@@ -32,7 +32,7 @@ describe('host normalization', () => {
 });
 
 describe('host drafts', () => {
-  const draft = { label: '', address: 'example.com', port: '', username: 'me', group: '', tags: [], startupCommand: '' };
+  const draft = { label: '', address: 'example.com', port: '', username: 'me', group: '', tags: [], startupCommand: '', reconnectOnStart: false };
   it('accepts a minimal draft with port 22 and the address as label', () => {
     expect(validateHostDraft(draft)).toEqual({ ok: true, value: { label: 'example.com', address: 'example.com', port: 22, username: 'me' } });
   });

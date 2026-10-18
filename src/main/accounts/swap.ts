@@ -108,7 +108,16 @@ export function claimSwap(): boolean {
   running = true;
   return true;
 }
-export function releaseSwap(): void { running = false; }
+/** Frees the slot; everyone waiting for it to be free (the quit, swapIdle) learns it at once. */
+export function releaseSwap(): void {
+  running = false;
+  for (const resolve of idleWaiters.splice(0)) resolve();
+}
+const idleWaiters: Array<() => void> = [];
+/** Resolves once no swap, "Set as main" activation, recovery or reconcile holds the slot (at once when none does). */
+export function swapIdle(): Promise<void> {
+  return running ? new Promise((resolve) => { idleWaiters.push(resolve); }) : Promise.resolve();
+}
 /** Set by the 0.9.1 activation and its recovery when they leave a journal and backups behind (or clear them). */
 export function setSwapUnresolved(value: boolean): void { unresolved = value; }
 
@@ -240,7 +249,7 @@ export async function clearPendingSwap(deps: Pick<SwapDeps, 'backupDir' | 'fs'>)
     const empty = (await fs.readdir(deps.backupDir)).length === 0;
     if (empty) unresolved = false;
     return empty;
-  } catch { return false; } finally { running = false; }
+  } catch { return false; } finally { releaseSwap(); }
 }
 
 /**
@@ -260,7 +269,7 @@ export async function swapMainAccount(deps: SwapDeps, accountId: string): Promis
     if (error instanceof Fail && error.code === 'manual') unresolved = true;
     return { ok: false, error: error instanceof Fail ? error.code : 'write' };
   } finally {
-    running = false;
+    releaseSwap();
   }
 }
 
@@ -510,7 +519,7 @@ export async function recoverInterruptedSwap(deps: SwapDeps): Promise<SwapRecove
     const result = await recover(deps);
     unresolved = result === 'manual';
     return result;
-  } catch { unresolved = true; return 'manual'; } finally { running = false; }
+  } catch { unresolved = true; return 'manual'; } finally { releaseSwap(); }
 }
 
 async function recover(deps: SwapDeps): Promise<SwapRecovery> {

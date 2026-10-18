@@ -5,7 +5,8 @@ import { execFile } from 'child_process';
 import { appPlatform } from '../shared/platform';
 import type { GitProbe, GitResult } from '../shared/git';
 import { Git } from './git';
-import { GIT_CHANNELS, GONE, handleGit } from './gitHandler';
+import { GIT_MUTATING_CHANNELS, GIT_READ_CHANNELS, GONE, handleGit, INVALID } from './gitHandler';
+import { createIpcGuard, type IpcSenderEvent } from './ipcGuard';
 
 export interface GitIpcDeps {
   projectPath(projectId: string): string | undefined;
@@ -14,6 +15,8 @@ export interface GitIpcDeps {
   git?: Git;
   /** Where the trusted repositories are remembered. */
   trustFile?: string;
+  /** The sender check (R9) of the channels that change something. */
+  allowed(event: IpcSenderEvent): boolean;
 }
 
 const GIT_DOWNLOAD = 'https://git-scm.com/downloads';
@@ -29,21 +32,24 @@ const run = (file: string, args: string[], options: { cwd?: string; timeout: num
 export function registerGitIpc(deps: GitIpcDeps): void {
   const git = deps.git ?? new Git({ trustFile: deps.trustFile });
   const windows = appPlatform(process.platform) === 'win32';
+  const { guardedHandle } = createIpcGuard(ipcMain, deps.allowed);
+  // A foreign sender gets the answer of an invalid request; the panel already shows those.
+  const refused = (): GitResult<never> => ({ ok: false, code: 'invalid', error: INVALID });
   ipcMain.handle('git:probe', async (_e, projectId: unknown): Promise<GitProbe> => {
     const path = typeof projectId === 'string' ? deps.projectPath(projectId) : undefined;
     return path ? git.probe(path) : 'no-repo';
   });
   /** "This is not a repository yet": `git init` in the project folder (main branch), only when it really is not one. */
-  ipcMain.handle('git:init', async (_e, projectId: unknown): Promise<GitResult<{ message: string }>> => {
+  guardedHandle('git:init', async (_e, projectId: unknown): Promise<GitResult<{ message: string }>> => {
     const path = typeof projectId === 'string' ? deps.projectPath(projectId) : undefined;
     if (!path) return { ok: false, code: 'gone', error: GONE };
     if (await git.probe(path) !== 'no-repo') return { ok: false, code: 'failed', error: 'Ten folder jest już repozytorium git lub git nie jest zainstalowany.' };
     let result = await run('git', ['init', '-b', 'main'], { cwd: path, timeout: 20000 });
     if (!result.ok) result = await run('git', ['init'], { cwd: path, timeout: 20000 });
     return result.ok ? { ok: true, data: { message: result.out.trim() } } : { ok: false, code: 'failed', error: result.error };
-  });
+  }, refused);
   /** Installs Git where the system has a package manager we can drive (winget on Windows, the Xcode tools on macOS); elsewhere the download page opens. */
-  ipcMain.handle('git:installGit', async (): Promise<GitResult<{ message: string; restart: boolean }>> => {
+  guardedHandle('git:installGit', async (): Promise<GitResult<{ message: string; restart: boolean }>> => {
     if (windows) {
       const result = await run('winget', ['install', '--id', 'Git.Git', '-e', '--source', 'winget', '--accept-package-agreements', '--accept-source-agreements', '--silent'], { timeout: 15 * 60 * 1000 });
       if (result.ok) return { ok: true, data: { message: 'Git zainstalowany.', restart: true } };
@@ -56,7 +62,7 @@ export function registerGitIpc(deps: GitIpcDeps): void {
     }
     void shell.openExternal(GIT_DOWNLOAD);
     return { ok: true, data: { message: 'Otwarto stronę pobierania Gita.', restart: false } };
-  });
+  }, refused);
   ipcMain.handle('git:worktrees', async (_e, projectId: unknown, request: unknown): Promise<GitResult<unknown>> => {
     const path = typeof projectId === 'string' ? deps.projectPath(projectId) : undefined;
     if (!path) return { ok: false, code: 'gone', error: GONE };
@@ -64,10 +70,14 @@ export function registerGitIpc(deps: GitIpcDeps): void {
     const prefer = typeof wanted === 'string' && wanted.length > 0 && wanted.length <= 1000 && !wanted.includes('\0') ? wanted : undefined;
     return git.worktrees(path, path, deps.worktreePaths?.(projectId as string) ?? [], prefer);
   });
-  for (const channel of GIT_CHANNELS) {
-    ipcMain.handle(`git:${channel}`, (_e, projectId: unknown, request: unknown) => {
-      const path = typeof projectId === 'string' ? deps.projectPath(projectId) : undefined;
-      return handleGit(git, path, channel, request, windows, typeof projectId === 'string' ? deps.worktreePaths?.(projectId) ?? [] : []);
-    });
+  const runGit = (channel: string, projectId: unknown, request: unknown) => {
+    const path = typeof projectId === 'string' ? deps.projectPath(projectId) : undefined;
+    return handleGit(git, path, channel, request, windows, typeof projectId === 'string' ? deps.worktreePaths?.(projectId) ?? [] : []);
+  };
+  for (const channel of GIT_READ_CHANNELS) {
+    ipcMain.handle(`git:${channel}`, (_e, projectId: unknown, request: unknown) => runGit(channel, projectId, request));
+  }
+  for (const channel of GIT_MUTATING_CHANNELS) {
+    guardedHandle(`git:${channel}`, (_e, projectId: unknown, request: unknown) => runGit(channel, projectId, request), refused);
   }
 }

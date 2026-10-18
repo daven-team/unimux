@@ -25,6 +25,7 @@ const api: McApi = {
   killCellAndWait: (cellId) => ipcRenderer.invoke('cell:killAndWait', cellId),
   bindCodexSession: (cellId, cwd) => ipcRenderer.invoke('codex:bind', cellId, cwd),
   aliveCells: () => ipcRenderer.invoke('cell:alive'),
+  claimAppStart: () => ipcRenderer.invoke('app:claimStart'),
   reportCellStatus: (cellId, status, reason, hooked) => ipcRenderer.send('cell:runtime', cellId, status, reason, hooked),
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
   pickSoundFile: () => ipcRenderer.invoke('sound:pick'),

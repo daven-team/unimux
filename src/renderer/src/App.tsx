@@ -29,11 +29,13 @@ const loadFileEditor = () => import('./components/FileEditor').then((m) => ({ de
 const loadSshView = () => import('./components/ssh/SshView').then((m) => ({ default: m.SshView }));
 const loadSettingsPage = () => import('./components/SettingsPage').then((m) => ({ default: m.SettingsPage }));
 import { useFileStore } from './files';
-import { initSsh } from './ssh';
+import { cancelReconnectAtStart, initSsh, markReconnectAtStart } from './ssh';
 import { useSshStore } from './sshStore';
 import { isWindowShown, onWindowShown } from './windowShown';
 
 let booted = false;
+/** Asked once per renderer (main answers true only to the first renderer load of the app run); a retried boot reuses it. */
+let appStartClaim: Promise<boolean> | undefined;
 /** The listeners registered before the first state arrives; a retried boot must not add them twice. */
 let listening = false;
 
@@ -59,6 +61,9 @@ async function bootSteps(): Promise<void> {
     window.mc.loadSnapshot(), window.mc.aliveCells(), window.mc.getMcpInfo(), window.mc.cliStatus().catch(() => ({})),
   ]);
   setAliveAtStart(alive);
+  appStartClaim ??= window.mc.claimAppStart().catch(() => false);
+  // Before the state reaches the store, so no cell view can mount before its app-start mark (Łącz ponownie po uruchomieniu).
+  if (await appStartClaim) markReconnectAtStart(snapshot.state);
   setUi({ cliStatus });
   // The translations of the chosen language load before the first real render: no untranslated texts at start.
   await loadLanguage(snapshot.state.settings.language ?? chosenLanguage()).catch((error) => reportError('boot', error));
@@ -81,8 +86,12 @@ function listenEarly(): void {
   window.addEventListener('beforeunload', flushPendingSaves);
   document.addEventListener('visibilitychange', () => { if (document.hidden) flushPendingSaves(); });
   onWindowShown((shown) => { if (!shown) flushPendingSaves(); });
-  window.mc.on('automation:start-cells', (ids) => ids.forEach(ensureStarted));
+  window.mc.on('automation:start-cells', (ids) => ids.forEach((id) => ensureStarted(id)));
   window.mc.on('cli:changed', applyCliStatus);
+  // Before the start claim is asked: a Pty Host restart heard before bootRest registers its full handlers still stops the
+  // app-start SSH reconnect (main also refuses the claim after a restart).
+  window.mc.on('ptyhost:crashed', cancelReconnectAtStart);
+  window.mc.on('ptyhost:fatal', cancelReconnectAtStart);
 }
 
 /** One step of the start after the state arrived: a failure is reported and the start goes on (the listeners after it still register). */
