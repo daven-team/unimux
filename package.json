@@ -40,6 +40,7 @@
     "dist:win": "electron-vite build && electron-builder --win --publish never",
     "dist:mac": "electron-vite build && electron-builder --mac --publish never -c.npmRebuild=true",
     "test:packaged": "node scripts/smoke-pty.mjs",
+    "test:start": "node scripts/smoke-start.mjs",
     "test:ssh-electron": "node scripts/smoke-ssh.mjs",
     "perf": "node scripts/perf-profile.mjs",
     "publish-release": "node scripts/release.mjs"

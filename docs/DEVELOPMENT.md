@@ -9,6 +9,7 @@ npm test              # unit tests + integration tests against a real native PTY
 npm run dist:win      # Windows installer in release/
 npm run dist:mac      # macOS DMG + ZIP in release/ (run on a Mac)
 npm run test:packaged # verify node-pty using the packaged Electron runtime
+npm run test:start    # Windows: start the packaged app like a shortcut does (no console) in a scratch profile
 npm run test:ssh-electron # check SSH key types and ciphers under Electron's own Node
 ```
 

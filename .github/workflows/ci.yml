@@ -49,6 +49,59 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       - run: npm test
 
+  # Tag runs can only read caches saved on main, and the package jobs never run on main: without this job every
+  # release started with cold Electron and electron-builder downloads. It fills the same cache entries as the package
+  # jobs (same paths and key) and does the work only when the lockfile changed, otherwise it ends after the cache lookup.
+  warm-cache:
+    name: Warm cache (${{ matrix.name }})
+    if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            command: npm run dist:win
+            download-cache: |
+              ~/AppData/Local/electron/Cache
+              ~/AppData/Local/electron-builder/Cache
+          - name: macOS Apple Silicon
+            os: macos-15
+            command: npm run dist:mac -- --arm64
+            download-cache: |
+              ~/Library/Caches/electron
+              ~/Library/Caches/electron-builder
+          - name: macOS Intel
+            os: macos-15-intel
+            command: npm run dist:mac -- --x64
+            download-cache: |
+              ~/Library/Caches/electron
+              ~/Library/Caches/electron-builder
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: downloads
+        name: Cache Electron and electron-builder downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ matrix.download-cache }}
+          key: electron-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.downloads.outputs.cache-hit != 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.downloads.outputs.cache-hit != 'true'
+        run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      # Packaging is what downloads the Electron zip and electron-builder's tools; its output is thrown away.
+      - if: steps.downloads.outputs.cache-hit != 'true'
+        name: Package application (fills the download cache)
+        run: ${{ matrix.command }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
   # Fails in seconds when a tag does not match package.json or has no release notes.
   release-metadata:
     name: Release metadata
@@ -128,6 +181,11 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - name: Verify packaged terminal runtime
         run: npm run test:packaged
+      # 0.9.3 and 0.9.4 crashed when started from a shortcut or the installer (no console, no standard handles), which no
+      # check started from a terminal could see.
+      - name: Start the packaged app without a console
+        if: runner.os == 'Windows'
+        run: npm run test:start
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unimux-${{ matrix.artifact }}
