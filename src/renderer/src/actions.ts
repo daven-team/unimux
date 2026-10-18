@@ -13,11 +13,11 @@ import { canSwapCells, neighborSlot } from '../../shared/gridDrag';
 import { CLI_NAMES, profileAvailable, type CliId, type CliStatusMap } from '../../shared/cliStatus';
 import { snapshotCellRects } from './gridMotion';
 import { sessionSearchPaths } from '../../shared/sessionTrack';
-import { sshSpecName } from '../../shared/ssh';
+import { sshSpecName, sshStartEffects } from '../../shared/ssh';
 import type { CellSession, Profile, SessionInfo, Snippet, Tab, Worktree } from '../../shared/types';
 import { askChoice, getS, getUi, setUi, toast, update } from './store';
 import { flushDrafts, showTerminalTabs } from './files';
-import { connectOnMount, reconnectAtStart, reconnectCell, startSshCell } from './ssh';
+import { cancelReconnectAtStart, connectOnMount, reconnectCell, startSshCell } from './ssh';
 import { terminals } from './terminals/TerminalManager';
 
 /** Cells whose pty was started (or found alive) during this renderer session. */
@@ -42,7 +42,7 @@ export function resetStarted(): void {
   aliveAtStart.clear();
   // D5: after a Pty Host crash no SSH cell connects by itself, not even one marked but not yet mounted.
   connectOnMount.clear();
-  reconnectAtStart.clear(); // and no app-start reconnect either: a Pty Host restart is not an app start
+  cancelReconnectAtStart(); // and no app-start reconnect either: a Pty Host restart is not an app start
   setUi((ui) => ({ epoch: ui.epoch + 1 }));
 }
 
@@ -102,7 +102,9 @@ function startOnce(cellId: string, beforeSpawn?: (cellId: string) => void, fromV
   startListeners.forEach((l) => l());
   ensureTerminal(cellId);
   if (findCell(getS(), cellId)?.cell.ssh) {
-    startSshCell(cellId, aliveAtStart.delete(cellId), fromView);
+    const decision = startSshCell(cellId, aliveAtStart.delete(cellId), fromView);
+    // A start from outside the view that ends idle does not count: the cell's later mount decides again (app-start reconnect).
+    if (!sshStartEffects(fromView, decision).keepStarted) started.delete(cellId);
     return Promise.resolve();
   }
   // pty survived a renderer reload; its output is replayed

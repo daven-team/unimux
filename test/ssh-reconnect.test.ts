@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  hostFormDirty, hostToDraft, normalizeSshHosts, reconnectAllTargets, reconnectAtStartCells, sshCellStart, validateHostDraft,
+  hostFormDirty, hostToDraft, normalizeSshHosts, reconnectAllTargets, reconnectAtStartCells, sshCellStart, sshStartEffects, validateHostDraft,
   type SshHost, type SshPhase,
 } from '../src/shared/ssh';
 import { normalizeState } from '../src/shared/state';
+import { createAppStartClaim } from '../src/main/appStartClaim';
 
 const ID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const host = (n: number, patch: Partial<SshHost> = {}): SshHost => ({ id: ID(n), label: `h${n}`, address: `h${n}.example`, port: 22, username: 'deploy', createdAt: 1, updatedAt: 1, ...patch });
@@ -93,5 +94,37 @@ describe('"Połącz ponownie wszystkie SSH"', () => {
   it('takes at most the 20 cells of a grid', () => {
     const cells = Array.from({ length: 25 }, (_, i) => cell(`c${i}`));
     expect(reconnectAllTargets(cells, {}, hosts)).toHaveLength(20);
+  });
+});
+
+describe('the app start claim of main', () => {
+  it('answers true once, to the app window only', () => {
+    const c = createAppStartClaim();
+    expect(c.claim(false)).toBe(false); // a foreign sender spends nothing
+    expect(c.claim(true)).toBe(true);
+    expect(c.claim(true)).toBe(false); // a reload
+  });
+  it('is spent by a Pty Host restart before the renderer claims it', () => {
+    const c = createAppStartClaim();
+    c.cancel();
+    expect(c.claim(true)).toBe(false);
+  });
+});
+
+describe('what a start of an SSH cell leaves behind', () => {
+  it('spends the app-start mark only when the cell view mounts', () => {
+    expect(sshStartEffects(true, 'connect')).toEqual({ spendMark: true, keepStarted: true });
+    expect(sshStartEffects(true, 'idle')).toEqual({ spendMark: true, keepStarted: true });
+  });
+  it('lets a later mount decide again after an idle start from elsewhere (task restore, automation, path drop)', () => {
+    expect(sshStartEffects(false, 'idle')).toEqual({ spendMark: false, keepStarted: false });
+    expect(sshStartEffects(false, 'connect')).toEqual({ spendMark: false, keepStarted: true }); // a cell the user just created
+    expect(sshStartEffects(false, 'attach')).toEqual({ spendMark: false, keepStarted: true });
+  });
+  it('a background start keeps the mark, so the mount still connects at app start', () => {
+    const background = sshCellStart({ alive: false, connectOnMount: false, appStart: true, reconnectOnStart: true, mounted: false });
+    expect(background).toBe('idle');
+    expect(sshStartEffects(false, background).spendMark).toBe(false);
+    expect(sshCellStart({ alive: false, connectOnMount: false, appStart: true, reconnectOnStart: true, mounted: true, phase: 'idle' })).toBe('connect');
   });
 });

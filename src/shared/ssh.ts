@@ -588,11 +588,22 @@ export interface SshCellStartInput {
  * started, the host asks for it and the cell view mounts (hidden tabs connect when opened). A renderer reload or a Pty Host
  * restart is not an app start.
  */
-export function sshCellStart(input: SshCellStartInput): 'attach' | 'connect' | 'idle' {
+export type SshStartDecision = 'attach' | 'connect' | 'idle';
+
+export function sshCellStart(input: SshCellStartInput): SshStartDecision {
   if (input.alive || isLivePhase(input.phase)) return 'attach';
   if (input.connectOnMount) return 'connect';
   const untouched = input.phase === undefined || input.phase === 'idle';
   return input.appStart && input.reconnectOnStart && input.mounted && untouched ? 'connect' : 'idle';
+}
+
+/**
+ * What a start of an SSH cell leaves behind: the app-start mark is spent only by the mounted cell view, and a start from
+ * elsewhere (boot restore of a task, automation, a path drop) that ends idle does not count as started, so the later mount
+ * decides again.
+ */
+export function sshStartEffects(mounted: boolean, decision: SshStartDecision): { spendMark: boolean; keepStarted: boolean } {
+  return { spendMark: mounted, keepStarted: mounted || decision !== 'idle' };
 }
 
 /** SSH cells (any project and tab) whose host has the reconnect option on: the candidates of the first renderer load. */

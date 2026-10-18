@@ -29,7 +29,7 @@ const loadFileEditor = () => import('./components/FileEditor').then((m) => ({ de
 const loadSshView = () => import('./components/ssh/SshView').then((m) => ({ default: m.SshView }));
 const loadSettingsPage = () => import('./components/SettingsPage').then((m) => ({ default: m.SettingsPage }));
 import { useFileStore } from './files';
-import { initSsh, markReconnectAtStart } from './ssh';
+import { cancelReconnectAtStart, initSsh, markReconnectAtStart } from './ssh';
 import { useSshStore } from './sshStore';
 import { isWindowShown, onWindowShown } from './windowShown';
 
@@ -88,6 +88,10 @@ function listenEarly(): void {
   onWindowShown((shown) => { if (!shown) flushPendingSaves(); });
   window.mc.on('automation:start-cells', (ids) => ids.forEach((id) => ensureStarted(id)));
   window.mc.on('cli:changed', applyCliStatus);
+  // Before the start claim is asked: a Pty Host restart heard before bootRest registers its full handlers still stops the
+  // app-start SSH reconnect (main also refuses the claim after a restart).
+  window.mc.on('ptyhost:crashed', cancelReconnectAtStart);
+  window.mc.on('ptyhost:fatal', cancelReconnectAtStart);
 }
 
 /** One step of the start after the state arrived: a failure is reported and the start goes on (the listeners after it still register). */
