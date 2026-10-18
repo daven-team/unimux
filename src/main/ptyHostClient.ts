@@ -23,11 +23,16 @@ export class PtyHostClient extends EventEmitter {
   start(): void {
     const child = utilityProcess.fork(join(__dirname, 'ptyhost.js'), [], {
       serviceName: 'unimux Pty Host',
-      // stderr is kept (the last few KB) for the crash log; it still reaches the console of a development run.
-      stdio: ['ignore', 'inherit', 'pipe'],
+      // Both streams are our own pipes: with only stderr piped, Electron on Windows hands the host this process's stdout handle
+      // unchecked, and an app started from a shortcut or the installer has none, so launching the host killed the app.
+      // stderr is kept (the last few KB) for the crash log; both still reach the console of a development run.
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     this.child = child;
     this.stderrTail = '';
+    child.stdout?.on('data', (chunk: Buffer | string) => {
+      try { process.stdout.write(String(chunk)); } catch { /* no console */ }
+    });
     child.stderr?.on('data', (chunk: Buffer | string) => {
       const text = String(chunk);
       try { process.stderr.write(text); } catch { /* no console */ }

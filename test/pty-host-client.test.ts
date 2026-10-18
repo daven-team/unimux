@@ -4,14 +4,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 class FakeChild extends EventEmitter {
   posted: unknown[] = [];
+  stdout = new EventEmitter();
   stderr = new EventEmitter();
   killed = false;
   postMessage(m: unknown) { this.posted.push(m); }
   kill() { this.killed = true; }
 }
-const forks = vi.hoisted(() => ({ children: [] as unknown[] }));
+const forks = vi.hoisted(() => ({ children: [] as unknown[], options: [] as unknown[] }));
 vi.mock('electron', () => ({
-  utilityProcess: { fork: () => { const child = new FakeChild(); forks.children.push(child); return child; } },
+  utilityProcess: {
+    fork: (_path: string, _args: string[], options: unknown) => { const child = new FakeChild(); forks.children.push(child); forks.options.push(options); return child; },
+  },
   MessageChannelMain: class { port1 = { name: 'p1' }; port2 = { name: 'p2' }; },
 }));
 
@@ -20,8 +23,20 @@ const children = () => forks.children as FakeChild[];
 const spawnReq = (id: string) => ({ id, cwd: '.', cols: 80, rows: 24, env: {}, shell: 'powershell' as const });
 const renderer = () => ({ isDestroyed: () => false, postMessage: vi.fn() });
 
-beforeEach(() => { vi.useFakeTimers(); forks.children.length = 0; });
+beforeEach(() => { vi.useFakeTimers(); forks.children.length = 0; forks.options.length = 0; });
 afterEach(() => { vi.useRealTimers(); });
+
+describe('PtyHostClient stdio', () => {
+  it('gives the host its own pipes instead of the parent stdout handle', () => {
+    // With one stream piped, Electron on Windows hands the parent's other std handles to the child unchecked; an app started
+    // from a shortcut or the installer has no stdout, and launching the host with that null handle kills the app (0x80000003).
+    const client = new PtyHostClient();
+    client.start();
+    expect((forks.options[0] as { stdio: unknown }).stdio).toEqual(['ignore', 'pipe', 'pipe']);
+    // The host's stdout is drained, so a host that prints a lot never blocks on a full pipe.
+    expect(children()[0].stdout.listenerCount('data')).toBe(1);
+  });
+});
 
 describe('PtyHostClient restart', () => {
   it('queues spawns sent between a crash and the restart and delivers them after the renderer port', () => {
