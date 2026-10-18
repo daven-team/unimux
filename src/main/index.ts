@@ -206,8 +206,9 @@ if (!superseded && !devEnv('MC_DATA_DIR') && !existsSync(join(DATA_DIR, 'state.j
 }
 
 let win: BrowserWindow | null = null;
-/** The sender check of every IPC channel that changes accounts, logins, usage, SSH data or the secret clipboard (R9). */
+/** The first renderer load of this app run, for SSH hosts that reconnect at start (appStartClaim.ts). */
 const appStartClaim = createAppStartClaim();
+/** The sender check of every IPC channel that changes accounts, logins, usage, SSH data or the secret clipboard (R9). */
 const fromAppWindow = (event: { sender: unknown; senderFrame?: unknown }): boolean => isFromWindow(win, event);
 /** SSH sessions: created after app.whenReady() (safeStorage needs it), before the window (startSsh). */
 let ssh: SshCoordinator | null = null;
