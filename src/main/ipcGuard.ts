@@ -55,6 +55,7 @@ export const OPEN_IPC_CHANNELS: Readonly<Record<string, string>> = {
   'fs:listProjectDirectories': 'lists project folders',
   'fs:searchProject': 'searches project files (the running search is kept per sender, so no other window can stop it)',
   'fs:readProjectFile': 'reads a project file',
+  'fs:statProjectFile': 'size and modification time of a project file (an open editor tab checks for changes on disk)',
   'sessions:list': 'lists conversation files of a project',
   'git:isRepo': 'checks whether a folder is a git repository',
   'git:probe': 'checks whether the project is a repository',

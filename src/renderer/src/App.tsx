@@ -30,7 +30,7 @@ const loadAutomationPanel = () => import('./components/AutomationPanel').then((m
 const loadFileEditor = () => import('./components/FileEditor').then((m) => ({ default: m.FileEditor }));
 const loadSshView = () => import('./components/ssh/SshView').then((m) => ({ default: m.SshView }));
 const loadSettingsPage = () => import('./components/SettingsPage').then((m) => ({ default: m.SettingsPage }));
-import { useFileStore } from './files';
+import { useFileStore, watchFilesOnDisk } from './files';
 import { cancelReconnectAtStart, initSsh, markReconnectAtStart } from './ssh';
 import { useSshStore } from './sshStore';
 import { isWindowShown, onWindowShown } from './windowShown';
@@ -135,6 +135,8 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
     window.clearTimeout(focusTimer);
     focusTimer = window.setTimeout(() => { if (hasBlockedCells()) void recheckCli(); }, 500);
   });
+  // Open editor tabs follow files an agent (or anything else) changed on disk.
+  bootStep(watchFilesOnDisk);
   window.mc.on('cell:restarted', (cellId) => { terminals.prepareSpawn(cellId); terminals.syncSize(cellId); });
   window.mc.on('cell:hook', (cellId, event, info) => terminals.hook(cellId, event, info));
   window.mc.on('cell:session', (cellId, session) => {

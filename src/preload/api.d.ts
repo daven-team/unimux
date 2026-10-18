@@ -14,7 +14,7 @@ import type { ReplaceRequest, ReplaceResult, SearchOptions, SearchResult } from 
 import type { CreateResult, DeleteResult, FileOpProgress, FileOpRequest, FileOpResult, RenameResult } from '../shared/fileOps';
 import type { GitApi } from '../shared/git';
 import type { SshApi, SshPrompt, SshSessionState, SshVaultInfo } from '../shared/ssh';
-import type { AppState, CellSession, Profile, ProjectDirectory, ProjectFilePreview, SessionInfo, UpdateState, Worktree } from '../shared/types';
+import type { AppState, CellSession, Profile, ProjectDirectory, ProjectFilePreview, SessionInfo, UpdateState, Worktree, WorktreeInspection, WorktreeInspectResult, WorktreeRemoveResult } from '../shared/types';
 
 export type { SessionInfo };
 
@@ -85,6 +85,8 @@ export interface McApi {
   listProjectDirectoryBatch(projectId: string, relativePaths: string[]): Promise<Record<string, ProjectDirectory>>;
   /** `large`: the editor's read (images, Parquet tables and up to 8 MB of text); without it the small preview. */
   readProjectFile(projectId: string, relativePath: string, large?: boolean): Promise<ProjectFilePreview>;
+  /** Size and modification time (null when unreadable): open tabs read a file again only when these changed. */
+  statProjectFile(projectId: string, relativePath: string): Promise<{ size: number; mtimeMs: number } | null>;
   listProjectDirectories(projectId: string): Promise<{ ok: true; paths: string[]; truncated: boolean } | { ok: false; error: string }>;
   searchProject(projectId: string, options: SearchOptions): Promise<SearchResult>;
   replaceInProject(projectId: string, request: ReplaceRequest): Promise<ReplaceResult>;
@@ -93,11 +95,15 @@ export interface McApi {
   deleteProjectEntries(projectId: string, relativePaths: string[]): Promise<DeleteResult>;
   transferProjectEntries(projectId: string, request: FileOpRequest): Promise<FileOpResult>;
   cancelFileOp(opId: string): void;
-  writeProjectFile(projectId: string, relativePath: string, text: string, expectedText: string): Promise<{ ok: true } | { ok: false; error: string }>;
+  /** code 'conflict': the file on disk is not `expectedText` any more (nothing written). */
+  writeProjectFile(projectId: string, relativePath: string, text: string, expectedText: string): Promise<{ ok: true } | { ok: false; error: string; code?: 'conflict' }>;
   listSessions(projectPath: string): Promise<SessionInfo[]>;
   isGitRepo(path: string): Promise<boolean>;
   createWorktree(projectPath: string, name: string): Promise<Worktree>;
-  removeWorktree(projectPath: string, wt: Worktree, deleteBranch: boolean): Promise<void>;
+  /** What removing the worktree would lose (uncommitted files, commits the project's HEAD cannot reach). */
+  inspectWorktree(projectPath: string, wt: Worktree): Promise<WorktreeInspectResult>;
+  /** Main refuses (code 'unsafe', with the new inspection) when work would be lost beyond `confirmed` (what the user accepted). */
+  removeWorktree(projectPath: string, wt: Worktree, deleteBranch: boolean, confirmed?: WorktreeInspection): Promise<WorktreeRemoveResult>;
   /** The Git panel (see shared/git.ts): every call names a project; main resolves the folder and validates the request. */
   git: GitApi;
   ssh: SshApi;

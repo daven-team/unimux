@@ -29,6 +29,15 @@ export interface FileDocument {
   view?: Extract<ProjectFilePreview, { kind: 'image' | 'table' }>;
   /** A read-only git diff opened as a tab instead of a file. */
   diff?: DiffRef;
+  /**
+   * The file on disk is no longer the text this tab started from and the tab has unsaved edits: 'changed' = noticed by a
+   * check (a notice), 'save' = a save was refused for it. Both offer Reload, Show diff and Overwrite.
+   */
+  diskConflict?: 'changed' | 'save';
+  /** The text on disk when the conflict was last seen (for the diff). */
+  externalText?: string;
+  /** Size and modification time seen when the text was last read: a check reads the file again only when they changed. */
+  diskStamp?: { size: number; mtimeMs: number };
 }
 export interface DiffRef { source: GitDiffSource; path: string; oldPath?: string; hash?: string; worktree?: string }
 const labels = {
@@ -40,7 +49,6 @@ const labels = {
   largeNotice: ['Read-only view: the first {shown} of {total}. Open the file in an external editor to see all of it.', 'Tylko do odczytu: pierwsze {shown} z {total}. Otwórz plik w zewnętrznym edytorze, aby zobaczyć całość.', 'Nur Lesen: die ersten {shown} von {total}. Öffne die Datei in einem externen Editor, um alles zu sehen.', 'Solo lectura: los primeros {shown} de {total}. Abre el archivo en un editor externo para verlo completo.', 'Lecture seule : les premiers {shown} sur {total}. Ouvrez le fichier dans un éditeur externe pour tout voir.', 'Só de leitura: os primeiros {shown} de {total}. Abra o ficheiro num editor externo para ver tudo.'],
   tooLarge: ['This file exceeds 256 KB and cannot be edited safely here.', 'Ten plik przekracza 256 KB i nie może być tu bezpiecznie edytowany.', 'Diese Datei ist größer als 256 KB und kann hier nicht sicher bearbeitet werden.', 'Este archivo supera 256 KB y no se puede editar aquí con seguridad.', 'Ce fichier dépasse 256 Ko et ne peut pas être modifié ici en sécurité.', 'Este ficheiro excede 256 KB e não pode ser editado aqui em segurança.'],
   failed: ['Could not save. Your draft is preserved.', 'Nie udało się zapisać. Szkic został zachowany.', 'Speichern fehlgeschlagen. Der Entwurf bleibt erhalten.', 'No se pudo guardar. El borrador se conserva.', 'Échec de l’enregistrement. Le brouillon est conservé.', 'Não foi possível guardar. O rascunho foi preservado.'],
-  conflict: ['The file changed outside the editor. Your draft is preserved.', 'Plik zmienił się poza edytorem. Twój szkic został zachowany.', 'Die Datei wurde außerhalb des Editors geändert. Der Entwurf bleibt erhalten.', 'El archivo cambió fuera del editor. El borrador se conserva.', 'Le fichier a été modifié en dehors de l’éditeur. Le brouillon est conservé.', 'O ficheiro foi alterado fora do editor. O rascunho foi preservado.'],
   invalid: ['Invalid file content.', 'Nieprawidłowa treść pliku.', 'Ungültiger Dateiinhalt.', 'Contenido de archivo no válido.', 'Contenu du fichier non valide.', 'Conteúdo de ficheiro inválido.'],
   binary: ['Binary files or unsupported encodings cannot be edited.', 'Nie można edytować pliku binarnego lub nieobsługiwanego kodowania.', 'Binärdateien oder nicht unterstützte Kodierungen können nicht bearbeitet werden.', 'No se pueden editar archivos binarios o codificaciones no admitidas.', 'Les fichiers binaires ou les encodages non pris en charge ne peuvent pas être modifiés.', 'Não é possível editar ficheiros binários ou codificações não suportadas.'],
 } as const;
@@ -48,8 +56,8 @@ export function fileLabel(key: keyof typeof labels, language: Language = getS().
   return labels[key][['en', 'pl', 'de', 'es', 'fr', 'pt'].indexOf(language)];
 }
 export function fileErrorLabel(message: string, language: Language): string {
-  const key = message === 'Plik zmienił się poza edytorem. Twój szkic został zachowany.' ? 'conflict'
-    : message === 'Nieprawidłowa treść pliku.' ? 'invalid'
+  // A save conflict comes as a code (ProjectFileWriteResult.code) and is shown as FileDocument.diskConflict, not here.
+  const key = message === 'Nieprawidłowa treść pliku.' ? 'invalid'
     : message === 'Plik jest zbyt duży do bezpiecznej edycji.' ? 'tooLarge'
     : message.startsWith('Nie można edytować pliku binarnego') ? 'binary' : null;
   return key ? fileLabel(key, language) : message;
@@ -61,7 +69,7 @@ function restoreDrafts(): FileDocument[] {
     const value: unknown = JSON.parse(localStorage.getItem(storageKey) ?? '[]');
     if (!Array.isArray(value)) return [];
     return value.filter((d): d is FileDocument => d && typeof d.id === 'string' && typeof d.projectId === 'string' && typeof d.relativePath === 'string' && typeof d.name === 'string' && typeof d.text === 'string' && typeof d.savedText === 'string' && typeof d.diskText === 'string')
-      .map((d) => ({ ...d, status: 'ready', saving: false, error: null, wrap: Boolean(d.wrap) }));
+      .map((d) => ({ ...d, status: 'ready', saving: false, error: null, wrap: Boolean(d.wrap), diskConflict: undefined, externalText: undefined }));
   } catch { return []; }
 }
 export const useFileStore = create<{ documents: FileDocument[]; activeFileId: string | null }>(() => ({ documents: restoreDrafts(), activeFileId: null }));
@@ -82,7 +90,7 @@ export const isFileDirty = (d: FileDocument): boolean => d.text !== d.savedText;
 export function activateFile(id: string): void {
   setUi({ settingsActive: false });
   useSshStore.setState({ viewActive: false });
-  if (useFileStore.getState().documents.some((d) => d.id === id)) useFileStore.setState({ activeFileId: id });
+  if (useFileStore.getState().documents.some((d) => d.id === id)) { useFileStore.setState({ activeFileId: id }); void checkFileOnDisk(id); }
 }
 export function showTerminalTabs(): void { setUi({ settingsActive: false }); useSshStore.setState({ viewActive: false }); useFileStore.setState({ activeFileId: null }); }
 export async function openFile(projectId: string, relativePath: string): Promise<void> {
@@ -105,7 +113,7 @@ export async function retryFile(id: string): Promise<void> {
   try {
     const result = await window.mc.readProjectFile(doc.projectId, doc.relativePath, true);
     if (loads.get(id) !== token) return;
-    if (result.kind === 'text') patch(id, { status: result.truncated ? 'truncated' : 'ready', size: result.size, view: undefined, text: normalize(result.text), savedText: normalize(result.text), diskText: result.text });
+    if (result.kind === 'text') patch(id, { status: result.truncated ? 'truncated' : 'ready', size: result.size, view: undefined, text: normalize(result.text), savedText: normalize(result.text), diskText: result.text, diskConflict: undefined, externalText: undefined });
     else if (result.kind === 'image' || result.kind === 'table') patch(id, { status: result.kind, size: result.size, view: result, text: '', savedText: '', diskText: '' });
     else patch(id, { status: result.kind, size: result.kind === 'binary' ? result.size : undefined, error: result.kind === 'error' ? result.message : null });
   } catch (error) { if (loads.get(id) === token) patch(id, { status: 'error', error: String(error) }); }
@@ -142,17 +150,104 @@ export async function saveFile(id: string): Promise<boolean> {
   patch(id, { saving: true, error: null });
   try {
     const result = await window.mc.writeProjectFile(doc.projectId, doc.relativePath, doc.text, doc.diskText);
-    if (!result.ok) { patch(id, { error: result.error }); return false; }
+    if (!result.ok) {
+      if (result.code === 'conflict') patch(id, { diskConflict: 'save' });
+      else patch(id, { error: result.error });
+      return false;
+    }
     const endings = doc.diskText.match(/\r\n|\r|\n/g) ?? [];
     let index = 0;
     const diskText = doc.text.replace(/\n/g, () => endings[index++] ?? endings[0] ?? '\n');
     // Edits made while saving stay dirty against the snapshot that was written.
-    patch(id, { savedText: doc.text, diskText });
+    patch(id, { savedText: doc.text, diskText, diskConflict: undefined, externalText: undefined });
     refreshGitBadges(doc.projectId, 600);
     return true;
   } catch { patch(id, { error: fileLabel('failed') }); return false; }
   finally { patch(id, { saving: false }); }
 }
+// ── files changed on disk ───────────────────────────────────────────────────
+
+const checks = new Set<string>();
+/**
+ * Compares an open text tab with its file on disk. A clean tab takes the new text at once; a tab with unsaved edits keeps
+ * them and gets a notice (diskConflict 'changed'). Other results (gone, binary, unreadable for a moment while an agent
+ * rewrites it) change nothing: saving reports them.
+ */
+export async function checkFileOnDisk(id: string): Promise<void> {
+  const doc = useFileStore.getState().documents.find((d) => d.id === id);
+  if (!doc || doc.diff || doc.status !== 'ready' || doc.saving || loads.has(id) || checks.has(id)) return;
+  checks.add(id);
+  try {
+    // Size and modification time first (taken before the read, so a write during the read shows up next time): the text is
+    // read only when they changed since the last read.
+    const stamp = await window.mc.statProjectFile(doc.projectId, doc.relativePath);
+    if (!stamp || (doc.diskStamp && doc.diskStamp.size === stamp.size && doc.diskStamp.mtimeMs === stamp.mtimeMs)) return;
+    const result = await window.mc.readProjectFile(doc.projectId, doc.relativePath, true);
+    const now = useFileStore.getState().documents.find((d) => d.id === id);
+    // A save, load or rename that happened meanwhile knows better.
+    if (!now || now.saving || loads.has(id) || now.diskText !== doc.diskText || now.relativePath !== doc.relativePath) return;
+    if (result.kind !== 'text') return;
+    if (result.truncated) { if (!isFileDirty(now)) void retryFile(id); return; }
+    if (result.text === now.diskText) {
+      patch(id, { diskStamp: stamp, ...(now.diskConflict === 'changed' ? { diskConflict: undefined, externalText: undefined } : {}) });
+      return;
+    }
+    if (!isFileDirty(now)) patch(id, { text: normalize(result.text), savedText: normalize(result.text), diskText: result.text, size: result.size, diskStamp: stamp, diskConflict: undefined, externalText: undefined, error: null });
+    else patch(id, { diskConflict: now.diskConflict ?? 'changed', externalText: result.text, diskStamp: stamp });
+  } catch { /* the next check tries again */ }
+  finally { checks.delete(id); }
+}
+/** Every open text tab (on focus and when an agent finished a turn). */
+export function checkOpenFilesOnDisk(): void {
+  for (const d of useFileStore.getState().documents) if (!d.diff && d.status === 'ready') void checkFileOnDisk(d.id);
+}
+/** Conflict choice "Reload": drops the unsaved edits and reads the file again. */
+export async function reloadFileFromDisk(id: string): Promise<void> {
+  const doc = useFileStore.getState().documents.find((d) => d.id === id);
+  if (!doc || doc.saving) return;
+  patch(id, { text: doc.savedText, diskConflict: undefined, externalText: undefined, error: null });
+  await retryFile(id);
+}
+/** Conflict choice "Show diff": reads the current disk text into externalText; resolves to it (null when unreadable). */
+export async function loadDiskText(id: string): Promise<string | null> {
+  const doc = useFileStore.getState().documents.find((d) => d.id === id);
+  if (!doc) return null;
+  try {
+    const result = await window.mc.readProjectFile(doc.projectId, doc.relativePath, true);
+    if (result.kind !== 'text' || result.truncated) return null;
+    patch(id, { externalText: result.text });
+    return result.text;
+  } catch { return null; }
+}
+/** Conflict choice "Overwrite": keeps the editor text and writes it over what is on disk now (another change in between is a new conflict). */
+export async function overwriteFileOnDisk(id: string): Promise<boolean> {
+  const disk = await loadDiskText(id);
+  if (disk === null) { patch(id, { error: fileLabel('failed') }); return false; }
+  patch(id, { diskText: disk, diskConflict: undefined, externalText: undefined, error: null });
+  return saveFile(id);
+}
+let watching = false;
+/**
+ * Keeps open tabs in step with the disk without polling every file: all open tabs are checked when the window gets focus
+ * or becomes visible and when an agent finishes a turn, and only the tab on screen every few seconds while the window has focus.
+ * A check compares size and modification time first and reads the text only when they changed.
+ */
+export function watchFilesOnDisk(): void {
+  if (watching) return;
+  watching = true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const soon = () => { clearTimeout(timer); timer = setTimeout(checkOpenFilesOnDisk, 300); };
+  window.addEventListener('focus', soon);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) soon(); });
+  window.mc.on('cell:hook', (_cellId, event) => { if (event === 'stop') soon(); });
+  setInterval(() => {
+    const active = useFileStore.getState().activeFileId;
+    // Only while the user looks at the editor: the window has focus and no settings or SSH view covers the tab.
+    if (active && !document.hidden && document.hasFocus() && !getUi().settingsActive && !useSshStore.getState().viewActive) void checkFileOnDisk(active);
+  }, ACTIVE_CHECK_MS);
+}
+const ACTIVE_CHECK_MS = 2500;
+
 const closing = new Set<string>();
 export async function closeFile(id: string): Promise<boolean> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);

@@ -1,4 +1,4 @@
-import { tr } from './i18n';
+import { errorText, tr } from './i18n';
 // High-level user actions: they combine state transitions with pty/terminal side effects.
 import type { GridLayout } from '../../shared/layout';
 import { normalizeProjectPath } from '../../shared/platform';
@@ -14,7 +14,7 @@ import { CLI_NAMES, profileAvailable, type CliId, type CliStatusMap } from '../.
 import { snapshotCellRects } from './gridMotion';
 import { sessionSearchPaths } from '../../shared/sessionTrack';
 import { sshSpecName, sshStartEffects } from '../../shared/ssh';
-import type { CellSession, Profile, SessionInfo, Snippet, Tab, Worktree } from '../../shared/types';
+import type { CellSession, Profile, SessionInfo, Snippet, Tab, Worktree, WorktreeInspection, WorktreeInspectResult, WorktreeRemoveResult } from '../../shared/types';
 import { askChoice, getS, getUi, setUi, toast, update } from './store';
 import { confirmCloseWorking } from './closeGuard';
 import { namesList, workingAgents } from '../../shared/agentWork';
@@ -301,30 +301,89 @@ export async function removeCell(cellId: string): Promise<void> {
   if (tab.cells.length === 1) { await closeTab(project.id, tab.id); return; }
   // A working agent asks first (before the worktree question, which stays separate).
   if (!(await confirmCloseWorking([cellId], 'cell'))) return;
-  let removeWt = false;
-  if (cell.worktree) {
-    const choice = await askChoice(tr("Zamknąć komórkę z worktree?"), `${cell.worktree.path}\nbranch ${cell.worktree.branch}`, [
-      { label: tr("Zostaw worktree"), value: 'keep', primary: true },
-      { label: tr("Usuń worktree i branch"), value: 'remove', danger: true },
-    ]);
-    if (!choice) return;
-    removeWt = choice === 'remove';
+  let removeWt: false | { confirmed?: WorktreeInspection } = false;
+  // A worktree another cell still works in (open or in a closed grid, e.g. after a resumed conversation) stays without asking.
+  const shared = !!cell.worktree && getS().projects.some((p) => [...p.tabs, ...p.archive].some((t) => t.cells.some((c) => c.id !== cellId && sameFolder(c.worktree?.path, cell.worktree?.path))));
+  if (cell.worktree && !shared) {
+    const answer = await askWorktreeRemoval(project.path, cell.worktree);
+    if (answer === null) return;
+    removeWt = answer;
   }
   killAndDispose(cellId);
   update((s) => removeCellState(s, project.id, tab.id, cellId));
   if (removeWt && cell.worktree) {
     // Windows can't delete a folder that is still some process's cwd: wait for the pty to exit.
     await window.mc.killCellAndWait(cellId);
-    await deleteWorktree(project.path, cell.worktree);
+    await deleteWorktree(project.path, cell.worktree, removeWt.confirmed);
   }
 }
 
-async function deleteWorktree(projectPath: string, wt: Worktree): Promise<void> {
-  try {
-    await window.mc.removeWorktree(projectPath, wt, true);
-    toast(tr('Usunięto worktree {branch}', { branch: wt.branch }));
-  } catch (e) {
-    toast(tr('Nie udało się usunąć worktree: {error}', { error: (e as Error).message }), 'error');
+/** Only branches unimux created for a cell go with its worktree (the same rule as ownsBranch in src/main/worktree.ts). */
+const ownsBranch = (wt: Worktree): boolean => !wt.adopted && wt.branch.startsWith('mc/');
+/** Commits removing the worktree would drop: its branch's own ones only when the branch goes too. */
+const lostCommits = (wt: Worktree, i: WorktreeInspection): number => i.detached + (ownsBranch(wt) ? i.unmerged : 0);
+
+/**
+ * The worktree part of closing a cell: shows what removing it would lose (uncommitted files, commits the project's
+ * branch does not have) and asks a second time when that is anything. null = cancelled, false = keep the worktree.
+ */
+async function askWorktreeRemoval(projectPath: string, wt: Worktree): Promise<false | { confirmed?: WorktreeInspection } | null> {
+  let checked: WorktreeInspectResult;
+  try { checked = await window.mc.inspectWorktree(projectPath, wt); } catch (e) { checked = { ok: false, error: (e as Error).message }; }
+  const owned = ownsBranch(wt);
+  const lines = [wt.path, ...(wt.branch ? [`branch ${wt.branch}`] : []), ''];
+  if (!checked.ok) {
+    // Nothing is known about what it holds: it can only stay (removing it is possible later in git or the file manager).
+    lines.push(tr('Nie udało się sprawdzić stanu worktree: {error}', { error: errorText(checked.error) }), tr('Worktree zostanie na dysku.'));
+    const choice = await askChoice(tr("Zamknąć komórkę z worktree?"), lines.join('\n'), [{ label: tr("Zostaw worktree"), value: 'keep', primary: true }]);
+    return choice ? false : null;
+  }
+  const info = checked.inspection;
+  const commits = lostCommits(wt, info);
+  if (!info.dirty && !commits) lines.push(owned ? tr('Brak niezatwierdzonych plików i commitów spoza {base}.', { base: info.base }) : tr('Brak niezatwierdzonych plików i commitów, które by przepadły.'));
+  else {
+    lines.push(tr('Niezatwierdzone pliki: {count}', { count: info.dirty }));
+    if (owned) lines.push(tr('Commity, których nie ma w {base}: {count}', { base: info.base, count: info.unmerged }));
+    if (info.detached) lines.push(tr('Commity poza każdym branchem (odłączony HEAD): {count}', { count: info.detached }));
+  }
+  if (!owned) lines.push('', tr('Branch tego worktree nie zostanie usunięty (nie utworzył go unimux).'));
+  const choice = await askChoice(tr("Zamknąć komórkę z worktree?"), lines.join('\n'), [
+    { label: tr("Zostaw worktree"), value: 'keep', primary: true },
+    { label: owned ? tr("Usuń worktree i branch") : tr('Usuń worktree'), value: 'remove', danger: true },
+  ]);
+  if (!choice) return null;
+  if (choice !== 'remove') return false;
+  if (!info.dirty && !commits) return {};
+  const again = await confirmLoss(wt, info, tr('Usunąć worktree z niezapisaną pracą?'));
+  if (again === null) return null;
+  return again ? { confirmed: info } : false;
+}
+
+/** The second, explicit confirmation of a loss; true = remove anyway, false = keep, null = cancelled. */
+async function confirmLoss(wt: Worktree, info: WorktreeInspection, title: string): Promise<boolean | null> {
+  const answer = await askChoice(title, `${wt.path}\n\n${tr('Tej pracy nie da się potem odzyskać.')}`, [
+    { label: tr("Zostaw worktree"), value: 'keep', primary: true },
+    { label: tr('Usuń mimo to: przepadną pliki ({files}) i commity ({commits})', { files: info.dirty, commits: lostCommits(wt, info) }), value: 'force', danger: true },
+  ]);
+  return answer === null ? null : answer === 'force';
+}
+
+/**
+ * Removes the worktree after the cell's terminal is gone. Main inspects again: when more work appeared than the user
+ * accepted (the agent kept writing while the dialog was open), it refuses and the user is asked again with the new numbers.
+ */
+async function deleteWorktree(projectPath: string, wt: Worktree, confirmed?: WorktreeInspection): Promise<void> {
+  const name = wt.branch || wt.path;
+  for (let round = 0; round < 5; round++) {
+    let result: WorktreeRemoveResult;
+    try { result = await window.mc.removeWorktree(projectPath, wt, true, confirmed); }
+    catch (e) { result = { ok: false, code: 'failed', error: (e as Error).message }; }
+    if (result.ok) return toast(tr('Usunięto worktree {branch}', { branch: name }));
+    if (result.code === 'branch') return toast(tr('Usunięto worktree, ale branch {branch} został: {error}', { branch: wt.branch, error: result.error }), 'error');
+    if (result.code !== 'unsafe' || !result.inspection) return toast(tr('Nie udało się usunąć worktree: {error}', { error: errorText(result.error) }), 'error');
+    const again = await confirmLoss(wt, result.inspection, tr('W worktree pojawiła się nowa praca. Usunąć mimo to?'));
+    if (!again) return toast(tr('Worktree {branch} został na dysku.', { branch: name }));
+    confirmed = result.inspection;
   }
 }
 
@@ -491,6 +550,8 @@ export interface TabSpecCell {
   profileId: string;
   role?: import('../../shared/automation').AgentRole;
   worktree: boolean;
+  /** An existing worktree the cell works in (a resumed worktree conversation); `worktree` then creates nothing. */
+  existingWorktree?: Worktree;
   name?: string;
   prompt?: string;
   session?: CellSession;
@@ -530,8 +591,8 @@ export async function openTab(projectId: string, layout: GridLayout, cells: TabS
   const specs: Array<{ model?: string; color?: string; profileId: string; role?: import('../../shared/automation').AgentRole; name?: string; startupPrompt?: string; worktree?: Worktree; session?: CellSession; ssh?: { hostId: string } }> = [];
   for (let i = 0; i < layout.areas.length; i++) {
     const spec = cells[i] ?? cells[cells.length - 1] ?? { profileId: getS().settings.lastProfileId, worktree: false };
-    let worktree: Worktree | undefined;
-    if (spec.worktree && !spec.sshHostId) {
+    let worktree: Worktree | undefined = spec.sshHostId ? undefined : spec.existingWorktree;
+    if (!worktree && spec.worktree && !spec.sshHostId) {
       try {
         worktree = await window.mc.createWorktree(project.path, `${tabName ?? 'grid'}-${i + 1}`);
       } catch (e) {
@@ -624,22 +685,32 @@ export function resumeSession(info: SessionInfo, target: 'cell' | 'newCell' | 'n
   if (!p) return;
   const profile = profileFor(info.cli);
   const session: CellSession = { cli: info.cli, id: info.id, confirmed: true };
+  // A conversation of a worktree resumes in that folder (the cell is bound to the worktree); a removed folder cannot.
+  const wt = info.worktree;
+  if (wt && !wt.exists) return void toast(tr('Folder worktree {name} już nie istnieje, więc tej rozmowy nie da się wznowić: {path}', { name: wt.label, path: wt.path }), 'error');
+  // Adopted: the cell joins the folder but never owns its branch (closing it never deletes the branch); an unknown branch stays ''.
+  const worktree: Worktree | undefined = wt ? { path: wt.path, branch: wt.branch ?? '', adopted: true } : undefined;
   const focused = getUi().focusedCellId;
-  if (target === 'cell' && focused && findCell(getS(), focused)) {
+  const focusedCell = focused ? findCell(getS(), focused)?.cell : undefined;
+  // The active cell can take it only when it works in the same folder (Claude and Codex resume a conversation per folder).
+  if (target === 'cell' && focused && focusedCell && sameFolder(focusedCell.worktree?.path, worktree?.path)) {
     update((s) => updateCell(s, focused, { profileId: profile.id, session }));
     restartCell(focused, 'resume');
     return;
   }
   const tab = activeTab(p);
-  if (target === 'newCell' && tab) {
-    update((s) => addCell(s, p.id, tab.id, profile.id, { session }));
+  if ((target === 'newCell' || target === 'cell') && tab) {
+    update((s) => addCell(s, p.id, tab.id, profile.id, { session, ...(worktree ? { worktree } : {}) }));
     const t = activeTab(activeProject(getS()));
     const cell = t?.cells[t.cells.length - 1];
     if (cell) focusCell(cell.id);
     return;
   }
-  void openTab(p.id, layoutForCount(1), [{ profileId: profile.id, worktree: false, session }], info.title.slice(0, 24));
+  void openTab(p.id, layoutForCount(1), [{ profileId: profile.id, worktree: false, ...(worktree ? { existingWorktree: worktree } : {}), session }], info.title.slice(0, 24));
 }
+
+const sameFolder = (a: string | undefined, b: string | undefined): boolean =>
+  (a ? normalizeProjectPath(a) : '') === (b ? normalizeProjectPath(b) : '');
 
 // ── snippets ────────────────────────────────────────────────────────────────
 
