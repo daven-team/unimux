@@ -41,7 +41,7 @@
   box-shadow: inset 0 0 0 var(--cell-frame-width) var(--cell-frame-color);
 }
 
-/* Keep the 30px header and terminal body padding in sync with cellBodyBox. */
+/* The header height is --cell-head (styles.css); keep the terminal body padding in sync with cellBodyBox. */
 .terminal-cell > .cell-head {
   gap: 6px;
   padding-inline: 9px 6px;

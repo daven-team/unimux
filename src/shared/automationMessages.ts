@@ -3,6 +3,7 @@ export const automationMessages = {
   'Bez MCP': ['No MCP', 'Ohne MCP', 'Sin MCP', 'Sans MCP', 'Sem MCP'],
   'Rola / MCP': ['Role / MCP', 'Rolle / MCP', 'Rol / MCP', 'Rôle / MCP', 'Papel / MCP'],
   'Po zmianie roli uruchom agenta ponownie, aby włączyć MCP.': ['Restart the agent after changing its role to enable MCP.', 'Starte den Agenten nach einem Rollenwechsel neu, um MCP zu aktivieren.', 'Reinicia el agente después de cambiar su rol para activar MCP.', 'Redémarrez l’agent après avoir changé son rôle pour activer MCP.', 'Reinicia o agente após alterar o seu papel para ativar MCP.'],
+  'Zmień wysokość panelu zespołu AI': ['Resize the AI team panel', 'Höhe des KI-Team-Panels ändern', 'Cambiar la altura del panel del equipo de IA', 'Redimensionner le panneau de l’équipe IA', 'Alterar a altura do painel da equipa de IA'],
   'Zespół AI': ['AI team', 'KI-Team', 'Equipo de IA', 'Équipe IA', 'Equipa de IA'],
   'Nie udało się utworzyć gridu: {error}': ['Could not create grid: {error}', 'Raster konnte nicht erstellt werden: {error}', 'No se pudo crear la cuadrícula: {error}', 'Impossible de créer la grille : {error}', 'Não foi possível criar a grelha: {error}'],
   'Zadania i wiadomości agentów': ['Agent tasks and messages', 'Aufgaben und Nachrichten der Agenten', 'Tareas y mensajes de agentes', 'Tâches et messages des agents', 'Tarefas e mensagens dos agentes'],
