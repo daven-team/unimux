@@ -1,4 +1,5 @@
 import { changeAgentRole } from '../agentRoles';
+import { cellLabel } from '../../../shared/agentWork';
 import { shortcutText, titleWithShortcut, useShortcutText } from '../shortcuts';
 import { useI18n } from '../i18n';
 import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
@@ -82,7 +83,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   };
 
   // An SSH cell is named by its host chip; the name shows next to it only when the user gave the cell one.
-  const label = ssh ? sshHeaderName(cell.name) : cell.name ?? sessionTitle ?? profile.name;
+  const label = ssh ? sshHeaderName(cell.name) : cellLabel(cell, sessionTitle && cell.session ? { [cell.session.id]: sessionTitle } : {}, profile.name);
 
   const sshItems = (): MenuItem[] => [
     { label: tr('Połącz ponownie'), onClick: () => void reconnectCell(cell.id) },
@@ -278,6 +279,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
       <div className="cell-body" ref={bodyRef} style={lackingCli ? { visibility: 'hidden' } : undefined} />
       <span className="cell-frame" aria-hidden="true" />
       {pathDrop && <div className={`cell-path-drop ${pathDrop.blocked ? 'blocked' : ''}`} role="status">{pathDrop.blocked ? tr(ssh ? 'Ścieżki lokalne nie działają w sesji SSH' : 'Komórka nie jest uruchomiona') : dropLabel(pathDrop.target)}</div>}
+      {drop && !pathDrop && <div className="cell-snippet-drop" role="status">{tr('Upuść, aby wkleić')}</div>}
       {lackingCli && <CliMissingCard cli={lackingCli} cellId={cell.id} onChangeProfile={(anchor) => openMenuAt(anchor, profileItems())} />}
       {ssh && <SshCellCard cellId={cell.id} host={host} session={sshSession} prompt={sshPrompt} />}
       {floodHint && !error && (

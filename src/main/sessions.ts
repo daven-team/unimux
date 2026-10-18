@@ -214,7 +214,10 @@ export function listClaudeSessions(home: string, projectPath: string): SessionIn
 
 /** Same result as listClaudeSessions, but never blocks the event loop on file IO. */
 export async function listClaudeSessionsAsync(home: string, projectPath: string): Promise<SessionInfo[]> {
-  const dir = claudeDir(home, projectPath);
+  return listClaudeDirAsync(claudeDir(home, projectPath));
+}
+
+async function listClaudeDirAsync(dir: string): Promise<SessionInfo[]> {
   let names: string[];
   try {
     names = (await readdir(dir)).filter((f) => f.endsWith('.jsonl'));
@@ -387,10 +390,15 @@ function codexIndexFor(home: string): Promise<CodexEntry[]> {
 
 export async function listCodexSessionsAsync(home: string, projectPath: string): Promise<SessionInfo[]> {
   const want = normPath(projectPath);
+  return listCodexWhere(home, (cwd) => cwd === want);
+}
+
+/** Codex sessions whose normalized cwd passes `wanted`. */
+async function listCodexWhere(home: string, wanted: (cwd: string) => boolean): Promise<SessionInfo[]> {
   const out: SessionInfo[] = [];
   for (const entry of await codexIndexFor(home)) {
     const { meta } = entry;
-    if (!meta || normPath(meta.cwd) !== want) continue;
+    if (!meta || !wanted(normPath(meta.cwd))) continue;
     if (entry.title === undefined) {
       try { entry.title = await codexTitle(entry.file); } catch { continue; }
     }
@@ -422,8 +430,68 @@ export async function findRecentCodexSession(home: string, cwd: string, windowMs
   return best?.id ?? null;
 }
 
-/** Non-blocking listing for the IPC handler. */
-export async function listSessionsAsync(home: string, projectPath: string): Promise<SessionInfo[]> {
-  const [claude, codex] = await Promise.all([listClaudeSessionsAsync(home, projectPath), listCodexSessionsAsync(home, projectPath)]);
-  return [...claude, ...codex].sort(byUpdated);
+/** A worktree of the project main knows from its cells (open or in closed grids). */
+export interface WorktreeHint { path: string; branch: string }
+
+const splitPath = (path: string) => {
+  const trimmed = path.replace(/[\\/]+$/, '');
+  const cut = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  return { parent: cut < 0 ? '' : trimmed.slice(0, cut), name: trimmed.slice(cut + 1) };
+};
+
+/**
+ * Tells whether a (normalized) cwd is a worktree folder of the project: one of the known worktrees, or a sibling named
+ * `<project folder>-wt-<name>` the way createWorktree (src/main/worktree.ts) names them, so removed ones count too.
+ */
+export function worktreeMatcher(projectPath: string, known: WorktreeHint[]): (cwd: string) => boolean {
+  const project = splitPath(projectPath);
+  const prefix = normPath(`${project.parent}/${project.name}-wt-`);
+  const exact = new Set(known.map((w) => normPath(w.path)));
+  const self = normPath(projectPath);
+  return (cwd) => cwd !== self && (exact.has(cwd) || (cwd.startsWith(prefix) && cwd.length > prefix.length && !/[\\/]/.test(cwd.slice(prefix.length))));
+}
+
+/** The current branch of an existing worktree folder (for a resumed cell); undefined when git cannot tell. */
+export type BranchOf = (path: string) => Promise<string | undefined>;
+
+/**
+ * Non-blocking listing for the IPC handler: the project's own conversations and those held in its worktree folders
+ * (labelled with the worktree branch or folder name, with `exists` false for a removed folder).
+ */
+export async function listSessionsAsync(home: string, projectPath: string, worktrees: WorktreeHint[] = [], branchOf?: BranchOf): Promise<SessionInfo[]> {
+  const isWorktree = worktreeMatcher(projectPath, worktrees);
+  const [claude, codex, claudeWt, codexWt] = await Promise.all([
+    listClaudeSessionsAsync(home, projectPath),
+    listCodexSessionsAsync(home, projectPath),
+    listClaudeWorktreesAsync(home, projectPath, worktrees, isWorktree),
+    listCodexWhere(home, isWorktree),
+  ]);
+  const known = new Map(worktrees.map((w) => [normPath(w.path), w.branch]));
+  const branches = new Map<string, Promise<string | undefined>>();
+  const labelled = await Promise.all([...claudeWt, ...codexWt].map(async (info) => {
+    const key = normPath(info.cwd);
+    const exists = existsSync(info.cwd);
+    let branch = known.get(key);
+    if (!branch && exists && branchOf) {
+      if (!branches.has(key)) branches.set(key, branchOf(info.cwd).catch(() => undefined));
+      branch = await branches.get(key);
+    }
+    return { ...info, worktree: { path: info.cwd, label: branch ?? splitPath(info.cwd).name, exists, ...(branch ? { branch } : {}) } };
+  }));
+  return [...claude, ...codex, ...labelled].sort(byUpdated);
+}
+
+/** Claude sessions of the worktree folders: the session folders whose encoded name can belong to one, checked by their cwd. */
+async function listClaudeWorktreesAsync(home: string, projectPath: string, worktrees: WorktreeHint[], isWorktree: (cwd: string) => boolean): Promise<SessionInfo[]> {
+  const root = join(home, '.claude', 'projects');
+  const project = splitPath(projectPath);
+  const prefix = claudeProjectDirName(`${project.parent}/${project.name}-wt-`);
+  const exact = new Set(worktrees.map((w) => claudeProjectDirName(w.path)));
+  const own = claudeProjectDirName(projectPath);
+  let names: string[];
+  try { names = await readdir(root); } catch { return []; }
+  const dirs = names.filter((name) => name !== own && (exact.has(name) || (name.startsWith(prefix) && name.length > prefix.length)));
+  const lists = await Promise.all(dirs.map((name) => listClaudeDirAsync(join(root, name))));
+  // The encoding is lossy (every non-alphanumeric character becomes '-'): the cwd recorded in the session decides.
+  return lists.flat().filter((info) => !!info.cwd && isWorktree(normPath(info.cwd)));
 }

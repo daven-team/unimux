@@ -6,6 +6,8 @@ import { isAuxPtyId } from '../../shared/cliInstall';
 import { ptyHostRestartToast } from '../../shared/ssh';
 import type { McpInfo } from '../../shared/automation';
 import { alertForStatus } from './alerts';
+import { initQuitGuard } from './closeGuard';
+import { noteAgentTurnEnd } from './turnRefresh';
 import { initBackgroundLoader } from './backgroundLoader';
 import { applyCliStatus, flushPendingSaves, ensureStarted, focusCell, hasBlockedCells, recheckCli, refreshSessionTitles, resetStarted, releaseCellTerminal, setAliveAtStart } from './actions';
 import { CommandPalette } from './components/CommandPalette';
@@ -28,7 +30,7 @@ const loadAutomationPanel = () => import('./components/AutomationPanel').then((m
 const loadFileEditor = () => import('./components/FileEditor').then((m) => ({ default: m.FileEditor }));
 const loadSshView = () => import('./components/ssh/SshView').then((m) => ({ default: m.SshView }));
 const loadSettingsPage = () => import('./components/SettingsPage').then((m) => ({ default: m.SettingsPage }));
-import { useFileStore } from './files';
+import { useFileStore, watchFilesOnDisk } from './files';
 import { cancelReconnectAtStart, initSsh, markReconnectAtStart } from './ssh';
 import { useSshStore } from './sshStore';
 import { isWindowShown, onWindowShown } from './windowShown';
@@ -133,6 +135,8 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
     window.clearTimeout(focusTimer);
     focusTimer = window.setTimeout(() => { if (hasBlockedCells()) void recheckCli(); }, 500);
   });
+  // Open editor tabs follow files an agent (or anything else) changed on disk.
+  bootStep(watchFilesOnDisk);
   window.mc.on('cell:restarted', (cellId) => { terminals.prepareSpawn(cellId); terminals.syncSize(cellId); });
   window.mc.on('cell:hook', (cellId, event, info) => terminals.hook(cellId, event, info));
   window.mc.on('cell:session', (cellId, session) => {
@@ -163,6 +167,8 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
       return { statuses: { ...ui.statuses, [cellId]: status }, failures };
     });
     if (status !== 'waiting') return;
+    // A turn ended: the Files tree and the Git views of its project (or worktree) are read again, debounced (turnRefresh).
+    if (prev === 'working') noteAgentTurnEnd(cellId);
     alertForStatus(cellId, status, prev, cause, reason, hooked, info);
     if (!hooked) bindCodexSession(cellId); // a cell whose notify hook works is bound by its committed turn ends instead
     // A turn finished: the agent may have (re)titled the conversation.
@@ -191,6 +197,7 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
     if (!['completed', 'cancelled'].includes(task.status)) bootStep(() => ensureStarted(task.cellId));
   }
   bootStep(initBackgroundLoader);
+  bootStep(initQuitGuard);
 }
 
 /**

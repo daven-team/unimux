@@ -67,7 +67,7 @@ function PaletteInner() {
       out.push({ kind: tr('Akcja'), title: tr("Historia projektu"), desc: keys('history.open') || undefined, run: () => setUi({ modal: { kind: 'history', projectId: project.id } }) });
       out.push({ kind: tr('Akcja'), title: tr("Otwórz folder projektu"), run: () => window.mc.openPath(project.path) });
       out.push({ kind: tr('Akcja'), title: tr("Otwórz projekt w Cursorze"), run: () => window.mc.openInEditor(project.path) });
-      if (tab) out.push({ kind: tr('Akcja'), title: tr('Zamknij zakładkę „{name}”', { name: tab.name }), desc: keys('tab.close') || undefined, run: () => closeTab(project.id, tab.id) });
+      if (tab) out.push({ kind: tr('Akcja'), title: tr('Zamknij zakładkę „{name}”', { name: tab.name }), desc: keys('tab.close') || undefined, run: () => void closeTab(project.id, tab.id) });
     }
     if (focused) {
       out.push({ kind: tr('Akcja'), title: tr("Maksymalizuj / przywróć komórkę"), desc: keys('cell.maximize') || undefined, run: () => toggleMaximize(focused) });

@@ -61,7 +61,7 @@ export function Modals() {
       )}
       {dialog && (
         <div className="overlay" style={{ zIndex: 55 }} onMouseDown={(e) => e.target === e.currentTarget && closeDialog()}>
-          <DialogView dialog={dialog} />
+          <DialogView key={dialog.id} dialog={dialog} />
         </div>
       )}
     </>
@@ -71,6 +71,7 @@ export function Modals() {
 function DialogView({ dialog }: { dialog: Dialog }) {
   const { tr } = useI18n();
   const [value, setValue] = useState(dialog.kind === 'prompt' ? dialog.value : '');
+  const [checked, setChecked] = useState(false);
   if (dialog.kind === 'prompt') {
     return (
       <div className="modal" style={{ width: 440 }}>
@@ -96,11 +97,19 @@ function DialogView({ dialog }: { dialog: Dialog }) {
   return (
     <div className="modal" style={{ width: 460 }}>
       <div className="modal-head"><h3>{dialog.title}</h3></div>
-      <div className="modal-body"><div className="muted" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{dialog.body}</div></div>
+      <div className="modal-body">
+        <div className="muted" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{dialog.body}</div>
+        {dialog.check && (
+          <label className="dialog-check" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
+            <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
+            {dialog.check}
+          </label>
+        )}
+      </div>
       <div className="modal-foot">
         <button className="btn" onClick={closeDialog}>{tr("Anuluj")}</button>
         {dialog.actions.map((a) => (
-          <button key={a.value} autoFocus={a.primary} className={`btn ${a.danger ? 'danger' : ''} ${a.primary ? 'primary' : ''}`} onClick={() => dialog.onChoose(a.value)}>
+          <button key={a.value} autoFocus={a.primary} className={`btn ${a.danger ? 'danger' : ''} ${a.primary ? 'primary' : ''}`} onClick={() => dialog.onChoose(a.value, checked)}>
             {a.label}
           </button>
         ))}
@@ -174,6 +183,9 @@ function HistoryModal({ projectId }: { projectId: string }) {
               <div key={x.cli + x.id} className="hist-item">
                 <span className={`cli ${x.cli}`}>{x.cli}</span>
                 <span className="htitle" title={x.title}>{x.title}</span>
+                {x.worktree && <span className={`tag hist-worktree ${x.worktree.exists ? '' : 'gone'}`} title={x.worktree.path}>
+                  {x.worktree.exists ? tr('worktree {name}', { name: x.worktree.label }) : tr('worktree {name} (usunięty)', { name: x.worktree.label })}
+                </span>}
                 {openIds.has(x.id) && <span className="tag">{tr("otwarta")}</span>}
                 <span className="hmeta">{formatAgo(language, x.updatedAt)}</span>
                 {isActive && (

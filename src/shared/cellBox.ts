@@ -10,8 +10,11 @@ export function chooseGridSize(measured: ReadonlyArray<Size | null>, lastKnown: 
   return measured.find((m): m is Size => !!m && m.width >= MIN_GRID.width && m.height >= MIN_GRID.height) ?? lastKnown;
 }
 
+/** Height of a cell header: keep it equal to the --cell-head CSS variable (styles.css), which the renderer reads first. */
+export const CELL_HEAD_HEIGHT = 30;
+
 /** Cell body (below the header, inside the padding and the 1 px grid line) of the cell at `index` for a grid of `grid` pixels. */
-export function cellBodyBox(layout: GridLayout, index: number, grid: Size, headHeight = 30): Size | null {
+export function cellBodyBox(layout: GridLayout, index: number, grid: Size, headHeight = CELL_HEAD_HEIGHT): Size | null {
   const rect = areaRects(layout)[index];
   if (!rect) return null;
   return {

@@ -29,8 +29,33 @@ export interface CellSession {
 
 export interface Worktree {
   path: string;
+  /** '' when unknown (an adopted worktree on a detached HEAD). */
   branch: string;
+  /** A worktree the cell joined (a resumed conversation), not one unimux created for it: its branch is never deleted. */
+  adopted?: boolean;
 }
+
+/** What removing a worktree would lose (src/main/worktree.ts inspectWorktree). */
+export interface WorktreeInspection {
+  /** The folder is still on disk. */
+  exists: boolean;
+  /** Files with uncommitted changes, untracked ones included (ignored ones not). */
+  dirty: number;
+  /** Commits of the worktree branch that the project's current HEAD cannot reach. */
+  unmerged: number;
+  /** Commits reachable from the worktree's HEAD but from no branch, remote or tag (a detached HEAD). */
+  detached: number;
+  /** The project's current branch (the base of `unmerged`), "HEAD" when detached. */
+  base: string;
+  /** The worktree's HEAD and the branch tip (commit ids, '' when none): a confirmed removal checks they did not move. */
+  head: string;
+  tip: string;
+}
+
+export type WorktreeInspectResult = { ok: true; inspection: WorktreeInspection } | { ok: false; error: string };
+
+/** 'unsafe': work would be lost and the removal was not forced (nothing removed); 'branch': the worktree is gone, its branch stayed. */
+export type WorktreeRemoveResult = { ok: true } | { ok: false; code: 'unsafe' | 'failed' | 'branch'; error: string; inspection?: WorktreeInspection };
 
 export interface Cell {
   id: string;
@@ -131,6 +156,8 @@ export interface Settings {
   backgroundLoad: BackgroundLoadMode;
   /** Keyboard shortcuts the user changed: action id to combo (`Ctrl+Shift+E`), or null when the shortcut is switched off (see shared/shortcuts.ts). */
   shortcuts: ShortcutOverrides;
+  /** Ask before closing a grid, a cell or the app while a Claude or Codex cell is working ("do not ask again" turns it off). */
+  confirmCloseWorking: boolean;
 }
 
 export interface AppState {
@@ -176,6 +203,8 @@ export interface SessionInfo {
   title: string;
   startedAt: number;
   updatedAt: number;
+  /** Held in a worktree folder of the project (not the project folder): its branch (or folder name) and whether it still exists. */
+  worktree?: { path: string; label: string; branch?: string; exists: boolean };
 }
 
 export interface UpdateState {

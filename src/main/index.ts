@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { execFile, spawn } from 'child_process';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, safeStorage, shell, type OpenDialogOptions } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, powerMonitor, safeStorage, shell, type OpenDialogOptions } from 'electron';
+import { createQuitConfirm, isQuitAnswer, sessionEndingNow } from './quitConfirm';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { homedir, hostname } from 'os';
 import { isAbsolute, join } from 'path';
@@ -10,8 +11,8 @@ import { cleanEnv } from '../shared/env';
 import type { HostToMain } from '../shared/ipc';
 import { buildLaunchCommand, type LaunchOptions } from '../shared/profiles';
 import { endCellMcp, prepareCellMcp } from './mcpCellConfig';
-import type { AppState, Worktree } from '../shared/types';
-import { appPlatform } from '../shared/platform';
+import type { AppState, Worktree, WorktreeInspection, WorktreeInspectResult } from '../shared/types';
+import { appPlatform, normalizeProjectPath } from '../shared/platform';
 import { detectLanguage } from '../shared/languages';
 import { CHROMIUM_WEBGL_CONTEXTS } from '../shared/terminalLimits';
 import { translate, type MessageKey, type MessageParams } from '../shared/i18n';
@@ -19,7 +20,7 @@ import { HookServer } from './hooks';
 import { pathExists } from './fsProbe';
 import { PromptFiles, pruneCellFiles, removeCellFiles } from './cellFiles';
 import { applyDockIcon, windowIcon } from './appIcon';
-import { LARGE_VIEW_BYTES, listProjectDirectories, listProjectDirectory, listProjectDirectoryBatch, readProjectFile, writeProjectFile } from './files';
+import { LARGE_VIEW_BYTES, listProjectDirectories, listProjectDirectory, listProjectDirectoryBatch, readProjectFile, statProjectFile, writeProjectFile } from './files';
 import { registerFileOpsIpc } from './filesIpc';
 import { createIpcGuard } from './ipcGuard';
 import { registerGitIpc } from './gitIpc';
@@ -64,7 +65,7 @@ import { fetchClaude, fetchCodex, type FetcherDeps } from './usage/fetchers';
 import { UsageService } from './usage/service';
 import { MAIN_ACCOUNTS } from '../shared/usage';
 import type { UpdateStrings } from '../shared/updateProgress';
-import { createWorktree, isGitRepo, removeWorktree } from './worktree';
+import { createWorktree, currentBranch, inspectWorktree, isGitRepo, removeWorktree } from './worktree';
 import { StateController } from './stateController';
 import { SshCoordinator } from './ssh/coordinator';
 import { createSshHandlers, readKeyFileFromDisk, registerSshIpc } from './ssh/ipc';
@@ -497,6 +498,29 @@ const updateStrings = (): UpdateStrings => ({
 });
 
 const send = (channel: string, ...args: unknown[]) => { safeSend(win, channel, ...args); };
+/** The OS ends the session (Windows shutdown or log-off, macOS shutdown): nothing may hold the quit any more. */
+let sessionEndingAt: number | undefined;
+/** The OS announced a session end: quits within the next minute are never held, and an open question lets the quit go on. */
+const markSessionEnding = (): void => { sessionEndingAt = Date.now(); quitConfirm.release(); };
+/** Closing the window or quitting while agents work asks first (in the renderer); see quitConfirm.ts for what is never held. */
+const quitConfirm = createQuitConfirm({
+  exempt: () => quitting || gating || superseded || sessionEndingNow(sessionEndingAt, Date.now()) || updateHandoffStarted() || !isLive(win) || win!.webContents.isCrashed(),
+  // A minimized or hidden window (taskbar "Close window", Dock "Quit" after Cmd+H) is brought up first: the question must be seen.
+  ask: () => {
+    withLiveWindow(win, (w) => {
+      if (w.isMinimized()) w.restore();
+      w.show();
+      w.focus();
+    });
+    if (process.platform === 'darwin') { try { app.focus({ steal: true }); } catch { /* the window is shown anyway */ } }
+    send('app:confirm-quit');
+  },
+  quit: () => app.quit(),
+  setTimer: (fn, ms) => setTimeout(fn, ms),
+  clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+});
+guardedOn('app:quitGuard', (_e, ask: unknown) => { quitConfirm.setGuard(ask === true); });
+guardedOn('app:quitAnswer', (_e, answer: unknown) => { if (isQuitAnswer(answer)) quitConfirm.answer(answer); });
 cliDetector.onChange((map) => send('cli:changed', map));
 /** Guided install of the agent CLIs in a visible terminal (`install:` ptys are not cells). */
 const install = new InstallManager({
@@ -551,7 +575,8 @@ const controller = new StateController(state, (snapshot) => {
 });
 const automation = new AutomationService(controller, {
   createWorktree,
-  removeWorktree: (path, wt) => removeWorktree(path, wt, true),
+  // Rolls back worktrees it has just created: nothing is in them yet, so the unforced removal goes through.
+  removeWorktree: async (path, wt) => { await removeWorktree(path, wt, true); },
   startCells: (ids) => send('automation:start-cells', ids),
   missingCli: (profileId) => {
     const profile = state.profiles.find((p) => p.id === profileId);
@@ -665,9 +690,12 @@ function createWindow(): void {
   win.on('focus', () => cliDetector.invalidateRegistry());
   if (!app.isPackaged) win.webContents.on('console-message', (e) => e.level !== 'debug' && console.log('[renderer]', e.level, e.message));
   // The install window lives in the renderer: a reload or crash must not leave an invisible install running.
-  win.webContents.on('did-start-loading', () => install.dispose());
+  win.webContents.on('did-start-loading', () => { install.dispose(); quitConfirm.rendererGone(); });
+  // The close button (or Alt+F4, or the last window on macOS) while agents work: the renderer asks first.
+  win.on('close', (e) => { if (quitConfirm.hold()) e.preventDefault(); });
   win.webContents.on('render-process-gone', (_e, details) => {
     install.dispose();
+    quitConfirm.rendererGone();
     onRendererGone(created, details.reason, details.exitCode);
   });
   // A renderer stuck in a loop: after a grace period the user may reload it (the terminals keep running in the Pty Host).
@@ -678,7 +706,7 @@ function createWindow(): void {
   });
   win.on('responsive', () => { clearTimeout(hung); hung = undefined; });
   // Windows ends the session without before-quit: the last changes are written now (the renderer was asked to send its own).
-  win.on('query-session-end', () => { send('app:before-quit'); });
+  win.on('query-session-end', () => { markSessionEnding(); send('app:before-quit'); });
   win.on('session-end', () => { saver.flush(); });
   win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { ptyHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -715,7 +743,7 @@ function onRendererGone(window: BrowserWindow, reason: string, exitCode: number)
   };
   void dialog.showMessageBox(window, options).then(({ response }) => {
     if (quitting || !isLive(window)) return;
-    if (response === 1) app.quit(); else reloadWindow(window);
+    if (response === 1) { quitConfirm.confirm(); app.quit(); } else reloadWindow(window);
   }).catch(() => {});
 }
 
@@ -843,7 +871,7 @@ ptyHost.on('fatal', (code: unknown, stderrTail: unknown) => {
   };
   void (isLive(win) ? dialog.showMessageBox(win!, options) : dialog.showMessageBox(options)).then(({ response }) => {
     if (quitting) return;
-    if (response === 1) { app.quit(); return; }
+    if (response === 1) { quitConfirm.confirm(); app.quit(); return; }
     ptyHost.restartAfterFatal();
     send('ptyhost:crashed', resumes);
   }).catch(() => {});
@@ -1101,6 +1129,10 @@ guardedHandle('fs:replaceInProject', (_e, projectId: string, request: ReplaceReq
   const project = state.projects.find((p) => p.id === projectId);
   return project ? replaceInProject(project.path, request) : { ok: false, error: 'Projekt już nie istnieje.' };
 }, () => ({ ok: false, error: 'Projekt już nie istnieje.' }));
+ipcMain.handle('fs:statProjectFile', (_e, projectId: string, path: string) => {
+  const project = state.projects.find((p) => p.id === projectId);
+  return project ? statProjectFile(project.path, path) : null;
+});
 ipcMain.handle('fs:readProjectFile', (_e, projectId: string, path: string, large?: boolean) => {
   const project = state.projects.find((p) => p.id === projectId);
   return project ? readProjectFile(project.path, path, large === true ? LARGE_VIEW_BYTES : undefined) : { kind: 'error', message: 'Projekt już nie istnieje.' };
@@ -1110,7 +1142,13 @@ guardedHandle('fs:writeProjectFile', (_e, projectId: string, path: string, text:
   return project ? writeProjectFile(project.path, path, text, expectedText) : { ok: false, error: 'Projekt już nie istnieje.' };
 }, () => ({ ok: false, error: 'Projekt już nie istnieje.' }));
 registerFileOpsIpc({ projectPath: (projectId) => state.projects.find((p) => p.id === projectId)?.path, send, allowed: fromAppWindow });
-ipcMain.handle('sessions:list', (_e, projectPath: string) => listSessionsAsync(homedir(), projectPath));
+/** Worktrees of the project's cells, open and in closed grids (History lists their conversations too). */
+function projectWorktrees(projectPath: string): Worktree[] {
+  const key = normalizeProjectPath(projectPath);
+  return state.projects.filter((p) => normalizeProjectPath(p.path) === key)
+    .flatMap((p) => [...p.tabs, ...p.archive].flatMap((t) => t.cells.flatMap((c) => (c.worktree ? [c.worktree] : []))));
+}
+ipcMain.handle('sessions:list', (_e, projectPath: string) => listSessionsAsync(homedir(), projectPath, projectWorktrees(projectPath), currentBranch));
 registerGitIpc({
   projectPath: (projectId) => state.projects.find((p) => p.id === projectId)?.path,
   worktreePaths: (projectId) => state.projects.find((p) => p.id === projectId)?.tabs.flatMap((t) => t.cells.flatMap((c) => (c.worktree ? [c.worktree.path] : []))) ?? [],
@@ -1119,7 +1157,8 @@ registerGitIpc({
 });
 ipcMain.handle('git:isRepo', (_e, p: string) => isGitRepo(p));
 guardedHandle('git:createWorktree', (_e, p: string, name: string) => createWorktree(p, name), () => Promise.reject(new Error('Refused.')));
-guardedHandle('git:removeWorktree', (_e, p: string, wt: Worktree, del: boolean) => removeWorktree(p, wt, del), () => Promise.reject(new Error('Refused.')));
+guardedHandle('git:inspectWorktree', (_e, p: string, wt: Worktree): Promise<WorktreeInspectResult> => inspectWorktree(p, wt).then((inspection) => ({ ok: true as const, inspection }), (error: Error) => ({ ok: false as const, error: error.message })), () => ({ ok: false, error: 'Refused.' }));
+guardedHandle('git:removeWorktree', (_e, p: string, wt: Worktree, del: boolean, confirmed?: WorktreeInspection) => removeWorktree(p, wt, del, confirmed ?? undefined), () => Promise.reject(new Error('Refused.')));
 
 guardedOn('notify', (_e, n: { title: string; body: string; cellId: string }) => {
   if (!n || typeof n !== 'object' || typeof n.title !== 'string' || typeof n.body !== 'string' || (n.cellId !== undefined && typeof n.cellId !== 'string')) return;
@@ -1483,6 +1522,9 @@ async function recoverActivation(): Promise<void> {
 
 app.whenReady().then(async () => {
   startupTimer.mark('app-ready');
+  // macOS and Linux shutdown or log-off: the quit that follows is never held by the "agents are working" question.
+  // Whatever the order of this event and the quit, a held quit is released here (and the answer wait has an upper bound anyway).
+  try { powerMonitor.on('shutdown', markSessionEnding); } catch { /* not available: only the question's upper bound applies */ }
   applyDockIcon();
   if (superseded) return;
   // The line is written when the renderer reports in; a start that never gets that far is written after a minute.
@@ -1517,6 +1559,8 @@ function exitNow(): void {
 }
 
 app.on('before-quit', (e) => {
+  // Cmd+Q, the Dock or the macOS menu while agents work: held once while the renderer asks (never for a session end or an update).
+  if (quitConfirm.hold()) { e.preventDefault(); return; }
   clearTimeout(handoffWatchdog);
   // A copied private key does not outlive the app in the clipboard, however the quit goes on (the wind-down below waits).
   void flushSecretClipboard();

@@ -1,6 +1,7 @@
 // Each row contains English, German, Spanish, French and Portuguese translations.
 // Polish uses the source message (the key). Placeholders must match across a row.
 import { agentModeMessages } from './agentModeMessages';
+import { agentWorkMessages } from './agentWorkMessages';
 import { alertMessages } from './alertMessages';
 import { automationMessages } from './automationMessages';
 import { cliMessages } from './cliMessages';
@@ -17,6 +18,7 @@ import { shortcutMessages } from './shortcutMessages';
 import { sshMessages } from './sshMessages';
 import { sshModeMessages } from './sshModeMessages';
 import { sshViewMessages } from './sshViewMessages';
+import { safetyMessages } from './safetyMessages';
 import { stabilityMessages } from './stabilityMessages';
 import { statusMessages } from './statusMessages';
 import { swapMessages } from './swapMessages';
@@ -27,6 +29,7 @@ import { usageMessages } from './usageMessages';
 import { uxMessages } from './uxMessages';
 export const messages = {
   ...agentModeMessages,
+  ...agentWorkMessages,
   ...alertMessages,
   ...automationMessages,
   ...cliMessages,
@@ -37,6 +40,7 @@ export const messages = {
   ...gridMessages,
   ...macUpdateMessages,
   ...perfMessages,
+  ...safetyMessages,
   ...stabilityMessages,
   ...railMessages,
   ...settingsMessages,
