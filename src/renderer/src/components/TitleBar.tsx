@@ -237,7 +237,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
                 className={`tab grid-tab ${activeKey === `grid:${t.id}` ? 'active' : ''}`}
                 style={{ order: order.indexOf(`grid:${t.id}`), ...(t.color ? { '--tab-color': t.color } : {}) } as CSSProperties}
                 onMouseDown={(e) => e.button === 0 && selectTab(project.id, t)}
-                onAuxClick={(e) => e.button === 1 && closeTab(project.id, t.id)}
+                onAuxClick={(e) => e.button === 1 && void closeTab(project.id, t.id)}
                 onDoubleClick={() => setEditing(t.id)}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -250,7 +250,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
                     ...(t.cells.some((c) => c.ssh) ? [{ label: tr('Wysyłanie masowe'), onClick: () => setUi({ modal: { kind: 'broadcast', projectId: project.id, tabId: t.id } }) }] : []),
                     ...(reconnectAllTargetsOf(project.id, t.id).length ? [{ label: tr('Połącz ponownie wszystkie SSH'), onClick: () => reconnectAllSsh(project.id, t.id) }] : []),
                     { sep: true },
-                    { label: tr("Zamknij (do historii)"), danger: true, onClick: () => closeTab(project.id, t.id), hint: shortcutText('tab.close') || undefined },
+                    { label: tr("Zamknij (do historii)"), danger: true, onClick: () => void closeTab(project.id, t.id), hint: shortcutText('tab.close') || undefined },
                   ]);
                 }}
                 title={tr("Dwuklik lub prawy klik: zmień nazwę · środkowy przycisk: zamknij")}
@@ -276,7 +276,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
                 )}
                 <span className="size">{describeLayout(t.layout)}</span>
                 <StatusBadges counts={counts} />
-                <span className="x" onMouseDown={(e) => e.stopPropagation()} onClick={() => closeTab(project.id, t.id)}><IX /></span>
+                <span className="x" onMouseDown={(e) => e.stopPropagation()} onClick={() => void closeTab(project.id, t.id)}><IX /></span>
               </div>
             );
           })}

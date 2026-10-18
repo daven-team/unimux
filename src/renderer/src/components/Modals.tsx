@@ -61,7 +61,7 @@ export function Modals() {
       )}
       {dialog && (
         <div className="overlay" style={{ zIndex: 55 }} onMouseDown={(e) => e.target === e.currentTarget && closeDialog()}>
-          <DialogView dialog={dialog} />
+          <DialogView key={dialog.id} dialog={dialog} />
         </div>
       )}
     </>

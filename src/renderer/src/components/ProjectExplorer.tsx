@@ -20,7 +20,7 @@ import {
   registerTreeFocus, selectPaths, selectedPaths, setExpanded, targetDirectory, toggleFolder, transferEntries, trashEntries, undoLast, useExplorer,
 } from '../explorer';
 import { useTreeListings } from '../treeListings';
-import { onTurnRefresh } from '../turnRefresh';
+import { onTurnRefresh, refreshMatches } from '../turnRefresh';
 import {
   flattenTree, indentFor, indentGuides, scrollToShow, scrollTopForPinned, stabilizeRows, stickyIndent, stickyRows, visibleRange, type TreeRow,
 } from '../../../shared/treeRows';
@@ -230,7 +230,7 @@ export function ProjectExplorer({ project }: { project: Project }) {
   useGitBadgeSync(project.id, project.path);
   // An agent turn in this project (not in one of its worktrees) may have changed files: the open folders and marks are read again.
   useEffect(() => onTurnRefresh((target) => {
-    if (target.projectId !== project.id || target.worktree) return;
+    if (!refreshMatches(target, project.id)) return;
     bumpRefresh();
     refreshGitBadges(project.id, 0);
   }), [project.id]);

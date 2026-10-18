@@ -22,7 +22,7 @@ export type Modal =
   | { kind: 'auth'; provider: 'claude' | 'codex'; target: LoginTarget }
   | { kind: 'broadcast'; projectId: string; tabId: string };
 
-export type Dialog =
+export type Dialog = { id: number } & (
   | { kind: 'prompt'; title: string; value: string; placeholder?: string; onSubmit: (value: string) => void }
   | {
       kind: 'confirm';
@@ -32,7 +32,7 @@ export type Dialog =
       /** A checkbox under the text (for example "do not ask again"); its state comes with the choice. */
       check?: string;
       onChoose: (value: string | null, checked?: boolean) => void;
-    };
+    });
 
 export interface Ui {
   statuses: Record<string, CellStatus>;
@@ -153,11 +153,21 @@ export function toast(text: string, kind: 'info' | 'error' = 'info'): void {
   toastTimer = window.setTimeout(() => setUi({ toast: null }), kind === 'error' ? 6000 : 3000);
 }
 
+let dialogIds = 0;
+/** A new dialog replaces an open one: the replaced one resolves as cancelled first, so no caller waits forever. */
+function replaceOpenDialog(): number {
+  const previous = pendingPrompt;
+  pendingPrompt = null;
+  previous?.();
+  return ++dialogIds;
+}
+
 export function askText(title: string, value = '', placeholder?: string): Promise<string | null> {
+  const id = replaceOpenDialog();
   return new Promise((resolve) => {
     setUi({
       dialog: {
-        kind: 'prompt', title, value, placeholder,
+        id, kind: 'prompt', title, value, placeholder,
         onSubmit: (v) => {
           pendingPrompt = null;
           setUi({ dialog: null });
@@ -174,10 +184,11 @@ export function askChoice(
   title: string, body: string,
   actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean }>,
 ): Promise<string | null> {
+  const id = replaceOpenDialog();
   return new Promise((resolve) => {
     setUi({
       dialog: {
-        kind: 'confirm', title, body, actions,
+        id, kind: 'confirm', title, body, actions,
         onChoose: (v) => {
           pendingPrompt = null;
           setUi({ dialog: null });
@@ -195,10 +206,11 @@ export function askChoiceChecked(
   actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean }>,
   check: string,
 ): Promise<{ value: string | null; checked: boolean }> {
+  const id = replaceOpenDialog();
   return new Promise((resolve) => {
     setUi({
       dialog: {
-        kind: 'confirm', title, body, actions, check,
+        id, kind: 'confirm', title, body, actions, check,
         onChoose: (value, checked) => {
           pendingPrompt = null;
           setUi({ dialog: null });

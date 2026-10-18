@@ -165,6 +165,33 @@ try {
   if ((await main.evaluate(`__el.BrowserWindow.getAllWindows().length`)) !== 1) throw new Error('the window closed after Cancel');
   ok('closing the window with a working agent asks; Cancel keeps the app');
 
+  // 6b. A quit while the window is minimized brings the window up with the question; a second Close while it is open does not get
+  // stuck (the question stays, the app neither quits nor ignores the answer); Cancel keeps the app.
+  await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].minimize(), true`);
+  await sleep(800);
+  if (!(await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].isMinimized()`))) throw new Error('the window did not minimize');
+  await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].close(), true`);
+  await app.until(`!!document.querySelector('.overlay .modal')`, 'quit dialog (minimized)');
+  await sleep(500);
+  const shown = await main.evaluate(`(() => { const w = __el.BrowserWindow.getAllWindows()[0]; return { minimized: w.isMinimized(), visible: w.isVisible() }; })()`);
+  if (shown.minimized || !shown.visible) throw new Error(`the question is not visible: ${JSON.stringify(shown)}`);
+  ok('a quit while minimized brings the window up with the question');
+  const firstDialog = await dialogText();
+  await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].close(), true`);
+  await sleep(4000); // past the 3 s acknowledgement fallback
+  if ((await main.evaluate(`__el.BrowserWindow.getAllWindows().length`)) !== 1) throw new Error('the second Close quit while the question was open');
+  if ((await app.evaluate(`document.querySelectorAll('.overlay .modal').length`)) !== 1 || (await dialogText()) !== firstDialog) throw new Error('the second Close changed the question');
+  await clickDialog('Cancel');
+  await sleep(1000);
+  if ((await main.evaluate(`__el.BrowserWindow.getAllWindows().length`)) !== 1) throw new Error('the window closed after Cancel (second Close)');
+  if (await app.evaluate(`!!document.querySelector('.overlay .modal')`)) throw new Error('the question stayed open after Cancel');
+  // Not stuck: the next Close asks again at once.
+  await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].close(), true`);
+  await app.until(`!!document.querySelector('.overlay .modal')`, 'quit dialog after Cancel');
+  await clickDialog('Cancel');
+  await sleep(800);
+  ok('a second Close while the question is open does not get stuck; Cancel keeps the app');
+
   // 7. A waiting agent does not count: the window close goes through without a question.
   await main.hook(ids.d, 'stop');
   await sleep(800);

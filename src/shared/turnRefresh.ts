@@ -37,3 +37,22 @@ export function createTurnRefresh(
     },
   };
 }
+
+/** Whether two folder paths are the same folder (slashes and a trailing slash aside; letter case too where the file system ignores it). */
+export function sameFolder(a: string, b: string, ignoreCase: boolean): boolean {
+  const norm = (p: string) => {
+    const out = p.replace(/\\/g, '/').replace(/\/+$/, '');
+    return ignoreCase ? out.toLowerCase() : out;
+  };
+  return norm(a) === norm(b);
+}
+
+/**
+ * Whether a refresh target concerns a view of `projectId` showing `worktree` (undefined = the project folder itself): a project
+ * turn refreshes only the project view, a worktree turn only the view of that worktree.
+ */
+export function refreshTargetMatches(target: RefreshTarget, projectId: string, worktree: string | undefined, ignoreCase: boolean): boolean {
+  if (target.projectId !== projectId) return false;
+  if (worktree === undefined) return !target.worktree;
+  return target.worktree !== undefined && sameFolder(target.worktree, worktree, ignoreCase);
+}

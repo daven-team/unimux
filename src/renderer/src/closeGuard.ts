@@ -47,13 +47,23 @@ export function initQuitGuard(): void {
   useStore.subscribe((st, prev) => {
     if (st.ui.statuses !== prev.ui.statuses || st.s.projects !== prev.s.projects || st.s.settings !== prev.s.settings || st.s.profiles !== prev.s.profiles) push();
   });
-  let asking = false;
+  // The open quit question: its dialog id, and a token so a replaced question never answers for the current one.
+  let question: { token: number; dialogId: number | undefined } | null = null;
+  let tokens = 0;
   window.mc.on('app:confirm-quit', () => {
-    if (asking) { window.mc.answerQuit('asking'); return; }
-    asking = true;
+    // Main asks again on every further Close: "still asking" only while the question's dialog is really on screen.
+    if (question?.dialogId !== undefined && getUi().dialog?.id === question.dialogId) { window.mc.answerQuit('asking'); return; }
+    const token = ++tokens;
+    const current = { token, dialogId: undefined as number | undefined };
+    question = current;
+    // The dialog is set synchronously (before the first await), so it can be recognised right away.
+    const answer = confirmCloseWorking(allCellIds(getS()), 'app');
+    current.dialogId = getUi().dialog?.id;
     window.mc.answerQuit('asking');
-    void confirmCloseWorking(allCellIds(getS()), 'app')
-      .catch(() => true)
-      .then((go) => { asking = false; window.mc.answerQuit(go ? 'quit' : 'cancel'); });
+    void answer.catch(() => true).then((go) => {
+      if (question !== current) return;
+      question = null;
+      window.mc.answerQuit(go ? 'quit' : 'cancel');
+    });
   });
 }

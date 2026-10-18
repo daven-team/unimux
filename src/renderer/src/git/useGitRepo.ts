@@ -3,7 +3,7 @@
 // The hook lives as long as the panel is on screen, so a hidden panel runs nothing: no listener, no timer.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GitErrorCode, GitStatus } from '../../../shared/git';
-import { onTurnRefresh, sameFolder } from '../turnRefresh';
+import { onTurnRefresh, refreshMatches } from '../turnRefresh';
 
 export interface RepoError { code: GitErrorCode; message: string }
 
@@ -56,8 +56,7 @@ export function useGitRepo(projectId: string, worktree: string | undefined, enab
     window.addEventListener('focus', onFocus);
     // Already debounced per project and worktree (turnRefresh); a status only, never a write, and nothing while not trusted.
     const offTurn = onTurnRefresh((target) => {
-      if (!enabled || target.projectId !== projectId) return;
-      if (worktree ? target.worktree !== undefined && sameFolder(target.worktree, worktree) : !target.worktree) refresh(0);
+      if (enabled && refreshMatches(target, projectId, worktree)) refresh(0);
     });
     return () => { window.clearTimeout(timer.current); sequence.current++; window.removeEventListener('focus', onFocus); offTurn(); };
   }, [load, refresh, enabled, projectId, worktree]);

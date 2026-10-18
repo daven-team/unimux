@@ -1,7 +1,7 @@
 // Agent turn ends refresh the views that show the project on disk (Files tree, its git marks, the Git panel). Only views that are
 // on screen listen, so a hidden project reads nothing; the refreshes are reads only and keep the views' own trust checks.
 import { findCell, getProfile } from '../../shared/state';
-import { createTurnRefresh, type RefreshTarget } from '../../shared/turnRefresh';
+import { createTurnRefresh, refreshTargetMatches, type RefreshTarget } from '../../shared/turnRefresh';
 import { getS } from './store';
 
 const listeners = new Set<(target: RefreshTarget) => void>();
@@ -30,11 +30,6 @@ export function onTurnRefresh(listener: (target: RefreshTarget) => void): () => 
   return () => { listeners.delete(listener); };
 }
 
-/** Whether two folder paths are the same folder (slashes, a trailing slash and, on Windows and macOS, letter case aside). */
-export function sameFolder(a: string, b: string): boolean {
-  const norm = (p: string) => {
-    const out = p.replace(/\\/g, '/').replace(/\/+$/, '');
-    return window.mc.platform === 'linux' ? out : out.toLowerCase();
-  };
-  return norm(a) === norm(b);
-}
+/** Whether a refresh target concerns the view of `projectId` showing `worktree` (undefined = the project folder). */
+export const refreshMatches = (target: RefreshTarget, projectId: string, worktree?: string): boolean =>
+  refreshTargetMatches(target, projectId, worktree, window.mc.platform !== 'linux');

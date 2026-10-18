@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { execFile, spawn } from 'child_process';
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, powerMonitor, safeStorage, shell, type OpenDialogOptions } from 'electron';
-import { createQuitConfirm, isQuitAnswer } from './quitConfirm';
+import { createQuitConfirm, isQuitAnswer, sessionEndingNow } from './quitConfirm';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { homedir, hostname } from 'os';
 import { isAbsolute, join } from 'path';
@@ -499,11 +499,22 @@ const updateStrings = (): UpdateStrings => ({
 
 const send = (channel: string, ...args: unknown[]) => { safeSend(win, channel, ...args); };
 /** The OS ends the session (Windows shutdown or log-off, macOS shutdown): nothing may hold the quit any more. */
-let sessionEnding = false;
+let sessionEndingAt: number | undefined;
+/** The OS announced a session end: quits within the next minute are never held, and an open question lets the quit go on. */
+const markSessionEnding = (): void => { sessionEndingAt = Date.now(); quitConfirm.release(); };
 /** Closing the window or quitting while agents work asks first (in the renderer); see quitConfirm.ts for what is never held. */
 const quitConfirm = createQuitConfirm({
-  exempt: () => quitting || gating || superseded || sessionEnding || updateHandoffStarted() || !isLive(win) || win!.webContents.isCrashed(),
-  ask: () => send('app:confirm-quit'),
+  exempt: () => quitting || gating || superseded || sessionEndingNow(sessionEndingAt, Date.now()) || updateHandoffStarted() || !isLive(win) || win!.webContents.isCrashed(),
+  // A minimized or hidden window (taskbar "Close window", Dock "Quit" after Cmd+H) is brought up first: the question must be seen.
+  ask: () => {
+    withLiveWindow(win, (w) => {
+      if (w.isMinimized()) w.restore();
+      w.show();
+      w.focus();
+    });
+    if (process.platform === 'darwin') { try { app.focus({ steal: true }); } catch { /* the window is shown anyway */ } }
+    send('app:confirm-quit');
+  },
   quit: () => app.quit(),
   setTimer: (fn, ms) => setTimeout(fn, ms),
   clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
@@ -694,7 +705,7 @@ function createWindow(): void {
   });
   win.on('responsive', () => { clearTimeout(hung); hung = undefined; });
   // Windows ends the session without before-quit: the last changes are written now (the renderer was asked to send its own).
-  win.on('query-session-end', () => { sessionEnding = true; send('app:before-quit'); });
+  win.on('query-session-end', () => { markSessionEnding(); send('app:before-quit'); });
   win.on('session-end', () => { saver.flush(); });
   win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { ptyHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -1500,7 +1511,8 @@ async function recoverActivation(): Promise<void> {
 app.whenReady().then(async () => {
   startupTimer.mark('app-ready');
   // macOS and Linux shutdown or log-off: the quit that follows is never held by the "agents are working" question.
-  try { powerMonitor.on('shutdown', () => { sessionEnding = true; }); } catch { /* not available: only the question may show */ }
+  // Whatever the order of this event and the quit, a held quit is released here (and the answer wait has an upper bound anyway).
+  try { powerMonitor.on('shutdown', markSessionEnding); } catch { /* not available: only the question's upper bound applies */ }
   applyDockIcon();
   if (superseded) return;
   // The line is written when the renderer reports in; a start that never gets that far is written after a minute.

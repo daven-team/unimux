@@ -3,8 +3,8 @@ import { allCellIds, cellLabel, namesList, shouldConfirmClose, workingAgents } f
 import { alertNotice, createAlertBurst, groupAlerts, type AlertItem } from '../src/shared/alertBurst';
 import { translate } from '../src/shared/i18n';
 import { defaultState, normalizeState, updateSettings } from '../src/shared/state';
-import { createTurnRefresh } from '../src/shared/turnRefresh';
-import { createQuitConfirm } from '../src/main/quitConfirm';
+import { createTurnRefresh, refreshTargetMatches } from '../src/shared/turnRefresh';
+import { createQuitConfirm, sessionEndingNow } from '../src/main/quitConfirm';
 import type { AppState } from '../src/shared/types';
 
 const en = (key: Parameters<typeof translate>[1], params?: Parameters<typeof translate>[2]) => translate('en', key, params);
@@ -182,7 +182,7 @@ describe('quit confirmation', () => {
     const clock = fakeTimers();
     const ask = vi.fn();
     const quit = vi.fn();
-    const confirm = createQuitConfirm({ exempt: () => exempt, ask, quit, setTimer: clock.setTimer, clearTimer: clock.clearTimer }, 3000);
+    const confirm = createQuitConfirm({ exempt: () => exempt, ask, quit, setTimer: clock.setTimer, clearTimer: clock.clearTimer }, 3000, 120000);
     return { clock, ask, quit, confirm };
   }
 
@@ -192,22 +192,85 @@ describe('quit confirmation', () => {
     expect(ask).not.toHaveBeenCalled();
   });
 
-  it('asks once, then quits or stays as the user chose', () => {
+  it('quits or stays as the user chose', () => {
     const { confirm, ask, quit, clock } = setup();
     confirm.setGuard(true);
-    expect(confirm.hold()).toBe(true);
     expect(confirm.hold()).toBe(true);
     expect(ask).toHaveBeenCalledTimes(1);
     confirm.answer('asking');
     clock.advance(60000);
     expect(quit).not.toHaveBeenCalled();
     confirm.answer('cancel');
+    clock.advance(200000);
     expect(quit).not.toHaveBeenCalled();
     expect(confirm.hold()).toBe(true);
     confirm.answer('asking');
     confirm.answer('quit');
     expect(quit).toHaveBeenCalledTimes(1);
     expect(confirm.hold()).toBe(false);
+    expect(clock.pending()).toBe(0);
+  });
+
+  it('a second Close while asking asks again and quits when the renderer stays silent', () => {
+    const { confirm, ask, quit, clock } = setup();
+    confirm.setGuard(true);
+    confirm.hold();
+    confirm.answer('asking');
+    clock.advance(10000);
+    // The dialog got lost: the renderer no longer acknowledges the repeated question.
+    expect(confirm.hold()).toBe(true);
+    expect(ask).toHaveBeenCalledTimes(2);
+    clock.advance(2999);
+    expect(quit).not.toHaveBeenCalled();
+    clock.advance(1);
+    expect(quit).toHaveBeenCalledTimes(1);
+  });
+
+  it('a repeated Close that is acknowledged keeps waiting for the answer', () => {
+    const { confirm, quit, clock } = setup();
+    confirm.setGuard(true);
+    confirm.hold();
+    confirm.answer('asking');
+    confirm.hold();
+    confirm.answer('asking');
+    clock.advance(5000);
+    expect(quit).not.toHaveBeenCalled();
+    confirm.answer('cancel');
+    expect(quit).not.toHaveBeenCalled();
+  });
+
+  it('an acknowledged question holds the quit at most two minutes', () => {
+    const { confirm, quit, clock } = setup();
+    confirm.setGuard(true);
+    confirm.hold();
+    confirm.answer('asking');
+    clock.advance(60000);
+    confirm.hold();
+    confirm.answer('asking');
+    // The bound is not extended by the repeated question.
+    clock.advance(59999);
+    expect(quit).not.toHaveBeenCalled();
+    clock.advance(1);
+    expect(quit).toHaveBeenCalledTimes(1);
+  });
+
+  it('a session end releases a held quit at once', () => {
+    const { confirm, quit } = setup();
+    confirm.setGuard(true);
+    confirm.hold();
+    confirm.answer('asking');
+    confirm.release();
+    expect(quit).toHaveBeenCalledTimes(1);
+    const idle = setup();
+    idle.confirm.release();
+    expect(idle.quit).not.toHaveBeenCalled();
+  });
+
+  it('treats a session end as exempt for about a minute only', () => {
+    expect(sessionEndingNow(undefined, 1000)).toBe(false);
+    expect(sessionEndingNow(1000, 1000)).toBe(true);
+    expect(sessionEndingNow(1000, 60999)).toBe(true);
+    expect(sessionEndingNow(1000, 61000)).toBe(false);
   });
 
   it('never holds a session end or update and does not wait for a silent renderer', () => {
@@ -223,5 +286,17 @@ describe('quit confirmation', () => {
     reloaded.confirm.setGuard(true);
     reloaded.confirm.rendererGone();
     expect(reloaded.confirm.hold()).toBe(false);
+  });
+});
+
+describe('which views a turn refreshes', () => {
+  it('refreshes the project view for project turns and a worktree view only for its own worktree', () => {
+    expect(refreshTargetMatches({ projectId: 'p1' }, 'p1', undefined, true)).toBe(true);
+    expect(refreshTargetMatches({ projectId: 'p1' }, 'p2', undefined, true)).toBe(false);
+    expect(refreshTargetMatches({ projectId: 'p1', worktree: 'C:\\x\\wt' }, 'p1', undefined, true)).toBe(false);
+    expect(refreshTargetMatches({ projectId: 'p1' }, 'p1', 'C:/x/wt', true)).toBe(false);
+    expect(refreshTargetMatches({ projectId: 'p1', worktree: 'C:\\X\\WT\\' }, 'p1', 'c:/x/wt', true)).toBe(true);
+    expect(refreshTargetMatches({ projectId: 'p1', worktree: '/x/WT' }, 'p1', '/x/wt', false)).toBe(false);
+    expect(refreshTargetMatches({ projectId: 'p1', worktree: '/x/wt-2' }, 'p1', '/x/wt', false)).toBe(false);
   });
 });
