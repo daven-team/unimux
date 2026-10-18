@@ -3,7 +3,7 @@
 // the other at load time (only inside functions).
 import { layoutForCount as layoutFor } from '../../shared/layout';
 import { activeProject, activeTab, addCell, ensureShellProfile, findCell, removeSshHost } from '../../shared/state';
-import { connectingNotice, hostEndpoint, promptNeedsToast, restoredPromptToasts, sshCellStart, sshCellVisible, sshGridName, sshNotice, sshSessionEnded, type SshPrompt, type SshSessionState } from '../../shared/ssh';
+import { connectingNotice, hostEndpoint, promptNeedsToast, reconnectAllTargets, reconnectAtStartCells, restoredPromptToasts, sshCellStart, sshCellVisible, sshGridName, sshNotice, sshSessionEnded, type SshPrompt, type SshSessionState } from '../../shared/ssh';
 import { menuHosts, sectionChange, sectionForDetail, type SshDetail } from '../../shared/sshView';
 import { createProject, ensureTerminal, focusCell, openTab } from './actions';
 import { useFileStore } from './files';
@@ -16,6 +16,22 @@ import { terminals } from './terminals/TerminalManager';
 
 /** SSH cells created by the user in this renderer session: they connect when their view mounts (spec 6.1 step 1). */
 export const connectOnMount = new Set<string>();
+
+/**
+ * SSH cells of hosts with "Łącz ponownie po uruchomieniu aplikacji" that were in the state when this app run's first renderer
+ * load booted: each connects once, when its view mounts. Empty after a reload (main answers claimAppStart once per run) and
+ * cleared by a Pty Host restart (D5 keeps applying there).
+ */
+export const reconnectAtStart = new Set<string>();
+
+export function markReconnectAtStart(state: { projects: Parameters<typeof reconnectAtStartCells>[0]; sshHosts: Parameters<typeof reconnectAtStartCells>[1] }): void {
+  reconnectAtStart.clear();
+  for (const id of reconnectAtStartCells(state.projects, state.sshHosts)) reconnectAtStart.add(id);
+}
+
+/** Resolved once initSsh has loaded the sessions of main: an app-start connect waits for it, so the snapshot cannot hide it. */
+let sshLoaded!: () => void;
+const sshReady = new Promise<void>((resolve) => { sshLoaded = resolve; });
 
 export function sshContext(hostId?: string): { host: string; endpoint: string } {
   const host = hostId ? getS().sshHosts.find((h) => h.id === hostId) : undefined;
@@ -71,18 +87,45 @@ export async function initSsh(): Promise<void> {
     // A reload keeps the prompts open in main (R7): a hidden cell that waits is announced again (Review Focus 2 and 3).
     // Before the held events run (M7): a prompt that arrived meanwhile announces itself through onPrompt.
     for (const cellId of restoredPromptToasts(useSshStore.getState().prompts, cellVisible)) announcePrompt(cellId);
-  } finally { gate.open(); }
+  } finally { gate.open(); sshLoaded(); }
 }
 
-/** Called by startOnce for SSH cells (D5: never a connect without the user's intent). */
-export function startSshCell(cellId: string, alive: boolean): void {
+/** Called by startOnce for SSH cells (D5: never a connect without the user's intent, or the host's opt-in at app start). */
+export function startSshCell(cellId: string, alive: boolean, mounted: boolean): void {
   const found = findCell(getS(), cellId);
   if (!found?.cell.ssh) return;
-  const decision = sshCellStart({ alive, connectOnMount: connectOnMount.delete(cellId) });
-  if (decision === 'connect') { void connectCell(cellId); return; }
+  const hostId = found.cell.ssh.hostId;
+  const created = connectOnMount.delete(cellId);
+  const decision = sshCellStart({
+    alive, connectOnMount: created, appStart: reconnectAtStart.delete(cellId), mounted,
+    reconnectOnStart: getS().sshHosts.some((h) => h.id === hostId && h.reconnectOnStart), phase: useSshStore.getState().sessions[cellId]?.phase,
+  });
+  if (decision === 'connect' && created) { void connectCell(cellId); return; }
+  if (decision === 'connect') { void connectAtStart(cellId); return; }
   if (decision === 'idle' && !useSshStore.getState().sessions[cellId]) {
     useSshStore.getState().setSession({ cellId, hostId: found.cell.ssh.hostId, phase: 'idle', since: Date.now() });
   }
+}
+
+/** The app-start connect waits for the sessions of main; a Pty Host restart, a closed cell or a connect meanwhile cancels it. */
+async function connectAtStart(cellId: string): Promise<void> {
+  const epoch = getUi().epoch;
+  await sshReady;
+  if (getUi().epoch !== epoch || !findCell(getS(), cellId)?.cell.ssh) return;
+  const phase = useSshStore.getState().sessions[cellId]?.phase;
+  if (phase !== undefined && phase !== 'idle') return;
+  await connectCell(cellId);
+}
+
+/** "Połącz ponownie wszystkie SSH": the tab's SSH cells that are idle, ended or failed (never connecting or connected ones). */
+export function reconnectAllTargetsOf(projectId: string, tabId: string): string[] {
+  const tab = getS().projects.find((p) => p.id === projectId)?.tabs.find((t) => t.id === tabId);
+  if (!tab) return [];
+  return reconnectAllTargets(tab.cells, useSshStore.getState().sessions, new Set(getS().sshHosts.map((h) => h.id)));
+}
+
+export function reconnectAllSsh(projectId: string, tabId: string): void {
+  for (const cellId of reconnectAllTargetsOf(projectId, tabId)) void connectCell(cellId);
 }
 
 export async function connectCell(cellId: string): Promise<void> {

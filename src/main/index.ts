@@ -1011,6 +1011,10 @@ ipcMain.handle('cell:killAndWait', async (_e, id: string) => {
   await ptyHost.killAndWait(id);
 });
 ipcMain.handle('cell:alive', () => [...alive]);
+/** True for the first renderer that asks in this app run, false for every later one (a reload, a crash reload): SSH hosts
+ *  with "Łącz ponownie po uruchomieniu aplikacji" connect at an app start only. */
+let appStartUnclaimed = true;
+ipcMain.handle('app:claimStart', () => { const first = appStartUnclaimed; appStartUnclaimed = false; return first; });
 const cliHandlers = createCliHandlers(cliDetector, (url) => { void shell.openExternal(url); });
 ipcMain.handle('cli:status', () => cliHandlers.status());
 ipcMain.handle('cli:recheck', (_e, id?: unknown) => cliHandlers.recheck(id));

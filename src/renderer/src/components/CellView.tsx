@@ -73,7 +73,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
     // Attach (and fit) before starting so the pty is spawned with the cell's real size.
     ensureTerminal(cell.id);
     terminals.attach(cell.id, el);
-    ensureStarted(cell.id);
+    ensureStarted(cell.id, true);
     return () => terminals.detach(cell.id, el);
   }, [cell.id, epoch]);
 

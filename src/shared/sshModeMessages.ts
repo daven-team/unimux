@@ -45,6 +45,8 @@ export const sshModeMessages = {
   'Wysyłanie masowe': ['Bulk send', 'Massenversand', 'Envío masivo', 'Envoi groupé', 'Envio em massa'],
   'Wysyłanie masowe ({count})': ['Bulk send ({count})', 'Massenversand ({count})', 'Envío masivo ({count})', 'Envoi groupé ({count})', 'Envio em massa ({count})'],
   'SSH: wysyłanie masowe': ['SSH: bulk send', 'SSH: Massenversand', 'SSH: envío masivo', 'SSH : envoi groupé', 'SSH: envio em massa'],
+  'Połącz ponownie wszystkie SSH': ['Reconnect all SSH', 'Alle SSH erneut verbinden', 'Volver a conectar todos los SSH', 'Reconnecter tous les SSH', 'Voltar a ligar todos os SSH'],
+  'SSH: połącz ponownie wszystkie': ['SSH: reconnect all', 'SSH: alle erneut verbinden', 'SSH: volver a conectar todos', 'SSH : tout reconnecter', 'SSH: voltar a ligar todos'],
   'Wysyłanie masowe: jedno polecenie do wielu sesji': [
     'Bulk send: one command to several sessions',
     'Massenversand: ein Befehl an mehrere Sitzungen',

@@ -10,7 +10,7 @@ import {
   sendSnippet, switchProject, toggleMaximize,
 } from '../actions';
 import { openSidebarPanel } from '../panelActions';
-import { openSshView } from '../ssh';
+import { openSshView, reconnectAllSsh, reconnectAllTargetsOf } from '../ssh';
 import { getS, getUi, setUi, toast, update, useStore } from '../store';
 import { profileOptionLabel } from '../cliUi';
 import { statusLog, terminals } from '../terminals/TerminalManager';
@@ -63,6 +63,7 @@ function PaletteInner() {
       out.push({ kind: tr('Akcja'), title: tr("Nowy terminal (zakładka)"), desc: keys('terminal.new') || undefined, run: () => quickTab() });
       out.push(...ssh);
       if (tab?.cells.some((c) => c.ssh)) out.push({ kind: tr('Akcja'), title: tr('SSH: wysyłanie masowe'), run: () => setUi({ modal: { kind: 'broadcast', projectId: project.id, tabId: tab.id } }) });
+      if (tab && reconnectAllTargetsOf(project.id, tab.id).length) out.push({ kind: tr('Akcja'), title: tr('SSH: połącz ponownie wszystkie'), run: () => reconnectAllSsh(project.id, tab.id) });
       out.push({ kind: tr('Akcja'), title: tr("Historia projektu"), desc: keys('history.open') || undefined, run: () => setUi({ modal: { kind: 'history', projectId: project.id } }) });
       out.push({ kind: tr('Akcja'), title: tr("Otwórz folder projektu"), run: () => window.mc.openPath(project.path) });
       out.push({ kind: tr('Akcja'), title: tr("Otwórz projekt w Cursorze"), run: () => window.mc.openInEditor(project.path) });

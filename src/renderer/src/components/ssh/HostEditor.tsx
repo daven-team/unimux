@@ -35,7 +35,7 @@ export function HostEditor({ paneId, hostId }: { paneId: string; hostId?: string
     setErrors({});
     const now = Date.now();
     let id = host?.id;
-    if (host) update((s) => updateSshHost(s, host.id, { group: undefined, tags: undefined, keyId: undefined, startupCommand: undefined, color: undefined, ...r.value }, now));
+    if (host) update((s) => updateSshHost(s, host.id, { group: undefined, tags: undefined, keyId: undefined, startupCommand: undefined, color: undefined, reconnectOnStart: undefined, ...r.value }, now));
     else {
       id = uid();
       const created = { id, ...r.value, createdAt: now, updatedAt: now };
@@ -128,6 +128,10 @@ export function HostEditor({ paneId, hostId }: { paneId: string; hostId?: string
           <textarea className="input mono" rows={4} value={draft.startupCommand} spellCheck={false} onChange={(e) => set({ startupCommand: e.target.value })} />
           <span className="ssh-card-hint">{tr('Każda linia jest wpisywana tak, jakby ją wpisano ręcznie')}</span>{field('startupCommand')}
         </label>
+        <div className="ssh-field">
+          <label className="check"><input type="checkbox" data-field="reconnectOnStart" checked={draft.reconnectOnStart} onChange={(e) => set({ reconnectOnStart: e.target.checked })} />{tr('Łącz ponownie po uruchomieniu aplikacji')}</label>
+          <span className="ssh-card-hint">{tr('Komórki tego hosta łączą się same, gdy po starcie aplikacji pojawią się na ekranie. Pytanie o hasło lub nieznany klucz hosta i tak pojawi się w komórce.')}</span>
+        </div>
       </div>
       <div className="ssh-actions">
         <button type="submit" className="btn primary">{tr('Zapisz')}</button>
