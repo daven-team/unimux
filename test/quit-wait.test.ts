@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { QUIT_SWAP_WAIT_MS, waitUntilIdle } from '../src/main/quitWait';
+import { QUIT_SWAP_AFTER_CELLS_MS, QUIT_SWAP_WAIT_MS, waitUntilIdle } from '../src/main/quitWait';
 import { claimSwap, isSwapRunning, releaseSwap, swapIdle } from '../src/main/accounts/swap';
 import { SHUTDOWN_HARD_LIMIT_MS } from '../src/main/safeWindow';
 
@@ -46,9 +46,11 @@ describe('waitUntilIdle (the quit waits for a running swap, 0.9.6)', () => {
     expect(await result).toBe(false);
   });
 
-  it('the bound is 5 s, well inside the hard shutdown limit', () => {
+  it('the bounds (5 s, then 3 s after the cells) stay well inside the hard shutdown limit', () => {
     expect(QUIT_SWAP_WAIT_MS).toBe(5000);
-    expect(QUIT_SWAP_WAIT_MS).toBeLessThan(SHUTDOWN_HARD_LIMIT_MS / 2);
+    expect(QUIT_SWAP_AFTER_CELLS_MS).toBe(3000);
+    // 0.15 s + both waits + terminals (about 4 s) + the last save (3 s) leave a margin to the hard limit.
+    expect(150 + QUIT_SWAP_WAIT_MS + QUIT_SWAP_AFTER_CELLS_MS + 4000 + 3000).toBeLessThan(SHUTDOWN_HARD_LIMIT_MS - 3000);
   });
 });
 
@@ -69,6 +71,33 @@ describe('swapIdle', () => {
     releaseSwap();
     await idle;
     expect(resolved).toBe(true);
+  });
+
+  it('a release followed at once by a new claim keeps the quit waiting (within the bound)', async () => {
+    vi.useFakeTimers();
+    const deps = { busy: isSwapRunning, idle: swapIdle, setTimer: (fn: () => void, ms: number) => setTimeout(fn, ms), clearTimer: (t: unknown) => clearTimeout(t as ReturnType<typeof setTimeout>) };
+    claimSwap();
+    let result: boolean | undefined;
+    void waitUntilIdle(deps, 5000).then((r) => { result = r; });
+    await vi.advanceTimersByTimeAsync(1000);
+    // The startup recovery between two attempts: the slot is free for a moment only.
+    releaseSwap();
+    expect(claimSwap()).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(result).toBeUndefined();
+    releaseSwap();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result).toBe(true);
+
+    // The same with a holder that never lets go: the bound still ends the wait.
+    claimSwap();
+    result = undefined;
+    void waitUntilIdle(deps, 5000).then((r) => { result = r; });
+    for (let i = 0; i < 4; i++) { await vi.advanceTimersByTimeAsync(1000); releaseSwap(); claimSwap(); }
+    expect(result).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(result).toBe(false);
+    releaseSwap();
   });
 
   it('with real timers: the quit wait ends with the swap, or after the bound', async () => {

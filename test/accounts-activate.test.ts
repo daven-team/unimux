@@ -414,6 +414,19 @@ describe('recoverInterruptedActivation', () => {
     expect(isActivationRecoveryPending()).toBe(false);
   });
 
+  it('starts no further start-up attempt once the app quits (0.9.6)', async () => {
+    crashedAfterLiveWrites();
+    const lock = join(home, '.claude.lock');
+    mkdirSync(lock);
+    let quitting = false;
+    const waits: number[] = [];
+    // The quit begins during the wait between two attempts; the lock is free by then, but no attempt may claim the slot.
+    const d: ActivateDeps = { ...deps(), delay: async (ms) => { waits.push(ms); quitting = true; rmSync(lock, { recursive: true }); } };
+    expect(await recoverActivationWithRetry(d, 3, 1000, () => quitting)).toBe('locked');
+    expect(waits).toEqual([1000]);
+    expect(await activationJournalPending(deps())).toBe(true); // the journal stays for the next start
+  });
+
   it('stops a pending retry when the version-2 journal is gone, unparsable or not version 2 (D1)', async () => {
     for (const journal of [null, '{not json', JSON.stringify({ version: 1, accountId: T, phase: 'backed-up' })]) {
       crashedAfterLiveWrites();

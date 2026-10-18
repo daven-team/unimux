@@ -4,7 +4,9 @@
 //
 // How a new channel stays covered: test/ipc-guard.test.ts scans src/main for `ipcMain.handle` / `ipcMain.on` registrations
 // that bypass this wrapper and fails unless the channel is on OPEN_IPC_CHANNELS below (read-only, with the reason it may stay
-// open). It also asserts that the known mutating channels are registered through `guardedHandle` / `guardedOn`.
+// open). It also asserts that the known mutating channels are registered through `guardedHandle` / `guardedOn`. Limitation:
+// it does not follow an IPC object passed as a parameter (accountsIpc.ts and ssh/ipc.ts do that and have their own sender
+// tests); any other file doing so, or aliasing ipcMain, fails the scan until it is reviewed.
 import type { IpcMain } from 'electron';
 
 export interface IpcSenderEvent { sender: unknown; senderFrame?: unknown }
@@ -59,6 +61,5 @@ export const OPEN_IPC_CHANNELS: Readonly<Record<string, string>> = {
   'git:worktrees': 'lists the worktrees of the project',
   // gitIpc.ts registers the read-only git channels of GIT_READ_CHANNELS in one loop.
   'git:${channel}': 'the read-only git channels (status, log, show, diff, branches, trust info)',
-  'changelog:get': 'reads the release notes (from GitHub or its cache file)',
   'update:get': 'reads the update state',
 };

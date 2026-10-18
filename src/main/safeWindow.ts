@@ -17,13 +17,18 @@ export function isLive<T extends { isDestroyed(): boolean; webContents: { isDest
 
 /**
  * The IPC sender check (R9) of ssh:*, accounts:*, auth:*, usage:refresh and the secret clipboard: only the app window's own
- * webContents (its main frame), and only while it is alive. Another window (a login or update window, a foreign frame) is refused.
+ * webContents (a top-level frame), and only while it is alive. Since 0.9.6 it guards every channel that changes something. Another window (a login or update window, a foreign frame) is refused.
  */
 export function isFromWindow(win: { isDestroyed(): boolean; webContents: { isDestroyed(): boolean; mainFrame?: unknown } } | null | undefined, event: { sender: unknown; senderFrame?: unknown }): boolean {
   if (!isLive(win) || event.sender !== win.webContents) return false;
-  // Electron passes the calling frame: a subframe of the app window (none today) is refused too.
   const main = win.webContents.mainFrame;
-  return main === undefined || !('senderFrame' in event) || event.senderFrame === main;
+  if (main === undefined || !('senderFrame' in event)) return true;
+  const frame = event.senderFrame as { parent?: unknown } | null | undefined;
+  // Any top-level frame of the app window counts (0.9.6): on a reload Chromium may swap the main frame, and the old document's
+  // last `state:edit` (its beforeunload flush) can arrive after the new one committed. Electron reports a frame that is already
+  // gone as null; the webContents is still the app window's, so it is that old document. A subframe (it has a parent) is refused.
+  if (frame === main || frame === null || frame === undefined) return true;
+  return frame.parent === null;
 }
 
 /** Sends to a window only if it is still alive; true when the message was handed over. Never throws. */

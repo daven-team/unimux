@@ -68,6 +68,20 @@ describe('IPC channel registry', () => {
     const open = registrations(/ipcMain\.(?:handle|on|once|handleOnce|addListener|prependListener)\(\s*([^,)]+)[,)]/g);
     expect(open.length).toBeGreaterThan(10);
     expect(open.filter(({ channel }) => !Object.hasOwn(OPEN_IPC_CHANNELS, channel))).toEqual([]);
+    // The one dynamic open entry is the read loop of gitIpc.ts: accepted there only, and only once.
+    const dynamic = open.filter(({ channel }) => channel === 'git:${channel}');
+    expect(dynamic.map(({ file }) => file.replace(/\\/g, '/'))).toEqual(['src/main/gitIpc.ts']);
+  });
+
+  it('nothing registers channels around the scan (aliases of ipcMain, an injected ipc outside the modules with own tests)', () => {
+    // Limitation: the scan sees `ipcMain.<method>(` and `guarded*(` only. ipcGuard.ts is the wrapper itself; modules that receive the IPC object as a parameter
+    // (accountsIpc.ts, ssh/ipc.ts) check their senders themselves and are covered by accounts-ipc and ssh-ipc tests; any other
+    // file doing so, or aliasing ipcMain, fails here and has to be reviewed (and added to this list with its own test).
+    const ownTests = ['src/main/ipcGuard.ts', 'src/main/accountsIpc.ts', 'src/main/ssh/ipc.ts'];
+    const injected = sources.filter(({ file, text }) => !ownTests.includes(file.replace(/\\/g, '/')) && /\bipc\.(?:handle|on|once|handleOnce|addListener|prependListener)\(/.test(text));
+    expect(injected.map(({ file }) => file)).toEqual([]);
+    const aliased = sources.filter(({ text }) => /(?:=|:)\s*ipcMain\s*[;,)}\n]|\{[^}]*\}\s*=\s*ipcMain\b/.test(text));
+    expect(aliased.map(({ file }) => file)).toEqual([]);
   });
 
   it('every channel the app changes something through is registered with guardedHandle / guardedOn', () => {
@@ -79,7 +93,7 @@ describe('IPC channel registry', () => {
       'git:init', 'git:installGit', 'git:createWorktree', 'git:removeWorktree', 'git:${channel}',
       'shell:openExternal', 'shell:openPath', 'shell:revealPath', 'shell:openInEditor',
       'clipboard:read', 'clipboard:write', 'clipboard:writeSecret', 'app:reportError', 'app:startupMark',
-      'update:check', 'update:install', 'update:open', 'update-splash:init', 'update-splash:close', 'update-splash:open',
+      'update:check', 'update:install', 'update:open', 'changelog:get', 'update-splash:init', 'update-splash:close', 'update-splash:open',
     ];
     expect(mutating.filter((channel) => !guarded.has(channel))).toEqual([]);
     // A channel is either guarded or open, never both.

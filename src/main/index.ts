@@ -45,7 +45,7 @@ import { dismissAccountNotice, gateFamilyRefresh, gateProfileRefresh, handleAdop
 import { registerAccountIpc } from './accountsIpc';
 import { createSecretClipboard } from '../shared/sshClipboard';
 import { clearPendingSwap, hasPendingSwap, isSwapRunning, isSwapUnresolved, recoverInterruptedSwap, swapIdle, swapPaths, type SwapDeps } from './accounts/swap';
-import { QUIT_SWAP_WAIT_MS, waitUntilIdle } from './quitWait';
+import { QUIT_SWAP_AFTER_CELLS_MS, QUIT_SWAP_WAIT_MS, waitUntilIdle } from './quitWait';
 import {
   activateAccount, activationJournalPending, checkActivationTarget, clearPendingActivation, isActivationRecoveryPending, recoverActivationWithRetry,
   recoverInterruptedActivation, startActivationRecoveryRetry, type ActivateDeps,
@@ -266,7 +266,10 @@ const usage = new UsageService({
     if (isActivationRecoveryPending()) await retryActivationRecovery();
     // A re-login whose restore failed earlier is tried again (the card stays set aside until it works). The poll waits for it
     // briefly only: a restore waiting for Claude Code's locks goes on by itself instead of delaying every account's read.
+    // A poll already running when the app quits (usage.stop() does not abort it) starts no further account work.
+    if (quitting) return;
     await login.retryParkedRestores(PARKED_RESTORE_WAIT_MS).catch(() => undefined);
+    if (quitting) return;
     // During a main login the roles stay as they are, but the outgoing live login keeps being backed up.
     if (login.isMainActive()) await resyncOutgoingWhenIdle(liveGuard(), reconcileDeps()).catch(() => null);
     else await reconcileIdle();
@@ -1181,7 +1184,8 @@ const changelog = createChangelog({
     return response.json();
   },
 });
-ipcMain.handle('changelog:get', (_e, force: boolean) => changelog.get(force));
+// `force` skips the freshness check (a GitHub request each time): a foreign sender only ever gets the cached answer.
+guardedHandle('changelog:get', (_e, force: boolean) => changelog.get(force), () => changelog.get(false));
 // Accounts, login and usage (0.9.3): everything that changes something only answers the app window (accountsIpc.ts).
 registerAccountIpc(ipcMain, {
   getUsage: () => usage.getState(),
@@ -1462,7 +1466,9 @@ async function recoverActivation(): Promise<void> {
   // first a 0.9.1 (version 2) journal, otherwise the 0.9.0 recovery decides.
   try {
     // Shorter lock waits here: account actions wait for this; a recovery still 'locked' is retried by the polls.
-    if ((await recoverActivationWithRetry({ ...activateDeps(), locks: { timeoutMs: 3_000 } })) === 'legacy') await recoverInterruptedSwap(swapDeps());
+    // Once the app quits no further attempt (nor the legacy recovery) starts: the journal stays and the next start retries.
+    const recovered = await recoverActivationWithRetry({ ...activateDeps(), locks: { timeoutMs: 3_000 } }, undefined, undefined, () => quitting);
+    if (recovered === 'legacy' && !quitting) await recoverInterruptedSwap(swapDeps());
   } catch { /* the journal stays and the next start retries */ }
   startupTimer.mark('accounts-recovered');
 }
@@ -1523,13 +1529,18 @@ app.on('before-quit', (e) => {
     saver.flush();
     // A running swap or "Set as main" finishes first (bounded, inside the hard limit): exiting in the middle of one can leave
     // the live login half swapped and Claude Code's lock directories behind. No new one starts now (account IPC refuses).
-    const swapDone = await waitUntilIdle({
+    const swapWait = {
       busy: isSwapRunning, idle: swapIdle,
-      setTimer: (fn, ms) => setTimeout(fn, ms), clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
-    }, QUIT_SWAP_WAIT_MS);
-    if (!swapDone) crashLog.warn(`quit did not wait for the account swap: still running after ${QUIT_SWAP_WAIT_MS} ms`);
+      setTimer: (fn: () => void, ms: number) => setTimeout(fn, ms), clearTimer: (timer: unknown) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    };
+    await waitUntilIdle(swapWait, QUIT_SWAP_WAIT_MS);
     try {
       await ptyHost.shutdown();
+      // An activation waiting for a Claude Code lock that a cell held gets it now: it may finish within the rest of the budget
+      // (no wait at all when nothing runs).
+      if (!(await waitUntilIdle(swapWait, QUIT_SWAP_AFTER_CELLS_MS))) {
+        crashLog.warn(`quit did not wait for the account swap: still running after ${QUIT_SWAP_WAIT_MS + QUIT_SWAP_AFTER_CELLS_MS} ms`);
+      }
       // A save that hit a lock gets a few more seconds (well inside the hard limit) instead of being lost.
       if (saver.hasPending() && !(await flushUntilSaved(saver, 3000))) crashLog.error('the last state changes could not be saved');
       await mcp.stop();

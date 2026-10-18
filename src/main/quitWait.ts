@@ -3,6 +3,11 @@
 
 /** Longest time the wind-down waits for a running swap before it goes on anyway (well inside SHUTDOWN_HARD_LIMIT_MS). */
 export const QUIT_SWAP_WAIT_MS = 5000;
+/**
+ * The second wait, after the cells were shut down: an activation that waited for a Claude Code lock a cell held can finish
+ * then. Both waits plus the terminal shutdown (about 4 s) and the last save (3 s) stay well inside SHUTDOWN_HARD_LIMIT_MS.
+ */
+export const QUIT_SWAP_AFTER_CELLS_MS = 3000;
 
 export interface IdleWaitDeps {
   /** True while the work runs. */
@@ -28,6 +33,12 @@ export function waitUntilIdle(deps: IdleWaitDeps, boundMs: number = QUIT_SWAP_WA
       resolve(idle);
     };
     const timer = deps.setTimer(() => finish(!deps.busy()), boundMs);
-    deps.idle().then(() => finish(true), () => finish(!deps.busy()));
+    // One release is not enough: a retry or a poll may claim the slot again at once, so it is checked again each time.
+    const watch = (): void => {
+      if (done) return;
+      if (!deps.busy()) { finish(true); return; }
+      deps.idle().then(watch, () => finish(!deps.busy()));
+    };
+    watch();
   });
 }

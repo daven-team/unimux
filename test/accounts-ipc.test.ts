@@ -129,6 +129,18 @@ describe('isFromWindow', () => {
     const framed = { isDestroyed: () => false, webContents: { isDestroyed: () => false, mainFrame: frame } };
     expect(isFromWindow(framed, { sender: framed.webContents, senderFrame: frame })).toBe(true);
     expect(isFromWindow(framed, { sender: framed.webContents, senderFrame: {} })).toBe(false);
-    expect(isFromWindow(framed, { sender: framed.webContents, senderFrame: null })).toBe(false);
+  });
+
+  it('accepts any top-level frame of the app window (a reload swapping the main frame), never a subframe (0.9.6)', () => {
+    const frame = { parent: null };
+    const framed = { isDestroyed: () => false, webContents: { isDestroyed: () => false, mainFrame: frame } };
+    // The previous document's main frame, still sending its last edit after the new one committed.
+    expect(isFromWindow(framed, { sender: framed.webContents, senderFrame: { parent: null } })).toBe(true);
+    // Electron reports a frame that is already gone as null.
+    expect(isFromWindow(framed, { sender: framed.webContents, senderFrame: null })).toBe(true);
+    // An iframe of the app window.
+    expect(isFromWindow(framed, { sender: framed.webContents, senderFrame: { parent: frame } })).toBe(false);
+    // A top-level frame of another webContents.
+    expect(isFromWindow(framed, { sender: { isDestroyed: () => false }, senderFrame: { parent: null } })).toBe(false);
   });
 });
