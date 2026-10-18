@@ -5,7 +5,7 @@ import { normalizeProjectPath } from '../../shared/platform';
 import { layoutForCount } from '../../shared/layout';
 import { CELL_HEAD_HEIGHT, cellBodyBox, chooseGridSize, type Size } from '../../shared/cellBox';
 import {
-  activeProject, activeTab, addCell, addProject, addTab, closeTab as closeTabState, ensureShellProfile, findCell, getProfile,
+  activeProject, activeTab, addCell, addProject, addTab, cellWorktreeUse, closeTab as closeTabState, ensureShellProfile, findCell, getProfile,
   removeCell as removeCellState, removeProject as removeProjectState, restoreTab, setActiveProject, setActiveTab,
   swapCells as swapCellsState, uid, updateCell, updateSettings,
 } from '../../shared/state';
@@ -303,14 +303,26 @@ export async function removeCell(cellId: string): Promise<void> {
   if (!(await confirmCloseWorking([cellId], 'cell'))) return;
   let removeWt: false | { confirmed?: WorktreeInspection } = false;
   // A worktree another cell still works in (open or in a closed grid, e.g. after a resumed conversation) stays without asking.
-  const shared = !!cell.worktree && getS().projects.some((p) => [...p.tabs, ...p.archive].some((t) => t.cells.some((c) => c.id !== cellId && sameFolder(c.worktree?.path, cell.worktree?.path))));
-  if (cell.worktree && !shared) {
+  const use = cellWorktreeUse(getS(), cellId, sameFolder);
+  if (use === 'gone') return;
+  if (cell.worktree && use === 'own') {
     const answer = await askWorktreeRemoval(project.path, cell.worktree);
     if (answer === null) return;
     removeWt = answer;
   }
+  // The grid as it is now: other cells may have been closed while a question was open.
+  const now = findCell(getS(), cellId);
+  if (!now) return;
+  if (now.tab.cells.length === 1) {
+    // It is the last cell now: the grid goes to the history with it, so its worktree stays (the archived grid uses it).
+    killAndDispose(cellId);
+    update((s) => closeTabState(s, now.project.id, now.tab.id));
+    toast(tr('Zakładka „{name}” trafiła do historii', { name: now.tab.name }));
+    return;
+  }
   killAndDispose(cellId);
-  update((s) => removeCellState(s, project.id, tab.id, cellId));
+  update((s) => removeCellState(s, now.project.id, now.tab.id, cellId));
+  if (cell.worktree && use === 'shared') toast(tr('Worktree zostaje: używa go inna komórka lub zamknięty grid.'));
   if (removeWt && cell.worktree) {
     // Windows can't delete a folder that is still some process's cwd: wait for the pty to exit.
     await window.mc.killCellAndWait(cellId);
@@ -346,7 +358,10 @@ async function askWorktreeRemoval(projectPath: string, wt: Worktree): Promise<fa
     if (owned) lines.push(tr('Commity, których nie ma w {base}: {count}', { base: info.base, count: info.unmerged }));
     if (info.detached) lines.push(tr('Commity poza każdym branchem (odłączony HEAD): {count}', { count: info.detached }));
   }
-  if (!owned) lines.push('', tr('Branch tego worktree nie zostanie usunięty (nie utworzył go unimux).'));
+  if (!owned) {
+    // An adopted worktree (a resumed conversation) may well have an mc/ branch from an earlier cell: no claim about who made it.
+    lines.push('', wt.adopted ? tr('Branch tego worktree zostaje (komórka dołączyła do istniejącego worktree).') : tr('Branch tego worktree nie zostanie usunięty (nie utworzył go unimux).'));
+  }
   const choice = await askChoice(tr("Zamknąć komórkę z worktree?"), lines.join('\n'), [
     { label: tr("Zostaw worktree"), value: 'keep', primary: true },
     { label: owned ? tr("Usuń worktree i branch") : tr('Usuń worktree'), value: 'remove', danger: true },
@@ -385,6 +400,7 @@ async function deleteWorktree(projectPath: string, wt: Worktree, confirmed?: Wor
     if (!again) return toast(tr('Worktree {branch} został na dysku.', { branch: name }));
     confirmed = result.inspection;
   }
+  toast(tr('Worktree {branch} został na dysku.', { branch: name }));
 }
 
 function killAndDispose(cellId: string): void {

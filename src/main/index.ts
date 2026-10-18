@@ -1133,7 +1133,7 @@ ipcMain.handle('fs:statProjectFile', (_e, projectId: string, path: string) => {
   const project = state.projects.find((p) => p.id === projectId);
   return project ? statProjectFile(project.path, path) : null;
 });
-ipcMain.handle('fs:readProjectFile',(_e, projectId: string, path: string, large?: boolean) => {
+ipcMain.handle('fs:readProjectFile', (_e, projectId: string, path: string, large?: boolean) => {
   const project = state.projects.find((p) => p.id === projectId);
   return project ? readProjectFile(project.path, path, large === true ? LARGE_VIEW_BYTES : undefined) : { kind: 'error', message: 'Projekt już nie istnieje.' };
 });

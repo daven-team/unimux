@@ -268,6 +268,22 @@ export function findCell(s: AppState, cellId: string): { project: Project; tab: 
   return null;
 }
 
+/**
+ * What closing a cell may do with its worktree, judged from the state as it is now (after any question was answered):
+ * 'gone' = the cell is no longer open; 'last' = it is the only cell of its grid, so closing it sends the grid (with this
+ * cell and its worktree) to the history; 'shared' = another open or closed-grid cell works in the same folder; 'own' = the
+ * worktree belongs to this cell alone; 'none' = no worktree.
+ */
+export function cellWorktreeUse(s: AppState, cellId: string, samePath: (a: string, b: string) => boolean): 'gone' | 'last' | 'shared' | 'own' | 'none' {
+  const found = findCell(s, cellId);
+  if (!found) return 'gone';
+  if (found.tab.cells.length <= 1) return 'last';
+  const path = found.cell.worktree?.path;
+  if (!path) return 'none';
+  const shared = s.projects.some((p) => [...p.tabs, ...p.archive].some((t) => t.cells.some((c) => c.id !== cellId && !!c.worktree?.path && samePath(c.worktree.path, path))));
+  return shared ? 'shared' : 'own';
+}
+
 // ── library: profiles, presets, snippets, settings ──────────────────────────
 
 const upsert = <T extends { id: string }>(list: T[], item: T) =>

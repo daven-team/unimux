@@ -38,6 +38,11 @@ export interface FileDocument {
   externalText?: string;
   /** Size and modification time seen when the text was last read: a check reads the file again only when they changed. */
   diskStamp?: { size: number; mtimeMs: number };
+  /**
+   * Size and modification time of the disk text behind a 'changed' notice. Kept apart from diskStamp (which always belongs
+   * to diskText): a tab with unsaved edits skips re-reading the same conflict, a tab undone back to clean reads it again.
+   */
+  conflictStamp?: { size: number; mtimeMs: number };
 }
 export interface DiffRef { source: GitDiffSource; path: string; oldPath?: string; hash?: string; worktree?: string }
 const labels = {
@@ -69,7 +74,8 @@ function restoreDrafts(): FileDocument[] {
     const value: unknown = JSON.parse(localStorage.getItem(storageKey) ?? '[]');
     if (!Array.isArray(value)) return [];
     return value.filter((d): d is FileDocument => d && typeof d.id === 'string' && typeof d.projectId === 'string' && typeof d.relativePath === 'string' && typeof d.name === 'string' && typeof d.text === 'string' && typeof d.savedText === 'string' && typeof d.diskText === 'string')
-      .map((d) => ({ ...d, status: 'ready', saving: false, error: null, wrap: Boolean(d.wrap), diskConflict: undefined, externalText: undefined }));
+      // No stamps: the first check after a start reads the file again and brings back a conflict notice when the disk moved on.
+      .map((d) => ({ ...d, status: 'ready', saving: false, error: null, wrap: Boolean(d.wrap), diskConflict: undefined, externalText: undefined, diskStamp: undefined, conflictStamp: undefined }));
   } catch { return []; }
 }
 export const useFileStore = create<{ documents: FileDocument[]; activeFileId: string | null }>(() => ({ documents: restoreDrafts(), activeFileId: null }));
@@ -113,7 +119,7 @@ export async function retryFile(id: string): Promise<void> {
   try {
     const result = await window.mc.readProjectFile(doc.projectId, doc.relativePath, true);
     if (loads.get(id) !== token) return;
-    if (result.kind === 'text') patch(id, { status: result.truncated ? 'truncated' : 'ready', size: result.size, view: undefined, text: normalize(result.text), savedText: normalize(result.text), diskText: result.text, diskConflict: undefined, externalText: undefined });
+    if (result.kind === 'text') patch(id, { status: result.truncated ? 'truncated' : 'ready', size: result.size, view: undefined, text: normalize(result.text), savedText: normalize(result.text), diskText: result.text, diskConflict: undefined, externalText: undefined, conflictStamp: undefined });
     else if (result.kind === 'image' || result.kind === 'table') patch(id, { status: result.kind, size: result.size, view: result, text: '', savedText: '', diskText: '' });
     else patch(id, { status: result.kind, size: result.kind === 'binary' ? result.size : undefined, error: result.kind === 'error' ? result.message : null });
   } catch (error) { if (loads.get(id) === token) patch(id, { status: 'error', error: String(error) }); }
@@ -159,7 +165,7 @@ export async function saveFile(id: string): Promise<boolean> {
     let index = 0;
     const diskText = doc.text.replace(/\n/g, () => endings[index++] ?? endings[0] ?? '\n');
     // Edits made while saving stay dirty against the snapshot that was written.
-    patch(id, { savedText: doc.text, diskText, diskConflict: undefined, externalText: undefined });
+    patch(id, { savedText: doc.text, diskText, diskConflict: undefined, externalText: undefined, conflictStamp: undefined });
     refreshGitBadges(doc.projectId, 600);
     return true;
   } catch { patch(id, { error: fileLabel('failed') }); return false; }
@@ -168,6 +174,8 @@ export async function saveFile(id: string): Promise<boolean> {
 // ── files changed on disk ───────────────────────────────────────────────────
 
 const checks = new Set<string>();
+type DiskStamp = { size: number; mtimeMs: number };
+const sameStamp = (a: DiskStamp | undefined, b: DiskStamp): boolean => !!a && a.size === b.size && a.mtimeMs === b.mtimeMs;
 /**
  * Compares an open text tab with its file on disk. A clean tab takes the new text at once; a tab with unsaved edits keeps
  * them and gets a notice (diskConflict 'changed'). Other results (gone, binary, unreadable for a moment while an agent
@@ -181,7 +189,7 @@ export async function checkFileOnDisk(id: string): Promise<void> {
     // Size and modification time first (taken before the read, so a write during the read shows up next time): the text is
     // read only when they changed since the last read.
     const stamp = await window.mc.statProjectFile(doc.projectId, doc.relativePath);
-    if (!stamp || (doc.diskStamp && doc.diskStamp.size === stamp.size && doc.diskStamp.mtimeMs === stamp.mtimeMs)) return;
+    if (!stamp || sameStamp(doc.diskStamp, stamp) || (isFileDirty(doc) && sameStamp(doc.conflictStamp, stamp))) return;
     const result = await window.mc.readProjectFile(doc.projectId, doc.relativePath, true);
     const now = useFileStore.getState().documents.find((d) => d.id === id);
     // A save, load or rename that happened meanwhile knows better.
@@ -189,11 +197,12 @@ export async function checkFileOnDisk(id: string): Promise<void> {
     if (result.kind !== 'text') return;
     if (result.truncated) { if (!isFileDirty(now)) void retryFile(id); return; }
     if (result.text === now.diskText) {
-      patch(id, { diskStamp: stamp, ...(now.diskConflict === 'changed' ? { diskConflict: undefined, externalText: undefined } : {}) });
+      patch(id, { diskStamp: stamp, conflictStamp: undefined, ...(now.diskConflict === 'changed' ? { diskConflict: undefined, externalText: undefined } : {}) });
       return;
     }
-    if (!isFileDirty(now)) patch(id, { text: normalize(result.text), savedText: normalize(result.text), diskText: result.text, size: result.size, diskStamp: stamp, diskConflict: undefined, externalText: undefined, error: null });
-    else patch(id, { diskConflict: now.diskConflict ?? 'changed', externalText: result.text, diskStamp: stamp });
+    if (!isFileDirty(now)) patch(id, { text: normalize(result.text), savedText: normalize(result.text), diskText: result.text, size: result.size, diskStamp: stamp, conflictStamp: undefined, diskConflict: undefined, externalText: undefined, error: null });
+    // diskStamp stays with diskText (the text the edits started from); the conflict has its own stamp.
+    else patch(id, { diskConflict: now.diskConflict ?? 'changed', externalText: result.text, conflictStamp: stamp });
   } catch { /* the next check tries again */ }
   finally { checks.delete(id); }
 }
@@ -205,7 +214,7 @@ export function checkOpenFilesOnDisk(): void {
 export async function reloadFileFromDisk(id: string): Promise<void> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
   if (!doc || doc.saving) return;
-  patch(id, { text: doc.savedText, diskConflict: undefined, externalText: undefined, error: null });
+  patch(id, { text: doc.savedText, diskConflict: undefined, externalText: undefined, conflictStamp: undefined, error: null });
   await retryFile(id);
 }
 /** Conflict choice "Show diff": reads the current disk text into externalText; resolves to it (null when unreadable). */
@@ -223,7 +232,7 @@ export async function loadDiskText(id: string): Promise<string | null> {
 export async function overwriteFileOnDisk(id: string): Promise<boolean> {
   const disk = await loadDiskText(id);
   if (disk === null) { patch(id, { error: fileLabel('failed') }); return false; }
-  patch(id, { diskText: disk, diskConflict: undefined, externalText: undefined, error: null });
+  patch(id, { diskText: disk, diskConflict: undefined, externalText: undefined, conflictStamp: undefined, diskStamp: undefined, error: null });
   return saveFile(id);
 }
 let watching = false;
@@ -240,6 +249,7 @@ export function watchFilesOnDisk(): void {
   window.addEventListener('focus', soon);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) soon(); });
   window.mc.on('cell:hook', (_cellId, event) => { if (event === 'stop') soon(); });
+  soon(); // tabs restored with unsaved drafts get their conflict notice back right after a start
   setInterval(() => {
     const active = useFileStore.getState().activeFileId;
     // Only while the user looks at the editor: the window has focus and no settings or SSH view covers the tab.
@@ -289,7 +299,9 @@ function writeDrafts(): void {
   const last = writtenDrafts;
   if (last && dirty.length === last.length && dirty.every((d, i) => d === last[i])) return;
   writtenDrafts = dirty;
-  try { localStorage.setItem(storageKey, JSON.stringify(dirty)); } catch { /* In-memory drafts still remain protected by close confirmation. */ }
+  // Only what a restart needs: no copy of the disk text behind a conflict, no stamps (the first check recomputes them).
+  const stored = dirty.map(({ externalText: _e, diskStamp: _s, conflictStamp: _c, diskConflict: _d, view: _v, ...draft }) => draft);
+  try { localStorage.setItem(storageKey, JSON.stringify(stored)); } catch { /* In-memory drafts still remain protected by close confirmation. */ }
 }
 /** Writes pending drafts now (no-op when nothing is waiting). */
 export function flushDrafts(): void {

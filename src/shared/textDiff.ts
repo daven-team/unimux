@@ -65,3 +65,18 @@ export function lineDiff(before: string, after: string, context = 3): DiffLine[]
   });
   return out;
 }
+
+/** The conflict diff renders at most this many lines (one DOM row each): a rewrite of a huge file must not freeze the editor. */
+export const DIFF_VIEW_MAX_LINES = 5000;
+
+/**
+ * The lines the conflict diff shows: the first `max` of the diff, how many there are in all, and the width (in digits)
+ * of the line number column. The width comes from a loop: spreading one argument per line overflows the stack on big diffs.
+ */
+export function diffView(before: string, after: string, max = DIFF_VIEW_MAX_LINES): { lines: DiffLine[]; total: number; width: number } {
+  const all = lineDiff(before, after);
+  const lines = all.length > max ? all.slice(0, max) : all;
+  let widest = 1;
+  for (const l of lines) widest = Math.max(widest, l.oldNo ?? 0, l.newNo ?? 0);
+  return { lines, total: all.length, width: String(widest).length };
+}

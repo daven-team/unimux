@@ -1,13 +1,12 @@
 // Read-only diff of the file on disk against the editor text (a save conflict). Same look as the Git diff view; loaded on demand.
 import { useMemo } from 'react';
-import { lineDiff } from '../../../shared/textDiff';
+import { diffView } from '../../../shared/textDiff';
 import { useI18n } from '../i18n';
 import './gitPanel.css';
 
 export default function TextDiffView({ disk, editor, path }: { disk: string; editor: string; path: string }) {
   const { tr } = useI18n();
-  const lines = useMemo(() => lineDiff(disk, editor), [disk, editor]);
-  const width = String(Math.max(...lines.map((l) => Math.max(l.oldNo ?? 0, l.newNo ?? 0)), 1)).length;
+  const { lines, total, width } = useMemo(() => diffView(disk, editor), [disk, editor]);
   return (
     <div className="git-diff-view file-conflict-diff" aria-label={tr('Różnice: dysk i edytor')}>
       <div className="git-diff-path muted" title={path}><span className="git-diff-source">{tr('- na dysku, + w edytorze')}</span>{' · '}{path}</div>
@@ -21,6 +20,7 @@ export default function TextDiffView({ disk, editor, path }: { disk: string; edi
               <span className="code">{line.text || ' '}</span>
             </div>
           ))}
+          {total > lines.length && <div className="git-diff-message muted">{tr('Pokazano pierwsze {shown} z {total} linii różnic.', { shown: lines.length, total })}</div>}
         </div>
       )}
     </div>

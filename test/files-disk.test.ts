@@ -2,18 +2,18 @@
 // notice, a save conflict comes as a code and offers Reload / Show diff / Overwrite.
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { documentId } from '../src/shared/fileOps';
-import { lineDiff, minimalChange } from '../src/shared/textDiff';
+import { DIFF_VIEW_MAX_LINES, diffView, lineDiff, minimalChange } from '../src/shared/textDiff';
 
 interface TestDoc { id: string; text: string; savedText: string; diskText: string; error: string | null; diskConflict?: string; externalText?: string }
 let files: any;
 let disk = '';
 let writes: Array<{ text: string; expected: string }> = [];
 let reads = 0;
+const storage = new Map<string, string>();
 /** A modification time that changes with the content (a real write moves mtime). */
 const mtimeOf = (text: string) => [...text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7);
 
 beforeAll(async () => {
-  const storage = new Map<string, string>();
   vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => { storage.set(k, v); }, removeItem: (k: string) => { storage.delete(k); } });
   vi.stubGlobal('window', {
     mc: {
@@ -90,6 +90,42 @@ describe('files changed on disk', () => {
   });
 });
 
+describe('a conflict notice', () => {
+  it('a dirty tab does not re-read the same conflict; undone back to clean it takes the disk text', async () => {
+    open('one\n', 'mine\n');
+    disk = 'theirs\n';
+    await files.checkFileOnDisk(ID);
+    expect(get().diskConflict).toBe('changed');
+    reads = 0;
+    await files.checkFileOnDisk(ID);
+    expect(reads).toBe(0);
+    files.editFile(ID, 'one\n'); // undo: clean again
+    await files.checkFileOnDisk(ID);
+    expect(get()).toMatchObject({ text: 'theirs\n', savedText: 'theirs\n', diskText: 'theirs\n' });
+    expect(get().diskConflict).toBeUndefined();
+  });
+
+  it('stored drafts carry no disk copy or stamps, and the notice comes back after a restart', async () => {
+    open('one\n', 'mine\n');
+    disk = 'theirs\n';
+    await files.checkFileOnDisk(ID);
+    expect(get()).toMatchObject({ diskConflict: 'changed', externalText: 'theirs\n' });
+    files.flushDrafts();
+    const stored = JSON.parse(storage.get('mc-file-drafts-v1') ?? '[]');
+    expect(stored).toHaveLength(1);
+    expect(stored[0].text).toBe('mine\n');
+    for (const key of ['externalText', 'diskStamp', 'conflictStamp', 'diskConflict']) expect(stored[0]).not.toHaveProperty(key);
+    vi.resetModules();
+    const modulePath = '../src/renderer/src/files';
+    const restarted = await import(/* @vite-ignore */ modulePath);
+    const doc = (): TestDoc => restarted.useFileStore.getState().documents.find((d: TestDoc) => d.id === ID)!;
+    expect(doc()).toMatchObject({ text: 'mine\n', diskText: 'one\n' });
+    expect(doc().diskConflict).toBeUndefined();
+    await restarted.checkFileOnDisk(ID);
+    expect(doc()).toMatchObject({ text: 'mine\n', diskConflict: 'changed', externalText: 'theirs\n' });
+  });
+});
+
 describe('cheap checks', () => {
   it('reads the text only when size or modification time changed since the last read', async () => {
     open('one\n');
@@ -130,5 +166,15 @@ describe('lineDiff', () => {
 
   it('identical texts (line endings aside) have no lines', () => {
     expect(lineDiff('a\r\nb', 'a\nb')).toEqual([]);
+  });
+
+  it('a full rewrite of a huge file neither overflows the stack nor renders every line', () => {
+    const before = Array.from({ length: 150_000 }, (_, i) => `old ${i}`).join('\n');
+    const after = Array.from({ length: 150_000 }, (_, i) => `new ${i}`).join('\n');
+    const view = diffView(before, after);
+    expect(view.total).toBe(300_000);
+    expect(view.lines).toHaveLength(DIFF_VIEW_MAX_LINES);
+    expect(view.width).toBe(String(DIFF_VIEW_MAX_LINES).length);
+    expect(diffView('a\nb', 'a\nc')).toMatchObject({ total: 3, width: 1 });
   });
 });
