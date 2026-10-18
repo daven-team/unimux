@@ -71,6 +71,9 @@ export function SettingsPage() {
             {LANGUAGES.map((option) => <option key={option.code} value={option.code} lang={option.code}>{option.name}</option>)}
           </Select>
         </SettingRow>
+        <SettingRow title={tr('Pytaj przed zamknięciem pracujących agentów')} htmlFor="settings-confirm-close" hint={tr('Zamknięcie zakładki, komórki lub aplikacji, gdy agent Claude lub Codex jest w trakcie tury, najpierw pyta o potwierdzenie.')}>
+          <input id="settings-confirm-close" className="setting-switch" type="checkbox" role="switch" checked={settings.confirmCloseWorking} onChange={(e) => setSetting({ confirmCloseWorking: e.target.checked })} />
+        </SettingRow>
       </SettingsGroup>}
       {section === 1 && <SettingsGroup>
           <SettingRow title={tr("Rozmiar czcionki terminala (nowe komórki)")} htmlFor="settings-font-size" hint={tr('Dotyczy nowo otwieranych komórek terminala.')}>

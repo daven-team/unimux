@@ -16,6 +16,7 @@ import { sessionSearchPaths } from '../../shared/sessionTrack';
 import { sshSpecName, sshStartEffects } from '../../shared/ssh';
 import type { CellSession, Profile, SessionInfo, Snippet, Tab, Worktree } from '../../shared/types';
 import { askChoice, getS, getUi, setUi, toast, update } from './store';
+import { confirmCloseWorking } from './closeGuard';
 import { flushDrafts, showTerminalTabs } from './files';
 import { cancelReconnectAtStart, connectOnMount, reconnectCell, startSshCell } from './ssh';
 import { terminals } from './terminals/TerminalManager';
@@ -290,6 +291,8 @@ export async function removeCell(cellId: string): Promise<void> {
   if (!found) return;
   const { project, tab, cell } = found;
   if (tab.cells.length === 1) return closeTab(project.id, tab.id);
+  // A working agent asks first (before the worktree question, which stays separate).
+  if (!(await confirmCloseWorking([cellId], 'cell'))) return;
   let removeWt = false;
   if (cell.worktree) {
     const choice = await askChoice(tr("Zamknąć komórkę z worktree?"), `${cell.worktree.path}\nbranch ${cell.worktree.branch}`, [
@@ -562,7 +565,11 @@ export async function addAgent(profileId: string, worktree = false): Promise<voi
   if (cell) focusCell(cell.id);
 }
 
-export function closeTab(projectId: string, tabId: string): void {
+export async function closeTab(projectId: string, tabId: string): Promise<void> {
+  const asked = getS().projects.find((p) => p.id === projectId)?.tabs.find((t) => t.id === tabId);
+  if (!asked) return;
+  if (!(await confirmCloseWorking(asked.cells.map((c) => c.id), 'tab'))) return;
+  // The grid as it is now: cells may have been added or removed while the question was open.
   const tab = getS().projects.find((p) => p.id === projectId)?.tabs.find((t) => t.id === tabId);
   if (!tab) return;
   for (const c of tab.cells) killAndDispose(c.id);

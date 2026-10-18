@@ -71,7 +71,7 @@ export async function startTestServer(args = []) {
   return { ...info, stop: () => killTree(child.pid) };
 }
 
-export async function launchApp(root, extraEnv = {}) {
+export async function launchApp(root, extraEnv = {}, extraArgs = []) {
   const port = await freePort();
   const home = join(root, 'home');
   // Login variables of the real user are dropped first; extraEnv may still point them at a fake home.
@@ -85,7 +85,7 @@ export async function launchApp(root, extraEnv = {}) {
   for (const [key, value] of Object.entries(env)) if (value === null) delete env[key];
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.ELECTRON_RENDERER_URL;
-  const child = spawn(electron, ['.'], { cwd: process.cwd(), env, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = spawn(electron, [...extraArgs, '.'], { cwd: process.cwd(), env, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', (d) => { stderr = (stderr + d).slice(-4000); });
   let target;

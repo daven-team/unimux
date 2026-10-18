@@ -31,7 +31,7 @@ export function defaultState(platform: AppPlatform = 'win32'): AppState {
     presets: [],
     snippets: [],
     sshHosts: [],
-    settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {} },
+    settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true },
     sidebarCollapsed: false,
     snippetsOpen: true,
     sidebarWidth: PANEL_LIMITS.sidebar.default,
@@ -424,6 +424,7 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
       showAiUsage: typeof r.settings?.showAiUsage === 'boolean' ? r.settings.showAiUsage : d.settings.showAiUsage,
       usageIntervalMinutes: (USAGE_INTERVALS_MINUTES as readonly number[]).includes(r.settings?.usageIntervalMinutes as number) ? r.settings!.usageIntervalMinutes! : d.settings.usageIntervalMinutes,
       usageCollapsed: typeof r.settings?.usageCollapsed === 'boolean' ? r.settings.usageCollapsed : d.settings.usageCollapsed,
+      confirmCloseWorking: typeof r.settings?.confirmCloseWorking === 'boolean' ? r.settings.confirmCloseWorking : d.settings.confirmCloseWorking,
       backgroundLoad: normalizeBackgroundLoad(r.settings?.backgroundLoad),
       shortcuts: normalizeShortcutOverrides(r.settings?.shortcuts, platform),
       // The retired notifications / waitingSound* keys only seed the alerts when none are saved yet; they are never written again.

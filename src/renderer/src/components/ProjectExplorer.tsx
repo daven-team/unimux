@@ -20,6 +20,7 @@ import {
   registerTreeFocus, selectPaths, selectedPaths, setExpanded, targetDirectory, toggleFolder, transferEntries, trashEntries, undoLast, useExplorer,
 } from '../explorer';
 import { useTreeListings } from '../treeListings';
+import { onTurnRefresh } from '../turnRefresh';
 import {
   flattenTree, indentFor, indentGuides, scrollToShow, scrollTopForPinned, stabilizeRows, stickyIndent, stickyRows, visibleRange, type TreeRow,
 } from '../../../shared/treeRows';
@@ -227,6 +228,12 @@ export function ProjectExplorer({ project }: { project: Project }) {
   const entryPaths = useMemo(() => rows.flatMap((row) => row.type === 'entry' ? [row.entry.path] : []), [rows]);
 
   useGitBadgeSync(project.id, project.path);
+  // An agent turn in this project (not in one of its worktrees) may have changed files: the open folders and marks are read again.
+  useEffect(() => onTurnRefresh((target) => {
+    if (target.projectId !== project.id || target.worktree) return;
+    bumpRefresh();
+    refreshGitBadges(project.id, 0);
+  }), [project.id]);
   const reload = () => { bumpRefresh(); refreshGitBadges(project.id, 0); setManualRefresh(true); setTimeout(() => setManualRefresh(false), 50); };
   const expandAll = async () => {
     try {

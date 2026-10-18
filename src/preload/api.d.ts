@@ -65,6 +65,10 @@ export interface McApi {
   /** True only for the first renderer load of this app run (later loads and reloads get false). */
   claimAppStart(): Promise<boolean>;
   reportCellStatus(cellId: string, status: CellStatus, reason?: StatusReason, hooked?: boolean): void;
+  /** True while quitting must ask first (an agent is working and the confirmation is on): main then sends 'app:confirm-quit'. */
+  setQuitGuard(ask: boolean): void;
+  /** The answer to 'app:confirm-quit': 'asking' at once (the dialog is open), then 'quit' or 'cancel'. */
+  answerQuit(answer: 'asking' | 'quit' | 'cancel'): void;
   pickFolder(): Promise<string | null>;
   /** Native dialog for an own alert sound; null when cancelled. */
   pickSoundFile(): Promise<string | null>;
@@ -149,6 +153,8 @@ export interface McApi {
   on(channel: 'ssh:prompt', cb: (cellId: string, prompt: SshPrompt | null) => void): () => void;
   on(channel: 'ssh:vault:changed', cb: (info: SshVaultInfo) => void): () => void;
   on(channel: 'app:before-quit', cb: () => void): () => void;
+  /** The user closes the window or quits while agents work: the renderer asks and answers with answerQuit. */
+  on(channel: 'app:confirm-quit', cb: () => void): () => void;
   on(channel: 'update:state', cb: (s: UpdateState) => void): () => void;
   on(channel: 'usage:state', cb: (state: UsageState) => void): () => void;
   on(channel: 'accounts:swapPending', cb: (pending: boolean) => void): () => void;

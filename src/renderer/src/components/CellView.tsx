@@ -1,4 +1,5 @@
 import { changeAgentRole } from '../agentRoles';
+import { cellLabel } from '../../../shared/agentWork';
 import { shortcutText, titleWithShortcut, useShortcutText } from '../shortcuts';
 import { useI18n } from '../i18n';
 import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
@@ -82,7 +83,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   };
 
   // An SSH cell is named by its host chip; the name shows next to it only when the user gave the cell one.
-  const label = ssh ? sshHeaderName(cell.name) : cell.name ?? sessionTitle ?? profile.name;
+  const label = ssh ? sshHeaderName(cell.name) : cellLabel(cell, sessionTitle && cell.session ? { [cell.session.id]: sessionTitle } : {}, profile.name);
 
   const sshItems = (): MenuItem[] => [
     { label: tr('Połącz ponownie'), onClick: () => void reconnectCell(cell.id) },

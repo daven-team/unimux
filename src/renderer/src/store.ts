@@ -29,7 +29,9 @@ export type Dialog =
       title: string;
       body: string;
       actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean }>;
-      onChoose: (value: string | null) => void;
+      /** A checkbox under the text (for example "do not ask again"); its state comes with the choice. */
+      check?: string;
+      onChoose: (value: string | null, checked?: boolean) => void;
     };
 
 export interface Ui {
@@ -184,6 +186,27 @@ export function askChoice(
       },
     });
     pendingPrompt = () => resolve(null);
+  });
+}
+
+/** askChoice with a checkbox: resolves with the chosen value (null when cancelled) and whether the box was ticked. */
+export function askChoiceChecked(
+  title: string, body: string,
+  actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean }>,
+  check: string,
+): Promise<{ value: string | null; checked: boolean }> {
+  return new Promise((resolve) => {
+    setUi({
+      dialog: {
+        kind: 'confirm', title, body, actions, check,
+        onChoose: (value, checked) => {
+          pendingPrompt = null;
+          setUi({ dialog: null });
+          resolve({ value, checked: checked === true });
+        },
+      },
+    });
+    pendingPrompt = () => resolve({ value: null, checked: false });
   });
 }
 
