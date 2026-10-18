@@ -1,6 +1,6 @@
 // Safe worktree removal against a real temporary repository: what would be lost is counted, an unforced removal refuses
 // (and removes nothing), a forced one removes the worktree and the unmerged branch.
-import { execFileSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -151,5 +151,25 @@ describe('worktree inspection and safe removal', () => {
     const list = sh(repo, 'worktree', 'list');
     expect(list).not.toContain('proj-wt-gone');
     expect(list).toContain('proj-wt-unplugged');
+  });
+
+  // Windows: a project reached through a short (8.3) path, like a temp folder under a long user name on CI. git lists its
+  // worktrees under the long name, so a folder deleted by hand must still be found and only its registration dropped.
+  it.runIf(process.platform === 'win32')('finds a removed folder under its long name when the project path is a short 8.3 path', async () => {
+    const longLab = realpathSync.native(mkdtempSync(join(tmpdir(), 'mc wt long name ')));
+    try {
+      const short = execSync(`for %I in ("${longLab}") do @echo %~sI`, { encoding: 'utf8', windowsHide: true, shell: 'cmd.exe' }).trim();
+      if (!short || short.toLowerCase() === longLab.toLowerCase()) return; // 8.3 names are off on this volume
+      const longRepo = join(longLab, 'proj');
+      execFileSync('git', ['init', '-q', '-b', 'main', longRepo], { windowsHide: true });
+      writeFileSync(join(longRepo, 'a.txt'), 'one\n');
+      sh(longRepo, 'add', '.');
+      sh(longRepo, 'commit', '-q', '-m', 'first');
+      const shortRepo = join(short, 'proj');
+      const wt = await createWorktree(shortRepo, 'gone');
+      rmSync(wt.path, { recursive: true, force: true });
+      expect(await removeWorktree(shortRepo, wt, true)).toEqual({ ok: true });
+      expect(sh(longRepo, 'worktree', 'list')).not.toContain('proj-wt-gone');
+    } finally { rmSync(longLab, { recursive: true, force: true }); }
   });
 });

@@ -1,7 +1,7 @@
 // git worktrees for cells that should work in isolation from the rest of the grid.
 import { execFile } from 'child_process';
-import { existsSync } from 'fs';
-import { basename, dirname, join } from 'path';
+import { existsSync, realpathSync } from 'fs';
+import { basename, dirname, join, resolve } from 'path';
 import { promisify } from 'util';
 import { cleanEnv } from '../shared/env';
 import { normalizeProjectPath } from '../shared/platform';
@@ -65,14 +65,31 @@ export async function createWorktree(projectPath: string, name: string): Promise
   throw new Error('Nie udało się znaleźć wolnej nazwy dla worktree');
 }
 
-/** The entry of `git worktree list --porcelain` for this folder (its HEAD), or null when git does not know it. */
-async function listedWorktree(projectPath: string, path: string): Promise<{ head: string } | null> {
-  const want = normalizeProjectPath(path);
+/**
+ * A path in its long, real spelling, also for a folder that no longer exists (its nearest existing parent is resolved): a
+ * project reached through a short 8.3 path (a temp folder under a long Windows user name) has its worktrees listed by git
+ * under the long name.
+ */
+function longPath(path: string): string {
+  let dir = resolve(path);
+  const rest: string[] = [];
+  for (;;) {
+    try { return join(realpathSync.native(dir), ...rest.reverse()); } catch { /* not there (yet): one level up */ }
+    const parent = dirname(dir);
+    if (parent === dir) return path;
+    rest.push(basename(dir));
+    dir = parent;
+  }
+}
+
+/** The entry of `git worktree list --porcelain` for this folder (its HEAD and the path as git spells it), or null when git does not know it. */
+async function listedWorktree(projectPath: string, path: string): Promise<{ head: string; folder: string } | null> {
+  const want = normalizeProjectPath(longPath(path));
   const { stdout } = await git(projectPath, 'worktree', 'list', '--porcelain');
   for (const block of stdout.split(/\r?\n\r?\n/)) {
     const lines = block.split(/\r?\n/);
     const folder = lines.find((l) => l.startsWith('worktree '))?.slice(9);
-    if (folder && normalizeProjectPath(folder) === want) return { head: lines.find((l) => l.startsWith('HEAD '))?.slice(5) ?? '' };
+    if (folder && normalizeProjectPath(longPath(folder)) === want) return { head: lines.find((l) => l.startsWith('HEAD '))?.slice(5) ?? '', folder };
   }
   return null;
 }
@@ -142,7 +159,10 @@ export async function removeWorktree(projectPath: string, wt: Worktree, deleteBr
   try {
     if (inspection.exists) await gitWrite(projectPath, 'worktree', 'remove', ...(force ? ['--force'] : []), wt.path);
     // A folder already gone: only its own registration is dropped (`worktree prune` would also drop others on an unplugged drive).
-    else if (await listedWorktree(projectPath, wt.path)) await gitWrite(projectPath, 'worktree', 'remove', wt.path);
+    else {
+      const listed = await listedWorktree(projectPath, wt.path);
+      if (listed) await gitWrite(projectPath, 'worktree', 'remove', listed.folder);
+    }
   } catch (error) { return { ok: false, code: 'failed', error: gitError(error) }; }
   if (dropBranch && inspection.tip) {
     try { await gitWrite(projectPath, 'branch', force ? '-D' : '-d', wt.branch); }
