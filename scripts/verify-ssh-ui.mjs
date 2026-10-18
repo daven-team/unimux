@@ -103,7 +103,7 @@ const PARTS = {
           await app.press('Enter');
         };
         const D = '.ssh-view-detail';
-        const fieldValues = () => app.evaluate(`[...document.querySelectorAll('${D} [data-field]')].map((e) => e.value).join('|')`);
+        const fieldValues = () => app.evaluate(`[...document.querySelectorAll('${D} [data-field]:not([type=checkbox])')].map((e) => e.value).join('|')`);
         const hidden = `getComputedStyle(document.querySelector('.ssh-workspace')).display === 'none'`;
         const showGrid = () => app.evaluate(`document.querySelector('.workspace-tabs .grid-tab').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))`);
         await palette('SSH: nowy host');
