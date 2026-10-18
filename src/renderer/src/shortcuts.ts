@@ -71,7 +71,7 @@ function run(id: string): void {
     case 'tab.close': {
       if (getUi().settingsActive) { setUi({ settingsTabOpen: false, settingsActive: false }); break; }
       const tab = activeTab(project);
-      if (project && tab) closeTab(project.id, tab.id);
+      if (project && tab) void closeTab(project.id, tab.id);
       break;
     }
     case 'snippets.toggle': update((s) => ({ ...s, snippetsOpen: !s.snippetsOpen })); break;

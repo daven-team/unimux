@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { execFile, spawn } from 'child_process';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, safeStorage, shell, type OpenDialogOptions } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, powerMonitor, safeStorage, shell, type OpenDialogOptions } from 'electron';
+import { createQuitConfirm, isQuitAnswer, sessionEndingNow } from './quitConfirm';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { homedir, hostname } from 'os';
 import { isAbsolute, join } from 'path';
@@ -497,6 +498,29 @@ const updateStrings = (): UpdateStrings => ({
 });
 
 const send = (channel: string, ...args: unknown[]) => { safeSend(win, channel, ...args); };
+/** The OS ends the session (Windows shutdown or log-off, macOS shutdown): nothing may hold the quit any more. */
+let sessionEndingAt: number | undefined;
+/** The OS announced a session end: quits within the next minute are never held, and an open question lets the quit go on. */
+const markSessionEnding = (): void => { sessionEndingAt = Date.now(); quitConfirm.release(); };
+/** Closing the window or quitting while agents work asks first (in the renderer); see quitConfirm.ts for what is never held. */
+const quitConfirm = createQuitConfirm({
+  exempt: () => quitting || gating || superseded || sessionEndingNow(sessionEndingAt, Date.now()) || updateHandoffStarted() || !isLive(win) || win!.webContents.isCrashed(),
+  // A minimized or hidden window (taskbar "Close window", Dock "Quit" after Cmd+H) is brought up first: the question must be seen.
+  ask: () => {
+    withLiveWindow(win, (w) => {
+      if (w.isMinimized()) w.restore();
+      w.show();
+      w.focus();
+    });
+    if (process.platform === 'darwin') { try { app.focus({ steal: true }); } catch { /* the window is shown anyway */ } }
+    send('app:confirm-quit');
+  },
+  quit: () => app.quit(),
+  setTimer: (fn, ms) => setTimeout(fn, ms),
+  clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+});
+guardedOn('app:quitGuard', (_e, ask: unknown) => { quitConfirm.setGuard(ask === true); });
+guardedOn('app:quitAnswer', (_e, answer: unknown) => { if (isQuitAnswer(answer)) quitConfirm.answer(answer); });
 cliDetector.onChange((map) => send('cli:changed', map));
 /** Guided install of the agent CLIs in a visible terminal (`install:` ptys are not cells). */
 const install = new InstallManager({
@@ -665,9 +689,12 @@ function createWindow(): void {
   win.on('focus', () => cliDetector.invalidateRegistry());
   if (!app.isPackaged) win.webContents.on('console-message', (e) => e.level !== 'debug' && console.log('[renderer]', e.level, e.message));
   // The install window lives in the renderer: a reload or crash must not leave an invisible install running.
-  win.webContents.on('did-start-loading', () => install.dispose());
+  win.webContents.on('did-start-loading', () => { install.dispose(); quitConfirm.rendererGone(); });
+  // The close button (or Alt+F4, or the last window on macOS) while agents work: the renderer asks first.
+  win.on('close', (e) => { if (quitConfirm.hold()) e.preventDefault(); });
   win.webContents.on('render-process-gone', (_e, details) => {
     install.dispose();
+    quitConfirm.rendererGone();
     onRendererGone(created, details.reason, details.exitCode);
   });
   // A renderer stuck in a loop: after a grace period the user may reload it (the terminals keep running in the Pty Host).
@@ -678,7 +705,7 @@ function createWindow(): void {
   });
   win.on('responsive', () => { clearTimeout(hung); hung = undefined; });
   // Windows ends the session without before-quit: the last changes are written now (the renderer was asked to send its own).
-  win.on('query-session-end', () => { send('app:before-quit'); });
+  win.on('query-session-end', () => { markSessionEnding(); send('app:before-quit'); });
   win.on('session-end', () => { saver.flush(); });
   win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { ptyHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -715,7 +742,7 @@ function onRendererGone(window: BrowserWindow, reason: string, exitCode: number)
   };
   void dialog.showMessageBox(window, options).then(({ response }) => {
     if (quitting || !isLive(window)) return;
-    if (response === 1) app.quit(); else reloadWindow(window);
+    if (response === 1) { quitConfirm.confirm(); app.quit(); } else reloadWindow(window);
   }).catch(() => {});
 }
 
@@ -843,7 +870,7 @@ ptyHost.on('fatal', (code: unknown, stderrTail: unknown) => {
   };
   void (isLive(win) ? dialog.showMessageBox(win!, options) : dialog.showMessageBox(options)).then(({ response }) => {
     if (quitting) return;
-    if (response === 1) { app.quit(); return; }
+    if (response === 1) { quitConfirm.confirm(); app.quit(); return; }
     ptyHost.restartAfterFatal();
     send('ptyhost:crashed', resumes);
   }).catch(() => {});
@@ -1483,6 +1510,9 @@ async function recoverActivation(): Promise<void> {
 
 app.whenReady().then(async () => {
   startupTimer.mark('app-ready');
+  // macOS and Linux shutdown or log-off: the quit that follows is never held by the "agents are working" question.
+  // Whatever the order of this event and the quit, a held quit is released here (and the answer wait has an upper bound anyway).
+  try { powerMonitor.on('shutdown', markSessionEnding); } catch { /* not available: only the question's upper bound applies */ }
   applyDockIcon();
   if (superseded) return;
   // The line is written when the renderer reports in; a start that never gets that far is written after a minute.
@@ -1517,6 +1547,8 @@ function exitNow(): void {
 }
 
 app.on('before-quit', (e) => {
+  // Cmd+Q, the Dock or the macOS menu while agents work: held once while the renderer asks (never for a session end or an update).
+  if (quitConfirm.hold()) { e.preventDefault(); return; }
   clearTimeout(handoffWatchdog);
   // A copied private key does not outlive the app in the clipboard, however the quit goes on (the wind-down below waits).
   void flushSecretClipboard();

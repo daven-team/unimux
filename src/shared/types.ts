@@ -131,6 +131,8 @@ export interface Settings {
   backgroundLoad: BackgroundLoadMode;
   /** Keyboard shortcuts the user changed: action id to combo (`Ctrl+Shift+E`), or null when the shortcut is switched off (see shared/shortcuts.ts). */
   shortcuts: ShortcutOverrides;
+  /** Ask before closing a grid, a cell or the app while a Claude or Codex cell is working ("do not ask again" turns it off). */
+  confirmCloseWorking: boolean;
 }
 
 export interface AppState {

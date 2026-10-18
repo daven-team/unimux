@@ -16,6 +16,8 @@ import { sessionSearchPaths } from '../../shared/sessionTrack';
 import { sshSpecName, sshStartEffects } from '../../shared/ssh';
 import type { CellSession, Profile, SessionInfo, Snippet, Tab, Worktree } from '../../shared/types';
 import { askChoice, getS, getUi, setUi, toast, update } from './store';
+import { confirmCloseWorking } from './closeGuard';
+import { namesList, workingAgents } from '../../shared/agentWork';
 import { flushDrafts, showTerminalTabs } from './files';
 import { cancelReconnectAtStart, connectOnMount, reconnectCell, startSshCell } from './ssh';
 import { terminals } from './terminals/TerminalManager';
@@ -296,7 +298,9 @@ export async function removeCell(cellId: string): Promise<void> {
   const found = findCell(getS(), cellId);
   if (!found) return;
   const { project, tab, cell } = found;
-  if (tab.cells.length === 1) return closeTab(project.id, tab.id);
+  if (tab.cells.length === 1) { await closeTab(project.id, tab.id); return; }
+  // A working agent asks first (before the worktree question, which stays separate).
+  if (!(await confirmCloseWorking([cellId], 'cell'))) return;
   let removeWt = false;
   if (cell.worktree) {
     const choice = await askChoice(tr("Zamknąć komórkę z worktree?"), `${cell.worktree.path}\nbranch ${cell.worktree.branch}`, [
@@ -454,10 +458,14 @@ export async function removeProject(projectId: string): Promise<void> {
   const live = p.tabs.reduce((n, t) => n + t.cells.length, 0);
   const { tasks, messages } = getS().automation;
   const aiItems = tasks.some((t) => t.projectId === projectId) || messages.some((m) => m.projectId === projectId);
+  // Working agents are named like in the tab and cell confirmation (one dialog here: removing a project always asks).
+  const ui = getUi();
+  const working = workingAgents(getS(), p.tabs.flatMap((t) => t.cells.map((c) => c.id)), ui.statuses, ui.sessionTitles);
   const choice = await askChoice(
     tr('Usunąć projekt „{name}” z listy?', { name: p.name }),
     tr('Folder na dysku zostaje nietknięty.') + (live ? ' ' + tr('Zamkniętych zostanie {count} terminali.', { count: live }) : '')
-      + (aiItems ? ' ' + tr('Zadania i wiadomości zespołu AI tego projektu zostaną usunięte.') : ''),
+      + (aiItems ? ' ' + tr('Zadania i wiadomości zespołu AI tego projektu zostaną usunięte.') : '')
+      + (working.length ? '\n\n' + tr('Pracujący agenci ({count}): {names}. Ich bieżąca tura zostanie przerwana.', { count: working.length, names: namesList(working.map((w) => w.label)) }) : ''),
     [{ label: tr("Usuń z listy"), value: 'yes', danger: true }],
   );
   if (choice !== 'yes') return;
@@ -569,7 +577,11 @@ export async function addAgent(profileId: string, worktree = false): Promise<voi
   if (cell) focusCell(cell.id);
 }
 
-export function closeTab(projectId: string, tabId: string): void {
+export async function closeTab(projectId: string, tabId: string): Promise<void> {
+  const asked = getS().projects.find((p) => p.id === projectId)?.tabs.find((t) => t.id === tabId);
+  if (!asked) return;
+  if (!(await confirmCloseWorking(asked.cells.map((c) => c.id), 'tab'))) return;
+  // The grid as it is now: cells may have been added or removed while the question was open.
   const tab = getS().projects.find((p) => p.id === projectId)?.tabs.find((t) => t.id === tabId);
   if (!tab) return;
   for (const c of tab.cells) killAndDispose(c.id);

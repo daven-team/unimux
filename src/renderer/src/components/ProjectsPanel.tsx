@@ -48,7 +48,7 @@ function TabList({ project, active, countsOf }: { project: Project; active: bool
                 } },
                 { label: tr("Nowy grid") + '…', onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
                 { sep: true },
-                { label: tr("Zamknij grid"), onClick: () => closeTab(project.id, t.id) },
+                { label: tr("Zamknij grid"), onClick: () => void closeTab(project.id, t.id) },
               ]);
             }}
             onClick={() => {

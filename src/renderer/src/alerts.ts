@@ -1,5 +1,7 @@
 // Raises the alerts (OS notification and sound) for agent status changes. The decision itself is pure (shared/alerts).
-import { ALERT_EVENTS, alertEventOf, createAlertSoundThrottle, createTurnDedupe, decideAlert, errorPhrase, type AlertEventId } from '../../shared/alerts';
+import { ALERT_EVENTS, alertEventOf, createAlertSoundThrottle, createTurnDedupe, decideAlert, type AlertEventId } from '../../shared/alerts';
+import { alertBody as bodyOf, alertNotice, createAlertBurst, groupAlerts, type AlertItem } from '../../shared/alertBurst';
+import { cellLabel } from '../../shared/agentWork';
 import { activeProject, activeTab, findCell, getProfile } from '../../shared/state';
 import { shouldNotify, type CellStatus, type HookInfo, type StatusCause, type StatusReason } from '../../shared/status';
 import { playAlertSound } from './alertSound';
@@ -16,10 +18,13 @@ function isVisible(cellId: string): boolean {
 
 /** Body of the OS notification: what happened to which agent (and for an error, the human phrase of its code). */
 export function alertBody(event: AlertEventId, name: string, errorCode?: string): string {
-  if (event === 'attention') return tr('{name} potrzebuje Ciebie', { name });
-  if (event === 'error') return tr('{name} - błąd: {detail}', { name, detail: tr(errorPhrase(errorCode)) });
-  return tr('{name} skończył pracę', { name });
+  return bodyOf(tr, event, name, errorCode);
 }
+
+/** Notifications wait about a second for others: a burst of turn ends becomes one notification per event. */
+const burst = createAlertBurst<AlertItem>((items) => {
+  for (const group of groupAlerts(items)) window.mc.notify(alertNotice(tr, group));
+}, { setTimer: (fn, ms) => window.setTimeout(fn, ms), clearTimer: (timer) => window.clearTimeout(timer as number) });
 
 const allowSound = createAlertSoundThrottle();
 const firstOfTurn = createTurnDedupe();
@@ -44,11 +49,9 @@ export function alertForStatus(
   if (!decision.notify && !decision.sound) return;
   statusLog.markAlert(cellId);
   if (decision.notify) {
-    const n = found.tab.cells.findIndex((c) => c.id === cellId) + 1;
-    window.mc.notify({
-      title: `${found.project.name} · ${found.tab.name} #${n}`,
-      body: alertBody(decision.event, profile.name, info?.error),
-      cellId,
+    burst.push({
+      event: decision.event, cellId, label: cellLabel(found.cell, getUi().sessionTitles, profile.name), errorCode: info?.error,
+      projectId: found.project.id, projectName: found.project.name, tabId: found.tab.id, tabName: found.tab.name,
     });
   }
   if (decision.sound) void playAlertSound(decision.event, decision.sound);
