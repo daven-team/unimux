@@ -42,9 +42,15 @@
 .git-section-head:focus-visible { outline: 1px solid var(--text-2); outline-offset: -1px; }
 .git-count { flex: none; min-width: 16px; padding: 0 4px; border-radius: 4px; background: var(--bg-hover); color: var(--text-2); font-size: 10px; line-height: 16px; text-align: center; letter-spacing: 0; }
 
-.git-changes { flex: 1 1 55%; min-height: 0; display: flex; flex-direction: column; }
+/* min-height auto: the head and the commit box always keep their room (only the file list, which scrolls, gives way), so a
+   saved history height taller than a short panel shrinks the history instead of pushing it over the commit box. */
+.git-changes { flex: 1 1 55%; min-height: auto; display: flex; flex-direction: column; }
 .git-changes.collapsed { flex: none; }
-.git-changes-body { flex: 1; min-height: 0; overflow-y: auto; }
+/* A history with a saved height keeps it: the changes take what is left, and the history gives way only once they reach their minimum. */
+.git-panel:has(> .git-history.sized) > .git-changes:not(.collapsed) { flex-basis: 0; }
+/* contain: size keeps a long file list out of the section's minimum height (it fills the room it gets and scrolls); about two
+   rows always stay visible. */
+.git-changes-body { flex: 1; min-height: 52px; overflow-y: auto; contain: size; }
 .git-group-head { min-height: 24px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 14px; font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--text-2); }
 .git-group-head .git-count { margin-left: 4px; }
 .git-panel .git-group-head .btn { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; }

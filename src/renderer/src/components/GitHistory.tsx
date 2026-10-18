@@ -96,7 +96,7 @@ export function GitHistory({ projectId, historyKey, initial, opts, nonce, collap
   if (selected) return <GitCommitView projectId={projectId} commit={selected} opts={opts} onBack={() => setSelected(null)} />;
 
   return (
-    <section className={`git-history ${collapsed ? 'collapsed' : ''}`} aria-label={tr('Historia')} style={!collapsed && height ? { flex: `0 0 ${height}px` } : undefined}>
+    <section className={`git-history ${collapsed ? 'collapsed' : height ? 'sized' : ''}`} aria-label={tr('Historia')} style={!collapsed && height ? { flex: `0 1 ${height}px` } : undefined}>
       <div className="git-section-head static">
         {onToggle
           ? <button className="git-toggle" aria-expanded={!collapsed} onClick={onToggle} title={collapsed ? tr('Rozwiń historię') : tr('Zwiń historię')}><span className={`tree-chevron ${collapsed ? '' : 'open'}`}><IChevron /></span><span>{tr('Historia')}</span></button>
