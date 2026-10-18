@@ -1028,7 +1028,7 @@ guardedHandle('cell:killAndWait', async (_e, id: string) => {
 ipcMain.handle('cell:alive', () => [...alive]);
 // True for the first app window renderer that asks in this app run, false for every later one (a reload, a crash reload) and
 // after a Pty Host restart: SSH hosts with "Łącz ponownie po uruchomieniu aplikacji" connect at an app start only.
-ipcMain.handle('app:claimStart', (e) => appStartClaim.claim(fromAppWindow(e)));
+guardedHandle('app:claimStart', () => appStartClaim.claim(true), () => false);
 const cliHandlers = createCliHandlers(cliDetector, (url) => { void shell.openExternal(url); });
 ipcMain.handle('cli:status', () => cliHandlers.status());
 // A recheck runs the detection (it starts processes); a foreign sender gets the cached answer.
