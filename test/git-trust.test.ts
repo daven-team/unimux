@@ -280,13 +280,14 @@ describe('write operations', () => {
     sh(dir, 'config', 'core.autocrlf', 'true');
     sh(dir, 'config', 'core.safecrlf', 'warn');
     for (let i = 0; i < 300; i++) write(dir, `file-${i}.txt`, `line one\nline two ${i}\n`);
-    const tiny = new Git({ env, maxOutputBytes: 200, writeOutputBytes: 300 });
+    // Only the output caps are under test: a loaded CI runner may need longer than the 10 s of a normal read for 300 files.
+    const tiny = new Git({ env, maxOutputBytes: 200, writeOutputBytes: 300, readTimeoutMs: 60_000 });
     const result = await tiny.stage(dir, { requestId: id(), paths: [], all: true });
-    expect(result.ok).toBe(true);
+    expect(result).toMatchObject({ ok: true });
     expect(sh(dir, 'diff', '--cached', '--name-only').trim().split('\n')).toHaveLength(300);
     expect(existsSync(join(dir, '.git', 'index.lock'))).toBe(false);
     const committed = await tiny.commit(dir, { requestId: id(), message: 'all of them' });
-    expect(committed.ok).toBe(true);
+    expect(committed).toMatchObject({ ok: true });
     expect(sh(dir, 'log', '--format=%s').trim()).toBe('all of them');
   });
 
