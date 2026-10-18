@@ -7,7 +7,7 @@ import { join } from 'path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Git } from '../src/main/git';
 import { handleGit } from '../src/main/gitHandler';
-import { samePath } from '../src/main/gitPaths';
+import { canonicalPath, samePath } from '../src/main/gitPaths';
 import type { GitResult, GitStatus, GitTrustInfo } from '../src/shared/git';
 
 // Real git processes: slow under a busy machine or CI runner, so these tests get more time than the 20 s default.
@@ -404,11 +404,15 @@ describe('environment and scope', () => {
     sh(dir, 'worktree', 'add', '-q', '-b', 'b', wt);
     write(dir, 'x.txt', 'x');
     write(wt, 'y.txt', 'y');
-    const [one, two] = await Promise.all([
-      git.stage(dir, { requestId: id(), paths: ['x.txt'] }), git.stage(wt, { requestId: id(), paths: ['y.txt'] }),
-    ]);
-    expect([one.ok, two.ok].sort()).toEqual([false, true]);
-    expect([one, two].find((r) => !r.ok)).toMatchObject({ code: 'busy' });
+    // A writer in the main worktree holds the repository lock (taken only after a few git reads, so two real writers started
+    // together may just as well run one after the other): the other worktree's writer has to wait its turn.
+    const busy = (git as unknown as { busy: Set<string> }).busy;
+    const key = canonicalPath(join(dir, '.git'));
+    busy.add(key);
+    expect(await git.stage(wt, { requestId: id(), paths: ['y.txt'] })).toMatchObject({ ok: false, code: 'busy' });
+    busy.delete(key);
+    expect((await git.stage(wt, { requestId: id(), paths: ['y.txt'] })).ok).toBe(true);
+    expect((await git.stage(dir, { requestId: id(), paths: ['x.txt'] })).ok).toBe(true);
   });
 
   it('refuses a push when the URL it would use is not the one the user confirmed', async () => {
