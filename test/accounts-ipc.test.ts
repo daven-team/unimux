@@ -7,7 +7,7 @@ import { isFromWindow } from '../src/main/safeWindow';
 const APP = { sender: 'app-window' };
 const FOREIGN = { sender: 'login-window' };
 
-function setup(ready?: Promise<unknown>) {
+function setup(ready?: Promise<unknown>, stopped?: () => boolean) {
   const calls: string[] = [];
   const usage = { claude: [], codex: [] };
   const handlers = Object.fromEntries((['getUsage', 'refreshUsage', 'startLogin', 'cancelLogin', 'removeAccount', 'makeMain', 'adoptCopy', 'swapPending', 'clearSwapPending', 'dismissNotice'] as const)
@@ -18,7 +18,7 @@ function setup(ready?: Promise<unknown>) {
     handle: (channel: string, fn: (event: { sender: unknown }, payload?: unknown) => unknown) => { invokes.set(channel, fn); },
     on: (channel: string, fn: (event: { sender: unknown }, payload?: unknown) => void) => { sends.set(channel, fn); },
   };
-  registerAccountIpc(ipc as never, handlers, (event) => event.sender === APP.sender, ready);
+  registerAccountIpc(ipc as never, handlers, (event) => event.sender === APP.sender, ready, stopped);
   return { calls, usage, invokes, sends };
 }
 
@@ -75,6 +75,23 @@ describe('accounts, auth and usage IPC sender check (0.9.3)', () => {
     finish();
     await Promise.all([...answers, pending]);
     expect(calls).toEqual(expect.arrayContaining(['makeMain:acc-1', 'startLogin:acc-1', 'removeAccount:acc-1', 'swapPending:undefined', 'cancelLogin:login-1']));
+  });
+
+  it('starts no new account work once the app quits, also for a call still waiting for the recovery (0.9.6)', async () => {
+    let finish!: () => void;
+    let quitting = false;
+    const { calls, usage, invokes, sends } = setup(new Promise<void>((resolve) => { finish = resolve; }), () => quitting);
+    const waiting = invokes.get('accounts:makeMain')!(APP, 'acc-1');
+    quitting = true;
+    finish();
+    expect(await waiting).toEqual({ ok: false, error: 'invalid' });
+    for (const channel of Object.keys(GUARDED_ACCOUNT_CHANNELS) as Array<keyof typeof GUARDED_ACCOUNT_CHANNELS>) {
+      expect(await invokes.get(channel)!(APP, 'acc-1'), channel).toEqual(accountRefusal(channel, { getUsage: () => usage }));
+    }
+    // A cancel only stops work: it still runs.
+    sends.get('auth:cancel')!(APP, 'login-1');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls.filter((c) => !c.startsWith('getUsage'))).toEqual(['cancelLogin:login-1']);
   });
 
   it('a failed recovery still lets the handlers run (they apply their own guards)', async () => {
