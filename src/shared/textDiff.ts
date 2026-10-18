@@ -1,6 +1,16 @@
 // A small line diff of two texts (the file on disk vs the editor) in the line shape of the Git diff view.
 import type { DiffLine } from './git';
 
+/** The smallest single replacement turning `before` into `after` (common start and end kept), as an editor change. */
+export function minimalChange(before: string, after: string): { from: number; to: number; insert: string } {
+  let start = 0;
+  const max = Math.min(before.length, after.length);
+  while (start < max && before.charCodeAt(start) === after.charCodeAt(start)) start++;
+  let end = 0;
+  while (end < max - start && before.charCodeAt(before.length - 1 - end) === after.charCodeAt(after.length - 1 - end)) end++;
+  return { from: start, to: before.length - end, insert: after.slice(start, after.length - end) };
+}
+
 /** Above this many cells the middle part is shown as removed + added instead of being matched line by line. */
 const MAX_CELLS = 4_000_000;
 

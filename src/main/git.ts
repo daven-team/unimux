@@ -101,7 +101,7 @@ function killTree(child: ChildProcess): Promise<void> {
 }
 
 /** Variables that would point git at another repository, index or configuration than the folder we run it in. */
-const SCRUBBED_ENV = /^(GIT_DIR|GIT_WORK_TREE|GIT_INDEX_FILE|GIT_COMMON_DIR|GIT_OBJECT_DIRECTORY|GIT_ALTERNATE_OBJECT_DIRECTORIES|GIT_NAMESPACE|GIT_PREFIX|GIT_CONFIG|GIT_CONFIG_SYSTEM|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+|GIT_CONFIG_PARAMETERS|GIT_EXTERNAL_DIFF|GIT_DIFF_OPTS)$/i;
+export const SCRUBBED_ENV = /^(GIT_DIR|GIT_WORK_TREE|GIT_INDEX_FILE|GIT_COMMON_DIR|GIT_OBJECT_DIRECTORY|GIT_ALTERNATE_OBJECT_DIRECTORIES|GIT_NAMESPACE|GIT_PREFIX|GIT_CONFIG|GIT_CONFIG_SYSTEM|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+|GIT_CONFIG_PARAMETERS|GIT_EXTERNAL_DIFF|GIT_DIFF_OPTS)$/i;
 
 /** Resolves links and 8.3 short names, like the canonical spelling of folders does (the plain fs.promises version leaves short names alone on some systems). */
 const realpath = promisify(fsRealpath.native);

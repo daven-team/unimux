@@ -29,7 +29,10 @@ export interface CellSession {
 
 export interface Worktree {
   path: string;
+  /** '' when unknown (an adopted worktree on a detached HEAD). */
   branch: string;
+  /** A worktree the cell joined (a resumed conversation), not one unimux created for it: its branch is never deleted. */
+  adopted?: boolean;
 }
 
 /** What removing a worktree would lose (src/main/worktree.ts inspectWorktree). */
@@ -40,9 +43,16 @@ export interface WorktreeInspection {
   dirty: number;
   /** Commits of the worktree branch that the project's current HEAD cannot reach. */
   unmerged: number;
+  /** Commits reachable from the worktree's HEAD but from no branch, remote or tag (a detached HEAD). */
+  detached: number;
   /** The project's current branch (the base of `unmerged`), "HEAD" when detached. */
   base: string;
+  /** The worktree's HEAD and the branch tip (commit ids, '' when none): a confirmed removal checks they did not move. */
+  head: string;
+  tip: string;
 }
+
+export type WorktreeInspectResult = { ok: true; inspection: WorktreeInspection } | { ok: false; error: string };
 
 /** 'unsafe': work would be lost and the removal was not forced (nothing removed); 'branch': the worktree is gone, its branch stayed. */
 export type WorktreeRemoveResult = { ok: true } | { ok: false; code: 'unsafe' | 'failed' | 'branch'; error: string; inspection?: WorktreeInspection };

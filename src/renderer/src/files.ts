@@ -36,6 +36,8 @@ export interface FileDocument {
   diskConflict?: 'changed' | 'save';
   /** The text on disk when the conflict was last seen (for the diff). */
   externalText?: string;
+  /** Size and modification time seen when the text was last read: a check reads the file again only when they changed. */
+  diskStamp?: { size: number; mtimeMs: number };
 }
 export interface DiffRef { source: GitDiffSource; path: string; oldPath?: string; hash?: string; worktree?: string }
 const labels = {
@@ -47,7 +49,6 @@ const labels = {
   largeNotice: ['Read-only view: the first {shown} of {total}. Open the file in an external editor to see all of it.', 'Tylko do odczytu: pierwsze {shown} z {total}. Otwórz plik w zewnętrznym edytorze, aby zobaczyć całość.', 'Nur Lesen: die ersten {shown} von {total}. Öffne die Datei in einem externen Editor, um alles zu sehen.', 'Solo lectura: los primeros {shown} de {total}. Abre el archivo en un editor externo para verlo completo.', 'Lecture seule : les premiers {shown} sur {total}. Ouvrez le fichier dans un éditeur externe pour tout voir.', 'Só de leitura: os primeiros {shown} de {total}. Abra o ficheiro num editor externo para ver tudo.'],
   tooLarge: ['This file exceeds 256 KB and cannot be edited safely here.', 'Ten plik przekracza 256 KB i nie może być tu bezpiecznie edytowany.', 'Diese Datei ist größer als 256 KB und kann hier nicht sicher bearbeitet werden.', 'Este archivo supera 256 KB y no se puede editar aquí con seguridad.', 'Ce fichier dépasse 256 Ko et ne peut pas être modifié ici en sécurité.', 'Este ficheiro excede 256 KB e não pode ser editado aqui em segurança.'],
   failed: ['Could not save. Your draft is preserved.', 'Nie udało się zapisać. Szkic został zachowany.', 'Speichern fehlgeschlagen. Der Entwurf bleibt erhalten.', 'No se pudo guardar. El borrador se conserva.', 'Échec de l’enregistrement. Le brouillon est conservé.', 'Não foi possível guardar. O rascunho foi preservado.'],
-  conflict: ['The file changed outside the editor. Your draft is preserved.', 'Plik zmienił się poza edytorem. Twój szkic został zachowany.', 'Die Datei wurde außerhalb des Editors geändert. Der Entwurf bleibt erhalten.', 'El archivo cambió fuera del editor. El borrador se conserva.', 'Le fichier a été modifié en dehors de l’éditeur. Le brouillon est conservé.', 'O ficheiro foi alterado fora do editor. O rascunho foi preservado.'],
   invalid: ['Invalid file content.', 'Nieprawidłowa treść pliku.', 'Ungültiger Dateiinhalt.', 'Contenido de archivo no válido.', 'Contenu du fichier non valide.', 'Conteúdo de ficheiro inválido.'],
   binary: ['Binary files or unsupported encodings cannot be edited.', 'Nie można edytować pliku binarnego lub nieobsługiwanego kodowania.', 'Binärdateien oder nicht unterstützte Kodierungen können nicht bearbeitet werden.', 'No se pueden editar archivos binarios o codificaciones no admitidas.', 'Les fichiers binaires ou les encodages non pris en charge ne peuvent pas être modifiés.', 'Não é possível editar ficheiros binários ou codificações não suportadas.'],
 } as const;
@@ -177,6 +178,10 @@ export async function checkFileOnDisk(id: string): Promise<void> {
   if (!doc || doc.diff || doc.status !== 'ready' || doc.saving || loads.has(id) || checks.has(id)) return;
   checks.add(id);
   try {
+    // Size and modification time first (taken before the read, so a write during the read shows up next time): the text is
+    // read only when they changed since the last read.
+    const stamp = await window.mc.statProjectFile(doc.projectId, doc.relativePath);
+    if (!stamp || (doc.diskStamp && doc.diskStamp.size === stamp.size && doc.diskStamp.mtimeMs === stamp.mtimeMs)) return;
     const result = await window.mc.readProjectFile(doc.projectId, doc.relativePath, true);
     const now = useFileStore.getState().documents.find((d) => d.id === id);
     // A save, load or rename that happened meanwhile knows better.
@@ -184,11 +189,11 @@ export async function checkFileOnDisk(id: string): Promise<void> {
     if (result.kind !== 'text') return;
     if (result.truncated) { if (!isFileDirty(now)) void retryFile(id); return; }
     if (result.text === now.diskText) {
-      if (now.diskConflict === 'changed') patch(id, { diskConflict: undefined, externalText: undefined });
+      patch(id, { diskStamp: stamp, ...(now.diskConflict === 'changed' ? { diskConflict: undefined, externalText: undefined } : {}) });
       return;
     }
-    if (!isFileDirty(now)) patch(id, { text: normalize(result.text), savedText: normalize(result.text), diskText: result.text, size: result.size, diskConflict: undefined, externalText: undefined, error: null });
-    else patch(id, { diskConflict: now.diskConflict ?? 'changed', externalText: result.text });
+    if (!isFileDirty(now)) patch(id, { text: normalize(result.text), savedText: normalize(result.text), diskText: result.text, size: result.size, diskStamp: stamp, diskConflict: undefined, externalText: undefined, error: null });
+    else patch(id, { diskConflict: now.diskConflict ?? 'changed', externalText: result.text, diskStamp: stamp });
   } catch { /* the next check tries again */ }
   finally { checks.delete(id); }
 }
@@ -224,7 +229,8 @@ export async function overwriteFileOnDisk(id: string): Promise<boolean> {
 let watching = false;
 /**
  * Keeps open tabs in step with the disk without polling every file: all open tabs are checked when the window gets focus
- * or becomes visible and when an agent finishes a turn, and only the tab on screen every few seconds while the window is visible.
+ * or becomes visible and when an agent finishes a turn, and only the tab on screen every few seconds while the window has focus.
+ * A check compares size and modification time first and reads the text only when they changed.
  */
 export function watchFilesOnDisk(): void {
   if (watching) return;
@@ -236,7 +242,8 @@ export function watchFilesOnDisk(): void {
   window.mc.on('cell:hook', (_cellId, event) => { if (event === 'stop') soon(); });
   setInterval(() => {
     const active = useFileStore.getState().activeFileId;
-    if (active && !document.hidden) void checkFileOnDisk(active);
+    // Only while the user looks at the editor: the window has focus and no settings or SSH view covers the tab.
+    if (active && !document.hidden && document.hasFocus() && !getUi().settingsActive && !useSshStore.getState().viewActive) void checkFileOnDisk(active);
   }, ACTIVE_CHECK_MS);
 }
 const ACTIVE_CHECK_MS = 2500;

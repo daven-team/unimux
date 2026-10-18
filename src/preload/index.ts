@@ -38,6 +38,7 @@ const api: McApi = {
   listProjectDirectoryBatch: (projectId, paths) => ipcRenderer.invoke('fs:listProjectDirectoryBatch', projectId, paths),
   writeProjectFile: (projectId, path, text, expectedText) => ipcRenderer.invoke('fs:writeProjectFile', projectId, path, text, expectedText),
   readProjectFile: (projectId, path, large) => ipcRenderer.invoke('fs:readProjectFile', projectId, path, large),
+  statProjectFile: (projectId, path) => ipcRenderer.invoke('fs:statProjectFile', projectId, path),
   listProjectDirectories: (projectId) => ipcRenderer.invoke('fs:listProjectDirectories', projectId),
   searchProject: (projectId, options) => ipcRenderer.invoke('fs:searchProject', projectId, options),
   replaceInProject: (projectId, request) => ipcRenderer.invoke('fs:replaceInProject', projectId, request),
@@ -50,7 +51,7 @@ const api: McApi = {
   isGitRepo: (path) => ipcRenderer.invoke('git:isRepo', path),
   createWorktree: (projectPath, name) => ipcRenderer.invoke('git:createWorktree', projectPath, name),
   inspectWorktree: (projectPath, wt) => ipcRenderer.invoke('git:inspectWorktree', projectPath, wt),
-  removeWorktree: (projectPath, wt, deleteBranch, force) => ipcRenderer.invoke('git:removeWorktree', projectPath, wt, deleteBranch, force === true),
+  removeWorktree: (projectPath, wt, deleteBranch, confirmed) => ipcRenderer.invoke('git:removeWorktree', projectPath, wt, deleteBranch, confirmed),
   git: {
     probe: (projectId) => ipcRenderer.invoke('git:probe', projectId),
     init: (projectId) => ipcRenderer.invoke('git:init', projectId),

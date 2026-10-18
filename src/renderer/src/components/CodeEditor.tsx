@@ -20,6 +20,7 @@ import { rust } from '@codemirror/legacy-modes/mode/rust';
 import { c, cpp, java, csharp } from '@codemirror/legacy-modes/mode/clike';
 import { standardSQL } from '@codemirror/legacy-modes/mode/sql';
 import { toml } from '@codemirror/legacy-modes/mode/toml';
+import { minimalChange } from '../../../shared/textDiff';
 import './file-workspace.css';
 
 /** .env files: `# comments`, `export KEY=value`, quoted values and ${VAR} references. */
@@ -143,7 +144,9 @@ export function CodeEditor({ path, text, wrap, onChange }: { path: string; text:
   useEffect(() => {
     const editor = view.current;
     if (!editor || text === emitted.current) return;
-    if (editor.state.doc.toString() !== text) editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text } });
+    // Only the changed middle is replaced (a file rewritten on disk): the cursor and the scroll position stay where they were.
+    const current = editor.state.doc.toString();
+    if (current !== text) editor.dispatch({ changes: minimalChange(current, text) });
   }, [text]);
   useEffect(() => { view.current?.dispatch({ effects: wrapping.current.reconfigure(wrap ? EditorView.lineWrapping : []) }); }, [wrap]);
   return <div ref={host} className="code-editor file-workspace-code" />;

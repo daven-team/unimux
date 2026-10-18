@@ -41,6 +41,8 @@ try {
   writeState(root, state);
   app = await launchApp(root);
   const { evaluate, until, click, cdp } = app;
+  // The offscreen window never has the OS focus; the visible tab is checked only while the window is focused, like a user looking at it.
+  await cdp('Emulation.setFocusEmulationEnabled', { enabled: true });
   const text = (selector) => evaluate(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? ''`);
 
   // ── worktree removal ──
@@ -56,8 +58,14 @@ try {
   if (!second.includes('pliki (1)') || !second.includes('commity (1)')) throw new Error(`second confirmation lacks the counts: ${second}`);
   if (!existsSync(join(worktree, 'scratch.txt'))) throw new Error('the worktree was touched before the second confirmation');
   ok(`a second, red confirmation asks: "${second}"`);
+  // The agent writes one more file while the user reads the dialog: the removal stops and asks again with the new count.
+  writeFileSync(join(worktree, 'later.txt'), 'written after the confirmation\n');
   await click('.modal-foot button.danger', 'Usuń mimo to');
   await until(`document.querySelectorAll('button[aria-label="Zamknij komórkę"]').length === 1`, 'cell closed');
+  await until(`!!document.querySelector('.modal') && document.querySelector('.modal').textContent.includes('nowa praca') && document.querySelector('.modal').textContent.includes('pliki (2)')`, 'third confirmation with the new count');
+  if (!existsSync(join(worktree, 'later.txt'))) throw new Error('the worktree was removed although more work appeared');
+  ok('work added after the confirmation stops the removal and asks again: files (2)');
+  await click('.modal-foot button.danger', 'Usuń mimo to');
   const t0 = Date.now();
   // The folder goes first, the branch right after it.
   while ((existsSync(worktree) || git(project, 'branch', '--list', 'mc/agent').trim()) && Date.now() - t0 < 20000) await sleep(200);

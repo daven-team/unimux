@@ -1,4 +1,4 @@
-import { open, readdir, realpath, rename, unlink } from 'fs/promises';
+import { open, readdir, realpath, rename, stat, unlink } from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { isAbsolute, relative, resolve, sep } from 'path';
 import { IGNORED_FOLDERS } from '../shared/search';
@@ -21,6 +21,14 @@ async function projectFilePath(projectRoot: string, relativePath: string, rootRe
   const [realRoot, target] = await Promise.all([rootReal ?? realpath(root), realpath(requested)]);
   if (!isInside(realRoot, target)) throw new Error('Ten link prowadzi poza folder projektu.');
   return target;
+}
+
+/** Size and modification time of a project file (null when it cannot be read): a cheap "did it change?" before reading it. */
+export async function statProjectFile(root: string, path: string): Promise<{ size: number; mtimeMs: number } | null> {
+  try {
+    const info = await stat(await projectFilePath(root, path));
+    return info.isFile() ? { size: info.size, mtimeMs: info.mtimeMs } : null;
+  } catch { return null; }
 }
 
 /** Natural, case-insensitive order of names (one collator: much faster than localeCompare with a locale per call). */

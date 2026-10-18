@@ -2,12 +2,15 @@
 // notice, a save conflict comes as a code and offers Reload / Show diff / Overwrite.
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { documentId } from '../src/shared/fileOps';
-import { lineDiff } from '../src/shared/textDiff';
+import { lineDiff, minimalChange } from '../src/shared/textDiff';
 
 interface TestDoc { id: string; text: string; savedText: string; diskText: string; error: string | null; diskConflict?: string; externalText?: string }
 let files: any;
 let disk = '';
 let writes: Array<{ text: string; expected: string }> = [];
+let reads = 0;
+/** A modification time that changes with the content (a real write moves mtime). */
+const mtimeOf = (text: string) => [...text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7);
 
 beforeAll(async () => {
   const storage = new Map<string, string>();
@@ -15,7 +18,8 @@ beforeAll(async () => {
   vi.stubGlobal('window', {
     mc: {
       platform: 'linux',
-      readProjectFile: async () => ({ kind: 'text', text: disk, size: disk.length, truncated: false }),
+      statProjectFile: async () => ({ size: disk.length, mtimeMs: mtimeOf(disk) }),
+      readProjectFile: async () => { reads++; return { kind: 'text', text: disk, size: disk.length, truncated: false }; },
       writeProjectFile: async (_p: string, _path: string, text: string, expected: string) => {
         writes.push({ text, expected });
         if (expected !== disk) return { ok: false, code: 'conflict', error: 'any wording' };
@@ -83,6 +87,33 @@ describe('files changed on disk', () => {
     await files.reloadFileFromDisk(ID);
     expect(get()).toMatchObject({ text: 'theirs\n', savedText: 'theirs\n', diskText: 'theirs\n' });
     expect(get().diskConflict).toBeUndefined();
+  });
+});
+
+describe('cheap checks', () => {
+  it('reads the text only when size or modification time changed since the last read', async () => {
+    open('one\n');
+    reads = 0;
+    await files.checkFileOnDisk(ID); // no stamp yet: one read
+    expect(reads).toBe(1);
+    await files.checkFileOnDisk(ID);
+    await files.checkFileOnDisk(ID);
+    expect(reads).toBe(1);
+    disk = 'one, then more\n';
+    await files.checkFileOnDisk(ID);
+    expect(reads).toBe(2);
+    expect(get().text).toBe('one, then more\n');
+  });
+});
+
+describe('minimalChange', () => {
+  it('replaces only the changed middle, so the editor keeps the cursor and scroll', () => {
+    expect(minimalChange('abc\ndef\nghi\n', 'abc\nDEF\nghi\n')).toEqual({ from: 4, to: 7, insert: 'DEF' });
+    expect(minimalChange('abc', 'abcd')).toEqual({ from: 3, to: 3, insert: 'd' });
+    expect(minimalChange('aaa', 'aa')).toEqual({ from: 2, to: 3, insert: '' });
+    const before = 'x'.repeat(5);
+    const { from, to, insert } = minimalChange(before, 'yy');
+    expect(before.slice(0, from) + insert + before.slice(to)).toBe('yy');
   });
 });
 
