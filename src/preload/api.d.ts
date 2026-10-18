@@ -14,7 +14,7 @@ import type { ReplaceRequest, ReplaceResult, SearchOptions, SearchResult } from 
 import type { CreateResult, DeleteResult, FileOpProgress, FileOpRequest, FileOpResult, RenameResult } from '../shared/fileOps';
 import type { GitApi } from '../shared/git';
 import type { SshApi, SshPrompt, SshSessionState, SshVaultInfo } from '../shared/ssh';
-import type { AppState, CellSession, Profile, ProjectDirectory, ProjectFilePreview, SessionInfo, UpdateState, Worktree } from '../shared/types';
+import type { AppState, CellSession, Profile, ProjectDirectory, ProjectFilePreview, SessionInfo, UpdateState, Worktree, WorktreeInspection, WorktreeRemoveResult } from '../shared/types';
 
 export type { SessionInfo };
 
@@ -89,11 +89,15 @@ export interface McApi {
   deleteProjectEntries(projectId: string, relativePaths: string[]): Promise<DeleteResult>;
   transferProjectEntries(projectId: string, request: FileOpRequest): Promise<FileOpResult>;
   cancelFileOp(opId: string): void;
-  writeProjectFile(projectId: string, relativePath: string, text: string, expectedText: string): Promise<{ ok: true } | { ok: false; error: string }>;
+  /** code 'conflict': the file on disk is not `expectedText` any more (nothing written). */
+  writeProjectFile(projectId: string, relativePath: string, text: string, expectedText: string): Promise<{ ok: true } | { ok: false; error: string; code?: 'conflict' }>;
   listSessions(projectPath: string): Promise<SessionInfo[]>;
   isGitRepo(path: string): Promise<boolean>;
   createWorktree(projectPath: string, name: string): Promise<Worktree>;
-  removeWorktree(projectPath: string, wt: Worktree, deleteBranch: boolean): Promise<void>;
+  /** What removing the worktree would lose (uncommitted files, commits the project's HEAD cannot reach). */
+  inspectWorktree(projectPath: string, wt: Worktree): Promise<WorktreeInspection>;
+  /** Without `force` main refuses (code 'unsafe') when work would be lost. */
+  removeWorktree(projectPath: string, wt: Worktree, deleteBranch: boolean, force?: boolean): Promise<WorktreeRemoveResult>;
   /** The Git panel (see shared/git.ts): every call names a project; main resolves the folder and validates the request. */
   git: GitApi;
   ssh: SshApi;

@@ -180,7 +180,10 @@ export async function readProjectFile(root: string, path: string, limit = PREVIE
   }
 }
 
-export type ProjectFileWriteResult = { ok: true } | { ok: false; error: string };
+/** 'conflict': the file on disk is not the text the editor started from (nothing was written). */
+export type ProjectFileWriteResult = { ok: true } | { ok: false; error: string; code?: 'conflict' };
+const CONFLICT = 'Plik zmienił się poza edytorem. Twój szkic został zachowany.';
+class SaveConflict extends Error { constructor() { super(CONFLICT); } }
 
 // Serialize our own saves so two tabs cannot both overwrite the same baseline.
 const saves = new Map<string, Promise<ProjectFileWriteResult>>();
@@ -221,7 +224,7 @@ async function saveText(root: string, path: string, target: string, text: string
     try { baseline = new TextDecoder(encoding, { fatal: true }).decode(bytes); }
     catch { throw new Error('Nie można edytować pliku binarnego lub nieobsługiwanego kodowania.'); }
     if (/[\x00-\x08\x0e-\x1f]/.test(baseline)) throw new Error('Nie można edytować pliku binarnego.');
-    if (baseline !== expectedText) throw new Error('Plik zmienił się poza edytorem. Twój szkic został zachowany.');
+    if (baseline !== expectedText) throw new SaveConflict();
     if (/[\x00-\x08\x0e-\x1f]/.test(text) || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(text)) throw new Error('Nieprawidłowa treść pliku.');
     // Textareas normalize line breaks. Keep each original separator (including mixed files).
     const endings = baseline.match(/\r\n|\r|\n/g) ?? [];
@@ -240,7 +243,7 @@ async function saveText(root: string, path: string, target: string, text: string
     const staged = await open(temporary, 'wx', mode);
     try { await staged.writeFile(output); await staged.sync(); }
     finally { await staged.close(); }
-    if (await projectFilePath(root, path) !== target) throw new Error('Plik zmienił się poza edytorem. Twój szkic został zachowany.');
+    if (await projectFilePath(root, path) !== target) throw new SaveConflict();
     const current = await open(target, 'r');
     let unchanged = false;
     try {
@@ -251,10 +254,10 @@ async function saveText(root: string, path: string, target: string, text: string
         unchanged = check.subarray(0, bytesRead).equals(bytes);
       }
     } finally { await current.close(); }
-    if (!unchanged) throw new Error('Plik zmienił się poza edytorem. Twój szkic został zachowany.');
+    if (!unchanged) throw new SaveConflict();
     await rename(temporary, target);
     temporary = undefined;
     return { ok: true };
-  } catch (error) { return { ok: false, error: fileError(error) }; }
+  } catch (error) { return error instanceof SaveConflict ? { ok: false, code: 'conflict', error: CONFLICT } : { ok: false, error: fileError(error) }; }
   finally { if (temporary) await unlink(temporary).catch(() => undefined); }
 }

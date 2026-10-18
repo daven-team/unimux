@@ -146,3 +146,8 @@
   .file-workspace-editor .markdown-view-toggle .btn { padding: 0 5px; font-size: 10px; }
   .file-workspace-editor .file-breadcrumb li:not(:last-child) { max-width: 80px; }
 }
+
+/* A file changed on disk while the tab has unsaved edits: the notice and its three choices. */
+.file-disk-conflict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.file-disk-conflict-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.file-conflict-diff { flex: 1; min-height: 0; overflow: auto; }

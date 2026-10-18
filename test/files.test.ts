@@ -127,9 +127,20 @@ describe('safe project file editing', () => {
 
   it('rejects an external edit without changing bytes or leaving temporary files', async () => {
     await writeFile(join(root, 'conflict.txt'), 'external');
-    expect(await writeProjectFile(root, 'conflict.txt', 'draft', 'original')).toMatchObject({ ok: false, error: expect.stringContaining('zmienił') });
+    // The renderer tells a conflict by its code, never by the (Polish) message.
+    expect(await writeProjectFile(root, 'conflict.txt', 'draft', 'original')).toMatchObject({ ok: false, code: 'conflict', error: expect.stringContaining('zmienił') });
     expect(await readFile(join(root, 'conflict.txt'), 'utf8')).toBe('external');
     expect((await readdir(root)).filter((name) => name.includes('.mc-save-'))).toEqual([]);
+    // "Overwrite (keep mine)": the same draft against the text now on disk is written.
+    expect(await writeProjectFile(root, 'conflict.txt', 'draft', 'external')).toEqual({ ok: true });
+    expect(await readFile(join(root, 'conflict.txt'), 'utf8')).toBe('draft');
+  });
+
+  it('other save failures carry no conflict code', async () => {
+    await writeFile(join(root, 'bad-text.txt'), 'ok');
+    const result = await writeProjectFile(root, 'bad-text.txt', 'a\u0001b', 'ok');
+    expect(result).toMatchObject({ ok: false });
+    expect(result).not.toHaveProperty('code');
   });
 
   it('serializes concurrent saves to the same baseline', async () => {

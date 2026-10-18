@@ -198,3 +198,52 @@ describe('incremental session reading', () => {
     expect(codexCacheStats().dirReads).toBe(4); // sessions, 2026, 10, 02
   });
 });
+
+describe('sessions of worktree folders', () => {
+  it('lists conversations of known and removed `<repo>-wt-*` worktrees, labelled, and never of unrelated folders', async () => {
+    clearClaudeCache();
+    clearCodexCache();
+    const home = mkdtempSync(join(tmpdir(), 'mc-home-wt-'));
+    const parent = mkdtempSync(join(tmpdir(), 'mc-parent-'));
+    const project = join(parent, 'app');
+    const live = join(parent, 'app-wt-grid-1'); // open cell, branch known from state
+    const loose = join(parent, 'app-wt-left'); // still on disk, no cell knows it: branch asked from git
+    const removed = join(parent, 'app-wt-old'); // folder gone
+    const unrelated = join(parent, 'app-wt-x', 'nested'); // deeper than a worktree folder
+    const other = join(parent, 'apple-wt-1'); // another project's worktree
+    for (const dir of [project, live, loose]) mkdirSync(dir, { recursive: true });
+    const claude = (cwd: string, id: string, text: string) => {
+      const dir = join(home, '.claude', 'projects', claudeProjectDirName(cwd));
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${id}.jsonl`), jsonl([{ type: 'user', message: { content: text }, sessionId: id, cwd, timestamp: '2026-10-01T10:00:00Z' }]));
+    };
+    claude(project, 'main', 'main project');
+    claude(live, 'live', 'in the live worktree');
+    claude(removed, 'gone', 'in a removed worktree');
+    claude(unrelated, 'nested', 'nested folder');
+    claude(other, 'apple', 'other project');
+    const xdir = join(home, '.codex', 'sessions', '2026', '10', '06');
+    mkdirSync(xdir, { recursive: true });
+    const codex = (id: string, cwd: string, text: string) => writeFileSync(join(xdir, `rollout-2026-10-06T10-00-00-${id}.jsonl`), jsonl([
+      { type: 'session_meta', payload: { id, cwd, timestamp: '2026-10-06T10:00:00Z' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } },
+    ]));
+    codex('cx-loose', loose, 'codex in the loose worktree');
+    codex('cx-other', other, 'codex elsewhere');
+
+    const branchOf = async (path: string) => (path === loose ? 'mc/left' : undefined);
+    const list = await listSessionsAsync(home, project, [{ path: live, branch: 'mc/grid-1' }], branchOf);
+    const byId = Object.fromEntries(list.map((s) => [s.id, s]));
+    expect(Object.keys(byId).sort()).toEqual(['cx-loose', 'gone', 'live', 'main']);
+    expect(byId.main.worktree).toBeUndefined();
+    expect(byId.live.worktree).toEqual({ path: live, label: 'mc/grid-1', branch: 'mc/grid-1', exists: true });
+    expect(byId['cx-loose'].worktree).toEqual({ path: loose, label: 'mc/left', branch: 'mc/left', exists: true });
+    expect(byId.gone.worktree).toEqual({ path: removed, label: 'app-wt-old', exists: false });
+
+    // Without worktree hints the pattern still finds them; the project's own listing is unchanged.
+    expect((await listSessionsAsync(home, project)).map((s) => s.id).sort()).toEqual(['cx-loose', 'gone', 'live', 'main']);
+    expect((await listClaudeSessionsAsync(home, project)).map((s) => s.id)).toEqual(['main']);
+    rmSync(home, { recursive: true, force: true });
+    rmSync(parent, { recursive: true, force: true });
+  });
+});

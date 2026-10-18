@@ -174,6 +174,9 @@ function HistoryModal({ projectId }: { projectId: string }) {
               <div key={x.cli + x.id} className="hist-item">
                 <span className={`cli ${x.cli}`}>{x.cli}</span>
                 <span className="htitle" title={x.title}>{x.title}</span>
+                {x.worktree && <span className={`tag hist-worktree ${x.worktree.exists ? '' : 'gone'}`} title={x.worktree.path}>
+                  {x.worktree.exists ? tr('worktree {name}', { name: x.worktree.label }) : tr('worktree {name} (usunięty)', { name: x.worktree.label })}
+                </span>}
                 {openIds.has(x.id) && <span className="tag">{tr("otwarta")}</span>}
                 <span className="hmeta">{formatAgo(language, x.updatedAt)}</span>
                 {isActive && (

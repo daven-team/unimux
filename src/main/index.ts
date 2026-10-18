@@ -11,7 +11,7 @@ import type { HostToMain } from '../shared/ipc';
 import { buildLaunchCommand, type LaunchOptions } from '../shared/profiles';
 import { endCellMcp, prepareCellMcp } from './mcpCellConfig';
 import type { AppState, Worktree } from '../shared/types';
-import { appPlatform } from '../shared/platform';
+import { appPlatform, normalizeProjectPath } from '../shared/platform';
 import { detectLanguage } from '../shared/languages';
 import { CHROMIUM_WEBGL_CONTEXTS } from '../shared/terminalLimits';
 import { translate, type MessageKey, type MessageParams } from '../shared/i18n';
@@ -64,7 +64,7 @@ import { fetchClaude, fetchCodex, type FetcherDeps } from './usage/fetchers';
 import { UsageService } from './usage/service';
 import { MAIN_ACCOUNTS } from '../shared/usage';
 import type { UpdateStrings } from '../shared/updateProgress';
-import { createWorktree, isGitRepo, removeWorktree } from './worktree';
+import { createWorktree, currentBranch, inspectWorktree, isGitRepo, removeWorktree } from './worktree';
 import { StateController } from './stateController';
 import { SshCoordinator } from './ssh/coordinator';
 import { createSshHandlers, readKeyFileFromDisk, registerSshIpc } from './ssh/ipc';
@@ -551,7 +551,8 @@ const controller = new StateController(state, (snapshot) => {
 });
 const automation = new AutomationService(controller, {
   createWorktree,
-  removeWorktree: (path, wt) => removeWorktree(path, wt, true),
+  // Rolls back worktrees it has just created (nothing in them yet), as before: forced.
+  removeWorktree: async (path, wt) => { await removeWorktree(path, wt, true, true); },
   startCells: (ids) => send('automation:start-cells', ids),
   missingCli: (profileId) => {
     const profile = state.profiles.find((p) => p.id === profileId);
@@ -1110,7 +1111,13 @@ guardedHandle('fs:writeProjectFile', (_e, projectId: string, path: string, text:
   return project ? writeProjectFile(project.path, path, text, expectedText) : { ok: false, error: 'Projekt już nie istnieje.' };
 }, () => ({ ok: false, error: 'Projekt już nie istnieje.' }));
 registerFileOpsIpc({ projectPath: (projectId) => state.projects.find((p) => p.id === projectId)?.path, send, allowed: fromAppWindow });
-ipcMain.handle('sessions:list', (_e, projectPath: string) => listSessionsAsync(homedir(), projectPath));
+/** Worktrees of the project's cells, open and in closed grids (History lists their conversations too). */
+function projectWorktrees(projectPath: string): Worktree[] {
+  const key = normalizeProjectPath(projectPath);
+  return state.projects.filter((p) => normalizeProjectPath(p.path) === key)
+    .flatMap((p) => [...p.tabs, ...p.archive].flatMap((t) => t.cells.flatMap((c) => (c.worktree ? [c.worktree] : []))));
+}
+ipcMain.handle('sessions:list', (_e, projectPath: string) => listSessionsAsync(homedir(), projectPath, projectWorktrees(projectPath), currentBranch));
 registerGitIpc({
   projectPath: (projectId) => state.projects.find((p) => p.id === projectId)?.path,
   worktreePaths: (projectId) => state.projects.find((p) => p.id === projectId)?.tabs.flatMap((t) => t.cells.flatMap((c) => (c.worktree ? [c.worktree.path] : []))) ?? [],
@@ -1119,7 +1126,8 @@ registerGitIpc({
 });
 ipcMain.handle('git:isRepo', (_e, p: string) => isGitRepo(p));
 guardedHandle('git:createWorktree', (_e, p: string, name: string) => createWorktree(p, name), () => Promise.reject(new Error('Refused.')));
-guardedHandle('git:removeWorktree', (_e, p: string, wt: Worktree, del: boolean) => removeWorktree(p, wt, del), () => Promise.reject(new Error('Refused.')));
+guardedHandle('git:inspectWorktree', (_e, p: string, wt: Worktree) => inspectWorktree(p, wt), () => Promise.reject(new Error('Refused.')));
+guardedHandle('git:removeWorktree', (_e, p: string, wt: Worktree, del: boolean, force: boolean) => removeWorktree(p, wt, del, force === true), () => Promise.reject(new Error('Refused.')));
 
 guardedOn('notify', (_e, n: { title: string; body: string; cellId: string }) => {
   if (!n || typeof n !== 'object' || typeof n.title !== 'string' || typeof n.body !== 'string' || (n.cellId !== undefined && typeof n.cellId !== 'string')) return;

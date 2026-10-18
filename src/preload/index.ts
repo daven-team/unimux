@@ -49,7 +49,8 @@ const api: McApi = {
   listSessions: (projectPath) => ipcRenderer.invoke('sessions:list', projectPath),
   isGitRepo: (path) => ipcRenderer.invoke('git:isRepo', path),
   createWorktree: (projectPath, name) => ipcRenderer.invoke('git:createWorktree', projectPath, name),
-  removeWorktree: (projectPath, wt, deleteBranch) => ipcRenderer.invoke('git:removeWorktree', projectPath, wt, deleteBranch),
+  inspectWorktree: (projectPath, wt) => ipcRenderer.invoke('git:inspectWorktree', projectPath, wt),
+  removeWorktree: (projectPath, wt, deleteBranch, force) => ipcRenderer.invoke('git:removeWorktree', projectPath, wt, deleteBranch, force === true),
   git: {
     probe: (projectId) => ipcRenderer.invoke('git:probe', projectId),
     init: (projectId) => ipcRenderer.invoke('git:init', projectId),
