@@ -3,7 +3,8 @@ import { windowIcon } from './appIcon';
 import { join } from 'path';
 import type { UpdateStage } from '../shared/updateProgress';
 import type { GateView } from './startupGate';
-import { safeSend } from './safeWindow';
+import { isFromWindow, safeSend } from './safeWindow';
+import { createIpcGuard } from './ipcGuard';
 
 export interface GateTexts {
   checking: string;
@@ -64,11 +65,14 @@ export function createGateWindow(texts: GateTexts, currentVersion: string): { sh
   /** "Install now" of the 'ask' prompt; ignored at any other stage. */
   const requestInstall = () => { if (latest?.stage === 'ask') install?.(); };
 
+  // The gate window's own channels answer only the gate window itself (R9); the main window never uses them.
+  const { guardedHandle, guardedOn } = createIpcGuard(ipcMain, (event) => isFromWindow(win, event));
+
   const create = () => {
     ipcMain.removeHandler('update-splash:init');
-    ipcMain.handle('update-splash:init', () => ({
+    guardedHandle('update-splash:init', () => ({
       title: latest?.title ?? '', hint: latest?.hint ?? '', fromVersion: currentVersion, version: '', state: latest, open: '', close: texts.close,
-    }));
+    }), () => null);
     win = new BrowserWindow({
       width: 440, height: 200, resizable: false, maximizable: false, minimizable: false, fullscreenable: false,
       frame: false, show: false, center: true, alwaysOnTop: true, backgroundColor: '#0d0d0d', title: 'unimux',
@@ -78,9 +82,9 @@ export function createGateWindow(texts: GateTexts, currentVersion: string): { sh
     });
     win.setMenu(null);
     ipcMain.removeAllListeners('update-splash:close');
-    ipcMain.on('update-splash:close', requestClose);
+    guardedOn('update-splash:close', requestClose);
     ipcMain.removeAllListeners('update-splash:open');
-    ipcMain.on('update-splash:open', requestInstall);
+    guardedOn('update-splash:open', requestInstall);
     win.on('close', (e) => { if (latest?.closable) { e.preventDefault(); requestClose(); } });
     win.webContents.on('will-navigate', (e) => e.preventDefault());
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

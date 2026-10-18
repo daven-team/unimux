@@ -21,6 +21,7 @@ import { PromptFiles, pruneCellFiles, removeCellFiles } from './cellFiles';
 import { applyDockIcon, windowIcon } from './appIcon';
 import { LARGE_VIEW_BYTES, listProjectDirectories, listProjectDirectory, listProjectDirectoryBatch, readProjectFile, writeProjectFile } from './files';
 import { registerFileOpsIpc } from './filesIpc';
+import { createIpcGuard } from './ipcGuard';
 import { registerGitIpc } from './gitIpc';
 import { replaceInProject, searchProject } from './search';
 import type { ReplaceRequest, SearchOptions } from '../shared/search';
@@ -43,7 +44,8 @@ import { AccountsStore } from './accounts/store';
 import { dismissAccountNotice, gateFamilyRefresh, gateProfileRefresh, handleAdoptCopy, handleRemoveAccount, loginBlock } from './accounts/guards';
 import { registerAccountIpc } from './accountsIpc';
 import { createSecretClipboard } from '../shared/sshClipboard';
-import { clearPendingSwap, hasPendingSwap, isSwapRunning, isSwapUnresolved, recoverInterruptedSwap, swapPaths, type SwapDeps } from './accounts/swap';
+import { clearPendingSwap, hasPendingSwap, isSwapRunning, isSwapUnresolved, recoverInterruptedSwap, swapIdle, swapPaths, type SwapDeps } from './accounts/swap';
+import { QUIT_SWAP_AFTER_CELLS_MS, QUIT_SWAP_WAIT_MS, waitUntilIdle } from './quitWait';
 import {
   activateAccount, activationJournalPending, checkActivationTarget, clearPendingActivation, isActivationRecoveryPending, recoverActivationWithRetry,
   recoverInterruptedActivation, startActivationRecoveryRetry, type ActivateDeps,
@@ -210,6 +212,8 @@ let win: BrowserWindow | null = null;
 const appStartClaim = createAppStartClaim();
 /** The sender check of every IPC channel that changes accounts, logins, usage, SSH data or the secret clipboard (R9). */
 const fromAppWindow = (event: { sender: unknown; senderFrame?: unknown }): boolean => isFromWindow(win, event);
+/** The same check for every other channel that changes something (0.9.6, ipcGuard.ts); pure reads stay on ipcMain. */
+const { guardedHandle, guardedOn } = createIpcGuard(ipcMain, fromAppWindow);
 /** SSH sessions: created after app.whenReady() (safeStorage needs it), before the window (startSsh). */
 let ssh: SshCoordinator | null = null;
 // A second instance never reads (nor backs up) the state: it only hands over to the first one and exits.
@@ -265,7 +269,10 @@ const usage = new UsageService({
     if (isActivationRecoveryPending()) await retryActivationRecovery();
     // A re-login whose restore failed earlier is tried again (the card stays set aside until it works). The poll waits for it
     // briefly only: a restore waiting for Claude Code's locks goes on by itself instead of delaying every account's read.
+    // A poll already running when the app quits (usage.stop() does not abort it) starts no further account work.
+    if (quitting) return;
     await login.retryParkedRestores(PARKED_RESTORE_WAIT_MS).catch(() => undefined);
+    if (quitting) return;
     // During a main login the roles stay as they are, but the outgoing live login keeps being backed up.
     if (login.isMainActive()) await resyncOutgoingWhenIdle(liveGuard(), reconcileDeps()).catch(() => null);
     else await reconcileIdle();
@@ -383,6 +390,7 @@ const guardDeps = { swapRunning: isSwapRunning, swapPending: () => hasPendingSwa
 const readLiveIdentity = () => readLiveClaudeIdentity(usageDeps.credentials);
 /** One more try of a version-2 recovery that found Claude Code's locks busy (from the polls and from its own timer). */
 async function retryActivationRecovery(): Promise<void> {
+  if (quitting) return; // no new account work once the app quits
   const recovered = await recoverInterruptedActivation(activateDeps()).catch(() => 'manual' as const);
   if (recovered !== 'locked') void pushSwapPending();
 }
@@ -417,6 +425,7 @@ let ownLoginChange = false;
 const liveGuard = () => ({ swapUnresolved: isSwapUnresolved, journalPending: () => activationJournalPending(activateDeps()) });
 /** Reconciles the live login holding the swap slot; skipped while a swap, a login or an activation journal is pending. */
 function reconcileIdle(): Promise<boolean> {
+  if (quitting) return Promise.resolve(false); // no new account work once the app quits
   return reconcileWhenIdle({ ...liveGuard(), loginActive: () => login.isActive() }, async () => {
     // The own change is used by this one reconcile, also when it fails halfway.
     const ownChange = ownLoginChange;
@@ -605,7 +614,7 @@ async function startMcp(retries = 2): Promise<void> {
   mcpStarting = false;
   send('mcp:info', mcpInfo());
 }
-ipcMain.handle('mcp:retry', async () => { if (!mcp.getInfo().running) await startMcp(0); return mcpInfo(); });
+guardedHandle('mcp:retry', async () => { if (!mcp.getInfo().running) await startMcp(0); return mcpInfo(); }, () => mcpInfo());
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -893,7 +902,7 @@ function boundCodexIds(): Set<string> {
  * Codex picks its own session id. The renderer calls this right after a Codex cell finished a
  * turn: its rollout file was just written, so the freshest unclaimed one in that cwd is the cell's.
  */
-ipcMain.handle('codex:bind', async (_e, cellId: string, cwd: string) => {
+guardedHandle('codex:bind', async (_e, cellId: string, cwd: string) => {
   const peers = state.projects.flatMap((p) => p.tabs.flatMap((t) => t.cells
     .filter((c) => alive.has(c.id) && getProfile(state, c.profileId).cli === 'codex' && (c.worktree?.path ?? p.path) === cwd)));
   // Shared-directory simultaneous starts are ambiguous. Never guess a message recipient.
@@ -905,21 +914,22 @@ ipcMain.handle('codex:bind', async (_e, cellId: string, cwd: string) => {
   claimedCodex.add(id);
   send('cell:session', cellId, { cli: 'codex', id, confirmed: false });
   return id;
-});
+}, () => null);
 
 // ── ipc ─────────────────────────────────────────────────────────────────────
 
 ipcMain.handle('state:load', () => state);
 ipcMain.handle('state:snapshot', () => controller.snapshot());
 // The answer is an acknowledgement; the new state reaches the renderer once, as the patch `state:changed` carries.
-ipcMain.handle('state:edit', (_e, edit: StateEdit) => { const { revision, editId } = controller.apply(edit); return { revision, editId }; });
+// A foreign sender is refused the way an edit the controller rejects is: a rejected call.
+guardedHandle('state:edit', (_e, edit: StateEdit) => { const { revision, editId } = controller.apply(edit); return { revision, editId }; }, () => Promise.reject(new Error('Refused.')));
 ipcMain.handle('mcp:info', (): McpInfo => mcpInfo());
-ipcMain.handle('automation:execute', (_e, operation: AutomationOperation, input: unknown) => {
+guardedHandle('automation:execute', (_e, operation: AutomationOperation, input: unknown) => {
   if (!Object.hasOwn(automationSchemas, operation)) throw new Error('Unknown operation.');
   return automation.execute(operation, input);
-});
+}, () => Promise.reject(new Error('Unknown operation.')));
 
-ipcMain.handle('cell:spawn', (_e, req: SpawnCellRequest) => spawnRequest(req));
+guardedHandle('cell:spawn', (_e, req: SpawnCellRequest) => spawnRequest(req), (): SpawnResult => ({ ok: false, error: 'invalid request' }));
 type SpawnResult = { ok: true } | { ok: false; error: string; cliMissing?: CliId; cliStatus?: CliStatus };
 async function spawnRequest(req: SpawnCellRequest): Promise<SpawnResult> {
   // A file write that fails (an antivirus lock on the hooks file, a full disk) answers with an error the cell shows, never a
@@ -997,7 +1007,7 @@ async function spawnRequestUnsafe(req: SpawnCellRequest): Promise<SpawnResult> {
   startupTimer.mark('first-spawn');
   return { ok: true };
 }
-ipcMain.on('cell:kill', (_e, id: string) => {
+guardedOn('cell:kill', (_e, id: string) => {
   noteKill(id);
   ssh?.killed(id);
   endCellMcp(mcp, MCP_DIR, id);
@@ -1006,7 +1016,7 @@ ipcMain.on('cell:kill', (_e, id: string) => {
   alive.delete(id);
   ptyHost.kill(id);
 });
-ipcMain.handle('cell:killAndWait', async (_e, id: string) => {
+guardedHandle('cell:killAndWait', async (_e, id: string) => {
   noteKill(id);
   ssh?.killed(id);
   endCellMcp(mcp, MCP_DIR, id);
@@ -1014,21 +1024,22 @@ ipcMain.handle('cell:killAndWait', async (_e, id: string) => {
   automation.statuses.set(id, 'exited');
   alive.delete(id);
   await ptyHost.killAndWait(id);
-});
+}, () => undefined);
 ipcMain.handle('cell:alive', () => [...alive]);
 // True for the first app window renderer that asks in this app run, false for every later one (a reload, a crash reload) and
 // after a Pty Host restart: SSH hosts with "Łącz ponownie po uruchomieniu aplikacji" connect at an app start only.
 ipcMain.handle('app:claimStart', (e) => appStartClaim.claim(fromAppWindow(e)));
 const cliHandlers = createCliHandlers(cliDetector, (url) => { void shell.openExternal(url); });
 ipcMain.handle('cli:status', () => cliHandlers.status());
-ipcMain.handle('cli:recheck', (_e, id?: unknown) => cliHandlers.recheck(id));
-ipcMain.on('cli:openDocs', (_e, id?: unknown) => { cliHandlers.openDocs(id); });
+// A recheck runs the detection (it starts processes); a foreign sender gets the cached answer.
+guardedHandle('cli:recheck', (_e, id?: unknown) => cliHandlers.recheck(id), () => cliHandlers.status());
+guardedOn('cli:openDocs', (_e, id?: unknown) => { cliHandlers.openDocs(id); });
 const installHandlers = createInstallHandlers(install);
 ipcMain.handle('install:options', (_e, cli?: unknown) => installHandlers.options(cli));
-ipcMain.handle('install:start', (_e, request?: unknown) => installHandlers.start(request));
-ipcMain.on('install:cancel', (_e, id?: unknown) => { installHandlers.cancel(id); });
+guardedHandle('install:start', (_e, request?: unknown) => installHandlers.start(request), () => ({ ok: false, error: 'invalid' }));
+guardedOn('install:cancel', (_e, id?: unknown) => { installHandlers.cancel(id); });
 ipcMain.handle('install:current', () => installHandlers.current());
-ipcMain.on('cell:runtime', (_e, cellId: string, status: string, reason?: string, hooked?: boolean) => {
+guardedOn('cell:runtime', (_e, cellId: string, status: string, reason?: string, hooked?: boolean) => {
   const found = findCell(state, cellId);
   if (!found || !alive.has(cellId)) return;
   // The renderer's StatusTracker decides; heuristics (hooked = false) never yield "ready".
@@ -1039,21 +1050,21 @@ ipcMain.on('cell:runtime', (_e, cellId: string, status: string, reason?: string,
 /** Opens the dialog on the main window while it exists, free-standing otherwise. */
 const showOpen = (options: OpenDialogOptions) => (isLive(win) ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options));
 
-ipcMain.handle('dialog:pickFolder', async () => {
+guardedHandle('dialog:pickFolder', async () => {
   const r = await showOpen({ properties: ['openDirectory'], title: tr('Wybierz folder projektu') });
   return r.canceled ? null : r.filePaths[0];
-});
-ipcMain.handle('sound:pick', async () => {
+}, () => null);
+guardedHandle('sound:pick', async () => {
   const r = await showOpen({
     properties: ['openFile'],
     title: tr('Wybierz plik dźwiękowy'),
     filters: [{ name: tr('Pliki dźwiękowe'), extensions: [...SOUND_EXTENSIONS] }],
   });
   return r.canceled || !isSoundFile(r.filePaths[0]) ? null : r.filePaths[0];
-});
+}, () => null);
 // The path is never taken from the renderer: only the saved setting of that event (set from the dialog result) is read.
 ipcMain.handle('sound:load', (_e, event?: unknown, knownKey?: unknown) => loadEventSound(state.settings.alerts, event, knownKey));
-ipcMain.on('sound:beep', () => shell.beep());
+guardedOn('sound:beep', () => shell.beep());
 ipcMain.handle('fs:exists', (_e, p: string) => pathExists(p));
 /** Files dropped from the system file manager: whether each absolute path is a folder, a file or gone. */
 ipcMain.handle('fs:pathKinds', async (_e, paths: unknown): Promise<Array<'dir' | 'file' | null>> => {
@@ -1086,30 +1097,31 @@ ipcMain.handle('fs:searchProject', async (e, projectId: string, options: SearchO
   try { return await searchProject(project.path, options, Date.now, controller.signal); }
   finally { if (searches.get(e.sender.id) === controller) searches.delete(e.sender.id); }
 });
-ipcMain.handle('fs:replaceInProject', (_e, projectId: string, request: ReplaceRequest) => {
+guardedHandle('fs:replaceInProject', (_e, projectId: string, request: ReplaceRequest) => {
   const project = state.projects.find((p) => p.id === projectId);
   return project ? replaceInProject(project.path, request) : { ok: false, error: 'Projekt już nie istnieje.' };
-});
+}, () => ({ ok: false, error: 'Projekt już nie istnieje.' }));
 ipcMain.handle('fs:readProjectFile', (_e, projectId: string, path: string, large?: boolean) => {
   const project = state.projects.find((p) => p.id === projectId);
   return project ? readProjectFile(project.path, path, large === true ? LARGE_VIEW_BYTES : undefined) : { kind: 'error', message: 'Projekt już nie istnieje.' };
 });
-ipcMain.handle('fs:writeProjectFile', (_e, projectId: string, path: string, text: string, expectedText: string) => {
+guardedHandle('fs:writeProjectFile', (_e, projectId: string, path: string, text: string, expectedText: string) => {
   const project = state.projects.find((p) => p.id === projectId);
   return project ? writeProjectFile(project.path, path, text, expectedText) : { ok: false, error: 'Projekt już nie istnieje.' };
-});
-registerFileOpsIpc({ projectPath: (projectId) => state.projects.find((p) => p.id === projectId)?.path, send });
+}, () => ({ ok: false, error: 'Projekt już nie istnieje.' }));
+registerFileOpsIpc({ projectPath: (projectId) => state.projects.find((p) => p.id === projectId)?.path, send, allowed: fromAppWindow });
 ipcMain.handle('sessions:list', (_e, projectPath: string) => listSessionsAsync(homedir(), projectPath));
 registerGitIpc({
   projectPath: (projectId) => state.projects.find((p) => p.id === projectId)?.path,
   worktreePaths: (projectId) => state.projects.find((p) => p.id === projectId)?.tabs.flatMap((t) => t.cells.flatMap((c) => (c.worktree ? [c.worktree.path] : []))) ?? [],
   trustFile: join(DATA_DIR, 'git-trust.json'),
+  allowed: fromAppWindow,
 });
 ipcMain.handle('git:isRepo', (_e, p: string) => isGitRepo(p));
-ipcMain.handle('git:createWorktree', (_e, p: string, name: string) => createWorktree(p, name));
-ipcMain.handle('git:removeWorktree', (_e, p: string, wt: Worktree, del: boolean) => removeWorktree(p, wt, del));
+guardedHandle('git:createWorktree', (_e, p: string, name: string) => createWorktree(p, name), () => Promise.reject(new Error('Refused.')));
+guardedHandle('git:removeWorktree', (_e, p: string, wt: Worktree, del: boolean) => removeWorktree(p, wt, del), () => Promise.reject(new Error('Refused.')));
 
-ipcMain.on('notify', (_e, n: { title: string; body: string; cellId: string }) => {
+guardedOn('notify', (_e, n: { title: string; body: string; cellId: string }) => {
   if (!n || typeof n !== 'object' || typeof n.title !== 'string' || typeof n.body !== 'string' || (n.cellId !== undefined && typeof n.cellId !== 'string')) return;
   if (!Notification.isSupported()) return;
   const notification = new Notification(notificationOptions(n));
@@ -1132,19 +1144,18 @@ ipcMain.on('notify', (_e, n: { title: string; body: string; cellId: string }) =>
 });
 /** Errors of the renderer (error boundaries, window.onerror, unhandled rejections) for crash.log; packaged builds keep no console. */
 const allowRendererReport = createReportLimiter();
-ipcMain.on('app:reportError', (e, kind: unknown, message: unknown, stack: unknown) => {
-  if (!isLive(win) || e.sender !== win!.webContents) return;
+guardedOn('app:reportError', (_e, kind: unknown, message: unknown, stack: unknown) => {
   const line = rendererReport(kind, message, stack);
   if (line && allowRendererReport(Date.now())) crashLog.error(line);
 });
 /** Startup marks of the renderer (its boot finished, the first terminal output arrived): a fixed list, from the app window only. */
-ipcMain.on('app:startupMark', (e, name: unknown) => {
-  if (!isLive(win) || e.sender !== win!.webContents || !isRendererMark(name) || startupTimer.has(name)) return;
+guardedOn('app:startupMark', (_e, name: unknown) => {
+  if (!isRendererMark(name) || startupTimer.has(name)) return;
   startupTimer.mark(name);
   void startupLog.flush();
 });
-ipcMain.handle('clipboard:read', () => clipboard.readText());
-ipcMain.on('clipboard:write', (_e, text: unknown) => { if (typeof text === 'string') clipboard.writeText(text); });
+guardedHandle('clipboard:read', () => clipboard.readText(), () => '');
+guardedOn('clipboard:write', (_e, text: unknown) => { if (typeof text === 'string') clipboard.writeText(text); });
 /** A copied private key (0.9.3): the clearing waits here, not in the window, so a reload or quit within the minute still clears it. */
 const secretClipboard = createSecretClipboard({
   read: () => clipboard.readText(),
@@ -1156,23 +1167,23 @@ const secretClipboard = createSecretClipboard({
 /** Clears a still waiting copied key now; resolves within `ms` whatever the clipboard does. */
 const flushSecretClipboard = (ms = 400): Promise<void> =>
   Promise.race([secretClipboard.flush().catch(() => undefined), new Promise<void>((resolve) => setTimeout(resolve, ms))]);
-ipcMain.handle('clipboard:writeSecret', async (e, text: unknown) => {
-  if (!fromAppWindow(e) || typeof text !== 'string' || !text) return false;
+guardedHandle('clipboard:writeSecret', async (_e, text: unknown) => {
+  if (typeof text !== 'string' || !text) return false;
   await secretClipboard.copy(text);
   return true;
-});
+}, () => false);
 // A quit that skips the wind-down below (an update taking over) still clears a waiting key before the process ends.
 app.on('will-quit', (e) => {
   if (!secretClipboard.pending()) return;
   e.preventDefault();
   void flushSecretClipboard().then(() => app.exit(0));
 });
-ipcMain.on('shell:openExternal', (_e, address: string) => {
+guardedOn('shell:openExternal', (_e, address: string) => {
   try { const url = new URL(address); if (['http:', 'https:'].includes(url.protocol)) void shell.openExternal(url.href); } catch { /* invalid address */ }
 });
 const isPathArg = (p: unknown): p is string => typeof p === 'string' && p.length > 0 && !p.includes('\0');
-ipcMain.on('shell:openPath', (_e, p: unknown) => { if (isPathArg(p)) void shell.openPath(p).catch(() => undefined); });
-ipcMain.on('shell:revealPath', (_e, p: unknown) => { if (isPathArg(p)) shell.showItemInFolder(p); });
+guardedOn('shell:openPath', (_e, p: unknown) => { if (isPathArg(p)) void shell.openPath(p).catch(() => undefined); });
+guardedOn('shell:revealPath', (_e, p: unknown) => { if (isPathArg(p)) shell.showItemInFolder(p); });
 const changelog = createChangelog({
   cacheFile: join(DATA_DIR, 'changelog.json'),
   fetchJson: async (url) => {
@@ -1181,7 +1192,8 @@ const changelog = createChangelog({
     return response.json();
   },
 });
-ipcMain.handle('changelog:get', (_e, force: boolean) => changelog.get(force));
+// `force` skips the freshness check (a GitHub request each time): a foreign sender only ever gets the cached answer.
+guardedHandle('changelog:get', (_e, force: boolean) => changelog.get(force), () => changelog.get(false));
 // Accounts, login and usage (0.9.3): everything that changes something only answers the app window (accountsIpc.ts).
 registerAccountIpc(ipcMain, {
   getUsage: () => usage.getState(),
@@ -1234,12 +1246,13 @@ registerAccountIpc(ipcMain, {
       send('usage:state', usage.getState());
     }
   },
-}, fromAppWindow, accountsReady.promise);
+}, fromAppWindow, accountsReady.promise, () => quitting);
 usage.onChange((snapshot) => send('usage:state', snapshot));
-ipcMain.handle('update:check', () => checkForUpdates());
+// A check changes the update state (and may start a download); a foreign sender gets nothing done.
+guardedHandle('update:check', () => checkForUpdates(), () => undefined);
 ipcMain.handle('update:get', () => ({ ...getUpdateState(), currentVersion: app.getVersion() }));
-ipcMain.on('update:install', () => openInstallWindow());
-ipcMain.on('update:open', () => shell.openExternal(RELEASES_URL));
+guardedOn('update:install', () => openInstallWindow());
+guardedOn('update:open', () => shell.openExternal(RELEASES_URL));
 /** `cursor` / `code` found on PATH, looked up without blocking main (a slow PATH on network drives) and kept for a few minutes. */
 let editorLookup: { at: number; found: Promise<string | undefined> } | undefined;
 const EDITOR_LOOKUP_MS = 5 * 60_000;
@@ -1252,7 +1265,7 @@ function findEditor(): Promise<string | undefined> {
   editorLookup = { at: Date.now(), found };
   return found;
 }
-ipcMain.on('shell:openInEditor', (_e, p: unknown) => {
+guardedOn('shell:openInEditor', (_e, p: unknown) => {
   if (!isPathArg(p)) return;
   void findEditor().then((editor) => openInEditor(p, editor)).catch((error) => crashLog.warn(`open in editor failed: ${describeError(error)}`));
 });
@@ -1444,11 +1457,13 @@ async function startMainApp(): Promise<void> {
   await Promise.all([services, accountsDone]);
 }
 
+/** Stops the timer that retries a 'locked' activation recovery (the quit calls it). */
+let stopActivationRetry: (() => void) | undefined;
 /** Startup account work; account IPC and the usage polls wait for it (`accountsReady`). */
 async function recoverAccounts(): Promise<void> {
   try { await recoverActivation(); } finally { accountsRecovered.open(); }
   // A recovery still 'locked' is retried by its own timer too: the polls do not run while the limits panel is off.
-  startActivationRecoveryRetry(retryActivationRecovery);
+  if (!quitting) stopActivationRetry = startActivationRecoveryRetry(retryActivationRecovery);
   // 0.9.0 -> 0.9.1: identities and duplicates of the saved accounts (once; nothing is deleted).
   try { await migrateAccounts(migrationDeps()); } catch { /* retried at the next start */ }
   startupTimer.mark('accounts-migrated');
@@ -1459,7 +1474,9 @@ async function recoverActivation(): Promise<void> {
   // first a 0.9.1 (version 2) journal, otherwise the 0.9.0 recovery decides.
   try {
     // Shorter lock waits here: account actions wait for this; a recovery still 'locked' is retried by the polls.
-    if ((await recoverActivationWithRetry({ ...activateDeps(), locks: { timeoutMs: 3_000 } })) === 'legacy') await recoverInterruptedSwap(swapDeps());
+    // Once the app quits no further attempt (nor the legacy recovery) starts: the journal stays and the next start retries.
+    const recovered = await recoverActivationWithRetry({ ...activateDeps(), locks: { timeoutMs: 3_000 } }, undefined, undefined, () => quitting);
+    if (recovered === 'legacy' && !quitting) await recoverInterruptedSwap(swapDeps());
   } catch { /* the journal stays and the next start retries */ }
   startupTimer.mark('accounts-recovered');
 }
@@ -1510,6 +1527,7 @@ app.on('before-quit', (e) => {
   // However the wind-down goes (stuck terminals), the process must end: a running installer waits for it.
   const shutdownLimit = setTimeout(() => { crashLog.warn('shutdown overran its limit, exiting'); ptyHost.forceKill(); exitNow(); }, SHUTDOWN_HARD_LIMIT_MS);
   usage.stop();
+  stopActivationRetry?.();
   login.dispose();
   install.dispose();
   send('app:before-quit');
@@ -1517,8 +1535,20 @@ app.on('before-quit', (e) => {
   setTimeout(async () => {
     // Never throws; a save that still fails is logged by the saver and tried again below.
     saver.flush();
+    // A running swap or "Set as main" finishes first (bounded, inside the hard limit): exiting in the middle of one can leave
+    // the live login half swapped and Claude Code's lock directories behind. No new one starts now (account IPC refuses).
+    const swapWait = {
+      busy: isSwapRunning, idle: swapIdle,
+      setTimer: (fn: () => void, ms: number) => setTimeout(fn, ms), clearTimer: (timer: unknown) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    };
+    await waitUntilIdle(swapWait, QUIT_SWAP_WAIT_MS);
     try {
       await ptyHost.shutdown();
+      // An activation waiting for a Claude Code lock that a cell held gets it now: it may finish within the rest of the budget
+      // (no wait at all when nothing runs).
+      if (!(await waitUntilIdle(swapWait, QUIT_SWAP_AFTER_CELLS_MS))) {
+        crashLog.warn(`quit did not wait for the account swap: still running after ${QUIT_SWAP_WAIT_MS + QUIT_SWAP_AFTER_CELLS_MS} ms`);
+      }
       // A save that hit a lock gets a few more seconds (well inside the hard limit) instead of being lost.
       if (saver.hasPending() && !(await flushUntilSaved(saver, 3000))) crashLog.error('the last state changes could not be saved');
       await mcp.stop();

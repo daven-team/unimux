@@ -318,8 +318,10 @@ export async function activationJournalPending(deps: Pick<ActivateDeps, 'backupD
 }
 
 /** The start-up recovery: a few tries while Claude Code holds its locks; after that the polls retry (`isActivationRecoveryPending`). */
-export async function recoverActivationWithRetry(deps: ActivateDeps, attempts = 3, waitMs = 1_000): Promise<ActivationRecovery> {
+export async function recoverActivationWithRetry(deps: ActivateDeps, attempts = 3, waitMs = 1_000, stopped: () => boolean = () => false): Promise<ActivationRecovery> {
   for (let i = 1; ; i++) {
+    // Once the app quits no further attempt starts (0.9.6): the journal stays and the next start retries.
+    if (stopped()) return 'locked';
     const result = await recoverInterruptedActivation(deps);
     if (result !== 'locked' || i >= attempts) return result;
     await deps.delay(waitMs);

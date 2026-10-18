@@ -5,11 +5,16 @@ import {
 import type { Git } from './git';
 
 export const GONE = 'Projekt już nie istnieje.';
-const INVALID = 'Nieprawidłowe żądanie git.';
+export const INVALID = 'Nieprawidłowe żądanie git.';
 
 export const GIT_CHANNELS: readonly GitChannel[] = [
   'status', 'log', 'show', 'diff', 'branches', 'fetch', 'pull', 'push', 'stage', 'unstage', 'commit', 'checkout', 'trust', 'trustGrant', 'trustRevoke',
 ];
+
+/** Channels that only read (status, history, diffs, branch list, trust info): open to any sender. */
+export const GIT_READ_CHANNELS: readonly GitChannel[] = ['status', 'log', 'show', 'diff', 'branches', 'trust'];
+/** Channels that change the repository, its remotes or the trust list: only the app window may call them (R9). */
+export const GIT_MUTATING_CHANNELS: readonly GitChannel[] = GIT_CHANNELS.filter((c) => !GIT_READ_CHANNELS.includes(c));
 
 type Run = (git: Git, dir: string, req: never, scope: string) => Promise<GitResult<unknown>>;
 
