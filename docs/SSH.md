@@ -15,7 +15,12 @@ The **SSH** tile in the left rail opens the **SSH view** as a tab in the main ar
 - **Host keys.** The first connection shows the server's fingerprint and asks whether to trust it; a changed key shows a red warning and connects only after you confirm the replacement. Trusted keys are listed in **Known hosts** of the SSH view and in **Settings > SSH**.
 - **Startup command** per host: typed into the shell after login, line by line as if you typed it.
 - **Bulk send.** One command for the checked SSH sessions of the current grid (SSH view button, palette, grid tab menu).
-- **No restore, no reconnect.** Sessions are not restored after a restart of the app; the cells show a **Connect** card. There is no automatic reconnect.
+- **No session restore.** Sessions are not restored after a restart of the app; the cells show a **Connect** card, unless the host asks to reconnect (see below). A dropped connection is not reconnected by itself.
+
+## Reconnecting
+
+- **Reconnect when the app starts.** A checkbox in the host's details, off by default. When it is on, the SSH cells of that host connect by themselves after the app starts, each when its grid is shown (a grid in a tab you have not opened yet connects when you open it). A host that asks for a password, a key passphrase or an unknown host key still asks in the cell, as for a manual **Connect** (a cell that is not on screen also shows a toast). Reloading the window or a restart of the terminal process is not an app start: sessions that are still running are picked up as always, ended ones keep the **Connect** card or the reconnect bar.
+- **Reconnect all SSH.** In the grid tab menu and the command palette (**SSH: reconnect all**), shown while the grid has SSH cells that are idle, ended or failed. It connects exactly those cells; connecting and connected ones are left alone.
 
 ## Where secrets live
 

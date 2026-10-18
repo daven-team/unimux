@@ -97,6 +97,7 @@ import { defaultState } from '../shared/state';
 import { createReloadLimiter, createReportLimiter, describeError, rendererReport, trimNotifications, UNRESPONSIVE_GRACE_MS } from './stability';
 import { createStartupLog, createStartupTimer, isRendererMark } from './startupTiming';
 import { createStartupGate, spawnWaitsFor } from './startupGates';
+import { createAppStartClaim } from './appStartClaim';
 
 // Startup timing: milliseconds since the process started, one line per launch in startup.log (startupTiming.ts).
 const startupTimer = createStartupTimer(() => performance.now());
@@ -206,6 +207,7 @@ if (!superseded && !devEnv('MC_DATA_DIR') && !existsSync(join(DATA_DIR, 'state.j
 
 let win: BrowserWindow | null = null;
 /** The sender check of every IPC channel that changes accounts, logins, usage, SSH data or the secret clipboard (R9). */
+const appStartClaim = createAppStartClaim();
 const fromAppWindow = (event: { sender: unknown; senderFrame?: unknown }): boolean => isFromWindow(win, event);
 /** SSH sessions: created after app.whenReady() (safeStorage needs it), before the window (startSsh). */
 let ssh: SshCoordinator | null = null;
@@ -795,6 +797,8 @@ ptyHost.on('message', (m: HostToMain) => {
 });
 /** Everything that ran in the Pty Host is gone: logins, the install window, MCP tokens, SSH sessions. Returns what the toast promises. */
 function forgetHostTerminals(code: unknown, stderrTail: unknown): boolean {
+  // A restart before the renderer listens must still stop the app-start SSH reconnect (D5 after a Pty Host restart).
+  appStartClaim.cancel();
   const tail = typeof stderrTail === 'string' && stderrTail.trim() ? `\n${stderrTail.trim()}` : '';
   crashLog.error(`pty host exited (code ${String(code)})${tail}`);
   releaseAllPrompts();
@@ -1011,6 +1015,9 @@ ipcMain.handle('cell:killAndWait', async (_e, id: string) => {
   await ptyHost.killAndWait(id);
 });
 ipcMain.handle('cell:alive', () => [...alive]);
+// True for the first app window renderer that asks in this app run, false for every later one (a reload, a crash reload) and
+// after a Pty Host restart: SSH hosts with "Łącz ponownie po uruchomieniu aplikacji" connect at an app start only.
+ipcMain.handle('app:claimStart', (e) => appStartClaim.claim(fromAppWindow(e)));
 const cliHandlers = createCliHandlers(cliDetector, (url) => { void shell.openExternal(url); });
 ipcMain.handle('cli:status', () => cliHandlers.status());
 ipcMain.handle('cli:recheck', (_e, id?: unknown) => cliHandlers.recheck(id));

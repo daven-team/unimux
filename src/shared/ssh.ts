@@ -21,6 +21,8 @@ export interface SshHost {
   keyId?: string;
   startupCommand?: string;
   color?: string;
+  /** Cells of this host connect by themselves when their view first mounts after the app starts (stored only when on). */
+  reconnectOnStart?: true;
   createdAt: number;
   updatedAt: number;
   // Reserved for later releases, never written now: agent, via, proxy, env, mosh, charset.
@@ -210,6 +212,7 @@ export function normalizeSshHost(raw: unknown): SshHost | null {
   if (isUuid(r.keyId)) host.keyId = r.keyId;
   if (typeof r.startupCommand === 'string' && r.startupCommand.trim() && !startupProblem(r.startupCommand)) host.startupCommand = r.startupCommand;
   if (typeof r.color === 'string' && HEX_COLOR.test(r.color)) host.color = r.color;
+  if (r.reconnectOnStart === true) host.reconnectOnStart = true;
   return host;
 }
 
@@ -227,7 +230,7 @@ export function normalizeSshHosts(raw: unknown): SshHost[] {
   return out;
 }
 
-export interface SshHostDraft { label: string; address: string; port: string; username: string; group: string; tags: string[]; keyId?: string; startupCommand: string; color?: string }
+export interface SshHostDraft { label: string; address: string; port: string; username: string; group: string; tags: string[]; keyId?: string; startupCommand: string; color?: string; reconnectOnStart: boolean }
 export type HostDraftField = 'address' | 'port' | 'username' | 'startupCommand';
 export type HostDraftResult =
   | { ok: true; value: Omit<SshHost, 'id' | 'createdAt' | 'updatedAt'> }
@@ -254,6 +257,7 @@ export function validateHostDraft(d: SshHostDraft): HostDraftResult {
   if (d.keyId) value.keyId = d.keyId;
   if (d.startupCommand.trim()) value.startupCommand = d.startupCommand;
   if (d.color && HEX_COLOR.test(d.color)) value.color = d.color;
+  if (d.reconnectOnStart) value.reconnectOnStart = true;
   return { ok: true, value };
 }
 
@@ -261,6 +265,7 @@ export function hostToDraft(h?: SshHost): SshHostDraft {
   return {
     label: h?.label ?? '', address: h?.address ?? '', port: h ? String(h.port) : '22', username: h?.username ?? '',
     group: h?.group ?? '', tags: h?.tags ?? [], keyId: h?.keyId, startupCommand: h?.startupCommand ?? '', color: h?.color,
+    reconnectOnStart: h?.reconnectOnStart === true,
   };
 }
 
@@ -270,7 +275,7 @@ export function hostToDraft(h?: SshHost): SshHostDraft {
  */
 export function hostFormDirty(host: SshHost | undefined, draft: SshHostDraft, typed: { tag: string; password: string }): boolean {
   if (typed.tag.trim() || typed.password) return true;
-  const key = (d: SshHostDraft) => JSON.stringify([d.label.trim(), d.address.trim(), d.port.trim(), d.username.trim(), d.group.trim(), d.tags, d.keyId ?? '', d.startupCommand, d.color ?? '']);
+  const key = (d: SshHostDraft) => JSON.stringify([d.label.trim(), d.address.trim(), d.port.trim(), d.username.trim(), d.group.trim(), d.tags, d.keyId ?? '', d.startupCommand, d.color ?? '', d.reconnectOnStart]);
   if (!host) return key(draft) !== key(hostToDraft(undefined));
   const v = validateHostDraft(draft);
   if (!v.ok) return key(draft) !== key(hostToDraft(host));
@@ -563,8 +568,60 @@ export const enterSubmitsPrompt = (target: { tagName: string; type?: string }): 
   target.tagName === 'INPUT' && (target.type === 'text' || target.type === 'password');
 
 /** What a freshly mounted SSH cell does (spec 6.1 step 2). */
-export function sshCellStart(input: { alive: boolean; connectOnMount: boolean }): 'attach' | 'connect' | 'idle' {
-  return input.alive ? 'attach' : input.connectOnMount ? 'connect' : 'idle';
+export interface SshCellStartInput {
+  /** The session survived a renderer reload (main reported the cell alive). */
+  alive: boolean;
+  /** The user created the cell in this renderer session. */
+  connectOnMount: boolean;
+  /** The cell was in the state when this app run's first renderer load booted, and no Pty Host restart came since. */
+  appStart?: boolean;
+  /** The cell's host has "Łącz ponownie po uruchomieniu aplikacji" on. */
+  reconnectOnStart?: boolean;
+  /** The start comes from the cell view mounting (not the background loader or automation). */
+  mounted?: boolean;
+  /** The session phase the renderer already knows for the cell ("Połącz ponownie wszystkie SSH" may have connected it). */
+  phase?: SshPhase;
+}
+
+/**
+ * D5 with one opt-in exception: a cell connects by itself only when the user just created it, or when the app has just
+ * started, the host asks for it and the cell view mounts (hidden tabs connect when opened). A renderer reload or a Pty Host
+ * restart is not an app start.
+ */
+export type SshStartDecision = 'attach' | 'connect' | 'idle';
+
+export function sshCellStart(input: SshCellStartInput): SshStartDecision {
+  if (input.alive || isLivePhase(input.phase)) return 'attach';
+  if (input.connectOnMount) return 'connect';
+  const untouched = input.phase === undefined || input.phase === 'idle';
+  return input.appStart && input.reconnectOnStart && input.mounted && untouched ? 'connect' : 'idle';
+}
+
+/**
+ * What a start of an SSH cell leaves behind: the app-start mark is spent only by the mounted cell view, and a start from
+ * elsewhere (boot restore of a task, automation, a path drop) that ends idle does not count as started, so the later mount
+ * decides again.
+ */
+export function sshStartEffects(mounted: boolean, decision: SshStartDecision): { spendMark: boolean; keepStarted: boolean } {
+  return { spendMark: mounted, keepStarted: mounted || decision !== 'idle' };
+}
+
+/** SSH cells (any project and tab) whose host has the reconnect option on: the candidates of the first renderer load. */
+export function reconnectAtStartCells(projects: ReadonlyArray<{ tabs: ReadonlyArray<{ cells: ReadonlyArray<{ id: string; ssh?: SshCellRef }> }> }>, hosts: readonly SshHost[]): string[] {
+  const on = new Set(hosts.filter((h) => h.reconnectOnStart).map((h) => h.id));
+  return projects.flatMap((p) => p.tabs.flatMap((t) => t.cells.filter((c) => c.ssh && on.has(c.ssh.hostId)).map((c) => c.id)));
+}
+
+/**
+ * The cells "Połącz ponownie wszystkie SSH" connects in a tab: SSH cells whose session is idle, ended or failed (or not
+ * started yet), with a host that still exists; connecting and connected ones are never touched. At most a grid's 20 cells.
+ */
+export function reconnectAllTargets(
+  cells: ReadonlyArray<{ id: string; ssh?: SshCellRef }>,
+  sessions: Readonly<Record<string, Pick<SshSessionState, 'phase'> | undefined>>,
+  hostIds: ReadonlySet<string>,
+): string[] {
+  return cells.filter((c) => c.ssh && hostIds.has(c.ssh.hostId) && !isLivePhase(sessions[c.id]?.phase)).map((c) => c.id).slice(0, 20);
 }
 
 // ── key editors ──────────────────────────────────────────────────────────────

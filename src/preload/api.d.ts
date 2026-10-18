@@ -62,6 +62,8 @@ export interface McApi {
   /** Binds the freshest unclaimed Codex session in `cwd` to the cell (emits cell:session). */
   bindCodexSession(cellId: string, cwd: string): Promise<string | null>;
   aliveCells(): Promise<string[]>;
+  /** True only for the first renderer load of this app run (later loads and reloads get false). */
+  claimAppStart(): Promise<boolean>;
   reportCellStatus(cellId: string, status: CellStatus, reason?: StatusReason, hooked?: boolean): void;
   pickFolder(): Promise<string | null>;
   /** Native dialog for an own alert sound; null when cancelled. */

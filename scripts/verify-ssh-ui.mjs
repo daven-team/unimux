@@ -823,6 +823,89 @@ const PARTS = {
       }
     } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
   },
+  /**
+   * 0.9.6 F3: "Łącz ponownie po uruchomieniu aplikacji" set in the host form reconnects the host's cell when the app starts
+   * again (not after a reload); a host without it stays idle. "Połącz ponownie wszystkie SSH" (tab menu, palette) connects
+   * only the idle, ended or failed SSH cells and is hidden while none is left.
+   */
+  async reconnectOnStart() {
+    const server = await startTestServer(['--no-auth']);
+    const root = scratchRoot('reconnect');
+    try {
+      const on = testHost(server.port, { label: 'auto-host' });
+      const off = testHost(server.port, { label: 'manual-host' });
+      writeKnownHost(root, server);
+      const state = sshState({ projectPath: join(root, 'project'), hosts: [on, off], cells: [on.id, off.id] });
+      writeState(root, state);
+      const [autoCell, manualCell] = state.projects[0].tabs[0].cells.map((c) => c.id);
+      const cellIs = (cellId, what) => {
+        const cell = `document.querySelector('.cell[data-cell-id="${cellId}"]')`;
+        if (what === 'connected') return `(() => { const c = ${cell}; return !!c && !c.querySelector('.ssh-card') && !c.querySelector('.ssh-bar') && !c.querySelector('.status-text.ssh'); })()`;
+        if (what === 'card') return `${cell}?.querySelector('.ssh-card button')?.textContent === 'Połącz'`;
+        return `!!${cell}?.querySelector('.ssh-bar')`; // ended
+      };
+      const tabMenu = async () => {
+        await app.evaluate(`document.querySelector('.workspace-tabs .grid-tab').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 40 }))`);
+        await app.until(`!!document.querySelector('.menu .menu-item')`, 'tab menu');
+        const items = await app.evaluate(`[...document.querySelectorAll('.menu .menu-item')].map((e) => e.textContent)`);
+        return items;
+      };
+      const closeMenu = () => app.press('Escape');
+      let app = await launchApp(root);
+      try {
+        // Option off everywhere: D5, both cells wait for "Połącz".
+        await app.until(`${cellIs(autoCell, 'card')} && ${cellIs(manualCell, 'card')}`, 'both cells idle at the first start');
+        // "Połącz ponownie wszystkie SSH" is offered (two idle cells) and connects both.
+        if (!(await tabMenu()).includes('Połącz ponownie wszystkie SSH')) throw new Error('tab menu lacks "Połącz ponownie wszystkie SSH" with idle cells');
+        await app.screenshot('ssh-reconnect-all-menu.png');
+        await app.click('.menu .menu-item', 'Połącz ponownie wszystkie SSH');
+        await app.until(`${cellIs(autoCell, 'connected')} && ${cellIs(manualCell, 'connected')}`, 'reconnect all connected both cells');
+        if ((await tabMenu()).includes('Połącz ponownie wszystkie SSH')) throw new Error('"Połącz ponownie wszystkie SSH" still offered with every cell connected');
+        await closeMenu();
+        // One cell ends: the palette offers the action and it connects only that one.
+        await app.evaluate(`window.mc.killCell(${JSON.stringify(manualCell)}), true`);
+        await app.until(cellIs(manualCell, 'ended'), 'manual cell ended');
+        await app.click('button[aria-label="Szukaj wszędzie"]');
+        await app.until(`!!document.querySelector('.palette input')`, 'palette');
+        await app.setValue('.palette input', 'SSH: połącz ponownie wszystkie');
+        await app.until(`document.querySelector('.palette-item.sel .ptitle')?.textContent === 'SSH: połącz ponownie wszystkie'`, 'palette entry');
+        await app.press('Enter');
+        await app.until(`${cellIs(autoCell, 'connected')} && ${cellIs(manualCell, 'connected')}`, 'palette reconnected the ended cell');
+        const notices = await app.evaluate(`${CELL_BUFFERS}.map((t) => t.split('\\n').filter((l) => l.includes('łączenie z')).length)`);
+        if (notices[0] !== 1 || notices[1] !== 2) throw new Error(`connecting notices per cell: ${notices} (the connected cell must not be touched)`);
+        // The option in the host form of the SSH view.
+        await app.click('.rail-tiles [aria-label="SSH"]');
+        await app.until(`document.querySelectorAll('.ssh-view .ssh-tile[data-host-id]').length === 2`, 'host tiles');
+        await app.click('.ssh-tile[data-host-id]', 'auto-host');
+        await app.until(`!!document.querySelector('.ssh-view-detail [data-field=reconnectOnStart]')`, 'reconnect option in the host form');
+        if (await app.evaluate(`document.querySelector('.ssh-view-detail [data-field=reconnectOnStart]').checked`)) throw new Error('the option is on by default');
+        await app.click('.ssh-view-detail [data-field=reconnectOnStart]');
+        await app.evaluate(`document.querySelector('.ssh-view-detail [data-field=reconnectOnStart]').scrollIntoView({ block: 'center' }), true`);
+        await app.screenshot('ssh-reconnect-option.png');
+        await app.click('.ssh-view-detail .ssh-editor button.primary', 'Zapisz');
+        await app.until(`window.__mc.useStore.getState().s.sshHosts.find((h) => h.label === 'auto-host')?.reconnectOnStart === true`, 'option saved');
+        await app.evaluate(`document.querySelector('.workspace-tabs .grid-tab').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))`);
+        // A renderer reload is not an app start: both sessions end first, and after the reload nothing connects by itself.
+        await app.evaluate(`(window.mc.killCell(${JSON.stringify(autoCell)}), window.mc.killCell(${JSON.stringify(manualCell)}), true)`);
+        await app.until(`${cellIs(autoCell, 'ended')} && ${cellIs(manualCell, 'ended')}`, 'both ended before the reload');
+        await sleep(2500); // state.json is written debounced
+        await app.cdp('Page.reload');
+        await app.until(`!!document.querySelector('.app .workspace-tabs') && !!document.querySelector('.cell[data-cell-id="${autoCell}"] .cell-head .ssh-host')`, 'app after the reload');
+        await sleep(3000);
+        if (await app.evaluate(cellIs(autoCell, 'connected'))) throw new Error('the cell connected by itself after a renderer reload');
+      } finally { await app.close(); }
+      if (!JSON.parse(readFileSync(join(root, 'data', 'state.json'), 'utf8')).sshHosts.find((h) => h.id === on.id)?.reconnectOnStart) throw new Error('state.json lacks the option');
+      // App start with the same data dir: the host with the option connects by itself, the other one waits for "Połącz".
+      app = await launchApp(root);
+      try {
+        await app.until(cellIs(autoCell, 'connected'), 'auto cell reconnected at app start');
+        await app.until(`${CELL_BUFFERS}[0].includes('łączenie z')`, 'connecting notice in the auto cell');
+        await sleep(2500);
+        if (!(await app.evaluate(cellIs(manualCell, 'card')))) throw new Error('the cell of the host without the option did not stay idle');
+        await app.screenshot('ssh-reconnect-at-start.png');
+      } finally { await app.close(); }
+    } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+  },
   /** D8: with MC_SSH_NO_SAFESTORAGE=1 the banner shows, a saved password works for the session, nothing secret is written. */
   async noSafeStorage() {
     const server = await startTestServer();

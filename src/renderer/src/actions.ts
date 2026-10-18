@@ -13,11 +13,11 @@ import { canSwapCells, neighborSlot } from '../../shared/gridDrag';
 import { CLI_NAMES, profileAvailable, type CliId, type CliStatusMap } from '../../shared/cliStatus';
 import { snapshotCellRects } from './gridMotion';
 import { sessionSearchPaths } from '../../shared/sessionTrack';
-import { sshSpecName } from '../../shared/ssh';
+import { sshSpecName, sshStartEffects } from '../../shared/ssh';
 import type { CellSession, Profile, SessionInfo, Snippet, Tab, Worktree } from '../../shared/types';
 import { askChoice, getS, getUi, setUi, toast, update } from './store';
 import { flushDrafts, showTerminalTabs } from './files';
-import { connectOnMount, reconnectCell, startSshCell } from './ssh';
+import { cancelReconnectAtStart, connectOnMount, reconnectCell, startSshCell } from './ssh';
 import { terminals } from './terminals/TerminalManager';
 
 /** Cells whose pty was started (or found alive) during this renderer session. */
@@ -42,6 +42,7 @@ export function resetStarted(): void {
   aliveAtStart.clear();
   // D5: after a Pty Host crash no SSH cell connects by itself, not even one marked but not yet mounted.
   connectOnMount.clear();
+  cancelReconnectAtStart(); // and no app-start reconnect either: a Pty Host restart is not an app start
   setUi((ui) => ({ epoch: ui.epoch + 1 }));
 }
 
@@ -84,21 +85,26 @@ export function ensureTerminal(cellId: string): void {
   });
 }
 
-/** Starts the cell's terminal once per session (resuming its conversation when it has one). */
-export function ensureStarted(cellId: string): void {
-  void startOnce(cellId);
+/**
+ * Starts the cell's terminal once per session (resuming its conversation when it has one). `fromView` is set by the cell view
+ * when it mounts: only then may an SSH cell connect by itself at app start (never from automation or a path drop).
+ */
+export function ensureStarted(cellId: string, fromView = false): void {
+  void startOnce(cellId, undefined, fromView);
 }
 
 /** The cell's start was requested in this renderer session. */
 export const isStarted = (cellId: string): boolean => started.has(cellId);
 
-function startOnce(cellId: string, beforeSpawn?: (cellId: string) => void): Promise<void> {
+function startOnce(cellId: string, beforeSpawn?: (cellId: string) => void, fromView = false): Promise<void> {
   if (started.has(cellId)) return Promise.resolve();
   started.add(cellId);
   startListeners.forEach((l) => l());
   ensureTerminal(cellId);
   if (findCell(getS(), cellId)?.cell.ssh) {
-    startSshCell(cellId, aliveAtStart.delete(cellId));
+    const decision = startSshCell(cellId, aliveAtStart.delete(cellId), fromView);
+    // A start from outside the view that ends idle does not count: the cell's later mount decides again (app-start reconnect).
+    if (!sshStartEffects(fromView, decision).keepStarted) started.delete(cellId);
     return Promise.resolve();
   }
   // pty survived a renderer reload; its output is replayed
@@ -631,7 +637,7 @@ export function sendSnippet(snippet: Snippet, target: 'focused' | 'all' | { cell
   // Cells that never started have no agent to receive the text yet (it would hit the bare shell
   // before the launch command): start them, but don't paste.
   const ready = ids.filter((id) => started.has(id));
-  ids.filter((id) => !started.has(id)).forEach(ensureStarted);
+  ids.filter((id) => !started.has(id)).forEach((id) => ensureStarted(id));
   if (ready.length < ids.length) toast(tr('Komórki w trakcie startu: {count}. Wklej do nich ponownie za chwilę.', { count: ids.length - ready.length }));
   for (const id of ready) terminals.paste(id, snippet.text, snippet.autoSend);
   if (ids.length === 1) focusCell(ids[0]);
