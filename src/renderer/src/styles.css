@@ -16,7 +16,7 @@
   --waiting: #4ade80;
   --error: #f87171;
   --titlebar: 36px;
-  /* Height of a grid cell's header; drop overlays and cell cards start right below it (cellBodyBox measures the real header). */
+  /* Height of a grid cell's header; drop overlays and cell cards start right below it (cellBodyBox measures the real header; keep CELL_HEAD_HEIGHT in shared/cellBox.ts equal). */
   --cell-head: 30px;
   --statusbar: 24px;
   --radius: 7px;
@@ -234,16 +234,17 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .term-host .xterm-viewport { background: var(--bg) !important; }
 .cell-error {
   position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 10px 12px; border-radius: var(--radius);
-  background: #2a1414; border: 1px solid #5b2626; color: #fecaca; display: flex; gap: 10px; align-items: center; z-index: 2;
+  background: #2a1414; border: 1px solid #5b2626; color: #fecaca; display: flex; gap: 10px; align-items: stretch; z-index: 2;
 }
-/* A long error scrolls inside the box (never above the header), so "Try again" stays visible in a small cell. */
-.cell-error, .cell-hint { max-height: calc(100% - var(--cell-head) - 24px); align-items: stretch; }
+/* A long error or hint scrolls inside its box (never above the header), so its button stays visible in a small cell: the text
+   is stretched to the box height (align-items: stretch in both base rules) and scrolls, the button stays centered. */
+.cell-error, .cell-hint { max-height: calc(100% - var(--cell-head) - 24px); }
 .cell-error > .btn, .cell-hint > .btn { align-self: center; flex: none; }
 .cell-error .grow, .cell-hint .grow { min-height: 0; overflow-y: auto; overflow-wrap: break-word; }
 .cell-error .grow { flex: 1; }
 .cell-hint {
   position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 6px 10px; border-radius: var(--radius); font-size: 12px;
-  background: #2b2412; border: 1px solid #5c4a1a; color: #f3dca0; display: flex; gap: 10px; align-items: center; z-index: 2;
+  background: #2b2412; border: 1px solid #5c4a1a; color: #f3dca0; display: flex; gap: 10px; align-items: stretch; z-index: 2;
 }
 .cell-hint .grow { flex: 1; }
 
@@ -975,7 +976,10 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .fr-line ins { background: #4ade8024; color: #bbf7d0; text-decoration: none; border-radius: 2px; }
 
 /* ── AI account limits (docked above the status bar) ───────────────────── */
-.usage-panel { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 4px 10px 6px; border-top: 1px solid var(--border); background: var(--bg-1); font-size: 11px; color: var(--text-2); max-height: min(40vh, 35%); overflow-y: auto; }
+.usage-panel { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 4px 10px 6px; border-top: 1px solid var(--border); background: var(--bg-1); font-size: 11px; color: var(--text-2); max-height: 40vh; overflow-y: auto; }
+/* Docked under the side panel content: at most 35% of the side panel, so the panel above keeps room in a short window (the
+   cards scroll). The collapsed rail variant (.rail-foot) keeps 40vh. */
+.side-panel > .usage-panel { max-height: min(40vh, 35%); }
 .usage-head { display: flex; align-items: center; gap: 6px; }
 .usage-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: transparent; color: var(--text-2); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
 .usage-title:hover { color: var(--text); }

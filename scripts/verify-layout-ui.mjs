@@ -2,7 +2,10 @@
 // - the snippet drop overlay is a translated element ("Drop to paste") that starts right below the cell header, like the path
 //   drop overlay;
 // - the AI team panel has a splitter: keys and a mouse drag resize it, the height is saved, it is clamped so the grid keeps
-//   200px, and a saved height taller than a short window shrinks instead of pushing the grid away;
+//   200px, a saved height taller than a short window shrinks instead of pushing the grid away (after a reload and when a live
+//   tall window shrinks), a drag saves only when it ends, and the separator reports the shown height and the allowed range;
+// - the docked AI usage panel is capped at min(40vh, 35%) of the side panel (a filler stands in for account cards);
+// - a long cell hint scrolls inside its box like a long error;
 // - a long cell error keeps its "Try again" button inside the cell (the error box is injected into a real cell with the markup
 //   of CellView, because a spawn error with a long message cannot be produced without a broken CLI);
 // - the sign-in terminal of the auth dialog fits a short window without scrolling the dialog (the dialog markup of AuthModal is
@@ -108,16 +111,24 @@ try {
     const afterKey = await app.evaluate(`({ h: Math.round(document.querySelector('.automation-panel').getBoundingClientRect().height), saved: localStorage.getItem('mc-automation-height-v1') })`);
     console.log('after ArrowUp', JSON.stringify(afterKey));
     expect(afterKey.h === 424 && afterKey.saved === '424', 'ArrowUp did not grow and save the panel by 24px', afterKey);
+    await app.press('ArrowDown');
+    await sleep(300);
+    const afterDown = await app.evaluate(`({ h: Math.round(document.querySelector('.automation-panel').getBoundingClientRect().height), saved: localStorage.getItem('mc-automation-height-v1') })`);
+    console.log('after ArrowDown', JSON.stringify(afterDown));
+    expect(afterDown.h === 400 && afterDown.saved === '400', 'ArrowDown did not shrink and save the panel by 24px', afterDown);
     const s = await app.evaluate(box('.automation-splitter'));
     const x = Math.round((s.left + s.right) / 2), y = Math.round((s.top + s.bottom) / 2);
     const mouse = (type, yy) => app.cdp('Input.dispatchMouseEvent', { type, x, y: yy, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1 });
     await mouse('mousePressed', y);
     for (let i = 1; i <= 5; i++) { await mouse('mouseMoved', y - i * 20); await sleep(30); }
+    const midDrag = await app.evaluate(`({ h: Math.round(document.querySelector('.automation-panel').getBoundingClientRect().height), saved: localStorage.getItem('mc-automation-height-v1') })`);
+    console.log('during the drag', JSON.stringify(midDrag));
+    expect(midDrag.h === 500 && midDrag.saved === '400', 'the drag does not resize live, or saves before it ends', midDrag);
     await mouse('mouseReleased', y - 100);
     await sleep(400);
     const afterDrag = await app.evaluate(`({ h: Math.round(document.querySelector('.automation-panel').getBoundingClientRect().height), saved: localStorage.getItem('mc-automation-height-v1') })`);
     console.log('after a 100px drag up', JSON.stringify(afterDrag));
-    expect(Math.abs(afterDrag.h - 524) <= 1 && afterDrag.saved === String(afterDrag.h), 'the drag did not resize and save the panel', afterDrag);
+    expect(Math.abs(afterDrag.h - 500) <= 1 && afterDrag.saved === String(afterDrag.h), 'the drag did not resize and save the panel', afterDrag);
     await mouse('mousePressed', y - 100);
     for (let i = 1; i <= 10; i++) { await mouse('mouseMoved', y - 100 - i * 100); await sleep(30); }
     await mouse('mouseReleased', 5);
@@ -132,9 +143,62 @@ try {
     await sleep(300);
     const min = await app.evaluate(box('.automation-panel'));
     expect(min.h === 140, 'Home does not shrink the panel to 140px', min);
+
+    // A live tall window with a big panel shrinks to 900x560 with the panel open (the Git panel bug scenario).
+    await app.evaluate(`document.querySelector('.automation-splitter').dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })), true`);
+    await sleep(300);
+    const big = await app.evaluate(`({ panel: ${box('.automation-panel')}, saved: localStorage.getItem('mc-automation-height-v1') })`);
+    console.log('End in the tall window', JSON.stringify(big));
+    await size(900, 560);
+    await sleep(300);
+    const shrunk = await app.evaluate(`(() => {
+      const s = document.querySelector('.automation-splitter');
+      return { grid: ${box('.main > .workspace-content')}, panel: ${box('.automation-panel')}, main: ${box('.main')}, saved: localStorage.getItem('mc-automation-height-v1'),
+        ariaNow: Number(s.getAttribute('aria-valuenow')), ariaMin: Number(s.getAttribute('aria-valuemin')), ariaMax: Number(s.getAttribute('aria-valuemax')) };
+    })()`);
+    await app.screenshot(`097-team-live-shrink-${TAG}.png`);
+    console.log('live shrink to 900x560', JSON.stringify(shrunk));
+    expect(shrunk.grid.h >= 199, 'the grid has less than 200px after a live shrink', shrunk);
+    expect(shrunk.panel.h >= 139, 'the AI team panel is below 140px after a live shrink', shrunk);
+    expect(shrunk.panel.bottom <= shrunk.main.bottom + 1, 'the AI team panel runs out of the main area after a live shrink', shrunk);
+    expect(shrunk.ariaNow === shrunk.panel.h, 'aria-valuenow is not the shown height', shrunk);
+    expect(shrunk.ariaMin === 140 && Math.abs(shrunk.ariaMax - (shrunk.grid.h + shrunk.panel.h - 200)) <= 1, 'aria-valuemin/max do not match the room', shrunk);
+    await size(900, 1000);
   }
   await app.click('.team-toggle');
   await sleep(300);
+
+  // V9: the docked usage panel (shown without accounts too) is capped at min(40vh, 35%) of the side panel in a short window.
+  await size(900, 560);
+  const usage = await app.evaluate(`(() => {
+    const u = document.querySelector('.side-panel > .usage-panel');
+    if (!u) return null;
+    // A tall filler stands in for many account cards (cards need connected accounts); it is removed right away.
+    const filler = document.createElement('div'); filler.style.cssText = 'height: 1000px; flex: none'; u.appendChild(filler);
+    const r = { h: Math.round(u.getBoundingClientRect().height), scrolls: u.scrollHeight > u.clientHeight, side: Math.round(u.parentElement.getBoundingClientRect().height), vh: innerHeight };
+    filler.remove();
+    return r;
+  })()`);
+  console.log('docked usage panel', JSON.stringify(usage));
+  expect(usage && Math.abs(usage.h - Math.min(0.4 * usage.vh, 0.35 * usage.side)) <= 1 && usage.scrolls, 'the docked usage panel is not capped at min(40vh, 35%) with scrolling', usage);
+
+  // V7: a long hint (same markup as CellView's mouse flood hint) scrolls and keeps its button visible.
+  const hint = await app.evaluate(`(() => {
+    const cell = document.querySelectorAll('.cell')[2];
+    const div = document.createElement('div');
+    div.className = 'cell-hint';
+    div.innerHTML = '<span class="grow"></span><button class="btn small">Close</button>';
+    div.firstChild.textContent = Array.from({ length: 30 }, () => 'The terminal sent mouse events to the shell - the mode was reset.').join(' ');
+    cell.appendChild(div);
+    const c = cell.getBoundingClientRect(), h = cell.querySelector('.cell-head').getBoundingClientRect(), b = div.querySelector('button').getBoundingClientRect(), e = div.getBoundingClientRect(), g = div.firstChild;
+    const r = { cell: [Math.round(c.top), Math.round(c.bottom)], head: Math.round(h.bottom), box: [Math.round(e.top), Math.round(e.bottom)], button: [Math.round(b.top), Math.round(b.bottom)], textScrolls: g.scrollHeight > g.clientHeight, textInside: g.getBoundingClientRect().bottom <= e.bottom + 1 };
+    div.remove();
+    return r;
+  })()`);
+  console.log('long cell hint', JSON.stringify(hint));
+  expect(hint.box[0] >= hint.head && hint.box[1] <= hint.cell[1], 'the hint box leaves the cell body', hint);
+  expect(hint.button[0] >= hint.box[0] && hint.button[1] <= hint.box[1], 'the hint button is not visible', hint);
+  expect(hint.textScrolls && hint.textInside, 'the long hint does not scroll inside its box', hint);
 
   // V7: a long error in a small cell (injected with the markup of CellView) keeps its button inside the cell.
   await size(900, 560);

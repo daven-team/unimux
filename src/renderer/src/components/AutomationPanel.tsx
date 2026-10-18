@@ -28,7 +28,11 @@ export function AutomationPanel() {
   const [runtime, setRuntime] = useState<Record<string, AgentRuntimeStatus>>({});
   const section = useRef<HTMLElement>(null);
   const [height, setHeight] = useState<number | null>(readPanelHeight);
-  const saveHeight = (next: number) => { setHeight(next); try { localStorage.setItem(HEIGHT_KEY, String(next)); } catch { /* the height just is not remembered */ } };
+  /** A drag only renders the new height; the end of the drag and every key step save it. */
+  const changeHeight = (next: number, save: boolean) => {
+    setHeight(next);
+    if (save) try { localStorage.setItem(HEIGHT_KEY, String(next)); } catch { /* the height just is not remembered */ }
+  };
   const agents = project?.tabs.flatMap((grid) => grid.cells.filter((cell) => getProfile(state, cell.profileId).cli !== 'shell').map((cell) => ({ cell, grid }))) ?? [];
   const recipients = agents.filter(({ cell }) => cell.role);
   const targetId = recipients.some(({ cell }) => cell.id === target) ? target : recipients[0]?.cell.id ?? '';
@@ -84,7 +88,7 @@ export function AutomationPanel() {
   const delivery = (value: string) => tr(value === 'native' ? 'Przekazano do sesji' : value === 'startup' ? 'Prompt startowy' : 'W skrzynce agenta');
 
   return <section ref={section} className="automation-panel" aria-label={tr('Zadania i wiadomości agentów')} style={height ? { '--automation-height': `${height}px` } as CSSProperties : undefined}>
-    <PanelSplitter section={section} height={height} onChange={saveHeight} />
+    <PanelSplitter section={section} height={height} onChange={changeHeight} />
     <div className="automation-head">
       <strong>{tr('Zespół AI')}</strong>
       {/* Nothing while the server is still starting (the window opens before it listens). */}
@@ -222,18 +226,32 @@ function readPanelHeight(): number | null {
  * The saved height is only a flex basis (styles.css), so a smaller window shrinks the panel; here it is clamped so the grid
  * above keeps at least MIN_GRID pixels.
  */
-function PanelSplitter({ section, height, onChange }: { section: React.RefObject<HTMLElement | null>; height: number | null; onChange: (height: number) => void }) {
+function PanelSplitter({ section, height, onChange }: { section: React.RefObject<HTMLElement | null>; height: number | null; onChange: (height: number, save: boolean) => void }) {
   const { tr } = useI18n();
-  const drag = useRef<{ id: number; y: number; start: number; release: () => void } | null>(null);
+  const drag = useRef<{ id: number; y: number; start: number; last: number | null; release: () => void } | null>(null);
   const [dragging, setDragging] = useState(false);
+  /** What the panel really shows (a saved height may be shrunk by a short window) and the largest height the room allows. */
+  const [measured, setMeasured] = useState<{ now: number; max: number }>({ now: height ?? DEFAULT_PANEL, max: height ?? DEFAULT_PANEL });
   useEffect(() => () => drag.current?.release(), []);
+  const content = () => section.current?.parentElement?.querySelector<HTMLElement>(':scope > .workspace-content') ?? null;
   /** The room shared by the grid and the panel. */
-  const room = () => {
+  const room = () => (section.current?.offsetHeight ?? DEFAULT_PANEL) + (content()?.offsetHeight ?? MIN_GRID);
+  const maxHeight = () => Math.max(MIN_PANEL, room() - MIN_GRID);
+  useEffect(() => {
     const el = section.current;
-    const content = el?.parentElement?.querySelector<HTMLElement>(':scope > .workspace-content');
-    return (el?.offsetHeight ?? DEFAULT_PANEL) + (content?.offsetHeight ?? MIN_GRID);
-  };
-  const clamp = (value: number) => Math.round(Math.max(MIN_PANEL, Math.min(room() - MIN_GRID, value)));
+    if (!el) return;
+    const measure = () => setMeasured((m) => {
+      const next = { now: el.offsetHeight, max: maxHeight() };
+      return next.now === m.now && next.max === m.max ? m : next;
+    });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    const grid = content();
+    if (grid) observer.observe(grid);
+    return () => observer.disconnect();
+  }, []);
+  const clamp = (value: number) => Math.round(Math.max(MIN_PANEL, Math.min(maxHeight(), value)));
   /** The rendered height: a saved height may have been shrunk by a smaller window. */
   const current = () => section.current?.offsetHeight ?? height ?? DEFAULT_PANEL;
   const finish = () => {
@@ -241,31 +259,33 @@ function PanelSplitter({ section, height, onChange }: { section: React.RefObject
     if (!d) return;
     drag.current = null;
     setDragging(false);
+    if (d.last !== null) onChange(d.last, true);
     // After the final height is rendered, so each terminal is fitted once.
     setTimeout(d.release, 0);
   };
-  const shown = height ?? DEFAULT_PANEL;
   return <div
     className={`automation-splitter ${dragging ? 'dragging' : ''}`}
     role="separator"
     aria-orientation="horizontal"
     aria-label={tr('Zmień wysokość panelu zespołu AI')}
     aria-valuemin={MIN_PANEL}
-    aria-valuenow={shown}
-    aria-valuetext={tr('{width} pikseli', { width: shown })}
+    aria-valuemax={measured.max}
+    aria-valuenow={measured.now}
+    aria-valuetext={tr('{width} pikseli', { width: measured.now })}
     tabIndex={0}
     onPointerDown={(e) => {
       if (e.button !== 0) return;
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
       drag.current?.release();
-      drag.current = { id: e.pointerId, y: e.clientY, start: current(), release: terminals.holdFits() };
+      drag.current = { id: e.pointerId, y: e.clientY, start: current(), last: null, release: terminals.holdFits() };
       setDragging(true);
     }}
     onPointerMove={(e) => {
       const d = drag.current;
       if (!d || d.id !== e.pointerId) return;
-      onChange(clamp(d.start - (e.clientY - d.y)));
+      d.last = clamp(d.start - (e.clientY - d.y));
+      onChange(d.last, false);
     }}
     onPointerUp={finish}
     onPointerCancel={finish}
@@ -277,7 +297,7 @@ function PanelSplitter({ section, height, onChange }: { section: React.RefObject
       if (next === null) return;
       e.preventDefault();
       e.stopPropagation();
-      onChange(clamp(next));
+      onChange(clamp(next), true);
     }}
   />;
 }
