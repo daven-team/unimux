@@ -4,6 +4,7 @@ export const railMessages = {
   'Panele boczne': ['Side panels', 'Seitenleisten', 'Paneles laterales', 'Panneaux latéraux', 'Painéis laterais'],
   'Kliknij ponownie, aby zwinąć panel': ['Click again to collapse the panel', 'Erneut klicken, um das Panel einzuklappen', 'Haz clic de nuevo para contraer el panel', 'Cliquez à nouveau pour réduire le panneau', 'Clique novamente para recolher o painel'],
   'Upuść, aby dodać ścieżkę': ['Drop to add the path', 'Zum Hinzufügen des Pfads ablegen', 'Suelta para añadir la ruta', 'Déposez pour ajouter le chemin', 'Largue para adicionar o caminho'],
+  'Upuść, aby wkleić': ['Drop to paste', 'Zum Einfügen ablegen', 'Suelta para pegar', 'Déposez pour coller', 'Largue para colar'],
   'Komórka nie jest uruchomiona': ['The cell is not running', 'Die Zelle läuft nicht', 'La celda no está en ejecución', 'La cellule n’est pas lancée', 'A célula não está em execução'],
   'Nie dodano ścieżki: komórka nie jest uruchomiona.': [
     'Path not added: the cell is not running.',

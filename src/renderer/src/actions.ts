@@ -3,7 +3,7 @@ import { tr } from './i18n';
 import type { GridLayout } from '../../shared/layout';
 import { normalizeProjectPath } from '../../shared/platform';
 import { layoutForCount } from '../../shared/layout';
-import { cellBodyBox, chooseGridSize, type Size } from '../../shared/cellBox';
+import { CELL_HEAD_HEIGHT, cellBodyBox, chooseGridSize, type Size } from '../../shared/cellBox';
 import {
   activeProject, activeTab, addCell, addProject, addTab, closeTab as closeTabState, ensureShellProfile, findCell, getProfile,
   removeCell as removeCellState, removeProject as removeProjectState, restoreTab, setActiveProject, setActiveTab,
@@ -152,6 +152,13 @@ const measure = (selector: string): Size | null => {
   return rect ? { width: rect.width, height: rect.height } : null;
 };
 
+/** The header height of a rendered cell, else the --cell-head CSS variable, else the shared constant. */
+function cellHeadHeight(): number {
+  const rendered = document.querySelector<HTMLElement>('.cell-head')?.offsetHeight;
+  if (rendered) return rendered;
+  return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cell-head')) || CELL_HEAD_HEIGHT;
+}
+
 /** Fits the not yet shown terminal of a cell to the box it will get. The grid measures 0x0 while Settings or an editor covers it: the workspace (or the last size seen) stands in. */
 function presizeForLayout(cellId: string): void {
   const found = findCell(getS(), cellId);
@@ -159,7 +166,7 @@ function presizeForLayout(cellId: string): void {
   const grid = chooseGridSize([measure('.terminal-workspace .grid'), measure('.workspace-content')], lastGridSize);
   if (!grid) return;
   lastGridSize = grid;
-  const box = cellBodyBox(found.tab.layout, found.tab.cells.findIndex((c) => c.id === cellId), grid, document.querySelector<HTMLElement>('.cell-head')?.offsetHeight ?? 30);
+  const box = cellBodyBox(found.tab.layout, found.tab.cells.findIndex((c) => c.id === cellId), grid, cellHeadHeight());
   if (box) terminals.presize(cellId, box.width, box.height);
 }
 
