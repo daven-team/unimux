@@ -51,10 +51,12 @@ jobs:
 
   # Tag runs can only read caches saved on main, and the package jobs never run on main: without this job every
   # release started with cold Electron and electron-builder downloads. It fills the same cache entries as the package
-  # jobs (same paths and key) and does the work only when the lockfile changed, otherwise it ends after the cache lookup.
+  # jobs (same paths and key) and does the work only when Electron or electron-builder changed, otherwise it ends after the
+  # cache lookup. A failed warm-up (a flaky dmg build) does not turn main red: the next push tries again.
   warm-cache:
     name: Warm cache (${{ matrix.name }})
     if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
+    continue-on-error: true
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -80,12 +82,18 @@ jobs:
               ~/Library/Caches/electron-builder
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The key follows the Electron and electron-builder versions only: npm version rewrites package-lock.json on every
+      # release, so a lockfile hash never matched between main and the tag pushed with it.
+      - id: tools
+        name: Packaging tool versions
+        shell: bash
+        run: echo "versions=$(node -p "const l = require('./package-lock.json').packages; ['electron', 'electron-builder', 'app-builder-lib'].map((n) => l['node_modules/' + n].version).join('-')")" >> "$GITHUB_OUTPUT"
       - id: downloads
         name: Cache Electron and electron-builder downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ matrix.download-cache }}
-          key: electron-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          key: electron-downloads-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.versions }}
       - if: steps.downloads.outputs.cache-hit != 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -162,13 +170,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # The Electron zip and electron-builder's tools, per OS and architecture; a new lockfile (new Electron or
-      # electron-builder) starts a fresh entry, so old downloads do not pile up. Saved only after a green job.
+      # The key follows the Electron and electron-builder versions only: npm version rewrites package-lock.json on every
+      # release, so a lockfile hash never matched between main and the tag pushed with it.
+      - id: tools
+        name: Packaging tool versions
+        shell: bash
+        run: echo "versions=$(node -p "const l = require('./package-lock.json').packages; ['electron', 'electron-builder', 'app-builder-lib'].map((n) => l['node_modules/' + n].version).join('-')")" >> "$GITHUB_OUTPUT"
+      # The Electron zip and electron-builder's tools, per OS and architecture; a new Electron or electron-builder starts a
+      # fresh entry, so old downloads do not pile up. Saved only after a green job.
       - name: Cache Electron and electron-builder downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ matrix.download-cache }}
-          key: electron-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          key: electron-downloads-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.versions }}
       - run: npm ci
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'

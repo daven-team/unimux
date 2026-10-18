@@ -98,16 +98,15 @@ describe('"Połącz ponownie wszystkie SSH"', () => {
 });
 
 describe('the app start claim of main', () => {
-  it('answers true once, to the app window only', () => {
+  it('answers true once (a foreign sender never reaches it: the channel is sender-guarded)', () => {
     const c = createAppStartClaim();
-    expect(c.claim(false)).toBe(false); // a foreign sender spends nothing
-    expect(c.claim(true)).toBe(true);
-    expect(c.claim(true)).toBe(false); // a reload
+    expect(c.claim()).toBe(true);
+    expect(c.claim()).toBe(false); // a reload
   });
   it('is spent by a Pty Host restart before the renderer claims it', () => {
     const c = createAppStartClaim();
     c.cancel();
-    expect(c.claim(true)).toBe(false);
+    expect(c.claim()).toBe(false);
   });
 });
 

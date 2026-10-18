@@ -16,13 +16,15 @@ if (!existsSync(executable)) throw new Error(`Packaged app not found: ${executab
 const scratch = mkdtempSync(join(tmpdir(), 'unimux-start-'));
 const home = join(scratch, 'home');
 for (const dir of ['AppData/Roaming', 'AppData/Local']) mkdirSync(join(home, dir), { recursive: true });
-const startupLog = join(home, 'AppData', 'Roaming', 'unimux', 'startup.log');
+const profile = join(home, 'AppData', 'Roaming', 'unimux');
+const startupLog = join(profile, 'startup.log');
+const pidFile = join(scratch, 'app.pid');
 
 // CreateProcess with STARTF_USESTDHANDLES and null handles; ELECTRON_NO_ATTACH_CONSOLE keeps Electron from borrowing the console
 // of this script, which would hand the app valid handles again. The app's profile follows APPDATA, its home USERPROFILE.
 const launcher = join(scratch, 'launch.ps1');
 writeFileSync(launcher, `
-param([string]$Exe, [string]$HomeDir, [string]$StartupLog, [int]$TimeoutSeconds = 90, [int]$AliveSeconds = 8)
+param([string]$Exe, [string]$HomeDir, [string]$StartupLog, [string]$PidFile, [int]$TimeoutSeconds = 90, [int]$AliveSeconds = 8)
 $ErrorActionPreference = 'Stop'
 Add-Type @"
 using System;
@@ -51,6 +53,8 @@ if (-not [NoConsoleLaunch]::CreateProcess($Exe, '"' + $Exe + '"', [IntPtr]::Zero
   Write-Output ('CreateProcess failed: ' + [Runtime.InteropServices.Marshal]::GetLastWin32Error()); exit 2
 }
 $appPid = $pi.dwProcessId
+# For the Node side: it stops the app if this script itself is cut off by its timeout.
+Set-Content -Path $PidFile -Value $appPid
 $exited = { [NoConsoleLaunch]::WaitForSingleObject($pi.hProcess, 0) -eq 0 }
 $exitText = { $c = [uint32]0; [NoConsoleLaunch]::GetExitCodeProcess($pi.hProcess, [ref]$c) | Out-Null; '0x{0:X}' -f $c }
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -73,16 +77,23 @@ exit 0
 let status = 1;
 try {
   const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', launcher,
-    '-Exe', executable, '-HomeDir', home, '-StartupLog', startupLog], { encoding: 'utf8', windowsHide: true, timeout: 180_000 });
+    '-Exe', executable, '-HomeDir', home, '-StartupLog', startupLog, '-PidFile', pidFile], { encoding: 'utf8', windowsHide: true, timeout: 180_000 });
   process.stdout.write(result.stdout ?? '');
   process.stderr.write(result.stderr ?? '');
   status = result.status ?? 1;
+  if (result.error) process.stderr.write(`${result.error.message}\n`);
   if (status !== 0) {
-    const crashLog = join(home, 'AppData', 'Roaming', 'unimux', 'crash.log');
-    if (existsSync(crashLog)) process.stderr.write(`crash.log:\n${readFileSync(crashLog, 'utf8')}\n`);
+    // A fresh profile also checks for updates: on a build older than the latest release the app may update and quit.
+    for (const name of ['crash.log', 'updater.log']) {
+      const file = join(profile, name);
+      if (existsSync(file)) process.stderr.write(`${name}:\n${readFileSync(file, 'utf8').split('\n').slice(-30).join('\n')}\n`);
+    }
   }
 } finally {
-  rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
+  // The launcher stops the app itself; this covers a launcher cut off by the timeout.
+  if (existsSync(pidFile)) spawnSync('taskkill', ['/PID', readFileSync(pidFile, 'utf8').trim(), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+  try { rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 }); }
+  catch (error) { console.warn(`Scratch profile not removed: ${error.message}`); }
 }
 if (status !== 0) {
   console.error('Start without a console FAILED');
