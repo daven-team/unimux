@@ -241,7 +241,8 @@ export function App() {
   const settingsActive = useStore((st) => st.ui.settingsActive);
   const settingsTabOpen = useStore((st) => st.ui.settingsTabOpen);
   // A boolean, not the documents: typing in the editor must not re-render the whole app.
-  const fileOpen = useFileStore((st) => st.documents.some((doc) => doc.id === st.activeFileId && doc.projectId === projectId));
+  // Tabs of files outside the projects (remote and local SFTP files, projectId '') show in every project.
+  const fileOpen = useFileStore((st) => st.documents.some((doc) => doc.id === st.activeFileId && (doc.projectId === projectId || !doc.projectId)));
   const sshViewActive = useSshStore((st) => st.viewActive);
   const sshViewOpen = useSshStore((st) => st.viewOpen);
   const ready = useStore((st) => st.ready);

@@ -4,7 +4,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification
 import { createQuitConfirm, isQuitAnswer, sessionEndingNow } from './quitConfirm';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { homedir, hostname } from 'os';
-import { isAbsolute, join } from 'path';
+import { dirname, isAbsolute, join } from 'path';
 import { rm, stat } from 'fs/promises';
 import type { SpawnCellRequest } from '../preload/api';
 import { cleanEnv } from '../shared/env';
@@ -699,13 +699,14 @@ function createWindow(): void {
   win.on('focus', () => cliDetector.invalidateRegistry());
   if (!app.isPackaged) win.webContents.on('console-message', (e) => e.level !== 'debug' && console.log('[renderer]', e.level, e.message));
   // The install window lives in the renderer: a reload or crash must not leave an invisible install running.
-  win.webContents.on('did-start-loading', () => { install.dispose(); quitConfirm.rendererGone(); sftp?.rendererGone(); });
+  win.webContents.on('did-start-loading', () => { install.dispose(); quitConfirm.rendererGone(); sftp?.rendererGone(); localFiles.rendererGone(); });
   // The close button (or Alt+F4, or the last window on macOS) while agents work: the renderer asks first.
   win.on('close', (e) => { if (quitConfirm.hold()) e.preventDefault(); });
   win.webContents.on('render-process-gone', (_e, details) => {
     install.dispose();
     quitConfirm.rendererGone();
     sftp?.rendererGone();
+    localFiles.rendererGone();
     onRendererGone(created, details.reason, details.exitCode);
   });
   // A renderer stuck in a loop: after a grace period the user may reload it (the terminals keep running in the Pty Host).
@@ -1180,12 +1181,15 @@ guardedHandle('fs:writeProjectFile', (_e, projectId: string, path: string, text:
   return project ? writeProjectFile(project.path, path, text, expectedText) : { ok: false, error: 'Projekt już nie istnieje.' };
 }, () => ({ ok: false, error: 'Projekt już nie istnieje.' }));
 registerFileOpsIpc({ projectPath: (projectId) => state.projects.find((p) => p.id === projectId)?.path, send, allowed: fromAppWindow });
-registerLocalFilesIpc({ guardedHandle, guardedOn }, createLocalFiles({
+const localFiles = createLocalFiles({
   platform: process.platform,
   trash: createTrash(),
   openFolder: async (path) => { const error = await shell.openPath(path); if (error) throw new Error('open failed'); },
   showFile: (path) => shell.showItemInFolder(path),
-}));
+  // The editor never reads or writes the app's own data (state, vault, logs) or its install.
+  forbidden: [DATA_DIR, app.getPath('userData'), dirname(app.getPath('exe')), ...(app.isPackaged ? [app.getAppPath()] : [])],
+});
+registerLocalFilesIpc({ guardedHandle, guardedOn }, localFiles);
 /** Worktrees of the project's cells, open and in closed grids (History lists their conversations too). */
 function projectWorktrees(projectPath: string): Worktree[] {
   const key = normalizeProjectPath(projectPath);

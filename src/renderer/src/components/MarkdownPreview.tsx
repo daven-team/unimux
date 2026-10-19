@@ -83,7 +83,8 @@ export function MarkdownPreview({ text, projectId, path }: { text: string; proje
     const external = externalMarkdownUrl(href);
     if (external) { window.mc.openExternal(external); return; }
     const relative = projectLinkPath(href, path);
-    if (relative) void openFile(projectId, relative);
+    // A tab outside the projects (projectId '') has no project to resolve a relative link in.
+    if (relative && projectId) void openFile(projectId, relative);
   };
   return <div className="markdown-preview-scroll" tabIndex={0}>
     <article className="markdown-preview" aria-label={path} onClick={followLink} onAuxClick={followLink}

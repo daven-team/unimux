@@ -13,7 +13,8 @@ import * as actions from './actions';
 import { useStore } from './store';
 import { terminals } from './terminals/TerminalManager';
 import { useSftpStore } from './sftpStore';
-(window as unknown as { __mc: unknown }).__mc = { actions, useStore, terminals, useSftpStore };
+import { useFileStore } from './files';
+(window as unknown as { __mc: unknown }).__mc = { actions, useStore, terminals, useSftpStore, useFileStore };
 
 // A file dropped anywhere the app does not handle must never make the window navigate to it.
 for (const type of ['dragover', 'drop'] as const) {

@@ -278,7 +278,7 @@ class RemoteReadStream extends Readable {
 }
 
 /** Writes a remote file at increasing offsets with up to DEPTH writes in flight; the handle is closed on finish. */
-class RemoteWriteStream extends Writable {
+export class RemoteWriteStream extends Writable {
   private position = 0;
   private inflight = 0;
   private failed: Error | null = null;

@@ -27,6 +27,8 @@ import { HostPicker } from './HostPicker';
 import { TransferPanel } from './TransferPanel';
 import { useFolder, type Listing } from './useFolder';
 import './sftp.css';
+import { isFileLike } from '../../../../shared/editorSource';
+import { openLocalEntry, openRemoteEntry } from '../../remoteOpen';
 
 /** Sessions whose start folder a mounted view already showed (kept across remounts of the view). */
 const shownSessions = new Set<string>();
@@ -190,9 +192,16 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
     await remote.refresh();
   };
 
+  // ── editor tabs (0.9.9): a file opens in a tab at the top ──
+  const openRemote = (e: PaneEntry) => { if (hostId && connected && isFileLike(e)) void openRemoteEntry(hostId, e.path, e.kind === 'file' ? e.size : undefined); };
+  const openLocal = (e: PaneEntry) => { if (isFileLike(e)) openLocalEntry(e.path); };
+  const openItem = (sel: PaneEntry[], open: (e: PaneEntry) => void, enabled = true): MenuItem =>
+    ({ label: tr('Otwórz'), disabled: !enabled || sel.length !== 1 || !isFileLike(sel[0]), onClick: () => open(sel[0]) });
+
   const localActions = (sel: PaneEntry[]): MenuItem[] => {
     const drives = localDir === DRIVES;
     return [
+      openItem(sel, openLocal),
       { label: tr('Nowy folder'), disabled: drives, onClick: () => void localNewFolder() },
       { label: tr('Zmień nazwę'), disabled: drives || sel.length !== 1, onClick: () => void localRename(sel[0]) },
       { label: tr('Przenieś do kosza'), danger: true, disabled: drives || !sel.length, onClick: () => void localDelete(sel) },
@@ -203,6 +212,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
     ];
   };
   const remoteActions = (sel: PaneEntry[]): MenuItem[] => [
+    openItem(sel, openRemote, connected),
     { label: tr('Nowy folder'), disabled: !connected, onClick: () => void remoteNewFolder() },
     { label: tr('Zmień nazwę'), disabled: !connected || sel.length !== 1, onClick: () => void remoteRename(sel[0]) },
     { label: tr('Usuń'), danger: true, disabled: !connected || !sel.length, onClick: () => void remoteDelete(sel) },
@@ -296,7 +306,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
       {compactNav && <div className="sftp-nav"><SshNav compact /></div>}
       <div className="sftp-panes">
         <FilePane side="local" label={tr('Lokalne pliki')} head={localHead} folder={local.folder} crumbs={localCrumbList} extraColumns={false}
-          onOpen={goLocal} onBack={local.back} onForward={local.forward} onUp={local.up}
+          onOpen={goLocal} onOpenFile={openLocal} onBack={local.back} onForward={local.forward} onUp={local.up}
           actions={localActions}
           transfer={{ label: tr('Wyślij'), icon: <IUpload />, disabled: !connected || !remoteDir, run: (sel) => upload(sel.map((e) => e.path), remoteDir!) }}
           onDelete={(sel) => void localDelete(sel)} onRename={(e) => void localRename(e)}
@@ -309,7 +319,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
           }}
           dropDisabled={localDir === DRIVES} />
         <FilePane side="remote" label={tr('Pliki na serwerze')} head={remoteHead} folder={remote.folder} crumbs={remoteCrumbList} extraColumns
-          onOpen={(p) => void remote.go(p)} onBack={remote.back} onForward={remote.forward} onUp={remote.up}
+          onOpen={(p) => void remote.go(p)} onOpenFile={openRemote} onBack={remote.back} onForward={remote.forward} onUp={remote.up}
           actions={remoteActions}
           transfer={{ label: tr('Pobierz'), icon: <IDownload />, disabled: !connected || !localDir || localDir === DRIVES, run: (sel) => download(sel.map((e) => e.path), localDir!) }}
           onDelete={(sel) => void remoteDelete(sel)} onRename={(e) => void remoteRename(e)}
