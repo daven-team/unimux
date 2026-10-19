@@ -13,6 +13,7 @@ export const sftpMessages = {
   'Proces SFTP został uruchomiony ponownie': ['The SFTP process was restarted', 'Der SFTP-Prozess wurde neu gestartet', 'El proceso SFTP se reinició', 'Le processus SFTP a été redémarré', 'O processo SFTP foi reiniciado'],
   'Serwer nie obsługuje tej operacji': ['The server does not support this operation', 'Der Server unterstützt diesen Vorgang nicht', 'El servidor no admite esta operación', 'Le serveur ne prend pas en charge cette opération', 'O servidor não suporta esta operação'],
   'Za dużo elementów naraz': ['Too many items at once', 'Zu viele Elemente auf einmal', 'Demasiados elementos a la vez', 'Trop d\'éléments à la fois', 'Demasiados itens de uma vez'],
+  'Nazwa, której nie można bezpiecznie zapisać w tym miejscu': ['A name that cannot be written safely here', 'Ein Name, der hier nicht sicher geschrieben werden kann', 'Un nombre que no se puede escribir aquí de forma segura', 'Un nom qui ne peut pas être écrit ici en toute sécurité', 'Um nome que não pode ser escrito aqui com segurança'],
   'Operacja nie powiodła się': ['The operation failed', 'Der Vorgang ist fehlgeschlagen', 'La operación ha fallado', 'L\'opération a échoué', 'A operação falhou'],
   'Serwer nie udostępnia SFTP': ['The server does not offer SFTP', 'Der Server bietet kein SFTP an', 'El servidor no ofrece SFTP', 'Le serveur ne propose pas SFTP', 'O servidor não disponibiliza SFTP'],
 } as const;

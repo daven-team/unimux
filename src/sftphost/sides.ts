@@ -6,7 +6,7 @@ import { lstat, mkdir, readdir, rename, rmdir, stat, unlink, utimes } from 'fs/p
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'path';
 import { Readable, Writable } from 'stream';
 import type { FileEntry, SFTPWrapper, Stats as SftpStats } from 'ssh2';
-import { kindFromMode, ownerFromLongname, permissionString, posixBasename, posixContains, posixJoin, posixParent, type EntryKind, type SftpEntry, type SftpErrorCode } from '../shared/sftp';
+import { kindFromMode, ownerFromLongname, permissionString, posixBasename, safeEntryName, posixContains, posixJoin, posixParent, type EntryKind, type SftpEntry, type SftpErrorCode } from '../shared/sftp';
 
 export interface Meta { kind: EntryKind; size: number; mtime: number; mode?: number }
 export interface DirEntry extends Meta { name: string; longname?: string }
@@ -21,6 +21,8 @@ export interface FileSide {
   /** Names that differ only in case are the same file (Windows and default macOS disks). */
   readonly caseInsensitive: boolean;
   join(dir: string, name: string): string;
+  /** A name read from a folder may be joined onto a path of this side (never "..", no separators: shared safeEntryName). */
+  validName(name: string): boolean;
   /** `child` is `parent` or inside it. */
   contains(parent: string, child: string): boolean;
   basename(path: string): string;
@@ -89,7 +91,8 @@ const wrapLocal = async <T>(fn: () => Promise<T>): Promise<T> => {
 
 export class LocalSide implements FileSide {
   readonly remote = false;
-  constructor(readonly caseInsensitive = process.platform === 'win32' || process.platform === 'darwin') {}
+  constructor(readonly caseInsensitive = process.platform === 'win32' || process.platform === 'darwin', private readonly windowsNames = process.platform === 'win32') {}
+  validName(name: string): boolean { return safeEntryName(name, { windows: this.windowsNames }); }
   join(dir: string, name: string): string { return join(dir, name); }
   contains(parent: string, child: string): boolean {
     const fold = (p: string) => { const r = resolve(p); return this.caseInsensitive ? r.toLowerCase() : r; };
@@ -313,6 +316,7 @@ export class RemoteSide implements FileSide {
     return (this.sftp as unknown as { _extensions?: Record<string, string> })._extensions?.['posix-rename@openssh.com'] === '1';
   }
 
+  validName(name: string): boolean { return safeEntryName(name); }
   join(dir: string, name: string): string { return posixJoin(dir, name); }
   contains(parent: string, child: string): boolean { return posixContains(parent, child); }
   basename(path: string): string { return posixBasename(path); }
@@ -375,5 +379,8 @@ export class RemoteSide implements FileSide {
 /** One remote listing entry for the view. */
 export function remoteEntry(dir: string, e: FileEntry): SftpEntry {
   const meta = remoteMeta(e.attrs);
-  return { name: e.filename, path: posixJoin(dir, e.filename), kind: meta.kind, size: meta.size, mtime: meta.mtime, permissions: permissionString(meta.mode), ...ownerFromLongname(e.longname) };
+  const entry: SftpEntry = { name: e.filename, path: posixJoin(dir, e.filename), kind: meta.kind, size: meta.size, mtime: meta.mtime, permissions: permissionString(meta.mode), ...ownerFromLongname(e.longname) };
+  // A name that is not one safe path segment never reads as a normal entry (its joined path would point elsewhere).
+  if (!safeEntryName(e.filename)) { entry.unsafeName = true; entry.kind = 'other'; entry.path = ''; }
+  return entry;
 }

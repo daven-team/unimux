@@ -29,6 +29,8 @@ interface Batch {
   src: FileSide;
   dst: FileSide;
   policy: ConflictChoice | undefined;
+  /** The chosen target folder: no target path may leave it. */
+  root: string;
   /** Folders already made sure of (path -> pending check). */
   dirs: Map<string, Promise<void>>;
   cancelled: boolean;
@@ -73,9 +75,14 @@ export class TransferQueue {
     if (this.disposed) throw new SftpError('noSession');
     const sides = this.sides(req.direction);
     if (!sides) throw new SftpError('notConnected');
-    const batch: Batch = { id: randomUUID(), direction: req.direction, src: sides.src, dst: sides.dst, policy: req.policy, dirs: new Map(), cancelled: false };
+    const batch: Batch = { id: randomUUID(), direction: req.direction, src: sides.src, dst: sides.dst, policy: req.policy, root: req.targetDir, dirs: new Map(), cancelled: false };
     const { src, dst } = sides;
-    const files: Array<{ source: string; target: string; name: string; size: number; mtime: number }> = [];
+    const files: Array<{ source: string; target: string; name: string; size: number; mtime: number; error?: TransferItem['error'] }> = [];
+    // A name read from the source side (a server for downloads) is never trusted: one that is not a single safe segment on
+    // both sides ("..", "a/b", "c:d", "NUL" on Windows) becomes a failed item and is never joined onto a path.
+    const reject = (parent: string, label: string, error: TransferItem['error']) => {
+      files.push({ source: parent, target: req.targetDir, name: label, size: 0, mtime: 0, error });
+    };
     const emptyDirs: string[] = [];
     const walk = async (source: string, target: string, label: string, depth: number): Promise<void> => {
       if (batch.cancelled || this.disposed) throw new SftpError('cancelled');
@@ -90,6 +97,7 @@ export class TransferQueue {
         if (!real || real.kind !== 'file') return;
         kind = 'file'; size = real.size; mtime = real.mtime;
       }
+      if (!dst.contains(batch.root, target) || target === batch.root) { reject(source, label, 'invalid'); return; }
       if (kind === 'file') {
         files.push({ source, target, name: label, size, mtime });
         if (files.length > SFTP_LIMITS.batchFiles) throw new SftpError('tooMany');
@@ -98,11 +106,15 @@ export class TransferQueue {
       if (kind !== 'dir') return;
       const children = await src.readdir(source);
       if (!children.length) emptyDirs.push(target);
-      for (const child of children) await walk(src.join(source, child.name), dst.join(target, child.name), `${label}/${child.name}`, depth + 1);
+      for (const child of children) {
+        if (!src.validName(child.name) || !dst.validName(child.name)) { reject(source, `${label}/${child.name}`, 'invalidName'); continue; }
+        await walk(src.join(source, child.name), dst.join(target, child.name), `${label}/${child.name}`, depth + 1);
+      }
     };
     for (const source of req.sources) {
       const name = src.basename(source);
       if (!name) throw new SftpError('invalid');
+      if (!src.validName(name) || !dst.validName(name)) { reject(src.dirname(source), name, 'invalidName'); continue; }
       const target = dst.join(req.targetDir, name);
       // Copying a folder into itself would never end.
       if (req.direction === 'local-copy' && dst.contains(source, req.targetDir)) throw new SftpError('invalid');
@@ -111,7 +123,7 @@ export class TransferQueue {
     const created = files.map((f): Job => ({
       item: {
         id: randomUUID(), batchId: batch.id, sessionId: this.sessionId, direction: req.direction, source: f.source, target: f.target, name: f.name,
-        bytesDone: 0, bytesTotal: f.size, speed: 0, state: 'queued',
+        bytesDone: 0, bytesTotal: f.size, speed: 0, ...(f.error ? { state: 'failed' as const, error: f.error, endedAt: this.now() } : { state: 'queued' as const }),
       },
       batch, plannedTarget: f.target, abort: null, answer: null, samples: [], resuming: false,
     }));
@@ -215,6 +227,7 @@ export class TransferQueue {
       if (srcMeta.kind === 'dir') throw new SftpError('isADirectory');
       this.update(job, { bytesTotal: srcMeta.size }, false);
       const dir = dst.dirname(job.item.target);
+      if (job.item.target === batch.root || !dst.contains(batch.root, job.item.target)) throw new SftpError('invalid');
       await this.ensureDir(batch, dir);
       if (abort.signal.aborted) throw new SftpError('cancelled');
       let target = job.item.target;
@@ -234,6 +247,8 @@ export class TransferQueue {
         }
         this.update(job, { state: 'running', target, conflict: undefined });
       }
+      // Defense in depth: whatever the names were, nothing is written outside the chosen folder.
+      if (target === batch.root || !dst.contains(batch.root, target)) throw new SftpError('invalid');
       part = dst.join(dir, partName(dst.basename(target)));
       await dst.unlink(part).catch(() => undefined); // a part file left by a crash
       const reader = await src.openRead(job.item.source);
@@ -306,6 +321,7 @@ export class TransferQueue {
     for (const id of itemIds) {
       const job = this.jobs.get(id);
       if (!job || (job.item.state !== 'failed' && job.item.state !== 'cancelled')) continue;
+      if (job.item.error === 'invalidName' || job.item.error === 'invalid') continue; // a retry cannot make the name safe
       any = true;
       job.batch.cancelled = false;
       this.update(job, { state: 'queued', target: job.plannedTarget, bytesDone: 0, speed: 0, error: undefined, skipped: undefined, conflict: undefined, startedAt: undefined, endedAt: undefined });

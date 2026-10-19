@@ -283,7 +283,11 @@ export class SftpHost {
       if (!meta) throw new SftpError('notFound');
       if (meta.kind !== 'dir') { total.files++; return; }
       total.dirs++;
-      for (const child of await side.readdir(path)) await walk(side.join(path, child.name));
+      for (const child of await side.readdir(path)) {
+        // A name from the server that is not one safe segment ("..", "a/b") would make the walk leave the folder: refused.
+        if (!side.validName(child.name)) throw new SftpError('invalidName');
+        await walk(side.join(path, child.name));
+      }
     };
     for (const p of paths) {
       const path = posixNormalize(p);
@@ -298,6 +302,7 @@ export class SftpHost {
     if (!meta) return;
     if (meta.kind !== 'dir') { await side.unlink(path); return; }
     const children = await side.readdir(path);
+    if (children.some((c) => !side.validName(c.name))) throw new SftpError('invalidName');
     const files = children.filter((c) => c.kind !== 'dir');
     await eachLimited(files, 8, (c) => side.unlink(side.join(path, c.name)));
     for (const c of children) if (c.kind === 'dir') await this.remove(side, side.join(path, c.name));

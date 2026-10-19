@@ -58,6 +58,8 @@ export interface SftpEntry {
   group?: string;
   /** For a symlink: what it points to ('other' when broken or unknown). */
   target?: 'file' | 'dir' | 'other';
+  /** The server sent a name that cannot be used safely (it contains "\" or the like): shown, but never opened or transferred. */
+  unsafeName?: true;
 }
 
 export interface LocalEntry {
@@ -80,7 +82,7 @@ export interface LocalEntry {
 export type SftpErrorCode =
   | 'notFound' | 'exists' | 'permission' | 'notEmpty' | 'notADirectory' | 'isADirectory' | 'noSpace'
   | 'invalid' | 'noSession' | 'notConnected' | 'changed' | 'cancelled' | 'connectionLost' | 'sftpHostCrashed'
-  | 'unsupported' | 'tooMany' | 'failed';
+  | 'unsupported' | 'tooMany' | 'invalidName' | 'failed';
 
 export type SftpResult<T> = { ok: true; value: T } | { ok: false; error: SftpErrorCode };
 
@@ -102,6 +104,7 @@ export function sftpErrorText(code: SftpErrorCode): Localized {
     case 'sftpHostCrashed': return { key: 'Proces SFTP został uruchomiony ponownie' };
     case 'unsupported': return { key: 'Serwer nie obsługuje tej operacji' };
     case 'tooMany': return { key: 'Za dużo elementów naraz' };
+    case 'invalidName': return { key: 'Nazwa, której nie można bezpiecznie zapisać w tym miejscu' };
     default: return { key: 'Operacja nie powiodła się' };
   }
 }
@@ -267,6 +270,25 @@ export function validRemoteName(name: unknown): name is string {
 }
 
 // ── names ───────────────────────────────────────────────────────────────────
+
+const WINDOWS_DEVICE = /^(con|prn|aux|nul|conin\$|conout\$|clock\$|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i;
+
+/**
+ * A single entry name that is safe to join onto a folder path: never empty, ".", "..", and never containing "/", "\" or NUL
+ * (a name from a server is never trusted: "../x" would leave the chosen folder). With `windows` (the name becomes a local
+ * Windows path) also no ":" (drive letters, alternate data streams), no <>"|?* or control characters, no reserved device
+ * name (CON, NUL, COM1 ...) and no trailing dot or space.
+ */
+export function safeEntryName(name: unknown, opts: { windows?: boolean } = {}): name is string {
+  if (typeof name !== 'string' || !name || name.length > SFTP_LIMITS.name || name === '.' || name === '..') return false;
+  if (/[\/\\\0]/.test(name)) return false;
+  if (opts.windows) {
+    if (/[:<>"|?*\x00-\x1f]/.test(name)) return false;
+    if (/[. ]$/.test(name)) return false;
+    if (WINDOWS_DEVICE.test(name)) return false;
+  }
+  return true;
+}
 
 export const PART_SUFFIX = '.unimux-part';
 /** The temporary name a file is written under until it is complete. */
