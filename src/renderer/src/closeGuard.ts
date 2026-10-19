@@ -1,9 +1,12 @@
 // Asking before closing a grid, a cell or the app while Claude or Codex agents are in the middle of a turn. Waiting-for-you and
 // idle cells do not count. "Do not ask again" turns the setting off (Settings > App settings turns it back on).
+// Quitting also asks while SFTP transfers run (always: the shutdown would cancel them), before the agents question.
 import { allCellIds, namesList, shouldConfirmClose, workingAgents } from '../../shared/agentWork';
+import { isActive } from '../../shared/sftp';
 import { updateSettings } from '../../shared/state';
 import { tr } from './i18n';
-import { askChoiceChecked, getS, getUi, update, useStore } from './store';
+import { useSftpStore } from './sftpStore';
+import { askChoice, askChoiceChecked, getS, getUi, update, useStore } from './store';
 
 export type CloseKind = 'tab' | 'cell' | 'app';
 
@@ -30,22 +33,47 @@ export async function confirmCloseWorking(cellIds: Iterable<string>, kind: Close
   return true;
 }
 
+/** SFTP transfers a quit would stop: queued, running or waiting for a conflict answer, and folder walks still being prepared. */
+export function activeTransferCount(): number {
+  const { transfers, preparing } = useSftpStore.getState();
+  return transfers.filter((i) => isActive(i.state)).length + preparing.length;
+}
+
+/** Resolves true when quitting may go on: no SFTP transfer runs, or the user chose "Quit anyway" (the shutdown cancels them). */
+export async function confirmQuitTransfers(): Promise<boolean> {
+  const count = activeTransferCount();
+  if (!count) return true;
+  const choice = await askChoice(tr('Zamknąć aplikację w trakcie transferów?'), tr('Transfery w toku: {count}. Zamknięcie aplikacji je przerwie.', { count }), [
+    { label: tr('Zakończ mimo to'), value: 'quit', danger: true },
+  ]);
+  return choice === 'quit';
+}
+
 /**
- * Tells main whether quitting must ask first (some agent works and the setting is on), so a quit with nothing to ask about never
- * waits for this window. Main then asks through 'app:confirm-quit'.
+ * Tells main whether quitting must ask first (some agent works and the setting is on, or SFTP transfers run), so a quit with
+ * nothing to ask about never waits for this window. Main then asks through 'app:confirm-quit'.
  */
 export function initQuitGuard(): void {
+  const agentsWork = (): boolean => {
+    const { s, ui } = useStore.getState();
+    return shouldConfirmClose(s, workingAgents(s, allCellIds(s), ui.statuses, ui.sessionTitles));
+  };
+  // Each part is recomputed only when its own store changes (transfer progress arrives several times a second).
+  let agents = agentsWork();
+  let transfers = activeTransferCount() > 0;
   let last: boolean | undefined;
   const push = (): void => {
-    const { s, ui } = useStore.getState();
-    const guard = shouldConfirmClose(s, workingAgents(s, allCellIds(s), ui.statuses, ui.sessionTitles));
+    const guard = agents || transfers;
     if (guard === last) return;
     last = guard;
     window.mc.setQuitGuard(guard);
   };
   push();
   useStore.subscribe((st, prev) => {
-    if (st.ui.statuses !== prev.ui.statuses || st.s.projects !== prev.s.projects || st.s.settings !== prev.s.settings || st.s.profiles !== prev.s.profiles) push();
+    if (st.ui.statuses !== prev.ui.statuses || st.s.projects !== prev.s.projects || st.s.settings !== prev.s.settings || st.s.profiles !== prev.s.profiles) { agents = agentsWork(); push(); }
+  });
+  useSftpStore.subscribe((st, prev) => {
+    if (st.transfers !== prev.transfers || st.preparing !== prev.preparing) { transfers = activeTransferCount() > 0; push(); }
   });
   // The open quit question: its dialog id, and a token so a replaced question never answers for the current one.
   let question: { token: number; dialogId: number | undefined } | null = null;
@@ -56,9 +84,19 @@ export function initQuitGuard(): void {
     const token = ++tokens;
     const current = { token, dialogId: undefined as number | undefined };
     question = current;
-    // The dialog is set synchronously (before the first await), so it can be recognised right away.
-    const answer = confirmCloseWorking(allCellIds(getS()), 'app');
-    current.dialogId = getUi().dialog?.id;
+    // Each dialog is set synchronously (before the first await), so it can be recognised right away. Running transfers are
+    // asked about first, then the working agents.
+    const askAgents = (): Promise<boolean> => {
+      const agents = confirmCloseWorking(allCellIds(getS()), 'app');
+      current.dialogId = getUi().dialog?.id;
+      return agents;
+    };
+    const answer = activeTransferCount() === 0 ? askAgents() : (async () => {
+      const transfers = confirmQuitTransfers();
+      current.dialogId = getUi().dialog?.id;
+      if (!(await transfers) || question !== current) return false;
+      return askAgents();
+    })();
     window.mc.answerQuit('asking');
     void answer.catch(() => true).then((go) => {
       if (question !== current) return;

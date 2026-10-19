@@ -699,12 +699,13 @@ function createWindow(): void {
   win.on('focus', () => cliDetector.invalidateRegistry());
   if (!app.isPackaged) win.webContents.on('console-message', (e) => e.level !== 'debug' && console.log('[renderer]', e.level, e.message));
   // The install window lives in the renderer: a reload or crash must not leave an invisible install running.
-  win.webContents.on('did-start-loading', () => { install.dispose(); quitConfirm.rendererGone(); });
+  win.webContents.on('did-start-loading', () => { install.dispose(); quitConfirm.rendererGone(); sftp?.rendererGone(); });
   // The close button (or Alt+F4, or the last window on macOS) while agents work: the renderer asks first.
   win.on('close', (e) => { if (quitConfirm.hold()) e.preventDefault(); });
   win.webContents.on('render-process-gone', (_e, details) => {
     install.dispose();
     quitConfirm.rendererGone();
+    sftp?.rendererGone();
     onRendererGone(created, details.reason, details.exitCode);
   });
   // A renderer stuck in a loop: after a grace period the user may reload it (the terminals keep running in the Pty Host).

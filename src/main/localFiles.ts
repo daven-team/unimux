@@ -15,6 +15,9 @@ export interface LocalFilesDeps {
   home?(): string;
 }
 
+/** A macOS directory name Finder may treat as a package rather than a plain folder (any extension, e.g. Foo.app). */
+export const isBundleName = (name: string): boolean => /\.[a-z0-9]+$/i.test(name) && !/^\.[^.]*$/.test(name);
+
 const ok = <T>(value: T): LocalResult<T> => ({ ok: true, value });
 const fail = (error: LocalErrorCode): LocalResult<never> => ({ ok: false, error });
 
@@ -105,7 +108,10 @@ export function createLocalFiles(deps: LocalFilesDeps) {
       if (!validLocalPath(path)) return fail('invalid');
       try {
         const st = await stat(path);
-        if (st.isDirectory()) await deps.openFolder(path); else deps.showFile(path);
+        // On macOS a directory with an extension (Foo.app, .bundle, .pkg, .prefPane, .workflow) is a bundle: opening it would launch
+        // it, and a downloaded bundle carries no quarantine flag. It is shown selected in Finder instead.
+        if (st.isDirectory() && !(deps.platform === 'darwin' && isBundleName(basename(resolve(path))))) await deps.openFolder(path);
+        else deps.showFile(path);
         return ok(null);
       } catch (error) { return fail(codeOf(error)); }
     },

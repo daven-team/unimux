@@ -74,4 +74,19 @@ describe('concurrent renderer and MCP state edits', () => {
     expect(() => controller.apply({ id: 'ui', base, next: addCell(base, project.id, tab.id, 'codex') })).toThrow('cell limit');
     expect(controller.get()).toBe(before);
   });
+  it('normalizes the SFTP places and the scrollback setting of a renderer edit', () => {
+    const base = grid(1);
+    const controller = new StateController(base, () => {});
+    const remotePaths = JSON.parse('{"__proto__":"/x","h1":"/srv//www/","bad id":"/y","h2":"relative"}') as Record<string, string>;
+    const next = { ...base, sftp: { localPath: 'relative/path', remotePaths }, settings: { ...base.settings, scrollbackLines: 123 } };
+    controller.apply({ id: 'ui', base, next });
+    const state = controller.get();
+    expect(state.sftp).toEqual({ remotePaths: { h1: '/srv/www' } });
+    expect(Object.getPrototypeOf(state.sftp.remotePaths)).toBe(Object.prototype);
+    expect(state.settings.scrollbackLines).toBe(5000);
+    const kept = { ...base, sftp: { remotePaths: { h1: '/srv' } }, settings: { ...base.settings, scrollbackLines: 10_000 } };
+    controller.apply({ id: 'ui2', base: state, next: kept });
+    expect(controller.get().sftp).toEqual({ remotePaths: { h1: '/srv' } });
+    expect(controller.get().settings.scrollbackLines).toBe(10_000);
+  });
 });

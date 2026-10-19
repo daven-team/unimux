@@ -11,7 +11,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ssh2 from 'ssh2';
-import { launchApp, scratchRoot, sleep, startTestServer, testHost, writeState } from './ssh-ui-lib.mjs';
+import { launchApp, mainInspector, scratchRoot, sleep, startTestServer, testHost, writeState } from './ssh-ui-lib.mjs';
 
 const shot = (app, name) => app.screenshot(`098-sftp-${name}.png`);
 const log = (m) => process.stdout.write(`  ${m}\n`);
@@ -49,9 +49,12 @@ writeState(root, {
 });
 
 let app;
+let main;
+const inspectPort = 9300 + Math.floor(Math.random() * 500);
 const remoteFiles = (dir = home) => readdirSync(dir);
 try {
-  app = await launchApp(root, { MC_TRASH_DIR: trash });
+  app = await launchApp(root, { MC_TRASH_DIR: trash }, [`--inspect=${inspectPort}`]);
+  main = await mainInspector(inspectPort);
   await app.cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   const ev = app.evaluate;
   const sftp = `window.__mc.useSftpStore.getState()`;
@@ -301,12 +304,35 @@ try {
   await sleep(400);
   await shot(app, 'narrow');
   log('local trash, remembered folders, narrow window OK');
+
+  // 13. Closing the window (the last one, so the app would quit) while a transfer runs asks first; Cancel keeps the app and the
+  // transfer goes on.
+  await app.cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await upload(['big.bin']);
+  await app.until(`${sftp}.transfers[0]?.state === 'running' && ${sftp}.transfers[0].bytesDone > 0`, 'running before the quit');
+  await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].close(), true`);
+  await app.until(`document.querySelector('.modal h3')?.textContent === 'Zamknąć aplikację w trakcie transferów?'`, 'quit question about the transfers');
+  const quitBody = await ev(`document.querySelector('.modal .modal-body').textContent`);
+  if (!quitBody.includes('Transfery w toku: 1.')) throw new Error(`quit question body: ${quitBody}`);
+  await shot(app, 'quit-ask');
+  const before = await ev(`${sftp}.transfers[0].bytesDone`);
+  await dialogChoose('Anuluj');
+  await sleep(1500);
+  if ((await main.evaluate(`__el.BrowserWindow.getAllWindows().length`)) !== 1) throw new Error('the window closed after Cancel');
+  const after = await ev(`${sftp}.transfers[0]`);
+  if (!['running', 'done'].includes(after.state) || (after.state === 'running' && after.bytesDone <= before)) throw new Error(`the transfer did not go on after Cancel: ${JSON.stringify({ state: after.state, before, after: after.bytesDone })}`);
+  log(`after Cancel the transfer is ${after.state} (${before} -> ${after.bytesDone} bytes)`);
+  // "Zakończ mimo to" is not chosen here: the script closes the app itself.
+  if (after.state === 'running') await app.click('.sftp-transfer.running .btn', 'Anuluj');
+  await app.until(`${sftp}.transfers.every((i) => i.state !== 'running' && i.state !== 'queued')`, 'transfer ended');
+  log('quit with a running transfer asks, Cancel keeps it running OK');
   process.stdout.write('verify-sftp-ui: all OK\n');
 } catch (error) {
   if (app) await shot(app, 'failure').catch(() => undefined);
   process.stdout.write(`verify-sftp-ui: FAILED ${error.stack ?? error}\n`);
   process.exitCode = 1;
 } finally {
+  main?.close();
   await app?.close();
   server.stop();
   await sleep(500);

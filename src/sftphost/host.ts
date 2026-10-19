@@ -206,8 +206,13 @@ export class SftpHost {
 
   /** App shutdown: at most about 2 s in all (main waits SFTP_SHUTDOWN_WAIT_MS for it). */
   async shutdown(): Promise<void> {
-    await Promise.all([...this.sessions.keys()].map((id) => this.disconnect(id, { idleMs: 1000, graceMs: 800 })));
+    // Aborted local copies remove their <name>.unimux-part files asynchronously: waited for (bounded) next to the sessions, since
+    // main kills this process as soon as the shutdown is reported done.
     this.localQueue.dispose('cancelled');
+    await Promise.all([
+      ...[...this.sessions.keys()].map((id) => this.disconnect(id, { idleMs: 1000, graceMs: 800 })),
+      this.localQueue.whenIdle(1000),
+    ]);
     this.throttle.flush();
   }
 

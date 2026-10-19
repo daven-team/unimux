@@ -167,6 +167,9 @@ export class SftpService {
     for (const e of this.sessions.values()) this.scheduleIdle(e);
   }
 
+  /** The renderer reloads or crashed: the new page starts with the view hidden and only reports a change, so main counts it closed. */
+  rendererGone(): void { if (this.viewOpen) this.viewClosed(); }
+
   private scheduleIdle(entry: Entry): void {
     this.clearTimer(entry.idle);
     entry.idle = null;
