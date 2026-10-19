@@ -54,6 +54,15 @@ Windows only: `npm run release` bumps the version, runs the tests, builds and pu
 
 All platforms: add notes in `docs/releases/x.y.z.md`, push a version tag, wait for CI to pass, and run **Actions → Publish release** with the tag and the successful CI run ID. The workflow checks that the build matches the tag, verifies package hashes, combines both Mac update manifests, and publishes all installers in one release.
 
+## Performance
+
+Windows only, after `npm run build`:
+
+- `node scripts/perf-check.mjs [cells] [seconds]` is the regression check (default 20 cmd cells, 15 s windows). It starts the built app with a scratch data dir and home and measures four phases: idle, one "working" dot with no visible output, a 12,000-line flood in every other cell (memory once the scrollback is full) and every cell printing about 60 lines a second. It prints CPU (% of one core) and private memory per process (main, GPU, renderer, Pty Host), the running animations and the frames the compositor drew. It fails when an animation runs continuously while cells work, when idle costs 1 % of a core or more, or when the working dot costs 2.5 % or more or draws 10 frames a second or more. `--json` prints the raw numbers, `--scrollback=N` starts with that scrollback setting.
+- `node scripts/perf-grid.mjs` (frame times and long tasks of a busy grid) and `npm run perf` (`scripts/perf-profile.mjs`, startup profile) give more detail.
+
+Keep the status indicators free of infinite CSS animations: one running animation makes Chromium present a frame at every vsync (about 40 % of a core on a 240 Hz display). The working dot blinks from one shared timer instead (`src/shared/blink.ts`). node-pty's ConPTY output Worker gets small heap limits at install time (`scripts/patch-node-pty.cjs`, run by `postinstall` and checked by `npm run test:packaged`); after a node-pty upgrade the patch fails loudly until it is adapted.
+
 ## Screenshots
 
 To refresh the README images after building, run `node scripts/capture-readme.mjs`. It launches a separate offscreen Electron instance with temporary data and captures the actual UI via CDP. See the [capture instructions](screenshots/README.md).
