@@ -68,7 +68,9 @@ export const LIVE_PHASES: readonly SshPhase[] = ['connecting', 'verifying', 'aut
 export const isLivePhase = (phase: SshPhase | undefined): boolean => !!phase && LIVE_PHASES.includes(phase);
 
 export type SshErrorCode = 'dns' | 'refused' | 'timeout' | 'unreachable' | 'reset' | 'protocol' | 'auth' | 'hostKeyRejected'
-  | 'hostKeyChanged' | 'passphrase' | 'keyLocked' | 'keyMissing' | 'hostMissing' | 'shellDenied' | 'ptyHostCrashed' | 'cancelled' | 'unknown';
+  | 'hostKeyChanged' | 'passphrase' | 'keyLocked' | 'keyMissing' | 'hostMissing' | 'shellDenied' | 'ptyHostCrashed' | 'cancelled' | 'unknown'
+  /** SFTP sessions (0.9.8): the server refused the sftp subsystem; the SFTP host process restarted. */
+  | 'sftpDenied' | 'sftpHostCrashed';
 
 export interface SshSessionState {
   cellId: string;
@@ -378,6 +380,8 @@ export function sshErrorText(code: SshErrorCode, ctx: { host: string; endpoint: 
     case 'hostMissing': return { key: 'Ten host został usunięty' };
     case 'shellDenied': return { key: 'Serwer nie otworzył powłoki' };
     case 'ptyHostCrashed': return { key: 'Proces terminali został uruchomiony ponownie' };
+    case 'sftpDenied': return { key: 'Serwer nie udostępnia SFTP' };
+    case 'sftpHostCrashed': return { key: 'Proces SFTP został uruchomiony ponownie' };
     case 'cancelled': return { key: 'Anulowano' };
     default: return { key: 'Nieznany błąd SSH' };
   }
