@@ -1,7 +1,9 @@
 // In-process SSH server for tests and real-app checks: 127.0.0.1 only, keys generated at run time, user "alice".
 // Erasable TypeScript only and no relative imports: scripts/ssh-test-server.mjs loads this file with Node's type stripping.
 import { closeSync, constants as fsc, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, utimesSync, chmodSync, writeSync, existsSync, type Stats } from 'node:fs';
+import { createRequire } from 'node:module';
 import { isAbsolute, join, relative, sep } from 'node:path';
+import type { Duplex } from 'node:stream';
 import ssh2 from 'ssh2';
 import type { Attributes, Connection, FileEntry, ServerChannel, SFTPWrapper } from 'ssh2';
 
@@ -27,6 +29,13 @@ export interface TestServerOptions {
   sftpHome?: string;
   /** Advertises and serves posix-rename@openssh.com (an overwriting rename), like OpenSSH. */
   sftpPosixRename?: boolean;
+  /**
+   * 0.9.9: answers exec requests `sudo -n <server>` and `sudo -S -p '' <server>` like sudo would and then serves SFTP over the
+   * exec channel (the same folder as the subsystem). `password`: sudo wants one (-n then fails, -S reads it as the first stdin
+   * line; 3 wrong lines end it); `requiretty` / `denied`: sudo refuses; `serverPath`: where sftp-server is (another path is
+   * "command not found"); default /usr/lib/openssh/sftp-server.
+   */
+  sftpSudo?: { password?: string; requiretty?: boolean; denied?: boolean; serverPath?: string };
 }
 
 /** Test knobs and counters of the SFTP subsystem (mutable while the server runs). */
@@ -43,6 +52,12 @@ export interface SftpServerStats {
   written: number;
   /** Answers RENAME (and posix-rename) from -> to with a failure when this returns true (remote paths). */
   renameFail: ((from: string, to: string) => boolean) | null;
+  /** SETSTAT permission changes in order (remote path, bits). */
+  chmods: Array<{ path: string; mode: number }>;
+  /** Permission bits set by SETSTAT per local path: reported instead of the disk's (Windows keeps no POSIX bits). */
+  modes: Map<string, number>;
+  /** Exec commands received (sudo), in order. */
+  execs: string[];
 }
 
 export interface TestServer {
@@ -76,8 +91,37 @@ function statusOf(error: unknown): number {
   return SFTP_STATUS.FAILURE;
 }
 
-function attrsOf(st: Stats): Attributes {
-  return { mode: st.mode, uid: 1000, gid: 1000, size: st.size, atime: Math.floor(st.atimeMs / 1000), mtime: Math.floor(st.mtimeMs / 1000) };
+function attrsOf(st: Stats, path?: string, modes?: Map<string, number>): Attributes {
+  const set = path !== undefined ? modes?.get(path) : undefined;
+  const mode = set === undefined ? st.mode : (st.mode & 0o170000) | set;
+  return { mode, uid: 1000, gid: 1000, size: st.size, atime: Math.floor(st.atimeMs / 1000), mtime: Math.floor(st.mtimeMs / 1000) };
+}
+
+/** Moves the permission overlay of `from` (and everything under it) to `to` after a rename; drops it for a removed path. */
+function moveModes(modes: Map<string, number>, from: string, to: string | null): void {
+  for (const key of [...modes.keys()]) {
+    if (key !== from && !key.startsWith(from + sep)) continue;
+    const bits = modes.get(key)!;
+    modes.delete(key);
+    if (to !== null) modes.set(to + key.slice(from.length), bits);
+  }
+}
+
+const SftpClass = createRequire(import.meta.url)('ssh2/lib/protocol/SFTP.js').SFTP as new (client: unknown, info: unknown, cfg: { server: boolean }) => SFTPWrapper & { push(d: Buffer | null): void };
+
+/** ssh2's server-side SFTP on an exec channel (what `sudo sftp-server` is to a real server). */
+function sftpOnExec(stream: ServerChannel): SFTPWrapper & { push(d: Buffer | null): void } {
+  const outgoing = { id: 0, window: Number.MAX_SAFE_INTEGER, packetSize: 32 * 1024, state: 'open' };
+  const protocol = {
+    channelData: (_id: number, data: Buffer) => { if (outgoing.state === 'open') stream.write(data); },
+    channelClose: () => { try { stream.exit(0); stream.end(); } catch { /* gone */ } },
+    channelEOF: () => { try { stream.end(); } catch { /* gone */ } },
+  };
+  const sftp = new SftpClass({ _protocol: protocol }, { type: 'session', incoming: { id: 0, window: Number.MAX_SAFE_INTEGER, packetSize: 32 * 1024, state: 'open' }, outgoing }, { server: true });
+  (stream as unknown as Duplex).on('data', (d: Buffer) => sftp.push(d));
+  (stream as unknown as Duplex).on('end', () => sftp.push(null));
+  (stream as unknown as Duplex).on('close', () => { outgoing.state = 'closed'; sftp.emit('close'); });
+  return sftp;
 }
 
 function lsMode(mode: number): string {
@@ -90,8 +134,9 @@ function lsMode(mode: number): string {
   return out;
 }
 
-function entryOf(name: string, st: Stats): FileEntry {
-  return { filename: name, longname: `${lsMode(st.mode)}    1 alice    staff ${String(st.size).padStart(8)} Jan  1 00:00 ${name}`, attrs: attrsOf(st) };
+function entryOf(name: string, st: Stats, path?: string, modes?: Map<string, number>): FileEntry {
+  const attrs = attrsOf(st, path, modes);
+  return { filename: name, longname: `${lsMode(attrs.mode)}    1 alice    staff ${String(st.size).padStart(8)} Jan  1 00:00 ${name}`, attrs };
 }
 
 /** Normalizes a remote path ("." and ".." resolved against `home`); the result is absolute and never leaves "/". */
@@ -185,23 +230,24 @@ function serveSftp(sftp: SFTPWrapper, root: string, home: string, stats: SftpSer
     if (h?.kind !== 'dir') { sftp.status(reqId, SFTP_STATUS.FAILURE); return; }
     if (h.sent) { sftp.status(reqId, SFTP_STATUS.EOF); return; }
     h.sent = true;
-    const names = readdirSync(h.path).flatMap((name) => { try { return [entryOf(name, lstatSync(join(h.path, name)))]; } catch { return []; } });
+    const names = readdirSync(h.path).flatMap((name) => { try { return [entryOf(name, lstatSync(join(h.path, name)), join(h.path, name), stats.modes)]; } catch { return []; } });
     if (!names.length) { sftp.status(reqId, SFTP_STATUS.EOF); return; }
     sftp.name(reqId, names);
   }));
-  sftp.on('STAT', (reqId, path) => run(reqId, 'STAT', () => sftp.attrs(reqId, attrsOf(statSync(real(path))))));
-  sftp.on('LSTAT', (reqId, path) => run(reqId, 'LSTAT', () => sftp.attrs(reqId, attrsOf(lstatSync(real(path))))));
+  sftp.on('STAT', (reqId, path) => run(reqId, 'STAT', () => sftp.attrs(reqId, attrsOf(statSync(real(path)), real(path), stats.modes))));
+  sftp.on('LSTAT', (reqId, path) => run(reqId, 'LSTAT', () => sftp.attrs(reqId, attrsOf(lstatSync(real(path)), real(path), stats.modes))));
   sftp.on('FSTAT', (reqId, handle) => run(reqId, 'FSTAT', () => {
     const h = handleOf(handle);
     if (h?.kind !== 'file') { sftp.status(reqId, SFTP_STATUS.FAILURE); return; }
     sftp.attrs(reqId, attrsOf(fstatSync(h.fd)));
   }));
   sftp.on('MKDIR', (reqId, path) => run(reqId, 'MKDIR', () => { mkdirSync(real(path)); sftp.status(reqId, SFTP_STATUS.OK); }));
-  sftp.on('RMDIR', (reqId, path) => run(reqId, 'RMDIR', () => { rmdirSync(real(path)); sftp.status(reqId, SFTP_STATUS.OK); }));
+  sftp.on('RMDIR', (reqId, path) => run(reqId, 'RMDIR', () => { rmdirSync(real(path)); moveModes(stats.modes, real(path), null); sftp.status(reqId, SFTP_STATUS.OK); }));
   sftp.on('REMOVE', (reqId, path) => run(reqId, 'REMOVE', () => {
     const p = real(path);
     if (lstatSync(p).isDirectory()) { sftp.status(reqId, SFTP_STATUS.FAILURE, 'is a directory'); return; }
     unlinkSync(p);
+    moveModes(stats.modes, p, null);
     sftp.status(reqId, SFTP_STATUS.OK);
   }));
   // SFTP v3 semantics (like OpenSSH without posix-rename): an existing target is refused, never overwritten.
@@ -211,6 +257,7 @@ function serveSftp(sftp: SFTPWrapper, root: string, home: string, stats: SftpSer
     if (stats.renameFail?.(remoteNormalize(oldPath, home), remoteNormalize(newPath, home))) { sftp.status(reqId, SFTP_STATUS.FAILURE, 'rename refused'); return; }
     if (existsSync(to)) { sftp.status(reqId, SFTP_STATUS.FAILURE, 'target exists'); return; }
     renameSync(from, to);
+    moveModes(stats.modes, from, to);
     sftp.status(reqId, SFTP_STATUS.OK);
   }));
   sftp.on('EXTENDED', (reqId: number, name: string, data: Buffer | undefined) => run(reqId, 'EXTENDED', () => {
@@ -220,7 +267,9 @@ function serveSftp(sftp: SFTPWrapper, root: string, home: string, stats: SftpSer
     const newPath = data.subarray(8 + a, 8 + a + data.readUInt32BE(4 + a)).toString('utf8');
     stats.ops.push('POSIX_RENAME');
     if (stats.renameFail?.(remoteNormalize(oldPath, home), remoteNormalize(newPath, home))) { sftp.status(reqId, SFTP_STATUS.FAILURE, 'rename refused'); return; }
+    moveModes(stats.modes, real(newPath), null);
     renameSync(real(oldPath), real(newPath)); // overwrites, like OpenSSH
+    moveModes(stats.modes, real(oldPath), real(newPath));
     sftp.status(reqId, SFTP_STATUS.OK);
   }));
   sftp.on('REALPATH', (reqId, path) => run(reqId, 'REALPATH', () => {
@@ -232,12 +281,18 @@ function serveSftp(sftp: SFTPWrapper, root: string, home: string, stats: SftpSer
     } catch { /* not there: the lexical path, like OpenSSH for a missing last segment */ }
     sftp.name(reqId, [{ filename: normalized, longname: normalized, attrs: {} as Attributes }]);
   }));
-  const setstat = (reqId: number, path: string, attrs: Attributes) => {
-    if (typeof attrs.mode === 'number') chmodSync(path, attrs.mode & 0o7777);
+  const setstat = (reqId: number, path: string, attrs: Attributes, remote: string) => {
+    if (typeof attrs.mode === 'number') {
+      lstatSync(path);
+      stats.modes.set(path, attrs.mode & 0o7777);
+      stats.chmods.push({ path: remote, mode: attrs.mode & 0o7777 });
+      // Windows keeps only a read-only flag (a read-only file could not be cleaned up by the tests): the overlay answers there.
+      if (process.platform !== 'win32') chmodSync(path, attrs.mode & 0o7777);
+    }
     if (typeof attrs.mtime === 'number') utimesSync(path, attrs.atime ?? attrs.mtime, attrs.mtime);
     sftp.status(reqId, SFTP_STATUS.OK);
   };
-  sftp.on('SETSTAT', (reqId, path, attrs) => run(reqId, 'SETSTAT', () => setstat(reqId, real(path), attrs)));
+  sftp.on('SETSTAT', (reqId, path, attrs) => run(reqId, 'SETSTAT', () => setstat(reqId, real(path), attrs, remoteNormalize(path, home))));
   sftp.on('FSETSTAT', (reqId, _handle, _attrs) => run(reqId, 'FSETSTAT', () => sftp.status(reqId, SFTP_STATUS.OK)));
   sftp.on('end', () => {
     for (const h of handles.values()) if (h.kind === 'file') { try { closeSync(h.fd); } catch { /* closed */ } if (h.write) stats.openWrites--; }
@@ -261,7 +316,7 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
   const input: string[] = [];
   const shells: ServerChannel[] = [];
   const conns = new Set<Connection>();
-  const sftpStats: SftpServerStats = { delayMs: 0, openWrites: 0, maxOpenWrites: 0, ops: [], failWritesAfter: null, written: 0, renameFail: null };
+  const sftpStats: SftpServerStats = { delayMs: 0, openWrites: 0, maxOpenWrites: 0, ops: [], failWritesAfter: null, written: 0, renameFail: null, chmods: [], modes: new Map(), execs: [] };
 
   const server = new Server({ hostKeys: [host.private], ...(opts.banner ? { banner: opts.banner } : {}) }, (conn) => {
     conns.add(conn);
@@ -285,6 +340,40 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
       session.on('sftp', (acceptSftp, reject) => {
         if (!opts.sftpRoot) { reject(); return; }
         serveSftp(acceptSftp(), opts.sftpRoot, remoteNormalize(opts.sftpHome ?? '/', '/'), sftpStats, opts.sftpPosixRename === true);
+      });
+      session.on('exec', (acceptExec, rejectExec, info) => {
+        const sudo = opts.sftpSudo;
+        if (!opts.sftpRoot || !sudo) { rejectExec?.(); return; }
+        const stream = acceptExec();
+        sftpStats.execs.push(info.command);
+        const fail = (message: string, code = 1) => { stream.stderr.write(message); stream.exit(code); stream.end(); };
+        const m = /^sudo (-n|-S -p '') (\S+)$/.exec(info.command);
+        if (!m) { fail(`sh: 1: ${info.command.split(' ')[0]}: not found\n`, 127); return; }
+        const [, mode, path] = m;
+        if (path !== (sudo.serverPath ?? '/usr/lib/openssh/sftp-server')) { fail(`sudo: ${path}: command not found\n`); return; }
+        if (sudo.denied) { fail(`Sorry, user alice is not allowed to execute '${path}' as root on test-server.\n`); return; }
+        if (sudo.requiretty) { fail('sudo: sorry, you must have a tty to run sudo\n'); return; }
+        const serve = (rest: Buffer) => {
+          const sftp = sftpOnExec(stream);
+          serveSftp(sftp, opts.sftpRoot!, remoteNormalize(opts.sftpHome ?? '/', '/'), sftpStats, opts.sftpPosixRename === true);
+          if (rest.length) sftp.push(rest);
+        };
+        if (sudo.password === undefined) { serve(Buffer.alloc(0)); return; }
+        if (mode === '-n') { fail('sudo: a password is required\n'); return; }
+        // sudo -S reads the password line by line from stdin; the SFTP stream follows the right one.
+        let buf = Buffer.alloc(0);
+        let tries = 0;
+        const onData = (chunk: Buffer) => {
+          buf = Buffer.concat([buf, chunk]);
+          for (let nl = buf.indexOf(10); nl >= 0; nl = buf.indexOf(10)) {
+            const line = buf.subarray(0, nl).toString('utf8');
+            buf = buf.subarray(nl + 1);
+            if (line === sudo.password) { stream.off('data', onData); serve(buf); return; }
+            if (++tries >= 3) { stream.off('data', onData); fail('sudo: 3 incorrect password attempts\n'); return; }
+            stream.stderr.write('Sorry, try again.\n');
+          }
+        };
+        stream.on('data', onData);
       });
       session.on('pty', (ok, _no, info) => { ptys.push({ term: info.term, cols: info.cols, rows: info.rows }); ok?.(); });
       session.on('window-change', (ok, _no, info) => { windowChanges.push({ cols: info.cols, rows: info.rows }); ok?.(); });

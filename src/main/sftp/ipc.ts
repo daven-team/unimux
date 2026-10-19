@@ -2,7 +2,7 @@
 // codes only. Remote paths must be absolute POSIX paths, local ones absolute local paths.
 import { z } from 'zod';
 import {
-  isSftpSessionId, SFTP_LIMITS, validRemotePath,
+  isLocalDirection, isSftpSessionId, SFTP_LIMITS, validRemotePath,
   type SftpResult, type TransferRequest,
 } from '../../shared/sftp';
 import { SSH_LIMITS, type SshPromptAnswer } from '../../shared/ssh';
@@ -17,17 +17,27 @@ const remotePath = z.string().refine(validRemotePath);
 const remotePaths = z.array(remotePath).min(1).max(SFTP_LIMITS.paths);
 const count = z.object({ files: z.number().int().min(0), dirs: z.number().int().min(0) }).strict();
 const transfer = z.object({
-  direction: z.enum(['upload', 'download', 'local-copy']),
+  direction: z.enum(['upload', 'download', 'local-copy', 'move', 'local-move']),
   sources: z.array(z.string()).min(1).max(SFTP_LIMITS.paths),
   targetDir: z.string(),
   policy: z.enum(['overwrite', 'skip', 'keepBoth']).optional(),
   batchId: uuid.optional(),
-}).strict().refine((r) => (r.direction === 'download'
-  ? r.sources.every(validRemotePath) && validLocalPath(r.targetDir)
-  : r.sources.every(validLocalPath) && (r.direction === 'upload' ? validRemotePath(r.targetDir) : validLocalPath(r.targetDir))));
+}).strict().refine((r) => {
+  const remote = (p: string) => validRemotePath(p);
+  const sourceRemote = r.direction === 'download' || r.direction === 'move';
+  const targetRemote = r.direction === 'upload' || r.direction === 'move';
+  return r.sources.every(sourceRemote ? remote : validLocalPath) && (targetRemote ? remote(r.targetDir) : validLocalPath(r.targetDir));
+});
+const mode = z.number().int().min(0).max(0o7777);
+const chmodRequest = z.object({
+  paths: remotePaths,
+  set: z.object({ bits: mode, mask: mode }).strict().nullable(),
+  recursive: z.object({ dirMode: mode, fileMode: mode }).strict().nullable(),
+  opId: uuid.optional(),
+}).strict().refine((r) => r.set !== null || r.recursive !== null);
 const answer = z.union([
   z.object({ sessionId, promptId: uuid, cancel: z.literal(true) }).strict(),
-  z.object({ sessionId, promptId: uuid, values: z.array(z.string().max(SSH_LIMITS.password)).max(10), remember: z.boolean().optional() }).strict(),
+  z.object({ sessionId, promptId: uuid, values: z.array(z.string().max(SSH_LIMITS.password)).max(10), remember: z.boolean().optional(), useSaved: z.boolean().optional() }).strict(),
   z.object({ sessionId, promptId: uuid, hostKey: z.enum(['once', 'save', 'replace']) }).strict(),
 ]);
 const cancelTarget = z.object({ itemIds: z.array(uuid).max(SFTP_LIMITS.paths).optional(), batchId: uuid.optional() }).strict();
@@ -72,7 +82,7 @@ export function createSftpHandlers(service: SftpService) {
     },
     enqueue: async (id: unknown, req: unknown): Promise<SftpResult<unknown>> => {
       const q = queueId.safeParse(id), r = transfer.safeParse(req);
-      if (!q.success || !r.success || (q.data === null) !== (r.data.direction === 'local-copy')) return INVALID;
+      if (!q.success || !r.success || (q.data === null) !== isLocalDirection(r.data.direction)) return INVALID;
       return service.op(q.data, { op: 'enqueue', req: r.data as TransferRequest });
     },
     cancel: (id: unknown, target: unknown) => { const t = cancelTarget.safeParse(target); return t.success ? queueOp(id, { op: 'cancel', ...t.data }) : Promise.resolve({ ok: false }); },
@@ -82,6 +92,16 @@ export function createSftpHandlers(service: SftpService) {
     },
     retry: (id: unknown, itemIds: unknown) => { const i = z.array(uuid).min(1).max(SFTP_LIMITS.paths).safeParse(itemIds); return i.success ? queueOp(id, { op: 'retry', itemIds: i.data }) : Promise.resolve({ ok: false }); },
     clearFinished: (id: unknown) => queueOp(id, { op: 'clearFinished' }),
+    chmodCount: (id: unknown, paths: unknown, recursive: unknown) => {
+      const p = remotePaths.safeParse(paths);
+      return p.success && typeof recursive === 'boolean' ? run(id, { op: 'chmodCount', paths: p.data, recursive }) : INVALID;
+    },
+    chmod: (id: unknown, req: unknown) => { const r = chmodRequest.safeParse(req); return r.success ? run(id, { op: 'chmod', req: r.data }) : INVALID; },
+    cancelOp: async (id: unknown, opId: unknown) => {
+      if (!uuid.safeParse(opId).success) return { ok: false };
+      const r = await run(id, { op: 'cancelOp', opId: opId as string });
+      return { ok: r.ok && r.value === true };
+    },
     viewOpened: () => service.viewOpened(),
     viewClosed: () => service.viewClosed(),
   };
@@ -108,6 +128,9 @@ export function registerSftpIpc(guard: IpcGuard, h: SftpHandlers): void {
   guard.guardedHandle('sftp:answerConflict', (_e, id: unknown, itemId: unknown, a: unknown) => h.answerConflict(id, itemId, a), no);
   guard.guardedHandle('sftp:retry', (_e, id: unknown, itemIds: unknown) => h.retry(id, itemIds), no);
   guard.guardedHandle('sftp:clearFinished', (_e, id: unknown) => h.clearFinished(id), no);
+  guard.guardedHandle('sftp:chmodCount', (_e, id: unknown, paths: unknown, recursive: unknown) => h.chmodCount(id, paths, recursive), invalid);
+  guard.guardedHandle('sftp:chmod', (_e, id: unknown, req: unknown) => h.chmod(id, req), invalid);
+  guard.guardedHandle('sftp:cancelOp', (_e, id: unknown, opId: unknown) => h.cancelOp(id, opId), no);
   guard.guardedOn('sftp:viewOpened', () => h.viewOpened());
   guard.guardedOn('sftp:viewClosed', () => h.viewClosed());
 }

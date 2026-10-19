@@ -40,7 +40,7 @@
    together with its cells. */
 .sftp-table { --sftp-cols: minmax(96px, 1fr) 92px 54px 60px; }
 .sftp-pane.wide .sftp-table { --sftp-cols: minmax(96px, 1fr) 92px 54px 60px 70px 52px; }
-.sftp-row { display: grid; grid-template-columns: var(--sftp-cols); align-items: center; height: 26px; padding: 0 8px; gap: 6px; font-size: 12px; color: var(--text-2); cursor: default; user-select: none; }
+.sftp-row, .sftp-uprow { display: grid; grid-template-columns: var(--sftp-cols); align-items: center; height: 26px; padding: 0 8px; gap: 6px; font-size: 12px; color: var(--text-2); cursor: default; user-select: none; }
 .sftp-columns { height: 26px; border-top: 1px solid #ffffff0a; border-bottom: 1px solid #ffffff0a; background: #1c1c1c; }
 .sftp-columns .sftp-col { display: flex; align-items: center; gap: 4px; border: 0; background: transparent; color: var(--muted); font-size: 11px; text-align: left; padding: 0; cursor: pointer; }
 .sftp-columns .sftp-col:hover { color: var(--text); }
@@ -62,7 +62,15 @@
 .sftp-list:focus .sftp-row.on { background: var(--accent-soft); }
 .sftp-list:focus .sftp-row.focus { box-shadow: inset 0 0 0 1px #a8a29e88; }
 .sftp-list .sftp-row.unsafe { opacity: .45; }
-.sftp-list .sftp-row.drop, .sftp-list.drop { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.sftp-list .sftp-row.drop, .sftp-list .sftp-uprow.drop, .sftp-list.drop { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+/* 0.9.9: the ".." row, cut entries, a refresh in progress (the old rows stay, dimmed: no flash to an empty list). */
+.sftp-list .sftp-uprow:hover { background: #ffffff06; }
+.sftp-uprow .sftp-name { color: var(--text-2); }
+.sftp-list .sftp-row.cut { opacity: .5; }
+.sftp-list.loading .sftp-row, .sftp-list.loading .sftp-uprow { opacity: .6; transition: opacity .15s .15s; }
+.sftp-crumb button.drop { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); color: var(--text); }
+.sftp-pathbar .btn.sftp-refresh { margin-left: 4px; }
+.sftp-sudo-badge { flex: none; padding: 0 5px; border-radius: 4px; background: #f59e0b22; border: 1px solid #f59e0b66; color: #fbbf24; font-size: 10.5px; font-weight: 600; line-height: 15px; }
 .sftp-empty-list { padding: 24px 12px; color: var(--muted); font-size: 12px; text-align: center; }
 .sftp-status { flex: none; display: flex; align-items: center; height: 24px; padding: 0 10px; border-top: 1px solid #ffffff0a; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sftp-error { color: var(--error); font-size: 11.5px; overflow-wrap: anywhere; }
@@ -130,6 +138,29 @@
 .sftp-transfer.cancelled .sftp-progress > span, .sftp-transfer.conflict .sftp-progress > span { background: var(--muted); }
 .sftp-transfer.conflict .sftp-transfer-state { color: var(--working); }
 .sftp-transfer-actions { display: flex; gap: 4px; flex: none; }
+
+/* "Uprawnienia…" (0.9.9). */
+.modal.sftp-perms { width: 460px; }
+.sftp-perms .modal-body { display: flex; flex-direction: column; gap: 12px; }
+.sftp-perms-main { display: flex; flex-direction: column; gap: 10px; }
+.sftp-perms-main.off { opacity: .45; }
+.sftp-perms-octal { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-2); }
+.sftp-perms-octal .input, .sftp-perms-masks .input { width: 72px; font-family: "Cascadia Mono", Consolas, Menlo, monospace; }
+.sftp-perms-symbolic, .sftp-perms-masks code { font-family: "Cascadia Mono", Consolas, Menlo, monospace; font-size: 12.5px; color: var(--text); letter-spacing: .5px; }
+.sftp-perms-grid { border-collapse: collapse; font-size: 12px; }
+.sftp-perms-grid th { font-weight: 500; color: var(--muted); padding: 4px 14px 4px 0; text-align: left; }
+.sftp-perms-grid thead th { text-align: center; }
+.sftp-perms-grid td { text-align: center; padding: 4px 14px; }
+.sftp-perms-special { display: flex; align-items: center; gap: 14px; font-size: 12px; }
+.sftp-perms-special code { font-size: 11.5px; }
+.sftp-perms-recursive { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid #ffffff0d; }
+.sftp-perms-masks { display: flex; gap: 18px; }
+.sftp-perms-masks label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
+.sftp-perms-count { font-size: 12px; color: var(--text-2); min-height: 16px; }
+.sftp-perms-progress { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-2); }
+.sftp-perms-result { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.sftp-perms-errors { margin: 0; padding: 0 0 0 16px; max-height: 160px; overflow: auto; font-size: 11.5px; }
+.sftp-perms-errors code { font-family: "Cascadia Mono", Consolas, Menlo, monospace; }
 
 /* Narrow panes drop the less important columns, track and cells together (the pane is the container). A remote pane of
    about 470 px shows every column; Owner goes first, then Kind, then Permissions; the date goes last. */

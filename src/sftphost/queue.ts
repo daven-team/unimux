@@ -7,8 +7,8 @@ import { randomUUID } from 'crypto';
 import { pipeline } from 'stream/promises';
 import { Transform, type Writable } from 'stream';
 import {
-  isFinished, keepBothName, partName, SFTP_LIMITS,
-  type ConflictAnswer, type ConflictChoice, type TransferDirection, type TransferItem, type TransferRequest,
+  isFinished, isMoveDirection, keepBothName, partName, SFTP_LIMITS,
+  type ConflictAnswer, type ConflictChoice, type EntryKind, type TransferDirection, type TransferItem, type TransferRequest,
 } from '../shared/sftp';
 import { SftpError, localError, type FileSide, type Meta } from './sides';
 
@@ -56,7 +56,7 @@ interface Job {
 /** Sides throw SftpError; a raw error can only come from a Node stream (the local disk). */
 const errorOf = (error: unknown) => (error instanceof SftpError ? error.code : localError(error));
 
-type FileSpec = { source: string; target: string; name: string; size: number; mtime: number; error?: TransferItem['error'] };
+type FileSpec = { source: string; target: string; name: string; size: number; mtime: number; error?: TransferItem['error']; kind?: EntryKind };
 
 export class TransferQueue {
   private jobs = new Map<string, Job>();
@@ -92,7 +92,7 @@ export class TransferQueue {
     const batch: Batch = { id, direction: req.direction, src: sides.src, dst: sides.dst, policy: req.policy, root: req.targetDir, dirs: new Map(), cancelled: false };
     this.walking.set(id, batch);
     try {
-      const { files, emptyDirs } = await this.expand(batch, req);
+      const { files, emptyDirs } = isMoveDirection(req.direction) ? { ...(await this.expandMove(batch, req)), emptyDirs: [] } : await this.expand(batch, req);
       if (batch.cancelled || this.disposed) throw new SftpError('cancelled');
       for (const f of files) {
         const job: Job = {
@@ -175,6 +175,28 @@ export class TransferQueue {
       await walk(source, target, name, 0, rootReal);
     }
     return { files, emptyDirs };
+  }
+
+  /**
+   * A move (0.9.9) is one item per selected entry (a folder moves as a whole with one rename). Entries already in the target
+   * folder have nothing to do and get no item; a folder into itself or its child refuses the whole request.
+   */
+  private async expandMove(batch: Batch, req: TransferRequest): Promise<{ files: FileSpec[] }> {
+    const side = batch.src;
+    const files: FileSpec[] = [];
+    for (const source of req.sources) if (side.contains(source, req.targetDir)) throw new SftpError('intoItself');
+    for (const source of req.sources) {
+      if (batch.cancelled || this.disposed) throw new SftpError('cancelled');
+      const name = side.basename(source);
+      if (!name) throw new SftpError('invalid');
+      if (!side.validName(name)) { files.push({ source, target: req.targetDir, name, size: 0, mtime: 0, error: 'invalidName' }); continue; }
+      if (side.inflight.key(side.dirname(source)) === side.inflight.key(req.targetDir)) continue;
+      const meta = await side.lstat(source);
+      if (!meta) { files.push({ source, target: req.targetDir, name, size: 0, mtime: 0, error: 'notFound' }); continue; }
+      files.push({ source, target: side.join(req.targetDir, name), name, size: meta.kind === 'file' ? meta.size : 0, mtime: meta.mtime, kind: meta.kind });
+      if (files.length > SFTP_LIMITS.batchFiles) throw new SftpError('tooMany');
+    }
+    return { files };
   }
 
   private update(job: Job, patch: Partial<TransferItem>, force = true): void {
@@ -260,7 +282,7 @@ export class TransferQueue {
       job.answer = (a) => resolve(a);
       this.update(job, {
         state: 'conflict', speed: 0,
-        conflict: { target: job.item.target, existing: { kind: existing.kind, size: existing.size, mtime: existing.mtime }, incoming: { size: incoming.size, mtime: incoming.mtime } },
+        conflict: { target: job.item.target, existing: { kind: existing.kind, size: existing.size, mtime: existing.mtime }, incoming: { size: incoming.size, mtime: incoming.mtime, kind: incoming.kind } },
       });
       signal.addEventListener('abort', () => resolve(null), { once: true });
       this.pump();
@@ -288,6 +310,7 @@ export class TransferQueue {
   }
 
   private async run(job: Job): Promise<void> {
+    if (isMoveDirection(job.batch.direction)) return this.runMove(job);
     const { batch } = job;
     const { src, dst } = batch;
     const owner = job.item.id;
@@ -367,6 +390,133 @@ export class TransferQueue {
       dst.inflight.release(target, owner);
       dst.inflight.release(job.plannedTarget, owner);
     }
+  }
+
+  /** A free "name (n).ext" next to `target`, held for `owner` before anything else can take it (no await in between). */
+  private async keepBothTarget(side: FileSide, target: string, owner: string, directory: boolean): Promise<string> {
+    const dir = side.dirname(target);
+    const names = (await side.readdir(dir)).map((e) => e.name);
+    let name = keepBothName(side.basename(target), names, { caseInsensitive: side.caseInsensitive, directory });
+    while (side.inflight.isHeld(side.join(dir, name))) { names.push(name); name = keepBothName(side.basename(target), names, { caseInsensitive: side.caseInsensitive, directory }); }
+    const next = side.join(dir, name);
+    side.inflight.hold(next, owner);
+    side.inflight.release(target, owner);
+    return next;
+  }
+
+  /**
+   * A move inside one side (0.9.9): one rename (posix-rename, or the aside dance for Overwrite on a server). A local move across
+   * volumes copies through part files and deletes the source only once every copy is complete; a server that cannot rename
+   * (another file system) fails with crossDevice. Nothing is ever deleted while it is the only copy.
+   */
+  private async runMove(job: Job): Promise<void> {
+    const { batch } = job;
+    const side = batch.dst;
+    const owner = job.item.id;
+    const abort = new AbortController();
+    job.abort = abort;
+    let target = job.item.target;
+    try {
+      const source = job.item.source;
+      const meta = await side.lstat(source);
+      if (!meta) throw new SftpError('notFound');
+      if (target === batch.root || !side.contains(batch.root, target)) throw new SftpError('invalid');
+      if (side.contains(source, batch.root)) throw new SftpError('intoItself');
+      let overwrite = false;
+      const existing = await side.lstat(target);
+      if (existing) {
+        const choice = await this.decide(job, existing, meta);
+        if (choice === 'cancelled' || abort.signal.aborted) throw new SftpError('cancelled');
+        if (choice === 'skip') { this.update(job, { state: 'done', skipped: true, conflict: undefined, speed: 0, endedAt: this.now() }); return; }
+        if (choice === 'overwrite') {
+          // Only a file replaces a file: a folder is never merged or replaced by a move.
+          if (existing.kind === 'dir' || meta.kind === 'dir') throw new SftpError('isADirectory');
+          overwrite = true;
+        } else target = await this.keepBothTarget(side, target, owner, meta.kind === 'dir');
+        this.update(job, { state: 'running', target, conflict: undefined });
+      }
+      if (target === batch.root || !side.contains(batch.root, target)) throw new SftpError('invalid');
+      try {
+        await side.rename(source, target, overwrite);
+      } catch (error) {
+        const code = errorOf(error);
+        if (side.remote) throw new SftpError(code === 'failed' ? 'crossDevice' : code, error instanceof SftpError && error.keepPart);
+        if (code !== 'crossDevice') throw error;
+        await this.copyThenDelete(job, side, source, target, meta, overwrite, abort.signal);
+      }
+      this.update(job, { state: 'done', bytesDone: job.item.bytesTotal, speed: 0, endedAt: this.now() });
+    } catch (error) {
+      const code = abort.signal.aborted ? 'cancelled' : errorOf(error);
+      if (this.jobs.get(job.item.id) !== job) return;
+      const finalError = this.disposed?.error ?? code;
+      this.update(job, finalError === 'cancelled'
+        ? { state: 'cancelled', speed: 0, conflict: undefined, endedAt: this.now() }
+        : { state: 'failed', error: finalError, speed: 0, conflict: undefined, endedAt: this.now() });
+    } finally {
+      job.abort = null;
+      side.inflight.release(target, owner);
+      side.inflight.release(job.plannedTarget, owner);
+    }
+  }
+
+  /** One file through "<name>.unimux-part" on the same side (a local move across volumes); the part file never stays. */
+  private async copyFile(side: FileSide, from: string, to: string, overwrite: boolean, signal: AbortSignal, onBytes: (n: number) => void): Promise<void> {
+    const part = side.join(side.dirname(to), partName(side.basename(to)));
+    await side.unlink(part).catch(() => undefined);
+    let wrote = false;
+    try {
+      const reader = await side.openRead(from);
+      let writer: Writable;
+      try { writer = await side.openWrite(part); } catch (error) { reader.stream.destroy(); throw error; }
+      wrote = true;
+      const meter = new Transform({ transform: (chunk: Buffer, _enc, callback) => { onBytes(chunk.length); callback(null, chunk); } });
+      await pipeline(reader.stream, meter, writer, { signal });
+      if (!(writer as { closed?: boolean }).closed) await new Promise<void>((resolve) => { writer.once('close', () => resolve()); setTimeout(resolve, 2000); });
+      if (signal.aborted) throw new SftpError('cancelled');
+      await side.rename(part, to, overwrite);
+      wrote = false;
+      const meta = await side.stat(from);
+      if (meta?.mtime) await side.setMtime(to, meta.mtime).catch(() => undefined);
+    } catch (error) {
+      if (wrote) await side.unlink(part).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async copyThenDelete(job: Job, side: FileSide, source: string, target: string, meta: Meta, overwrite: boolean, signal: AbortSignal): Promise<void> {
+    let done = 0;
+    job.samples = [[this.now(), 0]];
+    const onBytes = (n: number) => { done += n; this.progress(job, done); };
+    if (meta.kind === 'file') {
+      this.update(job, { bytesTotal: meta.size }, false);
+      await this.copyFile(side, source, target, overwrite, signal, onBytes);
+      await side.unlink(source);
+      return;
+    }
+    if (meta.kind !== 'dir') throw new SftpError('crossDevice');
+    // The whole tree is read first: a link or an unsafe name inside refuses the move before anything is copied.
+    const dirs: Array<[string, string]> = [[source, target]];
+    const files: Array<[string, string]> = [];
+    let total = 0;
+    const walk = async (from: string, to: string, depth: number): Promise<void> => {
+      if (depth > 64) throw new SftpError('tooMany');
+      for (const child of await side.readdir(from)) {
+        if (!side.validName(child.name)) throw new SftpError('invalidName');
+        const a = side.join(from, child.name), b = side.join(to, child.name);
+        if (child.kind === 'dir') { dirs.push([a, b]); await walk(a, b, depth + 1); continue; }
+        if (child.kind !== 'file') throw new SftpError('linkSkipped');
+        files.push([a, b]);
+        total += child.size;
+        if (files.length > SFTP_LIMITS.batchFiles) throw new SftpError('tooMany');
+      }
+    };
+    await walk(source, target, 0);
+    this.update(job, { bytesTotal: total }, false);
+    for (const [, to] of dirs) { if (signal.aborted) throw new SftpError('cancelled'); await side.mkdir(to); }
+    for (const [from, to] of files) { if (signal.aborted) throw new SftpError('cancelled'); await this.copyFile(side, from, to, false, signal, onBytes); }
+    // Everything is copied: only now the source goes (files first, then the folders deepest first).
+    for (const [from] of files) await side.unlink(from);
+    for (const [from] of [...dirs].reverse()) await side.rmdir(from);
   }
 
   private progress(job: Job, done: number): void {

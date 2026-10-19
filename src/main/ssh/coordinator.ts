@@ -35,6 +35,8 @@ type PromptBody = SshPrompt extends infer P ? (P extends SshPrompt ? Omit<P, 'id
 interface Group { id: string; key: string | null; prompt: SshPrompt; cells: Map<string, (a: Answer) => void>; timer: NodeJS.Timeout }
 interface Live { kind: 'cell' | 'session'; state: SshSessionState; host: string; port: number; user: string; endpoint: string; pendingSave?: string }
 
+type Answer2 = Answer & { useSaved?: boolean };
+
 const PROMPT_TIMEOUT_MS = 5 * 60_000;
 const MAX_PASSPHRASE_TRIES = 3;
 
@@ -88,10 +90,10 @@ export class SshCoordinator {
     if (!host) return { ok: false, error: 'hostMissing' };
     const existing = this.sessionsByCell.get(req.sessionId);
     if (existing && isLivePhase(existing.state.phase)) return { ok: true };
-    return this.start(req.sessionId, 'session', host, { cols: 80, rows: 24 });
+    return this.start(req.sessionId, 'session', host, { cols: 80, rows: 24, ...(host.sftpSudo ? { sftpSudo: { ...(host.sftpCommand ? { command: host.sftpCommand } : {}) } } : {}) });
   }
 
-  private async start(id: string, kind: Live['kind'], host: SshHost, size: { cols: number; rows: number; startup?: string }): Promise<{ ok: true } | { ok: false; error: SshErrorCode }> {
+  private async start(id: string, kind: Live['kind'], host: SshHost, size: { cols: number; rows: number; startup?: string; sftpSudo?: { command?: string } }): Promise<{ ok: true } | { ok: false; error: SshErrorCode }> {
     const live: Live = {
       kind, state: { cellId: id, hostId: host.id, phase: 'connecting', since: this.now() },
       host: host.address, port: host.port, user: host.username, endpoint: hostEndpoint(host.address, host.port),
@@ -142,7 +144,7 @@ export class SshCoordinator {
     const delivered = this.deps.host({ t: 'sshConnect', req: {
       id, host: host.address, port: host.port, username: host.username, cols: size.cols, rows: size.rows,
       ...(privateKey ? { privateKey } : {}), ...(passphrase ? { passphrase } : {}), ...(savedPassword.ok ? { password: savedPassword.password } : {}),
-      ...(startup ? { startup } : {}),
+      ...(startup ? { startup } : {}), ...(size.sftpSudo ? { sftpSudo: size.sftpSudo } : {}),
       allowPasswordPrompt: true, ...(this.deps.debug ? { debug: true } : {}),
     } });
     // M1: a connect sent while the Pty Host is restarting or gone would be lost and leave the cell `connecting` forever.
@@ -205,7 +207,10 @@ export class SshCoordinator {
     }
     const count = p.kind === 'keyboard' ? p.fields.length : p.kind === 'hostKey' ? -1 : 1;
     if (a.values.length !== count) return { ok: false };
-    this.finish(group, { values: a.values, remember: a.remember === true });
+    // "Użyj zapisanego hasła" (a sudo prompt only): the user's consent to use the host's saved login password for sudo once.
+    if (a.useSaved && (p.kind !== 'sudo' || !p.canUseSaved)) return { ok: false };
+    const answer: Answer2 = { values: a.values, remember: p.kind === 'sudo' ? false : a.remember === true, ...(a.useSaved ? { useSaved: true } : {}) };
+    this.finish(group, answer);
     return { ok: true };
   }
 
@@ -271,13 +276,23 @@ export class SshCoordinator {
     const live = this.sessionsByCell.get(m.id);
     const reply = (values: string[] | null) => this.deps.host({ t: 'sshAuthAnswer', id: m.id, promptId: m.promptId, values });
     if (!live || !isLivePhase(live.state.phase)) { reply(null); return; }
+    // A sudo password (0.9.9) is asked only for SFTP sessions and never saved.
+    if (m.kind === 'sudo' && live.kind !== 'session') { reply(null); return; }
+    const saved = m.kind === 'sudo' ? this.deps.vault.password(live.state.hostId) : null;
     const body: PromptBody = m.kind === 'password'
       ? { kind: 'password', user: live.user, endpoint: live.endpoint, canSave: !this.deps.vault.readOnly(), retry: m.retry }
-      : { kind: 'keyboard', endpoint: live.endpoint, name: sanitizeServerText(m.name ?? '', 200), instructions: sanitizeServerText(m.instructions ?? ''),
-          fields: m.fields.slice(0, 10).map((f) => ({ text: sanitizeServerText(f.text, 200), echo: f.echo === true })) };
-    const answer = await this.ask(m.id, null, body);
+      : m.kind === 'sudo' ? { kind: 'sudo', user: live.user, endpoint: live.endpoint, canUseSaved: !!saved?.ok, retry: m.retry }
+        : { kind: 'keyboard', endpoint: live.endpoint, name: sanitizeServerText(m.name ?? '', 200), instructions: sanitizeServerText(m.instructions ?? ''),
+            fields: m.fields.slice(0, 10).map((f) => ({ text: sanitizeServerText(f.text, 200), echo: f.echo === true })) };
+    const answer = await this.ask(m.id, null, body) as Answer2;
     if (this.sessionsByCell.get(m.id) !== live) return;
     if (!('values' in answer)) { reply(null); return; }
+    if (m.kind === 'sudo') {
+      if (!answer.useSaved) { reply(answer.values); return; }
+      const now = this.deps.vault.password(live.state.hostId);
+      reply(now.ok ? [now.password] : null);
+      return;
+    }
     // I1: only the latest answer decides; a retry answered without "remember" must not save an earlier (wrong) password.
     live.pendingSave = m.kind === 'password' && answer.remember ? answer.values[0] : undefined;
     reply(answer.values);

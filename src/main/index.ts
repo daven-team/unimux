@@ -802,6 +802,7 @@ function startSsh(): void {
   sftp = new SftpService({
     coordinator, host: sftpHost,
     hostExists: (hostId) => state.sshHosts.some((h) => h.id === hostId),
+    hostSudo: (hostId) => state.sshHosts.some((h) => h.id === hostId && h.sftpSudo === true),
     events: {
       session: (s) => send('sftp:session', s),
       prompt: (sessionId, prompt) => send('sftp:prompt', sessionId, prompt),

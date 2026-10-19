@@ -64,6 +64,7 @@ export function localError(error: unknown): SftpErrorCode {
     case 'ENOTDIR': return 'notADirectory';
     case 'EISDIR': return 'isADirectory';
     case 'ENOSPC': case 'EDQUOT': return 'noSpace';
+    case 'EXDEV': return 'crossDevice';
     case 'ABORT_ERR': return 'cancelled';
     default: return 'failed';
   }
@@ -390,6 +391,8 @@ export class RemoteSide implements FileSide {
     }
     await this.unlink(aside).catch(() => undefined);
   }
+  /** SETSTAT with only the permission bits (0.9.9); the server follows a symlink, so callers never pass one. */
+  chmod(path: string, mode: number): Promise<void> { return this.rq.call<void>((cb) => this.sftp.setstat(path, { mode: mode & 0o7777 }, cb)); }
   async setMtime(path: string, mtime: number): Promise<void> {
     const seconds = Math.floor(mtime / 1000);
     await this.rq.call<void>((cb) => this.sftp.setstat(path, { atime: seconds, mtime: seconds }, cb));
