@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   gridTabLabels, groupWorkspaceKeys, mergeWorkspaceOrder, migrateWorkspaceOrders, normalizeWorkspaceOrder, parseWorkspaceKey,
-  sameOrder, sortTabsByOrder, stepWorkspace, stripKeys,
+  neighbourAfterClose, sameOrder, sortTabsByOrder, stepWorkspace, stripKeys, syncTabsToOrder,
 } from '../src/shared/workspaceOrder';
 import { addProject, addTab, closeTab, defaultState, focusGrid, normalizeState, restoreTab } from '../src/shared/state';
 import { decideShortcut } from '../src/shared/shortcutDispatch';
@@ -67,14 +67,13 @@ describe('ordering', () => {
     expect(mergeWorkspaceOrder(['grid:a1', 'grid:b1'], ['grid:a1', 'grid:b1', 'file:new', 'ssh'], 'grid:a1')).toEqual(['grid:a1', 'grid:b1', 'file:new', 'ssh']);
   });
 
-  it('shows the grids of every project and the files of the project on screen and outside projects', () => {
+  it('shows the grids and the files of every project and the files outside projects', () => {
     const keys = stripKeys({
-      settingsOpen: false, sshOpen: true, activeProjectId: 'A',
+      settingsOpen: false, sshOpen: true,
       projects: [{ id: 'A', tabs: [{ id: 'a1' }] }, { id: 'B', tabs: [{ id: 'b1' }] }],
       files: [{ id: 'fa', projectId: 'A' }, { id: 'fb', projectId: 'B' }, { id: 'remote', projectId: '' }],
     });
-    expect(keys.all).toEqual(['ssh', 'grid:a1', 'grid:b1', 'file:fa', 'file:fb', 'file:remote']);
-    expect(keys.shown).toEqual(['ssh', 'grid:a1', 'grid:b1', 'file:fa', 'file:remote']);
+    expect(keys).toEqual(['ssh', 'grid:a1', 'grid:b1', 'file:fa', 'file:fb', 'file:remote']);
   });
 
   it('sorts each project grids by the strip so the sidebar follows a drag across projects', () => {
@@ -83,6 +82,15 @@ describe('ordering', () => {
     expect(sameOrder(['a', 'b'], ['a', 'b'])).toBe(true);
     expect(sameOrder(['a', 'b'], ['b', 'a'])).toBe(false);
     expect(sameOrder(['a'], undefined)).toBe(false);
+  });
+
+  it('keeps every project grids in the strip order (a new grid placed after the front tab moves in the sidebar too)', () => {
+    const projects = [{ id: 'A', tabs: [{ id: 'a1' }, { id: 'a2' }, { id: 'a3' }] }, { id: 'B', tabs: [{ id: 'b1' }] }];
+    const next = syncTabsToOrder(projects, ['grid:a1', 'grid:b1', 'grid:a3', 'grid:a2']);
+    expect(next[0].tabs.map((t) => t.id)).toEqual(['a1', 'a3', 'a2']);
+    expect(next[1]).toBe(projects[1]);
+    // Nothing moves: the same array, so no state edit.
+    expect(syncTabsToOrder(projects, ['grid:a1', 'grid:a2', 'grid:a3', 'grid:b1'])).toBe(projects);
   });
 });
 
@@ -125,8 +133,25 @@ describe('open, close and switch', () => {
     expect(closed.projects[0].archive[0].id).toBe(a1);
     expect(normalizeWorkspaceOrder([`grid:${a1}`, `grid:${a2}`, `grid:${b1}`], ids)).toEqual([`grid:${a2}`, `grid:${b1}`]);
     const restored = restoreTab(closed, a, a1);
-    const available = stripKeys({ settingsOpen: false, sshOpen: false, activeProjectId: a, projects: restored.projects, files: [] }).all;
+    const available = stripKeys({ settingsOpen: false, sshOpen: false, projects: restored.projects, files: [] });
     expect(mergeWorkspaceOrder([`grid:${a2}`, `grid:${b1}`], available, `grid:${a2}`)).toEqual([`grid:${a2}`, `grid:${a1}`, `grid:${b1}`]);
+  });
+
+  it('closing the tab in front brings its strip neighbour (right, else left) to the front, also of another project', () => {
+    const shown = ['grid:a1', 'grid:b1', 'file:f'];
+    expect(neighbourAfterClose(shown, 'grid:a1')).toBe('grid:b1');
+    expect(neighbourAfterClose(shown, 'file:f')).toBe('grid:b1');
+    expect(neighbourAfterClose(['grid:a1'], 'grid:a1')).toBeNull();
+    expect(neighbourAfterClose(shown, 'grid:gone')).toBeNull();
+  });
+
+  it('Mod+Tab and Mod+Shift+Tab also work with Settings in front (Settings is a tab of the strip)', () => {
+    const ctx = {
+      resolution: resolveShortcuts({}, 'win32'), languageChosen: true, recording: false, overlayOpen: false, paletteOpen: false,
+      settingsActive: true, hasProject: true, hasTab: true, target: 'other' as const,
+    };
+    expect(decideShortcut({ code: 'Tab', ctrlKey: true, shiftKey: false, altKey: false, metaKey: false }, ctx)).toBe('tab.next');
+    expect(decideShortcut({ code: 'Tab', ctrlKey: true, shiftKey: true, altKey: false, metaKey: false }, ctx)).toBe('tab.prev');
   });
 
   it('Mod+Shift+W acts whenever a tab is in front, also a file with no grid behind it', () => {
@@ -137,6 +162,28 @@ describe('open, close and switch', () => {
     const ev = { key: 'W', code: 'KeyW', ctrlKey: true, shiftKey: true, altKey: false, metaKey: false };
     expect(decideShortcut(ev, ctx)).toBe('tab.close');
     expect(decideShortcut(ev, { ...ctx, hasTab: false })).toBeNull();
+  });
+});
+
+describe('unique grid ids', () => {
+  it('normalizeState gives a grid whose id another project (or the archive) already uses a new id; the active tab follows', () => {
+    const { s, a, b, a1, a2 } = twoProjects();
+    const raw = JSON.parse(JSON.stringify(s)) as AppState;
+    const beta = raw.projects.find((p) => p.id === b)!;
+    beta.tabs[0].id = a1; // a duplicate of Alpha's first grid
+    beta.activeTabId = a1;
+    raw.projects.find((p) => p.id === a)!.archive = [{ ...raw.projects[0].tabs[1], id: a2, closedAt: 1 }]; // archived copy of an open id
+    const loaded = normalizeState(raw)!;
+    const ids = loaded.projects.flatMap((p) => [...p.tabs, ...p.archive].map((t) => t.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    const alpha = loaded.projects.find((p) => p.id === a)!;
+    expect(alpha.tabs.map((t) => t.id)).toEqual([a1, a2]); // the first holder keeps its id
+    const betaLoaded = loaded.projects.find((p) => p.id === b)!;
+    expect(betaLoaded.tabs[0].id).not.toBe(a1);
+    expect(betaLoaded.activeTabId).toBe(betaLoaded.tabs[0].id);
+    expect(alpha.archive[0].id).not.toBe(a2);
+    // A file without duplicates is left as it is.
+    expect(normalizeState(JSON.parse(JSON.stringify(s)))!.projects.map((p) => p.tabs.map((t) => t.id))).toEqual(s.projects.map((p) => p.tabs.map((t) => t.id)));
   });
 });
 

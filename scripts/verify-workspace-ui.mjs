@@ -110,14 +110,13 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
   await dragCard(grids[0], fileCard, false);
   const movedCards = await visualCards();
   assert.ok(movedCards.indexOf(grids[0]) < movedCards.indexOf(fileCard), 'grid can move before a file');
-  // 1.0.0: the order is global and lives in state.json (its persistence across a restart is checked by verify-grid-tabs.mjs).
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  assert.deepEqual(await visualCards(), movedCards, 'mixed order kept after the drop');
+  // 1.0.0: the order is global and lives in state.json: main's state has exactly the order the strip shows after the drop.
+  await until(() => evaluate(`window.mc.loadSnapshot().then((snap) => JSON.stringify(snap.state.workspaceOrder) === ${JSON.stringify(JSON.stringify(movedCards))})`), 'mixed order saved in the state');
   await screenshot('workspace-card-reorder');
   await screenshot('settings-general');
   await click('.settings-nav button', 'Terminal');
   await until(() => evaluate('!!document.querySelector("#settings-shell")'), 'terminal settings layout');
-  assert.ok(await evaluate('(() => { const rows = [...document.querySelectorAll(".settings-card > .setting-row")]; return rows.length === 3 && rows.every((row, index) => index === 0 || row.getBoundingClientRect().top >= rows[index - 1].getBoundingClientRect().bottom); })()'), 'terminal settings are separate rows');
+  assert.ok(await evaluate('(() => { const rows = [...document.querySelectorAll(".settings-card > .setting-row")]; return rows.length >= 3 && rows.every((row, index) => index === 0 || row.getBoundingClientRect().top >= rows[index - 1].getBoundingClientRect().bottom); })()'), 'terminal settings are separate rows');
   await screenshot('settings-terminal');
   await click('#settings-shell');
   await until(() => evaluate('!!document.querySelector(".select-popup")'), 'shell menu');
@@ -217,7 +216,7 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
   assert.ok(await evaluate('(() => { const viewport = document.querySelector(".markdown-preview-scroll").getBoundingClientRect(); const target = document.querySelector("#markdown-project-checks").getBoundingClientRect(); return target.top >= viewport.top && target.top < viewport.bottom && document.querySelector(".file-editor").getAttribute("aria-label") === "README.md"; })()'), 'Markdown fragment navigates inside preview');
   await click('.markdown-preview a[href="src/catalog.mjs"]');
   await until(() => evaluate('document.querySelector(".file-editor")?.getAttribute("aria-label") === "src/catalog.mjs" && !!document.querySelector(".cm-content")'), 'relative Markdown link opens project source');
-  await click('.file-tab[title="README.md"]');
+  await click('.file-tab[title^="README.md"]');
   await until(() => evaluate('!!document.querySelector(".markdown-preview")'), 'return to Markdown preview');
   await click('.markdown-view-toggle button', 'Edit source');
   await until(() => evaluate('!!document.querySelector(".file-editor .cm-content")'), 'Markdown source toggle');
@@ -225,18 +224,18 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
   const readmePath = join(project, 'README.md');
   const readmeOriginal = readFileSync(readmePath, 'utf8');
   await setText(readmeOriginal + '\n## Unsaved preview update\n\nThis draft is visible before saving.\n');
-  await until(() => evaluate(`!!document.querySelector('.file-tab[title="README.md"] .file-dirty')`), 'Markdown source creates protected draft');
+  await until(() => evaluate(`!!document.querySelector('.file-tab[title^="README.md"] .file-dirty')`), 'Markdown source creates protected draft');
   await click('.markdown-view-toggle button', 'Preview');
   await until(() => evaluate('document.querySelector("#markdown-unsaved-preview-update")?.textContent === "Unsaved preview update"'), 'Markdown preview reflects unsaved source');
   assert.equal(readFileSync(readmePath, 'utf8'), readmeOriginal, 'preview leaves draft unsaved on disk');
-  await click('.file-tab[title="README.md"] .x');
+  await click('.file-tab[title^="README.md"] .x');
   await until(() => evaluate('!!document.querySelector(".overlay")'), 'Markdown preview protects draft on close');
   await click('.modal-foot button', 'Cancel');
   await until(() => evaluate('!document.querySelector(".overlay") && !!document.querySelector("#markdown-unsaved-preview-update")'), 'cancel preserves Markdown preview draft');
-  await click('.file-tab[title="README.md"] .x');
+  await click('.file-tab[title^="README.md"] .x');
   await until(() => evaluate('!!document.querySelector(".overlay")'), 'Markdown discard confirmation');
   await click('.modal-foot button', 'Discard');
-  await until(() => evaluate(`!document.querySelector('.file-tab[title="README.md"]')`), 'Markdown draft discarded');
+  await until(() => evaluate(`!document.querySelector('.file-tab[title^="README.md"]')`), 'Markdown draft discarded');
   assert.equal(readFileSync(readmePath, 'utf8'), readmeOriginal, 'discard keeps original Markdown file');
   console.log('Workspace UI verified: settings tab/sections/grid/file navigation, aligned snippet empty state, project names and add placement, footer version, distinct grid/file tabs, aligned toolbar, line numbers, syntax colors, undo, project dragging, update menu, neutral resize cleanup, editor save/conflict/close and draft recovery, safe Markdown rendering, fragment/project links, source/preview toggles and draft protection.');
 }

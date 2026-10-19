@@ -187,7 +187,7 @@ try {
     await evaluate(`document.querySelector('.explorer-tree').scrollTop = ${(target + 1 - 5) * rowHeight}`);
     await sleep(300);
     await app.click(`.tree-rows .file-entry[data-path=${JSON.stringify(deepFile)}]`);
-    await until(`!!document.querySelector('.tab.file-tab[title=${JSON.stringify(deepFile)}]')`, 'deep file opened');
+    await until(`!!document.querySelector('.tab.file-tab[title^=${JSON.stringify(deepFile)}]')`, 'deep file opened');
     // Keyboard: ArrowDown moves focus through virtual rows, past the rendered window.
     await evaluate(`document.querySelector('.tree-rows .file-entry[data-path=${JSON.stringify(pinned)}]').focus()`);
     for (let i = 0; i < 80; i++) await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 });
@@ -243,7 +243,7 @@ try {
     await app.click('.explorer-heading-actions .btn[aria-haspopup=menu]');
     await app.click('.menu-item', 'Zwiń wszystkie foldery');
     await until(`Number(document.querySelector('.explorer-tree').dataset.rows) < 10`, 'collapsed again');
-    await evaluate(`(() => { const tab = document.querySelector('.tab.file-tab[title=${JSON.stringify(deepFile)}]'); const r = tab.getBoundingClientRect(); tab.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: r.left + 10, clientY: r.top + 10 })); })()`);
+    await evaluate(`(() => { const tab = document.querySelector('.tab.file-tab[title^=${JSON.stringify(deepFile)}]'); const r = tab.getBoundingClientRect(); tab.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: r.left + 10, clientY: r.top + 10 })); })()`);
     await app.click('.menu-item', 'Pokaż w panelu plików');
     await until(`document.activeElement?.dataset?.path === ${JSON.stringify(deepFile)}`, 'revealed and focused');
     const revealed = await evaluate(`(() => { const r = document.activeElement.getBoundingClientRect(), t = document.querySelector('.explorer-tree').getBoundingClientRect(), s = document.querySelector('.tree-sticky-rows')?.getBoundingClientRect();

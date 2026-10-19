@@ -467,6 +467,19 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
     })),
   } as AppState;
   for (const key of LEGACY_ALERT_KEYS) delete (normalized.settings as unknown as Record<string, unknown>)[key];
+  // Grid ids are unique across all projects (the strip keys grids by id): a repeated id (open or archived, a hand-edited or merged
+  // file) gets a new one; an active tab that was re-id'd follows.
+  const seenTabIds = new Set<string>();
+  const freshId = (id: string) => { if (!seenTabIds.has(id)) { seenTabIds.add(id); return id; } const next = uid(); seenTabIds.add(next); return next; };
+  normalized.projects = normalized.projects.map((p) => {
+    const tabs = p.tabs.map((t) => { const id = freshId(t.id); return id === t.id ? t : { ...t, id }; });
+    // The active tab keeps pointing at the same grid: if its id was given away, the first grid that had it.
+    const kept = tabs.some((t) => t.id === p.activeTabId);
+    const moved = p.tabs.findIndex((t) => t.id === p.activeTabId);
+    const activeTabId = kept || moved < 0 ? p.activeTabId : tabs[moved].id;
+    const archive = p.archive.map((t) => { const id = freshId(t.id); return id === t.id ? t : { ...t, id }; });
+    return tabs.every((t, i) => t === p.tabs[i]) && archive.every((t, i) => t === p.archive[i]) ? p : { ...p, tabs, archive, activeTabId };
+  });
   // An active project or tab dropped by the repair falls back to the first one left, so the window does not open on an empty grid.
   normalized.projects = normalized.projects.map((p) =>
     p.activeTabId && !p.tabs.some((t) => t.id === p.activeTabId) ? { ...p, activeTabId: p.tabs[0]?.id ?? null } : p);

@@ -2,6 +2,7 @@
 // cells whose profile is switched to "claude" in Settings after they started (the running shells stay shells), and the agent
 // status is faked with the 'cell:hook' event main sends for a real hook (the technique of verify-agent-close.mjs). PATH is cut to
 // the Windows folders, so even a restarted cell could not find a real CLI.
+// The cells are cmd shells (cmd.exe is in the cut PATH), so they start and the screenshots show working terminals.
 // Checks: the grids of two projects are tabs of one strip (project colour bar, project name in the tooltip, the project name as a
 // prefix when two grids share a name); clicking a grid of the other project switches the project (sidebar and Files follow);
 // Mod+Tab walks the whole strip across projects; a drag across projects reorders the strip and the order survives a restart
@@ -25,7 +26,7 @@ mkdirSync(betaPath, { recursive: true });
 writeFileSync(join(alphaPath, 'notes.txt'), 'alpha notes\n');
 writeFileSync(join(betaPath, 'beta-only.txt'), 'beta\n');
 writeState(root, {
-  version: 1, settings: { language: 'en', backgroundLoad: 'visible' }, activeProjectId: P.alpha,
+  version: 1, settings: { language: 'en', backgroundLoad: 'visible', shell: 'cmd' }, activeProjectId: P.alpha,
   profiles: [{ id: 'fake', name: 'Fake agent', cli: 'shell', args: '', color: '#8b5cf6' }],
   projects: [
     { id: P.alpha, name: 'Alpha', path: alphaPath, color: '#3b82f6', archive: [], activeTabId: T.alphaMain, tabs: [
@@ -127,8 +128,17 @@ try {
   const savedGrids = saved.filter((id) => id.startsWith('grid:'));
   const shownGrids = moved.filter((id) => id.startsWith('grid:'));
   if (JSON.stringify(savedGrids) !== JSON.stringify(shownGrids)) fail(`state.json order ${JSON.stringify(saved)} vs strip ${JSON.stringify(moved)}`);
+  // Inside a project too, and the project's grid list (the sidebar and its "last 3") follows the strip.
+  await dragCard(`grid:${T.alphaNotes}`, `grid:${T.alphaMain}`, false);
+  await app.until(`(() => { const ids = [...document.querySelectorAll('.workspace-tabs .tab')].sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left).map((el) => el.dataset.workspaceId); return ids.indexOf('grid:${T.alphaNotes}') === ids.indexOf('grid:${T.alphaMain}') - 1; })()`, 'Notes before Main');
+  await showPanel('projects');
+  await app.until(`(() => { const names = [...document.querySelectorAll('.project')].find((p) => p.querySelector('.name')?.textContent === 'Alpha').parentElement.querySelectorAll('.tab-item .tname'); return [...names].map((n) => n.textContent).join(',') === 'Notes,Main'; })()`, 'sidebar follows the strip');
+  await sleep(1500);
+  const savedState = JSON.parse(readFileSync(join(root, 'data', 'state.json'), 'utf8'));
+  const alphaTabs = savedState.projects.find((p) => p.id === P.alpha).tabs.map((t) => t.id);
+  if (JSON.stringify(alphaTabs) !== JSON.stringify([T.alphaNotes, T.alphaMain])) fail(`Alpha grids in state.json: ${JSON.stringify(alphaTabs)}`);
   await app.screenshot('100-tabs-reordered.png');
-  ok('a drag across projects reorders the strip and the order is in state.json');
+  ok('a drag across projects reorders the strip and the order is in state.json; the sidebar list follows the strip');
 
   // 5. "All tabs" lists the entries grouped by project.
   await app.click('.tabs-all');
@@ -151,6 +161,15 @@ try {
   await app.click('#settings-profile-cli-fake');
   await app.click('[role=option]', 'claude');
   await sleep(300);
+  // Settings is a tab of the strip: Mod+Tab leaves it (it used to be blocked there).
+  if ((await activeKey()) !== 'settings') fail(`Settings not in front: ${await activeKey()}`);
+  await app.evaluate(`(document.activeElement?.blur(), true)`);
+  await key('Tab', 'Tab', 9, CTRL);
+  await app.until(`!!document.querySelector('.workspace-tabs .tab.active') && document.querySelector('.workspace-tabs .tab.active').dataset.workspaceId !== 'settings'`, 'Mod+Tab leaves Settings', 5000);
+  if (!(await app.evaluate(`!!document.querySelector('.settings-tab')`))) fail('Mod+Tab closed Settings');
+  ok(`Mod+Tab leaves Settings (now ${await activeKey()})`);
+  await app.click('.settings-tab');
+  await app.until(`document.querySelector('.workspace-tabs .tab.active')?.dataset.workspaceId === 'settings'`, 'Settings in front again');
   // Mod+Shift+W with Settings in front closes Settings only.
   await key('KeyW', 'W', 87, CTRL | SHIFT);
   await app.until(`!document.querySelector('.settings-tab')`, 'Settings closed by Mod+Shift+W');
@@ -177,6 +196,17 @@ try {
   await filesShow('notes.txt', 'Alpha files again');
   await app.click('.file-entry[data-path="notes.txt"]');
   await app.until(`document.querySelector('.workspace-tabs .tab.active')?.classList.contains('file-tab')`, 'file tab in front');
+  // The file tab of Alpha stays in the strip while Beta is on screen (with Alpha's colour); clicking it switches back to Alpha.
+  const fileSel = `document.querySelector('.workspace-tabs .file-tab')`;
+  await selectTab(T.betaBuild);
+  await projectIs('Beta', 'Beta with the Alpha file open');
+  const fileTab = await app.evaluate(`(() => { const t = ${fileSel}; return t && { project: t.dataset.projectId, bar: getComputedStyle(t.querySelector('.tab-project')).backgroundColor, title: t.title }; })()`);
+  if (!fileTab || fileTab.project !== P.alpha || fileTab.bar !== 'rgb(59, 130, 246)' || !fileTab.title.includes('Project: Alpha')) fail(`Alpha file tab while Beta is shown: ${JSON.stringify(fileTab)}`);
+  await app.screenshot('100-tabs-file-other-project.png');
+  await app.evaluate(`${fileSel}.click(), true`);
+  await projectIs('Alpha', 'the file tab switches to Alpha');
+  await app.until(`document.querySelector('.workspace-tabs .tab.active')?.classList.contains('file-tab') && !!document.querySelector('.file-editor')`, 'file in front again');
+  ok('a file tab of another project stays in the strip with its colour; clicking it switches the project');
   await app.screenshot('100-tabs-file-front.png');
   await app.evaluate(`(document.activeElement?.blur(), true)`);
   await key('KeyW', 'W', 87, CTRL | SHIFT);
@@ -188,6 +218,18 @@ try {
   ok('Mod+Shift+W with a file tab in front closes only the file tab');
   await main.hook(C.a, 'stop');
   await sleep(500);
+
+  // The profile goes back to a plain shell, so the cells start again after the restart (no real CLI is ever looked for).
+  await app.click('.tb-btn[aria-label="Settings"]');
+  await app.until(`[...document.querySelectorAll('.settings-nav [role=tab]')].some((t) => t.textContent === 'Agent profiles')`, 'settings page (back to shell)');
+  await app.click('.settings-nav [role=tab]', 'Agent profiles');
+  await app.until(`!!document.querySelector('#settings-profile-cli-fake')`, 'profile card (back to shell)');
+  await app.click('#settings-profile-cli-fake');
+  await app.click('[role=option]', 'shell');
+  await sleep(300);
+  await app.click('.settings-tab .x');
+  await app.until(`!document.querySelector('.settings-tab')`, 'Settings closed');
+  await sleep(1500); // the state is written to disk with a short delay
 
   // 9. Restart: the order of the strip is the same.
   const orderBefore = await strip();
@@ -204,6 +246,23 @@ try {
   if ((await activeProject()) !== 'Alpha') fail(`active project after the restart: ${await activeProject()}`);
   await app.screenshot('100-tabs-after-restart.png');
   ok('the order of the strip survives a restart');
+
+  // 10. Closing the grid in front brings its strip neighbour to the front, also when that one belongs to another project.
+  const owners = await app.evaluate(`[...document.querySelectorAll('.workspace-tabs .tab.grid-tab')].sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left).map((el) => [el.dataset.workspaceId, el.dataset.projectId])`);
+  const at = owners.findIndex(([, project], i) => owners[i + 1] && owners[i + 1][1] !== project);
+  if (at < 0) fail(`no neighbours of different projects: ${JSON.stringify(owners)}`);
+  const [closing, closingProject] = owners[at];
+  const [neighbour, neighbourProject] = owners[at + 1];
+  const closingId = closing.slice(5);
+  await selectTab(closingId);
+  await app.until(`document.querySelector('.workspace-tabs .tab.active')?.dataset.workspaceId === ${JSON.stringify(closing)}`, 'grid to close in front');
+  await app.evaluate(`${tabSel(closingId)}.querySelector('.x').click(), true`);
+  await app.until(`!${tabSel(closingId)}`, 'grid closed');
+  await app.until(`document.querySelector('.workspace-tabs .tab.active')?.dataset.workspaceId === ${JSON.stringify(neighbour)}`, 'the strip neighbour in front', 5000);
+  await projectIs(neighbourProject === P.alpha ? 'Alpha' : 'Beta', 'the neighbour project is active');
+  if (closingProject === neighbourProject) fail('the neighbour is of the same project');
+  await app.screenshot('100-tabs-close-neighbour.png');
+  ok('closing the grid in front brings its strip neighbour (of the other project) to the front');
   console.log(`ALL OK (${results.length})`);
 } finally {
   main?.close();

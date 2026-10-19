@@ -14,20 +14,13 @@ export function readLegacyOrders(): unknown {
   try { return JSON.parse(localStorage.getItem(LEGACY_ORDER_KEY) ?? '{}'); } catch { return {}; }
 }
 
-/** The strip as it is now: its full order, the keys it shows (in that order) and the one in front. */
-export function currentStrip(): { order: string[]; shown: string[]; active: string | null } {
+/** The strip as it is now: the keys it shows, in its order, and the one in front. */
+export function currentStrip(): { shown: string[]; active: string | null } {
   const s = getS();
-  const files = useFileStore.getState();
-  const ssh = useSshStore.getState();
-  const project = activeProject(s);
   const keys = stripKeys({
-    settingsOpen: getUi().settingsTabOpen, sshOpen: ssh.viewOpen, activeProjectId: project?.id ?? null,
-    projects: s.projects, files: files.documents,
+    settingsOpen: getUi().settingsTabOpen, sshOpen: useSshStore.getState().viewOpen, projects: s.projects, files: useFileStore.getState().documents,
   });
-  const order = mergeWorkspaceOrder(s.workspaceOrder ?? [], keys.all, null);
-  const visible = new Set(keys.shown);
-  const shown = order.filter((key) => visible.has(key));
-  return { order, shown, active: frontKey() };
+  return { shown: mergeWorkspaceOrder(s.workspaceOrder ?? [], keys, null), active: frontKey() };
 }
 
 /** The key of the tab in front (cheap: it runs on every key press for the shortcut dispatch). */

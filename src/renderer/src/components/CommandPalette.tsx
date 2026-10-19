@@ -96,7 +96,7 @@ function PaletteInner() {
     for (const p of s.projects) out.push({ kind: tr('Projekt'), title: p.name, desc: p.path, run: () => switchProject(p.id) });
     for (const p of s.projects)
       for (const t of p.tabs)
-        out.push({ kind: tr('Zakładka'), title: t.name, desc: `${p.name} · ${describeLayout(t.layout)}`, run: () => { switchProject(p.id); selectTab(p.id, t); } });
+        out.push({ kind: tr('Zakładka'), title: t.name, desc: `${p.name} · ${describeLayout(t.layout)}`, run: () => selectTab(p.id, t) });
     for (const sn of s.snippets.filter((x) => !x.projectId || x.projectId === project?.id))
       out.push({ kind: tr('Snippet'), title: sn.name, desc: tr("Enter: aktywna · Shift+Enter: wszystkie"), run: (shift) => sendSnippet(sn, shift ? 'all' : 'focused') });
     if (project) {

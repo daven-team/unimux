@@ -21,6 +21,8 @@ import { namesList, workingAgents } from '../../shared/agentWork';
 import { flushDrafts, showTerminalTabs } from './files';
 import { cancelReconnectAtStart, connectOnMount, reconnectCell, startSshCell } from './ssh';
 import { terminals } from './terminals/TerminalManager';
+import { activateWorkspaceKey, currentStrip } from './workspaceStrip';
+import { neighbourAfterClose } from '../../shared/workspaceOrder';
 
 /** Cells whose pty was started (or found alive) during this renderer session. */
 const started = new Set<string>();
@@ -662,7 +664,11 @@ export async function closeTab(projectId: string, tabId: string): Promise<void> 
   const tab = getS().projects.find((p) => p.id === projectId)?.tabs.find((t) => t.id === tabId);
   if (!tab) return;
   for (const c of tab.cells) killAndDispose(c.id);
+  // The grid in front closes: its neighbour in the strip comes to the front (also a tab of another project), as in a browser.
+  const strip = currentStrip();
+  const neighbour = strip.active === `grid:${tabId}` ? neighbourAfterClose(strip.shown, strip.active) : null;
   update((s) => closeTabState(s, projectId, tabId));
+  if (neighbour) activateWorkspaceKey(neighbour);
   toast(tr('Zakładka „{name}” trafiła do historii', { name: tab.name }));
 }
 

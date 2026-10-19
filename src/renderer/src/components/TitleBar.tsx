@@ -1,7 +1,7 @@
 import { shortcutText, titleWithShortcut, useShortcutText } from '../shortcuts';
 import { useI18n } from '../i18n';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react';
-import { activeWorkspaceKey, gridTabLabels, groupWorkspaceKeys, mergeWorkspaceOrder, migrateWorkspaceOrders, reorderWorkspace, sameOrder, sortTabsByOrder, stripKeys } from '../../../shared/workspaceOrder';
+import { activeWorkspaceKey, gridTabLabels, groupWorkspaceKeys, mergeWorkspaceOrder, migrateWorkspaceOrders, reorderWorkspace, sameOrder, stripKeys, syncTabsToOrder } from '../../../shared/workspaceOrder';
 import { readLegacyOrders } from '../workspaceStrip';
 import type { Project } from '../../../shared/types';
 import { describeLayout } from '../../../shared/layout';
@@ -84,20 +84,25 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
   const [drag, setDrag] = useState<{ id: string } | null>(null);
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
   // One global order in state.json; the first start of 1.0.0 builds it from the per-project orders of 0.9.x.
-  const keys = useMemo(() => stripKeys({ settingsOpen: settingsTabOpen, sshOpen, activeProjectId: project?.id ?? null, projects, files: documents }),
-    [settingsTabOpen, sshOpen, project?.id, projects, documents]);
+  const keys = useMemo(() => stripKeys({ settingsOpen: settingsTabOpen, sshOpen, projects, files: documents }), [settingsTabOpen, sshOpen, projects, documents]);
   const legacy = useRef<string[] | null>(null);
   if (!savedOrder && !legacy.current) legacy.current = migrateWorkspaceOrders(readLegacyOrders(), projects);
   // The tab that was in front at the last render: a grid opened now (sidebar, palette, History) lands right after it.
   const anchor = useRef<string | null>(null);
-  const allKey = keys.all.join('\n');
-  const order = useMemo(() => mergeWorkspaceOrder(savedOrder ?? legacy.current ?? [], keys.all, anchor.current), [savedOrder, allKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const allKey = keys.join('\n');
+  const order = useMemo(() => mergeWorkspaceOrder(savedOrder ?? legacy.current ?? [], keys, anchor.current), [savedOrder, allKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The order goes to state.json, and each project's grids follow it (the sidebar and its "last 3" agree with the strip).
+  const gridIdsKey = projects.map((p) => p.tabs.map((t) => t.id).join(',')).join('|');
   useEffect(() => {
-    if (!sameOrder(order, savedOrder)) update((st) => sameOrder(st.workspaceOrder, order) ? st : { ...st, workspaceOrder: order });
-  }, [order, savedOrder]);
-  const shownSet = useMemo(() => new Set(keys.shown), [keys]);
-  const shown = useMemo(() => order.filter((key) => shownSet.has(key)), [order, shownSet]);
+    update((st) => {
+      const projectsInOrder = syncTabsToOrder(st.projects, order);
+      if (sameOrder(st.workspaceOrder, order) && projectsInOrder === st.projects) return st;
+      return { ...st, workspaceOrder: order, projects: projectsInOrder };
+    });
+  }, [order, savedOrder, gridIdsKey]);
+  const shown = order;
   const tabLabels = useMemo(() => gridTabLabels(projects), [projects]);
+  const projectById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const endDrag = () => { setDrag(null); setDrop(null); };
   const dragProps = (id: string) => ({
     draggable: editing !== id.slice(5),
@@ -131,10 +136,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       const bounds = e.currentTarget.getBoundingClientRect();
       const next = reorderWorkspace(order, drag.id, id, e.clientX > bounds.left + bounds.width / 2);
       // Across projects too; each project's grids follow the strip (the sidebar lists them in that order).
-      if (next !== order) update((st) => ({ ...st, workspaceOrder: next, projects: st.projects.map((p) => {
-        const tabs = sortTabsByOrder(p.tabs, next);
-        return tabs.every((t, i) => t === p.tabs[i]) ? p : { ...p, tabs };
-      }) }));
+      if (next !== order) update((st) => ({ ...st, workspaceOrder: next, projects: syncTabsToOrder(st.projects, next) }));
       endDrag();
     },
   });
@@ -207,7 +209,8 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
   const fileTabMenu = (x: number, y: number, doc: FileTab) => {
     const fileKeys = shown.filter((key) => key.startsWith('file:'));
     const idsFor = (mode: 'others' | 'right' | 'all') => tabsToClose(fileKeys, `file:${doc.id}`, mode).map((key) => key.slice(5));
-    const full = doc.source ? doc.source.path : project ? fullProjectPath(project.path, doc.relativePath, window.mc.platform) : doc.relativePath;
+    const owner = projects.find((p) => p.id === doc.projectId);
+    const full = doc.source ? doc.source.path : owner ? fullProjectPath(owner.path, doc.relativePath, window.mc.platform) : doc.relativePath;
     openMenu(x, y, [
       { header: doc.name },
       { label: tr('Zamknij'), onClick: () => void closeFile(doc.id) },
@@ -303,18 +306,25 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
               </div>
             );
           }))}
-          {documents.filter((doc) => tabShown(doc, project?.id)).map((doc) => (
-            <div key={doc.id} {...dragProps(`file:${doc.id}`)} style={{ order: order.indexOf(`file:${doc.id}`) }} className={`tab file-tab ${activeKey === `file:${doc.id}` ? 'active' : ''}`}
-              title={doc.source ? sourceTitle(doc.source, doc.source.kind === 'remote' ? hostLabel(doc.source.hostId) : undefined) : doc.relativePath}
+          {/* Files of every project (1.0.0) with their project's colour; files outside the projects have none. */}
+          {documents.map((doc) => {
+            const owner = projectById.get(doc.projectId);
+            return (
+            <div key={doc.id} {...dragProps(`file:${doc.id}`)} data-project-id={owner?.id}
+              style={{ order: order.indexOf(`file:${doc.id}`), ...(owner ? { '--project-color': owner.color } : {}) } as CSSProperties}
+              className={`tab file-tab ${activeKey === `file:${doc.id}` ? 'active' : ''}`}
+              title={doc.source ? sourceTitle(doc.source, doc.source.kind === 'remote' ? hostLabel(doc.source.hostId) : undefined) : `${doc.relativePath}${owner ? `\n${tr('Projekt: {name}', { name: owner.name })}` : ''}`}
               onClick={() => activateFile(doc.id)} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void closeFile(doc.id); } }}
               onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
               onContextMenu={(e) => { e.preventDefault(); fileTabMenu(e.clientX, e.clientY, doc); }}>
+              {owner && <span className="tab-project" aria-hidden="true" />}
               <span className="tab-type-icon" aria-hidden="true"><FileIcon name={doc.name} /></span><span className="label">{doc.name}</span>{doc.diff && <span className="tab-diff-tag">diff</span>}
               {doc.source?.kind === 'remote' && <span className="tab-host-tag">{hostLabel(doc.source.hostId)}</span>}
               {doc.dirty && <span className="file-dirty" aria-label={tr('Niezapisane zmiany')}>●</span>}
               <button className="x" aria-label={tr('Zamknij')} onClick={(e) => { e.stopPropagation(); void closeFile(doc.id); }}><IX /></button>
             </div>
-          ))}
+            );
+          })}
     </div>
     {(edges.canLeft || edges.canRight) && <button className="tabs-scroll no-drag" disabled={!edges.canRight} title={tr('Przewiń karty w prawo')} aria-label={tr('Przewiń karty w prawo')} onClick={() => scrollStrip(1)}><span className="chev-right"><IChevron /></span></button>}
     {project && <>

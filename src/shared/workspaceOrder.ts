@@ -121,27 +121,43 @@ export function parseWorkspaceKey(key: string): WorkspaceTarget | null {
 export interface StripInput {
   settingsOpen: boolean;
   sshOpen: boolean;
-  activeProjectId: string | null;
   projects: ReadonlyArray<{ id: string; tabs: ReadonlyArray<{ id: string }> }>;
   files: ReadonlyArray<{ id: string; projectId: string }>;
 }
 
 /**
- * The keys of everything open (`all`, what the order is kept for) and of what the strip shows (`shown`): the grids of every
- * project, but the file tabs only of the project on screen and of files outside the projects (projectId '').
+ * The keys of everything the strip shows (in no particular order): Settings, the SSH view, the grids of every project and the
+ * file tabs of every project and outside the projects (A1: one strip for all projects).
  */
-export function stripKeys(input: StripInput): { all: string[]; shown: string[] } {
-  const fixed = [...(input.settingsOpen ? ['settings'] : []), ...(input.sshOpen ? ['ssh'] : [])];
-  const grids = input.projects.flatMap((p) => p.tabs.map((t) => `grid:${t.id}`));
-  const fileShown = (f: { projectId: string }) => !f.projectId || f.projectId === input.activeProjectId;
-  return {
-    all: [...fixed, ...grids, ...input.files.map((f) => `file:${f.id}`)],
-    shown: [...fixed, ...grids, ...input.files.filter(fileShown).map((f) => `file:${f.id}`)],
-  };
+export function stripKeys(input: StripInput): string[] {
+  return [
+    ...(input.settingsOpen ? ['settings'] : []), ...(input.sshOpen ? ['ssh'] : []),
+    ...input.projects.flatMap((p) => p.tabs.map((t) => `grid:${t.id}`)),
+    ...input.files.map((f) => `file:${f.id}`),
+  ];
+}
+
+/** The tab that comes to the front when `key` (the tab in front) closes: its right neighbour, else its left one. */
+export function neighbourAfterClose(shown: readonly string[], key: string): string | null {
+  const at = shown.indexOf(key);
+  if (at < 0) return null;
+  return shown[at + 1] ?? shown[at - 1] ?? null;
 }
 
 /** Project tabs sorted by the strip order (the sidebar lists a project's grids, its "last 3" follow the strip). */
 export function sortTabsByOrder<T extends { id: string }>(tabs: readonly T[], order: readonly string[]): T[] {
   const at = (t: T) => { const i = order.indexOf(`grid:${t.id}`); return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
   return [...tabs].sort((a, b) => at(a) - at(b));
+}
+
+/** Every project's `tabs` in the strip order; the same array (and the same projects) when nothing moves. */
+export function syncTabsToOrder<P extends { tabs: ReadonlyArray<{ id: string }> }>(projects: P[], order: readonly string[]): P[] {
+  let changed = false;
+  const next = projects.map((p) => {
+    const tabs = sortTabsByOrder(p.tabs, order);
+    if (tabs.every((t, i) => t === p.tabs[i])) return p;
+    changed = true;
+    return { ...p, tabs };
+  });
+  return changed ? next : projects;
 }
