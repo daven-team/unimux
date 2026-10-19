@@ -951,8 +951,7 @@ dbHost.on('message', (m: DbHostToMain) => {
 });
 // Its sessions are gone; the next database use starts it again.
 dbHost.on('crashed', (code: unknown, stderrTail: unknown) => {
-  const tail = typeof stderrTail === 'string' && stderrTail.trim() ? `
-${stderrTail.trim()}` : '';
+  const tail = typeof stderrTail === 'string' && stderrTail.trim() ? `\n${stderrTail.trim()}` : '';
   crashLog.error(`db host exited (code ${String(code)})${tail}`);
   db?.hostCrashed();
 });

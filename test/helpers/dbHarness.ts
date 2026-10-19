@@ -19,7 +19,7 @@ export interface Pglite { db: PGlite; server: PGLiteSocketServer; port: number; 
 
 export async function startPglite(): Promise<Pglite> {
   const db = await PGlite.create();
-  const server = new PGLiteSocketServer({ db, port: 0, host: '127.0.0.1', maxConnections: 16 });
+  const server = new PGLiteSocketServer({ db, port: 0, host: '127.0.0.1', maxConnections: 100 });
   await server.start();
   const port = Number(server.getServerConn().split(':').pop());
   return { db, server, port, close: async () => { await server.stop(); await db.close(); } };

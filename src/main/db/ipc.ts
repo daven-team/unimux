@@ -46,9 +46,9 @@ const answer = z.union([
 ]);
 const sort = z.array(z.object({ column: name, desc: z.boolean() }).strict()).max(DB_LIMITS.sortColumns);
 const edit = z.union([
-  z.object({ op: z.literal('update'), key: keyValues, set: values }).strict(),
+  z.object({ op: z.literal('update'), key: keyValues, set: values, original: values.optional() }).strict(),
   z.object({ op: z.literal('insert'), values }).strict(),
-  z.object({ op: z.literal('delete'), key: keyValues }).strict(),
+  z.object({ op: z.literal('delete'), key: keyValues, original: values.optional() }).strict(),
 ]);
 const editRequest = z.object({ schema: name, table: name, edits: z.array(edit).min(1).max(DB_LIMITS.edits) }).strict();
 const objectKind = z.enum(['table', 'partitioned', 'view', 'matview', 'foreign', 'sequence', 'function', 'procedure']);

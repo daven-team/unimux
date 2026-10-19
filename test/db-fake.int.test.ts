@@ -153,6 +153,17 @@ describe('DbHost: cancel and statement timeout', () => {
     expect(s.statements.slice(-3)).toEqual(['SET statement_timeout = 2000', 'SELECT pg_sleep(0.3)', 'SET statement_timeout = 200']);
   });
 
+  it('a restore that fails ends the session instead of leaving it with the run-only settings', async () => {
+    const s = await fake();
+    const h = dbHarness();
+    const id = await h.open({ port: s.port, statementTimeoutMs: 200 });
+    s.failing.add('SET statement_timeout = 200');
+    const r = await h.run(id, { sql: 'SELECT 1', statementTimeoutMs: 5000 });
+    expect(r.end.ok).toBe(false);
+    await waitFor(() => h.last(id)?.phase === 'error');
+    expect(h.last(id)?.error).toBe('dbFailed');
+  });
+
   it('a read-only connection sets default_transaction_read_only at connect', async () => {
     const s = await fake();
     const h = dbHarness();

@@ -1,7 +1,7 @@
 // The database contract (1.0.0): session ids, the connection normalizer, the connection form checks, state helpers and texts.
 import { describe, expect, it } from 'vitest';
 import {
-  dbConnectionToDraft, dbEndpoint, dbErrorText, dbSessionId, duplicateDbConnection, isDbSessionId, normalizeDbConnection, normalizeDbConnections,
+  dbConnectionToDraft, dbEndpoint, dbErrorText, dbTlsModeLabel, dbSessionId, duplicateDbConnection, isDbSessionId, normalizeDbConnection, normalizeDbConnections,
   removeDbConnection, upsertDbConnection, validateDbDraft, type DbConnection, type DbErrorCode,
 } from '../src/shared/db';
 import { messages } from '../src/shared/messages';
@@ -28,7 +28,7 @@ describe('normalizeDbConnection', () => {
 
   it('falls back to defaults for bad optional fields and refuses unusable entries', () => {
     expect(normalizeDbConnection({ ...base, port: 0, tls: 'weird', color: 'red', group: ' ops ', statementTimeoutMs: -1, database: '' })).toEqual({ ...base, port: 5432, tls: 'prefer', group: 'ops', database: 'postgres' });
-    expect(normalizeDbConnection({ ...base, tls: 'verify-full' })?.tls).toBe('require'); // no CA file: never silently "verified"
+    expect(normalizeDbConnection({ ...base, tls: 'verify-full' })).toBeNull(); // no CA file: unusable, never weakened to require
     expect(normalizeDbConnection({ ...base, tls: 'verify-full', caPath: 'C:\\ca.pem' })).toMatchObject({ tls: 'verify-full', caPath: 'C:\\ca.pem' });
     expect(normalizeDbConnection({ ...base, id: 'x' })).toBeNull();
     expect(normalizeDbConnection({ ...base, kind: 'mysql' })).toBeNull();
@@ -39,8 +39,12 @@ describe('normalizeDbConnection', () => {
 
   it('keeps an SSH tunnel only with a host id and a valid database address', () => {
     expect(normalizeDbConnection({ ...base, ssh: { hostId: HOST, dbHost: '127.0.0.1', dbPort: 6543 } })?.ssh).toEqual({ hostId: HOST, dbHost: '127.0.0.1', dbPort: 6543 });
-    expect(normalizeDbConnection({ ...base, ssh: { hostId: HOST, dbHost: '127.0.0.1', dbPort: 'x' } })?.ssh).toEqual({ hostId: HOST, dbHost: '127.0.0.1', dbPort: 5432 });
-    expect(normalizeDbConnection({ ...base, ssh: { hostId: 'x', dbHost: '127.0.0.1' } })?.ssh).toBeNull();
+    // A damaged tunnel makes the connection unusable: it never becomes a direct connection.
+    expect(normalizeDbConnection({ ...base, ssh: { hostId: HOST, dbHost: '127.0.0.1', dbPort: 'x' } })).toBeNull();
+    expect(normalizeDbConnection({ ...base, ssh: { hostId: 'x', dbHost: '127.0.0.1', dbPort: 22 } })).toBeNull();
+    expect(normalizeDbConnection({ ...base, ssh: { hostId: HOST, dbHost: 'bad host', dbPort: 22 } })).toBeNull();
+    expect(normalizeDbConnection({ ...base, ssh: 'x' })).toBeNull();
+    expect(normalizeDbConnection({ ...base, ssh: undefined })?.ssh).toBeNull();
   });
 
   it('a list drops duplicates and junk; the state normalizer keeps the list', () => {
@@ -102,6 +106,11 @@ describe('state helpers', () => {
 describe('texts', () => {
   it('every error code has a translated text', () => {
     const codes: DbErrorCode[] = ['dbHostCrashed', 'connectionMissing', 'unsupported', 'dbAuth', 'dbRefused', 'dbDns', 'dbTimeout', 'dbTls', 'dbTlsUnsupported', 'dbNoDatabase', 'caFile', 'tunnel', 'dbClosed', 'dbFailed', 'readOnly', 'inTransaction', 'noSession', 'notConnected', 'invalid', 'noKey', 'conflict', 'notFound', 'server', 'statementTimeout', 'cancelled', 'auth'];
-    for (const code of codes) expect(Object.hasOwn(messages, dbErrorText(code).key), code).toBe(true);
+    for (const code of [...codes, 'busy', 'tooMany'] as DbErrorCode[]) expect(Object.hasOwn(messages, dbErrorText(code).key), code).toBe(true);
+    for (const mode of ['disable', 'prefer', 'require', 'verify-full'] as const) {
+      const { label, detail } = dbTlsModeLabel(mode);
+      expect(Object.hasOwn(messages, label.key) && Object.hasOwn(messages, detail.key), mode).toBe(true);
+    }
+    expect(dbTlsModeLabel('require').detail.key).toBe('Bez weryfikacji certyfikatu');
   });
 });
