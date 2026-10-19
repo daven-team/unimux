@@ -2,6 +2,7 @@
 // Erasable TypeScript only and no relative imports: scripts/ssh-test-server.mjs loads this file with Node's type stripping.
 import { closeSync, constants as fsc, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, utimesSync, chmodSync, writeSync, existsSync, type Stats } from 'node:fs';
 import { createRequire } from 'node:module';
+import { connect as netConnect } from 'node:net';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import type { Duplex } from 'node:stream';
 import ssh2 from 'ssh2';
@@ -50,6 +51,11 @@ export interface TestServerOptions {
   };
   /** Advertises and serves lsetstat@openssh.com (a SETSTAT that never follows a symlink). */
   sftpLsetstat?: boolean;
+  /**
+   * 1.0.0: direct-tcpip (client forwardOut, the DB tunnels). Default: forwards to 127.0.0.1 / localhost are served (piped to
+   * that local port); `false` refuses every forward like a server with AllowTcpForwarding no.
+   */
+  tcpForwarding?: boolean;
 }
 
 /** Test knobs and counters of the SFTP subsystem (mutable while the server runs). */
@@ -99,6 +105,8 @@ export interface TestServer {
   connections(): number;
   /** Present with `sftpRoot`. */
   sftp: SftpServerStats;
+  /** direct-tcpip requests in order (where the client asked to go) and whether they were served. */
+  forwards: Array<{ host: string; port: number; accepted: boolean }>;
   close(): Promise<void>;
 }
 
@@ -363,6 +371,7 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
   const conns = new Set<Connection>();
   const sftpStats: SftpServerStats = { delayMs: 0, openWrites: 0, maxOpenWrites: 0, ops: [], failWritesAfter: null, written: 0, renameFail: null, chmods: [], modes: new Map(), execs: [], envs: [], sudoEarlyInput: 0, opens: [], owners: new Map() };
   const sftpExt = { posixRename: opts.sftpPosixRename === true, lsetstat: opts.sftpLsetstat === true };
+  const forwards: TestServer['forwards'] = [];
 
   const server = new Server({ hostKeys: [host.private], ...(opts.banner ? { banner: opts.banner } : {}) }, (conn) => {
     conns.add(conn);
@@ -380,6 +389,23 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
         return ctx.prompt([{ prompt: 'Code: ', echo: true }], 'Second factor', 'Type the code', (answers) => (answers[0] === opts.keyboardCode ? ctx.accept() : ctx.reject(methods)));
       }
       return ctx.reject(methods);
+    });
+    conn.on('tcpip', (accept, reject, info) => {
+      const local = info.destIP === '127.0.0.1' || info.destIP === 'localhost';
+      const allowed = opts.tcpForwarding !== false && local;
+      forwards.push({ host: info.destIP, port: info.destPort, accepted: allowed });
+      if (!allowed) { reject(); return; }
+      const sock = netConnect({ host: '127.0.0.1', port: info.destPort });
+      sock.once('error', () => { reject(); });
+      sock.once('connect', () => {
+        const channel = accept();
+        sock.removeAllListeners('error');
+        sock.on('error', () => { try { channel.close(); } catch { /* gone */ } });
+        channel.on('error', () => sock.destroy());
+        channel.on('close', () => sock.destroy());
+        sock.on('close', () => { try { channel.close(); } catch { /* gone */ } });
+        sock.pipe(channel).pipe(sock);
+      });
     });
     conn.on('ready', () => conn.on('session', (accept) => {
       const session = accept();
@@ -509,6 +535,7 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
     dropConnections: () => { for (const c of conns) (c as unknown as { _sock: { destroy(): void } })._sock.destroy(); },
     connections: () => conns.size,
     sftp: sftpStats,
+    forwards,
     close: () => new Promise<void>((resolve) => { for (const c of conns) c.end(); server.close(() => resolve()); }),
   };
 }

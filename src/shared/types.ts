@@ -7,6 +7,7 @@ import type { BackgroundLoadMode } from './backgroundLoad';
 import type { Overrides as ShortcutOverrides } from './shortcuts';
 import type { SshCellRef, SshHost } from './ssh';
 import type { SftpPlaces } from './sftpView';
+import type { DbConnection } from './db';
 
 export type CliKind = 'claude' | 'codex' | 'shell';
 /** A forced path format of a shell cell: Claude (@path), Codex (plain path) or the quoted shell form. */
@@ -180,6 +181,8 @@ export interface AppState {
    * shared/workspaceOrder.ts. Absent until the per-project orders of 0.9.x are migrated.
    */
   workspaceOrder?: string[];
+  /** Saved database connections (1.0.0; no secrets: passwords live in <data>/db/vault.json, owned by main). */
+  dbConnections: DbConnection[];
   settings: Settings;
   sidebarCollapsed: boolean;
   snippetsOpen: boolean;
