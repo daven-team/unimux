@@ -100,7 +100,8 @@ export const BULK_COALESCE_MS = 12;
 export const BACKGROUND_COALESCE_MS = 33;
 /** A buffer this large is sent at once instead of waiting for the timer. */
 export const FLUSH_NOW_CHARS = 128 * 1024;
-const ECHO_WINDOW_MS = 150;
+/** Output this soon after a keystroke counts as its echo (see coalesceDelay and OutputChannel.wrote). */
+export const ECHO_WINDOW_MS = 150;
 /** A cell that got input this recently counts as the one the user works in, even without the focus. */
 export const ACTIVE_WINDOW_MS = 1000;
 

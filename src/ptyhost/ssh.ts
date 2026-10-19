@@ -101,7 +101,12 @@ export class SshManager implements TerminalBackend {
       this.fail(s, mapSshError(err, s.login.override));
     });
     client.on('close', () => this.onClose(s));
-    try { client.connect(s.login.connectConfig()); } catch (err) { this.fail(s, mapSshError(err)); }
+    try {
+      client.connect(s.login.connectConfig());
+      // An interactive session (like OpenSSH's client): every keystroke leaves at once instead of waiting, under Nagle's
+      // algorithm, for the acknowledgement of the previous one (one round trip per key when typing fast).
+      client.setNoDelay(true);
+    } catch (err) { this.fail(s, mapSshError(err)); }
   }
 
   private arm(s: Session, ms: number): void {
