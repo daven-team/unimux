@@ -10,7 +10,7 @@ import { createHash, randomUUID } from 'crypto';
 import { isUtf8 } from 'buffer';
 import type { ConnectionOptions } from 'tls';
 import type { Duplex } from 'stream';
-import Redis, { AbstractConnector } from 'ioredis';
+import Redis, { AbstractConnector, Command } from 'ioredis';
 import type ConnectorConstructor from 'ioredis/built/connectors/ConnectorConstructor';
 import type { NetStream } from 'ioredis/built/types';
 import type { DbErrorCode, DbPortMessage, DbResult, DbServerError } from '../shared/db';
@@ -206,6 +206,10 @@ type Cmd = (name: string, ...args: Arg[]) => Promise<unknown>;
 const ok = <T>(value: T): DbResult<T> => ({ ok: true, value });
 const fail = (error: DbErrorCode, server?: DbServerError): DbResult<never> => ({ ok: false, error, ...(server ? { server } : {}) });
 class OpError extends Error { constructor(readonly code: DbErrorCode, readonly server?: DbServerError) { super(code); } }
+
+// ioredis turns every HGETALL reply into an object; the console needs the server's flat array (a typed reply, binary-safe
+// fields). The host itself never relies on the object form.
+Command.setReplyTransformer('hgetall', (result: unknown) => result);
 
 const LENGTH_COMMAND: Record<string, string> = { string: 'strlen', hash: 'hlen', list: 'llen', set: 'scard', zset: 'zcard', stream: 'xlen' };
 const RETRY_DELAYS = [300, 1000, 2000];

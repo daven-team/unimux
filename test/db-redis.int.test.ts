@@ -411,6 +411,9 @@ describe('Redis: console', () => {
     expect(await reply('GET nothing')).toEqual({ t: 'null' });
     expect(await reply('RPUSH l a b')).toEqual({ t: 'integer', v: '2' });
     expect(await reply('LRANGE l 0 -1')).toEqual({ t: 'array', items: [{ t: 'bulk', v: 'a', bytes: 1 }, { t: 'bulk', v: 'b', bytes: 1 }], length: 2 });
+    expect(await reply('HSET h f1 v1 f2 v2')).toEqual({ t: 'integer', v: '2' });
+    // A flat array (field, value ...), not the object ioredis would make of it.
+    expect(await reply('HGETALL h')).toEqual({ t: 'array', items: [{ t: 'bulk', v: 'f1', bytes: 2 }, { t: 'bulk', v: 'v1', bytes: 2 }, { t: 'bulk', v: 'f2', bytes: 2 }, { t: 'bulk', v: 'v2', bytes: 2 }], length: 4 });
     expect(await reply('HSET greeting f v')).toMatchObject({ t: 'error', v: expect.stringMatching(/^WRONGTYPE/) });
     expect(await reply('NOSUCHCMD x')).toMatchObject({ t: 'error', v: expect.stringMatching(/unknown command/) });
     expect(await reply('TYPE l')).toEqual({ t: 'simple', v: 'list' });

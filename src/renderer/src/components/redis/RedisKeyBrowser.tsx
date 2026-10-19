@@ -137,9 +137,9 @@ export default function RedisKeyBrowser({ tabId, ref, readOnly }: RedisViewProps
 
   return (
     <div className="redis-browser">
-      <section className="redis-keys-pane" aria-label={tr('Klucze')}>
+      <section className="redis-keys-pane" aria-label={tr('Przeglądarka kluczy')}>
         <div className="redis-toolbar">
-          <Select className="redis-db-select" value={String(ref.db)} title={tr('Baza danych')} onChange={(e) => void switchDb(Number(e.target.value))}>
+          <Select className="select redis-db-select" value={String(ref.db)} title={tr('Baza danych')} onChange={(e) => void switchDb(Number(e.target.value))}>
             {Array.from({ length: Math.max(dbCount, ref.db + 1) }, (_, i) => <option key={i} value={String(i)}>{`DB ${i}${dbKeys(i) ? ` (${dbKeys(i).toLocaleString()})` : ''}`}</option>)}
           </Select>
           <form className="redis-search" onSubmit={(e) => { e.preventDefault(); void loadKeys(tabId, true); }}>
@@ -147,7 +147,7 @@ export default function RedisKeyBrowser({ tabId, ref, readOnly }: RedisViewProps
             <input className="input" value={b.pattern} placeholder={tr('Wzorzec, np. user:*')} aria-label={tr('Wzorzec kluczy')} spellCheck={false}
               onChange={(e) => patchB(tabId, { pattern: e.target.value })} />
           </form>
-          <Select className="redis-type-select" value={b.type} title={tr('Typ')} onChange={(e) => { patchB(tabId, { type: e.target.value }); void loadKeys(tabId, true); }}>
+          <Select className="select redis-type-select" value={b.type} title={tr('Typ')} onChange={(e) => { patchB(tabId, { type: e.target.value }); void loadKeys(tabId, true); }}>
             <option value="">{tr('Wszystkie typy')}</option>
             {REDIS_EDITABLE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </Select>
@@ -163,7 +163,7 @@ export default function RedisKeyBrowser({ tabId, ref, readOnly }: RedisViewProps
           {!readOnly && <button className="btn small primary redis-new-key" onClick={() => setDialog('new')}><IPlus /> {tr('Nowy klucz')}</button>}
         </div>
         {b.error && <div className="redis-error-text pad" role="alert">{b.error}</div>}
-        <VirtualList className="redis-key-list" label={tr('Klucze')} count={rows.length} rowHeight={ROW}
+        <VirtualList className="redis-key-list" label={tr('Przeglądarka kluczy')} count={rows.length} rowHeight={ROW}
           scrollTo={currentId ? rows.findIndex((r) => r.id === currentId) : null}
           row={(i) => {
             const r = rows[i];

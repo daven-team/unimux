@@ -68,7 +68,7 @@ export const refOf = (tabId: string): RedisTabRef | undefined => docOf(tabId)?.r
 
 export function viewLabel(view: RedisTabView): string {
   switch (view) {
-    case 'keys': return tr('Klucze');
+    case 'keys': return tr('Przeglądarka kluczy');
     case 'console': return tr('Konsola');
     case 'pubsub': return tr('Pub/Sub');
     case 'info': return tr('Serwer');

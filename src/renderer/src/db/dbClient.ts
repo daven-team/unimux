@@ -210,7 +210,9 @@ export function disconnectConnection(connectionId: string): void {
 
 /** The sessions of a connection that are connecting or connected (the panel's state dot). */
 export function connectionState(st: Pick<DbStore, 'sessions' | 'shared'>, connectionId: string): 'connected' | 'connecting' | 'closed' {
-  const ids = Object.entries(st.shared).filter(([key]) => key.startsWith(`${connectionId}\n`)).map(([, id]) => st.sessions[id]);
+  const shared = Object.entries(st.shared).filter(([key]) => key.startsWith(`${connectionId}\n`)).map(([, id]) => st.sessions[id]);
+  // Redis sessions belong to the Redis tabs (not shared ones): any of them counts.
+  const ids = [...shared, ...Object.values(st.sessions).filter((x) => x.kind === 'redis' && x.connectionId === connectionId && !x.test)];
   if (ids.some((s) => s?.state === 'connected')) return 'connected';
   if (ids.some((s) => s?.state === 'connecting')) return 'connecting';
   return 'closed';

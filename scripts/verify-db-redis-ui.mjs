@@ -70,6 +70,7 @@ try {
     await submit('.redis-keys-pane .redis-search');
   };
   const openKey = async (name) => {
+    await click('.redis-keys-pane .redis-seg button', 'Lista');
     await search(name);
     await until(`!!${keyRow(name)}`, `key row ${name}`);
     await evaluate(`${keyRow(name)}.click(), true`);
@@ -232,6 +233,7 @@ try {
   await click('.redis-view-btn', 'Konsola');
   await until(`!!document.querySelector('.redis-console-line') && !document.querySelector('.redis-console-line').disabled`, 'console', 30000);
   const run = async (line) => {
+    await until(`!document.querySelector('.redis-console-line').disabled`, 'console ready');
     await setValue('.redis-console-line', line);
     await evaluate(`document.querySelector('.redis-console-line').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })), true`);
   };
@@ -241,11 +243,11 @@ try {
   await run('SET greeting hello');
   await until(`[...document.querySelectorAll('.rr.simple')].some((e) => e.textContent === 'OK')`, 'OK reply');
   await run('HGETALL user:1');
-  await until(`!!document.querySelector('.rr.map')`, 'map reply');
+  await until(`!!document.querySelector('.rr.map')`, 'map reply').catch(async (e) => { console.log('console:', await textOf('.redis-console-log'), 'modal:', await textOf('.modal')); throw e; });
   await run('LRANGE queue 0 -1');
   await until(`!!document.querySelector('.rr.array')`, 'array reply');
-  await run('INCR counter');
-  await until(`!!document.querySelector('.rr.integer')`, 'integer reply');
+  await run('LLEN queue');
+  await until(`!!document.querySelector('.rr.integer')`, 'integer reply').catch(async (e) => { console.log('console:', await textOf('.redis-console-log'), 'input:', await evaluate("document.querySelector('.redis-console-line').value")); throw e; });
   await run('GET nothing-here');
   await until(`!!document.querySelector('.rr.nil')`, 'nil reply');
   check(true, 'console replies render by type (simple, map, array, integer, nil)');
@@ -308,7 +310,15 @@ try {
   check(true, 'SLOWLOG and CLIENT LIST tables');
 
   // ── read-only connection through the SSH tunnel ──
-  await openPalette('vps', 'Otwórz przeglądarkę Redis: vps redis');
+  // Through the connections panel this time: a click on a Redis connection opens its key browser.
+  await click('#db-view');
+  const vpsRow = "[...document.querySelectorAll('.db-row')].find((r) => r.querySelector('.db-name')?.textContent === 'vps redis')";
+  await until(`!!${vpsRow}`, 'Redis connection in the panel');
+  await evaluate(`(() => { const r = ${vpsRow}; const b = r.getBoundingClientRect(); r.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: b.left + 20, clientY: b.top + 8 })); return true; })()`);
+  await until(`[...document.querySelectorAll('[role=menuitem]')].some((b) => b.textContent.includes('Konsola'))`, 'Redis entries in the connection menu');
+  check(true, 'the connections panel offers the Redis views in the connection menu');
+  await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true`);
+  await evaluate(`${vpsRow}.click(), true`);
   await until(`!!document.querySelector('.redis-card input[type=password]')`, 'SSH password prompt in the tab', 30000);
   await shot('login');
   await setValue('.redis-card input[type=password]', ssh.password);
@@ -317,6 +327,7 @@ try {
   check(await evaluate(`[...document.querySelectorAll('.redis-chip')].some((e) => e.textContent.includes('tylko do odczytu'))`), 'the tunnel connection shows read-only');
   check(await count('.redis-new-key') === 0 && await count('.redis-delete-selected') === 0, 'no "new key" or delete controls on a read-only connection');
   await openKey('user:1');
+  await until(`[...document.querySelectorAll('.redis-item')].some((e) => e.textContent.includes('city'))`, 'ro hash fields');
   await evaluate(`[...document.querySelectorAll('.redis-item')].find((e) => e.textContent.includes('city')).click(), true`);
   await until(`!!document.querySelector('.redis-editor .redis-value-text')`, 'ro editor');
   check(await count('.redis-delete-key') === 0 && await count('.redis-rename') === 0 && await count('.redis-editor .redis-save') === 0 && await count('.redis-items .redis-add') === 0, 'the value panel has no edit controls on a read-only connection');
