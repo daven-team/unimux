@@ -1,7 +1,11 @@
 // Load node-pty with the packaged Electron runtime to catch ABI/architecture mismatches.
 import { execFileSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
+
+// The packaged node-pty must carry the conout Worker limits added at install time (scripts/patch-node-pty.cjs).
+const { MARKER, LIMITS } = createRequire(import.meta.url)('./patch-node-pty.cjs');
 
 const mac = process.platform === 'darwin';
 const bundle = resolve('release', mac ? `mac${process.arch === 'arm64' ? '-arm64' : ''}/unimux.app/Contents` : 'win-unpacked');
@@ -56,6 +60,9 @@ const script = `
   }
   for (const id of ['zod/v3', 'zod/v4']) appRequire(id);
   process.stdout.write('Packaged main dependencies OK (' + external.join(', ') + ')\\n');
+  const conout = fs.readFileSync(path.join(${JSON.stringify(modulePath)}, 'lib', 'windowsConoutConnection.js'), 'utf8');
+  assert.ok(conout.includes(${JSON.stringify(MARKER)}) && conout.includes(${JSON.stringify(LIMITS)}), 'packaged node-pty lacks the conout Worker resourceLimits patch');
+  process.stdout.write('Packaged node-pty conout Worker limits OK\\n');
   const pty = require(${JSON.stringify(modulePath)});
   const windows = process.platform === 'win32';
   const env = { ...process.env };
