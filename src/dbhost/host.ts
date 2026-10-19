@@ -409,7 +409,7 @@ export class DbHost {
       return { ...await this.openRedisOnce(s, password, true, dbIndex), tls: true };
     } catch (error) {
       const code = error instanceof RedisConnectError ? error.code : 'dbFailed';
-      if (mode === 'prefer' && (code === 'dbTls' || code === 'dbClosed' || code === 'dbTimeout' || code === 'tunnel')) return { ...await this.openRedisOnce(s, password, false, dbIndex), tls: false };
+      if (mode === 'prefer' && (code === 'dbTls' || code === 'dbClosed')) return { ...await this.openRedisOnce(s, password, false, dbIndex), tls: false };
       throw error;
     }
   }
@@ -449,7 +449,7 @@ export class DbHost {
     s.redisTls = opened.tls;
     const redis = new RedisSession(opened.client, opened.control, {
       sessionId: s.id, readOnly: s.config.readOnly, dbIndex, viaTunnel: !!s.config.ssh, ...(this.redisLimits ? { limits: this.redisLimits } : {}),
-      openSubscriber: () => this.openRedisOnce(s, s.password, s.redisTls, 0),
+      openConnection: (db) => this.openRedisOnce(s, s.password, s.redisTls, db),
     }, {
       port: (m) => this.out.toRenderer(m),
       activity: (busy) => { if (this.live(s)) this.out.toMain({ t: 'dbActivity', id: s.id, busy }); },
@@ -535,7 +535,7 @@ export class DbHost {
     if (s.config.kind === 'redis') {
       if (op.op !== 'redis') return { ok: false, error: 'invalid' };
       if (!s.redis || s.phase !== 'connected') return { ok: false, error: 'notConnected' };
-      return s.redis.handle(op.req);
+      return s.redis.handle(op.req, op.deadline);
     }
     if (op.op === 'redis') return { ok: false, error: 'invalid' };
     if (!s.pg || s.phase !== 'connected') return { ok: false, error: 'notConnected' };

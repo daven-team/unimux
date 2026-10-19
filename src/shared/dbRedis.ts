@@ -25,8 +25,17 @@ export const REDIS_LIMITS = {
   /** Console: argv size, the reply's nodes and the bytes of one bulk string, and the time one command may take. */
   argv: 10_000, replyNodes: 10_000, replyBulkBytes: 1024 * 1024,
   consoleTimeoutMs: 30_000, consoleTimeoutMaxMs: 5 * 60_000,
-  /** Pattern deletes: keys counted at most (more: the count says "at least"), UNLINK batch size. */
-  countKeys: 10_000_000, deleteBatch: 500,
+  /**
+   * Pattern deletes: keys counted at most (more: complete false), UNLINK batch size, how long a count's token is valid, and
+   * the slack over the confirmed count a delete may reach (max(deleteSlackMin, count * deleteSlack)) before it stops with more.
+   */
+  countKeys: 1_000_000, deleteBatch: 500, tokenTtlMs: 5 * 60_000, deleteSlackMin: 100, deleteSlack: 0.05,
+  /** Value pages are read in sub-batches of this many items and stop at this many bytes (the page comes back shorter). */
+  pageBatch: 200, pageBytes: 8 * 1024 * 1024,
+  /** Console reads above these sizes (items of a collection, bytes of a value) need `confirmed`. */
+  consoleItemsConfirm: 100_000, consoleBytesConfirm: 64 * 1024 * 1024,
+  /** One browsing operation on the server at most (then the connection is dropped and reconnected, reported). */
+  opTimeoutMs: 60_000,
   /** Pub/Sub: messages waiting for the renderer at most (more are dropped and counted), bytes of one payload shown. */
   pubsubBuffer: 5000, pubsubBufferBytes: 8 * 1024 * 1024, pubsubPayloadBytes: 64 * 1024, pubsubBatch: 500, pubsubFlushMs: 50,
   pubsubChannels: 1000,
@@ -363,25 +372,33 @@ export type RedisNewValue =
   | { type: 'zset'; entries: Array<[RedisData, string]> }
   | { type: 'stream'; id?: string; fields: Array<[RedisData, RedisData]> };
 
+/**
+ * Writes. `existing: true` (hset, lpush, rpush, sadd, zadd, zincrby, xadd): the edit comes from an open value view, so a key
+ * that expired or was deleted meanwhile answers 'notFound' (and another type 'wrongType') instead of creating a new key.
+ */
 export type RedisWrite =
-  /** keepTtl: SET ... KEEPTTL (the default keeps the TTL; false clears it); ttlMs: a new expiry. */
+  /**
+   * keepTtl: SET ... KEEPTTL (the default keeps the TTL; false clears it); ttlMs: a new expiry. Only replaces a string (or
+   * creates the key): a key that holds another type answers 'wrongType' and stays untouched.
+   */
   | { op: 'set'; key: RedisData; value: RedisData; keepTtl?: boolean; ttlMs?: number }
-  | { op: 'hset'; key: RedisData; field: RedisData; value: RedisData; onlyNew?: boolean }
+  | { op: 'hset'; key: RedisData; field: RedisData; value: RedisData; onlyNew?: boolean; existing?: boolean }
   | { op: 'hdel'; key: RedisData; fields: RedisData[] }
-  | { op: 'lpush' | 'rpush'; key: RedisData; items: RedisData[] }
+  | { op: 'lpush' | 'rpush'; key: RedisData; items: RedisData[]; existing?: boolean }
   /** expected: the element's current value; a different value is a conflict (nothing is written). */
   | { op: 'lset'; key: RedisData; index: number; value: RedisData; expected?: RedisData }
   /** LREM count value: count > 0 from the head, < 0 from the tail, 0 all. */
   | { op: 'lrem'; key: RedisData; count: number; value: RedisData }
   /** Removes the element at index when it still has the expected value (WATCH + LSET to a marker + LREM). */
   | { op: 'ldel'; key: RedisData; index: number; expected: RedisData }
-  | { op: 'sadd' | 'srem'; key: RedisData; members: RedisData[] }
+  | { op: 'sadd'; key: RedisData; members: RedisData[]; existing?: boolean }
+  | { op: 'srem'; key: RedisData; members: RedisData[] }
   /** mode: nx only new members, xx only existing (score edits). Scores as text ("1.5", "-inf"). */
-  | { op: 'zadd'; key: RedisData; entries: Array<[RedisData, string]>; mode?: 'nx' | 'xx' }
+  | { op: 'zadd'; key: RedisData; entries: Array<[RedisData, string]>; mode?: 'nx' | 'xx'; existing?: boolean }
   | { op: 'zrem'; key: RedisData; members: RedisData[] }
-  | { op: 'zincrby'; key: RedisData; member: RedisData; by: string }
+  | { op: 'zincrby'; key: RedisData; member: RedisData; by: string; existing?: boolean }
   /** id default "*"; maxLen trims with "~" when approx. */
-  | { op: 'xadd'; key: RedisData; id?: string; fields: Array<[RedisData, RedisData]>; maxLen?: number; approx?: boolean }
+  | { op: 'xadd'; key: RedisData; id?: string; fields: Array<[RedisData, RedisData]>; maxLen?: number; approx?: boolean; existing?: boolean }
   | { op: 'xdel'; key: RedisData; ids: string[] }
   | { op: 'xtrim'; key: RedisData; strategy: 'maxlen' | 'minid'; threshold: string; approx?: boolean }
   /** RENAMENX unless overwrite (then RENAME): an existing new name answers 'keyExists'. */
@@ -397,6 +414,11 @@ export interface RedisWriteResult { changed: number; id?: string }
 
 /** A pattern delete: the count first (token), then the delete with that token. complete false: the count stopped at the cap. */
 export interface RedisPatternCount { token: string; count: number; complete: boolean }
+/**
+ * The pattern delete's answer. It stops near the confirmed count (count + max(100, 5 %)): `more` means keys still match
+ * (new ones appeared meanwhile, or the count was incomplete) and the user should count and confirm again.
+ */
+export interface RedisPatternDelete { deleted: number; cancelled: boolean; more: boolean }
 
 // ── console ─────────────────────────────────────────────────────────────────
 
@@ -528,7 +550,10 @@ export type RedisOp =
   | { kind: 'write'; write: RedisWrite }
   | { kind: 'countPattern'; match: string; type?: string }
   | { kind: 'deletePattern'; token: string }
-  /** Stops a running count or pattern delete (between batches). */
+  /**
+   * Stops every console command, count and pattern delete enqueued before it (between batches; queued ones never start).
+   * Those three run on the session's own console connection, so browsing never waits for them.
+   */
   | { kind: 'cancel' }
   | { kind: 'command'; req: RedisCommandRequest }
   | { kind: 'info'; section?: string }
@@ -549,7 +574,7 @@ export interface DbRedisApi {
   readItem(sessionId: string, req: RedisItemRequest): Promise<DbResult<RedisBlob>>;
   write(sessionId: string, write: RedisWrite): Promise<DbResult<RedisWriteResult>>;
   countPattern(sessionId: string, match: string, type?: string): Promise<DbResult<RedisPatternCount>>;
-  deletePattern(sessionId: string, token: string): Promise<DbResult<{ deleted: number; cancelled: boolean }>>;
+  deletePattern(sessionId: string, token: string): Promise<DbResult<RedisPatternDelete>>;
   cancel(sessionId: string): Promise<DbResult<boolean>>;
   command(sessionId: string, req: RedisCommandRequest): Promise<DbResult<RedisCommandResult>>;
   info(sessionId: string, section?: string): Promise<DbResult<RedisInfoSection[]>>;

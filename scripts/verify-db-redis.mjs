@@ -90,6 +90,9 @@ try {
   const slow = await app.evaluate(`window.mc.db.redis.slowlog(${j(sid)}, 10)`);
   const clients = await app.evaluate(`window.mc.db.redis.clients(${j(sid)})`);
   check(info.ok && info.value[0].name === 'Server' && slow.ok && slow.value[0].args[0] === 'KEYS' && clients.ok && clients.value.length >= 2, 'INFO, SLOWLOG and CLIENT LIST are read');
+  const counted = await app.evaluate(`window.mc.db.redis.countPattern(${j(sid)}, 'item:*')`);
+  const deleted = counted.ok && await app.evaluate(`window.mc.db.redis.deletePattern(${j(sid)}, ${j(counted.value.token)})`);
+  check(counted.ok && counted.value.count === 300 && deleted.ok && deleted.value.deleted === 300 && deleted.value.more === false, 'a pattern delete removes exactly the counted keys (console connection)');
   const sel = await app.evaluate(`window.mc.db.redis.select(${j(sid)}, 3)`);
   await app.until(`window.__db.sessions.some((s) => s.id === ${j(sid)} && s.database === '3')`, 'db 3 in the state');
   check(sel.ok, 'SELECT moves the session to DB 3');
