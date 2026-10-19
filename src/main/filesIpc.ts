@@ -18,7 +18,7 @@ export interface FilesIpcDeps {
 }
 
 /** The OS trash. Unpackaged builds can redirect it into a folder (MC_TRASH_DIR) so UI checks never touch the real recycle bin. */
-function createTrash(): TrashFn {
+export function createTrash(): TrashFn {
   const dir = !app.isPackaged ? process.env.MC_TRASH_DIR : undefined;
   if (!dir) return (path) => shell.trashItem(path);
   return async (path) => {
