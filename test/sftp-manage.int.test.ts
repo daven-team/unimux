@@ -15,6 +15,7 @@ import {
 } from '../src/shared/sftp';
 import type { SftpHostToMain, SftpOp } from '../src/shared/sftpHostIpc';
 import { startTestServer, type TestServer } from './helpers/sshServer';
+import { SUDO_MARKER } from '../src/sftphost/sudo';
 
 const SESSION = sftpSessionId('11111111-2222-4333-8444-555555555555');
 let dir: string;
@@ -65,7 +66,7 @@ function harness(opts: { onMain?: (m: SftpHostToMain, host: SftpHost) => boolean
       if (m.t === 'sshHostKey') void host.handle({ t: 'sshHostKeyAnswer', id: m.id, promptId: m.promptId, accept: true });
     },
     toRenderer: (m) => { port.push(m); items = applyPortMessage(items, m); },
-  }, { killGraceMs: 300, sftpMs: 5000 });
+  }, { killGraceMs: 300, sftpMs: 5000, sudoPromptGraceMs: 400 });
   hosts.push(host);
   const start = (o: SftpOp, id = SESSION): Promise<SftpResult<unknown>> => {
     const n = ++reqId;
@@ -185,9 +186,12 @@ describe('moves on the local disk', () => {
   /** A local disk whose renames of real entries cross a volume (EXDEV); renames of part files work (same folder). */
   class OtherVolume extends LocalSide {
     failWrite: string | null = null;
+    /** Called after a copy was renamed into place (to change its source meanwhile). */
+    afterPlace: ((to: string) => void) | null = null;
     override async rename(from: string, to: string, overwrite: boolean): Promise<void> {
       if (!from.endsWith('.unimux-part')) throw new SftpError('crossDevice');
-      return super.rename(from, to, overwrite);
+      await super.rename(from, to, overwrite);
+      this.afterPlace?.(to);
     }
     override async openWrite(path: string) {
       if (this.failWrite && path.includes(this.failWrite)) throw new SftpError('noSpace');
@@ -237,7 +241,94 @@ describe('moves on the local disk', () => {
     expect(items()[0]).toMatchObject({ state: 'failed', error: 'noSpace' });
     expect(readFileSync(local('src', 'a.txt'), 'utf8')).toBe('A');
     expect(readFileSync(local('src', 'b.txt'), 'utf8')).toBe('B');
-    expect(readdirSync(local('dst', 'src')).some((n) => n.endsWith('.unimux-part'))).toBe(false);
+    // What the job made in the target (the folder, the copy of a.txt) is gone again; nothing that was there before is touched.
+    expect(readdirSync(local('dst'))).toEqual([]);
+  });
+
+  it('a source changed after its copy is never deleted: both stay', async () => {
+    const side = new OtherVolume();
+    side.afterPlace = (to) => { if (to.endsWith('a.txt')) writeFileSync(local('src', 'a.txt'), 'A, but newer and longer'); };
+    const { q, items, settled } = queueOn(side);
+    mkdirSync(local('src'), { recursive: true });
+    writeFileSync(local('src', 'a.txt'), 'A');
+    mkdirSync(local('dst'));
+    await q.enqueue({ direction: 'local-move', sources: [local('src')], targetDir: local('dst') });
+    await settled();
+    expect(items()[0]).toMatchObject({ state: 'failed', error: 'changed' });
+    expect(readFileSync(local('src', 'a.txt'), 'utf8')).toBe('A, but newer and longer');
+    expect(readFileSync(local('dst', 'src', 'a.txt'), 'utf8')).toBe('A');
+  });
+
+  it('a folder reached through a junction is still "into itself"', async () => {
+    mkdirSync(local('box', 'inner'), { recursive: true });
+    try { symlinkSync(local('box'), local('alias'), 'junction'); } catch { return; } // no links here
+    const h = harness();
+    expect(await h.op({ op: 'enqueue', req: { direction: 'local-move', sources: [local('box')], targetDir: local('alias', 'inner') } }, LOCAL_QUEUE_ID)).toEqual({ ok: false, error: 'intoItself' });
+    expect(existsSync(local('box', 'inner'))).toBe(true);
+  });
+});
+
+describe('permission changes: links, order, sudo', () => {
+  const tree = () => {
+    mkdirSync(remote('site', 'img'), { recursive: true });
+    writeFileSync(remote('site', 'index.html'), 'x');
+    writeFileSync(remote('site', 'img', 'logo.png'), 'x');
+  };
+
+  it('uses lsetstat when the server offers it and refuses a recursive change as root without it', async () => {
+    const s = await server({ sftpLsetstat: true });
+    const h = harness();
+    await h.connect(s);
+    tree();
+    expect(await h.value<ChmodCount>({ op: 'chmodCount', paths: ['/home/alice/site'], recursive: true })).toMatchObject({ noFollow: true });
+    await h.value({ op: 'chmod', req: { paths: ['/home/alice/site'], set: null, recursive: { dirMode: 0o755, fileMode: 0o644 } } });
+    expect(s.sftp.ops.filter((o) => o === 'LSETSTAT')).toHaveLength(4);
+    expect(s.sftp.ops).not.toContain('SETSTAT');
+    const plain = await server({ sftpSudo: {} });
+    const root = harness();
+    await root.connect(plain, { sftpSudo: {} });
+    expect(await root.op({ op: 'chmod', req: { paths: ['/home/alice/site'], set: null, recursive: { dirMode: 0o755, fileMode: 0o644 } } })).toEqual({ ok: false, error: 'unsafeChmod' });
+    // One entry (no walk) is still allowed: it is looked at and never a link.
+    expect((await root.value<ChmodResult>({ op: 'chmod', req: { paths: ['/home/alice/site/index.html'], set: { bits: 0o600, mask: 0o7777 }, recursive: null } })).changed).toBe(1);
+    const safe = await server({ sftpSudo: {}, sftpLsetstat: true });
+    const root2 = harness();
+    await root2.connect(safe, { sftpSudo: {} });
+    expect((await root2.value<ChmodResult>({ op: 'chmod', req: { paths: ['/home/alice/site'], set: null, recursive: { dirMode: 0o755, fileMode: 0o644 }, total: 4 } })).changed).toBe(4);
+  });
+
+  it('a folder value without the owner r+x changes the contents first, otherwise the folder first', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    tree();
+    await h.value({ op: 'chmod', req: { paths: ['/home/alice/site'], set: null, recursive: { dirMode: 0o600, fileMode: 0o600 } } });
+    expect(s.sftp.chmods.map((c) => c.path)).toEqual(['/home/alice/site/img/logo.png', '/home/alice/site/img', '/home/alice/site/index.html', '/home/alice/site']);
+    s.sftp.chmods.length = 0;
+    await h.value({ op: 'chmod', req: { paths: ['/home/alice/site'], set: null, recursive: { dirMode: 0o755, fileMode: 0o644 } } });
+    expect(s.sftp.chmods[0].path).toBe('/home/alice/site');
+    expect(s.sftp.chmods).toHaveLength(4);
+  });
+
+  it('Cancel stops the change while the tree is still being counted', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    for (let i = 0; i < 30; i++) { mkdirSync(remote('many', `d${i}`), { recursive: true }); writeFileSync(remote('many', `d${i}`, 'f.txt'), 'x'); }
+    const opId = '77777777-2222-4333-8444-555555555555';
+    const running = h.start({ op: 'chmod', req: { paths: ['/home/alice/many'], set: null, recursive: { dirMode: 0o700, fileMode: 0o600 }, opId } });
+    expect(await h.value<boolean>({ op: 'cancelOp', opId })).toBe(true);
+    const r = await running;
+    expect(r).toEqual({ ok: true, value: { changed: 0, errors: [], cancelled: true } });
+    expect(s.sftp.chmods).toEqual([]);
+  });
+
+  it('a move into a folder reached through a server link is "into itself"', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    mkdirSync(remote('box', 'inner'), { recursive: true });
+    try { symlinkSync(remote('box'), remote('alias'), 'junction'); } catch { return; } // no links here
+    expect(await h.op({ op: 'enqueue', req: { direction: 'move', sources: ['/home/alice/box'], targetDir: '/home/alice/alias/inner' } })).toEqual({ ok: false, error: 'intoItself' });
   });
 });
 
@@ -274,8 +365,8 @@ describe('permission changes', () => {
     let link = false;
     try { symlinkSync(remote('outside.txt'), remote('site', 'link.txt'), 'file'); link = true; } catch { /* symlinks need developer mode on Windows */ }
     const count = await h.value<ChmodCount>({ op: 'chmodCount', paths: ['/home/alice/site'], recursive: true });
-    expect(count).toEqual({ dirs: 2, files: 2, links: link ? 1 : 0 });
-    expect(await h.value<ChmodCount>({ op: 'chmodCount', paths: ['/home/alice/site'], recursive: false })).toEqual({ dirs: 1, files: 0, links: 0 });
+    expect(count).toEqual({ dirs: 2, files: 2, links: link ? 1 : 0, noFollow: false });
+    expect(await h.value<ChmodCount>({ op: 'chmodCount', paths: ['/home/alice/site'], recursive: false })).toEqual({ dirs: 1, files: 0, links: 0, noFollow: false });
     const opId = '99999999-2222-4333-8444-555555555555';
     const r = await h.value<ChmodResult>({ op: 'chmod', req: { paths: ['/home/alice/site'], set: null, recursive: { dirMode: 0o750, fileMode: 0o640 }, opId } });
     expect(r).toEqual({ changed: 4, errors: [] });
@@ -350,8 +441,39 @@ describe('SFTP through sudo', () => {
     const h = harness({ onMain: answers.onMain });
     await h.connect(s, { sftpSudo: {} });
     expect(answers.asked).toEqual([false, true]);
-    expect(s.sftp.execs).toEqual(['sudo -n /usr/lib/openssh/sftp-server', "sudo -S -p '' /usr/lib/openssh/sftp-server", "sudo -S -p '' /usr/lib/openssh/sftp-server"]);
+    const withPassword = `sudo -S -p '${SUDO_MARKER}' /usr/lib/openssh/sftp-server`;
+    expect(s.sftp.execs).toEqual(['sudo -n /usr/lib/openssh/sftp-server', withPassword, withPassword]);
+    expect(s.sftp.envs).toContain('LC_ALL=C');
     expect((await h.value<string>({ op: 'realpath', path: '.' }))).toBe('/home/alice');
+  });
+
+  it('writes the password only after sudo printed its prompt (late prompt, no LC_ALL=C, Polish sudo)', async () => {
+    const s = await server({ sftpSudo: { password: 'root-pw', locale: 'pl', ignoreEnv: true, promptDelayMs: 250 } });
+    const answers = sudoAnswers(['zle', 'root-pw']);
+    const h = harness({ onMain: answers.onMain });
+    await h.connect(s, { sftpSudo: {} });
+    expect(answers.asked).toEqual([false, true]);
+    expect(s.sftp.envs).toEqual([]);
+    expect(s.sftp.sudoEarlyInput).toBe(0);
+    expect(await h.value<string>({ op: 'realpath', path: '.' })).toBe('/home/alice');
+  });
+
+  it('a sudo in a language nobody knows still asks (sudo -n exit status) and tells a wrong password by its prompt', async () => {
+    const s = await server({ sftpSudo: { password: 'root-pw', locale: 'xx', ignoreEnv: true } });
+    const answers = sudoAnswers(['a', 'b', 'c']);
+    const h = harness({ onMain: answers.onMain });
+    const last = await h.login(s, { sftpSudo: {} });
+    expect(answers.asked).toEqual([false, true, true]);
+    expect(last).toMatchObject({ phase: 'error', error: 'sudoPassword' });
+  });
+
+  it('a sudo -S that does not ask gets no password: the SFTP stream starts clean', async () => {
+    const s = await server({ sftpSudo: { password: 'root-pw', noPromptForS: true } });
+    const answers = sudoAnswers(['root-pw']);
+    const h = harness({ onMain: answers.onMain });
+    await h.connect(s, { sftpSudo: {} });
+    expect(answers.asked).toEqual([false]);
+    expect(await h.value<string>({ op: 'realpath', path: '.' })).toBe('/home/alice');
   });
 
   it('three wrong passwords, a cancel, requiretty, a refusal and no server end with clear errors instead of hanging', async () => {
@@ -361,6 +483,12 @@ describe('SFTP through sudo', () => {
       [{ sftpSudo: { requiretty: true } }, [], 'sudoTty'],
       [{ sftpSudo: { denied: true } }, [], 'sudoDenied'],
       [{ sftpSudo: { serverPath: '/nowhere/sftp-server' } }, [], 'sudoNoServer'],
+      [{ sftpSudo: { missing: true } }, [], 'sudoMissing'],
+      // Polish sudo without LC_ALL=C.
+      [{ sftpSudo: { password: 'root-pw', locale: 'pl', ignoreEnv: true } }, ['a', 'b', 'c'], 'sudoPassword'],
+      [{ sftpSudo: { requiretty: true, locale: 'pl', ignoreEnv: true } }, [], 'sudoTty'],
+      [{ sftpSudo: { denied: true, locale: 'pl', ignoreEnv: true } }, [], 'sudoDenied'],
+      [{ sftpSudo: { serverPath: '/nowhere/sftp-server', locale: 'pl', ignoreEnv: true } }, [], 'sudoNoServer'],
     ];
     for (const [opts, replies, error] of cases) {
       const s = await server(opts);

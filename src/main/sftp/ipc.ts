@@ -34,6 +34,7 @@ const chmodRequest = z.object({
   set: z.object({ bits: mode, mask: mode }).strict().nullable(),
   recursive: z.object({ dirMode: mode, fileMode: mode }).strict().nullable(),
   opId: uuid.optional(),
+  total: z.number().int().min(0).max(10_000_000).optional(),
 }).strict().refine((r) => r.set !== null || r.recursive !== null);
 const answer = z.union([
   z.object({ sessionId, promptId: uuid, cancel: z.literal(true) }).strict(),

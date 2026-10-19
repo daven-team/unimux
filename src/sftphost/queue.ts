@@ -184,7 +184,7 @@ export class TransferQueue {
   private async expandMove(batch: Batch, req: TransferRequest): Promise<{ files: FileSpec[] }> {
     const side = batch.src;
     const files: FileSpec[] = [];
-    for (const source of req.sources) if (side.contains(source, req.targetDir)) throw new SftpError('intoItself');
+    for (const source of req.sources) if (await this.intoItself(side, source, req.targetDir)) throw new SftpError('intoItself');
     for (const source of req.sources) {
       if (batch.cancelled || this.disposed) throw new SftpError('cancelled');
       const name = side.basename(source);
@@ -421,7 +421,7 @@ export class TransferQueue {
       const meta = await side.lstat(source);
       if (!meta) throw new SftpError('notFound');
       if (target === batch.root || !side.contains(batch.root, target)) throw new SftpError('invalid');
-      if (side.contains(source, batch.root)) throw new SftpError('intoItself');
+      if (await this.intoItself(side, source, batch.root)) throw new SftpError('intoItself');
       let overwrite = false;
       const existing = await side.lstat(target);
       if (existing) {
@@ -440,6 +440,7 @@ export class TransferQueue {
         await side.rename(source, target, overwrite);
       } catch (error) {
         const code = errorOf(error);
+        // SFTP v3 reports every refused rename as a plain failure: the text names another file system only as an example.
         if (side.remote) throw new SftpError(code === 'failed' ? 'crossDevice' : code, error instanceof SftpError && error.keepPart);
         if (code !== 'crossDevice') throw error;
         await this.copyThenDelete(job, side, source, target, meta, overwrite, abort.signal);
@@ -483,6 +484,22 @@ export class TransferQueue {
     }
   }
 
+  /**
+   * `source` is `targetDir` or above it: lexically, and by the real paths of both (an 8.3 spelling, a \\?\ or UNC path, a
+   * junction or a server symlink to the same folder is caught too).
+   */
+  private async intoItself(side: FileSide, source: string, targetDir: string): Promise<boolean> {
+    if (side.contains(source, targetDir)) return true;
+    const [rs, rt] = await Promise.all([side.realpath(source).catch(() => null), side.realpath(targetDir).catch(() => null)]);
+    return !!rs && !!rt && side.contains(rs, rt);
+  }
+
+  /** The copy is complete and the source is still what was read before the copy (else both stay: 'changed'). */
+  private async verifyCopy(side: FileSide, from: string, to: string, size: number, mtime: number): Promise<void> {
+    const [a, b] = await Promise.all([side.stat(from), side.stat(to)]);
+    if (!a || !b || a.size !== size || b.size !== size || a.mtime !== mtime) throw new SftpError('changed');
+  }
+
   private async copyThenDelete(job: Job, side: FileSide, source: string, target: string, meta: Meta, overwrite: boolean, signal: AbortSignal): Promise<void> {
     let done = 0;
     job.samples = [[this.now(), 0]];
@@ -490,13 +507,14 @@ export class TransferQueue {
     if (meta.kind === 'file') {
       this.update(job, { bytesTotal: meta.size }, false);
       await this.copyFile(side, source, target, overwrite, signal, onBytes);
+      await this.verifyCopy(side, source, target, meta.size, meta.mtime);
       await side.unlink(source);
       return;
     }
     if (meta.kind !== 'dir') throw new SftpError('crossDevice');
     // The whole tree is read first: a link or an unsafe name inside refuses the move before anything is copied.
     const dirs: Array<[string, string]> = [[source, target]];
-    const files: Array<[string, string]> = [];
+    const files: Array<{ from: string; to: string; size: number; mtime: number }> = [];
     let total = 0;
     const walk = async (from: string, to: string, depth: number): Promise<void> => {
       if (depth > 64) throw new SftpError('tooMany');
@@ -505,17 +523,32 @@ export class TransferQueue {
         const a = side.join(from, child.name), b = side.join(to, child.name);
         if (child.kind === 'dir') { dirs.push([a, b]); await walk(a, b, depth + 1); continue; }
         if (child.kind !== 'file') throw new SftpError('linkSkipped');
-        files.push([a, b]);
+        files.push({ from: a, to: b, size: child.size, mtime: child.mtime });
         total += child.size;
         if (files.length > SFTP_LIMITS.batchFiles) throw new SftpError('tooMany');
       }
     };
     await walk(source, target, 0);
     this.update(job, { bytesTotal: total }, false);
-    for (const [, to] of dirs) { if (signal.aborted) throw new SftpError('cancelled'); await side.mkdir(to); }
-    for (const [from, to] of files) { if (signal.aborted) throw new SftpError('cancelled'); await this.copyFile(side, from, to, false, signal, onBytes); }
-    // Everything is copied: only now the source goes (files first, then the folders deepest first).
-    for (const [from] of files) await side.unlink(from);
+    // What this job made in the target: removed again when the copy fails or is cancelled (never anything that was there).
+    const madeDirs: string[] = [];
+    const placed: string[] = [];
+    try {
+      for (const [, to] of dirs) { if (signal.aborted) throw new SftpError('cancelled'); await side.mkdir(to); madeDirs.push(to); }
+      for (const f of files) {
+        if (signal.aborted) throw new SftpError('cancelled');
+        await this.copyFile(side, f.from, f.to, false, signal, onBytes);
+        placed.push(f.to);
+      }
+    } catch (error) {
+      for (const p of [...placed].reverse()) await side.unlink(p).catch(() => undefined);
+      for (const d of [...madeDirs].reverse()) await side.rmdir(d).catch(() => undefined);
+      throw error;
+    }
+    // Every copy is checked against its source (a source changed meanwhile keeps both); only then the source goes (files
+    // first, then the folders deepest first).
+    for (const f of files) await this.verifyCopy(side, f.from, f.to, f.size, f.mtime);
+    for (const f of files) await side.unlink(f.from);
     for (const [from] of [...dirs].reverse()) await side.rmdir(from);
   }
 

@@ -1,7 +1,7 @@
 // SFTP over an exec channel (0.9.9, "Uruchamiaj SFTP przez sudo"): ssh2 1.17 starts its SFTP client only on the "sftp"
 // subsystem (Client.sftp()), so a server command such as `sudo -n /usr/lib/openssh/sftp-server` runs on a public exec channel
 // and ssh2's own SFTP protocol class is attached to that channel here. This is the one file that uses an ssh2 internal
-// (lib/protocol/SFTP.js, its constructor and push/_init): test/sftp-sudo.test.ts pins it and fails on an ssh2 upgrade.
+// (lib/protocol/SFTP.js, its constructor and push/_init): test/sftp-manage.test.ts ("the ssh2 internal behind SFTP over an exec channel") pins it and fails on an ssh2 upgrade.
 import { createRequire } from 'module';
 import type { Duplex } from 'stream';
 import type { SFTPWrapper } from 'ssh2';

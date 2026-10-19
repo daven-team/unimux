@@ -10,7 +10,7 @@ import {
 import { PERM_GRID, SPECIAL_BITS, symbolicPreview, toggleModeBit, type PaneEntry } from '../../../../shared/sftpView';
 import type { MessageKey } from '../../../../shared/i18n';
 import { useI18n } from '../../i18n';
-import { toast } from '../../store';
+import { askChoice, toast } from '../../store';
 import { useSftpStore } from '../../sftpStore';
 import { IX } from '../icons';
 
@@ -24,7 +24,7 @@ function Check({ checked, indeterminate, disabled, label, onChange }: { checked:
   return <input ref={ref} type="checkbox" aria-label={label} checked={checked && !indeterminate} disabled={disabled} onChange={onChange} />;
 }
 
-export function PermissionsDialog({ sessionId, entries, onClose }: { sessionId: string; entries: PaneEntry[]; onClose(changed: boolean): void }) {
+export function PermissionsDialog({ sessionId, entries, sudo, onClose }: { sessionId: string; entries: PaneEntry[]; sudo: boolean; onClose(changed: boolean): void }) {
   const { tr } = useI18n();
   const initial = useMemo(() => {
     const modes = entries.map((e) => modeFromPermissions(e.permissions)).filter((m): m is number => m !== null);
@@ -65,16 +65,28 @@ export function PermissionsDialog({ sessionId, entries, onClose }: { sessionId: 
     if (v !== null) setState({ bits: v, mask: PERM_MASK });
   };
   const dirMode = parseOctalMode(dirText), fileMode = parseOctalMode(fileText);
-  const canApply = !running && !result && (recursive ? dirMode !== null && fileMode !== null && typeof count === 'object' && count !== null : state.mask !== 0 && !octalError);
+  const counted = typeof count === 'object' && count !== null ? count : null;
+  // As root a recursive change needs lsetstat (a link swapped into the tree could otherwise redirect it anywhere).
+  const unsafe = recursive && sudo && counted?.noFollow === false;
+  const canApply = !running && !result && (recursive ? dirMode !== null && fileMode !== null && !!counted && !unsafe : state.mask !== 0 && !octalError);
+  // Without the owner's r+x a folder value is written after the contents (root reads any folder anyway).
+  const lockOut = recursive && !sudo && dirMode !== null && (dirMode & 0o500) !== 0o500;
+  const setidFiles = recursive && fileMode !== null && (fileMode & 0o6000) !== 0;
+  const specialAsRoot = sudo && (recursive ? ((dirMode ?? 0) | (fileMode ?? 0)) & 0o7000 : state.bits & state.mask & 0o7000) !== 0;
 
   const apply = async () => {
     if (!canApply) return;
+    if (setidFiles || specialAsRoot) {
+      const body = [setidFiles ? tr('Wartość dla plików zawiera setuid lub setgid: każdy plik w tych folderach będzie uruchamiany z uprawnieniami właściciela lub grupy.') : '', specialAsRoot ? tr('Bity specjalne przez sudo: zmiana działa jako root.') : ''].filter(Boolean).join('\n\n');
+      if (await askChoice(tr('Ustawić bity specjalne?'), body, [{ label: tr('Zastosuj'), value: 'yes', danger: true }]) !== 'yes') return;
+    }
     const opId = crypto.randomUUID();
     setRunning(opId);
     const r = await window.mc.sftp.chmod(sessionId, {
       paths: entries.map((e) => e.path), opId,
       set: recursive ? null : { bits: state.bits, mask: state.mask },
       recursive: recursive ? { dirMode: dirMode!, fileMode: fileMode! } : null,
+      ...(recursive && counted ? { total: counted.files + counted.dirs } : {}),
     }).catch(() => ({ ok: false as const, error: 'failed' as const }));
     useSftpStore.setState((st) => { const { [opId]: _gone, ...rest } = st.opProgress; return { opProgress: rest }; });
     setRunning(null);
@@ -95,7 +107,7 @@ export function PermissionsDialog({ sessionId, entries, onClose }: { sessionId: 
         onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Escape') { e.preventDefault(); cancel(); } if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT' && (e.target as HTMLInputElement).type !== 'checkbox') { e.preventDefault(); void apply(); } }}>
         <div className="modal-head"><h3>{title}</h3><button type="button" className="btn ghost icon" aria-label={tr('Zamknij')} disabled={!!running} onClick={() => onClose(!!result)}><IX /></button></div>
         <div className="modal-body">
-          <div className={`sftp-perms-main${gridDisabled ? ' off' : ''}`}>
+          {!recursive && <div className={`sftp-perms-main${gridDisabled ? ' off' : ''}`}>
             <label className="sftp-perms-octal">
               <span>{tr('Wartość ósemkowa')}</span>
               <input className="input mono" data-field="octal" value={octal} maxLength={4} inputMode="numeric" spellCheck={false} disabled={gridDisabled} autoFocus
@@ -128,12 +140,13 @@ export function PermissionsDialog({ sessionId, entries, onClose }: { sessionId: 
                 </label>
               ))}
             </div>
-          </div>
+            {specialAsRoot && <div className="sftp-perms-warn" role="alert">{tr('Bity specjalne przez sudo: zmiana działa jako root.')}</div>}
+          </div>}
           {hasFolders && (
             <div className="sftp-perms-recursive">
               <label className="check"><input type="checkbox" data-field="recursive" checked={recursive} disabled={!!running || !!result} onChange={(e) => setRecursive(e.target.checked)} /> {tr('Zastosuj do zawartości')}</label>
               {recursive && <>
-                <p className="ssh-card-hint">{tr('Foldery i wszystko w nich: foldery dostaną pierwszą wartość, pliki drugą. Dowiązania są pomijane.')}</p>
+                <p className="ssh-card-hint">{tr('Foldery i wszystko w nich: foldery dostaną pierwszą wartość, pliki drugą. Dowiązania są pomijane.')} {tr('Zaznaczone foldery też dostaną wartość dla folderów, zaznaczone pliki wartość dla plików.')}</p>
                 <div className="sftp-perms-masks">
                   <label><span>{tr('Foldery')}</span><input className="input mono" data-field="dirMode" value={dirText} maxLength={4} disabled={!!running || !!result} onChange={(e) => setDirText(e.target.value)} />
                     <code>{dirMode === null ? '' : symbolicPreview(dirMode, PERM_MASK)}</code></label>
@@ -141,6 +154,10 @@ export function PermissionsDialog({ sessionId, entries, onClose }: { sessionId: 
                     <code>{fileMode === null ? '' : symbolicPreview(fileMode, PERM_MASK)}</code></label>
                 </div>
                 {(dirMode === null || fileMode === null) && <div className="ssh-error" role="alert">{tr('Wpisz 3 lub 4 cyfry od 0 do 7, np. 644 lub 0755')}</div>}
+                {lockOut && <div className="sftp-perms-warn" data-field="lockout">{tr('Wartość dla folderów odbiera właścicielowi odczyt lub wykonanie: najpierw zostanie zmieniona zawartość, a foldery na końcu.')}</div>}
+                {setidFiles && <div className="sftp-perms-warn" data-field="setid" role="alert">{tr('Wartość dla plików zawiera setuid lub setgid: każdy plik w tych folderach będzie uruchamiany z uprawnieniami właściciela lub grupy.')}</div>}
+                {specialAsRoot && <div className="sftp-perms-warn" role="alert">{tr('Bity specjalne przez sudo: zmiana działa jako root.')}</div>}
+                {unsafe && <div className="ssh-error" data-field="unsafe" role="alert">{errorText('unsafeChmod')}</div>}
                 <div className="sftp-perms-count" data-field="count" role="status">
                   {count === 'loading' ? tr('Liczenie…') : count === 'error' ? tr('Operacja nie powiodła się') : count ? <>
                     {tr('Zostanie zmienionych: folderów {dirs}, plików {files}', { dirs: count.dirs, files: count.files })}

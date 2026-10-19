@@ -86,7 +86,9 @@ export type SftpErrorCode =
   | 'invalid' | 'noSession' | 'notConnected' | 'changed' | 'cancelled' | 'connectionLost' | 'sftpHostCrashed'
   | 'unsupported' | 'tooMany' | 'invalidName' | 'linkOutside' | 'linkFolder' | 'failed'
   /** 0.9.9 moves: a folder into itself or its child; the server could not rename (another file system); a symlink left out. */
-  | 'intoItself' | 'crossDevice' | 'linkSkipped';
+  | 'intoItself' | 'crossDevice' | 'linkSkipped'
+  /** A recursive permission change as root on a server without lsetstat@openssh.com (not safe against swapped-in links). */
+  | 'unsafeChmod';
 
 export type SftpResult<T> = { ok: true; value: T } | { ok: false; error: SftpErrorCode };
 
@@ -112,7 +114,8 @@ export function sftpErrorText(code: SftpErrorCode): Localized {
     case 'linkFolder': return { key: 'Dowiązania do folderów nie są kopiowane' };
     case 'linkOutside': return { key: 'Dowiązanie wskazuje poza wybrany folder - pominięto' };
     case 'intoItself': return { key: 'Nie można przenieść folderu do niego samego' };
-    case 'crossDevice': return { key: 'Serwer nie może przenieść tego elementu (być może do innego systemu plików) - skopiuj go i usuń oryginał' };
+    case 'crossDevice': return { key: 'Serwer nie mógł przenieść tego elementu (na przykład do innego systemu plików) - skopiuj go i usuń oryginał' };
+    case 'unsafeChmod': return { key: 'Ten serwer nie obsługuje zmiany uprawnień bez podążania za dowiązaniami (lsetstat) - przez sudo zmiana rekurencyjna jest wyłączona' };
     case 'linkSkipped': return { key: 'Dowiązania są pomijane' };
     default: return { key: 'Operacja nie powiodła się' };
   }
@@ -415,8 +418,11 @@ export interface ChmodRequest {
   recursive: { dirMode: number; fileMode: number } | null;
   /** A uuid of the view: progress comes as 'opProgress' on the transfer port, cancelOp(opId) stops the walk. */
   opId?: string;
+  /** The count the dialog showed (files + folders): the progress total without walking the tree again. */
+  total?: number;
 }
-export interface ChmodCount { files: number; dirs: number; links: number }
+/** `noFollow`: the server offers lsetstat@openssh.com (changes never follow a symlink). */
+export interface ChmodCount { files: number; dirs: number; links: number; noFollow?: boolean }
 export interface ChmodResult { changed: number; errors: Array<{ path: string; error: SftpErrorCode }>; cancelled?: true }
 /** Errors listed after a permission change (the rest is counted only). */
 export const CHMOD_ERRORS_MAX = 200;

@@ -35,7 +35,21 @@ export interface TestServerOptions {
    * line; 3 wrong lines end it); `requiretty` / `denied`: sudo refuses; `serverPath`: where sftp-server is (another path is
    * "command not found"); default /usr/lib/openssh/sftp-server.
    */
-  sftpSudo?: { password?: string; requiretty?: boolean; denied?: boolean; serverPath?: string };
+  sftpSudo?: {
+    password?: string; requiretty?: boolean; denied?: boolean; serverPath?: string;
+    /** sudo's language when the client's LC_ALL=C is not taken ('pl': Polish messages, 'xx': messages nobody knows). */
+    locale?: 'pl' | 'xx';
+    /** The server ignores the client's environment requests (no AcceptEnv). */
+    ignoreEnv?: boolean;
+    /** `sudo -S` starts the server without asking (a cached credential): nothing may be written before the SFTP stream. */
+    noPromptForS?: boolean;
+    /** The -p prompt is printed this late (input that came before it is counted in stats.sudoEarlyInput). */
+    promptDelayMs?: number;
+    /** No sudo on this server at all ("sh: 1: sudo: not found"). */
+    missing?: boolean;
+  };
+  /** Advertises and serves lsetstat@openssh.com (a SETSTAT that never follows a symlink). */
+  sftpLsetstat?: boolean;
 }
 
 /** Test knobs and counters of the SFTP subsystem (mutable while the server runs). */
@@ -58,6 +72,10 @@ export interface SftpServerStats {
   modes: Map<string, number>;
   /** Exec commands received (sudo), in order. */
   execs: string[];
+  /** Environment requests of exec channels ("LC_ALL=C"). */
+  envs: string[];
+  /** Bytes a sudo -S run received before it printed its prompt (a password written too early). */
+  sudoEarlyInput: number;
 }
 
 export interface TestServer {
@@ -149,16 +167,13 @@ function remoteNormalize(path: string, home: string): string {
   return `/${parts.join('/')}`;
 }
 
-/** The VERSION packet with the posix-rename@openssh.com extension (ssh2's server sends a bare version 3). */
-function versionWithPosixRename(): Buffer {
-  const name = Buffer.from('posix-rename@openssh.com');
-  const data = Buffer.from('1');
-  const body = Buffer.alloc(1 + 4 + 4 + name.length + 4 + data.length);
-  let p = 0;
-  body[p++] = 2; // VERSION
-  body.writeUInt32BE(3, p); p += 4;
-  body.writeUInt32BE(name.length, p); p += 4; name.copy(body, p); p += name.length;
-  body.writeUInt32BE(data.length, p); p += 4; data.copy(body, p);
+/** The VERSION packet with extensions (ssh2's server sends a bare version 3). */
+function versionWith(names: string[]): Buffer {
+  const str = (s: string) => { const b = Buffer.from(s); const l = Buffer.alloc(4); l.writeUInt32BE(b.length, 0); return Buffer.concat([l, b]); };
+  const head = Buffer.alloc(5);
+  head[0] = 2; // VERSION
+  head.writeUInt32BE(3, 1);
+  const body = Buffer.concat([head, ...names.flatMap((n) => [str(n), str('1')])]);
   const len = Buffer.alloc(4);
   len.writeUInt32BE(body.length, 0);
   return Buffer.concat([len, body]);
@@ -167,13 +182,15 @@ const BARE_VERSION = Buffer.from([0, 0, 0, 5, 2, 0, 0, 0, 3]);
 
 type SftpHandle = { kind: 'file'; fd: number; write: boolean } | { kind: 'dir'; path: string; sent: boolean };
 
-function serveSftp(sftp: SFTPWrapper, root: string, home: string, stats: SftpServerStats, posixRename: boolean): void {
-  if (posixRename) {
-    // Swap the bare VERSION answer for one that names the extension (the only way to advertise it with ssh2's server).
+function serveSftp(sftp: SFTPWrapper, root: string, home: string, stats: SftpServerStats, ext: { posixRename: boolean; lsetstat: boolean }): void {
+  const posixRename = ext.posixRename;
+  const extensions = [...(ext.posixRename ? ['posix-rename@openssh.com'] : []), ...(ext.lsetstat ? ['lsetstat@openssh.com'] : [])];
+  if (extensions.length) {
+    // Swap the bare VERSION answer for one that names the extensions (the only way to advertise them with ssh2's server).
     const proto = (sftp as unknown as { _protocol: { channelData(id: number, data: Buffer): void } })._protocol;
     const channelId = (sftp as unknown as { outgoing: { id: number } }).outgoing.id;
     const original = proto.channelData.bind(proto);
-    proto.channelData = (id: number, data: Buffer) => original(id, id === channelId && Buffer.isBuffer(data) && data.equals(BARE_VERSION) ? versionWithPosixRename() : data);
+    proto.channelData = (id: number, data: Buffer) => original(id, id === channelId && Buffer.isBuffer(data) && data.equals(BARE_VERSION) ? versionWith(extensions) : data);
   }
   const handles = new Map<number, SftpHandle>();
   let nextHandle = 1;
@@ -261,6 +278,27 @@ function serveSftp(sftp: SFTPWrapper, root: string, home: string, stats: SftpSer
     sftp.status(reqId, SFTP_STATUS.OK);
   }));
   sftp.on('EXTENDED', (reqId: number, name: string, data: Buffer | undefined) => run(reqId, 'EXTENDED', () => {
+    if (ext.lsetstat && name === 'lsetstat@openssh.com' && data) {
+      // string path, then ATTRS: flags, [size u64], [uid gid], [permissions] ...
+      const n = data.readUInt32BE(0);
+      const path = data.subarray(4, 4 + n).toString('utf8');
+      let p = 4 + n;
+      const flags = data.readUInt32BE(p); p += 4;
+      if (flags & 1) p += 8;
+      if (flags & 2) p += 8;
+      stats.ops.push('LSETSTAT');
+      const local = real(path);
+      lstatSync(local);
+      if (flags & 4) {
+        const mode = data.readUInt32BE(p) & 0o7777;
+        // Never follows: a link keeps its target's bits untouched.
+        stats.modes.set(local, mode);
+        stats.chmods.push({ path: remoteNormalize(path, home), mode });
+        if (process.platform !== 'win32' && !lstatSync(local).isSymbolicLink()) chmodSync(local, mode);
+      }
+      sftp.status(reqId, SFTP_STATUS.OK);
+      return;
+    }
     if (!posixRename || name !== 'posix-rename@openssh.com' || !data) { sftp.status(reqId, SFTP_STATUS.OP_UNSUPPORTED); return; }
     const a = data.readUInt32BE(0);
     const oldPath = data.subarray(4, 4 + a).toString('utf8');
@@ -283,7 +321,8 @@ function serveSftp(sftp: SFTPWrapper, root: string, home: string, stats: SftpSer
   }));
   const setstat = (reqId: number, path: string, attrs: Attributes, remote: string) => {
     if (typeof attrs.mode === 'number') {
-      lstatSync(path);
+      // SETSTAT follows a symlink (like OpenSSH): the bits land on the target.
+      if (lstatSync(path).isSymbolicLink()) path = realpathSync(path);
       stats.modes.set(path, attrs.mode & 0o7777);
       stats.chmods.push({ path: remote, mode: attrs.mode & 0o7777 });
       // Windows keeps only a read-only flag (a read-only file could not be cleaned up by the tests): the overlay answers there.
@@ -316,7 +355,8 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
   const input: string[] = [];
   const shells: ServerChannel[] = [];
   const conns = new Set<Connection>();
-  const sftpStats: SftpServerStats = { delayMs: 0, openWrites: 0, maxOpenWrites: 0, ops: [], failWritesAfter: null, written: 0, renameFail: null, chmods: [], modes: new Map(), execs: [] };
+  const sftpStats: SftpServerStats = { delayMs: 0, openWrites: 0, maxOpenWrites: 0, ops: [], failWritesAfter: null, written: 0, renameFail: null, chmods: [], modes: new Map(), execs: [], envs: [], sudoEarlyInput: 0 };
+  const sftpExt = { posixRename: opts.sftpPosixRename === true, lsetstat: opts.sftpLsetstat === true };
 
   const server = new Server({ hostKeys: [host.private], ...(opts.banner ? { banner: opts.banner } : {}) }, (conn) => {
     conns.add(conn);
@@ -339,41 +379,59 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
       const session = accept();
       session.on('sftp', (acceptSftp, reject) => {
         if (!opts.sftpRoot) { reject(); return; }
-        serveSftp(acceptSftp(), opts.sftpRoot, remoteNormalize(opts.sftpHome ?? '/', '/'), sftpStats, opts.sftpPosixRename === true);
+        serveSftp(acceptSftp(), opts.sftpRoot, remoteNormalize(opts.sftpHome ?? '/', '/'), sftpStats, sftpExt);
+      });
+      const env: Record<string, string> = {};
+      session.on('env', (acceptEnv, rejectEnv, info) => {
+        if (opts.sftpSudo?.ignoreEnv) { rejectEnv?.(); return; }
+        env[info.key] = info.val;
+        sftpStats.envs.push(`${info.key}=${info.val}`);
+        acceptEnv?.();
       });
       session.on('exec', (acceptExec, rejectExec, info) => {
         const sudo = opts.sftpSudo;
         if (!opts.sftpRoot || !sudo) { rejectExec?.(); return; }
         const stream = acceptExec();
         sftpStats.execs.push(info.command);
+        // sudo speaks English with LC_ALL=C, else the server's language.
+        const lang = env.LC_ALL === 'C' ? 'en' : sudo.locale ?? 'en';
+        const say = (en: string, pl: string) => (lang === 'en' ? en : lang === 'pl' ? pl : 'sudo: ффф фф\n');
         const fail = (message: string, code = 1) => { stream.stderr.write(message); stream.exit(code); stream.end(); };
-        const m = /^sudo (-n|-S -p '') (\S+)$/.exec(info.command);
+        if (sudo.missing && info.command.startsWith('sudo ')) { fail('sh: 1: sudo: not found\n', 127); return; }
+        const m = /^sudo (-n|-S -p '([^']*)') (\S+)$/.exec(info.command);
         if (!m) { fail(`sh: 1: ${info.command.split(' ')[0]}: not found\n`, 127); return; }
-        const [, mode, path] = m;
-        if (path !== (sudo.serverPath ?? '/usr/lib/openssh/sftp-server')) { fail(`sudo: ${path}: command not found\n`); return; }
-        if (sudo.denied) { fail(`Sorry, user alice is not allowed to execute '${path}' as root on test-server.\n`); return; }
-        if (sudo.requiretty) { fail('sudo: sorry, you must have a tty to run sudo\n'); return; }
+        const [, mode, prompt, path] = m;
+        if (path !== (sudo.serverPath ?? '/usr/lib/openssh/sftp-server')) { fail(say(`sudo: ${path}: command not found\n`, `sudo: ${path}: nie znaleziono polecenia\n`)); return; }
+        if (sudo.denied) { fail(say(`Sorry, user alice is not allowed to execute '${path}' as root on test-server.\n`, `Niestety, użytkownik alice nie ma uprawnień do uruchamiania '${path}' jako root na test-server.\n`)); return; }
+        if (sudo.requiretty) { fail(say('sudo: sorry, you must have a tty to run sudo\n', 'sudo: niestety, aby uruchomić sudo, musisz mieć terminal\n')); return; }
         const serve = (rest: Buffer) => {
           const sftp = sftpOnExec(stream);
-          serveSftp(sftp, opts.sftpRoot!, remoteNormalize(opts.sftpHome ?? '/', '/'), sftpStats, opts.sftpPosixRename === true);
+          serveSftp(sftp, opts.sftpRoot!, remoteNormalize(opts.sftpHome ?? '/', '/'), sftpStats, sftpExt);
           if (rest.length) sftp.push(rest);
         };
         if (sudo.password === undefined) { serve(Buffer.alloc(0)); return; }
-        if (mode === '-n') { fail('sudo: a password is required\n'); return; }
-        // sudo -S reads the password line by line from stdin; the SFTP stream follows the right one.
+        if (mode === '-n') { fail(say('sudo: a password is required\n', 'sudo: wymagane jest hasło\n')); return; }
+        if (sudo.noPromptForS) { serve(Buffer.alloc(0)); return; }
+        // sudo -S prints its prompt (-p) and reads the password line by line from stdin; the SFTP stream follows the right one.
         let buf = Buffer.alloc(0);
         let tries = 0;
+        let asked = false;
+        const ask = () => { asked = true; if (prompt) stream.stderr.write(prompt); };
         const onData = (chunk: Buffer) => {
+          if (!asked) { sftpStats.sudoEarlyInput += chunk.length; }
           buf = Buffer.concat([buf, chunk]);
+          if (!asked) return;
           for (let nl = buf.indexOf(10); nl >= 0; nl = buf.indexOf(10)) {
             const line = buf.subarray(0, nl).toString('utf8');
             buf = buf.subarray(nl + 1);
             if (line === sudo.password) { stream.off('data', onData); serve(buf); return; }
-            if (++tries >= 3) { stream.off('data', onData); fail('sudo: 3 incorrect password attempts\n'); return; }
-            stream.stderr.write('Sorry, try again.\n');
+            if (++tries >= 3) { stream.off('data', onData); fail(say('sudo: 3 incorrect password attempts\n', 'sudo: 3 nieprawidłowe próby wprowadzenia hasła\n')); return; }
+            stream.stderr.write(say('Sorry, try again.\n', 'Niestety, spróbuj ponownie.\n'));
+            if (prompt) stream.stderr.write(prompt);
           }
         };
         stream.on('data', onData);
+        if (sudo.promptDelayMs) setTimeout(() => { ask(); onData(Buffer.alloc(0)); }, sudo.promptDelayMs); else ask();
       });
       session.on('pty', (ok, _no, info) => { ptys.push({ term: info.term, cols: info.cols, rows: info.rows }); ok?.(); });
       session.on('window-change', (ok, _no, info) => { windowChanges.push({ cols: info.cols, rows: info.rows }); ok?.(); });

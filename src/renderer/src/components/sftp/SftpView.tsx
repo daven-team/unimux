@@ -286,7 +286,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
           <span className={`sftp-dot ${session?.state ?? 'closed'}`} aria-label={status || undefined} />
           <strong>{host.label}</strong>
           <span className="muted sftp-host-address">{userAtEndpoint(host)}</span>
-          {connected && session?.sudo && <span className="sftp-sudo-badge" title={tr('SFTP działa jako root (sudo)')}>sudo</span>}
+          {connected && session?.sudo && <span className="sftp-sudo-badge" title={tr('SFTP działa przez sudo')}>sudo</span>}
         </button>
       ) : <strong>{tr('Serwer')}</strong>}
     </div>
@@ -372,7 +372,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
       </div>
       <TransferPanel />
       {perms && sessionId && connected && (
-        <PermissionsDialog sessionId={sessionId} entries={perms} onClose={(changed) => { setPerms(null); if (changed) void remote.refresh(); }} />
+        <PermissionsDialog sessionId={sessionId} entries={perms} sudo={session?.sudo === true} onClose={(changed) => { setPerms(null); if (changed) void remote.refresh(); }} />
       )}
     </div>
   );

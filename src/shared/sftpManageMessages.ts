@@ -3,13 +3,44 @@
 export const sftpManageMessages = {
   // moving
   'Nie można przenieść folderu do niego samego': ['A folder cannot be moved into itself', 'Ein Ordner kann nicht in sich selbst verschoben werden', 'No se puede mover una carpeta dentro de sí misma', 'Impossible de déplacer un dossier dans lui-même', 'Não é possível mover uma pasta para dentro de si própria'],
-  'Serwer nie może przenieść tego elementu (być może do innego systemu plików) - skopiuj go i usuń oryginał': [
-    'The server cannot move this item (perhaps to another file system) - copy it and delete the original',
-    'Der Server kann dieses Element nicht verschieben (vielleicht in ein anderes Dateisystem) - kopiere es und lösche das Original',
-    'El servidor no puede mover este elemento (quizá a otro sistema de archivos): cópialo y elimina el original',
-    'Le serveur ne peut pas déplacer cet élément (peut-être vers un autre système de fichiers) - copiez-le puis supprimez l\'original',
-    'O servidor não consegue mover este item (talvez para outro sistema de ficheiros) - copie-o e elimine o original',
+  'Serwer nie mógł przenieść tego elementu (na przykład do innego systemu plików) - skopiuj go i usuń oryginał': [
+    'The server could not move this item (for example to another file system) - copy it and delete the original',
+    'Der Server konnte dieses Element nicht verschieben (zum Beispiel in ein anderes Dateisystem) - kopiere es und lösche das Original',
+    'El servidor no pudo mover este elemento (por ejemplo, a otro sistema de archivos): cópialo y elimina el original',
+    'Le serveur n\'a pas pu déplacer cet élément (par exemple vers un autre système de fichiers) - copiez-le puis supprimez l\'original',
+    'O servidor não conseguiu mover este item (por exemplo, para outro sistema de ficheiros) - copie-o e elimine o original',
   ],
+  'Ten serwer nie obsługuje zmiany uprawnień bez podążania za dowiązaniami (lsetstat) - przez sudo zmiana rekurencyjna jest wyłączona': [
+    'This server cannot change permissions without following symbolic links (lsetstat) - a recursive change through sudo is turned off',
+    'Dieser Server kann Berechtigungen nicht ändern, ohne symbolischen Links zu folgen (lsetstat) - eine rekursive Änderung über sudo ist deaktiviert',
+    'Este servidor no puede cambiar permisos sin seguir enlaces simbólicos (lsetstat): el cambio recursivo con sudo está desactivado',
+    'Ce serveur ne peut pas modifier les permissions sans suivre les liens symboliques (lsetstat) - la modification récursive via sudo est désactivée',
+    'Este servidor não consegue alterar permissões sem seguir ligações simbólicas (lsetstat) - a alteração recursiva através do sudo está desativada',
+  ],
+  'Wartość dla folderów odbiera właścicielowi odczyt lub wykonanie: najpierw zostanie zmieniona zawartość, a foldery na końcu.': [
+    'The folder value takes read or execute away from the owner: the contents are changed first and the folders last.',
+    'Der Ordnerwert nimmt dem Besitzer Lesen oder Ausführen weg: zuerst wird der Inhalt geändert, die Ordner zuletzt.',
+    'El valor de carpetas quita al propietario la lectura o la ejecución: primero se cambia el contenido y las carpetas al final.',
+    'La valeur des dossiers retire au propriétaire la lecture ou l\'exécution : le contenu est modifié d\'abord, les dossiers en dernier.',
+    'O valor das pastas retira ao proprietário a leitura ou a execução: primeiro é alterado o conteúdo e as pastas no fim.',
+  ],
+  'Wartość dla plików zawiera setuid lub setgid: każdy plik w tych folderach będzie uruchamiany z uprawnieniami właściciela lub grupy.': [
+    'The file value has setuid or setgid: every file in these folders will run with the rights of its owner or group.',
+    'Der Dateiwert enthält setuid oder setgid: jede Datei in diesen Ordnern läuft mit den Rechten ihres Besitzers oder ihrer Gruppe.',
+    'El valor de archivos contiene setuid o setgid: cada archivo de estas carpetas se ejecutará con los permisos de su propietario o grupo.',
+    'La valeur des fichiers contient setuid ou setgid : chaque fichier de ces dossiers s\'exécutera avec les droits de son propriétaire ou de son groupe.',
+    'O valor dos ficheiros contém setuid ou setgid: cada ficheiro nestas pastas será executado com os direitos do seu proprietário ou grupo.',
+  ],
+  'Bity specjalne przez sudo: zmiana działa jako root.': ['Special bits through sudo: the change runs as root.', 'Spezielle Bits über sudo: die Änderung läuft als root.', 'Bits especiales con sudo: el cambio se ejecuta como root.', 'Bits spéciaux via sudo : la modification s\'exécute en tant que root.', 'Bits especiais através do sudo: a alteração é executada como root.'],
+  'Ustawić bity specjalne?': ['Set special bits?', 'Spezielle Bits setzen?', '¿Establecer bits especiales?', 'Définir des bits spéciaux ?', 'Definir bits especiais?'],
+  'Zaznaczone foldery też dostaną wartość dla folderów, zaznaczone pliki wartość dla plików.': [
+    'The selected folders get the folder value too, the selected files the file value.',
+    'Die ausgewählten Ordner erhalten ebenfalls den Ordnerwert, die ausgewählten Dateien den Dateiwert.',
+    'Las carpetas seleccionadas también reciben el valor de carpetas y los archivos seleccionados el de archivos.',
+    'Les dossiers sélectionnés reçoivent aussi la valeur des dossiers, les fichiers sélectionnés celle des fichiers.',
+    'As pastas selecionadas também recebem o valor das pastas e os ficheiros selecionados o dos ficheiros.',
+  ],
+  'Na serwerze nie ma polecenia sudo': ['The server has no sudo command', 'Auf dem Server gibt es keinen sudo-Befehl', 'El servidor no tiene el comando sudo', 'Le serveur n\'a pas de commande sudo', 'O servidor não tem o comando sudo'],
   'Dowiązania są pomijane': ['Symbolic links are skipped', 'Symbolische Links werden übersprungen', 'Los enlaces simbólicos se omiten', 'Les liens symboliques sont ignorés', 'As ligações simbólicas são ignoradas'],
   'Te elementy już są w tym folderze': ['These items are already in this folder', 'Diese Elemente sind schon in diesem Ordner', 'Estos elementos ya están en esta carpeta', 'Ces éléments sont déjà dans ce dossier', 'Estes itens já estão nesta pasta'],
   'Przenoszenie': ['Moving', 'Verschieben', 'Moviendo', 'Déplacement', 'A mover'],
@@ -79,5 +110,5 @@ export const sftpManageMessages = {
   'Hasło sudo dla {user}@{endpoint}': ['sudo password for {user}@{endpoint}', 'sudo-Passwort für {user}@{endpoint}', 'Contraseña de sudo para {user}@{endpoint}', 'Mot de passe sudo pour {user}@{endpoint}', 'Palavra-passe do sudo para {user}@{endpoint}'],
   'Hasło sudo nie jest zapisywane.': ['The sudo password is never saved.', 'Das sudo-Passwort wird nie gespeichert.', 'La contraseña de sudo nunca se guarda.', 'Le mot de passe sudo n\'est jamais enregistré.', 'A palavra-passe do sudo nunca é guardada.'],
   'Użyj zapisanego hasła logowania': ['Use the saved login password', 'Gespeichertes Anmeldepasswort verwenden', 'Usar la contraseña de inicio de sesión guardada', 'Utiliser le mot de passe de connexion enregistré', 'Usar a palavra-passe de início de sessão guardada'],
-  'SFTP działa jako root (sudo)': ['SFTP runs as root (sudo)', 'SFTP läuft als root (sudo)', 'SFTP se ejecuta como root (sudo)', 'SFTP s\'exécute en tant que root (sudo)', 'O SFTP é executado como root (sudo)'],
+  'SFTP działa przez sudo': ['SFTP runs through sudo', 'SFTP läuft über sudo', 'SFTP se ejecuta con sudo', 'SFTP s\'exécute via sudo', 'O SFTP é executado através do sudo'],
 } as const;

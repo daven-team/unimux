@@ -44,7 +44,8 @@ const server = await startTestServer(['--sftp-root', remoteRoot, '--sftp-home', 
 // SFTP through sudo (0.9.9): one server without a sudo password, one that wants "root-secret"; both serve the same folder.
 const SUDO_PASSWORD = 'root-secret';
 const sudoServer = await startTestServer(['--sftp-root', remoteRoot, '--sftp-home', '/home/alice', '--sftp-sudo']);
-const sudoPwServer = await startTestServer(['--sftp-root', remoteRoot, '--sftp-home', '/home/alice', '--sftp-sudo-password', SUDO_PASSWORD]);
+// The password server speaks Polish and ignores LC_ALL=C (a VPS with a Polish locale) and offers lsetstat@openssh.com.
+const sudoPwServer = await startTestServer(['--sftp-root', remoteRoot, '--sftp-home', '/home/alice', '--sftp-sudo-password', SUDO_PASSWORD, '--sftp-sudo-locale', 'pl', '--sftp-sudo-ignore-env', '--sftp-lsetstat']);
 const keyHost = testHost(server.port, { label: 'vps-key', group: 'lab' });
 const pwHost = testHost(server.port, { label: 'vps-password', group: 'lab' });
 const projectId = '7a3a5d30-2f45-4d61-9d6b-1b0f6a3c1a01';
@@ -391,7 +392,13 @@ try {
   await menu('remote', 'Uprawnienia…');
   await app.until(`!!document.querySelector('.sftp-perms [data-field=recursive]')`, 'recursive option for a folder');
   await app.click('.sftp-perms [data-field=recursive]');
+  if (await ev(`!!document.querySelector('.sftp-perms .sftp-perms-main')`)) throw new Error('the main grid is shown in recursive mode');
+  // A folder value without the owner's r+x: the contents go first (warned).
+  await app.setValue('.sftp-perms input[data-field=dirMode]', '600');
+  await app.until(`!!document.querySelector('.sftp-perms [data-field=lockout]')`, 'lock-out warning');
+  await shot99('perms-lockout');
   await app.setValue('.sftp-perms input[data-field=dirMode]', '750');
+  if (await ev(`!!document.querySelector('.sftp-perms [data-field=lockout]')`)) throw new Error('lock-out warning for 750');
   await app.setValue('.sftp-perms input[data-field=fileMode]', '640');
   await app.until(`(document.querySelector('.sftp-perms [data-field=count]')?.textContent ?? '').includes('folderów 2, plików 2')`, 'recursive count');
   await shot99('perms-recursive');
@@ -479,7 +486,15 @@ try {
   await loginTo('vps-sudo', sudoServer);
   await app.until(`${sftp}.session?.state === 'connected' && !!document.querySelector('.sftp-pane-remote .sftp-sudo-badge') && ${hasRow('remote', 'readme.txt')}`, 'sudo without a password, badge');
   await shot99('sudo-badge');
-  log('SFTP through sudo (NOPASSWD) with the sudo badge OK');
+  // This server has no lsetstat: a recursive change as root is refused in the dialog.
+  await clickRow('remote', 'box');
+  await menu('remote', 'Uprawnienia…');
+  await app.click('.sftp-perms [data-field=recursive]');
+  await app.until(`!!document.querySelector('.sftp-perms [data-field=unsafe]') && document.querySelector('.sftp-perms .modal-foot .btn.primary').disabled`, 'recursive chmod as root without lsetstat refused');
+  await shot99('perms-sudo-unsafe');
+  await app.click('.sftp-perms .modal-foot .btn', 'Anuluj');
+  await app.until(`!document.querySelector('.sftp-perms')`, 'dialog closed');
+  log('SFTP through sudo (NOPASSWD) with the sudo badge, recursive chmod without lsetstat refused OK');
   await loginTo('vps-sudo-pw', sudoPwServer);
   await app.until(sudoPrompt, 'sudo password prompt');
   await shot99('sudo-prompt');
@@ -488,7 +503,23 @@ try {
   await shot99('sudo-retry');
   await answerSudo(SUDO_PASSWORD);
   await app.until(`${sftp}.session?.state === 'connected' && !!document.querySelector('.sftp-pane-remote .sftp-sudo-badge') && ${hasRow('remote', 'readme.txt')}`, 'sudo with a password');
-  log('SFTP through sudo with a password (wrong, then right) OK');
+  log('SFTP through sudo with a password, Polish sudo without LC_ALL=C (wrong, then right) OK');
+  // With lsetstat a recursive change as root works; setuid in the file value asks first.
+  await clickRow('remote', 'box');
+  await menu('remote', 'Uprawnienia…');
+  await app.click('.sftp-perms [data-field=recursive]');
+  await app.setValue('.sftp-perms input[data-field=dirMode]', '755');
+  await app.setValue('.sftp-perms input[data-field=fileMode]', '4755');
+  await app.until(`!!document.querySelector('.sftp-perms [data-field=setid]') && (document.querySelector('.sftp-perms [data-field=count]')?.textContent ?? '').includes('folderów') && !document.querySelector('.sftp-perms [data-field=unsafe]')`, 'setid warning, counted, lsetstat');
+  await app.click('.sftp-perms .modal-foot .btn.primary');
+  await app.until(`[...document.querySelectorAll('.modal h3')].some((h) => h.textContent === 'Ustawić bity specjalne?')`, 'setid confirmation');
+  await shot99('perms-setid-confirm');
+  await ev(`(() => { const m = [...document.querySelectorAll('.modal')].find((x) => x.querySelector('h3')?.textContent === 'Ustawić bity specjalne?'); [...m.querySelectorAll('.modal-foot .btn')].find((b) => b.textContent === 'Anuluj').click(); return true; })()`);
+  await app.until(`!!document.querySelector('.sftp-perms') && !document.querySelector('.sftp-perms .sftp-perms-progress')`, 'dialog still open after Anuluj');
+  await app.setValue('.sftp-perms input[data-field=fileMode]', '644');
+  await app.click('.sftp-perms .modal-foot .btn.primary');
+  await app.until(`!document.querySelector('.sftp-perms') && ${permOf('remote', 'box')} === 'drwxr-xr-x'`, 'recursive chmod as root through lsetstat');
+  log('recursive chmod through sudo with lsetstat, setuid confirmation OK');
   // Disconnect and connect again for the three wrong passwords.
   await menu('remote', 'Rozłącz');
   await app.until(`!${sftp}.sessionId`, 'disconnected');

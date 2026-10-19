@@ -11,7 +11,7 @@ import { SshVault } from '../src/main/ssh/vault';
 import { createSftpHandlers } from '../src/main/sftp/ipc';
 import type { SftpService } from '../src/main/sftp/service';
 import { SSH2_SFTP_ADAPTER_VERSION, sftpClass, sftpOverStream } from '../src/sftphost/execSftp';
-import { classifySudo, passwordCommand, sudoCommands, sudoError, validSudoPassword } from '../src/sftphost/sudo';
+import { classifySudo, markerCount, passwordCommand, SUDO_MARKER, sudoCommands, sudoError, validSudoPassword } from '../src/sftphost/sudo';
 import {
   applyMode, commonMode, modeFromPermissions, octalMode, parseOctalMode, permissionString, planRemoteMove, PERM_MASK, sftpSessionId, symbolicMode,
 } from '../src/shared/sftp';
@@ -135,8 +135,9 @@ describe('SFTP through sudo: rules', () => {
   it('tries the usual sftp-server places, or only the own command; a password turns -n into -S', () => {
     expect(sudoCommands()).toEqual(['sudo -n /usr/lib/openssh/sftp-server', 'sudo -n /usr/libexec/openssh/sftp-server', 'sudo -n /usr/lib/ssh/sftp-server']);
     expect(sudoCommands('  doas /usr/lib/sftp-server ')).toEqual(['doas /usr/lib/sftp-server']);
-    expect(passwordCommand('sudo -n /usr/lib/openssh/sftp-server')).toBe("sudo -S -p '' /usr/lib/openssh/sftp-server");
-    expect(passwordCommand('sudo -n -u www /usr/lib/sftp-server -l INFO')).toBe("sudo -S -p '' -u www /usr/lib/sftp-server -l INFO");
+    expect(passwordCommand('sudo -n /usr/lib/openssh/sftp-server')).toBe(`sudo -S -p '${SUDO_MARKER}' /usr/lib/openssh/sftp-server`);
+    expect(passwordCommand('sudo -n -u www /usr/lib/sftp-server -l INFO')).toBe(`sudo -S -p '${SUDO_MARKER}' -u www /usr/lib/sftp-server -l INFO`);
+    expect(markerCount(`${SUDO_MARKER}Sorry, try again.\n${SUDO_MARKER}`)).toBe(2);
     expect(passwordCommand('doas /usr/lib/sftp-server')).toBeNull();
     expect(validSudoPassword('pw')).toBe(true);
     expect(validSudoPassword('a\nb')).toBe(false);
@@ -159,6 +160,21 @@ describe('SFTP through sudo: rules', () => {
     expect(sudoError('denied')).toBe('sudoDenied');
     expect(sudoError('notFound')).toBe('sudoNoServer');
     expect(sudoError('timeout')).toBe('sudoFailed');
+    expect(sudoError('noSudo')).toBe('sudoMissing');
+  });
+
+  it('reads Polish sudo, a missing sudo, and an unknown language by the exit status of sudo -n', () => {
+    expect(classifySudo('sudo: wymagane jest hasło\n', 1)).toBe('password');
+    expect(classifySudo('Niestety, spróbuj ponownie.\n')).toBe('wrongPassword');
+    expect(classifySudo('sudo: /usr/lib/openssh/sftp-server: nie znaleziono polecenia\n', 1)).toBe('notFound');
+    expect(classifySudo("Niestety, użytkownik alice nie ma uprawnień do uruchamiania '/x' jako root na h.\n", 1)).toBe('denied');
+    expect(classifySudo('sudo: niestety, aby uruchomić sudo, musisz mieć terminal\n', 1)).toBe('tty');
+    expect(classifySudo('sh: 1: sudo: not found\n', 127)).toBe('noSudo');
+    expect(classifySudo('bash: sudo: command not found\n', 127)).toBe('noSudo');
+    expect(classifySudo('sudo: /x: command not found\n', 1)).toBe('notFound');
+    expect(classifySudo('sudo: ффф\n', 1, true)).toBe('password');
+    expect(classifySudo('sudo: ффф\n', 1)).toBe('other');
+    expect(classifySudo(`${SUDO_MARKER}`)).toBeNull();
   });
 
   it('the host keeps the sudo option and a one-line command; the editor validates it', () => {

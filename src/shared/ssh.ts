@@ -76,7 +76,7 @@ export type SshErrorCode = 'dns' | 'refused' | 'timeout' | 'unreachable' | 'rese
   /** SFTP sessions (0.9.8): the server refused the sftp subsystem; the SFTP host process restarted. */
   | 'sftpDenied' | 'sftpHostCrashed'
   /** SFTP through sudo (0.9.9): wrong password, requiretty, not allowed, no sftp-server found, anything else. */
-  | 'sudoPassword' | 'sudoTty' | 'sudoDenied' | 'sudoNoServer' | 'sudoFailed';
+  | 'sudoPassword' | 'sudoTty' | 'sudoDenied' | 'sudoNoServer' | 'sudoFailed' | 'sudoMissing';
 
 export interface SshSessionState {
   cellId: string;
@@ -407,6 +407,7 @@ export function sshErrorText(code: SshErrorCode, ctx: { host: string; endpoint: 
     case 'sudoDenied': return { key: 'To konto nie może uruchomić serwera SFTP przez sudo' };
     case 'sudoNoServer': return { key: 'Nie znaleziono serwera SFTP (sftp-server) - podaj polecenie w ustawieniach hosta' };
     case 'sudoFailed': return { key: 'Nie udało się uruchomić SFTP przez sudo' };
+    case 'sudoMissing': return { key: 'Na serwerze nie ma polecenia sudo' };
     case 'cancelled': return { key: 'Anulowano' };
     default: return { key: 'Nieznany błąd SSH' };
   }
