@@ -16,8 +16,11 @@ export interface FakePgOptions {
   requireTls?: boolean;
   /** Answer a Close that no Sync follows with a ReadyForQuery as well (what PGlite's socket server does). */
   readyAfterLoneClose?: boolean;
-  /** Send a ReadyForQuery right with an error of an extended-protocol batch that no Sync ended yet (PGlite does). */
-  readyWithError?: boolean;
+  /**
+   * Send a ReadyForQuery right with an error of an extended-protocol batch that no Sync ended yet (PGlite does). 'separate':
+   * in a write of its own a little later, so it reaches the client in another read (PGlite's socket server in another process).
+   */
+  readyWithError?: boolean | 'separate';
 }
 
 export interface FakePg {
@@ -114,7 +117,15 @@ export async function startFakePg(opts: FakePgOptions = {}): Promise<FakePg> {
     let skipToSync = false;
     const write = (b: Buffer) => { try { stream.write(b); } catch { /* gone */ } };
     // PGlite's socket server answers an error of a batch without Sync with a ReadyForQuery of its own, in the same write.
-    const writeError = (b: Backend, e: SqlError, syncFollows: boolean) => write(opts.readyWithError && !syncFollows ? Buffer.concat([errorResponse(e.code, e.message), msg('Z', Buffer.from(b.tx))]) : errorResponse(e.code, e.message));
+    const writeError = async (b: Backend, e: SqlError, syncFollows: boolean) => {
+      if (!opts.readyWithError || syncFollows) { write(errorResponse(e.code, e.message)); return; }
+      if (opts.readyWithError !== 'separate') { write(Buffer.concat([errorResponse(e.code, e.message), msg('Z', Buffer.from(b.tx))])); return; }
+      write(errorResponse(e.code, e.message));
+      await new Promise((r) => setTimeout(r, 30));
+      write(msg('Z', Buffer.from(b.tx)));
+      // The ReadyForQuery of the Sync that follows goes in a later read too.
+      await new Promise((r) => setTimeout(r, 30));
+    };
 
     const finishLogin = (user: string, database: string) => {
       if (database === 'missing') { write(errorResponse('3D000', `database "${database}" does not exist`)); stream.end(); return; }
@@ -208,13 +219,13 @@ export async function startFakePg(opts: FakePgOptions = {}): Promise<FakePg> {
           return;
         }
         if (type === 'D') {
-          if (portal?.error) { if (b.tx === 'T') b.tx = 'E'; writeError(b, portal.error, syncFollows); skipToSync = true; return; }
+          if (portal?.error) { if (b.tx === 'T') b.tx = 'E'; await writeError(b, portal.error, syncFollows); skipToSync = true; return; }
           write(portal && portal.fields.length ? rowDescription(portal.fields) : msg('n'));
           return;
         }
         if (type === 'E') {
           if (!portal) return;
-          if (portal.error) { if (b.tx === 'T') b.tx = 'E'; writeError(b, portal.error, syncFollows); skipToSync = true; return; }
+          if (portal.error) { if (b.tx === 'T') b.tx = 'E'; await writeError(b, portal.error, syncFollows); skipToSync = true; return; }
           const max = body.readInt32BE(body.indexOf(0) + 1);
           const end = max > 0 ? Math.min(portal.rows.length, portal.at + max) : portal.rows.length;
           for (; portal.at < end; portal.at++) write(dataRow(portal.rows[portal.at]));

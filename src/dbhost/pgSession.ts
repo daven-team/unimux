@@ -90,31 +90,21 @@ export class PgSession {
   private overrideActive = false;
   private noticeTarget: string | null = null;
   /**
-   * ReadyForQuery messages that came in a later read than the last error message, and their count when that error came.
-   * A cursor the server refuses sends its Sync only once the error is in, so the ReadyForQuery answering that Sync always
-   * comes later. PGlite's socket server also sends one of its own right with the error; that one is not counted.
+   * An error came from the server since the last drain: the ReadyForQuery messages that end its exchange may still be on the way
+   * (PGlite sends one more than Postgres), so the next statement waits for drain() first.
    */
-  private readySeq = 0;
-  private errorSeq = -1;
-  private errorChunk = false;
-  private readyWaiters: Array<() => void> = [];
+  private dirty = false;
   private gone = false;
 
   constructor(readonly client: Client, private readonly opts: PgSessionOptions, private readonly out: PgSessionOut) {
     const con = (client as unknown as { connection: { on(e: string, f: (m: { status?: string }) => void): void } }).connection;
-    con.on('errorMessage', () => {
-      this.errorSeq = this.readySeq;
-      this.errorChunk = true;
-      // Messages of one read are handled synchronously: the flag holds for the rest of the read the error came in.
-      queueMicrotask(() => { this.errorChunk = false; });
-    });
+    con.on('errorMessage', () => { this.dirty = true; });
     con.on('readyForQuery', (m) => {
       const tx: DbTxStatus = m.status === 'T' ? 'transaction' : m.status === 'E' ? 'failed' : 'idle';
       if (tx !== this.tx) { this.tx = tx; this.out.tx(tx); }
-      if (!this.errorChunk) { this.readySeq++; this.wakeReady(); }
     });
-    client.on('end', () => { this.gone = true; this.wakeReady(); });
-    client.on('error', () => { this.gone = true; this.wakeReady(); });
+    client.on('end', () => { this.gone = true; });
+    client.on('error', () => { this.gone = true; });
     client.on('notice', (n: { message?: string; severity?: string }) => {
       if (this.noticeTarget && typeof n.message === 'string') this.out.port({ t: 'notice', queryId: this.noticeTarget, message: n.message.slice(0, DB_LIMITS.serverText), ...(n.severity ? { severity: n.severity } : {}) });
     });
@@ -122,31 +112,60 @@ export class PgSession {
 
   private now(): number { return this.opts.now?.() ?? Date.now(); }
 
-  private wakeReady(): void {
-    const waiters = this.readyWaiters;
-    this.readyWaiters = [];
-    for (const w of waiters) w();
+  /**
+   * Waits until the exchange of the last server error is over before anything else goes to the server. Postgres ends an
+   * error with one ReadyForQuery (for the Sync); PGlite's socket server sends one more right after the error, and from a server
+   * in another process it can come in a read of its own. Taken as the end of the next statement, it ended that statement
+   * early and the statement's real answer then broke the connection (or went to the statement after it). So an empty query
+   * goes out as a marker and every message up to its answer is kept from the client: the ReadyForQuery after the marker's
+   * EmptyQueryResponse (or error) is the only one the client sees, whatever the server sent before it.
+   */
+  private async drain(): Promise<void> {
+    if (!this.dirty || this.gone || this.ended) return;
+    this.dirty = false;
+    const con = (this.client as unknown as { connection: { emit(event: string | symbol, ...args: unknown[]): boolean; query(text: string): void } }).connection;
+    const emit = con.emit;
+    await new Promise<void>((resolve) => {
+      let answered = false;
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        con.emit = emit;
+        resolve();
+      };
+      con.emit = function (this: unknown, event: string | symbol, ...args: unknown[]): boolean {
+        if (event === 'readyForQuery') {
+          if (!answered) return true;
+          finish();
+          return emit.call(con, event, ...args);
+        }
+        if (event === 'emptyQuery' || event === 'errorMessage' || event === 'commandComplete' || event === 'rowDescription' || event === 'dataRow') { answered = true; return true; }
+        if (event === 'end' || event === 'error') finish();
+        return emit.call(con, event, ...args);
+      };
+      // No answer at all: the connection cannot be trusted any more.
+      const timer = setTimeout(() => { finish(); this.client.end().catch(() => undefined); }, 30_000);
+      try { con.query(''); } catch { finish(); }
+    });
+  }
+
+  /** A statement through the client, after drain(). */
+  private async query(config: string | Record<string, unknown>): Promise<QueryResult> {
+    await this.drain();
+    return this.client.query(config as never) as unknown as Promise<QueryResult>;
   }
 
   /**
    * Ends a cursor before the connection is used again. A cursor the server refused has sent its Sync already (its portal goes
-   * with it): it is not closed again (a lone Close that PGlite answers with one more ReadyForQuery, which would end the next
-   * statement early and break the connection when that statement's real answer comes), and the next statement waits for
-   * the ReadyForQuery of that Sync, so a stray one can never be taken for its own.
+   * with it): it is not closed again (a lone Close that PGlite answers with one more ReadyForQuery); the rest of its exchange is
+   * drained, so the transaction state is known before the run reports its end.
    */
   private async closeCursor(cursor: Cursor): Promise<void> {
     const state = cursorState(cursor);
     if (state === 'done') return;
-    if (state === 'error') {
-      const deadline = Date.now() + 10_000;
-      while (this.readySeq <= this.errorSeq && !this.ended && !this.gone && Date.now() < deadline) {
-        await new Promise<void>((resolve) => {
-          const t = setTimeout(resolve, 250);
-          this.readyWaiters.push(() => { clearTimeout(t); resolve(); });
-        });
-      }
-      return;
-    }
+    if (state === 'error') { await this.drain(); return; }
     try { await cursor.close(); } catch { /* the connection is gone */ }
   }
 
@@ -165,7 +184,7 @@ export class PgSession {
   // ── plumbing ───────────────────────────────────────────────────────────────
 
   private raw(text: string, values?: unknown[]): Promise<Row[]> {
-    return (this.client.query({ text, values, rowMode: 'array', types: RAW_TYPES } as never) as unknown as Promise<QueryResult>).then((r) => r.rows as unknown as Row[]);
+    return this.query({ text, values, rowMode: 'array', types: RAW_TYPES }).then((r) => r.rows as unknown as Row[]);
   }
 
   /** Runs `fn` after everything queued before it; the session reports busy while anything is queued or running. */
@@ -203,7 +222,7 @@ export class PgSession {
   }
 
   private async must(sql: string): Promise<void> {
-    try { await this.client.query(sql); } catch { this.fatal(); }
+    try { await this.query(sql); } catch { this.fatal(); }
   }
 
   /** Runs the queued restores once nothing holds the connection (no transaction, no cursor); a failed one ends the session. */
@@ -264,7 +283,8 @@ export class PgSession {
     }));
   }
 
-  private reader(text: string, values?: unknown[]): Reader {
+  private async reader(text: string, values?: unknown[]): Promise<Reader> {
+    await this.drain();
     const cursor = this.client.query(new Cursor(text, values as never, { rowMode: 'array', types: RAW_TYPES } as never));
     return { cursor, fields: null, columnsSent: false, buffered: [], done: false, batch: 100, result: {} };
   }
@@ -373,7 +393,7 @@ export class PgSession {
       case 'ddl': { const ddl = await objectDdl(q, op.schema, op.name, op.kind, op.args); return ddl === null ? fail('notFound') : ok(ddl); }
       case 'transaction': {
         if (op.action === 'begin') await this.reassert();
-        await this.client.query(op.action === 'begin' ? 'BEGIN' : op.action === 'commit' ? 'COMMIT' : 'ROLLBACK');
+        await this.query(op.action === 'begin' ? 'BEGIN' : op.action === 'commit' ? 'COMMIT' : 'ROLLBACK');
         await this.settle();
         return ok(this.tx);
       }
@@ -436,13 +456,13 @@ export class PgSession {
       }
       if (override) {
         if (this.tx !== 'idle') { refuse('inTransaction'); return; }
-        await this.client.query('SET default_transaction_read_only = off');
+        await this.query('SET default_transaction_read_only = off');
         this.overrideActive = true;
         this.restore.push('SET default_transaction_read_only = on');
       }
       if (req.statementTimeoutMs !== undefined && req.statementTimeoutMs !== null && req.statementTimeoutMs !== this.opts.statementTimeoutMs) {
         const ms = Math.max(0, Math.min(DB_LIMITS.statementTimeoutMaxMs, Math.floor(req.statementTimeoutMs)));
-        await this.client.query(`SET statement_timeout = ${ms}`);
+        await this.query(`SET statement_timeout = ${ms}`);
         // Without a connection setting the server's (or the role's) default comes back, not 0.
         this.restore.push(this.opts.statementTimeoutMs ? `SET statement_timeout = ${Math.floor(this.opts.statementTimeoutMs)}` : 'RESET statement_timeout');
       }
@@ -483,7 +503,7 @@ export class PgSession {
   private async statement(queryId: string, index: number, text: string, rowCap: number, last: boolean): Promise<void> {
     const t0 = this.now();
     if (!returnsRows(text)) {
-      const r = await this.onServer(() => this.client.query({ text, rowMode: 'array', types: RAW_TYPES } as never)) as unknown as QueryResult | QueryResult[];
+      const r = await this.onServer(() => this.query({ text, rowMode: 'array', types: RAW_TYPES } as never)) as unknown as QueryResult | QueryResult[];
       const results = Array.isArray(r) ? r : [r];
       const res = results[results.length - 1];
       const fields = (res.fields ?? []) as FieldLike[];
@@ -495,7 +515,7 @@ export class PgSession {
       this.out.port({ t: 'statementEnd', queryId, index, command: res.command ?? '', rowCount: res.rowCount ?? null, rows: Math.min(rows.length, rowCap), hasMore: false, ...(rows.length > rowCap ? { truncated: true } : {}), timeMs: this.now() - t0 });
       return;
     }
-    const reader = this.reader(text);
+    const reader = await this.reader(text);
     let sent: number;
     try { sent = await this.pump(queryId, index, reader, rowCap); } catch (error) { await this.closeCursor(reader.cursor); throw error; }
     const more = !reader.done || reader.buffered.length > 0;
@@ -574,18 +594,18 @@ export class PgSession {
       let built: ReturnType<typeof pageSql>;
       try { built = pageSql(req, key); } catch { error('invalid'); return; }
       this.out.port({ t: 'statement', queryId: req.queryId, index: 0, start: 0, end: 0 });
-      await this.client.query('BEGIN READ ONLY');
+      await this.query('BEGIN READ ONLY');
       const limit = Math.floor(req.limit);
       let sent = 0;
       let more = false;
       try {
-        const reader = this.reader(built.sql, built.params);
+        const reader = await this.reader(built.sql, built.params);
         try { sent = await this.pump(req.queryId, 0, reader, limit); } catch (e) { await this.closeCursor(reader.cursor); throw e; }
         more = !reader.done || reader.buffered.length > 0;
         if (!reader.done) await this.closeCursor(reader.cursor);
-        await this.client.query('COMMIT');
+        await this.query('COMMIT');
       } catch (e) {
-        try { await this.client.query('ROLLBACK'); } catch { /* gone */ }
+        try { await this.query('ROLLBACK'); } catch { /* gone */ }
         throw e;
       }
       this.out.port({ t: 'statementEnd', queryId: req.queryId, index: 0, command: 'SELECT', rowCount: sent, rows: sent, hasMore: more, timeMs: this.now() - started });
@@ -628,25 +648,25 @@ export class PgSession {
     if (this.tx !== 'idle') return fail('inTransaction');
     const built = await this.buildEdits(req);
     if ('error' in built) return built.error;
-    await this.client.query('BEGIN');
+    await this.query('BEGIN');
     let affected = 0;
     for (const s of built.statements) {
       let r: QueryResult;
       try {
-        r = await this.onServer(() => this.client.query({ text: s.sql, values: s.params, rowMode: 'array', types: RAW_TYPES } as never)) as unknown as QueryResult;
+        r = await this.onServer(() => this.query({ text: s.sql, values: s.params, rowMode: 'array', types: RAW_TYPES } as never)) as unknown as QueryResult;
       } catch (error) {
-        try { await this.client.query('ROLLBACK'); } catch { /* gone */ }
+        try { await this.query('ROLLBACK'); } catch { /* gone */ }
         const server = serverError(error);
         return fail(this.codeOf(error), server ?? undefined, s.index);
       }
       if (s.op !== 'insert' && r.rowCount !== 1) {
-        try { await this.client.query('ROLLBACK'); } catch { /* gone */ }
+        try { await this.query('ROLLBACK'); } catch { /* gone */ }
         return fail('conflict', undefined, s.index);
       }
       affected += r.rowCount ?? 0;
     }
-    try { await this.client.query('COMMIT'); } catch (error) {
-      try { await this.client.query('ROLLBACK'); } catch { /* gone */ }
+    try { await this.query('COMMIT'); } catch (error) {
+      try { await this.query('ROLLBACK'); } catch { /* gone */ }
       const server = serverError(error);
       return fail(this.codeOf(error), server ?? undefined);
     }

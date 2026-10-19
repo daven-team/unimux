@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DB_LIMITS, isTruncated, type DbTableInfo, type DbObjectInfo } from '../src/shared/db';
 import { parseDbInput } from '../src/shared/dbSql';
 import { rowOriginal } from '../src/shared/dbTabs';
-import { dbHarness, startPglite, waitFor, type Pglite } from './helpers/dbHarness';
+import { dbHarness, splittingProxy, startPglite, waitFor, type Pglite } from './helpers/dbHarness';
 
 let pgl: Pglite;
 beforeAll(async () => {
@@ -507,6 +507,47 @@ describe('DbHost on PGlite: a failing page filter keeps the shared session (core
       await own.db.exec('RESET ALL');
     });
   }
+
+  it('stays connected when the error and PGlite\'s extra ReadyForQuery arrive in separate reads (server in another process)', async () => {
+    // PGlite sends a ReadyForQuery of its own right after the error and one more for the cursor's Sync. Over a real socket the
+    // first one can come in a read of its own: it was taken for the Sync's, the ROLLBACK went out early, the Sync's
+    // ReadyForQuery ended the ROLLBACK and its CommandComplete then broke the connection (dbClosed).
+    const proxy = await splittingProxy(own.port);
+    try {
+      for (const cfg of [{}, { readOnly: true, statementTimeoutMs: 30000 }]) {
+        const h = dbHarness();
+        const id = await h.open({ port: proxy.port, ...cfg });
+        expect(h.last(id)?.phase).toBe('connected');
+        for (const filter of ['no_such_column = 1', '1/0 = 1']) {
+          const bad = await h.page(id, { schema: 'public', table: 'f', limit: 5, filter });
+          expect(bad.statements[0].error?.code, filter).toBe('server');
+          expect(bad.end, filter).toMatchObject({ ok: false, tx: 'idle' });
+          const next = await h.page(id, { schema: 'public', table: 'f', limit: 3 });
+          expect(next.end.ok, filter).toBe(true);
+          expect(next.statements[0].rows, filter).toHaveLength(3);
+        }
+        // A refused statement of a script, and one inside the user's own transaction (it stays failed until ROLLBACK).
+        const bad = await h.run(id, { sql: 'SELECT no_such_column FROM f' });
+        expect(bad.statements[0].error?.code).toBe('server');
+        expect((await h.run(id, { sql: 'SELECT 1' })).statements[0].rows).toEqual([['1']]);
+        await h.run(id, { sql: 'BEGIN' });
+        expect((await h.run(id, { sql: 'SELECT 1/0 FROM f' })).end).toMatchObject({ ok: false, tx: 'failed' });
+        expect((await h.run(id, { sql: 'ROLLBACK' })).end).toMatchObject({ ok: true, tx: 'idle' });
+        expect((await h.run(id, { sql: 'SELECT 2' })).statements[0].rows).toEqual([['2']]);
+        // A refused statement with parameters (Parse/Bind/Execute/Sync in one go): an edit that breaks the primary key.
+        if (!('readOnly' in cfg)) {
+          const dup = await h.op(id, { op: 'applyEdits', req: { schema: 'public', table: 'f', edits: [{ op: 'insert', values: { id: '1', price: '1' } }] } });
+          expect(dup).toMatchObject({ ok: false });
+          expect((await h.run(id, { sql: 'SELECT 3' })).statements[0].rows).toEqual([['3']]);
+        }
+        expect(h.last(id)?.phase).toBe('connected');
+        h.host.close(id);
+      }
+    } finally {
+      await proxy.close();
+      await own.db.exec('RESET ALL');
+    }
+  });
 });
 
 describe('DbHost on PGlite: the conflict check compares in each column\'s own type (core fix)', () => {
