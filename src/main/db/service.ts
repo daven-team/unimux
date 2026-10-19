@@ -48,13 +48,20 @@ interface Entry {
   pendingSave?: string;
   test?: (r: DbTestResult) => void;
   started: number;
+  /** The shared SSH tunnel this session uses (key of `tunnels`). */
+  tunnelKey?: string;
 }
+
+/** The SSH tunnel of a connection as main sees it: the session that logs it in and every session on it. */
+interface TunnelRef { owner: string; refs: Set<string> }
+const tunnelKeyOf = (c: DbConnection): string | null => (c.ssh ? `${c.id}|${c.ssh.hostId}|${c.ssh.dbHost}|${c.ssh.dbPort}` : null);
 
 const PROMPT_TIMEOUT_MS = 5 * 60_000;
 const TEST_TIMEOUT_MS = 7 * 60_000;
 
 export class DbService<S extends DbStateLike = DbStateLike> {
   private sessions = new Map<string, Entry>();
+  private tunnels = new Map<string, TunnelRef>();
   private pinned = new Set<string>();
 
   constructor(private readonly deps: DbServiceDeps<S>) {}
@@ -115,7 +122,15 @@ export class DbService<S extends DbStateLike = DbStateLike> {
     if (!connection) return Promise.resolve({ ok: false, error: 'invalid' });
     let secret: string | undefined;
     if (password && 'set' in password) secret = password.set;
-    else if (password && 'saved' in password) { const p = this.deps.vault.password(password.saved); if (p.ok) secret = p.password; }
+    else if (password && 'saved' in password) {
+      // A saved password goes only to the server it was saved for: same kind, host, port, user and tunnel.
+      const saved = this.connections().find((c) => c.id === password.saved);
+      const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+      if (!saved || saved.kind !== connection.kind || saved.user !== connection.user || !same(saved.ssh, connection.ssh)
+        || (!connection.ssh && (saved.host !== connection.host || saved.port !== connection.port))) return Promise.resolve({ ok: false, error: 'invalid' });
+      const p = this.deps.vault.password(password.saved);
+      if (p.ok) secret = p.password;
+    }
     return new Promise((resolve) => {
       const r = this.open(connection, { password: secret ?? null, test: resolve });
       if (!r.ok) { resolve({ ok: false, error: r.error }); return; }
@@ -140,6 +155,8 @@ export class DbService<S extends DbStateLike = DbStateLike> {
 
   private open(connection: DbConnection, opts: { password: string | null | 'saved'; test?: (r: DbTestResult) => void }): { ok: true; sessionId: string } | { ok: false; error: DbErrorCode } {
     if (connection.ssh && !this.deps.sshHostExists(connection.ssh.hostId)) return { ok: false, error: 'hostMissing' };
+    const all = [...this.sessions.values()];
+    if (all.length >= DB_LIMITS.sessionsTotal || all.filter((e) => e.connection.id === connection.id).length >= DB_LIMITS.sessionsPerConnection) return { ok: false, error: 'tooMany' };
     if (!this.deps.host.ensure()) return { ok: false, error: 'dbHostCrashed' };
     const id = dbSessionId(randomUUID());
     const entry: Entry = {
@@ -168,13 +185,22 @@ export class DbService<S extends DbStateLike = DbStateLike> {
     }
     let secret: string | undefined;
     if (password === 'saved') { const p = this.deps.vault.password(c.id); if (p.ok) secret = p.password; } else if (password !== null) secret = password;
+    // One SSH login per connection: the first session opens the tunnel, the others ride on it.
+    const key = tunnelKeyOf(c);
+    let owner = false;
+    if (key) {
+      let t = this.tunnels.get(key);
+      if (!t) { t = { owner: id, refs: new Set() }; this.tunnels.set(key, t); owner = true; }
+      t.refs.add(id);
+      entry.tunnelKey = key;
+    }
     const config: DbOpenConfig = {
       kind: c.kind, host: c.host, port: c.port, user: c.user, database: c.database ?? (c.kind === 'postgres' ? 'postgres' : String(c.dbIndex ?? 0)),
       tls: c.tls, ...(ca ? { ca } : {}), ...(secret !== undefined ? { password: secret } : {}), readOnly: c.readOnly,
-      ...(c.statementTimeoutMs ? { statementTimeoutMs: c.statementTimeoutMs } : {}), ssh: c.ssh ? { dbHost: c.ssh.dbHost, dbPort: c.ssh.dbPort } : null,
+      ...(c.statementTimeoutMs ? { statementTimeoutMs: c.statementTimeoutMs } : {}), ssh: c.ssh && key ? { dbHost: c.ssh.dbHost, dbPort: c.ssh.dbPort, tunnelKey: key, owner } : null,
     };
     if (!this.deps.host.send({ t: 'dbOpen', id, config })) { this.end(entry, 'error', 'dbHostCrashed'); return; }
-    if (!c.ssh) return;
+    if (!c.ssh || !owner) return;
     const r = await this.deps.coordinator.connectSession({ sessionId: id, hostId: c.ssh.hostId });
     // The coordinator reports most failures as an 'error' state itself (onCoordinatorSession); one it refused up front is reported here.
     if (!r.ok && this.sessions.get(id) === entry) { this.end(entry, 'error', r.error); this.deps.host.send({ t: 'dbClose', id }); }
@@ -186,6 +212,11 @@ export class DbService<S extends DbStateLike = DbStateLike> {
     if (this.sessions.get(id) !== entry) return;
     this.sessions.delete(id);
     this.clearTimer(entry.idle);
+    if (entry.tunnelKey) {
+      const t = this.tunnels.get(entry.tunnelKey);
+      t?.refs.delete(id);
+      if (t && !t.refs.size) this.tunnels.delete(entry.tunnelKey);
+    }
     if (entry.own) { this.clearTimer(entry.own.timer); entry.own = null; this.deps.events.prompt(id, null); }
     entry.pendingSave = undefined;
     entry.state = {
@@ -235,7 +266,7 @@ export class DbService<S extends DbStateLike = DbStateLike> {
         const wasConnected = entry.state.phase === 'connected' || entry.state.reconnecting !== undefined;
         entry.state = {
           ...entry.state, state: dbStatusOf(m.phase), phase: m.phase, since: this.now(),
-          ...(m.serverVersion ? { serverVersion: m.serverVersion } : {}), ...(m.database ? { database: m.database } : {}),
+          ...(m.serverVersion ? { serverVersion: m.serverVersion } : {}), ...(m.database ? { database: m.database } : {}), ...(m.tls !== undefined ? { tls: m.tls } : {}),
           ...(m.phase === 'connected' && entry.connection.kind === 'postgres' ? { tx: 'idle' as const } : {}),
           ...(m.reconnect ? { reconnecting: m.reconnect } : {}),
         };

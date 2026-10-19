@@ -6,7 +6,10 @@
 import { randomUUID } from 'crypto';
 import { isUtf8 } from 'buffer';
 import type { ConnectionOptions } from 'tls';
-import Redis from 'ioredis';
+import type { Duplex } from 'stream';
+import Redis, { AbstractConnector } from 'ioredis';
+import type ConnectorConstructor from 'ioredis/built/connectors/ConnectorConstructor';
+import type { NetStream } from 'ioredis/built/types';
 import type { DbErrorCode, DbPortMessage, DbResult, DbServerError } from '../shared/db';
 import {
   REDIS_LIMITS, REDIS_READ_COMMANDS, REDIS_READ_ONLY_REFUSED, classifyRedisCommand, parseRedisClientList, parseRedisInfo, parseRedisKeyspace,
@@ -70,6 +73,7 @@ export function mapRedisConnectError(error: unknown, viaTunnel: boolean): RedisC
   const e = (error ?? {}) as { code?: unknown; message?: unknown };
   const code = typeof e.code === 'string' ? e.code : '';
   const message = typeof e.message === 'string' ? e.message : '';
+  if (code === 'ETUNNEL') return new RedisConnectError('tunnel');
   if (code === 'ECONNREFUSED') return new RedisConnectError(viaTunnel ? 'tunnel' : 'dbRefused');
   if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'EAI_NONAME') return new RedisConnectError('dbDns');
   if (code === 'ETIMEDOUT' || /timed? ?out/i.test(message)) return new RedisConnectError('dbTimeout');
@@ -89,8 +93,11 @@ export interface RedisConnectOptions {
   password: string | undefined;
   connectTimeoutMs: number;
   viaTunnel: boolean;
-  /** Called before every TCP connect, reconnects included (an SSH tunnel admits one announced connection each time). */
-  beforeConnect(): void;
+  /**
+   * Through an SSH tunnel: a connected stream (the forwarded channel, TLS already on top when wanted) for every connect,
+   * reconnects included. Absent: ioredis connects to host:port itself (TLS from `tls`).
+   */
+  stream?: () => Promise<Duplex>;
   /** SELECT this DB after connecting. */
   dbIndex?: number;
 }
@@ -100,22 +107,35 @@ export interface RedisControl { enabled: boolean; onRetry(attempt: number): numb
 
 export interface OpenedRedis { client: Redis; control: RedisControl; serverVersion?: string; lastError(): unknown }
 
+/** An ioredis connector handing out an already connected stream (the SSH channel) instead of opening a socket itself. */
+function streamConnector(open: () => Promise<Duplex>): ConnectorConstructor {
+  return class TunnelConnector extends AbstractConnector {
+    constructor() { super(2000); }
+    connect(): Promise<NetStream> {
+      this.connecting = true;
+      return open().then((stream) => {
+        if (!this.connecting) { stream.destroy(); throw new Error('Connection is closed.'); }
+        this.stream = stream as unknown as NetStream;
+        stream.once('error', (e) => { this.firstError = e; });
+        return this.stream;
+      });
+    }
+  } as unknown as ConnectorConstructor;
+}
+
 /** Connects, checks the login (PING answers NOAUTH when a password is needed), selects the DB and reads the version. */
 export async function openRedis(o: RedisConnectOptions): Promise<OpenedRedis> {
   const control: RedisControl = { enabled: false, onRetry: () => null };
   let lastError: unknown;
-  o.beforeConnect();
   const client = new Redis({
-    host: o.host, port: o.port, ...(o.tls ? { tls: o.tls } : {}),
+    host: o.host, port: o.port, ...(o.stream ? { Connector: streamConnector(o.stream) } : o.tls ? { tls: o.tls } : {}),
     ...(o.user ? { username: o.user } : {}), ...(o.password !== undefined ? { password: o.password } : {}),
     lazyConnect: true, enableOfflineQueue: false, enableReadyCheck: false, maxRetriesPerRequest: 0, autoResendUnfulfilledCommands: false,
     autoResubscribe: false, protocol: 2, stringNumbers: true, connectTimeout: o.connectTimeoutMs, connectionName: 'unimux', disableClientInfo: true,
     keepAlive: 15_000, reconnectOnError: null,
     retryStrategy: (times: number) => {
       if (!control.enabled) return null;
-      const delay = control.onRetry(times);
-      if (delay !== null) o.beforeConnect();
-      return delay;
+      return control.onRetry(times);
     },
   });
   client.on('error', (e) => { lastError = e; });

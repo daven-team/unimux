@@ -140,20 +140,64 @@ export function firstKeyword(sql: string): string {
   return m ? m[1].toUpperCase() : '';
 }
 
-const ROW_KEYWORDS = new Set(['SELECT', 'WITH', 'VALUES', 'TABLE', 'SHOW', 'EXPLAIN', 'FETCH']);
+const ROW_KEYWORDS = new Set(['SELECT', 'WITH', 'VALUES', 'TABLE', 'SHOW', 'EXPLAIN', 'FETCH', 'EXECUTE', 'CALL']);
+const WRITE_WORDS = /\b(?:INSERT|UPDATE|DELETE|MERGE|TRUNCATE)\b/i;
 
 /** Text outside quotes and comments (for keyword checks). */
-function codeOnly(sql: string): string {
+export function codeOnly(sql: string): string {
   return sql.replace(/--[^\n]*|\/\*[\s\S]*?\*\/|'(?:[^']|'')*'|"(?:[^"]|"")*"|\$([A-Za-z_]*)\$[\s\S]*?\$\1\$/g, ' ');
 }
 
 /** Whether a statement returns rows (read through a cursor, page by page): SELECT, WITH, VALUES, TABLE, SHOW, EXPLAIN, FETCH or ... RETURNING. */
 export function returnsRows(sql: string): boolean {
   const kw = firstKeyword(sql);
-  // A cursor also runs statements without rows (SELECT ... INTO), so a false "yes" costs nothing.
+  // A cursor also runs statements without rows (SELECT ... INTO), so a false "yes" costs nothing; EXECUTE and CALL may return
+  // rows too, and through a cursor their result is read in bounded batches.
   if (ROW_KEYWORDS.has(kw)) return true;
   return /\bRETURNING\b/i.test(codeOnly(sql));
 }
+
+/**
+ * Whether a statement only reads (its cursor may stay open for "load more"): SELECT (not INTO, not FOR UPDATE/SHARE), VALUES,
+ * TABLE, SHOW, FETCH, EXPLAIN without ANALYZE and WITH without a data-changing part. Everything else that returns rows
+ * (... RETURNING, CALL, EXECUTE) is read up to the cap and its cursor closed at once, so its changes commit right away.
+ */
+export function isReadStatement(sql: string): boolean {
+  const kw = firstKeyword(sql);
+  const code = codeOnly(sql);
+  switch (kw) {
+    case 'SELECT': return !/\bINTO\b/i.test(code) && !/\bFOR\s+(?:NO\s+KEY\s+)?(?:UPDATE|SHARE|KEY\s+SHARE)\b/i.test(code);
+    case 'VALUES': case 'TABLE': case 'SHOW': case 'FETCH': return true;
+    case 'EXPLAIN': return !/\bANALY[SZ]E\b/i.test(code);
+    case 'WITH': return !WRITE_WORDS.test(code) && !/\bINTO\b/i.test(code);
+    default: return false;
+  }
+}
+
+const RO_ALLOWED = new Set(['SELECT', 'WITH', 'VALUES', 'TABLE', 'SHOW', 'EXPLAIN', 'FETCH', 'MOVE', 'CLOSE', 'DECLARE', 'BEGIN', 'START', 'COMMIT', 'END', 'ROLLBACK', 'ABORT', 'SAVEPOINT', 'RELEASE', 'SET']);
+const TX_END = new Set(['COMMIT', 'END', 'ROLLBACK', 'ABORT']);
+
+/**
+ * What a read-only connection may run without the explicit override (one statement of a split script): reads and transaction
+ * control. Refused: anything that changes data or the schema, SET / RESET / DISCARD (they could switch read-only off) except
+ * SET TRANSACTION, BEGIN / START / SET TRANSACTION ... READ WRITE, and calls of set_config, dblink or the read-only settings by
+ * name. The server's read-only transaction stays the second line of defense (a function a SELECT calls is refused by it).
+ */
+export function readOnlyAllows(sql: string): boolean {
+  const kw = firstKeyword(sql);
+  const code = codeOnly(sql);
+  if (!RO_ALLOWED.has(kw)) return false;
+  if (kw === 'SHOW') return true;
+  if (/\bset_config\b|\b(?:default_)?transaction_read_only\b|\bdblink\w*/i.test(code)) return false;
+  if (/\bREAD\s+WRITE\b/i.test(code)) return false;
+  if (kw === 'SET') return /^[\s(]*SET\s+TRANSACTION\b/i.test(code);
+  if (kw === 'SELECT') return !/\bINTO\b/i.test(code);
+  if (kw === 'WITH' || kw === 'EXPLAIN' || kw === 'DECLARE') return !WRITE_WORDS.test(code) && !/\bINTO\b/i.test(code);
+  return true;
+}
+
+/** COMMIT, END, ROLLBACK or ABORT (ending the open transaction). */
+export const endsTransaction = (sql: string): boolean => TX_END.has(firstKeyword(sql));
 
 // ── staged edits ────────────────────────────────────────────────────────────
 
@@ -181,6 +225,17 @@ export function buildEditStatements(schema: string, table: string, keyColumns: r
       return `${quoteIdent(k)} = $${params.length}`;
     }).join(' AND ');
   };
+  // The row must still hold the values it was loaded with (compared as text, so types without equality work too).
+  const unchanged = (original: Record<string, string | null> | undefined, params: Array<string | null>): string => {
+    if (!original) return '';
+    return Object.keys(original).map((c) => {
+      checkColumn(c);
+      const v = original[c];
+      if (v !== null && typeof v !== 'string') throw new DbSqlError('invalid');
+      params.push(v);
+      return ` AND ${quoteIdent(c)}::text IS NOT DISTINCT FROM $${params.length}`;
+    }).join('');
+  };
   return edits.map((e, index) => {
     const params: Array<string | null> = [];
     const value = (v: unknown): string | null => { if (v !== null && typeof v !== 'string') throw new DbSqlError('invalid'); return v as string | null; };
@@ -189,11 +244,11 @@ export function buildEditStatements(schema: string, table: string, keyColumns: r
       if (!names.length) throw new DbSqlError('invalid');
       const sets = names.map((c) => { writable(c); params.push(value(e.set[c])); return `${quoteIdent(c)} = $${params.length}`; });
       for (const k of Object.keys(e.key)) checkColumn(k);
-      return { op: e.op, index, sql: `UPDATE ${target} SET ${sets.join(', ')} WHERE ${where(e.key, params)}`, params };
+      return { op: e.op, index, sql: `UPDATE ${target} SET ${sets.join(', ')} WHERE ${where(e.key, params)}${unchanged(e.original, params)}`, params };
     }
     if (e.op === 'delete') {
       for (const k of Object.keys(e.key)) checkColumn(k);
-      return { op: e.op, index, sql: `DELETE FROM ${target} WHERE ${where(e.key, params)}`, params };
+      return { op: e.op, index, sql: `DELETE FROM ${target} WHERE ${where(e.key, params)}${unchanged(e.original, params)}`, params };
     }
     if (e.op === 'insert') {
       const names = Object.keys(e.values);
@@ -274,7 +329,8 @@ export function cellSql(schema: string, table: string, column: string, key: Reco
   if (!keyColumns.length || names.length !== keyColumns.length || !keyColumns.every((k) => typeof key[k] === 'string')) throw new DbSqlError('invalid');
   const params = keyColumns.map((k) => key[k]);
   return {
-    sql: `SELECT ${quoteIdent(column)}::text FROM ${qualifiedName(schema, table)} WHERE ${keyColumns.map((k, i) => `${quoteIdent(k)} = $${i + 1}`).join(' AND ')} LIMIT 2`,
+    // left(): a huge value is cut on the server, never fetched whole.
+    sql: `SELECT left(${quoteIdent(column)}::text, ${DB_LIMITS.fullValueChars + 1}) FROM ${qualifiedName(schema, table)} WHERE ${keyColumns.map((k, i) => `${quoteIdent(k)} = $${i + 1}`).join(' AND ')} LIMIT 2`,
     params,
   };
 }

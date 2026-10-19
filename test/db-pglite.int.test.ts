@@ -5,7 +5,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DB_LIMITS, isTruncated, type DbTableInfo, type DbObjectInfo } from '../src/shared/db';
 import { parseDbInput } from '../src/shared/dbSql';
-import { dbHarness, startPglite, type Pglite } from './helpers/dbHarness';
+import { dbHarness, startPglite, waitFor, type Pglite } from './helpers/dbHarness';
 
 let pgl: Pglite;
 beforeAll(async () => {
@@ -228,8 +228,7 @@ CREATE FUNCTION q1f() RETURNS int LANGUAGE plpgsql AS $body$ BEGIN RETURN 1; END
     expect(h.collect(open.queryId).statements[0].closed).toBe(true);
     // A statement before the last one cannot keep its cursor.
     const two = await h.run(id, { sql: 'SELECT g FROM generate_series(1, 50) g; SELECT 2', rowCap: 10 });
-    expect(two.statements[0]).toMatchObject({ closed: true });
-    expect(two.statements[0].end?.hasMore).toBe(true);
+    expect(two.statements[0]).toMatchObject({ closed: false, end: { hasMore: false, truncated: true, rows: 10 } });
     expect(two.statements[1].rows).toEqual([['2']]);
   });
 
@@ -343,8 +342,11 @@ describe('DbHost on PGlite: read-only connections', () => {
   it('refuses writes and edits, browses, and lets one run write with the explicit override', async () => {
     const h = dbHarness();
     const id = await h.open({ port: ro.port, readOnly: true });
-    const write = await h.run(id, { sql: "INSERT INTO r VALUES (2, 'b')" });
-    expect(write.statements[0].error).toMatchObject({ code: 'readOnly', server: { code: '25006' } });
+    const write = await h.run(id, { sql: "SELECT 1; INSERT INTO r VALUES (2, 'b')" });
+    // Refused before anything runs: the error names the statement, nothing reached the server.
+    expect(write.statements).toHaveLength(2);
+    expect(write.statements[1].error).toEqual({ code: 'readOnly' });
+    expect(write.statements[0]).toBeUndefined();
     expect(await h.op(id, { op: 'applyEdits', req: { schema: 'public', table: 'r', edits: [{ op: 'delete', key: { id: '1' } }] } })).toEqual({ ok: false, error: 'readOnly' });
     expect((await h.page(id, { schema: 'public', table: 'r', limit: 10 })).statements[0].rows).toEqual([['1', 'a']]);
     const override = await h.run(id, { sql: "INSERT INTO r VALUES (2, 'b')", readWrite: true });
@@ -354,5 +356,111 @@ describe('DbHost on PGlite: read-only connections', () => {
     expect((await h.run(id, { sql: 'SELECT count(*) FROM r' })).statements[0].rows).toEqual([['2']]);
     h.host.close(id);
     await ro.db.exec('SET default_transaction_read_only = off');
+  });
+});
+
+describe('DbHost on PGlite: read-only cannot be switched off (fix round 1)', () => {
+  let ro: Pglite;
+  beforeAll(async () => { ro = await startPglite(); await ro.db.exec("CREATE TABLE r (id int primary key, v text); INSERT INTO r VALUES (1, 'a'); CREATE FUNCTION wipe() RETURNS int LANGUAGE sql AS $$ DELETE FROM r RETURNING 1 $$;"); }, 60000);
+  afterAll(async () => { await ro?.close(); });
+  const count = async () => (await ro.db.query<{ n: number }>('SELECT count(*)::int AS n FROM r')).rows[0].n;
+
+  it('refuses SET, RESET, DISCARD, READ WRITE transactions and set_config before anything runs', async () => {
+    const h = dbHarness();
+    const id = await h.open({ port: ro.port, readOnly: true });
+    for (const sql of ["BEGIN READ WRITE; INSERT INTO r VALUES (5, 'x'); COMMIT", 'SET default_transaction_read_only = off', 'RESET ALL', 'DISCARD ALL',
+      'SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE', "SELECT set_config('default_transaction_read_only', 'off', false)", 'START TRANSACTION READ WRITE']) {
+      const r = await h.run(id, { sql });
+      expect(r.end.ok, sql).toBe(false);
+      expect(r.statements.find(Boolean)?.error?.code, sql).toBe('readOnly');
+    }
+    // A function a SELECT calls is refused by the server's read-only transaction.
+    expect((await h.run(id, { sql: 'SELECT wipe()' })).statements[0].error?.code).toBe('readOnly');
+    expect(await count()).toBe(1);
+    expect(h.last(id)?.phase).toBe('connected');
+    h.host.close(id);
+  });
+
+  it('after an override run that failed inside its transaction and a ROLLBACK, a plain DELETE is still refused', async () => {
+    const h = dbHarness();
+    const id = await h.open({ port: ro.port, readOnly: true });
+    const over = await h.run(id, { sql: "BEGIN; INSERT INTO r VALUES (1, 'dup')", readWrite: true });
+    expect(over.end.tx).toBe('failed');
+    // Inside the override's transaction only ending it runs without the override.
+    expect((await h.run(id, { sql: 'SELECT 1' })).statements.find(Boolean)?.error?.code).toBe('inTransaction');
+    expect((await h.run(id, { sql: 'ROLLBACK' })).end).toMatchObject({ ok: true, tx: 'idle' });
+    expect((await h.run(id, { sql: 'DELETE FROM r' })).statements.find(Boolean)?.error?.code).toBe('readOnly');
+    expect((await h.run(id, { sql: 'SHOW default_transaction_read_only' })).statements[0].rows).toEqual([['on']]);
+    // An override that committed restores read-only right after.
+    expect((await h.run(id, { sql: "INSERT INTO r VALUES (2, 'b')", readWrite: true })).end.ok).toBe(true);
+    expect((await h.run(id, { sql: 'SHOW default_transaction_read_only' })).statements[0].rows).toEqual([['on']]);
+    expect(await count()).toBe(2);
+    h.host.close(id);
+    await ro.db.exec('SET default_transaction_read_only = off');
+    await ro.db.exec('DELETE FROM r WHERE id = 2');
+  });
+
+  it('a page filter that switches read-only off with set_config is undone after the page', async () => {
+    const h = dbHarness();
+    const id = await h.open({ port: ro.port, readOnly: true });
+    await h.page(id, { schema: 'public', table: 'r', limit: 5, filter: "set_config('default_transaction_read_only', 'off', false) IS NOT NULL" });
+    expect((await h.run(id, { sql: 'SHOW default_transaction_read_only' })).statements[0].rows).toEqual([['on']]);
+    h.host.close(id);
+    await ro.db.exec('SET default_transaction_read_only = off');
+  });
+});
+
+describe('DbHost on PGlite: cursors, memory and busy (fix round 1)', () => {
+  it('reads data-changing statements up to the cap and commits them at once (truncated, no open cursor)', async () => {
+    const h = dbHarness();
+    const id = await h.open({ port: pgl.port });
+    await h.run(id, { sql: 'CREATE TABLE ret (id int)' });
+    const r = await h.run(id, { sql: 'INSERT INTO ret SELECT g FROM generate_series(1, 50) g RETURNING id', rowCap: 10 });
+    expect(r.statements[0].rows).toHaveLength(10);
+    expect(r.statements[0].end).toMatchObject({ hasMore: false, truncated: true });
+    expect(r.end.tx).toBe('idle');
+    expect(await h.op(id, { op: 'fetchMore', queryId: r.queryId, count: 10 })).toEqual({ ok: false, error: 'notFound' });
+    expect((await pgl.db.query<{ n: number }>('SELECT count(*)::int AS n FROM ret')).rows[0].n).toBe(50);
+  });
+
+  it('stops a read at the character budget for very wide rows and loads the rest later', async () => {
+    const h = dbHarness();
+    const id = await h.open({ port: pgl.port });
+    const r = await h.run(id, { sql: `SELECT g, repeat('x', ${DB_LIMITS.cellChars}) FROM generate_series(1, 600) g`, rowCap: 1000 });
+    const first = r.statements[0].rows.length;
+    expect(first).toBeLessThan(600);
+    expect(first * DB_LIMITS.cellChars).toBeGreaterThanOrEqual(DB_LIMITS.pageChars);
+    expect(r.statements[0].end?.hasMore).toBe(true);
+    const chunks = h.port.filter((m) => m.t === 'rows' && m.queryId === r.queryId);
+    expect(chunks.length).toBeGreaterThan(10);
+    await h.more(id, r.queryId, 1000);
+    expect(h.collect(r.queryId).statements[0].rows).toHaveLength(600);
+  });
+
+  it('closes a result cursor nobody fetched from after the idle time', async () => {
+    const h = dbHarness({ timers: { cursorIdleMs: 150 } });
+    const id = await h.open({ port: pgl.port });
+    const r = await h.run(id, { sql: 'SELECT g FROM generate_series(1, 50) g', rowCap: 10 });
+    expect(r.statements[0].end?.hasMore).toBe(true);
+    await waitFor(() => h.port.some((m) => m.t === 'resultClosed' && m.queryId === r.queryId), 3000);
+    expect(await h.op(id, { op: 'fetchMore', queryId: r.queryId, count: 10 })).toEqual({ ok: false, error: 'notFound' });
+  });
+
+  it('answers metadata with busy while a run is in flight', async () => {
+    const h = dbHarness();
+    const id = await h.open({ port: pgl.port });
+    const slow = await h.run(id, { sql: 'SELECT pg_sleep(0.5)' }, false);
+    expect(await h.op(id, { op: 'schemas' })).toEqual({ ok: false, error: 'busy' });
+    await waitFor(() => h.ended(slow.queryId), 5000);
+    expect((await h.op(id, { op: 'schemas' })).ok).toBe(true);
+  });
+
+  it('a row changed since it was loaded is a conflict when the loaded values are sent', async () => {
+    const h = dbHarness();
+    const id = await h.open({ port: pgl.port });
+    await h.run(id, { sql: `CREATE TABLE oc (id int primary key, v text, j json); INSERT INTO oc VALUES (1, 'a', '{"x":1}')` });
+    await pgl.db.exec("UPDATE oc SET v = 'changed elsewhere'");
+    expect(await h.op(id, { op: 'applyEdits', req: { schema: 'public', table: 'oc', edits: [{ op: 'update', key: { id: '1' }, set: { v: 'mine' }, original: { v: 'a' } }] } })).toEqual({ ok: false, error: 'conflict', index: 0 });
+    expect(await h.value(id, { op: 'applyEdits', req: { schema: 'public', table: 'oc', edits: [{ op: 'update', key: { id: '1' }, set: { v: 'mine' }, original: { v: 'changed elsewhere', j: '{"x":1}' } }] } })).toEqual({ affected: 1 });
   });
 });

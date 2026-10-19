@@ -601,7 +601,7 @@ describe('Redis: through the SSH tunnel', () => {
       if (m.t === 'sshAuthPrompt') { void host.handle({ t: 'sshAuthAnswer', id: m.id, promptId: m.promptId, values: ['pw'] }); return true; }
       return false;
     } });
-    const sid = await h.openRedis(s, { ssh: { dbHost: '127.0.0.1', dbPort: s.port }, host: 'ignored.example', port: 1, password: 'r-pw' }, false);
+    const sid = await h.openRedis(s, { ssh: { dbHost: '127.0.0.1', dbPort: s.port, tunnelKey: 'redis-tunnel-1', owner: true }, host: 'ignored.example', port: 1, password: 'r-pw' }, false);
     await h.host.handle({ t: 'sshConnect', req: { id: sid, host: '127.0.0.1', port: ssh.port, username: 'alice', cols: 80, rows: 24, allowPasswordPrompt: true } });
     await waitFor(() => ['connected', 'error'].includes(h.last(sid)?.phase ?? ''), 15000);
     expect(h.last(sid)?.phase).toBe('connected');
@@ -611,7 +611,18 @@ describe('Redis: through the SSH tunnel', () => {
     expect(got.ok && got.value.reply).toEqual({ t: 'bulk', v: 'ssh', bytes: 3 });
     await h.rv(sid, { kind: 'subscribe', channels: ['t'] });
     expect(ssh.forwards).toHaveLength(2);
+    expect(h.last(sid)?.tls).toBe(false);
+    // A second session of the same connection rides the same tunnel (no second login) and survives a dropped connection.
+    const second = await h.openRedis(s, { ssh: { dbHost: '127.0.0.1', dbPort: s.port, tunnelKey: 'redis-tunnel-1', owner: false }, password: 'r-pw' });
+    expect(h.last(second)?.phase).toBe('connected');
+    expect(h.host.tunnelCount()).toBe(1);
+    s.dropClients();
+    await waitFor(() => h.statuses(second).some((x) => x.reconnect === 1) && h.last(second)?.phase === 'connected', 10000);
+    const again = await h.cmd(second, 'GET through');
+    expect(again.ok && again.value.reply).toEqual({ t: 'bulk', v: 'ssh', bytes: 3 });
+    h.host.close(second);
     h.host.close(sid);
+    await waitFor(() => h.host.tunnelCount() === 0);
 
     const s2 = await server();
     const port = s2.port;
@@ -620,7 +631,7 @@ describe('Redis: through the SSH tunnel', () => {
       if (m.t === 'sshAuthPrompt') { void host.handle({ t: 'sshAuthAnswer', id: m.id, promptId: m.promptId, values: ['pw'] }); return true; }
       return false;
     } });
-    const sid2 = await h2.openRedis(s2, { ssh: { dbHost: '127.0.0.1', dbPort: port } }, false);
+    const sid2 = await h2.openRedis(s2, { ssh: { dbHost: '127.0.0.1', dbPort: port, tunnelKey: 'redis-tunnel-2', owner: true } }, false);
     await h2.host.handle({ t: 'sshConnect', req: { id: sid2, host: '127.0.0.1', port: ssh.port, username: 'alice', cols: 80, rows: 24, allowPasswordPrompt: true } });
     await waitFor(() => ['connected', 'error'].includes(h2.last(sid2)?.phase ?? ''), 15000);
     expect(h2.last(sid2)).toMatchObject({ phase: 'error', error: 'tunnel' });

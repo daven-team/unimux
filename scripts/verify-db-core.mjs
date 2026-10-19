@@ -64,8 +64,15 @@ try {
   await app.until(`window.__db.msgs.some((m) => m.t === 'queryEnd' && m.queryId === '${qid}')`, 'query end');
   const rows = await app.evaluate(`window.__db.msgs.filter((m) => m.queryId === '${qid}' && m.t === 'rows' && m.index === 0).reduce((n, m) => n + m.rows.length, 0)`);
   const end0 = await app.evaluate(`window.__db.msgs.find((m) => m.queryId === '${qid}' && m.t === 'statementEnd' && m.index === 0)`);
-  const closed = await app.evaluate(`window.__db.msgs.some((m) => m.queryId === '${qid}' && m.t === 'resultClosed' && m.index === 0)`);
-  check(rows === 1000 && end0.hasMore && closed, 'rows stream over the DB port in chunks, capped at 1000 with more on the server');
+  check(rows === 1000 && end0.truncated && !end0.hasMore, 'rows stream over the DB port in chunks; an earlier statement of a run is cut at 1000 (truncated)');
+  const lid = 'a0000000-0000-4000-8000-000000000004';
+  await app.evaluate(`window.mc.db.pg.query(${JSON.stringify(c.sessionId)}, { queryId: '${lid}', sql: 'SELECT * FROM items ORDER BY id', rowCap: 1000 })`);
+  await app.until(`window.__db.msgs.some((m) => m.t === 'queryEnd' && m.queryId === '${lid}')`, 'last query end');
+  const more = await app.evaluate(`window.mc.db.pg.fetchMore(${JSON.stringify(c.sessionId)}, '${lid}', 1000)`);
+  await app.until(`window.__db.msgs.filter((m) => m.queryId === '${lid}' && m.t === 'statementEnd').length === 2`, 'load more end');
+  const total = await app.evaluate(`window.__db.msgs.filter((m) => m.queryId === '${lid}' && m.t === 'rows').reduce((n, m) => n + m.rows.length, 0)`);
+  const end1 = await app.evaluate(`window.__db.msgs.filter((m) => m.queryId === '${lid}' && m.t === 'statementEnd').at(-1)`);
+  check(more.ok && total === 1500 && !end1.hasMore, 'the last read statement keeps its cursor: load more brings the remaining 500 rows');
   const big = await app.evaluate(`window.__db.msgs.find((m) => m.queryId === '${qid}' && m.t === 'rows' && m.index === 0).rows[0][2]`);
   check(big === '9007199254740993', 'bigint keeps every digit');
 
@@ -92,10 +99,13 @@ try {
   check(answered.ok, 'the SSH password is answered through db.answer');
   await app.until(`window.__db.sessions.some((s) => s.id === ${JSON.stringify(t.sessionId)} && s.state === 'connected')`, 'tunnel connected', 30000);
   const tq = 'a0000000-0000-4000-8000-000000000003';
-  await app.evaluate(`window.mc.db.pg.query(${JSON.stringify(t.sessionId)}, { queryId: '${tq}', sql: "SELECT name FROM items WHERE id = 1; INSERT INTO items VALUES (9999, 'x', 1)" })`);
+  const tw = 'a0000000-0000-4000-8000-000000000005';
+  await app.evaluate(`window.mc.db.pg.query(${JSON.stringify(t.sessionId)}, { queryId: '${tq}', sql: 'SELECT name FROM items WHERE id = 1' })`);
   await app.until(`window.__db.msgs.some((m) => m.t === 'queryEnd' && m.queryId === '${tq}')`, 'tunnel query end');
   const tname = await app.evaluate(`window.__db.msgs.find((m) => m.queryId === '${tq}' && m.t === 'rows').rows[0][0]`);
-  const refused = await app.evaluate(`window.__db.msgs.find((m) => m.queryId === '${tq}' && m.t === 'statementError')?.error`);
+  await app.evaluate(`window.mc.db.pg.query(${JSON.stringify(t.sessionId)}, { queryId: '${tw}', sql: "INSERT INTO items VALUES (9999, 'x', 1)" })`);
+  await app.until(`window.__db.msgs.some((m) => m.t === 'queryEnd' && m.queryId === '${tw}')`, 'tunnel write end');
+  const refused = await app.evaluate(`window.__db.msgs.find((m) => m.queryId === '${tw}' && m.t === 'statementError')?.error`);
   check(tname === 'renamed' && refused === 'readOnly', 'a query runs through the SSH tunnel; the read-only connection refuses the INSERT');
   const snap = await app.evaluate('window.mc.db.sessions()');
   check(snap.sessions.length === 2 && snap.prompts.length === 0, 'two sessions, no open prompts');

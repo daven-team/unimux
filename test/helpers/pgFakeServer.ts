@@ -23,6 +23,8 @@ export interface FakePg {
   /** Statements in order (simple and extended). */
   statements: string[];
   cancels: Array<{ via: 'function' | 'protocol'; pid: number }>;
+  /** Statements (exact text) the server answers with an error from now on. */
+  failing: Set<string>;
   close(): Promise<void>;
 }
 
@@ -50,6 +52,7 @@ export async function startFakePg(opts: FakePgOptions = {}): Promise<FakePg> {
   const logins: FakePg['logins'] = [];
   const statements: string[] = [];
   const cancels: FakePg['cancels'] = [];
+  const failing = new Set<string>();
   const sockets = new Set<Duplex>();
   let nextPid = 1000;
 
@@ -58,6 +61,7 @@ export async function startFakePg(opts: FakePgOptions = {}): Promise<FakePg> {
   async function run(b: Backend, sql: string, params: Array<string | null>): Promise<{ fields: string[]; rows: Array<Array<string | null>>; command: string }> {
     statements.push(sql);
     const text = sql.trim().replace(/;$/, '');
+    if (failing.has(text)) throw new SqlError('XX000', 'injected failure');
     let m: RegExpExecArray | null;
     if ((m = /^SET\s+(\w+)\s*(?:=|TO)\s*(.+)$/i.exec(text))) { b.settings.set(m[1].toLowerCase(), m[2].trim().replace(/^'|'$/g, '')); return { fields: [], rows: [], command: 'SET' }; }
     if (/^BEGIN/i.test(text)) { b.tx = 'T'; return { fields: [], rows: [], command: 'BEGIN' }; }
@@ -244,7 +248,7 @@ export async function startFakePg(opts: FakePgOptions = {}): Promise<FakePg> {
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
   return {
     port: (server.address() as { port: number }).port,
-    logins, statements, cancels,
+    logins, statements, cancels, failing,
     close: () => new Promise<void>((resolve) => { for (const s of sockets) s.destroy(); server.close(() => resolve()); }),
   };
 }

@@ -3,7 +3,7 @@
 // and ends cleanly when the forward or the SSH connection fails. The last part runs the whole main chain: DbService, the real
 // SSH coordinator (known hosts, SSH vault) and the DB vault.
 import { mkdtempSync, rmSync } from 'node:fs';
-import { connect } from 'node:net';
+import { Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -38,6 +38,8 @@ afterEach(async () => {
 });
 
 async function ssh(opts: Parameters<typeof startTestServer>[0] = {}) { const s = await startTestServer({ password: 'pw', ...opts }); servers.push(s); return s; }
+let keyN = 0;
+const via = (port: number, owner = true, key = `k${++keyN}`) => ({ dbHost: '127.0.0.1', dbPort: port, tunnelKey: key, owner });
 const sshReq = (id: string, s: TestServer, extra: Partial<SshConnectRequest> = {}): SshConnectRequest => ({ id, host: '127.0.0.1', port: s.port, username: 'alice', cols: 80, rows: 24, allowPasswordPrompt: true, ...extra });
 
 describe('DbHost: SSH tunnel', () => {
@@ -50,7 +52,7 @@ describe('DbHost: SSH tunnel', () => {
       return false;
     } });
     const id = dbSessionId('aaaaaaaa-0000-4000-8000-000000000001');
-    await h.open({ ssh: { dbHost: '127.0.0.1', dbPort: pgl.port }, host: 'ignored.example', port: 1 }, id, false);
+    await h.open({ ssh: via(pgl.port), host: 'ignored.example', port: 1 }, id, false);
     await h.host.handle({ t: 'sshConnect', req: sshReq(id, s) });
     await waitFor(() => ['connected', 'error'].includes(h.last(id)?.phase ?? ''), 15000);
     expect(h.last(id)?.phase).toBe('connected');
@@ -59,15 +61,16 @@ describe('DbHost: SSH tunnel', () => {
     expect(h.toMain.filter((m) => m.t === 'sshStatus').map((m) => (m as { phase: string }).phase)).toEqual(['connecting', 'verifying', 'authenticating', 'connected']);
     expect(s.forwards).toEqual([{ host: '127.0.0.1', port: pgl.port, accepted: true }]);
     expect((await h.run(id, { sql: 'SELECT v FROM tun' })).statements[0].rows).toEqual([['through ssh']]);
-    // Nobody else may use the local end of the tunnel.
-    const port = (h.host as unknown as { sessions: Map<string, { tunnelPort: number }> }).sessions.get(id)!.tunnelPort;
-    const closed = await new Promise<boolean>((resolve) => {
-      const sock = connect({ host: '127.0.0.1', port }, () => undefined);
-      sock.on('close', () => resolve(true));
-      sock.on('error', () => undefined);
-      setTimeout(() => resolve(false), 3000);
+    // There is no local end of the tunnel that another program could connect to: pg reads and writes the SSH channel itself.
+    const listening = await new Promise<number>((resolve) => {
+      // The Node process listens on nothing but the PGlite and SSH test servers (whose ports are known).
+      const handles = (process as unknown as { _getActiveHandles(): unknown[] })._getActiveHandles();
+      resolve(handles.filter((x) => x instanceof Server && (x.address() as { port?: number } | null)?.port !== pgl.port && (x.address() as { port?: number } | null)?.port !== s.port && x.listening).length);
     });
-    expect(closed).toBe(true);
+    expect(listening).toBe(0);
+    // A cancel goes through the tunnel too (its own channel).
+    const slow = await h.run(id, { sql: 'SELECT count(*) FROM generate_series(1, 10)' });
+    expect(slow.end.ok).toBe(true);
     expect(s.forwards).toHaveLength(1);
     h.host.close(id);
     expect(h.last(id)?.phase).toBe('closed');
@@ -78,7 +81,7 @@ describe('DbHost: SSH tunnel', () => {
     const s = await ssh({ tcpForwarding: false });
     const h = dbHarness();
     const id = dbSessionId('aaaaaaaa-0000-4000-8000-000000000002');
-    await h.open({ ssh: { dbHost: '127.0.0.1', dbPort: pgl.port } }, id, false);
+    await h.open({ ssh: via(pgl.port) }, id, false);
     await h.host.handle({ t: 'sshConnect', req: sshReq(id, s, { password: 'pw' }) });
     await waitFor(() => ['connected', 'error'].includes(h.last(id)?.phase ?? ''), 15000);
     expect(h.last(id)).toMatchObject({ phase: 'error', error: 'tunnel' });
@@ -86,7 +89,7 @@ describe('DbHost: SSH tunnel', () => {
 
     const s2 = await ssh();
     const id2 = dbSessionId('aaaaaaaa-0000-4000-8000-000000000003');
-    await h.open({ ssh: { dbHost: '127.0.0.1', dbPort: pgl.port } }, id2, false);
+    await h.open({ ssh: via(pgl.port) }, id2, false);
     await h.host.handle({ t: 'sshConnect', req: sshReq(id2, s2, { password: 'pw' }) });
     await waitFor(() => h.last(id2)?.phase === 'connected', 15000);
     s2.dropConnections();
@@ -102,15 +105,38 @@ describe('DbHost: SSH tunnel', () => {
       return false;
     } });
     const id = dbSessionId('aaaaaaaa-0000-4000-8000-000000000004');
-    await h.open({ ssh: { dbHost: '127.0.0.1', dbPort: pgl.port } }, id, false);
+    await h.open({ ssh: via(pgl.port) }, id, false);
     await h.host.handle({ t: 'sshConnect', req: sshReq(id, s) });
     await waitFor(() => h.last(id)?.phase === 'error', 15000);
     expect(h.last(id)?.error).toBe('cancelled');
     expect(h.toMain.some((m) => m.t === 'sshStatus' && m.phase === 'error')).toBe(true);
 
     const quick = dbHarness({ timers: { sshWaitMs: 100 } });
-    const id2 = await quick.open({ ssh: { dbHost: '127.0.0.1', dbPort: pgl.port } });
+    const id2 = await quick.open({ ssh: via(pgl.port) });
     expect(quick.last(id2)).toMatchObject({ phase: 'error', error: 'timeout' });
+  });
+
+  it('shares one tunnel (one SSH login) between the sessions of a connection and closes it with the last one', async () => {
+    const s = await ssh();
+    const h = dbHarness();
+    const a = dbSessionId('aaaaaaaa-0000-4000-8000-000000000011');
+    const b = dbSessionId('aaaaaaaa-0000-4000-8000-000000000012');
+    await h.open({ ssh: via(pgl.port, true, 'shared') }, a, false);
+    await h.open({ ssh: via(pgl.port, false, 'shared') }, b, false);
+    await h.host.handle({ t: 'sshConnect', req: sshReq(a, s, { password: 'pw' }) });
+    await waitFor(() => h.last(a)?.phase === 'connected' && h.last(b)?.phase === 'connected', 15000);
+    expect(s.connections()).toBe(1);
+    expect(s.forwards).toHaveLength(2);
+    expect(h.host.tunnelCount()).toBe(1);
+    // The owner closing does not end the tunnel of the other session.
+    h.host.close(a);
+    expect((await h.run(b, { sql: 'SELECT v FROM tun' })).statements[0].rows).toEqual([['through ssh']]);
+    h.host.close(b);
+    expect(h.host.tunnelCount()).toBe(0);
+    await waitFor(() => s.connections() === 0);
+    // A session that expects a shared tunnel nobody opened fails at once.
+    const c = await h.open({ ssh: via(pgl.port, false, 'none') });
+    expect(h.last(c)).toMatchObject({ phase: 'error', error: 'tunnel' });
   });
 });
 

@@ -23,8 +23,11 @@ export interface DbOpenConfig {
   password?: string;
   readOnly: boolean;
   statementTimeoutMs?: number;
-  /** The database address as the SSH server sees it; the sshConnect for the same id follows. */
-  ssh: { dbHost: string; dbPort: number } | null;
+  /**
+   * The database address as the SSH server sees it. Sessions of one connection share one tunnel (`tunnelKey`): the `owner`
+   * opens it and its sshConnect follows; the others wait for it (and fail with 'tunnel' when there is none).
+   */
+  ssh: { dbHost: string; dbPort: number; tunnelKey: string; owner: boolean } | null;
 }
 
 export type DbHostOp =
@@ -58,7 +61,7 @@ export type MainToDbHost =
 export type DbHostToMain =
   | Extract<HostToMain, { t: 'sshStatus' | 'sshHostKey' | 'sshAuthPrompt' | 'log' }>
   /** The session moved on (tunnel steps, database connect, connected, error, closed). `message`: the server's own text of an error. */
-  | { t: 'dbStatus'; id: string; phase: DbPhase; error?: DbErrorCode; message?: string; serverVersion?: string; database?: string; /** Redis: the reconnect attempt (phase 'database'). */ reconnect?: number }
+  | { t: 'dbStatus'; id: string; phase: DbPhase; error?: DbErrorCode; message?: string; serverVersion?: string; database?: string; tls?: boolean; /** Redis: the reconnect attempt (phase 'database'). */ reconnect?: number }
   /** The session switched databases (Redis SELECT): the DB index as text. */
   | { t: 'dbDatabase'; id: string; database: string }
   /** The server asks for a password and none is saved (or the saved one was refused: retry). */
