@@ -53,13 +53,13 @@ describe('staged edits', () => {
     // A value that arrived truncated is never compared (and never equals the typed one).
     s = stageCell(EMPTY_STAGED, { id: '1' }, 'big', 'xx', undefined);
     expect(s.updates[0]).toEqual({ key: { id: '1' }, set: { big: 'xx' } });
-    // Booleans are not compared (their ::text differs from the wire text).
-    s = stageCell(EMPTY_STAGED, { id: '1' }, 'ok', 'f', 't', false);
-    expect(s.updates[0].original).toBeUndefined();
+    // Booleans are compared like every other type (the DB Host compares in the column's own type).
+    s = stageCell(EMPTY_STAGED, { id: '1' }, 'ok', 'f', 't');
+    expect(s.updates[0].original).toEqual({ ok: 't' });
   });
 
   it('keeps the loaded row for a delete, toggles deletes and builds the save in order', () => {
-    expect(rowOriginal(row, columns)).toEqual({ id: '1', name: 'a' });
+    expect(rowOriginal(row, columns)).toEqual({ id: '1', name: 'a', ok: 't' });
     let s = stageCell(EMPTY_STAGED, { id: '1' }, 'name', 'b', 'a');
     s = stageCell(s, { id: '2' }, 'name', 'z', 'y');
     s = toggleDeletes(s, [{ key: { id: '2' }, original: { id: '2', name: 'y' } }]);

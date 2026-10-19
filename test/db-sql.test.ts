@@ -105,9 +105,13 @@ describe('staged edits', () => {
     const [u, d] = buildEditStatements('s', 't', ['id'], [
       { op: 'update', key: { id: '1' }, set: { v: 'new' }, original: { v: 'old', n: null } },
       { op: 'delete', key: { id: '2' }, original: { v: 'x' } },
-    ], ['id', 'v', 'n']);
-    expect(u).toMatchObject({ sql: 'UPDATE "s"."t" SET "v" = $1 WHERE "id" = $2 AND "v"::text IS NOT DISTINCT FROM $3 AND "n"::text IS NOT DISTINCT FROM $4', params: ['new', '1', 'old', null] });
-    expect(d).toMatchObject({ sql: 'DELETE FROM "s"."t" WHERE "id" = $1 AND "v"::text IS NOT DISTINCT FROM $2', params: ['2', 'x'] });
+    ], ['id', 'v', 'n'], [], { id: 'integer', v: 'character(4)', n: 'boolean' });
+    // In the column's own type, compared in Postgres's output form; NULL as IS NULL.
+    expect(u).toMatchObject({ sql: `UPDATE "s"."t" SET "v" = $1 WHERE "id" = $2 AND ("v" IS NOT NULL AND format('%s', "v") = format('%s', $3::character(4))) AND "n" IS NULL`, params: ['new', '1', 'old'] });
+    expect(d).toMatchObject({ sql: `DELETE FROM "s"."t" WHERE "id" = $1 AND ("v" IS NOT NULL AND format('%s', "v") = format('%s', $2::character(4)))`, params: ['2', 'x'] });
+    // json and jsonb compare as jsonb; without a known type the output form is compared with the loaded text.
+    const [j] = buildEditStatements('s', 't', ['id'], [{ op: 'delete', key: { id: '1' }, original: { j: '{"a": 1}', b: '{}', x: 'y' } }], ['id', 'j', 'b', 'x'], [], { j: 'json', b: 'jsonb' });
+    expect(j.sql).toBe(`DELETE FROM "s"."t" WHERE "id" = $1 AND "j"::jsonb = $2::jsonb AND "b"::jsonb = $3::jsonb AND ("x" IS NOT NULL AND format('%s', "x") = $4::text)`);
     expect(() => buildEditStatements('s', 't', ['id'], [{ op: 'update', key: { id: '1' }, set: { v: 'a' }, original: { zz: 'a' } }], ['id', 'v'])).toThrow(DbSqlError);
   });
 
