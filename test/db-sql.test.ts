@@ -2,7 +2,7 @@
 // their preview, table paging, value kinds, input checks and copy/export formats.
 import { describe, expect, it } from 'vitest';
 import {
-  DbSqlError, buildEditStatements, cellSql, editPreview, firstKeyword, formatDbValue, inlineParams, jsonValue, pageSql, parseDbInput, quoteIdent, quoteLiteral,
+  DbSqlError, buildEditStatements, cellSql, editPreview, endsTransaction, firstKeyword, isReadStatement, readOnlyAllows, formatDbValue, inlineParams, jsonValue, pageSql, parseDbInput, quoteIdent, quoteLiteral,
   returnsRows, rowsToCsv, rowsToJson, rowsToTsv, splitSql, statementAt, valueKind,
 } from '../src/shared/dbSql';
 
@@ -61,8 +61,25 @@ describe('statementAt', () => {
 describe('returnsRows', () => {
   it('reads row-returning statements through a cursor', () => {
     expect(firstKeyword('/* c */ -- d\n (SELECT 1)')).toBe('SELECT');
-    for (const sql of ['SELECT 1', 'with x as (select 1) select * from x', 'VALUES (1)', 'TABLE t', 'SHOW search_path', 'EXPLAIN SELECT 1', 'INSERT INTO t VALUES (1) RETURNING id', 'update t set a = 1 returning *']) expect(returnsRows(sql), sql).toBe(true);
-    for (const sql of ['INSERT INTO t VALUES (1)', 'CREATE TABLE t (a int)', 'BEGIN', 'SET x = 1', "INSERT INTO t VALUES ('returning')", 'VACUUM', 'CALL p()']) expect(returnsRows(sql), sql).toBe(false);
+    for (const sql of ['SELECT 1', 'with x as (select 1) select * from x', 'VALUES (1)', 'TABLE t', 'SHOW search_path', 'EXPLAIN SELECT 1', 'INSERT INTO t VALUES (1) RETURNING id', 'update t set a = 1 returning *', 'CALL p()', 'EXECUTE stmt(1)']) expect(returnsRows(sql), sql).toBe(true);
+    for (const sql of ['INSERT INTO t VALUES (1)', 'CREATE TABLE t (a int)', 'BEGIN', 'SET x = 1', "INSERT INTO t VALUES ('returning')", 'VACUUM']) expect(returnsRows(sql), sql).toBe(false);
+  });
+
+  it('keeps cursors open only for statements that cannot change data', () => {
+    for (const sql of ['SELECT * FROM t', 'VALUES (1)', 'TABLE t', 'SHOW x', 'EXPLAIN SELECT 1', 'WITH a AS (SELECT 1) SELECT * FROM a', "SELECT 'insert into x'"]) expect(isReadStatement(sql), sql).toBe(true);
+    for (const sql of ['INSERT INTO t VALUES (1) RETURNING *', 'WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d', 'SELECT * INTO t2 FROM t', 'SELECT * FROM t FOR UPDATE', 'EXPLAIN ANALYZE DELETE FROM t', 'CALL p()', 'EXECUTE s']) expect(isReadStatement(sql), sql).toBe(false);
+  });
+});
+
+describe('read-only connections', () => {
+  it('allows reads and transaction control and refuses writes and anything that could switch read-only off', () => {
+    for (const sql of ['SELECT 1', 'with x as (select 1) select * from x', 'EXPLAIN SELECT 1', 'SHOW search_path', 'BEGIN', 'BEGIN READ ONLY', 'START TRANSACTION ISOLATION LEVEL SERIALIZABLE', 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ', 'COMMIT', 'ROLLBACK', 'SAVEPOINT a', 'DECLARE c CURSOR FOR SELECT 1', 'FETCH 10 FROM c', "SELECT 'set_config'"]) expect(readOnlyAllows(sql), sql).toBe(true);
+    for (const sql of ['INSERT INTO t VALUES (1)', 'UPDATE t SET a = 1', 'DELETE FROM t', 'CREATE TABLE t (a int)', 'DROP TABLE t', 'TRUNCATE t', 'COPY t FROM STDIN', 'CALL p()', 'DO $$ BEGIN END $$',
+      'SET default_transaction_read_only = off', 'SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE', 'RESET ALL', 'DISCARD ALL', 'BEGIN READ WRITE', 'START TRANSACTION READ WRITE',
+      'SET TRANSACTION READ WRITE', "SELECT set_config('default_transaction_read_only', 'off', false)", 'SELECT * INTO t2 FROM t', 'WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d',
+      'EXPLAIN ANALYZE DELETE FROM t', 'SET statement_timeout = 0', 'PREPARE p AS DELETE FROM t', 'EXECUTE p', "SELECT dblink_exec('x', 'delete from t')"]) expect(readOnlyAllows(sql), sql).toBe(false);
+    expect(endsTransaction('commit')).toBe(true);
+    expect(endsTransaction('SELECT 1')).toBe(false);
   });
 });
 
@@ -82,6 +99,16 @@ describe('staged edits', () => {
     ]);
     expect(inlineParams(built[0].sql, built[0].params)).toBe(`UPDATE "public"."users" SET "name" = 'O''Brien', "note" = NULL WHERE "id" = '7'`);
     expect(editPreview(built.slice(3))).toBe('BEGIN;\nDELETE FROM "public"."users" WHERE "id" = \'9\';\nCOMMIT;');
+  });
+
+  it('requires the loaded values of edited columns to be unchanged (conflict check)', () => {
+    const [u, d] = buildEditStatements('s', 't', ['id'], [
+      { op: 'update', key: { id: '1' }, set: { v: 'new' }, original: { v: 'old', n: null } },
+      { op: 'delete', key: { id: '2' }, original: { v: 'x' } },
+    ], ['id', 'v', 'n']);
+    expect(u).toMatchObject({ sql: 'UPDATE "s"."t" SET "v" = $1 WHERE "id" = $2 AND "v"::text IS NOT DISTINCT FROM $3 AND "n"::text IS NOT DISTINCT FROM $4', params: ['new', '1', 'old', null] });
+    expect(d).toMatchObject({ sql: 'DELETE FROM "s"."t" WHERE "id" = $1 AND "v"::text IS NOT DISTINCT FROM $2', params: ['2', 'x'] });
+    expect(() => buildEditStatements('s', 't', ['id'], [{ op: 'update', key: { id: '1' }, set: { v: 'a' }, original: { zz: 'a' } }], ['id', 'v'])).toThrow(DbSqlError);
   });
 
   it('uses composite keys in order and refuses what would not identify one row', () => {
@@ -120,7 +147,7 @@ describe('pageSql', () => {
   });
 
   it('reads one cell by its key', () => {
-    expect(cellSql('s', 't', 'body', { id: '4' }, ['id'])).toEqual({ sql: 'SELECT "body"::text FROM "s"."t" WHERE "id" = $1 LIMIT 2', params: ['4'] });
+    expect(cellSql('s', 't', 'body', { id: '4' }, ['id'])).toEqual({ sql: 'SELECT left("body"::text, 16777217) FROM "s"."t" WHERE "id" = $1 LIMIT 2', params: ['4'] });
     expect(() => cellSql('s', 't', 'body', { other: '4' }, ['id'])).toThrow(DbSqlError);
   });
 });
