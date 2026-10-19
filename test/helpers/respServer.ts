@@ -19,6 +19,20 @@ export interface RespServerOptions {
   noScanType?: boolean;
   noUnlink?: boolean;
   noHello?: boolean;
+  /**
+   * SCAN family like real Redis: cursors are stable positions (deleting an item never shifts the others); `scanRepeat` also
+   * returns the last item of each page again at the start of the next one (Redis may return an element twice);
+   * `wholeSmall`: H/S/ZSCAN of a container with at most this many items returns all of it at once with cursor 0 (listpack).
+   */
+  scanRepeat?: boolean;
+  wholeSmall?: number;
+  /** Renamed commands (new name -> real one), like rename-command; the real name is then unknown. */
+  renames?: Record<string, string>;
+  /** Redis 6 style: COMMAND INFO of a container has no subcommand entries. Before Redis 6: SET has no KEEPTTL. */
+  noSubcommandInfo?: boolean;
+  noKeepTtl?: boolean;
+  /** Delays one command (upper case name, "MEMORY USAGE" style for subcommands) by ms before it runs. */
+  commandDelays?: Record<string, number>;
   version?: string;
   /** Serve TLS with this key and certificate (PEM). */
   tls?: { key: string; cert: string };
@@ -81,11 +95,15 @@ export interface RespServer {
   connections(): number;
   /** Destroys every client connection (the clients see a dropped connection). */
   dropClients(): void;
+  /** Destroys only the connections in subscriber mode. */
+  dropSubscribers(): void;
   /** Stops accepting connections (refused) and drops the open ones, until resume(). */
   stopListening(): Promise<void>;
   resume(): Promise<void>;
   /** Delays every reply by this many ms (0: none). */
   delayMs: number;
+  /** Per-command delays (mutable; see RespServerOptions.commandDelays). */
+  commandDelays: Record<string, number>;
   /** Sets a string key directly (tests). */
   setString(key: string | Buffer, value: string | Buffer, db?: number): void;
   close(): Promise<void>;
@@ -174,7 +192,7 @@ const FLAGS: Record<string, string[]> = {
   lindex: ['readonly'], lpush: ['write', 'denyoom', 'fast'], rpush: ['write', 'denyoom', 'fast'], lset: ['write', 'denyoom'], lrem: ['write'],
   sadd: ['write', 'denyoom', 'fast'], srem: ['write', 'fast'], scard: ['readonly', 'fast'], smembers: ['readonly'], sscan: ['readonly'], sismember: ['readonly', 'fast'],
   zadd: ['write', 'denyoom', 'fast'], zrem: ['write', 'fast'], zcard: ['readonly', 'fast'], zscore: ['readonly', 'fast'], zincrby: ['write', 'denyoom', 'fast'],
-  zrange: ['readonly'], zscan: ['readonly'], xadd: ['write', 'denyoom', 'fast'], xrange: ['readonly'], xrevrange: ['readonly'], xdel: ['write', 'fast'],
+  zrange: ['readonly'], zscan: ['readonly'], xadd: ['write', 'denyoom', 'fast'], xrange: ['readonly'], xread: ['readonly', 'blocking', 'movablekeys'], replconf: ['admin', 'noscript', 'loading', 'stale', 'allow_busy'], xrevrange: ['readonly'], xdel: ['write', 'fast'],
   xtrim: ['write'], xlen: ['readonly', 'fast'], select: ['loading', 'stale', 'fast'], ping: ['fast'], echo: ['fast'], info: ['loading', 'stale'],
   flushdb: ['write'], flushall: ['write'], publish: ['pubsub', 'loading', 'stale', 'fast', 'may_replicate'], subscribe: ['pubsub', 'noscript', 'loading', 'stale'],
   psubscribe: ['pubsub', 'noscript', 'loading', 'stale'], unsubscribe: ['pubsub', 'noscript', 'loading', 'stale'], punsubscribe: ['pubsub', 'noscript', 'loading', 'stale'],
@@ -184,6 +202,8 @@ const FLAGS: Record<string, string[]> = {
   hello: ['noscript', 'loading', 'stale', 'fast', 'no_auth', 'allow_busy'], quit: ['noscript', 'loading', 'stale', 'fast', 'no_auth', 'allow_busy'],
   shutdown: ['admin', 'noscript', 'loading', 'stale', 'no_multi', 'sentinel', 'allow_busy'], swapdb: ['write', 'fast'],
 };
+/** Commands (and "name|sub") in the @dangerous ACL category. */
+const DANGEROUS = new Set(['flushall', 'flushdb', 'keys', 'debug', 'shutdown', 'swapdb', 'info', 'config|set', 'config|rewrite', 'config|resetstat', 'client|kill', 'client|list', 'slowlog|get', 'slowlog|reset']);
 const SUBS: Record<string, Record<string, string[]>> = {
   config: { get: ['admin', 'noscript', 'loading', 'stale'], set: ['admin', 'noscript', 'loading', 'stale'], resetstat: ['admin', 'noscript', 'loading', 'stale'], rewrite: ['admin', 'noscript', 'loading', 'stale'] },
   client: { list: ['admin', 'noscript', 'loading', 'stale'], setname: ['noscript', 'loading', 'stale'], getname: ['noscript', 'loading', 'stale'], setinfo: ['noscript', 'loading', 'stale'], kill: ['admin', 'noscript', 'loading', 'stale'], id: ['noscript', 'loading', 'stale'] },
@@ -276,19 +296,33 @@ export async function startRespServer(opts: RespServerOptions = {}): Promise<Res
     return names.filter((n) => all[n]).map((n) => `# ${n[0].toUpperCase()}${n.slice(1)}\r\n${all[n].join('\r\n')}${all[n].length ? '\r\n' : ''}`).join('\r\n');
   }
 
-  function commandInfo(name: string): Reply {
-    const flags = FLAGS[name];
-    const subs = SUBS[name];
+  const renamedFrom = new Map(Object.entries(opts.renames ?? {}).map(([to, from]) => [from.toLowerCase(), to.toLowerCase()]));
+  function commandInfo(asked: string): Reply {
+    const real = (opts.renames ?? {})[asked.toUpperCase()]?.toLowerCase() ?? (renamedFrom.has(asked) ? '' : asked);
+    const flags = FLAGS[real];
+    const subs = SUBS[real];
     if (!flags && !subs) return B(null);
-    const entry = (n: string, f: string[]): Reply => A([B(n), I(-1), A(f.map(S)), I(0), I(0), I(0), A([]), A([]), A([]), A([])]);
-    if (!subs) return entry(name, flags!);
-    const e = entry(name, ['loading', 'stale']);
-    (e as { v: Reply[] }).v[9] = A(Object.entries(subs).map(([s, f]) => entry(`${name}|${s}`, f)));
+    const cats = (n: string, f: string[]) => [...(f.includes('write') ? ['@write'] : []), ...(f.includes('readonly') ? ['@read'] : []), ...(DANGEROUS.has(n) ? ['@dangerous'] : [])];
+    const entry = (n: string, shown: string, f: string[]): Reply => A([B(shown), I(-1), A(f.map(S)), I(0), I(0), I(0), A(cats(n, f).map(S)), A([]), A([]), A([])]);
+    if (!subs) return entry(real, asked, flags!);
+    if (opts.noSubcommandInfo) return entry(real, asked, ['admin', 'noscript', 'loading', 'stale']);
+    const e = entry(real, asked, ['loading', 'stale']);
+    (e as { v: Reply[] }).v[9] = A(Object.entries(subs).map(([s, f]) => entry(`${real}|${s}`, `${asked}|${s}`, f)));
     return e;
   }
 
-  /** SCAN-style iteration over a list of items: cursor = offset. */
-  function scanItems<T>(items: T[], cursorArg: Buffer | undefined, rest: Buffer[], matchOf: (t: T) => string, extra?: (t: T, type: string | null) => boolean): { next: number; out: T[] } | Reply {
+  /** Stable positions per container (a key's position never changes; deleted keys leave a gap), like Redis' cursors. */
+  const seqs = new WeakMap<object, Map<string, number>>();
+  let nextSeq = 1;
+  function ordered<T>(container: Map<string, T>): Array<[string, T, number]> {
+    let s = seqs.get(container);
+    if (!s) { s = new Map(); seqs.set(container, s); }
+    for (const k of container.keys()) if (!s.has(k)) s.set(k, nextSeq++);
+    return [...container.entries()].map(([k, v]) => [k, v, s!.get(k)!] as [string, T, number]).sort((x, y) => x[2] - y[2]);
+  }
+
+  /** SCAN-style iteration: the cursor is the position to go on from (0: start / done). */
+  function scanItems<T>(container: Map<string, T>, cursorArg: Buffer | undefined, rest: Buffer[], extra?: (k: string, t: T, type: string | null) => boolean): { next: number; out: Array<[string, T]> } | Reply {
     const cursor = num(cursorArg);
     if (cursor === null || cursor < 0) return E('ERR invalid cursor');
     let count = 10, match: string | null = null, type: string | null = null;
@@ -300,15 +334,23 @@ export async function startRespServer(opts: RespServerOptions = {}): Promise<Res
       else if (o === 'NOVALUES') continue;
       else return SYNTAX;
     }
-    const out: T[] = [];
-    let i = cursor;
-    for (; i < items.length && i < cursor + count; i++) {
-      const it = items[i];
-      if (match !== null && !globMatch(match, matchOf(it))) continue;
-      if (extra && !extra(it, type)) continue;
-      out.push(it);
+    const all = ordered(container);
+    // A small hash, set or zset comes back whole (Redis ignores COUNT for listpack encodings).
+    if (!extra && opts.wholeSmall !== undefined && all.length <= opts.wholeSmall) count = Infinity;
+    const from = all.findIndex((x) => x[2] >= cursor);
+    const out: Array<[string, T]> = [];
+    if (from < 0) return { next: 0, out };
+    let i = from;
+    for (; i < all.length && i < from + count; i++) {
+      const [k, v] = all[i];
+      if (match !== null && !globMatch(match, k)) continue;
+      if (extra && !extra(k, v, type)) continue;
+      out.push([k, v]);
     }
-    return { next: i >= items.length ? 0 : i, out };
+    if (i >= all.length) return { next: 0, out };
+    // scanRepeat: the next page starts with the last item of this one again (when that still makes progress).
+    const next = opts.scanRepeat && i - 1 > from ? all[i - 1][2] : all[i][2];
+    return { next, out };
   }
 
   function sortedZ(z: Map<string, { member: Buffer; score: number }>) {
@@ -338,7 +380,10 @@ export async function startRespServer(opts: RespServerOptions = {}): Promise<Res
   // ── commands ─────────────────────────────────────────────────────────────
 
   async function run(c: Conn, argv: Buffer[]): Promise<Reply> {
-    const cmd = up(argv[0]);
+    const asked = up(argv[0]);
+    const renamed = (opts.renames ?? {})[asked];
+    if (!renamed && renamedFrom.has(asked.toLowerCase())) return E(`ERR unknown command '${argv[0].toString()}', with args beginning with: `);
+    const cmd = renamed ? renamed.toUpperCase() : asked;
     const a = argv.slice(1);
     const sub = up(a[0]);
     const full = ['CONFIG', 'CLIENT', 'MEMORY', 'SLOWLOG', 'COMMAND', 'OBJECT', 'XINFO', 'ACL', 'SCRIPT', 'FUNCTION'].includes(cmd) && a.length ? `${cmd} ${sub}` : cmd;
@@ -442,10 +487,9 @@ export async function startRespServer(opts: RespServerOptions = {}): Promise<Res
       case 'FLUSHALL': dbs.forEach((m, i) => { for (const k of [...m.keys()]) remove(i, k); }); return OK;
       case 'KEYS': { const p = a[0] ? keyOf(a[0]) : '*'; return A([...db.keys()].filter((k) => lookup(c.db, k) && globMatch(p, k)).map((k) => B(bufOf(k)))); }
       case 'SCAN': {
-        const keys = [...db.keys()];
-        const r = scanItems(keys, a[0], a.slice(1), (k) => k, (k, type) => { const e = lookup(c.db, k); return !!e && (type === null || e.value.type === type); });
+        const r = scanItems(db, a[0], a.slice(1), (k, _e, type) => { const e = lookup(c.db, k); return !!e && (type === null || e.value.type === type); });
         if (isReply(r)) return r;
-        return A([B(String(r.next)), A(r.out.map((k) => B(bufOf(k))))]);
+        return A([B(String(r.next)), A(r.out.map(([k]) => B(bufOf(k))))]);
       }
       case 'TYPE': { const e = lookup(c.db, k0); return S(e ? e.value.type : 'none'); }
       case 'TTL': case 'PTTL': {
@@ -495,7 +539,7 @@ export async function startRespServer(opts: RespServerOptions = {}): Promise<Res
         let nx = false, xx = false, keep = false, get = false, exp: number | undefined;
         for (let i = 2; i < a.length; i++) {
           const o = up(a[i]);
-          if (o === 'NX') nx = true; else if (o === 'XX') xx = true; else if (o === 'KEEPTTL') keep = true; else if (o === 'GET') get = true;
+          if (o === 'NX') nx = true; else if (o === 'XX') xx = true; else if (o === 'KEEPTTL' && !opts.noKeepTtl) keep = true; else if (o === 'GET') get = true;
           else if (o === 'EX' || o === 'PX') { const n = num(a[++i]); if (n === null || n <= 0) return E('ERR invalid expire time in \'set\' command'); exp = Date.now() + (o === 'EX' ? n * 1000 : n); }
           else return SYNTAX;
         }
@@ -525,7 +569,7 @@ export async function startRespServer(opts: RespServerOptions = {}): Promise<Res
       case 'HGETALL': { const h = typed(c, a[0], 'hash', false); if (isReply(h)) return h; const pairs = h ? [...h.v.entries()] : []; return c.proto === 3 ? { k: 'map', v: pairs.map(([f, v]) => [B(bufOf(f)), B(v)]) } : A(pairs.flatMap(([f, v]) => [B(bufOf(f)), B(v)])); }
       case 'HSCAN': {
         const h = typed(c, a[0], 'hash', false); if (isReply(h)) return h;
-        const r = scanItems(h ? [...h.v.entries()] : [], a[1], a.slice(2), ([f]) => f);
+        const r = scanItems(h ? h.v : new Map<string, Buffer>(), a[1], a.slice(2));
         if (isReply(r)) return r;
         return A([B(String(r.next)), A(r.out.flatMap(([f, v]) => [B(bufOf(f)), B(v)]))]);
       }
@@ -575,9 +619,9 @@ export async function startRespServer(opts: RespServerOptions = {}): Promise<Res
       case 'SMEMBERS': { const s = typed(c, a[0], 'set', false); if (isReply(s)) return s; return A(s ? [...s.v.values()].map((x) => B(x)) : []); }
       case 'SSCAN': {
         const s = typed(c, a[0], 'set', false); if (isReply(s)) return s;
-        const r = scanItems(s ? [...s.v.values()] : [], a[1], a.slice(2), (m) => keyOf(m));
+        const r = scanItems(s ? s.v : new Map<string, Buffer>(), a[1], a.slice(2));
         if (isReply(r)) return r;
-        return A([B(String(r.next)), A(r.out.map((m) => B(m)))]);
+        return A([B(String(r.next)), A(r.out.map(([, m]) => B(m)))]);
       }
       case 'ZADD': {
         let i = 1, nx = false, xx = false, ch = false;
@@ -623,9 +667,9 @@ export async function startRespServer(opts: RespServerOptions = {}): Promise<Res
       }
       case 'ZSCAN': {
         const z = typed(c, a[0], 'zset', false); if (isReply(z)) return z;
-        const r = scanItems(z ? [...z.v.values()] : [], a[1], a.slice(2), (e) => keyOf(e.member));
+        const r = scanItems(z ? z.v : new Map<string, { member: Buffer; score: number }>(), a[1], a.slice(2));
         if (isReply(r)) return r;
-        return A([B(String(r.next)), A(r.out.flatMap((e) => [B(e.member), B(fmtScore(e.score))]))]);
+        return A([B(String(r.next)), A(r.out.flatMap(([, e]) => [B(e.member), B(fmtScore(e.score))]))]);
       }
       case 'XADD': {
         let i = 1, maxLen: number | null = null;
@@ -714,6 +758,22 @@ export async function startRespServer(opts: RespServerOptions = {}): Promise<Res
         return A(out);
       }
       case 'SWAPDB': return OK;
+      case 'REPLCONF': return OK;
+      case 'XREAD': {
+        const at = a.findIndex((x) => up(x) === 'STREAMS');
+        if (at < 0) return SYNTAX;
+        const rest = a.slice(at + 1);
+        const half = rest.length / 2;
+        const out: Reply[] = [];
+        for (let i = 0; i < half; i++) {
+          const s = typed(c, rest[i], 'stream', false); if (isReply(s)) return s;
+          const p = parseRangeId(rest[half + i].toString(), true);
+          if (!s || !p) continue;
+          const list = s.v.filter((e) => idCmp(e.id, p.id) > 0);
+          if (list.length) out.push(A([B(rest[i]), A(list.map((e) => A([B(idStr(e.id)), A(e.fields.map((f) => B(f)))])))]));
+        }
+        return out.length ? A(out) : A(null);
+      }
       default: return E(`ERR unknown command '${argv[0]?.toString() ?? ''}', with args beginning with: ${a.slice(0, 3).map((x) => `'${x.toString()}' `).join('')}`);
     }
   }
@@ -765,6 +825,9 @@ export async function startRespServer(opts: RespServerOptions = {}): Promise<Res
         c.lastCmd = argv[0].toString().toLowerCase();
         c.queue = c.queue.then(async () => {
           let reply: Reply;
+          const delays = server.commandDelays;
+          const wait = delays[`${up(argv[0])} ${up(argv[1])}`] ?? delays[up(argv[0])];
+          if (wait) await new Promise((res) => setTimeout(res, wait));
           try { reply = await run(c, argv); } catch (error) { reply = E(`ERR ${(error as Error).message}`); }
           if (server.delayMs) await new Promise((res) => setTimeout(res, server.delayMs));
           send(c, reply);
@@ -783,9 +846,10 @@ export async function startRespServer(opts: RespServerOptions = {}): Promise<Res
   const port = await listen(opts.port ?? 0);
 
   const server: RespServer = {
-    port, log, slowlog, dbs, options: opts, delayMs: 0,
+    port, log, slowlog, dbs, options: opts, delayMs: 0, commandDelays: { ...(opts.commandDelays ?? {}) },
     connections: () => conns.size,
     dropClients: () => { for (const c of conns) c.sock.destroy(); },
+    dropSubscribers: () => { for (const c of conns) if (subscribed(c)) c.sock.destroy(); },
     stopListening: () => new Promise((resolve) => { listener.close(() => resolve()); for (const c of conns) c.sock.destroy(); }),
     resume: async () => { await listen(port); },
     setString: (key, value, db = 0) => setEntry(db, keyOf(Buffer.from(key as never)), { type: 'string', v: Buffer.from(value as never) }),

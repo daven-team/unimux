@@ -392,7 +392,7 @@ describe('Redis: values', () => {
     expect(counted).toMatchObject({ count: 230, complete: true });
     expect(errorOf(await h.r(id, { kind: 'deletePattern', token: '00000000-0000-4000-8000-000000000000' }))).toBe('staleToken');
     const before = s.log.length;
-    expect(await h.rv(id, { kind: 'deletePattern', token: counted.token })).toEqual({ deleted: 230, cancelled: false });
+    expect(await h.rv(id, { kind: 'deletePattern', token: counted.token })).toEqual({ deleted: 230, cancelled: false, more: false });
     const unlinks = s.log.slice(before).filter((l) => l.argv[0].toLowerCase() === 'unlink');
     expect(unlinks.every((l) => l.argv.length - 1 <= 50)).toBe(true);
     expect(s.dbs[0].size).toBe(1);
@@ -555,7 +555,8 @@ describe('Redis: Pub/Sub', () => {
     expect(after.channels).toEqual([{ b64: 'AP8=' }]);
     const none = await h.rv<RedisPubSubState>(id, { kind: 'unsubscribe', all: true });
     expect(none).toMatchObject({ state: 'idle', channels: [], patterns: [] });
-    await waitFor(() => s.connections() === 1);
+    // Left: the main connection and the console's own one (the PING above).
+    await waitFor(() => s.connections() === 2);
     expect((h.port as unknown as PortMsg[]).some((m) => m.t === 'redisPubSubState' && m.sessionId === id && m.state?.state === 'idle')).toBe(true);
   });
 
@@ -610,7 +611,8 @@ describe('Redis: through the SSH tunnel', () => {
     const got = await h.cmd(sid, 'GET through');
     expect(got.ok && got.value.reply).toEqual({ t: 'bulk', v: 'ssh', bytes: 3 });
     await h.rv(sid, { kind: 'subscribe', channels: ['t'] });
-    expect(ssh.forwards).toHaveLength(2);
+    // Main, console (the GET) and subscriber: each its own forwarded channel.
+    expect(ssh.forwards).toHaveLength(3);
     expect(h.last(sid)?.tls).toBe(false);
     // A second session of the same connection rides the same tunnel (no second login) and survives a dropped connection.
     const second = await h.openRedis(s, { ssh: { dbHost: '127.0.0.1', dbPort: s.port, tunnelKey: 'redis-tunnel-1', owner: false }, password: 'r-pw' });
