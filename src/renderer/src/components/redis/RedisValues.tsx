@@ -8,12 +8,14 @@ import {
   isBinaryData, redisDataDisplay, redisDataFromHex, redisDataHex, redisDataKey, type RedisBlob, type RedisData, type RedisHashEntry, type RedisReadRequest,
   type RedisReadResult, type RedisStreamEntry, type RedisWrite, type RedisZsetEntry,
 } from '../../../../shared/dbRedis';
-import { containsPattern, formatBytes, formatJson, hexDump, isJsonText, jsonError, validNewStreamId, validScore } from '../../../../shared/redisView';
+import {
+  containsPattern, editorText, formatBytes, formatJson, hexDump, isJsonText, jsonError, jsonSaveText, lineEndings, savedText, validNewStreamId, validScore, writeOutcome,
+} from '../../../../shared/redisView';
 import { useI18n } from '../../i18n';
 import { askChoice, toast } from '../../store';
 import { resultText, withTab } from '../../redis/redisClient';
 import { IPlus, ISearch, IX } from '../icons';
-import { DataText, preview, RedisDialog, VirtualList } from './common';
+import { DataText, preview, RedisDialog, useOffline, VirtualList } from './common';
 import type { ValueProps } from './RedisValuePanel';
 
 const PAGE = 200;
@@ -36,17 +38,17 @@ async function read<T extends RedisReadResult['type']>(tabId: string, req: Redis
  */
 async function write(tabId: string, w: RedisWrite, p: Pick<ValueProps, 'onChanged' | 'onReload'>, tr: Tr): Promise<{ changed: number; id?: string } | null> {
   const r = await withTab(tabId, (sid) => window.mc.db.redis.write(sid, w));
-  if (r.ok) { p.onChanged(); return r.value; }
-  if (r.error === 'notFound' || r.error === 'wrongType') {
-    toast(r.error === 'notFound' ? tr('Klucz już nie istnieje') : tr('Klucz zmienił typ - wczytano go ponownie'), 'error');
-    p.onReload();
-    return null;
+  const outcome = writeOutcome(r);
+  switch (outcome.kind) {
+    case 'done': p.onChanged(); return r.ok ? r.value : null;
+    case 'reload':
+      toast(outcome.why === 'notFound' ? tr('Klucz już nie istnieje') : outcome.why === 'wrongType' ? tr('Klucz zmienił typ - wczytano go ponownie') : tr('Element zmienił się w międzyczasie - wczytano listę ponownie'), 'error');
+      p.onReload();
+      return null;
+    // A deadline passed (the write did not start) or a hang was cut: never retried by itself; a refresh shows what the key holds.
+    case 'timeout': toast(tr('Serwer nie odpowiedział na czas. Odśwież, aby sprawdzić stan klucza, i spróbuj ponownie.'), 'error'); return null;
+    case 'error': if (!r.ok) toast(resultText(r), 'error'); return null;
   }
-  // A deadline passed (the write did not start) or a hang was cut: never retried by itself; a refresh shows what the key holds.
-  if (r.error === 'dbTimeout') { toast(tr('Serwer nie odpowiedział na czas. Odśwież, aby sprawdzić stan klucza, i spróbuj ponownie.'), 'error'); return null; }
-  if (r.error === 'conflict') { toast(tr('Element zmienił się w międzyczasie - wczytano listę ponownie'), 'error'); p.onReload(); return null; }
-  toast(resultText(r), 'error');
-  return null;
 }
 
 async function readWhole(tabId: string, req: Parameters<typeof window.mc.db.redis.readItem>[1]): Promise<RedisBlob | null> {
@@ -56,8 +58,9 @@ async function readWhole(tabId: string, req: Parameters<typeof window.mc.db.redi
   return null;
 }
 
-const confirmDelete = async (tr: Tr, title: string, body: string): Promise<boolean> =>
-  (await askChoice(title, body, [{ label: tr('Usuń'), value: 'delete', danger: true }])) === 'delete';
+/** A confirmed delete; the body ends with where it runs ("local redis · DB 3"). */
+const confirmDelete = async (tr: Tr, title: string, body: string, where: string): Promise<boolean> =>
+  (await askChoice(title, `${body}\n${where}`, [{ label: tr('Usuń'), value: 'delete', danger: true }])) === 'delete';
 
 /** Items of a further SCAN page added to the loaded ones (a scan may return an item twice). */
 function dedupe<T>(loaded: T[], page: T[], id: (t: T) => RedisData): T[] {
@@ -72,15 +75,17 @@ const asData = (text: string): RedisData => text;
 
 // ── shared layout ───────────────────────────────────────────────────────────
 
-function Items({ toolbar, count, row, more, onMore, loading, error, editor, empty }: {
+/** A list of a value's items with the editor below; the keyboard moves the chosen item (`sel`) with the arrows. */
+function Items({ toolbar, count, row, more, onMore, loading, error, editor, empty, sel, onSel, label, className = '' }: {
   toolbar?: ReactNode; count: number; row: (i: number) => ReactNode; more: boolean; onMore: () => void; loading: boolean; error: string | null; editor?: ReactNode; empty: string;
+  sel: number | null; onSel: (i: number) => void; label: string; className?: string;
 }) {
   const { tr } = useI18n();
   return (
-    <div className="redis-items">
+    <div className={`redis-items ${className}`}>
       {toolbar && <div className="redis-toolbar sub">{toolbar}</div>}
       {error && <div className="redis-error-text pad" role="alert">{error}</div>}
-      <VirtualList className="redis-item-list" count={count} rowHeight={ROW} row={row}
+      <VirtualList className="redis-item-list" count={count} rowHeight={ROW} row={row} active={sel} onMove={onSel} label={label}
         end={more ? <div className="redis-more"><button className="btn small redis-load-more" disabled={loading} onClick={onMore}>{loading ? tr('Wczytywanie…') : tr('Wczytaj więcej')}</button></div>
           : !count && !loading ? <div className="redis-empty muted">{empty}</div> : null} />
       {editor}
@@ -124,14 +129,30 @@ function useWhole(blob: RedisBlob | null, load: () => Promise<RedisBlob | null>)
   return { value: blob?.truncated ? whole : blob, loading };
 }
 
-/** A textarea for a value; binary data is shown escaped and read-only (edit it as hex in a string key). */
-function ValueBox({ blob, text, onText, readOnly, className = '' }: { blob: RedisBlob | null; text: string; onText: (t: string) => void; readOnly: boolean; className?: string }) {
+/**
+ * The text editor of an item value (hash field, list element). Binary data is shown escaped and read-only. Line endings are kept:
+ * a CRLF value is edited with LF and saved with CRLF again; a value with mixed line endings cannot round-trip through a textarea,
+ * so it is read-only here.
+ */
+function useItemText(blob: RedisBlob | null): { shown: string; text: string | null; setText: (t: string) => void; canEdit: boolean; save: () => RedisData | null; note: string | null } {
   const { tr } = useI18n();
+  const [text, setText] = useState<string | null>(null);
+  const display = blob ? redisDataDisplay(blob.data) : '';
   const binary = !!blob && isBinaryData(blob.data);
+  const eol = binary ? 'lf' : lineEndings(display);
+  const canEdit = !!blob && !binary && eol !== 'mixed';
+  const note = binary ? tr('Wartość binarna - pokazano bajty spoza tekstu jako \\xHH')
+    : eol === 'mixed' ? tr('Wartość ma mieszane końce linii (CR, LF, CRLF) - edycja tekstowa jest wyłączona, żeby ich nie zmienić. Użyj konsoli.')
+      : eol === 'crlf' ? tr('Końce linii CRLF zostaną zachowane.') : null;
+  return { shown: text ?? (canEdit ? editorText(display) : display), text, setText, canEdit, save: () => (text === null ? null : savedText(text, eol)), note };
+}
+
+function ValueBox({ item, readOnly }: { item: ReturnType<typeof useItemText>; readOnly: boolean }) {
+  const { tr } = useI18n();
   return (
     <>
-      {binary && <p className="muted small">{tr('Wartość binarna - pokazano bajty spoza tekstu jako \\xHH')}</p>}
-      <textarea className={`textarea redis-value-text ${className}`} value={text} readOnly={readOnly || binary} spellCheck={false} onChange={(e) => onText(e.target.value)} />
+      {item.note && <p className="muted small">{item.note}</p>}
+      <textarea className="textarea redis-value-text" value={item.shown} readOnly={readOnly || !item.canEdit} spellCheck={false} aria-label={tr('Wartość')} onChange={(e) => item.setText(e.target.value)} />
     </>
   );
 }
@@ -142,6 +163,7 @@ type StringMode = 'text' | 'json' | 'hex';
 
 export function StringView(p: ValueProps) {
   const { tr } = useI18n();
+  const offline = useOffline();
   const [blob, setBlob] = useState<RedisBlob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<StringMode>('text');
@@ -155,46 +177,66 @@ export function StringView(p: ValueProps) {
     const v = r.value.value;
     setBlob(v);
     setDraft(null);
-    setMode(isBinaryData(v.data) ? 'hex' : isJsonText(v.data as string) ? 'json' : 'text');
+    const t = isBinaryData(v.data) ? null : v.data;
+    setMode(t === null ? 'hex' : isJsonText(t) && lineEndings(t) === 'lf' ? 'json' : 'text');
   };
   useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const binary = !!blob && isBinaryData(blob.data);
+  const stored = blob && !binary ? (blob.data as string) : '';
+  // A textarea turns CR and CRLF into LF: CRLF text is edited with LF and saved with CRLF; mixed line endings only as hex.
+  const eol = binary ? 'lf' : lineEndings(stored);
   const sourceText = useMemo(() => {
     if (!blob) return '';
     if (mode === 'hex') return blob.bytes <= HEX_EDIT_BYTES ? redisDataHex(blob.data) : '';
-    const text = redisDataDisplay(blob.data);
-    return mode === 'json' ? formatJson(text) ?? text : text;
-  }, [blob, mode]);
+    if (binary) return redisDataDisplay(blob.data);
+    return mode === 'json' ? formatJson(stored) ?? stored : editorText(stored);
+  }, [blob, mode, binary, stored]);
   if (error) return <div className="redis-error-text pad" role="alert">{error}</div>;
   if (!blob) return <div className="redis-center muted">{tr('Wczytywanie…')}</div>;
   const text = draft ?? sourceText;
   const dirty = draft !== null && draft !== sourceText;
   const truncated = !!blob.truncated;
-  const editable = !p.readOnly && !truncated && !(binary && mode !== 'hex') && !(mode === 'hex' && blob.bytes > HEX_EDIT_BYTES);
+  const textBlocked = mode !== 'hex' && (binary || eol === 'mixed' || (mode === 'json' && eol !== 'lf'));
+  const editable = !p.readOnly && !truncated && !textBlocked && !(mode === 'hex' && blob.bytes > HEX_EDIT_BYTES);
   const jsonProblem = mode === 'json' ? jsonError(text) : null;
   const switchMode = (next: StringMode) => {
     if (next === mode) return;
     // An edit goes along to the other view when it can be expressed there; else the stored value is shown again.
-    if (draft !== null && dirty) {
+    if (draft !== null && dirty && eol === 'lf') {
       if (next === 'hex' && mode !== 'hex') setDraft(redisDataHex(asData(draft)));
-      else if (mode === 'hex') { const d = redisDataFromHex(draft); setDraft(d !== null && !isBinaryData(d) ? (next === 'json' ? formatJson(d) ?? d : d) : null); }
+      else if (mode === 'hex') { const d = redisDataFromHex(draft); setDraft(d !== null && !isBinaryData(d) && lineEndings(d) === 'lf' ? (next === 'json' ? formatJson(d) ?? d : d) : null); }
       else if (next === 'json') setDraft(formatJson(draft) ?? draft);
     } else setDraft(null);
     setMode(next);
   };
-  const save = async () => {
-    let value: RedisData | null;
-    if (mode === 'hex') { value = redisDataFromHex(text); if (value === null) { toast(tr('Nieprawidłowy zapis szesnastkowy'), 'error'); return; } }
-    else if (mode === 'json') {
-      if (jsonProblem) { toast(tr('Nieprawidłowy JSON: {error}', { error: jsonProblem }), 'error'); return; }
-      // A compact stored JSON stays compact (the pretty view is only how it is shown).
-      const stored = redisDataDisplay(blob.data);
-      value = stored.includes('\n') ? text : formatJson(text, 0) ?? text;
-    } else value = text;
+  const store = async (value: RedisData) => {
     setBusy(true);
-    const ok = await write(p.tabId, { op: 'set', key: p.keyName, value, keepTtl }, p, tr);
+    // existing: a key that expired or was deleted while the editor was open is not created again (notFound reloads the panel).
+    const ok = await write(p.tabId, { op: 'set', key: p.keyName, value, keepTtl, existing: true }, p, tr);
     setBusy(false);
     if (ok) { toast(tr('Zapisano')); void load(); }
+  };
+  const save = async () => {
+    if (mode === 'hex') {
+      const value = redisDataFromHex(text);
+      if (value === null) { toast(tr('Nieprawidłowy zapis szesnastkowy'), 'error'); return; }
+      await store(value);
+      return;
+    }
+    if (mode === 'json') {
+      // The stored formatting is kept (pretty or compact); any other style is not rewritten without asking.
+      const plan = jsonSaveText(stored, text);
+      if (plan.kind === 'invalid') { toast(tr('Nieprawidłowy JSON: {error}', { error: jsonProblem ?? '' }), 'error'); return; }
+      if (plan.kind === 'save') { await store(plan.text); return; }
+      const choice = await askChoice(tr('Jak zapisać JSON?'), `${tr('Zapisana wartość ma własne formatowanie. Zapis z widoku JSON je zmieni.')}\n${p.where}`, [
+        { label: tr('Sformatowany'), value: 'pretty', primary: true }, { label: tr('Kompaktowy'), value: 'compact' },
+      ]);
+      if (choice === 'pretty') await store(plan.pretty);
+      else if (choice === 'compact') await store(plan.compact);
+      return;
+    }
+    const value = savedText(text, eol);
+    if (value !== null) await store(value);
   };
   return (
     <div className="redis-string">
@@ -205,6 +247,7 @@ export function StringView(p: ValueProps) {
           <button className={mode === 'hex' ? 'on' : ''} aria-pressed={mode === 'hex'} onClick={() => switchMode('hex')}>Hex</button>
         </div>
         {binary && <span className="redis-bin" title={tr('Dane binarne')}>bin</span>}
+        {eol === 'crlf' && <span className="redis-chip" title={tr('Końce linii CRLF zostaną zachowane.')}>CRLF</span>}
         <span className="muted">{formatBytes(blob.bytes)}</span>
         {mode === 'json' && <span className={jsonProblem ? 'redis-error-text' : 'redis-ok-text'}>{jsonProblem ? tr('Nieprawidłowy JSON') : tr('Poprawny JSON')}</span>}
         <span className="grow" />
@@ -216,16 +259,22 @@ export function StringView(p: ValueProps) {
           {blob.bytes <= 16 * 1024 * 1024 && <button className="btn small" onClick={() => void load(16 * 1024 * 1024)}>{tr('Wczytaj całość')}</button>}
         </div>
       )}
+      {!p.readOnly && !truncated && textBlocked && !binary && (
+        <div className="redis-note" role="status">
+          {eol === 'mixed' ? tr('Wartość ma mieszane końce linii (CR, LF, CRLF) - edytuj ją jako Hex, żeby ich nie zmienić.') : tr('Wartość z końcami linii CRLF edytuj w widoku Tekst lub Hex.')}
+          <button className="btn small" onClick={() => switchMode('hex')}>{tr('Edytuj jako Hex')}</button>
+        </div>
+      )}
       {mode === 'hex' && blob.bytes > HEX_EDIT_BYTES
         ? <pre className="redis-hexdump">{hexDump(blob.data).join('\n')}</pre>
-        : <textarea className={`textarea redis-string-text ${mode === 'hex' ? 'hex' : ''} ${jsonProblem ? 'invalid' : ''}`} value={binary && mode === 'text' ? redisDataDisplay(blob.data) : text}
+        : <textarea className={`textarea redis-string-text ${mode === 'hex' ? 'hex' : ''} ${jsonProblem ? 'invalid' : ''}`} value={text}
           readOnly={!editable} spellCheck={false} aria-label={tr('Wartość')} onChange={(e) => setDraft(e.target.value)} />}
       {editable && (
         <div className="redis-row-actions">
           <label className="check"><input type="checkbox" checked={keepTtl} onChange={(e) => setKeepTtl(e.target.checked)} /> {tr('Zachowaj czas wygaśnięcia')}</label>
           <span className="grow" />
           <button className="btn small" disabled={!dirty} onClick={() => setDraft(null)}>{tr('Cofnij zmiany')}</button>
-          <button className="btn small primary redis-save" disabled={!dirty || busy} onClick={() => void save()}>{tr('Zapisz')}</button>
+          <button className="btn small primary redis-save" disabled={!dirty || busy || offline} onClick={() => void save()}>{tr('Zapisz')}</button>
         </div>
       )}
     </div>
@@ -236,6 +285,7 @@ export function StringView(p: ValueProps) {
 
 export function HashView(p: ValueProps) {
   const { tr } = useI18n();
+  const offline = useOffline();
   const [entries, setEntries] = useState<RedisHashEntry[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -259,15 +309,16 @@ export function HashView(p: ValueProps) {
   const current = sel !== null ? entries[sel] : undefined;
   return (
     <Items loading={loading} error={error} count={entries.length} more={cursor !== null && cursor !== '0'} onMore={() => void load(false)} empty={tr('Brak pól')}
+      sel={sel} onSel={(i) => { setSel(i); setAdding(false); }} label={tr('Pole')}
       toolbar={<>
         <SearchField value={search} onChange={setSearch} onSubmit={() => void load(true)} label={tr('Szukaj pól')} />
         <span className="grow" />
-        {!p.readOnly && <button className="btn small redis-add" onClick={() => { setAdding(true); setSel(null); }}><IPlus /> {tr('Dodaj pole')}</button>}
+        {!p.readOnly && <button className="btn small redis-add" disabled={offline} onClick={() => { setAdding(true); setSel(null); }}><IPlus /> {tr('Dodaj pole')}</button>}
       </>}
       row={(i) => {
         const e = entries[i];
         return (
-          <div className={`redis-item two ${i === sel ? 'current' : ''}`} role="listitem" onClick={() => { setSel(i); setAdding(false); }}>
+          <div className={`redis-item two ${i === sel ? 'current' : ''}`} onClick={() => { setSel(i); setAdding(false); }}>
             <DataText data={e.field} className="redis-item-field" />
             <span className="redis-item-value">{preview(e.value.data)}{e.value.truncated ? <span className="redis-cut"> ({formatBytes(e.value.bytes)})</span> : null}</span>
           </div>
@@ -279,29 +330,34 @@ export function HashView(p: ValueProps) {
         if (r.changed === 0) { toast(tr('Takie pole już istnieje'), 'error'); return false; }
         void load(true); return true;
       }} />
-        : current ? <HashEditor key={`${current.field}`} p={p} entry={current} onClose={() => setSel(null)} onDone={() => void load(true)} /> : undefined}
+        // Keyed by the field's bytes: two binary-named fields never share an editor (and its unsaved text).
+        : current ? <HashEditor key={redisDataKey(current.field)} p={p} entry={current} onClose={() => setSel(null)} onDone={() => void load(true)} /> : undefined}
     />
   );
 }
 
 function HashEditor({ p, entry, onClose, onDone }: { p: ValueProps; entry: RedisHashEntry; onClose: () => void; onDone: () => void }) {
   const { tr } = useI18n();
+  const offline = useOffline();
   const whole = useWhole(entry.value, () => readWhole(p.tabId, { type: 'hash', key: p.keyName, field: entry.field }));
-  const [text, setText] = useState<string | null>(null);
-  const shown = text ?? (whole.value ? redisDataDisplay(whole.value.data) : '');
-  const save = async () => { if (await write(p.tabId, { op: 'hset', key: p.keyName, field: entry.field, value: asData(shown), existing: true }, p, tr)) { toast(tr('Zapisano')); onDone(); } };
+  const item = useItemText(whole.value);
+  const save = async () => {
+    const value = item.save();
+    if (value === null) return;
+    if (await write(p.tabId, { op: 'hset', key: p.keyName, field: entry.field, value, existing: true }, p, tr)) { toast(tr('Zapisano')); onDone(); }
+  };
   const remove = async () => {
-    if (!await confirmDelete(tr, tr('Usunąć pole?'), redisDataDisplay(entry.field))) return;
+    if (!await confirmDelete(tr, tr('Usunąć pole?'), redisDataDisplay(entry.field), p.where)) return;
     if (await write(p.tabId, { op: 'hdel', key: p.keyName, fields: [entry.field] }, p, tr)) onDone();
   };
   return (
     <Editor title={<DataText data={entry.field} className="strong" />} onClose={onClose} actions={<>
       <button className="btn small ghost" onClick={() => whole.value && copy(tr, whole.value.data)}>{tr('Kopiuj wartość')}</button>
       <span className="grow" />
-      {!p.readOnly && <button className="btn small danger" onClick={() => void remove()}>{tr('Usuń pole')}</button>}
-      {!p.readOnly && <button className="btn small primary redis-save" disabled={text === null || whole.loading} onClick={() => void save()}>{tr('Zapisz')}</button>}
+      {!p.readOnly && <button className="btn small danger" disabled={offline} onClick={() => void remove()}>{tr('Usuń pole')}</button>}
+      {!p.readOnly && <button className="btn small primary redis-save" disabled={item.text === null || whole.loading || !item.canEdit || offline} onClick={() => void save()}>{tr('Zapisz')}</button>}
     </>}>
-      {whole.loading ? <p className="muted">{tr('Wczytywanie…')}</p> : <ValueBox blob={whole.value} text={shown} onText={setText} readOnly={p.readOnly} />}
+      {whole.loading ? <p className="muted">{tr('Wczytywanie…')}</p> : <ValueBox item={item} readOnly={p.readOnly} />}
     </Editor>
   );
 }
@@ -309,6 +365,7 @@ function HashEditor({ p, entry, onClose, onDone }: { p: ValueProps; entry: Redis
 function AddPair({ tr, first, second, onAdd, onClose, secondCheck }: {
   tr: Tr; first: string; second: string; onAdd: (a: string, b: string) => Promise<boolean>; onClose: () => void; secondCheck?: (b: string) => string | null;
 }) {
+  const offline = useOffline();
   const [a, setA] = useState('');
   const [b, setB] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -323,7 +380,7 @@ function AddPair({ tr, first, second, onAdd, onClose, secondCheck }: {
       {error && <span className="redis-error-text">{error}</span>}
       <span className="grow" />
       <button className="btn small" onClick={onClose}>{tr('Anuluj')}</button>
-      <button className="btn small primary redis-add-save" onClick={() => void submit()}>{tr('Dodaj')}</button>
+      <button className="btn small primary redis-add-save" disabled={offline} onClick={() => void submit()}>{tr('Dodaj')}</button>
     </>}>
       <div className="redis-two">
         <label className="field"><span>{first}</span><input className="input redis-add-first" autoFocus value={a} spellCheck={false} onChange={(e) => setA(e.target.value)} /></label>
@@ -337,6 +394,7 @@ function AddPair({ tr, first, second, onAdd, onClose, secondCheck }: {
 
 export function ListView(p: ValueProps) {
   const { tr } = useI18n();
+  const offline = useOffline();
   const [items, setItems] = useState<RedisBlob[]>([]);
   const [length, setLength] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -363,15 +421,16 @@ export function ListView(p: ValueProps) {
   const current = sel !== null ? items[sel] : undefined;
   return (
     <Items loading={loading} error={error} count={items.length} more={items.length < length} onMore={() => void load(false)} empty={tr('Lista jest pusta')}
+      sel={sel} onSel={(i) => { setSel(i); setRemoveOpen(false); }} label={tr('Element')}
       toolbar={!p.readOnly ? <>
         <input className="input redis-push-input" value={push} placeholder={tr('Nowy element')} aria-label={tr('Nowy element')} spellCheck={false} onChange={(e) => setPush(e.target.value)} />
-        <button className="btn small redis-lpush" onClick={() => void doPush('lpush')}>{tr('Dodaj na początek')}</button>
-        <button className="btn small redis-rpush" onClick={() => void doPush('rpush')}>{tr('Dodaj na koniec')}</button>
+        <button className="btn small redis-lpush" disabled={offline} onClick={() => void doPush('lpush')}>{tr('Dodaj na początek')}</button>
+        <button className="btn small redis-rpush" disabled={offline} onClick={() => void doPush('rpush')}>{tr('Dodaj na koniec')}</button>
         <span className="grow" />
-        <button className="btn small" onClick={() => { setRemoveOpen(true); setSel(null); }}>{tr('Usuń wg wartości…')}</button>
+        <button className="btn small redis-lrem-open" disabled={offline} onClick={() => { setRemoveOpen(true); setSel(null); }}>{tr('Usuń wg wartości…')}</button>
       </> : undefined}
       row={(i) => (
-        <div className={`redis-item idx ${i === sel ? 'current' : ''}`} role="listitem" onClick={() => { setSel(i); setRemoveOpen(false); }}>
+        <div className={`redis-item idx ${i === sel ? 'current' : ''}`} onClick={() => { setSel(i); setRemoveOpen(false); }}>
           <span className="redis-item-index">{i}</span>
           <span className="redis-item-value">{preview(items[i].data)}{items[i].truncated ? <span className="redis-cut"> ({formatBytes(items[i].bytes)})</span> : null}</span>
         </div>
@@ -384,33 +443,44 @@ export function ListView(p: ValueProps) {
 
 function ListEditor({ p, index, blob, onClose, onDone }: { p: ValueProps; index: number; blob: RedisBlob; onClose: () => void; onDone: () => void }) {
   const { tr } = useI18n();
+  const offline = useOffline();
   const whole = useWhole(blob, () => readWhole(p.tabId, { type: 'list', key: p.keyName, index }));
-  const [text, setText] = useState<string | null>(null);
-  const shown = text ?? (whole.value ? redisDataDisplay(whole.value.data) : '');
+  const item = useItemText(whole.value);
   // The element must still hold what was loaded (else someone changed the list meanwhile: conflict).
   const expected = whole.value && !whole.value.truncated ? whole.value.data : undefined;
-  const save = async () => { if (await write(p.tabId, { op: 'lset', key: p.keyName, index, value: asData(shown), ...(expected !== undefined ? { expected } : {}) }, p, tr)) { toast(tr('Zapisano')); onDone(); } };
+  const save = async () => {
+    const value = item.save();
+    if (value === null) return;
+    if (await write(p.tabId, { op: 'lset', key: p.keyName, index, value, ...(expected !== undefined ? { expected } : {}) }, p, tr)) { toast(tr('Zapisano')); onDone(); }
+  };
   const remove = async () => {
-    if (expected === undefined || !await confirmDelete(tr, tr('Usunąć element {index}?', { index }), preview(expected, 200))) return;
+    if (expected === undefined || !await confirmDelete(tr, tr('Usunąć element {index}?', { index }), preview(expected, 200), p.where)) return;
     if (await write(p.tabId, { op: 'ldel', key: p.keyName, index, expected }, p, tr)) onDone();
   };
   return (
     <Editor title={<strong>{tr('Element {index}', { index })}</strong>} onClose={onClose} actions={<>
       <button className="btn small ghost" onClick={() => whole.value && copy(tr, whole.value.data)}>{tr('Kopiuj wartość')}</button>
       <span className="grow" />
-      {!p.readOnly && <button className="btn small danger" disabled={expected === undefined} onClick={() => void remove()}>{tr('Usuń element')}</button>}
-      {!p.readOnly && <button className="btn small primary redis-save" disabled={text === null || whole.loading} onClick={() => void save()}>{tr('Zapisz')}</button>}
+      {!p.readOnly && <button className="btn small danger" disabled={expected === undefined || offline} onClick={() => void remove()}>{tr('Usuń element')}</button>}
+      {!p.readOnly && <button className="btn small primary redis-save" disabled={item.text === null || whole.loading || !item.canEdit || offline} onClick={() => void save()}>{tr('Zapisz')}</button>}
     </>}>
-      {whole.loading ? <p className="muted">{tr('Wczytywanie…')}</p> : <ValueBox blob={whole.value} text={shown} onText={setText} readOnly={p.readOnly} />}
+      {whole.loading ? <p className="muted">{tr('Wczytywanie…')}</p> : <ValueBox item={item} readOnly={p.readOnly} />}
     </Editor>
   );
 }
 
 function RemoveByValue({ p, onClose, onDone }: { p: ValueProps; onClose: () => void; onDone: () => void }) {
   const { tr } = useI18n();
+  const offline = useOffline();
   const [value, setValue] = useState('');
   const [which, setWhich] = useState<'all' | 'first' | 'last'>('all');
+  const whichText = which === 'all' ? tr('Wszystkie') : which === 'first' ? tr('Pierwszy od początku') : tr('Pierwszy od końca');
   const submit = async () => {
+    // LREM removes at once: asked first with the value and the direction.
+    const ok = await askChoice(tr('Usunąć elementy o tej wartości?'), `${tr('Wartość: {value}', { value: preview(value, 200) || '""' })}\n${tr('Które: {which}', { which: whichText })}\n${p.where}`, [
+      { label: tr('Usuń'), value: 'delete', danger: true },
+    ]);
+    if (ok !== 'delete') return;
     const count = which === 'all' ? 0 : which === 'first' ? 1 : -1;
     const r = await write(p.tabId, { op: 'lrem', key: p.keyName, count, value }, p, tr);
     if (r) { toast(tr('Usunięto elementów: {count}', { count: r.changed })); onDone(); onClose(); }
@@ -419,7 +489,7 @@ function RemoveByValue({ p, onClose, onDone }: { p: ValueProps; onClose: () => v
     <Editor title={<strong>{tr('Usuń elementy o wartości')}</strong>} onClose={onClose} actions={<>
       <span className="grow" />
       <button className="btn small" onClick={onClose}>{tr('Anuluj')}</button>
-      <button className="btn small danger redis-lrem" onClick={() => void submit()}>{tr('Usuń')}</button>
+      <button className="btn small danger redis-lrem" disabled={offline} onClick={() => void submit()}>{tr('Usuń…')}</button>
     </>}>
       <input className="input redis-lrem-value" autoFocus value={value} placeholder={tr('Wartość')} aria-label={tr('Wartość')} spellCheck={false} onChange={(e) => setValue(e.target.value)} />
       <div className="redis-seg" role="radiogroup">
@@ -435,6 +505,7 @@ function RemoveByValue({ p, onClose, onDone }: { p: ValueProps; onClose: () => v
 
 export function SetView(p: ValueProps) {
   const { tr } = useI18n();
+  const offline = useOffline();
   const [members, setMembers] = useState<RedisData[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -461,21 +532,22 @@ export function SetView(p: ValueProps) {
     if (r) { if (r.changed === 0) toast(tr('Ten element już jest w zbiorze')); setAdd(''); void load(true); }
   };
   const remove = async (m: RedisData) => {
-    if (!await confirmDelete(tr, tr('Usunąć element?'), preview(m, 200))) return;
+    if (!await confirmDelete(tr, tr('Usunąć element?'), preview(m, 200), p.where)) return;
     if (await write(p.tabId, { op: 'srem', key: p.keyName, members: [m] }, p, tr)) void load(true);
   };
   const current = sel !== null ? members[sel] : undefined;
   return (
     <Items loading={loading} error={error} count={members.length} more={cursor !== null && cursor !== '0'} onMore={() => void load(false)} empty={tr('Zbiór jest pusty')}
+      sel={sel} onSel={setSel} label={tr('Element')}
       toolbar={<>
         <SearchField value={search} onChange={setSearch} onSubmit={() => void load(true)} label={tr('Szukaj elementów')} />
         {!p.readOnly && <>
           <input className="input redis-add-member" value={add} placeholder={tr('Nowy element')} aria-label={tr('Nowy element')} spellCheck={false} onChange={(e) => setAdd(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void doAdd(); }} />
-          <button className="btn small redis-add" onClick={() => void doAdd()}><IPlus /> {tr('Dodaj')}</button>
+          <button className="btn small redis-add" disabled={offline} onClick={() => void doAdd()}><IPlus /> {tr('Dodaj')}</button>
         </>}
       </>}
       row={(i) => (
-        <div className={`redis-item ${i === sel ? 'current' : ''}`} role="listitem" onClick={() => setSel(i)}>
+        <div className={`redis-item ${i === sel ? 'current' : ''}`} onClick={() => setSel(i)}>
           <DataText data={members[i]} className="redis-item-value" />
         </div>
       )}
@@ -494,6 +566,7 @@ export function SetView(p: ValueProps) {
 
 export function ZsetView(p: ValueProps) {
   const { tr } = useI18n();
+  const offline = useOffline();
   const [entries, setEntries] = useState<RedisZsetEntry[]>([]);
   const [length, setLength] = useState(0);
   const [rev, setRev] = useState(false);
@@ -517,22 +590,29 @@ export function ZsetView(p: ValueProps) {
   const current = sel !== null ? entries[sel] : undefined;
   return (
     <Items loading={loading} error={error} count={entries.length} more={entries.length < length} onMore={() => void load(false)} empty={tr('Zbiór jest pusty')}
+      sel={sel} onSel={(i) => { setSel(i); setAdding(false); }} label={tr('Element')}
       toolbar={<>
         <button className="btn small redis-sort" aria-label={tr('Sortuj wg wyniku')} onClick={() => { setRev(!rev); void load(true, !rev); }}>
           {rev ? tr('Wynik: malejąco') : tr('Wynik: rosnąco')}
         </button>
         <span className="grow" />
-        {!p.readOnly && <button className="btn small redis-add" onClick={() => { setAdding(true); setSel(null); }}><IPlus /> {tr('Dodaj element')}</button>}
+        {!p.readOnly && <button className="btn small redis-add" disabled={offline} onClick={() => { setAdding(true); setSel(null); }}><IPlus /> {tr('Dodaj element')}</button>}
       </>}
       row={(i) => (
-        <div className={`redis-item zset ${i === sel ? 'current' : ''}`} role="listitem" onClick={() => { setSel(i); setAdding(false); }}>
+        <div className={`redis-item zset ${i === sel ? 'current' : ''}`} onClick={() => { setSel(i); setAdding(false); }}>
           <span className="redis-item-index">{rev ? length - 1 - i : i}</span>
           <DataText data={entries[i].member} className="redis-item-value" />
           <span className="redis-item-score">{entries[i].score}</span>
         </div>
       )}
       editor={adding ? <AddPair tr={tr} first={tr('Element')} second={tr('Wynik')} onClose={() => setAdding(false)} secondCheck={(s) => (validScore(s) ? null : tr('Nieprawidłowy wynik'))}
-        onAdd={async (member, score) => { if (!await write(p.tabId, { op: 'zadd', key: p.keyName, entries: [[member, score.trim()]], existing: true }, p, tr)) return false; void load(true); return true; }} />
+        onAdd={async (member, score) => {
+          // nx: adding never overwrites the score of a member that is already there.
+          const r = await write(p.tabId, { op: 'zadd', key: p.keyName, entries: [[member, score.trim()]], mode: 'nx', existing: true }, p, tr);
+          if (!r) return false;
+          if (r.changed === 0) { toast(tr('Ten element już istnieje'), 'error'); return false; }
+          void load(true); return true;
+        }} />
         : current ? <ZsetEditor key={`${sel}:${current.score}`} p={p} entry={current} onClose={() => setSel(null)} onDone={() => void load(true)} /> : undefined}
     />
   );
@@ -540,13 +620,14 @@ export function ZsetView(p: ValueProps) {
 
 function ZsetEditor({ p, entry, onClose, onDone }: { p: ValueProps; entry: RedisZsetEntry; onClose: () => void; onDone: () => void }) {
   const { tr } = useI18n();
+  const offline = useOffline();
   const [score, setScore] = useState(entry.score);
   const save = async () => {
     if (!validScore(score)) { toast(tr('Nieprawidłowy wynik'), 'error'); return; }
     if (await write(p.tabId, { op: 'zadd', key: p.keyName, entries: [[entry.member, score.trim()]], mode: 'xx', existing: true }, p, tr)) { toast(tr('Zapisano')); onDone(); }
   };
   const remove = async () => {
-    if (!await confirmDelete(tr, tr('Usunąć element?'), preview(entry.member, 200))) return;
+    if (!await confirmDelete(tr, tr('Usunąć element?'), preview(entry.member, 200), p.where)) return;
     if (await write(p.tabId, { op: 'zrem', key: p.keyName, members: [entry.member] }, p, tr)) onDone();
   };
   return (
@@ -554,7 +635,7 @@ function ZsetEditor({ p, entry, onClose, onDone }: { p: ValueProps; entry: Redis
       <button className="btn small ghost" onClick={() => copy(tr, entry.member)}>{tr('Kopiuj')}</button>
       <span className="grow" />
       {!p.readOnly && <button className="btn small danger" onClick={() => void remove()}>{tr('Usuń element')}</button>}
-      {!p.readOnly && <button className="btn small primary redis-save" disabled={score === entry.score} onClick={() => void save()}>{tr('Zapisz wynik')}</button>}
+      {!p.readOnly && <button className="btn small primary redis-save" disabled={score === entry.score || offline} onClick={() => void save()}>{tr('Zapisz wynik')}</button>}
     </>}>
       <label className="field"><span>{tr('Wynik')}</span>
         <input className="input redis-score-input" value={score} readOnly={p.readOnly} spellCheck={false} onChange={(e) => setScore(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void save(); }} />
@@ -567,6 +648,7 @@ function ZsetEditor({ p, entry, onClose, onDone }: { p: ValueProps; entry: Redis
 
 export function StreamView(p: ValueProps) {
   const { tr } = useI18n();
+  const offline = useOffline();
   const [entries, setEntries] = useState<RedisStreamEntry[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [length, setLength] = useState(0);
@@ -591,22 +673,23 @@ export function StreamView(p: ValueProps) {
   useEffect(() => { void load(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const current = sel !== null ? entries[sel] : undefined;
   const remove = async (e: RedisStreamEntry) => {
-    if (!await confirmDelete(tr, tr('Usunąć wpis?'), e.id)) return;
+    if (!await confirmDelete(tr, tr('Usunąć wpis?'), e.id, p.where)) return;
     if (await write(p.tabId, { op: 'xdel', key: p.keyName, ids: [e.id] }, p, tr)) void load(true);
   };
   return (
     <>
       <Items loading={loading} error={error} count={entries.length} more={next !== null && entries.length < length} onMore={() => void load(false)} empty={tr('Strumień jest pusty')}
+        sel={sel} onSel={setSel} label={tr('Wpis')} className="redis-stream"
         toolbar={<>
           <span className="muted">{tr('Najnowsze najpierw')}</span>
           <span className="grow" />
           {!p.readOnly && <button className="btn small" onClick={() => setDialog('trim')}>{tr('Przytnij…')}</button>}
-          {!p.readOnly && <button className="btn small redis-add" onClick={() => setDialog('add')}><IPlus /> {tr('Dodaj wpis')}</button>}
+          {!p.readOnly && <button className="btn small redis-add" disabled={offline} onClick={() => setDialog('add')}><IPlus /> {tr('Dodaj wpis')}</button>}
         </>}
         row={(i) => {
           const e = entries[i];
           return (
-            <div className={`redis-item two ${i === sel ? 'current' : ''}`} role="listitem" onClick={() => setSel(i)}>
+            <div className={`redis-item two ${i === sel ? 'current' : ''}`} onClick={() => setSel(i)}>
               <span className="redis-item-field mono">{e.id}</span>
               <span className="redis-item-value">{e.fields.map((f) => `${redisDataDisplay(f.field)}=${preview(f.value.data, 80)}`).join('  ')}</span>
             </div>
@@ -631,6 +714,7 @@ export function StreamView(p: ValueProps) {
 
 function StreamAddDialog({ p, onClose, onDone }: { p: ValueProps; onClose: () => void; onDone: () => void }) {
   const { tr } = useI18n();
+  const offline = useOffline();
   const [id, setId] = useState('*');
   const [fields, setFields] = useState<Array<[string, string]>>([['', '']]);
   const [error, setError] = useState<string | null>(null);
@@ -645,7 +729,7 @@ function StreamAddDialog({ p, onClose, onDone }: { p: ValueProps; onClose: () =>
   return (
     <RedisDialog title={tr('Nowy wpis strumienia')} onClose={onClose} actions={<>
       <button className="btn small" onClick={onClose}>{tr('Anuluj')}</button>
-      <button className="btn small primary redis-xadd" onClick={() => void submit()}>{tr('Dodaj')}</button>
+      <button className="btn small primary redis-xadd" disabled={offline} onClick={() => void submit()}>{tr('Dodaj')}</button>
     </>}>
       <label className="field"><span>{tr('Identyfikator (* = nadany przez serwer)')}</span><input className="input mono" value={id} onChange={(e) => setId(e.target.value)} /></label>
       {fields.map(([f, v], i) => (
@@ -662,6 +746,7 @@ function StreamAddDialog({ p, onClose, onDone }: { p: ValueProps; onClose: () =>
 
 function StreamTrimDialog({ p, length, onClose, onDone }: { p: ValueProps; length: number; onClose: () => void; onDone: () => void }) {
   const { tr } = useI18n();
+  const offline = useOffline();
   const [strategy, setStrategy] = useState<'maxlen' | 'minid'>('maxlen');
   const [threshold, setThreshold] = useState('');
   const [approx, setApprox] = useState(false);
@@ -670,14 +755,14 @@ function StreamTrimDialog({ p, length, onClose, onDone }: { p: ValueProps; lengt
     const t = threshold.trim();
     if (strategy === 'maxlen' ? !/^\d+$/.test(t) : !validNewStreamId(t) || t.includes('*')) { setError(strategy === 'maxlen' ? tr('Podaj liczbę wpisów') : tr('Nieprawidłowy identyfikator wpisu')); return; }
     const body = strategy === 'maxlen' ? tr('Zostanie najwyżej {count} najnowszych wpisów (teraz: {length}).', { count: t, length }) : tr('Wpisy starsze niż {id} zostaną usunięte.', { id: t });
-    if ((await askChoice(tr('Przyciąć strumień?'), body, [{ label: tr('Przytnij'), value: 'trim', danger: true }])) !== 'trim') return;
+    if ((await askChoice(tr('Przyciąć strumień?'), `${body}\n${p.where}`, [{ label: tr('Przytnij'), value: 'trim', danger: true }])) !== 'trim') return;
     const r = await write(p.tabId, { op: 'xtrim', key: p.keyName, strategy, threshold: t, approx }, p, tr);
     if (r) { toast(tr('Usunięto wpisów: {count}', { count: r.changed })); onDone(); }
   };
   return (
     <RedisDialog title={tr('Przytnij strumień')} onClose={onClose} actions={<>
       <button className="btn small" onClick={onClose}>{tr('Anuluj')}</button>
-      <button className="btn small danger redis-xtrim" onClick={() => void submit()}>{tr('Przytnij…')}</button>
+      <button className="btn small danger redis-xtrim" disabled={offline} onClick={() => void submit()}>{tr('Przytnij…')}</button>
     </>}>
       <div className="redis-seg" role="radiogroup">
         <button role="radio" aria-checked={strategy === 'maxlen'} className={strategy === 'maxlen' ? 'on' : ''} onClick={() => setStrategy('maxlen')}>{tr('Zostaw N najnowszych')}</button>

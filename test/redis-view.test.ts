@@ -46,6 +46,8 @@ describe('key tree', () => {
     expect(scanPattern('  ')).toBeUndefined();
     expect(scanPattern('*')).toBeUndefined();
     expect(scanPattern('user:*')).toBe('user:*');
+    expect(scanPattern('user')).toBe('*user*');
+    expect(scanPattern('a]b')).toBe('*a\\]b*');
     expect(containsPattern('name')).toBe('*name*');
     expect(containsPattern('na?e')).toBe('na?e');
     expect(containsPattern('')).toBeUndefined();
@@ -149,6 +151,7 @@ describe('pub/sub and info', () => {
     const second = appendMessages(first.list, [msg('c', '3'), msg('d', '{"x":1}')], first.nextSeq, 3);
     expect(second.list.map((m) => [m.channel, m.seq])).toEqual([['b', 1], ['c', 2], ['d', 3]]);
     expect(second.nextSeq).toBe(4);
+    expect(second.dropped).toBe(1);
     expect(messageMatches(second.list[2], 'X":')).toBe(true);
     expect(messageMatches(second.list[2], 'zzz')).toBe(false);
     expect(messageMatches({ ...msg('news', ''), pattern: 'ne*' }, 'ne*')).toBe(true);

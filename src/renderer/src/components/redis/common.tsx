@@ -1,19 +1,41 @@
 // Shared pieces of the Redis views (1.0.0): a windowed list of fixed-height rows, a dialog inside the tab, type badges and
 // small formatting components.
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { rowWindow } from '../../../../shared/virtualRows';
 import { isBinaryData, redisDataDisplay, type RedisData } from '../../../../shared/dbRedis';
 import { useI18n } from '../../i18n';
 import { IX } from '../icons';
 
+/** True while the tab's session is reconnecting (or moving to another DB): views stay visible, writes are disabled. */
+export const OfflineContext = createContext(false);
+export const useOffline = (): boolean => useContext(OfflineContext);
+
+/** The index an arrow, Home, End or Page key moves to in a list of `count` rows (null: not a moving key). */
+export function stepIndex(key: string, index: number, count: number, page = 10): number | null {
+  if (!count) return null;
+  const at = index < 0 ? -1 : index;
+  switch (key) {
+    case 'ArrowDown': return Math.min(count - 1, at + 1);
+    case 'ArrowUp': return Math.max(0, at < 0 ? 0 : at - 1);
+    case 'Home': return 0;
+    case 'End': return count - 1;
+    case 'PageDown': return Math.min(count - 1, Math.max(0, at) + page);
+    case 'PageUp': return Math.max(0, at - page);
+    default: return null;
+  }
+}
+
 /**
- * A scrolling list that renders only the rows in view (plus overscan). `end` renders after the rows (a "load more" button).
- * `scrollTo`: an index to bring into view when it changes.
+ * A scrolling listbox that renders only the rows in view (plus overscan). `end` renders after the rows (a "load more" button).
+ * Keyboard: the list takes the focus and marks `active` (aria-activedescendant, scrolled into view); `onMove` gets the index an
+ * arrow / Home / End / Page key moves to; `onKey` gets every other key with the active index.
  */
-export function VirtualList({ count, rowHeight, row, className = '', end, scrollTo, label }: {
-  count: number; rowHeight: number; row: (index: number) => ReactNode; className?: string; end?: ReactNode; scrollTo?: number | null; label?: string;
+export function VirtualList({ count, rowHeight, row, className = '', end, active = null, label, onMove, onKey }: {
+  count: number; rowHeight: number; row: (index: number) => ReactNode; className?: string; end?: ReactNode; active?: number | null; label?: string;
+  onMove?: (index: number) => void; onKey?: (e: KeyboardEvent<HTMLDivElement>, index: number) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const id = useId();
   const [view, setView] = useState({ top: 0, height: 400 });
   useLayoutEffect(() => {
     const el = ref.current;
@@ -26,18 +48,25 @@ export function VirtualList({ count, rowHeight, row, className = '', end, scroll
   }, []);
   useEffect(() => {
     const el = ref.current;
-    if (!el || scrollTo === null || scrollTo === undefined || scrollTo < 0) return;
-    const top = scrollTo * rowHeight;
+    if (!el || active === null || active < 0) return;
+    const top = active * rowHeight;
     if (top < el.scrollTop) el.scrollTop = top;
     else if (top + rowHeight > el.scrollTop + el.clientHeight) el.scrollTop = top + rowHeight - el.clientHeight;
-  }, [scrollTo, rowHeight]);
+  }, [active, rowHeight]);
   const w = rowWindow(view.top, view.height, rowHeight, count, 12);
   const rows: ReactNode[] = [];
   for (let i = w.start; i < w.end; i++) {
-    rows.push(<div key={i} className="redis-vrow" style={{ top: i * rowHeight, height: rowHeight }}>{row(i)}</div>);
+    rows.push(<div key={i} id={`${id}-${i}`} role="option" aria-selected={i === active} className={`redis-vrow ${i === active ? 'active' : ''}`} style={{ top: i * rowHeight, height: rowHeight }}>{row(i)}</div>);
   }
+  const keyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget) return;
+    const next = stepIndex(e.key, active ?? -1, count, Math.max(1, Math.floor(view.height / rowHeight) - 1));
+    if (next !== null && onMove) { e.preventDefault(); onMove(next); return; }
+    if (active !== null && active >= 0) onKey?.(e, active);
+  };
   return (
-    <div ref={ref} className={`redis-vlist ${className}`} role="list" aria-label={label} onScroll={(e) => setView({ top: e.currentTarget.scrollTop, height: e.currentTarget.clientHeight })}>
+    <div ref={ref} className={`redis-vlist ${className}`} role="listbox" tabIndex={0} aria-label={label} aria-activedescendant={active !== null && active >= 0 && active < count ? `${id}-${active}` : undefined}
+      onKeyDown={keyDown} onScroll={(e) => setView({ top: e.currentTarget.scrollTop, height: e.currentTarget.clientHeight })}>
       <div className="redis-vspace" style={{ height: count * rowHeight }}>{rows}</div>
       {end}
     </div>

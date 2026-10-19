@@ -1,25 +1,26 @@
 // The key browser of a Redis tab (1.0.0): DB switcher with key counts, SCAN with a pattern and a type filter (never KEYS),
 // keys as a ":"-tree or a flat list loaded page by page ("load more" for millions of keys), type, TTL and size per key,
 // multi-select with delete, delete by pattern (count first, then confirmed with the count, cancellable), a new key of any type,
-// and the value panel of the chosen key.
+// and the value panel of the chosen key. Keyboard: the list is a listbox (arrows move and open, Left/Right fold folders,
+// Space selects, Delete deletes after a confirmation).
 import { useEffect, useMemo, useState } from 'react';
 import { create } from 'zustand';
 import { REDIS_EDITABLE_TYPES, redisDataDisplay, redisDataKey, type RedisData, type RedisDbList, type RedisEditableType, type RedisKeyInfo, type RedisNewValue } from '../../../../shared/dbRedis';
-import { formatBytes, formatTtl, mergeKeys, parseTtlInput, redisKeyRows, scanPattern, validScore } from '../../../../shared/redisView';
+import { afterPatternCount, afterPatternDelete, folderPattern, formatBytes, formatTtl, mergeKeys, parseTtlInput, redisKeyRows, scanPattern, validScore, type RedisKeyRow } from '../../../../shared/redisView';
 import { useI18n } from '../../i18n';
 import { askChoice, toast } from '../../store';
-import { resultText, setTabDb, withTab } from '../../redis/redisClient';
+import { moveTabToDb, onForgetTab, resultText, whereText, withTab } from '../../redis/redisClient';
 import { openMenu } from '../ContextMenu';
 import { Select } from '../Select';
 import { IChevron, IPlus, ISearch } from '../icons';
 import { RefreshIcon } from '../Spinner';
-import { RedisDialog, TypeBadge, VirtualList } from './common';
+import { RedisDialog, TypeBadge, useOffline, VirtualList } from './common';
 import { RedisValuePanel } from './RedisValuePanel';
 import type { RedisViewProps } from './RedisTabView';
 
 interface BrowserState {
   pattern: string;
-  /** The pattern of the loaded keys (the field may hold an edit not applied yet). */
+  /** The search text of the loaded keys (the field may hold an edit not applied yet). */
   applied: string;
   type: string;
   mode: 'tree' | 'flat';
@@ -31,15 +32,18 @@ interface BrowserState {
   open: string[];
   selected: string[];
   current: RedisKeyInfo | null;
+  /** The row the keyboard is on (a folder or a key), by row id. */
+  active: string | null;
   dbs: RedisDbList | null;
 }
 
-const fresh = (): BrowserState => ({ pattern: '', applied: '', type: '', mode: 'tree', keys: [], cursor: null, loading: false, error: null, open: [], selected: [], current: null, dbs: null });
-/** Per tab (the view unmounts when another tab is in front; what was loaded stays). */
+const fresh = (): BrowserState => ({ pattern: '', applied: '', type: '', mode: 'tree', keys: [], cursor: null, loading: false, error: null, open: [], selected: [], current: null, active: null, dbs: null });
+/** Per tab (the view unmounts when another tab is in front; what was loaded stays until the tab closes). */
 const useBrowsers = create<Record<string, BrowserState>>(() => ({}));
 const getB = (tabId: string): BrowserState => useBrowsers.getState()[tabId] ?? fresh();
 const patchB = (tabId: string, patch: Partial<BrowserState> | ((b: BrowserState) => Partial<BrowserState>)) =>
   useBrowsers.setState((st) => { const b = st[tabId] ?? fresh(); return { [tabId]: { ...b, ...(typeof patch === 'function' ? patch(b) : patch) } }; });
+onForgetTab((tabId) => { loadTokens.delete(tabId); useBrowsers.setState((st) => { const next = { ...st }; delete next[tabId]; return next; }, true); });
 
 const PAGE_KEYS = 500;
 const ROW = 26;
@@ -87,6 +91,7 @@ export function keyGone(tabId: string, key: RedisData, renamedTo?: RedisData): v
 
 export default function RedisKeyBrowser({ tabId, ref, readOnly }: RedisViewProps) {
   const { tr } = useI18n();
+  const offline = useOffline();
   const b = useBrowsers((st) => st[tabId]) ?? fresh();
   const [dialog, setDialog] = useState<null | 'new' | { pattern: string }>(null);
   useEffect(() => { if (b.cursor === null && !b.loading && !b.error) void loadKeys(tabId, true); }, [tabId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -95,26 +100,33 @@ export default function RedisKeyBrowser({ tabId, ref, readOnly }: RedisViewProps
   const rows = useMemo(() => redisKeyRows(b.keys, b.mode, open), [b.keys, b.mode, open]);
   const selected = useMemo(() => new Set(b.selected), [b.selected]);
   const currentId = b.current ? redisDataKey(b.current.key) : null;
+  const activeIndex = (() => { const id = b.active ?? currentId; return id ? rows.findIndex((r) => r.id === id) : -1; })();
   const dbCount = b.dbs?.count ?? 16;
   const dbKeys = (i: number) => b.dbs?.dbs.find((d) => d.index === i)?.keys ?? 0;
   const done = b.cursor === '0';
+  const where = whereText(tabId);
 
-  const switchDb = async (index: number) => {
-    const r = await withTab(tabId, (sid) => window.mc.db.redis.select(sid, index));
-    if (!r.ok) { toast(resultText(r), 'error'); return; }
-    setTabDb(tabId, index);
-    patchB(tabId, { current: null, selected: [], open: [] });
+  const switchDb = (index: number) => {
+    // The DB's own session (shared with other views of that DB, or a new one); this one stays with its other tabs.
+    moveTabToDb(tabId, index);
+    patchB(tabId, { current: null, selected: [], open: [], active: null, dbs: null });
     void loadKeys(tabId, true);
     void loadDbs(tabId);
   };
   const refresh = () => { void loadKeys(tabId, true); void loadDbs(tabId); };
   const toggleSelect = (id: string) => patchB(tabId, (cur) => ({ selected: cur.selected.includes(id) ? cur.selected.filter((s) => s !== id) : [...cur.selected, id] }));
-  const toggleFolder = (path: string) => patchB(tabId, (cur) => ({ open: cur.open.includes(path) ? cur.open.filter((p) => p !== path) : [...cur.open, path] }));
-  const deleteSelected = async () => {
-    const keys = b.keys.filter((k) => selected.has(redisDataKey(k.key))).map((k) => k.key);
-    if (!keys.length) return;
-    const choice = await askChoice(tr('Usunąć zaznaczone klucze?'), tr('Zostanie usuniętych kluczy: {count}. Tego nie można cofnąć.', { count: keys.length }), [
-      { label: tr('Usuń ({count})', { count: keys.length }), value: 'delete', danger: true },
+  const toggleFolder = (path: string, to?: boolean) => patchB(tabId, (cur) => {
+    const isOpen = cur.open.includes(path);
+    if (to === isOpen) return {};
+    return { open: isOpen ? cur.open.filter((p) => p !== path) : [...cur.open, path] };
+  });
+  const deleteKeys = async (keys: RedisData[]) => {
+    if (!keys.length || readOnly) return;
+    const body = keys.length === 1
+      ? `${redisDataDisplay(keys[0])}\n${where}`
+      : `${tr('Zostanie usuniętych kluczy: {count}. Tego nie można cofnąć.', { count: keys.length })}\n${where}`;
+    const choice = await askChoice(keys.length === 1 ? tr('Usunąć klucz?') : tr('Usunąć zaznaczone klucze?'), body, [
+      { label: keys.length === 1 ? tr('Usuń') : tr('Usuń ({count})', { count: keys.length }), value: 'delete', danger: true },
     ]);
     if (choice !== 'delete') return;
     const r = await withTab(tabId, (sid) => window.mc.db.redis.write(sid, { op: 'delete', keys }));
@@ -123,35 +135,59 @@ export default function RedisKeyBrowser({ tabId, ref, readOnly }: RedisViewProps
     for (const k of keys) keyGone(tabId, k);
     void loadDbs(tabId);
   };
+  const deleteSelected = () => deleteKeys(b.keys.filter((k) => selected.has(redisDataKey(k.key))).map((k) => k.key));
   const folderMenu = (x: number, y: number, path: string) => openMenu(x, y, [
     { header: path },
-    { label: tr('Szukaj w tym folderze'), onClick: () => { patchB(tabId, { pattern: `${path}*` }); void loadKeys(tabId, true); } },
+    { label: tr('Szukaj w tym folderze'), onClick: () => { patchB(tabId, { pattern: folderPattern(path) }); void loadKeys(tabId, true); } },
     { label: tr('Kopiuj prefiks'), onClick: () => window.mc.clipboardWrite(path) },
-    ...(readOnly ? [] : [{ sep: true as const }, { label: tr('Usuń klucze pasujące do {pattern}…', { pattern: `${path}*` }), danger: true, onClick: () => setDialog({ pattern: `${path}*` }) }]),
+    ...(readOnly ? [] : [{ sep: true as const }, { label: tr('Usuń klucze pasujące do {pattern}…', { pattern: folderPattern(path) }), danger: true, onClick: () => setDialog({ pattern: folderPattern(path) }) }]),
   ]);
   const keyMenu = (x: number, y: number, info: RedisKeyInfo) => openMenu(x, y, [
     { header: redisDataDisplay(info.key) },
     { label: tr('Kopiuj nazwę klucza'), onClick: () => window.mc.clipboardWrite(redisDataDisplay(info.key)) },
-    { label: selected.has(redisDataKey(info.key)) ? tr('Odznacz') : tr('Zaznacz'), onClick: () => toggleSelect(redisDataKey(info.key)) },
+    ...(readOnly ? [] : [{ label: selected.has(redisDataKey(info.key)) ? tr('Odznacz') : tr('Zaznacz'), onClick: () => toggleSelect(redisDataKey(info.key)) }]),
   ]);
+  const activate = (row: RedisKeyRow) => {
+    if (row.kind === 'folder') patchB(tabId, { active: row.id });
+    else patchB(tabId, { active: row.id, current: row.info });
+  };
+  const onListKey = (e: React.KeyboardEvent<HTMLDivElement>, index: number) => {
+    const row = rows[index];
+    if (!row) return;
+    if (row.kind === 'folder') {
+      const path = row.id.slice(2);
+      if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); toggleFolder(path, e.key === 'Enter' ? undefined : true); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); toggleFolder(path, false); }
+      return;
+    }
+    if (e.key === 'ArrowLeft' && row.depth > 0) {
+      // To the folder this key is in.
+      for (let i = index - 1; i >= 0; i--) { const r = rows[i]; if (r.kind === 'folder' && r.depth === row.depth - 1) { e.preventDefault(); patchB(tabId, { active: r.id }); return; } }
+    }
+    if (e.key === ' ' && !readOnly) { e.preventDefault(); toggleSelect(row.id); }
+    else if (e.key === 'Delete' && !readOnly) { e.preventDefault(); void (b.selected.length ? deleteSelected() : deleteKeys([row.info.key])); }
+  };
 
   return (
     <div className="redis-browser">
       <section className="redis-keys-pane" aria-label={tr('Przeglądarka kluczy')}>
         <div className="redis-toolbar">
-          <Select className="select redis-db-select" value={String(ref.db)} title={tr('Baza danych')} onChange={(e) => void switchDb(Number(e.target.value))}>
+          <Select className="select redis-db-select" value={String(ref.db)} title={tr('Baza danych')} onChange={(e) => switchDb(Number(e.target.value))}>
             {Array.from({ length: Math.max(dbCount, ref.db + 1) }, (_, i) => <option key={i} value={String(i)}>{`DB ${i}${dbKeys(i) ? ` (${dbKeys(i).toLocaleString()})` : ''}`}</option>)}
           </Select>
-          <form className="redis-search" onSubmit={(e) => { e.preventDefault(); void loadKeys(tabId, true); }}>
-            <ISearch />
-            <input className="input" value={b.pattern} placeholder={tr('Wzorzec, np. user:*')} aria-label={tr('Wzorzec kluczy')} spellCheck={false}
-              onChange={(e) => patchB(tabId, { pattern: e.target.value })} />
-          </form>
           <Select className="select redis-type-select" value={b.type} title={tr('Typ')} onChange={(e) => { patchB(tabId, { type: e.target.value }); void loadKeys(tabId, true); }}>
             <option value="">{tr('Wszystkie typy')}</option>
             {REDIS_EDITABLE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </Select>
+          <span className="grow" />
           <button className="btn small icon ghost" title={tr('Odśwież')} aria-label={tr('Odśwież')} onClick={refresh}><RefreshIcon spinning={b.loading} /></button>
+        </div>
+        <div className="redis-toolbar sub">
+          <form className="redis-search" onSubmit={(e) => { e.preventDefault(); void loadKeys(tabId, true); }}>
+            <ISearch />
+            <input className="input" value={b.pattern} placeholder={tr('Szukaj kluczy lub wzorzec, np. user:*')} aria-label={tr('Wzorzec kluczy')} spellCheck={false}
+              onChange={(e) => patchB(tabId, { pattern: e.target.value })} />
+          </form>
         </div>
         <div className="redis-toolbar sub">
           <div className="redis-seg" role="group" aria-label={tr('Widok kluczy')}>
@@ -159,18 +195,18 @@ export default function RedisKeyBrowser({ tabId, ref, readOnly }: RedisViewProps
             <button className={b.mode === 'flat' ? 'on' : ''} aria-pressed={b.mode === 'flat'} onClick={() => patchB(tabId, { mode: 'flat' })}>{tr('Lista')}</button>
           </div>
           <span className="grow" />
-          {!readOnly && <button className="btn small" onClick={() => setDialog({ pattern: b.applied || '*' })}>{tr('Usuń wg wzorca…')}</button>}
-          {!readOnly && <button className="btn small primary redis-new-key" onClick={() => setDialog('new')}><IPlus /> {tr('Nowy klucz')}</button>}
+          {!readOnly && <button className="btn small redis-pattern-delete" disabled={offline} onClick={() => setDialog({ pattern: scanPattern(b.applied) ?? '*' })}>{tr('Usuń wg wzorca…')}</button>}
+          {!readOnly && <button className="btn small primary redis-new-key" disabled={offline} onClick={() => setDialog('new')}><IPlus /> {tr('Nowy klucz')}</button>}
         </div>
         {b.error && <div className="redis-error-text pad" role="alert">{b.error}</div>}
-        <VirtualList className="redis-key-list" label={tr('Przeglądarka kluczy')} count={rows.length} rowHeight={ROW}
-          scrollTo={currentId ? rows.findIndex((r) => r.id === currentId) : null}
+        <VirtualList className="redis-key-list" label={tr('Przeglądarka kluczy')} count={rows.length} rowHeight={ROW} active={activeIndex}
+          onMove={(i) => { if (rows[i]) activate(rows[i]); }} onKey={onListKey}
           row={(i) => {
             const r = rows[i];
             if (r.kind === 'folder') {
               const path = r.id.slice(2);
               return (
-                <div className="redis-key-row folder" role="listitem" style={{ paddingLeft: 8 + r.depth * 14 }} onClick={() => toggleFolder(path)}
+                <div className="redis-key-row folder" style={{ paddingLeft: 8 + r.depth * 14 }} onClick={() => { patchB(tabId, { active: r.id }); toggleFolder(path); }}
                   onContextMenu={(e) => { e.preventDefault(); folderMenu(e.clientX, e.clientY, path); }}>
                   <span className={`redis-chev ${r.open ? 'open' : ''}`}><IChevron /></span>
                   <span className="redis-key-name">{r.name}</span>
@@ -181,10 +217,10 @@ export default function RedisKeyBrowser({ tabId, ref, readOnly }: RedisViewProps
             const id = r.id;
             const ttl = formatTtl(r.info.ttlMs);
             return (
-              <div className={`redis-key-row ${id === currentId ? 'current' : ''} ${selected.has(id) ? 'selected' : ''}`} role="listitem" title={redisDataDisplay(r.info.key)}
-                style={{ paddingLeft: 8 + r.depth * 14 }} onClick={() => patchB(tabId, { current: r.info })}
+              <div className={`redis-key-row ${id === currentId ? 'current' : ''} ${selected.has(id) ? 'selected' : ''}`} title={redisDataDisplay(r.info.key)}
+                style={{ paddingLeft: 8 + r.depth * 14 }} onClick={() => activate(r)}
                 onContextMenu={(e) => { e.preventDefault(); keyMenu(e.clientX, e.clientY, r.info); }}>
-                <input type="checkbox" className="redis-key-check" checked={selected.has(id)} aria-label={tr('Zaznacz')} onClick={(e) => e.stopPropagation()} onChange={() => toggleSelect(id)} />
+                {!readOnly && <input type="checkbox" className="redis-key-check" tabIndex={-1} checked={selected.has(id)} aria-label={tr('Zaznacz')} onClick={(e) => e.stopPropagation()} onChange={() => toggleSelect(id)} />}
                 <TypeBadge type={r.info.type} />
                 <span className="redis-key-name">{r.name}</span>
                 <span className={`redis-ttl ${ttl ? '' : 'none'}`} title={ttl ? tr('Wygasa za {ttl}', { ttl }) : tr('Bez wygaśnięcia')}>{ttl ?? ''}</span>
@@ -202,7 +238,7 @@ export default function RedisKeyBrowser({ tabId, ref, readOnly }: RedisViewProps
           {b.selected.length > 0 && <>
             <span className="muted">{tr('Zaznaczono: {count}', { count: b.selected.length })}</span>
             <button className="btn small ghost" onClick={() => patchB(tabId, { selected: [] })}>{tr('Odznacz')}</button>
-            {!readOnly && <button className="btn small danger redis-delete-selected" onClick={() => void deleteSelected()}>{tr('Usuń zaznaczone')}</button>}
+            {!readOnly && <button className="btn small danger redis-delete-selected" disabled={offline} onClick={() => void deleteSelected()}>{tr('Usuń zaznaczone')}</button>}
           </>}
         </footer>
       </section>
@@ -212,7 +248,7 @@ export default function RedisKeyBrowser({ tabId, ref, readOnly }: RedisViewProps
           : <div className="redis-center muted">{tr('Wybierz klucz, aby zobaczyć jego wartość')}</div>}
       </section>
       {dialog === 'new' && <NewKeyDialog tabId={tabId} onClose={() => setDialog(null)} onCreated={(k) => { setDialog(null); void refreshKey(tabId, k).then(() => patchB(tabId, (cur) => ({ current: cur.keys.find((x) => redisDataKey(x.key) === redisDataKey(k)) ?? null }))); void loadDbs(tabId); }} />}
-      {dialog && dialog !== 'new' && <PatternDeleteDialog tabId={tabId} initial={dialog.pattern} type={b.type} onClose={() => setDialog(null)} onDeleted={() => { setDialog(null); void loadKeys(tabId, true); void loadDbs(tabId); }} />}
+      {dialog && dialog !== 'new' && <PatternDeleteDialog tabId={tabId} initial={dialog.pattern} type={b.type} where={where} onClose={() => setDialog(null)} onDeleted={() => { setDialog(null); void loadKeys(tabId, true); void loadDbs(tabId); }} />}
     </div>
   );
 }
@@ -273,57 +309,64 @@ function NewKeyDialog({ tabId, onClose, onCreated }: { tabId: string; onClose: (
 
 // ── delete by pattern ───────────────────────────────────────────────────────
 
-function PatternDeleteDialog({ tabId, initial, type, onClose, onDeleted }: { tabId: string; initial: string; type: string; onClose: () => void; onDeleted: () => void }) {
+/**
+ * Count, then delete with the count's token after a confirmation that names the count, the pattern (shown as "*" for every key)
+ * and where it runs. The steps come from afterPatternCount / afterPatternDelete: `more` counts again and asks again; an expired
+ * or used token (staleToken) needs a new count.
+ */
+function PatternDeleteDialog({ tabId, initial, type, where, onClose, onDeleted }: { tabId: string; initial: string; type: string; where: string; onClose: () => void; onDeleted: () => void }) {
   const { tr } = useI18n();
+  const offline = useOffline();
   const [pattern, setPattern] = useState(initial);
   const [count, setCount] = useState<{ token: string; count: number; complete: boolean; pattern: string } | null>(null);
+  const [empty, setEmpty] = useState<string | null>(null);
   const [step, setStep] = useState<'idle' | 'counting' | 'deleting'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [deletedSoFar, setDeletedSoFar] = useState(0);
+  const effective = pattern.trim() || '*';
+  const countNow = async () => {
+    setStep('counting');
+    const r = await withTab(tabId, (sid) => window.mc.db.redis.countPattern(sid, effective, type || undefined));
+    setStep('idle');
+    const next = afterPatternCount(r);
+    if (next.kind === 'confirm') { setCount({ token: next.token, count: next.count, complete: next.complete, pattern: effective }); setEmpty(null); }
+    else if (next.kind === 'empty') { setCount(null); setEmpty(effective); }
+    else if (!r.ok) setError(resultText(r));
+  };
   const run = async () => {
     setError(null);
-    if (!count || count.pattern !== pattern) {
-      setStep('counting');
-      const r = await withTab(tabId, (sid) => window.mc.db.redis.countPattern(sid, pattern || '*', type || undefined));
-      setStep('idle');
-      if (!r.ok) { setError(resultText(r)); return; }
-      setCount({ ...r.value, pattern });
-      return;
-    }
-    if (count.count === 0) { onClose(); return; }
+    if (!count || count.pattern !== effective) { await countNow(); return; }
     setStep('deleting');
     const r = await withTab(tabId, (sid) => window.mc.db.redis.deletePattern(sid, count.token));
     setStep('idle');
-    if (!r.ok) { setError(resultText(r)); setCount(null); return; }
-    const total = deletedSoFar + r.value.deleted;
-    setDeletedSoFar(total);
-    if (r.value.cancelled) { toast(tr('Przerwano. Usunięto kluczy: {count}', { count: total })); onDeleted(); return; }
-    // The delete stops near the confirmed count: `more` means keys still match (added meanwhile, or the count was capped).
-    // Count again and offer to go on, asking with the new count; nothing more is deleted without that confirmation.
-    if (!r.value.more) { toast(tr('Usunięto kluczy: {count}', { count: total })); onDeleted(); return; }
-    setStep('counting');
-    const again = await withTab(tabId, (sid) => window.mc.db.redis.countPattern(sid, pattern || '*', type || undefined));
-    setStep('idle');
-    if (again.ok && again.value.count > 0) { setCount({ ...again.value, pattern }); return; }
-    toast(tr('Usunięto kluczy: {count}', { count: total }));
-    onDeleted();
+    const next = afterPatternDelete(r, deletedSoFar);
+    if (next.kind === 'error') { if (!r.ok) setError(resultText(r)); setCount(null); if (next.recount) await countNow(); return; }
+    if (next.kind === 'done') {
+      toast(next.cancelled ? tr('Przerwano. Usunięto kluczy: {count}', { count: next.deleted }) : tr('Usunięto kluczy: {count}', { count: next.deleted }));
+      onDeleted();
+      return;
+    }
+    if (next.kind === 'recount') { setDeletedSoFar(next.deleted); setCount(null); await countNow(); }
   };
   const cancel = () => { if (step !== 'idle') void withTab(tabId, (sid) => window.mc.db.redis.cancel(sid)); else onClose(); };
-  const ready = count && count.pattern === pattern;
+  const ready = !!count && count.pattern === effective;
   const countText = ready ? (count.complete ? String(count.count) : tr('co najmniej {count}', { count: count.count })) : '';
   return (
     <RedisDialog title={tr('Usuń klucze wg wzorca')} onClose={cancel} actions={<>
       <button className="btn small" onClick={cancel}>{step === 'idle' ? tr('Anuluj') : tr('Przerwij')}</button>
-      <button className={`btn small ${ready && count.count > 0 ? 'danger' : 'primary'} redis-pattern-run`} disabled={step !== 'idle'} onClick={() => void run()}>
-        {!ready ? tr('Policz klucze') : count.count === 0 ? tr('Zamknij') : tr('Usuń {count} kluczy', { count: countText })}
+      <button className={`btn small ${ready ? 'danger' : 'primary'} redis-pattern-run`} disabled={step !== 'idle' || offline || empty === effective} onClick={() => void run()}>
+        {!ready ? tr('Policz klucze') : tr('Usuń {count} kluczy', { count: countText })}
       </button>
     </>}>
-      <label className="field"><span>{tr('Wzorzec')}</span><input className="input redis-pattern-input" autoFocus value={pattern} spellCheck={false} disabled={step !== 'idle'} onChange={(e) => setPattern(e.target.value)} /></label>
+      <p className="muted redis-where">{where}</p>
+      <label className="field"><span>{tr('Wzorzec')}</span><input className="input redis-pattern-input mono" autoFocus value={pattern} placeholder="*" spellCheck={false} disabled={step !== 'idle'} onChange={(e) => setPattern(e.target.value)} /></label>
+      {!pattern.trim() && <p className="redis-warn-text">{tr('Pusty wzorzec oznacza wszystkie klucze (*).')}</p>}
       {type && <p className="muted">{tr('Tylko klucze typu {type}', { type })}</p>}
       {step === 'counting' && <p className="muted" role="status">{tr('Liczenie kluczy…')}</p>}
       {step === 'deleting' && <p className="muted" role="status">{tr('Usuwanie kluczy…')}</p>}
       {deletedSoFar > 0 && step === 'idle' && <p className="muted" role="status">{tr('Usunięto już kluczy: {count}. Część pasujących kluczy wciąż istnieje.', { count: deletedSoFar })}</p>}
-      {ready && step === 'idle' && <p className={count.count ? 'redis-warn-text' : 'muted'} role="status">{count.count ? tr('Pasujące klucze: {count}. Usunięcia nie można cofnąć.', { count: countText }) : tr('Żaden klucz nie pasuje do wzorca')}</p>}
+      {ready && step === 'idle' && <p className="redis-warn-text" role="status">{tr('Pasujące do {pattern}: {count}. Usunięcia nie można cofnąć.', { pattern: effective, count: countText })}</p>}
+      {empty === effective && step === 'idle' && <p className="muted" role="status">{tr('Żaden klucz nie pasuje do wzorca')}</p>}
       {error && <p className="redis-error-text" role="alert">{error}</p>}
     </RedisDialog>
   );

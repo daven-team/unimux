@@ -1,6 +1,6 @@
 // A Redis tab of the top strip (1.0.0): the connection bar (colour, name, endpoint, DB, version, TLS, read-only, switching to the
 // other views), the login of its session (DbLogin: SSH host key and password, the Redis password) and the view itself.
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { dbEndpoint, dbPhaseLabel } from '../../../../shared/db';
 import type { RedisTabRef, RedisTabView as View } from '../../../../shared/redisView';
 import { useFileStore } from '../../files';
@@ -9,6 +9,7 @@ import { useStore } from '../../store';
 import { ensureTabSession, openRedisTab, reconnectTab, tabSessionState, useRedisStore, viewLabel } from '../../redis/redisClient';
 import { DbLogin } from '../db/DbLogin';
 import { BusyRing } from '../Spinner';
+import { OfflineContext } from './common';
 import '../ssh/ssh.css';
 import './redis.css';
 
@@ -32,11 +33,17 @@ export function RedisTabView() {
   const sessionId = useRedisStore((st) => st.tabSessions[tabId]);
   const tabError = useRedisStore((st) => st.tabErrors[tabId]);
   const prompt = useRedisStore((st) => (sessionId ? st.prompts[sessionId] : undefined));
+  const shownRef = useRef<string | null>(null);
   // A tab connects when it is shown (also after its session ended unexpectedly: then it waits for "connect again").
   useEffect(() => { if (tabId && connection && !sessionId && !tabError) void ensureTabSession(tabId); }, [tabId, connection, sessionId, tabError]);
   if (!doc || !ref) return null;
   if (!connection) return <div className="redis-view"><div className="redis-center muted">{tr('To połączenie zostało usunięte')}</div></div>;
   const connected = session?.state === 'connected';
+  // Once shown, the view stays mounted while its session reconnects or the key browser moves to another DB (unsaved edits, open
+  // editors and the Pub/Sub detail survive; writes are disabled meanwhile). A login question or an ended session replaces it.
+  if (connected) shownRef.current = tabId;
+  const keepBody = shownRef.current === tabId && !prompt && !tabError;
+  const offline = !connected;
   const readOnly = session?.readOnly ?? connection.readOnly;
   const phase = session && session.state === 'connecting' ? dbPhaseLabel(session.phase) : null;
   return (
@@ -58,15 +65,15 @@ export function RedisTabView() {
           ))}
         </nav>
       </header>
-      {connected && sessionId
-        ? <Suspense fallback={null}><Body view={ref.view} props={{ tabId, sessionId, ref, readOnly }} /></Suspense>
+      {(connected && sessionId) || keepBody
+        ? <OfflineContext.Provider value={offline}><Suspense fallback={null}><Body view={ref.view} props={{ tabId, sessionId: sessionId ?? '', ref, readOnly }} /></Suspense></OfflineContext.Provider>
         : (
           <div className="redis-center">
             {prompt && sessionId ? <div className="redis-card login"><DbLogin sessionId={sessionId} /></div>
               : tabError ? (
                 <div className="redis-card" role="alert">
-                  <div className="redis-card-title">{tr('Nie udało się połączyć')}</div>
-                  <p className="redis-error-text">{tabError}</p>
+                  <div className="redis-card-title">{tabError.closed ? tr('Rozłączono') : tr('Nie udało się połączyć')}</div>
+                  {!tabError.closed && <p className="redis-error-text">{tabError.text}</p>}
                   <button className="btn small primary" onClick={() => reconnectTab(tabId)}>{tr('Połącz ponownie')}</button>
                 </div>
               ) : <div className="muted redis-connecting" role="status"><BusyRing className="redis-ring" /> {phase ? tr(phase.key, phase.params) : tr('łączenie…')}</div>}

@@ -5,9 +5,10 @@ import { redisDataDisplay, type RedisData, type RedisKeyInfo } from '../../../..
 import { formatBytes, formatTtl, parseTtlInput } from '../../../../shared/redisView';
 import { useI18n } from '../../i18n';
 import { askChoice, toast } from '../../store';
-import { resultText, withTab } from '../../redis/redisClient';
-import { IEdit } from '../icons';
-import { DataText, RedisDialog, TypeBadge } from './common';
+import { resultText, whereText, withTab } from '../../redis/redisClient';
+import { openMenuAt } from '../ContextMenu';
+import { IEdit, IMore } from '../icons';
+import { DataText, RedisDialog, TypeBadge, useOffline } from './common';
 import { HashView, ListView, SetView, StreamView, StringView, ZsetView } from './RedisValues';
 
 export interface ValueProps {
@@ -18,38 +19,54 @@ export interface ValueProps {
   onChanged: () => void;
   /** The key holds another type now or vanished: the panel reads it again. */
   onReload: () => void;
+  /** Where the value lives, for confirmations: "local redis · DB 3". */
+  where: string;
 }
 
 export function RedisValuePanel({ tabId, info, readOnly, onChanged, onGone }: {
   tabId: string; info: RedisKeyInfo; readOnly: boolean; onChanged: (key: RedisData) => void; onGone: (key: RedisData, renamedTo?: RedisData) => void;
 }) {
   const { tr } = useI18n();
+  const offline = useOffline();
+  const where = whereText(tabId);
   const [dialog, setDialog] = useState<null | 'ttl' | 'rename'>(null);
   const [generation, setGeneration] = useState(0);
   const key = info.key;
   const ttl = formatTtl(info.ttlMs);
   const remove = async () => {
-    const choice = await askChoice(tr('Usunąć klucz?'), redisDataDisplay(key), [{ label: tr('Usuń'), value: 'delete', danger: true }]);
+    const choice = await askChoice(tr('Usunąć klucz?'), `${redisDataDisplay(key)}
+${where}`, [{ label: tr('Usuń'), value: 'delete', danger: true }]);
     if (choice !== 'delete') return;
     const r = await withTab(tabId, (sid) => window.mc.db.redis.write(sid, { op: 'delete', keys: [key] }));
     if (!r.ok) { toast(resultText(r), 'error'); return; }
     toast(tr('Klucz usunięty'));
     onGone(key);
   };
-  const props: ValueProps = { tabId, keyName: key, readOnly, onChanged: () => onChanged(key), onReload: () => { onChanged(key); setGeneration((g) => g + 1); } };
+  const props: ValueProps = { tabId, keyName: key, readOnly, onChanged: () => onChanged(key), onReload: () => { onChanged(key); setGeneration((g) => g + 1); }, where };
+  const copyName = () => { window.mc.clipboardWrite(redisDataDisplay(key)); toast(tr('Skopiowano')); };
+  // Below about 420 px the actions move into one menu (the container query in redis.css shows either the buttons or the menu).
+  const moreMenu = (el: HTMLElement) => openMenuAt(el, [
+    { label: tr('Kopiuj nazwę'), onClick: copyName },
+    ...(readOnly ? [] : [{ label: tr('Zmień nazwę'), disabled: offline, onClick: () => setDialog('rename') }]),
+    { label: tr('Odśwież'), onClick: () => props.onReload() },
+    ...(readOnly ? [] : [{ sep: true as const }, { label: tr('Usuń'), danger: true, disabled: offline, onClick: () => void remove() }]),
+  ]);
   return (
     <div className="redis-value">
       <header className="redis-value-head">
         <TypeBadge type={info.type} />
         <DataText data={key} className="redis-value-key" />
         <span className="grow" />
-        <button className="btn small ghost" title={tr('Kopiuj nazwę klucza')} onClick={() => { window.mc.clipboardWrite(redisDataDisplay(key)); toast(tr('Skopiowano')); }}>{tr('Kopiuj nazwę')}</button>
-        {!readOnly && <button className="btn small ghost redis-rename" onClick={() => setDialog('rename')}><IEdit /> {tr('Zmień nazwę')}</button>}
-        <button className="btn small ghost" onClick={() => props.onReload()}>{tr('Odśwież')}</button>
-        {!readOnly && <button className="btn small danger redis-delete-key" onClick={() => void remove()}>{tr('Usuń')}</button>}
+        <span className="redis-value-actions">
+          <button className="btn small ghost" title={tr('Kopiuj nazwę klucza')} onClick={copyName}>{tr('Kopiuj nazwę')}</button>
+          {!readOnly && <button className="btn small ghost redis-rename" disabled={offline} onClick={() => setDialog('rename')}><IEdit /> {tr('Zmień nazwę')}</button>}
+          <button className="btn small ghost" onClick={() => props.onReload()}>{tr('Odśwież')}</button>
+          {!readOnly && <button className="btn small danger redis-delete-key" disabled={offline} onClick={() => void remove()}>{tr('Usuń')}</button>}
+        </span>
+        <button className="btn small ghost icon redis-value-more" aria-label={tr('Więcej akcji')} title={tr('Więcej akcji')} onClick={(e) => moreMenu(e.currentTarget)}><IMore /></button>
       </header>
       <div className="redis-value-meta">
-        <span className="redis-meta-item">TTL: <button className={`redis-ttl-btn ${readOnly ? 'static' : ''}`} disabled={readOnly} onClick={() => setDialog('ttl')}>{ttl ?? tr('bez wygaśnięcia')}</button></span>
+        <span className="redis-meta-item">TTL: <button className={`redis-ttl-btn ${readOnly ? 'static' : ''}`} disabled={readOnly || offline} onClick={() => setDialog('ttl')}>{ttl ?? tr('bez wygaśnięcia')}</button></span>
         {info.length !== undefined && <span className="redis-meta-item">{info.type === 'string' ? tr('Rozmiar: {size}', { size: formatBytes(info.length) }) : tr('Elementów: {count}', { count: info.length.toLocaleString() })}</span>}
         {info.memory !== undefined && <span className="redis-meta-item">{tr('Pamięć: {size}', { size: formatBytes(info.memory) })}</span>}
       </div>
@@ -104,7 +121,7 @@ function RenameDialog({ tabId, keyName, onClose, onDone }: { tabId: string; keyN
     if (!name || name === keyName) { onClose(); return; }
     let r = await withTab(tabId, (sid) => window.mc.db.redis.write(sid, { op: 'rename', key: keyName, newKey: name }));
     if (!r.ok && r.error === 'keyExists') {
-      const choice = await askChoice(tr('Klucz „{name}” już istnieje', { name }), tr('Nadpisanie usunie jego obecną wartość.'), [
+      const choice = await askChoice(tr('Klucz „{name}” już istnieje', { name }), `${tr('Nadpisanie usunie jego obecną wartość.')}\n${whereText(tabId)}`, [
         { label: tr('Nadpisz'), value: 'overwrite', danger: true },
       ]);
       if (choice !== 'overwrite') return;

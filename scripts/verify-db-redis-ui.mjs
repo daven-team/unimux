@@ -183,6 +183,37 @@ try {
   check(true, 'a stream entry is added and shows first (newest first)');
   await shot('stream');
 
+  // ── fix round 1: sorted set NX, CRLF round-trip, mixed line endings, JSON save style ──
+  await openKey('scores');
+  await click('.redis-items .redis-add');
+  await setValue('.redis-add-first', 'ala');
+  await setValue('.redis-add-second', '5');
+  await click('.redis-add-save');
+  await until(`(document.querySelector('.toast')?.textContent ?? '').includes('już istnieje')`, 'zset nx refusal');
+  check((await cmd('ZSCORE', 'scores', 'ala')).v === '10', 'adding a sorted-set member that exists does not overwrite its score (NX)');
+  await cmd('SET', 'crlf:1', 'line one\r\nline two\r\n');
+  await openKey('crlf:1');
+  await until(`(document.querySelector('.redis-string-text')?.value ?? '') === 'line one\\nline two\\n'`, 'crlf shown with lf');
+  check(await evaluate(`[...document.querySelectorAll('.redis-chip')].some((c) => c.textContent === 'CRLF')`), 'a CRLF value is marked CRLF');
+  await setValue('.redis-string-text', 'line one\nline two\nline three\n');
+  await click('.redis-save');
+  await until(`(async () => { const r = await window.mc.db.redis.command(${j(probe)}, { argv: ['GET', 'crlf:1'] }); return r.ok && r.value.reply.v === 'line one\\r\\nline two\\r\\nline three\\r\\n'; })()`, 'crlf kept');
+  check(true, 'editing a CRLF value keeps its CRLF line endings');
+  await cmd('SET', 'mixed:1', 'a\r\nb\nc');
+  await openKey('mixed:1');
+  await until(`!!document.querySelector('.redis-string-text')?.readOnly && [...document.querySelectorAll('.redis-note button')].some((b) => b.textContent.includes('Hex'))`, 'mixed read-only');
+  check(true, 'a value with mixed line endings is read-only as text, with "edit as hex"');
+  await cmd('SET', 'json:spaced', '{"a": 1}');
+  await openKey('json:spaced');
+  await until(`(document.querySelector('.redis-string-text')?.value ?? '').includes('"a": 1')`, 'json view');
+  await setValue('.redis-string-text', '{\n  "a": 5\n}');
+  await click('.redis-save');
+  await until(`(document.querySelector('.modal-head')?.textContent ?? '').includes('JSON')`, 'json style question');
+  check(true, 'saving JSON that has its own formatting asks: formatted or compact');
+  await confirmDialog('Kompaktowy');
+  await until(`(async () => { const r = await window.mc.db.redis.command(${j(probe)}, { argv: ['GET', 'json:spaced'] }); return r.ok && r.value.reply.v === '{"a":5}'; })()`, 'json compact saved');
+  check(true, 'the chosen JSON style is saved');
+
   // ── binary string ──
   await search('bin*');
   await until(`[...document.querySelectorAll('.redis-key-row')].some((e) => e.title.startsWith('bin'))`, 'binary key');
@@ -229,11 +260,35 @@ try {
   await until(`(async () => { const r = await window.mc.db.redis.countPattern(${j(probe)}, 'item:2*'); return r.ok && r.value.count === 108; })()`, 'deleted 3');
   check(true, 'the selected keys are deleted');
 
+  // ── fix round 1: a folder with glob characters deletes only its own keys; keyboard navigation ──
+  await cmd('SET', 'a[1]:x', '1');
+  await cmd('SET', 'a1:x', '2');
+  await search('a*');
+  await click('.redis-seg button', 'Drzewo');
+  const folderRow = "[...document.querySelectorAll('.redis-key-row.folder')].find((r) => r.querySelector('.redis-key-name')?.textContent === 'a[1]')";
+  await until(`!!${folderRow}`, 'folder a[1]');
+  await evaluate(`(() => { const r = ${folderRow}; const b = r.getBoundingClientRect(); r.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: b.left + 20, clientY: b.top + 8 })); return true; })()`);
+  await until(`[...document.querySelectorAll('[role=menuitem]')].some((b) => b.textContent.includes('a\\\\[1\\\\]:*'))`, 'escaped folder pattern in the menu');
+  await evaluate(`[...document.querySelectorAll('[role=menuitem]')].find((b) => b.textContent.includes('a\\\\[1\\\\]:*')).click(), true`);
+  await until(`document.querySelector('.redis-pattern-input')?.value === 'a\\\\[1\\\\]:*'`, 'escaped pattern prefilled');
+  await click('.redis-pattern-run');
+  await until(`(document.querySelector('.redis-pattern-run')?.textContent ?? '').includes(' 1 ')`, 'folder count 1');
+  check(await evaluate(`(document.querySelector('.redis-where')?.textContent ?? '').includes('local redis · DB 0')`), 'the pattern delete names the connection and DB');
+  await click('.redis-pattern-run');
+  await until(`(async () => { const a = await window.mc.db.redis.command(${j(probe)}, { argv: ['EXISTS', 'a[1]:x'] }); const b = await window.mc.db.redis.command(${j(probe)}, { argv: ['EXISTS', 'a1:x'] }); return a.ok && b.ok && a.value.reply.v === '0' && b.value.reply.v === '1'; })()`, 'folder delete');
+  check(true, 'deleting folder a[1]: removes only its key, not a1:x (glob characters escaped)');
+  await search('user:*');
+  await click('.redis-seg button', 'Lista');
+  await until(`!!${keyRow('user:1')}`, 'user:1 row');
+  await evaluate(`(() => { const l = document.querySelector('.redis-key-list'); l.focus(); l.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); return true; })()`);
+  await until(`(document.querySelector('.redis-value-key')?.textContent ?? '').endsWith('user:1')`, 'keyboard open');
+  check(await evaluate(`!!document.querySelector('.redis-key-list[aria-activedescendant]')`), 'the key list is a keyboard listbox: the arrow key opens the key');
+
   // ── console ──
   await click('.redis-view-btn', 'Konsola');
-  await until(`!!document.querySelector('.redis-console-line') && !document.querySelector('.redis-console-line').disabled`, 'console', 30000);
+  await until(`!!document.querySelector('.redis-console-line') && !document.querySelector('.redis-console-line').readOnly`, 'console', 30000);
   const run = async (line) => {
-    await until(`!document.querySelector('.redis-console-line').disabled`, 'console ready');
+    await until(`!document.querySelector('.redis-console-line').readOnly`, 'console ready');
     await setValue('.redis-console-line', line);
     await evaluate(`document.querySelector('.redis-console-line').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })), true`);
   };
@@ -263,6 +318,14 @@ try {
   await evaluate(`document.querySelector('.redis-console-line').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })), true`);
   await until(`document.querySelector('.redis-console-line').value === 'SUBSCRIBE news'`, 'history');
   check(true, 'the up arrow brings back the last command');
+  await run('AUTH secret-pw-xyz');
+  await run('CONFIG SET requirepass hunter2-xyz');
+  await until(`!!document.querySelector('.modal-foot')`, 'config set asks');
+  check(await evaluate(`(document.querySelector('.modal-body')?.textContent ?? '').includes('local redis · DB 0')`), 'a dangerous command names the connection and DB');
+  await click('.modal-foot button', 'Anuluj');
+  await until(`[...document.querySelectorAll('.redis-console-cmd')].some((e) => e.textContent.includes('requirepass ***'))`, 'masked line');
+  const stored = await evaluate(`Object.keys(localStorage).filter((k) => k.startsWith('mc-redis-history')).map((k) => localStorage.getItem(k)).join('\\n')`);
+  check(!stored.includes('secret-pw-xyz') && !stored.includes('hunter2-xyz') && !stored.includes('AUTH') && stored.includes('requirepass ***'), 'the console history never stores passwords (AUTH left out, CONFIG SET requirepass masked)');
   await setValue('.redis-console-line', '');
   await shot('console');
 
@@ -271,9 +334,10 @@ try {
   await until(`!!document.querySelector('.redis-sub-input')`, 'pubsub', 30000);
   await setValue('.redis-sub-input', 'news');
   await click('.redis-sub-channel');
+  await until(`document.querySelectorAll('.redis-sub-chip').length === 1`, 'first chip');
   await setValue('.redis-sub-input', 'ev:*');
   await click('.redis-sub-pattern');
-  await until(`document.querySelectorAll('.redis-sub-chip').length === 2`, 'chips');
+  await until(`document.querySelectorAll('.redis-sub-chip').length === 2`, 'chips').catch(async (e) => { console.log('pubsub:', await textOf('.redis-pubsub'), 'toast:', await textOf('.toast')); throw e; });
   check(true, 'subscriptions to a channel and a pattern show as chips');
   await setValue('.redis-pub-channel', 'news');
   await setValue('.redis-pub-message', '{"title":"hello","n":1}');
@@ -309,6 +373,9 @@ try {
   await until(`document.querySelectorAll('.redis-table tbody tr').length >= 2`, 'clients');
   check(true, 'SLOWLOG and CLIENT LIST tables');
 
+  const sessionsOfA = await evaluate(`(async () => (await window.mc.db.sessions()).sessions.filter((s) => s.connectionId === ${j(a.connection.id)}).length)()`);
+  check(sessionsOfA === 3, `keys, Pub/Sub and server views of one DB share one session (sessions of the connection: ${sessionsOfA}, expected 3 = shared + console + probe)`);
+
   // ── read-only connection through the SSH tunnel ──
   // Through the connections panel this time: a click on a Redis connection opens its key browser.
   await click('#db-view');
@@ -325,7 +392,7 @@ try {
   await submit('.redis-card form');
   await until(`!!document.querySelector('.redis-browser .redis-key-row')`, 'tunnel connected', 30000);
   check(await evaluate(`[...document.querySelectorAll('.redis-chip')].some((e) => e.textContent.includes('tylko do odczytu'))`), 'the tunnel connection shows read-only');
-  check(await count('.redis-new-key') === 0 && await count('.redis-delete-selected') === 0, 'no "new key" or delete controls on a read-only connection');
+  check(await count('.redis-new-key') === 0 && await count('.redis-delete-selected') === 0 && await count('.redis-key-check') === 0, 'no "new key", selection or delete controls on a read-only connection');
   await openKey('user:1');
   await until(`[...document.querySelectorAll('.redis-item')].some((e) => e.textContent.includes('city'))`, 'ro hash fields');
   await evaluate(`[...document.querySelectorAll('.redis-item')].find((e) => e.textContent.includes('city')).click(), true`);
@@ -333,10 +400,19 @@ try {
   check(await count('.redis-delete-key') === 0 && await count('.redis-rename') === 0 && await count('.redis-editor .redis-save') === 0 && await count('.redis-items .redis-add') === 0, 'the value panel has no edit controls on a read-only connection');
   await shot('readonly');
   await click('.redis-view-btn', 'Konsola');
-  await until(`!!document.querySelector('.redis-console-line') && !document.querySelector('.redis-console-line').disabled`, 'ro console', 30000);
+  await until(`!!document.querySelector('.redis-console-line') && !document.querySelector('.redis-console-line').readOnly`, 'ro console', 30000);
   await run('SET x 1');
   await until(`[...document.querySelectorAll('.redis-console-note.error')].some((e) => e.textContent.includes('tylko do odczytu'))`, 'ro refusal');
   check((await cmd('EXISTS', 'x')).v === '0', 'a write in the console of a read-only connection is refused with a clear message');
+
+  // ── fix round 1: a disconnect from the panel reads "Rozłączono" ──
+  if (!(await evaluate(`!!document.querySelector('.db-panel')`))) await click('#db-view');
+  await until(`!!${vpsRow}`, 'vps row');
+  await evaluate(`(() => { const r = ${vpsRow}; const b = r.getBoundingClientRect(); r.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: b.left + 20, clientY: b.top + 8 })); return true; })()`);
+  await until(`[...document.querySelectorAll('[role=menuitem]')].some((b) => b.textContent.trim() === 'Rozłącz')`, 'disconnect entry');
+  await evaluate(`[...document.querySelectorAll('[role=menuitem]')].find((b) => b.textContent.trim() === 'Rozłącz').click(), true`);
+  await until(`(document.querySelector('.redis-card-title')?.textContent ?? '') === 'Rozłączono'`, 'disconnected card', 20000);
+  check(true, 'after "Rozłącz" the Redis tab says "Rozłączono" (not a failure) and offers to connect again');
 
   // ── tabs close their sessions ──
   await evaluate(`(() => { for (const b of [...document.querySelectorAll('.workspace-tabs .redis-strip-tab .x')]) b.click(); return true; })()`);

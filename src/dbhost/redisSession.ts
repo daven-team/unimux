@@ -207,9 +207,12 @@ const ok = <T>(value: T): DbResult<T> => ({ ok: true, value });
 const fail = (error: DbErrorCode, server?: DbServerError): DbResult<never> => ({ ok: false, error, ...(server ? { server } : {}) });
 class OpError extends Error { constructor(readonly code: DbErrorCode, readonly server?: DbServerError) { super(code); } }
 
-// ioredis turns every HGETALL reply into an object; the console needs the server's flat array (a typed reply, binary-safe
-// fields). The host itself never relies on the object form.
-Command.setReplyTransformer('hgetall', (result: unknown) => result);
+// ioredis reshapes some replies (HGETALL into an object, VSIM and others under protocol 2): the console shows what the server
+// sent, so every registered reply transformer is an identity in the DB Host (the host never relies on the reshaped forms).
+/** ioredis' registered reply transformers by command name (identities once this module loaded). */
+export const replyTransformers = (): Record<string, (result: unknown) => unknown> =>
+  (Command as unknown as { _transformer: { reply: Record<string, (result: unknown) => unknown> } })._transformer.reply;
+for (const name of Object.keys(replyTransformers())) Command.setReplyTransformer(name, (result: unknown) => result);
 
 const LENGTH_COMMAND: Record<string, string> = { string: 'strlen', hash: 'hlen', list: 'llen', set: 'scard', zset: 'zcard', stream: 'xlen' };
 const RETRY_DELAYS = [300, 1000, 2000];
@@ -689,7 +692,8 @@ export class RedisSession {
 
   private async setString(key: Buffer, w: Extract<RedisWrite, { op: 'set' }>): Promise<void> {
     const value = fromData(w.value);
-    const check = () => this.expectType(key, 'string', true);
+    // existing: the edit comes from an open value view; a key that expired or was deleted meanwhile is not created again.
+    const check = () => this.expectType(key, 'string', !w.existing);
     if (w.ttlMs) { await this.atomically(key, check, [['set', key, value, 'PX', w.ttlMs]], 'conflict'); return; }
     if (w.keepTtl === false) { await this.atomically(key, check, [['set', key, value]], 'conflict'); return; }
     if (this.keepTtl) {
