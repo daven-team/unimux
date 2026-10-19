@@ -332,6 +332,18 @@ describe('SftpHost: transfers', () => {
     expect(h.items().filter((i) => i.batchId === b)).toEqual([]);
   });
 
+  it('an app shutdown during a local copy waits for the aborted copies to remove their part files', async () => {
+    const h = harness();
+    mkdirSync(local('many'));
+    for (let n = 0; n < 40; n++) writeFileSync(local('many', `f${n}.bin`), Buffer.alloc(4_000_000, n));
+    mkdirSync(local('out'));
+    const b = await h.enqueue({ direction: 'local-copy', sources: [local('many')], targetDir: local('out') }, LOCAL_QUEUE_ID);
+    const parts = () => (existsSync(local('out', 'many')) ? readdirSync(local('out', 'many')).filter((n) => n.endsWith('.unimux-part')) : []);
+    await waitFor(() => parts().length > 0 || (h.ofBatch(b).length > 0 && h.ofBatch(b).every((i) => i.state === 'done')));
+    await h.host.shutdown();
+    expect(parts()).toEqual([]);
+  });
+
   it('a lost connection fails what was not finished with connectionLost', async () => {
     const s = await server();
     const h = harness();

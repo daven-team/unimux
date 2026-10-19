@@ -106,6 +106,24 @@ describe('SftpService', () => {
     expect(f.service.ids()).toEqual([]);
   });
 
+  it('counts the view closed when the renderer reloads or crashes, so the idle disconnect still comes', async () => {
+    const f = setup();
+    f.service.viewOpened();
+    const r = await f.service.connect(HOST);
+    const id = r.ok ? r.sessionId : '';
+    f.service.onCoordinatorSession({ cellId: id, hostId: HOST, phase: 'connected', since: 2 });
+    await flush();
+    expect(f.live()).toEqual([]);
+    f.service.rendererGone();
+    expect(f.live().map((t) => t.ms)).toEqual([120_000]);
+    // A second reload while hidden does not restart the timer.
+    const timer = f.live()[0];
+    f.service.rendererGone();
+    expect(f.live()).toEqual([timer]);
+    timer.fn();
+    expect(f.sent).toEqual([{ t: 'sftpDisconnect', id }]);
+  });
+
   it('forgets a session that failed and tells the renderer when the SFTP host restarted', async () => {
     const f = setup();
     const r = await f.service.connect(HOST);
@@ -198,5 +216,25 @@ describe('local files of the SFTP view', () => {
     const roots = await lf.roots();
     expect(roots.home).toBe(dir);
     if (process.platform === 'win32') expect(roots.drives.length).toBeGreaterThan(0); else expect(roots.drives).toEqual([]);
+  });
+
+  it('reveals a macOS bundle (Foo.app) selected in Finder instead of opening it, and opens plain folders', async () => {
+    const calls: string[] = [];
+    const make = (platform: NodeJS.Platform) => createLocalFiles({
+      platform, trash: async () => undefined, home: () => dir,
+      openFolder: async (p) => { calls.push(`open ${p}`); }, showFile: (p) => { calls.push(`show ${p}`); },
+    });
+    mkdirSync(join(dir, 'Foo.app', 'Contents'), { recursive: true });
+    mkdirSync(join(dir, 'Plain'));
+    writeFileSync(join(dir, 'f.txt'), '');
+    const mac = make('darwin');
+    expect(await mac.reveal(join(dir, 'Foo.app'))).toEqual({ ok: true, value: null });
+    expect(await mac.reveal(join(dir, 'Foo.app', 'Contents'))).toEqual({ ok: true, value: null });
+    expect(await mac.reveal(join(dir, 'Plain'))).toEqual({ ok: true, value: null });
+    expect(await mac.reveal(join(dir, 'f.txt'))).toEqual({ ok: true, value: null });
+    expect(calls).toEqual([`show ${join(dir, 'Foo.app')}`, `open ${join(dir, 'Foo.app', 'Contents')}`, `open ${join(dir, 'Plain')}`, `show ${join(dir, 'f.txt')}`]);
+    calls.length = 0;
+    await make('win32').reveal(join(dir, 'Foo.app'));
+    expect(calls).toEqual([`open ${join(dir, 'Foo.app')}`]);
   });
 });

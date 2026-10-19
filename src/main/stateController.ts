@@ -3,6 +3,8 @@ import type { AppState } from '../shared/types';
 import { layoutForCount, MAX_CELLS } from '../shared/layout';
 import { normalizeAlerts } from '../shared/alerts';
 import { normalizeSshHosts } from '../shared/ssh';
+import { normalizeSftpPlaces } from '../shared/sftpView';
+import { normalizeScrollback } from '../shared/terminalLimits';
 
 /** Main is the single writer. Renderer edits rebase; MCP operations mutate the latest state. */
 export class StateController {
@@ -27,8 +29,9 @@ export class StateController {
     return this.change((state) => {
       const next = mergeStateEdit(state, edit);
       // The renderer cannot store arbitrary alert values (unknown presets, relative or UNC sound paths): they are normalized here.
-      // SSH hosts edited in the renderer are normalized the same way (R6).
-      return { ...next, sshHosts: normalizeSshHosts(next.sshHosts), settings: { ...next.settings, alerts: normalizeAlerts(next.settings.alerts) }, projects: next.projects.map((project) => {
+      // SSH hosts edited in the renderer are normalized the same way (R6), and so are the SFTP places and the scrollback setting.
+      const sftp = normalizeSftpPlaces(next.sftp);
+      return { ...next, sshHosts: normalizeSshHosts(next.sshHosts), sftp: JSON.stringify(sftp) === JSON.stringify(next.sftp) ? next.sftp : sftp, settings: { ...next.settings, alerts: normalizeAlerts(next.settings.alerts), scrollbackLines: normalizeScrollback(next.settings.scrollbackLines) }, projects: next.projects.map((project) => {
         const tabs = project.tabs.map((tab) => {
           if (tab.cells.length < 1 || tab.cells.length > MAX_CELLS) throw new Error('Concurrent grid change exceeds the cell limit.');
           return tab.layout.areas.length === tab.cells.length ? tab : { ...tab, layout: layoutForCount(tab.cells.length) };

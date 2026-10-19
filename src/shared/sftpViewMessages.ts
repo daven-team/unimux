@@ -66,6 +66,9 @@ export const sftpViewMessages = {
   'Przerwać transfery i zmienić host?': ['Stop the transfers and change the host?', 'Übertragungen abbrechen und Host wechseln?', '¿Detener las transferencias y cambiar de host?', 'Arrêter les transferts et changer d\'hôte ?', 'Parar as transferências e mudar de anfitrião?'],
   'Transfery w toku: {count}. Zmiana hosta je anuluje.': ['Transfers in progress: {count}. Changing the host cancels them.', 'Laufende Übertragungen: {count}. Ein Hostwechsel bricht sie ab.', 'Transferencias en curso: {count}. Cambiar de host las cancela.', 'Transferts en cours : {count}. Changer d\'hôte les annule.', 'Transferências em curso: {count}. Mudar de anfitrião cancela-as.'],
   'Rozłączyć i przerwać transfery?': ['Disconnect and stop the transfers?', 'Trennen und Übertragungen abbrechen?', '¿Desconectar y detener las transferencias?', 'Se déconnecter et arrêter les transferts ?', 'Desligar e parar as transferências?'],
+  'Zamknąć aplikację w trakcie transferów?': ['Quit while transfers are running?', 'Beenden, während Übertragungen laufen?', '¿Salir con transferencias en curso?', 'Quitter pendant des transferts en cours ?', 'Sair com transferências em curso?'],
+  'Transfery w toku: {count}. Zamknięcie aplikacji je przerwie.': ['Transfers in progress: {count}. Quitting the app stops them.', 'Laufende Übertragungen: {count}. Beim Beenden der App werden sie abgebrochen.', 'Transferencias en curso: {count}. Salir de la aplicación las detiene.', 'Transferts en cours : {count}. Quitter l’application les interrompt.', 'Transferências em curso: {count}. Sair da aplicação interrompe-as.'],
+  'Zakończ mimo to': ['Quit anyway', 'Trotzdem beenden', 'Salir de todos modos', 'Quitter quand même', 'Sair mesmo assim'],
   'Transfery w toku: {count}.': ['Transfers in progress: {count}.', 'Laufende Übertragungen: {count}.', 'Transferencias en curso: {count}.', 'Transferts en cours : {count}.', 'Transferências em curso: {count}.'],
   // transfers
   'Transfery': ['Transfers', 'Übertragungen', 'Transferencias', 'Transferts', 'Transferências'],
@@ -78,7 +81,7 @@ export const sftpViewMessages = {
   'w kolejce': ['queued', 'in der Warteschlange', 'en cola', 'en attente', 'em fila'],
   'przesyłanie': ['transferring', 'wird übertragen', 'transfiriendo', 'transfert', 'a transferir'],
   'gotowe': ['done', 'fertig', 'listo', 'terminé', 'concluído'],
-  'błąd': ['failed', 'fehlgeschlagen', 'error', 'échec', 'falhou'],
+  'nieudane': ['failed', 'fehlgeschlagen', 'fallido', 'échec', 'falhou'],
   'anulowano': ['cancelled', 'abgebrochen', 'cancelado', 'annulé', 'cancelado'],
   'konflikt': ['conflict', 'Konflikt', 'conflicto', 'conflit', 'conflito'],
   'pominięto': ['skipped', 'übersprungen', 'omitido', 'ignoré', 'ignorado'],

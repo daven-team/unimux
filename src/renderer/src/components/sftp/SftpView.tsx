@@ -17,6 +17,7 @@ import { useSftpStore } from '../../sftpStore';
 import type { MenuItem } from '../ContextMenu';
 import { openMenuAt } from '../ContextMenu';
 import { IDownload, IDrive, IHome, IServer, IUpload } from '../icons';
+import { BusyRing } from '../Spinner';
 import { AuthPrompt } from '../ssh/AuthPrompt';
 import { HostKeyPrompt } from '../ssh/HostKeyPrompt';
 import { sftpPromptReply } from '../ssh/promptReply';
@@ -270,7 +271,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
   } else if (session.state === 'connecting') {
     remotePlaceholder = (
       <div className="sftp-center sftp-connecting" role="status">
-        <span className="spinner" aria-hidden />
+        <BusyRing className="sftp-spinner" />
         <p>{tr('Łączenie z {host}…', { host: host?.label ?? '' })}</p>
         <button type="button" className="btn small" onClick={() => void disconnectSftp()}>{tr('Anuluj')}</button>
       </div>

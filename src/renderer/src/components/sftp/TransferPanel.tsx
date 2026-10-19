@@ -9,6 +9,7 @@ import { useI18n } from '../../i18n';
 import { askConflict, cancelBatch, cancelTransfer, clearFinishedTransfers, retryTransfer } from '../../sftp';
 import { useSftpStore } from '../../sftpStore';
 import { IArrowRight, IDownload, IUpload } from '../icons';
+import { BusyRing } from '../Spinner';
 
 const HEIGHT_KEY = 'mc-sftp-transfers-height-v1';
 export const MIN_PANEL = 110;
@@ -23,7 +24,7 @@ function readHeight(): number | null {
   } catch { return null; }
 }
 
-const STATE_LABEL = { queued: 'w kolejce', running: 'przesyłanie', done: 'gotowe', failed: 'błąd', cancelled: 'anulowano', conflict: 'konflikt' } as const;
+const STATE_LABEL = { queued: 'w kolejce', running: 'przesyłanie', done: 'gotowe', failed: 'nieudane', cancelled: 'anulowano', conflict: 'konflikt' } as const;
 
 export function TransferPanel() {
   const { tr, language } = useI18n();
@@ -64,7 +65,7 @@ export function TransferPanel() {
       </div>
       {preparing.map((b) => (
         <div key={b.batchId} className="sftp-transfer preparing" data-batch-id={b.batchId}>
-          <span className="spinner small" aria-hidden />
+          <BusyRing className="sftp-spinner small" />
           <div className="sftp-transfer-main"><span className="sftp-transfer-name">{tr('Przygotowywanie transferu ({count})…', { count: b.sources })}</span></div>
           <div className="sftp-transfer-actions"><button type="button" className="btn small" onClick={() => cancelBatch(b.queue, b.batchId)}>{tr('Anuluj')}</button></div>
         </div>

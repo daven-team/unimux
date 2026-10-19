@@ -58,7 +58,7 @@ export const updateMessages = {
   'Całe słowa': ['Whole words', 'Ganze Wörter', 'Palabras completas', 'Mots entiers', 'Palavras inteiras'],
   'Wyrażenie regularne': ['Regular expression', 'Regulärer Ausdruck', 'Expresión regular', 'Expression régulière', 'Expressão regular'],
   'Szukaj ponownie': ['Search again', 'Erneut suchen', 'Buscar de nuevo', 'Rechercher à nouveau', 'Procurar novamente'],
-  'Szukaj': ['Search', 'Suchen', 'Buscar', 'Rechercher', 'Procurar'],
+  'Szukaj': ['Search', 'Suchen', 'Buscar', 'Rechercher', 'Pesquisar'],
   'Zamień wszystko': ['Replace all', 'Alle ersetzen', 'Reemplazar todo', 'Tout remplacer', 'Substituir tudo'],
   'Filtry plików': ['File filters', 'Dateifilter', 'Filtros de archivos', 'Filtres de fichiers', 'Filtros de ficheiros'],
   'Pliki (np. *.ts, src/**)': ['Files (e.g. *.ts, src/**)', 'Dateien (z. B. *.ts, src/**)', 'Archivos (p. ej. *.ts, src/**)', 'Fichiers (p. ex. *.ts, src/**)', 'Ficheiros (p. ex. *.ts, src/**)'],

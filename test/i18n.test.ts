@@ -1,3 +1,5 @@
+import { readdirSync } from 'fs';
+import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { formatAgo, translate, translateError, type MessageKey } from '../src/shared/i18n';
 import { detectLanguage, isLanguage, LANGUAGES } from '../src/shared/languages';
@@ -60,5 +62,25 @@ describe('app languages', () => {
     expect(formatAgo('en', now - 120000, now)).toBe('2 minutes ago');
     expect(formatAgo('de', now - 86400000, now)).toBe('gestern');
     expect(formatAgo('pl', now + 1000, now)).toBe('przed chwilą');
+  });
+
+  it('never defines one Polish key in two message tables with different translations', async () => {
+    // messages.ts spreads every table into one object, so a later table would silently override an earlier row.
+    const dir = join(__dirname, '../src/shared');
+    const files = readdirSync(dir).filter((f) => /Messages\.ts$/.test(f) && f !== 'messages.ts');
+    expect(files.length).toBeGreaterThan(10);
+    const conflicts: string[] = [];
+    const final = messages as Record<string, readonly string[]>;
+    for (const file of files) {
+      const mod = (await import(/* @vite-ignore */ join(dir, file))) as Record<string, unknown>;
+      for (const [name, table] of Object.entries(mod)) {
+        if (!table || typeof table !== 'object' || Array.isArray(table)) continue;
+        for (const [key, row] of Object.entries(table as Record<string, unknown>)) {
+          if (!Array.isArray(row)) continue;
+          if (JSON.stringify(final[key]) !== JSON.stringify(row)) conflicts.push(`${file} ${name}: '${key}'`);
+        }
+      }
+    }
+    expect(conflicts).toEqual([]);
   });
 });
