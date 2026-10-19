@@ -14,6 +14,7 @@ import { DEFAULT_SCROLLBACK_LINES, normalizeScrollback } from './terminalLimits'
 import { normalizeShortcutOverrides } from './shortcuts';
 import { normalizeSshHosts, type SshCellRef, type SshHost } from './ssh';
 import { defaultSftpPlaces, forgetRemotePlace, normalizeSftpPlaces } from './sftpView';
+import { normalizeWorkspaceOrder } from './workspaceOrder';
 import type {
   AppState, ArchivedTab, Cell, Preset, PresetCell, Profile, Project, Settings, Snippet, Tab, Worktree,
 } from './types';
@@ -168,6 +169,13 @@ export function renameTab(s: AppState, projectId: string, tabId: string, name: s
 
 export function setActiveTab(s: AppState, projectId: string, tabId: string): AppState {
   return mapProject(s, projectId, (p) => ({ ...p, activeTabId: tabId }));
+}
+
+/** A grid tab of the strip was clicked: its project becomes the active one (sidebar, Files, Git follow) and the grid its active tab. */
+export function focusGrid(s: AppState, projectId: string, tabId: string): AppState {
+  const project = s.projects.find((p) => p.id === projectId);
+  if (!project?.tabs.some((t) => t.id === tabId)) return s;
+  return setActiveTab(setActiveProject(s, projectId), projectId, tabId);
 }
 
 export function moveTab(s: AppState, projectId: string, tabId: string, toIndex: number): AppState {
@@ -465,6 +473,10 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
   if (normalized.activeProjectId && !normalized.projects.some((p) => p.id === normalized.activeProjectId)) {
     normalized.activeProjectId = normalized.projects[0]?.id ?? null;
   }
+  // The strip order keeps only keys of a known kind and grids that are still open; absent stays absent for the migration.
+  const workspaceOrder = normalizeWorkspaceOrder(r.workspaceOrder, new Set(normalized.projects.flatMap((p) => p.tabs.map((t) => t.id))));
+  if (workspaceOrder) normalized.workspaceOrder = workspaceOrder;
+  else delete normalized.workspaceOrder;
   // Retention of the MCP inboxes (also drops what removed projects left behind before 0.9.3).
   normalized.automation = pruneAutomation(normalized.automation, new Set(normalized.projects.map((p) => p.id)), Date.now());
   return normalized;

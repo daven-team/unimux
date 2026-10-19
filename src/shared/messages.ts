@@ -92,6 +92,7 @@ export const messages = {
   'przed chwilą': ['just now', 'gerade eben', 'hace un momento', 'à l’instant', 'agora mesmo'],
   'Projekty': ['Projects', 'Projekte', 'Proyectos', 'Projets', 'Projetos'],
   'Projekt': ['Project', 'Projekt', 'Proyecto', 'Projet', 'Projeto'],
+  'Projekt: {name}': ['Project: {name}', 'Projekt: {name}', 'Proyecto: {name}', 'Projet : {name}', 'Projeto: {name}'],
   'Pliki': ['Files', 'Dateien', 'Archivos', 'Fichiers', 'Ficheiros'],
   'Nowy projekt': ['New project', 'Neues Projekt', 'Nuevo proyecto', 'Nouveau projet', 'Novo projeto'],
   'Dodaj projekt': ['Add project', 'Projekt hinzufügen', 'Añadir proyecto', 'Ajouter un projet', 'Adicionar projeto'],

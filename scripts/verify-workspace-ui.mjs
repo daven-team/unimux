@@ -110,8 +110,9 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
   await dragCard(grids[0], fileCard, false);
   const movedCards = await visualCards();
   assert.ok(movedCards.indexOf(grids[0]) < movedCards.indexOf(fileCard), 'grid can move before a file');
-  const savedOrders = await evaluate(`JSON.parse(localStorage.getItem('mc-workspace-order-v1'))`);
-  assert.ok(Object.values(savedOrders).some(order => JSON.stringify(order) === JSON.stringify(movedCards)), 'mixed order saved for project');
+  // 1.0.0: the order is global and lives in state.json (its persistence across a restart is checked by verify-grid-tabs.mjs).
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.deepEqual(await visualCards(), movedCards, 'mixed order kept after the drop');
   await screenshot('workspace-card-reorder');
   await screenshot('settings-general');
   await click('.settings-nav button', 'Terminal');

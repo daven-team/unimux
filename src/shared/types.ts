@@ -175,6 +175,11 @@ export interface AppState {
   sshHosts: SshHost[];
   /** The SFTP view's last local folder and last remote folder per host (0.9.8). */
   sftp: SftpPlaces;
+  /**
+   * The order of the top strip (1.0.0): grids of all projects, file tabs, Settings and the SSH view, as keys of
+   * shared/workspaceOrder.ts. Absent until the per-project orders of 0.9.x are migrated.
+   */
+  workspaceOrder?: string[];
   settings: Settings;
   sidebarCollapsed: boolean;
   snippetsOpen: boolean;

@@ -6,7 +6,7 @@ import { layoutForCount } from '../../shared/layout';
 import { CELL_HEAD_HEIGHT, cellBodyBox, chooseGridSize, type Size } from '../../shared/cellBox';
 import {
   activeProject, activeTab, addCell, addProject, addTab, cellWorktreeUse, closeTab as closeTabState, ensureShellProfile, findCell, getProfile,
-  removeCell as removeCellState, removeProject as removeProjectState, restoreTab, setActiveProject, setActiveTab,
+  removeCell as removeCellState, removeProject as removeProjectState, restoreTab, setActiveProject, setActiveTab, focusGrid,
   swapCells as swapCellsState, uid, updateCell, updateSettings,
 } from '../../shared/state';
 import { canSwapCells, neighborSlot } from '../../shared/gridDrag';
@@ -672,17 +672,10 @@ export function restoreArchived(projectId: string, archivedId: string): void {
   if (tab?.cells[0]) focusCell(tab.cells[0].id);
 }
 
-export function cycleTab(dir: 1 | -1): void {
-  const p = activeProject(getS());
-  if (!p || p.tabs.length < 2) return;
-  const idx = p.tabs.findIndex((t) => t.id === p.activeTabId);
-  const next = p.tabs[(idx + dir + p.tabs.length) % p.tabs.length];
-  selectTab(p.id, next);
-}
-
+/** Brings a grid to the front; a grid of another project switches the project too (1.0.0: the strip holds all projects). */
 export function selectTab(projectId: string, tab: Tab): void {
   showTerminalTabs();
-  update((s) => setActiveTab(s, projectId, tab.id));
+  update((s) => focusGrid(s, projectId, tab.id));
   setUi({ maximizedCellId: null, focusedCellId: tab.cells[0]?.id ?? null });
   const id = tab.cells[0]?.id;
   if (id) requestAnimationFrame(() => requestAnimationFrame(() => terminals.focus(id)));
