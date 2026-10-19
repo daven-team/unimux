@@ -2,18 +2,20 @@
 // shared and reference counted; its owner session logs it in, host key and auth questions go to main's coordinator like a
 // cell's), then connects pg with the connection's TLS mode (prefer falls
 // back to plain when the server has no TLS), asks main for the password when the server wants one and none is saved (or the
-// saved one is refused), and finally runs the session's operations (PgSession). Independent of Electron (the process wrapper
+// saved one is refused), and finally runs the session's operations (PgSession). Redis sessions connect ioredis the same way
+// (TLS modes, the forwarded channel as its stream, password prompts) and run RedisSession. Independent of Electron (the process wrapper
 // is index.ts) so it is tested in Node against PGlite, the fake server and the SSH test server.
 import { randomUUID } from 'crypto';
 import { Socket, isIP } from 'net';
 import type { Duplex } from 'stream';
-import { TLSSocket, checkServerIdentity, type ConnectionOptions } from 'tls';
+import { TLSSocket, checkServerIdentity, connect as tlsConnect, type ConnectionOptions } from 'tls';
 import pg from 'pg';
 import type { SshConnectRequest } from '../shared/ipc';
 import type { DbErrorCode, DbPhase, DbPortMessage, DbResult } from '../shared/db';
 import type { DbHostOp, DbHostToMain, DbOpenConfig, MainToDbHost } from '../shared/dbHostIpc';
 import type { SshErrorCode } from '../shared/ssh';
 import { PgSession, RAW_TYPES, serverError } from './pgSession';
+import { RedisConnectError, RedisSession, openRedis, type OpenedRedis, type RedisLimits } from './redisSession';
 import { ForwardSocket, SshTunnel, TUNNEL_TIMERS, TunnelForwardError, type TunnelTimers } from './tunnel';
 
 export interface DbHostTimers extends TunnelTimers {
@@ -49,6 +51,9 @@ interface Session {
   passwordAsk: { promptId: string; resolve(value: string | null): void } | null;
   client: pg.Client | null;
   pg: PgSession | null;
+  redis: RedisSession | null;
+  /** Redis: the connection uses TLS (prefer resolved); the Pub/Sub connection connects the same way. */
+  redisTls: boolean;
   /** The password the connection used (side connections for cancel need it); dropped when the session ends. */
   password: string | undefined;
 }
@@ -98,7 +103,7 @@ export class DbHost {
   private tunnels = new Map<string, TunnelRecord>();
   private readonly timers: DbHostTimers;
 
-  constructor(private readonly out: DbHostOutput, timers: Partial<DbHostTimers> = {}) {
+  constructor(private readonly out: DbHostOutput, timers: Partial<DbHostTimers> = {}, private readonly redisLimits?: Partial<RedisLimits>) {
     this.timers = { ...DB_HOST_TIMERS, ...timers };
   }
 
@@ -139,7 +144,7 @@ export class DbHost {
 
   private live(s: Session): boolean { return this.sessions.get(s.id) === s && !s.ended; }
 
-  private status(s: Session, phase: DbPhase, extra: { error?: DbErrorCode; message?: string; serverVersion?: string; database?: string; tls?: boolean } = {}): void {
+  private status(s: Session, phase: DbPhase, extra: { error?: DbErrorCode; message?: string; serverVersion?: string; database?: string; tls?: boolean; reconnect?: number } = {}): void {
     s.phase = phase;
     this.out.toMain({ t: 'dbStatus', id: s.id, phase, ...extra });
   }
@@ -148,18 +153,19 @@ export class DbHost {
 
   open(id: string, config: DbOpenConfig): void {
     if (this.sessions.has(id)) this.close(id);
-    const s: Session = { id, config, phase: 'connecting', ended: false, closing: false, tunnel: null, sshWait: null, passwordAsk: null, client: null, pg: null, password: config.password };
+    const s: Session = { id, config, phase: 'connecting', ended: false, closing: false, tunnel: null, sshWait: null, passwordAsk: null, client: null, pg: null, redis: null, redisTls: false, password: config.password };
     this.sessions.set(id, s);
     this.status(s, 'connecting');
     void this.start(s).catch(() => this.fail(s, 'dbFailed'));
   }
 
   private async start(s: Session): Promise<void> {
-    if (s.config.kind !== 'postgres') { this.fail(s, 'unsupported'); return; }
+    if (s.config.kind !== 'postgres' && s.config.kind !== 'redis') { this.fail(s, 'unsupported'); return; }
     if (s.config.ssh) {
       if (!(await this.joinTunnel(s)) || !this.live(s)) return;
     }
     this.status(s, 'database');
+    if (s.config.kind === 'redis') { await this.startRedis(s); return; }
     const client = await this.connectWithPassword(s);
     if (!client || !this.live(s)) { if (client) void client.end().catch(() => undefined); return; }
     s.client = client;
@@ -364,6 +370,98 @@ export class DbHost {
     });
   }
 
+  // ── Redis ──────────────────────────────────────────────────────────────────
+
+  /** One Redis connection with the session's endpoint, TLS and login (the main one or the Pub/Sub one). */
+  private openRedisOnce(s: Session, password: string | undefined, tlsOn: boolean, dbIndex: number): Promise<OpenedRedis> {
+    const { host, port } = this.endpoint(s);
+    const tls = tlsOn ? this.ssl(s, true) as ConnectionOptions : null;
+    return openRedis({
+      host, port, tls, user: s.config.user, password, connectTimeoutMs: this.timers.dbConnectMs, viaTunnel: !!s.config.ssh, dbIndex,
+      // Through SSH ioredis gets the forwarded channel itself (TLS on top of it): no local port exists, reconnects included.
+      ...(s.config.ssh ? { stream: () => this.redisTunnelStream(s, tls) } : {}),
+    });
+  }
+
+  /** A connected stream through the session's tunnel (TLS over it when on), for one Redis connect or reconnect. */
+  private redisTunnelStream(s: Session, tls: ConnectionOptions | null): Promise<Duplex> {
+    return new Promise((resolve, reject) => {
+      let sock: ForwardSocket;
+      try { sock = this.tunnelStream(s)!; } catch (e) { reject(e); return; }
+      const timer = setTimeout(() => { sock.destroy(); reject(new Error('connect ETIMEDOUT')); }, this.timers.dbConnectMs);
+      const failed = (e: Error) => { clearTimeout(timer); reject(e); };
+      sock.once('error', failed);
+      sock.once('connect', () => {
+        if (!tls) { clearTimeout(timer); sock.off('error', failed); resolve(sock); return; }
+        const t = tlsConnect({ ...tls, socket: sock as unknown as Socket });
+        t.once('error', failed);
+        t.once('secureConnect', () => { clearTimeout(timer); sock.off('error', failed); t.off('error', failed); resolve(t); });
+      });
+      sock.connect();
+    });
+  }
+
+  /** prefer: TLS first, plain when the TLS handshake fails (Redis has no TLS negotiation of its own). */
+  private async openRedisTls(s: Session, password: string | undefined, dbIndex: number): Promise<OpenedRedis & { tls: boolean }> {
+    const mode = s.config.tls;
+    if (mode === 'disable') return { ...await this.openRedisOnce(s, password, false, dbIndex), tls: false };
+    try {
+      return { ...await this.openRedisOnce(s, password, true, dbIndex), tls: true };
+    } catch (error) {
+      const code = error instanceof RedisConnectError ? error.code : 'dbFailed';
+      if (mode === 'prefer' && (code === 'dbTls' || code === 'dbClosed' || code === 'dbTimeout' || code === 'tunnel')) return { ...await this.openRedisOnce(s, password, false, dbIndex), tls: false };
+      throw error;
+    }
+  }
+
+  private async startRedis(s: Session): Promise<void> {
+    const dbIndex = Number(s.config.database) || 0;
+    let password = s.config.password;
+    let prompts = 0;
+    let opened: (OpenedRedis & { tls: boolean }) | null = null;
+    // An ACL user without a saved password is asked first: connecting as the default user instead would be someone else.
+    if (s.config.user && password === undefined) {
+      const typed = await this.askPassword(s, false);
+      prompts++;
+      if (!this.live(s)) return;
+      if (typed === null) { this.fail(s, 'cancelled'); return; }
+      password = typed;
+    }
+    while (!opened) {
+      if (!this.live(s)) return;
+      try {
+        opened = await this.openRedisTls(s, password, dbIndex);
+      } catch (error) {
+        if (!this.live(s)) return;
+        const e = error instanceof RedisConnectError ? error : new RedisConnectError('dbFailed');
+        const code = e.code;
+        if (code !== 'dbAuth') { this.fail(s, code, e.serverMessage); return; }
+        if (prompts >= MAX_PASSWORD_PROMPTS) { this.fail(s, 'dbAuth', e.serverMessage); return; }
+        const typed = await this.askPassword(s, password !== undefined);
+        prompts++;
+        if (!this.live(s)) return;
+        if (typed === null) { this.fail(s, 'cancelled'); return; }
+        password = typed;
+      }
+    }
+    if (!this.live(s)) { opened.client.disconnect(); return; }
+    s.password = password;
+    s.redisTls = opened.tls;
+    const redis = new RedisSession(opened.client, opened.control, {
+      sessionId: s.id, readOnly: s.config.readOnly, dbIndex, viaTunnel: !!s.config.ssh, ...(this.redisLimits ? { limits: this.redisLimits } : {}),
+      openSubscriber: () => this.openRedisOnce(s, s.password, s.redisTls, 0),
+    }, {
+      port: (m) => this.out.toRenderer(m),
+      activity: (busy) => { if (this.live(s)) this.out.toMain({ t: 'dbActivity', id: s.id, busy }); },
+      reconnecting: (attempt) => { if (this.live(s)) this.status(s, 'database', { reconnect: attempt }); },
+      reconnected: () => { if (this.live(s)) this.status(s, 'connected', { database: String(redis.currentDb) }); },
+      closed: (error, message) => this.fail(s, error, message),
+      database: (index) => { if (this.live(s)) this.out.toMain({ t: 'dbDatabase', id: s.id, database: String(index) }); },
+    }, opened.lastError);
+    s.redis = redis;
+    this.status(s, 'connected', { ...(opened.serverVersion ? { serverVersion: opened.serverVersion } : {}), database: String(dbIndex), tls: opened.tls });
+  }
+
   private async sideConnection(s: Session): Promise<pg.Client> {
     if (!this.live(s)) throw new Error('ended');
     const side = await this.connectTls(s, s.password);
@@ -403,6 +501,8 @@ export class DbHost {
     if (s.sshWait) { clearTimeout(s.sshWait.timer); const w = s.sshWait; s.sshWait = null; w.resolve(null); }
     if (s.passwordAsk) { const a = s.passwordAsk; s.passwordAsk = null; a.resolve(null); }
     s.pg?.end();
+    s.redis?.end();
+    s.redis = null;
     const client = s.client;
     s.client = null;
     if (client) void client.end().catch(() => undefined);
@@ -432,6 +532,12 @@ export class DbHost {
   async op(id: string, op: DbHostOp): Promise<DbResult<unknown>> {
     const s = this.sessions.get(id);
     if (!s || s.ended) return { ok: false, error: 'noSession' };
+    if (s.config.kind === 'redis') {
+      if (op.op !== 'redis') return { ok: false, error: 'invalid' };
+      if (!s.redis || s.phase !== 'connected') return { ok: false, error: 'notConnected' };
+      return s.redis.handle(op.req);
+    }
+    if (op.op === 'redis') return { ok: false, error: 'invalid' };
     if (!s.pg || s.phase !== 'connected') return { ok: false, error: 'notConnected' };
     return s.pg.handle(op);
   }

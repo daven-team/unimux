@@ -9,7 +9,14 @@ import type { DbHostOp, DbHostToMain, MainToDbHost } from '../shared/dbHostIpc';
 
 export const DB_STDERR_TAIL_BYTES = 8 * 1024;
 /** How long main waits for an operation's answer (a run itself answers once accepted; its rows go to the port). */
-export const dbOpTimeoutMs = (op: DbHostOp): number => (op.op === 'applyEdits' || op.op === 'ddl' || op.op === 'databases' ? 10 * 60_000 : op.op === 'cellValue' ? 5 * 60_000 : 2 * 60_000);
+export const dbOpTimeoutMs = (op: DbHostOp): number => {
+  if (op.op === 'redis') {
+    // Pattern counts and deletes walk the whole keyspace; a console command has its own (shorter) limit in the host.
+    const k = op.req.kind;
+    return k === 'countPattern' || k === 'deletePattern' ? 60 * 60_000 : k === 'command' ? 6 * 60_000 : k === 'write' || k === 'readItem' ? 5 * 60_000 : 2 * 60_000;
+  }
+  return op.op === 'applyEdits' || op.op === 'ddl' || op.op === 'databases' ? 10 * 60_000 : op.op === 'cellValue' ? 5 * 60_000 : 2 * 60_000;
+};
 export const DB_SHUTDOWN_WAIT_MS = 3000;
 
 export interface DbHostLink {

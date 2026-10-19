@@ -3,6 +3,7 @@
 // Pure SQL helpers (quoting, splitting, edits, paging, value formatting) live in dbSql.ts.
 import type { MessageKey } from './i18n';
 import { addressProblem, isUuid, normalizeAddress, sshErrorText, type Localized, type SshErrorCode, type SshPrompt } from './ssh';
+import type { DbRedisApi, RedisPortMessage } from './dbRedis';
 
 // ── ids and limits ──────────────────────────────────────────────────────────
 
@@ -275,7 +276,7 @@ export const dbStatusOf = (p: DbPhase): DbSessionStatus => (p === 'connected' ? 
 export type DbTxStatus = 'idle' | 'transaction' | 'failed';
 
 export type DbErrorCode = SshErrorCode
-  /** The DB Host restarted; the saved connection or its SSH host is gone; Redis is not available in this build yet. */
+  /** The DB Host restarted; the saved connection or its SSH host is gone; this kind of database is not supported. */
   | 'dbHostCrashed' | 'connectionMissing' | 'unsupported'
   /** Connecting: wrong password or role, refused, unknown host, timeout, TLS failed, TLS needed but off, no such database, the CA file. */
   | 'dbAuth' | 'dbRefused' | 'dbDns' | 'dbTimeout' | 'dbTls' | 'dbTlsUnsupported' | 'dbNoDatabase' | 'caFile' | 'tunnel'
@@ -287,6 +288,12 @@ export type DbErrorCode = SshErrorCode
   | 'noKey' | 'conflict' | 'notFound'
   /** The server refused a statement (`server` has its message); the statement timeout hit. */
   | 'server' | 'statementTimeout'
+  /**
+   * Redis: the new key name exists (rename, create); the key holds another type; the command needs the user's confirmation
+   * (dangerous); it blocks the connection or subscribes (use Pub/Sub); it would break the session's connection or is a
+   * transaction (not in the console); a pattern delete's count token is unknown or used.
+   */
+  | 'keyExists' | 'wrongType' | 'needsConfirm' | 'blockingCommand' | 'subscribeCommand' | 'consoleUnsupported' | 'staleToken'
   /** The session runs something (a query or page) and refuses metadata and edits until it ends; too many sessions are open. */
   | 'busy' | 'tooMany';
 
@@ -317,8 +324,10 @@ export interface DbSessionState {
   error?: DbErrorCode;
   /** The server's text for a connect error (e.g. "password authentication failed for user ..."). */
   message?: string;
-  /** The database the session is on (Postgres). */
+  /** The database the session is on (Postgres), or the DB index as text (Redis: "0", changes with select). */
   database?: string;
+  /** Redis: the connection dropped and the host is trying again (attempt 1..REDIS_LIMITS.reconnectAttempts); absent once connected. */
+  reconnecting?: number;
   serverVersion?: string;
   readOnly: boolean;
   tx?: DbTxStatus;
@@ -425,7 +434,9 @@ export type DbPortMessage =
   /** The run ended: tx is the session's transaction state after it. */
   | { t: 'queryEnd'; queryId: string; ok: boolean; cancelled: boolean; timeMs: number; tx: DbTxStatus }
   /** A result's open cursor was closed (another operation needed the connection): no more rows for it. */
-  | { t: 'resultClosed'; queryId: string; index: number };
+  | { t: 'resultClosed'; queryId: string; index: number }
+  /** Redis Pub/Sub messages and subscriber state (keyed by sessionId, not queryId). */
+  | RedisPortMessage;
 
 // ── metadata ────────────────────────────────────────────────────────────────
 
@@ -537,6 +548,7 @@ export interface DbApi {
   /** The sessions open tabs use: they are never disconnected for being idle. Replaces the previous list. */
   pin(sessionIds: string[]): void;
   pg: DbPgApi;
+  redis: DbRedisApi;
 }
 
 // ── texts ───────────────────────────────────────────────────────────────────
@@ -567,6 +579,13 @@ export function dbErrorText(code: DbErrorCode, ssh: { host: string; endpoint: st
     case 'notFound': return { key: 'Nie znaleziono obiektu' };
     case 'server': return { key: 'Serwer bazy zgłosił błąd' };
     case 'statementTimeout': return { key: 'Przekroczono limit czasu zapytania' };
+    case 'keyExists': return { key: 'Klucz o tej nazwie już istnieje' };
+    case 'wrongType': return { key: 'Klucz ma inny typ niż oczekiwany' };
+    case 'needsConfirm': return { key: 'To polecenie wymaga potwierdzenia' };
+    case 'blockingCommand': return { key: 'Polecenia blokujące połączenie nie działają w konsoli' };
+    case 'subscribeCommand': return { key: 'Subskrypcje działają w zakładce Pub/Sub, nie w konsoli' };
+    case 'consoleUnsupported': return { key: 'Tego polecenia nie można użyć w konsoli' };
+    case 'staleToken': return { key: 'Policz klucze ponownie przed usunięciem' };
     case 'busy': return { key: 'Połączenie jest zajęte - poczekaj na koniec zapytania' };
     case 'tooMany': return { key: 'Za dużo otwartych połączeń z bazą' };
     default: return sshErrorText(code, ssh);
