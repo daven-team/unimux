@@ -1,11 +1,14 @@
 // Main-side brain of SSH sessions (spec 6.1, 7.3, 9, D7): resolves hosts and credentials, talks to the Pty Host,
 // asks the renderer (coalescing identical prompts) and keeps a session state per cell. The only place that decrypts secrets.
+// Since 0.9.8 a session may also be a non-cell one (an SFTP session, id "sftp:<uuid>"): same vault, saved password,
+// passphrase check, known hosts and prompt grouping; its commands go to the SFTP Host (main routes `host()` by id).
 import { randomUUID } from 'crypto';
 import type { HostToMain, MainToHost } from '../../shared/ipc';
+import { isSftpSessionId } from '../../shared/sftp';
 import { findCell } from '../../shared/state';
 import {
   hostEndpoint, isLivePhase, knownHostId, sanitizeServerText, startupInput,
-  type SshConnectCellRequest, type SshErrorCode, type SshPhase, type SshPrompt, type SshPromptAnswer, type SshSessionState, type SshSessionsSnapshot,
+  type SshConnectCellRequest, type SshErrorCode, type SshHost, type SshPhase, type SshPrompt, type SshPromptAnswer, type SshSessionState, type SshSessionsSnapshot,
 } from '../../shared/ssh';
 import type { AppState } from '../../shared/types';
 import { checkPassphrase } from './keys';
@@ -18,7 +21,7 @@ export interface CoordinatorDeps {
   state(): AppState;
   vault: SshVault;
   knownHosts: KnownHostsStore;
-  /** Sends a command to the Pty Host; false when no Pty Host is running (restarting or given up), so it was not delivered. */
+  /** Sends a command to the Pty Host (cells) or the SFTP Host (sessions, by id); false when it was not delivered (no host runs). */
   host(m: SshHostCommand): boolean | void;
   events: { session(s: SshSessionState): void; prompt(cellId: string, prompt: SshPrompt | null): void; vaultChanged(): void };
   debug?: boolean;
@@ -30,7 +33,7 @@ type Answer = { cancel: true; timeout?: boolean } | { values: string[]; remember
 type PromptBody = SshPrompt extends infer P ? (P extends SshPrompt ? Omit<P, 'id'> : never) : never;
 
 interface Group { id: string; key: string | null; prompt: SshPrompt; cells: Map<string, (a: Answer) => void>; timer: NodeJS.Timeout }
-interface Live { state: SshSessionState; host: string; port: number; user: string; endpoint: string; pendingSave?: string }
+interface Live { kind: 'cell' | 'session'; state: SshSessionState; host: string; port: number; user: string; endpoint: string; pendingSave?: string }
 
 const PROMPT_TIMEOUT_MS = 5 * 60_000;
 const MAX_PASSPHRASE_TRIES = 3;
@@ -72,14 +75,31 @@ export class SshCoordinator {
     if (!found || found.cell.ssh?.hostId !== req.hostId || !host) return { ok: false, error: 'hostMissing' };
     const existing = this.sessionsByCell.get(req.cellId);
     if (existing && isLivePhase(existing.state.phase)) return { ok: true }; // R13
+    return this.start(req.cellId, 'cell', host, { cols: req.cols, rows: req.rows, startup: startupInput(host.startupCommand) ?? undefined });
+  }
+
+  /**
+   * A login that is not a grid cell (0.9.8, SFTP): `sessionId` is "sftp:<uuid>". Everything else is the cell path: vault key,
+   * passphrase (saved, remembered or asked), saved password, known hosts and the same prompt groups.
+   */
+  async connectSession(req: { sessionId: string; hostId: string }): Promise<{ ok: true } | { ok: false; error: SshErrorCode }> {
+    if (!isSftpSessionId(req.sessionId)) return { ok: false, error: 'unknown' };
+    const host = this.deps.state().sshHosts.find((h) => h.id === req.hostId);
+    if (!host) return { ok: false, error: 'hostMissing' };
+    const existing = this.sessionsByCell.get(req.sessionId);
+    if (existing && isLivePhase(existing.state.phase)) return { ok: true };
+    return this.start(req.sessionId, 'session', host, { cols: 80, rows: 24 });
+  }
+
+  private async start(id: string, kind: Live['kind'], host: SshHost, size: { cols: number; rows: number; startup?: string }): Promise<{ ok: true } | { ok: false; error: SshErrorCode }> {
     const live: Live = {
-      state: { cellId: req.cellId, hostId: host.id, phase: 'connecting', since: this.now() },
+      kind, state: { cellId: id, hostId: host.id, phase: 'connecting', since: this.now() },
       host: host.address, port: host.port, user: host.username, endpoint: hostEndpoint(host.address, host.port),
     };
-    this.sessionsByCell.set(req.cellId, live);
+    this.sessionsByCell.set(id, live);
     this.deps.events.session(live.state);
-    const current = () => this.sessionsByCell.get(req.cellId) === live && isLivePhase(live.state.phase);
-    const fail = (error: SshErrorCode) => { if (current()) this.setPhase(req.cellId, live, 'error', { error }); return { ok: false as const, error }; };
+    const current = () => this.sessionsByCell.get(id) === live && isLivePhase(live.state.phase);
+    const fail = (error: SshErrorCode) => { if (current()) this.setPhase(id, live, 'error', { error }); return { ok: false as const, error }; };
 
     let privateKey: string | undefined;
     let passphrase: string | undefined;
@@ -101,7 +121,7 @@ export class SshCoordinator {
         // The key may be replaced while the prompt is open: a passphrase checked against this material is remembered only for it.
         const generation = this.deps.vault.generation(host.keyId);
         for (let attempt = 0; attempt < MAX_PASSPHRASE_TRIES && passphrase === undefined; attempt++) {
-          const answer = await this.ask(req.cellId, `pp:${host.keyId}`, { kind: 'passphrase', keyId: host.keyId, keyLabel: info.label, retry: attempt > 0 });
+          const answer = await this.ask(id, `pp:${host.keyId}`, { kind: 'passphrase', keyId: host.keyId, keyLabel: info.label, retry: attempt > 0 });
           if (!current()) return { ok: false, error: 'cancelled' };
           if (!('values' in answer)) return fail('cancelled');
           const typed = answer.values[0] ?? '';
@@ -118,15 +138,15 @@ export class SshCoordinator {
     }
     const savedPassword = this.deps.vault.password(host.id);
     if (!current()) return { ok: false, error: 'cancelled' };
-    const startup = startupInput(host.startupCommand);
+    const startup = size.startup;
     const delivered = this.deps.host({ t: 'sshConnect', req: {
-      id: req.cellId, host: host.address, port: host.port, username: host.username, cols: req.cols, rows: req.rows,
+      id, host: host.address, port: host.port, username: host.username, cols: size.cols, rows: size.rows,
       ...(privateKey ? { privateKey } : {}), ...(passphrase ? { passphrase } : {}), ...(savedPassword.ok ? { password: savedPassword.password } : {}),
       ...(startup ? { startup } : {}),
       allowPasswordPrompt: true, ...(this.deps.debug ? { debug: true } : {}),
     } });
     // M1: a connect sent while the Pty Host is restarting or gone would be lost and leave the cell `connecting` forever.
-    if (delivered === false) return fail('ptyHostCrashed');
+    if (delivered === false) return fail(kind === 'cell' ? 'ptyHostCrashed' : 'sftpHostCrashed');
     return { ok: true };
   }
 
@@ -273,11 +293,32 @@ export class SshCoordinator {
     if (isLivePhase(live.state.phase)) this.setPhase(cellId, live, 'closed');
   }
 
+  /** The Pty Host restarted: every cell session ended (SFTP sessions live in another process). */
   hostCrashed(): void {
     for (const [cellId, live] of this.sessionsByCell) {
+      if (live.kind !== 'cell') continue;
       this.withdraw(cellId);
       if (isLivePhase(live.state.phase)) this.setPhase(cellId, live, 'error', { error: 'ptyHostCrashed' });
     }
+  }
+
+  /** The SFTP Host restarted: every non-cell session ended. */
+  sessionHostCrashed(): void {
+    for (const [id, live] of this.sessionsByCell) {
+      if (live.kind !== 'session') continue;
+      this.withdraw(id);
+      if (isLivePhase(live.state.phase)) this.setPhase(id, live, 'error', { error: 'sftpHostCrashed' });
+    }
+  }
+
+  /** A non-cell session was disconnected by the user (or idled out): its prompt goes, it reads closed and is forgotten. */
+  endSession(id: string): void {
+    const live = this.sessionsByCell.get(id);
+    this.withdraw(id);
+    if (!live || live.kind !== 'session') return;
+    live.pendingSave = undefined;
+    if (isLivePhase(live.state.phase)) this.setPhase(id, live, 'closed');
+    this.sessionsByCell.delete(id);
   }
 
   stateChanged(state: AppState): void {
@@ -285,10 +326,17 @@ export class SshCoordinator {
     for (const [cellId, live] of this.sessionsByCell) if (!isLivePhase(live.state.phase) && !findCell(state, cellId)) this.sessionsByCell.delete(cellId);
   }
 
-  sessions(): SshSessionsSnapshot {
+  /** Cell sessions and their prompts (what the SSH store of the renderer holds). */
+  sessions(): SshSessionsSnapshot { return this.snapshot('cell'); }
+
+  /** Non-cell sessions (SFTP) and their prompts; `cellId` is the session id. */
+  sessionSnapshot(): SshSessionsSnapshot { return this.snapshot('session'); }
+
+  private snapshot(kind: Live['kind']): SshSessionsSnapshot {
+    const ofKind = (id: string) => (isSftpSessionId(id) ? 'session' : 'cell') === kind;
     return {
-      sessions: [...this.sessionsByCell.values()].map((l) => l.state),
-      prompts: [...this.promptOfCell].flatMap(([cellId, groupId]) => { const g = this.groups.get(groupId); return g ? [{ cellId, prompt: g.prompt }] : []; }),
+      sessions: [...this.sessionsByCell.values()].filter((l) => l.kind === kind).map((l) => l.state),
+      prompts: [...this.promptOfCell].flatMap(([cellId, groupId]) => { const g = this.groups.get(groupId); return g && ofKind(cellId) ? [{ cellId, prompt: g.prompt }] : []; }),
     };
   }
 }

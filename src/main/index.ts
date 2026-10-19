@@ -21,12 +21,18 @@ import { pathExists } from './fsProbe';
 import { PromptFiles, pruneCellFiles, removeCellFiles } from './cellFiles';
 import { applyDockIcon, windowIcon } from './appIcon';
 import { LARGE_VIEW_BYTES, listProjectDirectories, listProjectDirectory, listProjectDirectoryBatch, readProjectFile, statProjectFile, writeProjectFile } from './files';
-import { registerFileOpsIpc } from './filesIpc';
+import { createTrash, registerFileOpsIpc } from './filesIpc';
 import { createIpcGuard } from './ipcGuard';
 import { registerGitIpc } from './gitIpc';
 import { replaceInProject, searchProject } from './search';
 import type { ReplaceRequest, SearchOptions } from '../shared/search';
 import { PtyHostClient } from './ptyHostClient';
+import { SftpHostClient } from './sftpHostClient';
+import { SftpService } from './sftp/service';
+import { createSftpHandlers, registerSftpIpc } from './sftp/ipc';
+import { createLocalFiles, registerLocalFilesIpc } from './localFiles';
+import { isSftpSessionId } from '../shared/sftp';
+import type { SftpHostToMain } from '../shared/sftpHostIpc';
 import { claudeProjectDirName, findRecentCodexSession, listSessionsAsync } from './sessions';
 import { createSaver, flushUntilSaved, loadState, StateUnreadableError } from './store';
 import { updateHandoverCommitted, blockUpdateVersion, canInstallNow, checkForUpdates, getUpdateState, handOver, initUpdater, isPortableBuild, isUpdateDownloaded, onUpdateTargetChange, previousMacUpdate, recheckUpdate, signalMacUpdateReady, updateHandoffStarted, updateTarget, RELEASES_URL, startupCheck, startupDownload, updatesEnabled } from './updater';
@@ -310,6 +316,9 @@ const killCount = new Map<string, number>();
 const noteKill = (id: string) => killCount.set(id, (killCount.get(id) ?? 0) + 1);
 let usageKey = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}`;
 const ptyHost = new PtyHostClient();
+/** The SFTP Host (0.9.8): started on the first SFTP use, never at app start. */
+const sftpHost = new SftpHostClient();
+let sftp: SftpService | null = null;
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const login = new LoginManager({
   store: accounts,
@@ -708,7 +717,7 @@ function createWindow(): void {
   // Windows ends the session without before-quit: the last changes are written now (the renderer was asked to send its own).
   win.on('query-session-end', () => { markSessionEnding(); send('app:before-quit'); });
   win.on('session-end', () => { saver.flush(); });
-  win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { ptyHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
+  win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { ptyHost.connectRenderer(win.webContents); sftpHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -779,11 +788,26 @@ function startSsh(): void {
   const vaultChanged = () => send('ssh:vault:changed', vault.info());
   ssh = new SshCoordinator({
     state: () => state, vault, knownHosts,
-    host: (m) => ptyHost.sendSsh(m),
-    events: { session: (s) => send('ssh:session', s), prompt: (cellId, prompt) => send('ssh:prompt', cellId, prompt), vaultChanged },
+    // SFTP sessions ("sftp:<uuid>") log in through the SFTP Host, cells through the Pty Host.
+    host: (m) => (isSftpSessionId(m.t === 'sshConnect' ? m.req.id : m.id) ? sftpHost.send(m) : ptyHost.sendSsh(m)),
+    events: {
+      session: (s) => { if (isSftpSessionId(s.cellId)) sftp?.onCoordinatorSession(s); else send('ssh:session', s); },
+      prompt: (cellId, prompt) => { if (isSftpSessionId(cellId)) sftp?.onPrompt(cellId, prompt); else send('ssh:prompt', cellId, prompt); },
+      vaultChanged,
+    },
     debug: !app.isPackaged && process.env.MC_SSH_DEBUG === '1',
   });
   const coordinator = ssh;
+  sftp = new SftpService({
+    coordinator, host: sftpHost,
+    hostExists: (hostId) => state.sshHosts.some((h) => h.id === hostId),
+    events: {
+      session: (s) => send('sftp:session', s),
+      prompt: (sessionId, prompt) => send('sftp:prompt', sessionId, prompt),
+      hostCrashed: () => send('sftp:hostCrashed'),
+    },
+  });
+  registerSftpIpc({ guardedHandle, guardedOn }, createSftpHandlers(sftp));
   registerSshIpc(ipcMain, createSshHandlers({
     coordinator, vault, knownHosts, drafts: new KeyDrafts(),
     state: () => state,
@@ -852,6 +876,19 @@ function forgetHostTerminals(code: unknown, stderrTail: unknown): boolean {
   alive.clear();
   return resumes;
 }
+sftpHost.on('message', (m: SftpHostToMain) => {
+  if (m.t === 'log') {
+    if (allowHostLog(Date.now())) { if (m.level === 'warn') crashLog.warn(m.message); else crashLog.error(m.message); }
+    return;
+  }
+  sftp?.onHostMessage(m);
+});
+// Its sessions and transfers are gone; the next SFTP use starts it again.
+sftpHost.on('crashed', (code: unknown, stderrTail: unknown) => {
+  const tail = typeof stderrTail === 'string' && stderrTail.trim() ? `\n${stderrTail.trim()}` : '';
+  crashLog.error(`sftp host exited (code ${String(code)})${tail}`);
+  sftp?.hostCrashed();
+});
 // The renderer starts its visible cells again at once; PtyHostClient keeps those spawns until the new host is up.
 ptyHost.on('crashed', (code: unknown, stderrTail: unknown) => {
   send('ptyhost:crashed', forgetHostTerminals(code, stderrTail));
@@ -1142,6 +1179,12 @@ guardedHandle('fs:writeProjectFile', (_e, projectId: string, path: string, text:
   return project ? writeProjectFile(project.path, path, text, expectedText) : { ok: false, error: 'Projekt już nie istnieje.' };
 }, () => ({ ok: false, error: 'Projekt już nie istnieje.' }));
 registerFileOpsIpc({ projectPath: (projectId) => state.projects.find((p) => p.id === projectId)?.path, send, allowed: fromAppWindow });
+registerLocalFilesIpc({ guardedHandle, guardedOn }, createLocalFiles({
+  platform: process.platform,
+  trash: createTrash(),
+  openFolder: async (path) => { const error = await shell.openPath(path); if (error) throw new Error('open failed'); },
+  showFile: (path) => shell.showItemInFolder(path),
+}));
 /** Worktrees of the project's cells, open and in closed grids (History lists their conversations too). */
 function projectWorktrees(projectPath: string): Worktree[] {
   const key = normalizeProjectPath(projectPath);
@@ -1569,7 +1612,7 @@ app.on('before-quit', (e) => {
   e.preventDefault();
   quitting = true;
   // However the wind-down goes (stuck terminals), the process must end: a running installer waits for it.
-  const shutdownLimit = setTimeout(() => { crashLog.warn('shutdown overran its limit, exiting'); ptyHost.forceKill(); exitNow(); }, SHUTDOWN_HARD_LIMIT_MS);
+  const shutdownLimit = setTimeout(() => { crashLog.warn('shutdown overran its limit, exiting'); ptyHost.forceKill(); sftpHost.forceKill(); exitNow(); }, SHUTDOWN_HARD_LIMIT_MS);
   usage.stop();
   stopActivationRetry?.();
   login.dispose();
@@ -1587,7 +1630,7 @@ app.on('before-quit', (e) => {
     };
     await waitUntilIdle(swapWait, QUIT_SWAP_WAIT_MS);
     try {
-      await ptyHost.shutdown();
+      await Promise.all([ptyHost.shutdown(), sftpHost.shutdown()]);
       // An activation waiting for a Claude Code lock that a cell held gets it now: it may finish within the rest of the budget
       // (no wait at all when nothing runs).
       if (!(await waitUntilIdle(swapWait, QUIT_SWAP_AFTER_CELLS_MS))) {

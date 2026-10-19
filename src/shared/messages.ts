@@ -14,6 +14,7 @@ import { macUpdateMessages } from './macUpdateMessages';
 import { perfMessages } from './perfMessages';
 import { railMessages } from './railMessages';
 import { settingsMessages } from './settingsMessages';
+import { sftpMessages } from './sftpMessages';
 import { shortcutMessages } from './shortcutMessages';
 import { sshMessages } from './sshMessages';
 import { sshModeMessages } from './sshModeMessages';
@@ -44,6 +45,7 @@ export const messages = {
   ...stabilityMessages,
   ...railMessages,
   ...settingsMessages,
+  ...sftpMessages,
   ...shortcutMessages,
   ...sshMessages,
   ...sshModeMessages,
