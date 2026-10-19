@@ -23,6 +23,7 @@ import type { PathMode } from '../../../shared/types';
 import { addDroppedFilesToCell, addPathsToCell, cellDropFormat, cellRefusesPaths, readDroppedPaths } from '../pathDrop';
 import { setUi, toast, update, useStore } from '../store';
 import { terminals } from '../terminals/TerminalManager';
+import { useBlink } from '../blink';
 import { openMenu, openMenuAt, type MenuItem } from './ContextMenu';
 import { IBranch, IMax, IRestart, IRestore, IX } from './icons';
 import './terminalCell.css';
@@ -45,6 +46,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const profiles = useStore((st) => st.s.profiles);
   const profile = useStore((st) => getProfile(st.s, cell.profileId));
   const status = useStore((st) => st.ui.statuses[cell.id] ?? 'idle');
+  useBlink(status === 'working');
   const failure = useStore((st) => st.ui.failures[cell.id]);
   const focused = useStore((st) => st.ui.focusedCellId === cell.id);
   const mcpInfo = useStore((st) => st.ui.mcpInfo);

@@ -15,10 +15,8 @@ button.updater-badge:hover { border-color: #93c5fd80; background: #26344b; }
 .updater-transfer { color: #a8b3c8; font-size: 10px; font-variant-numeric: tabular-nums; }
 .updater-track { height: 3px; border-radius: 4px; background: #ffffff13; overflow: hidden; }
 .updater-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #60a5fa, #a78bfa, #67e8f9); transition: width .25s ease; }
-.updater-spinner { width: 11px; height: 11px; flex: none; border: 2px solid #93c5fd33; border-top-color: #93c5fd; border-radius: 50%; animation: updater-spin .9s linear infinite; }
-@keyframes updater-spin { to { transform: rotate(360deg); } }
 .updater-error { flex-direction: column; align-items: flex-start; gap: 0; color: #fecaca; background: #361e24; border-color: #f8717150; max-width: 310px; padding: 2px 9px; }
 .updater-error button { color: inherit; font: inherit; font-weight: 600; cursor: pointer; border: 0; background: transparent; padding: 0; }
 .updater-error-message { display: block; width: 100%; max-width: 290px; overflow: hidden; text-overflow: ellipsis; font-size: 10px; color: #fca5a5; }
 @media (max-width: 1100px) { .updater-download-row { flex-direction: column; align-items: flex-start; gap: 0; } .updater-download { min-width: 190px; } }
-@media (prefers-reduced-motion: reduce) { .brand-burst, .updater-spinner { animation: none; } .updater-track > span { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .brand-burst { animation: none; } .updater-track > span { transition: none; } }

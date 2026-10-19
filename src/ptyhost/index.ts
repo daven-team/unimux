@@ -61,14 +61,12 @@ function attachRenderer(port: MessagePortMain): void {
   rendererPort?.close();
   // Queued output is part of the replay tails the new renderer gets below.
   batcher.drop();
+  router.rendererAttached();
   rendererPort = port;
   port.on('message', (e) => {
     const m = e.data as RendererToHost;
-    if (m.t === 'write') {
-      router.write(m.id, m.data);
-      if (tapped.has(m.id) && m.data.includes('\x03')) toMain({ t: 'interrupt', id: m.id });
-    } else if (m.t === 'resize') router.resize(m.id, m.cols, m.rows);
-    else if (m.t === 'ack') router.ack(m.id, m.chars);
+    router.message(m);
+    if (m.t === 'write' && tapped.has(m.id) && m.data.includes('\x03')) toMain({ t: 'interrupt', id: m.id });
   });
   port.on('close', () => {
     // Only the current port counts: replacing it closes the old one after the new one is in place.

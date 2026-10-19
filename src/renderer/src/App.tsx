@@ -71,9 +71,21 @@ async function bootSteps(): Promise<void> {
   // The translations of the chosen language load before the first real render: no untranslated texts at start.
   await loadLanguage(snapshot.state.settings.language ?? chosenLanguage()).catch((error) => reportError('boot', error));
   useStore.getState().init(snapshot);
+  followScrollback();
   await bootRest(mcpInfo);
   window.mc.startupMark?.('renderer-boot');
 }
+
+/** Settings > Terminal > scrollback applies to every terminal, the open ones included. */
+function followScrollback(): void {
+  terminals.setScrollback(getS().settings.scrollbackLines);
+  if (scrollbackFollowed) return;
+  scrollbackFollowed = true;
+  useStore.subscribe((st, prev) => {
+    if (st.s.settings.scrollbackLines !== prev.s.settings.scrollbackLines) terminals.setScrollback(st.s.settings.scrollbackLines);
+  });
+}
+let scrollbackFollowed = false;
 
 function listenEarly(): void {
   terminals.setWindowsBuild(window.mc.windowsBuild);

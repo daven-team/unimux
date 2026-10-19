@@ -35,7 +35,7 @@ vi.mock('node-pty', () => ({
 }));
 
 import { PtyManager } from '../src/ptyhost/manager';
-import { HIGH_WATER, LOW_WATER } from '../src/ptyhost/flow';
+import { BACKGROUND_COALESCE_MS, HIGH_WATER, LOW_WATER } from '../src/ptyhost/flow';
 
 const req = { id: 'a', cwd: '.', cols: 80, rows: 24, env: {}, shell: 'cmd' as const };
 
@@ -51,10 +51,11 @@ function setup(delivered = true) {
   return { m, data, exits, p: procs[procs.length - 1] };
 }
 
-/** Sends `n` characters and lets the coalescing timer fire. */
+/** Sends `n` characters and lets the coalescing timer fire (an unfocused cell nobody types in: the background window). */
+const FLUSHED = BACKGROUND_COALESCE_MS * 1.5;
 function output(p: FakeProc, n: number) {
   p.emit('x'.repeat(n));
-  vi.advanceTimersByTime(20);
+  vi.advanceTimersByTime(FLUSHED);
 }
 
 beforeEach(() => {
@@ -85,7 +86,7 @@ describe('PtyManager flow control', () => {
     p.emit('a');
     p.emit('b');
     expect(data).toHaveLength(0);
-    vi.advanceTimersByTime(20);
+    vi.advanceTimersByTime(FLUSHED);
     expect(data).toEqual([{ id: 'a', data: 'ab' }]);
   });
 

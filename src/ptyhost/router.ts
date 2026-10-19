@@ -3,7 +3,8 @@
 
 export interface TerminalBackend {
   has(id: string): boolean;
-  write(id: string, data: string): void;
+  /** `reply`: a terminal reply, not typing (see RendererToHost). */
+  write(id: string, data: string, reply?: boolean): void;
   resize(id: string, cols: number, rows: number): void;
   ack(id: string, chars: number): void;
   setFlowControl(on: boolean): void;
@@ -11,6 +12,9 @@ export interface TerminalBackend {
   kill(id: string, timeoutMs?: number): Promise<void>;
   killAll(timeoutMs?: number): Promise<void>;
 }
+
+import type { RendererToHost } from '../shared/ipc';
+import { setFocusedTerminal } from './output';
 
 const EARLY_SIZES_MAX = 200;
 
@@ -24,7 +28,20 @@ export class HostRouter {
     return this.backends.find((b) => b.has(id));
   }
 
-  write(id: string, data: string): void { this.owner(id)?.write(id, data); }
+  write(id: string, data: string, reply = false): void { this.owner(id)?.write(id, data, reply); }
+
+  /** One message from the renderer's port. */
+  message(m: RendererToHost): void {
+    if (m.t === 'write') this.write(m.id, m.data, m.reply === true);
+    else if (m.t === 'resize') this.resize(m.id, m.cols, m.rows);
+    else if (m.t === 'ack') this.ack(m.id, m.chars);
+    else if (m.t === 'focus') setFocusedTerminal(typeof m.id === 'string' ? m.id : null);
+  }
+
+  /** A renderer (re)connected: it reports its focused terminal itself, the old one's report is forgotten. */
+  rendererAttached(): void {
+    setFocusedTerminal(null);
+  }
   ack(id: string, chars: number): void { this.owner(id)?.ack(id, chars); }
 
   resize(id: string, cols: number, rows: number): void {

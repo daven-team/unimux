@@ -28,7 +28,7 @@
   ],
   "main": "out/main/index.js",
   "scripts": {
-    "postinstall": "node scripts/fix-pty-permissions.cjs",
+    "postinstall": "node scripts/patch-node-pty.cjs && node scripts/fix-pty-permissions.cjs",
     "icons": "node scripts/render-icon.cjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
