@@ -184,13 +184,17 @@ describe.skipIf(!windows)('a project reached through a short (8.3) path', () => 
     for (const spelling of [dir, short, dir.toUpperCase(), dir.toLowerCase(), dir.replace(/\\/g, '/')]) {
       expect(data<GitTrustInfo>(await handleGit(second, spelling, 'trust', {}, true)).state, spelling).toBe('trusted');
     }
-    // two writers named by different spellings of the same repository serialize
+    // Writers named by different spellings of the same repository share one lock. The lock is held here (taken only after a
+    // few git reads, two real writers started together may as well run one after the other on a busy machine).
     writeFileSync(join(dir, 'x.txt'), 'x');
     writeFileSync(join(dir, 'y.txt'), 'y');
-    const [one, two] = await Promise.all([
-      second.stage(short, { requestId: id(), paths: ['x.txt'] }), second.stage(dir, { requestId: id(), paths: ['y.txt'] }),
-    ]);
-    expect([one.ok, two.ok].sort()).toEqual([false, true]);
+    const busy = (second as unknown as { busy: Set<string> }).busy;
+    const key = canonicalPath(join(dir, '.git'));
+    busy.add(key);
+    expect(await second.stage(short, { requestId: id(), paths: ['x.txt'] })).toMatchObject({ ok: false, code: 'busy' });
+    busy.delete(key);
+    expect((await second.stage(short, { requestId: id(), paths: ['x.txt'] })).ok).toBe(true);
+    expect((await second.stage(dir, { requestId: id(), paths: ['y.txt'] })).ok).toBe(true);
   });
 
   it('still refuses 8.3 aliases and links inside a repository path', async () => {
