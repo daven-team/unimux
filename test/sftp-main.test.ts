@@ -97,7 +97,7 @@ describe('SftpService', () => {
     expect(f.live()).toEqual([]); // transfers run: it stays
     f.service.onHostMessage({ t: 'sftpQueue', id, active: false });
     expect(f.live().map((t) => t.ms)).toEqual([120_000]);
-    f.service.viewOpened();
+    f.service.viewOpened(id);
     expect(f.live()).toEqual([]);
     f.service.viewClosed();
     f.live()[0].fn();

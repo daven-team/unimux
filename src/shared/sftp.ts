@@ -32,6 +32,8 @@ export interface SftpSessionState {
   path?: string;
   /** 0.9.9: the SFTP server runs through sudo (the host's "Uruchamiaj SFTP przez sudo"); set once connected. */
   sudo?: true;
+  /** 0.9.9: a session opened for editor tabs (the SSH user's own rights); the SFTP view never adopts it. */
+  plain?: true;
 }
 
 export const sftpStatusOf = (phase: SshPhase): SftpSessionStatus =>
@@ -90,7 +92,9 @@ export type SftpErrorCode =
   /** 0.9.9 moves: a folder into itself or its child; the server could not rename (another file system); a symlink left out. */
   | 'intoItself' | 'crossDevice' | 'linkSkipped'
   /** A recursive permission change as root on a server without lsetstat@openssh.com (not safe against swapped-in links). */
-  | 'unsafeChmod';
+  | 'unsafeChmod'
+  /** 0.9.9 editor saves: the folder of the file does not let the SSH user create the temporary part file. */
+  | 'partDenied';
 
 export type SftpResult<T> = { ok: true; value: T } | { ok: false; error: SftpErrorCode };
 
@@ -119,6 +123,7 @@ export function sftpErrorText(code: SftpErrorCode): Localized {
     case 'crossDevice': return { key: 'Serwer nie mógł przenieść tego elementu (na przykład do innego systemu plików) - skopiuj go i usuń oryginał' };
     case 'unsafeChmod': return { key: 'Ten serwer nie obsługuje zmiany uprawnień bez podążania za dowiązaniami (lsetstat) - przez sudo zmiana rekurencyjna jest wyłączona' };
     case 'linkSkipped': return { key: 'Dowiązania są pomijane' };
+    case 'partDenied': return { key: 'W tym folderze nie można utworzyć pliku tymczasowego (brak uprawnień do folderu) - zapis nie jest możliwy' };
     default: return { key: 'Operacja nie powiodła się' };
   }
 }
@@ -200,6 +205,16 @@ export function applyPortMessage(items: readonly TransferItem[], m: SftpPortMess
   const known = new Set(items.map((i) => i.id));
   for (const i of m.items) if (!known.has(i.id)) next.push(i);
   return next;
+}
+
+/**
+ * Moves and renames of the queue that finished with this message (0.9.9): open editor tabs follow them. Only live updates count
+ * (a snapshot after a reload repeats old ones); a skipped item moved nothing.
+ */
+export function finishedMoves(before: readonly TransferItem[], m: SftpPortMessage): TransferItem[] {
+  if (m.t !== 'items') return [];
+  const was = new Map(before.map((i) => [i.id, i.state]));
+  return m.items.filter((i) => isMoveDirection(i.direction) && i.state === 'done' && !i.skipped && was.get(i.id) !== 'done');
 }
 
 /** After the SFTP host restarted its queue is gone: what was not finished counts as failed (the view offers a new enqueue). */
@@ -496,7 +511,7 @@ export interface SftpApi {
   /** Hosts of editor tabs with unsaved changes: their sessions are kept while the view is closed. */
   pinHosts(hostIds: string[]): void;
   /** The SFTP view became visible / was closed (idle disconnect 2 minutes after close with an empty queue). */
-  viewOpened(): void;
+  viewOpened(shownSessionId: string | null): void;
   viewClosed(): void;
 }
 
@@ -517,6 +532,7 @@ export interface LocalFilesApi {
   reveal(path: string): Promise<LocalResult<null>>;
   /** A local file outside the projects in an editor tab (0.9.9): the same reads and safe saves as a project file. */
   readFile(path: string): Promise<ProjectFilePreview>;
-  statFile(path: string): Promise<{ size: number; mtimeMs: number } | null>;
+  /** 'gone': nothing is there any more (moved, renamed or deleted). */
+  statFile(path: string): Promise<{ size: number; mtimeMs: number } | 'gone' | null>;
   writeFile(path: string, text: string, expectedText: string): Promise<{ ok: true } | { ok: false; error: string; code?: 'conflict' }>;
 }

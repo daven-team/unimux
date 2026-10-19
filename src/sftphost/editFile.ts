@@ -77,7 +77,11 @@ export async function statForEditor(side: RemoteSide, path: string): Promise<Fil
 async function openPart(side: RemoteSide, part: string): Promise<Buffer> {
   const create = () => side.rq.call<Buffer>((cb) => side.sftp.open(part, 'wx', { mode: 0o600 }, cb));
   try { return await create(); } catch (error) {
-    if (!(await side.lstat(part).catch(() => null))) throw error;
+    if (!(await side.lstat(part).catch(() => null))) {
+      // The folder does not let the SSH user create a file (a root-owned folder): its own text, the file itself may be writable.
+      if (remoteError(error) === 'permission') throw new SftpError('partDenied');
+      throw error;
+    }
     await side.unlink(part);
     return create();
   }

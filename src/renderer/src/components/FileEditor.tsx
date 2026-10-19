@@ -12,7 +12,7 @@ import { fullProjectPath } from '../../../shared/platform';
 import { FileActionIcon, FileBreadcrumb } from './FileIcon';
 import { IX } from './icons';
 import { sourceTitle } from '../../../shared/editorSource';
-import { ensureSession, useRemoteSessions } from '../remoteSessions';
+import { ensureSession, liveSession, useRemoteSessions } from '../remoteSessions';
 import { useSftpStore } from '../sftpStore';
 import { downloadRemoteFile } from '../remoteOpen';
 import { RemoteLogin } from './RemoteLogin';
@@ -41,10 +41,12 @@ export function FileEditor() {
   const project = useStore((s) => s.s.projects.find((p) => p.id === doc?.projectId));
   const remote = doc?.source?.kind === 'remote' ? doc.source : null;
   const hostLabel = useStore((s) => (remote ? s.s.sshHosts.find((h) => h.id === remote.hostId)?.label ?? '?' : ''));
-  // Whether a remote tab has a connection decides its reconnect button.
-  const editorSession = useRemoteSessions((st) => !remote || Object.values(st.sessions).some((s) => s.hostId === remote.hostId && s.state === 'connected'));
-  const viewSession = useSftpStore((st) => !!remote && st.hostId === remote.hostId && st.session?.state === 'connected');
-  const hasSession = editorSession || viewSession;
+  // Whether a remote tab has a connection decides its reconnect button: the same rule as the tab's reads and saves (a connected
+  // session with the SSH user's own rights; the view's sudo session never counts). Both stores re-render the tab.
+  const fromSessions = useRemoteSessions(() => (remote ? liveSession(remote.hostId) : null));
+  const fromView = useSftpStore(() => (remote ? liveSession(remote.hostId) : null));
+  const hasSession = !remote || (fromView ?? fromSessions) !== null;
+  const sudoHost = useStore((s) => !!remote && s.s.sshHosts.some((h) => h.id === remote.hostId && h.sftpSudo === true));
   const connecting = useRemoteSessions((st) => (remote ? !!st.connecting[remote.hostId] : false));
   useEffect(() => {
     if (!doc) return;
@@ -124,6 +126,7 @@ export function FileEditor() {
         </div>
       </div>
       {remote && <RemoteLogin hostId={remote.hostId} hostLabel={hostLabel} />}
+      {sudoHost && <div className="preview-notice remote-notice muted" data-field="sudo-rights" role="note">{tr('Karty edytora otwierają pliki z uprawnieniami użytkownika SSH (bez sudo).')}</div>}
       {doc.error && <div className="preview-notice error remote-notice" role="alert" style={{ whiteSpace: 'pre-wrap' }}>
         <span>{errorText(fileErrorLabel(doc.error, language))}</span>
         {remote && !hasSession && !connecting && <span className="remote-notice-actions">

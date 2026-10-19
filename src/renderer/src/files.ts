@@ -7,7 +7,7 @@ import { useSshStore } from './sshStore';
 import type { GitDiffSource } from '../../shared/git';
 import type { ProjectFilePreview } from '../../shared/types';
 import { documentId, documentsUnder, removeDocuments, retargetDocuments, type FileMoveRecord } from '../../shared/fileOps';
-import { cleanStamp, localRelativePath, sourceDocumentId, sourceName, TEXT_ENCODINGS, validSource, type EditorWarning, type FileSource, type RemoteStamp, type TextEncodingName } from '../../shared/editorSource';
+import { cleanStamp, FILE_GONE, localRelativePath, movedSource, POSIX_PATHS, retargetSourceDocuments, sourceDocumentId, sourceName, sourceUnder, TEXT_ENCODINGS, validSource, type EditorWarning, type FileSource, type PathRules, type RemoteStamp, type SourceScope, type TextEncodingName } from '../../shared/editorSource';
 import { initRemoteSessions, pinHosts, sftpErrorMessage, withSession } from './remoteSessions';
 
 export interface FileDocument {
@@ -139,8 +139,8 @@ interface ReadOutcome { preview: ProjectFilePreview | { kind: 'tooLarge'; size: 
 type WriteOutcome = { ok: true; stamp?: DiskStamp | null; notice?: string } | { ok: false; error: string; code?: 'conflict' };
 /** One kind of file behind a tab: a project file, a local file outside the projects or a remote file (0.9.9). */
 interface FileIO {
-  /** Size and modification time, or null when unknown (gone, unreadable, no connection for a background check). */
-  stat(doc: FileDocument): Promise<DiskStamp | null>;
+  /** Size and modification time; 'gone' when nothing is there any more; null when unknown (unreadable, no connection). */
+  stat(doc: FileDocument): Promise<DiskStamp | 'gone' | null>;
   /** `interactive`: the user asked for it (a remote file may log in for it). */
   read(doc: FileDocument, interactive: boolean): Promise<ReadOutcome>;
   write(doc: FileDocument, text: string, expected: string): Promise<WriteOutcome>;
@@ -178,13 +178,13 @@ const remoteIO: FileIO = {
     const { path } = doc.source;
     // One stat request (following links, like the read), never a folder listing.
     const r = await withSession(doc.source.hostId, false, (id) => window.mc.sftp.statFile(id, path));
-    return r.ok ? r.value : null;
+    return r.ok ? r.value : r.error === 'notFound' ? 'gone' : null;
   },
   async read(doc, interactive) {
     if (doc.source?.kind !== 'remote') return { preview: { kind: 'error', message: sftpErrorMessage('invalid') } };
     const { path } = doc.source;
     const r = await withSession(doc.source.hostId, interactive, (id) => window.mc.sftp.readFile(id, path));
-    if (!r.ok) return { preview: { kind: 'error', message: r.error === 'login' ? r.message : sftpErrorMessage(r.error) } };
+    if (!r.ok) return { preview: { kind: 'error', message: r.error === 'login' ? r.message : r.error === 'notFound' ? FILE_GONE : sftpErrorMessage(r.error) } };
     const v = r.value;
     if (v.kind === 'text') return { preview: { kind: 'text', text: v.text, size: v.size, truncated: false }, stamp: v.stamp, encoding: v.encoding };
     if (v.kind === 'image') return { preview: { kind: 'image', mime: v.mime, dataUrl: v.dataUrl, size: v.size }, stamp: v.stamp };
@@ -212,7 +212,7 @@ const remoteIO: FileIO = {
       return { ok: false, error: tr('Nie zapisano: plik na serwerze należy do innego użytkownika.') };
     }
     if (r.error === 'changed') return { ok: false, code: 'conflict', error: sftpErrorMessage('changed') };
-    return { ok: false, error: r.error === 'login' ? r.message : sftpErrorMessage(r.error) };
+    return { ok: false, error: r.error === 'login' ? r.message : r.error === 'notFound' ? FILE_GONE : sftpErrorMessage(r.error) };
   },
 };
 
@@ -352,6 +352,13 @@ export async function checkFileOnDisk(id: string, force = false): Promise<void> 
     // read only when they changed since the last read. A remote tab without a connection is not checked (no login for it).
     const io = ioOf(doc);
     const stamp = await io.stat(doc);
+    if (stamp === 'gone') {
+      // Moved, renamed or deleted (here or elsewhere): the tab says so; its text and unsaved changes stay.
+      if (useFileStore.getState().documents.some((d) => d.id === id && d.error !== FILE_GONE)) patch(id, { error: FILE_GONE });
+      return;
+    }
+    // The file is back (restored, or moved back): the notice goes.
+    if (stamp && doc.error === FILE_GONE) patch(id, { error: null });
     if (!stamp || sameStamp(doc.diskStamp, stamp) || (isFileDirty(doc) && sameStamp(doc.conflictStamp, stamp))) return;
     const { preview: result, stamp: readStamp, encoding } = await io.read(doc, false);
     const now = useFileStore.getState().documents.find((d) => d.id === id);
@@ -542,4 +549,75 @@ export function forgetDeletedFiles(projectId: string, paths: string[]): void {
 /** Closes several tabs one by one (each unsaved one asks first); stops when the user cancels. */
 export async function closeFiles(ids: string[]): Promise<void> {
   for (const id of ids) if (!await closeFile(id)) return;
+}
+
+// ── moves and deletes in the SFTP view (0.9.9) ─────────────────────────────
+
+/** How local paths compare on this computer. */
+export const localPathRules = (): PathRules => ({ caseInsensitive: window.mc.platform === 'win32' || window.mc.platform === 'darwin', backslash: window.mc.platform === 'win32' });
+const rulesOf = (scope: SourceScope): PathRules => (scope.kind === 'remote' ? POSIX_PATHS : localPathRules());
+
+/** Marks tabs as gone (their text and unsaved changes stay; a save or check says what happened). */
+function markGone(ids: string[]): void {
+  if (!ids.length) return;
+  const gone = new Set(ids);
+  useFileStore.setState((s) => ({ documents: s.documents.map((d) => (gone.has(d.id) ? { ...d, error: FILE_GONE } : d)) }));
+}
+
+/** Project tabs under a local path, as project id + relative path (the local pane can reach files of a project). */
+function projectPaths(path: string): Array<{ projectId: string; relative: string }> {
+  const { caseInsensitive } = localPathRules();
+  return getS().projects.flatMap((p) => { const relative = localRelativePath(p.path, path, caseInsensitive); return relative ? [{ projectId: p.id, relative }] : []; });
+}
+
+/**
+ * Open tabs follow a move or rename done in the SFTP view (remote: the host's server; local: this computer, project files too).
+ * A project file moved out of its project is marked as gone.
+ */
+export function followMoves(scope: SourceScope, moves: Array<{ from: string; to: string }>): void {
+  if (!moves.length) return;
+  const rules = rulesOf(scope);
+  const before = useFileStore.getState();
+  const moveOf = (source: FileSource): FileSource | null => {
+    for (const m of moves) { const next = movedSource(source, scope, m.from, m.to, rules); if (next) return next; }
+    return null;
+  };
+  const result = retargetSourceDocuments(before.documents, before.activeFileId, moveOf, isFileDirty);
+  if (result.idMap.size) {
+    const moved = new Set(result.idMap.values());
+    const reload: string[] = [];
+    for (const [oldId, newId] of result.idMap) {
+      loads.delete(oldId);
+      remoteChecks.delete(oldId);
+      aliases.set(oldId, newId);
+      if (result.documents.some((d) => d.id === newId && d.status === 'loading')) reload.push(newId);
+    }
+    for (const id of result.closed) { loads.delete(id); remoteChecks.delete(id); }
+    // A moved tab whose check saw the old path gone first is fine again under its new path.
+    useFileStore.setState({
+      documents: result.documents.map((d) => (moved.has(d.id) && d.error === FILE_GONE ? { ...d, error: null } : d)),
+      activeFileId: result.activeId,
+    });
+    for (const id of reload) void retryFile(id);
+  }
+  markGone(result.gone);
+  if (scope.kind !== 'local') return;
+  // Project files moved through the local pane.
+  for (const m of moves) {
+    for (const { projectId, relative } of projectPaths(m.from)) {
+      const target = projectPaths(m.to).find((p) => p.projectId === projectId);
+      if (target) retargetOpenFiles(projectId, [{ from: relative, to: target.relative }]);
+      else markGone(documentsUnder(useFileStore.getState().documents, projectId, [relative]));
+    }
+  }
+}
+
+/** Tabs of files deleted in the SFTP view (remote: deleted on the server; local: moved to the trash) say so at once. */
+export function markDeleted(scope: SourceScope, paths: string[]): void {
+  if (!paths.length) return;
+  const rules = rulesOf(scope);
+  const docs = useFileStore.getState().documents;
+  const ids = docs.filter((d) => d.source && sourceUnder(d.source, scope, paths, rules)).map((d) => d.id);
+  if (scope.kind === 'local') for (const p of paths) for (const { projectId, relative } of projectPaths(p)) ids.push(...documentsUnder(docs, projectId, [relative]));
+  markGone(ids);
 }

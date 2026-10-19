@@ -8,6 +8,7 @@ import type { IpcGuard } from './ipcGuard';
 import { sameLocalFile } from '../sftphost/sides';
 import { readLocalFile, statLocalFile, writeLocalFile } from './files';
 import type { ProjectFilePreview } from '../shared/types';
+import { FILE_GONE } from '../shared/editorSource';
 
 export interface LocalFilesDeps {
   platform: NodeJS.Platform;
@@ -82,11 +83,15 @@ export function createLocalFiles(deps: LocalFilesDeps) {
   };
   let forbiddenReal: Promise<string[]> | null = null;
   const forbidden = () => (forbiddenReal ??= Promise.all((deps.forbidden ?? []).filter(Boolean).map((f) => realpath(resolve(f)).catch(() => resolve(f)))));
-  /** The real path of a file the editor may read or write, or null. */
-  const editablePath = async (path: unknown): Promise<string | null> => {
+  /** The real path of a file the editor may read or write, 'gone' when nothing is there any more (ENOENT), else null. */
+  const editablePath = async (path: unknown): Promise<string | 'gone' | null> => {
     if (!validLocalPath(path) || (windows && isUncOrDevicePath(path))) return null;
     let real: string;
-    try { real = await realpath(resolve(path)); } catch { return null; }
+    try { real = await realpath(resolve(path)); } catch (error) {
+      // Moved, renamed or deleted: its own text, not "cannot be edited here" (the place is fine, the file is not there).
+      const code = (error as NodeJS.ErrnoException).code;
+      return code === 'ENOENT' || code === 'ENOTDIR' ? 'gone' : null;
+    }
     if (windows && isUncOrDevicePath(real)) return null;
     const roots = [...(deps.forbidden ?? []).map((f) => resolve(f)), ...(await forbidden())];
     if (roots.some((root) => inside(root, real) || inside(root, resolve(path)))) return null;
@@ -158,17 +163,21 @@ export function createLocalFiles(deps: LocalFilesDeps) {
     // folders, never over UNC or device paths, and a write only for a file this window opened (read) before.
     async readFile(path: unknown): Promise<ProjectFilePreview> {
       const real = await editablePath(path);
+      if (real === 'gone') return { kind: 'error', message: FILE_GONE };
       if (!real) return { kind: 'error', message: EDIT_REFUSED };
       const result = await readLocalFile(real);
       if (result.kind !== 'error') remember(real);
       return result;
     },
-    async statFile(path: unknown): Promise<{ size: number; mtimeMs: number } | null> {
+    /** 'gone': the file is not there any more (the tab says it was moved or deleted). */
+    async statFile(path: unknown): Promise<{ size: number; mtimeMs: number } | 'gone' | null> {
       const real = await editablePath(path);
+      if (real === 'gone') return 'gone';
       return real ? statLocalFile(real) : null;
     },
     async writeFile(path: unknown, text: unknown, expectedText: unknown): Promise<{ ok: true } | { ok: false; error: string; code?: 'conflict' }> {
       const real = await editablePath(path);
+      if (real === 'gone') return { ok: false, error: FILE_GONE };
       if (!real) return { ok: false, error: EDIT_REFUSED };
       if (!opened.has(fold(real))) return { ok: false, error: NOT_OPENED };
       return writeLocalFile(real, text, expectedText);

@@ -6,7 +6,8 @@
 // changes, no part file stays, the mode is kept), changes it on the server meanwhile (the conflict choices; Show differences;
 // Overwrite), lets a clean tab follow a server change when it gets focus, opens an image (preview), a big file and a binary
 // (the download offer), disconnects and saves again (the login prompt inside the tab, then the save), opens a local file
-// outside the projects, and checks that an unsaved remote draft survives a window reload.
+// outside the projects, checks that an unsaved remote draft survives a window reload, and that tabs follow a remote and a local
+// move done in the view and say "moved or deleted" when their file is gone.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { launchApp, scratchRoot, sleep, startTestServer, testHost, writeKnownHost, writeState } from './ssh-ui-lib.mjs';
@@ -64,6 +65,24 @@ try {
     throw new Error(`timeout: ${label}: ${existsSync(path) ? JSON.stringify(readFileSync(path, 'utf8').slice(0, 200)) : 'missing'}`);
   };
   const noPartFiles = () => { const left = readdirSync(home).filter((n) => n.includes('.unimux-')); if (left.length) throw new Error(`part files left: ${left}`); };
+  /** A drag of one row inside a pane onto a folder row of the same pane; true when the pane accepted it. */
+  const dragWithin = (side, names, folder) => ev(`(() => {
+    const dt = new DataTransfer();
+    const pane = document.querySelector('.sftp-pane-${side}');
+    const source = [...pane.querySelectorAll('.sftp-list .sftp-row')].find((r) => r.dataset.name === ${JSON.stringify(names[0])});
+    source.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    const el = [...pane.querySelectorAll('.sftp-list .sftp-row')].find((r) => r.dataset.name === ${JSON.stringify(folder)});
+    el.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    const over = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt });
+    el.dispatchEvent(over);
+    if (over.defaultPrevented) el.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    source.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    return over.defaultPrevented; })()`);
+  const key = async (side, keyName, code, vk, modifiers = 0) => {
+    await ev(`document.querySelector('.sftp-pane-${side} .sftp-list').focus()`);
+    for (const type of ['keyDown', 'keyUp']) await app.cdp('Input.dispatchKeyEvent', { type, key: keyName, code, windowsVirtualKeyCode: vk, modifiers });
+  };
   const openSftpView = async () => {
     await app.click('.workspace-tabs .ssh-tab');
     await app.until(`!!document.querySelector('.sftp-view') && document.querySelector('.sftp-view').offsetParent !== null`, 'SFTP view shown');
@@ -206,6 +225,62 @@ try {
   await app.until(`${docs}.some((d) => d.relativePath === '/home/alice/notes.txt' && d.text === 'draft across reload\\n' && d.source?.kind === 'remote')`, 'remote draft restored');
   if (readFileSync(notes, 'utf8') !== 'saved after a reconnect\n') throw new Error('the draft was written');
   log('remote draft restored after a reload');
+
+  // 11. Tabs follow moves done in the SFTP view (0.9.9 final review): a remote move and a local move; a file deleted elsewhere
+  // makes its tab say it was moved or deleted. After the reload the view did not adopt the editor's own session: it logs in again.
+  if (await ev(`!!${sftp}.sessionId`)) throw new Error('the view adopted the editor session after the reload');
+  mkdirSync(join(home, 'dest'), { recursive: true });
+  writeFileSync(join(home, 'm.txt'), 'remote move me\n');
+  mkdirSync(join(local, 'ldest'), { recursive: true });
+  writeFileSync(join(local, 'loc-move.txt'), 'local move me\n');
+  await app.click('.rail-tiles [aria-label="SSH"]');
+  await app.until(`!!document.querySelector('.ssh-nav-item[data-section="sftp"]')`, 'SFTP entry after the reload');
+  await app.click('.ssh-nav-item[data-section="sftp"]');
+  await app.until(`!!document.querySelector('.sftp-view .sftp-connect')`, 'SFTP empty state after the reload');
+  await app.click('.sftp-connect .btn', 'Wybierz host');
+  await app.click('.sftp-host-option', 'vps');
+  await app.until(`!!document.querySelector('.sftp-prompt input[type=password]')`, 'password prompt in the view again');
+  await app.setValue('.sftp-prompt input[type=password]', server.password);
+  await app.click('.sftp-prompt button[type=submit]');
+  await app.until(`${sftp}.session?.state === 'connected' && ${hasRow('remote', 'm.txt')} && ${hasRow('remote', 'dest')}`, 'view connected again');
+  await dblRow('remote', 'm.txt');
+  await app.until(`${editorText}.includes('remote move me')`, 'm.txt in a tab');
+  await openSftpView();
+  if (!(await dragWithin('remote', ['m.txt'], 'dest'))) throw new Error('remote drop onto dest refused');
+  await app.until(`${sftp}.transfers.some((i) => i.direction === 'move' && i.state === 'done') && !${hasRow('remote', 'm.txt')}`, 'remote move done');
+  await app.until(`${docs}.some((d) => d.relativePath === '/home/alice/dest/m.txt') && !${docs}.some((d) => d.relativePath === '/home/alice/m.txt')`, 'the remote tab followed the move');
+  await app.click('.workspace-tabs .file-tab', 'm.txt');
+  const movedTab = await ev(`document.querySelector('.workspace-tabs .file-tab.active')?.title`);
+  if (movedTab !== 'vps:/home/alice/dest/m.txt') throw new Error(`moved tab title: ${movedTab}`);
+  await setText('saved after the move\n');
+  await save();
+  await waitFile(join(home, 'dest', 'm.txt'), 'saved after the move\n', 'save to the moved file');
+  if (existsSync(join(home, 'm.txt'))) throw new Error('the save recreated the old path');
+  await shot(app, 'moved-remote');
+  log('remote tab followed the move to dest/ and saved there');
+
+  await openSftpView();
+  await key('local', 'F5', 'F5', 116);
+  await app.until(`${hasRow('local', 'loc-move.txt')} && ${hasRow('local', 'ldest')}`, 'local fixtures listed');
+  await dblRow('local', 'loc-move.txt');
+  await app.until(`${editorText}.includes('local move me')`, 'loc-move.txt in a tab');
+  await openSftpView();
+  if (!(await dragWithin('local', ['loc-move.txt'], 'ldest'))) throw new Error('local drop onto ldest refused');
+  const movedLocal = join(local, 'ldest', 'loc-move.txt');
+  await app.until(`${docs}.some((d) => d.relativePath === ${JSON.stringify(movedLocal)}) && !${docs}.some((d) => d.relativePath === ${JSON.stringify(join(local, 'loc-move.txt'))})`, 'the local tab followed the move');
+  if (readFileSync(movedLocal, 'utf8') !== 'local move me\n') throw new Error('local move');
+  log('local tab followed the move to ldest/');
+
+  // A file deleted outside the app: the tab says so when it gets focus.
+  rmSync(join(home, 'dest', 'm.txt'));
+  await sleep(3200); // at most one remote check per few seconds
+  await app.click('.workspace-tabs .file-tab', 'm.txt');
+  await app.until(`(document.querySelector('.file-editor [role=alert]')?.textContent ?? '').includes('Plik został przeniesiony lub usunięty.')`, 'gone notice on the remote tab', 15000);
+  await shot(app, 'gone');
+  rmSync(movedLocal);
+  await app.click('.workspace-tabs .file-tab', 'loc-move.txt');
+  await app.until(`(document.querySelector('.file-editor [role=alert]')?.textContent ?? '').includes('Plik został przeniesiony lub usunięty.')`, 'gone notice on the local tab', 15000);
+  log('deleted files: both tabs say "Plik został przeniesiony lub usunięty."');
 
   process.stdout.write('verify-sftp-edit: all OK\n');
 } catch (error) {

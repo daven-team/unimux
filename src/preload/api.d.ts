@@ -87,7 +87,7 @@ export interface McApi {
   /** `large`: the editor's read (images, Parquet tables and up to 8 MB of text); without it the small preview. */
   readProjectFile(projectId: string, relativePath: string, large?: boolean): Promise<ProjectFilePreview>;
   /** Size and modification time (null when unreadable): open tabs read a file again only when these changed. */
-  statProjectFile(projectId: string, relativePath: string): Promise<{ size: number; mtimeMs: number } | null>;
+  statProjectFile(projectId: string, relativePath: string): Promise<{ size: number; mtimeMs: number } | 'gone' | null>;
   listProjectDirectories(projectId: string): Promise<{ ok: true; paths: string[]; truncated: boolean } | { ok: false; error: string }>;
   searchProject(projectId: string, options: SearchOptions): Promise<SearchResult>;
   replaceInProject(projectId: string, request: ReplaceRequest): Promise<ReplaceResult>;

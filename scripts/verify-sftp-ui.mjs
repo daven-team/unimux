@@ -492,9 +492,19 @@ try {
   await app.click('.sftp-perms [data-field=recursive]');
   await app.until(`!!document.querySelector('.sftp-perms [data-field=unsafe]') && document.querySelector('.sftp-perms .modal-foot .btn.primary').disabled`, 'recursive chmod as root without lsetstat refused');
   await shot99('perms-sudo-unsafe');
+  // A single change as root without lsetstat is not race-safe: it asks first (Anuluj changes nothing).
+  await app.click('.sftp-perms [data-field=recursive]');
+  await app.setValue('.sftp-perms input[data-field=octal]', '750');
+  await app.click('.sftp-perms .modal-foot .btn.primary');
+  const unsafeAsk = `[...document.querySelectorAll('.modal h3')].some((h) => h.textContent === 'Zmienić uprawnienia bez ochrony przed dowiązaniami?')`;
+  await app.until(unsafeAsk, 'single chmod as root without lsetstat asks first');
+  await shot99('perms-sudo-single');
+  await ev(`(() => { const m = [...document.querySelectorAll('.modal')].find((x) => x.querySelector('h3')?.textContent === 'Zmienić uprawnienia bez ochrony przed dowiązaniami?'); [...m.querySelectorAll('.modal-foot .btn')].find((b) => b.textContent === 'Anuluj').click(); return true; })()`);
+  await app.until(`!${unsafeAsk} && !!document.querySelector('.sftp-perms')`, 'question dismissed, dialog still open');
+  if (await ev(`${permOf('remote', 'box')} === 'drwxr-x---'`)) throw new Error('the dismissed single chmod changed the mode');
   await app.click('.sftp-perms .modal-foot .btn', 'Anuluj');
   await app.until(`!document.querySelector('.sftp-perms')`, 'dialog closed');
-  log('SFTP through sudo (NOPASSWD) with the sudo badge, recursive chmod without lsetstat refused OK');
+  log('SFTP through sudo (NOPASSWD) with the sudo badge, recursive chmod without lsetstat refused, a single one asks first OK');
   await loginTo('vps-sudo-pw', sudoPwServer);
   await app.until(sudoPrompt, 'sudo password prompt');
   await shot99('sudo-prompt');

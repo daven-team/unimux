@@ -216,7 +216,7 @@ describe('SFTP through sudo: the coordinator', () => {
 
   it('sends the sudo option with the login and asks the sudo password without a save option', async () => {
     const f = setup('sudo -n /opt/sftp-server');
-    expect(await f.coordinator.connectSession({ sessionId: SID, hostId: HOST })).toEqual({ ok: true });
+    expect(await f.coordinator.connectSession({ sessionId: SID, hostId: HOST, sudo: true })).toEqual({ ok: true });
     expect(f.sent[0]).toMatchObject({ t: 'sshConnect', req: { id: SID, sftpSudo: { command: 'sudo -n /opt/sftp-server' } } });
     f.coordinator.onHostMessage({ t: 'sshAuthPrompt', id: SID, promptId: 'p1', kind: 'sudo', fields: [], retry: false });
     await tick();
@@ -232,9 +232,9 @@ describe('SFTP through sudo: the coordinator', () => {
     expect(existsSync(join(dir, 'vault.json')) ? readFileSync(join(dir, 'vault.json'), 'utf8') : '').not.toContain('s3cret');
   });
 
-  it('a plain session (editor tabs) of a sudo host never runs through sudo', async () => {
+  it('a session without the sudo flag (editor tabs) of a sudo host never runs through sudo: the host setting is not read again', async () => {
     const f = setup('sudo -n /opt/sftp-server');
-    expect(await f.coordinator.connectSession({ sessionId: SID, hostId: HOST, plain: true })).toEqual({ ok: true });
+    expect(await f.coordinator.connectSession({ sessionId: SID, hostId: HOST })).toEqual({ ok: true });
     expect(f.sent[0]).toMatchObject({ t: 'sshConnect', req: { id: SID } });
     expect((f.sent[0] as { req: { sftpSudo?: unknown } }).req.sftpSudo).toBeUndefined();
   });
@@ -242,7 +242,7 @@ describe('SFTP through sudo: the coordinator', () => {
   it('uses the saved login password for sudo only on the explicit choice', async () => {
     const f = setup();
     expect(f.vault.setPassword(HOST, 'login-pw').ok).toBe(true);
-    await f.coordinator.connectSession({ sessionId: SID, hostId: HOST });
+    await f.coordinator.connectSession({ sessionId: SID, hostId: HOST, sudo: true });
     expect(f.sent[0]).toMatchObject({ req: { sftpSudo: {} } });
     f.coordinator.onHostMessage({ t: 'sshAuthPrompt', id: SID, promptId: 'p2', kind: 'sudo', fields: [], retry: true });
     await tick();

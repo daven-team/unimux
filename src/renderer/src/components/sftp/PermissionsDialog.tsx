@@ -76,6 +76,15 @@ export function PermissionsDialog({ sessionId, entries, sudo, onClose }: { sessi
 
   const apply = async () => {
     if (!canApply) return;
+    if (sudo && !recursive) {
+      // As root without lsetstat the change goes through SETSTAT, which follows a link: one swapped in between the check and
+      // the change would redirect it. The user decides (a recursive change is refused outright in that case).
+      const c = await window.mc.sftp.chmodCount(sessionId, entries.map((e) => e.path), false).catch(() => null);
+      if (!c || !c.ok) { toast(errorText(c ? c.error : 'failed'), 'error'); return; }
+      if (c.value.noFollow === false && await askChoice(tr('Zmienić uprawnienia bez ochrony przed dowiązaniami?'), tr('Ten serwer nie obsługuje lsetstat: przez sudo zmiana uprawnień podąża za dowiązaniami. Jeśli ktoś podmieni ten element na dowiązanie w trakcie zmiany, zmiana jako root trafi w miejsce, na które ono wskazuje. Zmieniaj tak tylko elementy w folderach, do których inni nie mają zapisu.'), [
+        { label: tr('Zastosuj'), value: 'yes', danger: true },
+      ]) !== 'yes') return;
+    }
     if (setidFiles || specialAsRoot) {
       const body = [setidFiles ? tr('Wartość dla plików zawiera setuid lub setgid: każdy plik w tych folderach będzie uruchamiany z uprawnieniami właściciela lub grupy.') : '', specialAsRoot ? tr('Bity specjalne przez sudo: zmiana działa jako root.') : ''].filter(Boolean).join('\n\n');
       if (await askChoice(tr('Ustawić bity specjalne?'), body, [{ label: tr('Zastosuj'), value: 'yes', danger: true }]) !== 'yes') return;
