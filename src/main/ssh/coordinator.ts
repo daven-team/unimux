@@ -2,8 +2,10 @@
 // asks the renderer (coalescing identical prompts) and keeps a session state per cell. The only place that decrypts secrets.
 // Since 0.9.8 a session may also be a non-cell one (an SFTP session, id "sftp:<uuid>"): same vault, saved password,
 // passphrase check, known hosts and prompt grouping; its commands go to the SFTP Host (main routes `host()` by id).
+// Since 1.0.0 the SSH tunnel of a DB session ("db:<uuid>") logs in the same way; its commands go to the DB Host.
 import { randomUUID } from 'crypto';
 import type { HostToMain, MainToHost } from '../../shared/ipc';
+import { isDbSessionId } from '../../shared/db';
 import { isSftpSessionId } from '../../shared/sftp';
 import { findCell } from '../../shared/state';
 import {
@@ -36,6 +38,10 @@ interface Group { id: string; key: string | null; prompt: SshPrompt; cells: Map<
 interface Live { kind: 'cell' | 'session'; state: SshSessionState; host: string; port: number; user: string; endpoint: string; pendingSave?: string }
 
 type Answer2 = Answer & { useSaved?: boolean };
+
+/** The non-cell session kinds by id prefix: SFTP sessions and DB tunnels (each lives in its own utility process). */
+export type SessionHostKind = 'sftp' | 'db';
+export const sessionHostOf = (id: string): SessionHostKind | null => (isSftpSessionId(id) ? 'sftp' : isDbSessionId(id) ? 'db' : null);
 
 const PROMPT_TIMEOUT_MS = 5 * 60_000;
 const MAX_PASSPHRASE_TRIES = 3;
@@ -89,7 +95,7 @@ export class SshCoordinator {
    * created; it is never read from the host again here, so editor sessions (sudo false) always run as the SSH user.
    */
   async connectSession(req: { sessionId: string; hostId: string; sudo?: boolean }): Promise<{ ok: true } | { ok: false; error: SshErrorCode }> {
-    if (!isSftpSessionId(req.sessionId)) return { ok: false, error: 'unknown' };
+    if (!sessionHostOf(req.sessionId)) return { ok: false, error: 'unknown' };
     const host = this.deps.state().sshHosts.find((h) => h.id === req.hostId);
     if (!host) return { ok: false, error: 'hostMissing' };
     const existing = this.sessionsByCell.get(req.sessionId);
@@ -152,7 +158,7 @@ export class SshCoordinator {
       allowPasswordPrompt: true, ...(this.deps.debug ? { debug: true } : {}),
     } });
     // M1: a connect sent while the Pty Host is restarting or gone would be lost and leave the cell `connecting` forever.
-    if (delivered === false) return fail(kind === 'cell' ? 'ptyHostCrashed' : 'sftpHostCrashed');
+    if (delivered === false) return fail(kind === 'cell' ? 'ptyHostCrashed' : sessionHostOf(id) === 'db' ? 'dbHostCrashed' : 'sftpHostCrashed');
     return { ok: true };
   }
 
@@ -321,12 +327,12 @@ export class SshCoordinator {
     }
   }
 
-  /** The SFTP Host restarted: every non-cell session ended. */
-  sessionHostCrashed(): void {
+  /** The SFTP Host (or, with 'db', the DB Host) restarted: every non-cell session it ran ended. */
+  sessionHostCrashed(host: SessionHostKind = 'sftp'): void {
     for (const [id, live] of this.sessionsByCell) {
-      if (live.kind !== 'session') continue;
+      if (live.kind !== 'session' || sessionHostOf(id) !== host) continue;
       this.withdraw(id);
-      if (isLivePhase(live.state.phase)) this.setPhase(id, live, 'error', { error: 'sftpHostCrashed' });
+      if (isLivePhase(live.state.phase)) this.setPhase(id, live, 'error', { error: host === 'db' ? 'dbHostCrashed' : 'sftpHostCrashed' });
     }
   }
 
@@ -348,13 +354,13 @@ export class SshCoordinator {
   /** Cell sessions and their prompts (what the SSH store of the renderer holds). */
   sessions(): SshSessionsSnapshot { return this.snapshot('cell'); }
 
-  /** Non-cell sessions (SFTP) and their prompts; `cellId` is the session id. */
-  sessionSnapshot(): SshSessionsSnapshot { return this.snapshot('session'); }
+  /** Non-cell sessions of one host process (SFTP by default, or the DB tunnels) and their prompts; `cellId` is the session id. */
+  sessionSnapshot(host: SessionHostKind = 'sftp'): SshSessionsSnapshot { return this.snapshot('session', host); }
 
-  private snapshot(kind: Live['kind']): SshSessionsSnapshot {
-    const ofKind = (id: string) => (isSftpSessionId(id) ? 'session' : 'cell') === kind;
+  private snapshot(kind: Live['kind'], host?: SessionHostKind): SshSessionsSnapshot {
+    const ofKind = (id: string) => (sessionHostOf(id) ? 'session' : 'cell') === kind && (!host || sessionHostOf(id) === host);
     return {
-      sessions: [...this.sessionsByCell.values()].filter((l) => l.kind === kind).map((l) => l.state),
+      sessions: [...this.sessionsByCell.entries()].filter(([id, l]) => l.kind === kind && ofKind(id)).map(([, l]) => l.state),
       prompts: [...this.promptOfCell].flatMap(([cellId, groupId]) => { const g = this.groups.get(groupId); return g && ofKind(cellId) ? [{ cellId, prompt: g.prompt }] : []; }),
     };
   }

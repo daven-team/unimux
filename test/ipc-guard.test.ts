@@ -98,6 +98,8 @@ describe('IPC channel registry', () => {
       'sftp:answerConflict', 'sftp:retry', 'sftp:clearFinished', 'sftp:viewOpened', 'sftp:viewClosed',
       'sftp:list', 'sftp:stat', 'sftp:realpath', 'sftp:deleteCount', 'sftp:sessions',
       'local:list', 'local:roots', 'local:mkdir', 'local:rename', 'local:trash', 'local:reveal',
+      'db:connections:save', 'db:connections:delete', 'db:connections:duplicate', 'db:connections:test', 'db:vault:info',
+      'db:connect', 'db:disconnect', 'db:sessions', 'db:prompt:answer', 'db:pg', 'db:pin',
     ];
     expect(mutating.filter((channel) => !guarded.has(channel))).toEqual([]);
     // A channel is either guarded or open, never both.

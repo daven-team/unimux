@@ -75,6 +75,8 @@ export type SshErrorCode = 'dns' | 'refused' | 'timeout' | 'unreachable' | 'rese
   | 'hostKeyChanged' | 'passphrase' | 'keyLocked' | 'keyMissing' | 'hostMissing' | 'shellDenied' | 'ptyHostCrashed' | 'cancelled' | 'unknown'
   /** SFTP sessions (0.9.8): the server refused the sftp subsystem; the SFTP host process restarted. */
   | 'sftpDenied' | 'sftpHostCrashed'
+  /** 1.0.0: the DB Host (which runs the SSH tunnels of database sessions) restarted. */
+  | 'dbHostCrashed'
   /** SFTP through sudo (0.9.9): wrong password, requiretty, not allowed, no sftp-server found, anything else. */
   | 'sudoPassword' | 'sudoTty' | 'sudoDenied' | 'sudoNoServer' | 'sudoFailed' | 'sudoMissing';
 
@@ -402,6 +404,7 @@ export function sshErrorText(code: SshErrorCode, ctx: { host: string; endpoint: 
     case 'ptyHostCrashed': return { key: 'Proces terminali został uruchomiony ponownie' };
     case 'sftpDenied': return { key: 'Serwer nie udostępnia SFTP' };
     case 'sftpHostCrashed': return { key: 'Proces SFTP został uruchomiony ponownie' };
+    case 'dbHostCrashed': return { key: 'Proces baz danych został uruchomiony ponownie' };
     case 'sudoPassword': return { key: 'Nieprawidłowe hasło sudo' };
     case 'sudoTty': return { key: 'sudo wymaga terminala (requiretty) - SFTP przez sudo nie może się uruchomić' };
     case 'sudoDenied': return { key: 'To konto nie może uruchomić serwera SFTP przez sudo' };

@@ -14,6 +14,7 @@ import { DEFAULT_SCROLLBACK_LINES, normalizeScrollback } from './terminalLimits'
 import { normalizeShortcutOverrides } from './shortcuts';
 import { normalizeSshHosts, type SshCellRef, type SshHost } from './ssh';
 import { defaultSftpPlaces, forgetRemotePlace, normalizeSftpPlaces } from './sftpView';
+import { normalizeDbConnections } from './db';
 import type {
   AppState, ArchivedTab, Cell, Preset, PresetCell, Profile, Project, Settings, Snippet, Tab, Worktree,
 } from './types';
@@ -34,6 +35,7 @@ export function defaultState(platform: AppPlatform = 'win32'): AppState {
     snippets: [],
     sshHosts: [],
     sftp: defaultSftpPlaces(),
+    dbConnections: [],
     settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true, scrollbackLines: DEFAULT_SCROLLBACK_LINES },
     sidebarCollapsed: false,
     snippetsOpen: true,
@@ -433,6 +435,7 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
     snippets: Array.isArray(r.snippets) ? r.snippets : [],
     sshHosts: normalizeSshHosts(r.sshHosts),
     sftp: normalizeSftpPlaces(r.sftp),
+    dbConnections: normalizeDbConnections(r.dbConnections),
     settings: {
       ...d.settings, ...(r.settings ?? {}),
       // Existing Polish installations keep their UI and do not get first-run onboarding again.
