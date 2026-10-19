@@ -3,7 +3,7 @@
 // buffer. Pure helpers shared by the renderer and the tests: no Node or DOM imports.
 import { isUuid } from './ssh';
 import {
-  isBinaryData, isStreamId, REDIS_CONTAINER_COMMANDS, redisDataBytes, redisDataDisplay, redisDataKey, type RedisData, type RedisInfoSection, type RedisKeyInfo,
+  classifyRedisCommand, isBinaryData, isStreamId, quoteRedisArg, REDIS_CONTAINER_COMMANDS, redisCommandName, redisDataBytes, redisDataDisplay, redisDataKey, type RedisData, type RedisInfoSection, type RedisKeyInfo,
   type RedisPubSubMessage, type RedisReply,
 } from './dbRedis';
 
@@ -87,15 +87,24 @@ export function mergeKeys(loaded: readonly RedisKeyInfo[], page: readonly RedisK
   return out;
 }
 
-/** A SCAN MATCH pattern from the search field: empty is every key; the text is used as typed (a glob). */
-export const scanPattern = (text: string): string | undefined => (text.trim() === '' || text.trim() === '*' ? undefined : text.trim());
-
-/** A glob for searching fields or members: plain text matches anywhere ("*text*"); a glob is used as typed. */
+/**
+ * A glob for every search field (keys, fields, members): plain text matches anywhere ("*text*", glob characters in it escaped);
+ * text with a glob character (* ? [) is used as typed. Empty (or "*"): no MATCH.
+ */
 export function containsPattern(text: string): string | undefined {
   const t = text.trim();
-  if (!t) return undefined;
-  return /[*?[\]]/.test(t) ? t : `*${t}*`;
+  if (!t || t === '*') return undefined;
+  return /[*?[]/.test(t) ? t : `*${globEscape(t)}*`;
 }
+
+/** The SCAN MATCH pattern of the key search field (the same rule as the field and member searches). */
+export const scanPattern = containsPattern;
+
+/** Text matched literally inside a glob: a backslash before \ * ? [ ] (a folder "a[1]:" must not match "a1:"). */
+export const globEscape = (text: string): string => text.replace(/[\\*?[\]]/g, (c) => `\\${c}`);
+
+/** The pattern of everything under a ":"-folder (its path ends with the separator), literal up to the final "*". */
+export const folderPattern = (path: string): string => `${globEscape(path)}*`;
 
 // ── numbers, sizes, TTLs ────────────────────────────────────────────────────
 
@@ -294,22 +303,37 @@ export function pushHistory(history: readonly string[], line: string, max = 200)
 
 // ── Pub/Sub ─────────────────────────────────────────────────────────────────
 
-/** A received message in the renderer's list (seq: a stable key for rendering). */
-export interface RedisPubSubRow extends RedisPubSubMessage { seq: number }
+/** A received message in the renderer's list: seq (a stable key) and `search`, its lower-cased text for the filter (built once). */
+export interface RedisPubSubRow extends RedisPubSubMessage { seq: number; search: string }
 
-/** Messages added to the list, oldest dropped beyond `cap`. */
-export function appendMessages(list: readonly RedisPubSubRow[], incoming: readonly RedisPubSubMessage[], nextSeq: number, cap = 5000): { list: RedisPubSubRow[]; nextSeq: number } {
+/** The list keeps at most this many messages and this many payload bytes; older ones go first (and count as dropped). */
+export const PUBSUB_LIST_CAP = 5000;
+export const PUBSUB_LIST_BYTES = 16 * 1024 * 1024;
+
+const searchText = (m: RedisPubSubMessage): string =>
+  [m.channel, m.pattern, m.payload.data].filter((d): d is RedisData => d !== undefined).map((d) => redisDataDisplay(d).toLowerCase()).join('\n');
+
+/** Messages kept under both caps (count and payload bytes), newest last; `dropped`: how many older ones did not fit. */
+export function capMessages<T extends { payload: { bytes: number } }>(all: readonly T[], cap = PUBSUB_LIST_CAP, maxBytes = PUBSUB_LIST_BYTES): { kept: T[]; dropped: number } {
+  let bytes = 0;
+  let from = all.length;
+  while (from > 0 && all.length - from < cap && bytes + all[from - 1].payload.bytes <= maxBytes) { from--; bytes += all[from].payload.bytes; }
+  return { kept: from ? all.slice(from) : [...all], dropped: from };
+}
+
+/** Messages added to the list under the caps; `dropped`: older messages that had to go. */
+export function appendMessages(list: readonly RedisPubSubRow[], incoming: readonly RedisPubSubMessage[], nextSeq: number, cap = PUBSUB_LIST_CAP, maxBytes = PUBSUB_LIST_BYTES): { list: RedisPubSubRow[]; nextSeq: number; dropped: number } {
   let seq = nextSeq;
-  const added = incoming.map((m) => ({ ...m, seq: seq++ }));
-  const all = list.length + added.length > cap ? [...list, ...added].slice(-cap) : [...list, ...added];
-  return { list: all, nextSeq: seq };
+  const added = incoming.map((m) => ({ ...m, seq: seq++, search: searchText(m) }));
+  const { kept, dropped } = capMessages([...list, ...added], cap, maxBytes);
+  return { list: kept, nextSeq: seq, dropped };
 }
 
 /** A message matches the filter when its channel, pattern or payload contains the text (case-insensitive). */
-export function messageMatches(m: RedisPubSubMessage, filter: string): boolean {
+export function messageMatches(m: RedisPubSubMessage & { search?: string }, filter: string): boolean {
   const f = filter.trim().toLowerCase();
   if (!f) return true;
-  return [m.channel, m.pattern, m.payload.data].some((d) => d !== undefined && redisDataDisplay(d).toLowerCase().includes(f));
+  return (m.search ?? searchText(m)).includes(f);
 }
 
 // ── server info ─────────────────────────────────────────────────────────────
@@ -338,4 +362,136 @@ export function hitRatio(sections: readonly RedisInfoSection[]): number | null {
   const hits = Number(infoValue(sections, 'keyspace_hits')), misses = Number(infoValue(sections, 'keyspace_misses'));
   if (!Number.isFinite(hits) || !Number.isFinite(misses) || hits + misses === 0) return null;
   return Math.round((hits / (hits + misses)) * 1000) / 10;
+}
+
+// ── text editing: line endings ──────────────────────────────────────────────
+
+/**
+ * How a text value can be edited in a textarea (which turns every CR and CRLF into LF): `lf` as is; `crlf` (every line break is
+ * CRLF) shown with LF and turned back on save; `mixed` (lone CR, or LF and CRLF together) cannot round-trip, so the text editor is
+ * read-only for it (a string value can be edited as hex).
+ */
+export type LineEndings = 'lf' | 'crlf' | 'mixed';
+
+export function lineEndings(text: string): LineEndings {
+  if (!text.includes('\r')) return 'lf';
+  const crlf = (text.match(/\r\n/g) ?? []).length;
+  const cr = (text.match(/\r/g) ?? []).length;
+  const lf = (text.match(/\n/g) ?? []).length;
+  return crlf === cr && crlf === lf ? 'crlf' : 'mixed';
+}
+
+/** The text a textarea shows for a value (LF line breaks). */
+export const editorText = (text: string): string => text.replace(/\r\n/g, '\n');
+
+/** The value to save from a textarea's text: CRLF values get their CRLF back; null for `mixed` (never saved from text). */
+export function savedText(edited: string, eol: LineEndings): string | null {
+  if (eol === 'mixed') return null;
+  const lf = edited.replace(/\r\n?/g, '\n');
+  return eol === 'crlf' ? lf.replace(/\n/g, '\r\n') : lf;
+}
+
+// ── console history ─────────────────────────────────────────────────────────
+
+const MASK = '***';
+const upper = (d: RedisData | undefined): string => (typeof d === 'string' ? d.toUpperCase() : '');
+
+/**
+ * The console line as it may be kept in the history (localStorage), or null when it must not be kept at all. AUTH and HELLO ...
+ * AUTH lines are dropped; the secrets of CONFIG SET requirepass / masterauth / masteruser, ACL SETUSER ">pass" / "#hash" rules
+ * and MIGRATE ... AUTH / AUTH2 are masked.
+ */
+export function historyLine(argv: readonly RedisData[]): string | null {
+  const first = upper(argv[0]);
+  if (first === 'AUTH') return null;
+  if (first === 'HELLO' && argv.some((a) => upper(a) === 'AUTH')) return null;
+  const out = argv.map((a) => quoteRedisArg(a));
+  const name = redisCommandName(argv);
+  if (name === 'CONFIG SET') {
+    for (let i = 2; i + 1 < argv.length; i += 2) if (['REQUIREPASS', 'MASTERAUTH', 'MASTERUSER'].includes(upper(argv[i]))) out[i + 1] = MASK;
+  } else if (name === 'ACL SETUSER') {
+    for (let i = 3; i < argv.length; i++) {
+      const a = argv[i];
+      if (typeof a !== 'string') out[i] = MASK;
+      else if (/^[>#<!]/.test(a)) out[i] = `${a[0]}${MASK}`;
+    }
+  } else if (first === 'MIGRATE') {
+    for (let i = 0; i < argv.length; i++) {
+      if (upper(argv[i]) === 'AUTH' && i + 1 < argv.length) out[i + 1] = MASK;
+      if (upper(argv[i]) === 'AUTH2' && i + 2 < argv.length) out[i + 2] = MASK;
+    }
+  }
+  return out.join(' ');
+}
+
+// ── outcomes of calls (what the views do with a result) ─────────────────────
+
+type Failure = { ok: false; error: string };
+
+/**
+ * What a write from an open value view leads to: done; `reload` (the key vanished, holds another type now or the item changed:
+ * read it again, with `why`); `timeout` (not run or cut: tell the user, never retried by itself); `error` (show the text).
+ */
+export type WriteOutcome = { kind: 'done' } | { kind: 'reload'; why: 'notFound' | 'wrongType' | 'conflict' } | { kind: 'timeout' } | { kind: 'error' };
+
+export function writeOutcome(r: { ok: true } | Failure): WriteOutcome {
+  if (r.ok) return { kind: 'done' };
+  if (r.error === 'notFound' || r.error === 'wrongType' || r.error === 'conflict') return { kind: 'reload', why: r.error };
+  if (r.error === 'dbTimeout' || r.error === 'statementTimeout') return { kind: 'timeout' };
+  return { kind: 'error' };
+}
+
+/** The pattern delete's steps: ask with the count, nothing matches, done, count again and ask again, or an error. */
+export type PatternStep =
+  | { kind: 'confirm'; token: string; count: number; complete: boolean }
+  | { kind: 'empty' }
+  | { kind: 'done'; deleted: number; cancelled: boolean }
+  | { kind: 'recount'; deleted: number }
+  | { kind: 'error'; recount: boolean };
+
+export function afterPatternCount(r: { ok: true; value: { token: string; count: number; complete: boolean } } | Failure): PatternStep {
+  if (!r.ok) return { kind: 'error', recount: false };
+  return r.value.count > 0 ? { kind: 'confirm', token: r.value.token, count: r.value.count, complete: r.value.complete } : { kind: 'empty' };
+}
+
+/** After a delete: done; `recount` (`more`: keys still match, count and confirm again); error (staleToken: count again first). */
+export function afterPatternDelete(r: { ok: true; value: { deleted: number; cancelled: boolean; more: boolean } } | Failure, deletedBefore: number): PatternStep {
+  if (!r.ok) return { kind: 'error', recount: r.error === 'staleToken' };
+  const deleted = deletedBefore + r.value.deleted;
+  if (r.value.cancelled || !r.value.more) return { kind: 'done', deleted, cancelled: r.value.cancelled };
+  return { kind: 'recount', deleted };
+}
+
+/** What the console does with a parsed command before sending it. */
+export type ConsoleRoute = { kind: 'send' } | { kind: 'confirm' } | { kind: 'refuse'; why: 'subscribe' | 'blocking' | 'unsupported' };
+
+export function consoleRoute(argv: readonly RedisData[]): ConsoleRoute {
+  const cls = classifyRedisCommand(argv);
+  if (cls.refused === 'subscribe') return { kind: 'refuse', why: 'subscribe' };
+  if (cls.refused === 'blocking') return { kind: 'refuse', why: 'blocking' };
+  if (cls.refused) return { kind: 'refuse', why: 'unsupported' };
+  return cls.dangerous ? { kind: 'confirm' } : { kind: 'send' };
+}
+
+/** What the console does with a refused send: offer the read-only override, ask (dangerous, or a big reply), or show the error. */
+export type ConsoleRetry = { kind: 'offerWrite' } | { kind: 'ask'; why: 'danger' | 'big' } | { kind: 'error' };
+
+export function afterConsoleError(error: string, argv: readonly RedisData[], confirmed: boolean): ConsoleRetry {
+  if (error === 'readOnly') return { kind: 'offerWrite' };
+  if (error === 'needsConfirm' && !confirmed) return { kind: 'ask', why: classifyRedisCommand(argv).dangerous ? 'danger' : 'big' };
+  return { kind: 'error' };
+}
+
+/**
+ * The text to save from the JSON view: a stored value already in the pretty (2 spaces) or compact form keeps that form; any
+ * other formatting (4 spaces, tabs, one line with spaces) is not rewritten silently: `ask` (pretty or compact).
+ */
+export type JsonSave = { kind: 'save'; text: string } | { kind: 'ask'; pretty: string; compact: string } | { kind: 'invalid' };
+
+export function jsonSaveText(stored: string, edited: string): JsonSave {
+  const pretty = formatJson(edited, 2), compact = formatJson(edited, 0);
+  if (pretty === null || compact === null) return { kind: 'invalid' };
+  if (formatJson(stored, 2) === stored) return { kind: 'save', text: pretty };
+  if (formatJson(stored, 0) === stored) return { kind: 'save', text: compact };
+  return { kind: 'ask', pretty, compact };
 }

@@ -1,11 +1,15 @@
-// The renderer side of the Redis views (1.0.0): the sessions of Redis tabs (one per tab: browsing, the console, Pub/Sub and the
-// server views never wait for each other), their login prompts, Pub/Sub messages from the DB port, the tabs in the top strip
-// (FileDocument with `redis`), pins, and the texts of failed calls. Kept apart from the Postgres client so both can grow.
+// The renderer side of the Redis views (1.0.0): the sessions of Redis tabs, their login prompts, Pub/Sub messages from the DB
+// port, the tabs in the top strip (FileDocument with `redis`), pins, and the texts of failed calls. Kept apart from the Postgres
+// client so both can grow.
+//
+// Sessions: the key browser, the server view and Pub/Sub of one connection and DB share one session (one login, one password
+// prompt; the DB Host gives Pub/Sub its own subscriber connection). The console has its own session, because SELECT in the
+// console moves its session to another DB.
 import { create } from 'zustand';
 import { setDbPins } from '../db/pins';
 import { dbErrorText, type DbConnection, type DbErrorCode, type DbPortMessage, type DbPrompt, type DbResult, type DbSessionState } from '../../../shared/db';
 import type { RedisPubSubMessage, RedisPubSubState } from '../../../shared/dbRedis';
-import { appendMessages, redisTabId, type RedisPubSubRow, type RedisTabRef, type RedisTabView } from '../../../shared/redisView';
+import { appendMessages, capMessages, redisTabId, type RedisPubSubRow, type RedisTabRef, type RedisTabView } from '../../../shared/redisView';
 import { activateFile, useFileStore, type FileDocument } from '../files';
 import { tr } from '../i18n';
 import { getS, setUi } from '../store';
@@ -17,27 +21,29 @@ export interface RedisPubSubTab {
   state: RedisPubSubState | null;
   messages: RedisPubSubRow[];
   nextSeq: number;
-  /** Dropped by the DB Host since the tab started listening (the buffer was full). */
+  /** Lost messages: dropped by the DB Host (its buffer was full) plus those the renderer's caps pushed out of the list or held buffer. */
   dropped: number;
   paused: boolean;
   /** Arrived while paused; shown on resume (capped like the list). */
   held: RedisPubSubMessage[];
 }
 
+/** Why a tab has no session: an error (with its text), or the user disconnected it ("Rozłączono"). */
+export interface RedisTabProblem { text: string; closed: boolean }
+
 export interface RedisStore {
   /** Redis sessions by id (live ones; an ended one is removed and kept in `ended`). */
   sessions: Record<string, DbSessionState>;
   prompts: Record<string, DbPrompt>;
-  /** Tab id -> its session id. */
+  /** Tab id -> its session id (tabs of one connection and DB may share one). */
   tabSessions: Record<string, string>;
-  /** Tab id -> why its session could not connect (shown with "connect again"). */
-  tabErrors: Record<string, string>;
+  /** Tab id -> why it has no session (shown with "connect again"). */
+  tabErrors: Record<string, RedisTabProblem>;
   pubsub: Record<string, RedisPubSubTab>;
 }
 
 export const useRedisStore = create<RedisStore>(() => ({ sessions: {}, prompts: {}, tabSessions: {}, tabErrors: {}, pubsub: {} }));
 
-const MESSAGE_CAP = 5000;
 const isLive = (s: DbSessionState | undefined): boolean => !!s && (s.state === 'connected' || s.state === 'connecting');
 
 // ── texts of failures ───────────────────────────────────────────────────────
@@ -75,7 +81,14 @@ export function viewLabel(view: RedisTabView): string {
   }
 }
 
-/** What the "all tabs" menu and the tooltip show: "local redis · Klucze · DB 0". */
+/** Where a destructive action runs, for its confirmation: "local redis · DB 3". */
+export function whereText(tabId: string): string {
+  const ref = refOf(tabId);
+  const c = ref ? connectionOf(ref.connectionId) : undefined;
+  return ref && c ? `${c.name} · DB ${ref.db}` : '';
+}
+
+/** What the "all tabs" menu and the tooltip show: "local redis · Konsola · DB 0". */
 const tabPath = (c: DbConnection, view: RedisTabView, db: number): string => `${c.name} · ${viewLabel(view)} · DB ${db}`;
 
 /**
@@ -99,7 +112,7 @@ export function openRedisTab(connectionId: string, view: RedisTabView, db?: numb
   return id;
 }
 
-/** The tab now shows another DB (the key browser's switcher, or SELECT in the console). */
+/** The tab now shows another DB (SELECT in the console). */
 export function setTabDb(tabId: string, db: number): void {
   const doc = docOf(tabId);
   const c = doc?.redis ? connectionOf(doc.redis.connectionId) : undefined;
@@ -108,11 +121,30 @@ export function setTabDb(tabId: string, db: number): void {
   useFileStore.setState((s) => ({ documents: s.documents.map((d) => (d.id === tabId ? { ...d, redis, relativePath: tabPath(c, redis.view, db) } : d)) }));
 }
 
+/**
+ * The key browser moves to another DB: it leaves the session of the old DB (shared ones stay with their other tabs) and the next
+ * operation takes the session of the new DB (shared, or a new login).
+ */
+export function moveTabToDb(tabId: string, db: number): void {
+  setTabDb(tabId, db);
+  releaseTab(tabId);
+}
+
+// ── per-tab state of the view modules ───────────────────────────────────────
+
+const forgetters = new Set<(tabId: string) => void>();
+/** A view module registers how to drop what it keeps for a tab (called when the tab closes). */
+export function onForgetTab(fn: (tabId: string) => void): void { forgetters.add(fn); }
+
 // ── sessions ────────────────────────────────────────────────────────────────
 
 /** The last state of sessions that ended (a wait that starts late still learns why). */
 const ended = new Map<string, DbSessionState>();
 const waiters = new Map<string, Array<(s: DbSessionState) => void>>();
+/** Sessions this window ended on purpose (tab closed, "Rozłącz" from here): not reported as failures. */
+const userClosed = new Set<string>();
+
+const tabsOf = (st: Pick<RedisStore, 'tabSessions'>, sessionId: string): string[] => Object.entries(st.tabSessions).filter(([, sid]) => sid === sessionId).map(([tab]) => tab);
 
 function onSession(s: DbSessionState): void {
   if (s.kind !== 'redis' || s.test) return;
@@ -122,19 +154,23 @@ function onSession(s: DbSessionState): void {
     const prompts = { ...st.prompts };
     if (isLive(s)) { sessions[s.id] = s; return { sessions, prompts }; }
     delete sessions[s.id]; delete prompts[s.id];
-    // The session of an open tab ended (dropped for good, login cancelled or refused): the tab says why and offers to connect again.
-    const tab = Object.entries(st.tabSessions).find(([, sid]) => sid === s.id)?.[0];
-    if (!tab) return { sessions, prompts };
+    // The session of open tabs ended: dropped for good, login cancelled or refused (an error), or disconnected without an error
+    // ("Rozłączono": the connections panel's "Rozłącz"). The tabs say so and offer to connect again.
+    const tabs = tabsOf(st, s.id);
+    if (!tabs.length) return { sessions, prompts };
     const tabSessions = { ...st.tabSessions };
-    delete tabSessions[tab];
-    return { sessions, prompts, tabSessions, tabErrors: { ...st.tabErrors, [tab]: redisErrorText(s.error ?? 'dbClosed', s.connectionId, s.message) } };
+    const tabErrors = { ...st.tabErrors };
+    const closed = !s.error || userClosed.has(s.id);
+    const problem: RedisTabProblem = closed ? { text: tr('Rozłączono'), closed: true } : { text: redisErrorText(s.error!, s.connectionId, s.message), closed: false };
+    for (const tab of tabs) { delete tabSessions[tab]; tabErrors[tab] = problem; }
+    const pubsub = { ...st.pubsub };
+    delete pubsub[s.id];
+    return { sessions, prompts, tabSessions, tabErrors, pubsub };
   });
   if (s.state !== 'connecting') { const list = waiters.get(s.id); waiters.delete(s.id); list?.forEach((fn) => fn(s)); }
-  // SELECT in the console moves the session to another DB: its tab follows.
-  if (s.state === 'connected' && s.database !== undefined) {
-    const tab = Object.entries(useRedisStore.getState().tabSessions).find(([, sid]) => sid === s.id)?.[0];
-    const ref = tab ? refOf(tab) : undefined;
-    if (tab && ref && ref.view !== 'keys' && /^\d+$/.test(s.database)) setTabDb(tab, Number(s.database));
+  // SELECT in the console moves the console's session to another DB: its tab follows.
+  if (s.state === 'connected' && s.database !== undefined && /^\d+$/.test(s.database)) {
+    for (const tab of tabsOf(useRedisStore.getState(), s.id)) if (refOf(tab)?.view === 'console') setTabDb(tab, Number(s.database));
   }
 }
 
@@ -144,10 +180,21 @@ function waitSession(sessionId: string): Promise<DbSessionState> {
   return new Promise((resolve) => waiters.set(sessionId, [...(waiters.get(sessionId) ?? []), resolve]));
 }
 
+/** The session another open tab of the same connection and DB uses (not for the console). */
+function sharedSession(tabId: string, ref: RedisTabRef): string | null {
+  if (ref.view === 'console') return null;
+  const st = useRedisStore.getState();
+  for (const [tab, sid] of Object.entries(st.tabSessions)) {
+    const other = refOf(tab);
+    if (tab !== tabId && other && other.view !== 'console' && other.connectionId === ref.connectionId && other.db === ref.db && isLive(st.sessions[sid])) return sid;
+  }
+  return null;
+}
+
 const connecting = new Map<string, Promise<SessionResult>>();
 export type SessionResult = { ok: true; sessionId: string } | { ok: false; error: string };
 
-/** The tab's connected session: an existing one, or a new login (its prompts show in the tab). */
+/** The tab's connected session: its own, one shared with another tab of the same connection and DB, or a new login. */
 export function ensureTabSession(tabId: string): Promise<SessionResult> {
   const sid = useRedisStore.getState().tabSessions[tabId];
   const live = sid ? useRedisStore.getState().sessions[sid] : undefined;
@@ -159,22 +206,17 @@ export function ensureTabSession(tabId: string): Promise<SessionResult> {
     const c = ref ? connectionOf(ref.connectionId) : undefined;
     if (!ref || !c) return { ok: false, error: redisErrorText('connectionMissing') };
     useRedisStore.setState((st) => { const tabErrors = { ...st.tabErrors }; delete tabErrors[tabId]; return { tabErrors }; });
-    // A session that is still connecting (a reconnect after a drop) is waited for; anything else starts a new login.
-    let sessionId = sid && live ? sid : null;
+    // A session that is still connecting (a reconnect after a drop) is waited for; a shared one is joined; else a new login.
+    let sessionId = sid && live ? sid : sharedSession(tabId, ref);
     if (!sessionId) {
       const r = await window.mc.db.connect(c.id).catch(() => ({ ok: false as const, error: 'dbFailed' as DbErrorCode }));
       if (!r.ok) return fail(tabId, redisErrorText(r.error, c.id));
       sessionId = r.sessionId;
-      useRedisStore.setState((st) => ({ tabSessions: { ...st.tabSessions, [tabId]: sessionId! } }));
     }
+    useRedisStore.setState((st) => ({ tabSessions: { ...st.tabSessions, [tabId]: sessionId! } }));
     const state = await waitSession(sessionId);
-    if (state.state !== 'connected') return fail(tabId, redisErrorText(state.error ?? 'dbClosed', c.id, state.message));
-    if (docOf(tabId) === undefined) {
-      // The tab closed during the login.
-      void window.mc.db.disconnect(sessionId).catch(() => undefined);
-      useRedisStore.setState((st) => { const tabSessions = { ...st.tabSessions }; delete tabSessions[tabId]; return { tabSessions }; });
-      return { ok: false, error: '' };
-    }
+    if (state.state !== 'connected') return { ok: false, error: useRedisStore.getState().tabErrors[tabId]?.text ?? redisErrorText(state.error ?? 'dbClosed', c.id, state.message) };
+    if (docOf(tabId) === undefined) { releaseTab(tabId); return { ok: false, error: '' }; }
     const want = refOf(tabId)?.db ?? 0;
     if (String(want) !== state.database) {
       const sel = await call(() => window.mc.db.redis.select(sessionId!, want));
@@ -186,9 +228,26 @@ export function ensureTabSession(tabId: string): Promise<SessionResult> {
   return run;
 }
 
-function fail(tabId: string, error: string): SessionResult {
-  useRedisStore.setState((st) => ({ tabErrors: { ...st.tabErrors, [tabId]: error } }));
-  return { ok: false, error };
+function fail(tabId: string, text: string): SessionResult {
+  useRedisStore.setState((st) => ({ tabErrors: { ...st.tabErrors, [tabId]: { text, closed: false } } }));
+  return { ok: false, error: text };
+}
+
+/** The tab leaves its session; a session no other tab uses is ended. */
+function releaseTab(tabId: string): void {
+  const st = useRedisStore.getState();
+  const sid = st.tabSessions[tabId];
+  if (!sid) return;
+  const others = tabsOf(st, sid).filter((t) => t !== tabId && docOf(t));
+  useRedisStore.setState((cur) => {
+    const tabSessions = { ...cur.tabSessions };
+    delete tabSessions[tabId];
+    if (others.length) return { tabSessions };
+    const pubsub = { ...cur.pubsub };
+    delete pubsub[sid];
+    return { tabSessions, pubsub };
+  });
+  if (!others.length) { userClosed.add(sid); void window.mc.db.disconnect(sid).catch(() => undefined); }
 }
 
 /**
@@ -201,11 +260,9 @@ export async function withTab<T>(tabId: string, run: (sessionId: string) => Prom
   return call(() => run(s.sessionId));
 }
 
-/** Ends the tab's session and logs in again (the "connect again" button). */
+/** Logs in again after the session ended (the "connect again" button). */
 export function reconnectTab(tabId: string): void {
-  const sid = useRedisStore.getState().tabSessions[tabId];
-  if (sid) void window.mc.db.disconnect(sid).catch(() => undefined);
-  useRedisStore.setState((st) => { const tabSessions = { ...st.tabSessions }; delete tabSessions[tabId]; return { tabSessions }; });
+  useRedisStore.setState((st) => { const tabErrors = { ...st.tabErrors }; delete tabErrors[tabId]; return { tabErrors }; });
   void ensureTabSession(tabId);
 }
 
@@ -222,6 +279,8 @@ export const pubsubOf = (st: RedisStore, sessionId: string | undefined): RedisPu
 
 export function updatePubSub(sessionId: string, fn: (p: RedisPubSubTab) => Partial<RedisPubSubTab>): void {
   useRedisStore.setState((st) => {
+    // Messages of a session no open tab owns (late batches after a close) are not kept.
+    if (!Object.values(st.tabSessions).includes(sessionId)) return {};
     const current = st.pubsub[sessionId] ?? emptyPubSub();
     return { pubsub: { ...st.pubsub, [sessionId]: { ...current, ...fn(current) } } };
   });
@@ -230,8 +289,11 @@ export function updatePubSub(sessionId: string, fn: (p: RedisPubSubTab) => Parti
 function onPort(msg: DbPortMessage): void {
   if (msg.t === 'redisPubSub') {
     updatePubSub(msg.sessionId, (p) => {
-      if (p.paused) return { held: [...p.held, ...msg.messages].slice(-MESSAGE_CAP), dropped: p.dropped + msg.dropped };
-      const next = appendMessages(p.messages, msg.messages, p.nextSeq, MESSAGE_CAP);
+      if (p.paused) {
+        const held = capMessages([...p.held, ...msg.messages]);
+        return { held: held.kept, dropped: p.dropped + msg.dropped + held.dropped };
+      }
+      const next = appendMessages(p.messages, msg.messages, p.nextSeq);
       return { messages: next.list, nextSeq: next.nextSeq, dropped: p.dropped + msg.dropped };
     });
   } else if (msg.t === 'redisPubSubState') updatePubSub(msg.sessionId, () => ({ state: msg.state }));
@@ -240,7 +302,7 @@ function onPort(msg: DbPortMessage): void {
 export function setPaused(sessionId: string, paused: boolean): void {
   updatePubSub(sessionId, (p) => {
     if (paused || !p.held.length) return { paused };
-    const next = appendMessages(p.messages, p.held, p.nextSeq, MESSAGE_CAP);
+    const next = appendMessages(p.messages, p.held, p.nextSeq);
     return { paused, held: [], messages: next.list, nextSeq: next.nextSeq };
   });
 }
@@ -271,22 +333,23 @@ export function initRedis(): void {
     if (prompt) prompts[sessionId] = prompt; else delete prompts[sessionId];
     return { prompts };
   }));
-  // A tab that closed ends its session; the pins follow the open tabs (no idle disconnect under an open tab).
+  // A tab that closed leaves its session (ended when no other tab uses it) and its views forget what they kept for it; the pins
+  // follow the open tabs (no idle disconnect under an open tab).
+  let openTabs = new Set(useFileStore.getState().documents.filter((d) => d.redis).map((d) => d.id));
   useFileStore.subscribe((s, prev) => {
     if (s.documents === prev.documents) return;
-    const open = new Set(s.documents.filter((d) => d.redis).map((d) => d.id));
-    const st = useRedisStore.getState();
-    const gone = Object.keys(st.tabSessions).filter((tab) => !open.has(tab));
-    const errs = Object.keys(st.tabErrors).filter((tab) => !open.has(tab));
-    if (!gone.length && !errs.length) return;
-    for (const tab of gone) void window.mc.db.disconnect(st.tabSessions[tab]).catch(() => undefined);
+    const now = new Set(s.documents.filter((d) => d.redis).map((d) => d.id));
+    const closed = [...openTabs].filter((tab) => !now.has(tab));
+    openTabs = now;
+    if (!closed.length) return;
+    for (const tab of closed) {
+      releaseTab(tab);
+      for (const forget of forgetters) forget(tab);
+    }
     useRedisStore.setState((cur) => {
-      const tabSessions = { ...cur.tabSessions };
       const tabErrors = { ...cur.tabErrors };
-      const pubsub = { ...cur.pubsub };
-      for (const tab of gone) { delete pubsub[tabSessions[tab]]; delete tabSessions[tab]; }
-      for (const tab of errs) delete tabErrors[tab];
-      return { tabSessions, tabErrors, pubsub };
+      for (const tab of closed) delete tabErrors[tab];
+      return { tabErrors };
     });
   });
   useRedisStore.subscribe((st, prev) => { if (st.tabSessions !== prev.tabSessions) setDbPins('redis', Object.values(st.tabSessions)); });

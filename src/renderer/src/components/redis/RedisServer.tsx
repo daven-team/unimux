@@ -3,9 +3,9 @@
 import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { parseRedisKeyspace, redisDataDisplay, type RedisClientInfo, type RedisInfoSection, type RedisSlowlogEntry } from '../../../../shared/dbRedis';
-import { formatBytes, formatUptime, hitRatio, infoGroups, infoValue } from '../../../../shared/redisView';
+import { formatBytes, formatTtl, formatUptime, hitRatio, infoGroups, infoValue } from '../../../../shared/redisView';
 import { useI18n } from '../../i18n';
-import { resultText, withTab } from '../../redis/redisClient';
+import { onForgetTab, resultText, withTab } from '../../redis/redisClient';
 import { RefreshIcon } from '../Spinner';
 import type { RedisViewProps } from './RedisTabView';
 
@@ -14,6 +14,7 @@ interface ServerData { info: RedisInfoSection[] | null; slowlog: RedisSlowlogEnt
 const empty: ServerData = { info: null, slowlog: null, clients: null, error: null, loading: false, at: null };
 const useServer = create<Record<string, ServerData>>(() => ({}));
 const patch = (tabId: string, p: Partial<ServerData>) => useServer.setState((st) => ({ [tabId]: { ...(st[tabId] ?? empty), ...p } }));
+onForgetTab((tabId) => useServer.setState((st) => { const next = { ...st }; delete next[tabId]; return next; }, true));
 
 async function load(tabId: string): Promise<void> {
   patch(tabId, { loading: true, error: null });
@@ -74,7 +75,7 @@ export default function RedisServer({ tabId }: RedisViewProps) {
             {summary.map(([k, v]) => <div key={k} className="redis-stat"><span className="muted">{k}</span><strong>{v}</strong></div>)}
           </div>
           <div className="redis-info-grid">
-            {groups.main.map((s) => <InfoCard key={s.name} title={sectionName(s.name)} section={s} />)}
+            {groups.main.map((s) => (s.name.toLowerCase() === 'keyspace' ? <KeyspaceCard key={s.name} title={sectionName(s.name)} section={s} /> : <InfoCard key={s.name} title={sectionName(s.name)} section={s} />))}
           </div>
           {groups.other.length > 0 && <>
             <button className="btn small ghost" onClick={() => setShowOther(!showOther)}>{showOther ? tr('Ukryj pozostałe sekcje') : tr('Pokaż pozostałe sekcje ({count})', { count: groups.other.length })}</button>
@@ -107,6 +108,23 @@ export default function RedisServer({ tabId }: RedisViewProps) {
         )}
       </div>
     </div>
+  );
+}
+
+/** INFO keyspace as a table: DB, keys, keys with an expiry, average TTL. */
+function KeyspaceCard({ title, section }: { title: string; section: RedisInfoSection }) {
+  const { tr } = useI18n();
+  const dbs = parseRedisKeyspace([section]);
+  return (
+    <section className="redis-info-card">
+      <h3>{title}</h3>
+      {dbs.length ? (
+        <table className="redis-table compact">
+          <thead><tr><th>DB</th><th className="num">{tr('Klucze')}</th><th className="num">{tr('Z wygaśnięciem')}</th><th className="num">{tr('Średni TTL')}</th></tr></thead>
+          <tbody>{dbs.map((d) => <tr key={d.index}><td>db{d.index}</td><td className="num">{d.keys.toLocaleString()}</td><td className="num">{d.expires.toLocaleString()}</td><td className="num">{d.avgTtlMs ? formatTtl(d.avgTtlMs) : '-'}</td></tr>)}</tbody>
+        </table>
+      ) : <p className="muted">{tr('Brak kluczy')}</p>}
+    </section>
   );
 }
 

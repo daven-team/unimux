@@ -60,7 +60,6 @@ export const dbUiMessages = {
   'Połącz przez SSH': ['Connect through SSH', 'Über SSH verbinden', 'Conectar por SSH', 'Se connecter via SSH', 'Ligar por SSH'],
   'Połączenie działa': ['The connection works', 'Die Verbindung funktioniert', 'La conexión funciona', 'La connexion fonctionne', 'A ligação funciona'],
   'Połączenie zostało zamknięte': ['The connection was closed', 'Die Verbindung wurde geschlossen', 'La conexión se cerró', 'La connexion a été fermée', 'A ligação foi fechada'],
-  'Przeglądarka Redis jest jeszcze niedostępna': ['The Redis browser is not available yet', 'Der Redis-Browser ist noch nicht verfügbar', 'El explorador de Redis aún no está disponible', 'Le navigateur Redis n\'est pas encore disponible', 'O navegador Redis ainda não está disponível'],
   'Instrukcje do uruchomienia: {count}': ['Statements to run: {count}', 'Auszuführende Anweisungen: {count}', 'Instrucciones a ejecutar: {count}', 'Instructions à exécuter : {count}', 'Instruções a executar: {count}'],
   'RO po ponownym połączeniu': ['RO after reconnecting', 'RO nach erneutem Verbinden', 'RO tras reconectar', 'RO après reconnexion', 'RO após voltar a ligar'],
   'zapis po ponownym połączeniu': ['writable after reconnecting', 'beschreibbar nach erneutem Verbinden', 'escritura tras reconectar', 'écriture après reconnexion', 'escrita após voltar a ligar'],

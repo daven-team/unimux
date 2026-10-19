@@ -35,7 +35,8 @@ export default function RedisPubSub({ tabId, sessionId, readOnly }: RedisViewPro
     const r = await withTab(tabId, (sid) => window.mc.db.redis.subscribe(sid, { [kind]: [name] }));
     if (!r.ok) { toast(resultText(r), 'error'); return; }
     updatePubSub(sessionId, () => ({ state: r.value }));
-    setTarget('');
+    // Something typed meanwhile stays in the field.
+    setTarget((t) => (t.trim() === name ? '' : t));
   };
   const unsubscribe = async (kind: 'channels' | 'patterns', name: RedisData) => {
     const r = await withTab(tabId, (sid) => window.mc.db.redis.unsubscribe(sid, { [kind]: [name] }));
@@ -109,7 +110,7 @@ function Chip({ data, kind, onRemove }: { data: RedisData; kind: string; onRemov
 
 function MessageRow({ m, current, onPick }: { m: RedisPubSubRow; current: boolean; onPick: () => void }) {
   return (
-    <div className={`redis-msg-row ${current ? 'current' : ''}`} role="listitem" onClick={onPick}>
+    <div className={`redis-msg-row ${current ? 'current' : ''}`} onClick={onPick}>
       <span className="mono muted">{clockTime(m.time)}</span>
       <span className="redis-msg-channel"><DataText data={m.channel} />{m.pattern !== undefined && <span className="redis-msg-pattern">{redisDataDisplay(m.pattern)}</span>}</span>
       <span className="redis-msg-payload">{isBinaryData(m.payload.data) && <span className="redis-bin">bin</span>}{preview(m.payload.data, 400)}</span>

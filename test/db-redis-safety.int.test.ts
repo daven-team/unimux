@@ -129,14 +129,27 @@ describe('writes', () => {
       { op: 'hset', key: 'gone', field: 'f', value: 'v', existing: true }, { op: 'rpush', key: 'gone', items: ['x'], existing: true },
       { op: 'sadd', key: 'gone', members: ['x'], existing: true }, { op: 'zadd', key: 'gone', entries: [['m', '1']], existing: true },
       { op: 'zincrby', key: 'gone', member: 'm', by: '1', existing: true }, { op: 'xadd', key: 'gone', fields: [['f', 'v']], existing: true },
+      { op: 'set', key: 'gone', value: 'v', existing: true }, { op: 'set', key: 'gone', value: 'v', existing: true, keepTtl: false },
     ] as const) {
       expect(errorOf(await h.r(id, { kind: 'write', write: w as never })), w.op).toBe('notFound');
     }
     expect(s.dbs[0].has('gone')).toBe(false);
     s.setString('str', 'x');
     expect(errorOf(await h.r(id, { kind: 'write', write: { op: 'lpush', key: 'str', items: ['y'], existing: true } }))).toBe('wrongType');
+    expect(await h.rv(id, { kind: 'write', write: { op: 'set', key: 'str', value: 'y', existing: true } })).toEqual({ changed: 1 });
     await h.rv(id, { kind: 'write', write: { op: 'rpush', key: 'l', items: ['a'] } });
+    expect(errorOf(await h.r(id, { kind: 'write', write: { op: 'set', key: 'l', value: 'y', existing: true } }))).toBe('wrongType');
     expect(await h.rv(id, { kind: 'write', write: { op: 'rpush', key: 'l', items: ['b'], existing: true } })).toEqual({ changed: 2 });
+  });
+});
+
+describe('console fidelity', () => {
+  it('every ioredis reply transformer is an identity in the DB Host (HGETALL, VSIM ... arrive as the server sent them)', async () => {
+    const { replyTransformers } = await import('../src/dbhost/redisSession');
+    const all = replyTransformers();
+    expect(Object.keys(all)).toContain('hgetall');
+    const reply = [Buffer.from('f'), Buffer.from('v')];
+    for (const [name, fn] of Object.entries(all)) expect(fn(reply), name).toBe(reply);
   });
 });
 

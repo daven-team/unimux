@@ -381,7 +381,7 @@ export type RedisWrite =
    * keepTtl: SET ... KEEPTTL (the default keeps the TTL; false clears it); ttlMs: a new expiry. Only replaces a string (or
    * creates the key): a key that holds another type answers 'wrongType' and stays untouched.
    */
-  | { op: 'set'; key: RedisData; value: RedisData; keepTtl?: boolean; ttlMs?: number }
+  | { op: 'set'; key: RedisData; value: RedisData; keepTtl?: boolean; ttlMs?: number; existing?: boolean }
   | { op: 'hset'; key: RedisData; field: RedisData; value: RedisData; onlyNew?: boolean; existing?: boolean }
   | { op: 'hdel'; key: RedisData; fields: RedisData[] }
   | { op: 'lpush' | 'rpush'; key: RedisData; items: RedisData[]; existing?: boolean }

@@ -120,7 +120,7 @@ const newValue = z.discriminatedUnion('type', [
   z.object({ type: z.literal('stream'), id: streamId.optional(), fields: pairs(rName, rValue) }).strict(),
 ]);
 const write = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('set'), key: rKey, value: rValue, keepTtl: z.boolean().optional(), ttlMs: ttl.optional() }).strict(),
+  z.object({ op: z.literal('set'), key: rKey, value: rValue, keepTtl: z.boolean().optional(), ttlMs: ttl.optional(), existing: z.boolean().optional() }).strict(),
   z.object({ op: z.literal('hset'), key: rKey, field: rName, value: rValue, onlyNew: z.boolean().optional(), existing: z.boolean().optional() }).strict(),
   z.object({ op: z.literal('hdel'), key: rKey, fields: items(rName) }).strict(),
   z.object({ op: z.literal('lpush'), key: rKey, items: items(rValue), existing: z.boolean().optional() }).strict(),
