@@ -12,6 +12,8 @@ import {
 import { openSidebarPanel } from '../panelActions';
 import { openSshView, reconnectAllSsh, reconnectAllTargetsOf } from '../ssh';
 import { openSftp } from '../sftp';
+import { initDb, revealConnection } from '../db/dbClient';
+import { dbEndpoint } from '../../../shared/db';
 import { getS, getUi, setUi, toast, update, useStore } from '../store';
 import { profileOptionLabel } from '../cliUi';
 import { statusLog, terminals } from '../terminals/TerminalManager';
@@ -85,6 +87,16 @@ function PaletteInner() {
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj snippety"), desc: keys('snippets.toggle') || undefined, run: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj panel projektów"), desc: keys('sidebar.toggle') || undefined, run: () => update((st) => ({ ...st, sidebarCollapsed: !st.sidebarCollapsed })) });
     out.push({ kind: tr('Akcja'), title: tr('Panel: Git'), run: () => { openSidebarPanel('git'); } });
+    out.push({ kind: tr('Akcja'), title: tr('Bazy danych: nowe połączenie'), run: () => setUi({ modal: { kind: 'dbConnection', dbKind: 'postgres' } }) });
+    out.push({ kind: tr('Akcja'), title: tr('Bazy danych: otwórz połączenie…'), run: () => { openSidebarPanel('db'); } });
+    for (const c of s.dbConnections) {
+      out.push({ kind: tr('Baza danych'), title: c.name, desc: `${c.kind === 'postgres' ? 'PostgreSQL' : 'Redis'} · ${dbEndpoint(c)}`, run: () => {
+        openSidebarPanel('db');
+        if (c.kind !== 'postgres') return;
+        initDb();
+        void revealConnection(c.id).then((error) => { if (error) toast(error, 'error'); });
+      } });
+    }
     out.push({ kind: tr('Akcja'), title: tr("Nowy snippet") + '…', run: () => setUi({ modal: { kind: 'snippet', snippetId: null } }) });
     out.push({ kind: tr('Akcja'), title: tr("Ustawienia"), run: () => setUi({ settingsTabOpen: true, settingsActive: true }) });
     out.push({ kind: tr('Akcja'), title: tr('Skopiuj dziennik statusów'), run: () => {

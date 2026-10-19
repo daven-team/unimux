@@ -20,7 +20,8 @@ export type Modal =
   | { kind: 'project'; projectId: string }
   | { kind: 'file'; projectId: string; relativePath: string }
   | { kind: 'auth'; provider: 'claude' | 'codex'; target: LoginTarget }
-  | { kind: 'broadcast'; projectId: string; tabId: string };
+  | { kind: 'broadcast'; projectId: string; tabId: string }
+  | { kind: 'dbConnection'; connectionId?: string; dbKind?: 'postgres' | 'redis' };
 
 export type Dialog = { id: number } & (
   | { kind: 'prompt'; title: string; value: string; placeholder?: string; onSubmit: (value: string) => void }

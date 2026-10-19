@@ -130,6 +130,8 @@ const api: McApi = {
     viewOpened: (shownSessionId) => ipcRenderer.send('sftp:viewOpened', shownSessionId),
     viewClosed: () => ipcRenderer.send('sftp:viewClosed'),
   },
+  dbPickCaFile: () => ipcRenderer.invoke('db:pickCaFile'),
+  dbExport: (name, text) => ipcRenderer.invoke('db:export', name, text),
   db: {
     saveConnection: (input, password) => ipcRenderer.invoke('db:connections:save', input, password),
     deleteConnection: (id) => ipcRenderer.invoke('db:connections:delete', id),

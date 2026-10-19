@@ -1125,3 +1125,6 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .panel-failed.statusbar { flex-direction: row; padding: 2px 10px; }
 .window-failed { display: grid; place-items: center; height: 100vh; color: var(--muted); }
 .window-failed .row { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
+
+/* Database tabs in the strip (1.0.0): the connection name tinted with its colour. */
+.workspace-tabs .tab.db-tab-strip .tab-host-tag { background: color-mix(in srgb, var(--project-color) 22%, transparent); color: var(--text); }

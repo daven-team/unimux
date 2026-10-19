@@ -7,6 +7,9 @@ import { updateSettings } from '../../shared/state';
 import { tr } from './i18n';
 import { useSftpStore } from './sftpStore';
 import { askChoice, askChoiceChecked, getS, getUi, update, useStore } from './store';
+import { useDbStore } from './db/dbClient';
+import { openTransactions, stagedTabs } from './db/tabs';
+import { useFileStore } from './files';
 
 export type CloseKind = 'tab' | 'cell' | 'app';
 
@@ -50,6 +53,24 @@ export async function confirmQuitTransfers(): Promise<boolean> {
 }
 
 /**
+ * Resolves true when quitting may go on: no SQL tab has an open transaction and no table tab has staged edits, or the user
+ * chose "Quit anyway" (transactions roll back; staged edits stay as drafts for the next start).
+ */
+export async function confirmQuitDatabase(): Promise<boolean> {
+  const tx = openTransactions();
+  const staged = stagedTabs();
+  if (!tx && !staged) return true;
+  const lines = [
+    ...(tx ? [tr('Otwarte transakcje: {count}. Zostaną wycofane (ROLLBACK).', { count: tx })] : []),
+    ...(staged ? [tr('Tabele z niezapisanymi zmianami: {count}. Zmiany zostaną zachowane jako szkic.', { count: staged })] : []),
+  ];
+  const choice = await askChoice(tr('Zamknąć aplikację z niezapisaną pracą w bazach danych?'), lines.join(' '), [
+    { label: tr('Zakończ mimo to'), value: 'quit', danger: true },
+  ]);
+  return choice === 'quit';
+}
+
+/**
  * Tells main whether quitting must ask first (some agent works and the setting is on, or SFTP transfers run), so a quit with
  * nothing to ask about never waits for this window. Main then asks through 'app:confirm-quit'.
  */
@@ -61,9 +82,11 @@ export function initQuitGuard(): void {
   // Each part is recomputed only when its own store changes (transfer progress arrives several times a second).
   let agents = agentsWork();
   let transfers = activeTransferCount() > 0;
+  const databaseWork = (): boolean => openTransactions() > 0 || stagedTabs() > 0;
+  let database = databaseWork();
   let last: boolean | undefined;
   const push = (): void => {
-    const guard = agents || transfers;
+    const guard = agents || transfers || database;
     if (guard === last) return;
     last = guard;
     window.mc.setQuitGuard(guard);
@@ -75,6 +98,8 @@ export function initQuitGuard(): void {
   useSftpStore.subscribe((st, prev) => {
     if (st.transfers !== prev.transfers || st.preparing !== prev.preparing) { transfers = activeTransferCount() > 0; push(); }
   });
+  useDbStore.subscribe((st, prev) => { if (st.sessions !== prev.sessions || st.tabSessions !== prev.tabSessions) { database = databaseWork(); push(); } });
+  useFileStore.subscribe((st, prev) => { if (st.documents !== prev.documents) { database = databaseWork(); push(); } });
   // The open quit question: its dialog id, and a token so a replaced question never answers for the current one.
   let question: { token: number; dialogId: number | undefined } | null = null;
   let tokens = 0;
@@ -91,11 +116,18 @@ export function initQuitGuard(): void {
       current.dialogId = getUi().dialog?.id;
       return agents;
     };
-    const answer = activeTransferCount() === 0 ? askAgents() : (async () => {
+    // Database work (open transactions, staged edits) is asked about first, then running transfers, then the working agents.
+    const askRest = (): Promise<boolean> => (activeTransferCount() === 0 ? askAgents() : (async () => {
       const transfers = confirmQuitTransfers();
       current.dialogId = getUi().dialog?.id;
       if (!(await transfers) || question !== current) return false;
       return askAgents();
+    })());
+    const answer = openTransactions() === 0 && stagedTabs() === 0 ? askRest() : (async () => {
+      const db = confirmQuitDatabase();
+      current.dialogId = getUi().dialog?.id;
+      if (!(await db) || question !== current) return false;
+      return askRest();
     })();
     window.mc.answerQuit('asking');
     void answer.catch(() => true).then((go) => {

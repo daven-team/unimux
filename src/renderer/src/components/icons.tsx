@@ -34,6 +34,15 @@ export const IMore = () => <Svg><path d="M3.5 8h.01M8 8h.01M12.5 8h.01" strokeWi
 export const IServer = () => <Svg><rect x="2.5" y="2.5" width="11" height="4.5" rx="1.2" /><rect x="2.5" y="9" width="11" height="4.5" rx="1.2" /><path d="M5 4.75h.01M5 11.25h.01" strokeWidth="2" /></Svg>;
 export const IKey = () => <Svg><circle cx="5.5" cy="10.5" r="3" /><path d="M7.6 8.4 13.5 2.5M11.5 4.5l1.5 1.5M10 6l1.2 1.2" /></Svg>;
 export const IShield = () => <Svg><path d="M8 1.8 13 3.8v3.8c0 3-2.1 5.4-5 6.6-2.9-1.2-5-3.6-5-6.6V3.8z" /><path d="m5.8 8 1.6 1.6 2.9-3" /></Svg>;
+export const IDatabase = () => <Svg><ellipse cx="8" cy="3.8" rx="5" ry="1.8" /><path d="M3 3.8v8.4c0 1 2.2 1.8 5 1.8s5-.8 5-1.8V3.8M3 8c0 1 2.2 1.8 5 1.8S13 9 13 8" /></Svg>;
+export const ITable = () => <Svg><rect x="2.5" y="3" width="11" height="10" rx="1.2" /><path d="M2.5 6.5h11M2.5 9.8h11M6.5 6.5V13" /></Svg>;
+export const IView = () => <Svg><path d="M1.8 8S4 3.8 8 3.8 14.2 8 14.2 8 12 12.2 8 12.2 1.8 8 1.8 8z" /><circle cx="8" cy="8" r="1.8" /></Svg>;
+export const IColumn = () => <Svg size={12}><rect x="5" y="2.5" width="6" height="11" rx="1" /><path d="M5 6h6M5 9.5h6" /></Svg>;
+export const IFunction = () => <Svg><path d="M10.5 2.5c-2 0-2.5 1.2-2.8 3L6.5 13.5M4.5 6.5h5" /></Svg>;
+export const ISequence = () => <Svg><path d="M3 4.5h2M3 8h4M3 11.5h6M11 3.5v9M9.5 11l1.5 1.5 1.5-1.5" /></Svg>;
+export const IPlay = () => <Svg size={12}><path d="M4.5 3v10l8-5z" fill="currentColor" /></Svg>;
+export const IStop = () => <Svg size={12}><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor" /></Svg>;
+export const IRefresh = () => <Svg size={12}><path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v3h-3" /></Svg>;
 export const IChevron = () => <Svg size={10}><path d="M4 6l4 4 4-4" /></Svg>;
 // SFTP view (0.9.8): path bar and transfers.
 export const IArrowLeft = () => <Svg><path d="M13 8H3M7 4L3 8l4 4" /></Svg>;
@@ -78,6 +87,8 @@ export const TFiles = () => (
 export const TGit = () => (
   <T><circle cx="6" cy="4" r="2" /><circle cx="6" cy="20" r="2" /><circle cx="18" cy="8" r="2" /><path d="M6 6v12M18 10c0 6-12 3-12 8" /></T>
 );
+/** A database cylinder (the "Bazy danych" rail tile). */
+export const TDatabase = () => <T><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5" /><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" /></T>;
 /** A terminal prompt. */
 export const TTerminal = () => <T><path d="m4 17 6-6-6-6" /><path d="M12 19h8" /></T>;
 export const TSnippet = () => <T><path d="m16 18 6-6-6-6" /><path d="m8 6-6 6 6 6" /></T>;
