@@ -12,7 +12,8 @@ createRoot(document.getElementById('root')!).render(<ErrorBoundary name="window"
 import * as actions from './actions';
 import { useStore } from './store';
 import { terminals } from './terminals/TerminalManager';
-(window as unknown as { __mc: unknown }).__mc = { actions, useStore, terminals };
+import { useSftpStore } from './sftpStore';
+(window as unknown as { __mc: unknown }).__mc = { actions, useStore, terminals, useSftpStore };
 
 // A file dropped anywhere the app does not handle must never make the window navigate to it.
 for (const type of ['dragover', 'drop'] as const) {

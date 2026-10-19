@@ -11,6 +11,7 @@ import { sshHeaderName, sshPhaseLabel, userAtEndpoint } from '../../../shared/ss
 import { useSshStore } from '../sshStore';
 import { disconnectCell, openSshView, reconnectCell, sshContext, sshHostMenuItems } from '../ssh';
 import { SshCellCard } from './ssh/SshCellCard';
+import { openSftp } from '../sftp';
 import { profileOptionLabel } from '../cliUi';
 import { CliMissingCard } from './CliMissingCard';
 import type { Cell } from '../../../shared/types';
@@ -90,6 +91,8 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const sshItems = (): MenuItem[] => [
     { label: tr('Połącz ponownie'), onClick: () => void reconnectCell(cell.id) },
     { label: tr('Rozłącz'), onClick: () => disconnectCell(cell.id) },
+    // 0.9.8: the SFTP view on this host, in the folder the shell last reported (OSC 7 / 9;9), else the login folder.
+    ...(host && sshSession?.phase === 'connected' ? [{ label: tr('Otwórz SFTP tutaj'), onClick: () => openSftp({ hostId: host.id, path: terminals.remoteCwd(cell.id) }) }] : []),
     ...(host ? [{ label: tr('Edytuj host'), onClick: () => openSshView({ kind: 'host', hostId: host.id }) }] : []),
     ...(host ? [{ label: tr('Kopiuj adres'), onClick: () => window.mc.clipboardWrite(userAtEndpoint(host)) }] : []),
   ];

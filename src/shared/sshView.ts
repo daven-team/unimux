@@ -50,17 +50,17 @@ export function menuHosts(hosts: readonly SshHost[], max = MENU_HOSTS): { shown:
 
 // ── SSH mode (0.9.2): the left side panel shows the SSH sections while the SSH view is in front ──
 
-/** The sections of the SSH view; SFTP is listed in the navigation but is not a section yet. */
-export type SshSection = 'hosts' | 'keys' | 'knownHosts';
+/** The sections of the SSH view; SFTP (0.9.8) is the two-pane file manager. */
+export type SshSection = 'hosts' | 'keys' | 'knownHosts' | 'sftp';
 
-export interface SshNavEntry { id: SshSection | 'sftp'; label: 'Hosty' | 'Klucze' | 'Znane hosty' | 'SFTP'; disabled?: true }
+export interface SshNavEntry { id: SshSection; label: 'Hosty' | 'Klucze' | 'Znane hosty' | 'SFTP'; disabled?: true }
 
-/** The navigation of SSH mode, in order. A disabled entry is shown greyed with "wkrótce" and can never be chosen. */
+/** The navigation of SSH mode, in order. A disabled entry (none since 0.9.8) would be shown greyed and never chosen. */
 export const SSH_NAV: readonly SshNavEntry[] = [
   { id: 'hosts', label: 'Hosty' },
   { id: 'keys', label: 'Klucze' },
   { id: 'knownHosts', label: 'Znane hosty' },
-  { id: 'sftp', label: 'SFTP', disabled: true },
+  { id: 'sftp', label: 'SFTP' },
 ];
 
 export const DEFAULT_SSH_SECTION: SshSection = 'hosts';
@@ -106,7 +106,7 @@ export function visibleSelection(selected: readonly string[], shown: ReadonlyArr
 
 /**
  * The store change for a click in the SSH mode navigation: the new section, the detail only if it belongs there (a new-key
- * draft or a host form of the old section is dropped) and the host selection only in Hosty. Nothing for SFTP or the same section.
+ * draft or a host form of the old section is dropped) and the host selection only in Hosty. Nothing for the same section.
  */
 export function sectionChange(st: { section: SshSection; detail: SshDetail | null; selectedHosts: string[] }, clicked: string): Partial<{ section: SshSection; detail: SshDetail | null; selectedHosts: string[] }> {
   const section = chooseSshSection(st.section, clicked);

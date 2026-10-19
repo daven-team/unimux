@@ -2,12 +2,15 @@
 import { useState } from 'react';
 import type { SshPrompt } from '../../../../shared/ssh';
 import { useI18n } from '../../i18n';
+import { promptReply, type PromptReply } from './promptReply';
 
-export function HostKeyPrompt({ cellId, prompt }: { cellId: string; prompt: Extract<SshPrompt, { kind: 'hostKey' }> }) {
+/** In a cell (`cellId`) or, with `respond`, anywhere else that shows a login prompt (the SFTP view, 0.9.8). */
+export function HostKeyPrompt({ cellId, prompt, respond }: { cellId: string; prompt: Extract<SshPrompt, { kind: 'hostKey' }>; respond?: (reply: PromptReply) => void }) {
   const { tr } = useI18n();
   const [checked, setChecked] = useState(false);
-  const answer = (hostKey: 'once' | 'save' | 'replace') => void window.mc.ssh.answer({ cellId, promptId: prompt.id, hostKey });
-  const cancel = () => void window.mc.ssh.answer({ cellId, promptId: prompt.id, cancel: true });
+  const send = respond ?? promptReply(cellId);
+  const answer = (hostKey: 'once' | 'save' | 'replace') => send({ promptId: prompt.id, hostKey });
+  const cancel = () => send({ promptId: prompt.id, cancel: true });
   const fingerprint = <code className="ssh-fingerprint">{prompt.keyType} {prompt.fingerprint}</code>;
   if (prompt.reason === 'changed') {
     return (

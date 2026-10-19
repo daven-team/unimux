@@ -80,7 +80,7 @@ const PARTS = {
         if (existsSync(path) && readFileSync(path, 'utf8').includes(server.password)) throw new Error(`${file} contains the test password`);
       }
       if (!existsSync(join(root, 'data', 'ssh', 'known_hosts.json'))) throw new Error('host key was not saved');
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
   },
   /** Task 9, W3: new host from the palette in the SSH view's details pane, save and connect; generate a key and copy its public key; import by drop and by paste. */
   async editors() {
@@ -176,7 +176,7 @@ const PARTS = {
       if (vault.includes('PRIVATE KEY') || vault.includes(server.password)) throw new Error('vault.json contains plain secrets');
       const state = readFileSync(join(root, 'data', 'state.json'), 'utf8');
       if (!state.includes('"local test"') || state.includes('PRIVATE KEY') || state.includes(server.password)) throw new Error('state.json: host missing or a secret leaked');
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
   },
   /** Task 9 fix: with no project at all, the palette still opens the SSH view and a host can be saved. */
   async editorsNoProject() {
@@ -202,7 +202,7 @@ const PARTS = {
         await sleep(2500); // state.json is written debounced
       } finally { await app.close(); }
       if (!readFileSync(join(root, 'data', 'state.json'), 'utf8').includes('"example.invalid"')) throw new Error('host not stored');
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally { rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
   },
   /** Task 10, W3: the SSH tile opens the SSH view, hosts are tiles by group and searchable, folding, details and multi-select work, a group opens as a 3-cell grid.
    *  0.9.2 polish: no "Bez grupy" tile and no local shells, the details pane only while a host is chosen, search narrows the selection. */
@@ -249,9 +249,9 @@ const PARTS = {
         if (await app.evaluate(`localStorage.getItem('mc-ssh-groups-v1')`) !== '["lab"]') throw new Error('fold state not stored');
         await app.click('.ssh-group-head', 'lab');
         await app.until(`document.querySelectorAll('.ssh-tile[data-host-id]').length === 4`, 'expanded group');
-        // A click shows the host in the details pane with its two actions.
+        // A click shows the host in the details pane with its actions (Otwórz SFTP since 0.9.8).
         await app.click('.ssh-tile[data-host-id]', 'web-1');
-        await app.until(`document.querySelector('.ssh-view-detail h2')?.textContent === 'web-1' && [...document.querySelectorAll('.ssh-detail-actions button')].map((b) => b.textContent).join('|') === 'Połącz|Otwórz w nowym gridzie'`, 'host details');
+        await app.until(`document.querySelector('.ssh-view-detail h2')?.textContent === 'web-1' && [...document.querySelectorAll('.ssh-detail-actions button')].map((b) => b.textContent).join('|') === 'Połącz|Otwórz w nowym gridzie|Otwórz SFTP'`, 'host details');
         await app.screenshot('ssh-view-details.png');
         // Ctrl+click selects; the bar counts the selection and clears it.
         await app.evaluate(`(() => { for (const tile of [...document.querySelectorAll('.ssh-tile[data-host-id]')].filter((t) => /web-1|pi/.test(t.textContent))) tile.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })); return true; })()`);
@@ -303,9 +303,9 @@ const PARTS = {
         await app.until(`document.querySelector('.workspace-tabs .grid-tab.active .label')?.textContent === 'lab' && !!document.querySelector('.workspace-tabs .ssh-tab')`, 'tab named after the group, SSH tab kept');
         await app.screenshot('ssh-group-grid.png');
       } finally { await app.close(); }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
   },
-  /** 0.9.2 SSH mode: the side panel shows Hosty, Klucze, Znane hosty and a disabled SFTP while the SSH view is in front; Projects brings the normal panel back. */
+  /** 0.9.2 SSH mode: the side panel shows Hosty, Klucze, Znane hosty and SFTP (enabled in 0.9.8) while the SSH view is in front; Projects brings the normal panel back. */
   async sshMode() {
     const server = await startTestServer(['--no-auth']);
     const root = scratchRoot('ssh-mode');
@@ -337,12 +337,14 @@ const PARTS = {
         // In SSH mode the SSH tile unfolds the side panel (and folds it again later).
         await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`!!document.querySelector('.ssh-view .ssh-tile[data-host-id]') && !!document.querySelector('.side-panel .ssh-nav')`, 'SSH mode with its navigation in the side panel');
-        if (await app.evaluate(navState) !== 'hosts:on|keys|knownHosts|sftp:off') throw new Error(`side panel entries: ${await app.evaluate(navState)}`);
-        if (!(await app.evaluate(`document.querySelector('.ssh-nav-item[data-section="sftp"]').textContent.includes('wkrótce')`))) throw new Error('SFTP lacks the coming-soon note');
+        if (await app.evaluate(navState) !== 'hosts:on|keys|knownHosts|sftp') throw new Error(`side panel entries: ${await app.evaluate(navState)}`);
+        if (await app.evaluate(`document.querySelector('.ssh-nav-item[data-section="sftp"]').textContent.includes('wkrótce')`)) throw new Error('SFTP still has the coming-soon note');
         if (await app.evaluate(`!!document.querySelector('.side-panel .project-list, #sidebar-projects')`)) throw new Error('the projects panel is still shown in SSH mode');
-        // The disabled SFTP entry cannot be chosen.
+        // 0.9.8: SFTP is a section: it shows the SFTP view (the host tiles go), Hosty brings them back.
         await app.click('.ssh-nav-item[data-section="sftp"]');
-        await app.until(`${navState} === 'hosts:on|keys|knownHosts|sftp:off'`, 'SFTP not selectable');
+        await app.until(`${navState} === 'hosts|keys|knownHosts|sftp:on' && !!document.querySelector('.sftp-view .sftp-connect') && getComputedStyle(document.querySelector('.ssh-view')).display === 'none'`, 'SFTP section');
+        await app.click('.ssh-nav-item[data-section="hosts"]');
+        await app.until(`${navState} === 'hosts:on|keys|knownHosts|sftp' && getComputedStyle(document.querySelector('.sftp-host')).display === 'none'`, 'Hosty again');
         await app.until(`document.querySelectorAll('.ssh-group-tile').length === 3 && !document.querySelector('.ssh-view-detail')`, 'group tiles, no details pane');
         await shot('hosts');
         // Klucze: the empty state, then a generated key as a tile with its editor.
@@ -365,7 +367,9 @@ const PARTS = {
         // Keyboard: arrows move through the enabled entries only.
         await app.evaluate(`document.querySelector('.ssh-nav-item.on').focus()`);
         await app.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 });
-        await app.until(`document.querySelector('.ssh-nav-item.on')?.dataset.section === 'hosts' && document.activeElement?.dataset.section === 'hosts'`, 'ArrowDown wraps past the disabled SFTP entry');
+        await app.until(`document.querySelector('.ssh-nav-item.on')?.dataset.section === 'sftp' && document.activeElement?.dataset.section === 'sftp'`, 'ArrowDown goes on to SFTP');
+        await app.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 });
+        await app.until(`document.querySelector('.ssh-nav-item.on')?.dataset.section === 'hosts' && document.activeElement?.dataset.section === 'hosts'`, 'ArrowDown wraps from SFTP to Hosty');
         // Folded side panel: the SSH tile folds it, the view offers the sections itself.
         await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`!document.querySelector('.side-panel') && !!document.querySelector('.ssh-view-main .ssh-nav.compact')`, 'compact sections in the folded state');
@@ -404,7 +408,7 @@ const PARTS = {
         await app.click('.menu .menu-item', 'Pokaż w panelu plików');
         await app.until(`!document.querySelector('.side-panel .ssh-nav') && !!document.querySelector('#sidebar-files .file-entry[data-path="notes.txt"]') && ${sshHidden}`, 'file revealed, SSH mode ended');
       } finally { await app.close(); }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
   },
   /** 0.9.2 polish: the details pane only while something is chosen, the calmer Hosty, "Pokaż klucz prywatny" and "Zastąp klucz prywatny". */
   async polish() {
@@ -581,7 +585,7 @@ const PARTS = {
         const text = readFileSync(join(root, 'data', file), 'utf8');
         if (text.includes('PRIVATE KEY') || text.includes(replacement.private.split('\n')[1])) throw new Error(`${file} contains private key text`);
       }
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally { rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
   },
   /** Task 11: a saved preset with three SSH cells opens from the palette and connects; the grid dialog lists hosts. */
   async grid() {
@@ -629,7 +633,7 @@ const PARTS = {
         if (!named.length || named.some((n) => n !== null)) throw new Error(`grid-dialog SSH cells: ${JSON.stringify(named)}`);
         await app.screenshot('ssh-grid-dialog-opened.png');
       } finally { await app.close(); }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
   },
   /** W3: a normal grid adds SSH cells from "Dodaj" and from a cell's menu, like choosing a profile. */
   async gridAdd() {
@@ -660,7 +664,7 @@ const PARTS = {
         await app.until(`document.querySelectorAll('.cell').length === 3 && document.querySelectorAll('.cell .cell-head .ssh-host').length === 2`, 'a second SSH cell');
         await app.screenshot('091-grid-add-cells.png');
       } finally { await app.close(); }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
   },
   /** Task 12: a 3-cell grid opened from the 'lab' group, one command broadcast to all three (read from each terminal buffer), then one disconnected cell is disabled and skipped. */
   async broadcast() {
@@ -722,7 +726,7 @@ const PARTS = {
         if (await app.evaluate(hasLine(0, 'again'))) throw new Error('the disconnected cell received the command');
         await app.press('Escape');
       } finally { await app.close(); }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
   },
   /** Task 13: Settings > SSH shows the storage and the known host, and removes it. */
   async settings() {
@@ -745,7 +749,7 @@ const PARTS = {
         await app.click('.ssh-known button', 'Usuń');
         await app.until(`document.querySelector('.settings-content').textContent.includes('Brak znanych hostów')`, 'known host removed');
       } finally { await app.close(); }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
   },
   /** Task 13 (a)-(c): a vault and a known hosts file of a newer format open read-only; Settings says so, shows both paths, and neither file is touched. */
   async settingsReadOnly() {
@@ -773,7 +777,7 @@ const PARTS = {
       } finally { await app.close(); }
       if (readFileSync(vaultFile, 'utf8') !== '{"version":99,"keys":[],"passwords":[]}') throw new Error('the vault file was modified');
       if (readFileSync(hostsFile, 'utf8') !== damaged) throw new Error('the known hosts file was modified');
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
   },
   /** Spec 14: after a restart of the app the cell shows "Połącz" (D5); a new host key on the same port gives the red card (incl. the changed host key, L13). */
   async restart() {
@@ -821,7 +825,7 @@ const PARTS = {
         const text = readFileSync(file, 'utf8');
         for (const secret of [...passwords, 'PRIVATE KEY']) if (text.includes(secret)) throw new Error(`${file} contains a secret`);
       }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
   },
   /**
    * 0.9.6 F3: "Łącz ponownie po uruchomieniu aplikacji" set in the host form reconnects the host's cell when the app starts
@@ -904,7 +908,7 @@ const PARTS = {
         if (!(await app.evaluate(cellIs(manualCell, 'card')))) throw new Error('the cell of the host without the option did not stay idle');
         await app.screenshot('ssh-reconnect-at-start.png');
       } finally { await app.close(); }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
   },
   /** D8: with MC_SSH_NO_SAFESTORAGE=1 the banner shows, a saved password works for the session, nothing secret is written. */
   async noSafeStorage() {
@@ -936,7 +940,7 @@ const PARTS = {
       } finally { await app.close(); }
       if (existsSync(join(root, 'data', 'ssh', 'vault.json'))) throw new Error('vault.json written although safeStorage was unavailable');
       if (readFileSync(join(root, 'data', 'state.json'), 'utf8').includes(server.password)) throw new Error('state.json contains the password');
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
+    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
   },
 };
 
