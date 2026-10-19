@@ -15,6 +15,13 @@ export function normalizeScrollback(value: unknown): number {
   return (SCROLLBACK_CHOICES as readonly number[]).includes(value as number) ? (value as number) : DEFAULT_SCROLLBACK_LINES;
 }
 
+/** Gives open terminals (xterm instances) a new scrollback (xterm drops the oldest lines when it shrinks); returns the value used. */
+export function applyScrollback(terminals: Iterable<{ options: { scrollback?: number } }>, lines: unknown): number {
+  const next = normalizeScrollback(lines);
+  for (const term of terminals) if (term.options.scrollback !== next) term.options.scrollback = next;
+  return next;
+}
+
 /** Characters of recent output the pty host keeps per terminal to replay into a reloaded renderer. */
 export const PTY_REPLAY_CHARS = 512 * 1024;
 

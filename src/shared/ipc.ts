@@ -61,7 +61,8 @@ export type HostToMain =
   | { t: 'sshAuthPrompt'; id: string; promptId: string; kind: 'password' | 'keyboard'; name?: string; instructions?: string; fields: Array<{ text: string; echo: boolean }>; retry: boolean };
 
 export type RendererToHost =
-  | { t: 'write'; id: string; data: string }
+  /** `reply`: the terminal's own answer (device / focus / mouse report), not typing: it does not shorten the output window. */
+  | { t: 'write'; id: string; data: string; reply?: boolean }
   | { t: 'resize'; id: string; cols: number; rows: number }
   /** The renderer finished parsing `chars` characters of output (flow control). */
   | { t: 'ack'; id: string; chars: number }

@@ -214,10 +214,10 @@ export class SshManager implements TerminalBackend {
   private pauseStreams(s: Session): void { s.stream?.pause(); s.stream?.stderr.pause(); }
   private resumeStreams(s: Session): void { s.stream?.resume(); s.stream?.stderr.resume(); }
 
-  write(id: string, data: string): void {
+  write(id: string, data: string, reply = false): void {
     const s = this.sessions.get(id);
     if (!s?.stream || s.ended) return;
-    s.out.wrote();
+    if (!reply) s.out.wrote();
     s.stream.write(Buffer.from(data, 'utf8'));
   }
 

@@ -138,10 +138,10 @@ export class PtyManager implements TerminalBackend {
     for (const e of this.entries.values()) e.out.resetFlow();
   }
 
-  write(id: string, data: string): void {
+  write(id: string, data: string, reply = false): void {
     const e = this.entries.get(id);
     if (!e) return;
-    e.out.wrote();
+    if (!reply) e.out.wrote();
     e.proc.write(data);
   }
 
