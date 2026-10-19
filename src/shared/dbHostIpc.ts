@@ -46,7 +46,11 @@ export type DbHostOp =
   | { op: 'applyEdits'; req: DbEditRequest }
   | { op: 'cellValue'; req: DbCellRequest }
   /** Every Redis operation (the session must be a Redis one). */
-  | { op: 'redis'; req: RedisOp };
+  /**
+   * deadline: when main stops waiting for the answer (ms since epoch, set by DbHostClient). An operation still queued in the
+   * host then is skipped ('dbTimeout'), so a change the user saw fail never runs later.
+   */
+  | { op: 'redis'; req: RedisOp; deadline?: number };
 
 export type MainToDbHost =
   /** Login of a session's SSH tunnel (secrets in memory only, never logged). */

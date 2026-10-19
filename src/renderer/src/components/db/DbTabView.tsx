@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DbSort, DbValue } from '../../../../shared/db';
 import { DB_LIMITS, isTruncated } from '../../../../shared/db';
 import { formatDbValue, parseDbInput, rowsToCsv, rowsToJson, splitSql, statementAt } from '../../../../shared/dbSql';
-import { addInsert, comparableKind, conflictRowIndex, isDeleted, rowOriginal, txToggle, parseStaged, removeInserts, rowKey, setInsertValue, stageCell, stagedCell, stagedCount, toggleDeletes, type DbRowKey, type DbStaged } from '../../../../shared/dbTabs';
+import { addInsert, conflictRowIndex, isDeleted, rowOriginal, txToggle, parseStaged, removeInserts, rowKey, setInsertValue, stageCell, stagedCell, stagedCount, toggleDeletes, type DbRowKey, type DbStaged } from '../../../../shared/dbTabs';
 import { uid } from '../../../../shared/state';
 import type { SQLNamespace } from '@codemirror/lang-sql';
 import { closeFile, editFile, useFileStore, type FileDocument } from '../../files';
@@ -186,7 +186,7 @@ function DbTableView({ id }: { id: string }) {
     const key = keys[r];
     if (!key) return;
     const original = st.rows[r][c];
-    setStaged(id, stageCell(staged, key, name, value, original === null ? null : isTruncated(original) ? undefined : original, comparableKind(columns[c].kind)));
+    setStaged(id, stageCell(staged, key, name, value, original === null ? null : isTruncated(original) ? undefined : original));
   };
   const openValue = (r: number, c: number) => {
     const col = columns[c];

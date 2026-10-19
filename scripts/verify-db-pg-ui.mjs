@@ -142,10 +142,14 @@ try {
   await key('Enter');
   await app.until(`document.querySelector('.db-table-tab [data-field=pageinfo]')?.textContent === '1-8'`, 'filtered rows', 20000);
   check(true, 'WHERE filter (8 rows)');
+  const liveSessions = `window.mc.db.sessions().then((s) => s.sessions.filter((x) => x.state === 'connected').map((x) => x.id).sort().join(','))`;
+  const sessionsBefore = await ev(liveSessions);
   await app.setValue('.db-table-tab [data-field=where]', 'nonsense_col > 1');
   await key('Enter');
   await app.until(`!!document.querySelector('.db-table-tab [data-field=error]')`, 'filter error');
   check((await textOf('.db-table-tab [data-field=error]')).includes('nonsense_col'), 'a bad filter shows the server error');
+  await sleep(300);
+  check(sessionsBefore !== '' && await ev(liveSessions) === sessionsBefore, 'a bad filter keeps the shared session connected (no reconnect)');
   await app.setValue('.db-table-tab [data-field=where]', '');
   await key('Enter');
   await app.until(`document.querySelector('.db-table-tab [data-field=pageinfo]')?.textContent === '1-100'`, 'filter cleared');
@@ -198,7 +202,7 @@ try {
   await app.click('.db-table-tab [data-action=show-sql]');
   await app.until(`!!document.querySelector('.db-preview-sql')`, 'SQL preview');
   const preview = await textOf('.db-preview-sql');
-  check(preview.startsWith('BEGIN;') && preview.includes(`UPDATE "public"."items" SET "name" = 'renamed one' WHERE "id" = '1' AND "name"::text IS NOT DISTINCT FROM 'item 1';`) && preview.includes(`DELETE FROM "public"."items" WHERE "id" = '4'`) && preview.includes('INSERT INTO "public"."items"') && preview.trim().endsWith('COMMIT;'), 'Pokaż SQL shows the transaction');
+  check(preview.startsWith('BEGIN;') && preview.includes(`UPDATE "public"."items" SET "name" = 'renamed one' WHERE "id" = '1' AND ("name" IS NOT NULL AND format('%s', "name") = format('%s', 'item 1'::text));`) && preview.includes(`DELETE FROM "public"."items" WHERE "id" = '4'`) && preview.includes(`format('%s', "active") = format('%s', 't'::boolean)`) && preview.includes('INSERT INTO "public"."items"') && preview.trim().endsWith('COMMIT;'), 'Pokaż SQL shows the transaction');
   await app.screenshot('100-db-preview.png');
   await clickText('.db-preview .modal-foot .btn.primary');
   await app.click('.db-table-tab [data-action=save]');

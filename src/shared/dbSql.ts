@@ -206,8 +206,10 @@ export interface DbBuiltStatement { op: DbStagedEdit['op']; index: number; sql: 
 /**
  * The parameterized statement of each staged edit, identified by `keyColumns` (the primary key or a unique not-null key).
  * `columns`: the table's columns (an edit naming another one, or a generated one in `readOnlyColumns`, is refused).
+ * `columnTypes`: each column's type as the server's format_type names it (with its typmod), for the conflict check of
+ * `original`; never from the renderer.
  */
-export function buildEditStatements(schema: string, table: string, keyColumns: readonly string[] | null, edits: readonly DbStagedEdit[], columns?: readonly string[], readOnlyColumns: readonly string[] = []): DbBuiltStatement[] {
+export function buildEditStatements(schema: string, table: string, keyColumns: readonly string[] | null, edits: readonly DbStagedEdit[], columns?: readonly string[], readOnlyColumns: readonly string[] = [], columnTypes?: Readonly<Record<string, string>>): DbBuiltStatement[] {
   if (!edits.length || edits.length > DB_LIMITS.edits) throw new DbSqlError('invalid');
   const target = qualifiedName(schema, table);
   const known = columns ? new Set(columns) : null;
@@ -225,15 +227,25 @@ export function buildEditStatements(schema: string, table: string, keyColumns: r
       return `${quoteIdent(k)} = $${params.length}`;
     }).join(' AND ');
   };
-  // The row must still hold the values it was loaded with (compared as text, so types without equality work too).
+  // The row must still hold the values it was loaded with. The loaded value is Postgres's output form of the column: the
+  // parameter is read in the column's own type (its input function, typmod included) and both sides are compared in the
+  // output form again (format('%s', ...) prints through the output function, unlike ::text, which turns a boolean into
+  // "true", strips char(n) padding and adds /32 to an inet). So the check is exact for every type, also those without an
+  // equality operator, and does not depend on formatting settings (a timestamptz is compared in the current time zone on
+  // both sides). json and jsonb compare as jsonb (spacing and key order do not count).
   const unchanged = (original: Record<string, string | null> | undefined, params: Array<string | null>): string => {
     if (!original) return '';
     return Object.keys(original).map((c) => {
       checkColumn(c);
       const v = original[c];
       if (v !== null && typeof v !== 'string') throw new DbSqlError('invalid');
+      const col = quoteIdent(c);
+      if (v === null) return ` AND ${col} IS NULL`;
       params.push(v);
-      return ` AND ${quoteIdent(c)}::text IS NOT DISTINCT FROM $${params.length}`;
+      const p = `$${params.length}`;
+      const type = columnTypes && Object.hasOwn(columnTypes, c) ? columnTypes[c] : null;
+      if (type === 'json' || type === 'jsonb') return ` AND ${col}::jsonb = ${p}::jsonb`;
+      return ` AND (${col} IS NOT NULL AND format('%s', ${col}) = ${type ? `format('%s', ${p}::${type})` : `${p}::text`})`;
     }).join('');
   };
   return edits.map((e, index) => {

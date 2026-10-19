@@ -493,6 +493,7 @@ export interface DbTableInfo {
 /**
  * `original`: the values the row was loaded with (text form, null for NULL) of the edited columns (update) or of any columns
  * (delete). The statement then also requires them unchanged, so a row changed by someone else meanwhile is a conflict.
+ * Each is compared in its column's own type (json and jsonb as jsonb), so every type can be sent as it arrived.
  * Leave out a column whose loaded value arrived truncated.
  */
 export type DbStagedEdit =

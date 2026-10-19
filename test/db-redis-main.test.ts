@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DbHost } from '../src/dbhost/host';
 import { createDbHandlers } from '../src/main/db/ipc';
+import { redisDeadline } from '../src/main/dbHostClient';
 import { DbService } from '../src/main/db/service';
 import { DbVault } from '../src/main/db/vault';
 import { SshCoordinator } from '../src/main/ssh/coordinator';
@@ -161,5 +162,22 @@ describe('db:redis IPC validation', () => {
     // The Postgres channel does not take Redis operations.
     expect(await h.pg(SID, { op: 'redis', req: { kind: 'databases' } })).toEqual({ ok: false, error: 'invalid' });
     expect(calls).toEqual([]);
+  });
+
+  it('limits bytes, not characters: per value and for the whole request', async () => {
+    const { h, calls } = handlers();
+    // 600k two-byte characters: under the 1 MB name limit in characters, over it in bytes.
+    expect(await h.redis(SID, { kind: 'keyInfo', keys: ['ż'.repeat(600_000)] })).toEqual({ ok: false, error: 'invalid' });
+    const big = 'x'.repeat(40 * 1024 * 1024);
+    expect(await h.redis(SID, { kind: 'write', write: { op: 'rpush', key: 'l', items: [big, big] } })).toEqual({ ok: false, error: 'invalid' });
+    expect(await h.redis(SID, { kind: 'command', req: { argv: ['MSET', 'a', big, 'b', big] } })).toEqual({ ok: false, error: 'invalid' });
+    expect(calls).toEqual([]);
+    expect(await h.redis(SID, { kind: 'write', write: { op: 'rpush', key: 'l', items: [big], existing: true } })).toEqual({ ok: true, value: 1 });
+  });
+
+  it('Redis operations carry a deadline before main gives up', () => {
+    expect(redisDeadline(1_000_000, 120_000)).toBe(1_000_000 + 110_000);
+    expect(redisDeadline(0, 5000)).toBe(4500);
+    expect(redisDeadline(0, 500)).toBe(1000);
   });
 });

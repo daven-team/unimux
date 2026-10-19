@@ -17,6 +17,8 @@ export const dbOpTimeoutMs = (op: DbHostOp): number => {
   }
   return op.op === 'applyEdits' || op.op === 'ddl' || op.op === 'databases' ? 10 * 60_000 : op.op === 'cellValue' ? 5 * 60_000 : 2 * 60_000;
 };
+/** The deadline a Redis operation carries: main's timeout less a margin (the answer must still reach main in time). */
+export const redisDeadline = (now: number, timeoutMs: number): number => now + Math.max(1000, timeoutMs - Math.min(10_000, timeoutMs / 10));
 export const DB_SHUTDOWN_WAIT_MS = 3000;
 
 export interface DbHostLink {
@@ -104,10 +106,13 @@ export class DbHostClient extends EventEmitter implements DbHostLink {
   request(id: string, op: DbHostOp): Promise<DbResult<unknown>> {
     if (!this.child) return Promise.resolve({ ok: false, error: 'noSession' });
     const reqId = this.nextReq++;
+    const timeoutMs = dbOpTimeoutMs(op);
+    // Redis operations carry the moment main gives up (with a margin): the host skips them when they only start later.
+    const sent: DbHostOp = op.op === 'redis' ? { ...op, deadline: redisDeadline(Date.now(), timeoutMs) } : op;
     return new Promise((resolve) => {
-      const timer = setTimeout(() => { this.pending.delete(reqId); resolve({ ok: false, error: 'dbTimeout' }); }, dbOpTimeoutMs(op));
+      const timer = setTimeout(() => { this.pending.delete(reqId); resolve({ ok: false, error: 'dbTimeout' }); }, timeoutMs);
       this.pending.set(reqId, { resolve, timer });
-      this.child!.postMessage({ t: 'dbOp', reqId, id, op } satisfies MainToDbHost);
+      this.child!.postMessage({ t: 'dbOp', reqId, id, op: sent } satisfies MainToDbHost);
     });
   }
 
