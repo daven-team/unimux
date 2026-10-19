@@ -2,6 +2,7 @@
 // SSH coordinator in main drives an SFTP login exactly like a cell's. Transfer progress does not pass through main: it goes
 // from the SFTP Host to the renderer over a transferred MessagePort (SftpPortMessage in shared/sftp.ts).
 import type { HostToMain, MainToHost } from './ipc';
+import type { EditorSave } from './editorSource';
 import type { ConflictAnswer, DeleteCount, SftpResult, TransferRequest } from './sftp';
 
 export type SftpOp =
@@ -16,7 +17,10 @@ export type SftpOp =
   | { op: 'cancel'; itemIds?: string[]; batchId?: string }
   | { op: 'answerConflict'; itemId: string; answer: ConflictAnswer }
   | { op: 'retry'; itemIds: string[] }
-  | { op: 'clearFinished' };
+  | { op: 'clearFinished' }
+  /** An editor tab (0.9.9): the file read into memory, and its text saved back through a part file. */
+  | { op: 'readFile'; path: string }
+  | { op: 'writeFile'; path: string; save: EditorSave };
 
 export type MainToSftpHost =
   /** Login of an SFTP session (secrets in memory only, never logged). */

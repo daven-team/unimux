@@ -152,7 +152,36 @@ async function readParquet(target: string, size: number): Promise<ProjectFilePre
 /** `limit` is how much of the beginning of a text file is returned (the preview modal and search keep the small default). */
 export async function readProjectFile(root: string, path: string, limit = PREVIEW_BYTES): Promise<ProjectFilePreview> {
   try {
-    const target = await projectFilePath(root, path);
+    return await readFileAt(await projectFilePath(root, path), path, limit);
+  } catch (error) {
+    return { kind: 'error', message: fileError(error) };
+  }
+}
+
+/** A local file outside the projects (an editor tab opened from the SFTP view's local pane, 0.9.9): read like a project file. */
+export async function readLocalFile(path: unknown): Promise<ProjectFilePreview> {
+  try {
+    return await readFileAt(await localFilePath(path), path as string, LARGE_VIEW_BYTES);
+  } catch (error) {
+    return { kind: 'error', message: fileError(error) };
+  }
+}
+
+export async function statLocalFile(path: unknown): Promise<{ size: number; mtimeMs: number } | null> {
+  try {
+    const info = await stat(await localFilePath(path));
+    return info.isFile() ? { size: info.size, mtimeMs: info.mtimeMs } : null;
+  } catch { return null; }
+}
+
+/** An absolute local path, resolved through links (the editor writes the file a link points to). */
+async function localFilePath(path: unknown): Promise<string> {
+  if (typeof path !== 'string' || !path || path.length > 4096 || path.includes(' ') || !isAbsolute(path)) throw new Error('Nieprawidłowa ścieżka lub nazwa');
+  return realpath(resolve(path));
+}
+
+async function readFileAt(target: string, path: string, limit: number): Promise<ProjectFilePreview> {
+  {
     const file = await open(target, 'r');
     try {
       const stat = await file.stat();
@@ -183,8 +212,6 @@ export async function readProjectFile(root: string, path: string, limit = PREVIE
     } finally {
       await file.close();
     }
-  } catch (error) {
-    return { kind: 'error', message: fileError(error) };
   }
 }
 
@@ -195,14 +222,23 @@ class SaveConflict extends Error { constructor() { super(CONFLICT); } }
 
 // Serialize our own saves so two tabs cannot both overwrite the same baseline.
 const saves = new Map<string, Promise<ProjectFileWriteResult>>();
-export async function writeProjectFile(root: string, path: string, text: string, expectedText: string): Promise<ProjectFileWriteResult> {
+export function writeProjectFile(root: string, path: string, text: string, expectedText: string): Promise<ProjectFileWriteResult> {
+  return writeFileWith(() => projectFilePath(root, path), text, expectedText);
+}
+
+/** A local file outside the projects: the same checks as a project file (unchanged since it was read, size limit, staged write). */
+export function writeLocalFile(path: unknown, text: unknown, expectedText: unknown): Promise<ProjectFileWriteResult> {
+  return writeFileWith(() => localFilePath(path), text, expectedText);
+}
+
+async function writeFileWith(resolveTarget: () => Promise<string>, text: unknown, expectedText: unknown): Promise<ProjectFileWriteResult> {
   try {
     if (typeof text !== 'string' || typeof expectedText !== 'string') throw new Error('Nieprawidłowa treść pliku.');
-    const target = await projectFilePath(root, path);
+    const target = await resolveTarget();
     const previous = saves.get(target);
     const pending = (async () => {
       if (previous) await previous;
-      return saveText(root, path, target, text, expectedText);
+      return saveText(resolveTarget, target, text, expectedText);
     })();
     saves.set(target, pending);
     try { return await pending; }
@@ -210,7 +246,7 @@ export async function writeProjectFile(root: string, path: string, text: string,
   } catch (error) { return { ok: false, error: fileError(error) }; }
 }
 
-async function saveText(root: string, path: string, target: string, text: string, expectedText: string): Promise<ProjectFileWriteResult> {
+async function saveText(resolveTarget: () => Promise<string>, target: string, text: string, expectedText: string): Promise<ProjectFileWriteResult> {
   let temporary: string | undefined;
   try {
     const file = await open(target, 'r');
@@ -251,7 +287,7 @@ async function saveText(root: string, path: string, target: string, text: string
     const staged = await open(temporary, 'wx', mode);
     try { await staged.writeFile(output); await staged.sync(); }
     finally { await staged.close(); }
-    if (await projectFilePath(root, path) !== target) throw new SaveConflict();
+    if (await resolveTarget() !== target) throw new SaveConflict();
     const current = await open(target, 'r');
     let unchanged = false;
     try {

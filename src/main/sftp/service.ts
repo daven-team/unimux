@@ -28,6 +28,8 @@ interface Entry { state: SftpSessionState; initialPath?: string; queueActive: bo
 export class SftpService {
   private sessions = new Map<string, Entry>();
   private viewOpen = false;
+  /** Hosts with unsaved editor tabs (0.9.9): their sessions are not disconnected for being idle. */
+  private pinned = new Set<string>();
 
   constructor(private readonly deps: SftpServiceDeps) {}
 
@@ -168,16 +170,26 @@ export class SftpService {
   }
 
   /** The renderer reloads or crashed: the new page starts with the view hidden and only reports a change, so main counts it closed. */
-  rendererGone(): void { if (this.viewOpen) this.viewClosed(); }
+  rendererGone(): void {
+    if (this.viewOpen) this.viewClosed();
+    // The new page reports its unsaved editor tabs again.
+    if (this.pinned.size) this.pinHosts([]);
+  }
+
+  /** The hosts of editor tabs with unsaved changes: their sessions stay connected while the view is closed. */
+  pinHosts(hostIds: string[]): void {
+    this.pinned = new Set(hostIds);
+    for (const e of this.sessions.values()) this.scheduleIdle(e);
+  }
 
   private scheduleIdle(entry: Entry): void {
     this.clearTimer(entry.idle);
     entry.idle = null;
-    if (this.viewOpen || entry.queueActive) return;
+    if (this.viewOpen || entry.queueActive || this.pinned.has(entry.state.hostId)) return;
     const id = entry.state.id;
     entry.idle = this.setTimer(() => {
       const e = this.sessions.get(id);
-      if (e === entry && !this.viewOpen && !e.queueActive) void this.disconnect(id);
+      if (e === entry && !this.viewOpen && !e.queueActive && !this.pinned.has(e.state.hostId)) void this.disconnect(id);
     }, this.deps.idleMs ?? SFTP_LIMITS.idleDisconnectMs);
   }
 

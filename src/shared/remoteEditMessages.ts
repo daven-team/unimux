@@ -1,0 +1,52 @@
+// Texts of SFTP files in editor tabs (0.9.9): opening, the download offer, connecting and server conflicts. Each row: English,
+// German, Spanish, French, Portuguese. Polish is the key.
+export const remoteEditMessages = {
+  'Otwórz': ['Open', 'Öffnen', 'Abrir', 'Ouvrir', 'Abrir'],
+  'Nie można otworzyć {name} w edytorze': ['{name} cannot be opened in the editor', '{name} kann nicht im Editor geöffnet werden', 'No se puede abrir {name} en el editor', 'Impossible d\'ouvrir {name} dans l\'éditeur', 'Não é possível abrir {name} no editor'],
+  'Plik ma {size}, a edytor otwiera pliki tekstowe do {limit}. Możesz go pobrać na ten komputer.': [
+    'The file is {size}; the editor opens text files up to {limit}. You can download it to this computer.',
+    'Die Datei ist {size} groß; der Editor öffnet Textdateien bis {limit}. Du kannst sie auf diesen Computer herunterladen.',
+    'El archivo ocupa {size}; el editor abre archivos de texto de hasta {limit}. Puedes descargarlo en este equipo.',
+    'Le fichier fait {size} ; l\'éditeur ouvre les fichiers texte jusqu\'à {limit}. Vous pouvez le télécharger sur cet ordinateur.',
+    'O ficheiro tem {size}; o editor abre ficheiros de texto até {limit}. Pode transferi-lo para este computador.',
+  ],
+  'To plik binarny lub w nieobsługiwanym kodowaniu. Możesz go pobrać na ten komputer.': [
+    'This is a binary file or uses an unsupported encoding. You can download it to this computer.',
+    'Das ist eine Binärdatei oder eine nicht unterstützte Kodierung. Du kannst sie auf diesen Computer herunterladen.',
+    'Es un archivo binario o con una codificación no admitida. Puedes descargarlo en este equipo.',
+    'C\'est un fichier binaire ou dans un encodage non pris en charge. Vous pouvez le télécharger sur cet ordinateur.',
+    'É um ficheiro binário ou com uma codificação não suportada. Pode transferi-lo para este computador.',
+  ],
+  'Tego pliku nie można pokazać w edytorze (plik binarny lub za duży). Możesz go pobrać na ten komputer.': [
+    'This file cannot be shown in the editor (binary or too large). You can download it to this computer.',
+    'Diese Datei kann nicht im Editor angezeigt werden (binär oder zu groß). Du kannst sie auf diesen Computer herunterladen.',
+    'Este archivo no se puede mostrar en el editor (binario o demasiado grande). Puedes descargarlo en este equipo.',
+    'Ce fichier ne peut pas être affiché dans l\'éditeur (binaire ou trop volumineux). Vous pouvez le télécharger sur cet ordinateur.',
+    'Este ficheiro não pode ser mostrado no editor (binário ou demasiado grande). Pode transferi-lo para este computador.',
+  ],
+  'Pobieranie do {folder}': ['Downloading to {folder}', 'Wird heruntergeladen nach {folder}', 'Descargando en {folder}', 'Téléchargement vers {folder}', 'A transferir para {folder}'],
+  'Nie udało się połączyć z {host}: {error}': ['Could not connect to {host}: {error}', 'Verbindung mit {host} fehlgeschlagen: {error}', 'No se pudo conectar con {host}: {error}', 'Connexion à {host} impossible : {error}', 'Não foi possível ligar a {host}: {error}'],
+  'Brak połączenia z {host}. Połącz ponownie, aby wczytać lub zapisać plik.': [
+    'No connection to {host}. Reconnect to load or save the file.',
+    'Keine Verbindung mit {host}. Verbinde dich erneut, um die Datei zu laden oder zu speichern.',
+    'No hay conexión con {host}. Vuelve a conectar para cargar o guardar el archivo.',
+    'Aucune connexion à {host}. Reconnectez-vous pour charger ou enregistrer le fichier.',
+    'Sem ligação a {host}. Volte a ligar para carregar ou guardar o ficheiro.',
+  ],
+  'Nie zapisano: plik zmienił się na serwerze w trakcie edycji.': [
+    'Not saved: the file changed on the server while you were editing it.',
+    'Nicht gespeichert: Die Datei wurde während der Bearbeitung auf dem Server geändert.',
+    'No guardado: el archivo cambió en el servidor mientras lo editabas.',
+    'Non enregistré : le fichier a été modifié sur le serveur pendant que vous le modifiiez.',
+    'Não guardado: o ficheiro mudou no servidor enquanto o editava.',
+  ],
+  'Plik zmienił się na serwerze. Masz tu niezapisane zmiany.': [
+    'The file changed on the server. You have unsaved changes here.',
+    'Die Datei wurde auf dem Server geändert. Du hast hier ungespeicherte Änderungen.',
+    'El archivo cambió en el servidor. Tienes cambios sin guardar aquí.',
+    'Le fichier a été modifié sur le serveur. Vous avez des modifications non enregistrées ici.',
+    'O ficheiro mudou no servidor. Tem aqui alterações não guardadas.',
+  ],
+  '- na serwerze, + w edytorze': ['- on the server, + in the editor', '- auf dem Server, + im Editor', '- en el servidor, + en el editor', '- sur le serveur, + dans l’éditeur', '- no servidor, + no editor'],
+  'Wczytaj z serwera (odrzuć moje zmiany)':['Reload from server (discard my edits)', 'Vom Server neu laden (meine Änderungen verwerfen)', 'Recargar desde el servidor (descartar mis cambios)', 'Recharger depuis le serveur (abandonner mes modifications)', 'Recarregar do servidor (descartar as minhas alterações)'],
+} as const;

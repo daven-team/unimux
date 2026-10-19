@@ -4,12 +4,12 @@ import { diffView } from '../../../shared/textDiff';
 import { useI18n } from '../i18n';
 import './gitPanel.css';
 
-export default function TextDiffView({ disk, editor, path }: { disk: string; editor: string; path: string }) {
+export default function TextDiffView({ disk, editor, path, remote = false }: { disk: string; editor: string; path: string; remote?: boolean }) {
   const { tr } = useI18n();
   const { lines, total, width } = useMemo(() => diffView(disk, editor), [disk, editor]);
   return (
     <div className="git-diff-view file-conflict-diff" aria-label={tr('Różnice: dysk i edytor')}>
-      <div className="git-diff-path muted" title={path}><span className="git-diff-source">{tr('- na dysku, + w edytorze')}</span>{' · '}{path}</div>
+      <div className="git-diff-path muted" title={path}><span className="git-diff-source">{remote ? tr('- na serwerze, + w edytorze') : tr('- na dysku, + w edytorze')}</span>{' · '}{path}</div>
       {!lines.length ? <div className="git-diff-message muted">{tr('Brak różnic do pokazania.')}</div> : (
         <div className="git-diff" role="table" aria-label={tr('Różnice: dysk i edytor')} style={{ ['--ln' as string]: `${width}ch` }}>
           {lines.map((line, i) => (

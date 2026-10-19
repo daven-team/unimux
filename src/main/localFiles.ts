@@ -6,6 +6,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'path';
 import { permissionString, safeEntryName, SFTP_LIMITS, type LocalEntry, type LocalErrorCode, type LocalResult } from '../shared/sftp';
 import type { IpcGuard } from './ipcGuard';
 import { sameLocalFile } from '../sftphost/sides';
+import { readLocalFile, statLocalFile, writeLocalFile } from './files';
 
 export interface LocalFilesDeps {
   platform: NodeJS.Platform;
@@ -115,6 +116,10 @@ export function createLocalFiles(deps: LocalFilesDeps) {
         return ok(null);
       } catch (error) { return fail(codeOf(error)); }
     },
+    // An editor tab of a local file outside the projects (0.9.9): read and saved like a project file.
+    readFile: (path: unknown) => readLocalFile(path),
+    statFile: (path: unknown) => statLocalFile(path),
+    writeFile: (path: unknown, text: unknown, expectedText: unknown) => writeLocalFile(path, text, expectedText),
   };
 }
 
@@ -129,4 +134,7 @@ export function registerLocalFilesIpc(guard: IpcGuard, files: LocalFiles): void 
   guard.guardedHandle('local:rename', (_e, from: unknown, to: unknown) => files.rename(from, to), refused);
   guard.guardedHandle('local:trash', (_e, paths: unknown) => files.trash(paths), refused);
   guard.guardedHandle('local:reveal', (_e, path: unknown) => files.reveal(path), refused);
+  guard.guardedHandle('local:readFile', (_e, path: unknown) => files.readFile(path), () => ({ kind: 'error', message: 'Nieprawidłowa ścieżka lub nazwa' }));
+  guard.guardedHandle('local:statFile', (_e, path: unknown) => files.statFile(path), () => null);
+  guard.guardedHandle('local:writeFile', (_e, path: unknown, text: unknown, expectedText: unknown) => files.writeFile(path, text, expectedText), () => ({ ok: false, error: 'Nieprawidłowa ścieżka lub nazwa' }));
 }

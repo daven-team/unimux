@@ -1,6 +1,7 @@
 // The SFTP host core against the in-process test server with its SFTP subsystem over a temp folder (127.0.0.1 only).
 // The process wrapper (src/sftphost/index.ts) only forwards messages; everything here is the logic it runs.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import type { EditorRead, FileStamp, TextEncodingName } from '../src/shared/editorSource';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -564,5 +565,89 @@ describe('SftpHost: overwrite, cancel and links (fix round 1)', () => {
     const byName = Object.fromEntries(h.ofBatch(b).map((i) => [i.name, i]));
     expect(byName['pick/link.txt']).toMatchObject({ state: 'failed', error: 'linkOutside' });
     expect(readdirSync(remote('home', 'alice', 'pick'))).toEqual(['ok.txt']);
+  });
+});
+
+describe('SftpHost: files in editor tabs (0.9.9)', () => {
+  const save = (text: string, baseline: string, expected: FileStamp | null, encoding: TextEncodingName = 'utf-8') =>
+    ({ op: 'writeFile' as const, path: '/home/alice/e.txt', save: { text, baseline, encoding, expected } });
+
+  it('reads a text file into memory and saves through a part file: no part file stays, the mode is kept, CRLF kept', async () => {
+    const s = await server({ sftpPosixRename: true });
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(remote('home', 'alice', 'e.txt'), 'one\r\ntwo\r\n');
+    chmodSync(remote('home', 'alice', 'e.txt'), 0o640);
+    const before = statSync(remote('home', 'alice', 'e.txt')).mode & 0o777;
+    const read = await h.value<EditorRead>({ op: 'readFile', path: '/home/alice/e.txt' });
+    expect(read).toMatchObject({ kind: 'text', text: 'one\r\ntwo\r\n', encoding: 'utf-8', size: 10 });
+    if (read.kind !== 'text') throw new Error('text expected');
+    const written = await h.value<{ stamp: FileStamp }>(save('one\nTWO\nthree\n', read.text, read.stamp));
+    expect(readFileSync(remote('home', 'alice', 'e.txt'), 'utf8')).toBe('one\r\nTWO\r\nthree\r\n');
+    expect(readdirSync(remote('home', 'alice'))).toEqual(['e.txt']);
+    expect(statSync(remote('home', 'alice', 'e.txt')).mode & 0o777).toBe(before);
+    expect(s.sftp.ops).toContain('SETSTAT');
+    expect(written.stamp.size).toBe(statSync(remote('home', 'alice', 'e.txt')).size);
+    // The new stamp is the base of the next save.
+    await h.value(save('again\n', 'one\r\nTWO\r\nthree\r\n', written.stamp));
+    expect(readFileSync(remote('home', 'alice', 'e.txt'), 'utf8')).toBe('again\r\n');
+  });
+
+  it('refuses a save when the server file changed since it was opened (size or time), and writes nothing', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(remote('home', 'alice', 'e.txt'), 'base');
+    const read = await h.value<EditorRead>({ op: 'readFile', path: '/home/alice/e.txt' });
+    if (read.kind !== 'text') throw new Error('text expected');
+    writeFileSync(remote('home', 'alice', 'e.txt'), 'someone else');
+    expect(await h.op(save('mine', 'base', read.stamp))).toEqual({ ok: false, error: 'changed' });
+    expect(readFileSync(remote('home', 'alice', 'e.txt'), 'utf8')).toBe('someone else');
+    expect(readdirSync(remote('home', 'alice'))).toEqual(['e.txt']);
+    // Same size, another time: a change too.
+    writeFileSync(remote('home', 'alice', 'e.txt'), 'base');
+    utimesSync(remote('home', 'alice', 'e.txt'), new Date(2001, 1, 1), new Date(2001, 1, 1));
+    expect(await h.op(save('mine', 'base', read.stamp))).toEqual({ ok: false, error: 'changed' });
+    // A restored draft without a stamp compares the text instead.
+    expect(await h.op(save('mine', 'other', null))).toEqual({ ok: false, error: 'changed' });
+    expect(await h.op(save('mine', 'base', null))).toMatchObject({ ok: true });
+    expect(readFileSync(remote('home', 'alice', 'e.txt'), 'utf8')).toBe('mine');
+  });
+
+  it('keeps the BOM and UTF-16, previews images, offers big and binary files for download', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(remote('home', 'alice', 'bom.txt'), Buffer.from('﻿zażółć', 'utf8'));
+    const bom = await h.value<EditorRead>({ op: 'readFile', path: '/home/alice/bom.txt' });
+    expect(bom).toMatchObject({ kind: 'text', text: 'zażółć', encoding: 'utf-8-bom' });
+    if (bom.kind !== 'text') throw new Error('text expected');
+    await h.value({ op: 'writeFile', path: '/home/alice/bom.txt', save: { text: 'gęś', baseline: bom.text, encoding: bom.encoding, expected: bom.stamp } });
+    expect(readFileSync(remote('home', 'alice', 'bom.txt'))).toEqual(Buffer.from('﻿gęś', 'utf8'));
+    writeFileSync(remote('home', 'alice', 'w.txt'), Buffer.from('﻿hi', 'utf16le'));
+    expect(await h.value<EditorRead>({ op: 'readFile', path: '/home/alice/w.txt' })).toMatchObject({ kind: 'text', text: 'hi', encoding: 'utf-16le' });
+    const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+    writeFileSync(remote('home', 'alice', 'p.png'), png);
+    expect(await h.value<EditorRead>({ op: 'readFile', path: '/home/alice/p.png' })).toMatchObject({ kind: 'image', mime: 'image/png', dataUrl: `data:image/png;base64,${png.toString('base64')}` });
+    writeFileSync(remote('home', 'alice', 'b.bin'), Buffer.from([1, 2, 0, 3]));
+    expect(await h.value<EditorRead>({ op: 'readFile', path: '/home/alice/b.bin' })).toEqual({ kind: 'binary', size: 4 });
+    writeFileSync(remote('home', 'alice', 'big.log'), Buffer.alloc(8 * 1024 * 1024 + 1, 0x61));
+    expect(await h.value<EditorRead>({ op: 'readFile', path: '/home/alice/big.log' })).toEqual({ kind: 'tooLarge', size: 8 * 1024 * 1024 + 1 });
+    expect(await h.op({ op: 'readFile', path: '/home/alice/missing.txt' })).toEqual({ ok: false, error: 'notFound' });
+    expect(await h.op({ op: 'readFile', path: '/home/alice' })).toEqual({ ok: false, error: 'isADirectory' });
+  });
+
+  it('a save whose rename fails leaves the old file and no part file', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(remote('home', 'alice', 'e.txt'), 'old');
+    const read = await h.value<EditorRead>({ op: 'readFile', path: '/home/alice/e.txt' });
+    if (read.kind !== 'text') throw new Error('text expected');
+    s.sftp.renameFail = (from) => from.endsWith('.unimux-part');
+    expect(await h.op(save('new', 'old', read.stamp))).toEqual({ ok: false, error: 'failed' });
+    expect(readFileSync(remote('home', 'alice', 'e.txt'), 'utf8')).toBe('old');
+    await waitFor(() => readdirSync(remote('home', 'alice')).length === 1);
+    expect(readdirSync(remote('home', 'alice'))).toEqual(['e.txt']);
   });
 });
