@@ -90,13 +90,13 @@ export function stagedCell(s: DbStaged, key: DbRowKey, column: string): { value:
 }
 
 /** Stages a new value of a cell; typing the original value back removes the change (`original` undefined: not known whole). */
-export function stageCell(s: DbStaged, key: DbRowKey, column: string, value: string | null, original: string | null | undefined, checkOriginal = true): DbStaged {
+export function stageCell(s: DbStaged, key: DbRowKey, column: string, value: string | null, original: string | null | undefined): DbStaged {
   const at = s.updates.findIndex((x) => sameKey(x.key, key));
   const set = { ...(at >= 0 ? s.updates[at].set : {}) };
   const originals: DbOriginal = { ...(at >= 0 ? s.updates[at].original ?? {} : {}) };
   if (original !== undefined && value === original) { delete set[column]; delete originals[column]; } else {
     set[column] = value;
-    if (checkOriginal && original !== undefined && !Object.hasOwn(originals, column)) originals[column] = original;
+    if (original !== undefined && !Object.hasOwn(originals, column)) originals[column] = original;
   }
   const updates = s.updates.filter((_, i) => i !== at);
   if (Object.keys(set).length) updates.splice(at >= 0 ? at : updates.length, 0, { key, set, ...(Object.keys(originals).length ? { original: originals } : {}) });
@@ -112,16 +112,10 @@ export function toggleDeletes(s: DbStaged, rows: ReadonlyArray<{ key: DbRowKey; 
   return { ...s, deletes: [...s.deletes, ...rows.filter((r) => !isDeleted(s, r.key)).map((r) => ({ key: r.key, ...(r.original ? { original: r.original } : {}) }))] };
 }
 
-/**
- * Whether a column's loaded value can be compared in the conflict check: the check compares `col::text`, and a boolean's
- * ::text ("true") differs from its wire text ("t"), so booleans are left out (as truncated values are).
- */
-export const comparableKind = (kind: string): boolean => kind !== 'bool';
-
-/** The loaded values of a row for the conflict check (truncated values and booleans left out). */
-export function rowOriginal(row: readonly DbValue[], columns: ReadonlyArray<{ name: string; kind?: string }>): DbOriginal {
+/** The loaded values of a row for the conflict check (truncated values left out; the DB Host compares each in its own type). */
+export function rowOriginal(row: readonly DbValue[], columns: ReadonlyArray<{ name: string }>): DbOriginal {
   const out: DbOriginal = {};
-  columns.forEach((c, i) => { const v = row[i]; if ((v === null || typeof v === 'string') && comparableKind(c.kind ?? '')) out[c.name] = v; });
+  columns.forEach((c, i) => { const v = row[i]; if (v === null || typeof v === 'string') out[c.name] = v; });
   return out;
 }
 

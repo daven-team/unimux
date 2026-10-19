@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DB_LIMITS, isTruncated, type DbTableInfo, type DbObjectInfo } from '../src/shared/db';
 import { parseDbInput } from '../src/shared/dbSql';
+import { rowOriginal } from '../src/shared/dbTabs';
 import { dbHarness, startPglite, waitFor, type Pglite } from './helpers/dbHarness';
 
 let pgl: Pglite;
@@ -462,5 +463,127 @@ describe('DbHost on PGlite: cursors, memory and busy (fix round 1)', () => {
     await pgl.db.exec("UPDATE oc SET v = 'changed elsewhere'");
     expect(await h.op(id, { op: 'applyEdits', req: { schema: 'public', table: 'oc', edits: [{ op: 'update', key: { id: '1' }, set: { v: 'mine' }, original: { v: 'a' } }] } })).toEqual({ ok: false, error: 'conflict', index: 0 });
     expect(await h.value(id, { op: 'applyEdits', req: { schema: 'public', table: 'oc', edits: [{ op: 'update', key: { id: '1' }, set: { v: 'mine' }, original: { v: 'changed elsewhere', j: '{"x":1}' } }] } })).toEqual({ affected: 1 });
+  });
+});
+
+describe('DbHost on PGlite: a failing page filter keeps the shared session (core fix)', () => {
+  // A server of its own: the read-only variants change session settings, and PGlite shares one backend between connections.
+  let own: Pglite;
+  beforeAll(async () => {
+    own = await startPglite();
+    await own.db.exec(`CREATE TABLE f (id int PRIMARY KEY, price numeric(10,2)); INSERT INTO f SELECT g, g FROM generate_series(1, 20) g;`);
+  }, 60000);
+  afterAll(async () => { await own?.close(); });
+
+  const variants: Array<{ name: string; cfg: { readOnly?: boolean; statementTimeoutMs?: number } }> = [
+    { name: 'read-write', cfg: {} },
+    { name: 'read-write with a statement timeout', cfg: { statementTimeoutMs: 30000 } },
+    { name: 'read-only', cfg: { readOnly: true } },
+    { name: 'read-only with a statement timeout', cfg: { readOnly: true, statementTimeoutMs: 30000 } },
+  ];
+  for (const variant of variants) {
+    it(`answers a query error with the server message, rolls back and the next page works (${variant.name})`, async () => {
+      const h = dbHarness();
+      const id = await h.open({ port: own.port, ...variant.cfg });
+      expect(h.last(id)?.phase).toBe('connected');
+      const statusesBefore = h.statuses(id).length;
+      for (const filter of ['no_such_column = 1', 'nonsense', '1/0 = 1', "price > 'abc'", 'id = (SELECT id FROM f)']) {
+        const bad = await h.page(id, { schema: 'public', table: 'f', limit: 5, filter });
+        expect(bad.statements[0].error?.code, filter).toBe('server');
+        expect(bad.statements[0].error?.server?.message, filter).toBeTruthy();
+        expect(bad.end, filter).toMatchObject({ ok: false, tx: 'idle' });
+        expect(h.last(id)?.phase, filter).toBe('connected');
+        const next = await h.page(id, { schema: 'public', table: 'f', limit: 3 });
+        expect(next.end.ok, filter).toBe(true);
+        expect(next.statements[0].rows, filter).toHaveLength(3);
+      }
+      // No reconnect, no new status: the same session answered everything.
+      expect(h.statuses(id).length).toBe(statusesBefore);
+      const show = async (name: string) => (await h.run(id, { sql: `SHOW ${name}` })).statements[0].rows[0][0];
+      expect(await show('default_transaction_read_only')).toBe(variant.cfg.readOnly ? 'on' : 'off');
+      if (variant.cfg.statementTimeoutMs) expect(await show('statement_timeout')).toBe('30s');
+      expect((await h.op(id, { op: 'schemas' })).ok).toBe(true);
+      h.host.close(id);
+      await own.db.exec('RESET ALL');
+    });
+  }
+});
+
+describe('DbHost on PGlite: the conflict check compares in each column\'s own type (core fix)', () => {
+  let own: Pglite;
+  const ROW = (id: number) => `(${id}, true, 1.5, '2026-10-20 12:34:56.789+02', '{"b": 2,  "a": [1, 2]}', '{"b": 2, "a": 1}', '{1,2,NULL}',
+    '\\x00ff10', '1 day 02:03:04', 0.1, 'ab', '10.0.0.1', '10.0.0.0/8', '{"a b",NULL,c}', NULL, '3.141592653589793', 'x')`;
+  beforeAll(async () => {
+    own = await startPglite();
+    await own.db.exec(`CREATE TABLE ty (
+      id int PRIMARY KEY, flag boolean, price numeric(10,2), at timestamptz, j json, jb jsonb, ints int[], bin bytea, span interval,
+      f double precision, ch char(5), ip inet, net cidr, texts text[], missing numeric, r real, v text
+    );
+    INSERT INTO ty VALUES ${[1, 2, 3, 4].map(ROW).join(', ')};`);
+  }, 60000);
+  afterAll(async () => { await own?.close(); });
+
+  const load = async (h: ReturnType<typeof dbHarness>, id: string, rowId: number) => {
+    const page = (await h.page(id, { schema: 'public', table: 'ty', limit: 1, filter: `id = ${rowId}` })).statements[0];
+    expect(page.rows).toHaveLength(1);
+    return { row: page.rows[0], original: rowOriginal(page.rows[0], page.columns) };
+  };
+
+  it('updates and deletes rows of boolean, numeric(10,2), timestamptz, json, jsonb, int[], bytea, interval, float, char(n), inet and cidr columns', async () => {
+    const h = dbHarness();
+    const id = await h.open({ port: own.port });
+    const { row, original } = await load(h, id, 1);
+    // The wire forms really differ from ::text for some of them (the reason for the old false conflicts).
+    expect(original).toMatchObject({ flag: 't', price: '1.50', ch: 'ab   ', ip: '10.0.0.1', missing: null });
+    expect(Object.keys(original)).toHaveLength(row.length);
+    expect(await h.value(id, { op: 'applyEdits', req: { schema: 'public', table: 'ty', edits: [{ op: 'update', key: { id: '1' }, set: { v: 'saved' }, original }] } })).toEqual({ affected: 1 });
+    // Every edited column checked with its loaded value: update each column of a row in turn, each against what was loaded.
+    const second = await load(h, id, 2);
+    const changes: Record<string, string> = { flag: 'f', price: '2.25', at: '2020-01-01 00:00:00+00', j: '{"z":1}', jb: '{"z": 1}', ints: '{3}', bin: '\\x01', span: '00:00:01',
+      f: '0.30000000000000004', ch: 'zz', ip: '192.168.1.1', net: '192.168.0.0/16', texts: '{}', missing: '7', r: '1.5' };
+    let current = second.original;
+    for (const [col, value] of Object.entries(changes)) {
+      expect(await h.value(id, { op: 'applyEdits', req: { schema: 'public', table: 'ty', edits: [{ op: 'update', key: { id: '2' }, set: { [col]: value }, original: { [col]: current[col] } }] } }), col).toEqual({ affected: 1 });
+      current = (await load(h, id, 2)).original;
+    }
+    // A delete checks the whole loaded row.
+    const third = await load(h, id, 3);
+    expect(await h.value(id, { op: 'applyEdits', req: { schema: 'public', table: 'ty', edits: [{ op: 'delete', key: { id: '3' }, original: third.original }] } })).toEqual({ affected: 1 });
+    expect((await own.db.query<{ n: number }>('SELECT count(*)::int AS n FROM ty WHERE id = 3')).rows[0].n).toBe(0);
+    h.host.close(id);
+  });
+
+  it('a timestamptz loaded in one time zone still matches after the session switched time zones', async () => {
+    const h = dbHarness();
+    const id = await h.open({ port: own.port });
+    await h.run(id, { sql: `SET TimeZone = 'Asia/Tokyo'` });
+    const { original } = await load(h, id, 4);
+    expect(original.at).toBe('2026-10-20 19:34:56.789+09');
+    await h.run(id, { sql: `SET TimeZone = 'America/New_York'` });
+    expect(await h.value(id, { op: 'applyEdits', req: { schema: 'public', table: 'ty', edits: [{ op: 'update', key: { id: '4' }, set: { v: 'tz' }, original: { at: original.at, v: original.v } }] } })).toEqual({ affected: 1 });
+    await h.run(id, { sql: 'RESET TimeZone' });
+    h.host.close(id);
+  });
+
+  it('a real change made elsewhere is still a conflict, for every type', async () => {
+    const h = dbHarness();
+    const id = await h.open({ port: own.port });
+    await own.db.exec(`INSERT INTO ty VALUES ${ROW(10)}`);
+    const { original } = await load(h, id, 10);
+    const elsewhere: Record<string, string> = {
+      flag: 'false', price: '1.51', at: `'2026-10-20 12:34:56.79+02'`, j: `'{"b": 2,  "a": [1, 3]}'`, jb: `'{"b": 2, "a": 2}'`, ints: `'{1,2}'`, bin: `'\\x00ff11'`,
+      span: `'1 day 02:03:05'`, f: '0.1000000000000001', ch: `'ab  c'`, ip: `'10.0.0.2'`, net: `'10.0.0.0/9'`, texts: `'{"a b",c}'`, missing: '0', r: '3.1415925',
+    };
+    for (const [col, sqlValue] of Object.entries(elsewhere)) {
+      await own.db.exec(`UPDATE ty SET ${col} = ${sqlValue} WHERE id = 10`);
+      expect(await h.op(id, { op: 'applyEdits', req: { schema: 'public', table: 'ty', edits: [{ op: 'update', key: { id: '10' }, set: { v: 'mine' }, original: { [col]: original[col] } }] } }), col).toEqual({ ok: false, error: 'conflict', index: 0 });
+      expect(await h.op(id, { op: 'applyEdits', req: { schema: 'public', table: 'ty', edits: [{ op: 'delete', key: { id: '10' }, original }] } }), col).toEqual({ ok: false, error: 'conflict', index: 0 });
+      // Put it back (row 1 holds the same values; only its v was saved): then the loaded values match again.
+      await own.db.exec(`UPDATE ty SET ${col} = (SELECT ${col} FROM ty WHERE id = 1) WHERE id = 10`);
+    }
+    // A json value whose text changed only in spacing or key order is the same jsonb: not a conflict.
+    await own.db.exec(`UPDATE ty SET j = '{"a":[1,2],"b":2}' WHERE id = 10`);
+    expect(await h.value(id, { op: 'applyEdits', req: { schema: 'public', table: 'ty', edits: [{ op: 'delete', key: { id: '10' }, original }] } })).toEqual({ affected: 1 });
+    h.host.close(id);
   });
 });

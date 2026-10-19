@@ -14,6 +14,10 @@ export interface FakePgOptions {
   tls?: { key: string; cert: string };
   /** Refuse plain connections (like hostssl only). */
   requireTls?: boolean;
+  /** Answer a Close that no Sync follows with a ReadyForQuery as well (what PGlite's socket server does). */
+  readyAfterLoneClose?: boolean;
+  /** Send a ReadyForQuery right with an error of an extended-protocol batch that no Sync ended yet (PGlite does). */
+  readyWithError?: boolean;
 }
 
 export interface FakePg {
@@ -109,6 +113,8 @@ export async function startFakePg(opts: FakePgOptions = {}): Promise<FakePg> {
     let portal: { rows: Array<Array<string | null>>; fields: string[]; command: string; at: number; error?: SqlError } | null = null;
     let skipToSync = false;
     const write = (b: Buffer) => { try { stream.write(b); } catch { /* gone */ } };
+    // PGlite's socket server answers an error of a batch without Sync with a ReadyForQuery of its own, in the same write.
+    const writeError = (b: Backend, e: SqlError, syncFollows: boolean) => write(opts.readyWithError && !syncFollows ? Buffer.concat([errorResponse(e.code, e.message), msg('Z', Buffer.from(b.tx))]) : errorResponse(e.code, e.message));
 
     const finishLogin = (user: string, database: string) => {
       if (database === 'missing') { write(errorResponse('3D000', `database "${database}" does not exist`)); stream.end(); return; }
@@ -156,7 +162,7 @@ export async function startFakePg(opts: FakePgOptions = {}): Promise<FakePg> {
       return true;
     };
 
-    const onMessage = (type: string, body: Buffer) => {
+    const onMessage = (type: string, body: Buffer, syncFollows: boolean) => {
       if (type === 'p' && authState) {
         const given = body.subarray(0, body.length - 1).toString('utf8');
         const { user, database, salt } = authState;
@@ -202,13 +208,13 @@ export async function startFakePg(opts: FakePgOptions = {}): Promise<FakePg> {
           return;
         }
         if (type === 'D') {
-          if (portal?.error) { if (b.tx === 'T') b.tx = 'E'; write(errorResponse(portal.error.code, portal.error.message)); skipToSync = true; return; }
+          if (portal?.error) { if (b.tx === 'T') b.tx = 'E'; writeError(b, portal.error, syncFollows); skipToSync = true; return; }
           write(portal && portal.fields.length ? rowDescription(portal.fields) : msg('n'));
           return;
         }
         if (type === 'E') {
           if (!portal) return;
-          if (portal.error) { if (b.tx === 'T') b.tx = 'E'; write(errorResponse(portal.error.code, portal.error.message)); skipToSync = true; return; }
+          if (portal.error) { if (b.tx === 'T') b.tx = 'E'; writeError(b, portal.error, syncFollows); skipToSync = true; return; }
           const max = body.readInt32BE(body.indexOf(0) + 1);
           const end = max > 0 ? Math.min(portal.rows.length, portal.at + max) : portal.rows.length;
           for (; portal.at < end; portal.at++) write(dataRow(portal.rows[portal.at]));
@@ -216,9 +222,20 @@ export async function startFakePg(opts: FakePgOptions = {}): Promise<FakePg> {
           else write(msg('C', cstr(portal.command)));
           return;
         }
-        if (type === 'C') { write(msg('3')); return; }
+        if (type === 'C') {
+          write(msg('3'));
+          // Late, as from a server in another process: the client has moved on to its next statement by then.
+          if (opts.readyAfterLoneClose && !syncFollows) { await new Promise((r) => setTimeout(r, 30)); write(msg('Z', Buffer.from(b.tx))); }
+          return;
+        }
       });
     };
+
+    /** Whether the rest of this read holds a Sync. */
+    function syncLater(rest: Buffer): boolean {
+      for (let at = 0; at + 5 <= rest.length; at += rest.readInt32BE(at + 1) + 1) if (rest[at] === 0x53) return true;
+      return false;
+    }
 
     function onData(chunk: Buffer): void {
       buf = Buffer.concat([buf, chunk]);
@@ -238,7 +255,7 @@ export async function startFakePg(opts: FakePgOptions = {}): Promise<FakePg> {
         const type = String.fromCharCode(buf[0]);
         const body = buf.subarray(5, len + 1);
         buf = buf.subarray(len + 1);
-        onMessage(type, body);
+        onMessage(type, body, syncLater(buf));
       }
     }
     raw.on('data', onData);
