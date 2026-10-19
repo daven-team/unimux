@@ -4,6 +4,7 @@ import type { MessagePortMain } from 'electron';
 import type { HostToMain, HostToRenderer, MainToHost, RendererToHost } from '../shared/ipc';
 import { OutputBatcher } from './batch';
 import { PtyManager, type PtySink } from './manager';
+import { setFocusedTerminal } from './output';
 import { HostRouter } from './router';
 import { SshManager } from './ssh';
 
@@ -61,6 +62,8 @@ function attachRenderer(port: MessagePortMain): void {
   rendererPort?.close();
   // Queued output is part of the replay tails the new renderer gets below.
   batcher.drop();
+  // The new renderer reports its focused terminal itself.
+  setFocusedTerminal(null);
   rendererPort = port;
   port.on('message', (e) => {
     const m = e.data as RendererToHost;
@@ -69,6 +72,7 @@ function attachRenderer(port: MessagePortMain): void {
       if (tapped.has(m.id) && m.data.includes('\x03')) toMain({ t: 'interrupt', id: m.id });
     } else if (m.t === 'resize') router.resize(m.id, m.cols, m.rows);
     else if (m.t === 'ack') router.ack(m.id, m.chars);
+    else if (m.t === 'focus') setFocusedTerminal(typeof m.id === 'string' ? m.id : null);
   });
   port.on('close', () => {
     // Only the current port counts: replacing it closes the old one after the new one is in place.

@@ -158,6 +158,8 @@ export interface Settings {
   shortcuts: ShortcutOverrides;
   /** Ask before closing a grid, a cell or the app while a Claude or Codex cell is working ("do not ask again" turns it off). */
   confirmCloseWorking: boolean;
+  /** Lines of history each terminal keeps (one of SCROLLBACK_CHOICES, shared/terminalLimits.ts). */
+  scrollbackLines: number;
 }
 
 export interface AppState {

@@ -15,6 +15,7 @@ import { shellsForPlatform } from '../../../shared/platform';
 import { USAGE_INTERVALS_MINUTES } from '../../../shared/usage';
 import { BACKGROUND_LOAD_MODES, BACKGROUND_MAX_CELLS, normalizeBackgroundLoad, type BackgroundLoadMode } from '../../../shared/backgroundLoad';
 import type { MessageKey } from '../../../shared/i18n';
+import { DEFAULT_SCROLLBACK_LINES, normalizeScrollback, SCROLLBACK_CHOICES } from '../../../shared/terminalLimits';
 import { IX, TSettings } from './icons';
 import { SshSettings } from './ssh/SshSettings';
 
@@ -85,6 +86,14 @@ export function SettingsPage() {
               {shellsForPlatform(window.mc.platform).map((shell) => <option key={shell.code} value={shell.code}>{shell.name}</option>)}
             </Select>
           </SettingRow>
+        <SettingRow title={tr('Historia przewijania terminala')} htmlFor="settings-scrollback" hint={tr('Ile wierszy historii trzyma każdy terminal. Więcej wierszy to więcej pamięci. Zmiana działa od razu we wszystkich terminalach; zmniejszenie usuwa najstarsze wiersze.')}>
+          <Select id="settings-scrollback" className="select" value={settings.scrollbackLines}
+            onChange={(e) => setSetting({ scrollbackLines: normalizeScrollback(Number(e.target.value)) })}>
+            {SCROLLBACK_CHOICES.map((lines) => <option key={lines} value={lines}>
+              {tr(lines === DEFAULT_SCROLLBACK_LINES ? '{count} wierszy (domyślnie)' : '{count} wierszy', { count: lines.toLocaleString(language) })}
+            </option>)}
+          </Select>
+        </SettingRow>
         <SettingRow title={tr('Wczytywanie sesji w tle po uruchomieniu')} htmlFor="settings-background-load" hint={tr(BACKGROUND_HINT[settings.backgroundLoad], { max: BACKGROUND_MAX_CELLS })}>
           <Select id="settings-background-load" className="select" value={settings.backgroundLoad}
             onChange={(e) => setSetting({ backgroundLoad: normalizeBackgroundLoad(e.target.value) })}>

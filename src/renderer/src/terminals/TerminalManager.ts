@@ -17,7 +17,7 @@ import { inputModesOff, isMouseReport, MouseFloodGuard, terminalModeReset } from
 import { encodeWin32Key } from '../../../shared/win32input';
 import { tr } from '../i18n';
 import { confirmTerminalLink } from '../terminalLinks';
-import { MAX_WEBGL_CONTEXTS, PENDING_OUTPUT_CHARS, SCROLLBACK_LINES } from '../../../shared/terminalLimits';
+import { DEFAULT_SCROLLBACK_LINES, MAX_WEBGL_CONTEXTS, normalizeScrollback, PENDING_OUTPUT_CHARS } from '../../../shared/terminalLimits';
 import { nextLossCount, planWebgl, webglBackoff, WebglLimit } from '../../../shared/webglPool';
 import { onWindowShown } from '../windowShown';
 
@@ -144,7 +144,9 @@ class TerminalManager {
       if (this.webglLimit.recover(performance.now())) console.warn(`WebGL contexts limit raised to ${this.webglLimit.limit}`);
       if (this.needsWebgl()) this.balanceWebgl();
     }, 1000);
-    document.addEventListener('focusin', () => { if (this.needsWebgl()) this.balanceWebgl(); });
+    document.addEventListener('focusin', () => { if (this.needsWebgl()) this.balanceWebgl(); this.syncHostFocus(); });
+    // During focusout the next element does not have the focus yet: look once the move is done.
+    document.addEventListener('focusout', () => setTimeout(() => this.syncHostFocus(), 0));
     // Capture: the event does not bubble, and xterm reports a lost context only 3 s later (after waiting for a restore).
     document.addEventListener('webglcontextlost', (ev) => this.contextLost(ev.target), true);
   }
@@ -198,6 +200,27 @@ class TerminalManager {
     port.start();
     // Tell the host about the sizes we already know (e.g. after a host restart).
     for (const e of this.entries.values()) this.post({ t: 'resize', id: e.id, cols: e.term.cols, rows: e.term.rows });
+    this.syncHostFocus(true);
+  }
+
+  /** Lines of history a terminal keeps (Settings > Terminal, see setScrollback). */
+  private scrollback = DEFAULT_SCROLLBACK_LINES;
+
+  /** The terminal last reported to the pty host as focused (its output keeps the short coalescing window). */
+  private hostFocus: string | null = null;
+
+  private focusedTerminal(): string | null {
+    const active = document.activeElement;
+    if (!active) return null;
+    for (const e of this.entries.values()) if (e.term.textarea === active) return e.id;
+    return null;
+  }
+
+  private syncHostFocus(force = false): void {
+    const id = this.focusedTerminal();
+    if (id === this.hostFocus && !force) return;
+    this.hostFocus = id;
+    this.post({ t: 'focus', id });
   }
 
   private post(m: RendererToHost): void {
@@ -299,7 +322,7 @@ class TerminalManager {
       fontSize: opts.fontSize,
       lineHeight: 1.1,
       cursorBlink: true,
-      scrollback: SCROLLBACK_LINES,
+      scrollback: this.scrollback,
       allowProposedApi: true,
       ...(window.mc.platform === 'win32' && opts.remote !== true ? { windowsPty: { backend: 'conpty' as const, buildNumber: this.buildNumber || 26100 } } : {}),
       rightClickSelectsWord: false,
@@ -703,6 +726,14 @@ class TerminalManager {
   isFocused(cellId: string): boolean {
     const e = this.entries.get(cellId);
     return !!e && document.activeElement === e.term.textarea;
+  }
+
+  /** Lines of history of every terminal (Settings > Terminal): new ones start with it, live ones change now (shrinking drops the oldest lines). */
+  setScrollback(lines: number): void {
+    const next = normalizeScrollback(lines);
+    if (next === this.scrollback) return;
+    this.scrollback = next;
+    for (const e of this.entries.values()) e.term.options.scrollback = next;
   }
 
   setFontSize(cellId: string, size: number): void {

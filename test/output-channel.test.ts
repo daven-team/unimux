@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EXIT_DRAIN_MS, OutputChannel, PAUSE_WATCHDOG_MS } from '../src/ptyhost/output';
-import { HIGH_WATER, LOW_WATER } from '../src/ptyhost/flow';
+import { BACKGROUND_COALESCE_MS, HIGH_WATER, LOW_WATER } from '../src/ptyhost/flow';
 
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
@@ -17,7 +17,8 @@ describe('OutputChannel', () => {
   it('coalesces small chunks and keeps a replay tail', () => {
     const { out, sent } = setup();
     out.push('a'); out.push('b');
-    vi.advanceTimersByTime(20);
+    // A cell nobody types in waits for the background window (BACKGROUND_COALESCE_MS, on its grid).
+    vi.advanceTimersByTime(BACKGROUND_COALESCE_MS * 1.5);
     expect(sent).toEqual(['ab']);
     expect(out.history()).toBe('ab');
   });

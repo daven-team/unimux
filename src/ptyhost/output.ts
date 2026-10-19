@@ -11,6 +11,13 @@ export const EXIT_DRAIN_MS = 80;
 
 export interface OutputControl { pause(): void; resume(): void }
 
+/** The terminal the renderer reported as focused (its output keeps the short coalescing window, see coalesceDelay). */
+let focusedTerminal: string | null = null;
+
+export function setFocusedTerminal(id: string | null): void {
+  focusedTerminal = id;
+}
+
 export class OutputChannel {
   private buf = '';
   private timer: NodeJS.Timeout | null = null;
@@ -36,7 +43,7 @@ export class OutputChannel {
     if (this.buf.length >= FLUSH_NOW_CHARS) this.flush();
     else if (!this.timer) {
       const now = Date.now();
-      this.timer = setTimeout(() => this.flush(), alignedDelay(now, coalesceDelay(now, this.lastWrite)));
+      this.timer = setTimeout(() => this.flush(), alignedDelay(now, coalesceDelay(now, this.lastWrite, focusedTerminal === this.id)));
     }
   }
 

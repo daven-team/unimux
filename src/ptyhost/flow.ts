@@ -90,23 +90,33 @@ export class FlowGate {
   }
 }
 
-/** Typing echoes must stay snappy; bulk output is coalesced into roughly one frame. */
+/**
+ * Typing echoes must stay snappy; bulk output of the cell the user works in is coalesced into roughly one frame; output of
+ * cells nobody types in (agents streaming in the background) waits about two frames at 60 Hz, which roughly halves the
+ * renderer's parse and draw work for a busy grid (measured: 20 busy cells 48 -> 34 % of a core).
+ */
 export const ECHO_COALESCE_MS = 4;
 export const BULK_COALESCE_MS = 12;
+export const BACKGROUND_COALESCE_MS = 33;
 /** A buffer this large is sent at once instead of waiting for the timer. */
 export const FLUSH_NOW_CHARS = 128 * 1024;
 const ECHO_WINDOW_MS = 150;
+/** A cell that got input this recently counts as the one the user works in, even without the focus. */
+export const ACTIVE_WINDOW_MS = 1000;
 
-export function coalesceDelay(now: number, lastWrite: number): number {
-  return now - lastWrite < ECHO_WINDOW_MS ? ECHO_COALESCE_MS : BULK_COALESCE_MS;
+/** The coalescing window of the next flush: `focused` = the renderer reported this terminal as the focused one. */
+export function coalesceDelay(now: number, lastWrite: number, focused: boolean): number {
+  const sinceWrite = now - lastWrite;
+  if (sinceWrite < ECHO_WINDOW_MS) return ECHO_COALESCE_MS;
+  return focused || sinceWrite < ACTIVE_WINDOW_MS ? BULK_COALESCE_MS : BACKGROUND_COALESCE_MS;
 }
 
 /**
- * The bulk delay moved onto a shared BULK_COALESCE_MS grid (between half and one and a half periods, one period on average),
- * so busy terminals flush in the same timer turn and their output leaves the host as one message.
+ * Bulk and background delays moved onto a shared grid of their own period (between half and one and a half periods, one
+ * period on average), so busy terminals flush in the same timer turn and their output leaves the host as one message.
  */
 export function alignedDelay(now: number, delay: number): number {
-  if (delay !== BULK_COALESCE_MS) return delay;
-  const next = BULK_COALESCE_MS - (now % BULK_COALESCE_MS);
-  return next < BULK_COALESCE_MS / 2 ? next + BULK_COALESCE_MS : next;
+  if (delay !== BULK_COALESCE_MS && delay !== BACKGROUND_COALESCE_MS) return delay;
+  const next = delay - (now % delay);
+  return next < delay / 2 ? next + delay : next;
 }

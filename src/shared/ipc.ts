@@ -64,7 +64,9 @@ export type RendererToHost =
   | { t: 'write'; id: string; data: string }
   | { t: 'resize'; id: string; cols: number; rows: number }
   /** The renderer finished parsing `chars` characters of output (flow control). */
-  | { t: 'ack'; id: string; chars: number };
+  | { t: 'ack'; id: string; chars: number }
+  /** The terminal with the keyboard focus (null: none); its output is coalesced with the short window. */
+  | { t: 'focus'; id: string | null };
 
 export type HostToRenderer =
   | { t: 'data'; id: string; data: string }

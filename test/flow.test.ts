@@ -82,9 +82,10 @@ describe('FlowGate', () => {
 
 describe('coalesceDelay', () => {
   it('is short right after the user typed and longer for bulk output', () => {
-    expect(coalesceDelay(1000, 900)).toBe(ECHO_COALESCE_MS);
-    expect(coalesceDelay(1000, 100)).toBe(BULK_COALESCE_MS);
-    expect(coalesceDelay(1000, -Infinity)).toBe(BULK_COALESCE_MS);
+    expect(coalesceDelay(1000, 900, true)).toBe(ECHO_COALESCE_MS);
+    expect(coalesceDelay(1000, 900, false)).toBe(ECHO_COALESCE_MS);
+    expect(coalesceDelay(1000, 100, true)).toBe(BULK_COALESCE_MS);
+    expect(coalesceDelay(1000, -Infinity, true)).toBe(BULK_COALESCE_MS);
   });
 });
 
