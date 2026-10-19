@@ -5,7 +5,7 @@ import { Client } from 'ssh2';
 import type { SshConnectRequest } from '../shared/ipc';
 import type { SftpOp, MainToSftpHost, SftpHostToMain } from '../shared/sftpHostIpc';
 import {
-  LOCAL_QUEUE_ID, SFTP_LIMITS, posixNormalize, validRemotePath,
+  LOCAL_QUEUE_ID, SFTP_LIMITS, posixContains, posixNormalize, validRemoteName, validRemotePath,
   type DeleteCount, type SftpEntry, type SftpErrorCode, type SftpPortMessage, type SftpResult, type TransferDirection, type TransferItem,
 } from '../shared/sftp';
 import type { SshErrorCode, SshPhase } from '../shared/ssh';
@@ -47,6 +47,14 @@ function hardClose(client: Client): void {
 const ok = <T>(value: T): SftpResult<T> => ({ ok: true, value });
 const fail = (error: SftpErrorCode): SftpResult<never> => ({ ok: false, error });
 const codeOf = (error: unknown): SftpErrorCode => (error instanceof SftpError ? error.code : 'failed');
+
+/** Normalized delete paths without duplicates and without paths inside another selected one (counted once, removed once). */
+export function deleteRoots(paths: string[]): string[] {
+  const unique = [...new Set(paths.map((p) => posixNormalize(p)))].sort((a, b) => a.length - b.length);
+  const roots: string[] = [];
+  for (const p of unique) if (!roots.some((r) => posixContains(r, p))) roots.push(p);
+  return roots;
+}
 
 /** Runs `fn` over `items` with at most `limit` at once. */
 async function eachLimited<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
@@ -178,16 +186,17 @@ export class SftpHost {
     else this.status(s, 'error', s.error ?? s.login.override ?? 'reset');
   }
 
-  async disconnect(id: string): Promise<void> {
+  /** `waits`: how long aborted files may clean up and the connection may close cleanly (shorter at app shutdown). */
+  async disconnect(id: string, waits: { idleMs: number; graceMs: number } = { idleMs: 1500, graceMs: this.timers.killGraceMs }): Promise<void> {
     const s = this.sessions.get(id);
     if (!s || s.ended) return;
     s.disconnected = true;
     s.queue.dispose('cancelled');
     // Aborted files remove their part files over the still open connection first.
-    await s.queue.whenIdle(1500);
+    await s.queue.whenIdle(waits.idleMs);
     if (s.ended) return;
     await new Promise<void>((resolve) => {
-      const done = setTimeout(() => { hardClose(s.client); this.onClose(s); resolve(); }, this.timers.killGraceMs);
+      const done = setTimeout(() => { hardClose(s.client); this.onClose(s); resolve(); }, waits.graceMs);
       s.client.once('close', () => { clearTimeout(done); resolve(); });
       this.disarm(s);
       s.login.abort();
@@ -195,8 +204,9 @@ export class SftpHost {
     });
   }
 
+  /** App shutdown: at most about 2 s in all (main waits SFTP_SHUTDOWN_WAIT_MS for it). */
   async shutdown(): Promise<void> {
-    await Promise.all([...this.sessions.keys()].map((id) => this.disconnect(id)));
+    await Promise.all([...this.sessions.keys()].map((id) => this.disconnect(id, { idleMs: 1000, graceMs: 800 })));
     this.localQueue.dispose('cancelled');
     this.throttle.flush();
   }
@@ -234,14 +244,15 @@ export class SftpHost {
         if (!meta) return fail('notFound');
         return ok(await this.entryAt(side, path, meta.kind));
       }
-      case 'realpath': return ok(await side.realpath(op.path));
+      case 'realpath': return ok(await side.resolvePath(op.path));
       case 'mkdir': await side.mkdir(posixNormalize(op.path)); return ok(null);
       case 'rename': await side.rename(posixNormalize(op.from), posixNormalize(op.to), false); return ok(null);
-      case 'deleteCount': return ok(await this.count(side, op.paths));
+      case 'deleteCount': return ok(await this.count(side, deleteRoots(op.paths)));
       case 'delete': {
-        const now = await this.count(side, op.paths);
+        const roots = deleteRoots(op.paths);
+        const now = await this.count(side, roots);
         if (now.files !== op.confirmed.files || now.dirs !== op.confirmed.dirs) return fail('changed');
-        for (const p of op.paths) await this.remove(side, posixNormalize(p));
+        for (const p of roots) await this.remove(side, p);
         return ok(null);
       }
     }
@@ -284,13 +295,13 @@ export class SftpHost {
       if (meta.kind !== 'dir') { total.files++; return; }
       total.dirs++;
       for (const child of await side.readdir(path)) {
-        // A name from the server that is not one safe segment ("..", "a/b") would make the walk leave the folder: refused.
-        if (!side.validName(child.name)) throw new SftpError('invalidName');
+        // A name from the server that is not one POSIX segment ("..", "a/b") would make the walk leave the folder: refused.
+        // A "\" is an ordinary character here (it never becomes a local path), so such files stay deletable.
+        if (!validRemoteName(child.name)) throw new SftpError('invalidName');
         await walk(side.join(path, child.name));
       }
     };
-    for (const p of paths) {
-      const path = posixNormalize(p);
+    for (const path of paths) {
       if (path === '/' || !validRemotePath(path)) throw new SftpError('invalid');
       await walk(path);
     }
@@ -302,7 +313,7 @@ export class SftpHost {
     if (!meta) return;
     if (meta.kind !== 'dir') { await side.unlink(path); return; }
     const children = await side.readdir(path);
-    if (children.some((c) => !side.validName(c.name))) throw new SftpError('invalidName');
+    if (children.some((c) => !validRemoteName(c.name))) throw new SftpError('invalidName');
     const files = children.filter((c) => c.kind !== 'dir');
     await eachLimited(files, 8, (c) => side.unlink(side.join(path, c.name)));
     for (const c of children) if (c.kind === 'dir') await this.remove(side, side.join(path, c.name));

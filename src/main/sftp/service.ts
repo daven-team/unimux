@@ -3,7 +3,7 @@
 // 2 minutes after the SFTP view closed once its queue is empty. Electron-free so it is unit tested.
 import { randomUUID } from 'crypto';
 import {
-  LOCAL_QUEUE_ID, SFTP_LIMITS, sftpSessionId, sftpStatusOf,
+  LOCAL_QUEUE_ID, SFTP_LIMITS, isSftpSessionId, sftpSessionId, sftpStatusOf,
   type SftpResult, type SftpSessionState, type SftpSnapshot,
 } from '../../shared/sftp';
 import type { SftpHostToMain, SftpOp } from '../../shared/sftpHostIpc';
@@ -20,6 +20,7 @@ export interface SftpServiceDeps {
   idleMs?: number;
   setTimer?(fn: () => void, ms: number): unknown;
   clearTimer?(t: unknown): void;
+  defer?(fn: () => void): void;
 }
 
 interface Entry { state: SftpSessionState; initialPath?: string; queueActive: boolean; idle: unknown; resolving: boolean }
@@ -31,6 +32,8 @@ export class SftpService {
   constructor(private readonly deps: SftpServiceDeps) {}
 
   private now(): number { return this.deps.now?.() ?? Date.now(); }
+  /** Runs after the current IPC answer went out (a microtask would still run before it). */
+  private defer(fn: () => void): void { if (this.deps.defer) this.deps.defer(fn); else setImmediate(fn); }
   private setTimer(fn: () => void, ms: number): unknown { return this.deps.setTimer ? this.deps.setTimer(fn, ms) : setTimeout(fn, ms); }
   private clearTimer(t: unknown): void { if (t === undefined || t === null) return; if (this.deps.clearTimer) this.deps.clearTimer(t); else clearTimeout(t as NodeJS.Timeout); }
 
@@ -38,9 +41,21 @@ export class SftpService {
     if (!this.deps.hostExists(hostId)) return { ok: false, error: 'hostMissing' };
     if (!this.deps.host.ensure()) return { ok: false, error: 'sftpHostCrashed' };
     const id = sftpSessionId(randomUUID());
-    this.sessions.set(id, { state: { id, hostId, state: 'connecting', phase: 'connecting', since: this.now() }, initialPath, queueActive: false, idle: null, resolving: false });
-    const r = await this.deps.coordinator.connectSession({ sessionId: id, hostId });
-    if (!r.ok) { this.forget(id); return r; }
+    const entry: Entry = { state: { id, hostId, state: 'connecting', phase: 'connecting', since: this.now() }, initialPath, queueActive: false, idle: null, resolving: false };
+    this.sessions.set(id, entry);
+    // The id goes back first; the login (which may wait minutes for a passphrase) runs after this answer was sent, so every
+    // 'sftp:session' and 'sftp:prompt' event names an id the view already has.
+    this.defer(() => {
+      void this.deps.coordinator.connectSession({ sessionId: id, hostId }).then((r) => {
+        if (r.ok || this.sessions.get(id) !== entry) return;
+        // The coordinator reports most failures as an 'error' state itself; one it refused up front is reported here.
+        if (entry.state.state !== 'error') {
+          entry.state = { ...entry.state, state: 'error', phase: 'error', since: this.now(), error: r.error };
+          this.deps.events.session(entry.state);
+        }
+        this.forget(id);
+      });
+    });
     return { ok: true, sessionId: id };
   }
 
@@ -114,7 +129,8 @@ export class SftpService {
       this.scheduleIdle(entry);
       return;
     }
-    if (m.t === 'sshStatus' || m.t === 'sshHostKey' || m.t === 'sshAuthPrompt') this.deps.coordinator.onHostMessage(m);
+    // Only for sessions this service started: the SFTP Host can never move a cell's state.
+    if ((m.t === 'sshStatus' || m.t === 'sshHostKey' || m.t === 'sshAuthPrompt') && isSftpSessionId(m.id) && this.sessions.has(m.id)) this.deps.coordinator.onHostMessage(m);
   }
 
   hostCrashed(): void {

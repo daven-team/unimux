@@ -1,6 +1,6 @@
 // The SFTP host core against the in-process test server with its SFTP subsystem over a temp folder (127.0.0.1 only).
 // The process wrapper (src/sftphost/index.ts) only forwards messages; everything here is the logic it runs.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -425,5 +425,132 @@ describe('SftpHost behind the SSH coordinator', () => {
     expect(c.last()?.phase).toBe('connected');
     c.coordinator.sessionHostCrashed();
     expect(c.last()).toMatchObject({ phase: 'error', error: 'sftpHostCrashed' });
+  });
+});
+
+describe('SftpHost: overwrite, cancel and links (fix round 1)', () => {
+  it('overwrites with posix-rename when the server offers it', async () => {
+    const s = await server({ sftpPosixRename: true });
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(local('o.txt'), 'new content');
+    writeFileSync(remote('home', 'alice', 'o.txt'), 'old');
+    const b = await h.enqueue({ direction: 'upload', sources: [local('o.txt')], targetDir: '/home/alice', policy: 'overwrite' });
+    await h.settled(b);
+    expect(h.ofBatch(b)[0].state).toBe('done');
+    expect(s.sftp.ops).toContain('POSIX_RENAME');
+    expect(readFileSync(remote('home', 'alice', 'o.txt'), 'utf8')).toBe('new content');
+    expect(readdirSync(remote('home', 'alice'))).toEqual(['o.txt']);
+  });
+
+  it('without posix-rename the old file moves aside and comes back when the new one cannot be renamed in', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(local('o.txt'), 'new content');
+    writeFileSync(remote('home', 'alice', 'o.txt'), 'old');
+    s.sftp.renameFail = (from) => from.endsWith('.unimux-part');
+    const b = await h.enqueue({ direction: 'upload', sources: [local('o.txt')], targetDir: '/home/alice', policy: 'overwrite' });
+    await h.settled(b);
+    expect(h.ofBatch(b)[0]).toMatchObject({ state: 'failed', error: 'failed' });
+    expect(readFileSync(remote('home', 'alice', 'o.txt'), 'utf8')).toBe('old');
+    await waitFor(() => readdirSync(remote('home', 'alice')).length === 1);
+    expect(readdirSync(remote('home', 'alice'))).toEqual(['o.txt']);
+    // And the plain path works: aside, in, aside copy removed.
+    s.sftp.renameFail = null;
+    expect(await h.value({ op: 'retry', itemIds: [h.ofBatch(b)[0].id] })).toBe(true);
+    await waitFor(() => h.ofBatch(b)[0].state === 'done');
+    expect(readFileSync(remote('home', 'alice', 'o.txt'), 'utf8')).toBe('new content');
+    expect(readdirSync(remote('home', 'alice'))).toEqual(['o.txt']);
+  });
+
+  it('when the old file cannot be put back either, neither copy is deleted', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(local('o.txt'), 'new content');
+    writeFileSync(remote('home', 'alice', 'o.txt'), 'old');
+    s.sftp.renameFail = (from) => from.endsWith('.unimux-part') || from.includes('.unimux-old');
+    const b = await h.enqueue({ direction: 'upload', sources: [local('o.txt')], targetDir: '/home/alice', policy: 'overwrite' });
+    await h.settled(b);
+    expect(h.ofBatch(b)[0].state).toBe('failed');
+    expect(readFileSync(remote('home', 'alice', 'o.txt.unimux-old'), 'utf8')).toBe('old');
+    expect(readFileSync(remote('home', 'alice', 'o.txt.unimux-part'), 'utf8')).toBe('new content');
+  });
+
+  it('cancelling a download removes the local part file', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(remote('home', 'alice', 'big.bin'), Buffer.alloc(3_000_000, 4));
+    s.sftp.delayMs = 20;
+    mkdirSync(local('dl'));
+    const b = await h.enqueue({ direction: 'download', sources: ['/home/alice/big.bin'], targetDir: local('dl') });
+    await waitFor(() => (h.ofBatch(b)[0]?.bytesDone ?? 0) > 100_000);
+    await h.value({ op: 'cancel', batchId: b });
+    await h.settled(b);
+    expect(h.ofBatch(b)[0].state).toBe('cancelled');
+    await waitFor(() => readdirSync(local('dl')).length === 0);
+  });
+
+  it('a Disconnect while files move marks them cancelled, not failed', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    s.sftp.delayMs = 20;
+    writeFileSync(local('l.bin'), Buffer.alloc(2_000_000, 1));
+    writeFileSync(local('q.bin'), 'q');
+    const b = await h.enqueue({ direction: 'upload', sources: [local('l.bin'), local('q.bin')], targetDir: '/home/alice' });
+    await waitFor(() => (h.ofBatch(b)[0]?.bytesDone ?? 0) > 0);
+    await h.host.handle({ t: 'sftpDisconnect', id: SESSION });
+    await h.settled(b);
+    expect(h.ofBatch(b).map((i) => i.state)).toEqual(['cancelled', expect.stringMatching(/cancelled|done/)]);
+    expect(existsSync(remote('home', 'alice', 'l.bin.unimux-part'))).toBe(false);
+  });
+
+  it('counts and deletes overlapping or repeated paths once', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    mkdirSync(remote('home', 'alice', 'a', 'b'), { recursive: true });
+    writeFileSync(remote('home', 'alice', 'a', 'b', 'x'), 'x');
+    const paths = ['/home/alice/a', '/home/alice/a/b', '/home/alice/a/', '/home/alice/a/b/x'];
+    const count = await h.value<{ files: number; dirs: number }>({ op: 'deleteCount', paths });
+    expect(count).toEqual({ files: 1, dirs: 2 });
+    expect(await h.op({ op: 'delete', paths, confirmed: count })).toEqual({ ok: true, value: null });
+    expect(existsSync(remote('home', 'alice', 'a'))).toBe(false);
+  });
+
+  it('a remote link loop does not loop: download fails that item, delete removes the link and never follows it', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    mkdirSync(remote('home', 'alice', 'loop'));
+    writeFileSync(remote('home', 'alice', 'loop', 'f.txt'), 'f');
+    try { symlinkSync(remote('home', 'alice', 'loop'), remote('home', 'alice', 'loop', 'again'), 'junction'); } catch { return; } // no links here
+    mkdirSync(local('dl'));
+    const b = await h.enqueue({ direction: 'download', sources: ['/home/alice/loop'], targetDir: local('dl') });
+    const byName = Object.fromEntries((await (async () => { await h.settled(b); return h.ofBatch(b); })()).map((i) => [i.name, i]));
+    expect(byName['loop/f.txt'].state).toBe('done');
+    expect(byName['loop/again']).toMatchObject({ state: 'failed', error: 'linkFolder' });
+    const count = await h.value<{ files: number; dirs: number }>({ op: 'deleteCount', paths: ['/home/alice/loop'] });
+    expect(count).toEqual({ files: 2, dirs: 1 });
+    expect(await h.op({ op: 'delete', paths: ['/home/alice/loop'], confirmed: count })).toEqual({ ok: true, value: null });
+    expect(existsSync(remote('home', 'alice', 'loop'))).toBe(false);
+  });
+
+  it('an upload of a folder with a link to a file outside it does not send that file', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    mkdirSync(local('pick'));
+    writeFileSync(local('secret.txt'), 'SECRET');
+    writeFileSync(local('pick', 'ok.txt'), 'ok');
+    try { symlinkSync(local('secret.txt'), local('pick', 'link.txt'), 'file'); } catch { return; } // symlinks need developer mode on Windows
+    const b = await h.enqueue({ direction: 'upload', sources: [local('pick')], targetDir: '/home/alice' });
+    await h.settled(b);
+    const byName = Object.fromEntries(h.ofBatch(b).map((i) => [i.name, i]));
+    expect(byName['pick/link.txt']).toMatchObject({ state: 'failed', error: 'linkOutside' });
+    expect(readdirSync(remote('home', 'alice', 'pick'))).toEqual(['ok.txt']);
   });
 });
