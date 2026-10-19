@@ -82,7 +82,7 @@ export interface LocalEntry {
 export type SftpErrorCode =
   | 'notFound' | 'exists' | 'permission' | 'notEmpty' | 'notADirectory' | 'isADirectory' | 'noSpace'
   | 'invalid' | 'noSession' | 'notConnected' | 'changed' | 'cancelled' | 'connectionLost' | 'sftpHostCrashed'
-  | 'unsupported' | 'tooMany' | 'invalidName' | 'failed';
+  | 'unsupported' | 'tooMany' | 'invalidName' | 'linkOutside' | 'linkFolder' | 'failed';
 
 export type SftpResult<T> = { ok: true; value: T } | { ok: false; error: SftpErrorCode };
 
@@ -105,6 +105,8 @@ export function sftpErrorText(code: SftpErrorCode): Localized {
     case 'unsupported': return { key: 'Serwer nie obsługuje tej operacji' };
     case 'tooMany': return { key: 'Za dużo elementów naraz' };
     case 'invalidName': return { key: 'Nazwa, której nie można bezpiecznie zapisać w tym miejscu' };
+    case 'linkFolder': return { key: 'Dowiązania do folderów nie są kopiowane' };
+    case 'linkOutside': return { key: 'Dowiązanie wskazuje poza wybrany folder - pominięto' };
     default: return { key: 'Operacja nie powiodła się' };
   }
 }
@@ -157,6 +159,8 @@ export interface TransferRequest {
   targetDir: string;
   /** Answer every conflict of this batch up front (no question). */
   policy?: ConflictChoice;
+  /** A uuid chosen by the view: `cancel({ batchId })` then also stops the folder walk before enqueue answered. */
+  batchId?: string;
 }
 
 /** Messages on the transfer port (SFTP host -> renderer, transferred as 'mc:sftp-port'). */

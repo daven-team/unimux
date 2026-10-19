@@ -21,6 +21,7 @@ const transfer = z.object({
   sources: z.array(z.string()).min(1).max(SFTP_LIMITS.paths),
   targetDir: z.string(),
   policy: z.enum(['overwrite', 'skip', 'keepBoth']).optional(),
+  batchId: uuid.optional(),
 }).strict().refine((r) => (r.direction === 'download'
   ? r.sources.every(validRemotePath) && validLocalPath(r.targetDir)
   : r.sources.every(validLocalPath) && (r.direction === 'upload' ? validRemotePath(r.targetDir) : validLocalPath(r.targetDir))));

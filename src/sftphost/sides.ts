@@ -2,24 +2,30 @@
 // bytes; the remote ones keep several requests in flight (one request per round trip would crawl over a real link) and are
 // abortable like any stream (destroy closes the remote handle).
 import { createReadStream, createWriteStream } from 'fs';
-import { lstat, mkdir, readdir, rename, rmdir, stat, unlink, utimes } from 'fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'path';
+import { lstat, mkdir, readdir, realpath, rename, rmdir, stat, unlink, utimes } from 'fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { Readable, Writable } from 'stream';
 import type { FileEntry, SFTPWrapper, Stats as SftpStats } from 'ssh2';
-import { kindFromMode, ownerFromLongname, permissionString, posixBasename, safeEntryName, posixContains, posixJoin, posixParent, type EntryKind, type SftpEntry, type SftpErrorCode } from '../shared/sftp';
+import { kindFromMode, ownerFromLongname, permissionString, posixBasename, posixNormalize, safeEntryName, posixContains, posixJoin, posixParent, type EntryKind, type SftpEntry, type SftpErrorCode } from '../shared/sftp';
+import { TargetRegistry } from './targets';
 
 export interface Meta { kind: EntryKind; size: number; mtime: number; mode?: number }
 export interface DirEntry extends Meta { name: string; longname?: string }
 
 /** An error with one of the fixed codes the UI shows (raw messages never leave the SFTP host). */
 export class SftpError extends Error {
-  constructor(readonly code: SftpErrorCode) { super(code); }
+  /** `keepPart`: the old target is gone and could not be put back, so the complete part file is the only copy: never delete it. */
+  constructor(readonly code: SftpErrorCode, readonly keepPart = false) { super(code); }
 }
 
 export interface FileSide {
   readonly remote: boolean;
   /** Names that differ only in case are the same file (Windows and default macOS disks). */
   readonly caseInsensitive: boolean;
+  /** Targets being written right now on this side (all queues that write here share it). */
+  readonly inflight: TargetRegistry;
+  /** Resolves symlinks (null when nothing is there). */
+  realpath(path: string): Promise<string | null>;
   join(dir: string, name: string): string;
   /** A name read from a folder may be joined onto a path of this side (never "..", no separators: shared safeEntryName). */
   validName(name: string): boolean;
@@ -85,19 +91,32 @@ function localMeta(st: { isDirectory(): boolean; isFile(): boolean; isSymbolicLi
   return { kind, size: kind === 'file' ? st.size : 0, mtime: Math.round(st.mtimeMs), mode: st.mode };
 }
 
+/** `a` and `b` name the same file (a case-only rename on a case-insensitive disk); on a case-sensitive one they differ. */
+export async function sameLocalFile(a: string, b: string): Promise<boolean> {
+  try {
+    const [x, y] = await Promise.all([lstat(a, { bigint: true }), lstat(b, { bigint: true })]);
+    return x.dev === y.dev && x.ino === y.ino && x.ino !== 0n;
+  } catch { return false; }
+}
+
 const wrapLocal = async <T>(fn: () => Promise<T>): Promise<T> => {
   try { return await fn(); } catch (error) { throw new SftpError(localError(error)); }
 };
 
 export class LocalSide implements FileSide {
   readonly remote = false;
-  constructor(readonly caseInsensitive = process.platform === 'win32' || process.platform === 'darwin', private readonly windowsNames = process.platform === 'win32') {}
+  readonly inflight: TargetRegistry;
+  constructor(readonly caseInsensitive = process.platform === 'win32' || process.platform === 'darwin', private readonly windowsNames = process.platform === 'win32') {
+    this.inflight = new TargetRegistry((p) => { const r = resolve(p); return caseInsensitive ? r.toLowerCase() : r; });
+  }
+  async realpath(path: string): Promise<string | null> { try { return await realpath(path); } catch { return null; } }
   validName(name: string): boolean { return safeEntryName(name, { windows: this.windowsNames }); }
   join(dir: string, name: string): string { return join(dir, name); }
   contains(parent: string, child: string): boolean {
     const fold = (p: string) => { const r = resolve(p); return this.caseInsensitive ? r.toLowerCase() : r; };
     const rel = relative(fold(parent), fold(child));
-    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+    // "..cache" inside the folder is fine; only ".." itself or "../..." leaves it.
+    return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
   }
   basename(path: string): string { return basename(path); }
   dirname(path: string): string { return dirname(path); }
@@ -122,11 +141,7 @@ export class LocalSide implements FileSide {
   rmdir(path: string): Promise<void> { return wrapLocal(() => rmdir(path)); }
   async rename(from: string, to: string, overwrite: boolean): Promise<void> {
     return wrapLocal(async () => {
-      if (!overwrite) {
-        const there = await this.lstat(to);
-        // A case-only rename of the same file on a case-insensitive disk is allowed.
-        if (there && !(this.caseInsensitive && from.toLowerCase() === to.toLowerCase())) throw new SftpError('exists');
-      }
+      if (!overwrite && await this.lstat(to) && !(await sameLocalFile(from, to))) throw new SftpError('exists');
       await rename(from, to);
     });
   }
@@ -307,7 +322,13 @@ export class RemoteSide implements FileSide {
   readonly remote = true;
   readonly caseInsensitive = false;
   readonly rq: RemoteRequests;
+  readonly inflight = new TargetRegistry((p) => posixNormalize(p));
   constructor(readonly sftp: SFTPWrapper) { this.rq = new RemoteRequests(sftp); }
+  async realpath(path: string): Promise<string | null> {
+    try { return await this.rq.call<string>((cb) => this.sftp.realpath(path, cb)); } catch (error) { if (isNotFound(remoteError(error))) return null; throw error; }
+  }
+  /** The realpath of the remote pane (an error when it does not exist). */
+  resolvePath(path: string): Promise<string> { return this.rq.call<string>((cb) => this.sftp.realpath(path, cb)); }
 
   /** The session ended: pending requests fail with connectionLost, later ones at once. */
   kill(): void { this.rq.kill(); }
@@ -335,7 +356,6 @@ export class RemoteSide implements FileSide {
   async readdirRaw(path: string): Promise<FileEntry[]> {
     return (await this.rq.call<FileEntry[]>((cb) => this.sftp.readdir(path, cb))).filter((e) => e.filename !== '.' && e.filename !== '..');
   }
-  realpath(path: string): Promise<string> { return this.rq.call<string>((cb) => this.sftp.realpath(path, cb)); }
   async mkdir(path: string): Promise<void> {
     try { await this.rq.call<void>((cb) => this.sftp.mkdir(path, cb)); } catch (error) {
       // SFTP v3 answers a generic failure for an existing name: tell it apart.
@@ -354,9 +374,21 @@ export class RemoteSide implements FileSide {
     if (overwrite && this.posixRename) { await this.rq.call<void>((cb) => this.sftp.ext_openssh_rename(from, to, cb)); return; }
     const there = await this.lstat(to);
     if (there && !overwrite) throw new SftpError('exists');
-    // Without posix-rename an existing target is removed first (plain SFTP v3 rename never overwrites).
-    if (there) { if (there.kind === 'dir') throw new SftpError('isADirectory'); await this.unlink(to); }
-    await this.rq.call<void>((cb) => this.sftp.rename(from, to, cb));
+    if (!there) { await this.rq.call<void>((cb) => this.sftp.rename(from, to, cb)); return; }
+    if (there.kind === 'dir') throw new SftpError('isADirectory');
+    // Without posix-rename (plain SFTP v3 rename never overwrites): the old file moves aside first, the new one comes in, and
+    // only then the aside copy goes. A failure puts the old file back; nothing is deleted while it is the only copy.
+    let aside = `${to}.unimux-old`;
+    for (let n = 1; await this.lstat(aside); n++) aside = `${to}.unimux-old${n}`;
+    await this.rq.call<void>((cb) => this.sftp.rename(to, aside, cb));
+    try {
+      await this.rq.call<void>((cb) => this.sftp.rename(from, to, cb));
+    } catch (error) {
+      const code = remoteError(error);
+      try { await this.rq.call<void>((cb) => this.sftp.rename(aside, to, cb)); } catch { throw new SftpError(code, true); }
+      throw new SftpError(code);
+    }
+    await this.unlink(aside).catch(() => undefined);
   }
   async setMtime(path: string, mtime: number): Promise<void> {
     const seconds = Math.floor(mtime / 1000);
