@@ -11,9 +11,26 @@ export const EXIT_DRAIN_MS = 80;
 
 export interface OutputControl { pause(): void; resume(): void }
 
+/** The terminal the renderer reported as focused (its output keeps the short coalescing window, see coalesceDelay). */
+let focusedTerminal: string | null = null;
+/** Live channels by terminal id: a focus change re-arms the newly focused one's pending flush. */
+const channels = new Map<string, OutputChannel>();
+
+export function setFocusedTerminal(id: string | null): void {
+  focusedTerminal = id;
+  if (id !== null) channels.get(id)?.rearm();
+}
+
+/** The terminal the renderer reported as focused (tests). */
+export function focusedTerminalId(): string | null {
+  return focusedTerminal;
+}
+
 export class OutputChannel {
   private buf = '';
   private timer: NodeJS.Timeout | null = null;
+  /** When the pending flush timer fires (Date.now() clock). */
+  private due = Infinity;
   private readonly tail = new TailBuffer(PTY_REPLAY_CHARS);
   private readonly gate = new FlowGate();
   private watchdog: NodeJS.Timeout | null = null;
@@ -27,27 +44,46 @@ export class OutputChannel {
     private readonly sink: () => PtySink,
     private readonly control: OutputControl,
     private readonly flowControl: () => boolean,
-  ) {}
+  ) {
+    channels.set(id, this);
+  }
 
   push(data: string): void {
     if (this.disposed || !data) return;
     this.tail.push(data);
     this.buf += data;
     if (this.buf.length >= FLUSH_NOW_CHARS) this.flush();
-    else if (!this.timer) {
-      const now = Date.now();
-      this.timer = setTimeout(() => this.flush(), alignedDelay(now, coalesceDelay(now, this.lastWrite)));
-    }
+    else if (!this.timer) this.arm();
+  }
+
+  private arm(): void {
+    const now = Date.now();
+    const delay = alignedDelay(now, coalesceDelay(now, this.lastWrite, focusedTerminal === this.id));
+    if (this.timer) clearTimeout(this.timer);
+    this.due = now + delay;
+    this.timer = setTimeout(() => this.flush(), delay);
+  }
+
+  /**
+   * The window may have become shorter (the user typed, or the terminal got the focus): a pending flush that was armed with
+   * the long background window is moved up, so the first echo or redraw does not wait for it.
+   */
+  rearm(): void {
+    if (!this.timer || this.disposed) return;
+    const now = Date.now();
+    if (now + alignedDelay(now, coalesceDelay(now, this.lastWrite, focusedTerminal === this.id)) < this.due) this.arm();
   }
 
   /** The user typed into this terminal (echoes are flushed faster). */
   wrote(): void {
     this.lastWrite = Date.now();
+    this.rearm();
   }
 
   flush(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.due = Infinity;
     if (!this.buf || this.disposed) return;
     const out = this.buf;
     this.buf = '';
@@ -101,6 +137,7 @@ export class OutputChannel {
 
   dispose(): void {
     this.disposed = true;
+    if (channels.get(this.id) === this) channels.delete(this.id);
     if (this.timer) clearTimeout(this.timer);
     if (this.watchdog) clearTimeout(this.watchdog);
     this.timer = null;

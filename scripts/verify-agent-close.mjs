@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { launchApp, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
+import { launchApp, mainInspector, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
 
 const ids = { a: randomUUID(), b: randomUUID(), c: randomUUID(), d: randomUUID() };
 const tabs = { main: randomUUID(), other: randomUUID(), third: randomUUID() };
@@ -24,33 +24,6 @@ function state(project) {
       { id: tabs.other, name: 'Other', layout: layout(1), cells: [{ id: ids.c, profileId: 'fake', name: 'Writer' }] },
       { id: tabs.third, name: 'Third', layout: layout(1), cells: [{ id: ids.d, profileId: 'fake', name: 'Tester' }] },
     ] }],
-  };
-}
-
-/** CDP of the main process (Node inspector): evaluates with the app's own electron module. */
-async function mainInspector(port) {
-  let target;
-  for (let i = 0; i < 50 && !target; i++) {
-    try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json())[0]; } catch { await sleep(200); }
-  }
-  if (!target) throw new Error('main inspector not reachable');
-  const ws = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
-  let next = 0;
-  const pending = new Map();
-  ws.onmessage = (e) => { const m = JSON.parse(e.data); pending.get(m.id)?.(m); pending.delete(m.id); };
-  const evaluate = (expression) => new Promise((resolve, reject) => {
-    const id = ++next;
-    pending.set(id, (m) => (m.error || m.result.exceptionDetails ? reject(new Error(JSON.stringify(m.error ?? m.result.exceptionDetails))) : resolve(m.result.result.value)));
-    ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true } }));
-  });
-  await evaluate(`globalThis.__el = process.mainModule.require('electron'); globalThis.__notes = [];
-    __el.ipcMain.on('notify', (_e, n) => __notes.push(n)); true`);
-  return {
-    evaluate,
-    hook: (cellId, event) => evaluate(`__el.BrowserWindow.getAllWindows()[0].webContents.send('cell:hook', ${JSON.stringify(cellId)}, ${JSON.stringify(event)}), true`),
-    notes: () => evaluate('__notes.splice(0)'),
-    close: () => { try { ws.close(); } catch { /* closed */ } },
   };
 }
 

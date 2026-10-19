@@ -11,6 +11,7 @@ import { sshHeaderName, sshPhaseLabel, userAtEndpoint } from '../../../shared/ss
 import { useSshStore } from '../sshStore';
 import { disconnectCell, openSshView, reconnectCell, sshContext, sshHostMenuItems } from '../ssh';
 import { SshCellCard } from './ssh/SshCellCard';
+import { openSftp } from '../sftp';
 import { profileOptionLabel } from '../cliUi';
 import { CliMissingCard } from './CliMissingCard';
 import type { Cell } from '../../../shared/types';
@@ -22,6 +23,7 @@ import type { PathMode } from '../../../shared/types';
 import { addDroppedFilesToCell, addPathsToCell, cellDropFormat, cellRefusesPaths, readDroppedPaths } from '../pathDrop';
 import { setUi, toast, update, useStore } from '../store';
 import { terminals } from '../terminals/TerminalManager';
+import { useBlink } from '../blink';
 import { openMenu, openMenuAt, type MenuItem } from './ContextMenu';
 import { IBranch, IMax, IRestart, IRestore, IX } from './icons';
 import './terminalCell.css';
@@ -44,6 +46,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const profiles = useStore((st) => st.s.profiles);
   const profile = useStore((st) => getProfile(st.s, cell.profileId));
   const status = useStore((st) => st.ui.statuses[cell.id] ?? 'idle');
+  useBlink(status === 'working');
   const failure = useStore((st) => st.ui.failures[cell.id]);
   const focused = useStore((st) => st.ui.focusedCellId === cell.id);
   const mcpInfo = useStore((st) => st.ui.mcpInfo);
@@ -88,6 +91,8 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const sshItems = (): MenuItem[] => [
     { label: tr('Połącz ponownie'), onClick: () => void reconnectCell(cell.id) },
     { label: tr('Rozłącz'), onClick: () => disconnectCell(cell.id) },
+    // 0.9.8: the SFTP view on this host, in the folder the shell last reported (OSC 7 / 9;9), else the login folder.
+    ...(host && sshSession?.phase === 'connected' ? [{ label: tr('Otwórz SFTP tutaj'), onClick: () => openSftp({ hostId: host.id, path: terminals.remoteCwd(cell.id) }) }] : []),
     ...(host ? [{ label: tr('Edytuj host'), onClick: () => openSshView({ kind: 'host', hostId: host.id }) }] : []),
     ...(host ? [{ label: tr('Kopiuj adres'), onClick: () => window.mc.clipboardWrite(userAtEndpoint(host)) }] : []),
   ];

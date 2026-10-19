@@ -31,13 +31,6 @@ export const sshModeMessages = {
   'Usuń {host}': ['Remove {host}', '{host} entfernen', 'Eliminar {host}', 'Supprimer {host}', 'Remover {host}'],
   '{name}, hosty: {count}': ['{name}, hosts: {count}', '{name}, Hosts: {count}', '{name}, hosts: {count}', '{name}, hôtes : {count}', '{name}, anfitriões: {count}'],
   'Dodano {date}': ['Added {date}', 'Hinzugefügt am {date}', 'Añadido el {date}', 'Ajouté le {date}', 'Adicionado em {date}'],
-  'Przesyłanie plików przez SFTP pojawi się w jednej z kolejnych wersji.': [
-    'File transfer over SFTP is coming in a later version.',
-    'Dateiübertragung per SFTP kommt in einer späteren Version.',
-    'La transferencia de archivos por SFTP llegará en una versión posterior.',
-    'Le transfert de fichiers par SFTP arrivera dans une version ultérieure.',
-    'A transferência de ficheiros por SFTP chega numa versão posterior.',
-  ],
   // 0.9.2 polish: the details pane, bulk send, the private key of a stored key.
   'Odrzucić niezapisane zmiany?': ['Discard unsaved changes?', 'Nicht gespeicherte Änderungen verwerfen?', '¿Descartar los cambios sin guardar?', 'Abandonner les modifications non enregistrées ?', 'Descartar as alterações não guardadas?'],
   'Odrzuć zmiany': ['Discard changes', 'Änderungen verwerfen', 'Descartar cambios', 'Abandonner les modifications', 'Descartar alterações'],

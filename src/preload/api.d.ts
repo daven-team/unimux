@@ -14,6 +14,7 @@ import type { ReplaceRequest, ReplaceResult, SearchOptions, SearchResult } from 
 import type { CreateResult, DeleteResult, FileOpProgress, FileOpRequest, FileOpResult, RenameResult } from '../shared/fileOps';
 import type { GitApi } from '../shared/git';
 import type { SshApi, SshPrompt, SshSessionState, SshVaultInfo } from '../shared/ssh';
+import type { LocalFilesApi, SftpApi, SftpSessionState } from '../shared/sftp';
 import type { AppState, CellSession, Profile, ProjectDirectory, ProjectFilePreview, SessionInfo, UpdateState, Worktree, WorktreeInspection, WorktreeInspectResult, WorktreeRemoveResult } from '../shared/types';
 
 export type { SessionInfo };
@@ -107,6 +108,10 @@ export interface McApi {
   /** The Git panel (see shared/git.ts): every call names a project; main resolves the folder and validates the request. */
   git: GitApi;
   ssh: SshApi;
+  /** SFTP sessions and transfers (0.9.8); progress arrives on the 'mc:sftp-port' MessagePort (SftpPortMessage). */
+  sftp: SftpApi;
+  /** The local pane of the SFTP view: any folder, drives, home, new folder, rename, trash, show in Explorer/Finder. */
+  localFs: LocalFilesApi;
   notify(n: { title: string; body: string; cellId: string }): void;
   openExternal(url: string): void;
   openPath(path: string): void;
@@ -158,6 +163,10 @@ export interface McApi {
   on(channel: 'ssh:session', cb: (state: SshSessionState) => void): () => void;
   on(channel: 'ssh:prompt', cb: (cellId: string, prompt: SshPrompt | null) => void): () => void;
   on(channel: 'ssh:vault:changed', cb: (info: SshVaultInfo) => void): () => void;
+  on(channel: 'sftp:session', cb: (state: SftpSessionState) => void): () => void;
+  on(channel: 'sftp:prompt', cb: (sessionId: string, prompt: SshPrompt | null) => void): () => void;
+  /** The SFTP Host restarted: every SFTP session ended and unfinished transfers are lost (failUnfinished). */
+  on(channel: 'sftp:hostCrashed', cb: () => void): () => void;
   on(channel: 'app:before-quit', cb: () => void): () => void;
   /** The user closes the window or quits while agents work: the renderer asks and answers with answerQuit. */
   on(channel: 'app:confirm-quit', cb: () => void): () => void;

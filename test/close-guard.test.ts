@@ -4,7 +4,9 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 let store: any;
 let guard: any;
+let sftpStore: any;
 const answers: string[] = [];
+const guards: boolean[] = [];
 const handlers = new Map<string, (...args: unknown[]) => void>();
 
 beforeAll(async () => {
@@ -15,7 +17,7 @@ beforeAll(async () => {
       platform: 'linux',
       applyStateEdit: (edit: { id: string }) => Promise.resolve({ revision: 0, editId: edit.id }),
       loadSnapshot: () => new Promise(() => undefined),
-      setQuitGuard: () => undefined,
+      setQuitGuard: (ask: boolean) => { guards.push(ask); },
       answerQuit: (answer: string) => { answers.push(answer); },
       on: (channel: string, cb: (...args: unknown[]) => void) => { handlers.set(channel, cb); return () => undefined; },
     },
@@ -24,8 +26,10 @@ beforeAll(async () => {
   // The renderer is not part of the node tsconfig: loaded through variables, so tsc does not follow the imports.
   const storePath = '../src/renderer/src/store';
   const guardPath = '../src/renderer/src/closeGuard';
+  const sftpStorePath = '../src/renderer/src/sftpStore';
   store = await import(/* @vite-ignore */ storePath);
   guard = await import(/* @vite-ignore */ guardPath);
+  sftpStore = await import(/* @vite-ignore */ sftpStorePath);
 });
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -86,5 +90,55 @@ describe('quit question', () => {
     store.getUi().dialog.onChoose('close', false);
     await flush();
     expect(answers.at(-1)).toBe('quit');
+  });
+});
+
+describe('quit question with SFTP transfers', () => {
+  const item = (id: string, state: string) => ({ id, state, sessionId: 'sftp:x', batchId: 'b', name: id });
+  it('holds the quit while transfers run, asks about them first (Cancel keeps them), then about working agents', async () => {
+    // initQuitGuard already ran in the test above: its subscriptions and the 'app:confirm-quit' handler are live.
+    const ask = handlers.get('app:confirm-quit')!;
+    store.setUi({ statuses: {} });
+    guards.length = 0;
+    sftpStore.useSftpStore.setState({ transfers: [item('a', 'running'), item('b', 'queued'), item('c', 'done')], preparing: [] });
+    expect(guards).toEqual([true]);
+    expect(guard.activeTransferCount()).toBe(2);
+    answers.length = 0;
+    ask();
+    expect(answers).toEqual(['asking']);
+    const q = store.getUi().dialog;
+    expect(q.title).toBe('Quit while transfers are running?');
+    expect(q.body).toBe('Transfers in progress: 2. Quitting the app stops them.');
+    expect(q.actions.map((a: { label: string }) => a.label)).toEqual(['Quit anyway']);
+    ask();
+    expect(answers).toEqual(['asking', 'asking']);
+    q.onChoose(null);
+    await flush();
+    expect(answers.at(-1)).toBe('cancel');
+    expect(sftpStore.useSftpStore.getState().transfers).toHaveLength(3);
+    // Quit anyway with no working agent: quits.
+    ask();
+    store.getUi().dialog.onChoose('quit');
+    await flush();
+    expect(answers.at(-1)).toBe('quit');
+    // Transfers and working agents: both questions in turn; a further Close during the second one is "still asking".
+    workingState();
+    answers.length = 0;
+    ask();
+    store.getUi().dialog.onChoose('quit');
+    await flush();
+    const agents = store.getUi().dialog;
+    expect(agents.title).toContain('agents');
+    ask();
+    expect(answers).toEqual(['asking', 'asking']);
+    agents.onChoose('close', false);
+    await flush();
+    expect(answers.at(-1)).toBe('quit');
+    // A preparing folder walk counts too; nothing running and no working agent lets the quit go unasked.
+    store.setUi({ statuses: {} });
+    sftpStore.useSftpStore.setState({ transfers: [item('c', 'done')], preparing: [{ batchId: 'p', queue: null, sources: 1 }] });
+    expect(guards.at(-1)).toBe(true);
+    sftpStore.useSftpStore.setState({ preparing: [] });
+    expect(guards.at(-1)).toBe(false);
   });
 });

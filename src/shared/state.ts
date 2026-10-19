@@ -10,8 +10,10 @@ import { USAGE_INTERVALS_MINUTES } from './usage';
 import { defaultAlerts, LEGACY_ALERT_KEYS, readAlerts } from './alerts';
 import { DEFAULT_UPDATE_MODE, normalizeUpdateMode } from './updateMode';
 import { DEFAULT_BACKGROUND_LOAD, normalizeBackgroundLoad } from './backgroundLoad';
+import { DEFAULT_SCROLLBACK_LINES, normalizeScrollback } from './terminalLimits';
 import { normalizeShortcutOverrides } from './shortcuts';
 import { normalizeSshHosts, type SshCellRef, type SshHost } from './ssh';
+import { defaultSftpPlaces, forgetRemotePlace, normalizeSftpPlaces } from './sftpView';
 import type {
   AppState, ArchivedTab, Cell, Preset, PresetCell, Profile, Project, Settings, Snippet, Tab, Worktree,
 } from './types';
@@ -31,7 +33,8 @@ export function defaultState(platform: AppPlatform = 'win32'): AppState {
     presets: [],
     snippets: [],
     sshHosts: [],
-    settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true },
+    sftp: defaultSftpPlaces(),
+    settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true, scrollbackLines: DEFAULT_SCROLLBACK_LINES },
     sidebarCollapsed: false,
     snippetsOpen: true,
     sidebarWidth: PANEL_LIMITS.sidebar.default,
@@ -317,7 +320,7 @@ export function updateSshHost(s: AppState, id: string, patch: Partial<Omit<SshHo
   }) };
 }
 
-export const removeSshHost = (s: AppState, id: string): AppState => ({ ...s, sshHosts: s.sshHosts.filter((h) => h.id !== id) });
+export const removeSshHost = (s: AppState, id: string): AppState => ({ ...s, sshHosts: s.sshHosts.filter((h) => h.id !== id), sftp: forgetRemotePlace(s.sftp ?? defaultSftpPlaces(), id) });
 
 export function duplicateSshHost(s: AppState, id: string, newId = uid(), now = Date.now()): AppState {
   const source = s.sshHosts.find((h) => h.id === id);
@@ -429,6 +432,7 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
     presets: (Array.isArray(r.presets) ? r.presets : []).map((p) => ({ ...p, cells: cleanPresetCells(p.cells ?? []) })),
     snippets: Array.isArray(r.snippets) ? r.snippets : [],
     sshHosts: normalizeSshHosts(r.sshHosts),
+    sftp: normalizeSftpPlaces(r.sftp),
     settings: {
       ...d.settings, ...(r.settings ?? {}),
       // Existing Polish installations keep their UI and do not get first-run onboarding again.
@@ -442,6 +446,7 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
       usageCollapsed: typeof r.settings?.usageCollapsed === 'boolean' ? r.settings.usageCollapsed : d.settings.usageCollapsed,
       confirmCloseWorking: typeof r.settings?.confirmCloseWorking === 'boolean' ? r.settings.confirmCloseWorking : d.settings.confirmCloseWorking,
       backgroundLoad: normalizeBackgroundLoad(r.settings?.backgroundLoad),
+      scrollbackLines: normalizeScrollback(r.settings?.scrollbackLines),
       shortcuts: normalizeShortcutOverrides(r.settings?.shortcuts, platform),
       // The retired notifications / waitingSound* keys only seed the alerts when none are saved yet; they are never written again.
       alerts: readAlerts(r.settings as Record<string, unknown> | undefined),

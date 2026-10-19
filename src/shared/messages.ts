@@ -14,6 +14,8 @@ import { macUpdateMessages } from './macUpdateMessages';
 import { perfMessages } from './perfMessages';
 import { railMessages } from './railMessages';
 import { settingsMessages } from './settingsMessages';
+import { sftpMessages } from './sftpMessages';
+import { sftpViewMessages } from './sftpViewMessages';
 import { shortcutMessages } from './shortcutMessages';
 import { sshMessages } from './sshMessages';
 import { sshModeMessages } from './sshModeMessages';
@@ -44,6 +46,8 @@ export const messages = {
   ...stabilityMessages,
   ...railMessages,
   ...settingsMessages,
+  ...sftpMessages,
+  ...sftpViewMessages,
   ...shortcutMessages,
   ...sshMessages,
   ...sshModeMessages,
@@ -250,7 +254,7 @@ export const messages = {
   '+ dodaj rząd': ['+ add row', '+ Zeile hinzufügen', '+ añadir fila', '+ ajouter une ligne', '+ adicionar linha'],
   'Komórki': ['Cells', 'Zellen', 'Celdas', 'Cellules', 'Células'],
   'profil dla wszystkich…': ['profile for all…', 'Profil für alle…', 'perfil para todas…', 'profil pour toutes…', 'perfil para todas…'],
-  'Prompt startowy': ['Startup prompt', 'Startprompt', 'Prompt inicial', 'Prompt initial', 'Prompt inicial'],
+  'Prompt startowy': ['Startup prompt', 'Start-Prompt', 'Prompt inicial', 'Prompt initial', 'Prompt inicial'],
   'Prompt startowy dla wszystkich': ['Startup prompt for all cells', 'Startprompt für alle Zellen', 'Prompt inicial para todas las celdas', 'Prompt initial pour toutes les cellules', 'Prompt inicial para todas as células'],
   'Prompt dla wszystkich': ['Prompt for all', 'Prompt für alle', 'Prompt para todas', 'Prompt pour toutes', 'Prompt para todas'],
   'Wyczyść prompty': ['Clear prompts', 'Prompts leeren', 'Limpiar prompts', 'Effacer les prompts', 'Limpar prompts'],

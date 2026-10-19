@@ -1,16 +1,17 @@
 // Owns every SSH session: one ssh2 Client per cell id (spec 6.1, 6.2, 6.4). Independent of Electron so it is tested in Node.
-// Secrets arrive in SshConnectRequest (memory only), are dropped once ssh2 used them, and are never logged.
-import { randomUUID } from 'crypto';
+// Secrets arrive in SshConnectRequest (memory only), are dropped once ssh2 used them, and are never logged. The login itself
+// (connect options, host key and auth callbacks) is the shared SshLogin of src/sshcore, also used by the SFTP Host.
 import { StringDecoder } from 'string_decoder';
-import { Client, type ClientChannel, type ConnectConfig } from 'ssh2';
+import { Client, type ClientChannel } from 'ssh2';
 import type { SshConnectRequest } from '../shared/ipc';
 import { sanitizeServerText, type SshErrorCode, type SshPhase } from '../shared/ssh';
+import { SshLogin, type SshAuthPromptInfo } from '../sshcore/login';
 import type { PtySink } from './manager';
 import { OutputChannel } from './output';
 import type { TerminalBackend } from './router';
-import { isRecoverableAuthError, mapSshError, sshDebugFilter } from './sshErrors';
+import { isRecoverableAuthError, mapSshError } from './sshErrors';
 
-export type SshAuthPromptInfo = { kind: 'password' | 'keyboard'; name?: string; instructions?: string; fields: Array<{ text: string; echo: boolean }>; retry: boolean };
+export type { SshAuthPromptInfo };
 
 export interface SshEvents {
   spawned(id: string): void;
@@ -22,20 +23,15 @@ export interface SshEvents {
 
 export interface SshTimers { connectMs: number; authStepMs: number; shellMs: number; quietMs: number; startupMaxMs: number; killGraceMs: number; keepaliveMs: number; keepaliveCountMax: number }
 export const SSH_TIMERS: SshTimers = { connectMs: 20_000, authStepMs: 20_000, shellMs: 20_000, quietMs: 400, startupMaxMs: 5000, killGraceMs: 2000, keepaliveMs: 15_000, keepaliveCountMax: 3 };
-const MAX_PROMPT_TRIES = 3;
-
 /**
  * ssh2's destroy() is a no-op once end() half-closed the socket, so a peer that never reads or answers the FIN (a server that
  * accepts TCP but never speaks SSH) would keep the socket open for good. The socket itself is destroyed as well.
  */
-function hardClose(client: Client): void {
+export function hardClose(client: Client): void {
   try { client.destroy(); } catch { /* gone */ }
   const sock = (client as unknown as { _sock?: { destroyed?: boolean; destroy(): void } })._sock;
   try { if (sock && !sock.destroyed) sock.destroy(); } catch { /* gone */ }
 }
-
-type Step = 'publickey' | 'savedPassword';
-type NextAuth = (method: unknown) => void;
 
 interface Session {
   id: string;
@@ -46,13 +42,8 @@ interface Session {
   /** Our copy of the request; privateKey, passphrase and password are deleted after ready and on every end. */
   req: SshConnectRequest;
   size: { cols: number; rows: number };
-  steps: Step[];
-  passwordTries: number;
-  keyboardTries: number;
+  login: SshLogin;
   timer: NodeJS.Timeout | null;
-  hostKey: { promptId: string; verify: (ok: boolean) => void } | null;
-  auth: { promptId: string; answer: (values: string[] | null) => void } | null;
-  override: SshErrorCode | undefined;
   error: SshErrorCode | undefined;
   exited: boolean;
   exitCode: number | undefined;
@@ -85,10 +76,18 @@ export class SshManager implements TerminalBackend {
     const s = {
       id: req.id, client, stream: null, phase: 'connecting', req: { ...req },
       size: { cols: Math.max(2, req.cols), rows: Math.max(1, req.rows) },
-      steps: [...(req.privateKey ? ['publickey' as const] : []), ...(req.password ? ['savedPassword' as const] : [])],
-      passwordTries: 0, keyboardTries: 0, timer: null, hostKey: null, auth: null, override: undefined, error: undefined,
+      timer: null, error: undefined,
       exited: false, exitCode: undefined, startup: { text: req.startup, quiet: null, max: null }, ended: false, draining: false, closed, markClosed,
-    } as Omit<Session, 'out'> as Session;
+    } as Omit<Session, 'out' | 'login'> as Session;
+    s.login = new SshLogin(s.req, this.timers, {
+      live: () => this.live(s),
+      arm: (ms) => this.arm(s, ms),
+      disarm: () => this.disarm(s),
+      phase: (phase) => { s.phase = phase; this.events.status(s.id, phase); },
+      hostKey: (promptId, key) => this.events.hostKey(s.id, promptId, key),
+      authPrompt: (promptId, prompt) => this.events.authPrompt(s.id, promptId, prompt),
+      debug: (line) => this.events.debug?.(s.id, line),
+    });
     s.out = new OutputChannel(req.id, () => this.sink, { pause: () => this.pauseStreams(s), resume: () => this.resumeStreams(s) }, () => this.flowControl);
     this.sessions.set(req.id, s);
     this.events.spawned(req.id);
@@ -99,18 +98,10 @@ export class SshManager implements TerminalBackend {
     client.on('error', (err) => {
       // A key that cannot sign is skipped by ssh2 itself (saved password, prompt or keyboard-interactive come next).
       if (isRecoverableAuthError(err)) return;
-      this.fail(s, mapSshError(err, s.override));
+      this.fail(s, mapSshError(err, s.login.override));
     });
     client.on('close', () => this.onClose(s));
-    const keep = sshDebugFilter();
-    const config: ConnectConfig = {
-      host: req.host, port: req.port, username: req.username,
-      readyTimeout: 0, keepaliveInterval: this.timers.keepaliveMs, keepaliveCountMax: this.timers.keepaliveCountMax, tryKeyboard: true,
-      hostVerifier: ((key: Buffer, verify: (ok: boolean) => void) => { this.onHostKey(s, key, verify); }) as unknown as ConnectConfig['hostVerifier'],
-      authHandler: ((methods: string[] | null, _partial: boolean, next: NextAuth) => { this.nextAuth(s, methods, next); }) as unknown as ConnectConfig['authHandler'],
-      ...(req.debug ? { debug: (line: string) => { if (keep(line)) this.events.debug?.(s.id, line); } } : {}),
-    };
-    try { client.connect(config); } catch (err) { this.fail(s, mapSshError(err)); }
+    try { client.connect(s.login.connectConfig()); } catch (err) { this.fail(s, mapSshError(err)); }
   }
 
   private arm(s: Session, ms: number): void {
@@ -123,99 +114,19 @@ export class SshManager implements TerminalBackend {
     s.timer = null;
   }
 
-  private onHostKey(s: Session, key: Buffer, verify: (ok: boolean) => void): void {
-    if (!this.live(s)) { verify(false); return; }
-    this.disarm(s);
-    s.phase = 'verifying';
-    this.events.status(s.id, 'verifying');
-    const promptId = randomUUID();
-    s.hostKey = { promptId, verify };
-    this.events.hostKey(s.id, promptId, key.toString('base64'));
-  }
-
   answerHostKey(id: string, promptId: string, accept: boolean, error?: SshErrorCode): void {
     const s = this.sessions.get(id);
-    if (!s?.hostKey || s.hostKey.promptId !== promptId || s.ended) return;
-    const { verify } = s.hostKey;
-    s.hostKey = null;
-    if (accept) {
-      s.phase = 'authenticating';
-      this.events.status(s.id, 'authenticating');
-      this.arm(s, this.timers.authStepMs);
-    } else s.override = error ?? 'hostKeyRejected';
-    verify(accept);
-  }
-
-  private nextAuth(s: Session, methods: string[] | null, next: NextAuth): void {
-    if (!this.live(s) || s.override) { next(false); return; }
-    const username = s.req.username;
-    const allows = (method: string) => methods === null || methods.includes(method);
-    while (s.steps.length) {
-      const step = s.steps.shift()!;
-      if (step === 'publickey' && s.req.privateKey && allows('publickey')) {
-        this.arm(s, this.timers.authStepMs);
-        next({ type: 'publickey', username, key: s.req.privateKey, ...(s.req.passphrase ? { passphrase: s.req.passphrase } : {}) });
-        return;
-      }
-      if (step === 'savedPassword' && s.req.password && allows('password')) {
-        this.arm(s, this.timers.authStepMs);
-        next({ type: 'password', username, password: s.req.password });
-        return;
-      }
-    }
-    if (methods === null) { this.arm(s, this.timers.authStepMs); next({ type: 'none', username }); return; }
-    if (methods.includes('password') && s.req.allowPasswordPrompt && s.passwordTries < MAX_PROMPT_TRIES) {
-      s.passwordTries++;
-      this.disarm(s);
-      this.ask(s, { kind: 'password', fields: [], retry: s.passwordTries > 1 }, (values) => {
-        if (!values) { s.override = 'cancelled'; next(false); return; }
-        this.arm(s, this.timers.authStepMs);
-        next({ type: 'password', username, password: values[0] ?? '' });
-      });
-      return;
-    }
-    if (methods.includes('keyboard-interactive') && s.keyboardTries < MAX_PROMPT_TRIES) {
-      s.keyboardTries++;
-      this.arm(s, this.timers.authStepMs);
-      next({
-        type: 'keyboard-interactive', username,
-        prompt: (name: string, instructions: string, _lang: string, prompts: Array<{ prompt: string; echo?: boolean }>, finish: (answers: string[]) => void) => {
-          if (!this.live(s) || !prompts.length) { finish([]); return; }
-          this.disarm(s);
-          this.ask(s, {
-            kind: 'keyboard', name: sanitizeServerText(name, 200), instructions: sanitizeServerText(instructions),
-            fields: prompts.slice(0, 10).map((p) => ({ text: sanitizeServerText(p.prompt, 200), echo: p.echo === true })), retry: s.keyboardTries > 1,
-          }, (values) => {
-            if (!values) { s.override = 'cancelled'; finish([]); return; }
-            this.arm(s, this.timers.authStepMs);
-            finish(values);
-          });
-        },
-      });
-      return;
-    }
-    next(false);
-  }
-
-  private ask(s: Session, prompt: SshAuthPromptInfo, answer: (values: string[] | null) => void): void {
-    const promptId = randomUUID();
-    s.auth = { promptId, answer };
-    this.events.authPrompt(s.id, promptId, prompt);
+    if (!s || s.ended) return;
+    s.login.answerHostKey(promptId, accept, error);
   }
 
   answerAuth(id: string, promptId: string, values: string[] | null): void {
     const s = this.sessions.get(id);
-    if (!s?.auth || s.auth.promptId !== promptId || s.ended) return;
-    const { answer } = s.auth;
-    s.auth = null;
-    answer(values === null ? null : values.map((v) => String(v)));
+    if (!s || s.ended) return;
+    s.login.answerAuth(promptId, values);
   }
 
-  private dropSecrets(s: Session): void {
-    delete s.req.privateKey;
-    delete s.req.passphrase;
-    delete s.req.password;
-  }
+  private dropSecrets(s: Session): void { s.login.dropSecrets(); }
 
   private onReady(s: Session): void {
     if (!this.live(s)) return;
@@ -235,8 +146,8 @@ export class SshManager implements TerminalBackend {
       stream.on('exit', (code: number | null) => { s.exited = true; if (typeof code === 'number') s.exitCode = code; });
       stream.on('close', () => { this.output(s, stdout.end() + stderr.end()); try { s.client.end(); } catch { /* gone */ } });
       // A reset mid-write surfaces as a stream error: it ends this session, never the Pty Host (and every other terminal).
-      stream.on('error', (error: unknown) => this.fail(s, mapSshError(error, s.override)));
-      stream.stderr.on('error', (error: unknown) => this.fail(s, mapSshError(error, s.override)));
+      stream.on('error', (error: unknown) => this.fail(s, mapSshError(error, s.login.override)));
+      stream.stderr.on('error', (error: unknown) => this.fail(s, mapSshError(error, s.login.override)));
       if (s.startup.text) s.startup.max = setTimeout(() => this.typeStartup(s), this.timers.startupMaxMs);
     });
   }
@@ -271,8 +182,7 @@ export class SshManager implements TerminalBackend {
     // I3: after the remote exit a hard-closing server may answer the disconnect with a reset; that is still a clean close.
     if (!s.error && !s.exited) s.error = error;
     this.disarm(s);
-    if (s.hostKey) { const { verify } = s.hostKey; s.hostKey = null; try { verify(false); } catch { /* ssh2 already gave up */ } }
-    s.auth = null;
+    s.login.abort();
     try { s.client.end(); } catch { /* gone */ }
     // ssh2 emits 'close' after an error; if it does not, the session is ended here.
     setTimeout(() => { if (!s.ended && this.sessions.get(s.id) === s) { hardClose(s.client); this.onClose(s); } }, this.timers.killGraceMs);
@@ -294,7 +204,7 @@ export class SshManager implements TerminalBackend {
         this.sessions.delete(s.id);
         if (s.error) this.events.status(s.id, 'error', { error: s.error });
         else if (s.phase === 'connected' && s.exited) this.events.status(s.id, 'closed', s.exitCode !== undefined ? { exitCode: s.exitCode } : undefined);
-        else this.events.status(s.id, 'error', { error: s.override ?? 'reset' });
+        else this.events.status(s.id, 'error', { error: s.login.override ?? 'reset' });
         this.sink.exit(s.id, s.exitCode ?? -1);
       }
       s.markClosed();
@@ -304,10 +214,10 @@ export class SshManager implements TerminalBackend {
   private pauseStreams(s: Session): void { s.stream?.pause(); s.stream?.stderr.pause(); }
   private resumeStreams(s: Session): void { s.stream?.resume(); s.stream?.stderr.resume(); }
 
-  write(id: string, data: string): void {
+  write(id: string, data: string, reply = false): void {
     const s = this.sessions.get(id);
     if (!s?.stream || s.ended) return;
-    s.out.wrote();
+    if (!reply) s.out.wrote();
     s.stream.write(Buffer.from(data, 'utf8'));
   }
 
@@ -338,8 +248,7 @@ export class SshManager implements TerminalBackend {
     this.clearStartup(s);
     this.dropSecrets(s);
     s.out.dispose();
-    if (s.hostKey) { const { verify } = s.hostKey; s.hostKey = null; try { verify(false); } catch { /* gone */ } }
-    s.auth = null;
+    s.login.abort();
     try { s.stream?.end(); } catch { /* gone */ }
     try { s.client.end(); } catch { /* gone */ }
     const destroy = setTimeout(() => { hardClose(s.client); s.markClosed(); }, timeoutMs);

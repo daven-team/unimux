@@ -3,8 +3,24 @@
 // renderer (xterm keeps 3 x 32 bits per cell, lines are allocated only once they exist), plus the two caps below as
 // strings (one byte per character for plain output).
 
-/** Lines of history kept by each terminal in the renderer (xterm `scrollback`). Full buffer = about 14 MB at 120 columns. */
-export const SCROLLBACK_LINES = 10_000;
+/**
+ * Lines of history kept by each terminal in the renderer (xterm `scrollback`), chosen in Settings > Terminal. A full buffer
+ * of 10,000 lines is about 14 MB at 120 columns.
+ */
+export const SCROLLBACK_CHOICES = [1000, 2500, 5000, 10_000, 25_000] as const;
+export const DEFAULT_SCROLLBACK_LINES = 5000;
+
+/** A saved scrollback setting, or the default when it is missing or not one of the choices. */
+export function normalizeScrollback(value: unknown): number {
+  return (SCROLLBACK_CHOICES as readonly number[]).includes(value as number) ? (value as number) : DEFAULT_SCROLLBACK_LINES;
+}
+
+/** Gives open terminals (xterm instances) a new scrollback (xterm drops the oldest lines when it shrinks); returns the value used. */
+export function applyScrollback(terminals: Iterable<{ options: { scrollback?: number } }>, lines: unknown): number {
+  const next = normalizeScrollback(lines);
+  for (const term of terminals) if (term.options.scrollback !== next) term.options.scrollback = next;
+  return next;
+}
 
 /** Characters of recent output the pty host keeps per terminal to replay into a reloaded renderer. */
 export const PTY_REPLAY_CHARS = 512 * 1024;

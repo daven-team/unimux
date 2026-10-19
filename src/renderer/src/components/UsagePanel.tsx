@@ -10,7 +10,7 @@ import { useUsage } from '../usage';
 import { openMenuAt } from './ContextMenu';
 import { IChevron, IPlus } from './icons';
 import { ProviderIcon } from './ProviderIcons';
-import { RefreshIcon, useHoldBusy } from './Spinner';
+import { BusyRing, RefreshIcon, useHoldBusy } from './Spinner';
 
 const DORMANT_NOTE = 'Token dostępu wygasł - Claude Code odświeży go przy najbliższym użyciu. Uruchom sesję Claude (albo wyślij wiadomość), a limity wrócą.';
 const HELD_NOTE = {
@@ -203,7 +203,7 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
         {showMain && usage.active && <span className="usage-chip main">{tr('główne')}</span>}
         {swapping === usage.accountId && (
           <span className="usage-swapping" role="status" aria-live="polite">
-            <span className="usage-spinner" aria-hidden="true" />
+            <BusyRing className="usage-spinner" />
             {tr('Przełączam konto…')}
           </span>
         )}
