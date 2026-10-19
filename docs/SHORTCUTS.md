@@ -10,12 +10,12 @@ These are the defaults. Every one of them can be changed, disabled or restored i
 | `Ctrl+Shift+T` | New tab with a single terminal |
 | `Ctrl+Shift+G` | New grid or preset |
 | `Ctrl+Shift+N` | Add an agent to the current grid |
-| `Ctrl+Shift+W` | Close the grid (it goes to History) |
+| `Ctrl+Shift+W` | Close the tab in front: a grid (it goes to History), a file, the SSH view or Settings |
 | `Ctrl+Shift+H` | History of conversations and grids |
 | `Ctrl+Shift+M` | Maximize or restore the cell (or double click its header) |
 | `Ctrl+Alt+Arrows` | Move between cells |
 | `Ctrl+Alt+Shift+Arrows` | Swap the focused cell with its neighbour (or drag a cell by its header onto another one) |
-| `Ctrl+Tab` | Next grid |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab of the strip (grids of all projects, files) |
 | `Ctrl+Shift+B` / `Ctrl+Shift+E` | Toggle snippets / projects panel |
 | `Ctrl+Wheel` | Zoom a single cell |
 

@@ -388,9 +388,10 @@ describe('the default map reproduces the old behaviour', () => {
     }
     if (ctrlShift && e.code === 'KeyB') return 'snippets.toggle';
     if (ctrlShift && e.code === 'KeyE') return 'sidebar.toggle';
+    // 1.0.0: Settings is a tab of the strip, so Mod+Tab also leaves it (it used to be blocked there).
+    if (ctrl && e.code === 'Tab') return e.shiftKey ? 'tab.prev' : 'tab.next';
     if (settingsActive) return null;
     if (ctrlShift && e.code === 'KeyM') return 'cell.maximize';
-    if (ctrl && e.code === 'Tab') return e.shiftKey ? 'tab.prev' : 'tab.next';
     if (primary && e.altKey && !e.getModifierState?.('AltGraph')) {
       const dir: Record<string, string> = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
       const d = dir[e.code];

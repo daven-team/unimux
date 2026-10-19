@@ -11,6 +11,8 @@
 // It fails (exit code 1) when an animation runs continuously while cells work, when the idle phase costs 1 % of a core or
 // more, or when the dot phase costs DOT_BUDGET or draws DOT_FRAMES frames a second or more.
 // Usage: node scripts/perf-check.mjs [cells, default 20] [seconds per measured window, default 15] [--json] [--scrollback=N]
+//   [--projects=N]: N projects (1.0.0 grid tabs across projects); every extra project has an open grid of 4 cmd cells that is
+//   shown once at the start (its shells start) and then stays hidden behind the measured grid, all in one tab strip.
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -30,6 +32,8 @@ if (scrollbackArg && !SCROLLBACK_CHOICES.includes(scrollback)) {
   console.error(`--scrollback must be one of ${SCROLLBACK_CHOICES.join(', ')}`);
   process.exit(2);
 }
+const projectsArg = process.argv.find((a) => a.startsWith('--projects='));
+const projectCount = projectsArg ? Math.max(1, Math.min(10, Number(projectsArg.split('=')[1]) || 1)) : 1;
 const count = Number(args[0] ?? 20);
 const seconds = Number(args[1] ?? 15);
 /** Budget of the idle phase, in % of one core for all app processes together. */
@@ -68,10 +72,17 @@ writeFileSync(ticker, `setInterval(() => process.stdout.write('\\x1b7\\x1b8'), 1
 const cols = 5;
 const rows = Math.max(1, Math.ceil(count / cols));
 const areas = Array.from({ length: count }, (_, i) => ({ col: i % cols, row: Math.floor(i / cols), colSpan: 1, rowSpan: 1 }));
+const extraAreas = Array.from({ length: 4 }, (_, i) => ({ col: i % 2, row: Math.floor(i / 2), colSpan: 1, rowSpan: 1 }));
+const extraProjects = Array.from({ length: projectCount - 1 }, (_, k) => {
+  mkdirSync(join(root, `project${k + 2}`), { recursive: true });
+  return { id: `p${k + 2}`, name: `Project ${k + 2}`, path: join(root, `project${k + 2}`), color: ['#22c55e', '#f59e0b', '#a855f7', '#ec4899'][k % 4], archive: [], activeTabId: `t${k + 2}`, tabs: [{
+    id: `t${k + 2}`, name: 'Grid', layout: { cols: 2, rows: 2, areas: extraAreas }, cells: extraAreas.map((_, i) => ({ id: `p${k + 2}c${i}`, name: `Shell ${i + 1}`, profileId: 'shell' })),
+  }] };
+});
 writeFileSync(join(root, 'data', 'state.json'), JSON.stringify({
   version: 1, activeProjectId: 'p', projects: [{ id: 'p', name: 'Grid', path: join(root, 'project'), color: '#3b82f6', archive: [], activeTabId: 't', tabs: [{
     id: 't', name: 'Grid', layout: { cols, rows, areas }, cells: areas.map((_, i) => ({ id: `c${i}`, name: `Shell ${i + 1}`, profileId: 'shell' })),
-  }] }],
+  }] }, ...extraProjects],
   profiles: [{ id: 'shell', name: 'Terminal', cli: 'shell', args: '', color: '#888888' }],
   snippets: [], presets: [], settings: { language: 'en', fontSize: 11, shell: 'cmd', lastProfileId: 'shell', backgroundLoad: 'visible', ...(Number.isFinite(scrollback) ? { scrollbackLines: scrollback } : {}) },
   sidebarCollapsed: true, snippetsOpen: false,
@@ -209,11 +220,20 @@ try {
   };
   const working = () => app.evaluate(`document.querySelectorAll('.cell .dot.working').length`);
 
+  // The other projects' grids: each shown once from the tab strip (its shells start), then the measured grid comes back.
+  const showGrid = (id) => app.evaluate(`[...document.querySelectorAll('.tab.grid-tab')].find((t) => t.dataset.workspaceId === 'grid:${id}').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })), true`);
+  for (const p of extraProjects) {
+    await app.until(`!!document.querySelector('.tab.grid-tab[data-workspace-id="grid:${p.tabs[0].id}"]')`, `tab of ${p.name}`);
+    await showGrid(p.tabs[0].id);
+    await app.until(`document.querySelectorAll('.cell .xterm').length === 4`, `terminals of ${p.name}`, 30000);
+    await sleep(1500);
+  }
+  if (extraProjects.length) await showGrid('t');
   await app.until(`document.querySelectorAll('.cell .xterm').length >= ${count}`, `${count} terminals`, 60000);
   // Start-up work (session scans, first usage read) settles before the idle window.
   await sleep(15000);
   const display = await mainEval(`(() => { const d = process.mainModule.require('electron').screen.getPrimaryDisplay(); return { hz: d.displayFrequency, width: d.size.width, height: d.size.height }; })()`);
-  const result = { count, display };
+  const result = { count, projects: projectCount, display };
 
   // Two windows, the quieter one counts, and a third one when both are over the budget: one-off work of a fresh start (the
   // first update check, CLI detection) or another program may land in a window, a steady cost shows in all of them.
@@ -253,7 +273,7 @@ try {
   result.failures = failures;
   if (asJson) console.log(JSON.stringify(result, null, 1));
   else {
-    console.log(`display ${display.width}x${display.height} at ${display.hz} Hz, ${count} cells`);
+    console.log(`display ${display.width}x${display.height} at ${display.hz} Hz, ${count} cells${projectCount > 1 ? `, ${projectCount} projects (${(projectCount - 1) * 4} hidden cells)` : ''}`);
     const types = ['main', 'gpu', 'renderer', 'ptyhost', 'sftphost'];
     console.log(['phase', 'working', ...types.map((t) => `${t} cpu%`), 'total cpu%', ...types.map((t) => `${t} privMB`), 'total privMB', 'draw/s', 'anims'].join('\t'));
     for (const phase of ['idle', 'dot', 'flood', 'busy']) {

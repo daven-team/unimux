@@ -18,6 +18,7 @@ export interface DispatchContext {
   paletteOpen: boolean;
   settingsActive: boolean;
   hasProject: boolean;
+  /** A tab of the strip is in front (a grid, a file, the SSH view or Settings). */
   hasTab: boolean;
   /** What has the focus: the terminal, a text field (input, textarea, editor), or something else. */
   target: 'terminal' | 'input' | 'other';
@@ -40,8 +41,8 @@ export function decideShortcut(event: DispatchEvent, ctx: DispatchContext): stri
     if (!modified && ctx.target !== 'other') continue;
     if (ctx.target === 'input' && def.allowInInput === false) continue;
     if (def.id === 'tab.close') {
-      // On the Settings screen it closes that tab; otherwise the active grid, if there is one.
-      if (ctx.settingsActive || (ctx.hasProject && ctx.hasTab)) return def.id;
+      // It closes the tab in front of the strip (Settings, the SSH view, a file or a grid), if there is one.
+      if (ctx.settingsActive || ctx.hasTab) return def.id;
       continue;
     }
     if (def.requiresProject && !ctx.hasProject) continue;

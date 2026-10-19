@@ -736,6 +736,8 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid #a8a29e; outli
 .workspace-tabs .tab-type-icon { display: grid; place-items: center; width: 15px; height: 15px; flex: none; opacity: .8; }
 .workspace-tabs .tab-type-icon svg { width: 14px; height: 14px; }
 .workspace-tabs .grid-tab .tab-type-icon { color: var(--tab-color); }
+/* 1.0.0: grids and files of every project share the strip; a bar in the project colour tells them apart. */
+.workspace-tabs .tab .tab-project { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--project-color, transparent); opacity: .85; pointer-events: none; }
 .workspace-tabs .file-tab { --tab-color: #737373; background: #101010; }
 .workspace-tabs .file-tab.active { background: #202020; border-top-color: #dedede; }
 .workspace-tabs .tab[draggable="true"] { cursor: grab; }

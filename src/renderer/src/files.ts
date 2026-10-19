@@ -115,7 +115,15 @@ export const isFileDirty = (d: FileDocument): boolean => d.text !== d.savedText;
 export function activateFile(id: string): void {
   setUi({ settingsActive: false });
   useSshStore.setState({ viewActive: false });
-  if (useFileStore.getState().documents.some((d) => d.id === id)) { useFileStore.setState({ activeFileId: id }); void checkFileOnDisk(id); }
+  const doc = useFileStore.getState().documents.find((d) => d.id === id);
+  if (!doc) return;
+  // 1.0.0: the strip shows the files of every project; a file of another project switches to that project (sidebar, Files, Git).
+  if (doc.projectId && doc.projectId !== getS().activeProjectId && getS().projects.some((p) => p.id === doc.projectId)) {
+    update((s) => ({ ...s, activeProjectId: doc.projectId }));
+    setUi({ maximizedCellId: null });
+  }
+  useFileStore.setState({ activeFileId: id });
+  void checkFileOnDisk(id);
 }
 export function showTerminalTabs(): void { setUi({ settingsActive: false }); useSshStore.setState({ viewActive: false }); useFileStore.setState({ activeFileId: null }); }
 export async function openFile(projectId: string, relativePath: string): Promise<void> {

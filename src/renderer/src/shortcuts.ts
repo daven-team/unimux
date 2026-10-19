@@ -2,10 +2,11 @@
 // registry in shared/shortcuts.ts (defaults plus the user's overrides in the settings); the decision itself is shared/shortcutDispatch.ts.
 // Defaults avoid keys Claude/Codex use themselves (Ctrl+T, Ctrl+B, Ctrl+W, Alt+arrows ...).
 import { useEffect } from 'react';
-import { activeProject, activeTab } from '../../shared/state';
+import { activeProject } from '../../shared/state';
 import { decideShortcut } from '../../shared/shortcutDispatch';
 import { displayCombo, matchShortcut, RepeatGuard, resolveShortcuts, shortcutDef, type ShortcutResolution } from '../../shared/shortcuts';
-import { addAgent, closeTab, cycleTab, moveCellBy, moveFocus, quickTab, toggleMaximize } from './actions';
+import { addAgent, moveCellBy, moveFocus, quickTab, toggleMaximize } from './actions';
+import { closeFrontTab, cycleWorkspace, frontKey } from './workspaceStrip';
 import { getS, getUi, setUi, update, useStore } from './store';
 
 let cached: { overrides: unknown; platform: string; resolution: ShortcutResolution } | null = null;
@@ -68,17 +69,13 @@ function run(id: string): void {
     case 'agent.add': void addAgent(getS().settings.lastProfileId); break;
     case 'grid.new': if (project) setUi({ modal: { kind: 'grid', projectId: project.id } }); break;
     case 'history.open': if (project) setUi({ modal: { kind: 'history', projectId: project.id } }); break;
-    case 'tab.close': {
-      if (getUi().settingsActive) { setUi({ settingsTabOpen: false, settingsActive: false }); break; }
-      const tab = activeTab(project);
-      if (project && tab) void closeTab(project.id, tab.id);
-      break;
-    }
+    // The tab in front, whatever its kind: with a file or the SSH view in front this never closes the grid behind it.
+    case 'tab.close': closeFrontTab(); break;
     case 'snippets.toggle': update((s) => ({ ...s, snippetsOpen: !s.snippetsOpen })); break;
     case 'sidebar.toggle': update((s) => ({ ...s, sidebarCollapsed: !s.sidebarCollapsed })); break;
     case 'cell.maximize': toggleMaximize(); break;
-    case 'tab.next': cycleTab(1); break;
-    case 'tab.prev': cycleTab(-1); break;
+    case 'tab.next': cycleWorkspace(1); break;
+    case 'tab.prev': cycleWorkspace(-1); break;
     case 'cell.focus.left': moveFocus(-1, 0); break;
     case 'cell.focus.right': moveFocus(1, 0); break;
     case 'cell.focus.up': moveFocus(0, -1); break;
@@ -101,7 +98,7 @@ export function useShortcuts(): void {
       const id = decideShortcut(e, {
         resolution: currentShortcuts(), languageChosen: !!s.settings.language, recording,
         overlayOpen: !!(ui.dialog || ui.modal), paletteOpen: ui.palette, settingsActive: ui.settingsActive,
-        hasProject: !!project, hasTab: !!activeTab(project), target: focusTarget(e.target),
+        hasProject: !!project, hasTab: !!frontKey(), target: focusTarget(e.target),
       });
       if (!id) return;
       e.preventDefault();

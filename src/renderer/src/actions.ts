@@ -6,7 +6,7 @@ import { layoutForCount } from '../../shared/layout';
 import { CELL_HEAD_HEIGHT, cellBodyBox, chooseGridSize, type Size } from '../../shared/cellBox';
 import {
   activeProject, activeTab, addCell, addProject, addTab, cellWorktreeUse, closeTab as closeTabState, ensureShellProfile, findCell, getProfile,
-  removeCell as removeCellState, removeProject as removeProjectState, restoreTab, setActiveProject, setActiveTab,
+  removeCell as removeCellState, removeProject as removeProjectState, restoreTab, setActiveProject, setActiveTab, focusGrid,
   swapCells as swapCellsState, uid, updateCell, updateSettings,
 } from '../../shared/state';
 import { canSwapCells, neighborSlot } from '../../shared/gridDrag';
@@ -21,6 +21,8 @@ import { namesList, workingAgents } from '../../shared/agentWork';
 import { flushDrafts, showTerminalTabs } from './files';
 import { cancelReconnectAtStart, connectOnMount, reconnectCell, startSshCell } from './ssh';
 import { terminals } from './terminals/TerminalManager';
+import { activateWorkspaceKey, currentStrip } from './workspaceStrip';
+import { neighbourAfterClose } from '../../shared/workspaceOrder';
 
 /** Cells whose pty was started (or found alive) during this renderer session. */
 const started = new Set<string>();
@@ -662,7 +664,11 @@ export async function closeTab(projectId: string, tabId: string): Promise<void> 
   const tab = getS().projects.find((p) => p.id === projectId)?.tabs.find((t) => t.id === tabId);
   if (!tab) return;
   for (const c of tab.cells) killAndDispose(c.id);
+  // The grid in front closes: its neighbour in the strip comes to the front (also a tab of another project), as in a browser.
+  const strip = currentStrip();
+  const neighbour = strip.active === `grid:${tabId}` ? neighbourAfterClose(strip.shown, strip.active) : null;
   update((s) => closeTabState(s, projectId, tabId));
+  if (neighbour) activateWorkspaceKey(neighbour);
   toast(tr('Zakładka „{name}” trafiła do historii', { name: tab.name }));
 }
 
@@ -672,17 +678,10 @@ export function restoreArchived(projectId: string, archivedId: string): void {
   if (tab?.cells[0]) focusCell(tab.cells[0].id);
 }
 
-export function cycleTab(dir: 1 | -1): void {
-  const p = activeProject(getS());
-  if (!p || p.tabs.length < 2) return;
-  const idx = p.tabs.findIndex((t) => t.id === p.activeTabId);
-  const next = p.tabs[(idx + dir + p.tabs.length) % p.tabs.length];
-  selectTab(p.id, next);
-}
-
+/** Brings a grid to the front; a grid of another project switches the project too (1.0.0: the strip holds all projects). */
 export function selectTab(projectId: string, tab: Tab): void {
   showTerminalTabs();
-  update((s) => setActiveTab(s, projectId, tab.id));
+  update((s) => focusGrid(s, projectId, tab.id));
   setUi({ maximizedCellId: null, focusedCellId: tab.cells[0]?.id ?? null });
   const id = tab.cells[0]?.id;
   if (id) requestAnimationFrame(() => requestAnimationFrame(() => terminals.focus(id)));
