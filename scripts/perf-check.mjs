@@ -22,14 +22,22 @@ if (process.platform !== 'win32') throw new Error('perf-check is Windows only');
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const asJson = process.argv.includes('--json');
 /** --scrollback=N starts the app with that scrollback setting (A/B of the renderer memory after the flood phase). */
-const scrollback = Number(process.argv.find((a) => a.startsWith('--scrollback='))?.split('=')[1] ?? NaN);
+const scrollbackArg = process.argv.find((a) => a.startsWith('--scrollback='));
+const scrollback = scrollbackArg ? Number(scrollbackArg.split('=')[1]) : NaN;
+/** The choices of Settings > Terminal (src/shared/terminalLimits.ts SCROLLBACK_CHOICES): anything else would be normalized away. */
+const SCROLLBACK_CHOICES = [1000, 2500, 5000, 10_000, 25_000];
+if (scrollbackArg && !SCROLLBACK_CHOICES.includes(scrollback)) {
+  console.error(`--scrollback must be one of ${SCROLLBACK_CHOICES.join(', ')}`);
+  process.exit(2);
+}
 const count = Number(args[0] ?? 20);
 const seconds = Number(args[1] ?? 15);
 /** Budget of the idle phase, in % of one core for all app processes together. */
 const IDLE_BUDGET = 1;
 /**
- * Budget of the dot phase: the blink's two frames a second plus the ticker (any continuous animation costs 30-45 % here on a
- * 240 Hz display), and the frames the compositor may draw per second in it (the display rate when something animates).
+ * Budget of the dot phase: the 1 Hz blink presents two frames a second, about 0.5 % of a core each on a 240 Hz display with
+ * 20 WebGL cells, plus the ticker; any continuous animation costs 30-45 % here. And the frames the compositor may draw per
+ * second in it (the display rate when something animates).
  */
 const DOT_BUDGET = 2.5;
 const DOT_FRAMES = 10;
@@ -103,7 +111,12 @@ async function connectEvents(url) {
     pending.set(id, (m) => (m.error ? reject(new Error(m.error.message)) : resolve(m.result)));
     ws.send(JSON.stringify({ id, method, params }));
   });
-  const on = (method, l) => { if (!listeners.has(method)) listeners.set(method, []); listeners.get(method).push(l); };
+  /** Adds a listener; the returned function removes it. */
+  const on = (method, l) => {
+    if (!listeners.has(method)) listeners.set(method, []);
+    listeners.get(method).push(l);
+    return () => listeners.set(method, listeners.get(method).filter((x) => x !== l));
+  };
   return { send, on, close: () => ws.close() };
 }
 
@@ -126,8 +139,9 @@ try {
   const page = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()).find((t) => t.type === 'page' && t.url.includes('index.html'));
   rc = await connectEvents(page.webSocketDebuggerUrl);
 
-  const metrics = () => mainEval(`process.mainModule.require('electron').app.getAppMetrics().map((m) => ({ pid: m.pid, type: m.type === 'Utility' ? (m.serviceName || m.name || 'Utility') : m.type, priv: m.memory.privateBytes ?? 0, ws: m.memory.workingSetSize, cpuS: m.cpu.cumulativeCPUUsage }))`);
-  const kind = (type) => ({ Browser: 'main', GPU: 'gpu', Tab: 'renderer', 'node.mojom.NodeService': 'ptyhost' }[type] ?? type);
+  // Utility processes by their name (serviceName in utilityProcess.fork): the Pty Host and the SFTP Host are both Node services.
+  const metrics = () => mainEval(`process.mainModule.require('electron').app.getAppMetrics().map((m) => ({ pid: m.pid, type: m.type === 'Utility' ? (m.name || m.serviceName || 'Utility') : m.type, priv: m.memory.privateBytes ?? 0, ws: m.memory.workingSetSize, cpuS: m.cpu.cumulativeCPUUsage }))`);
+  const kind = (type) => ({ Browser: 'main', GPU: 'gpu', Tab: 'renderer', 'unimux Pty Host': 'ptyhost', 'unimux SFTP Host': 'sftphost' }[type] ?? type);
   /** CPU % of one core per process type over `secs`, private and working set MB per type at the end. */
   const measure = async (secs) => {
     const m0 = await metrics();
@@ -139,7 +153,7 @@ try {
     const mem = {};
     for (const p of m1) {
       const k = kind(p.type);
-      if (k === 'tracing.mojom.TracingService') continue; // started by this check's own trace
+      if (k === 'Tracing Service' || k === 'tracing.mojom.TracingService') continue; // started by this check's own trace
       const q = m0.find((x) => x.pid === p.pid);
       if (q) cpu[k] = +((cpu[k] ?? 0) + (p.cpuS - q.cpuS) / s * 100).toFixed(1);
       mem[k] ??= { privMB: 0, wsMB: 0 };
@@ -167,12 +181,17 @@ try {
     const onData = (p) => events.push(...p.value);
     let done;
     const finished = new Promise((r) => { done = r; });
-    rc.on('Tracing.dataCollected', onData);
-    rc.on('Tracing.tracingComplete', () => done());
-    await rc.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { includedCategories: ['devtools.timeline', 'disabled-by-default-devtools.timeline.frame'] } });
-    await sleep(secs * 1000);
-    await rc.send('Tracing.end');
-    await finished;
+    const offData = rc.on('Tracing.dataCollected', onData);
+    const offDone = rc.on('Tracing.tracingComplete', () => done());
+    try {
+      await rc.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { includedCategories: ['devtools.timeline', 'disabled-by-default-devtools.timeline.frame'] } });
+      await sleep(secs * 1000);
+      await rc.send('Tracing.end');
+      await finished;
+    } finally {
+      offData();
+      offDone();
+    }
     const per = (name) => +(events.filter((e) => e.name === name).length / secs).toFixed(1);
     return { drawFramePerS: per('DrawFrame'), beginMainFramePerS: per('BeginMainThreadFrame') };
   };
@@ -196,9 +215,10 @@ try {
   const display = await mainEval(`(() => { const d = process.mainModule.require('electron').screen.getPrimaryDisplay(); return { hz: d.displayFrequency, width: d.size.width, height: d.size.height }; })()`);
   const result = { count, display };
 
-  // Two windows, the quieter one counts: one-off work of a fresh start (the first update check, CLI detection) may land in
-  // either, a steady cost shows in both.
+  // Two windows, the quieter one counts, and a third one when both are over the budget: one-off work of a fresh start (the
+  // first update check, CLI detection) or another program may land in a window, a steady cost shows in all of them.
   const idleWindows = [await measure(seconds), await measure(seconds)];
+  if (Math.min(...idleWindows.map((w) => w.cpu.total)) >= IDLE_BUDGET) idleWindows.push(await measure(seconds));
   const quiet = idleWindows.reduce((a, b) => (b.cpu.total < a.cpu.total ? b : a));
   result.idle = { working: await working(), ...quiet, windowsTotalCpu: idleWindows.map((w) => w.cpu.total), animations: await continuous(), frames: await frames(4) };
 
@@ -218,6 +238,8 @@ try {
   result.flood = { scrollback: Number.isFinite(scrollback) ? scrollback : 'default', ...(await measure(3)) };
 
   for (let i = 1; i < count; i++) await run(i, `"${process.execPath}" "${writer}"`);
+  // Background cells only: no focused cell (short output window, blinking cursor).
+  await app.evaluate(`(document.activeElement?.blur(), true)`);
   await sleep(6000);
   result.busy = { working: await working(), animations: await continuous(), ...(await measure(seconds)), frames: await frames(4) };
 
@@ -232,7 +254,7 @@ try {
   if (asJson) console.log(JSON.stringify(result, null, 1));
   else {
     console.log(`display ${display.width}x${display.height} at ${display.hz} Hz, ${count} cells`);
-    const types = ['main', 'gpu', 'renderer', 'ptyhost'];
+    const types = ['main', 'gpu', 'renderer', 'ptyhost', 'sftphost'];
     console.log(['phase', 'working', ...types.map((t) => `${t} cpu%`), 'total cpu%', ...types.map((t) => `${t} privMB`), 'total privMB', 'draw/s', 'anims'].join('\t'));
     for (const phase of ['idle', 'dot', 'flood', 'busy']) {
       const r = result[phase];
