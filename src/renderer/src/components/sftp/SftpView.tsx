@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { safeEntryName, sftpErrorText, validRemoteName, posixJoin, posixParent, type SftpErrorCode, type TransferRequest } from '../../../../shared/sftp';
 import {
-  deleteCountText, deleteNames, DRIVES, dropRequest, localCrumbs, localJoin, localParent, rememberLocalPath, rememberRemotePath, remoteCrumbs,
+  deleteCountText, deleteNames, DRIVES, dropRequest, outsideFolder, localCrumbs, localJoin, localParent, rememberLocalPath, rememberRemotePath, remoteCrumbs,
   type PaneEntry, type SftpDragPayload,
 } from '../../../../shared/sftpView';
 import { sshErrorText, userAtEndpoint } from '../../../../shared/ssh';
@@ -26,6 +26,9 @@ import { HostPicker } from './HostPicker';
 import { TransferPanel } from './TransferPanel';
 import { useFolder, type Listing } from './useFolder';
 import './sftp.css';
+
+/** Sessions whose start folder a mounted view already showed (kept across remounts of the view). */
+const shownSessions = new Set<string>();
 
 export function SftpView({ compactNav }: { compactNav: boolean }) {
   const { tr } = useI18n();
@@ -84,7 +87,17 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
   // A new session starts empty; once connected it shows its start folder.
   useEffect(() => { remote.reset(); }, [sessionId, remote.reset]);
   const startPath = connected ? session?.path ?? '/' : null;
-  useEffect(() => { if (startPath) void remote.go(startPath, { history: false }); }, [sessionId, startPath, remote.go]);
+  useEffect(() => {
+    if (!startPath || !sessionId) return;
+    const remembered = hostId ? getS().sftp?.remotePaths[hostId] : undefined;
+    const seen = shownSessions.has(sessionId);
+    shownSessions.add(sessionId);
+    void (async () => {
+      if (seen && remembered && remembered !== startPath && await remote.go(remembered, { history: false })) return;
+      await remote.go(startPath, { history: false });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, startPath, remote.go]);
   useEffect(() => { if (remoteGoto && connected) void remote.go(remoteGoto.path); }, [remoteGoto, connected, remote.go]);
 
   // Finished transfers show up in the panes without a manual refresh.
@@ -220,11 +233,10 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
   const remoteHead = (
     <div className="sftp-title">
       {host ? (
-        <button type="button" className="sftp-host-chip" title={tr('Zmień host')} onClick={openHostPicker}>
-          <span className={`sftp-dot ${session?.state ?? 'closed'}`} style={host.color && connected ? { background: host.color } : undefined} />
+        <button type="button" className="sftp-host-chip" title={`${host.label} · ${userAtEndpoint(host)}${status ? ` · ${status}` : ''}\n${tr('Zmień host')}`} onClick={openHostPicker}>
+          <span className={`sftp-dot ${session?.state ?? 'closed'}`} aria-label={status || undefined} />
           <strong>{host.label}</strong>
-          <span className="muted">{userAtEndpoint(host)}</span>
-          {status && <span className="muted">· {status}</span>}
+          <span className="muted sftp-host-address">{userAtEndpoint(host)}</span>
         </button>
       ) : <strong>{tr('Serwer')}</strong>}
     </div>
@@ -288,7 +300,12 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
           transfer={{ label: tr('Wyślij'), icon: <IUpload />, disabled: !connected || !remoteDir, run: (sel) => upload(sel.map((e) => e.path), remoteDir!) }}
           onDelete={(sel) => void localDelete(sel)} onRename={(e) => void localRename(e)}
           onDropEntries={(payload, dir) => onDropEntries(payload, 'local', dir)}
-          onDropFiles={(paths, dir) => void enqueue(null, { direction: 'local-copy', sources: paths, targetDir: dir })}
+          onDropFiles={(paths, dir) => {
+            // Files dropped onto the folder they already live in would only conflict with themselves.
+            const sources = outsideFolder(paths, dir, flavor);
+            if (!sources.length) { toast(tr('Te pliki już są w tym folderze'), 'info'); return; }
+            void enqueue(null, { direction: 'local-copy', sources, targetDir: dir });
+          }}
           dropDisabled={localDir === DRIVES} />
         <FilePane side="remote" label={tr('Pliki na serwerze')} head={remoteHead} folder={remote.folder} crumbs={remoteCrumbList} extraColumns
           onOpen={(p) => void remote.go(p)} onBack={remote.back} onForward={remote.forward} onUp={remote.up}
@@ -297,7 +314,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
           onDelete={(sel) => void remoteDelete(sel)} onRename={(e) => void remoteRename(e)}
           onDropEntries={(payload, dir) => onDropEntries(payload, 'remote', dir)}
           onDropFiles={(paths, dir) => upload(paths, dir)}
-          dropDisabled={!connected} placeholder={remotePlaceholder} />
+          dropDisabled={!connected || !!remotePlaceholder} placeholder={remotePlaceholder} />
       </div>
       <TransferPanel />
     </div>

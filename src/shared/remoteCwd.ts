@@ -11,8 +11,8 @@ function remotePath(raw: string): string | null {
   return validRemotePath(path) ? path : null;
 }
 
-/** The payload of OSC 7 (what follows "7;"): "file://host/path" or "file:///path"; the host part is ignored. */
-export function parseOsc7(payload: string): string | null {
+/** The payload of OSC 7 (what follows "7;"): "file://host/path" or "file:///path"; the host is lowercased ('' when absent). */
+export function parseOsc7(payload: string): { host: string; path: string } | null {
   if (typeof payload !== 'string' || payload.length > MAX_PAYLOAD) return null;
   const match = /^file:\/\/([^/]*)(\/.*)?$/i.exec(payload.trim());
   if (!match || !match[2]) return null;
@@ -20,7 +20,27 @@ export function parseOsc7(payload: string): string | null {
   const encoded = match[2].replace(/[?#].*$/, '');
   let decoded: string;
   try { decoded = decodeURIComponent(encoded); } catch { return null; }
-  return remotePath(decoded);
+  const path = remotePath(decoded);
+  return path ? { host: match[1].toLowerCase(), path } : null;
+}
+
+/**
+ * The folder of an SSH cell's shell, from its reports. The host of the first OSC 7 report is the cell's machine; a report
+ * naming another host (the user went on with ssh, su to a container ...) clears the folder, and OSC 9;9 reports (no host) are
+ * ignored until the cell's machine reports again. An empty host or "localhost" counts as the cell's machine.
+ */
+export interface CwdTrack { host: string | null; path: string | null; foreign: boolean }
+export const EMPTY_CWD: CwdTrack = { host: null, path: null, foreign: false };
+
+export function trackOsc7(t: CwdTrack, report: { host: string; path: string } | null): CwdTrack {
+  if (!report) return t;
+  const host = report.host === 'localhost' ? '' : report.host;
+  if (!host || t.host === null || host === t.host) return { host: t.host ?? (host || null), path: report.path, foreign: false };
+  return { host: t.host, path: null, foreign: true };
+}
+
+export function trackOsc99(t: CwdTrack, path: string | null): CwdTrack {
+  return !path || t.foreign ? t : { ...t, path };
 }
 
 /** The path of OSC 9;9 (what follows "9;9;"), possibly quoted. Only POSIX paths count: a remote shell has no "C:\". */

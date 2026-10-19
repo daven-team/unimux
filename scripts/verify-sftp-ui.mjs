@@ -2,8 +2,10 @@
 // (scripts/ssh-test-server.mjs --sftp-root <scratch>). Never a real host, never the user's data dir, home or ~/.ssh.
 // Needs `npm run build` first. Screenshots go to D:\Projekty\_shots\098-sftp-*.png.
 //
-// Drags between the panes are dispatched as DOM drag events carrying the same DataTransfer payload a real drag sets
-// (dragstart cannot be produced over CDP for an in-page drag without the OS); the drop handler of the pane is the real one.
+// Drags between the panes are dispatched as DOM drag events (an in-page HTML5 drag cannot be started over CDP without the OS):
+// dragstart on the selected source rows (the pane's own handler fills the DataTransfer and remembers the drag), then
+// dragenter/dragover/drop on the target with the same DataTransfer, then dragend. A forged payload without a dragstart behind
+// it (what another app could put under the custom type) is checked to do nothing.
 // The OS drop goes through CDP Input.dispatchDragEvent with real file paths, so the pane reads them with window.mc.pathForFile
 // (webUtils.getPathForFile in the preload), exactly like a drop from Explorer.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -71,13 +73,25 @@ try {
     if (check) await app.click('.modal .dialog-check input');
     await app.click('.modal .modal-foot .btn', label);
   };
-  /** The same drop the pane gets from a drag of the other pane: a DataTransfer with the SFTP payload, dropped on the list. */
-  const dragDrop = (fromSide, paths, toSide, folderName) => ev(`(() => {
+  /** A drag of the rows `names` (selected first, Ctrl click) from one pane, dropped on the other pane or one of its folder rows. */
+  const dragDrop = async (fromSide, names, toSide, folderName) => {
+    for (const [i, name] of names.entries()) await clickRow(fromSide, name, { ctrl: i > 0 });
+    await ev(`(() => {
     const dt = new DataTransfer();
-    dt.setData('application/x-unimux-sftp', JSON.stringify({ side: ${JSON.stringify(fromSide)}, paths: ${JSON.stringify(paths)} }));
+    const source = [...document.querySelectorAll('.sftp-pane-${fromSide} .sftp-list .sftp-row')].find((r) => r.dataset.name === ${JSON.stringify(names[0])});
+    source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
     const list = document.querySelector('.sftp-pane-${toSide} .sftp-list');
     const target = ${folderName ? `[...list.querySelectorAll('.sftp-row')].find((r) => r.dataset.name === ${JSON.stringify(folderName)})` : 'list'};
     for (const type of ['dragenter', 'dragover', 'drop']) target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }));
+    source.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    return true; })()`);
+  };
+  /** What a web page could drop: the custom type with paths, no drag from this window behind it. */
+  const forgedDrop = (side, paths, toSide) => ev(`(() => {
+    const dt = new DataTransfer();
+    dt.setData('application/x-unimux-sftp', JSON.stringify({ side: ${JSON.stringify(side)}, paths: ${JSON.stringify(paths)} }));
+    const list = document.querySelector('.sftp-pane-${toSide} .sftp-list');
+    for (const type of ['dragenter', 'dragover', 'drop']) list.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }));
     return true; })()`);
   const allDone = `(() => { const t = ${sftp}.transfers; return t.length > 0 && t.every((i) => ['done', 'failed', 'cancelled'].includes(i.state)); })()`;
   const clearDone = async () => { await app.click('.sftp-transfers-head .btn', 'Wyczyść zakończone'); await app.until(`${sftp}.transfers.length === 0`, 'queue cleared'); };
@@ -110,6 +124,15 @@ try {
   if (crumbs !== '/|home|alice') throw new Error(`remote crumbs: ${crumbs}`);
   const cols = await ev(`[...document.querySelectorAll('.sftp-pane-remote .sftp-columns .sftp-col')].map((c) => c.textContent).join('|')`);
   if (!cols.includes('Uprawnienia') || !cols.includes('Właściciel')) throw new Error(`remote columns: ${cols}`);
+  // At 1440x900 every column is on screen in both panes, and no column is cut off by the pane edge.
+  const shown = (side) => ev(`[...document.querySelectorAll('.sftp-pane-${side} .sftp-columns .sftp-col')].filter((c) => getComputedStyle(c).display !== 'none').map((c) => c.textContent).join('|')`);
+  const remoteShown = await shown('remote'), localShown = await shown('local');
+  if (remoteShown !== 'Nazwa|Data modyfikacji|Rozmiar|Rodzaj|Uprawnienia|Właściciel') throw new Error(`remote columns on screen: ${remoteShown}`);
+  if (localShown !== 'Nazwa|Data modyfikacji|Rozmiar|Rodzaj') throw new Error(`local columns on screen: ${localShown}`);
+  const overflow = await ev(`[...document.querySelectorAll('.sftp-pane .sftp-columns')].some((r) => r.scrollWidth > r.clientWidth + 1)`);
+  if (overflow) throw new Error('a column row overflows its pane');
+  const heads = await ev(`[...document.querySelectorAll('.sftp-pane-head')].map((h) => h.offsetHeight).join('|')`);
+  if (new Set(heads.split('|')).size !== 1) throw new Error(`pane heads differ in height: ${heads}`);
   if (!(await ev(`[...document.querySelectorAll('.sftp-pane-remote .sftp-row')].some((r) => r.textContent.includes('-rw'))`))) throw new Error('no permission string shown');
   await shot(app, 'connected');
   log('key login with host key prompt OK');
@@ -128,11 +151,15 @@ try {
   log('new folder and rename OK');
 
   // 4. Upload a file and a folder by a drag from the local pane (into the folder "docs" under the pointer, then the pane).
-  await dragDrop('local', [join(local, 'b.txt')], 'remote', 'docs');
+  // A forged drop first: nothing is uploaded.
+  await forgedDrop('local', [join(local, 'b.txt')], 'remote');
+  await sleep(800);
+  if ((await ev(`${sftp}.transfers.length + ${sftp}.preparing.length`)) !== 0) throw new Error('a forged drag payload started a transfer');
+  await dragDrop('local', ['b.txt'], 'remote', 'docs');
   await app.until(allDone, 'upload into docs');
   if (!existsSync(join(home, 'docs', 'b.txt'))) throw new Error('drop onto a folder row did not upload into it');
   await clearDone();
-  await dragDrop('local', [join(local, 'a.txt'), join(local, 'site')], 'remote');
+  await dragDrop('local', ['a.txt', 'site'], 'remote');
   await app.until(`${allDone} && ${hasRow('remote', 'a.txt')}`, 'upload of a file and a folder');
   if (readFileSync(join(home, 'site', 'css', 'a.css'), 'utf8') !== 'body{}\n') throw new Error('folder upload content');
   if (!existsSync(join(home, 'site', 'img', 'logo.txt'))) throw new Error('the existing remote folder content was lost on merge');
@@ -146,7 +173,7 @@ try {
   await app.until(hasRow('local', 'back'), 'local folder');
   await ev(`(() => { const r = [...document.querySelectorAll('.sftp-pane-local .sftp-row')].find((x) => x.dataset.name === 'back'); r.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); return true; })()`);
   await app.until(`document.querySelector('.sftp-pane-local .sftp-crumb button.on')?.textContent === 'back'`, 'into back');
-  await dragDrop('remote', ['/home/alice/site', '/home/alice/readme.txt'], 'local');
+  await dragDrop('remote', ['site', 'readme.txt'], 'local');
   await app.until(`${allDone} && ${hasRow('local', 'site')} && ${hasRow('local', 'readme.txt')}`, 'download back');
   if (readFileSync(join(local, 'back', 'site', 'img', 'logo.txt'), 'utf8') !== 'logo\n') throw new Error('folder download content');
   await clearDone();
@@ -283,5 +310,5 @@ try {
   await app?.close();
   server.stop();
   await sleep(500);
-  rmSync(root, { recursive: true, force: true });
+  rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
 }

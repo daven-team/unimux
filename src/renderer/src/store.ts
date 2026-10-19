@@ -158,7 +158,7 @@ let dialogIds = 0;
 function replaceOpenDialog(): number {
   const previous = pendingPrompt;
   pendingPrompt = null;
-  previous?.();
+  previous?.(true);
   return ++dialogIds;
 }
 
@@ -205,7 +205,7 @@ export function askChoiceChecked(
   title: string, body: string,
   actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean }>,
   check: string,
-): Promise<{ value: string | null; checked: boolean }> {
+): Promise<{ value: string | null; checked: boolean; replaced?: true }> {
   const id = replaceOpenDialog();
   return new Promise((resolve) => {
     setUi({
@@ -218,11 +218,12 @@ export function askChoiceChecked(
         },
       },
     });
-    pendingPrompt = () => resolve({ value: null, checked: false });
+    pendingPrompt = (replaced) => resolve({ value: null, checked: false, ...(replaced ? { replaced: true } : {}) });
   });
 }
 
-let pendingPrompt: (() => void) | null = null;
+/** Resolves the open dialog as cancelled; `replaced` when a newer dialog took its place (not the user's choice). */
+let pendingPrompt: ((replaced?: boolean) => void) | null = null;
 export function closeModal(): void {
   setUi({ modal: null });
 }

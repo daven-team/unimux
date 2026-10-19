@@ -13,7 +13,7 @@ import { FailureScanner } from '../../../shared/outputFailure';
 import { isFocusOrMouseReport, isUserInput, StatusTracker, type CellStatus, type HookEvent, type HookInfo, type StatusCause, type StatusReason } from '../../../shared/status';
 import { hookDetail, StatusLog, type StatusTrigger } from '../../../shared/statusLog';
 import { sshModeReset } from '../../../shared/ssh';
-import { parseOsc7, parseOsc99 } from '../../../shared/remoteCwd';
+import { EMPTY_CWD, parseOsc7, parseOsc99, trackOsc7, trackOsc99, type CwdTrack } from '../../../shared/remoteCwd';
 import { inputModesOff, isMouseReport, MouseFloodGuard, terminalModeReset } from '../../../shared/termReset';
 import { encodeWin32Key } from '../../../shared/win32input';
 import { tr } from '../i18n';
@@ -344,7 +344,7 @@ class TerminalManager {
       // 9;4;... = progress, 9;9;... = cwd reporting (oh-my-posh etc.) - not notifications.
       if (payload.startsWith('9;')) {
         entry.infer.reportCwd(payload.slice(2));
-        if (entry.remote) this.noteRemoteCwd(cellId, parseOsc99(payload.slice(2)));
+        if (entry.remote) this.remoteCwds.set(cellId, trackOsc99(this.remoteCwds.get(cellId) ?? EMPTY_CWD, parseOsc99(payload.slice(2))));
       }
       if (/^(4|9);/.test(payload)) return true;
       if (entry.agent && entry.replaying === 0) this.setStatus(entry, () => entry.tracker.osc9(), 'osc9');
@@ -352,7 +352,7 @@ class TerminalManager {
     });
     // OSC 7 (file://host/path): the folder of a remote shell, for "Otwórz SFTP tutaj" (0.9.8). Local shells are not asked.
     term.parser.registerOscHandler(7, (payload) => {
-      if (entry.remote) this.noteRemoteCwd(cellId, parseOsc7(payload));
+      if (entry.remote) this.remoteCwds.set(cellId, trackOsc7(this.remoteCwds.get(cellId) ?? EMPTY_CWD, parseOsc7(payload)));
       return true;
     });
     term.onBell(() => {
@@ -751,12 +751,9 @@ class TerminalManager {
   }
 
   /** The last folder an SSH cell's shell reported (OSC 7 or an OSC 9;9 POSIX path), for "Otwórz SFTP tutaj". */
-  private remoteCwds = new Map<string, string>();
-  private noteRemoteCwd(cellId: string, path: string | null): void {
-    if (path) this.remoteCwds.set(cellId, path);
-  }
+  private remoteCwds = new Map<string, CwdTrack>();
   remoteCwd(cellId: string): string | undefined {
-    return this.remoteCwds.get(cellId);
+    return this.remoteCwds.get(cellId)?.path ?? undefined;
   }
 
   /** A dim line written by the app (not part of the session output, not replayed). */

@@ -214,16 +214,28 @@ export function validLocalPath(path: unknown): path is string {
 // ── drag between the panes ──────────────────────────────────────────────────
 
 export const SFTP_DRAG_MIME = 'application/x-unimux-sftp';
-export interface SftpDragPayload { side: 'local' | 'remote'; paths: string[]; sessionId?: string }
+export interface SftpDragPayload { side: 'local' | 'remote'; paths: string[] }
+/** A drag started in one of the panes of this window. Only its nonce travels in the drag data. */
+export interface ActiveDrag extends SftpDragPayload { nonce: string }
 
-export function parseSftpDrag(raw: string): SftpDragPayload | null {
-  try {
-    const v = JSON.parse(raw) as Partial<SftpDragPayload>;
-    if ((v.side !== 'local' && v.side !== 'remote') || !Array.isArray(v.paths) || !v.paths.length || v.paths.length > 1000) return null;
-    if (!v.paths.every((p) => (v.side === 'remote' ? validRemotePath(p) : validLocalPath(p)))) return null;
-    if (v.sessionId !== undefined && typeof v.sessionId !== 'string') return null;
-    return { side: v.side, paths: v.paths, ...(v.sessionId ? { sessionId: v.sessionId } : {}) };
-  } catch { return null; }
+/**
+ * The entries a drop of SFTP_DRAG_MIME data carries. The data is never trusted: other apps (a web page in a browser) can put
+ * any text under this type, so only the nonce of the drag that started in this window counts, and the paths come from that
+ * drag. A drop onto the pane the drag started in carries nothing.
+ */
+export function resolveDrop(active: ActiveDrag | null, raw: string, onto: 'local' | 'remote'): SftpDragPayload | null {
+  if (!active || !raw || raw !== active.nonce || active.side === onto || !active.paths.length) return null;
+  return { side: active.side, paths: [...active.paths] };
+}
+
+/**
+ * Files dropped from Explorer/Finder onto the local pane: the ones already in `targetDir` are left out (a copy onto itself
+ * would be a conflict with itself).
+ */
+export function outsideFolder(paths: readonly string[], targetDir: string, flavor: PathFlavor): string[] {
+  const key = (p: string) => { const t = flavor === 'win32' ? p.replace(/[\\/]+$/, '') : p.replace(/\/+$/, ''); return flavor === 'win32' ? t.toLowerCase() : t || '/'; };
+  const dir = key(targetDir);
+  return paths.filter((p) => { const parent = localParent(p, flavor); return parent === null || key(parent) !== dir; });
 }
 
 /**

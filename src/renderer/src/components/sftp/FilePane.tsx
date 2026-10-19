@@ -5,8 +5,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { rowSlots, rowWindow } from '../../../../shared/virtualRows';
 import {
-  clickSelect, EMPTY_SELECTION, filterEntries, formatBytes, isFolderLike, kindLabel, liveSelection, moveSelect, parseSftpDrag, selectAll,
-  SFTP_DRAG_MIME, sortEntries, toggleSort, DEFAULT_SORT, type Crumb, type PaneEntry, type Selection, type SftpDragPayload, type SortKey, type SortOrder,
+  clickSelect, EMPTY_SELECTION, filterEntries, formatBytes, isFolderLike, kindLabel, liveSelection, moveSelect, resolveDrop, selectAll,
+  SFTP_DRAG_MIME, sortEntries, toggleSort, DEFAULT_SORT, type Crumb, type PaneEntry, type ActiveDrag, type Selection, type SftpDragPayload, type SortKey, type SortOrder,
 } from '../../../../shared/sftpView';
 import type { MessageKey } from '../../../../shared/i18n';
 import { useI18n } from '../../i18n';
@@ -55,8 +55,8 @@ export interface PaneProps {
   placeholder?: ReactNode;
 }
 
-/** The pane a drag started in (dragover cannot read the payload, only its type). */
-let dragSide: 'local' | 'remote' | null = null;
+/** The drag started in a pane of this window (dragover cannot read the data, only its types). */
+let activeDrag: ActiveDrag | null = null;
 
 const COLUMNS: Array<{ key: SortKey; label: MessageKey; remote?: true }> = [
   { key: 'name', label: 'Nazwa' },
@@ -76,7 +76,9 @@ export function FilePane(p: PaneProps) {
   const list = useRef<HTMLDivElement>(null);
   const crumbBar = useRef<HTMLElement>(null);
   const [view, setView] = useState({ top: 0, height: 400 });
-  const dates = useMemo(() => new Intl.DateTimeFormat(language, { dateStyle: 'medium', timeStyle: 'short' }), [language]);
+  // A compact date in the column, the long one in its tooltip.
+  const dates = useMemo(() => new Intl.DateTimeFormat(language, { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }), [language]);
+  const longDates = useMemo(() => new Intl.DateTimeFormat(language, { dateStyle: 'medium', timeStyle: 'medium' }), [language]);
 
   // A new folder starts unfiltered, unselected and at the top.
   useEffect(() => { setFilter(''); setSel(EMPTY_SELECTION); if (list.current) list.current.scrollTop = 0; }, [p.folder.path]);
@@ -152,18 +154,20 @@ export function FilePane(p: PaneProps) {
   };
 
   // ── drag and drop ──
+  // The entries of an in-app drag stay in `activeDrag`; the drag data carries only its nonce (see resolveDrop).
   const onDragStart = (e: DragEvent, entry: PaneEntry) => {
     if (entry.unsafeName) { e.preventDefault(); return; }
     const paths = sel.paths.includes(entry.path) ? sel.paths : [entry.path];
     if (!sel.paths.includes(entry.path)) setSel(clickSelect(sel, order, entry.path));
-    e.dataTransfer.setData(SFTP_DRAG_MIME, JSON.stringify({ side: p.side, paths }));
+    activeDrag = { side: p.side, paths: [...paths], nonce: crypto.randomUUID() };
+    e.dataTransfer.setData(SFTP_DRAG_MIME, activeDrag.nonce);
     e.dataTransfer.effectAllowed = 'copy';
-    dragSide = p.side;
   };
+  /** An in-app drag from the other pane, or files from the OS; custom data without an in-app drag behind it never counts. */
   const accepts = (e: DragEvent): boolean => {
     if (p.dropDisabled || p.folder.path === null) return false;
     const types = Array.from(e.dataTransfer.types);
-    if (types.includes(SFTP_DRAG_MIME)) return dragSide !== p.side;
+    if (types.includes(SFTP_DRAG_MIME) && activeDrag) return activeDrag.side !== p.side;
     return types.includes('Files');
   };
   const targetOf = (e: DragEvent): string => {
@@ -179,17 +183,15 @@ export function FilePane(p: PaneProps) {
   };
   const onDrop = (e: DragEvent) => {
     const ok = accepts(e);
+    const active = activeDrag;
+    activeDrag = null;
     setOver(null);
-    dragSide = null;
     if (!ok) return;
     e.preventDefault();
     const target = targetOf(e);
-    const raw = e.dataTransfer.getData(SFTP_DRAG_MIME);
-    if (raw) {
-      const payload = parseSftpDrag(raw);
-      if (payload && payload.side !== p.side) p.onDropEntries(payload, target);
-      return;
-    }
+    const payload = resolveDrop(active, e.dataTransfer.getData(SFTP_DRAG_MIME), p.side);
+    if (payload) { p.onDropEntries(payload, target); return; }
+    if (active) return;
     const paths = Array.from(e.dataTransfer.files).map((f) => window.mc.pathForFile(f)).filter(Boolean);
     if (paths.length) p.onDropFiles(paths, target);
   };
@@ -209,8 +211,8 @@ export function FilePane(p: PaneProps) {
             onChange={(e) => setFilter(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape' && filter) { e.stopPropagation(); setFilter(''); } }} />
         </div>
         <button type="button" className="btn small sftp-actions" disabled={f.path === null} onClick={(e) => openMenuAt(e.currentTarget, p.actions(selected))}>{tr('Akcje')} <IChevron /></button>
-        <button type="button" className="btn small sftp-send" disabled={p.transfer.disabled || !selected.length} title={p.transfer.label} onClick={() => p.transfer.run(selected)}>
-          {p.transfer.icon}<span>{p.transfer.label}</span>
+        <button type="button" className="btn small sftp-send" disabled={p.transfer.disabled || !selected.length} title={p.transfer.label} aria-label={p.transfer.label} onClick={() => p.transfer.run(selected)}>
+          {p.transfer.icon}<span className="sftp-send-label">{p.transfer.label}</span>
         </button>
       </div>
       <div className="sftp-pathbar" style={p.placeholder ? { display: 'none' } : undefined}>
@@ -250,7 +252,7 @@ export function FilePane(p: PaneProps) {
                 <div key={e.path || `unsafe-${slot.index}`} role="row" aria-rowindex={slot.index + 1} aria-selected={on}
                   className={`sftp-row${on ? ' on' : ''}${sel.focus === e.path ? ' focus' : ''}${e.unsafeName ? ' unsafe' : ''}${over === e.path && folder ? ' drop' : ''}`}
                   data-path={e.path} data-name={e.name} {...(folder ? { 'data-folder-path': e.path } : {})}
-                  draggable={!e.unsafeName} onDragStart={(ev) => onDragStart(ev, e)} onDragEnd={() => { dragSide = null; setOver(null); }}
+                  draggable={!e.unsafeName} onDragStart={(ev) => onDragStart(ev, e)} onDragEnd={() => { activeDrag = null; setOver(null); }}
                   onClick={(ev) => onRowClick(ev, e)} onDoubleClick={() => open(e)} onContextMenu={(ev) => { ev.stopPropagation(); onRowMenu(ev, e); }}
                   title={e.unsafeName ? tr('Nazwa, której nie można bezpiecznie zapisać w tym miejscu') : undefined}>
                   <span className="sftp-col sftp-col-name">
@@ -258,7 +260,7 @@ export function FilePane(p: PaneProps) {
                     <span className="sftp-name">{e.name}</span>
                     {e.kind === 'symlink' && <span className="sftp-link" title={tr('Dowiązanie')}><ILink /></span>}
                   </span>
-                  <span className="sftp-col sftp-col-mtime">{e.mtime ? dates.format(e.mtime) : ''}</span>
+                  <span className="sftp-col sftp-col-mtime" title={e.mtime ? longDates.format(e.mtime) : undefined}>{e.mtime ? dates.format(e.mtime) : ''}</span>
                   <span className="sftp-col sftp-col-size">{isFolderLike(e) || e.kind === 'other' ? '' : formatBytes(e.size, language)}</span>
                   <span className="sftp-col sftp-col-kind">{tr(kind.key, kind.params)}</span>
                   {p.extraColumns && <span className="sftp-col sftp-col-permissions">{e.permissions}</span>}

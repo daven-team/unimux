@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { parseOsc7, parseOsc99 } from '../src/shared/remoteCwd';
+import { EMPTY_CWD, parseOsc7, parseOsc99, trackOsc7, trackOsc99 } from '../src/shared/remoteCwd';
 import type { TransferItem } from '../src/shared/sftp';
 import {
   canRetry, clickSelect, deleteNames, DRIVES, dropRequest, EMPTY_HISTORY, EMPTY_SELECTION, filterEntries, forgetRemotePlace, formatBytes, goBack, goForward,
   kindLabel, liveSelection, localBasename, localCrumbs, localJoin, localParent, MAX_REMOTE_PLACES, mergeSnapshot, moveSelect, normalizeSftpPlaces,
-  parseSftpDrag, percentOf, pushHistory, reenqueueRequest, rememberLocalPath, rememberRemotePath, remoteCrumbs, selectAll, sortEntries, toggleSort,
+  outsideFolder, percentOf, resolveDrop, pushHistory, reenqueueRequest, rememberLocalPath, rememberRemotePath, remoteCrumbs, selectAll, sortEntries, toggleSort,
   validLocalPath, type PaneEntry,
 } from '../src/shared/sftpView';
 import { addSshHost, defaultState, normalizeState, removeSshHost } from '../src/shared/state';
@@ -12,13 +12,27 @@ import { addSshHost, defaultState, normalizeState, removeSshHost } from '../src/
 const E = (name: string, kind: PaneEntry['kind'] = 'file', patch: Partial<PaneEntry> = {}): PaneEntry => ({ name, path: `/d/${name}`, kind, size: 0, mtime: 0, permissions: '', ...patch });
 
 describe('OSC 7 and OSC 9;9 remote folders', () => {
-  it('reads file://host/path with percent escapes, ignoring the host', () => {
-    expect(parseOsc7('file://vps/home/alice/site')).toBe('/home/alice/site');
-    expect(parseOsc7('file:///var/www')).toBe('/var/www');
-    expect(parseOsc7('file://vps/home/alice/My%20Files/%C5%BC%C3%B3%C5%82w')).toBe('/home/alice/My Files/żółw');
-    expect(parseOsc7('FILE://vps/tmp/')).toBe('/tmp');
-    expect(parseOsc7('file://vps/a/./b/../c')).toBe('/a/c');
-    expect(parseOsc7('file://vps/a?x=1#f')).toBe('/a');
+  it('reads file://host/path with percent escapes and a lowercased host', () => {
+    expect(parseOsc7('file://vps/home/alice/site')).toEqual({ host: 'vps', path: '/home/alice/site' });
+    expect(parseOsc7('file:///var/www')).toEqual({ host: '', path: '/var/www' });
+    expect(parseOsc7('file://vps/home/alice/My%20Files/%C5%BC%C3%B3%C5%82w')?.path).toBe('/home/alice/My Files/żółw');
+    expect(parseOsc7('FILE://VPS/tmp/')).toEqual({ host: 'vps', path: '/tmp' });
+    expect(parseOsc7('file://vps/a/./b/../c')?.path).toBe('/a/c');
+    expect(parseOsc7('file://vps/a?x=1#f')?.path).toBe('/a');
+  });
+
+  it('keeps the folder of the cell machine only: another host clears it until the first host reports again', () => {
+    let t = trackOsc7(EMPTY_CWD, parseOsc7('file://vps/srv'));
+    expect(t).toEqual({ host: 'vps', path: '/srv', foreign: false });
+    t = trackOsc7(t, parseOsc7('file://localhost/srv/a'));
+    expect(t.path).toBe('/srv/a');
+    t = trackOsc7(t, parseOsc7('file://container/app'));
+    expect(t).toEqual({ host: 'vps', path: null, foreign: true });
+    expect(trackOsc99(t, '/app/x')).toBe(t);
+    t = trackOsc7(t, parseOsc7('file://vps/home'));
+    expect(t).toEqual({ host: 'vps', path: '/home', foreign: false });
+    expect(trackOsc99(t, '/tmp').path).toBe('/tmp');
+    expect(trackOsc7(t, null)).toBe(t);
   });
 
   it('refuses anything that is not an absolute POSIX folder', () => {
@@ -141,12 +155,23 @@ describe('local paths', () => {
 });
 
 describe('drag between the panes', () => {
-  it('parses a valid payload and refuses junk', () => {
-    expect(parseSftpDrag(JSON.stringify({ side: 'remote', paths: ['/a', '/b'] }))).toEqual({ side: 'remote', paths: ['/a', '/b'] });
-    expect(parseSftpDrag(JSON.stringify({ side: 'local', paths: ['C:\\a'] }))).toEqual({ side: 'local', paths: ['C:\\a'] });
-    for (const bad of ['', '{', JSON.stringify({ side: 'x', paths: ['/a'] }), JSON.stringify({ side: 'remote', paths: [] }), JSON.stringify({ side: 'remote', paths: ['a'] }), JSON.stringify({ side: 'remote', paths: ['/a\\b'] }), JSON.stringify({ side: 'local', paths: ['relative'] })]) {
-      expect(parseSftpDrag(bad), bad).toBeNull();
-    }
+  it('takes the entries only from the drag that started in this window (the drag data is never trusted)', () => {
+    const active = { side: 'local' as const, paths: ['C:\\a.txt'], nonce: 'n-1' };
+    expect(resolveDrop(active, 'n-1', 'remote')).toEqual({ side: 'local', paths: ['C:\\a.txt'] });
+    // A payload from another app (a web page) without an in-app drag behind it, or with a wrong nonce, carries nothing.
+    expect(resolveDrop(null, JSON.stringify({ side: 'local', paths: ['C:\\Users\\me\\.ssh\\id_ed25519'] }), 'remote')).toBeNull();
+    expect(resolveDrop(null, 'n-1', 'remote')).toBeNull();
+    expect(resolveDrop(active, JSON.stringify({ side: 'local', paths: ['\\\\attacker\\share\\x'] }), 'remote')).toBeNull();
+    expect(resolveDrop(active, 'n-2', 'remote')).toBeNull();
+    expect(resolveDrop(active, '', 'remote')).toBeNull();
+    // Onto the pane it came from: nothing.
+    expect(resolveDrop(active, 'n-1', 'local')).toBeNull();
+  });
+  it('leaves out OS files dropped onto the folder they already live in', () => {
+    expect(outsideFolder(['C:\\Work\\a.txt', 'D:\\b.txt'], 'c:\\work\\', 'win32')).toEqual(['D:\\b.txt']);
+    expect(outsideFolder(['C:\\a.txt'], 'C:\\', 'win32')).toEqual([]);
+    expect(outsideFolder(['/Users/a/x', '/tmp/y'], '/Users/a', 'posix')).toEqual(['/tmp/y']);
+    expect(outsideFolder(['/x'], '/', 'posix')).toEqual([]);
   });
   it('uploads onto the remote pane, downloads onto the local one, nothing onto its own pane', () => {
     expect(dropRequest({ side: 'local', paths: ['C:\\a'] }, 'remote', '/srv')).toEqual({ direction: 'upload', sources: ['C:\\a'], targetDir: '/srv' });

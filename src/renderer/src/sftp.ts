@@ -4,7 +4,7 @@
 // arrive as events for that id (events that come before the answer are held and applied once the id is known).
 import { isActive, isFinished, sftpErrorText, type ConflictChoice, type TransferRequest, type SftpPortMessage, type SftpSessionState, type TransferItem, applyPortMessage, failUnfinished, LOCAL_QUEUE_ID } from '../../shared/sftp';
 import type { SshPrompt } from '../../shared/ssh';
-import { formatBytes, mergeSnapshot, reenqueueRequest, type PathFlavor } from '../../shared/sftpView';
+import { canRetry, formatBytes, mergeSnapshot, reenqueueRequest, type PathFlavor } from '../../shared/sftpView';
 import { chosenLanguage, tr } from './i18n';
 import { askChoice, askChoiceChecked, getS, getUi, toast, useStore } from './store';
 import { openSshView, selectSshSection } from './ssh';
@@ -87,8 +87,20 @@ export async function initSftp(): Promise<void> {
     if (now) void askNextConflict();
   };
   useSshStore.subscribe(follow);
-  useStore.subscribe((st, prev) => { if (st.ui.settingsActive !== prev.ui.settingsActive) follow(); });
-  useSftpStore.subscribe((st, prev) => { if (st.transfers !== prev.transfers) void askNextConflict(); });
+  useStore.subscribe((st, prev) => {
+    if (st.ui.settingsActive !== prev.ui.settingsActive) follow();
+    // A conflict question waits for any open dialog to close (it never replaces one).
+    if (prev.ui.dialog && !st.ui.dialog) void askNextConflict();
+  });
+  useSftpStore.subscribe((st, prev) => {
+    if (st.transfers === prev.transfers) return;
+    // An item that left the conflict state (answered, retried, removed) may be asked again when it meets a conflict later.
+    if (asked.size) {
+      const open = new Set(st.transfers.filter((i) => i.state === 'conflict').map((i) => i.id));
+      for (const id of asked) if (!open.has(id)) asked.delete(id);
+    }
+    void askNextConflict();
+  });
   follow();
   try {
     // After a reload: main still has the session (and maybe a prompt) the view showed.
@@ -104,8 +116,12 @@ export async function initSftp(): Promise<void> {
 
 const activeOf = (sessionId: string | null) => useSftpStore.getState().transfers.filter((i) => i.sessionId === sessionId && isActive(i.state));
 
+/** Bumped by every connect: an answer that arrives after a newer connect started is disconnected, never adopted. */
+let connectSeq = 0;
+
 /** Connects the view to a saved host; a session of another host with running transfers is asked about first. */
 export async function connectSftp(hostId: string, initialPath?: string): Promise<boolean> {
+  const seq = ++connectSeq;
   const st = useSftpStore.getState();
   if (!getS().sshHosts.some((h) => h.id === hostId)) return false;
   const live = st.session && (st.session.state === 'connected' || st.session.state === 'connecting');
@@ -121,13 +137,18 @@ export async function connectSftp(hostId: string, initialPath?: string): Promise
       const choice = await askChoice(tr('Przerwać transfery i zmienić host?'), tr('Transfery w toku: {count}. Zmiana hosta je anuluje.', { count: running }), [
         { label: tr('Zmień host'), value: 'yes', danger: true },
       ]);
-      if (choice !== 'yes') return false;
+      if (choice !== 'yes' || seq !== connectSeq) return false;
     }
     void window.mc.sftp.disconnect(st.sessionId);
   }
   const path = initialPath ?? getS().sftp?.remotePaths[hostId];
   useSftpStore.setState({ pickerOpen: false, remoteGoto: null, prompt: null });
   const result = await window.mc.sftp.connect(hostId, path);
+  if (seq !== connectSeq) {
+    // Another host was chosen meanwhile: this session would stay connected but unseen.
+    if (result.ok) void window.mc.sftp.disconnect(result.sessionId);
+    return false;
+  }
   if (!result.ok) {
     useSftpStore.setState({ sessionId: null, hostId, session: { id: '', hostId, state: 'error', phase: 'error', since: Date.now(), error: result.error }, prompt: null });
     return false;
@@ -194,6 +215,8 @@ export function cancelTransfer(item: TransferItem): void {
 }
 
 export async function retryTransfer(item: TransferItem): Promise<void> {
+  // Entries a folder transfer left out (links, unsafe names) stay out: a re-enqueue as a top-level source would follow a link.
+  if (!canRetry(item)) return;
   const st = useSftpStore.getState();
   const liveQueue = item.sessionId === LOCAL_QUEUE_ID || (item.sessionId === st.sessionId && st.session?.state === 'connected');
   if (item.error !== 'sftpHostCrashed' && liveQueue) {
@@ -239,11 +262,13 @@ export async function askConflict(item: TransferItem): Promise<void> {
     tr('Istniejący: {size}, {date}', { size: c.existing.kind === 'dir' ? tr('Folder') : formatBytes(c.existing.size, language), date: when(c.existing.mtime) }),
     tr('Nowy: {size}, {date}', { size: formatBytes(c.incoming.size, language), date: when(c.incoming.mtime) }),
   ].join('\n');
-  const { value, checked } = await askChoiceChecked(tr('Konflikt nazw'), body, [
+  const { value, checked, replaced } = await askChoiceChecked(tr('Konflikt nazw'), body, [
     { label: tr('Zastąp'), value: 'overwrite', danger: true },
     { label: tr('Pomiń'), value: 'skip' },
     { label: tr('Zachowaj oba'), value: 'keepBoth', primary: true },
   ], tr('Zrób to samo dla pozostałych'));
+  // Another dialog took its place: the question comes back once that one is closed. Only Anuluj counts as dismissed.
+  if (replaced) asked.delete(item.id);
   if (!value) return;
   // The rest of the batch is answered by the host: its open conflicts are not asked again while the update is on its way.
   if (checked) for (const i of useSftpStore.getState().transfers) if (i.batchId === item.batchId && i.state === 'conflict') asked.add(i.id);
@@ -251,7 +276,7 @@ export async function askConflict(item: TransferItem): Promise<void> {
 }
 
 async function askNextConflict(): Promise<void> {
-  if (asking || !sftpVisible()) return;
+  if (asking || !sftpVisible() || getUi().dialog) return;
   const next = useSftpStore.getState().transfers.find((i) => i.state === 'conflict' && i.conflict && !asked.has(i.id));
   if (!next) return;
   asking = true;

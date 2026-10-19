@@ -1,21 +1,24 @@
 /* The SFTP view (0.9.8): two panes and the transfer queue, in the look of the SSH view (existing tokens, ssh.css). */
 .sftp-host { flex: 1; min-width: 0; min-height: 0; display: flex; }
-.sftp-view { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #181818; container-type: inline-size; }
+.sftp-view { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #181818; container: sftp-view / inline-size; }
 .sftp-nav { padding: 10px 12px 0; }
-.sftp-panes { flex: 1 1 auto; min-height: 200px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 10px 12px; }
-.sftp-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #202020; border-radius: 10px; border: 1px solid #ffffff08; overflow: hidden; container-type: inline-size; }
-.sftp-pane-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; min-width: 0; flex-wrap: wrap; }
+.sftp-panes { flex: 1 1 auto; min-height: 200px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 10px; padding: 10px 12px; }
+.sftp-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #202020; border-radius: 10px; border: 1px solid #ffffff08; overflow: hidden; container: sftp-pane / inline-size; }
+/* One line in every width: the title shrinks with an ellipsis, the filter shrinks, narrow panes drop texts (below). */
+.sftp-pane-head { display: flex; align-items: center; gap: 6px; height: 30px; padding: 8px 10px 4px; min-width: 0; flex-wrap: nowrap; }
 .sftp-pane-head .grow { flex: 1; min-width: 0; }
-.sftp-title { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 12.5px; color: var(--text); }
+.sftp-title { flex: 0 1 auto; display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; font-size: 12.5px; color: var(--text); }
 .sftp-title strong { font-weight: 600; white-space: nowrap; }
 .sftp-host-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 26px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text); font-size: 12.5px; cursor: pointer; }
+.sftp-host-chip strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sftp-host-chip:hover { background: #ffffff08; border-color: #ffffff12; }
 .sftp-host-chip .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
 .sftp-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--muted); }
 .sftp-dot.connected { background: #4ade80; }
 .sftp-dot.connecting { background: var(--working); }
 .sftp-dot.error { background: var(--error); }
-.sftp-filter { position: relative; display: flex; align-items: center; width: 130px; min-width: 90px; }
+.sftp-filter { position: relative; flex: 0 1 120px; display: flex; align-items: center; min-width: 64px; }
+.sftp-pane-head .btn { flex: none; }
 .sftp-filter svg { position: absolute; left: 7px; color: var(--muted); pointer-events: none; }
 .sftp-filter .input { width: 100%; height: 24px; padding: 0 8px 0 25px; box-sizing: border-box; background: #171717; border: 1px solid #ffffff0d; border-radius: 6px; color: var(--text); font-size: 12px; }
 .sftp-filter.wide { width: auto; margin: 0 14px 8px; }
@@ -33,9 +36,11 @@
 .sftp-crumb button.on { color: var(--text); }
 
 .sftp-table { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.sftp-pane { --sftp-cols: minmax(120px, 1fr) 118px 64px 84px; }
-.sftp-pane.wide { --sftp-cols: minmax(120px, 1fr) 118px 64px 84px 86px 64px; }
-.sftp-row { display: grid; grid-template-columns: var(--sftp-cols); align-items: center; height: 26px; padding: 0 10px; gap: 8px; font-size: 12px; color: var(--text-2); cursor: default; user-select: none; }
+/* The column tracks live on .sftp-table, inside the pane container, so the @container rules below drop a column's track
+   together with its cells. */
+.sftp-table { --sftp-cols: minmax(96px, 1fr) 92px 54px 60px; }
+.sftp-pane.wide .sftp-table { --sftp-cols: minmax(96px, 1fr) 92px 54px 60px 70px 52px; }
+.sftp-row { display: grid; grid-template-columns: var(--sftp-cols); align-items: center; height: 26px; padding: 0 8px; gap: 6px; font-size: 12px; color: var(--text-2); cursor: default; user-select: none; }
 .sftp-columns { height: 26px; border-top: 1px solid #ffffff0a; border-bottom: 1px solid #ffffff0a; background: #1c1c1c; }
 .sftp-columns .sftp-col { display: flex; align-items: center; gap: 4px; border: 0; background: transparent; color: var(--muted); font-size: 11px; text-align: left; padding: 0; cursor: pointer; }
 .sftp-columns .sftp-col:hover { color: var(--text); }
@@ -44,7 +49,8 @@
 .sftp-col { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sftp-col-size { text-align: right; justify-content: flex-end; font-variant-numeric: tabular-nums; }
 .sftp-col-mtime, .sftp-col-permissions { font-variant-numeric: tabular-nums; }
-.sftp-col-permissions { font-family: "Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular", "Courier New", monospace; font-size: 11px; }
+.sftp-row .sftp-col-mtime { font-size: 11.5px; }
+.sftp-list .sftp-col-permissions { font-family: "Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular", "Courier New", monospace; font-size: 11px; }
 .sftp-col-name { display: flex; align-items: center; gap: 7px; color: var(--text); }
 .sftp-icon { display: inline-flex; flex: none; width: 16px; justify-content: center; color: #c9a86a; }
 .sftp-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -124,20 +130,33 @@
 .sftp-transfer.conflict .sftp-transfer-state { color: var(--working); }
 .sftp-transfer-actions { display: flex; gap: 4px; flex: none; }
 
-/* Narrow panes drop the less important columns (the pane is the container); a narrow view stacks the panes. */
-@container (max-width: 760px) {
-  .sftp-pane.wide { --sftp-cols: minmax(120px, 1fr) 118px 64px 84px; }
-  .sftp-row .sftp-col-permissions, .sftp-row .sftp-col-owner { display: none; }
+/* Narrow panes drop the less important columns, track and cells together (the pane is the container). A remote pane of
+   about 470 px shows every column; Owner goes first, then Kind, then Permissions; the date goes last. */
+@container sftp-pane (max-width: 469px) {
+  .sftp-pane.wide .sftp-table { --sftp-cols: minmax(96px, 1fr) 92px 54px 60px 70px; }
+  .sftp-pane.wide .sftp-col-owner { display: none; }
 }
-@container (max-width: 470px) {
-  .sftp-pane, .sftp-pane.wide { --sftp-cols: minmax(110px, 1fr) 112px 64px; }
-  .sftp-row .sftp-col-kind { display: none; }
+@container sftp-pane (max-width: 411px) {
+  .sftp-pane.wide .sftp-table { --sftp-cols: minmax(96px, 1fr) 92px 54px 70px; }
+  .sftp-pane.wide .sftp-col-kind { display: none; }
 }
-@container (max-width: 340px) {
-  .sftp-pane, .sftp-pane.wide { --sftp-cols: minmax(100px, 1fr) 64px; }
-  .sftp-row .sftp-col-mtime { display: none; }
+@container sftp-pane (max-width: 345px) {
+  .sftp-pane.wide .sftp-table { --sftp-cols: minmax(96px, 1fr) 92px 54px; }
+  .sftp-pane.wide .sftp-col-permissions { display: none; }
 }
-@container (max-width: 640px) {
+@container sftp-pane (max-width: 335px) {
+  .sftp-pane-local .sftp-table { --sftp-cols: minmax(96px, 1fr) 92px 54px; }
+  .sftp-pane-local .sftp-col-kind { display: none; }
+}
+@container sftp-pane (max-width: 270px) {
+  .sftp-pane .sftp-table, .sftp-pane.wide .sftp-table { --sftp-cols: minmax(96px, 1fr) 54px; }
+  .sftp-pane .sftp-col-mtime { display: none; }
+}
+/* Narrow pane heads: the address and the transfer button text go (both stay in the tooltips). */
+@container sftp-pane (max-width: 520px) {
+  .sftp-host-address, .sftp-send-label { display: none; }
+}
+@container sftp-view (max-width: 640px) {
   .sftp-panes { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
   .sftp-transfer-bytes, .sftp-transfer-speed { display: none; }
 }
