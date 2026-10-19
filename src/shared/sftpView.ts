@@ -3,7 +3,7 @@
 // No DOM or Electron imports: tested in Node.
 import type { MessageKey, MessageParams } from './i18n';
 import {
-  isFinished, posixNormalize, posixParent, validRemotePath, type DeleteCount, type EntryKind, type TransferItem, type TransferRequest,
+  isFinished, planMove, posixNormalize, posixParent, symbolicMode, validRemotePath, type DeleteCount, type EntryKind, type TransferItem, type TransferRequest,
 } from './sftp';
 
 // ── entries ─────────────────────────────────────────────────────────────────
@@ -205,6 +205,27 @@ export function remoteCrumbs(path: string): Crumb[] {
   return out;
 }
 
+const localKey = (p: string, flavor: PathFlavor): string => {
+  const t = flavor === 'win32' ? p.replace(/[\\/]+$/, '') : p.replace(/\/+$/, '');
+  return flavor === 'win32' ? t.toLowerCase() : t || '/';
+};
+
+/** `child` is `parent` or inside it (local paths; Windows case-insensitive). */
+export function localContains(parent: string, child: string, flavor: PathFlavor): boolean {
+  const p = localKey(parent, flavor), c = localKey(child, flavor);
+  if (c === p) return true;
+  const sep = flavor === 'win32' ? '\\' : '/';
+  return c.startsWith(p.endsWith(sep) ? p : `${p}${sep}`);
+}
+
+/** planMove (shared/sftp.ts) for local paths: entries already in `targetDir` are left out, a folder into itself is refused. */
+export const planLocalMove = (sources: readonly string[], targetDir: string, flavor: PathFlavor) =>
+  planMove(sources, targetDir, {
+    contains: (a, b) => localContains(a, b, flavor),
+    dirname: (p) => localParent(p, flavor) ?? '',
+    same: (a, b) => localKey(a, flavor) === localKey(b, flavor),
+  });
+
 /** An absolute local path the app may remember (no control characters). */
 export function validLocalPath(path: unknown): path is string {
   return typeof path === 'string' && path.length > 0 && path.length <= 4096 && !/[\u0000-\u001f]/.test(path)
@@ -226,6 +247,15 @@ export interface ActiveDrag extends SftpDragPayload { nonce: string }
 export function resolveDrop(active: ActiveDrag | null, raw: string, onto: 'local' | 'remote'): SftpDragPayload | null {
   if (!active || !raw || raw !== active.nonce || active.side === onto || !active.paths.length) return null;
   return { side: active.side, paths: [...active.paths] };
+}
+
+/**
+ * The entries of an in-app drag dropped onto a folder of the pane it started in (0.9.9: a move). Like resolveDrop only the
+ * nonce of the drag that started in this window counts; null for a drag from the other pane or without a matching nonce.
+ */
+export function resolveMove(active: ActiveDrag | null, raw: string, onto: 'local' | 'remote'): string[] | null {
+  if (!active || !raw || raw !== active.nonce || active.side !== onto || !active.paths.length) return null;
+  return [...active.paths];
 }
 
 /**
@@ -263,7 +293,7 @@ export function mergeSnapshot(local: readonly TransferItem[], snapshot: readonly
 
 /** A retry of an item whose queue died with the SFTP Host: a new enqueue of the same source into the same folder. */
 export function reenqueueRequest(item: Pick<TransferItem, 'direction' | 'source' | 'target'>, flavor: PathFlavor): TransferRequest {
-  const targetDir = item.direction === 'upload' ? posixParent(item.target) : localParent(item.target, flavor) ?? item.target;
+  const targetDir = item.direction === 'upload' || item.direction === 'move' ? posixParent(item.target) : localParent(item.target, flavor) ?? item.target;
   return { direction: item.direction, sources: [item.source], targetDir };
 }
 
@@ -271,6 +301,32 @@ export function reenqueueRequest(item: Pick<TransferItem, 'direction' | 'source'
 const FINAL_ERRORS = new Set(['invalidName', 'linkOutside', 'linkFolder', 'unsupported', 'tooMany']);
 export const canRetry = (i: Pick<TransferItem, 'state' | 'error'>): boolean => (i.state === 'failed' || i.state === 'cancelled') && !FINAL_ERRORS.has(i.error ?? '');
 export const canCancel = (i: Pick<TransferItem, 'state'>): boolean => !isFinished(i.state);
+
+// ── permissions dialog ──────────────────────────────────────────────────────
+
+/** The rwx grid: owner, group, others x read, write, execute (bits). */
+export const PERM_GRID: ReadonlyArray<{ who: 'owner' | 'group' | 'others'; bits: readonly [number, number, number] }> = [
+  { who: 'owner', bits: [0o400, 0o200, 0o100] },
+  { who: 'group', bits: [0o040, 0o020, 0o010] },
+  { who: 'others', bits: [0o004, 0o002, 0o001] },
+];
+export const SPECIAL_BITS: readonly number[] = [0o4000, 0o2000, 0o1000];
+
+/** "rwxr-xr-x" where a bit outside `mask` (differs in the selection, stays as it is) reads "?". */
+export function symbolicPreview(bits: number, mask: number): string {
+  const s = symbolicMode(bits).split('');
+  const at: Array<[number, number]> = [[0, 0o400], [1, 0o200], [3, 0o040], [4, 0o020], [6, 0o004], [7, 0o002]];
+  for (const [i, b] of at) if (!(mask & b)) s[i] = '?';
+  // The x places also carry setuid / setgid / sticky.
+  for (const [i, x, special] of [[2, 0o100, 0o4000], [5, 0o010, 0o2000], [8, 0o001, 0o1000]] as const) if (!(mask & x) || !(mask & special)) s[i] = '?';
+  return s.join('');
+}
+
+/** A checkbox of the grid clicked: the bit becomes defined (in `mask`) and flips (an indeterminate one turns on). */
+export function toggleModeBit(state: { bits: number; mask: number }, bit: number): { bits: number; mask: number } {
+  const on = (state.mask & bit) !== 0 && (state.bits & bit) !== 0;
+  return { bits: on ? state.bits & ~bit : state.bits | bit, mask: state.mask | bit };
+}
 
 // ── delete confirmation ─────────────────────────────────────────────────────
 

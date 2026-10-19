@@ -8,12 +8,17 @@
 // it (what another app could put under the custom type) is checked to do nothing.
 // The OS drop goes through CDP Input.dispatchDragEvent with real file paths, so the pane reads them with window.mc.pathForFile
 // (webUtils.getPathForFile in the preload), exactly like a drop from Explorer.
+// 0.9.9 (steps 9b-9e and 12b, screenshots D:\Projekty\_shots\099-*.png): the turning refresh icon, moves by a drag inside each
+// pane (onto a folder row, a path segment and ".."), Cut / Paste, a folder into itself refused, permissions with digits, with the
+// checkboxes and recursively with two values, and SFTP through sudo (NOPASSWD, a sudo password with a wrong first try, three
+// wrong passwords ending in a clear error) against two more local test servers over the same folder.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ssh2 from 'ssh2';
 import { launchApp, mainInspector, scratchRoot, sleep, startTestServer, testHost, writeState } from './ssh-ui-lib.mjs';
 
 const shot = (app, name) => app.screenshot(`098-sftp-${name}.png`);
+const shot99 = (name) => app.screenshot(`099-${name}.png`);
 const log = (m) => process.stdout.write(`  ${m}\n`);
 
 const root = scratchRoot('sftp');
@@ -36,6 +41,11 @@ const pair = ssh2.utils.generateKeyPairSync('ed25519');
 writeFileSync(join(root, 'user.pub'), pair.public);
 
 const server = await startTestServer(['--sftp-root', remoteRoot, '--sftp-home', '/home/alice', '--public-key-file', join(root, 'user.pub'), '--sftp-delay', '4']);
+// SFTP through sudo (0.9.9): one server without a sudo password, one that wants "root-secret"; both serve the same folder.
+const SUDO_PASSWORD = 'root-secret';
+const sudoServer = await startTestServer(['--sftp-root', remoteRoot, '--sftp-home', '/home/alice', '--sftp-sudo']);
+// The password server speaks Polish and ignores LC_ALL=C (a VPS with a Polish locale) and offers lsetstat@openssh.com.
+const sudoPwServer = await startTestServer(['--sftp-root', remoteRoot, '--sftp-home', '/home/alice', '--sftp-sudo-password', SUDO_PASSWORD, '--sftp-sudo-locale', 'pl', '--sftp-sudo-ignore-env', '--sftp-lsetstat']);
 const keyHost = testHost(server.port, { label: 'vps-key', group: 'lab' });
 const pwHost = testHost(server.port, { label: 'vps-password', group: 'lab' });
 const projectId = '7a3a5d30-2f45-4d61-9d6b-1b0f6a3c1a01';
@@ -96,6 +106,35 @@ try {
     const list = document.querySelector('.sftp-pane-${toSide} .sftp-list');
     for (const type of ['dragenter', 'dragover', 'drop']) list.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }));
     return true; })()`);
+  /** A drag of rows inside one pane onto a folder row ({ row }), a path segment ({ crumb }) or ".." ({ up: true }); true when the pane accepted it. */
+  const dragWithin = async (side, names, target) => {
+    for (const [i, name] of names.entries()) await clickRow(side, name, { ctrl: i > 0 });
+    return ev(`(() => {
+    const dt = new DataTransfer();
+    const pane = document.querySelector('.sftp-pane-${side}');
+    const source = [...pane.querySelectorAll('.sftp-list .sftp-row')].find((r) => r.dataset.name === ${JSON.stringify(names[0])});
+    source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    const t = ${JSON.stringify(target)};
+    const el = t.row ? [...pane.querySelectorAll('.sftp-list .sftp-row')].find((r) => r.dataset.name === t.row)
+      : t.crumb ? [...pane.querySelectorAll('.sftp-crumb button')].find((b) => b.textContent === t.crumb) : pane.querySelector('.sftp-uprow');
+    if (!el) throw new Error('no drop target');
+    el.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    const over = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt });
+    el.dispatchEvent(over);
+    if (over.defaultPrevented) el.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    source.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    return over.defaultPrevented; })()`);
+  };
+  const key = async (side, keyName, code, vk, modifiers = 0) => {
+    await ev(`document.querySelector('.sftp-pane-${side} .sftp-list').focus()`);
+    for (const type of ['keyDown', 'keyUp']) await app.cdp('Input.dispatchKeyEvent', { type, key: keyName, code, windowsVirtualKeyCode: vk, modifiers });
+  };
+  const permOf = (side, name) => `([...document.querySelectorAll('.sftp-pane-${side} .sftp-list .sftp-row')].find((r) => r.dataset.name === ${JSON.stringify(name)})?.querySelector('.sftp-col-permissions')?.textContent ?? '')`;
+  const openFolder = async (side, name) => {
+    await ev(`(() => { const r = [...document.querySelectorAll('.sftp-pane-${side} .sftp-row')].find((x) => x.dataset.name === ${JSON.stringify(name)}); r.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); return true; })()`);
+    await app.until(`document.querySelector('.sftp-pane-${side} .sftp-crumb button.on')?.textContent === ${JSON.stringify(name)}`, `into ${name}`);
+  };
+  const toastText = `[...document.querySelectorAll('.toast')].map((t) => t.textContent).join('|')`;
   const allDone = `(() => { const t = ${sftp}.transfers; return t.length > 0 && t.every((i) => ['done', 'failed', 'cancelled'].includes(i.state)); })()`;
   const clearDone = async () => { await app.click('.sftp-transfers-head .btn', 'Wyczyść zakończone'); await app.until(`${sftp}.transfers.length === 0`, 'queue cleared'); };
 
@@ -255,6 +294,122 @@ try {
   await clearDone();
   log('OS drop OK');
 
+  // 9b. Refresh (toolbar button, F5): the icon turns at least ~400 ms and until the listing came; the old rows stay meanwhile.
+  const refresh = await ev(`(async () => {
+    const btn = document.querySelector('.sftp-pane-remote .sftp-refresh');
+    const rowsBefore = document.querySelectorAll('.sftp-pane-remote .sftp-list .sftp-row').length;
+    const t0 = performance.now();
+    btn.click();
+    await new Promise((r) => setTimeout(r, 40));
+    const spun = !!btn.querySelector('.refresh-icon.spinning');
+    const rowsDuring = document.querySelectorAll('.sftp-pane-remote .sftp-list .sftp-row').length;
+    let held = -1;
+    while (performance.now() - t0 < 5000) { await new Promise((r) => setTimeout(r, 15)); if (!btn.querySelector('.refresh-icon.spinning')) { held = performance.now() - t0; break; } }
+    return { spun, rowsBefore, rowsDuring, held };
+  })()`);
+  if (!refresh.spun || refresh.rowsDuring !== refresh.rowsBefore || refresh.held < 380) throw new Error(`refresh feedback: ${JSON.stringify(refresh)}`);
+  await key('remote', 'F5', 'F5', 116);
+  await sleep(60);
+  if (!(await ev(`!!document.querySelector('.sftp-pane-remote .sftp-refresh .refresh-icon.spinning')`))) throw new Error('F5 did not refresh');
+  await shot99('refresh');
+  await app.until(`!document.querySelector('.sftp-pane-remote .sftp-refresh .refresh-icon.spinning')`, 'refresh ended');
+  log(`refresh turns ${Math.round(refresh.held)} ms, rows kept, F5 OK`);
+
+  // 9c. Moves by a drag inside each pane: onto a folder row, onto a path segment, onto "..".
+  mkdirSync(join(home, 'box', 'inner'), { recursive: true });
+  writeFileSync(join(home, 'mv1.txt'), 'move one\n');
+  writeFileSync(join(home, 'box', 'inner', 'deep.txt'), 'deep\n');
+  await key('remote', 'F5', 'F5', 116);
+  await app.until(`${hasRow('remote', 'mv1.txt')} && ${hasRow('remote', 'box')}`, 'move fixtures listed');
+  if (!(await dragWithin('remote', ['mv1.txt'], { row: 'box' }))) throw new Error('drop onto a folder row of the same pane refused');
+  await app.until(`${allDone} && !${hasRow('remote', 'mv1.txt')}`, 'moved into box');
+  if (readFileSync(join(home, 'box', 'mv1.txt'), 'utf8') !== 'move one\n' || existsSync(join(home, 'mv1.txt'))) throw new Error('remote move by drag');
+  await clearDone();
+  // A folder onto itself is no drop target.
+  if (await dragWithin('remote', ['box'], { row: 'box' })) throw new Error('a folder was accepted as a drop onto itself');
+  await openFolder('remote', 'box');
+  if (!(await ev(`!!document.querySelector('.sftp-pane-remote .sftp-uprow')`))) throw new Error('no ".." row');
+  if (!(await dragWithin('remote', ['mv1.txt'], { crumb: 'alice' }))) throw new Error('drop onto a path segment refused');
+  await app.until(`${allDone} && !${hasRow('remote', 'mv1.txt')}`, 'moved onto the path segment');
+  if (!existsSync(join(home, 'mv1.txt'))) throw new Error('move onto the path segment');
+  await clearDone();
+  await openFolder('remote', 'inner');
+  if (!(await dragWithin('remote', ['deep.txt'], { up: true }))) throw new Error('drop onto ".." refused');
+  await app.until(`${allDone} && !${hasRow('remote', 'deep.txt')}`, 'moved onto ..');
+  if (!existsSync(join(home, 'box', 'deep.txt'))) throw new Error('move onto ".."');
+  await clearDone();
+  await shot99('move-up');
+  // The local pane: b.txt onto the local folder "site".
+  if (!(await dragWithin('local', ['b.txt'], { row: 'site' }))) throw new Error('local drop onto a folder row refused');
+  await app.until(`${allDone} && !${hasRow('local', 'b.txt')}`, 'local move');
+  if (readFileSync(join(local, 'site', 'b.txt'), 'utf8') !== 'local b\n' || existsSync(join(local, 'b.txt'))) throw new Error('local move by drag');
+  await clearDone();
+  log('moves by drag (folder row, path segment, "..", local pane) OK');
+
+  // 9d. Cut and Paste (Ctrl+X / Ctrl+V and the Actions menu); a folder into itself is refused with a message.
+  await app.click('.sftp-pane-remote .sftp-crumb button', 'alice');
+  await app.until(hasRow('remote', 'mv1.txt'), 'back in alice');
+  await clickRow('remote', 'mv1.txt');
+  await key('remote', 'x', 'KeyX', 88, 2);
+  await app.until(`!!document.querySelector('.sftp-pane-remote .sftp-row.cut[data-name="mv1.txt"]')`, 'cut row dimmed');
+  await shot99('cut');
+  await openFolder('remote', 'box');
+  await key('remote', 'v', 'KeyV', 86, 2);
+  await app.until(`${allDone} && ${hasRow('remote', 'mv1.txt')}`, 'pasted into box');
+  if (!existsSync(join(home, 'box', 'mv1.txt')) || existsSync(join(home, 'mv1.txt'))) throw new Error('cut and paste');
+  await clearDone();
+  await app.click('.sftp-pane-remote .sftp-crumb button', 'alice');
+  await app.until(hasRow('remote', 'box'), 'alice again');
+  await clickRow('remote', 'box');
+  await menu('remote', 'Wytnij');
+  await openFolder('remote', 'box');
+  await menu('remote', 'Wklej');
+  await app.until(`${toastText}.includes('Nie można przenieść folderu do niego samego')`, 'folder into itself refused');
+  if (!existsSync(join(home, 'box', 'mv1.txt'))) throw new Error('the refused move changed something');
+  await shot99('into-itself');
+  await app.click('.sftp-pane-remote .sftp-crumb button', 'alice');
+  await app.until(hasRow('remote', 'box'), 'alice after the refusal');
+  log('cut and paste, folder into itself refused OK');
+
+  // 9e. Permissions: digits, checkboxes, then a folder recursively with one value for folders and one for files.
+  await clickRow('remote', 'readme.txt');
+  await menu('remote', 'Uprawnienia…');
+  await app.until(`!!document.querySelector('.sftp-perms')`, 'permissions dialog');
+  await app.setValue('.sftp-perms input[data-field=octal]', '600');
+  await app.until(`document.querySelector('.sftp-perms [data-field=symbolic]').textContent === 'rw-------' && !document.querySelector('.sftp-perms tr[data-who=group] input').checked`, 'grid follows the digits');
+  await shot99('perms-digits');
+  await app.click('.sftp-perms .modal-foot .btn.primary');
+  await app.until(`!document.querySelector('.sftp-perms') && ${permOf('remote', 'readme.txt')} === '-rw-------'`, 'chmod 600');
+  await clickRow('remote', 'readme.txt');
+  await menu('remote', 'Uprawnienia…');
+  await app.until(`document.querySelector('.sftp-perms input[data-field=octal]')?.value === '600'`, 'dialog shows 600');
+  await app.click('.sftp-perms tr[data-who=group] td:nth-of-type(1) input');
+  await app.until(`document.querySelector('.sftp-perms input[data-field=octal]').value === '640'`, 'digits follow the grid');
+  await shot99('perms-grid');
+  await app.click('.sftp-perms .modal-foot .btn.primary');
+  await app.until(`!document.querySelector('.sftp-perms') && ${permOf('remote', 'readme.txt')} === '-rw-r-----'`, 'chmod by checkbox');
+  await clickRow('remote', 'box');
+  await menu('remote', 'Uprawnienia…');
+  await app.until(`!!document.querySelector('.sftp-perms [data-field=recursive]')`, 'recursive option for a folder');
+  await app.click('.sftp-perms [data-field=recursive]');
+  if (await ev(`!!document.querySelector('.sftp-perms .sftp-perms-main')`)) throw new Error('the main grid is shown in recursive mode');
+  // A folder value without the owner's r+x: the contents go first (warned).
+  await app.setValue('.sftp-perms input[data-field=dirMode]', '600');
+  await app.until(`!!document.querySelector('.sftp-perms [data-field=lockout]')`, 'lock-out warning');
+  await shot99('perms-lockout');
+  await app.setValue('.sftp-perms input[data-field=dirMode]', '750');
+  if (await ev(`!!document.querySelector('.sftp-perms [data-field=lockout]')`)) throw new Error('lock-out warning for 750');
+  await app.setValue('.sftp-perms input[data-field=fileMode]', '640');
+  await app.until(`(document.querySelector('.sftp-perms [data-field=count]')?.textContent ?? '').includes('folderów 2, plików 2')`, 'recursive count');
+  await shot99('perms-recursive');
+  await app.click('.sftp-perms .modal-foot .btn.primary');
+  await app.until(`!document.querySelector('.sftp-perms') && ${permOf('remote', 'box')} === 'drwxr-x---'`, 'recursive chmod on the folder');
+  await openFolder('remote', 'box');
+  await app.until(`${permOf('remote', 'mv1.txt')} === '-rw-r-----' && ${permOf('remote', 'inner')} === 'drwxr-x---'`, 'recursive chmod inside');
+  await app.click('.sftp-pane-remote .sftp-crumb button', 'alice');
+  await app.until(hasRow('remote', 'box'), 'alice after chmod');
+  log('permissions: digits, checkboxes, recursive with two values OK');
+
   // 10. Switching host while a transfer runs asks first; then the password host signs in with a prompt in the view.
   await upload(['big.bin']);
   await app.until(`${sftp}.transfers[0]?.state === 'running'`, 'running before the switch');
@@ -305,6 +460,87 @@ try {
   await shot(app, 'narrow');
   log('local trash, remembered folders, narrow window OK');
 
+  // 12b. SFTP through sudo: a host without a sudo password (badge), one with a password (wrong first, then right), and three
+  // wrong passwords ending with a clear error.
+  await app.cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  const sudoHost = testHost(sudoServer.port, { label: 'vps-sudo', group: 'lab', sftpSudo: true });
+  const sudoPwHost = testHost(sudoPwServer.port, { label: 'vps-sudo-pw', group: 'lab', sftpSudo: true });
+  await ev(`(() => { window.__mc.useStore.getState().update((s) => ({ ...s, sshHosts: [...s.sshHosts, ${JSON.stringify(sudoHost)}, ${JSON.stringify(sudoPwHost)}] })); return true; })()`);
+  /** Picks the host whose label is exactly `label` ("vps-sudo" is also a part of "vps-sudo-pw"). */
+  const pickHost = (label) => ev(`(() => { const o = [...document.querySelectorAll('.sftp-host-option')].find((x) => x.querySelector('.sftp-host-label')?.textContent === ${JSON.stringify(label)}); if (!o) throw new Error('no host ${label}'); o.click(); return true; })()`);
+  const loginTo = async (label, srv) => {
+    await app.click('.sftp-pane-remote .sftp-host-chip');
+    await app.until(`!!document.querySelector('.sftp-picker')`, 'picker');
+    await pickHost(label);
+    await app.until(`!!document.querySelector('.sftp-prompt .ssh-fingerprint') || !!document.querySelector('.sftp-prompt input[type=password]')`, `${label}: first prompt`);
+    if (await ev(`!!document.querySelector('.sftp-prompt .ssh-fingerprint')`)) await app.click('.sftp-prompt .btn', 'Zaufaj i zapisz');
+    await app.until(`(document.querySelector('.sftp-prompt .ssh-card-title')?.textContent ?? '').startsWith('Hasło dla')`, `${label}: login password prompt`);
+    await app.setValue('.sftp-prompt input[type=password]', srv.password);
+    await app.click('.sftp-prompt button[type=submit]');
+  };
+  const sudoPrompt = `(document.querySelector('.sftp-prompt .ssh-card-title')?.textContent ?? '').startsWith('Hasło sudo')`;
+  const answerSudo = async (pw) => {
+    await app.setValue('.sftp-prompt input[type=password]', pw);
+    await app.click('.sftp-prompt button[type=submit]');
+  };
+  await loginTo('vps-sudo', sudoServer);
+  await app.until(`${sftp}.session?.state === 'connected' && !!document.querySelector('.sftp-pane-remote .sftp-sudo-badge') && ${hasRow('remote', 'readme.txt')}`, 'sudo without a password, badge');
+  await shot99('sudo-badge');
+  // This server has no lsetstat: a recursive change as root is refused in the dialog.
+  await clickRow('remote', 'box');
+  await menu('remote', 'Uprawnienia…');
+  await app.click('.sftp-perms [data-field=recursive]');
+  await app.until(`!!document.querySelector('.sftp-perms [data-field=unsafe]') && document.querySelector('.sftp-perms .modal-foot .btn.primary').disabled`, 'recursive chmod as root without lsetstat refused');
+  await shot99('perms-sudo-unsafe');
+  await app.click('.sftp-perms .modal-foot .btn', 'Anuluj');
+  await app.until(`!document.querySelector('.sftp-perms')`, 'dialog closed');
+  log('SFTP through sudo (NOPASSWD) with the sudo badge, recursive chmod without lsetstat refused OK');
+  await loginTo('vps-sudo-pw', sudoPwServer);
+  await app.until(sudoPrompt, 'sudo password prompt');
+  await shot99('sudo-prompt');
+  await answerSudo('wrong-one');
+  await app.until(`${sudoPrompt} && (document.querySelector('.sftp-prompt .ssh-error')?.textContent ?? '') === 'Nieprawidłowe hasło sudo'`, 'sudo retry after a wrong password');
+  await shot99('sudo-retry');
+  await answerSudo(SUDO_PASSWORD);
+  await app.until(`${sftp}.session?.state === 'connected' && !!document.querySelector('.sftp-pane-remote .sftp-sudo-badge') && ${hasRow('remote', 'readme.txt')}`, 'sudo with a password');
+  log('SFTP through sudo with a password, Polish sudo without LC_ALL=C (wrong, then right) OK');
+  // With lsetstat a recursive change as root works; setuid in the file value asks first.
+  await clickRow('remote', 'box');
+  await menu('remote', 'Uprawnienia…');
+  await app.click('.sftp-perms [data-field=recursive]');
+  await app.setValue('.sftp-perms input[data-field=dirMode]', '755');
+  await app.setValue('.sftp-perms input[data-field=fileMode]', '4755');
+  await app.until(`!!document.querySelector('.sftp-perms [data-field=setid]') && (document.querySelector('.sftp-perms [data-field=count]')?.textContent ?? '').includes('folderów') && !document.querySelector('.sftp-perms [data-field=unsafe]')`, 'setid warning, counted, lsetstat');
+  await app.click('.sftp-perms .modal-foot .btn.primary');
+  await app.until(`[...document.querySelectorAll('.modal h3')].some((h) => h.textContent === 'Ustawić bity specjalne?')`, 'setid confirmation');
+  await shot99('perms-setid-confirm');
+  await ev(`(() => { const m = [...document.querySelectorAll('.modal')].find((x) => x.querySelector('h3')?.textContent === 'Ustawić bity specjalne?'); [...m.querySelectorAll('.modal-foot .btn')].find((b) => b.textContent === 'Anuluj').click(); return true; })()`);
+  await app.until(`!!document.querySelector('.sftp-perms') && !document.querySelector('.sftp-perms .sftp-perms-progress')`, 'dialog still open after Anuluj');
+  await app.setValue('.sftp-perms input[data-field=fileMode]', '644');
+  await app.click('.sftp-perms .modal-foot .btn.primary');
+  await app.until(`!document.querySelector('.sftp-perms') && ${permOf('remote', 'box')} === 'drwxr-xr-x'`, 'recursive chmod as root through lsetstat');
+  log('recursive chmod through sudo with lsetstat, setuid confirmation OK');
+  // Disconnect and connect again for the three wrong passwords.
+  await menu('remote', 'Rozłącz');
+  await app.until(`!${sftp}.sessionId`, 'disconnected');
+  await app.click('.sftp-connect .btn', 'Wybierz host');
+  await pickHost('vps-sudo-pw');
+  await app.until(`(document.querySelector('.sftp-prompt .ssh-card-title')?.textContent ?? '').startsWith('Hasło dla')`, 'login password again');
+  await app.setValue('.sftp-prompt input[type=password]', sudoPwServer.password);
+  await app.click('.sftp-prompt button[type=submit]');
+  for (let i = 0; i < 3; i++) {
+    await app.until(`${sudoPrompt} && (${i} === 0 || !!document.querySelector('.sftp-prompt .ssh-error'))`, `sudo prompt ${i + 1}`);
+    await answerSudo(`bad-${i}`);
+    await sleep(300);
+  }
+  await app.until(`!!document.querySelector('.sftp-ended .sftp-error') && document.querySelector('.sftp-ended .sftp-error').textContent === 'Nieprawidłowe hasło sudo'`, 'three wrong sudo passwords end with an error');
+  await shot99('sudo-wrong');
+  log('three wrong sudo passwords: clear error OK');
+  // Back to the key host for the last step.
+  await app.click('.sftp-ended .btn', 'Wybierz host');
+  await pickHost('vps-key');
+  await app.until(`${sftp}.session?.state === 'connected' && ${hasRow('remote', 'inside.txt')} && !document.querySelector('.sftp-pane-remote .sftp-sudo-badge')`, 'back on the key host (its remembered folder, no sudo badge)');
+
   // 13. Closing the window (the last one, so the app would quit) while a transfer runs asks first; Cancel keeps the app and the
   // transfer goes on.
   await app.cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
@@ -335,6 +571,8 @@ try {
   main?.close();
   await app?.close();
   server.stop();
+  sudoServer.stop();
+  sudoPwServer.stop();
   await sleep(500);
   rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
 }

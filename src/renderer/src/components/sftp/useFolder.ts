@@ -72,7 +72,7 @@ export function useFolder(list: (path: string) => Promise<Listing>, parent: (pat
   }, []);
 
   return {
-    folder: { path, entries, loading, error, truncated, canBack: history.back.length > 0, canForward: history.forward.length > 0, canUp: path !== null && parent(path) !== null },
+    folder: { path, entries, loading, error, truncated, canBack: history.back.length > 0, canForward: history.forward.length > 0, canUp: path !== null && parent(path) !== null, parentPath: path === null ? null : parent(path) },
     go, refresh, back, forward, up, reset,
   };
 }

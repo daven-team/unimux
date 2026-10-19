@@ -2,9 +2,9 @@
 // Windows, home on macOS), the server on the right ("Połącz z hostem" with "Wybierz host" until a saved host is connected;
 // login prompts appear in the pane), and the transfer queue at the bottom. One session at a time (src/renderer/src/sftp.ts).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { safeEntryName, sftpErrorText, validRemoteName, posixJoin, posixParent, type SftpErrorCode, type TransferRequest } from '../../../../shared/sftp';
+import { planRemoteMove, safeEntryName, sftpErrorText, validRemoteName, posixJoin, posixParent, type SftpErrorCode, type TransferRequest } from '../../../../shared/sftp';
 import {
-  deleteCountText, deleteNames, DRIVES, dropRequest, outsideFolder, localCrumbs, localJoin, localParent, rememberLocalPath, rememberRemotePath, remoteCrumbs,
+  deleteCountText, deleteNames, DRIVES, dropRequest, isFolderLike, outsideFolder, localCrumbs, localJoin, localParent, planLocalMove, rememberLocalPath, rememberRemotePath, remoteCrumbs,
   type PaneEntry, type SftpDragPayload,
 } from '../../../../shared/sftpView';
 import { sshErrorText, userAtEndpoint } from '../../../../shared/ssh';
@@ -24,6 +24,7 @@ import { sftpPromptReply } from '../ssh/promptReply';
 import { SshNav } from '../ssh/SshNav';
 import { FilePane } from './FilePane';
 import { HostPicker } from './HostPicker';
+import { PermissionsDialog } from './PermissionsDialog';
 import { TransferPanel } from './TransferPanel';
 import { useFolder, type Listing } from './useFolder';
 import './sftp.css';
@@ -124,6 +125,38 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
     if (req.direction === 'upload') upload(req.sources, req.targetDir); else download(req.sources, req.targetDir);
   };
 
+  // ── moves (0.9.9): a drag onto a folder of the same pane, or Cut and Paste ──
+  /** Entries cut with Ctrl+X / "Wytnij" (one side at a time; a remote cut belongs to its session). */
+  const [cut, setCut] = useState<{ side: 'local' | 'remote'; paths: string[]; sessionId: string | null } | null>(null);
+  useEffect(() => { setCut((c) => (c?.side === 'remote' ? null : c)); }, [sessionId]);
+  const cutOf = (side: 'local' | 'remote') => (cut && cut.side === side && (side === 'local' || cut.sessionId === sessionId) ? cut.paths : null);
+  const localCut = useMemo(() => new Set(cutOf('local') ?? []), [cut]);
+  const remoteCut = useMemo(() => new Set(cutOf('remote') ?? []), [cut, sessionId]);
+  const moveEntries = (side: 'local' | 'remote', paths: string[], targetDir: string): boolean => {
+    if (!paths.length || (side === 'local' && targetDir === DRIVES)) return false;
+    const plan = side === 'remote' ? planRemoteMove(paths, targetDir) : planLocalMove(paths, targetDir, flavor);
+    if (plan.problem) { toast(errorText(plan.problem), 'error'); return false; }
+    if (!plan.sources.length) { toast(tr('Te elementy już są w tym folderze'), 'info'); return false; }
+    if (side === 'remote') {
+      if (!sessionId || !connected) return false;
+      void enqueue(sessionId, { direction: 'move', sources: plan.sources, targetDir });
+    } else void enqueue(null, { direction: 'local-move', sources: plan.sources, targetDir });
+    return true;
+  };
+  const cutEntries = (side: 'local' | 'remote', sel: PaneEntry[]) => {
+    if (!sel.length || (side === 'local' && local.folder.path === DRIVES)) return;
+    setCut({ side, paths: sel.map((e) => e.path), sessionId: side === 'remote' ? sessionId : null });
+    toast(tr('Wycięte: {count}', { count: sel.length }), 'info');
+  };
+  const paste = (side: 'local' | 'remote', targetDir: string | null) => {
+    const paths = cutOf(side);
+    if (!paths || targetDir === null) return;
+    if (moveEntries(side, paths, targetDir)) setCut(null);
+  };
+
+  // ── permissions (0.9.9) ──
+  const [perms, setPerms] = useState<PaneEntry[] | null>(null);
+
   // ── file operations ──
   const validName = (side: 'local' | 'remote', name: string) => (side === 'remote' ? validRemoteName(name) : safeEntryName(name, { windows: flavor === 'win32' }));
   const askName = async (side: 'local' | 'remote', title: string, value = ''): Promise<string | null> => {
@@ -192,6 +225,16 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
     await remote.refresh();
   };
 
+  /** Cut, Paste and (on one folder) Paste here. */
+  const moveItems = (side: 'local' | 'remote', sel: PaneEntry[], dir: string | null, off: boolean): MenuItem[] => {
+    const pasteable = !off && !!cutOf(side);
+    const into = sel.length === 1 && isFolderLike(sel[0]) && !sel[0].unsafeName ? sel[0] : null;
+    return [
+      { label: tr('Wytnij'), disabled: off || !sel.length, onClick: () => cutEntries(side, sel) },
+      { label: tr('Wklej'), disabled: !pasteable || !dir, onClick: () => paste(side, dir) },
+      ...(into ? [{ label: tr('Wklej tutaj'), disabled: !pasteable, onClick: () => paste(side, into.path) }] : []),
+    ];
+  };
   // ── editor tabs (0.9.9): a file opens in a tab at the top ──
   const openRemote = (e: PaneEntry) => { if (hostId && connected && isFileLike(e)) void openRemoteEntry(hostId, e.path, e.kind === 'file' ? e.size : undefined); };
   const openLocal = (e: PaneEntry) => { if (isFileLike(e)) openLocalEntry(e.path); };
@@ -206,6 +249,8 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
       { label: tr('Zmień nazwę'), disabled: drives || sel.length !== 1, onClick: () => void localRename(sel[0]) },
       { label: tr('Przenieś do kosza'), danger: true, disabled: drives || !sel.length, onClick: () => void localDelete(sel) },
       { sep: true },
+      ...moveItems('local', sel, localDir, drives),
+      { sep: true },
       { label: tr('Wyślij na serwer'), disabled: !connected || !sel.length || !remoteDir, onClick: () => upload(sel.map((e) => e.path), remoteDir!) },
       { label: tr('Odśwież'), onClick: () => void local.refresh() },
       { label: tr(flavor === 'win32' ? 'Otwórz w Eksploratorze' : 'Pokaż w Finderze'), disabled: drives, onClick: () => { const target = sel[0]?.path ?? localDir; if (target) void window.mc.localFs.reveal(target); } },
@@ -216,6 +261,9 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
     { label: tr('Nowy folder'), disabled: !connected, onClick: () => void remoteNewFolder() },
     { label: tr('Zmień nazwę'), disabled: !connected || sel.length !== 1, onClick: () => void remoteRename(sel[0]) },
     { label: tr('Usuń'), danger: true, disabled: !connected || !sel.length, onClick: () => void remoteDelete(sel) },
+    { label: tr('Uprawnienia…'), disabled: !connected || !sel.length || sel.some((e) => e.unsafeName), onClick: () => setPerms(sel) },
+    { sep: true },
+    ...moveItems('remote', sel, remoteDir, !connected),
     { sep: true },
     { label: tr('Pobierz'), disabled: !connected || !sel.length || !localDir || localDir === DRIVES, onClick: () => download(sel.map((e) => e.path), localDir!) },
     { label: tr('Odśwież'), disabled: !connected, onClick: () => void remote.refresh() },
@@ -248,6 +296,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
           <span className={`sftp-dot ${session?.state ?? 'closed'}`} aria-label={status || undefined} />
           <strong>{host.label}</strong>
           <span className="muted sftp-host-address">{userAtEndpoint(host)}</span>
+          {connected && session?.sudo && <span className="sftp-sudo-badge" title={tr('SFTP działa przez sudo')}>sudo</span>}
         </button>
       ) : <strong>{tr('Serwer')}</strong>}
     </div>
@@ -311,6 +360,8 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
           transfer={{ label: tr('Wyślij'), icon: <IUpload />, disabled: !connected || !remoteDir, run: (sel) => upload(sel.map((e) => e.path), remoteDir!) }}
           onDelete={(sel) => void localDelete(sel)} onRename={(e) => void localRename(e)}
           onDropEntries={(payload, dir) => onDropEntries(payload, 'local', dir)}
+          onMoveEntries={(paths, dir) => void moveEntries('local', paths, dir)}
+          onRefresh={() => void local.refresh()} onCut={(sel) => cutEntries('local', sel)} onPaste={() => paste('local', localDir)} cutPaths={localCut}
           onDropFiles={(paths, dir) => {
             // Files dropped onto the folder they already live in would only conflict with themselves.
             const sources = outsideFolder(paths, dir, flavor);
@@ -325,9 +376,14 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
           onDelete={(sel) => void remoteDelete(sel)} onRename={(e) => void remoteRename(e)}
           onDropEntries={(payload, dir) => onDropEntries(payload, 'remote', dir)}
           onDropFiles={(paths, dir) => upload(paths, dir)}
+          onMoveEntries={(paths, dir) => void moveEntries('remote', paths, dir)}
+          onRefresh={() => { if (connected) void remote.refresh(); }} onCut={(sel) => { if (connected) cutEntries('remote', sel); }} onPaste={() => paste('remote', remoteDir)} cutPaths={remoteCut}
           dropDisabled={!connected || !!remotePlaceholder} placeholder={remotePlaceholder} />
       </div>
       <TransferPanel />
+      {perms && sessionId && connected && (
+        <PermissionsDialog sessionId={sessionId} entries={perms} sudo={session?.sudo === true} onClose={(changed) => { setPerms(null); if (changed) void remote.refresh(); }} />
+      )}
     </div>
   );
 }

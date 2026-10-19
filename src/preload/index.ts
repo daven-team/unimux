@@ -102,7 +102,7 @@ const api: McApi = {
     answer: (answer) => ipcRenderer.invoke('ssh:prompt:answer', answer),
   },
   sftp: {
-    connect: (hostId, initialPath) => ipcRenderer.invoke('sftp:connect', hostId, initialPath),
+    connect: (hostId, initialPath, opts) => ipcRenderer.invoke('sftp:connect', hostId, initialPath, opts),
     disconnect: (sessionId) => ipcRenderer.invoke('sftp:disconnect', sessionId),
     sessions: () => ipcRenderer.invoke('sftp:sessions'),
     answer: (answer) => ipcRenderer.invoke('sftp:prompt:answer', answer),
@@ -118,6 +118,9 @@ const api: McApi = {
     answerConflict: (sessionId, itemId, answer) => ipcRenderer.invoke('sftp:answerConflict', sessionId, itemId, answer),
     retry: (sessionId, itemIds) => ipcRenderer.invoke('sftp:retry', sessionId, itemIds),
     clearFinished: (sessionId) => ipcRenderer.invoke('sftp:clearFinished', sessionId),
+    chmodCount: (sessionId, paths, recursive) => ipcRenderer.invoke('sftp:chmodCount', sessionId, paths, recursive),
+    chmod: (sessionId, req) => ipcRenderer.invoke('sftp:chmod', sessionId, req),
+    cancelOp: (sessionId, opId) => ipcRenderer.invoke('sftp:cancelOp', sessionId, opId),
     readFile: (sessionId, path) => ipcRenderer.invoke('sftp:readFile', sessionId, path),
     statFile: (sessionId, path) => ipcRenderer.invoke('sftp:statFile', sessionId, path),
     writeFile: (sessionId, path, save) => ipcRenderer.invoke('sftp:writeFile', sessionId, path, save),

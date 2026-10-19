@@ -2,10 +2,12 @@
 // columns and a windowed list (folders with thousands of entries render only the rows on screen). Multi-select with
 // Ctrl/Shift click and the keyboard (arrows, Home/End, Page keys, Enter opens, Backspace goes up, Delete, F2, Ctrl+A).
 // Entries drag to the other pane; drops come from the other pane (SFTP_DRAG_MIME) or from the OS (Files).
+// 0.9.9: a drag onto a folder row, a path segment or ".." of the same pane moves the entries there; Ctrl+X / Ctrl+V cut and
+// paste, F5 and the turning refresh button list the folder again (the old rows stay, dimmed, until the new listing came).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { rowSlots, rowWindow } from '../../../../shared/virtualRows';
 import {
-  clickSelect, EMPTY_SELECTION, filterEntries, formatBytes, isFolderLike, kindLabel, liveSelection, moveSelect, resolveDrop, selectAll,
+  clickSelect, EMPTY_SELECTION, filterEntries, formatBytes, isFolderLike, kindLabel, liveSelection, moveSelect, resolveDrop, resolveMove, selectAll,
   SFTP_DRAG_MIME, sortEntries, toggleSort, DEFAULT_SORT, type Crumb, type PaneEntry, type ActiveDrag, type Selection, type SftpDragPayload, type SortKey, type SortOrder,
 } from '../../../../shared/sftpView';
 import type { MessageKey } from '../../../../shared/i18n';
@@ -14,6 +16,7 @@ import { useI18n } from '../../i18n';
 import { openMenu, openMenuAt, type MenuItem } from '../ContextMenu';
 import { FileIcon } from '../FileIcon';
 import { IArrowLeft, IArrowRight, IArrowUp, IChevron, IFolder, ILink, ISearch } from '../icons';
+import { RefreshIcon, useHoldBusy } from '../Spinner';
 
 export const ROW_HEIGHT = 26;
 
@@ -27,6 +30,8 @@ export interface PaneFolder {
   canBack: boolean;
   canForward: boolean;
   canUp: boolean;
+  /** The folder above (the ".." row); null at the top. On Windows a drive root goes up to the drive list (DRIVES). */
+  parentPath: string | null;
 }
 
 export interface PaneProps {
@@ -52,6 +57,16 @@ export interface PaneProps {
   onDropEntries(payload: SftpDragPayload, targetDir: string): void;
   /** Files from the OS (Explorer, Finder, the desktop) were dropped into `targetDir`. */
   onDropFiles(paths: string[], targetDir: string): void;
+  /** Entries of this pane dragged onto one of its folders (a row, a path segment or ".."): a move. */
+  onMoveEntries(paths: string[], targetDir: string): void;
+  /** F5, the refresh button. */
+  onRefresh(): void;
+  /** Ctrl+X: these entries are cut (shown dimmed until pasted). */
+  onCut(selected: PaneEntry[]): void;
+  /** Ctrl+V: the cut entries go into the shown folder. */
+  onPaste(): void;
+  /** Paths cut from this pane (dimmed rows). */
+  cutPaths?: ReadonlySet<string>;
   /** No drop target (the drive list, a remote pane without a session). */
   dropDisabled?: boolean;
   /** Text shown instead of the list (no entries yet, an empty state). */
@@ -104,13 +119,18 @@ export function FilePane(p: PaneProps) {
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-  const slots = rowSlots(rowWindow(view.top, view.height, ROW_HEIGHT, rows.length), rows.length, focusIndex >= 0 ? [focusIndex] : []);
+  // The ".." row sits above the windowed rows (one row height).
+  const upRow = p.folder.parentPath !== null && p.folder.path !== null;
+  const offset = upRow ? ROW_HEIGHT : 0;
+  const slots = rowSlots(rowWindow(Math.max(0, view.top - offset), view.height, ROW_HEIGHT, rows.length), rows.length, focusIndex >= 0 ? [focusIndex] : []);
+  const refreshing = useHoldBusy(p.folder.loading, 400);
 
   const reveal = (index: number) => {
     const el = list.current;
     if (!el || index < 0) return;
-    if (index * ROW_HEIGHT < el.scrollTop) el.scrollTop = index * ROW_HEIGHT;
-    else if ((index + 1) * ROW_HEIGHT > el.scrollTop + el.clientHeight) el.scrollTop = (index + 1) * ROW_HEIGHT - el.clientHeight;
+    const top = index * ROW_HEIGHT + offset;
+    if (top < el.scrollTop) el.scrollTop = top;
+    else if (top + ROW_HEIGHT > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_HEIGHT - el.clientHeight;
   };
   const move = (m: number | 'home' | 'end', extend: boolean) => {
     const next = moveSelect(sel, order, m, extend);
@@ -138,7 +158,10 @@ export function FilePane(p: PaneProps) {
         case 'Backspace': if (p.folder.canUp) p.onUp(); return true;
         case 'Delete': if (selected.length) p.onDelete(selected); return true;
         case 'F2': { const f = (sel.focus ? byPath.get(sel.focus) : undefined) ?? selected[0]; if (f) p.onRename(f); return true; }
+        case 'F5': p.onRefresh(); return true;
         case 'a': case 'A': if (mod) { setSel(selectAll(order)); return true; } return false;
+        case 'x': case 'X': if (mod && !e.shiftKey && !e.altKey) { if (selected.length) p.onCut(selected); return true; } return false;
+        case 'v': case 'V': if (mod && !e.shiftKey && !e.altKey) { p.onPaste(); return true; } return false;
         case 'Escape': if (sel.paths.length) { setSel(EMPTY_SELECTION); return true; } return false;
         default: return false;
       }
@@ -168,35 +191,44 @@ export function FilePane(p: PaneProps) {
     if (!sel.paths.includes(entry.path)) setSel(clickSelect(sel, order, entry.path));
     activeDrag = { side: p.side, paths: [...paths], nonce: crypto.randomUUID() };
     e.dataTransfer.setData(SFTP_DRAG_MIME, activeDrag.nonce);
-    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.effectAllowed = 'copyMove';
+  };
+  /** The folder element under the pointer (a folder row, a path segment, ".."), or null. */
+  const folderUnder = (e: DragEvent): string | null => (e.target as HTMLElement).closest<HTMLElement>('[data-folder-path]')?.dataset.folderPath ?? null;
+  /** A drag from this pane moves onto one of its folders, never onto the shown folder itself or onto a dragged entry. */
+  const moveTarget = (e: DragEvent): string | null => {
+    const target = folderUnder(e);
+    if (target === null || target === p.folder.path || !activeDrag || activeDrag.side !== p.side) return null;
+    return activeDrag.paths.includes(target) ? null : target;
   };
   /** An in-app drag from the other pane, or files from the OS; custom data without an in-app drag behind it never counts. */
   const accepts = (e: DragEvent): boolean => {
     if (p.dropDisabled || p.folder.path === null) return false;
     const types = Array.from(e.dataTransfer.types);
-    if (types.includes(SFTP_DRAG_MIME) && activeDrag) return activeDrag.side !== p.side;
+    if (types.includes(SFTP_DRAG_MIME) && activeDrag) return activeDrag.side !== p.side || moveTarget(e) !== null;
     return types.includes('Files');
   };
-  const targetOf = (e: DragEvent): string => {
-    const row = (e.target as HTMLElement).closest<HTMLElement>('[data-folder-path]');
-    return row?.dataset.folderPath ?? p.folder.path ?? '';
-  };
+  const targetOf = (e: DragEvent): string => folderUnder(e) ?? p.folder.path ?? '';
   const onDragOver = (e: DragEvent) => {
-    if (!accepts(e)) return;
+    if (!accepts(e)) { if (over !== null && activeDrag?.side === p.side) setOver(null); return; }
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-    const target = targetOf(e);
+    const moving = activeDrag?.side === p.side;
+    e.dataTransfer.dropEffect = moving ? 'move' : 'copy';
+    const target = moving ? moveTarget(e)! : targetOf(e);
     if (over !== target) setOver(target);
   };
   const onDrop = (e: DragEvent) => {
     const ok = accepts(e);
     const active = activeDrag;
+    const target = active?.side === p.side ? moveTarget(e) : targetOf(e);
     activeDrag = null;
     setOver(null);
-    if (!ok) return;
+    if (!ok || target === null) return;
     e.preventDefault();
-    const target = targetOf(e);
-    const payload = resolveDrop(active, e.dataTransfer.getData(SFTP_DRAG_MIME), p.side);
+    const raw = e.dataTransfer.getData(SFTP_DRAG_MIME);
+    const moved = resolveMove(active, raw, p.side);
+    if (moved) { p.onMoveEntries(moved, target); return; }
+    const payload = resolveDrop(active, raw, p.side);
     if (payload) { p.onDropEntries(payload, target); return; }
     if (active) return;
     const paths = Array.from(e.dataTransfer.files).map((f) => window.mc.pathForFile(f)).filter(Boolean);
@@ -230,10 +262,12 @@ export function FilePane(p: PaneProps) {
           {p.crumbs.map((c, i) => (
             <span key={c.path} className="sftp-crumb">
               {i > 0 && c.label !== '/' && p.crumbs[i - 1].label !== '/' && <span className="sftp-crumb-sep">/</span>}
-              <button type="button" className={i === p.crumbs.length - 1 ? 'on' : ''} title={c.path} onClick={() => p.onOpen(c.path)}>{c.label}</button>
+              <button type="button" className={`${i === p.crumbs.length - 1 ? 'on' : ''}${over === c.path && c.path !== f.path ? ' drop' : ''}`} title={c.path} data-folder-path={c.path} onClick={() => p.onOpen(c.path)}>{c.label}</button>
             </span>
           ))}
         </nav>
+        <button type="button" className={`btn ghost icon sftp-refresh${refreshing ? ' busy' : ''}`} aria-label={tr('Odśwież')} title={refreshing ? tr('Odświeżanie…') : tr('Odśwież')} aria-busy={refreshing}
+          disabled={f.path === null} onClick={p.onRefresh}><RefreshIcon spinning={refreshing} /></button>
       </div>
       {p.placeholder ?? (
         <div className="sftp-table">
@@ -245,10 +279,17 @@ export function FilePane(p: PaneProps) {
               </button>
             ))}
           </div>
-          <div ref={list} className={`sftp-list${over === f.path ? ' drop' : ''}`} role="grid" aria-label={p.label} aria-multiselectable tabIndex={0}
+          <div ref={list} className={`sftp-list${over === f.path ? ' drop' : ''}${f.loading && f.path !== null ? ' loading' : ''}`} role="grid" aria-label={p.label} aria-multiselectable tabIndex={0} aria-busy={f.loading}
             aria-rowcount={rows.length} onKeyDown={onKeyDown} onScroll={(e) => { const t = e.currentTarget.scrollTop; setView((v) => (v.top === t ? v : { ...v, top: t })); }}
             onContextMenu={(e) => { if (e.target === e.currentTarget) onRowMenu(e, null); }}
             onMouseDown={(e) => { if (e.target === e.currentTarget) setSel(EMPTY_SELECTION); }}>
+            {upRow && (
+              <div className={`sftp-uprow${over !== null && over === f.parentPath ? ' drop' : ''}`} role="row" title={tr('Folder nadrzędny')}
+                {...(f.parentPath ? { 'data-folder-path': f.parentPath } : {})}
+                onDoubleClick={p.onUp} onContextMenu={(ev) => { ev.preventDefault(); ev.stopPropagation(); }}>
+                <span className="sftp-col sftp-col-name"><span className="sftp-icon"><IFolder /></span><span className="sftp-name">..</span></span>
+              </div>
+            )}
             {slots.map((slot, i) => {
               if (slot.kind === 'gap') return <div key={`gap-${i}`} style={{ height: slot.rows * ROW_HEIGHT }} aria-hidden />;
               const e = rows[slot.index];
@@ -257,7 +298,7 @@ export function FilePane(p: PaneProps) {
               const kind = kindLabel(e);
               return (
                 <div key={e.path || `unsafe-${slot.index}`} role="row" aria-rowindex={slot.index + 1} aria-selected={on}
-                  className={`sftp-row${on ? ' on' : ''}${sel.focus === e.path ? ' focus' : ''}${e.unsafeName ? ' unsafe' : ''}${over === e.path && folder ? ' drop' : ''}`}
+                  className={`sftp-row${on ? ' on' : ''}${sel.focus === e.path ? ' focus' : ''}${e.unsafeName ? ' unsafe' : ''}${over === e.path && folder ? ' drop' : ''}${p.cutPaths?.has(e.path) ? ' cut' : ''}`}
                   data-path={e.path} data-name={e.name} {...(folder ? { 'data-folder-path': e.path } : {})}
                   draggable={!e.unsafeName} onDragStart={(ev) => onDragStart(ev, e)} onDragEnd={() => { activeDrag = null; setOver(null); }}
                   onClick={(ev) => onRowClick(ev, e)} onDoubleClick={() => open(e)} onContextMenu={(ev) => { ev.stopPropagation(); onRowMenu(ev, e); }}

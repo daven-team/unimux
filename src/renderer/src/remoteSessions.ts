@@ -63,6 +63,8 @@ function pendingSession(hostId: string): string | null {
   const editor = useRemoteSessions.getState().connecting[hostId];
   if (editor) return editor;
   const view = useSftpStore.getState();
+  // The view's login of a sudo host would end in a session with raised rights: never waited for.
+  if (getS().sshHosts.some((h) => h.id === hostId && h.sftpSudo)) return null;
   return view.sessionId && view.hostId === hostId && view.session?.state === 'connecting' ? view.sessionId : null;
 }
 
@@ -114,7 +116,8 @@ export function ensureSession(hostId: string): Promise<SessionResult> {
     if (!getS().sshHosts.some((h) => h.id === hostId)) { const t = sshErrorText('hostMissing', sshContext(hostId)); return { ok: false, error: tr(t.key, t.params) }; }
     let id = pendingSession(hostId);
     if (!id) {
-      const r = await window.mc.sftp.connect(hostId).catch(() => null);
+      // Its own rights only: a host with "Uruchamiaj SFTP przez sudo" still gets a plain session for editor tabs.
+      const r = await window.mc.sftp.connect(hostId, undefined, { plain: true }).catch(() => null);
       if (!r || !r.ok) {
         const t = r ? sshErrorText(r.error, sshContext(hostId)) : null;
         return { ok: false, error: loginError(hostId, null, t ? tr(t.key, t.params) : undefined) };

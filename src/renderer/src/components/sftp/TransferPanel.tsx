@@ -85,7 +85,7 @@ function TransferRow({ item }: { item: TransferItem }) {
   const p = percentOf(item);
   const error = item.error ? sftpErrorText(item.error) : null;
   const dir = item.direction === 'upload' ? <IUpload /> : item.direction === 'download' ? <IDownload /> : <IArrowRight />;
-  const dirLabel = tr(item.direction === 'upload' ? 'Wysyłanie' : item.direction === 'download' ? 'Pobieranie' : 'Kopiowanie');
+  const dirLabel = tr(item.direction === 'upload' ? 'Wysyłanie' : item.direction === 'download' ? 'Pobieranie' : item.direction === 'move' || item.direction === 'local-move' ? 'Przenoszenie' : 'Kopiowanie');
   return (
     <div className={`sftp-transfer ${item.state}`} data-transfer-id={item.id} data-state={item.state} title={`${item.source}\n${item.target}`}>
       <span className="sftp-transfer-dir" title={dirLabel} aria-label={dirLabel}>{dir}</span>

@@ -64,6 +64,7 @@ export function localError(error: unknown): SftpErrorCode {
     case 'ENOTDIR': return 'notADirectory';
     case 'EISDIR': return 'isADirectory';
     case 'ENOSPC': case 'EDQUOT': return 'noSpace';
+    case 'EXDEV': return 'crossDevice';
     case 'ABORT_ERR': return 'cancelled';
     default: return 'failed';
   }
@@ -389,6 +390,19 @@ export class RemoteSide implements FileSide {
       throw new SftpError(code);
     }
     await this.unlink(aside).catch(() => undefined);
+  }
+  /** The server offers lsetstat@openssh.com (a SETSTAT that never follows a symlink, OpenSSH 8.x and later). */
+  get lsetstat(): boolean {
+    return (this.sftp as unknown as { _extensions?: Record<string, string> })._extensions?.['lsetstat@openssh.com'] !== undefined;
+  }
+  /**
+   * Only the permission bits (0.9.9): through lsetstat when offered, else SETSTAT (which follows a symlink: callers lstat
+   * first, and a recursive change as root is refused without lsetstat).
+   */
+  chmodNoFollow(path: string, mode: number): Promise<void> {
+    const attrs = { mode: mode & 0o7777 };
+    if (this.lsetstat) return this.rq.call<void>((cb) => (this.sftp as unknown as { ext_openssh_lsetstat(p: string, a: typeof attrs, cb: (err?: Error | null) => void): void }).ext_openssh_lsetstat(path, attrs, cb));
+    return this.rq.call<void>((cb) => this.sftp.setstat(path, attrs, cb));
   }
   async setMtime(path: string, mtime: number): Promise<void> {
     const seconds = Math.floor(mtime / 1000);

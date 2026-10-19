@@ -14,8 +14,8 @@ export const SFTP_STDERR_TAIL_BYTES = 8 * 1024;
  * timeout would answer 'failed' while the host goes on and adds the items later) and ends with the session, a host crash or
  * cancel({ batchId }) for the batchId the view chose.
  */
-export const opTimeoutMs = (op: SftpOp): number | null => (op.op === 'enqueue' ? null
-  : op.op === 'delete' || op.op === 'deleteCount' ? 10 * 60_000
+export const opTimeoutMs = (op: SftpOp): number | null => (op.op === 'enqueue' || op.op === 'chmod' ? null
+  : op.op === 'delete' || op.op === 'deleteCount' || op.op === 'chmodCount' ? 10 * 60_000
     // An editor tab reads or writes up to 8 MB in one request (a slow link needs minutes).
     : op.op === 'readFile' || op.op === 'writeFile' ? 5 * 60_000 : 60_000);
 /** Main waits this long for the host to close its sessions at app shutdown (the host itself takes at most about 2 s). */

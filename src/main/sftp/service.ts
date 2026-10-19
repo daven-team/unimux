@@ -15,6 +15,8 @@ export interface SftpServiceDeps {
   coordinator: Pick<SshCoordinator, 'connectSession' | 'endSession' | 'answer' | 'sessionSnapshot' | 'onHostMessage' | 'sessionHostCrashed'>;
   host: SftpHostLink;
   hostExists(hostId: string): boolean;
+  /** 0.9.9: the host runs SFTP through sudo (the session then reads `sudo` once connected). */
+  hostSudo?(hostId: string): boolean;
   events: { session(s: SftpSessionState): void; prompt(sessionId: string, prompt: SshPrompt | null): void; hostCrashed(): void };
   now?(): number;
   idleMs?: number;
@@ -23,7 +25,7 @@ export interface SftpServiceDeps {
   defer?(fn: () => void): void;
 }
 
-interface Entry { state: SftpSessionState; initialPath?: string; queueActive: boolean; idle: unknown; resolving: boolean }
+interface Entry { state: SftpSessionState; initialPath?: string; queueActive: boolean; idle: unknown; resolving: boolean; sudo: boolean }
 
 export class SftpService {
   private sessions = new Map<string, Entry>();
@@ -39,16 +41,17 @@ export class SftpService {
   private setTimer(fn: () => void, ms: number): unknown { return this.deps.setTimer ? this.deps.setTimer(fn, ms) : setTimeout(fn, ms); }
   private clearTimer(t: unknown): void { if (t === undefined || t === null) return; if (this.deps.clearTimer) this.deps.clearTimer(t); else clearTimeout(t as NodeJS.Timeout); }
 
-  async connect(hostId: string, initialPath?: string): Promise<{ ok: true; sessionId: string } | { ok: false; error: SshErrorCode }> {
+  /** `plain`: a session with the SSH user's own rights even when the host runs SFTP through sudo (editor tabs). */
+  async connect(hostId: string, initialPath?: string, opts: { plain?: boolean } = {}): Promise<{ ok: true; sessionId: string } | { ok: false; error: SshErrorCode }> {
     if (!this.deps.hostExists(hostId)) return { ok: false, error: 'hostMissing' };
     if (!this.deps.host.ensure()) return { ok: false, error: 'sftpHostCrashed' };
     const id = sftpSessionId(randomUUID());
-    const entry: Entry = { state: { id, hostId, state: 'connecting', phase: 'connecting', since: this.now() }, initialPath, queueActive: false, idle: null, resolving: false };
+    const entry: Entry = { state: { id, hostId, state: 'connecting', phase: 'connecting', since: this.now() }, initialPath, queueActive: false, idle: null, resolving: false, sudo: !opts.plain && this.deps.hostSudo?.(hostId) === true };
     this.sessions.set(id, entry);
     // The id goes back first; the login (which may wait minutes for a passphrase) runs after this answer was sent, so every
     // 'sftp:session' and 'sftp:prompt' event names an id the view already has.
     this.defer(() => {
-      void this.deps.coordinator.connectSession({ sessionId: id, hostId }).then((r) => {
+      void this.deps.coordinator.connectSession({ sessionId: id, hostId, ...(opts.plain ? { plain: true } : {}) }).then((r) => {
         if (r.ok || this.sessions.get(id) !== entry) return;
         // The coordinator reports most failures as an 'error' state itself; one it refused up front is reported here.
         if (entry.state.state !== 'error') {
@@ -92,7 +95,8 @@ export class SftpService {
       void this.resolveStart(entry).then((path) => {
         entry.resolving = false;
         if (this.sessions.get(s.cellId) !== entry) return; // ended meanwhile
-        entry.state = { ...next, ...(path ? { path } : {}) };
+        // Sudo never falls back to the plain subsystem: a connected session of a sudo host runs through sudo.
+        entry.state = { ...next, ...(path ? { path } : {}), ...(entry.sudo ? { sudo: true as const } : {}) };
         this.deps.events.session(entry.state);
         this.scheduleIdle(entry);
       });

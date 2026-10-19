@@ -21,6 +21,10 @@ export const queueOf = (sessionId: string): string | null => (sessionId === LOCA
 let port: MessagePort | null = null;
 
 function onPortMessage(m: SftpPortMessage): void {
+  if (m.t === 'opProgress') {
+    useSftpStore.setState((st) => ({ opProgress: { ...st.opProgress, [m.opId]: { done: m.done, total: m.total } } }));
+    return;
+  }
   useSftpStore.setState((st) => ({ transfers: m.t === 'snapshot' ? mergeSnapshot(st.transfers, m.items) : applyPortMessage(st.transfers, m) }));
 }
 
@@ -270,10 +274,12 @@ export async function askConflict(item: TransferItem): Promise<void> {
     tr('{name} już istnieje w miejscu docelowym.', { name: item.name }),
     '',
     tr('Istniejący: {size}, {date}', { size: c.existing.kind === 'dir' ? tr('Folder') : formatBytes(c.existing.size, language), date: when(c.existing.mtime) }),
-    tr('Nowy: {size}, {date}', { size: formatBytes(c.incoming.size, language), date: when(c.incoming.mtime) }),
+    tr('Nowy: {size}, {date}', { size: c.incoming.kind === 'dir' ? tr('Folder') : formatBytes(c.incoming.size, language), date: when(c.incoming.mtime) }),
   ].join('\n');
+  // Only a file replaces a file (0.9.9: a moved folder is never merged into or replaced by another entry).
+  const canOverwrite = c.existing.kind !== 'dir' && c.incoming.kind !== 'dir';
   const { value, checked, replaced } = await askChoiceChecked(tr('Konflikt nazw'), body, [
-    { label: tr('Zastąp'), value: 'overwrite', danger: true },
+    ...(canOverwrite ? [{ label: tr('Zastąp'), value: 'overwrite', danger: true }] : []),
     { label: tr('Pomiń'), value: 'skip' },
     { label: tr('Zachowaj oba'), value: 'keepBoth', primary: true },
   ], tr('Zrób to samo dla pozostałych'));
