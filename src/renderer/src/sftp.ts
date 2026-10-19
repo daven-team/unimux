@@ -10,6 +10,7 @@ import { askChoice, askChoiceChecked, getS, getUi, toast, useStore } from './sto
 import { openSshView, selectSshSection } from './ssh';
 import { useSshStore } from './sshStore';
 import { useSftpStore } from './sftpStore';
+import { pinnedHosts } from './remoteSessions';
 
 export const pathFlavor = (): PathFlavor => (window.mc.platform === 'win32' ? 'win32' : 'posix');
 /** The queue id of an item as the API wants it: null for the local copies. */
@@ -143,7 +144,9 @@ export async function connectSftp(hostId: string, initialPath?: string): Promise
       ]);
       if (choice !== 'yes' || seq !== connectSeq) return false;
     }
-    void window.mc.sftp.disconnect(st.sessionId);
+    // Unsaved remote tabs of the old host keep using its session: the view only lets go of it (main keeps a pinned session).
+    if (!pinnedHosts().has(st.hostId ?? '')) void window.mc.sftp.disconnect(st.sessionId);
+    else if (running) void window.mc.sftp.cancel(st.sessionId, { itemIds: activeOf(st.sessionId).map((i) => i.id).slice(0, 1000) });
   }
   const path = initialPath ?? getS().sftp?.remotePaths[hostId];
   useSftpStore.setState({ pickerOpen: false, remoteGoto: null, prompt: null });
@@ -163,8 +166,15 @@ export async function connectSftp(hostId: string, initialPath?: string): Promise
 
 /** Disconnect (remote pane Actions): running transfers of the session are asked about first. */
 export async function disconnectSftp(): Promise<void> {
-  const { sessionId } = useSftpStore.getState();
+  const { sessionId, hostId } = useSftpStore.getState();
   if (!sessionId) return;
+  if (hostId && pinnedHosts().has(hostId)) {
+    // Editor tabs with unsaved changes use this connection: their next save would have to log in again.
+    const choice = await askChoice(tr('Rozłączyć mimo niezapisanych plików?'), tr('Karty z niezapisanymi zmianami w plikach tego serwera korzystają z tego połączenia. Przy zapisie połączą się ponownie.'), [
+      { label: tr('Rozłącz'), value: 'yes', danger: true },
+    ]);
+    if (choice !== 'yes') return;
+  }
   const running = activeOf(sessionId).length;
   if (running) {
     const choice = await askChoice(tr('Rozłączyć i przerwać transfery?'), tr('Transfery w toku: {count}.', { count: running }), [

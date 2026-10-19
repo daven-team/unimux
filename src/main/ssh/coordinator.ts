@@ -84,13 +84,14 @@ export class SshCoordinator {
    * A login that is not a grid cell (0.9.8, SFTP): `sessionId` is "sftp:<uuid>". Everything else is the cell path: vault key,
    * passphrase (saved, remembered or asked), saved password, known hosts and the same prompt groups.
    */
-  async connectSession(req: { sessionId: string; hostId: string }): Promise<{ ok: true } | { ok: false; error: SshErrorCode }> {
+  /** `plain` (0.9.9): never through sudo, even for a host with "Uruchamiaj SFTP przez sudo" (editor tabs write as the SSH user). */
+  async connectSession(req: { sessionId: string; hostId: string; plain?: boolean }): Promise<{ ok: true } | { ok: false; error: SshErrorCode }> {
     if (!isSftpSessionId(req.sessionId)) return { ok: false, error: 'unknown' };
     const host = this.deps.state().sshHosts.find((h) => h.id === req.hostId);
     if (!host) return { ok: false, error: 'hostMissing' };
     const existing = this.sessionsByCell.get(req.sessionId);
     if (existing && isLivePhase(existing.state.phase)) return { ok: true };
-    return this.start(req.sessionId, 'session', host, { cols: 80, rows: 24, ...(host.sftpSudo ? { sftpSudo: { ...(host.sftpCommand ? { command: host.sftpCommand } : {}) } } : {}) });
+    return this.start(req.sessionId, 'session', host, { cols: 80, rows: 24, ...(host.sftpSudo && !req.plain ? { sftpSudo: { ...(host.sftpCommand ? { command: host.sftpCommand } : {}) } } : {}) });
   }
 
   private async start(id: string, kind: Live['kind'], host: SshHost, size: { cols: number; rows: number; startup?: string; sftpSudo?: { command?: string } }): Promise<{ ok: true } | { ok: false; error: SshErrorCode }> {

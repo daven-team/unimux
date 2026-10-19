@@ -17,6 +17,7 @@ import { useStatusCounts } from '../statusCounts';
 import { locateInFiles } from '../explorer';
 import { fullProjectPath } from '../../../shared/platform';
 import { tabsToClose } from '../../../shared/fileOps';
+import { sourceTitle, type FileSource } from '../../../shared/editorSource';
 import { revealScroll, scrollEdges, stepScroll, wheelScroll } from '../../../shared/tabStrip';
 import { useSshStore } from '../sshStore';
 import { activateSshView, closeSshView, reconnectAllSsh, reconnectAllTargetsOf, sshHostMenuItems } from '../ssh';
@@ -49,9 +50,11 @@ export const TitleBar = memo(function TitleBar() {
 });
 
 /** What a file tab shows (not the text): typing in the editor changes none of it except `dirty`. */
-interface FileTab { id: string; projectId: string; name: string; relativePath: string; diff: boolean; dirty: boolean }
+interface FileTab { id: string; projectId: string; name: string; relativePath: string; diff: boolean; dirty: boolean; source: FileSource | null }
 const fileTabsKey = (documents: readonly FileDocument[]): string =>
-  JSON.stringify(documents.map((d) => [d.id, d.projectId, d.name, d.relativePath, !!d.diff, d.text !== d.savedText]));
+  JSON.stringify(documents.map((d) => [d.id, d.projectId, d.name, d.relativePath, !!d.diff, d.text !== d.savedText, d.source ?? null]));
+/** A tab of the project on screen, or of a file outside the projects (remote and local SFTP files show in every project). */
+const tabShown = (doc: { projectId: string }, projectId: string | undefined): boolean => !doc.projectId || doc.projectId === projectId;
 
 export const WorkspaceTabs = memo(function WorkspaceTabs() {
   const { tr } = useI18n();
@@ -62,10 +65,12 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
   const countsOf = useStatusCounts();
   const cliStatus = useStore((st) => st.ui.cliStatus);
   const tabsKey = useFileStore((st) => fileTabsKey(st.documents));
-  const documents = useMemo(() => (JSON.parse(tabsKey) as Array<[string, string, string, string, boolean, boolean]>)
-    .map(([id, projectId, name, relativePath, diff, dirty]): FileTab => ({ id, projectId, name, relativePath, diff, dirty })), [tabsKey]);
+  const documents = useMemo(() => (JSON.parse(tabsKey) as Array<[string, string, string, string, boolean, boolean, FileSource | null]>)
+    .map(([id, projectId, name, relativePath, diff, dirty, source]): FileTab => ({ id, projectId, name, relativePath, diff, dirty, source })), [tabsKey]);
+  const sshHosts = useStore((st) => st.s.sshHosts);
+  const hostLabel = (hostId: string) => sshHosts.find((h) => h.id === hostId)?.label ?? '?';
   const selectedFile = useFileStore((st) => st.activeFileId);
-  const activeFileId = documents.some((doc) => doc.id === selectedFile && doc.projectId === project?.id) ? selectedFile : null;
+  const activeFileId = documents.some((doc) => doc.id === selectedFile && tabShown(doc, project?.id)) ? selectedFile : null;
   const settingsTabOpen = useStore((st) => st.ui.settingsTabOpen);
   const settingsActive = useStore((st) => st.ui.settingsActive);
   const sshOpen = useSshStore((st) => st.viewOpen);
@@ -84,7 +89,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
     ...(settingsTabOpen ? ['settings'] : []),
     ...(sshOpen ? ['ssh'] : []),
     ...(project?.tabs.map((t) => `grid:${t.id}`) ?? []),
-    ...documents.filter((doc) => doc.projectId === project?.id).map((doc) => `file:${doc.id}`),
+    ...documents.filter((doc) => tabShown(doc, project?.id)).map((doc) => `file:${doc.id}`),
   ]);
   const endDrag = () => { setDrag(null); setDrop(null); };
   const dragProps = (id: string) => ({
@@ -186,7 +191,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
   const fileTabMenu = (x: number, y: number, doc: FileTab) => {
     const fileKeys = order.filter((key) => key.startsWith('file:'));
     const idsFor = (mode: 'others' | 'right' | 'all') => tabsToClose(fileKeys, `file:${doc.id}`, mode).map((key) => key.slice(5));
-    const full = project ? fullProjectPath(project.path, doc.relativePath, window.mc.platform) : doc.relativePath;
+    const full = doc.source ? doc.source.path : project ? fullProjectPath(project.path, doc.relativePath, window.mc.platform) : doc.relativePath;
     openMenu(x, y, [
       { header: doc.name },
       { label: tr('Zamknij'), onClick: () => void closeFile(doc.id) },
@@ -195,9 +200,10 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       { label: tr('Zamknij wszystkie pliki'), onClick: () => void closeFiles(idsFor('all')) },
       { sep: true },
       { label: tr('Kopiuj ścieżkę'), onClick: () => window.mc.clipboardWrite(full) },
-      { label: tr('Kopiuj ścieżkę względną'), onClick: () => window.mc.clipboardWrite(doc.relativePath) },
-      { label: tr('Pokaż w menedżerze plików'), onClick: () => window.mc.revealPath(full) },
-      { label: tr('Pokaż w panelu plików'), onClick: () => locateInFiles(doc.projectId, doc.relativePath) },
+      // A remote file has no local path; a local file outside the projects has no project to be relative to.
+      ...(doc.source ? [] : [{ label: tr('Kopiuj ścieżkę względną'), onClick: () => window.mc.clipboardWrite(doc.relativePath) }]),
+      ...(doc.source?.kind === 'remote' ? [] : [{ label: tr('Pokaż w menedżerze plików'), onClick: () => window.mc.revealPath(full) }]),
+      ...(doc.source ? [] : [{ label: tr('Pokaż w panelu plików'), onClick: () => locateInFiles(doc.projectId, doc.relativePath) }]),
     ]);
   };
 
@@ -280,12 +286,14 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
               </div>
             );
           })}
-          {documents.filter((doc) => doc.projectId === project.id).map((doc) => (
-            <div key={doc.id} {...dragProps(`file:${doc.id}`)} style={{ order: order.indexOf(`file:${doc.id}`) }} className={`tab file-tab ${activeKey === `file:${doc.id}` ? 'active' : ''}`} title={doc.relativePath}
+          {documents.filter((doc) => tabShown(doc, project.id)).map((doc) => (
+            <div key={doc.id} {...dragProps(`file:${doc.id}`)} style={{ order: order.indexOf(`file:${doc.id}`) }} className={`tab file-tab ${activeKey === `file:${doc.id}` ? 'active' : ''}`}
+              title={doc.source ? sourceTitle(doc.source, doc.source.kind === 'remote' ? hostLabel(doc.source.hostId) : undefined) : doc.relativePath}
               onClick={() => activateFile(doc.id)} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void closeFile(doc.id); } }}
               onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
               onContextMenu={(e) => { e.preventDefault(); fileTabMenu(e.clientX, e.clientY, doc); }}>
               <span className="tab-type-icon" aria-hidden="true"><FileIcon name={doc.name} /></span><span className="label">{doc.name}</span>{doc.diff && <span className="tab-diff-tag">diff</span>}
+              {doc.source?.kind === 'remote' && <span className="tab-host-tag">{hostLabel(doc.source.hostId)}</span>}
               {doc.dirty && <span className="file-dirty" aria-label={tr('Niezapisane zmiany')}>●</span>}
               <button className="x" aria-label={tr('Zamknij')} onClick={(e) => { e.stopPropagation(); void closeFile(doc.id); }}><IX /></button>
             </div>

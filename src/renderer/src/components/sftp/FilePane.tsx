@@ -11,6 +11,7 @@ import {
   SFTP_DRAG_MIME, sortEntries, toggleSort, DEFAULT_SORT, type Crumb, type PaneEntry, type ActiveDrag, type Selection, type SftpDragPayload, type SortKey, type SortOrder,
 } from '../../../../shared/sftpView';
 import type { MessageKey } from '../../../../shared/i18n';
+import { isFileLike } from '../../../../shared/editorSource';
 import { useI18n } from '../../i18n';
 import { openMenu, openMenuAt, type MenuItem } from '../ContextMenu';
 import { FileIcon } from '../FileIcon';
@@ -43,6 +44,8 @@ export interface PaneProps {
   /** Remote panes add Permissions and Owner. */
   extraColumns: boolean;
   onOpen(path: string): void;
+  /** A file was opened (double click, Enter): it opens in an editor tab (0.9.9). */
+  onOpenFile?(entry: PaneEntry): void;
   onBack(): void;
   onForward(): void;
   onUp(): void;
@@ -134,7 +137,11 @@ export function FilePane(p: PaneProps) {
     setSel(next);
     reveal(rows.findIndex((r) => r.path === next.focus));
   };
-  const open = (e: PaneEntry) => { if (isFolderLike(e) && !e.unsafeName) p.onOpen(e.path); };
+  const open = (e: PaneEntry) => {
+    if (e.unsafeName) return;
+    if (isFolderLike(e)) p.onOpen(e.path);
+    else if (isFileLike(e)) p.onOpenFile?.(e);
+  };
 
   const onKeyDown = (e: KeyboardEvent) => {
     const mod = e.ctrlKey || e.metaKey;

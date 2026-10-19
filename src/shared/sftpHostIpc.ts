@@ -3,6 +3,7 @@
 // from the SFTP Host to the renderer over a transferred MessagePort (SftpPortMessage in shared/sftp.ts).
 import type { HostToMain, MainToHost } from './ipc';
 import type { ChmodRequest, ConflictAnswer, DeleteCount, SftpResult, TransferRequest } from './sftp';
+import type { EditorSave } from './editorSource';
 
 export type SftpOp =
   | { op: 'list'; path: string }
@@ -20,7 +21,11 @@ export type SftpOp =
   /** 0.9.9: permission changes and stopping a long operation by its op id. */
   | { op: 'chmodCount'; paths: string[]; recursive: boolean }
   | { op: 'chmod'; req: ChmodRequest }
-  | { op: 'cancelOp'; opId: string };
+  | { op: 'cancelOp'; opId: string }
+  /** An editor tab (0.9.9): the file read into memory, and its text saved back through a part file. */
+  | { op: 'readFile'; path: string }
+  | { op: 'statFile'; path: string }
+  | { op: 'writeFile'; path: string; save: EditorSave };
 
 export type MainToSftpHost =
   /** Login of an SFTP session (secrets in memory only, never logged). */

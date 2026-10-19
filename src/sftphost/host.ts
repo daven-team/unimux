@@ -14,6 +14,7 @@ import { SshLogin } from '../sshcore/login';
 import { isRecoverableAuthError, mapSshError } from '../ptyhost/sshErrors';
 import { LocalSide, RemoteSide, SftpError, remoteEntry, type FileSide } from './sides';
 import { TransferQueue } from './queue';
+import { readForEditor, statForEditor, writeFromEditor } from './editFile';
 import { ItemThrottle } from './throttle';
 import { sftpOverStream } from './execSftp';
 import { classifySudo, markerCount, passwordCommand, SUDO_ENV, sudoCommands, sudoError, validSudoPassword, type SudoOutcome } from './sudo';
@@ -397,6 +398,9 @@ export class SftpHost {
       }
       case 'chmodCount': return ok(await this.chmodCount(side, deleteRoots(op.paths), op.recursive));
       case 'chmod': return ok(await this.chmod(side, op.req, !!this.sessions.get(id)?.sudo));
+      case 'readFile': return ok(await readForEditor(side, posixNormalize(op.path)));
+      case 'statFile': return ok(await statForEditor(side, posixNormalize(op.path)));
+      case 'writeFile': return ok(await writeFromEditor(side, posixNormalize(op.path), op.save, `editor:${id}`));
     }
   }
 

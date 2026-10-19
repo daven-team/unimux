@@ -30,6 +30,8 @@ interface Entry { state: SftpSessionState; initialPath?: string; queueActive: bo
 export class SftpService {
   private sessions = new Map<string, Entry>();
   private viewOpen = false;
+  /** Hosts with unsaved editor tabs (0.9.9): their sessions are not disconnected for being idle. */
+  private pinned = new Set<string>();
 
   constructor(private readonly deps: SftpServiceDeps) {}
 
@@ -39,16 +41,17 @@ export class SftpService {
   private setTimer(fn: () => void, ms: number): unknown { return this.deps.setTimer ? this.deps.setTimer(fn, ms) : setTimeout(fn, ms); }
   private clearTimer(t: unknown): void { if (t === undefined || t === null) return; if (this.deps.clearTimer) this.deps.clearTimer(t); else clearTimeout(t as NodeJS.Timeout); }
 
-  async connect(hostId: string, initialPath?: string): Promise<{ ok: true; sessionId: string } | { ok: false; error: SshErrorCode }> {
+  /** `plain`: a session with the SSH user's own rights even when the host runs SFTP through sudo (editor tabs). */
+  async connect(hostId: string, initialPath?: string, opts: { plain?: boolean } = {}): Promise<{ ok: true; sessionId: string } | { ok: false; error: SshErrorCode }> {
     if (!this.deps.hostExists(hostId)) return { ok: false, error: 'hostMissing' };
     if (!this.deps.host.ensure()) return { ok: false, error: 'sftpHostCrashed' };
     const id = sftpSessionId(randomUUID());
-    const entry: Entry = { state: { id, hostId, state: 'connecting', phase: 'connecting', since: this.now() }, initialPath, queueActive: false, idle: null, resolving: false, sudo: this.deps.hostSudo?.(hostId) === true };
+    const entry: Entry = { state: { id, hostId, state: 'connecting', phase: 'connecting', since: this.now() }, initialPath, queueActive: false, idle: null, resolving: false, sudo: !opts.plain && this.deps.hostSudo?.(hostId) === true };
     this.sessions.set(id, entry);
     // The id goes back first; the login (which may wait minutes for a passphrase) runs after this answer was sent, so every
     // 'sftp:session' and 'sftp:prompt' event names an id the view already has.
     this.defer(() => {
-      void this.deps.coordinator.connectSession({ sessionId: id, hostId }).then((r) => {
+      void this.deps.coordinator.connectSession({ sessionId: id, hostId, ...(opts.plain ? { plain: true } : {}) }).then((r) => {
         if (r.ok || this.sessions.get(id) !== entry) return;
         // The coordinator reports most failures as an 'error' state itself; one it refused up front is reported here.
         if (entry.state.state !== 'error') {
@@ -171,16 +174,26 @@ export class SftpService {
   }
 
   /** The renderer reloads or crashed: the new page starts with the view hidden and only reports a change, so main counts it closed. */
-  rendererGone(): void { if (this.viewOpen) this.viewClosed(); }
+  rendererGone(): void {
+    if (this.viewOpen) this.viewClosed();
+    // The new page reports its unsaved editor tabs again.
+    if (this.pinned.size) this.pinHosts([]);
+  }
+
+  /** The hosts of editor tabs with unsaved changes: their sessions stay connected while the view is closed. */
+  pinHosts(hostIds: string[]): void {
+    this.pinned = new Set(hostIds);
+    for (const e of this.sessions.values()) this.scheduleIdle(e);
+  }
 
   private scheduleIdle(entry: Entry): void {
     this.clearTimer(entry.idle);
     entry.idle = null;
-    if (this.viewOpen || entry.queueActive) return;
+    if (this.viewOpen || entry.queueActive || this.pinned.has(entry.state.hostId)) return;
     const id = entry.state.id;
     entry.idle = this.setTimer(() => {
       const e = this.sessions.get(id);
-      if (e === entry && !this.viewOpen && !e.queueActive) void this.disconnect(id);
+      if (e === entry && !this.viewOpen && !e.queueActive && !this.pinned.has(e.state.hostId)) void this.disconnect(id);
     }, this.deps.idleMs ?? SFTP_LIMITS.idleDisconnectMs);
   }
 

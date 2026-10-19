@@ -2,6 +2,8 @@
 // helpers for POSIX remote paths, "keep both" names, permission strings and part files. No Node or Electron imports.
 import type { Localized } from './ssh';
 import type { SshErrorCode, SshPhase, SshPrompt } from './ssh';
+import type { EditorRead, EditorSave, EditorWriteResult, FileStamp } from './editorSource';
+import type { ProjectFilePreview } from './types';
 
 // ── sessions ────────────────────────────────────────────────────────────────
 
@@ -458,7 +460,8 @@ export interface DeleteCount { files: number; dirs: number }
 /** `window.mc.sftp` (src/preload). Every call is validated in src/main/sftp/ipc.ts. */
 export interface SftpApi {
   /** Starts a login with the saved host data; follow 'sftp:session' / 'sftp:prompt' for the outcome. */
-  connect(hostId: string, initialPath?: string): Promise<{ ok: true; sessionId: string } | { ok: false; error: SshErrorCode }>;
+  /** `plain` (0.9.9): never through sudo (editor tabs write as the SSH user); the view's sessions follow the host setting. */
+  connect(hostId: string, initialPath?: string, opts?: { plain?: boolean }): Promise<{ ok: true; sessionId: string } | { ok: false; error: SshErrorCode }>;
   disconnect(sessionId: string): Promise<{ ok: boolean }>;
   sessions(): Promise<SftpSnapshot>;
   answer(answer: SftpPromptAnswer): Promise<{ ok: boolean }>;
@@ -484,6 +487,14 @@ export interface SftpApi {
   chmod(sessionId: string, req: ChmodRequest): Promise<SftpResult<ChmodResult>>;
   /** Stops a long operation started with `opId` (a recursive permission change). */
   cancelOp(sessionId: string, opId: string): Promise<{ ok: boolean }>;
+  /** A remote file for an editor tab (0.9.9): text, an image preview, or binary / too large (offer a download). */
+  readFile(sessionId: string, path: string): Promise<SftpResult<EditorRead>>;
+  /** Saves an editor tab through a part file; 'changed' when the server file is not the one the tab was opened from. */
+  writeFile(sessionId: string, path: string, save: EditorSave): Promise<SftpResult<EditorWriteResult>>;
+  /** Size and time of a file (following links) for the focus check of a tab: one request, no folder listing. */
+  statFile(sessionId: string, path: string): Promise<SftpResult<FileStamp>>;
+  /** Hosts of editor tabs with unsaved changes: their sessions are kept while the view is closed. */
+  pinHosts(hostIds: string[]): void;
   /** The SFTP view became visible / was closed (idle disconnect 2 minutes after close with an empty queue). */
   viewOpened(): void;
   viewClosed(): void;
@@ -504,4 +515,8 @@ export interface LocalFilesApi {
   trash(paths: string[]): Promise<LocalResult<null>>;
   /** Opens a folder in Explorer/Finder, or shows a file selected in its folder. */
   reveal(path: string): Promise<LocalResult<null>>;
+  /** A local file outside the projects in an editor tab (0.9.9): the same reads and safe saves as a project file. */
+  readFile(path: string): Promise<ProjectFilePreview>;
+  statFile(path: string): Promise<{ size: number; mtimeMs: number } | null>;
+  writeFile(path: string, text: string, expectedText: string): Promise<{ ok: true } | { ok: false; error: string; code?: 'conflict' }>;
 }
