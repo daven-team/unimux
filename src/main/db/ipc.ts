@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { DB_KINDS, DB_LIMITS, DB_TLS_MODES, isDbSessionId, type DbConnectionInput, type DbPasswordChange, type DbPromptAnswer, type DbResult } from '../../shared/db';
 import type { DbHostOp } from '../../shared/dbHostIpc';
+import { REDIS_LIMITS, type RedisOp } from '../../shared/dbRedis';
 import type { IpcGuard } from '../ipcGuard';
 import type { DbService } from './service';
 
@@ -76,6 +77,100 @@ const op = z.discriminatedUnion('op', [
   z.object({ op: z.literal('cellValue'), req: z.object({ schema: name, table: name, key: keyValues, column: name }).strict() }).strict(),
 ]);
 
+// ── Redis ────────────────────────────────────────────────────────────────────
+
+const RL = REDIS_LIMITS;
+/** Binary-safe data: UTF-8 text or base64 (sizes checked on the decoded length). */
+const data = (maxBytes: number) => z.union([
+  z.string().max(maxBytes),
+  z.object({ b64: z.string().max(Math.ceil(maxBytes / 3) * 4 + 4).regex(/^[A-Za-z0-9+/]*={0,2}$/) }).strict(),
+]);
+const rKey = data(RL.nameBytes);
+const rName = data(RL.nameBytes);
+const rValue = data(RL.writeBytes);
+const pattern = z.string().max(RL.nameBytes);
+const cursor = z.string().regex(/^\d{1,20}$/);
+const count = z.number().int().min(1).max(RL.pageItems);
+const streamId = z.string().regex(/^(?:\d{1,20}-\d{1,20}|\d{1,20}|\*|\d{1,20}-\*)$/);
+const rangeId = z.string().regex(/^\(?(?:\d{1,20}(?:-\d{1,20})?)$|^[-+]$/);
+const score = z.string().regex(/^[+-]?(?:inf|(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)$/i);
+const typeName = z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/);
+const ttl = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
+const items = <T extends z.ZodTypeAny>(t: T) => z.array(t).min(1).max(RL.writeItems);
+const pairs = <A extends z.ZodTypeAny, B extends z.ZodTypeAny>(a: A, b: B) => items(z.tuple([a, b]));
+const newValue = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('string'), value: rValue }).strict(),
+  z.object({ type: z.literal('hash'), entries: pairs(rName, rValue) }).strict(),
+  z.object({ type: z.literal('list'), items: items(rValue) }).strict(),
+  z.object({ type: z.literal('set'), members: items(rName) }).strict(),
+  z.object({ type: z.literal('zset'), entries: pairs(rName, score) }).strict(),
+  z.object({ type: z.literal('stream'), id: streamId.optional(), fields: pairs(rName, rValue) }).strict(),
+]);
+const write = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('set'), key: rKey, value: rValue, keepTtl: z.boolean().optional(), ttlMs: ttl.optional() }).strict(),
+  z.object({ op: z.literal('hset'), key: rKey, field: rName, value: rValue, onlyNew: z.boolean().optional() }).strict(),
+  z.object({ op: z.literal('hdel'), key: rKey, fields: items(rName) }).strict(),
+  z.object({ op: z.literal('lpush'), key: rKey, items: items(rValue) }).strict(),
+  z.object({ op: z.literal('rpush'), key: rKey, items: items(rValue) }).strict(),
+  z.object({ op: z.literal('lset'), key: rKey, index: z.number().int(), value: rValue, expected: rValue.optional() }).strict(),
+  z.object({ op: z.literal('lrem'), key: rKey, count: z.number().int(), value: rValue }).strict(),
+  z.object({ op: z.literal('ldel'), key: rKey, index: z.number().int(), expected: rValue }).strict(),
+  z.object({ op: z.literal('sadd'), key: rKey, members: items(rName) }).strict(),
+  z.object({ op: z.literal('srem'), key: rKey, members: items(rName) }).strict(),
+  z.object({ op: z.literal('zadd'), key: rKey, entries: pairs(rName, score), mode: z.enum(['nx', 'xx']).optional() }).strict(),
+  z.object({ op: z.literal('zrem'), key: rKey, members: items(rName) }).strict(),
+  z.object({ op: z.literal('zincrby'), key: rKey, member: rName, by: score }).strict(),
+  z.object({ op: z.literal('xadd'), key: rKey, id: streamId.optional(), fields: pairs(rName, rValue), maxLen: z.number().int().min(0).optional(), approx: z.boolean().optional() }).strict(),
+  z.object({ op: z.literal('xdel'), key: rKey, ids: items(streamId) }).strict(),
+  z.object({ op: z.literal('xtrim'), key: rKey, strategy: z.enum(['maxlen', 'minid']), threshold: z.string().regex(/^\d{1,20}(?:-\d{1,20})?$/), approx: z.boolean().optional() }).strict(),
+  z.object({ op: z.literal('rename'), key: rKey, newKey: rKey, overwrite: z.boolean().optional() }).strict(),
+  z.object({ op: z.literal('expire'), key: rKey, ttlMs: ttl }).strict(),
+  z.object({ op: z.literal('persist'), key: rKey }).strict(),
+  z.object({ op: z.literal('delete'), keys: items(rKey) }).strict(),
+  z.object({ op: z.literal('create'), key: rKey, value: newValue, ttlMs: ttl.optional() }).strict(),
+]);
+const readReq = z.union([
+  z.object({ type: z.literal('string'), key: rKey, offset: z.number().int().min(0).optional(), maxBytes: z.number().int().min(1).max(RL.stringBytesMax).optional() }).strict(),
+  z.object({ type: z.literal('hash'), key: rKey, cursor, count, match: pattern.optional() }).strict(),
+  z.object({ type: z.literal('list'), key: rKey, start: z.number().int().min(0), count }).strict(),
+  z.object({ type: z.literal('set'), key: rKey, cursor, count, match: pattern.optional() }).strict(),
+  z.object({ type: z.literal('zset'), key: rKey, start: z.number().int().min(0), count, rev: z.boolean().optional() }).strict(),
+  z.object({ type: z.literal('zset'), key: rKey, cursor, count, match: pattern.optional() }).strict(),
+  z.object({ type: z.literal('stream'), key: rKey, start: rangeId, end: rangeId, count, rev: z.boolean().optional() }).strict(),
+]);
+const itemReq = z.union([
+  z.object({ type: z.literal('hash'), key: rKey, field: rName }).strict(),
+  z.object({ type: z.literal('list'), key: rKey, index: z.number().int() }).strict(),
+  z.object({ type: z.literal('stream'), key: rKey, id: z.string().regex(/^\d{1,20}-\d{1,20}$/), field: rName }).strict(),
+]);
+const channels = z.array(rName).max(RL.pubsubChannels);
+const redisOp = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('databases') }).strict(),
+  z.object({ kind: z.literal('select'), index: z.number().int().min(0).max(10_000) }).strict(),
+  z.object({ kind: z.literal('scan'), req: z.object({
+    cursor, match: pattern.optional(), count: z.number().int().min(1).max(RL.scanCountMax).optional(), type: typeName.optional(),
+    limit: z.number().int().min(1).max(RL.scanKeys).optional(), details: z.boolean().optional(),
+  }).strict() }).strict(),
+  z.object({ kind: z.literal('keyInfo'), keys: z.array(rKey).max(RL.infoKeys) }).strict(),
+  z.object({ kind: z.literal('read'), req: readReq }).strict(),
+  z.object({ kind: z.literal('readItem'), req: itemReq }).strict(),
+  z.object({ kind: z.literal('write'), write }).strict(),
+  z.object({ kind: z.literal('countPattern'), match: pattern, type: typeName.optional() }).strict(),
+  z.object({ kind: z.literal('deletePattern'), token: uuid }).strict(),
+  z.object({ kind: z.literal('cancel') }).strict(),
+  z.object({ kind: z.literal('command'), req: z.object({
+    argv: z.array(rValue).min(1).max(RL.argv).refine((a) => typeof a[0] === 'string' && a[0].length > 0 && a[0].length <= 64),
+    readWrite: z.boolean().optional(), confirmed: z.boolean().optional(), timeoutMs: z.number().int().min(1).max(RL.consoleTimeoutMaxMs).optional(),
+  }).strict() }).strict(),
+  z.object({ kind: z.literal('info'), section: z.string().regex(/^[a-z_]{1,32}$/i).optional() }).strict(),
+  z.object({ kind: z.literal('slowlog'), count: z.number().int().min(1).max(RL.slowlogMax).optional() }).strict(),
+  z.object({ kind: z.literal('clients') }).strict(),
+  z.object({ kind: z.literal('subscribe'), channels: channels.optional(), patterns: channels.optional() }).strict(),
+  z.object({ kind: z.literal('unsubscribe'), channels: channels.optional(), patterns: channels.optional(), all: z.boolean().optional() }).strict(),
+  z.object({ kind: z.literal('pubsubState') }).strict(),
+  z.object({ kind: z.literal('publish'), channel: rName, message: rValue, readWrite: z.boolean().optional() }).strict(),
+]);
+
 const INVALID: DbResult<never> = { ok: false, error: 'invalid' };
 
 export function createDbHandlers(service: DbService) {
@@ -108,6 +203,10 @@ export function createDbHandlers(service: DbService) {
       const s = sessionId.safeParse(id), o = op.safeParse(raw);
       return s.success && o.success ? service.op(s.data, o.data as DbHostOp) : INVALID;
     },
+    redis: async (id: unknown, raw: unknown): Promise<DbResult<unknown>> => {
+      const s = sessionId.safeParse(id), o = redisOp.safeParse(raw);
+      return s.success && o.success ? service.op(s.data, { op: 'redis', req: o.data as RedisOp }) : INVALID;
+    },
     pin: (ids: unknown) => { const p = z.array(sessionId).max(1000).safeParse(ids); if (p.success) service.pin(p.data); },
   };
 }
@@ -126,5 +225,6 @@ export function registerDbIpc(guard: IpcGuard, h: DbHandlers): void {
   guard.guardedHandle('db:sessions', () => h.sessions(), () => ({ sessions: [], prompts: [] }));
   guard.guardedHandle('db:prompt:answer', (_e, a: unknown) => h.answer(a), no);
   guard.guardedHandle('db:pg', (_e, id: unknown, o: unknown) => h.pg(id, o), () => INVALID);
+  guard.guardedHandle('db:redis', (_e, id: unknown, o: unknown) => h.redis(id, o), () => INVALID);
   guard.guardedOn('db:pin', (_e, ids: unknown) => h.pin(ids));
 }

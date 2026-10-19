@@ -33,6 +33,11 @@ describe('ssh2 packaging', () => {
     }
   });
 
+  it('ships the Redis driver exactly pinned as a production dependency (1.0.0)', () => {
+    expect(pkg.dependencies.ioredis).toBe('6.0.0');
+    expect(pkg.devDependencies.ioredis).toBeUndefined();
+  });
+
   it('keeps the optional native parts of ssh2 out of every file list', () => {
     for (const list of [pkg.build.files, pkg.build.win.files, pkg.build.mac.files]) for (const rule of EXCLUDED) expect(list, rule).toContain(rule);
   });

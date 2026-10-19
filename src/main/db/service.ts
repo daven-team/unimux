@@ -145,7 +145,7 @@ export class DbService<S extends DbStateLike = DbStateLike> {
     const entry: Entry = {
       state: {
         id, connectionId: connection.id, kind: connection.kind, state: 'connecting', phase: 'connecting', since: this.now(), readOnly: connection.readOnly,
-        ...(connection.kind === 'postgres' ? { database: connection.database ?? 'postgres' } : {}), ...(opts.test ? { test: true as const } : {}),
+        database: connection.kind === 'postgres' ? connection.database ?? 'postgres' : String(connection.dbIndex ?? 0), ...(opts.test ? { test: true as const } : {}),
       },
       connection, idle: null, busy: false, closing: false, own: null, ...(opts.test ? { test: opts.test } : {}), started: this.now(),
     };
@@ -232,12 +232,25 @@ export class DbService<S extends DbStateLike = DbStateLike> {
         const entry = this.sessions.get(m.id);
         if (!entry) return;
         if (!isLiveDbPhase(m.phase)) { this.end(entry, m.phase === 'closed' ? 'closed' : 'error', m.error ?? (m.phase === 'error' ? 'dbFailed' : undefined), m.message); return; }
+        const wasConnected = entry.state.phase === 'connected' || entry.state.reconnecting !== undefined;
         entry.state = {
           ...entry.state, state: dbStatusOf(m.phase), phase: m.phase, since: this.now(),
-          ...(m.serverVersion ? { serverVersion: m.serverVersion } : {}), ...(m.database ? { database: m.database } : {}), ...(m.phase === 'connected' ? { tx: 'idle' as const } : {}),
+          ...(m.serverVersion ? { serverVersion: m.serverVersion } : {}), ...(m.database ? { database: m.database } : {}),
+          ...(m.phase === 'connected' && entry.connection.kind === 'postgres' ? { tx: 'idle' as const } : {}),
+          ...(m.reconnect ? { reconnecting: m.reconnect } : {}),
         };
+        if (!m.reconnect) delete entry.state.reconnecting;
         this.deps.events.session(entry.state);
-        if (m.phase === 'connected') this.connected(entry);
+        // A Redis reconnect that worked is not a new login (no password to save, no test to answer).
+        if (m.phase === 'connected' && !wasConnected) this.connected(entry);
+        else if (m.phase === 'connected') this.scheduleIdle(entry);
+        return;
+      }
+      case 'dbDatabase': {
+        const entry = this.sessions.get(m.id);
+        if (!entry || entry.state.database === m.database) return;
+        entry.state = { ...entry.state, database: m.database };
+        this.deps.events.session(entry.state);
         return;
       }
       case 'dbPasswordPrompt': this.askPassword(m.id, m.promptId, m.retry); return;

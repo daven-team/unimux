@@ -5,6 +5,7 @@ import type { HostToMain, MainToHost } from './ipc';
 import type {
   DbCellRequest, DbEditRequest, DbErrorCode, DbKind, DbObjectKind, DbPhase, DbQueryRequest, DbResult, DbTablePageRequest, DbTlsMode, DbTxStatus,
 } from './db';
+import type { RedisOp } from './dbRedis';
 
 /** Everything the DB Host needs to open one session. Secrets (password) in memory only, never logged. */
 export interface DbOpenConfig {
@@ -13,6 +14,7 @@ export interface DbOpenConfig {
   host: string;
   port: number;
   user: string;
+  /** Postgres: the database; Redis: the DB index as text. */
   database: string;
   tls: DbTlsMode;
   /** verify-full: the CA certificate text (main read the file). */
@@ -39,7 +41,9 @@ export type DbHostOp =
   | { op: 'transaction'; action: 'begin' | 'commit' | 'rollback' }
   | { op: 'previewEdits'; req: DbEditRequest }
   | { op: 'applyEdits'; req: DbEditRequest }
-  | { op: 'cellValue'; req: DbCellRequest };
+  | { op: 'cellValue'; req: DbCellRequest }
+  /** Every Redis operation (the session must be a Redis one). */
+  | { op: 'redis'; req: RedisOp };
 
 export type MainToDbHost =
   /** Login of a session's SSH tunnel (secrets in memory only, never logged). */
@@ -54,7 +58,9 @@ export type MainToDbHost =
 export type DbHostToMain =
   | Extract<HostToMain, { t: 'sshStatus' | 'sshHostKey' | 'sshAuthPrompt' | 'log' }>
   /** The session moved on (tunnel steps, database connect, connected, error, closed). `message`: the server's own text of an error. */
-  | { t: 'dbStatus'; id: string; phase: DbPhase; error?: DbErrorCode; message?: string; serverVersion?: string; database?: string }
+  | { t: 'dbStatus'; id: string; phase: DbPhase; error?: DbErrorCode; message?: string; serverVersion?: string; database?: string; /** Redis: the reconnect attempt (phase 'database'). */ reconnect?: number }
+  /** The session switched databases (Redis SELECT): the DB index as text. */
+  | { t: 'dbDatabase'; id: string; database: string }
   /** The server asks for a password and none is saved (or the saved one was refused: retry). */
   | { t: 'dbPasswordPrompt'; id: string; promptId: string; retry: boolean }
   | { t: 'dbTx'; id: string; tx: DbTxStatus }

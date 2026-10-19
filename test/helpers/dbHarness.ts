@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
 import { DbHost, type DbHostTimers } from '../../src/dbhost/host';
+import type { RedisLimits } from '../../src/dbhost/redisSession';
 import { dbSessionId, type DbColumn, type DbErrorCode, type DbPortMessage, type DbQueryRequest, type DbResult, type DbServerError, type DbTablePageRequest, type DbValue } from '../../src/shared/db';
 import type { DbHostOp, DbHostToMain, DbOpenConfig } from '../../src/shared/dbHostIpc';
 
@@ -30,7 +31,7 @@ export interface RunResult { statements: StatementResult[]; end: Extract<DbPortM
 
 export const BASE_CONFIG: DbOpenConfig = { kind: 'postgres', host: '127.0.0.1', port: 5432, user: 'postgres', database: 'postgres', tls: 'disable', readOnly: false, ssh: null };
 
-export function dbHarness(opts: { timers?: Partial<DbHostTimers>; onMain?: (m: DbHostToMain, host: DbHost) => boolean; autoPassword?: string | null } = {}) {
+export function dbHarness(opts: { timers?: Partial<DbHostTimers>; onMain?: (m: DbHostToMain, host: DbHost) => boolean; autoPassword?: string | null; redisLimits?: Partial<RedisLimits> } = {}) {
   const toMain: DbHostToMain[] = [];
   const port: DbPortMessage[] = [];
   const results = new Map<number, DbResult<unknown>>();
@@ -44,7 +45,7 @@ export function dbHarness(opts: { timers?: Partial<DbHostTimers>; onMain?: (m: D
       if (m.t === 'dbPasswordPrompt' && opts.autoPassword !== undefined) void host.handle({ t: 'dbPasswordAnswer', id: m.id, promptId: m.promptId, value: opts.autoPassword });
     },
     toRenderer: (m) => port.push(m),
-  }, { killGraceMs: 300, dbConnectMs: 5000, ...opts.timers });
+  }, { killGraceMs: 300, dbConnectMs: 5000, ...opts.timers }, opts.redisLimits);
 
   const statuses = (id: string) => toMain.flatMap((m) => (m.t === 'dbStatus' && m.id === id ? [m] : []));
   const last = (id: string) => statuses(id).at(-1);
@@ -70,7 +71,7 @@ export function dbHarness(opts: { timers?: Partial<DbHostTimers>; onMain?: (m: D
     let end: RunResult['end'] | undefined;
     const notices: string[] = [];
     for (const m of port) {
-      if (m.queryId !== queryId) continue;
+      if (!('queryId' in m) || m.queryId !== queryId) continue;
       switch (m.t) {
         case 'statement': at(m.index).span = { start: m.start, end: m.end }; break;
         case 'columns': at(m.index).columns = m.columns; break;
@@ -101,10 +102,10 @@ export function dbHarness(opts: { timers?: Partial<DbHostTimers>; onMain?: (m: D
   };
   /** The next rows of an open result; waits for its statementEnd (or error). */
   const more = async (id: string, queryId: string, count: number) => {
-    const before = port.filter((m) => m.queryId === queryId && (m.t === 'statementEnd' || m.t === 'statementError')).length;
+    const before = port.filter((m) => 'queryId' in m && m.queryId === queryId && (m.t === 'statementEnd' || m.t === 'statementError')).length;
     const r = await op(id, { op: 'fetchMore', queryId, count });
     if (!r.ok) return r;
-    await waitFor(() => port.filter((m) => m.queryId === queryId && (m.t === 'statementEnd' || m.t === 'statementError')).length > before);
+    await waitFor(() => port.filter((m) => 'queryId' in m && m.queryId === queryId && (m.t === 'statementEnd' || m.t === 'statementError')).length > before);
     return r;
   };
   return { host, toMain, port, statuses, last, open, op, value, run, page, more, collect, ended };
