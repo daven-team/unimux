@@ -11,7 +11,7 @@ import type { ComponentType, ReactNode } from 'react';
 import type { MessageKey } from '../../shared/i18n';
 import { gitPanelReason, type PanelContext, type PanelDef } from '../../shared/sidebarPanels';
 import { FilesPanel } from './components/FilesPanel';
-import { TFiles, TGit, TProjects, TTerminal } from './components/icons';
+import { TDatabase, TFiles, TGit, TProjects, TTerminal } from './components/icons';
 import type { PanelResizeProps } from './components/PanelResizeHandle';
 import { LazyScreen } from './components/LazyScreen';
 import { ProjectsPanel } from './components/ProjectsPanel';
@@ -24,6 +24,9 @@ export interface PanelProps { resize: PanelResizeProps }
 // the main bundle (imported above): the Files tree uses the same change letters (.git-letter).
 const loadGitPanel = () => import('./components/GitPanel').then((m) => ({ default: m.GitPanel }));
 function GitPanelLazy() { return <LazyScreen load={loadGitPanel} />; }
+// The database panel (1.0.0) loads when it is first opened.
+const loadDbPanel = () => import('./components/db/DbPanel').then((m) => ({ default: m.DbPanel }));
+function DbPanelLazy() { return <LazyScreen load={loadDbPanel} />; }
 
 export interface SidebarPanel extends Omit<PanelDef, 'unavailableReason'> {
   label: MessageKey;
@@ -40,5 +43,6 @@ export const SIDEBAR_PANELS: readonly SidebarPanel[] = [
   { id: 'files', label: 'Pliki', icon: TFiles, component: FilesPanel, unavailableReason: (ctx) => (ctx.hasProject ? null : 'Najpierw dodaj projekt') },
   // Git needs a project that is a repository (the tile is disabled, with the reason as its tooltip, otherwise). SSH: opens the SSH view in the main area (W3).
   { id: 'git', label: 'Git', icon: TGit, component: GitPanelLazy, unavailableReason: gitPanelReason },
+  { id: 'db', label: 'Bazy danych', icon: TDatabase, component: DbPanelLazy },
   { id: 'terminal', label: 'SSH', icon: TTerminal, opensView: true, onActivate: () => openSshView() },
 ];

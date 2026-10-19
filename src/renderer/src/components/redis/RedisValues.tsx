@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { DbResult } from '../../../../shared/db';
 import {
-  isBinaryData, redisDataDisplay, redisDataFromHex, redisDataHex, type RedisBlob, type RedisData, type RedisHashEntry, type RedisReadRequest,
+  isBinaryData, redisDataDisplay, redisDataFromHex, redisDataHex, redisDataKey, type RedisBlob, type RedisData, type RedisHashEntry, type RedisReadRequest,
   type RedisReadResult, type RedisStreamEntry, type RedisWrite, type RedisZsetEntry,
 } from '../../../../shared/dbRedis';
 import { containsPattern, formatBytes, formatJson, hexDump, isJsonText, jsonError, validNewStreamId, validScore } from '../../../../shared/redisView';
@@ -42,6 +42,8 @@ async function write(tabId: string, w: RedisWrite, p: Pick<ValueProps, 'onChange
     p.onReload();
     return null;
   }
+  // A deadline passed (the write did not start) or a hang was cut: never retried by itself; a refresh shows what the key holds.
+  if (r.error === 'dbTimeout') { toast(tr('Serwer nie odpowiedział na czas. Odśwież, aby sprawdzić stan klucza, i spróbuj ponownie.'), 'error'); return null; }
   if (r.error === 'conflict') { toast(tr('Element zmienił się w międzyczasie - wczytano listę ponownie'), 'error'); p.onReload(); return null; }
   toast(resultText(r), 'error');
   return null;
@@ -56,6 +58,12 @@ async function readWhole(tabId: string, req: Parameters<typeof window.mc.db.redi
 
 const confirmDelete = async (tr: Tr, title: string, body: string): Promise<boolean> =>
   (await askChoice(title, body, [{ label: tr('Usuń'), value: 'delete', danger: true }])) === 'delete';
+
+/** Items of a further SCAN page added to the loaded ones (a scan may return an item twice). */
+function dedupe<T>(loaded: T[], page: T[], id: (t: T) => RedisData): T[] {
+  const seen = new Set(loaded.map((t) => redisDataKey(id(t))));
+  return [...loaded, ...page.filter((t) => { const k = redisDataKey(id(t)); if (seen.has(k)) return false; seen.add(k); return true; })];
+}
 
 const copy = (tr: Tr, d: RedisData) => { window.mc.clipboardWrite(redisDataDisplay(d)); toast(tr('Skopiowano')); };
 
@@ -243,7 +251,7 @@ export function HashView(p: ValueProps) {
     if (t !== token.current) return;
     setLoading(false);
     if (!r.ok) { setError(resultText(r)); return; }
-    setEntries((cur) => (reset ? r.value.entries : [...cur, ...r.value.entries]));
+    setEntries((cur) => (reset ? r.value.entries : dedupe(cur, r.value.entries, (e) => e.field)));
     setCursor(r.value.cursor);
     if (reset) setSel(null);
   };
@@ -266,7 +274,7 @@ export function HashView(p: ValueProps) {
         );
       }}
       editor={adding ? <AddPair tr={tr} first={tr('Pole')} second={tr('Wartość')} onClose={() => setAdding(false)} onAdd={async (field, value) => {
-        const r = await write(p.tabId, { op: 'hset', key: p.keyName, field, value, onlyNew: true }, p, tr);
+        const r = await write(p.tabId, { op: 'hset', key: p.keyName, field, value, onlyNew: true, existing: true }, p, tr);
         if (!r) return false;
         if (r.changed === 0) { toast(tr('Takie pole już istnieje'), 'error'); return false; }
         void load(true); return true;
@@ -281,7 +289,7 @@ function HashEditor({ p, entry, onClose, onDone }: { p: ValueProps; entry: Redis
   const whole = useWhole(entry.value, () => readWhole(p.tabId, { type: 'hash', key: p.keyName, field: entry.field }));
   const [text, setText] = useState<string | null>(null);
   const shown = text ?? (whole.value ? redisDataDisplay(whole.value.data) : '');
-  const save = async () => { if (await write(p.tabId, { op: 'hset', key: p.keyName, field: entry.field, value: asData(shown) }, p, tr)) { toast(tr('Zapisano')); onDone(); } };
+  const save = async () => { if (await write(p.tabId, { op: 'hset', key: p.keyName, field: entry.field, value: asData(shown), existing: true }, p, tr)) { toast(tr('Zapisano')); onDone(); } };
   const remove = async () => {
     if (!await confirmDelete(tr, tr('Usunąć pole?'), redisDataDisplay(entry.field))) return;
     if (await write(p.tabId, { op: 'hdel', key: p.keyName, fields: [entry.field] }, p, tr)) onDone();
@@ -350,7 +358,7 @@ export function ListView(p: ValueProps) {
   };
   useEffect(() => { void load(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const doPush = async (op: 'lpush' | 'rpush') => {
-    if (await write(p.tabId, { op, key: p.keyName, items: [push] }, p, tr)) { setPush(''); void load(true); }
+    if (await write(p.tabId, { op, key: p.keyName, items: [push], existing: true }, p, tr)) { setPush(''); void load(true); }
   };
   const current = sel !== null ? items[sel] : undefined;
   return (
@@ -442,14 +450,14 @@ export function SetView(p: ValueProps) {
     if (t !== token.current) return;
     setLoading(false);
     if (!r.ok) { setError(resultText(r)); return; }
-    setMembers((cur) => (reset ? r.value.members : [...cur, ...r.value.members]));
+    setMembers((cur) => (reset ? r.value.members : dedupe(cur, r.value.members, (m) => m)));
     setCursor(r.value.cursor);
     if (reset) setSel(null);
   };
   useEffect(() => { void load(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const doAdd = async () => {
     if (!add) return;
-    const r = await write(p.tabId, { op: 'sadd', key: p.keyName, members: [add] }, p, tr);
+    const r = await write(p.tabId, { op: 'sadd', key: p.keyName, members: [add], existing: true }, p, tr);
     if (r) { if (r.changed === 0) toast(tr('Ten element już jest w zbiorze')); setAdd(''); void load(true); }
   };
   const remove = async (m: RedisData) => {
@@ -524,7 +532,7 @@ export function ZsetView(p: ValueProps) {
         </div>
       )}
       editor={adding ? <AddPair tr={tr} first={tr('Element')} second={tr('Wynik')} onClose={() => setAdding(false)} secondCheck={(s) => (validScore(s) ? null : tr('Nieprawidłowy wynik'))}
-        onAdd={async (member, score) => { if (!await write(p.tabId, { op: 'zadd', key: p.keyName, entries: [[member, score.trim()]] }, p, tr)) return false; void load(true); return true; }} />
+        onAdd={async (member, score) => { if (!await write(p.tabId, { op: 'zadd', key: p.keyName, entries: [[member, score.trim()]], existing: true }, p, tr)) return false; void load(true); return true; }} />
         : current ? <ZsetEditor key={`${sel}:${current.score}`} p={p} entry={current} onClose={() => setSel(null)} onDone={() => void load(true)} /> : undefined}
     />
   );
@@ -535,7 +543,7 @@ function ZsetEditor({ p, entry, onClose, onDone }: { p: ValueProps; entry: Redis
   const [score, setScore] = useState(entry.score);
   const save = async () => {
     if (!validScore(score)) { toast(tr('Nieprawidłowy wynik'), 'error'); return; }
-    if (await write(p.tabId, { op: 'zadd', key: p.keyName, entries: [[entry.member, score.trim()]], mode: 'xx' }, p, tr)) { toast(tr('Zapisano')); onDone(); }
+    if (await write(p.tabId, { op: 'zadd', key: p.keyName, entries: [[entry.member, score.trim()]], mode: 'xx', existing: true }, p, tr)) { toast(tr('Zapisano')); onDone(); }
   };
   const remove = async () => {
     if (!await confirmDelete(tr, tr('Usunąć element?'), preview(entry.member, 200))) return;
@@ -631,7 +639,7 @@ function StreamAddDialog({ p, onClose, onDone }: { p: ValueProps; onClose: () =>
     const pairs = fields.filter(([f]) => f);
     if (!pairs.length) { setError(tr('Podaj nazwę pola')); return; }
     if (!validNewStreamId(id)) { setError(tr('Nieprawidłowy identyfikator wpisu')); return; }
-    const r = await write(p.tabId, { op: 'xadd', key: p.keyName, id: id.trim(), fields: pairs }, p, tr);
+    const r = await write(p.tabId, { op: 'xadd', key: p.keyName, id: id.trim(), fields: pairs, existing: true }, p, tr);
     if (r) { toast(tr('Dodano wpis {id}', { id: r.id ?? '' })); onDone(); }
   };
   return (

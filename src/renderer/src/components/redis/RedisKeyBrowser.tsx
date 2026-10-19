@@ -298,8 +298,9 @@ function PatternDeleteDialog({ tabId, initial, type, onClose, onDeleted }: { tab
     const total = deletedSoFar + r.value.deleted;
     setDeletedSoFar(total);
     if (r.value.cancelled) { toast(tr('Przerwano. Usunięto kluczy: {count}', { count: total })); onDeleted(); return; }
-    // Keys can remain (a scan that missed keys while deleting, or keys added meanwhile): count again and offer to go on,
-    // asking with the new count; nothing more is deleted without that confirmation.
+    // The delete stops near the confirmed count: `more` means keys still match (added meanwhile, or the count was capped).
+    // Count again and offer to go on, asking with the new count; nothing more is deleted without that confirmation.
+    if (!r.value.more) { toast(tr('Usunięto kluczy: {count}', { count: total })); onDeleted(); return; }
     setStep('counting');
     const again = await withTab(tabId, (sid) => window.mc.db.redis.countPattern(sid, pattern || '*', type || undefined));
     setStep('idle');

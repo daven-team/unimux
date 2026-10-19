@@ -4,8 +4,8 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification
 import { createQuitConfirm, isQuitAnswer, sessionEndingNow } from './quitConfirm';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { homedir, hostname } from 'os';
-import { dirname, isAbsolute, join } from 'path';
-import { readFile, rm, stat } from 'fs/promises';
+import { basename, dirname, isAbsolute, join } from 'path';
+import { readFile, rm, stat, writeFile } from 'fs/promises';
 import type { SpawnCellRequest } from '../preload/api';
 import { cleanEnv } from '../shared/env';
 import type { HostToMain } from '../shared/ipc';
@@ -847,6 +847,26 @@ function startSsh(): void {
     },
   });
   registerDbIpc({ guardedHandle, guardedOn }, createDbHandlers(db));
+  // The CA file of a verify-full connection: only its path goes back (main reads it at connect time).
+  guardedHandle('db:pickCaFile', async () => {
+    const r = await showOpen({ title: tr('Wybierz plik certyfikatu CA'), properties: ['openFile'], filters: [{ name: 'PEM', extensions: ['pem', 'crt', 'cer'] }, { name: '*', extensions: ['*'] }] });
+    return r.canceled ? null : r.filePaths[0] ?? null;
+  }, () => null);
+  // Export of a result (CSV / JSON): the user picks where in the save dialog; the renderer never names a path.
+  // MC_DB_EXPORT_DIR (real-app checks only) writes into that folder without the dialog.
+  guardedHandle('db:export', async (_e, name: unknown, text: unknown) => {
+    if (typeof name !== 'string' || !name || name.length > 200 || /[\\/\0]/.test(name) || typeof text !== 'string' || text.length > 512 * 1024 * 1024) return { ok: false };
+    let path: string | null = null;
+    if (process.env.MC_DB_EXPORT_DIR) path = join(process.env.MC_DB_EXPORT_DIR, basename(name));
+    else {
+      const ext = name.split('.').pop() ?? '';
+      const options = { title: tr('Eksportuj wynik'), defaultPath: name, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] };
+      const r = isLive(win) ? await dialog.showSaveDialog(win!, options) : await dialog.showSaveDialog(options);
+      path = r.canceled || !r.filePath ? null : r.filePath;
+    }
+    if (!path) return { ok: false, cancelled: true };
+    try { await writeFile(path, text, 'utf8'); return { ok: true, path }; } catch { return { ok: false }; }
+  }, () => ({ ok: false }));
   registerSshIpc(ipcMain, createSshHandlers({
     coordinator, vault, knownHosts, drafts: new KeyDrafts(),
     state: () => state,

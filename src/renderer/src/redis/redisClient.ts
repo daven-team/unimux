@@ -2,6 +2,7 @@
 // server views never wait for each other), their login prompts, Pub/Sub messages from the DB port, the tabs in the top strip
 // (FileDocument with `redis`), pins, and the texts of failed calls. Kept apart from the Postgres client so both can grow.
 import { create } from 'zustand';
+import { setDbPins } from '../db/pins';
 import { dbErrorText, type DbConnection, type DbErrorCode, type DbPortMessage, type DbPrompt, type DbResult, type DbSessionState } from '../../../shared/db';
 import type { RedisPubSubMessage, RedisPubSubState } from '../../../shared/dbRedis';
 import { appendMessages, redisTabId, type RedisPubSubRow, type RedisTabRef, type RedisTabView } from '../../../shared/redisView';
@@ -288,10 +289,5 @@ export function initRedis(): void {
       return { tabSessions, tabErrors, pubsub };
     });
   });
-  let lastPins = '';
-  useRedisStore.subscribe((st, prev) => {
-    if (st.tabSessions === prev.tabSessions) return;
-    const pins = [...new Set(Object.values(st.tabSessions))].sort();
-    if (pins.join() !== lastPins) { lastPins = pins.join(); window.mc.db.pin(pins); }
-  });
+  useRedisStore.subscribe((st, prev) => { if (st.tabSessions !== prev.tabSessions) setDbPins('redis', Object.values(st.tabSessions)); });
 }

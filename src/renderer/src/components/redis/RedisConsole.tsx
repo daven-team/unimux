@@ -63,11 +63,15 @@ export default function RedisConsole({ tabId, ref, readOnly }: RedisViewProps) {
       } });
       return;
     }
-    if (r.error === 'needsConfirm' && !opts.confirmed) { await confirmAndSend(argv, text, opts); return; }
+    // The server side asks too: a command the server marks dangerous, or a read whose reply would be very big.
+    if (r.error === 'needsConfirm' && !opts.confirmed) { await confirmAndSend(argv, text, opts, classifyRedisCommand(argv).dangerous ? 'danger' : 'big'); return; }
+    // A command that hit its deadline is never sent again by itself.
     push(tabId, { kind: 'note', tone: 'error', text: resultText(r, ref.connectionId) });
   };
-  const confirmAndSend = async (argv: RedisData[], text: string, opts: { readWrite?: boolean } = {}) => {
-    const choice = await askChoice(tr('Uruchomić niebezpieczne polecenie?'), tr('To polecenie może usunąć dane albo zatrzymać serwer:\n{command}', { command: text }), [
+  const confirmAndSend = async (argv: RedisData[], text: string, opts: { readWrite?: boolean } = {}, why: 'danger' | 'big' = 'danger') => {
+    const choice = await askChoice(why === 'danger' ? tr('Uruchomić niebezpieczne polecenie?') : tr('Uruchomić to polecenie?'),
+      why === 'danger' ? tr('To polecenie może usunąć dane albo zatrzymać serwer:\n{command}', { command: text })
+        : tr('Odpowiedź może być bardzo duża albo serwer oznacza to polecenie jako niebezpieczne:\n{command}', { command: text }), [
       { label: tr('Uruchom'), value: 'run', danger: true },
     ]);
     if (choice !== 'run') { push(tabId, { kind: 'note', tone: 'info', text: tr('Anulowano') }); return; }

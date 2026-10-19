@@ -113,6 +113,10 @@ export interface McApi {
   sftp: SftpApi;
   /** Database connections and sessions (1.0.0); result rows arrive on the 'mc:db-port' MessagePort (DbPortMessage). */
   db: DbApi;
+  /** The CA certificate file of a connection (native dialog); null when cancelled. */
+  dbPickCaFile(): Promise<string | null>;
+  /** Saves an exported result where the user picks in the save dialog. */
+  dbExport(name: string, text: string): Promise<{ ok: boolean; path?: string; cancelled?: boolean }>;
   /** The local pane of the SFTP view: any folder, drives, home, new folder, rename, trash, show in Explorer/Finder. */
   localFs: LocalFilesApi;
   notify(n: { title: string; body: string; cellId: string }): void;

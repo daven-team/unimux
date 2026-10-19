@@ -80,11 +80,24 @@ const op = z.discriminatedUnion('op', [
 // ── Redis ────────────────────────────────────────────────────────────────────
 
 const RL = REDIS_LIMITS;
-/** Binary-safe data: UTF-8 text or base64 (sizes checked on the decoded length). */
+/** Bytes of binary-safe data (UTF-8 length of text, decoded length of base64). */
+const dataBytes = (d: string | { b64: string }): number => (typeof d === 'string' ? Buffer.byteLength(d, 'utf8') : Math.floor(d.b64.length * 3 / 4) - (d.b64.endsWith('==') ? 2 : d.b64.endsWith('=') ? 1 : 0));
+/** Binary-safe data: UTF-8 text or base64, limited in bytes. */
 const data = (maxBytes: number) => z.union([
-  z.string().max(maxBytes),
+  z.string().max(maxBytes).refine((s) => Buffer.byteLength(s, 'utf8') <= maxBytes),
   z.object({ b64: z.string().max(Math.ceil(maxBytes / 3) * 4 + 4).regex(/^[A-Za-z0-9+/]*={0,2}$/) }).strict(),
 ]);
+/** The bytes of every value in a request together (a write, a command or a publish may not exceed REDIS_LIMITS.writeBytes). */
+function totalBytes(v: unknown): number {
+  if (typeof v === 'string') return Buffer.byteLength(v, 'utf8');
+  if (Array.isArray(v)) return v.reduce((n: number, x) => n + totalBytes(x), 0);
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    if (typeof o.b64 === 'string' && Object.keys(o).length === 1) return dataBytes({ b64: o.b64 });
+    return Object.values(o).reduce((n: number, x) => n + totalBytes(x), 0);
+  }
+  return 0;
+}
 const rKey = data(RL.nameBytes);
 const rName = data(RL.nameBytes);
 const rValue = data(RL.writeBytes);
@@ -108,19 +121,19 @@ const newValue = z.discriminatedUnion('type', [
 ]);
 const write = z.discriminatedUnion('op', [
   z.object({ op: z.literal('set'), key: rKey, value: rValue, keepTtl: z.boolean().optional(), ttlMs: ttl.optional() }).strict(),
-  z.object({ op: z.literal('hset'), key: rKey, field: rName, value: rValue, onlyNew: z.boolean().optional() }).strict(),
+  z.object({ op: z.literal('hset'), key: rKey, field: rName, value: rValue, onlyNew: z.boolean().optional(), existing: z.boolean().optional() }).strict(),
   z.object({ op: z.literal('hdel'), key: rKey, fields: items(rName) }).strict(),
-  z.object({ op: z.literal('lpush'), key: rKey, items: items(rValue) }).strict(),
-  z.object({ op: z.literal('rpush'), key: rKey, items: items(rValue) }).strict(),
+  z.object({ op: z.literal('lpush'), key: rKey, items: items(rValue), existing: z.boolean().optional() }).strict(),
+  z.object({ op: z.literal('rpush'), key: rKey, items: items(rValue), existing: z.boolean().optional() }).strict(),
   z.object({ op: z.literal('lset'), key: rKey, index: z.number().int(), value: rValue, expected: rValue.optional() }).strict(),
   z.object({ op: z.literal('lrem'), key: rKey, count: z.number().int(), value: rValue }).strict(),
   z.object({ op: z.literal('ldel'), key: rKey, index: z.number().int(), expected: rValue }).strict(),
-  z.object({ op: z.literal('sadd'), key: rKey, members: items(rName) }).strict(),
+  z.object({ op: z.literal('sadd'), key: rKey, members: items(rName), existing: z.boolean().optional() }).strict(),
   z.object({ op: z.literal('srem'), key: rKey, members: items(rName) }).strict(),
-  z.object({ op: z.literal('zadd'), key: rKey, entries: pairs(rName, score), mode: z.enum(['nx', 'xx']).optional() }).strict(),
+  z.object({ op: z.literal('zadd'), key: rKey, entries: pairs(rName, score), mode: z.enum(['nx', 'xx']).optional(), existing: z.boolean().optional() }).strict(),
   z.object({ op: z.literal('zrem'), key: rKey, members: items(rName) }).strict(),
-  z.object({ op: z.literal('zincrby'), key: rKey, member: rName, by: score }).strict(),
-  z.object({ op: z.literal('xadd'), key: rKey, id: streamId.optional(), fields: pairs(rName, rValue), maxLen: z.number().int().min(0).optional(), approx: z.boolean().optional() }).strict(),
+  z.object({ op: z.literal('zincrby'), key: rKey, member: rName, by: score, existing: z.boolean().optional() }).strict(),
+  z.object({ op: z.literal('xadd'), key: rKey, id: streamId.optional(), fields: pairs(rName, rValue), maxLen: z.number().int().min(0).optional(), approx: z.boolean().optional(), existing: z.boolean().optional() }).strict(),
   z.object({ op: z.literal('xdel'), key: rKey, ids: items(streamId) }).strict(),
   z.object({ op: z.literal('xtrim'), key: rKey, strategy: z.enum(['maxlen', 'minid']), threshold: z.string().regex(/^\d{1,20}(?:-\d{1,20})?$/), approx: z.boolean().optional() }).strict(),
   z.object({ op: z.literal('rename'), key: rKey, newKey: rKey, overwrite: z.boolean().optional() }).strict(),
@@ -205,7 +218,9 @@ export function createDbHandlers(service: DbService) {
     },
     redis: async (id: unknown, raw: unknown): Promise<DbResult<unknown>> => {
       const s = sessionId.safeParse(id), o = redisOp.safeParse(raw);
-      return s.success && o.success ? service.op(s.data, { op: 'redis', req: o.data as RedisOp }) : INVALID;
+      if (!s.success || !o.success) return INVALID;
+      if (totalBytes(o.data) > REDIS_LIMITS.writeBytes) return INVALID;
+      return service.op(s.data, { op: 'redis', req: o.data as RedisOp });
     },
     pin: (ids: unknown) => { const p = z.array(sessionId).max(1000).safeParse(ids); if (p.success) service.pin(p.data); },
   };

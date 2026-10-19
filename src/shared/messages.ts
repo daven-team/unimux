@@ -8,6 +8,7 @@ import { cliMessages } from './cliMessages';
 import { codexMessages } from './codexMessages';
 import { dbMessages } from './dbMessages';
 import { redisMessages } from './redisMessages';
+import { dbUiMessages } from './dbUiMessages';
 import { filesMessages } from './filesMessages';
 import { gitMessages } from './gitMessages';
 import { gitSetupMessages } from './gitSetupMessages';
@@ -42,6 +43,7 @@ export const messages = {
   ...codexMessages,
   ...dbMessages,
   ...redisMessages,
+  ...dbUiMessages,
   ...filesMessages,
   ...gitMessages,
   ...gitSetupMessages,

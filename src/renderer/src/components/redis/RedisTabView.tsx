@@ -1,16 +1,13 @@
 // A Redis tab of the top strip (1.0.0): the connection bar (colour, name, endpoint, DB, version, TLS, read-only, switching to the
-// other views), the login of its session (SSH host key and password, the Redis password) and the view itself.
-import { lazy, Suspense, useEffect, useState } from 'react';
-import { dbEndpoint, dbPhaseLabel, type DbPrompt } from '../../../../shared/db';
+// other views), the login of its session (DbLogin: SSH host key and password, the Redis password) and the view itself.
+import { lazy, Suspense, useEffect } from 'react';
+import { dbEndpoint, dbPhaseLabel } from '../../../../shared/db';
 import type { RedisTabRef, RedisTabView as View } from '../../../../shared/redisView';
 import { useFileStore } from '../../files';
 import { useI18n } from '../../i18n';
 import { useStore } from '../../store';
-import { useSshStore } from '../../sshStore';
 import { ensureTabSession, openRedisTab, reconnectTab, tabSessionState, useRedisStore, viewLabel } from '../../redis/redisClient';
-import { AuthPrompt } from '../ssh/AuthPrompt';
-import { HostKeyPrompt } from '../ssh/HostKeyPrompt';
-import type { PromptReply } from '../ssh/promptReply';
+import { DbLogin } from '../db/DbLogin';
 import { BusyRing } from '../Spinner';
 import '../ssh/ssh.css';
 import './redis.css';
@@ -65,7 +62,7 @@ export function RedisTabView() {
         ? <Suspense fallback={null}><Body view={ref.view} props={{ tabId, sessionId, ref, readOnly }} /></Suspense>
         : (
           <div className="redis-center">
-            {prompt && sessionId ? <Login sessionId={sessionId} prompt={prompt} />
+            {prompt && sessionId ? <div className="redis-card login"><DbLogin sessionId={sessionId} /></div>
               : tabError ? (
                 <div className="redis-card" role="alert">
                   <div className="redis-card-title">{tr('Nie udało się połączyć')}</div>
@@ -86,41 +83,6 @@ function Body({ view, props }: { view: View; props: RedisViewProps }) {
     case 'pubsub': return <RedisPubSub key={props.tabId} {...props} />;
     case 'info': return <RedisServer key={props.tabId} {...props} />;
   }
-}
-
-/** The tab's login question: the SSH tunnel's (host key, password, passphrase) or the Redis password. */
-function Login({ sessionId, prompt }: { sessionId: string; prompt: DbPrompt }) {
-  const storage = useSshStore((st) => st.vault?.storage ?? 'unavailable');
-  const respond = (reply: PromptReply) => { void window.mc.db.answer({ ...(reply as object), sessionId } as Parameters<typeof window.mc.db.answer>[0]); };
-  return (
-    <div className="redis-card login">
-      {prompt.kind === 'dbPassword' ? <PasswordPrompt sessionId={sessionId} prompt={prompt} />
-        : prompt.kind === 'hostKey' ? <HostKeyPrompt key={prompt.id} cellId={sessionId} prompt={prompt} respond={respond} />
-          : prompt.kind === 'sudo' ? null
-            : <AuthPrompt key={prompt.id} cellId={sessionId} prompt={prompt} storage={storage} respond={respond} />}
-    </div>
-  );
-}
-
-function PasswordPrompt({ sessionId, prompt }: { sessionId: string; prompt: Extract<DbPrompt, { kind: 'dbPassword' }> }) {
-  const { tr } = useI18n();
-  const [value, setValue] = useState('');
-  const [remember, setRemember] = useState(false);
-  const submit = () => { void window.mc.db.answer({ sessionId, promptId: prompt.id, values: [value], ...(prompt.canSave ? { remember } : {}) }); setValue(''); };
-  const cancel = () => { void window.mc.db.answer({ sessionId, promptId: prompt.id, cancel: true }); setValue(''); };
-  return (
-    <form className="redis-password" onSubmit={(e) => { e.preventDefault(); submit(); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Escape') cancel(); }}>
-      <div className="redis-card-title">{tr('Hasło do Redis')}</div>
-      <p className="muted">{prompt.user ? `${prompt.user}@` : ''}{prompt.endpoint} · {prompt.connectionName}</p>
-      {prompt.retry && <p className="redis-error-text">{tr('Serwer odrzucił hasło. Spróbuj ponownie.')}</p>}
-      <input className="input" type="password" autoFocus value={value} aria-label={tr('Hasło')} onChange={(e) => setValue(e.target.value)} />
-      {prompt.canSave && <label className="check"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> {tr('Zapamiętaj hasło')}</label>}
-      <div className="redis-row-actions">
-        <button type="submit" className="btn small primary">{tr('Połącz')}</button>
-        <button type="button" className="btn small" onClick={cancel}>{tr('Anuluj')}</button>
-      </div>
-    </form>
-  );
 }
 
 export default RedisTabView;

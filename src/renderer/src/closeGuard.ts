@@ -50,6 +50,19 @@ export async function confirmQuitTransfers(): Promise<boolean> {
 }
 
 /**
+ * Unsaved database work (1.0.0: open transactions of SQL tabs, staged edits of table tabs). The database module registers it
+ * when it starts, so this file does not load it: `pending` says whether quitting must ask, `ask` asks (true: quit anyway).
+ */
+export interface QuitWork { pending(): boolean; ask(): Promise<boolean>; subscribe(changed: () => void): void }
+let databaseWork: QuitWork | null = null;
+let databaseChanged: () => void = () => {};
+export function setDatabaseQuitWork(work: QuitWork): void {
+  databaseWork = work;
+  work.subscribe(() => databaseChanged());
+  databaseChanged();
+}
+
+/**
  * Tells main whether quitting must ask first (some agent works and the setting is on, or SFTP transfers run), so a quit with
  * nothing to ask about never waits for this window. Main then asks through 'app:confirm-quit'.
  */
@@ -61,9 +74,10 @@ export function initQuitGuard(): void {
   // Each part is recomputed only when its own store changes (transfer progress arrives several times a second).
   let agents = agentsWork();
   let transfers = activeTransferCount() > 0;
+  let database = databaseWork?.pending() ?? false;
   let last: boolean | undefined;
   const push = (): void => {
-    const guard = agents || transfers;
+    const guard = agents || transfers || database;
     if (guard === last) return;
     last = guard;
     window.mc.setQuitGuard(guard);
@@ -75,6 +89,7 @@ export function initQuitGuard(): void {
   useSftpStore.subscribe((st, prev) => {
     if (st.transfers !== prev.transfers || st.preparing !== prev.preparing) { transfers = activeTransferCount() > 0; push(); }
   });
+  databaseChanged = () => { database = databaseWork?.pending() ?? false; push(); };
   // The open quit question: its dialog id, and a token so a replaced question never answers for the current one.
   let question: { token: number; dialogId: number | undefined } | null = null;
   let tokens = 0;
@@ -91,11 +106,18 @@ export function initQuitGuard(): void {
       current.dialogId = getUi().dialog?.id;
       return agents;
     };
-    const answer = activeTransferCount() === 0 ? askAgents() : (async () => {
+    // Database work (open transactions, staged edits) is asked about first, then running transfers, then the working agents.
+    const askRest = (): Promise<boolean> => (activeTransferCount() === 0 ? askAgents() : (async () => {
       const transfers = confirmQuitTransfers();
       current.dialogId = getUi().dialog?.id;
       if (!(await transfers) || question !== current) return false;
       return askAgents();
+    })());
+    const answer = !databaseWork?.pending() ? askRest() : (async () => {
+      const db = databaseWork.ask();
+      current.dialogId = getUi().dialog?.id;
+      if (!(await db) || question !== current) return false;
+      return askRest();
     })();
     window.mc.answerQuit('asking');
     void answer.catch(() => true).then((go) => {
