@@ -24,6 +24,12 @@ export const DB_LIMITS = {
   cellChars: 64 * 1024, fullValueChars: 16 * 1024 * 1024,
   /** One rows message carries at most this many rows or about this many characters. */
   chunkRows: 500, chunkChars: 2 * 1024 * 1024,
+  /** One read (a statement's first page, a fetchMore or a table page) stops at about this many characters even below its row cap. */
+  pageChars: 32 * 1024 * 1024,
+  /** An open result cursor nobody fetched from for this long is closed (resultClosed): it holds a snapshot and locks. */
+  cursorIdleMs: 2 * 60_000,
+  /** Sessions per saved connection and in all. */
+  sessionsPerConnection: 32, sessionsTotal: 128,
   sql: 8 * 1024 * 1024, filter: 64 * 1024, identifier: 1024, edits: 5000, sortColumns: 16, serverText: 4000,
   /** A session nobody pinned is disconnected after this long without an operation. */
   idleMs: 5 * 60_000,
@@ -116,14 +122,18 @@ export function normalizeDbConnection(raw: unknown): DbConnection | null {
   if (group) c.group = group;
   if (kind === 'postgres') c.database = validDatabase(r.database) ? r.database : 'postgres';
   if (kind === 'redis') c.dbIndex = typeof r.dbIndex === 'number' && Number.isInteger(r.dbIndex) && r.dbIndex >= 0 && r.dbIndex <= 10_000 ? r.dbIndex : 0;
+  // A connection is never weakened: verify-full without a usable CA file, or a damaged tunnel, makes it unusable (dropped)
+  // instead of turning into one without certificate checks or a direct connection.
   if (c.tls === 'verify-full') {
-    if (validCaPath(r.caPath)) c.caPath = r.caPath;
-    else c.tls = 'require';
+    if (!validCaPath(r.caPath)) return null;
+    c.caPath = r.caPath;
   }
   const ssh = r.ssh as Record<string, unknown> | null | undefined;
-  if (ssh && typeof ssh === 'object' && isUuid(ssh.hostId)) {
+  if (ssh !== null && ssh !== undefined) {
+    if (typeof ssh !== 'object' || Array.isArray(ssh) || !isUuid(ssh.hostId) || !isPort(ssh.dbPort)) return null;
     const dbHost = validHost(ssh.dbHost);
-    if (dbHost) c.ssh = { hostId: ssh.hostId, dbHost, dbPort: isPort(ssh.dbPort) ? ssh.dbPort : DB_DEFAULT_PORT[kind] };
+    if (!dbHost) return null;
+    c.ssh = { hostId: ssh.hostId, dbHost, dbPort: ssh.dbPort };
   }
   if (kind === 'postgres' && typeof r.statementTimeoutMs === 'number' && Number.isInteger(r.statementTimeoutMs) && r.statementTimeoutMs > 0 && r.statementTimeoutMs <= DB_LIMITS.statementTimeoutMaxMs) {
     c.statementTimeoutMs = r.statementTimeoutMs;
@@ -276,7 +286,9 @@ export type DbErrorCode = SshErrorCode
   /** Edits: the table has no primary or unique not-null key; a row changed or vanished meanwhile (rolled back); not found. */
   | 'noKey' | 'conflict' | 'notFound'
   /** The server refused a statement (`server` has its message); the statement timeout hit. */
-  | 'server' | 'statementTimeout';
+  | 'server' | 'statementTimeout'
+  /** The session runs something (a query or page) and refuses metadata and edits until it ends; too many sessions are open. */
+  | 'busy' | 'tooMany';
 
 /** The server's own error, as Postgres reports it (never translated; capped). */
 export interface DbServerError {
@@ -310,6 +322,8 @@ export interface DbSessionState {
   serverVersion?: string;
   readOnly: boolean;
   tx?: DbTxStatus;
+  /** Set once connected: the connection is encrypted with TLS (prefer may have fallen back to plain). */
+  tls?: boolean;
   /** A "Test connection" session (ends by itself). */
   test?: true;
 }
@@ -401,9 +415,10 @@ export type DbPortMessage =
   | { t: 'rows'; queryId: string; index: number; rows: DbValue[][] }
   /**
    * The statement finished (or the next page of it arrived). command: "SELECT", "UPDATE" ...; rowCount: the server's count
-   * (affected rows, or rows read so far); hasMore: more rows wait on the server (fetchMore).
+   * (affected rows, or rows read so far); hasMore: more rows wait on the server (fetchMore). truncated: the statement returned
+   * more rows than were read, and they cannot be loaded (a data-changing statement, or not the last statement of the run).
    */
-  | { t: 'statementEnd'; queryId: string; index: number; command: string; rowCount: number | null; rows: number; hasMore: boolean; timeMs: number }
+  | { t: 'statementEnd'; queryId: string; index: number; command: string; rowCount: number | null; rows: number; hasMore: boolean; truncated?: boolean; timeMs: number }
   | { t: 'statementError'; queryId: string; index: number; error: DbErrorCode; server?: DbServerError; timeMs: number }
   /** NOTICE / WARNING lines of the server during the run. */
   | { t: 'notice'; queryId: string; message: string; severity?: string }
@@ -464,10 +479,15 @@ export interface DbTableInfo {
 // ── staged edits ────────────────────────────────────────────────────────────
 
 /** A key value or a new value: the text form (as cells arrive), null for SQL NULL. Keys are never null. */
+/**
+ * `original`: the values the row was loaded with (text form, null for NULL) of the edited columns (update) or of any columns
+ * (delete). The statement then also requires them unchanged, so a row changed by someone else meanwhile is a conflict.
+ * Leave out a column whose loaded value arrived truncated.
+ */
 export type DbStagedEdit =
-  | { op: 'update'; key: Record<string, string>; set: Record<string, string | null> }
+  | { op: 'update'; key: Record<string, string>; set: Record<string, string | null>; original?: Record<string, string | null> }
   | { op: 'insert'; values: Record<string, string | null> }
-  | { op: 'delete'; key: Record<string, string> };
+  | { op: 'delete'; key: Record<string, string>; original?: Record<string, string | null> };
 
 export interface DbEditRequest { schema: string; table: string; edits: DbStagedEdit[] }
 export interface DbEditPreview { sql: string; statements: number }
@@ -547,7 +567,19 @@ export function dbErrorText(code: DbErrorCode, ssh: { host: string; endpoint: st
     case 'notFound': return { key: 'Nie znaleziono obiektu' };
     case 'server': return { key: 'Serwer bazy zgłosił błąd' };
     case 'statementTimeout': return { key: 'Przekroczono limit czasu zapytania' };
+    case 'busy': return { key: 'Połączenie jest zajęte - poczekaj na koniec zapytania' };
+    case 'tooMany': return { key: 'Za dużo otwartych połączeń z bazą' };
     default: return sshErrorText(code, ssh);
+  }
+}
+
+/** The TLS mode as the form and the tab show it: what it guarantees, in words. */
+export function dbTlsModeLabel(mode: DbTlsMode): { label: Localized; detail: Localized } {
+  switch (mode) {
+    case 'disable': return { label: { key: 'Bez szyfrowania' }, detail: { key: 'Hasło i dane płyną otwartym tekstem' } };
+    case 'prefer': return { label: { key: 'TLS, gdy serwer go oferuje' }, detail: { key: 'Bez weryfikacji certyfikatu; może połączyć się bez szyfrowania' } };
+    case 'require': return { label: { key: 'Wymagaj TLS' }, detail: { key: 'Bez weryfikacji certyfikatu' } };
+    case 'verify-full': return { label: { key: 'TLS z weryfikacją certyfikatu' }, detail: { key: 'Certyfikat sprawdzany wobec pliku CA i nazwy hosta' } };
   }
 }
 

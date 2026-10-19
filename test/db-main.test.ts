@@ -263,6 +263,61 @@ describe('DbService: sessions', () => {
   });
 });
 
+describe('DbService: fix round 1', () => {
+  it('caps the sessions of one connection', async () => {
+    const t = setup();
+    const c = t.save();
+    for (let i = 0; i < 32; i++) expect(t.service.connect(c.id).ok).toBe(true);
+    expect(t.service.connect(c.id)).toEqual({ ok: false, error: 'tooMany' });
+    const other = t.save({ name: 'other' });
+    expect(t.service.connect(other.id).ok).toBe(true);
+  });
+
+  it('shares one tunnel login between the sessions of a connection', async () => {
+    const t = setup();
+    const c = t.save({ ssh: { hostId: HOST, dbHost: '127.0.0.1', dbPort: 5433 } });
+    const a = t.service.connect(c.id) as { sessionId: string };
+    const b = t.service.connect(c.id) as { sessionId: string };
+    await t.flush();
+    const opens = t.sent.filter((m) => m.t === 'dbOpen') as Array<Extract<MainToDbHost, { t: 'dbOpen' }>>;
+    expect(opens.map((o) => o.config.ssh?.owner)).toEqual([true, false]);
+    expect(opens[0].config.ssh?.tunnelKey).toBe(opens[1].config.ssh?.tunnelKey);
+    expect(t.coordinatorCalls).toEqual([`connect ${a.sessionId} ${HOST}`]);
+    await t.service.disconnect(a.sessionId);
+    t.service.connect(c.id);
+    await t.flush();
+    expect((t.sent.filter((m) => m.t === 'dbOpen').at(-1) as Extract<MainToDbHost, { t: 'dbOpen' }>).config.ssh?.owner).toBe(false);
+    for (const id of t.service.ids()) await t.service.disconnect(id);
+    const d = t.service.connect(c.id) as { sessionId: string };
+    await t.flush();
+    expect((t.sent.filter((m) => m.t === 'dbOpen').at(-1) as Extract<MainToDbHost, { t: 'dbOpen' }>).config.ssh?.owner).toBe(true);
+    expect(t.coordinatorCalls.filter((x) => x.startsWith('connect'))).toEqual([`connect ${a.sessionId} ${HOST}`, `connect ${d.sessionId} ${HOST}`]);
+    expect(b.sessionId).toBeTruthy();
+  });
+
+  it('a test uses a saved password only for the server it was saved for', async () => {
+    const t = setup();
+    const c = t.save({}, { set: 'pw' });
+    expect(await t.service.testConnection({ ...input, host: 'evil.example.com' }, { saved: c.id })).toEqual({ ok: false, error: 'invalid' });
+    expect(await t.service.testConnection({ ...input, user: 'root' }, { saved: c.id })).toEqual({ ok: false, error: 'invalid' });
+    expect(await t.service.testConnection({ ...input, ssh: { hostId: HOST, dbHost: '127.0.0.1', dbPort: 5432 } }, { saved: c.id })).toEqual({ ok: false, error: 'invalid' });
+    const same = t.service.testConnection({ ...input, name: 'renamed', tls: 'require' }, { saved: c.id });
+    await t.flush();
+    const open = t.sent.filter((m) => m.t === 'dbOpen').at(-1) as Extract<MainToDbHost, { t: 'dbOpen' }>;
+    expect(open.config.password).toBe('pw');
+    t.service.onHostMessage({ t: 'dbStatus', id: open.id, phase: 'connected', tls: true });
+    expect(await same).toMatchObject({ ok: true });
+  });
+
+  it('reports whether the connection is encrypted', async () => {
+    const t = setup();
+    const r = t.service.connect(t.save({ tls: 'prefer' }).id) as { sessionId: string };
+    await t.flush();
+    t.service.onHostMessage({ t: 'dbStatus', id: r.sessionId, phase: 'connected', tls: false });
+    expect(t.last(r.sessionId)).toMatchObject({ state: 'connected', tls: false });
+  });
+});
+
 describe('DB IPC validation', () => {
   it('refuses malformed requests before the service sees them', async () => {
     const t = setup();

@@ -1,5 +1,6 @@
 // One connected Postgres session of the DB Host (1.0.0): runs its operations one at a time on its pg.Client, streams rows to the
-// renderer over the DB port in chunks, keeps at most one result cursor open for "load more", tracks the transaction state from
+// renderer over the DB port in bounded batches, keeps at most one read-only result cursor open for "load more" (closed after
+// DB_LIMITS.cursorIdleMs without a fetch), enforces read-only connections on the client side too, tracks the transaction state from
 // ReadyForQuery, cancels through pg_cancel_backend on a side connection, and applies staged edits in one transaction.
 // Independent of Electron so it is tested in Node against PGlite and the fake server.
 import type { Client, QueryResult } from 'pg';
@@ -8,7 +9,7 @@ import {
   DB_LIMITS, type DbCellRequest, type DbColumn, type DbEditRequest, type DbErrorCode, type DbPortMessage, type DbQueryRequest, type DbResult,
   type DbServerError, type DbTablePageRequest, type DbTxStatus, type DbValue,
 } from '../shared/db';
-import { DbSqlError, buildEditStatements, cellSql, editPreview, pageSql, returnsRows, splitSql, valueKind } from '../shared/dbSql';
+import { DbSqlError, buildEditStatements, cellSql, editPreview, endsTransaction, firstKeyword, isReadStatement, pageSql, readOnlyAllows, returnsRows, splitSql, valueKind } from '../shared/dbSql';
 import { listDatabases, listObjects, listSchemas, objectDdl, tableInfo, type Row } from './pgMeta';
 import type { DbHostOp } from '../shared/dbHostIpc';
 
@@ -29,11 +30,13 @@ export interface PgSessionOptions {
   sideConnection(): Promise<Client>;
   /** The protocol-level CancelRequest (the fallback when no side connection can be opened). */
   cancelRequest(processId: number, secretKey: number): Promise<void>;
+  /** A session setting could not be restored: the session must end (it might be read-write or without its timeout). */
+  fatal(): void;
+  cursorIdleMs?: number;
   now?(): number;
 }
 
 interface FieldLike { name: string; dataTypeID: number; tableID?: number; columnID?: number }
-interface OpenResult { queryId: string; index: number; cursor: Cursor; buffered: unknown[][]; sent: number; started: number }
 interface Run { queryId: string; cancelled: boolean }
 
 const ok = <T>(value: T): DbResult<T> => ({ ok: true, value });
@@ -61,10 +64,16 @@ export function toValue(v: unknown): DbValue {
   return s.length > DB_LIMITS.cellChars ? { t: 'trunc', head: s.slice(0, DB_LIMITS.cellChars), chars: s.length } : s;
 }
 
+interface Reader { cursor: Cursor; fields: FieldLike[] | null; columnsSent: boolean; buffered: unknown[][]; done: boolean; batch: number; result: { command?: string; rowCount?: number | null } }
+interface OpenResult { queryId: string; index: number; reader: Reader; sent: number; timer: NodeJS.Timeout | null }
+
 export class PgSession {
   tx: DbTxStatus = 'idle';
   private queue: Promise<unknown> = Promise.resolve();
   private pending = 0;
+  /** Queries, table pages and fetchMore queued or running: metadata and edits answer 'busy' meanwhile. */
+  private runs = 0;
+  private metaPending = 0;
   private open: OpenResult | null = null;
   private run: Run | null = null;
   /** A statement is on the server right now (what cancel stops). */
@@ -73,8 +82,10 @@ export class PgSession {
   private ended = false;
   private types = new Map<number, { name: string; category: string }>();
   private keys = new Map<string, { at: number; key: string[] | null }>();
-  /** SET statements that restore the session after a run; deferred while a cursor holds the connection. */
+  /** Settings a run changed (read-only override, statement timeout); restored only once no transaction or cursor is open. */
   private restore: string[] = [];
+  /** A read-only connection runs with writes allowed (its override run left a transaction open). */
+  private overrideActive = false;
   private noticeTarget: string | null = null;
 
   constructor(readonly client: Client, private readonly opts: PgSessionOptions, private readonly out: PgSessionOut) {
@@ -99,6 +110,7 @@ export class PgSession {
   end(): void {
     this.ended = true;
     if (this.run) this.run.cancelled = true;
+    if (this.open?.timer) clearTimeout(this.open.timer);
   }
 
   // ── plumbing ───────────────────────────────────────────────────────────────
@@ -115,6 +127,12 @@ export class PgSession {
     return next;
   }
 
+  /** A query, page or fetchMore: counted so metadata refuses with 'busy' instead of piling up behind it. */
+  private serialRun(fn: () => Promise<void>): void {
+    this.runs++;
+    void this.serial(fn).finally(() => { this.runs--; });
+  }
+
   private async onServer<T>(fn: () => Promise<T>): Promise<T> {
     this.inFlight = true;
     try { return await fn(); } finally { this.inFlight = false; }
@@ -126,6 +144,32 @@ export class PgSession {
     if (server.code === '57014') return this.cancelRequested ? 'cancelled' : /statement timeout/i.test(server.message) ? 'statementTimeout' : 'cancelled';
     if (server.code === '25006') return 'readOnly';
     return 'server';
+  }
+
+  /** A setting that must hold could not be set: the session cannot be trusted any more and ends. */
+  private fatal(): never {
+    this.ended = true;
+    this.opts.fatal();
+    throw new Error('session settings could not be restored');
+  }
+
+  private async must(sql: string): Promise<void> {
+    try { await this.client.query(sql); } catch { this.fatal(); }
+  }
+
+  /** Runs the queued restores once nothing holds the connection (no transaction, no cursor); a failed one ends the session. */
+  private async settle(): Promise<void> {
+    if (this.tx !== 'idle' || this.open || !this.restore.length) return;
+    const restore = this.restore;
+    this.restore = [];
+    for (const sql of restore) await this.must(sql);
+    this.overrideActive = false;
+  }
+
+  /** Re-asserts the session settings a statement may have changed (set_config in a SELECT or a page filter). */
+  private async reassert(): Promise<void> {
+    if (this.tx !== 'idle' || this.open || this.overrideActive) return;
+    if (this.opts.readOnly) await this.must('SET default_transaction_read_only = on');
   }
 
   private async columns(fields: readonly FieldLike[], canQuery: boolean): Promise<DbColumn[]> {
@@ -145,21 +189,24 @@ export class PgSession {
     });
   }
 
-  /** Rows to the port in chunks of at most chunkRows rows or about chunkChars characters. */
-  private sendRows(queryId: string, index: number, rows: readonly unknown[][]): void {
+  /** Rows to the port in chunks of at most chunkRows rows or about chunkChars characters; returns the characters sent. */
+  private sendRows(queryId: string, index: number, rows: readonly unknown[][]): number {
     let chunk: DbValue[][] = [];
     let chars = 0;
+    let total = 0;
     for (const row of rows) {
       const values = row.map(toValue);
       chunk.push(values);
       for (const v of values) chars += v === null ? 4 : typeof v === 'string' ? v.length : v.head.length;
       if (chunk.length >= DB_LIMITS.chunkRows || chars >= DB_LIMITS.chunkChars) {
         this.out.port({ t: 'rows', queryId, index, rows: chunk });
+        total += chars;
         chunk = [];
         chars = 0;
       }
     }
     if (chunk.length) this.out.port({ t: 'rows', queryId, index, rows: chunk });
+    return total + chars;
   }
 
   private read(cursor: Cursor, count: number): Promise<{ rows: unknown[][]; result: { fields?: FieldLike[]; command?: string; rowCount?: number | null } }> {
@@ -168,45 +215,101 @@ export class PgSession {
     }));
   }
 
-  /** Closes the open result cursor (the connection is needed for something else) and runs the deferred restores. */
+  private reader(text: string, values?: unknown[]): Reader {
+    const cursor = this.client.query(new Cursor(text, values as never, { rowMode: 'array', types: RAW_TYPES } as never));
+    return { cursor, fields: null, columnsSent: false, buffered: [], done: false, batch: 100, result: {} };
+  }
+
+  /**
+   * Reads and sends up to `max` rows in batches (smaller ones for wide rows) and stops early at DB_LIMITS.pageChars characters,
+   * so a result of huge rows never sits in memory whole. Reads one row ahead to know whether more follow.
+   */
+  private async pump(queryId: string, index: number, r: Reader, max: number): Promise<number> {
+    let sent = 0;
+    let chars = 0;
+    while (sent < max && !(r.done && !r.buffered.length) && chars < DB_LIMITS.pageChars) {
+      let rows: unknown[][];
+      if (r.buffered.length) { rows = r.buffered; r.buffered = []; }
+      else {
+        const want = Math.min(r.batch, max - sent);
+        const got = await this.read(r.cursor, want);
+        if (!r.fields) r.fields = got.result.fields ?? [];
+        r.result = got.result;
+        if (got.rows.length < want) r.done = true;
+        rows = got.rows;
+      }
+      if (!r.columnsSent && r.fields) {
+        r.columnsSent = true;
+        if (r.fields.length) this.out.port({ t: 'columns', queryId, index, columns: await this.columns(r.fields, r.done) });
+      }
+      if (rows.length) {
+        chars += this.sendRows(queryId, index, rows);
+        sent += rows.length;
+        const perRow = Math.max(1, chars / sent);
+        r.batch = Math.max(1, Math.min(DB_LIMITS.chunkRows, Math.floor(DB_LIMITS.chunkChars / perRow)));
+      }
+    }
+    if (!r.done && !r.buffered.length && sent >= max) {
+      const got = await this.read(r.cursor, 1);
+      r.result = got.result;
+      if (got.rows.length) r.buffered = got.rows; else r.done = true;
+    }
+    if (!r.columnsSent && r.fields) {
+      r.columnsSent = true;
+      if (r.fields.length) this.out.port({ t: 'columns', queryId, index, columns: await this.columns(r.fields, r.done) });
+    }
+    return sent;
+  }
+
+  private armIdle(open: OpenResult): void {
+    if (open.timer) clearTimeout(open.timer);
+    open.timer = setTimeout(() => {
+      void this.serial(async () => { if (this.open === open) { await this.closeOpen(); await this.settle().catch(() => undefined); } });
+    }, this.opts.cursorIdleMs ?? DB_LIMITS.cursorIdleMs);
+  }
+
+  /** Closes the open result cursor (the connection is needed for something else, or nobody fetched for a while). */
   private async closeOpen(): Promise<void> {
     const open = this.open;
-    if (open) {
-      this.open = null;
-      try { await open.cursor.close(); } catch { /* the connection is gone */ }
-      this.out.port({ t: 'resultClosed', queryId: open.queryId, index: open.index });
-    }
-    const restore = this.restore;
-    this.restore = [];
-    for (const sql of restore) { try { await this.client.query(sql); } catch { /* best effort */ } }
+    if (!open) return;
+    this.open = null;
+    if (open.timer) clearTimeout(open.timer);
+    try { await open.reader.cursor.close(); } catch { /* the connection is gone */ }
+    this.out.port({ t: 'resultClosed', queryId: open.queryId, index: open.index });
   }
 
   // ── operations ─────────────────────────────────────────────────────────────
 
   /**
    * One operation. query, tablePage and fetchMore answer once accepted (their rows and their end go to the port); cancel runs
-   * at once; everything else waits its turn and answers with its value.
+   * at once; metadata and edits answer 'busy' while a run is queued or running, else wait their turn and answer with the value.
    */
   handle(op: DbHostOp): Promise<DbResult<unknown>> {
     if (this.ended) return Promise.resolve(fail('noSession'));
     switch (op.op) {
       case 'cancel': return this.cancel().then(ok);
-      case 'query': void this.serial(() => this.runQuery(op.req)); return Promise.resolve(ok(true));
-      case 'tablePage': void this.serial(() => this.runPage(op.req)); return Promise.resolve(ok(true));
+      case 'query': this.serialRun(() => this.runQuery(op.req)); return Promise.resolve(ok(true));
+      case 'tablePage': this.serialRun(() => this.runPage(op.req)); return Promise.resolve(ok(true));
       case 'fetchMore':
         if (!this.open || this.open.queryId !== op.queryId) return Promise.resolve(fail('notFound'));
-        void this.serial(() => this.fetchMore(op.queryId, op.count));
+        if (this.open.timer) clearTimeout(this.open.timer);
+        this.serialRun(() => this.fetchMore(op.queryId, op.count));
         return Promise.resolve(ok(true));
       case 'closeResult':
-        return this.serial(async () => { if (this.open?.queryId === op.queryId) await this.closeOpen(); return ok(true); });
+        return this.serial(async () => { if (this.open?.queryId === op.queryId) { await this.closeOpen(); await this.settle(); } return ok(true); }).catch(() => fail('dbFailed'));
       default:
+        if (this.runs > 0 || this.metaPending >= 4) return Promise.resolve(fail('busy'));
+        this.metaPending++;
         return this.serial(async () => {
-          await this.closeOpen();
-          try { return await this.meta(op); } catch (error) {
+          try {
+            await this.closeOpen();
+            await this.settle();
+            return await this.meta(op);
+          } catch (error) {
             if (error instanceof DbSqlError) return fail(error.code);
             const server = serverError(error);
-            return fail(this.codeOf(error), server ?? undefined);
-          }
+            return fail(this.ended ? 'dbFailed' : this.codeOf(error), server ?? undefined);
+          } finally { this.metaPending--; }
         });
     }
   }
@@ -220,7 +323,9 @@ export class PgSession {
       case 'tableInfo': { const info = await tableInfo(q, op.schema, op.name); return info ? ok(info) : fail('notFound'); }
       case 'ddl': { const ddl = await objectDdl(q, op.schema, op.name, op.kind, op.args); return ddl === null ? fail('notFound') : ok(ddl); }
       case 'transaction': {
+        if (op.action === 'begin') await this.reassert();
         await this.client.query(op.action === 'begin' ? 'BEGIN' : op.action === 'commit' ? 'COMMIT' : 'ROLLBACK');
+        await this.settle();
         return ok(this.tx);
       }
       case 'previewEdits': {
@@ -263,21 +368,27 @@ export class PgSession {
     this.cancelRequested = false;
     this.noticeTarget = req.queryId;
     let allOk = true;
-    const end = () => {
-      if (this.run === run) this.run = null;
-      this.out.port({ t: 'queryEnd', queryId: req.queryId, ok: allOk && !run.cancelled, cancelled: run.cancelled, timeMs: this.now() - started, tx: this.tx });
+    const override = req.readWrite === true && this.opts.readOnly;
+    const refuse = (code: DbErrorCode, index = 0) => {
+      allOk = false;
+      this.out.port({ t: 'statementError', queryId: req.queryId, index, error: code, timeMs: this.now() - started });
     };
     try {
       await this.closeOpen();
+      await this.settle();
       const spans = splitSql(req.sql);
       const rowCap = Math.max(1, Math.min(DB_LIMITS.rowCapMax, Math.floor(req.rowCap ?? DB_LIMITS.rowCap)));
-      const failRun = (code: DbErrorCode, server?: DbServerError) => {
-        allOk = false;
-        this.out.port({ t: 'statementError', queryId: req.queryId, index: 0, error: code, ...(server ? { server } : {}), timeMs: this.now() - started });
-      };
-      if (req.readWrite && this.opts.readOnly) {
-        if (this.tx !== 'idle') { failRun('inTransaction'); return; }
+      if (this.opts.readOnly && !override) {
+        // An override's transaction is still open: only ending it may run without the override.
+        if (this.overrideActive && !spans.every((s) => endsTransaction(s.text))) { refuse('inTransaction'); return; }
+        // Checked before anything runs: a refused statement anywhere stops the whole script.
+        const bad = spans.findIndex((s) => !readOnlyAllows(s.text));
+        if (bad >= 0) { refuse('readOnly', bad); return; }
+      }
+      if (override) {
+        if (this.tx !== 'idle') { refuse('inTransaction'); return; }
         await this.client.query('SET default_transaction_read_only = off');
+        this.overrideActive = true;
         this.restore.push('SET default_transaction_read_only = on');
       }
       if (req.statementTimeoutMs !== undefined && req.statementTimeoutMs !== null && req.statementTimeoutMs !== this.opts.statementTimeoutMs) {
@@ -289,11 +400,14 @@ export class PgSession {
       for (let i = 0; i < spans.length; i++) {
         if (run.cancelled || this.ended) break;
         const span = spans[i];
+        // A function a statement called may have switched read-only off for the session: set again before the next one.
+        if (!override) await this.reassert();
         this.out.port({ t: 'statement', queryId: req.queryId, index: i, start: span.start, end: span.end });
         const t0 = this.now();
         try {
           await this.statement(req.queryId, i, span.text, rowCap, i === spans.length - 1);
         } catch (error) {
+          if (this.ended) throw error;
           allOk = false;
           const server = serverError(error);
           this.out.port({ t: 'statementError', queryId: req.queryId, index: i, error: this.codeOf(error), ...(server ? { server } : {}), timeMs: this.now() - t0 });
@@ -303,45 +417,50 @@ export class PgSession {
     } catch (error) {
       allOk = false;
       const server = serverError(error);
-      this.out.port({ t: 'statementError', queryId: req.queryId, index: 0, error: this.codeOf(error), ...(server ? { server } : {}), timeMs: this.now() - started });
+      this.out.port({ t: 'statementError', queryId: req.queryId, index: 0, error: this.ended ? 'dbFailed' : this.codeOf(error), ...(server ? { server } : {}), timeMs: this.now() - started });
     } finally {
-      // Nothing holds the connection: the session settings of the run are restored now (else when the cursor closes).
-      if (!this.open) await this.closeOpen();
+      try { if (!this.ended) { await this.settle(); if (!override) await this.reassert(); } } catch { allOk = false; }
       this.noticeTarget = this.open ? req.queryId : null;
-      end();
+      if (this.run === run) this.run = null;
+      this.out.port({ t: 'queryEnd', queryId: req.queryId, ok: allOk && !run.cancelled, cancelled: run.cancelled, timeMs: this.now() - started, tx: this.tx });
     }
   }
 
-  /** One statement: through a cursor when it returns rows (first rowCap rows; the cursor stays open for "load more" when `keep`). */
-  private async statement(queryId: string, index: number, text: string, rowCap: number, keep: boolean): Promise<void> {
+  /**
+   * One statement. Row-returning ones go through a cursor read in bounded batches; only a read-only statement that is the last
+   * of the run keeps its cursor open for "load more". Any other (... RETURNING, CALL, EXECUTE, or an earlier statement) is
+   * read up to the cap and closed at once (its changes commit now), reported with truncated when rows were left.
+   */
+  private async statement(queryId: string, index: number, text: string, rowCap: number, last: boolean): Promise<void> {
     const t0 = this.now();
     if (!returnsRows(text)) {
       const r = await this.onServer(() => this.client.query({ text, rowMode: 'array', types: RAW_TYPES } as never)) as unknown as QueryResult | QueryResult[];
       const results = Array.isArray(r) ? r : [r];
-      const last = results[results.length - 1];
-      const fields = (last.fields ?? []) as FieldLike[];
-      const rows = (last.rows ?? []) as unknown as unknown[][];
+      const res = results[results.length - 1];
+      const fields = (res.fields ?? []) as FieldLike[];
+      const rows = (res.rows ?? []) as unknown as unknown[][];
       if (fields.length) {
         this.out.port({ t: 'columns', queryId, index, columns: await this.columns(fields, true) });
         this.sendRows(queryId, index, rows.slice(0, rowCap));
       }
-      this.out.port({ t: 'statementEnd', queryId, index, command: last.command ?? '', rowCount: last.rowCount ?? null, rows: Math.min(rows.length, rowCap), hasMore: false, timeMs: this.now() - t0 });
+      this.out.port({ t: 'statementEnd', queryId, index, command: res.command ?? '', rowCount: res.rowCount ?? null, rows: Math.min(rows.length, rowCap), hasMore: false, ...(rows.length > rowCap ? { truncated: true } : {}), timeMs: this.now() - t0 });
       return;
     }
-    const cursor = this.client.query(new Cursor(text, undefined, { rowMode: 'array', types: RAW_TYPES } as never));
-    let got: Awaited<ReturnType<PgSession['read']>>;
-    try { got = await this.read(cursor, rowCap + 1); } catch (error) { try { await cursor.close(); } catch { /* gone */ } throw error; }
-    const done = got.rows.length <= rowCap;
-    const fields = got.result.fields ?? [];
-    if (fields.length) this.out.port({ t: 'columns', queryId, index, columns: await this.columns(fields, done) });
-    const first = got.rows.slice(0, rowCap);
-    this.sendRows(queryId, index, first);
-    const hasMore = !done;
-    this.out.port({ t: 'statementEnd', queryId, index, command: done ? got.result.command ?? '' : 'SELECT', rowCount: done ? got.result.rowCount ?? first.length : null, rows: first.length, hasMore, timeMs: this.now() - t0 });
-    if (!hasMore) return;
-    this.open = { queryId, index, cursor, buffered: got.rows.slice(rowCap), sent: first.length, started: t0 };
-    // A statement before the last one cannot keep its cursor: the next one needs the connection.
-    if (!keep) await this.closeOpen();
+    const reader = this.reader(text);
+    let sent: number;
+    try { sent = await this.pump(queryId, index, reader, rowCap); } catch (error) { try { await reader.cursor.close(); } catch { /* gone */ } throw error; }
+    const more = !reader.done || reader.buffered.length > 0;
+    const keep = more && last && isReadStatement(text);
+    if (more && !keep) {
+      try { await reader.cursor.close(); } catch { /* gone */ }
+      this.out.port({ t: 'statementEnd', queryId, index, command: firstKeyword(text) || 'SELECT', rowCount: null, rows: sent, hasMore: false, truncated: true, timeMs: this.now() - t0 });
+      return;
+    }
+    const command = reader.result.command ?? '';
+    this.out.port({ t: 'statementEnd', queryId, index, command: keep ? 'SELECT' : command, rowCount: keep ? null : (command === 'SELECT' ? sent : reader.result.rowCount ?? sent), rows: sent, hasMore: keep, timeMs: this.now() - t0 });
+    if (!keep) return;
+    this.open = { queryId, index, reader, sent, timer: null };
+    this.armIdle(this.open);
   }
 
   private async fetchMore(queryId: string, count: number): Promise<void> {
@@ -352,25 +471,23 @@ export class PgSession {
     this.cancelRequested = false;
     this.noticeTarget = queryId;
     try {
-      const want = n + 1 - open.buffered.length;
-      const got = want > 0 ? await this.read(open.cursor, want) : { rows: [], result: {} as { command?: string; rowCount?: number | null } };
-      const done = want > 0 && got.rows.length < want;
-      const rows = [...open.buffered, ...got.rows];
-      const send = rows.slice(0, n);
-      open.buffered = rows.slice(n);
-      open.sent += send.length;
-      this.sendRows(queryId, open.index, send);
-      const hasMore = open.buffered.length > 0 || !done;
-      if (!hasMore) this.open = null;
+      const sent = await this.pump(queryId, open.index, open.reader, n);
+      open.sent += sent;
+      const hasMore = !open.reader.done || open.reader.buffered.length > 0;
       // The last Execute's CommandComplete counts only its own rows: a SELECT's total is what was sent.
-      const command = done ? got.result.command ?? 'SELECT' : 'SELECT';
-      this.out.port({ t: 'statementEnd', queryId, index: open.index, command, rowCount: done ? (command === 'SELECT' ? open.sent : got.result.rowCount ?? open.sent) : null, rows: open.sent, hasMore, timeMs: this.now() - t0 });
-      if (!hasMore) await this.closeOpen();
-    } catch (error) {
+      this.out.port({ t: 'statementEnd', queryId, index: open.index, command: 'SELECT', rowCount: hasMore ? null : open.sent, rows: open.sent, hasMore, timeMs: this.now() - t0 });
+      if (hasMore) { this.armIdle(open); return; }
       this.open = null;
+      if (open.timer) clearTimeout(open.timer);
+      await this.settle();
+      await this.reassert();
+    } catch (error) {
+      if (this.open === open) this.open = null;
+      if (open.timer) clearTimeout(open.timer);
       const server = serverError(error);
-      this.out.port({ t: 'statementError', queryId, index: open.index, error: this.codeOf(error), ...(server ? { server } : {}), timeMs: this.now() - t0 });
-      await this.closeOpen();
+      this.out.port({ t: 'statementError', queryId, index: open.index, error: this.ended ? 'dbFailed' : this.codeOf(error), ...(server ? { server } : {}), timeMs: this.now() - t0 });
+      try { await open.reader.cursor.close(); } catch { /* gone */ }
+      if (!this.ended) await this.settle().catch(() => undefined);
     }
   }
 
@@ -386,7 +503,11 @@ export class PgSession {
     return key;
   }
 
-  /** One page of a table inside a READ ONLY transaction (the user's filter can change nothing). */
+  /**
+   * One page of a table inside a READ ONLY transaction, read in bounded batches. The filter is the user's own SQL: the READ
+   * ONLY transaction stops data changes, not every side effect of the functions it calls, so the session settings are set
+   * again after the page.
+   */
   private async runPage(req: DbTablePageRequest): Promise<void> {
     const started = this.now();
     const run: Run = { queryId: req.queryId, cancelled: false };
@@ -397,31 +518,39 @@ export class PgSession {
     const error = (code: DbErrorCode, server?: DbServerError) => this.out.port({ t: 'statementError', queryId: req.queryId, index: 0, error: code, ...(server ? { server } : {}), timeMs: this.now() - started });
     try {
       await this.closeOpen();
+      await this.settle();
       if (this.tx !== 'idle') { error('inTransaction'); return; }
+      await this.reassert();
       const key = await this.editKey(req.schema, req.table);
       let built: ReturnType<typeof pageSql>;
       try { built = pageSql(req, key); } catch { error('invalid'); return; }
       this.out.port({ t: 'statement', queryId: req.queryId, index: 0, start: 0, end: 0 });
       await this.client.query('BEGIN READ ONLY');
-      let r: QueryResult;
+      const limit = Math.floor(req.limit);
+      let sent = 0;
+      let more = false;
       try {
-        r = await this.onServer(() => this.client.query({ text: built.sql, values: built.params, rowMode: 'array', types: RAW_TYPES, queryMode: 'extended' } as never)) as unknown as QueryResult;
+        const reader = this.reader(built.sql, built.params);
+        try { sent = await this.pump(req.queryId, 0, reader, limit); } catch (e) { try { await reader.cursor.close(); } catch { /* gone */ } throw e; }
+        more = !reader.done || reader.buffered.length > 0;
+        if (!reader.done) await reader.cursor.close();
         await this.client.query('COMMIT');
       } catch (e) {
         try { await this.client.query('ROLLBACK'); } catch { /* gone */ }
         throw e;
       }
-      const rows = r.rows as unknown as unknown[][];
-      const limit = Math.floor(req.limit);
-      this.out.port({ t: 'columns', queryId: req.queryId, index: 0, columns: await this.columns(r.fields as FieldLike[], true) });
-      const page = rows.slice(0, limit);
-      this.sendRows(req.queryId, 0, page);
-      this.out.port({ t: 'statementEnd', queryId: req.queryId, index: 0, command: 'SELECT', rowCount: page.length, rows: page.length, hasMore: rows.length > limit, timeMs: this.now() - started });
+      this.out.port({ t: 'statementEnd', queryId: req.queryId, index: 0, command: 'SELECT', rowCount: sent, rows: sent, hasMore: more, timeMs: this.now() - started });
       success = true;
     } catch (e) {
       const server = serverError(e);
-      error(this.codeOf(e), server ?? undefined);
+      error(this.ended ? 'dbFailed' : this.codeOf(e), server ?? undefined);
     } finally {
+      try {
+        if (!this.ended) {
+          await this.reassert();
+          if (this.opts.statementTimeoutMs && this.tx === 'idle') await this.must(`SET statement_timeout = ${Math.floor(this.opts.statementTimeoutMs)}`);
+        }
+      } catch { success = false; }
       if (this.run === run) this.run = null;
       this.noticeTarget = null;
       this.out.port({ t: 'queryEnd', queryId: req.queryId, ok: success, cancelled: run.cancelled, timeMs: this.now() - started, tx: this.tx });
