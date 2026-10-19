@@ -20,6 +20,8 @@ import { locateInFiles } from '../explorer';
 import { fullProjectPath } from '../../../shared/platform';
 import { tabsToClose } from '../../../shared/fileOps';
 import { sourceTitle, type FileSource } from '../../../shared/editorSource';
+import type { RedisTabRef } from '../../../shared/redisView';
+import { viewLabel } from '../redis/redisClient';
 import type { DbTabRef } from '../../../shared/dbTabs';
 import { revealScroll, scrollEdges, stepScroll, wheelScroll } from '../../../shared/tabStrip';
 import { useSshStore } from '../sshStore';
@@ -53,9 +55,9 @@ export const TitleBar = memo(function TitleBar() {
 });
 
 /** What a file tab shows (not the text): typing in the editor changes none of it except `dirty`. */
-interface FileTab { id: string; projectId: string; name: string; relativePath: string; diff: boolean; dirty: boolean; source: FileSource | null; db: DbTabRef | null }
+interface FileTab { id: string; projectId: string; name: string; relativePath: string; diff: boolean; dirty: boolean; source: FileSource | null; db: DbTabRef | null; redis: RedisTabRef | null }
 const fileTabsKey = (documents: readonly FileDocument[]): string =>
-  JSON.stringify(documents.map((d) => [d.id, d.projectId, d.name, d.relativePath, !!d.diff, d.text !== d.savedText, d.source ?? null, d.db ?? null]));
+  JSON.stringify(documents.map((d) => [d.id, d.projectId, d.name, d.relativePath, !!d.diff, d.text !== d.savedText, d.source ?? null, d.db ?? null, d.redis ?? null]));
 /** A tab of the project on screen, or of a file outside the projects (remote and local SFTP files show in every project). */
 const tabShown = (doc: { projectId: string }, projectId: string | undefined): boolean => !doc.projectId || doc.projectId === projectId;
 
@@ -71,8 +73,8 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
   const countsOf = useStatusCounts();
   const cliStatus = useStore((st) => st.ui.cliStatus);
   const tabsKey = useFileStore((st) => fileTabsKey(st.documents));
-  const documents = useMemo(() => (JSON.parse(tabsKey) as Array<[string, string, string, string, boolean, boolean, FileSource | null, DbTabRef | null]>)
-    .map(([id, projectId, name, relativePath, diff, dirty, source, db]): FileTab => ({ id, projectId, name, relativePath, diff, dirty, source, db })), [tabsKey]);
+  const documents = useMemo(() => (JSON.parse(tabsKey) as Array<[string, string, string, string, boolean, boolean, FileSource | null, DbTabRef | null, RedisTabRef | null]>)
+    .map(([id, projectId, name, relativePath, diff, dirty, source, db, redis]): FileTab => ({ id, projectId, name, relativePath, diff, dirty, source, db, redis })), [tabsKey]);
   const dbConnections = useStore((st) => st.s.dbConnections);
   const dbConnection = (id: string) => dbConnections.find((c) => c.id === id);
   const sshHosts = useStore((st) => st.s.sshHosts);
@@ -212,6 +214,15 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
   const fileTabMenu = (x: number, y: number, doc: FileTab) => {
     const fileKeys = shown.filter((key) => key.startsWith('file:'));
     const idsFor = (mode: 'others' | 'right' | 'all') => tabsToClose(fileKeys, `file:${doc.id}`, mode).map((key) => key.slice(5));
+    if (doc.redis) {
+      openMenu(x, y, [
+        { header: doc.relativePath },
+        { label: tr('Zamknij'), onClick: () => void closeFile(doc.id) },
+        { label: tr('Zamknij pozostałe'), disabled: idsFor('others').length === 0, onClick: () => void closeFiles(idsFor('others')) },
+        { label: tr('Zamknij karty po prawej'), disabled: idsFor('right').length === 0, onClick: () => void closeFiles(idsFor('right')) },
+      ]);
+      return;
+    }
     if (doc.db) {
       const ref = doc.db;
       const objectName = ref.kind === 'table' ? `${ref.schema}.${ref.table}` : ref.kind === 'ddl' ? `${ref.schema}.${ref.name}` : null;
@@ -323,6 +334,21 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
           }))}
           {/* Files of every project (1.0.0) with their project's colour; files outside the projects have none. */}
           {documents.map((doc) => {
+            if (doc.redis) {
+              const c = dbConnection(doc.redis.connectionId);
+              return (
+                <div key={doc.id} {...dragProps(`file:${doc.id}`)} style={{ order: order.indexOf(`file:${doc.id}`), '--project-color': c?.color ?? '#dc382d' } as CSSProperties}
+                  className={`tab file-tab redis-strip-tab ${activeKey === `file:${doc.id}` ? 'active' : ''}`} title={doc.relativePath}
+                  onClick={() => activateFile(doc.id)} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void closeFile(doc.id); } }}
+                  onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
+                  onContextMenu={(e) => { e.preventDefault(); fileTabMenu(e.clientX, e.clientY, doc); }}>
+                  <span className="tab-project" aria-hidden="true" />
+                  <span className="tab-type-icon" aria-hidden="true"><IDatabase /></span><span className="label">{doc.name}</span>
+                  <span className="tab-host-tag">{doc.redis.view === 'keys' ? `DB ${doc.redis.db}` : viewLabel(doc.redis.view)}</span>
+                  <button className="x" aria-label={tr('Zamknij')} onClick={(e) => { e.stopPropagation(); void closeFile(doc.id); }}><IX /></button>
+                </div>
+              );
+            }
             const owner = projectById.get(doc.projectId);
             if (doc.db) {
               const c = dbConnection(doc.db.connectionId);

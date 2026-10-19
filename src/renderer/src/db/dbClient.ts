@@ -2,6 +2,7 @@
 // from the DB Host) routed by query id, shared sessions (one per connection and database: the tree, table and DDL tabs) and
 // the own sessions of SQL editor tabs, pins, and the loads of the panel's tree.
 import { create } from 'zustand';
+import { setDbPins } from './pins';
 import { dbErrorText, type DbErrorCode, type DbPortMessage, type DbPrompt, type DbResult, type DbServerError, type DbSessionState, type DbVaultInfo } from '../../../shared/db';
 import type { DbLoad, DbLoadRequest } from '../../../shared/dbTree';
 import { tr } from '../i18n';
@@ -126,14 +127,13 @@ export function initDb(): void {
       shared: { ...keep(saved.shared), ...st.shared }, tabSessions: { ...keep(saved.tabSessions), ...st.tabSessions },
     }));
   }).catch(() => undefined);
-  let lastPins = '';
   useDbStore.subscribe((st, prev) => {
     if (st.open !== prev.open) { try { localStorage.setItem(TREE_KEY, JSON.stringify(st.open)); } catch { /* full */ } }
     if (st.shared === prev.shared && st.tabSessions === prev.tabSessions) return;
     try { sessionStorage.setItem(SESSIONS_KEY, JSON.stringify({ shared: st.shared, tabSessions: st.tabSessions })); } catch { /* full */ }
     // Every session this window uses stays connected until it is closed here (no idle disconnect under an open tab).
     const pins = [...new Set([...Object.values(st.shared), ...Object.values(st.tabSessions)])].sort();
-    if (pins.join() !== lastPins) { lastPins = pins.join(); window.mc.db.pin(pins); }
+    setDbPins('postgres', pins);
   });
 }
 

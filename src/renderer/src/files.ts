@@ -8,6 +8,7 @@ import type { GitDiffSource } from '../../shared/git';
 import type { ProjectFilePreview } from '../../shared/types';
 import { documentId, documentsUnder, removeDocuments, retargetDocuments, type FileMoveRecord } from '../../shared/fileOps';
 import { cleanStamp, FILE_GONE, localRelativePath, movedSource, POSIX_PATHS, retargetSourceDocuments, sourceDocumentId, sourceName, sourceUnder, TEXT_ENCODINGS, validSource, type EditorWarning, type FileSource, type PathRules, type RemoteStamp, type SourceScope, type TextEncodingName } from '../../shared/editorSource';
+import type { RedisTabRef } from '../../shared/redisView';
 import { initRemoteSessions, pinHosts, sftpErrorMessage, withSession } from './remoteSessions';
 import { dbTabId, validDbTabRef, type DbTabRef } from '../../shared/dbTabs';
 
@@ -31,6 +32,8 @@ export interface FileDocument {
    * of an editor tab, or the staged edits of a table tab (serialized, '' when there are none): unsaved ones are kept as drafts.
    */
   db?: DbTabRef;
+  /** A Redis view of the database viewer (1.0.0): never read from or written to disk and never a draft (nothing to save). */
+  redis?: RedisTabRef;
   /** Remote text files: the encoding the save writes back (BOM and UTF-16 kept). */
   encoding?: TextEncodingName;
   /** A non-blocking note of the last save (permissions or owner not kept); never stored. */
@@ -280,7 +283,7 @@ export async function openLocalFile(path: string): Promise<void> {
 const loads = new Map<string, symbol>();
 export async function retryFile(id: string): Promise<void> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
-  if (!doc || doc.diff || doc.db || isFileDirty(doc) || doc.saving) return;
+  if (!doc || doc.diff || doc.db || doc.redis || isFileDirty(doc) || doc.saving) return;
   const token = Symbol(); loads.set(id, token);
   patch(id, { status: 'loading', error: null });
   try {
@@ -319,7 +322,7 @@ export function setFileMarkdownView(id: string, markdownView: 'preview' | 'sourc
 }
 export async function saveFile(id: string): Promise<boolean> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
-  if (!doc || doc.status !== 'ready' || doc.saving || doc.db) return false;
+  if (!doc || doc.status !== 'ready' || doc.saving || doc.db || doc.redis) return false;
   if (!isFileDirty(doc)) return true;
   patch(id, { saving: true, error: null });
   try {
@@ -355,7 +358,7 @@ const sameStamp = (a: DiskStamp | undefined, b: DiskStamp): boolean => !!a && a.
  */
 export async function checkFileOnDisk(id: string, force = false): Promise<void> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
-  if (!doc || doc.diff || doc.db || doc.status !== 'ready' || doc.saving || loads.has(id) || checks.has(id)) return;
+  if (!doc || doc.diff || doc.db || doc.redis || doc.status !== 'ready' || doc.saving || loads.has(id) || checks.has(id)) return;
   if (isRemoteDoc(doc)) {
     // `force`: the user just reconnected the tab.
     if (!force && Date.now() - (remoteChecks.get(id) ?? 0) < REMOTE_CHECK_MS) return;
@@ -394,7 +397,7 @@ export async function checkFileOnDisk(id: string, force = false): Promise<void> 
 /** Every open text tab (on focus and when an agent finished a turn); of the remote ones only the tab on screen. */
 export function checkOpenFilesOnDisk(): void {
   const { documents, activeFileId } = useFileStore.getState();
-  for (const d of documents) if (!d.diff && !d.db && d.status === 'ready' && (!isRemoteDoc(d) || d.id === activeFileId)) void checkFileOnDisk(d.id);
+  for (const d of documents) if (!d.diff && !d.db && !d.redis && d.status === 'ready' && (!isRemoteDoc(d) || d.id === activeFileId)) void checkFileOnDisk(d.id);
 }
 /** Conflict choice "Reload": drops the unsaved edits and reads the file again. */
 export async function reloadFileFromDisk(id: string): Promise<void> {
@@ -447,7 +450,7 @@ export function watchFilesOnDisk(): void {
     // Only while the user looks at the editor: the window has focus and no settings or SSH view covers the tab. Remote tabs are
     // never polled (a check goes over the network): they are checked when they get focus.
     if (active && !document.hidden && document.hasFocus() && !getUi().settingsActive && !useSshStore.getState().viewActive
-      && !documents.some((d) => d.id === active && (isRemoteDoc(d) || d.db))) void checkFileOnDisk(active);
+      && !documents.some((d) => d.id === active && (isRemoteDoc(d) || d.db || d.redis))) void checkFileOnDisk(active);
   }, ACTIVE_CHECK_MS);
   initRemoteSessions();
   // Hosts of remote tabs with unsaved changes keep their SFTP session while the SFTP view is closed.

@@ -2,6 +2,7 @@
 // Postgres connection its databases, schemas, objects and, for tables and views, columns, keys and indexes. Lists load lazily
 // (dbTree says what an expanded node waits for) and the rows are windowed, so schemas with thousands of tables stay light.
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { openRedisTab, viewLabel } from '../../redis/redisClient';
 import { dbEndpoint, type DbConnection } from '../../../../shared/db';
 import { buildDbTree, nodeKey, toggleNode, type DbFolder, type DbPart, type DbTreeRow } from '../../../../shared/dbTree';
 import { hasRows } from '../../../../shared/dbTabs';
@@ -74,7 +75,8 @@ export const DbPanel = memo(function DbPanel() {
 
   const setOpen = (next: Set<string>) => useDbStore.setState({ open: [...next] });
   const connect = async (c: DbConnection) => {
-    if (c.kind !== 'postgres') { toast(tr('Przeglądarka Redis jest jeszcze niedostępna')); return; }
+    // Redis: the key browser opens in a tab of the top strip (its session and login live there).
+    if (c.kind === 'redis') { openRedisTab(c.id, 'keys'); return; }
     setErrors((e) => { const n = { ...e }; delete n[c.id]; return n; });
     const key = nodeKey.connection(c.id);
     if (!open.has(key)) setOpen(new Set([...open, key]));
@@ -83,6 +85,7 @@ export const DbPanel = memo(function DbPanel() {
   };
   const toggle = (row: DbTreeRow) => {
     if (row.type === 'connection') {
+      if (row.connection.kind === 'redis') { openRedisTab(row.connection.id, 'keys'); return; }
       if (!live(row.connection.id)) { void connect(row.connection); return; }
       setOpen(toggleNode(open, row));
       return;
@@ -103,6 +106,12 @@ export const DbPanel = memo(function DbPanel() {
         isOn ? { label: tr('Rozłącz'), onClick: () => void disconnectAsking(c.id, c.name) } : { label: tr('Połącz'), onClick: () => void connect(c) },
         { label: tr('Nowy edytor SQL'), onClick: () => openSqlTab(c.id, c.database ?? 'postgres') },
         ...(isOn ? [{ label: tr('Odśwież'), onClick: () => refreshLoads((k) => k[1] === c.id) }] : []),
+        { sep: true } as MenuItem,
+      ] : []),
+      ...(c.kind === 'redis' ? [
+        // Disconnecting ends the sessions of its tabs (they offer to connect again).
+        ...(isOn ? [{ label: tr('Rozłącz'), onClick: () => void disconnectAsking(c.id, c.name) }] : []),
+        ...(['keys', 'console', 'pubsub', 'info'] as const).map((view) => ({ label: view === 'keys' ? tr('Otwórz przeglądarkę kluczy') : viewLabel(view), onClick: () => { openRedisTab(c.id, view); } })),
         { sep: true } as MenuItem,
       ] : []),
       { label: tr('Edytuj…'), onClick: () => editConnection(c.id) },
@@ -201,7 +210,8 @@ export const DbPanel = memo(function DbPanel() {
   };
 
   const hostLabel = (id: string) => sshHosts.find((h) => h.id === id)?.label ?? '?';
-  const promptSessions = Object.values(sessions).filter((s) => !s.test && prompts[s.id]);
+  // Redis sessions belong to Redis tabs, which show their own login.
+  const promptSessions = Object.values(sessions).filter((s) => !s.test && s.kind !== 'redis' && prompts[s.id]);
   const connName = (id: string) => connections.find((c) => c.id === id)?.name ?? '?';
 
   const renderRow = (row: DbTreeRow, index: number) => {

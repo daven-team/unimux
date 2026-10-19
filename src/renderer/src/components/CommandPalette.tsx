@@ -12,6 +12,7 @@ import {
 import { openSidebarPanel } from '../panelActions';
 import { openSshView, reconnectAllSsh, reconnectAllTargetsOf } from '../ssh';
 import { openSftp } from '../sftp';
+import { openRedisTab, viewLabel } from '../redis/redisClient';
 import { initDb, revealConnection } from '../db/dbClient';
 import { dbEndpoint } from '../../../shared/db';
 import { getS, getUi, setUi, toast, update, useStore } from '../store';
@@ -105,6 +106,13 @@ function PaletteInner() {
       toast(tr('Skopiowano dziennik statusów. Wpisów: {count}', { count: statusLog.size }));
     } });
 
+    // Redis connections (1.0.0): the key browser, the console, Pub/Sub and the server views of each saved connection.
+    for (const c of s.dbConnections ?? []) {
+      if (c.kind !== 'redis') continue;
+      for (const view of ['keys', 'console', 'pubsub', 'info'] as const) {
+        out.push({ kind: 'Redis', title: view === 'keys' ? tr('Otwórz przeglądarkę Redis: {name}', { name: c.name }) : `${c.name}: ${viewLabel(view)}`, desc: dbEndpoint(c), run: () => { openRedisTab(c.id, view); } });
+      }
+    }
     for (const p of s.projects) out.push({ kind: tr('Projekt'), title: p.name, desc: p.path, run: () => switchProject(p.id) });
     for (const p of s.projects)
       for (const t of p.tabs)

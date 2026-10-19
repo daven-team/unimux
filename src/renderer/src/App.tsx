@@ -28,12 +28,14 @@ import { terminals } from './terminals/TerminalManager';
 // Rarely used screens load on demand: the editor alone (CodeMirror, language packs, Markdown preview) is about a third of the bundle.
 const loadAutomationPanel = () => import('./components/AutomationPanel').then((m) => ({ default: m.AutomationPanel }));
 const loadFileEditor = () => import('./components/FileEditor').then((m) => ({ default: m.FileEditor }));
+const loadRedisTab = () => import('./components/redis/RedisTabView').then((m) => ({ default: m.RedisTabView }));
 const loadSshView = () => import('./components/ssh/SshView').then((m) => ({ default: m.SshView }));
 const loadDbTab = () => import('./components/db/DbTabView').then((m) => ({ default: m.DbTabView }));
 const loadSettingsPage = () => import('./components/SettingsPage').then((m) => ({ default: m.SettingsPage }));
 import { useFileStore, watchFilesOnDisk } from './files';
 import { cancelReconnectAtStart, initSsh, markReconnectAtStart } from './ssh';
 import { initSftp } from './sftp';
+import { initRedis } from './redis/redisClient';
 import { initDbTabs } from './db/tabs';
 import { useSshStore } from './sshStore';
 import { isWindowShown, onWindowShown } from './windowShown';
@@ -120,6 +122,7 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   // Session states and open prompts of SSH cells (a reload finds them in main, R7).
   await initSsh().catch((error) => reportError('boot', error));
   await initSftp().catch((error) => reportError('boot', error));
+  bootStep(initRedis);
   // The DB port arrives when the DB Host starts: its listener and the tab hooks are there before any connect.
   try { initDbTabs(); } catch (error) { reportError('boot', error); }
   setUi({ mcpInfo });
@@ -247,6 +250,7 @@ export function App() {
   // A boolean, not the documents: typing in the editor must not re-render the whole app.
   // Tabs of files outside the projects (remote and local SFTP files, projectId '') show in every project.
   const fileOpen = useFileStore((st) => st.documents.some((doc) => doc.id === st.activeFileId && (doc.projectId === projectId || !doc.projectId)));
+  const redisOpen = useFileStore((st) => st.documents.some((doc) => doc.id === st.activeFileId && !!doc.redis));
   const dbOpen = useFileStore((st) => st.documents.some((doc) => doc.id === st.activeFileId && !!doc.db));
   const sshViewActive = useSshStore((st) => st.viewActive);
   const sshViewOpen = useSshStore((st) => st.viewOpen);
@@ -320,7 +324,7 @@ export function App() {
             <div className="terminal-workspace" style={{ display: fileOpen || settingsActive || sshViewActive ? 'none' : 'flex' }}>{gridView}</div>
             {settingsTabOpen && <div className="settings-workspace" style={{ display: settingsActive ? 'flex' : 'none' }}><LazyScreen load={loadSettingsPage} /></div>}
             {sshViewOpen && <div className="ssh-workspace" style={{ display: sshViewActive && !settingsActive ? 'flex' : 'none' }}><LazyScreen load={loadSshView} /></div>}
-            {!settingsActive && !sshViewActive && fileOpen && <LazyScreen load={dbOpen ? loadDbTab : loadFileEditor} key={dbOpen ? 'db' : 'file'} />}
+            {!settingsActive && !sshViewActive && fileOpen && <LazyScreen load={redisOpen ? loadRedisTab : dbOpen ? loadDbTab : loadFileEditor} key={redisOpen ? 'redis' : dbOpen ? 'db' : 'file'} />}
           </div>
           {automationOpen && <LazyScreen load={loadAutomationPanel} />}
         </div>
