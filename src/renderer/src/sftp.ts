@@ -2,7 +2,7 @@
 // transfer queue from the SFTP Host's port, conflict questions and the entry points (SSH host menu, SSH cell menu, palette).
 // The session model: connect answers with the session id at once; connecting / connected / error / closed and the prompts
 // arrive as events for that id (events that come before the answer are held and applied once the id is known).
-import { isActive, isFinished, sftpErrorText, type ConflictChoice, type TransferRequest, type SftpPortMessage, type SftpSessionState, type TransferItem, applyPortMessage, failUnfinished, LOCAL_QUEUE_ID } from '../../shared/sftp';
+import { finishedMoves, isActive, isFinished, sftpErrorText, type ConflictChoice, type TransferRequest, type SftpPortMessage, type SftpSessionState, type TransferItem, applyPortMessage, failUnfinished, LOCAL_QUEUE_ID } from '../../shared/sftp';
 import type { SshPrompt } from '../../shared/ssh';
 import { canRetry, formatBytes, mergeSnapshot, reenqueueRequest, type PathFlavor } from '../../shared/sftpView';
 import { chosenLanguage, tr } from './i18n';
@@ -10,6 +10,8 @@ import { askChoice, askChoiceChecked, getS, getUi, toast, useStore } from './sto
 import { openSshView, selectSshSection } from './ssh';
 import { useSshStore } from './sshStore';
 import { useSftpStore } from './sftpStore';
+import { liveSession, pinnedHosts } from './remoteSessions';
+import { followMoves } from './files';
 
 export const pathFlavor = (): PathFlavor => (window.mc.platform === 'win32' ? 'win32' : 'posix');
 /** The queue id of an item as the API wants it: null for the local copies. */
@@ -20,7 +22,26 @@ export const queueOf = (sessionId: string): string | null => (sessionId === LOCA
 let port: MessagePort | null = null;
 
 function onPortMessage(m: SftpPortMessage): void {
+  if (m.t === 'opProgress') {
+    useSftpStore.setState((st) => ({ opProgress: { ...st.opProgress, [m.opId]: { done: m.done, total: m.total } } }));
+    return;
+  }
+  const moves = finishedMoves(useSftpStore.getState().transfers, m);
   useSftpStore.setState((st) => ({ transfers: m.t === 'snapshot' ? mergeSnapshot(st.transfers, m.items) : applyPortMessage(st.transfers, m) }));
+  if (moves.length) followQueueMoves(moves);
+}
+
+/** Editor tabs follow the moves the queue finished (0.9.9): a server move by the host of its session, a local one on this computer. */
+function followQueueMoves(items: TransferItem[]): void {
+  const local = items.filter((i) => i.direction === 'local-move').map((i) => ({ from: i.source, to: i.target }));
+  if (local.length) followMoves({ kind: 'local' }, local);
+  const hosts = useSftpStore.getState().sessionHosts;
+  const byHost = new Map<string, Array<{ from: string; to: string }>>();
+  for (const i of items) {
+    const hostId = i.direction === 'move' ? hosts[i.sessionId] ?? lastState.get(i.sessionId)?.hostId : undefined;
+    if (hostId) byHost.set(hostId, [...(byHost.get(hostId) ?? []), { from: i.source, to: i.target }]);
+  }
+  for (const [hostId, moves] of byHost) followMoves({ kind: 'remote', hostId }, moves);
 }
 
 // Registered when the module loads (before the page finishes loading), so a port sent at did-finish-load is never missed.
@@ -77,14 +98,19 @@ export async function initSftp(): Promise<void> {
   window.mc.on('sftp:session', onSession);
   window.mc.on('sftp:prompt', onPrompt);
   window.mc.on('sftp:hostCrashed', onHostCrashed);
-  // The idle disconnect of main needs to know when the view is on screen.
+  // The idle disconnect of main needs to know when the view is on screen and which session it shows (every other one may go
+  // idle meanwhile).
   let shown = false;
+  let shownSession: string | null = null;
   const follow = () => {
     const now = sftpVisible();
-    if (now === shown) return;
+    const session = useSftpStore.getState().sessionId;
+    if (now === shown && (!now || session === shownSession)) return;
+    const opened = now && !shown;
     shown = now;
-    if (now) window.mc.sftp.viewOpened(); else window.mc.sftp.viewClosed();
-    if (now) void askNextConflict();
+    shownSession = now ? session : null;
+    if (now) window.mc.sftp.viewOpened(session); else window.mc.sftp.viewClosed();
+    if (opened) void askNextConflict();
   };
   useSshStore.subscribe(follow);
   useStore.subscribe((st, prev) => {
@@ -93,6 +119,7 @@ export async function initSftp(): Promise<void> {
     if (prev.ui.dialog && !st.ui.dialog) void askNextConflict();
   });
   useSftpStore.subscribe((st, prev) => {
+    if (st.sessionId !== prev.sessionId) follow();
     if (st.transfers === prev.transfers) return;
     // An item that left the conflict state (answered, retried, removed) may be asked again when it meets a conflict later.
     if (asked.size) {
@@ -107,7 +134,8 @@ export async function initSftp(): Promise<void> {
     const snapshot = await window.mc.sftp.sessions();
     for (const s of snapshot.sessions) if (!lastState.has(s.id)) lastState.set(s.id, s);
     for (const p of snapshot.prompts) if (!lastPrompt.has(p.sessionId)) lastPrompt.set(p.sessionId, p.prompt);
-    const live = [...snapshot.sessions].reverse().find((s) => s.state === 'connected' || s.state === 'connecting');
+    // Sessions of editor tabs (plain) are never adopted: the view would work without sudo and its "Rozłącz" would end them.
+    const live = [...snapshot.sessions].reverse().find((s) => !s.plain && (s.state === 'connected' || s.state === 'connecting'));
     if (live && !useSftpStore.getState().sessionId) adopt(live.id, live.hostId);
   } catch { /* no SFTP sessions to restore */ }
 }
@@ -118,6 +146,9 @@ const activeOf = (sessionId: string | null) => useSftpStore.getState().transfers
 
 /** Bumped by every connect: an answer that arrives after a newer connect started is disconnected, never adopted. */
 let connectSeq = 0;
+
+/** Whether dirty editor tabs use the view's session: a pinned host and the session the tabs pick (never a sudo one). */
+const tabsUse = (sessionId: string, hostId: string | null): boolean => !!hostId && pinnedHosts().has(hostId) && liveSession(hostId) === sessionId;
 
 /** Connects the view to a saved host; a session of another host with running transfers is asked about first. */
 export async function connectSftp(hostId: string, initialPath?: string): Promise<boolean> {
@@ -139,7 +170,10 @@ export async function connectSftp(hostId: string, initialPath?: string): Promise
       ]);
       if (choice !== 'yes' || seq !== connectSeq) return false;
     }
-    void window.mc.sftp.disconnect(st.sessionId);
+    // Unsaved remote tabs of the old host keep using its session: the view only lets go of it (main keeps a pinned session).
+    // A sudo session is never one the tabs use, so it always ends here.
+    if (!tabsUse(st.sessionId, st.hostId)) void window.mc.sftp.disconnect(st.sessionId);
+    else if (running) void window.mc.sftp.cancel(st.sessionId, { itemIds: activeOf(st.sessionId).map((i) => i.id).slice(0, 1000) });
   }
   const path = initialPath ?? getS().sftp?.remotePaths[hostId];
   useSftpStore.setState({ pickerOpen: false, remoteGoto: null, prompt: null });
@@ -159,8 +193,15 @@ export async function connectSftp(hostId: string, initialPath?: string): Promise
 
 /** Disconnect (remote pane Actions): running transfers of the session are asked about first. */
 export async function disconnectSftp(): Promise<void> {
-  const { sessionId } = useSftpStore.getState();
+  const { sessionId, hostId } = useSftpStore.getState();
   if (!sessionId) return;
+  if (tabsUse(sessionId, hostId)) {
+    // Editor tabs with unsaved changes use this connection: their next save would have to log in again.
+    const choice = await askChoice(tr('Rozłączyć mimo niezapisanych plików?'), tr('Karty z niezapisanymi zmianami w plikach tego serwera korzystają z tego połączenia. Przy zapisie połączą się ponownie.'), [
+      { label: tr('Rozłącz'), value: 'yes', danger: true },
+    ]);
+    if (choice !== 'yes') return;
+  }
   const running = activeOf(sessionId).length;
   if (running) {
     const choice = await askChoice(tr('Rozłączyć i przerwać transfery?'), tr('Transfery w toku: {count}.', { count: running }), [
@@ -260,10 +301,12 @@ export async function askConflict(item: TransferItem): Promise<void> {
     tr('{name} już istnieje w miejscu docelowym.', { name: item.name }),
     '',
     tr('Istniejący: {size}, {date}', { size: c.existing.kind === 'dir' ? tr('Folder') : formatBytes(c.existing.size, language), date: when(c.existing.mtime) }),
-    tr('Nowy: {size}, {date}', { size: formatBytes(c.incoming.size, language), date: when(c.incoming.mtime) }),
+    tr('Nowy: {size}, {date}', { size: c.incoming.kind === 'dir' ? tr('Folder') : formatBytes(c.incoming.size, language), date: when(c.incoming.mtime) }),
   ].join('\n');
+  // Only a file replaces a file (0.9.9: a moved folder is never merged into or replaced by another entry).
+  const canOverwrite = c.existing.kind !== 'dir' && c.incoming.kind !== 'dir';
   const { value, checked, replaced } = await askChoiceChecked(tr('Konflikt nazw'), body, [
-    { label: tr('Zastąp'), value: 'overwrite', danger: true },
+    ...(canOverwrite ? [{ label: tr('Zastąp'), value: 'overwrite', danger: true }] : []),
     { label: tr('Pomiń'), value: 'skip' },
     { label: tr('Zachowaj oba'), value: 'keepBoth', primary: true },
   ], tr('Zrób to samo dla pozostałych'));

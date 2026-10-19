@@ -1,11 +1,14 @@
 // The local pane of the SFTP view (0.9.8): any folder the user browses (not only projects), the drives on Windows, the home
 // folder, new folder, rename, trash and "show in Explorer/Finder". Absolute paths only; every channel is sender-checked.
-import { lstat, mkdir, readdir, rename, stat } from 'fs/promises';
+import { lstat, mkdir, readdir, realpath, rename, stat } from 'fs/promises';
 import { homedir } from 'os';
-import { basename, dirname, isAbsolute, join, resolve } from 'path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { permissionString, safeEntryName, SFTP_LIMITS, type LocalEntry, type LocalErrorCode, type LocalResult } from '../shared/sftp';
 import type { IpcGuard } from './ipcGuard';
 import { sameLocalFile } from '../sftphost/sides';
+import { readLocalFile, statLocalFile, writeLocalFile } from './files';
+import type { ProjectFilePreview } from '../shared/types';
+import { FILE_GONE } from '../shared/editorSource';
 
 export interface LocalFilesDeps {
   platform: NodeJS.Platform;
@@ -13,7 +16,20 @@ export interface LocalFilesDeps {
   openFolder(path: string): Promise<void>;
   showFile(path: string): void;
   home?(): string;
+  /**
+   * Folders the editor never reads or writes through local:readFile / local:writeFile (0.9.9): the app's data dir and userData
+   * (state, vault, logs) and the install dir.
+   */
+  forbidden?: string[];
 }
+
+/** Files the window read through local:readFile in this page: the only ones local:writeFile accepts. */
+export const OPENED_LIMIT = 500;
+const EDIT_REFUSED = 'Tego miejsca nie można edytować w aplikacji.';
+const NOT_OPENED = 'Ten plik nie został otwarty w edytorze.';
+
+/** A UNC or device path (\\server\share, \\?\, \\.\): never read for the editor (a read could leak the Windows login to a server). */
+export const isUncOrDevicePath = (path: string): boolean => /^[\\/]{2}/.test(path);
 
 /** A macOS directory name Finder may treat as a package rather than a plain folder (any extension, e.g. Foo.app). */
 export const isBundleName = (name: string): boolean => /\.[a-z0-9]+$/i.test(name) && !/^\.[^.]*$/.test(name);
@@ -53,6 +69,34 @@ async function entryOf(dir: string, name: string, platform: NodeJS.Platform): Pr
 
 export function createLocalFiles(deps: LocalFilesDeps) {
   const windows = deps.platform === 'win32';
+  const caseInsensitive = windows || deps.platform === 'darwin';
+  const fold = (p: string) => (caseInsensitive ? p.toLowerCase() : p);
+  const inside = (root: string, child: string) => {
+    const rel = relative(fold(root), fold(child));
+    return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+  };
+  const opened = new Set<string>();
+  const remember = (real: string) => {
+    opened.delete(fold(real));
+    opened.add(fold(real));
+    if (opened.size > OPENED_LIMIT) opened.delete(opened.values().next().value!);
+  };
+  let forbiddenReal: Promise<string[]> | null = null;
+  const forbidden = () => (forbiddenReal ??= Promise.all((deps.forbidden ?? []).filter(Boolean).map((f) => realpath(resolve(f)).catch(() => resolve(f)))));
+  /** The real path of a file the editor may read or write, 'gone' when nothing is there any more (ENOENT), else null. */
+  const editablePath = async (path: unknown): Promise<string | 'gone' | null> => {
+    if (!validLocalPath(path) || (windows && isUncOrDevicePath(path))) return null;
+    let real: string;
+    try { real = await realpath(resolve(path)); } catch (error) {
+      // Moved, renamed or deleted: its own text, not "cannot be edited here" (the place is fine, the file is not there).
+      const code = (error as NodeJS.ErrnoException).code;
+      return code === 'ENOENT' || code === 'ENOTDIR' ? 'gone' : null;
+    }
+    if (windows && isUncOrDevicePath(real)) return null;
+    const roots = [...(deps.forbidden ?? []).map((f) => resolve(f)), ...(await forbidden())];
+    if (roots.some((root) => inside(root, real) || inside(root, resolve(path)))) return null;
+    return real;
+  };
   const validName = (path: string) => safeEntryName(basename(path), { windows });
   return {
     async list(path: unknown): Promise<LocalResult<{ path: string; entries: LocalEntry[]; truncated: boolean }>> {
@@ -115,6 +159,31 @@ export function createLocalFiles(deps: LocalFilesDeps) {
         return ok(null);
       } catch (error) { return fail(codeOf(error)); }
     },
+    // An editor tab of a local file outside the projects (0.9.9): read and saved like a project file, only outside the app's own
+    // folders, never over UNC or device paths, and a write only for a file this window opened (read) before.
+    async readFile(path: unknown): Promise<ProjectFilePreview> {
+      const real = await editablePath(path);
+      if (real === 'gone') return { kind: 'error', message: FILE_GONE };
+      if (!real) return { kind: 'error', message: EDIT_REFUSED };
+      const result = await readLocalFile(real);
+      if (result.kind !== 'error') remember(real);
+      return result;
+    },
+    /** 'gone': the file is not there any more (the tab says it was moved or deleted). */
+    async statFile(path: unknown): Promise<{ size: number; mtimeMs: number } | 'gone' | null> {
+      const real = await editablePath(path);
+      if (real === 'gone') return 'gone';
+      return real ? statLocalFile(real) : null;
+    },
+    async writeFile(path: unknown, text: unknown, expectedText: unknown): Promise<{ ok: true } | { ok: false; error: string; code?: 'conflict' }> {
+      const real = await editablePath(path);
+      if (real === 'gone') return { ok: false, error: FILE_GONE };
+      if (!real) return { ok: false, error: EDIT_REFUSED };
+      if (!opened.has(fold(real))) return { ok: false, error: NOT_OPENED };
+      return writeLocalFile(real, text, expectedText);
+    },
+    /** The page reloaded or crashed: what it opened counts no more (restored drafts read again before they save). */
+    rendererGone(): void { opened.clear(); },
   };
 }
 
@@ -129,4 +198,7 @@ export function registerLocalFilesIpc(guard: IpcGuard, files: LocalFiles): void 
   guard.guardedHandle('local:rename', (_e, from: unknown, to: unknown) => files.rename(from, to), refused);
   guard.guardedHandle('local:trash', (_e, paths: unknown) => files.trash(paths), refused);
   guard.guardedHandle('local:reveal', (_e, path: unknown) => files.reveal(path), refused);
+  guard.guardedHandle('local:readFile', (_e, path: unknown) => files.readFile(path), () => ({ kind: 'error', message: 'Nieprawidłowa ścieżka lub nazwa' }));
+  guard.guardedHandle('local:statFile', (_e, path: unknown) => files.statFile(path), () => null);
+  guard.guardedHandle('local:writeFile', (_e, path: unknown, text: unknown, expectedText: unknown) => files.writeFile(path, text, expectedText), () => ({ ok: false, error: 'Nieprawidłowa ścieżka lub nazwa' }));
 }

@@ -12,8 +12,11 @@ export function ColorPicker({ value, onChange, label }: { value: string; onChang
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
   const root = useRef<HTMLDivElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
   const id = useId();
   useEffect(() => setDraft(value), [value]);
+  // Opened near the bottom of a scrolling pane (the SSH host form), the palette scrolls into view instead of opening out of sight.
+  useEffect(() => { if (open) pop.current?.scrollIntoView({ block: 'nearest' }); }, [open]);
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => { if (!root.current?.contains(e.target as Node)) setOpen(false); };
@@ -27,7 +30,7 @@ export function ColorPicker({ value, onChange, label }: { value: string; onChang
     <div className="color-picker" ref={root}>
       <button type="button" className="color-swatch" style={{ background: value }} aria-label={label ?? tr('Wybierz kolor')} title={value} aria-haspopup="dialog" aria-expanded={open} aria-controls={id} onClick={() => setOpen((v) => !v)} />
       {open && (
-        <div className="color-pop" id={id} role="dialog" aria-label={tr('Wybierz kolor')}>
+        <div className="color-pop" ref={pop} id={id} role="dialog" aria-label={tr('Wybierz kolor')}>
           <div className="color-grid">
             {PALETTE.map((color) => (
               <button key={color} type="button" className={`color-dot ${color.toLowerCase() === value.toLowerCase() ? 'on' : ''}`} style={{ background: color }} aria-label={color} title={color} onClick={() => { onChange(color); setOpen(false); }} />

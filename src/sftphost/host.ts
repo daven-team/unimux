@@ -1,22 +1,27 @@
 // The SFTP Host (0.9.8): one ssh2 Client and SFTP channel per session, the remote operations and the transfer queues.
 // Logs in with the shared SshLogin (host key and auth questions go to main's coordinator like a cell's). Independent of
 // Electron (the process wrapper is index.ts) so it is tested in Node against the local test server.
-import { Client } from 'ssh2';
+import { randomUUID } from 'crypto';
+import { Client, type ClientChannel, type SFTPWrapper } from 'ssh2';
 import type { SshConnectRequest } from '../shared/ipc';
 import type { SftpOp, MainToSftpHost, SftpHostToMain } from '../shared/sftpHostIpc';
 import {
-  LOCAL_QUEUE_ID, SFTP_LIMITS, posixContains, posixNormalize, validRemoteName, validRemotePath,
-  type DeleteCount, type SftpEntry, type SftpErrorCode, type SftpPortMessage, type SftpResult, type TransferDirection, type TransferItem,
+  CHMOD_ERRORS_MAX, LOCAL_QUEUE_ID, SFTP_LIMITS, applyMode, isLocalDirection, posixContains, posixNormalize, validRemoteName, validRemotePath,
+  type ChmodCount, type ChmodRequest, type ChmodResult, type DeleteCount, type SftpEntry, type SftpErrorCode, type SftpPortMessage, type SftpResult, type TransferDirection, type TransferItem,
 } from '../shared/sftp';
 import type { SshErrorCode, SshPhase } from '../shared/ssh';
 import { SshLogin } from '../sshcore/login';
 import { isRecoverableAuthError, mapSshError } from '../ptyhost/sshErrors';
 import { LocalSide, RemoteSide, SftpError, remoteEntry, type FileSide } from './sides';
 import { TransferQueue } from './queue';
+import { readForEditor, statForEditor, writeFromEditor } from './editFile';
 import { ItemThrottle } from './throttle';
+import { sftpOverStream } from './execSftp';
+import { classifySudo, markerCount, passwordCommand, SUDO_ENV, sudoCommands, sudoError, validSudoPassword, type SudoOutcome } from './sudo';
 
-export interface SftpHostTimers { connectMs: number; authStepMs: number; sftpMs: number; killGraceMs: number; keepaliveMs: number; keepaliveCountMax: number }
-export const SFTP_TIMERS: SftpHostTimers = { connectMs: 20_000, authStepMs: 20_000, sftpMs: 20_000, killGraceMs: 2000, keepaliveMs: 15_000, keepaliveCountMax: 3 };
+/** `sudoPromptGraceMs`: how long a `sudo -S` run waits for sudo's password prompt before it assumes sudo will not ask. */
+export interface SftpHostTimers { connectMs: number; authStepMs: number; sftpMs: number; killGraceMs: number; keepaliveMs: number; keepaliveCountMax: number; sudoPromptGraceMs: number }
+export const SFTP_TIMERS: SftpHostTimers = { connectMs: 20_000, authStepMs: 20_000, sftpMs: 20_000, killGraceMs: 2000, keepaliveMs: 15_000, keepaliveCountMax: 3, sudoPromptGraceMs: 3000 };
 
 export interface SftpHostOutput {
   toMain(m: SftpHostToMain): void;
@@ -36,7 +41,14 @@ interface Session {
   /** The user (or main's idle timer) disconnected: the end reads "closed", not an error. */
   disconnected: boolean;
   ended: boolean;
+  /** 0.9.9: the SFTP server runs through sudo on an exec channel (null: the sftp subsystem). */
+  sudo: { command?: string } | null;
+  /** The open sudo password question. */
+  sudoAsk: { promptId: string; resolve(password: string | null): void } | null;
 }
+
+/** Long operations of the view that can be stopped (a recursive permission change). */
+interface RunningOp { cancelled: boolean }
 
 function hardClose(client: Client): void {
   try { client.destroy(); } catch { /* gone */ }
@@ -64,6 +76,7 @@ async function eachLimited<T>(items: T[], limit: number, fn: (item: T) => Promis
 
 export class SftpHost {
   private sessions = new Map<string, Session>();
+  private ops = new Map<string, RunningOp>();
   private readonly local = new LocalSide();
   private readonly localQueue: TransferQueue;
   private readonly throttle: ItemThrottle;
@@ -72,7 +85,7 @@ export class SftpHost {
   constructor(private readonly out: SftpHostOutput, timers: Partial<SftpHostTimers> = {}, private readonly opts: { maxConcurrent?: number } = {}) {
     this.timers = { ...SFTP_TIMERS, ...timers };
     this.throttle = new ItemThrottle((items) => this.out.toRenderer({ t: 'items', items }), 1000 / SFTP_LIMITS.progressPerSecond);
-    this.localQueue = this.makeQueue(LOCAL_QUEUE_ID, (direction) => (direction === 'local-copy' ? { src: this.local, dst: this.local } : null));
+    this.localQueue = this.makeQueue(LOCAL_QUEUE_ID, (direction) => (isLocalDirection(direction) ? { src: this.local, dst: this.local } : null));
   }
 
   private makeQueue(id: string, sides: (d: TransferDirection) => { src: FileSide; dst: FileSide } | null): TransferQueue {
@@ -96,7 +109,13 @@ export class SftpHost {
     switch (m.t) {
       case 'sshConnect': this.connect(m.req); break;
       case 'sshHostKeyAnswer': { const s = this.sessions.get(m.id); if (s && !s.ended) s.login.answerHostKey(m.promptId, m.accept, m.error); break; }
-      case 'sshAuthAnswer': { const s = this.sessions.get(m.id); if (s && !s.ended) s.login.answerAuth(m.promptId, m.values); break; }
+      case 'sshAuthAnswer': {
+        const s = this.sessions.get(m.id);
+        if (!s || s.ended) break;
+        if (s.sudoAsk && s.sudoAsk.promptId === m.promptId) { const ask = s.sudoAsk; s.sudoAsk = null; ask.resolve(m.values?.[0] ?? null); break; }
+        s.login.answerAuth(m.promptId, m.values);
+        break;
+      }
       case 'sftpDisconnect': await this.disconnect(m.id); break;
       case 'sftpOp': {
         let result: SftpResult<unknown>;
@@ -122,11 +141,15 @@ export class SftpHost {
     const old = this.sessions.get(req.id);
     if (old) void this.disconnect(req.id);
     const client = new Client();
-    const s = { id: req.id, client, phase: 'connecting', timer: null, side: null, error: undefined, disconnected: false, ended: false } as Omit<Session, 'login' | 'queue'> as Session;
+    const s = {
+      id: req.id, client, phase: 'connecting', timer: null, side: null, error: undefined, disconnected: false, ended: false,
+      sudo: req.sftpSudo ? { ...(req.sftpSudo.command ? { command: req.sftpSudo.command } : {}) } : null, sudoAsk: null,
+    } as Omit<Session, 'login' | 'queue'> as Session;
     s.queue = this.makeQueue(req.id, (direction) => {
       if (!s.side || s.phase !== 'connected') return null;
       if (direction === 'upload') return { src: this.local, dst: s.side };
       if (direction === 'download') return { src: s.side, dst: this.local };
+      if (direction === 'move') return { src: s.side, dst: s.side };
       return null;
     });
     s.login = new SshLogin({ ...req }, this.timers, {
@@ -150,15 +173,126 @@ export class SftpHost {
   private onReady(s: Session): void {
     if (!this.live(s)) return;
     s.login.dropSecrets();
+    if (s.sudo) { void this.startSudo(s); return; }
     this.arm(s, this.timers.sftpMs);
     s.client.sftp((err, sftp) => {
       if (!this.live(s)) { try { sftp?.end(); } catch { /* gone */ } return; }
       this.disarm(s);
       if (err || !sftp) { this.fail(s, 'sftpDenied'); return; }
-      s.side = new RemoteSide(sftp);
-      sftp.on('close', () => { if (this.live(s)) this.fail(s, 'reset'); });
-      sftp.on('error', () => { if (this.live(s)) this.fail(s, 'reset'); });
-      this.status(s, 'connected');
+      this.attach(s, sftp);
+    });
+  }
+
+  private attach(s: Session, sftp: SFTPWrapper): void {
+    s.side = new RemoteSide(sftp);
+    sftp.on('close', () => { if (this.live(s)) this.fail(s, 'reset'); });
+    sftp.on('error', () => { if (this.live(s)) this.fail(s, 'reset'); });
+    this.status(s, 'connected');
+  }
+
+  // ── SFTP through sudo (0.9.9) ─────────────────────────────────────────────
+
+  /**
+   * Tries the server commands in order (the next one only when sudo says the program is not there). sudo asking for a password
+   * turns `sudo -n` into `sudo -S -p ''` with the password asked in the view (up to 3 times); requiretty, a refusal or no
+   * answer within the SFTP timeout end the session with a clear error instead of hanging.
+   */
+  private async startSudo(s: Session): Promise<void> {
+    const commands = sudoCommands(s.sudo?.command);
+    for (let i = 0; i < commands.length; i++) {
+      const r = await this.execSftp(s, commands[i], null);
+      if (!this.live(s)) { if (r.ok) try { r.sftp.end(); } catch { /* gone */ } return; }
+      if (r.ok) { this.attach(s, r.sftp); return; }
+      if (r.outcome === 'notFound' && i < commands.length - 1) continue;
+      if (r.outcome !== 'password') { this.fail(s, sudoError(r.outcome)); return; }
+      const withPassword = passwordCommand(commands[i]);
+      if (!withPassword) { this.fail(s, 'sudoFailed'); return; }
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const password = await this.askSudo(s, attempt > 0);
+        if (!this.live(s)) return;
+        if (password === null) { this.fail(s, 'cancelled'); return; }
+        if (!validSudoPassword(password)) { this.fail(s, 'sudoPassword'); return; }
+        const again = await this.execSftp(s, withPassword, password);
+        if (!this.live(s)) { if (again.ok) try { again.sftp.end(); } catch { /* gone */ } return; }
+        if (again.ok) { this.attach(s, again.sftp); return; }
+        if (again.outcome !== 'wrongPassword') { this.fail(s, sudoError(again.outcome)); return; }
+      }
+      this.fail(s, 'sudoPassword');
+      return;
+    }
+    this.fail(s, 'sudoNoServer');
+  }
+
+  /** The sudo password question (main asks the view; a cancel or the prompt timeout answers null). No timer runs meanwhile. */
+  private askSudo(s: Session, retry: boolean): Promise<string | null> {
+    this.disarm(s);
+    return new Promise((resolve) => {
+      const promptId = randomUUID();
+      s.sudoAsk = { promptId, resolve };
+      this.out.toMain({ t: 'sshAuthPrompt', id: s.id, promptId, kind: 'sudo', fields: [], retry });
+    });
+  }
+
+  /**
+   * One server command on an exec channel (LC_ALL=C where the server accepts it) with ssh2's SFTP client on it. Without a
+   * password the SFTP INIT goes out at once. With one (a `sudo -S -p '<marker>'` run) the password is written only after
+   * sudo printed the marker, and the INIT right behind it; a second marker is a wrong password. When no marker comes within
+   * the grace time sudo is taken not to ask: the INIT goes out and the password is never written.
+   */
+  private execSftp(s: Session, command: string, password: string | null): Promise<{ ok: true; sftp: SFTPWrapper } | { ok: false; outcome: SudoOutcome | 'timeout' }> {
+    return new Promise((resolve) => {
+      let settled = false;
+      let channel: ClientChannel | null = null;
+      let stderr = '';
+      let exitCode: number | null = null;
+      let grace: NodeJS.Timeout | null = null;
+      const nonInteractive = password === null;
+      const timer = setTimeout(() => finish({ ok: false, outcome: classifySudo(stderr, exitCode, nonInteractive) ?? 'timeout' }), this.timers.sftpMs);
+      const finish = (r: { ok: true; sftp: SFTPWrapper } | { ok: false; outcome: SudoOutcome | 'timeout' }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (grace) clearTimeout(grace);
+        if (!r.ok) { try { channel?.close(); } catch { /* gone */ } }
+        resolve(r);
+      };
+      try {
+        s.client.exec(command, { env: { ...SUDO_ENV } }, (err, ch) => {
+          if (err || !ch) { finish({ ok: false, outcome: 'other' }); return; }
+          channel = ch;
+          if (settled || !this.live(s)) { try { ch.close(); } catch { /* gone */ } finish({ ok: false, outcome: 'other' }); return; }
+          const remoteIdent = (s.client as unknown as { _protocol?: { _remoteIdentRaw?: string } })._protocol?._remoteIdentRaw;
+          const { sftp, start } = sftpOverStream(ch, { remoteIdent });
+          let started = false;
+          let wrote = false;
+          const startSftp = () => { if (started || settled) return; started = true; if (grace) clearTimeout(grace); start(); };
+          ch.stderr.on('data', (d: Buffer) => {
+            if (settled) return;
+            stderr = (stderr + d.toString('utf8')).slice(-4096);
+            const markers = markerCount(stderr);
+            if (markers >= 1 && password === null) { finish({ ok: false, outcome: 'password' }); return; }
+            if (markers >= 2) { finish({ ok: false, outcome: 'wrongPassword' }); return; }
+            if (markers === 1 && password !== null && !wrote) {
+              // A prompt after the INIT went out: sudo has read the INIT as (part of) the password. Never write it then.
+              if (started) { finish({ ok: false, outcome: 'other' }); return; }
+              wrote = true;
+              ch.write(`${password}\n`);
+              startSftp();
+              return;
+            }
+            const o = classifySudo(stderr);
+            // A wrong password makes sudo wait for the next line (the SFTP INIT has none): it would hang until the timeout.
+            if (o === 'wrongPassword' || o === 'tty' || o === 'denied' || o === 'noSudo') finish({ ok: false, outcome: o });
+          });
+          ch.on('exit', (code: number | null) => { exitCode = typeof code === 'number' ? code : -1; });
+          const ended = () => setTimeout(() => finish({ ok: false, outcome: classifySudo(stderr, exitCode ?? -1, nonInteractive) ?? 'other' }), 20);
+          sftp.once('ready', () => finish({ ok: true, sftp }));
+          sftp.once('close', ended);
+          sftp.on('error', ended);
+          if (password === null) startSftp();
+          else grace = setTimeout(startSftp, this.timers.sudoPromptGraceMs);
+        });
+      } catch { finish({ ok: false, outcome: 'other' }); }
     });
   }
 
@@ -166,6 +300,7 @@ export class SftpHost {
     if (!this.live(s)) return;
     if (!s.error && !s.disconnected) s.error = error;
     this.disarm(s);
+    if (s.sudoAsk) { const ask = s.sudoAsk; s.sudoAsk = null; ask.resolve(null); }
     s.side?.kill();
     s.login.abort();
     try { s.client.end(); } catch { /* gone */ }
@@ -231,13 +366,14 @@ export class SftpHost {
       case 'enqueue': {
         const queue = this.queueOf(id);
         if (!queue) return fail('noSession');
-        if (id === LOCAL_QUEUE_ID ? op.req.direction !== 'local-copy' : op.req.direction === 'local-copy') return fail('invalid');
+        if (id === LOCAL_QUEUE_ID ? !isLocalDirection(op.req.direction) : isLocalDirection(op.req.direction)) return fail('invalid');
         return ok(await queue.enqueue(op.req));
       }
       case 'cancel': { const q = this.queueOf(id); return q ? ok(q.cancel({ itemIds: op.itemIds, batchId: op.batchId })) : fail('noSession'); }
       case 'answerConflict': { const q = this.queueOf(id); return q ? ok(q.answerConflict(op.itemId, op.answer)) : fail('noSession'); }
       case 'retry': { const q = this.queueOf(id); return q ? ok(q.retry(op.itemIds)) : fail('noSession'); }
       case 'clearFinished': { const q = this.queueOf(id); return q ? ok(q.clearFinished().length) : fail('noSession'); }
+      case 'cancelOp': { const r = this.ops.get(op.opId); if (r) r.cancelled = true; return ok(!!r); }
       default: break;
     }
     const side = this.remote(id);
@@ -260,6 +396,110 @@ export class SftpHost {
         for (const p of roots) await this.remove(side, p);
         return ok(null);
       }
+      case 'chmodCount': return ok(await this.chmodCount(side, deleteRoots(op.paths), op.recursive));
+      case 'chmod': return ok(await this.chmod(side, op.req, !!this.sessions.get(id)?.sudo));
+      case 'readFile': return ok(await readForEditor(side, posixNormalize(op.path)));
+      case 'statFile': return ok(await statForEditor(side, posixNormalize(op.path)));
+      case 'writeFile': return ok(await writeFromEditor(side, posixNormalize(op.path), op.save, `editor:${id}`));
+    }
+  }
+
+  // ── permissions (0.9.9) ───────────────────────────────────────────────────
+
+  /**
+   * Walks the selection (folders recursively with `recursive`), with the delete walk's rules: a name from the server that is not
+   * one safe segment is never joined (an error entry), nothing outside the selected folder is visited, symlinks are never
+   * followed or changed (chmod on a link changes its target, which may be anywhere). After a folder was read it is looked at
+   * again: one that turned into something else meanwhile (a link swapped in) is not walked into. `postOrder`: a folder is
+   * visited after its contents (a folder value that takes away the owner's r or x would lock the walk out otherwise).
+   */
+  private async walkModes(side: RemoteSide, roots: string[], opts: { recursive: boolean; postOrder?: boolean; cancelled?: () => boolean },
+    visit: (path: string, kind: 'file' | 'dir' | 'link' | 'bad', mode: number, error?: SftpErrorCode) => Promise<boolean>): Promise<boolean> {
+    let seen = 0;
+    const walk = async (path: string, root: string, depth: number): Promise<boolean> => {
+      if (opts.cancelled?.()) return false;
+      if (++seen > 1_000_000 || depth > 64) throw new SftpError('tooMany');
+      if (!posixContains(root, path)) return visit(path, 'bad', 0, 'invalid');
+      const meta = await side.lstat(path);
+      if (!meta) return visit(path, 'bad', 0, 'notFound');
+      if (meta.kind === 'symlink') return visit(path, 'link', meta.mode ?? 0, 'linkSkipped');
+      if (meta.kind !== 'dir' && meta.kind !== 'file') return visit(path, 'bad', 0, 'unsupported');
+      const descend = meta.kind === 'dir' && opts.recursive;
+      if (!(descend && opts.postOrder) && !(await visit(path, meta.kind, meta.mode ?? 0))) return false;
+      if (!descend) return true;
+      let children;
+      try { children = await side.readdir(path); } catch (error) { return visit(path, 'bad', 0, error instanceof SftpError ? error.code : 'failed'); }
+      // The listing came from whatever is at this path now: still the folder, or the walk stops here.
+      const again = await side.lstat(path).catch(() => null);
+      if (again?.kind !== 'dir') return visit(path, 'bad', 0, 'changed');
+      for (const child of children) {
+        if (!validRemoteName(child.name)) { if (!(await visit(`${path}/${child.name}`, 'bad', 0, 'invalidName'))) return false; continue; }
+        if (!(await walk(side.join(path, child.name), root, depth + 1))) return false;
+      }
+      if (opts.postOrder) return visit(path, 'dir', again.mode ?? meta.mode ?? 0);
+      return true;
+    };
+    for (const root of roots) {
+      if (root === '/' && opts.recursive) throw new SftpError('invalid');
+      if (!validRemotePath(root)) throw new SftpError('invalid');
+      if (!(await walk(root, root, 0))) return false;
+    }
+    return true;
+  }
+
+  private async chmodCount(side: RemoteSide, roots: string[], recursive: boolean, cancelled?: () => boolean): Promise<ChmodCount> {
+    const count: ChmodCount = { files: 0, dirs: 0, links: 0, noFollow: side.lsetstat };
+    await this.walkModes(side, roots, { recursive, cancelled }, async (_p, kind) => {
+      if (kind === 'file') count.files++; else if (kind === 'dir') count.dirs++; else if (kind === 'link') count.links++;
+      return true;
+    });
+    return count;
+  }
+
+  /**
+   * SETSTAT follows a symlink, so every change goes through lsetstat@openssh.com when the server offers it. Under sudo (root)
+   * without it a recursive change is refused: a link swapped into the tree between the look and the change could point the
+   * change at any file of the system. The folder value without the owner's r+x changes the contents first (not needed as
+   * root, which reads any folder).
+   */
+  private async chmod(side: RemoteSide, req: ChmodRequest, sudo: boolean): Promise<ChmodResult> {
+    const roots = deleteRoots(req.paths);
+    const recursive = req.recursive;
+    const set = req.set;
+    if (!recursive && !set) throw new SftpError('invalid');
+    if (recursive && sudo && !side.lsetstat) throw new SftpError('unsafeChmod');
+    const run: RunningOp = { cancelled: false };
+    if (req.opId) this.ops.set(req.opId, run);
+    const result: ChmodResult = { changed: 0, errors: [] };
+    const addError = (path: string, error: SftpErrorCode) => { if (result.errors.length < CHMOD_ERRORS_MAX) result.errors.push({ path, error }); };
+    try {
+      // The total for the progress: the dialog's count (it counted before asking), else counted here (cancellable).
+      let total = roots.length;
+      if (recursive && req.total !== undefined) total = req.total;
+      else if (recursive) { const c = await this.chmodCount(side, roots, true, () => run.cancelled); total = c.files + c.dirs; }
+      let done = 0;
+      let lastSent = 0;
+      const progress = (force = false) => {
+        const now = Date.now();
+        if (!req.opId || (!force && now - lastSent < 1000 / SFTP_LIMITS.progressPerSecond)) return;
+        lastSent = now;
+        this.out.toRenderer({ t: 'opProgress', opId: req.opId, done, total: Math.max(total, done) });
+      };
+      const postOrder = !!recursive && !sudo && (recursive.dirMode & 0o500) !== 0o500;
+      const finished = await this.walkModes(side, roots, { recursive: !!recursive, postOrder, cancelled: () => run.cancelled }, async (path, kind, mode, error) => {
+        if (run.cancelled) return false;
+        if (error) { if (kind !== 'link' || !recursive) addError(path, error); return true; }
+        const next = recursive ? (kind === 'dir' ? recursive.dirMode : recursive.fileMode) : applyMode(mode, set!.bits, set!.mask);
+        try { await side.chmodNoFollow(path, next); result.changed++; } catch (e) { addError(path, e instanceof SftpError ? e.code : 'failed'); }
+        done++;
+        progress();
+        return true;
+      });
+      if (!finished || run.cancelled) result.cancelled = true;
+      progress(true);
+      return result;
+    } finally {
+      if (req.opId) this.ops.delete(req.opId);
     }
   }
 

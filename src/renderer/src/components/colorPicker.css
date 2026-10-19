@@ -3,10 +3,11 @@
 .color-swatch { width: 24px; height: 24px; padding: 0; border: 2px solid #ffffff1f; border-radius: 50%; cursor: pointer; transition: transform .1s, border-color .1s; }
 .color-swatch:hover { border-color: #ffffff55; transform: scale(1.06); }
 .color-swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.color-pop { position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; width: 196px; padding: 10px; border: 1px solid #343434; border-radius: 12px; background: #181818; box-shadow: 0 8px 24px #0008; }
-.color-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+/* Sized by its content (8 dots of 18px), so no column is cut off wherever the picker is used. */
+.color-pop { position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; width: max-content; padding: 10px; border: 1px solid #343434; border-radius: 12px; background: #181818; box-shadow: 0 8px 24px #0008; }
+.color-grid { display: grid; grid-template-columns: repeat(8, 18px); gap: 6px; }
 .color-dot { width: 18px; height: 18px; padding: 0; border: 2px solid transparent; border-radius: 50%; cursor: pointer; }
 .color-dot:hover { transform: scale(1.12); }
 .color-dot.on { border-color: #fff; box-shadow: 0 0 0 1px #000 inset; }
-.color-custom { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 11.5px; color: var(--text-2); }
-.settings-card .color-custom .input { width: 84px; height: 26px; padding: 0 8px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 11.5px; }
+.color-custom { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 11.5px; color: var(--text-2); white-space: nowrap; }
+.color-custom .input { width: 84px; height: 26px; padding: 0 8px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 11.5px; }

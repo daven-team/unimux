@@ -1,6 +1,7 @@
 // The SFTP host core against the in-process test server with its SFTP subsystem over a temp folder (127.0.0.1 only).
 // The process wrapper (src/sftphost/index.ts) only forwards messages; everything here is the logic it runs.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import type { EditorRead, EditorWriteResult, RemoteStamp, TextEncodingName } from '../src/shared/editorSource';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -564,5 +565,164 @@ describe('SftpHost: overwrite, cancel and links (fix round 1)', () => {
     const byName = Object.fromEntries(h.ofBatch(b).map((i) => [i.name, i]));
     expect(byName['pick/link.txt']).toMatchObject({ state: 'failed', error: 'linkOutside' });
     expect(readdirSync(remote('home', 'alice', 'pick'))).toEqual(['ok.txt']);
+  });
+});
+
+
+describe('SftpHost: files in editor tabs (0.9.9)', () => {
+  const save = (text: string, baseline: string, expected: RemoteStamp | null, extra: { encoding?: TextEncodingName; path?: string; allowOwnerChange?: boolean } = {}) =>
+    ({ op: 'writeFile' as const, path: extra.path ?? '/home/alice/e.txt', save: { text, baseline, encoding: extra.encoding ?? 'utf-8', expected, ...(extra.allowOwnerChange ? { allowOwnerChange: true } : {}) } });
+  const readText = async (h: ReturnType<typeof harness>, path = '/home/alice/e.txt') => {
+    const read = await h.value<EditorRead>({ op: 'readFile', path });
+    if (read.kind !== 'text') throw new Error(`text expected: ${read.kind}`);
+    return read;
+  };
+  const saved = (r: EditorWriteResult) => { if (r.kind !== 'saved') throw new Error(`saved expected: ${r.kind}`); return r; };
+
+  it('saves through an exclusive, private part file: no part file stays, the mode is kept, CRLF kept', async () => {
+    const s = await server({ sftpPosixRename: true });
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(remote('home', 'alice', 'e.txt'), 'one\r\ntwo\r\n');
+    chmodSync(remote('home', 'alice', 'e.txt'), 0o640);
+    const before = statSync(remote('home', 'alice', 'e.txt')).mode & 0o777;
+    const read = await readText(h);
+    expect(read).toMatchObject({ text: 'one\r\ntwo\r\n', encoding: 'utf-8', size: 10 });
+    expect(read.stamp.hash).toMatch(/^[0-9a-f]{64}$/);
+    const written = saved(await h.value<EditorWriteResult>(save('one\nTWO\nthree\n', read.text, read.stamp)));
+    expect(readFileSync(remote('home', 'alice', 'e.txt'), 'utf8')).toBe('one\r\nTWO\r\nthree\r\n');
+    expect(readdirSync(remote('home', 'alice'))).toEqual(['e.txt']);
+    expect(statSync(remote('home', 'alice', 'e.txt')).mode & 0o777).toBe(before);
+    // The part file is created exclusively and private; only the finished file gets the original mode (SETSTAT after the data).
+    const partOpens = s.sftp.opens.filter((o) => o.path === '/home/alice/e.txt.unimux-part');
+    expect(partOpens).toEqual([{ path: '/home/alice/e.txt.unimux-part', exclusive: true, mode: 0o600 }]);
+    if (before !== 0o600) expect(s.sftp.ops.lastIndexOf('SETSTAT')).toBeGreaterThan(s.sftp.ops.lastIndexOf('WRITE'));
+    expect(written.warnings).toEqual([]);
+    expect(written.stamp?.size).toBe(statSync(remote('home', 'alice', 'e.txt')).size);
+    // The new stamp is the base of the next save.
+    saved(await h.value<EditorWriteResult>(save('again\n', 'one\r\nTWO\r\nthree\r\n', written.stamp)));
+    expect(readFileSync(remote('home', 'alice', 'e.txt'), 'utf8')).toBe('again\r\n');
+  });
+
+  it('a file planted under the part name is removed and the part file created exclusively again (never written through)', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(remote('home', 'alice', 'e.txt'), 'base');
+    writeFileSync(remote('home', 'alice', 'other.txt'), 'must stay');
+    const read = await readText(h);
+    let linked = true;
+    try { symlinkSync(remote('home', 'alice', 'other.txt'), remote('home', 'alice', 'e.txt.unimux-part'), 'file'); } catch { linked = false; } // symlinks need developer mode on Windows
+    if (!linked) writeFileSync(remote('home', 'alice', 'e.txt.unimux-part'), 'leftover');
+    saved(await h.value<EditorWriteResult>(save('mine', 'base', read.stamp)));
+    expect(readFileSync(remote('home', 'alice', 'e.txt'), 'utf8')).toBe('mine');
+    expect(readFileSync(remote('home', 'alice', 'other.txt'), 'utf8')).toBe('must stay');
+    expect(readdirSync(remote('home', 'alice')).sort()).toEqual(['e.txt', 'other.txt']);
+    const partOpens = s.sftp.opens.filter((o) => o.path === '/home/alice/e.txt.unimux-part');
+    expect(partOpens.length).toBe(2);
+    expect(partOpens.every((o) => o.exclusive)).toBe(true);
+  });
+
+  it('saving through a symlink writes the file it points to and keeps the link', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(remote('home', 'alice', 'real.txt'), 'real');
+    try { symlinkSync(remote('home', 'alice', 'real.txt'), remote('home', 'alice', 'link.txt'), 'file'); } catch { return; } // symlinks need developer mode on Windows
+    const read = await readText(h, '/home/alice/link.txt');
+    saved(await h.value<EditorWriteResult>(save('changed', 'real', read.stamp, { path: '/home/alice/link.txt' })));
+    expect(lstatSync(remote('home', 'alice', 'link.txt')).isSymbolicLink()).toBe(true);
+    expect(readFileSync(remote('home', 'alice', 'real.txt'), 'utf8')).toBe('changed');
+    expect(await h.value({ op: 'statFile', path: '/home/alice/link.txt' })).toEqual({ size: 7, mtimeMs: Math.floor(statSync(remote('home', 'alice', 'real.txt')).mtimeMs / 1000) * 1000 });
+  });
+
+  it('refuses a save when the server file changed (size, time, or content within the same second), and writes nothing', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    const file = remote('home', 'alice', 'e.txt');
+    writeFileSync(file, 'base');
+    const read = await readText(h);
+    writeFileSync(file, 'someone else');
+    expect(await h.op(save('mine', 'base', read.stamp))).toEqual({ ok: false, error: 'changed' });
+    expect(readFileSync(file, 'utf8')).toBe('someone else');
+    // Same size and the same second: only the content hash tells.
+    const t = statSync(file).mtime;
+    writeFileSync(file, 'BASE');
+    utimesSync(file, t, t);
+    const sameStampRead = { ...read.stamp, size: 4, mtimeMs: Math.floor(t.getTime() / 1000) * 1000 };
+    expect(await h.op(save('mine', 'base', sameStampRead))).toEqual({ ok: false, error: 'changed' });
+    // A restored draft without a stamp compares the text instead.
+    expect(await h.op(save('mine', 'other', null))).toEqual({ ok: false, error: 'changed' });
+    expect(await h.op(save('mine', 'BASE', null))).toMatchObject({ ok: true, value: { kind: 'saved' } });
+    expect(readFileSync(file, 'utf8')).toBe('mine');
+    expect(readdirSync(remote('home', 'alice'))).toEqual(['e.txt']);
+  });
+
+  it('a file of another owner is not replaced without consent; with it the save reports the owner change', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(remote('home', 'alice', 'e.txt'), 'base');
+    s.sftp.owners.set('/home/alice/e.txt', { uid: 1001, gid: 1001 });
+    const read = await readText(h);
+    expect(await h.value<EditorWriteResult>(save('mine', 'base', read.stamp))).toEqual({ kind: 'ownerChange', from: { uid: 1001, gid: 1001 }, to: { uid: 1000, gid: 1000 } });
+    expect(readFileSync(remote('home', 'alice', 'e.txt'), 'utf8')).toBe('base');
+    await waitFor(() => readdirSync(remote('home', 'alice')).length === 1);
+    expect(readdirSync(remote('home', 'alice'))).toEqual(['e.txt']);
+    const done = saved(await h.value<EditorWriteResult>(save('mine', 'base', read.stamp, { allowOwnerChange: true })));
+    expect(done.warnings).toEqual([{ kind: 'owner', from: { uid: 1001, gid: 1001 }, to: { uid: 1000, gid: 1000 } }]);
+    expect(readFileSync(remote('home', 'alice', 'e.txt'), 'utf8')).toBe('mine');
+  });
+
+  it('keeps the BOM and UTF-16, previews images, offers big and binary files for download', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(remote('home', 'alice', 'bom.txt'), Buffer.from('﻿zażółć', 'utf8'));
+    const bom = await readText(h, '/home/alice/bom.txt');
+    expect(bom).toMatchObject({ text: 'zażółć', encoding: 'utf-8-bom' });
+    saved(await h.value<EditorWriteResult>(save('gęś', bom.text, bom.stamp, { encoding: bom.encoding, path: '/home/alice/bom.txt' })));
+    expect(readFileSync(remote('home', 'alice', 'bom.txt'))).toEqual(Buffer.from('﻿gęś', 'utf8'));
+    writeFileSync(remote('home', 'alice', 'w.txt'), Buffer.from('﻿hi', 'utf16le'));
+    expect(await h.value<EditorRead>({ op: 'readFile', path: '/home/alice/w.txt' })).toMatchObject({ kind: 'text', text: 'hi', encoding: 'utf-16le' });
+    const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+    writeFileSync(remote('home', 'alice', 'p.png'), png);
+    expect(await h.value<EditorRead>({ op: 'readFile', path: '/home/alice/p.png' })).toMatchObject({ kind: 'image', mime: 'image/png', dataUrl: `data:image/png;base64,${png.toString('base64')}` });
+    writeFileSync(remote('home', 'alice', 'b.bin'), Buffer.from([1, 2, 0, 3]));
+    expect(await h.value<EditorRead>({ op: 'readFile', path: '/home/alice/b.bin' })).toEqual({ kind: 'binary', size: 4 });
+    writeFileSync(remote('home', 'alice', 'big.log'), Buffer.alloc(8 * 1024 * 1024 + 1, 0x61));
+    expect(await h.value<EditorRead>({ op: 'readFile', path: '/home/alice/big.log' })).toEqual({ kind: 'tooLarge', size: 8 * 1024 * 1024 + 1 });
+    expect(await h.op({ op: 'readFile', path: '/home/alice/missing.txt' })).toEqual({ ok: false, error: 'notFound' });
+    expect(await h.op({ op: 'readFile', path: '/home/alice' })).toEqual({ ok: false, error: 'isADirectory' });
+    expect(await h.op({ op: 'statFile', path: '/home/alice' })).toEqual({ ok: false, error: 'invalid' });
+    const ops = s.sftp.ops.length;
+    await h.value({ op: 'statFile', path: '/home/alice/w.txt' });
+    expect(s.sftp.ops.slice(ops)).toEqual(['STAT']); // one request, no folder listing
+  });
+
+  it('a save whose rename fails leaves the old file and no part file', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(remote('home', 'alice', 'e.txt'), 'old');
+    const read = await readText(h);
+    s.sftp.renameFail = (from) => from.endsWith('.unimux-part');
+    expect(await h.op(save('new', 'old', read.stamp))).toEqual({ ok: false, error: 'failed' });
+    expect(readFileSync(remote('home', 'alice', 'e.txt'), 'utf8')).toBe('old');
+    await waitFor(() => readdirSync(remote('home', 'alice')).length === 1);
+    expect(readdirSync(remote('home', 'alice'))).toEqual(['e.txt']);
+  });
+
+  it('when the old file cannot be put back either, the result names where both copies are', async () => {
+    const s = await server();
+    const h = harness();
+    await h.connect(s);
+    writeFileSync(remote('home', 'alice', 'e.txt'), 'old');
+    const read = await readText(h);
+    s.sftp.renameFail = (from) => from.endsWith('.unimux-part') || from.includes('.unimux-old');
+    expect(await h.value<EditorWriteResult>(save('new', 'old', read.stamp))).toEqual({ kind: 'stranded', part: '/home/alice/e.txt.unimux-part', aside: '/home/alice/e.txt.unimux-old' });
+    expect(readFileSync(remote('home', 'alice', 'e.txt.unimux-old'), 'utf8')).toBe('old');
+    expect(readFileSync(remote('home', 'alice', 'e.txt.unimux-part'), 'utf8')).toBe('new');
   });
 });

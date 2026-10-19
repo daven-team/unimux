@@ -15,7 +15,9 @@ import { perfMessages } from './perfMessages';
 import { railMessages } from './railMessages';
 import { settingsMessages } from './settingsMessages';
 import { sftpMessages } from './sftpMessages';
+import { sftpManageMessages } from './sftpManageMessages';
 import { sftpViewMessages } from './sftpViewMessages';
+import { remoteEditMessages } from './remoteEditMessages';
 import { shortcutMessages } from './shortcutMessages';
 import { sshMessages } from './sshMessages';
 import { sshModeMessages } from './sshModeMessages';
@@ -47,7 +49,9 @@ export const messages = {
   ...railMessages,
   ...settingsMessages,
   ...sftpMessages,
+  ...sftpManageMessages,
   ...sftpViewMessages,
+  ...remoteEditMessages,
   ...shortcutMessages,
   ...sshMessages,
   ...sshModeMessages,

@@ -23,6 +23,10 @@ export interface SshHost {
   color?: string;
   /** Cells of this host connect by themselves when their view first mounts after the app starts (stored only when on). */
   reconnectOnStart?: true;
+  /** 0.9.9: SFTP sessions run the SFTP server through sudo (stored only when on). */
+  sftpSudo?: true;
+  /** 0.9.9: the SFTP server command for sudo (empty: `sudo -n` with the usual sftp-server places). */
+  sftpCommand?: string;
   createdAt: number;
   updatedAt: number;
   // Reserved for later releases, never written now: agent, via, proxy, env, mosh, charset.
@@ -70,7 +74,9 @@ export const isLivePhase = (phase: SshPhase | undefined): boolean => !!phase && 
 export type SshErrorCode = 'dns' | 'refused' | 'timeout' | 'unreachable' | 'reset' | 'protocol' | 'auth' | 'hostKeyRejected'
   | 'hostKeyChanged' | 'passphrase' | 'keyLocked' | 'keyMissing' | 'hostMissing' | 'shellDenied' | 'ptyHostCrashed' | 'cancelled' | 'unknown'
   /** SFTP sessions (0.9.8): the server refused the sftp subsystem; the SFTP host process restarted. */
-  | 'sftpDenied' | 'sftpHostCrashed';
+  | 'sftpDenied' | 'sftpHostCrashed'
+  /** SFTP through sudo (0.9.9): wrong password, requiretty, not allowed, no sftp-server found, anything else. */
+  | 'sudoPassword' | 'sudoTty' | 'sudoDenied' | 'sudoNoServer' | 'sudoFailed' | 'sudoMissing';
 
 export interface SshSessionState {
   cellId: string;
@@ -86,11 +92,13 @@ export type SshPrompt =
   | { id: string; kind: 'passphrase'; keyId: string; keyLabel: string; retry: boolean }
   | { id: string; kind: 'password'; user: string; endpoint: string; canSave: boolean; retry: boolean }
   | { id: string; kind: 'keyboard'; endpoint: string; name: string; instructions: string; fields: Array<{ text: string; echo: boolean }> }
+  /** 0.9.9: the password sudo asks for (SFTP through sudo); never saved. `canUseSaved`: the host has a saved login password. */
+  | { id: string; kind: 'sudo'; user: string; endpoint: string; canUseSaved: boolean; retry: boolean }
   | { id: string; kind: 'hostKey'; endpoint: string; keyType: string; fingerprint: string; reason: 'unknown' | 'newType' | 'changed'; knownFingerprints: string[]; knownTypes: string[] };
 
 export type SshPromptAnswer =
   | { cellId: string; promptId: string; cancel: true }
-  | { cellId: string; promptId: string; values: string[]; remember?: boolean }
+  | { cellId: string; promptId: string; values: string[]; remember?: boolean; useSaved?: boolean }
   | { cellId: string; promptId: string; hostKey: 'once' | 'save' | 'replace' };
 
 /** What a (reloaded) renderer asks for: every session state and the prompts that are still open (R7). */
@@ -183,6 +191,12 @@ export function normalizeTags(raw: unknown): string[] {
   return out;
 }
 
+/** The SFTP server command of a host (0.9.9): one line, no control characters, at most 512 characters. */
+export function sftpCommandProblem(text: string): 'tooLong' | 'control' | null {
+  if (text.trim().length > 512) return 'tooLong';
+  return /[\u0000-\u001f\u007f]/.test(text.trim()) ? 'control' : null;
+}
+
 /** TAB, LF and CR are allowed; every other C0 control (ESC included) and DEL is refused. */
 export function startupProblem(text: string): 'tooLong' | 'control' | null {
   if (text.length > SSH_LIMITS.startup) return 'tooLong';
@@ -215,6 +229,8 @@ export function normalizeSshHost(raw: unknown): SshHost | null {
   if (typeof r.startupCommand === 'string' && r.startupCommand.trim() && !startupProblem(r.startupCommand)) host.startupCommand = r.startupCommand;
   if (typeof r.color === 'string' && HEX_COLOR.test(r.color)) host.color = r.color;
   if (r.reconnectOnStart === true) host.reconnectOnStart = true;
+  if (r.sftpSudo === true) host.sftpSudo = true;
+  if (typeof r.sftpCommand === 'string' && r.sftpCommand.trim() && !sftpCommandProblem(r.sftpCommand)) host.sftpCommand = r.sftpCommand.trim();
   return host;
 }
 
@@ -232,8 +248,8 @@ export function normalizeSshHosts(raw: unknown): SshHost[] {
   return out;
 }
 
-export interface SshHostDraft { label: string; address: string; port: string; username: string; group: string; tags: string[]; keyId?: string; startupCommand: string; color?: string; reconnectOnStart: boolean }
-export type HostDraftField = 'address' | 'port' | 'username' | 'startupCommand';
+export interface SshHostDraft { label: string; address: string; port: string; username: string; group: string; tags: string[]; keyId?: string; startupCommand: string; color?: string; reconnectOnStart: boolean; sftpSudo?: boolean; sftpCommand?: string }
+export type HostDraftField = 'address' | 'port' | 'username' | 'startupCommand' | 'sftpCommand';
 export type HostDraftResult =
   | { ok: true; value: Omit<SshHost, 'id' | 'createdAt' | 'updatedAt'> }
   | { ok: false; errors: Partial<Record<HostDraftField, MessageKey>> };
@@ -250,6 +266,8 @@ export function validateHostDraft(d: SshHostDraft): HostDraftResult {
   if (!isValidUsername(username)) errors.username = 'Podaj nazwę użytkownika';
   const startup = startupProblem(d.startupCommand);
   if (startup) errors.startupCommand = startup === 'tooLong' ? 'Polecenie startowe jest za długie' : 'Polecenie zawiera znaki sterujące';
+  const sftpCommand = sftpCommandProblem(d.sftpCommand ?? '');
+  if (sftpCommand) errors.sftpCommand = sftpCommand === 'tooLong' ? 'Polecenie jest za długie' : 'Polecenie zawiera znaki sterujące';
   if (Object.keys(errors).length) return { ok: false, errors };
   const value: Omit<SshHost, 'id' | 'createdAt' | 'updatedAt'> = { label: clip(d.label.trim(), SSH_LIMITS.label) || address, address, port, username };
   const group = clip(d.group.trim(), SSH_LIMITS.group);
@@ -260,6 +278,8 @@ export function validateHostDraft(d: SshHostDraft): HostDraftResult {
   if (d.startupCommand.trim()) value.startupCommand = d.startupCommand;
   if (d.color && HEX_COLOR.test(d.color)) value.color = d.color;
   if (d.reconnectOnStart) value.reconnectOnStart = true;
+  if (d.sftpSudo) value.sftpSudo = true;
+  if (d.sftpCommand?.trim()) value.sftpCommand = d.sftpCommand.trim();
   return { ok: true, value };
 }
 
@@ -267,7 +287,7 @@ export function hostToDraft(h?: SshHost): SshHostDraft {
   return {
     label: h?.label ?? '', address: h?.address ?? '', port: h ? String(h.port) : '22', username: h?.username ?? '',
     group: h?.group ?? '', tags: h?.tags ?? [], keyId: h?.keyId, startupCommand: h?.startupCommand ?? '', color: h?.color,
-    reconnectOnStart: h?.reconnectOnStart === true,
+    reconnectOnStart: h?.reconnectOnStart === true, sftpSudo: h?.sftpSudo === true, sftpCommand: h?.sftpCommand ?? '',
   };
 }
 
@@ -277,7 +297,7 @@ export function hostToDraft(h?: SshHost): SshHostDraft {
  */
 export function hostFormDirty(host: SshHost | undefined, draft: SshHostDraft, typed: { tag: string; password: string }): boolean {
   if (typed.tag.trim() || typed.password) return true;
-  const key = (d: SshHostDraft) => JSON.stringify([d.label.trim(), d.address.trim(), d.port.trim(), d.username.trim(), d.group.trim(), d.tags, d.keyId ?? '', d.startupCommand, d.color ?? '', d.reconnectOnStart]);
+  const key = (d: SshHostDraft) => JSON.stringify([d.label.trim(), d.address.trim(), d.port.trim(), d.username.trim(), d.group.trim(), d.tags, d.keyId ?? '', d.startupCommand, d.color ?? '', d.reconnectOnStart, d.sftpSudo === true, (d.sftpCommand ?? '').trim()]);
   if (!host) return key(draft) !== key(hostToDraft(undefined));
   const v = validateHostDraft(draft);
   if (!v.ok) return key(draft) !== key(hostToDraft(host));
@@ -382,6 +402,12 @@ export function sshErrorText(code: SshErrorCode, ctx: { host: string; endpoint: 
     case 'ptyHostCrashed': return { key: 'Proces terminali został uruchomiony ponownie' };
     case 'sftpDenied': return { key: 'Serwer nie udostępnia SFTP' };
     case 'sftpHostCrashed': return { key: 'Proces SFTP został uruchomiony ponownie' };
+    case 'sudoPassword': return { key: 'Nieprawidłowe hasło sudo' };
+    case 'sudoTty': return { key: 'sudo wymaga terminala (requiretty) - SFTP przez sudo nie może się uruchomić' };
+    case 'sudoDenied': return { key: 'To konto nie może uruchomić serwera SFTP przez sudo' };
+    case 'sudoNoServer': return { key: 'Nie znaleziono serwera SFTP (sftp-server) - podaj polecenie w ustawieniach hosta' };
+    case 'sudoFailed': return { key: 'Nie udało się uruchomić SFTP przez sudo' };
+    case 'sudoMissing': return { key: 'Na serwerze nie ma polecenia sudo' };
     case 'cancelled': return { key: 'Anulowano' };
     default: return { key: 'Nieznany błąd SSH' };
   }

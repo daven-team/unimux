@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { CodeEditor } from './CodeEditor';
-import { closeFile, editFile, fileErrorLabel, fileLabel, isFileDirty, loadDiskText, overwriteFileOnDisk, reloadFileFromDisk, retryFile, saveFile, setFileDataView, setFileMarkdownView, toggleFileWrap, useFileStore } from '../files';
+import { checkFileOnDisk, closeFile, editFile, fileErrorLabel, fileLabel, isFileDirty, loadDiskText, overwriteFileOnDisk, reloadFileFromDisk, retryFile, saveFile, setFileDataView, setFileMarkdownView, toggleFileWrap, useFileStore } from '../files';
 import { detectDelimiter, isDelimitedPath, parseDelimited } from '../../../shared/csv';
 import { DataTable, ImageView, LargeTextView } from './FileViews';
 import { handleZoomKey, setFileZoom, stepFileZoom, useFileZoom } from '../fileZoom';
@@ -11,6 +11,11 @@ import { matchesShortcut } from '../shortcuts';
 import { fullProjectPath } from '../../../shared/platform';
 import { FileActionIcon, FileBreadcrumb } from './FileIcon';
 import { IX } from './icons';
+import { sourceTitle } from '../../../shared/editorSource';
+import { ensureSession, liveSession, useRemoteSessions } from '../remoteSessions';
+import { useSftpStore } from '../sftpStore';
+import { downloadRemoteFile } from '../remoteOpen';
+import { RemoteLogin } from './RemoteLogin';
 
 const GitDiffView = lazy(() => import('./GitDiffView'));
 const TextDiffView = lazy(() => import('./TextDiffView'));
@@ -34,6 +39,15 @@ export function FileEditor() {
     return () => el.removeEventListener('wheel', onWheel);
   }, [doc?.id]);
   const project = useStore((s) => s.s.projects.find((p) => p.id === doc?.projectId));
+  const remote = doc?.source?.kind === 'remote' ? doc.source : null;
+  const hostLabel = useStore((s) => (remote ? s.s.sshHosts.find((h) => h.id === remote.hostId)?.label ?? '?' : ''));
+  // Whether a remote tab has a connection decides its reconnect button: the same rule as the tab's reads and saves (a connected
+  // session with the SSH user's own rights; the view's sudo session never counts). Both stores re-render the tab.
+  const fromSessions = useRemoteSessions(() => (remote ? liveSession(remote.hostId) : null));
+  const fromView = useSftpStore(() => (remote ? liveSession(remote.hostId) : null));
+  const hasSession = !remote || (fromView ?? fromSessions) !== null;
+  const sudoHost = useStore((s) => !!remote && s.s.sshHosts.some((h) => h.id === remote.hostId && h.sftpSudo === true));
+  const connecting = useRemoteSessions((st) => (remote ? !!st.connecting[remote.hostId] : false));
   useEffect(() => {
     if (!doc) return;
     const onKey = (event: KeyboardEvent) => {
@@ -84,10 +98,17 @@ export function FileEditor() {
   const largeNotice = doc.status === 'truncated'
     ? fileLabel('largeNotice', language).replace('{shown}', formatSize(doc.text.length, language)).replace('{total}', formatSize(doc.size ?? doc.text.length, language))
     : '';
+  // A remote file: "host:/path" with the host as the first crumb; a local file outside the projects: its full path.
+  const crumbTitle = doc.source ? sourceTitle(doc.source, hostLabel) : path;
+  const local = doc.source?.kind === 'local';
+  const canOpenExternally = !!project || local;
+  const conflictText = remote
+    ? { save: tr('Nie zapisano: plik zmienił się na serwerze w trakcie edycji.'), changed: tr('Plik zmienił się na serwerze. Masz tu niezapisane zmiany.'), reload: tr('Wczytaj z serwera (odrzuć moje zmiany)') }
+    : { save: tr('Nie zapisano: plik zmienił się na dysku w trakcie edycji.'), changed: tr('Plik zmienił się na dysku. Masz tu niezapisane zmiany.'), reload: tr('Wczytaj z dysku (odrzuć moje zmiany)') };
   return (
     <section ref={section} className="file-editor file-workspace-editor" aria-label={doc.relativePath} style={{ ['--file-zoom' as string]: zoom }} onKeyDownCapture={(e) => { handleZoomKey(e); }}>
       <div className="file-editor-toolbar">
-        <FileBreadcrumb projectName={project?.name} relativePath={doc.relativePath} fullPath={path} />
+        <FileBreadcrumb projectName={remote ? hostLabel : project?.name} relativePath={doc.relativePath} fullPath={crumbTitle} />
         <span role="status" className={`editor-save-status ${dirty ? 'dirty' : ''}`}>{doc.saving ? fileLabel('saving', language) : dirty ? `● ${fileLabel('dirty', language)}` : doc.status === 'ready' ? fileLabel('saved', language) : ''}</span>
         <div className="file-editor-actions">
           {markdown && <div className="markdown-view-toggle" role="group" aria-label="Markdown">
@@ -104,11 +125,28 @@ export function FileEditor() {
           <button className="btn ghost icon" title={tr('Zamknij podgląd pliku')} aria-label={tr('Zamknij podgląd pliku')} onClick={() => void closeFile(doc.id)}><IX /></button>
         </div>
       </div>
-      {doc.error && <div className="preview-notice error" role="alert" style={{ whiteSpace: 'pre-wrap' }}>{errorText(fileErrorLabel(doc.error, language))}</div>}
+      {remote && <RemoteLogin hostId={remote.hostId} hostLabel={hostLabel} />}
+      {sudoHost && <div className="preview-notice remote-notice muted" data-field="sudo-rights" role="note">{tr('Karty edytora otwierają pliki z uprawnieniami użytkownika SSH (bez sudo).')}</div>}
+      {doc.error && <div className="preview-notice error remote-notice" role="alert" style={{ whiteSpace: 'pre-wrap' }}>
+        <span>{errorText(fileErrorLabel(doc.error, language))}</span>
+        {remote && !hasSession && !connecting && <span className="remote-notice-actions">
+          <button className="btn small" onClick={() => void ensureSession(remote.hostId)}>{tr('Połącz ponownie')}</button>
+        </span>}
+      </div>}
+      {remote && !hasSession && !connecting && !doc.error && dirty && <div className="preview-notice remote-notice" role="status">
+        <span>{tr('Brak połączenia z {host}. Połącz ponownie, aby wczytać lub zapisać plik.', { host: hostLabel })}</span>
+        <span className="remote-notice-actions"><button className="btn small" onClick={() => void ensureSession(remote.hostId)}>{tr('Połącz ponownie')}</button></span>
+      </div>}
+      {/* A clean tab without a connection is not checked any more: it may show an old version of the server file. */}
+      {remote && !hasSession && !connecting && !doc.error && !dirty && doc.status === 'ready' && <div className="preview-notice remote-notice muted remote-stale" role="status">
+        <span>{tr('Brak połączenia z {host} - zawartość może być nieaktualna.', { host: hostLabel })}</span>
+        <span className="remote-notice-actions"><button className="btn small" onClick={() => void ensureSession(remote.hostId).then((r) => { if (r.ok) void checkFileOnDisk(doc.id, true); })}>{tr('Połącz ponownie')}</button></span>
+      </div>}
+      {doc.notice && <div className="preview-notice remote-notice" role="status" style={{ whiteSpace: 'pre-wrap' }}>{doc.notice}</div>}
       {doc.diskConflict && <div className={`preview-notice file-disk-conflict ${doc.diskConflict === 'save' ? 'error' : ''}`} role="alert">
-        <span>{doc.diskConflict === 'save' ? tr('Nie zapisano: plik zmienił się na dysku w trakcie edycji.') : tr('Plik zmienił się na dysku. Masz tu niezapisane zmiany.')}</span>
+        <span>{doc.diskConflict === 'save' ? conflictText.save : conflictText.changed}</span>
         <span className="file-disk-conflict-actions">
-          <button className="btn small" disabled={doc.saving} onClick={() => { setDiffFor(null); void reloadFileFromDisk(doc.id); }}>{tr('Wczytaj z dysku (odrzuć moje zmiany)')}</button>
+          <button className="btn small" disabled={doc.saving} onClick={() => { setDiffFor(null); void reloadFileFromDisk(doc.id); }}>{conflictText.reload}</button>
           <button className={`btn small ${showDiff ? 'active' : ''}`} aria-pressed={showDiff} onClick={() => { if (showDiff) setDiffFor(null); else void loadDiskText(doc.id).then(() => setDiffFor(doc.id)); }}>{showDiff ? tr('Ukryj różnice') : tr('Pokaż różnice')}</button>
           <button className="btn small danger" disabled={doc.saving} onClick={() => { setDiffFor(null); void overwriteFileOnDisk(doc.id); }}>{tr('Nadpisz (zachowaj moje)')}</button>
         </span>
@@ -116,18 +154,20 @@ export function FileEditor() {
       {doc.status === 'loading' && <div className="file-preview-message muted">{tr('Wczytywanie pliku…')}</div>}
       {tableView && table && <DataTable columns={table.rows[0] ?? []} rows={table.rows.slice(1)} {...(table.truncated ? { note: fileLabel('largeNotice', language).replace('{shown}', `${table.rows.length}`).replace('{total}', formatSize(doc.size ?? doc.text.length, language)) } : {})} />}
       {showDiff && <Suspense fallback={<div className="file-preview-message muted">{tr('Wczytywanie…')}</div>}>
-        <TextDiffView disk={doc.externalText ?? ''} editor={doc.text} path={doc.relativePath} />
+        <TextDiffView disk={doc.externalText ?? ''} editor={doc.text} path={doc.source ? crumbTitle : doc.relativePath} remote={!!remote} />
       </Suspense>}
       {!tableView && !showDiff && doc.status === 'ready' && (preview
         ? <MarkdownPreview key={doc.id} text={doc.text} projectId={doc.projectId} path={doc.relativePath} />
         : <CodeEditor key={doc.id} path={doc.relativePath} text={doc.text} wrap={doc.wrap} onChange={text => editFile(doc.id, text)} />)}
       {doc.status === 'image' && doc.view?.kind === 'image' && <ImageView src={doc.view.dataUrl} name={doc.name} size={doc.size} />}
       {doc.status === 'table' && doc.view?.kind === 'table' && <DataTable columns={doc.view.columns} types={doc.view.types} rows={doc.view.rows} note={`${doc.view.format.toUpperCase()} · ${doc.view.totalRows.toLocaleString(language)} ${{ en: 'rows', pl: 'wierszy', de: 'Zeilen', es: 'filas', fr: 'lignes', pt: 'linhas' }[language]} · ${doc.view.columns.length} ${{ en: 'columns', pl: 'kolumn', de: 'Spalten', es: 'columnas', fr: 'colonnes', pt: 'colunas' }[language]}${doc.view.rows.length < doc.view.totalRows ? ` · ${{ en: 'showing the first', pl: 'pokazano pierwsze', de: 'angezeigt: die ersten', es: 'mostrando las primeras', fr: 'affichage des premières', pt: 'a mostrar as primeiras' }[language]} ${doc.view.rows.length.toLocaleString(language)}` : ''}`} />}
-      {doc.status === 'binary' && <div className="file-preview-message muted">{tr('Ten plik jest binarny lub ma nieobsługiwane kodowanie. Otwórz go w edytorze albo menedżerze plików.')}</div>}
+      {doc.status === 'binary' && !remote && <div className="file-preview-message muted">{tr('Ten plik jest binarny lub ma nieobsługiwane kodowanie. Otwórz go w edytorze albo menedżerze plików.')}</div>}
+      {(doc.status === 'binary' || doc.status === 'tooLarge') && remote && <div className="file-preview-message muted">{tr('Tego pliku nie można pokazać w edytorze (plik binarny lub za duży). Możesz go pobrać na ten komputer.')}</div>}
       {doc.status === 'truncated' && !tableView && <LargeTextView key={doc.id} text={doc.text} notice={largeNotice} />}
       {doc.status !== 'loading' && doc.status !== 'ready' && doc.status !== 'image' && doc.status !== 'table' && <div style={{ padding: 16, display: 'flex', gap: 8 }}>
         <button className="btn" onClick={() => void retryFile(doc.id)}>{tr('Spróbuj ponownie')}</button>
-        {project && <button className="btn" onClick={() => window.mc.openInEditor(path)}>{tr('Otwórz w edytorze')}</button>}
+        {remote && (doc.status === 'binary' || doc.status === 'tooLarge') && <button className="btn primary" onClick={() => void downloadRemoteFile(remote.hostId, remote.path)}>{tr('Pobierz')}</button>}
+        {canOpenExternally && <button className="btn" onClick={() => window.mc.openInEditor(path)}>{tr('Otwórz w edytorze')}</button>}
       </div>}
     </section>
   );

@@ -2,6 +2,8 @@
 // helpers for POSIX remote paths, "keep both" names, permission strings and part files. No Node or Electron imports.
 import type { Localized } from './ssh';
 import type { SshErrorCode, SshPhase, SshPrompt } from './ssh';
+import type { EditorRead, EditorSave, EditorWriteResult, FileStamp } from './editorSource';
+import type { ProjectFilePreview } from './types';
 
 // ── sessions ────────────────────────────────────────────────────────────────
 
@@ -28,6 +30,10 @@ export interface SftpSessionState {
   error?: SftpSessionError;
   /** The folder the session started in (realpath of the asked folder, else of the login folder); set once connected. */
   path?: string;
+  /** 0.9.9: the SFTP server runs through sudo (the host's "Uruchamiaj SFTP przez sudo"); set once connected. */
+  sudo?: true;
+  /** 0.9.9: a session opened for editor tabs (the SSH user's own rights); the SFTP view never adopts it. */
+  plain?: true;
 }
 
 export const sftpStatusOf = (phase: SshPhase): SftpSessionStatus =>
@@ -82,7 +88,13 @@ export interface LocalEntry {
 export type SftpErrorCode =
   | 'notFound' | 'exists' | 'permission' | 'notEmpty' | 'notADirectory' | 'isADirectory' | 'noSpace'
   | 'invalid' | 'noSession' | 'notConnected' | 'changed' | 'cancelled' | 'connectionLost' | 'sftpHostCrashed'
-  | 'unsupported' | 'tooMany' | 'invalidName' | 'linkOutside' | 'linkFolder' | 'failed';
+  | 'unsupported' | 'tooMany' | 'invalidName' | 'linkOutside' | 'linkFolder' | 'failed'
+  /** 0.9.9 moves: a folder into itself or its child; the server could not rename (another file system); a symlink left out. */
+  | 'intoItself' | 'crossDevice' | 'linkSkipped'
+  /** A recursive permission change as root on a server without lsetstat@openssh.com (not safe against swapped-in links). */
+  | 'unsafeChmod'
+  /** 0.9.9 editor saves: the folder of the file does not let the SSH user create the temporary part file. */
+  | 'partDenied';
 
 export type SftpResult<T> = { ok: true; value: T } | { ok: false; error: SftpErrorCode };
 
@@ -107,13 +119,22 @@ export function sftpErrorText(code: SftpErrorCode): Localized {
     case 'invalidName': return { key: 'Nazwa, której nie można bezpiecznie zapisać w tym miejscu' };
     case 'linkFolder': return { key: 'Dowiązania do folderów nie są kopiowane' };
     case 'linkOutside': return { key: 'Dowiązanie wskazuje poza wybrany folder - pominięto' };
+    case 'intoItself': return { key: 'Nie można przenieść folderu do niego samego' };
+    case 'crossDevice': return { key: 'Serwer nie mógł przenieść tego elementu (na przykład do innego systemu plików) - skopiuj go i usuń oryginał' };
+    case 'unsafeChmod': return { key: 'Ten serwer nie obsługuje zmiany uprawnień bez podążania za dowiązaniami (lsetstat) - przez sudo zmiana rekurencyjna jest wyłączona' };
+    case 'linkSkipped': return { key: 'Dowiązania są pomijane' };
+    case 'partDenied': return { key: 'W tym folderze nie można utworzyć pliku tymczasowego (brak uprawnień do folderu) - zapis nie jest możliwy' };
     default: return { key: 'Operacja nie powiodła się' };
   }
 }
 
 // ── transfers ───────────────────────────────────────────────────────────────
 
-export type TransferDirection = 'upload' | 'download' | 'local-copy';
+/** 'move': a rename inside the session's server; 'local-move': inside the local disk (copy and delete across volumes). */
+export type TransferDirection = 'upload' | 'download' | 'local-copy' | 'move' | 'local-move';
+/** Directions of the local queue (no connection needed). */
+export const isLocalDirection = (d: TransferDirection): boolean => d === 'local-copy' || d === 'local-move';
+export const isMoveDirection = (d: TransferDirection): boolean => d === 'move' || d === 'local-move';
 export type TransferState = 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'conflict';
 export type ConflictChoice = 'overwrite' | 'skip' | 'keepBoth';
 export interface ConflictAnswer { choice: ConflictChoice; applyToRest: boolean }
@@ -122,7 +143,8 @@ export interface TransferConflict {
   /** The final path that already exists. */
   target: string;
   existing: { kind: EntryKind; size: number; mtime: number };
-  incoming: { size: number; mtime: number };
+  /** `kind` (0.9.9): a moved folder cannot overwrite anything, so the question offers no Overwrite then. */
+  incoming: { size: number; mtime: number; kind?: EntryKind };
 }
 
 export interface TransferItem {
@@ -169,10 +191,13 @@ export type SftpPortMessage =
   | { t: 'snapshot'; items: TransferItem[] }
   /** Changed items (full objects). Progress of a running item comes at most ~10 times a second. */
   | { t: 'items'; items: TransferItem[] }
-  | { t: 'removed'; ids: string[] };
+  | { t: 'removed'; ids: string[] }
+  /** Progress of a long operation the view started with an op id (a recursive permission change, 0.9.9). */
+  | { t: 'opProgress'; opId: string; done: number; total: number };
 
 /** Applies one port message to a renderer-side list (order kept: enqueue order). */
 export function applyPortMessage(items: readonly TransferItem[], m: SftpPortMessage): TransferItem[] {
+  if (m.t === 'opProgress') return items as TransferItem[];
   if (m.t === 'snapshot') return [...m.items];
   if (m.t === 'removed') { const gone = new Set(m.ids); return items.filter((i) => !gone.has(i.id)); }
   const changed = new Map(m.items.map((i) => [i.id, i]));
@@ -180,6 +205,16 @@ export function applyPortMessage(items: readonly TransferItem[], m: SftpPortMess
   const known = new Set(items.map((i) => i.id));
   for (const i of m.items) if (!known.has(i.id)) next.push(i);
   return next;
+}
+
+/**
+ * Moves and renames of the queue that finished with this message (0.9.9): open editor tabs follow them. Only live updates count
+ * (a snapshot after a reload repeats old ones); a skipped item moved nothing.
+ */
+export function finishedMoves(before: readonly TransferItem[], m: SftpPortMessage): TransferItem[] {
+  if (m.t !== 'items') return [];
+  const was = new Map(before.map((i) => [i.id, i.state]));
+  return m.items.filter((i) => isMoveDirection(i.direction) && i.state === 'done' && !i.skipped && was.get(i.id) !== 'done');
 }
 
 /** After the SFTP host restarted its queue is gone: what was not finished counts as failed (the view offers a new enqueue). */
@@ -347,6 +382,84 @@ export function permissionString(mode: number | undefined): string {
     + triplet(0o004, 0o002, 0o001, 0o1000, 't', 'T');
 }
 
+// ── permission changes (0.9.9) ──────────────────────────────────────────────
+
+/** The bits a permission change sets: rwx for owner, group and others plus setuid (4000), setgid (2000) and sticky (1000). */
+export const PERM_MASK = 0o7777;
+
+/** "644", "0755", "4755" -> the bits; null for anything else (3 or 4 octal digits only). */
+export function parseOctalMode(text: string): number | null {
+  const t = text.trim();
+  return /^[0-7]{3,4}$/.test(t) ? parseInt(t, 8) : null;
+}
+
+/** The bits as octal digits: 3 without special bits ("644"), 4 with them ("4755"). */
+export function octalMode(mode: number): string {
+  const m = mode & PERM_MASK;
+  return m > 0o777 ? m.toString(8).padStart(4, '0') : m.toString(8).padStart(3, '0');
+}
+
+/** "rwxr-xr-x" (setuid/setgid/sticky as s/S and t/T, like ls). */
+export const symbolicMode = (mode: number): string => permissionString(S_IFREG | (mode & PERM_MASK)).slice(1);
+
+/** "drwxr-sr-x" (the listing column) -> the permission bits; null when it is not such a string. */
+export function modeFromPermissions(text: string | undefined): number | null {
+  if (!text || !/^[-dlcbps][-r][-w][-xsS][-r][-w][-xsS][-r][-w][-xtT]$/.test(text)) return null;
+  const c = text.slice(1);
+  let mode = 0;
+  const bit = (i: number, value: number) => { if (c[i] !== '-' && c[i] !== 'S' && c[i] !== 'T') mode |= value; };
+  [0o400, 0o200, 0o100, 0o040, 0o020, 0o010, 0o004, 0o002, 0o001].forEach((v, i) => bit(i, v));
+  if (c[2] === 's' || c[2] === 'S') mode |= 0o4000;
+  if (c[5] === 's' || c[5] === 'S') mode |= 0o2000;
+  if (c[8] === 't' || c[8] === 'T') mode |= 0o1000;
+  return mode;
+}
+
+/** What several entries have in common: `bits` set in all of them, `mixed` the bits that differ (shown indeterminate). */
+export function commonMode(modes: readonly number[]): { bits: number; mixed: number } {
+  if (!modes.length) return { bits: 0, mixed: 0 };
+  let and = PERM_MASK, or = 0;
+  for (const m of modes) { and &= m & PERM_MASK; or |= m & PERM_MASK; }
+  return { bits: and, mixed: or & ~and };
+}
+
+/** The new bits of one entry: the bits in `mask` come from `bits`, the rest stays as it was (an indeterminate checkbox). */
+export const applyMode = (current: number, bits: number, mask: number): number => ((current & PERM_MASK) & ~mask) | (bits & mask);
+
+export interface ChmodRequest {
+  /** Absolute remote paths (the selection). */
+  paths: string[];
+  /** Without `recursive`: each selected entry gets `applyMode(its mode, bits, mask)`. */
+  set: { bits: number; mask: number } | null;
+  /** "Zastosuj do zawartości": every folder (the selected ones and all inside) gets `dirMode`, every file `fileMode`. */
+  recursive: { dirMode: number; fileMode: number } | null;
+  /** A uuid of the view: progress comes as 'opProgress' on the transfer port, cancelOp(opId) stops the walk. */
+  opId?: string;
+  /** The count the dialog showed (files + folders): the progress total without walking the tree again. */
+  total?: number;
+}
+/** `noFollow`: the server offers lsetstat@openssh.com (changes never follow a symlink). */
+export interface ChmodCount { files: number; dirs: number; links: number; noFollow?: boolean }
+export interface ChmodResult { changed: number; errors: Array<{ path: string; error: SftpErrorCode }>; cancelled?: true }
+/** Errors listed after a permission change (the rest is counted only). */
+export const CHMOD_ERRORS_MAX = 200;
+
+// ── moves (0.9.9) ───────────────────────────────────────────────────────────
+
+/**
+ * A move of `sources` into `targetDir` on one side: sources already in `targetDir` are left out (nothing to do); a folder
+ * into itself or one of its children is refused.
+ */
+export function planMove(sources: readonly string[], targetDir: string, side: { contains(parent: string, child: string): boolean; dirname(path: string): string; same(a: string, b: string): boolean }):
+  { sources: string[]; problem: 'intoItself' | null } {
+  if (sources.some((s) => side.contains(s, targetDir))) return { sources: [], problem: 'intoItself' };
+  return { sources: sources.filter((s) => !side.same(side.dirname(s), targetDir)), problem: null };
+}
+
+/** planMove for remote (POSIX) paths. */
+export const planRemoteMove = (sources: readonly string[], targetDir: string) =>
+  planMove(sources, targetDir, { contains: posixContains, dirname: posixParent, same: (a, b) => posixNormalize(a) === posixNormalize(b) });
+
 /** Owner and group from an `ls -l` style longname ("-rw-r--r--  1 alice staff 12 Jan 1 00:00 a.txt"), when the server sent one. */
 export function ownerFromLongname(longname: string | undefined): { owner?: string; group?: string } {
   if (!longname) return {};
@@ -362,7 +475,8 @@ export interface DeleteCount { files: number; dirs: number }
 /** `window.mc.sftp` (src/preload). Every call is validated in src/main/sftp/ipc.ts. */
 export interface SftpApi {
   /** Starts a login with the saved host data; follow 'sftp:session' / 'sftp:prompt' for the outcome. */
-  connect(hostId: string, initialPath?: string): Promise<{ ok: true; sessionId: string } | { ok: false; error: SshErrorCode }>;
+  /** `plain` (0.9.9): never through sudo (editor tabs write as the SSH user); the view's sessions follow the host setting. */
+  connect(hostId: string, initialPath?: string, opts?: { plain?: boolean }): Promise<{ ok: true; sessionId: string } | { ok: false; error: SshErrorCode }>;
   disconnect(sessionId: string): Promise<{ ok: boolean }>;
   sessions(): Promise<SftpSnapshot>;
   answer(answer: SftpPromptAnswer): Promise<{ ok: boolean }>;
@@ -383,8 +497,21 @@ export interface SftpApi {
   retry(sessionId: string | null, itemIds: string[]): Promise<{ ok: boolean }>;
   /** Drops finished items (done, failed, cancelled) from the queue. */
   clearFinished(sessionId: string | null): Promise<{ ok: boolean }>;
+  /** 0.9.9: what a permission change would touch (folders recursively with `recursive`). Symlinks are never changed. */
+  chmodCount(sessionId: string, paths: string[], recursive: boolean): Promise<SftpResult<ChmodCount>>;
+  chmod(sessionId: string, req: ChmodRequest): Promise<SftpResult<ChmodResult>>;
+  /** Stops a long operation started with `opId` (a recursive permission change). */
+  cancelOp(sessionId: string, opId: string): Promise<{ ok: boolean }>;
+  /** A remote file for an editor tab (0.9.9): text, an image preview, or binary / too large (offer a download). */
+  readFile(sessionId: string, path: string): Promise<SftpResult<EditorRead>>;
+  /** Saves an editor tab through a part file; 'changed' when the server file is not the one the tab was opened from. */
+  writeFile(sessionId: string, path: string, save: EditorSave): Promise<SftpResult<EditorWriteResult>>;
+  /** Size and time of a file (following links) for the focus check of a tab: one request, no folder listing. */
+  statFile(sessionId: string, path: string): Promise<SftpResult<FileStamp>>;
+  /** Hosts of editor tabs with unsaved changes: their sessions are kept while the view is closed. */
+  pinHosts(hostIds: string[]): void;
   /** The SFTP view became visible / was closed (idle disconnect 2 minutes after close with an empty queue). */
-  viewOpened(): void;
+  viewOpened(shownSessionId: string | null): void;
   viewClosed(): void;
 }
 
@@ -403,4 +530,9 @@ export interface LocalFilesApi {
   trash(paths: string[]): Promise<LocalResult<null>>;
   /** Opens a folder in Explorer/Finder, or shows a file selected in its folder. */
   reveal(path: string): Promise<LocalResult<null>>;
+  /** A local file outside the projects in an editor tab (0.9.9): the same reads and safe saves as a project file. */
+  readFile(path: string): Promise<ProjectFilePreview>;
+  /** 'gone': nothing is there any more (moved, renamed or deleted). */
+  statFile(path: string): Promise<{ size: number; mtimeMs: number } | 'gone' | null>;
+  writeFile(path: string, text: string, expectedText: string): Promise<{ ok: true } | { ok: false; error: string; code?: 'conflict' }>;
 }

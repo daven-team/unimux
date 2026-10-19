@@ -35,7 +35,7 @@ export function HostEditor({ paneId, hostId }: { paneId: string; hostId?: string
     setErrors({});
     const now = Date.now();
     let id = host?.id;
-    if (host) update((s) => updateSshHost(s, host.id, { group: undefined, tags: undefined, keyId: undefined, startupCommand: undefined, color: undefined, reconnectOnStart: undefined, ...r.value }, now));
+    if (host) update((s) => updateSshHost(s, host.id, { group: undefined, tags: undefined, keyId: undefined, startupCommand: undefined, color: undefined, reconnectOnStart: undefined, sftpSudo: undefined, sftpCommand: undefined, ...r.value }, now));
     else {
       id = uid();
       const created = { id, ...r.value, createdAt: now, updatedAt: now };
@@ -132,6 +132,18 @@ export function HostEditor({ paneId, hostId }: { paneId: string; hostId?: string
           <label className="check"><input type="checkbox" data-field="reconnectOnStart" checked={draft.reconnectOnStart} onChange={(e) => set({ reconnectOnStart: e.target.checked })} />{tr('Łącz ponownie po uruchomieniu aplikacji')}</label>
           <span className="ssh-card-hint">{tr('Komórki tego hosta łączą się same, gdy po starcie aplikacji pojawią się na ekranie. Pytanie o hasło lub nieznany klucz hosta i tak pojawi się w komórce.')}</span>
         </div>
+      </div>
+      <div className="ssh-section">
+        <div className="ssh-field">
+          <label className="check"><input type="checkbox" data-field="sftpSudo" checked={draft.sftpSudo === true} onChange={(e) => set({ sftpSudo: e.target.checked })} />{tr('Uruchamiaj SFTP przez sudo')}</label>
+          <span className="ssh-card-hint">{tr('Pliki w widoku SFTP są wtedy widoczne i zmieniane jako root. Hasło sudo, jeśli jest potrzebne, zostanie zapytane w widoku SFTP i nie jest zapisywane.')} {tr('Karty edytora otwierają pliki z uprawnieniami użytkownika SSH (bez sudo).')}</span>
+        </div>
+        {draft.sftpSudo && (
+          <label className="ssh-field"><span>{tr('Polecenie serwera SFTP')}</span>
+            <input className="input mono" data-field="sftpCommand" value={draft.sftpCommand ?? ''} spellCheck={false} maxLength={512} placeholder="sudo -n /usr/lib/openssh/sftp-server" onChange={(e) => set({ sftpCommand: e.target.value })} />
+            <span className="ssh-card-hint">{tr('Puste: sudo -n z typowymi ścieżkami sftp-server')}</span>{field('sftpCommand')}
+          </label>
+        )}
       </div>
       <div className="ssh-actions">
         <button type="submit" className="btn primary">{tr('Zapisz')}</button>

@@ -33,6 +33,8 @@ export interface SshConnectRequest {
   allowPasswordPrompt: boolean;
   /** Unpackaged runs with MC_SSH_DEBUG=1 only (main decides): ssh2 debug lines up to USERAUTH go to the console. */
   debug?: boolean;
+  /** SFTP sessions of a host with "Uruchamiaj SFTP przez sudo" (0.9.9): the server command runs on an exec channel. */
+  sftpSudo?: { command?: string };
 }
 
 export type MainToHost =
@@ -58,7 +60,7 @@ export type HostToMain =
   | { t: 'sshStatus'; id: string; phase: SshPhase; error?: SshErrorCode; exitCode?: number; banner?: string }
   /** `key` is the base64 raw public key blob the server presented. */
   | { t: 'sshHostKey'; id: string; promptId: string; key: string }
-  | { t: 'sshAuthPrompt'; id: string; promptId: string; kind: 'password' | 'keyboard'; name?: string; instructions?: string; fields: Array<{ text: string; echo: boolean }>; retry: boolean };
+  | { t: 'sshAuthPrompt'; id: string; promptId: string; kind: 'password' | 'keyboard' | 'sudo'; name?: string; instructions?: string; fields: Array<{ text: string; echo: boolean }>; retry: boolean };
 
 export type RendererToHost =
   /** `reply`: the terminal's own answer (device / focus / mouse report), not typing: it does not shorten the output window. */

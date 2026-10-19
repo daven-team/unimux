@@ -20,8 +20,10 @@ interface SftpStore {
   pickerOpen: boolean;
   /** A folder the remote pane should go to (set by "Otwórz SFTP tutaj" on the connected host); bumped by `seq`. */
   remoteGoto: { path: string; seq: number } | null;
+  /** Progress of long operations by op id (a recursive permission change, 0.9.9). */
+  opProgress: Record<string, { done: number; total: number }>;
 }
 
 export const useSftpStore = create<SftpStore>(() => ({
-  sessionId: null, hostId: null, session: null, prompt: null, sessionHosts: {}, transfers: [], preparing: [], pickerOpen: false, remoteGoto: null,
+  sessionId: null, hostId: null, session: null, prompt: null, sessionHosts: {}, transfers: [], preparing: [], pickerOpen: false, remoteGoto: null, opProgress: {},
 }));
