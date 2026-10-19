@@ -3,14 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DbSort, DbValue } from '../../../../shared/db';
 import { DB_LIMITS, isTruncated } from '../../../../shared/db';
-import { formatDbValue, parseDbInput, rowsToCsv, rowsToJson, statementAt } from '../../../../shared/dbSql';
-import { addInsert, isDeleted, rowOriginal, parseStaged, removeInserts, rowKey, setInsertValue, stageCell, stagedCell, stagedCount, toggleDeletes, type DbRowKey, type DbStaged } from '../../../../shared/dbTabs';
+import { formatDbValue, parseDbInput, rowsToCsv, rowsToJson, splitSql, statementAt } from '../../../../shared/dbSql';
+import { addInsert, conflictRowIndex, isDeleted, rowOriginal, txToggle, parseStaged, removeInserts, rowKey, setInsertValue, stageCell, stagedCell, stagedCount, toggleDeletes, type DbRowKey, type DbStaged } from '../../../../shared/dbTabs';
 import { uid } from '../../../../shared/state';
 import type { SQLNamespace } from '@codemirror/lang-sql';
 import { closeFile, editFile, useFileStore, type FileDocument } from '../../files';
 import { resultError, useDbStore } from '../../db/dbClient';
 import {
-  applyStaged, cancelSql, connectionOf, loadDdl, loadMore, loadPage, openSqlTab, previewStaged, readHistory, readOnlyReason, runSql, setStaged, sqlTransaction,
+  applyStaged, cancelSql, clearHistory, connectionOf, loadDdl, loadMore, loadPage, openSqlTab, previewStaged, readHistory, readOnlyReason, runSql, setStaged, sqlTransaction,
   tabState, useDbTabs, type SqlResult, type SqlTabState, type TableTabState, type DdlTabState,
 } from '../../db/tabs';
 import { useI18n } from '../../i18n';
@@ -45,8 +45,11 @@ function TabHeader({ doc, sessionId, children }: { doc: FileDocument; sessionId:
       <span className="db-color" style={{ background: connection?.color ?? 'var(--muted)' }} />
       <strong className="db-tab-conn">{connection?.name ?? tr('To połączenie zostało usunięte')}</strong>
       <span className="db-tab-path">{ref.database}{ref.kind === 'table' ? ` · ${ref.schema}.${ref.table}` : ref.kind === 'ddl' ? ` · ${ref.schema}.${ref.name}` : ''}</span>
-      {connection?.readOnly && <span className="db-ro" title={tr('To połączenie jest tylko do odczytu')}>RO</span>}
-      {session?.state === 'connected' && session.tls !== undefined && <span className={`db-tls ${session.tls ? 'on' : 'off'}`} data-field="tls">{session.tls ? tr('Połączenie szyfrowane (TLS)') : tr('Połączenie nieszyfrowane')}</span>}
+      {(session ? session.readOnly : connection?.readOnly) && <span className="db-ro" data-field="ro" title={tr('To połączenie jest tylko do odczytu')}>RO</span>}
+      {session && connection && session.readOnly !== connection.readOnly && <span className="db-meta" data-field="ro-pending" title={tr('Zmiana trybu tylko do odczytu zadziała po ponownym połączeniu')}>{tr(connection.readOnly ? 'RO po ponownym połączeniu' : 'zapis po ponownym połączeniu')}</span>}
+      {session?.state === 'connected' && session.tls !== undefined && <span className={`db-tls ${session.tls ? 'on' : 'off'}`} data-field="tls"
+        title={session.tls && connection?.tls !== 'verify-full' ? tr('Szyfrowane, ale certyfikat serwera nie jest sprawdzany') : undefined}>
+        {!session.tls ? tr('Połączenie nieszyfrowane') : connection?.tls === 'verify-full' ? tr('Połączenie szyfrowane (TLS)') : tr('TLS bez weryfikacji certyfikatu')}</span>}
       {session?.serverVersion && <span className="db-meta" title={session.serverVersion}>{session.serverVersion.split(' ').slice(0, 2).join(' ')}</span>}
       <span className="grow" />
       {children}
@@ -70,9 +73,15 @@ function ValueViewer({ target, onClose }: { target: ViewerTarget; onClose: () =>
   }, [target]); // eslint-disable-line react-hooks/exhaustive-deps
   const shown = full ? formatDbValue(full.value, target.kind, { pretty: true }) : null;
   useEffect(() => { setText(shown ?? ''); }, [shown]);
-  const apply = (asNull: boolean) => {
-    const r = parseDbInput(target.kind, text, { asNull, typeName: target.typeName });
+  const apply = (asNull: boolean, compact = false) => {
+    // Unchanged text (also a re-indented JSON view or line breaks the text box normalized) stages nothing.
+    const norm = (t: string) => t.replace(/\r\n?/g, '\n');
+    if (!asNull && full && full.value !== null && norm(text) === norm(shown ?? '')) { onClose(); return; }
+    let typed = text;
+    if (compact) { try { typed = JSON.stringify(JSON.parse(text)); } catch { /* checked below */ } }
+    const r = parseDbInput(target.kind, typed, { asNull, typeName: target.typeName });
     if (!r.ok) { setInputError(tr(r.error)); return; }
+    if (r.value === full?.value) { onClose(); return; }
     target.onApply?.(r.value);
     onClose();
   };
@@ -92,14 +101,15 @@ function ValueViewer({ target, onClose }: { target: ViewerTarget; onClose: () =>
         {target.onApply && full && <>
           <span className="grow" />
           <button className="btn small" onClick={() => apply(true)}>{tr('Ustaw NULL')}</button>
-          <button className="btn small primary" onClick={() => apply(false)}>{tr('Zastosuj')}</button>
+          {target.kind === 'json' && <button className="btn small" title={tr('Zapisz JSON bez wcięć')} onClick={() => apply(false, true)}>{tr('Zastosuj zwięźle')}</button>}
+          <button className="btn small primary" data-action="viewer-apply" onClick={() => apply(false)}>{tr('Zastosuj')}</button>
         </>}
       </div>
     </aside>
   );
 }
 
-function SqlPreview({ sql, onClose }: { sql: string; onClose: () => void }) {
+function SqlPreview({ sql, onClose, onSave }: { sql: string; onClose: () => void; onSave?: () => void }) {
   const { tr } = useI18n();
   return (
     <div className="db-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}>
@@ -108,7 +118,9 @@ function SqlPreview({ sql, onClose }: { sql: string; onClose: () => void }) {
         <div className="modal-body"><pre className="db-preview-sql">{sql}</pre></div>
         <div className="modal-foot">
           <button className="btn" onClick={() => window.mc.clipboardWrite(sql)}>{tr('Kopiuj')}</button>
-          <button className="btn primary" autoFocus onClick={onClose}>{tr('Zamknij')}</button>
+          <span className="grow" />
+          <button className="btn" autoFocus onClick={onClose}>{tr('Zamknij')}</button>
+          {onSave && <button className="btn primary" data-action="preview-save" onClick={onSave}>{tr('Zapisz zmiany')}</button>}
         </div>
       </div>
     </div>
@@ -134,12 +146,14 @@ function DbTableView({ id }: { id: string }) {
   const staged: DbStaged = useMemo(() => parseStaged(doc.text), [doc.text]);
   const [filter, setFilter] = useState(st.filter);
   const [viewer, setViewer] = useState<ViewerTarget | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ sql: string; staged: string } | null>(null);
+  const sessionReadOnly = useDbStore((s) => (st.sessionId ? s.sessions[st.sessionId]?.readOnly : undefined));
   const [widths, setWidths] = useState<Record<string, number>>({});
   const [selRows, setSelRows] = useState<number[]>([]);
   const [reveal, setReveal] = useState<{ row: number; seq: number } | null>(null);
   useEffect(() => { if (!st.columns.length && !st.loading && !st.error) void loadPage(id); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const readOnly = readOnlyReason(ref, st.info);
+  const readOnly = readOnlyReason(ref, st.info, sessionReadOnly);
+  const locked = !!readOnly || st.saving;
   const info = st.info;
   const keyCols = info?.editKey ?? null;
   const columns: GridColumn[] = useMemo(() => (st.columns.length ? st.columns : (info?.columns ?? []).map((c) => ({ name: c.name, typeName: c.typeName, kind: c.kind, typeOid: c.typeOid })))
@@ -157,9 +171,11 @@ function DbTableView({ id }: { id: string }) {
     const s = key ? stagedCell(staged, key, name) : null;
     return s ? { value: s.value, changed: true } : { value: st.rows[r][c] ?? null };
   };
-  const rowState = (r: number): RowState => (r >= st.rows.length ? 'inserted' : keys[r] && isDeleted(staged, keys[r]!) ? 'deleted' : null);
+  const conflictRow = conflictRowIndex(st.conflict, keys, staged, st.rows.length);
+  const rowState = (r: number): RowState => (r === conflictRow ? 'conflict' : r >= st.rows.length ? 'inserted' : keys[r] && isDeleted(staged, keys[r]!) ? 'deleted' : null);
+  useEffect(() => { if (conflictRow !== null) setReveal((v) => ({ row: conflictRow, seq: (v?.seq ?? 0) + 1 })); }, [st.conflict]); // eslint-disable-line react-hooks/exhaustive-deps
   const canEdit = (r: number, c: number) => {
-    if (readOnly) return false;
+    if (locked) return false;
     const name = columns[c].name;
     if (r >= st.rows.length) return !generated.has(name);
     return !!keys[r] && !fixed.has(name) && !isDeleted(staged, keys[r]!);
@@ -197,13 +213,14 @@ function DbTableView({ id }: { id: string }) {
   const keysOf = (rows: number[]): Array<{ key: DbRowKey; original: Record<string, string | null> }> => rows.filter((r) => r < st.rows.length && keys[r])
     .map((r) => ({ key: keys[r]!, original: rowOriginal(st.rows[r], st.columns) }));
   const deleteRows = (rows: number[]) => {
-    if (readOnly) return;
+    if (locked) return;
     const inserts = rows.filter((r) => r >= st.rows.length).map((r) => insertAt(r)?.id).filter(Boolean) as string[];
     let next = removeInserts(staged, inserts);
     next = toggleDeletes(next, keysOf(rows));
     setStaged(id, next);
   };
   const duplicateRows = (rows: number[]) => {
+    if (locked) return;
     let next = staged;
     for (const r of rows) {
       const values: Record<string, string | null> = {};
@@ -221,7 +238,7 @@ function DbTableView({ id }: { id: string }) {
   };
   const showSql = async () => {
     const r = await previewStaged(id);
-    if (r.ok) setPreview(r.sql); else toast(r.error, 'error');
+    if (r.ok) setPreview({ sql: r.sql, staged: r.staged }); else toast(r.error, 'error');
   };
   const discard = async () => {
     const choice = await askChoice(tr('Cofnąć zmiany?'), tr('Zmiany czekające na zapis: {count}.', { count: stagedCount(staged) }), [{ label: tr('Cofnij zmiany'), value: 'discard', danger: true }]);
@@ -258,14 +275,14 @@ function DbTableView({ id }: { id: string }) {
       </div>
       <div className="db-toolbar db-edit-bar">
         {readOnly ? <span className="db-note" data-field="readonly-note">{readOnly}</span> : <>
-          <button className="btn small" data-action="add-row" onClick={() => { setStaged(id, addInsert(staged, uid())); setReveal((r) => ({ row: rowCount, seq: (r?.seq ?? 0) + 1 })); }}>{tr('Dodaj wiersz')}</button>
-          <button className="btn small" disabled={!selRows.length} onClick={() => duplicateRows(selRows)}>{tr('Duplikuj')}</button>
-          <button className="btn small" disabled={!selRows.length} data-action="delete-rows" onClick={() => deleteRows(selRows)}>{tr('Usuń')}</button>
+          <button className="btn small" data-action="add-row" disabled={st.saving} onClick={() => { setStaged(id, addInsert(staged, uid())); setReveal((r) => ({ row: rowCount, seq: (r?.seq ?? 0) + 1 })); }}>{tr('Dodaj wiersz')}</button>
+          <button className="btn small" disabled={!selRows.length || st.saving} onClick={() => duplicateRows(selRows)}>{tr('Duplikuj')}</button>
+          <button className="btn small" disabled={!selRows.length || st.saving} data-action="delete-rows" onClick={() => deleteRows(selRows)}>{tr('Usuń')}</button>
         </>}
         <span className="grow" />
         {pending > 0 && <span className="db-pending" data-field="pending">{tr('Zmiany do zapisania: {count}', { count: pending })}</span>}
         {pending > 0 && <button className="btn small" data-action="show-sql" onClick={() => void showSql()}>{tr('Pokaż SQL')}</button>}
-        {pending > 0 && <button className="btn small" data-action="discard" onClick={() => void discard()}>{tr('Cofnij zmiany')}</button>}
+        {pending > 0 && <button className="btn small" data-action="discard" disabled={st.saving} onClick={() => void discard()}>{tr('Cofnij zmiany')}</button>}
         {pending > 0 && <button className="btn small primary" data-action="save" disabled={st.saving || !!readOnly} onClick={() => void applyStaged(id)}>{st.saving ? tr('Zapisywanie…') : tr('Zapisz zmiany')}</button>}
         <button className="btn small ghost" disabled={!st.rows.length} onClick={(e) => openMenuAt(e.currentTarget, [
           { header: tr('Eksportuj stronę') },
@@ -278,16 +295,17 @@ function DbTableView({ id }: { id: string }) {
       {st.notice && <div className="db-notice" role="status">{st.notice}</div>}
       <div className="db-tab-body">
         <DbGrid label={doc.name} columns={columns} rowCount={rowCount} cell={cell} rowState={rowState} firstNumber={from} sort={st.sort}
-          onSort={changeSort} canEdit={canEdit} onEdit={onEdit} onOpenValue={openValue} onDeleteKey={readOnly ? undefined : deleteRows}
+          onSort={changeSort} canEdit={canEdit} onEdit={onEdit} onOpenValue={openValue} onDeleteKey={locked ? undefined : deleteRows}
           resetKey={st.loads} widths={widths} onWidths={setWidths} emptyText={st.loading ? tr('Wczytywanie…') : st.error ? ' ' : undefined}
           onSelectRows={setSelRows} reveal={reveal}
-          menuItems={(rows) => readOnly ? [] : [
+          menuItems={(rows) => locked ? [] : [
             { label: tr('Duplikuj wiersz'), onClick: () => duplicateRows(rows) },
             { label: rows.every((r) => rowState(r) === 'deleted') ? tr('Przywróć wiersze') : tr('Usuń wiersze'), danger: true, onClick: () => deleteRows(rows) },
           ]} />
         {viewer && <ValueViewer target={viewer} onClose={() => setViewer(null)} />}
       </div>
-      {preview !== null && <SqlPreview sql={preview} onClose={() => setPreview(null)} />}
+      {preview !== null && <SqlPreview sql={preview.sql} onClose={() => setPreview(null)}
+        onSave={readOnly || st.saving ? undefined : () => { const expect = preview.staged; setPreview(null); void applyStaged(id, expect); }} />}
     </section>
   );
 }
@@ -332,13 +350,30 @@ function DbSqlView({ id }: { id: string }) {
   };
   useEffect(() => { const err = st.results.find((r) => r.error && r.position); if (err && !st.running) showError(err); }, [st.running]); // eslint-disable-line react-hooks/exhaustive-deps
   const overrideRun = async () => {
-    const choice = await askChoice(tr('Uruchomić z zapisem?'), tr('To połączenie jest tylko do odczytu. Ten jeden raz zapytanie może zmienić dane.'), [{ label: tr('Uruchom z zapisem'), value: 'run', danger: true }]);
+    // Nothing of the refused run ran (read-only is checked before the first statement): the whole run goes again, shown here.
+    const statements = splitSql(st.runText);
+    const listed = statements.slice(0, 8).map((s, i) => `${i + 1}. ${s.text.replace(/\s+/g, ' ').slice(0, 160)}`);
+    const more = statements.length > listed.length ? `\n${tr('…i jeszcze {count}', { count: statements.length - listed.length })}` : '';
+    const body = `${tr('To połączenie jest tylko do odczytu. Ten jeden raz zapytanie może zmienić dane.')}\n\n${tr('Instrukcje do uruchomienia: {count}', { count: statements.length })}\n${listed.join('\n')}${more}`;
+    const choice = await askChoice(tr('Uruchomić z zapisem?'), body, [{ label: tr('Uruchom z zapisem'), value: 'run', danger: true }]);
     if (choice === 'run') void runSql(id, st.runText, st.runOffset, { readWrite: true });
+  };
+  const toggleTx = async (on: boolean) => {
+    const action = txToggle(tx, on);
+    if (action === 'begin' || action === 'rollback') { void sqlTransaction(id, action); return; }
+    if (action !== 'ask') return;
+    const choice = await askChoice(tr('Zakończyć transakcję?'), tr('Zatwierdź zmiany (COMMIT) albo je wycofaj (ROLLBACK).'), [
+      { label: 'COMMIT', value: 'commit', primary: true },
+      { label: 'ROLLBACK', value: 'rollback', danger: true },
+    ]);
+    if (choice === 'commit' || choice === 'rollback') void sqlTransaction(id, choice);
   };
   const historyMenu = (el: HTMLElement) => {
     const list = readHistory(ref.connectionId).slice(0, 30);
     openMenuAt(el, list.length ? [
       { header: tr('Historia zapytań') },
+      { label: tr('Wyczyść historię'), danger: true, onClick: () => clearHistory(ref.connectionId) },
+      { sep: true },
       ...list.map((h) => ({ label: h.sql.replace(/\s+/g, ' ').slice(0, 90), hint: `${h.ok ? '' : '! '}${new Date(h.at).toLocaleTimeString()}`, onClick: () => useFileStore.setState((s) => ({ documents: s.documents.map((d) => (d.id === id ? { ...d, text: d.text ? `${d.text.replace(/\s*$/, '')}\n\n${h.sql}` : h.sql } : d)) })) })),
     ] : [{ header: tr('Historia zapytań jest pusta') }]);
   };
@@ -364,7 +399,7 @@ function DbSqlView({ id }: { id: string }) {
         <button className="btn small" data-action="cancel" disabled={!st.running} onClick={() => void cancelSql(id)}><IStop /> {tr('Anuluj')}</button>
         <span className="db-sep" />
         <label className="check db-txmode" title={tr('Tryb transakcji: zmiany czekają na COMMIT albo ROLLBACK')}>
-          <input type="checkbox" data-field="txmode" checked={tx !== 'idle' || st.txMode} disabled={st.running || tx !== 'idle'} onChange={(e) => { if (e.target.checked) void sqlTransaction(id, 'begin'); }} />
+          <input type="checkbox" data-field="txmode" checked={tx !== 'idle'} disabled={st.running} onChange={(e) => void toggleTx(e.target.checked)} />
           {tr('Transakcja')}
         </label>
         {tx !== 'idle' && <>
@@ -440,7 +475,8 @@ function ResultGrid({ id, result, name }: { id: string; result: SqlResult; name:
       </div>
       <div className="db-result-foot">
         <span className="db-meta" data-field="result-rows">{tr('{count} wierszy', { count: result.rows.length })}{result.timeMs !== null ? ` · ${result.timeMs} ms` : ''}</span>
-        {result.hasMore && !result.closed && <button className="btn small" data-action="load-more" disabled={result.loadingMore} onClick={() => void loadMore(id, result.index)}>{result.loadingMore ? tr('Wczytywanie…') : tr('Wczytaj więcej')}</button>}
+        {result.capped && <span className="db-note" data-field="capped">{tr('Wczytano {count} wierszy - więcej nie mieści się w tym widoku', { count: result.rows.length })}</span>}
+        {result.hasMore && !result.closed && !result.capped && <button className="btn small" data-action="load-more" disabled={result.loadingMore} onClick={() => void loadMore(id, result.index)}>{result.loadingMore ? tr('Wczytywanie…') : tr('Wczytaj więcej')}</button>}
         {result.truncated && <span className="db-note">{tr('Wynik obcięty do {count} wierszy (instrukcja nie jest zwykłym odczytem)', { count: result.rows.length })}</span>}
         {result.hasMore && result.closed && <span className="db-note">{tr('Wynik zamknięty - uruchom zapytanie ponownie, aby wczytać więcej')}</span>}
         <span className="grow" />
