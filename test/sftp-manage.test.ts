@@ -108,12 +108,15 @@ describe('IPC validation of moves and permission changes', () => {
   beforeEach(() => { calls.length = 0; });
 
   it('moves stay on one side and in their queue', async () => {
+    // Local paths are absolute for this platform (a Windows path is not absolute on macOS or Linux).
+    const localSrc = process.platform === 'win32' ? 'C:\\a\\x' : '/a/x';
+    const localDir = process.platform === 'win32' ? 'C:\\b' : '/b';
     expect((await h.enqueue(SID, { direction: 'move', sources: ['/a/x'], targetDir: '/b' })).ok).toBe(true);
-    expect((await h.enqueue(null, { direction: 'local-move', sources: ['C:\\a\\x'], targetDir: 'C:\\b' })).ok).toBe(true);
+    expect((await h.enqueue(null, { direction: 'local-move', sources: [localSrc], targetDir: localDir })).ok).toBe(true);
     expect(await h.enqueue(null, { direction: 'move', sources: ['/a/x'], targetDir: '/b' })).toEqual({ ok: false, error: 'invalid' });
-    expect(await h.enqueue(SID, { direction: 'local-move', sources: ['C:\\a\\x'], targetDir: 'C:\\b' })).toEqual({ ok: false, error: 'invalid' });
+    expect(await h.enqueue(SID, { direction: 'local-move', sources: [localSrc], targetDir: localDir })).toEqual({ ok: false, error: 'invalid' });
     expect(await h.enqueue(SID, { direction: 'move', sources: ['C:\\a\\x'], targetDir: '/b' })).toEqual({ ok: false, error: 'invalid' });
-    expect(await h.enqueue(null, { direction: 'local-move', sources: ['C:\\a\\x'], targetDir: 'b' })).toEqual({ ok: false, error: 'invalid' });
+    expect(await h.enqueue(null, { direction: 'local-move', sources: [localSrc], targetDir: 'b' })).toEqual({ ok: false, error: 'invalid' });
     expect(calls).toHaveLength(2);
   });
 
