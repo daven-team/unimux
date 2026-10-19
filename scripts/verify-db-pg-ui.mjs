@@ -155,6 +155,13 @@ try {
   await app.click('.db-table-tab [data-action=prev-page]');
   await app.until(`${cell(0, 0)}?.textContent === '1'`, 'back to the first page');
 
+  // A NULL cell entered and left without typing stages nothing (never NULL -> '').
+  await dbl(cell(4, 5));
+  await app.until(`!!document.querySelector('.db-cell-editor input')`, 'editor on a NULL cell');
+  check(await ev(`document.querySelector('.db-cell-editor input').dataset.state === 'null'`), 'the editor of a NULL cell shows NULL as its state');
+  await ev(`document.querySelector('.db-cell-editor input').blur(), true`);
+  await app.until(`!document.querySelector('.db-cell-editor')`, 'editor closed');
+  check(!(await ev(`!!document.querySelector('.db-table-tab [data-field=pending]')`)) && await ev(`!!${cell(4, 5)}.querySelector('.db-null')`), 'leaving a NULL cell without typing stages nothing');
   // Edit a cell inline.
   await dbl(cell(0, 1));
   await app.until(`!!document.querySelector('.db-cell-editor input')`, 'cell editor');
@@ -218,6 +225,7 @@ try {
   await app.until(`!!document.querySelector('.db-table-tab [data-field=error]')`, 'conflict error', 20000);
   const conflictText = await textOf('.db-table-tab [data-field=error]');
   check(conflictText.includes('id = 2') && conflictText.includes('nic nie zapisano'), 'a conflict names the row and saves nothing');
+  check(await ev(`document.querySelector('.db-table-tab .db-grid [aria-rowindex="3"]')?.classList.contains('conflict')`), 'the conflicting row is highlighted');
   await app.screenshot('100-db-conflict.png');
   await app.click('.db-table-tab [data-action=discard]');
   await app.until(`!!document.querySelector('.modal .modal-foot')`, 'discard asks');
@@ -293,6 +301,24 @@ try {
   await key('Enter', CTRL);
   await app.until(`${cell(0, 0)}?.textContent === '0'`, 'rollback undid the insert', 20000);
   check(true, 'ROLLBACK undoes the insert');
+  // COMMIT typed in the script ends the transaction: the toggle follows the session.
+  await ev(`document.querySelector('.db-sql-tab [data-field=txmode]').click()`);
+  await app.until(`!!document.querySelector('.db-sql-tab [data-field=tx]') && document.querySelector('.db-sql-tab [data-field=txmode]').checked`, 'transaction open again', 20000);
+  await typeCm('COMMIT');
+  await key('Enter', CTRL);
+  await app.until(`!document.querySelector('.db-sql-tab [data-field=tx]') && !document.querySelector('.db-sql-tab [data-field=txmode]').checked`, 'toggle off after a typed COMMIT', 20000);
+  check(true, 'a COMMIT typed in the script turns the transaction toggle off');
+  // "Rozłącz" with an open transaction in a SQL tab asks first.
+  await ev(`document.querySelector('.db-sql-tab [data-field=txmode]').click()`);
+  await app.until(`!!document.querySelector('.db-sql-tab [data-field=tx]')`, 'transaction for the disconnect question', 20000);
+  await contextOn(rowByText('local pg'));
+  await menu('Rozłącz');
+  await app.until(`!!document.querySelector('.modal .modal-foot')`, 'disconnect asks');
+  check((await textOf('.modal')).includes('Otwarte transakcje: 1'), 'disconnecting with an open transaction asks and counts it');
+  await app.screenshot('100-db-disconnect-asks.png');
+  await clickText('.modal .modal-foot .btn', 'Anuluj');
+  await app.click('.db-sql-tab [data-action=rollback]');
+  await app.until(`!document.querySelector('.db-sql-tab [data-field=tx]')`, 'rolled back after the question', 20000);
 
   // ── read-only connection ──
   const ro = await ev(`window.mc.db.saveConnection({ kind: 'postgres', name: 'pg read-only', color: '#f59e0b', host: '127.0.0.1', port: ${pg.port}, user: 'postgres', database: 'postgres', tls: 'disable', ssh: null, readOnly: true }, { keep: true })`);
@@ -306,6 +332,7 @@ try {
   await dbl(rowByText('items'));
   await app.until(`(document.querySelector('.db-table-tab [data-field=readonly-note]')?.textContent ?? '').includes('tylko do odczytu')`, 'read-only table', 20000);
   check(true, 'a read-only connection opens tables read-only with a note');
+  check(await ev(`!!document.querySelector('.db-table-tab [data-field=ro]')`), 'the RO badge comes from the session');
   await contextOn(rowByText('pg read-only'));
   await menu('Nowy edytor SQL');
   await app.until(`!!document.querySelector('.db-sql-tab .cm-content')`, 'read-only SQL tab');

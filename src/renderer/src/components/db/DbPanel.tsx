@@ -8,8 +8,8 @@ import { hasRows } from '../../../../shared/dbTabs';
 import { quoteIdent } from '../../../../shared/dbSql';
 import { rowWindow } from '../../../../shared/virtualRows';
 import type { MessageKey } from '../../../../shared/i18n';
-import { connectionState, disconnectConnection, ensureShared, initDb, isLive, refreshLoads, runLoad, sharedKey, useDbStore } from '../../db/dbClient';
-import { initDbTabs, openDdlTab, openSqlTab, openTableTab } from '../../db/tabs';
+import { connectionState, ensureShared, initDb, isLive, refreshLoads, runLoad, sharedKey, useDbStore } from '../../db/dbClient';
+import { disconnectAsking, initDbTabs, openDdlTab, openSqlTab, openTableTab, openTransactions, pruneStoredHistory, stagedTabsOf } from '../../db/tabs';
 import { useI18n } from '../../i18n';
 import { askChoice, setUi, toast, useStore } from '../../store';
 import { openMenu, openMenuAt, type MenuItem } from '../ContextMenu';
@@ -26,7 +26,12 @@ export const openNewConnection = (kind: 'postgres' | 'redis' = 'postgres') => se
 export const editConnection = (id: string) => setUi({ modal: { kind: 'dbConnection', connectionId: id } });
 
 export async function deleteConnection(c: DbConnection, tr: (k: MessageKey, p?: Record<string, string | number>) => string): Promise<void> {
-  const choice = await askChoice(tr('Usunąć połączenie {name}?', { name: c.name }), tr('Zapisane hasło też zostanie usunięte. Otwarte karty tego połączenia przestaną działać.'), [
+  const tx = openTransactions(c.id);
+  const staged = stagedTabsOf(c.id);
+  const body = [tr('Zapisane hasło też zostanie usunięte. Otwarte karty tego połączenia przestaną działać.'),
+    ...(tx ? [tr('Otwarte transakcje: {count}. Zostaną wycofane (ROLLBACK).', { count: tx })] : []),
+    ...(staged ? [tr('Tabele z niezapisanymi zmianami: {count}. Zmian nie będzie można zapisać.', { count: staged })] : [])].join('\n');
+  const choice = await askChoice(tr('Usunąć połączenie {name}?', { name: c.name }), body, [
     { label: tr('Usuń połączenie'), value: 'delete', danger: true },
   ]);
   if (choice !== 'delete') return;
@@ -48,9 +53,11 @@ export const DbPanel = memo(function DbPanel() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<string | null>(null);
   const open = useMemo(() => new Set(openList), [openList]);
-  const live = (connectionId: string) => connectionState({ sessions, shared }, connectionId) !== 'closed';
+  const live = (connectionId: string) => connectionState({ sessions }, connectionId) !== 'closed';
   const { rows, needed } = useMemo(() => buildDbTree({ connections, open, loads, filter, live }), [connections, open, loads, filter, sessions, shared]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { for (const req of needed) void runLoad(req); }, [needed]);
+  // History of deleted connections goes with them.
+  useEffect(() => { pruneStoredHistory(); }, [connections]);
 
   const scroller = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ top: 0, height: 400 });
@@ -67,7 +74,7 @@ export const DbPanel = memo(function DbPanel() {
 
   const setOpen = (next: Set<string>) => useDbStore.setState({ open: [...next] });
   const connect = async (c: DbConnection) => {
-    if (c.kind !== 'postgres') { toast(tr('Przeglądarka Redis będzie dostępna w kolejnej wersji')); return; }
+    if (c.kind !== 'postgres') { toast(tr('Przeglądarka Redis jest jeszcze niedostępna')); return; }
     setErrors((e) => { const n = { ...e }; delete n[c.id]; return n; });
     const key = nodeKey.connection(c.id);
     if (!open.has(key)) setOpen(new Set([...open, key]));
@@ -93,7 +100,7 @@ export const DbPanel = memo(function DbPanel() {
     openMenu(x, y, [
       { header: c.name },
       ...(c.kind === 'postgres' ? [
-        isOn ? { label: tr('Rozłącz'), onClick: () => disconnectConnection(c.id) } : { label: tr('Połącz'), onClick: () => void connect(c) },
+        isOn ? { label: tr('Rozłącz'), onClick: () => void disconnectAsking(c.id, c.name) } : { label: tr('Połącz'), onClick: () => void connect(c) },
         { label: tr('Nowy edytor SQL'), onClick: () => openSqlTab(c.id, c.database ?? 'postgres') },
         ...(isOn ? [{ label: tr('Odśwież'), onClick: () => refreshLoads((k) => k[1] === c.id) }] : []),
         { sep: true } as MenuItem,
@@ -136,6 +143,55 @@ export const DbPanel = memo(function DbPanel() {
     } else return;
     openMenu(x, y, items);
   };
+  /** Keyboard of the tree (like the Files tree): arrows move and fold, Enter opens, the menu key or Shift+F10 opens the menu. */
+  const onTreeKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!rows.length) return;
+    const at = Math.max(0, rows.findIndex((r) => r.key === selected));
+    const row = rows[at];
+    const go = (i: number) => {
+      const index = Math.max(0, Math.min(rows.length - 1, i));
+      setSelected(rows[index].key);
+      const el = scroller.current;
+      if (el) {
+        const top = index * ROW;
+        if (top < el.scrollTop) el.scrollTop = top;
+        else if (top + ROW > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW - el.clientHeight;
+      }
+    };
+    const expandable = 'expanded' in row && (row.type !== 'object' || row.expandable);
+    switch (e.key) {
+      case 'ArrowDown': go(selected ? at + 1 : 0); break;
+      case 'ArrowUp': go(at - 1); break;
+      case 'Home': go(0); break;
+      case 'End': go(rows.length - 1); break;
+      case 'PageDown': go(at + Math.max(1, Math.floor(view.height / ROW) - 1)); break;
+      case 'PageUp': go(at - Math.max(1, Math.floor(view.height / ROW) - 1)); break;
+      case 'ArrowRight':
+        if (expandable && !row.expanded) toggle(row);
+        else if (expandable) go(at + 1);
+        break;
+      case 'ArrowLeft': {
+        if (expandable && row.expanded) { toggle(row); break; }
+        for (let i = at - 1; i >= 0; i--) if (rows[i].depth < row.depth) { go(i); break; }
+        break;
+      }
+      case 'Enter':
+        if (row.type === 'object') activate(row);
+        else if (expandable || (row.type === 'status' && row.retry)) activate(row);
+        break;
+      case 'ContextMenu': case 'F10': {
+        if (e.key === 'F10' && !e.shiftKey) return;
+        const el = scroller.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(row.key)}"]`);
+        const b = el?.getBoundingClientRect();
+        rowMenu(row, (b?.left ?? 0) + 24, (b?.top ?? 0) + ROW);
+        break;
+      }
+      default: return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   const activate = (row: DbTreeRow) => {
     if (row.type === 'object') {
       if (hasRows(row.object.kind)) openTableTab(row.connectionId, row.database, row.object.schema, row.object.name, row.object.kind);
@@ -158,7 +214,7 @@ export const DbPanel = memo(function DbPanel() {
       case 'group': body = <><IFolder /><span className="db-name">{row.name}</span><span className="db-meta">{row.count}</span></>; break;
       case 'connection': {
         const c = row.connection;
-        const state = connectionState({ sessions, shared }, c.id);
+        const state = connectionState({ sessions }, c.id);
         title = `${c.name}\n${c.user ? `${c.user}@` : ''}${dbEndpoint(c)}${c.ssh ? `\n${tr('przez SSH: {host}', { host: hostLabel(c.ssh.hostId) })}` : ''}${c.readOnly ? `\n${tr('Tylko do odczytu')}` : ''}`;
         body = <>
           <span className="db-color" style={{ background: c.color ?? 'var(--muted)' }} />
@@ -197,7 +253,7 @@ export const DbPanel = memo(function DbPanel() {
     }
     return (
       <div key={row.key} className={`db-row db-${row.type} ${selected === row.key ? 'sel' : ''}`} style={style} title={title} data-key={row.key}
-        role="treeitem" aria-expanded={'expanded' in row ? row.expanded : undefined} aria-level={row.depth + 1}
+        role="treeitem" id={`db-tree-row-${index}`} aria-selected={selected === row.key} aria-expanded={'expanded' in row ? row.expanded : undefined} aria-level={row.depth + 1}
         onClick={() => { setSelected(row.key); if (row.type === 'connection' || row.type === 'group' || row.type === 'database' || row.type === 'schema' || row.type === 'folder' || row.type === 'part' || (row.type === 'status' && row.retry)) activate(row); }}
         onDoubleClick={() => { if (row.type === 'object') activate(row); }}
         onContextMenu={(e) => { e.preventDefault(); setSelected(row.key); rowMenu(row, e.clientX, e.clientY); }}>
@@ -242,7 +298,9 @@ export const DbPanel = memo(function DbPanel() {
           <button className="btn primary" onClick={() => openNewConnection('postgres')}>{tr('Nowe połączenie')}</button>
         </div>
       ) : (
-        <div className="db-tree" ref={scroller} role="tree" aria-label={tr('Bazy danych')} onScroll={(e) => setView({ top: e.currentTarget.scrollTop, height: e.currentTarget.clientHeight })}>
+        <div className="db-tree" ref={scroller} role="tree" tabIndex={0} aria-label={tr('Bazy danych')} onKeyDown={onTreeKey}
+          aria-activedescendant={selected && rows.some((r) => r.key === selected) ? `db-tree-row-${rows.findIndex((r) => r.key === selected)}` : undefined}
+          onMouseDown={(e) => { if ((e.target as HTMLElement).closest('.db-row')) scroller.current?.focus(); }} onScroll={(e) => setView({ top: e.currentTarget.scrollTop, height: e.currentTarget.clientHeight })}>
           <div style={{ height: rows.length * ROW, position: 'relative' }}>
             {rows.slice(win.start, win.end).map((row, i) => renderRow(row, win.start + i))}
           </div>

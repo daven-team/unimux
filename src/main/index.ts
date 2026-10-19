@@ -853,11 +853,11 @@ function startSsh(): void {
     return r.canceled ? null : r.filePaths[0] ?? null;
   }, () => null);
   // Export of a result (CSV / JSON): the user picks where in the save dialog; the renderer never names a path.
-  // MC_DB_EXPORT_DIR (real-app checks only) writes into that folder without the dialog.
+  // MC_DB_EXPORT_DIR (real-app checks of an unpackaged build only) writes into that folder without the dialog.
   guardedHandle('db:export', async (_e, name: unknown, text: unknown) => {
     if (typeof name !== 'string' || !name || name.length > 200 || /[\\/\0]/.test(name) || typeof text !== 'string' || text.length > 512 * 1024 * 1024) return { ok: false };
     let path: string | null = null;
-    if (process.env.MC_DB_EXPORT_DIR) path = join(process.env.MC_DB_EXPORT_DIR, basename(name));
+    if (process.env.MC_DB_EXPORT_DIR && !app.isPackaged) path = join(process.env.MC_DB_EXPORT_DIR, basename(name));
     else {
       const ext = name.split('.').pop() ?? '';
       const options = { title: tr('Eksportuj wynik'), defaultPath: name, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] };

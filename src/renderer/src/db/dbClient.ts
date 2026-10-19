@@ -209,12 +209,17 @@ export function disconnectConnection(connectionId: string): void {
 }
 
 /** The sessions of a connection that are connecting or connected (the panel's state dot). */
-export function connectionState(st: Pick<DbStore, 'sessions' | 'shared'>, connectionId: string): 'connected' | 'connecting' | 'closed' {
-  const ids = Object.entries(st.shared).filter(([key]) => key.startsWith(`${connectionId}\n`)).map(([, id]) => st.sessions[id]);
-  if (ids.some((s) => s?.state === 'connected')) return 'connected';
-  if (ids.some((s) => s?.state === 'connecting')) return 'connecting';
+/** The state of a connection from all its sessions (tree, table and SQL tabs; never a "Testuj połączenie" one). */
+export function connectionState(st: Pick<DbStore, 'sessions'>, connectionId: string): 'connected' | 'connecting' | 'closed' {
+  const own = Object.values(st.sessions).filter((s) => s.connectionId === connectionId && !s.test);
+  if (own.some((s) => s.state === 'connected')) return 'connected';
+  if (own.some((s) => s.state === 'connecting')) return 'connecting';
   return 'closed';
 }
+
+/** Live sessions of a connection (not test ones). */
+export const liveSessionsOf = (connectionId: string): number =>
+  Object.values(useDbStore.getState().sessions).filter((s) => s.connectionId === connectionId && !s.test && isLive(s)).length;
 
 // ── tree loads ──────────────────────────────────────────────────────────────
 
