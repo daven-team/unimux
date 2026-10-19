@@ -11,6 +11,7 @@ import {
 } from '../actions';
 import { openSidebarPanel } from '../panelActions';
 import { openSshView, reconnectAllSsh, reconnectAllTargetsOf } from '../ssh';
+import { openSftp } from '../sftp';
 import { getS, getUi, setUi, toast, update, useStore } from '../store';
 import { profileOptionLabel } from '../cliUi';
 import { statusLog, terminals } from '../terminals/TerminalManager';
@@ -56,6 +57,7 @@ function PaletteInner() {
       { kind: tr('Akcja'), title: tr('SSH: hosty i klucze'), run: () => openSshView() },
       { kind: tr('Akcja'), title: tr('SSH: nowy host'), run: () => openSshView({ kind: 'host' }) },
       { kind: tr('Akcja'), title: tr('SSH: nowy klucz'), run: () => openSshView({ kind: 'newKey' }) },
+      { kind: tr('Akcja'), title: tr('SFTP: połącz z hostem…'), run: () => openSftp({ picker: true }) },
     ];
     if (!project) out.push(...ssh);
     if (project) {

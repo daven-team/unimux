@@ -35,6 +35,15 @@ export const IServer = () => <Svg><rect x="2.5" y="2.5" width="11" height="4.5" 
 export const IKey = () => <Svg><circle cx="5.5" cy="10.5" r="3" /><path d="M7.6 8.4 13.5 2.5M11.5 4.5l1.5 1.5M10 6l1.2 1.2" /></Svg>;
 export const IShield = () => <Svg><path d="M8 1.8 13 3.8v3.8c0 3-2.1 5.4-5 6.6-2.9-1.2-5-3.6-5-6.6V3.8z" /><path d="m5.8 8 1.6 1.6 2.9-3" /></Svg>;
 export const IChevron = () => <Svg size={10}><path d="M4 6l4 4 4-4" /></Svg>;
+// SFTP view (0.9.8): path bar and transfers.
+export const IArrowLeft = () => <Svg><path d="M13 8H3M7 4L3 8l4 4" /></Svg>;
+export const IArrowRight = () => <Svg><path d="M3 8h10M9 4l4 4-4 4" /></Svg>;
+export const IArrowUp = () => <Svg><path d="M8 13V3M4 7l4-4 4 4" /></Svg>;
+export const IUpload = () => <Svg><path d="M8 10.5V2.5M4.5 6 8 2.5 11.5 6M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2" /></Svg>;
+export const IDownload = () => <Svg><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2" /></Svg>;
+export const IHome = () => <Svg><path d="M2.5 7.5 8 3l5.5 4.5M4 6.5V13h3V9.5h2V13h3V6.5" /></Svg>;
+export const IDrive = () => <Svg><rect x="2" y="5" width="12" height="6" rx="1.5" /><path d="M11 8h.01" strokeWidth="2.4" /></Svg>;
+export const ILink = () => <Svg size={10}><path d="M6.5 9.5l3-3M5 8l-1.5 1.5a2.1 2.1 0 0 0 3 3L8 11M11 8l1.5-1.5a2.1 2.1 0 0 0-3-3L8 5" /></Svg>;
 
 /** Supplied brand artwork, shared with the installer and update splash. */
 export function Logo({ size = 18 }: { size?: number }) {

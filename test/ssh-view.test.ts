@@ -59,18 +59,18 @@ describe('newKeyDetail (W3)', () => {
 });
 
 describe('SSH mode sections (0.9.2)', () => {
-  it('lists Hosty, Klucze, Znane hosty and a disabled SFTP entry, in that order', () => {
+  it('lists Hosty, Klucze, Znane hosty and SFTP (enabled since 0.9.8), in that order', () => {
     expect(SSH_NAV.map((e) => e.id)).toEqual(['hosts', 'keys', 'knownHosts', 'sftp']);
-    expect(SSH_NAV.filter((e) => e.disabled).map((e) => e.id)).toEqual(['sftp']);
+    expect(SSH_NAV.filter((e) => e.disabled).map((e) => e.id)).toEqual([]);
     expect(DEFAULT_SSH_SECTION).toBe('hosts');
   });
 
-  it('never selects the disabled SFTP entry or an unknown one', () => {
-    expect(chooseSshSection('keys', 'sftp')).toBe('keys');
+  it('selects SFTP like any section, never an unknown entry', () => {
+    expect(chooseSshSection('keys', 'sftp')).toBe('sftp');
     expect(chooseSshSection('hosts', 'nope')).toBe('hosts');
     expect(chooseSshSection('hosts', 'knownHosts')).toBe('knownHosts');
     expect(chooseSshSection('knownHosts', 'keys')).toBe('keys');
-    for (const junk of ['', 'sftp', 'Hosts', '__proto__', 'constructor']) expect(chooseSshSection('keys', junk)).toBe('keys');
+    for (const junk of ['', 'SFTP', 'Hosts', '__proto__', 'constructor']) expect(chooseSshSection('keys', junk)).toBe('keys');
   });
 
   it('puts a detail into its section and shows only the own detail of a section', () => {
@@ -90,7 +90,8 @@ describe('SSH mode sections (0.9.2)', () => {
     expect(sectionChange(st, 'knownHosts')).toEqual({ section: 'knownHosts', detail: null, selectedHosts: [] });
     expect(sectionChange({ section: 'hosts', detail: { kind: 'host', hostId: 'h1' }, selectedHosts: ['h1', 'h2'] }, 'keys')).toEqual({ section: 'keys', detail: null, selectedHosts: [] });
     expect(sectionChange(st, 'keys')).toEqual({});
-    expect(sectionChange(st, 'sftp')).toEqual({});
+    expect(sectionChange(st, 'sftp')).toEqual({ section: 'sftp', detail: null, selectedHosts: [] });
+    expect(sectionChange({ ...st, section: 'sftp' }, 'sftp')).toEqual({});
   });
 
   it('is SSH mode only while the view is in front and Settings is not', () => {

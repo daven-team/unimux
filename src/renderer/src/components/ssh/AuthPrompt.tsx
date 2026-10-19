@@ -2,11 +2,14 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { enterSubmitsPrompt, type SshPrompt, type SshVaultInfo } from '../../../../shared/ssh';
 import { useI18n } from '../../i18n';
+import { promptReply, type PromptReply } from './promptReply';
 
 type AuthKind = Extract<SshPrompt, { kind: 'passphrase' | 'password' | 'keyboard' }>;
 
-export function AuthPrompt({ cellId, prompt, storage }: { cellId: string; prompt: AuthKind; storage: SshVaultInfo['storage'] }) {
+/** In a cell (`cellId`) or, with `respond`, anywhere else that shows a login prompt (the SFTP view, 0.9.8). */
+export function AuthPrompt({ cellId, prompt, storage, respond }: { cellId: string; prompt: AuthKind; storage: SshVaultInfo['storage']; respond?: (reply: PromptReply) => void }) {
   const { tr } = useI18n();
+  const send = respond ?? promptReply(cellId);
   const fields = prompt.kind === 'keyboard' ? prompt.fields : [{ text: '', echo: false }];
   const [values, setValues] = useState<string[]>(() => fields.map(() => ''));
   const [remember, setRemember] = useState(prompt.kind === 'passphrase');
@@ -15,10 +18,10 @@ export function AuthPrompt({ cellId, prompt, storage }: { cellId: string; prompt
   useEffect(() => () => { valuesRef.current.fill(''); }, []);
 
   const submit = () => {
-    void window.mc.ssh.answer({ cellId, promptId: prompt.id, values, ...(prompt.kind !== 'keyboard' ? { remember } : {}) });
+    send({ promptId: prompt.id, values, ...(prompt.kind !== 'keyboard' ? { remember } : {}) });
     setValues(fields.map(() => ''));
   };
-  const cancel = () => { void window.mc.ssh.answer({ cellId, promptId: prompt.id, cancel: true }); setValues(fields.map(() => '')); };
+  const cancel = () => { send({ promptId: prompt.id, cancel: true }); setValues(fields.map(() => '')); };
   const onKey = (e: KeyboardEvent) => {
     e.stopPropagation();
     const target = e.target as HTMLInputElement;

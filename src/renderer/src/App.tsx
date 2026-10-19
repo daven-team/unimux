@@ -32,6 +32,7 @@ const loadSshView = () => import('./components/ssh/SshView').then((m) => ({ defa
 const loadSettingsPage = () => import('./components/SettingsPage').then((m) => ({ default: m.SettingsPage }));
 import { useFileStore, watchFilesOnDisk } from './files';
 import { cancelReconnectAtStart, initSsh, markReconnectAtStart } from './ssh';
+import { initSftp } from './sftp';
 import { useSshStore } from './sshStore';
 import { isWindowShown, onWindowShown } from './windowShown';
 
@@ -104,6 +105,7 @@ function bootStep(step: () => void): void {
 async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>>): Promise<void> {
   // Session states and open prompts of SSH cells (a reload finds them in main, R7).
   await initSsh().catch((error) => reportError('boot', error));
+  await initSftp().catch((error) => reportError('boot', error));
   setUi({ mcpInfo });
   const state = getS();
 
