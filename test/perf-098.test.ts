@@ -223,8 +223,8 @@ describe('shared blink', () => {
         if (/animation\s*:[^;]*\binfinite\b/.test(rule[2])) infinite.push(rule[1].trim());
       }
     }
-    // .brand.fx runs 2.4 s after a click on the logo; the SFTP view's spinner belongs to the SFTP work.
-    expect(infinite.sort()).toEqual(['.brand.fx .bn-fx', '.spinner']);
+    // .brand.fx runs 2.4 s after a click on the logo, nothing else.
+    expect(infinite.sort()).toEqual(['.brand.fx .bn-fx']);
   });
 });
 
