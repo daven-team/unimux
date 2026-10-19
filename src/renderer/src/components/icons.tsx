@@ -42,7 +42,6 @@ export const IFunction = () => <Svg><path d="M10.5 2.5c-2 0-2.5 1.2-2.8 3L6.5 13
 export const ISequence = () => <Svg><path d="M3 4.5h2M3 8h4M3 11.5h6M11 3.5v9M9.5 11l1.5 1.5 1.5-1.5" /></Svg>;
 export const IPlay = () => <Svg size={12}><path d="M4.5 3v10l8-5z" fill="currentColor" /></Svg>;
 export const IStop = () => <Svg size={12}><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor" /></Svg>;
-export const IRefresh = () => <Svg size={12}><path d="M13 8a5 5 0 1 1-1.5-3.5M13 3v3h-3" /></Svg>;
 export const IChevron = () => <Svg size={10}><path d="M4 6l4 4 4-4" /></Svg>;
 // SFTP view (0.9.8): path bar and transfers.
 export const IArrowLeft = () => <Svg><path d="M13 8H3M7 4L3 8l4 4" /></Svg>;

@@ -50,11 +50,15 @@ export function nextSqlName(used: readonly string[]): string {
 /** Key values of a row (text forms), by edit key column. */
 export type DbRowKey = Record<string, string>;
 export interface DbStagedInsert { id: string; values: Record<string, string | null> }
+/** Values a row was loaded with (text form, null for NULL); a save is a conflict when the row no longer has them. */
+export type DbOriginal = Record<string, string | null>;
 /** The edits of a table tab waiting for "Zapisz zmiany". */
 export interface DbStaged {
-  updates: Array<{ key: DbRowKey; set: Record<string, string | null> }>;
+  /** `original`: the loaded values of the edited columns (a truncated one is left out). */
+  updates: Array<{ key: DbRowKey; set: Record<string, string | null>; original?: DbOriginal }>;
   inserts: DbStagedInsert[];
-  deletes: DbRowKey[];
+  /** `original`: the loaded values of the row (truncated ones left out). */
+  deletes: Array<{ key: DbRowKey; original?: DbOriginal }>;
 }
 
 export const EMPTY_STAGED: DbStaged = { updates: [], inserts: [], deletes: [] };
@@ -86,23 +90,39 @@ export function stagedCell(s: DbStaged, key: DbRowKey, column: string): { value:
 }
 
 /** Stages a new value of a cell; typing the original value back removes the change (`original` undefined: not known whole). */
-export function stageCell(s: DbStaged, key: DbRowKey, column: string, value: string | null, original: string | null | undefined): DbStaged {
+export function stageCell(s: DbStaged, key: DbRowKey, column: string, value: string | null, original: string | null | undefined, checkOriginal = true): DbStaged {
   const at = s.updates.findIndex((x) => sameKey(x.key, key));
   const set = { ...(at >= 0 ? s.updates[at].set : {}) };
-  if (original !== undefined && value === original) delete set[column];
-  else set[column] = value;
+  const originals: DbOriginal = { ...(at >= 0 ? s.updates[at].original ?? {} : {}) };
+  if (original !== undefined && value === original) { delete set[column]; delete originals[column]; } else {
+    set[column] = value;
+    if (checkOriginal && original !== undefined && !Object.hasOwn(originals, column)) originals[column] = original;
+  }
   const updates = s.updates.filter((_, i) => i !== at);
-  if (Object.keys(set).length) updates.splice(at >= 0 ? at : updates.length, 0, { key, set });
+  if (Object.keys(set).length) updates.splice(at >= 0 ? at : updates.length, 0, { key, set, ...(Object.keys(originals).length ? { original: originals } : {}) });
   return { ...s, updates };
 }
 
-export const isDeleted = (s: DbStaged, key: DbRowKey): boolean => s.deletes.some((k) => sameKey(k, key));
+export const isDeleted = (s: DbStaged, key: DbRowKey): boolean => s.deletes.some((d) => sameKey(d.key, key));
 
 /** Marks rows for deletion, or (all already marked) takes the mark away again. */
-export function toggleDeletes(s: DbStaged, keys: readonly DbRowKey[]): DbStaged {
-  if (!keys.length) return s;
-  if (keys.every((k) => isDeleted(s, k))) return { ...s, deletes: s.deletes.filter((d) => !keys.some((k) => sameKey(k, d))) };
-  return { ...s, deletes: [...s.deletes, ...keys.filter((k) => !isDeleted(s, k))] };
+export function toggleDeletes(s: DbStaged, rows: ReadonlyArray<{ key: DbRowKey; original?: DbOriginal }>): DbStaged {
+  if (!rows.length) return s;
+  if (rows.every((r) => isDeleted(s, r.key))) return { ...s, deletes: s.deletes.filter((d) => !rows.some((r) => sameKey(r.key, d.key))) };
+  return { ...s, deletes: [...s.deletes, ...rows.filter((r) => !isDeleted(s, r.key)).map((r) => ({ key: r.key, ...(r.original ? { original: r.original } : {}) }))] };
+}
+
+/**
+ * Whether a column's loaded value can be compared in the conflict check: the check compares `col::text`, and a boolean's
+ * ::text ("true") differs from its wire text ("t"), so booleans are left out (as truncated values are).
+ */
+export const comparableKind = (kind: string): boolean => kind !== 'bool';
+
+/** The loaded values of a row for the conflict check (truncated values and booleans left out). */
+export function rowOriginal(row: readonly DbValue[], columns: ReadonlyArray<{ name: string; kind?: string }>): DbOriginal {
+  const out: DbOriginal = {};
+  columns.forEach((c, i) => { const v = row[i]; if ((v === null || typeof v === 'string') && comparableKind(c.kind ?? '')) out[c.name] = v; });
+  return out;
 }
 
 export const addInsert = (s: DbStaged, id: string, values: Record<string, string | null> = {}): DbStaged => ({ ...s, inserts: [...s.inserts, { id, values }] });
@@ -127,8 +147,8 @@ export const removeInserts = (s: DbStaged, ids: readonly string[]): DbStaged => 
  */
 export function stagedEdits(s: DbStaged): DbStagedEdit[] {
   return [
-    ...s.updates.filter((u) => !isDeleted(s, u.key)).map((u): DbStagedEdit => ({ op: 'update', key: u.key, set: u.set })),
-    ...s.deletes.map((key): DbStagedEdit => ({ op: 'delete', key })),
+    ...s.updates.filter((u) => !isDeleted(s, u.key)).map((u): DbStagedEdit => ({ op: 'update', key: u.key, set: u.set, ...(u.original ? { original: u.original } : {}) })),
+    ...s.deletes.map((d): DbStagedEdit => ({ op: 'delete', key: d.key, ...(d.original ? { original: d.original } : {}) })),
     ...s.inserts.map((i): DbStagedEdit => ({ op: 'insert', values: i.values })),
   ];
 }
@@ -152,9 +172,10 @@ export function parseStaged(text: string): DbStaged {
   if (!text) return EMPTY_STAGED;
   try {
     const v = JSON.parse(text) as Partial<DbStaged>;
-    const updates = Array.isArray(v.updates) ? v.updates.filter((u) => u && isTextRecord(u.key, false) && Object.keys(u.key).length > 0 && isTextRecord(u.set, true)) : [];
+    const okOriginal = (o: unknown) => o === undefined || isTextRecord(o, true);
+    const updates = Array.isArray(v.updates) ? v.updates.filter((u) => u && isTextRecord(u.key, false) && Object.keys(u.key).length > 0 && isTextRecord(u.set, true) && okOriginal(u.original)) : [];
     const inserts = Array.isArray(v.inserts) ? v.inserts.filter((i) => i && typeof i.id === 'string' && isTextRecord(i.values, true)) : [];
-    const deletes = Array.isArray(v.deletes) ? v.deletes.filter((k) => isTextRecord(k, false) && Object.keys(k).length > 0) : [];
+    const deletes = Array.isArray(v.deletes) ? v.deletes.filter((d) => d && isTextRecord(d.key, false) && Object.keys(d.key).length > 0 && okOriginal(d.original)) : [];
     return { updates, inserts, deletes };
   } catch { return EMPTY_STAGED; }
 }

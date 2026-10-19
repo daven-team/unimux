@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DbSort, DbValue } from '../../../../shared/db';
 import { DB_LIMITS, isTruncated } from '../../../../shared/db';
 import { formatDbValue, parseDbInput, rowsToCsv, rowsToJson, statementAt } from '../../../../shared/dbSql';
-import { addInsert, isDeleted, parseStaged, removeInserts, rowKey, setInsertValue, stageCell, stagedCell, stagedCount, toggleDeletes, type DbRowKey, type DbStaged } from '../../../../shared/dbTabs';
+import { addInsert, comparableKind, isDeleted, rowOriginal, parseStaged, removeInserts, rowKey, setInsertValue, stageCell, stagedCell, stagedCount, toggleDeletes, type DbRowKey, type DbStaged } from '../../../../shared/dbTabs';
 import { uid } from '../../../../shared/state';
 import type { SQLNamespace } from '@codemirror/lang-sql';
 import { closeFile, editFile, useFileStore, type FileDocument } from '../../files';
@@ -46,6 +46,7 @@ function TabHeader({ doc, sessionId, children }: { doc: FileDocument; sessionId:
       <strong className="db-tab-conn">{connection?.name ?? tr('To połączenie zostało usunięte')}</strong>
       <span className="db-tab-path">{ref.database}{ref.kind === 'table' ? ` · ${ref.schema}.${ref.table}` : ref.kind === 'ddl' ? ` · ${ref.schema}.${ref.name}` : ''}</span>
       {connection?.readOnly && <span className="db-ro" title={tr('To połączenie jest tylko do odczytu')}>RO</span>}
+      {session?.state === 'connected' && session.tls !== undefined && <span className={`db-tls ${session.tls ? 'on' : 'off'}`} data-field="tls">{session.tls ? tr('Połączenie szyfrowane (TLS)') : tr('Połączenie nieszyfrowane')}</span>}
       {session?.serverVersion && <span className="db-meta" title={session.serverVersion}>{session.serverVersion.split(' ').slice(0, 2).join(' ')}</span>}
       <span className="grow" />
       {children}
@@ -129,7 +130,6 @@ function DbTableView({ id }: { id: string }) {
   const doc = useFileStore((s) => s.documents.find((d) => d.id === id))!;
   const ref = doc.db as Extract<NonNullable<FileDocument['db']>, { kind: 'table' }>;
   const st = useDbTabs((s) => s[id] as TableTabState | undefined) ?? tabState<TableTabState>(id, 'table');
-  const connection = useStore((s) => s.s.dbConnections.find((c) => c.id === ref.connectionId));
   const prompt = useDbStore((s) => Object.values(s.sessions).find((x) => x.connectionId === ref.connectionId && s.prompts[x.id] && !x.test)?.id ?? null);
   const staged: DbStaged = useMemo(() => parseStaged(doc.text), [doc.text]);
   const [filter, setFilter] = useState(st.filter);
@@ -137,6 +137,7 @@ function DbTableView({ id }: { id: string }) {
   const [preview, setPreview] = useState<string | null>(null);
   const [widths, setWidths] = useState<Record<string, number>>({});
   const [selRows, setSelRows] = useState<number[]>([]);
+  const [reveal, setReveal] = useState<{ row: number; seq: number } | null>(null);
   useEffect(() => { if (!st.columns.length && !st.loading && !st.error) void loadPage(id); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const readOnly = readOnlyReason(ref, st.info);
   const info = st.info;
@@ -169,7 +170,7 @@ function DbTableView({ id }: { id: string }) {
     const key = keys[r];
     if (!key) return;
     const original = st.rows[r][c];
-    setStaged(id, stageCell(staged, key, name, value, original === null ? null : isTruncated(original) ? undefined : original));
+    setStaged(id, stageCell(staged, key, name, value, original === null ? null : isTruncated(original) ? undefined : original, comparableKind(columns[c].kind)));
   };
   const openValue = (r: number, c: number) => {
     const col = columns[c];
@@ -193,7 +194,8 @@ function DbTableView({ id }: { id: string }) {
     const sort = next ? [...others, next] : others;
     void loadPage(id, { sort: add ? sort : next ? [next] : [], offset: 0 });
   };
-  const keysOf = (rows: number[]): DbRowKey[] => rows.filter((r) => r < st.rows.length).map((r) => keys[r]).filter((k): k is DbRowKey => !!k);
+  const keysOf = (rows: number[]): Array<{ key: DbRowKey; original: Record<string, string | null> }> => rows.filter((r) => r < st.rows.length && keys[r])
+    .map((r) => ({ key: keys[r]!, original: rowOriginal(st.rows[r], st.columns) }));
   const deleteRows = (rows: number[]) => {
     if (readOnly) return;
     const inserts = rows.filter((r) => r >= st.rows.length).map((r) => insertAt(r)?.id).filter(Boolean) as string[];
@@ -256,7 +258,7 @@ function DbTableView({ id }: { id: string }) {
       </div>
       <div className="db-toolbar db-edit-bar">
         {readOnly ? <span className="db-note" data-field="readonly-note">{readOnly}</span> : <>
-          <button className="btn small" data-action="add-row" onClick={() => setStaged(id, addInsert(staged, uid()))}>{tr('Dodaj wiersz')}</button>
+          <button className="btn small" data-action="add-row" onClick={() => { setStaged(id, addInsert(staged, uid())); setReveal((r) => ({ row: rowCount, seq: (r?.seq ?? 0) + 1 })); }}>{tr('Dodaj wiersz')}</button>
           <button className="btn small" disabled={!selRows.length} onClick={() => duplicateRows(selRows)}>{tr('Duplikuj')}</button>
           <button className="btn small" disabled={!selRows.length} data-action="delete-rows" onClick={() => deleteRows(selRows)}>{tr('Usuń')}</button>
         </>}
@@ -277,8 +279,8 @@ function DbTableView({ id }: { id: string }) {
       <div className="db-tab-body">
         <DbGrid label={doc.name} columns={columns} rowCount={rowCount} cell={cell} rowState={rowState} firstNumber={from} sort={st.sort}
           onSort={changeSort} canEdit={canEdit} onEdit={onEdit} onOpenValue={openValue} onDeleteKey={readOnly ? undefined : deleteRows}
-          resetKey={st.loads} widths={widths} onWidths={setWidths}
-          onSelectRows={setSelRows}
+          resetKey={st.loads} widths={widths} onWidths={setWidths} emptyText={st.loading ? tr('Wczytywanie…') : st.error ? ' ' : undefined}
+          onSelectRows={setSelRows} reveal={reveal}
           menuItems={(rows) => readOnly ? [] : [
             { label: tr('Duplikuj wiersz'), onClick: () => duplicateRows(rows) },
             { label: rows.every((r) => rowState(r) === 'deleted') ? tr('Przywróć wiersze') : tr('Usuń wiersze'), danger: true, onClick: () => deleteRows(rows) },
@@ -286,7 +288,6 @@ function DbTableView({ id }: { id: string }) {
         {viewer && <ValueViewer target={viewer} onClose={() => setViewer(null)} />}
       </div>
       {preview !== null && <SqlPreview sql={preview} onClose={() => setPreview(null)} />}
-      {connection && st.loading && !st.rows.length && <div className="db-status">{tr('Wczytywanie…')}</div>}
     </section>
   );
 }
@@ -440,6 +441,7 @@ function ResultGrid({ id, result, name }: { id: string; result: SqlResult; name:
       <div className="db-result-foot">
         <span className="db-meta" data-field="result-rows">{tr('{count} wierszy', { count: result.rows.length })}{result.timeMs !== null ? ` · ${result.timeMs} ms` : ''}</span>
         {result.hasMore && !result.closed && <button className="btn small" data-action="load-more" disabled={result.loadingMore} onClick={() => void loadMore(id, result.index)}>{result.loadingMore ? tr('Wczytywanie…') : tr('Wczytaj więcej')}</button>}
+        {result.truncated && <span className="db-note">{tr('Wynik obcięty do {count} wierszy (instrukcja nie jest zwykłym odczytem)', { count: result.rows.length })}</span>}
         {result.hasMore && result.closed && <span className="db-note">{tr('Wynik zamknięty - uruchom zapytanie ponownie, aby wczytać więcej')}</span>}
         <span className="grow" />
         <button className="btn small ghost" disabled={!result.rows.length} onClick={(e) => openMenuAt(e.currentTarget, [

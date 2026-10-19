@@ -22,8 +22,8 @@ CREATE SCHEMA shop; CREATE TABLE shop.orders (id int PRIMARY KEY, item int REFER
 ANALYZE;
 `;
 
-async function startServer(script, args = []) {
-  const child = spawn(process.execPath, [script, ...args], { stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true });
+async function startServer(script, args = [], nodeArgs = []) {
+  const child = spawn(process.execPath, [...nodeArgs, script, ...args], { stdio: ['ignore', 'pipe', 'inherit'], windowsHide: true });
   const info = await new Promise((resolve, reject) => {
     let buf = '';
     const timer = setTimeout(() => reject(new Error(`${script} did not start`)), 40000);
@@ -40,7 +40,8 @@ const root = scratchRoot('dbui');
 const exportDir = join(root, 'export');
 mkdirSync(exportDir, { recursive: true });
 const pg = await startServer('scripts/pg-test-server.mjs', ['--sql', SEED]);
-const fake = await startServer('scripts/pg-fake-server.mjs');
+// The fake server's helper uses TypeScript parameter properties: Node needs the transform, not just type stripping.
+const fake = await startServer('scripts/pg-fake-server.mjs', [], ['--experimental-transform-types', '--no-warnings']);
 const ssh = await startTestServer();
 let app;
 const VK = { Enter: 13, Escape: 27, Tab: 9, Home: 36, End: 35, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Delete: 46, a: 65, c: 67 };
@@ -48,7 +49,7 @@ const CTRL = 2, SHIFT = 8;
 try {
   const host = testHost(ssh.port);
   // No known host entry: the tunnel connection must ask about the host key and the SSH password.
-  writeState(root, sshState({ projectPath: join(root, 'project'), hosts: [host] }));
+  writeState(root, { ...sshState({ projectPath: join(root, 'project'), hosts: [host] }), snippetsOpen: false });
   app = await launchApp(root, { MC_DB_EXPORT_DIR: exportDir });
   const ev = app.evaluate;
   const key = async (k, modifiers = 0) => {
@@ -95,7 +96,8 @@ try {
   await app.setValue('.db-editor [data-field=port]', String(pg.port));
   await app.click('.db-editor [data-action=save]');
   await app.until(`!document.querySelector('.db-editor')`, 'form closed');
-  const state = JSON.parse(readFileSync(join(root, 'data', 'state.json'), 'utf8'));
+  let state = {};
+  for (let i = 0; i < 60 && !state.dbConnections?.length; i++) { await sleep(200); try { state = JSON.parse(readFileSync(join(root, 'data', 'state.json'), 'utf8')); } catch { /* being written */ } }
   check(state.dbConnections?.length === 1 && state.dbConnections[0].group === 'Dev' && !JSON.stringify(state).includes('secret-pw'), 'the connection is saved (group kept, no password in state.json)');
   const connId = state.dbConnections[0].id;
 
@@ -176,7 +178,10 @@ try {
   await dbl(cell(newRow, 1));
   await app.setValue('.db-cell-editor input', 'brand new');
   await key('Enter');
-  // Delete row 3 (id 3).
+  await app.screenshot('100-db-new-row.png');
+  // Delete the fourth row (id 4).
+  await ev(`(() => { const g = document.querySelector('.db-table-tab .db-grid'); g.scrollTop = 0; g.dispatchEvent(new Event('scroll')); return true; })()`);
+  await app.until(`!!document.querySelector('.db-table-tab .db-grid [aria-rowindex="5"] .db-rn')`, 'top rows again');
   await mouseDown(`document.querySelector('.db-table-tab .db-grid [aria-rowindex="5"] .db-rn')`);
   await app.click('.db-table-tab [data-action=delete-rows]');
   await app.until(`document.querySelector('.db-table-tab .db-grid [aria-rowindex="5"]')?.classList.contains('deleted')`, 'row marked deleted');
@@ -186,11 +191,12 @@ try {
   await app.click('.db-table-tab [data-action=show-sql]');
   await app.until(`!!document.querySelector('.db-preview-sql')`, 'SQL preview');
   const preview = await textOf('.db-preview-sql');
-  check(preview.startsWith('BEGIN;') && preview.includes(`UPDATE "public"."items" SET "name" = 'renamed one' WHERE "id" = '1';`) && preview.includes('DELETE FROM "public"."items" WHERE "id" = \'3\'') && preview.includes('INSERT INTO "public"."items"') && preview.trim().endsWith('COMMIT;'), 'Pokaż SQL shows the transaction');
+  check(preview.startsWith('BEGIN;') && preview.includes(`UPDATE "public"."items" SET "name" = 'renamed one' WHERE "id" = '1' AND "name"::text IS NOT DISTINCT FROM 'item 1';`) && preview.includes(`DELETE FROM "public"."items" WHERE "id" = '4'`) && preview.includes('INSERT INTO "public"."items"') && preview.trim().endsWith('COMMIT;'), 'Pokaż SQL shows the transaction');
   await app.screenshot('100-db-preview.png');
   await clickText('.db-preview .modal-foot .btn.primary');
   await app.click('.db-table-tab [data-action=save]');
-  await app.until(`!!document.querySelector('.db-table-tab .db-notice')`, 'saved', 20000);
+  await app.until(`!!document.querySelector('.db-table-tab .db-notice, .db-table-tab [data-field=error]')`, 'saved', 20000);
+  if (await ev(`!!document.querySelector('.db-table-tab [data-field=error]')`)) throw new Error(await textOf('.db-table-tab [data-field=error]'));
   check((await textOf('.db-table-tab .db-notice')).includes('3') && await gridCell(0, 1) === 'renamed one' && !(await ev(`!!document.querySelector('.db-table-tab [data-field=pending]')`)), 'Zapisz zmiany applies the staged edits');
 
   // Conflict: a staged edit of a row deleted meanwhile (from a SQL tab).
@@ -206,7 +212,7 @@ try {
   await key('Enter', CTRL);
   await app.until(`!!document.querySelector('.db-sql-tab [data-field=affected]') || [...document.querySelectorAll('.db-sql-tab .db-msg')].some((m) => m.textContent.includes('DELETE'))`, 'delete ran', 20000);
   check(true, 'Ctrl+Enter runs the statement under the cursor');
-  await ev(`[...document.querySelectorAll('.workspace-tabs .db-tab-strip')].find((t) => t.querySelector('.label').textContent === 'items').click()`);
+  await ev(`[...document.querySelectorAll('.workspace-tabs .db-tab-strip')].find((t) => t.querySelector('.label').textContent === 'items' && !t.querySelector('.tab-diff-tag')).click()`);
   await app.until(`!!document.querySelector('.db-table-tab [data-action=save]')`, 'back on the table');
   await app.click('.db-table-tab [data-action=save]');
   await app.until(`!!document.querySelector('.db-table-tab [data-field=error]')`, 'conflict error', 20000);
@@ -249,7 +255,7 @@ try {
   check(true, 'Run with a selection runs only the selected text');
   await key('Enter', CTRL | SHIFT);
   await app.until(`document.querySelectorAll('.db-sql-tab .db-result-tab').length === 4`, 'script results', 20000);
-  check(await ev(`document.querySelector('.db-sql-tab .db-result-tab.on').textContent.includes('5')`) && await gridCell(0, 1) === 'item 1', 'Ctrl+Shift+Enter runs the script: several result sets');
+  check(await ev(`document.querySelector('.db-sql-tab .db-result-tab.on').textContent.includes('5')`) && await gridCell(0, 1) === 'renamed one', 'Ctrl+Shift+Enter runs the script: several result sets');
   await clickText('.db-sql-tab .db-result-tab', 'Wynik 3');
   await app.until(`(document.querySelector('.db-sql-tab [data-field=affected]')?.textContent ?? '').includes('UPDATE')`, 'affected rows');
   check((await textOf('.db-sql-tab [data-field=affected]')).includes('2'), 'rows affected of the UPDATE (2: id 2 was deleted)');
@@ -292,9 +298,12 @@ try {
   const ro = await ev(`window.mc.db.saveConnection({ kind: 'postgres', name: 'pg read-only', color: '#f59e0b', host: '127.0.0.1', port: ${pg.port}, user: 'postgres', database: 'postgres', tls: 'disable', ssh: null, readOnly: true }, { keep: true })`);
   check(ro.ok, 'a read-only connection is saved');
   await app.until(`!!${rowByText('pg read-only')}`, 'read-only connection row');
+  // Fold the first connection's tree (its session stays), then open the read-only one.
+  await ev(`${rowByText('local pg')}.click()`);
+  await app.until(`!${rowByText('items')}`, 'first tree folded');
   await ev(`${rowByText('pg read-only')}.click()`);
-  await app.until(`[...document.querySelectorAll('.db-row')].filter((r) => r.querySelector('.db-name')?.textContent === 'items').length === 2`, 'second tree', 30000);
-  await dbl(`[...document.querySelectorAll('.db-row')].filter((r) => r.querySelector('.db-name')?.textContent === 'items')[1]`);
+  await app.until(`!!${rowByText('items')}`, 'read-only tree', 30000);
+  await dbl(rowByText('items'));
   await app.until(`(document.querySelector('.db-table-tab [data-field=readonly-note]')?.textContent ?? '').includes('tylko do odczytu')`, 'read-only table', 20000);
   check(true, 'a read-only connection opens tables read-only with a note');
   await contextOn(rowByText('pg read-only'));
@@ -336,6 +345,8 @@ try {
   await app.click('.db-editor [data-action=save]');
   await app.until(`!document.querySelector('.db-editor')`, 'tunnel form closed');
   await app.until(`!!${rowByText('pg via ssh')}`, 'tunnel row');
+  await ev(`${rowByText('pg read-only')}.click()`);
+  await app.until(`!${rowByText('items')}`, 'read-only tree folded');
   await ev(`${rowByText('pg via ssh')}.click()`);
   await app.until(`!!document.querySelector('.db-panel-login .ssh-prompt')`, 'host key prompt', 30000);
   check((await textOf('.db-panel-login')).includes(ssh.fingerprint.slice(0, 20)), 'the SSH host key question appears in the panel');
@@ -344,12 +355,12 @@ try {
   await app.until(`!!document.querySelector('.db-panel-login input[type=password]')`, 'SSH password prompt', 30000);
   await app.setValue('.db-panel-login input[type=password]', ssh.password);
   await app.click('.db-panel-login button[type=submit]');
-  await app.until(`[...document.querySelectorAll('.db-row')].filter((r) => r.querySelector('.db-name')?.textContent === 'items').length === 3`, 'tree through the tunnel', 30000);
+  await app.until(`!!${rowByText('items')}`, 'tree through the tunnel', 30000);
   check(true, 'the tunnel connection logs in through the prompts and shows its tree');
   await app.screenshot('100-db-tunnel-tree.png');
 
   // ── drafts across a reload ──
-  await ev(`[...document.querySelectorAll('.workspace-tabs .db-tab-strip')].find((t) => t.querySelector('.label').textContent === 'items').click()`);
+  await ev(`[...document.querySelectorAll('.workspace-tabs .db-tab-strip')].find((t) => t.querySelector('.label').textContent === 'items' && !t.querySelector('.tab-diff-tag')).click()`);
   await app.until(`${cell(0, 1)}?.textContent === 'renamed one'`, 'items tab');
   await dbl(cell(0, 1));
   await app.setValue('.db-cell-editor input', 'draft value');
@@ -362,16 +373,23 @@ try {
   await app.until(`!!document.querySelector('.app .workspace-tabs')`, 'reloaded', 30000);
   await app.until(`[...document.querySelectorAll('.workspace-tabs .db-tab-strip')].some((t) => t.querySelector('.label').textContent === 'items' && t.querySelector('.file-dirty'))`, 'table draft after reload', 20000);
   check(await ev(`[...document.querySelectorAll('.workspace-tabs .db-tab-strip .label')].some((l) => l.textContent === ${JSON.stringify(sqlName)})`), 'the SQL draft and the staged edits survive a reload');
-  await ev(`[...document.querySelectorAll('.workspace-tabs .db-tab-strip')].find((t) => t.querySelector('.label').textContent === 'items').click()`);
+  await ev(`[...document.querySelectorAll('.workspace-tabs .db-tab-strip')].find((t) => t.querySelector('.label').textContent === 'items' && !t.querySelector('.tab-diff-tag')).click()`);
   await app.until(`${cell(0, 1)}?.textContent === 'draft value'`, 'staged value shown after reload', 30000);
   check(true, 'the restored staged edit shows on its row');
   // Closing the tab with staged edits asks.
-  await ev(`[...document.querySelectorAll('.workspace-tabs .db-tab-strip')].find((t) => t.querySelector('.label').textContent === 'items').querySelector('.x').click()`);
+  await ev(`[...document.querySelectorAll('.workspace-tabs .db-tab-strip')].find((t) => t.querySelector('.label').textContent === 'items' && !t.querySelector('.tab-diff-tag')).querySelector('.x').click()`);
   await app.until(`!!document.querySelector('.modal .modal-foot')`, 'close asks');
   check((await textOf('.modal')).includes('items'), 'closing a tab with staged edits asks');
   await app.screenshot('100-db-close-asks.png');
   await clickText('.modal .modal-foot .btn', 'Anuluj');
   console.log(`DB Postgres UI check passed (${passed} checks)`);
+} catch (error) {
+  // What the window showed when a step failed.
+  try {
+    await app?.screenshot('100-db-failure.png');
+    console.log(await app?.evaluate(`JSON.stringify({ text: document.querySelector('.db-tab')?.innerText?.slice(0, 600), tabs: [...document.querySelectorAll('.workspace-tabs .tab .label')].map((l) => l.textContent) })`));
+  } catch { /* the window is gone */ }
+  throw error;
 } finally {
   await app?.close();
   pg.stop();

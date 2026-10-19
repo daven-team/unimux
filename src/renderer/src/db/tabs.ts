@@ -6,9 +6,11 @@ import type { DbColumn, DbConnection, DbObjectKind, DbSort, DbTableInfo, DbTxSta
 import { DB_LIMITS } from '../../../shared/db';
 import { dbTabId, editRowLabel, EMPTY_STAGED, isStagedEmpty, nextSqlName, parseHistory, parseStaged, pushHistory, serializeStaged, stagedCount, stagedEdits, type DbHistoryEntry, type DbStaged, type DbTabRef } from '../../../shared/dbTabs';
 import { uid } from '../../../shared/state';
+import { splitSql } from '../../../shared/dbSql';
 import { activateFile, editFile, setDbTabHooks, useFileStore, type FileDocument } from '../files';
 import { tr } from '../i18n';
 import { askChoice, getS, setUi } from '../store';
+import { setDatabaseQuitWork } from '../closeGuard';
 import { useSshStore } from '../sshStore';
 import { connectTab, dbErrorMessage, ensureShared, initDb, onQuery, releaseTab, resultError, useDbStore } from './dbClient';
 
@@ -44,6 +46,8 @@ export interface SqlResult {
   command: string | null;
   rowCount: number | null;
   hasMore: boolean;
+  /** The statement returned more rows than were read (not a plain read: its cursor closed at once). */
+  truncated?: boolean;
   /** Its cursor was closed: no more rows can be loaded. */
   closed: boolean;
   timeMs: number | null;
@@ -289,9 +293,11 @@ export async function runSql(id: string, sql: string, offset: number, opts: { re
     if (m.t === 'statement') { pending = [...pending, { index: m.index, start: m.start, end: m.end, columns: null, rows: [], command: null, rowCount: null, hasMore: false, closed: false, timeMs: null, error: null }]; soon(); }
     else if (m.t === 'columns') edit(m.index, (r) => ({ ...r, columns: m.columns }));
     else if (m.t === 'rows') edit(m.index, (r) => ({ ...r, rows: r.rows.concat(m.rows) }));
-    else if (m.t === 'statementEnd') edit(m.index, (r) => ({ ...r, command: m.command, rowCount: m.rowCount, hasMore: m.hasMore, timeMs: m.timeMs, loadingMore: false }));
+    else if (m.t === 'statementEnd') edit(m.index, (r) => ({ ...r, command: m.command, rowCount: m.rowCount, hasMore: m.hasMore, truncated: m.truncated === true, timeMs: m.timeMs, loadingMore: false }));
     else if (m.t === 'statementError') {
-      if (at(m.index) < 0) pending = [...pending, { index: m.index, start: 0, end: 0, columns: null, rows: [], command: null, rowCount: null, hasMore: false, closed: true, timeMs: null, error: null }];
+      // Refused before it ran (read-only): no 'statement' message came, the split of the text says where it is.
+      const span = at(m.index) < 0 ? splitSql(sql)[m.index] : undefined;
+      if (at(m.index) < 0) pending = [...pending, { index: m.index, start: span?.start ?? 0, end: span?.end ?? 0, columns: null, rows: [], command: null, rowCount: null, hasMore: false, closed: true, timeMs: null, error: null }];
       edit(m.index, (r) => ({ ...r, error: dbErrorMessage(m.error, m.server, ref.connectionId), readOnly: m.error === 'readOnly', ...(m.server?.position ? { position: m.server.position } : {}), timeMs: m.timeMs, loadingMore: false }));
     } else if (m.t === 'resultClosed') edit(m.index, (r) => ({ ...r, closed: true, loadingMore: false }));
     else if (m.t === 'notice') patchTab<SqlTabState>(id, (t) => ({ notices: [...t.notices, m.message].slice(-500) }));
@@ -397,4 +403,30 @@ export function initDbTabs(): void {
   hooked = true;
   initDb();
   setDbTabHooks({ confirmClose, closed });
+  setDatabaseQuitWork({
+    pending: () => openTransactions() > 0 || stagedTabs() > 0,
+    ask: confirmQuitDatabase,
+    subscribe: (changed) => {
+      useDbStore.subscribe((st, prev) => { if (st.sessions !== prev.sessions || st.tabSessions !== prev.tabSessions) changed(); });
+      useFileStore.subscribe((st, prev) => { if (st.documents !== prev.documents) changed(); });
+    },
+  });
+}
+
+/**
+ * Resolves true when quitting may go on: no SQL tab has an open transaction and no table tab has staged edits, or the user
+ * chose "Quit anyway" (transactions roll back; staged edits stay as drafts for the next start).
+ */
+async function confirmQuitDatabase(): Promise<boolean> {
+  const tx = openTransactions();
+  const staged = stagedTabs();
+  if (!tx && !staged) return true;
+  const lines = [
+    ...(tx ? [tr('Otwarte transakcje: {count}. Zostaną wycofane (ROLLBACK).', { count: tx })] : []),
+    ...(staged ? [tr('Tabele z niezapisanymi zmianami: {count}. Zmiany zostaną zachowane jako szkic.', { count: staged })] : []),
+  ];
+  const choice = await askChoice(tr('Zamknąć aplikację z niezapisaną pracą w bazach danych?'), lines.join(' '), [
+    { label: tr('Zakończ mimo to'), value: 'quit', danger: true },
+  ]);
+  return choice === 'quit';
 }

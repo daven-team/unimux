@@ -54,6 +54,18 @@ export function onQuery(queryId: string, fn: (m: DbPortMessage) => void): () => 
   return () => { if (listeners.get(queryId) === fn) listeners.delete(queryId); };
 }
 
+// The port arrives when the DB Host starts and again right after a reload (before the app boots): listen from the start.
+let port: MessagePort | null = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener('message', (e) => {
+    if (e.source !== window || e.data !== 'mc:db-port' || !e.ports[0]) return;
+    port?.close();
+    port = e.ports[0];
+    port.onmessage = (m: MessageEvent<DbPortMessage>) => { const msg = m.data; if (msg && typeof msg === 'object') listeners.get(msg.queryId)?.(msg); };
+    port.start();
+  });
+}
+
 // ── events ──────────────────────────────────────────────────────────────────
 
 const waiters = new Map<string, Array<(s: DbSessionState) => void>>();
@@ -92,10 +104,6 @@ let booted = false;
 export function initDb(): void {
   if (booted) return;
   booted = true;
-  window.addEventListener('message', (e) => {
-    if (e.source !== window || e.data !== 'mc:db-port' || !e.ports[0]) return;
-    e.ports[0].onmessage = (m: MessageEvent<DbPortMessage>) => { const msg = m.data; if (msg && typeof msg === 'object') listeners.get(msg.queryId)?.(msg); };
-  });
   window.mc.on('db:session', onSession);
   window.mc.on('db:prompt', (sessionId, prompt) => useDbStore.setState((st) => {
     const prompts = { ...st.prompts };
@@ -215,9 +223,12 @@ const setLoad = (key: string, load: DbLoad | null) => useDbStore.setState((st) =
   return { loads };
 });
 
-/** Loads one list of the tree through the shared session of its database. */
-export async function runLoad(req: DbLoadRequest): Promise<void> {
-  if (useDbStore.getState().loads[req.key]?.status === 'loading') return;
+/**
+ * Loads one list of the tree through the shared session of its database. While a long query or a page runs on that session
+ * the host answers `busy`: the load waits and tries again (for about a minute), then says so.
+ */
+export async function runLoad(req: DbLoadRequest, attempt = 0): Promise<void> {
+  if (attempt === 0 && useDbStore.getState().loads[req.key]?.status === 'loading') return;
   setLoad(req.key, { status: 'loading' });
   const session = await ensureShared(req.connectionId, req.kind === 'databases' ? undefined : req.database);
   if (!session.ok) { setLoad(req.key, { status: 'error', message: session.error }); return; }
@@ -227,12 +238,8 @@ export async function runLoad(req: DbLoadRequest): Promise<void> {
     : req.kind === 'schemas' ? await pg.schemas(sid)
       : req.kind === 'objects' ? await pg.objects(sid, req.schema)
         : await pg.tableInfo(sid, req.schema, req.name);
-  setLoad(req.key, r.ok ? { status: 'ready', value: r.value } : { status: 'error', message: busyHint(r) ?? resultError(r, req.connectionId) });
-}
-
-/** A metadata call refused while a long query runs on the session: a short hint instead of a failure. */
-export function busyHint(r: Extract<DbResult<unknown>, { ok: false }>): string | null {
-  return (r.error as string) === 'busy' ? tr('Sesja jest zajęta przez zapytanie - spróbuj za chwilę') : null;
+  if (!r.ok && r.error === 'busy' && attempt < 60) { setTimeout(() => void runLoad(req, attempt + 1), 1000); return; }
+  setLoad(req.key, r.ok ? { status: 'ready', value: r.value } : { status: 'error', message: resultError(r, req.connectionId) });
 }
 
 /** Drops loaded lists (all of a connection, or those whose key starts with a prefix) so they load again. */

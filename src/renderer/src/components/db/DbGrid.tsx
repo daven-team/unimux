@@ -31,6 +31,8 @@ export interface DbGridProps {
   /** Extra context menu items for the selected rows. */
   menuItems?(rows: number[], range: CellRange): MenuItem[];
   onDeleteKey?(rows: number[]): void;
+  /** Scrolls to a row and puts the cursor on it (a new row); `seq` changes for each request. */
+  reveal?: { row: number; seq: number } | null;
   /** The rows the selection covers (the owner's toolbar acts on them). */
   onSelectRows?(rows: number[]): void;
   /** Changes scroll back to the top (a new page). */
@@ -38,6 +40,8 @@ export interface DbGridProps {
   widths?: Record<string, number>;
   onWidths?(widths: Record<string, number>): void;
   label: string;
+  /** Shown instead of "Brak wierszy" (e.g. while the first page loads). */
+  emptyText?: string;
 }
 
 const ROW = 24;
@@ -158,6 +162,14 @@ export const DbGrid = memo(function DbGrid(props: DbGridProps) {
     if (left < el.scrollLeft + RN) el.scrollLeft = left - RN;
     else if (left + w > el.scrollLeft + el.clientWidth) el.scrollLeft = left + w - el.clientWidth;
   };
+  useEffect(() => {
+    const r = props.reveal;
+    if (!r || r.row >= rowCount) return;
+    const p = { row: r.row, col: 0 };
+    setFocus(p); setAnchor(p);
+    reveal(p);
+    scroller.current?.focus();
+  }, [props.reveal?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
   const startEdit = (p: CellPos) => {
     if (!props.canEdit?.(p.row, p.col) || !props.onEdit) {
       const v = props.cell(p.row, p.col).value;
@@ -288,7 +300,7 @@ export const DbGrid = memo(function DbGrid(props: DbGridProps) {
             onDone={(value) => { const p = edit; setEditing(null); scroller.current?.focus(); if (value !== undefined) props.onEdit?.(p.row, p.col, value); }} />
         )}
       </div>
-      {!rowCount && <div className="db-grid-empty">{tr('Brak wierszy')}</div>}
+      {!rowCount && <div className="db-grid-empty">{props.emptyText ?? tr('Brak wierszy')}</div>}
     </div>
   );
 });

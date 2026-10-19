@@ -2,7 +2,7 @@
 // vault; the form only says whether one is saved), database or DB index, TLS, the SSH tunnel through a saved host, read-only
 // and the statement timeout. "Testuj połączenie" connects with the typed values (login questions appear here) and says how it went.
 import { useMemo, useState } from 'react';
-import { DB_DEFAULT_PORT, DB_TLS_MODES, dbConnectionToDraft, validateDbDraft, type DbConnectionDraft, type DbDraftField, type DbKind, type DbPasswordChange, type DbTestResult, type DbTlsMode } from '../../../../shared/db';
+import { DB_DEFAULT_PORT, DB_TLS_MODES, dbConnectionToDraft, dbTlsModeLabel, validateDbDraft, type DbConnectionDraft, type DbDraftField, type DbKind, type DbPasswordChange, type DbTestResult, type DbTlsMode } from '../../../../shared/db';
 import type { MessageKey } from '../../../../shared/i18n';
 import { dbErrorMessage, useDbStore } from '../../db/dbClient';
 import { useI18n } from '../../i18n';
@@ -13,14 +13,6 @@ import { Select } from '../Select';
 import { DbLogin } from './DbLogin';
 import '../ssh/ssh.css';
 import './db.css';
-
-/** The texts of the TLS modes: prefer and require encrypt but do not check the certificate. */
-export const TLS_LABELS: Record<DbTlsMode, MessageKey> = {
-  disable: 'Bez TLS',
-  prefer: 'TLS, jeśli serwer obsługuje (bez weryfikacji certyfikatu)',
-  require: 'Wymagaj TLS (bez weryfikacji certyfikatu)',
-  'verify-full': 'Wymagaj TLS i sprawdzaj certyfikat (plik CA, nazwa hosta)',
-};
 
 export function DbConnectionEditor({ connectionId, kind: initialKind }: { connectionId?: string; kind?: DbKind }) {
   const { tr } = useI18n();
@@ -177,8 +169,9 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
         <div className="ssh-section">
           <label className="ssh-field"><span>{tr('TLS')}</span>
             <Select className="select" value={draft.tls} data-field="tls" onChange={(e) => set({ tls: e.target.value as DbTlsMode })}>
-              {DB_TLS_MODES.map((m) => <option key={m} value={m}>{tr(TLS_LABELS[m])}</option>)}
+              {DB_TLS_MODES.map((m) => { const l = dbTlsModeLabel(m).label; return <option key={m} value={m}>{tr(l.key, l.params)}</option>; })}
             </Select>
+            <span className="ssh-card-hint" data-field="tlsDetail">{tr(dbTlsModeLabel(draft.tls).detail.key)}</span>
           </label>
           {draft.tls === 'verify-full' && (
             <label className="ssh-field"><span>{tr('Certyfikat CA')}</span>
