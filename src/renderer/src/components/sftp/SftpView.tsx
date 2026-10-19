@@ -30,6 +30,7 @@ import { useFolder, type Listing } from './useFolder';
 import './sftp.css';
 import { isFileLike } from '../../../../shared/editorSource';
 import { openLocalEntry, openRemoteEntry } from '../../remoteOpen';
+import { followMoves, markDeleted } from '../../files';
 
 /** Sessions whose start folder a mounted view already showed (kept across remounts of the view). */
 const shownSessions = new Set<string>();
@@ -180,8 +181,10 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
     if (!localDir || localDir === DRIVES) return;
     const name = await askName('local', tr('Zmień nazwę'), e.name);
     if (!name) return;
-    const r = await window.mc.localFs.rename(e.path, localJoin(localDir, name, flavor));
+    const to = localJoin(localDir, name, flavor);
+    const r = await window.mc.localFs.rename(e.path, to);
     if (!r.ok) toast(errorText(r.error), 'error');
+    else followMoves({ kind: 'local' }, [{ from: e.path, to }]);
     await local.refresh();
   };
   const localDelete = async (sel: PaneEntry[]) => {
@@ -192,6 +195,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
     if (choice !== 'yes') return;
     const r = await window.mc.localFs.trash(sel.map((e) => e.path));
     if (!r.ok) toast(errorText(r.error), 'error');
+    else markDeleted({ kind: 'local' }, sel.map((e) => e.path));
     await local.refresh();
   };
   const remoteNewFolder = async () => {
@@ -206,8 +210,10 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
     if (!sessionId || !remoteDir) return;
     const name = await askName('remote', tr('Zmień nazwę'), e.name);
     if (!name) return;
-    const r = await window.mc.sftp.rename(sessionId, e.path, posixJoin(remoteDir, name));
+    const to = posixJoin(remoteDir, name);
+    const r = await window.mc.sftp.rename(sessionId, e.path, to);
     if (!r.ok) toast(errorText(r.error), 'error');
+    else if (hostId) followMoves({ kind: 'remote', hostId }, [{ from: e.path, to }]);
     await remote.refresh();
   };
   const remoteDelete = async (sel: PaneEntry[]) => {
@@ -222,6 +228,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
     if (choice !== 'yes') return;
     const r = await window.mc.sftp.delete(sessionId, paths, count.value);
     if (!r.ok) toast(errorText(r.error), 'error');
+    else if (hostId) markDeleted({ kind: 'remote', hostId }, paths);
     await remote.refresh();
   };
 
@@ -296,7 +303,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
           <span className={`sftp-dot ${session?.state ?? 'closed'}`} aria-label={status || undefined} />
           <strong>{host.label}</strong>
           <span className="muted sftp-host-address">{userAtEndpoint(host)}</span>
-          {connected && session?.sudo && <span className="sftp-sudo-badge" title={tr('SFTP działa przez sudo')}>sudo</span>}
+          {connected && session?.sudo && <span className="sftp-sudo-badge" title={`${tr('SFTP działa przez sudo')}. ${tr('Karty edytora otwierają pliki z uprawnieniami użytkownika SSH (bez sudo).')}`}>sudo</span>}
         </button>
       ) : <strong>{tr('Serwer')}</strong>}
     </div>

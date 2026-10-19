@@ -125,7 +125,7 @@ const api: McApi = {
     statFile: (sessionId, path) => ipcRenderer.invoke('sftp:statFile', sessionId, path),
     writeFile: (sessionId, path, save) => ipcRenderer.invoke('sftp:writeFile', sessionId, path, save),
     pinHosts: (hostIds) => ipcRenderer.send('sftp:pinHosts', hostIds),
-    viewOpened: () => ipcRenderer.send('sftp:viewOpened'),
+    viewOpened: (shownSessionId) => ipcRenderer.send('sftp:viewOpened', shownSessionId),
     viewClosed: () => ipcRenderer.send('sftp:viewClosed'),
   },
   localFs: {

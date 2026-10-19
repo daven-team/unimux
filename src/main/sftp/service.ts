@@ -25,11 +25,13 @@ export interface SftpServiceDeps {
   defer?(fn: () => void): void;
 }
 
-interface Entry { state: SftpSessionState; initialPath?: string; queueActive: boolean; idle: unknown; resolving: boolean; sudo: boolean }
+interface Entry { state: SftpSessionState; initialPath?: string; queueActive: boolean; idle: unknown; resolving: boolean; sudo: boolean; plain: boolean }
 
 export class SftpService {
   private sessions = new Map<string, Entry>();
   private viewOpen = false;
+  /** The session the open SFTP view shows (0.9.9): the only one exempt from the idle disconnect while the view is open. */
+  private shown: string | null = null;
   /** Hosts with unsaved editor tabs (0.9.9): their sessions are not disconnected for being idle. */
   private pinned = new Set<string>();
 
@@ -46,12 +48,18 @@ export class SftpService {
     if (!this.deps.hostExists(hostId)) return { ok: false, error: 'hostMissing' };
     if (!this.deps.host.ensure()) return { ok: false, error: 'sftpHostCrashed' };
     const id = sftpSessionId(randomUUID());
-    const entry: Entry = { state: { id, hostId, state: 'connecting', phase: 'connecting', since: this.now() }, initialPath, queueActive: false, idle: null, resolving: false, sudo: !opts.plain && this.deps.hostSudo?.(hostId) === true };
+    // Sudo is decided here, once: the coordinator gets the flag and never reads the host setting again (a toggle in between
+    // can never give a root session without `sudo` on it).
+    const sudo = !opts.plain && this.deps.hostSudo?.(hostId) === true;
+    const plain = opts.plain === true;
+    const entry: Entry = { state: { id, hostId, state: 'connecting', phase: 'connecting', since: this.now(), ...(plain ? { plain: true as const } : {}) }, initialPath, queueActive: false, idle: null, resolving: false, sudo, plain };
     this.sessions.set(id, entry);
+    // Only the view opens sessions that are not plain: while it is open, the new one is the one it shows (the renderer confirms it).
+    if (!plain && this.viewOpen) this.shown = id;
     // The id goes back first; the login (which may wait minutes for a passphrase) runs after this answer was sent, so every
     // 'sftp:session' and 'sftp:prompt' event names an id the view already has.
     this.defer(() => {
-      void this.deps.coordinator.connectSession({ sessionId: id, hostId, ...(opts.plain ? { plain: true } : {}) }).then((r) => {
+      void this.deps.coordinator.connectSession({ sessionId: id, hostId, sudo }).then((r) => {
         if (r.ok || this.sessions.get(id) !== entry) return;
         // The coordinator reports most failures as an 'error' state itself; one it refused up front is reported here.
         if (entry.state.state !== 'error') {
@@ -87,7 +95,7 @@ export class SftpService {
       if (!isLivePhase(s.phase)) this.deps.events.session({ id: s.cellId, hostId: s.hostId, state: sftpStatusOf(s.phase), phase: s.phase, since: s.since, ...(s.error ? { error: s.error } : {}) });
       return;
     }
-    const next: SftpSessionState = { id: s.cellId, hostId: s.hostId, state: sftpStatusOf(s.phase), phase: s.phase, since: s.since, ...(s.error ? { error: s.error } : {}) };
+    const next: SftpSessionState = { id: s.cellId, hostId: s.hostId, state: sftpStatusOf(s.phase), phase: s.phase, since: s.since, ...(s.error ? { error: s.error } : {}), ...(entry.plain ? { plain: true as const } : {}) };
     if (s.phase === 'connected') {
       // "connected" goes out with the start folder: the asked one when it exists, else the login folder.
       if (entry.resolving || entry.state.path) return;
@@ -163,13 +171,16 @@ export class SftpService {
     return this.deps.host.request(id, op);
   }
 
-  viewOpened(): void {
+  /** The view is on screen and shows `shownId` (null: no session): every other session may still go idle. */
+  viewOpened(shownId: string | null = null): void {
     this.viewOpen = true;
-    for (const e of this.sessions.values()) { this.clearTimer(e.idle); e.idle = null; }
+    this.shown = shownId;
+    for (const e of this.sessions.values()) this.scheduleIdle(e);
   }
 
   viewClosed(): void {
     this.viewOpen = false;
+    this.shown = null;
     for (const e of this.sessions.values()) this.scheduleIdle(e);
   }
 
@@ -186,14 +197,22 @@ export class SftpService {
     for (const e of this.sessions.values()) this.scheduleIdle(e);
   }
 
+  /**
+   * Whether a session stays connected without a timer: the one the open view shows, one with queue activity, and a non-sudo
+   * session of a host with unsaved editor tabs (the tabs never use a sudo session, so a pin never keeps one alive unseen).
+   */
+  private kept(entry: Entry): boolean {
+    return (this.viewOpen && this.shown === entry.state.id) || entry.queueActive || (!entry.sudo && this.pinned.has(entry.state.hostId));
+  }
+
   private scheduleIdle(entry: Entry): void {
     this.clearTimer(entry.idle);
     entry.idle = null;
-    if (this.viewOpen || entry.queueActive || this.pinned.has(entry.state.hostId)) return;
+    if (this.kept(entry)) return;
     const id = entry.state.id;
     entry.idle = this.setTimer(() => {
       const e = this.sessions.get(id);
-      if (e === entry && !this.viewOpen && !e.queueActive && !this.pinned.has(e.state.hostId)) void this.disconnect(id);
+      if (e === entry && !this.kept(e)) void this.disconnect(id);
     }, this.deps.idleMs ?? SFTP_LIMITS.idleDisconnectMs);
   }
 

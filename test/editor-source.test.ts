@@ -8,11 +8,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   cleanStamp, decodeText, EDITOR_IMAGE_BYTES, EDITOR_TEXT_BYTES, encodeText, isFileLike, needsHashCheck, localRelativePath, remoteOpenPlan, restoreLineEndings, sameStamp,
   sourceDocumentId, sourceTitle, validEditorSave, validEditorText, validSource,
+  FILE_GONE, movedPath, movedSource, POSIX_PATHS, retargetSourceDocuments, sourceUnder, type FileSource,
 } from '../src/shared/editorSource';
+import { finishedMoves, type TransferItem } from '../src/shared/sftp';
 import { createLocalFiles, isUncOrDevicePath } from '../src/main/localFiles';
 import { createSftpHandlers } from '../src/main/sftp/ipc';
 import { SftpService, type SftpServiceDeps } from '../src/main/sftp/service';
-import type { SftpResult } from '../src/shared/sftp';
+import type { SftpResult, SftpSessionState } from '../src/shared/sftp';
 import type { MainToSftpHost, SftpOp } from '../src/shared/sftpHostIpc';
 
 const HOST = '00000000-0000-4000-8000-000000000001';
@@ -162,13 +164,15 @@ describe('local files outside the projects', () => {
   });
 });
 
-function service() {
+function service(sudoHosts: string[] = []) {
   const timers: Array<{ fn: () => void; ms: number; cleared: boolean }> = [];
+  const connects: Array<{ sessionId: string; hostId: string; sudo?: boolean }> = [];
+  const states: SftpSessionState[] = [];
   const sent: MainToSftpHost[] = [];
   const requests: Array<{ id: string; op: SftpOp }> = [];
   const deps: SftpServiceDeps = {
     coordinator: {
-      connectSession: async () => ({ ok: true }),
+      connectSession: async (req) => { connects.push(req); return { ok: true }; },
       endSession: () => undefined,
       answer: () => ({ ok: true }),
       sessionSnapshot: () => ({ sessions: [], prompts: [] }),
@@ -186,7 +190,8 @@ function service() {
       },
     },
     hostExists: (id) => id === HOST || id === OTHER,
-    events: { session: () => undefined, prompt: () => undefined, hostCrashed: () => undefined },
+    hostSudo: (id) => sudoHosts.includes(id),
+    events: { session: (st) => { states.push(st); }, prompt: () => undefined, hostCrashed: () => undefined },
     now: () => 5,
     setTimer: (fn, ms) => { const t = { fn, ms, cleared: false }; timers.push(t); return t; },
     clearTimer: (t) => { (t as { cleared: boolean }).cleared = true; },
@@ -194,14 +199,14 @@ function service() {
   };
   const svc = new SftpService(deps);
   const live = () => timers.filter((t) => !t.cleared);
-  const connect = async (hostId: string) => {
-    const r = await svc.connect(hostId);
+  const connect = async (hostId: string, opts: { plain?: boolean } = {}) => {
+    const r = await svc.connect(hostId, undefined, opts);
     const id = r.ok ? r.sessionId : '';
     svc.onCoordinatorSession({ cellId: id, hostId, phase: 'connected', since: 2 });
     await new Promise((r2) => setTimeout(r2, 5));
     return id;
   };
-  return { svc, live, sent, requests, connect };
+  return { svc, live, sent, requests, connect, connects, states };
 }
 
 describe('SFTP sessions of remote editor tabs', () => {
@@ -235,6 +240,48 @@ describe('SFTP sessions of remote editor tabs', () => {
     expect(f.svc.ids()).toEqual([a]);
   });
 
+  it('a sudo session is never kept by a pin: it goes idle while the host has unsaved tabs (0.9.9 final review)', async () => {
+    const f = service([HOST]);
+    const root = await f.connect(HOST);
+    const plain = await f.connect(HOST, { plain: true });
+    f.svc.pinHosts([HOST]);
+    expect(f.live()).toHaveLength(1);
+    f.live()[0].fn();
+    expect(f.sent).toEqual([{ t: 'sftpDisconnect', id: root }]);
+    expect(f.svc.ids()).toEqual([plain]);
+  });
+
+  it('while the view is open only the session it shows is exempt from the idle disconnect', async () => {
+    const f = service();
+    const a = await f.connect(HOST);
+    const b = await f.connect(OTHER);
+    f.svc.viewOpened(b);
+    expect(f.live()).toHaveLength(1);
+    f.live()[0].fn();
+    expect(f.svc.ids()).toEqual([b]);
+    // The view switches to another session: the old one starts counting down.
+    const c = await f.connect(HOST);
+    f.svc.viewOpened(c);
+    expect(f.live()).toHaveLength(1);
+    f.live()[0].fn();
+    expect(f.svc.ids()).toEqual([c]);
+    expect(a).not.toBe(c);
+  });
+
+  it('decides sudo once and hands the coordinator an explicit flag; editor sessions are marked plain', async () => {
+    const f = service([HOST]);
+    const root = await f.connect(HOST);
+    const plain = await f.connect(HOST, { plain: true });
+    const other = await f.connect(OTHER);
+    expect(f.connects).toEqual([{ sessionId: root, hostId: HOST, sudo: true }, { sessionId: plain, hostId: HOST, sudo: false }, { sessionId: other, hostId: OTHER, sudo: false }]);
+    const last = (id: string) => f.states.filter((x) => x.id === id).at(-1);
+    expect(last(root)).toMatchObject({ state: 'connected', sudo: true });
+    expect(last(root)?.plain).toBeUndefined();
+    expect(last(plain)).toMatchObject({ state: 'connected', plain: true });
+    expect(last(plain)?.sudo).toBeUndefined();
+    expect(f.svc.snapshot().sessions.find((x) => x.id === plain)?.plain).toBe(true);
+  });
+
   it('validates the editor channels: absolute remote paths, a well formed save, host ids only', async () => {
     const f = service();
     const h = createSftpHandlers(f.svc);
@@ -250,5 +297,80 @@ describe('SFTP sessions of remote editor tabs', () => {
     h.pinHosts(['not-a-uuid']);
     f.svc.viewClosed();
     expect(f.live()).toHaveLength(1); // the bad pin list was ignored
+  });
+});
+
+describe('editor tabs follow moves of the SFTP view (0.9.9 final review)', () => {
+  const WIN = { caseInsensitive: true, backslash: true };
+  it('moves a path that is the moved entry or lies under it', () => {
+    expect(movedPath('/srv/a.txt', '/srv/a.txt', '/srv/b.txt', POSIX_PATHS)).toBe('/srv/b.txt');
+    expect(movedPath('/srv/app/x/y.yml', '/srv/app', '/opt/app2', POSIX_PATHS)).toBe('/opt/app2/x/y.yml');
+    expect(movedPath('/srv/apple/y.yml', '/srv/app', '/opt/app2', POSIX_PATHS)).toBeNull();
+    expect(movedPath('/srv/App/y', '/srv/app', '/x', POSIX_PATHS)).toBeNull();
+    expect(movedPath('C:\\Users\\A\\notes\\t.md', 'c:/users/a/notes', 'C:\\Users\\A\\old', WIN)).toBe('C:\\Users\\A\\old\\t.md');
+  });
+
+  it('touches only the same side and host', () => {
+    const remote: FileSource = { kind: 'remote', hostId: 'h1', path: '/srv/a' };
+    expect(movedSource(remote, { kind: 'remote', hostId: 'h2' }, '/srv/a', '/srv/b', POSIX_PATHS)).toBeNull();
+    expect(movedSource(remote, { kind: 'local' }, '/srv/a', '/srv/b', POSIX_PATHS)).toBeNull();
+    expect(movedSource(remote, { kind: 'remote', hostId: 'h1' }, '/srv/a', '/srv/b', POSIX_PATHS)).toEqual({ kind: 'remote', hostId: 'h1', path: '/srv/b' });
+    expect(sourceUnder(remote, { kind: 'remote', hostId: 'h1' }, ['/srv'], POSIX_PATHS)).toBe(true);
+    expect(sourceUnder(remote, { kind: 'remote', hostId: 'h1' }, ['/sr'], POSIX_PATHS)).toBe(false);
+  });
+
+  const docOf = (source: FileSource, text = 'same') => ({ id: sourceDocumentId(source), source, relativePath: source.path, name: source.path.split('/').pop()!, text, savedText: 'same' });
+  const dirty = (d: { text: string; savedText: string }) => d.text !== d.savedText;
+  const scope = { kind: 'remote' as const, hostId: 'h1' };
+  const move = (from: string, to: string) => (s: FileSource) => movedSource(s, scope, from, to, POSIX_PATHS);
+
+  it('retargets tabs (their unsaved text stays) and keeps the active tab', () => {
+    const a = docOf({ kind: 'remote', hostId: 'h1', path: '/srv/app/a.yml' }, 'edited');
+    const other = docOf({ kind: 'remote', hostId: 'h2', path: '/srv/app/a.yml' });
+    const r = retargetSourceDocuments([a, other], a.id, move('/srv/app', '/srv/old'), dirty);
+    const moved = r.documents[0];
+    expect(moved).toMatchObject({ source: { path: '/srv/old/a.yml' }, relativePath: '/srv/old/a.yml', name: 'a.yml', text: 'edited' });
+    expect(moved.id).toBe(sourceDocumentId({ kind: 'remote', hostId: 'h1', path: '/srv/old/a.yml' }));
+    expect(r.documents[1]).toBe(other);
+    expect(r.activeId).toBe(moved.id);
+    expect(r.idMap.get(a.id)).toBe(moved.id);
+  });
+
+  it('a clean tab on the target is replaced; one with unsaved changes stays and the moved tab is marked gone', () => {
+    const a = docOf({ kind: 'remote', hostId: 'h1', path: '/srv/a' });
+    const cleanB = docOf({ kind: 'remote', hostId: 'h1', path: '/srv/b' });
+    const r = retargetSourceDocuments([a, cleanB], cleanB.id, move('/srv/a', '/srv/b'), dirty);
+    expect(r.closed).toEqual([cleanB.id]);
+    expect(r.documents.map((d) => d.id)).toEqual([cleanB.id]);
+    expect(r.documents[0].text).toBe('same');
+    expect(r.activeId).toBe(cleanB.id);
+    const dirtyB = docOf({ kind: 'remote', hostId: 'h1', path: '/srv/b' }, 'mine');
+    const r2 = retargetSourceDocuments([a, dirtyB], a.id, move('/srv/a', '/srv/b'), dirty);
+    expect(r2.gone).toEqual([a.id]);
+    expect(r2.documents).toEqual([a, dirtyB]);
+    expect(FILE_GONE).toBe('Plik został przeniesiony lub usunięty.');
+  });
+
+  it('reports a move once, when its item reaches done (never from a snapshot, never a skipped one)', () => {
+    const item = (patch: Partial<TransferItem>): TransferItem => ({ id: 'i1', batchId: 'b', sessionId: 'sftp:x', direction: 'move', source: '/a', target: '/b', name: 'a', bytesDone: 0, bytesTotal: 0, speed: 0, state: 'running', ...patch });
+    expect(finishedMoves([item({})], { t: 'items', items: [item({ state: 'done' })] })).toHaveLength(1);
+    expect(finishedMoves([item({ state: 'done' })], { t: 'items', items: [item({ state: 'done' })] })).toHaveLength(0);
+    expect(finishedMoves([], { t: 'snapshot', items: [item({ state: 'done' })] })).toHaveLength(0);
+    expect(finishedMoves([item({})], { t: 'items', items: [item({ state: 'done', skipped: true })] })).toHaveLength(0);
+    expect(finishedMoves([item({})], { t: 'items', items: [item({ state: 'done', direction: 'upload' })] })).toHaveLength(0);
+    expect(finishedMoves([], { t: 'items', items: [item({ state: 'done', direction: 'local-move' })] })).toHaveLength(1);
+  });
+
+  it('a local file that is gone has its own text, not "cannot be edited here"', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'unimux-gone-'));
+    try {
+      const files = createLocalFiles({ platform: process.platform, trash: async () => undefined, openFolder: async () => undefined, showFile: () => undefined });
+      const path = join(dir, 'moved.txt');
+      expect(await files.readFile(path)).toEqual({ kind: 'error', message: FILE_GONE });
+      expect(await files.statFile(path)).toBe('gone');
+      expect(await files.writeFile(path, 'x', '')).toEqual({ ok: false, error: FILE_GONE });
+      writeFileSync(path, 'hi');
+      expect(await files.statFile(path)).toMatchObject({ size: 2 });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

@@ -112,7 +112,7 @@ export function createSftpHandlers(service: SftpService) {
       ? run(id, { op: 'writeFile', path: path as string, save: { text: save.text, baseline: save.baseline, encoding: save.encoding, expected: cleanStamp(save.expected), ...(save.allowOwnerChange ? { allowOwnerChange: true } : {}) } })
       : INVALID),
     pinHosts: (hostIds: unknown) => { const h = z.array(uuid).max(200).safeParse(hostIds); if (h.success) service.pinHosts(h.data); },
-    viewOpened: () => service.viewOpened(),
+    viewOpened: (shown: unknown) => service.viewOpened(sessionId.safeParse(shown).success ? shown as string : null),
     viewClosed: () => service.viewClosed(),
   };
 }
@@ -145,6 +145,6 @@ export function registerSftpIpc(guard: IpcGuard, h: SftpHandlers): void {
   guard.guardedHandle('sftp:readFile', (_e, id: unknown, path: unknown) => h.readFile(id, path), invalid);
   guard.guardedHandle('sftp:writeFile', (_e, id: unknown, path: unknown, save: unknown) => h.writeFile(id, path, save), invalid);
   guard.guardedOn('sftp:pinHosts', (_e, hostIds: unknown) => h.pinHosts(hostIds));
-  guard.guardedOn('sftp:viewOpened', () => h.viewOpened());
+  guard.guardedOn('sftp:viewOpened', (_e, shown: unknown) => h.viewOpened(shown));
   guard.guardedOn('sftp:viewClosed', () => h.viewClosed());
 }

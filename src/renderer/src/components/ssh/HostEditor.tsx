@@ -136,7 +136,7 @@ export function HostEditor({ paneId, hostId }: { paneId: string; hostId?: string
       <div className="ssh-section">
         <div className="ssh-field">
           <label className="check"><input type="checkbox" data-field="sftpSudo" checked={draft.sftpSudo === true} onChange={(e) => set({ sftpSudo: e.target.checked })} />{tr('Uruchamiaj SFTP przez sudo')}</label>
-          <span className="ssh-card-hint">{tr('Pliki w widoku SFTP są wtedy widoczne i zmieniane jako root. Hasło sudo, jeśli jest potrzebne, zostanie zapytane w widoku SFTP i nie jest zapisywane.')}</span>
+          <span className="ssh-card-hint">{tr('Pliki w widoku SFTP są wtedy widoczne i zmieniane jako root. Hasło sudo, jeśli jest potrzebne, zostanie zapytane w widoku SFTP i nie jest zapisywane.')} {tr('Karty edytora otwierają pliki z uprawnieniami użytkownika SSH (bez sudo).')}</span>
         </div>
         {draft.sftpSudo && (
           <label className="ssh-field"><span>{tr('Polecenie serwera SFTP')}</span>

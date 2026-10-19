@@ -103,4 +103,19 @@ export const remoteEditMessages = {
   ],
   '- na serwerze, + w edytorze': ['- on the server, + in the editor', '- auf dem Server, + im Editor', '- en el servidor, + en el editor', '- sur le serveur, + dans l’éditeur', '- no servidor, + no editor'],
   'Wczytaj z serwera (odrzuć moje zmiany)':['Reload from server (discard my edits)', 'Vom Server neu laden (meine Änderungen verwerfen)', 'Recargar desde el servidor (descartar mis cambios)', 'Recharger depuis le serveur (abandonner mes modifications)', 'Recarregar do servidor (descartar as minhas alterações)'],
+  'Plik został przeniesiony lub usunięty.': ['The file was moved or deleted.', 'Die Datei wurde verschoben oder gelöscht.', 'El archivo se ha movido o eliminado.', 'Le fichier a été déplacé ou supprimé.', 'O ficheiro foi movido ou eliminado.'],
+  'Karty edytora otwierają pliki z uprawnieniami użytkownika SSH (bez sudo).': [
+    "Editor tabs open files with the SSH user's rights (without sudo).",
+    'Editor-Tabs öffnen Dateien mit den Rechten des SSH-Benutzers (ohne sudo).',
+    'Las pestañas del editor abren los archivos con los permisos del usuario SSH (sin sudo).',
+    "Les onglets de l'éditeur ouvrent les fichiers avec les droits de l'utilisateur SSH (sans sudo).",
+    'Os separadores do editor abrem os ficheiros com as permissões do utilizador SSH (sem sudo).',
+  ],
+  'W tym folderze nie można utworzyć pliku tymczasowego (brak uprawnień do folderu) - zapis nie jest możliwy': [
+    'A temporary file cannot be created in this folder (no permission for the folder) - the file cannot be saved',
+    'In diesem Ordner kann keine temporäre Datei angelegt werden (keine Berechtigung für den Ordner) - Speichern ist nicht möglich',
+    'No se puede crear un archivo temporal en esta carpeta (sin permiso en la carpeta): no se puede guardar',
+    "Impossible de créer un fichier temporaire dans ce dossier (pas de droits sur le dossier) - l'enregistrement est impossible",
+    'Não é possível criar um ficheiro temporário nesta pasta (sem permissão na pasta) - não é possível guardar',
+  ],
 } as const;

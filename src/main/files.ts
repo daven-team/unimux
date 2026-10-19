@@ -24,11 +24,15 @@ async function projectFilePath(projectRoot: string, relativePath: string, rootRe
 }
 
 /** Size and modification time of a project file (null when it cannot be read): a cheap "did it change?" before reading it. */
-export async function statProjectFile(root: string, path: string): Promise<{ size: number; mtimeMs: number } | null> {
+/** 'gone' (0.9.9): nothing is there any more, so the tab can say the file was moved or deleted. */
+export async function statProjectFile(root: string, path: string): Promise<{ size: number; mtimeMs: number } | 'gone' | null> {
   try {
     const info = await stat(await projectFilePath(root, path));
     return info.isFile() ? { size: info.size, mtimeMs: info.mtimeMs } : null;
-  } catch { return null; }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'gone' : null;
+  }
 }
 
 /** Natural, case-insensitive order of names (one collator: much faster than localeCompare with a locale per call). */

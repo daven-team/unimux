@@ -170,3 +170,89 @@ export function localRelativePath(root: string, child: string, caseInsensitive: 
   const rel = c.slice(r.length + 1);
   return rel && !rel.split('/').some((part) => part === '..' || part === '.' || !part) ? rel : null;
 }
+
+// ── tabs that follow moves (0.9.9) ─────────────────────────────────────────
+
+/** The text of a tab whose file was moved, renamed or deleted outside the tab (a Polish key, translated where it is shown). */
+export const FILE_GONE = 'Plik został przeniesiony lub usunięty.';
+
+/** How paths of one side compare: a server is POSIX and case-sensitive; Windows takes either slash and, like macOS, ignores case. */
+export interface PathRules { caseInsensitive: boolean; backslash: boolean }
+export const POSIX_PATHS: PathRules = { caseInsensitive: false, backslash: false };
+
+/** Where a move or rename of `from` to `to` took `path`: the new path when `path` is `from` or lies under it, else null. */
+export function movedPath(path: string, from: string, to: string, rules: PathRules): string | null {
+  const sep = rules.backslash ? '\\' : '/';
+  const norm = (p: string) => (rules.backslash ? p.replace(/\//g, '\\') : p);
+  const trim = (p: string) => (rules.backslash ? p.replace(/\\+$/, '') : p.replace(/\/+$/, ''));
+  const fold = (p: string) => (rules.caseInsensitive ? p.toLowerCase() : p);
+  const p = norm(path);
+  const f = trim(norm(from));
+  const t = trim(norm(to));
+  if (!f || !t) return null;
+  if (fold(p) === fold(f)) return t;
+  return fold(p).startsWith(`${fold(f)}${sep}`) ? `${t}${p.slice(f.length)}` : null;
+}
+
+/** The files of one side a move or delete happened on: a saved host's server, or this computer. */
+export type SourceScope = { kind: 'remote'; hostId: string } | { kind: 'local' };
+
+/** The source a move took `source` to (same side only), or null when the move does not touch it. */
+export function movedSource(source: FileSource, scope: SourceScope, from: string, to: string, rules: PathRules): FileSource | null {
+  if (source.kind !== scope.kind) return null;
+  if (source.kind === 'remote' && scope.kind === 'remote' && source.hostId !== scope.hostId) return null;
+  const path = movedPath(source.path, from, to, rules);
+  return path === null ? null : { ...source, path };
+}
+
+/** Whether `source` is one of `paths` or lies under one of them. */
+export const sourceUnder = (source: FileSource, scope: SourceScope, paths: string[], rules: PathRules): boolean =>
+  paths.some((p) => movedSource(source, scope, p, p, rules) !== null);
+
+interface SourceDoc { id: string; source?: FileSource; relativePath: string; name: string }
+export interface SourceRetarget<T> {
+  documents: T[];
+  activeId: string | null;
+  /** Old tab id -> new tab id (an in-flight load or save still reports under the old one). */
+  idMap: Map<string, string>;
+  /** Clean tabs of the target that a moved tab replaced (their id now belongs to the moved tab). */
+  closed: string[];
+  /** Moved tabs that could not take their new id (a tab with unsaved changes is open on the target): marked as gone instead. */
+  gone: string[];
+}
+
+/**
+ * Editor tabs of files outside the projects follow a move or rename done in the SFTP view: source, path, name and id change,
+ * text and unsaved changes stay. A clean tab already open on the target is closed (the moved file replaced it); one with unsaved
+ * changes is never dropped, so the moved tab then keeps its old id and is marked as gone.
+ */
+export function retargetSourceDocuments<T extends SourceDoc>(
+  documents: T[], activeId: string | null, move: (source: FileSource) => FileSource | null, isDirty: (doc: T) => boolean,
+): SourceRetarget<T> {
+  const idMap = new Map<string, string>();
+  const plans = new Map<string, FileSource>();
+  for (const doc of documents) {
+    const next = doc.source ? move(doc.source) : null;
+    if (next && sourceDocumentId(next) !== doc.id) plans.set(doc.id, next);
+  }
+  const closed = new Set<string>();
+  const gone: string[] = [];
+  for (const [id, next] of plans) {
+    const newId = sourceDocumentId(next);
+    const there = documents.find((d) => d.id === newId && !plans.has(d.id));
+    if (there && isDirty(there)) { gone.push(id); continue; }
+    if (there) closed.add(there.id);
+    idMap.set(id, newId);
+  }
+  const result: T[] = [];
+  for (const doc of documents) {
+    if (closed.has(doc.id)) continue;
+    const newId = idMap.get(doc.id);
+    if (!newId) { result.push(doc); continue; }
+    const source = plans.get(doc.id)!;
+    result.push({ ...doc, id: newId, source, relativePath: source.path, name: sourceName(source) });
+  }
+  // A closed target tab's id now belongs to the moved tab, so the active id always names a tab that is still open.
+  const nextActive = activeId === null ? null : idMap.get(activeId) ?? activeId;
+  return { documents: result, activeId: nextActive, idMap, closed: [...closed], gone };
+}
