@@ -1,6 +1,7 @@
 // Drives the DB Host core in-process (1.0.0): what main would send, what it gets back, and the DB port's messages collected
 // per run. Used by the PGlite, fake-server and SSH tunnel integration tests.
 import { randomUUID } from 'node:crypto';
+import { connect, createServer, type Socket } from 'node:net';
 import { PGlite } from '@electric-sql/pglite';
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
 import { DbHost, type DbHostTimers } from '../../src/dbhost/host';
@@ -24,6 +25,45 @@ export async function startPglite(): Promise<Pglite> {
   await server.start();
   const port = Number(server.getServerConn().split(':').pop());
   return { db, server, port, close: async () => { await server.stop(); await db.close(); } };
+}
+
+/**
+ * A TCP proxy in front of a server that hands every backend message to the client in a write of its own and holds each
+ * ReadyForQuery back a little: what a server in another process does over a real socket (PGlite's socket server writes an
+ * error and its extra ReadyForQuery separately, so they can arrive in different reads). In-process, they usually coalesce.
+ */
+export async function splittingProxy(targetPort: number): Promise<{ port: number; close(): Promise<void> }> {
+  const sockets = new Set<Socket>();
+  const server = createServer((client) => {
+    const upstream = connect(targetPort, '127.0.0.1');
+    sockets.add(client); sockets.add(upstream);
+    client.setNoDelay(true);
+    client.pipe(upstream);
+    let buf = Buffer.alloc(0);
+    let chain = Promise.resolve();
+    upstream.on('data', (chunk: Buffer) => {
+      buf = Buffer.concat([buf, chunk]);
+      const messages: Buffer[] = [];
+      while (buf.length >= 5 && buf.length >= 1 + buf.readInt32BE(1)) {
+        const len = 1 + buf.readInt32BE(1);
+        messages.push(buf.subarray(0, len));
+        buf = buf.subarray(len);
+      }
+      for (const m of messages) {
+        chain = chain.then(async () => {
+          if (m[0] === 0x5a) await new Promise((r) => setTimeout(r, 15));
+          else await new Promise((r) => setImmediate(r));
+          if (!client.destroyed) client.write(m);
+        });
+      }
+    });
+    const end = () => { client.destroy(); upstream.destroy(); };
+    client.on('close', end); upstream.on('close', end);
+    client.on('error', end); upstream.on('error', end);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  return { port, close: () => new Promise<void>((resolve) => { for (const s of sockets) s.destroy(); server.close(() => resolve()); }) };
 }
 
 export interface StatementResult { columns: DbColumn[]; rows: DbValue[][]; end?: Extract<DbPortMessage, { t: 'statementEnd' }>; error?: { code: DbErrorCode; server?: DbServerError }; closed: boolean; span?: { start: number; end: number } }
