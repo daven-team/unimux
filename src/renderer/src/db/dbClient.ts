@@ -61,7 +61,8 @@ if (typeof window !== 'undefined') {
     if (e.source !== window || e.data !== 'mc:db-port' || !e.ports[0]) return;
     port?.close();
     port = e.ports[0];
-    port.onmessage = (m: MessageEvent<DbPortMessage>) => { const msg = m.data; if (msg && typeof msg === 'object') listeners.get(msg.queryId)?.(msg); };
+    // Query messages go to their query's listener; Redis Pub/Sub messages (keyed by session, no queryId) are not for these.
+    port.onmessage = (m: MessageEvent<DbPortMessage>) => { const msg = m.data; if (msg && typeof msg === 'object' && 'queryId' in msg) listeners.get(msg.queryId)?.(msg); };
     port.start();
   });
 }
