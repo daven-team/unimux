@@ -164,6 +164,29 @@ describe('DbHost: cancel and statement timeout', () => {
     expect(h.last(id)?.error).toBe('dbFailed');
   });
 
+  it.each([
+    ['a lone Close answered with a late ReadyForQuery', { readyAfterLoneClose: true }],
+    ['a ReadyForQuery sent right with the error', { readyWithError: true }],
+    ['both (as PGlite does)', { readyAfterLoneClose: true, readyWithError: true }],
+  ])('a row-returning statement the server refuses answers its error and leaves the session usable (%s)', async (_name, opts) => {
+    // A failed cursor already sent its Sync. Closing it again sent a lone Close, which PGlite's socket server answers with an
+    // extra ReadyForQuery, and PGlite also sends one right with the error: a stray ReadyForQuery ended the next statement early
+    // and that statement's real answer then broke the connection (the session ended).
+    const s = await fake(opts);
+    const h = dbHarness();
+    const id = await h.open({ port: s.port, statementTimeoutMs: 200, readOnly: true });
+    s.failing.add("SELECT current_setting('app.boom')");
+    for (let i = 0; i < 2; i++) {
+      const bad = await h.run(id, { sql: "SELECT current_setting('app.boom')" });
+      expect(bad.statements[0].error).toMatchObject({ code: 'server', server: { code: 'XX000', message: 'injected failure' } });
+      expect(bad.end).toMatchObject({ ok: false, tx: 'idle' });
+      const next = await h.run(id, { sql: 'SELECT 1' });
+      expect(next.end.ok).toBe(true);
+      expect(next.statements[0].rows).toEqual([['1']]);
+    }
+    expect(h.last(id)?.phase).toBe('connected');
+  });
+
   it('a read-only connection sets default_transaction_read_only at connect', async () => {
     const s = await fake();
     const h = dbHarness();

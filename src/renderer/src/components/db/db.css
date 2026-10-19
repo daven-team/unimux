@@ -19,7 +19,12 @@
 .db-chev-hit { display: inline-flex; cursor: pointer; }
 .db-meta { flex: none; margin-left: auto; color: var(--muted); font-size: 11px; }
 .db-row .db-meta + .db-meta, .db-row .db-ro + .db-meta { margin-left: 0; }
-.db-type { flex: none; margin-left: auto; color: var(--muted); font-size: 11px; font-family: Consolas, Menlo, monospace; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+/* The name has priority: the type label shrinks first (and hides when there is no room); the tooltip has both. */
+.db-type { flex: 0 100 auto; min-width: 0; margin-left: auto; padding-left: 6px; color: var(--muted); font-size: 11px; font-family: Consolas, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.db-row .db-name { flex: 0 1 auto; min-width: 2.5em; }
+.db-column .db-name, .db-constraint .db-name, .db-index .db-name { flex: 0 0 auto; max-width: calc(100% - 40px); }
+.db-tree:focus { outline: none; }
+.db-tree:focus-visible .db-row.sel { box-shadow: inset 0 0 0 1px var(--accent); }
 .db-args { color: var(--muted); font-size: 11px; }
 .db-folder-name { color: var(--text-2); font-size: 11.5px; }
 .db-color { flex: none; width: 8px; height: 8px; border-radius: 50%; }
@@ -116,6 +121,9 @@
 .db-grow.deleted .db-gcell { text-decoration: line-through; color: #fca5a5; background: #f8717110; }
 .db-grow.inserted .db-gcell { background: #4ade800f; }
 .db-grow.inserted .db-rn { color: var(--waiting); }
+.db-grow.conflict .db-gcell { background: #f8717126; box-shadow: inset 0 1px 0 #f87171aa, inset 0 -1px 0 #f87171aa; }
+.db-grow.conflict .db-rn { color: var(--error); }
+.db-cell-editor .input.db-input-null::placeholder { color: var(--muted); font-style: italic; }
 .db-null { color: var(--muted); font-style: italic; font-size: 11px; }
 .db-null.big { padding: 16px; font-size: 13px; }
 .db-default { color: #4ade8099; font-style: italic; font-size: 11px; }

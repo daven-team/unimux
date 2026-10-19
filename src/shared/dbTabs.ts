@@ -1,7 +1,9 @@
 // Tabs of the database viewer (1.0.0) and the staged edits of a table tab. Pure helpers shared by the renderer and tests:
 // tab references and ids (also the keys of the drafts kept like file drafts), the staged edits model (one object per tab,
 // serialized into the tab's draft text), the query history and the column/selection math of the data grid.
-import { isTruncated, type DbObjectKind, type DbStagedEdit, type DbValue } from './db';
+import { isTruncated, type DbObjectKind, type DbStagedEdit, type DbTxStatus, type DbValue, type DbValueKind } from './db';
+import { parseDbInput } from './dbSql';
+import type { MessageKey } from './i18n';
 import { isUuid } from './ssh';
 
 // ── tab references ──────────────────────────────────────────────────────────
@@ -90,13 +92,13 @@ export function stagedCell(s: DbStaged, key: DbRowKey, column: string): { value:
 }
 
 /** Stages a new value of a cell; typing the original value back removes the change (`original` undefined: not known whole). */
-export function stageCell(s: DbStaged, key: DbRowKey, column: string, value: string | null, original: string | null | undefined, checkOriginal = true): DbStaged {
+export function stageCell(s: DbStaged, key: DbRowKey, column: string, value: string | null, original: string | null | undefined): DbStaged {
   const at = s.updates.findIndex((x) => sameKey(x.key, key));
   const set = { ...(at >= 0 ? s.updates[at].set : {}) };
   const originals: DbOriginal = { ...(at >= 0 ? s.updates[at].original ?? {} : {}) };
   if (original !== undefined && value === original) { delete set[column]; delete originals[column]; } else {
     set[column] = value;
-    if (checkOriginal && original !== undefined && !Object.hasOwn(originals, column)) originals[column] = original;
+    if (original !== undefined && !Object.hasOwn(originals, column)) originals[column] = original;
   }
   const updates = s.updates.filter((_, i) => i !== at);
   if (Object.keys(set).length) updates.splice(at >= 0 ? at : updates.length, 0, { key, set, ...(Object.keys(originals).length ? { original: originals } : {}) });
@@ -112,16 +114,10 @@ export function toggleDeletes(s: DbStaged, rows: ReadonlyArray<{ key: DbRowKey; 
   return { ...s, deletes: [...s.deletes, ...rows.filter((r) => !isDeleted(s, r.key)).map((r) => ({ key: r.key, ...(r.original ? { original: r.original } : {}) }))] };
 }
 
-/**
- * Whether a column's loaded value can be compared in the conflict check: the check compares `col::text`, and a boolean's
- * ::text ("true") differs from its wire text ("t"), so booleans are left out (as truncated values are).
- */
-export const comparableKind = (kind: string): boolean => kind !== 'bool';
-
-/** The loaded values of a row for the conflict check (truncated values and booleans left out). */
-export function rowOriginal(row: readonly DbValue[], columns: ReadonlyArray<{ name: string; kind?: string }>): DbOriginal {
+/** The loaded values of a row for the conflict check (truncated values left out; the DB Host compares each in its own type). */
+export function rowOriginal(row: readonly DbValue[], columns: ReadonlyArray<{ name: string }>): DbOriginal {
   const out: DbOriginal = {};
-  columns.forEach((c, i) => { const v = row[i]; if ((v === null || typeof v === 'string') && comparableKind(c.kind ?? '')) out[c.name] = v; });
+  columns.forEach((c, i) => { const v = row[i]; if (v === null || typeof v === 'string') out[c.name] = v; });
   return out;
 }
 
@@ -151,6 +147,83 @@ export function stagedEdits(s: DbStaged): DbStagedEdit[] {
     ...s.deletes.map((d): DbStagedEdit => ({ op: 'delete', key: d.key, ...(d.original ? { original: d.original } : {}) })),
     ...s.inserts.map((i): DbStagedEdit => ({ op: 'insert', values: i.values })),
   ];
+}
+
+/** What each edit of `stagedEdits(s)` came from (same order): a staged row change or delete by key, or a new row by id. */
+export type DbEditTarget = { kind: 'row'; key: DbRowKey } | { kind: 'insert'; id: string };
+export function stagedEditTargets(s: DbStaged): DbEditTarget[] {
+  return [
+    ...s.updates.filter((u) => !isDeleted(s, u.key)).map((u): DbEditTarget => ({ kind: 'row', key: u.key })),
+    ...s.deletes.map((d): DbEditTarget => ({ kind: 'row', key: d.key })),
+    ...s.inserts.map((i): DbEditTarget => ({ kind: 'insert', id: i.id })),
+  ];
+}
+
+/** Where a failed save's row is in a table tab: its index among the page rows (then the new rows), or null when not on the page. */
+export function conflictRowIndex(target: DbEditTarget | null, keys: ReadonlyArray<DbRowKey | null>, s: DbStaged, pageRows: number): number | null {
+  if (!target) return null;
+  if (target.kind === 'insert') { const i = s.inserts.findIndex((x) => x.id === target.id); return i < 0 ? null : pageRows + i; }
+  const i = keys.findIndex((k) => !!k && sameKey(k, target.key));
+  return i < 0 ? null : i;
+}
+
+/** The row a failed save names (the edit at `index` of the edits built from `s`), or null. */
+export const failedTarget = (s: DbStaged, index: number | undefined): DbEditTarget | null =>
+  index === undefined ? null : stagedEditTargets(s)[index] ?? null;
+
+/**
+ * The staged set after a successful save of `sent`: exactly what was sent is gone, anything staged meanwhile stays. A cell
+ * changed again after it was sent stays staged, and its loaded value is now what the save wrote.
+ */
+export function withoutSent(current: DbStaged, sent: DbStaged): DbStaged {
+  const sentDeleted = (key: DbRowKey) => sent.deletes.some((d) => sameKey(d.key, key));
+  const updates: DbStaged['updates'] = [];
+  for (const u of current.updates) {
+    // An update of a row the save deleted was never sent (stagedEdits drops it); the row is gone now.
+    if (sentDeleted(u.key)) continue;
+    const s = sent.updates.find((x) => sameKey(x.key, u.key));
+    if (!s) { updates.push(u); continue; }
+    const set: Record<string, string | null> = {};
+    const original: DbOriginal = { ...(u.original ?? {}) };
+    for (const [column, value] of Object.entries(u.set)) {
+      if (Object.hasOwn(s.set, column)) {
+        if (s.set[column] === value) { delete original[column]; continue; }
+        if (Object.hasOwn(original, column)) original[column] = s.set[column];
+      }
+      set[column] = value;
+    }
+    for (const column of Object.keys(original)) if (!Object.hasOwn(set, column)) delete original[column];
+    if (Object.keys(set).length) updates.push({ key: u.key, set, ...(Object.keys(original).length ? { original } : {}) });
+  }
+  return {
+    updates,
+    deletes: current.deletes.filter((d) => !sentDeleted(d.key)),
+    inserts: current.inserts.filter((i) => !sent.inserts.some((x) => x.id === i.id)),
+  };
+}
+
+/**
+ * What leaving the inline cell editor stages: nothing when the user typed nothing (a NULL or DEFAULT cell entered and left
+ * stays as it was; never an empty string), NULL when chosen, else the typed text checked for the column's kind.
+ */
+export type CellCommit = { kind: 'none' } | { kind: 'value'; value: string | null } | { kind: 'error'; error: MessageKey };
+export function cellCommit(input: { touched: boolean; asNull: boolean; text: string; kind: DbValueKind; typeName?: string }): CellCommit {
+  if (input.asNull) return { kind: 'value', value: null };
+  if (!input.touched) return { kind: 'none' };
+  const r = parseDbInput(input.kind, input.text, { typeName: input.typeName });
+  return r.ok ? { kind: 'value', value: r.value } : { kind: 'error', error: r.error };
+}
+
+/**
+ * The transaction toggle of a SQL tab follows the session's state only: on while a transaction is open (BEGIN from the
+ * toolbar or typed in the script), off after COMMIT / ROLLBACK (typed too) and after a reconnect. What switching it does.
+ */
+export function txToggle(tx: DbTxStatus | undefined, wantOn: boolean): 'begin' | 'ask' | 'rollback' | null {
+  const state = tx ?? 'idle';
+  if (wantOn) return state === 'idle' ? 'begin' : null;
+  if (state === 'transaction') return 'ask';
+  if (state === 'failed') return 'rollback';
+  return null;
 }
 
 /** "id = 5" or "a = 1, b = 'x'": names the row of a failed edit. */
@@ -187,11 +260,38 @@ export const serializeStaged = (s: DbStaged): string => (isStagedEmpty(s) ? '' :
 
 export interface DbHistoryEntry { sql: string; at: number; ok: boolean; timeMs: number }
 export const DB_HISTORY_LIMIT = 200;
-const HISTORY_SQL_MAX = 64 * 1024;
+/** A longer entry is not kept; the whole history (all connections) stays under DB_HISTORY_TOTAL characters. */
+export const HISTORY_SQL_MAX = 8 * 1024;
+export const DB_HISTORY_TOTAL = 1024 * 1024;
+
+/**
+ * The history text of a statement: passwords in it are masked (PASSWORD '...', IDENTIFIED BY '...', password=... inside
+ * connection strings), so the history never keeps a secret typed into a script.
+ */
+export function redactSql(sql: string): string {
+  return sql
+    .replace(/\b(PASSWORD|IDENTIFIED\s+BY)(\s+)(E?'(?:[^']|'')*'|\$([A-Za-z_]*)\$[\s\S]*?\$\4\$)/gi, (_m, word: string, space: string) => `${word}${space}'***'`)
+    .replace(/\b(password\s*=\s*)('[^']*'|[^\s']+)/gi, (_m, head: string) => `${head}***`);
+}
+
+/** The stored history kept within its limits: only live connections, entries under the size cap, the total under its cap (oldest go first). */
+export function pruneHistory(all: Record<string, DbHistoryEntry[]>, liveIds: ReadonlySet<string>, total = DB_HISTORY_TOTAL): Record<string, DbHistoryEntry[]> {
+  const out: Record<string, DbHistoryEntry[]> = {};
+  for (const [id, list] of Object.entries(all)) if (liveIds.has(id)) out[id] = list.filter((e) => e.sql.length <= HISTORY_SQL_MAX);
+  let size = Object.values(out).reduce((n, list) => n + list.reduce((m, e) => m + e.sql.length + 48, 0), 0);
+  while (size > total) {
+    let oldest: { id: string; at: number } | null = null;
+    for (const [id, list] of Object.entries(out)) { const last = list[list.length - 1]; if (last && (!oldest || last.at < oldest.at)) oldest = { id, at: last.at }; }
+    if (!oldest) break;
+    const dropped = out[oldest.id].pop()!;
+    size -= dropped.sql.length + 48;
+  }
+  return out;
+}
 
 /** The newest entry first; running the same text again moves it to the top. Very long scripts are not kept. */
 export function pushHistory(list: readonly DbHistoryEntry[], entry: DbHistoryEntry, limit = DB_HISTORY_LIMIT): DbHistoryEntry[] {
-  const sql = entry.sql.trim();
+  const sql = redactSql(entry.sql.trim());
   if (!sql || sql.length > HISTORY_SQL_MAX) return [...list];
   return [{ ...entry, sql }, ...list.filter((e) => e.sql !== sql)].slice(0, limit);
 }

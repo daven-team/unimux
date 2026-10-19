@@ -11,6 +11,7 @@ import { ColorPicker } from '../ColorPicker';
 import { IX } from '../icons';
 import { Select } from '../Select';
 import { DbLogin } from './DbLogin';
+import { offerReconnect } from '../../db/tabs';
 import '../ssh/ssh.css';
 import './db.css';
 
@@ -69,6 +70,7 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
     if (!r.ok) { toast(tr(r.error === 'readOnly' ? 'Magazyn haseł baz danych jest tylko do odczytu' : 'Nie udało się zapisać zmian'), 'error'); return; }
     setPassword('');
     closeModal();
+    if (connection) void offerReconnect(connection, value);
   };
   const pickCa = async () => { const path = await window.mc.dbPickCaFile(); if (path) set({ caPath: path }); };
   const tunnel = draft.sshHostId !== null;

@@ -4,8 +4,8 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import type { DbSort, DbValue, DbValueKind } from '../../../../shared/db';
 import { isTruncated } from '../../../../shared/db';
-import { formatDbValue, isNumericKind, parseDbInput, rowsToCsv, rowsToJson, rowsToTsv } from '../../../../shared/dbSql';
-import { clampColumnWidth, columnWindow, defaultColumnWidth, inRange, moveCell, rangeOf, type CellPos, type CellRange } from '../../../../shared/dbTabs';
+import { formatDbValue, isNumericKind, rowsToCsv, rowsToJson, rowsToTsv } from '../../../../shared/dbSql';
+import { cellCommit, clampColumnWidth, columnWindow, defaultColumnWidth, inRange, moveCell, rangeOf, type CellPos, type CellRange } from '../../../../shared/dbTabs';
 import { rowWindow } from '../../../../shared/virtualRows';
 import { useI18n } from '../../i18n';
 import { openMenu, type MenuItem } from '../ContextMenu';
@@ -13,7 +13,7 @@ import { openMenu, type MenuItem } from '../ContextMenu';
 export interface GridColumn { name: string; typeName: string; kind: DbValueKind; key?: boolean }
 /** A cell as the grid shows it: undefined = DEFAULT (a new row's untouched cell). */
 export interface GridCell { value: DbValue | undefined; changed?: boolean }
-export type RowState = 'deleted' | 'inserted' | null;
+export type RowState = 'deleted' | 'inserted' | 'conflict' | null;
 
 export interface DbGridProps {
   columns: readonly GridColumn[];
@@ -55,16 +55,18 @@ const cellText = (v: DbValue | undefined, kind: DbValueKind): string => {
 };
 
 /** The inline editor of one cell: typed text or NULL; Enter saves, Escape cancels. */
-function CellEditor({ column, initial, onDone, style }: { column: GridColumn; initial: string | null; style: CSSProperties; onDone(value: string | null | undefined): void }) {
+function CellEditor({ column, initial, isDefault, onDone, style }: { column: GridColumn; initial: string | null; isDefault: boolean; style: CSSProperties; onDone(value: string | null | undefined): void }) {
   const { tr } = useI18n();
   const [text, setText] = useState(initial ?? '');
+  // Nothing typed yet: leaving stages nothing (a NULL or DEFAULT cell never becomes an empty string by itself).
+  const [touched, setTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement & HTMLSelectElement>(null);
   useEffect(() => { input.current?.focus(); if (input.current && 'select' in input.current && column.kind !== 'bool') input.current.select(); }, [column.kind]);
-  const commit = (asNull = false, value = text) => {
-    const r = parseDbInput(column.kind, value, { asNull, typeName: column.typeName });
-    if (!r.ok) { setError(tr(r.error)); return; }
-    onDone(r.value);
+  const commit = (asNull = false, value = text, typed = touched) => {
+    const r = cellCommit({ touched: typed, asNull, text: value, kind: column.kind, typeName: column.typeName });
+    if (r.kind === 'error') { setError(tr(r.error)); return; }
+    onDone(r.kind === 'none' ? undefined : r.value);
   };
   const onKey = (e: KeyboardEvent) => {
     e.stopPropagation();
@@ -75,12 +77,13 @@ function CellEditor({ column, initial, onDone, style }: { column: GridColumn; in
     <div className="db-cell-editor" style={style} onMouseDown={(e) => e.stopPropagation()}>
       {column.kind === 'bool' ? (
         <select ref={input} className="input" value={text === '' && initial === null ? '' : text} onKeyDown={onKey}
-          onChange={(e) => (e.target.value === '' ? commit(true) : commit(false, e.target.value))}>
+          onChange={(e) => (e.target.value === '' ? commit(true) : commit(false, e.target.value, true))}>
           <option value="">NULL</option><option value="t">true</option><option value="f">false</option>
         </select>
       ) : (
-        <input ref={input} className={`input ${isNumericKind(column.kind) ? 'num' : ''}`} value={text} spellCheck={false} placeholder={initial === null ? 'NULL' : ''}
-          onChange={(e) => { setText(e.target.value); setError(null); }} onKeyDown={onKey} onBlur={() => commit()} aria-label={column.name} />
+        <input ref={input} className={`input ${isNumericKind(column.kind) ? 'num' : ''} ${!touched && initial === null ? 'db-input-null' : ''}`} value={text} spellCheck={false}
+          placeholder={!touched && initial === null ? (isDefault ? 'DEFAULT' : 'NULL') : ''} data-state={!touched && initial === null ? (isDefault ? 'default' : 'null') : undefined}
+          onChange={(e) => { setText(e.target.value); setTouched(true); setError(null); }} onKeyDown={onKey} onBlur={() => commit()} aria-label={column.name} />
       )}
       <button type="button" className="db-null-btn" title={tr('Ustaw NULL')} onMouseDown={(e) => { e.preventDefault(); commit(true); }}>NULL</button>
       {error && <div className="db-cell-error" role="alert">{error}</div>}
@@ -138,7 +141,8 @@ export const DbGrid = memo(function DbGrid(props: DbGridProps) {
     }
     return out;
   };
-  const full = (rows: number[]): CellRange => ({ r0: Math.min(...rows), r1: Math.max(...rows), c0: 0, c1: columns.length - 1 });
+  // The rows of the selection are a contiguous range: its bounds (no spread of a possibly huge list).
+  const full = (rows: number[]): CellRange => ({ r0: rows[0] ?? 0, r1: rows[rows.length - 1] ?? 0, c0: 0, c1: columns.length - 1 });
   const copy = (r: CellRange, format: 'tsv' | 'csv' | 'json') => {
     const data = rowsOf(r);
     const cols = columns.slice(r.c0, r.c1 + 1);
@@ -295,7 +299,7 @@ export const DbGrid = memo(function DbGrid(props: DbGridProps) {
       <div className="db-gbody" style={{ height: rowCount * ROW, width: total }}>
         {rowsShown}
         {edit && (
-          <CellEditor key={`${edit.row}:${edit.col}`} column={columns[edit.col]} initial={editInitial === undefined ? null : editInitial === null ? null : isTruncated(editInitial) ? editInitial.head : editInitial}
+          <CellEditor key={`${edit.row}:${edit.col}`} column={columns[edit.col]} isDefault={editInitial === undefined} initial={editInitial === undefined ? null : editInitial === null ? null : isTruncated(editInitial) ? editInitial.head : editInitial}
             style={{ top: edit.row * ROW, left: RN + cw.lefts[edit.col], minWidth: widths[edit.col] }}
             onDone={(value) => { const p = edit; setEditing(null); scroller.current?.focus(); if (value !== undefined) props.onEdit?.(p.row, p.col, value); }} />
         )}
