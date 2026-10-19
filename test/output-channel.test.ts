@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EXIT_DRAIN_MS, OutputChannel, PAUSE_WATCHDOG_MS } from '../src/ptyhost/output';
-import { BACKGROUND_COALESCE_MS, HIGH_WATER, LOW_WATER } from '../src/ptyhost/flow';
+import { BACKGROUND_COALESCE_MS, ECHO_COALESCE_MS, ECHO_WINDOW_MS, HIGH_WATER, LOW_WATER } from '../src/ptyhost/flow';
 
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
@@ -68,6 +68,57 @@ describe('OutputChannel', () => {
     out.dispose();
     out.push('late');
     vi.advanceTimersByTime(20);
+    expect(sent).toEqual([]);
+  });
+
+  // Task L (0.9.9): on Windows a 4 ms setTimeout fires after one timer tick (about 15.6 ms), which every echo used to wait for.
+  it('delivers the first output after a keystroke on the next event-loop turn, without a timer', () => {
+    const { out, sent } = setup();
+    out.wrote();
+    out.push('e');
+    expect(sent).toEqual([]);
+    vi.advanceTimersByTime(0);
+    expect(sent).toEqual(['e']);
+  });
+
+  it('flushes output that was waiting for the background window together with the echo', () => {
+    const { out, sent } = setup();
+    out.push('stream ');
+    out.wrote();
+    out.push('echo');
+    vi.advanceTimersByTime(0);
+    expect(sent).toEqual(['stream echo']);
+  });
+
+  it('coalesces the rest of the output of a typed cell on the echo window again', () => {
+    const { out, sent } = setup();
+    out.wrote();
+    out.push('e');
+    vi.advanceTimersByTime(0);
+    out.push('1'); out.push('2');
+    vi.advanceTimersByTime(0);
+    expect(sent).toEqual(['e']);
+    vi.advanceTimersByTime(ECHO_COALESCE_MS);
+    expect(sent).toEqual(['e', '12']);
+  });
+
+  it('a keystroke without an answer does not turn output long after it into an echo', () => {
+    const { out, sent } = setup();
+    out.wrote();
+    vi.advanceTimersByTime(ECHO_WINDOW_MS);
+    out.push('late');
+    vi.advanceTimersByTime(0);
+    expect(sent).toEqual([]);
+    vi.advanceTimersByTime(BACKGROUND_COALESCE_MS * 1.5);
+    expect(sent).toEqual(['late']);
+  });
+
+  it('dispose cancels a pending echo flush', () => {
+    const { out, sent } = setup();
+    out.wrote();
+    out.push('e');
+    out.dispose();
+    vi.advanceTimersByTime(10);
     expect(sent).toEqual([]);
   });
 });

@@ -1,6 +1,6 @@
 // SshManager against a real in-process ssh2 server on 127.0.0.1 (no other network). Fake sink and events stand in for main and the renderer.
 import { createServer } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import ssh2 from 'ssh2';
 import { SshManager, type SshEvents, type SshTimers } from '../src/ptyhost/ssh';
 import type { SshConnectRequest } from '../src/shared/ipc';
@@ -146,6 +146,43 @@ describe('SshManager', () => {
     h.m.resize('c1', 120, 40);
     await waitFor(() => s.windowChanges.length === 1);
     expect(s.windowChanges[0]).toEqual({ cols: 120, rows: 40 });
+  });
+
+  // Task L (0.9.9): like OpenSSH's client for an interactive session, keystrokes are not held back by Nagle's algorithm.
+  it('turns Nagle off on the session socket', async () => {
+    const spy = vi.spyOn(ssh2.Client.prototype, 'setNoDelay');
+    try {
+      const s = await server({ password: 'pw' });
+      const h = harness();
+      h.m.connect(req(s.port, { password: 'pw' }));
+      expect(spy).toHaveBeenCalledWith(true);
+      const sock = (spy.mock.contexts[0] as unknown as { _sock: object })._sock;
+      const flag = Object.getOwnPropertySymbols(sock).find((k) => k.description === 'kSetNoDelay');
+      if (flag) expect((sock as Record<symbol, unknown>)[flag]).toBe(true);
+      await h.trust();
+      await waitFor(() => h.phases().includes('connected'));
+    } finally { spy.mockRestore(); }
+  });
+
+  // Task L (0.9.9): an echo used to wait for the 4 ms coalescing timer, which Windows rounds up to its timer tick (15.6 ms).
+  // With setTimeout frozen the echo must still arrive: it may only wait for the end of the event-loop turn.
+  it('delivers the echo of a typed character without waiting for a coalescing timer', async () => {
+    const s = await server({ password: 'pw' });
+    const h = harness();
+    h.m.connect(req(s.port, { password: 'pw' }));
+    await h.trust();
+    await waitFor(() => (h.out.get('c1') ?? '').includes('$ '));
+    await new Promise((r) => setTimeout(r, 200));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      for (const ch of 'abc') {
+        const before = h.out.get('c1') ?? '';
+        h.m.write('c1', ch);
+        const t0 = Date.now();
+        while ((h.out.get('c1') ?? '') === before && Date.now() - t0 < 2000) await new Promise((r) => setImmediate(r));
+        expect((h.out.get('c1') ?? '').slice(before.length)).toBe(ch);
+      }
+    } finally { vi.useRealTimers(); }
   });
 
   it('types the startup command once, after the greeting and a quiet period', async () => {
