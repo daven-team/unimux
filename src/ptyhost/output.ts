@@ -1,7 +1,7 @@
 // The output path of one terminal (pty or SSH channel): coalescing, replay tail, renderer back-pressure and the exit drain.
 // Extracted from PtyManager so both backends share it; the source is paused and resumed through `control`.
 import { PTY_REPLAY_CHARS } from '../shared/terminalLimits';
-import { alignedDelay, coalesceDelay, FLUSH_NOW_CHARS, FlowGate, TailBuffer } from './flow';
+import { alignedDelay, coalesceDelay, ECHO_WINDOW_MS, FLUSH_NOW_CHARS, FlowGate, TailBuffer } from './flow';
 import type { PtySink } from './manager';
 
 /** A paused source is resumed anyway when no acknowledgement arrives for this long (renderer gone or stuck). */
@@ -35,6 +35,12 @@ export class OutputChannel {
   private readonly gate = new FlowGate();
   private watchdog: NodeJS.Timeout | null = null;
   private lastWrite = -Infinity;
+  /**
+   * The user typed and no output came since: the next output is the echo and leaves on the next event-loop turn instead of
+   * waiting for a timer (on Windows even a 4 ms setTimeout fires only on the next timer tick, about 15.6 ms later).
+   */
+  private echoPending = false;
+  private immediate: NodeJS.Immediate | null = null;
   /** The source ended and its last output is being drained: never pause it again. */
   private exiting = false;
   private disposed = false;
@@ -53,7 +59,15 @@ export class OutputChannel {
     this.tail.push(data);
     this.buf += data;
     if (this.buf.length >= FLUSH_NOW_CHARS) this.flush();
-    else if (!this.timer) this.arm();
+    else if (this.echoPending && Date.now() - this.lastWrite < ECHO_WINDOW_MS) this.flushEcho();
+    else if (!this.timer && !this.immediate) this.arm();
+  }
+
+  /** Sends the echo (and whatever waited before it) at the end of this event-loop turn: chunks of the same turn go together. */
+  private flushEcho(): void {
+    this.echoPending = false;
+    if (this.immediate) return;
+    this.immediate = setImmediate(() => { this.immediate = null; this.flush(); });
   }
 
   private arm(): void {
@@ -77,12 +91,15 @@ export class OutputChannel {
   /** The user typed into this terminal (echoes are flushed faster). */
   wrote(): void {
     this.lastWrite = Date.now();
+    this.echoPending = true;
     this.rearm();
   }
 
   flush(): void {
     if (this.timer) clearTimeout(this.timer);
+    if (this.immediate) clearImmediate(this.immediate);
     this.timer = null;
+    this.immediate = null;
     this.due = Infinity;
     if (!this.buf || this.disposed) return;
     const out = this.buf;
@@ -139,8 +156,10 @@ export class OutputChannel {
     this.disposed = true;
     if (channels.get(this.id) === this) channels.delete(this.id);
     if (this.timer) clearTimeout(this.timer);
+    if (this.immediate) clearImmediate(this.immediate);
     if (this.watchdog) clearTimeout(this.watchdog);
     this.timer = null;
+    this.immediate = null;
     this.watchdog = null;
   }
 }
