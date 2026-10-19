@@ -6,6 +6,7 @@ import type { AgentRole, AutomationState } from './automation';
 import type { BackgroundLoadMode } from './backgroundLoad';
 import type { Overrides as ShortcutOverrides } from './shortcuts';
 import type { SshCellRef, SshHost } from './ssh';
+import type { SftpPlaces } from './sftpView';
 
 export type CliKind = 'claude' | 'codex' | 'shell';
 /** A forced path format of a shell cell: Claude (@path), Codex (plain path) or the quoted shell form. */
@@ -170,6 +171,8 @@ export interface AppState {
   snippets: Snippet[];
   /** Saved SSH hosts (no secrets: those live in <data>/ssh/vault.json, owned by main). */
   sshHosts: SshHost[];
+  /** The SFTP view's last local folder and last remote folder per host (0.9.8). */
+  sftp: SftpPlaces;
   settings: Settings;
   sidebarCollapsed: boolean;
   snippetsOpen: boolean;

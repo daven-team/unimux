@@ -277,6 +277,12 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
               setTimeout(() => conn.end(), 100);
               return;
             }
+            // "cd /some/dir" reports the folder like a shell with OSC 7 integration (fish, vte.sh): file://host/percent-encoded path.
+            if (command.startsWith('cd /')) {
+              const dir = command.slice(3).trim();
+              stream.write(`\r\n\u001b]7;file://test-server${dir.split('/').map(encodeURIComponent).join('/')}\u0007$ `);
+              continue;
+            }
             stream.write(command.startsWith('echo ') ? `\r\n${command.slice(5)}\r\n$ ` : '\r\n$ ');
           }
         });

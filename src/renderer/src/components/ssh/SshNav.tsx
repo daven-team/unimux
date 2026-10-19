@@ -1,4 +1,4 @@
-// The SSH mode navigation (0.9.2): Hosty, Klucze, Znane hosty and a greyed SFTP ("wkrótce"). In the side panel while the
+// The SSH mode navigation (0.9.2): Hosty, Klucze, Znane hosty and SFTP (0.9.8). In the side panel while the
 // SSH view is in front; `compact` is the segmented row at the top of the view when the side panel is folded.
 import { useRef, type KeyboardEvent, type ReactNode } from 'react';
 import { railFocusTarget } from '../../../../shared/sidebarPanels';
@@ -20,7 +20,7 @@ export function SshNav({ compact = false }: { compact?: boolean }) {
   const hostCount = useStore((st) => st.s.sshHosts.length);
   const list = useRef<HTMLDivElement>(null);
   const counts: Partial<Record<SshNavEntry['id'], number>> = { hosts: hostCount, keys: keyCount };
-  /** Arrows, Home and End move along the enabled entries and choose them (the disabled SFTP entry is skipped). */
+  /** Arrows, Home and End move along the enabled entries and choose them (a disabled entry would be skipped). */
   const onKeyDown = (e: KeyboardEvent) => {
     const tabs = Array.from(list.current?.querySelectorAll<HTMLButtonElement>('[role=tab]:not(:disabled)') ?? []);
     const key = compact ? ARROWS[e.key] ?? e.key : e.key;
@@ -39,11 +39,11 @@ export function SshNav({ compact = false }: { compact?: boolean }) {
         return (
           <button key={entry.id} type="button" role="tab" data-section={entry.id} className={`ssh-nav-item${on ? ' on' : ''}`}
             aria-selected={on} aria-controls={on ? 'ssh-section' : undefined} tabIndex={on ? 0 : -1} disabled={entry.disabled}
-            title={entry.disabled ? `${tr(entry.label)} · ${tr('wkrótce')} - ${tr('Przesyłanie plików przez SFTP pojawi się w jednej z kolejnych wersji.')}` : tr(entry.label)}
+            title={tr(entry.label)}
             onClick={() => selectSshSection(entry.id)}>
             <Icon />
             <span className="ssh-nav-label">{tr(entry.label)}</span>
-            {entry.disabled ? <span className="ssh-nav-soon">{tr('wkrótce')}</span> : !compact && count !== undefined ? <span className="ssh-nav-count">{count}</span> : null}
+            {!compact && count !== undefined ? <span className="ssh-nav-count">{count}</span> : null}
           </button>
         );
       })}

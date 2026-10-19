@@ -24,6 +24,8 @@ import { KnownHostsView } from './KnownHostsView';
 import { NewKeyEditor } from './NewKeyEditor';
 import { PaneActive, PaneDirty, paneGuardOff, withoutPaneGuard } from './paneVisibility';
 import { SshNav } from './SshNav';
+import { SftpView } from '../sftp/SftpView';
+import { openSftp } from '../../sftp';
 import './ssh.css';
 
 const FOLD_KEY = 'mc-ssh-groups-v1';
@@ -111,13 +113,20 @@ export function SshView() {
     useSshStore.setState({ selectedHosts: [] });
   };
 
+  // The SFTP section (0.9.8) is its own two-pane screen; once shown it stays mounted, so its folders and selection survive a
+  // visit to another section.
+  const sftp = section === 'sftp';
+  const [sftpSeen, setSftpSeen] = useState(sftp);
+  useEffect(() => { if (sftp) setSftpSeen(true); }, [sftp]);
   return (
-    <div className="ssh-view">
+    <>
+    {sftpSeen && <div className="sftp-host" style={{ display: sftp ? 'flex' : 'none' }}><SftpView compactNav={collapsed} /></div>}
+    <div className="ssh-view" style={sftp ? { display: 'none' } : undefined}>
       <div className="ssh-view-main" onKeyDown={onKeyDown}>
         {/* With the side panel folded the view itself offers the sections. */}
         {collapsed && <SshNav compact />}
         {vault?.storage === 'unavailable' && <div className="ssh-banner-warn">{tr('Szyfrowanie systemowe jest niedostępne - klucze i hasła są trzymane tylko do zamknięcia aplikacji')}</div>}
-        <div id="ssh-section" role="tabpanel" className="ssh-view-body" aria-label={tr(section === 'hosts' ? 'Hosty' : section === 'keys' ? 'Klucze' : 'Znane hosty')}>
+        <div id="ssh-section" role="tabpanel" className="ssh-view-body" aria-label={tr(section === 'hosts' ? 'Hosty' : section === 'keys' ? 'Klucze' : section === 'sftp' ? 'SFTP' : 'Znane hosty')}>
           {section === 'hosts' && <HostsSection detail={detail} onConnect={connect} onClosePane={closePane} />}
           {section === 'keys' && <KeysSection detail={detail} onClosePane={closePane} />}
           {section === 'knownHosts' && <KnownHostsView />}
@@ -134,6 +143,7 @@ export function SshView() {
         </aside>
       )}
     </div>
+    </>
   );
 }
 
@@ -214,6 +224,7 @@ function HostsSection({ detail, onConnect, onClosePane }: { detail: SshDetail | 
     openMenu(e.clientX, e.clientY, [
       { label: tr('Połącz w aktywnej siatce'), onClick: () => onConnect(h.id, 'cell') },
       { label: tr('Otwórz w nowym gridzie'), onClick: () => onConnect(h.id, 'tab') },
+      { label: tr('Otwórz SFTP'), onClick: () => openSftp({ hostId: h.id }) },
       { sep: true },
       { label: tr('Edytuj'), onClick: () => showSshDetail({ kind: 'host', hostId: h.id }) },
       { label: tr('Duplikuj'), onClick: () => update((s) => duplicateSshHost(s, h.id)) },
@@ -368,6 +379,7 @@ function DetailPane({ detail, onConnect }: { detail: SshDetail; onConnect: (host
           <div className="ssh-detail-actions">
             <button className="btn primary" onClick={() => onConnect(hostId, 'cell')}>{tr('Połącz')}</button>
             <button className="btn" onClick={() => onConnect(hostId, 'tab')}>{tr('Otwórz w nowym gridzie')}</button>
+            <button className="btn" onClick={() => openSftp({ hostId })}>{tr('Otwórz SFTP')}</button>
           </div>
         )}
         <HostEditor paneId={detailKey(detail)} hostId={hostId} />
