@@ -354,8 +354,10 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .menu-item.disabled:hover, .menu-item.disabled:focus-visible { background: transparent; color: var(--text-2); }
 .usage-card.busy { opacity: 0.85; }
 .usage-swapping { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-2); white-space: nowrap; }
-.usage-spinner { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; animation: refresh-turn 0.8s linear infinite; }
-@media (prefers-reduced-motion: reduce) { .usage-spinner { animation-duration: 2.4s; } }
+/* Turns with the shared blink (blink.ts), no CSS animation. */
+.usage-spinner { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; }
+:root[data-blink] .usage-spinner { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { :root[data-blink] .usage-spinner { transform: none; } }
 .menu-sep { height: 1px; background: #ffffff09; margin: 5px -5px; }
 .menu-label { padding: 4px 12px 3px; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: #828282; text-transform: uppercase; letter-spacing: .4px; }
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 70; padding: 9px 14px; border-radius: 8px; background: #1f1f1f; border: 1px solid var(--border-2); color: var(--text); box-shadow: 0 12px 40px #000a; max-width: 70vw; }
@@ -612,8 +614,6 @@ select option { background: #171717; color: var(--text); }
 }
 .update-pill:hover { background: #fff; }
 .update-pill.muted-pill { background: var(--bg-2); color: var(--text-2); border-color: var(--border-2); cursor: default; font-weight: 500; }
-.update-pill .pulse { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 0 #22c55e88; animation: upd-pulse 1.6s infinite; }
-@keyframes upd-pulse { 0% { box-shadow: 0 0 0 0 #22c55e88; } 70% { box-shadow: 0 0 0 6px #22c55e00; } 100% { box-shadow: 0 0 0 0 #22c55e00; } }
 @keyframes pill-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
 /* "+ Dodaj" pill in the tab bar */
@@ -933,10 +933,10 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 
 /* ── refresh feedback ──────────────────────────────────────────────────── */
 .refresh-icon { display: inline-grid; place-items: center; line-height: 0; }
-.refresh-icon.spinning svg { animation: refresh-turn .7s linear infinite; }
-@keyframes refresh-turn { to { transform: rotate(360deg); } }
+/* Flips with the shared blink while spinning (blink.ts), no CSS animation. */
+:root[data-blink] .refresh-icon.spinning svg { transform: rotate(180deg); }
 .statusbar .refresh-icon svg { width: 12px; height: 12px; }
-@media (prefers-reduced-motion: reduce) { .refresh-icon.spinning svg { animation-duration: 2.4s; } }
+@media (prefers-reduced-motion: reduce) { :root[data-blink] .refresh-icon.spinning svg { transform: none; } }
 
 /* ── find and replace ──────────────────────────────────────────────────── */
 .modal.find-replace { width: 900px; height: min(80vh, 760px); }
