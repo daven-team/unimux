@@ -156,14 +156,14 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .badge.exited { color: var(--error); background: #f8717114; }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: #3a3a3a; }
-/* The halo is a pseudo element animated with transform and opacity only (compositor), not box-shadow (a repaint every frame). */
-.dot.working { position: relative; background: var(--working); }
-.dot.working::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: #f5b94266; animation: pulse 1.4s infinite; will-change: transform, opacity; pointer-events: none; }
+/* No CSS animation here: a running one presents a frame at every vsync. blink.ts flips data-blink on <html> twice a second
+   while a cell works, and the halo shows in one phase (a calm 1 Hz blink). */
+.dot.working { background: var(--working); }
+:root[data-blink] .dot.working { box-shadow: 0 0 0 3px #f5b94259; }
 .dot.waiting { background: var(--waiting); }
 .dot.exited { background: var(--error); }
 .dot.waiting.error { background: var(--error); }
-@keyframes pulse { 0% { transform: scale(1); opacity: 1; } 70% { transform: scale(2.43); opacity: 0; } 100% { transform: scale(1); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .dot.working::after { animation: none; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { :root[data-blink] .dot.working { box-shadow: none; } }
 
 /* ── tab bar (inside titlebar) ─────────────────────────────────────────── */
 .tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; flex: 0 1 auto; scrollbar-width: none; }
