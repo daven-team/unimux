@@ -20,6 +20,7 @@ export type SftpOp =
   | { op: 'clearFinished' }
   /** An editor tab (0.9.9): the file read into memory, and its text saved back through a part file. */
   | { op: 'readFile'; path: string }
+  | { op: 'statFile'; path: string }
   | { op: 'writeFile'; path: string; save: EditorSave };
 
 export type MainToSftpHost =

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { CodeEditor } from './CodeEditor';
-import { closeFile, editFile, fileErrorLabel, fileLabel, isFileDirty, loadDiskText, overwriteFileOnDisk, reloadFileFromDisk, retryFile, saveFile, setFileDataView, setFileMarkdownView, toggleFileWrap, useFileStore } from '../files';
+import { checkFileOnDisk, closeFile, editFile, fileErrorLabel, fileLabel, isFileDirty, loadDiskText, overwriteFileOnDisk, reloadFileFromDisk, retryFile, saveFile, setFileDataView, setFileMarkdownView, toggleFileWrap, useFileStore } from '../files';
 import { detectDelimiter, isDelimitedPath, parseDelimited } from '../../../shared/csv';
 import { DataTable, ImageView, LargeTextView } from './FileViews';
 import { handleZoomKey, setFileZoom, stepFileZoom, useFileZoom } from '../fileZoom';
@@ -134,6 +134,12 @@ export function FileEditor() {
         <span>{tr('Brak połączenia z {host}. Połącz ponownie, aby wczytać lub zapisać plik.', { host: hostLabel })}</span>
         <span className="remote-notice-actions"><button className="btn small" onClick={() => void ensureSession(remote.hostId)}>{tr('Połącz ponownie')}</button></span>
       </div>}
+      {/* A clean tab without a connection is not checked any more: it may show an old version of the server file. */}
+      {remote && !hasSession && !connecting && !doc.error && !dirty && doc.status === 'ready' && <div className="preview-notice remote-notice muted remote-stale" role="status">
+        <span>{tr('Brak połączenia z {host} - zawartość może być nieaktualna.', { host: hostLabel })}</span>
+        <span className="remote-notice-actions"><button className="btn small" onClick={() => void ensureSession(remote.hostId).then((r) => { if (r.ok) void checkFileOnDisk(doc.id, true); })}>{tr('Połącz ponownie')}</button></span>
+      </div>}
+      {doc.notice && <div className="preview-notice remote-notice" role="status" style={{ whiteSpace: 'pre-wrap' }}>{doc.notice}</div>}
       {doc.diskConflict && <div className={`preview-notice file-disk-conflict ${doc.diskConflict === 'save' ? 'error' : ''}`} role="alert">
         <span>{doc.diskConflict === 'save' ? conflictText.save : conflictText.changed}</span>
         <span className="file-disk-conflict-actions">

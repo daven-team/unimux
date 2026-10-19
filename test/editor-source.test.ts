@@ -1,15 +1,15 @@
 // Files outside projects in editor tabs (0.9.9): the shared source helpers (ids = draft keys, open decisions by size and
 // kind, stamps, encodings), main's local file channels, the SFTP IPC of the editor and the idle disconnect that keeps the
 // sessions of hosts with unsaved remote tabs.
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  decodeText, EDITOR_IMAGE_BYTES, EDITOR_TEXT_BYTES, encodeText, isFileLike, localRelativePath, remoteOpenPlan, restoreLineEndings, sameStamp,
+  cleanStamp, decodeText, EDITOR_IMAGE_BYTES, EDITOR_TEXT_BYTES, encodeText, isFileLike, needsHashCheck, localRelativePath, remoteOpenPlan, restoreLineEndings, sameStamp,
   sourceDocumentId, sourceTitle, validEditorSave, validEditorText, validSource,
 } from '../src/shared/editorSource';
-import { createLocalFiles } from '../src/main/localFiles';
+import { createLocalFiles, isUncOrDevicePath } from '../src/main/localFiles';
 import { createSftpHandlers } from '../src/main/sftp/ipc';
 import { SftpService, type SftpServiceDeps } from '../src/main/sftp/service';
 import type { SftpResult } from '../src/shared/sftp';
@@ -74,6 +74,16 @@ describe('editor sources', () => {
     expect(sameStamp({ size: 1, mtimeMs: 2 }, { size: 1, mtimeMs: 3 })).toBe(false);
     expect(sameStamp({ size: 2, mtimeMs: 2 }, { size: 1, mtimeMs: 2 })).toBe(false);
     expect(sameStamp(undefined, { size: 1, mtimeMs: 2 })).toBe(false);
+    const hash = 'a'.repeat(64);
+    // Within 2 s of the read (or a small file) the content hash decides; without a hash only the stamp can.
+    expect(needsHashCheck({ size: 10_000_000, mtimeMs: 10_000, readAt: 11_500, hash })).toBe(true);
+    expect(needsHashCheck({ size: 10_000_000, mtimeMs: 10_000, readAt: 60_000, hash })).toBe(false);
+    expect(needsHashCheck({ size: 100, mtimeMs: 10_000, readAt: 60_000, hash })).toBe(true);
+    expect(needsHashCheck({ size: 100, mtimeMs: 10_000, readAt: 10_000 })).toBe(false);
+    expect(cleanStamp({ size: 1, mtimeMs: 2, hash, readAt: 3, sessionId: 'sftp:x' })).toEqual({ size: 1, mtimeMs: 2, hash, readAt: 3 });
+    expect(cleanStamp({ size: 1, mtimeMs: 2, hash: 'not-hex' })).toBeNull();
+    expect(validEditorSave({ text: 'a', baseline: 'b', encoding: 'utf-8', expected: { size: 1, mtimeMs: 2, hash }, allowOwnerChange: true })).toBe(true);
+    expect(validEditorSave({ text: 'a', baseline: 'b', encoding: 'utf-8', expected: null, allowOwnerChange: 'yes' })).toBe(false);
     expect(validEditorSave({ text: 'a', baseline: 'b', encoding: 'utf-8', expected: null })).toBe(true);
     expect(validEditorSave({ text: 'a', baseline: 'b', encoding: 'utf-8', expected: { size: 1, mtimeMs: 2 } })).toBe(true);
     expect(validEditorSave({ text: 'a', baseline: 'b', encoding: 'latin1', expected: null })).toBe(false);
@@ -115,6 +125,40 @@ describe('local files outside the projects', () => {
     expect(await f.statFile('rel')).toBeNull();
     expect(await f.writeFile('rel.txt', 'a', 'b')).toMatchObject({ ok: false });
     expect(await f.writeFile(join(dir, 'x.txt'), 1, 'b')).toMatchObject({ ok: false });
+  });
+
+  it('writes only a file this window read first; a reload forgets them (a restored draft reads again)', async () => {
+    const path = join(dir, 'a.txt');
+    writeFileSync(path, 'a');
+    const f = files();
+    expect(await f.writeFile(path, 'b', 'a')).toEqual({ ok: false, error: 'Ten plik nie został otwarty w edytorze.' });
+    expect(readFileSync(path, 'utf8')).toBe('a');
+    await f.readFile(path);
+    expect(await f.writeFile(path, 'b', 'a')).toEqual({ ok: true });
+    f.rendererGone();
+    expect(await f.writeFile(path, 'c', 'b')).toMatchObject({ ok: false, error: 'Ten plik nie został otwarty w edytorze.' });
+    expect(readFileSync(path, 'utf8')).toBe('b');
+  });
+
+  it('never reads or writes the app data dir or the install dir, nor UNC and device paths', async () => {
+    const data = join(dir, 'data');
+    mkdirSync(data);
+    const state = join(data, 'state.json');
+    writeFileSync(state, '{}');
+    const f = createLocalFiles({ platform: process.platform, trash: async () => undefined, openFolder: async () => undefined, showFile: () => undefined, forbidden: [data] });
+    expect(await f.readFile(state)).toEqual({ kind: 'error', message: 'Tego miejsca nie można edytować w aplikacji.' });
+    expect(await f.statFile(state)).toBeNull();
+    expect(await f.writeFile(state, 'x', '{}')).toEqual({ ok: false, error: 'Tego miejsca nie można edytować w aplikacji.' });
+    expect(readFileSync(state, 'utf8')).toBe('{}');
+    // The same folder spelled through "..".
+    expect(await f.readFile(join(dir, 'x', '..', 'data', 'state.json'))).toMatchObject({ kind: 'error' });
+    expect(isUncOrDevicePath('\\\\server\\share\\a.txt')).toBe(true);
+    expect(isUncOrDevicePath('\\\\?\\C:\\a.txt')).toBe(true);
+    expect(isUncOrDevicePath('\\\\.\\PhysicalDrive0')).toBe(true);
+    expect(isUncOrDevicePath('//server/share')).toBe(true);
+    expect(isUncOrDevicePath('C:\\a.txt')).toBe(false);
+    const win = createLocalFiles({ platform: 'win32', trash: async () => undefined, openFolder: async () => undefined, showFile: () => undefined });
+    expect(await win.readFile('\\\\server\\share\\a.txt')).toEqual({ kind: 'error', message: 'Tego miejsca nie można edytować w aplikacji.' });
   });
 });
 

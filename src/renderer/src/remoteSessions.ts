@@ -43,11 +43,18 @@ export function initRemoteSessions(): void {
 
 const connected = (s: SftpSessionState | undefined | null): boolean => s?.state === 'connected';
 
-/** A connected session of `hostId` (the SFTP view's first), or null. */
+/**
+ * A session with raised rights (a sudo session of the SFTP view) is never used for an editor tab: its saves would be written as
+ * another user. Read defensively: the field belongs to the session state of the view.
+ */
+const elevated = (s: SftpSessionState | null | undefined): boolean => !!(s as (SftpSessionState & { sudo?: unknown; elevated?: unknown }) | null | undefined)?.sudo
+  || !!(s as (SftpSessionState & { elevated?: unknown }) | null | undefined)?.elevated;
+
+/** A connected session of `hostId` (the SFTP view's first) that runs with the SSH user's own rights, or null. */
 export function liveSession(hostId: string): string | null {
   const view = useSftpStore.getState();
-  if (view.sessionId && view.hostId === hostId && connected(view.session)) return view.sessionId;
-  const found = Object.values(useRemoteSessions.getState().sessions).find((s) => s.hostId === hostId && connected(s));
+  if (view.sessionId && view.hostId === hostId && connected(view.session) && !elevated(view.session)) return view.sessionId;
+  const found = Object.values(useRemoteSessions.getState().sessions).find((s) => s.hostId === hostId && connected(s) && !elevated(s));
   return found?.id ?? null;
 }
 
@@ -165,6 +172,8 @@ export async function withSession<T>(hostId: string, interactive: boolean, fn: (
 }
 
 let lastPins = '';
+/** Hosts whose sessions dirty remote tabs need (the SFTP view does not drop such a session without asking). */
+export const pinnedHosts = (): Set<string> => new Set(lastPins ? lastPins.split(',') : []);
 /** The hosts of remote tabs with unsaved changes: main keeps their sessions while the SFTP view is closed. */
 export function pinHosts(hostIds: string[]): void {
   const key = [...new Set(hostIds)].sort().join(',');

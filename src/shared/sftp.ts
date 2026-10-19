@@ -2,7 +2,7 @@
 // helpers for POSIX remote paths, "keep both" names, permission strings and part files. No Node or Electron imports.
 import type { Localized } from './ssh';
 import type { SshErrorCode, SshPhase, SshPrompt } from './ssh';
-import type { EditorRead, EditorSave, FileStamp } from './editorSource';
+import type { EditorRead, EditorSave, EditorWriteResult, FileStamp } from './editorSource';
 import type { ProjectFilePreview } from './types';
 
 // ── sessions ────────────────────────────────────────────────────────────────
@@ -388,7 +388,9 @@ export interface SftpApi {
   /** A remote file for an editor tab (0.9.9): text, an image preview, or binary / too large (offer a download). */
   readFile(sessionId: string, path: string): Promise<SftpResult<EditorRead>>;
   /** Saves an editor tab through a part file; 'changed' when the server file is not the one the tab was opened from. */
-  writeFile(sessionId: string, path: string, save: EditorSave): Promise<SftpResult<{ stamp: FileStamp }>>;
+  writeFile(sessionId: string, path: string, save: EditorSave): Promise<SftpResult<EditorWriteResult>>;
+  /** Size and time of a file (following links) for the focus check of a tab: one request, no folder listing. */
+  statFile(sessionId: string, path: string): Promise<SftpResult<FileStamp>>;
   /** Hosts of editor tabs with unsaved changes: their sessions are kept while the view is closed. */
   pinHosts(hostIds: string[]): void;
   /** The SFTP view became visible / was closed (idle disconnect 2 minutes after close with an empty queue). */

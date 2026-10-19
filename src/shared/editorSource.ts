@@ -90,8 +90,8 @@ export const validEditorText = (text: string): boolean => !CONTROL.test(text) &&
 /** The bytes to write for `text` in the file's encoding and line endings (baseline: the file's text the edits started from). */
 export function encodeText(text: string, baseline: string, encoding: TextEncodingName): Uint8Array {
   const body = restoreLineEndings(text, baseline);
-  if (encoding === 'utf-8' || encoding === 'utf-8-bom') return new TextEncoder().encode((encoding === 'utf-8-bom' ? '﻿' : '') + body);
-  const full = `﻿${body}`;
+  if (encoding === 'utf-8' || encoding === 'utf-8-bom') return new TextEncoder().encode((encoding === 'utf-8-bom' ? '\ufeff' : '') + body);
+  const full = `\ufeff${body}`;
   const out = new Uint8Array(full.length * 2);
   for (let i = 0; i < full.length; i++) {
     const code = full.charCodeAt(i);
@@ -104,23 +104,61 @@ export function encodeText(text: string, baseline: string, encoding: TextEncodin
 
 /** A remote file read for an editor tab (by the SFTP Host). */
 export type EditorRead =
-  | { kind: 'text'; text: string; encoding: TextEncodingName; size: number; stamp: FileStamp }
-  | { kind: 'image'; mime: string; dataUrl: string; size: number; stamp: FileStamp }
+  | { kind: 'text'; text: string; encoding: TextEncodingName; size: number; stamp: RemoteStamp }
+  | { kind: 'image'; mime: string; dataUrl: string; size: number; stamp: RemoteStamp }
   | { kind: 'binary'; size: number }
   | { kind: 'tooLarge'; size: number };
 
-/** A save of a remote editor tab. `expected` null (a draft restored without its stamp): the server text is compared instead. */
-export interface EditorSave { text: string; baseline: string; encoding: TextEncodingName; expected: FileStamp | null }
+/**
+ * A save of a remote editor tab. `expected` null (a draft restored without its stamp): the server text is compared instead.
+ * `allowOwnerChange`: the user agreed that the saved file will belong to the SSH user (the server file has another owner).
+ */
+export interface EditorSave { text: string; baseline: string; encoding: TextEncodingName; expected: RemoteStamp | null; allowOwnerChange?: boolean }
+
+/**
+ * The stamp of a remote read or save: size and time, plus the sha256 of the bytes and when they were read. SFTP times have a
+ * resolution of one second, so a save compares the hash too when the file changed close to the read.
+ */
+export interface RemoteStamp extends FileStamp { hash?: string; readAt?: number }
+
+/** The save compares the content hash (a re-read) when the time cannot tell a change apart: within 2 s of the read, or small files. */
+export const HASH_CHECK_WINDOW_MS = 2000;
+export const HASH_CHECK_SMALL_BYTES = 64 * 1024;
+export const needsHashCheck = (s: RemoteStamp): boolean =>
+  !!s.hash && (s.readAt === undefined || Math.abs(s.readAt - s.mtimeMs) <= HASH_CHECK_WINDOW_MS || s.size <= HASH_CHECK_SMALL_BYTES);
+
+export interface FileOwner { uid: number; gid: number }
+
+/** Something the save could not keep as it was (shown in the tab; the save itself went through). */
+export type EditorWarning = { kind: 'mode'; mode: number } | { kind: 'owner'; from: FileOwner; to: FileOwner };
+
+export type EditorWriteResult =
+  /** `stamp` null: the server file could not be read back after the rename (the next save compares the text). */
+  | { kind: 'saved'; stamp: RemoteStamp | null; warnings: EditorWarning[] }
+  /** The server file belongs to another user and the saved one would not: nothing was written, the user is asked. */
+  | { kind: 'ownerChange'; from: FileOwner; to: FileOwner }
+  /** The new file could not be renamed in and the old one could not be put back: both copies stay on the server. */
+  | { kind: 'stranded'; part: string; aside: string | null };
+
+const validStampShape = (stamp: unknown): boolean => !!stamp && typeof stamp === 'object'
+  && Number.isFinite((stamp as FileStamp).size) && Number.isFinite((stamp as FileStamp).mtimeMs)
+  && ((stamp as RemoteStamp).hash === undefined || (typeof (stamp as RemoteStamp).hash === 'string' && /^[0-9a-f]{64}$/.test((stamp as RemoteStamp).hash!)))
+  && ((stamp as RemoteStamp).readAt === undefined || Number.isFinite((stamp as RemoteStamp).readAt));
 
 /** Rejects a save request that does not have the shape main expects (the IPC also validates it). */
 export function validEditorSave(value: unknown): value is EditorSave {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
-  const stamp = v.expected;
-  const stampOk = stamp === null || (!!stamp && typeof stamp === 'object'
-    && Number.isFinite((stamp as FileStamp).size) && Number.isFinite((stamp as FileStamp).mtimeMs));
+  const stampOk = v.expected === null || validStampShape(v.expected);
   return typeof v.text === 'string' && typeof v.baseline === 'string' && v.text.length <= EDITOR_TEXT_BYTES && v.baseline.length <= EDITOR_TEXT_BYTES
-    && TEXT_ENCODINGS.includes(v.encoding as TextEncodingName) && stampOk;
+    && TEXT_ENCODINGS.includes(v.encoding as TextEncodingName) && stampOk && (v.allowOwnerChange === undefined || typeof v.allowOwnerChange === 'boolean');
+}
+
+/** A stamp restored from a draft or sent over IPC: only the known fields. */
+export function cleanStamp(stamp: unknown): RemoteStamp | null {
+  if (!validStampShape(stamp)) return null;
+  const s = stamp as RemoteStamp;
+  return { size: s.size, mtimeMs: s.mtimeMs, ...(s.hash ? { hash: s.hash } : {}), ...(s.readAt !== undefined ? { readAt: s.readAt } : {}) };
 }
 
 /** `child` is inside the folder `root` (a local path; case-insensitive on Windows and macOS). Relative path with "/" or null. */

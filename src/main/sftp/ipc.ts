@@ -7,7 +7,7 @@ import {
 } from '../../shared/sftp';
 import { SSH_LIMITS, type SshPromptAnswer } from '../../shared/ssh';
 import type { SftpOp } from '../../shared/sftpHostIpc';
-import { validEditorSave } from '../../shared/editorSource';
+import { cleanStamp, validEditorSave } from '../../shared/editorSource';
 import type { IpcGuard } from '../ipcGuard';
 import { validLocalPath } from '../localFiles';
 import type { SftpService } from './service';
@@ -83,9 +83,10 @@ export function createSftpHandlers(service: SftpService) {
     },
     retry: (id: unknown, itemIds: unknown) => { const i = z.array(uuid).min(1).max(SFTP_LIMITS.paths).safeParse(itemIds); return i.success ? queueOp(id, { op: 'retry', itemIds: i.data }) : Promise.resolve({ ok: false }); },
     clearFinished: (id: unknown) => queueOp(id, { op: 'clearFinished' }),
+    statFile: (id: unknown, path: unknown) => (remotePath.safeParse(path).success ? run(id, { op: 'statFile', path: path as string }) : INVALID),
     readFile: (id: unknown, path: unknown) => (remotePath.safeParse(path).success ? run(id, { op: 'readFile', path: path as string }) : INVALID),
     writeFile: (id: unknown, path: unknown, save: unknown) => (remotePath.safeParse(path).success && validEditorSave(save)
-      ? run(id, { op: 'writeFile', path: path as string, save: { text: save.text, baseline: save.baseline, encoding: save.encoding, expected: save.expected ? { size: save.expected.size, mtimeMs: save.expected.mtimeMs } : null } })
+      ? run(id, { op: 'writeFile', path: path as string, save: { text: save.text, baseline: save.baseline, encoding: save.encoding, expected: cleanStamp(save.expected), ...(save.allowOwnerChange ? { allowOwnerChange: true } : {}) } })
       : INVALID),
     pinHosts: (hostIds: unknown) => { const h = z.array(uuid).max(200).safeParse(hostIds); if (h.success) service.pinHosts(h.data); },
     viewOpened: () => service.viewOpened(),
@@ -114,6 +115,7 @@ export function registerSftpIpc(guard: IpcGuard, h: SftpHandlers): void {
   guard.guardedHandle('sftp:answerConflict', (_e, id: unknown, itemId: unknown, a: unknown) => h.answerConflict(id, itemId, a), no);
   guard.guardedHandle('sftp:retry', (_e, id: unknown, itemIds: unknown) => h.retry(id, itemIds), no);
   guard.guardedHandle('sftp:clearFinished', (_e, id: unknown) => h.clearFinished(id), no);
+  guard.guardedHandle('sftp:statFile', (_e, id: unknown, path: unknown) => h.statFile(id, path), invalid);
   guard.guardedHandle('sftp:readFile', (_e, id: unknown, path: unknown) => h.readFile(id, path), invalid);
   guard.guardedHandle('sftp:writeFile', (_e, id: unknown, path: unknown, save: unknown) => h.writeFile(id, path, save), invalid);
   guard.guardedOn('sftp:pinHosts', (_e, hostIds: unknown) => h.pinHosts(hostIds));

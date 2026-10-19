@@ -176,7 +176,7 @@ export async function statLocalFile(path: unknown): Promise<{ size: number; mtim
 
 /** An absolute local path, resolved through links (the editor writes the file a link points to). */
 async function localFilePath(path: unknown): Promise<string> {
-  if (typeof path !== 'string' || !path || path.length > 4096 || path.includes(' ') || !isAbsolute(path)) throw new Error('Nieprawidłowa ścieżka lub nazwa');
+  if (typeof path !== 'string' || !path || path.length > 4096 || path.includes('\0') || !isAbsolute(path)) throw new Error('Nieprawidłowa ścieżka lub nazwa');
   return realpath(resolve(path));
 }
 

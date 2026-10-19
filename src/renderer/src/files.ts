@@ -7,7 +7,7 @@ import { useSshStore } from './sshStore';
 import type { GitDiffSource } from '../../shared/git';
 import type { ProjectFilePreview } from '../../shared/types';
 import { documentId, documentsUnder, removeDocuments, retargetDocuments, type FileMoveRecord } from '../../shared/fileOps';
-import { localRelativePath, sourceDocumentId, sourceName, TEXT_ENCODINGS, validSource, type FileSource, type FileStamp, type TextEncodingName } from '../../shared/editorSource';
+import { cleanStamp, localRelativePath, sourceDocumentId, sourceName, TEXT_ENCODINGS, validSource, type EditorWarning, type FileSource, type RemoteStamp, type TextEncodingName } from '../../shared/editorSource';
 import { initRemoteSessions, pinHosts, sftpErrorMessage, withSession } from './remoteSessions';
 
 export interface FileDocument {
@@ -27,6 +27,8 @@ export interface FileDocument {
   source?: FileSource;
   /** Remote text files: the encoding the save writes back (BOM and UTF-16 kept). */
   encoding?: TextEncodingName;
+  /** A non-blocking note of the last save (permissions or owner not kept); never stored. */
+  notice?: string;
   saving: boolean;
   error: string | null;
   wrap: boolean;
@@ -47,7 +49,7 @@ export interface FileDocument {
   /** The text on disk when the conflict was last seen (for the diff). */
   externalText?: string;
   /** Size and modification time seen when the text was last read: a check reads the file again only when they changed. */
-  diskStamp?: { size: number; mtimeMs: number };
+  diskStamp?: RemoteStamp;
   /**
    * Size and modification time of the disk text behind a 'changed' notice. Kept apart from diskStamp (which always belongs
    * to diskText): a tab with unsaved edits skips re-reading the same conflict, a tab undone back to clean reads it again.
@@ -79,7 +81,6 @@ export function fileErrorLabel(message: string, language: Language): string {
 }
 const normalize = (text: string) => text.replace(/\r\n|\r/g, '\n');
 const storageKey = 'mc-file-drafts-v1';
-const validStamp = (s: unknown): s is FileStamp => !!s && typeof s === 'object' && Number.isFinite((s as FileStamp).size) && Number.isFinite((s as FileStamp).mtimeMs);
 function restoreDrafts(): FileDocument[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(storageKey) ?? '[]');
@@ -91,7 +92,7 @@ function restoreDrafts(): FileDocument[] {
       // A remote draft keeps the stamp it was opened from: its save compares it with the server file.
       .map((d) => ({
         ...d, status: 'ready', saving: false, error: null, wrap: Boolean(d.wrap), diskConflict: undefined, externalText: undefined, conflictStamp: undefined,
-        diskStamp: d.source?.kind === 'remote' && validStamp(d.diskStamp) ? d.diskStamp : undefined,
+        diskStamp: d.source?.kind === 'remote' ? cleanStamp(d.diskStamp) ?? undefined : undefined, notice: undefined,
         encoding: d.encoding && TEXT_ENCODINGS.includes(d.encoding) ? d.encoding : undefined,
       }));
   } catch { return []; }
@@ -131,10 +132,11 @@ export async function openFile(projectId: string, relativePath: string): Promise
 
 // ── where a tab's text comes from ──────────────────────────────────────────
 
-type DiskStamp = FileStamp;
+type DiskStamp = RemoteStamp;
 /** A read: what the tab shows, and for a remote file the stamp and encoding the next save needs. */
 interface ReadOutcome { preview: ProjectFilePreview | { kind: 'tooLarge'; size: number }; stamp?: DiskStamp; encoding?: TextEncodingName }
-type WriteOutcome = { ok: true; stamp?: DiskStamp } | { ok: false; error: string; code?: 'conflict' };
+/** `stamp` null: the file could not be read back, the next save compares the text. `notice`: shown in the tab. */
+type WriteOutcome = { ok: true; stamp?: DiskStamp | null; notice?: string } | { ok: false; error: string; code?: 'conflict' };
 /** One kind of file behind a tab: a project file, a local file outside the projects or a remote file (0.9.9). */
 interface FileIO {
   /** Size and modification time, or null when unknown (gone, unreadable, no connection for a background check). */
@@ -150,20 +152,33 @@ const projectIO: FileIO = {
   write: (doc, text, expected) => window.mc.writeProjectFile(doc.projectId, doc.relativePath, text, expected),
 };
 
+/** Local files read in this page: main lets a local file be written only after this window read it (a restored draft reads first). */
+const localRead = new Set<string>();
 const localIO: FileIO = {
   stat: (doc) => window.mc.localFs.statFile(doc.relativePath),
-  read: async (doc) => ({ preview: await window.mc.localFs.readFile(doc.relativePath) }),
-  write: (doc, text, expected) => window.mc.localFs.writeFile(doc.relativePath, text, expected),
+  read: async (doc) => {
+    const preview = await window.mc.localFs.readFile(doc.relativePath);
+    if (preview.kind !== 'error') localRead.add(doc.relativePath);
+    return { preview };
+  },
+  write: async (doc, text, expected) => {
+    if (!localRead.has(doc.relativePath)) await localIO.read(doc, true);
+    return window.mc.localFs.writeFile(doc.relativePath, text, expected);
+  },
 };
+
+const ownerText = (o: { uid: number; gid: number }): string => `uid ${o.uid}, gid ${o.gid}`;
+const warningText = (w: EditorWarning): string => (w.kind === 'mode'
+  ? tr('Zapisano, ale nie udało się przywrócić uprawnień pliku ({mode}).', { mode: w.mode.toString(8).padStart(4, '0') })
+  : tr('Zapisano, ale właściciel pliku zmienił się z {from} na {to}.', { from: ownerText(w.from), to: ownerText(w.to) }));
 
 const remoteIO: FileIO = {
   async stat(doc) {
     if (doc.source?.kind !== 'remote') return null;
     const { path } = doc.source;
-    const r = await withSession(doc.source.hostId, false, (id) => window.mc.sftp.stat(id, path));
-    // A symlink's own stamp says nothing about the file it points to: such tabs are not checked in the background.
-    if (!r.ok || r.value.kind !== 'file') return null;
-    return { size: r.value.size, mtimeMs: r.value.mtime };
+    // One stat request (following links, like the read), never a folder listing.
+    const r = await withSession(doc.source.hostId, false, (id) => window.mc.sftp.statFile(id, path));
+    return r.ok ? r.value : null;
   },
   async read(doc, interactive) {
     if (doc.source?.kind !== 'remote') return { preview: { kind: 'error', message: sftpErrorMessage('invalid') } };
@@ -178,9 +193,24 @@ const remoteIO: FileIO = {
   async write(doc, text, expected) {
     if (doc.source?.kind !== 'remote') return { ok: false, error: sftpErrorMessage('invalid') };
     const { path } = doc.source;
+    const { hostId } = doc.source;
     const save = { text, baseline: expected, encoding: doc.encoding ?? 'utf-8', expected: doc.diskStamp ?? null };
-    const r = await withSession(doc.source.hostId, true, (id) => window.mc.sftp.writeFile(id, path, save));
-    if (r.ok) return { ok: true, stamp: r.value.stamp };
+    let r = await withSession(hostId, true, (id) => window.mc.sftp.writeFile(id, path, save));
+    if (r.ok && r.value.kind === 'ownerChange') {
+      // The server file belongs to another user: replacing it would make it the SSH user's. Only with the user's consent.
+      const { from, to } = r.value;
+      const choice = await askChoice(tr('Zmienić właściciela pliku?'), tr('{path} należy do {from}. Zapisany plik będzie należał do {to} (zapis zastępuje plik).', { path, from: ownerText(from), to: ownerText(to) }), [
+        { label: tr('Zapisz mimo to'), value: 'save', danger: true },
+      ]);
+      if (choice !== 'save') return { ok: false, error: tr('Nie zapisano: plik na serwerze należy do innego użytkownika.') };
+      r = await withSession(hostId, true, (id) => window.mc.sftp.writeFile(id, path, { ...save, allowOwnerChange: true }));
+    }
+    if (r.ok) {
+      const v = r.value;
+      if (v.kind === 'saved') return { ok: true, stamp: v.stamp, ...(v.warnings.length ? { notice: v.warnings.map(warningText).join('\n') } : {}) };
+      if (v.kind === 'stranded') return { ok: false, error: tr('Nie udało się podmienić pliku na serwerze. Nowa treść jest w {part}, poprzednia wersja w {aside}. Szkic został zachowany.', { part: v.part, aside: v.aside ?? `${path}.unimux-old` }) };
+      return { ok: false, error: tr('Nie zapisano: plik na serwerze należy do innego użytkownika.') };
+    }
     if (r.error === 'changed') return { ok: false, code: 'conflict', error: sftpErrorMessage('changed') };
     return { ok: false, error: r.error === 'login' ? r.message : sftpErrorMessage(r.error) };
   },
@@ -288,7 +318,9 @@ export async function saveFile(id: string): Promise<boolean> {
     let index = 0;
     const diskText = doc.text.replace(/\n/g, () => endings[index++] ?? endings[0] ?? '\n');
     // Edits made while saving stay dirty against the snapshot that was written.
-    patch(id, { savedText: doc.text, diskText, diskConflict: undefined, externalText: undefined, conflictStamp: undefined, ...(result.stamp ? { diskStamp: result.stamp } : {}) });
+    // A stamp of null: the file was not read back, so the next save compares the text (diskStamp cleared).
+    patch(id, { savedText: doc.text, diskText, diskConflict: undefined, externalText: undefined, conflictStamp: undefined, notice: result.notice,
+      ...(result.stamp !== undefined ? { diskStamp: result.stamp ?? undefined } : {}) });
     if (!doc.source) refreshGitBadges(doc.projectId, 600);
     return true;
   } catch { patch(id, { error: fileLabel('failed') }); return false; }
@@ -306,11 +338,12 @@ const sameStamp = (a: DiskStamp | undefined, b: DiskStamp): boolean => !!a && a.
  * them and gets a notice (diskConflict 'changed'). Other results (gone, binary, unreadable for a moment while an agent
  * rewrites it) change nothing: saving reports them.
  */
-export async function checkFileOnDisk(id: string): Promise<void> {
+export async function checkFileOnDisk(id: string, force = false): Promise<void> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
   if (!doc || doc.diff || doc.status !== 'ready' || doc.saving || loads.has(id) || checks.has(id)) return;
   if (isRemoteDoc(doc)) {
-    if (Date.now() - (remoteChecks.get(id) ?? 0) < REMOTE_CHECK_MS) return;
+    // `force`: the user just reconnected the tab.
+    if (!force && Date.now() - (remoteChecks.get(id) ?? 0) < REMOTE_CHECK_MS) return;
     remoteChecks.set(id, Date.now());
   }
   checks.add(id);
@@ -447,7 +480,7 @@ function writeDrafts(): void {
   writtenDrafts = dirty;
   // Only what a restart needs: no copy of the disk text behind a conflict, no stamps (the first check recomputes them).
   // A remote draft keeps its stamp (its save compares it with the server file) and its encoding; never a session or a secret.
-  const stored = dirty.map(({ externalText: _e, diskStamp, conflictStamp: _c, diskConflict: _d, view: _v, ...draft }) => (draft.source?.kind === 'remote' ? { ...draft, diskStamp } : draft));
+  const stored = dirty.map(({ externalText: _e, diskStamp, conflictStamp: _c, diskConflict: _d, view: _v, notice: _n, ...draft }) => (draft.source?.kind === 'remote' ? { ...draft, diskStamp } : draft));
   try { localStorage.setItem(storageKey, JSON.stringify(stored)); } catch { /* In-memory drafts still remain protected by close confirmation. */ }
 }
 /** Writes pending drafts now (no-op when nothing is waiting). */

@@ -18,12 +18,18 @@ let server = { text: '', mtimeMs: 1000 };
 const stampOf = () => ({ size: server.text.length, mtimeMs: server.mtimeMs });
 let live = new Set<string>([SESSION]);
 const calls: string[] = [];
+/** Answers of the next writes (after the stamp check), instead of a plain 'saved'. */
+const writeNext: unknown[] = [];
 const writes: Array<{ id: string; expected: unknown; text: string }> = [];
 const listeners = new Map<string, Array<(...a: unknown[]) => void>>();
 const storage = new Map<string, string>();
 const emit = (channel: string, ...args: unknown[]) => { for (const cb of listeners.get(channel) ?? []) cb(...args); };
 
+/** The check throttle reads Date.now(): only the clock is faked, so no test sleeps. */
+const later = (ms: number) => vi.setSystemTime(Date.now() + ms);
+
 beforeAll(async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
   // A draft of another run: restored with its host, path and stamp; a malformed one is dropped.
   storage.set('mc-file-drafts-v1', JSON.stringify([
     { id: sourceDocumentId({ kind: 'remote', hostId: HOST, path: '/etc/motd' }), projectId: '', relativePath: '/etc/motd', name: 'motd', source: { kind: 'remote', hostId: HOST, path: '/etc/motd' }, text: 'draft', savedText: 'x', diskText: 'x', diskStamp: { size: 1, mtimeMs: 5 }, encoding: 'utf-8-bom', status: 'ready', saving: false, error: null, wrap: false },
@@ -42,7 +48,7 @@ beforeAll(async () => {
           setTimeout(() => { live.add(SESSION2); emit('sftp:session', { id: SESSION2, hostId, state: 'connected', phase: 'connected', since: 1 }); }, 5);
           return { ok: true, sessionId: SESSION2 };
         },
-        stat: async (id: string) => { calls.push(`stat:${id}`); return live.has(id) ? { ok: true, value: { kind: 'file', size: server.text.length, mtime: server.mtimeMs } } : { ok: false, error: 'noSession' }; },
+        statFile: async (id: string) => { calls.push(`stat:${id}`); return live.has(id) ? { ok: true, value: { size: server.text.length, mtimeMs: server.mtimeMs } } : { ok: false, error: 'noSession' }; },
         readFile: async (id: string) => {
           calls.push(`read:${id}`);
           if (!live.has(id)) return { ok: false, error: 'noSession' };
@@ -55,7 +61,9 @@ beforeAll(async () => {
           const now = stampOf();
           if (!save.expected || save.expected.size !== now.size || save.expected.mtimeMs !== now.mtimeMs) return { ok: false, error: 'changed' };
           server = { text: save.text, mtimeMs: server.mtimeMs + 1000 };
-          return { ok: true, value: { stamp: stampOf() } };
+          const next = writeNext.shift();
+          if (next) return { ok: true, value: next };
+          return { ok: true, value: { kind: 'saved', stamp: stampOf(), warnings: [] } };
         },
         pinHosts: () => undefined,
       },
@@ -107,7 +115,7 @@ describe('remote files in editor tabs', () => {
 
   it('a clean tab reloads when the server file changed, at most once per few seconds (no polling over the network)', async () => {
     server = { text: 'b: 1\n', mtimeMs: 20_000 };
-    await new Promise((r) => setTimeout(r, 3100)); // focusing the tab again in the open test checked it a moment ago
+    later(3100); // focusing the tab again in the open test checked it a moment ago
     await files.checkFileOnDisk(ID);
     expect(get()).toMatchObject({ text: 'b: 1\n', savedText: 'b: 1\n' });
     calls.length = 0;
@@ -115,7 +123,7 @@ describe('remote files in editor tabs', () => {
     await files.checkFileOnDisk(ID);
     expect(calls).toEqual([]);
     expect(get().text).toBe('b: 1\n');
-  }, 10_000);
+  });
 
   it('a save after the session ended logs in again with the saved host and retries; a background check never logs in', async () => {
     live.delete(SESSION);
@@ -123,7 +131,7 @@ describe('remote files in editor tabs', () => {
     expect(sessions.liveSession(HOST)).toBeNull();
     const doc = get();
     files.useFileStore.setState({ documents: files.useFileStore.getState().documents.map((d: { id: string }) => (d.id === ID ? { ...doc, diskStamp: undefined } : d)) });
-    await new Promise((r) => setTimeout(r, 3100));
+    later(3100);
     await files.checkFileOnDisk(ID);
     expect(calls).not.toContain('connect');
     files.editFile(ID, 'b: 2\n');
@@ -138,15 +146,45 @@ describe('remote files in editor tabs', () => {
     expect(calls).toContain('connect');
     expect(writes.at(-1)).toMatchObject({ id: SESSION2, text: 'b: 2\n' });
     expect(server.text).toBe('b: 2\n');
-  }, 10_000);
+  });
+
+  it('a save that kept neither mode nor owner says so in the tab; a save not read back clears the stamp', async () => {
+    files.editFile(ID, 'c: 1\n');
+    writeNext.push({ kind: 'saved', stamp: null, warnings: [{ kind: 'mode', mode: 0o640 }] });
+    expect(await files.saveFile(ID)).toBe(true);
+    expect(get().notice).toContain('0640');
+    // No stamp: the next save sends none, so the host compares the text (no false conflict).
+    expect(get().diskStamp).toBeUndefined();
+    files.editFile(ID, 'c: 2\n');
+    await files.saveFile(ID);
+    expect(writes.at(-1)).toMatchObject({ expected: null });
+  });
+
+  it('when the old file could not be put back, the error names both copies and the tab stays dirty', async () => {
+    files.useFileStore.setState({ documents: files.useFileStore.getState().documents.map((d: { id: string }) => (d.id === ID ? { ...get(), diskStamp: stampOf() } : d)) });
+    files.editFile(ID, 'd: 1\n');
+    writeNext.push({ kind: 'stranded', part: `${PATH}.unimux-part`, aside: `${PATH}.unimux-old` });
+    expect(await files.saveFile(ID)).toBe(false);
+    expect(get().error).toContain(`${PATH}.unimux-part`);
+    expect(get().error).toContain(`${PATH}.unimux-old`);
+    expect(get().text).not.toBe(get().savedText);
+  });
+
+  it('a session with raised rights (sudo) is never used for an editor tab', () => {
+    const other = '00000000-0000-4000-8000-0000000000dd';
+    emit('sftp:session', { id: 'sftp:00000000-0000-4000-8000-0000000000ee', hostId: other, state: 'connected', phase: 'connected', since: 3, sudo: true });
+    expect(sessions.liveSession(other)).toBeNull();
+    emit('sftp:session', { id: 'sftp:00000000-0000-4000-8000-0000000000ef', hostId: other, state: 'connected', phase: 'connected', since: 3 });
+    expect(sessions.liveSession(other)).toBe('sftp:00000000-0000-4000-8000-0000000000ef');
+  });
 
   it('unsaved remote drafts are stored with host, path and stamp, never a session', async () => {
     files.editFile(ID, 'draft\n');
     files.flushDrafts();
-    await new Promise((r) => setTimeout(r, 800));
     const stored = JSON.parse(storage.get('mc-file-drafts-v1') ?? '[]');
     const mine = stored.find((d: { id: string }) => d.id === ID);
-    expect(mine).toMatchObject({ source: { kind: 'remote', hostId: HOST, path: PATH }, text: 'draft\n', diskStamp: stampOf() });
+    expect(mine).toMatchObject({ source: { kind: 'remote', hostId: HOST, path: PATH }, text: 'draft\n', diskStamp: get().diskStamp });
+    expect(mine.diskStamp).toBeTruthy();
     expect(JSON.stringify(stored)).not.toContain('sftp:');
   });
 });

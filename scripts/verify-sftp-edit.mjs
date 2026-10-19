@@ -170,6 +170,10 @@ try {
   await app.until(`!${sftp}.sessionId`, 'disconnected');
   await app.click('.workspace-tabs .file-tab', 'notes.txt');
   await app.until(`${editorText}.includes('server side update')`, 'notes tab');
+  // A clean tab without a connection says its content may be outdated (it is not checked any more).
+  await app.until(`!!document.querySelector('.remote-stale')`, 'stale notice on a clean tab without a session');
+  log(`clean tab without a session: "${await ev(`document.querySelector('.remote-stale span').textContent`)}"`);
+  await shot(app, 'stale');
   await setText('saved after a reconnect\n');
   await app.until(`!!document.querySelector('.remote-notice')`, 'no connection notice');
   await save();

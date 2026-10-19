@@ -43,6 +43,10 @@ export interface SftpServerStats {
   written: number;
   /** Answers RENAME (and posix-rename) from -> to with a failure when this returns true (remote paths). */
   renameFail: ((from: string, to: string) => boolean) | null;
+  /** Every OPEN: the remote path, whether it was exclusive (O_EXCL) and the mode asked for (null when none). */
+  opens: Array<{ path: string; exclusive: boolean; mode: number | null }>;
+  /** The uid/gid STAT and LSTAT report for these remote paths (others: 1000/1000). */
+  owners: Map<string, { uid: number; gid: number }>;
 }
 
 export interface TestServer {
@@ -148,6 +152,7 @@ function serveSftp(sftp: SFTPWrapper, root: string, home: string, stats: SftpSer
     if (flags & OPEN_MODE.EXCL) f |= fsc.O_EXCL;
     if (flags & OPEN_MODE.APPEND) f |= fsc.O_APPEND;
     const path = real(filename);
+    stats.opens.push({ path: remoteNormalize(filename, home), exclusive: (flags & OPEN_MODE.EXCL) !== 0, mode: typeof attrs?.mode === 'number' ? attrs.mode & 0o7777 : null });
     if (existsSync(path) && statSync(path).isDirectory()) { sftp.status(reqId, SFTP_STATUS.FAILURE, 'is a directory'); return; }
     const fd = openSync(path, f, typeof attrs?.mode === 'number' ? attrs.mode & 0o7777 : 0o644);
     if (write) { stats.openWrites++; stats.maxOpenWrites = Math.max(stats.maxOpenWrites, stats.openWrites); }
@@ -189,8 +194,9 @@ function serveSftp(sftp: SFTPWrapper, root: string, home: string, stats: SftpSer
     if (!names.length) { sftp.status(reqId, SFTP_STATUS.EOF); return; }
     sftp.name(reqId, names);
   }));
-  sftp.on('STAT', (reqId, path) => run(reqId, 'STAT', () => sftp.attrs(reqId, attrsOf(statSync(real(path))))));
-  sftp.on('LSTAT', (reqId, path) => run(reqId, 'LSTAT', () => sftp.attrs(reqId, attrsOf(lstatSync(real(path))))));
+  const owned = (path: string, attrs: Attributes): Attributes => ({ ...attrs, ...(stats.owners.get(remoteNormalize(path, home)) ?? {}) });
+  sftp.on('STAT', (reqId, path) => run(reqId, 'STAT', () => sftp.attrs(reqId, owned(path, attrsOf(statSync(real(path)))))));
+  sftp.on('LSTAT', (reqId, path) => run(reqId, 'LSTAT', () => sftp.attrs(reqId, owned(path, attrsOf(lstatSync(real(path)))))));
   sftp.on('FSTAT', (reqId, handle) => run(reqId, 'FSTAT', () => {
     const h = handleOf(handle);
     if (h?.kind !== 'file') { sftp.status(reqId, SFTP_STATUS.FAILURE); return; }
@@ -261,7 +267,7 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
   const input: string[] = [];
   const shells: ServerChannel[] = [];
   const conns = new Set<Connection>();
-  const sftpStats: SftpServerStats = { delayMs: 0, openWrites: 0, maxOpenWrites: 0, ops: [], failWritesAfter: null, written: 0, renameFail: null };
+  const sftpStats: SftpServerStats = { delayMs: 0, openWrites: 0, maxOpenWrites: 0, ops: [], failWritesAfter: null, written: 0, renameFail: null, opens: [], owners: new Map() };
 
   const server = new Server({ hostKeys: [host.private], ...(opts.banner ? { banner: opts.banner } : {}) }, (conn) => {
     conns.add(conn);

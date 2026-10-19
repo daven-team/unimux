@@ -119,6 +119,7 @@ const api: McApi = {
     retry: (sessionId, itemIds) => ipcRenderer.invoke('sftp:retry', sessionId, itemIds),
     clearFinished: (sessionId) => ipcRenderer.invoke('sftp:clearFinished', sessionId),
     readFile: (sessionId, path) => ipcRenderer.invoke('sftp:readFile', sessionId, path),
+    statFile: (sessionId, path) => ipcRenderer.invoke('sftp:statFile', sessionId, path),
     writeFile: (sessionId, path, save) => ipcRenderer.invoke('sftp:writeFile', sessionId, path, save),
     pinHosts: (hostIds) => ipcRenderer.send('sftp:pinHosts', hostIds),
     viewOpened: () => ipcRenderer.send('sftp:viewOpened'),

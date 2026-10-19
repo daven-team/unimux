@@ -13,7 +13,7 @@ import { SshLogin } from '../sshcore/login';
 import { isRecoverableAuthError, mapSshError } from '../ptyhost/sshErrors';
 import { LocalSide, RemoteSide, SftpError, remoteEntry, type FileSide } from './sides';
 import { TransferQueue } from './queue';
-import { readForEditor, writeFromEditor } from './editFile';
+import { readForEditor, statForEditor, writeFromEditor } from './editFile';
 import { ItemThrottle } from './throttle';
 
 export interface SftpHostTimers { connectMs: number; authStepMs: number; sftpMs: number; killGraceMs: number; keepaliveMs: number; keepaliveCountMax: number }
@@ -262,6 +262,7 @@ export class SftpHost {
         return ok(null);
       }
       case 'readFile': return ok(await readForEditor(side, posixNormalize(op.path)));
+      case 'statFile': return ok(await statForEditor(side, posixNormalize(op.path)));
       case 'writeFile': return ok(await writeFromEditor(side, posixNormalize(op.path), op.save, `editor:${id}`));
     }
   }
