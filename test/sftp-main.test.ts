@@ -22,15 +22,18 @@ function setup() {
   const prompts: Array<[string, SshPrompt | null]> = [];
   const ended: string[] = [];
   let crashed = 0;
+  const deferred: Array<() => void> = [];
+  const connects: string[] = [];
+  const forwarded: string[] = [];
   let connected: ((s: SshSessionState) => void) | null = null;
   const realpaths: Record<string, string> = { '.': '/home/alice', '/srv/www': '/srv/www' };
   const deps: SftpServiceDeps = {
     coordinator: {
-      connectSession: async (req) => { connected?.({ cellId: req.sessionId, hostId: req.hostId, phase: 'connecting', since: 1 }); return { ok: true }; },
+      connectSession: async (req) => { connects.push(req.sessionId); connected?.({ cellId: req.sessionId, hostId: req.hostId, phase: 'connecting', since: 1 }); return { ok: true }; },
       endSession: (id) => { ended.push(id); },
       answer: () => ({ ok: true }),
       sessionSnapshot: () => ({ sessions: [], prompts: [] }),
-      onHostMessage: () => true,
+      onHostMessage: (m) => { forwarded.push(m.t === 'sshStatus' ? m.id : ''); return true; },
       sessionHostCrashed: () => undefined,
     },
     host: {
@@ -48,11 +51,13 @@ function setup() {
     now: () => 5,
     setTimer: (fn, ms) => { const t = { fn, ms, cleared: false }; timers.push(t); return t; },
     clearTimer: (t) => { (t as { cleared: boolean }).cleared = true; },
+    defer: (fn) => { deferred.push(fn); },
   };
   const service = new SftpService(deps);
   connected = (s) => service.onCoordinatorSession(s);
   const live = () => timers.filter((t) => !t.cleared);
-  return { service, sent, requests, states, prompts, ended, timers, live, crashed: () => crashed };
+  const runDeferred = async () => { while (deferred.length) deferred.shift()!(); await flush(); };
+  return { service, runDeferred, connects, forwarded, sent, requests, states, prompts, ended, timers, live, crashed: () => crashed };
 }
 
 describe('SftpService', () => {
@@ -61,12 +66,18 @@ describe('SftpService', () => {
     const r = await f.service.connect(HOST, '/srv/www');
     expect(r.ok).toBe(true);
     const id = r.ok ? r.sessionId : '';
+    // The id is answered before the login starts: no event names an id the view does not have yet.
+    expect(f.connects).toEqual([]);
+    expect(f.states).toEqual([]);
+    await f.runDeferred();
+    expect(f.connects).toEqual([id]);
     expect(id).toMatch(/^sftp:[0-9a-f-]{36}$/);
     f.service.onCoordinatorSession({ cellId: id, hostId: HOST, phase: 'connected', since: 2 });
     await flush();
     expect(f.states.at(-1)).toMatchObject({ id, state: 'connected', path: '/srv/www' });
     const r2 = await f.service.connect(HOST, '/gone');
     const id2 = r2.ok ? r2.sessionId : '';
+    await f.runDeferred();
     f.service.onCoordinatorSession({ cellId: id2, hostId: HOST, phase: 'connected', since: 2 });
     await flush();
     expect(f.states.at(-1)).toMatchObject({ id: id2, state: 'connected', path: '/home/alice' });
@@ -107,6 +118,27 @@ describe('SftpService', () => {
     f.service.hostCrashed();
     expect(f.crashed()).toBe(1);
     expect(f.service.ids()).toEqual([]);
+  });
+});
+
+describe('SftpService routing', () => {
+  it('passes login messages of the SFTP Host on only for its own sftp: sessions (never a cell id)', async () => {
+    const f = setup();
+    const r = await f.service.connect(HOST);
+    const id = r.ok ? r.sessionId : '';
+    f.service.onHostMessage({ t: 'sshStatus', id: '00000000-0000-4000-8000-0000000000c1', phase: 'error', error: 'reset' });
+    f.service.onHostMessage({ t: 'sshStatus', id: 'sftp:00000000-0000-4000-8000-0000000000c2', phase: 'error', error: 'reset' });
+    f.service.onHostMessage({ t: 'sshStatus', id, phase: 'authenticating' });
+    expect(f.forwarded).toEqual([id]);
+  });
+
+  it('a login refused up front still ends with an error event for the id connect returned', async () => {
+    const f = setup();
+    const svc = new SftpService({ ...(f.service as unknown as { deps: SftpServiceDeps }).deps, coordinator: { ...(f.service as unknown as { deps: SftpServiceDeps }).deps.coordinator, connectSession: async () => ({ ok: false, error: 'hostMissing' }) } });
+    const r = await svc.connect(HOST);
+    await f.runDeferred();
+    expect(f.states.at(-1)).toMatchObject({ id: r.ok ? r.sessionId : '', state: 'error', error: 'hostMissing' });
+    expect(svc.ids()).toEqual([]);
   });
 });
 

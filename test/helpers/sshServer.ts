@@ -1,7 +1,7 @@
 // In-process SSH server for tests and real-app checks: 127.0.0.1 only, keys generated at run time, user "alice".
 // Erasable TypeScript only and no relative imports: scripts/ssh-test-server.mjs loads this file with Node's type stripping.
-import { closeSync, constants as fsc, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, renameSync, rmdirSync, statSync, unlinkSync, utimesSync, chmodSync, writeSync, existsSync, type Stats } from 'node:fs';
-import { join } from 'node:path';
+import { closeSync, constants as fsc, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, utimesSync, chmodSync, writeSync, existsSync, type Stats } from 'node:fs';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import ssh2 from 'ssh2';
 import type { Attributes, Connection, FileEntry, ServerChannel, SFTPWrapper } from 'ssh2';
 
@@ -25,6 +25,8 @@ export interface TestServerOptions {
   sftpRoot?: string;
   /** The remote login folder (realpath of "." and relative paths); default "/". */
   sftpHome?: string;
+  /** Advertises and serves posix-rename@openssh.com (an overwriting rename), like OpenSSH. */
+  sftpPosixRename?: boolean;
 }
 
 /** Test knobs and counters of the SFTP subsystem (mutable while the server runs). */
@@ -39,6 +41,8 @@ export interface SftpServerStats {
   /** Answers every WRITE with a failure once this many bytes were written in total (a full disk); null: never. */
   failWritesAfter: number | null;
   written: number;
+  /** Answers RENAME (and posix-rename) from -> to with a failure when this returns true (remote paths). */
+  renameFail: ((from: string, to: string) => boolean) | null;
 }
 
 export interface TestServer {
@@ -100,9 +104,32 @@ function remoteNormalize(path: string, home: string): string {
   return `/${parts.join('/')}`;
 }
 
+/** The VERSION packet with the posix-rename@openssh.com extension (ssh2's server sends a bare version 3). */
+function versionWithPosixRename(): Buffer {
+  const name = Buffer.from('posix-rename@openssh.com');
+  const data = Buffer.from('1');
+  const body = Buffer.alloc(1 + 4 + 4 + name.length + 4 + data.length);
+  let p = 0;
+  body[p++] = 2; // VERSION
+  body.writeUInt32BE(3, p); p += 4;
+  body.writeUInt32BE(name.length, p); p += 4; name.copy(body, p); p += name.length;
+  body.writeUInt32BE(data.length, p); p += 4; data.copy(body, p);
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(body.length, 0);
+  return Buffer.concat([len, body]);
+}
+const BARE_VERSION = Buffer.from([0, 0, 0, 5, 2, 0, 0, 0, 3]);
+
 type SftpHandle = { kind: 'file'; fd: number; write: boolean } | { kind: 'dir'; path: string; sent: boolean };
 
-function serveSftp(sftp: SFTPWrapper, root: string, home: string, stats: SftpServerStats): void {
+function serveSftp(sftp: SFTPWrapper, root: string, home: string, stats: SftpServerStats, posixRename: boolean): void {
+  if (posixRename) {
+    // Swap the bare VERSION answer for one that names the extension (the only way to advertise it with ssh2's server).
+    const proto = (sftp as unknown as { _protocol: { channelData(id: number, data: Buffer): void } })._protocol;
+    const channelId = (sftp as unknown as { outgoing: { id: number } }).outgoing.id;
+    const original = proto.channelData.bind(proto);
+    proto.channelData = (id: number, data: Buffer) => original(id, id === channelId && Buffer.isBuffer(data) && data.equals(BARE_VERSION) ? versionWithPosixRename() : data);
+  }
   const handles = new Map<number, SftpHandle>();
   let nextHandle = 1;
   const real = (path: string) => join(root, ...remoteNormalize(path, home).split('/').filter(Boolean));
@@ -181,12 +208,28 @@ function serveSftp(sftp: SFTPWrapper, root: string, home: string, stats: SftpSer
   sftp.on('RENAME', (reqId, oldPath, newPath) => run(reqId, 'RENAME', () => {
     const from = real(oldPath), to = real(newPath);
     lstatSync(from);
+    if (stats.renameFail?.(remoteNormalize(oldPath, home), remoteNormalize(newPath, home))) { sftp.status(reqId, SFTP_STATUS.FAILURE, 'rename refused'); return; }
     if (existsSync(to)) { sftp.status(reqId, SFTP_STATUS.FAILURE, 'target exists'); return; }
     renameSync(from, to);
     sftp.status(reqId, SFTP_STATUS.OK);
   }));
+  sftp.on('EXTENDED', (reqId: number, name: string, data: Buffer | undefined) => run(reqId, 'EXTENDED', () => {
+    if (!posixRename || name !== 'posix-rename@openssh.com' || !data) { sftp.status(reqId, SFTP_STATUS.OP_UNSUPPORTED); return; }
+    const a = data.readUInt32BE(0);
+    const oldPath = data.subarray(4, 4 + a).toString('utf8');
+    const newPath = data.subarray(8 + a, 8 + a + data.readUInt32BE(4 + a)).toString('utf8');
+    stats.ops.push('POSIX_RENAME');
+    if (stats.renameFail?.(remoteNormalize(oldPath, home), remoteNormalize(newPath, home))) { sftp.status(reqId, SFTP_STATUS.FAILURE, 'rename refused'); return; }
+    renameSync(real(oldPath), real(newPath)); // overwrites, like OpenSSH
+    sftp.status(reqId, SFTP_STATUS.OK);
+  }));
   sftp.on('REALPATH', (reqId, path) => run(reqId, 'REALPATH', () => {
-    const normalized = remoteNormalize(path, home);
+    let normalized = remoteNormalize(path, home);
+    // Symlinks resolve like OpenSSH's realpath; a target outside the served folder reads as "/..outside/...".
+    try {
+      const rel = relative(realpathSync(root), realpathSync(real(path)));
+      normalized = rel.startsWith('..') || isAbsolute(rel) ? `/..outside/${rel.split(sep).join('/')}` : `/${rel.split(sep).join('/')}`.replace(/\/$/, '') || '/';
+    } catch { /* not there: the lexical path, like OpenSSH for a missing last segment */ }
     sftp.name(reqId, [{ filename: normalized, longname: normalized, attrs: {} as Attributes }]);
   }));
   const setstat = (reqId: number, path: string, attrs: Attributes) => {
@@ -218,7 +261,7 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
   const input: string[] = [];
   const shells: ServerChannel[] = [];
   const conns = new Set<Connection>();
-  const sftpStats: SftpServerStats = { delayMs: 0, openWrites: 0, maxOpenWrites: 0, ops: [], failWritesAfter: null, written: 0 };
+  const sftpStats: SftpServerStats = { delayMs: 0, openWrites: 0, maxOpenWrites: 0, ops: [], failWritesAfter: null, written: 0, renameFail: null };
 
   const server = new Server({ hostKeys: [host.private], ...(opts.banner ? { banner: opts.banner } : {}) }, (conn) => {
     conns.add(conn);
@@ -241,7 +284,7 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
       const session = accept();
       session.on('sftp', (acceptSftp, reject) => {
         if (!opts.sftpRoot) { reject(); return; }
-        serveSftp(acceptSftp(), opts.sftpRoot, remoteNormalize(opts.sftpHome ?? '/', '/'), sftpStats);
+        serveSftp(acceptSftp(), opts.sftpRoot, remoteNormalize(opts.sftpHome ?? '/', '/'), sftpStats, opts.sftpPosixRename === true);
       });
       session.on('pty', (ok, _no, info) => { ptys.push({ term: info.term, cols: info.cols, rows: info.rows }); ok?.(); });
       session.on('window-change', (ok, _no, info) => { windowChanges.push({ cols: info.cols, rows: info.rows }); ok?.(); });

@@ -5,6 +5,7 @@ import { homedir } from 'os';
 import { basename, dirname, isAbsolute, join, resolve } from 'path';
 import { permissionString, safeEntryName, SFTP_LIMITS, type LocalEntry, type LocalErrorCode, type LocalResult } from '../shared/sftp';
 import type { IpcGuard } from './ipcGuard';
+import { sameLocalFile } from '../sftphost/sides';
 
 export interface LocalFilesDeps {
   platform: NodeJS.Platform;
@@ -86,8 +87,9 @@ export function createLocalFiles(deps: LocalFilesDeps) {
       if (resolve(dirname(from)) !== resolve(dirname(to))) return fail('invalid'); // a rename, not a move
       try {
         const there = await lstat(to).catch(() => null);
-        const caseOnly = (windows || deps.platform === 'darwin') && from.toLowerCase() === to.toLowerCase();
-        if (there && !caseOnly) return fail('exists');
+        // A case-only rename is allowed only when both names are the same file (a case-insensitive disk); on a case-sensitive
+        // volume "A" next to "a" is another file and stays.
+        if (there && !(await sameLocalFile(from, to))) return fail('exists');
         await rename(from, to);
         return ok(null);
       } catch (error) { return fail(codeOf(error)); }
