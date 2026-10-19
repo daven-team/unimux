@@ -4,6 +4,8 @@ import { appPlatform, windowsBuildFromRelease } from '../shared/platform';
 
 // MessagePorts can't cross the context bridge; forward the pty data port to the page.
 ipcRenderer.on('pty-port', (e) => window.postMessage('mc:pty-port', '*', e.ports));
+// The SFTP transfer port (progress straight from the SFTP Host, 0.9.8): the page receives it as 'mc:sftp-port'.
+ipcRenderer.on('sftp-port', (e) => window.postMessage('mc:sftp-port', '*', e.ports));
 
 const api: McApi = {
   platform: appPlatform(process.platform),
@@ -98,6 +100,34 @@ const api: McApi = {
     connect: (req) => ipcRenderer.invoke('ssh:connect', req),
     sessions: () => ipcRenderer.invoke('ssh:sessions'),
     answer: (answer) => ipcRenderer.invoke('ssh:prompt:answer', answer),
+  },
+  sftp: {
+    connect: (hostId, initialPath) => ipcRenderer.invoke('sftp:connect', hostId, initialPath),
+    disconnect: (sessionId) => ipcRenderer.invoke('sftp:disconnect', sessionId),
+    sessions: () => ipcRenderer.invoke('sftp:sessions'),
+    answer: (answer) => ipcRenderer.invoke('sftp:prompt:answer', answer),
+    list: (sessionId, path) => ipcRenderer.invoke('sftp:list', sessionId, path),
+    stat: (sessionId, path) => ipcRenderer.invoke('sftp:stat', sessionId, path),
+    realpath: (sessionId, path) => ipcRenderer.invoke('sftp:realpath', sessionId, path),
+    mkdir: (sessionId, path) => ipcRenderer.invoke('sftp:mkdir', sessionId, path),
+    rename: (sessionId, from, to) => ipcRenderer.invoke('sftp:rename', sessionId, from, to),
+    deleteCount: (sessionId, paths) => ipcRenderer.invoke('sftp:deleteCount', sessionId, paths),
+    delete: (sessionId, paths, confirmed) => ipcRenderer.invoke('sftp:delete', sessionId, paths, confirmed),
+    enqueue: (sessionId, req) => ipcRenderer.invoke('sftp:enqueue', sessionId, req),
+    cancel: (sessionId, target) => ipcRenderer.invoke('sftp:cancel', sessionId, target),
+    answerConflict: (sessionId, itemId, answer) => ipcRenderer.invoke('sftp:answerConflict', sessionId, itemId, answer),
+    retry: (sessionId, itemIds) => ipcRenderer.invoke('sftp:retry', sessionId, itemIds),
+    clearFinished: (sessionId) => ipcRenderer.invoke('sftp:clearFinished', sessionId),
+    viewOpened: () => ipcRenderer.send('sftp:viewOpened'),
+    viewClosed: () => ipcRenderer.send('sftp:viewClosed'),
+  },
+  localFs: {
+    list: (path) => ipcRenderer.invoke('local:list', path),
+    roots: () => ipcRenderer.invoke('local:roots'),
+    mkdir: (path) => ipcRenderer.invoke('local:mkdir', path),
+    rename: (from, to) => ipcRenderer.invoke('local:rename', from, to),
+    trash: (paths) => ipcRenderer.invoke('local:trash', paths),
+    reveal: (path) => ipcRenderer.invoke('local:reveal', path),
   },
   notify: (n) => ipcRenderer.send('notify', n),
   openExternal: (url) => ipcRenderer.send('shell:openExternal', url),

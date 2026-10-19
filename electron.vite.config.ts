@@ -12,6 +12,7 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
           ptyhost: resolve(__dirname, 'src/ptyhost/index.ts'),
+          sftphost: resolve(__dirname, 'src/sftphost/index.ts'),
           updatesplash: resolve(__dirname, 'src/updatesplash/index.ts'),
         },
         // Lazy dependencies (MCP SDK, electron-updater) stay `require` behind a promise: the CommonJS builds they ship are loaded,
