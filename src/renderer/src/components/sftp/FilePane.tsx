@@ -213,7 +213,7 @@ export function FilePane(p: PaneProps) {
           {p.transfer.icon}<span>{p.transfer.label}</span>
         </button>
       </div>
-      <div className="sftp-pathbar">
+      <div className="sftp-pathbar" style={p.placeholder ? { display: 'none' } : undefined}>
         <button type="button" className="btn ghost icon" aria-label={tr('Wstecz')} title={tr('Wstecz')} disabled={!f.canBack} onClick={p.onBack}><IArrowLeft /></button>
         <button type="button" className="btn ghost icon" aria-label={tr('Do przodu')} title={tr('Do przodu')} disabled={!f.canForward} onClick={p.onForward}><IArrowRight /></button>
         <button type="button" className="btn ghost icon" aria-label={tr('W górę')} title={tr('W górę')} disabled={!f.canUp} onClick={p.onUp}><IArrowUp /></button>

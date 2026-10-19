@@ -255,7 +255,9 @@ export function reenqueueRequest(item: Pick<TransferItem, 'direction' | 'source'
   return { direction: item.direction, sources: [item.source], targetDir };
 }
 
-export const canRetry = (i: Pick<TransferItem, 'state' | 'error'>): boolean => (i.state === 'failed' || i.state === 'cancelled') && i.error !== 'invalidName';
+/** Entries a folder transfer leaves out for good (unsafe names, links): a retry would only be refused again. */
+const FINAL_ERRORS = new Set(['invalidName', 'linkOutside', 'linkFolder', 'unsupported', 'tooMany']);
+export const canRetry = (i: Pick<TransferItem, 'state' | 'error'>): boolean => (i.state === 'failed' || i.state === 'cancelled') && !FINAL_ERRORS.has(i.error ?? '');
 export const canCancel = (i: Pick<TransferItem, 'state'>): boolean => !isFinished(i.state);
 
 // ── delete confirmation ─────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
 // transfer queue from the SFTP Host's port, conflict questions and the entry points (SSH host menu, SSH cell menu, palette).
 // The session model: connect answers with the session id at once; connecting / connected / error / closed and the prompts
 // arrive as events for that id (events that come before the answer are held and applied once the id is known).
-import { isActive, isFinished, type ConflictChoice, type SftpPortMessage, type SftpSessionState, type TransferItem, applyPortMessage, failUnfinished, LOCAL_QUEUE_ID } from '../../shared/sftp';
+import { isActive, isFinished, sftpErrorText, type ConflictChoice, type TransferRequest, type SftpPortMessage, type SftpSessionState, type TransferItem, applyPortMessage, failUnfinished, LOCAL_QUEUE_ID } from '../../shared/sftp';
 import type { SshPrompt } from '../../shared/ssh';
 import { formatBytes, mergeSnapshot, reenqueueRequest, type PathFlavor } from '../../shared/sftpView';
 import { chosenLanguage, tr } from './i18n';
@@ -166,23 +166,50 @@ export function openSftp(opts: { hostId?: string; path?: string; picker?: boolea
 
 // ── transfers ───────────────────────────────────────────────────────────────
 
+/**
+ * Starts a transfer. The view picks the batch id, so a long folder walk can be stopped (cancelBatch) before the host answers;
+ * meanwhile the batch shows as "preparing" in the transfer panel. A failure (not a cancel) is shown as a toast.
+ */
+export async function enqueueTransfer(queue: string | null, req: TransferRequest): Promise<boolean> {
+  const batchId = crypto.randomUUID();
+  useSftpStore.setState((st) => ({ preparing: [...st.preparing, { batchId, queue, sources: req.sources.length }] }));
+  try {
+    const r = await window.mc.sftp.enqueue(queue, { ...req, batchId });
+    if (!r.ok && r.error !== 'cancelled') { const t = sftpErrorText(r.error); toast(tr(t.key, t.params), 'error'); }
+    return r.ok;
+  } catch {
+    toast(tr('Operacja nie powiodła się'), 'error');
+    return false;
+  } finally {
+    useSftpStore.setState((st) => ({ preparing: st.preparing.filter((b) => b.batchId !== batchId) }));
+  }
+}
+
+export function cancelBatch(queue: string | null, batchId: string): void {
+  void window.mc.sftp.cancel(queue, { batchId });
+}
+
 export function cancelTransfer(item: TransferItem): void {
   void window.mc.sftp.cancel(queueOf(item.sessionId), { itemIds: [item.id] });
 }
 
 export async function retryTransfer(item: TransferItem): Promise<void> {
-  if (item.error !== 'sftpHostCrashed' && (await window.mc.sftp.retry(queueOf(item.sessionId), [item.id])).ok) return;
-  // The SFTP Host restarted (or the session of the item ended) and forgot this item: the same source goes into the same
-  // folder again, on the view's session to the same host.
   const st = useSftpStore.getState();
+  const liveQueue = item.sessionId === LOCAL_QUEUE_ID || (item.sessionId === st.sessionId && st.session?.state === 'connected');
+  if (item.error !== 'sftpHostCrashed' && liveQueue) {
+    // The host refuses a retry of entries a folder transfer left out (links, unsafe names): it says so.
+    if (!(await window.mc.sftp.retry(queueOf(item.sessionId), [item.id])).ok) toast(tr('Nie udało się ponowić transferu'), 'error');
+    return;
+  }
+  // The SFTP Host restarted or the item's session ended, so its queue is gone: the same source goes into the same folder
+  // again, on the view's session to the same host.
   let queue: string | null = null;
   if (item.sessionId !== LOCAL_QUEUE_ID) {
     const host = st.sessionHosts[item.sessionId];
     if (!st.sessionId || st.session?.state !== 'connected' || st.hostId !== host) { toast(tr('Połącz się ponownie z tym hostem, aby ponowić transfer'), 'error'); return; }
     queue = st.sessionId;
   }
-  const result = await window.mc.sftp.enqueue(queue, reenqueueRequest(item, pathFlavor()));
-  if (!result.ok) { toast(tr('Nie udało się ponowić transferu'), 'error'); return; }
+  if (!await enqueueTransfer(queue, reenqueueRequest(item, pathFlavor()))) return;
   useSftpStore.setState((s) => ({ transfers: s.transfers.filter((i) => i.id !== item.id) }));
 }
 

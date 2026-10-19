@@ -175,6 +175,8 @@ describe('transfers', () => {
     expect(canRetry(item('1', { state: 'failed', error: 'permission' }))).toBe(true);
     expect(canRetry(item('1', { state: 'cancelled' }))).toBe(true);
     expect(canRetry(item('1', { state: 'failed', error: 'invalidName' }))).toBe(false);
+    expect(canRetry(item('1', { state: 'failed', error: 'linkFolder' }))).toBe(false);
+    expect(canRetry(item('1', { state: 'failed', error: 'linkOutside' }))).toBe(false);
     expect(canRetry(item('1', { state: 'done' }))).toBe(false);
   });
   it('lists at most five names in the delete question', () => {

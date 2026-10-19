@@ -249,9 +249,9 @@ const PARTS = {
         if (await app.evaluate(`localStorage.getItem('mc-ssh-groups-v1')`) !== '["lab"]') throw new Error('fold state not stored');
         await app.click('.ssh-group-head', 'lab');
         await app.until(`document.querySelectorAll('.ssh-tile[data-host-id]').length === 4`, 'expanded group');
-        // A click shows the host in the details pane with its two actions.
+        // A click shows the host in the details pane with its actions (Otwórz SFTP since 0.9.8).
         await app.click('.ssh-tile[data-host-id]', 'web-1');
-        await app.until(`document.querySelector('.ssh-view-detail h2')?.textContent === 'web-1' && [...document.querySelectorAll('.ssh-detail-actions button')].map((b) => b.textContent).join('|') === 'Połącz|Otwórz w nowym gridzie'`, 'host details');
+        await app.until(`document.querySelector('.ssh-view-detail h2')?.textContent === 'web-1' && [...document.querySelectorAll('.ssh-detail-actions button')].map((b) => b.textContent).join('|') === 'Połącz|Otwórz w nowym gridzie|Otwórz SFTP'`, 'host details');
         await app.screenshot('ssh-view-details.png');
         // Ctrl+click selects; the bar counts the selection and clears it.
         await app.evaluate(`(() => { for (const tile of [...document.querySelectorAll('.ssh-tile[data-host-id]')].filter((t) => /web-1|pi/.test(t.textContent))) tile.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })); return true; })()`);
@@ -305,7 +305,7 @@ const PARTS = {
       } finally { await app.close(); }
     } finally { server.stop(); rmSync(root, { recursive: true, force: true }); }
   },
-  /** 0.9.2 SSH mode: the side panel shows Hosty, Klucze, Znane hosty and a disabled SFTP while the SSH view is in front; Projects brings the normal panel back. */
+  /** 0.9.2 SSH mode: the side panel shows Hosty, Klucze, Znane hosty and SFTP (enabled in 0.9.8) while the SSH view is in front; Projects brings the normal panel back. */
   async sshMode() {
     const server = await startTestServer(['--no-auth']);
     const root = scratchRoot('ssh-mode');
@@ -337,12 +337,14 @@ const PARTS = {
         // In SSH mode the SSH tile unfolds the side panel (and folds it again later).
         await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`!!document.querySelector('.ssh-view .ssh-tile[data-host-id]') && !!document.querySelector('.side-panel .ssh-nav')`, 'SSH mode with its navigation in the side panel');
-        if (await app.evaluate(navState) !== 'hosts:on|keys|knownHosts|sftp:off') throw new Error(`side panel entries: ${await app.evaluate(navState)}`);
-        if (!(await app.evaluate(`document.querySelector('.ssh-nav-item[data-section="sftp"]').textContent.includes('wkrótce')`))) throw new Error('SFTP lacks the coming-soon note');
+        if (await app.evaluate(navState) !== 'hosts:on|keys|knownHosts|sftp') throw new Error(`side panel entries: ${await app.evaluate(navState)}`);
+        if (await app.evaluate(`document.querySelector('.ssh-nav-item[data-section="sftp"]').textContent.includes('wkrótce')`)) throw new Error('SFTP still has the coming-soon note');
         if (await app.evaluate(`!!document.querySelector('.side-panel .project-list, #sidebar-projects')`)) throw new Error('the projects panel is still shown in SSH mode');
-        // The disabled SFTP entry cannot be chosen.
+        // 0.9.8: SFTP is a section: it shows the SFTP view (the host tiles go), Hosty brings them back.
         await app.click('.ssh-nav-item[data-section="sftp"]');
-        await app.until(`${navState} === 'hosts:on|keys|knownHosts|sftp:off'`, 'SFTP not selectable');
+        await app.until(`${navState} === 'hosts|keys|knownHosts|sftp:on' && !!document.querySelector('.sftp-view .sftp-connect') && getComputedStyle(document.querySelector('.ssh-view')).display === 'none'`, 'SFTP section');
+        await app.click('.ssh-nav-item[data-section="hosts"]');
+        await app.until(`${navState} === 'hosts:on|keys|knownHosts|sftp' && getComputedStyle(document.querySelector('.sftp-host')).display === 'none'`, 'Hosty again');
         await app.until(`document.querySelectorAll('.ssh-group-tile').length === 3 && !document.querySelector('.ssh-view-detail')`, 'group tiles, no details pane');
         await shot('hosts');
         // Klucze: the empty state, then a generated key as a tile with its editor.
@@ -365,7 +367,9 @@ const PARTS = {
         // Keyboard: arrows move through the enabled entries only.
         await app.evaluate(`document.querySelector('.ssh-nav-item.on').focus()`);
         await app.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 });
-        await app.until(`document.querySelector('.ssh-nav-item.on')?.dataset.section === 'hosts' && document.activeElement?.dataset.section === 'hosts'`, 'ArrowDown wraps past the disabled SFTP entry');
+        await app.until(`document.querySelector('.ssh-nav-item.on')?.dataset.section === 'sftp' && document.activeElement?.dataset.section === 'sftp'`, 'ArrowDown goes on to SFTP');
+        await app.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 });
+        await app.until(`document.querySelector('.ssh-nav-item.on')?.dataset.section === 'hosts' && document.activeElement?.dataset.section === 'hosts'`, 'ArrowDown wraps from SFTP to Hosty');
         // Folded side panel: the SSH tile folds it, the view offers the sections itself.
         await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`!document.querySelector('.side-panel') && !!document.querySelector('.ssh-view-main .ssh-nav.compact')`, 'compact sections in the folded state');

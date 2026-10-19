@@ -71,6 +71,8 @@
 .sftp-prompt.danger .sftp-card { border-color: #ef4444; }
 .sftp-card .input { width: 100%; box-sizing: border-box; background: #171717; border: 1px solid #ffffff0d; border-radius: 6px; color: var(--text); }
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #ffffff22; border-top-color: var(--text-2); animation: sftp-spin .8s linear infinite; }
+.spinner.small { width: 12px; height: 12px; flex: none; }
+.sftp-transfer.preparing { margin: 0 6px; }
 @keyframes sftp-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
 .sftp-picker { flex: 1; min-height: 0; display: flex; flex-direction: column; }

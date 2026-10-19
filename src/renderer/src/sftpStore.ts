@@ -14,6 +14,8 @@ interface SftpStore {
   sessionHosts: Record<string, string>;
   /** Every item of every queue (sessions and local copies), in enqueue order. */
   transfers: TransferItem[];
+  /** Enqueues still walking their folders (no items yet): shown with Cancel in the transfer panel. */
+  preparing: Array<{ batchId: string; queue: string | null; sources: number }>;
   /** The host picker of the remote pane is open. */
   pickerOpen: boolean;
   /** A folder the remote pane should go to (set by "Otwórz SFTP tutaj" on the connected host); bumped by `seq`. */
@@ -21,5 +23,5 @@ interface SftpStore {
 }
 
 export const useSftpStore = create<SftpStore>(() => ({
-  sessionId: null, hostId: null, session: null, prompt: null, sessionHosts: {}, transfers: [], pickerOpen: false, remoteGoto: null,
+  sessionId: null, hostId: null, session: null, prompt: null, sessionHosts: {}, transfers: [], preparing: [], pickerOpen: false, remoteGoto: null,
 }));

@@ -12,7 +12,7 @@ import { useI18n } from '../../i18n';
 import { askChoice, askText, getS, toast, update, useStore } from '../../store';
 import { sshContext } from '../../ssh';
 import { useSshStore } from '../../sshStore';
-import { connectSftp, disconnectSftp, openHostPicker, pathFlavor } from '../../sftp';
+import { connectSftp, disconnectSftp, enqueueTransfer, openHostPicker, pathFlavor } from '../../sftp';
 import { useSftpStore } from '../../sftpStore';
 import type { MenuItem } from '../ContextMenu';
 import { openMenuAt } from '../ContextMenu';
@@ -99,10 +99,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
   }, [done]);
 
   // ── transfers ──
-  const enqueue = async (queue: string | null, req: TransferRequest) => {
-    const r = await window.mc.sftp.enqueue(queue, req);
-    if (!r.ok) toast(errorText(r.error), 'error');
-  };
+  const enqueue = (queue: string | null, req: TransferRequest) => enqueueTransfer(queue, req);
   const upload = (sources: string[], targetDir: string) => { if (sessionId && connected) void enqueue(sessionId, { direction: 'upload', sources, targetDir }); };
   const download = (sources: string[], targetDir: string) => { if (sessionId && targetDir !== DRIVES) void enqueue(sessionId, { direction: 'download', sources, targetDir }); };
   const onDropEntries = (payload: SftpDragPayload, onto: 'local' | 'remote', targetDir: string) => {

@@ -82,6 +82,7 @@ export const sftpViewMessages = {
   'anulowano': ['cancelled', 'abgebrochen', 'cancelado', 'annulé', 'cancelado'],
   'konflikt': ['conflict', 'Konflikt', 'conflicto', 'conflit', 'conflito'],
   'pominięto': ['skipped', 'übersprungen', 'omitido', 'ignoré', 'ignorado'],
+  'Przygotowywanie transferu ({count})…': ['Preparing the transfer ({count})…', 'Übertragung wird vorbereitet ({count})…', 'Preparando la transferencia ({count})…', 'Préparation du transfert ({count})…', 'A preparar a transferência ({count})…'],
   'Rozwiąż': ['Resolve', 'Klären', 'Resolver', 'Résoudre', 'Resolver'],
   'Zmień wysokość panelu transferów': ['Resize the transfers panel', 'Höhe des Übertragungsbereichs ändern', 'Cambiar la altura del panel de transferencias', 'Redimensionner le panneau des transferts', 'Alterar a altura do painel de transferências'],
   'Połącz się ponownie z tym hostem, aby ponowić transfer': ['Connect to this host again to retry the transfer', 'Verbinde dich erneut mit diesem Host, um die Übertragung zu wiederholen', 'Vuelve a conectarte a este host para reintentar la transferencia', 'Reconnectez-vous à cet hôte pour relancer le transfert', 'Volte a ligar a este anfitrião para repetir a transferência'],

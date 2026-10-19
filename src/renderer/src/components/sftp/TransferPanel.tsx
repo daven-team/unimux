@@ -6,7 +6,7 @@ import { isFinished, overallProgress, sftpErrorText, type TransferItem } from '.
 import { canCancel, canRetry, formatBytes, percentOf } from '../../../../shared/sftpView';
 import { rowSlots, rowWindow } from '../../../../shared/virtualRows';
 import { useI18n } from '../../i18n';
-import { askConflict, cancelTransfer, clearFinishedTransfers, retryTransfer } from '../../sftp';
+import { askConflict, cancelBatch, cancelTransfer, clearFinishedTransfers, retryTransfer } from '../../sftp';
 import { useSftpStore } from '../../sftpStore';
 import { IArrowRight, IDownload, IUpload } from '../icons';
 
@@ -28,6 +28,7 @@ const STATE_LABEL = { queued: 'w kolejce', running: 'przesyłanie', done: 'gotow
 export function TransferPanel() {
   const { tr, language } = useI18n();
   const items = useSftpStore((st) => st.transfers);
+  const preparing = useSftpStore((st) => st.preparing);
   const [height, setHeight] = useState<number | null>(readHeight);
   const section = useRef<HTMLElement>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -43,7 +44,7 @@ export function TransferPanel() {
     observer.observe(el);
     return () => observer.disconnect();
   }, [items.length > 0]);
-  if (!items.length) return null;
+  if (!items.length && !preparing.length) return null;
   const percent = total.total > 0 ? Math.floor((total.done / total.total) * 100) : total.finished === total.files ? 100 : 0;
   const slots = rowSlots(rowWindow(view.top, view.height, ROW, items.length), items.length);
   const changeHeight = (next: number, save: boolean) => {
@@ -61,6 +62,13 @@ export function TransferPanel() {
         <span className="grow" />
         <button type="button" className="btn small" disabled={!finished} onClick={() => void clearFinishedTransfers()}>{tr('Wyczyść zakończone')}</button>
       </div>
+      {preparing.map((b) => (
+        <div key={b.batchId} className="sftp-transfer preparing" data-batch-id={b.batchId}>
+          <span className="spinner small" aria-hidden />
+          <div className="sftp-transfer-main"><span className="sftp-transfer-name">{tr('Przygotowywanie transferu ({count})…', { count: b.sources })}</span></div>
+          <div className="sftp-transfer-actions"><button type="button" className="btn small" onClick={() => cancelBatch(b.queue, b.batchId)}>{tr('Anuluj')}</button></div>
+        </div>
+      ))}
       <div ref={list} className="sftp-transfer-list" onScroll={(e) => { const t = e.currentTarget.scrollTop; setView((v) => (v.top === t ? v : { ...v, top: t })); }}>
         {slots.map((slot, n) => slot.kind === 'gap'
           ? <div key={`gap-${n}`} style={{ height: slot.rows * ROW }} aria-hidden />
