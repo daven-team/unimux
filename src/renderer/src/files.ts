@@ -481,7 +481,6 @@ export async function closeFile(id: string): Promise<boolean> {
       const choice = await askChoice(fileLabel('close'), doc.relativePath, [
         { label: tr('Zapisz'), value: 'save', primary: true },
         { label: fileLabel('discard'), value: 'discard', danger: true },
-        { label: tr('Anuluj'), value: 'cancel' },
       ]);
       if (choice !== 'save' && choice !== 'discard') return false;
       if (choice === 'save' && (!await saveFile(id) || useFileStore.getState().documents.some((d) => d.id === id && isFileDirty(d)))) return false;

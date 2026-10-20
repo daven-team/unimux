@@ -105,7 +105,6 @@ export function FindReplaceModal({ projectId }: { projectId: string }) {
   const replaceAll = async () => {
     const choice = await askChoice(tr('Zamienić wszystkie wystąpienia?'), tr('Zamienić {matches} wystąpień w {files} plikach? Tej operacji nie można cofnąć.', { matches: total, files: files.length }), [
       { label: tr('Zamień wszystko'), value: 'replace', danger: true },
-      { label: tr('Anuluj'), value: 'cancel' },
     ]);
     if (choice === 'replace') await apply({ kind: 'all' }, files.map((f) => f.path));
   };

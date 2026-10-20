@@ -453,7 +453,6 @@ async function confirmClose(doc: FileDocument): Promise<boolean> {
     const choice = await askChoice(tr('Zapisać zmiany w tabeli {name}?', { name: ref.table }), tr('Zmiany czekające na zapis: {count}.', { count: stagedCount(staged) }), [
       { label: tr('Zapisz zmiany'), value: 'save', primary: true },
       { label: tr('Odrzuć zmiany'), value: 'discard', danger: true },
-      { label: tr('Anuluj'), value: 'cancel' },
     ]);
     if (choice === 'save') return applyStaged(doc.id);
     return choice === 'discard';
@@ -462,7 +461,6 @@ async function confirmClose(doc: FileDocument): Promise<boolean> {
     if (sqlTx(doc.id) !== 'idle') {
       const choice = await askChoice(tr('Transakcja jest otwarta'), tr('Zamknięcie karty wycofa niezatwierdzone zmiany (ROLLBACK).'), [
         { label: tr('Wycofaj i zamknij'), value: 'rollback', danger: true },
-        { label: tr('Anuluj'), value: 'cancel' },
       ]);
       if (choice !== 'rollback') return false;
       return true;
@@ -470,7 +468,6 @@ async function confirmClose(doc: FileDocument): Promise<boolean> {
     if (doc.text.trim() && doc.text !== doc.savedText) {
       const choice = await askChoice(tr('Zamknąć skrypt SQL?'), tr('Tekst zapytania w karcie {name} zostanie utracony.', { name: doc.name }), [
         { label: tr('Zamknij bez zapisywania'), value: 'discard', danger: true },
-        { label: tr('Anuluj'), value: 'cancel' },
       ]);
       return choice === 'discard';
     }
