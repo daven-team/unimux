@@ -166,6 +166,8 @@ export interface Settings {
   scrollbackLines: number;
   /** Colour theme of SSH terminals (Settings > SSH); a host may choose its own (shared/sshThemes.ts). */
   sshTheme: SshThemeId;
+  /** Command suggestions in SSH terminals and the host command history behind them; only `false` turns them off. */
+  sshAutocomplete?: boolean;
 }
 
 export interface AppState {

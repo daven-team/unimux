@@ -28,6 +28,7 @@ import { sshModeMessages } from './sshModeMessages';
 import { sshThemeMessages } from './sshThemeMessages';
 import { sshViewMessages } from './sshViewMessages';
 import { sshHostsMessages } from './sshHostsMessages';
+import { sshAutocompleteMessages } from './sshAutocompleteMessages';
 import { safetyMessages } from './safetyMessages';
 import { stabilityMessages } from './stabilityMessages';
 import { statusMessages } from './statusMessages';
@@ -68,6 +69,7 @@ export const messages = {
   ...sshThemeMessages,
   ...sshViewMessages,
   ...sshHostsMessages,
+  ...sshAutocompleteMessages,
   ...statusMessages,
   ...swapMessages,
   ...termMessages,

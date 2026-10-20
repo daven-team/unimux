@@ -12,6 +12,7 @@ import { resolveSshTheme } from '../../../shared/sshThemes';
 import { useSshStore } from '../sshStore';
 import { disconnectCell, openSshView, reconnectCell, sshContext, sshHostMenuItems } from '../ssh';
 import { SshCellCard } from './ssh/SshCellCard';
+import { SshAutocomplete } from './ssh/SshAutocomplete';
 import { openSftp } from '../sftp';
 import { profileOptionLabel } from '../cliUi';
 import { CliMissingCard } from './CliMissingCard';
@@ -294,6 +295,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
       {drop && !pathDrop && <div className="cell-snippet-drop" role="status">{tr('Upuść, aby wkleić')}</div>}
       {lackingCli && <CliMissingCard cli={lackingCli} cellId={cell.id} onChangeProfile={(anchor) => openMenuAt(anchor, profileItems())} />}
       {ssh && <SshCellCard cellId={cell.id} host={host} session={sshSession} prompt={sshPrompt} />}
+      {ssh && <SshAutocomplete cellId={cell.id} />}
       {floodHint && !error && (
         <div className="cell-hint" role="status">
           <span className="grow">{tr("Terminal wysyłał zdarzenia myszy do powłoki - zresetowano tryb")}</span>

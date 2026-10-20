@@ -6,6 +6,7 @@ import { toast } from '../../store';
 import { useSshStore } from '../../sshStore';
 import { SettingRow, SettingsGroup } from '../SettingRow';
 import { SshThemeSettings } from './SshThemePicker';
+import { SshAutocompleteSettings } from './SshAutocompleteSettings';
 import { useKnownHosts } from './useKnownHosts';
 
 export function SshSettings() {
@@ -44,5 +45,6 @@ export function SshSettings() {
         </table>
       )}
     </SettingsGroup>
+    <SshAutocompleteSettings />
   </>;
 }

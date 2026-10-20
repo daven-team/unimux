@@ -17,6 +17,7 @@ import type { GithubApi } from '../shared/github';
 import type { SshApi, SshPrompt, SshSessionState, SshVaultInfo } from '../shared/ssh';
 import type { LocalFilesApi, SftpApi, SftpSessionState } from '../shared/sftp';
 import type { DbApi, DbPrompt, DbSessionState, DbVaultInfo } from '../shared/db';
+import type { SshHistoryApi } from '../shared/commandHistory';
 import type { AppState, CellSession, Profile, ProjectDirectory, ProjectFilePreview, SessionInfo, UpdateState, Worktree, WorktreeInspection, WorktreeInspectResult, WorktreeRemoveResult } from '../shared/types';
 
 export type { SessionInfo };
@@ -122,6 +123,8 @@ export interface McApi {
   dbExport(name: string, text: string): Promise<{ ok: boolean; path?: string; cancelled?: boolean }>;
   /** The local pane of the SFTP view: any folder, drives, home, new folder, rename, trash, show in Explorer/Finder. */
   localFs: LocalFilesApi;
+  /** The command history of SSH hosts for the terminal autocomplete (kept by main on this computer only). */
+  sshHistory: SshHistoryApi;
   notify(n: { title: string; body: string; cellId: string }): void;
   openExternal(url: string): void;
   openPath(path: string): void;

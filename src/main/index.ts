@@ -84,6 +84,7 @@ import { createWorktree, currentBranch, inspectWorktree, isGitRepo, removeWorktr
 import { StateController } from './stateController';
 import { SshCoordinator } from './ssh/coordinator';
 import { createSshHandlers, readKeyFileFromDisk, registerSshIpc } from './ssh/ipc';
+import { CommandHistoryStore, registerCommandHistoryIpc } from './ssh/commandHistory';
 import { KeyDrafts } from './ssh/keys';
 import { KnownHostsStore } from './ssh/knownHosts';
 import { writePrivateFile } from './ssh/files';
@@ -802,6 +803,10 @@ function startSsh(): void {
   const vault = new SshVault(join(dir, 'vault.json'), cipher);
   const knownHosts = new KnownHostsStore(join(dir, 'known_hosts.json'));
   const vaultChanged = () => send('ssh:vault:changed', vault.info());
+  // The command history of the SSH autocomplete (local only); pending changes are written before the app quits.
+  const commandHistory = new CommandHistoryStore(join(dir, 'command_history.json'), { hostExists: (hostId) => state.sshHosts.some((h) => h.id === hostId) });
+  registerCommandHistoryIpc({ guardedHandle, guardedOn }, commandHistory);
+  app.on('before-quit', () => commandHistory.flush());
   ssh = new SshCoordinator({
     state: () => state, vault, knownHosts,
     // SFTP sessions ("sftp:<uuid>") log in through the SFTP Host, DB tunnels ("db:<uuid>") through the DB Host, cells through the Pty Host.
