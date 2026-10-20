@@ -23,10 +23,10 @@ export interface PanelProps { resize: PanelResizeProps }
 // The Git panel (history, graph, changes) loads when it is first opened: it is not needed at startup. Its styles stay in
 // the main bundle (imported above): the Files tree uses the same change letters (.git-letter).
 const loadGitPanel = () => import('./components/GitPanel').then((m) => ({ default: m.GitPanel }));
-function GitPanelLazy() { return <LazyScreen load={loadGitPanel} />; }
+function GitPanelLazy() { return <LazyScreen load={loadGitPanel} panel />; }
 // The database panel (1.0.0) loads when it is first opened.
 const loadDbPanel = () => import('./components/db/DbPanel').then((m) => ({ default: m.DbPanel }));
-function DbPanelLazy() { return <LazyScreen load={loadDbPanel} />; }
+function DbPanelLazy() { return <LazyScreen load={loadDbPanel} panel />; }
 
 export interface SidebarPanel extends Omit<PanelDef, 'unavailableReason'> {
   label: MessageKey;

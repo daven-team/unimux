@@ -8,9 +8,10 @@ import { moveSnippet, removeSnippet, uid, upsertSnippet, type DropEdge } from '.
 import { PANEL_LIMITS } from '../../../shared/panels';
 import { askChoice, setUi, update, useStore } from '../store';
 import { SNIPPET_MIME } from './CellView';
-import { IEdit, IPlus, ISnippet } from './icons';
+import { IEdit, IPlus } from './icons';
 import { dropEdge, scrollDragList } from './listDrag';
 import { openMenu } from './ContextMenu';
+import { EmptyLink, fillTokens, PanelEmpty } from './PanelEmpty';
 import { PanelResizeHandle, type PanelResizeProps } from './PanelResizeHandle';
 
 export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
@@ -80,12 +81,13 @@ export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
         <button className="sq" title={tr("Nowy snippet")} aria-label={tr("Nowy snippet")} onClick={() => create()}><IPlus /></button>
       </div>
       {!snippets.length ? (
-        <div className="empty-state">
-          <div className="es-icon"><ISnippet /></div>
-          <div className="es-title">{tr("Brak snippetów")}</div>
-          <div className="es-text">{tr("Zapisz prompty, których często używasz, i wklejaj je do terminali jednym kliknięciem.")}</div>
-          <button className="btn ghost" onClick={() => create()}><IPlus />  {tr("Nowy snippet")}</button>
-        </div>
+        <PanelEmpty>
+          <p>{tr("Zapisz prompty, których często używasz, i wklejaj je do terminali jednym kliknięciem.")}</p>
+          <button className="btn primary" onClick={() => create()}>{tr("Nowy snippet")}</button>
+          {projectId && <p>{fillTokens(tr("Możesz też {link}."), {
+            link: <EmptyLink onClick={() => create(projectId)}>{tr("dodać snippet tylko dla tego projektu")}</EmptyLink>,
+          })}</p>}
+        </PanelEmpty>
       ) : (
       <>
       <input className="search" aria-label={tr("Szukaj snippetów")} placeholder={tr("Szukaj snippetów") + '…'} value={q} onChange={(e) => setQ(e.target.value)} />

@@ -15,6 +15,7 @@ import { useI18n } from '../../i18n';
 import { askChoice, setUi, toast, useStore } from '../../store';
 import { openMenu, openMenuAt, type MenuItem } from '../ContextMenu';
 import { IChevron, IColumn, IDatabase, IFolder, IFunction, IKey, IPlus, ISequence, ITable, IView } from '../icons';
+import { EmptyLink, fillTokens, PanelEmpty } from '../PanelEmpty';
 import { DbLogin } from './DbLogin';
 import './db.css';
 
@@ -302,11 +303,14 @@ export const DbPanel = memo(function DbPanel() {
         </div>
       ))}
       {!connections.length ? (
-        <div className="db-empty">
-          <IDatabase />
-          <p>{tr('Dodaj połączenie z bazą PostgreSQL lub Redis. Bazy dostępne tylko na serwerze otworzysz przez tunel SSH.')}</p>
+        <PanelEmpty className="db-empty">
+          <p>{fillTokens(tr('Dodaj połączenie z bazą {postgres} lub {redis}.'), {
+            postgres: <EmptyLink label={`${tr('Nowe połączenie')}: PostgreSQL`} onClick={() => openNewConnection('postgres')}>PostgreSQL</EmptyLink>,
+            redis: <EmptyLink label={`${tr('Nowe połączenie')}: Redis`} onClick={() => openNewConnection('redis')}>Redis</EmptyLink>,
+          })}</p>
           <button className="btn primary" onClick={() => openNewConnection('postgres')}>{tr('Nowe połączenie')}</button>
-        </div>
+          <p>{tr('Bazy dostępne tylko na serwerze otworzysz przez tunel SSH.')}</p>
+        </PanelEmpty>
       ) : (
         <div className="db-tree" ref={scroller} role="tree" tabIndex={0} aria-label={tr('Bazy danych')} onKeyDown={onTreeKey}
           aria-activedescendant={selected && rows.some((r) => r.key === selected) ? `db-tree-row-${rows.findIndex((r) => r.key === selected)}` : undefined}
