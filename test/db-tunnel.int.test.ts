@@ -138,6 +138,49 @@ describe('DbHost: SSH tunnel', () => {
     const c = await h.open({ ssh: via(pgl.port, false, 'none') });
     expect(h.last(c)).toMatchObject({ phase: 'error', error: 'tunnel' });
   });
+
+  it('the owner closed during the login: a waiting session takes the login over (before and during the SSH login)', async () => {
+    const s = await ssh();
+    // The owner is closed at its password question; the session that takes over answers it.
+    const owners: string[] = [];
+    let closeAt: string | null = null;
+    const h = dbHarness({ onMain: (m, host) => {
+      if (m.t === 'dbTunnelOwner') owners.push(m.id);
+      if (m.t === 'sshAuthPrompt') {
+        if (m.id === closeAt) { closeAt = null; host.close(m.id); return true; }
+        void host.handle({ t: 'sshAuthAnswer', id: m.id, promptId: m.promptId, values: ['pw'] });
+        return true;
+      }
+      return false;
+    } });
+    const a = dbSessionId('aaaaaaaa-0000-4000-8000-000000000021');
+    const b = dbSessionId('aaaaaaaa-0000-4000-8000-000000000022');
+    const c = dbSessionId('aaaaaaaa-0000-4000-8000-000000000023');
+    await h.open({ ssh: via(pgl.port, true, 'handover') }, a, false);
+    await h.open({ ssh: via(pgl.port, false, 'handover') }, b, false);
+    await h.open({ ssh: via(pgl.port, false, 'handover') }, c, false);
+    // Before main's sshConnect arrived: b takes over, nobody reads "cancelled".
+    h.host.close(a);
+    expect(h.last(a)?.phase).toBe('closed');
+    expect(owners).toEqual([b]);
+    expect(h.last(b)?.phase).toBe('connecting');
+    expect(h.host.tunnelCount()).toBe(1);
+    // During the SSH login (at the password question): c takes over and logs the tunnel in.
+    closeAt = b;
+    await h.host.handle({ t: 'sshConnect', req: sshReq(b, s) });
+    await waitFor(() => owners.length === 2, 15000);
+    expect(owners).toEqual([b, c]);
+    expect(h.last(b)?.phase).toBe('closed');
+    // The dropped attempt's prompt answers go nowhere; the new owner's login runs.
+    await h.host.handle({ t: 'sshConnect', req: sshReq(c, s) });
+    await waitFor(() => ['connected', 'error'].includes(h.last(c)?.phase ?? ''), 15000);
+    expect(h.last(c)?.phase).toBe('connected');
+    expect(h.toMain.some((m) => m.t === 'dbStatus' && m.error === 'cancelled')).toBe(false);
+    expect((await h.run(c, { sql: 'SELECT v FROM tun' })).statements[0].rows).toEqual([['through ssh']]);
+    h.host.close(c);
+    expect(h.host.tunnelCount()).toBe(0);
+    await waitFor(() => s.connections() === 0);
+  });
 });
 
 describe('DbService behind the SSH coordinator (main chain)', () => {
@@ -200,6 +243,42 @@ describe('DbService behind the SSH coordinator (main chain)', () => {
     expect(c.last(id)).toMatchObject({ state: 'error', error: 'dbHostCrashed' });
     expect(c.coordinator.sessionSnapshot('db').sessions.filter((x) => x.phase === 'connected')).toEqual([]);
     c.host.close(id);
+  });
+
+  it('two sessions of one connection: the owner disconnected at its host key question, the other one takes the login over', async () => {
+    const s = await ssh();
+    const c = chain(s, { kind: 'postgres', name: 'x', host: 'localhost', port: 5432, user: 'app', database: 'app', tls: 'disable', ssh: { hostId: HOST_ID, dbHost: '127.0.0.1', dbPort: pgl.port }, readOnly: false });
+    const a = (c.service.connect(CONN_ID) as { sessionId: string }).sessionId;
+    const b = (c.service.connect(CONN_ID) as { sessionId: string }).sessionId;
+    await waitFor(() => c.open(a)?.kind === 'hostKey');
+    await c.service.disconnect(a);
+    expect(c.last(a)?.state).toBe('closed');
+    // The question moves to the other session (its own login through the coordinator).
+    await waitFor(() => c.open(b)?.kind === 'hostKey', 15000);
+    c.service.answer({ sessionId: b, promptId: c.open(b)!.id, hostKey: 'save' });
+    await waitFor(() => c.open(b)?.kind === 'password');
+    c.service.answer({ sessionId: b, promptId: c.open(b)!.id, values: ['pw'] });
+    await waitFor(() => ['connected', 'error'].includes(c.last(b)?.state ?? ''), 15000);
+    expect(c.last(b)?.state).toBe('connected');
+    expect(c.sessions.some((x) => x.error === 'cancelled')).toBe(false);
+    await c.service.disconnect(b);
+    await waitFor(() => s.connections() === 0);
+  });
+
+  it('a refused host key ends every session waiting on that tunnel with the same error (no second question)', async () => {
+    const s = await ssh();
+    const c = chain(s, { kind: 'postgres', name: 'x', host: 'localhost', port: 5432, user: 'app', database: 'app', tls: 'disable', ssh: { hostId: HOST_ID, dbHost: '127.0.0.1', dbPort: pgl.port }, readOnly: false });
+    const a = (c.service.connect(CONN_ID) as { sessionId: string }).sessionId;
+    const b = (c.service.connect(CONN_ID) as { sessionId: string }).sessionId;
+    await waitFor(() => c.open(a)?.kind === 'hostKey');
+    c.service.answer({ sessionId: a, promptId: c.open(a)!.id, cancel: true });
+    await waitFor(() => c.last(a)?.state === 'error' && c.last(b)?.state === 'error', 15000);
+    expect(c.last(a)?.error).toBe('hostKeyRejected');
+    expect(c.last(b)?.error).toBe('hostKeyRejected');
+    await new Promise((r) => setTimeout(r, 300));
+    expect(c.prompts.filter((p) => p.id === b && p.prompt)).toEqual([]);
+    expect(c.service.snapshot().sessions).toEqual([]);
+    expect(c.host.tunnelCount()).toBe(0);
   });
 
   it('an unknown SSH host key that the user refuses ends the session with the coordinator error', async () => {

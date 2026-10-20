@@ -73,5 +73,7 @@ export type DbHostToMain =
   | { t: 'dbTx'; id: string; tx: DbTxStatus }
   /** The session runs something (busy) or is idle again: main's idle disconnect waits while it is busy. */
   | { t: 'dbActivity'; id: string; busy: boolean }
+  /** The owner of a shared SSH tunnel was closed during its login: this session takes the login over (main starts it). */
+  | { t: 'dbTunnelOwner'; id: string }
   | { t: 'dbResult'; reqId: number; result: DbResult<unknown> }
   | { t: 'shutdownDone' };
