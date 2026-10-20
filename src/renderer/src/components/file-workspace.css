@@ -162,3 +162,6 @@
 .remote-login-card { width: 100%; max-width: 440px; padding: 14px; background: #181818; border: 1px solid #ffffff12; border-radius: 10px; }
 .remote-login.danger .remote-login-card { border-color: #ef4444; }
 .remote-login-card .input { width: 100%; box-sizing: border-box; }
+
+/* The preview tab in the top strip (opened with a single click, the next file replaces it): its name in italics, like VS Code. */
+.workspace-tabs .file-tab.preview .label { font-style: italic; }

@@ -148,7 +148,8 @@ const TreeEntryRow = memo(function TreeEntryRow({ entry, depth, open, pos, size,
       style={{ top, height: TREE_ROW_HEIGHT, paddingLeft: pinned ? stickyIndent(sticky) : indentFor(depth) }}
       draggable
       onClick={(e) => pinned ? actions.current.stickyClick(e, index) : actions.current.click(e, entry)}
-      onDoubleClick={(e) => { e.preventDefault(); if (!pinned) actions.current.startRename(entry.path); }}
+      // A double click on a file keeps its tab (the second click opens it with 'keep'); on a folder it still renames it.
+      onDoubleClick={(e) => { e.preventDefault(); if (!pinned && folder) actions.current.startRename(entry.path); }}
       onContextMenu={(e) => actions.current.menu(e, entry)}
       onDragStart={(e) => actions.current.dragStart(e, entry)}
       onDragOver={(e) => actions.current.dragOver(e, entry)}
@@ -383,7 +384,8 @@ export function ProjectExplorer({ project }: { project: Project }) {
       }
       selectPaths(project.id, [entry.path], entry.path);
       if (folder) toggleFolder(project.id, entry.path);
-      else { treeOpen.keyboard = e.detail === 0; void openFile(project.id, entry.path); }
+      // A single click opens the preview tab; the second click of a double click, Enter or Space keep the tab (like VS Code).
+      else { treeOpen.keyboard = e.detail === 0; void openFile(project.id, entry.path, e.detail === 1 ? 'preview' : 'keep'); }
     },
     // A pinned folder: a click scrolls to it (it becomes a normal row under its own pinned parents);
     // a click on its chevron collapses it, like VS Code.
@@ -413,7 +415,7 @@ export function ProjectExplorer({ project }: { project: Project }) {
         ...(multi ? [] : [
           folder
             ? { label: expanded.has(entry.path) ? tr("Zwiń folder") : tr("Rozwiń folder"), onClick: () => toggleFolder(project.id, entry.path) }
-            : { label: tr("Podgląd pliku"), onClick: () => void openFile(project.id, entry.path) },
+            : { label: tr("Podgląd pliku"), onClick: () => void openFile(project.id, entry.path, 'preview') },
           ...(!folder ? [{ label: tr("Otwórz w edytorze"), onClick: () => window.mc.openInEditor(fullPath) }] : []),
           { label: tr("Pokaż w menedżerze plików"), onClick: () => window.mc.revealPath(fullPath) },
           { sep: true as const },

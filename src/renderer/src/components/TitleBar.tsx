@@ -14,7 +14,7 @@ import { IChevron, IDatabase, IPlusBold, ISearch, ITable, IX, TGrid, THistory, T
 import { FileIcon } from './FileIcon';
 import { StatusBadges } from './StatusBadges';
 import { Brand } from './Brand';
-import { activateFile, closeFile, closeFiles, useFileStore, type FileDocument } from '../files';
+import { activateFile, closeFile, closeFiles, keepFile, useFileStore, type FileDocument } from '../files';
 import { useStatusCounts } from '../statusCounts';
 import { locateInFiles } from '../explorer';
 import { fullProjectPath } from '../../../shared/platform';
@@ -55,9 +55,9 @@ export const TitleBar = memo(function TitleBar() {
 });
 
 /** What a file tab shows (not the text): typing in the editor changes none of it except `dirty`. */
-interface FileTab { id: string; projectId: string; name: string; relativePath: string; diff: boolean; dirty: boolean; source: FileSource | null; db: DbTabRef | null; redis: RedisTabRef | null }
+interface FileTab { id: string; projectId: string; name: string; relativePath: string; diff: boolean; dirty: boolean; source: FileSource | null; db: DbTabRef | null; redis: RedisTabRef | null; preview: boolean }
 const fileTabsKey = (documents: readonly FileDocument[]): string =>
-  JSON.stringify(documents.map((d) => [d.id, d.projectId, d.name, d.relativePath, !!d.diff, d.text !== d.savedText, d.source ?? null, d.db ?? null, d.redis ?? null]));
+  JSON.stringify(documents.map((d) => [d.id, d.projectId, d.name, d.relativePath, !!d.diff, d.text !== d.savedText, d.source ?? null, d.db ?? null, d.redis ?? null, !!d.preview]));
 /** A tab of the project on screen, or of a file outside the projects (remote and local SFTP files show in every project). */
 const tabShown = (doc: { projectId: string }, projectId: string | undefined): boolean => !doc.projectId || doc.projectId === projectId;
 
@@ -73,8 +73,8 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
   const countsOf = useStatusCounts();
   const cliStatus = useStore((st) => st.ui.cliStatus);
   const tabsKey = useFileStore((st) => fileTabsKey(st.documents));
-  const documents = useMemo(() => (JSON.parse(tabsKey) as Array<[string, string, string, string, boolean, boolean, FileSource | null, DbTabRef | null, RedisTabRef | null]>)
-    .map(([id, projectId, name, relativePath, diff, dirty, source, db, redis]): FileTab => ({ id, projectId, name, relativePath, diff, dirty, source, db, redis })), [tabsKey]);
+  const documents = useMemo(() => (JSON.parse(tabsKey) as Array<[string, string, string, string, boolean, boolean, FileSource | null, DbTabRef | null, RedisTabRef | null, boolean]>)
+    .map(([id, projectId, name, relativePath, diff, dirty, source, db, redis, preview]): FileTab => ({ id, projectId, name, relativePath, diff, dirty, source, db, redis, preview })), [tabsKey]);
   const dbConnections = useStore((st) => st.s.dbConnections);
   const dbConnection = (id: string) => dbConnections.find((c) => c.id === id);
   const sshHosts = useStore((st) => st.s.sshHosts);
@@ -142,6 +142,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       const next = reorderWorkspace(order, drag.id, id, e.clientX > bounds.left + bounds.width / 2);
       // Across projects too; each project's grids follow the strip (the sidebar lists them in that order).
       if (next !== order) update((st) => ({ ...st, workspaceOrder: next, projects: syncTabsToOrder(st.projects, next) }));
+      if (next !== order && drag.id.startsWith('file:')) keepFile(drag.id.slice(5)); // a moved preview tab stays
       endDrag();
     },
   });
@@ -239,6 +240,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
     const full = doc.source ? doc.source.path : owner ? fullProjectPath(owner.path, doc.relativePath, window.mc.platform) : doc.relativePath;
     openMenu(x, y, [
       { header: doc.name },
+      ...(doc.preview ? [{ label: tr('Zachowaj kartę'), onClick: () => keepFile(doc.id) }] : []),
       { label: tr('Zamknij'), onClick: () => void closeFile(doc.id) },
       { label: tr('Zamknij pozostałe'), disabled: idsFor('others').length === 0, onClick: () => void closeFiles(idsFor('others')) },
       { label: tr('Zamknij karty po prawej'), disabled: idsFor('right').length === 0, onClick: () => void closeFiles(idsFor('right')) },
@@ -372,9 +374,10 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
             return (
             <div key={doc.id} {...dragProps(`file:${doc.id}`)} data-project-id={owner?.id}
               style={{ order: order.indexOf(`file:${doc.id}`), ...(owner ? { '--project-color': owner.color } : {}) } as CSSProperties}
-              className={`tab file-tab ${activeKey === `file:${doc.id}` ? 'active' : ''}`}
-              title={doc.source ? sourceTitle(doc.source, doc.source.kind === 'remote' ? hostLabel(doc.source.hostId) : undefined) : `${doc.relativePath}${owner ? `\n${tr('Projekt: {name}', { name: owner.name })}` : ''}`}
-              onClick={() => activateFile(doc.id)} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void closeFile(doc.id); } }}
+              className={`tab file-tab ${activeKey === `file:${doc.id}` ? 'active' : ''} ${doc.preview ? 'preview' : ''}`}
+              title={(doc.source ? sourceTitle(doc.source, doc.source.kind === 'remote' ? hostLabel(doc.source.hostId) : undefined) : `${doc.relativePath}${owner ? `\n${tr('Projekt: {name}', { name: owner.name })}` : ''}`)
+                + (doc.preview ? `\n${tr('Podgląd: następny kliknięty plik zastąpi tę kartę. Dwuklik zachowuje ją na stałe.')}` : '')}
+              onClick={() => activateFile(doc.id)} onDoubleClick={() => keepFile(doc.id)} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void closeFile(doc.id); } }}
               onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
               onContextMenu={(e) => { e.preventDefault(); fileTabMenu(e.clientX, e.clientY, doc); }}>
               {owner && <span className="tab-project" aria-hidden="true" />}

@@ -167,7 +167,7 @@ export function FindReplaceModal({ projectId }: { projectId: string }) {
                 <button className="fr-file-name" onClick={() => toggle(file.path)} aria-expanded={open}>
                   <span className="fr-caret">{open ? '▾' : '▸'}</span>{file.path}<span className="fr-count">{file.matches.length}</span>
                 </button>
-                <button className="btn small ghost" onClick={() => { void openFile(projectId, file.path); closeModal(); }}>{tr('Otwórz plik')}</button>
+                <button className="btn small ghost" onClick={() => { void openFile(projectId, file.path, 'preview'); closeModal(); }}>{tr('Otwórz plik')}</button>
                 <button className="btn small" disabled={working} onClick={() => void apply({ kind: 'file', path: file.path }, [file.path])}>{tr('Zamień w pliku')}</button>
               </header>
               {shown.map((match) => (

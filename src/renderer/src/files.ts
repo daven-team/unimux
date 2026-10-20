@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { detectLanguage, type Language } from '../../shared/languages';
-import { askChoice, getS, getUi, setUi, update } from './store';
+import { askChoice, getS, getUi, setUi, update, useStore } from './store';
 import { refreshGitBadges } from './git/gitBadges';
 import { tr } from './i18n';
 import { useSshStore } from './sshStore';
@@ -11,6 +11,7 @@ import { cleanStamp, FILE_GONE, localRelativePath, movedSource, POSIX_PATHS, ret
 import type { RedisTabRef } from '../../shared/redisView';
 import { initRemoteSessions, pinHosts, sftpErrorMessage, withSession } from './remoteSessions';
 import { dbTabId, validDbTabRef, type DbTabRef } from '../../shared/dbTabs';
+import { keepTab, keepTabs, openTab, swapOrderKey, type OpenMode } from '../../shared/previewTabs';
 
 export interface FileDocument {
   id: string;
@@ -64,6 +65,11 @@ export interface FileDocument {
    * to diskText): a tab with unsaved edits skips re-reading the same conflict, a tab undone back to clean reads it again.
    */
   conflictStamp?: { size: number; mtimeMs: number };
+  /**
+   * The preview tab (a file opened with a single click; its title in italics): the next file opened that way takes its place.
+   * A double click, an edit, a save or a drag keeps the tab (shared/previewTabs.ts). Never on a tab with unsaved changes.
+   */
+  preview?: boolean;
 }
 export interface DiffRef { source: GitDiffSource; path: string; oldPath?: string; hash?: string; worktree?: string }
 const labels = {
@@ -101,7 +107,7 @@ function restoreDrafts(): FileDocument[] {
       // No stamps: the first check after a start reads the file again and brings back a conflict notice when the disk moved on.
       // A remote draft keeps the stamp it was opened from: its save compares it with the server file.
       .map((d) => ({
-        ...d, status: 'ready', saving: false, error: null, wrap: Boolean(d.wrap), diskConflict: undefined, externalText: undefined, conflictStamp: undefined,
+        ...d, status: 'ready', saving: false, error: null, wrap: Boolean(d.wrap), diskConflict: undefined, externalText: undefined, conflictStamp: undefined, preview: undefined,
         diskStamp: d.source?.kind === 'remote' ? cleanStamp(d.diskStamp) ?? undefined : undefined, notice: undefined,
         encoding: d.encoding && TEXT_ENCODINGS.includes(d.encoding) ? d.encoding : undefined,
       }));
@@ -136,15 +142,46 @@ export function activateFile(id: string): void {
   void checkFileOnDisk(id);
 }
 export function showTerminalTabs(): void { setUi({ settingsActive: false }); useSshStore.setState({ viewActive: false }); useFileStore.setState({ activeFileId: null }); }
-export async function openFile(projectId: string, relativePath: string): Promise<void> {
+/** Setting "Open files in preview mode" (on unless switched off). */
+const previewTabsOn = (): boolean => getS().settings.previewTabs !== false;
+/**
+ * Puts the tab `id` in the strip (see shared/previewTabs.ts): an open tab stays (a 'keep' open keeps it); a new one takes the
+ * preview tab's place in the strip or goes to the end. True when the tab was created (its content still has to be read).
+ */
+function placeTab(id: string, create: () => FileDocument, mode: OpenMode): boolean {
+  const before = useFileStore.getState().documents;
+  const result = openTab(before, id, create, mode === 'preview' && previewTabsOn() ? 'preview' : 'keep', (d) => isFileDirty(d) || d.saving);
+  if (!result.created) {
+    if (result.documents !== before) useFileStore.setState({ documents: result.documents });
+    return false;
+  }
+  const replaced = result.replaced;
+  if (replaced) {
+    loads.delete(replaced);
+    // In the same tick as the tab change (one render): the strip never shows the new tab without the old one's place.
+    update((s) => {
+      const order = s.workspaceOrder && swapOrderKey(s.workspaceOrder, `file:${replaced}`, `file:${id}`);
+      return order && order !== s.workspaceOrder ? { ...s, workspaceOrder: order } : s;
+    });
+  }
+  useFileStore.setState({ documents: result.documents, activeFileId: id });
+  return true;
+}
+/** Keeps the preview tab `id` open (a double click on it or on its file, a drag, "Keep open"); nothing for a kept tab. */
+export function keepFile(id: string): void {
+  useFileStore.setState((s) => { const documents = keepTab(s.documents, id); return documents === s.documents ? s : { documents }; });
+}
+/**
+ * Opens a project file in a tab. 'preview' (a single click in Files, a search result): the preview tab, which the next file
+ * opened that way replaces; 'keep' (a double click, Enter, an explicit Open): a tab that stays. An open file comes to the front.
+ */
+export async function openFile(projectId: string, relativePath: string, mode: OpenMode = 'keep'): Promise<void> {
   setUi({ settingsActive: false });
   useSshStore.setState({ viewActive: false });
   const path = relativePath.replace(/\\/g, '/');
   const id = documentId(projectId, path);
-  const existing = useFileStore.getState().documents.find((d) => d.id === id);
-  if (existing) { activateFile(id); return; }
-  const document: FileDocument = { id, projectId, relativePath: path, name: path.split('/').pop() ?? path, text: '', savedText: '', diskText: '', status: 'loading', saving: false, error: null, wrap: false };
-  useFileStore.setState((s) => ({ documents: [...s.documents, document], activeFileId: id }));
+  const create = (): FileDocument => ({ id, projectId, relativePath: path, name: path.split('/').pop() ?? path, text: '', savedText: '', diskText: '', status: 'loading', saving: false, error: null, wrap: false });
+  if (!placeTab(id, create, mode)) { activateFile(id); return; }
   await retryFile(id);
 }
 
@@ -298,7 +335,10 @@ export async function retryFile(id: string): Promise<void> {
 }
 export function editFile(id: string, text: string): void {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
-  if (doc?.status === 'ready') patch(id, { text: normalize(text) });
+  if (doc?.status !== 'ready') return;
+  const next = normalize(text);
+  // The first change keeps a preview tab: another file must never take the place of unsaved edits.
+  patch(id, doc.preview && next !== doc.text ? { text: next, preview: undefined } : { text: next });
 }
 export function toggleFileWrap(id: string): void {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
@@ -307,14 +347,14 @@ export function toggleFileWrap(id: string): void {
 export function setFileDataView(id: string, dataView: 'table' | 'source'): void {
   patch(id, { dataView });
 }
-/** A git diff as a tab (read-only, next to the files). The same change opened twice focuses the existing tab. */
-export function openDiffTab(projectId: string, diff: DiffRef): void {
+/**
+ * A git diff as a tab (read-only, next to the files). The same change opened twice focuses the existing tab. Like a change
+ * clicked in VS Code's source control view, it opens in the preview tab unless `mode` is 'keep'.
+ */
+export function openDiffTab(projectId: string, diff: DiffRef, mode: OpenMode = 'preview'): void {
   setUi({ settingsActive: false });
   const id = JSON.stringify([projectId, 'diff', diff.source, diff.hash ?? '', diff.worktree ?? '', diff.oldPath ?? '', diff.path]);
-  if (!useFileStore.getState().documents.some((d) => d.id === id)) {
-    const document: FileDocument = { id, projectId, relativePath: diff.path, name: diff.path.split('/').pop() ?? diff.path, text: '', savedText: '', diskText: '', status: 'ready', saving: false, error: null, wrap: false, diff };
-    useFileStore.setState((s) => ({ documents: [...s.documents, document] }));
-  }
+  placeTab(id, () => ({ id, projectId, relativePath: diff.path, name: diff.path.split('/').pop() ?? diff.path, text: '', savedText: '', diskText: '', status: 'ready', saving: false, error: null, wrap: false, diff }), mode);
   activateFile(id);
 }
 export function setFileMarkdownView(id: string, markdownView: 'preview' | 'source'): void {
@@ -322,6 +362,7 @@ export function setFileMarkdownView(id: string, markdownView: 'preview' | 'sourc
 }
 export async function saveFile(id: string): Promise<boolean> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
+  if (doc?.preview) keepFile(id); // a save keeps the tab, like an edit
   if (!doc || doc.status !== 'ready' || doc.saving || doc.db || doc.redis) return false;
   if (!isFileDirty(doc)) return true;
   patch(id, { saving: true, error: null });
@@ -515,7 +556,7 @@ function writeDrafts(): void {
   writtenDrafts = dirty;
   // Only what a restart needs: no copy of the disk text behind a conflict, no stamps (the first check recomputes them).
   // A remote draft keeps its stamp (its save compares it with the server file) and its encoding; never a session or a secret.
-  const stored = dirty.map(({ externalText: _e, diskStamp, conflictStamp: _c, diskConflict: _d, view: _v, notice: _n, ...draft }) => (draft.source?.kind === 'remote' ? { ...draft, diskStamp } : draft));
+  const stored = dirty.map(({ externalText: _e, diskStamp, conflictStamp: _c, diskConflict: _d, view: _v, notice: _n, preview: _p, ...draft }) => (draft.source?.kind === 'remote' ? { ...draft, diskStamp } : draft));
   try { localStorage.setItem(storageKey, JSON.stringify(stored)); } catch { /* In-memory drafts still remain protected by close confirmation. */ }
 }
 /** Writes pending drafts now (no-op when nothing is waiting). */
@@ -530,6 +571,12 @@ useFileStore.subscribe((s, prev) => {
   if (draftTimer === null) draftTimer = setTimeout(writeDrafts, DRAFT_SAVE_MS);
 });
 writtenDrafts = useFileStore.getState().documents.filter(isFileDirty); // the restored drafts are what storage holds
+// "Open files in preview mode" switched off: the preview tab becomes a kept tab (nothing would replace it any more).
+useStore.subscribe((st, prev) => {
+  if (st.s.settings.previewTabs !== false || prev.s.settings.previewTabs === false) return;
+  const documents = keepTabs(useFileStore.getState().documents);
+  if (documents !== useFileStore.getState().documents) useFileStore.setState({ documents });
+});
 
 /** Open tabs follow renamed or moved files and folders (their text and unsaved changes stay untouched). */
 export function retargetOpenFiles(projectId: string, moves: FileMoveRecord[], replaced: string[] = []): void {

@@ -25,4 +25,6 @@ Plain `Ctrl+T`, `Ctrl+B` and `Ctrl+W` in terminals are left alone on purpose: Cl
 
 In the Files tree, `F2` renames, `Delete` moves to the trash, and `Ctrl+C` / `Ctrl+X` / `Ctrl+V` / `Ctrl+Z` / `Ctrl+A` copy, cut, paste, undo and select all.
 
+A single click on a file opens it in the preview tab (its name in italics): the next file you click replaces it instead of adding a tab. A double click on the file or on the tab, `Enter`, an edit, a save or dragging the tab keeps it open. Turn this off with **Settings → Open files in preview mode**.
+
 In an editor tab, `Ctrl+S` saves the file and **Tab** inserts indentation. The editor toolbar offers line wrapping and a close button with unsaved-change protection (save, discard or cancel).

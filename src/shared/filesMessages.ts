@@ -87,6 +87,23 @@ export const filesMessages = {
   'Wszystkie karty': ['All tabs', 'Alle Tabs', 'Todas las pestañas', 'Tous les onglets', 'Todos os separadores'],
   'Przewiń karty w lewo': ['Scroll tabs left', 'Tabs nach links scrollen', 'Desplazar pestañas a la izquierda', 'Faire défiler les onglets vers la gauche', 'Deslocar separadores para a esquerda'],
   'Przewiń karty w prawo': ['Scroll tabs right', 'Tabs nach rechts scrollen', 'Desplazar pestañas a la derecha', 'Faire défiler les onglets vers la droite', 'Deslocar separadores para a direita'],
+  // Preview tabs: a single click opens a file in the one preview tab (its title in italics), the next file replaces it.
+  'Zachowaj kartę': ['Keep open', 'Geöffnet lassen', 'Mantener abierto', 'Garder ouvert', 'Manter aberto'],
+  'Podgląd: następny kliknięty plik zastąpi tę kartę. Dwuklik zachowuje ją na stałe.': [
+    'Preview: the next file you click replaces this tab. Double-click to keep it.',
+    'Vorschau: Die nächste angeklickte Datei ersetzt diesen Tab. Doppelklick behält ihn.',
+    'Vista previa: el siguiente archivo en el que hagas clic reemplaza esta pestaña. Doble clic para conservarla.',
+    'Aperçu : le prochain fichier cliqué remplace cet onglet. Double-cliquez pour le garder.',
+    'Pré-visualização: o próximo ficheiro em que clicar substitui este separador. Duplo clique para o manter.',
+  ],
+  'Otwieraj pliki w trybie podglądu': ['Open files in preview mode', 'Dateien im Vorschaumodus öffnen', 'Abrir archivos en modo de vista previa', 'Ouvrir les fichiers en mode aperçu', 'Abrir ficheiros em modo de pré-visualização'],
+  'Pojedyncze kliknięcie pliku otwiera go w jednej karcie podglądu (nazwa kursywą), którą zastępuje kolejny kliknięty plik. Dwuklik, edycja lub zapis zachowuje kartę na stałe.': [
+    'A single click on a file opens it in one preview tab (name in italics) that the next clicked file replaces. A double click, an edit or a save keeps the tab.',
+    'Ein einfacher Klick auf eine Datei öffnet sie in einem Vorschau-Tab (Name kursiv), den die nächste angeklickte Datei ersetzt. Doppelklick, Bearbeiten oder Speichern behält den Tab.',
+    'Un clic en un archivo lo abre en una única pestaña de vista previa (nombre en cursiva), que el siguiente archivo pulsado reemplaza. Un doble clic, una edición o guardar conserva la pestaña.',
+    'Un simple clic sur un fichier l’ouvre dans un seul onglet d’aperçu (nom en italique), remplacé par le prochain fichier cliqué. Un double clic, une modification ou un enregistrement garde l’onglet.',
+    'Um clique num ficheiro abre-o num único separador de pré-visualização (nome em itálico), que o próximo ficheiro clicado substitui. Um duplo clique, uma edição ou guardar mantém o separador.',
+  ],
   'Zamknij pozostałe': ['Close others', 'Andere schließen', 'Cerrar las demás', 'Fermer les autres', 'Fechar os outros'],
   'Zamknij karty po prawej': ['Close tabs to the right', 'Tabs rechts schließen', 'Cerrar pestañas a la derecha', 'Fermer les onglets à droite', 'Fechar separadores à direita'],
   'Zamknij wszystkie pliki': ['Close all files', 'Alle Dateien schließen', 'Cerrar todos los archivos', 'Fermer tous les fichiers', 'Fechar todos os ficheiros'],
