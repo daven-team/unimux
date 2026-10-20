@@ -4,8 +4,7 @@ import type { Project, ProjectFileEntry } from '../../../shared/types';
 import { setUi, toast } from '../store';
 import { openFile, treeOpen } from '../files';
 import { openMenu } from './ContextMenu';
-import { IChevron, IFolder } from './icons';
-import { FileIcon } from './FileIcon';
+import { FileIcon, FolderIcon, TreeChevron } from './FileIcon';
 import { RefreshIcon, useHoldBusy } from './Spinner';
 import { refreshGitBadges, useGitBadgeSync, useProjectBadges } from '../git/gitBadges';
 import { badgeFor } from '../../../shared/gitBadges';
@@ -22,7 +21,7 @@ import {
 import { useTreeListings } from '../treeListings';
 import { onTurnRefresh, refreshMatches } from '../turnRefresh';
 import {
-  flattenTree, indentFor, indentGuides, scrollToShow, scrollTopForPinned, stabilizeRows, stickyIndent, stickyRows, visibleRange, type TreeRow,
+  flattenTree, indentFor, indentGuides, scrollToShow, scrollTopForPinned, stabilizeRows, stickyIndent, stickyRows, TWISTIE, visibleRange, type TreeRow,
 } from '../../../shared/treeRows';
 
 export const fullProjectPath = (root: string, relative: string) =>
@@ -30,7 +29,7 @@ export const fullProjectPath = (root: string, relative: string) =>
 
 const TREE_MIME = 'application/x-mc-tree-entries';
 /** Height of every tree row in pixels (the list is virtual: only the rows in view exist in the DOM). */
-export const TREE_ROW_HEIGHT = 24;
+export const TREE_ROW_HEIGHT = 22;
 /** Folder levels pinned at the top while scrolling. */
 const STICKY_MAX = 5;
 const OVERSCAN = 12;
@@ -87,8 +86,8 @@ function RenameRow({ entry, depth, pos, size, top, projectId, actions }: { entry
   return (
     <div className="file-entry editing" style={{ top, height: TREE_ROW_HEIGHT, paddingLeft: indentFor(depth) }} role="treeitem" aria-selected aria-level={depth + 1} aria-posinset={pos} aria-setsize={size}>
       <Guides depth={depth} />
-      {folder && <span className="tree-chevron"><IChevron /></span>}
-      {folder ? <span className="explorer-folder-icon"><IFolder /></span> : <FileIcon name={entry.name} />}
+      {folder ? <span className="tree-chevron"><TreeChevron /></span> : <span className="tree-twistie" />}
+      {folder ? <FolderIcon /> : <FileIcon name={entry.name} />}
       <input
         ref={input} className="file-rename" defaultValue={entry.name} aria-label={tr('Nowa nazwa')} aria-invalid={error ? true : undefined} title={error ?? undefined} spellCheck={false}
         onChange={() => setError(null)}
@@ -164,12 +163,11 @@ const TreeEntryRow = memo(function TreeEntryRow({ entry, depth, open, pos, size,
       }}
     >
       {!pinned && <Guides depth={depth} />}
-      {folder && <span className={`tree-chevron ${open ? 'open' : ''}`}><IChevron /></span>}
-      {folder ? <span className={`explorer-folder-icon ${open ? 'open' : ''}`}><IFolder /></span> : <FileIcon name={entry.name} />}
+      {folder ? <span className={`tree-chevron ${open ? 'open' : ''}`}><TreeChevron /></span> : <span className="tree-twistie" />}
+      {folder ? <FolderIcon open={open} dot={dot} /> : <FileIcon name={entry.name} />}
       <span className="file-name">{entry.name}</span>
       {entry.kind === 'symlink' && <span className="muted">↗</span>}
-      {letter ? <span className={`file-git git-letter ${letterClass ?? ''}`} title={letterTitle}>{letter}</span>
-        : dot ? <span className={`file-git git-dot ${dot}`} aria-hidden /> : null}
+      {letter && <span className={`file-git git-letter ${letterClass ?? ''}`} title={letterTitle}>{letter}</span>}
     </button>
   );
 });
@@ -181,7 +179,7 @@ function TreeMessageRow({ row, top, actions }: { row: Extract<TreeRow, { type: '
       : row.message === 'truncated' ? tr('Wyświetlono pierwsze 2000 elementów. Pełna lista jest w menedżerze plików.')
         : errorText(row.error ?? '');
   return (
-    <div className={`tree-message tree-row-message ${row.message === 'error' ? 'error' : ''}`} style={{ top, height: TREE_ROW_HEIGHT, paddingLeft: indentFor(row.depth) + 4 }} role="none" title={text}>
+    <div className={`tree-message tree-row-message ${row.message === 'error' ? 'error' : ''}`} style={{ top, height: TREE_ROW_HEIGHT, paddingLeft: indentFor(row.depth) + TWISTIE + 4 }} role="none" title={text}>
       <Guides depth={row.depth} />
       <span className="tree-message-text">{text}</span>
       {row.message === 'error' && <button className="btn small" onClick={() => actions.current.retry(row.dir)}>{tr('Spróbuj ponownie')}</button>}
@@ -566,7 +564,7 @@ export function ProjectExplorer({ project }: { project: Project }) {
           <button className="btn ghost icon" title={tr('Nowy plik')} aria-label={tr('Nowy plik')} onClick={() => void createEntry(project.id, targetDirectory(project.id), 'file')}><NewEntryIcon /></button>
           <button className="btn ghost icon" title={tr('Nowy folder')} aria-label={tr('Nowy folder')} onClick={() => void createEntry(project.id, targetDirectory(project.id), 'directory')}><NewEntryIcon folder /></button>
           <button className="btn ghost icon" title={tr('Odśwież pliki')} aria-label={tr('Odśwież pliki')} onClick={reload}><RefreshIcon spinning={spinning} /></button>
-          <button className="btn ghost icon" title={actionsLabel} aria-label={actionsLabel} aria-haspopup="menu" onClick={moreActions}><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="13" cy="8" r="1" /></svg></button>
+          <button className="btn ghost icon" title={actionsLabel} aria-label={actionsLabel} aria-haspopup="menu" onClick={moreActions}><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="13" cy="8" r="1" /></svg></button>
         </div>
       </div>
       <div
@@ -611,9 +609,10 @@ export function ProjectExplorer({ project }: { project: Project }) {
   );
 }
 
+/** 1 px outlines on half pixels at 16 px, so the header icons stay as thin and sharp as the tree's. */
 function NewEntryIcon({ folder = false }: { folder?: boolean }) {
-  return <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    {folder ? <path d="M8 13H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h3l2 2h5a1 1 0 0 1 1 1v2" /> : <path d="M8 14H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h5l4 4v2M9 2v4h4" />}
-    <path d="M12 10v5M9.5 12.5h5" />
+  return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeLinejoin="round" aria-hidden="true">
+    {folder ? <path d="M8.5 13.5h-7v-10h4l2 2h7v3" /> : <path d="M8.5 14.5h-5v-13h6l3 3v4M9.5 1.5v3h3" />}
+    <path d="M12.5 10v5M10 12.5h5" />
   </svg>;
 }

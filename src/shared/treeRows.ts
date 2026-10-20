@@ -148,7 +148,9 @@ export function scrollTopForPinned(index: number, depth: number, rowHeight: numb
 }
 
 /** Indentation: a full step per level up to `cap`, then a small step, and no growth at all after `cap + compressed`. */
-export const INDENT = { base: 4, step: 8, cap: 8, small: 2, compressed: 8 } as const;
+export const INDENT = { base: 6, step: 10, cap: 7, small: 2, compressed: 8 } as const;
+/** Width of the twistie slot (the chevron, or the empty space of a file row) that starts every row; guides run through its middle. */
+export const TWISTIE = 16;
 
 export function indentFor(depth: number, o: { base: number; step: number; cap: number; small: number; compressed: number } = INDENT): number {
   const d = Math.max(0, depth);
@@ -159,7 +161,7 @@ export function indentFor(depth: number, o: { base: number; step: number; cap: n
  * X positions of the indent guide lines of a row at `depth`: one per ancestor level, under that level's chevron
  * (packed closer on the compressed levels, always left of the row's own indent; equal positions are drawn once).
  */
-export function indentGuides(depth: number, chevronCenter = 5): number[] {
+export function indentGuides(depth: number, chevronCenter = TWISTIE / 2): number[] {
   const guides: number[] = [];
   for (let level = 0; level < depth; level++) {
     const x = indentFor(level + 1) - (INDENT.step - chevronCenter);

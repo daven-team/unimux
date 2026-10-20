@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectDirectory, ProjectFileEntry } from '../src/shared/types';
 import {
-  flattenTree, indentFor, indentGuides, INDENT, scrollToShow, scrollTopForPinned, shownFolders, stabilizeRows, stickyIndent, stickyRows, visibleRange, type TreeRow,
+  flattenTree, indentFor, indentGuides, INDENT, scrollToShow, scrollTopForPinned, shownFolders, stabilizeRows, stickyIndent, stickyRows, TWISTIE, visibleRange, type TreeRow,
 } from '../src/shared/treeRows';
 
 const dir = (path: string): ProjectFileEntry => ({ name: path.split('/').pop()!, path, kind: 'directory' });
@@ -193,11 +193,21 @@ describe('indentation', () => {
 
   it('draws one guide per parent level, under its chevron, never more than the distinct positions', () => {
     expect(indentGuides(0)).toEqual([]);
-    expect(indentGuides(2)).toEqual([indentFor(0) + 5, indentFor(1) + 5]);
+    expect(indentGuides(2)).toEqual([indentFor(0) + TWISTIE / 2, indentFor(1) + TWISTIE / 2]);
     expect(indentGuides(40)).toHaveLength(INDENT.cap + INDENT.compressed);
     const guides = indentGuides(12);
     expect(guides).toEqual([...guides].sort((a, b) => a - b));
     expect(guides.at(-1)!).toBeLessThan(indentFor(12));
+  });
+
+  it('keeps rows and guides on whole pixels, with room between a guide and the child row it runs past', () => {
+    for (let depth = 0; depth < 30; depth++) {
+      expect(Number.isInteger(indentFor(depth))).toBe(true);
+      expect(Number.isInteger(stickyIndent(depth))).toBe(true);
+      for (const x of indentGuides(depth)) expect(Number.isInteger(x)).toBe(true);
+    }
+    // Full levels: the parent's guide runs left of the child's twistie slot, not through it.
+    for (let level = 0; level < INDENT.cap - 1; level++) expect(indentGuides(level + 1).at(-1)!).toBeLessThan(indentFor(level + 1));
   });
 });
 

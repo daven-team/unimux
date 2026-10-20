@@ -1,20 +1,23 @@
 /* Scoped explorer and editor styling; shared shell styles remain independent. */
+/* The header reads like a pane title: the project name small and upper case, thin 16 px icon buttons. */
 .file-workspace-explorer .explorer-heading {
   min-height: 34px;
   gap: 6px;
-  padding: 3px 8px;
+  padding: 3px 8px 3px 12px;
   border: 0;
 }
 .file-workspace-explorer .explorer-heading .picon {
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
-  font-size: 11px;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 10px;
 }
 .file-workspace-explorer .explorer-project {
-  color: var(--text);
-  font-size: 11.5px;
-  font-weight: 600;
+  color: #c5cbd3;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
 }
 .explorer-heading-actions {
   display: flex;
@@ -34,8 +37,18 @@
   color: var(--text);
   background: var(--bg-hover);
 }
+.file-workspace-explorer .explorer-heading-actions svg { width: 16px; height: 16px; }
+.file-workspace-explorer .explorer-heading-actions .refresh-icon svg { stroke-width: 1.25px; }
 .file-workspace-explorer .explorer-tree { padding: 0; overflow-x: hidden; overflow-y: auto; }
-.file-workspace-explorer .file-entry { gap: 6px; }
+/* Rows: every row starts with a 16 px twistie slot (a chevron, or empty for a file) so files line up with folders; the
+   slot overlaps the gap by 2 px, leaving 4 px before the icon. Row height and offsets are whole pixels, so the icons land
+   on the pixel grid. */
+.file-workspace-explorer .file-entry { gap: 6px; padding-right: 12px; }
+.file-workspace-explorer .tree-chevron, .file-workspace-explorer .tree-twistie { flex: none; width: 16px; height: 16px; margin-right: -2px; }
+.file-workspace-explorer .tree-chevron { color: #8b939e; transform: none; }
+.file-workspace-explorer .tree-chevron.open { transform: rotate(90deg); }
+.file-workspace-explorer .file-entry:hover .tree-chevron, .file-workspace-explorer .file-entry.selected .tree-chevron { color: var(--text); }
+.file-workspace-explorer .file-rename { height: 20px; }
 /* The tree is a virtual list: fixed-height rows placed absolutely, only the rows in view exist. */
 .tree-rows { position: relative; margin-bottom: 12px; }
 .tree-rows > .file-entry, .tree-rows > .tree-row-message, .tree-sticky-rows > .file-entry { position: absolute; left: 0; right: 0; width: auto; }
@@ -46,10 +59,10 @@
 .tree-sticky-rows > .file-entry:last-child { z-index: 0; }
 .tree-sticky-rows > .file-entry:hover { background: var(--bg-hover); }
 .tree-sticky-rows > .file-entry.selected { background: color-mix(in srgb, var(--accent) 16%, var(--bg-1)); }
-/* Indent guides: one thin line per parent level (deep levels are packed closer, see shared/treeRows.ts). */
+/* Indent guides: one thin line per parent level under that level's chevron (deep levels are packed closer, see shared/treeRows.ts). */
 .tree-guides { position: absolute; top: 0; bottom: 0; left: 0; width: 0; pointer-events: none; }
-.tree-guides > span { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255, 255, 255, .09); }
-.file-entry:hover .tree-guides > span, .file-entry.selected .tree-guides > span { background: rgba(255, 255, 255, .14); }
+.tree-guides > span { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255, 255, 255, .1); }
+.file-entry:hover .tree-guides > span, .file-entry.selected .tree-guides > span { background: rgba(255, 255, 255, .17); }
 .tree-row-message { display: flex; align-items: center; gap: 8px; padding-top: 0; padding-bottom: 0; white-space: nowrap; overflow: hidden; }
 .tree-row-message.error { flex-direction: row; align-items: center; }
 .tree-row-message .tree-message-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -62,9 +75,18 @@
   height: 16px;
   flex: none;
 }
-.file-type-icon svg { display: block; flex: none; }
-.explorer-folder-icon { color: #c6a878; }
-.explorer-folder-icon.open { color: #dec394; }
+.file-type-icon svg, .explorer-folder-icon svg { display: block; flex: none; }
+.explorer-folder-icon { color: #a9b1bc; }
+.explorer-folder-icon.open { color: #c3cad3; }
+/* Git change inside a folder: a dot on the folder's corner (colours of .git-dot). */
+.folder-dot { fill: var(--muted); }
+.folder-dot.add { fill: #4ade80; }
+.folder-dot.mod { fill: #f5b942; }
+.folder-dot.del { fill: #f87171; }
+.folder-dot.ren { fill: #60a5fa; }
+/* File tabs: the icon at the 16 px it is drawn for (a smaller box would scale it and blur it). */
+.workspace-tabs .tab-type-icon:has(> .file-type-icon) { width: 16px; height: 16px; }
+.workspace-tabs .tab-type-icon .file-type-icon svg { width: 16px; height: 16px; }
 .files-panel > .side-footer { border-top: 0; }
 
 .file-workspace-editor {
