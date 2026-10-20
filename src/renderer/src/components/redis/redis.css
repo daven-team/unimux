@@ -15,10 +15,11 @@
 .redis-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 10px; background: var(--bg-3); border: 1px solid var(--border-2); color: var(--text-2); font-size: 11px; white-space: nowrap; flex: none; }
 .redis-chip.warn { color: var(--working); border-color: #5a4a1e; background: #2a2210; }
 .redis-chip.ok { color: var(--waiting); border-color: #1f4a30; background: #11261a; }
-.redis-views { display: flex; gap: 2px; padding: 2px; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; flex: none; }
-.redis-view-btn { height: 24px; padding: 0 11px; border: 0; border-radius: 5px; background: transparent; color: var(--text-2); font-size: 12px; cursor: pointer; }
+/* The view switcher: a plain segmented control, the view in front lighter (no coloured line under a rounded button). */
+.redis-views { display: flex; gap: 2px; padding: 2px; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; flex: none; }
+.redis-view-btn { height: 24px; padding: 0 11px; border: 0; border-radius: 3px; background: transparent; color: var(--text-2); font-size: 12px; cursor: pointer; }
 .redis-view-btn:hover { color: var(--text); background: var(--bg-hover); }
-.redis-view-btn.on { background: var(--bg-3); color: var(--text); box-shadow: inset 0 -2px 0 var(--conn-color); }
+.redis-view-btn.on { background: #ffffff17; color: var(--text); }
 
 .redis-center { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; min-height: 0; text-align: center; }
 .redis-connecting { display: flex; align-items: center; gap: 8px; }
