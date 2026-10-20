@@ -4,7 +4,8 @@ import './file-workspace.css';
 
 // Every glyph is drawn for a 16 px box at 1:1 (never scaled): fills sit on whole pixels and 1 px outlines on half
 // pixels, so the straight edges stay sharp; only diagonals and curves are anti-aliased. Letters come from a small pixel
-// font (2 px strokes) instead of SVG text, which blurs at these sizes.
+// font (2 px strokes) instead of SVG text, which blurs at these sizes. Outlines set their own stroke width, so a host's
+// `svg { stroke-width }` rule (the SFTP list thins its icons that way) cannot thicken them off the grid.
 
 const BLUE = '#4f9fe3', CYAN = '#5ccfe6', YELLOW = '#e6cf4f', AMBER = '#e2b34a', ORANGE = '#e8804a', RED = '#e8634f';
 const GREEN = '#8bc46a', PURPLE = '#b48ae0', PINK = '#e7739f', GREY = '#9aa4b2', BROWN = '#c49a6c';
@@ -65,7 +66,7 @@ const braces = () => pixels(pixelPath(['..###', '.####', '.##..', '.##..', '##..
 const hash = () => pixels(pixelPath(['..##..##..', '..##..##..', '##########', '##########', '..##..##..', '..##..##..', '##########', '##########', '..##..##..', '..##..##..'], 3, 3));
 const terminal = () => <><path d="M2 4h2.5l4 4-4 4H2l4-4z" />{pixels(pixelPath(['######', '######'], 9, 11))}</>;
 const atom = () => <>
-  <g fill="none" stroke="currentColor">
+  <g fill="none" stroke="currentColor" strokeWidth="1">
     <ellipse cx="8" cy="8" rx="6.5" ry="2.5" />
     <ellipse cx="8" cy="8" rx="6.5" ry="2.5" transform="rotate(60 8 8)" />
     <ellipse cx="8" cy="8" rx="6.5" ry="2.5" transform="rotate(120 8 8)" />
@@ -154,7 +155,7 @@ const GLYPHS: Record<FileIconId, Glyph> = {
       <path d="M1 8h12.3c.3-1 1.1-1.5 2.2-1.2-.2 1-.8 1.5-1.6 1.8C13.2 11.8 10.6 13.5 7 13.5 3.6 13.5 1.6 11.6 1 8z" />
     </>,
   },
-  license: { color: '#c5cbd3', body: () => <><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" />{strokes('M10.1 6.2a2.75 2.75 0 1 0 0 3.6', 1.5)}</> },
+  license: { color: '#c5cbd3', body: () => <><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1" />{strokes('M10.1 6.2a2.75 2.75 0 1 0 0 3.6', 1.5)}</> },
   git: {
     color: RED,
     body: (id) => <>
@@ -211,7 +212,7 @@ export function FolderIcon({ open = false, dot }: { open?: boolean; dot?: string
     <span className={`explorer-folder-icon ${open ? 'open' : ''}`} aria-hidden="true">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeLinejoin="round">
         {dot && <mask id={maskId}><rect width="16" height="16" fill="#fff" stroke="none" /><circle cx="13" cy="12" r="3.5" fill="#000" stroke="none" /></mask>}
-        <path d={open ? FOLDER_OPEN : FOLDER} mask={dot ? `url(#${maskId})` : undefined} />
+        <path d={open ? FOLDER_OPEN : FOLDER} strokeWidth="1" mask={dot ? `url(#${maskId})` : undefined} />
         {dot && <circle className={`folder-dot ${dot}`} cx="13" cy="12" r="2.25" stroke="none" />}
       </svg>
     </span>

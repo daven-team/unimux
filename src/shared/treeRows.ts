@@ -1,6 +1,7 @@
 // The project tree as a flat list of fixed-height rows (only the rows in view are rendered), the folder rows pinned at
 // the top while scrolling (sticky scroll) and the indentation of deep levels. Pure functions, no DOM.
 import type { ProjectDirectory, ProjectFileEntry } from './types';
+import { IGNORED_FOLDERS } from './search';
 
 export type TreeMessage = 'loading' | 'empty' | 'error' | 'truncated';
 
@@ -88,6 +89,18 @@ export function shownFolders(expanded: Iterable<string>): string[] {
     if (visible) shown.push(path);
   }
   return shown;
+}
+
+/**
+ * Whether the row at `index` is a dependency or build output folder (node_modules, out, release: IGNORED_FOLDERS) or lies
+ * inside one; the tree dims those. Folder names only, the project's .gitignore is not read.
+ */
+export function inIgnoredFolder(rows: readonly TreeRow[], index: number, names: ReadonlySet<string> = IGNORED_FOLDERS): boolean {
+  for (let i = index; i >= 0 && i < rows.length; i = rows[i].parent) {
+    const row = rows[i];
+    if (row.type === 'entry' && row.entry.kind === 'directory' && names.has(row.entry.name)) return true;
+  }
+  return false;
 }
 
 export interface StickyRows {

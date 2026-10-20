@@ -51,6 +51,23 @@ describe('file icon mapping', () => {
     expect(fileIconId('licenses.ts')).toBe('ts');
   });
 
+  it('lets a known extension win over the names with a free suffix (LICENSE-MIT, Dockerfile.dev, .env.local)', () => {
+    const cases: [string, FileIconId][] = [
+      ['license.ts', 'ts'], ['src/licence.tsx', 'tsx'], ['license-checker.config.js', 'js'], ['LICENSE.json', 'json'],
+      ['Dockerfile.ts', 'ts'], ['.env.d.ts', 'ts'], ['.env.sh', 'shell'],
+      ['LICENSE.txt', 'license'], ['LICENSE-APACHE', 'license'], ['COPYING.LESSER', 'license'], ['license.rst', 'license'],
+      ['Dockerfile.prod', 'docker'], ['Containerfile', 'docker'], ['api.dockerfile', 'docker'], ['.env.development.local', 'env'],
+    ];
+    for (const [name, id] of cases) expect(fileIconId(name), name).toBe(id);
+  });
+
+  it('never answers with an Object.prototype member (constructor, __proto__)', () => {
+    for (const name of ['constructor', 'Constructor', '__proto__', 'a.constructor', 'a.__proto__', 'toString', 'a.hasOwnProperty', 'x/valueOf']) {
+      expect(fileIconId(name), name).toBe('file');
+      expect(render(mod.FileIcon, { name }), name).toContain('data-icon="file"');
+    }
+  });
+
   it('falls back to the plain file for unknown, missing and dot-only extensions', () => {
     for (const name of ['bash.exe.stackdump', 'README', 'archive.unknownext', '', '.', 'name.']) expect(fileIconId(name)).toBe('file');
   });
@@ -82,16 +99,28 @@ describe('FileIcon glyphs', () => {
     expect(html).not.toMatch(/<text|<image|font-size/i);
     // The pixel-grid shapes use whole-pixel coordinates only.
     for (const [, d] of html.matchAll(/<path d="([^"]+)"[^>]*shape-rendering="crispEdges"/g)) expect(d).toMatch(/^[MhvzZ\d -]+$/);
+    // Every outline names its width (a host's `svg { stroke-width }` rule must not thicken it).
+    for (const [tag] of html.matchAll(/<[a-z]+ [^>]*stroke="currentColor"[^>]*>/g)) expect(tag).toMatch(/stroke-width="/);
   });
 
-  it('no two icons are drawn the same', () => {
+  it('no two icons render identically (shape and colour together)', () => {
     const drawn = new Map<string, FileIconId>();
     for (const id of FILE_ICON_IDS) {
       const html = render(mod.FileTypeIcon, { id }).replace(/data-icon="[a-z]+"/, '').replace(/id="[^"]*"|url\(#[^)]*\)/g, '');
       const same = drawn.get(html);
-      expect(same, `${id} is drawn exactly like ${same}`).toBeUndefined();
+      expect(same, `${id} renders exactly like ${same}`).toBeUndefined();
       drawn.set(html, id);
     }
+  });
+
+  it('icons share a shape only within the families told apart by colour', () => {
+    const shapes = new Map<string, FileIconId[]>();
+    for (const id of FILE_ICON_IDS) {
+      const svg = /<svg[\s\S]*<\/svg>/.exec(render(mod.FileTypeIcon, { id }))![0].replace(/id="[^"]*"|url\(#[^)]*\)/g, '');
+      shapes.set(svg, [...(shapes.get(svg) ?? []), id]);
+    }
+    const shared = [...shapes.values()].filter((ids) => ids.length > 1).map((ids) => ids.join(' '));
+    expect(shared.sort()).toEqual(['css scss less', 'markdown mdx', 'shell powershell batch', 'svg image', 'toml config env make', 'tsx jsx'].sort());
   });
 
   it('FileIcon draws the icon of the name', () => {
@@ -106,6 +135,7 @@ describe('FileIcon glyphs', () => {
     expect(open).toContain('class="explorer-folder-icon open"');
     expect(closed).not.toBe(open.replace(' open"', ' "'));
     expect(closed).not.toContain('<mask');
+    expect(closed).toMatch(/<path d="[^"]+" stroke-width="1"/);
     const dotted = render(mod.FolderIcon, { dot: 'mod' });
     expect(dotted).toContain('class="folder-dot mod"');
     const mask = /<mask id="([^"]+)"/.exec(dotted)?.[1];

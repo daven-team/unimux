@@ -9,9 +9,10 @@ export const FILE_ICON_IDS = [
 ] as const;
 export type FileIconId = (typeof FILE_ICON_IDS)[number];
 
-const ids = (map: Record<string, string>): Record<string, FileIconId> => {
-  const out: Record<string, FileIconId> = {};
-  for (const [id, keys] of Object.entries(map)) for (const key of keys.split(' ')) out[key] = id as FileIconId;
+/** Keys by icon: a Map, so a file named `constructor` or `__proto__` finds nothing instead of an Object.prototype member. */
+const ids = (map: Partial<Record<FileIconId, string>>): ReadonlyMap<string, FileIconId> => {
+  const out = new Map<string, FileIconId>();
+  for (const [id, keys] of Object.entries(map)) for (const key of keys?.split(' ') ?? []) out.set(key, id as FileIconId);
   return out;
 };
 
@@ -48,17 +49,20 @@ const BY_EXTENSION = ids({
 /** The icon of a file: its name or path (either separator), case-insensitive. */
 export function fileIconId(name: string): FileIconId {
   const base = name.split(/[\\/]/).pop()?.toLowerCase() ?? '';
-  const named = BY_NAME[base];
+  const named = BY_NAME.get(base);
   if (named) return named;
-  if (base === '.env' || base.startsWith('.env.')) return 'env';
+  const dot = base.lastIndexOf('.');
+  const byExtension = dot >= 0 ? BY_EXTENSION.get(base.slice(dot + 1)) : undefined;
   if (/^tsconfig(\..+)?\.json$/.test(base)) return 'tsconfig';
   if (/^jsconfig(\..+)?\.json$/.test(base)) return 'jsconfig';
   if (/^vite\.config\.[cm]?[jt]s$/.test(base)) return 'vite';
   if (/^vitest\.(config|workspace)\.[cm]?[jt]s$/.test(base)) return 'vitest';
-  if (/^(docker|container)file([.-].+)?$/.test(base) || /^(docker-)?compose(\..+)?\.ya?ml$/.test(base)) return 'docker';
-  if (/^(licen[cs]e|copying|unlicense)([.-].+)?$/.test(base)) return 'license';
-  const dot = base.lastIndexOf('.');
-  return (dot >= 0 && BY_EXTENSION[base.slice(dot + 1)]) || 'file';
+  if (/^(docker-)?compose(\..+)?\.ya?ml$/.test(base)) return 'docker';
+  // Names with a free suffix (.env.local, Dockerfile.dev, LICENSE-MIT) yield to a known extension: license.ts is TypeScript.
+  if (base.startsWith('.env.') && !byExtension) return 'env';
+  if (/^(docker|container)file([.-].+)?$/.test(base) && (!byExtension || byExtension === 'docker')) return 'docker';
+  if (/^(licen[cs]e|copying|unlicense)([.-].+)?$/.test(base) && (!byExtension || byExtension === 'text' || byExtension === 'markdown')) return 'license';
+  return byExtension ?? 'file';
 }
 
 /**

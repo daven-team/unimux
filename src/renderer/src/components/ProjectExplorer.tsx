@@ -21,7 +21,7 @@ import {
 import { useTreeListings } from '../treeListings';
 import { onTurnRefresh, refreshMatches } from '../turnRefresh';
 import {
-  flattenTree, indentFor, indentGuides, scrollToShow, scrollTopForPinned, stabilizeRows, stickyIndent, stickyRows, TWISTIE, visibleRange, type TreeRow,
+  flattenTree, inIgnoredFolder, indentFor, indentGuides, scrollToShow, scrollTopForPinned, stabilizeRows, stickyIndent, stickyRows, TWISTIE, visibleRange, type TreeRow,
 } from '../../../shared/treeRows';
 
 export const fullProjectPath = (root: string, relative: string) =>
@@ -117,6 +117,8 @@ interface RowProps {
   selected: boolean;
   cut: boolean;
   dropTarget: boolean;
+  /** A dependency or build output folder, or inside one: drawn dimmed. */
+  ignored: boolean;
   letter?: string;
   letterClass?: string;
   letterTitle?: string;
@@ -126,13 +128,13 @@ interface RowProps {
   actions: React.MutableRefObject<RowActions>;
 }
 
-const TreeEntryRow = memo(function TreeEntryRow({ entry, depth, open, pos, size, index, top, selected, cut, dropTarget, letter, letterClass, letterTitle, dot, sticky, actions }: RowProps) {
+const TreeEntryRow = memo(function TreeEntryRow({ entry, depth, open, pos, size, index, top, selected, cut, dropTarget, ignored, letter, letterClass, letterTitle, dot, sticky, actions }: RowProps) {
   const folder = entry.kind === 'directory';
   const pinned = sticky !== undefined;
   // Pinned copies are mouse shortcuts only: hidden from assistive technology (the real row is in the tree).
   return (
     <button
-      className={`file-entry ${folder ? 'folder' : ''} ${selected ? 'selected' : ''} ${cut ? 'cut' : ''} ${dropTarget ? 'drop-target' : ''}`}
+      className={`file-entry ${folder ? 'folder' : ''} ${selected ? 'selected' : ''} ${cut ? 'cut' : ''} ${dropTarget ? 'drop-target' : ''} ${ignored ? 'ignored' : ''}`}
       role={pinned ? undefined : 'treeitem'}
       aria-expanded={folder && !pinned ? open : undefined}
       aria-selected={pinned ? undefined : selected}
@@ -549,7 +551,7 @@ export function ProjectExplorer({ project }: { project: Project }) {
     return (
       <TreeEntryRow
         key={path} entry={row.entry} depth={row.depth} open={row.open} pos={row.pos} size={row.size} index={i} top={top} actions={actionsRef} sticky={position}
-        selected={selected.has(path)} cut={cut.has(path)} dropTarget={dropTarget === path}
+        selected={selected.has(path)} cut={cut.has(path)} dropTarget={dropTarget === path} ignored={inIgnoredFolder(rows, i)}
         letter={mark.letter?.letter} letterClass={mark.letter?.cls} letterTitle={mark.letter ? tr(mark.letter.title) : undefined} dot={mark.dot}
       />
     );

@@ -49,6 +49,10 @@
 .file-workspace-explorer .tree-chevron.open { transform: rotate(90deg); }
 .file-workspace-explorer .file-entry:hover .tree-chevron, .file-workspace-explorer .file-entry.selected .tree-chevron { color: var(--text); }
 .file-workspace-explorer .file-rename { height: 20px; }
+/* Dependency and build output folders (node_modules, out, release) and what is inside them: dimmed, as in Cursor. */
+.file-workspace-explorer .file-entry.ignored { color: var(--muted); }
+.file-workspace-explorer .file-entry.ignored:is(:hover, :focus-visible, .selected) { color: var(--text-2); }
+.file-workspace-explorer .file-entry.ignored :is(.file-type-icon, .explorer-folder-icon) { opacity: .6; }
 /* The tree is a virtual list: fixed-height rows placed absolutely, only the rows in view exist. */
 .tree-rows { position: relative; margin-bottom: 12px; }
 .tree-rows > .file-entry, .tree-rows > .tree-row-message, .tree-sticky-rows > .file-entry { position: absolute; left: 0; right: 0; width: auto; }
