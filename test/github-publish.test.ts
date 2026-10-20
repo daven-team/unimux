@@ -5,15 +5,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  folderBaseName, isGithubPage, isValidRepoName, sanitizeRepoName, validatePublishRequest, type GithubPublishRequest,
+  folderBaseName, GITHUB_DEVICE_SCOPE, INVALID_NAME, isGithubPage, isValidRepoName, sanitizeRepoName, validatePublishRequest, type GithubPublishRequest,
 } from '../src/shared/github';
 import { redactSecrets } from '../src/shared/git';
+import { messages } from '../src/shared/messages';
 import {
   createRepo, devicePollStep, ERR, fetchLogin, mapCreateRepoError, pollDeviceToken, requestDeviceCode, TOKEN_URL,
   type FetchLike, type FetchResponse,
 } from '../src/main/github/api';
 import { GithubAuth, type ExecFile } from '../src/main/github/auth';
-import { GITHUB_HEADER_KEY, githubAuthRefused, githubGitEnv } from '../src/main/github/gitEnv';
+import { GITHUB_HEADER_KEY, GITHUB_HELPER_KEY, githubAuthRefused, githubGitEnv, githubTokenRefused, workflowScopeRefused } from '../src/main/github/gitEnv';
 import { createGithubHandlers, GITHUB_CHANNELS, registerGithubIpc } from '../src/main/github/ipc';
 import { createPublisher, PUBLISH_ERR } from '../src/main/github/publish';
 import { GithubTokenStore } from '../src/main/github/tokenStore';
@@ -97,11 +98,15 @@ describe('publish request validation', () => {
 });
 
 describe('the token in git’s environment', () => {
-  it('is one header for https://github.com/ in GIT_CONFIG_*, never an argument', () => {
+  it('is one header for https://github.com/ in GIT_CONFIG_*, never an argument, with the user’s helpers off for github.com', () => {
     const env = githubGitEnv(TOKEN);
-    expect(env.GIT_CONFIG_COUNT).toBe('1');
+    expect(env.GIT_CONFIG_COUNT).toBe('2');
     expect(env.GIT_CONFIG_KEY_0).toBe(GITHUB_HEADER_KEY);
     expect(GITHUB_HEADER_KEY).toBe('http.https://github.com/.extraheader');
+    // An empty helper empties git's list for github.com: a refused header can never make git erase the user's credential.
+    expect(env.GIT_CONFIG_KEY_1).toBe(GITHUB_HELPER_KEY);
+    expect(GITHUB_HELPER_KEY).toBe('credential.https://github.com.helper');
+    expect(env.GIT_CONFIG_VALUE_1).toBe('');
     const [, scheme, value] = /^(AUTHORIZATION: basic) (\S+)$/.exec(env.GIT_CONFIG_VALUE_0)!;
     expect(scheme).toBe('AUTHORIZATION: basic');
     expect(Buffer.from(value, 'base64').toString('utf8')).toBe(`x-access-token:${TOKEN}`);
@@ -126,6 +131,33 @@ describe('the token in git’s environment', () => {
     expect(githubAuthRefused("fatal: Authentication failed for 'https://gitlab.com/a/b.git/'")).toBe(false);
     expect(githubAuthRefused("fatal: unable to access 'https://github.com/a/b.git/': Could not resolve host: github.com")).toBe(false);
     expect(githubAuthRefused(' ! [rejected]        main -> main (fetch first)')).toBe(false);
+    // What git says after a 401 to our header (no helper, no prompt): the address has no path there.
+    expect(githubAuthRefused("fatal: could not read Username for 'https://github.com': terminal prompts disabled")).toBe(true);
+    expect(githubAuthRefused("fatal: could not read Username for 'https://github.com.evil.io': terminal prompts disabled")).toBe(false);
+    expect(githubAuthRefused("fatal: Authentication failed for 'https://github.company.io/a/b.git/'")).toBe(false);
+    // A token without the "workflow" permission: the user's own credentials may have it.
+    const workflow = "To https://github.com/a/b.git\n ! [remote rejected] main -> main (refusing to allow an OAuth App to create or update workflow `.github/workflows/ci.yml` without `workflow` scope)\nerror: failed to push some refs to 'https://github.com/a/b.git'";
+    expect(githubAuthRefused(workflow)).toBe(true);
+    expect(workflowScopeRefused(workflow)).toBe(true);
+    expect(workflowScopeRefused('remote: Permission denied')).toBe(false);
+  });
+
+  it('tells a dead token (401) from one refused for a single repository', () => {
+    expect(githubTokenRefused("fatal: could not read Username for 'https://github.com': terminal prompts disabled")).toBe(true);
+    expect(githubTokenRefused("remote: Invalid username or token.\nfatal: Authentication failed for 'https://github.com/a/b.git/'")).toBe(true);
+    expect(githubTokenRefused("remote: Repository not found.\nfatal: repository 'https://github.com/a/b.git/' not found")).toBe(false);
+    expect(githubTokenRefused("fatal: unable to access 'https://github.com/a/b.git/': The requested URL returned error: 403")).toBe(false);
+    expect(githubTokenRefused("fatal: could not read Username for 'https://gitlab.com': terminal prompts disabled")).toBe(false);
+  });
+});
+
+describe('messages', () => {
+  it('every message main sends for publishing is translated', () => {
+    for (const key of [...Object.values(ERR), ...Object.values(PUBLISH_ERR), INVALID_NAME]) expect(Object.hasOwn(messages, key), key).toBe(true);
+  });
+
+  it('the device flow asks for "repo" only', () => {
+    expect(GITHUB_DEVICE_SCOPE).toBe('repo');
   });
 });
 
@@ -153,7 +185,7 @@ describe('GitHub answers to "create repository"', () => {
     expect(calls[0].url).not.toContain(TOKEN);
 
     const odd = fakeFetch([{ status: 201, body: { ...created, clone_url: 'https://evil.example/x.git' } }]);
-    expect(await createRepo(odd.fetch, TOKEN, { name: 'unimux', private: true })).toMatchObject({ ok: false, code: 'failed' });
+    expect(await createRepo(odd.fetch, TOKEN, { name: 'unimux', private: true })).toEqual({ ok: false, code: 'failed', error: ERR.failed });
     const offline = fakeFetch(['offline']);
     expect(await createRepo(offline.fetch, TOKEN, { name: 'unimux', private: false })).toEqual({ ok: false, code: 'network', error: ERR.network });
   });
@@ -320,6 +352,79 @@ describe('sign-in order', () => {
     expect(existsSync(join(dir, `token-${stores}.json`))).toBe(false);
   });
 
+  it('the dialog’s status checks a stored token with GitHub and forgets a dead one', async () => {
+    const dead = setup({ gh: 'missing', answers: [{ status: 401, body: { message: 'Bad credentials' } }] });
+    dead.store.set(TOKEN, 'ajzak');
+    expect(await dead.auth.status()).toMatchObject({ signedIn: false, source: null, login: null });
+    expect(dead.calls[0]).toMatchObject({ url: 'https://api.github.com/user', headers: { Authorization: `Bearer ${TOKEN}` } });
+    expect(dead.store.get()).toBeNull();
+
+    // Then the GitHub CLI's sign-in takes over.
+    const cli = setup({ gh: 'gho_fromGitHubCli0000000000000000000000', answers: [{ status: 401, body: {} }, { status: 200, body: { login: 'cli-user' } }] });
+    cli.store.set(TOKEN, 'ajzak');
+    expect(await cli.auth.status()).toMatchObject({ signedIn: true, source: 'gh', login: 'cli-user' });
+
+    // A live one shows GitHub's current name, asked once for a few minutes.
+    const live = setup({ answers: [{ status: 200, body: { login: 'renamed' } }] });
+    live.store.set(TOKEN, 'ajzak');
+    expect(await live.auth.status()).toMatchObject({ signedIn: true, source: 'stored', login: 'renamed' });
+    expect(await live.auth.status()).toMatchObject({ signedIn: true, source: 'stored', login: 'renamed' });
+    expect(live.calls).toHaveLength(1);
+    // The quick status of the panel's menu never asks.
+    expect(await live.auth.status(true)).toMatchObject({ signedIn: true, source: 'stored', login: 'ajzak' });
+    expect(live.calls).toHaveLength(1);
+  });
+
+  it('a refused fetch, pull or push has the stored token checked: a dead one is forgotten, at most once a minute', async () => {
+    const dead = setup({ answers: [{ status: 401, body: {} }] });
+    dead.store.set(TOKEN, 'ajzak');
+    await dead.auth.checkStored();
+    expect(dead.store.get()).toBeNull();
+
+    const live = setup({ answers: [{ status: 200, body: { login: 'ajzak' } }, { status: 401, body: {} }] });
+    live.store.set(TOKEN, 'ajzak');
+    await Promise.all([live.auth.checkStored(), live.auth.checkStored()]);
+    await live.auth.checkStored();
+    expect(live.calls).toHaveLength(1);
+    expect(live.store.get()).toBe(TOKEN);
+
+    // Offline: nothing is known, the token stays.
+    const offline = setup({ answers: ['offline'] });
+    offline.store.set(TOKEN, 'ajzak');
+    await offline.auth.checkStored();
+    expect(offline.store.get()).toBe(TOKEN);
+    // Without a stored token there is nothing to ask.
+    const none = setup();
+    await none.auth.checkStored();
+    expect(none.calls).toEqual([]);
+  });
+
+  it('device flow: a double start polls one code only, a sign-out drops a start still waiting for its code', async () => {
+    const { auth, calls } = setup({
+      clientId: 'Iv1.abc',
+      answers: [
+        { status: 200, body: { device_code: 'd1', user_code: 'AAAA-1111', verification_uri: 'https://github.com/login/device', expires_in: 900, interval: 5 } },
+        { status: 200, body: { device_code: 'd2', user_code: 'BBBB-2222', verification_uri: 'https://github.com/login/device', expires_in: 900, interval: 5 } },
+        { status: 200, body: { access_token: TOKEN } },
+        { status: 200, body: { login: 'ajzak' } },
+      ],
+    });
+    const [first, second] = await Promise.all([auth.startDevice(), auth.startDevice()]);
+    expect(first).toEqual({ ok: false, code: 'cancelled', error: ERR.cancelled });
+    if (!second.ok) throw new Error('expected a code');
+    expect(second.data.userCode).toBe('BBBB-2222');
+    expect(await auth.waitDevice(second.data.flowId)).toEqual({ ok: true, data: { login: 'ajzak' } });
+    const polls = calls.filter((c) => c.url === TOKEN_URL);
+    expect(polls).toHaveLength(1);
+    expect(new URLSearchParams(polls[0].body).get('device_code')).toBe('d2');
+
+    const late = setup({ clientId: 'Iv1.abc', answers: [{ status: 200, body: { device_code: 'd', user_code: 'CCCC-3333', verification_uri: 'https://github.com/login/device', expires_in: 900, interval: 5 } }] });
+    const pending = late.auth.startDevice();
+    await late.auth.signOut();
+    expect(await pending).toMatchObject({ ok: false, code: 'cancelled' });
+    expect(late.calls.filter((c) => c.url === TOKEN_URL)).toEqual([]);
+  });
+
   it('device flow: hidden without a client id, stores the token it gets', async () => {
     expect(await setup().auth.startDevice()).toMatchObject({ ok: false, code: 'no-client' });
     const { auth, store } = setup({
@@ -404,6 +509,10 @@ describe('publishing', () => {
       .toEqual({ ok: false, code: 'push-failed', error: PUBLISH_ERR.pushFailed, detail: 'remote: Permission denied', url: 'https://github.com/ajzak/unimux' });
     expect(await setup({ push: 'remote-error' }).publish('/p', '/p', req))
       .toMatchObject({ ok: false, code: 'remote-failed', error: PUBLISH_ERR.remoteFailed, url: 'https://github.com/ajzak/unimux' });
+    // A push refused for workflow files says why (the device-flow sign-in has no "workflow" permission).
+    const workflow = "To https://github.com/ajzak/unimux.git\n ! [remote rejected] main -> main (refusing to allow an OAuth App to create or update workflow `.github/workflows/ci.yml` without `workflow` scope)";
+    expect(await setup({ push: { pushed: false, message: workflow } }).publish('/p', '/p', req))
+      .toEqual({ ok: false, code: 'push-failed', error: PUBLISH_ERR.workflowScope, detail: workflow, url: 'https://github.com/ajzak/unimux' });
   });
 
   it('runs one publish per repository at a time', async () => {

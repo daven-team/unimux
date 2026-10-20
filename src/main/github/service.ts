@@ -37,6 +37,8 @@ export function createGithubService(deps: GithubServiceDeps) {
       const token = store.get();
       return token ? githubGitEnv(token) : null;
     },
+    /** GitHub refused that header as a whole: it is checked with GitHub, and forgotten when GitHub no longer accepts it. */
+    remoteAuthRefused: (): void => { void auth.checkStored(); },
     handlers: (git: Git, project: Pick<GithubHandlerDeps, 'projectPath' | 'worktreePaths'>): GithubHandlers =>
       createGithubHandlers({ auth, git, publish: createPublisher({ git, auth, fetch: deps.fetch }), ...project }),
   };

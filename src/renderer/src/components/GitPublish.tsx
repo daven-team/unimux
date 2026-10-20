@@ -25,21 +25,22 @@ export function CloudUploadIcon() {
   );
 }
 
-/** Takes the Commit button's place while there is nothing to commit and the repository has no remote. */
+/**
+ * Takes the Commit button's place (GitChanges' commitSlot, under the message box) while there is nothing to commit and the
+ * repository has no remote. The classes are the Commit button's.
+ */
 export function GitPublishButton({ disabled, onClick }: { disabled: boolean; onClick(): void }) {
   const { tr } = useI18n();
   return (
-    <div className="git-commit-box git-publish-box">
-      <button className="btn small primary" disabled={disabled} onClick={onClick} title={tr('Utwórz repozytorium na GitHubie i wyślij do niego tę gałąź')}>
-        <CloudUploadIcon />{tr('Opublikuj na GitHubie')}
-      </button>
-    </div>
+    <button className="btn small primary" disabled={disabled} onClick={onClick} title={tr('Utwórz repozytorium na GitHubie i wyślij do niego tę gałąź')}>
+      <CloudUploadIcon />{tr('Opublikuj na GitHubie')}
+    </button>
   );
 }
 
 interface Options {
   projectId: string;
-  /** The folder the repository name is suggested from (the shown worktree or the project folder). */
+  /** The folder the repository name is suggested from: the project folder (a worktree shares its repository). */
   folder: string;
   branch: string | null;
   opts: { worktree?: string };
@@ -112,6 +113,9 @@ function PublishDialog({ projectId, defaultName, branch, opts, onClose, onChange
   const [result, setResult] = useState<GithubPublishResult | null>(null);
   /** The repository was created although a later step failed: publishing again would only meet the new remote. */
   const [created, setCreated] = useState(false);
+  /** The device flow is being started (main asks GitHub for a code): the sign-in button waits, so a double click starts one flow. */
+  const [starting, setStarting] = useState(false);
+  const startingNow = useRef(false);
   const alive = useRef(true);
   const flow = useRef<string | null>(null);
 
@@ -145,12 +149,19 @@ function PublishDialog({ projectId, defaultName, branch, opts, onClose, onChange
   const failure = (res: Exclude<GithubResult<unknown>, { ok: true }>): Problem => ({ error: res.error, ...(res.detail ? { detail: res.detail } : {}), ...(res.url ? { url: res.url } : {}) });
 
   const signIn = async () => {
+    if (startingNow.current) return;
+    startingNow.current = true;
+    setStarting(true);
     setProblem(null);
     setCopied(false);
     try {
-      const started = await window.mc.github.deviceStart();
+      const started = await window.mc.github.deviceStart().finally(() => {
+        startingNow.current = false;
+        if (alive.current) setStarting(false);
+      });
       if (!alive.current) { if (started.ok) void window.mc.github.deviceCancel(started.data.flowId); return; }
-      if (!started.ok) { setProblem(failure(started)); return; }
+      // "cancelled": a newer start replaced this one in main.
+      if (!started.ok) { if (started.code !== 'cancelled') setProblem(failure(started)); return; }
       flow.current = started.data.flowId;
       setDevice(started.data);
       setPhase('device');
@@ -229,7 +240,9 @@ function PublishDialog({ projectId, defaultName, branch, opts, onClose, onChange
         <span>{tr('Nie jesteś zalogowany do GitHuba.')}</span>
         {auth?.deviceFlow ? (
           <div className="gh-publish-actions">
-            <button className="btn small primary" onClick={() => void signIn()}>{tr('Zaloguj się do GitHuba')}</button>
+            <button className="btn small primary" disabled={starting} aria-busy={starting} onClick={() => void signIn()}>
+              {starting && <RefreshIcon spinning />}{tr('Zaloguj się do GitHuba')}
+            </button>
             {auth.storage === 'unavailable' && <span className="muted gh-publish-small">{tr('Logowanie zostanie zapamiętane tylko do zamknięcia aplikacji (szyfrowanie systemowe jest niedostępne).')}</span>}
           </div>
         ) : (
@@ -245,9 +258,10 @@ function PublishDialog({ projectId, defaultName, branch, opts, onClose, onChange
     );
   })();
 
+  // The detail is a message of ours (git's refusals, translated here) or git's or GitHub's own text (left as it is).
   const problemBox = problem && (
     <div className="gh-publish-error" role="alert">
-      <span>{errorText(problem.error)}{problem.detail ? ` (${problem.detail})` : ''}</span>
+      <span>{errorText(problem.error)}{problem.detail ? ` (${errorText(problem.detail)})` : ''}</span>
       {problem.url && <button className="btn small" onClick={() => window.mc.openExternal(problem.url!)}>{tr('Otwórz na GitHubie')}</button>}
     </div>
   );
@@ -273,7 +287,11 @@ function PublishDialog({ projectId, defaultName, branch, opts, onClose, onChange
   } else {
     body = (
       <>
-        <p className="muted gh-publish-lead">{tr('Na Twoim koncie GitHub powstanie nowe repozytorium. Gałąź {branch} zostanie do niego wysłana i będzie je śledzić.', { branch: branch ?? 'HEAD' })}</p>
+        <p className="muted gh-publish-lead">
+          {tr('Na Twoim koncie GitHub powstanie nowe repozytorium. Gałąź {branch} zostanie do niego wysłana i będzie je śledzić.', { branch: branch ?? 'HEAD' })}
+          {/* The first branch pushed to an empty repository becomes its default one: in a cell's worktree that is the cell's branch. */}
+          {opts.worktree && <> {tr('Panel pokazuje worktree, więc gałąź {branch} zostanie domyślną gałęzią nowego repozytorium.', { branch: branch ?? 'HEAD' })}</>}
+        </p>
         <div className="field">
           <label htmlFor="gh-publish-name">{tr('Nazwa repozytorium')}</label>
           <input

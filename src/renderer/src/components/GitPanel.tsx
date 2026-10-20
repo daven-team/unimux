@@ -159,9 +159,10 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
     return done;
   }, [busy, tr, errorText, repo, loadTrust]);
 
-  // "Publish to GitHub" (GitPublish.tsx): offered while the repository has no remote.
+  // "Publish to GitHub" (GitPublish.tsx): offered while the repository has no remote. The name is suggested from the project
+  // folder even while a worktree is shown (its folder is "<project>-wt-<name>"; it shares the project's repository).
   const publish = useGitPublish({
-    projectId, folder: worktree ?? projectPath, branch: status?.branch ?? null, opts,
+    projectId, folder: projectPath, branch: status?.branch ?? null, opts,
     onChanged: () => { setNonce((n) => n + 1); repo.refresh(0); refreshGitBadges(projectId, 400); },
   });
 
@@ -357,8 +358,9 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
   // The pull and push buttons carry the counts; the label says it too for the title and for screen readers.
   const pullLabel = status.behind > 0 ? tr('Pull (commitów do pobrania: {count})', { count: status.behind }) : tr('Pobierz i dołącz zmiany (pull, tylko fast-forward)');
   const pushLabel = status.ahead > 0 ? tr('Push (commitów do wysłania: {count})', { count: status.ahead }) : tr('Wyślij commity do zdalnego repozytorium (push)');
-  // No remote and nothing to commit: "Publish to GitHub" takes the Commit button's place (VS Code's "Publish Branch").
+  // No remote and nothing to commit: "Publish to GitHub" takes the Commit button's place under the message box (VS Code's "Publish Branch").
   const publishFirst = canWrite && status.hasRemote === false && !status.initial && !!status.branch && !status.files.length;
+  const commitSlot = publishFirst ? <GitPublishButton disabled={!!busy} onClick={publish.open} /> : undefined;
 
   return (
     <div className="sidebar-content git-panel" ref={panel}>
@@ -388,8 +390,7 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
         </div>
       )}
       {publish.notice}
-      {publishFirst && <GitPublishButton disabled={!!busy} onClick={publish.open} />}
-      <GitChanges view={changesLayout.view} sort={changesLayout.sort} projectId={projectId} status={status} busy={!!busy} writable={canWrite && !publishFirst} programsNote={programsNote} opts={opts} run={run} onOpen={openDiff} onMenu={fileMenu} />
+      <GitChanges view={changesLayout.view} sort={changesLayout.sort} projectId={projectId} status={status} busy={!!busy} writable={canWrite} programsNote={programsNote} opts={opts} run={run} onOpen={openDiff} onMenu={fileMenu} commitSlot={commitSlot} />
       {publish.dialog}
       <div className="git-splitter" role="separator" aria-orientation="horizontal" aria-label={tr('Zmień wysokość historii')} tabIndex={0} onPointerDown={startResize} onKeyDown={resizeKey} />
       <GitHistory projectId={projectId} historyKey={historyKey} initial={status.initial} opts={opts} nonce={nonce} {...historyProps} />

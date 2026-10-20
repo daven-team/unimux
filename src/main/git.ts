@@ -26,7 +26,7 @@ import { canonicalPath, isInsidePath, relativeInside, samePath } from './gitPath
 import { pathExists } from './fsProbe';
 import { atomicWriteFileSync } from './atomicWrite';
 import { attributeDrivers, configuredAttributeDrivers, dangerousConfigKeys, parseConfigList, type ConfigEntry } from '../shared/gitTrust';
-import { githubAuthRefused } from './github/gitEnv';
+import { githubAuthRefused, githubTokenRefused } from './github/gitEnv';
 
 export interface GitOptions {
   /** The executable (default "git"); tests point it at a stand-in. */
@@ -50,6 +50,8 @@ export interface GitOptions {
    * https://github.com only. Null when there is none. Never on the command line.
    */
   remoteAuth?: () => Record<string, string> | null;
+  /** GitHub refused that sign-in as a whole (401) in a fetch, pull or push: its owner checks it and forgets it when it is dead. */
+  remoteAuthRefused?: () => void;
 }
 
 export const READ_TIMEOUT_MS = 10_000;
@@ -162,6 +164,7 @@ export class Git {
   /** The remote names per root while the local configuration file is unchanged (status only). */
   private readonly remoteLists = new Map<string, { names: string[]; at: number; stamp: string }>();
   private readonly remoteAuth?: () => Record<string, string> | null;
+  private readonly remoteAuthRefused?: () => void;
   /** Identical reads that are still running (a window focus asks the Files tree and the Git panel at once): they share one run. */
   private readonly inflight = new Map<string, Promise<GitResult<unknown>>>();
   /** Bumped by every write and trust change: part of the key of shared reads. */
@@ -178,6 +181,7 @@ export class Git {
     this.writeCap = options.writeOutputBytes ?? WRITE_OUTPUT_CAP;
     this.trust = new GitTrustStore(options.trustFile);
     this.remoteAuth = options.remoteAuth;
+    this.remoteAuthRefused = options.remoteAuthRefused;
   }
 
   // ---------- running git ----------
@@ -693,15 +697,17 @@ export class Git {
   /**
    * A run that talks to a remote: with the GitHub sign-in of unimux when there is one (git sends it to https://github.com only).
    * When GitHub refuses it, the same command runs once more without it, so the user's own credential manager still answers
-   * (nothing was transferred: git stops at the refused authentication).
+   * (nothing changed on either side: git stops at the refused authentication, or GitHub rejected the pushed refs). A refusal of
+   * the token as a whole is reported, so that a dead sign-in is not sent again with every later operation.
    */
   private async network(root: string, args: string[]): Promise<RunOutput> {
     const auth = this.remoteAuth?.() ?? null;
     if (!auth) return this.run(root, args, { timeoutMs: this.networkTimeout });
     try { return await this.run(root, args, { timeoutMs: this.networkTimeout, env: auth }); }
     catch (error) {
-      if (error instanceof GitFailure && error.code === 'failed' && githubAuthRefused(error.message)) return this.run(root, args, { timeoutMs: this.networkTimeout });
-      throw error;
+      if (!(error instanceof GitFailure) || error.code !== 'failed' || !githubAuthRefused(error.message)) throw error;
+      if (githubTokenRefused(error.message)) this.remoteAuthRefused?.();
+      return this.run(root, args, { timeoutMs: this.networkTimeout });
     }
   }
 

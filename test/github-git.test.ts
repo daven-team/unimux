@@ -1,9 +1,11 @@
 // The git half of "Publish to GitHub" against REAL repositories in temporary folders: the remote is added and the branch pushed
 // with upstream, the token reaches git in the environment only (a pass-through stand-in records every command line), and fetch,
 // pull and push use the stored sign-in with a second try without it when GitHub refuses it. github.com itself is never contacted:
-// a global `insteadOf` turns the https address into a local bare repository.
+// a global `insteadOf` turns the https address into a local bare repository, and a local HTTP server plays a refusing GitHub.
 import { execFileSync } from 'child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { createServer } from 'http';
+import type { AddressInfo } from 'net';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -16,6 +18,11 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 const TOKEN = 'gho_16C7e42F292c6912E7710c838347Ae178B4a';
 const HEADER = Buffer.from(`x-access-token:${TOKEN}`).toString('base64');
 const URL = 'https://github.com/ajzak/demo.git';
+/** What git prints when GitHub refuses our header: as a whole (401; no helper and no prompt left), or for one repository only. */
+const REFUSALS = {
+  token: "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n",
+  repository: "remote: Repository not found.\nfatal: repository 'https://github.com/ajzak/demo.git/' not found\n",
+};
 
 let lab: string;
 let env: NodeJS.ProcessEnv;
@@ -40,8 +47,8 @@ function repo(name: string, commits: number): string {
 }
 
 /** A Git engine whose "git" is the recording stand-in (`log` gets one JSON line per run). */
-function spiedGit(log: string, extra: NodeJS.ProcessEnv = {}, remoteAuth?: () => Record<string, string> | null): Git {
-  return new Git({ bin: process.execPath, prefixArgs: [spy], env: { ...env, SPY_LOG: log, ...extra }, remoteAuth });
+function spiedGit(log: string, extra: NodeJS.ProcessEnv = {}, remoteAuth?: () => Record<string, string> | null, remoteAuthRefused?: () => void): Git {
+  return new Git({ bin: process.execPath, prefixArgs: [spy], env: { ...env, SPY_LOG: log, ...extra }, remoteAuth, remoteAuthRefused });
 }
 const runs = (log: string): Array<{ args: string[]; header: string | null }> =>
   readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
@@ -63,8 +70,9 @@ beforeAll(() => {
     "const fs = require('fs');",
     'const args = process.argv.slice(2);',
     "fs.appendFileSync(process.env.SPY_LOG, JSON.stringify({ args, header: process.env.GIT_CONFIG_VALUE_0 || null }) + '\\n');",
-    "if (process.env.SPY_REFUSE === '1' && process.env.GIT_CONFIG_VALUE_0 && args.includes('fetch')) {",
-    "  process.stderr.write(\"remote: Invalid username or token.\\nfatal: Authentication failed for 'https://github.com/ajzak/demo.git/'\\n\");",
+    `const refusal = (${JSON.stringify(REFUSALS)})[process.env.SPY_REFUSE];`,
+    "if (refusal && process.env.GIT_CONFIG_VALUE_0 && args.includes('fetch')) {",
+    '  process.stderr.write(refusal);',
     '  process.exit(128);',
     '}',
     "const result = spawnSync('git', args, { stdio: 'inherit' });",
@@ -139,13 +147,69 @@ describe('fetch, pull and push with the stored GitHub sign-in', () => {
     const fetches = runs(plain).filter((r) => r.args.includes('fetch'));
     expect(fetches.map((r) => r.header)).toEqual([`AUTHORIZATION: basic ${HEADER}`]);
 
+    // GitHub refused the token as a whole: the second try goes without it, and the owner of the sign-in hears about it.
+    let reports = 0;
+    const report = () => { reports++; };
     const refused = join(lab, 'refused.log');
-    expect((await spiedGit(refused, { SPY_REFUSE: '1' }, () => githubGitEnv(TOKEN)).fetch(clone, id(), clone)).ok).toBe(true);
+    expect((await spiedGit(refused, { SPY_REFUSE: 'token' }, () => githubGitEnv(TOKEN), report).fetch(clone, id(), clone)).ok).toBe(true);
     expect(runs(refused).filter((r) => r.args.includes('fetch')).map((r) => r.header)).toEqual([`AUTHORIZATION: basic ${HEADER}`, null]);
+    expect(reports).toBe(1);
+
+    // Refused for this one repository (another account's): the user's credentials get their try, the token is not suspected.
+    const elsewhere = join(lab, 'elsewhere.log');
+    expect((await spiedGit(elsewhere, { SPY_REFUSE: 'repository' }, () => githubGitEnv(TOKEN), report).fetch(clone, id(), clone)).ok).toBe(true);
+    expect(runs(elsewhere).filter((r) => r.args.includes('fetch')).map((r) => r.header)).toEqual([`AUTHORIZATION: basic ${HEADER}`, null]);
+    expect(reports).toBe(1);
 
     const none = join(lab, 'none.log');
     expect((await spiedGit(none, {}, () => null).pull(clone, id(), clone)).ok).toBe(true);
     expect(runs(none).every((r) => r.header === null)).toBe(true);
     expect(JSON.stringify(runs(refused).map((r) => r.args))).not.toContain(TOKEN);
+  });
+});
+
+describe('a refused sign-in and the user’s own credential helper (real git, a local server that answers 401)', () => {
+  it('git neither asks the helper nor makes it erase its credential while our header is sent', async () => {
+    const seen: Array<string | null> = [];
+    const server = createServer((req, res) => {
+      seen.push(req.headers.authorization ?? null);
+      res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="github"' });
+      res.end();
+    });
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    try {
+      const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      // The user's credential helper: it has a credential, and records every question git asks it.
+      const log = join(lab, 'helper.log');
+      const helper = join(lab, 'helper.cjs');
+      writeFileSync(helper, [
+        "const fs = require('fs');",
+        "process.stdin.on('data', () => undefined);",
+        "process.stdin.on('end', () => {",
+        `  fs.appendFileSync(${JSON.stringify(log)}, process.argv[2] + '\\n');`,
+        "  if (process.argv[2] === 'get') process.stdout.write('username=user\\npassword=secret\\n');",
+        '});',
+      ].join('\n'));
+      const slash = (path: string) => path.replace(/\\/g, '/');
+      const config = join(lab, 'helper.gitconfig');
+      writeFileSync(config, `[user]\n\tname = Tester\n\temail = tester@example.com\n[credential]\n\thelper = !'${slash(process.execPath)}' '${slash(helper)}'\n`);
+      const work = repo('helper-work', 1);
+      sh(work, 'remote', 'add', 'origin', `${origin}/ajzak/demo.git`);
+      const asked = (): string[] => (existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : []);
+      const gitWith = (auth: Record<string, string>) => new Git({ env: { ...env, GIT_CONFIG_GLOBAL: config }, remoteAuth: () => auth });
+
+      expect(await gitWith(githubGitEnv(TOKEN, origin)).fetch(work, id(), work)).toMatchObject({ ok: false, error: expect.stringContaining('could not read Username') });
+      expect(asked()).toEqual([]);
+      expect(seen).toEqual([`basic ${HEADER}`]);
+
+      // The check of the check: without the reset git asks the helper, sends our refused header once more (curl prefers it) and
+      // then tells the helper to erase the credential it never sent.
+      seen.length = 0;
+      expect((await gitWith({ ...githubGitEnv(TOKEN, origin), GIT_CONFIG_COUNT: '1' }).fetch(work, id(), work)).ok).toBe(false);
+      expect(asked()).toEqual(['get', 'erase']);
+      expect(seen).toEqual([`basic ${HEADER}`, `basic ${HEADER}`]);
+    } finally {
+      server.close();
+    }
   });
 });

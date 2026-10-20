@@ -16,6 +16,13 @@ export const githubMessages = {
     'Un nouveau dépôt sera créé sur votre compte GitHub. La branche {branch} y sera envoyée et le suivra.',
     'Será criado um novo repositório na sua conta do GitHub. O ramo {branch} será enviado para ele e irá acompanhá-lo.',
   ],
+  'Panel pokazuje worktree, więc gałąź {branch} zostanie domyślną gałęzią nowego repozytorium.': [
+    'The panel shows a worktree, so branch {branch} will become the new repository’s default branch.',
+    'Das Panel zeigt einen Worktree, daher wird Branch {branch} der Standard-Branch des neuen Repositorys.',
+    'El panel muestra un worktree, así que la rama {branch} será la rama predeterminada del repositorio nuevo.',
+    'Le panneau affiche un worktree : la branche {branch} deviendra la branche par défaut du nouveau dépôt.',
+    'O painel mostra um worktree, por isso o ramo {branch} passará a ser o ramo predefinido do novo repositório.',
+  ],
   'Nazwa repozytorium': ['Repository name', 'Repository-Name', 'Nombre del repositorio', 'Nom du dépôt', 'Nome do repositório'],
   'Widoczność': ['Visibility', 'Sichtbarkeit', 'Visibilidad', 'Visibilité', 'Visibilidade'],
   'Prywatne repozytorium': ['Private repository', 'Privates Repository', 'Repositorio privado', 'Dépôt privé', 'Repositório privado'],
@@ -88,5 +95,12 @@ export const githubMessages = {
     'El repositorio se creó en GitHub, pero no se pudo enviar la rama. Usa Push en el panel Git para volver a intentarlo.',
     'Le dépôt a été créé sur GitHub, mais l’envoi de la branche a échoué. Utilisez Push dans le panneau Git pour réessayer.',
     'O repositório foi criado no GitHub, mas o envio do ramo falhou. Use Push no painel Git para tentar novamente.',
+  ],
+  'Repozytorium zostało utworzone na GitHubie, ale GitHub nie przyjął gałęzi: zawiera pliki .github/workflows, a to logowanie nie ma uprawnienia „workflow”. Użyj Push w panelu Git (z Twoimi poświadczeniami git) albo git push w terminalu.': [
+    'The repository was created on GitHub, but GitHub refused the branch: it contains .github/workflows files and this sign-in lacks the “workflow” permission. Use Push in the Git panel (with your own git credentials) or git push in a terminal.',
+    'Das Repository wurde auf GitHub erstellt, aber GitHub hat den Branch abgelehnt: Er enthält .github/workflows-Dateien und dieser Anmeldung fehlt die Berechtigung „workflow“. Nutze Push im Git-Panel (mit deinen eigenen Git-Anmeldedaten) oder git push in einem Terminal.',
+    'El repositorio se creó en GitHub, pero GitHub rechazó la rama: contiene archivos .github/workflows y este inicio de sesión no tiene el permiso «workflow». Usa Push en el panel Git (con tus propias credenciales de git) o git push en un terminal.',
+    'Le dépôt a été créé sur GitHub, mais GitHub a refusé la branche : elle contient des fichiers .github/workflows et cette connexion n’a pas l’autorisation « workflow ». Utilisez Push dans le panneau Git (avec vos propres identifiants git) ou git push dans un terminal.',
+    'O repositório foi criado no GitHub, mas o GitHub recusou o ramo: contém ficheiros .github/workflows e esta sessão não tem a permissão “workflow”. Use Push no painel Git (com as suas próprias credenciais git) ou git push num terminal.',
   ],
 } as const;

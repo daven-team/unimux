@@ -90,7 +90,7 @@ export async function createRepo(fetch: FetchLike, token: string, req: { name: s
   const htmlUrl = str(body.html_url, 300);
   const cloneUrl = str(body.clone_url, 300);
   if (!fullName || !htmlUrl || !cloneUrl || !GITHUB_REPO_URL.test(cloneUrl) || !GITHUB_REPO_URL.test(htmlUrl)) {
-    return { ok: false, code: 'failed', error: ERR.failed, detail: 'unexpected answer' };
+    return { ok: false, code: 'failed', error: ERR.failed };
   }
   return { ok: true, data: { fullName, htmlUrl, cloneUrl } };
 }

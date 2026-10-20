@@ -31,13 +31,20 @@ const GH_FALLBACKS: Partial<Record<NodeJS.Platform, string[]>> = {
 };
 const GH_TIMEOUT_MS = 8000;
 const LOGIN_TTL_MS = 10 * 60_000;
+/** A refused fetch, pull or push has GitHub check the stored token at most this often. */
+const STORED_CHECK_MS = 60_000;
 
 interface Flow { id: string; controller: AbortController; result: Promise<GithubResult<{ login: string | null }>> }
 
 export class GithubAuth {
   private flow: Flow | null = null;
-  /** The user name of the gh token, per token, for a few minutes (the dialog asks each time it opens). */
-  private ghLogin: { token: string; login: string | null; at: number } | null = null;
+  /** Bumped by every start and by a cancel of all flows: a start whose code arrives after a newer start (a double click) is dropped. */
+  private starts = 0;
+  /** What GitHub said about a token (its user name), per token, for a few minutes (the dialog asks each time it opens). */
+  private known: { token: string; login: string | null; at: number } | null = null;
+  /** The check of the stored token after a refused network operation: still running, and when the last one started. */
+  private storedCheck: Promise<void> | null = null;
+  private storedCheckAt = 0;
 
   constructor(private readonly deps: GithubAuthDeps) {}
 
@@ -68,30 +75,75 @@ export class GithubAuth {
   /** GitHub refused the token (401): a stored one is forgotten (it cannot work again); a gh token belongs to the CLI. */
   rejected(source: GithubAuthSource): void {
     if (source === 'stored') this.deps.store.clear();
-    else this.ghLogin = null;
+    this.known = null;
+  }
+
+  /**
+   * What GitHub says about `token`: its user name (null when it could not be read, e.g. offline), or false when GitHub refuses
+   * the token (401). Remembered a few minutes per token unless `fresh`.
+   */
+  private async check(token: string, fresh = false): Promise<string | null | false> {
+    const known = this.known;
+    if (!fresh && known && known.token === token && Date.now() - known.at < LOGIN_TTL_MS) return known.login;
+    const login = await fetchLogin(this.deps.fetch, token);
+    if (!login.ok && login.code === 'auth') {
+      if (this.known?.token === token) this.known = null;
+      return false;
+    }
+    this.known = { token, login: login.ok ? login.data : null, at: Date.now() };
+    return this.known.login;
+  }
+
+  /** Forgets the stored token if it is still `token` (a sign-in that finished in the meantime stays). */
+  private forgetStored(token: string): void {
+    if (this.deps.store.get() === token) this.deps.store.clear();
+    if (this.known?.token === token) this.known = null;
   }
 
   /** Who is signed in. `local`: the stored sign-in only (no `gh`, no network), for the Git panel's menu. */
   async status(local = false): Promise<GithubAuthStatus> {
     const base = { deviceFlow: !!this.deps.clientId, storage: this.deps.store.storage };
-    if (this.deps.store.get()) return { ...base, signedIn: true, source: 'stored', login: this.deps.store.login() };
-    if (local) return { ...base, signedIn: false, source: null, login: null };
+    const signedOut: GithubAuthStatus = { ...base, signedIn: false, source: null, login: null };
+    const stored = this.deps.store.get();
+    if (stored && local) return { ...base, signedIn: true, source: 'stored', login: this.deps.store.login() };
+    if (stored) {
+      const login = await this.check(stored);
+      if (login !== false) return { ...base, signedIn: true, source: 'stored', login: login ?? this.deps.store.login() };
+      // GitHub no longer accepts it (revoked, unused for a year, rotated out): forgotten; the GitHub CLI's sign-in may still work.
+      this.forgetStored(stored);
+    }
+    if (local) return signedOut;
     const gh = await this.ghToken();
-    if (!gh) return { ...base, signedIn: false, source: null, login: null };
-    const known = this.ghLogin;
-    if (known && known.token === gh && Date.now() - known.at < LOGIN_TTL_MS) return { ...base, signedIn: true, source: 'gh', login: known.login };
-    const login = await fetchLogin(this.deps.fetch, gh);
+    if (!gh) return signedOut;
+    const login = await this.check(gh);
     // GitHub says the CLI's token is no longer valid: the user has to run `gh auth login` again (or sign in here).
-    if (!login.ok && login.code === 'auth') return { ...base, signedIn: false, source: null, login: null };
-    this.ghLogin = { token: gh, login: login.ok ? login.data : null, at: Date.now() };
-    return { ...base, signedIn: true, source: 'gh', login: this.ghLogin.login };
+    if (login === false) return signedOut;
+    return { ...base, signedIn: true, source: 'gh', login };
+  }
+
+  /**
+   * A fetch, pull or push to github.com was refused with the stored token (Git's remoteAuthRefused): GitHub is asked whether the
+   * token still works, and a 401 forgets it, so later operations no longer send it. At most once a minute; a running check is shared.
+   */
+  checkStored(): Promise<void> {
+    if (this.storedCheck) return this.storedCheck;
+    const token = this.deps.store.get();
+    if (!token || Date.now() - this.storedCheckAt < STORED_CHECK_MS) return Promise.resolve();
+    this.storedCheckAt = Date.now();
+    this.storedCheck = this.check(token, true)
+      .then((login) => { if (login === false) this.forgetStored(token); })
+      .finally(() => { this.storedCheck = null; });
+    return this.storedCheck;
   }
 
   /** Starts the device flow (one at a time: a new start ends the previous one) and polls GitHub in the background. */
   async startDevice(): Promise<GithubResult<GithubDeviceStart>> {
     this.cancelDevice();
+    const ticket = this.starts;
     const code = await requestDeviceCode(this.deps.fetch, this.deps.clientId, GITHUB_DEVICE_SCOPE);
     if (!code.ok) return code;
+    // A newer start (a double click) or a sign-out came while GitHub answered: this code is never polled (it simply expires).
+    if (ticket !== this.starts) return { ok: false, code: 'cancelled', error: ERR.cancelled };
     const controller = new AbortController();
     const id = randomUUID();
     const result = pollDeviceToken({ fetch: this.deps.fetch, clientId: this.deps.clientId, code: code.data, signal: controller.signal, ...this.deps.poll })
@@ -113,8 +165,9 @@ export class GithubAuth {
     return this.flow.result;
   }
 
-  /** Stops the running device flow (all of them when no id is given). */
+  /** Stops the running device flow (without an id: whatever runs, including a start still waiting for its code). */
   cancelDevice(flowId?: string): void {
+    if (flowId === undefined) this.starts++;
     if (!this.flow || (flowId !== undefined && this.flow.id !== flowId)) return;
     this.flow.controller.abort();
     this.flow = null;
@@ -124,7 +177,7 @@ export class GithubAuth {
   async signOut(): Promise<GithubAuthStatus> {
     this.cancelDevice();
     this.deps.store.clear();
-    this.ghLogin = null;
+    this.known = null;
     return this.status(true);
   }
 }

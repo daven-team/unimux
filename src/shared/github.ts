@@ -4,7 +4,7 @@ import type { GitErrorCode } from './git';
 import { isRequestId } from './git';
 
 /**
- * The client id of unimux's GitHub OAuth App (device flow, scope "repo"). Empty: the app has no OAuth App registered yet, so
+ * The client id of unimux's GitHub OAuth App (device flow, scope GITHUB_DEVICE_SCOPE). Empty: the app has no OAuth App registered yet, so
  * "Sign in with GitHub" is hidden and the dialog asks for the GitHub CLI (`gh auth login`) instead. To enable it, register an
  * OAuth App on GitHub (Settings > Developer settings > OAuth Apps, "Enable Device Flow" checked) and put its public client id
  * here; a device-flow client id is not a secret (no client secret is used).
@@ -12,10 +12,11 @@ import { isRequestId } from './git';
 export const GITHUB_OAUTH_CLIENT_ID: string = '';
 
 /**
- * The scopes the device flow asks for: creating private repositories and pushing to them needs "repo"; "workflow" because GitHub
- * refuses a push that contains .github/workflows files from an OAuth token without it (the push of a fresh repository would fail).
+ * The scope the device flow asks for: "repo" (creating private repositories and pushing to them), nothing broader. GitHub
+ * refuses such a token a push that adds or changes .github/workflows files ("workflow" scope): publishing says so
+ * (PUBLISH_ERR.workflowScope), and later pushes in the Git panel try again with the user's own git credentials.
  */
-export const GITHUB_DEVICE_SCOPE = 'repo workflow';
+export const GITHUB_DEVICE_SCOPE = 'repo';
 export const GITHUB_DEVICE_PAGE = 'https://github.com/login/device';
 export const GITHUB_REPO_NAME_MAX = 100;
 
@@ -25,8 +26,9 @@ export type GithubErrorCode =
   | 'remote-failed' | 'expired' | 'denied' | 'cancelled' | 'no-client';
 
 /**
- * `error` is a message key (Polish source text) or git's own text; `detail` is GitHub's or git's untranslated explanation, shown
- * after it. `url` is the web page of a repository that was created although a later step failed.
+ * `error` is a message key (Polish source text) or git's own text; `detail`, shown after it, is GitHub's or git's own explanation
+ * or the message key of the git step that refused (both go through the renderer's errorText, which leaves unknown text as it is).
+ * `url` is the web page of a repository that was created although a later step failed.
  */
 export type GithubResult<T> = { ok: true; data: T } | { ok: false; code: GithubErrorCode; error: string; detail?: string; url?: string };
 

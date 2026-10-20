@@ -6,7 +6,7 @@ import type { Git } from '../git';
 import { canonicalPath } from '../gitPaths';
 import { createRepo, type FetchLike } from './api';
 import type { GithubAuth } from './auth';
-import { githubGitEnv } from './gitEnv';
+import { githubGitEnv, workflowScopeRefused } from './gitEnv';
 
 export const PUBLISH_ERR = {
   signIn: 'Zaloguj się do GitHuba, aby opublikować repozytorium.',
@@ -16,6 +16,7 @@ export const PUBLISH_ERR = {
   busy: 'Publikowanie już trwa.',
   remoteFailed: 'Repozytorium zostało utworzone na GitHubie, ale nie udało się dodać go jako origin.',
   pushFailed: 'Repozytorium zostało utworzone na GitHubie, ale wysłanie gałęzi nie powiodło się. Użyj Push w panelu Git, aby spróbować ponownie.',
+  workflowScope: 'Repozytorium zostało utworzone na GitHubie, ale GitHub nie przyjął gałęzi: zawiera pliki .github/workflows, a to logowanie nie ma uprawnienia „workflow”. Użyj Push w panelu Git (z Twoimi poświadczeniami git) albo git push w terminalu.',
 } as const;
 
 export interface PublishDeps {
@@ -50,7 +51,11 @@ export function createPublisher(deps: PublishDeps): Publish {
       const { fullName, htmlUrl, cloneUrl } = created.data;
       const pushed = await deps.git.publishPush(dir, { requestId: req.requestId, url: cloneUrl, branch, env: githubGitEnv(auth.token) }, scope);
       if (!pushed.ok) return { ok: false, code: 'remote-failed', error: PUBLISH_ERR.remoteFailed, detail: pushed.error, url: htmlUrl };
-      if (!pushed.data.pushed) return { ok: false, code: 'push-failed', error: PUBLISH_ERR.pushFailed, detail: pushed.data.message, url: htmlUrl };
+      if (!pushed.data.pushed) {
+        // The device-flow sign-in asks for "repo" only: GitHub refuses it a push that brings GitHub Actions workflow files.
+        const error = workflowScopeRefused(pushed.data.message) ? PUBLISH_ERR.workflowScope : PUBLISH_ERR.pushFailed;
+        return { ok: false, code: 'push-failed', error, detail: pushed.data.message, url: htmlUrl };
+      }
       return { ok: true, data: { fullName, htmlUrl, branch } };
     } catch (error) {
       return { ok: false, code: 'failed', error: error instanceof Error ? error.message : String(error) };

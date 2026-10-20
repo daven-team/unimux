@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import type { GitFileChange, GitOpResult, GitResult, GitStatus } from '../../../shared/git';
 import { useI18n } from '../i18n';
 import { askChoice, toast } from '../store';
@@ -22,10 +22,15 @@ interface Props {
   onMenu(e: React.MouseEvent, file: GitFileChange, source: Source): void;
   view: ChangesView;
   sort: ChangesSort;
+  /**
+   * Shown in the place of the Commit button when given, e.g. a "Publish" action while there is nothing to commit and no remote.
+   * The panel decides when; without it the Commit button is shown.
+   */
+  commitSlot?: ReactNode;
 }
 
 /** The Changes section: files grouped as conflicts, staged, changed and untracked, with stage / unstage and a commit box. */
-export function GitChanges({ projectId, status, busy, writable, programsNote, opts, run, onOpen, onMenu, view, sort }: Props) {
+export function GitChanges({ projectId, status, busy, writable, programsNote, opts, run, onOpen, onMenu, view, sort, commitSlot }: Props) {
   const { tr } = useI18n();
   useShortcutText(); // the commit shortcut in the tooltips follows the settings
   const [open, setOpen] = useState(true);
@@ -146,9 +151,11 @@ export function GitChanges({ projectId, status, busy, writable, programsNote, op
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={(e) => { if (matchesShortcut('git.commit', e)) { e.preventDefault(); void commit(); } }}
           />
-          <button className="btn small primary" disabled={busy || !staged || !message.trim()} onClick={() => void commit()} title={titleWithShortcut(tr('Zatwierdź dodane pliki'), 'git.commit')}>
-            <ICheck />{tr('Commit')}{staged > 0 && ` (${staged})`}
-          </button>
+          {commitSlot ?? (
+            <button className="btn small primary" disabled={busy || !staged || !message.trim()} onClick={() => void commit()} title={titleWithShortcut(tr('Zatwierdź dodane pliki'), 'git.commit')}>
+              <ICheck />{tr('Commit')}{staged > 0 && ` (${staged})`}
+            </button>
+          )}
           {programsNote && <span className="git-note muted">{programsNote}</span>}
         </div>
       )}

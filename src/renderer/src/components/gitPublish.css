@@ -1,6 +1,4 @@
-/* "Publish to GitHub" (GitPublish.tsx): the panel's primary button, the "published" line and the dialog */
-.git-panel .git-publish-box { padding-top: 4px; }
-.git-panel .git-publish-box > .btn svg { width: 14px; height: 14px; }
+/* "Publish to GitHub" (GitPublish.tsx): the "published" line and the dialog (the panel's button is styled as the Commit button) */
 .git-publish-notice { flex: none; display: flex; align-items: center; gap: 6px; margin: 0 10px 6px; padding: 5px 6px 5px 8px; border: 1px solid #1f3d2a; border-radius: 6px; background: #12301e; color: #bbf7d0; font-size: 11.5px; }
 .git-publish-notice-text { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-publish-notice-text svg { flex: none; }
@@ -28,6 +26,7 @@
 .gh-publish-account-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gh-publish-signin { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-1); font-size: 12px; }
 .gh-publish-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.gh-publish-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
 .gh-publish-progress, .gh-publish-wait, .gh-publish-account.muted { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
 .gh-publish-progress { color: var(--text-2); }
 .gh-publish-error { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid #5b2626; border-radius: 8px; background: #2a1414; color: #fca5a5; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }

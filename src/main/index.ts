@@ -1277,7 +1277,7 @@ const github = createGithubService({
   fetch: (url, init) => net.fetch(url, init),
   env: () => cliDetector.applyEnv(cleanEnv(process.env)),
 });
-const gitEngine = new Git({ trustFile: join(DATA_DIR, 'git-trust.json'), remoteAuth: github.remoteAuth });
+const gitEngine = new Git({ trustFile: join(DATA_DIR, 'git-trust.json'), remoteAuth: github.remoteAuth, remoteAuthRefused: github.remoteAuthRefused });
 const gitProject = {
   projectPath: (projectId: string) => state.projects.find((p) => p.id === projectId)?.path,
   worktreePaths: (projectId: string) => state.projects.find((p) => p.id === projectId)?.tabs.flatMap((t) => t.cells.flatMap((c) => (c.worktree ? [c.worktree.path] : []))) ?? [],
