@@ -1,6 +1,7 @@
 // The project tree as a flat list of fixed-height rows (only the rows in view are rendered), the folder rows pinned at
 // the top while scrolling (sticky scroll) and the indentation of deep levels. Pure functions, no DOM.
 import type { ProjectDirectory, ProjectFileEntry } from './types';
+import { IGNORED_FOLDERS } from './search';
 
 export type TreeMessage = 'loading' | 'empty' | 'error' | 'truncated';
 
@@ -90,6 +91,18 @@ export function shownFolders(expanded: Iterable<string>): string[] {
   return shown;
 }
 
+/**
+ * Whether the row at `index` is a dependency or build output folder (node_modules, out, release: IGNORED_FOLDERS) or lies
+ * inside one; the tree dims those. Folder names only, the project's .gitignore is not read.
+ */
+export function inIgnoredFolder(rows: readonly TreeRow[], index: number, names: ReadonlySet<string> = IGNORED_FOLDERS): boolean {
+  for (let i = index; i >= 0 && i < rows.length; i = rows[i].parent) {
+    const row = rows[i];
+    if (row.type === 'entry' && row.entry.kind === 'directory' && names.has(row.entry.name)) return true;
+  }
+  return false;
+}
+
 export interface StickyRows {
   /** Row indices of the pinned folders, the outermost first. */
   rows: number[];
@@ -148,7 +161,9 @@ export function scrollTopForPinned(index: number, depth: number, rowHeight: numb
 }
 
 /** Indentation: a full step per level up to `cap`, then a small step, and no growth at all after `cap + compressed`. */
-export const INDENT = { base: 4, step: 8, cap: 8, small: 2, compressed: 8 } as const;
+export const INDENT = { base: 6, step: 10, cap: 7, small: 2, compressed: 8 } as const;
+/** Width of the twistie slot (the chevron, or the empty space of a file row) that starts every row; guides run through its middle. */
+export const TWISTIE = 16;
 
 export function indentFor(depth: number, o: { base: number; step: number; cap: number; small: number; compressed: number } = INDENT): number {
   const d = Math.max(0, depth);
@@ -159,7 +174,7 @@ export function indentFor(depth: number, o: { base: number; step: number; cap: n
  * X positions of the indent guide lines of a row at `depth`: one per ancestor level, under that level's chevron
  * (packed closer on the compressed levels, always left of the row's own indent; equal positions are drawn once).
  */
-export function indentGuides(depth: number, chevronCenter = 5): number[] {
+export function indentGuides(depth: number, chevronCenter = TWISTIE / 2): number[] {
   const guides: number[] = [];
   for (let level = 0; level < depth; level++) {
     const x = indentFor(level + 1) - (INDENT.step - chevronCenter);

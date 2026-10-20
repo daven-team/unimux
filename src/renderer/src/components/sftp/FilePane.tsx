@@ -14,8 +14,8 @@ import type { MessageKey } from '../../../../shared/i18n';
 import { isFileLike } from '../../../../shared/editorSource';
 import { useI18n } from '../../i18n';
 import { openMenu, openMenuAt, type MenuItem } from '../ContextMenu';
-import { FileIcon } from '../FileIcon';
-import { IArrowLeft, IArrowRight, IArrowUp, IChevron, IFolder, ILink, ISearch } from '../icons';
+import { FileIcon, FolderIcon } from '../FileIcon';
+import { IArrowLeft, IArrowRight, IArrowUp, IChevron, ILink, ISearch } from '../icons';
 import { RefreshIcon, useHoldBusy } from '../Spinner';
 
 export const ROW_HEIGHT = 26;
@@ -287,7 +287,7 @@ export function FilePane(p: PaneProps) {
               <div className={`sftp-uprow${over !== null && over === f.parentPath ? ' drop' : ''}`} role="row" title={tr('Folder nadrzędny')}
                 {...(f.parentPath ? { 'data-folder-path': f.parentPath } : {})}
                 onDoubleClick={p.onUp} onContextMenu={(ev) => { ev.preventDefault(); ev.stopPropagation(); }}>
-                <span className="sftp-col sftp-col-name"><span className="sftp-icon"><IFolder /></span><span className="sftp-name">..</span></span>
+                <span className="sftp-col sftp-col-name"><span className="sftp-icon"><FolderIcon /></span><span className="sftp-name">..</span></span>
               </div>
             )}
             {slots.map((slot, i) => {
@@ -304,7 +304,7 @@ export function FilePane(p: PaneProps) {
                   onClick={(ev) => onRowClick(ev, e)} onDoubleClick={() => open(e)} onContextMenu={(ev) => { ev.stopPropagation(); onRowMenu(ev, e); }}
                   title={e.unsafeName ? tr('Nazwa, której nie można bezpiecznie zapisać w tym miejscu') : undefined}>
                   <span className="sftp-col sftp-col-name">
-                    <span className="sftp-icon">{isFolderLike(e) ? <IFolder /> : <FileIcon name={e.name} />}</span>
+                    <span className="sftp-icon">{isFolderLike(e) ? <FolderIcon /> : <FileIcon name={e.name} />}</span>
                     <span className="sftp-name">{e.name}</span>
                     {e.kind === 'symlink' && <span className="sftp-link" title={tr('Dowiązanie')}><ILink /></span>}
                   </span>

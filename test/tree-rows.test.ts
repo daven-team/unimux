@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectDirectory, ProjectFileEntry } from '../src/shared/types';
 import {
-  flattenTree, indentFor, indentGuides, INDENT, scrollToShow, scrollTopForPinned, shownFolders, stabilizeRows, stickyIndent, stickyRows, visibleRange, type TreeRow,
+  flattenTree, inIgnoredFolder, indentFor, indentGuides, INDENT, scrollToShow, scrollTopForPinned, shownFolders, stabilizeRows, stickyIndent, stickyRows, TWISTIE, visibleRange, type TreeRow,
 } from '../src/shared/treeRows';
 
 const dir = (path: string): ProjectFileEntry => ({ name: path.split('/').pop()!, path, kind: 'directory' });
@@ -90,6 +90,31 @@ describe('shownFolders', () => {
   it('keeps the root and the expanded folders whose parents are all expanded', () => {
     expect(shownFolders(['a', 'a/x', 'b/y', 'a/x/q'])).toEqual(['', 'a', 'a/x', 'a/x/q']);
     expect(shownFolders([])).toEqual(['']);
+  });
+});
+
+describe('inIgnoredFolder', () => {
+  const tree: Record<string, ProjectDirectory> = {
+    '': ok(dir('node_modules'), dir('out'), dir('src'), file('release')),
+    node_modules: ok(dir('node_modules/react'), file('node_modules/.package-lock.json')),
+    'node_modules/react': ok(file('node_modules/react/index.js')),
+    src: ok(dir('src/build'), dir('src/lib'), file('src/main.ts')),
+    'src/build': ok(file('src/build/a.js')),
+    'src/lib': ok(file('src/lib/b.ts')),
+  };
+  const rows = flattenTree((path) => tree[path], new Set(['node_modules', 'node_modules/react', 'src', 'src/build', 'src/lib']));
+  const dimmed = (names?: ReadonlySet<string>) => rows.flatMap((row, i) => row.type === 'entry' && inIgnoredFolder(rows, i, names) ? [row.entry.path] : []);
+
+  it('dims the dependency and build output folders and everything below them, at any depth', () => {
+    expect(dimmed()).toEqual([
+      'node_modules', 'node_modules/react', 'node_modules/react/index.js', 'node_modules/.package-lock.json', 'out', 'src/build', 'src/build/a.js',
+    ]);
+  });
+
+  it('matches folders only (a file named release stays) and takes another set of names', () => {
+    expect(dimmed(new Set(['lib', 'release']))).toEqual(['src/lib', 'src/lib/b.ts']);
+    expect(inIgnoredFolder(rows, -1)).toBe(false);
+    expect(inIgnoredFolder(rows, rows.length)).toBe(false);
   });
 });
 
@@ -193,11 +218,21 @@ describe('indentation', () => {
 
   it('draws one guide per parent level, under its chevron, never more than the distinct positions', () => {
     expect(indentGuides(0)).toEqual([]);
-    expect(indentGuides(2)).toEqual([indentFor(0) + 5, indentFor(1) + 5]);
+    expect(indentGuides(2)).toEqual([indentFor(0) + TWISTIE / 2, indentFor(1) + TWISTIE / 2]);
     expect(indentGuides(40)).toHaveLength(INDENT.cap + INDENT.compressed);
     const guides = indentGuides(12);
     expect(guides).toEqual([...guides].sort((a, b) => a - b));
     expect(guides.at(-1)!).toBeLessThan(indentFor(12));
+  });
+
+  it('keeps rows and guides on whole pixels, with room between a guide and the child row it runs past', () => {
+    for (let depth = 0; depth < 30; depth++) {
+      expect(Number.isInteger(indentFor(depth))).toBe(true);
+      expect(Number.isInteger(stickyIndent(depth))).toBe(true);
+      for (const x of indentGuides(depth)) expect(Number.isInteger(x)).toBe(true);
+    }
+    // Full levels: the parent's guide runs left of the child's twistie slot, not through it.
+    for (let level = 0; level < INDENT.cap - 1; level++) expect(indentGuides(level + 1).at(-1)!).toBeLessThan(indentFor(level + 1));
   });
 });
 
