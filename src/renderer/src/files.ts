@@ -461,8 +461,8 @@ export function watchFilesOnDisk(): void {
 const ACTIVE_CHECK_MS = 2500;
 
 /**
- * Database tabs (1.0.0) ask their own questions before closing (staged edits, an unsaved script, an open transaction) and
- * release their session afterwards; the database module registers this at start (no import cycle).
+ * Database tabs (1.0.0) ask their own questions before closing (staged edits, an unsaved script, an open transaction; unsaved
+ * Redis values) and release their session afterwards; the database module registers this at start (no import cycle).
  */
 export interface DbTabHooks { confirmClose(doc: FileDocument): Promise<boolean>; closed(doc: FileDocument): void }
 let dbHooks: DbTabHooks | null = null;
@@ -475,7 +475,7 @@ export async function closeFile(id: string): Promise<boolean> {
   if (doc.saving || closing.has(id) || getUi().dialog) return false;
   closing.add(id);
   try {
-    if (doc.db) {
+    if (doc.db || doc.redis) {
       if (dbHooks && !await dbHooks.confirmClose(doc)) return false;
     } else if (isFileDirty(doc)) {
       const choice = await askChoice(fileLabel('close'), doc.relativePath, [

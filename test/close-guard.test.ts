@@ -142,3 +142,137 @@ describe('quit question with SFTP transfers', () => {
     expect(guards.at(-1)).toBe(false);
   });
 });
+
+describe('quit question with database work', () => {
+  // A fake of what the database module registers: `pending` and a question of its own (Quit anyway / Cancel).
+  let pending = false;
+  let notify: () => void = () => undefined;
+  const asked: string[] = [];
+  const work = {
+    pending: () => pending,
+    ask: () => { asked.push('db'); return store.askChoice('Unsaved database work', '', [{ label: 'Quit anyway', value: 'quit', danger: true }]).then((v: string | null) => v === 'quit'); },
+    subscribe: (changed: () => void) => { notify = changed; },
+  };
+  const item = (id: string, state: string) => ({ id, state, sessionId: 'sftp:x', batchId: 'b', name: id });
+  const setPending = (value: boolean) => { pending = value; notify(); };
+  const reset = () => {
+    store.setUi({ statuses: {} });
+    sftpStore.useSftpStore.setState({ transfers: [], preparing: [] });
+    setPending(false);
+  };
+
+  it('registers through setDatabaseQuitWork and holds the quit only while database work is pending', () => {
+    // initQuitGuard already ran above: the registration feeds its guard.
+    store.setUi({ statuses: {} });
+    sftpStore.useSftpStore.setState({ transfers: [], preparing: [] });
+    guard.setDatabaseQuitWork(work);
+    guards.length = 0;
+    setPending(true);
+    expect(guards).toEqual([true]);
+    setPending(false);
+    expect(guards).toEqual([true, false]);
+  });
+
+  it('asks about database work first and cancels the quit when it is cancelled', async () => {
+    const ask = handlers.get('app:confirm-quit')!;
+    reset();
+    workingState();
+    sftpStore.useSftpStore.setState({ transfers: [item('a', 'running')], preparing: [] });
+    setPending(true);
+    answers.length = 0;
+    ask();
+    expect(answers).toEqual(['asking']);
+    const db = store.getUi().dialog;
+    expect(db.title).toBe('Unsaved database work');
+    // A further Close while the database question is on screen: still asking, no second dialog.
+    ask();
+    expect(answers).toEqual(['asking', 'asking']);
+    expect(store.getUi().dialog.id).toBe(db.id);
+    db.onChoose(null);
+    await flush();
+    expect(answers.at(-1)).toBe('cancel');
+    expect(store.getUi().dialog).toBeNull();
+  });
+
+  it('then asks about transfers and then about agents, in that order, and cancels at each step', async () => {
+    const ask = handlers.get('app:confirm-quit')!;
+    // Quit anyway at every step: three dialogs in order, then quit.
+    reset();
+    workingState();
+    sftpStore.useSftpStore.setState({ transfers: [item('a', 'running')], preparing: [] });
+    setPending(true);
+    answers.length = 0;
+    const titles: string[] = [];
+    ask();
+    titles.push(store.getUi().dialog.title);
+    store.getUi().dialog.onChoose('quit');
+    await flush();
+    titles.push(store.getUi().dialog.title);
+    store.getUi().dialog.onChoose('quit');
+    await flush();
+    titles.push(store.getUi().dialog.title);
+    store.getUi().dialog.onChoose('close', false);
+    await flush();
+    expect(titles[0]).toBe('Unsaved database work');
+    expect(titles[1]).toBe('Quit while transfers are running?');
+    expect(titles[2]).toContain('agents');
+    expect(answers).toEqual(['asking', 'quit']);
+    // Cancel at the transfers step.
+    answers.length = 0;
+    ask();
+    store.getUi().dialog.onChoose('quit');
+    await flush();
+    expect(store.getUi().dialog.title).toBe('Quit while transfers are running?');
+    store.getUi().dialog.onChoose(null);
+    await flush();
+    expect(answers).toEqual(['asking', 'cancel']);
+    expect(store.getUi().dialog).toBeNull();
+    // Cancel at the agents step.
+    answers.length = 0;
+    ask();
+    store.getUi().dialog.onChoose('quit');
+    await flush();
+    store.getUi().dialog.onChoose('quit');
+    await flush();
+    const agents = store.getUi().dialog;
+    expect(agents.title).toContain('agents');
+    // A further Close during the last question is "still asking".
+    ask();
+    expect(answers).toEqual(['asking', 'asking']);
+    agents.onChoose(null);
+    await flush();
+    expect(answers).toEqual(['asking', 'asking', 'cancel']);
+  });
+
+  it('a database question replaced by another dialog answers cancel and never goes on to the next steps', async () => {
+    const ask = handlers.get('app:confirm-quit')!;
+    reset();
+    workingState();
+    setPending(true);
+    answers.length = 0;
+    ask();
+    const other = store.askChoice('Other', '', [{ label: 'Go', value: 'go' }]);
+    await flush();
+    expect(answers).toEqual(['asking', 'cancel']);
+    expect(store.getUi().dialog.title).toBe('Other');
+    store.getUi().dialog.onChoose('go');
+    await expect(other).resolves.toBe('go');
+  });
+
+  it('without pending database work there is no database question', async () => {
+    const ask = handlers.get('app:confirm-quit')!;
+    reset();
+    workingState();
+    asked.length = 0;
+    answers.length = 0;
+    ask();
+    expect(store.getUi().dialog.title).toContain('agents');
+    store.getUi().dialog.onChoose('close', false);
+    await flush();
+    expect(asked).toEqual([]);
+    expect(answers).toEqual(['asking', 'quit']);
+    // Nothing at all to ask about: the quit is not held.
+    store.setUi({ statuses: {} });
+    expect(guards.at(-1)).toBe(false);
+  });
+});

@@ -10,10 +10,12 @@ import {
 } from '../../../../shared/dbRedis';
 import {
   containsPattern, editorText, formatBytes, formatJson, hexDump, isJsonText, jsonError, jsonSaveText, lineEndings, savedText, validNewStreamId, validScore, writeOutcome,
+  type LineEndings,
 } from '../../../../shared/redisView';
 import { useI18n } from '../../i18n';
 import { askChoice, toast } from '../../store';
-import { resultText, withTab } from '../../redis/redisClient';
+import { refOf, resultText, withTab } from '../../redis/redisClient';
+import { draftSlot, getDraft, putDraft, recall, remember } from '../../redis/redisDrafts';
 import { IPlus, ISearch, IX } from '../icons';
 import { DataText, preview, RedisDialog, useOffline, VirtualList } from './common';
 import type { ValueProps } from './RedisValuePanel';
@@ -72,6 +74,29 @@ const copy = (tr: Tr, d: RedisData) => { window.mc.clipboardWrite(redisDataDispl
 
 /** Text typed into an editor as data (a binary value shown escaped cannot be typed back: hex is used for it). */
 const asData = (text: string): RedisData => text;
+
+// ── drafts ──────────────────────────────────────────────────────────────────
+// What is typed survives the view unmounting (another tab in front, another key chosen): it is kept per tab in redisDrafts
+// until it is saved, undone or the tab closes (which asks first).
+
+/** The draft slot of a part of this key's view (the DB, the type and the key bytes are part of it). */
+const slotOf = (p: ValueProps, type: string, part: string): string => draftSlot(refOf(p.tabId)?.db ?? 0, type, redisDataKey(p.keyName), part);
+
+/** A state kept as a draft of the tab while `isDraft` says it holds something unsaved (an input of a new item: no save of its own). */
+function useDraftState<T>(tabId: string, slot: string, initial: T, isDraft: (v: T) => boolean): [T, (v: T) => void, () => void] {
+  const [value, setValue] = useState<T>(() => getDraft<T>(tabId, slot) ?? initial);
+  const set = (v: T) => { setValue(v); putDraft(tabId, slot, isDraft(v) ? { value: v, save: null } : null); };
+  const clear = () => { setValue(initial); putDraft(tabId, slot, null); };
+  return [value, set, clear];
+}
+
+/** Which item a list view had open (by its bytes or index), restored after the view comes back; written once the first page arrived. */
+function useOpenItem(p: ValueProps, type: string, current: string | null, loaded: boolean): string | undefined {
+  const slot = slotOf(p, type, 'open');
+  const [wanted] = useState(() => recall<string>(p.tabId, slot));
+  useEffect(() => { if (loaded) remember(p.tabId, slot, current); }, [loaded, current]); // eslint-disable-line react-hooks/exhaustive-deps
+  return wanted;
+}
 
 // ── shared layout ───────────────────────────────────────────────────────────
 
@@ -134,17 +159,24 @@ function useWhole(blob: RedisBlob | null, load: () => Promise<RedisBlob | null>)
  * a CRLF value is edited with LF and saved with CRLF again; a value with mixed line endings cannot round-trip through a textarea,
  * so it is read-only here.
  */
-function useItemText(blob: RedisBlob | null): { shown: string; text: string | null; setText: (t: string) => void; canEdit: boolean; save: () => RedisData | null; note: string | null } {
+function useItemText(blob: RedisBlob | null, draft: { tabId: string; slot: string; save: (value: RedisData) => Promise<boolean> }): { shown: string; text: string | null; setText: (t: string | null) => void; canEdit: boolean; save: () => RedisData | null; note: string | null } {
   const { tr } = useI18n();
-  const [text, setText] = useState<string | null>(null);
+  const [text, setText] = useState<string | null>(() => getDraft<string>(draft.tabId, draft.slot) ?? null);
   const display = blob ? redisDataDisplay(blob.data) : '';
   const binary = !!blob && isBinaryData(blob.data);
   const eol = binary ? 'lf' : lineEndings(display);
   const canEdit = !!blob && !binary && eol !== 'mixed';
+  const original = canEdit ? editorText(display) : display;
+  // The edit is a draft of the tab while it differs from the loaded value (saved without the editor when the tab closes).
+  useEffect(() => {
+    if (!blob) return;
+    const value = text === null || !canEdit || text === original ? null : savedText(text, eol);
+    putDraft(draft.tabId, draft.slot, value === null ? null : { value: text, save: () => draft.save(value) });
+  }, [text, blob]); // eslint-disable-line react-hooks/exhaustive-deps
   const note = binary ? tr('Wartość binarna - pokazano bajty spoza tekstu jako \\xHH')
     : eol === 'mixed' ? tr('Wartość ma mieszane końce linii (CR, LF, CRLF) - edycja tekstowa jest wyłączona, żeby ich nie zmienić. Użyj konsoli.')
       : eol === 'crlf' ? tr('Końce linii CRLF zostaną zachowane.') : null;
-  return { shown: text ?? (canEdit ? editorText(display) : display), text, setText, canEdit, save: () => (text === null ? null : savedText(text, eol)), note };
+  return { shown: text ?? original, text, setText, canEdit, save: () => (text === null ? null : savedText(text, eol)), note };
 }
 
 function ValueBox({ item, readOnly }: { item: ReturnType<typeof useItemText>; readOnly: boolean }) {
@@ -160,27 +192,60 @@ function ValueBox({ item, readOnly }: { item: ReturnType<typeof useItemText>; re
 // ── string ──────────────────────────────────────────────────────────────────
 
 type StringMode = 'text' | 'json' | 'hex';
+/** A string edit kept while the view is away: the view it was typed in, the text, the TTL choice and how much was loaded. */
+interface StringDraft { mode: StringMode; text: string; keepTtl: boolean; maxBytes?: number }
+
+/** Saves a string edit (from the editor, or from the tab's close question without it): true when the write went through. */
+async function saveString(p: ValueProps, tr: Tr, d: { mode: StringMode; text: string; keepTtl: boolean; stored: string; eol: LineEndings }): Promise<boolean> {
+  // existing: a key that expired or was deleted while the editor was open is not created again (notFound reloads the panel).
+  const store = async (value: RedisData) => !!await write(p.tabId, { op: 'set', key: p.keyName, value, keepTtl: d.keepTtl, existing: true }, p, tr);
+  if (d.mode === 'hex') {
+    const value = redisDataFromHex(d.text);
+    if (value === null) { toast(tr('Nieprawidłowy zapis szesnastkowy'), 'error'); return false; }
+    return store(value);
+  }
+  if (d.mode === 'json') {
+    // The stored formatting is kept (pretty or compact); any other style is not rewritten without asking.
+    const plan = jsonSaveText(d.stored, d.text);
+    if (plan.kind === 'invalid') { toast(tr('Nieprawidłowy JSON: {error}', { error: jsonError(d.text) ?? '' }), 'error'); return false; }
+    if (plan.kind === 'save') return store(plan.text);
+    const choice = await askChoice(tr('Jak zapisać JSON?'), `${tr('Zapisana wartość ma własne formatowanie. Zapis z widoku JSON je zmieni.')}\n${p.where}`, [
+      { label: tr('Sformatowany'), value: 'pretty', primary: true }, { label: tr('Kompaktowy'), value: 'compact' },
+    ]);
+    if (choice === 'pretty') return store(plan.pretty);
+    if (choice === 'compact') return store(plan.compact);
+    return false;
+  }
+  const value = savedText(d.text, d.eol);
+  return value === null ? false : store(value);
+}
 
 export function StringView(p: ValueProps) {
   const { tr } = useI18n();
   const offline = useOffline();
+  const slot = slotOf(p, 'string', 'value');
+  const [kept] = useState(() => getDraft<StringDraft>(p.tabId, slot));
   const [blob, setBlob] = useState<RedisBlob | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<StringMode>('text');
-  const [draft, setDraft] = useState<string | null>(null);
-  const [keepTtl, setKeepTtl] = useState(true);
+  const [mode, setMode] = useState<StringMode>(kept?.mode ?? 'text');
+  const [draft, setDraft] = useState<string | null>(kept?.text ?? null);
+  const [keepTtl, setKeepTtl] = useState(kept?.keepTtl ?? true);
   const [busy, setBusy] = useState(false);
-  const load = async (maxBytes?: number) => {
+  const loadedMax = useRef<number | undefined>(kept?.maxBytes);
+  /** `keep`: the first load of a view that comes back keeps the draft from before (and the view it was typed in). */
+  const load = async (maxBytes?: number, keep = false) => {
     setError(null);
     const r = await read(p.tabId, { type: 'string', key: p.keyName, ...(maxBytes ? { maxBytes } : {}) });
     if (!r.ok) { setError(resultText(r)); return; }
     const v = r.value.value;
+    loadedMax.current = maxBytes;
     setBlob(v);
+    if (keep && getDraft(p.tabId, slot)) return;
     setDraft(null);
     const t = isBinaryData(v.data) ? null : v.data;
     setMode(t === null ? 'hex' : isJsonText(t) && lineEndings(t) === 'lf' ? 'json' : 'text');
   };
-  useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(kept?.maxBytes, true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const binary = !!blob && isBinaryData(blob.data);
   const stored = blob && !binary ? (blob.data as string) : '';
   // A textarea turns CR and CRLF into LF: CRLF text is edited with LF and saved with CRLF; mixed line endings only as hex.
@@ -191,13 +256,20 @@ export function StringView(p: ValueProps) {
     if (binary) return redisDataDisplay(blob.data);
     return mode === 'json' ? formatJson(stored) ?? stored : editorText(stored);
   }, [blob, mode, binary, stored]);
-  if (error) return <div className="redis-error-text pad" role="alert">{error}</div>;
-  if (!blob) return <div className="redis-center muted">{tr('Wczytywanie…')}</div>;
   const text = draft ?? sourceText;
   const dirty = draft !== null && draft !== sourceText;
-  const truncated = !!blob.truncated;
+  const truncated = !!blob?.truncated;
   const textBlocked = mode !== 'hex' && (binary || eol === 'mixed' || (mode === 'json' && eol !== 'lf'));
-  const editable = !p.readOnly && !truncated && !textBlocked && !(mode === 'hex' && blob.bytes > HEX_EDIT_BYTES);
+  const editable = !!blob && !p.readOnly && !truncated && !textBlocked && !(mode === 'hex' && blob.bytes > HEX_EDIT_BYTES);
+  // An unsaved edit is a draft of the tab (kept while another tab is in front, asked about when the tab closes or the app quits).
+  useEffect(() => {
+    if (!blob) return;
+    if (!dirty || !editable || draft === null) { putDraft(p.tabId, slot, null); return; }
+    const d = { mode, text: draft, keepTtl, stored, eol };
+    putDraft<StringDraft>(p.tabId, slot, { value: { mode, text: draft, keepTtl, maxBytes: loadedMax.current }, save: () => saveString(p, tr, d) });
+  }, [blob, draft, mode, keepTtl, dirty, editable]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (error) return <div className="redis-error-text pad" role="alert">{error}</div>;
+  if (!blob) return <div className="redis-center muted">{tr('Wczytywanie…')}</div>;
   const jsonProblem = mode === 'json' ? jsonError(text) : null;
   const switchMode = (next: StringMode) => {
     if (next === mode) return;
@@ -209,34 +281,11 @@ export function StringView(p: ValueProps) {
     } else setDraft(null);
     setMode(next);
   };
-  const store = async (value: RedisData) => {
-    setBusy(true);
-    // existing: a key that expired or was deleted while the editor was open is not created again (notFound reloads the panel).
-    const ok = await write(p.tabId, { op: 'set', key: p.keyName, value, keepTtl, existing: true }, p, tr);
-    setBusy(false);
-    if (ok) { toast(tr('Zapisano')); void load(); }
-  };
   const save = async () => {
-    if (mode === 'hex') {
-      const value = redisDataFromHex(text);
-      if (value === null) { toast(tr('Nieprawidłowy zapis szesnastkowy'), 'error'); return; }
-      await store(value);
-      return;
-    }
-    if (mode === 'json') {
-      // The stored formatting is kept (pretty or compact); any other style is not rewritten without asking.
-      const plan = jsonSaveText(stored, text);
-      if (plan.kind === 'invalid') { toast(tr('Nieprawidłowy JSON: {error}', { error: jsonProblem ?? '' }), 'error'); return; }
-      if (plan.kind === 'save') { await store(plan.text); return; }
-      const choice = await askChoice(tr('Jak zapisać JSON?'), `${tr('Zapisana wartość ma własne formatowanie. Zapis z widoku JSON je zmieni.')}\n${p.where}`, [
-        { label: tr('Sformatowany'), value: 'pretty', primary: true }, { label: tr('Kompaktowy'), value: 'compact' },
-      ]);
-      if (choice === 'pretty') await store(plan.pretty);
-      else if (choice === 'compact') await store(plan.compact);
-      return;
-    }
-    const value = savedText(text, eol);
-    if (value !== null) await store(value);
+    setBusy(true);
+    const ok = await saveString(p, tr, { mode, text, keepTtl, stored, eol });
+    setBusy(false);
+    if (ok) { putDraft(p.tabId, slot, null); toast(tr('Zapisano')); void load(loadedMax.current); }
   };
   return (
     <div className="redis-string">
@@ -292,9 +341,13 @@ export function HashView(p: ValueProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sel, setSel] = useState<number | null>(null);
-  const [adding, setAdding] = useState(false);
+  const addSlot = slotOf(p, 'hash', 'add');
+  const [adding, setAdding] = useState(() => getDraft(p.tabId, addSlot) !== undefined);
+  const [loaded, setLoaded] = useState(false);
   const token = useRef(0);
-  const load = async (reset: boolean) => {
+  const current = sel !== null ? entries[sel] : undefined;
+  const wanted = useOpenItem(p, 'hash', current ? redisDataKey(current.field) : null, loaded);
+  const load = async (reset: boolean, first = false) => {
     const t = ++token.current;
     setLoading(true); setError(null);
     const r = await read(p.tabId, { type: 'hash', key: p.keyName, cursor: reset ? '0' : cursor ?? '0', count: PAGE, match: containsPattern(search) });
@@ -303,13 +356,15 @@ export function HashView(p: ValueProps) {
     if (!r.ok) { setError(resultText(r)); return; }
     setEntries((cur) => (reset ? r.value.entries : dedupe(cur, r.value.entries, (e) => e.field)));
     setCursor(r.value.cursor);
-    if (reset) setSel(null);
+    // The field that was open before the view went away opens again (with its unsaved text).
+    if (reset) { const i = first && wanted ? r.value.entries.findIndex((e) => redisDataKey(e.field) === wanted) : -1; setSel(i >= 0 && !adding ? i : null); }
+    setLoaded(true);
   };
-  useEffect(() => { void load(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const current = sel !== null ? entries[sel] : undefined;
+  useEffect(() => { void load(true, true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const closeAdd = () => { setAdding(false); putDraft(p.tabId, addSlot, null); };
   return (
     <Items loading={loading} error={error} count={entries.length} more={cursor !== null && cursor !== '0'} onMore={() => void load(false)} empty={tr('Brak pól')}
-      sel={sel} onSel={(i) => { setSel(i); setAdding(false); }} label={tr('Pole')}
+      sel={sel} onSel={(i) => { setSel(i); closeAdd(); }} label={tr('Pole')}
       toolbar={<>
         <SearchField value={search} onChange={setSearch} onSubmit={() => void load(true)} label={tr('Szukaj pól')} />
         <span className="grow" />
@@ -318,13 +373,13 @@ export function HashView(p: ValueProps) {
       row={(i) => {
         const e = entries[i];
         return (
-          <div className={`redis-item two ${i === sel ? 'current' : ''}`} onClick={() => { setSel(i); setAdding(false); }}>
+          <div className={`redis-item two ${i === sel ? 'current' : ''}`} onClick={() => { setSel(i); closeAdd(); }}>
             <DataText data={e.field} className="redis-item-field" />
             <span className="redis-item-value">{preview(e.value.data)}{e.value.truncated ? <span className="redis-cut"> ({formatBytes(e.value.bytes)})</span> : null}</span>
           </div>
         );
       }}
-      editor={adding ? <AddPair tr={tr} first={tr('Pole')} second={tr('Wartość')} onClose={() => setAdding(false)} onAdd={async (field, value) => {
+      editor={adding ? <AddPair tr={tr} tabId={p.tabId} slot={addSlot} first={tr('Pole')} second={tr('Wartość')} onClose={closeAdd} onAdd={async (field, value) => {
         const r = await write(p.tabId, { op: 'hset', key: p.keyName, field, value, onlyNew: true, existing: true }, p, tr);
         if (!r) return false;
         if (r.changed === 0) { toast(tr('Takie pole już istnieje'), 'error'); return false; }
@@ -340,11 +395,13 @@ function HashEditor({ p, entry, onClose, onDone }: { p: ValueProps; entry: Redis
   const { tr } = useI18n();
   const offline = useOffline();
   const whole = useWhole(entry.value, () => readWhole(p.tabId, { type: 'hash', key: p.keyName, field: entry.field }));
-  const item = useItemText(whole.value);
+  const slot = slotOf(p, 'hash', `f:${redisDataKey(entry.field)}`);
+  const store = async (value: RedisData) => !!await write(p.tabId, { op: 'hset', key: p.keyName, field: entry.field, value, existing: true }, p, tr);
+  const item = useItemText(whole.value, { tabId: p.tabId, slot, save: store });
   const save = async () => {
     const value = item.save();
     if (value === null) return;
-    if (await write(p.tabId, { op: 'hset', key: p.keyName, field: entry.field, value, existing: true }, p, tr)) { toast(tr('Zapisano')); onDone(); }
+    if (await store(value)) { putDraft(p.tabId, slot, null); item.setText(null); toast(tr('Zapisano')); onDone(); }
   };
   const remove = async () => {
     if (!await confirmDelete(tr, tr('Usunąć pole?'), redisDataDisplay(entry.field), p.where)) return;
@@ -355,6 +412,7 @@ function HashEditor({ p, entry, onClose, onDone }: { p: ValueProps; entry: Redis
       <button className="btn small ghost" onClick={() => whole.value && copy(tr, whole.value.data)}>{tr('Kopiuj wartość')}</button>
       <span className="grow" />
       {!p.readOnly && <button className="btn small danger" disabled={offline} onClick={() => void remove()}>{tr('Usuń pole')}</button>}
+      {!p.readOnly && <button className="btn small redis-undo" disabled={item.text === null} onClick={() => item.setText(null)}>{tr('Cofnij zmiany')}</button>}
       {!p.readOnly && <button className="btn small primary redis-save" disabled={item.text === null || whole.loading || !item.canEdit || offline} onClick={() => void save()}>{tr('Zapisz')}</button>}
     </>}>
       {whole.loading ? <p className="muted">{tr('Wczytywanie…')}</p> : <ValueBox item={item} readOnly={p.readOnly} />}
@@ -362,12 +420,15 @@ function HashEditor({ p, entry, onClose, onDone }: { p: ValueProps; entry: Redis
   );
 }
 
-function AddPair({ tr, first, second, onAdd, onClose, secondCheck }: {
-  tr: Tr; first: string; second: string; onAdd: (a: string, b: string) => Promise<boolean>; onClose: () => void; secondCheck?: (b: string) => string | null;
+function AddPair({ tr, tabId, slot, first, second, onAdd, onClose, secondCheck }: {
+  tr: Tr; tabId: string; slot: string; first: string; second: string; onAdd: (a: string, b: string) => Promise<boolean>; onClose: () => void; secondCheck?: (b: string) => string | null;
 }) {
   const offline = useOffline();
-  const [a, setA] = useState('');
-  const [b, setB] = useState('');
+  // What is typed is a draft of the tab (an input of a new item: "Save" on closing the tab drops it).
+  const [pair, setPair] = useDraftState<[string, string]>(tabId, slot, ['', ''], ([x, y]) => !!(x || y));
+  const [a, b] = pair;
+  const setA = (v: string) => setPair([v, b]);
+  const setB = (v: string) => setPair([a, v]);
   const [error, setError] = useState<string | null>(null);
   const submit = async () => {
     if (!a) { setError(tr('Podaj nazwę pola')); return; }
@@ -400,10 +461,12 @@ export function ListView(p: ValueProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sel, setSel] = useState<number | null>(null);
-  const [push, setPush] = useState('');
+  const [push, setPush, clearPush] = useDraftState(p.tabId, slotOf(p, 'list', 'push'), '', (v) => v !== '');
   const [removeOpen, setRemoveOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const token = useRef(0);
-  const load = async (reset: boolean) => {
+  const wanted = useOpenItem(p, 'list', sel !== null ? String(sel) : null, loaded);
+  const load = async (reset: boolean, first = false) => {
     const t = ++token.current;
     setLoading(true); setError(null);
     const r = await read(p.tabId, { type: 'list', key: p.keyName, start: reset ? 0 : items.length, count: PAGE });
@@ -412,11 +475,13 @@ export function ListView(p: ValueProps) {
     if (!r.ok) { setError(resultText(r)); return; }
     setItems((cur) => (reset ? r.value.items : [...cur, ...r.value.items]));
     setLength(r.value.length);
-    if (reset) setSel(null);
+    // The element that was open before the view went away opens again (with its unsaved text).
+    if (reset) { const i = first && wanted !== undefined ? Number(wanted) : -1; setSel(i >= 0 && i < r.value.items.length ? i : null); }
+    setLoaded(true);
   };
-  useEffect(() => { void load(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(true, true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const doPush = async (op: 'lpush' | 'rpush') => {
-    if (await write(p.tabId, { op, key: p.keyName, items: [push], existing: true }, p, tr)) { setPush(''); void load(true); }
+    if (await write(p.tabId, { op, key: p.keyName, items: [push], existing: true }, p, tr)) { clearPush(); void load(true); }
   };
   const current = sel !== null ? items[sel] : undefined;
   return (
@@ -445,13 +510,15 @@ function ListEditor({ p, index, blob, onClose, onDone }: { p: ValueProps; index:
   const { tr } = useI18n();
   const offline = useOffline();
   const whole = useWhole(blob, () => readWhole(p.tabId, { type: 'list', key: p.keyName, index }));
-  const item = useItemText(whole.value);
   // The element must still hold what was loaded (else someone changed the list meanwhile: conflict).
   const expected = whole.value && !whole.value.truncated ? whole.value.data : undefined;
+  const slot = slotOf(p, 'list', `i:${index}`);
+  const store = async (value: RedisData) => !!await write(p.tabId, { op: 'lset', key: p.keyName, index, value, ...(expected !== undefined ? { expected } : {}) }, p, tr);
+  const item = useItemText(whole.value, { tabId: p.tabId, slot, save: store });
   const save = async () => {
     const value = item.save();
     if (value === null) return;
-    if (await write(p.tabId, { op: 'lset', key: p.keyName, index, value, ...(expected !== undefined ? { expected } : {}) }, p, tr)) { toast(tr('Zapisano')); onDone(); }
+    if (await store(value)) { putDraft(p.tabId, slot, null); item.setText(null); toast(tr('Zapisano')); onDone(); }
   };
   const remove = async () => {
     if (expected === undefined || !await confirmDelete(tr, tr('Usunąć element {index}?', { index }), preview(expected, 200), p.where)) return;
@@ -462,6 +529,7 @@ function ListEditor({ p, index, blob, onClose, onDone }: { p: ValueProps; index:
       <button className="btn small ghost" onClick={() => whole.value && copy(tr, whole.value.data)}>{tr('Kopiuj wartość')}</button>
       <span className="grow" />
       {!p.readOnly && <button className="btn small danger" disabled={expected === undefined || offline} onClick={() => void remove()}>{tr('Usuń element')}</button>}
+      {!p.readOnly && <button className="btn small redis-undo" disabled={item.text === null} onClick={() => item.setText(null)}>{tr('Cofnij zmiany')}</button>}
       {!p.readOnly && <button className="btn small primary redis-save" disabled={item.text === null || whole.loading || !item.canEdit || offline} onClick={() => void save()}>{tr('Zapisz')}</button>}
     </>}>
       {whole.loading ? <p className="muted">{tr('Wczytywanie…')}</p> : <ValueBox item={item} readOnly={p.readOnly} />}
@@ -512,7 +580,7 @@ export function SetView(p: ValueProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sel, setSel] = useState<number | null>(null);
-  const [add, setAdd] = useState('');
+  const [add, setAdd, clearAdd] = useDraftState(p.tabId, slotOf(p, 'set', 'add'), '', (v) => v !== '');
   const token = useRef(0);
   const load = async (reset: boolean) => {
     const t = ++token.current;
@@ -529,7 +597,7 @@ export function SetView(p: ValueProps) {
   const doAdd = async () => {
     if (!add) return;
     const r = await write(p.tabId, { op: 'sadd', key: p.keyName, members: [add], existing: true }, p, tr);
-    if (r) { if (r.changed === 0) toast(tr('Ten element już jest w zbiorze')); setAdd(''); void load(true); }
+    if (r) { if (r.changed === 0) toast(tr('Ten element już jest w zbiorze')); clearAdd(); void load(true); }
   };
   const remove = async (m: RedisData) => {
     if (!await confirmDelete(tr, tr('Usunąć element?'), preview(m, 200), p.where)) return;
@@ -573,9 +641,13 @@ export function ZsetView(p: ValueProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sel, setSel] = useState<number | null>(null);
-  const [adding, setAdding] = useState(false);
+  const addSlot = slotOf(p, 'zset', 'add');
+  const [adding, setAdding] = useState(() => getDraft(p.tabId, addSlot) !== undefined);
+  const [loaded, setLoaded] = useState(false);
   const token = useRef(0);
-  const load = async (reset: boolean, desc = rev) => {
+  const current = sel !== null ? entries[sel] : undefined;
+  const wanted = useOpenItem(p, 'zset', current ? redisDataKey(current.member) : null, loaded);
+  const load = async (reset: boolean, desc = rev, first = false) => {
     const t = ++token.current;
     setLoading(true); setError(null);
     const r = await read(p.tabId, { type: 'zset', key: p.keyName, start: reset ? 0 : entries.length, count: PAGE, rev: desc });
@@ -584,13 +656,15 @@ export function ZsetView(p: ValueProps) {
     if (!r.ok) { setError(resultText(r)); return; }
     setEntries((cur) => (reset ? r.value.entries : [...cur, ...r.value.entries]));
     setLength(r.value.length);
-    if (reset) setSel(null);
+    // The member that was open before the view went away opens again (with its unsaved score).
+    if (reset) { const i = first && wanted ? r.value.entries.findIndex((e) => redisDataKey(e.member) === wanted) : -1; setSel(i >= 0 && !adding ? i : null); }
+    setLoaded(true);
   };
-  useEffect(() => { void load(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const current = sel !== null ? entries[sel] : undefined;
+  useEffect(() => { void load(true, rev, true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const closeAdd = () => { setAdding(false); putDraft(p.tabId, addSlot, null); };
   return (
     <Items loading={loading} error={error} count={entries.length} more={entries.length < length} onMore={() => void load(false)} empty={tr('Zbiór jest pusty')}
-      sel={sel} onSel={(i) => { setSel(i); setAdding(false); }} label={tr('Element')}
+      sel={sel} onSel={(i) => { setSel(i); closeAdd(); }} label={tr('Element')}
       toolbar={<>
         <button className="btn small redis-sort" aria-label={tr('Sortuj wg wyniku')} onClick={() => { setRev(!rev); void load(true, !rev); }}>
           {rev ? tr('Wynik: malejąco') : tr('Wynik: rosnąco')}
@@ -599,13 +673,13 @@ export function ZsetView(p: ValueProps) {
         {!p.readOnly && <button className="btn small redis-add" disabled={offline} onClick={() => { setAdding(true); setSel(null); }}><IPlus /> {tr('Dodaj element')}</button>}
       </>}
       row={(i) => (
-        <div className={`redis-item zset ${i === sel ? 'current' : ''}`} onClick={() => { setSel(i); setAdding(false); }}>
+        <div className={`redis-item zset ${i === sel ? 'current' : ''}`} onClick={() => { setSel(i); closeAdd(); }}>
           <span className="redis-item-index">{rev ? length - 1 - i : i}</span>
           <DataText data={entries[i].member} className="redis-item-value" />
           <span className="redis-item-score">{entries[i].score}</span>
         </div>
       )}
-      editor={adding ? <AddPair tr={tr} first={tr('Element')} second={tr('Wynik')} onClose={() => setAdding(false)} secondCheck={(s) => (validScore(s) ? null : tr('Nieprawidłowy wynik'))}
+      editor={adding ? <AddPair tr={tr} tabId={p.tabId} slot={addSlot} first={tr('Element')} second={tr('Wynik')} onClose={closeAdd} secondCheck={(s) => (validScore(s) ? null : tr('Nieprawidłowy wynik'))}
         onAdd={async (member, score) => {
           // nx: adding never overwrites the score of a member that is already there.
           const r = await write(p.tabId, { op: 'zadd', key: p.keyName, entries: [[member, score.trim()]], mode: 'nx', existing: true }, p, tr);
@@ -621,10 +695,16 @@ export function ZsetView(p: ValueProps) {
 function ZsetEditor({ p, entry, onClose, onDone }: { p: ValueProps; entry: RedisZsetEntry; onClose: () => void; onDone: () => void }) {
   const { tr } = useI18n();
   const offline = useOffline();
-  const [score, setScore] = useState(entry.score);
+  const slot = slotOf(p, 'zset', `m:${redisDataKey(entry.member)}`);
+  const [score, setScoreState] = useState(() => getDraft<string>(p.tabId, slot) ?? entry.score);
+  const store = async (value: string): Promise<boolean> => {
+    if (!validScore(value)) { toast(tr('Nieprawidłowy wynik'), 'error'); return false; }
+    return !!await write(p.tabId, { op: 'zadd', key: p.keyName, entries: [[entry.member, value.trim()]], mode: 'xx', existing: true }, p, tr);
+  };
+  // A changed score is a draft of the tab (saved without the editor when the tab closes and the user chooses Save).
+  const setScore = (v: string) => { setScoreState(v); putDraft(p.tabId, slot, v !== entry.score ? { value: v, save: () => store(v) } : null); };
   const save = async () => {
-    if (!validScore(score)) { toast(tr('Nieprawidłowy wynik'), 'error'); return; }
-    if (await write(p.tabId, { op: 'zadd', key: p.keyName, entries: [[entry.member, score.trim()]], mode: 'xx', existing: true }, p, tr)) { toast(tr('Zapisano')); onDone(); }
+    if (await store(score)) { putDraft(p.tabId, slot, null); toast(tr('Zapisano')); onDone(); }
   };
   const remove = async () => {
     if (!await confirmDelete(tr, tr('Usunąć element?'), preview(entry.member, 200), p.where)) return;
@@ -655,7 +735,8 @@ export function StreamView(p: ValueProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sel, setSel] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<null | 'add' | 'trim'>(null);
+  const addSlot = slotOf(p, 'stream', 'add');
+  const [dialog, setDialog] = useState<null | 'add' | 'trim'>(() => (getDraft(p.tabId, addSlot) !== undefined ? 'add' : null));
   const token = useRef(0);
   const load = async (reset: boolean) => {
     const t = ++token.current;
@@ -706,19 +787,24 @@ export function StreamView(p: ValueProps) {
           </Editor>
         ) : undefined}
       />
-      {dialog === 'add' && <StreamAddDialog p={p} onClose={() => setDialog(null)} onDone={() => { setDialog(null); void load(true); }} />}
+      {dialog === 'add' && <StreamAddDialog p={p} slot={addSlot} onClose={() => { putDraft(p.tabId, addSlot, null); setDialog(null); }} onDone={() => { putDraft(p.tabId, addSlot, null); setDialog(null); void load(true); }} />}
       {dialog === 'trim' && <StreamTrimDialog p={p} length={length} onClose={() => setDialog(null)} onDone={() => { setDialog(null); void load(true); }} />}
     </>
   );
 }
 
-function StreamAddDialog({ p, onClose, onDone }: { p: ValueProps; onClose: () => void; onDone: () => void }) {
+interface StreamAddDraft { id: string; fields: Array<[string, string]> }
+
+function StreamAddDialog({ p, slot, onClose, onDone }: { p: ValueProps; slot: string; onClose: () => void; onDone: () => void }) {
   const { tr } = useI18n();
   const offline = useOffline();
-  const [id, setId] = useState('*');
-  const [fields, setFields] = useState<Array<[string, string]>>([['', '']]);
+  // The new entry being typed is a draft of the tab (an input of a new item: "Save" on closing the tab drops it).
+  const [form, setForm] = useDraftState<StreamAddDraft>(p.tabId, slot, { id: '*', fields: [['', '']] }, (d) => d.id !== '*' || d.fields.some(([f, v]) => !!(f || v)));
+  const { id, fields } = form;
+  const setId = (v: string) => setForm({ id: v, fields });
+  const setFields = (fn: (f: Array<[string, string]>) => Array<[string, string]>) => setForm({ id, fields: fn(fields) });
   const [error, setError] = useState<string | null>(null);
-  const set = (i: number, j: 0 | 1, v: string) => setFields((f) => f.map((pair, k) => (k === i ? (j === 0 ? [v, pair[1]] : [pair[0], v]) : pair)));
+  const set = (i: number, j: 0 | 1, v: string) => setFields((f) => f.map((pair, k): [string, string] => (k === i ? (j === 0 ? [v, pair[1]] : [pair[0], v]) : pair)));
   const submit = async () => {
     const pairs = fields.filter(([f]) => f);
     if (!pairs.length) { setError(tr('Podaj nazwę pola')); return; }

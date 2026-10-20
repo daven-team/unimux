@@ -12,6 +12,7 @@ import { tr } from '../i18n';
 import { askChoice, getS, setUi } from '../store';
 import { setDatabaseQuitWork } from '../closeGuard';
 import { useSshStore } from '../sshStore';
+import { confirmCloseRedis, redisDraftTotal, redisQuitLine, useRedisDrafts } from '../redis/redisDrafts';
 import { connectTab, dbErrorMessage, disconnectConnection, ensureShared, initDb, liveSessionsOf, onQuery, releaseTab, resultError, useDbStore } from './dbClient';
 
 // ── runtime state ───────────────────────────────────────────────────────────
@@ -444,6 +445,7 @@ export const stagedTabs = (): number => useFileStore.getState().documents.filter
 // ── closing ─────────────────────────────────────────────────────────────────
 
 async function confirmClose(doc: FileDocument): Promise<boolean> {
+  if (doc.redis) return confirmCloseRedis(doc);
   const ref = doc.db!;
   if (ref.kind === 'table') {
     const staged = stagedOf(doc.id);
@@ -491,26 +493,30 @@ export function initDbTabs(): void {
   initDb();
   setDbTabHooks({ confirmClose, closed });
   setDatabaseQuitWork({
-    pending: () => openTransactions() > 0 || stagedTabs() > 0,
+    pending: () => openTransactions() > 0 || stagedTabs() > 0 || redisDraftTotal() > 0,
     ask: confirmQuitDatabase,
     subscribe: (changed) => {
       useDbStore.subscribe((st, prev) => { if (st.sessions !== prev.sessions || st.tabSessions !== prev.tabSessions) changed(); });
       useFileStore.subscribe((st, prev) => { if (st.documents !== prev.documents) changed(); });
+      useRedisDrafts.subscribe((st, prev) => { if (st.drafts !== prev.drafts) changed(); });
     },
   });
 }
 
 /**
- * Resolves true when quitting may go on: no SQL tab has an open transaction and no table tab has staged edits, or the user
- * chose "Quit anyway" (transactions roll back; staged edits stay as drafts for the next start).
+ * Resolves true when quitting may go on: no SQL tab has an open transaction, no table tab has staged edits and no Redis tab has
+ * unsaved values, or the user chose "Quit anyway" (transactions roll back; staged edits stay as drafts for the next start; Redis
+ * values are lost).
  */
 async function confirmQuitDatabase(): Promise<boolean> {
   const tx = openTransactions();
   const staged = stagedTabs();
-  if (!tx && !staged) return true;
+  const redis = redisQuitLine();
+  if (!tx && !staged && !redis) return true;
   const lines = [
     ...(tx ? [tr('Otwarte transakcje: {count}. Zostaną wycofane (ROLLBACK).', { count: tx })] : []),
     ...(staged ? [tr('Tabele z niezapisanymi zmianami: {count}. Zmiany zostaną zachowane jako szkic.', { count: staged })] : []),
+    ...(redis ? [redis] : []),
   ];
   const choice = await askChoice(tr('Zamknąć aplikację z niezapisaną pracą w bazach danych?'), lines.join(' '), [
     { label: tr('Zakończ mimo to'), value: 'quit', danger: true },

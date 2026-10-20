@@ -14,6 +14,7 @@ import { activateFile, useFileStore, type FileDocument } from '../files';
 import { tr } from '../i18n';
 import { getS, setUi } from '../store';
 import { useSshStore } from '../sshStore';
+import { dropRedisDrafts } from './redisDrafts';
 import { sshContext } from '../ssh';
 
 /** Pub/Sub of one session: the subscriber's state and the received messages (kept while the tab is hidden). */
@@ -344,6 +345,7 @@ export function initRedis(): void {
     if (!closed.length) return;
     for (const tab of closed) {
       releaseTab(tab);
+      dropRedisDrafts(tab);
       for (const forget of forgetters) forget(tab);
     }
     useRedisStore.setState((cur) => {

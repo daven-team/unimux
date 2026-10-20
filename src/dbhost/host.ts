@@ -67,6 +67,8 @@ interface TunnelRecord {
   ready: Promise<void>;
   settle(error?: DbErrorCode | SshErrorCode): void;
   refs: Set<string>;
+  /** The login attempt: a session that takes over the login of a closed owner starts a new one (the old one's events are dropped). */
+  attempt: number;
 }
 
 /** pg and Node connect errors as the fixed codes the UI shows. */
@@ -213,7 +215,7 @@ export class DbHost {
       let settle!: TunnelRecord['settle'];
       const ready = new Promise<void>((resolve, reject) => { settle = (error) => (error ? reject(error) : resolve()); });
       ready.catch(() => undefined);
-      rec = { key: cfg.tunnelKey, owner: s.id, tunnel: null, state: 'waiting', ready, settle, refs: new Set() };
+      rec = { key: cfg.tunnelKey, owner: s.id, tunnel: null, state: 'waiting', ready, settle, refs: new Set(), attempt: 0 };
       this.tunnels.set(cfg.tunnelKey, rec);
       void this.openTunnel(s, rec);
     }
@@ -227,18 +229,22 @@ export class DbHost {
   }
 
   private async openTunnel(owner: Session, rec: TunnelRecord): Promise<void> {
+    const attempt = rec.attempt;
+    // False once another session took the login over: this attempt's events no longer count.
+    const mine = () => rec.attempt === attempt;
     const req = await new Promise<SshConnectRequest | null>((resolve) => {
       owner.sshWait = { resolve, timer: setTimeout(() => { owner.sshWait = null; resolve(null); }, this.timers.sshWaitMs) };
     });
-    if (rec.state !== 'waiting') return;
+    if (rec.state !== 'waiting' || !mine()) return;
     if (!req) { this.endTunnel(rec, this.live(owner) ? 'timeout' : 'cancelled'); return; }
     const target = owner.config.ssh!;
-    const ownerLive = () => this.live(owner);
+    const ownerLive = () => this.live(owner) && mine();
     const tunnel = new SshTunnel(req, { host: target.dbHost, port: target.dbPort }, {
       phase: (phase) => { if (ownerLive()) { this.status(owner, phase); this.out.toMain({ t: 'sshStatus', id: owner.id, phase }); } },
-      hostKey: (promptId, key) => this.out.toMain({ t: 'sshHostKey', id: owner.id, promptId, key }),
-      authPrompt: (promptId, prompt) => this.out.toMain({ t: 'sshAuthPrompt', id: owner.id, promptId, ...prompt }),
+      hostKey: (promptId, key) => { if (mine()) this.out.toMain({ t: 'sshHostKey', id: owner.id, promptId, key }); },
+      authPrompt: (promptId, prompt) => { if (mine()) this.out.toMain({ t: 'sshAuthPrompt', id: owner.id, promptId, ...prompt }); },
       ended: (error) => {
+        if (!mine()) return;
         if (error && ownerLive()) this.out.toMain({ t: 'sshStatus', id: owner.id, phase: 'error', error });
         this.endTunnel(rec, error);
       },
@@ -249,7 +255,7 @@ export class DbHost {
     try {
       await tunnel.start();
     } catch { return; } // ended() reported it
-    if (rec.state !== 'waiting') { tunnel.close(); return; }
+    if (rec.state !== 'waiting' || !mine()) { tunnel.close(); return; }
     rec.state = 'ready';
     if (ownerLive()) this.out.toMain({ t: 'sshStatus', id: owner.id, phase: 'connected' });
     rec.settle();
@@ -272,8 +278,27 @@ export class DbHost {
     s.tunnel = null;
     if (!rec || rec.state === 'ended') return;
     rec.refs.delete(s.id);
-    // The owner gave up before the login finished, or nobody uses the tunnel any more: it closes.
-    if (rec.refs.size === 0 || (rec.state === 'waiting' && rec.owner === s.id)) this.endTunnel(rec, 'cancelled');
+    // Nobody uses the tunnel any more: it closes.
+    if (rec.refs.size === 0) { this.endTunnel(rec, 'cancelled'); return; }
+    // The owner was closed before the login finished while other sessions wait on the tunnel: one of them takes the login over.
+    if (rec.state === 'waiting' && rec.owner === s.id) this.handOver(rec);
+  }
+
+  /**
+   * A waiting session becomes the owner of a tunnel whose login is not finished: the old attempt is dropped, the new owner waits
+   * for its own sshConnect, and main starts the coordinator's login for it ('dbTunnelOwner').
+   */
+  private handOver(rec: TunnelRecord): void {
+    const next = [...rec.refs].map((id) => this.sessions.get(id)).find((x): x is Session => !!x && this.live(x));
+    if (!next) { this.endTunnel(rec, 'cancelled'); return; }
+    rec.attempt++;
+    const old = rec.tunnel;
+    rec.tunnel = null;
+    old?.close();
+    rec.owner = next.id;
+    this.status(next, 'connecting');
+    void this.openTunnel(next, rec);
+    this.out.toMain({ t: 'dbTunnelOwner', id: next.id });
   }
 
   private endpoint(s: Session): { host: string; port: number; logicalHost: string } {

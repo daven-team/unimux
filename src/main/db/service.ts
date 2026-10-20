@@ -201,9 +201,34 @@ export class DbService<S extends DbStateLike = DbStateLike> {
     };
     if (!this.deps.host.send({ t: 'dbOpen', id, config })) { this.end(entry, 'error', 'dbHostCrashed'); return; }
     if (!c.ssh || !owner) return;
-    const r = await this.deps.coordinator.connectSession({ sessionId: id, hostId: c.ssh.hostId });
+    await this.loginTunnel(entry);
+  }
+
+  /** The coordinator's SSH login of a tunnel owner (the first session of a connection, or one that took a closed owner's login over). */
+  private async loginTunnel(entry: Entry): Promise<void> {
+    const id = entry.state.id;
+    const ssh = entry.connection.ssh;
+    if (!ssh) return;
+    const r = await this.deps.coordinator.connectSession({ sessionId: id, hostId: ssh.hostId });
     // The coordinator reports most failures as an 'error' state itself (onCoordinatorSession); one it refused up front is reported here.
-    if (!r.ok && this.sessions.get(id) === entry) { this.end(entry, 'error', r.error); this.deps.host.send({ t: 'dbClose', id }); }
+    if (!r.ok && this.sessions.get(id) === entry) this.failTunnelLogin(entry, r.error);
+  }
+
+  /**
+   * The SSH login of a tunnel failed: the sessions waiting on that tunnel end with the same error first (they would otherwise
+   * take the refused login over and ask again), then its owner.
+   */
+  private failTunnelLogin(entry: Entry, error: DbErrorCode): void {
+    const id = entry.state.id;
+    const t = entry.tunnelKey ? this.tunnels.get(entry.tunnelKey) : undefined;
+    for (const rider of [...(t?.refs ?? [])]) {
+      const e = this.sessions.get(rider);
+      if (rider === id || !e || e.state.state !== 'connecting') continue;
+      this.end(e, 'error', error);
+      this.deps.host.send({ t: 'dbClose', id: rider });
+    }
+    this.end(entry, 'error', error);
+    this.deps.host.send({ t: 'dbClose', id });
   }
 
   /** Ends a session in main: the last state goes out, prompts close, the coordinator forgets the tunnel. */
@@ -247,8 +272,7 @@ export class DbService<S extends DbStateLike = DbStateLike> {
   onCoordinatorSession(s: SshSessionState): void {
     const entry = this.sessions.get(s.cellId);
     if (!entry || s.phase !== 'error') return;
-    this.end(entry, 'error', s.error ?? 'tunnel');
-    this.deps.host.send({ t: 'dbClose', id: s.cellId });
+    this.failTunnelLogin(entry, s.error ?? 'tunnel');
   }
 
   onPrompt(sessionId: string, prompt: SshPrompt | null): void { if (this.sessions.has(sessionId)) this.deps.events.prompt(sessionId, prompt); }
@@ -285,6 +309,15 @@ export class DbService<S extends DbStateLike = DbStateLike> {
         return;
       }
       case 'dbPasswordPrompt': this.askPassword(m.id, m.promptId, m.retry); return;
+      case 'dbTunnelOwner': {
+        // The owner of this session's tunnel was closed during the login: this session logs the tunnel in now.
+        const entry = this.sessions.get(m.id);
+        if (!entry?.connection.ssh || !entry.tunnelKey) return;
+        const t = this.tunnels.get(entry.tunnelKey);
+        if (t) t.owner = m.id;
+        void this.loginTunnel(entry);
+        return;
+      }
       case 'dbTx': {
         const entry = this.sessions.get(m.id);
         if (!entry || entry.state.tx === m.tx) return;

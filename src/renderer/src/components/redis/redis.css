@@ -55,7 +55,7 @@
 .redis-seg button.on { background: var(--bg-3); color: var(--text); }
 .redis-seg button:disabled { opacity: .4; cursor: default; }
 .redis-new-key { display: inline-flex; align-items: center; gap: 4px; }
-.btn.small svg { flex: none; }
+.redis-view .btn.small svg { flex: none; }
 
 /* key browser */
 .redis-browser { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(260px, 38%) minmax(0, 1fr); }
