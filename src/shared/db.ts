@@ -249,6 +249,35 @@ export function upsertDbConnection<S extends DbStateLike>(s: S, c: DbConnection)
 
 export const removeDbConnection = <S extends DbStateLike>(s: S, id: string): S => ({ ...s, dbConnections: (s.dbConnections ?? []).filter((c) => c.id !== id) });
 
+/**
+ * Colours of the connection folders (1.0.3): folder name -> colour. A connection takes the colour of its folder (rows, tabs);
+ * one outside a folder has none. Only folders that still hold a connection keep theirs. A state from before 1.0.3 (`raw`
+ * absent) starts with the colour of the first coloured connection of each folder, so nothing changes colour on update.
+ */
+export function normalizeDbGroupColors(raw: unknown, connections: readonly DbConnection[]): Record<string, string> {
+  const groups = new Set(connections.map((c) => c.group).filter((g): g is string => !!g));
+  const out: Record<string, string> = {};
+  if (raw === undefined) {
+    for (const c of connections) if (c.group && c.color && !out[c.group]) out[c.group] = c.color;
+    return out;
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [name, color] of Object.entries(raw as Record<string, unknown>)) {
+    if (groups.has(name) && typeof color === 'string' && HEX_COLOR.test(color)) out[name] = color;
+  }
+  return out;
+}
+
+/** The colour a connection shows: its folder's, none outside a folder or for a folder without one. */
+export const dbConnectionColor = (colors: Readonly<Record<string, string>> | undefined, c: { group?: string }): string | undefined =>
+  (c.group ? colors?.[c.group] : undefined);
+
+/** Sets (or with `color` undefined removes) the colour of the folder `name`. */
+export function setDbGroupColor<S extends { dbGroupColors?: Record<string, string> }>(s: S, name: string, color: string | undefined): S {
+  const { [name]: _old, ...rest } = s.dbGroupColors ?? {};
+  return { ...s, dbGroupColors: color && HEX_COLOR.test(color) ? { ...rest, [name]: color } : rest };
+}
+
 /** A copy right after the original, named "<name> (2)" (the first free number). */
 export function duplicateDbConnection<S extends DbStateLike>(s: S, id: string, newId: string, now: number): S {
   const list = s.dbConnections ?? [];

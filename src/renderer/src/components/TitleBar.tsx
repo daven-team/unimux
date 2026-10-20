@@ -25,6 +25,7 @@ import type { RedisTabRef } from '../../../shared/redisView';
 import { viewLabel } from '../redis/redisClient';
 import type { DbTabRef } from '../../../shared/dbTabs';
 import { revealScroll, scrollEdges, stepScroll, stripTabColor, wheelScroll } from '../../../shared/tabStrip';
+import { dbConnectionColor } from '../../../shared/db';
 import { useSshStore } from '../sshStore';
 import { activateSshView, closeSshView, reconnectAllSsh, reconnectAllTargetsOf, sshHostMenuItems } from '../ssh';
 
@@ -79,6 +80,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
   const documents = useMemo(() => (JSON.parse(tabsKey) as Array<[string, string, string, string, boolean, boolean, FileSource | null, DbTabRef | null, RedisTabRef | null, boolean]>)
     .map(([id, projectId, name, relativePath, diff, dirty, source, db, redis, preview]): FileTab => ({ id, projectId, name, relativePath, diff, dirty, source, db, redis, preview })), [tabsKey]);
   const dbConnections = useStore((st) => st.s.dbConnections);
+  const dbGroupColors = useStore((st) => st.s.dbGroupColors);
   const dbConnection = (id: string) => dbConnections.find((c) => c.id === id);
   const sshHosts = useStore((st) => st.s.sshHosts);
   const hostLabel = (hostId: string) => sshHosts.find((h) => h.id === hostId)?.label ?? '?';
@@ -348,7 +350,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
           {documents.map((doc) => {
             if (doc.redis) {
               const c = dbConnection(doc.redis.connectionId);
-              const color = stripTabColor({ connection: c });
+              const color = stripTabColor({ connection: c ? { color: dbConnectionColor(dbGroupColors, c) } : null });
               return (
                 <div key={doc.id} {...dragProps(`file:${doc.id}`)} style={stripTabStyle(order.indexOf(`file:${doc.id}`), color)}
                   className={`tab file-tab redis-strip-tab ${activeKey === `file:${doc.id}` ? 'active' : ''}`} title={doc.relativePath}
@@ -365,7 +367,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
             const owner = projectById.get(doc.projectId);
             if (doc.db) {
               const c = dbConnection(doc.db.connectionId);
-              const color = stripTabColor({ connection: c });
+              const color = stripTabColor({ connection: c ? { color: dbConnectionColor(dbGroupColors, c) } : null });
               return (
                 <div key={doc.id} {...dragProps(`file:${doc.id}`)}
                   style={stripTabStyle(order.indexOf(`file:${doc.id}`), color)}

@@ -5,7 +5,7 @@ import { normalizeAlerts } from '../shared/alerts';
 import { normalizeSshHosts } from '../shared/ssh';
 import { normalizeSshIdentities } from '../shared/sshIdentity';
 import { normalizeSshThemeId } from '../shared/sshThemes';
-import { normalizeDbConnections } from '../shared/db';
+import { normalizeDbConnections, normalizeDbGroupColors } from '../shared/db';
 import { normalizeSftpPlaces } from '../shared/sftpView';
 import { normalizeScrollback } from '../shared/terminalLimits';
 import { normalizeWorkspaceOrder, sameOrder } from '../shared/workspaceOrder';
@@ -48,7 +48,7 @@ export class StateController {
         // Untouched projects keep their identity, so the change that is sent on is computed cheaply.
         return tabs.every((tab, i) => tab === project.tabs[i]) ? project : { ...project, tabs };
       });
-      const out: AppState = { ...next, sshHosts: normalizeSshHosts(next.sshHosts), sshIdentities, dbConnections, sftp: JSON.stringify(sftp) === JSON.stringify(next.sftp) ? next.sftp : sftp, settings: { ...next.settings, alerts: normalizeAlerts(next.settings.alerts), scrollbackLines: normalizeScrollback(next.settings.scrollbackLines), sshTheme: normalizeSshThemeId(next.settings.sshTheme) }, projects };
+      const out: AppState = { ...next, sshHosts: normalizeSshHosts(next.sshHosts), sshIdentities, dbConnections, dbGroupColors: normalizeDbGroupColors(next.dbGroupColors ?? {}, dbConnections), sftp: JSON.stringify(sftp) === JSON.stringify(next.sftp) ? next.sftp : sftp, settings: { ...next.settings, alerts: normalizeAlerts(next.settings.alerts), scrollbackLines: normalizeScrollback(next.settings.scrollbackLines), sshTheme: normalizeSshThemeId(next.settings.sshTheme) }, projects };
       // The strip order from the renderer is repaired like at load (known kinds of keys, open grids, no duplicates, a limit);
       // an order that needs no repair keeps its identity.
       const order = normalizeWorkspaceOrder(next.workspaceOrder, new Set(projects.flatMap((p) => p.tabs.map((t) => t.id))));

@@ -1,7 +1,7 @@
 // A Redis tab of the top strip (1.0.0): the connection bar (colour, name, endpoint, DB, version, TLS, read-only, switching to the
 // other views), the login of its session (DbLogin: SSH host key and password, the Redis password) and the view itself.
 import { lazy, Suspense, useEffect, useRef } from 'react';
-import { dbEndpoint, dbPhaseLabel } from '../../../../shared/db';
+import { dbConnectionColor, dbEndpoint, dbPhaseLabel } from '../../../../shared/db';
 import type { RedisTabRef, RedisTabView as View } from '../../../../shared/redisView';
 import { useFileStore } from '../../files';
 import { useI18n } from '../../i18n';
@@ -28,6 +28,7 @@ export function RedisTabView() {
   const ref = doc?.redis;
   const tabId = doc?.id ?? '';
   const connection = useStore((s) => (ref ? s.s.dbConnections?.find((c) => c.id === ref.connectionId) : undefined));
+  const groupColor = useStore((s) => (connection ? dbConnectionColor(s.s.dbGroupColors, connection) : undefined));
   const sshLabel = useStore((s) => (connection?.ssh ? s.s.sshHosts.find((h) => h.id === connection.ssh!.hostId)?.label ?? '?' : ''));
   const session = useRedisStore((st) => tabSessionState(st, tabId));
   const sessionId = useRedisStore((st) => st.tabSessions[tabId]);
@@ -47,7 +48,7 @@ export function RedisTabView() {
   const readOnly = session?.readOnly ?? connection.readOnly;
   const phase = session && session.state === 'connecting' ? dbPhaseLabel(session.phase) : null;
   return (
-    <div className="redis-view" style={{ ['--conn-color' as string]: connection.color ?? '#dc382d' }}>
+    <div className="redis-view" style={{ ['--conn-color' as string]: groupColor ?? '#dc382d' }}>
       <header className="redis-bar">
         <span className="redis-conn-dot" aria-hidden="true" />
         <strong className="redis-conn-name">{connection.name}</strong>

@@ -1,13 +1,12 @@
-// The connection form of the "Bazy danych" panel (1.0.0): type, name, colour, group, address, user, password (kept in the DB
-// vault; the form only says whether one is saved), database or DB index, TLS, the SSH tunnel through a saved host, read-only
-// and the statement timeout. "Testuj połączenie" connects with the typed values (login questions appear here) and says how it went.
+// The connection form of the "Bazy danych" panel (1.0.0): type, name, group (its folder, which also gives the colour since
+// 1.0.3), address, user, password (kept in the DB vault; the form only says whether one is saved), database or DB index, TLS,
+// the SSH tunnel through a saved host, read-only and the statement timeout. "Testuj połączenie" connects with the typed values (login questions appear here) and says how it went.
 import { useMemo, useState } from 'react';
 import { DB_DEFAULT_PORT, DB_TLS_MODES, dbConnectionToDraft, dbTlsModeLabel, validateDbDraft, type DbConnectionDraft, type DbDraftField, type DbKind, type DbPasswordChange, type DbTestResult, type DbTlsMode } from '../../../../shared/db';
 import type { MessageKey } from '../../../../shared/i18n';
 import { dbErrorMessage, useDbStore } from '../../db/dbClient';
 import { useI18n } from '../../i18n';
 import { closeModal, toast, useStore } from '../../store';
-import { ColorPicker } from '../ColorPicker';
 import { IX } from '../icons';
 import { Select } from '../Select';
 import { DbLogin } from './DbLogin';
@@ -100,10 +99,6 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
             <input className="input" list="db-groups" data-field="group" value={draft.group} maxLength={60} onChange={(e) => set({ group: e.target.value })} />
             <datalist id="db-groups">{groups.map((g) => <option key={g} value={g} />)}</datalist>
           </label>
-          <div className="ssh-field"><span>{tr('Kolor')}</span>
-            <div className="ssh-row"><ColorPicker value={draft.color ?? '#60a5fa'} label={tr('Kolor')} onChange={(color) => set({ color })} />
-              {draft.color && <button type="button" className="btn small ghost" onClick={() => set({ color: undefined })}>{tr('Usuń kolor')}</button>}</div>
-          </div>
         </div>
 
         <div className="ssh-section">

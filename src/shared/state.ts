@@ -17,7 +17,7 @@ import { normalizeSshIdentities } from './sshIdentity';
 import { DEFAULT_SSH_THEME, normalizeSshThemeId } from './sshThemes';
 import { defaultSftpPlaces, forgetRemotePlace, normalizeSftpPlaces } from './sftpView';
 import { normalizeWorkspaceOrder } from './workspaceOrder';
-import { normalizeDbConnections } from './db';
+import { normalizeDbConnections, normalizeDbGroupColors } from './db';
 import type {
   AppState, ArchivedTab, Cell, Preset, PresetCell, Profile, Project, Settings, Snippet, Tab, Worktree,
 } from './types';
@@ -40,6 +40,7 @@ export function defaultState(platform: AppPlatform = 'win32'): AppState {
     sshIdentities: [],
     sftp: defaultSftpPlaces(),
     dbConnections: [],
+    dbGroupColors: {},
     settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true, scrollbackLines: DEFAULT_SCROLLBACK_LINES, sshTheme: DEFAULT_SSH_THEME },
     sidebarCollapsed: false,
     snippetsOpen: true,
@@ -417,6 +418,7 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
   const r = raw as Partial<AppState>;
   if (r.version !== 1 || !Array.isArray(r.projects)) return null;
   const d = defaultState(platform);
+  const dbConnections = normalizeDbConnections(r.dbConnections);
   const remap = (id: string) => RETIRED_PROFILES[id] ?? id;
   const remapCells = <T extends { profileId: string }>(cells: T[]) => cells.map((c) => ({ ...c, profileId: remap(c.profileId) }));
   // A cell's path format override survives only as one of the known values; an SSH reference only as { hostId: string }.
@@ -449,7 +451,8 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
     sshHosts: normalizeSshHosts(r.sshHosts),
     sshIdentities: normalizeSshIdentities(r.sshIdentities),
     sftp: normalizeSftpPlaces(r.sftp),
-    dbConnections: normalizeDbConnections(r.dbConnections),
+    dbConnections,
+    dbGroupColors: normalizeDbGroupColors(r.dbGroupColors, dbConnections),
     settings: {
       ...d.settings, ...(r.settings ?? {}),
       // Existing Polish installations keep their UI and do not get first-run onboarding again.

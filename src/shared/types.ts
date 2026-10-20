@@ -191,6 +191,8 @@ export interface AppState {
   workspaceOrder?: string[];
   /** Saved database connections (1.0.0; no secrets: passwords live in <data>/db/vault.json, owned by main). */
   dbConnections: DbConnection[];
+  /** Colours of the connection folders (1.0.3, shared/db.ts normalizeDbGroupColors); a connection shows its folder's. */
+  dbGroupColors: Record<string, string>;
   settings: Settings;
   sidebarCollapsed: boolean;
   snippetsOpen: boolean;

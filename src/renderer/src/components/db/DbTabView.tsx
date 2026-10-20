@@ -2,7 +2,7 @@
 // its results, or the DDL of an object. The data and results live in db/tabs.ts, so switching tabs keeps them.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DbSort, DbValue } from '../../../../shared/db';
-import { DB_LIMITS, isTruncated } from '../../../../shared/db';
+import { DB_LIMITS, dbConnectionColor, isTruncated } from '../../../../shared/db';
 import { formatDbValue, parseDbInput, rowsToCsv, rowsToJson, splitSql, statementAt } from '../../../../shared/dbSql';
 import { addInsert, conflictRowIndex, isDeleted, rowOriginal, txToggle, parseStaged, removeInserts, rowKey, setInsertValue, stageCell, stagedCell, stagedCount, toggleDeletes, type DbRowKey, type DbStaged } from '../../../../shared/dbTabs';
 import { uid } from '../../../../shared/state';
@@ -38,11 +38,12 @@ export function DbTabView() {
 function TabHeader({ doc, sessionId, children }: { doc: FileDocument; sessionId: string | null; children?: React.ReactNode }) {
   const { tr } = useI18n();
   const connection = useStore((st) => st.s.dbConnections.find((c) => c.id === doc.db?.connectionId));
+  const color = useStore((st) => (connection ? dbConnectionColor(st.s.dbGroupColors, connection) : undefined));
   const session = useDbStore((st) => (sessionId ? st.sessions[sessionId] : undefined));
   const ref = doc.db!;
   return (
     <div className="db-tab-head">
-      <span className="db-color" style={{ background: connection?.color ?? 'var(--muted)' }} />
+      <span className="db-color" style={{ background: color ?? 'var(--muted)' }} />
       <strong className="db-tab-conn">{connection?.name ?? tr('To połączenie zostało usunięte')}</strong>
       <span className="db-tab-path">{ref.database}{ref.kind === 'table' ? ` · ${ref.schema}.${ref.table}` : ref.kind === 'ddl' ? ` · ${ref.schema}.${ref.name}` : ''}</span>
       {(session ? session.readOnly : connection?.readOnly) && <span className="db-ro" data-field="ro" title={tr('To połączenie jest tylko do odczytu')}>RO</span>}

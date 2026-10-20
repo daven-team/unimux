@@ -28,6 +28,8 @@
 .db-args { color: var(--muted); font-size: 11px; }
 .db-folder-name { color: var(--text-2); font-size: 11.5px; }
 .db-color { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+/* A folder's colour (right-click > colour) tints its icon; its connections show it in their tabs. */
+.db-group-icon { display: grid; place-items: center; flex: none; }
 .db-ro { flex: none; padding: 0 4px; border-radius: 3px; background: #f59e0b22; color: #fbbf24; font-size: 9.5px; font-weight: 700; line-height: 14px; }
 .db-state { flex: none; width: 7px; height: 7px; border-radius: 50%; margin-left: auto; background: transparent; border: 1px solid var(--border-2); }
 .db-state.connected { background: var(--waiting); border-color: var(--waiting); }

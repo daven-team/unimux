@@ -3,7 +3,8 @@
 // (dbTree says what an expanded node waits for) and the rows are windowed, so schemas with thousands of tables stay light.
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { openRedisTab, viewLabel } from '../../redis/redisClient';
-import { dbEndpoint, type DbConnection } from '../../../../shared/db';
+import { dbEndpoint, setDbGroupColor, type DbConnection } from '../../../../shared/db';
+import { PROJECT_COLORS } from '../../../../shared/state';
 import { buildDbTree, nodeKey, toggleNode, type DbFolder, type DbPart, type DbTreeRow } from '../../../../shared/dbTree';
 import { hasRows } from '../../../../shared/dbTabs';
 import { quoteIdent } from '../../../../shared/dbSql';
@@ -12,7 +13,7 @@ import type { MessageKey } from '../../../../shared/i18n';
 import { connectionState, ensureShared, initDb, isLive, refreshLoads, runLoad, sharedKey, useDbStore } from '../../db/dbClient';
 import { disconnectAsking, initDbTabs, openDdlTab, openSqlTab, openTableTab, openTransactions, pruneStoredHistory, stagedTabsOf } from '../../db/tabs';
 import { useI18n } from '../../i18n';
-import { askChoice, setUi, toast, useStore } from '../../store';
+import { askChoice, setUi, toast, update, useStore } from '../../store';
 import { openMenu, openMenuAt, type MenuItem } from '../ContextMenu';
 import { IChevron, IColumn, IDatabase, IFolder, IFunction, IKey, IPlus, ISequence, ITable, IView } from '../icons';
 import { EmptyLink, fillTokens, PanelEmpty } from '../PanelEmpty';
@@ -46,6 +47,7 @@ export const DbPanel = memo(function DbPanel() {
   const { tr } = useI18n();
   useEffect(() => { initDb(); initDbTabs(); }, []);
   const connections = useStore((st) => st.s.dbConnections);
+  const groupColors = useStore((st) => st.s.dbGroupColors);
   const sshHosts = useStore((st) => st.s.sshHosts);
   const sessions = useDbStore((st) => st.sessions);
   const shared = useDbStore((st) => st.shared);
@@ -125,6 +127,15 @@ export const DbPanel = memo(function DbPanel() {
   };
   const rowMenu = (row: DbTreeRow, x: number, y: number) => {
     if (row.type === 'connection') { connectionMenu(row.connection, x, y); return; }
+    if (row.type === 'group') {
+      // The colour belongs to the folder: its connections show it in their rows and tabs.
+      openMenu(x, y, [
+        { header: row.name },
+        { colors: PROJECT_COLORS, onPick: (color) => update((st) => setDbGroupColor(st, row.name, color)) },
+        ...(groupColors[row.name] ? [{ label: tr('Usuń kolor'), onClick: () => update((st) => setDbGroupColor(st, row.name, undefined)) }] : []),
+      ]);
+      return;
+    }
     const items: MenuItem[] = [];
     if (row.type === 'database') {
       items.push({ header: row.database }, { label: tr('Nowy edytor SQL tutaj'), onClick: () => openSqlTab(row.connectionId, row.database) },
@@ -223,13 +234,12 @@ export const DbPanel = memo(function DbPanel() {
     let body: React.ReactNode = null;
     let title: string | undefined;
     switch (row.type) {
-      case 'group': body = <><IFolder /><span className="db-name">{row.name}</span><span className="db-meta">{row.count}</span></>; break;
+      case 'group': body = <><span className="db-group-icon" style={groupColors[row.name] ? { color: groupColors[row.name] } : undefined}><IFolder /></span><span className="db-name">{row.name}</span><span className="db-meta">{row.count}</span></>; break;
       case 'connection': {
         const c = row.connection;
         const state = connectionState({ sessions }, c.id);
         title = `${c.name}\n${c.user ? `${c.user}@` : ''}${dbEndpoint(c)}${c.ssh ? `\n${tr('przez SSH: {host}', { host: hostLabel(c.ssh.hostId) })}` : ''}${c.readOnly ? `\n${tr('Tylko do odczytu')}` : ''}`;
         body = <>
-          <span className="db-color" style={{ background: c.color ?? 'var(--muted)' }} />
           <span title={c.kind === 'postgres' ? 'PostgreSQL' : 'Redis'}><DbKindIcon kind={c.kind} /></span>
           <span className="db-name">{c.name}</span>
           {c.readOnly && <span className="db-ro" title={tr('Tylko do odczytu')}>RO</span>}
