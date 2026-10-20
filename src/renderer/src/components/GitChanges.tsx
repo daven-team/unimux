@@ -18,7 +18,8 @@ interface Props {
   programsNote: string | null;
   opts: { worktree?: string };
   run(action: string, call: () => Promise<GitResult<GitOpResult>>, quiet?: boolean): Promise<boolean>;
-  onOpen(file: GitFileChange, source: Source): void;
+  /** `keep`: a double click keeps the diff tab; a single click opens it in the preview tab. */
+  onOpen(file: GitFileChange, source: Source, keep?: boolean): void;
   onMenu(e: React.MouseEvent, file: GitFileChange, source: Source): void;
   view: ChangesView;
   sort: ChangesSort;
@@ -76,7 +77,7 @@ export function GitChanges({ projectId, status, busy, writable, programsNote, op
           tabIndex={0}
           style={tree ? { paddingLeft: 14 + depth * 12 } : undefined}
           title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}
-          onClick={() => onOpen(file, source)}
+          onClick={(e) => onOpen(file, source, e.detail >= 2)}
           onKeyDown={(e) => { if (e.key === 'Enter') onOpen(file, source); }}
           onContextMenu={(e) => onMenu(e, file, source)}
         >

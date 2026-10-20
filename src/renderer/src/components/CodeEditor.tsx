@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { treeOpen } from '../files';
+import { registerEditorFocus, treeOpen } from '../files';
 import { basicSetup } from 'codemirror';
 import { Compartment, EditorState, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
@@ -119,7 +119,7 @@ export const theme = EditorView.theme({
   '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: '#bda35a55' },
 }, { dark: true });
 
-export function CodeEditor({ path, text, wrap, onChange }: { path: string; text: string; wrap: boolean; onChange: (text: string) => void }) {
+export function CodeEditor({ id, path, text, wrap, onChange }: { id: string; path: string; text: string; wrap: boolean; onChange: (text: string) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const changed = useRef(onChange);
@@ -141,6 +141,8 @@ export function CodeEditor({ path, text, wrap, onChange }: { path: string; text:
     treeOpen.keyboard = false;
     return () => { view.current = null; editor.destroy(); };
   }, [path]);
+  // A double click on the file in the tree when its editor is already on screen (files.ts focusFileEditor).
+  useEffect(() => registerEditorFocus(id, () => view.current?.focus()), [id]);
   useEffect(() => {
     const editor = view.current;
     if (!editor || text === emitted.current) return;

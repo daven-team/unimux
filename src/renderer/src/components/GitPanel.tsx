@@ -249,9 +249,9 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
     ]);
   };
 
-  const openDiff = (file: GitFileChange, source: 'working' | 'staged' | 'untracked') => {
+  const openDiff = (file: GitFileChange, source: 'working' | 'staged' | 'untracked', keep = false) => {
     if (file.path.endsWith('/')) return;
-    openDiffTab(projectId, { source, path: file.path, ...(file.origPath && source === 'staged' ? { oldPath: file.origPath } : {}), ...(worktree ? { worktree } : {}) });
+    openDiffTab(projectId, { source, path: file.path, ...(file.origPath && source === 'staged' ? { oldPath: file.origPath } : {}), ...(worktree ? { worktree } : {}) }, keep ? 'keep' : 'preview');
   };
 
   const fileMenu = (e: React.MouseEvent, file: GitFileChange, source: 'working' | 'staged' | 'untracked') => {

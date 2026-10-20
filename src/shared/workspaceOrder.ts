@@ -62,18 +62,18 @@ export function migrateWorkspaceOrders(legacy: unknown, projects: ReadonlyArray<
 }
 
 /**
- * The order with what is open now: surviving keys keep their place, closed ones are dropped. New grids go right after
- * `anchor` (the tab that was in front when they were opened), other new keys at the end.
+ * The order with what is open now: surviving keys keep their place, closed ones are dropped. New grids and file tabs go right
+ * after `anchor` (the tab that was in front when they were opened, like VS Code), Settings and the SSH view at the end.
  */
 export function mergeWorkspaceOrder(saved: readonly string[], available: readonly string[], anchor: string | null): string[] {
   const present = new Set(available);
   const kept = [...new Set(saved.filter((key) => present.has(key)))];
   const known = new Set(kept);
   const fresh = [...new Set(available.filter((key) => !known.has(key)))];
-  const grids = fresh.filter(isGridKey);
-  const others = fresh.filter((key) => !isGridKey(key));
+  const opened = fresh.filter((key) => !isFixedKey(key));
+  const others = fresh.filter(isFixedKey);
   const at = anchor ? kept.indexOf(anchor) : -1;
-  const out = at < 0 ? [...kept, ...grids] : [...kept.slice(0, at + 1), ...grids, ...kept.slice(at + 1)];
+  const out = at < 0 ? [...kept, ...opened] : [...kept.slice(0, at + 1), ...opened, ...kept.slice(at + 1)];
   return [...out, ...others];
 }
 

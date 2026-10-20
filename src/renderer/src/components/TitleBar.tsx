@@ -14,7 +14,7 @@ import { IChevron, IDatabase, IPlusBold, ISearch, ITable, IX, TGrid, THistory, T
 import { FileIcon } from './FileIcon';
 import { StatusBadges } from './StatusBadges';
 import { Brand } from './Brand';
-import { activateFile, closeFile, closeFiles, useFileStore, type FileDocument } from '../files';
+import { activateFile, closeFile, closeFiles, keepFile, useFileStore, type FileDocument } from '../files';
 import { useStatusCounts } from '../statusCounts';
 import { locateInFiles } from '../explorer';
 import { fullProjectPath } from '../../../shared/platform';
@@ -55,9 +55,9 @@ export const TitleBar = memo(function TitleBar() {
 });
 
 /** What a file tab shows (not the text): typing in the editor changes none of it except `dirty`. */
-interface FileTab { id: string; projectId: string; name: string; relativePath: string; diff: boolean; dirty: boolean; source: FileSource | null; db: DbTabRef | null; redis: RedisTabRef | null }
+interface FileTab { id: string; projectId: string; name: string; relativePath: string; diff: boolean; dirty: boolean; source: FileSource | null; db: DbTabRef | null; redis: RedisTabRef | null; preview: boolean }
 const fileTabsKey = (documents: readonly FileDocument[]): string =>
-  JSON.stringify(documents.map((d) => [d.id, d.projectId, d.name, d.relativePath, !!d.diff, d.text !== d.savedText, d.source ?? null, d.db ?? null, d.redis ?? null]));
+  JSON.stringify(documents.map((d) => [d.id, d.projectId, d.name, d.relativePath, !!d.diff, d.text !== d.savedText, d.source ?? null, d.db ?? null, d.redis ?? null, !!d.preview]));
 /** A tab of the project on screen, or of a file outside the projects (remote and local SFTP files show in every project). */
 const tabShown = (doc: { projectId: string }, projectId: string | undefined): boolean => !doc.projectId || doc.projectId === projectId;
 /** A strip tab's place in the order and its one colour (the chip, the active top line), from stripTabColor. */
@@ -75,8 +75,8 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
   const countsOf = useStatusCounts();
   const cliStatus = useStore((st) => st.ui.cliStatus);
   const tabsKey = useFileStore((st) => fileTabsKey(st.documents));
-  const documents = useMemo(() => (JSON.parse(tabsKey) as Array<[string, string, string, string, boolean, boolean, FileSource | null, DbTabRef | null, RedisTabRef | null]>)
-    .map(([id, projectId, name, relativePath, diff, dirty, source, db, redis]): FileTab => ({ id, projectId, name, relativePath, diff, dirty, source, db, redis })), [tabsKey]);
+  const documents = useMemo(() => (JSON.parse(tabsKey) as Array<[string, string, string, string, boolean, boolean, FileSource | null, DbTabRef | null, RedisTabRef | null, boolean]>)
+    .map(([id, projectId, name, relativePath, diff, dirty, source, db, redis, preview]): FileTab => ({ id, projectId, name, relativePath, diff, dirty, source, db, redis, preview })), [tabsKey]);
   const dbConnections = useStore((st) => st.s.dbConnections);
   const dbConnection = (id: string) => dbConnections.find((c) => c.id === id);
   const sshHosts = useStore((st) => st.s.sshHosts);
@@ -144,12 +144,16 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       const next = reorderWorkspace(order, drag.id, id, e.clientX > bounds.left + bounds.width / 2);
       // Across projects too; each project's grids follow the strip (the sidebar lists them in that order).
       if (next !== order) update((st) => ({ ...st, workspaceOrder: next, projects: syncTabsToOrder(st.projects, next) }));
+      if (next !== order && drag.id.startsWith('file:')) keepFile(drag.id.slice(5)); // a moved preview tab stays
       endDrag();
     },
   });
 
   // Many open tabs: the strip scrolls (wheel, arrows), keeps the active tab in view and has a list of all tabs.
   const stripRef = useRef<HTMLDivElement>(null);
+  // The tab under the first click of a double click (null for a close button): a double click keeps only that tab, never one
+  // that slid under the pointer because the first click closed a tab before it.
+  const firstClick = useRef<string | null>(null);
   const [edges, setEdges] = useState({ canLeft: false, canRight: false });
   const measure = () => {
     const el = stripRef.current;
@@ -267,7 +271,11 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
 
   return <div className="workspace-tabs" aria-label={tr('Gridy i pliki')}>
     {(edges.canLeft || edges.canRight) && <button className="tabs-scroll no-drag" disabled={!edges.canLeft} title={tr('Przewiń karty w lewo')} aria-label={tr('Przewiń karty w lewo')} onClick={() => scrollStrip(-1)}><span className="chev-left"><IChevron /></span></button>}
-    <div className="tabs no-drag" ref={stripRef} onScroll={measure}>
+    <div className="tabs no-drag" ref={stripRef} onScroll={measure}
+      onMouseDownCapture={(e) => {
+        const target = e.target as HTMLElement;
+        if (e.detail <= 1) firstClick.current = target.closest('.x') ? null : target.closest<HTMLElement>('[data-workspace-id]')?.dataset.workspaceId ?? null;
+      }}>
       {settingsTabOpen && <div {...dragProps('settings')} style={{ order: order.indexOf('settings') }} className={`tab settings-tab ${settingsActive ? 'active' : ''}`} onClick={() => setUi({ settingsActive: true })} onAuxClick={(e) => { if (e.button === 1) setUi({ settingsTabOpen: false, settingsActive: false }); }}>
         <span className="tab-type-icon"><TSettings /></span><span className="label">{tr('Ustawienia')}</span>
         <button className="x" aria-label={tr('Zamknij')} onClick={(e) => { e.stopPropagation(); setUi({ settingsTabOpen: false, settingsActive: false }); }}><IX /></button>
@@ -378,9 +386,12 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
             return (
             <div key={doc.id} {...dragProps(`file:${doc.id}`)} data-project-id={owner?.id}
               style={stripTabStyle(order.indexOf(`file:${doc.id}`), color)}
-              className={`tab file-tab ${activeKey === `file:${doc.id}` ? 'active' : ''}`}
-              title={doc.source ? sourceTitle(doc.source, doc.source.kind === 'remote' ? hostLabel(doc.source.hostId) : undefined) : `${doc.relativePath}${owner ? `\n${tr('Projekt: {name}', { name: owner.name })}` : ''}`}
-              onClick={() => activateFile(doc.id)} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void closeFile(doc.id); } }}
+              className={`tab file-tab ${activeKey === `file:${doc.id}` ? 'active' : ''} ${doc.preview ? 'preview' : ''}`}
+              title={(doc.source ? sourceTitle(doc.source, doc.source.kind === 'remote' ? hostLabel(doc.source.hostId) : undefined) : `${doc.relativePath}${owner ? `
+${tr('Projekt: {name}', { name: owner.name })}` : ''}`)
+                + (doc.preview ? `
+${tr('Podgląd: następny kliknięty plik zastąpi tę kartę. Dwuklik zachowuje ją na stałe.')}` : '')}
+              onClick={() => activateFile(doc.id)} onDoubleClick={() => { if (firstClick.current === `file:${doc.id}`) keepFile(doc.id); }} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void closeFile(doc.id); } }}
               onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
               onContextMenu={(e) => { e.preventDefault(); fileTabMenu(e.clientX, e.clientY, doc); }}>
               {color && <span className="tab-project" aria-hidden="true" />}
