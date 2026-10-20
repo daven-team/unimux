@@ -34,9 +34,15 @@ describe('commit button', () => {
   it('asks for a message, offers to stage everything when nothing is staged, else commits', () => {
     expect(commitPlan('fix', groupChanges([]))).toBe('nothing');
     expect(commitPlan('', groupChanges([]))).toBe('nothing');
-    expect(commitPlan('fix', groupChanges([conflict]))).toBe('nothing');
     expect(commitPlan('  \n', groupChanges([staged]))).toBe('ask');
     expect(commitPlan('fix', groupChanges([changed, untracked]))).toBe('stage-all');
     expect(commitPlan('fix', groupChanges([staged, changed]))).toBe('commit');
+  });
+  it('never stages or commits while conflicts are left (adding everything would mark them resolved, markers included)', () => {
+    expect(commitPlan('fix', groupChanges([conflict]))).toBe('conflicts');
+    expect(commitPlan('', groupChanges([conflict]))).toBe('conflicts');
+    expect(commitPlan('fix', groupChanges([conflict, untracked]))).toBe('conflicts');
+    expect(commitPlan('fix', groupChanges([conflict, changed]))).toBe('conflicts');
+    expect(commitPlan('fix', groupChanges([conflict, staged]))).toBe('conflicts');
   });
 });

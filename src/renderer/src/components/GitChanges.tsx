@@ -80,10 +80,12 @@ export function GitChanges({ projectId, status, busy, writable, programsNote, op
 
   /**
    * The Commit button, its shortcut and the check mark of the header: commits what is staged; without a message it asks for one,
-   * without staged files it offers to add everything first. `andPush` pushes afterwards (with the usual confirmation).
+   * without staged files it offers to add everything first, never while conflicts are left. `andPush` pushes afterwards (with the
+   * usual confirmation).
    */
   const commitNow = async (andPush = false) => {
     const plan = commitPlan(message, groups);
+    if (plan === 'conflicts') { toast(tr('Najpierw rozwiąż konflikty i dodaj rozwiązane pliki do commita.'), 'error'); return; }
     if (plan === 'nothing') { toast(tr('Brak zmian do zatwierdzenia.')); return; }
     if (plan === 'ask') { messageBox.current?.focus(); toast(tr('Wpisz opis commita.')); return; }
     if (plan === 'stage-all') {
@@ -208,13 +210,14 @@ export function GitChanges({ projectId, status, busy, writable, programsNote, op
 
   return (
     <section className={`git-changes ${open ? '' : 'collapsed'}`} aria-label={tr('Zmiany')}>
-      <div className="git-pane-head" onClick={() => setOpen((v) => !v)}>
+      <div className="git-pane-head with-branch" onClick={() => setOpen((v) => !v)}>
         <button className="git-pane-toggle" aria-expanded={open}>
           <span className={`tree-chevron ${open ? 'open' : ''}`}><IChevron /></span>
           <span className="git-pane-title">{tr('Zmiany')}</span>
         </button>
         <span className="git-pane-actions" onClick={(e) => e.stopPropagation()}>
-          {writable && committable && (
+          {/* Only with the section open: the message it commits (or asks for) is in the box below. */}
+          {open && writable && committable && (
             <button className="btn ghost icon small git-hover-action" disabled={busy} onClick={() => void commitNow()} title={titleWithShortcut(tr('Zatwierdź zmiany (commit)'), 'git.commit')} aria-label={tr('Zatwierdź zmiany (commit)')}><ICheck /></button>
           )}
           {branch}

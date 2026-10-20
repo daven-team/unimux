@@ -17,17 +17,21 @@
 .git-panel .tree-chevron { width: 16px; height: 16px; }
 .git-panel .tree-chevron svg { width: 12px; height: 12px; stroke-width: 1.5px; }
 
-/* Pane headers: the whole row toggles its section; the buttons on the right (always shown) do not. */
+/* Pane headers: the whole row toggles its section; the buttons on the right (always shown) do not. In a narrow panel the title
+   gives way (it ellipsizes) and the buttons keep their size. In the Changes header (with-branch) the title gives way first, down
+   to a few letters, then the branch name ellipsizes (it says more). */
 .git-pane-head { flex: none; display: flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px 0 4px; color: var(--git-head-text); cursor: pointer; user-select: none; }
 .git-pane-head:hover { background: var(--bg-hover); color: #d0d0d0; }
 .git-pane-head.static { cursor: default; }
 .git-pane-head.static:hover { background: transparent; color: var(--git-head-text); }
-.git-pane-toggle { flex: 1 0 auto; min-width: 0; height: 100%; display: flex; align-items: center; gap: 2px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: inherit; }
+.git-pane-toggle { flex: 1 1 auto; min-width: 0; height: 100%; display: flex; align-items: center; gap: 2px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: inherit; }
 .git-pane-toggle:focus-visible { outline: 1px solid var(--text-2); outline-offset: -1px; }
 .git-pane-head.static .git-pane-toggle { padding-left: 6px; }
 .git-pane-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .git-pane-head .git-back-chevron { transform: rotate(90deg); }
-.git-pane-actions { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 1px; cursor: default; }
+.git-pane-actions { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 1px; cursor: default; }
+.git-pane-head.with-branch .git-pane-toggle { flex-shrink: 100; min-width: 5.5em; }
+.git-pane-head.with-branch .git-pane-actions { flex: 0 1 auto; min-width: 0; }
 .git-panel .git-pane-actions .btn { flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; color: #a8a8a8; }
 .git-panel .git-pane-actions .btn:hover:not(:disabled), .git-panel .git-pane-actions .btn.on { background: #ffffff14; color: var(--text); }
 .git-panel .git-pane-actions .btn.git-sync { width: auto; min-width: 22px; padding: 0 3px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; }
@@ -39,7 +43,7 @@
 .git-pane-head:hover .git-hover-action, .git-pane-head:has(:focus-visible) .git-hover-action { display: inline-flex; }
 
 /* The branch switcher (right end of the Changes header) and the read-only bar */
-.git-branch { flex: 0 1 auto; min-width: 0; max-width: 100%; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 5px; border: 0; border-radius: 4px; background: transparent; color: #bdbdbd; font-size: 12px; cursor: pointer; }
+.git-branch { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 5px; border: 0; border-radius: 4px; background: transparent; color: #bdbdbd; font-size: 12px; cursor: pointer; }
 .git-branch:hover { background: #ffffff14; color: var(--text); }
 .git-branch:focus-visible { outline: 1px solid var(--text-2); outline-offset: -1px; }
 .git-branch svg { flex: none; display: block; color: #9a9a9a; }
@@ -194,7 +198,10 @@
 .git-trust-keys code { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 10.5px; overflow-wrap: anywhere; }
 .git-trust-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
-/* A narrow panel keeps the branch name readable: fetch stays in the "..." menu and the chevron goes. */
+/* A narrow panel keeps the branch name and the titles readable: fetch (then refresh) stays in the "..." menu and the chevron goes. */
 @container (max-width: 250px) {
   .git-panel .git-pane-actions .btn.git-fetch, .git-branch-chevron { display: none; }
+}
+@container (max-width: 215px) {
+  .git-panel .git-pane-actions .btn.git-refresh { display: none; }
 }

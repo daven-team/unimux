@@ -315,8 +315,9 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
     ]);
   };
 
-  const refreshButton = (
-    <button className={`btn ghost icon small ${spinning ? 'busy' : ''}`} onClick={() => void refreshNow()} title={spinning ? tr('Odświeżanie…') : tr('Odśwież')} aria-label={tr('Odśwież')} aria-busy={spinning}><RefreshIcon spinning={spinning} /></button>
+  /** `inMenu`: the "..." menu next to it has Refresh too, so a narrow panel may hide the button (gitPanel.css). */
+  const refreshButton = (inMenu = false) => (
+    <button className={`btn ghost icon small ${inMenu ? 'git-refresh' : ''} ${spinning ? 'busy' : ''}`} onClick={() => void refreshNow()} title={spinning ? tr('Odświeżanie…') : tr('Odśwież')} aria-label={tr('Odśwież')} aria-busy={spinning}><RefreshIcon spinning={spinning} /></button>
   );
 
   if (trustError && !trust) {
@@ -340,7 +341,7 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
           <span className="git-badge conflict" title={tr('Tryb tylko do odczytu')}>{tr('Tryb tylko do odczytu')}</span>
         </div>
         <TrustBanner keys={trust.keys} folded={folded} onFold={() => setFolded(true)} onTrust={() => void grantTrust()} />
-        <GitHistory projectId={projectId} historyKey={`ro:${readOnlyHead?.name ?? ''}:${readOnlyHead?.hash ?? ''}`} initial={false} opts={opts} nonce={nonce} actions={refreshButton} />
+        <GitHistory projectId={projectId} historyKey={`ro:${readOnlyHead?.name ?? ''}:${readOnlyHead?.hash ?? ''}`} initial={false} opts={opts} nonce={nonce} actions={refreshButton()} />
       </div>
     );
   }
@@ -381,7 +382,7 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
       <button className={`btn ghost icon small git-sync ${status.ahead > 0 ? 'up' : ''}`} disabled={!!busy || !canWrite || !status.push || (!status.ahead && !status.push.setUpstream)} onClick={() => void pushNow()} aria-label={pushLabel} title={pushLabel}>
         {busy === 'Push' ? '…' : <><GitTransferIcon kind="push" />{status.ahead > 0 && <span className="git-sync-count">{status.ahead}</span>}</>}
       </button>
-      {refreshButton}
+      {refreshButton(true)}
       <button className="btn ghost icon small" onClick={(e) => openOverflow(e.currentTarget)} title={tr('Więcej akcji Git')} aria-label={tr('Więcej akcji Git')} aria-haspopup="menu"><IMore /></button>
     </>
   );

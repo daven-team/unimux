@@ -56,11 +56,13 @@ export const hasCommittable = (groups: Record<ChangeGroup, readonly GitFileChang
   groups.staged.length + groups.unstaged.length + groups.untracked.length > 0;
 
 /**
- * What the Commit button (and its shortcut) does now: `nothing` to commit, `ask` for a message first, `stage-all` (nothing is
- * staged yet: offer to add every change and commit them together, as Cursor does) or `commit` what is staged.
+ * What the Commit button (and its shortcut) does now: `conflicts` to resolve first (git refuses a commit with unmerged files, and
+ * adding everything would mark them resolved with their conflict markers inside), `nothing` to commit, `ask` for a message first,
+ * `stage-all` (nothing is staged yet: offer to add every change and commit them together, as Cursor does) or `commit` what is staged.
  */
-export type CommitPlan = 'nothing' | 'ask' | 'stage-all' | 'commit';
+export type CommitPlan = 'conflicts' | 'nothing' | 'ask' | 'stage-all' | 'commit';
 export function commitPlan(message: string, groups: Record<ChangeGroup, readonly GitFileChange[]>): CommitPlan {
+  if (groups.conflict.length) return 'conflicts';
   if (!hasCommittable(groups)) return 'nothing';
   if (!message.trim()) return 'ask';
   return groups.staged.length ? 'commit' : 'stage-all';
