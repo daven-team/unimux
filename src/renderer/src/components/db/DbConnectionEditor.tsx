@@ -82,7 +82,8 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
         <h3>{connection ? connection.name : tr('Nowe połączenie')}</h3>
         <button className="btn ghost icon" aria-label={tr('Zamknij')} onClick={closeModal}><IX /></button>
       </div>
-      <form className="modal-body ssh-editor db-form" onSubmit={(e) => { e.preventDefault(); void save(); }}>
+      {/* A login question of "Testuj połączenie" is a form inside this one: its submit bubbles here and must not save and close. */}
+      <form className="modal-body ssh-editor db-form" onSubmit={(e) => { e.preventDefault(); if (e.target === e.currentTarget) void save(); }}>
         <div className="ssh-row">
           <label className="ssh-field"><span>{tr('Typ')}</span>
             <Select className="select" value={draft.kind} data-field="kind" disabled={!!connection} onChange={(e) => setKind(e.target.value as DbKind)}>

@@ -93,18 +93,15 @@ describe('Redis through DbService', () => {
     await waitFor(() => s.connections() === 0);
   });
 
-  it('tests a Redis connection (and a wrong password)', async () => {
+  it('tests a Redis connection (and a wrong password ends the test without asking again)', async () => {
     const s = await startRespServer({ password: 'pw' });
     servers.push(s);
     const c = chain({ kind: 'redis', name: 'x', host: '127.0.0.1', port: s.port, user: '', dbIndex: 0, tls: 'disable', ssh: null, readOnly: false });
     const input = { kind: 'redis' as const, name: 'form', host: '127.0.0.1', port: s.port, user: '', dbIndex: 0, tls: 'disable' as const, ssh: null, readOnly: false };
     expect(await c.service.testConnection(input, { set: 'pw' })).toMatchObject({ ok: true, serverVersion: '7.2.4' });
-    const bad = c.service.testConnection(input, { set: 'nope' });
-    await waitFor(() => c.sessions.some((x) => x.test) && [...c.sessions].reverse().some((x) => c.open(x.id)?.kind === 'dbPassword'));
-    const sid = [...c.sessions].reverse().find((x) => c.open(x.id)?.kind === 'dbPassword')!.id;
-    expect(c.open(sid)).toMatchObject({ retry: true, canSave: false });
-    c.service.answer({ sessionId: sid, promptId: c.open(sid)!.id, cancel: true });
-    expect(await bad).toEqual({ ok: false, error: 'cancelled' });
+    const bad = await c.service.testConnection(input, { set: 'nope' });
+    expect(bad).toMatchObject({ ok: false, error: 'dbAuth' });
+    expect(c.sessions.some((x) => c.open(x.id)?.kind === 'dbPassword')).toBe(false);
   });
 });
 

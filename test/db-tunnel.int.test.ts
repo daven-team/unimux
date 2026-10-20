@@ -301,12 +301,9 @@ describe('DbService behind the SSH coordinator (main chain)', () => {
     const ok = await c.service.testConnection(input, { set: 'dbpw' });
     expect(ok).toMatchObject({ ok: true, serverVersion: '16.4 (fake)' });
     await waitFor(() => c.service.ids().length === 0);
-    const bad = c.service.testConnection(input, { set: 'nope' });
-    await waitFor(() => c.prompts.some((p) => p.prompt?.kind === 'dbPassword'));
-    const p = [...c.prompts].reverse().find((x) => x.prompt?.kind === 'dbPassword')!;
-    expect(p.prompt).toMatchObject({ retry: true, canSave: false });
-    c.service.answer({ sessionId: p.id, promptId: p.prompt!.id, cancel: true });
-    expect(await bad).toEqual({ ok: false, error: 'cancelled' });
+    // The form's password was refused: the test says so instead of asking for another one.
+    expect(await c.service.testConnection(input, { set: 'nope' })).toMatchObject({ ok: false, error: 'dbAuth' });
+    expect(c.prompts.some((p) => p.prompt?.kind === 'dbPassword')).toBe(false);
     expect(c.dbVault.info().saved).toEqual([]);
   });
 });

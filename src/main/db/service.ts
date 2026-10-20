@@ -47,6 +47,8 @@ interface Entry {
   /** A typed password to save once the session connected ("Zapamiętaj"). */
   pendingSave?: string;
   test?: (r: DbTestResult) => void;
+  /** A test was refused with the form's password: it ends as a wrong password instead of asking again. */
+  testAuthFailed?: true;
   started: number;
   /** The shared SSH tunnel this session uses (key of `tunnels`). */
   tunnelKey?: string;
@@ -253,7 +255,7 @@ export class DbService<S extends DbStateLike = DbStateLike> {
     if (entry.test) {
       const done = entry.test;
       entry.test = undefined;
-      done({ ok: false, error: error ?? 'dbClosed', ...(message ? { message } : {}) });
+      done({ ok: false, error: entry.testAuthFailed && error === 'cancelled' ? 'dbAuth' : error ?? 'dbClosed', ...(message ? { message } : {}) });
     }
     // Out of the coordinator's own loop (it may be iterating its sessions right now).
     queueMicrotask(() => this.deps.coordinator.endSession(id));
@@ -356,6 +358,12 @@ export class DbService<S extends DbStateLike = DbStateLike> {
   private askPassword(id: string, hostPromptId: string, retry: boolean): void {
     const entry = this.sessions.get(id);
     if (!entry) { this.deps.host.send({ t: 'dbPasswordAnswer', id, promptId: hostPromptId, value: null }); return; }
+    // "Testuj połączenie" checks the form's password: a refused one is the answer, the user fixes it in the form.
+    if (entry.state.test && retry) {
+      entry.testAuthFailed = true;
+      this.deps.host.send({ t: 'dbPasswordAnswer', id, promptId: hostPromptId, value: null });
+      return;
+    }
     if (entry.own) this.clearTimer(entry.own.timer);
     const c = entry.connection;
     const promptId = randomUUID();
