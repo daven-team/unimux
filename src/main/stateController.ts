@@ -3,6 +3,7 @@ import type { AppState } from '../shared/types';
 import { layoutForCount, MAX_CELLS } from '../shared/layout';
 import { normalizeAlerts } from '../shared/alerts';
 import { normalizeSshHosts } from '../shared/ssh';
+import { normalizeSshIdentities } from '../shared/sshIdentity';
 import { normalizeDbConnections } from '../shared/db';
 import { normalizeSftpPlaces } from '../shared/sftpView';
 import { normalizeScrollback } from '../shared/terminalLimits';
@@ -36,6 +37,8 @@ export class StateController {
       // Database connections edited in the renderer (reordering, grouping) are normalized like SSH hosts.
       const db = normalizeDbConnections(next.dbConnections);
       const dbConnections = JSON.stringify(db) === JSON.stringify(next.dbConnections) ? next.dbConnections : db;
+      const identities = normalizeSshIdentities(next.sshIdentities);
+      const sshIdentities = JSON.stringify(identities) === JSON.stringify(next.sshIdentities) ? next.sshIdentities : identities;
       const projects = next.projects.map((project) => {
         const tabs = project.tabs.map((tab) => {
           if (tab.cells.length < 1 || tab.cells.length > MAX_CELLS) throw new Error('Concurrent grid change exceeds the cell limit.');
@@ -44,7 +47,7 @@ export class StateController {
         // Untouched projects keep their identity, so the change that is sent on is computed cheaply.
         return tabs.every((tab, i) => tab === project.tabs[i]) ? project : { ...project, tabs };
       });
-      const out: AppState = { ...next, sshHosts: normalizeSshHosts(next.sshHosts), dbConnections, sftp: JSON.stringify(sftp) === JSON.stringify(next.sftp) ? next.sftp : sftp, settings: { ...next.settings, alerts: normalizeAlerts(next.settings.alerts), scrollbackLines: normalizeScrollback(next.settings.scrollbackLines) }, projects };
+      const out: AppState = { ...next, sshHosts: normalizeSshHosts(next.sshHosts), sshIdentities, dbConnections, sftp: JSON.stringify(sftp) === JSON.stringify(next.sftp) ? next.sftp : sftp, settings: { ...next.settings, alerts: normalizeAlerts(next.settings.alerts), scrollbackLines: normalizeScrollback(next.settings.scrollbackLines) }, projects };
       // The strip order from the renderer is repaired like at load (known kinds of keys, open grids, no duplicates, a limit);
       // an order that needs no repair keeps its identity.
       const order = normalizeWorkspaceOrder(next.workspaceOrder, new Set(projects.flatMap((p) => p.tabs.map((t) => t.id))));

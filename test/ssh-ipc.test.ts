@@ -9,12 +9,14 @@ import { KnownHostsStore } from '../src/main/ssh/knownHosts';
 import { SshVault } from '../src/main/ssh/vault';
 import { layoutForCount } from '../src/shared/layout';
 import { addProject, addSshHost, addTab, defaultState } from '../src/shared/state';
+import { upsertSshIdentity } from '../src/shared/sshIdentity';
 import type { AppState } from '../src/shared/types';
 import { fakeCertificate, fakeCipher, ppkV2Rsa, readableKeyPair } from './helpers/sshKeys';
 
 const HOST = '00000000-0000-4000-8000-000000000001';
+const IDENTITY = '00000000-0000-4000-8000-0000000000a1';
 const pair = readableKeyPair('ed25519', { passphrase: 'ipc-pass-phrase', cipher: 'aes256-ctr', rounds: 16 });
-const SECRETS = [pair.private.split('\n')[1], 'ipc-pass-phrase', 'ipc-host-password'];
+const SECRETS = [pair.private.split('\n')[1], 'ipc-pass-phrase', 'ipc-host-password', 'ipc-identity-password'];
 const leaks = (value: unknown) => SECRETS.filter((s) => JSON.stringify(value ?? null).includes(s));
 
 let dir: string;
@@ -106,6 +108,35 @@ describe('ssh IPC handlers', () => {
     expect(leaks(await h.vaultInfo())).toEqual([]);
     expect((await h.vaultInfo()).savedPasswords).toEqual([HOST]);
     expect(await h.clearPassword({ hostId: HOST })).toEqual({ ok: true });
+  });
+
+  it('stores identity passwords only for identities in the state, without echoing them', async () => {
+    const h = createSshHandlers(deps);
+    expect(await h.setIdentityPassword({ identityId: IDENTITY, password: 'ipc-identity-password' })).toEqual({ ok: false, error: 'notFound' });
+    state = upsertSshIdentity(state, { id: IDENTITY, label: 'me', username: 'me', createdAt: 0, updatedAt: 0 });
+    expect(await h.setIdentityPassword({ identityId: IDENTITY, password: 'x'.repeat(1025) })).toEqual({ ok: false, error: 'invalid' });
+    expect(await h.setIdentityPassword({ identityId: 'not-a-uuid', password: 'p' })).toEqual({ ok: false, error: 'invalid' });
+    expect(await h.setIdentityPassword({ identityId: IDENTITY, password: '' })).toEqual({ ok: false, error: 'invalid' });
+    expect(await h.setIdentityPassword({ identityId: IDENTITY, password: 'p', hostId: HOST })).toEqual({ ok: false, error: 'invalid' });
+    const r = await h.setIdentityPassword({ identityId: IDENTITY, password: 'ipc-identity-password' });
+    expect(r).toEqual({ ok: true, ephemeral: false });
+    const info = await h.vaultInfo();
+    expect(leaks(info)).toEqual([]);
+    expect(info).toMatchObject({ savedPasswords: [], savedIdentityPasswords: [IDENTITY], lockedIdentityPasswords: [] });
+    expect(deps.vault.identityPassword(IDENTITY)).toEqual({ ok: true, password: 'ipc-identity-password' });
+    expect(deps.vaultChanged).toHaveBeenCalled();
+    expect(await h.clearIdentityPassword({ identityId: 'nope' })).toEqual({ ok: false });
+    expect(await h.clearIdentityPassword({ identityId: IDENTITY })).toEqual({ ok: true });
+    expect((await h.vaultInfo()).savedIdentityPasswords).toEqual([]);
+  });
+
+  it('clears a deleted key from hosts and identities', async () => {
+    const h = createSshHandlers(deps);
+    const generated = await h.generateKey({ label: 'gen', type: 'ed25519', savePassphrase: false });
+    if (!generated.ok) throw new Error('generate');
+    state = upsertSshIdentity(state, { id: IDENTITY, label: 'me', username: 'me', keyId: generated.key.id, createdAt: 0, updatedAt: 0 });
+    expect(await h.removeKey({ id: generated.key.id })).toEqual({ ok: true });
+    expect(state.sshIdentities[0].keyId).toBeUndefined();
   });
 
   it('answers nothing to a window that is not the app window (R9)', async () => {
@@ -208,6 +239,8 @@ describe('ssh IPC handlers', () => {
     const stored = await h.commitDraft({ draftId: draft.draftId, label: 'stored', savePassphrase: true });
     if (!stored.ok) throw new Error('commit');
     await h.setPassword({ hostId: HOST, password: 'ipc-host-password' });
+    state = upsertSshIdentity(state, { id: IDENTITY, label: 'me', username: 'me', createdAt: 0, updatedAt: 0 });
+    await h.setIdentityPassword({ identityId: IDENTITY, password: 'ipc-identity-password' });
     const ready = await h.draftFromText({ privateKey: pair.private });
     if (!ready.ok) throw new Error('draft');
     const cellId = state.projects[0].tabs[0].cells[0].id;
@@ -226,6 +259,8 @@ describe('ssh IPC handlers', () => {
       replacePrivateKey: { id: stored.key.id, privateKey: pair.private, passphrase: 'ipc-pass-phrase', savePassphrase: true },
       setPassword: { hostId: HOST, password: 'ipc-host-password' },
       clearPassword: { hostId: HOST },
+      setIdentityPassword: { identityId: IDENTITY, password: 'ipc-identity-password' },
+      clearIdentityPassword: { identityId: IDENTITY },
       forgetPassphrases: undefined,
       storageStatus: undefined,
       knownHosts: undefined,

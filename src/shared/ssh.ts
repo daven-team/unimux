@@ -19,6 +19,8 @@ export interface SshHost {
   group?: string;
   tags?: string[];
   keyId?: string;
+  /** An identity (shared/sshIdentity.ts) that replaces the user name, key and password of the host; `username` mirrors its user name. */
+  identityId?: string;
   startupCommand?: string;
   color?: string;
   /** Cells of this host connect by themselves when their view first mounts after the app starts (stored only when on). */
@@ -63,6 +65,9 @@ export interface SshVaultInfo {
   keys: SshKeyInfo[];
   savedPasswords: string[];
   lockedPasswords: string[];
+  /** Identities with a saved password, and those whose password cannot be decrypted here (absent before identities existed). */
+  savedIdentityPasswords?: string[];
+  lockedIdentityPasswords?: string[];
   /** The vault file comes from a newer app version: nothing can be changed. */
   readOnly: boolean;
 }
@@ -144,6 +149,8 @@ export interface SshApi {
   replacePrivateKey(req: ReplaceKeyRequest): Promise<ReplaceKeyResult>;
   setPassword(hostId: string, password: string): Promise<{ ok: true; ephemeral: boolean } | { ok: false; error: 'notFound' | 'invalid' | 'readOnly' | 'failed' }>;
   clearPassword(hostId: string): Promise<{ ok: boolean }>;
+  setIdentityPassword(identityId: string, password: string): Promise<{ ok: true; ephemeral: boolean } | { ok: false; error: 'notFound' | 'invalid' | 'readOnly' | 'failed' }>;
+  clearIdentityPassword(identityId: string): Promise<{ ok: boolean }>;
   forgetPassphrases(): Promise<{ ok: boolean }>;
   storageStatus(): Promise<SshStorageStatus>;
   knownHosts(): Promise<KnownHostInfo[]>;
@@ -228,6 +235,7 @@ export function normalizeSshHost(raw: unknown): SshHost | null {
   const tags = normalizeTags(r.tags);
   if (tags.length) host.tags = tags;
   if (isUuid(r.keyId)) host.keyId = r.keyId;
+  if (isUuid(r.identityId)) host.identityId = r.identityId;
   if (typeof r.startupCommand === 'string' && r.startupCommand.trim() && !startupProblem(r.startupCommand)) host.startupCommand = r.startupCommand;
   if (typeof r.color === 'string' && HEX_COLOR.test(r.color)) host.color = r.color;
   if (r.reconnectOnStart === true) host.reconnectOnStart = true;
@@ -250,7 +258,7 @@ export function normalizeSshHosts(raw: unknown): SshHost[] {
   return out;
 }
 
-export interface SshHostDraft { label: string; address: string; port: string; username: string; group: string; tags: string[]; keyId?: string; startupCommand: string; color?: string; reconnectOnStart: boolean; sftpSudo?: boolean; sftpCommand?: string }
+export interface SshHostDraft { label: string; address: string; port: string; username: string; group: string; tags: string[]; keyId?: string; identityId?: string; startupCommand: string; color?: string; reconnectOnStart: boolean; sftpSudo?: boolean; sftpCommand?: string }
 export type HostDraftField = 'address' | 'port' | 'username' | 'startupCommand' | 'sftpCommand';
 export type HostDraftResult =
   | { ok: true; value: Omit<SshHost, 'id' | 'createdAt' | 'updatedAt'> }
@@ -276,7 +284,9 @@ export function validateHostDraft(d: SshHostDraft): HostDraftResult {
   if (group) value.group = group;
   const tags = normalizeTags(d.tags);
   if (tags.length) value.tags = tags;
-  if (d.keyId) value.keyId = d.keyId;
+  // An identity replaces the host's own key (the form keeps it while the identity is attached, so detaching brings it back).
+  if (d.identityId && isUuid(d.identityId)) value.identityId = d.identityId;
+  else if (d.keyId) value.keyId = d.keyId;
   if (d.startupCommand.trim()) value.startupCommand = d.startupCommand;
   if (d.color && HEX_COLOR.test(d.color)) value.color = d.color;
   if (d.reconnectOnStart) value.reconnectOnStart = true;
@@ -288,18 +298,19 @@ export function validateHostDraft(d: SshHostDraft): HostDraftResult {
 export function hostToDraft(h?: SshHost): SshHostDraft {
   return {
     label: h?.label ?? '', address: h?.address ?? '', port: h ? String(h.port) : '22', username: h?.username ?? '',
-    group: h?.group ?? '', tags: h?.tags ?? [], keyId: h?.keyId, startupCommand: h?.startupCommand ?? '', color: h?.color,
+    group: h?.group ?? '', tags: h?.tags ?? [], keyId: h?.keyId, identityId: h?.identityId, startupCommand: h?.startupCommand ?? '', color: h?.color,
     reconnectOnStart: h?.reconnectOnStart === true, sftpSudo: h?.sftpSudo === true, sftpCommand: h?.sftpCommand ?? '',
   };
 }
 
 /**
  * The host form would change the saved host on Zapisz (compared as it would be saved, so a label left empty or a port without
- * leading zeros is not a change), a new host form has anything in it, or a tag or password is typed but not added.
+ * leading zeros is not a change), a new host form has anything in it, a tag or password is typed but not added, or the saved
+ * password is marked for removal.
  */
-export function hostFormDirty(host: SshHost | undefined, draft: SshHostDraft, typed: { tag: string; password: string }): boolean {
-  if (typed.tag.trim() || typed.password) return true;
-  const key = (d: SshHostDraft) => JSON.stringify([d.label.trim(), d.address.trim(), d.port.trim(), d.username.trim(), d.group.trim(), d.tags, d.keyId ?? '', d.startupCommand, d.color ?? '', d.reconnectOnStart, d.sftpSudo === true, (d.sftpCommand ?? '').trim()]);
+export function hostFormDirty(host: SshHost | undefined, draft: SshHostDraft, typed: { tag: string; password: string; clearPassword?: boolean }): boolean {
+  if (typed.tag.trim() || typed.password || typed.clearPassword) return true;
+  const key = (d: SshHostDraft) => JSON.stringify([d.label.trim(), d.address.trim(), d.port.trim(), d.username.trim(), d.group.trim(), d.tags, d.identityId ? '' : d.keyId ?? '', d.identityId ?? '', d.startupCommand, d.color ?? '', d.reconnectOnStart, d.sftpSudo === true, (d.sftpCommand ?? '').trim()]);
   if (!host) return key(draft) !== key(hostToDraft(undefined));
   const v = validateHostDraft(draft);
   if (!v.ok) return key(draft) !== key(hostToDraft(host));
@@ -717,7 +728,12 @@ export function newKeyProblem(p: { label: string; passphrase: string; repeat: st
   return null;
 }
 
-export const hostsUsingKey = (hosts: readonly SshHost[], keyId: string): SshHost[] => hosts.filter((h) => h.keyId === keyId);
+/** Hosts that sign in with the key: their own key, or the key of the identity they use (an identity replaces the host's key). */
+export const hostsUsingKey = (hosts: readonly SshHost[], keyId: string, identities: ReadonlyArray<{ id: string; keyId?: string }> = []): SshHost[] =>
+  hosts.filter((h) => {
+    const identity = h.identityId ? identities.find((i) => i.id === h.identityId) : undefined;
+    return (identity ? identity.keyId : h.keyId) === keyId;
+  });
 
 /** The key label field follows the stored label (renamed elsewhere, late vault push) unless the user is typing in it. */
 export const labelFieldValue = (p: { field: string; stored: string; focused: boolean }): string => (p.focused ? p.field : p.stored);

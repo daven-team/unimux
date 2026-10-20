@@ -13,6 +13,7 @@ import { DEFAULT_BACKGROUND_LOAD, normalizeBackgroundLoad } from './backgroundLo
 import { DEFAULT_SCROLLBACK_LINES, normalizeScrollback } from './terminalLimits';
 import { normalizeShortcutOverrides } from './shortcuts';
 import { normalizeSshHosts, type SshCellRef, type SshHost } from './ssh';
+import { normalizeSshIdentities } from './sshIdentity';
 import { defaultSftpPlaces, forgetRemotePlace, normalizeSftpPlaces } from './sftpView';
 import { normalizeWorkspaceOrder } from './workspaceOrder';
 import { normalizeDbConnections } from './db';
@@ -35,6 +36,7 @@ export function defaultState(platform: AppPlatform = 'win32'): AppState {
     presets: [],
     snippets: [],
     sshHosts: [],
+    sshIdentities: [],
     sftp: defaultSftpPlaces(),
     dbConnections: [],
     settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true, scrollbackLines: DEFAULT_SCROLLBACK_LINES },
@@ -343,14 +345,16 @@ export function duplicateSshHost(s: AppState, id: string, newId = uid(), now = D
   return { ...s, sshHosts: [...s.sshHosts.slice(0, at), copy, ...s.sshHosts.slice(at)] };
 }
 
-/** A deleted key: hosts that used it fall back to password or keyboard-interactive sign-in. */
+/** A deleted key: hosts and identities that used it fall back to password or keyboard-interactive sign-in. */
 export function clearSshKeyRefs(s: AppState, keyId: string): AppState {
-  if (!s.sshHosts.some((h) => h.keyId === keyId)) return s;
-  return { ...s, sshHosts: s.sshHosts.map((h) => {
-    if (h.keyId !== keyId) return h;
-    const { keyId: _keyId, ...rest } = h;
-    return rest;
-  }) };
+  const identities = s.sshIdentities ?? [];
+  if (!s.sshHosts.some((h) => h.keyId === keyId) && !identities.some((i) => i.keyId === keyId)) return s;
+  const drop = <T extends { keyId?: string }>(x: T): T => {
+    if (x.keyId !== keyId) return x;
+    const { keyId: _keyId, ...rest } = x;
+    return rest as T;
+  };
+  return { ...s, sshHosts: s.sshHosts.map(drop), sshIdentities: identities.map(drop) };
 }
 
 /** The profile SSH cells use: the first shell profile; the default one is restored when the user deleted every shell profile (R5). */
@@ -442,6 +446,7 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
     presets: (Array.isArray(r.presets) ? r.presets : []).map((p) => ({ ...p, cells: cleanPresetCells(p.cells ?? []) })),
     snippets: Array.isArray(r.snippets) ? r.snippets : [],
     sshHosts: normalizeSshHosts(r.sshHosts),
+    sshIdentities: normalizeSshIdentities(r.sshIdentities),
     sftp: normalizeSftpPlaces(r.sftp),
     dbConnections: normalizeDbConnections(r.dbConnections),
     settings: {

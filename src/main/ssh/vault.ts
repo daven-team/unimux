@@ -1,4 +1,5 @@
 // The SSH vault (<data>/ssh/vault.json, spec 7.3): key metadata in clear, secrets as safeStorage blobs. Main only.
+// Saved passwords belong to a host or (since identities) to an identity; each kind is its own list in the file.
 import { createHash, randomUUID } from 'crypto';
 import { existsSync } from 'fs';
 import { dirname } from 'path';
@@ -33,8 +34,16 @@ export interface NewKey {
 type KeyMetaRecord = Omit<SshKeyInfo, 'ephemeral' | 'locked'>;
 interface KeyRecord { meta: KeyMetaRecord; secret: string | null; plain: { privateKey: string; passphrase?: string } | null; locked: boolean }
 interface PasswordRecord { hostId: string; updatedAt: number; secret: string | null; plain: string | null; locked: boolean }
+/** Whose password: a host's (`passwords` in the file, keyed by hostId) or an identity's (`identityPasswords`, keyed by identityId). */
+type PasswordOwner = 'host' | 'identity';
+type Passwords = Readonly<Record<PasswordOwner, readonly PasswordRecord[]>>;
 
-const VERSION = 1;
+/**
+ * The newest format this version reads. A file is written as version 2 only while it holds identity passwords: a version 1 app
+ * would drop that list on its next write, so it opens such a file read-only instead; a file without them stays version 1.
+ */
+const VERSION = 2;
+const OWNER_FIELD: Record<PasswordOwner, 'hostId' | 'identityId'> = { host: 'hostId', identity: 'identityId' };
 const ALGOS = new Set<string>(KEY_ALGOS);
 const digest = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -42,7 +51,8 @@ const str = (v: unknown, max = 4000) => (typeof v === 'string' && v.length <= ma
 
 export class SshVault {
   private keys: KeyRecord[] = [];
-  private passwords: PasswordRecord[] = [];
+  /** Records of both owners keep the owner's id in `hostId` (an identity id for identity passwords). */
+  private passwords: Passwords = { host: [], identity: [] };
   /** A newer version, an unreadable file or one of the wrong shape: nothing is ever written over it (no stored secret is lost). */
   private newer = false;
   /** D7: passphrases typed into a prompt with "remember until the app quits". Never written. */
@@ -60,14 +70,17 @@ export class SshVault {
       if (existsSync(file)) this.newer = true;
       return;
     }
-    const v = read.value as { version?: unknown; keys?: unknown; passwords?: unknown };
-    if (!isObject(v) || (v.keys !== undefined && !Array.isArray(v.keys)) || (v.passwords !== undefined && !Array.isArray(v.passwords))) {
+    const v = read.value as { version?: unknown; keys?: unknown; passwords?: unknown; identityPasswords?: unknown };
+    if (!isObject(v) || [v.keys, v.passwords, v.identityPasswords].some((list) => list !== undefined && !Array.isArray(list))) {
       this.newer = true;
       return;
     }
     if (typeof v.version === 'number' && v.version > VERSION) this.newer = true;
     const rawKeys: unknown[] = Array.isArray(v.keys) ? v.keys : [];
-    const rawPasswords: unknown[] = Array.isArray(v.passwords) ? v.passwords : [];
+    const rawPasswords: Record<PasswordOwner, unknown[]> = {
+      host: Array.isArray(v.passwords) ? v.passwords : [],
+      identity: Array.isArray(v.identityPasswords) ? v.identityPasswords : [],
+    };
     for (const raw of rawKeys) {
       if (!isObject(raw)) continue;
       const k = raw;
@@ -79,18 +92,22 @@ export class SshVault {
         source: k.source === 'generated' ? 'generated' : 'imported', createdAt: typeof k.createdAt === 'number' ? k.createdAt : 0,
       }, secret, plain: null, locked: false });
     }
-    for (const raw of rawPasswords) {
-      if (!isObject(raw)) continue;
-      const hostId = str(raw.hostId, 64), secret = str(raw.secret, 20000);
-      if (hostId && secret) this.passwords.push({ hostId, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : 0, secret, plain: null, locked: false });
+    const loaded: Record<PasswordOwner, PasswordRecord[]> = { host: [], identity: [] };
+    for (const owner of ['host', 'identity'] as const) {
+      for (const raw of rawPasswords[owner]) {
+        if (!isObject(raw)) continue;
+        const id = str(raw[OWNER_FIELD[owner]], 64), secret = str(raw.secret, 20000);
+        if (id && secret) loaded[owner].push({ hostId: id, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : 0, secret, plain: null, locked: false });
+      }
     }
+    this.passwords = loaded;
     // An entry this version cannot read would be dropped by the next write: open read-only instead.
-    if (this.keys.length !== rawKeys.length || this.passwords.length !== rawPasswords.length) this.newer = true;
+    if (this.keys.length !== rawKeys.length || loaded.host.length !== rawPasswords.host.length || loaded.identity.length !== rawPasswords.identity.length) this.newer = true;
     // DPAPI decrypts without a prompt, so locked entries are known at once (spec 7.3). The Keychain stays lazy: no prompt at startup,
     // and a denial is retried on the next use. The decrypted values are dropped right away.
     if (this.cipher.storage === 'dpapi') {
       for (const k of this.keys) this.keySecret(k.meta.id);
-      for (const p of this.passwords) this.password(p.hostId);
+      for (const owner of ['host', 'identity'] as const) for (const p of loaded[owner]) this.ownedPassword(owner, p.hostId);
     }
   }
 
@@ -103,8 +120,10 @@ export class SshVault {
     return {
       storage: this.cipher.storage,
       keys: this.keys.map((r) => this.infoOf(r)),
-      savedPasswords: this.passwords.map((p) => p.hostId),
-      lockedPasswords: this.passwords.filter((p) => p.locked).map((p) => p.hostId),
+      savedPasswords: this.passwords.host.map((p) => p.hostId),
+      lockedPasswords: this.passwords.host.filter((p) => p.locked).map((p) => p.hostId),
+      savedIdentityPasswords: this.passwords.identity.map((p) => p.hostId),
+      lockedIdentityPasswords: this.passwords.identity.filter((p) => p.locked).map((p) => p.hostId),
       readOnly: this.newer,
     };
   }
@@ -236,27 +255,42 @@ export class SshVault {
   markVerified(keyId: string, passphrase: string): void { this.verifiedPassphrases.set(keyId, digest(passphrase)); }
   isVerified(keyId: string, passphrase: string): boolean { return this.verifiedPassphrases.get(keyId) === digest(passphrase); }
 
-  setPassword(hostId: string, password: string): { ok: true; ephemeral: boolean } | { ok: false; error: 'readOnly' } {
+  setPassword(hostId: string, password: string): { ok: true; ephemeral: boolean } | { ok: false; error: 'readOnly' } { return this.setOwnedPassword('host', hostId, password); }
+  clearPassword(hostId: string): boolean { return this.clearOwnedPassword('host', hostId); }
+  password(hostId: string): { ok: true; password: string } | { ok: false; error: 'none' | 'locked' } { return this.ownedPassword('host', hostId); }
+  /** Main calls this after every state change: passwords of hosts that no longer exist are deleted. */
+  prunePasswords(hostIds: ReadonlySet<string>): boolean { return this.pruneOwned('host', hostIds); }
+
+  setIdentityPassword(identityId: string, password: string): { ok: true; ephemeral: boolean } | { ok: false; error: 'readOnly' } { return this.setOwnedPassword('identity', identityId, password); }
+  clearIdentityPassword(identityId: string): boolean { return this.clearOwnedPassword('identity', identityId); }
+  identityPassword(identityId: string): { ok: true; password: string } | { ok: false; error: 'none' | 'locked' } { return this.ownedPassword('identity', identityId); }
+  /** Like prunePasswords, for identities that no longer exist. */
+  pruneIdentityPasswords(identityIds: ReadonlySet<string>): boolean { return this.pruneOwned('identity', identityIds); }
+
+  private withPasswords(owner: PasswordOwner, list: readonly PasswordRecord[]): Passwords { return { ...this.passwords, [owner]: list }; }
+
+  private setOwnedPassword(owner: PasswordOwner, id: string, password: string): { ok: true; ephemeral: boolean } | { ok: false; error: 'readOnly' } {
     if (this.newer) return { ok: false, error: 'readOnly' };
     const secret = this.seal(password);
-    const record: PasswordRecord = { hostId, updatedAt: this.now(), secret, plain: secret === null ? password : null, locked: false };
-    const next = [...this.passwords.filter((p) => p.hostId !== hostId), record];
+    const record: PasswordRecord = { hostId: id, updatedAt: this.now(), secret, plain: secret === null ? password : null, locked: false };
+    const next = this.withPasswords(owner, [...this.passwords[owner].filter((p) => p.hostId !== id), record]);
     this.write(this.keys, next);
     this.passwords = next;
     return { ok: true, ephemeral: secret === null };
   }
 
-  clearPassword(hostId: string): boolean {
+  private clearOwnedPassword(owner: PasswordOwner, id: string): boolean {
     if (this.newer) return false;
-    const next = this.passwords.filter((p) => p.hostId !== hostId);
-    if (next.length === this.passwords.length) return false;
+    const list = this.passwords[owner].filter((p) => p.hostId !== id);
+    if (list.length === this.passwords[owner].length) return false;
+    const next = this.withPasswords(owner, list);
     this.write(this.keys, next);
     this.passwords = next;
     return true;
   }
 
-  password(hostId: string): { ok: true; password: string } | { ok: false; error: 'none' | 'locked' } {
-    const p = this.passwords.find((x) => x.hostId === hostId);
+  private ownedPassword(owner: PasswordOwner, id: string): { ok: true; password: string } | { ok: false; error: 'none' | 'locked' } {
+    const p = this.passwords[owner].find((x) => x.hostId === id);
     if (!p) return { ok: false, error: 'none' };
     if (p.plain !== null) return { ok: true, password: p.plain };
     const text = p.secret ? this.open(p.secret) : null;
@@ -265,27 +299,31 @@ export class SshVault {
     return { ok: true, password: text };
   }
 
-  /** Main calls this after every state change: passwords of hosts that no longer exist are deleted. */
-  prunePasswords(hostIds: ReadonlySet<string>): boolean {
+  private pruneOwned(owner: PasswordOwner, ids: ReadonlySet<string>): boolean {
     if (this.newer) return false;
-    const next = this.passwords.filter((p) => hostIds.has(p.hostId));
-    if (next.length === this.passwords.length) return false;
+    const list = this.passwords[owner].filter((p) => ids.has(p.hostId));
+    if (list.length === this.passwords[owner].length) return false;
+    const next = this.withPasswords(owner, list);
     this.write(this.keys, next);
     this.passwords = next;
     return true;
   }
 
   /** Writes the given lists; callers adopt them only after this returns, so a failed write leaves memory as it was. */
-  private write(allKeys: readonly KeyRecord[], allPasswords: readonly PasswordRecord[]): void {
+  private write(allKeys: readonly KeyRecord[], allPasswords: Passwords): void {
     if (this.newer) return;
     const keys = allKeys.filter((k) => k.secret !== null);
-    const passwords = allPasswords.filter((p) => p.secret !== null);
-    if (!keys.length && !passwords.length && !existsSync(this.file)) return; // memory-only vault: nothing touches the disk (D8)
+    const stored = (owner: PasswordOwner) => allPasswords[owner].filter((p) => p.secret !== null)
+      .map((p) => ({ [OWNER_FIELD[owner]]: p.hostId, updatedAt: p.updatedAt, secret: p.secret }));
+    const passwords = stored('host');
+    const identityPasswords = stored('identity');
+    if (!keys.length && !passwords.length && !identityPasswords.length && !existsSync(this.file)) return; // memory-only vault: nothing touches the disk (D8)
     ensurePrivateDir(dirname(this.file));
     writePrivateFile(this.file, JSON.stringify({
-      version: VERSION,
+      version: identityPasswords.length ? VERSION : 1,
       keys: keys.map((k) => ({ ...k.meta, certificate: k.meta.certificate ?? null, secret: k.secret })),
-      passwords: passwords.map((p) => ({ hostId: p.hostId, updatedAt: p.updatedAt, secret: p.secret })),
+      passwords,
+      ...(identityPasswords.length ? { identityPasswords } : {}),
     }, null, 1));
   }
 }
