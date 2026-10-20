@@ -1,10 +1,19 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { PROJECT_COLORS } from '../../../shared/state';
 import { useI18n } from '../i18n';
 import './colorPicker.css';
 
 const PALETTE = [...PROJECT_COLORS, '#d97757', '#10a37f', '#8b5cf6', '#64748b', '#eab308', '#f43f5e', '#14b8a6', '#9ca3af'];
 const HEX = /^#[0-9a-f]{6}$/i;
+
+/** The right edge the palette must stay inside: its nearest clipping or scrolling ancestor, else the window. */
+function rightLimit(el: HTMLElement): number {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const { overflowX } = getComputedStyle(p);
+    if (overflowX !== 'visible') return p.getBoundingClientRect().right;
+  }
+  return window.innerWidth;
+}
 
 /**
  * A round swatch that opens a small palette with a hex field (instead of the system colour dialog). Optional: `swatch` content and
@@ -20,8 +29,15 @@ export function ColorPicker({ value, onChange, label, swatch, swatchClassName, o
   const pop = useRef<HTMLDivElement>(null);
   const id = useId();
   useEffect(() => setDraft(value), [value]);
-  // Opened near the bottom of a scrolling pane (the SSH host form), the palette scrolls into view instead of opening out of sight.
-  useEffect(() => { if (open) pop.current?.scrollIntoView({ block: 'nearest' }); }, [open]);
+  // A swatch near the right edge (the colour of a database connection) opens the palette leftwards: opened rightwards it would
+  // stick out of the dialog and scroll it sideways. Then, opened near the bottom of a scrolling pane (the SSH host form), the
+  // palette scrolls into view instead of opening out of sight.
+  useLayoutEffect(() => {
+    const el = pop.current;
+    if (!open || !el) return;
+    if (el.getBoundingClientRect().right > rightLimit(el)) el.classList.add('end');
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => { if (!root.current?.contains(e.target as Node)) setOpen(false); };
