@@ -278,18 +278,19 @@ export const DbPanel = memo(function DbPanel() {
 
   return (
     <div className="sidebar-content db-panel">
-      <div className="db-panel-head">
-        {connections.length > 0 ? (
+      {/* An empty panel has no head: its text starts under the title and offers both kinds itself. */}
+      {connections.length > 0 && (
+        <div className="db-panel-head">
           <input className="input db-filter" placeholder={tr('Filtruj obiekty…')} aria-label={tr('Filtruj obiekty…')} value={filter} spellCheck={false}
             onChange={(e) => useDbStore.setState({ filter: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') useDbStore.setState({ filter: '' }); }} />
-        ) : <span className="grow" />}
-        <button className="btn ghost icon" title={tr('Nowe połączenie')} aria-label={tr('Nowe połączenie')} data-action="new-connection"
-          onClick={(e) => openMenuAt(e.currentTarget, [
-            { header: tr('Nowe połączenie') },
-            { label: 'PostgreSQL', onClick: () => openNewConnection('postgres') },
-            { label: 'Redis', onClick: () => openNewConnection('redis') },
-          ])}><IPlus /></button>
-      </div>
+          <button className="btn ghost icon" title={tr('Nowe połączenie')} aria-label={tr('Nowe połączenie')} data-action="new-connection"
+            onClick={(e) => openMenuAt(e.currentTarget, [
+              { header: tr('Nowe połączenie') },
+              { label: 'PostgreSQL', onClick: () => openNewConnection('postgres') },
+              { label: 'Redis', onClick: () => openNewConnection('redis') },
+            ])}><IPlus /></button>
+        </div>
+      )}
       {promptSessions.map((s) => (
         <div key={s.id} className="db-panel-login">
           <div className="db-panel-login-title">{connName(s.connectionId)}{s.database ? ` · ${s.database}` : ''}</div>

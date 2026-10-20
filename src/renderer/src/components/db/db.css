@@ -3,7 +3,7 @@
 /* ── panel ── */
 .db-panel { display: flex; flex-direction: column; min-height: 0; }
 .db-panel-head { display: flex; align-items: center; gap: 4px; padding: 2px 8px 6px 10px; }
-.db-panel-head .grow, .db-tab-head .grow, .db-toolbar .grow, .db-viewer-head .grow, .db-viewer-foot .grow, .db-result-foot .grow, .db-editor .grow { flex: 1; }
+.db-tab-head .grow, .db-toolbar .grow, .db-viewer-head .grow, .db-viewer-foot .grow, .db-result-foot .grow, .db-editor .grow { flex: 1; }
 .db-filter { flex: 1; min-width: 0; height: 26px; font-size: 12px; }
 .db-tree { flex: 1; min-height: 0; overflow: auto; position: relative; padding-bottom: 8px; }
 .db-row { position: absolute; left: 0; right: 0; height: 24px; display: flex; align-items: center; gap: 5px; padding-right: 8px; color: var(--text-2); cursor: default; white-space: nowrap; user-select: none; }

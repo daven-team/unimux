@@ -9,13 +9,16 @@ class Boundary extends Component<{ onRetry(): void; panel?: boolean; children: R
   render(): ReactNode {
     if (!this.state.failed) return this.props.children;
     const retry = () => { this.setState({ failed: false }); this.props.onRetry(); };
-    // A side panel says it at its top, like its empty state; a screen of the main area in its middle.
+    // A side panel says it at its top, like its empty state; a screen of the main area in its middle. The panel's
+    // fallback still fills the column (as the panel would), so the usage box under it stays at the bottom of the sidebar.
     if (this.props.panel) {
       return (
-        <PanelEmpty role="alert">
-          <p>{tr('Nie udało się wczytać tego widoku.')}</p>
-          <button className="btn primary" onClick={retry}>{tr('Spróbuj ponownie')}</button>
-        </PanelEmpty>
+        <div className="sidebar-content">
+          <PanelEmpty role="alert">
+            <p>{tr('Nie udało się wczytać tego widoku.')}</p>
+            <button className="btn primary" onClick={retry}>{tr('Spróbuj ponownie')}</button>
+          </PanelEmpty>
+        </div>
       );
     }
     return (

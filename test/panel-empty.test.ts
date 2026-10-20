@@ -38,8 +38,12 @@ describe('PanelEmpty', () => {
     expect(out).toContain('<a class="panel-empty-link" role="button" tabindex="0" title="New connection: Redis" aria-label="New connection: Redis">Redis</a>');
     expect(out).toContain('<button class="btn primary">New connection</button>');
     const css = readFileSync('src/renderer/src/components/panelEmpty.css', 'utf8');
-    expect(css).toMatch(/\.panel-empty > \.btn \{ width: 100%; \}/);
+    // Full width, but never a very long bar in a widened panel (Cursor caps it at 300px too).
+    expect(css).toMatch(/\.panel-empty > \.btn \{ width: 100%; max-width: 300px; \}/);
     expect(css).toMatch(/\.panel-empty-link:focus-visible \{ outline:/);
+    // The links take the primary button's colour (one accent in the view), steel blue until that token exists.
+    expect(css).toMatch(/\.panel-empty-link \{[^}]*color: var\(--btn-primary-bg, #81a1c1\)/);
+    expect(css).toMatch(/\.panel-empty-link:focus-visible \{ outline: 1px solid var\(--btn-primary-bg, #81a1c1\)/);
     expect(css).not.toMatch(/justify-content: center|text-align: center/);
   });
 
@@ -78,9 +82,16 @@ describe('PanelEmpty', () => {
     const db = read('db/DbPanel.tsx');
     expect(db).toContain("onClick={() => openNewConnection('postgres')}>PostgreSQL</EmptyLink>");
     expect(db).toContain("onClick={() => openNewConnection('redis')}>Redis</EmptyLink>");
+    // No lone + row above the empty text: the head (filter and + menu) is there only with connections.
+    expect(db).toMatch(/\{connections\.length > 0 && \(\s*<div className="db-panel-head">/);
     expect(readFileSync('src/renderer/src/styles.css', 'utf8')).not.toMatch(/\.empty-state|\.es-icon/);
-    // A side panel that fails to load says so at its top too.
+    // Snippets only of other projects: the same empty state, not a box under a search field with nothing to search.
+    const snippets = read('SnippetPanel.tsx');
+    expect(snippets).toContain('{!available.length ? (');
+    expect(snippets).toContain('{snippets.length ? tr("Brak snippetów dostępnych w tym projekcie.")');
+    // A side panel that fails to load says so at its top too, and still fills the column (the usage box stays at the bottom).
     const registry = readFileSync('src/renderer/src/panelRegistry.tsx', 'utf8');
     expect(registry).toContain('<LazyScreen load={loadDbPanel} panel />');
+    expect(read('LazyScreen.tsx')).toMatch(/<div className="sidebar-content">\s*<PanelEmpty role="alert">/);
   });
 });
