@@ -102,6 +102,20 @@ describe('git and terminal tiles', () => {
     expect(terminal).toContain('opensView: true');
     expect(entries.find((line) => line.includes("id: 'git'"))).toContain('unavailableReason: gitPanelReason');
   });
+
+  it('draws the folder on the Files tile and a different icon on the Projects tile', () => {
+    const registry = readFileSync('src/renderer/src/panelRegistry.tsx', 'utf8');
+    expect(registry).toMatch(/id: 'projects'.*icon: TProjects/);
+    expect(registry).toMatch(/id: 'files'.*icon: TFiles/);
+    const icons = readFileSync('src/renderer/src/components/icons.tsx', 'utf8');
+    const body = (name: string) => {
+      const start = icons.indexOf(`export const ${name} =`);
+      return icons.slice(start, icons.indexOf('</T>', start));
+    };
+    const folder = 'M3 7V5a2 2 0 0 1 2-2h5l2 3h7';
+    expect(body('TFiles')).toContain(folder);
+    expect(body('TProjects')).not.toContain(folder);
+  });
 });
 
 describe('railTileShown (W3)', () => {

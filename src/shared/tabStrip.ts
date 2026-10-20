@@ -1,4 +1,20 @@
-// Pure scroll logic of the workspace tab strip (many open tabs overflow horizontally).
+// Pure logic of the workspace tab strip: its colours and its scrolling (many open tabs overflow horizontally).
+
+const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+
+/** What a tab of the strip belongs to: a project (its grids and files) or a database connection (tables, queries, Redis views). */
+export interface StripTabOwner { project?: { color?: string } | null; connection?: { color?: string } | null }
+
+/**
+ * The one colour a tab of the strip shows (its chip, and its top line while it is in front), null for none: the colour of what
+ * the tab belongs to. Settings, SSH and files outside the projects have none, and so does a connection without a colour.
+ * A grid's own colour is not used: every new grid gets one automatically (addTab), and drawn next to the project colour it gave
+ * each grid tab of the shared strip a second, unrelated colour.
+ */
+export function stripTabColor(owner: StripTabOwner): string | null {
+  const color = owner.project ? owner.project.color : owner.connection?.color;
+  return color && HEX_COLOR.test(color) ? color : null;
+}
 
 export interface ScrollEdges { canLeft: boolean; canRight: boolean }
 

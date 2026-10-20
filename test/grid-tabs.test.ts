@@ -1,10 +1,12 @@
 // 1.0.0 grid tabs across projects: the global strip order, its migration and the open / close / switch logic.
+import { readFileSync } from 'fs';
 import { describe, expect, it } from 'vitest';
 import {
   gridTabLabels, groupWorkspaceKeys, mergeWorkspaceOrder, migrateWorkspaceOrders, normalizeWorkspaceOrder, parseWorkspaceKey,
   neighbourAfterClose, sameOrder, sortTabsByOrder, stepWorkspace, stripKeys, syncTabsToOrder,
 } from '../src/shared/workspaceOrder';
-import { addProject, addTab, closeTab, defaultState, focusGrid, normalizeState, restoreTab } from '../src/shared/state';
+import { addProject, addTab, closeTab, defaultState, focusGrid, normalizeState, restoreTab, updateProject } from '../src/shared/state';
+import { stripTabColor } from '../src/shared/tabStrip';
 import { decideShortcut } from '../src/shared/shortcutDispatch';
 import { resolveShortcuts } from '../src/shared/shortcuts';
 import type { AppState } from '../src/shared/types';
@@ -203,5 +205,37 @@ describe('labels and the all-tabs menu', () => {
       { projectId: 'A', keys: ['grid:a1', 'file:fa'] },
       { projectId: 'B', keys: ['grid:b1'] },
     ]);
+  });
+});
+
+describe('strip colours', () => {
+  it("gives every tab of a project the project's colour, never the grid's own automatic one", () => {
+    const { s } = twoProjects();
+    const [alpha, beta] = s.projects;
+    // New grids get their own colours (addTab); the strip does not draw them next to the project colour.
+    expect(new Set(alpha.tabs.map((t) => t.color)).size).toBe(alpha.tabs.length);
+    expect(alpha.tabs.map(() => stripTabColor({ project: alpha }))).toEqual([alpha.color, alpha.color]);
+    expect(stripTabColor({ project: beta })).toBe(beta.color);
+    expect(stripTabColor({ project: alpha })).not.toBe(stripTabColor({ project: beta }));
+    // The tab menu's swatches recolour the project, so every one of its tabs follows.
+    const recoloured = updateProject(s, alpha.id, { color: '#ec4899' });
+    expect(stripTabColor({ project: recoloured.projects[0] })).toBe('#ec4899');
+  });
+
+  it("uses a connection's colour for database tabs and shows none without an owner colour", () => {
+    expect(stripTabColor({ connection: { color: '#22c55e' } })).toBe('#22c55e');
+    expect(stripTabColor({ connection: {} })).toBeNull();
+    expect(stripTabColor({ connection: undefined })).toBeNull();
+    // Settings, SSH and files outside the projects.
+    expect(stripTabColor({})).toBeNull();
+    expect(stripTabColor({ project: null })).toBeNull();
+    // The project decides; a value that is not a colour never reaches the CSS.
+    expect(stripTabColor({ project: { color: '#3b82f6' }, connection: { color: '#22c55e' } })).toBe('#3b82f6');
+    expect(stripTabColor({ project: { color: 'url(x)' } })).toBeNull();
+  });
+
+  it('draws no per-grid colour in the strip (1.0.0 painted it next to the project colour)', () => {
+    expect(readFileSync('src/renderer/src/components/TitleBar.tsx', 'utf8')).not.toContain('--tab-color');
+    expect(readFileSync('src/renderer/src/styles.css', 'utf8')).not.toContain('--tab-color');
   });
 });
