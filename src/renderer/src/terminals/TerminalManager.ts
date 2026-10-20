@@ -740,12 +740,15 @@ class TerminalManager {
   }
 
   /**
-   * The colours of a terminal: SSH cells draw in their theme (shared/sshThemes.ts), every other terminal in THEME. xterm
-   * repaints by itself, the WebGL renderer included (it rebuilds its glyph atlas); a parked terminal repaints when shown.
+   * The colours of a terminal: SSH cells draw in their theme (shared/sshThemes.ts), every other terminal in THEME, with the
+   * theme's contrast floor (1 = none). xterm repaints by itself, the WebGL renderer included (it rebuilds its glyph atlas);
+   * a parked terminal repaints when shown.
    */
-  setTheme(cellId: string, theme: ITheme = THEME): void {
+  setTheme(cellId: string, theme: ITheme = THEME, minimumContrastRatio = 1): void {
     const e = this.entries.get(cellId);
-    if (e && e.term.options.theme !== theme) e.term.options.theme = theme;
+    if (!e) return;
+    if (e.term.options.theme !== theme) e.term.options.theme = theme;
+    if (e.term.options.minimumContrastRatio !== minimumContrastRatio) e.term.options.minimumContrastRatio = minimumContrastRatio;
   }
 
   setFontSize(cellId: string, size: number): void {

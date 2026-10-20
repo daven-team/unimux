@@ -47,6 +47,12 @@ export interface SshTheme {
   /** A product name, the same in every language. */
   name: string;
   colors: TerminalPalette;
+  /**
+   * xterm's `minimumContrastRatio` while the theme is on (1, xterm's default, when missing): at draw time every text colour
+   * is darkened or lightened until it reaches this contrast with the cell behind it. A light theme needs it because its
+   * `white` and `brightWhite` stay light (programs paint backgrounds with them), so text in them would vanish on the paper.
+   */
+  minimumContrastRatio?: number;
 }
 
 export const DEFAULT_SSH_THEME: SshThemeId = 'unimux-dark';
@@ -74,12 +80,13 @@ export const SSH_THEMES: readonly SshTheme[] = [
     },
   },
   {
-    // Near-black with scarlet text, a neon cyan cursor and acid yellow.
+    // Near-black with hot pink text, scarlet red, a neon cyan cursor and acid yellow (the text stays lighter than red, so
+    // errors and deleted lines still stand out).
     id: 'unimux-cyberpunk', name: 'Unimux Cyberpunk', colors: {
-      background: '#140b12', foreground: '#ff3b6f', cursor: '#00f0d0', cursorAccent: '#140b12',
+      background: '#140b12', foreground: '#ff9cbd', cursor: '#00f0d0', cursorAccent: '#140b12',
       selectionBackground: '#5c1a3a', selectionInactiveBackground: '#5c1a3a80', selectionForeground: '#ffe9f1',
       black: '#24121f', red: '#ff2e4d', green: '#21e6a1', yellow: '#ffe347', blue: '#2ab3ff', magenta: '#ff47d1', cyan: '#00f0d0', white: '#f5d0de',
-      brightBlack: '#8a5a7c', brightRed: '#ff6b80', brightGreen: '#66ffc4', brightYellow: '#fff27a', brightBlue: '#6fd0ff', brightMagenta: '#ff85e3', brightCyan: '#6bfff0', brightWhite: '#ffffff',
+      brightBlack: '#8a5a7c', brightRed: '#ff5c5c', brightGreen: '#66ffc4', brightYellow: '#fff27a', brightBlue: '#6fd0ff', brightMagenta: '#ff85e3', brightCyan: '#6bfff0', brightWhite: '#ffffff',
     },
   },
   {
@@ -110,8 +117,9 @@ export const SSH_THEMES: readonly SshTheme[] = [
     },
   },
   {
-    // A light theme: ink on warm paper; `white` stays light grey (programs use it as a background).
-    id: 'unimux-daylight', name: 'Unimux Daylight', colors: {
+    // A light theme: ink on warm paper; `white` stays light grey (programs use it as a background), and the contrast floor
+    // keeps text printed in white or bright white readable.
+    id: 'unimux-daylight', name: 'Unimux Daylight', minimumContrastRatio: 4.5, colors: {
       background: '#fafaf7', foreground: '#2a2f38', cursor: '#2a2f38', cursorAccent: '#fafaf7',
       selectionBackground: '#cfe0f7', selectionInactiveBackground: '#cfe0f799',
       black: '#2a2f38', red: '#c8293d', green: '#26803c', yellow: '#8f6200', blue: '#1f5fc4', magenta: '#9333b3', cyan: '#0d7a89', white: '#b9bcc2',

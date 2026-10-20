@@ -79,12 +79,11 @@ export function SshThemeSelect({ value, onChange }: { value: string | undefined;
       <span id={labelId}>{tr('Motyw terminala')}</span>
       <div className="ssh-row ssh-theme-select">
         <Select className="select grow" aria-labelledby={labelId} value={hostThemeValue(value)} onChange={(e) => onChange(hostThemeFromValue(e.target.value))}>
-          <option value={FOLLOW_GLOBAL_THEME}>{tr('Jak w ustawieniach ({name})', { name: sshThemeById(setting).name })}</option>
+          <option value={FOLLOW_GLOBAL_THEME} title={tr('Motyw dla wszystkich hostów zmienisz w Ustawienia > SSH.')}>{tr('Jak w ustawieniach ({name})', { name: sshThemeById(setting).name })}</option>
           {SSH_THEMES.map((theme) => <option key={theme.id} value={theme.id}>{theme.name}</option>)}
         </Select>
         <SshThemePreview theme={resolveSshTheme(value, setting)} compact />
       </div>
-      <span className="ssh-card-hint">{tr('Motyw dla wszystkich hostów zmienisz w Ustawienia > SSH.')}</span>
     </div>
   );
 }

@@ -86,7 +86,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   }, [cell.id, epoch]);
 
   // After the attach above (the terminal exists by then); a theme changed in the settings or on the host repaints at once.
-  useEffect(() => { terminals.setTheme(cell.id, sshTheme?.colors); }, [cell.id, epoch, sshTheme]);
+  useEffect(() => { terminals.setTheme(cell.id, sshTheme?.colors, sshTheme?.minimumContrastRatio); }, [cell.id, epoch, sshTheme]);
 
   const markFocused = () => {
     setUi({ focusedCellId: cell.id });

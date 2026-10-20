@@ -25,6 +25,14 @@ const contrast = (a: number[], b: number[]) => {
   const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return (hi + 0.05) / (lo + 0.05);
 };
+// CIE76 colour difference (Euclidean distance in CIELAB, D65): about 2 is just noticeable, 30+ reads as another colour.
+const lab = (channels: number[]) => {
+  const [r, g, b] = channels.map((c) => { const s = c / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; });
+  const f = (t: number) => (t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116);
+  const [x, y, z] = [(0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047, 0.2126 * r + 0.7152 * g + 0.0722 * b, (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883].map(f);
+  return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+};
+const difference = (a: string, b: string) => { const [p, q] = [lab(rgb(a)), lab(rgb(b))]; return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]); };
 
 describe('SSH terminal theme registry', () => {
   it('lists every id once, in the stored order, with a unique name', () => {
@@ -52,20 +60,32 @@ describe('SSH terminal theme registry', () => {
   it('keeps every theme readable', () => {
     const problems: string[] = [];
     const check = (theme: string, what: string, ratio: number, min: number) => { if (ratio < min) problems.push(`${theme} ${what}: ${ratio.toFixed(2)} < ${min}`); };
-    for (const { id, colors } of SSH_THEMES) {
+    for (const { id, colors, minimumContrastRatio = 1 } of SSH_THEMES) {
       const bg = rgb(colors.background);
       check(id, 'foreground', contrast(rgb(colors.foreground), bg), 4.5);
       check(id, 'cursor', contrast(rgb(colors.cursor), bg), 3);
       check(id, 'selected text', contrast(rgb(colors.selectionForeground ?? colors.foreground), over(colors.selectionBackground, colors.background)), 4.5);
       check(id, 'selection', contrast(over(colors.selectionBackground, colors.background), bg), 1.25);
+      // Errors and deleted lines (red) must not look like plain text.
+      for (const key of ['red', 'brightRed'] as const) check(id, `${key} apart from the foreground`, difference(colors[key], colors.foreground), 30);
       // The default keeps the colours terminals always had (Campbell); the new themes keep their accents and dim text legible.
       if (id === DEFAULT_SSH_THEME) continue;
+      // Programs paint backgrounds with `black` on a dark theme and with `white`/`brightWhite` on a light one, so those may sit
+      // close to the background; text in them on a light theme stays readable only through the theme's contrast floor.
+      const light = luminance(bg) > 0.5;
+      if (light) check(id, 'contrast floor', minimumContrastRatio, 4.5);
       for (const key of ANSI_KEYS) {
-        if (key === 'black' || key === 'white' || key === 'brightWhite') continue;
+        if (light ? key === 'white' || key === 'brightWhite' : key === 'black') continue;
         check(id, key, contrast(rgb(colors[key]), bg), 3);
       }
     }
     expect(problems).toEqual([]);
+  });
+
+  it('keeps a contrast floor within the range xterm accepts (the dark default has none)', () => {
+    for (const { id, minimumContrastRatio = 1 } of SSH_THEMES) expect(minimumContrastRatio >= 1 && minimumContrastRatio <= 21, id).toBe(true);
+    expect(sshThemeById(DEFAULT_SSH_THEME).minimumContrastRatio).toBeUndefined();
+    expect(sshThemeById('unimux-daylight').minimumContrastRatio).toBe(4.5);
   });
 
   it('keeps the default theme as the classic look (Campbell on the app background)', () => {
