@@ -195,7 +195,7 @@ const api: McApi = {
     list: (hostId) => ipcRenderer.invoke('ssh:history:list', hostId),
     record: (hostId, command) => ipcRenderer.send('ssh:history:record', hostId, command),
     clear: (hostId) => ipcRenderer.invoke('ssh:history:clear', hostId),
-    counts: () => ipcRenderer.invoke('ssh:history:counts'),
+    status: () => ipcRenderer.invoke('ssh:history:status'),
   },
   notify: (n) => ipcRenderer.send('notify', n),
   openExternal: (url) => ipcRenderer.send('shell:openExternal', url),

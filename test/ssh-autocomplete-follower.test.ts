@@ -24,23 +24,43 @@ afterAll(() => { for (const name of added) delete g[name]; });
 const PROMPT = 'u@web:~$ ';
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-/** What a command prints; `prompt: false` = it waits for input (a question) instead of the next prompt. */
-type Run = (cmd: string) => { out: string; prompt: boolean };
+/** A program that has the keyboard (a pager, a full-screen program): what each key prints, `done` = it quit. */
+type Program = (key: string) => { out: string; done: boolean };
+/** What a command prints; `prompt: false` = it waits for input (a question, a program) instead of the next prompt. */
+type Run = (cmd: string) => { out: string; prompt: boolean; program?: Program };
 
-/** A remote shell with a line editor: echoes typing (unless echo is off), backspace, ↑ (last command), Tab and Enter. */
+/**
+ * A remote shell with a line editor: echoes typing (unless echo is off), backspace, ↑ (last command), → (takes its own
+ * faint suggestion, like zsh-autosuggestions), Tab and Enter. While a program runs, it gets the keys.
+ */
 class FakeShell {
   line = '';
   echo = true;
   history: string[] = [];
+  /** The shell's own inline suggestion (drawn by the test), taken with →. */
+  suggestion = '';
+  program: Program | null = null;
   private queue = '';
   constructor(private readonly term: XTerminal, public prompt = PROMPT, private readonly run: Run = () => ({ out: '', prompt: true })) {}
 
   feed(data: string): void {
     for (let i = 0; i < data.length; i++) {
-      if (data.startsWith('\x1b[A', i)) {
+      if (this.program) {
+        const result = this.program(data[i]);
+        this.queue += result.out;
+        if (result.done) {
+          this.program = null;
+          this.queue += this.prompt;
+        }
+      } else if (data.startsWith('\x1b[A', i)) {
         const recalled = this.history.at(-1) ?? '';
         this.queue += '\b \b'.repeat(this.line.length) + recalled;
         this.line = recalled;
+        i += 2;
+      } else if (data.startsWith('\x1b[C', i)) {
+        this.line += this.suggestion;
+        this.queue += this.suggestion;
+        this.suggestion = '';
         i += 2;
       } else if (data[i] === '\x7f') {
         if (!this.line) continue;
@@ -53,6 +73,7 @@ class FakeShell {
         if (cmd.trim()) this.history.push(cmd);
         const result = this.run(cmd);
         this.queue += `\r\n${result.out}${result.prompt ? this.prompt : ''}`;
+        this.program = result.program ?? null;
       } else if (data[i] === '\t') {
         // Several candidates: bash lists them and draws the prompt and the line again.
         this.queue += `\r\ncheckout  cherry-pick\r\n${this.prompt}${this.line}`;
@@ -90,6 +111,7 @@ async function setup(o: { history?: string[]; snippets?: SuggestSource[]; run?: 
   const shell = new FakeShell(term, o.prompt ?? PROMPT, o.run);
   term.onData((d) => { sent.push(d); follower.input(d); shell.feed(d); });
   term.onWriteParsed(() => follower.parsed());
+  term.buffer.onBufferChange(() => follower.screenChanged());
   term.parser.registerOscHandler(133, (payload) => { follower.promptMark(payload); return false; });
   await new Promise<void>((resolve) => term.write(`Welcome\r\n${o.prompt ?? PROMPT}`, resolve));
   await tick();
@@ -101,7 +123,9 @@ async function setup(o: { history?: string[]; snippets?: SuggestSource[]; run?: 
     await shell.flush();
   };
   const type = async (text: string) => { for (const ch of text) await press(ch); };
-  return { term, follower, shell, remembered, sent, press, type, view: () => view, advance: (ms: number) => { clock += ms; } };
+  /** Output of the remote end that is not an answer to a key (the shell's own suggestion, a program printing). */
+  const write = async (data: string) => { await new Promise<void>((resolve) => term.write(data, resolve)); await tick(); };
+  return { term, follower, shell, remembered, sent, press, type, write, view: () => view, advance: (ms: number) => { clock += ms; } };
 }
 
 describe('the command line follower (real xterm buffer)', () => {
@@ -252,5 +276,91 @@ describe('the command line follower (real xterm buffer)', () => {
     t.advance(1000);
     await t.type('ma');
     expect(t.view()?.items[0].text).toBe('make test');
+  });
+
+  it('leaves → to the shell while its own faint suggestion takes the cells after the cursor (zsh-autosuggestions)', async () => {
+    const t = await setup({ history: ['git stash list', 'git status'] });
+    await t.type('git st');
+    expect(t.view()?.ghost).toBe('ash list');
+    // The shell draws its suggestion in bright black and puts the cursor back.
+    t.shell.suggestion = 'atus';
+    await t.write('\x1b[90matus\x1b[0m\x1b[4D');
+    expect(t.view()).toMatchObject({ ghost: '', room: 0 });
+    expect(t.view()?.items.map((i) => i.text)).toEqual(['git stash list', 'git status']);
+    await t.press('ArrowRight');
+    expect(t.sent.at(-1)).toBe('\x1b[C');
+    expect(t.shell.line).toBe('git status');
+    await t.press('Enter');
+    // Once the list is entered with ↓, → takes the chosen item even without room for its ghost.
+    await t.type('git st');
+    await t.write('\x1b[90matus\x1b[0m\x1b[4D');
+    await t.press('ArrowDown');
+    expect(t.view()).toMatchObject({ selected: 0, ghost: '' });
+    await t.press('ArrowRight');
+    expect(t.shell.line).toBe('git stash list');
+  });
+
+  it('inserts a suggestion accepted before the echo of the last key once that echo arrived, and not after more typing', async () => {
+    const t = await setup({ history: ['git status'] });
+    await t.type('git st');
+    // A slow link: "a" is sent, its echo is not back yet when → is pressed.
+    t.term.input('a', true);
+    expect(t.follower.key(key('ArrowRight'))).toBe(true);
+    expect(t.sent.at(-1)).toBe('a');
+    await t.shell.flush();
+    expect(t.sent.at(-1)).toBe('tus');
+    await t.shell.flush();
+    expect(t.shell.line).toBe('git status');
+    await t.press('Enter');
+    expect(t.remembered).toEqual(['git status']);
+    // Typing on after the click: the insertion is dropped, the shell keeps what was typed.
+    await t.type('git st');
+    t.term.input('a', true);
+    t.follower.accept(0);
+    t.term.input('x', true);
+    await t.shell.flush();
+    await t.shell.flush();
+    expect(t.shell.line).toBe('git stax');
+  });
+
+  it('starts over after a full-screen program quit with a single key (q in man)', async () => {
+    const man: Program = (k) => (k === 'q' ? { out: '\x1b[?1049l', done: true } : { out: '', done: false });
+    const t = await setup({ history: ['ls -la'], run: (cmd) => (cmd === 'man ls' ? { out: '\x1b[?1049h\x1b[HLS(1)\r\n:', prompt: false, program: man } : { out: '', prompt: true }) });
+    await t.type('man ls');
+    await t.press('Enter');
+    t.advance(1000);
+    await t.press(' ');
+    await t.press('q');
+    await t.type('ls');
+    expect(t.view()?.items.map((i) => i.text)).toEqual(['ls -la']);
+    await t.press('Enter');
+    expect(t.remembered).toEqual(['man ls', 'ls']);
+  });
+
+  it('starts over after a pager without the alternate screen quit with q, but never in its search prompt', async () => {
+    const pager: Program = (k) => (k === 'q' ? { out: '\r\x1b[K', done: true } : k === '/' ? { out: '\r\x1b[K/', done: false } : k === '\r' ? { out: '\r\x1b[K:', done: false } : { out: k, done: false });
+    const t = await setup({ history: ['ls -la'], run: (cmd) => (cmd === 'git log' ? { out: 'commit 1a2b3c\r\nAuthor: u\r\n:', prompt: false, program: pager } : { out: '', prompt: true }) });
+    await t.type('git log');
+    await t.press('Enter');
+    t.advance(1000);
+    await t.press('/');
+    await t.type('ls');
+    expect(t.view()).toBeNull();
+    await t.press('Enter');
+    await t.press('q');
+    await t.type('ls');
+    expect(t.view()?.items.map((i) => i.text)).toEqual(['ls -la']);
+    await t.press('Enter');
+    expect(t.remembered).toEqual(['git log', 'ls']);
+  });
+
+  it('keeps the command run before the next one was typed ahead of its echo (slow link)', async () => {
+    const t = await setup({ history: [] });
+    await t.type('cd /var/log');
+    // Enter, then the next command, all before any echo is back.
+    for (const ch of '\rls\r') { t.advance(150); t.term.input(ch, true); }
+    await t.shell.flush();
+    // "ls" was typed while the cursor still sat on the line before: where it starts is not known, so it is not kept.
+    expect(t.remembered).toEqual(['cd /var/log']);
   });
 });

@@ -22,6 +22,15 @@ export const COMMAND_HISTORY_LIMITS = {
 
 export const COMMAND_HISTORY_VERSION = 1;
 
+/** What Settings > SSH shows of the history file. */
+export interface SshHistoryStatus {
+  /** Entries kept per host id. */
+  counts: Record<string, number>;
+  /** The file is from a newer version, not a history file or unreadable: nothing is recorded or cleared, it stays as it is. */
+  readOnly: boolean;
+  file: string;
+}
+
 /** `window.mc.sshHistory` (src/preload); every call is validated in src/main/ssh/commandHistory.ts. */
 export interface SshHistoryApi {
   list(hostId: string): Promise<CommandHistoryEntry[]>;
@@ -29,8 +38,7 @@ export interface SshHistoryApi {
   record(hostId: string, command: string): void;
   /** One host's history, or every host's (null). */
   clear(hostId: string | null): Promise<{ ok: boolean }>;
-  /** Entries kept per host id. */
-  counts(): Promise<Record<string, number>>;
+  status(): Promise<SshHistoryStatus>;
 }
 
 const HOUR = 3_600_000;

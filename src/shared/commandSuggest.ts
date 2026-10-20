@@ -117,6 +117,9 @@ export type PopupKeyAction =
 const PASS: PopupKeyAction = { kind: 'pass', hide: false };
 const PASS_HIDE: PopupKeyAction = { kind: 'pass', hide: true };
 
+/** A modifier pressed on its own (AltGr comes as Ctrl+Alt with key AltGraph on Windows): the popup stays as it is. */
+const MODIFIER_KEYS = new Set(['Control', 'Alt', 'AltGraph', 'Meta', 'Shift', 'CapsLock', 'OS', 'Fn']);
+
 /**
  * A keydown while the popup is open. The shell keeps every key unless the popup is engaged: ↓ enters and walks the list, ↑
  * walks back (and leaves it from the first item) only once the list was entered, Enter inserts the chosen item (without
@@ -124,11 +127,10 @@ const PASS_HIDE: PopupKeyAction = { kind: 'pass', hide: true };
  * modifiers go to the shell and close the popup; typing goes to the shell and keeps it.
  */
 export function popupKey(ev: KeyLike, st: PopupKeyState): PopupKeyAction {
-  if (ev.isComposing || !st.count) return PASS;
+  if (ev.isComposing || !st.count || MODIFIER_KEYS.has(ev.key)) return PASS;
   // AltGr (Ctrl+Alt on Windows) types a character, like Polish letters do.
   if (ev.ctrlKey && ev.altKey && !ev.metaKey && [...ev.key].length === 1) return PASS;
-  const modified = ev.ctrlKey || ev.altKey || ev.metaKey;
-  if (modified) return ev.key === 'Control' || ev.key === 'Alt' || ev.key === 'Meta' ? PASS : PASS_HIDE;
+  if (ev.ctrlKey || ev.altKey || ev.metaKey) return PASS_HIDE;
   switch (ev.key) {
     case 'ArrowDown':
       if (ev.shiftKey) return PASS_HIDE;
@@ -177,4 +179,15 @@ export function classifyInput(data: string): InputKind {
   const text = PASTE.exec(data)?.[1] ?? data;
   if (/[\r\n]/.test(text)) return /[\r\n]\s*$/.test(text) ? 'abort' : 'lose';
   return text && !/[\u0000-\u001f\u007f]/.test(text) ? 'text' : 'other';
+}
+
+/**
+ * The typed line (`typed`, the cursor at its end) once the shell echoed `data`: typed or pasted text is added, a backspace
+ * takes the last character. Null when that cannot be foreseen (word erase, Tab, the shell's history, cursor keys) or when
+ * the line before was not known either.
+ */
+export function predictLine(typed: string | null, data: string): string | null {
+  if (typed === null) return null;
+  if (data === '\x7f' || data === '\b') return Array.from(typed).slice(0, -1).join('');
+  return classifyInput(data) === 'text' ? typed + (PASTE.exec(data)?.[1] ?? data) : null;
 }

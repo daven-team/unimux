@@ -1,6 +1,8 @@
 // Settings > SSH, "Podpowiedzi poleceń": the switch of the SSH command autocomplete and the per-host command history
-// behind it (kept by main on this computer only), which can be cleared host by host or all at once.
+// behind it (kept by main on this computer only), which can be cleared host by host or all at once. A history file that
+// opened read-only (newer version, not a history file, unreadable) is explained here with its path, like the vault's.
 import { useEffect, useState } from 'react';
+import type { SshHistoryStatus } from '../../../../shared/commandHistory';
 import { updateSettings } from '../../../../shared/state';
 import { useI18n } from '../../i18n';
 import { askChoice, toast, update, useStore } from '../../store';
@@ -11,9 +13,11 @@ export function SshAutocompleteSettings() {
   const { tr } = useI18n();
   const enabled = useStore((st) => st.s.settings.sshAutocomplete !== false);
   const hosts = useStore((st) => st.s.sshHosts);
-  const [counts, setCounts] = useState<Record<string, number> | null>(null);
-  const load = () => void window.mc.sshHistory.counts().then(setCounts, () => setCounts({}));
+  const [status, setStatus] = useState<SshHistoryStatus | null>(null);
+  const load = () => void window.mc.sshHistory.status().then(setStatus, () => setStatus({ counts: {}, readOnly: false, file: '' }));
   useEffect(load, []);
+  const counts = status?.counts;
+  const readOnly = !!status?.readOnly;
   const withHistory = hosts.filter((h) => (counts?.[h.id] ?? 0) > 0);
 
   const clear = async (hostId: string | null) => {
@@ -30,19 +34,24 @@ export function SshAutocompleteSettings() {
   return (
     <SettingsGroup title={tr('Podpowiedzi poleceń')} description={tr('Historia poleceń jest zapisywana tylko na tym komputerze, osobno dla każdego hosta, i nigdzie nie jest wysyłana. Polecenia zaczynające się od spacji oraz tekst wpisywany bez echa (hasła) nie są zapisywane.')}>
       <SettingRow title={tr('Podpowiedzi poleceń w terminalach SSH')} htmlFor="settings-ssh-autocomplete"
-        hint={tr('Podczas pisania polecenia pod kursorem pojawiają się pasujące polecenia z historii hosta i jednowierszowe snippety. Klawisze należą do powłoki, dopóki nie wejdziesz w listę strzałką w dół. Nie działa w programach pełnoekranowych (vim, htop, tmux).')}>
+        hint={tr('Podczas pisania polecenia pod kursorem pojawiają się pasujące polecenia z historii hosta i jednowierszowe snippety. Klawisze należą do powłoki; gdy lista jest widoczna, strzałka w dół wchodzi w nią, strzałka w prawo dopełnia szary tekst za kursorem, a Esc ją zamyka. Nie działa w programach pełnoekranowych (vim, htop, tmux).')}>
         <input id="settings-ssh-autocomplete" className="setting-switch" type="checkbox" role="switch" checked={enabled}
           onChange={(e) => update((st) => updateSettings(st, { sshAutocomplete: e.target.checked }))} />
       </SettingRow>
+      {readOnly && status?.file && (
+        <div className="ssh-banner-warn" role="alert">
+          {tr('Historia poleceń jest tylko do odczytu: plik {file} jest nieczytelny, ma nieprawidłowy format albo pochodzi z nowszej wersji aplikacji. Nowe polecenia nie są zapisywane, historii nie można wyczyścić, a plik pozostaje nietknięty. Napraw lub usuń ten plik i uruchom aplikację ponownie.', { file: status.file })}
+        </div>
+      )}
       {counts && !withHistory.length && <p className="muted">{tr('Brak zapisanej historii poleceń')}</p>}
       {withHistory.map((h) => (
         <SettingRow key={h.id} title={h.label} hint={tr('Poleceń w historii: {count}', { count: counts![h.id] })}>
-          <button className="btn" aria-label={`${tr('Wyczyść historię poleceń')}: ${h.label}`} onClick={() => void clear(h.id)}>{tr('Wyczyść')}</button>
+          <button className="btn" disabled={readOnly} aria-label={`${tr('Wyczyść historię poleceń')}: ${h.label}`} onClick={() => void clear(h.id)}>{tr('Wyczyść')}</button>
         </SettingRow>
       ))}
       {withHistory.length > 1 && (
         <SettingRow title={tr('Wyczyść całą historię poleceń')}>
-          <button className="btn danger" onClick={() => void clear(null)}>{tr('Wyczyść')}</button>
+          <button className="btn danger" disabled={readOnly} onClick={() => void clear(null)}>{tr('Wyczyść')}</button>
         </SettingRow>
       )}
     </SettingsGroup>

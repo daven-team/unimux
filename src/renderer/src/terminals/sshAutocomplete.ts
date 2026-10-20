@@ -145,11 +145,11 @@ class SshTerminalAddon implements RemoteAddon {
     this.disposables = [
       term.onData((d) => follower.input(d)),
       // The line is read once a write is parsed, never in the middle of one (a completion listing scrolls before the prompt
-      // is drawn again); scrolling back and switching to the alternate screen only hide the popup.
+      // is drawn again); scrolling back only hides the popup, a full-screen program starting or ending starts the line over.
       term.onWriteParsed(() => follower.parsed()),
       term.onScroll(() => { if (!atBottom(term.buffer.active)) follower.close(); }),
       term.onResize(() => follower.refresh()),
-      term.buffer.onBufferChange(() => follower.close()),
+      term.buffer.onBufferChange(() => follower.screenChanged()),
       term.parser.registerOscHandler(133, (payload) => { follower.promptMark(payload); return false; }),
       { dispose: () => term.textarea?.removeEventListener('blur', blur) },
     ];

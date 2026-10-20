@@ -155,6 +155,10 @@ export function cursorBelowLine(buffer: BufferLike, anchor: LineAnchor): boolean
   return buffer.baseY + buffer.cursorY > last;
 }
 
+/** The cursor is on the logical line of `anchor`: its row or a wrapped continuation (not above it after `clear`, not below). */
+export const cursorOnLine = (buffer: BufferLike, anchor: LineAnchor): boolean =>
+  anchor.row >= 0 && buffer.baseY + buffer.cursorY >= anchor.row && !cursorBelowLine(buffer, anchor);
+
 /**
  * The same prompt drawn again on the cursor's line (bash after a completion listing, Ctrl+L, zsh after a background job
  * message): the anchor moves there. Null when the cursor's line does not start with the anchor's prompt text.
@@ -179,6 +183,17 @@ const SHELL_END = /(?:[$#%❯➜λ]|[-])$/u;
 /** Prompts ending in `>` and similar arrows (PowerShell, cmd, fish) unless they ask for a secret. */
 const ARROW_END = /[>»›❭→▶]$/u;
 
+const replPrompt = (text: string): boolean => REPL_PROMPT.test(text.split(/\s+/).pop()!) || REPL_PROMPT.test(text);
+
+/**
+ * A prompt ending the way POSIX shells and prompt themes end theirs (`$`, `#`, `%`, an arrow theme), not a REPL's: the
+ * stronger evidence asked for when a program that had the keys (a pager's `:` or `/`, a question) ended without Enter.
+ */
+export function isClassicShellPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  return !!text && !replPrompt(text) && (SHELL_END.test(text) || /[➜❯]/u.test(text));
+}
+
 /**
  * Whether the text left of the cursor looks like an interactive shell's prompt (the line typed after it is a command).
  * Questions (`[Y/n]`, `(yes/no)?`, `Password:`), the `>` continuation prompt and REPL prompts are not; any other prompt
@@ -186,10 +201,8 @@ const ARROW_END = /[>»›❭→▶]$/u;
  */
 export function isShellPrompt(prompt: string): boolean {
   const text = prompt.trim();
-  if (!text || text === '>') return false;
-  const last = text.split(/\s+/).pop()!;
-  if (REPL_PROMPT.test(last) || REPL_PROMPT.test(text)) return false;
-  if (SHELL_END.test(text) || /[➜❯]/u.test(text)) return true;
+  if (!text || text === '>' || replPrompt(text)) return false;
+  if (isClassicShellPrompt(text)) return true;
   if (SECRET_PROMPT.test(text)) return false;
   if (ARROW_END.test(text)) return true;
   // A question waiting for an answer.

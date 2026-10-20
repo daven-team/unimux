@@ -49,7 +49,8 @@ export function SshAutocomplete({ cellId }: { cellId: string }) {
       });
       ghost.current.style.setProperty('--cell-w', `${geo.cellWidth}px`);
     }
-    Object.assign(el.style, font, { maxHeight: '', visibility: 'visible' });
+    // Measured from the left edge: the place of the last keystroke would narrow the shrink-to-fit width of the box.
+    Object.assign(el.style, font, { maxHeight: '', left: '0px', top: '0px', visibility: 'visible' });
     const text = el.querySelector<HTMLElement>('.ssh-ac-text');
     const inset = el.clientLeft + (text?.offsetLeft ?? 0);
     const width = el.offsetWidth;

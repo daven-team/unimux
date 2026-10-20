@@ -3,7 +3,7 @@
 // atomic (files.ts). A file from a newer version, or one that is not a history file, is never written over.
 import { existsSync } from 'fs';
 import { dirname } from 'path';
-import { COMMAND_HISTORY_LIMITS, COMMAND_HISTORY_VERSION, historyCommand, normalizeCommandHistory, recordCommand, type CommandHistoryEntry } from '../../shared/commandHistory';
+import { COMMAND_HISTORY_LIMITS, COMMAND_HISTORY_VERSION, historyCommand, normalizeCommandHistory, recordCommand, type CommandHistoryEntry, type SshHistoryStatus } from '../../shared/commandHistory';
 import { isUuid } from '../../shared/ssh';
 import type { IpcGuard } from '../ipcGuard';
 import { ensurePrivateDir, readJsonFile, writePrivateFile } from './files';
@@ -82,6 +82,11 @@ export class CommandHistoryStore {
     return out;
   }
 
+  /** Settings > SSH: the counts, and the file with why nothing is recorded when it opened read-only. */
+  status(): SshHistoryStatus {
+    return { counts: this.counts(), readOnly: this.readOnly(), file: this.file };
+  }
+
   private changed(): void {
     this.dirty = true;
     this.timer ??= setTimeout(() => { this.timer = null; this.flush(); }, this.opts.writeDelayMs ?? 1500);
@@ -108,5 +113,5 @@ export function registerCommandHistoryIpc(guard: IpcGuard, store: CommandHistory
   guard.guardedHandle('ssh:history:list', (_e, hostId: unknown) => store.list(hostId), () => []);
   guard.guardedOn('ssh:history:record', (_e, hostId: unknown, command: unknown) => { store.record(hostId, command); });
   guard.guardedHandle('ssh:history:clear', (_e, hostId: unknown) => ({ ok: store.clear(hostId) }), () => ({ ok: false }));
-  guard.guardedHandle('ssh:history:counts', () => store.counts(), () => ({}));
+  guard.guardedHandle('ssh:history:status', () => store.status(), () => ({ counts: {}, readOnly: false, file: '' }));
 }

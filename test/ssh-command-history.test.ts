@@ -78,6 +78,8 @@ describe('CommandHistoryStore (main)', () => {
     const store = open();
     expect(store.list(A).map((e) => e.command)).toEqual(['ls']);
     expect(store.readOnly()).toBe(true);
+    // Settings > SSH explains it with the file path.
+    expect(store.status()).toEqual({ counts: { [A]: 1 }, readOnly: true, file });
     expect(store.record(A, 'pwd')).toBe(false);
     expect(store.clear(null)).toBe(false);
     store.flush();
@@ -112,7 +114,8 @@ describe('CommandHistoryStore (main)', () => {
     sends.get('ssh:history:record')!(app, A, 'id');
     expect(await invokes.get('ssh:history:list')!(foreign, A)).toEqual([]);
     expect(await invokes.get('ssh:history:list')!(app, A)).toEqual([{ command: 'id', count: 1, lastUsed: 1000 }]);
-    expect(await invokes.get('ssh:history:counts')!(app)).toEqual({ [A]: 1 });
+    expect(await invokes.get('ssh:history:status')!(app)).toEqual({ counts: { [A]: 1 }, readOnly: false, file });
+    expect(await invokes.get('ssh:history:status')!(foreign)).toEqual({ counts: {}, readOnly: false, file: '' });
     expect(await invokes.get('ssh:history:clear')!(foreign, A)).toEqual({ ok: false });
     expect(await invokes.get('ssh:history:clear')!(app, A)).toEqual({ ok: true });
     expect(store.list(A)).toEqual([]);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { anchorAtCursor, atBottom, cursorBelowLine, isShellPrompt, readCommandLine, readSubmittedLine, relocateAnchor, stripRightPrompt, type BufferLike } from '../src/shared/commandLine';
+import { anchorAtCursor, atBottom, cursorBelowLine, cursorOnLine, isClassicShellPrompt, isShellPrompt, readCommandLine, readSubmittedLine, relocateAnchor, stripRightPrompt, type BufferLike } from '../src/shared/commandLine';
 import { captureCommand, COMMAND_HISTORY_LIMITS, frecency, historyCommand, normalizeCommandHistory, recordCommand, type CommandHistoryEntry } from '../src/shared/commandHistory';
-import { classifyInput, completionKeys, fuzzyRanges, ghostText, popupKey, suggestCommands, type KeyLike, type SuggestSource } from '../src/shared/commandSuggest';
+import { classifyInput, completionKeys, fuzzyRanges, ghostText, popupKey, predictLine, suggestCommands, type KeyLike, type SuggestSource } from '../src/shared/commandSuggest';
 
 /**
  * A terminal buffer of `cols` columns: one string per row (absolute rows), `wrapped` = rows that continue the row above,
@@ -91,6 +91,15 @@ describe('reading the command line back from the buffer', () => {
     expect(readSubmittedLine(buffer(['', ''], { cursor: [0, 1] }), at(0), 40)).toBeNull();
   });
 
+  it('knows whether the cursor is still on a line (not above it after `clear`, not below it after Enter)', () => {
+    const rows = [`${PROMPT}echo 0123456789012345678901234567890`, '0123456789end', ''];
+    expect(cursorOnLine(buffer(rows, { cursor: [PROMPT.length + 4, 0], wrapped: [1] }), at(0))).toBe(true);
+    expect(cursorOnLine(buffer(rows, { cursor: [13, 1], wrapped: [1] }), at(0))).toBe(true);
+    expect(cursorOnLine(buffer(rows, { cursor: [0, 2], wrapped: [1] }), at(0))).toBe(false);
+    expect(cursorOnLine(buffer(['', PROMPT], { cursor: [0, 0] }), at(1))).toBe(false);
+    expect(cursorOnLine(buffer([PROMPT], { cursor: [9, 0] }), at(-1))).toBe(false);
+  });
+
   it('moves the anchor to the same prompt drawn again (a completion listing, Ctrl+L)', () => {
     const rows = [`${PROMPT}git ch`, 'checkout  cherry  cherry-pick', `${PROMPT}git ch`];
     const b = buffer(rows, { cursor: [PROMPT.length + 6, 2] });
@@ -113,6 +122,12 @@ describe('reading the command line back from the buffer', () => {
       'PS C:\\Users\\u> ', 'C:\\Users\\u>', 'u@web ~> ', 'u@web \uE0B0 ', 'u@passport:~$ ', '~/x ']) expect(isShellPrompt(p), p).toBe(true);
     for (const p of ['', '   ', '> ', '>>> ', '... ', 'mysql> ', 'MariaDB [(none)]> ', 'postgres=# ', 'app=> ', 'sqlite> ', 'irb(main):001:0> ', '127.0.0.1:6379> ', '(gdb) ', 'sftp> ',
       'Password: ', '[sudo] password for u: ', 'Enter passphrase for key \'/k\': ', 'Token> ', 'Do you want to continue? [Y/n] ', 'Are you sure (yes/no/[fingerprint])? ', 'Overwrite (y/n) ']) expect(isShellPrompt(p), p).toBe(false);
+  });
+
+  it('asks for a classic shell prompt when a program ended without Enter (a pager quit with q)', () => {
+    for (const p of ['u@web:~$ ', 'root@web:/var/www# ', 'web% ', '➜  repo git:(main) ✗ ', '~/src ❯ ']) expect(isClassicShellPrompt(p), p).toBe(true);
+    // A pager's search and `:` prompt, a REPL ending in `#`, an answer typed after a question, a line typed fast, nothing.
+    for (const p of ['/', ':', 'postgres=# ', 'Do you want to continue? [Y/n] y', 'u@web:~$ l', '', 'PS C:\\> ']) expect(isClassicShellPrompt(p), p).toBe(false);
   });
 });
 
@@ -219,6 +234,16 @@ describe('suggestions', () => {
     expect(completionKeys('żółw', 'żółty')).toBe('\x7fty');
     expect(completionKeys('ls', 'ls')).toBe('');
   });
+
+  it('foresees the line once typed text and backspaces are echoed, and nothing else', () => {
+    expect(predictLine('git st', 'a')).toBe('git sta');
+    expect(predictLine('git st', '\x1b[200~atus -s\x1b[201~')).toBe('git status -s');
+    expect(predictLine('żółw', '\x7f')).toBe('żół');
+    expect(predictLine('ls', '\b')).toBe('l');
+    expect(predictLine('', '\x7f')).toBe('');
+    for (const d of ['\t', '\x1b[A', '\x1b[D', '\x17', '\x1b[3~', '\x04']) expect(predictLine('git st', d), JSON.stringify(d)).toBeNull();
+    expect(predictLine(null, 'a')).toBeNull();
+  });
 });
 
 describe('keys while the popup is open', () => {
@@ -234,6 +259,10 @@ describe('keys while the popup is open', () => {
     expect(popupKey(key('Enter'), closed)).toEqual({ kind: 'pass', hide: true });
     expect(popupKey(key('c', { ctrlKey: true }), closed)).toEqual({ kind: 'pass', hide: true });
     expect(popupKey(key('ł', { ctrlKey: true, altKey: true }), closed)).toEqual({ kind: 'pass', hide: false });
+    // AltGr itself (Windows: Control, then AltGraph with Ctrl+Alt) and other lone modifiers keep the popup and its choice.
+    for (const k of ['Control', 'AltGraph', 'Shift', 'CapsLock', 'Meta']) {
+      expect(popupKey(key(k, { ctrlKey: true, altKey: true }), inList), k).toEqual({ kind: 'pass', hide: false });
+    }
     expect(popupKey(key('Enter', { isComposing: true }), inList)).toEqual({ kind: 'pass', hide: false });
   });
 
