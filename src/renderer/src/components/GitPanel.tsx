@@ -5,7 +5,7 @@ import { Select } from './Select';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { activeProject, findCell } from '../../../shared/state';
 import {
-  projectRelativePath, type GitBranch, type GitFileChange, type GitOpResult, type GitResult, type GitTrustInfo, type GitWorktree,
+  projectRelativePath, type GitBranch, type GitFileChange, type GitOpResult, type GitResult, type GitStatus, type GitTrustInfo, type GitWorktree,
 } from '../../../shared/git';
 import { useI18n } from '../i18n';
 import { askChoice, toast, useStore } from '../store';
@@ -33,10 +33,10 @@ export function GitPanel() {
 }
 
 const MAX_KEYS_SHOWN = 8;
-/** Small, distinct transfer marks for the repository toolbar; labels and confirmations live on the buttons. */
+/** Small, distinct transfer marks for the repository buttons of the History header; labels and confirmations live on the buttons. */
 function GitTransferIcon({ kind }: { kind: 'fetch' | 'pull' | 'push' }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       {kind === 'push' ? <path d="M8 11V2M5 5l3-3 3 3" /> : <path d="M8 2v9M5 8l3 3 3-3" />}
       {kind === 'fetch' ? <path d="M3 14h2m2 0h2m2 0h2" /> : <path d="M3 11v3h10v-3" />}
     </svg>
@@ -214,19 +214,25 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
 
   const fetchNow = () => void run('Fetch', () => window.mc.git.fetch(projectId, { requestId: newRequestId(), ...opts }));
   const pullNow = () => void run('Pull', () => window.mc.git.pull(projectId, { requestId: newRequestId(), ...opts }));
-  const pushNow = async () => {
-    const push = status?.push;
-    if (!status || !push) { toast(tr('Brak zdalnego repozytorium, do którego można wypchnąć tę gałąź.'), 'error'); return; }
+  /** Push with a confirmation naming the target; `current` is the status it describes (the one on screen unless given). */
+  const pushNow = async (current: GitStatus | null = status) => {
+    const push = current?.push;
+    if (!current || !push) { toast(tr('Brak zdalnego repozytorium, do którego można wypchnąć tę gałąź.'), 'error'); return; }
     const lines = [
-      tr('Gałąź {branch} zostanie wysłana do {target}.', { branch: status.branch ?? '', target: `${push.remote}/${push.branch}` }),
+      tr('Gałąź {branch} zostanie wysłana do {target}.', { branch: current.branch ?? '', target: `${push.remote}/${push.branch}` }),
       tr('Adres docelowy: {url}', { url: push.url }),
     ];
-    if (status.ahead) lines.push(tr('Commitów do wysłania: {count}', { count: status.ahead }));
+    if (current.ahead) lines.push(tr('Commitów do wysłania: {count}', { count: current.ahead }));
     if (push.setUpstream) lines.push(tr('Ustawione zostanie też śledzenie gałęzi zdalnej.'));
     if (programsNote) lines.push(programsNote);
     const choice = await askChoice(tr('Wypchnąć zmiany?'), lines.join('\n'), [{ label: 'Push', value: 'push', primary: true }]);
     if (choice !== 'push') return;
     void run('Push', () => window.mc.git.push(projectId, { requestId: newRequestId(), remote: push.remote, branch: push.branch, urlId: push.urlId, ...opts }));
+  };
+  /** "Commit and push": the confirmation counts the commits from a fresh status (the one on screen is from before the commit). */
+  const pushAfterCommit = async () => {
+    const fresh = await window.mc.git.status(projectId, opts).catch(() => null);
+    await pushNow(fresh?.ok ? fresh.data : status);
   };
 
   const switchBranch = async (branch: GitBranch) => {
@@ -254,16 +260,20 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
     openDiffTab(projectId, { source, path: file.path, ...(file.origPath && source === 'staged' ? { oldPath: file.origPath } : {}), ...(worktree ? { worktree } : {}) }, keep ? 'keep' : 'preview');
   };
 
+  /** Where a changed file lies in the project, to open it in the editor or the Files panel; null for a deleted file, a folder or another worktree. */
+  const editPath = (file: GitFileChange): string | null => {
+    if (!status || worktree || file.path.endsWith('/') || file.x === 'D' || file.y === 'D') return null;
+    return projectRelativePath(status.projectRelation, file.path, window.mc.platform === 'win32');
+  };
+
   const fileMenu = (e: React.MouseEvent, file: GitFileChange, source: 'working' | 'staged' | 'untracked') => {
     e.preventDefault();
-    const relative = status ? projectRelativePath(status.projectRelation, file.path, window.mc.platform === 'win32') : null;
-    const deleted = file.x === 'D' || file.y === 'D';
+    const relative = editPath(file);
     const folder = file.path.endsWith('/');
-    const usable = !!relative && !deleted && !folder && !worktree;
     openMenu(e.clientX, e.clientY, [
       { label: tr('Pokaż zmiany'), disabled: folder, onClick: () => openDiff(file, source) },
-      { label: tr('Otwórz w edytorze'), disabled: !usable, onClick: () => { if (relative) void openFile(projectId, relative); } },
-      { label: tr('Pokaż w panelu plików'), disabled: !usable, onClick: () => { if (relative) locateInFiles(projectId, relative); } },
+      { label: tr('Otwórz w edytorze'), disabled: !relative, onClick: () => { if (relative) void openFile(projectId, relative); } },
+      { label: tr('Pokaż w panelu plików'), disabled: !relative, onClick: () => { if (relative) locateInFiles(projectId, relative); } },
       { sep: true },
       { label: tr('Kopiuj ścieżkę względną'), onClick: () => window.mc.clipboardWrite(file.path) },
     ]);
@@ -305,6 +315,11 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
     ]);
   };
 
+  /** `inMenu`: the "..." menu next to it has Refresh too, so a narrow panel may hide the button (gitPanel.css). */
+  const refreshButton = (inMenu = false) => (
+    <button className={`btn ghost icon small ${inMenu ? 'git-refresh' : ''} ${spinning ? 'busy' : ''}`} onClick={() => void refreshNow()} title={spinning ? tr('Odświeżanie…') : tr('Odśwież')} aria-label={tr('Odśwież')} aria-busy={spinning}><RefreshIcon spinning={spinning} /></button>
+  );
+
   if (trustError && !trust) {
     return (
       <div className="sidebar-content git-panel">
@@ -324,11 +339,9 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
         <div className="git-bar">
           <span className="git-branch static" title={branchLabel}><IBranch /><span className="git-branch-name">{branchLabel}</span></span>
           <span className="git-badge conflict" title={tr('Tryb tylko do odczytu')}>{tr('Tryb tylko do odczytu')}</span>
-          <span className="git-spacer" />
-          <button className="btn ghost icon small" onClick={() => void refreshNow()} title={tr('Odśwież')} aria-label={tr('Odśwież')}><RefreshIcon spinning={spinning} /></button>
         </div>
         <TrustBanner keys={trust.keys} folded={folded} onFold={() => setFolded(true)} onTrust={() => void grantTrust()} />
-        <GitHistory projectId={projectId} historyKey={`ro:${readOnlyHead?.name ?? ''}:${readOnlyHead?.hash ?? ''}`} initial={false} opts={opts} nonce={nonce} />
+        <GitHistory projectId={projectId} historyKey={`ro:${readOnlyHead?.name ?? ''}:${readOnlyHead?.hash ?? ''}`} initial={false} opts={opts} nonce={nonce} actions={refreshButton()} />
       </div>
     );
   }
@@ -350,25 +363,33 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
   const pullLabel = status.behind > 0 ? tr('Pull (commitów do pobrania: {count})', { count: status.behind }) : tr('Pobierz i dołącz zmiany (pull, tylko fast-forward)');
   const pushLabel = status.ahead > 0 ? tr('Push (commitów do wysłania: {count})', { count: status.ahead }) : tr('Wyślij commity do zdalnego repozytorium (push)');
 
+  // The branch switcher sits at the right end of the Changes header (commits go to it); the conflict count stays next to it.
+  const branchControl = (
+    <>
+      {conflicts > 0 && <span className="git-badge conflict" title={tr('Konflikt scalania')}>!{conflicts}</span>}
+      <button className="git-branch" onClick={(e) => void openBranches(e.currentTarget)} title={status.upstream ? `${tr('Zmień gałąź')}\n${tr('Śledzi: {upstream}', { upstream: status.upstream })}` : tr('Zmień gałąź')} aria-haspopup="menu">
+        <IBranch /><span className="git-branch-name">{branchLabel}</span><span className="git-branch-chevron"><IChevron /></span>
+      </button>
+    </>
+  );
+  // The repository buttons live in the History header, like the ones of Cursor's graph header.
+  const repoActions = (
+    <>
+      <button className="btn ghost icon small git-fetch" disabled={!!busy || !canWrite} onClick={fetchNow} aria-label="Fetch" title={tr('Pobierz zmiany ze zdalnego repozytorium (fetch)')}>{busy === 'Fetch' ? '…' : <GitTransferIcon kind="fetch" />}</button>
+      <button className={`btn ghost icon small git-sync ${status.behind > 0 ? 'down' : ''}`} disabled={!!busy || !canWrite || !status.upstream} onClick={pullNow} aria-label={pullLabel} title={status.upstream ? pullLabel : tr('Ta gałąź nie śledzi gałęzi zdalnej')}>
+        {busy === 'Pull' ? '…' : <><GitTransferIcon kind="pull" />{status.behind > 0 && <span className="git-sync-count">{status.behind}</span>}</>}
+      </button>
+      <button className={`btn ghost icon small git-sync ${status.ahead > 0 ? 'up' : ''}`} disabled={!!busy || !canWrite || !status.push || (!status.ahead && !status.push.setUpstream)} onClick={() => void pushNow()} aria-label={pushLabel} title={pushLabel}>
+        {busy === 'Push' ? '…' : <><GitTransferIcon kind="push" />{status.ahead > 0 && <span className="git-sync-count">{status.ahead}</span>}</>}
+      </button>
+      {refreshButton(true)}
+      <button className="btn ghost icon small" onClick={(e) => openOverflow(e.currentTarget)} title={tr('Więcej akcji Git')} aria-label={tr('Więcej akcji Git')} aria-haspopup="menu"><IMore /></button>
+    </>
+  );
+
   return (
     <div className="sidebar-content git-panel" ref={panel}>
       {worktreeSelect}
-      <div className="git-bar">
-        <button className="git-branch" onClick={(e) => void openBranches(e.currentTarget)} title={status.upstream ? `${tr('Zmień gałąź')}\n${tr('Śledzi: {upstream}', { upstream: status.upstream })}` : tr('Zmień gałąź')} aria-haspopup="menu">
-          <IBranch /><span className="git-branch-name">{branchLabel}</span><span className="git-branch-chevron"><IChevron /></span>
-        </button>
-        {conflicts > 0 && <span className="git-badge conflict" title={tr('Konflikt scalania')}>!{conflicts}</span>}
-        <span className="git-spacer" />
-        <button className="btn ghost icon small git-fetch" disabled={!!busy || !canWrite} onClick={fetchNow} aria-label="Fetch" title={tr('Pobierz zmiany ze zdalnego repozytorium (fetch)')}>{busy === 'Fetch' ? '…' : <GitTransferIcon kind="fetch" />}</button>
-        <button className={`btn ghost icon small git-sync ${status.behind > 0 ? 'down' : ''}`} disabled={!!busy || !canWrite || !status.upstream} onClick={pullNow} aria-label={pullLabel} title={status.upstream ? pullLabel : tr('Ta gałąź nie śledzi gałęzi zdalnej')}>
-          {busy === 'Pull' ? '…' : <><GitTransferIcon kind="pull" />{status.behind > 0 && <span className="git-sync-count">{status.behind}</span>}</>}
-        </button>
-        <button className={`btn ghost icon small git-sync ${status.ahead > 0 ? 'up' : ''}`} disabled={!!busy || !canWrite || !status.push || (!status.ahead && !status.push.setUpstream)} onClick={() => void pushNow()} aria-label={pushLabel} title={pushLabel}>
-          {busy === 'Push' ? '…' : <><GitTransferIcon kind="push" />{status.ahead > 0 && <span className="git-sync-count">{status.ahead}</span>}</>}
-        </button>
-        <button className={`btn ghost icon small ${spinning ? 'busy' : ''}`} onClick={() => void refreshNow()} title={spinning ? tr('Odświeżanie…') : tr('Odśwież')} aria-label={tr('Odśwież')} aria-busy={spinning}><RefreshIcon spinning={spinning} /></button>
-        <button className="btn ghost icon small" onClick={(e) => openOverflow(e.currentTarget)} title={tr('Więcej akcji Git')} aria-label={tr('Więcej akcji Git')} aria-haspopup="menu"><IMore /></button>
-      </div>
       {repo.error && <p className="git-note error" role="alert">{errorText(repo.error.message)}</p>}
       {status.parent && <p className="git-note error" role="note">{tr('Repozytorium nadrzędne: ten projekt jest podfolderem większego repozytorium ({root}). Zmiany w nim są wyłączone.', { root: status.root })}</p>}
       {trustedWithPrograms && (
@@ -377,9 +398,14 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
           <button className="btn small" onClick={() => void revokeTrust()}>{tr('Cofnij zaufanie')}</button>
         </div>
       )}
-      <GitChanges view={changesLayout.view} sort={changesLayout.sort} projectId={projectId} status={status} busy={!!busy} writable={canWrite} programsNote={programsNote} opts={opts} run={run} onOpen={openDiff} onMenu={fileMenu} />
+      {/* commitSlot (not set yet) takes the Commit button's place, e.g. for publishing a repository that has no remote. */}
+      <GitChanges
+        view={changesLayout.view} sort={changesLayout.sort} projectId={projectId} status={status} busy={!!busy} writable={canWrite} programsNote={programsNote}
+        opts={opts} run={run} onOpen={openDiff} onMenu={fileMenu} editPath={editPath} branch={branchControl}
+        onPush={status.push ? pushAfterCommit : undefined}
+      />
       <div className="git-splitter" role="separator" aria-orientation="horizontal" aria-label={tr('Zmień wysokość historii')} tabIndex={0} onPointerDown={startResize} onKeyDown={resizeKey} />
-      <GitHistory projectId={projectId} historyKey={historyKey} initial={status.initial} opts={opts} nonce={nonce} {...historyProps} />
+      <GitHistory projectId={projectId} historyKey={historyKey} initial={status.initial} opts={opts} nonce={nonce} actions={repoActions} {...historyProps} />
     </div>
   );
 }
