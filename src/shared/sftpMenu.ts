@@ -8,7 +8,7 @@ import { isFolderLike, type PaneEntry } from './sftpView';
 export type PaneAction =
   /** Selected entries: open (a folder goes there, a file opens in an editor tab), download or upload them... */
   | 'open' | 'transfer' | 'rename' | 'copyPath' | 'reveal' | 'cut'
-  /** ...paste the cut entries into the one selected folder, change permissions, delete them (last, red). */
+  /** ...paste the cut entries into the one right-clicked folder, change permissions, delete them (last, red). */
   | 'pasteInto' | 'permissions' | 'delete'
   /** The shown folder: a new folder in it, the cut entries pasted into it, list it again, copy its path, show it in Explorer. */
   | 'newFolder' | 'paste' | 'refresh' | 'copyFolderPath' | 'revealFolder'
@@ -24,7 +24,7 @@ export interface PaneMenuInput {
   selection: ReadonlyArray<Pick<PaneEntry, 'kind' | 'target' | 'unsafeName'>>;
   /** The listing is live: always for the local pane, a connected session for the remote one. */
   live: boolean;
-  /** Entries can be created, renamed, moved and deleted here: live, and (local) not the drive list. */
+  /** Entries can be created, renamed, moved and deleted here: live, and (local) not the drive list (no path of its own). */
   writable: boolean;
   /** The pane shows a folder (null path before the first listing). */
   hasFolder: boolean;
@@ -55,36 +55,38 @@ function entryGroups(m: PaneMenuInput): Array<Array<PaneAction | false>> {
   const remote = m.side === 'remote';
   const safe = !sel.some((e) => e.unsafeName);
   const openable = !!one && !one.unsafeName && (isFolderLike(one) || isFileLike(one));
-  const folder = !!one && !one.unsafeName && isFolderLike(one);
+  // A right click on one folder pastes into it (like Explorer); Paste of the toolbar always goes into the shown folder, like Ctrl+V.
+  const into = m.place === 'entries' && !!one && !one.unsafeName && isFolderLike(one);
   return [
     [m.live && openable && 'open', m.canTransfer && 'transfer'],
     [m.writable && !!one && 'rename', 'copyPath', !remote && m.writable && 'reveal'],
-    [m.writable && 'cut', m.writable && m.canPaste && (folder ? 'pasteInto' : 'paste')],
+    [m.writable && 'cut', m.writable && m.canPaste && (into ? 'pasteInto' : 'paste')],
     [remote && m.writable && safe && 'permissions', m.writable && 'delete'],
   ];
 }
 
-/** The actions of the shown folder; the toolbar adds Copy path and keeps them in one group (below the entry actions). */
+/** The actions of the shown folder; the toolbar adds Copy path and keeps them in one group (below the entry actions).
+ *  Copy path and Show in Explorer need a folder with a path of its own: not the drive list (never writable). */
 function folderGroups(m: PaneMenuInput, toolbar: boolean): Array<Array<PaneAction | false>> {
   if (!m.hasFolder) return [];
   const create = [m.writable && 'newFolder', m.writable && m.canPaste && 'paste'] as const;
-  const view = [m.live && 'refresh', toolbar && 'copyFolderPath', m.side === 'local' && m.writable && 'revealFolder'] as const;
+  const view = [m.live && 'refresh', toolbar && m.writable && 'copyFolderPath', m.side === 'local' && m.writable && 'revealFolder'] as const;
   return toolbar ? [[...create, ...view]] : [[...create], [...view]];
 }
 
 /**
  * What a menu of the pane lists. A right click on entries never shows folder or host actions, a right click on the empty
  * list never shows entry or host actions; the toolbar menu lists the entry actions (with a selection), the folder actions
- * without the ones the selection already offers under the same name (Paste, Copy path, Show in Explorer), then the host.
+ * without the ones the selection already offers under the same name (Paste, Copy path, Show in Explorer), then the host
+ * (also when the pane has no folder: a session whose start folder could not be listed can still be left).
  */
 export function paneMenu(m: PaneMenuInput): PaneMenuEntry[] {
   const entries = m.place !== 'empty' && m.selection.length > 0;
   if (m.place !== 'toolbar') return joinGroups(entries ? entryGroups(m) : folderGroups(m, false));
   const own = entries ? entryGroups(m) : [];
   const taken = new Set(own.flat());
-  const pasteTaken = taken.has('paste') || taken.has('pasteInto');
   const folder = folderGroups(m, true).map((group) => group.map((a) => (
-    (a === 'paste' && pasteTaken) || (a === 'copyFolderPath' && taken.has('copyPath')) || (a === 'revealFolder' && taken.has('reveal')) ? false : a
+    (a === 'paste' && taken.has('paste')) || (a === 'copyFolderPath' && taken.has('copyPath')) || (a === 'revealFolder' && taken.has('reveal')) ? false : a
   )));
   const host: Array<PaneAction | false> = m.side === 'remote' ? ['changeHost', m.hasSession && 'disconnect'] : [];
   return joinGroups([...own, ...folder, host]);

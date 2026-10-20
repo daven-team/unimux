@@ -80,6 +80,21 @@ describe('SFTP pane menus', () => {
     expect(paneMenu(local({ place: 'toolbar', selection: [] }))).toEqual(['newFolder', 'refresh', 'copyFolderPath', 'revealFolder']);
   });
 
+  it('offers no folder path on the drive list (it has none to copy), only the drives themselves', () => {
+    expect(paneMenu(local({ place: 'toolbar', selection: [], writable: false }))).toEqual(['refresh']);
+    expect(paneMenu(local({ place: 'toolbar', selection: [dir], writable: false }))).toEqual(['open', 'transfer', 'sep', 'copyPath', 'sep', 'refresh']);
+  });
+
+  it('pastes into the shown folder from the toolbar, like Ctrl+V, even with one folder selected', () => {
+    for (const side of [remote, local]) {
+      const menu = paneMenu(side({ place: 'toolbar', canPaste: true, selection: [dir] }));
+      expect(menu).toContain('paste');
+      expect(menu).not.toContain('pasteInto');
+    }
+    // The right click on that folder still pastes into it.
+    expect(paneMenu(remote({ canPaste: true, selection: [dir] }))).toContain('pasteInto');
+  });
+
   it('never shows two items of the same name in the toolbar menu', () => {
     const named = (menu: string[]) => menu.map((a) => (a === 'pasteInto' ? 'paste' : a === 'copyFolderPath' ? 'copyPath' : a === 'revealFolder' ? 'reveal' : a)).filter((a) => a !== 'sep');
     for (const input of [remote({ place: 'toolbar', canPaste: true }), remote({ place: 'toolbar', canPaste: true, selection: [dir] }), local({ place: 'toolbar', canPaste: true })]) {
@@ -93,5 +108,11 @@ describe('SFTP pane menus', () => {
   it('keeps Change host in the toolbar menu of a remote pane without a session, Disconnect only with one', () => {
     const menu = paneMenu(remote({ place: 'toolbar', selection: [], live: false, writable: false, hasFolder: false, hasSession: false }));
     expect(menu).toEqual(['changeHost']);
+  });
+
+  it('still offers the host actions when a session could not list its start folder', () => {
+    expect(paneMenu(remote({ place: 'toolbar', selection: [], writable: false, hasFolder: false }))).toEqual(['changeHost', 'disconnect']);
+    // The right-click menus never carry them.
+    expect(paneMenu(remote({ place: 'empty', selection: [], writable: false, hasFolder: false }))).toEqual([]);
   });
 });

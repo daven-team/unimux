@@ -189,6 +189,8 @@ export function FilePane(p: PaneProps) {
     } else items = p.menu('empty', []);
     if (items.length) openMenu(e.clientX, e.clientY, items);
   };
+  /** The empty part of the list: anything in it but an entry or ".." (the list itself, the empty-folder note, the row gaps). */
+  const onEmptyPart = (e: MouseEvent) => !(e.target as Element).closest('.sftp-row, .sftp-uprow');
 
   // ── drag and drop ──
   // The entries of an in-app drag stay in `activeDrag`; the drag data carries only its nonce (see resolveDrop).
@@ -244,6 +246,8 @@ export function FilePane(p: PaneProps) {
 
   const columns = COLUMNS.filter((c) => !c.remote || p.extraColumns);
   const f = p.folder;
+  // Actions opens whenever it has something to offer (a session whose start folder could not be listed still has Disconnect).
+  const toolbarMenu = p.head !== null && !p.placeholder ? p.menu('toolbar', selected) : [];
   const empty = !rows.length && !f.loading && f.path !== null && !f.error;
   return (
     <section className={`sftp-pane sftp-pane-${p.side}${p.extraColumns ? ' wide' : ''}`} aria-label={p.label}
@@ -259,8 +263,8 @@ export function FilePane(p: PaneProps) {
                 <input className="input" type="search" value={filter} placeholder={tr('Filtruj')} aria-label={tr('Filtruj')} spellCheck={false}
                   onChange={(e) => setFilter(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape' && filter) { e.stopPropagation(); setFilter(''); } }} />
               </div>
-              <button type="button" className="btn small sftp-actions" aria-haspopup="menu" disabled={f.path === null}
-                onClick={(e) => { const items = p.menu('toolbar', selected); if (items.length) openMenuAt(e.currentTarget, items); }}>{tr('Akcje')} <IChevron /></button>
+              <button type="button" className="btn small sftp-actions" aria-haspopup="menu" disabled={!toolbarMenu.length}
+                onClick={(e) => openMenuAt(e.currentTarget, toolbarMenu)}>{tr('Akcje')} <IChevron /></button>
             </>
           )}
         </div>
@@ -292,8 +296,8 @@ export function FilePane(p: PaneProps) {
           </div>
           <div ref={list} className={`sftp-list${over === f.path ? ' drop' : ''}${f.loading && f.path !== null ? ' loading' : ''}`} role="grid" aria-label={p.label} aria-multiselectable tabIndex={0} aria-busy={f.loading}
             aria-rowcount={rows.length} onKeyDown={onKeyDown} onScroll={(e) => { const t = e.currentTarget.scrollTop; setView((v) => (v.top === t ? v : { ...v, top: t })); }}
-            onContextMenu={(e) => { if (e.target === e.currentTarget) onRowMenu(e, null); }}
-            onMouseDown={(e) => { if (e.target === e.currentTarget) setSel(EMPTY_SELECTION); }}>
+            onContextMenu={(e) => { if (onEmptyPart(e)) onRowMenu(e, null); }}
+            onMouseDown={(e) => { if (onEmptyPart(e)) setSel(EMPTY_SELECTION); }}>
             {upRow && (
               <div className={`sftp-uprow${over !== null && over === f.parentPath ? ' drop' : ''}`} role="row" title={tr('Folder nadrzędny')}
                 {...(f.parentPath ? { 'data-folder-path': f.parentPath } : {})}

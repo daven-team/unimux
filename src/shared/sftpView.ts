@@ -128,6 +128,40 @@ export function liveSelection(sel: Selection, order: readonly string[]): Selecti
   return { paths, anchor: sel.anchor && shown.has(sel.anchor) ? sel.anchor : null, focus: sel.focus && shown.has(sel.focus) ? sel.focus : null };
 }
 
+// ── host picker ─────────────────────────────────────────────────────────────
+
+/** Where a host card sits on screen (its getBoundingClientRect). */
+export interface CardBox { left: number; top: number; width: number; height: number }
+export type CardKey = 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight';
+
+/**
+ * The arrow keys in the card grid of the host picker (cards in reading order, `from` -1 when the focus is elsewhere, e.g. in
+ * the search): Left/Right go to the previous/next card, Up/Down to the nearest card of the row above/below (the rows of the next
+ * group count as rows below). Down from elsewhere goes to the first card, Up from the top row back to the search (-1);
+ * null when there is nothing that way (the key keeps its default, e.g. the caret in the search).
+ */
+export function cardStep(cards: readonly CardBox[], from: number, key: CardKey): number | null {
+  if (!cards.length) return null;
+  if (from < 0 || from >= cards.length) return key === 'ArrowDown' ? 0 : null;
+  if (key === 'ArrowLeft') return from > 0 ? from - 1 : null;
+  if (key === 'ArrowRight') return from < cards.length - 1 ? from + 1 : null;
+  const at = cards[from];
+  const down = key === 'ArrowDown';
+  // Another row starts at least half a card away (cards of one row share their top, give or take a subpixel).
+  const half = at.height / 2;
+  const rows = cards.map((box, index) => ({ box, index })).filter(({ box }) => (down ? box.top >= at.top + half : box.top <= at.top - half));
+  if (!rows.length) return down ? null : -1;
+  const rowTop = down ? Math.min(...rows.map(({ box }) => box.top)) : Math.max(...rows.map(({ box }) => box.top));
+  const middle = (box: CardBox) => box.left + box.width / 2;
+  let best: { index: number; gap: number } | null = null;
+  for (const { box, index } of rows) {
+    if (Math.abs(box.top - rowTop) > half) continue;
+    const gap = Math.abs(middle(box) - middle(at));
+    if (!best || gap < best.gap) best = { index, gap };
+  }
+  return best ? best.index : null;
+}
+
 // ── history ─────────────────────────────────────────────────────────────────
 
 export interface NavHistory { back: readonly string[]; forward: readonly string[] }
