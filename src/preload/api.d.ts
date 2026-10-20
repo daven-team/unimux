@@ -13,6 +13,7 @@ import type { AdoptCopyResult, LoginRequest, LoginState, SwapResult } from '../s
 import type { ReplaceRequest, ReplaceResult, SearchOptions, SearchResult } from '../shared/search';
 import type { CreateResult, DeleteResult, FileOpProgress, FileOpRequest, FileOpResult, RenameResult } from '../shared/fileOps';
 import type { GitApi } from '../shared/git';
+import type { GithubApi } from '../shared/github';
 import type { SshApi, SshPrompt, SshSessionState, SshVaultInfo } from '../shared/ssh';
 import type { LocalFilesApi, SftpApi, SftpSessionState } from '../shared/sftp';
 import type { DbApi, DbPrompt, DbSessionState, DbVaultInfo } from '../shared/db';
@@ -108,6 +109,8 @@ export interface McApi {
   removeWorktree(projectPath: string, wt: Worktree, deleteBranch: boolean, confirmed?: WorktreeInspection): Promise<WorktreeRemoveResult>;
   /** The Git panel (see shared/git.ts): every call names a project; main resolves the folder and validates the request. */
   git: GitApi;
+  /** "Publish to GitHub" of the Git panel (see shared/github.ts): the sign-in and the publishing; tokens never leave main. */
+  github: GithubApi;
   ssh: SshApi;
   /** SFTP sessions and transfers (0.9.8); progress arrives on the 'mc:sftp-port' MessagePort (SftpPortMessage). */
   sftp: SftpApi;

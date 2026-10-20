@@ -26,6 +26,7 @@ import { canonicalPath, isInsidePath, relativeInside, samePath } from './gitPath
 import { pathExists } from './fsProbe';
 import { atomicWriteFileSync } from './atomicWrite';
 import { attributeDrivers, configuredAttributeDrivers, dangerousConfigKeys, parseConfigList, type ConfigEntry } from '../shared/gitTrust';
+import { githubAuthRefused } from './github/gitEnv';
 
 export interface GitOptions {
   /** The executable (default "git"); tests point it at a stand-in. */
@@ -44,6 +45,11 @@ export interface GitOptions {
   writeOutputBytes?: number;
   /** Where the trusted repositories are remembered (memory only when absent). */
   trustFile?: string;
+  /**
+   * Environment additions of fetch, pull and push: the GitHub sign-in unimux stored ("Publish to GitHub"), sent by git to
+   * https://github.com only. Null when there is none. Never on the command line.
+   */
+  remoteAuth?: () => Record<string, string> | null;
 }
 
 export const READ_TIMEOUT_MS = 10_000;
@@ -80,6 +86,8 @@ interface RunOptions {
   allowTruncate?: boolean;
   /** Exit codes besides 0 that are an answer, not a failure (diff --no-index exits 1 when there is a difference). */
   okCodes?: number[];
+  /** Variables added to the quiet environment of this run (the credentials of a network operation). */
+  env?: Record<string, string>;
 }
 
 interface RunOutput { code: number; stdout: string; stderr: string; truncated: boolean }
@@ -151,6 +159,9 @@ export class Git {
   private readonly scans = new Map<string, { scan: RepoScan; at: number }>();
   /** Where a push of a branch goes, per root and branch, while the local configuration file is unchanged (status only). */
   private readonly pushTargets = new Map<string, { target: GitPushTarget | null; at: number; stamp: string }>();
+  /** The remote names per root while the local configuration file is unchanged (status only). */
+  private readonly remoteLists = new Map<string, { names: string[]; at: number; stamp: string }>();
+  private readonly remoteAuth?: () => Record<string, string> | null;
   /** Identical reads that are still running (a window focus asks the Files tree and the Git panel at once): they share one run. */
   private readonly inflight = new Map<string, Promise<GitResult<unknown>>>();
   /** Bumped by every write and trust change: part of the key of shared reads. */
@@ -166,6 +177,7 @@ export class Git {
     this.cap = options.maxOutputBytes ?? OUTPUT_CAP;
     this.writeCap = options.writeOutputBytes ?? WRITE_OUTPUT_CAP;
     this.trust = new GitTrustStore(options.trustFile);
+    this.remoteAuth = options.remoteAuth;
   }
 
   // ---------- running git ----------
@@ -210,7 +222,7 @@ export class Git {
       };
       let child: ChildProcess;
       try {
-        child = spawn(this.bin, this.args(args), { cwd, env: this.env(read, cwd), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+        child = spawn(this.bin, this.args(args), { cwd, env: { ...this.env(read, cwd), ...options.env }, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
       } catch (error) { reject(spawnFailure(error)); return; }
 
       const chunks: Buffer[][] = [[], []];
@@ -533,7 +545,8 @@ export class Git {
       const parsed = parseStatusV2(out.stdout, GIT_MAX_FILES);
       const push = parsed.branch && !parsed.initial ? await this.cachedPushTarget(root, parsed.branch) : null;
       const parent = scope ? !this.withinScope(scope, root) : false;
-      return ok({ ...parsed, truncated: parsed.truncated || out.truncated, root, push, parent, projectRelation: this.relation(scope, root) });
+      const hasRemote = push !== null || (await this.cachedRemotes(root)).length > 0;
+      return ok({ ...parsed, truncated: parsed.truncated || out.truncated, root, push, parent, projectRelation: this.relation(scope, root), hasRemote });
     }));
   }
 
@@ -543,12 +556,7 @@ export class Git {
    */
   private async cachedPushTarget(root: string, branch: string): Promise<GitPushTarget | null> {
     const startedAt = this.generation;
-    let stamp = '';
-    try {
-      const { commonDir } = await this.gitDirs(root);
-      const info = await stat(join(commonDir, 'config'));
-      stamp = `${info.mtimeMs}:${info.size}`;
-    } catch { stamp = 'none'; }
+    const stamp = await this.configStamp(root);
     const key = `${root}\0${branch}`;
     const hit = this.pushTargets.get(key);
     if (hit && hit.stamp === stamp && Date.now() - hit.at < PUSH_TARGET_TTL_MS) return hit.target;
@@ -556,6 +564,32 @@ export class Git {
     // A write (push, fetch, checkout...) that ran meanwhile dropped the cache: this older answer must not come back into it.
     if (this.generation === startedAt) remember(this.pushTargets, key, { target, at: Date.now(), stamp });
     return target;
+  }
+
+  /** Changes whenever the repository's local configuration file does (a remote added or removed, a pushurl set). */
+  private async configStamp(root: string): Promise<string> {
+    try {
+      const { commonDir } = await this.gitDirs(root);
+      const info = await stat(join(commonDir, 'config'));
+      return `${info.mtimeMs}:${info.size}`;
+    } catch { return 'none'; }
+  }
+
+  private async remoteNames(root: string): Promise<string[]> {
+    const out = await this.run(root, ['remote'], { timeoutMs: this.readTimeout, read: true });
+    return out.stdout.split('\n').map((r) => r.trim()).filter(Boolean);
+  }
+
+  /** The remotes the status reports (does the repository have any: "Publish to GitHub"), remembered like the push target. */
+  private async cachedRemotes(root: string): Promise<string[]> {
+    const startedAt = this.generation;
+    const stamp = await this.configStamp(root);
+    const hit = this.remoteLists.get(root);
+    if (hit && hit.stamp === stamp && Date.now() - hit.at < PUSH_TARGET_TTL_MS) return hit.names;
+    let names: string[];
+    try { names = await this.remoteNames(root); } catch { return []; }
+    if (this.generation === startedAt) remember(this.remoteLists, root, { names, at: Date.now(), stamp });
+    return names;
   }
 
   /**
@@ -645,7 +679,7 @@ export class Git {
       this.generation++;
       try { return await work(root); }
       finally {
-        this.busy.delete(key); this.roots.delete(dir); this.scans.delete(root); this.generation++;
+        this.busy.delete(key); this.roots.delete(dir); this.scans.delete(root); this.remoteLists.delete(root); this.generation++;
         for (const target of this.pushTargets.keys()) if (target.startsWith(`${root}\0`)) this.pushTargets.delete(target);
       }
     });
@@ -656,13 +690,28 @@ export class Git {
     return { message: lines.slice(-2).join(' ') || fallback };
   }
 
+  /**
+   * A run that talks to a remote: with the GitHub sign-in of unimux when there is one (git sends it to https://github.com only).
+   * When GitHub refuses it, the same command runs once more without it, so the user's own credential manager still answers
+   * (nothing was transferred: git stops at the refused authentication).
+   */
+  private async network(root: string, args: string[]): Promise<RunOutput> {
+    const auth = this.remoteAuth?.() ?? null;
+    if (!auth) return this.run(root, args, { timeoutMs: this.networkTimeout });
+    try { return await this.run(root, args, { timeoutMs: this.networkTimeout, env: auth }); }
+    catch (error) {
+      if (error instanceof GitFailure && error.code === 'failed' && githubAuthRefused(error.message)) return this.run(root, args, { timeoutMs: this.networkTimeout });
+      throw error;
+    }
+  }
+
   fetch(dir: string, requestId: string, scope?: string): Promise<GitResult<GitOpResult>> {
-    return this.mutate(dir, requestId, scope, async (root) => ok(this.opMessage(await this.run(root, ['fetch'], { timeoutMs: this.networkTimeout }), 'OK')));
+    return this.mutate(dir, requestId, scope, async (root) => ok(this.opMessage(await this.network(root, ['fetch']), 'OK')));
   }
 
   /** Fast-forward only: it never creates a merge commit, never rebases and stops when the branches diverged. */
   pull(dir: string, requestId: string, scope?: string): Promise<GitResult<GitOpResult>> {
-    return this.mutate(dir, requestId, scope, async (root) => ok(this.opMessage(await this.run(root, ['pull', '--ff-only', '--no-rebase', '--no-edit'], { timeoutMs: this.networkTimeout }), 'OK')));
+    return this.mutate(dir, requestId, scope, async (root) => ok(this.opMessage(await this.network(root, ['pull', '--ff-only', '--no-rebase', '--no-edit']), 'OK')));
   }
 
   /**
@@ -680,7 +729,51 @@ export class Git {
         return fail('invalid', 'Cel push zmienił się od ostatniego odświeżenia. Odśwież panel i spróbuj ponownie.');
       }
       const args = ['push', ...(target.setUpstream ? ['--set-upstream'] : []), target.remote, `refs/heads/${parsed.branch}:refs/heads/${target.branch}`];
-      return ok(this.opMessage(await this.run(root, args, { timeoutMs: this.networkTimeout }), 'OK'));
+      return ok(this.opMessage(await this.network(root, args), 'OK'));
+    });
+  }
+
+  // ---------- publishing (src/main/github/publish.ts) ----------
+
+  /** The checked out branch (null: detached HEAD); reads HEAD only, starts nothing. */
+  private async currentBranch(root: string): Promise<string | null> {
+    try { return (await this.run(root, ['symbolic-ref', '--quiet', '--short', 'HEAD'], { timeoutMs: this.readTimeout, read: true })).stdout.trim() || null; }
+    catch { return null; }
+  }
+
+  /**
+   * What publishing needs to know before anything is created on GitHub: the branch, whether it has a commit, the remotes.
+   * Refused like a write in a repository above the project or in one that is not trusted (the push would run its hooks).
+   */
+  publishInfo(dir: string, scope?: string): Promise<GitResult<{ branch: string | null; initial: boolean; remotes: string[] }>> {
+    return this.attempt(async () => {
+      const root = await this.root(dir);
+      if (scope && !this.withinScope(scope, root)) return fail('parent', 'To repozytorium nadrzędne wobec projektu: zapisy są wyłączone.');
+      await this.requireTrust(root, true);
+      let initial = false;
+      try { await this.run(root, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], { timeoutMs: this.readTimeout, read: true }); } catch { initial = true; }
+      return ok({ branch: await this.currentBranch(root), initial, remotes: await this.remoteNames(root) });
+    });
+  }
+
+  /**
+   * The git half of publishing, inside the repository's write lock: checks again that there is no remote and that `branch` is
+   * still checked out, adds `url` as "origin" and pushes the branch with upstream. `env` carries the credentials (never the
+   * command line). A failed push keeps the remote (the repository exists now): `pushed` is false and `message` is git's.
+   */
+  publishPush(dir: string, req: { requestId: string; url: string; branch: string; env: Record<string, string> }, scope?: string): Promise<GitResult<{ pushed: boolean; message: string }>> {
+    return this.mutate<{ pushed: boolean; message: string }>(dir, req.requestId, scope, async (root) => {
+      if (!isSafeRef(req.branch) || !/^https:\/\/\S+$/.test(req.url)) return fail('invalid', 'Nieprawidłowe żądanie git.');
+      if ((await this.remoteNames(root)).length) return fail('invalid', 'To repozytorium ma już zdalne repozytorium.');
+      if (await this.currentBranch(root) !== req.branch) return fail('invalid', 'Cel push zmienił się od ostatniego odświeżenia. Odśwież panel i spróbuj ponownie.');
+      await this.run(root, ['remote', 'add', '--', 'origin', req.url], { timeoutMs: this.readTimeout });
+      try {
+        const out = await this.run(root, ['push', '--set-upstream', 'origin', `refs/heads/${req.branch}:refs/heads/${req.branch}`], { timeoutMs: this.networkTimeout, env: req.env });
+        return ok({ pushed: true, message: this.opMessage(out, 'OK').message });
+      } catch (error) {
+        if (error instanceof GitFailure) return ok({ pushed: false, message: error.message });
+        throw error;
+      }
     });
   }
 

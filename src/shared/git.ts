@@ -68,6 +68,8 @@ export interface GitStatus {
   parent: boolean;
   /** Where the project folder lies relative to the repository root (null: unrelated); main works it out from canonical paths. */
   projectRelation: GitProjectRelation | null;
+  /** The repository has at least one remote (false: "Publish to GitHub" is offered). */
+  hasRemote?: boolean;
 }
 
 export interface GitRef { name: string; kind: 'head' | 'branch' | 'remote' | 'tag'; current?: boolean }
@@ -358,6 +360,7 @@ export function validateGitRequest<C extends GitChannel>(channel: C, input: unkn
 export function redactSecrets(value: string): string {
   return value
     .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, '$1***@')
+    .replace(/(authorization:\s*(?:basic|bearer|token)\s+)\S+/gi, '$1***')
     .replace(/\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{16,})\b/g, '***');
 }
 

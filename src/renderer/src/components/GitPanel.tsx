@@ -18,6 +18,7 @@ import { openMenu, openMenuAt } from './ContextMenu';
 import { GitChanges } from './GitChanges';
 import { GitHistory } from './GitHistory';
 import { GitSetup } from './GitSetup';
+import { GitPublishButton, useGitPublish } from './GitPublish';
 import { refreshGitBadges } from '../git/gitBadges';
 import { IBranch, IChevron, IMore } from './icons';
 import { RefreshIcon, useHoldBusy } from './Spinner';
@@ -157,6 +158,12 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
     }
     return done;
   }, [busy, tr, errorText, repo, loadTrust]);
+
+  // "Publish to GitHub" (GitPublish.tsx): offered while the repository has no remote.
+  const publish = useGitPublish({
+    projectId, folder: worktree ?? projectPath, branch: status?.branch ?? null, opts,
+    onChanged: () => { setNonce((n) => n + 1); repo.refresh(0); refreshGitBadges(projectId, 400); },
+  });
 
   /** The explicit "trust this repository": a confirmation naming the keys, then the dedicated request (main scans again and stores it). */
   const grantTrust = async () => {
@@ -299,6 +306,7 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
       { label: tr('Pull'), disabled: !idle || !status?.upstream, onClick: pullNow },
       { label: 'Push', disabled: !idle || !status?.push || (!status.ahead && !status.push.setUpstream), onClick: () => void pushNow() },
       { label: 'Fetch', disabled: !idle, onClick: fetchNow },
+      ...publish.menu({ hasRemote: status?.hasRemote, initial: !!status?.initial, branch: status?.branch ?? null, idle }),
       { label: tr('Przełącz na gałąź…'), onClick: () => void openBranches(button) },
       { sep: true },
       { label: tr('Odśwież'), onClick: () => void refreshNow() },
@@ -349,6 +357,8 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
   // The pull and push buttons carry the counts; the label says it too for the title and for screen readers.
   const pullLabel = status.behind > 0 ? tr('Pull (commitów do pobrania: {count})', { count: status.behind }) : tr('Pobierz i dołącz zmiany (pull, tylko fast-forward)');
   const pushLabel = status.ahead > 0 ? tr('Push (commitów do wysłania: {count})', { count: status.ahead }) : tr('Wyślij commity do zdalnego repozytorium (push)');
+  // No remote and nothing to commit: "Publish to GitHub" takes the Commit button's place (VS Code's "Publish Branch").
+  const publishFirst = canWrite && status.hasRemote === false && !status.initial && !!status.branch && !status.files.length;
 
   return (
     <div className="sidebar-content git-panel" ref={panel}>
@@ -377,7 +387,10 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
           <button className="btn small" onClick={() => void revokeTrust()}>{tr('Cofnij zaufanie')}</button>
         </div>
       )}
-      <GitChanges view={changesLayout.view} sort={changesLayout.sort} projectId={projectId} status={status} busy={!!busy} writable={canWrite} programsNote={programsNote} opts={opts} run={run} onOpen={openDiff} onMenu={fileMenu} />
+      {publish.notice}
+      {publishFirst && <GitPublishButton disabled={!!busy} onClick={publish.open} />}
+      <GitChanges view={changesLayout.view} sort={changesLayout.sort} projectId={projectId} status={status} busy={!!busy} writable={canWrite && !publishFirst} programsNote={programsNote} opts={opts} run={run} onOpen={openDiff} onMenu={fileMenu} />
+      {publish.dialog}
       <div className="git-splitter" role="separator" aria-orientation="horizontal" aria-label={tr('Zmień wysokość historii')} tabIndex={0} onPointerDown={startResize} onKeyDown={resizeKey} />
       <GitHistory projectId={projectId} historyKey={historyKey} initial={status.initial} opts={opts} nonce={nonce} {...historyProps} />
     </div>
