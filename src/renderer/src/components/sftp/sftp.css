@@ -21,9 +21,7 @@
 .sftp-pane-head .btn { flex: none; }
 .sftp-filter svg { position: absolute; left: 7px; color: var(--muted); pointer-events: none; }
 .sftp-filter .input { width: 100%; height: 24px; padding: 0 8px 0 25px; box-sizing: border-box; background: #171717; border: 1px solid #ffffff0d; border-radius: 6px; color: var(--text); font-size: 12px; }
-.sftp-filter.wide { width: auto; margin: 0 14px 8px; }
-.sftp-filter.wide .input { height: 30px; }
-.btn.sftp-send, .btn.sftp-actions { display: inline-flex; align-items: center; gap: 5px; height: 24px; }
+.btn.sftp-actions { display: inline-flex; align-items: center; gap: 5px; height: 24px; }
 .sftp-pathbar { display: flex; align-items: center; gap: 2px; padding: 2px 8px 6px; min-width: 0; }
 .sftp-pathbar .btn.icon { height: 24px; width: 24px; flex: none; }
 .sftp-pathbar .btn:disabled { opacity: .35; cursor: default; }
@@ -56,15 +54,18 @@
 .sftp-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sftp-link { display: inline-flex; color: var(--muted); }
 .sftp-list { flex: 1; min-height: 0; overflow: auto; outline: none; position: relative; }
-.sftp-list:focus-visible { box-shadow: inset 0 0 0 1px #a8a29e66; }
-.sftp-list .sftp-row:hover { background: #ffffff06; }
-.sftp-list .sftp-row.on { background: #ffffff12; color: var(--text); }
-.sftp-list:focus .sftp-row.on { background: var(--accent-soft); }
-.sftp-list:focus .sftp-row.focus { box-shadow: inset 0 0 0 1px #a8a29e88; }
+/* The selection like the lists of Cursor and VS Code: a background only, no frame (tinted like the project tree while the
+   list has focus); the keyboard focus is a faint 1px line on its row, shown only while the keyboard is used (on the list
+   itself while no row has it). */
+.sftp-list:focus-visible:not(:has(.sftp-row.focus)) { box-shadow: inset 0 0 0 1px #ffffff10; }
+.sftp-list .sftp-row:hover { background: #ffffff08; }
+.sftp-list .sftp-row.on { background: #ffffff0f; color: var(--text); }
+.sftp-list:focus .sftp-row.on { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.sftp-list:focus-visible .sftp-row.focus { box-shadow: inset 0 0 0 1px #ffffff14; }
 .sftp-list .sftp-row.unsafe { opacity: .45; }
 .sftp-list .sftp-row.drop, .sftp-list .sftp-uprow.drop, .sftp-list.drop { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
 /* 0.9.9: the ".." row, cut entries, a refresh in progress (the old rows stay, dimmed: no flash to an empty list). */
-.sftp-list .sftp-uprow:hover { background: #ffffff06; }
+.sftp-list .sftp-uprow:hover { background: #ffffff08; }
 .sftp-uprow .sftp-name { color: var(--text-2); }
 .sftp-list .sftp-row.cut { opacity: .5; }
 .sftp-list.loading .sftp-row, .sftp-list.loading .sftp-uprow { opacity: .6; transition: opacity .15s .15s; }
@@ -90,19 +91,24 @@
 .sftp-spinner.small { width: 12px; height: 12px; flex: none; }
 .sftp-transfer.preparing { margin: 0 6px; }
 @media (prefers-reduced-motion: reduce) { :root[data-blink] .sftp-spinner { transform: none; } }
+/* "Wybierz host": in place of the whole remote pane, one column: the title row (the pane head's size, so it lines up with the
+   local pane), the search, the hosts as cards in a grid. */
 .sftp-picker { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.sftp-picker-head { display: flex; align-items: center; gap: 8px; padding: 6px 14px 8px; }
-.sftp-picker-head h3 { margin: 0; color: var(--text); font-size: 13px; font-weight: 600; }
-.sftp-picker-head .grow { flex: 1; }
-.sftp-picker-list { flex: 1; min-height: 0; overflow: auto; padding: 0 8px 12px; display: flex; flex-direction: column; gap: 8px; }
-.sftp-picker-group { display: flex; flex-direction: column; gap: 2px; }
-.sftp-picker-group-name { padding: 2px 8px; color: var(--muted); font-size: 11px; }
-.sftp-picker-none { margin: 8px; color: var(--muted); font-size: 12px; }
-.sftp-host-option { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
-.sftp-host-option:hover, .sftp-host-option:focus-visible { background: #ffffff0a; outline: none; border-color: #ffffff12; }
-.sftp-host-option.on { border-color: #ffffff22; }
+.sftp-picker-head h3.sftp-title { margin: 0; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.sftp-picker-search { flex: none; margin: 4px 10px 10px; }
+.sftp-picker-search .input { height: 28px; }
+.sftp-picker-list { flex: 1; min-height: 0; overflow: auto; padding: 0 10px 12px; display: flex; flex-direction: column; gap: 12px; }
+.sftp-picker-group { display: flex; flex-direction: column; gap: 6px; }
+.sftp-picker-group-name { padding: 0 2px; color: var(--muted); font-size: 11px; }
+.sftp-picker-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 6px; }
+.sftp-picker-none { margin: 4px 2px; color: var(--muted); font-size: 12px; }
+.sftp-host-option { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid #ffffff0a; border-radius: 8px; background: #ffffff05; color: var(--text); text-align: left; cursor: pointer; }
+.sftp-host-option:hover { background: #ffffff0a; border-color: #ffffff14; }
+.sftp-host-option:focus-visible { background: #ffffff0a; border-color: #ffffff2e; outline: none; }
+.sftp-host-option.on { border-color: #ffffff1f; }
+.sftp-host-option .sftp-dot { margin-left: auto; }
 .sftp-host-icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: none; border-radius: 8px; background: #ffffff0a; color: var(--text-2); }
-.sftp-host-text { display: flex; flex-direction: column; min-width: 0; }
+.sftp-host-text { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .sftp-host-label { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sftp-host-address { color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -138,6 +144,11 @@
 .sftp-transfer.cancelled .sftp-progress > span, .sftp-transfer.conflict .sftp-progress > span { background: var(--muted); }
 .sftp-transfer.conflict .sftp-transfer-state { color: var(--working); }
 .sftp-transfer-actions { display: flex; gap: 4px; flex: none; }
+
+/* Thin icons: the shared icons draw 1.8 wide for the chrome, the file lists, heads, host cards and transfers use lighter
+   strokes (CSS wins over the attribute of the svg; dots that set their own width stay round). */
+.sftp-icon svg, .sftp-link svg, .sftp-host-icon svg, .sftp-pane-head svg, .sftp-filter svg, .sftp-pathbar svg, .sftp-columns svg, .sftp-transfers svg { stroke-width: 1.35; }
+.sftp-connect-icon svg { stroke-width: 1.1; }
 
 /* "Uprawnienia…" (0.9.9). */
 .modal.sftp-perms { width: 460px; }
@@ -185,9 +196,9 @@
   .sftp-pane .sftp-table, .sftp-pane.wide .sftp-table { --sftp-cols: minmax(96px, 1fr) 54px; }
   .sftp-pane .sftp-col-mtime { display: none; }
 }
-/* Narrow pane heads: the address and the transfer button text go (both stay in the tooltips). */
+/* Narrow pane heads: the address of the host chip goes (it stays in the tooltip). */
 @container sftp-pane (max-width: 520px) {
-  .sftp-host-address, .sftp-send-label { display: none; }
+  .sftp-host-chip .sftp-host-address { display: none; }
 }
 @container sftp-view (max-width: 640px) {
   .sftp-panes { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }

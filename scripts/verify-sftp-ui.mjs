@@ -74,7 +74,16 @@ try {
   const menu = async (side, label) => {
     await app.click(`.sftp-pane-${side} .sftp-actions`);
     await app.until(`!!document.querySelector('.menu')`, 'actions menu');
-    await ev(`(() => { const el = [...document.querySelectorAll('.menu .menu-item')].find((e) => e.textContent.trim() === ${JSON.stringify(label)}); if (!el) throw new Error('menu item ${label}'); el.click(); return true; })()`);
+    await ev(`(() => { const el = [...document.querySelectorAll('.menu .menu-item')].find((e) => (e.firstChild?.textContent ?? e.textContent).trim() === ${JSON.stringify(label)}); if (!el) throw new Error('menu item ${label}'); el.click(); return true; })()`);
+  };
+  /** The labels of a right-click menu on the row `name` (or on the empty list), without the shortcut hints; the menu closes again. */
+  const contextLabels = async (side, name) => {
+    await ev(`(() => { const list = document.querySelector('.sftp-pane-${side} .sftp-list'); const el = ${name ? `[...list.querySelectorAll('.sftp-row')].find((r) => r.dataset.name === ${JSON.stringify(name)})` : 'list'}; const b = el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: b.left + 20, clientY: ${name ? 'b.top + 8' : 'b.bottom - 8'} })); return true; })()`);
+    await app.until(`!!document.querySelector('.menu')`, 'context menu');
+    const labels = await ev(`[...document.querySelectorAll('.menu .menu-item')].map((e) => (e.firstChild?.textContent ?? e.textContent).trim()).join('|')`);
+    await ev(`(() => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); return true; })()`);
+    await app.until(`!document.querySelector('.menu')`, 'context menu closed');
+    return labels;
   };
   const answerText = async (value) => {
     await app.until(`!!document.querySelector('.modal input.input')`, 'name dialog');
@@ -156,6 +165,7 @@ try {
   await app.click('.sftp-connect .btn', 'Wybierz host');
   await app.until(`document.querySelectorAll('.sftp-picker .sftp-host-option').length === 2 && document.querySelector('.sftp-picker-group-name')?.textContent === 'lab'`, 'host picker');
   await shot(app, 'picker');
+  if (await ev(`!!document.querySelector('.sftp-pane-remote .sftp-actions, .sftp-pane-remote .sftp-filter:not(.sftp-picker-search)')`)) throw new Error('file actions shown before a host is connected');
   await app.click('.sftp-host-option', 'vps-key');
   await app.until(`!!document.querySelector('.sftp-prompt .ssh-fingerprint')`, 'host key prompt in the view');
   if (!(await ev(`document.querySelector('.sftp-prompt .ssh-fingerprint').textContent.includes(${JSON.stringify(server.fingerprint)})`))) throw new Error('fingerprint mismatch');
@@ -178,6 +188,13 @@ try {
   if (!(await ev(`[...document.querySelectorAll('.sftp-pane-remote .sftp-row')].some((r) => r.textContent.includes('-rw'))`))) throw new Error('no permission string shown');
   await shot(app, 'connected');
   log('key login with host key prompt OK');
+
+  // Contextual menus: on a file only what can be done with it (Delete last, no host actions), on the empty list the folder.
+  const fileMenu = await contextLabels('remote', 'readme.txt');
+  if (fileMenu !== 'Otwórz|Pobierz|Zmień nazwę|Kopiuj ścieżkę|Wytnij|Uprawnienia…|Usuń') throw new Error(`remote file menu: ${fileMenu}`);
+  const emptyMenu = await contextLabels('remote', null);
+  if (emptyMenu !== 'Nowy folder|Odśwież') throw new Error(`remote empty-list menu: ${emptyMenu}`);
+  log('contextual menus OK');
 
   // 3. New folder, rename (F2).
   await menu('remote', 'Nowy folder');
@@ -227,9 +244,9 @@ try {
   // 6. Conflicts: Overwrite, Skip, Keep both, then "do the same for the rest" with two files.
   writeFileSync(join(local, 'a.txt'), 'local a v2\n');
   const upload = (names) => ev(`(async () => { const s = ${sftp}; const r = await window.mc.sftp.enqueue(s.sessionId, { direction: 'upload', sources: ${JSON.stringify(names.map((n) => join(local, n)))}, targetDir: '/home/alice' }); return r.ok; })()`);
-  // The Upload button with a selection (Ctrl click adds the second file).
+  // Upload from the Actions menu with a selection.
   await clickRow('local', 'a.txt');
-  await app.click('.sftp-pane-local .sftp-send');
+  await menu('local', 'Wyślij na serwer');
   await app.until(`document.querySelector('.modal h3')?.textContent === 'Konflikt nazw'`, 'conflict question');
   await shot(app, 'conflict');
   await dialogChoose('Zastąp');

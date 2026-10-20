@@ -1,4 +1,6 @@
 // "Wybierz host" of the SFTP view: the saved SSH hosts by group with their address, a search field (fuzzy, like the SSH view).
+// One compact column in place of the whole remote pane: the title row (in line with the head of the local pane), the search,
+// then the hosts as cards (icon, label, user@host:port; the connected one with a green dot).
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { filterHosts, groupHosts, userAtEndpoint, type SshHost } from '../../../../shared/ssh';
 import { useI18n } from '../../i18n';
@@ -25,13 +27,13 @@ export function HostPicker({ hosts, currentHostId, onPick, onCancel }: { hosts: 
   };
   return (
     <div className="sftp-picker" role="dialog" aria-label={tr('Wybierz host')} onKeyDown={onKeyDown}>
-      <div className="sftp-picker-head">
-        <h3>{tr('Wybierz host')}</h3>
+      <div className="sftp-pane-head sftp-picker-head">
+        <h3 className="sftp-title">{tr('Wybierz host')}</h3>
         <span className="grow" />
         {onCancel && <button type="button" className="btn small" onClick={onCancel}>{tr('Anuluj')}</button>}
       </div>
       {hosts.length > 0 && (
-        <div className="sftp-filter wide">
+        <div className="sftp-filter sftp-picker-search">
           <ISearch />
           <input className="input" type="search" autoFocus value={query} placeholder={tr('Szukaj hostów')} aria-label={tr('Szukaj hostów')} spellCheck={false}
             onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && shown[0]) { e.preventDefault(); onPick(shown[0].id); } }} />
@@ -48,15 +50,18 @@ export function HostPicker({ hosts, currentHostId, onPick, onCancel }: { hosts: 
         {groups.map((g) => (
           <div key={g.name ?? ''} className="sftp-picker-group">
             {headings && <div className="sftp-picker-group-name">{g.name ?? tr('Bez grupy')}</div>}
-            {g.hosts.map((h) => (
-              <button key={h.id} type="button" className={`sftp-host-option${h.id === currentHostId ? ' on' : ''}`} data-host-id={h.id} onClick={() => onPick(h.id)}>
-                <span className="sftp-host-icon" style={h.color ? { color: h.color } : undefined}><IServer /></span>
-                <span className="sftp-host-text">
-                  <span className="sftp-host-label">{h.label}</span>
-                  <span className="sftp-host-address">{userAtEndpoint(h)}</span>
-                </span>
-              </button>
-            ))}
+            <div className="sftp-picker-cards">
+              {g.hosts.map((h) => (
+                <button key={h.id} type="button" className={`sftp-host-option${h.id === currentHostId ? ' on' : ''}`} data-host-id={h.id} title={`${h.label} · ${userAtEndpoint(h)}`} onClick={() => onPick(h.id)}>
+                  <span className="sftp-host-icon" style={h.color ? { color: h.color } : undefined}><IServer /></span>
+                  <span className="sftp-host-text">
+                    <span className="sftp-host-label">{h.label}</span>
+                    <span className="sftp-host-address">{userAtEndpoint(h)}</span>
+                  </span>
+                  {h.id === currentHostId && <span className="sftp-dot connected" role="img" aria-label={tr('połączono')} />}
+                </button>
+              ))}
+            </div>
           </div>
         ))}
       </div>

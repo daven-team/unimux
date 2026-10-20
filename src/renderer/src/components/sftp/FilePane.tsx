@@ -1,9 +1,10 @@
-// One pane of the SFTP view (0.9.8): path bar (back, forward, up, crumbs), filter, Actions, the transfer button, sortable
+// One pane of the SFTP view (0.9.8): path bar (back, forward, up, crumbs), filter, Actions, sortable
 // columns and a windowed list (folders with thousands of entries render only the rows on screen). Multi-select with
 // Ctrl/Shift click and the keyboard (arrows, Home/End, Page keys, Enter opens, Backspace goes up, Delete, F2, Ctrl+A).
 // Entries drag to the other pane; drops come from the other pane (SFTP_DRAG_MIME) or from the OS (Files).
 // 0.9.9: a drag onto a folder row, a path segment or ".." of the same pane moves the entries there; Ctrl+X / Ctrl+V cut and
 // paste, F5 and the turning refresh button list the folder again (the old rows stay, dimmed, until the new listing came).
+// The right-click menus and Actions list only what can run (shared/sftpMenu.ts); upload and download live there too.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { rowSlots, rowWindow } from '../../../../shared/virtualRows';
 import {
@@ -11,6 +12,7 @@ import {
   SFTP_DRAG_MIME, sortEntries, toggleSort, DEFAULT_SORT, type Crumb, type PaneEntry, type ActiveDrag, type Selection, type SftpDragPayload, type SortKey, type SortOrder,
 } from '../../../../shared/sftpView';
 import type { MessageKey } from '../../../../shared/i18n';
+import type { PaneMenuInput } from '../../../../shared/sftpMenu';
 import { isFileLike } from '../../../../shared/editorSource';
 import { useI18n } from '../../i18n';
 import { openMenu, openMenuAt, type MenuItem } from '../ContextMenu';
@@ -37,7 +39,8 @@ export interface PaneFolder {
 export interface PaneProps {
   side: 'local' | 'remote';
   label: string;
-  /** Left of the path bar: the pane title and its own buttons (drives, home, host chip). */
+  /** Left of the path bar: the pane title and its own buttons (drives, home, host chip); null when the placeholder brings
+   *  its own head (the host picker). */
   head: ReactNode;
   folder: PaneFolder;
   crumbs: Crumb[];
@@ -49,8 +52,8 @@ export interface PaneProps {
   onBack(): void;
   onForward(): void;
   onUp(): void;
-  actions(selected: PaneEntry[]): MenuItem[];
-  transfer: { label: string; icon: ReactNode; disabled: boolean; run(selected: PaneEntry[]): void };
+  /** The menu of a right click on entries or on the empty list, or of the Actions button (empty: no menu). */
+  menu(place: PaneMenuInput['place'], selected: PaneEntry[]): MenuItem[];
   onDelete(selected: PaneEntry[]): void;
   onRename(entry: PaneEntry): void;
   /** Entries dragged from the other pane were dropped into `targetDir`. */
@@ -69,7 +72,8 @@ export interface PaneProps {
   cutPaths?: ReadonlySet<string>;
   /** No drop target (the drive list, a remote pane without a session). */
   dropDisabled?: boolean;
-  /** Text shown instead of the list (no entries yet, an empty state). */
+  /** Shown instead of the path bar and the list (no session yet, the host picker, a login prompt); the filter and Actions
+   *  stay hidden until there is a listing. */
   placeholder?: ReactNode;
 }
 
@@ -173,14 +177,17 @@ export function FilePane(p: PaneProps) {
     if (entry.unsafeName) return;
     setSel((s) => clickSelect(s, order, entry.path, { shift: e.shiftKey, toggle: e.ctrlKey || e.metaKey }));
   };
+  /** A right click on an entry selects it first (unless it is selected); one on the empty list or on an entry that cannot be
+   *  selected (an unsafe name) shows the menu of the folder. */
   const onRowMenu = (e: MouseEvent, entry: PaneEntry | null) => {
     e.preventDefault();
-    let chosen = selected;
-    if (entry && !entry.unsafeName && !sel.paths.includes(entry.path)) {
-      setSel(clickSelect(sel, order, entry.path));
-      chosen = [entry];
-    }
-    openMenu(e.clientX, e.clientY, p.actions(entry ? chosen : []));
+    let items: MenuItem[];
+    if (entry && !entry.unsafeName) {
+      const chosen = sel.paths.includes(entry.path) ? selected : [entry];
+      if (!sel.paths.includes(entry.path)) setSel(clickSelect(sel, order, entry.path));
+      items = p.menu('entries', chosen);
+    } else items = p.menu('empty', []);
+    if (items.length) openMenu(e.clientX, e.clientY, items);
   };
 
   // ── drag and drop ──
@@ -241,19 +248,23 @@ export function FilePane(p: PaneProps) {
   return (
     <section className={`sftp-pane sftp-pane-${p.side}${p.extraColumns ? ' wide' : ''}`} aria-label={p.label}
       onDragOver={onDragOver} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(null); }} onDrop={onDrop}>
-      <div className="sftp-pane-head">
-        {p.head}
-        <span className="grow" />
-        <div className="sftp-filter">
-          <ISearch />
-          <input className="input" type="search" value={filter} placeholder={tr('Filtruj')} aria-label={tr('Filtruj')} spellCheck={false}
-            onChange={(e) => setFilter(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape' && filter) { e.stopPropagation(); setFilter(''); } }} />
+      {p.head !== null && (
+        <div className="sftp-pane-head">
+          {p.head}
+          <span className="grow" />
+          {!p.placeholder && (
+            <>
+              <div className="sftp-filter">
+                <ISearch />
+                <input className="input" type="search" value={filter} placeholder={tr('Filtruj')} aria-label={tr('Filtruj')} spellCheck={false}
+                  onChange={(e) => setFilter(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape' && filter) { e.stopPropagation(); setFilter(''); } }} />
+              </div>
+              <button type="button" className="btn small sftp-actions" aria-haspopup="menu" disabled={f.path === null}
+                onClick={(e) => { const items = p.menu('toolbar', selected); if (items.length) openMenuAt(e.currentTarget, items); }}>{tr('Akcje')} <IChevron /></button>
+            </>
+          )}
         </div>
-        <button type="button" className="btn small sftp-actions" disabled={f.path === null} onClick={(e) => openMenuAt(e.currentTarget, p.actions(selected))}>{tr('Akcje')} <IChevron /></button>
-        <button type="button" className="btn small sftp-send" disabled={p.transfer.disabled || !selected.length} title={p.transfer.label} aria-label={p.transfer.label} onClick={() => p.transfer.run(selected)}>
-          {p.transfer.icon}<span className="sftp-send-label">{p.transfer.label}</span>
-        </button>
-      </div>
+      )}
       <div className="sftp-pathbar" style={p.placeholder ? { display: 'none' } : undefined}>
         <button type="button" className="btn ghost icon" aria-label={tr('Wstecz')} title={tr('Wstecz')} disabled={!f.canBack} onClick={p.onBack}><IArrowLeft /></button>
         <button type="button" className="btn ghost icon" aria-label={tr('Do przodu')} title={tr('Do przodu')} disabled={!f.canForward} onClick={p.onForward}><IArrowRight /></button>
