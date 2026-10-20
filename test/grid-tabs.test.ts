@@ -209,17 +209,20 @@ describe('labels and the all-tabs menu', () => {
 });
 
 describe('strip colours', () => {
-  it("gives every tab of a project the project's colour, never the grid's own automatic one", () => {
+  it("gives every grid tab its project's colour, never the grid's own automatic one", () => {
     const { s } = twoProjects();
     const [alpha, beta] = s.projects;
-    // New grids get their own colours (addTab); the strip does not draw them next to the project colour.
+    // New grids get their own, different colours (addTab), so a strip that drew them would differ from tab to tab.
     expect(new Set(alpha.tabs.map((t) => t.color)).size).toBe(alpha.tabs.length);
-    expect(alpha.tabs.map(() => stripTabColor({ project: alpha }))).toEqual([alpha.color, alpha.color]);
-    expect(stripTabColor({ project: beta })).toBe(beta.color);
-    expect(stripTabColor({ project: alpha })).not.toBe(stripTabColor({ project: beta }));
+    expect(alpha.tabs.map((t) => stripTabColor({ project: alpha, grid: t }))).toEqual([alpha.color, alpha.color]);
+    expect(stripTabColor({ project: beta, grid: beta.tabs[0] })).toBe(beta.color);
+    expect(stripTabColor({ project: alpha, grid: alpha.tabs[0] })).not.toBe(stripTabColor({ project: beta, grid: beta.tabs[0] }));
+    // Nor one set explicitly (MCP update_grid): it stays stored, unshown.
+    expect(stripTabColor({ project: { color: '#3b82f6' }, grid: { color: '#ef4444' } })).toBe('#3b82f6');
+    expect(stripTabColor({ grid: { color: '#ef4444' } })).toBeNull();
     // The tab menu's swatches recolour the project, so every one of its tabs follows.
-    const recoloured = updateProject(s, alpha.id, { color: '#ec4899' });
-    expect(stripTabColor({ project: recoloured.projects[0] })).toBe('#ec4899');
+    const recoloured = updateProject(s, alpha.id, { color: '#ec4899' }).projects[0];
+    expect(recoloured.tabs.map((t) => stripTabColor({ project: recoloured, grid: t }))).toEqual(['#ec4899', '#ec4899']);
   });
 
   it("uses a connection's colour for database tabs and shows none without an owner colour", () => {
@@ -234,8 +237,15 @@ describe('strip colours', () => {
     expect(stripTabColor({ project: { color: 'url(x)' } })).toBeNull();
   });
 
-  it('draws no per-grid colour in the strip (1.0.0 painted it next to the project colour)', () => {
-    expect(readFileSync('src/renderer/src/components/TitleBar.tsx', 'utf8')).not.toContain('--tab-color');
-    expect(readFileSync('src/renderer/src/styles.css', 'utf8')).not.toContain('--tab-color');
+  it("colours each grid tab of the strip through stripTabColor with its grid (1.0.0 painted the grid's colour next to the project's)", () => {
+    const titleBar = readFileSync('src/renderer/src/components/TitleBar.tsx', 'utf8');
+    const start = titleBar.indexOf('project.tabs.map((t) =>');
+    const end = titleBar.indexOf('}))}', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const gridTab = titleBar.slice(start, end);
+    expect(gridTab).toContain('const color = stripTabColor({ project, grid: t });');
+    expect(gridTab).toContain('style={stripTabStyle(order.indexOf(`grid:${t.id}`), color)}');
+    expect(gridTab).not.toMatch(/\bt\.color\b/);
   });
 });

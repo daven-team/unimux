@@ -282,7 +282,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       {/* The open grids of every project (1.0.0); a click on a grid of another project switches the project. */}
       {projects.flatMap((project) => project.tabs.map((t) => {
             const counts = countsOf(t.id);
-            const color = stripTabColor({ project });
+            const color = stripTabColor({ project, grid: t });
             return (
               <div
                 key={`${project.id}:${t.id}`}

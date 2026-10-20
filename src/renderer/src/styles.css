@@ -20,10 +20,11 @@
   --cell-head: 30px;
   --statusbar: 24px;
   --radius: 7px;
-  /* Buttons (Cursor-like): flat fills, a small radius. Secondary is neutral grey, primary steel blue with dark text. */
+  /* Buttons (Cursor-like): flat fills, a small radius. Secondary is neutral grey, primary steel blue with dark text. Cursor's grey
+     is #626262 on a #272727 toast; #4d4d4d keeps about the same step in lightness on unimux's darker panels and modals. */
   --btn-radius: 4px;
-  --btn-bg: #383838;
-  --btn-bg-hover: #444444;
+  --btn-bg: #4d4d4d;
+  --btn-bg-hover: #595959;
   --btn-fg: #e2e2e2;
   --btn-primary-bg: #81a1c1;
   --btn-primary-bg-hover: #91afcc;
@@ -108,7 +109,7 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 /* The border stays (transparent) so the variants that colour it (dashed "add" buttons, toggles) keep their size. Hover rules
    skip disabled buttons through :where(), which keeps their specificity as low as before for the per-panel overrides. */
 .btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 24px; padding: 0 9px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 22px; padding: 0 9px;
   border-radius: var(--btn-radius); border: 1px solid transparent; background: var(--btn-bg); color: var(--btn-fg); cursor: pointer;
   white-space: nowrap; transition: background .1s, color .1s;
 }
@@ -119,7 +120,7 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .btn.danger:where(:not(:disabled)):hover { background: #5a2828; color: #ffd0d0; }
 .btn.ghost { background: transparent; color: var(--text-2); }
 .btn.ghost:where(:not(:disabled)):hover { background: var(--btn-ghost-hover); color: var(--text); }
-.btn.icon { width: 24px; padding: 0; }
+.btn.icon { width: 22px; padding: 0; }
 .btn.small { height: 20px; padding: 0 7px; font-size: 11.5px; }
 .btn:disabled { opacity: .45; cursor: default; }
 @media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
