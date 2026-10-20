@@ -87,6 +87,7 @@ export const filesMessages = {
   'Wszystkie karty': ['All tabs', 'Alle Tabs', 'Todas las pestañas', 'Tous les onglets', 'Todos os separadores'],
   'Przewiń karty w lewo': ['Scroll tabs left', 'Tabs nach links scrollen', 'Desplazar pestañas a la izquierda', 'Faire défiler les onglets vers la gauche', 'Deslocar separadores para a esquerda'],
   'Przewiń karty w prawo': ['Scroll tabs right', 'Tabs nach rechts scrollen', 'Desplazar pestañas a la derecha', 'Faire défiler les onglets vers la droite', 'Deslocar separadores para a direita'],
+  'Kolor projektu': ['Project color', 'Projektfarbe', 'Color del proyecto', 'Couleur du projet', 'Cor do projeto'],
   'Zamknij pozostałe': ['Close others', 'Andere schließen', 'Cerrar las demás', 'Fermer les autres', 'Fechar os outros'],
   'Zamknij karty po prawej': ['Close tabs to the right', 'Tabs rechts schließen', 'Cerrar pestañas a la derecha', 'Fermer les onglets à droite', 'Fechar separadores à direita'],
   'Zamknij wszystkie pliki': ['Close all files', 'Alle Dateien schließen', 'Cerrar todos los archivos', 'Fermer tous les fichiers', 'Fechar todos os ficheiros'],

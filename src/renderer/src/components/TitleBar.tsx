@@ -5,7 +5,7 @@ import { activeWorkspaceKey, gridTabLabels, groupWorkspaceKeys, mergeWorkspaceOr
 import { readLegacyOrders } from '../workspaceStrip';
 import type { Project } from '../../../shared/types';
 import { describeLayout } from '../../../shared/layout';
-import { activeProject, renameTab, PROJECT_COLORS } from '../../../shared/state';
+import { activeProject, renameTab, updateProject, PROJECT_COLORS } from '../../../shared/state';
 import { addAgent, closeTab, selectTab } from '../actions';
 import { setUi, update, useStore } from '../store';
 import { profileOptionLabel } from '../cliUi';
@@ -23,7 +23,7 @@ import { sourceTitle, type FileSource } from '../../../shared/editorSource';
 import type { RedisTabRef } from '../../../shared/redisView';
 import { viewLabel } from '../redis/redisClient';
 import type { DbTabRef } from '../../../shared/dbTabs';
-import { revealScroll, scrollEdges, stepScroll, wheelScroll } from '../../../shared/tabStrip';
+import { revealScroll, scrollEdges, stepScroll, stripTabColor, wheelScroll } from '../../../shared/tabStrip';
 import { useSshStore } from '../sshStore';
 import { activateSshView, closeSshView, reconnectAllSsh, reconnectAllTargetsOf, sshHostMenuItems } from '../ssh';
 
@@ -60,6 +60,8 @@ const fileTabsKey = (documents: readonly FileDocument[]): string =>
   JSON.stringify(documents.map((d) => [d.id, d.projectId, d.name, d.relativePath, !!d.diff, d.text !== d.savedText, d.source ?? null, d.db ?? null, d.redis ?? null]));
 /** A tab of the project on screen, or of a file outside the projects (remote and local SFTP files show in every project). */
 const tabShown = (doc: { projectId: string }, projectId: string | undefined): boolean => !doc.projectId || doc.projectId === projectId;
+/** A strip tab's place in the order and its one colour (the chip, the active top line), from stripTabColor. */
+const stripTabStyle = (order: number, color: string | null): CSSProperties => ({ order, ...(color ? { '--project-color': color } : {}) }) as CSSProperties;
 
 export const WorkspaceTabs = memo(function WorkspaceTabs() {
   const { tr } = useI18n();
@@ -280,13 +282,14 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       {/* The open grids of every project (1.0.0); a click on a grid of another project switches the project. */}
       {projects.flatMap((project) => project.tabs.map((t) => {
             const counts = countsOf(t.id);
+            const color = stripTabColor({ project, grid: t });
             return (
               <div
                 key={`${project.id}:${t.id}`}
                 {...dragProps(`grid:${t.id}`)}
                 data-project-id={project.id}
                 className={`tab grid-tab ${activeKey === `grid:${t.id}` ? 'active' : ''}`}
-                style={{ order: order.indexOf(`grid:${t.id}`), '--project-color': project.color, ...(t.color ? { '--tab-color': t.color } : {}) } as CSSProperties}
+                style={stripTabStyle(order.indexOf(`grid:${t.id}`), color)}
                 onMouseDown={(e) => e.button === 0 && selectTab(project.id, t)}
                 onAuxClick={(e) => e.button === 1 && void closeTab(project.id, t.id)}
                 onDoubleClick={() => setEditing(t.id)}
@@ -294,9 +297,9 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
                   e.preventDefault();
                   openMenu(e.clientX, e.clientY, [
                     { label: tr("Zmień nazwę"), onClick: () => setEditing(t.id) },
-                    { header: tr('Kolor') },
-                    { colors: PROJECT_COLORS, onPick: (color) => update((st) => ({ ...st, projects: st.projects.map((p) => p.id === project.id ? { ...p, tabs: p.tabs.map((tab) => tab.id === t.id ? { ...tab, color } : tab) } : p) })) },
-                    ...(t.color ? [{ label: tr('Usuń kolor'), onClick: () => update((st) => ({ ...st, projects: st.projects.map((p) => p.id === project.id ? { ...p, tabs: p.tabs.map((tab) => tab.id === t.id ? { ...tab, color: undefined } : tab) } : p) })) }] : []),
+                    // The strip shows the project's colour (not the grid's own), so this is what the swatches change.
+                    { header: tr('Kolor projektu') },
+                    { colors: PROJECT_COLORS, onPick: (color) => update((st) => updateProject(st, project.id, { color })) },
                     { label: tr("Nowy grid") + '…', onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
                     ...(t.cells.some((c) => c.ssh) ? [{ label: tr('Wysyłanie masowe'), onClick: () => setUi({ modal: { kind: 'broadcast', projectId: project.id, tabId: t.id } }) }] : []),
                     ...(reconnectAllTargetsOf(project.id, t.id).length ? [{ label: tr('Połącz ponownie wszystkie SSH'), onClick: () => reconnectAllSsh(project.id, t.id) }] : []),
@@ -306,7 +309,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
                 }}
                 title={`${tr('Projekt: {name}', { name: project.name })}\n${tr("Dwuklik lub prawy klik: zmień nazwę · środkowy przycisk: zamknij")}`}
               >
-                <span className="tab-project" aria-hidden="true" />
+                {color && <span className="tab-project" aria-hidden="true" />}
                 <span className="tab-type-icon" aria-hidden="true"><TGrid /></span>
                 {editing === t.id ? (
                   <input
@@ -332,17 +335,18 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
               </div>
             );
           }))}
-          {/* Files of every project (1.0.0) with their project's colour; files outside the projects have none. */}
+          {/* Files of every project (1.0.0) with their project's colour chip; files outside the projects have none. */}
           {documents.map((doc) => {
             if (doc.redis) {
               const c = dbConnection(doc.redis.connectionId);
+              const color = stripTabColor({ connection: c });
               return (
-                <div key={doc.id} {...dragProps(`file:${doc.id}`)} style={{ order: order.indexOf(`file:${doc.id}`), '--project-color': c?.color ?? '#dc382d' } as CSSProperties}
+                <div key={doc.id} {...dragProps(`file:${doc.id}`)} style={stripTabStyle(order.indexOf(`file:${doc.id}`), color)}
                   className={`tab file-tab redis-strip-tab ${activeKey === `file:${doc.id}` ? 'active' : ''}`} title={doc.relativePath}
                   onClick={() => activateFile(doc.id)} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void closeFile(doc.id); } }}
                   onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
                   onContextMenu={(e) => { e.preventDefault(); fileTabMenu(e.clientX, e.clientY, doc); }}>
-                  <span className="tab-project" aria-hidden="true" />
+                  {color && <span className="tab-project" aria-hidden="true" />}
                   <span className="tab-type-icon" aria-hidden="true"><IDatabase /></span><span className="label">{doc.name}</span>
                   <span className="tab-host-tag">{doc.redis.view === 'keys' ? `DB ${doc.redis.db}` : viewLabel(doc.redis.view)}</span>
                   <button className="x" aria-label={tr('Zamknij')} onClick={(e) => { e.stopPropagation(); void closeFile(doc.id); }}><IX /></button>
@@ -352,15 +356,16 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
             const owner = projectById.get(doc.projectId);
             if (doc.db) {
               const c = dbConnection(doc.db.connectionId);
+              const color = stripTabColor({ connection: c });
               return (
                 <div key={doc.id} {...dragProps(`file:${doc.id}`)}
-                  style={{ order: order.indexOf(`file:${doc.id}`), '--project-color': c?.color ?? 'var(--muted)' } as CSSProperties}
+                  style={stripTabStyle(order.indexOf(`file:${doc.id}`), color)}
                   className={`tab file-tab db-tab-strip ${activeKey === `file:${doc.id}` ? 'active' : ''}`}
                   title={doc.relativePath}
                   onClick={() => activateFile(doc.id)} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void closeFile(doc.id); } }}
                   onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
                   onContextMenu={(e) => { e.preventDefault(); fileTabMenu(e.clientX, e.clientY, doc); }}>
-                  <span className="tab-project" aria-hidden="true" />
+                  {color && <span className="tab-project" aria-hidden="true" />}
                   <span className="tab-type-icon" aria-hidden="true">{doc.db.kind === 'table' ? <ITable /> : <IDatabase />}</span><span className="label">{doc.name}</span>
                   {doc.db.kind === 'ddl' && <span className="tab-diff-tag">DDL</span>}
                   <span className="tab-host-tag">{c?.name ?? '?'}</span>
@@ -369,15 +374,16 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
                 </div>
               );
             }
+            const color = stripTabColor({ project: owner });
             return (
             <div key={doc.id} {...dragProps(`file:${doc.id}`)} data-project-id={owner?.id}
-              style={{ order: order.indexOf(`file:${doc.id}`), ...(owner ? { '--project-color': owner.color } : {}) } as CSSProperties}
+              style={stripTabStyle(order.indexOf(`file:${doc.id}`), color)}
               className={`tab file-tab ${activeKey === `file:${doc.id}` ? 'active' : ''}`}
               title={doc.source ? sourceTitle(doc.source, doc.source.kind === 'remote' ? hostLabel(doc.source.hostId) : undefined) : `${doc.relativePath}${owner ? `\n${tr('Projekt: {name}', { name: owner.name })}` : ''}`}
               onClick={() => activateFile(doc.id)} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void closeFile(doc.id); } }}
               onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
               onContextMenu={(e) => { e.preventDefault(); fileTabMenu(e.clientX, e.clientY, doc); }}>
-              {owner && <span className="tab-project" aria-hidden="true" />}
+              {color && <span className="tab-project" aria-hidden="true" />}
               <span className="tab-type-icon" aria-hidden="true"><FileIcon name={doc.name} /></span><span className="label">{doc.name}</span>{doc.diff && <span className="tab-diff-tag">diff</span>}
               {doc.source?.kind === 'remote' && <span className="tab-host-tag">{hostLabel(doc.source.hostId)}</span>}
               {doc.dirty && <span className="file-dirty" aria-label={tr('Niezapisane zmiany')}>●</span>}

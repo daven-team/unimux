@@ -20,6 +20,16 @@
   --cell-head: 30px;
   --statusbar: 24px;
   --radius: 7px;
+  /* Buttons (Cursor-like): flat fills, a small radius. Secondary is neutral grey, primary steel blue with dark text. Cursor's grey
+     is #626262 on a #272727 toast; #4d4d4d keeps about the same step in lightness on unimux's darker panels and modals. */
+  --btn-radius: 4px;
+  --btn-bg: #4d4d4d;
+  --btn-bg-hover: #595959;
+  --btn-fg: #e2e2e2;
+  --btn-primary-bg: #81a1c1;
+  --btn-primary-bg-hover: #91afcc;
+  --btn-primary-fg: #191c22;
+  --btn-ghost-hover: #ffffff12;
   font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
   font-size: 12.5px;
   color: var(--text);
@@ -96,21 +106,24 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .brand-logo { width: 14px; height: 14px; border-radius: 4px; background: linear-gradient(135deg, #3b82f6, #a855f7); flex: none; }
 .titlebar .no-drag, .titlebar button, .titlebar .tab { -webkit-app-region: no-drag; }
 
+/* The border stays (transparent) so the variants that colour it (dashed "add" buttons, toggles) keep their size. Hover rules
+   skip disabled buttons through :where(), which keeps their specificity as low as before for the per-panel overrides. */
 .btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 26px; padding: 0 10px;
-  border-radius: 6px; border: 1px solid var(--border-2); background: var(--bg-2); color: var(--text-2); cursor: pointer;
-  white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 22px; padding: 0 9px;
+  border-radius: var(--btn-radius); border: 1px solid transparent; background: var(--btn-bg); color: var(--btn-fg); cursor: pointer;
+  white-space: nowrap; transition: background .1s, color .1s;
 }
-.btn:hover { background: var(--bg-hover); color: var(--text); border-color: #3a3a3a; }
-.btn.primary { background: #e2e2e2; border-color: #e2e2e2; color: #171717; font-weight: 600; }
-.btn.primary:hover { background: #f0f0f0; border-color: #f0f0f0; color: #111; }
-.btn.danger { color: #fca5a5; border-color: #5b2626; background: #2a1414; }
-.btn.danger:hover { background: #3a1a1a; }
-.btn.ghost { border-color: transparent; background: transparent; }
-.btn.ghost:hover { background: var(--bg-hover); }
-.btn.icon { width: 26px; padding: 0; }
-.btn.small { height: 22px; padding: 0 7px; font-size: 11.5px; }
+.btn:where(:not(:disabled)):hover { background: var(--btn-bg-hover); color: #f4f4f4; }
+.btn.primary, .btn.white { background: var(--btn-primary-bg); color: var(--btn-primary-fg); font-weight: 500; }
+.btn.primary:where(:not(:disabled)):hover, .btn.white:where(:not(:disabled)):hover { background: var(--btn-primary-bg-hover); color: var(--btn-primary-fg); }
+.btn.danger { background: #4a2121; color: #ffb4b4; }
+.btn.danger:where(:not(:disabled)):hover { background: #5a2828; color: #ffd0d0; }
+.btn.ghost { background: transparent; color: var(--text-2); }
+.btn.ghost:where(:not(:disabled)):hover { background: var(--btn-ghost-hover); color: var(--text); }
+.btn.icon { width: 22px; padding: 0; }
+.btn.small { height: 20px; padding: 0 7px; font-size: 11.5px; }
 .btn:disabled { opacity: .45; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
 .kbd { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 10.5px; color: var(--muted); border: 1px solid var(--border-2); border-radius: 4px; padding: 0 4px; }
 
 /* ── sidebar ───────────────────────────────────────────────────────────── */
@@ -119,14 +132,17 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 /* the tile rail: one icon tile per panel, always visible; the panel content sits to its right */
 .rail { width: 48px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg); }
 .sidebar.collapsed .rail { border-right: 0; }
-.rail-tiles { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0; }
-.rail-tile { position: relative; width: 32px; height: 32px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #858585; cursor: pointer; transition: background .15s, color .15s; }
-.rail-tile:hover { background: var(--bg-hover); color: var(--text); }
-.rail-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.rail-tile svg { width: 20px; height: 20px; stroke-width: 2; shape-rendering: geometricPrecision; }
-.rail-tile.on { background: #303030; color: #f0f0f0; }
+/* No tile backgrounds: hovering only brightens the icon; the open panel's tile has a bright icon and a thin bar at the rail's edge. */
+.rail-tiles { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px 0; }
+.rail-tile { position: relative; width: 100%; height: 36px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 0; background: transparent; color: #7f7f7f; cursor: pointer; transition: color .12s; }
+.rail-tile:hover { color: var(--text); }
+.rail-tile:focus-visible { outline: 1px solid var(--accent); outline-offset: -4px; border-radius: 6px; }
+.rail-tile svg { width: 20px; height: 20px; stroke-width: 1.5; shape-rendering: geometricPrecision; }
+.rail-tile.on { color: #f2f2f2; }
+.rail-tile.on::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 0 2px 2px 0; background: var(--btn-primary-bg); }
 .rail-tile[aria-disabled="true"] { opacity: .4; cursor: default; }
-.rail-tile[aria-disabled="true"]:hover { background: transparent; color: var(--muted); }
+.rail-tile[aria-disabled="true"]:hover { color: #7f7f7f; }
+@media (prefers-reduced-motion: reduce) { .rail-tile { transition: none; } }
 .rail-foot { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end; }
 .side-panel { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .side-panel-title { flex: none; padding: 11px 14px 6px; font-size: 10.5px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; color: var(--muted); user-select: none; }
@@ -368,15 +384,14 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 /* ── polish: square icon buttons, white CTA, empty states, legend ───────── */
 .sq {
   width: 24px; height: 24px; flex: none; display: grid; place-items: center; padding: 0;
-  border-radius: 7px; border: 1px solid var(--border-2); background: var(--bg-2); color: var(--text-2); cursor: pointer;
-  transition: background .12s, border-color .12s, color .12s;
+  border-radius: var(--btn-radius); border: 0; background: transparent; color: var(--text-2); cursor: pointer;
+  transition: background .12s, color .12s;
 }
-.sq:hover { background: #262626; border-color: #3a3a3a; color: #fff; }
+.sq:hover { background: var(--btn-ghost-hover); color: #fff; }
 .sq svg { width: 13px; height: 13px; }
 
-.btn.white { background: #ededed; border-color: #ededed; color: #0b0b0b; font-weight: 600; }
-.btn.white:hover { background: #fff; border-color: #fff; color: #000; }
-.btn.lg { height: 34px; padding: 0 16px; border-radius: 8px; font-size: 13px; }
+/* .btn.white (the call to action of a screen) looks like .btn.primary, see the buttons above. */
+.btn.lg { height: 32px; padding: 0 14px; font-size: 13px; }
 
 .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 10px; padding: 24px 18px 48px; }
 .empty-state .es-icon { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--bg-2); border: 1px solid var(--border-2); color: var(--text-2); margin-bottom: 4px; }
@@ -582,14 +597,14 @@ select option { background: #171717; color: var(--text); }
 /* ── toolbar buttons ────────────────────────────────────────────────────── */
 .tb-btn {
   height: 30px; min-width: 30px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  border: 1px solid transparent; border-radius: 7px; background: transparent; color: #9a9a9a; cursor: pointer; font-size: 12.5px;
+  border: 1px solid transparent; border-radius: var(--btn-radius); background: transparent; color: #9a9a9a; cursor: pointer; font-size: 12.5px;
   -webkit-app-region: no-drag; transition: background .12s, color .12s;
 }
-.tb-btn:hover { background: #1f1f1f; color: #f2f2f2; }
+.tb-btn:hover { background: var(--btn-ghost-hover); color: #f2f2f2; }
 .tb-btn.on { color: #e6e6e6; }
 .tb-btn.wide { padding: 0 10px 0 7px; }
 .tb-btn svg { flex: none; }
-.titlebar .tb-btn { width: 26px; min-width: 26px; height: 26px; padding: 0; border-radius: 5px; }
+.titlebar .tb-btn { width: 26px; min-width: 26px; height: 26px; padding: 0; }
 .titlebar .tb-btn svg { width: 15px; height: 15px; }
 .titlebar .tb-btn.on { background: #252525; }
 
@@ -616,14 +631,14 @@ select option { background: #171717; color: var(--text); }
 .update-pill.muted-pill { background: var(--bg-2); color: var(--text-2); border-color: var(--border-2); cursor: default; font-weight: 500; }
 @keyframes pill-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
-/* "+ Dodaj" pill in the tab bar */
+/* "+ Dodaj" in the tab bar: the strip's call to action, a steel-blue pill (like Cursor's "Agents Window" pill). */
 .tb-add {
-  -webkit-app-region: no-drag; height: 28px; display: inline-flex; align-items: center; gap: 7px; padding: 0 9px 0 10px; margin-left: 2px;
-  border: 1px solid #2c2c2c; border-radius: 8px; background: #161616; color: #d6d6d6; font-size: 12.5px; font-weight: 500; cursor: pointer;
-  transition: background .12s, border-color .12s, color .12s;
+  -webkit-app-region: no-drag; height: 22px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px 0 9px; margin-left: 2px;
+  border: 0; border-radius: 11px; background: var(--btn-primary-bg); color: var(--btn-primary-fg); font-size: 12px; font-weight: 500; cursor: pointer;
+  transition: background .12s;
 }
-.tb-add:hover { background: #222; border-color: #3d3d3d; color: #fff; }
-.tb-add svg:last-child { opacity: .55; margin-left: -1px; }
+.tb-add:hover { background: var(--btn-primary-bg-hover); }
+.tb-add svg:last-child { opacity: .7; margin-left: -1px; }
 
 /* Resizable side panels */
 .panel-resize { position: absolute; top: 0; bottom: 0; width: 8px; z-index: 35; cursor: col-resize; touch-action: none; outline: none; }
@@ -721,25 +736,26 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid #a8a29e; outli
   content: ''; position: absolute; height: 2px; top: 0; left: 0; right: 0; background: var(--accent); border-radius: 2px;
 }
 
-/* Workspace tabs live below the navbar. Color accents identify teams without obscuring labels. */
+/* Workspace tabs live below the navbar. Grids and files of every project share the strip (1.0.0), so a tab shows at most one
+   colour, always in the same place: a small chip in the colour of what it belongs to, its project or its database connection
+   (--project-color, see stripTabColor in shared/tabStrip.ts). A grid's own colour is not drawn here. The active tab is the
+   lighter one with a thin top line in that colour (neutral without one); neighbouring tabs share one 1px separator. */
 .workspace-tabs { flex: none; height: 33px; min-width: 0; display: flex; background: #111; border-bottom: 1px solid var(--border); }
 .workspace-tabs .tabs { position: relative; display: flex; align-items: stretch; gap: 0; overflow-x: auto; flex: 0 1 auto; padding: 0; min-width: 0; }
-.workspace-tabs .tab { --tab-color: #a8a29e; position: relative; display: flex; align-items: center; gap: 7px; flex: none; min-width: 94px; max-width: 230px; height: 32px; padding: 0 10px; border-radius: 0; border: 0; border-right: 1px solid #272727; border-top: 2px solid color-mix(in srgb, var(--tab-color) 55%, transparent); background: color-mix(in srgb, var(--tab-color) 5%, #141414); color: #969696; cursor: pointer; }
-.workspace-tabs .tab:hover { background: color-mix(in srgb, var(--tab-color) 10%, #1a1a1a); color: #eee; }
-.workspace-tabs .tab.active { background: color-mix(in srgb, var(--tab-color) 12%, #191919); border-top-color: var(--tab-color); color: #f2f2f2; }
+.workspace-tabs .tab { position: relative; display: flex; align-items: center; gap: 7px; flex: none; min-width: 94px; max-width: 230px; height: 32px; padding: 0 8px 0 10px; border: 0; border-right: 1px solid #222; border-radius: 0; background: transparent; color: #8c8c8c; cursor: pointer; }
+.workspace-tabs .tab:hover { background: #161616; color: #dcdcdc; }
+.workspace-tabs .tab.active { background: #1b1b1b; border-right-color: #222; color: #f2f2f2; }
+.workspace-tabs .tab.active::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--project-color, #8f8f8f); pointer-events: none; }
 .workspace-tabs .tab .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-tabs .tab .size { color: #727272; font-size: 10px; }
 .workspace-tabs .tab .x { flex: none; border: 0; background: transparent; padding: 2px; display: grid; place-items: center; border-radius: 3px; color: #888; cursor: pointer; }
 .workspace-tabs .tab .x:hover { color: #fff; background: #ffffff15; }
-.workspace-tabs .tb-btn, .workspace-tabs .tb-add { flex: none; align-self: center; margin: 0 5px; border-radius: 3px; }
+.workspace-tabs .tb-btn, .workspace-tabs .tb-add { flex: none; align-self: center; margin: 0 5px; }
 .workspace-tabs .tab input { width: 130px; background: #121212; border: 1px solid #555; outline: none; }
 .workspace-tabs .tab-type-icon { display: grid; place-items: center; width: 15px; height: 15px; flex: none; opacity: .8; }
 .workspace-tabs .tab-type-icon svg { width: 14px; height: 14px; }
-.workspace-tabs .grid-tab .tab-type-icon { color: var(--tab-color); }
-/* 1.0.0: grids and files of every project share the strip; a bar in the project colour tells them apart. */
-.workspace-tabs .tab .tab-project { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--project-color, transparent); opacity: .85; pointer-events: none; }
-.workspace-tabs .file-tab { --tab-color: #737373; background: #101010; }
-.workspace-tabs .file-tab.active { background: #202020; border-top-color: #dedede; }
+/* The owner chip: a rounded square like the project swatches of the sidebar (status dots are round). */
+.workspace-tabs .tab .tab-project { flex: none; width: 7px; height: 7px; margin-right: -1px; border-radius: 2px; background: var(--project-color, transparent); pointer-events: none; }
 .workspace-tabs .tab[draggable="true"] { cursor: grab; }
 .workspace-tabs .tab[data-dragging] { opacity: .45; }
 .workspace-tabs .tab[data-drop]::after { content: ''; position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); pointer-events: none; z-index: 2; }
@@ -810,8 +826,7 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid #a8a29e; outli
 .settings-card .row { flex-wrap: wrap; gap: 12px; }
 .settings-card .check { line-height: 1.6; }
 .settings-card input[type=checkbox], .settings-card input[type=range] { accent-color: #a8a29e; }
-.refresh-button { border: 1px solid #454545; border-radius: 7px; background: #ffffff05; color: #d4d4d4; gap: 8px; padding: 6px 12px; }
-.refresh-button:hover { border-color: #737373; background: #ffffff0d; color: #fff; }
+.refresh-button { gap: 8px; padding: 0 12px; }
 .refresh-button:disabled { opacity: .5; cursor: wait; }
 @media (max-width: 900px) {
   .settings-page { gap: 24px; padding: 36px 24px 24px; }
@@ -1126,5 +1141,5 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .window-failed { display: grid; place-items: center; height: 100vh; color: var(--muted); }
 .window-failed .row { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
 
-/* Database tabs in the strip (1.0.0): the connection name tinted with its colour. */
-.workspace-tabs .tab.db-tab-strip .tab-host-tag { background: color-mix(in srgb, var(--project-color) 22%, transparent); color: var(--text); }
+/* Database tabs in the strip (1.0.0): the connection's colour is the tab's chip, so its name tag stays neutral. */
+.workspace-tabs .tab.db-tab-strip .tab-host-tag, .workspace-tabs .tab.redis-strip-tab .tab-host-tag { background: #ffffff10; color: var(--text-2); }

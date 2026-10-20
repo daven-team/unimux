@@ -218,6 +218,3 @@
 .redis-table td { padding: 4px 8px; border-bottom: 1px solid #ffffff08; color: var(--text); word-break: break-all; }
 .redis-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .redis-table .mono { font-family: var(--mono); }
-
-/* the tab of the top strip */
-.tab.redis-strip-tab .tab-type-icon { color: var(--project-color); }

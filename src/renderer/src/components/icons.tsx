@@ -76,11 +76,16 @@ export const TPlus = () => <T><path d="M12 5v14M5 12h14" /></T>;
 export const THistory = () => (
   <T><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l4 2" /></T>
 );
+/** Stacked layers: the projects (the folder belongs to the Files tile). */
 export const TProjects = () => (
-  <T><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /></T>
+  <T>
+    <path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" />
+    <path d="m2 12.08 9.17 4.17a2 2 0 0 0 1.66 0L22 12.08" /><path d="m2 17.08 9.17 4.17a2 2 0 0 0 1.66 0L22 17.08" />
+  </T>
 );
+/** A folder: the project's files. */
 export const TFiles = () => (
-  <T><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M8 13h8M8 17h5" /></T>
+  <T><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /></T>
 );
 /** Familiar source-control branch mark. */
 export const TGit = () => (
