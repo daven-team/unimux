@@ -54,6 +54,15 @@
   padding: 3px 1px 1px 7px;
 }
 
+/* An SSH cell's colour theme (CellView sets --term-bg): the padding around xterm and its viewport take the theme background. */
+.terminal-cell > .cell-body {
+  background: var(--term-bg, transparent);
+}
+
+.terminal-cell > .cell-body .term-host .xterm-viewport {
+  background: var(--term-bg, var(--bg)) !important;
+}
+
 .terminal-cell .cell-heading {
   display: flex;
   align-items: center;

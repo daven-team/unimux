@@ -19,6 +19,7 @@ import { IconInput, IdentityChip, KeyField, PasswordField, UsernameField } from 
 
 /** The colour the palette opens with while the host has none (the tile itself stays neutral then). */
 const PALETTE_START = '#60a5fa';
+import { SshThemeSelect } from './SshThemePicker';
 
 export function HostEditor({ paneId, hostId }: { paneId: string; hostId?: string }) {
   const { tr } = useI18n();
@@ -59,7 +60,7 @@ export function HostEditor({ paneId, hostId }: { paneId: string; hostId?: string
     setClearSaved(false);
     const now = Date.now();
     let id = host?.id;
-    if (host) update((s) => updateSshHost(s, host.id, { group: undefined, tags: undefined, keyId: undefined, identityId: undefined, startupCommand: undefined, color: undefined, reconnectOnStart: undefined, sftpSudo: undefined, sftpCommand: undefined, ...r.value }, now));
+    if (host) update((s) => updateSshHost(s, host.id, { group: undefined, tags: undefined, keyId: undefined, identityId: undefined, startupCommand: undefined, color: undefined, reconnectOnStart: undefined, sftpSudo: undefined, sftpCommand: undefined, theme: undefined, ...r.value }, now));
     else {
       id = uid();
       const created = { id, ...r.value, createdAt: now, updatedAt: now };
@@ -157,7 +158,7 @@ export function HostEditor({ paneId, hostId }: { paneId: string; hostId?: string
                 aria-label={tr('Polecenie serwera SFTP')} title={tr('Polecenie serwera SFTP')} onChange={(e) => set({ sftpCommand: e.target.value })} />
               {field('sftpCommand')}
             </>}
-            {/* More per-host options (the terminal theme of SSH cells, ...) go in this card. */}
+            <SshThemeSelect value={draft.theme} onChange={(theme) => set({ theme })} />
           </div>
         )}
       </section>

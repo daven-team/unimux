@@ -2,6 +2,7 @@
 // No Node or DOM imports: this file is compiled for both sides.
 import { fuzzyFilter } from './fuzzy';
 import type { MessageKey, MessageParams } from './i18n';
+import { isSshThemeId, type SshThemeId } from './sshThemes';
 import { terminalModeReset } from './termReset';
 import type { PresetCell, Tab } from './types';
 
@@ -29,6 +30,8 @@ export interface SshHost {
   sftpSudo?: true;
   /** 0.9.9: the SFTP server command for sudo (empty: `sudo -n` with the usual sftp-server places). */
   sftpCommand?: string;
+  /** The colour theme of this host's terminals (shared/sshThemes.ts); absent = the one of Settings > SSH. */
+  theme?: SshThemeId;
   createdAt: number;
   updatedAt: number;
   // Reserved for later releases, never written now: agent, via, proxy, env, mosh, charset.
@@ -241,6 +244,7 @@ export function normalizeSshHost(raw: unknown): SshHost | null {
   if (r.reconnectOnStart === true) host.reconnectOnStart = true;
   if (r.sftpSudo === true) host.sftpSudo = true;
   if (typeof r.sftpCommand === 'string' && r.sftpCommand.trim() && !sftpCommandProblem(r.sftpCommand)) host.sftpCommand = r.sftpCommand.trim();
+  if (isSshThemeId(r.theme)) host.theme = r.theme;
   return host;
 }
 
@@ -258,7 +262,7 @@ export function normalizeSshHosts(raw: unknown): SshHost[] {
   return out;
 }
 
-export interface SshHostDraft { label: string; address: string; port: string; username: string; group: string; tags: string[]; keyId?: string; identityId?: string; startupCommand: string; color?: string; reconnectOnStart: boolean; sftpSudo?: boolean; sftpCommand?: string }
+export interface SshHostDraft { label: string; address: string; port: string; username: string; group: string; tags: string[]; keyId?: string; identityId?: string; startupCommand: string; color?: string; reconnectOnStart: boolean; sftpSudo?: boolean; sftpCommand?: string; theme?: string }
 export type HostDraftField = 'address' | 'port' | 'username' | 'startupCommand' | 'sftpCommand';
 export type HostDraftResult =
   | { ok: true; value: Omit<SshHost, 'id' | 'createdAt' | 'updatedAt'> }
@@ -292,6 +296,7 @@ export function validateHostDraft(d: SshHostDraft): HostDraftResult {
   if (d.reconnectOnStart) value.reconnectOnStart = true;
   if (d.sftpSudo) value.sftpSudo = true;
   if (d.sftpCommand?.trim()) value.sftpCommand = d.sftpCommand.trim();
+  if (isSshThemeId(d.theme)) value.theme = d.theme;
   return { ok: true, value };
 }
 
@@ -300,6 +305,7 @@ export function hostToDraft(h?: SshHost): SshHostDraft {
     label: h?.label ?? '', address: h?.address ?? '', port: h ? String(h.port) : '22', username: h?.username ?? '',
     group: h?.group ?? '', tags: h?.tags ?? [], keyId: h?.keyId, identityId: h?.identityId, startupCommand: h?.startupCommand ?? '', color: h?.color,
     reconnectOnStart: h?.reconnectOnStart === true, sftpSudo: h?.sftpSudo === true, sftpCommand: h?.sftpCommand ?? '',
+    theme: h?.theme,
   };
 }
 
@@ -310,7 +316,7 @@ export function hostToDraft(h?: SshHost): SshHostDraft {
  */
 export function hostFormDirty(host: SshHost | undefined, draft: SshHostDraft, typed: { tag: string; password: string; clearPassword?: boolean }): boolean {
   if (typed.tag.trim() || typed.password || typed.clearPassword) return true;
-  const key = (d: SshHostDraft) => JSON.stringify([d.label.trim(), d.address.trim(), d.port.trim(), d.username.trim(), d.group.trim(), d.tags, d.identityId ? '' : d.keyId ?? '', d.identityId ?? '', d.startupCommand, d.color ?? '', d.reconnectOnStart, d.sftpSudo === true, (d.sftpCommand ?? '').trim()]);
+  const key = (d: SshHostDraft) => JSON.stringify([d.label.trim(), d.address.trim(), d.port.trim(), d.username.trim(), d.group.trim(), d.tags, d.identityId ? '' : d.keyId ?? '', d.identityId ?? '', d.startupCommand, d.color ?? '', d.reconnectOnStart, d.sftpSudo === true, (d.sftpCommand ?? '').trim(), d.theme ?? '']);
   if (!host) return key(draft) !== key(hostToDraft(undefined));
   const v = validateHostDraft(draft);
   if (!v.ok) return key(draft) !== key(hostToDraft(host));

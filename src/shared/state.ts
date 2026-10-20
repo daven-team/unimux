@@ -14,6 +14,7 @@ import { DEFAULT_SCROLLBACK_LINES, normalizeScrollback } from './terminalLimits'
 import { normalizeShortcutOverrides } from './shortcuts';
 import { normalizeSshHosts, type SshCellRef, type SshHost } from './ssh';
 import { normalizeSshIdentities } from './sshIdentity';
+import { DEFAULT_SSH_THEME, normalizeSshThemeId } from './sshThemes';
 import { defaultSftpPlaces, forgetRemotePlace, normalizeSftpPlaces } from './sftpView';
 import { normalizeWorkspaceOrder } from './workspaceOrder';
 import { normalizeDbConnections } from './db';
@@ -39,7 +40,7 @@ export function defaultState(platform: AppPlatform = 'win32'): AppState {
     sshIdentities: [],
     sftp: defaultSftpPlaces(),
     dbConnections: [],
-    settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true, scrollbackLines: DEFAULT_SCROLLBACK_LINES },
+    settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true, scrollbackLines: DEFAULT_SCROLLBACK_LINES, sshTheme: DEFAULT_SSH_THEME },
     sidebarCollapsed: false,
     snippetsOpen: true,
     sidebarWidth: PANEL_LIMITS.sidebar.default,
@@ -463,6 +464,7 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
       confirmCloseWorking: typeof r.settings?.confirmCloseWorking === 'boolean' ? r.settings.confirmCloseWorking : d.settings.confirmCloseWorking,
       backgroundLoad: normalizeBackgroundLoad(r.settings?.backgroundLoad),
       scrollbackLines: normalizeScrollback(r.settings?.scrollbackLines),
+      sshTheme: normalizeSshThemeId(r.settings?.sshTheme),
       shortcuts: normalizeShortcutOverrides(r.settings?.shortcuts, platform),
       // The retired notifications / waitingSound* keys only seed the alerts when none are saved yet; they are never written again.
       alerts: readAlerts(r.settings as Record<string, unknown> | undefined),
