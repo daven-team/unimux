@@ -185,6 +185,44 @@ describe('SshManager', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // 1.0.1: ssh2 writes a packet to the socket in pieces (AES-GCM: length, payload, tag); with Nagle off each piece was a TCP
+  // segment of its own, three per keystroke. Corked, a keystroke is one write.
+  it('sends each keystroke to the socket as one write', async () => {
+    const s = await server({ password: 'pw' });
+    const h = harness();
+    h.m.connect(req(s.port, { password: 'pw' }));
+    await h.trust();
+    await waitFor(() => (h.out.get('c1') ?? '').includes('$ '));
+    await new Promise((r) => setTimeout(r, 200));
+    const sock = (h.m as unknown as { sessions: Map<string, { client: { _sock: { _writeGeneric: (...a: unknown[]) => unknown } } }> }).sessions.get('c1')!.client._sock;
+    const writes = vi.spyOn(sock, '_writeGeneric');
+    for (const ch of 'xyz') {
+      const before = h.out.get('c1') ?? '';
+      h.m.write('c1', ch);
+      await waitFor(() => (h.out.get('c1') ?? '') !== before);
+    }
+    expect(writes).toHaveBeenCalledTimes(3);
+    expect(s.input.join('')).toBe('xyz');
+  });
+
+  // 1.0.1 review: on a server farther away than the local echo window, the first key of a session still waited for the
+  // coalescing timer (nothing was measured yet). The shell request's round trips give a first estimate.
+  it('seeds the echo window from the round trips of the shell request', async () => {
+    const s = await server({ password: 'pw' });
+    const h = harness();
+    h.m.connect(req(s.port, { password: 'pw' }));
+    type Shell = (opts: unknown, cb: (...a: unknown[]) => void) => unknown;
+    type Internals = { sessions: Map<string, { client: { shell: Shell }; out: { echoWindow: number } }> };
+    const session = (h.m as unknown as Internals).sessions.get('c1')!;
+    const shell = session.client.shell.bind(session.client);
+    // A server 200 ms away: the channel open, pty and shell requests take a round trip each.
+    session.client.shell = (opts: unknown, cb: (...a: unknown[]) => void) => shell(opts, (...a: unknown[]) => setTimeout(() => cb(...a), 3 * 200));
+    await h.trust();
+    await waitFor(() => h.phases().includes('connected'));
+    expect(session.out.echoWindow).toBeGreaterThanOrEqual(2 * 200 + 20);
+    expect(session.out.echoWindow).toBeLessThan(600);
+  });
+
   it('types the startup command once, after the greeting and a quiet period', async () => {
     const s = await server({ password: 'pw' });
     const h = harness();

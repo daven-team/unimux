@@ -23,14 +23,33 @@ export interface SshEvents {
 
 export interface SshTimers { connectMs: number; authStepMs: number; shellMs: number; quietMs: number; startupMaxMs: number; killGraceMs: number; keepaliveMs: number; keepaliveCountMax: number }
 export const SSH_TIMERS: SshTimers = { connectMs: 20_000, authStepMs: 20_000, shellMs: 20_000, quietMs: 400, startupMaxMs: 5000, killGraceMs: 2000, keepaliveMs: 15_000, keepaliveCountMax: 3 };
+/** Round trips of ssh2's shell(): the session channel opens, then the pty and the shell are requested, each awaiting its reply. */
+export const SHELL_ROUND_TRIPS = 3;
 /**
  * ssh2's destroy() is a no-op once end() half-closed the socket, so a peer that never reads or answers the FIN (a server that
  * accepts TCP but never speaks SSH) would keep the socket open for good. The socket itself is destroyed as well.
  */
 export function hardClose(client: Client): void {
   try { client.destroy(); } catch { /* gone */ }
-  const sock = (client as unknown as { _sock?: { destroyed?: boolean; destroy(): void } })._sock;
+  const sock = socketOf(client);
   try { if (sock && !sock.destroyed) sock.destroy(); } catch { /* gone */ }
+}
+
+/** The client's TCP socket (ssh2 keeps it private). */
+function socketOf(client: Client): { destroyed?: boolean; destroy(): void; cork?(): void; uncork?(): void } | undefined {
+  return (client as unknown as { _sock?: ReturnType<typeof socketOf> })._sock;
+}
+
+/**
+ * Writes typed input to the channel as one socket write. ssh2 hands every packet to the socket in pieces (AES-GCM: length,
+ * payload and tag) and Nagle's algorithm is off, so each piece left as a TCP segment of its own: three per keystroke, and a
+ * relay on the way that does use Nagle (a port forwarder in front of the server) could hold the later pieces back until the
+ * first one is acknowledged. Corked, the pieces go out in one write, the way OpenSSH's client sends a packet.
+ */
+function writeCorked(client: Client, stream: ClientChannel, data: Buffer): void {
+  const sock = socketOf(client);
+  sock?.cork?.();
+  try { stream.write(data); } finally { sock?.uncork?.(); }
 }
 
 interface Session {
@@ -137,10 +156,13 @@ export class SshManager implements TerminalBackend {
     if (!this.live(s)) return;
     this.dropSecrets(s);
     this.arm(s, this.timers.shellMs);
+    const asked = performance.now();
     s.client.shell({ term: 'xterm-256color', cols: s.size.cols, rows: s.size.rows, width: 0, height: 0 }, (err, stream) => {
       if (!this.live(s)) { try { stream?.close(); } catch { /* gone */ } return; }
       this.disarm(s);
       if (err || !stream) { this.fail(s, 'shellDenied'); return; }
+      // The first key typed already gets the echo window of a slow server instead of waiting for a coalescing timer.
+      s.out.seedEcho((performance.now() - asked) / SHELL_ROUND_TRIPS);
       s.stream = stream;
       s.phase = 'connected';
       this.events.status(s.id, 'connected');
@@ -179,7 +201,7 @@ export class SshManager implements TerminalBackend {
     s.startup.text = undefined;
     if (!text || !this.live(s) || !s.stream) return;
     s.out.wrote();
-    s.stream.write(Buffer.from(text, 'utf8'));
+    writeCorked(s.client, s.stream, Buffer.from(text, 'utf8'));
   }
 
   private fail(s: Session, error: SshErrorCode): void {
@@ -223,7 +245,7 @@ export class SshManager implements TerminalBackend {
     const s = this.sessions.get(id);
     if (!s?.stream || s.ended) return;
     if (!reply) s.out.wrote();
-    s.stream.write(Buffer.from(data, 'utf8'));
+    writeCorked(s.client, s.stream, Buffer.from(data, 'utf8'));
   }
 
   resize(id: string, cols: number, rows: number): void {

@@ -9,8 +9,11 @@ import { OutputChannel } from './output';
 import type { TerminalBackend } from './router';
 
 export interface PtySink {
-  /** Returns false when nobody received the data (no renderer connected). */
-  data(id: string, data: string): unknown;
+  /**
+   * Returns false when nobody received the data (no renderer connected). `echo`: the answer to a keystroke, sent at once
+   * instead of with the rest of this event-loop turn's output.
+   */
+  data(id: string, data: string, echo?: boolean): unknown;
   exit(id: string, code: number): void;
 }
 
