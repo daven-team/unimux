@@ -5,11 +5,11 @@
 // Space selects, Delete deletes after a confirmation).
 import { useEffect, useMemo, useState } from 'react';
 import { create } from 'zustand';
-import { REDIS_EDITABLE_TYPES, redisDataDisplay, redisDataKey, type RedisData, type RedisDbList, type RedisEditableType, type RedisKeyInfo, type RedisNewValue } from '../../../../shared/dbRedis';
-import { afterPatternCount, afterPatternDelete, folderPattern, formatBytes, formatTtl, mergeKeys, parseTtlInput, redisKeyRows, scanPattern, validScore, type RedisKeyRow } from '../../../../shared/redisView';
+import { isBinaryData, REDIS_EDITABLE_TYPES, redisDataDisplay, redisDataKey, type RedisData, type RedisDbList, type RedisEditableType, type RedisKeyInfo, type RedisNewValue } from '../../../../shared/dbRedis';
+import { afterPatternCount, afterPatternDelete, folderPattern, formatBytes, formatTtl, mergeKeys, parseTtlInput, REDIS_KEY_SEPARATOR, redisKeyRows, scanPattern, validScore, type RedisKeyRow } from '../../../../shared/redisView';
 import { useI18n } from '../../i18n';
 import { askChoice, toast } from '../../store';
-import { moveTabToDb, onForgetTab, resultText, whereText, withTab } from '../../redis/redisClient';
+import { moveTabToDb, onForgetTab, resultText, takeKeyFocus, useKeyFocus, whereText, withTab } from '../../redis/redisClient';
 import { openMenu } from '../ContextMenu';
 import { Select } from '../Select';
 import { IChevron, IPlus, ISearch } from '../icons';
@@ -80,6 +80,16 @@ export async function refreshKey(tabId: string, key: RedisData): Promise<void> {
   });
 }
 
+/** Shows a key the panel's tree picked: the folders above it open, it becomes the current key (details read again). */
+async function showKey(tabId: string, key: RedisData): Promise<void> {
+  const id = redisDataKey(key);
+  const parts = isBinaryData(key) ? [] : redisDataDisplay(key).split(REDIS_KEY_SEPARATOR).slice(0, -1);
+  const folders = parts.map((_, i) => `${parts.slice(0, i + 1).join(REDIS_KEY_SEPARATOR)}${REDIS_KEY_SEPARATOR}`);
+  patchB(tabId, (b) => ({ mode: 'tree', open: [...new Set([...b.open, ...folders])], active: id }));
+  await refreshKey(tabId, key);
+  patchB(tabId, (b) => ({ current: b.keys.find((k) => redisDataKey(k.key) === id) ?? b.current }));
+}
+
 /** A key the value panel renamed or deleted. */
 export function keyGone(tabId: string, key: RedisData, renamedTo?: RedisData): void {
   const id = redisDataKey(key);
@@ -96,6 +106,8 @@ export default function RedisKeyBrowser({ tabId, ref, readOnly }: RedisViewProps
   const [dialog, setDialog] = useState<null | 'new' | { pattern: string }>(null);
   useEffect(() => { if (b.cursor === null && !b.loading && !b.error) void loadKeys(tabId, true); }, [tabId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!b.dbs) void loadDbs(tabId); }, [tabId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const focus = useKeyFocus((st) => st[tabId]);
+  useEffect(() => { if (focus === undefined) return; takeKeyFocus(tabId); void showKey(tabId, focus); }, [focus, tabId]);
   const open = useMemo(() => new Set(b.open), [b.open]);
   const rows = useMemo(() => redisKeyRows(b.keys, b.mode, open), [b.keys, b.mode, open]);
   const selected = useMemo(() => new Set(b.selected), [b.selected]);

@@ -8,7 +8,7 @@
 import { create } from 'zustand';
 import { setDbPins } from '../db/pins';
 import { dbErrorText, type DbConnection, type DbErrorCode, type DbPortMessage, type DbPrompt, type DbResult, type DbSessionState } from '../../../shared/db';
-import type { RedisPubSubMessage, RedisPubSubState } from '../../../shared/dbRedis';
+import type { RedisData, RedisPubSubMessage, RedisPubSubState } from '../../../shared/dbRedis';
 import { appendMessages, capMessages, redisTabId, type RedisPubSubRow, type RedisTabRef, type RedisTabView } from '../../../shared/redisView';
 import { activateFile, useFileStore, type FileDocument } from '../files';
 import { tr } from '../i18n';
@@ -111,6 +111,13 @@ export function openRedisTab(connectionId: string, view: RedisTabView, db?: numb
   };
   useFileStore.setState((s) => ({ documents: [...s.documents, doc], activeFileId: id }));
   return id;
+}
+
+/** A key the "Bazy danych" tree asked a key browser tab to show (taken by the browser when it is on screen). */
+export const useKeyFocus = create<Record<string, RedisData>>(() => ({}));
+export function focusRedisKey(tabId: string, key: RedisData): void { useKeyFocus.setState({ [tabId]: key }); }
+export function takeKeyFocus(tabId: string): void {
+  useKeyFocus.setState((st) => { const next = { ...st }; delete next[tabId]; return next; }, true);
 }
 
 /** The tab now shows another DB (SELECT in the console). */

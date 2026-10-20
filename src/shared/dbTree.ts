@@ -1,7 +1,10 @@
 // The tree of the "Bazy danych" panel (1.0.0) as a flat list of rows: connection groups, connections, databases, schemas,
-// object folders, objects and, under a table or view, its columns, keys and indexes. Pure: the panel keeps what is expanded
+// object folders, objects and, under a table or view, its columns, keys and indexes; for Redis (1.0.3) its DBs and, under a DB,
+// the loaded keys as a ":"-tree. Pure: the panel keeps what is expanded
 // and what was loaded; this file turns that into rows (virtualized by the panel) and says what still has to be loaded.
 import type { DbColumnInfo, DbConnection, DbConstraintInfo, DbDatabaseInfo, DbIndexInfo, DbObjectInfo, DbObjectKind, DbSchemaInfo, DbTableInfo } from './db';
+import { redisDataDisplay, type RedisDbList, type RedisKeyInfo } from './dbRedis';
+import { REDIS_KEY_SEPARATOR, redisKeyRows } from './redisView';
 
 export type DbLoad<T = unknown> = { status: 'loading' } | { status: 'ready'; value: T } | { status: 'error'; message: string };
 
@@ -11,12 +14,21 @@ export const loadKey = {
   schemas: (c: string, db: string) => JSON.stringify(['schemas', c, db]),
   objects: (c: string, db: string, schema: string) => JSON.stringify(['objects', c, db, schema]),
   info: (c: string, db: string, schema: string, name: string) => JSON.stringify(['info', c, db, schema, name]),
+  redisDbs: (c: string) => JSON.stringify(['redisDbs', c]),
+  redisKeys: (c: string, db: number) => JSON.stringify(['redisKeys', c, String(db)]),
 };
+/** The keys of a Redis DB loaded so far (SCAN pages); cursor '0': all of them. */
+export interface RedisKeysLoad { keys: RedisKeyInfo[]; cursor: string }
+/** DBs a Redis server shows when CONFIG GET databases is not allowed (the default of redis.conf), and at most. */
+export const REDIS_DEFAULT_DBS = 16;
+const REDIS_MAX_DBS = 256;
 export type DbLoadRequest =
   | { kind: 'databases'; key: string; connectionId: string }
   | { kind: 'schemas'; key: string; connectionId: string; database: string }
   | { kind: 'objects'; key: string; connectionId: string; database: string; schema: string }
-  | { kind: 'info'; key: string; connectionId: string; database: string; schema: string; name: string };
+  | { kind: 'info'; key: string; connectionId: string; database: string; schema: string; name: string }
+  | { kind: 'redisDbs'; key: string; connectionId: string }
+  | { kind: 'redisKeys'; key: string; connectionId: string; db: number };
 
 /** Keys of tree nodes (what is expanded). */
 export const nodeKey = {
@@ -27,6 +39,9 @@ export const nodeKey = {
   folder: (c: string, db: string, s: string, folder: DbFolder) => JSON.stringify(['f', c, db, s, folder]),
   object: (c: string, db: string, s: string, name: string, args = '') => JSON.stringify(['o', c, db, s, name, args]),
   part: (c: string, db: string, s: string, name: string, part: DbPart) => JSON.stringify(['p', c, db, s, name, part]),
+  redisDb: (c: string, db: number) => JSON.stringify(['rd', c, db]),
+  /** A folder of the key tree: `path` ends with the separator ("user:" or "user:42:"). */
+  redisFolder: (c: string, db: number, path: string) => JSON.stringify(['rf', c, db, path]),
 };
 
 export type DbFolder = 'tables' | 'views' | 'matviews' | 'sequences' | 'functions';
@@ -39,6 +54,7 @@ const FOLDERS = Object.keys(FOLDER_KINDS) as DbFolder[];
 export const hasColumns = (kind: DbObjectKind): boolean => kind === 'table' || kind === 'partitioned' || kind === 'foreign' || kind === 'view' || kind === 'matview';
 
 interface Ctx { connectionId: string; database: string }
+interface RedisCtx { connectionId: string; db: number }
 /** `auto`: the node starts open (folding it is what gets remembered). */
 export type DbTreeRow = { key: string; depth: number; auto?: boolean } & (
   | { type: 'group'; name: string; expanded: boolean; count: number }
@@ -51,7 +67,13 @@ export type DbTreeRow = { key: string; depth: number; auto?: boolean } & (
   | { type: 'column'; column: DbColumnInfo; primary: boolean }
   | { type: 'constraint'; constraint: DbConstraintInfo }
   | { type: 'index'; index: DbIndexInfo }
-  | { type: 'status'; status: 'loading' | 'error' | 'empty'; message?: string; retry?: string }
+  /** `keys`: an empty Redis DB ("no keys" instead of "no objects"). */
+  | { type: 'status'; status: 'loading' | 'error' | 'empty'; message?: string; retry?: string; keys?: true }
+  | ({ type: 'redisDb'; keys: number; current: boolean; expanded: boolean } & RedisCtx)
+  | ({ type: 'redisFolder'; path: string; name: string; count: number; expanded: boolean } & RedisCtx)
+  | ({ type: 'redisKey'; info: RedisKeyInfo; name: string } & RedisCtx)
+  /** More keys wait on the server (the SCAN is not complete): a row that loads the next page. */
+  | ({ type: 'redisMore'; loaded: number } & RedisCtx)
 );
 
 export interface DbTreeInput {
@@ -150,10 +172,56 @@ export function buildDbTree(input: DbTreeInput): { rows: DbTreeRow[]; needed: Db
     }
   };
 
+  // The open folders of each key tree, by connection and DB.
+  const redisOpen = new Map<string, Set<string>>();
+  for (const key of input.open) {
+    if (!key.startsWith('["rf"')) continue;
+    const [, c, db, path] = JSON.parse(key) as [string, string, number, string];
+    const id = JSON.stringify([c, db]);
+    redisOpen.set(id, (redisOpen.get(id) ?? new Set()).add(path));
+  }
+
+  const redisKeyTree = (ctx: RedisCtx, depth: number) => {
+    const key = loadKey.redisKeys(ctx.connectionId, ctx.db);
+    const load = pending(key, depth, { kind: 'redisKeys', key, ...ctx });
+    if (!load || load.status !== 'ready') return;
+    const value = load.value as RedisKeysLoad;
+    // A filter shows the keys whose name contains it, as a flat list (a tree would hide them in closed folders).
+    const keys = filter ? value.keys.filter((k) => matches(redisDataDisplay(k.key))) : value.keys;
+    const open = redisOpen.get(JSON.stringify([ctx.connectionId, ctx.db])) ?? new Set<string>();
+    for (const r of redisKeyRows(keys, filter ? 'flat' : 'tree', open, REDIS_KEY_SEPARATOR)) {
+      if (r.kind === 'folder') {
+        const path = r.id.slice(2);
+        rows.push({ key: nodeKey.redisFolder(ctx.connectionId, ctx.db, path), depth: depth + r.depth, type: 'redisFolder', ...ctx, path, name: r.name, count: r.count, expanded: r.open });
+      } else rows.push({ key: `${key}:${r.id}`, depth: depth + r.depth, type: 'redisKey', ...ctx, info: r.info, name: r.name });
+    }
+    if (value.cursor !== '0') rows.push({ key: `${key}#more`, depth, type: 'redisMore', ...ctx, loaded: value.keys.length });
+    else if (!keys.length) rows.push({ key: `${key}#empty`, depth, type: 'status', status: 'empty', keys: true });
+  };
+
+  const redisRows = (c: DbConnection, depth: number) => {
+    const key = loadKey.redisDbs(c.id);
+    const load = pending(key, depth, { kind: 'redisDbs', key, connectionId: c.id });
+    if (!load || load.status !== 'ready') return;
+    const list = load.value as RedisDbList;
+    const current = c.dbIndex ?? 0;
+    const count = Math.min(REDIS_MAX_DBS, Math.max(list.count ?? REDIS_DEFAULT_DBS, current + 1, ...list.dbs.map((d) => d.index + 1)));
+    for (let db = 0; db < count; db++) {
+      const dk = nodeKey.redisDb(c.id, db);
+      const isCurrent = db === current;
+      // The connection's own DB starts open, like the default database of a Postgres server.
+      const expanded = isCurrent ? !input.open.has(`${dk}!`) : opened(dk);
+      const keys = list.dbs.find((d) => d.index === db)?.keys ?? 0;
+      rows.push({ key: dk, depth, auto: isCurrent, type: 'redisDb', connectionId: c.id, db, keys, current: isCurrent, expanded });
+      if (expanded) redisKeyTree({ connectionId: c.id, db }, depth + 1);
+    }
+  };
+
   const connectionRows = (c: DbConnection, depth: number) => {
     const ck = nodeKey.connection(c.id);
     const expanded = opened(ck) && input.live(c.id);
     rows.push({ key: ck, depth, type: 'connection', connection: c, expanded });
+    if (expanded && c.kind === 'redis') { redisRows(c, depth + 1); return; }
     if (!expanded || c.kind !== 'postgres') return;
     const key = loadKey.databases(c.id);
     const load = pending(key, depth + 1, { kind: 'databases', key, connectionId: c.id });

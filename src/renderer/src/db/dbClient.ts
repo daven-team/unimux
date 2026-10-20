@@ -4,7 +4,8 @@
 import { create } from 'zustand';
 import { setDbPins } from './pins';
 import { dbErrorText, type DbErrorCode, type DbPortMessage, type DbPrompt, type DbResult, type DbServerError, type DbSessionState, type DbVaultInfo } from '../../../shared/db';
-import type { DbLoad, DbLoadRequest } from '../../../shared/dbTree';
+import { loadKey, type DbLoad, type DbLoadRequest, type RedisKeysLoad } from '../../../shared/dbTree';
+import { mergeKeys } from '../../../shared/redisView';
 import { tr } from '../i18n';
 import { getS } from '../store';
 import { sshContext } from '../ssh';
@@ -166,7 +167,8 @@ export function ensureShared(connectionId: string, database?: string): Promise<S
   const running = connecting.get(key);
   if (running) return running;
   const p = (async (): Promise<SessionResult> => {
-    const r = await window.mc.db.connect(connectionId, db === (connection.database ?? 'postgres') ? undefined : { database: db });
+    // Redis: one session per DB of the tree (`database` names it), each SELECTs its DB itself (runLoad).
+    const r = await window.mc.db.connect(connectionId, connection.kind !== 'postgres' || db === (connection.database ?? 'postgres') ? undefined : { database: db });
     if (!r.ok) return { ok: false, error: dbErrorMessage(r.error, undefined, connectionId) };
     useDbStore.setState((s) => ({ shared: { ...s.shared, [key]: r.sessionId } }));
     return waitSession(r.sessionId, connectionId);
@@ -233,20 +235,39 @@ const setLoad = (key: string, load: DbLoad | null) => useDbStore.setState((st) =
  * Loads one list of the tree through the shared session of its database. While a long query or a page runs on that session
  * the host answers `busy`: the load waits and tries again (for about a minute), then says so.
  */
-export async function runLoad(req: DbLoadRequest, attempt = 0): Promise<void> {
-  if (attempt === 0 && useDbStore.getState().loads[req.key]?.status === 'loading') return;
-  setLoad(req.key, { status: 'loading' });
-  const session = await ensureShared(req.connectionId, req.kind === 'databases' ? undefined : req.database);
+/** Keys per page of a Redis DB in the tree (the key browser of a tab loads the same). */
+const REDIS_TREE_PAGE = 500;
+
+/** The keys of a Redis DB in the tree: the first page, or with `more` the next one added to those loaded. */
+async function loadRedisKeys(req: Extract<DbLoadRequest, { kind: 'redisKeys' }>, sid: string, more: boolean): Promise<DbResult<RedisKeysLoad>> {
+  const before = useDbStore.getState().loads[req.key];
+  const loaded = more && before?.status === 'ready' ? before.value as RedisKeysLoad : { keys: [], cursor: '0' };
+  const selected = await window.mc.db.redis.select(sid, req.db);
+  if (!selected.ok) return selected;
+  const r = await window.mc.db.redis.scan(sid, { cursor: loaded.cursor, limit: REDIS_TREE_PAGE, count: 250 });
+  return r.ok ? { ok: true, value: { keys: mergeKeys(loaded.keys, r.value.keys), cursor: r.value.cursor } } : r;
+}
+
+export async function runLoad(req: DbLoadRequest, attempt = 0, more = false): Promise<void> {
+  if (attempt === 0 && !more && useDbStore.getState().loads[req.key]?.status === 'loading') return;
+  if (!more) setLoad(req.key, { status: 'loading' });
+  const session = await ensureShared(req.connectionId, req.kind === 'databases' || req.kind === 'redisDbs' ? undefined : req.kind === 'redisKeys' ? `db${req.db}` : req.database);
   if (!session.ok) { setLoad(req.key, { status: 'error', message: session.error }); return; }
   const sid = session.sessionId;
   const pg = window.mc.db.pg;
-  const r = req.kind === 'databases' ? await pg.databases(sid)
+  const r = req.kind === 'redisDbs' ? await window.mc.db.redis.databases(sid)
+    : req.kind === 'redisKeys' ? await loadRedisKeys(req, sid, more)
+    : req.kind === 'databases' ? await pg.databases(sid)
     : req.kind === 'schemas' ? await pg.schemas(sid)
       : req.kind === 'objects' ? await pg.objects(sid, req.schema)
         : await pg.tableInfo(sid, req.schema, req.name);
-  if (!r.ok && r.error === 'busy' && attempt < 60) { setTimeout(() => void runLoad(req, attempt + 1), 1000); return; }
+  if (!r.ok && r.error === 'busy' && attempt < 60) { setTimeout(() => void runLoad(req, attempt + 1, more), 1000); return; }
   setLoad(req.key, r.ok ? { status: 'ready', value: r.value } : { status: 'error', message: resultError(r, req.connectionId) });
 }
+
+/** Loads the next page of keys of a Redis DB in the tree ("Załaduj więcej"). */
+export const loadMoreRedisKeys = (connectionId: string, db: number): Promise<void> =>
+  runLoad({ kind: 'redisKeys', key: loadKey.redisKeys(connectionId, db), connectionId, db }, 0, true);
 
 /** Drops loaded lists (all of a connection, or those whose key starts with a prefix) so they load again. */
 export function refreshLoads(match: (key: string[]) => boolean): void {

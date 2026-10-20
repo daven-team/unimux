@@ -2,15 +2,16 @@
 // Postgres connection its databases, schemas, objects and, for tables and views, columns, keys and indexes. Lists load lazily
 // (dbTree says what an expanded node waits for) and the rows are windowed, so schemas with thousands of tables stay light.
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { openRedisTab, viewLabel } from '../../redis/redisClient';
+import { focusRedisKey, openRedisTab, viewLabel } from '../../redis/redisClient';
 import { dbEndpoint, setDbGroupColor, type DbConnection } from '../../../../shared/db';
+import { redisDataDisplay } from '../../../../shared/dbRedis';
 import { PROJECT_COLORS } from '../../../../shared/state';
 import { buildDbTree, nodeKey, toggleNode, type DbFolder, type DbPart, type DbTreeRow } from '../../../../shared/dbTree';
 import { hasRows } from '../../../../shared/dbTabs';
 import { quoteIdent } from '../../../../shared/dbSql';
 import { rowWindow } from '../../../../shared/virtualRows';
 import type { MessageKey } from '../../../../shared/i18n';
-import { connectionState, ensureShared, initDb, isLive, refreshLoads, runLoad, sharedKey, useDbStore } from '../../db/dbClient';
+import { connectionState, ensureShared, initDb, isLive, loadMoreRedisKeys, refreshLoads, runLoad, sharedKey, useDbStore } from '../../db/dbClient';
 import { disconnectAsking, initDbTabs, openDdlTab, openSqlTab, openTableTab, openTransactions, pruneStoredHistory, stagedTabsOf } from '../../db/tabs';
 import { useI18n } from '../../i18n';
 import { askChoice, setUi, toast, update, useStore } from '../../store';
@@ -79,8 +80,6 @@ export const DbPanel = memo(function DbPanel() {
 
   const setOpen = (next: Set<string>) => useDbStore.setState({ open: [...next] });
   const connect = async (c: DbConnection) => {
-    // Redis: the key browser opens in a tab of the top strip (its session and login live there).
-    if (c.kind === 'redis') { openRedisTab(c.id, 'keys'); return; }
     setErrors((e) => { const n = { ...e }; delete n[c.id]; return n; });
     const key = nodeKey.connection(c.id);
     if (!open.has(key)) setOpen(new Set([...open, key]));
@@ -89,7 +88,6 @@ export const DbPanel = memo(function DbPanel() {
   };
   const toggle = (row: DbTreeRow) => {
     if (row.type === 'connection') {
-      if (row.connection.kind === 'redis') { openRedisTab(row.connection.id, 'keys'); return; }
       if (!live(row.connection.id)) { void connect(row.connection); return; }
       setOpen(toggleNode(open, row));
       return;
@@ -114,7 +112,8 @@ export const DbPanel = memo(function DbPanel() {
       ] : []),
       ...(c.kind === 'redis' ? [
         // Disconnecting ends the sessions of its tabs (they offer to connect again).
-        ...(isOn ? [{ label: tr('Rozłącz'), onClick: () => void disconnectAsking(c.id, c.name) }] : []),
+        isOn ? { label: tr('Rozłącz'), onClick: () => void disconnectAsking(c.id, c.name) } : { label: tr('Połącz'), onClick: () => void connect(c) },
+        ...(isOn ? [{ label: tr('Odśwież'), onClick: () => refreshLoads((k) => k[1] === c.id) }] : []),
         ...(['keys', 'console', 'pubsub', 'info'] as const).map((view) => ({ label: view === 'keys' ? tr('Otwórz przeglądarkę kluczy') : viewLabel(view), onClick: () => { openRedisTab(c.id, view); } })),
         { sep: true } as MenuItem,
       ] : []),
@@ -127,6 +126,18 @@ export const DbPanel = memo(function DbPanel() {
   };
   const rowMenu = (row: DbTreeRow, x: number, y: number) => {
     if (row.type === 'connection') { connectionMenu(row.connection, x, y); return; }
+    if (row.type === 'redisDb' || row.type === 'redisFolder' || row.type === 'redisKey') {
+      const { connectionId, db } = row;
+      openMenu(x, y, [
+        { header: row.type === 'redisDb' ? `db${db}` : row.type === 'redisKey' ? redisDataDisplay(row.info.key) : row.path },
+        ...(row.type === 'redisKey' ? [
+          { label: tr('Otwórz'), onClick: () => activate(row) },
+          { label: tr('Kopiuj nazwę klucza'), onClick: () => window.mc.clipboardWrite(redisDataDisplay(row.info.key)) },
+        ] : [{ label: tr('Otwórz przeglądarkę kluczy'), onClick: () => { openRedisTab(connectionId, 'keys', db); } }]),
+        { label: tr('Odśwież'), onClick: () => refreshLoads((k) => k[0] === 'redisKeys' && k[1] === connectionId && k[2] === String(db)) },
+      ]);
+      return;
+    }
     if (row.type === 'group') {
       // The colour belongs to the folder: its connections show it in their rows and tabs.
       openMenu(x, y, [
@@ -198,7 +209,7 @@ export const DbPanel = memo(function DbPanel() {
         break;
       }
       case 'Enter':
-        if (row.type === 'object') activate(row);
+        if (row.type === 'object' || row.type === 'redisKey' || row.type === 'redisMore') activate(row);
         else if (expandable || (row.type === 'status' && row.retry)) activate(row);
         break;
       case 'ContextMenu': case 'F10': {
@@ -218,13 +229,19 @@ export const DbPanel = memo(function DbPanel() {
     if (row.type === 'object') {
       if (hasRows(row.object.kind)) openTableTab(row.connectionId, row.database, row.object.schema, row.object.name, row.object.kind);
       else openDdlTab(row.connectionId, row.database, row.object.schema, row.object.name, row.object.kind, row.object.args);
-    } else if (row.type === 'status' && row.retry) refreshLoads((k) => JSON.stringify(k) === row.retry);
+    } else if (row.type === 'redisKey') {
+      // The key opens in the key browser of its DB (a tab of the strip), with its value.
+      const tabId = openRedisTab(row.connectionId, 'keys', row.db);
+      if (tabId) focusRedisKey(tabId, row.info.key);
+    } else if (row.type === 'redisMore') void loadMoreRedisKeys(row.connectionId, row.db);
+    else if (row.type === 'status' && row.retry) refreshLoads((k) => JSON.stringify(k) === row.retry);
     else if ('expanded' in row) toggle(row);
   };
 
   const hostLabel = (id: string) => sshHosts.find((h) => h.id === id)?.label ?? '?';
-  // Redis sessions belong to Redis tabs, which show their own login.
-  const promptSessions = Object.values(sessions).filter((s) => !s.test && s.kind !== 'redis' && prompts[s.id]);
+  // Redis sessions of tabs show their own login; the panel's (the tree's DBs) ask here.
+  const panelSessions = new Set(Object.values(shared));
+  const promptSessions = Object.values(sessions).filter((s) => !s.test && (s.kind !== 'redis' || panelSessions.has(s.id)) && prompts[s.id]);
   const connName = (id: string) => connections.find((c) => c.id === id)?.name ?? '?';
 
   const renderRow = (row: DbTreeRow, index: number) => {
@@ -267,17 +284,21 @@ export const DbPanel = memo(function DbPanel() {
       }
       case 'constraint': title = row.constraint.definition; body = <><IKey /><span className="db-name">{row.constraint.name}</span><span className="db-type">{row.constraint.type === 'p' ? 'PK' : row.constraint.type === 'u' ? 'UNIQUE' : 'FK'}</span></>; break;
       case 'index': title = row.index.definition; body = <><span className="db-idx">ix</span><span className="db-name">{row.index.name}</span><span className="db-type">{row.index.unique ? 'UNIQUE' : ''}</span></>; break;
+      case 'redisDb': body = <><IDatabase /><span className={`db-name ${row.keys ? '' : 'dim'}`}>{`db${row.db}`}</span>{row.keys > 0 && <span className="db-meta">{formatCount(row.keys)}</span>}</>; break;
+      case 'redisFolder': body = <><IFolder /><span className="db-name">{row.name}</span><span className="db-meta">{row.count}</span></>; break;
+      case 'redisKey': title = redisDataDisplay(row.info.key); body = <><IKey /><span className="db-name">{row.name}</span></>; break;
+      case 'redisMore': body = <span className="db-status db-more">{tr('Wczytaj więcej')}</span>; break;
       case 'status':
         body = row.status === 'loading' ? <span className="db-status">{tr('Wczytywanie…')}</span>
-          : row.status === 'empty' ? <span className="db-status">{tr('Brak obiektów')}</span>
+          : row.status === 'empty' ? <span className="db-status">{tr(row.keys ? 'Brak kluczy' : 'Brak obiektów')}</span>
             : <span className="db-status error" title={row.message}>{row.message} · {tr('Ponów')}</span>;
         break;
     }
     return (
       <div key={row.key} className={`db-row db-${row.type} ${selected === row.key ? 'sel' : ''}`} style={style} title={title} data-key={row.key}
         role="treeitem" id={`db-tree-row-${index}`} aria-selected={selected === row.key} aria-expanded={'expanded' in row ? row.expanded : undefined} aria-level={row.depth + 1}
-        onClick={() => { setSelected(row.key); if (row.type === 'connection' || row.type === 'group' || row.type === 'database' || row.type === 'schema' || row.type === 'folder' || row.type === 'part' || (row.type === 'status' && row.retry)) activate(row); }}
-        onDoubleClick={() => { if (row.type === 'object') activate(row); }}
+        onClick={() => { setSelected(row.key); if (row.type === 'connection' || row.type === 'group' || row.type === 'database' || row.type === 'schema' || row.type === 'folder' || row.type === 'part' || row.type === 'redisDb' || row.type === 'redisFolder' || row.type === 'redisMore' || (row.type === 'status' && row.retry)) activate(row); }}
+        onDoubleClick={() => { if (row.type === 'object' || row.type === 'redisKey') activate(row); }}
         onContextMenu={(e) => { e.preventDefault(); setSelected(row.key); rowMenu(row, e.clientX, e.clientY); }}>
         {row.type === 'object' && row.expandable
           ? <span className="db-chev-hit" onClick={(e) => { e.stopPropagation(); toggle(row); }}>{chevron}</span>
