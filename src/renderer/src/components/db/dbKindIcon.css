@@ -1,0 +1,5 @@
+/* The Postgres and Redis glyphs (DbKindIcon): the panel rows and the database tabs of the strip. */
+.db-kind-icon { display: block; flex: none; width: 16px; height: 16px; }
+/* In the tab strip the logo keeps its 16px drawing box (scaled to the strip's 14px it would blur) and its colours. */
+.workspace-tabs .tab-type-icon:has(> .db-kind-icon) { width: 16px; height: 16px; opacity: 1; }
+.workspace-tabs .tab-type-icon .db-kind-icon { width: 16px; height: 16px; }

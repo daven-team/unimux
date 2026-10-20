@@ -10,7 +10,8 @@ import { addAgent, closeTab, selectTab } from '../actions';
 import { setUi, update, useStore } from '../store';
 import { profileOptionLabel } from '../cliUi';
 import { openMenu, openMenuAt } from './ContextMenu';
-import { IChevron, IDatabase, IPlusBold, ISearch, ITable, IX, TGrid, THistory, TSettings, TSidebar, TSnippet, TTerminal } from './icons';
+import { IChevron, IPlusBold, ISearch, ITable, IX, TGrid, THistory, TSettings, TSidebar, TSnippet, TTerminal } from './icons';
+import { DbKindIcon } from './db/DbKindIcon';
 import { FileIcon } from './FileIcon';
 import { StatusBadges } from './StatusBadges';
 import { Brand } from './Brand';
@@ -355,7 +356,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
                   onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
                   onContextMenu={(e) => { e.preventDefault(); fileTabMenu(e.clientX, e.clientY, doc); }}>
                   {color && <span className="tab-project" aria-hidden="true" />}
-                  <span className="tab-type-icon" aria-hidden="true"><IDatabase /></span><span className="label">{doc.name}</span>
+                  <span className="tab-type-icon" aria-hidden="true"><DbKindIcon kind="redis" /></span><span className="label">{doc.name}</span>
                   <span className="tab-host-tag">{doc.redis.view === 'keys' ? `DB ${doc.redis.db}` : viewLabel(doc.redis.view)}</span>
                   <button className="x" aria-label={tr('Zamknij')} onClick={(e) => { e.stopPropagation(); void closeFile(doc.id); }}><IX /></button>
                 </div>
@@ -374,7 +375,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
                   onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
                   onContextMenu={(e) => { e.preventDefault(); fileTabMenu(e.clientX, e.clientY, doc); }}>
                   {color && <span className="tab-project" aria-hidden="true" />}
-                  <span className="tab-type-icon" aria-hidden="true">{doc.db.kind === 'table' ? <ITable /> : <IDatabase />}</span><span className="label">{doc.name}</span>
+                  <span className="tab-type-icon" aria-hidden="true">{doc.db.kind === 'table' ? <ITable /> : <DbKindIcon kind="postgres" />}</span><span className="label">{doc.name}</span>
                   {doc.db.kind === 'ddl' && <span className="tab-diff-tag">DDL</span>}
                   <span className="tab-host-tag">{c?.name ?? '?'}</span>
                   {doc.dirty && <span className="file-dirty" aria-label={tr('Niezapisane zmiany')}>●</span>}

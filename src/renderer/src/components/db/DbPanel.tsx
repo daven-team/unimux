@@ -16,6 +16,7 @@ import { askChoice, setUi, toast, useStore } from '../../store';
 import { openMenu, openMenuAt, type MenuItem } from '../ContextMenu';
 import { IChevron, IColumn, IDatabase, IFolder, IFunction, IKey, IPlus, ISequence, ITable, IView } from '../icons';
 import { EmptyLink, fillTokens, PanelEmpty } from '../PanelEmpty';
+import { DbKindIcon } from './DbKindIcon';
 import { DbLogin } from './DbLogin';
 import './db.css';
 
@@ -229,7 +230,7 @@ export const DbPanel = memo(function DbPanel() {
         title = `${c.name}\n${c.user ? `${c.user}@` : ''}${dbEndpoint(c)}${c.ssh ? `\n${tr('przez SSH: {host}', { host: hostLabel(c.ssh.hostId) })}` : ''}${c.readOnly ? `\n${tr('Tylko do odczytu')}` : ''}`;
         body = <>
           <span className="db-color" style={{ background: c.color ?? 'var(--muted)' }} />
-          <span className={`db-kind ${c.kind}`}>{c.kind === 'postgres' ? 'PG' : 'RD'}</span>
+          <span title={c.kind === 'postgres' ? 'PostgreSQL' : 'Redis'}><DbKindIcon kind={c.kind} /></span>
           <span className="db-name">{c.name}</span>
           {c.readOnly && <span className="db-ro" title={tr('Tylko do odczytu')}>RO</span>}
           {c.ssh && <span className="db-meta">SSH</span>}
