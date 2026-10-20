@@ -79,6 +79,14 @@ const api: McApi = {
     trustGrant: (projectId, req) => ipcRenderer.invoke('git:trustGrant', projectId, req),
     trustRevoke: (projectId, req) => ipcRenderer.invoke('git:trustRevoke', projectId, req),
   },
+  github: {
+    status: (options) => ipcRenderer.invoke('github:status', options),
+    deviceStart: () => ipcRenderer.invoke('github:deviceStart'),
+    deviceWait: (flowId) => ipcRenderer.invoke('github:deviceWait', flowId),
+    deviceCancel: (flowId) => ipcRenderer.invoke('github:deviceCancel', flowId),
+    signOut: () => ipcRenderer.invoke('github:signOut'),
+    publish: (projectId, req) => ipcRenderer.invoke('github:publish', projectId, req),
+  },
   ssh: {
     vaultInfo: () => ipcRenderer.invoke('ssh:vault:info'),
     generateKey: (req) => ipcRenderer.invoke('ssh:key:generate', req),

@@ -12,6 +12,7 @@ import { dbUiMessages } from './dbUiMessages';
 import { filesMessages } from './filesMessages';
 import { gitMessages } from './gitMessages';
 import { gitSetupMessages } from './gitSetupMessages';
+import { githubMessages } from './githubMessages';
 import { gridMessages } from './gridMessages';
 import { macUpdateMessages } from './macUpdateMessages';
 import { perfMessages } from './perfMessages';
@@ -47,6 +48,7 @@ export const messages = {
   ...filesMessages,
   ...gitMessages,
   ...gitSetupMessages,
+  ...githubMessages,
   ...gridMessages,
   ...macUpdateMessages,
   ...perfMessages,

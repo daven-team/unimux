@@ -24,6 +24,9 @@ import { LARGE_VIEW_BYTES, listProjectDirectories, listProjectDirectory, listPro
 import { createTrash, registerFileOpsIpc } from './filesIpc';
 import { createIpcGuard } from './ipcGuard';
 import { registerGitIpc } from './gitIpc';
+import { Git } from './git';
+import { createGithubService } from './github/service';
+import { registerGithubIpc } from './github/ipc';
 import { replaceInProject, searchProject } from './search';
 import type { ReplaceRequest, SearchOptions } from '../shared/search';
 import { PtyHostClient } from './ptyHostClient';
@@ -1267,12 +1270,20 @@ function projectWorktrees(projectPath: string): Worktree[] {
     .flatMap((p) => [...p.tabs, ...p.archive].flatMap((t) => t.cells.flatMap((c) => (c.worktree ? [c.worktree] : []))));
 }
 ipcMain.handle('sessions:list', (_e, projectPath: string) => listSessionsAsync(homedir(), projectPath, projectWorktrees(projectPath), currentBranch));
-registerGitIpc({
-  projectPath: (projectId) => state.projects.find((p) => p.id === projectId)?.path,
-  worktreePaths: (projectId) => state.projects.find((p) => p.id === projectId)?.tabs.flatMap((t) => t.cells.flatMap((c) => (c.worktree ? [c.worktree.path] : []))) ?? [],
-  trustFile: join(DATA_DIR, 'git-trust.json'),
-  allowed: fromAppWindow,
+// "Publish to GitHub" (src/main/github): the sign-in unimux stores there also lets fetch, pull and push reach https://github.com.
+const github = createGithubService({
+  dataDir: DATA_DIR,
+  cipher: electronCipher(safeStorage, process.platform, !app.isPackaged && process.env.MC_SSH_NO_SAFESTORAGE === '1'),
+  fetch: (url, init) => net.fetch(url, init),
+  env: () => cliDetector.applyEnv(cleanEnv(process.env)),
 });
+const gitEngine = new Git({ trustFile: join(DATA_DIR, 'git-trust.json'), remoteAuth: github.remoteAuth, remoteAuthRefused: github.remoteAuthRefused });
+const gitProject = {
+  projectPath: (projectId: string) => state.projects.find((p) => p.id === projectId)?.path,
+  worktreePaths: (projectId: string) => state.projects.find((p) => p.id === projectId)?.tabs.flatMap((t) => t.cells.flatMap((c) => (c.worktree ? [c.worktree.path] : []))) ?? [],
+};
+registerGitIpc({ ...gitProject, git: gitEngine, allowed: fromAppWindow });
+registerGithubIpc({ guardedHandle }, github.handlers(gitEngine, gitProject));
 ipcMain.handle('git:isRepo', (_e, p: string) => isGitRepo(p));
 guardedHandle('git:createWorktree', (_e, p: string, name: string) => createWorktree(p, name), () => Promise.reject(new Error('Refused.')));
 guardedHandle('git:inspectWorktree', (_e, p: string, wt: Worktree): Promise<WorktreeInspectResult> => inspectWorktree(p, wt).then((inspection) => ({ ok: true as const, inspection }), (error: Error) => ({ ok: false as const, error: error.message })), () => ({ ok: false, error: 'Refused.' }));
