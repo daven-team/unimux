@@ -113,6 +113,17 @@ export const identityCredentialText = (c: IdentityCredential): MessageKey =>
 
 export const hostsUsingIdentity = (hosts: readonly SshHost[], identityId: string): SshHost[] => hosts.filter((h) => h.identityId === identityId);
 
+/** Identities that sign in with the key: deleting the key leaves them (and every host attached later) with the user name only. */
+export const identitiesUsingKey = (identities: readonly SshIdentity[], keyId: string): SshIdentity[] => identities.filter((i) => i.keyId === keyId);
+
+/** The question before a key is deleted: it counts the hosts and the identities that use it (an identity without hosts too). */
+export function removeKeyQuestion(name: string, hosts: number, identities: number): { key: MessageKey; params: Record<string, string | number> } {
+  if (hosts && identities) return { key: 'Klucz jest używany przez {hosts} hostów i {identities} tożsamości. Usunąć go?', params: { hosts, identities } };
+  if (identities) return { key: 'Klucz jest używany przez {count} tożsamości. Usunąć go?', params: { count: identities } };
+  if (hosts) return { key: 'Klucz jest używany przez {count} hostów. Usunąć go?', params: { count: hosts } };
+  return { key: 'Usunąć klucz {name}?', params: { name } };
+}
+
 // ── state ────────────────────────────────────────────────────────────────────
 
 /**

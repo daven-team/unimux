@@ -172,10 +172,14 @@ export function paneLeaves(prev: PaneScreen, next: PaneScreen): boolean {
 
 /**
  * Ctrl/Cmd+click on a host card toggles it in the multi-selection. A plain click only picks one card (it no longer opens the
- * editor: the pencil does), and that card is where a multi-selection starts, so "click A, Ctrl+click B" selects both.
+ * editor: the pencil does), and that card is where a multi-selection starts, so "click A, Ctrl+click B" selects both. A picked
+ * card that is not shown (searched away, in a folded group) never joins: "Otwórz jako siatkę (n)" counts shown hosts only. The
+ * clicked card stays picked only while it is selected (a card Ctrl+clicked out of the selection does not look selected).
  */
-export function ctrlPick(selected: readonly string[], picked: string | null, clicked: string): string[] {
-  return toggleSelection(selected.length || !picked || picked === clicked ? selected : [picked], clicked);
+export function ctrlPick(selected: readonly string[], picked: string | null, clicked: string, shown: readonly string[]): { selected: string[]; picked: string | null } {
+  const start = !selected.length && picked && picked !== clicked && shown.includes(picked) ? [picked] : selected;
+  const next = toggleSelection(start, clicked);
+  return { selected: next, picked: next.includes(clicked) ? clicked : null };
 }
 
 /** The second line of a host card, like Termius: the protocol, the user name and the tags ("ssh, adam, hetzner"). */

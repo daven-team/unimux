@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { StateController } from '../src/main/stateController';
 import { hostFormDirty, hostsUsingKey, hostToDraft, normalizeSshHosts, validateHostDraft, type SshHost, type SshHostDraft } from '../src/shared/ssh';
 import {
-  hostIdentity, hostLogin, hostsUsingIdentity, identityCredential, identityCredentialText, identityFormDirty, identityToDraft, matchIdentities,
-  normalizeSshIdentities, removeSshIdentity, upsertSshIdentity, validateIdentityDraft, IDENTITY_LIMIT, type SshIdentity,
+  hostIdentity, hostLogin, hostsUsingIdentity, identitiesUsingKey, identityCredential, identityCredentialText, identityFormDirty, identityToDraft, matchIdentities,
+  normalizeSshIdentities, removeKeyQuestion, removeSshIdentity, upsertSshIdentity, validateIdentityDraft, IDENTITY_LIMIT, type SshIdentity,
 } from '../src/shared/sshIdentity';
 import { cardKeyConnects, ctrlPick, detailKey, hostCardDetail, liveDetail, paneDetail, sectionForDetail } from '../src/shared/sshView';
 import { addSshHost, clearSshKeyRefs, defaultState, normalizeState } from '../src/shared/state';
@@ -139,6 +139,16 @@ describe('identity state', () => {
     expect(hostsUsingKey(hosts, KEY).map((h) => h.id)).toEqual([ID(1), ID(3), ID(4)]);
   });
 
+  it('counts the identities that carry a key in the question before deleting it, also when no host uses them', () => {
+    const withKey = identity(1, { keyId: KEY });
+    expect(identitiesUsingKey([withKey, identity(2), identity(3, { keyId: OTHER_KEY })], KEY)).toEqual([withKey]);
+    expect(identitiesUsingKey([], KEY)).toEqual([]);
+    expect(removeKeyQuestion('main', 0, 1)).toEqual({ key: 'Klucz jest używany przez {count} tożsamości. Usunąć go?', params: { count: 1 } });
+    expect(removeKeyQuestion('main', 2, 1)).toEqual({ key: 'Klucz jest używany przez {hosts} hostów i {identities} tożsamości. Usunąć go?', params: { hosts: 2, identities: 1 } });
+    expect(removeKeyQuestion('main', 3, 0)).toEqual({ key: 'Klucz jest używany przez {count} hostów. Usunąć go?', params: { count: 3 } });
+    expect(removeKeyQuestion('main', 0, 0)).toEqual({ key: 'Usunąć klucz {name}?', params: { name: 'main' } });
+  });
+
   it('clears a deleted key from hosts and identities alike', () => {
     let s = upsertSshIdentity(withHosts(host(1, { keyId: KEY }), host(2, { keyId: OTHER_KEY })), identity(1, { keyId: KEY }));
     s = upsertSshIdentity(s, identity(2, { keyId: OTHER_KEY }));
@@ -206,11 +216,23 @@ describe('host form with an identity', () => {
 
 describe('host cards and the keychain pane', () => {
   it('picks one card with a plain click and starts a Ctrl+click selection from it', () => {
-    expect(ctrlPick([], 'a', 'b')).toEqual(['a', 'b']);
-    expect(ctrlPick([], null, 'b')).toEqual(['b']);
-    expect(ctrlPick([], 'b', 'b')).toEqual(['b']);
-    expect(ctrlPick(['a', 'c'], 'z', 'c')).toEqual(['a']);
-    expect(ctrlPick(['a'], 'z', 'b')).toEqual(['a', 'b']);
+    const shown = ['a', 'b', 'c', 'z'];
+    expect(ctrlPick([], 'a', 'b', shown)).toEqual({ selected: ['a', 'b'], picked: 'b' });
+    expect(ctrlPick([], null, 'b', shown)).toEqual({ selected: ['b'], picked: 'b' });
+    expect(ctrlPick([], 'b', 'b', shown)).toEqual({ selected: ['b'], picked: 'b' });
+    expect(ctrlPick(['a'], 'z', 'b', shown)).toEqual({ selected: ['a', 'b'], picked: 'b' });
+  });
+
+  it('never starts a selection from a hidden pick and drops the pick of a card Ctrl+clicked out of the selection', () => {
+    // Click A, search A away, Ctrl+click B: only B ("Otwórz jako siatkę" never counts a host that is not shown).
+    expect(ctrlPick([], 'a', 'b', ['b', 'c'])).toEqual({ selected: ['b'], picked: 'b' });
+    // A card in a folded group is not shown either.
+    expect(ctrlPick([], 'a', 'b', [])).toEqual({ selected: ['b'], picked: 'b' });
+    // Ctrl+click A again in [A, C]: A leaves the selection and is not picked (it would look selected).
+    expect(ctrlPick(['a', 'c'], 'a', 'a', ['a', 'c'])).toEqual({ selected: ['c'], picked: null });
+    expect(ctrlPick(['a', 'c'], 'z', 'c', ['a', 'c', 'z'])).toEqual({ selected: ['a'], picked: null });
+    // After "Wyczyść zaznaczenie" (the pick is cleared with it) a Ctrl+click starts afresh.
+    expect(ctrlPick([], null, 'c', ['a', 'b', 'c'])).toEqual({ selected: ['c'], picked: 'c' });
   });
 
   it('shows "ssh, user, tags" under the label and connects on a plain Enter only', () => {

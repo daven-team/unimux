@@ -5,6 +5,7 @@
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { PaneActive, useClearWhenHidden, useReportDirty, withoutPaneGuard } from './paneVisibility';
 import { draftErrorKey, formDirty, READ_ONLY_VAULT_HINT, hostsUsingKey, labelFieldValue, replaceKeyErrorKey, type KeyError, type SshKeyInfo } from '../../../../shared/ssh';
+import { identitiesUsingKey, removeKeyQuestion } from '../../../../shared/sshIdentity';
 import type { MessageKey } from '../../../../shared/i18n';
 import { useI18n } from '../../i18n';
 import { askChoice, toast, useStore } from '../../store';
@@ -25,6 +26,8 @@ export function KeyEditor({ keyId }: { keyId: string }) {
   const identities = useStore((st) => st.s.sshIdentities);
   // Hosts that sign in with this key directly or through their identity.
   const hosts = useMemo(() => hostsUsingKey(allHosts, keyId, identities), [allHosts, keyId, identities]);
+  // Identities that carry this key (also the ones no host uses yet): deleting the key takes it from them.
+  const keyIdentities = useMemo(() => identitiesUsingKey(identities, keyId).sort((a, b) => a.label.localeCompare(b.label)), [identities, keyId]);
   const [label, setLabel] = useState(key?.label ?? '');
   const labelFocused = useRef(false);
   // A rename elsewhere or a late vault push shows up unless the user is typing in the field.
@@ -54,8 +57,8 @@ export function KeyEditor({ keyId }: { keyId: string }) {
     setError(tr(r.error === 'locked' ? 'Nie można odczytać klucza na tym komputerze' : r.error === 'notFound' ? 'Klucz przypisany do hosta nie istnieje' : 'Nie udało się zapisać pliku'));
   };
   const remove = async () => {
-    const title = hosts.length ? tr('Klucz jest używany przez {count} hostów. Usunąć go?', { count: hosts.length }) : tr('Usunąć klucz {name}?', { name: key.label });
-    if (await askChoice(title, '', [{ label: tr('Usuń klucz'), value: 'yes', danger: true }]) !== 'yes') return;
+    const question = removeKeyQuestion(key.label, hosts.length, keyIdentities.length);
+    if (await askChoice(tr(question.key, question.params), '', [{ label: tr('Usuń klucz'), value: 'yes', danger: true }]) !== 'yes') return;
     if ((await window.mc.ssh.removeKey(key.id)).ok) withoutPaneGuard(() => showSshDetail(null));
     else setError(tr('Nie udało się zapisać zmian'));
   };
@@ -108,6 +111,9 @@ export function KeyEditor({ keyId }: { keyId: string }) {
         <div className="ssh-field"><span>{tr('Hosty używające klucza')}</span>
           {hosts.length ? <ul className="ssh-list">{hosts.map((h) => <li key={h.id}><button type="button" className="btn small ghost" onClick={() => showSshDetail({ kind: 'host', hostId: h.id })}>{h.label}</button></li>)}</ul> : <span className="ssh-card-hint">-</span>}
         </div>
+        {keyIdentities.length > 0 && <div className="ssh-field ssh-key-identities"><span>{tr('Tożsamości używające klucza')}</span>
+          <ul className="ssh-list">{keyIdentities.map((i) => <li key={i.id}><button type="button" className="btn small ghost" onClick={() => showSshDetail({ kind: 'identity', identityId: i.id })}>{i.label}</button></li>)}</ul>
+        </div>}
       </div>
       {!readOnly && <div className="ssh-actions">
         <span className="grow" />

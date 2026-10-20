@@ -4,7 +4,7 @@
 // the SSH rail tile, the palette, "Edytuj host" and "Wszystkie hosty…" (Add and cell menus). It stays mounted while its tab is
 // open; the pane is "active" only while the view is on screen (D4: typed secrets go).
 // Host cards work like Termius: a click picks the card, a double-click or Enter connects, the pencil opens the editor.
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { activeProject, activeTab, duplicateSshHost, updateSshHost } from '../../../../shared/state';
 import { existingSelection, filterHosts, groupHosts, parseFoldedGroups, userAtEndpoint, type SshHost } from '../../../../shared/ssh';
 import { identityCredential, identityCredentialText } from '../../../../shared/sshIdentity';
@@ -178,6 +178,20 @@ function HostsSection({ detail, onConnect }: { detail: SshDetail | null; onConne
   const [query, setQuery] = useState('');
   /** The card a plain click picked (highlighted; Enter connects it). A deleted host simply matches no card. */
   const [picked, setPicked] = useState<string | null>(null);
+  /**
+   * The pick lives while the cards are in use (Termius): a press anywhere else (empty space, the search, the pane, a menu) clears
+   * it, like the focus leaving the cards (leaveCard), so a highlighted card is always the one Enter connects.
+   */
+  useEffect(() => {
+    if (!picked) return;
+    const away = (e: PointerEvent) => { if (!(e.target instanceof Element && e.target.closest('.ssh-host-card'))) setPicked(null); };
+    document.addEventListener('pointerdown', away, true);
+    return () => document.removeEventListener('pointerdown', away, true);
+  }, [picked]);
+  // The view going to the background (a grid after connecting, a file, Settings) takes the focus from the cards: the pick goes too.
+  const viewActive = useSshStore((st) => st.viewActive);
+  const settingsActive = useStore((st) => st.ui.settingsActive);
+  useEffect(() => { if (!viewActive || settingsActive) setPicked(null); }, [viewActive, settingsActive]);
   const [chosenGroup, setGroup] = useState<string | null>(null);
   const [folded, setFolded] = useState<string[]>(() => parseFoldedGroups(localStorage.getItem(FOLD_KEY)));
   const searching = !!query.trim();
@@ -185,6 +199,9 @@ function HostsSection({ detail, onConnect }: { detail: SshDetail | null; onConne
   const group = liveGroupFilter(chosenGroup, hosts);
   const groups = groupHosts(filterHosts(hostsInGroup(hosts, group), query), !searching);
   const headings = showGroupHeadings(hosts);
+  const groupOpen = (key: string) => !headings || !folded.includes(key) || searching;
+  /** The cards on screen: a picked card outside them never starts a multi-selection. */
+  const shownIds = groups.flatMap((g) => (groupOpen(g.name ?? '') ? g.hosts.map((h) => h.id) : []));
   const sshInGrid = activeGrid?.cells.filter((c) => c.ssh).length ?? 0;
 
   const toggleFold = (key: string) => {
@@ -197,22 +214,25 @@ function HostsSection({ detail, onConnect }: { detail: SshDetail | null; onConne
     if (next === undefined || next === name) return;
     update((s) => s.sshHosts.filter((h) => h.group === name).reduce((acc, h) => updateSshHost(acc, h.id, { group: next || undefined }), s));
   };
+  /** The selection and the picked card go together: a cleared selection never comes back with the next Ctrl+click. */
+  const clearSelection = () => { setPicked(null); useSshStore.setState({ selectedHosts: [] }); };
   /** A different group filter clears the selection, so "Otwórz jako siatkę (n)" never counts hosts that are not shown. */
   const chooseGroup = (next: string | null) => {
     if (next === group) return;
     setGroup(next);
-    useSshStore.setState({ selectedHosts: [] });
+    clearSelection();
   };
   /** Typing in the search keeps only the selected hosts that stay visible ("Otwórz jako siatkę (n)" never counts hidden ones). */
   const search = (next: string) => {
     setQuery(next);
     const visible = filterHosts(hostsInGroup(hosts, group), next);
+    if (picked && !visible.some((h) => h.id === picked)) setPicked(null);
     useSshStore.setState((st) => {
       const kept = visibleSelection(st.selectedHosts, visible);
       return kept.length === st.selectedHosts.length ? {} : { selectedHosts: kept };
     });
   };
-  const openGrid = (ids: string[]) => { showTerminalTabs(); void openHostsAsGrid(ids); useSshStore.setState({ selectedHosts: [] }); };
+  const openGrid = (ids: string[]) => { showTerminalTabs(); void openHostsAsGrid(ids); clearSelection(); };
   const groupMenu = (e: MouseEvent, name: string | null, ids: string[]) => {
     e.preventDefault();
     openMenu(e.clientX, e.clientY, [
@@ -222,15 +242,30 @@ function HostsSection({ detail, onConnect }: { detail: SshDetail | null; onConne
   };
   /** A click only picks the card (Termius): the editor opens from the pencil, a double-click or Enter connects. */
   const clickTile = (e: MouseEvent, h: SshHost) => {
-    if (e.ctrlKey || e.metaKey) { useSshStore.setState((st) => ({ selectedHosts: ctrlPick(st.selectedHosts, picked, h.id) })); setPicked(h.id); return; }
+    if (e.ctrlKey || e.metaKey) {
+      const next = ctrlPick(useSshStore.getState().selectedHosts, picked, h.id, shownIds);
+      useSshStore.setState({ selectedHosts: next.selected });
+      setPicked(next.picked);
+      return;
+    }
     setPicked(h.id);
     if (useSshStore.getState().selectedHosts.length) useSshStore.setState({ selectedHosts: [] });
   };
+  /** Enter connects the card with the focus; Esc drops the pick (and, in SshView, the selection). */
   const tileKeyDown = (e: KeyboardEvent, h: SshHost) => {
     if (cardKeyConnects(e)) { e.preventDefault(); setPicked(h.id); onConnect(h.id, 'cell'); return; }
-    if (e.key === 'Escape' && picked && !useSshStore.getState().selectedHosts.length) setPicked(null);
+    if (e.key === 'Escape') setPicked(null);
   };
-  const editHost = (hostId: string) => { setPicked(hostId); showSshDetail({ kind: 'host', hostId }); };
+  /** Tab to a card picks it, so the highlight follows the keyboard; a mouse focus leaves picking to the click (Ctrl+click). */
+  const focusTile = (e: FocusEvent<HTMLButtonElement>, h: SshHost) => { if (e.currentTarget.matches(':focus-visible')) setPicked(h.id); };
+  /** The focus going to anything but a card (the search, the pane, a dialog) drops the pick; a window switch (no target) keeps it. */
+  const leaveCard = (e: FocusEvent) => { if (e.relatedTarget instanceof Element && !e.relatedTarget.closest('.ssh-host-card')) setPicked(null); };
+  const editHost = (hostId: string) => {
+    showSshDetail({ kind: 'host', hostId });
+    // Unsaved edits keep the pane on its host while the user is asked: the other card is not picked then.
+    const shown = useSshStore.getState().detail;
+    if (shown?.kind === 'host' && shown.hostId === hostId) setPicked(hostId);
+  };
   const hostMenu = (e: MouseEvent, h: SshHost) => {
     e.preventDefault();
     openMenu(e.clientX, e.clientY, [
@@ -265,7 +300,7 @@ function HostsSection({ detail, onConnect }: { detail: SshDetail | null; onConne
         <div className="ssh-view-selection">
           <span>{tr('Zaznaczono {count}', { count: selected.length })}</span>
           <button className="btn small primary ssh-open-grid" onClick={() => openGrid(selected)}>{tr('Otwórz jako siatkę ({count})', { count: selected.length })}</button>
-          <button className="btn small ghost" onClick={() => useSshStore.setState({ selectedHosts: [] })}>{tr('Wyczyść zaznaczenie')}</button>
+          <button className="btn small ghost" onClick={clearSelection}>{tr('Wyczyść zaznaczenie')}</button>
         </div>
       )}
       {!hosts.length ? (
@@ -299,7 +334,7 @@ function HostsSection({ detail, onConnect }: { detail: SshDetail | null; onConne
           <section className="ssh-view-section" aria-label={tr('Hosty')}>
             {!groups.length ? <p className="ssh-view-none">{tr('Nic nie znaleziono.')}</p> : groups.map((g) => {
               const key = g.name ?? '';
-              const open = !headings || !folded.includes(key) || searching;
+              const open = groupOpen(key);
               const ids = g.hosts.map((h) => h.id);
               return (
                 <div key={key} className="ssh-view-group">
@@ -318,10 +353,10 @@ function HostsSection({ detail, onConnect }: { detail: SshDetail | null; onConne
                         const current = detail?.kind === 'host' && detail.hostId === h.id;
                         const chosen = selected.includes(h.id);
                         return (
-                          <div key={h.id} className="ssh-host-card">
+                          <div key={h.id} className="ssh-host-card" onBlur={leaveCard}>
                             <button className={`ssh-tile ssh-host-tile${chosen ? ' selected' : ''}${current ? ' current' : ''}${picked === h.id ? ' picked' : ''}`} data-host-id={h.id}
                               aria-current={current ? 'true' : undefined} aria-pressed={chosen}
-                              onClick={(e) => clickTile(e, h)} onDoubleClick={() => onConnect(h.id, 'cell')} onKeyDown={(e) => tileKeyDown(e, h)} onContextMenu={(e) => hostMenu(e, h)}
+                              onClick={(e) => clickTile(e, h)} onDoubleClick={() => onConnect(h.id, 'cell')} onKeyDown={(e) => tileKeyDown(e, h)} onFocus={(e) => focusTile(e, h)} onContextMenu={(e) => hostMenu(e, h)}
                               title={`${userAtEndpoint(h)} · ${tr(STATE_LABEL[state])}\n${tr('Dwuklik lub Enter: połącz')}`}>
                               <span className={`ssh-host-icon${h.color ? '' : ' uncolored'}`} style={h.color ? { background: h.color } : undefined} aria-hidden="true">
                                 <IServer />
