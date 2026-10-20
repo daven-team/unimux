@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { EMPTY_CWD, parseOsc7, parseOsc99, trackOsc7, trackOsc99 } from '../src/shared/remoteCwd';
 import type { TransferItem } from '../src/shared/sftp';
 import {
-  canRetry, clickSelect, deleteNames, DRIVES, dropRequest, EMPTY_HISTORY, EMPTY_SELECTION, filterEntries, forgetRemotePlace, formatBytes, goBack, goForward,
+  canRetry, cardStep, clickSelect, deleteNames, DRIVES, dropRequest, EMPTY_HISTORY, EMPTY_SELECTION, filterEntries, forgetRemotePlace, formatBytes, goBack, goForward,
   kindLabel, liveSelection, localBasename, localCrumbs, localJoin, localParent, MAX_REMOTE_PLACES, mergeSnapshot, moveSelect, normalizeSftpPlaces,
   outsideFolder, percentOf, resolveDrop, pushHistory, reenqueueRequest, rememberLocalPath, rememberRemotePath, remoteCrumbs, selectAll, sortEntries, toggleSort,
   validLocalPath, type PaneEntry,
@@ -109,6 +109,44 @@ describe('selection', () => {
     expect(s).toEqual({ paths: ['a'], anchor: null, focus: 'a' });
     const same = { paths: ['a'], anchor: 'a', focus: 'a' };
     expect(liveSelection(same, order)).toBe(same);
+  });
+});
+
+describe('host picker cards', () => {
+  // Two groups: three cards in a row of a 3-column grid and one more below, then a group heading and two cards.
+  const box = (left: number, top: number) => ({ left, top, width: 200, height: 48 });
+  const cards = [box(0, 0), box(206, 0), box(412, 0), box(0, 54), box(0, 140), box(206, 140)];
+
+  it('goes by rows with Up and Down, to the nearest card of the next row (also of the next group)', () => {
+    expect(cardStep(cards, 1, 'ArrowDown')).toBe(3);
+    expect(cardStep(cards, 3, 'ArrowDown')).toBe(4);
+    expect(cardStep(cards, 2, 'ArrowDown')).toBe(3);
+    expect(cardStep(cards, 5, 'ArrowUp')).toBe(3);
+    expect(cardStep(cards, 3, 'ArrowUp')).toBe(0);
+    expect(cardStep(cards, 4, 'ArrowDown')).toBeNull();
+  });
+
+  it('goes by one card with Left and Right, stopping at the ends', () => {
+    expect(cardStep(cards, 0, 'ArrowRight')).toBe(1);
+    expect(cardStep(cards, 2, 'ArrowRight')).toBe(3);
+    expect(cardStep(cards, 3, 'ArrowLeft')).toBe(2);
+    expect(cardStep(cards, 0, 'ArrowLeft')).toBeNull();
+    expect(cardStep(cards, 5, 'ArrowRight')).toBeNull();
+  });
+
+  it('enters the cards from the search with Down and goes back to it from the top row with Up', () => {
+    expect(cardStep(cards, -1, 'ArrowDown')).toBe(0);
+    expect(cardStep(cards, -1, 'ArrowUp')).toBeNull();
+    expect(cardStep(cards, -1, 'ArrowLeft')).toBeNull();
+    expect(cardStep(cards, 2, 'ArrowUp')).toBe(-1);
+    expect(cardStep([], -1, 'ArrowDown')).toBeNull();
+  });
+
+  it('treats a subpixel difference in the tops as one row', () => {
+    const uneven = [box(0, 0), box(206, 0.4), box(0, 54.3), box(206, 53.8)];
+    expect(cardStep(uneven, 1, 'ArrowDown')).toBe(3);
+    expect(cardStep(uneven, 0, 'ArrowUp')).toBe(-1);
+    expect(cardStep(uneven, 1, 'ArrowUp')).toBe(-1);
   });
 });
 

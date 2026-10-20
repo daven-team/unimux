@@ -7,6 +7,8 @@ import {
   deleteCountText, deleteNames, DRIVES, dropRequest, isFolderLike, outsideFolder, localCrumbs, localJoin, localParent, planLocalMove, rememberLocalPath, rememberRemotePath, remoteCrumbs,
   type PaneEntry, type SftpDragPayload,
 } from '../../../../shared/sftpView';
+import { paneMenu, type PaneAction, type PaneMenuInput } from '../../../../shared/sftpMenu';
+import { displayCombo, parseDefault } from '../../../../shared/shortcuts';
 import { sshErrorText, userAtEndpoint } from '../../../../shared/ssh';
 import { useI18n } from '../../i18n';
 import { askChoice, askText, getS, toast, update, useStore } from '../../store';
@@ -16,7 +18,7 @@ import { connectSftp, disconnectSftp, enqueueTransfer, openHostPicker, pathFlavo
 import { useSftpStore } from '../../sftpStore';
 import type { MenuItem } from '../ContextMenu';
 import { openMenuAt } from '../ContextMenu';
-import { IDownload, IDrive, IHome, IServer, IUpload } from '../icons';
+import { IDrive, IHome, IServer } from '../icons';
 import { BusyRing } from '../Spinner';
 import { AuthPrompt } from '../ssh/AuthPrompt';
 import { HostKeyPrompt } from '../ssh/HostKeyPrompt';
@@ -232,56 +234,59 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
     await remote.refresh();
   };
 
-  /** Cut, Paste and (on one folder) Paste here. */
-  const moveItems = (side: 'local' | 'remote', sel: PaneEntry[], dir: string | null, off: boolean): MenuItem[] => {
-    const pasteable = !off && !!cutOf(side);
-    const into = sel.length === 1 && isFolderLike(sel[0]) && !sel[0].unsafeName ? sel[0] : null;
-    return [
-      { label: tr('Wytnij'), disabled: off || !sel.length, onClick: () => cutEntries(side, sel) },
-      { label: tr('Wklej'), disabled: !pasteable || !dir, onClick: () => paste(side, dir) },
-      ...(into ? [{ label: tr('Wklej tutaj'), disabled: !pasteable, onClick: () => paste(side, into.path) }] : []),
-    ];
-  };
   // ── editor tabs (0.9.9): a file opens in a tab at the top ──
   const openRemote = (e: PaneEntry) => { if (hostId && connected && isFileLike(e)) void openRemoteEntry(hostId, e.path, e.kind === 'file' ? e.size : undefined); };
   const openLocal = (e: PaneEntry) => { if (isFileLike(e)) openLocalEntry(e.path); };
-  const openItem = (sel: PaneEntry[], open: (e: PaneEntry) => void, enabled = true): MenuItem =>
-    ({ label: tr('Otwórz'), disabled: !enabled || sel.length !== 1 || !isFileLike(sel[0]), onClick: () => open(sel[0]) });
 
-  const localActions = (sel: PaneEntry[]): MenuItem[] => {
-    const drives = localDir === DRIVES;
-    return [
-      openItem(sel, openLocal),
-      { label: tr('Nowy folder'), disabled: drives, onClick: () => void localNewFolder() },
-      { label: tr('Zmień nazwę'), disabled: drives || sel.length !== 1, onClick: () => void localRename(sel[0]) },
-      { label: tr('Przenieś do kosza'), danger: true, disabled: drives || !sel.length, onClick: () => void localDelete(sel) },
-      { sep: true },
-      ...moveItems('local', sel, localDir, drives),
-      { sep: true },
-      { label: tr('Wyślij na serwer'), disabled: !connected || !sel.length || !remoteDir, onClick: () => upload(sel.map((e) => e.path), remoteDir!) },
-      { label: tr('Odśwież'), onClick: () => void local.refresh() },
-      { label: tr(flavor === 'win32' ? 'Otwórz w Eksploratorze' : 'Pokaż w Finderze'), disabled: drives, onClick: () => { const target = sel[0]?.path ?? localDir; if (target) void window.mc.localFs.reveal(target); } },
-    ];
+  const goLocal = (path: string) => void local.go(path);
+
+  // ── menus: a right click on entries, on the empty list, and Actions (only what can run, see shared/sftpMenu.ts) ──
+  const platform = window.mc.platform;
+  const keyHint = (template: string): string | undefined => { const combo = parseDefault(template, platform); return combo ? displayCombo(combo, platform) : undefined; };
+  const paneMenuItems = (side: 'local' | 'remote', place: PaneMenuInput['place'], sel: PaneEntry[]): MenuItem[] => {
+    const isLocal = side === 'local';
+    const dir = isLocal ? localDir : remoteDir;
+    const plan = paneMenu({
+      side, place, selection: sel,
+      live: isLocal || connected,
+      writable: isLocal ? !!localDir && localDir !== DRIVES : connected && !!remoteDir,
+      hasFolder: dir !== null && (isLocal || connected),
+      canTransfer: isLocal ? connected && !!remoteDir : connected && !!localDir && localDir !== DRIVES,
+      canPaste: !!cutOf(side),
+      hasSession: !!sessionId,
+    });
+    const reveal = tr(flavor === 'win32' ? 'Otwórz w Eksploratorze' : 'Pokaż w Finderze');
+    const first = sel[0];
+    const item = (action: PaneAction): MenuItem => {
+      switch (action) {
+        case 'open': return { label: tr('Otwórz'), hint: keyHint('Enter'), onClick: () => {
+          if (isFolderLike(first)) { if (isLocal) goLocal(first.path); else void remote.go(first.path); } else if (isLocal) openLocal(first); else openRemote(first);
+        } };
+        case 'transfer': return isLocal
+          ? { label: tr('Wyślij na serwer'), onClick: () => upload(sel.map((e) => e.path), remoteDir!) }
+          : { label: tr('Pobierz'), onClick: () => download(sel.map((e) => e.path), localDir!) };
+        case 'rename': return { label: tr('Zmień nazwę'), hint: keyHint('F2'), onClick: () => void (isLocal ? localRename(first) : remoteRename(first)) };
+        case 'copyPath': return { label: tr('Kopiuj ścieżkę'), onClick: () => window.mc.clipboardWrite(sel.map((e) => e.path).join('\n')) };
+        case 'reveal': return { label: reveal, onClick: () => void window.mc.localFs.reveal(first.path) };
+        case 'cut': return { label: tr('Wytnij'), hint: keyHint('Mod+X'), onClick: () => cutEntries(side, sel) };
+        case 'pasteInto': return { label: tr('Wklej'), onClick: () => paste(side, first.path) };
+        case 'permissions': return { label: tr('Uprawnienia…'), onClick: () => setPerms(sel) };
+        case 'delete': return isLocal
+          ? { label: tr('Przenieś do kosza'), danger: true, hint: keyHint('Delete'), onClick: () => void localDelete(sel) }
+          : { label: tr('Usuń'), danger: true, hint: keyHint('Delete'), onClick: () => void remoteDelete(sel) };
+        case 'newFolder': return { label: tr('Nowy folder'), onClick: () => void (isLocal ? localNewFolder() : remoteNewFolder()) };
+        case 'paste': return { label: tr('Wklej'), hint: keyHint('Mod+V'), onClick: () => paste(side, dir) };
+        case 'refresh': return { label: tr('Odśwież'), hint: keyHint('F5'), onClick: () => void (isLocal ? local.refresh() : remote.refresh()) };
+        case 'copyFolderPath': return { label: tr('Kopiuj ścieżkę'), onClick: () => { if (dir) window.mc.clipboardWrite(dir); } };
+        case 'revealFolder': return { label: reveal, onClick: () => { if (localDir) void window.mc.localFs.reveal(localDir); } };
+        case 'changeHost': return { label: tr('Zmień host'), onClick: openHostPicker };
+        case 'disconnect': return { label: tr('Rozłącz'), onClick: () => void disconnectSftp() };
+      }
+    };
+    return plan.map((a) => (a === 'sep' ? { sep: true as const } : item(a)));
   };
-  const remoteActions = (sel: PaneEntry[]): MenuItem[] => [
-    openItem(sel, openRemote, connected),
-    { label: tr('Nowy folder'), disabled: !connected, onClick: () => void remoteNewFolder() },
-    { label: tr('Zmień nazwę'), disabled: !connected || sel.length !== 1, onClick: () => void remoteRename(sel[0]) },
-    { label: tr('Usuń'), danger: true, disabled: !connected || !sel.length, onClick: () => void remoteDelete(sel) },
-    { label: tr('Uprawnienia…'), disabled: !connected || !sel.length || sel.some((e) => e.unsafeName), onClick: () => setPerms(sel) },
-    { sep: true },
-    ...moveItems('remote', sel, remoteDir, !connected),
-    { sep: true },
-    { label: tr('Pobierz'), disabled: !connected || !sel.length || !localDir || localDir === DRIVES, onClick: () => download(sel.map((e) => e.path), localDir!) },
-    { label: tr('Odśwież'), disabled: !connected, onClick: () => void remote.refresh() },
-    { label: tr('Kopiuj ścieżkę'), disabled: !remoteDir, onClick: () => window.mc.clipboardWrite(sel[0]?.path ?? remoteDir ?? '') },
-    { sep: true },
-    { label: tr('Zmień host'), onClick: openHostPicker },
-    { label: tr('Rozłącz'), disabled: !sessionId, onClick: () => void disconnectSftp() },
-  ];
 
   // ── heads ──
-  const goLocal = (path: string) => void local.go(path);
   const localHead = (
     <div className="sftp-title">
       <strong>{tr('Lokalne')}</strong>
@@ -363,8 +368,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
       <div className="sftp-panes">
         <FilePane side="local" label={tr('Lokalne pliki')} head={localHead} folder={local.folder} crumbs={localCrumbList} extraColumns={false}
           onOpen={goLocal} onOpenFile={openLocal} onBack={local.back} onForward={local.forward} onUp={local.up}
-          actions={localActions}
-          transfer={{ label: tr('Wyślij'), icon: <IUpload />, disabled: !connected || !remoteDir, run: (sel) => upload(sel.map((e) => e.path), remoteDir!) }}
+          menu={(place, sel) => paneMenuItems('local', place, sel)}
           onDelete={(sel) => void localDelete(sel)} onRename={(e) => void localRename(e)}
           onDropEntries={(payload, dir) => onDropEntries(payload, 'local', dir)}
           onMoveEntries={(paths, dir) => void moveEntries('local', paths, dir)}
@@ -376,10 +380,9 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
             void enqueue(null, { direction: 'local-copy', sources, targetDir: dir });
           }}
           dropDisabled={localDir === DRIVES} />
-        <FilePane side="remote" label={tr('Pliki na serwerze')} head={remoteHead} folder={remote.folder} crumbs={remoteCrumbList} extraColumns
+        <FilePane side="remote" label={tr('Pliki na serwerze')} head={pickerOpen ? null : remoteHead} folder={remote.folder} crumbs={remoteCrumbList} extraColumns
           onOpen={(p) => void remote.go(p)} onOpenFile={openRemote} onBack={remote.back} onForward={remote.forward} onUp={remote.up}
-          actions={remoteActions}
-          transfer={{ label: tr('Pobierz'), icon: <IDownload />, disabled: !connected || !localDir || localDir === DRIVES, run: (sel) => download(sel.map((e) => e.path), localDir!) }}
+          menu={(place, sel) => paneMenuItems('remote', place, sel)}
           onDelete={(sel) => void remoteDelete(sel)} onRename={(e) => void remoteRename(e)}
           onDropEntries={(payload, dir) => onDropEntries(payload, 'remote', dir)}
           onDropFiles={(paths, dir) => upload(paths, dir)}
