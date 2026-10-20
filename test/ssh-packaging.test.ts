@@ -24,6 +24,20 @@ describe('ssh2 packaging', () => {
     expect(pkg.dependencies['@types/ssh2']).toBeUndefined();
   });
 
+  it('ships the Postgres driver exactly pinned as production dependencies and the test servers as dev dependencies (1.0.0)', () => {
+    expect(pkg.dependencies.pg).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(pkg.dependencies['pg-cursor']).toMatch(/^\d+\.\d+\.\d+$/);
+    for (const dev of ['@electric-sql/pglite', '@electric-sql/pglite-socket', '@types/pg', '@types/pg-cursor']) {
+      expect(pkg.devDependencies[dev], dev).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(pkg.dependencies[dev], dev).toBeUndefined();
+    }
+  });
+
+  it('ships the Redis driver exactly pinned as a production dependency (1.0.0)', () => {
+    expect(pkg.dependencies.ioredis).toBe('6.0.0');
+    expect(pkg.devDependencies.ioredis).toBeUndefined();
+  });
+
   it('keeps the optional native parts of ssh2 out of every file list', () => {
     for (const list of [pkg.build.files, pkg.build.win.files, pkg.build.mac.files]) for (const rule of EXCLUDED) expect(list, rule).toContain(rule);
   });

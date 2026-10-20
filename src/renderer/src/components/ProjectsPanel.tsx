@@ -51,10 +51,7 @@ function TabList({ project, active, countsOf }: { project: Project; active: bool
                 { label: tr("Zamknij grid"), onClick: () => void closeTab(project.id, t.id) },
               ]);
             }}
-            onClick={() => {
-              if (!active) switchProject(project.id);
-              selectTab(project.id, t);
-            }}
+            onClick={() => selectTab(project.id, t)}
           >
             <IGrid />
             <span className="tname">{t.name}</span>

@@ -14,6 +14,8 @@ import { DEFAULT_SCROLLBACK_LINES, normalizeScrollback } from './terminalLimits'
 import { normalizeShortcutOverrides } from './shortcuts';
 import { normalizeSshHosts, type SshCellRef, type SshHost } from './ssh';
 import { defaultSftpPlaces, forgetRemotePlace, normalizeSftpPlaces } from './sftpView';
+import { normalizeWorkspaceOrder } from './workspaceOrder';
+import { normalizeDbConnections } from './db';
 import type {
   AppState, ArchivedTab, Cell, Preset, PresetCell, Profile, Project, Settings, Snippet, Tab, Worktree,
 } from './types';
@@ -34,6 +36,7 @@ export function defaultState(platform: AppPlatform = 'win32'): AppState {
     snippets: [],
     sshHosts: [],
     sftp: defaultSftpPlaces(),
+    dbConnections: [],
     settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true, scrollbackLines: DEFAULT_SCROLLBACK_LINES },
     sidebarCollapsed: false,
     snippetsOpen: true,
@@ -168,6 +171,13 @@ export function renameTab(s: AppState, projectId: string, tabId: string, name: s
 
 export function setActiveTab(s: AppState, projectId: string, tabId: string): AppState {
   return mapProject(s, projectId, (p) => ({ ...p, activeTabId: tabId }));
+}
+
+/** A grid tab of the strip was clicked: its project becomes the active one (sidebar, Files, Git follow) and the grid its active tab. */
+export function focusGrid(s: AppState, projectId: string, tabId: string): AppState {
+  const project = s.projects.find((p) => p.id === projectId);
+  if (!project?.tabs.some((t) => t.id === tabId)) return s;
+  return setActiveTab(setActiveProject(s, projectId), projectId, tabId);
 }
 
 export function moveTab(s: AppState, projectId: string, tabId: string, toIndex: number): AppState {
@@ -433,6 +443,7 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
     snippets: Array.isArray(r.snippets) ? r.snippets : [],
     sshHosts: normalizeSshHosts(r.sshHosts),
     sftp: normalizeSftpPlaces(r.sftp),
+    dbConnections: normalizeDbConnections(r.dbConnections),
     settings: {
       ...d.settings, ...(r.settings ?? {}),
       // Existing Polish installations keep their UI and do not get first-run onboarding again.
@@ -459,12 +470,29 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
     })),
   } as AppState;
   for (const key of LEGACY_ALERT_KEYS) delete (normalized.settings as unknown as Record<string, unknown>)[key];
+  // Grid ids are unique across all projects (the strip keys grids by id): a repeated id (open or archived, a hand-edited or merged
+  // file) gets a new one; an active tab that was re-id'd follows.
+  const seenTabIds = new Set<string>();
+  const freshId = (id: string) => { if (!seenTabIds.has(id)) { seenTabIds.add(id); return id; } const next = uid(); seenTabIds.add(next); return next; };
+  normalized.projects = normalized.projects.map((p) => {
+    const tabs = p.tabs.map((t) => { const id = freshId(t.id); return id === t.id ? t : { ...t, id }; });
+    // The active tab keeps pointing at the same grid: if its id was given away, the first grid that had it.
+    const kept = tabs.some((t) => t.id === p.activeTabId);
+    const moved = p.tabs.findIndex((t) => t.id === p.activeTabId);
+    const activeTabId = kept || moved < 0 ? p.activeTabId : tabs[moved].id;
+    const archive = p.archive.map((t) => { const id = freshId(t.id); return id === t.id ? t : { ...t, id }; });
+    return tabs.every((t, i) => t === p.tabs[i]) && archive.every((t, i) => t === p.archive[i]) ? p : { ...p, tabs, archive, activeTabId };
+  });
   // An active project or tab dropped by the repair falls back to the first one left, so the window does not open on an empty grid.
   normalized.projects = normalized.projects.map((p) =>
     p.activeTabId && !p.tabs.some((t) => t.id === p.activeTabId) ? { ...p, activeTabId: p.tabs[0]?.id ?? null } : p);
   if (normalized.activeProjectId && !normalized.projects.some((p) => p.id === normalized.activeProjectId)) {
     normalized.activeProjectId = normalized.projects[0]?.id ?? null;
   }
+  // The strip order keeps only keys of a known kind and grids that are still open; absent stays absent for the migration.
+  const workspaceOrder = normalizeWorkspaceOrder(r.workspaceOrder, new Set(normalized.projects.flatMap((p) => p.tabs.map((t) => t.id))));
+  if (workspaceOrder) normalized.workspaceOrder = workspaceOrder;
+  else delete normalized.workspaceOrder;
   // Retention of the MCP inboxes (also drops what removed projects left behind before 0.9.3).
   normalized.automation = pruneAutomation(normalized.automation, new Set(normalized.projects.map((p) => p.id)), Date.now());
   return normalized;

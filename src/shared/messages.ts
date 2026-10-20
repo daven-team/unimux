@@ -6,6 +6,9 @@ import { alertMessages } from './alertMessages';
 import { automationMessages } from './automationMessages';
 import { cliMessages } from './cliMessages';
 import { codexMessages } from './codexMessages';
+import { dbMessages } from './dbMessages';
+import { redisMessages } from './redisMessages';
+import { dbUiMessages } from './dbUiMessages';
 import { filesMessages } from './filesMessages';
 import { gitMessages } from './gitMessages';
 import { gitSetupMessages } from './gitSetupMessages';
@@ -38,6 +41,9 @@ export const messages = {
   ...automationMessages,
   ...cliMessages,
   ...codexMessages,
+  ...dbMessages,
+  ...redisMessages,
+  ...dbUiMessages,
   ...filesMessages,
   ...gitMessages,
   ...gitSetupMessages,
@@ -92,6 +98,7 @@ export const messages = {
   'przed chwilą': ['just now', 'gerade eben', 'hace un momento', 'à l’instant', 'agora mesmo'],
   'Projekty': ['Projects', 'Projekte', 'Proyectos', 'Projets', 'Projetos'],
   'Projekt': ['Project', 'Projekt', 'Proyecto', 'Projet', 'Projeto'],
+  'Projekt: {name}': ['Project: {name}', 'Projekt: {name}', 'Proyecto: {name}', 'Projet : {name}', 'Projeto: {name}'],
   'Pliki': ['Files', 'Dateien', 'Archivos', 'Fichiers', 'Ficheiros'],
   'Nowy projekt': ['New project', 'Neues Projekt', 'Nuevo proyecto', 'Nouveau projet', 'Novo projeto'],
   'Dodaj projekt': ['Add project', 'Projekt hinzufügen', 'Añadir proyecto', 'Ajouter un projet', 'Adicionar projeto'],

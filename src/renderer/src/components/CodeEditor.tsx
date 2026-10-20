@@ -87,7 +87,7 @@ function languageForFile(path: string): Extension {
   }
 }
 
-const colors = syntaxHighlighting(HighlightStyle.define([
+export const colors = syntaxHighlighting(HighlightStyle.define([
   { tag: [tags.keyword, tags.modifier, tags.operatorKeyword], color: '#c4a1ef' },
   { tag: [tags.string, tags.regexp], color: '#a6c993' },
   { tag: [tags.number, tags.bool, tags.null], color: '#e5b77e' },
@@ -101,7 +101,7 @@ const colors = syntaxHighlighting(HighlightStyle.define([
   { tag: [tags.link, tags.url], color: '#80c9bb', textDecoration: 'underline' },
   { tag: [tags.invalid], color: '#ef8e8e' },
 ]));
-const theme = EditorView.theme({
+export const theme = EditorView.theme({
   '&': { height: '100%', backgroundColor: 'var(--bg)', color: '#d6d6d6', fontSize: 'calc(13px * var(--file-zoom, 1))' },
   '.cm-scroller': { overflow: 'auto', fontFamily: 'Consolas, Menlo, monospace', lineHeight: '1.7' },
   '.cm-content': { padding: '12px 0', caretColor: '#eeeeee' },

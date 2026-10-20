@@ -7,6 +7,7 @@ import type { BackgroundLoadMode } from './backgroundLoad';
 import type { Overrides as ShortcutOverrides } from './shortcuts';
 import type { SshCellRef, SshHost } from './ssh';
 import type { SftpPlaces } from './sftpView';
+import type { DbConnection } from './db';
 
 export type CliKind = 'claude' | 'codex' | 'shell';
 /** A forced path format of a shell cell: Claude (@path), Codex (plain path) or the quoted shell form. */
@@ -175,6 +176,13 @@ export interface AppState {
   sshHosts: SshHost[];
   /** The SFTP view's last local folder and last remote folder per host (0.9.8). */
   sftp: SftpPlaces;
+  /**
+   * The order of the top strip (1.0.0): grids of all projects, file tabs, Settings and the SSH view, as keys of
+   * shared/workspaceOrder.ts. Absent until the per-project orders of 0.9.x are migrated.
+   */
+  workspaceOrder?: string[];
+  /** Saved database connections (1.0.0; no secrets: passwords live in <data>/db/vault.json, owned by main). */
+  dbConnections: DbConnection[];
   settings: Settings;
   sidebarCollapsed: boolean;
   snippetsOpen: boolean;

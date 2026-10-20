@@ -6,6 +6,8 @@ import { appPlatform, windowsBuildFromRelease } from '../shared/platform';
 ipcRenderer.on('pty-port', (e) => window.postMessage('mc:pty-port', '*', e.ports));
 // The SFTP transfer port (progress straight from the SFTP Host, 0.9.8): the page receives it as 'mc:sftp-port'.
 ipcRenderer.on('sftp-port', (e) => window.postMessage('mc:sftp-port', '*', e.ports));
+// The DB port (result rows straight from the DB Host, 1.0.0): the page receives it as 'mc:db-port'.
+ipcRenderer.on('db-port', (e) => window.postMessage('mc:db-port', '*', e.ports));
 
 const api: McApi = {
   platform: appPlatform(process.platform),
@@ -127,6 +129,56 @@ const api: McApi = {
     pinHosts: (hostIds) => ipcRenderer.send('sftp:pinHosts', hostIds),
     viewOpened: (shownSessionId) => ipcRenderer.send('sftp:viewOpened', shownSessionId),
     viewClosed: () => ipcRenderer.send('sftp:viewClosed'),
+  },
+  dbPickCaFile: () => ipcRenderer.invoke('db:pickCaFile'),
+  dbExport: (name, text) => ipcRenderer.invoke('db:export', name, text),
+  db: {
+    saveConnection: (input, password) => ipcRenderer.invoke('db:connections:save', input, password),
+    deleteConnection: (id) => ipcRenderer.invoke('db:connections:delete', id),
+    duplicateConnection: (id) => ipcRenderer.invoke('db:connections:duplicate', id),
+    testConnection: (input, password) => ipcRenderer.invoke('db:connections:test', input, password),
+    vaultInfo: () => ipcRenderer.invoke('db:vault:info'),
+    connect: (connectionId, opts) => ipcRenderer.invoke('db:connect', connectionId, opts),
+    disconnect: (sessionId) => ipcRenderer.invoke('db:disconnect', sessionId),
+    sessions: () => ipcRenderer.invoke('db:sessions'),
+    answer: (answer) => ipcRenderer.invoke('db:prompt:answer', answer),
+    pin: (sessionIds) => ipcRenderer.send('db:pin', sessionIds),
+    pg: {
+      databases: (sessionId) => ipcRenderer.invoke('db:pg', sessionId, { op: 'databases' }),
+      schemas: (sessionId) => ipcRenderer.invoke('db:pg', sessionId, { op: 'schemas' }),
+      objects: (sessionId, schema) => ipcRenderer.invoke('db:pg', sessionId, { op: 'objects', schema }),
+      tableInfo: (sessionId, schema, name) => ipcRenderer.invoke('db:pg', sessionId, { op: 'tableInfo', schema, name }),
+      ddl: (sessionId, schema, name, kind, args) => ipcRenderer.invoke('db:pg', sessionId, { op: 'ddl', schema, name, kind, ...(args !== undefined ? { args } : {}) }),
+      tablePage: (sessionId, req) => ipcRenderer.invoke('db:pg', sessionId, { op: 'tablePage', req }),
+      query: (sessionId, req) => ipcRenderer.invoke('db:pg', sessionId, { op: 'query', req }),
+      fetchMore: (sessionId, queryId, count) => ipcRenderer.invoke('db:pg', sessionId, { op: 'fetchMore', queryId, count }),
+      closeResult: (sessionId, queryId) => ipcRenderer.invoke('db:pg', sessionId, { op: 'closeResult', queryId }),
+      cancel: (sessionId) => ipcRenderer.invoke('db:pg', sessionId, { op: 'cancel' }),
+      transaction: (sessionId, action) => ipcRenderer.invoke('db:pg', sessionId, { op: 'transaction', action }),
+      previewEdits: (sessionId, req) => ipcRenderer.invoke('db:pg', sessionId, { op: 'previewEdits', req }),
+      applyEdits: (sessionId, req) => ipcRenderer.invoke('db:pg', sessionId, { op: 'applyEdits', req }),
+      cellValue: (sessionId, req) => ipcRenderer.invoke('db:pg', sessionId, { op: 'cellValue', req }),
+    },
+    redis: {
+      databases: (sessionId) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'databases' }),
+      select: (sessionId, index) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'select', index }),
+      scan: (sessionId, req) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'scan', req }),
+      keyInfo: (sessionId, keys) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'keyInfo', keys }),
+      read: (sessionId, req) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'read', req }),
+      readItem: (sessionId, req) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'readItem', req }),
+      write: (sessionId, write) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'write', write }),
+      countPattern: (sessionId, match, type) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'countPattern', match, ...(type !== undefined ? { type } : {}) }),
+      deletePattern: (sessionId, token) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'deletePattern', token }),
+      cancel: (sessionId) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'cancel' }),
+      command: (sessionId, req) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'command', req }),
+      info: (sessionId, section) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'info', ...(section !== undefined ? { section } : {}) }),
+      slowlog: (sessionId, count) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'slowlog', ...(count !== undefined ? { count } : {}) }),
+      clients: (sessionId) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'clients' }),
+      subscribe: (sessionId, target) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'subscribe', ...target }),
+      unsubscribe: (sessionId, target) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'unsubscribe', ...target }),
+      pubsubState: (sessionId) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'pubsubState' }),
+      publish: (sessionId, channel, message, readWrite) => ipcRenderer.invoke('db:redis', sessionId, { kind: 'publish', channel, message, ...(readWrite !== undefined ? { readWrite } : {}) }),
+    },
   },
   localFs: {
     list: (path) => ipcRenderer.invoke('local:list', path),

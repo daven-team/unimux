@@ -15,6 +15,7 @@ import type { CreateResult, DeleteResult, FileOpProgress, FileOpRequest, FileOpR
 import type { GitApi } from '../shared/git';
 import type { SshApi, SshPrompt, SshSessionState, SshVaultInfo } from '../shared/ssh';
 import type { LocalFilesApi, SftpApi, SftpSessionState } from '../shared/sftp';
+import type { DbApi, DbPrompt, DbSessionState, DbVaultInfo } from '../shared/db';
 import type { AppState, CellSession, Profile, ProjectDirectory, ProjectFilePreview, SessionInfo, UpdateState, Worktree, WorktreeInspection, WorktreeInspectResult, WorktreeRemoveResult } from '../shared/types';
 
 export type { SessionInfo };
@@ -110,6 +111,12 @@ export interface McApi {
   ssh: SshApi;
   /** SFTP sessions and transfers (0.9.8); progress arrives on the 'mc:sftp-port' MessagePort (SftpPortMessage). */
   sftp: SftpApi;
+  /** Database connections and sessions (1.0.0); result rows arrive on the 'mc:db-port' MessagePort (DbPortMessage). */
+  db: DbApi;
+  /** The CA certificate file of a connection (native dialog); null when cancelled. */
+  dbPickCaFile(): Promise<string | null>;
+  /** Saves an exported result where the user picks in the save dialog. */
+  dbExport(name: string, text: string): Promise<{ ok: boolean; path?: string; cancelled?: boolean }>;
   /** The local pane of the SFTP view: any folder, drives, home, new folder, rename, trash, show in Explorer/Finder. */
   localFs: LocalFilesApi;
   notify(n: { title: string; body: string; cellId: string }): void;
@@ -167,6 +174,11 @@ export interface McApi {
   on(channel: 'sftp:prompt', cb: (sessionId: string, prompt: SshPrompt | null) => void): () => void;
   /** The SFTP Host restarted: every SFTP session ended and unfinished transfers are lost (failUnfinished). */
   on(channel: 'sftp:hostCrashed', cb: () => void): () => void;
+  on(channel: 'db:session', cb: (state: DbSessionState) => void): () => void;
+  on(channel: 'db:prompt', cb: (sessionId: string, prompt: DbPrompt | null) => void): () => void;
+  /** The DB Host restarted: every DB session ended (each one also got a 'db:session' with error 'dbHostCrashed'). */
+  on(channel: 'db:hostCrashed', cb: () => void): () => void;
+  on(channel: 'db:vault:changed', cb: (info: DbVaultInfo) => void): () => void;
   on(channel: 'app:before-quit', cb: () => void): () => void;
   /** The user closes the window or quits while agents work: the renderer asks and answers with answerQuit. */
   on(channel: 'app:confirm-quit', cb: () => void): () => void;

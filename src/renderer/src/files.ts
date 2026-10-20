@@ -8,7 +8,9 @@ import type { GitDiffSource } from '../../shared/git';
 import type { ProjectFilePreview } from '../../shared/types';
 import { documentId, documentsUnder, removeDocuments, retargetDocuments, type FileMoveRecord } from '../../shared/fileOps';
 import { cleanStamp, FILE_GONE, localRelativePath, movedSource, POSIX_PATHS, retargetSourceDocuments, sourceDocumentId, sourceName, sourceUnder, TEXT_ENCODINGS, validSource, type EditorWarning, type FileSource, type PathRules, type RemoteStamp, type SourceScope, type TextEncodingName } from '../../shared/editorSource';
+import type { RedisTabRef } from '../../shared/redisView';
 import { initRemoteSessions, pinHosts, sftpErrorMessage, withSession } from './remoteSessions';
+import { dbTabId, validDbTabRef, type DbTabRef } from '../../shared/dbTabs';
 
 export interface FileDocument {
   id: string;
@@ -25,6 +27,13 @@ export interface FileDocument {
    * have projectId '' (shown in every project) and relativePath = the full path. Absent: a project file.
    */
   source?: FileSource;
+  /**
+   * A database tab (1.0.0): table data, a SQL editor or a DDL view; projectId '' (shown in every project). `text` is the SQL
+   * of an editor tab, or the staged edits of a table tab (serialized, '' when there are none): unsaved ones are kept as drafts.
+   */
+  db?: DbTabRef;
+  /** A Redis view of the database viewer (1.0.0): never read from or written to disk and never a draft (nothing to save). */
+  redis?: RedisTabRef;
   /** Remote text files: the encoding the save writes back (BOM and UTF-16 kept). */
   encoding?: TextEncodingName;
   /** A non-blocking note of the last save (permissions or owner not kept); never stored. */
@@ -87,7 +96,8 @@ function restoreDrafts(): FileDocument[] {
     if (!Array.isArray(value)) return [];
     return value.filter((d): d is FileDocument => d && typeof d.id === 'string' && typeof d.projectId === 'string' && typeof d.relativePath === 'string' && typeof d.name === 'string' && typeof d.text === 'string' && typeof d.savedText === 'string' && typeof d.diskText === 'string'
       // A remote or local draft must still name its file, and its id must be the one that file gets (one tab per file).
-      && (d.source === undefined || (validSource(d.source) && d.id === sourceDocumentId(d.source) && d.projectId === '')))
+      && (d.source === undefined || (validSource(d.source) && d.id === sourceDocumentId(d.source) && d.projectId === ''))
+      && (d.db === undefined || (validDbTabRef(d.db) && d.id === dbTabId(d.db) && d.projectId === '' && d.source === undefined)))
       // No stamps: the first check after a start reads the file again and brings back a conflict notice when the disk moved on.
       // A remote draft keeps the stamp it was opened from: its save compares it with the server file.
       .map((d) => ({
@@ -115,7 +125,15 @@ export const isFileDirty = (d: FileDocument): boolean => d.text !== d.savedText;
 export function activateFile(id: string): void {
   setUi({ settingsActive: false });
   useSshStore.setState({ viewActive: false });
-  if (useFileStore.getState().documents.some((d) => d.id === id)) { useFileStore.setState({ activeFileId: id }); void checkFileOnDisk(id); }
+  const doc = useFileStore.getState().documents.find((d) => d.id === id);
+  if (!doc) return;
+  // 1.0.0: the strip shows the files of every project; a file of another project switches to that project (sidebar, Files, Git).
+  if (doc.projectId && doc.projectId !== getS().activeProjectId && getS().projects.some((p) => p.id === doc.projectId)) {
+    update((s) => ({ ...s, activeProjectId: doc.projectId }));
+    setUi({ maximizedCellId: null });
+  }
+  useFileStore.setState({ activeFileId: id });
+  void checkFileOnDisk(id);
 }
 export function showTerminalTabs(): void { setUi({ settingsActive: false }); useSshStore.setState({ viewActive: false }); useFileStore.setState({ activeFileId: null }); }
 export async function openFile(projectId: string, relativePath: string): Promise<void> {
@@ -265,7 +283,7 @@ export async function openLocalFile(path: string): Promise<void> {
 const loads = new Map<string, symbol>();
 export async function retryFile(id: string): Promise<void> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
-  if (!doc || doc.diff || isFileDirty(doc) || doc.saving) return;
+  if (!doc || doc.diff || doc.db || doc.redis || isFileDirty(doc) || doc.saving) return;
   const token = Symbol(); loads.set(id, token);
   patch(id, { status: 'loading', error: null });
   try {
@@ -304,7 +322,7 @@ export function setFileMarkdownView(id: string, markdownView: 'preview' | 'sourc
 }
 export async function saveFile(id: string): Promise<boolean> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
-  if (!doc || doc.status !== 'ready' || doc.saving) return false;
+  if (!doc || doc.status !== 'ready' || doc.saving || doc.db || doc.redis) return false;
   if (!isFileDirty(doc)) return true;
   patch(id, { saving: true, error: null });
   try {
@@ -340,7 +358,7 @@ const sameStamp = (a: DiskStamp | undefined, b: DiskStamp): boolean => !!a && a.
  */
 export async function checkFileOnDisk(id: string, force = false): Promise<void> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
-  if (!doc || doc.diff || doc.status !== 'ready' || doc.saving || loads.has(id) || checks.has(id)) return;
+  if (!doc || doc.diff || doc.db || doc.redis || doc.status !== 'ready' || doc.saving || loads.has(id) || checks.has(id)) return;
   if (isRemoteDoc(doc)) {
     // `force`: the user just reconnected the tab.
     if (!force && Date.now() - (remoteChecks.get(id) ?? 0) < REMOTE_CHECK_MS) return;
@@ -379,7 +397,7 @@ export async function checkFileOnDisk(id: string, force = false): Promise<void> 
 /** Every open text tab (on focus and when an agent finished a turn); of the remote ones only the tab on screen. */
 export function checkOpenFilesOnDisk(): void {
   const { documents, activeFileId } = useFileStore.getState();
-  for (const d of documents) if (!d.diff && d.status === 'ready' && (!isRemoteDoc(d) || d.id === activeFileId)) void checkFileOnDisk(d.id);
+  for (const d of documents) if (!d.diff && !d.db && !d.redis && d.status === 'ready' && (!isRemoteDoc(d) || d.id === activeFileId)) void checkFileOnDisk(d.id);
 }
 /** Conflict choice "Reload": drops the unsaved edits and reads the file again. */
 export async function reloadFileFromDisk(id: string): Promise<void> {
@@ -432,7 +450,7 @@ export function watchFilesOnDisk(): void {
     // Only while the user looks at the editor: the window has focus and no settings or SSH view covers the tab. Remote tabs are
     // never polled (a check goes over the network): they are checked when they get focus.
     if (active && !document.hidden && document.hasFocus() && !getUi().settingsActive && !useSshStore.getState().viewActive
-      && !documents.some((d) => d.id === active && isRemoteDoc(d))) void checkFileOnDisk(active);
+      && !documents.some((d) => d.id === active && (isRemoteDoc(d) || d.db || d.redis))) void checkFileOnDisk(active);
   }, ACTIVE_CHECK_MS);
   initRemoteSessions();
   // Hosts of remote tabs with unsaved changes keep their SFTP session while the SFTP view is closed.
@@ -442,6 +460,14 @@ export function watchFilesOnDisk(): void {
 }
 const ACTIVE_CHECK_MS = 2500;
 
+/**
+ * Database tabs (1.0.0) ask their own questions before closing (staged edits, an unsaved script, an open transaction; unsaved
+ * Redis values) and release their session afterwards; the database module registers this at start (no import cycle).
+ */
+export interface DbTabHooks { confirmClose(doc: FileDocument): Promise<boolean>; closed(doc: FileDocument): void }
+let dbHooks: DbTabHooks | null = null;
+export function setDbTabHooks(hooks: DbTabHooks): void { dbHooks = hooks; }
+
 const closing = new Set<string>();
 export async function closeFile(id: string): Promise<boolean> {
   const doc = useFileStore.getState().documents.find((d) => d.id === id);
@@ -449,11 +475,12 @@ export async function closeFile(id: string): Promise<boolean> {
   if (doc.saving || closing.has(id) || getUi().dialog) return false;
   closing.add(id);
   try {
-    if (isFileDirty(doc)) {
+    if (doc.db || doc.redis) {
+      if (dbHooks && !await dbHooks.confirmClose(doc)) return false;
+    } else if (isFileDirty(doc)) {
       const choice = await askChoice(fileLabel('close'), doc.relativePath, [
         { label: tr('Zapisz'), value: 'save', primary: true },
         { label: fileLabel('discard'), value: 'discard', danger: true },
-        { label: tr('Anuluj'), value: 'cancel' },
       ]);
       if (choice !== 'save' && choice !== 'discard') return false;
       if (choice === 'save' && (!await saveFile(id) || useFileStore.getState().documents.some((d) => d.id === id && isFileDirty(d)))) return false;
@@ -466,6 +493,7 @@ export async function closeFile(id: string): Promise<boolean> {
       const next = documents.filter((d) => d.projectId === shown || !d.projectId).at(-1);
       return { documents, activeFileId: s.activeFileId === id ? next?.id ?? null : s.activeFileId };
     });
+    if (doc.db) dbHooks?.closed(doc);
     return true;
   } finally { closing.delete(id); }
 }

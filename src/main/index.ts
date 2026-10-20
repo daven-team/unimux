@@ -4,8 +4,8 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification
 import { createQuitConfirm, isQuitAnswer, sessionEndingNow } from './quitConfirm';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { homedir, hostname } from 'os';
-import { dirname, isAbsolute, join } from 'path';
-import { rm, stat } from 'fs/promises';
+import { basename, dirname, isAbsolute, join } from 'path';
+import { readFile, rm, stat, writeFile } from 'fs/promises';
 import type { SpawnCellRequest } from '../preload/api';
 import { cleanEnv } from '../shared/env';
 import type { HostToMain } from '../shared/ipc';
@@ -33,6 +33,12 @@ import { createSftpHandlers, registerSftpIpc } from './sftp/ipc';
 import { createLocalFiles, registerLocalFilesIpc } from './localFiles';
 import { isSftpSessionId } from '../shared/sftp';
 import type { SftpHostToMain } from '../shared/sftpHostIpc';
+import { DbHostClient } from './dbHostClient';
+import { DbService } from './db/service';
+import { DbVault } from './db/vault';
+import { createDbHandlers, registerDbIpc } from './db/ipc';
+import { DB_LIMITS, isDbSessionId } from '../shared/db';
+import type { DbHostToMain } from '../shared/dbHostIpc';
 import { claudeProjectDirName, findRecentCodexSession, listSessionsAsync } from './sessions';
 import { createSaver, flushUntilSaved, loadState, StateUnreadableError } from './store';
 import { updateHandoverCommitted, blockUpdateVersion, canInstallNow, checkForUpdates, getUpdateState, handOver, initUpdater, isPortableBuild, isUpdateDownloaded, onUpdateTargetChange, previousMacUpdate, recheckUpdate, signalMacUpdateReady, updateHandoffStarted, updateTarget, RELEASES_URL, startupCheck, startupDownload, updatesEnabled } from './updater';
@@ -319,6 +325,9 @@ const ptyHost = new PtyHostClient();
 /** The SFTP Host (0.9.8): started on the first SFTP use, never at app start. */
 const sftpHost = new SftpHostClient();
 let sftp: SftpService | null = null;
+/** The DB Host (1.0.0): started on the first database use, never at app start. */
+const dbHost = new DbHostClient();
+let db: DbService<AppState> | null = null;
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const login = new LoginManager({
   store: accounts,
@@ -577,6 +586,7 @@ const controller = new StateController(state, (snapshot) => {
   const previous = state;
   state = snapshot.state;
   ssh?.stateChanged(state);
+  db?.stateChanged();
   const key = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}`;
   if (key !== usageKey) { usageKey = key; usage.reschedule(); }
   saver.save(state);
@@ -699,13 +709,14 @@ function createWindow(): void {
   win.on('focus', () => cliDetector.invalidateRegistry());
   if (!app.isPackaged) win.webContents.on('console-message', (e) => e.level !== 'debug' && console.log('[renderer]', e.level, e.message));
   // The install window lives in the renderer: a reload or crash must not leave an invisible install running.
-  win.webContents.on('did-start-loading', () => { install.dispose(); quitConfirm.rendererGone(); sftp?.rendererGone(); localFiles.rendererGone(); });
+  win.webContents.on('did-start-loading', () => { install.dispose(); quitConfirm.rendererGone(); sftp?.rendererGone(); db?.rendererGone(); localFiles.rendererGone(); });
   // The close button (or Alt+F4, or the last window on macOS) while agents work: the renderer asks first.
   win.on('close', (e) => { if (quitConfirm.hold()) e.preventDefault(); });
   win.webContents.on('render-process-gone', (_e, details) => {
     install.dispose();
     quitConfirm.rendererGone();
     sftp?.rendererGone();
+    db?.rendererGone();
     localFiles.rendererGone();
     onRendererGone(created, details.reason, details.exitCode);
   });
@@ -719,7 +730,7 @@ function createWindow(): void {
   // Windows ends the session without before-quit: the last changes are written now (the renderer was asked to send its own).
   win.on('query-session-end', () => { markSessionEnding(); send('app:before-quit'); });
   win.on('session-end', () => { saver.flush(); });
-  win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { ptyHost.connectRenderer(win.webContents); sftpHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
+  win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { ptyHost.connectRenderer(win.webContents); sftpHost.connectRenderer(win.webContents); dbHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -790,11 +801,14 @@ function startSsh(): void {
   const vaultChanged = () => send('ssh:vault:changed', vault.info());
   ssh = new SshCoordinator({
     state: () => state, vault, knownHosts,
-    // SFTP sessions ("sftp:<uuid>") log in through the SFTP Host, cells through the Pty Host.
-    host: (m) => (isSftpSessionId(m.t === 'sshConnect' ? m.req.id : m.id) ? sftpHost.send(m) : ptyHost.sendSsh(m)),
+    // SFTP sessions ("sftp:<uuid>") log in through the SFTP Host, DB tunnels ("db:<uuid>") through the DB Host, cells through the Pty Host.
+    host: (m) => {
+      const id = m.t === 'sshConnect' ? m.req.id : m.id;
+      return isSftpSessionId(id) ? sftpHost.send(m) : isDbSessionId(id) ? dbHost.send(m) : ptyHost.sendSsh(m);
+    },
     events: {
-      session: (s) => { if (isSftpSessionId(s.cellId)) sftp?.onCoordinatorSession(s); else send('ssh:session', s); },
-      prompt: (cellId, prompt) => { if (isSftpSessionId(cellId)) sftp?.onPrompt(cellId, prompt); else send('ssh:prompt', cellId, prompt); },
+      session: (s) => { if (isSftpSessionId(s.cellId)) sftp?.onCoordinatorSession(s); else if (isDbSessionId(s.cellId)) db?.onCoordinatorSession(s); else send('ssh:session', s); },
+      prompt: (cellId, prompt) => { if (isSftpSessionId(cellId)) sftp?.onPrompt(cellId, prompt); else if (isDbSessionId(cellId)) db?.onPrompt(cellId, prompt); else send('ssh:prompt', cellId, prompt); },
       vaultChanged,
     },
     debug: !app.isPackaged && process.env.MC_SSH_DEBUG === '1',
@@ -811,6 +825,48 @@ function startSsh(): void {
     },
   });
   registerSftpIpc({ guardedHandle, guardedOn }, createSftpHandlers(sftp));
+  const dbVault = new DbVault(join(DATA_DIR, 'db', 'vault.json'), cipher);
+  db = new DbService<AppState>({
+    coordinator, host: dbHost, vault: dbVault,
+    state: () => state,
+    change: (fn) => { controller.change(fn); },
+    sshHostExists: (hostId) => state.sshHosts.some((h) => h.id === hostId),
+    readCa: async (path) => {
+      if (!isAbsolute(path)) return null;
+      try {
+        const info = await stat(path);
+        if (!info.isFile() || info.size > DB_LIMITS.caBytes) return null;
+        return await readFile(path, 'utf8');
+      } catch { return null; }
+    },
+    events: {
+      session: (s) => send('db:session', s),
+      prompt: (sessionId, prompt) => send('db:prompt', sessionId, prompt),
+      hostCrashed: () => send('db:hostCrashed'),
+      vaultChanged: () => send('db:vault:changed', dbVault.info()),
+    },
+  });
+  registerDbIpc({ guardedHandle, guardedOn }, createDbHandlers(db));
+  // The CA file of a verify-full connection: only its path goes back (main reads it at connect time).
+  guardedHandle('db:pickCaFile', async () => {
+    const r = await showOpen({ title: tr('Wybierz plik certyfikatu CA'), properties: ['openFile'], filters: [{ name: 'PEM', extensions: ['pem', 'crt', 'cer'] }, { name: '*', extensions: ['*'] }] });
+    return r.canceled ? null : r.filePaths[0] ?? null;
+  }, () => null);
+  // Export of a result (CSV / JSON): the user picks where in the save dialog; the renderer never names a path.
+  // MC_DB_EXPORT_DIR (real-app checks of an unpackaged build only) writes into that folder without the dialog.
+  guardedHandle('db:export', async (_e, name: unknown, text: unknown) => {
+    if (typeof name !== 'string' || !name || name.length > 200 || /[\\/\0]/.test(name) || typeof text !== 'string' || text.length > 512 * 1024 * 1024) return { ok: false };
+    let path: string | null = null;
+    if (process.env.MC_DB_EXPORT_DIR && !app.isPackaged) path = join(process.env.MC_DB_EXPORT_DIR, basename(name));
+    else {
+      const ext = name.split('.').pop() ?? '';
+      const options = { title: tr('Eksportuj wynik'), defaultPath: name, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] };
+      const r = isLive(win) ? await dialog.showSaveDialog(win!, options) : await dialog.showSaveDialog(options);
+      path = r.canceled || !r.filePath ? null : r.filePath;
+    }
+    if (!path) return { ok: false, cancelled: true };
+    try { await writeFile(path, text, 'utf8'); return { ok: true, path }; } catch { return { ok: false }; }
+  }, () => ({ ok: false }));
   registerSshIpc(ipcMain, createSshHandlers({
     coordinator, vault, knownHosts, drafts: new KeyDrafts(),
     state: () => state,
@@ -885,6 +941,19 @@ sftpHost.on('message', (m: SftpHostToMain) => {
     return;
   }
   sftp?.onHostMessage(m);
+});
+dbHost.on('message', (m: DbHostToMain) => {
+  if (m.t === 'log') {
+    if (allowHostLog(Date.now())) { if (m.level === 'warn') crashLog.warn(m.message); else crashLog.error(m.message); }
+    return;
+  }
+  db?.onHostMessage(m);
+});
+// Its sessions are gone; the next database use starts it again.
+dbHost.on('crashed', (code: unknown, stderrTail: unknown) => {
+  const tail = typeof stderrTail === 'string' && stderrTail.trim() ? `\n${stderrTail.trim()}` : '';
+  crashLog.error(`db host exited (code ${String(code)})${tail}`);
+  db?.hostCrashed();
 });
 // Its sessions and transfers are gone; the next SFTP use starts it again.
 sftpHost.on('crashed', (code: unknown, stderrTail: unknown) => {
@@ -1618,7 +1687,7 @@ app.on('before-quit', (e) => {
   e.preventDefault();
   quitting = true;
   // However the wind-down goes (stuck terminals), the process must end: a running installer waits for it.
-  const shutdownLimit = setTimeout(() => { crashLog.warn('shutdown overran its limit, exiting'); ptyHost.forceKill(); sftpHost.forceKill(); exitNow(); }, SHUTDOWN_HARD_LIMIT_MS);
+  const shutdownLimit = setTimeout(() => { crashLog.warn('shutdown overran its limit, exiting'); ptyHost.forceKill(); sftpHost.forceKill(); dbHost.forceKill(); exitNow(); }, SHUTDOWN_HARD_LIMIT_MS);
   usage.stop();
   stopActivationRetry?.();
   login.dispose();
@@ -1636,7 +1705,7 @@ app.on('before-quit', (e) => {
     };
     await waitUntilIdle(swapWait, QUIT_SWAP_WAIT_MS);
     try {
-      await Promise.all([ptyHost.shutdown(), sftpHost.shutdown()]);
+      await Promise.all([ptyHost.shutdown(), sftpHost.shutdown(), dbHost.shutdown()]);
       // An activation waiting for a Claude Code lock that a cell held gets it now: it may finish within the rest of the budget
       // (no wait at all when nothing runs).
       if (!(await waitUntilIdle(swapWait, QUIT_SWAP_AFTER_CELLS_MS))) {

@@ -52,7 +52,7 @@ const script = `
   const external = [...new Set([...mainSource.matchAll(/require\\("([^".][^"]*)"\\)/g)].map((m) => m[1]))]
     .filter((id) => id !== 'electron' && !id.startsWith('node:') && !builtinModules.includes(id.split('/')[0]));
   const appRequire = createRequire(path.join(mainDir, 'index.js'));
-  for (const id of ['@modelcontextprotocol/sdk/server/index.js', 'zod', 'ssh2', 'node-pty']) assert.ok(external.includes(id), id + ' is required by out/main');
+  for (const id of ['@modelcontextprotocol/sdk/server/index.js', 'zod', 'ssh2', 'node-pty', 'pg', 'pg-cursor', 'ioredis']) assert.ok(external.includes(id), id + ' is required by out/main');
   for (const id of external) {
     appRequire.resolve(id);
     // electron-updater needs a running Electron app, node-pty is started below.

@@ -12,6 +12,9 @@ import {
 import { openSidebarPanel } from '../panelActions';
 import { openSshView, reconnectAllSsh, reconnectAllTargetsOf } from '../ssh';
 import { openSftp } from '../sftp';
+import { openRedisTab, viewLabel } from '../redis/redisClient';
+import { initDb, revealConnection } from '../db/dbClient';
+import { dbEndpoint } from '../../../shared/db';
 import { getS, getUi, setUi, toast, update, useStore } from '../store';
 import { profileOptionLabel } from '../cliUi';
 import { statusLog, terminals } from '../terminals/TerminalManager';
@@ -85,6 +88,16 @@ function PaletteInner() {
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj snippety"), desc: keys('snippets.toggle') || undefined, run: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj panel projektów"), desc: keys('sidebar.toggle') || undefined, run: () => update((st) => ({ ...st, sidebarCollapsed: !st.sidebarCollapsed })) });
     out.push({ kind: tr('Akcja'), title: tr('Panel: Git'), run: () => { openSidebarPanel('git'); } });
+    out.push({ kind: tr('Akcja'), title: tr('Bazy danych: nowe połączenie'), run: () => setUi({ modal: { kind: 'dbConnection', dbKind: 'postgres' } }) });
+    out.push({ kind: tr('Akcja'), title: tr('Bazy danych: otwórz połączenie…'), run: () => { openSidebarPanel('db'); } });
+    for (const c of s.dbConnections) {
+      out.push({ kind: tr('Baza danych'), title: c.name, desc: `${c.kind === 'postgres' ? 'PostgreSQL' : 'Redis'} · ${dbEndpoint(c)}`, run: () => {
+        openSidebarPanel('db');
+        if (c.kind !== 'postgres') return;
+        initDb();
+        void revealConnection(c.id).then((error) => { if (error) toast(error, 'error'); });
+      } });
+    }
     out.push({ kind: tr('Akcja'), title: tr("Nowy snippet") + '…', run: () => setUi({ modal: { kind: 'snippet', snippetId: null } }) });
     out.push({ kind: tr('Akcja'), title: tr("Ustawienia"), run: () => setUi({ settingsTabOpen: true, settingsActive: true }) });
     out.push({ kind: tr('Akcja'), title: tr('Skopiuj dziennik statusów'), run: () => {
@@ -93,10 +106,17 @@ function PaletteInner() {
       toast(tr('Skopiowano dziennik statusów. Wpisów: {count}', { count: statusLog.size }));
     } });
 
+    // Redis connections (1.0.0): the key browser, the console, Pub/Sub and the server views of each saved connection.
+    for (const c of s.dbConnections ?? []) {
+      if (c.kind !== 'redis') continue;
+      for (const view of ['keys', 'console', 'pubsub', 'info'] as const) {
+        out.push({ kind: 'Redis', title: view === 'keys' ? tr('Otwórz przeglądarkę Redis: {name}', { name: c.name }) : `${c.name}: ${viewLabel(view)}`, desc: dbEndpoint(c), run: () => { openRedisTab(c.id, view); } });
+      }
+    }
     for (const p of s.projects) out.push({ kind: tr('Projekt'), title: p.name, desc: p.path, run: () => switchProject(p.id) });
     for (const p of s.projects)
       for (const t of p.tabs)
-        out.push({ kind: tr('Zakładka'), title: t.name, desc: `${p.name} · ${describeLayout(t.layout)}`, run: () => { switchProject(p.id); selectTab(p.id, t); } });
+        out.push({ kind: tr('Zakładka'), title: t.name, desc: `${p.name} · ${describeLayout(t.layout)}`, run: () => selectTab(p.id, t) });
     for (const sn of s.snippets.filter((x) => !x.projectId || x.projectId === project?.id))
       out.push({ kind: tr('Snippet'), title: sn.name, desc: tr("Enter: aktywna · Shift+Enter: wszystkie"), run: (shift) => sendSnippet(sn, shift ? 'all' : 'focused') });
     if (project) {
