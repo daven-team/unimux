@@ -1,0 +1,11 @@
+/* Empty states of the side panels (PanelEmpty.tsx): left-aligned text at the top, links inside the sentences, the main action full width. */
+.panel-empty { flex: none; display: flex; flex-direction: column; gap: 14px; padding: 6px 14px 14px; color: #cccccc; font-size: 13px; line-height: 1.45; text-align: left; overflow-wrap: anywhere; }
+.panel-empty p { margin: 0; }
+/* Full width up to 300px, like Cursor's welcome views: a wide panel never shows a very long bar. */
+.panel-empty > .btn { width: 100%; max-width: 300px; }
+/* The Projects list has 8px of padding of its own: the text still lines up with the panel title. */
+.side-list > .panel-empty { padding-inline: 6px; }
+/* Links share the steel blue of the primary button (--btn-primary-bg), Cursor's one accent of an empty view. */
+.panel-empty-link { border-radius: 2px; color: var(--btn-primary-bg, #81a1c1); text-decoration: none; cursor: pointer; }
+.panel-empty-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.panel-empty-link:focus-visible { outline: 1px solid var(--btn-primary-bg, #81a1c1); outline-offset: 1px; }

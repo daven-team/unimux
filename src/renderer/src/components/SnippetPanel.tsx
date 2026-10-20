@@ -8,9 +8,10 @@ import { moveSnippet, removeSnippet, uid, upsertSnippet, type DropEdge } from '.
 import { PANEL_LIMITS } from '../../../shared/panels';
 import { askChoice, setUi, update, useStore } from '../store';
 import { SNIPPET_MIME } from './CellView';
-import { IEdit, IPlus, ISnippet } from './icons';
+import { IEdit, IPlus } from './icons';
 import { dropEdge, scrollDragList } from './listDrag';
 import { openMenu } from './ContextMenu';
+import { EmptyLink, fillTokens, PanelEmpty } from './PanelEmpty';
 import { PanelResizeHandle, type PanelResizeProps } from './PanelResizeHandle';
 
 export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
@@ -20,9 +21,9 @@ export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
   const [q, setQ] = useState('');
   const [dragId, setDragId] = useState<string | null>(null);
   const [over, setOver] = useState<{ id: string | null; edge: DropEdge } | null>(null);
-  // Searching filters the library while preserving the user's chosen order.
-  const visible = snippets.filter((sn) => !sn.projectId || sn.projectId === projectId)
-    .filter((sn) => fuzzyScore(q, `${sn.name} ${sn.text}`) !== null).slice(0, 500);
+  // The library minus other projects' snippets; searching filters it while preserving the user's chosen order.
+  const available = snippets.filter((sn) => !sn.projectId || sn.projectId === projectId);
+  const visible = available.filter((sn) => fuzzyScore(q, `${sn.name} ${sn.text}`) !== null).slice(0, 500);
   const endDrag = () => { setDragId(null); setOver(null); };
 
   const use = (sn: Snippet, all: boolean) => sendSnippet(sn, all ? 'all' : 'focused');
@@ -79,13 +80,15 @@ export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
         </span>
         <button className="sq" title={tr("Nowy snippet")} aria-label={tr("Nowy snippet")} onClick={() => create()}><IPlus /></button>
       </div>
-      {!snippets.length ? (
-        <div className="empty-state">
-          <div className="es-icon"><ISnippet /></div>
-          <div className="es-title">{tr("Brak snippetów")}</div>
-          <div className="es-text">{tr("Zapisz prompty, których często używasz, i wklejaj je do terminali jednym kliknięciem.")}</div>
-          <button className="btn ghost" onClick={() => create()}><IPlus />  {tr("Nowy snippet")}</button>
-        </div>
+      {/* Nothing to show or search here (an empty library, or only other projects' snippets): the empty state. */}
+      {!available.length ? (
+        <PanelEmpty>
+          <p>{snippets.length ? tr("Brak snippetów dostępnych w tym projekcie.") : tr("Zapisz prompty, których często używasz, i wklejaj je do terminali jednym kliknięciem.")}</p>
+          <button className="btn primary" onClick={() => create()}>{tr("Nowy snippet")}</button>
+          {projectId && <p>{fillTokens(tr("Możesz też {link}."), {
+            link: <EmptyLink onClick={() => create(projectId)}>{tr("dodać snippet tylko dla tego projektu")}</EmptyLink>,
+          })}</p>}
+        </PanelEmpty>
       ) : (
       <>
       <input className="search" aria-label={tr("Szukaj snippetów")} placeholder={tr("Szukaj snippetów") + '…'} value={q} onChange={(e) => setQ(e.target.value)} />
@@ -165,7 +168,7 @@ export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
           </div>
         ))}
         {visible.length > 0 && <div className={`snippet-drop-space ${over?.id === null ? 'drop-end' : ''}`} aria-hidden="true" />}
-        {!visible.length && <div className="muted snippet-empty">{q ? tr('Nic nie pasuje do „{query}”.', { query: q }) : tr("Brak snippetów dostępnych w tym projekcie.")}</div>}
+        {!visible.length && <div className="muted snippet-empty">{tr('Nic nie pasuje do „{query}”.', { query: q })}</div>}
       </div>
       </>
       )}

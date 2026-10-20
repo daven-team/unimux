@@ -14,6 +14,7 @@ import { useSshStore } from '../sshStore';
 import { openMenu } from './ContextMenu';
 import { IFolder, IGrid, IHistory, IPlus } from './icons';
 import { dropEdge, scrollDragList } from './listDrag';
+import { PanelEmpty } from './PanelEmpty';
 import { StatusBadges } from './StatusBadges';
 import type { PanelProps } from '../panelRegistry';
 import { ProjectIconView } from './ProjectIcon';
@@ -211,12 +212,10 @@ export function ProjectsPanel({ resize }: PanelProps) {
       {projects.length > 0 && <button className="btn project-add-inline" onClick={() => void createProject()} title={tr('Dodaj projekt')} aria-label={tr('Dodaj projekt')}><IPlus />{tr('Dodaj projekt')}</button>}
       {projects.length > 0 && <div className={`project-drop-space ${over?.id === null ? 'drop-end' : ''}`} aria-hidden="true" />}
       {!projects.length && (
-        <div className="empty-state">
-          <div className="es-icon"><IFolder /></div>
-          <div className="es-title">{tr("Brak projektów")}</div>
-          <div className="es-text">{tr("Projekt to folder, w którym będą pracować Twoi agenci.")}</div>
-          <button className="btn white lg" onClick={() => void createProject()}><IPlus />  {tr("Nowy projekt")}</button>
-        </div>
+        <PanelEmpty>
+          <p>{tr("Nie masz jeszcze projektów.")} {tr("Projekt to folder, w którym będą pracować Twoi agenci.")}</p>
+          <button className="btn primary" onClick={() => void createProject()}>{tr("Nowy projekt")}</button>
+        </PanelEmpty>
       )}
       </div>
     </div>

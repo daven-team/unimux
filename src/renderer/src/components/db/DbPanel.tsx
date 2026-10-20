@@ -15,6 +15,7 @@ import { useI18n } from '../../i18n';
 import { askChoice, setUi, toast, useStore } from '../../store';
 import { openMenu, openMenuAt, type MenuItem } from '../ContextMenu';
 import { IChevron, IColumn, IDatabase, IFolder, IFunction, IKey, IPlus, ISequence, ITable, IView } from '../icons';
+import { EmptyLink, fillTokens, PanelEmpty } from '../PanelEmpty';
 import { DbLogin } from './DbLogin';
 import './db.css';
 
@@ -277,18 +278,19 @@ export const DbPanel = memo(function DbPanel() {
 
   return (
     <div className="sidebar-content db-panel">
-      <div className="db-panel-head">
-        {connections.length > 0 ? (
+      {/* An empty panel has no head: its text starts under the title and offers both kinds itself. */}
+      {connections.length > 0 && (
+        <div className="db-panel-head">
           <input className="input db-filter" placeholder={tr('Filtruj obiekty…')} aria-label={tr('Filtruj obiekty…')} value={filter} spellCheck={false}
             onChange={(e) => useDbStore.setState({ filter: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') useDbStore.setState({ filter: '' }); }} />
-        ) : <span className="grow" />}
-        <button className="btn ghost icon" title={tr('Nowe połączenie')} aria-label={tr('Nowe połączenie')} data-action="new-connection"
-          onClick={(e) => openMenuAt(e.currentTarget, [
-            { header: tr('Nowe połączenie') },
-            { label: 'PostgreSQL', onClick: () => openNewConnection('postgres') },
-            { label: 'Redis', onClick: () => openNewConnection('redis') },
-          ])}><IPlus /></button>
-      </div>
+          <button className="btn ghost icon" title={tr('Nowe połączenie')} aria-label={tr('Nowe połączenie')} data-action="new-connection"
+            onClick={(e) => openMenuAt(e.currentTarget, [
+              { header: tr('Nowe połączenie') },
+              { label: 'PostgreSQL', onClick: () => openNewConnection('postgres') },
+              { label: 'Redis', onClick: () => openNewConnection('redis') },
+            ])}><IPlus /></button>
+        </div>
+      )}
       {promptSessions.map((s) => (
         <div key={s.id} className="db-panel-login">
           <div className="db-panel-login-title">{connName(s.connectionId)}{s.database ? ` · ${s.database}` : ''}</div>
@@ -302,11 +304,14 @@ export const DbPanel = memo(function DbPanel() {
         </div>
       ))}
       {!connections.length ? (
-        <div className="db-empty">
-          <IDatabase />
-          <p>{tr('Dodaj połączenie z bazą PostgreSQL lub Redis. Bazy dostępne tylko na serwerze otworzysz przez tunel SSH.')}</p>
+        <PanelEmpty className="db-empty">
+          <p>{fillTokens(tr('Dodaj połączenie z bazą {postgres} lub {redis}.'), {
+            postgres: <EmptyLink label={`${tr('Nowe połączenie')}: PostgreSQL`} onClick={() => openNewConnection('postgres')}>PostgreSQL</EmptyLink>,
+            redis: <EmptyLink label={`${tr('Nowe połączenie')}: Redis`} onClick={() => openNewConnection('redis')}>Redis</EmptyLink>,
+          })}</p>
           <button className="btn primary" onClick={() => openNewConnection('postgres')}>{tr('Nowe połączenie')}</button>
-        </div>
+          <p>{tr('Bazy dostępne tylko na serwerze otworzysz przez tunel SSH.')}</p>
+        </PanelEmpty>
       ) : (
         <div className="db-tree" ref={scroller} role="tree" tabIndex={0} aria-label={tr('Bazy danych')} onKeyDown={onTreeKey}
           aria-activedescendant={selected && rows.some((r) => r.key === selected) ? `db-tree-row-${rows.findIndex((r) => r.key === selected)}` : undefined}

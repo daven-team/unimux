@@ -76,8 +76,8 @@ try {
   await app.click('#db-view');
   await app.until(`!!document.querySelector('.db-panel .db-empty')`, 'empty database panel');
   await app.screenshot('100-db-empty.png');
-  await app.click('.db-panel [data-action="new-connection"]');
-  await menu('PostgreSQL');
+  // The empty panel has no + menu: its full-width button opens the PostgreSQL form.
+  await app.click('.db-panel .db-empty .btn.primary');
   await app.until(`!!document.querySelector('.db-editor')`, 'connection form');
   await app.setValue('.db-editor [data-field=name]', 'local pg');
   await app.setValue('.db-editor [data-field=host]', '127.0.0.1');
