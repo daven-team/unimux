@@ -1,7 +1,7 @@
 // The output path of one terminal (pty or SSH channel): coalescing, replay tail, renderer back-pressure and the exit drain.
 // Extracted from PtyManager so both backends share it; the source is paused and resumed through `control`.
 import { PTY_REPLAY_CHARS } from '../shared/terminalLimits';
-import { alignedDelay, coalesceDelay, ECHO_WINDOW_MS, FLUSH_NOW_CHARS, FlowGate, TailBuffer } from './flow';
+import { alignedDelay, coalesceDelay, ECHO_FLUSHES, EchoClock, FLUSH_NOW_CHARS, FlowGate, TailBuffer } from './flow';
 import type { PtySink } from './manager';
 
 /** A paused source is resumed anyway when no acknowledgement arrives for this long (renderer gone or stuck). */
@@ -35,12 +35,16 @@ export class OutputChannel {
   private readonly gate = new FlowGate();
   private watchdog: NodeJS.Timeout | null = null;
   private lastWrite = -Infinity;
+  /** How long this terminal takes to answer a keystroke: its echo window. */
+  private readonly echo = new EchoClock();
   /**
-   * The user typed and no output came since: the next output is the echo and leaves on the next event-loop turn instead of
-   * waiting for a timer (on Windows even a 4 ms setTimeout fires only on the next timer tick, about 15.6 ms later).
+   * Flushes the latest keystroke may still send without a timer (ECHO_FLUSHES): its echo and the redraws right after it
+   * leave at the end of the event-loop callback that received them instead of waiting for a timer (on Windows even a 4 ms
+   * setTimeout may fire only on the next timer tick, about 15.6 ms later).
    */
-  private echoPending = false;
-  private immediate: NodeJS.Immediate | null = null;
+  private echoFlushes = 0;
+  /** An echo flush is queued for the end of the current callback. */
+  private echoQueued = false;
   /** The source ended and its last output is being drained: never pause it again. */
   private exiting = false;
   private disposed = false;
@@ -56,23 +60,39 @@ export class OutputChannel {
 
   push(data: string): void {
     if (this.disposed || !data) return;
+    const now = Date.now();
+    // Judged by the window learnt so far, then measured: one late answer must not make itself an echo.
+    const echo = this.echoQueued || (this.echoFlushes > 0 && now - this.lastWrite < this.echo.window);
+    this.echo.output(now);
     this.tail.push(data);
     this.buf += data;
     if (this.buf.length >= FLUSH_NOW_CHARS) this.flush();
-    else if (this.echoPending && Date.now() - this.lastWrite < ECHO_WINDOW_MS) this.flushEcho();
-    else if (!this.timer && !this.immediate) this.arm();
+    else if (echo) this.flushEcho();
+    else if (!this.timer) this.arm();
   }
 
-  /** Sends the echo (and whatever waited before it) at the end of this event-loop turn: chunks of the same turn go together. */
+  /**
+   * Sends the echo (and whatever waited before it) once the callback that received it is done: the chunks one socket read
+   * or pty read delivers go together, and the message leaves before the event loop turns to timers and other terminals.
+   */
   private flushEcho(): void {
-    this.echoPending = false;
-    if (this.immediate) return;
-    this.immediate = setImmediate(() => { this.immediate = null; this.flush(); });
+    if (this.echoQueued) return;
+    this.echoQueued = true;
+    this.echoFlushes--;
+    process.nextTick(() => {
+      this.echoQueued = false;
+      this.flush(true);
+    });
+  }
+
+  /** The echo window of this terminal in ms (tests and diagnostics). */
+  get echoWindow(): number {
+    return this.echo.window;
   }
 
   private arm(): void {
     const now = Date.now();
-    const delay = alignedDelay(now, coalesceDelay(now, this.lastWrite, focusedTerminal === this.id));
+    const delay = alignedDelay(now, coalesceDelay(now, this.lastWrite, focusedTerminal === this.id, this.echo.window));
     if (this.timer) clearTimeout(this.timer);
     this.due = now + delay;
     this.timer = setTimeout(() => this.flush(), delay);
@@ -85,26 +105,27 @@ export class OutputChannel {
   rearm(): void {
     if (!this.timer || this.disposed) return;
     const now = Date.now();
-    if (now + alignedDelay(now, coalesceDelay(now, this.lastWrite, focusedTerminal === this.id)) < this.due) this.arm();
+    if (now + alignedDelay(now, coalesceDelay(now, this.lastWrite, focusedTerminal === this.id, this.echo.window)) < this.due) this.arm();
   }
 
   /** The user typed into this terminal (echoes are flushed faster). */
   wrote(): void {
-    this.lastWrite = Date.now();
-    this.echoPending = true;
+    const now = Date.now();
+    this.lastWrite = now;
+    this.echo.keystroke(now);
+    this.echoFlushes = ECHO_FLUSHES;
     this.rearm();
   }
 
-  flush(): void {
+  /** `echo`: typed output, which the host sends at once instead of with the rest of the turn's output (PtySink.data). */
+  flush(echo = false): void {
     if (this.timer) clearTimeout(this.timer);
-    if (this.immediate) clearImmediate(this.immediate);
     this.timer = null;
-    this.immediate = null;
     this.due = Infinity;
     if (!this.buf || this.disposed) return;
     const out = this.buf;
     this.buf = '';
-    const delivered = this.sink().data(this.id, out) !== false;
+    const delivered = this.sink().data(this.id, out, echo) !== false;
     if (delivered && this.flowControl() && !this.exiting && this.gate.sent(out.length)) this.pause();
   }
 
@@ -155,11 +176,10 @@ export class OutputChannel {
   dispose(): void {
     this.disposed = true;
     if (channels.get(this.id) === this) channels.delete(this.id);
+    // A queued echo flush finds the channel disposed and sends nothing.
     if (this.timer) clearTimeout(this.timer);
-    if (this.immediate) clearImmediate(this.immediate);
     if (this.watchdog) clearTimeout(this.watchdog);
     this.timer = null;
-    this.immediate = null;
     this.watchdog = null;
   }
 }

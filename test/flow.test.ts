@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alignedDelay, BULK_COALESCE_MS, coalesceDelay, ECHO_COALESCE_MS, FlowGate, HIGH_WATER, LOW_WATER, MAX_TAIL_CHUNKS, TailBuffer } from '../src/ptyhost/flow';
+import { ACTIVE_WINDOW_MS, alignedDelay, BULK_COALESCE_MS, coalesceDelay, ECHO_COALESCE_MS, ECHO_WINDOW_MAX_MS, ECHO_WINDOW_MS, EchoClock, FlowGate, HIGH_WATER, LOW_WATER, MAX_TAIL_CHUNKS, TailBuffer } from '../src/ptyhost/flow';
 import { OutputBatcher } from '../src/ptyhost/batch';
 import { unpackHostMessage, type HostToRendererPort } from '../src/shared/ipc';
 
@@ -87,6 +87,74 @@ describe('coalesceDelay', () => {
     expect(coalesceDelay(1000, 100, true)).toBe(BULK_COALESCE_MS);
     expect(coalesceDelay(1000, -Infinity, true)).toBe(BULK_COALESCE_MS);
   });
+
+  it('keeps the echo delay for as long as the echo window of the terminal', () => {
+    expect(coalesceDelay(1000, 700, true)).toBe(BULK_COALESCE_MS);
+    expect(coalesceDelay(1000, 700, true, 420)).toBe(ECHO_COALESCE_MS);
+    expect(coalesceDelay(1000, 500, true, 420)).toBe(BULK_COALESCE_MS);
+  });
+});
+
+describe('EchoClock', () => {
+  /** Keys typed `gap` ms apart, each answered `answer` ms later; returns the clock's time afterwards. */
+  function typeAnswered(clock: EchoClock, start: number, keys: number, answer: number, gap = 1000): number {
+    let t = start;
+    for (let i = 0; i < keys; i++) {
+      clock.keystroke(t);
+      clock.output(t + answer);
+      t += gap;
+    }
+    return t;
+  }
+
+  it('starts with the local window and keeps it for terminals that answer quickly', () => {
+    const clock = new EchoClock();
+    expect(clock.window).toBe(ECHO_WINDOW_MS);
+    typeAnswered(clock, 0, 20, 3);
+    expect(clock.answerMs).toBeCloseTo(3);
+    expect(clock.window).toBe(ECHO_WINDOW_MS);
+    const nearby = new EchoClock(); // a server about 60 ms away
+    typeAnswered(nearby, 0, 20, 60);
+    expect(nearby.window).toBe(ECHO_WINDOW_MS);
+  });
+
+  // An SSH server 200 ms away: before, every echo that came after a pause in typing missed the fixed 150 ms window.
+  it('widens the window to about twice the round trip of a slow server, and narrows it again', () => {
+    const clock = new EchoClock();
+    let t = typeAnswered(clock, 0, 1, 200);
+    expect(clock.window).toBe(420);
+    t = typeAnswered(clock, t, 30, 120);
+    expect(clock.answerMs).toBeCloseTo(120, 0);
+    expect(clock.window).toBeGreaterThan(120 + 50);
+    typeAnswered(clock, t, 30, 5);
+    expect(clock.window).toBe(ECHO_WINDOW_MS);
+  });
+
+  it('measures fast typing from the oldest key still waiting for its echo', () => {
+    const clock = new EchoClock();
+    clock.keystroke(0);
+    clock.keystroke(80); // typed before the first echo came back
+    clock.output(200);
+    clock.output(280); // the second echo: no key waits any more
+    expect(clock.answerMs).toBe(200);
+    clock.keystroke(300);
+    clock.output(500);
+    expect(clock.answerMs).toBe(200);
+  });
+
+  it('does not take output long after a keystroke for its echo, and caps the window', () => {
+    const clock = new EchoClock();
+    clock.keystroke(0); // a password character: no echo
+    clock.output(5000); // something else, much later
+    expect(clock.answerMs).toBeNull();
+    clock.keystroke(6000);
+    clock.keystroke(6000 + ECHO_WINDOW_MAX_MS + 1); // the first key went unanswered for too long: measure from this one
+    clock.output(6000 + ECHO_WINDOW_MAX_MS + 101);
+    expect(clock.answerMs).toBe(100);
+    typeAnswered(clock, 20_000, 50, ECHO_WINDOW_MAX_MS - 1);
+    expect(clock.window).toBe(ECHO_WINDOW_MAX_MS);
+    expect(ECHO_WINDOW_MAX_MS).toBeLessThanOrEqual(ACTIVE_WINDOW_MS);
+  });
 });
 
 describe('alignedDelay', () => {
@@ -141,5 +209,18 @@ describe('OutputBatcher', () => {
     batcher.drop();
     queue.shift()!();
     expect(posted).toHaveLength(3);
+  });
+
+  it('posts a typed echo at once, together with the output queued before it', () => {
+    const posted: HostToRendererPort[] = [];
+    const queue: Array<() => void> = [];
+    const batcher = new OutputBatcher((m) => posted.push(m), (fn) => queue.push(fn));
+    batcher.data('agent', 'stream');
+    batcher.data('ssh', 'e', true);
+    expect(posted).toEqual([{ t: 'dataBatch', items: [['agent', 'stream'], ['ssh', 'e']] }]);
+    batcher.data('ssh', 'x', true);
+    expect(posted[1]).toEqual({ t: 'data', id: 'ssh', data: 'x' });
+    for (const fn of queue.splice(0)) fn();
+    expect(posted).toHaveLength(2);
   });
 });

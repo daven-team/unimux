@@ -29,8 +29,25 @@ export const SSH_TIMERS: SshTimers = { connectMs: 20_000, authStepMs: 20_000, sh
  */
 export function hardClose(client: Client): void {
   try { client.destroy(); } catch { /* gone */ }
-  const sock = (client as unknown as { _sock?: { destroyed?: boolean; destroy(): void } })._sock;
+  const sock = socketOf(client);
   try { if (sock && !sock.destroyed) sock.destroy(); } catch { /* gone */ }
+}
+
+/** The client's TCP socket (ssh2 keeps it private). */
+function socketOf(client: Client): { destroyed?: boolean; destroy(): void; cork?(): void; uncork?(): void } | undefined {
+  return (client as unknown as { _sock?: ReturnType<typeof socketOf> })._sock;
+}
+
+/**
+ * Writes typed input to the channel as one socket write. ssh2 hands every packet to the socket in pieces (AES-GCM: length,
+ * payload and tag) and Nagle's algorithm is off, so each piece left as a TCP segment of its own: three per keystroke, and a
+ * relay on the way that does use Nagle (a port forwarder in front of the server) could hold the later pieces back until the
+ * first one is acknowledged. Corked, the pieces go out in one write, the way OpenSSH's client sends a packet.
+ */
+function writeCorked(client: Client, stream: ClientChannel, data: Buffer): void {
+  const sock = socketOf(client);
+  sock?.cork?.();
+  try { stream.write(data); } finally { sock?.uncork?.(); }
 }
 
 interface Session {
@@ -179,7 +196,7 @@ export class SshManager implements TerminalBackend {
     s.startup.text = undefined;
     if (!text || !this.live(s) || !s.stream) return;
     s.out.wrote();
-    s.stream.write(Buffer.from(text, 'utf8'));
+    writeCorked(s.client, s.stream, Buffer.from(text, 'utf8'));
   }
 
   private fail(s: Session, error: SshErrorCode): void {
@@ -223,7 +240,7 @@ export class SshManager implements TerminalBackend {
     const s = this.sessions.get(id);
     if (!s?.stream || s.ended) return;
     if (!reply) s.out.wrote();
-    s.stream.write(Buffer.from(data, 'utf8'));
+    writeCorked(s.client, s.stream, Buffer.from(data, 'utf8'));
   }
 
   resize(id: string, cols: number, rows: number): void {

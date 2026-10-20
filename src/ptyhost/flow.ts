@@ -100,15 +100,66 @@ export const BULK_COALESCE_MS = 12;
 export const BACKGROUND_COALESCE_MS = 33;
 /** A buffer this large is sent at once instead of waiting for the timer. */
 export const FLUSH_NOW_CHARS = 128 * 1024;
-/** Output this soon after a keystroke counts as its echo (see coalesceDelay and OutputChannel.wrote). */
+/**
+ * Output this soon after a keystroke counts as its echo (see coalesceDelay and OutputChannel.wrote): the window of a local
+ * shell. A terminal that answers slower (an SSH server far away) gets a longer one from its EchoClock.
+ */
 export const ECHO_WINDOW_MS = 150;
 /** A cell that got input this recently counts as the one the user works in, even without the focus. */
 export const ACTIVE_WINDOW_MS = 1000;
+/** The longest echo window; an answer later than this is not taken for an echo (nor measured as one). */
+export const ECHO_WINDOW_MAX_MS = ACTIVE_WINDOW_MS;
+/**
+ * Flushes a keystroke may send without a timer: the echo and the redraws that follow it within a few milliseconds (zsh
+ * syntax highlighting and suggestions, fish, prompts that repaint); more output after it is coalesced again.
+ */
+export const ECHO_FLUSHES = 4;
+/** Weight of the newest keystroke -> answer time in the EchoClock's average. */
+export const ECHO_EWMA_WEIGHT = 0.25;
 
-/** The coalescing window of the next flush: `focused` = the renderer reported this terminal as the focused one. */
-export function coalesceDelay(now: number, lastWrite: number, focused: boolean): number {
+/**
+ * How long a terminal takes to answer a keystroke: a moving average of keystroke -> first output, measured from the first
+ * keystroke still waiting for an answer (fast typing measures the oldest key, whose echo comes first). Its `window` is the
+ * echo window of the terminal: ECHO_WINDOW_MS for anything answering within about 65 ms (local shells, nearby servers),
+ * else twice the average plus a margin for jitter, at most ECHO_WINDOW_MAX_MS. Without it an SSH server with a round trip
+ * above 150 ms had every echo after a pause in typing wait for the coalescing timer.
+ */
+export class EchoClock {
+  private waitingSince: number | null = null;
+  private average: number | null = null;
+
+  /** The user typed at `now`. */
+  keystroke(now: number): void {
+    if (this.waitingSince === null || now - this.waitingSince > ECHO_WINDOW_MAX_MS) this.waitingSince = now;
+  }
+
+  /** The terminal printed something at `now`: the answer to the keystroke that waits, if any. */
+  output(now: number): void {
+    if (this.waitingSince === null) return;
+    const sample = now - this.waitingSince;
+    this.waitingSince = null;
+    if (sample > ECHO_WINDOW_MAX_MS) return; // no echo (a password, a key without output): what came now is something else
+    this.average = this.average === null ? sample : this.average + (sample - this.average) * ECHO_EWMA_WEIGHT;
+  }
+
+  /** Average keystroke -> answer time in ms (null before the first answer). */
+  get answerMs(): number | null {
+    return this.average;
+  }
+
+  get window(): number {
+    if (this.average === null) return ECHO_WINDOW_MS;
+    return Math.min(ECHO_WINDOW_MAX_MS, Math.max(ECHO_WINDOW_MS, Math.round(2 * this.average + 20)));
+  }
+}
+
+/**
+ * The coalescing window of the next flush: `focused` = the renderer reported this terminal as the focused one, `echoWindow`
+ * = how long after a keystroke output still counts as its echo (see EchoClock).
+ */
+export function coalesceDelay(now: number, lastWrite: number, focused: boolean, echoWindow = ECHO_WINDOW_MS): number {
   const sinceWrite = now - lastWrite;
-  if (sinceWrite < ECHO_WINDOW_MS) return ECHO_COALESCE_MS;
+  if (sinceWrite < echoWindow) return ECHO_COALESCE_MS;
   return focused || sinceWrite < ACTIVE_WINDOW_MS ? BULK_COALESCE_MS : BACKGROUND_COALESCE_MS;
 }
 

@@ -10,9 +10,14 @@ export class OutputBatcher {
     private readonly schedule: (fn: () => void) => void = (fn) => { setImmediate(fn); },
   ) {}
 
-  /** Queues one terminal's output; it is posted at the end of this turn (no added delay, the timers already coalesced it). */
-  data(id: string, data: string): void {
+  /**
+   * Queues one terminal's output; it is posted at the end of this turn (no added delay, the timers already coalesced it).
+   * `now`: a typed echo, posted at once together with whatever is queued (one more message instead of a turn of waiting
+   * behind other terminals' output and timers).
+   */
+  data(id: string, data: string, now = false): void {
     this.items.push([id, data]);
+    if (now) { this.flush(); return; }
     if (this.scheduled) return;
     this.scheduled = true;
     this.schedule(() => this.flush());

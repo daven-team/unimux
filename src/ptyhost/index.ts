@@ -22,9 +22,10 @@ const logToMain = (level: 'error' | 'warn', message: string) => { try { toMain({
 // with it: the error is reported to main's crash log and the host keeps running.
 process.on('uncaughtException', (error) => logToMain('error', `pty host uncaught exception: ${describeError(error)}`));
 process.on('unhandledRejection', (reason) => logToMain('error', `pty host unhandled rejection: ${describeError(reason)}`));
-const toRenderer = (m: HostToRenderer): boolean => {
+/** `echo`: typed output, posted at once (see OutputBatcher.data). */
+const toRenderer = (m: HostToRenderer, echo = false): boolean => {
   if (!rendererPort) return false;
-  if (m.t === 'data') { batcher.data(m.id, m.data); return true; }
+  if (m.t === 'data') { batcher.data(m.id, m.data, echo); return true; }
   batcher.flush(); // output of a terminal always arrives before its exit
   rendererPort.postMessage(m);
   return true;
@@ -35,9 +36,9 @@ const tapped = new Set<string>();
 
 /** Shared by both backends: renderer data, the install window tap and exits. */
 const sink: PtySink = {
-  data: (id, data) => {
+  data: (id, data, echo) => {
     if (tapped.has(id)) toMain({ t: 'tap', id, data });
-    return toRenderer({ t: 'data', id, data });
+    return toRenderer({ t: 'data', id, data }, echo === true);
   },
   exit: (id, code) => {
     tapped.delete(id);
