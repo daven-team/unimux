@@ -24,6 +24,7 @@ import { remoteEditMessages } from './remoteEditMessages';
 import { shortcutMessages } from './shortcutMessages';
 import { sshMessages } from './sshMessages';
 import { sshModeMessages } from './sshModeMessages';
+import { sshThemeMessages } from './sshThemeMessages';
 import { sshViewMessages } from './sshViewMessages';
 import { safetyMessages } from './safetyMessages';
 import { stabilityMessages } from './stabilityMessages';
@@ -61,6 +62,7 @@ export const messages = {
   ...shortcutMessages,
   ...sshMessages,
   ...sshModeMessages,
+  ...sshThemeMessages,
   ...sshViewMessages,
   ...statusMessages,
   ...swapMessages,

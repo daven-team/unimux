@@ -8,6 +8,7 @@ import { errorPhrase, failureLabel } from '../../../shared/alerts';
 import { getProfile, PROJECT_COLORS, updateCell } from '../../../shared/state';
 import { missingCardCli } from '../../../shared/cliStatus';
 import { sshHeaderName, sshPhaseLabel, userAtEndpoint } from '../../../shared/ssh';
+import { resolveSshTheme } from '../../../shared/sshThemes';
 import { useSshStore } from '../sshStore';
 import { disconnectCell, openSshView, reconnectCell, sshContext, sshHostMenuItems } from '../ssh';
 import { SshCellCard } from './ssh/SshCellCard';
@@ -60,6 +61,9 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const sshSession = useSshStore((st) => st.sessions[cell.id]);
   const sshPrompt = useSshStore((st) => st.prompts[cell.id]);
   const phaseLabel = ssh ? sshPhaseLabel(sshSession, sshPrompt, sshContext(ssh.hostId)) : null;
+  // SSH cells draw in their colour theme: the host's own, else the one of Settings > SSH (local terminals keep the app look).
+  const sshThemeSetting = useStore((st) => (ssh ? st.s.settings.sshTheme : undefined));
+  const sshTheme = ssh ? resolveSshTheme(host?.theme, sshThemeSetting) : undefined;
   // The card replaces the terminal only while the cell is held; a running terminal is never hidden by a late "missing".
   const lackingCli = ssh ? null : missingCardCli(profile, cliStatus, held);
   const sessionTitle = useStore((st) => (cell.session ? st.ui.sessionTitles[cell.session.id] : undefined));
@@ -80,6 +84,9 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
     ensureStarted(cell.id, true);
     return () => terminals.detach(cell.id, el);
   }, [cell.id, epoch]);
+
+  // After the attach above (the terminal exists by then); a theme changed in the settings or on the host repaints at once.
+  useEffect(() => { terminals.setTheme(cell.id, sshTheme?.colors); }, [cell.id, epoch, sshTheme]);
 
   const markFocused = () => {
     setUi({ focusedCellId: cell.id });
@@ -281,7 +288,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
           <button aria-label={tr("Zamknij komórkę")} title={tr("Zamknij komórkę")} onClick={() => void removeCell(cell.id)}><IX /></button>
         </span>
       </div>
-      <div className="cell-body" ref={bodyRef} style={lackingCli ? { visibility: 'hidden' } : undefined} />
+      <div className="cell-body" ref={bodyRef} style={lackingCli ? { visibility: 'hidden' } : sshTheme ? { ['--term-bg' as string]: sshTheme.colors.background } : undefined} />
       <span className="cell-frame" aria-hidden="true" />
       {pathDrop && <div className={`cell-path-drop ${pathDrop.blocked ? 'blocked' : ''}`} role="status">{pathDrop.blocked ? tr(ssh ? 'Ścieżki lokalne nie działają w sesji SSH' : 'Komórka nie jest uruchomiona') : dropLabel(pathDrop.target)}</div>}
       {drop && !pathDrop && <div className="cell-snippet-drop" role="status">{tr('Upuść, aby wkleić')}</div>}

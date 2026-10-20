@@ -13,6 +13,7 @@ import { FailureScanner } from '../../../shared/outputFailure';
 import { isFocusOrMouseReport, isUserInput, StatusTracker, type CellStatus, type HookEvent, type HookInfo, type StatusCause, type StatusReason } from '../../../shared/status';
 import { hookDetail, StatusLog, type StatusTrigger } from '../../../shared/statusLog';
 import { sshModeReset } from '../../../shared/ssh';
+import { DEFAULT_SSH_THEME, sshThemeById } from '../../../shared/sshThemes';
 import { EMPTY_CWD, parseOsc7, parseOsc99, trackOsc7, trackOsc99, type CwdTrack } from '../../../shared/remoteCwd';
 import { inputModesOff, isMouseReport, MouseFloodGuard, terminalModeReset } from '../../../shared/termReset';
 import { encodeWin32Key } from '../../../shared/win32input';
@@ -22,15 +23,8 @@ import { applyScrollback, DEFAULT_SCROLLBACK_LINES, MAX_WEBGL_CONTEXTS, PENDING_
 import { nextLossCount, planWebgl, webglBackoff, WebglLimit } from '../../../shared/webglPool';
 import { onWindowShown } from '../windowShown';
 
-// Campbell (Windows Terminal / PowerShell default) on a Cursor-like background.
-export const THEME: ITheme = {
-  background: '#0d0d0d', foreground: '#cccccc', cursor: '#cccccc', cursorAccent: '#0d0d0d',
-  selectionBackground: '#264f78', selectionInactiveBackground: '#264f7880',
-  black: '#0c0c0c', red: '#c50f1f', green: '#13a10e', yellow: '#c19c00', blue: '#0037da',
-  magenta: '#881798', cyan: '#3a96dd', white: '#cccccc',
-  brightBlack: '#767676', brightRed: '#e74856', brightGreen: '#16c60c', brightYellow: '#f9f1a5',
-  brightBlue: '#3b78ff', brightMagenta: '#b4009e', brightCyan: '#61d6d6', brightWhite: '#f2f2f2',
-};
+// Campbell (Windows Terminal / PowerShell default) on a Cursor-like background: every local terminal, and the default SSH theme.
+export const THEME: ITheme = sshThemeById(DEFAULT_SSH_THEME).colors;
 
 const FONT = '"Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular", "Courier New", monospace';
 
@@ -743,6 +737,15 @@ class TerminalManager {
   /** Lines of history of every terminal (Settings > Terminal): new ones start with it, live ones change now (shrinking drops the oldest lines). */
   setScrollback(lines: number): void {
     this.scrollback = applyScrollback([...this.entries.values()].map((e) => e.term), lines);
+  }
+
+  /**
+   * The colours of a terminal: SSH cells draw in their theme (shared/sshThemes.ts), every other terminal in THEME. xterm
+   * repaints by itself, the WebGL renderer included (it rebuilds its glyph atlas); a parked terminal repaints when shown.
+   */
+  setTheme(cellId: string, theme: ITheme = THEME): void {
+    const e = this.entries.get(cellId);
+    if (e && e.term.options.theme !== theme) e.term.options.theme = theme;
   }
 
   setFontSize(cellId: string, size: number): void {

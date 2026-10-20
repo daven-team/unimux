@@ -11,6 +11,7 @@ import { useSshStore } from '../../sshStore';
 import { confirmRemoveSshHost, openHostInCell, showSshDetail } from '../../ssh';
 import { ColorPicker } from '../ColorPicker';
 import { Select } from '../Select';
+import { SshThemeSelect } from './SshThemePicker';
 
 export function HostEditor({ paneId, hostId }: { paneId: string; hostId?: string }) {
   const { tr } = useI18n();
@@ -35,7 +36,7 @@ export function HostEditor({ paneId, hostId }: { paneId: string; hostId?: string
     setErrors({});
     const now = Date.now();
     let id = host?.id;
-    if (host) update((s) => updateSshHost(s, host.id, { group: undefined, tags: undefined, keyId: undefined, startupCommand: undefined, color: undefined, reconnectOnStart: undefined, sftpSudo: undefined, sftpCommand: undefined, ...r.value }, now));
+    if (host) update((s) => updateSshHost(s, host.id, { group: undefined, tags: undefined, keyId: undefined, startupCommand: undefined, color: undefined, reconnectOnStart: undefined, sftpSudo: undefined, sftpCommand: undefined, theme: undefined, ...r.value }, now));
     else {
       id = uid();
       const created = { id, ...r.value, createdAt: now, updatedAt: now };
@@ -122,6 +123,7 @@ export function HostEditor({ paneId, hostId }: { paneId: string; hostId?: string
           <div className="ssh-row"><ColorPicker value={draft.color ?? '#60a5fa'} label={tr('Kolor')} onChange={(color) => set({ color })} />
             {draft.color && <button type="button" className="btn small ghost" onClick={() => set({ color: undefined })}>{tr('Usuń kolor')}</button>}</div>
         </div>
+        <SshThemeSelect value={draft.theme} onChange={(theme) => set({ theme })} />
       </div>
       <div className="ssh-section">
         <label className="ssh-field"><span>{tr('Polecenie startowe')}</span>

@@ -1,10 +1,11 @@
-// Settings, section "SSH" (D12, spec 9 step 5): where secrets are kept, the trusted host keys, forgetting remembered passphrases.
+// Settings, section "SSH" (D12, spec 9 step 5): where secrets are kept, forgetting remembered passphrases, the terminal theme, the trusted host keys.
 // The SSH view lists the same known hosts (Znane hosty, useKnownHosts). A store that opened read-only (unreadable, wrong shape, malformed entry or a newer format) is explained here, with its file path.
 import { knownHostsDescription, readOnlyStoreNote, storageLabel } from '../../../../shared/ssh';
 import { useI18n } from '../../i18n';
 import { toast } from '../../store';
 import { useSshStore } from '../../sshStore';
 import { SettingRow, SettingsGroup } from '../SettingRow';
+import { SshThemeSettings } from './SshThemePicker';
 import { useKnownHosts } from './useKnownHosts';
 
 export function SshSettings() {
@@ -24,6 +25,7 @@ export function SshSettings() {
         <button className="btn" onClick={() => void window.mc.ssh.forgetPassphrases().then(() => toast(tr('Zapomniano zapamiętane hasła kluczy')))}>{tr('Zapomnij')}</button>
       </SettingRow>
     </SettingsGroup>
+    <SshThemeSettings />
     <SettingsGroup title={tr('Znane hosty')}
       description={tr(knownHostsDescription(status?.knownHostsFile), { file: status?.knownHostsFile ?? '' })}>
       {hostsNote && <div className="ssh-banner-warn" role="alert">{tr(hostsNote, { file: status?.knownHostsFile ?? '' })}</div>}

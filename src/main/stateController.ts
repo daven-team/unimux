@@ -3,6 +3,7 @@ import type { AppState } from '../shared/types';
 import { layoutForCount, MAX_CELLS } from '../shared/layout';
 import { normalizeAlerts } from '../shared/alerts';
 import { normalizeSshHosts } from '../shared/ssh';
+import { normalizeSshThemeId } from '../shared/sshThemes';
 import { normalizeDbConnections } from '../shared/db';
 import { normalizeSftpPlaces } from '../shared/sftpView';
 import { normalizeScrollback } from '../shared/terminalLimits';
@@ -31,7 +32,7 @@ export class StateController {
     return this.change((state) => {
       const next = mergeStateEdit(state, edit);
       // The renderer cannot store arbitrary alert values (unknown presets, relative or UNC sound paths): they are normalized here.
-      // SSH hosts edited in the renderer are normalized the same way (R6), and so are the SFTP places and the scrollback setting.
+      // SSH hosts edited in the renderer are normalized the same way (R6), and so are the SFTP places, the scrollback setting and the SSH theme.
       const sftp = normalizeSftpPlaces(next.sftp);
       // Database connections edited in the renderer (reordering, grouping) are normalized like SSH hosts.
       const db = normalizeDbConnections(next.dbConnections);
@@ -44,7 +45,7 @@ export class StateController {
         // Untouched projects keep their identity, so the change that is sent on is computed cheaply.
         return tabs.every((tab, i) => tab === project.tabs[i]) ? project : { ...project, tabs };
       });
-      const out: AppState = { ...next, sshHosts: normalizeSshHosts(next.sshHosts), dbConnections, sftp: JSON.stringify(sftp) === JSON.stringify(next.sftp) ? next.sftp : sftp, settings: { ...next.settings, alerts: normalizeAlerts(next.settings.alerts), scrollbackLines: normalizeScrollback(next.settings.scrollbackLines) }, projects };
+      const out: AppState = { ...next, sshHosts: normalizeSshHosts(next.sshHosts), dbConnections, sftp: JSON.stringify(sftp) === JSON.stringify(next.sftp) ? next.sftp : sftp, settings: { ...next.settings, alerts: normalizeAlerts(next.settings.alerts), scrollbackLines: normalizeScrollback(next.settings.scrollbackLines), sshTheme: normalizeSshThemeId(next.settings.sshTheme) }, projects };
       // The strip order from the renderer is repaired like at load (known kinds of keys, open grids, no duplicates, a limit);
       // an order that needs no repair keeps its identity.
       const order = normalizeWorkspaceOrder(next.workspaceOrder, new Set(projects.flatMap((p) => p.tabs.map((t) => t.id))));

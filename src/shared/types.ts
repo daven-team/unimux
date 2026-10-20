@@ -6,6 +6,7 @@ import type { AgentRole, AutomationState } from './automation';
 import type { BackgroundLoadMode } from './backgroundLoad';
 import type { Overrides as ShortcutOverrides } from './shortcuts';
 import type { SshCellRef, SshHost } from './ssh';
+import type { SshThemeId } from './sshThemes';
 import type { SftpPlaces } from './sftpView';
 import type { DbConnection } from './db';
 
@@ -162,6 +163,8 @@ export interface Settings {
   confirmCloseWorking: boolean;
   /** Lines of history each terminal keeps (one of SCROLLBACK_CHOICES, shared/terminalLimits.ts). */
   scrollbackLines: number;
+  /** Colour theme of SSH terminals (Settings > SSH); a host may choose its own (shared/sshThemes.ts). */
+  sshTheme: SshThemeId;
 }
 
 export interface AppState {
