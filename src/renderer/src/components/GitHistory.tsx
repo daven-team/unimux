@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { formatAgo } from '../../../shared/i18n';
 import { GIT_LOG_PAGE, layoutGraph, type GitCommit, type GitCommitDetails, type GitRef, type GraphRow } from '../../../shared/git';
 import type { Language } from '../../../shared/languages';
@@ -7,6 +7,7 @@ import { useI18n } from '../i18n';
 import { openDiffTab } from '../files';
 import { baseName, chipRefs, dirName, letterOf } from '../../../shared/gitUi';
 import { openMenu } from './ContextMenu';
+import { FileIcon } from './FileIcon';
 import { GitGraph, GRAPH_ROW, graphLanes } from './GitGraph';
 import { IBranch, IChevron, ICloud, ITag, IX } from './icons';
 
@@ -15,11 +16,17 @@ const MAX_LOADED = 3000;
 /** Rows rendered above and below the visible ones (every row is GRAPH_ROW px high, see .git-rows in gitPanel.css). */
 const OVERSCAN = 12;
 
-/** `historyKey` changes when HEAD or the branches moved (the list then starts again); `initial`: the repository has no commit yet. */
-interface Props { projectId: string; historyKey: string; initial: boolean; opts: { worktree?: string }; nonce: number; collapsed?: boolean; onToggle?(): void; height?: number | null }
+/**
+ * `historyKey` changes when HEAD or the branches moved (the list then starts again); `initial`: the repository has no commit yet;
+ * `actions`: the repository buttons of the header (fetch, pull, push, refresh, more), kept there like Cursor's graph header.
+ */
+interface Props {
+  projectId: string; historyKey: string; initial: boolean; opts: { worktree?: string }; nonce: number;
+  collapsed?: boolean; onToggle?(): void; height?: number | null; actions?: ReactNode;
+}
 
 /** The History section: commits in pages of 50 (loaded while scrolling), a thin graph, filters, and the details of one commit. */
-export function GitHistory({ projectId, historyKey, initial, opts, nonce, collapsed = false, onToggle, height = null }: Props) {
+export function GitHistory({ projectId, historyKey, initial, opts, nonce, collapsed = false, onToggle, height = null, actions }: Props) {
   const { tr, language, errorText } = useI18n();
   const [commits, setCommits] = useState<GitCommit[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -93,18 +100,21 @@ export function GitHistory({ projectId, historyKey, initial, opts, nonce, collap
   const focusedIndex = focusedHash ? commits.findIndex((c) => c.hash === focusedHash) : -1;
   const slots = rowSlots(view, commits.length, focusedIndex >= 0 ? [focusedIndex] : []);
 
-  if (selected) return <GitCommitView projectId={projectId} commit={selected} opts={opts} onBack={() => setSelected(null)} />;
+  if (selected) return <GitCommitView projectId={projectId} commit={selected} opts={opts} actions={actions} onBack={() => setSelected(null)} />;
 
   return (
     <section className={`git-history ${collapsed ? 'collapsed' : height ? 'sized' : ''}`} aria-label={tr('Historia')} style={!collapsed && height ? { flex: `0 1 ${height}px` } : undefined}>
-      <div className="git-section-head static">
+      {/* The whole header toggles the section (the button is its keyboard handle); the buttons on the right stop the click. */}
+      <div className={onToggle ? 'git-pane-head' : 'git-pane-head static'} onClick={onToggle}>
         {onToggle
-          ? <button className="git-toggle" aria-expanded={!collapsed} onClick={onToggle} title={collapsed ? tr('Rozwiń historię') : tr('Zwiń historię')}><span className={`tree-chevron ${collapsed ? '' : 'open'}`}><IChevron /></span><span>{tr('Historia')}</span></button>
-          : <span>{tr('Historia')}</span>}
-        <span className="git-spacer" />
-        {!collapsed && <button className={`btn ghost icon small ${all ? 'on' : ''}`} aria-pressed={all} title={tr('Pokaż commity wszystkich gałęzi')} aria-label={tr('Pokaż commity wszystkich gałęzi')} onClick={() => setAll((v) => !v)}>
-          <IBranch />
-        </button>}
+          ? <button className="git-pane-toggle" aria-expanded={!collapsed} title={collapsed ? tr('Rozwiń historię') : tr('Zwiń historię')}><span className={`tree-chevron ${collapsed ? '' : 'open'}`}><IChevron /></span><span className="git-pane-title">{tr('Historia')}</span></button>
+          : <span className="git-pane-toggle"><span className="git-pane-title">{tr('Historia')}</span></span>}
+        <span className="git-pane-actions" onClick={(e) => e.stopPropagation()}>
+          {!collapsed && <button className={`btn ghost icon small ${all ? 'on' : ''}`} aria-pressed={all} title={tr('Pokaż commity wszystkich gałęzi')} aria-label={tr('Pokaż commity wszystkich gałęzi')} onClick={() => setAll((v) => !v)}>
+            <IBranch />
+          </button>}
+          {actions}
+        </span>
       </div>
       {!collapsed && <>
       <HistorySearch initial={searchText.current} onText={(text) => { searchText.current = text; }} onQuery={setQuery} />
@@ -197,8 +207,8 @@ function RefChip({ gitRef }: { gitRef: GitRef }) {
   );
 }
 
-/** One commit: message, stats and its files (a click on a file opens the diff). */
-function GitCommitView({ projectId, commit, opts, onBack }: { projectId: string; commit: GitCommit; opts: { worktree?: string }; onBack(): void }) {
+/** One commit: message, stats and its files (a click on a file opens the diff). The header keeps the repository buttons. */
+function GitCommitView({ projectId, commit, opts, actions, onBack }: { projectId: string; commit: GitCommit; opts: { worktree?: string }; actions?: ReactNode; onBack(): void }) {
   const { tr, language, errorText } = useI18n();
   const [details, setDetails] = useState<GitCommitDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -215,7 +225,10 @@ function GitCommitView({ projectId, commit, opts, onBack }: { projectId: string;
   const { shown } = chipRefs(commit.refs, 8);
   return (
     <section className="git-history git-details" aria-label={tr('Szczegóły commita')}>
-      <button className="git-back" onClick={onBack}><span className="git-back-chevron"><IChevron /></span>{tr('Historia')}</button>
+      <div className="git-pane-head" onClick={onBack}>
+        <button className="git-pane-toggle"><span className="tree-chevron git-back-chevron"><IChevron /></span><span className="git-pane-title">{tr('Historia')}</span></button>
+        {actions && <span className="git-pane-actions" onClick={(e) => e.stopPropagation()}>{actions}</span>}
+      </div>
       <div className="git-details-body">
         <div className="git-details-subject">{commit.subject}</div>
         <div className="git-commit-meta muted" title={commit.hash}>{commit.short} · {commit.author} · {formatAgo(language, commit.at * 1000)}</div>
@@ -235,16 +248,17 @@ function GitCommitView({ projectId, commit, opts, onBack }: { projectId: string;
                 return (
                   <div
                     key={`${file.status}:${file.path}`}
-                    className="git-file"
+                    className={`git-file git-row ${letter.letter === 'D' ? 'deleted' : ''}`}
                     role="button"
                     tabIndex={0}
                     title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}
                     onClick={() => openDiffTab(projectId, { source: 'commit', hash: commit.hash, path: file.path, ...(file.origPath ? { oldPath: file.origPath } : {}), ...(worktree ? { worktree } : {}) })}
                     onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLElement).click(); }}
                   >
-                    <span className={`git-letter ${letter.cls}`} title={tr(letter.title)}>{letter.letter}</span>
-                    <span className="git-file-name">{baseName(file.path)}<span className="git-file-dir">{dirName(file.path)}</span></span>
+                    <FileIcon name={file.path} />
+                    <span className="git-file-name"><span className="git-file-base">{baseName(file.path)}</span><span className="git-file-dir">{dirName(file.path)}</span></span>
                     <span className="git-file-stat muted">{file.added === null ? 'bin' : <><span className="plus">+{file.added}</span> <span className="minus">-{file.deleted}</span></>}</span>
+                    <span className={`git-letter ${letter.cls}`} title={tr(letter.title)}>{letter.letter}</span>
                   </div>
                 );
               })}

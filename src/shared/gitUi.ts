@@ -51,6 +51,21 @@ export function chipRefs(refs: readonly GitRef[], max = 3): { shown: GitRef[]; m
   return { shown: sorted.slice(0, max), more: Math.max(0, sorted.length - max) };
 }
 
+/** Whether the Commit button has anything to work with: staged files, or changes it can stage (conflicts alone cannot be committed). */
+export const hasCommittable = (groups: Record<ChangeGroup, readonly GitFileChange[]>): boolean =>
+  groups.staged.length + groups.unstaged.length + groups.untracked.length > 0;
+
+/**
+ * What the Commit button (and its shortcut) does now: `nothing` to commit, `ask` for a message first, `stage-all` (nothing is
+ * staged yet: offer to add every change and commit them together, as Cursor does) or `commit` what is staged.
+ */
+export type CommitPlan = 'nothing' | 'ask' | 'stage-all' | 'commit';
+export function commitPlan(message: string, groups: Record<ChangeGroup, readonly GitFileChange[]>): CommitPlan {
+  if (!hasCommittable(groups)) return 'nothing';
+  if (!message.trim()) return 'ask';
+  return groups.staged.length ? 'commit' : 'stage-all';
+}
+
 export type ChangesView = 'list' | 'tree';
 export type ChangesSort = 'name' | 'path' | 'status';
 

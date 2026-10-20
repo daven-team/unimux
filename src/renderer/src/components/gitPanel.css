@@ -1,46 +1,81 @@
 /* Git panel (left rail) and the diff modal */
-.git-panel { min-height: 0; overflow: hidden; font-size: 12px; padding-top: 4px; container-type: inline-size; }
+/* Laid out like Cursor's Source Control: pane headers (Changes, History) with their buttons on the right, 22px rows in a 13px font,
+   a steel-blue action button and count pills. The colours below are shared (a "Publish" button can use .git-action-btn too). */
+.git-panel {
+  --git-action: #81a1c1; --git-action-hover: #91afcc; --git-action-text: #141c25;
+  --git-pill: #88c0d0; --git-pill-text: #10191c;
+  --git-row-text: #c8c8c8; --git-row-hover-text: #ededed; --git-head-text: #8c8c8c;
+  --git-field: #262626; --git-field-border: #2f2f2f; --git-field-focus: #2b2b2b; --git-field-focus-border: #4a4a4a; --git-placeholder: #737373;
+  min-height: 0; overflow: hidden; font-size: 12px; padding-top: 2px; container-type: inline-size;
+}
 .git-note { margin: 0; padding: 8px 14px; line-height: 1.5; color: var(--text-2); }
 .git-note.muted { color: var(--muted); }
 .git-note.error { color: var(--error); }
-.git-spacer { flex: 1; }
-.git-worktree { flex: none; margin: 0 10px 6px; min-width: 0; }
-.git-bar { flex: none; display: flex; align-items: center; gap: 2px; padding: 0 10px 4px; }
-.git-branch { min-width: 0; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 28px; padding: 0 6px; border: 0; border-radius: 5px; background: transparent; color: var(--text); cursor: pointer; }
-.git-branch:hover { background: var(--bg-hover); }
-.git-branch:focus-visible { outline: 1px solid var(--text-2); outline-offset: -1px; }
-.git-branch svg { flex: none; display: block; color: var(--text-2); }
-.git-branch-name { min-width: 3.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.git-branch-chevron { display: inline-flex; flex: none; }
-.git-badge { flex: none; padding: 1px 6px; border-radius: 999px; font-size: 10.5px; font-weight: 600; background: var(--bg-3); color: var(--text-2); }
-.git-badge.conflict { color: #fca5a5; background: #3a1a1a; }
-.git-upstream { flex: none; padding: 2px 12px 0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.git-panel .git-bar .btn { flex: none; width: 24px; height: 28px; padding: 0; border: 0; border-radius: 5px; }
-.git-panel .git-bar .btn.git-sync { width: auto; min-width: 24px; padding: 0 4px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; }
-.git-sync-count { font-size: 10.5px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
-.git-panel .git-bar .btn.git-sync.up:not(:disabled) { color: #86efac; }
-.git-panel .git-bar .btn.git-sync.down:not(:disabled) { color: #fcd34d; }
-.git-panel .git-search .btn, .git-panel .git-section-head .btn { flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; }
+.git-worktree { flex: none; margin: 2px 12px 6px; min-width: 0; }
 .git-panel .btn svg { display: block; flex: none; }
 .git-panel .btn:focus-visible { outline: 1px solid var(--text-2); outline-offset: -1px; }
+.git-panel .tree-chevron { width: 16px; height: 16px; }
+.git-panel .tree-chevron svg { width: 12px; height: 12px; stroke-width: 1.5px; }
 
-.git-section-head { flex: none; width: 100%; min-height: 26px; display: flex; align-items: center; gap: 6px; padding: 2px 10px; border: 0; background: transparent; color: var(--text-2); font-size: 11px; font-weight: 600; text-align: left; cursor: pointer; user-select: none; }
-.git-section-bar { flex: none; display: flex; align-items: center; padding-right: 6px; }
-.git-section-bar .git-section-head { flex: 1; min-width: 0; width: auto; }
-.git-panel .git-section-bar .btn { flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; }
-.git-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-weight: inherit; cursor: pointer; }
-.git-toggle:hover { color: var(--text); }
-.git-toggle:focus-visible { outline: 1px solid var(--text-2); outline-offset: 2px; }
-.git-history.collapsed { flex: none; min-height: 0; }
-.git-splitter { flex: none; height: 7px; margin: -3px 0; position: relative; z-index: 2; cursor: row-resize; touch-action: none; }
-.git-splitter::after { content: ''; position: absolute; left: 0; right: 0; top: 3px; height: 1px; background: var(--border); transition: background .12s, height .12s, top .12s; }
-.git-splitter:hover::after, .git-splitter:focus-visible::after { top: 2px; height: 3px; background: var(--accent); }
-.git-splitter:focus-visible { outline: none; }
-.git-section-head:hover { background: var(--bg-hover); color: var(--text); }
-.git-section-head.static { cursor: default; }
-.git-section-head.static:hover { background: transparent; color: var(--text-2); }
-.git-section-head:focus-visible { outline: 1px solid var(--text-2); outline-offset: -1px; }
-.git-count { flex: none; min-width: 16px; padding: 0 4px; border-radius: 4px; background: var(--bg-hover); color: var(--text-2); font-size: 10px; line-height: 16px; text-align: center; letter-spacing: 0; }
+/* Pane headers: the whole row toggles its section; the buttons on the right (always shown) do not. */
+.git-pane-head { flex: none; display: flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px 0 4px; color: var(--git-head-text); cursor: pointer; user-select: none; }
+.git-pane-head:hover { background: var(--bg-hover); color: #d0d0d0; }
+.git-pane-head.static { cursor: default; }
+.git-pane-head.static:hover { background: transparent; color: var(--git-head-text); }
+.git-pane-toggle { flex: 1 0 auto; min-width: 0; height: 100%; display: flex; align-items: center; gap: 2px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: inherit; }
+.git-pane-toggle:focus-visible { outline: 1px solid var(--text-2); outline-offset: -1px; }
+.git-pane-head.static .git-pane-toggle { padding-left: 6px; }
+.git-pane-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.git-pane-head .git-back-chevron { transform: rotate(90deg); }
+.git-pane-actions { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 1px; cursor: default; }
+.git-panel .git-pane-actions .btn { flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; color: #a8a8a8; }
+.git-panel .git-pane-actions .btn:hover:not(:disabled), .git-panel .git-pane-actions .btn.on { background: #ffffff14; color: var(--text); }
+.git-panel .git-pane-actions .btn.git-sync { width: auto; min-width: 22px; padding: 0 3px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; }
+.git-sync-count { font-size: 10.5px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+.git-panel .git-pane-actions .btn.git-sync.up:not(:disabled) { color: #86efac; }
+.git-panel .git-pane-actions .btn.git-sync.down:not(:disabled) { color: #fcd34d; }
+/* Header actions that only matter on the way (the check mark of Changes) show while the header is hovered or focused. */
+.git-pane-head .git-hover-action { display: none; }
+.git-pane-head:hover .git-hover-action, .git-pane-head:has(:focus-visible) .git-hover-action { display: inline-flex; }
+
+/* The branch switcher (right end of the Changes header) and the read-only bar */
+.git-branch { flex: 0 1 auto; min-width: 0; max-width: 100%; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 5px; border: 0; border-radius: 4px; background: transparent; color: #bdbdbd; font-size: 12px; cursor: pointer; }
+.git-branch:hover { background: #ffffff14; color: var(--text); }
+.git-branch:focus-visible { outline: 1px solid var(--text-2); outline-offset: -1px; }
+.git-branch svg { flex: none; display: block; color: #9a9a9a; }
+.git-branch-name { min-width: 3.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-branch-chevron { display: inline-flex; flex: none; }
+.git-branch.static { cursor: default; }
+.git-branch.static:hover { background: transparent; }
+.git-bar { flex: none; display: flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 12px 2px 6px; }
+.git-badge { flex: none; padding: 1px 6px; border-radius: 999px; font-size: 10.5px; font-weight: 600; background: var(--bg-3); color: var(--text-2); }
+.git-badge.conflict { color: #fca5a5; background: #3a1a1a; }
+
+/* Commit box: a quiet message field (no blue ring: focus only lightens it) and the Commit button with its menu. */
+.git-commit-box { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 2px 12px 6px; }
+.git-message-input {
+  display: block; width: 100%; height: 26px; min-height: 26px; max-height: 106px; padding: 4px 8px; resize: none; overflow-y: auto; outline: none;
+  border: 1px solid var(--git-field-border); border-radius: 3px; background: var(--git-field); color: #d0d0d0; font-size: 12.5px; line-height: 16px;
+  transition: border-color .12s, background-color .12s;
+}
+.git-message-input::placeholder, .git-search .input::placeholder { color: var(--git-placeholder); }
+.git-message-input:hover, .git-search .input:hover { border-color: #383838; }
+.git-message-input:focus, .git-search .input:focus { border-color: var(--git-field-focus-border); background: var(--git-field-focus); }
+/* The commit slot holds the Commit button (or what the panel puts in its place). */
+.git-commit-slot { display: flex; min-width: 0; }
+.git-commit-slot > * { flex: 1; min-width: 0; }
+.git-split { display: flex; min-width: 0; }
+.git-action-btn {
+  flex: 1; min-width: 0; height: 26px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px;
+  border: 0; border-radius: 3px; background: var(--git-action); color: var(--git-action-text); font-size: 12.5px; font-weight: 500; white-space: nowrap; cursor: pointer;
+}
+.git-action-btn:hover:not(:disabled) { background: var(--git-action-hover); }
+.git-action-btn:focus-visible { outline: 1px solid #c9d8e6; outline-offset: 1px; }
+.git-action-btn:disabled { opacity: .45; cursor: default; }
+.git-action-btn svg { display: block; flex: none; stroke-width: 1.6px; }
+.git-split > .git-action-btn:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.git-split > .git-split-more { flex: none; width: 26px; padding: 0; border-left: 1px solid #0000003d; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.git-commit-box .git-note { padding: 0; font-size: 10.5px; }
 
 /* min-height auto: the head and the commit box always keep their room (only the file list, which scrolls, gives way), so a
    saved history height taller than a short panel shrinks the history instead of pushing it over the commit box. */
@@ -49,52 +84,60 @@
 /* A history with a saved height keeps it: the changes take what is left, and the history gives way only once they reach their minimum. */
 .git-panel:has(> .git-history.sized) > .git-changes:not(.collapsed) { flex-basis: 0; }
 /* contain: size keeps a long file list out of the section's minimum height (it fills the room it gets and scrolls); about two
-   rows always stay visible. */
-.git-changes-body { flex: 1; min-height: 52px; overflow-y: auto; contain: size; }
-.git-group-head { min-height: 24px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 14px; font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--text-2); }
-.git-group-head .git-count { margin-left: 4px; }
-.git-panel .git-group-head .btn { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; }
-.git-file { display: flex; align-items: center; gap: 7px; min-height: 24px; padding: 0 8px 0 14px; color: var(--text-2); cursor: pointer; }
-.git-file:hover, .git-file:focus-visible { background: var(--bg-hover); color: var(--text); outline: none; }
-.git-file:focus-visible { box-shadow: inset 0 0 0 1px var(--text-2); }
+   rows always stay visible. Without changes it stays empty (no text, no zero count), like Cursor. */
+.git-changes-body { flex: 1; min-height: 52px; overflow-y: auto; contain: size; padding-bottom: 4px; }
+
+/* Group and file rows: the hover covers the whole row, its buttons included; the buttons show up left of the count or letter. */
+.git-row { display: flex; align-items: center; height: 22px; color: var(--git-row-text); font-size: 13px; cursor: pointer; }
+.git-row:hover, .git-row:focus-visible, .git-row:has(:focus-visible) { background: var(--bg-hover); color: var(--git-row-hover-text); outline: none; }
+.git-row:focus-visible, .git-row:has(> .git-row-toggle:focus-visible) { box-shadow: inset 0 0 0 1px var(--text-2); }
+.git-row-toggle { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 2px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: inherit; }
+.git-row-toggle:focus-visible { outline: none; }
+.git-row-actions { flex: none; display: none; align-items: center; gap: 1px; }
+.git-row:hover .git-row-actions, .git-row:focus-visible .git-row-actions, .git-row:has(:focus-visible) .git-row-actions { display: flex; }
+.git-panel .git-row-actions .btn { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; color: #c8c8c8; }
+.git-panel .git-row-actions .btn:hover:not(:disabled) { background: #ffffff14; color: #fff; }
+.git-group-head { gap: 4px; padding: 0 6px 0 10px; }
+.git-group-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-count { flex: none; min-width: 18px; height: 18px; padding: 0 6px; border-radius: 9px; background: var(--git-pill); color: var(--git-pill-text); font-size: 11px; font-weight: 500; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.git-count.conflict { background: #eba4a4; color: #2a1111; }
+.git-file { gap: 6px; padding: 0 6px 0 28px; }
 .git-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.git-file-dir { margin-left: 6px; font-size: 10.5px; color: var(--muted); }
-.git-file-stat { flex: none; font-size: 10.5px; }
-.git-panel .git-file-action { flex: none; width: 20px; height: 20px; padding: 0; border: 0; opacity: 0; }
-.git-file:hover .git-file-action, .git-file:focus-within .git-file-action { opacity: 1; }
-.git-dir { color: var(--text-2); }
-.git-dir .git-file-name { font-weight: 500; }
+.git-file-dir { margin-left: 6px; font-size: 12px; color: #7d7d7d; }
+.git-file.deleted .git-file-base { text-decoration: line-through; }
+.git-file-stat { flex: none; font-size: 11px; }
+.git-dir { gap: 0; }
+.git-dir .git-file-name { margin-left: 2px; }
 .git-letter { flex: none; width: 16px; height: 16px; display: inline-grid; place-items: center; border-radius: 4px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 10.5px; font-weight: 700; background: #ffffff0d; }
 .git-letter.add { color: #4ade80; background: #4ade8018; }
 .git-letter.del { color: #f87171; background: #f8717118; }
 .git-letter.mod { color: #f5b942; background: #f5b94218; }
 .git-letter.ren { color: #60a5fa; background: #60a5fa18; }
+/* In the panel's rows the letter stands at the right end, plain like Cursor's (the Files tree keeps the boxed one). */
+.git-file .git-letter { width: 14px; height: auto; margin-right: 2px; border-radius: 0; background: none; font-family: inherit; font-size: 12px; font-weight: 600; }
 .plus { color: #4ade80; }
 .minus { color: #f87171; }
-.git-commit-box { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 2px 10px 6px; }
-.git-commit-box textarea { resize: none; height: 30px; min-height: 30px; max-height: 30px; padding: 6px 8px; font-size: 12px; line-height: 16px; overflow: hidden; }
-.git-panel .git-commit-box > .btn { width: 100%; height: 26px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 5px; }
-.git-panel .git-commit-box > .btn.primary { background: #779dbc; color: #101820; }
-.git-panel .git-commit-box > .btn.primary:hover:not(:disabled) { background: #8aaac4; color: #101820; }
-.git-panel .git-commit-box textarea, .git-panel .git-search .input { border: 1px solid #ffffff14; background: #2c2c2c; color: var(--text); border-radius: 5px; }
-.git-panel .git-commit-box textarea::placeholder, .git-panel .git-search .input::placeholder { color: #8d8d8d; }
-.git-panel .git-commit-box textarea:focus-visible, .git-panel .git-search .input:focus-visible { outline: none; border-color: #779dbc; box-shadow: none; }
 
 .git-history { flex: 1 1 45%; min-height: 100px; display: flex; flex-direction: column; }
-.git-section-head.static .btn.on { background: var(--bg-hover); color: var(--text); }
-.git-search { flex: none; display: flex; align-items: center; gap: 4px; padding: 0 10px 6px; }
-.git-search .input { flex: 1; min-width: 0; height: 24px; padding: 0 8px; font-size: 11.5px; }
-.git-panel .input:focus { border-color: var(--muted); }
+.git-history.collapsed { flex: none; min-height: 0; }
+.git-splitter { flex: none; height: 7px; margin: -3px 0; position: relative; z-index: 2; cursor: row-resize; touch-action: none; }
+.git-splitter::after { content: ''; position: absolute; left: 0; right: 0; top: 3px; height: 1px; background: var(--border); transition: background .12s, height .12s, top .12s; }
+.git-splitter:hover::after, .git-splitter:focus-visible::after { top: 2px; height: 3px; background: var(--accent); }
+.git-splitter:focus-visible { outline: none; }
+.git-search { flex: none; display: flex; align-items: center; gap: 4px; padding: 2px 12px 6px; }
+.git-search .input { flex: 1; min-width: 0; height: 24px; padding: 0 8px; border: 1px solid var(--git-field-border); border-radius: 3px; background: var(--git-field); color: #d0d0d0; font-size: 12px; transition: border-color .12s, background-color .12s; }
+.git-panel .git-search .btn { flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; }
 .git-log { flex: 1; min-height: 0; overflow-y: auto; }
-.git-commit { display: flex; align-items: stretch; gap: 4px; min-height: 24px; padding: 0 10px; cursor: pointer; }
-/* The history is windowed (GitHistory.tsx): every row must be exactly GRAPH_ROW (24px) high. */
-.git-rows .git-commit { height: 24px; overflow: hidden; }
+.git-commit { display: flex; align-items: stretch; gap: 4px; min-height: 22px; padding: 0 10px 0 8px; cursor: pointer; }
+/* The history is windowed (GitHistory.tsx): every row must be exactly GRAPH_ROW (22px) high. */
+.git-rows .git-commit { height: 22px; overflow: hidden; }
 .git-commit:hover, .git-commit:focus-visible { background: var(--bg-hover); outline: none; }
 .git-commit:focus-visible { box-shadow: inset 0 0 0 1px var(--text-2); }
 .git-graph { flex: none; display: block; }
-.git-commit-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 2px; font-size: 12px; }
+.git-commit-text { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 2px; font-size: 13px; }
 .git-commit-subject { display: flex; align-items: center; gap: 5px; min-width: 0; }
-.git-subject-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.git-subject-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--git-row-text); }
+.git-commit:hover .git-subject-text, .git-commit:focus-visible .git-subject-text { color: var(--git-row-hover-text); }
 .git-chips { flex: none; display: inline-flex; align-items: center; gap: 4px; }
 .git-commit-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .git-chip { flex: none; display: inline-flex; align-items: center; gap: 3px; max-width: 96px; overflow: hidden; padding: 0 5px; border-radius: 4px; font-size: 10px; line-height: 15px; background: var(--bg-3); color: var(--text-2); }
@@ -107,10 +150,6 @@
 .git-chip.remote { color: #c4b5fd; background: #1f1936; }
 .git-more { margin: 6px 10px 10px; width: calc(100% - 20px); }
 
-.git-back { flex: none; min-height: 32px; display: flex; align-items: center; gap: 6px; padding: 2px 10px; border: 0; background: transparent; color: var(--text-2); font-size: 11px; font-weight: 600; text-align: left; cursor: pointer; }
-.git-back:hover { background: var(--bg-hover); color: var(--text); }
-.git-back:focus-visible { outline: 1px solid var(--text-2); outline-offset: -1px; }
-.git-back-chevron { display: grid; place-items: center; transform: rotate(90deg); }
 .git-details-body { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 10px; }
 .git-details-subject { padding: 4px 12px 2px; font-size: 13px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
 .git-details-body .git-commit-meta { padding: 0 12px; white-space: normal; }
@@ -154,11 +193,8 @@
 .git-trust-keys { margin: 0; padding: 0 0 0 16px; max-height: 120px; overflow: auto; color: #fcd34d; }
 .git-trust-keys code { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 10.5px; overflow-wrap: anywhere; }
 .git-trust-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.git-branch.static { cursor: default; }
-.git-branch.static:hover { background: transparent; }
-.git-commit-box .git-note { padding: 0; font-size: 10.5px; }
 
 /* A narrow panel keeps the branch name readable: fetch stays in the "..." menu and the chevron goes. */
 @container (max-width: 250px) {
-  .git-panel .git-bar .btn.git-fetch, .git-branch-chevron { display: none; }
+  .git-panel .git-pane-actions .btn.git-fetch, .git-branch-chevron { display: none; }
 }

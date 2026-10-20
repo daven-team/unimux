@@ -2,7 +2,8 @@ import type { ReactElement } from 'react';
 import type { GraphRow } from '../../../shared/git';
 import { LANE_COLORS } from '../../../shared/gitUi';
 
-export const GRAPH_ROW = 24;
+/** The height of one history row (22px like Cursor's rows; .git-rows .git-commit in gitPanel.css uses the same). */
+export const GRAPH_ROW = 22;
 const LANE = 11;
 const MAX_LANES = 6;
 
