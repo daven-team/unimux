@@ -3,6 +3,7 @@
 // Since 0.9.8 a session may also be a non-cell one (an SFTP session, id "sftp:<uuid>"): same vault, saved password,
 // passphrase check, known hosts and prompt grouping; its commands go to the SFTP Host (main routes `host()` by id).
 // Since 1.0.0 the SSH tunnel of a DB session ("db:<uuid>") logs in the same way; its commands go to the DB Host.
+// A host that uses an identity signs in with the identity's user name, key and saved password (hostLogin), for every kind.
 import { randomUUID } from 'crypto';
 import type { HostToMain, MainToHost } from '../../shared/ipc';
 import { isDbSessionId } from '../../shared/db';
@@ -12,6 +13,7 @@ import {
   hostEndpoint, isLivePhase, knownHostId, sanitizeServerText, startupInput,
   type SshConnectCellRequest, type SshErrorCode, type SshHost, type SshPhase, type SshPrompt, type SshPromptAnswer, type SshSessionState, type SshSessionsSnapshot,
 } from '../../shared/ssh';
+import { hostLogin, type HostLogin } from '../../shared/sshIdentity';
 import type { AppState } from '../../shared/types';
 import { checkPassphrase } from './keys';
 import type { KnownHostsStore } from './knownHosts';
@@ -35,7 +37,8 @@ type Answer = { cancel: true; timeout?: boolean } | { values: string[]; remember
 type PromptBody = SshPrompt extends infer P ? (P extends SshPrompt ? Omit<P, 'id'> : never) : never;
 
 interface Group { id: string; key: string | null; prompt: SshPrompt; cells: Map<string, (a: Answer) => void>; timer: NodeJS.Timeout }
-interface Live { kind: 'cell' | 'session'; state: SshSessionState; host: string; port: number; user: string; endpoint: string; pendingSave?: string }
+/** `secret`: whose vault entry holds the saved password of this login (the host, or the identity it uses). */
+interface Live { kind: 'cell' | 'session'; state: SshSessionState; host: string; port: number; user: string; endpoint: string; secret: HostLogin['secret']; pendingSave?: string }
 
 type Answer2 = Answer & { useSaved?: boolean };
 
@@ -104,9 +107,10 @@ export class SshCoordinator {
   }
 
   private async start(id: string, kind: Live['kind'], host: SshHost, size: { cols: number; rows: number; startup?: string; sftpSudo?: { command?: string } }): Promise<{ ok: true } | { ok: false; error: SshErrorCode }> {
+    const login = hostLogin(host, this.deps.state().sshIdentities ?? []);
     const live: Live = {
       kind, state: { cellId: id, hostId: host.id, phase: 'connecting', since: this.now() },
-      host: host.address, port: host.port, user: host.username, endpoint: hostEndpoint(host.address, host.port),
+      host: host.address, port: host.port, user: login.username, endpoint: hostEndpoint(host.address, host.port), secret: login.secret,
     };
     this.sessionsByCell.set(id, live);
     this.deps.events.session(live.state);
@@ -115,25 +119,26 @@ export class SshCoordinator {
 
     let privateKey: string | undefined;
     let passphrase: string | undefined;
-    if (host.keyId) {
-      const secret = this.deps.vault.keySecret(host.keyId);
+    const keyId = login.keyId;
+    if (keyId) {
+      const secret = this.deps.vault.keySecret(keyId);
       if (!secret.ok) { this.deps.events.vaultChanged(); return fail(secret.error); }
       privateKey = secret.privateKey;
-      const info = this.deps.vault.key(host.keyId);
+      const info = this.deps.vault.key(keyId);
       if (info?.encrypted) {
         // M2: the bcrypt check blocks the main loop, so a saved passphrase is checked once per run and a remembered one
         // (checked when it was typed) never again. A wrong one still ends in an ssh2 auth failure, no prompt is lost.
         const saved = secret.passphrase;
-        if (saved !== undefined && (this.deps.vault.isVerified(host.keyId, saved) || checkPassphrase(privateKey, saved))) {
-          this.deps.vault.markVerified(host.keyId, saved);
+        if (saved !== undefined && (this.deps.vault.isVerified(keyId, saved) || checkPassphrase(privateKey, saved))) {
+          this.deps.vault.markVerified(keyId, saved);
           passphrase = saved;
-        } else passphrase = this.deps.vault.remembered(host.keyId);
+        } else passphrase = this.deps.vault.remembered(keyId);
       }
       if (info?.encrypted && passphrase === undefined) {
         // The key may be replaced while the prompt is open: a passphrase checked against this material is remembered only for it.
-        const generation = this.deps.vault.generation(host.keyId);
+        const generation = this.deps.vault.generation(keyId);
         for (let attempt = 0; attempt < MAX_PASSPHRASE_TRIES && passphrase === undefined; attempt++) {
-          const answer = await this.ask(id, `pp:${host.keyId}`, { kind: 'passphrase', keyId: host.keyId, keyLabel: info.label, retry: attempt > 0 });
+          const answer = await this.ask(id, `pp:${keyId}`, { kind: 'passphrase', keyId, keyLabel: info.label, retry: attempt > 0 });
           if (!current()) return { ok: false, error: 'cancelled' };
           if (!('values' in answer)) return fail('cancelled');
           const typed = answer.values[0] ?? '';
@@ -142,17 +147,17 @@ export class SshCoordinator {
           const key = privateKey;
           if (this.onceFor(answer, () => checkPassphrase(key, typed))) {
             passphrase = typed;
-            if (answer.remember) this.deps.vault.remember(host.keyId, typed, generation);
+            if (answer.remember) this.deps.vault.remember(keyId, typed, generation);
           }
         }
         if (passphrase === undefined) return fail('passphrase');
       }
     }
-    const savedPassword = this.deps.vault.password(host.id);
+    const savedPassword = this.savedPassword(live.secret);
     if (!current()) return { ok: false, error: 'cancelled' };
     const startup = size.startup;
     const delivered = this.deps.host({ t: 'sshConnect', req: {
-      id, host: host.address, port: host.port, username: host.username, cols: size.cols, rows: size.rows,
+      id, host: host.address, port: host.port, username: login.username, cols: size.cols, rows: size.rows,
       ...(privateKey ? { privateKey } : {}), ...(passphrase ? { passphrase } : {}), ...(savedPassword.ok ? { password: savedPassword.password } : {}),
       ...(startup ? { startup } : {}), ...(size.sftpSudo ? { sftpSudo: size.sftpSudo } : {}),
       allowPasswordPrompt: true, ...(this.deps.debug ? { debug: true } : {}),
@@ -160,6 +165,11 @@ export class SshCoordinator {
     // M1: a connect sent while the Pty Host is restarting or gone would be lost and leave the cell `connecting` forever.
     if (delivered === false) return fail(kind === 'cell' ? 'ptyHostCrashed' : sessionHostOf(id) === 'db' ? 'dbHostCrashed' : 'sftpHostCrashed');
     return { ok: true };
+  }
+
+  /** The saved password of a login: the identity's when the host uses one, otherwise the host's own. */
+  private savedPassword(secret: Live['secret']): ReturnType<SshVault['password']> {
+    return secret.kind === 'identity' ? this.deps.vault.identityPassword(secret.id) : this.deps.vault.password(secret.id);
   }
 
   private ask(cellId: string, key: string | null, body: PromptBody): Promise<Answer> {
@@ -236,8 +246,13 @@ export class SshCoordinator {
           return true;
         }
         if (m.phase === 'connected' && live.pendingSave !== undefined) {
-          // A failed write only loses the "remember" wish; the session itself is fine.
-          try { if (this.deps.vault.setPassword(live.state.hostId, live.pendingSave).ok) this.deps.events.vaultChanged(); } catch { /* not saved */ }
+          // A failed write only loses the "remember" wish; the session itself is fine. A host that signs in with an identity
+          // saves it as the identity's password (the one its login uses).
+          const { secret, pendingSave } = live;
+          try {
+            const saved = secret.kind === 'identity' ? this.deps.vault.setIdentityPassword(secret.id, pendingSave) : this.deps.vault.setPassword(secret.id, pendingSave);
+            if (saved.ok) this.deps.events.vaultChanged();
+          } catch { /* not saved */ }
         }
         if (!isLivePhase(m.phase)) { live.pendingSave = undefined; this.withdraw(m.id); }
         if (m.phase === 'connected') live.pendingSave = undefined;
@@ -288,7 +303,7 @@ export class SshCoordinator {
     if (!live || !isLivePhase(live.state.phase)) { reply(null); return; }
     // A sudo password (0.9.9) is asked only for SFTP sessions and never saved.
     if (m.kind === 'sudo' && live.kind !== 'session') { reply(null); return; }
-    const saved = m.kind === 'sudo' ? this.deps.vault.password(live.state.hostId) : null;
+    const saved = m.kind === 'sudo' ? this.savedPassword(live.secret) : null;
     const body: PromptBody = m.kind === 'password'
       ? { kind: 'password', user: live.user, endpoint: live.endpoint, canSave: !this.deps.vault.readOnly(), retry: m.retry }
       : m.kind === 'sudo' ? { kind: 'sudo', user: live.user, endpoint: live.endpoint, canUseSaved: !!saved?.ok, retry: m.retry }
@@ -299,7 +314,7 @@ export class SshCoordinator {
     if (!('values' in answer)) { reply(null); return; }
     if (m.kind === 'sudo') {
       if (!answer.useSaved) { reply(answer.values); return; }
-      const now = this.deps.vault.password(live.state.hostId);
+      const now = this.savedPassword(live.secret);
       reply(now.ok ? [now.password] : null);
       return;
     }
@@ -348,6 +363,7 @@ export class SshCoordinator {
 
   stateChanged(state: AppState): void {
     try { if (this.deps.vault.prunePasswords(new Set(state.sshHosts.map((h) => h.id)))) this.deps.events.vaultChanged(); } catch { /* retried on the next change */ }
+    try { if (this.deps.vault.pruneIdentityPasswords(new Set((state.sshIdentities ?? []).map((i) => i.id)))) this.deps.events.vaultChanged(); } catch { /* retried on the next change */ }
     for (const [cellId, live] of this.sessionsByCell) if (!isLivePhase(live.state.phase) && !findCell(state, cellId)) this.sessionsByCell.delete(cellId);
   }
 

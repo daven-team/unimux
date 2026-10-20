@@ -284,7 +284,7 @@ try {
   await until(() => evaluate(`(() => { const ssh = [...document.querySelectorAll('.cell')].filter(c => c.querySelector('.cell-head .ssh-host')); return ssh.length === 3 && ssh.every(c => !c.querySelector('.ssh-card') && !c.querySelector('.ssh-bar') && !c.querySelector('.status-text.ssh')); })()`), 'three SSH sessions');
   await click('.workspace-tabs .ssh-tab');
   await until(() => evaluate('document.querySelectorAll(".ssh-tile .ssh-state.connected").length === 3'), 'connected tiles');
-  await evaluate(`(() => { const tile = [...document.querySelectorAll('.ssh-tile[data-host-id]')].find((t) => t.textContent.includes('web-1')); tile.click(); })()`);
+  await evaluate(`(() => { const tile = [...document.querySelectorAll('.ssh-tile[data-host-id]')].find((t) => t.textContent.includes('web-1')); tile.closest('.ssh-host-card').querySelector('.ssh-host-edit').click(); })()`);
   await until(() => evaluate(`document.querySelector('.ssh-view-detail h2')?.textContent === 'web-1'`), 'web-1 details');
   // The sidebar still shows the Git panel from the previous shot: the SSH shot shows the project list instead.
   await click('#projects-view');

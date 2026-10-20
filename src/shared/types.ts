@@ -6,6 +6,7 @@ import type { AgentRole, AutomationState } from './automation';
 import type { BackgroundLoadMode } from './backgroundLoad';
 import type { Overrides as ShortcutOverrides } from './shortcuts';
 import type { SshCellRef, SshHost } from './ssh';
+import type { SshIdentity } from './sshIdentity';
 import type { SftpPlaces } from './sftpView';
 import type { DbConnection } from './db';
 
@@ -174,6 +175,8 @@ export interface AppState {
   snippets: Snippet[];
   /** Saved SSH hosts (no secrets: those live in <data>/ssh/vault.json, owned by main). */
   sshHosts: SshHost[];
+  /** Saved SSH identities (user name and key reference; their passwords live in the SSH vault). Absent in files before identities. */
+  sshIdentities: SshIdentity[];
   /** The SFTP view's last local folder and last remote folder per host (0.9.8). */
   sftp: SftpPlaces;
   /**

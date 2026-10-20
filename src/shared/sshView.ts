@@ -1,11 +1,12 @@
 // Pure helpers of the SSH view (the `ssh` workspace tab, W3). No DOM imports: tested in Node.
-import { groupHosts, isLivePhase, type SshHost, type SshSessionState } from './ssh';
+import { groupHosts, isLivePhase, toggleSelection, type SshHost, type SshSessionState } from './ssh';
 
-/** What the details pane of the SSH view shows; a host without id is the "Nowy host" form. */
+/** What the details pane of the SSH view shows; a host (or identity) without id is the "Nowy host" ("Nowa tożsamość") form. */
 export type SshDetail =
   | { kind: 'host'; hostId?: string }
   | { kind: 'key'; keyId: string }
-  | { kind: 'newKey'; mode?: NewKeyMode; seq?: number };
+  | { kind: 'newKey'; mode?: NewKeyMode; seq?: number }
+  | { kind: 'identity'; identityId?: string };
 
 export type NewKeyMode = 'generate' | 'file' | 'paste';
 
@@ -24,16 +25,24 @@ export function hostTileState(hostId: string, cells: ReadonlyArray<{ id: string;
   return state;
 }
 
-/** A detail whose host or key no longer exists shows the empty hint instead. */
-export function liveDetail(detail: SshDetail | null, hosts: ReadonlyArray<Pick<SshHost, 'id'>>, keyIds: readonly string[]): SshDetail | null {
+/** A detail whose host, key or identity no longer exists shows the empty hint instead. */
+export function liveDetail(detail: SshDetail | null, hosts: ReadonlyArray<Pick<SshHost, 'id'>>, keyIds: readonly string[], identityIds: readonly string[] = []): SshDetail | null {
   if (!detail) return null;
   if (detail.kind === 'host' && detail.hostId && !hosts.some((h) => h.id === detail.hostId)) return null;
   if (detail.kind === 'key' && !keyIds.includes(detail.keyId)) return null;
+  if (detail.kind === 'identity' && detail.identityId && !identityIds.includes(detail.identityId)) return null;
   return detail;
 }
 
-/** React key of the pane: another host or key is a fresh pane (typed secrets and drafts of the previous one are dropped, R12). */
-export const detailKey = (d: SshDetail): string => (d.kind === 'host' ? `host:${d.hostId ?? 'new'}` : d.kind === 'key' ? `key:${d.keyId}` : `newKey:${d.mode ?? 'generate'}${d.seq ? `:${d.seq}` : ''}`);
+/** React key of the pane: another host, key or identity is a fresh pane (typed secrets and drafts of the previous one are dropped, R12). */
+export const detailKey = (d: SshDetail): string => {
+  switch (d.kind) {
+    case 'host': return `host:${d.hostId ?? 'new'}`;
+    case 'key': return `key:${d.keyId}`;
+    case 'identity': return `identity:${d.identityId ?? 'new'}`;
+    default: return `newKey:${d.mode ?? 'generate'}${d.seq ? `:${d.seq}` : ''}`;
+  }
+};
 
 /** "Nowy klucz > mode" from the header: an open new-key pane (in any mode) is replaced by a fresh one in the asked mode. */
 export function newKeyDetail(current: SshDetail | null, mode: NewKeyMode): SshDetail & { kind: 'newKey' } {
@@ -71,7 +80,7 @@ export function chooseSshSection(current: SshSection, clicked: string): SshSecti
   return entry && !entry.disabled ? (entry.id as SshSection) : current;
 }
 
-/** The section a detail belongs to (a host form to Hosty, a key or a new-key form to Klucze); null keeps the current one. */
+/** The section a detail belongs to (a host form to Hosty; a key, a new-key form or an identity to Klucze); null keeps the current one. */
 export function sectionForDetail(detail: SshDetail | null): SshSection | null {
   if (!detail) return null;
   return detail.kind === 'host' ? 'hosts' : 'keys';
@@ -158,3 +167,24 @@ export function paneLeaves(prev: PaneScreen, next: PaneScreen): boolean {
   const after = paneDetail(next.section, next.detail);
   return !after || detailKey(after) !== detailKey(before);
 }
+
+// ── host cards (Termius-like) ────────────────────────────────────────────────
+
+/**
+ * Ctrl/Cmd+click on a host card toggles it in the multi-selection. A plain click only picks one card (it no longer opens the
+ * editor: the pencil does), and that card is where a multi-selection starts, so "click A, Ctrl+click B" selects both. A picked
+ * card that is not shown (searched away, in a folded group) never joins: "Otwórz jako siatkę (n)" counts shown hosts only. The
+ * clicked card stays picked only while it is selected (a card Ctrl+clicked out of the selection does not look selected).
+ */
+export function ctrlPick(selected: readonly string[], picked: string | null, clicked: string, shown: readonly string[]): { selected: string[]; picked: string | null } {
+  const start = !selected.length && picked && picked !== clicked && shown.includes(picked) ? [picked] : selected;
+  const next = toggleSelection(start, clicked);
+  return { selected: next, picked: next.includes(clicked) ? clicked : null };
+}
+
+/** The second line of a host card, like Termius: the protocol, the user name and the tags ("ssh, adam, hetzner"). */
+export const hostCardDetail = (h: Pick<SshHost, 'username' | 'tags'>): string => ['ssh', h.username, ...(h.tags ?? [])].join(', ');
+
+/** Enter on a host card connects, like a double-click; with a modifier it is left to the rest of the app. */
+export const cardKeyConnects = (e: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }): boolean =>
+  e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;

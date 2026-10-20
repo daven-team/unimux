@@ -1,13 +1,15 @@
 // The SSH view (W3, SSH mode in 0.9.2): one workspace tab with three sections chosen in the side panel (SshNav): Hosty (group
-// tiles, host tiles by group), Klucze (key tiles) and Znane hosty (trusted host keys). A details pane on the right shows a
-// host or key only while one is chosen; with nothing chosen the tiles use the whole width. Opened by the SSH rail tile, the
-// palette, "Edytuj host" and "Wszystkie hosty…" (Add and cell menus). It stays mounted while its tab is open; the pane is
-// "active" only while the view is on screen (D4: typed secrets go).
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+// tiles, host cards by group), Klucze (identities and key tiles) and Znane hosty (trusted host keys). A details pane on the
+// right shows a host, key or identity only while one is chosen; with nothing chosen the tiles use the whole width. Opened by
+// the SSH rail tile, the palette, "Edytuj host" and "Wszystkie hosty…" (Add and cell menus). It stays mounted while its tab is
+// open; the pane is "active" only while the view is on screen (D4: typed secrets go).
+// Host cards work like Termius: a click picks the card, a double-click or Enter connects, the pencil opens the editor.
+import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { activeProject, activeTab, duplicateSshHost, updateSshHost } from '../../../../shared/state';
-import { existingSelection, filterHosts, groupHosts, parseFoldedGroups, toggleSelection, userAtEndpoint, type SshHost } from '../../../../shared/ssh';
+import { existingSelection, filterHosts, groupHosts, parseFoldedGroups, userAtEndpoint, type SshHost } from '../../../../shared/ssh';
+import { identityCredential, identityCredentialText } from '../../../../shared/sshIdentity';
 import {
-  clickedDetail, detailKey, groupTiles, hostsInGroup, hostTileState, liveDetail, liveGroupFilter, newKeyDetail, paneDetail, paneEscape, paneLeaves,
+  cardKeyConnects, clickedDetail, ctrlPick, detailKey, groupTiles, hostCardDetail, hostsInGroup, hostTileState, liveDetail, liveGroupFilter, newKeyDetail, paneDetail, paneEscape, paneLeaves,
   showGroupHeadings, showGroupRow, toggleGroupFilter, visibleSelection, type NewKeyMode, type PaneScreen, type SshDetail,
 } from '../../../../shared/sshView';
 import type { MessageKey } from '../../../../shared/i18n';
@@ -17,9 +19,11 @@ import { askChoice, askText, getS, setUi, update, useStore } from '../../store';
 import { useSshStore } from '../../sshStore';
 import { confirmRemoveSshHost, openHostInCell, openHostsAsGrid, showSshDetail } from '../../ssh';
 import { openMenu, openMenuAt, type MenuItem } from '../ContextMenu';
-import { IChevron, IKey, IPlus, IServer, IX } from '../icons';
+import { IChevron, IEdit, IKey, IPlus, IServer, IX } from '../icons';
 import { HostEditor } from './HostEditor';
+import { IdentityEditor } from './IdentityEditor';
 import { KeyEditor } from './KeyEditor';
+import { IIdentity } from './sshIcons';
 import { KnownHostsView } from './KnownHostsView';
 import { NewKeyEditor } from './NewKeyEditor';
 import { PaneActive, PaneDirty, paneGuardOff, withoutPaneGuard } from './paneVisibility';
@@ -43,6 +47,7 @@ const newKeyItems = (tr: (key: MessageKey) => string): MenuItem[] => [
 export function SshView() {
   const { tr } = useI18n();
   const hosts = useStore((st) => st.s.sshHosts);
+  const identities = useStore((st) => st.s.sshIdentities);
   const settingsActive = useStore((st) => st.ui.settingsActive);
   const collapsed = useStore((st) => st.s.sidebarCollapsed);
   const viewActive = useSshStore((st) => st.viewActive);
@@ -50,7 +55,7 @@ export function SshView() {
   const storedDetail = useSshStore((st) => st.detail);
   const section = useSshStore((st) => st.section);
   const keys = vault?.keys ?? [];
-  const detail = paneDetail(section, liveDetail(storedDetail, hosts, keys.map((k) => k.id)));
+  const detail = paneDetail(section, liveDetail(storedDetail, hosts, keys.map((k) => k.id), identities.map((i) => i.id)));
 
   /** Unsaved changes reported by the pane's editors (useReportDirty). */
   const dirty = useRef(new Map<string, boolean>());
@@ -72,9 +77,9 @@ export function SshView() {
     const screen = (st: Screen, closed: boolean): Partial<Screen> => ({
       section: st.section, detail: st.detail, selectedHosts: st.selectedHosts, ...(closed ? { viewOpen: st.viewOpen, viewActive: st.viewActive } : {}),
     });
-    // A deleted host or key is not an edit to keep (its editor asked before deleting).
+    // A deleted host, key or identity is not an edit to keep (its editor asked before deleting).
     const shownLive = (st: PaneScreen & { vault: { keys: Array<{ id: string }> } | null }) =>
-      liveDetail(paneDetail(st.section, st.detail), getS().sshHosts, (st.vault?.keys ?? []).map((k) => k.id)) !== null;
+      liveDetail(paneDetail(st.section, st.detail), getS().sshHosts, (st.vault?.keys ?? []).map((k) => k.id), getS().sshIdentities.map((i) => i.id)) !== null;
     return useSshStore.subscribe((st, prev) => {
       if (paneGuardOff() || !dirty.current.size || !paneLeaves(prev, st) || !shownLive(prev)) return;
       const closed = !st.viewOpen;
@@ -96,7 +101,9 @@ export function SshView() {
     if (useSshStore.getState().detail !== storedDetail) return;
     withoutPaneGuard(() => showSshDetail(null));
     if (!shown || shown.kind === 'newKey') return;
-    const selector = shown.kind === 'host' ? (shown.hostId ? `.ssh-tile[data-host-id="${shown.hostId}"]` : null) : `.ssh-tile[data-key-id="${shown.keyId}"]`;
+    const selector = shown.kind === 'host' ? (shown.hostId ? `.ssh-tile[data-host-id="${shown.hostId}"]` : null)
+      : shown.kind === 'identity' ? (shown.identityId ? `.ssh-tile[data-identity-id="${shown.identityId}"]` : null)
+        : `.ssh-tile[data-key-id="${shown.keyId}"]`;
     if (selector) requestAnimationFrame(() => document.querySelector<HTMLElement>(selector)?.focus());
   };
   const onPaneKeyDown = (e: KeyboardEvent) => {
@@ -127,7 +134,7 @@ export function SshView() {
         {collapsed && <SshNav compact />}
         {vault?.storage === 'unavailable' && <div className="ssh-banner-warn">{tr('Szyfrowanie systemowe jest niedostępne - klucze i hasła są trzymane tylko do zamknięcia aplikacji')}</div>}
         <div id="ssh-section" role="tabpanel" className="ssh-view-body" aria-label={tr(section === 'hosts' ? 'Hosty' : section === 'keys' ? 'Klucze' : section === 'sftp' ? 'SFTP' : 'Znane hosty')}>
-          {section === 'hosts' && <HostsSection detail={detail} onConnect={connect} onClosePane={closePane} />}
+          {section === 'hosts' && <HostsSection detail={detail} onConnect={connect} />}
           {section === 'keys' && <KeysSection detail={detail} onClosePane={closePane} />}
           {section === 'knownHosts' && <KnownHostsView />}
         </div>
@@ -159,7 +166,7 @@ function EmptyState({ icon, title, text, children }: { icon: ReactNode; title: s
   );
 }
 
-function HostsSection({ detail, onConnect, onClosePane }: { detail: SshDetail | null; onConnect: (hostId: string, target: 'cell' | 'tab') => void; onClosePane: () => Promise<void> }) {
+function HostsSection({ detail, onConnect }: { detail: SshDetail | null; onConnect: (hostId: string, target: 'cell' | 'tab') => void }) {
   const { tr } = useI18n();
   const hosts = useStore((st) => st.s.sshHosts);
   const projects = useStore((st) => st.s.projects);
@@ -169,6 +176,22 @@ function HostsSection({ detail, onConnect, onClosePane }: { detail: SshDetail | 
   const selected = useMemo(() => existingSelection(selectedIds, hosts), [selectedIds, hosts]);
   const cells = useMemo(() => projects.flatMap((p) => p.tabs.flatMap((t) => t.cells)), [projects]);
   const [query, setQuery] = useState('');
+  /** The card a plain click picked (highlighted; Enter connects it). A deleted host simply matches no card. */
+  const [picked, setPicked] = useState<string | null>(null);
+  /**
+   * The pick lives while the cards are in use (Termius): a press anywhere else (empty space, the search, the pane, a menu) clears
+   * it, like the focus leaving the cards (leaveCard), so a highlighted card is always the one Enter connects.
+   */
+  useEffect(() => {
+    if (!picked) return;
+    const away = (e: PointerEvent) => { if (!(e.target instanceof Element && e.target.closest('.ssh-host-card'))) setPicked(null); };
+    document.addEventListener('pointerdown', away, true);
+    return () => document.removeEventListener('pointerdown', away, true);
+  }, [picked]);
+  // The view going to the background (a grid after connecting, a file, Settings) takes the focus from the cards: the pick goes too.
+  const viewActive = useSshStore((st) => st.viewActive);
+  const settingsActive = useStore((st) => st.ui.settingsActive);
+  useEffect(() => { if (!viewActive || settingsActive) setPicked(null); }, [viewActive, settingsActive]);
   const [chosenGroup, setGroup] = useState<string | null>(null);
   const [folded, setFolded] = useState<string[]>(() => parseFoldedGroups(localStorage.getItem(FOLD_KEY)));
   const searching = !!query.trim();
@@ -176,6 +199,9 @@ function HostsSection({ detail, onConnect, onClosePane }: { detail: SshDetail | 
   const group = liveGroupFilter(chosenGroup, hosts);
   const groups = groupHosts(filterHosts(hostsInGroup(hosts, group), query), !searching);
   const headings = showGroupHeadings(hosts);
+  const groupOpen = (key: string) => !headings || !folded.includes(key) || searching;
+  /** The cards on screen: a picked card outside them never starts a multi-selection. */
+  const shownIds = groups.flatMap((g) => (groupOpen(g.name ?? '') ? g.hosts.map((h) => h.id) : []));
   const sshInGrid = activeGrid?.cells.filter((c) => c.ssh).length ?? 0;
 
   const toggleFold = (key: string) => {
@@ -188,22 +214,25 @@ function HostsSection({ detail, onConnect, onClosePane }: { detail: SshDetail | 
     if (next === undefined || next === name) return;
     update((s) => s.sshHosts.filter((h) => h.group === name).reduce((acc, h) => updateSshHost(acc, h.id, { group: next || undefined }), s));
   };
+  /** The selection and the picked card go together: a cleared selection never comes back with the next Ctrl+click. */
+  const clearSelection = () => { setPicked(null); useSshStore.setState({ selectedHosts: [] }); };
   /** A different group filter clears the selection, so "Otwórz jako siatkę (n)" never counts hosts that are not shown. */
   const chooseGroup = (next: string | null) => {
     if (next === group) return;
     setGroup(next);
-    useSshStore.setState({ selectedHosts: [] });
+    clearSelection();
   };
   /** Typing in the search keeps only the selected hosts that stay visible ("Otwórz jako siatkę (n)" never counts hidden ones). */
   const search = (next: string) => {
     setQuery(next);
     const visible = filterHosts(hostsInGroup(hosts, group), next);
+    if (picked && !visible.some((h) => h.id === picked)) setPicked(null);
     useSshStore.setState((st) => {
       const kept = visibleSelection(st.selectedHosts, visible);
       return kept.length === st.selectedHosts.length ? {} : { selectedHosts: kept };
     });
   };
-  const openGrid = (ids: string[]) => { showTerminalTabs(); void openHostsAsGrid(ids); useSshStore.setState({ selectedHosts: [] }); };
+  const openGrid = (ids: string[]) => { showTerminalTabs(); void openHostsAsGrid(ids); clearSelection(); };
   const groupMenu = (e: MouseEvent, name: string | null, ids: string[]) => {
     e.preventDefault();
     openMenu(e.clientX, e.clientY, [
@@ -211,13 +240,31 @@ function HostsSection({ detail, onConnect, onClosePane }: { detail: SshDetail | 
       ...(name ? [{ label: tr('Zmień nazwę grupy'), onClick: () => void renameGroup(name) }] : []),
     ]);
   };
+  /** A click only picks the card (Termius): the editor opens from the pencil, a double-click or Enter connects. */
   const clickTile = (e: MouseEvent, h: SshHost) => {
-    if (e.ctrlKey || e.metaKey) { useSshStore.setState((st) => ({ selectedHosts: toggleSelection(st.selectedHosts, h.id) })); return; }
-    // The second click of a double-click (connect) must not close the pane the first click opened.
-    if (e.detail > 1) return;
-    useSshStore.setState({ selectedHosts: [] });
-    const next = clickedDetail(detail, { kind: 'host', hostId: h.id });
-    if (next) showSshDetail(next); else void onClosePane();
+    if (e.ctrlKey || e.metaKey) {
+      const next = ctrlPick(useSshStore.getState().selectedHosts, picked, h.id, shownIds);
+      useSshStore.setState({ selectedHosts: next.selected });
+      setPicked(next.picked);
+      return;
+    }
+    setPicked(h.id);
+    if (useSshStore.getState().selectedHosts.length) useSshStore.setState({ selectedHosts: [] });
+  };
+  /** Enter connects the card with the focus; Esc drops the pick (and, in SshView, the selection). */
+  const tileKeyDown = (e: KeyboardEvent, h: SshHost) => {
+    if (cardKeyConnects(e)) { e.preventDefault(); setPicked(h.id); onConnect(h.id, 'cell'); return; }
+    if (e.key === 'Escape') setPicked(null);
+  };
+  /** Tab to a card picks it, so the highlight follows the keyboard; a mouse focus leaves picking to the click (Ctrl+click). */
+  const focusTile = (e: FocusEvent<HTMLButtonElement>, h: SshHost) => { if (e.currentTarget.matches(':focus-visible')) setPicked(h.id); };
+  /** The focus going to anything but a card (the search, the pane, a dialog) drops the pick; a window switch (no target) keeps it. */
+  const leaveCard = (e: FocusEvent) => { if (e.relatedTarget instanceof Element && !e.relatedTarget.closest('.ssh-host-card')) setPicked(null); };
+  const editHost = (hostId: string) => {
+    showSshDetail({ kind: 'host', hostId });
+    // Unsaved edits keep the pane on its host while the user is asked: the other card is not picked then.
+    const shown = useSshStore.getState().detail;
+    if (shown?.kind === 'host' && shown.hostId === hostId) setPicked(hostId);
   };
   const hostMenu = (e: MouseEvent, h: SshHost) => {
     e.preventDefault();
@@ -226,7 +273,7 @@ function HostsSection({ detail, onConnect, onClosePane }: { detail: SshDetail | 
       { label: tr('Otwórz w nowym gridzie'), onClick: () => onConnect(h.id, 'tab') },
       { label: tr('Otwórz SFTP'), onClick: () => openSftp({ hostId: h.id }) },
       { sep: true },
-      { label: tr('Edytuj'), onClick: () => showSshDetail({ kind: 'host', hostId: h.id }) },
+      { label: tr('Edytuj'), onClick: () => editHost(h.id) },
       { label: tr('Duplikuj'), onClick: () => update((s) => duplicateSshHost(s, h.id)) },
       { label: tr('Kopiuj adres'), onClick: () => window.mc.clipboardWrite(userAtEndpoint(h)) },
       { sep: true },
@@ -253,7 +300,7 @@ function HostsSection({ detail, onConnect, onClosePane }: { detail: SshDetail | 
         <div className="ssh-view-selection">
           <span>{tr('Zaznaczono {count}', { count: selected.length })}</span>
           <button className="btn small primary ssh-open-grid" onClick={() => openGrid(selected)}>{tr('Otwórz jako siatkę ({count})', { count: selected.length })}</button>
-          <button className="btn small ghost" onClick={() => useSshStore.setState({ selectedHosts: [] })}>{tr('Wyczyść zaznaczenie')}</button>
+          <button className="btn small ghost" onClick={clearSelection}>{tr('Wyczyść zaznaczenie')}</button>
         </div>
       )}
       {!hosts.length ? (
@@ -287,7 +334,7 @@ function HostsSection({ detail, onConnect, onClosePane }: { detail: SshDetail | 
           <section className="ssh-view-section" aria-label={tr('Hosty')}>
             {!groups.length ? <p className="ssh-view-none">{tr('Nic nie znaleziono.')}</p> : groups.map((g) => {
               const key = g.name ?? '';
-              const open = !headings || !folded.includes(key) || searching;
+              const open = groupOpen(key);
               const ids = g.hosts.map((h) => h.id);
               return (
                 <div key={key} className="ssh-view-group">
@@ -300,19 +347,29 @@ function HostsSection({ detail, onConnect, onClosePane }: { detail: SshDetail | 
                     <button className="btn small ghost ssh-group-open" onClick={() => openGrid(ids)}>{tr('Otwórz jako siatkę')}</button>
                   </div>}
                   {open && (
-                    <div className="ssh-tiles">
+                    <div className="ssh-tiles ssh-host-cards">
                       {g.hosts.map((h) => {
                         const state = hostTileState(h.id, cells, sessions);
                         const current = detail?.kind === 'host' && detail.hostId === h.id;
+                        const chosen = selected.includes(h.id);
                         return (
-                          <button key={h.id} className={`ssh-tile${selected.includes(h.id) ? ' selected' : ''}${current ? ' current' : ''}`} data-host-id={h.id}
-                            aria-current={current ? 'true' : undefined} aria-pressed={selected.includes(h.id)}
-                            onClick={(e) => clickTile(e, h)} onDoubleClick={() => onConnect(h.id, 'cell')} onContextMenu={(e) => hostMenu(e, h)}
-                            title={`${userAtEndpoint(h)} · ${tr(STATE_LABEL[state])}`}>
-                            <span className="ssh-tile-name"><span className="ssh-dot" style={{ background: h.color ?? 'var(--muted)' }} />{h.label}</span>
-                            <span className="ssh-tile-detail">{userAtEndpoint(h)}</span>
-                            <span className={`ssh-state ${state}`} aria-label={tr(STATE_LABEL[state])} />
-                          </button>
+                          <div key={h.id} className="ssh-host-card" onBlur={leaveCard}>
+                            <button className={`ssh-tile ssh-host-tile${chosen ? ' selected' : ''}${current ? ' current' : ''}${picked === h.id ? ' picked' : ''}`} data-host-id={h.id}
+                              aria-current={current ? 'true' : undefined} aria-pressed={chosen}
+                              onClick={(e) => clickTile(e, h)} onDoubleClick={() => onConnect(h.id, 'cell')} onKeyDown={(e) => tileKeyDown(e, h)} onFocus={(e) => focusTile(e, h)} onContextMenu={(e) => hostMenu(e, h)}
+                              title={`${userAtEndpoint(h)} · ${tr(STATE_LABEL[state])}\n${tr('Dwuklik lub Enter: połącz')}`}>
+                              <span className={`ssh-host-icon${h.color ? '' : ' uncolored'}`} style={h.color ? { background: h.color } : undefined} aria-hidden="true">
+                                <IServer />
+                                <span className={`ssh-state ${state}`} />
+                              </span>
+                              <span className="ssh-host-text">
+                                <span className="ssh-tile-name">{h.label}</span>
+                                <span className="ssh-tile-detail">{hostCardDetail(h)}</span>
+                              </span>
+                              <span className="sr-only">{tr(STATE_LABEL[state])}</span>
+                            </button>
+                            <button type="button" className="ssh-host-edit" aria-label={`${tr('Edytuj host')}: ${h.label}`} title={tr('Edytuj host')} onClick={() => editHost(h.id)}><IEdit /></button>
+                          </div>
                         );
                       })}
                     </div>
@@ -327,18 +384,49 @@ function HostsSection({ detail, onConnect, onClosePane }: { detail: SshDetail | 
   );
 }
 
+/** The Klucze section is the keychain: identities (a user name with an optional key and password) above the vault keys. */
 function KeysSection({ detail, onClosePane }: { detail: SshDetail | null; onClosePane: () => Promise<void> }) {
   const { tr } = useI18n();
   const vault = useSshStore((st) => st.vault);
+  const identities = useStore((st) => st.s.sshIdentities);
   const keys = vault?.keys ?? [];
+  const keyIds = keys.map((k) => k.id);
+  const sortedIdentities = useMemo(() => [...identities].sort((a, b) => a.label.localeCompare(b.label)), [identities]);
+  const toggle = (e: MouseEvent, clicked: SshDetail) => {
+    if (e.detail > 1) return;
+    const next = clickedDetail(detail, clicked);
+    if (next) showSshDetail(next); else void onClosePane();
+  };
   return (
     <>
       <div className="ssh-view-titlebar">
         <h2 className="ssh-view-title">{tr('Klucze')}</h2>
         <div className="ssh-view-actions">
+          <button className="btn ssh-new-identity" onClick={() => showSshDetail({ kind: 'identity' })}><IPlus />{tr('Nowa tożsamość')}</button>
           <button className="btn primary ssh-new-key" onClick={(e) => openMenuAt(e.currentTarget, newKeyItems(tr))}><IPlus />{tr('Nowy klucz')} <IChevron /></button>
         </div>
       </div>
+      <section className="ssh-view-section" aria-label={tr('Tożsamości')}>
+        <h3 className="ssh-view-subtitle">{tr('Tożsamości')}</h3>
+        {!sortedIdentities.length ? <p className="ssh-view-none">{tr('Brak tożsamości')}</p> : (
+          <div className="ssh-tiles">
+            {sortedIdentities.map((i) => {
+              const current = detail?.kind === 'identity' && detail.identityId === i.id;
+              return (
+                <button key={i.id} className={`ssh-tile ssh-identity-tile${current ? ' current' : ''}`} data-identity-id={i.id} aria-current={current ? 'true' : undefined}
+                  onClick={(e) => toggle(e, { kind: 'identity', identityId: i.id })} title={`${i.label} · ${i.username}`}>
+                  <span className="ssh-identity-icon" aria-hidden="true"><IIdentity /></span>
+                  <span className="ssh-host-text">
+                    <span className="ssh-tile-name">{i.label}</span>
+                    <span className="ssh-tile-detail">{i.username} · {tr(identityCredentialText(identityCredential(i, vault?.savedIdentityPasswords ?? [], keyIds)))}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </section>
+      {keys.length > 0 && <h3 className="ssh-view-subtitle">{tr('Klucze')}</h3>}
       {!keys.length ? (
         <EmptyState icon={<IKey />} title={tr('Nie masz jeszcze kluczy')} text={tr('Wygeneruj nowy klucz albo dodaj istniejący z pliku lub jako wklejony tekst. Klucz publiczny skopiujesz potem do authorized_keys na serwerze.')}>
           <button className="btn primary" onClick={() => newKey('generate')}>{tr('Wygeneruj klucz')}</button>
@@ -352,11 +440,7 @@ function KeysSection({ detail, onClosePane }: { detail: SshDetail | null; onClos
               const current = detail?.kind === 'key' && detail.keyId === k.id;
               return (
                 <button key={k.id} className={`ssh-tile ssh-key-tile${current ? ' current' : ''}`} data-key-id={k.id} aria-current={current ? 'true' : undefined}
-                  onClick={(e) => {
-                    if (e.detail > 1) return;
-                    const next = clickedDetail(detail, { kind: 'key', keyId: k.id });
-                    if (next) showSshDetail(next); else void onClosePane();
-                  }} title={k.fingerprint}>
+                  onClick={(e) => toggle(e, { kind: 'key', keyId: k.id })} title={k.fingerprint}>
                   <span className="ssh-tile-name">{k.label}{k.locked ? ' !' : ''}</span>
                   <span className="ssh-tile-detail"><span className="ssh-key-type">{shortType(k.type)}</span>{k.fingerprint}</span>
                 </button>
@@ -387,5 +471,6 @@ function DetailPane({ detail, onConnect }: { detail: SshDetail; onConnect: (host
     );
   }
   if (detail.kind === 'key') return <KeyEditor keyId={detail.keyId} />;
+  if (detail.kind === 'identity') return <IdentityEditor identityId={detail.identityId} />;
   return <NewKeyEditor initialMode={detail.mode} />;
 }

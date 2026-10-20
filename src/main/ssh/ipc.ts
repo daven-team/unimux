@@ -45,6 +45,8 @@ const S = {
   replace: z.object({ id, privateKey: secret(SSH_LIMITS.privateKey), passphrase: passphrase.optional(), savePassphrase: z.boolean() }).strict(),
   setPassword: z.object({ hostId: id, password: secret(SSH_LIMITS.password) }).strict(),
   byHost: z.object({ hostId: id }).strict(),
+  setIdentityPassword: z.object({ identityId: id, password: secret(SSH_LIMITS.password) }).strict(),
+  byIdentity: z.object({ identityId: id }).strict(),
   connect: z.object({ cellId: id, hostId: id, cols: z.number().int().min(2).max(2000), rows: z.number().int().min(1).max(1000) }).strict(),
   answer: z.union([
     z.object({ cellId: id, promptId: id, cancel: z.literal(true) }).strict(),
@@ -196,6 +198,20 @@ export function createSshHandlers(deps: SshIpcDeps) {
       try { deps.vault.clearPassword(p.data.hostId); } catch { return { ok: false }; }
       return changed({ ok: true });
     },
+    /** The password of an identity (shared/sshIdentity.ts): only for an identity that exists in the state; never echoed back. */
+    async setIdentityPassword(raw: unknown): Promise<{ ok: true; ephemeral: boolean } | { ok: false; error: 'notFound' | 'invalid' | 'readOnly' | 'failed' }> {
+      const p = S.setIdentityPassword.safeParse(raw);
+      if (!p.success) return { ok: false, error: 'invalid' };
+      if (!(deps.state().sshIdentities ?? []).some((i) => i.id === p.data.identityId)) return { ok: false, error: 'notFound' };
+      const r = guarded({ ok: false as const, error: 'failed' as const }, () => deps.vault.setIdentityPassword(p.data.identityId, p.data.password));
+      return r.ok ? changed({ ok: true, ephemeral: r.ephemeral }) : r;
+    },
+    async clearIdentityPassword(raw: unknown): Promise<{ ok: boolean }> {
+      const p = S.byIdentity.safeParse(raw);
+      if (!p.success) return { ok: false };
+      try { deps.vault.clearIdentityPassword(p.data.identityId); } catch { return { ok: false }; }
+      return changed({ ok: true });
+    },
     async forgetPassphrases(): Promise<{ ok: boolean }> { deps.vault.forgetRemembered(); return { ok: true }; },
     async storageStatus(): Promise<SshStorageStatus> {
       return { vaultFile: deps.vault.filePath(), vaultReadOnly: deps.vault.readOnly(), knownHostsFile: deps.knownHosts.filePath(), knownHostsReadOnly: deps.knownHosts.readOnly() };
@@ -227,6 +243,7 @@ export const SSH_CHANNELS = {
   'ssh:vault:info': 'vaultInfo', 'ssh:key:generate': 'generateKey', 'ssh:key:pickFile': 'pickKeyFile', 'ssh:key:draftFromFile': 'draftFromFile',
   'ssh:key:draftFromText': 'draftFromText', 'ssh:key:unlockDraft': 'unlockDraft', 'ssh:key:commitDraft': 'commitDraft', 'ssh:key:update': 'updateKey',
   'ssh:key:remove': 'removeKey', 'ssh:key:exportPrivate': 'exportPrivateKey', 'ssh:key:revealPrivate': 'revealPrivateKey', 'ssh:key:replacePrivate': 'replacePrivateKey', 'ssh:password:set': 'setPassword', 'ssh:password:clear': 'clearPassword',
+  'ssh:identityPassword:set': 'setIdentityPassword', 'ssh:identityPassword:clear': 'clearIdentityPassword',
   'ssh:passphrases:forget': 'forgetPassphrases', 'ssh:storage:status': 'storageStatus', 'ssh:knownHosts:list': 'knownHosts', 'ssh:knownHosts:remove': 'removeKnownHost',
   'ssh:connect': 'connect', 'ssh:sessions': 'sessions', 'ssh:prompt:answer': 'answer',
 } as const satisfies Record<string, Exclude<keyof SshHandlers, 'discardDraft'>>;
