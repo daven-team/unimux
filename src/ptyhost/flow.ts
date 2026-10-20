@@ -118,28 +118,50 @@ export const ECHO_FLUSHES = 4;
 export const ECHO_EWMA_WEIGHT = 0.25;
 
 /**
- * How long a terminal takes to answer a keystroke: a moving average of keystroke -> first output, measured from the first
- * keystroke still waiting for an answer (fast typing measures the oldest key, whose echo comes first). Its `window` is the
- * echo window of the terminal: ECHO_WINDOW_MS for anything answering within about 65 ms (local shells, nearby servers),
- * else twice the average plus a margin for jitter, at most ECHO_WINDOW_MAX_MS. Without it an SSH server with a round trip
- * above 150 ms had every echo after a pause in typing wait for the coalescing timer.
+ * How long a terminal takes to answer a keystroke: a moving average of keystroke -> first output. Only a key typed after a
+ * pause (no key for the current window) into a quiet terminal (no output for the average answer time) is measured: an
+ * earlier key's echo cannot be on its way then, and the first output after it is its own answer. Measuring keys typed while
+ * earlier echoes were still on their way took (round trip - typing gap) for the round trip when typing faster than the
+ * server answers, and output of a busy terminal (a build, a spinner) was taken for answers: both pulled the window down to
+ * 150 ms again. Its `window` is the echo window of the terminal: ECHO_WINDOW_MS for anything answering within about 65 ms
+ * (local shells, nearby servers), else twice the average plus a margin for jitter, at most ECHO_WINDOW_MAX_MS. Without it
+ * an SSH server with a round trip above 150 ms had every echo after a pause in typing wait for the coalescing timer.
+ * Times are of a monotonic clock (performance.now()).
  */
 export class EchoClock {
   private waitingSince: number | null = null;
   private average: number | null = null;
+  private lastKey = -Infinity;
+  private lastOutput = -Infinity;
 
   /** The user typed at `now`. */
   keystroke(now: number): void {
-    if (this.waitingSince === null || now - this.waitingSince > ECHO_WINDOW_MAX_MS) this.waitingSince = now;
+    // A key without an answer in time (a password, a key without output) is not measured any more.
+    if (this.waitingSince !== null && now - this.waitingSince > ECHO_WINDOW_MAX_MS) this.waitingSince = null;
+    if (this.waitingSince === null && now - this.lastKey >= this.window && now - this.lastOutput >= (this.average ?? 0)) {
+      this.waitingSince = now;
+    }
+    this.lastKey = now;
   }
 
   /** The terminal printed something at `now`: the answer to the keystroke that waits, if any. */
   output(now: number): void {
+    this.lastOutput = now;
     if (this.waitingSince === null) return;
     const sample = now - this.waitingSince;
     this.waitingSince = null;
-    if (sample > ECHO_WINDOW_MAX_MS) return; // no echo (a password, a key without output): what came now is something else
+    // Above the cap: no echo (a password, a key without output), what came now is something else. Negative: a clock that
+    // went back.
+    if (sample < 0 || sample > ECHO_WINDOW_MAX_MS) return;
     this.average = this.average === null ? sample : this.average + (sample - this.average) * ECHO_EWMA_WEIGHT;
+  }
+
+  /**
+   * A first estimate before any key was measured (an SSH session: one round trip of its shell request), so the first key
+   * typed already gets the window of a slow server. Ignored once a key was measured.
+   */
+  seed(ms: number): void {
+    if (this.average === null && ms >= 0 && ms <= ECHO_WINDOW_MAX_MS) this.average = ms;
   }
 
   /** Average keystroke -> answer time in ms (null before the first answer). */

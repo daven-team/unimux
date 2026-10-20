@@ -205,6 +205,24 @@ describe('SshManager', () => {
     expect(s.input.join('')).toBe('xyz');
   });
 
+  // 1.0.1 review: on a server farther away than the local echo window, the first key of a session still waited for the
+  // coalescing timer (nothing was measured yet). The shell request's round trips give a first estimate.
+  it('seeds the echo window from the round trips of the shell request', async () => {
+    const s = await server({ password: 'pw' });
+    const h = harness();
+    h.m.connect(req(s.port, { password: 'pw' }));
+    type Shell = (opts: unknown, cb: (...a: unknown[]) => void) => unknown;
+    type Internals = { sessions: Map<string, { client: { shell: Shell }; out: { echoWindow: number } }> };
+    const session = (h.m as unknown as Internals).sessions.get('c1')!;
+    const shell = session.client.shell.bind(session.client);
+    // A server 200 ms away: the channel open, pty and shell requests take a round trip each.
+    session.client.shell = (opts: unknown, cb: (...a: unknown[]) => void) => shell(opts, (...a: unknown[]) => setTimeout(() => cb(...a), 3 * 200));
+    await h.trust();
+    await waitFor(() => h.phases().includes('connected'));
+    expect(session.out.echoWindow).toBeGreaterThanOrEqual(2 * 200 + 20);
+    expect(session.out.echoWindow).toBeLessThan(600);
+  });
+
   it('types the startup command once, after the greeting and a quiet period', async () => {
     const s = await server({ password: 'pw' });
     const h = harness();

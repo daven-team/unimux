@@ -1,6 +1,6 @@
-// Server side of the SSH typing latency bench (test/ssh-latency.bench.test.ts), run in a child process of its own so the
-// load the bench puts on the Pty Host's event loop never slows the "remote" end down. 127.0.0.1 only, user alice, no
-// credentials ("none" method), a fresh host key on every start.
+// Server side of the SSH typing latency bench (scripts/ssh-latency-bench.mjs, test/helpers/sshLatencyBench.ts), run in a
+// child process of its own so the load the bench puts on the Pty Host's event loop never slows the "remote" end down.
+// 127.0.0.1 only, user alice, no credentials ("none" method), a fresh host key on every start.
 // - The shell echoes every typed character like a line editor. mode "split" also redraws `splitMs` later (zsh with
 //   syntax highlighting / autosuggestions, fish): the echo reaches the client as two SSH packets.
 // - A TCP proxy in front of the server delays each direction by half of `rttMs` (an emulated network round trip).

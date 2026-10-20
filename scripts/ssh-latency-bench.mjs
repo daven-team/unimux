@@ -27,8 +27,9 @@ const dir = mkdtempSync(join(tmpdir(), 'unimux-ssh-bench-'));
 // CommonJS: ssh2 uses __dirname.
 const out = join(dir, 'bench.cjs');
 try {
+  // nodePaths: an exported `src` has no node_modules of its own on the way up; it takes this checkout's.
   await build({ entryPoints: [resolve('test/helpers/sshLatencyBench.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: out,
-    external: ['electron', 'node-pty', 'cpu-features'], logLevel: 'error', plugins: otherSrc });
+    external: ['electron', 'node-pty', 'cpu-features'], logLevel: 'error', plugins: otherSrc, nodePaths: [resolve('node_modules')] });
   const { SCENARIOS, coarseTimers, runScenario, summarize } = createRequire(import.meta.url)(out);
   if (coarse) coarseTimers();
   const results = [];

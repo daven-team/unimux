@@ -31,6 +31,11 @@ export interface Scenario {
   load?: Load;
   /** Client cipher list (default: what SshLogin offers, i.e. ssh2's defaults). */
   ciphers?: string[];
+  /**
+   * 'steady' (default): 100 to 400 ms between keys. 'bursts': a fast typist, words of 3 to 8 keys 120 to 180 ms apart (faster
+   * than a far server answers, so echoes overlap the typing) and 1 to 2 s between words.
+   */
+  typing?: 'steady' | 'bursts';
 }
 
 /** 16 agents streaming about 50 KB/s each. */
@@ -52,7 +57,21 @@ export const SCENARIOS: Scenario[] = [
   { name: 'rtt40 split load', rttMs: 40, mode: 'split', load: LOAD },
   { name: 'rtt0 chacha20', rttMs: 0, mode: 'simple', ciphers: ['chacha20-poly1305@openssh.com'] },
   { name: 'rtt0 aes128-ctr+etm', rttMs: 0, mode: 'simple', ciphers: ['aes128-ctr'] },
+  { name: 'rtt200 bursts', rttMs: 200, mode: 'simple', typing: 'bursts' },
+  { name: 'rtt300 bursts', rttMs: 300, mode: 'simple', typing: 'bursts' },
 ];
+
+/** Gaps after each key of Scenario.typing 'bursts'; `rand` gives non-negative integers. */
+function burstGaps(count: number, rand: () => number): number[] {
+  const gaps: number[] = [];
+  let left = 0;
+  for (let i = 0; i < count; i++) {
+    if (left === 0) left = 3 + (rand() % 6);
+    left--;
+    gaps.push(left === 0 ? 1000 + (rand() % 1000) : 120 + (rand() % 61));
+  }
+  return gaps;
+}
 
 /** The renderer: types into `id`, acks every terminal's output (8 ms, like TerminalManager) and logs what `id` receives. */
 const RENDERER = `
@@ -234,7 +253,8 @@ export async function runScenario(s: Scenario, keyCount: number): Promise<Result
     // Unique characters per key (CJK), so every echo is found in the logs; gaps of a person typing or moving around.
     const keys = Array.from({ length: keyCount }, (_, i) => String.fromCodePoint(0x4e00 + i));
     let seed = 7;
-    const gaps = keys.map(() => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return 100 + (seed % 300); });
+    const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed; };
+    const gaps = s.typing === 'bursts' ? burstGaps(keys.length, rand) : keys.map(() => 100 + (rand() % 300));
     const typed = new Promise<void>((done) => worker.once('message', () => done()));
     const writesBefore = socketWrites;
     const eluBefore = eventLoopUtilization();
@@ -277,7 +297,10 @@ export async function runScenario(s: Scenario, keyCount: number): Promise<Result
 export function summarize(r: Result): Record<string, string> {
   return {
     scenario: r.scenario, cipher: r.cipher, 'writes/key': r.writesPerKey.toFixed(2), 'host busy': `${Math.round(r.hostBusy * 100)} %`,
-    total: fmt(r.total), network: fmt(r.network), 'host pipeline': fmt(r.pipeline), 'input queue': fmt(r.input), 'to renderer': fmt(r.deliver),
+    total: fmt(r.total), network: fmt(r.network), 'host pipeline': fmt(r.pipeline),
+    // An echo held by a coalescing timer shows here (or a host busy with other work: see the load scenarios).
+    'pipeline > 2 ms': `${r.pipeline.filter((ms) => ms > 2).length} / ${r.pipeline.length}`,
+    'input queue': fmt(r.input), 'to renderer': fmt(r.deliver),
     ...(r.redrawTotal.length ? { 'redraw total': fmt(r.redrawTotal), 'redraw pipeline': fmt(r.redrawPipeline) } : {}),
   };
 }

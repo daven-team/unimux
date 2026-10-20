@@ -29,7 +29,7 @@ export function focusedTerminalId(): string | null {
 export class OutputChannel {
   private buf = '';
   private timer: NodeJS.Timeout | null = null;
-  /** When the pending flush timer fires (Date.now() clock). */
+  /** When the pending flush timer fires (performance.now() clock: monotonic, a wall-clock step does not move it). */
   private due = Infinity;
   private readonly tail = new TailBuffer(PTY_REPLAY_CHARS);
   private readonly gate = new FlowGate();
@@ -60,7 +60,7 @@ export class OutputChannel {
 
   push(data: string): void {
     if (this.disposed || !data) return;
-    const now = Date.now();
+    const now = performance.now();
     // Judged by the window learnt so far, then measured: one late answer must not make itself an echo.
     const echo = this.echoQueued || (this.echoFlushes > 0 && now - this.lastWrite < this.echo.window);
     this.echo.output(now);
@@ -90,8 +90,13 @@ export class OutputChannel {
     return this.echo.window;
   }
 
+  /** A first estimate of how long this terminal takes to answer a keystroke, in ms (see EchoClock.seed). */
+  seedEcho(ms: number): void {
+    this.echo.seed(ms);
+  }
+
   private arm(): void {
-    const now = Date.now();
+    const now = performance.now();
     const delay = alignedDelay(now, coalesceDelay(now, this.lastWrite, focusedTerminal === this.id, this.echo.window));
     if (this.timer) clearTimeout(this.timer);
     this.due = now + delay;
@@ -104,13 +109,13 @@ export class OutputChannel {
    */
   rearm(): void {
     if (!this.timer || this.disposed) return;
-    const now = Date.now();
+    const now = performance.now();
     if (now + alignedDelay(now, coalesceDelay(now, this.lastWrite, focusedTerminal === this.id, this.echo.window)) < this.due) this.arm();
   }
 
   /** The user typed into this terminal (echoes are flushed faster). */
   wrote(): void {
-    const now = Date.now();
+    const now = performance.now();
     this.lastWrite = now;
     this.echo.keystroke(now);
     this.echoFlushes = ECHO_FLUSHES;

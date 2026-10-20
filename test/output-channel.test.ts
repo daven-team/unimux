@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EXIT_DRAIN_MS, OutputChannel, PAUSE_WATCHDOG_MS } from '../src/ptyhost/output';
-import { BACKGROUND_COALESCE_MS, ECHO_COALESCE_MS, ECHO_FLUSHES, ECHO_WINDOW_MS, HIGH_WATER, LOW_WATER } from '../src/ptyhost/flow';
+import { ACTIVE_WINDOW_MS, BACKGROUND_COALESCE_MS, ECHO_COALESCE_MS, ECHO_FLUSHES, ECHO_WINDOW_MS, HIGH_WATER, LOW_WATER } from '../src/ptyhost/flow';
 
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
@@ -164,6 +164,56 @@ describe('OutputChannel', () => {
     out.push('fast');
     await endOfCallback();
     expect(sent.at(-1)).toBe('fast');
+  });
+
+  // 1.0.1 review: typing faster than the server answers taught the channel a round trip of (round trip - typing gap), so
+  // the echo of the last key before each pause missed the window and waited for the timer again.
+  it('sends every echo of a fast typist on a far server without a timer', async () => {
+    for (const [gap, pause] of [[100, 400], [150, 1500]]) {
+      const { out, sent, echoes } = setup();
+      const keys: number[] = [];
+      for (let word = 0; word < 6; word++) for (let k = 0; k < 6; k++) keys.push(word * (5 * gap + pause) + k * gap);
+      // Each key answered 200 ms later; an echo due with a key is pushed first.
+      const events = [...keys.map((t, i) => [t, i, 1]), ...keys.map((t, i) => [t + 200, i, 0])].sort((a, b) => a[0] - b[0] || a[2] - b[2]);
+      let now = 0;
+      for (const [t, i, key] of events) {
+        vi.advanceTimersByTime(t - now);
+        now = t;
+        if (key) out.wrote();
+        else { out.push(`k${i} `); await endOfCallback(); }
+      }
+      expect(sent).toHaveLength(keys.length);
+      expect(echoes.every(Boolean)).toBe(true);
+      expect(out.echoWindow).toBe(420);
+      out.dispose();
+    }
+  });
+
+  // 1.0.1 review: SshManager seeds the round trip of its shell request, so the first key of a session is not late either.
+  it('takes a seeded round trip for the first key', async () => {
+    const { out, sent, echoes } = setup();
+    out.seedEcho(200);
+    expect(out.echoWindow).toBe(420);
+    out.wrote();
+    vi.advanceTimersByTime(200);
+    out.push('first');
+    await endOfCallback();
+    expect(sent).toEqual(['first']);
+    expect(echoes).toEqual([true]);
+  });
+
+  // A wall-clock step (NTP, a manual change) used to make a keystroke an hour old or an hour ahead: the windows run on a
+  // monotonic clock now.
+  it('keeps its windows across a wall-clock step', () => {
+    const { out, sent } = setup();
+    out.wrote();
+    vi.setSystemTime(Date.now() - 3_600_000);
+    vi.advanceTimersByTime(ACTIVE_WINDOW_MS + 1);
+    out.push('x');
+    vi.advanceTimersByTime(ECHO_COALESCE_MS + 1);
+    expect(sent).toEqual([]);
+    vi.advanceTimersByTime(BACKGROUND_COALESCE_MS * 1.5);
+    expect(sent).toEqual(['x']);
   });
 
   it('dispose cancels a pending echo flush', async () => {

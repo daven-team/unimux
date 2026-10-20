@@ -23,6 +23,8 @@ export interface SshEvents {
 
 export interface SshTimers { connectMs: number; authStepMs: number; shellMs: number; quietMs: number; startupMaxMs: number; killGraceMs: number; keepaliveMs: number; keepaliveCountMax: number }
 export const SSH_TIMERS: SshTimers = { connectMs: 20_000, authStepMs: 20_000, shellMs: 20_000, quietMs: 400, startupMaxMs: 5000, killGraceMs: 2000, keepaliveMs: 15_000, keepaliveCountMax: 3 };
+/** Round trips of ssh2's shell(): the session channel opens, then the pty and the shell are requested, each awaiting its reply. */
+export const SHELL_ROUND_TRIPS = 3;
 /**
  * ssh2's destroy() is a no-op once end() half-closed the socket, so a peer that never reads or answers the FIN (a server that
  * accepts TCP but never speaks SSH) would keep the socket open for good. The socket itself is destroyed as well.
@@ -154,10 +156,13 @@ export class SshManager implements TerminalBackend {
     if (!this.live(s)) return;
     this.dropSecrets(s);
     this.arm(s, this.timers.shellMs);
+    const asked = performance.now();
     s.client.shell({ term: 'xterm-256color', cols: s.size.cols, rows: s.size.rows, width: 0, height: 0 }, (err, stream) => {
       if (!this.live(s)) { try { stream?.close(); } catch { /* gone */ } return; }
       this.disarm(s);
       if (err || !stream) { this.fail(s, 'shellDenied'); return; }
+      // The first key typed already gets the echo window of a slow server instead of waiting for a coalescing timer.
+      s.out.seedEcho((performance.now() - asked) / SHELL_ROUND_TRIPS);
       s.stream = stream;
       s.phase = 'connected';
       this.events.status(s.id, 'connected');
