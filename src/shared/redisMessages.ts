@@ -234,4 +234,7 @@ export const redisMessages = {
   'Usuń…': ['Remove…', 'Entfernen…', 'Eliminar…', 'Supprimer…', 'Remover…'],
   'Ten element już istnieje': ['This member already exists', 'Dieses Element gibt es schon', 'Este elemento ya existe', 'Cet élément existe déjà', 'Este elemento já existe'],
   'Wpis': ['Entry', 'Eintrag', 'Entrada', 'Entrée', 'Entrada'],
+  'Zapisać zmiany w karcie Redis {name}?': ['Save the changes in the Redis tab {name}?', 'Änderungen im Redis-Tab {name} speichern?', '¿Guardar los cambios de la pestaña Redis {name}?', 'Enregistrer les modifications de l\'onglet Redis {name} ?', 'Guardar as alterações no separador Redis {name}?'],
+  'Niezapisane wartości Redis: {count}.': ['Unsaved Redis values: {count}.', 'Ungespeicherte Redis-Werte: {count}.', 'Valores de Redis sin guardar: {count}.', 'Valeurs Redis non enregistrées : {count}.', 'Valores Redis por guardar: {count}.'],
+  'Niezapisane wartości Redis: {count}. Zostaną utracone.': ['Unsaved Redis values: {count}. They will be lost.', 'Ungespeicherte Redis-Werte: {count}. Sie gehen verloren.', 'Valores de Redis sin guardar: {count}. Se perderán.', 'Valeurs Redis non enregistrées : {count}. Elles seront perdues.', 'Valores Redis por guardar: {count}. Serão perdidos.'],
 } as const;

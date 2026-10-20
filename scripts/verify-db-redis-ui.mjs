@@ -214,6 +214,45 @@ try {
   await until(`(async () => { const r = await window.mc.db.redis.command(${j(probe)}, { argv: ['GET', 'json:spaced'] }); return r.ok && r.value.reply.v === '{"a":5}'; })()`, 'json compact saved');
   check(true, 'the chosen JSON style is saved');
 
+  // ── final review: an unsaved value survives a tab switch (click and Mod+Tab); closing its tab asks ──
+  const key = async (code, keyName, vk, modifiers) => {
+    for (const type of ['rawKeyDown', 'keyUp']) await app.cdp('Input.dispatchKeyEvent', { type, key: keyName, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers });
+  };
+  const browserTab = "[...document.querySelectorAll('.workspace-tabs .redis-strip-tab')].find((t) => t.querySelector('.tab-host-tag')?.textContent === 'DB 0')";
+  const shownText = `(document.querySelector('.redis-string-text')?.value ?? '')`;
+  // The question below counts 2: this string edit and the sorted-set add form that stayed open after its refused NX add above.
+  await cmd('SET', 'draft:1', 'original');
+  await openKey('draft:1');
+  await until(`${shownText} === 'original'`, 'draft key shown');
+  await setValue('.redis-string-text', 'edited, not saved');
+  await click('.redis-view-btn', 'Serwer');
+  await until(`!document.querySelector('.redis-string-text') && !!document.querySelector('.redis-server')`, 'another tab in front', 30000);
+  await evaluate(`${browserTab}.click(), true`);
+  await until(`${shownText} === 'edited, not saved'`, 'draft after a click on the tab');
+  check(true, 'an unsaved string edit is still there after another tab was in front (click back)');
+  await evaluate(`document.activeElement?.blur(), true`);
+  await key('Tab', 'Tab', 9, 2);
+  await until(`!document.querySelector('.redis-string-text')`, 'Mod+Tab to the next tab');
+  await key('Tab', 'Tab', 9, 2 | 8);
+  await until(`${shownText} === 'edited, not saved'`, 'draft after Mod+Shift+Tab');
+  check((await cmd('GET', 'draft:1')).v === 'original', 'Mod+Tab away and back keeps the unsaved edit, and nothing was written');
+  await evaluate(`${browserTab}.querySelector('.x').click(), true`);
+  await until(`(document.querySelector('.modal-head')?.textContent ?? '').includes('Redis')`, 'close question');
+  check(await evaluate(`[...document.querySelectorAll('.modal-foot button')].map((b) => b.textContent.trim()).join('|') === 'Anuluj|Zapisz|Odrzuć zmiany'`)
+    && (await textOf('.modal-body')).includes('Niezapisane wartości Redis: 2'), 'closing a Redis tab with an unsaved value asks: Save / Discard / Cancel');
+  await shot('close-draft');
+  await click('.modal-foot button', 'Anuluj');
+  await until(`!document.querySelector('.modal-foot')`, 'question closed');
+  check(await evaluate(`!!(${browserTab})`) && await evaluate(`${shownText} === 'edited, not saved'`), 'Cancel keeps the tab and the unsaved edit');
+  await evaluate(`${browserTab}.querySelector('.x').click(), true`);
+  await confirmDialog('Zapisz');
+  await until(`(async () => { const r = await window.mc.db.redis.command(${j(probe)}, { argv: ['GET', 'draft:1'] }); return r.ok && r.value.reply.v === 'edited, not saved'; })()`, 'draft saved on close');
+  await until(`!(${browserTab})`, 'tab closed after save');
+  check(true, 'Save on the close question writes the value and closes the tab');
+  await openPalette('Redis', 'Otwórz przeglądarkę Redis: local redis');
+  await until(`!!document.querySelector('.redis-browser .redis-key-row')`, 'key browser again', 30000);
+  await click('.redis-keys-pane .redis-seg button', 'Lista');
+
   // ── binary string ──
   await search('bin*');
   await until(`[...document.querySelectorAll('.redis-key-row')].some((e) => e.title.startsWith('bin'))`, 'binary key');
