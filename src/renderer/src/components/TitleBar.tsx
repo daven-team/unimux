@@ -243,7 +243,6 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
     const full = doc.source ? doc.source.path : owner ? fullProjectPath(owner.path, doc.relativePath, window.mc.platform) : doc.relativePath;
     openMenu(x, y, [
       { header: doc.name },
-      ...(doc.preview ? [{ label: tr('Zachowaj kartę'), onClick: () => keepFile(doc.id) }] : []),
       { label: tr('Zamknij'), onClick: () => void closeFile(doc.id) },
       { label: tr('Zamknij pozostałe'), disabled: idsFor('others').length === 0, onClick: () => void closeFiles(idsFor('others')) },
       { label: tr('Zamknij karty po prawej'), disabled: idsFor('right').length === 0, onClick: () => void closeFiles(idsFor('right')) },

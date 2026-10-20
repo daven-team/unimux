@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { detectLanguage, type Language } from '../../shared/languages';
-import { askChoice, getS, getUi, setUi, update, useStore } from './store';
+import { askChoice, getS, getUi, setUi, update } from './store';
 import { refreshGitBadges } from './git/gitBadges';
 import { tr } from './i18n';
 import { useSshStore } from './sshStore';
@@ -11,7 +11,7 @@ import { cleanStamp, FILE_GONE, localRelativePath, movedSource, POSIX_PATHS, ret
 import type { RedisTabRef } from '../../shared/redisView';
 import { initRemoteSessions, pinHosts, sftpErrorMessage, withSession } from './remoteSessions';
 import { dbTabId, validDbTabRef, type DbTabRef } from '../../shared/dbTabs';
-import { keepTab, keepTabs, openTab, swapOrderKey, type OpenMode } from '../../shared/previewTabs';
+import { keepTab, openTab, swapOrderKey, type OpenMode } from '../../shared/previewTabs';
 
 export interface FileDocument {
   id: string;
@@ -157,8 +157,6 @@ export function activateFile(id: string): void {
   void checkFileOnDisk(id);
 }
 export function showTerminalTabs(): void { setUi({ settingsActive: false }); useSshStore.setState({ viewActive: false }); useFileStore.setState({ activeFileId: null }); }
-/** Setting "Open files in preview mode" (on unless switched off). */
-const previewTabsOn = (): boolean => getS().settings.previewTabs !== false;
 /**
  * Puts the tab `id` in the strip (see shared/previewTabs.ts): an open tab stays (a 'keep' open keeps it); a new one takes the
  * preview tab's place in the strip or opens right after the tab in front (mergeWorkspaceOrder). True when the tab was created
@@ -166,7 +164,7 @@ const previewTabsOn = (): boolean => getS().settings.previewTabs !== false;
  */
 function placeTab(id: string, create: () => FileDocument, mode: OpenMode): boolean {
   const before = useFileStore.getState().documents;
-  const result = openTab(before, id, create, mode === 'preview' && previewTabsOn() ? 'preview' : 'keep', (d) => isFileDirty(d) || d.saving);
+  const result = openTab(before, id, create, mode, (d) => isFileDirty(d) || d.saving);
   if (!result.created) {
     if (result.documents !== before) useFileStore.setState({ documents: result.documents });
     return false;
@@ -183,7 +181,7 @@ function placeTab(id: string, create: () => FileDocument, mode: OpenMode): boole
   useFileStore.setState({ documents: result.documents, activeFileId: id });
   return true;
 }
-/** Keeps the preview tab `id` open (a double click on it or on its file, a drag, "Keep open"); nothing for a kept tab. */
+/** Keeps the preview tab `id` open (a double click on it or on its file, a drag); nothing for a kept tab. */
 export function keepFile(id: string): void {
   useFileStore.setState((s) => { const documents = keepTab(s.documents, id); return documents === s.documents ? s : { documents }; });
 }
@@ -587,12 +585,6 @@ useFileStore.subscribe((s, prev) => {
   if (draftTimer === null) draftTimer = setTimeout(writeDrafts, DRAFT_SAVE_MS);
 });
 writtenDrafts = useFileStore.getState().documents.filter(isFileDirty); // the restored drafts are what storage holds
-// "Open files in preview mode" switched off: the preview tab becomes a kept tab (nothing would replace it any more).
-useStore.subscribe((st, prev) => {
-  if (st.s.settings.previewTabs !== false || prev.s.settings.previewTabs === false) return;
-  const documents = keepTabs(useFileStore.getState().documents);
-  if (documents !== useFileStore.getState().documents) useFileStore.setState({ documents });
-});
 
 /** Open tabs follow renamed or moved files and folders (their text and unsaved changes stay untouched). */
 export function retargetOpenFiles(projectId: string, moves: FileMoveRecord[], replaced: string[] = []): void {

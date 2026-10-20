@@ -25,6 +25,6 @@ Plain `Ctrl+T`, `Ctrl+B` and `Ctrl+W` in terminals are left alone on purpose: Cl
 
 In the Files tree, `F2` renames, `Delete` moves to the trash, and `Ctrl+C` / `Ctrl+X` / `Ctrl+V` / `Ctrl+Z` / `Ctrl+A` copy, cut, paste, undo and select all.
 
-A single click on a file, or `Space` on it in the tree, opens it in the preview tab (its name in italics) and leaves the keyboard in the tree: the next file opened that way replaces it instead of adding a tab. A double click on the file or on the tab, `Enter`, an edit, a save or dragging the tab keeps it open; a double click on the file and `Enter` also move the keyboard into the editor. In the Git panel, a double click on a change or on a file of a commit keeps its diff tab. Turn this off with **Settings → Open files in preview mode**.
+A single click on a file, or `Space` on it in the tree, opens it in the preview tab (its name in italics) and leaves the keyboard in the tree: the next file opened that way replaces it instead of adding a tab. A double click on the file or on the tab, `Enter`, an edit, a save or dragging the tab keeps it open; a double click on the file and `Enter` also move the keyboard into the editor. In the Git panel, a double click on a change or on a file of a commit keeps its diff tab.
 
 In an editor tab, `Ctrl+S` saves the file and **Tab** inserts indentation. The editor toolbar offers line wrapping and a close button with unsaved-change protection (save, discard or cancel).

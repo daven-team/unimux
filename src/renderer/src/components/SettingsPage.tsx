@@ -75,9 +75,6 @@ export function SettingsPage() {
         <SettingRow title={tr('Pytaj przed zamknięciem pracujących agentów')} htmlFor="settings-confirm-close" hint={tr('Zamknięcie zakładki, komórki lub aplikacji, gdy agent Claude lub Codex jest w trakcie tury, najpierw pyta o potwierdzenie.')}>
           <input id="settings-confirm-close" className="setting-switch" type="checkbox" role="switch" checked={settings.confirmCloseWorking} onChange={(e) => setSetting({ confirmCloseWorking: e.target.checked })} />
         </SettingRow>
-        <SettingRow title={tr('Otwieraj pliki w trybie podglądu')} htmlFor="settings-preview-tabs" hint={tr('Pojedyncze kliknięcie pliku otwiera go w jednej karcie podglądu (nazwa kursywą), którą zastępuje kolejny kliknięty plik. Dwuklik, edycja lub zapis zachowuje kartę na stałe.')}>
-          <input id="settings-preview-tabs" className="setting-switch" type="checkbox" role="switch" checked={settings.previewTabs} onChange={(e) => setSetting({ previewTabs: e.target.checked })} />
-        </SettingRow>
       </SettingsGroup>}
       {section === 1 && <SettingsGroup>
           <SettingRow title={tr("Rozmiar czcionki terminala (nowe komórki)")} htmlFor="settings-font-size" hint={tr('Dotyczy nowo otwieranych komórek terminala.')}>

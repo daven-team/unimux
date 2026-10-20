@@ -162,8 +162,6 @@ export interface Settings {
   confirmCloseWorking: boolean;
   /** Lines of history each terminal keeps (one of SCROLLBACK_CHOICES, shared/terminalLimits.ts). */
   scrollbackLines: number;
-  /** A single click on a file opens it in the one preview tab, which the next file replaces (shared/previewTabs.ts). */
-  previewTabs: boolean;
 }
 
 export interface AppState {

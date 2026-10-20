@@ -35,12 +35,11 @@ const id = (path: string) => documentId('p', path);
 const docs = (): TestDoc[] => files.useFileStore.getState().documents;
 const tabs = () => docs().map((d) => (d.preview ? `${d.relativePath}*` : d.relativePath));
 const finishRead = (path: string, text = `disk ${path}`) => { for (const done of reads.get(path) ?? []) done(text); reads.delete(path); };
-const setSettings = (patch: Record<string, unknown>) => store.useStore.setState((st: any) => ({ s: { ...st.s, settings: { ...st.s.settings, ...patch } } }));
 
 beforeEach(() => {
   reads.clear();
   files.useFileStore.setState({ documents: [], activeFileId: null });
-  store.useStore.setState((st: any) => ({ s: { ...st.s, workspaceOrder: [], settings: { ...st.s.settings, previewTabs: true } } }));
+  store.useStore.setState((st: any) => ({ s: { ...st.s, workspaceOrder: [] } }));
 });
 
 describe('opening files with a single click', () => {
@@ -82,7 +81,7 @@ describe('opening files with a single click', () => {
     expect(tabs()).toEqual(['a.ts', 'b.ts*']);
   });
 
-  it('keepFile (a double click on the tab, a drag, "Keep open") keeps it; nothing changes for a kept tab', () => {
+  it('keepFile (a double click on the tab, a drag) keeps it; nothing changes for a kept tab', () => {
     void files.openFile('p', 'a.ts', 'preview');
     files.keepFile(id('a.ts'));
     expect(tabs()).toEqual(['a.ts']);
@@ -132,16 +131,6 @@ describe('other ways in', () => {
     expect(docs().map((d) => !!d.preview)).toEqual([true, false]);
   });
 
-  it('with the setting off a single click opens a kept tab, and switching it off keeps the preview tab', () => {
-    void files.openFile('p', 'a.ts', 'preview');
-    setSettings({ previewTabs: false });
-    expect(tabs()).toEqual(['a.ts']);
-    void files.openFile('p', 'b.ts', 'preview');
-    expect(tabs()).toEqual(['a.ts', 'b.ts']);
-    setSettings({ previewTabs: true });
-    void files.openFile('p', 'c.ts', 'preview');
-    expect(tabs()).toEqual(['a.ts', 'b.ts', 'c.ts*']);
-  });
 
   it('closing the preview tab just closes it; the next single click opens a new one at the end', async () => {
     void files.openFile('p', 'kept.ts', 'keep');
