@@ -47,6 +47,8 @@ export const dbUiMessages = {
   'Magazyn haseł baz danych jest tylko do odczytu': ['The database password store is read-only', 'Der Passwortspeicher der Datenbanken ist schreibgeschützt', 'El almacén de contraseñas de bases de datos es de solo lectura', 'Le coffre des mots de passe des bases est en lecture seule', 'O cofre de palavras-passe das bases é só de leitura'],
   'Najpierw dodaj host w widoku SSH': ['Add a host in the SSH view first', 'Füge zuerst einen Host in der SSH-Ansicht hinzu', 'Primero añade un host en la vista SSH', 'Ajoutez d\'abord un hôte dans la vue SSH', 'Adicione primeiro um anfitrião na vista SSH'],
   'Następna strona': ['Next page', 'Nächste Seite', 'Página siguiente', 'Page suivante', 'Página seguinte'],
+  'SSH i TLS': ['SSH and TLS', 'SSH und TLS', 'SSH y TLS', 'SSH et TLS', 'SSH e TLS'],
+  'Zaawansowane': ['Advanced', 'Erweitert', 'Avanzado', 'Avancé', 'Avançado'],
   'Nowe połączenie': ['New connection', 'Neue Verbindung', 'Nueva conexión', 'Nouvelle connexion', 'Nova ligação'],
   'Nowy edytor SQL': ['New SQL editor', 'Neuer SQL-Editor', 'Nuevo editor SQL', 'Nouvel éditeur SQL', 'Novo editor SQL'],
   'Nowy edytor SQL tutaj': ['New SQL editor here', 'Neuer SQL-Editor hier', 'Nuevo editor SQL aquí', 'Nouvel éditeur SQL ici', 'Novo editor SQL aqui'],

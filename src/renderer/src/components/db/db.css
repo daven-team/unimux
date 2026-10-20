@@ -47,13 +47,22 @@
 .db-login .ssh-prompt { gap: 6px; }
 
 /* ── connection form ── */
-.db-editor { width: 620px; }
+/* The connection form, DataGrip-like: wide, labels on the left, the rest on pages (General, SSH and TLS, Advanced). */
+.db-editor { width: 760px; max-width: calc(100vw - 48px); }
 .db-editor .modal-body { overflow: auto; }
-.db-form .ssh-section { margin-top: 12px; }
-.db-form .ssh-field.port { width: 110px; flex: none; }
-.db-form .ssh-row { align-items: flex-start; }
+.db-form-grid { display: grid; grid-template-columns: 130px 1fr; column-gap: 12px; row-gap: 10px; align-items: center; }
+.db-form-grid[hidden] { display: none; }
+.db-label { color: var(--text-2); font-size: 12.5px; }
+.db-label.inline { flex: none; margin-left: 6px; }
+.db-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.db-line .grow { flex: 1; min-width: 0; }
+.db-port { width: 90px; flex: none; }
+.db-kind-select { width: 140px; flex: none; }
+.db-tabs { display: flex; gap: 2px; margin: 16px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.db-tab-btn { height: 26px; padding: 0 12px; border: 0; border-radius: 4px; background: transparent; color: var(--text-2); font-size: 12.5px; cursor: pointer; }
+.db-tab-btn:hover { color: var(--text); background: var(--bg-hover); }
+.db-tab-btn.on { color: var(--text); background: #ffffff17; }
 .db-saved-pw { display: inline-flex; align-items: center; height: 26px; padding: 0 8px; border-radius: 5px; background: #4ade801a; color: #86efac; font-size: 12px; }
-.db-timeout { margin-top: 8px; width: 220px !important; }
 .db-test { margin-top: 12px; padding: 8px 10px; border-radius: var(--radius); font-size: 12px; }
 .db-test.ok { background: #4ade801a; color: #86efac; }
 .db-test.error { background: #f871711a; color: #fca5a5; }
