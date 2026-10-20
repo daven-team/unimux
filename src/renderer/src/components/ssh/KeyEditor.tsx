@@ -22,7 +22,9 @@ export function KeyEditor({ keyId }: { keyId: string }) {
   const key = useSshStore((st) => st.vault?.keys.find((k) => k.id === keyId));
   const readOnly = useSshStore((st) => !!st.vault?.readOnly);
   const allHosts = useStore((st) => st.s.sshHosts);
-  const hosts = useMemo(() => hostsUsingKey(allHosts, keyId), [allHosts, keyId]);
+  const identities = useStore((st) => st.s.sshIdentities);
+  // Hosts that sign in with this key directly or through their identity.
+  const hosts = useMemo(() => hostsUsingKey(allHosts, keyId, identities), [allHosts, keyId, identities]);
   const [label, setLabel] = useState(key?.label ?? '');
   const labelFocused = useRef(false);
   // A rename elsewhere or a late vault push shows up unless the user is typing in the field.

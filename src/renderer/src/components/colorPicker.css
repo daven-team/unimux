@@ -11,3 +11,5 @@
 .color-dot.on { border-color: #fff; box-shadow: 0 0 0 1px #000 inset; }
 .color-custom { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 11.5px; color: var(--text-2); white-space: nowrap; }
 .color-custom .input { width: 84px; height: 26px; padding: 0 8px; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 11.5px; }
+/* The optional "Usuń kolor" row (onClear), under the hex field. */
+.color-clear { width: 100%; margin-top: 8px; justify-content: center; }

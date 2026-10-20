@@ -19,6 +19,10 @@ const TEXT = {
   en: { connecting: 'connecting to', connect: 'Connect', trust: 'Trust and save', disconnect: 'Disconnect', reconnect: 'Reconnect', crashed: 'The terminal process was restarted', crashedShort: 'The terminal process', restartToast: 'The terminal process restarted', resumeToast: 'resuming conversations' },
 }[LANGUAGE];
 if (!TEXT) throw new Error(`SSH_CHECK_LANGUAGE=${LANGUAGE} has no TEXT entry`);
+/** Host cards work like Termius: a click only picks a card, its pencil opens the host editor in the details pane. */
+const editHost = (app, name) => app.evaluate(`(() => { const tile = [...document.querySelectorAll('.ssh-tile[data-host-id]')].find((t) => t.textContent.includes(${JSON.stringify(name)})); tile.parentElement.querySelector('.ssh-host-edit').click(); return true; })()`);
+/** The less used host options sit under "Pokaż więcej" in the host editor. */
+const showMore = (app) => app.evaluate(`(() => { const b = document.querySelector('.ssh-view-detail .ssh-he-more'); if (b?.getAttribute('aria-expanded') === 'false') b.click(); return true; })()`);
 const PARTS = {
   /** Task 8: a prepared SSH cell shows "Połącz", the host key card, the password prompt, then the session. */
   async cell() {
@@ -115,7 +119,7 @@ const PARTS = {
         await app.until(hidden, 'settings in front');
         await app.click('.workspace-tabs .ssh-tab');
         await app.until(`!!document.querySelector('${D} [data-field=address]') && !(${hidden})`, 'host form after settings');
-        if (await fieldValues() !== 'local test|127.0.0.1|22|') throw new Error(`host form lost its input: ${await fieldValues()}`);
+        if (await fieldValues() !== '127.0.0.1|local test||22|') throw new Error(`host form lost its input: ${await fieldValues()}`);
         await app.setValue(`${D} [data-field=port]`, String(server.port));
         await app.setValue(`${D} [data-field=username]`, 'alice');
         await app.screenshot('ssh-host-editor.png');
@@ -249,8 +253,10 @@ const PARTS = {
         if (await app.evaluate(`localStorage.getItem('mc-ssh-groups-v1')`) !== '["lab"]') throw new Error('fold state not stored');
         await app.click('.ssh-group-head', 'lab');
         await app.until(`document.querySelectorAll('.ssh-tile[data-host-id]').length === 4`, 'expanded group');
-        // A click shows the host in the details pane with its actions (Otwórz SFTP since 0.9.8).
+        // A click only picks the card (Termius); its pencil shows the host in the details pane with its actions (Otwórz SFTP since 0.9.8).
         await app.click('.ssh-tile[data-host-id]', 'web-1');
+        await app.until(`!!document.querySelector('.ssh-tile.picked') && !document.querySelector('.ssh-view-detail')`, 'a click picked the card without opening the pane');
+        await editHost(app, 'web-1');
         await app.until(`document.querySelector('.ssh-view-detail h2')?.textContent === 'web-1' && [...document.querySelectorAll('.ssh-detail-actions button')].map((b) => b.textContent).join('|') === 'Połącz|Otwórz w nowym gridzie|Otwórz SFTP'`, 'host details');
         await app.screenshot('ssh-view-details.png');
         // Ctrl+click selects; the bar counts the selection and clears it.
@@ -270,16 +276,16 @@ const PARTS = {
         await app.until(`document.querySelectorAll('.ssh-tile.selected').length === 1`, 'one host selected');
         await app.press('Escape');
         await app.until(`!document.querySelector('.ssh-tile.selected') && document.querySelector('.ssh-view-detail h2')?.textContent === 'web-1'`, 'Esc cleared the selection, details kept');
-        // The pane closes: Esc with the focus in it, a second click on the shown tile, the X. Each time the tiles get the whole width back.
+        // The pane closes: Esc with the focus in it, the X. Each time the tiles get the whole width back; a click on a card keeps it.
         const paneGone = `!document.querySelector('.ssh-view-detail') && document.querySelector('.ssh-view-main').getBoundingClientRect().width === document.querySelector('.ssh-view').getBoundingClientRect().width`;
         await app.evaluate(`document.querySelector('.ssh-view-detail [data-field=label]').focus()`);
         await app.press('Escape');
-        await app.until(`${paneGone} && document.activeElement?.dataset.hostId === document.querySelector('.ssh-tile[data-host-id]')?.dataset.hostId`, 'Esc in the pane closed it, focus back on the tile');
-        await app.click('.ssh-tile[data-host-id]', 'web-1');
+        await app.until(`${paneGone} && document.activeElement?.dataset.hostId === [...document.querySelectorAll('.ssh-tile[data-host-id]')].find((t) => t.textContent.includes('web-1'))?.dataset.hostId`, 'Esc in the pane closed it, focus back on the tile');
+        await editHost(app, 'web-1');
         await app.until(`document.querySelector('.ssh-view-detail h2')?.textContent === 'web-1'`, 'pane open again');
-        await app.click('.ssh-tile[data-host-id]', 'web-1');
-        await app.until(paneGone, 'a second click on the shown tile closed the pane');
-        await app.click('.ssh-tile[data-host-id]', 'web-1');
+        await app.click('.ssh-tile[data-host-id]', 'pi');
+        await app.until(`document.querySelector('.ssh-view-detail h2')?.textContent === 'web-1' && document.querySelector('.ssh-tile.picked')?.textContent.includes('pi')`, 'a click on another card keeps the pane');
+        await editHost(app, 'web-1');
         await app.until(`!!document.querySelector('.ssh-view-detail .ssh-detail-close')`, 'pane with its X');
         await app.click('.ssh-view-detail .ssh-detail-close');
         await app.until(paneGone, 'the X closed the pane');
@@ -382,7 +388,7 @@ const PARTS = {
         // A narrow window (1100x700) with the side panel open.
         await app.cdp('Emulation.setDeviceMetricsOverride', { width: 1100, height: 700, deviceScaleFactor: 1, mobile: false });
         await sleep(400);
-        await app.click('.ssh-tile[data-host-id]', 'web-1');
+        await editHost(app, 'web-1');
         await app.until(`document.querySelector('.ssh-view-detail h2')?.textContent === 'web-1'`, 'host details in the narrow window');
         const overflow = await app.evaluate(`(() => { const m = document.querySelector('.ssh-view-main'); return m.scrollWidth > m.clientWidth + 1; })()`);
         if (overflow) throw new Error('the host column overflows in a narrow window');
@@ -437,30 +443,32 @@ const PARTS = {
         if (await app.evaluate(`document.querySelector('.ssh-broadcast-open').textContent`) !== 'Wysyłanie masowe (1)') throw new Error('bulk send button label');
         await shot('hosts-empty');
         await app.click('.ssh-tile[data-host-id]', 'web-1');
+        await app.until(`!!document.querySelector('.ssh-tile.picked') && ${fullWidth}`, 'a click only picks the card');
+        await editHost(app, 'web-1');
         await app.until(`document.querySelector('.ssh-view-detail h2')?.textContent === 'web-1' && document.querySelector('.ssh-view-main').getBoundingClientRect().width < document.querySelector('.ssh-view').getBoundingClientRect().width`, 'pane next to the tiles');
         await shot('host-selected');
         await app.click('.ssh-view-detail .ssh-detail-close');
         await app.until(fullWidth, 'pane closed by its X');
-        // Unsaved edits are never dropped silently: Esc and a second click ask; "Anuluj" keeps the edit, "Odrzuć zmiany" closes.
+        // Unsaved edits are never dropped silently: Esc and the X ask; "Anuluj" keeps the edit, "Odrzuć zmiany" closes.
         const discardAsked = `[...document.querySelectorAll('.modal-foot button')].some((b) => b.textContent === 'Odrzuć zmiany')`;
-        await app.click('.ssh-tile[data-host-id]', 'web-1');
+        await editHost(app, 'web-1');
         await app.until(`!!document.querySelector('.ssh-view-detail [data-field=label]')`, 'host form');
         await app.setValue('.ssh-view-detail [data-field=label]', 'web-1 edited');
         await app.press('Escape');
         await app.until(discardAsked, 'Esc asks before dropping the edit');
         await app.click('.modal-foot button', 'Anuluj');
         await app.until(`!document.querySelector('.modal-foot') && document.querySelector('.ssh-view-detail [data-field=label]')?.value === 'web-1 edited'`, 'edit kept after Anuluj');
-        await app.click('.ssh-tile[data-host-id]', 'web-1');
-        await app.until(discardAsked, 'a second click asks too');
+        await app.click('.ssh-view-detail .ssh-detail-close');
+        await app.until(discardAsked, 'the X asks too');
         await app.click('.modal-foot button', 'Odrzuć zmiany');
         await app.until(fullWidth, 'pane closed after discarding');
         // 0.9.3: another tile or another section with unsaved edits asks too; "Anuluj" keeps the item and the edit.
         const labelIs = (v) => `document.querySelector('.ssh-view-detail [data-field=label]')?.value === ${JSON.stringify(v)}`;
         const noModal = `!document.querySelector('.modal-foot')`;
-        await app.click('.ssh-tile[data-host-id]', 'web-1');
+        await editHost(app, 'web-1');
         await app.until(labelIs('web-1'), 'host form for the switch');
         await app.setValue('.ssh-view-detail [data-field=label]', 'web-1 edited');
-        await app.click('.ssh-tile[data-host-id]', 'web-2');
+        await editHost(app, 'web-2');
         await app.until(discardAsked, 'another tile asks before dropping the edit');
         await app.click('.modal-foot button', 'Anuluj');
         await app.until(`${noModal} && ${labelIs('web-1 edited')} && document.querySelector('.ssh-tile.current')?.textContent.includes('web-1')`, 'Anuluj keeps the item and the edit');
@@ -468,12 +476,12 @@ const PARTS = {
         await app.until(discardAsked, 'another section asks too');
         await app.click('.modal-foot button', 'Anuluj');
         await app.until(`${noModal} && ${labelIs('web-1 edited')} && document.querySelector('.ssh-nav-item.on')?.dataset.section === 'hosts'`, 'Anuluj keeps the section');
-        await app.click('.ssh-tile[data-host-id]', 'web-2');
+        await editHost(app, 'web-2');
         await app.until(discardAsked, 'asked again');
         await app.click('.modal-foot button', 'Odrzuć zmiany');
         await app.until(`${noModal} && ${labelIs('web-2')}`, 'the other tile after discarding');
         // A clean form switches without a question.
-        await app.click('.ssh-tile[data-host-id]', 'web-1');
+        await editHost(app, 'web-1');
         await app.until(`${noModal} && ${labelIs('web-1')}`, 'clean form switched silently');
         // The view going to the background (a grid tab) does not ask and keeps the edit, as in 0.9.2.
         const sshShown = `getComputedStyle(document.querySelector('.ssh-workspace')).display !== 'none'`;
@@ -493,12 +501,12 @@ const PARTS = {
         await app.until(`${noModal} && !document.querySelector('.workspace-tabs .ssh-tab')`, 'SSH tab closed after discarding');
         await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`${sshShown} && ${fullWidth}`, 'back in the view, the discarded pane closed');
-        await app.click('.ssh-tile[data-host-id]', 'web-1');
+        await editHost(app, 'web-1');
         await app.until(labelIs('web-1'), 'clean host form again');
         await app.click('.ssh-view-detail .ssh-detail-close');
         await app.until(fullWidth, 'pane closed after the switch checks');
         // A clean form closes without a question.
-        await app.click('.ssh-tile[data-host-id]', 'web-1');
+        await editHost(app, 'web-1');
         await app.until(`document.querySelector('.ssh-view-detail [data-field=label]')?.value === 'web-1'`, 'clean host form');
         await app.evaluate(`document.querySelector('.ssh-view-detail [data-field=label]').focus()`);
         await app.press('Escape');
@@ -571,7 +579,7 @@ const PARTS = {
         await app.click('.ssh-nav-item[data-section="hosts"]');
         await sleep(400);
         await shot('narrow-empty');
-        await app.click('.ssh-tile[data-host-id]', 'web-1');
+        await editHost(app, 'web-1');
         await app.until(`document.querySelector('.ssh-view-detail h2')?.textContent === 'web-1'`, 'host details in the narrow window');
         if (await app.evaluate(`(() => { const m = document.querySelector('.ssh-view-main'); return m.scrollWidth > m.clientWidth + 1; })()`)) throw new Error('the host column overflows in a narrow window');
         // Narrow: the search has its own line, the buttons sit under it; the Snippets panel is open next to the pane.
@@ -880,7 +888,9 @@ const PARTS = {
         // The option in the host form of the SSH view.
         await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`document.querySelectorAll('.ssh-view .ssh-tile[data-host-id]').length === 2`, 'host tiles');
-        await app.click('.ssh-tile[data-host-id]', 'auto-host');
+        await editHost(app, 'auto-host');
+        await app.until(`!!document.querySelector('.ssh-view-detail .ssh-he-more')`, 'host form');
+        await showMore(app);
         await app.until(`!!document.querySelector('.ssh-view-detail [data-field=reconnectOnStart]')`, 'reconnect option in the host form');
         if (await app.evaluate(`document.querySelector('.ssh-view-detail [data-field=reconnectOnStart]').checked`)) throw new Error('the option is on by default');
         await app.click('.ssh-view-detail [data-field=reconnectOnStart]');

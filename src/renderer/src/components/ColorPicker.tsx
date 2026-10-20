@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { PROJECT_COLORS } from '../../../shared/state';
 import { useI18n } from '../i18n';
 import './colorPicker.css';
@@ -6,8 +6,13 @@ import './colorPicker.css';
 const PALETTE = [...PROJECT_COLORS, '#d97757', '#10a37f', '#8b5cf6', '#64748b', '#eab308', '#f43f5e', '#14b8a6', '#9ca3af'];
 const HEX = /^#[0-9a-f]{6}$/i;
 
-/** A round swatch that opens a small palette with a hex field (instead of the system colour dialog). */
-export function ColorPicker({ value, onChange, label }: { value: string; onChange(color: string): void; label?: string }) {
+/**
+ * A round swatch that opens a small palette with a hex field (instead of the system colour dialog). Optional: `swatch` content and
+ * `swatchClassName` turn the trigger into something else (the icon tile of an SSH host), `onClear` adds a "Usuń kolor" row.
+ */
+export function ColorPicker({ value, onChange, label, swatch, swatchClassName, onClear }: {
+  value: string; onChange(color: string): void; label?: string; swatch?: ReactNode; swatchClassName?: string; onClear?: () => void;
+}) {
   const { tr } = useI18n();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -28,7 +33,7 @@ export function ColorPicker({ value, onChange, label }: { value: string; onChang
   const commit = (color: string) => { if (HEX.test(color)) onChange(color.toLowerCase()); };
   return (
     <div className="color-picker" ref={root}>
-      <button type="button" className="color-swatch" style={{ background: value }} aria-label={label ?? tr('Wybierz kolor')} title={value} aria-haspopup="dialog" aria-expanded={open} aria-controls={id} onClick={() => setOpen((v) => !v)} />
+      <button type="button" className={swatchClassName ? `color-swatch ${swatchClassName}` : 'color-swatch'} style={{ background: value }} aria-label={label ?? tr('Wybierz kolor')} title={swatch ? label : value} aria-haspopup="dialog" aria-expanded={open} aria-controls={id} onClick={() => setOpen((v) => !v)}>{swatch}</button>
       {open && (
         <div className="color-pop" ref={pop} id={id} role="dialog" aria-label={tr('Wybierz kolor')}>
           <div className="color-grid">
@@ -40,6 +45,7 @@ export function ColorPicker({ value, onChange, label }: { value: string; onChang
             <span>{tr('Własny kolor')}</span>
             <input className="input" value={draft} spellCheck={false} maxLength={7} onChange={(e) => { setDraft(e.target.value); commit(e.target.value); }} onBlur={() => setDraft(value)} />
           </label>
+          {onClear && <button type="button" className="btn small ghost color-clear" onClick={() => { onClear(); setOpen(false); }}>{tr('Usuń kolor')}</button>}
         </div>
       )}
     </div>
