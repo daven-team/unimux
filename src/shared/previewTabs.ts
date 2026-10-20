@@ -39,7 +39,8 @@ export function keepTabs<T extends PreviewTabLike>(documents: readonly T[], whic
 
 /**
  * Opens the tab `id`. An open tab stays where it is ('keep' keeps it when it was the preview tab). A new tab opened with
- * 'keep' goes to the end; with 'preview' it takes the place of the preview tab (or goes to the end as the new preview tab).
+ * 'keep' goes to the end of the list; with 'preview' it takes the place of the preview tab (or goes to the end as the new
+ * preview tab). The strip places a new tab by its own order (`replaced` takes the old key's place, see swapOrderKey).
  * A preview tab that must not be dropped (`mustKeep`: unsaved edits, a save running) is kept instead of replaced, so a
  * replacement never loses work.
  */

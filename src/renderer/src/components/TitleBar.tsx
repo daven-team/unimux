@@ -149,6 +149,9 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
 
   // Many open tabs: the strip scrolls (wheel, arrows), keeps the active tab in view and has a list of all tabs.
   const stripRef = useRef<HTMLDivElement>(null);
+  // The tab under the first click of a double click (null for a close button): a double click keeps only that tab, never one
+  // that slid under the pointer because the first click closed a tab before it.
+  const firstClick = useRef<string | null>(null);
   const [edges, setEdges] = useState({ canLeft: false, canRight: false });
   const measure = () => {
     const el = stripRef.current;
@@ -267,7 +270,11 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
 
   return <div className="workspace-tabs" aria-label={tr('Gridy i pliki')}>
     {(edges.canLeft || edges.canRight) && <button className="tabs-scroll no-drag" disabled={!edges.canLeft} title={tr('Przewiń karty w lewo')} aria-label={tr('Przewiń karty w lewo')} onClick={() => scrollStrip(-1)}><span className="chev-left"><IChevron /></span></button>}
-    <div className="tabs no-drag" ref={stripRef} onScroll={measure}>
+    <div className="tabs no-drag" ref={stripRef} onScroll={measure}
+      onMouseDownCapture={(e) => {
+        const target = e.target as HTMLElement;
+        if (e.detail <= 1) firstClick.current = target.closest('.x') ? null : target.closest<HTMLElement>('[data-workspace-id]')?.dataset.workspaceId ?? null;
+      }}>
       {settingsTabOpen && <div {...dragProps('settings')} style={{ order: order.indexOf('settings') }} className={`tab settings-tab ${settingsActive ? 'active' : ''}`} onClick={() => setUi({ settingsActive: true })} onAuxClick={(e) => { if (e.button === 1) setUi({ settingsTabOpen: false, settingsActive: false }); }}>
         <span className="tab-type-icon"><TSettings /></span><span className="label">{tr('Ustawienia')}</span>
         <button className="x" aria-label={tr('Zamknij')} onClick={(e) => { e.stopPropagation(); setUi({ settingsTabOpen: false, settingsActive: false }); }}><IX /></button>
@@ -377,7 +384,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
               className={`tab file-tab ${activeKey === `file:${doc.id}` ? 'active' : ''} ${doc.preview ? 'preview' : ''}`}
               title={(doc.source ? sourceTitle(doc.source, doc.source.kind === 'remote' ? hostLabel(doc.source.hostId) : undefined) : `${doc.relativePath}${owner ? `\n${tr('Projekt: {name}', { name: owner.name })}` : ''}`)
                 + (doc.preview ? `\n${tr('Podgląd: następny kliknięty plik zastąpi tę kartę. Dwuklik zachowuje ją na stałe.')}` : '')}
-              onClick={() => activateFile(doc.id)} onDoubleClick={() => keepFile(doc.id)} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void closeFile(doc.id); } }}
+              onClick={() => activateFile(doc.id)} onDoubleClick={() => { if (firstClick.current === `file:${doc.id}`) keepFile(doc.id); }} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void closeFile(doc.id); } }}
               onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
               onContextMenu={(e) => { e.preventDefault(); fileTabMenu(e.clientX, e.clientY, doc); }}>
               {owner && <span className="tab-project" aria-hidden="true" />}

@@ -239,7 +239,8 @@ function GitCommitView({ projectId, commit, opts, onBack }: { projectId: string;
                     role="button"
                     tabIndex={0}
                     title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}
-                    onClick={() => openDiffTab(projectId, { source: 'commit', hash: commit.hash, path: file.path, ...(file.origPath ? { oldPath: file.origPath } : {}), ...(worktree ? { worktree } : {}) })}
+                    // A single click opens the diff in the preview tab, a double click keeps it (like VS Code's timeline).
+                    onClick={(e) => openDiffTab(projectId, { source: 'commit', hash: commit.hash, path: file.path, ...(file.origPath ? { oldPath: file.origPath } : {}), ...(worktree ? { worktree } : {}) }, e.detail >= 2 ? 'keep' : 'preview')}
                     onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLElement).click(); }}
                   >
                     <span className={`git-letter ${letter.cls}`} title={tr(letter.title)}>{letter.letter}</span>

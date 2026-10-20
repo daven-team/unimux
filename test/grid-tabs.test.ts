@@ -63,8 +63,10 @@ describe('ordering', () => {
     // No anchor (first start) or an anchor that is gone: new grids go to the end.
     expect(mergeWorkspaceOrder(saved, ['grid:a1', 'grid:new', 'file:f'], null)).toEqual(['grid:a1', 'file:f', 'grid:new']);
     expect(mergeWorkspaceOrder(saved, ['grid:a1', 'grid:new'], 'grid:closed')).toEqual(['grid:a1', 'grid:new']);
-    // New files, Settings and the SSH view are appended at the end as before.
-    expect(mergeWorkspaceOrder(['grid:a1', 'grid:b1'], ['grid:a1', 'grid:b1', 'file:new', 'ssh'], 'grid:a1')).toEqual(['grid:a1', 'grid:b1', 'file:new', 'ssh']);
+    // A new file tab also opens right after the tab in front (like VS Code); Settings and the SSH view are appended at the end.
+    expect(mergeWorkspaceOrder(['grid:a1', 'grid:b1'], ['grid:a1', 'grid:b1', 'file:new', 'ssh'], 'grid:a1')).toEqual(['grid:a1', 'file:new', 'grid:b1', 'ssh']);
+    expect(mergeWorkspaceOrder(['file:c', 'grid:b1'], ['file:c', 'grid:b1', 'file:d'], 'file:c')).toEqual(['file:c', 'file:d', 'grid:b1']);
+    expect(mergeWorkspaceOrder(['grid:a1', 'grid:b1'], ['grid:a1', 'grid:b1', 'file:new'], null)).toEqual(['grid:a1', 'grid:b1', 'file:new']);
   });
 
   it('shows the grids and the files of every project and the files outside projects', () => {

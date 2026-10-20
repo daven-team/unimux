@@ -158,7 +158,7 @@ export function FileEditor() {
       </Suspense>}
       {!tableView && !showDiff && doc.status === 'ready' && (preview
         ? <MarkdownPreview key={doc.id} text={doc.text} projectId={doc.projectId} path={doc.relativePath} />
-        : <CodeEditor key={doc.id} path={doc.relativePath} text={doc.text} wrap={doc.wrap} onChange={text => editFile(doc.id, text)} />)}
+        : <CodeEditor key={doc.id} id={doc.id} path={doc.relativePath} text={doc.text} wrap={doc.wrap} onChange={text => editFile(doc.id, text)} />)}
       {doc.status === 'image' && doc.view?.kind === 'image' && <ImageView src={doc.view.dataUrl} name={doc.name} size={doc.size} />}
       {doc.status === 'table' && doc.view?.kind === 'table' && <DataTable columns={doc.view.columns} types={doc.view.types} rows={doc.view.rows} note={`${doc.view.format.toUpperCase()} · ${doc.view.totalRows.toLocaleString(language)} ${{ en: 'rows', pl: 'wierszy', de: 'Zeilen', es: 'filas', fr: 'lignes', pt: 'linhas' }[language]} · ${doc.view.columns.length} ${{ en: 'columns', pl: 'kolumn', de: 'Spalten', es: 'columnas', fr: 'colonnes', pt: 'colunas' }[language]}${doc.view.rows.length < doc.view.totalRows ? ` · ${{ en: 'showing the first', pl: 'pokazano pierwsze', de: 'angezeigt: die ersten', es: 'mostrando las primeras', fr: 'affichage des premières', pt: 'a mostrar as primeiras' }[language]} ${doc.view.rows.length.toLocaleString(language)}` : ''}`} />}
       {doc.status === 'binary' && !remote && <div className="file-preview-message muted">{tr('Ten plik jest binarny lub ma nieobsługiwane kodowanie. Otwórz go w edytorze albo menedżerze plików.')}</div>}

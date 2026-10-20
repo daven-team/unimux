@@ -125,6 +125,21 @@ function patch(id: string, changes: Partial<FileDocument>): void {
 }
 /** Set by the Files panel when a file is opened with the keyboard (Enter): the editor then takes focus. */
 export const treeOpen = { keyboard: false, hold: false };
+/** The code editors on screen by tab id (registered while mounted): focusFileEditor moves the keyboard into one of them. */
+const editorFocus = new Map<string, () => void>();
+export function registerEditorFocus(id: string, focus: () => void): () => void {
+  editorFocus.set(id, focus);
+  return () => { if (editorFocus.get(id) === focus) editorFocus.delete(id); };
+}
+/**
+ * Moves the keyboard into the editor of tab `id` (a double click or Enter on its file in the tree, like VS Code): right away
+ * when the editor is on screen, else as soon as it appears (the file is still loading).
+ */
+export function focusFileEditor(id: string): void {
+  const focus = editorFocus.get(id);
+  treeOpen.keyboard = !focus;
+  focus?.();
+}
 /** A rename or move from the tree re-creates editors: they must not steal the keyboard from the tree for a moment. */
 export function holdTreeFocus(): void { treeOpen.hold = true; setTimeout(() => { treeOpen.hold = false; }, 600); }
 export const isFileDirty = (d: FileDocument): boolean => d.text !== d.savedText;
@@ -146,7 +161,8 @@ export function showTerminalTabs(): void { setUi({ settingsActive: false }); use
 const previewTabsOn = (): boolean => getS().settings.previewTabs !== false;
 /**
  * Puts the tab `id` in the strip (see shared/previewTabs.ts): an open tab stays (a 'keep' open keeps it); a new one takes the
- * preview tab's place in the strip or goes to the end. True when the tab was created (its content still has to be read).
+ * preview tab's place in the strip or opens right after the tab in front (mergeWorkspaceOrder). True when the tab was created
+ * (its content still has to be read).
  */
 function placeTab(id: string, create: () => FileDocument, mode: OpenMode): boolean {
   const before = useFileStore.getState().documents;

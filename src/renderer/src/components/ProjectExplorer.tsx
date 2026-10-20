@@ -2,7 +2,7 @@ import { useI18n } from '../i18n';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Project, ProjectFileEntry } from '../../../shared/types';
 import { setUi, toast } from '../store';
-import { openFile, treeOpen } from '../files';
+import { focusFileEditor, openFile, treeOpen } from '../files';
 import { openMenu } from './ContextMenu';
 import { IChevron, IFolder } from './icons';
 import { FileIcon } from './FileIcon';
@@ -11,7 +11,7 @@ import { refreshGitBadges, useGitBadgeSync, useProjectBadges } from '../git/gitB
 import { badgeFor } from '../../../shared/gitBadges';
 import { ProjectIconView } from './ProjectIcon';
 import { fullProjectPath as projectPath } from '../../../shared/platform';
-import { baseName, parentPath, renameSelectionEnd, summarizeNames, topLevelPaths, validateEntryName } from '../../../shared/fileOps';
+import { baseName, documentId, parentPath, renameSelectionEnd, summarizeNames, topLevelPaths, validateEntryName } from '../../../shared/fileOps';
 import { matchesShortcut, shortcutText } from '../shortcuts';
 import { buildPathPayload, PATH_MIME } from '../../../shared/pathDrop';
 import { addTreePathsToFocusedCell, focusedCellId } from '../pathDrop';
@@ -40,6 +40,8 @@ let dragging: { projectId: string; paths: string[] } | null = null;
 /** Everything a row does goes through this object (kept in a ref, so rows only re-render when their own look changes). */
 interface RowActions {
   click(e: React.MouseEvent, entry: ProjectFileEntry): void;
+  /** Space on a file: the preview tab, the keyboard stays in the tree. */
+  preview(path: string): void;
   stickyClick(e: React.MouseEvent, index: number): void;
   menu(e: React.MouseEvent, entry: ProjectFileEntry): void;
   dragStart(e: React.DragEvent, entry: ProjectFileEntry): void;
@@ -161,6 +163,9 @@ const TreeEntryRow = memo(function TreeEntryRow({ entry, depth, open, pos, size,
           e.preventDefault();
           e.stopPropagation();
           actions.current.toggle(entry.path, e.key === 'ArrowRight');
+        } else if (!folder && !pinned && e.key === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+          e.preventDefault(); // no native button click (also on a held key): that one would keep the tab, like Enter
+          if (!e.repeat) actions.current.preview(entry.path);
         }
       }}
     >
@@ -384,8 +389,18 @@ export function ProjectExplorer({ project }: { project: Project }) {
       }
       selectPaths(project.id, [entry.path], entry.path);
       if (folder) toggleFolder(project.id, entry.path);
-      // A single click opens the preview tab; the second click of a double click, Enter or Space keep the tab (like VS Code).
-      else { treeOpen.keyboard = e.detail === 0; void openFile(project.id, entry.path, e.detail === 1 ? 'preview' : 'keep'); }
+      // A single click opens the preview tab and leaves the keyboard in the tree; the second click of a double click or Enter
+      // keep the tab and move the keyboard into its editor (like VS Code). Space is the row's onKeyDown (preview).
+      else {
+        treeOpen.keyboard = e.detail === 0;
+        void openFile(project.id, entry.path, e.detail === 1 ? 'preview' : 'keep');
+        if (e.detail !== 1) focusFileEditor(documentId(project.id, entry.path));
+      }
+    },
+    preview: (path) => {
+      selectPaths(project.id, [path], path);
+      treeOpen.keyboard = false;
+      void openFile(project.id, path, 'preview');
     },
     // A pinned folder: a click scrolls to it (it becomes a normal row under its own pinned parents);
     // a click on its chevron collapses it, like VS Code.

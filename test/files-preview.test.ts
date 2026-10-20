@@ -159,3 +159,34 @@ describe('other ways in', () => {
     expect('preview' in stored[0]).toBe(false);
   });
 });
+
+describe('the keyboard after a double click or Enter in the tree', () => {
+  it('focusFileEditor focuses the editor on screen right away, else the editor of the file when it appears', () => {
+    const focus = vi.fn();
+    const unregister = files.registerEditorFocus(id('a.ts'), focus);
+    files.treeOpen.keyboard = true;
+    files.focusFileEditor(id('a.ts'));
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(files.treeOpen.keyboard).toBe(false); // nothing left over for the next editor that mounts
+    // Still loading (no editor yet): the editor takes focus when it mounts (CodeEditor reads treeOpen.keyboard).
+    files.focusFileEditor(id('b.ts'));
+    expect(files.treeOpen.keyboard).toBe(true);
+    expect(focus).toHaveBeenCalledTimes(1);
+    unregister();
+    files.focusFileEditor(id('a.ts'));
+    expect(focus).toHaveBeenCalledTimes(1);
+    files.treeOpen.keyboard = false;
+  });
+
+  it('an editor unmounting after its replacement mounted leaves the replacement registered', () => {
+    const first = vi.fn(), second = vi.fn();
+    const unregisterFirst = files.registerEditorFocus(id('a.ts'), first);
+    const unregisterSecond = files.registerEditorFocus(id('a.ts'), second);
+    unregisterFirst();
+    files.focusFileEditor(id('a.ts'));
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveBeenCalled();
+    unregisterSecond();
+    files.treeOpen.keyboard = false;
+  });
+});

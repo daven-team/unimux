@@ -2,6 +2,7 @@
 // click, an edit, a save or a drag keeps it; a tab with unsaved edits is never replaced.
 import { describe, expect, it } from 'vitest';
 import { keepTab, keepTabs, openTab, previewTabId, swapOrderKey } from '../src/shared/previewTabs';
+import { defaultState, normalizeState, updateSettings } from '../src/shared/state';
 
 interface Doc { id: string; preview?: boolean; dirty?: boolean }
 const make = (id: string) => (): Doc => ({ id });
@@ -106,5 +107,19 @@ describe('swapOrderKey', () => {
     const order = ['grid:1'];
     expect(swapOrderKey(order, 'file:a', 'file:b')).toBe(order);
     expect(swapOrderKey(order, 'grid:1', 'grid:1')).toBe(order);
+  });
+});
+
+describe('the "Open files in preview mode" setting', () => {
+  it('is on by default, stays off through a save and falls back to on for a bad or missing value', () => {
+    const fresh = defaultState();
+    expect(fresh.settings.previewTabs).toBe(true);
+    const off = updateSettings(fresh, { previewTabs: false });
+    expect(normalizeState(JSON.parse(JSON.stringify(off)))!.settings.previewTabs).toBe(false);
+    const raw = JSON.parse(JSON.stringify(fresh));
+    raw.settings.previewTabs = 'no';
+    expect(normalizeState(raw)!.settings.previewTabs).toBe(true);
+    delete raw.settings.previewTabs; // a state.json from before the setting
+    expect(normalizeState(raw)!.settings.previewTabs).toBe(true);
   });
 });
