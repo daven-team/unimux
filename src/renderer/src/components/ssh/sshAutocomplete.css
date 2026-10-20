@@ -1,0 +1,92 @@
+/* SSH command autocomplete (SshAutocomplete.tsx): the suggestion popup and the ghost text over a terminal cell. Font family
+   and size come from the terminal (set inline), so the suggestions line up with the typed command. */
+.ssh-ac {
+  position: absolute;
+  z-index: 10;
+  min-width: 220px;
+  max-width: min(640px, calc(100% - 8px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px;
+  background: #191919;
+  border: 1px solid #343434;
+  border-radius: 7px;
+  box-shadow: 0 8px 28px #0008;
+  line-height: 1.45;
+}
+
+.ssh-ac-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: #c8c8c8;
+  white-space: pre;
+  cursor: pointer;
+}
+
+.ssh-ac-item:hover { background: #262626; }
+.ssh-ac-item.sel { background: #1d2a40; color: #f0f0f0; }
+
+.ssh-ac-kind {
+  flex: none;
+  width: 12px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.ssh-ac-kind svg { width: 12px; height: 12px; }
+.ssh-ac-item.sel .ssh-ac-kind { color: var(--accent-text); }
+
+.ssh-ac-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ssh-ac-text mark {
+  background: none;
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.ssh-ac-label {
+  flex: 0 1 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  font-size: 11px;
+}
+
+.ssh-ac-foot {
+  margin-top: 3px;
+  padding: 4px 8px 1px;
+  border-top: 1px solid #ffffff0a;
+  color: var(--muted);
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Fish-style completion: the rest of the suggestion after the cursor, one character per terminal cell. */
+.ssh-ghost {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  pointer-events: none;
+  white-space: pre;
+  color: #6b6b6b;
+}
+
+.ssh-ghost > span {
+  flex: none;
+  width: var(--cell-w, 0.6em);
+  text-align: center;
+}

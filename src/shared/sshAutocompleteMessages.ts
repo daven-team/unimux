@@ -1,0 +1,28 @@
+// Texts of the SSH command autocomplete (the popup and its settings). Each row: English, German, Spanish, French, Portuguese.
+// Polish is the key.
+export const sshAutocompleteMessages = {
+  '↓ wybierz · Enter wstaw · → dopełnij · Esc zamknij': ['↓ choose · Enter insert · → complete · Esc close', '↓ wählen · Enter einfügen · → vervollständigen · Esc schließen', '↓ elegir · Enter insertar · → completar · Esc cerrar', '↓ choisir · Entrée insérer · → compléter · Échap fermer', '↓ escolher · Enter inserir · → completar · Esc fechar'],
+  'Podpowiedzi poleceń': ['Command suggestions', 'Befehlsvorschläge', 'Sugerencias de comandos', 'Suggestions de commandes', 'Sugestões de comandos'],
+  'Podpowiedzi poleceń w terminalach SSH': ['Command suggestions in SSH terminals', 'Befehlsvorschläge in SSH-Terminals', 'Sugerencias de comandos en terminales SSH', 'Suggestions de commandes dans les terminaux SSH', 'Sugestões de comandos nos terminais SSH'],
+  'Podczas pisania polecenia pod kursorem pojawiają się pasujące polecenia z historii hosta i jednowierszowe snippety. Klawisze należą do powłoki, dopóki nie wejdziesz w listę strzałką w dół. Nie działa w programach pełnoekranowych (vim, htop, tmux).': [
+    'While you type a command, matching commands from the host’s history and one-line snippets appear under the cursor. Keys go to the shell until you enter the list with the down arrow. Not shown in full-screen programs (vim, htop, tmux).',
+    'Während du einen Befehl tippst, erscheinen unter dem Cursor passende Befehle aus dem Verlauf des Hosts und einzeilige Snippets. Tasten gehen an die Shell, bis du die Liste mit dem Pfeil nach unten betrittst. Nicht in Vollbildprogrammen (vim, htop, tmux).',
+    'Mientras escribes un comando, bajo el cursor aparecen comandos coincidentes del historial del host y fragmentos de una línea. Las teclas van a la shell hasta que entras en la lista con la flecha abajo. No aparece en programas a pantalla completa (vim, htop, tmux).',
+    'Pendant la saisie d’une commande, les commandes correspondantes de l’historique de l’hôte et les extraits d’une ligne apparaissent sous le curseur. Les touches vont au shell tant que vous n’entrez pas dans la liste avec la flèche bas. Absent des programmes plein écran (vim, htop, tmux).',
+    'Enquanto escreve um comando, aparecem sob o cursor comandos correspondentes do histórico do host e excertos de uma linha. As teclas vão para a shell até entrar na lista com a seta para baixo. Não aparece em programas de ecrã inteiro (vim, htop, tmux).',
+  ],
+  'Historia poleceń jest zapisywana tylko na tym komputerze, osobno dla każdego hosta, i nigdzie nie jest wysyłana. Polecenia zaczynające się od spacji oraz tekst wpisywany bez echa (hasła) nie są zapisywane.': [
+    'The command history is kept on this computer only, per host, and is never sent anywhere. Commands starting with a space and text typed without echo (passwords) are not saved.',
+    'Der Befehlsverlauf wird nur auf diesem Computer gespeichert, pro Host, und nirgendwohin gesendet. Befehle, die mit einem Leerzeichen beginnen, und ohne Echo getippter Text (Passwörter) werden nicht gespeichert.',
+    'El historial de comandos se guarda solo en este equipo, por host, y nunca se envía a ningún sitio. Los comandos que empiezan con un espacio y el texto escrito sin eco (contraseñas) no se guardan.',
+    'L’historique des commandes est conservé uniquement sur cet ordinateur, par hôte, et n’est jamais envoyé ailleurs. Les commandes commençant par une espace et le texte saisi sans écho (mots de passe) ne sont pas enregistrés.',
+    'O histórico de comandos é guardado apenas neste computador, por host, e nunca é enviado para lado nenhum. Os comandos que começam com um espaço e o texto escrito sem eco (palavras-passe) não são guardados.',
+  ],
+  'Brak zapisanej historii poleceń': ['No saved command history', 'Kein gespeicherter Befehlsverlauf', 'No hay historial de comandos guardado', 'Aucun historique de commandes enregistré', 'Sem histórico de comandos guardado'],
+  'Poleceń w historii: {count}': ['Commands in history: {count}', 'Befehle im Verlauf: {count}', 'Comandos en el historial: {count}', 'Commandes dans l’historique : {count}', 'Comandos no histórico: {count}'],
+  'Wyczyść całą historię poleceń': ['Clear all command history', 'Gesamten Befehlsverlauf leeren', 'Borrar todo el historial de comandos', 'Effacer tout l’historique des commandes', 'Limpar todo o histórico de comandos'],
+  'Wyczyścić historię poleceń hosta {name}?': ['Clear the command history of {name}?', 'Befehlsverlauf von {name} leeren?', '¿Borrar el historial de comandos de {name}?', 'Effacer l’historique des commandes de {name} ?', 'Limpar o histórico de comandos de {name}?'],
+  'Wyczyścić historię poleceń wszystkich hostów?': ['Clear the command history of all hosts?', 'Befehlsverlauf aller Hosts leeren?', '¿Borrar el historial de comandos de todos los hosts?', 'Effacer l’historique des commandes de tous les hôtes ?', 'Limpar o histórico de comandos de todos os hosts?'],
+  'Zapamiętane polecenia znikną z podpowiedzi.': ['The saved commands will no longer be suggested.', 'Die gespeicherten Befehle werden nicht mehr vorgeschlagen.', 'Los comandos guardados dejarán de sugerirse.', 'Les commandes enregistrées ne seront plus suggérées.', 'Os comandos guardados deixarão de ser sugeridos.'],
+  'Nie udało się wyczyścić historii poleceń': ['Could not clear the command history', 'Befehlsverlauf konnte nicht geleert werden', 'No se pudo borrar el historial de comandos', 'Impossible d’effacer l’historique des commandes', 'Não foi possível limpar o histórico de comandos'],
+} as const satisfies Record<string, readonly [string, string, string, string, string]>;

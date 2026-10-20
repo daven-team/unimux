@@ -162,6 +162,8 @@ export interface Settings {
   confirmCloseWorking: boolean;
   /** Lines of history each terminal keeps (one of SCROLLBACK_CHOICES, shared/terminalLimits.ts). */
   scrollbackLines: number;
+  /** Command suggestions in SSH terminals and the host command history behind them; only `false` turns them off. */
+  sshAutocomplete?: boolean;
 }
 
 export interface AppState {

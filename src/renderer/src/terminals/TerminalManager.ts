@@ -74,6 +74,15 @@ interface Entry {
   applySelection: ((args: unknown[]) => void) | null;
   /** An SSH session: no ConPTY hints, no win32-input-mode, no local exit line (spec 6.2). */
   remote: boolean;
+  /** The add-on of an SSH terminal (command autocomplete), see setRemoteAddon. */
+  addon: RemoteAddon | null;
+}
+
+/** What SSH terminals get on top (the command autocomplete, sshAutocomplete.ts): a look at every key first, and a dispose. */
+export interface RemoteAddon {
+  /** A key event before xterm handles it; false = the add-on consumed it. */
+  key(ev: KeyboardEvent): boolean;
+  dispose(): void;
 }
 
 /** `reason` is why the cell last became waiting (done / attention / error); `hooked` = precise hooks drive this cell; `info.turn` keys the alert of a turn. */
@@ -308,6 +317,7 @@ class TerminalManager {
       if (existing.remote !== remote) {
         existing.remote = remote;
         existing.term.options.windowsPty = remote || window.mc.platform !== 'win32' ? {} : { backend: 'conpty', buildNumber: this.buildNumber || 26100 };
+        this.syncAddon(existing);
       }
       return existing;
     }
@@ -341,12 +351,13 @@ class TerminalManager {
     const entry: Entry = {
       id: cellId, term, fit, webgl: null, shownAt: 0, outputAt: undefined, webglChangedAt: undefined, webglBlockedUntil: undefined, webglGl: null, webglGrantedAt: -Infinity, webglLosses: 0, host, tracker: new StatusTracker(), win32: false, agent: opts.agent,
       codex: opts.codex === true, scanner: new FailureScanner(), guard: new MouseFloodGuard(), infer: new AgentInference(window.mc.platform === 'win32' && opts.remote !== true), attachedTo: null, resizeObs: null, replaying: 0, lastSize: { cols: term.cols, rows: term.rows },
-      parkedSelection: null, applySelection: null, remote: opts.remote === true,
+      parkedSelection: null, applySelection: null, remote: opts.remote === true, addon: null,
     };
     entry.tracker.setCodex(entry.codex);
     entry.tracker.onBind = (thread) => this.bindListeners.forEach((l) => l(cellId, thread));
     entry.tracker.bgGuard = () => this.screenWaits(entry);
     this.entries.set(cellId, entry);
+    this.syncAddon(entry);
     this.statusTimer ??= setInterval(() => this.tickStatuses(), 400);
     this.deferParkedSelection(entry);
 
@@ -459,6 +470,7 @@ class TerminalManager {
   }
 
   private handleKey(entry: Entry, ev: KeyboardEvent): boolean {
+    if (entry.addon && !entry.addon.key(ev)) return false;
     const { term } = entry;
     const ctrl = ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.getModifierState('AltGraph');
     const command = window.mc.platform === 'darwin' && ev.metaKey && !ev.ctrlKey && !ev.altKey;
@@ -787,6 +799,19 @@ class TerminalManager {
     return this.remoteCwds.get(cellId)?.path ?? undefined;
   }
 
+  private remoteAddon: ((cellId: string, term: Terminal) => RemoteAddon) | null = null;
+
+  /** Installs the add-on of SSH terminals (once, at startup); terminals that exist already get it too. */
+  setRemoteAddon(factory: (cellId: string, term: Terminal) => RemoteAddon): void {
+    this.remoteAddon = factory;
+    for (const e of this.entries.values()) this.syncAddon(e);
+  }
+
+  private syncAddon(e: Entry): void {
+    if (e.remote && !e.addon && this.remoteAddon) e.addon = this.remoteAddon(e.id, e.term);
+    else if (!e.remote && e.addon) { e.addon.dispose(); e.addon = null; }
+  }
+
   /** A dim line written by the app (not part of the session output, not replayed). */
   writeNotice(cellId: string, text: string): void {
     this.entries.get(cellId)?.term.write(`\r\n\x1b[90m${text}\x1b[0m\r\n`);
@@ -833,6 +858,7 @@ class TerminalManager {
     if (!e) return;
     e.resizeObs?.disconnect();
     this.heldFits.delete(e);
+    e.addon?.dispose();
     this.releaseWebgl(e);
     e.term.dispose();
     e.host.remove();
