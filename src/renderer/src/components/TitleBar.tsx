@@ -10,7 +10,7 @@ import { addAgent, closeTab, selectTab } from '../actions';
 import { setUi, update, useStore } from '../store';
 import { profileOptionLabel } from '../cliUi';
 import { openMenu, openMenuAt } from './ContextMenu';
-import { IChevron, IPlusBold, ISearch, ITable, IX, TGrid, THistory, TSettings, TSidebar, TSnippet, TTerminal } from './icons';
+import { IChevron, IPlusBold, ISearch, ITable, IX, TGrid, THistory, TSettings, TNote, TSidebar, TSnippet, TTerminal } from './icons';
 import { DbKindIcon } from './db/DbKindIcon';
 import { FileIcon } from './FileIcon';
 import { StatusBadges } from './StatusBadges';
@@ -34,6 +34,7 @@ export const TitleBar = memo(function TitleBar() {
   useShortcutText(); // memoized: the shortcuts in the tooltips must still follow the settings
   const sidebarCollapsed = useStore((st) => st.s.sidebarCollapsed);
   const snippetsOpen = useStore((st) => st.s.snippetsOpen);
+  const notesOpen = useStore((st) => st.s.notesOpen);
   const projectId = useStore((st) => activeProject(st.s)?.id);
   const automationOpen = useStore((st) => st.ui.automationOpen);
   const settingsActive = useStore((st) => st.ui.settingsActive);
@@ -49,6 +50,7 @@ export const TitleBar = memo(function TitleBar() {
         </button>
         {projectId && <button className="tb-btn" title={titleWithShortcut(tr("Historia czatów i gridów"), 'history.open')} onClick={() => setUi({ modal: { kind: 'history', projectId } })}><THistory /></button>}
         <button className={`tb-btn ${snippetsOpen ? 'on' : ''}`} title={titleWithShortcut(tr("Snippety"), 'snippets.toggle')} onClick={() => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen }))}><TSnippet /></button>
+        <button className={`tb-btn ${notesOpen ? 'on' : ''}`} title={titleWithShortcut(tr("Notatki"), 'notes.toggle')} aria-label={tr("Notatki")} onClick={() => update((st) => ({ ...st, notesOpen: !st.notesOpen }))}><TNote /></button>
         <button className={`tb-btn ${!sidebarCollapsed ? 'on' : ''}`} title={titleWithShortcut(tr("Panel projektów"), 'sidebar.toggle')} onClick={() => update((st) => ({ ...st, sidebarCollapsed: !st.sidebarCollapsed }))}><TSidebar /></button>
         <button className={`tb-btn ${settingsActive ? 'on' : ''}`} title={tr("Ustawienia")} aria-label={tr("Ustawienia")} onClick={() => setUi({ settingsTabOpen: true, settingsActive: true })}><TSettings /></button>
       </div>

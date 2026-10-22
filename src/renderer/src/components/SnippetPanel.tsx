@@ -12,7 +12,7 @@ import { IEdit, IPlus } from './icons';
 import { dropEdge, scrollDragList } from './listDrag';
 import { openMenu } from './ContextMenu';
 import { EmptyLink, fillTokens, PanelEmpty } from './PanelEmpty';
-import { PanelResizeHandle, type PanelResizeProps } from './PanelResizeHandle';
+import type { PanelResizeProps } from './PanelResizeHandle';
 
 export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
   const { tr } = useI18n();
@@ -64,7 +64,6 @@ export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
 
   return (
     <aside className="rpanel" aria-label={tr("Panel snippetów")} onContextMenu={backgroundMenu}>
-      <PanelResizeHandle {...resize} />
       <div className="side-title">
         <span className="row" style={{ gap: 6 }}>
 

@@ -293,6 +293,21 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .tag { font-size: 10px; padding: 0 5px; border-radius: 4px; background: #1f2a3d; color: var(--accent-text); }
 .tag.green { background: #16301f; color: #86efac; }
 .rpanel-foot { border-top: 1px solid var(--border); padding: 8px 10px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+/* The right column holds the snippets, the notes or both (each half of the height, the one opened first on top). */
+.rcolumn { width: var(--snippets-width, 280px); flex: none; position: relative; border-left: 1px solid var(--border); background: var(--bg-1); display: flex; flex-direction: column; min-height: 0; }
+.rcolumn > .rpanel, .rcolumn > .panel-failed { width: auto; flex: 1 1 0; min-height: 0; border-left: 0; overflow: hidden; }
+.rcolumn.split > .rpanel + .rpanel, .rcolumn.split > * + .panel-failed, .rcolumn.split > .panel-failed + * { border-top: 1px solid var(--border); }
+/* ── notes ── */
+.snippet.note .n-text { white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.snippet.note .n-text.empty { font-style: italic; opacity: .7; }
+.note-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.note-editor-head { display: flex; align-items: center; gap: 4px; padding: 0 8px 6px 6px; }
+.note-name { flex: 1; min-width: 0; height: 26px; border: 1px solid transparent; border-radius: 4px; background: transparent; padding: 0 6px; outline: none; font-size: 13px; color: var(--text); }
+.note-name:hover { border-color: var(--border); }
+.note-name:focus { border-color: #2b5a99; }
+.note-text { flex: 1; min-height: 0; resize: none; margin: 0 10px; padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: transparent; outline: none; color: var(--text); font: inherit; font-size: 12.5px; line-height: 1.5; }
+.note-text:focus { border-color: #2b5a99; }
+.note-editor-foot { min-height: 22px; padding: 4px 12px; font-size: 11px; }
 
 /* ── overlays ──────────────────────────────────────────────────────────── */
 .overlay { position: fixed; inset: 0; background: #0009; display: flex; align-items: flex-start; justify-content: center; padding-top: 9vh; z-index: 50; }

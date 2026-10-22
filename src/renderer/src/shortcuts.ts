@@ -72,6 +72,7 @@ function run(id: string): void {
     // The tab in front, whatever its kind: with a file or the SSH view in front this never closes the grid behind it.
     case 'tab.close': closeFrontTab(); break;
     case 'snippets.toggle': update((s) => ({ ...s, snippetsOpen: !s.snippetsOpen })); break;
+    case 'notes.toggle': update((s) => ({ ...s, notesOpen: !s.notesOpen })); break;
     case 'sidebar.toggle': update((s) => ({ ...s, sidebarCollapsed: !s.sidebarCollapsed })); break;
     case 'cell.maximize': toggleMaximize(); break;
     case 'tab.next': cycleWorkspace(1); break;
