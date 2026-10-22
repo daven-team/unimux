@@ -96,6 +96,8 @@ export const TDatabase = () => <T><ellipse cx="12" cy="5" rx="8" ry="3" /><path 
 /** A terminal prompt. */
 export const TTerminal = () => <T><path d="m4 17 6-6-6-6" /><path d="M12 19h8" /></T>;
 export const TSnippet = () => <T><path d="m16 18 6-6-6-6" /><path d="m8 6-6 6 6 6" /></T>;
+/** A page with lines of text (the Notes panel). */
+export const TNote = () => <T><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6" /><path d="M8 13h8M8 17h5" /></T>;
 export const TSidebar = () => <T><rect width="18" height="18" x="3" y="3" rx="2.5" /><path d="M9 3v18" /></T>;
 export const TSettings = () => (
   <T>

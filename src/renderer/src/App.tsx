@@ -20,6 +20,9 @@ import { LazyScreen } from './components/LazyScreen';
 import { Modals } from './components/Modals';
 import { Sidebar } from './components/Sidebar';
 import { SnippetPanel } from './components/SnippetPanel';
+import { NotesPanel } from './components/NotesPanel';
+import { PanelResizeHandle } from './components/PanelResizeHandle';
+import { rightPanelOrder, type RightPanel } from '../../shared/notes';
 import { StatusBar } from './components/StatusBar';
 import { TitleBar, WorkspaceTabs } from './components/TitleBar';
 import { useShortcuts } from './shortcuts';
@@ -258,6 +261,9 @@ export function App() {
   const automationOpen = useStore((st) => st.ui.automationOpen);
   const languageChosen = useStore((st) => st.s.settings.language !== null);
   const snippetsOpen = useStore((st) => st.s.snippetsOpen);
+  const notesOpen = useStore((st) => st.s.notesOpen);
+  // The right column's panels top to bottom: the one opened first stays on top (see rightPanelOrder).
+  const rightOrder = useRef<readonly RightPanel[]>([]);
   const collapsed = useStore((st) => st.s.sidebarCollapsed);
   const sidebarWidth = useStore((st) => st.s.sidebarWidth);
   const snippetsWidth = useStore((st) => st.s.snippetsWidth);
@@ -299,7 +305,9 @@ export function App() {
   if (!ready) return bootFailed ? <WindowFallback message={tr('Nie udało się wczytać danych aplikacji.')} retry={() => setBootFailed(false)} /> : <div className="app" />;
   // The toast too: a language that fails to load in the preview says so.
   if (!languageChosen) return <><LanguageSetup />{toastView}</>;
-  const widths = fitPanelWidths(available, live.sidebar ?? sidebarWidth, live.snippets ?? snippetsWidth, collapsed, snippetsOpen);
+  rightOrder.current = rightPanelOrder(rightOrder.current, { snippets: snippetsOpen, notes: notesOpen });
+  const right = rightOrder.current;
+  const widths = fitPanelWidths(available, live.sidebar ?? sidebarWidth, live.snippets ?? snippetsWidth, collapsed, right.length > 0);
   const resizeProps = (panel: Panel) => ({
     panel,
     // The sidebar handle sizes the panel content; the rail in front of it is not part of that width.
@@ -328,7 +336,15 @@ export function App() {
           </div>
           {automationOpen && <LazyScreen load={loadAutomationPanel} />}
         </div>
-        {snippetsOpen && <ErrorBoundary name="snippets" fallback={(retry) => <PanelFallback retry={retry} />}><SnippetPanel resize={resizeProps('snippets')} /></ErrorBoundary>}
+        {right.length > 0 && (
+          // One column, one width and one resize handle; with both panels open each takes half of its height.
+          <div className={`rcolumn ${right.length > 1 ? 'split' : ''}`}>
+            <PanelResizeHandle {...resizeProps('snippets')} />
+            {right.map((panel) => panel === 'snippets'
+              ? <ErrorBoundary key="snippets" name="snippets" fallback={(retry) => <PanelFallback retry={retry} />}><SnippetPanel resize={resizeProps('snippets')} /></ErrorBoundary>
+              : <ErrorBoundary key="notes" name="notes" fallback={(retry) => <PanelFallback retry={retry} />}><NotesPanel resize={resizeProps('snippets')} /></ErrorBoundary>)}
+          </div>
+        )}
       </div>
       {statusBar}
       {commandPalette}

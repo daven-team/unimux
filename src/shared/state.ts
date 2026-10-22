@@ -18,8 +18,9 @@ import { DEFAULT_SSH_THEME, normalizeSshThemeId } from './sshThemes';
 import { defaultSftpPlaces, forgetRemotePlace, normalizeSftpPlaces } from './sftpView';
 import { normalizeWorkspaceOrder } from './workspaceOrder';
 import { normalizeDbConnections, normalizeDbGroupColors } from './db';
+import { NOTE_LIMITS, normalizeNotes } from './notes';
 import type {
-  AppState, ArchivedTab, Cell, Preset, PresetCell, Profile, Project, Settings, Snippet, Tab, Worktree,
+  AppState, ArchivedTab, Cell, Note, Preset, PresetCell, Profile, Project, Settings, Snippet, Tab, Worktree,
 } from './types';
 
 export const ARCHIVE_LIMIT = 50;
@@ -36,6 +37,7 @@ export function defaultState(platform: AppPlatform = 'win32'): AppState {
     profiles: DEFAULT_PROFILES.map((p) => ({ ...p, ...(p.cli === 'shell' && platform !== 'win32' ? { name: 'Terminal' } : {}) })),
     presets: [],
     snippets: [],
+    notes: [],
     sshHosts: [],
     sshIdentities: [],
     sftp: defaultSftpPlaces(),
@@ -44,6 +46,7 @@ export function defaultState(platform: AppPlatform = 'win32'): AppState {
     settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true, scrollbackLines: DEFAULT_SCROLLBACK_LINES, sshTheme: DEFAULT_SSH_THEME },
     sidebarCollapsed: false,
     snippetsOpen: true,
+    notesOpen: false,
     sidebarWidth: PANEL_LIMITS.sidebar.default,
     snippetsWidth: PANEL_LIMITS.snippets.default,
   };
@@ -317,6 +320,21 @@ export function moveSnippet(s: AppState, id: string, targetId: string | null, ed
   return snippets === s.snippets ? s : { ...s, snippets };
 }
 export const removeSnippet = (s: AppState, id: string): AppState => ({ ...s, snippets: s.snippets.filter((x) => x.id !== id) });
+export const upsertNote = (s: AppState, note: Note): AppState => ({ ...s, notes: upsert(s.notes, note) });
+/** A change of a note's name or text (capped like on load); the same state when nothing differs, so typing pauses write nothing. */
+export function editNote(s: AppState, id: string, patch: Partial<Pick<Note, 'name' | 'text'>>, now = Date.now()): AppState {
+  const note = s.notes.find((x) => x.id === id);
+  if (!note) return s;
+  const name = patch.name === undefined ? note.name : patch.name.slice(0, NOTE_LIMITS.name);
+  const text = patch.text === undefined ? note.text : patch.text.slice(0, NOTE_LIMITS.text);
+  if (name === note.name && text === note.text) return s;
+  return upsertNote(s, { ...note, name, text, updatedAt: now });
+}
+export function moveNote(s: AppState, id: string, targetId: string | null, edge: DropEdge = 'before'): AppState {
+  const notes = moveRelative(s.notes, id, targetId, edge);
+  return notes === s.notes ? s : { ...s, notes };
+}
+export const removeNote = (s: AppState, id: string): AppState => ({ ...s, notes: s.notes.filter((x) => x.id !== id) });
 export const updateSettings = (s: AppState, patch: Partial<Settings>): AppState => ({ ...s, settings: { ...s.settings, ...patch } });
 
 // ── ssh hosts ───────────────────────────────────────────────────────────────
@@ -448,6 +466,8 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
     profiles: profiles.length ? profiles : d.profiles,
     presets: (Array.isArray(r.presets) ? r.presets : []).map((p) => ({ ...p, cells: cleanPresetCells(p.cells ?? []) })),
     snippets: Array.isArray(r.snippets) ? r.snippets : [],
+    notes: normalizeNotes(r.notes),
+    notesOpen: r.notesOpen === true,
     sshHosts: normalizeSshHosts(r.sshHosts),
     sshIdentities: normalizeSshIdentities(r.sshIdentities),
     sftp: normalizeSftpPlaces(r.sftp),

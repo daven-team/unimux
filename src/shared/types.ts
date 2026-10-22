@@ -138,7 +138,18 @@ export interface Snippet {
   projectId?: string;
 }
 
-export type ShellKind = 'pwsh' | 'powershell' | 'cmd' | 'zsh' | 'bash';
+/** A note of the Notes panel (1.0.4): a small plain-text page; `projectId` keeps it to one project. */
+export interface Note {
+  id: string;
+  name: string;
+  text: string;
+  projectId?: string;
+  color?: string;
+  /** Last change of the name or text (ms since the epoch); 0 when unknown. */
+  updatedAt: number;
+}
+
+export type ShellKind ='pwsh' | 'powershell' | 'cmd' | 'zsh' | 'bash';
 
 export interface Settings {
   /** null until the language is confirmed on first launch. */
@@ -178,6 +189,8 @@ export interface AppState {
   profiles: Profile[];
   presets: Preset[];
   snippets: Snippet[];
+  /** The notes of the Notes panel (1.0.4, shared/notes.ts); absent in older files. */
+  notes: Note[];
   /** Saved SSH hosts (no secrets: those live in <data>/ssh/vault.json, owned by main). */
   sshHosts: SshHost[];
   /** Saved SSH identities (user name and key reference; their passwords live in the SSH vault). Absent in files before identities. */
@@ -196,6 +209,8 @@ export interface AppState {
   settings: Settings;
   sidebarCollapsed: boolean;
   snippetsOpen: boolean;
+  /** The Notes panel is open; it shares the right column (and `snippetsWidth`) with the snippets. */
+  notesOpen: boolean;
   sidebarWidth: number;
   snippetsWidth: number;
 }
