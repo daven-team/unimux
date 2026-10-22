@@ -1,12 +1,14 @@
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { ErrorBoundary, WindowFallback } from './components/ErrorBoundary';
+import { TooltipHost } from './components/TooltipHost';
 import { installErrorReporting } from './errorReport';
 import './styles.css';
 
 installErrorReporting();
 // The last resort: a render error no inner boundary caught leaves a "reload the window" card, not a blank window.
-createRoot(document.getElementById('root')!).render(<ErrorBoundary name="window" fallback={() => <WindowFallback />}><App /></ErrorBoundary>);
+// The tooltip host sits beside the app: titles get the styled bubble on the boot and language screens and the fallback too.
+createRoot(document.getElementById('root')!).render(<><ErrorBoundary name="window" fallback={() => <WindowFallback />}><App /></ErrorBoundary><TooltipHost /></>);
 
 // Handle for automated smoke tests driven over the DevTools protocol.
 import * as actions from './actions';
