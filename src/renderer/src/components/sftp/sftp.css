@@ -85,12 +85,10 @@
 .sftp-card { width: 100%; max-width: 440px; text-align: left; padding: 14px; background: #181818; border: 1px solid #ffffff12; border-radius: 10px; }
 .sftp-prompt.danger .sftp-card { border-color: #ef4444; }
 .sftp-card .input { width: 100%; box-sizing: border-box; background: #171717; border: 1px solid #ffffff0d; border-radius: 6px; color: var(--text); }
-/* No continuous animation (a long transfer would keep the GPU presenting frames): the ring turns with the shared low-rate blink (BusyRing holds it while shown). */
+/* A BusyRing: it turns with the shared .busy-ring animation (styles.css) only while it is shown. */
 .sftp-spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #ffffff22; border-top-color: var(--text-2); }
-:root[data-blink] .sftp-spinner { transform: rotate(180deg); }
 .sftp-spinner.small { width: 12px; height: 12px; flex: none; }
 .sftp-transfer.preparing { margin: 0 6px; }
-@media (prefers-reduced-motion: reduce) { :root[data-blink] .sftp-spinner { transform: none; } }
 /* "Wybierz host": in place of the whole remote pane, one column: the title row (the pane head's size, so it lines up with the
    local pane), the search, the hosts as cards in a grid. */
 .sftp-picker { flex: 1; min-height: 0; display: flex; flex-direction: column; }
