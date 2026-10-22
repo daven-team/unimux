@@ -120,6 +120,26 @@ export function moveSelect(sel: Selection, order: readonly string[], move: numbe
 
 export const selectAll = (order: readonly string[]): Selection => ({ paths: [...order], anchor: order[0] ?? null, focus: order[order.length - 1] ?? null });
 
+/**
+ * The rows a marquee (rubber band) touches, by index: the band spans content heights `y1`..`y2` (either order, scroll
+ * included), the rows start at `offset` (the ".." row above them) and are `rowHeight` tall each. null when it touches none.
+ */
+export function marqueeRows(y1: number, y2: number, offset: number, rowHeight: number, count: number): { first: number; last: number } | null {
+  const top = Math.min(y1, y2) - offset, bottom = Math.max(y1, y2) - offset;
+  if (count <= 0 || rowHeight <= 0 || bottom < 0 || top >= count * rowHeight) return null;
+  const first = Math.max(0, Math.floor(top / rowHeight));
+  const last = Math.min(count - 1, Math.max(first, Math.ceil(bottom / rowHeight) - 1));
+  return { first, last };
+}
+
+/** A marquee drag: the touched entries (in list order) are selected; with Ctrl/Cmd (`add`) they join the selection it started from. */
+export function marqueeSelect(base: Selection, order: readonly string[], hit: readonly string[], add: boolean): Selection {
+  if (add && !hit.length) return base;
+  const chosen = new Set(add ? [...base.paths, ...hit] : hit);
+  const paths = order.filter((p) => chosen.has(p));
+  return { paths, anchor: hit[0] ?? null, focus: hit[hit.length - 1] ?? null };
+}
+
 /** After a refresh or a filter change: only entries still shown stay selected. */
 export function liveSelection(sel: Selection, order: readonly string[]): Selection {
   const shown = new Set(order);

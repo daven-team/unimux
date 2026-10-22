@@ -86,6 +86,7 @@ function PaletteInner() {
       for (const [title, arrow, dx, dy] of moves) out.push({ kind: tr('Akcja'), title, desc: keys(`cell.move.${arrow}`) || undefined, run: () => moveCellBy(dx, dy) });
     }
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj snippety"), desc: keys('snippets.toggle') || undefined, run: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) });
+    out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj notatki"), desc: keys('notes.toggle') || undefined, run: () => update((st) => ({ ...st, notesOpen: !st.notesOpen })) });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj panel projektów"), desc: keys('sidebar.toggle') || undefined, run: () => update((st) => ({ ...st, sidebarCollapsed: !st.sidebarCollapsed })) });
     out.push({ kind: tr('Akcja'), title: tr('Panel: Git'), run: () => { openSidebarPanel('git'); } });
     out.push({ kind: tr('Akcja'), title: tr('Bazy danych: nowe połączenie'), run: () => setUi({ modal: { kind: 'dbConnection', dbKind: 'postgres' } }) });

@@ -10,13 +10,13 @@
 import { execFile, spawn, type ChildProcess } from 'child_process';
 import { createHash } from 'crypto';
 import { mkdirSync, readFileSync, statSync, unlinkSync } from 'fs';
-import { readdir, readFile, stat } from 'fs/promises';
+import { mkdir, readdir, readFile, rm, stat } from 'fs/promises';
 import { realpath as fsRealpath } from 'fs';
 import { promisify } from 'util';
 import { dirname, join, resolve } from 'path';
 import { cleanEnv } from '../shared/env';
 import {
-  BRANCH_FORMAT, DETAILS_FORMAT, GIT_COMMIT_FILE_LIMIT, GIT_MAX_FILES, LOG_FORMAT, isSafeRef, isSafeRemote, parseBranches, parseDetails,
+  BRANCH_FORMAT, DETAILS_FORMAT, GIT_COMMIT_FILE_LIMIT, GIT_MAX_FILES, INVALID_CLONE_URL, LOG_FORMAT, isCloneUrl, isSafeRef, isSafeRemote, parseBranches, parseDetails,
   parseDiffTree, parseLog, parseStatusV2, parseWorktrees, redactSecrets, trimGitText, worktreeAllowed,
   type GitBranch, type GitCheckoutRequest, type GitCommitDetails, type GitCommitRequest, type GitDiffRequest, type GitDiffResult,
   type GitErrorCode, type GitLogPage, type GitLogRequest, type GitOpResult, type GitPathsRequest, type GitProbe, type GitPushRequest,
@@ -39,6 +39,8 @@ export interface GitOptions {
   readTimeoutMs?: number;
   /** Operations that talk to a remote, and the ones that run hooks. */
   networkTimeoutMs?: number;
+  /** A clone (it can take long: a big repository over a slow line). */
+  cloneTimeoutMs?: number;
   /** Cap of the output kept from one read (the command is stopped when it prints more). */
   maxOutputBytes?: number;
   /** Cap of the output kept from one write (the excess is discarded; the command is never stopped for it). */
@@ -56,6 +58,7 @@ export interface GitOptions {
 
 export const READ_TIMEOUT_MS = 10_000;
 export const NETWORK_TIMEOUT_MS = 60_000;
+export const CLONE_TIMEOUT_MS = 10 * 60_000;
 const OUTPUT_CAP = 4 * 1024 * 1024;
 const WRITE_OUTPUT_CAP = 64 * 1024 * 1024;
 const DIFF_CAP = 1024 * 1024;
@@ -152,6 +155,7 @@ export class Git {
   private readonly baseEnv: NodeJS.ProcessEnv;
   private readonly readTimeout: number;
   private readonly networkTimeout: number;
+  private readonly cloneTimeout: number;
   private readonly cap: number;
   private readonly writeCap: number;
   private readonly busy = new Set<string>();
@@ -177,6 +181,7 @@ export class Git {
     this.baseEnv = options.env ?? process.env;
     this.readTimeout = options.readTimeoutMs ?? READ_TIMEOUT_MS;
     this.networkTimeout = options.networkTimeoutMs ?? NETWORK_TIMEOUT_MS;
+    this.cloneTimeout = options.cloneTimeoutMs ?? CLONE_TIMEOUT_MS;
     this.cap = options.maxOutputBytes ?? OUTPUT_CAP;
     this.writeCap = options.writeOutputBytes ?? WRITE_OUTPUT_CAP;
     this.trust = new GitTrustStore(options.trustFile);
@@ -700,15 +705,47 @@ export class Git {
    * (nothing changed on either side: git stops at the refused authentication, or GitHub rejected the pushed refs). A refusal of
    * the token as a whole is reported, so that a dead sign-in is not sent again with every later operation.
    */
-  private async network(root: string, args: string[]): Promise<RunOutput> {
-    const auth = this.remoteAuth?.() ?? null;
-    if (!auth) return this.run(root, args, { timeoutMs: this.networkTimeout });
-    try { return await this.run(root, args, { timeoutMs: this.networkTimeout, env: auth }); }
+  private async network(root: string, args: string[], timeoutMs = this.networkTimeout, withAuth = true): Promise<RunOutput> {
+    const auth = withAuth ? this.remoteAuth?.() ?? null : null;
+    if (!auth) return this.run(root, args, { timeoutMs });
+    try { return await this.run(root, args, { timeoutMs, env: auth }); }
     catch (error) {
       if (!(error instanceof GitFailure) || error.code !== 'failed' || !githubAuthRefused(error.message)) throw error;
       if (githubTokenRefused(error.message)) this.remoteAuthRefused?.();
-      return this.run(root, args, { timeoutMs: this.networkTimeout });
+      return this.run(root, args, { timeoutMs });
     }
+  }
+
+  /**
+   * `git clone -- <url> .` into `target`, which must be an empty folder or not exist yet (its parent must). The address was
+   * checked by isCloneUrl; ext:: stays off (args()). The GitHub sign-in of unimux goes along for https://github.com only, with
+   * the same fallback to the user's own credential helper. A folder made here goes away again when the clone fails.
+   */
+  clone(target: string, url: string): Promise<GitResult<GitOpResult>> {
+    return this.attempt(async () => {
+      if (!isCloneUrl(url)) return fail('invalid', INVALID_CLONE_URL);
+      let created = false;
+      try {
+        if ((await readdir(target)).length) return fail('invalid', 'Folder docelowy nie jest pusty. Klonować można tylko do pustego folderu.');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new GitFailure('failed', 'Nie można odczytać folderu docelowego.');
+        try { await mkdir(target); created = true; }
+        catch { return fail('invalid', 'Nie można utworzyć folderu docelowego.'); }
+      }
+      const key = `clone\0${caseFold(resolve(target))}`;
+      if (this.busy.has(key)) return fail('busy', 'Inna operacja git w tym repozytorium jeszcze trwa.');
+      this.busy.add(key);
+      try {
+        const github = /^https:\/\/github\.com\//i.test(url);
+        return ok(this.opMessage(await this.network(target, ['clone', '--', url, '.'], this.cloneTimeout, github), 'OK'));
+      } catch (error) {
+        if (created) await rm(target, { recursive: true, force: true }).catch(() => undefined);
+        throw error;
+      } finally {
+        this.busy.delete(key);
+        this.roots.delete(target);
+      }
+    });
   }
 
   fetch(dir: string, requestId: string, scope?: string): Promise<GitResult<GitOpResult>> {

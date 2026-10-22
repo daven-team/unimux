@@ -13,10 +13,10 @@ it('moves files across grids and settings in either direction', () => {
   expect(reorderWorkspace(cards, 'grid:b', 'grid:a', false)).toEqual(['grid:b', 'grid:a', 'file:a', 'settings']);
   expect(reorderWorkspace(cards, 'missing', 'grid:a', false)).toBe(cards);
 });
-it('picks the visible workspace: settings, then the SSH view, then a file, then the grid', () => {
+it('picks the visible workspace: settings, then a file, then the grid; with the SSH view in front no strip tab is', () => {
   const base = { settingsActive: false, sshActive: false, fileId: null, gridId: null };
   expect(activeWorkspaceKey({ ...base, settingsActive: true, sshActive: true, fileId: 'f', gridId: 'g' })).toBe('settings');
-  expect(activeWorkspaceKey({ ...base, sshActive: true, fileId: 'f', gridId: 'g' })).toBe('ssh');
+  expect(activeWorkspaceKey({ ...base, sshActive: true, fileId: 'f', gridId: 'g' })).toBeNull();
   expect(activeWorkspaceKey({ ...base, fileId: 'f', gridId: 'g' })).toBe('file:f');
   expect(activeWorkspaceKey({ ...base, gridId: 'g' })).toBe('grid:g');
   expect(activeWorkspaceKey(base)).toBeNull();

@@ -1,4 +1,3 @@
-import { Select } from './Select';
 // The Git panel of the left rail: the state of the active project's repository (branch, changes) and its history, with the
 // everyday actions (fetch, pull --ff-only, push with confirmation, stage, commit, switch branch). Nothing destructive lives here.
 // A repository whose own configuration can start programs stays read-only (history only) until the user trusts it.
@@ -10,6 +9,7 @@ import {
 import { useI18n } from '../i18n';
 import { askChoice, toast, useStore } from '../store';
 import { openDiffTab, openFile } from '../files';
+import { openBesideGrid } from '../splitView';
 import { locateInFiles } from '../explorer';
 import { useGitProbe } from '../git/gitProbe';
 import { newRequestId, type ChangesSort, type ChangesView } from '../../../shared/gitUi';
@@ -18,6 +18,7 @@ import { openMenu, openMenuAt } from './ContextMenu';
 import { GitChanges } from './GitChanges';
 import { GitHistory } from './GitHistory';
 import { GitSetup } from './GitSetup';
+import { GitCloneDialog } from './GitClone';
 import { GitPublishButton, useGitPublish } from './GitPublish';
 import { refreshGitBadges } from '../git/gitBadges';
 import { IBranch, IChevron, IMore } from './icons';
@@ -34,12 +35,16 @@ export function GitPanel() {
 }
 
 const MAX_KEYS_SHOWN = 8;
-/** Small, distinct transfer marks for the repository buttons of the History header; labels and confirmations live on the buttons. */
+/**
+ * The transfer marks of the History header's repository buttons, drawn at 12 px (like the refresh arrow next to them) with about
+ * the same line weight (1.4 px): an arrow down onto a dashed line (fetch: only the remote branches change),
+ * an arrow down into a tray (pull) and an arrow up out of it (push).
+ */
 function GitTransferIcon({ kind }: { kind: 'fetch' | 'pull' | 'push' }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {kind === 'push' ? <path d="M8 11V2M5 5l3-3 3 3" /> : <path d="M8 2v9M5 8l3 3 3-3" />}
-      {kind === 'fetch' ? <path d="M3 14h2m2 0h2m2 0h2" /> : <path d="M3 11v3h10v-3" />}
+    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {kind === 'push' ? <path d="M7 9V1.8M4 4.6L7 1.6l3 3" /> : <path d="M7 1.6v7.2M4 6l3 3 3-3" />}
+      {kind === 'fetch' ? <path d="M2 12.4h1.4M6.3 12.4h1.4M10.6 12.4H12" /> : <path d="M1.8 9.4v3h10.4v-3" />}
     </svg>
   );
 }
@@ -72,9 +77,9 @@ function TrustBanner({ keys, folded, onFold, onTrust }: { keys: string[]; folded
 
 function RepoView({ projectId, projectPath }: { projectId: string; projectPath: string }) {
   const { tr, errorText } = useI18n();
-  const [picked, setPicked] = useState<string | null>(null);
   const [worktrees, setWorktrees] = useState<GitWorktree[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [cloning, setCloning] = useState(false);
   const [nonce, setNonce] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const spinning = useHoldBusy(refreshing, 700);
@@ -89,9 +94,9 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
   const [readOnlyHead, setReadOnlyHead] = useState<{ name: string | null; hash: string } | null>(null);
   const cellWorktree = useStore((st) => { const id = st.ui.focusedCellId; return id ? findCell(st.s, id)?.cell.worktree?.path : undefined; });
 
-  // The worktree to show: the one the user picked, else the one of the focused cell, else the project folder itself.
+  // The worktree to show: the one of the focused cell, else the project folder itself.
   // Folders are matched in main by canonical path (short names, links and letter case do not matter), the answer comes as flags.
-  const known = picked ? worktrees.find((w) => w.path === picked && w.allowed) : worktrees.find((w) => w.preferred && w.allowed);
+  const known = worktrees.find((w) => w.preferred && w.allowed);
   const worktree = known && !known.isProject ? known.path : undefined;
   const opts = worktree ? { worktree } : {};
 
@@ -179,14 +184,6 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
     try {
       const result = await window.mc.git.trustGrant(projectId, { requestId: newRequestId(), ...opts });
       if (result.ok) { setTrust(result.data); setFolded(false); setNonce((n) => n + 1); }
-      else toast(tr('Git: {error}', { error: errorText(result.error) }), 'error');
-    } catch (e) { toast(tr('Git: {error}', { error: String(e) }), 'error'); }
-  };
-
-  const revokeTrust = async () => {
-    try {
-      const result = await window.mc.git.trustRevoke(projectId, { requestId: newRequestId(), ...opts });
-      if (result.ok) setTrust(result.data);
       else toast(tr('Git: {error}', { error: errorText(result.error) }), 'error');
     } catch (e) { toast(tr('Git: {error}', { error: String(e) }), 'error'); }
   };
@@ -280,25 +277,13 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
     const folder = file.path.endsWith('/');
     openMenu(e.clientX, e.clientY, [
       { label: tr('Pokaż zmiany'), disabled: folder, onClick: () => openDiff(file, source) },
+      { label: tr('Pokaż zmiany obok gridu'), disabled: folder, onClick: () => { openDiff(file, source, true); openBesideGrid(); } },
       { label: tr('Otwórz w edytorze'), disabled: !relative, onClick: () => { if (relative) void openFile(projectId, relative); } },
       { label: tr('Pokaż w panelu plików'), disabled: !relative, onClick: () => { if (relative) locateInFiles(projectId, relative); } },
       { sep: true },
       { label: tr('Kopiuj ścieżkę względną'), onClick: () => window.mc.clipboardWrite(file.path) },
     ]);
   };
-
-  const selectValue = known?.path ?? worktrees.find((w) => w.isProject)?.path ?? worktrees[0]?.path ?? '';
-  const folderName = (path: string): string => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? path;
-  const worktreeSelect = worktrees.length > 1 && (
-    // every option shows its full path, so the user sees which folder a choice means; the ones the project may not use are disabled
-    <Select className="select git-worktree" aria-label={tr('Worktree')} value={selectValue} onChange={(e) => setPicked(e.target.value)}>
-      {worktrees.map((w) => (
-        <option key={w.path} value={w.path} disabled={!w.allowed} title={w.path}>
-          {`${w.branch ?? tr('Odłączony HEAD ({head})', { head: w.head })} - ${folderName(w.path)} (${w.path})`}
-        </option>
-      ))}
-    </Select>
-  );
 
   /** The "..." menu of the panel: how the changes are shown and ordered, and the everyday actions (Cursor's menu, limited to what the panel can do). */
   const openOverflow = (button: HTMLElement) => {
@@ -314,11 +299,12 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
       { label: tr('Według ścieżki'), hint: mark(changesLayout.sort === 'path'), onClick: () => updateChangesLayout({ ...changesLayout, sort: 'path' }) },
       { label: tr('Według statusu'), hint: mark(changesLayout.sort === 'status'), onClick: () => updateChangesLayout({ ...changesLayout, sort: 'status' }) },
       { sep: true },
-      { label: tr('Pull'), disabled: !idle || !status?.upstream, onClick: pullNow },
+      { label: 'Pull', disabled: !idle || !status?.upstream, onClick: pullNow },
       { label: 'Push', disabled: !idle || !status?.push || (!status.ahead && !status.push.setUpstream), onClick: () => void pushNow() },
       { label: 'Fetch', disabled: !idle, onClick: fetchNow },
       ...publish.menu({ hasRemote: status?.hasRemote, initial: !!status?.initial, branch: status?.branch ?? null, idle }),
       { label: tr('Przełącz na gałąź…'), onClick: () => void openBranches(button) },
+      { label: tr('Klonuj repozytorium…'), onClick: () => setCloning(true) },
       { sep: true },
       { label: tr('Odśwież'), onClick: () => void refreshNow() },
     ]);
@@ -344,7 +330,6 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
     const branchLabel = readOnlyHead ? readOnlyHead.name ?? 'HEAD' : '';
     return (
       <div className="sidebar-content git-panel">
-        {worktreeSelect}
         <div className="git-bar">
           <span className="git-branch static" title={branchLabel}><IBranch /><span className="git-branch-name">{branchLabel}</span></span>
           <span className="git-badge conflict" title={tr('Tryb tylko do odczytu')}>{tr('Tryb tylko do odczytu')}</span>
@@ -368,9 +353,9 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
   const branchLabel = status.branch ?? tr('Odłączony HEAD ({head})', { head: status.head });
   const conflicts = status.files.filter((f) => f.conflict).length;
   const historyKey = `${status.branch ?? ''}:${status.head}:${status.upstream ?? ''}:${status.ahead}:${status.behind}`;
-  // The pull and push buttons carry the counts; the label says it too for the title and for screen readers.
-  const pullLabel = status.behind > 0 ? tr('Pull (commitów do pobrania: {count})', { count: status.behind }) : tr('Pobierz i dołącz zmiany (pull, tylko fast-forward)');
-  const pushLabel = status.ahead > 0 ? tr('Push (commitów do wysłania: {count})', { count: status.ahead }) : tr('Wyślij commity do zdalnego repozytorium (push)');
+  // One word each, git's own (the slang everyone uses); the pull and push buttons carry the counts, the label says it too.
+  const pullLabel = status.behind > 0 ? `Pull (${status.behind})` : 'Pull';
+  const pushLabel = status.ahead > 0 ? `Push (${status.ahead})` : 'Push';
   // No remote and nothing to commit: "Publish to GitHub" takes the Commit button's place under the message box (VS Code's "Publish Branch").
   const publishFirst = canWrite && status.hasRemote === false && !status.initial && !!status.branch && !status.files.length;
   const commitSlot = publishFirst ? <GitPublishButton disabled={!!busy} onClick={publish.open} /> : undefined;
@@ -387,8 +372,8 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
   // The repository buttons live in the History header, like the ones of Cursor's graph header.
   const repoActions = (
     <>
-      <button className="btn ghost icon small git-fetch" disabled={!!busy || !canWrite} onClick={fetchNow} aria-label="Fetch" title={tr('Pobierz zmiany ze zdalnego repozytorium (fetch)')}>{busy === 'Fetch' ? '…' : <GitTransferIcon kind="fetch" />}</button>
-      <button className={`btn ghost icon small git-sync ${status.behind > 0 ? 'down' : ''}`} disabled={!!busy || !canWrite || !status.upstream} onClick={pullNow} aria-label={pullLabel} title={status.upstream ? pullLabel : tr('Ta gałąź nie śledzi gałęzi zdalnej')}>
+      <button className="btn ghost icon small git-fetch" disabled={!!busy || !canWrite} onClick={fetchNow} aria-label="Fetch" title="Fetch">{busy === 'Fetch' ? '…' : <GitTransferIcon kind="fetch" />}</button>
+      <button className={`btn ghost icon small git-sync ${status.behind > 0 ? 'down' : ''}`} disabled={!!busy || !canWrite || !status.upstream} onClick={pullNow} aria-label={pullLabel} title={pullLabel}>
         {busy === 'Pull' ? '…' : <><GitTransferIcon kind="pull" />{status.behind > 0 && <span className="git-sync-count">{status.behind}</span>}</>}
       </button>
       <button className={`btn ghost icon small git-sync ${status.ahead > 0 ? 'up' : ''}`} disabled={!!busy || !canWrite || !status.push || (!status.ahead && !status.push.setUpstream)} onClick={() => void pushNow()} aria-label={pushLabel} title={pushLabel}>
@@ -401,15 +386,8 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
 
   return (
     <div className="sidebar-content git-panel" ref={panel}>
-      {worktreeSelect}
       {repo.error && <p className="git-note error" role="alert">{errorText(repo.error.message)}</p>}
       {status.parent && <p className="git-note error" role="note">{tr('Repozytorium nadrzędne: ten projekt jest podfolderem większego repozytorium ({root}). Zmiany w nim są wyłączone.', { root: status.root })}</p>}
-      {trustedWithPrograms && (
-        <div className="git-trust folded" role="note">
-          <span>{tr('Zaufane repozytorium: hooki i filtry z jego konfiguracji mogą się uruchamiać przy tych operacjach.')}</span>
-          <button className="btn small" onClick={() => void revokeTrust()}>{tr('Cofnij zaufanie')}</button>
-        </div>
-      )}
       {publish.notice}
       <GitChanges
         view={changesLayout.view} sort={changesLayout.sort} projectId={projectId} status={status} busy={!!busy} writable={canWrite} programsNote={programsNote}
@@ -417,6 +395,7 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
         onPush={status.push ? pushAfterCommit : undefined} commitSlot={commitSlot}
       />
       {publish.dialog}
+      {cloning && <GitCloneDialog target={{ kind: 'new' }} onClose={() => setCloning(false)} />}
       <div className="git-splitter" role="separator" aria-orientation="horizontal" aria-label={tr('Zmień wysokość historii')} tabIndex={0} onPointerDown={startResize} onKeyDown={resizeKey} />
       <GitHistory projectId={projectId} historyKey={historyKey} initial={status.initial} opts={opts} nonce={nonce} actions={repoActions} {...historyProps} />
     </div>

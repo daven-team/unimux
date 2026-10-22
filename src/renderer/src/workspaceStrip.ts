@@ -1,11 +1,11 @@
-// The top strip as one list (1.0.0): grids of every project, file tabs, Settings and the SSH view. The order is
-// AppState.workspaceOrder (kept up to date by WorkspaceTabs); the shortcuts walk and close what the strip shows.
-import { activeWorkspaceKey, mergeWorkspaceOrder, parseWorkspaceKey, stepWorkspace, stripKeys } from '../../shared/workspaceOrder';
+// The top strip as one list (1.0.0): grids of every project, file tabs and Settings (the SSH view has no tab since 1.0.4: it
+// is entered from the rail and stays open in the background). The order is AppState.workspaceOrder (kept up to date by
+// WorkspaceTabs); the shortcuts walk and close what the strip shows.
+import { activeWorkspaceKey, mergeWorkspaceOrder, parseWorkspaceKey, scopeWorkspaceKeys, stepWorkspace, stripKeyOwner, stripKeys } from '../../shared/workspaceOrder';
 import { activeProject } from '../../shared/state';
 import { getS, getUi, setUi } from './store';
 import { activateFile, closeFile, useFileStore } from './files';
 import { useSshStore } from './sshStore';
-import { activateSshView, closeSshView } from './ssh';
 import { closeTab, selectTab } from './actions';
 
 /** The per-project orders of 0.9.x, read once for the migration into state.json. */
@@ -14,13 +14,12 @@ export function readLegacyOrders(): unknown {
   try { return JSON.parse(localStorage.getItem(LEGACY_ORDER_KEY) ?? '{}'); } catch { return {}; }
 }
 
-/** The strip as it is now: the keys it shows, in its order, and the one in front. */
+/** The strip as it is now: the keys it shows (only the active project's with the strip scope 'project'), in its order, and the one in front. */
 export function currentStrip(): { shown: string[]; active: string | null } {
   const s = getS();
-  const keys = stripKeys({
-    settingsOpen: getUi().settingsTabOpen, sshOpen: useSshStore.getState().viewOpen, projects: s.projects, files: useFileStore.getState().documents,
-  });
-  return { shown: mergeWorkspaceOrder(s.workspaceOrder ?? [], keys, null), active: frontKey() };
+  const input = { settingsOpen: getUi().settingsTabOpen, projects: s.projects, files: useFileStore.getState().documents };
+  const order = mergeWorkspaceOrder(s.workspaceOrder ?? [], stripKeys(input), null);
+  return { shown: scopeWorkspaceKeys(order, s.settings.stripScope, s.activeProjectId, stripKeyOwner(input)), active: frontKey() };
 }
 
 /** The key of the tab in front (cheap: it runs on every key press for the shortcut dispatch). */
@@ -44,7 +43,6 @@ function findGrid(id: string) {
 export function activateWorkspaceKey(key: string): void {
   const target = parseWorkspaceKey(key);
   if (target?.kind === 'settings') setUi({ settingsActive: true });
-  else if (target?.kind === 'ssh') activateSshView();
   else if (target?.kind === 'file') activateFile(target.id);
   else if (target?.kind === 'grid') {
     const grid = findGrid(target.id);
@@ -52,11 +50,10 @@ export function activateWorkspaceKey(key: string): void {
   }
 }
 
-/** Closes one tab of the strip: Settings, the SSH view, a file (asks about unsaved edits) or a grid (asks about working agents). */
+/** Closes one tab of the strip: Settings, a file (asks about unsaved edits) or a grid (asks about working agents). */
 export function closeWorkspaceKey(key: string): void {
   const target = parseWorkspaceKey(key);
   if (target?.kind === 'settings') setUi({ settingsTabOpen: false, settingsActive: false });
-  else if (target?.kind === 'ssh') closeSshView();
   else if (target?.kind === 'file') void closeFile(target.id);
   else if (target?.kind === 'grid') {
     const grid = findGrid(target.id);

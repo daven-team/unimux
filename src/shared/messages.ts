@@ -15,6 +15,7 @@ import { gitSetupMessages } from './gitSetupMessages';
 import { githubMessages } from './githubMessages';
 import { gridMessages } from './gridMessages';
 import { macUpdateMessages } from './macUpdateMessages';
+import { notesMessages } from './notesMessages';
 import { perfMessages } from './perfMessages';
 import { railMessages } from './railMessages';
 import { settingsMessages } from './settingsMessages';
@@ -24,6 +25,7 @@ import { sftpViewMessages } from './sftpViewMessages';
 import { remoteEditMessages } from './remoteEditMessages';
 import { shortcutMessages } from './shortcutMessages';
 import { sshMessages } from './sshMessages';
+import { sshConnectMessages } from './sshConnectMessages';
 import { sshModeMessages } from './sshModeMessages';
 import { sshThemeMessages } from './sshThemeMessages';
 import { sshViewMessages } from './sshViewMessages';
@@ -54,6 +56,7 @@ export const messages = {
   ...githubMessages,
   ...gridMessages,
   ...macUpdateMessages,
+  ...notesMessages,
   ...perfMessages,
   ...safetyMessages,
   ...stabilityMessages,
@@ -65,6 +68,7 @@ export const messages = {
   ...remoteEditMessages,
   ...shortcutMessages,
   ...sshMessages,
+  ...sshConnectMessages,
   ...sshModeMessages,
   ...sshThemeMessages,
   ...sshViewMessages,

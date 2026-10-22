@@ -163,10 +163,18 @@ export interface GitPathsRequest extends GitMutation { paths: string[]; all?: bo
 export interface GitCommitRequest extends GitMutation { message: string }
 export interface GitCheckoutRequest extends GitMutation { branch: string; remote?: boolean }
 
+/**
+ * "Clone a repository": into the folder of a project that has no repository yet (`projectId`, the folder must be empty), or into
+ * a new folder `name` inside `parent` (it must not exist yet or be empty; the renderer then adds it as a project).
+ */
+export type GitCloneRequest = { url: string; projectId: string } | { url: string; parent: string; name: string };
+
 export interface GitApi {
   probe(projectId: string): Promise<GitProbe>;
   /** `git init` in the project folder (only when it is not a repository yet). */
   init(projectId: string): Promise<GitResult<{ message: string }>>;
+  /** `git clone -- <url> .` into an empty folder; answers with the folder the repository is in. */
+  clone(req: GitCloneRequest): Promise<GitResult<{ message: string; path: string }>>;
   /** Installs Git (winget / Xcode tools) or opens its download page. */
   installGit(): Promise<GitResult<{ message: string; restart: boolean }>>;
   worktrees(projectId: string, req?: { prefer?: string }): Promise<GitResult<GitWorktree[]>>;
@@ -352,6 +360,59 @@ export function validateGitRequest<C extends GitChannel>(channel: C, input: unkn
     default:
       return invalid;
   }
+}
+
+// ---------- clone ----------
+
+export const INVALID_CLONE_URL = 'Podaj adres repozytorium: https://…, ssh://… albo git@host:ścieżka.';
+
+/**
+ * An address `git clone` may get: https://host/path, ssh://[user@]host[:port]/path or the scp form user@host:path. Nothing else:
+ * no ext:: or file:// transport, no local path, no leading "-" (an option), no whitespace or control characters, no credentials
+ * in an https address (they would land in the repository's configuration).
+ */
+export function isCloneUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length < 8 || value.length > 2000) return false;
+  // eslint-disable-next-line no-control-regex
+  if (/[\s\x00-\x1f\x7f]/.test(value) || value.startsWith('-') || value.includes('::')) return false;
+  const scp = /^([A-Za-z0-9_][A-Za-z0-9._-]*)@([A-Za-z0-9][A-Za-z0-9.-]*):([^\\:]+)$/.exec(value);
+  if (scp) return !scp[3].startsWith('-') && !scp[3].includes('..');
+  let url: URL;
+  try { url = new URL(value); } catch { return false; }
+  if (!url.hostname || url.hostname.startsWith('-') || url.pathname.length < 2 || url.search || url.hash) return false;
+  if (url.protocol === 'https:') return !url.username && !url.password;
+  if (url.protocol === 'ssh:') return !url.password && !url.username.startsWith('-');
+  return false;
+}
+
+/** The folder name `git clone` would choose: the last part of the address without ".git", made safe for every file system. */
+export function cloneFolderName(url: string): string {
+  const path = url.replace(/[?#].*$/, '').replace(/[\\/]+$/, '');
+  const last = path.split(/[/:]/).pop() ?? '';
+  // eslint-disable-next-line no-control-regex
+  const name = last.replace(/\.git$/i, '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '').replace(/^[.-]+/, '');
+  if (!name) return 'repo';
+  return /^(con|prn|aux|nul|com\d|lpt\d)$/i.test(name) ? `${name}-repo` : name.slice(0, 100);
+}
+
+/** A single folder name (no separator, no "..", nothing Windows refuses). */
+export function isSafeFolderName(value: unknown): value is string {
+  if (typeof value !== 'string' || !value || value.length > 100 || value === '.' || value === '..') return false;
+  // eslint-disable-next-line no-control-regex
+  return !/[<>:"/\\|?*\x00-\x1f]/.test(value) && !/[. ]$/.test(value) && !value.startsWith('-') && !/^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(value);
+}
+
+/** Checks a clone request from the renderer; `parent` must be an absolute path. */
+export function validateCloneRequest(input: unknown): Checked<GitCloneRequest> {
+  const invalid = bad('Nieprawidłowe żądanie git.');
+  if (!isObject(input)) return invalid;
+  if (!isCloneUrl(input.url)) return bad(INVALID_CLONE_URL);
+  if (typeof input.projectId === 'string' && input.projectId && input.projectId.length <= 200) return { ok: true, value: { url: input.url, projectId: input.projectId } };
+  const parent = text(input.parent, 1000);
+  // eslint-disable-next-line no-control-regex
+  if (!parent || /[\x00-\x1f]/.test(parent) || !(parent.startsWith('/') || /^[A-Za-z]:[\\/]/.test(parent) || /^\\\\[^\\]/.test(parent))) return invalid;
+  if (!isSafeFolderName(input.name)) return invalid;
+  return { ok: true, value: { url: input.url, parent, name: input.name } };
 }
 
 // ---------- output text ----------

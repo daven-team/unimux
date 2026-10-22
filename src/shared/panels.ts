@@ -19,7 +19,8 @@ export function normalizePanelWidth(value: unknown, panel: Panel): number {
 
 /**
  * Fit saved preferences to the window without overwriting them when the window shrinks. `sidebar` goes in as the width of the
- * panel content and comes out as the width of the whole sidebar (rail included).
+ * panel content and comes out as the width of the whole sidebar (rail included). `snippetsOpen`: the right column is open (the
+ * snippets, the notes or both; they share its width).
  */
 export function fitPanelWidths(
   available: number, sidebar: number, snippets: number, collapsed: boolean, snippetsOpen: boolean,

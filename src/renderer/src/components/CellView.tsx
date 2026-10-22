@@ -5,7 +5,7 @@ import { useI18n } from '../i18n';
 import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { propsEqualWithStyle } from '../../../shared/renderEquality';
 import { errorPhrase, failureLabel } from '../../../shared/alerts';
-import { getProfile, PROJECT_COLORS, updateCell } from '../../../shared/state';
+import { cellDrawColor, getProfile, PROJECT_COLORS, updateCell } from '../../../shared/state';
 import { missingCardCli } from '../../../shared/cliStatus';
 import { sshHeaderName, sshPhaseLabel, userAtEndpoint } from '../../../shared/ssh';
 import { resolveSshTheme } from '../../../shared/sshThemes';
@@ -65,6 +65,8 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   // SSH cells draw in their colour theme: the host's own, else the one of Settings > SSH (local terminals keep the app look).
   const sshThemeSetting = useStore((st) => (ssh ? st.s.settings.sshTheme : undefined));
   const sshTheme = ssh ? resolveSshTheme(host?.theme, sshThemeSetting) : undefined;
+  // 1.0.4: an SSH cell takes its host's colour (Hosty) unless the user gave the cell its own.
+  const color = cellDrawColor(cell, host);
   // The card replaces the terminal only while the cell is held; a running terminal is never hidden by a late "missing".
   const lackingCli = ssh ? null : missingCardCli(profile, cliStatus, held);
   const sessionTitle = useStore((st) => (cell.session ? st.ui.sessionTitles[cell.session.id] : undefined));
@@ -137,7 +139,8 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
       ...(cell.name ? [{ label: tr("Przywróć nazwę automatyczną"), onClick: () => renameCell(cell.id, '') }] : []),
       { header: tr("Kolor") },
       { colors: PROJECT_COLORS, onPick: (c: string) => setCellColor(cell.id, c) },
-      ...(cell.color ? [{ label: tr("Usuń kolor"), onClick: () => setCellColor(cell.id, undefined) }] : []),
+      // Only a colour the cell shows: an automatic accent behind the host's colour has nothing to remove.
+      ...(cell.color && color === cell.color ? [{ label: tr("Usuń kolor"), onClick: () => setCellColor(cell.id, undefined) }] : []),
       { sep: true },
       ...restartItems(),
       ...(!ssh && profile.cli === 'shell' ? [{ sep: true as const }, ...pathModeItems()] : []),
@@ -163,8 +166,8 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   return (
     <div
       data-cell-id={cell.id}
-      className={`cell terminal-cell ${focused ? 'focused' : ''} ${drop ? 'drop' : ''} ${cell.color ? 'colored' : ''} ${dragSource ? 'drag-source' : ''}`}
-      style={cell.color ? { ...style, ['--cc' as string]: cell.color } : style}
+      className={`cell terminal-cell ${focused ? 'focused' : ''} ${drop ? 'drop' : ''} ${color ? 'colored' : ''} ${dragSource ? 'drag-source' : ''}`}
+      style={color ? { ...style, ['--cc' as string]: color } : style}
       onMouseDownCapture={markFocused}
       onFocusCapture={markFocused}
       onDragOver={(e) => {

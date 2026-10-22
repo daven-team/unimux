@@ -16,10 +16,11 @@ import { normalizeSshHosts, type SshCellRef, type SshHost } from './ssh';
 import { normalizeSshIdentities } from './sshIdentity';
 import { DEFAULT_SSH_THEME, normalizeSshThemeId } from './sshThemes';
 import { defaultSftpPlaces, forgetRemotePlace, normalizeSftpPlaces } from './sftpView';
-import { normalizeWorkspaceOrder } from './workspaceOrder';
+import { DEFAULT_STRIP_SCOPE, normalizeStripScope, normalizeWorkspaceOrder } from './workspaceOrder';
 import { normalizeDbConnections, normalizeDbGroupColors } from './db';
+import { NOTE_LIMITS, normalizeNotes } from './notes';
 import type {
-  AppState, ArchivedTab, Cell, Preset, PresetCell, Profile, Project, Settings, Snippet, Tab, Worktree,
+  AppState, ArchivedTab, Cell, Note, Preset, PresetCell, Profile, Project, Settings, Snippet, Tab, Worktree,
 } from './types';
 
 export const ARCHIVE_LIMIT = 50;
@@ -36,14 +37,16 @@ export function defaultState(platform: AppPlatform = 'win32'): AppState {
     profiles: DEFAULT_PROFILES.map((p) => ({ ...p, ...(p.cli === 'shell' && platform !== 'win32' ? { name: 'Terminal' } : {}) })),
     presets: [],
     snippets: [],
+    notes: [],
     sshHosts: [],
     sshIdentities: [],
     sftp: defaultSftpPlaces(),
     dbConnections: [],
     dbGroupColors: {},
-    settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true, scrollbackLines: DEFAULT_SCROLLBACK_LINES, sshTheme: DEFAULT_SSH_THEME },
+    settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true, scrollbackLines: DEFAULT_SCROLLBACK_LINES, sshTheme: DEFAULT_SSH_THEME, stripScope: DEFAULT_STRIP_SCOPE },
     sidebarCollapsed: false,
     snippetsOpen: true,
+    notesOpen: false,
     sidebarWidth: PANEL_LIMITS.sidebar.default,
     snippetsWidth: PANEL_LIMITS.snippets.default,
   };
@@ -62,6 +65,17 @@ type CellInput = { color?: string; model?: string; profileId: string; role?: Cel
 /** Accent colors handed out to new cells, in order; also used for agents created by a coordinator. */
 export const CELL_COLORS = ['#60a5fa', '#a78bfa', '#34d399', '#fbbf24', '#fb7185', '#22d3ee', '#c084fc', '#a3e635',
   '#818cf8', '#2dd4bf', '#f472b6', '#fb923c', '#38bdf8', '#4ade80', '#e879f9', '#facc15', '#93c5fd', '#6ee7b7', '#fda4af', '#d8b4fe'];
+
+/**
+ * The colour a cell is drawn in (1.0.4). An SSH cell of a host with a colour (Hosty) shows the host's colour, unless the user
+ * gave the cell its own: the cell menu picks from PROJECT_COLORS, while the CELL_COLORS accent every new cell gets on its own
+ * gives way to the host's. Other cells keep their own colour. "Usuń kolor" only removes the cell's own colour.
+ */
+export function cellDrawColor(cell: { color?: string; ssh?: unknown }, host: { color?: string } | null | undefined): string | undefined {
+  const hostColor = cell.ssh ? host?.color : undefined;
+  if (!cell.color) return hostColor;
+  return hostColor && CELL_COLORS.includes(cell.color.toLowerCase()) ? hostColor : cell.color;
+}
 
 /** The first accent color no other cell of the grid uses; once all are taken the palette repeats. */
 export function nextCellColor(used: Array<string | undefined>): string {
@@ -317,6 +331,21 @@ export function moveSnippet(s: AppState, id: string, targetId: string | null, ed
   return snippets === s.snippets ? s : { ...s, snippets };
 }
 export const removeSnippet = (s: AppState, id: string): AppState => ({ ...s, snippets: s.snippets.filter((x) => x.id !== id) });
+export const upsertNote = (s: AppState, note: Note): AppState => ({ ...s, notes: upsert(s.notes, note) });
+/** A change of a note's name or text (capped like on load); the same state when nothing differs, so typing pauses write nothing. */
+export function editNote(s: AppState, id: string, patch: Partial<Pick<Note, 'name' | 'text'>>, now = Date.now()): AppState {
+  const note = s.notes.find((x) => x.id === id);
+  if (!note) return s;
+  const name = patch.name === undefined ? note.name : patch.name.slice(0, NOTE_LIMITS.name);
+  const text = patch.text === undefined ? note.text : patch.text.slice(0, NOTE_LIMITS.text);
+  if (name === note.name && text === note.text) return s;
+  return upsertNote(s, { ...note, name, text, updatedAt: now });
+}
+export function moveNote(s: AppState, id: string, targetId: string | null, edge: DropEdge = 'before'): AppState {
+  const notes = moveRelative(s.notes, id, targetId, edge);
+  return notes === s.notes ? s : { ...s, notes };
+}
+export const removeNote = (s: AppState, id: string): AppState => ({ ...s, notes: s.notes.filter((x) => x.id !== id) });
 export const updateSettings = (s: AppState, patch: Partial<Settings>): AppState => ({ ...s, settings: { ...s.settings, ...patch } });
 
 // ── ssh hosts ───────────────────────────────────────────────────────────────
@@ -448,6 +477,8 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
     profiles: profiles.length ? profiles : d.profiles,
     presets: (Array.isArray(r.presets) ? r.presets : []).map((p) => ({ ...p, cells: cleanPresetCells(p.cells ?? []) })),
     snippets: Array.isArray(r.snippets) ? r.snippets : [],
+    notes: normalizeNotes(r.notes),
+    notesOpen: r.notesOpen === true,
     sshHosts: normalizeSshHosts(r.sshHosts),
     sshIdentities: normalizeSshIdentities(r.sshIdentities),
     sftp: normalizeSftpPlaces(r.sftp),
@@ -468,6 +499,7 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
       backgroundLoad: normalizeBackgroundLoad(r.settings?.backgroundLoad),
       scrollbackLines: normalizeScrollback(r.settings?.scrollbackLines),
       sshTheme: normalizeSshThemeId(r.settings?.sshTheme),
+      stripScope: normalizeStripScope(r.settings?.stripScope),
       shortcuts: normalizeShortcutOverrides(r.settings?.shortcuts, platform),
       // The retired notifications / waitingSound* keys only seed the alerts when none are saved yet; they are never written again.
       alerts: readAlerts(r.settings as Record<string, unknown> | undefined),

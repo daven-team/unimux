@@ -53,4 +53,23 @@ export const settingsMessages = {
   'Sygnał systemu (bez regulacji głośności)': ['System beep (ignores the volume)', 'Systemton (ignoriert die Lautstärke)', 'Sonido del sistema (ignora el volumen)', 'Son système (ignore le volume)', 'Som do sistema (ignora o volume)'],
   'Przywróć rozmiar 100%': ['Reset to 100%', 'Auf 100 % zurücksetzen', 'Restablecer al 100 %', 'Revenir à 100 %', 'Repor 100%'],
   'Wyłącz, aby agenci niczego nie sygnalizowali: ani okienkami, ani dźwiękiem. Ustawienia poniżej zostają zapamiętane.': ['Turn off so agents signal nothing: no popups and no sounds. The settings below are remembered.', 'Ausschalten, damit Agenten nichts signalisieren: weder Fenster noch Töne. Die Einstellungen unten bleiben gespeichert.', 'Desactívalo para que los agentes no avisen de nada: ni ventanas ni sonidos. Los ajustes de abajo se conservan.', 'Désactivez pour que les agents ne signalent rien : ni fenêtres ni sons. Les réglages ci-dessous sont conservés.', 'Desative para que os agentes não sinalizem nada: nem janelas nem sons. As definições abaixo ficam guardadas.'],
+  // 1.0.4: the top strip shows the tabs of every project or only of the active one (Settings > App, the "All tabs" menu).
+  'Karty na górnym pasku': ['Tabs in the top strip', 'Tabs in der oberen Leiste', 'Pestañas de la barra superior', 'Onglets de la barre du haut', 'Separadores da barra superior'],
+  'Wszystkich projektów': ['Of all projects', 'Aller Projekte', 'De todos los proyectos', 'De tous les projets', 'De todos os projetos'],
+  'Tylko aktywnego projektu': ['Only of the active project', 'Nur des aktiven Projekts', 'Solo del proyecto activo', 'Seulement du projet actif', 'Só do projeto ativo'],
+  'Tylko karty aktywnego projektu': ['Only tabs of the active project', 'Nur Tabs des aktiven Projekts', 'Solo pestañas del proyecto activo', 'Seulement les onglets du projet actif', 'Só separadores do projeto ativo'],
+  'Pasek pokazuje otwarte gridy i pliki wszystkich projektów naraz.': [
+    'The strip shows the open grids and files of all projects at once.',
+    'Die Leiste zeigt die offenen Grids und Dateien aller Projekte gleichzeitig.',
+    'La barra muestra a la vez los grids y archivos abiertos de todos los proyectos.',
+    'La barre affiche en même temps les grilles et fichiers ouverts de tous les projets.',
+    'A barra mostra ao mesmo tempo os grids e ficheiros abertos de todos os projetos.',
+  ],
+  'Pasek pokazuje tylko gridy i pliki aktywnego projektu (oraz karty spoza projektów). Wybór innego projektu po lewej pokazuje jego karty.': [
+    'The strip shows only the grids and files of the active project (and tabs outside the projects). Picking another project on the left shows its tabs.',
+    'Die Leiste zeigt nur die Grids und Dateien des aktiven Projekts (und Tabs außerhalb der Projekte). Ein anderes Projekt links zeigt dessen Tabs.',
+    'La barra muestra solo los grids y archivos del proyecto activo (y las pestañas fuera de los proyectos). Elegir otro proyecto a la izquierda muestra sus pestañas.',
+    'La barre n’affiche que les grilles et fichiers du projet actif (et les onglets hors projets). Choisir un autre projet à gauche affiche ses onglets.',
+    'A barra mostra só os grids e ficheiros do projeto ativo (e os separadores fora dos projetos). Escolher outro projeto à esquerda mostra os seus separadores.',
+  ],
 } as const;

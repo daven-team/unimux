@@ -293,6 +293,21 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .tag { font-size: 10px; padding: 0 5px; border-radius: 4px; background: #1f2a3d; color: var(--accent-text); }
 .tag.green { background: #16301f; color: #86efac; }
 .rpanel-foot { border-top: 1px solid var(--border); padding: 8px 10px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+/* The right column holds the snippets, the notes or both (each half of the height, the one opened first on top). */
+.rcolumn { width: var(--snippets-width, 280px); flex: none; position: relative; border-left: 1px solid var(--border); background: var(--bg-1); display: flex; flex-direction: column; min-height: 0; }
+.rcolumn > .rpanel, .rcolumn > .panel-failed { width: auto; flex: 1 1 0; min-height: 0; border-left: 0; overflow: hidden; }
+.rcolumn.split > .rpanel + .rpanel, .rcolumn.split > * + .panel-failed, .rcolumn.split > .panel-failed + * { border-top: 1px solid var(--border); }
+/* ── notes ── */
+.snippet.note .n-text { white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.snippet.note .n-text.empty { font-style: italic; opacity: .7; }
+.note-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.note-editor-head { display: flex; align-items: center; gap: 4px; padding: 0 8px 6px 6px; }
+.note-name { flex: 1; min-width: 0; height: 26px; border: 1px solid transparent; border-radius: 4px; background: transparent; padding: 0 6px; outline: none; font-size: 13px; color: var(--text); }
+.note-name:hover { border-color: var(--border); }
+.note-name:focus { border-color: #2b5a99; }
+.note-text { flex: 1; min-height: 0; resize: none; margin: 0 10px; padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: transparent; outline: none; color: var(--text); font: inherit; font-size: 12.5px; line-height: 1.5; }
+.note-text:focus { border-color: #2b5a99; }
+.note-editor-foot { min-height: 22px; padding: 4px 12px; font-size: 11px; }
 
 /* ── overlays ──────────────────────────────────────────────────────────── */
 .overlay { position: fixed; inset: 0; background: #0009; display: flex; align-items: flex-start; justify-content: center; padding-top: 9vh; z-index: 50; }
@@ -363,16 +378,15 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .menu { position: fixed; z-index: 60; min-width: 250px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; padding: 5px; background: #191919; border: 1px solid #343434; border-radius: 7px; box-shadow: 0 8px 28px #0008; }
 .menu-item { width: 100%; min-height: 27px; display: flex; align-items: center; gap: 24px; padding: 4px 12px; border: 0; background: transparent; text-align: left; border-radius: 4px; cursor: pointer; color: #d4d4d4; font-size: 12px; line-height: 19px; }
 .menu-item:hover, .menu-item:focus-visible { background: #333; color: #fff; outline: none; }
+.menu-swatch { display: inline-block; width: 9px; height: 9px; margin-right: 8px; border-radius: 3px; vertical-align: 0; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
 .menu-item .kbd { border: 0; background: none; padding: 0; font: inherit; color: #a3a3a3; white-space: nowrap; }
 .menu-item.danger { color: #fca5a5; }
 .menu-item.disabled { opacity: 0.45; cursor: default; }
 .menu-item.disabled:hover, .menu-item.disabled:focus-visible { background: transparent; color: var(--text-2); }
 .usage-card.busy { opacity: 0.85; }
 .usage-swapping { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-2); white-space: nowrap; }
-/* Turns with the shared blink (blink.ts), no CSS animation. */
+/* A BusyRing: turns with the shared .busy-ring animation. */
 .usage-spinner { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; }
-:root[data-blink] .usage-spinner { transform: rotate(180deg); }
-@media (prefers-reduced-motion: reduce) { :root[data-blink] .usage-spinner { transform: none; } }
 .menu-sep { height: 1px; background: #ffffff09; margin: 5px -5px; }
 .menu-label { padding: 4px 12px 3px; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: #828282; text-transform: uppercase; letter-spacing: .4px; }
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 70; padding: 9px 14px; border-radius: 8px; background: #1f1f1f; border: 1px solid var(--border-2); color: var(--text); box-shadow: 0 12px 40px #000a; max-width: 70vw; }
@@ -773,6 +787,13 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid #a8a29e; outli
 .explorer-busy span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-dirty { color: #e5cfa7; font-size: 9px; }
 .workspace-content, .terminal-workspace { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.file-pane { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
+/* Split view (1.0.4): the grid and the tab beside it side by side, a draggable edge between them. */
+.workspace-content.split { flex-direction: row; }
+.workspace-content.split > .terminal-workspace, .workspace-content.split > .file-pane { min-width: 160px; }
+.split-divider { position: relative; flex: none; width: 5px; cursor: col-resize; touch-action: none; outline: none; background: var(--border); }
+.split-divider::after { content: ''; position: absolute; top: 0; bottom: 0; left: 1px; width: 3px; background: var(--accent); opacity: 0; transition: opacity .12s; }
+.split-divider:hover::after, .split-divider:focus-visible::after, .split-divider.dragging::after { opacity: 1; }
 .settings-workspace { flex: 1; min-width: 0; min-height: 0; container-type: inline-size; }
 .settings-page { display: flex; justify-content: center; flex: 1; min-width: 0; min-height: 0; gap: 40px; padding: 48px clamp(32px, 4vw, 64px) 32px; background: #181818; }
 .settings-nav { width: 180px; flex: none; padding: 0; border: 0; overflow-y: auto; }
@@ -942,10 +963,13 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 
 /* ── refresh feedback ──────────────────────────────────────────────────── */
 .refresh-icon { display: inline-grid; place-items: center; line-height: 0; }
-/* Flips with the shared blink while spinning (blink.ts), no CSS animation. */
-:root[data-blink] .refresh-icon.spinning svg { transform: rotate(180deg); }
+/* Spinners (RefreshIcon while spinning, BusyRing) turn smoothly. The animation exists only while one is rendered, which is
+   only during a wait, so it does not keep the GPU presenting frames when nothing is busy. Static with reduced motion. */
+@keyframes mc-spin { to { transform: rotate(360deg); } }
+.refresh-icon.spinning svg, .busy-ring { animation: mc-spin .9s linear infinite; }
+.busy-ring { display: inline-block; }
 .statusbar .refresh-icon svg { width: 12px; height: 12px; }
-@media (prefers-reduced-motion: reduce) { :root[data-blink] .refresh-icon.spinning svg { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .refresh-icon.spinning svg, .busy-ring { animation: none; } }
 
 /* ── find and replace ──────────────────────────────────────────────────── */
 .modal.find-replace { width: 900px; height: min(80vh, 760px); }

@@ -21,6 +21,7 @@ export const IFile = () => <Svg><path d="M9.5 2H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1
 export const ICollapse = () => <Svg><rect x="2" y="5" width="9" height="9" rx="1.5" /><path d="M5 2h8a1 1 0 0 1 1 1v8M4.5 9.5h4" /></Svg>;
 export const IGrip = () => <Svg size={12}><path d="M5 4h.01M10 4h.01M5 8h.01M10 8h.01M5 12h.01M10 12h.01" strokeWidth="2.5" /></Svg>;
 export const ISnippet = () => <Svg><path d="M5 4L1.5 8 5 12M11 4l3.5 4-3.5 4M9.5 3l-3 10" /></Svg>;
+export const ISplit = () => <Svg><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M8 3v10M3.8 6h2.4M3.8 8.5h2.4" /></Svg>;
 export const ISidebar = () => <Svg><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M6 3v10" /></Svg>;
 export const ICollapseAll = () => <Svg><path d="M4 3.5l4 3.5 4-3.5M4 12.5L8 9l4 3.5" /></Svg>;
 export const IExpandAll = () => <Svg><path d="M4 7l4-3.5L12 7M4 9l4 3.5L12 9" /></Svg>;
@@ -96,6 +97,8 @@ export const TDatabase = () => <T><ellipse cx="12" cy="5" rx="8" ry="3" /><path 
 /** A terminal prompt. */
 export const TTerminal = () => <T><path d="m4 17 6-6-6-6" /><path d="M12 19h8" /></T>;
 export const TSnippet = () => <T><path d="m16 18 6-6-6-6" /><path d="m8 6-6 6 6 6" /></T>;
+/** A page with lines of text (the Notes panel). */
+export const TNote = () => <T><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6" /><path d="M8 13h8M8 17h5" /></T>;
 export const TSidebar = () => <T><rect width="18" height="18" x="3" y="3" rx="2.5" /><path d="M9 3v18" /></T>;
 export const TSettings = () => (
   <T>

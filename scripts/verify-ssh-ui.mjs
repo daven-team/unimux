@@ -111,13 +111,13 @@ const PARTS = {
         const hidden = `getComputedStyle(document.querySelector('.ssh-workspace')).display === 'none'`;
         const showGrid = () => app.evaluate(`document.querySelector('.workspace-tabs .grid-tab').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))`);
         await palette('SSH: nowy host');
-        await app.until(`!!document.querySelector('${D} [data-field=address]') && !!document.querySelector('.workspace-tabs .ssh-tab.active')`, 'host form in the SSH view');
+        await app.until(`!!document.querySelector('${D} [data-field=address]') && getComputedStyle(document.querySelector('.ssh-workspace')).display !== 'none'`, 'host form in the SSH view');
         await app.setValue(`${D} [data-field=label]`, 'local test');
         await app.setValue(`${D} [data-field=address]`, '127.0.0.1');
         // A half-filled host form survives Settings in front (the view stays mounted).
         await app.click('button[aria-label="Ustawienia"]');
         await app.until(hidden, 'settings in front');
-        await app.click('.workspace-tabs .ssh-tab');
+        await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`!!document.querySelector('${D} [data-field=address]') && !(${hidden})`, 'host form after settings');
         if (await fieldValues() !== '127.0.0.1|local test||22|') throw new Error(`host form lost its input: ${await fieldValues()}`);
         await app.setValue(`${D} [data-field=port]`, String(server.port));
@@ -129,7 +129,7 @@ const PARTS = {
         await connectWithPassword(app, server.password);
         await connected(app, 1);
         // Back in the view: the pane edits the saved host and its tile shows it connected.
-        await app.click('.workspace-tabs .ssh-tab');
+        await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`document.querySelector('${D} h2')?.textContent === 'local test' && !!document.querySelector('.ssh-tile .ssh-state.connected')`, 'saved host with a connected tile');
         await app.screenshot('ssh-view-host.png');
         // D4: a typed passphrase does not survive the view going to the background; the label does.
@@ -140,7 +140,7 @@ const PARTS = {
         await app.setValue(`${D} input[type=password]`, 'typed-secret');
         await showGrid();
         await app.until(hidden, 'grid in front');
-        await app.click('.workspace-tabs .ssh-tab');
+        await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`document.querySelector('${D} [data-field=newKeyLabel]')?.value === 'check key'`, 'label kept');
         if (await app.evaluate(`[...document.querySelectorAll('${D} input[type=password]')].some((e) => e.value)`)) throw new Error('a hidden pane still held a typed secret');
         await app.screenshot('ssh-newkey-editor.png');
@@ -160,7 +160,7 @@ const PARTS = {
         await app.until(`document.querySelector('${D} .ssh-facts dd')?.textContent === 'ssh-ed25519'`, 'dropped key draft');
         await showGrid();
         await app.until(hidden, 'grid in front again');
-        await app.click('.workspace-tabs .ssh-tab');
+        await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`document.querySelector('${D} .ssh-public')?.textContent.includes('dropped@check')`, 'draft kept after the grid');
         await app.click(`${D} .ssh-editor button.primary`, 'Zapisz');
         await app.until(`document.querySelector('${D} .ssh-public')?.textContent.includes('dropped@check') && !document.querySelector('${D} .ssh-segmented')`, 'dropped key stored');
@@ -219,7 +219,7 @@ const PARTS = {
       const app = await launchApp(root);
       try {
         await app.click('.rail-tiles [aria-label="SSH"]');
-        await app.until(`!!document.querySelector('.ssh-view') && !!document.querySelector('.workspace-tabs .ssh-tab.active')`, 'SSH view in the main area');
+        await app.until(`!!document.querySelector('.ssh-view') && getComputedStyle(document.querySelector('.ssh-workspace')).display !== 'none'`, 'SSH view in the main area');
         if (await app.evaluate(`!!document.querySelector('.side-panel .ssh-tile')`)) throw new Error('hosts are still listed in the left panel');
         // The SSH tile is a pressed toggle, not a second selected tab; in SSH mode no panel tile is selected (the side panel shows
         // the SSH navigation). Behind Settings the SSH tile is not pressed and the open panel's tile is selected again.
@@ -227,7 +227,7 @@ const PARTS = {
         if (await app.evaluate(railState) !== 'true|false|0') throw new Error(`rail state with the view in front: ${await app.evaluate(railState)}`);
         await app.click('button[aria-label="Ustawienia"]');
         await app.until(`${railState} === 'false|false|1'`, 'SSH tile not pressed behind Settings');
-        await app.click('.workspace-tabs .ssh-tab');
+        await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`${railState} === 'true|false|0'`, 'SSH tile pressed again');
         const heads = await app.evaluate(`[...document.querySelectorAll('.ssh-group-head .grow')].map((e) => e.textContent)`);
         if (JSON.stringify(heads) !== JSON.stringify(['lab', 'Bez grupy'])) throw new Error(`groups: ${heads}`);
@@ -306,7 +306,7 @@ const PARTS = {
         // A group opens as an SSH-only grid named after it; the SSH tab stays open.
         await app.evaluate(`(() => { const group = [...document.querySelectorAll('.ssh-view-group')].find((g) => g.querySelector('.ssh-group-head')?.textContent.includes('lab')); group.querySelector('.ssh-group-open').click(); return true; })()`);
         await app.until(`document.querySelectorAll('.cell .ssh-fingerprint').length === 3`, 'host key prompt in all three cells');
-        await app.until(`document.querySelector('.workspace-tabs .grid-tab.active .label')?.textContent === 'lab' && !!document.querySelector('.workspace-tabs .ssh-tab')`, 'tab named after the group, SSH tab kept');
+        await app.until(`document.querySelector('.workspace-tabs .grid-tab.active .label')?.textContent === 'lab' && !!document.querySelector('.ssh-workspace') && !document.querySelector('.workspace-tabs .ssh-tab')`, 'tab named after the group, SSH view kept in the background');
         await app.screenshot('ssh-group-grid.png');
       } finally { await app.close(); }
     } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
@@ -338,8 +338,8 @@ const PARTS = {
         await app.until(`!!document.querySelector('.ssh-view .ssh-tile[data-host-id]') && !document.querySelector('.side-panel') && !!document.querySelector('.ssh-view-main .ssh-nav.compact') && ${folded}`, 'SSH mode with the side panel still folded');
         await showGrid();
         await app.until(`${sshHidden} && ${folded}`, 'left SSH mode, the fold unchanged');
-        await app.click('.workspace-tabs .ssh-tab');
-        await app.until(`!!document.querySelector('.ssh-nav.compact') && ${folded}`, 'SSH mode from its tab, still folded');
+        await app.click('.rail-tiles [aria-label="SSH"]');
+        await app.until(`!!document.querySelector('.ssh-nav.compact') && ${folded}`, 'SSH mode from the rail again, still folded');
         // In SSH mode the SSH tile unfolds the side panel (and folds it again later).
         await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`!!document.querySelector('.ssh-view .ssh-tile[data-host-id]') && !!document.querySelector('.side-panel .ssh-nav')`, 'SSH mode with its navigation in the side panel');
@@ -393,14 +393,14 @@ const PARTS = {
         const overflow = await app.evaluate(`(() => { const m = document.querySelector('.ssh-view-main'); return m.scrollWidth > m.clientWidth + 1; })()`);
         if (overflow) throw new Error('the host column overflows in a narrow window');
         await shot('narrow');
-        // Leaving SSH mode: the Projects tile brings the normal side panel and the grid back; the SSH tab stays.
+        // Leaving SSH mode: the Projects tile brings the normal side panel and the grid back; the SSH view stays open in the background (no tab in the strip since 1.0.4).
         await app.click('.rail-tiles [aria-label="Projekty"]');
-        await app.until(`!document.querySelector('.ssh-nav') && !!document.querySelector('#sidebar-projects') && getComputedStyle(document.querySelector('.ssh-workspace')).display === 'none' && !!document.querySelector('.workspace-tabs .ssh-tab')`, 'normal side panel back');
+        await app.until(`!document.querySelector('.ssh-nav') && !!document.querySelector('#sidebar-projects') && getComputedStyle(document.querySelector('.ssh-workspace')).display === 'none' && !!document.querySelector('.ssh-workspace') && !document.querySelector('.workspace-tabs .ssh-tab')`, 'normal side panel back');
         const rail = await app.evaluate(`[document.querySelector('.rail-tiles [aria-label="SSH"]').getAttribute('aria-pressed'), document.querySelector('.rail-tiles [aria-label="Projekty"]').getAttribute('aria-selected')].join('|')`);
         if (rail !== 'false|true') throw new Error(`rail after leaving SSH mode: ${rail}`);
-        // The SSH tab brings SSH mode back on the section that was chosen; a grid tab ends it again.
-        await app.click('.workspace-tabs .ssh-tab');
-        await app.until(`document.querySelector('.side-panel .ssh-nav-item.on')?.dataset.section === 'hosts'`, 'SSH mode again from its tab');
+        // The SSH tile brings SSH mode back on the section that was chosen; a grid tab ends it again.
+        await app.click('.rail-tiles [aria-label="SSH"]');
+        await app.until(`document.querySelector('.side-panel .ssh-nav-item.on')?.dataset.section === 'hosts'`, 'SSH mode again from the rail');
         await shot('back');
         // "Pokaż w panelu plików" on a file tab ends SSH mode and reveals the file in the Files panel.
         await showGrid();
@@ -408,7 +408,7 @@ const PARTS = {
         await app.until(`!!document.querySelector('.file-entry[data-path="notes.txt"]')`, 'file in the Files panel');
         await app.click('.file-entry[data-path="notes.txt"]');
         await app.until(`!!document.querySelector('.workspace-tabs .file-tab')`, 'file tab');
-        await app.click('.workspace-tabs .ssh-tab');
+        await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`!!document.querySelector('.side-panel .ssh-nav')`, 'SSH mode before the reveal');
         await app.evaluate(`document.querySelector('.workspace-tabs .file-tab').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 400, clientY: 50 }))`);
         await app.click('.menu .menu-item', 'Pokaż w panelu plików');
@@ -488,19 +488,14 @@ const PARTS = {
         await app.setValue('.ssh-view-detail [data-field=label]', 'web-1 edited');
         await showGrid();
         await app.until(`${noModal} && !(${sshShown})`, 'grid in front without a question');
-        await app.click('.workspace-tabs .ssh-tab');
-        await app.until(`${noModal} && ${sshShown} && ${labelIs('web-1 edited')}`, 'back in the view with the edit');
-        // Closing the SSH tab drops the item: it asks; "Anuluj" keeps the tab, the item and the edit.
-        await app.click('.workspace-tabs .ssh-tab .x');
-        await app.until(discardAsked, 'closing the SSH tab asks');
-        await app.click('.modal-foot button', 'Anuluj');
-        await app.until(`${noModal} && ${sshShown} && ${labelIs('web-1 edited')} && !!document.querySelector('.workspace-tabs .ssh-tab.active')`, 'Anuluj keeps the SSH tab with the edit');
-        await app.click('.workspace-tabs .ssh-tab .x');
-        await app.until(discardAsked, 'closing asks again');
-        await app.click('.modal-foot button', 'Odrzuć zmiany');
-        await app.until(`${noModal} && !document.querySelector('.workspace-tabs .ssh-tab')`, 'SSH tab closed after discarding');
         await app.click('.rail-tiles [aria-label="SSH"]');
-        await app.until(`${sshShown} && ${fullWidth}`, 'back in the view, the discarded pane closed');
+        await app.until(`${noModal} && ${sshShown} && ${labelIs('web-1 edited')}`, 'back in the view with the edit');
+        // 1.0.4: the SSH view has no tab in the strip to close; closing the edited pane asks, "Odrzuć zmiany" closes it.
+        await app.until(`!document.querySelector('.workspace-tabs .ssh-tab')`, 'no SSH tab in the strip');
+        await app.click('.ssh-view-detail .ssh-detail-close');
+        await app.until(discardAsked, 'closing the edited pane asks');
+        await app.click('.modal-foot button', 'Odrzuć zmiany');
+        await app.until(`${noModal} && ${sshShown} && ${fullWidth}`, 'the discarded pane closed');
         await editHost(app, 'web-1');
         await app.until(labelIs('web-1'), 'clean host form again');
         await app.click('.ssh-view-detail .ssh-detail-close');
@@ -553,7 +548,7 @@ const PARTS = {
         await reveal();
         await showGrid();
         await app.until(`getComputedStyle(document.querySelector('.ssh-workspace')).display === 'none'`, 'grid in front');
-        await app.click('.workspace-tabs .ssh-tab');
+        await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`document.querySelector('.ssh-view-detail h2')?.textContent === 'deploy' && !document.querySelector('.ssh-private-text')`, 'hidden pane cleared it');
         // Esc in the pane closes it and drops the text.
         await reveal();
@@ -691,7 +686,7 @@ const PARTS = {
         await app.until(`${CELL_BUFFERS}.length === 3 && ${CELL_BUFFERS}.every((t) => t.includes('połączono') && t.includes('$'))`, 'three cells with a prompt');
         // "Wysyłanie masowe" in the SSH view's header targets the active grid.
         const showGrid = () => app.evaluate(`[...document.querySelectorAll('.workspace-tabs .grid-tab')].find((t) => t.textContent.includes('lab')).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))`);
-        await app.click('.workspace-tabs .ssh-tab');
+        await app.click('.rail-tiles [aria-label="SSH"]');
         await app.click('.ssh-view-head .ssh-broadcast-open', 'Wysyłanie masowe (3)');
         await app.until(`document.querySelector('.ssh-broadcast .modal-head h3')?.textContent.startsWith('Wysyłanie masowe: jedno polecenie do wielu sesji')`, 'bulk send dialog title');
         await app.until(`!!document.querySelector('.ssh-broadcast textarea')`, 'broadcast dialog');
@@ -720,7 +715,7 @@ const PARTS = {
         await app.click('.cell-head .ssh-host');
         await app.click('.menu .menu-item', 'Rozłącz');
         await app.until(`document.querySelectorAll('.cell .ssh-bar').length === 1`, 'first cell disconnected');
-        await app.click('.workspace-tabs .ssh-tab');
+        await app.click('.rail-tiles [aria-label="SSH"]');
         await app.click('.ssh-view-head .ssh-broadcast-open', 'Wysyłanie masowe');
         await app.until(`document.querySelectorAll('.ssh-targets li').length === 3 && document.querySelectorAll('.ssh-targets li.disabled').length === 1`, 'disconnected cell disabled in the dialog');
         const reason = await app.evaluate(`document.querySelector('.ssh-targets li.disabled .ssh-target-state').textContent`);

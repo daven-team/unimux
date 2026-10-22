@@ -61,6 +61,7 @@ const api: McApi = {
   git: {
     probe: (projectId) => ipcRenderer.invoke('git:probe', projectId),
     init: (projectId) => ipcRenderer.invoke('git:init', projectId),
+    clone: (req) => ipcRenderer.invoke('git:clone', req),
     installGit: () => ipcRenderer.invoke('git:installGit'),
     worktrees: (projectId, req) => ipcRenderer.invoke('git:worktrees', projectId, req),
     status: (projectId, req) => ipcRenderer.invoke('git:status', projectId, req),

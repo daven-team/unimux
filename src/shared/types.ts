@@ -10,6 +10,7 @@ import type { SshIdentity } from './sshIdentity';
 import type { SshThemeId } from './sshThemes';
 import type { SftpPlaces } from './sftpView';
 import type { DbConnection } from './db';
+import type { StripScope } from './workspaceOrder';
 
 export type CliKind = 'claude' | 'codex' | 'shell';
 /** A forced path format of a shell cell: Claude (@path), Codex (plain path) or the quoted shell form. */
@@ -138,7 +139,18 @@ export interface Snippet {
   projectId?: string;
 }
 
-export type ShellKind = 'pwsh' | 'powershell' | 'cmd' | 'zsh' | 'bash';
+/** A note of the Notes panel (1.0.4): a small plain-text page; `projectId` keeps it to one project. */
+export interface Note {
+  id: string;
+  name: string;
+  text: string;
+  projectId?: string;
+  color?: string;
+  /** Last change of the name or text (ms since the epoch); 0 when unknown. */
+  updatedAt: number;
+}
+
+export type ShellKind ='pwsh' | 'powershell' | 'cmd' | 'zsh' | 'bash';
 
 export interface Settings {
   /** null until the language is confirmed on first launch. */
@@ -168,6 +180,8 @@ export interface Settings {
   sshTheme: SshThemeId;
   /** Command suggestions in SSH terminals and the host command history behind them; only `false` turns them off. */
   sshAutocomplete?: boolean;
+  /** The top strip shows the tabs of every project ('all', 1.0.0) or only of the active project (shared/workspaceOrder.ts). */
+  stripScope: StripScope;
 }
 
 export interface AppState {
@@ -178,6 +192,8 @@ export interface AppState {
   profiles: Profile[];
   presets: Preset[];
   snippets: Snippet[];
+  /** The notes of the Notes panel (1.0.4, shared/notes.ts); absent in older files. */
+  notes: Note[];
   /** Saved SSH hosts (no secrets: those live in <data>/ssh/vault.json, owned by main). */
   sshHosts: SshHost[];
   /** Saved SSH identities (user name and key reference; their passwords live in the SSH vault). Absent in files before identities. */
@@ -196,6 +212,8 @@ export interface AppState {
   settings: Settings;
   sidebarCollapsed: boolean;
   snippetsOpen: boolean;
+  /** The Notes panel is open; it shares the right column (and `snippetsWidth`) with the snippets. */
+  notesOpen: boolean;
   sidebarWidth: number;
   snippetsWidth: number;
 }

@@ -183,6 +183,7 @@ export const SHORTCUTS = [
   { id: 'cell.move.up', label: 'Przesuń komórkę w górę', group: 'grid', scope: 'cell', default: 'Mod+Alt+Shift+Up', rebindable: true, blockedInSettings: true },
   { id: 'cell.move.down', label: 'Przesuń komórkę w dół', group: 'grid', scope: 'cell', default: 'Mod+Alt+Shift+Down', rebindable: true, blockedInSettings: true },
   { id: 'snippets.toggle', label: 'Pokaż lub ukryj snippety', group: 'panels', scope: 'global', default: 'Mod+Shift+B', rebindable: true },
+  { id: 'notes.toggle', label: 'Pokaż lub ukryj notatki', group: 'panels', scope: 'global', default: 'Mod+Shift+O', rebindable: true },
   { id: 'sidebar.toggle', label: 'Pokaż lub ukryj panel boczny', group: 'panels', scope: 'global', default: 'Mod+Shift+E', rebindable: true },
   { id: 'git.commit', label: 'Git: zatwierdź zmiany (commit)', group: 'panels', scope: 'git-panel', default: 'Mod+Enter', rebindable: true, aliases: ['Ctrl+Enter'] },
   { id: 'editor.save', label: 'Zapisz plik w edytorze', group: 'files', scope: 'editor', default: 'Mod+S', rebindable: true },

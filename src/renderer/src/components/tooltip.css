@@ -1,0 +1,9 @@
+/* The styled tooltip of every title (TooltipHost): the dark bubble of the menus, above menus, modals and popups. */
+.mc-tooltip {
+  position: fixed; left: 0; top: 0; z-index: 100000; max-width: min(380px, calc(100vw - 12px)); box-sizing: border-box;
+  padding: 5px 9px; border-radius: 6px; background: #1a1a1a; border: 1px solid #343434; box-shadow: 0 6px 20px #000a;
+  color: var(--text); font-size: 11.5px; font-weight: 400; line-height: 1.45; letter-spacing: 0; text-transform: none;
+  white-space: pre-line; overflow-wrap: anywhere; pointer-events: none; user-select: none;
+  visibility: hidden; opacity: 0; transition: opacity .08s;
+}
+.mc-tooltip.on { visibility: visible; opacity: 1; }

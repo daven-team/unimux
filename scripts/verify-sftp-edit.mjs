@@ -84,7 +84,7 @@ try {
     for (const type of ['keyDown', 'keyUp']) await app.cdp('Input.dispatchKeyEvent', { type, key: keyName, code, windowsVirtualKeyCode: vk, modifiers });
   };
   const openSftpView = async () => {
-    await app.click('.workspace-tabs .ssh-tab');
+    await app.click('.rail-tiles [aria-label="SSH"]');
     await app.until(`!!document.querySelector('.sftp-view') && document.querySelector('.sftp-view').offsetParent !== null`, 'SFTP view shown');
   };
 
@@ -150,7 +150,7 @@ try {
   // 5. A clean tab follows a change on the server when it gets focus again (no polling).
   writeFileSync(notes, 'server side update\n');
   await sleep(3200); // at most one check per few seconds
-  await app.click('.workspace-tabs .ssh-tab');
+  await app.click('.rail-tiles [aria-label="SSH"]');
   await app.click('.workspace-tabs .file-tab', 'notes.txt');
   await app.until(`${editorText}.includes('server side update')`, 'clean tab reloaded on focus', 15000);
   log('a clean tab reloaded the server change on focus');

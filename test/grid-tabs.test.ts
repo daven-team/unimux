@@ -2,8 +2,8 @@
 import { readFileSync } from 'fs';
 import { describe, expect, it } from 'vitest';
 import {
-  gridTabLabels, groupWorkspaceKeys, mergeWorkspaceOrder, migrateWorkspaceOrders, normalizeWorkspaceOrder, parseWorkspaceKey,
-  neighbourAfterClose, sameOrder, sortTabsByOrder, stepWorkspace, stripKeys, syncTabsToOrder,
+  gridTabLabels, groupWorkspaceKeys, mergeWorkspaceOrder, migrateWorkspaceOrders, normalizeStripScope, normalizeWorkspaceOrder, parseWorkspaceKey,
+  neighbourAfterClose, reorderWorkspace, sameOrder, scopeWorkspaceKeys, sortTabsByOrder, stepWorkspace, stripKeyOwner, stripKeys, syncTabsToOrder,
 } from '../src/shared/workspaceOrder';
 import { addProject, addTab, closeTab, defaultState, focusGrid, normalizeState, restoreTab, updateProject } from '../src/shared/state';
 import { stripTabColor } from '../src/shared/tabStrip';
@@ -32,8 +32,9 @@ function twoProjects(): { s: AppState; a: string; b: string; a1: string; a2: str
 describe('the stored order', () => {
   it('keeps known keys of open grids, drops unknown kinds, closed grids and duplicates', () => {
     const ids = new Set(['g1', 'g2']);
+    // 'ssh' (the SSH view's tab up to 1.0.3) is dropped: the view has no tab any more.
     expect(normalizeWorkspaceOrder(['grid:g2', 'db:x', 'file:p:a.ts', 'grid:gone', 'settings', 'grid:g2', 7, 'ssh', 'file:', 'grid:g1'], ids))
-      .toEqual(['grid:g2', 'file:p:a.ts', 'settings', 'ssh', 'grid:g1']);
+      .toEqual(['grid:g2', 'file:p:a.ts', 'settings', 'grid:g1']);
     expect(normalizeWorkspaceOrder('nonsense', ids)).toEqual([]);
     expect(normalizeWorkspaceOrder(undefined, ids)).toBeUndefined();
   });
@@ -65,19 +66,19 @@ describe('ordering', () => {
     // No anchor (first start) or an anchor that is gone: new grids go to the end.
     expect(mergeWorkspaceOrder(saved, ['grid:a1', 'grid:new', 'file:f'], null)).toEqual(['grid:a1', 'file:f', 'grid:new']);
     expect(mergeWorkspaceOrder(saved, ['grid:a1', 'grid:new'], 'grid:closed')).toEqual(['grid:a1', 'grid:new']);
-    // A new file tab also opens right after the tab in front (like VS Code); Settings and the SSH view are appended at the end.
-    expect(mergeWorkspaceOrder(['grid:a1', 'grid:b1'], ['grid:a1', 'grid:b1', 'file:new', 'ssh'], 'grid:a1')).toEqual(['grid:a1', 'file:new', 'grid:b1', 'ssh']);
+    // A new file tab also opens right after the tab in front (like VS Code); Settings is appended at the end.
+    expect(mergeWorkspaceOrder(['grid:a1', 'grid:b1'], ['grid:a1', 'grid:b1', 'file:new', 'settings'], 'grid:a1')).toEqual(['grid:a1', 'file:new', 'grid:b1', 'settings']);
     expect(mergeWorkspaceOrder(['file:c', 'grid:b1'], ['file:c', 'grid:b1', 'file:d'], 'file:c')).toEqual(['file:c', 'file:d', 'grid:b1']);
     expect(mergeWorkspaceOrder(['grid:a1', 'grid:b1'], ['grid:a1', 'grid:b1', 'file:new'], null)).toEqual(['grid:a1', 'grid:b1', 'file:new']);
   });
 
   it('shows the grids and the files of every project and the files outside projects', () => {
     const keys = stripKeys({
-      settingsOpen: false, sshOpen: true,
+      settingsOpen: true,
       projects: [{ id: 'A', tabs: [{ id: 'a1' }] }, { id: 'B', tabs: [{ id: 'b1' }] }],
       files: [{ id: 'fa', projectId: 'A' }, { id: 'fb', projectId: 'B' }, { id: 'remote', projectId: '' }],
     });
-    expect(keys).toEqual(['ssh', 'grid:a1', 'grid:b1', 'file:fa', 'file:fb', 'file:remote']);
+    expect(keys).toEqual(['settings', 'grid:a1', 'grid:b1', 'file:fa', 'file:fb', 'file:remote']);
   });
 
   it('sorts each project grids by the strip so the sidebar follows a drag across projects', () => {
@@ -111,7 +112,7 @@ describe('open, close and switch', () => {
 
   it('tells what a key closes or opens', () => {
     expect(parseWorkspaceKey('settings')).toEqual({ kind: 'settings' });
-    expect(parseWorkspaceKey('ssh')).toEqual({ kind: 'ssh' });
+    expect(parseWorkspaceKey('ssh')).toBeNull(); // no SSH tab since 1.0.4
     expect(parseWorkspaceKey('file:p:src/a.ts')).toEqual({ kind: 'file', id: 'p:src/a.ts' });
     expect(parseWorkspaceKey('grid:g1')).toEqual({ kind: 'grid', id: 'g1' });
     expect(parseWorkspaceKey('grid:')).toBeNull();
@@ -137,7 +138,7 @@ describe('open, close and switch', () => {
     expect(closed.projects[0].archive[0].id).toBe(a1);
     expect(normalizeWorkspaceOrder([`grid:${a1}`, `grid:${a2}`, `grid:${b1}`], ids)).toEqual([`grid:${a2}`, `grid:${b1}`]);
     const restored = restoreTab(closed, a, a1);
-    const available = stripKeys({ settingsOpen: false, sshOpen: false, projects: restored.projects, files: [] });
+    const available = stripKeys({ settingsOpen: false, projects: restored.projects, files: [] });
     expect(mergeWorkspaceOrder([`grid:${a2}`, `grid:${b1}`], available, `grid:${a2}`)).toEqual([`grid:${a2}`, `grid:${a1}`, `grid:${b1}`]);
   });
 
@@ -166,6 +167,52 @@ describe('open, close and switch', () => {
     const ev = { key: 'W', code: 'KeyW', ctrlKey: true, shiftKey: true, altKey: false, metaKey: false };
     expect(decideShortcut(ev, ctx)).toBe('tab.close');
     expect(decideShortcut(ev, { ...ctx, hasTab: false })).toBeNull();
+  });
+});
+
+describe('strip scope (1.0.4)', () => {
+  const input = {
+    projects: [{ id: 'A', tabs: [{ id: 'a1' }, { id: 'a2' }] }, { id: 'B', tabs: [{ id: 'b1' }] }],
+    files: [{ id: 'fa', projectId: 'A' }, { id: 'fb', projectId: 'B' }, { id: 'remote', projectId: '' }, { id: 'db', projectId: '' }],
+  };
+  const order = ['grid:b1', 'settings', 'grid:a1', 'file:remote', 'file:fb', 'grid:a2', 'file:fa', 'file:db'];
+  const ownerOf = stripKeyOwner(input);
+
+  it('knows the project of each key; Settings and tabs outside the projects have none', () => {
+    expect(['grid:a1', 'grid:b1', 'file:fa', 'file:fb', 'file:remote', 'settings', 'grid:gone'].map(ownerOf)).toEqual(['A', 'B', 'A', 'B', null, null, null]);
+  });
+
+  it("'all' shows every tab, 'project' only the active project's and those of no project, in the saved order", () => {
+    expect(scopeWorkspaceKeys(order, 'all', 'A', ownerOf)).toEqual(order);
+    expect(scopeWorkspaceKeys(order, 'project', 'A', ownerOf)).toEqual(['settings', 'grid:a1', 'file:remote', 'grid:a2', 'file:fa', 'file:db']);
+    expect(scopeWorkspaceKeys(order, 'project', 'B', ownerOf)).toEqual(['grid:b1', 'settings', 'file:remote', 'file:fb', 'file:db']);
+    expect(scopeWorkspaceKeys(order, 'project', null, ownerOf)).toEqual(['settings', 'file:remote', 'file:db']);
+  });
+
+  it('only filters the view: a drag among the shown tabs keeps the hidden ones in the global order', () => {
+    const shown = scopeWorkspaceKeys(order, 'project', 'A', ownerOf);
+    const next = reorderWorkspace(order, 'grid:a2', 'grid:a1', false);
+    expect(next).toEqual(['grid:b1', 'settings', 'grid:a2', 'grid:a1', 'file:remote', 'file:fb', 'file:fa', 'file:db']);
+    expect(scopeWorkspaceKeys(next, 'project', 'A', ownerOf)).toEqual(['settings', 'grid:a2', 'grid:a1', 'file:remote', 'file:fa', 'file:db']);
+    expect(next.filter((key) => !shown.includes(key))).toEqual(['grid:b1', 'file:fb']);
+  });
+
+  it('Mod+Tab cycles through the shown tabs only', () => {
+    const shown = scopeWorkspaceKeys(['grid:a1', 'grid:b1', 'grid:a2'], 'project', 'A', ownerOf);
+    expect(stepWorkspace(shown, 'grid:a1', 1)).toBe('grid:a2');
+    expect(stepWorkspace(shown, 'grid:a2', 1)).toBe('grid:a1');
+  });
+
+  it("is saved with the settings: 'all' by default, anything unknown falls back to it", () => {
+    expect(defaultState().settings.stripScope).toBe('all');
+    expect(normalizeStripScope('project')).toBe('project');
+    expect(normalizeStripScope('nonsense')).toBe('all');
+    expect(normalizeStripScope(undefined)).toBe('all');
+    const { s } = twoProjects();
+    const raw = JSON.parse(JSON.stringify(s));
+    expect(normalizeState({ ...raw, settings: { ...raw.settings, stripScope: 'project' } })!.settings.stripScope).toBe('project');
+    delete raw.settings.stripScope;
+    expect(normalizeState(raw)!.settings.stripScope).toBe('all');
   });
 });
 
