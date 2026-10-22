@@ -7,7 +7,7 @@ import { activeProject, activeTab, addCell, ensureShellProfile, findCell, remove
 import { connectingNotice, hostEndpoint, promptNeedsToast, reconnectAllTargets, reconnectAtStartCells, restoredPromptToasts, sshCellStart, sshCellVisible, sshStartEffects, type SshStartDecision, sshGridName, sshNotice, sshSessionEnded, type SshPrompt, type SshSessionState } from '../../shared/ssh';
 import { menuHosts, sectionChange, sectionForDetail, type SshDetail } from '../../shared/sshView';
 import { createProject, ensureTerminal, focusCell, openTab } from './actions';
-import { useFileStore } from './files';
+import { gridCovered } from './splitView';
 import type { MenuItem } from './components/ContextMenu';
 import { tr } from './i18n';
 import type { MessageKey } from '../../shared/i18n';
@@ -59,7 +59,7 @@ const cellVisible = (cellId: string): boolean => {
   return sshCellVisible({
     cellId,
     inActiveTab: !!tab?.cells.some((c) => c.id === cellId),
-    covered: getUi().settingsActive || useSshStore.getState().viewActive || !!useFileStore.getState().activeFileId,
+    covered: gridCovered(getUi().settingsActive, useSshStore.getState().viewActive),
     maximizedCellId: max && tab?.cells.some((c) => c.id === max) ? max : null,
   });
 };

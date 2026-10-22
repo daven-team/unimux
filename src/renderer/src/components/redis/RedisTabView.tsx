@@ -4,6 +4,7 @@ import { lazy, Suspense, useEffect, useRef } from 'react';
 import { dbConnectionColor, dbEndpoint, dbPhaseLabel } from '../../../../shared/db';
 import type { RedisTabRef, RedisTabView as View } from '../../../../shared/redisView';
 import { useFileStore } from '../../files';
+import { useShownFileId } from '../../splitView';
 import { useI18n } from '../../i18n';
 import { useStore } from '../../store';
 import { ensureTabSession, openRedisTab, reconnectTab, tabSessionState, useRedisStore, viewLabel } from '../../redis/redisClient';
@@ -24,7 +25,8 @@ const VIEWS: View[] = ['keys', 'console', 'pubsub', 'info'];
 
 export function RedisTabView() {
   const { tr } = useI18n();
-  const doc = useFileStore((s) => s.documents.find((d) => d.id === s.activeFileId && d.redis));
+  const shownId = useShownFileId();
+  const doc = useFileStore((s) => s.documents.find((d) => d.id === shownId && d.redis));
   const ref = doc?.redis;
   const tabId = doc?.id ?? '';
   const connection = useStore((s) => (ref ? s.s.dbConnections?.find((c) => c.id === ref.connectionId) : undefined));
