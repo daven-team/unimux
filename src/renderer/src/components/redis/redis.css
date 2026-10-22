@@ -1,5 +1,5 @@
 /* The Redis views (1.0.0): key browser with the value panel, console, Pub/Sub and server views. Existing tokens only; no
-   infinite animations (the busy ring turns with the shared blink). */
+   infinite animations of their own (the busy ring is a BusyRing, which turns only while it is shown). */
 .redis-view { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #181818; position: relative; --mono: "Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular", "Courier New", monospace; }
 .redis-view .grow { flex: 1; min-width: 0; }
 .redis-view .muted { color: var(--muted); }
@@ -24,8 +24,6 @@
 .redis-center { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; min-height: 0; text-align: center; }
 .redis-connecting { display: flex; align-items: center; gap: 8px; }
 .redis-ring { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border-2); border-top-color: var(--accent-text); display: inline-block; }
-:root[data-blink] .redis-ring { transform: rotate(180deg); }
-@media (prefers-reduced-motion: reduce) { :root[data-blink] .redis-ring { transform: none; } }
 .redis-card { width: min(420px, 100%); background: var(--bg-2); border: 1px solid var(--border-2); border-radius: 10px; padding: 16px 18px; text-align: left; display: flex; flex-direction: column; gap: 10px; }
 .redis-card-title { font-size: 13.5px; font-weight: 600; }
 .redis-password { display: flex; flex-direction: column; gap: 10px; }

@@ -1,4 +1,4 @@
-// One shared, calm blink for indicators that show ongoing work (the "working" dots, long waits in dialogs);
+// One shared, calm blink for indicators that show ongoing work for a long time (the "working" dots of agent cells);
 // renderer/src/blink.ts puts it on <html>. An infinite CSS animation makes Chromium composite and present a frame at every
 // vsync while it runs (about 40 % of a core on a 240 Hz display for a single dot), so these indicators do not animate: one
 // timer flips the phase twice a second (a 1 Hz blink, two frames a second). The timer runs only while something holds the

@@ -213,7 +213,7 @@ describe('shared blink', () => {
     expect(blink.running).toBe(false);
   });
 
-  it('leaves no infinite CSS animation in the renderer styles except the short brand effect and the SFTP view', () => {
+  it('leaves no infinite CSS animation in the renderer styles except the short brand effect and the spinners', () => {
     const cssFiles = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
       .flatMap((e) => (e.isDirectory() ? cssFiles(join(dir, e.name)) : e.name.endsWith('.css') ? [join(dir, e.name)] : []));
     const infinite: string[] = [];
@@ -223,8 +223,8 @@ describe('shared blink', () => {
         if (/animation\s*:[^;]*\binfinite\b/.test(rule[2])) infinite.push(rule[1].trim());
       }
     }
-    // .brand.fx runs 2.4 s after a click on the logo, nothing else.
-    expect(infinite.sort()).toEqual(['.brand.fx .bn-fx']);
+    // .brand.fx runs 2.4 s after a click on the logo; the spinners (RefreshIcon, BusyRing) are rendered only during a wait.
+    expect(infinite.sort()).toEqual(['.brand.fx .bn-fx', '.refresh-icon.spinning svg, .busy-ring']);
   });
 });
 

@@ -72,6 +72,8 @@
 .sftp-crumb button.drop { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); color: var(--text); }
 .sftp-pathbar .btn.sftp-refresh { margin-left: 4px; }
 .sftp-sudo-badge { flex: none; padding: 0 5px; border-radius: 4px; background: #f59e0b22; border: 1px solid #f59e0b66; color: #fbbf24; font-size: 10.5px; font-weight: 600; line-height: 15px; }
+/* The marquee (rubber band) of a drag over the list, in its content coordinates. */
+.sftp-marquee { position: absolute; z-index: 1; pointer-events: none; box-sizing: border-box; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .sftp-empty-list { padding: 24px 12px; color: var(--muted); font-size: 12px; text-align: center; }
 .sftp-status { flex: none; display: flex; align-items: center; height: 24px; padding: 0 10px; border-top: 1px solid #ffffff0a; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sftp-error { color: var(--error); font-size: 11.5px; overflow-wrap: anywhere; }
@@ -85,12 +87,10 @@
 .sftp-card { width: 100%; max-width: 440px; text-align: left; padding: 14px; background: #181818; border: 1px solid #ffffff12; border-radius: 10px; }
 .sftp-prompt.danger .sftp-card { border-color: #ef4444; }
 .sftp-card .input { width: 100%; box-sizing: border-box; background: #171717; border: 1px solid #ffffff0d; border-radius: 6px; color: var(--text); }
-/* No continuous animation (a long transfer would keep the GPU presenting frames): the ring turns with the shared low-rate blink (BusyRing holds it while shown). */
+/* A BusyRing: it turns with the shared .busy-ring animation (styles.css) only while it is shown. */
 .sftp-spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #ffffff22; border-top-color: var(--text-2); }
-:root[data-blink] .sftp-spinner { transform: rotate(180deg); }
 .sftp-spinner.small { width: 12px; height: 12px; flex: none; }
 .sftp-transfer.preparing { margin: 0 6px; }
-@media (prefers-reduced-motion: reduce) { :root[data-blink] .sftp-spinner { transform: none; } }
 /* "Wybierz host": in place of the whole remote pane, one column: the title row (the pane head's size, so it lines up with the
    local pane), the search, the hosts as cards in a grid. */
 .sftp-picker { flex: 1; min-height: 0; display: flex; flex-direction: column; }

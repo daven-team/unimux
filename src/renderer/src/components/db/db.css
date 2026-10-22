@@ -1,4 +1,4 @@
-/* The database panel and tabs (1.0.0). Shared tokens only; no CSS animations (busy states use the shared blink). */
+/* The database panel and tabs (1.0.0). Shared tokens only; no CSS animations of its own (busy states use RefreshIcon). */
 
 /* ── panel ── */
 .db-panel { display: flex; flex-direction: column; min-height: 0; }

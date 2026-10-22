@@ -15,7 +15,7 @@ reducedMotion?.addEventListener('change', sync);
 onWindowShown((next) => { shown = next; sync(); });
 sync();
 
-/** Keeps the shared blink running while `active` (a cell that shows a working dot, a dialog that waits). */
+/** Keeps the shared blink running while `active` (a cell that shows a working dot). Spinners turn with CSS (Spinner.tsx). */
 export function useBlink(active: boolean): void {
   useEffect(() => (active ? blink.hold() : undefined), [active]);
 }

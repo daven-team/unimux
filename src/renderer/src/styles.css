@@ -384,10 +384,8 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .menu-item.disabled:hover, .menu-item.disabled:focus-visible { background: transparent; color: var(--text-2); }
 .usage-card.busy { opacity: 0.85; }
 .usage-swapping { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-2); white-space: nowrap; }
-/* Turns with the shared blink (blink.ts), no CSS animation. */
+/* A BusyRing: turns with the shared .busy-ring animation. */
 .usage-spinner { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; }
-:root[data-blink] .usage-spinner { transform: rotate(180deg); }
-@media (prefers-reduced-motion: reduce) { :root[data-blink] .usage-spinner { transform: none; } }
 .menu-sep { height: 1px; background: #ffffff09; margin: 5px -5px; }
 .menu-label { padding: 4px 12px 3px; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: #828282; text-transform: uppercase; letter-spacing: .4px; }
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 70; padding: 9px 14px; border-radius: 8px; background: #1f1f1f; border: 1px solid var(--border-2); color: var(--text); box-shadow: 0 12px 40px #000a; max-width: 70vw; }
@@ -957,10 +955,13 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 
 /* ── refresh feedback ──────────────────────────────────────────────────── */
 .refresh-icon { display: inline-grid; place-items: center; line-height: 0; }
-/* Flips with the shared blink while spinning (blink.ts), no CSS animation. */
-:root[data-blink] .refresh-icon.spinning svg { transform: rotate(180deg); }
+/* Spinners (RefreshIcon while spinning, BusyRing) turn smoothly. The animation exists only while one is rendered, which is
+   only during a wait, so it does not keep the GPU presenting frames when nothing is busy. Static with reduced motion. */
+@keyframes mc-spin { to { transform: rotate(360deg); } }
+.refresh-icon.spinning svg, .busy-ring { animation: mc-spin .9s linear infinite; }
+.busy-ring { display: inline-block; }
 .statusbar .refresh-icon svg { width: 12px; height: 12px; }
-@media (prefers-reduced-motion: reduce) { :root[data-blink] .refresh-icon.spinning svg { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .refresh-icon.spinning svg, .busy-ring { animation: none; } }
 
 /* ── find and replace ──────────────────────────────────────────────────── */
 .modal.find-replace { width: 900px; height: min(80vh, 760px); }
