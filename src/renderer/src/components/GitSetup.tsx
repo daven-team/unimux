@@ -1,13 +1,16 @@
-// The Git panel of a project that has no repository yet (or a machine without git): explains it and offers the way out.
+// The Git panel of a project that has no repository yet (or a machine without git): the empty state of the side panels
+// (PanelEmpty, like the Snippets panel) with the ways out: create a repository, clone one into the folder, install git.
 import { useState } from 'react';
 import { useI18n } from '../i18n';
 import { askChoice, toast } from '../store';
 import { refreshGitProbe } from '../git/gitProbe';
-import { IBranch } from './icons';
+import { GitCloneDialog } from './GitClone';
+import { EmptyLink, fillTokens, PanelEmpty } from './PanelEmpty';
 
 export function GitSetup({ projectId, projectName, kind }: { projectId: string; projectName: string; kind: 'no-repo' | 'no-git' }) {
   const { tr, errorText } = useI18n();
   const [busy, setBusy] = useState(false);
+  const [cloning, setCloning] = useState(false);
   const windows = window.mc.platform === 'win32';
 
   const init = async () => {
@@ -36,24 +39,29 @@ export function GitSetup({ projectId, projectName, kind }: { projectId: string; 
     finally { setBusy(false); void refreshGitProbe(projectId); }
   };
 
+  if (kind === 'no-git') {
+    return (
+      <div className="sidebar-content git-panel">
+        <PanelEmpty>
+          <p>{tr('Panel Git potrzebuje programu git na tym komputerze.')}{windows ? ` ${tr('Instalacja przez winget potrwa chwilę i może poprosić o zgodę.')}` : ''}</p>
+          <button className="btn primary" disabled={busy} onClick={() => void install()}>{busy ? '…' : windows || window.mc.platform === 'darwin' ? tr('Zainstaluj Git') : tr('Pobierz Git')}</button>
+          <p>{fillTokens(tr('Git możesz też pobrać z {site}, a potem {check}.'), {
+            site: <EmptyLink onClick={() => window.mc.openExternal('https://git-scm.com/downloads')}>git-scm.com</EmptyLink>,
+            check: <EmptyLink onClick={() => void refreshGitProbe(projectId)}>{tr('sprawdzić ponownie')}</EmptyLink>,
+          })}</p>
+        </PanelEmpty>
+      </div>
+    );
+  }
+
   return (
     <div className="sidebar-content git-panel">
-      <div className="git-setup">
-        <span className="git-setup-icon"><IBranch /></span>
-        {kind === 'no-repo' ? <>
-          <strong>{tr('Ten projekt nie ma jeszcze repozytorium git')}</strong>
-          <p>{tr('Repozytorium pozwala śledzić zmiany, zatwierdzać je w commitach i cofać się do wcześniejszych wersji. Po jego utworzeniu pojawią się tu zmiany, historia i commit.')}</p>
-          <button className="btn small primary" disabled={busy} onClick={() => void init()}>{busy ? '…' : tr('Utwórz repozytorium')}</button>
-        </> : <>
-          <strong>{tr('Git nie jest zainstalowany')}</strong>
-          <p>{tr('Panel Git potrzebuje programu git na tym komputerze.')}{windows ? ` ${tr('Instalacja przez winget potrwa chwilę i może poprosić o zgodę.')}` : ''}</p>
-          <div className="git-setup-actions">
-            <button className="btn small primary" disabled={busy} onClick={() => void install()}>{busy ? '…' : windows || window.mc.platform === 'darwin' ? tr('Zainstaluj Git') : tr('Pobierz Git')}</button>
-            <button className="btn small" onClick={() => window.mc.openExternal('https://git-scm.com/downloads')}>git-scm.com</button>
-            <button className="btn small" disabled={busy} onClick={() => void refreshGitProbe(projectId)}>{tr('Sprawdź ponownie')}</button>
-          </div>
-        </>}
-      </div>
+      <PanelEmpty>
+        <p>{tr('Ten projekt nie ma jeszcze repozytorium git.')}</p>
+        <button className="btn primary" disabled={busy} onClick={() => void init()}>{busy ? '…' : tr('Utwórz repozytorium')}</button>
+        <button className="btn" disabled={busy} onClick={() => setCloning(true)}>{tr('Sklonuj repozytorium tutaj')}</button>
+      </PanelEmpty>
+      {cloning && <GitCloneDialog target={{ kind: 'here', projectId, projectName }} onClose={() => setCloning(false)} />}
     </div>
   );
 }

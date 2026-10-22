@@ -2,8 +2,10 @@
 // validates every request (see gitHandler.ts and shared/git.ts) before git runs.
 import { ipcMain, shell } from 'electron';
 import { execFile } from 'child_process';
+import { stat } from 'fs/promises';
+import { join } from 'path';
 import { appPlatform } from '../shared/platform';
-import type { GitProbe, GitResult } from '../shared/git';
+import { validateCloneRequest, type GitProbe, type GitResult } from '../shared/git';
 import { Git } from './git';
 import { GIT_MUTATING_CHANNELS, GIT_READ_CHANNELS, GONE, handleGit, INVALID } from './gitHandler';
 import { createIpcGuard, type IpcSenderEvent } from './ipcGuard';
@@ -47,6 +49,28 @@ export function registerGitIpc(deps: GitIpcDeps): void {
     let result = await run('git', ['init', '-b', 'main'], { cwd: path, timeout: 20000 });
     if (!result.ok) result = await run('git', ['init'], { cwd: path, timeout: 20000 });
     return result.ok ? { ok: true, data: { message: result.out.trim() } } : { ok: false, code: 'failed', error: result.error };
+  }, refused);
+  /**
+   * "Clone a repository": into the folder of a project that is no repository yet (it must be empty), or into a new folder
+   * `name` of a folder the user picked (it must not exist yet or be empty). The address is checked (isCloneUrl) before git runs.
+   */
+  guardedHandle('git:clone', async (_e, request: unknown): Promise<GitResult<{ message: string; path: string }>> => {
+    const checked = validateCloneRequest(request);
+    if (!checked.ok) return { ok: false, code: 'invalid', error: checked.error };
+    const req = checked.value;
+    let target: string;
+    if ('projectId' in req) {
+      const path = deps.projectPath(req.projectId);
+      if (!path) return { ok: false, code: 'gone', error: GONE };
+      if (await git.probe(path) !== 'no-repo') return { ok: false, code: 'failed', error: 'Ten folder jest już repozytorium git lub git nie jest zainstalowany.' };
+      target = path;
+    } else {
+      const parent = await stat(req.parent).catch(() => null);
+      if (!parent?.isDirectory()) return { ok: false, code: 'gone', error: 'Folder już nie istnieje.' };
+      target = join(req.parent, req.name);
+    }
+    const result = await git.clone(target, req.url);
+    return result.ok ? { ok: true, data: { message: result.data.message, path: target } } : result;
   }, refused);
   /** Installs Git where the system has a package manager we can drive (winget on Windows, the Xcode tools on macOS); elsewhere the download page opens. */
   guardedHandle('git:installGit', async (): Promise<GitResult<{ message: string; restart: boolean }>> => {

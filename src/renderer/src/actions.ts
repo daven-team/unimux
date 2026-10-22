@@ -513,7 +513,11 @@ export function toggleMaximize(cellId?: string): void {
 
 export async function createProject(): Promise<void> {
   const path = await window.mc.pickFolder();
-  if (!path) return;
+  if (path) addProjectFolder(path);
+}
+
+/** Adds a folder as a project and makes it the active one (a folder that already is a project is just switched to). */
+export function addProjectFolder(path: string): void {
   const existing = getS().projects.find((p) => normalizeProjectPath(p.path) === normalizeProjectPath(path));
   if (existing) return switchProject(existing.id);
   update((s) => addProject(s, { name: basename(path), path }));
