@@ -10,6 +10,7 @@ import {
 import { useI18n } from '../i18n';
 import { askChoice, toast, useStore } from '../store';
 import { openDiffTab, openFile } from '../files';
+import { openBesideGrid } from '../splitView';
 import { locateInFiles } from '../explorer';
 import { useGitProbe } from '../git/gitProbe';
 import { newRequestId, type ChangesSort, type ChangesView } from '../../../shared/gitUi';
@@ -280,6 +281,7 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
     const folder = file.path.endsWith('/');
     openMenu(e.clientX, e.clientY, [
       { label: tr('Pokaż zmiany'), disabled: folder, onClick: () => openDiff(file, source) },
+      { label: tr('Pokaż zmiany obok gridu'), disabled: folder, onClick: () => { openDiff(file, source, true); openBesideGrid(); } },
       { label: tr('Otwórz w edytorze'), disabled: !relative, onClick: () => { if (relative) void openFile(projectId, relative); } },
       { label: tr('Pokaż w panelu plików'), disabled: !relative, onClick: () => { if (relative) locateInFiles(projectId, relative); } },
       { sep: true },

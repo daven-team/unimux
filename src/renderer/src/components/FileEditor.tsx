@@ -10,7 +10,8 @@ import { getUi, useStore } from '../store';
 import { matchesShortcut } from '../shortcuts';
 import { fullProjectPath } from '../../../shared/platform';
 import { FileActionIcon, FileBreadcrumb } from './FileIcon';
-import { IX } from './icons';
+import { ISplit, IX } from './icons';
+import { closeSplit, openBesideGrid, useShownFileId, useSplitStore } from '../splitView';
 import { sourceTitle } from '../../../shared/editorSource';
 import { ensureSession, liveSession, useRemoteSessions } from '../remoteSessions';
 import { useSftpStore } from '../sftpStore';
@@ -25,7 +26,9 @@ const formatSize = (bytes: number, language: string): string =>
 
 export function FileEditor() {
   const { tr, language, errorText } = useI18n();
-  const doc = useFileStore((s) => s.documents.find((d) => d.id === s.activeFileId));
+  const shownId = useShownFileId();
+  const doc = useFileStore((s) => s.documents.find((d) => d.id === shownId));
+  const splitOn = useSplitStore((s) => s.on);
   const zoom = useFileZoom();
   /** The tab whose disk vs editor diff is shown (a conflict's "Show diff"). */
   const [diffFor, setDiffFor] = useState<string | null>(null);
@@ -52,6 +55,8 @@ export function FileEditor() {
     if (!doc) return;
     const onKey = (event: KeyboardEvent) => {
       if (getUi().dialog || getUi().modal || getUi().palette) return;
+      // Beside the grid the save belongs to the file only while it is in front (a click in the grid puts the grid there).
+      if (useFileStore.getState().activeFileId !== doc.id) return;
       if (matchesShortcut('editor.save', event)) {
         event.preventDefault(); event.stopPropagation(); void saveFile(doc.id);
       }
@@ -80,12 +85,15 @@ export function FileEditor() {
     es: ['Vista previa', 'Editar código'], fr: ['Aperçu', 'Modifier la source'], pt: ['Pré-visualização', 'Editar fonte'],
   }[language];
   const path = project ? fullProjectPath(project.path, doc.relativePath, window.mc.platform) : doc.relativePath;
+  const splitLabel = splitOn ? tr('Zamknij widok obok') : tr('Otwórz obok gridu');
+  const splitButton = <button className={`btn ghost icon ${splitOn ? 'active' : ''}`} title={splitLabel} aria-label={splitLabel} aria-pressed={splitOn} data-action="split-view" onClick={() => (splitOn ? closeSplit() : openBesideGrid(doc.id))}><ISplit /></button>;
   if (doc.diff) {
     return (
       <section ref={section} className="file-editor file-workspace-editor" aria-label={doc.relativePath} style={{ ['--file-zoom' as string]: zoom }} onKeyDownCapture={(e) => { handleZoomKey(e); }}>
         <div className="file-editor-toolbar">
           <FileBreadcrumb projectName={project?.name} relativePath={doc.relativePath} fullPath={path} />
           <div className="file-editor-actions">
+            {splitButton}
             <button className="btn ghost icon" title={tr('Zamknij podgląd pliku')} aria-label={tr('Zamknij podgląd pliku')} onClick={() => void closeFile(doc.id)}><IX /></button>
           </div>
         </div>
@@ -122,6 +130,7 @@ export function FileEditor() {
           </div>}
           {!preview && !tableView && doc.status === 'ready' && <button className={`btn ghost icon ${doc.wrap ? 'active' : ''}`} title={tr('Zawijaj wiersze')} aria-label={tr('Zawijaj wiersze')} aria-pressed={doc.wrap} onClick={() => toggleFileWrap(doc.id)}><FileActionIcon kind="wrap" /></button>}
           <button className={`btn ghost icon ${dirty ? 'save-dirty' : ''}`} title={tr('Zapisz')} aria-label={tr('Zapisz')} disabled={!dirty || doc.saving || doc.status !== 'ready'} onClick={() => void saveFile(doc.id)}><FileActionIcon kind="save" /></button>
+          {splitButton}
           <button className="btn ghost icon" title={tr('Zamknij podgląd pliku')} aria-label={tr('Zamknij podgląd pliku')} onClick={() => void closeFile(doc.id)}><IX /></button>
         </div>
       </div>

@@ -38,6 +38,8 @@ import { initSftp } from './sftp';
 import { initRedis } from './redis/redisClient';
 import { initDbTabs } from './db/tabs';
 import { useSshStore } from './sshStore';
+import { focusSplitSide, initSplitView, useShownFileId, useSplitStore } from './splitView';
+import { SplitDivider } from './components/SplitDivider';
 import { isWindowShown, onWindowShown } from './windowShown';
 
 let booted = false;
@@ -158,6 +160,7 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   });
   // Open editor tabs follow files an agent (or anything else) changed on disk.
   bootStep(watchFilesOnDisk);
+  bootStep(initSplitView);
   window.mc.on('cell:restarted', (cellId) => { terminals.prepareSpawn(cellId); terminals.syncSize(cellId); });
   window.mc.on('cell:hook', (cellId, event, info) => terminals.hook(cellId, event, info));
   window.mc.on('cell:session', (cellId, session) => {
@@ -244,14 +247,16 @@ const toastView = <Toast />;
 
 export function App() {
   const { language } = useI18n();
-  const projectId = useStore((st) => st.s.activeProjectId);
   const settingsActive = useStore((st) => st.ui.settingsActive);
   const settingsTabOpen = useStore((st) => st.ui.settingsTabOpen);
-  // A boolean, not the documents: typing in the editor must not re-render the whole app.
+  // An id and a kind, not the documents: typing in the editor must not re-render the whole app.
   // Tabs of files outside the projects (remote and local SFTP files, projectId '') show in every project.
-  const fileOpen = useFileStore((st) => st.documents.some((doc) => doc.id === st.activeFileId && (doc.projectId === projectId || !doc.projectId)));
-  const redisOpen = useFileStore((st) => st.documents.some((doc) => doc.id === st.activeFileId && !!doc.redis));
-  const dbOpen = useFileStore((st) => st.documents.some((doc) => doc.id === st.activeFileId && !!doc.db));
+  // The tab on screen: the one in front, or with the split view on the one beside the grid (shared/splitView.ts).
+  const shownFileId = useShownFileId();
+  const shownKind = useFileStore((st) => { const doc = st.documents.find((d) => d.id === shownFileId); return !doc ? null : doc.redis ? 'redis' : doc.db ? 'db' : 'file'; });
+  const fileOpen = shownKind !== null;
+  const split = useSplitStore((st) => st.on) && fileOpen;
+  const splitRatio = useSplitStore((st) => st.ratio);
   const sshViewActive = useSshStore((st) => st.viewActive);
   const sshViewOpen = useSshStore((st) => st.viewOpen);
   const ready = useStore((st) => st.ready);
@@ -320,11 +325,16 @@ export function App() {
         <ErrorBoundary name="sidebar" fallback={(retry) => <PanelFallback retry={retry} className="sidebar" />}><Sidebar resize={resizeProps('sidebar')} /></ErrorBoundary>
         <div className="main">
           {workspaceTabs}
-          <div className="workspace-content">
-            <div className="terminal-workspace" style={{ display: fileOpen || settingsActive || sshViewActive ? 'none' : 'flex' }}>{gridView}</div>
+          <div className={`workspace-content ${split && !settingsActive && !sshViewActive ? 'split' : ''}`}>
+            {/* Split view: the grid on the left, the tab beside it on the right; a click on a side puts it in front (keyboard, strip). */}
+            <div className="terminal-workspace" style={{ display: (fileOpen && !split) || settingsActive || sshViewActive ? 'none' : 'flex', ...(split ? { flex: `0 1 ${splitRatio * 100}%` } : {}) }}
+              onPointerDownCapture={split ? () => focusSplitSide('grid', null) : undefined}>{gridView}</div>
+            {split && !settingsActive && !sshViewActive && <SplitDivider />}
             {settingsTabOpen && <div className="settings-workspace" style={{ display: settingsActive ? 'flex' : 'none' }}><LazyScreen load={loadSettingsPage} /></div>}
             {sshViewOpen && <div className="ssh-workspace" style={{ display: sshViewActive && !settingsActive ? 'flex' : 'none' }}><LazyScreen load={loadSshView} /></div>}
-            {!settingsActive && !sshViewActive && fileOpen && <LazyScreen load={redisOpen ? loadRedisTab : dbOpen ? loadDbTab : loadFileEditor} key={redisOpen ? 'redis' : dbOpen ? 'db' : 'file'} />}
+            {!settingsActive && !sshViewActive && fileOpen && <div className="file-pane" onPointerDownCapture={split ? () => focusSplitSide('file', shownFileId) : undefined}>
+              <LazyScreen load={shownKind === 'redis' ? loadRedisTab : shownKind === 'db' ? loadDbTab : loadFileEditor} key={shownKind} />
+            </div>}
           </div>
           {automationOpen && <LazyScreen load={loadAutomationPanel} />}
         </div>

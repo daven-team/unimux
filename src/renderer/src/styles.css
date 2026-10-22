@@ -773,6 +773,13 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid #a8a29e; outli
 .explorer-busy span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-dirty { color: #e5cfa7; font-size: 9px; }
 .workspace-content, .terminal-workspace { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.file-pane { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
+/* Split view (1.0.4): the grid and the tab beside it side by side, a draggable edge between them. */
+.workspace-content.split { flex-direction: row; }
+.workspace-content.split > .terminal-workspace, .workspace-content.split > .file-pane { min-width: 160px; }
+.split-divider { position: relative; flex: none; width: 5px; cursor: col-resize; touch-action: none; outline: none; background: var(--border); }
+.split-divider::after { content: ''; position: absolute; top: 0; bottom: 0; left: 1px; width: 3px; background: var(--accent); opacity: 0; transition: opacity .12s; }
+.split-divider:hover::after, .split-divider:focus-visible::after, .split-divider.dragging::after { opacity: 1; }
 .settings-workspace { flex: 1; min-width: 0; min-height: 0; container-type: inline-size; }
 .settings-page { display: flex; justify-content: center; flex: 1; min-width: 0; min-height: 0; gap: 40px; padding: 48px clamp(32px, 4vw, 64px) 32px; background: #181818; }
 .settings-nav { width: 180px; flex: none; padding: 0; border: 0; overflow-y: auto; }

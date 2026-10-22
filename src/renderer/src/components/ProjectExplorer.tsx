@@ -3,6 +3,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import type { Project, ProjectFileEntry } from '../../../shared/types';
 import { setUi, toast } from '../store';
 import { focusFileEditor, openFile, treeOpen } from '../files';
+import { openBesideGrid } from '../splitView';
 import { openMenu } from './ContextMenu';
 import { FileIcon, FolderIcon, TreeChevron } from './FileIcon';
 import { RefreshIcon, useHoldBusy } from './Spinner';
@@ -431,6 +432,7 @@ export function ProjectExplorer({ project }: { project: Project }) {
           folder
             ? { label: expanded.has(entry.path) ? tr("Zwiń folder") : tr("Rozwiń folder"), onClick: () => toggleFolder(project.id, entry.path) }
             : { label: tr("Podgląd pliku"), onClick: () => void openFile(project.id, entry.path, 'preview') },
+          ...(!folder ? [{ label: tr('Otwórz obok gridu'), onClick: () => { void openFile(project.id, entry.path, 'keep'); openBesideGrid(); } }] : []),
           ...(!folder ? [{ label: tr("Otwórz w edytorze"), onClick: () => window.mc.openInEditor(fullPath) }] : []),
           { label: tr("Pokaż w menedżerze plików"), onClick: () => window.mc.revealPath(fullPath) },
           { sep: true as const },

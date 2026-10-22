@@ -9,6 +9,7 @@ import { uid } from '../../../../shared/state';
 import type { SQLNamespace } from '@codemirror/lang-sql';
 import { closeFile, editFile, useFileStore, type FileDocument } from '../../files';
 import { resultError, useDbStore } from '../../db/dbClient';
+import { useShownFileId } from '../../splitView';
 import {
   applyStaged, cancelSql, clearHistory, connectionOf, loadDdl, loadMore, loadPage, openSqlTab, previewStaged, readHistory, readOnlyReason, runSql, setStaged, sqlTransaction,
   tabState, useDbTabs, type SqlResult, type SqlTabState, type TableTabState, type DdlTabState,
@@ -24,7 +25,7 @@ import { DbLogin } from './DbLogin';
 import { SqlEditor, type SqlEditorApi, type SqlRunRequest } from './SqlEditor';
 import './db.css';
 
-const useDoc = (): FileDocument | undefined => useFileStore((s) => s.documents.find((d) => d.id === s.activeFileId));
+const useDoc = (): FileDocument | undefined => { const shownId = useShownFileId(); return useFileStore((s) => s.documents.find((d) => d.id === shownId)); };
 
 export function DbTabView() {
   const doc = useDoc();
