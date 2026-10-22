@@ -16,6 +16,7 @@ import { USAGE_INTERVALS_MINUTES } from '../../../shared/usage';
 import { BACKGROUND_LOAD_MODES, BACKGROUND_MAX_CELLS, normalizeBackgroundLoad, type BackgroundLoadMode } from '../../../shared/backgroundLoad';
 import type { MessageKey } from '../../../shared/i18n';
 import { DEFAULT_SCROLLBACK_LINES, normalizeScrollback, SCROLLBACK_CHOICES } from '../../../shared/terminalLimits';
+import { normalizeStripScope } from '../../../shared/workspaceOrder';
 import { IX, TSettings } from './icons';
 import { SshSettings } from './ssh/SshSettings';
 
@@ -74,6 +75,15 @@ export function SettingsPage() {
         </SettingRow>
         <SettingRow title={tr('Pytaj przed zamknięciem pracujących agentów')} htmlFor="settings-confirm-close" hint={tr('Zamknięcie zakładki, komórki lub aplikacji, gdy agent Claude lub Codex jest w trakcie tury, najpierw pyta o potwierdzenie.')}>
           <input id="settings-confirm-close" className="setting-switch" type="checkbox" role="switch" checked={settings.confirmCloseWorking} onChange={(e) => setSetting({ confirmCloseWorking: e.target.checked })} />
+        </SettingRow>
+        <SettingRow title={tr('Karty na górnym pasku')} htmlFor="settings-strip-scope" hint={tr(settings.stripScope === 'project'
+          ? 'Pasek pokazuje tylko gridy i pliki aktywnego projektu (oraz karty spoza projektów). Wybór innego projektu po lewej pokazuje jego karty.'
+          : 'Pasek pokazuje otwarte gridy i pliki wszystkich projektów naraz.')}>
+          <Select id="settings-strip-scope" className="select" value={settings.stripScope}
+            onChange={(e) => setSetting({ stripScope: normalizeStripScope(e.target.value) })}>
+            <option value="all">{tr('Wszystkich projektów')}</option>
+            <option value="project">{tr('Tylko aktywnego projektu')}</option>
+          </Select>
         </SettingRow>
       </SettingsGroup>}
       {section === 1 && <SettingsGroup>

@@ -68,7 +68,7 @@ export interface RailAction extends RailState {
 
 /**
  * A click on a tile, also in view mode (the SSH view in front, its navigation in the side panel):
- * - a view tile opens its view and leaves the fold of the side panel as it is (like the palette and the view's tab);
+ * - a view tile opens its view and leaves the fold of the side panel as it is (like the palette);
  *   in view mode it folds and unfolds the side panel like an open panel's tile;
  * - a panel tile in view mode leaves the view and shows that panel (never folds it); otherwise railClick, and a view that
  *   waits behind Settings goes to the background too (choosing a panel ends view mode).

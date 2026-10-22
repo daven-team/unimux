@@ -1,16 +1,16 @@
 import { shortcutText, titleWithShortcut, useShortcutText } from '../shortcuts';
 import { useI18n } from '../i18n';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react';
-import { activeWorkspaceKey, gridTabLabels, groupWorkspaceKeys, mergeWorkspaceOrder, migrateWorkspaceOrders, reorderWorkspace, sameOrder, stripKeys, syncTabsToOrder } from '../../../shared/workspaceOrder';
+import { activeWorkspaceKey, gridTabLabels, groupWorkspaceKeys, mergeWorkspaceOrder, migrateWorkspaceOrders, reorderWorkspace, sameOrder, scopeWorkspaceKeys, stripKeyOwner, stripKeys, syncTabsToOrder } from '../../../shared/workspaceOrder';
 import { readLegacyOrders } from '../workspaceStrip';
 import type { Project } from '../../../shared/types';
 import { describeLayout } from '../../../shared/layout';
-import { activeProject, renameTab, updateProject, PROJECT_COLORS } from '../../../shared/state';
+import { activeProject, renameTab, updateProject, updateSettings, PROJECT_COLORS } from '../../../shared/state';
 import { addAgent, closeTab, selectTab } from '../actions';
 import { setUi, update, useStore } from '../store';
 import { profileOptionLabel } from '../cliUi';
 import { openMenu, openMenuAt } from './ContextMenu';
-import { IChevron, IPlusBold, ISearch, ITable, IX, TGrid, THistory, TSettings, TSidebar, TSnippet, TTerminal } from './icons';
+import { IChevron, IPlusBold, ISearch, ITable, IX, TGrid, THistory, TSettings, TSidebar, TSnippet } from './icons';
 import { DbKindIcon } from './db/DbKindIcon';
 import { FileIcon } from './FileIcon';
 import { StatusBadges } from './StatusBadges';
@@ -27,7 +27,7 @@ import type { DbTabRef } from '../../../shared/dbTabs';
 import { revealScroll, scrollEdges, stepScroll, stripTabColor, wheelScroll } from '../../../shared/tabStrip';
 import { dbConnectionColor } from '../../../shared/db';
 import { useSshStore } from '../sshStore';
-import { activateSshView, closeSshView, reconnectAllSsh, reconnectAllTargetsOf, sshHostMenuItems } from '../ssh';
+import { reconnectAllSsh, reconnectAllTargetsOf, sshHostMenuItems } from '../ssh';
 
 export const TitleBar = memo(function TitleBar() {
   const { tr } = useI18n();
@@ -88,13 +88,14 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
   const activeFileId = documents.some((doc) => doc.id === selectedFile && tabShown(doc, project?.id)) ? selectedFile : null;
   const settingsTabOpen = useStore((st) => st.ui.settingsTabOpen);
   const settingsActive = useStore((st) => st.ui.settingsActive);
-  const sshOpen = useSshStore((st) => st.viewOpen);
+  // The SSH view has no tab (1.0.4); while it is in front no tab of the strip is.
   const sshActive = useSshStore((st) => st.viewActive);
+  const stripScope = useStore((st) => st.s.settings.stripScope);
   const [editing, setEditing] = useState<string | null>(null);
   const [drag, setDrag] = useState<{ id: string } | null>(null);
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
   // One global order in state.json; the first start of 1.0.0 builds it from the per-project orders of 0.9.x.
-  const keys = useMemo(() => stripKeys({ settingsOpen: settingsTabOpen, sshOpen, projects, files: documents }), [settingsTabOpen, sshOpen, projects, documents]);
+  const keys = useMemo(() => stripKeys({ settingsOpen: settingsTabOpen, projects, files: documents }), [settingsTabOpen, projects, documents]);
   const legacy = useRef<string[] | null>(null);
   if (!savedOrder && !legacy.current) legacy.current = migrateWorkspaceOrders(readLegacyOrders(), projects);
   // The tab that was in front at the last render: a grid opened now (sidebar, palette, History) lands right after it.
@@ -110,7 +111,10 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       return { ...st, workspaceOrder: order, projects: projectsInOrder };
     });
   }, [order, savedOrder, gridIdsKey]);
-  const shown = order;
+  // 1.0.4: with the strip scope 'project' only the active project's tabs (and those of no project) show; the order keeps them all.
+  const ownerOf = useMemo(() => stripKeyOwner({ projects, files: documents }), [projects, documents]);
+  const shown = useMemo(() => scopeWorkspaceKeys(order, stripScope, project?.id ?? null, ownerOf), [order, stripScope, project?.id, ownerOf]);
+  const visible = useMemo(() => new Set(shown), [shown]);
   const tabLabels = useMemo(() => gridTabLabels(projects), [projects]);
   const projectById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
   const endDrag = () => { setDrag(null); setDrop(null); };
@@ -165,7 +169,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
     setEdges((prev) => prev.canLeft === next.canLeft && prev.canRight === next.canRight ? prev : next);
   };
   // After the strip's content changed (tabs, names, badges, dirty marks); changes of its own size are the ResizeObserver's.
-  useLayoutEffect(measure, [projects, project?.id, countsOf, documents, editing, settingsTabOpen, sshOpen, order, tr]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(measure, [projects, project?.id, countsOf, documents, editing, settingsTabOpen, shown, tr]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const el = stripRef.current;
     if (!el) return;
@@ -200,7 +204,6 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
     const item = (key: string) => {
       const hint = key === activeKey ? '✓' : undefined;
       if (key === 'settings') return [{ label: tr('Ustawienia'), hint, onClick: () => setUi({ settingsActive: true }) }];
-      if (key === 'ssh') return [{ label: tr('SSH'), hint, onClick: activateSshView }];
       const owner = gridProject.get(key);
       if (owner) {
         const t = owner.tabs.find((tab) => `grid:${tab.id}` === key)!;
@@ -209,11 +212,14 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       const doc = documents.find((d) => `file:${d.id}` === key);
       return doc ? [{ label: (doc.dirty ? '● ' : '') + doc.relativePath, hint, onClick: () => activateFile(doc.id) }] : [];
     };
-    // Grouped by project: Settings, SSH and files outside the projects first, then each project with its grids and files.
+    // Grouped by project: Settings and files outside the projects first, then each project with its grids and files.
     const projectOf = (key: string) => gridProject.get(key)?.id ?? (documents.find((d) => `file:${d.id}` === key)?.projectId || null);
     const groups = groupWorkspaceKeys(shown, projectOf, projects.map((p) => p.id));
     openMenuAt(el, [
       { header: tr('Wszystkie karty') },
+      // 1.0.4: the same switch as in Settings > App: the tabs of every project, or only of the project on screen.
+      { label: tr('Tylko karty aktywnego projektu'), hint: stripScope === 'project' ? '✓' : undefined, onClick: () => update((st) => updateSettings(st, { stripScope: stripScope === 'project' ? 'all' : 'project' })) },
+      { sep: true as const },
       ...groups.flatMap((group) => [
         ...(group.projectId ? [{ header: projects.find((p) => p.id === group.projectId)?.name ?? '' }] : []),
         ...group.keys.flatMap(item),
@@ -264,10 +270,10 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
   const agentMenu = (el: HTMLElement) =>
     openMenuAt(el, [
       { header: tr("Dodaj komórkę do siatki") },
-      ...profiles.map((p) => ({ label: profileOptionLabel(p, cliStatus, tr), onClick: () => void addAgent(p.id), hint: p.id === lastProfileId ? shortcutText('agent.add') || undefined : undefined })),
+      ...profiles.map((p) => ({ label: profileOptionLabel(p, cliStatus, tr), color: p.color, onClick: () => void addAgent(p.id), hint: p.id === lastProfileId ? shortcutText('agent.add') || undefined : undefined })),
       { sep: true as const },
       { header: tr("W osobnym git worktree") },
-      ...profiles.filter((p) => p.cli !== 'shell').map((p) => ({ label: `${profileOptionLabel(p, cliStatus, tr)} + worktree`, onClick: () => void addAgent(p.id, true) })),
+      ...profiles.filter((p) => p.cli !== 'shell').map((p) => ({ label: `${profileOptionLabel(p, cliStatus, tr)} + worktree`, color: p.color, onClick: () => void addAgent(p.id, true) })),
       { sep: true as const },
       ...sshHostMenuItems('Komórka SSH'),
     ]);
@@ -283,15 +289,9 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
         <span className="tab-type-icon"><TSettings /></span><span className="label">{tr('Ustawienia')}</span>
         <button className="x" aria-label={tr('Zamknij')} onClick={(e) => { e.stopPropagation(); setUi({ settingsTabOpen: false, settingsActive: false }); }}><IX /></button>
       </div>}
-      {sshOpen && (
-        <div {...dragProps('ssh')} style={{ order: order.indexOf('ssh') }} className={`tab ssh-tab ${activeKey === 'ssh' ? 'active' : ''}`}
-          onClick={activateSshView} onAuxClick={(ev) => { if (ev.button === 1) closeSshView(); }}>
-          <span className="tab-type-icon" aria-hidden="true"><TTerminal /></span><span className="label">{tr('SSH')}</span>
-          <button className="x" aria-label={tr('Zamknij')} onClick={(ev) => { ev.stopPropagation(); closeSshView(); }}><IX /></button>
-        </div>
-      )}
       {/* The open grids of every project (1.0.0); a click on a grid of another project switches the project. */}
       {projects.flatMap((project) => project.tabs.map((t) => {
+            if (!visible.has(`grid:${t.id}`)) return null;
             const counts = countsOf(t.id);
             const color = stripTabColor({ project, grid: t });
             return (
@@ -348,6 +348,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
           }))}
           {/* Files of every project (1.0.0) with their project's colour chip; files outside the projects have none. */}
           {documents.map((doc) => {
+            if (!visible.has(`file:${doc.id}`)) return null;
             if (doc.redis) {
               const c = dbConnection(doc.redis.connectionId);
               const color = stripTabColor({ connection: c ? { color: dbConnectionColor(dbGroupColors, c) } : null });
