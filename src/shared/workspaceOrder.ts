@@ -11,23 +11,27 @@ export function reorderWorkspace(order: string[], source: string, target: string
   return next;
 }
 
-/** Which workspace tab is shown: Settings above the SSH view above a file above the grid. */
+/**
+ * Which workspace tab is shown: Settings above a file above the grid. The SSH view (1.0.4) is no tab of the strip: while it is
+ * in front no strip tab is, so the shortcuts never close the grid or file behind it.
+ */
 export function activeWorkspaceKey(s: { settingsActive: boolean; sshActive: boolean; fileId: string | null; gridId: string | null }): string | null {
   if (s.settingsActive) return 'settings';
-  if (s.sshActive) return 'ssh';
+  if (s.sshActive) return null;
   if (s.fileId) return `file:${s.fileId}`;
   return s.gridId ? `grid:${s.gridId}` : null;
 }
 
 // ── 1.0.0: one strip for all projects ───────────────────────────────────────
-// The strip holds the open grids of every project, the file tabs, Settings and the SSH view in one global order that lives in
-// state.json (`AppState.workspaceOrder`). Keys: 'settings', 'ssh', `grid:<tabId>` (tab ids are UUIDs, unique across projects)
-// and `file:<documentId>`. File tabs are not in AppState, so the state keeps their keys and the renderer drops closed ones.
+// The strip holds the open grids of every project, the file tabs and Settings in one global order that lives in state.json
+// (`AppState.workspaceOrder`). Keys: 'settings', `grid:<tabId>` (tab ids are UUIDs, unique across projects) and
+// `file:<documentId>`. File tabs are not in AppState, so the state keeps their keys and the renderer drops closed ones.
+// Up to 1.0.3 the SSH view had a tab too ('ssh'); a saved 'ssh' key is dropped when the order is read.
 
 export const WORKSPACE_ORDER_LIMIT = 1000;
 const KEY_MAX = 4096;
 
-const isFixedKey = (key: string): boolean => key === 'settings' || key === 'ssh';
+const isFixedKey = (key: string): boolean => key === 'settings';
 export const isGridKey = (key: string): boolean => key.startsWith('grid:');
 
 /** The stored order, repaired: strings of a known kind, grids that still exist, no duplicates. Absent stays absent (migration). */
@@ -63,7 +67,7 @@ export function migrateWorkspaceOrders(legacy: unknown, projects: ReadonlyArray<
 
 /**
  * The order with what is open now: surviving keys keep their place, closed ones are dropped. New grids and file tabs go right
- * after `anchor` (the tab that was in front when they were opened, like VS Code), Settings and the SSH view at the end.
+ * after `anchor` (the tab that was in front when they were opened, like VS Code), Settings at the end.
  */
 export function mergeWorkspaceOrder(saved: readonly string[], available: readonly string[], anchor: string | null): string[] {
   const present = new Set(available);
@@ -108,11 +112,11 @@ export function groupWorkspaceKeys(shown: readonly string[], projectOf: (key: st
   return [null, ...projectIds].filter((id) => groups.has(id)).map((id) => ({ projectId: id, keys: groups.get(id)! }));
 }
 
-export type WorkspaceTarget = { kind: 'settings' } | { kind: 'ssh' } | { kind: 'file'; id: string } | { kind: 'grid'; id: string };
+export type WorkspaceTarget = { kind: 'settings' } | { kind: 'file'; id: string } | { kind: 'grid'; id: string };
 
-/** What a strip key stands for (what Mod+Shift+W, a click or Mod+Tab acts on); null for an unknown key. */
+/** What a strip key stands for (what Mod+Shift+W, a click or Mod+Tab acts on); null for an unknown key (also the old 'ssh'). */
 export function parseWorkspaceKey(key: string): WorkspaceTarget | null {
-  if (key === 'settings' || key === 'ssh') return { kind: key };
+  if (key === 'settings') return { kind: key };
   if (key.startsWith('file:') && key.length > 5) return { kind: 'file', id: key.slice(5) };
   if (isGridKey(key) && key.length > 5) return { kind: 'grid', id: key.slice(5) };
   return null;
@@ -120,21 +124,45 @@ export function parseWorkspaceKey(key: string): WorkspaceTarget | null {
 
 export interface StripInput {
   settingsOpen: boolean;
-  sshOpen: boolean;
   projects: ReadonlyArray<{ id: string; tabs: ReadonlyArray<{ id: string }> }>;
   files: ReadonlyArray<{ id: string; projectId: string }>;
 }
 
 /**
- * The keys of everything the strip shows (in no particular order): Settings, the SSH view, the grids of every project and the
- * file tabs of every project and outside the projects (A1: one strip for all projects).
+ * The keys of everything the strip holds (in no particular order): Settings, the grids of every project and the file tabs of
+ * every project and outside the projects (A1: one strip for all projects).
  */
 export function stripKeys(input: StripInput): string[] {
   return [
-    ...(input.settingsOpen ? ['settings'] : []), ...(input.sshOpen ? ['ssh'] : []),
+    ...(input.settingsOpen ? ['settings'] : []),
     ...input.projects.flatMap((p) => p.tabs.map((t) => `grid:${t.id}`)),
     ...input.files.map((f) => `file:${f.id}`),
   ];
+}
+
+// ── 1.0.4: the strip of all projects or of the active one ──────────────────
+/** 'all': the strip shows the tabs of every project (1.0.0); 'project': only those of the active project (Settings > App). */
+export type StripScope = 'all' | 'project';
+export const STRIP_SCOPES: readonly StripScope[] = ['all', 'project'];
+export const DEFAULT_STRIP_SCOPE: StripScope = 'all';
+export const normalizeStripScope = (raw: unknown): StripScope => (STRIP_SCOPES as readonly unknown[]).includes(raw) ? raw as StripScope : DEFAULT_STRIP_SCOPE;
+
+/** The project a strip key belongs to: a grid's project, a file's project; null for Settings and tabs outside the projects. */
+export function stripKeyOwner(input: Omit<StripInput, 'settingsOpen'>): (key: string) => string | null {
+  const owners = new Map<string, string>();
+  for (const p of input.projects) for (const t of p.tabs) owners.set(`grid:${t.id}`, p.id);
+  for (const f of input.files) if (f.projectId) owners.set(`file:${f.id}`, f.projectId);
+  return (key) => owners.get(key) ?? null;
+}
+
+/**
+ * The tabs the strip shows, in the order: all of them, or (scope 'project') the grids and files of the active project and what
+ * belongs to no project (Settings, files outside the projects, database and Redis tabs). Only a view: the saved order keeps
+ * every tab, so switching back to 'all' (or to another project) finds the tabs where they were.
+ */
+export function scopeWorkspaceKeys(order: readonly string[], scope: StripScope, activeProjectId: string | null, ownerOf: (key: string) => string | null): string[] {
+  if (scope !== 'project') return [...order];
+  return order.filter((key) => { const owner = ownerOf(key); return owner === null || owner === activeProjectId; });
 }
 
 /** The tab that comes to the front when `key` (the tab in front) closes: its right neighbour, else its left one. */

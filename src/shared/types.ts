@@ -10,6 +10,7 @@ import type { SshIdentity } from './sshIdentity';
 import type { SshThemeId } from './sshThemes';
 import type { SftpPlaces } from './sftpView';
 import type { DbConnection } from './db';
+import type { StripScope } from './workspaceOrder';
 
 export type CliKind = 'claude' | 'codex' | 'shell';
 /** A forced path format of a shell cell: Claude (@path), Codex (plain path) or the quoted shell form. */
@@ -179,6 +180,8 @@ export interface Settings {
   sshTheme: SshThemeId;
   /** Command suggestions in SSH terminals and the host command history behind them; only `false` turns them off. */
   sshAutocomplete?: boolean;
+  /** The top strip shows the tabs of every project ('all', 1.0.0) or only of the active project (shared/workspaceOrder.ts). */
+  stripScope: StripScope;
 }
 
 export interface AppState {

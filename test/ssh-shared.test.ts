@@ -4,6 +4,7 @@ import {
   broadcastProblem, broadcastRowState, broadcastSend, ptyHostRestartToast, pushHistory, resumesConversation, sshCellsOfTab, cellSourcePatch, cellSourceValue, currentBroadcastResult, connectingBanner, existingSelection, parseCellSource, sanitizeServerText, sshCellStart, sshErrorText, sshNotice, sshModeReset, sshPhaseLabel, sshSpecName, sshSessionEnded, stampBroadcastResults, startupInput, startupProblem, userAtEndpoint, validateHostDraft,
   type SshHost, type SshSessionState,
 } from '../src/shared/ssh';
+import { cellDrawColor, CELL_COLORS } from '../src/shared/state';
 
 const ID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const host = (n: number, patch: Partial<SshHost> = {}): SshHost => ({ id: ID(n), label: `h${n}`, address: `h${n}.example`, port: 22, username: 'deploy', createdAt: 1, updatedAt: 1, ...patch });
@@ -416,5 +417,21 @@ describe('broadcast results follow the session (D2)', () => {
     expect(currentBroadcastResult(stamped.b, undefined)).toBe('skipped');
     expect(currentBroadcastResult(stamped.b, { ...at('connecting', 3), cellId: 'b' })).toBeUndefined();
     expect(currentBroadcastResult(undefined, at('connected', 5))).toBeUndefined();
+  });
+});
+
+describe('cell colour (1.0.4)', () => {
+  it("draws an SSH cell in its host's colour unless the user gave the cell its own; other cells keep only their own", () => {
+    const ref = { hostId: ID(1) };
+    expect(cellDrawColor({ ssh: ref }, host(1, { color: '#ef4444' }))).toBe('#ef4444');
+    expect(cellDrawColor({ ssh: ref, color: '#22c55e' }, host(1, { color: '#ef4444' }))).toBe('#22c55e');
+    // The automatic accent of a new cell gives way to the host's colour, and shows again without one.
+    expect(cellDrawColor({ ssh: ref, color: CELL_COLORS[0] }, host(1, { color: '#ef4444' }))).toBe('#ef4444');
+    expect(cellDrawColor({ ssh: ref, color: CELL_COLORS[0] }, host(1))).toBe(CELL_COLORS[0]);
+    expect(cellDrawColor({ color: CELL_COLORS[0] }, host(1, { color: '#ef4444' }))).toBe(CELL_COLORS[0]);
+    expect(cellDrawColor({ ssh: ref }, host(1))).toBeUndefined();
+    expect(cellDrawColor({ ssh: ref }, undefined)).toBeUndefined(); // a deleted host
+    expect(cellDrawColor({}, host(1, { color: '#ef4444' }))).toBeUndefined();
+    expect(cellDrawColor({ color: '#3b82f6' }, null)).toBe('#3b82f6');
   });
 });

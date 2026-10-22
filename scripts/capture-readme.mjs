@@ -282,7 +282,7 @@ try {
   await until(() => evaluate('!!document.querySelector(".ssh-view")'), 'SSH view');
   await evaluate(`(() => { const group = [...document.querySelectorAll('.ssh-view-group')].find((g) => g.querySelector('.ssh-group-head')?.textContent.includes('production')); if (!group) throw new Error('Missing production group'); group.querySelector('.ssh-group-open').click(); })()`);
   await until(() => evaluate(`(() => { const ssh = [...document.querySelectorAll('.cell')].filter(c => c.querySelector('.cell-head .ssh-host')); return ssh.length === 3 && ssh.every(c => !c.querySelector('.ssh-card') && !c.querySelector('.ssh-bar') && !c.querySelector('.status-text.ssh')); })()`), 'three SSH sessions');
-  await click('.workspace-tabs .ssh-tab');
+  await click('#terminal-view');
   await until(() => evaluate('document.querySelectorAll(".ssh-tile .ssh-state.connected").length === 3'), 'connected tiles');
   await evaluate(`(() => { const tile = [...document.querySelectorAll('.ssh-tile[data-host-id]')].find((t) => t.textContent.includes('web-1')); tile.closest('.ssh-host-card').querySelector('.ssh-host-edit').click(); })()`);
   await until(() => evaluate(`document.querySelector('.ssh-view-detail h2')?.textContent === 'web-1'`), 'web-1 details');
@@ -290,7 +290,6 @@ try {
   await click('#projects-view');
   await until(() => evaluate('!document.querySelector(".git-file") && !!document.querySelector(".project")'), 'project list beside the SSH view');
   await screenshot('ssh');
-  await evaluate(`document.querySelector('.workspace-tabs .ssh-tab .x')?.click()`);
   // Back to the Development grid and the project list for the optional checks.
   await evaluate(`(() => { const tab = [...document.querySelectorAll('.workspace-tabs .tab')].find(el => el.textContent.includes('Development')); if (!tab) throw new Error('Missing Development workspace tab'); tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })); })()`);
   if (!(await evaluate('!!document.querySelector(".project")'))) await click('#projects-view');

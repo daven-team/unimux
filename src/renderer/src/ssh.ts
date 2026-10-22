@@ -188,10 +188,12 @@ export async function openHostInCell(hostId: string, target: 'cell' | 'tab'): Pr
 /** Menu rows that add an SSH cell to the active grid, like choosing a profile (R14): at most 12 hosts, then "Wszystkie hosty…". */
 export function sshHostMenuItems(header: MessageKey): MenuItem[] {
   const { shown, more } = menuHosts(getS().sshHosts);
+  // The host's colour (Hosty) as a swatch; once one host has a colour the others keep an empty one, so the names line up.
+  const anyColor = shown.some((h) => h.color);
   return [
     { header: tr(header) },
     ...(shown.length
-      ? shown.map((h) => ({ label: h.label, hint: h.group, onClick: () => void openHostInCell(h.id, 'cell') }))
+      ? shown.map((h) => ({ label: h.label, hint: h.group, color: h.color ?? (anyColor ? 'transparent' : undefined), onClick: () => void openHostInCell(h.id, 'cell') }))
       : [{ label: tr('Dodaj host SSH…'), onClick: () => openSshView({ kind: 'host' }) }]),
     ...(more ? [{ label: tr('Wszystkie hosty…'), onClick: () => openSshView() }] : []),
   ];
@@ -226,14 +228,17 @@ export async function confirmRemoveSshHost(hostId: string): Promise<boolean> {
 
 // ── the SSH view (W3) ────────────────────────────────────────────────────────
 
-/** Opens the SSH workspace tab and brings it to the front; with a detail, the pane shows that host or key. */
+/**
+ * Brings the SSH view to the front (entered from the rail, 1.0.4: no tab in the strip); with a detail, the pane shows that host
+ * or key. Once opened it stays mounted in the background, so its sessions and SFTP connections and its place are kept.
+ */
 export function openSshView(detail?: SshDetail): void {
   useSshStore.setState((st) => (detail ? { viewOpen: true, viewActive: true, detail, section: sectionForDetail(detail) ?? st.section } : { viewOpen: true, viewActive: true }));
   setUi({ settingsActive: false });
 }
 
 /**
- * SSH mode ends: the view goes to the background (it stays open as a tab) and the grid or file under it comes back, also
+ * SSH mode ends: the view goes to the background (it stays open, hidden) and the grid or file under it comes back, also
  * when Settings is in front of it (a panel chosen there is what the user wants to see next).
  */
 export function leaveSshMode(): void {
@@ -243,15 +248,6 @@ export function leaveSshMode(): void {
 /** A click in the SSH mode navigation: a detail of another section and the host selection go (drafts are not kept, R12). */
 export function selectSshSection(clicked: string): void {
   useSshStore.setState((st) => sectionChange(st, clicked));
-}
-
-export function activateSshView(): void {
-  useSshStore.setState({ viewActive: true });
-  setUi({ settingsActive: false });
-}
-
-export function closeSshView(): void {
-  useSshStore.setState({ viewOpen: false, viewActive: false, detail: null, selectedHosts: [] });
 }
 
 /** Shows a host or key in the details pane, switching to its section (a new key from Hosty opens Klucze). */

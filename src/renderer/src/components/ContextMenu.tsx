@@ -3,7 +3,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 
 export type MenuItem =
-  | { label: string; onClick: () => void; danger?: boolean; hint?: string; disabled?: boolean }
+  /** color: a small swatch before the label (a profile's or an SSH host's colour). */
+  | { label: string; onClick: () => void; danger?: boolean; hint?: string; disabled?: boolean; color?: string }
   | { sep: true }
   | { header: string }
   | { colors: string[]; onPick: (color: string) => void };
@@ -89,7 +90,7 @@ export function ContextMenuHost() {
           );
         return (
           <button key={i} type="button" role="menuitem" tabIndex={item.disabled ? -1 : 0} className={`menu-item ${item.danger ? 'danger' : ''} ${item.disabled ? 'disabled' : ''}`} aria-disabled={item.disabled || undefined} onClick={() => { if (item.disabled) return; close(); item.onClick(); }}>
-            <span style={{ flex: 1 }}>{item.label}</span>
+            <span style={{ flex: 1 }}>{item.color && <span className="menu-swatch" style={{ background: item.color }} aria-hidden="true" />}{item.label}</span>
             {item.hint && <span className="kbd">{item.hint}</span>}
           </button>
         );
