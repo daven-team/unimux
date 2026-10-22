@@ -1,9 +1,12 @@
-// Overlay of an SSH cell (spec 6.3, R11): full card while idle, a prompt is open or a server banner arrived while connecting,
-// a bottom bar after the session ended (the last output stays readable above it).
+// Overlay of an SSH cell (spec 6.3, R11): full card while idle, the connecting card (SshConnectCard, 1.0.4) until the shell
+// opens or while a failed connect is shown, a bottom bar after the session ended (the last output stays readable above it).
 import { connectingBanner, sanitizeServerText, sshErrorText, userAtEndpoint, type SshHost, type SshPrompt, type SshSessionState } from '../../../../shared/ssh';
 import { useI18n } from '../../i18n';
 import { connectCell, reconnectCell, sshContext } from '../../ssh';
 import { useSshStore } from '../../sshStore';
+import { connectCardShown } from '../../../../shared/sshConnect';
+import { useSshConnectStore } from '../../sshConnectStore';
+import { SshConnectCard } from './SshConnectCard';
 import { AuthPrompt } from './AuthPrompt';
 import { HostKeyPrompt } from './HostKeyPrompt';
 import './ssh.css';
@@ -11,9 +14,12 @@ import './ssh.css';
 export function SshCellCard({ cellId, host, session, prompt }: { cellId: string; host: SshHost | undefined; session: SshSessionState | undefined; prompt: SshPrompt | undefined }) {
   const { tr } = useI18n();
   const storage = useSshStore((st) => st.vault?.storage ?? 'unavailable');
+  const attempt = useSshConnectStore((st) => st.attempts[cellId]);
   if (!host) {
     return <div className="ssh-card" role="group"><div className="ssh-card-inner"><div className="ssh-card-title">{tr('Ten host został usunięty')}</div></div></div>;
   }
+  // 1.0.4: from the connect until the shell opens (or the attempt failed) the connecting card covers the terminal.
+  if (connectCardShown(attempt, session, prompt)) return <SshConnectCard cellId={cellId} host={host} session={session} prompt={prompt} />;
   if (prompt) {
     return (
       <div className={`ssh-card${prompt.kind === 'hostKey' && prompt.reason === 'changed' ? ' danger' : ''}`} role="dialog" aria-label={host.label}>
