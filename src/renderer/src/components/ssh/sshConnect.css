@@ -26,9 +26,9 @@
 .ssh-step-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
 .ssh-step.done .ssh-step-node { background: var(--accent); border-color: var(--accent); color: #fff; }
 .ssh-step.done .ssh-step-label { color: var(--text-2); }
-.ssh-step.active .ssh-step-node { background: var(--accent-soft); border-color: transparent; color: var(--accent-text); }
+.ssh-step.active .ssh-step-node { background: color-mix(in srgb, var(--accent) 13%, var(--bg-3)); border-color: transparent; color: var(--accent-text); }
 .ssh-step.active .ssh-step-label { color: var(--text); }
-.ssh-step.failed .ssh-step-node { background: #ef444422; border-color: #ef4444; color: #f87171; }
+.ssh-step.failed .ssh-step-node { background: color-mix(in srgb, #ef4444 13%, var(--bg-3)); border-color: #ef4444; color: #f87171; }
 .ssh-step.failed .ssh-step-label { color: #f87171; }
 /* The arc around the active node turns on its own (a CSS animation, not the shared blink); static with reduced motion. */
 .ssh-step.active .ssh-step-node::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); border-right-color: var(--accent); animation: ssh-connect-spin .9s linear infinite; }

@@ -219,10 +219,10 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
     const projectOf = (key: string) => gridProject.get(key)?.id ?? (documents.find((d) => `file:${d.id}` === key)?.projectId || null);
     const groups = groupWorkspaceKeys(shown, projectOf, projects.map((p) => p.id));
     openMenuAt(el, [
-      { header: tr('Wszystkie karty') },
       // 1.0.4: the same switch as in Settings > App: the tabs of every project, or only of the project on screen.
       { label: tr('Tylko karty aktywnego projektu'), hint: stripScope === 'project' ? '✓' : undefined, onClick: () => update((st) => updateSettings(st, { stripScope: stripScope === 'project' ? 'all' : 'project' })) },
       { sep: true as const },
+      { header: tr('Wszystkie karty') },
       ...groups.flatMap((group) => [
         ...(group.projectId ? [{ header: projects.find((p) => p.id === group.projectId)?.name ?? '' }] : []),
         ...group.keys.flatMap(item),
@@ -277,9 +277,11 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
     openMenuAt(el, [
       { header: tr("Dodaj komórkę do siatki") },
       ...profiles.map((p) => ({ label: profileOptionLabel(p, cliStatus, tr), color: p.color, onClick: () => void addAgent(p.id), hint: p.id === lastProfileId ? shortcutText('agent.add') || undefined : undefined })),
-      { sep: true as const },
-      { header: tr("W osobnym git worktree") },
-      ...profiles.filter((p) => p.cli !== 'shell').map((p) => ({ label: `${profileOptionLabel(p, cliStatus, tr)} + worktree`, color: p.color, onClick: () => void addAgent(p.id, true) })),
+      ...(profiles.some((p) => p.cli !== 'shell') ? [
+        { sep: true as const },
+        { header: tr("W osobnym git worktree") },
+        ...profiles.filter((p) => p.cli !== 'shell').map((p) => ({ label: `${profileOptionLabel(p, cliStatus, tr)} + worktree`, color: p.color, onClick: () => void addAgent(p.id, true) })),
+      ] : []),
       { sep: true as const },
       ...sshHostMenuItems('Komórka SSH'),
     ]);

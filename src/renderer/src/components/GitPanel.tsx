@@ -36,13 +36,13 @@ export function GitPanel() {
 
 const MAX_KEYS_SHOWN = 8;
 /**
- * The transfer marks of the History header's repository buttons, drawn at their own size (14 px, no scaling) with the stroke
- * weight of the neighbouring icons: an arrow down onto a dashed line (fetch: only the remote branches change),
+ * The transfer marks of the History header's repository buttons, drawn at 12 px (like the refresh arrow next to them) with about
+ * the same line weight (1.4 px): an arrow down onto a dashed line (fetch: only the remote branches change),
  * an arrow down into a tray (pull) and an arrow up out of it (push).
  */
 function GitTransferIcon({ kind }: { kind: 'fetch' | 'pull' | 'push' }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       {kind === 'push' ? <path d="M7 9V1.8M4 4.6L7 1.6l3 3" /> : <path d="M7 1.6v7.2M4 6l3 3 3-3" />}
       {kind === 'fetch' ? <path d="M2 12.4h1.4M6.3 12.4h1.4M10.6 12.4H12" /> : <path d="M1.8 9.4v3h10.4v-3" />}
     </svg>

@@ -42,6 +42,7 @@ import { initRedis } from './redis/redisClient';
 import { initDbTabs } from './db/tabs';
 import { useSshStore } from './sshStore';
 import { focusSplitSide, initSplitView, useShownFileId, useSplitStore } from './splitView';
+import { clampSplitRatio } from '../../shared/splitView';
 import { SplitDivider } from './components/SplitDivider';
 import { isWindowShown, onWindowShown } from './windowShown';
 
@@ -335,7 +336,7 @@ export function App() {
           {workspaceTabs}
           <div className={`workspace-content ${split && !settingsActive && !sshViewActive ? 'split' : ''}`}>
             {/* Split view: the grid on the left, the tab beside it on the right; a click on a side puts it in front (keyboard, strip). */}
-            <div className="terminal-workspace" style={{ display: (fileOpen && !split) || settingsActive || sshViewActive ? 'none' : 'flex', ...(split ? { flex: `0 1 ${splitRatio * 100}%` } : {}) }}
+            <div className="terminal-workspace" style={{ display: (fileOpen && !split) || settingsActive || sshViewActive ? 'none' : 'flex', ...(split ? { flex: `0 1 ${clampSplitRatio(splitRatio, available - widths.sidebar - (right.length ? widths.snippets : 0)) * 100}%` } : {}) }}
               onPointerDownCapture={split ? () => focusSplitSide('grid', null) : undefined}>{gridView}</div>
             {split && !settingsActive && !sshViewActive && <SplitDivider />}
             {settingsTabOpen && <div className="settings-workspace" style={{ display: settingsActive ? 'flex' : 'none' }}><LazyScreen load={loadSettingsPage} /></div>}
