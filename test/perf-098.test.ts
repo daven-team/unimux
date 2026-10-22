@@ -223,8 +223,9 @@ describe('shared blink', () => {
         if (/animation\s*:[^;]*\binfinite\b/.test(rule[2])) infinite.push(rule[1].trim());
       }
     }
-    // .brand.fx runs 2.4 s after a click on the logo, nothing else.
-    expect(infinite.sort()).toEqual(['.brand.fx .bn-fx']);
+    // .brand.fx runs 2.4 s after a click on the logo; the arc of the SSH connecting card (1.0.4) exists only while a cell
+    // connects and turns by transform alone (static under reduced motion). Nothing else.
+    expect(infinite.sort()).toEqual(['.brand.fx .bn-fx', '.ssh-step.active .ssh-step-node::after']);
   });
 });
 

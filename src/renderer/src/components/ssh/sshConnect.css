@@ -1,0 +1,86 @@
+/* The connecting card of an SSH cell (1.0.4): host tile, a three-step track, status, prompts, log. Existing tokens only. */
+.ssh-card.ssh-connect { padding: 16px; }
+.ssh-card.ssh-connect.danger { box-shadow: inset 0 0 0 1px #ef4444; }
+/* margin: auto centres it and still lets a tall card (an open prompt in a short cell) scroll from its top. */
+.ssh-connect-inner { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 480px; min-width: 0; margin: auto; }
+.ssh-connect-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.ssh-connect-head .ssh-host-icon { width: 44px; height: 44px; border-radius: 11px; }
+.ssh-connect-head .ssh-host-icon svg { width: 22px; height: 22px; }
+.ssh-connect-name { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.ssh-connect-name strong, .ssh-connect-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ssh-connect-name strong { color: var(--text); font-size: 14px; font-weight: 600; }
+.ssh-connect-name span { color: var(--muted); font-size: 11.5px; }
+.ssh-connect-logs-toggle { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.ssh-connect-logs-toggle svg { flex: none; width: 13px; height: 13px; }
+.ssh-connect-logs-toggle.on { background: var(--btn-ghost-hover); }
+
+/* The track runs from the centre of the first node to the centre of the last; the fill follows --ssh-progress (0..1). */
+.ssh-steps { position: relative; --ssh-node: 34px; }
+.ssh-steps ol { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; padding: 0; list-style: none; }
+.ssh-steps-track { position: absolute; top: calc(var(--ssh-node) / 2 - 1px); left: calc(100% / 6); right: calc(100% / 6); height: 2px; border-radius: 1px; background: var(--border-2); }
+.ssh-steps-fill { position: absolute; inset: 0 auto 0 0; width: calc(var(--ssh-progress, 0) * 100%); border-radius: 1px; background: var(--accent); transition: width .35s ease; }
+.ssh-connect.failed .ssh-steps-fill { background: color-mix(in srgb, var(--accent) 55%, #ef4444); }
+.ssh-step { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+.ssh-step-node { position: relative; display: inline-flex; align-items: center; justify-content: center; width: var(--ssh-node); height: var(--ssh-node); border-radius: 50%; border: 1px solid var(--border-2); background: var(--bg-3); color: var(--muted); box-sizing: border-box; transition: background .2s, color .2s, border-color .2s; }
+.ssh-step-node svg { width: 15px; height: 15px; }
+.ssh-step-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
+.ssh-step.done .ssh-step-node { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ssh-step.done .ssh-step-label { color: var(--text-2); }
+.ssh-step.active .ssh-step-node { background: var(--accent-soft); border-color: transparent; color: var(--accent-text); }
+.ssh-step.active .ssh-step-label { color: var(--text); }
+.ssh-step.failed .ssh-step-node { background: #ef444422; border-color: #ef4444; color: #f87171; }
+.ssh-step.failed .ssh-step-label { color: #f87171; }
+/* The arc around the active node turns on its own (a CSS animation, not the shared blink); static with reduced motion. */
+.ssh-step.active .ssh-step-node::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); border-right-color: var(--accent); animation: ssh-connect-spin .9s linear infinite; }
+@keyframes ssh-connect-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .ssh-step.active .ssh-step-node::after { animation: none; }
+  .ssh-steps-fill, .ssh-step-node { transition: none; }
+}
+
+.ssh-connect-status { display: flex; flex-direction: column; gap: 4px; align-items: center; min-width: 0; color: var(--text-2); font-size: 12.5px; text-align: center; overflow-wrap: anywhere; }
+.ssh-connect-status.failed { color: var(--text); font-weight: 600; }
+.ssh-connect-error { color: #f87171; font-size: 12px; font-weight: 400; }
+.ssh-connect-prompt { padding: 12px; border: 1px solid #ffffff0d; border-radius: 10px; background: #202020; }
+.ssh-connect.danger .ssh-connect-prompt { border-color: #ef444466; }
+.ssh-connect-log { display: flex; flex-direction: column; gap: 2px; max-height: 140px; margin: 0; padding: 8px 10px; overflow: auto; list-style: none; border: 1px solid #ffffff0d; border-radius: 8px; background: #171717; font-family: "Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular", "Courier New", monospace; font-size: 11px; line-height: 1.5; user-select: text; }
+.ssh-connect-log li { display: flex; gap: 8px; min-width: 0; color: var(--text-2); }
+.ssh-connect-log li span { min-width: 0; overflow-wrap: anywhere; }
+.ssh-connect-log time { flex: none; color: var(--muted); }
+.ssh-connect-log li.ok span { color: #4ade80; }
+.ssh-connect-log li.error span { color: #f87171; }
+.ssh-connect-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.ssh-connect-actions .btn.primary { margin-left: auto; }
+
+/* A small grid cell: a smaller tile and nodes, no step labels, the log and banner shorter. */
+@container (max-width: 340px) or (max-height: 260px) {
+  .ssh-card.ssh-connect { padding: 8px 10px; }
+  .ssh-connect-inner { gap: 8px; }
+  .ssh-connect-head { gap: 8px; }
+  .ssh-connect-head .ssh-host-icon { width: 30px; height: 30px; border-radius: 8px; }
+  .ssh-connect-head .ssh-host-icon svg { width: 16px; height: 16px; }
+  .ssh-connect-name strong { font-size: 12.5px; }
+  .ssh-connect-name span { font-size: 11px; }
+  .ssh-steps { --ssh-node: 26px; }
+  .ssh-step-node svg { width: 12px; height: 12px; }
+  .ssh-step.active .ssh-step-node::after { inset: -3px; }
+  .ssh-step-label { display: none; }
+  .ssh-connect-status { font-size: 11.5px; }
+  .ssh-connect-prompt { padding: 8px; }
+  .ssh-connect-log { max-height: 80px; padding: 6px 8px; }
+  .ssh-connect-log time { display: none; }
+  .ssh-connect-logs-toggle span { display: none; }
+  .ssh-connect .ssh-banner { max-height: 48px; }
+}
+@container (max-width: 220px) {
+  .ssh-connect-head .ssh-host-icon { display: none; }
+}
+/* A maximized cell: a little more room around everything. */
+@container (min-width: 760px) and (min-height: 520px) {
+  .ssh-connect-inner { max-width: 560px; gap: 18px; }
+  .ssh-steps { --ssh-node: 40px; }
+  .ssh-step-node svg { width: 17px; height: 17px; }
+  .ssh-step-label { font-size: 12px; }
+  .ssh-connect-status { font-size: 13px; }
+  .ssh-connect-log { max-height: 220px; }
+}

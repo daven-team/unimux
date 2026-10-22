@@ -13,6 +13,9 @@ import { tr } from './i18n';
 import type { MessageKey } from '../../shared/i18n';
 import { askChoice, getS, getUi, setUi, toast, update } from './store';
 import { createInitGate, useSshStore } from './sshStore';
+import { useSshConnectStore } from './sshConnectStore';
+import type { ConnectContext } from '../../shared/sshConnect';
+import { hostLogin } from '../../shared/sshIdentity';
 import { terminals } from './terminals/TerminalManager';
 
 /** SSH cells created by the user in this renderer session: they connect when their view mounts (spec 6.1 step 1). */
@@ -47,6 +50,17 @@ export function sshContext(hostId?: string): { host: string; endpoint: string } 
   return host ? { host: host.address, endpoint: hostEndpoint(host.address, host.port) } : { host: '', endpoint: '' };
 }
 
+/** What the connecting card's log says about the host (user, key, saved password); the same login main will use. */
+export function connectContext(hostId: string): ConnectContext {
+  const host = getS().sshHosts.find((h) => h.id === hostId);
+  if (!host) return { ...sshContext(hostId), user: '' };
+  const login = hostLogin(host, getS().sshIdentities);
+  const vault = useSshStore.getState().vault;
+  const saved = login.secret.kind === 'identity' ? vault?.savedIdentityPasswords ?? [] : vault?.savedPasswords ?? [];
+  const keyLabel = login.keyId ? vault?.keys.find((k) => k.id === login.keyId)?.label : undefined;
+  return { ...sshContext(hostId), user: login.username, ...(keyLabel ? { keyLabel } : {}), savedPassword: saved.includes(login.secret.id) };
+}
+
 const cellLabel = (cellId: string): string => {
   const found = findCell(getS(), cellId);
   const host = found?.cell.ssh ? getS().sshHosts.find((h) => h.id === found.cell.ssh!.hostId) : undefined;
@@ -68,6 +82,7 @@ const announcePrompt = (cellId: string): void => toast(tr('SSH: {name} czeka na 
 
 function onSession(state: SshSessionState): void {
   const previous = useSshStore.getState().sessions[state.cellId]?.phase;
+  useSshConnectStore.getState().apply(state.cellId, { kind: 'session', at: Date.now(), state, ctx: connectContext(state.hostId) });
   useSshStore.getState().setSession(state);
   // I2: a network drop or a close while vim or htop ran leaves the alternate screen, so the notice below stays readable.
   if (sshSessionEnded(previous, state.phase)) terminals.resetSshModes(state.cellId);
@@ -81,6 +96,7 @@ function onSession(state: SshSessionState): void {
 
 function onPrompt(cellId: string, prompt: SshPrompt | null): void {
   const previousId = useSshStore.getState().prompts[cellId]?.id;
+  useSshConnectStore.getState().apply(cellId, { kind: 'prompt', at: Date.now(), prompt });
   useSshStore.getState().setPrompt(cellId, prompt);
   if (prompt && promptNeedsToast({ visible: cellVisible(cellId), previousId, nextId: prompt.id })) announcePrompt(cellId);
 }
@@ -93,6 +109,9 @@ export async function initSsh(): Promise<void> {
   try {
     const [vault, snapshot] = await Promise.all([window.mc.ssh.vaultInfo(), window.mc.ssh.sessions()]);
     useSshStore.getState().load(vault, snapshot);
+    // A reload in the middle of a connect: the card picks up from the sessions and prompts main still has.
+    for (const state of snapshot.sessions) useSshConnectStore.getState().apply(state.cellId, { kind: 'session', at: Date.now(), state, ctx: connectContext(state.hostId) });
+    for (const { cellId, prompt } of snapshot.prompts) useSshConnectStore.getState().apply(cellId, { kind: 'prompt', at: Date.now(), prompt });
     // A reload keeps the prompts open in main (R7): a hidden cell that waits is announced again (Review Focus 2 and 3).
     // Before the held events run (M7): a prompt that arrived meanwhile announces itself through onPrompt.
     for (const cellId of restoredPromptToasts(useSshStore.getState().prompts, cellVisible)) announcePrompt(cellId);
@@ -152,6 +171,7 @@ export async function connectCell(cellId: string): Promise<void> {
     // Written before the request leaves, so it always precedes the server greeting (W4).
     const notice = connectingNotice(sshContext(ref.hostId));
     terminals.writeNotice(cellId, tr(notice.key, notice.params));
+    useSshConnectStore.getState().apply(cellId, { kind: 'start', at: Date.now(), ctx: connectContext(ref.hostId) });
     useSshStore.getState().setSession({ cellId, hostId: ref.hostId, phase: 'connecting', since: Date.now() });
   }
   const { cols, rows } = terminals.size(cellId);
