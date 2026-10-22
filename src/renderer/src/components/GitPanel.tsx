@@ -35,15 +35,15 @@ export function GitPanel() {
 
 const MAX_KEYS_SHOWN = 8;
 /**
- * The transfer marks of the History header's repository buttons, drawn on the pixel grid at their own size (16 px, 1 px lines on
- * half-pixel centres, no scaling), so they stay sharp: an arrow down onto a dashed line (fetch: only the remote branches change),
+ * The transfer marks of the History header's repository buttons, drawn at their own size (14 px, no scaling) with the stroke
+ * weight of the neighbouring icons: an arrow down onto a dashed line (fetch: only the remote branches change),
  * an arrow down into a tray (pull) and an arrow up out of it (push).
  */
 function GitTransferIcon({ kind }: { kind: 'fetch' | 'pull' | 'push' }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="square" strokeLinejoin="miter" aria-hidden="true">
-      {kind === 'push' ? <path d="M7.5 10.5v-8M4.5 5.5l3-3 3 3" /> : <path d="M7.5 1.5v8M4.5 6.5l3 3 3-3" />}
-      {kind === 'fetch' ? <path d="M1.5 13.5h2M6.5 13.5h2M11.5 13.5h2" /> : <path d="M1.5 10.5v3h12v-3" />}
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {kind === 'push' ? <path d="M7 9V1.8M4 4.6L7 1.6l3 3" /> : <path d="M7 1.6v7.2M4 6l3 3 3-3" />}
+      {kind === 'fetch' ? <path d="M2 12.4h1.4M6.3 12.4h1.4M10.6 12.4H12" /> : <path d="M1.8 9.4v3h10.4v-3" />}
     </svg>
   );
 }
