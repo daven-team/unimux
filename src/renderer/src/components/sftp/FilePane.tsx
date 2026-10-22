@@ -5,10 +5,13 @@
 // 0.9.9: a drag onto a folder row, a path segment or ".." of the same pane moves the entries there; Ctrl+X / Ctrl+V cut and
 // paste, F5 and the turning refresh button list the folder again (the old rows stay, dimmed, until the new listing came).
 // The right-click menus and Actions list only what can run (shared/sftpMenu.ts); upload and download live there too.
+// 1.0.4: a drag that starts outside the entries' names (the empty list, the other columns of a row) draws a marquee like
+// Explorer: the rows it touches are selected live (Ctrl/Cmd adds to the selection) and the list scrolls near its edges.
+// An entry drags from its icon or name.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { rowSlots, rowWindow } from '../../../../shared/virtualRows';
 import {
-  clickSelect, EMPTY_SELECTION, filterEntries, formatBytes, isFolderLike, kindLabel, liveSelection, moveSelect, resolveDrop, resolveMove, selectAll,
+  clickSelect, EMPTY_SELECTION, filterEntries, formatBytes, isFolderLike, kindLabel, liveSelection, marqueeRows, marqueeSelect, moveSelect, resolveDrop, resolveMove, selectAll,
   SFTP_DRAG_MIME, sortEntries, toggleSort, DEFAULT_SORT, type Crumb, type PaneEntry, type ActiveDrag, type Selection, type SftpDragPayload, type SortKey, type SortOrder,
 } from '../../../../shared/sftpView';
 import type { MessageKey } from '../../../../shared/i18n';
@@ -21,6 +24,14 @@ import { IArrowLeft, IArrowRight, IArrowUp, IChevron, ILink, ISearch } from '../
 import { RefreshIcon, useHoldBusy } from '../Spinner';
 
 export const ROW_HEIGHT = 26;
+/** A press moves this far (px) before it becomes a marquee; less is a click. */
+const MARQUEE_SLOP = 4;
+/** Near the list's top or bottom edge (px) a marquee scrolls the list. */
+const MARQUEE_EDGE = 28;
+/** Where a press starts an entry drag instead of a marquee. */
+const DRAG_HANDLE = '.sftp-icon, .sftp-name, .sftp-link';
+
+interface MarqueeBox { left: number; top: number; width: number; height: number }
 
 export interface PaneFolder {
   /** null until the first listing arrived. */
@@ -192,6 +203,85 @@ export function FilePane(p: PaneProps) {
   /** The empty part of the list: anything in it but an entry or ".." (the list itself, the empty-folder note, the row gaps). */
   const onEmptyPart = (e: MouseEvent) => !(e.target as Element).closest('.sftp-row, .sftp-uprow');
 
+  // ── marquee (rubber band) ──
+  const [marquee, setMarquee] = useState<MarqueeBox | null>(null);
+  /** What a marquee in progress reads (its window listeners outlive the render that started it). */
+  const latest = useRef({ rows, order, offset, sel });
+  latest.current = { rows, order, offset, sel };
+  const endMarquee = useRef<(() => void) | null>(null);
+  /** A marquee just ended: the click of its release selects nothing. */
+  const swallowClick = useRef(false);
+  useEffect(() => () => endMarquee.current?.(), []);
+
+  /** A press outside the entries' names: a plain click on the empty list clears the selection (one on a row's other
+   *  columns selects it on click); moving past the slop draws the marquee. */
+  const onListMouseDown = (e: MouseEvent) => {
+    const el = list.current;
+    if (e.button !== 0 || !el || (e.target as Element).closest(DRAG_HANDLE)) return;
+    const box = el.getBoundingClientRect();
+    if (e.clientX >= box.left + el.clientWidth || e.clientY >= box.top + el.clientHeight) return; // a scroll bar
+    const add = e.ctrlKey || e.metaKey;
+    if (onEmptyPart(e) && !add) setSel(EMPTY_SELECTION);
+    e.preventDefault(); // no text selection and no entry drag from here
+    el.focus({ preventScroll: true });
+    endMarquee.current?.();
+    const base = add ? latest.current.sel : EMPTY_SELECTION;
+    /** A pointer position in the list's content coordinates (scroll included), clamped to the content. */
+    const point = (x: number, y: number) => {
+      const r = el.getBoundingClientRect();
+      return { x: Math.max(0, Math.min(el.scrollWidth, x - r.left + el.scrollLeft)), y: Math.max(0, Math.min(el.scrollHeight, y - r.top + el.scrollTop)) };
+    };
+    const start = point(e.clientX, e.clientY);
+    const pressX = e.clientX, pressY = e.clientY;
+    let last = { x: pressX, y: pressY };
+    let active = false;
+    let frame = 0;
+    const update = () => {
+      const now = point(last.x, last.y);
+      setMarquee({ left: Math.min(start.x, now.x), top: Math.min(start.y, now.y), width: Math.abs(now.x - start.x), height: Math.abs(now.y - start.y) });
+      const { rows: shown, order: ids, offset: above } = latest.current;
+      const span = marqueeRows(start.y, now.y, above, ROW_HEIGHT, shown.length);
+      const hit = span ? shown.slice(span.first, span.last + 1).filter((r) => !r.unsafeName).map((r) => r.path) : [];
+      setSel(marqueeSelect(base, ids, hit, add));
+    };
+    // Near the top or bottom edge the list scrolls (faster the further out) and the band grows with it.
+    const scroll = () => {
+      frame = 0;
+      const r = el.getBoundingClientRect();
+      const upper = r.top + MARQUEE_EDGE, lower = r.top + el.clientHeight - MARQUEE_EDGE;
+      const d = last.y < upper ? last.y - upper : last.y > lower ? last.y - lower : 0;
+      if (!d) return;
+      const before = el.scrollTop;
+      el.scrollTop += Math.max(-40, Math.min(40, Math.round(d / 2))) || Math.sign(d);
+      if (el.scrollTop === before) return;
+      update();
+      frame = requestAnimationFrame(scroll);
+    };
+    const onMove = (ev: globalThis.MouseEvent) => {
+      last = { x: ev.clientX, y: ev.clientY };
+      if (!active && Math.hypot(ev.clientX - pressX, ev.clientY - pressY) < MARQUEE_SLOP) return;
+      active = true;
+      update();
+      if (!frame) frame = requestAnimationFrame(scroll);
+    };
+    const finish = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', finish);
+      cancelAnimationFrame(frame);
+      endMarquee.current = null;
+      setMarquee(null);
+    };
+    const onUp = () => {
+      if (active) { swallowClick.current = true; setTimeout(() => { swallowClick.current = false; }); }
+      finish();
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('blur', finish);
+    endMarquee.current = finish;
+  };
+
   // ── drag and drop ──
   // The entries of an in-app drag stay in `activeDrag`; the drag data carries only its nonce (see resolveDrop).
   const onDragStart = (e: DragEvent, entry: PaneEntry) => {
@@ -297,7 +387,7 @@ export function FilePane(p: PaneProps) {
           <div ref={list} className={`sftp-list${over === f.path ? ' drop' : ''}${f.loading && f.path !== null ? ' loading' : ''}`} role="grid" aria-label={p.label} aria-multiselectable tabIndex={0} aria-busy={f.loading}
             aria-rowcount={rows.length} onKeyDown={onKeyDown} onScroll={(e) => { const t = e.currentTarget.scrollTop; setView((v) => (v.top === t ? v : { ...v, top: t })); }}
             onContextMenu={(e) => { if (onEmptyPart(e)) onRowMenu(e, null); }}
-            onMouseDown={(e) => { if (onEmptyPart(e)) setSel(EMPTY_SELECTION); }}>
+            onMouseDown={onListMouseDown} onClickCapture={(e) => { if (swallowClick.current) { swallowClick.current = false; e.stopPropagation(); } }}>
             {upRow && (
               <div className={`sftp-uprow${over !== null && over === f.parentPath ? ' drop' : ''}`} role="row" title={tr('Folder nadrzędny')}
                 {...(f.parentPath ? { 'data-folder-path': f.parentPath } : {})}
@@ -332,6 +422,7 @@ export function FilePane(p: PaneProps) {
               );
             })}
             {empty && <div className="sftp-empty-list">{filter ? tr('Brak wyników dla filtra') : tr('Folder jest pusty')}</div>}
+            {marquee && <div className="sftp-marquee" style={marquee} aria-hidden />}
           </div>
           <div className="sftp-status" role="status">
             {f.error ? <span className="sftp-error">{f.error}</span>
