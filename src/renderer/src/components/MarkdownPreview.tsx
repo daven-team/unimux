@@ -1,7 +1,8 @@
-import { useMemo, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, type MouseEvent, type RefObject } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { openFile } from '../files';
+import { usePreviewFind } from './previewFind';
 import './markdown.css';
 
 export const isMarkdownPath = (path: string): boolean => /\.(md|markdown)$/i.test(path);
@@ -65,8 +66,19 @@ function projectLinkPath(href: string, path: string): string | null {
   } catch { return null; }
 }
 
-export function MarkdownPreview({ text, projectId, path }: { text: string; projectId: string; path: string }) {
+/** Opens the find widget of the file tab on screen (Ctrl+F outside the text, see FileEditor.tsx); set by the editor or the preview. */
+export type FileFinder = RefObject<((replace: boolean) => void) | null>;
+
+export function MarkdownPreview({ text, projectId, path, finder }: { text: string; projectId: string; path: string; finder?: FileFinder }) {
   const html = useMemo(() => renderMarkdown(text), [text]);
+  const scroller = useRef<HTMLDivElement>(null);
+  const article = useRef<HTMLElement>(null);
+  const find = usePreviewFind(article, scroller, html);
+  useEffect(() => {
+    if (!finder) return;
+    finder.current = () => find.open();
+    return () => { finder.current = null; };
+  }, [finder, find.open]);
   const followLink = (event: MouseEvent<HTMLElement>) => {
     if (event.button !== 0 && event.button !== 1) return;
     const anchor = (event.target as Element).closest('a');
@@ -86,8 +98,11 @@ export function MarkdownPreview({ text, projectId, path }: { text: string; proje
     // A tab outside the projects (projectId '') has no project to resolve a relative link in.
     if (relative && projectId) void openFile(projectId, relative);
   };
-  return <div className="markdown-preview-scroll" tabIndex={0}>
-    <article className="markdown-preview" aria-label={path} onClick={followLink} onAuxClick={followLink}
-      dangerouslySetInnerHTML={{ __html: html }} />
+  return <div className="markdown-preview-host find-host" onKeyDown={find.onKeyDown}>
+    <div ref={scroller} className="markdown-preview-scroll" tabIndex={0}>
+      <article ref={article} className="markdown-preview" aria-label={path} onClick={followLink} onAuxClick={followLink}
+        dangerouslySetInnerHTML={{ __html: html }} />
+    </div>
+    {find.widget}
   </div>;
 }
