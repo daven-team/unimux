@@ -41,7 +41,8 @@ const script = `
   assert.equal(ico.readUInt16LE(2), 1);
   assert.equal(ico.readUInt16LE(4), 7);
   const splash = fs.readFileSync(path.join(appRoot, 'resources/update-splash/index.html'), 'utf8');
-  assert.match(splash, /class="logo" src="icon.png"/);
+  // 1.0.6: the logo is inlined (the page is also loaded from the app folder, which has no icon.png next to it).
+  assert.match(splash, /class="logo" src="data:image\\/png;base64,[A-Za-z0-9+\\/=]{200,}"/);
   process.stdout.write('Packaged branding assets OK\\n');
   // Every package out/main requires must resolve inside the package (the file lists drop type declarations, the MCP SDK's
   // ESM copy and zod's ESM files): the pure ones are loaded too, so their own requires are checked as well.

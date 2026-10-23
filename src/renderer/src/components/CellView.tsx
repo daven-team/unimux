@@ -7,6 +7,7 @@ import { propsEqualWithStyle } from '../../../shared/renderEquality';
 import { errorPhrase, failureLabel } from '../../../shared/alerts';
 import { cellDrawColor, getProfile, PROJECT_COLORS, updateCell } from '../../../shared/state';
 import { missingCardCli } from '../../../shared/cliStatus';
+import { shownProfileName } from '../../../shared/profiles';
 import { sshHeaderName, sshPhaseLabel, userAtEndpoint } from '../../../shared/ssh';
 import { resolveSshTheme } from '../../../shared/sshThemes';
 import { useSshStore } from '../sshStore';
@@ -26,6 +27,7 @@ import type { PathMode } from '../../../shared/types';
 import { addDroppedFilesToCell, addPathsToCell, cellDropFormat, cellRefusesPaths, readDroppedPaths } from '../pathDrop';
 import { setUi, toast, update, useStore } from '../store';
 import { terminals } from '../terminals/TerminalManager';
+import { TerminalFind } from '../terminals/terminalFind';
 import { useBlink } from '../blink';
 import { openMenu, openMenuAt, type MenuItem } from './ContextMenu';
 import { IBranch, IMax, IRestart, IRestore, IX } from './icons';
@@ -48,6 +50,8 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const bodyRef = useRef<HTMLDivElement>(null);
   const profiles = useStore((st) => st.s.profiles);
   const profile = useStore((st) => getProfile(st.s, cell.profileId));
+  const shell = useStore((st) => st.s.settings.shell);
+  const profileName = shownProfileName(profile, shell, tr);
   const status = useStore((st) => st.ui.statuses[cell.id] ?? 'idle');
   useBlink(status === 'working');
   const failure = useStore((st) => st.ui.failures[cell.id]);
@@ -99,7 +103,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   };
 
   // An SSH cell is named by its host chip; the name shows next to it only when the user gave the cell one.
-  const label = ssh ? sshHeaderName(cell.name) : cellLabel(cell, sessionTitle && cell.session ? { [cell.session.id]: sessionTitle } : {}, profile.name);
+  const label = ssh ? sshHeaderName(cell.name) : cellLabel(cell, sessionTitle && cell.session ? { [cell.session.id]: sessionTitle } : {}, profileName);
 
   const sshItems = (): MenuItem[] => [
     { label: tr('Połącz ponownie'), onClick: () => void reconnectCell(cell.id) },
@@ -230,9 +234,9 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
               <span className="profile-name">{host?.label ?? tr('Host usunięty')}</span>
             </button>
           ) : (
-            <button type="button" className="profile" onClick={(e) => openMenuAt(e.currentTarget, profileItems())} title={tr("Zmień profil")} aria-label={`${tr("Zmień profil")}: ${profile.name}`}>
+            <button type="button" className="profile" onClick={(e) => openMenuAt(e.currentTarget, profileItems())} title={tr("Zmień profil")} aria-label={`${tr("Zmień profil")}: ${profileName}`}>
               <span className="pchip" style={{ background: profile.color }} />
-              <span className="profile-name">{profile.name}</span>
+              <span className="profile-name">{profileName}</span>
             </button>
           )}
           {editing ? (
@@ -253,13 +257,14 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
               }}
             />
           ) : (
-            label && (
+            // The profile chip already names an unnamed shell cell: its label would only repeat it ("Wiersz polecenia Wiersz polecenia").
+            label && (cell.name || label !== profileName) && (
               <span className={`cell-name ${cell.name ? 'custom' : ''}`} title={`${label}\n${tr('Dwuklik: zmień nazwę')}`} onDoubleClick={() => setEditing(true)}>
                 {label}
               </span>
             )
           )}
-          {!label && !editing && !ssh && (
+          {(!label || (!cell.name && label === profileName)) && !editing && !ssh && (
             <span className="cell-name placeholder" onDoubleClick={() => setEditing(true)} title={tr("Dwuklik: nadaj nazwę")}>{tr("bez nazwy")}</span>
           )}
           {cell.worktree && (
@@ -297,6 +302,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
       </div>
       <div className="cell-body" ref={bodyRef} style={lackingCli ? { visibility: 'hidden' } : sshTheme ? { ['--term-bg' as string]: sshTheme.colors.background } : undefined} />
       <span className="cell-frame" aria-hidden="true" />
+      {!lackingCli && <TerminalFind cellId={cell.id} />}
       {pathDrop && <div className={`cell-path-drop ${pathDrop.blocked ? 'blocked' : ''}`} role="status">{pathDrop.blocked ? tr(ssh ? 'Ścieżki lokalne nie działają w sesji SSH' : 'Komórka nie jest uruchomiona') : dropLabel(pathDrop.target)}</div>}
       {drop && !pathDrop && <div className="cell-snippet-drop" role="status">{tr('Upuść, aby wkleić')}</div>}
       {lackingCli && <CliMissingCard cli={lackingCli} cellId={cell.id} onChangeProfile={(anchor) => openMenuAt(anchor, profileItems())} />}

@@ -7,6 +7,7 @@ import { ptyHostRestartToast } from '../../shared/ssh';
 import type { McpInfo } from '../../shared/automation';
 import { alertForStatus } from './alerts';
 import { initQuitGuard } from './closeGuard';
+import { initDetachFollow } from './detach';
 import { noteAgentTurnEnd } from './turnRefresh';
 import { initBackgroundLoader } from './backgroundLoader';
 import { applyCliStatus, flushPendingSaves, ensureStarted, focusCell, hasBlockedCells, recheckCli, refreshSessionTitles, resetStarted, releaseCellTerminal, setAliveAtStart } from './actions';
@@ -22,7 +23,7 @@ import { Sidebar } from './components/Sidebar';
 import { SnippetPanel } from './components/SnippetPanel';
 import { NotesPanel } from './components/NotesPanel';
 import { PanelResizeHandle } from './components/PanelResizeHandle';
-import { rightPanelOrder, type RightPanel } from '../../shared/notes';
+import { parseRightPanelOrder, RIGHT_ORDER_KEY, rightPanelOrder, type RightPanel } from '../../shared/notes';
 import { StatusBar } from './components/StatusBar';
 import { TitleBar, WorkspaceTabs } from './components/TitleBar';
 import { useShortcuts } from './shortcuts';
@@ -226,6 +227,8 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   }
   bootStep(initBackgroundLoader);
   bootStep(initQuitGuard);
+  // Tabs in their own window (1.0.6): their cells' terminals leave this window and come back with them.
+  bootStep(initDetachFollow);
 }
 
 /**
@@ -261,6 +264,7 @@ export function App() {
   const fileOpen = shownKind !== null;
   const split = useSplitStore((st) => st.on) && fileOpen;
   const splitRatio = useSplitStore((st) => st.ratio);
+  const splitSwapped = useSplitStore((st) => st.swapped);
   const sshViewActive = useSshStore((st) => st.viewActive);
   const sshViewOpen = useSshStore((st) => st.viewOpen);
   const ready = useStore((st) => st.ready);
@@ -269,7 +273,9 @@ export function App() {
   const snippetsOpen = useStore((st) => st.s.snippetsOpen);
   const notesOpen = useStore((st) => st.s.notesOpen);
   // The right column's panels top to bottom: the one opened first stays on top (see rightPanelOrder).
-  const rightOrder = useRef<readonly RightPanel[]>([]);
+  // Remembered across restarts (localStorage), so Notes above Snippets stays that way.
+  const rightOrder = useRef<readonly RightPanel[] | null>(null);
+  rightOrder.current ??= parseRightPanelOrder(localStorage.getItem(RIGHT_ORDER_KEY));
   const collapsed = useStore((st) => st.s.sidebarCollapsed);
   const sidebarWidth = useStore((st) => st.s.sidebarWidth);
   const snippetsWidth = useStore((st) => st.s.snippetsWidth);
@@ -311,8 +317,8 @@ export function App() {
   if (!ready) return bootFailed ? <WindowFallback message={tr('Nie udało się wczytać danych aplikacji.')} retry={() => setBootFailed(false)} /> : <div className="app" />;
   // The toast too: a language that fails to load in the preview says so.
   if (!languageChosen) return <><LanguageSetup />{toastView}</>;
-  rightOrder.current = rightPanelOrder(rightOrder.current, { snippets: snippetsOpen, notes: notesOpen });
-  const right = rightOrder.current;
+  const right = rightPanelOrder(rightOrder.current, { snippets: snippetsOpen, notes: notesOpen });
+  if (right !== rightOrder.current) { rightOrder.current = right; try { localStorage.setItem(RIGHT_ORDER_KEY, JSON.stringify(right)); } catch { /* kept for this run */ } }
   const widths = fitPanelWidths(available, live.sidebar ?? sidebarWidth, live.snippets ?? snippetsWidth, collapsed, right.length > 0);
   const resizeProps = (panel: Panel) => ({
     panel,
@@ -334,7 +340,7 @@ export function App() {
         <ErrorBoundary name="sidebar" fallback={(retry) => <PanelFallback retry={retry} className="sidebar" />}><Sidebar resize={resizeProps('sidebar')} /></ErrorBoundary>
         <div className="main">
           {workspaceTabs}
-          <div className={`workspace-content ${split && !settingsActive && !sshViewActive ? 'split' : ''}`}>
+          <div className={`workspace-content ${split && !settingsActive && !sshViewActive ? (splitSwapped ? 'split swapped' : 'split') : ''}`}>
             {/* Split view: the grid on the left, the tab beside it on the right; a click on a side puts it in front (keyboard, strip). */}
             <div className="terminal-workspace" style={{ display: (fileOpen && !split) || settingsActive || sshViewActive ? 'none' : 'flex', ...(split ? { flex: `0 1 ${clampSplitRatio(splitRatio, available - widths.sidebar - (right.length ? widths.snippets : 0)) * 100}%` } : {}) }}
               onPointerDownCapture={split ? () => focusSplitSide('grid', null) : undefined}>{gridView}</div>

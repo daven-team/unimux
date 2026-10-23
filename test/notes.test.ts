@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NOTE_LIMITS, normalizeNotes, notePreview, rightPanelOrder } from '../src/shared/notes';
+import { NOTE_LIMITS, normalizeNotes, notePreview, parseRightPanelOrder, rightPanelOrder } from '../src/shared/notes';
 import { defaultState, editNote, moveNote, normalizeState, removeNote, upsertNote } from '../src/shared/state';
 import type { Note } from '../src/shared/types';
 
@@ -98,5 +98,20 @@ describe('the right column order', () => {
     const order = rightPanelOrder([], open(true, false));
     expect(rightPanelOrder(order, open(true, false))).toBe(order);
     expect(rightPanelOrder(['notes', 'notes'], open(true, true))).toEqual(['notes', 'snippets']);
+  });
+});
+
+describe('parseRightPanelOrder', () => {
+  it('reads a saved order and keeps it while both panels stay open', () => {
+    const saved = parseRightPanelOrder('["notes","snippets"]');
+    expect(saved).toEqual(['notes', 'snippets']);
+    expect(rightPanelOrder(saved, { snippets: true, notes: true })).toBe(saved);
+  });
+
+  it('drops unknown or repeated entries and broken values', () => {
+    expect(parseRightPanelOrder('["notes","x","notes",3]')).toEqual(['notes']);
+    expect(parseRightPanelOrder('{"a":1}')).toEqual([]);
+    expect(parseRightPanelOrder('not json')).toEqual([]);
+    expect(parseRightPanelOrder(null)).toEqual([]);
   });
 });

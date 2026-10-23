@@ -8,7 +8,7 @@
 .db-tree { flex: 1; min-height: 0; overflow: auto; position: relative; padding-bottom: 8px; }
 .db-row { position: absolute; left: 0; right: 0; height: 24px; display: flex; align-items: center; gap: 5px; padding-right: 8px; color: var(--text-2); cursor: default; white-space: nowrap; user-select: none; }
 .db-row:hover { background: var(--bg-hover); }
-.db-row.sel { background: var(--accent-soft); color: var(--text); }
+.db-row.sel { background: var(--selection-bg); color: var(--text); }
 .db-row svg { flex: none; color: var(--muted); }
 .db-row .db-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 .db-row .db-name.dim { color: var(--muted); }
@@ -20,11 +20,14 @@
 .db-meta { flex: none; margin-left: auto; color: var(--muted); font-size: 11px; }
 .db-row .db-meta + .db-meta, .db-row .db-ro + .db-meta { margin-left: 0; }
 /* The name has priority: the type label shrinks first (and hides when there is no room); the tooltip has both. */
+/* A trigger's or index's table and timing (1.0.6): it gives way before the name does. */
+.db-row .db-name:has(+ .db-detail) { flex-shrink: 0; max-width: 75%; }
+.db-detail { flex: 0 100 auto; min-width: 0; margin-left: auto; padding-left: 6px; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .db-type { flex: 0 100 auto; min-width: 0; margin-left: auto; padding-left: 6px; color: var(--muted); font-size: 11px; font-family: Consolas, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .db-row .db-name { flex: 0 1 auto; min-width: 2.5em; }
 .db-column .db-name, .db-constraint .db-name, .db-index .db-name { flex: 0 0 auto; max-width: calc(100% - 40px); }
 .db-tree:focus { outline: none; }
-.db-tree:focus-visible .db-row.sel { box-shadow: inset 0 0 0 1px var(--accent); }
+.db-tree:focus-visible .db-row.sel { box-shadow: inset 0 0 0 1px #ffffff14; }
 .db-args { color: var(--muted); font-size: 11px; }
 .db-folder-name { color: var(--text-2); font-size: 11.5px; }
 .db-color { flex: none; width: 8px; height: 8px; border-radius: 50%; }
@@ -65,7 +68,9 @@
 .db-saved-pw { display: inline-flex; align-items: center; height: 26px; padding: 0 8px; border-radius: 5px; background: #4ade801a; color: #86efac; font-size: 12px; }
 .db-test { margin-top: 12px; padding: 8px 10px; border-radius: var(--radius); font-size: 12px; }
 .db-test.ok { background: #4ade801a; color: #86efac; }
-.db-test.error { background: #f871711a; color: #fca5a5; }
+.db-test.error { background: #f871711a; color: #fca5a5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.db-test-text { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.db-test.error .btn { flex: none; }
 .db-editor .modal-foot { display: flex; align-items: center; gap: 8px; }
 
 /* ── tabs ── */
@@ -147,7 +152,29 @@
 .db-viewer-foot { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-top: 1px solid var(--border); }
 
 /* ── SQL editor ── */
-.db-sql-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.db-sql-main { flex: 1; min-height: 0; display: flex; }
+.db-sql-body { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+
+/* The History panel (1.0.6): newest first, a star per entry, the statement on two lines, its time, duration and rows. */
+.db-history { width: min(360px, 45%); min-width: 220px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--bg-1); min-height: 0; }
+.db-history-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--border); }
+.db-history-tools { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); }
+.db-history-tools .input { flex: 1; min-width: 0; }
+.db-history-starred.on { color: #fbbf24; }
+.db-history-list { flex: 1; min-height: 0; overflow-y: auto; }
+.db-history-item { display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.db-history-item:hover { background: var(--bg-hover); }
+.db-history-item:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.db-history-star { flex: none; width: 20px; height: 20px; border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 20px; padding: 0; border-radius: 4px; }
+.db-history-star:hover { background: var(--bg-2); color: var(--text); }
+.db-history-star.on { color: #fbbf24; }
+.db-history-body { flex: 1; min-width: 0; }
+.db-history-sql { font: 12px/1.45 Consolas, Menlo, monospace; color: var(--text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: normal; overflow-wrap: anywhere; }
+.db-history-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 2px; font-size: 11px; color: var(--text-2); }
+.db-history-error { color: #fca5a5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.db-history-item.error .db-history-sql { color: #fecaca; }
+.db-history-foot { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-top: 1px solid var(--border); font-size: 12px; }
+.db-toolbar .btn.on { background: var(--bg-2); }
 .db-sql-top { min-height: 60px; display: flex; flex-shrink: 0; flex-grow: 0; }
 .db-sql-editor { flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
 .db-sql-editor .cm-editor { height: 100%; }

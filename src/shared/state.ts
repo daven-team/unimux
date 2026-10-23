@@ -12,11 +12,12 @@ import { DEFAULT_UPDATE_MODE, normalizeUpdateMode } from './updateMode';
 import { DEFAULT_BACKGROUND_LOAD, normalizeBackgroundLoad } from './backgroundLoad';
 import { DEFAULT_SCROLLBACK_LINES, normalizeScrollback } from './terminalLimits';
 import { normalizeShortcutOverrides } from './shortcuts';
-import { normalizeSshHosts, type SshCellRef, type SshHost } from './ssh';
+import { normalizeSshCellRef, normalizeSshHosts, patchSshCellRef, type SshCellRef, type SshHost } from './ssh';
 import { normalizeSshIdentities } from './sshIdentity';
 import { DEFAULT_SSH_THEME, normalizeSshThemeId } from './sshThemes';
 import { defaultSftpPlaces, forgetRemotePlace, normalizeSftpPlaces } from './sftpView';
 import { DEFAULT_STRIP_SCOPE, normalizeStripScope, normalizeWorkspaceOrder } from './workspaceOrder';
+import { normalizeDetachedWindows, openGrids } from './detached';
 import { normalizeDbConnections, normalizeDbGroupColors } from './db';
 import { NOTE_LIMITS, normalizeNotes } from './notes';
 import type {
@@ -290,6 +291,32 @@ export function updateCell(s: AppState, cellId: string, patch: Partial<Omit<Cell
   }));
 }
 
+/** An SSH cell's restore data (1.0.6): the same state when nothing changes (no save, no state event). */
+export function patchSshCell(s: AppState, cellId: string, patch: { cwd?: string | null; resume?: boolean }): AppState {
+  const ref = findCell(s, cellId)?.cell.ssh;
+  if (!ref) return s;
+  const next = patchSshCellRef(ref, patch);
+  return next === ref ? s : updateCell(s, cellId, { ssh: next });
+}
+
+/** At load with the session restore off: no cell keeps the "connected at close" mark of the last run (the same state when none has it). */
+export function unlessRestoring(s: AppState): AppState {
+  if (s.settings.sshRestoreSessions === true) return s;
+  let changed = false;
+  const projects = s.projects.map((p) => {
+    let touched = false;
+    const tabs = p.tabs.map((t) => {
+      if (!t.cells.some((c) => c.ssh?.resume)) return t;
+      touched = true;
+      return { ...t, cells: t.cells.map((c) => (c.ssh?.resume ? { ...c, ssh: patchSshCellRef(c.ssh, { resume: false }) } : c)) };
+    });
+    if (!touched) return p;
+    changed = true;
+    return { ...p, tabs };
+  });
+  return changed ? { ...s, projects } : s;
+}
+
 export function findCell(s: AppState, cellId: string): { project: Project; tab: Tab; cell: Cell } | null {
   for (const project of s.projects)
     for (const tab of project.tabs) {
@@ -454,8 +481,8 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
   const cleanCells = (cells: Cell[]) => remapCells(cells).map((c) => {
     const { pathMode: raw, ssh, ...rest } = c;
     const pathMode = normalizePathMode(raw);
-    const hostId = ssh && typeof ssh === 'object' && typeof (ssh as { hostId?: unknown }).hostId === 'string' ? (ssh as { hostId: string }).hostId : undefined;
-    return { ...rest, ...(pathMode ? { pathMode } : {}), ...(hostId ? { ssh: { hostId } } : {}) };
+    const ref = normalizeSshCellRef(ssh);
+    return { ...rest, ...(pathMode ? { pathMode } : {}), ...(ref ? { ssh: ref } : {}) };
   });
   const cleanPresetCells = (cells: PresetCell[]) => remapCells(cells).map((c) => {
     const { sshHostId, ...rest } = c;
@@ -535,6 +562,10 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
   const workspaceOrder = normalizeWorkspaceOrder(r.workspaceOrder, new Set(normalized.projects.flatMap((p) => p.tabs.map((t) => t.id))));
   if (workspaceOrder) normalized.workspaceOrder = workspaceOrder;
   else delete normalized.workspaceOrder;
+  // Detached windows (1.0.6) of grids that are still open; a restart reopens them.
+  const detachedWindows = normalizeDetachedWindows(r.detachedWindows, openGrids(normalized.projects));
+  if (detachedWindows) normalized.detachedWindows = detachedWindows;
+  else delete normalized.detachedWindows;
   // Retention of the MCP inboxes (also drops what removed projects left behind before 0.9.3).
   normalized.automation = pruneAutomation(normalized.automation, new Set(normalized.projects.map((p) => p.id)), Date.now());
   return normalized;

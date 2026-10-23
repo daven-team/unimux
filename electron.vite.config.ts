@@ -14,6 +14,8 @@ export default defineConfig({
           ptyhost: resolve(__dirname, 'src/ptyhost/index.ts'),
           sftphost: resolve(__dirname, 'src/sftphost/index.ts'),
           dbhost: resolve(__dirname, 'src/dbhost/index.ts'),
+          // The SQLite engine thread of the DB Host (built-in modules only: it is run as an eval'd worker).
+          sqliteworker: resolve(__dirname, 'src/dbhost/sqliteWorker.ts'),
           updatesplash: resolve(__dirname, 'src/updatesplash/index.ts'),
         },
         // Lazy dependencies (MCP SDK, electron-updater) stay `require` behind a promise: the CommonJS builds they ship are loaded,

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DbSort, DbValue } from '../../../../shared/db';
 import { DB_LIMITS, dbConnectionColor, isTruncated } from '../../../../shared/db';
-import { formatDbValue, parseDbInput, rowsToCsv, rowsToJson, splitSql, statementAt } from '../../../../shared/dbSql';
+import { errorSpan, formatDbValue, parseDbInput, rowsToCsv, rowsToJson, splitSql, statementAt } from '../../../../shared/dbSql';
 import { addInsert, conflictRowIndex, isDeleted, rowOriginal, txToggle, parseStaged, removeInserts, rowKey, setInsertValue, stageCell, stagedCell, stagedCount, toggleDeletes, type DbRowKey, type DbStaged } from '../../../../shared/dbTabs';
 import { uid } from '../../../../shared/state';
 import type { SQLNamespace } from '@codemirror/lang-sql';
@@ -12,7 +12,7 @@ import { dialectOf } from '../../db/tabs';
 import { resultError, useDbStore } from '../../db/dbClient';
 import { useShownFileId } from '../../splitView';
 import {
-  applyStaged, cancelSql, clearHistory, connectionOf, loadDdl, loadMore, loadPage, openSqlTab, previewStaged, readHistory, readOnlyReason, runSql, setStaged, sqlTransaction,
+  applyStaged, cancelSql, connectionOf, loadDdl, loadMore, loadPage, openSqlTab, previewStaged, readOnlyReason, runSql, setStaged, sqlTransaction,
   tabState, useDbTabs, type SqlResult, type SqlTabState, type TableTabState, type DdlTabState,
 } from '../../db/tabs';
 import { useI18n } from '../../i18n';
@@ -23,7 +23,8 @@ import { Select } from '../Select';
 import { RefreshIcon } from '../Spinner';
 import { DbGrid, type GridCell, type GridColumn, type RowState } from './DbGrid';
 import { DbLogin } from './DbLogin';
-import { SqlEditor, type SqlEditorApi, type SqlRunRequest } from './SqlEditor';
+import { SqlEditor, type SqlEditorApi, type SqlEditorDialect, type SqlRunRequest } from './SqlEditor';
+import { SqlHistoryPanel } from './SqlHistoryPanel';
 import './db.css';
 
 const useDoc = (): FileDocument | undefined => { const shownId = useShownFileId(); return useFileStore((s) => s.documents.find((d) => d.id === shownId)); };
@@ -47,7 +48,10 @@ function TabHeader({ doc, sessionId, children }: { doc: FileDocument; sessionId:
     <div className="db-tab-head">
       <span className="db-color" style={{ background: color ?? 'var(--muted)' }} />
       <strong className="db-tab-conn">{connection?.name ?? tr('To połączenie zostało usunięte')}</strong>
-      <span className="db-tab-path">{connection?.kind === 'mysql'
+      <span className="db-tab-path">{connection?.kind === 'sqlite'
+        // A SQLite file is one database: the object's name alone (a SQL tab: the file's name).
+        ? (ref.kind === 'table' ? ref.table : ref.kind === 'ddl' ? ref.name : connection.path?.split(/[\\/]/).pop() ?? '')
+        : connection?.kind === 'mysql'
         // A MySQL database is the schema: "shop.orders", or the SQL tab's default database (none: the whole server).
         ? (ref.kind === 'table' ? `${ref.schema}.${ref.table}` : ref.kind === 'ddl' ? `${ref.schema}.${ref.name}` : ref.database)
         : `${ref.database}${ref.kind === 'table' ? ` · ${ref.schema}.${ref.table}` : ref.kind === 'ddl' ? ` · ${ref.schema}.${ref.name}` : ''}`}</span>
@@ -265,7 +269,7 @@ function DbTableView({ id }: { id: string }) {
         <button className="btn small ghost" title={tr('Odśwież')} aria-label={tr('Odśwież')} data-action="refresh" onClick={() => void loadPage(id)}><RefreshIcon spinning={st.loading} /></button>
         <form className="db-where" onSubmit={(e) => { e.preventDefault(); void loadPage(id, { filter, offset: 0 }); }}>
           <span className="db-where-label">WHERE</span>
-          <input className="input mono" data-field="where" value={filter} spellCheck={false} placeholder={dialectOf(ref.connectionId) === 'mysql' ? "id > 100 AND name LIKE '%a%'" : "id > 100 AND name ILIKE '%a%'"} maxLength={DB_LIMITS.filter}
+          <input className="input mono" data-field="where" value={filter} spellCheck={false} placeholder={dialectOf(ref.connectionId) === 'postgres' ? "id > 100 AND name ILIKE '%a%'" : "id > 100 AND name LIKE '%a%'"} maxLength={DB_LIMITS.filter}
             title={tr('Warunek działa w transakcji tylko do odczytu, ale nie jest piaskownicą: wpisuj tylko warunki, którym ufasz.')}
             onChange={(e) => setFilter(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape' && filter) { e.stopPropagation(); setFilter(''); void loadPage(id, { filter: '', offset: 0 }); } }} />
           {st.filter && <button type="button" className="btn small ghost" onClick={() => { setFilter(''); void loadPage(id, { filter: '', offset: 0 }); }}>{tr('Wyczyść')}</button>}
@@ -351,8 +355,10 @@ function DbSqlView({ id }: { id: string }) {
   const shown = st.shown === 'messages' ? null : st.results.find((r) => r.index === st.shown) ?? st.results[0] ?? null;
   const showError = (r: SqlResult) => {
     if (!r.position) return;
-    const at = st.runOffset + r.start + r.position - 1;
-    api.current?.markError(at, Math.min(at + 1, st.runOffset + r.end));
+    // The word the server names (MySQL's "near '...'", SQLite's 'near "..."', Postgres's position) is underlined, within the statement.
+    const at = Math.min(st.runOffset + r.start + r.position - 1, st.runOffset + r.end);
+    const span = errorSpan(doc.text, at);
+    api.current?.markError(Math.max(span.from, st.runOffset + r.start), Math.max(Math.min(span.to, st.runOffset + r.end), Math.max(span.from, st.runOffset + r.start) + 1));
   };
   useEffect(() => { const err = st.results.find((r) => r.error && r.position); if (err && !st.running) showError(err); }, [st.running]); // eslint-disable-line react-hooks/exhaustive-deps
   const overrideRun = async () => {
@@ -374,15 +380,18 @@ function DbSqlView({ id }: { id: string }) {
     ]);
     if (choice === 'commit' || choice === 'rollback') void sqlTransaction(id, choice);
   };
-  const historyMenu = (el: HTMLElement) => {
-    const list = readHistory(ref.connectionId).slice(0, 30);
-    openMenuAt(el, list.length ? [
-      { header: tr('Historia zapytań') },
-      { label: tr('Wyczyść historię'), danger: true, onClick: () => clearHistory(ref.connectionId) },
-      { sep: true },
-      ...list.map((h) => ({ label: h.sql.replace(/\s+/g, ' ').slice(0, 90), hint: `${h.ok ? '' : '! '}${new Date(h.at).toLocaleTimeString()}`, onClick: () => useFileStore.setState((s) => ({ documents: s.documents.map((d) => (d.id === id ? { ...d, text: d.text ? `${d.text.replace(/\s*$/, '')}\n\n${h.sql}` : h.sql } : d)) })) })),
-    ] : [{ header: tr('Historia zapytań jest pusta') }]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  /** History: a click puts the statement at the cursor; a double click puts it there and runs it. */
+  const insertHistory = (sql: string, run: boolean) => {
+    const e = api.current;
+    if (!e) return;
+    // A double click: its first click already put the statement there (it is selected), so it runs from there.
+    const cur = e.request('auto');
+    const at = run && cur.text.slice(cur.from, cur.to) === sql ? { from: cur.from } : e.insert(sql);
+    if (run && !st.running) void runSql(id, sql, at.from);
   };
+  const connection = connectionOf(ref);
+  const dialect: SqlEditorDialect = connection?.kind === 'mysql' ? (connection.flavor === 'mariadb' ? 'mariadb' : 'mysql') : connection?.kind === 'sqlite' ? 'sqlite' : 'postgres';
   const dragSplit = (e: React.MouseEvent) => {
     e.preventDefault();
     const box = body.current!.getBoundingClientRect();
@@ -416,13 +425,14 @@ function DbSqlView({ id }: { id: string }) {
         <span className="grow" />
         {st.timeMs !== null && !st.running && <span className="db-meta">{st.cancelled ? tr('anulowano') : ''} {st.timeMs} ms</span>}
         {st.running && <span className="db-meta"><RefreshIcon spinning /> {tr('Wykonywanie…')}</span>}
-        <button className="btn small ghost" onClick={(e) => historyMenu(e.currentTarget)}>{tr('Historia')}</button>
+        <button className={`btn small ghost ${historyOpen ? 'on' : ''}`} data-action="history" aria-pressed={historyOpen} onClick={() => setHistoryOpen((v) => !v)}>{tr('Historia')}</button>
       </div>
       {prompt && <div className="db-tab-login"><DbLogin sessionId={prompt} /></div>}
       {st.error && <div className="db-error" role="alert" data-field="error">{st.error}</div>}
+      <div className="db-sql-main">
       <div className="db-sql-body" ref={body}>
         <div className="db-sql-top" style={{ flexBasis: `${split * 100}%` }}>
-          <SqlEditor text={doc.text} label={doc.name} schema={schema} dialect={connectionOf(ref)?.kind === 'mysql' ? (connectionOf(ref)?.flavor === 'mariadb' ? 'mariadb' : 'mysql') : 'postgres'} onApi={(a) => { api.current = a; }}
+          <SqlEditor text={doc.text} label={doc.name} schema={schema} dialect={dialect} onApi={(a) => { api.current = a; }}
             onChange={(text) => editFile(id, text)}
             onRun={(req) => run(req)} />
         </div>
@@ -432,7 +442,7 @@ function DbSqlView({ id }: { id: string }) {
             {st.results.map((r, i) => (
               <button key={r.index} role="tab" aria-selected={shown?.index === r.index} className={`db-result-tab ${shown?.index === r.index ? 'on' : ''} ${r.error ? 'error' : ''}`}
                 onClick={() => { useDbTabs.setState((s) => ({ ...s, [id]: { ...(s[id] as SqlTabState), shown: r.index } })); if (r.error) showError(r); }}>
-                {tr('Wynik {n}', { n: i + 1 })} <span className="db-meta">{rowsCountLabel(r)}</span>
+                {tr('Wynik {n}', { n: i + 1 })}{r.set ? <span className="db-meta" title={tr('Kolejny zestaw wyników tej samej instrukcji')}> · #{r.set}</span> : null} <span className="db-meta">{rowsCountLabel(r)}</span>
               </button>
             ))}
             <button role="tab" aria-selected={st.shown === 'messages'} className={`db-result-tab ${st.shown === 'messages' ? 'on' : ''}`} data-tab="messages"
@@ -444,7 +454,7 @@ function DbSqlView({ id }: { id: string }) {
               {st.results.map((r, i) => (
                 <div key={r.index} className={`db-msg ${r.error ? 'error' : ''}`}>
                   <span className="db-msg-n">{i + 1}</span>
-                  <span className="db-msg-sql">{st.runText.slice(r.start, r.end).replace(/\s+/g, ' ').slice(0, 160)}</span>
+                  <span className="db-msg-sql">{r.set ? `#${r.set} ` : ''}{st.runText.slice(r.start, r.end).replace(/\s+/g, ' ').slice(0, 160)}</span>
                   <span className="db-msg-res">{r.error ?? `${r.command ?? ''}${r.rowCount !== null ? ` · ${tr('wiersze: {count}', { count: r.rowCount })}` : ''}`}{r.timeMs !== null ? ` · ${r.timeMs} ms` : ''}</span>
                   {r.readOnly && <button className="btn small" onClick={() => void overrideRun()}>{tr('Uruchom z zapisem (jednorazowo)')}</button>}
                 </div>
@@ -461,6 +471,8 @@ function DbSqlView({ id }: { id: string }) {
             <div className="db-messages"><div className="db-msg" data-field="affected">{shown.command}{shown.rowCount !== null ? ` · ${tr('wiersze: {count}', { count: shown.rowCount })}` : ''}{shown.timeMs !== null ? ` · ${shown.timeMs} ms` : ''}</div></div>
           )}
         </div>
+      </div>
+      {historyOpen && <SqlHistoryPanel connectionId={ref.connectionId} onInsert={(sql) => insertHistory(sql, false)} onRun={(sql) => insertHistory(sql, true)} onClose={() => setHistoryOpen(false)} />}
       </div>
     </section>
   );

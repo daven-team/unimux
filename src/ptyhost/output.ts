@@ -3,6 +3,7 @@
 import { PTY_REPLAY_CHARS } from '../shared/terminalLimits';
 import { alignedDelay, coalesceDelay, ECHO_FLUSHES, EchoClock, FLUSH_NOW_CHARS, FlowGate, TailBuffer } from './flow';
 import type { PtySink } from './manager';
+import type { ReplaySize } from '../shared/replay';
 
 /** A paused source is resumed anyway when no acknowledgement arrives for this long (renderer gone or stuck). */
 export const PAUSE_WATCHDOG_MS = 3000;
@@ -164,6 +165,16 @@ export class OutputChannel {
 
   history(): string {
     return this.tail.toString();
+  }
+
+  /** The terminal (pty or SSH channel) has this size from now on; the replay tail records it (see shared/replay). */
+  resized(cols: number, rows: number): void {
+    this.tail.size(cols, rows);
+  }
+
+  /** The replay tail with the sizes its output was written at. */
+  replay(): { data: string; sizes: ReplaySize[] } {
+    return this.tail.replay();
   }
 
   get pausedOrWatched(): boolean {

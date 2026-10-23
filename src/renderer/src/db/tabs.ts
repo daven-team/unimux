@@ -4,7 +4,8 @@
 import { create } from 'zustand';
 import type { DbColumn, DbConnection, DbConnectionInput, DbResult, DbObjectKind, DbSort, DbTableInfo, DbTxStatus, DbValue } from '../../../shared/db';
 import { DB_LIMITS } from '../../../shared/db';
-import { dbTabId, editRowLabel, failedTarget, isStagedEmpty, nextSqlName, parseHistory, parseStaged, pruneHistory, pushHistory, serializeStaged, stagedCount, stagedEdits, withoutSent, type DbEditTarget, type DbHistoryEntry, type DbStaged, type DbTabRef } from '../../../shared/dbTabs';
+import { dbTabId, editRowLabel, failedTarget, isStagedEmpty, nextSqlName, parseHistory, parseStaged, serializeStaged, stagedCount, stagedEdits, withoutSent, type DbEditTarget, type DbStaged, type DbTabRef } from '../../../shared/dbTabs';
+import { DB_HISTORY_LIMITS, type DbHistoryRecord } from '../../../shared/dbHistory';
 import { uid } from '../../../shared/state';
 import { splitSql, type SqlDialect } from '../../../shared/dbSql';
 import { activateFile, editFile, setDbTabHooks, useFileStore, type FileDocument } from '../files';
@@ -61,6 +62,8 @@ export interface SqlResult {
   readOnly?: boolean;
   /** 1-based position of the error in the submitted text. */
   position?: number;
+  /** A further result set of the statement before it (2, 3, ...: a MySQL CALL). */
+  set?: number;
   loadingMore?: boolean;
 }
 
@@ -122,12 +125,16 @@ function openTab(ref: DbTabRef, name: string, relativePath: string, text = ''): 
 
 const connName = (connectionId: string) => getS().dbConnections?.find((c) => c.id === connectionId)?.name ?? '?';
 /** The SQL a connection speaks (how its scripts split, how names are quoted). */
-export const dialectOf = (connectionId: string): SqlDialect => (getS().dbConnections?.find((c) => c.id === connectionId)?.kind === 'mysql' ? 'mysql' : 'postgres');
+export const dialectOf = (connectionId: string): SqlDialect => {
+  const kind = getS().dbConnections?.find((c) => c.id === connectionId)?.kind;
+  return kind === 'mysql' ? 'mysql' : kind === 'sqlite' ? 'sqlite' : 'postgres';
+};
 /** The database part of a tab's path: MySQL without a default database shows none. */
 const dbPart = (database: string) => (database ? `${database} · ` : '');
 
 export function openTableTab(connectionId: string, database: string, schema: string, table: string, objectKind: DbObjectKind): string {
-  const id = openTab({ kind: 'table', connectionId, database, schema, table, objectKind }, table, `${connName(connectionId)} · ${dialectOf(connectionId) === 'mysql' ? `${schema}.${table}` : `${database} · ${schema}.${table}`}`);
+  const dialect = dialectOf(connectionId);
+  const id = openTab({ kind: 'table', connectionId, database, schema, table, objectKind }, table, `${connName(connectionId)} · ${dialect === 'sqlite' ? table : dialect === 'mysql' ? `${schema}.${table}` : `${database} · ${schema}.${table}`}`);
   const st = tabState<TableTabState>(id, 'table');
   if (!st.columns.length && !st.loading) void loadPage(id);
   return id;
@@ -136,13 +143,14 @@ export function openTableTab(connectionId: string, database: string, schema: str
 export function openSqlTab(connectionId: string, database: string, text = ''): string {
   const used = useFileStore.getState().documents.filter((d) => d.db?.kind === 'sql' && d.db.connectionId === connectionId).map((d) => d.name);
   const name = nextSqlName(used);
-  const id = openTab({ kind: 'sql', connectionId, database, uid: uid() }, name, `${connName(connectionId)} · ${dbPart(database)}${name}`, text);
+  const id = openTab({ kind: 'sql', connectionId, database, uid: uid() }, name, `${connName(connectionId)} · ${dialectOf(connectionId) === 'sqlite' ? '' : dbPart(database)}${name}`, text);
   tabState<SqlTabState>(id, 'sql');
   return id;
 }
 
 export function openDdlTab(connectionId: string, database: string, schema: string, name: string, objectKind: DbObjectKind, args?: string): string {
-  const id = openTab({ kind: 'ddl', connectionId, database, schema, name, objectKind, ...(args ? { args } : {}) }, name, `${connName(connectionId)} · ${dialectOf(connectionId) === 'mysql' ? '' : `${database} · `}${schema}.${name} (DDL)`);
+  const dialect = dialectOf(connectionId);
+  const id = openTab({ kind: 'ddl', connectionId, database, schema, name, objectKind, ...(args ? { args } : {}) }, name, `${connName(connectionId)} · ${dialect === 'sqlite' ? name : `${dialect === 'mysql' ? '' : `${database} · `}${schema}.${name}`} (DDL)`);
   void loadDdl(id);
   return id;
 }
@@ -272,25 +280,33 @@ export async function applyStaged(id: string, expect?: string): Promise<boolean>
 
 // ── SQL editor ──────────────────────────────────────────────────────────────
 
-const HISTORY_KEY = 'mc-db-history-v1';
-export function readHistory(connectionId: string): DbHistoryEntry[] {
-  try { return parseHistory(JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '{}'))[connectionId] ?? []; } catch { return []; }
-}
 /**
- * Rewrites the stored history (masked passwords, live connections only, at most ~1 MB in all), so it never crowds out the
- * file drafts that share the window's storage.
+ * The query history (1.0.6) lives in main (<data>/db/query_history.json, window.mc.db.history). The history of 1.0.0 to 1.0.5
+ * (this window's storage, whole runs) moves there once, oldest first, and leaves the storage.
  */
-function writeHistory(change: (all: Record<string, DbHistoryEntry[]>) => void): void {
-  try {
-    const all = parseHistory(JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '{}'));
-    change(all);
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(pruneHistory(all, new Set((getS().dbConnections ?? []).map((c) => c.id)))));
-  } catch { /* history is a convenience */ }
+const OLD_HISTORY_KEY = 'mc-db-history-v1';
+function migrateOldHistory(): void {
+  let old: ReturnType<typeof parseHistory> = {};
+  try { old = parseHistory(JSON.parse(localStorage.getItem(OLD_HISTORY_KEY) ?? '{}')); } catch { /* nothing to move */ }
+  try { localStorage.removeItem(OLD_HISTORY_KEY); } catch { /* storage unavailable */ }
+  const live = new Set((getS().dbConnections ?? []).map((c) => c.id));
+  for (const [connectionId, entries] of Object.entries(old)) {
+    if (!live.has(connectionId) || !entries.length) continue;
+    window.mc.db.history.record(connectionId, entries.slice(0, DB_HISTORY_LIMITS.perRun).reverse().map((e) => ({ sql: e.sql, at: e.at, timeMs: e.timeMs, rows: null, ok: e.ok })));
+  }
 }
-const addHistory = (connectionId: string, entry: DbHistoryEntry): void => writeHistory((all) => { all[connectionId] = pushHistory(all[connectionId] ?? [], entry); });
-export const clearHistory = (connectionId: string): void => writeHistory((all) => { delete all[connectionId]; });
-/** History of deleted connections goes (called when the connections change). */
-export const pruneStoredHistory = (): void => writeHistory(() => undefined);
+
+/** Listeners of a connection's history (the History panel loads again after a run). */
+const historyListeners = new Set<(connectionId: string) => void>();
+export function onHistoryChanged(fn: (connectionId: string) => void): () => void { historyListeners.add(fn); return () => { historyListeners.delete(fn); }; }
+export function historyChanged(connectionId: string): void { for (const fn of historyListeners) fn(connectionId); }
+
+/** Records the statements of a run (main keeps them unless the history is off). */
+function recordHistory(connectionId: string, records: DbHistoryRecord[]): void {
+  if (!records.length) return;
+  window.mc.db.history.record(connectionId, records.slice(0, DB_HISTORY_LIMITS.perRun));
+  historyChanged(connectionId);
+}
 
 const queryListeners = new Map<string, () => void>();
 
@@ -330,7 +346,7 @@ export async function runSql(id: string, sql: string, offset: number, opts: { re
     soon();
   };
   const off = onQuery(queryId, (m) => {
-    if (m.t === 'statement') { pending = [...pending, { index: m.index, start: m.start, end: m.end, columns: null, rows: [], command: null, rowCount: null, hasMore: false, closed: false, timeMs: null, error: null }]; soon(); }
+    if (m.t === 'statement') { pending = [...pending, { index: m.index, start: m.start, end: m.end, columns: null, rows: [], command: null, rowCount: null, hasMore: false, closed: false, timeMs: null, error: null, ...(m.set ? { set: m.set } : {}) }]; soon(); }
     else if (m.t === 'columns') edit(m.index, (r) => ({ ...r, columns: m.columns }));
     // Rows are appended in place (no copy per chunk); the result object is new so the grid redraws. At most DB_UI_MAX_ROWS.
     else if (m.t === 'rows') edit(m.index, (r) => {
@@ -349,11 +365,13 @@ export async function runSql(id: string, sql: string, offset: number, opts: { re
     else if (m.t === 'queryEnd') {
       if (timer) { clearTimeout(timer); flush(); }
       const results = pending;
-      const ok = m.ok && !results.some((r) => r.error);
       // The first result with rows, else the messages.
       const withRows = results.findIndex((r) => r.columns);
       patchTab<SqlTabState>(id, { running: false, timeMs: m.timeMs, cancelled: m.cancelled, results: [...results], shown: withRows >= 0 ? withRows : 'messages' });
-      addHistory(ref.connectionId, { sql, at: started, ok, timeMs: m.timeMs });
+      // Every statement that ran (further result sets of a CALL belong to their statement), with its own time and row count.
+      recordHistory(ref.connectionId, results.filter((r) => !r.set && (r.command !== null || r.error !== null)).map((r) => ({
+        sql: sql.slice(r.start, r.end), at: started, timeMs: r.timeMs ?? 0, rows: r.columns ? r.rows.length : r.rowCount, ok: !r.error, ...(r.error ? { error: r.error } : {}),
+      })));
     }
   });
   queryListeners.set(id, off);
@@ -417,7 +435,7 @@ export async function disconnectAsking(connectionId: string, name: string): Prom
 
 /** The fields of a connection its sessions were opened with (name, colour and group are not among them). */
 const sessionFields = (c: DbConnection | DbConnectionInput): string =>
-  JSON.stringify([c.host, c.port, c.user, c.database ?? null, c.dbIndex ?? null, c.tls, c.caPath ?? null, c.ssh ?? null, c.readOnly, c.statementTimeoutMs ?? null]);
+  JSON.stringify([c.host, c.port, c.user, c.database ?? null, c.dbIndex ?? null, c.tls, c.caPath ?? null, c.ssh ?? null, c.readOnly, c.statementTimeoutMs ?? null, c.path ?? null]);
 
 /**
  * After a connection was changed: its live sessions still use the old settings (read-only, address, TLS, timeout). Asks to
@@ -492,6 +510,7 @@ export function initDbTabs(): void {
   if (hooked) return;
   hooked = true;
   initDb();
+  migrateOldHistory();
   setDbTabHooks({ confirmClose, closed });
   setDatabaseQuitWork({
     pending: () => openTransactions() > 0 || stagedTabs() > 0 || redisDraftTotal() > 0,

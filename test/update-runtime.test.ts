@@ -23,6 +23,14 @@ function fakeInstall(): { installDir: string; appDir: string } {
 }
 
 describe('update window runtime', () => {
+  it('carries its logo inside the page (the startup window loads it from resources/update-splash, with no icon next to it)', () => {
+    const html = readFileSync(new URL('../resources/update-splash/index.html', import.meta.url), 'utf8');
+    const logo = /<img class="logo" src="([^"]+)"/.exec(html)?.[1] ?? '';
+    expect(logo.startsWith('data:image/png;base64,')).toBe(true);
+    expect(Buffer.from(logo.slice('data:image/png;base64,'.length), 'base64').equals(readFileSync(new URL('../resources/icon-64.png', import.meta.url)))).toBe(true);
+    expect(html).toMatch(/img-src[^;"]*data:/);
+  });
+
   it('copies only what a small window needs', () => {
     const dir = join(root, 'app');
     const keep = (path: string) => shouldCopy(dir, join(dir, path), 'unimux.exe');
@@ -53,7 +61,8 @@ describe('update window runtime', () => {
     const uiDir = join(runtimeDir, 'resources', 'app', 'ui');
     const logoSrc = readFileSync(join(uiDir, 'index.html'), 'utf8').match(/<img\b[^>]*class="logo"[^>]*src="([^"]+)"/)?.[1];
     expect(logoSrc).toBeTruthy();
-    expect(existsSync(join(uiDir, logoSrc!))).toBe(true);
+    // Inlined (see the test above) or a file the copy brought along.
+    expect(logoSrc!.startsWith('data:image/') || existsSync(join(uiDir, logoSrc!))).toBe(true);
     expect(existsSync(`${runtimeDir}.partial`)).toBe(false);
   });
 

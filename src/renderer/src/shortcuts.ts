@@ -8,6 +8,7 @@ import { displayCombo, matchShortcut, RepeatGuard, resolveShortcuts, shortcutDef
 import { addAgent, moveCellBy, moveFocus, quickTab, toggleMaximize } from './actions';
 import { closeFrontTab, cycleWorkspace, frontKey } from './workspaceStrip';
 import { getS, getUi, setUi, update, useStore } from './store';
+import { focusedTerminalCell, openTerminalFind } from './terminals/terminalFind';
 
 let cached: { overrides: unknown; platform: string; resolution: ShortcutResolution } | null = null;
 
@@ -75,6 +76,7 @@ function run(id: string): void {
     case 'notes.toggle': update((s) => ({ ...s, notesOpen: !s.notesOpen })); break;
     case 'sidebar.toggle': update((s) => ({ ...s, sidebarCollapsed: !s.sidebarCollapsed })); break;
     case 'cell.maximize': toggleMaximize(); break;
+    case 'terminal.find': { const cell = focusedTerminalCell(); if (cell) openTerminalFind(cell); break; }
     case 'tab.next': cycleWorkspace(1); break;
     case 'tab.prev': cycleWorkspace(-1); break;
     case 'cell.focus.left': moveFocus(-1, 0); break;
@@ -88,7 +90,8 @@ function run(id: string): void {
   }
 }
 
-export function useShortcuts(): void {
+/** `only`: the actions this window offers (a detached window, 1.0.6); other combos are left to the page. */
+export function useShortcuts(only?: ReadonlySet<string>): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.type !== 'keydown') return;
@@ -101,7 +104,7 @@ export function useShortcuts(): void {
         overlayOpen: !!(ui.dialog || ui.modal), paletteOpen: ui.palette, settingsActive: ui.settingsActive,
         hasProject: !!project, hasTab: !!frontKey(), target: focusTarget(e.target),
       });
-      if (!id) return;
+      if (!id || (only && !only.has(id))) return;
       e.preventDefault();
       e.stopPropagation();
       run(id);

@@ -9,6 +9,7 @@ import type { AppPlatform } from '../shared/platform';
 import type { ChangelogResult } from '../shared/changelog';
 import type { AlertEventId } from '../shared/alerts';
 import type { UsageState } from '../shared/usage';
+import type { MonitorSample } from '../shared/monitor';
 import type { AdoptCopyResult, LoginRequest, LoginState, SwapResult } from '../shared/accounts';
 import type { ReplaceRequest, ReplaceResult, SearchOptions, SearchResult } from '../shared/search';
 import type { CreateResult, DeleteResult, FileOpProgress, FileOpRequest, FileOpResult, RenameResult } from '../shared/fileOps';
@@ -18,6 +19,9 @@ import type { SshApi, SshPrompt, SshSessionState, SshVaultInfo } from '../shared
 import type { LocalFilesApi, SftpApi, SftpSessionState } from '../shared/sftp';
 import type { DbApi, DbPrompt, DbSessionState, DbVaultInfo } from '../shared/db';
 import type { SshHistoryApi } from '../shared/commandHistory';
+import type { DetachedTarget } from '../shared/detached';
+
+export type DetachResult = { ok: true; id: string } | { ok: false; error: string };
 import type { AppState, CellSession, Profile, ProjectDirectory, ProjectFilePreview, SessionInfo, UpdateState, Worktree, WorktreeInspection, WorktreeInspectResult, WorktreeRemoveResult } from '../shared/types';
 
 export type { SessionInfo };
@@ -66,6 +70,10 @@ export interface McApi {
   /** Binds the freshest unclaimed Codex session in `cwd` to the cell (emits cell:session). */
   bindCodexSession(cellId: string, cwd: string): Promise<string | null>;
   aliveCells(): Promise<string[]>;
+  /** The Monitor panel: one process sample (null for a refused sender). */
+  monitorSample(): Promise<MonitorSample | null>;
+  /** Kills one process of a cell's tree; false when it is not one (or is gone). */
+  monitorKill(pid: number): Promise<boolean>;
   /** True only for the first renderer load of this app run (later loads and reloads get false). */
   claimAppStart(): Promise<boolean>;
   reportCellStatus(cellId: string, status: CellStatus, reason?: StatusReason, hooked?: boolean): void;
@@ -160,6 +168,28 @@ export interface McApi {
   clearSwapPending(): Promise<{ ok: boolean; error?: 'locked' }>;
   /** Hides a notice about the saved accounts (the state is pushed again on 'usage:state'). */
   dismissAccountNotice(id: string): Promise<void>;
+  /** 1.0.6: tabs in their own window (main/detachedWindows.ts). Documents are FileDocument objects of the renderer. */
+  detach: {
+    /** From the main window: the tab goes to a new window (on another display when there is one). */
+    open(target: DetachedTarget, docs?: unknown[]): Promise<DetachResult>;
+    /** From the main window, at the end of a tab drag: a new window under the cursor, unless it is over the main window. */
+    dropOutside(target: DetachedTarget, docs?: unknown[]): Promise<DetachResult>;
+    /** In a detached window: the documents handed over for it (once). */
+    take(): Promise<unknown[]>;
+    /** In a detached window: back into the main window (`overMain`: only when the cursor is over it). */
+    attach(docs?: unknown[], overMain?: boolean): Promise<boolean>;
+    /** In a detached window: its tab was closed there; the window goes and nothing returns. */
+    dismiss(): Promise<boolean>;
+    /** From the main window: asks a detached window to give its tab back. */
+    requestAttach(id: string): void;
+    focus(id: string): void;
+  };
+  /** In a detached window: it is being closed, its tab goes back (detach.attach). */
+  on(channel: 'detach:closing', cb: () => void): () => void;
+  /** In the main window: a detached tab came back (its running cells, or its documents). */
+  on(channel: 'detach:returned', cb: (back: { id: string; target: DetachedTarget; docs: unknown[]; alive: string[] }) => void): () => void;
+  /** In the main window: the status of a cell shown in a detached window. */
+  on(channel: 'detach:status', cb: (cellId: string, status: CellStatus) => void): () => void;
   on(channel: 'auth:state', cb: (state: LoginState) => void): () => void;
   on(channel: 'install:state', cb: (state: InstallState) => void): () => void;
   on(channel: 'cli:changed', cb: (status: CliStatusMap) => void): () => void;

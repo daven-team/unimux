@@ -65,10 +65,11 @@ describe('PanelEmpty', () => {
 
   it('keeps every link of the database sentence in every language', () => {
     for (const { code } of LANGUAGES) {
-      const text = translate(code, 'Dodaj połączenie z bazą {postgres}, {mysql} lub {redis}.');
+      const text = translate(code, 'Dodaj połączenie z bazą {postgres}, {mysql}, {redis} lub otwórz plik {sqlite}.');
       expect(text, code).toContain('{postgres}');
       expect(text, code).toContain('{mysql}');
       expect(text, code).toContain('{redis}');
+      expect(text, code).toContain('{sqlite}');
       expect(translate(code, 'Możesz też {link}.'), code).toContain('{link}');
     }
   });

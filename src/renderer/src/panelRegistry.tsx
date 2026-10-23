@@ -11,7 +11,7 @@ import type { ComponentType, ReactNode } from 'react';
 import type { MessageKey } from '../../shared/i18n';
 import { gitPanelReason, type PanelContext, type PanelDef } from '../../shared/sidebarPanels';
 import { FilesPanel } from './components/FilesPanel';
-import { TDatabase, TFiles, TGit, TProjects, TTerminal } from './components/icons';
+import { TDatabase, TFiles, TGit, TMonitor, TProjects, TTerminal } from './components/icons';
 import type { PanelResizeProps } from './components/PanelResizeHandle';
 import { LazyScreen } from './components/LazyScreen';
 import { ProjectsPanel } from './components/ProjectsPanel';
@@ -27,6 +27,9 @@ function GitPanelLazy() { return <LazyScreen load={loadGitPanel} panel />; }
 // The database panel (1.0.0) loads when it is first opened.
 const loadDbPanel = () => import('./components/db/DbPanel').then((m) => ({ default: m.DbPanel }));
 function DbPanelLazy() { return <LazyScreen load={loadDbPanel} panel />; }
+// The Monitor panel (1.0.6) loads when it is first opened.
+const loadMonitorPanel = () => import('./components/MonitorPanel').then((m) => ({ default: m.MonitorPanel }));
+function MonitorPanelLazy() { return <LazyScreen load={loadMonitorPanel} panel />; }
 
 export interface SidebarPanel extends Omit<PanelDef, 'unavailableReason'> {
   label: MessageKey;
@@ -45,4 +48,6 @@ export const SIDEBAR_PANELS: readonly SidebarPanel[] = [
   { id: 'git', label: 'Git', icon: TGit, component: GitPanelLazy, unavailableReason: gitPanelReason },
   { id: 'db', label: 'Bazy danych', icon: TDatabase, component: DbPanelLazy },
   { id: 'terminal', label: 'SSH', icon: TTerminal, opensView: true, onActivate: () => openSshView() },
+  // What loads the computer: samples only while it is open (1.0.6).
+  { id: 'monitor', label: 'Monitor', icon: TMonitor, component: MonitorPanelLazy },
 ];

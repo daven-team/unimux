@@ -6,6 +6,7 @@
 import { anchorAtCursor, atBottom, cursorBelowLine, cursorOnLine, isClassicShellPrompt, isShellPrompt, readCommandLine, readSubmittedLine, relocateAnchor, type BufferLike, type LineAnchor } from './commandLine';
 import { captureCommand } from './commandHistory';
 import { classifyInput, completionKeys, ghostText, popupKey, predictLine, suggestCommands, type KeyLike, type Suggestion, type SuggestSource } from './commandSuggest';
+import { commonStart, completeLine, cycleIndex, matchEntries, pathToken, type CachedListing } from './remotePaths';
 import { isUserInput } from './status';
 
 /** Output newer than this when the user starts a line: a program is still printing, so the line is not followed. */
@@ -64,6 +65,14 @@ export interface FollowerEnv {
   publish(view: AutocompleteView | null): void;
   /** A monotonic clock in ms. */
   now(): number;
+  /**
+   * The entries of a folder on the server for a path word (remotePaths.ts; `dir` as typed, '' = the shell's folder):
+   * undefined while they are on their way (refresh() follows once they arrived), null when there are none to offer.
+   * Absent: no path completion.
+   */
+  paths?(dir: string): CachedListing | undefined;
+  /** Enter sent the line: what was typed on it (a cd may have changed the shell's folder). */
+  submitted?(line: string): void;
 }
 
 const sameView = (a: AutocompleteView | null, b: AutocompleteView | null): boolean =>
@@ -102,6 +111,9 @@ export class CommandLineFollower {
   /** A suggestion accepted while the echo of earlier input was on its way: inserted once the line is read with it. */
   private queued: string | null = null;
   private memo: { sources: readonly SuggestSource[]; typed: string; items: Suggestion[] } | null = null;
+  private pathMemo: { listing: CachedListing; typed: string; items: Suggestion[]; startCol: number } | null = null;
+  /** Tab went through server path entries: the entries (as they were when it started) and the one in the line now. */
+  private cycle: { items: Suggestion[]; index: number } | null = null;
   private submitted: (MarkedLine & { hostId: string; until: number }) | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -117,15 +129,51 @@ export class CommandLineFollower {
   /** A keydown while the popup may be open; true = consumed (the shell must not get it). */
   key(ev: KeyLike): boolean {
     if (!this.view) return false;
-    const action = popupKey(ev, { selected: this.view.selected, count: this.view.items.length, ghost: !!this.view.ghost });
+    // Enter after Tab put an entry in the line runs the line, like a shell's menu completion.
+    if (this.cycle && this.view.selected === this.cycle.index && ev.key === 'Enter' && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.isComposing) {
+      this.close();
+      return false;
+    }
+    const paths = this.view.items[0]?.kind === 'path';
+    const action = popupKey(ev, { selected: this.view.selected, count: this.view.items.length, ghost: !!this.view.ghost, paths });
     if (action.kind === 'pass') {
       if (action.hide) this.close();
       return false;
     }
     if (action.kind === 'select') this.select(action.index);
     else if (action.kind === 'accept') this.accept(action.index);
+    else if (action.kind === 'cycle') this.step(action.step);
     else this.close();
     return true;
+  }
+
+  /**
+   * Tab over server path entries. The first Tab puts in the only entry, or the longer start all entries share (like bash),
+   * and the popup goes on (a folder shows its own entries next); otherwise each Tab puts the next entry in the line and
+   * Shift+Tab the one before, the list staying as it was when the cycle started. Typing anything ends the cycle.
+   */
+  private step(step: 1 | -1): void {
+    const view = this.view;
+    const typed = this.last?.before;
+    if (!view || this.state !== 'tracking' || typed === undefined) return;
+    if (!this.cycle) {
+      const items = view.items;
+      if (items.length === 1) return this.put(items[0].text);
+      const token = pathToken(typed);
+      const common = commonStart(items.map((i) => (i.display ?? '').replace(/\/$/, '')));
+      if (token && common.length > token.prefix.length) return this.put(completeLine(typed, token, common, 'partial').replace(/^\s*/, ''));
+      this.cycle = { items, index: -1 };
+    }
+    this.cycle.index = cycleIndex(this.cycle.index, this.cycle.items.length, step);
+    this.put(this.cycle.items[this.cycle.index].text);
+    this.publish({ ...view, items: this.cycle.items, selected: this.cycle.index, ghost: '' });
+  }
+
+  /** Puts `text` in the line now, or once the echo of earlier input was read (see accept). */
+  private put(text: string): void {
+    if (this.last && this.synced(this.last)) this.expected = undefined;
+    if (this.expected === undefined) this.insert(text);
+    else this.queued = text;
   }
 
   /**
@@ -144,6 +192,7 @@ export class CommandLineFollower {
   /** Esc, blur, a key that leaves the line to the shell: the popup closes until the next typed character. */
   close(): void {
     this.wanted = false;
+    this.cycle = null;
     this.queued = null;
     this.publish(null);
   }
@@ -158,6 +207,7 @@ export class CommandLineFollower {
     if (!isUserInput(data)) return;
     if (this.inserting) { this.later(); return; }
     this.queued = null;
+    this.cycle = null;
     if (!this.env.enabled()) return this.reset();
     const kind = classifyInput(data);
     if (kind === 'submit') return this.submit();
@@ -210,17 +260,46 @@ export class CommandLineFollower {
     const hostId = this.env.hostId();
     const buffer = this.term.buffer.active;
     if (!hostId || !this.wanted || !read.atEnd || !read.before.trim() || !atBottom(buffer) || !this.env.enabled() || !this.env.shown()) return this.publish(null);
-    const sources = this.env.sources(hostId);
-    if (this.memo?.sources !== sources || this.memo.typed !== read.before) this.memo = { sources, typed: read.before, items: suggestCommands(read.before, sources) };
-    const items = this.memo.items;
+    const geometry = {
+      room: read.room, col: buffer.cursorX, row: buffer.cursorY, cols: this.term.cols, rows: this.term.rows,
+      startCol: this.marker?.line === buffer.baseY + buffer.cursorY ? this.col : 0,
+    };
+    if (this.cycle) {
+      const startCol = this.view?.items === this.cycle.items ? this.view.startCol : geometry.startCol;
+      return this.publish({ ...geometry, items: this.cycle.items, selected: this.cycle.index, ghost: '', startCol });
+    }
+    const paths = this.pathItems(read.before, buffer.cursorX);
+    let items: Suggestion[];
+    if (paths) items = paths.items;
+    else {
+      const sources = this.env.sources(hostId);
+      if (this.memo?.sources !== sources || this.memo.typed !== read.before) this.memo = { sources, typed: read.before, items: suggestCommands(read.before, sources) };
+      items = this.memo.items;
+    }
     if (!items.length) return this.publish(null);
     const chosen = this.view && this.view.selected >= 0 ? this.view.items[this.view.selected]?.text : undefined;
     const selected = chosen === undefined ? -1 : items.findIndex((i) => i.text === chosen);
-    this.publish({
-      items, selected, ghost: this.ghostOf(items[Math.max(0, selected)]), room: read.room,
-      col: buffer.cursorX, row: buffer.cursorY, cols: this.term.cols, rows: this.term.rows,
-      startCol: this.marker?.line === buffer.baseY + buffer.cursorY ? this.col : 0,
-    });
+    this.publish({ ...geometry, items, selected, ghost: this.ghostOf(items[Math.max(0, selected)]), ...(paths ? { startCol: paths.startCol } : {}) });
+  }
+
+  /**
+   * Server entries that complete the path word at the end of the line (null: no path word, no listing yet or no match; the
+   * history is suggested then). The popup lines up with the word: `startCol` is where it starts on the cursor's row.
+   */
+  private pathItems(typed: string, cursorCol: number): { items: Suggestion[]; startCol: number } | null {
+    if (!this.env.paths) return null;
+    const token = pathToken(typed);
+    const listing = token ? this.env.paths(token.dir) : null;
+    if (!token || !listing) return null;
+    if (this.pathMemo?.listing !== listing || this.pathMemo.typed !== typed) {
+      const lead = /^\s*/.exec(typed)![0].length;
+      const items = matchEntries(token, listing.entries).map((e): Suggestion => ({
+        text: completeLine(typed, token, e.name, e.dir ? 'dir' : 'file').slice(lead), kind: 'path', display: e.dir ? `${e.name}/` : e.name,
+        ranges: token.prefix ? [[0, token.prefix.length]] : [], prefix: true,
+      }));
+      this.pathMemo = { listing, typed, items, startCol: Math.max(0, cursorCol - (typed.length - token.start)) };
+    }
+    return this.pathMemo.items.length ? this.pathMemo : null;
   }
 
   private select(index: number): void {
@@ -335,6 +414,7 @@ export class CommandLineFollower {
   /** Enter: the line is recorded once the shell moved on from it (see SUBMIT_WAIT_MS). */
   private submit(): void {
     const hostId = this.env.hostId();
+    this.env.submitted?.(this.last?.before ?? '');
     if (this.state === 'tracking' && this.anchor() && this.marker && hostId) {
       this.checkSubmitted();
       this.submitted?.marker.dispose();
@@ -370,6 +450,7 @@ export class CommandLineFollower {
     this.expected = undefined;
     this.queued = null;
     this.wanted = false;
+    this.cycle = null;
     this.publish(null);
   }
 

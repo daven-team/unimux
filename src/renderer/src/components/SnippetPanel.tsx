@@ -1,7 +1,10 @@
 import { shortcutText } from '../shortcuts';
 import { useI18n } from '../i18n';
-import { useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { fuzzyScore } from '../../../shared/fuzzy';
+import { normalizeCodeLanguage } from '../../../shared/codeLanguages';
+import { snippetVarMatches } from '../../../shared/snippetVars';
+import { useCodeHighlight } from '../useCodeHighlight';
 import type { Snippet } from '../../../shared/types';
 import { sendSnippet } from '../actions';
 import { moveSnippet, removeSnippet, uid, upsertSnippet, type DropEdge } from '../../../shared/state';
@@ -163,7 +166,7 @@ export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
                 <IEdit />
               </button>
             </div>
-            <div className="s-text">{sn.text}</div>
+            <SnippetCode text={sn.text} language={sn.language} />
           </div>
         ))}
         {visible.length > 0 && <div className={`snippet-drop-space ${over?.id === null ? 'drop-end' : ''}`} aria-hidden="true" />}
@@ -174,3 +177,21 @@ export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
     </aside>
   );
 }
+
+/** Lines of a card's preview, and the characters kept of each (the card clips them anyway). */
+const PREVIEW_LINES = 3;
+const PREVIEW_LINE_CHARS = 200;
+
+/** The first lines of a snippet on its card, highlighted in its language (shell by default) once the languages loaded, variables marked. */
+const SnippetCode = memo(function SnippetCode({ text, language }: { text: string; language?: string }) {
+  const highlighter = useCodeHighlight();
+  const preview = useMemo(() => text.replace(/^\s*\n/, '').split(/\r?\n/, PREVIEW_LINES).map((line) => line.slice(0, PREVIEW_LINE_CHARS)).join('\n'), [text]);
+  const html = useMemo(() => {
+    if (!highlighter) return null;
+    const marks = snippetVarMatches(preview).map((m) => ({ from: m.from, to: m.to, cls: 'snip-var' }));
+    return highlighter.highlightHtml(preview, normalizeCodeLanguage(language) ?? 'shell', marks);
+  }, [highlighter, preview, language]);
+  return html === null
+    ? <div className="s-text s-code">{preview}</div>
+    : <div className="s-text s-code code-hl" dangerouslySetInnerHTML={{ __html: html }} />;
+});

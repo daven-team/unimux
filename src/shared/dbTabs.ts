@@ -1,7 +1,7 @@
 // Tabs of the database viewer (1.0.0) and the staged edits of a table tab. Pure helpers shared by the renderer and tests:
 // tab references and ids (also the keys of the drafts kept like file drafts), the staged edits model (one object per tab,
 // serialized into the tab's draft text), the query history and the column/selection math of the data grid.
-import { isTruncated, type DbObjectKind, type DbStagedEdit, type DbTxStatus, type DbValue, type DbValueKind } from './db';
+import { DB_OBJECT_KINDS, isTruncated, type DbObjectKind, type DbStagedEdit, type DbTxStatus, type DbValue, type DbValueKind } from './db';
 import { parseDbInput } from './dbSql';
 import type { MessageKey } from './i18n';
 import { isUuid } from './ssh';
@@ -13,7 +13,7 @@ export type DbTabRef =
   | { kind: 'sql'; connectionId: string; database: string; uid: string }
   | { kind: 'ddl'; connectionId: string; database: string; schema: string; name: string; objectKind: DbObjectKind; args?: string };
 
-const OBJECT_KINDS: readonly DbObjectKind[] = ['table', 'partitioned', 'view', 'matview', 'foreign', 'sequence', 'function', 'procedure'];
+const OBJECT_KINDS: readonly DbObjectKind[] = DB_OBJECT_KINDS;
 const NAME_MAX = 1024;
 const okName = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= NAME_MAX && !v.includes('\0');
 
@@ -32,7 +32,7 @@ export function validDbTabRef(value: unknown): value is DbTabRef {
   // An empty database: a MySQL connection without a default database.
   if (!isUuid(v.connectionId) || !(v.database === '' || okName(v.database))) return false;
   if (v.kind === 'sql') return isUuid(v.uid);
-  if (v.kind === 'table') return okName(v.schema) && okName(v.table) && OBJECT_KINDS.includes(v.objectKind as DbObjectKind);
+  if (v.kind === 'table') return okName(v.schema) && okName(v.table) && OBJECT_KINDS.includes(v.objectKind as DbObjectKind) && hasRows(v.objectKind as DbObjectKind);
   if (v.kind === 'ddl') return okName(v.schema) && okName(v.name) && OBJECT_KINDS.includes(v.objectKind as DbObjectKind) && (v.args === undefined || (typeof v.args === 'string' && v.args.length <= 8192));
   return false;
 }

@@ -6,6 +6,8 @@
 // (TLS modes, the forwarded channel as its stream, password prompts) and run RedisSession. Independent of Electron (the process wrapper
 // is index.ts) so it is tested in Node against PGlite, the fake server and the SSH test server.
 import { randomUUID } from 'crypto';
+import { stat } from 'fs/promises';
+import type { Worker } from 'worker_threads';
 import { Socket, isIP } from 'net';
 import type { Duplex } from 'stream';
 import { TLSSocket, checkServerIdentity, connect as tlsConnect, type ConnectionOptions } from 'tls';
@@ -19,6 +21,7 @@ import type { SshErrorCode } from '../shared/ssh';
 import { PgSession, RAW_TYPES, serverError } from './pgSession';
 import { MysqlSession, mysqlServerError } from './mysqlSession';
 import { RedisConnectError, RedisSession, openRedis, type OpenedRedis, type RedisLimits } from './redisSession';
+import { SqliteError, SqliteSession, sqliteErrorCode } from './sqliteSession';
 import { ForwardSocket, SshTunnel, TUNNEL_TIMERS, TunnelForwardError, type TunnelTimers } from './tunnel';
 
 export interface DbHostTimers extends TunnelTimers {
@@ -30,6 +33,13 @@ export interface DbHostTimers extends TunnelTimers {
   cursorIdleMs?: number;
 }
 export const DB_HOST_TIMERS: DbHostTimers = { ...TUNNEL_TIMERS, dbConnectMs: 20_000, sshWaitMs: 6 * 60_000 };
+
+/** How SQLite sessions start their engine thread (index.ts: the built worker; tests: the TypeScript file). */
+export interface DbHostSqlite {
+  spawn(interrupt: SharedArrayBuffer): Worker;
+  killGraceMs?: number;
+  busyMs?: number;
+}
 
 export interface DbHostOutput {
   toMain(m: DbHostToMain): void;
@@ -58,6 +68,8 @@ interface Session {
   /** MySQL / MariaDB: the connection and its session. */
   mysqlConn: mysql.Connection | null;
   mysql: MysqlSession | null;
+  /** SQLite (1.0.6): the session and its engine thread. */
+  sqlite: SqliteSession | null;
   /** Redis: the connection uses TLS (prefer resolved); the Pub/Sub connection connects the same way. */
   redisTls: boolean;
   /** The password the connection used (side connections for cancel need it); dropped when the session ends. */
@@ -142,7 +154,7 @@ export class DbHost {
   private tunnels = new Map<string, TunnelRecord>();
   private readonly timers: DbHostTimers;
 
-  constructor(private readonly out: DbHostOutput, timers: Partial<DbHostTimers> = {}, private readonly redisLimits?: Partial<RedisLimits>) {
+  constructor(private readonly out: DbHostOutput, timers: Partial<DbHostTimers> = {}, private readonly redisLimits?: Partial<RedisLimits>, private readonly sqliteEngine?: DbHostSqlite) {
     this.timers = { ...DB_HOST_TIMERS, ...timers };
   }
 
@@ -192,14 +204,15 @@ export class DbHost {
 
   open(id: string, config: DbOpenConfig): void {
     if (this.sessions.has(id)) this.close(id);
-    const s: Session = { id, config, phase: 'connecting', ended: false, closing: false, tunnel: null, sshWait: null, passwordAsk: null, client: null, pg: null, redis: null, mysqlConn: null, mysql: null, redisTls: false, password: config.password };
+    const s: Session = { id, config, phase: 'connecting', ended: false, closing: false, tunnel: null, sshWait: null, passwordAsk: null, client: null, pg: null, redis: null, mysqlConn: null, mysql: null, sqlite: null, redisTls: false, password: config.password };
     this.sessions.set(id, s);
     this.status(s, 'connecting');
     void this.start(s).catch(() => this.fail(s, 'dbFailed'));
   }
 
   private async start(s: Session): Promise<void> {
-    if (s.config.kind !== 'postgres' && s.config.kind !== 'redis' && s.config.kind !== 'mysql') { this.fail(s, 'unsupported'); return; }
+    if (s.config.kind !== 'postgres' && s.config.kind !== 'redis' && s.config.kind !== 'mysql' && s.config.kind !== 'sqlite') { this.fail(s, 'unsupported'); return; }
+    if (s.config.kind === 'sqlite') { this.status(s, 'database'); await this.startSqlite(s); return; }
     if (s.config.ssh) {
       if (!(await this.joinTunnel(s)) || !this.live(s)) return;
     }
@@ -525,6 +538,42 @@ export class DbHost {
     this.status(s, 'connected', { ...(opened.serverVersion ? { serverVersion: opened.serverVersion } : {}), database: String(dbIndex), tls: opened.tls });
   }
 
+  // ── SQLite ─────────────────────────────────────────────────────────────────
+
+  /** Opens the database file (it must exist: a moved file is never replaced by a new empty one) in an engine thread of its own. */
+  private async startSqlite(s: Session): Promise<void> {
+    const path = s.config.path;
+    if (!this.sqliteEngine || !path) { this.fail(s, 'unsupported'); return; }
+    try {
+      const info = await stat(path);
+      if (!info.isFile()) { this.fail(s, 'dbFileMissing', path); return; }
+    } catch { this.fail(s, 'dbFileMissing', path); return; }
+    if (!this.live(s)) return;
+    const sqlite = new SqliteSession({
+      path, readOnly: s.config.readOnly, spawn: (flag) => this.sqliteEngine!.spawn(flag),
+      fatal: (error, message) => this.fail(s, error, message),
+      ...(this.sqliteEngine.killGraceMs !== undefined ? { killGraceMs: this.sqliteEngine.killGraceMs } : {}),
+      ...(this.sqliteEngine.busyMs !== undefined ? { busyMs: this.sqliteEngine.busyMs } : {}),
+      ...(this.timers.cursorIdleMs !== undefined ? { cursorIdleMs: this.timers.cursorIdleMs } : {}),
+    }, {
+      port: (m) => this.out.toRenderer(m),
+      tx: (tx) => { if (this.live(s)) this.out.toMain({ t: 'dbTx', id: s.id, tx }); },
+      activity: (busy) => { if (this.live(s)) this.out.toMain({ t: 'dbActivity', id: s.id, busy }); },
+      notice: (message) => this.out.toMain({ t: 'log', level: 'warn', message: `[db ${s.id.slice(3, 11)}] ${message}` }),
+    });
+    s.sqlite = sqlite;
+    try {
+      await sqlite.connect();
+    } catch (error) {
+      s.sqlite = null;
+      if (this.live(s)) this.fail(s, error instanceof SqliteError ? sqliteErrorCode(error.info) : 'dbFailed', error instanceof Error ? error.message : undefined);
+      return;
+    }
+    if (!this.live(s)) { sqlite.end(); return; }
+    // No tls: a file on this computer is not a network connection (the tab shows no encryption badge).
+    this.status(s, 'connected', { serverVersion: `SQLite ${sqlite.serverVersion}`, database: 'main' });
+  }
+
   // ── MySQL / MariaDB ────────────────────────────────────────────────────────
 
   /**
@@ -692,6 +741,8 @@ export class DbHost {
     s.pg?.end();
     s.redis?.end();
     s.redis = null;
+    s.sqlite?.end();
+    s.sqlite = null;
     const my = s.mysqlConn;
     const busy = s.mysql?.busy() ?? false;
     s.mysql?.end();
@@ -737,6 +788,10 @@ export class DbHost {
       return s.redis.handle(op.req, op.deadline);
     }
     if (op.op === 'redis') return { ok: false, error: 'invalid' };
+    if (s.config.kind === 'sqlite') {
+      if (!s.sqlite || s.phase !== 'connected') return { ok: false, error: 'notConnected' };
+      return s.sqlite.handle(op);
+    }
     if (s.config.kind === 'mysql') {
       if (!s.mysql || s.phase !== 'connected') return { ok: false, error: 'notConnected' };
       return s.mysql.handle(op);

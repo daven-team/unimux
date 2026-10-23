@@ -8,6 +8,21 @@ export const DEFAULT_PROFILES: Profile[] = [
   { id: 'shell', name: 'PowerShell', cli: 'shell', args: '', color: '#7a7a7a' },
 ];
 
+/** Ids of the built-in shell profile (ssh-shell: its copy restored for SSH cells, see ensureShellProfile). */
+const BUILT_IN_SHELL_IDS = new Set(['shell', 'ssh-shell']);
+/** Names the built-in shell profile was shipped with (PowerShell on Windows, Terminal on macOS and Linux). */
+const BUILT_IN_SHELL_NAMES = new Set(['PowerShell', 'Terminal']);
+const SHELL_NAMES: Record<ShellKind, string> = { pwsh: 'PowerShell', powershell: 'Windows PowerShell', cmd: 'Wiersz polecenia', zsh: 'zsh', bash: 'bash' };
+
+/**
+ * The name a profile is shown with. The built-in shell profile, while it keeps its shipped name, is named after the shell chosen
+ * in Settings (a cell set to cmd does not say "PowerShell"); a renamed or custom profile keeps its own name.
+ */
+export function shownProfileName(profile: Pick<Profile, 'id' | 'name' | 'cli'>, shell: ShellKind, tr: (key: 'Wiersz polecenia') => string = (key) => key): string {
+  if (profile.cli !== 'shell' || !BUILT_IN_SHELL_IDS.has(profile.id) || !BUILT_IN_SHELL_NAMES.has(profile.name.trim())) return profile.name;
+  return shell === 'cmd' ? tr('Wiersz polecenia') : SHELL_NAMES[shell] ?? profile.name;
+}
+
 /** Profiles shipped by earlier versions, folded into their base profile. */
 export const RETIRED_PROFILES: Record<string, string> = { 'claude-opus': 'claude', 'codex-high': 'codex' };
 /** How long Codex waits for one unimux MCP tool call (its default is 60 s). */

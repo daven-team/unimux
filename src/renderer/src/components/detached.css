@@ -1,0 +1,29 @@
+/* A detached window (1.0.6): its title bar holds the tab, the grid's tools and "attach back"; below it the grid or the file. */
+.detached-app { grid-template-rows: var(--titlebar) minmax(0, 1fr); }
+.detached-body { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.detached-body > .terminal-workspace, .detached-body > .file-pane { flex: 1; }
+.detached-titlebar { padding-left: 10px; }
+html[data-platform="darwin"] .detached-titlebar { padding-left: 80px; }
+.detached-tab {
+  display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px; border-radius: 6px; max-width: 46%; min-width: 0;
+  background: var(--bg-3); color: #ededed; border: 1px solid var(--border-2); cursor: grab; white-space: nowrap; position: relative;
+}
+.detached-tab:active { cursor: grabbing; }
+.detached-tab .label { overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.detached-tab .size { font-size: 10.5px; color: var(--muted); }
+.detached-tab .tab-type-icon { display: inline-flex; color: var(--muted); }
+.detached-tab .tab-type-icon svg { width: 14px; height: 14px; }
+.detached-project { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.detached-tools { gap: 4px; align-items: center; display: flex; }
+.detached-attach { gap: 5px; }
+.detached-gone { display: grid; place-items: center; color: var(--muted); height: 100%; }
+/* The split view belongs to the main window. */
+html[data-detached] [data-action="split-view"] { display: none; }
+
+/* The main window: a tab that lives in its own window, as a dimmed chip at the end of the strip. */
+.tab.detached-chip { color: var(--muted); border-style: dashed; border-color: var(--border-2); opacity: .8; }
+.tab.detached-chip:hover { opacity: 1; }
+.tab.detached-chip .tab-type-icon svg { width: 13px; height: 13px; }
+.workspace-tabs .tabs.attach-drop { outline: 1px dashed var(--accent); outline-offset: -1px; border-radius: 6px; }
+.detached-placeholder .row { display: flex; gap: 8px; justify-content: center; }
+.detached-tab .tab-project { flex: none; width: 7px; height: 7px; border-radius: 2px; background: var(--project-color, transparent); pointer-events: none; }

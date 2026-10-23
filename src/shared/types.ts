@@ -1,3 +1,4 @@
+import type { DetachedWindow } from './detached';
 import type { GridLayout } from './layout';
 import type { Language } from './languages';
 import type { AlertSettings } from './alerts';
@@ -137,6 +138,10 @@ export interface Snippet {
   icon?: string;
   color?: string;
   projectId?: string;
+  /** Highlighting of the text (shared/codeLanguages.ts); absent = shell. */
+  language?: string;
+  /** The values last entered for its variables (shared/snippetVars.ts), offered again on the next send. */
+  values?: Record<string, string>;
 }
 
 /** A note of the Notes panel (1.0.4): a small plain-text page; `projectId` keeps it to one project. */
@@ -146,6 +151,8 @@ export interface Note {
   text: string;
   projectId?: string;
   color?: string;
+  /** Highlighting of the text (shared/codeLanguages.ts); absent = Markdown with highlighted code blocks. */
+  language?: string;
   /** Last change of the name or text (ms since the epoch); 0 when unknown. */
   updatedAt: number;
 }
@@ -180,6 +187,10 @@ export interface Settings {
   sshTheme: SshThemeId;
   /** Command suggestions in SSH terminals and the host command history behind them; only `false` turns them off. */
   sshAutocomplete?: boolean;
+  /** Path completion from the server in SSH terminals (1.0.6, remotePaths.ts); only `false` turns it off. */
+  sshPathComplete?: boolean;
+  /** 1.0.6: SSH cells connected when the app closed connect again at start, into the folder they were in. Off by default. */
+  sshRestoreSessions?: boolean;
   /** The top strip shows the tabs of every project ('all', 1.0.0) or only of the active project (shared/workspaceOrder.ts). */
   stripScope: StripScope;
 }
@@ -205,6 +216,8 @@ export interface AppState {
    * shared/workspaceOrder.ts. Absent until the per-project orders of 0.9.x are migrated.
    */
   workspaceOrder?: string[];
+  /** Tabs in their own window (1.0.6, shared/detached.ts); written by main only. Absent when none is detached. */
+  detachedWindows?: DetachedWindow[];
   /** Saved database connections (1.0.0; no secrets: passwords live in <data>/db/vault.json, owned by main). */
   dbConnections: DbConnection[];
   /** Colours of the connection folders (1.0.3, shared/db.ts normalizeDbGroupColors); a connection shows its folder's. */

@@ -1,7 +1,7 @@
 // IPC of the database viewer (1.0.0): zod-validated, sender-checked (guardedHandle / guardedOn with literal channel names),
 // fixed error codes only. Passwords travel renderer -> main only (save, test, prompt answers); nothing sends one back.
 import { z } from 'zod';
-import { DB_KINDS, DB_LIMITS, DB_TLS_MODES, isDbSessionId, type DbConnectionInput, type DbPasswordChange, type DbPromptAnswer, type DbResult } from '../../shared/db';
+import { DB_KINDS, DB_LIMITS, DB_OBJECT_KINDS, DB_TLS_MODES, isDbSessionId, type DbConnectionInput, type DbPasswordChange, type DbPromptAnswer, type DbResult } from '../../shared/db';
 import type { DbHostOp } from '../../shared/dbHostIpc';
 import { REDIS_LIMITS, type RedisOp } from '../../shared/dbRedis';
 import type { IpcGuard } from '../ipcGuard';
@@ -12,6 +12,8 @@ const sessionId = z.string().refine(isDbSessionId);
 const name = z.string().min(1).max(DB_LIMITS.identifier).refine((s) => !s.includes('\0'));
 const text = (max: number) => z.string().max(max);
 const port = z.number().int().min(1).max(65535);
+/** A SQLite connection has no port: 0 (the normalizer refuses 0 for every other kind). */
+const connectionPort = z.number().int().min(0).max(65535);
 const value = z.string().max(DB_LIMITS.fullValueChars).nullable();
 const keyValues = z.record(name, z.string().max(DB_LIMITS.fullValueChars)).refine((r) => Object.keys(r).length >= 1 && Object.keys(r).length <= 32);
 const values = z.record(name, value).refine((r) => Object.keys(r).length <= 1600);
@@ -23,7 +25,7 @@ const connectionInput = z.object({
   color: z.string().max(16).optional(),
   group: text(DB_LIMITS.group).optional(),
   host: text(DB_LIMITS.host),
-  port,
+  port: connectionPort,
   user: text(DB_LIMITS.user),
   database: text(DB_LIMITS.database).optional(),
   dbIndex: z.number().int().min(0).max(10_000).optional(),
@@ -32,6 +34,7 @@ const connectionInput = z.object({
   ssh: z.object({ hostId: uuid, dbHost: text(DB_LIMITS.host), dbPort: port }).strict().nullable(),
   readOnly: z.boolean(),
   statementTimeoutMs: z.number().int().min(1).max(DB_LIMITS.statementTimeoutMaxMs).optional(),
+  path: text(DB_LIMITS.caPath).optional(),
 }).strict();
 const password = z.string().min(1).max(DB_LIMITS.password);
 const passwordChange = z.union([
@@ -52,7 +55,7 @@ const edit = z.union([
   z.object({ op: z.literal('delete'), key: keyValues, original: values.optional() }).strict(),
 ]);
 const editRequest = z.object({ schema: name, table: name, edits: z.array(edit).min(1).max(DB_LIMITS.edits) }).strict();
-const objectKind = z.enum(['table', 'partitioned', 'view', 'matview', 'foreign', 'sequence', 'function', 'procedure']);
+const objectKind = z.enum(DB_OBJECT_KINDS as [string, ...string[]]);
 const op = z.discriminatedUnion('op', [
   z.object({ op: z.literal('databases') }).strict(),
   z.object({ op: z.literal('schemas') }).strict(),

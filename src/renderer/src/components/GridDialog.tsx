@@ -8,7 +8,7 @@ import {
 import { ensureShellProfile, getProfile, removePreset, uid, upsertPreset } from '../../../shared/state';
 import { cellSourcePatch, cellSourceValue, type SshHost } from '../../../shared/ssh';
 import { CLI_NAMES, missingCli, missingClis, type CliStatusMap } from '../../../shared/cliStatus';
-import { profileOptionLabel } from '../cliUi';
+import { profileName, profileOptionLabel } from '../cliUi';
 import type { PresetCell } from '../../../shared/types';
 import { offerInstall, openTab, showCliInstructions } from '../actions';
 import { askChoice, askText, closeModal, update, useStore } from '../store';
@@ -78,7 +78,7 @@ export function GridDialog({ projectId }: { projectId: string }) {
   };
 
   const savePreset = async () => {
-    const presetName = await askText(tr("Nazwa presetu"), name || `${describeLayout(layout)} ${cells[0].sshHostId ? tr('SSH') : getProfile(s, cells[0].profileId).name}`);
+    const presetName = await askText(tr("Nazwa presetu"), name || `${describeLayout(layout)} ${cells[0].sshHostId ? tr('SSH') : profileName(getProfile(s, cells[0].profileId), tr)}`);
     if (!presetName?.trim()) return;
     const scope = await askChoice(tr("Gdzie zapisać preset?"), tr("Preset globalny jest dostępny we wszystkich projektach."), [
       { label: tr("Tylko ten projekt"), value: 'project' },
@@ -191,7 +191,7 @@ export function GridDialog({ projectId }: { projectId: string }) {
                   <div className="pc-head">
                     <span className="n">{i + 1}</span>
                     <span className="nm">{cells[i].name || sshHost?.label || tr('Komórka {number}', { number: i + 1 })}</span>
-                    <span className="pill" style={{ color: prof.color, background: prof.color + '1f' }}>{cells[i].sshHostId ? tr('SSH') : prof.name}</span>
+                    <span className="pill" style={{ color: prof.color, background: prof.color + '1f' }}>{cells[i].sshHostId ? tr('SSH') : profileName(prof, tr)}</span>
                   </div>
                   <div className="pc-body">
                     {cells[i].prompt && prof.cli !== 'shell' && !cells[i].sshHostId ? (

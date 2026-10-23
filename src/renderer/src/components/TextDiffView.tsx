@@ -2,26 +2,20 @@
 import { useMemo } from 'react';
 import { diffView } from '../../../shared/textDiff';
 import { useI18n } from '../i18n';
+import { DiffLines } from './DiffLines';
+import type { FileFinder } from './MarkdownPreview';
 import './gitPanel.css';
 
-export default function TextDiffView({ disk, editor, path, remote = false }: { disk: string; editor: string; path: string; remote?: boolean }) {
+export default function TextDiffView({ disk, editor, path, remote = false, finder }: { disk: string; editor: string; path: string; remote?: boolean; finder?: FileFinder }) {
   const { tr } = useI18n();
   const { lines, total, width } = useMemo(() => diffView(disk, editor), [disk, editor]);
   return (
     <div className="git-diff-view file-conflict-diff" aria-label={tr('Różnice: dysk i edytor')}>
       <div className="git-diff-path muted" title={path}><span className="git-diff-source">{remote ? tr('- na serwerze, + w edytorze') : tr('- na dysku, + w edytorze')}</span>{' · '}{path}</div>
       {!lines.length ? <div className="git-diff-message muted">{tr('Brak różnic do pokazania.')}</div> : (
-        <div className="git-diff" role="table" aria-label={tr('Różnice: dysk i edytor')} style={{ ['--ln' as string]: `${width}ch` }}>
-          {lines.map((line, i) => (
-            <div key={i} className={`git-diff-line ${line.kind}`} role="row">
-              <span className="ln" aria-hidden>{line.oldNo ?? ''}</span>
-              <span className="ln" aria-hidden>{line.newNo ?? ''}</span>
-              <span className="sign" aria-hidden>{line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ''}</span>
-              <span className="code">{line.text || ' '}</span>
-            </div>
-          ))}
+        <DiffLines lines={lines} width={width} label={tr('Różnice: dysk i edytor')} finder={finder}>
           {total > lines.length && <div className="git-diff-message muted">{tr('Pokazano pierwsze {shown} z {total} linii różnic.', { shown: lines.length, total })}</div>}
-        </div>
+        </DiffLines>
       )}
     </div>
   );

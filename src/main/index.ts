@@ -16,13 +16,15 @@ import { appPlatform, normalizeProjectPath } from '../shared/platform';
 import { detectLanguage } from '../shared/languages';
 import { CHROMIUM_WEBGL_CONTEXTS } from '../shared/terminalLimits';
 import { translate, type MessageKey, type MessageParams } from '../shared/i18n';
-import { HookServer } from './hooks';
+import { bypassProxyForHooks, HookServer } from './hooks';
+import { Monitor } from './monitor';
 import { pathExists } from './fsProbe';
 import { PromptFiles, pruneCellFiles, removeCellFiles } from './cellFiles';
 import { applyDockIcon, windowIcon } from './appIcon';
 import { LARGE_VIEW_BYTES, listProjectDirectories, listProjectDirectory, listProjectDirectoryBatch, readProjectFile, statProjectFile, writeProjectFile } from './files';
 import { createTrash, registerFileOpsIpc } from './filesIpc';
 import { createIpcGuard } from './ipcGuard';
+import { closeAllDetached, fromDetachedWindow, initDetachedWindows, relayCellStatus, sendRouted, startDetachedWindows, stateChanged as detachedStateChanged } from './detachedWindows';
 import { registerGitIpc } from './gitIpc';
 import { Git } from './git';
 import { createGithubService } from './github/service';
@@ -40,6 +42,8 @@ import { DbHostClient } from './dbHostClient';
 import { DbService } from './db/service';
 import { DbVault } from './db/vault';
 import { createDbHandlers, registerDbIpc } from './db/ipc';
+import { DbHistoryStore, registerDbHistoryIpc } from './db/history';
+import { registerSqliteFileIpc } from './db/sqliteFiles';
 import { DB_LIMITS, isDbSessionId } from '../shared/db';
 import type { DbHostToMain } from '../shared/dbHostIpc';
 import { claudeProjectDirName, findRecentCodexSession, listSessionsAsync } from './sessions';
@@ -101,8 +105,8 @@ import { cliForProfile, CLI_NAMES, isCliId, missingCli, resolveExecFile, spawnDe
 import { automationSchemas, type AutomationOperation, type McpInfo } from '../shared/automation';
 import type { StateEdit } from '../shared/stateEdits';
 import { stateChange } from '../shared/statePatch';
-import { findCell, getProfile } from '../shared/state';
-import { resumesConversation } from '../shared/ssh';
+import { findCell, getProfile, patchSshCell, unlessRestoring } from '../shared/state';
+import { resumeForPhase, resumesConversation, type SshSessionState } from '../shared/ssh';
 import { automationHintForHook, automationStatusFor } from '../shared/runtimeStatus';
 import { followedSession, shouldUpdateCellSession } from '../shared/sessionTrack';
 import type { CodexNotice } from '../shared/codexHooks';
@@ -228,14 +232,16 @@ let win: BrowserWindow | null = null;
 /** The first renderer load of this app run, for SSH hosts that reconnect at start (appStartClaim.ts). */
 const appStartClaim = createAppStartClaim();
 /** The sender check of every IPC channel that changes accounts, logins, usage, SSH data or the secret clipboard (R9). */
-const fromAppWindow = (event: { sender: unknown; senderFrame?: unknown }): boolean => isFromWindow(win, event);
+// 1.0.6: the windows main created for detached tabs (detachedWindows.ts) count as the app window too.
+const fromAppWindow = (event: { sender: unknown; senderFrame?: unknown }): boolean => isFromWindow(win, event) || fromDetachedWindow(event);
 /** The same check for every other channel that changes something (0.9.6, ipcGuard.ts); pure reads stay on ipcMain. */
 const { guardedHandle, guardedOn } = createIpcGuard(ipcMain, fromAppWindow);
 /** SSH sessions: created after app.whenReady() (safeStorage needs it), before the window (startSsh). */
 let ssh: SshCoordinator | null = null;
 // A second instance never reads (nor backs up) the state: it only hands over to the first one and exits.
 // A state.json that stays locked ends the start here (with a message): saving the defaults over it would lose the user's data.
-let state: AppState = superseded ? defaultState(appPlatform(process.platform)) : loadStateOrFail();
+// With "Przywracaj sesje SSH po ponownym uruchomieniu" off, which sessions the last run had open means nothing for this one.
+let state: AppState = superseded ? defaultState(appPlatform(process.platform)) : unlessRestoring(loadStateOrFail());
 function loadStateOrFail(): AppState {
   try {
     return loadState(DATA_DIR, appPlatform(process.platform), { log: crashLog.warn });
@@ -470,6 +476,8 @@ usageDeps.refreshClaude = gateProfileRefresh<RefreshOutcome>(guardDeps, familyRe
 const hooks = new HookServer();
 if (devEnv('MC_HOOK_DEBUG') === '1') hooks.debugDir = DATA_DIR;
 const alive = new Set<string>();
+/** The pty shell pid of each running cell (the Monitor panel's process trees). */
+const cellPids = new Map<string, number>();
 /** Codex session ids handed to cells this run (state may lag behind the renderer). */
 const claimedCodex = new Set<string>();
 /** Live notifications - Windows drops click handlers of garbage-collected ones. */
@@ -519,7 +527,8 @@ const updateStrings = (): UpdateStrings => ({
   background: tr('Aktualizacja trwa dalej w tle'),
 });
 
-const send = (channel: string, ...args: unknown[]) => { safeSend(win, channel, ...args); };
+// The main window, and (1.0.6) the detached windows for the state and the messages of their own cells (detachedWindows.ts).
+const send = (channel: string, ...args: unknown[]) => { sendRouted(win, channel, args); };
 /** The OS ends the session (Windows shutdown or log-off, macOS shutdown): nothing may hold the quit any more. */
 let sessionEndingAt: number | undefined;
 /** The OS announced a session end: quits within the next minute are never held, and an open question lets the quit go on. */
@@ -591,6 +600,7 @@ const controller = new StateController(state, (snapshot) => {
   state = snapshot.state;
   ssh?.stateChanged(state);
   db?.stateChanged();
+  detachedStateChanged(state);
   const key = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}`;
   if (key !== usageKey) { usageKey = key; usage.reschedule(); }
   saver.save(state);
@@ -703,7 +713,7 @@ function createWindow(): void {
   });
   const created = win;
   // Async callbacks outlive the native window (shutdown, update hand-over); they must see "no window", not a destroyed one.
-  created.once('closed', () => { install.dispose(); if (win === created) win = null; });
+  created.once('closed', () => { install.dispose(); if (win === created) win = null; closeAllDetached(); });
   // Without background throttling the page always counts as visible, so the renderer learns from here when nobody can see it.
   const sendShown = () => { if (isLive(created)) safeSend(created, 'window:shown', created.isVisible() && !created.isMinimized()); };
   win.on('minimize', () => { usage.setActive(false); sendShown(); });
@@ -739,10 +749,31 @@ function createWindow(): void {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL);
-  else win.loadFile(join(__dirname, '../renderer/index.html'));
+  loadRenderer(win);
   startupTimer.mark('window-created');
 }
+
+/** The renderer page; a detached window (1.0.6) gets `?detached=<id>`. */
+function loadRenderer(w: BrowserWindow, query: Record<string, string> = {}): void {
+  const search = new URLSearchParams(query).toString();
+  if (process.env.ELECTRON_RENDERER_URL) void w.loadURL(search ? `${process.env.ELECTRON_RENDERER_URL}?${search}` : process.env.ELECTRON_RENDERER_URL);
+  else void w.loadFile(join(__dirname, '../renderer/index.html'), search ? { query } : undefined);
+}
+
+initDetachedWindows({
+  state: () => state,
+  change: (fn) => { controller.change(fn); },
+  mainWindow: () => win,
+  load: loadRenderer,
+  preload: join(__dirname, '../preload/index.js'),
+  icon: windowIcon,
+  pty: ptyHost,
+  isAlive: (cellId) => alive.has(cellId),
+  quitting: () => quitting,
+  offscreen: !!devEnv('MC_OFFSCREEN'),
+  devConsole: !app.isPackaged,
+  log: (message) => crashLog.warn(message),
+}, { guardedHandle, guardedOn });
 
 /** Renderer crashes reloaded without asking (3 within a minute); after that the user decides. */
 const allowRendererReload = createReloadLimiter();
@@ -815,7 +846,7 @@ function startSsh(): void {
       return isSftpSessionId(id) ? sftpHost.send(m) : isDbSessionId(id) ? dbHost.send(m) : ptyHost.sendSsh(m);
     },
     events: {
-      session: (s) => { if (isSftpSessionId(s.cellId)) sftp?.onCoordinatorSession(s); else if (isDbSessionId(s.cellId)) db?.onCoordinatorSession(s); else send('ssh:session', s); },
+      session: (s) => { if (isSftpSessionId(s.cellId)) sftp?.onCoordinatorSession(s); else if (isDbSessionId(s.cellId)) db?.onCoordinatorSession(s); else { noteSshResume(s); send('ssh:session', s); } },
       prompt: (cellId, prompt) => { if (isSftpSessionId(cellId)) sftp?.onPrompt(cellId, prompt); else if (isDbSessionId(cellId)) db?.onPrompt(cellId, prompt); else send('ssh:prompt', cellId, prompt); },
       vaultChanged,
     },
@@ -855,6 +886,22 @@ function startSsh(): void {
     },
   });
   registerDbIpc({ guardedHandle, guardedOn }, createDbHandlers(db));
+  // The SQL query history (1.0.6, local only); pending changes are written before the app quits.
+  const dbHistory = new DbHistoryStore(join(DATA_DIR, 'db', 'query_history.json'), { connectionExists: (id) => state.dbConnections.some((c) => c.id === id) });
+  registerDbHistoryIpc({ guardedHandle, guardedOn }, dbHistory);
+  app.on('before-quit', () => dbHistory.flush());
+  // SQLite database files: only their paths go back to the renderer.
+  registerSqliteFileIpc({ guardedHandle, guardedOn }, {
+    open: async () => {
+      const r = await showOpen({ title: tr('Otwórz plik bazy SQLite'), properties: ['openFile'], filters: [{ name: 'SQLite', extensions: ['db', 'sqlite', 'sqlite3', 'db3'] }, { name: '*', extensions: ['*'] }] });
+      return r.canceled ? null : r.filePaths[0] ?? null;
+    },
+    save: async () => {
+      const options = { title: tr('Nowy plik bazy SQLite'), defaultPath: 'database.sqlite', filters: [{ name: 'SQLite', extensions: ['sqlite', 'db', 'sqlite3'] }] };
+      const r = isLive(win) ? await dialog.showSaveDialog(win!, options) : await dialog.showSaveDialog(options);
+      return r.canceled || !r.filePath ? null : r.filePath;
+    },
+  });
   // The CA file of a verify-full connection: only its path goes back (main reads it at connect time).
   guardedHandle('db:pickCaFile', async () => {
     const r = await showOpen({ title: tr('Wybierz plik certyfikatu CA'), properties: ['openFile'], filters: [{ name: 'PEM', extensions: ['pem', 'crt', 'cer'] }, { name: '*', extensions: ['*'] }] });
@@ -909,9 +956,12 @@ ptyHost.on('message', (m: HostToMain) => {
   if ('id' in m && m.id.startsWith(INSTALL_PTY_PREFIX)) { install.onHostMessage(m); return; } // the install window is not a cell
   if ('id' in m && m.id.startsWith('auth:')) return; // login windows are not cells
   if (ssh?.onHostMessage(m)) return;
-  if (m.t === 'spawned') { automation.runtimeStarted(m.id); alive.add(m.id); automation.statuses.set(m.id, 'unknown'); }
-  else if (m.t === 'exit') {
+  if (m.t === 'spawned') {
+    automation.runtimeStarted(m.id); alive.add(m.id); automation.statuses.set(m.id, 'unknown');
+    if (m.pid > 0) cellPids.set(m.id, m.pid); else cellPids.delete(m.id);
+  } else if (m.t === 'exit') {
     alive.delete(m.id);
+    cellPids.delete(m.id);
     verifiedCodex.delete(m.id);
     endCellMcp(mcp, MCP_DIR, m.id);
     automation.statuses.set(m.id, 'exited');
@@ -924,6 +974,17 @@ ptyHost.on('message', (m: HostToMain) => {
     send('cell:spawnError', m.id, m.message);
   }
 });
+/**
+ * 1.0.6, "Przywracaj sesje SSH po ponownym uruchomieniu": whether each SSH cell's session is connected is kept in the cell
+ * (cell.ssh.resume), so the next app start knows which ones to restore. The sessions the quit (or the end of the system
+ * session, or an update taking over) closes leave it as it was: they were connected when the app closed.
+ */
+function noteSshResume(s: SshSessionState): void {
+  if (quitting || gating || superseded || sessionEndingNow(sessionEndingAt, Date.now())) return;
+  const resume = resumeForPhase(s.phase);
+  if (resume === null || patchSshCell(state, s.cellId, { resume }) === state) return;
+  controller.change((st) => patchSshCell(st, s.cellId, { resume }));
+}
 /** Everything that ran in the Pty Host is gone: logins, the install window, MCP tokens, SSH sessions. Returns what the toast promises. */
 function forgetHostTerminals(code: unknown, stderrTail: unknown): boolean {
   // A restart before the renderer listens must still stop the app-start SSH reconnect (D5 after a Pty Host restart).
@@ -1111,7 +1172,8 @@ async function spawnRequestUnsafe(req: SpawnCellRequest): Promise<SpawnResult> {
   }
   const baseEnv = await cliDetector.applyEnv({ ...cleanEnv(process.env), MC_CELL_ID: req.cellId }, cli ?? undefined);
   if ((killCount.get(req.cellId) ?? 0) !== killsBefore) return { ok: true }; // the cell was closed while the CLI was being looked up
-  const claudeSettingsPath = req.profile.cli === 'claude' ? hooks.writeClaudeSettings(HOOKS_DIR, req.cellId) : undefined;
+  // The detected version picks http hooks (no process per tool call) or the curl commands older versions need.
+  const claudeSettingsPath = req.profile.cli === 'claude' ? hooks.writeClaudeSettings(HOOKS_DIR, req.cellId, cliDetector.snapshot().claude?.version) : undefined;
   let mode = req.mode;
   // Claude only writes a transcript after the first prompt: resuming an unused id would fail,
   // so start a new conversation that keeps the same id instead.
@@ -1128,6 +1190,8 @@ async function spawnRequestUnsafe(req: SpawnCellRequest): Promise<SpawnResult> {
     initialPrompt = { file, text: req.startupPrompt };
   }
   const env: Record<string, string> = baseEnv;
+  // Claude Code's own requests to 127.0.0.1 (http hooks, the MCP server) would otherwise go through the user's proxy.
+  if (req.profile.cli === 'claude') bypassProxyForHooks(env);
   let mcpConfig: LaunchOptions['mcp'];
   // The token reaches Claude through its per-cell --mcp-config file only (not the environment every tool process inherits);
   // Codex can only read it from a variable (see mcpCellConfig.ts).
@@ -1171,6 +1235,14 @@ guardedHandle('cell:killAndWait', async (_e, id: string) => {
   await ptyHost.killAndWait(id);
 }, () => undefined);
 ipcMain.handle('cell:alive', () => [...alive]);
+// The Monitor panel asks every 2 s while it is on screen; nothing samples otherwise (the snapshot helper ends 15 s after the last ask).
+const monitor = new Monitor({
+  appMetrics: () => app.getAppMetrics(),
+  cells: () => [...cellPids].filter(([id]) => alive.has(id)).map(([cellId, pid]) => ({ cellId, pid })),
+});
+guardedHandle('monitor:sample', () => monitor.sample(), () => null);
+guardedHandle('monitor:kill', (_e, pid: unknown) => monitor.kill(pid), () => false);
+app.on('will-quit', () => monitor.dispose());
 // True for the first app window renderer that asks in this app run, false for every later one (a reload, a crash reload) and
 // after a Pty Host restart: SSH hosts with "Łącz ponownie po uruchomieniu aplikacji" connect at an app start only.
 guardedHandle('app:claimStart', () => appStartClaim.claim(), () => false);
@@ -1185,6 +1257,7 @@ guardedHandle('install:start', (_e, request?: unknown) => installHandlers.start(
 guardedOn('install:cancel', (_e, id?: unknown) => { installHandlers.cancel(id); });
 ipcMain.handle('install:current', () => installHandlers.current());
 guardedOn('cell:runtime', (_e, cellId: string, status: string, reason?: string, hooked?: boolean) => {
+  relayCellStatus(_e, cellId, status);
   const found = findCell(state, cellId);
   if (!found || !alive.has(cellId)) return;
   // The renderer's StatusTracker decides; heuristics (hooked = false) never yield "ready".
@@ -1607,6 +1680,8 @@ async function startMainApp(): Promise<void> {
     // Its IPC handlers are registered in the same tick as the window: the page cannot call them before it has loaded.
     startSsh();
     startupTimer.mark('ssh-started');
+    // Tabs that were in their own window at the last quit open there again.
+    startDetachedWindows();
   } catch (error) {
     // As before the window came first: without terminals or SSH the start failed (with a message), it does not run half.
     startupFailed(error);
@@ -1711,6 +1786,8 @@ app.on('before-quit', (e) => {
   send('app:before-quit');
   // Give the renderer a moment to push its final state, then wind down terminals cleanly.
   setTimeout(async () => {
+    // Detached windows close as they are (their registry stays for the next start); their pages flushed on app:before-quit.
+    closeAllDetached();
     // Never throws; a save that still fails is logged by the saver and tried again below.
     saver.flush();
     // A running swap or "Set as main" finishes first (bounded, inside the hard limit): exiting in the middle of one can leave

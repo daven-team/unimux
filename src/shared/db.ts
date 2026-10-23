@@ -4,6 +4,7 @@
 import type { MessageKey } from './i18n';
 import { addressProblem, isUuid, normalizeAddress, sshErrorText, type Localized, type SshErrorCode, type SshPrompt } from './ssh';
 import type { DbRedisApi, RedisPortMessage } from './dbRedis';
+import type { DbHistoryApi } from './dbHistory';
 
 // ── ids and limits ──────────────────────────────────────────────────────────
 
@@ -38,12 +39,20 @@ export const DB_LIMITS = {
 
 // ── connections ─────────────────────────────────────────────────────────────
 
-/** mysql (1.0.5): MySQL and MariaDB (one wire protocol, one driver); which one a server is shows once connected (`flavor`). */
-export type DbKind = 'postgres' | 'mysql' | 'redis';
-export const DB_KINDS: readonly DbKind[] = ['postgres', 'mysql', 'redis'];
-export const DB_DEFAULT_PORT: Record<DbKind, number> = { postgres: 5432, mysql: 3306, redis: 6379 };
+/**
+ * mysql (1.0.5): MySQL and MariaDB (one wire protocol, one driver); which one a server is shows once connected (`flavor`).
+ * sqlite (1.0.6): a database file on this computer (`path`), opened by the DB Host with Node's built-in node:sqlite.
+ */
+export type DbKind = 'postgres' | 'mysql' | 'redis' | 'sqlite';
+export const DB_KINDS: readonly DbKind[] = ['postgres', 'mysql', 'redis', 'sqlite'];
+/** SQLite has no port: 0 marks "none" (its connections keep host '', port 0, user '', no TLS and no tunnel). */
+export const DB_DEFAULT_PORT: Record<DbKind, number> = { postgres: 5432, mysql: 3306, redis: 6379, sqlite: 0 };
 /** The kinds that run SQL (the tree of databases, table tabs, SQL editors: window.mc.db.pg). */
-export const isSqlKind = (kind: DbKind): boolean => kind === 'postgres' || kind === 'mysql';
+export const isSqlKind = (kind: DbKind): boolean => kind === 'postgres' || kind === 'mysql' || kind === 'sqlite';
+/** The kinds that reach a server over the network (host, port, user, password, TLS, SSH tunnel). */
+export const isServerKind = (kind: DbKind): boolean => kind !== 'sqlite';
+/** The schema of a SQLite connection: its main database (the file itself). */
+export const SQLITE_MAIN = 'main';
 /** A MySQL-protocol server: Oracle's MySQL (and Percona) or MariaDB. */
 export type DbMysqlFlavor = 'mysql' | 'mariadb';
 /** The flavour from VERSION() and @@version_comment: MariaDB names itself in one of them. */
@@ -58,6 +67,7 @@ export function mysqlServerLabel(version: string, comment = ''): string {
 export function dbKindLabel(c: { kind: DbKind; flavor?: DbMysqlFlavor }): string {
   if (c.kind === 'postgres') return 'PostgreSQL';
   if (c.kind === 'redis') return 'Redis';
+  if (c.kind === 'sqlite') return 'SQLite';
   return c.flavor === 'mariadb' ? 'MariaDB' : c.flavor === 'mysql' ? 'MySQL' : 'MySQL / MariaDB';
 }
 /**
@@ -65,7 +75,7 @@ export function dbKindLabel(c: { kind: DbKind; flavor?: DbMysqlFlavor }): string
  * whole server), Redis its DB index as text.
  */
 export const dbDefaultDatabase = (c: { kind: DbKind; database?: string; dbIndex?: number }): string =>
-  (c.kind === 'postgres' ? c.database ?? 'postgres' : c.kind === 'mysql' ? c.database ?? '' : String(c.dbIndex ?? 0));
+  (c.kind === 'postgres' ? c.database ?? 'postgres' : c.kind === 'mysql' ? c.database ?? '' : c.kind === 'sqlite' ? SQLITE_MAIN : String(c.dbIndex ?? 0));
 /** disable: plain; prefer: TLS when the server offers it; require: TLS without certificate checks; verify-full: TLS checked against `caPath` and the host name. */
 export type DbTlsMode = 'disable' | 'prefer' | 'require' | 'verify-full';
 export const DB_TLS_MODES: readonly DbTlsMode[] = ['disable', 'prefer', 'require', 'verify-full'];
@@ -99,6 +109,8 @@ export interface DbConnection {
   readOnly: boolean;
   /** Postgres: the session's statement_timeout (absent: the server's). */
   statementTimeoutMs?: number;
+  /** SQLite: the absolute path of the database file on this computer. */
+  path?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -126,6 +138,24 @@ const validHost = (raw: unknown): string | null => {
 const validUser = (v: unknown): v is string => typeof v === 'string' && v.length <= DB_LIMITS.user && !CONTROL.test(v) && v.trim() === v;
 const validDatabase = (v: unknown): v is string => typeof v === 'string' && v.length >= 1 && v.length <= DB_LIMITS.database && !CONTROL.test(v);
 export const validCaPath = (v: unknown): v is string => typeof v === 'string' && v.length >= 1 && v.length <= DB_LIMITS.caPath && !CONTROL.test(v);
+/** An absolute file path of this computer (Windows "C:\..." or "\\server\share\...", POSIX "/..."), as a SQLite connection stores it. */
+export const validDbFilePath = (v: unknown): v is string => typeof v === 'string' && v.length >= 2 && v.length <= DB_LIMITS.caPath && !CONTROL.test(v)
+  && v.trim() === v && /^(?:[A-Za-z]:[\\/]|\\\\[^\\/]|\/)/.test(v) && !/[\\/]$/.test(v);
+/** The file name of a path (either separator). */
+export const fileBaseName = (path: string): string => path.split(/[\\/]/).pop() ?? path;
+
+/** A SQLite connection read from disk or sent by the renderer: only its file path, name, folder, colour and read-only mode. */
+function normalizeSqliteConnection(r: Record<string, unknown>): DbConnection | null {
+  if (!isUuid(r.id) || !validDbFilePath(r.path)) return null;
+  const c: DbConnection = {
+    id: r.id, kind: 'sqlite', name: cleanText(r.name, DB_LIMITS.name) ?? clip(fileBaseName(r.path), DB_LIMITS.name), host: '', port: 0, user: '', tls: 'disable',
+    ssh: null, readOnly: r.readOnly === true, path: r.path, createdAt: stamp(r.createdAt), updatedAt: stamp(r.updatedAt),
+  };
+  if (typeof r.color === 'string' && HEX_COLOR.test(r.color)) c.color = r.color;
+  const group = cleanText(r.group, DB_LIMITS.group);
+  if (group) c.group = group;
+  return c;
+}
 
 /**
  * A connection read from disk or sent by the renderer, or null when it cannot be used. Unknown fields are dropped; a bad
@@ -135,6 +165,7 @@ export function normalizeDbConnection(raw: unknown): DbConnection | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
   if (!isUuid(r.id) || !DB_KINDS.includes(r.kind as DbKind)) return null;
+  if (r.kind === 'sqlite') return normalizeSqliteConnection(r);
   const kind = r.kind as DbKind;
   const host = validHost(r.host);
   if (!host) return null;
@@ -193,8 +224,10 @@ export interface DbConnectionDraft {
   tls: DbTlsMode; caPath: string; sshHostId: string | null; sshDbHost: string; sshDbPort: string; readOnly: boolean;
   /** Seconds; empty: the server's default. */
   statementTimeout: string;
+  /** SQLite: the database file. */
+  path: string;
 }
-export type DbDraftField = 'host' | 'port' | 'user' | 'database' | 'dbIndex' | 'caPath' | 'sshDbHost' | 'sshDbPort' | 'statementTimeout';
+export type DbDraftField = 'host' | 'port' | 'user' | 'database' | 'dbIndex' | 'caPath' | 'sshDbHost' | 'sshDbPort' | 'statementTimeout' | 'path';
 export type DbDraftResult = { ok: true; value: DbConnectionInput } | { ok: false; errors: Partial<Record<DbDraftField, MessageKey>> };
 
 export function dbConnectionToDraft(c?: DbConnection, kind: DbKind = c?.kind ?? 'postgres'): DbConnectionDraft {
@@ -203,7 +236,7 @@ export function dbConnectionToDraft(c?: DbConnection, kind: DbKind = c?.kind ?? 
     user: c?.user ?? (kind === 'postgres' ? 'postgres' : kind === 'mysql' ? 'root' : ''), database: c?.database ?? (kind === 'mysql' ? '' : 'postgres'), dbIndex: String(c?.dbIndex ?? 0),
     tls: c?.tls ?? (kind === 'redis' ? 'disable' : 'prefer'), caPath: c?.caPath ?? '', sshHostId: c?.ssh?.hostId ?? null,
     sshDbHost: c?.ssh?.dbHost ?? '127.0.0.1', sshDbPort: String(c?.ssh?.dbPort ?? DB_DEFAULT_PORT[kind]), readOnly: c?.readOnly === true,
-    statementTimeout: c?.statementTimeoutMs ? String(c.statementTimeoutMs / 1000) : '',
+    statementTimeout: c?.statementTimeoutMs ? String(c.statementTimeoutMs / 1000) : '', path: c?.path ?? '',
   };
 }
 
@@ -216,6 +249,15 @@ const parsePort = (text: string, fallback: number): number | null => {
 
 export function validateDbDraft(d: DbConnectionDraft): DbDraftResult {
   const errors: Partial<Record<DbDraftField, MessageKey>> = {};
+  if (d.kind === 'sqlite') {
+    const path = d.path.trim();
+    if (!validDbFilePath(path)) return { ok: false, errors: { path: path ? 'Podaj pełną ścieżkę pliku bazy' : 'Wybierz plik bazy SQLite' } };
+    const value: DbConnectionInput = { kind: 'sqlite', name: clip(d.name.trim(), DB_LIMITS.name) || clip(fileBaseName(path), DB_LIMITS.name), host: '', port: 0, user: '', tls: 'disable', ssh: null, readOnly: d.readOnly, path };
+    if (d.color && HEX_COLOR.test(d.color)) value.color = d.color;
+    const group = clip(d.group.trim(), DB_LIMITS.group);
+    if (group && !CONTROL.test(group)) value.group = group;
+    return { ok: true, value };
+  }
   const tunnel = d.sshHostId !== null && isUuid(d.sshHostId);
   // With a tunnel the host field is not used: it keeps what was typed when valid, else a placeholder.
   const host = validHost(d.host) ?? (tunnel ? 'localhost' : null);
@@ -261,7 +303,8 @@ export function validateDbDraft(d: DbConnectionDraft): DbDraftResult {
 }
 
 /** "user@host:port/db" or, through SSH, "user@dbHost:dbPort/db via <ssh label>" (the label is added by the caller). */
-export function dbEndpoint(c: Pick<DbConnection, 'kind' | 'host' | 'port' | 'ssh' | 'database' | 'dbIndex'>): string {
+export function dbEndpoint(c: Pick<DbConnection, 'kind' | 'host' | 'port' | 'ssh' | 'database' | 'dbIndex' | 'path'>): string {
+  if (c.kind === 'sqlite') return c.path ?? '';
   const host = c.ssh ? c.ssh.dbHost : c.host;
   const port = c.ssh ? c.ssh.dbPort : c.port;
   const h = host.includes(':') ? `[${host}]` : host;
@@ -343,6 +386,8 @@ export type DbErrorCode = SshErrorCode
   | 'dbAuth' | 'dbRefused' | 'dbDns' | 'dbTimeout' | 'dbTls' | 'dbTlsUnsupported' | 'dbNoDatabase' | 'caFile' | 'tunnel'
   /** The server closed the connection; anything else. */
   | 'dbClosed' | 'dbFailed'
+  /** SQLite: the database file is not there; another program holds a lock on it; it is not a SQLite database. */
+  | 'dbFileMissing' | 'dbLocked' | 'dbNotSqlite'
   /** Operations: the connection is read-only, a transaction is open, no such session, not connected yet, a bad request. */
   | 'readOnly' | 'inTransaction' | 'noSession' | 'notConnected' | 'invalid'
   /** Edits: the table has no primary or unique not-null key; a row changed or vanished meanwhile (rolled back); not found. */
@@ -480,7 +525,11 @@ export interface DbTablePageRequest {
 /** Messages of the DB port (DB Host -> renderer). The rows of every query, table page and "load more" arrive here only. */
 export type DbPortMessage =
   /** A statement of the run started; start/end: its place in the submitted text. */
-  | { t: 'statement'; queryId: string; index: number; start: number; end: number }
+  /**
+   * set: a further result set of the same statement (2, 3, ...; a MySQL CALL answers with one per SELECT inside the procedure):
+   * it has an index of its own and the statement's start/end.
+   */
+  | { t: 'statement'; queryId: string; index: number; start: number; end: number; set?: number }
   | { t: 'columns'; queryId: string; index: number; columns: DbColumn[] }
   | { t: 'rows'; queryId: string; index: number; rows: DbValue[][] }
   /**
@@ -504,7 +553,9 @@ export type DbPortMessage =
 /** `system`: MySQL's own databases (information_schema, mysql, performance_schema, sys), listed last and dimmed. */
 export interface DbDatabaseInfo { name: string; owner: string; encoding: string; isTemplate: boolean; allowConnections: boolean; sizeBytes: number | null; comment?: string; system?: boolean }
 export interface DbSchemaInfo { name: string; owner: string; system: boolean; comment?: string }
-export type DbObjectKind = 'table' | 'partitioned' | 'view' | 'matview' | 'foreign' | 'sequence' | 'function' | 'procedure';
+/** trigger, event (MySQL / MariaDB) and index (SQLite's own list of indexes) show their DDL only. */
+export type DbObjectKind = 'table' | 'partitioned' | 'view' | 'matview' | 'foreign' | 'sequence' | 'function' | 'procedure' | 'trigger' | 'event' | 'index';
+export const DB_OBJECT_KINDS: readonly DbObjectKind[] = ['table', 'partitioned', 'view', 'matview', 'foreign', 'sequence', 'function', 'procedure', 'trigger', 'event', 'index'];
 export interface DbObjectInfo {
   schema: string;
   name: string;
@@ -516,6 +567,8 @@ export interface DbObjectInfo {
   args?: string;
   returns?: string;
   comment?: string;
+  /** Triggers: "BEFORE INSERT ON orders"; events: their schedule and state; SQLite indexes: their table. */
+  detail?: string;
 }
 export interface DbColumnInfo {
   name: string;
@@ -612,12 +665,21 @@ export interface DbApi {
   pin(sessionIds: string[]): void;
   pg: DbPgApi;
   redis: DbRedisApi;
+  /** The SQL query history (1.0.6, kept by main on this computer only). */
+  history: DbHistoryApi;
+  /** SQLite database files (1.0.6): the open dialog, and a new empty file (the save dialog, or at a typed path). */
+  sqlite: { pick(): Promise<string | null>; create(path?: string): Promise<DbSqliteCreateResult> };
 }
+
+export type DbSqliteCreateResult = { ok: true; path: string; existed: boolean } | { ok: false; error: 'cancelled' | 'invalid' | 'exists' | 'noFolder' | 'failed' };
 
 // ── texts ───────────────────────────────────────────────────────────────────
 
-/** The text of an error; SSH codes of a tunnel read like an SSH cell's (`ssh`: the SSH host's name and endpoint). */
-export function dbErrorText(code: DbErrorCode, ssh: { host: string; endpoint: string } = { host: '', endpoint: '' }): Localized {
+/**
+ * The text of an error; SSH codes of a tunnel read like an SSH cell's (`ssh`: the SSH host's name and endpoint). `kind`: a
+ * SQLite file has no server, its errors say so.
+ */
+export function dbErrorText(code: DbErrorCode, ssh: { host: string; endpoint: string } = { host: '', endpoint: '' }, kind?: DbKind): Localized {
   switch (code) {
     case 'dbHostCrashed': return { key: 'Proces baz danych został uruchomiony ponownie' };
     case 'connectionMissing': return { key: 'To połączenie zostało usunięte' };
@@ -640,7 +702,7 @@ export function dbErrorText(code: DbErrorCode, ssh: { host: string; endpoint: st
     case 'noKey': return { key: 'Tabela nie ma klucza głównego ani unikalnego - edycja jest wyłączona' };
     case 'conflict': return { key: 'Wiersz zmienił się w międzyczasie - zmiany wycofano' };
     case 'notFound': return { key: 'Nie znaleziono obiektu' };
-    case 'server': return { key: 'Serwer bazy zgłosił błąd' };
+    case 'server': return { key: kind === 'sqlite' ? 'SQLite zgłosił błąd' : 'Serwer bazy zgłosił błąd' };
     case 'statementTimeout': return { key: 'Przekroczono limit czasu zapytania' };
     case 'keyExists': return { key: 'Klucz o tej nazwie już istnieje' };
     case 'wrongType': return { key: 'Klucz ma inny typ niż oczekiwany' };
@@ -651,6 +713,9 @@ export function dbErrorText(code: DbErrorCode, ssh: { host: string; endpoint: st
     case 'staleToken': return { key: 'Policz klucze ponownie przed usunięciem' };
     case 'busy': return { key: 'Połączenie jest zajęte - poczekaj na koniec zapytania' };
     case 'tooMany': return { key: 'Za dużo otwartych połączeń z bazą' };
+    case 'dbFileMissing': return { key: 'Nie znaleziono pliku bazy' };
+    case 'dbLocked': return { key: 'Plik bazy jest zablokowany przez inny program' };
+    case 'dbNotSqlite': return { key: 'To nie jest plik bazy SQLite' };
     default: return sshErrorText(code, ssh);
   }
 }

@@ -28,6 +28,9 @@
 
 .ssh-ac-item:hover { background: #262626; }
 .ssh-ac-item.sel { background: #1d2a40; color: #f0f0f0; }
+/* A folder on the server (path completion), coloured the way `ls` shows folders. */
+.ssh-ac-item.dir .ssh-ac-text { color: #7aa7f0; }
+.ssh-ac-item.dir.sel .ssh-ac-text { color: #a9c6f7; }
 
 .ssh-ac-kind {
   flex: none;

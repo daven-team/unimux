@@ -18,7 +18,7 @@ describe('terminal sources', () => {
 
   it('follows the configured shell and platform, and extra profile arguments', () => {
     const custom: Profile[] = [...DEFAULT_PROFILES, { id: 'wsl', name: 'WSL', cli: 'shell', args: '-d Ubuntu', color: '#888' }];
-    expect(listTerminalSources(ctx({ profiles: custom, shell: 'cmd' })).map((s) => [s.label, s.detail])).toEqual([['PowerShell', 'cmd'], ['WSL', 'cmd -d Ubuntu']]);
+    expect(listTerminalSources(ctx({ profiles: custom, shell: 'cmd' })).map((s) => [s.label, s.detail])).toEqual([['Wiersz polecenia', 'cmd'], ['WSL', 'cmd -d Ubuntu']]);
     expect(listTerminalSources(ctx({ platform: 'darwin', shell: 'zsh' }))[0].detail).toBe('zsh');
     expect(listTerminalSources(ctx({ profiles: DEFAULT_PROFILES.filter((p) => p.cli !== 'shell') }))).toEqual([]);
   });

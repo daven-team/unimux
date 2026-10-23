@@ -1,25 +1,51 @@
 // Pure helpers for the pty output path: a bounded replay tail, renderer back-pressure and the coalescing delay.
+import type { ReplaySize } from '../shared/replay';
 
 /** Stored pieces of a tail before they are joined into one string. */
 export const MAX_TAIL_CHUNKS = 256;
+/** Size changes a tail remembers at most (a window drag resizes many times, mostly with little output in between). */
+export const MAX_TAIL_SIZES = 512;
 
 /** Keeps roughly the newest `limit` characters of a stream without re-copying the whole tail on every chunk. */
 export class TailBuffer {
   private chunks: string[] = [];
   private length = 0;
+  /** Characters ever pushed: the absolute position of the tail's end. */
+  private total = 0;
+  /** The pty sizes, each from an absolute position on (see `size`). */
+  private sizes: Array<{ pos: number; cols: number; rows: number }> = [];
 
   constructor(private readonly limit: number) {}
+
+  /** The terminal has `cols` x `rows` from now on: what follows was written at that size (see replay()). */
+  size(cols: number, rows: number): void {
+    const last = this.sizes[this.sizes.length - 1];
+    if (last && last.cols === cols && last.rows === rows) return;
+    if (last && last.pos === this.total) this.sizes.pop();
+    const before = this.sizes[this.sizes.length - 1];
+    if (!before || before.cols !== cols || before.rows !== rows) this.sizes.push({ pos: this.total, cols, rows });
+    this.pruneSizes();
+  }
+
+  private pruneSizes(): void {
+    // Only the newest size from before the kept characters still matters: it is the size they start at.
+    const start = this.total - Math.min(this.length, this.limit);
+    while (this.sizes.length > 1 && this.sizes[1].pos <= start) this.sizes.shift();
+    if (this.sizes.length > MAX_TAIL_SIZES) this.sizes.splice(0, this.sizes.length - MAX_TAIL_SIZES);
+  }
 
   push(data: string): void {
     if (!data) return;
     this.chunks.push(data);
     this.length += data.length;
+    this.total += data.length;
     // Drop whole leading chunks that are no longer needed; the exact cut happens in toString().
     while (this.chunks.length > 1 && this.length - this.chunks[0].length >= this.limit) {
       this.length -= this.chunks.shift()!.length;
     }
     // Many tiny chunks (echoes, spinners) cost far more as separate strings than their characters: join them now and then.
     if (this.chunks.length > MAX_TAIL_CHUNKS) this.compact();
+    if (this.sizes.length > 1) this.pruneSizes();
   }
 
   /** Number of stored pieces (tests). */
@@ -39,6 +65,19 @@ export class TailBuffer {
     const all = this.chunks.length === 1 ? this.chunks[0] : this.chunks.join('');
     if (this.chunks.length > 1) this.chunks = [all];
     return all.length > this.limit ? all.slice(-this.limit) : all;
+  }
+
+  /** The tail with the sizes it was written at, as offsets into it (the first one at 0 when a size is known). */
+  replay(): { data: string; sizes: ReplaySize[] } {
+    const data = this.toString();
+    const start = this.total - data.length;
+    const sizes: ReplaySize[] = [];
+    for (const s of this.sizes) {
+      const at = Math.max(0, s.pos - start);
+      if (sizes.length && sizes[sizes.length - 1].at === at) sizes.pop();
+      sizes.push({ at, cols: s.cols, rows: s.rows });
+    }
+    return { data, sizes };
   }
 }
 

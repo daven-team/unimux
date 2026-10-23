@@ -9,6 +9,7 @@ import { normalizeDbConnections, normalizeDbGroupColors } from '../shared/db';
 import { normalizeSftpPlaces } from '../shared/sftpView';
 import { normalizeScrollback } from '../shared/terminalLimits';
 import { normalizeWorkspaceOrder, sameOrder } from '../shared/workspaceOrder';
+import { normalizeDetachedWindows, openGrids } from '../shared/detached';
 
 /** Main is the single writer. Renderer edits rebase; MCP operations mutate the latest state. */
 export class StateController {
@@ -54,6 +55,10 @@ export class StateController {
       const order = normalizeWorkspaceOrder(next.workspaceOrder, new Set(projects.flatMap((p) => p.tabs.map((t) => t.id))));
       if (order === undefined) delete out.workspaceOrder;
       else if (!sameOrder(order, next.workspaceOrder)) out.workspaceOrder = order;
+      // Detached windows (1.0.6) are main's: a renderer edit never adds, moves or removes one; a grid it closed drops its window.
+      const detached = normalizeDetachedWindows(state.detachedWindows, openGrids(projects));
+      if (detached === undefined) delete out.detachedWindows;
+      else out.detachedWindows = JSON.stringify(detached) === JSON.stringify(state.detachedWindows) ? state.detachedWindows! : detached;
       return out;
     }, edit.id);
   }

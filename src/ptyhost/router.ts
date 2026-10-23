@@ -8,12 +8,18 @@ export interface TerminalBackend {
   resize(id: string, cols: number, rows: number): void;
   ack(id: string, chars: number): void;
   setFlowControl(on: boolean): void;
-  histories(): Array<{ id: string; data: string }>;
+  histories(): TerminalHistory[];
+  /** One terminal's flow count starts again (its output moved to another window, whose acks start from zero). */
+  resetFlow?(id: string): void;
   kill(id: string, timeoutMs?: number): Promise<void>;
   killAll(timeoutMs?: number): Promise<void>;
 }
 
 import type { RendererToHost } from '../shared/ipc';
+import type { ReplaySize } from '../shared/replay';
+
+/** A terminal's replay tail; `sizes`: the pty sizes it was written at (see shared/replay). */
+export interface TerminalHistory { id: string; data: string; sizes?: ReplaySize[] }
 import { setFocusedTerminal } from './output';
 
 const EARLY_SIZES_MAX = 200;
@@ -59,7 +65,10 @@ export class HostRouter {
   }
 
   setFlowControl(on: boolean): void { for (const b of this.backends) b.setFlowControl(on); }
-  histories(): Array<{ id: string; data: string }> { return this.backends.flatMap((b) => b.histories()); }
+  histories(): TerminalHistory[] { return this.backends.flatMap((b) => b.histories()); }
+  /** The replay tail of one terminal (undefined when no backend has it). */
+  history(id: string): TerminalHistory | undefined { return this.histories().find((h) => h.id === id); }
+  resetFlow(id: string): void { this.owner(id)?.resetFlow?.(id); }
   kill(id: string): Promise<void> { return this.owner(id)?.kill(id) ?? Promise.resolve(); }
   /** Settles every backend: one that rejects must not stop the others or the `killedAll` reply. */
   async killAll(): Promise<void> { await Promise.allSettled(this.backends.map((b) => b.killAll())); }

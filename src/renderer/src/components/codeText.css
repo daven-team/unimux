@@ -1,0 +1,72 @@
+/* Notes and snippets with code (1.0.6): their CodeMirror editor, highlighted snippet cards and code blocks of a note preview. */
+.text-code-editor { position: relative; min-height: 0; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.text-code-editor:focus-within { border-color: #2b5a99; }
+.text-code-editor .cm-editor { height: 100%; }
+.text-code-editor.loading { background: transparent; }
+.note-editor .text-code-editor { flex: 1; margin: 0 10px; }
+.snippet-code { height: 190px; min-height: 90px; max-height: 60vh; resize: vertical; background: var(--bg); border-color: var(--border-2); border-radius: 6px; }
+
+/* Snippet variables: {{name}} and {{name:default}}. */
+.snip-var { color: #e5b77e; background: #e5b77e1c; border-radius: 3px; box-shadow: 0 0 0 1px #e5b77e2e; }
+
+/* Static highlighting (codeHighlight.ts, the classes of @lezer/highlight's classHighlighter), the colours of the file editor. */
+.code-hl .tok-keyword { color: #c4a1ef; }
+.code-hl .tok-string { color: #a6c993; }
+.code-hl .tok-string2, .code-hl .tok-number, .code-hl .tok-bool, .code-hl .tok-atom, .code-hl .tok-literal { color: #e5b77e; }
+.code-hl .tok-comment { color: #777d72; font-style: italic; }
+.code-hl .tok-typeName, .code-hl .tok-className, .code-hl .tok-namespace { color: #80c9bb; }
+.code-hl .tok-propertyName, .code-hl .tok-variableName2, .code-hl .tok-meta { color: #a1c5e7; }
+.code-hl .tok-operator, .code-hl .tok-punctuation { color: #b9b9b9; }
+.code-hl .tok-heading { color: #d9c58f; font-weight: bold; }
+.code-hl .tok-link, .code-hl .tok-url { color: #80c9bb; text-decoration: underline; }
+.code-hl .tok-emphasis { font-style: italic; }
+.code-hl .tok-strong { font-weight: bold; }
+.code-hl .tok-invalid { color: #ef8e8e; }
+
+/* A snippet card: the first lines of its text, highlighted. */
+.snippet .s-text.s-code {
+  white-space: pre; overflow: hidden; text-overflow: clip; display: block; max-height: calc(1.45em * 3); line-height: 1.45;
+  font-family: 'Cascadia Mono', Consolas, monospace; font-size: 11px; color: #a9a9a9;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent);
+}
+
+/* The snippet editor: the language next to the text's label, the hint about variables under it. */
+.snippet-text-head { display: flex; align-items: center; gap: 8px; }
+.snippet-text-head .snippet-language { height: 24px; padding: 0 8px; font-size: 11.5px; min-width: 130px; }
+.snippet-vars-hint { font-size: 11px; line-height: 1.6; }
+.snippet-vars-hint code, .snippet-vars-builtins code, .snippet-vars label code { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 11px; color: #e5b77e; }
+/* The dialog asking for a snippet's variables before it is sent. */
+.snippet-vars .modal-body { display: flex; flex-direction: column; gap: 12px; }
+.snippet-vars-builtins { font-size: 11.5px; line-height: 1.6; }
+.snippet-vars-preview {
+  margin: 0; max-height: 160px; overflow: auto; padding: 8px 10px; border: 1px solid var(--border-2); border-radius: 6px; background: var(--bg);
+  font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: #d6d6d6;
+}
+
+/* The toolbar of an open note: its language and the Markdown preview toggle. */
+.note-editor-tools { display: flex; align-items: center; gap: 6px; padding: 0 10px 6px; }
+.note-editor-tools .note-language { height: 24px; min-width: 0; max-width: 150px; padding: 0 8px; font-size: 11.5px; }
+.note-editor-tools .btn.on { background: #303740; border-color: #465260; color: #eef3f9; }
+.note-preview { flex: 1; min-height: 0; margin: 0 10px; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; display: flex; flex-direction: column; }
+.note-preview .markdown-preview-host { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.note-preview .markdown-preview { padding: 14px 16px 40px; font-size: 13px; line-height: 1.65; }
+.note-preview .markdown-preview h1 { font-size: 1.6em; }
+.note-preview .markdown-preview h2 { font-size: 1.35em; }
+.note-preview .markdown-preview pre { padding: 12px 14px; }
+/* The panel is narrow: long lines of code wrap instead of scrolling sideways. */
+.note-preview .markdown-preview pre code { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Code blocks of a Markdown preview with code tools: a bar with the language and a copy button above the code. */
+.markdown-preview .md-code { margin: 0 0 1.25em; border: 1px solid #343b45; border-radius: 8px; background: #121519; overflow: hidden; }
+.markdown-preview .md-code > pre { margin: 0; border: 0; border-radius: 0; padding-top: 2px; }
+.markdown-preview .md-code-bar { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 28px; padding: 3px 5px 0 14px; }
+.markdown-preview .md-code-copy { opacity: .6; transition: opacity .12s; }
+.markdown-preview .md-code:hover .md-code-copy, .markdown-preview .md-code-copy:focus-visible { opacity: 1; }
+.markdown-preview .md-code-lang { font-size: 10.5px; color: #8b95a3; font-family: 'Cascadia Mono', Consolas, monospace; user-select: none; }
+.markdown-preview .md-code-copy {
+  display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; padding: 0; border: 1px solid #3a424d; border-radius: 4px;
+  background: #1b1f25; color: #b9c3cf; cursor: pointer;
+}
+.markdown-preview .md-code-copy:hover { background: #262c34; color: #eef3f9; }
+.markdown-preview .md-code-copy.copied { color: #86efac; border-color: #2f6b45; }
+.markdown-preview .md-code-copy svg { width: 13px; height: 13px; pointer-events: none; }

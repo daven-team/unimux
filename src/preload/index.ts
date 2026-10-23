@@ -29,6 +29,8 @@ const api: McApi = {
   killCellAndWait: (cellId) => ipcRenderer.invoke('cell:killAndWait', cellId),
   bindCodexSession: (cellId, cwd) => ipcRenderer.invoke('codex:bind', cellId, cwd),
   aliveCells: () => ipcRenderer.invoke('cell:alive'),
+  monitorSample: () => ipcRenderer.invoke('monitor:sample'),
+  monitorKill: (pid) => ipcRenderer.invoke('monitor:kill', pid),
   claimAppStart: () => ipcRenderer.invoke('app:claimStart'),
   setQuitGuard: (ask) => ipcRenderer.send('app:quitGuard', ask),
   answerQuit: (answer) => ipcRenderer.send('app:quitAnswer', answer),
@@ -154,6 +156,17 @@ const api: McApi = {
     sessions: () => ipcRenderer.invoke('db:sessions'),
     answer: (answer) => ipcRenderer.invoke('db:prompt:answer', answer),
     pin: (sessionIds) => ipcRenderer.send('db:pin', sessionIds),
+    history: {
+      list: (connectionId) => ipcRenderer.invoke('db:history:list', connectionId),
+      record: (connectionId, records) => ipcRenderer.send('db:history:record', connectionId, records),
+      star: (connectionId, id, star) => ipcRenderer.invoke('db:history:star', connectionId, id, star),
+      clear: (connectionId, stars) => ipcRenderer.invoke('db:history:clear', connectionId, stars === true),
+      setEnabled: (enabled) => ipcRenderer.invoke('db:history:enabled', enabled),
+    },
+    sqlite: {
+      pick: () => ipcRenderer.invoke('db:sqlite:pick'),
+      create: (path) => ipcRenderer.invoke('db:sqlite:create', path ?? null),
+    },
     pg: {
       databases: (sessionId) => ipcRenderer.invoke('db:pg', sessionId, { op: 'databases' }),
       schemas: (sessionId) => ipcRenderer.invoke('db:pg', sessionId, { op: 'schemas' }),
@@ -236,6 +249,15 @@ const api: McApi = {
   swapPending: () => ipcRenderer.invoke('accounts:swapPending'),
   clearSwapPending: () => ipcRenderer.invoke('accounts:clearSwapPending'),
   dismissAccountNotice: (id) => ipcRenderer.invoke('accounts:dismissNotice', id),
+  detach: {
+    open: (target, docs) => ipcRenderer.invoke('detach:open', target, docs),
+    dropOutside: (target, docs) => ipcRenderer.invoke('detach:dropOutside', target, docs),
+    take: () => ipcRenderer.invoke('detach:take'),
+    attach: (docs, overMain) => ipcRenderer.invoke('detach:attach', docs, overMain === true),
+    dismiss: () => ipcRenderer.invoke('detach:dismiss'),
+    requestAttach: (id) => ipcRenderer.send('detach:requestAttach', id),
+    focus: (id) => ipcRenderer.send('detach:focus', id),
+  },
   on: (channel: string, cb: (...args: any[]) => void) => {
     const listener = (_e: unknown, ...args: any[]) => cb(...args);
     ipcRenderer.on(channel, listener);

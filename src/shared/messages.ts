@@ -9,6 +9,7 @@ import { codexMessages } from './codexMessages';
 import { dbMessages } from './dbMessages';
 import { redisMessages } from './redisMessages';
 import { dbUiMessages } from './dbUiMessages';
+import { detachMessages } from './detachMessages';
 import { filesMessages } from './filesMessages';
 import { findMessages } from './findMessages';
 import { gitMessages } from './gitMessages';
@@ -16,7 +17,9 @@ import { gitSetupMessages } from './gitSetupMessages';
 import { githubMessages } from './githubMessages';
 import { gridMessages } from './gridMessages';
 import { macUpdateMessages } from './macUpdateMessages';
+import { monitorMessages } from './monitorMessages';
 import { notesMessages } from './notesMessages';
+import { snippetMessages } from './snippetMessages';
 import { perfMessages } from './perfMessages';
 import { railMessages } from './railMessages';
 import { settingsMessages } from './settingsMessages';
@@ -51,6 +54,7 @@ export const messages = {
   ...dbMessages,
   ...redisMessages,
   ...dbUiMessages,
+  ...detachMessages,
   ...filesMessages,
   ...findMessages,
   ...gitMessages,
@@ -58,7 +62,9 @@ export const messages = {
   ...githubMessages,
   ...gridMessages,
   ...macUpdateMessages,
+  ...monitorMessages,
   ...notesMessages,
+  ...snippetMessages,
   ...perfMessages,
   ...safetyMessages,
   ...stabilityMessages,
@@ -296,6 +302,7 @@ export const messages = {
   'Preset': ['Preset', 'Vorlage', 'Plantilla', 'Modèle', 'Predefinição'],
   'Grid': ['Grid', 'Raster', 'Cuadrícula', 'Grille', 'Grelha'],
   'Terminal': ['Terminal', 'Terminal', 'Terminal', 'Terminal', 'Terminal'],
+  'Wiersz polecenia': ['Command Prompt', 'Eingabeaufforderung', 'Símbolo del sistema', 'Invite de commandes', 'Prompt de comando'],
   'Zamknij zakładkę „{name}”': ['Close tab “{name}”', 'Tab „{name}“ schließen', 'Cerrar pestaña «{name}»', 'Fermer l’onglet « {name} »', 'Fechar separador «{name}»'],
   'Enter: aktywna · Shift+Enter: wszystkie': ['Enter: active cell · Shift+Enter: all cells', 'Enter: aktive Zelle · Umschalt+Enter: alle', 'Enter: celda activa · Mayús+Enter: todas', 'Entrée : cellule active · Maj+Entrée : toutes', 'Enter: célula ativa · Shift+Enter: todas'],
   'zamknięty grid {layout}, przywróć': ['closed grid {layout}, restore', 'geschlossenes Raster {layout}, wiederherstellen', 'cuadrícula cerrada {layout}, restaurar', 'grille fermée {layout}, rétablir', 'grelha fechada {layout}, restaurar'],

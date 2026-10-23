@@ -14,7 +14,10 @@ export class PtyHostClient extends EventEmitter {
   private child: UtilityProcess | null = null;
   private shuttingDown = false;
   private fatal = false;
-  private renderer: WebContents | null = null;
+  /** The renderer windows with a data port: 'main', and detached windows by id (1.0.6). */
+  private renderers = new Map<string, WebContents>();
+  /** Terminals routed to a detached window; sent again to a restarted host before the ports. */
+  private routes = new Map<string, string>();
   private crashes: number[] = [];
   /** Control messages sent while no host runs between a crash and its restart; delivered once the new host is up. */
   private queue: MainToHost[] = [];
@@ -38,6 +41,8 @@ export class PtyHostClient extends EventEmitter {
       try { process.stderr.write(text); } catch { /* no console */ }
       if (this.child === child) this.stderrTail = (this.stderrTail + text).slice(-STDERR_TAIL_BYTES);
     });
+    // Terminals of detached windows (1.0.6) keep their window across a host restart.
+    for (const [id, window] of this.routes) child.postMessage({ t: 'route', id, window } satisfies MainToHost);
     child.on('message', (m: HostToMain) => this.emit('message', m));
     child.on('exit', (code) => {
       if (this.child !== child) return;
@@ -62,7 +67,7 @@ export class PtyHostClient extends EventEmitter {
   /** Starts a new host, gives the renderer its data channel and delivers what was sent meanwhile. */
   private restart(): void {
     this.start();
-    if (this.renderer && !this.renderer.isDestroyed()) this.connectRenderer(this.renderer);
+    for (const [window, wc] of [...this.renderers]) if (!wc.isDestroyed()) this.connectRenderer(wc, window);
     const queued = this.queue;
     this.queue = [];
     for (const m of queued) this.child?.postMessage(m);
@@ -79,13 +84,27 @@ export class PtyHostClient extends EventEmitter {
     this.restart();
   }
 
-  /** Gives the renderer a direct data channel to the host (call again after a renderer reload). */
-  connectRenderer(wc: WebContents): void {
-    this.renderer = wc;
+  /**
+   * Gives a renderer a direct data channel to the host (call again after a renderer reload). `window`: 'main', or the id of a
+   * detached window (1.0.6), which gets only the terminals routed to it.
+   */
+  connectRenderer(wc: WebContents, window = 'main'): void {
+    this.renderers.set(window, wc);
     if (!this.child || wc.isDestroyed()) return;
     const { port1, port2 } = new MessageChannelMain();
-    this.child.postMessage({ t: 'port' }, [port1]);
+    this.child.postMessage(window === 'main' ? { t: 'port' } : { t: 'port', window }, [port1]);
     wc.postMessage('pty-port', null, [port2]);
+  }
+
+  /** A detached window closed: a restarted host does not connect it again. */
+  forgetRenderer(window: string): void {
+    if (window !== 'main') this.renderers.delete(window);
+  }
+
+  /** Routes a terminal's output to a detached window (null: the main window). */
+  route(id: string, window: string | null): void {
+    if (window === null) this.routes.delete(id); else this.routes.set(id, window);
+    if (this.child) this.child.postMessage({ t: 'route', id, window } satisfies MainToHost);
   }
 
   private send(m: MainToHost): void {

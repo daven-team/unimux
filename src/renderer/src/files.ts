@@ -12,6 +12,7 @@ import type { RedisTabRef } from '../../shared/redisView';
 import { initRemoteSessions, pinHosts, sftpErrorMessage, withSession } from './remoteSessions';
 import { dbTabId, validDbTabRef, type DbTabRef } from '../../shared/dbTabs';
 import { keepTab, openTab, swapOrderKey, type OpenMode } from '../../shared/previewTabs';
+import { detachedId } from './windowRole';
 
 export interface FileDocument {
   id: string;
@@ -95,7 +96,9 @@ export function fileErrorLabel(message: string, language: Language): string {
   return key ? fileLabel(key, language) : message;
 }
 const normalize = (text: string) => text.replace(/\r\n|\r/g, '\n');
-const storageKey = 'mc-file-drafts-v1';
+/** A detached window (1.0.6) keeps its tab's draft under its own key: the windows share one localStorage. */
+export const draftStorageKey = (windowId: string | null): string => (windowId === null ? 'mc-file-drafts-v1' : `mc-file-drafts-v1:${windowId}`);
+const storageKey = draftStorageKey(detachedId);
 function restoreDrafts(): FileDocument[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(storageKey) ?? '[]');

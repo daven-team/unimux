@@ -4,11 +4,12 @@
 import { StringDecoder } from 'string_decoder';
 import { Client, type ClientChannel } from 'ssh2';
 import type { SshConnectRequest } from '../shared/ipc';
+import { listScript, parseListing, REMOTE_LIST_MAX_BYTES, type RemoteListResult } from '../shared/remotePaths';
 import { sanitizeServerText, type SshErrorCode, type SshPhase } from '../shared/ssh';
 import { SshLogin, type SshAuthPromptInfo } from '../sshcore/login';
 import type { PtySink } from './manager';
 import { OutputChannel } from './output';
-import type { TerminalBackend } from './router';
+import type { TerminalBackend, TerminalHistory } from './router';
 import { isRecoverableAuthError, mapSshError } from './sshErrors';
 
 export type { SshAuthPromptInfo };
@@ -52,6 +53,12 @@ function writeCorked(client: Client, stream: ClientChannel, data: Buffer): void 
   try { stream.write(data); } finally { sock?.uncork?.(); }
 }
 
+/** A folder listing for path completion (1.0.6), see SshManager.list. */
+export interface ListRequest { dir: string; cwd: string | null; cwdOnly?: boolean }
+interface ListJob { req: ListRequest; resolve(result: RemoteListResult): void }
+/** A listing that takes longer is given up (a hung `ls` on a dead NFS mount): the popup keeps the history. */
+export const LIST_TIMEOUT_MS = 5000;
+
 interface Session {
   id: string;
   client: Client;
@@ -72,6 +79,9 @@ interface Session {
   draining: boolean;
   closed: Promise<void>;
   markClosed: () => void;
+  /** A listing runs on an exec channel; `listWaiting` is the newest one asked meanwhile (older ones were cancelled). */
+  listing?: boolean;
+  listWaiting?: ListJob | null;
 }
 
 export class SshManager implements TerminalBackend {
@@ -108,6 +118,7 @@ export class SshManager implements TerminalBackend {
       debug: (line) => this.events.debug?.(s.id, line),
     });
     s.out = new OutputChannel(req.id, () => this.sink, { pause: () => this.pauseStreams(s), resume: () => this.resumeStreams(s) }, () => this.flowControl);
+    s.out.resized(s.size.cols, s.size.rows);
     this.sessions.set(req.id, s);
     this.events.spawned(req.id);
     this.events.status(req.id, 'connecting');
@@ -248,10 +259,63 @@ export class SshManager implements TerminalBackend {
     writeCorked(s.client, s.stream, Buffer.from(data, 'utf8'));
   }
 
+  /**
+   * Remote path completion (1.0.6): runs remotePaths.listScript on an exec channel of the cell's own connection (no second
+   * login), one at a time per session; a request made while one runs replaces the one waiting. Never rejects.
+   */
+  list(id: string, req: ListRequest): Promise<RemoteListResult> {
+    const s = this.sessions.get(id);
+    if (!s || !this.live(s) || s.phase !== 'connected' || !s.stream) return Promise.resolve({ ok: false, reason: 'gone' });
+    return new Promise((resolve) => {
+      const job: ListJob = { req, resolve };
+      if (!s.listing) { this.runList(s, job); return; }
+      s.listWaiting?.resolve({ ok: false, reason: 'cancelled' });
+      s.listWaiting = job;
+    });
+  }
+
+  private runList(s: Session, job: ListJob): void {
+    s.listing = true;
+    let done = false;
+    let channel: ClientChannel | undefined;
+    const finish = (result: RemoteListResult) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { channel?.close(); } catch { /* gone */ }
+      job.resolve(result);
+      s.listing = false;
+      const next = s.listWaiting;
+      s.listWaiting = null;
+      if (!next) return;
+      if (this.live(s)) this.runList(s, next); else next.resolve({ ok: false, reason: 'gone' });
+    };
+    const timer = setTimeout(() => finish({ ok: false, reason: 'timeout' }), LIST_TIMEOUT_MS);
+    try {
+      // The script goes on stdin of a plain sh, so the login shell's own syntax (fish, csh) never matters.
+      s.client.exec('exec sh -s', (err, ch) => {
+        if (err || !ch) { finish({ ok: false, reason: this.live(s) ? 'unsupported' : 'gone' }); return; }
+        channel = ch;
+        if (done) { try { ch.close(); } catch { /* gone */ } return; }
+        const chunks: Buffer[] = [];
+        let size = 0;
+        ch.on('data', (chunk: Buffer) => { if (size < REMOTE_LIST_MAX_BYTES) { chunks.push(chunk); size += chunk.length; } });
+        ch.stderr.resume();
+        ch.on('error', () => finish({ ok: false, reason: 'failed' }));
+        ch.stderr.on('error', () => undefined);
+        ch.on('close', () => finish(parseListing(Buffer.concat(chunks).subarray(0, REMOTE_LIST_MAX_BYTES).toString('utf8'), job.req.cwdOnly === true)));
+        ch.end(listScript(job.req));
+      });
+    } catch {
+      finish({ ok: false, reason: 'failed' });
+    }
+  }
+
   resize(id: string, cols: number, rows: number): void {
     const s = this.sessions.get(id);
     if (!s) return;
     s.size = { cols: Math.max(2, cols), rows: Math.max(1, rows) };
+    s.out.resized(s.size.cols, s.size.rows);
     try { s.stream?.setWindow(s.size.rows, s.size.cols, 0, 0); } catch { /* closing */ }
   }
 
@@ -262,8 +326,12 @@ export class SshManager implements TerminalBackend {
     for (const s of this.sessions.values()) s.out.resetFlow();
   }
 
-  histories(): Array<{ id: string; data: string }> {
-    return [...this.sessions].map(([id, s]) => ({ id, data: s.out.history() }));
+  resetFlow(id: string): void {
+    this.sessions.get(id)?.out.resetFlow();
+  }
+
+  histories(): TerminalHistory[] {
+    return [...this.sessions].map(([id, s]) => ({ id, ...s.out.replay() }));
   }
 
   kill(id: string, timeoutMs = this.timers.killGraceMs): Promise<void> {

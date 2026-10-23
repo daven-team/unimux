@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { CodeEditor } from './CodeEditor';
 import { checkFileOnDisk, closeFile, editFile, fileErrorLabel, fileLabel, isFileDirty, loadDiskText, overwriteFileOnDisk, reloadFileFromDisk, retryFile, saveFile, setFileDataView, setFileMarkdownView, toggleFileWrap, useFileStore } from '../files';
-import { detectDelimiter, isDelimitedPath, parseDelimited } from '../../../shared/csv';
+import { detectDelimiter, isDelimitedPath, parseDelimited, TABLE_VIEW_ROWS } from '../../../shared/csv';
 import { DataTable, ImageView, LargeTextView } from './FileViews';
 import { handleZoomKey, setFileZoom, stepFileZoom, useFileZoom } from '../fileZoom';
 import { isMarkdownPath, MarkdownPreview } from './MarkdownPreview';
@@ -11,8 +11,9 @@ import { getUi, useStore } from '../store';
 import { matchesShortcut } from '../shortcuts';
 import { fullProjectPath } from '../../../shared/platform';
 import { FileActionIcon, FileBreadcrumb } from './FileIcon';
-import { ISplit, IX } from './icons';
-import { closeSplit, openBesideGrid, useShownFileId, useSplitStore } from '../splitView';
+import { IChevron, ISplit, IX } from './icons';
+import { openMenuAt } from './ContextMenu';
+import { closeSplit, openBesideGrid, splitMenuItems, useShownFileId, useSplitStore } from '../splitView';
 import { sourceTitle } from '../../../shared/editorSource';
 import { ensureSession, liveSession, useRemoteSessions } from '../remoteSessions';
 import { useSftpStore } from '../sftpStore';
@@ -81,8 +82,10 @@ export function FileEditor() {
   const table = useMemo(() => {
     if (!delimited || !doc) return null;
     const extension = doc.relativePath.slice(doc.relativePath.lastIndexOf('.') + 1).toLowerCase();
-    return parseDelimited(doc.text, detectDelimiter(doc.text, extension));
+    return parseDelimited(doc.text, detectDelimiter(doc.text, extension), TABLE_VIEW_ROWS);
   }, [delimited, doc?.text, doc?.relativePath]);
+  // The same array while the text stays the same: the table's find indexes it once, not at every render.
+  const tableRows = useMemo(() => table?.rows.slice(1) ?? [], [table]);
   if (!doc) return null;
   const dirty = isFileDirty(doc);
   const showDiff = diffFor === doc.id && !!doc.diskConflict && doc.externalText !== undefined;
@@ -99,7 +102,12 @@ export function FileEditor() {
   }[language];
   const path = project ? fullProjectPath(project.path, doc.relativePath, window.mc.platform) : doc.relativePath;
   const splitLabel = splitOn ? tr('Zamknij widok obok') : tr('Otwórz obok gridu');
-  const splitButton = <button className={`btn ghost icon ${splitOn ? 'active' : ''}`} title={splitLabel} aria-label={splitLabel} aria-pressed={splitOn} data-action="split-view" onClick={() => (splitOn ? closeSplit() : openBesideGrid(doc.id))}><ISplit /></button>;
+  // While the split is on, a menu next to the button (and a right click on it) closes it or swaps the sides.
+  const splitMenu = (e: React.MouseEvent<HTMLElement>) => { e.preventDefault(); openMenuAt(e.currentTarget, splitMenuItems(doc.id)); };
+  const splitButton = <>
+    <button className={`btn ghost icon ${splitOn ? 'active' : ''}`} title={splitLabel} aria-label={splitLabel} aria-pressed={splitOn} data-action="split-view" onClick={() => (splitOn ? closeSplit() : openBesideGrid(doc.id))} onContextMenu={splitMenu}><ISplit /></button>
+    {splitOn && <button className="btn ghost icon split-more" title={tr('Widok obok: więcej')} aria-label={tr('Widok obok: więcej')} aria-haspopup="menu" data-action="split-view-menu" onClick={splitMenu}><IChevron /></button>}
+  </>;
   if (doc.diff) {
     return (
       <section ref={section} className="file-editor file-workspace-editor" aria-label={doc.relativePath} style={{ ['--file-zoom' as string]: zoom }} onKeyDownCapture={(e) => { handleZoomKey(e); }}>
@@ -111,7 +119,7 @@ export function FileEditor() {
           </div>
         </div>
         <Suspense fallback={<div className="file-preview-message muted">{tr('Wczytywanie…')}</div>}>
-          <GitDiffView key={doc.id} projectId={doc.projectId} {...doc.diff} />
+          <GitDiffView key={doc.id} projectId={doc.projectId} {...doc.diff} finder={finder} />
         </Suspense>
       </section>
     );
@@ -174,18 +182,18 @@ export function FileEditor() {
         </span>
       </div>}
       {doc.status === 'loading' && <div className="file-preview-message muted">{tr('Wczytywanie pliku…')}</div>}
-      {tableView && table && <DataTable columns={table.rows[0] ?? []} rows={table.rows.slice(1)} {...(table.truncated ? { note: fileLabel('largeNotice', language).replace('{shown}', `${table.rows.length}`).replace('{total}', formatSize(doc.size ?? doc.text.length, language)) } : {})} />}
+      {tableView && table && <DataTable columns={table.rows[0] ?? []} rows={tableRows} finder={finder} {...(table.truncated ? { note: fileLabel('largeNotice', language).replace('{shown}', `${table.rows.length}`).replace('{total}', formatSize(doc.size ?? doc.text.length, language)) } : {})} />}
       {showDiff && <Suspense fallback={<div className="file-preview-message muted">{tr('Wczytywanie…')}</div>}>
-        <TextDiffView disk={doc.externalText ?? ''} editor={doc.text} path={doc.source ? crumbTitle : doc.relativePath} remote={!!remote} />
+        <TextDiffView disk={doc.externalText ?? ''} editor={doc.text} path={doc.source ? crumbTitle : doc.relativePath} remote={!!remote} finder={finder} />
       </Suspense>}
       {!tableView && !showDiff && doc.status === 'ready' && (preview
         ? <MarkdownPreview key={doc.id} text={doc.text} projectId={doc.projectId} path={doc.relativePath} finder={finder} />
         : <CodeEditor key={doc.id} id={doc.id} path={doc.relativePath} text={doc.text} wrap={doc.wrap} onChange={text => editFile(doc.id, text)} finder={finder} />)}
       {doc.status === 'image' && doc.view?.kind === 'image' && <ImageView src={doc.view.dataUrl} name={doc.name} size={doc.size} />}
-      {doc.status === 'table' && doc.view?.kind === 'table' && <DataTable columns={doc.view.columns} types={doc.view.types} rows={doc.view.rows} note={`${doc.view.format.toUpperCase()} · ${doc.view.totalRows.toLocaleString(language)} ${{ en: 'rows', pl: 'wierszy', de: 'Zeilen', es: 'filas', fr: 'lignes', pt: 'linhas' }[language]} · ${doc.view.columns.length} ${{ en: 'columns', pl: 'kolumn', de: 'Spalten', es: 'columnas', fr: 'colonnes', pt: 'colunas' }[language]}${doc.view.rows.length < doc.view.totalRows ? ` · ${{ en: 'showing the first', pl: 'pokazano pierwsze', de: 'angezeigt: die ersten', es: 'mostrando las primeras', fr: 'affichage des premières', pt: 'a mostrar as primeiras' }[language]} ${doc.view.rows.length.toLocaleString(language)}` : ''}`} />}
+      {doc.status === 'table' && doc.view?.kind === 'table' && <DataTable columns={doc.view.columns} types={doc.view.types} rows={doc.view.rows} finder={finder} note={`${doc.view.format.toUpperCase()} · ${doc.view.totalRows.toLocaleString(language)} ${{ en: 'rows', pl: 'wierszy', de: 'Zeilen', es: 'filas', fr: 'lignes', pt: 'linhas' }[language]} · ${doc.view.columns.length} ${{ en: 'columns', pl: 'kolumn', de: 'Spalten', es: 'columnas', fr: 'colonnes', pt: 'colunas' }[language]}${doc.view.rows.length < doc.view.totalRows ? ` · ${{ en: 'showing the first', pl: 'pokazano pierwsze', de: 'angezeigt: die ersten', es: 'mostrando las primeras', fr: 'affichage des premières', pt: 'a mostrar as primeiras' }[language]} ${doc.view.rows.length.toLocaleString(language)}` : ''}`} />}
       {doc.status === 'binary' && !remote && <div className="file-preview-message muted">{tr('Ten plik jest binarny lub ma nieobsługiwane kodowanie. Otwórz go w edytorze albo menedżerze plików.')}</div>}
       {(doc.status === 'binary' || doc.status === 'tooLarge') && remote && <div className="file-preview-message muted">{tr('Tego pliku nie można pokazać w edytorze (plik binarny lub za duży). Możesz go pobrać na ten komputer.')}</div>}
-      {doc.status === 'truncated' && !tableView && <LargeTextView key={doc.id} text={doc.text} notice={largeNotice} />}
+      {doc.status === 'truncated' && !tableView && <LargeTextView key={doc.id} text={doc.text} notice={largeNotice} finder={finder} />}
       {doc.status !== 'loading' && doc.status !== 'ready' && doc.status !== 'image' && doc.status !== 'table' && <div style={{ padding: 16, display: 'flex', gap: 8 }}>
         <button className="btn" onClick={() => void retryFile(doc.id)}>{tr('Spróbuj ponownie')}</button>
         {remote && (doc.status === 'binary' || doc.status === 'tooLarge') && <button className="btn primary" onClick={() => void downloadRemoteFile(remote.hostId, remote.path)}>{tr('Pobierz')}</button>}

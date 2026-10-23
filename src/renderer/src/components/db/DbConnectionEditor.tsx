@@ -1,8 +1,9 @@
 // The connection form of the "Bazy danych" panel (1.0.0): type, name, group (its folder, which also gives the colour since
 // 1.0.3), address, user, password (kept in the DB vault; the form only says whether one is saved), database or DB index, TLS,
 // the SSH tunnel through a saved host, read-only and the statement timeout. "Testuj połączenie" connects with the typed values (login questions appear here) and says how it went.
+// A SQLite connection (1.0.6) is a file: its path (typed, picked in the open dialog, or a new empty file), and read-only.
 import { useMemo, useState } from 'react';
-import { DB_DEFAULT_PORT, DB_TLS_MODES, dbConnectionToDraft, dbKindLabel, isSqlKind, dbTlsModeLabel, validateDbDraft, type DbConnectionDraft, type DbDraftField, type DbKind, type DbPasswordChange, type DbTestResult, type DbTlsMode } from '../../../../shared/db';
+import { DB_DEFAULT_PORT, DB_TLS_MODES, dbConnectionToDraft, fileBaseName, dbKindLabel, isSqlKind, dbTlsModeLabel, validateDbDraft, type DbConnectionDraft, type DbDraftField, type DbKind, type DbPasswordChange, type DbTestResult, type DbTlsMode } from '../../../../shared/db';
 import type { MessageKey } from '../../../../shared/i18n';
 import { dbErrorMessage, useDbStore } from '../../db/dbClient';
 import { useI18n } from '../../i18n';
@@ -71,7 +72,7 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
   const save = async () => {
     const value = validate();
     if (!value || saving) return;
-    const change: DbPasswordChange = typedPassword !== null ? { set: typedPassword } : clearPassword ? { clear: true } : { keep: true };
+    const change: DbPasswordChange = value.kind === 'sqlite' ? { keep: true } : typedPassword !== null ? { set: typedPassword } : clearPassword ? { clear: true } : { keep: true };
     setSaving(true);
     const r = await window.mc.db.saveConnection(connection ? { ...value, id: connection.id } : value, change);
     setSaving(false);
@@ -82,6 +83,18 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
   };
   const pickCa = async () => { const path = await window.mc.dbPickCaFile(); if (path) set({ caPath: path }); };
   const tunnel = draft.sshHostId !== null;
+  const sqlite = draft.kind === 'sqlite';
+  const pickSqlite = async () => { const path = await window.mc.db.sqlite.pick(); if (path) set({ path }); };
+  /** A new empty database file: where the save dialog says, or (`typed`) at the path in the field. */
+  const createSqlite = async (typed: boolean) => {
+    const r = await window.mc.db.sqlite.create(typed ? draft.path.trim() : undefined);
+    if (!r.ok) {
+      if (r.error !== 'cancelled') toast(tr(r.error === 'exists' ? 'Ten plik już istnieje' : r.error === 'noFolder' ? 'Nie ma takiego folderu' : r.error === 'invalid' ? 'Podaj pełną ścieżkę pliku bazy' : 'Nie udało się utworzyć pliku'), 'error');
+      return;
+    }
+    set({ path: r.path });
+    if (!r.existed) toast(tr('Utworzono pusty plik bazy: {path}', { path: r.path }));
+  };
 
   return (
     <div className="modal db-editor" role="dialog" aria-label={connection ? connection.name : tr('Nowe połączenie')}
@@ -95,11 +108,12 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
         <div className="db-form-grid">
           <span className="db-label">{tr('Nazwa')}</span>
           <div className="db-line">
-            <input className="input grow" data-field="name" value={draft.name} maxLength={80} placeholder={draft.sshHostId ? draft.sshDbHost : draft.host} onChange={(e) => set({ name: e.target.value })} />
+            <input className="input grow" data-field="name" value={draft.name} maxLength={80} placeholder={draft.kind === 'sqlite' ? fileBaseName(draft.path.trim()) : draft.sshHostId ? draft.sshDbHost : draft.host} onChange={(e) => set({ name: e.target.value })} />
             <Select className="select db-kind-select" value={draft.kind} data-field="kind" aria-label={tr('Typ')} disabled={!!connection} onChange={(e) => setKind(e.target.value as DbKind)}>
               <option value="postgres">PostgreSQL</option>
               <option value="mysql">{connection?.kind === 'mysql' ? dbKindLabel(connection) : 'MySQL / MariaDB'}</option>
               <option value="redis">Redis</option>
+              <option value="sqlite">SQLite</option>
             </Select>
           </div>
           <span className="db-label">{tr('Grupa')}</span>
@@ -109,6 +123,24 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
           </div>
         </div>
 
+        {sqlite ? (
+          <div className="db-form-grid">
+            <span className="db-label">{tr('Plik bazy')}</span>
+            <div className="db-line">
+              <input className="input grow mono" data-field="path" value={draft.path} spellCheck={false} placeholder={tr('Pełna ścieżka pliku .db lub .sqlite')} onChange={(e) => set({ path: e.target.value })} />
+            </div>
+            {errors.path && <><span />{field('path')}</>}
+            <span />
+            <div className="db-line">
+              <button type="button" className="btn small" data-action="sqlite-pick" onClick={() => void pickSqlite()}>{tr('Wybierz plik…')}</button>
+              <button type="button" className="btn small" data-action="sqlite-new" onClick={() => void createSqlite(false)}>{tr('Nowy plik…')}</button>
+            </div>
+            <span />
+            <label className="check"><input type="checkbox" data-field="readOnly" checked={draft.readOnly} onChange={(e) => set({ readOnly: e.target.checked })} />{tr('Tylko do odczytu')}</label>
+            <span /><span className="ssh-card-hint">{tr('Bez edycji danych i bez zapytań zmieniających dane (chyba że jednorazowo na to pozwolisz).')}</span>
+            <span /><span className="ssh-card-hint">{tr('Plik zostaje na tym komputerze. Inny program może go jednocześnie używać: zapis czeka, aż zwolni blokadę.')}</span>
+          </div>
+        ) : <>
         <div className="db-tabs" role="tablist">
           {(['general', 'ssh', 'advanced'] as const).map((t) => (
             <button key={t} type="button" role="tab" aria-selected={page === t} className={`db-tab-btn ${page === t ? 'on' : ''}`} onClick={() => setPage(t)}>
@@ -201,11 +233,15 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
             {draft.kind === 'mysql' && <><span /><span className="ssh-card-hint">{tr('MySQL ogranicza czas tylko zapytań SELECT; MariaDB wszystkich.')}</span></>}
           </>)}
         </div>
+        </>}
 
         {testing && <DbLogin sessionId={testSession} />}
         {test && (test.ok
           ? <div className="db-test ok" role="status" data-test="ok">{tr('Połączenie działa')}{test.serverVersion ? ` · ${test.serverVersion}` : ''} · {test.timeMs} ms</div>
-          : <div className="db-test error" role="alert" data-test="error">{dbErrorMessage(test.error, test.message, connection?.id)}</div>)}
+          : <div className="db-test error" role="alert" data-test="error">
+            <span className="db-test-text">{dbErrorMessage(test.error, test.message, connection?.id, sqlite ? 'sqlite' : undefined)}</span>
+            {sqlite && test.error === 'dbFileMissing' && <button type="button" className="btn small" data-action="sqlite-create" onClick={() => void createSqlite(true).then(() => runTest())}>{tr('Utwórz pusty plik bazy')}</button>}
+          </div>)}
       </form>
       <div className="modal-foot">
         <button type="button" className="btn" data-action="test" disabled={testing} onClick={() => void runTest()}>{testing ? tr('Testowanie…') : tr('Testuj połączenie')}</button>

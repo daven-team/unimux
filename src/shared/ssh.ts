@@ -37,7 +37,37 @@ export interface SshHost {
   // Reserved for later releases, never written now: agent, via, proxy, env, mosh, charset.
 }
 
-export interface SshCellRef { hostId: string }
+/**
+ * An SSH cell's host. 1.0.6 ("Przywracaj sesje SSH po ponownym uruchomieniu"): `resume` = the session was connected the
+ * last time main heard of it (main keeps it, the quit leaves it as it was), `cwd` = the shell's last folder on the server.
+ */
+export interface SshCellRef { hostId: string; cwd?: string; resume?: true }
+
+/** What a session phase says about `resume`: connected sets it, an end (or a session never started) clears it. */
+export function resumeForPhase(phase: SshPhase): boolean | null {
+  if (phase === 'connected') return true;
+  return phase === 'closed' || phase === 'error' || phase === 'idle' ? false : null;
+}
+
+/** A folder worth keeping for the restore: an absolute POSIX path of a sane length. */
+export const keepableCwd = (cwd: unknown): cwd is string =>
+  typeof cwd === 'string' && cwd.startsWith('/') && cwd.length <= 1024 && !/[\u0000-\u001f\u007f\\]/.test(cwd);
+
+/** The cell reference as it is stored: only known fields of the right shape. */
+export function normalizeSshCellRef(raw: unknown): SshCellRef | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.hostId !== 'string') return undefined;
+  return { hostId: r.hostId, ...(keepableCwd(r.cwd) ? { cwd: r.cwd } : {}), ...(r.resume === true ? { resume: true as const } : {}) };
+}
+
+/** `ref` with `cwd` and `resume` changed (undefined: left as it is, null / false: removed); the same object when nothing changes. */
+export function patchSshCellRef(ref: SshCellRef, patch: { cwd?: string | null; resume?: boolean }): SshCellRef {
+  const cwd = patch.cwd === undefined ? ref.cwd : patch.cwd && keepableCwd(patch.cwd) ? patch.cwd : undefined;
+  const resume = patch.resume === undefined ? ref.resume === true : patch.resume;
+  if (cwd === ref.cwd && resume === (ref.resume === true)) return ref;
+  return { hostId: ref.hostId, ...(cwd ? { cwd } : {}), ...(resume ? { resume: true as const } : {}) };
+}
 
 export type SshKeyType = 'ed25519' | 'ecdsa' | 'rsa';
 export type SshKeyAlgo = 'ssh-ed25519' | 'ecdsa-sha2-nistp256' | 'ecdsa-sha2-nistp384' | 'ecdsa-sha2-nistp521' | 'ssh-rsa';
@@ -133,7 +163,8 @@ export type ReplaceKeyError = KeyError | 'needsPassphrase' | 'duplicate';
 export type ReplaceKeyResult = { ok: true; key: SshKeyInfo; publicKeyChanged: boolean; certificateRemoved: boolean } | { ok: false; error: ReplaceKeyError };
 /** "Pokaż klucz prywatny": the stored text (still encrypted when it has a passphrase). The only IPC answer that carries private key text. */
 export type RevealKeyResult = { ok: true; privateKey: string } | { ok: false; error: 'notFound' | 'locked' };
-export interface SshConnectCellRequest { cellId: string; hostId: string; cols: number; rows: number }
+/** `restoreCwd` (1.0.6): an app-start restore; the shell goes back into the cell's last folder (cell.ssh.cwd) first. */
+export interface SshConnectCellRequest { cellId: string; hostId: string; cols: number; rows: number; restoreCwd?: boolean }
 
 /** `window.mc.ssh` (src/preload). Every call is validated in src/main/ssh/ipc.ts. */
 export interface SshApi {
@@ -600,7 +631,7 @@ export interface SshCellStartInput {
   connectOnMount: boolean;
   /** The cell was in the state when this app run's first renderer load booted, and no Pty Host restart came since. */
   appStart?: boolean;
-  /** The cell's host has "Łącz ponownie po uruchomieniu aplikacji" on. */
+  /** The cell's host has "Łącz ponownie po uruchomieniu aplikacji" on, or the cell's session is restored (restoresAtStart). */
   reconnectOnStart?: boolean;
   /** The start comes from the cell view mounting (not the background loader or automation). */
   mounted?: boolean;
@@ -631,10 +662,18 @@ export function sshStartEffects(mounted: boolean, decision: SshStartDecision): {
   return { spendMark: mounted, keepStarted: mounted || decision !== 'idle' };
 }
 
-/** SSH cells (any project and tab) whose host has the reconnect option on: the candidates of the first renderer load. */
-export function reconnectAtStartCells(projects: ReadonlyArray<{ tabs: ReadonlyArray<{ cells: ReadonlyArray<{ id: string; ssh?: SshCellRef }> }> }>, hosts: readonly SshHost[]): string[] {
-  const on = new Set(hosts.filter((h) => h.reconnectOnStart).map((h) => h.id));
-  return projects.flatMap((p) => p.tabs.flatMap((t) => t.cells.filter((c) => c.ssh && on.has(c.ssh.hostId)).map((c) => c.id)));
+/**
+ * A cell connects by itself at app start: its host has "Łącz ponownie po uruchomieniu aplikacji" on (always), or Settings >
+ * SSH > "Przywracaj sesje SSH po ponownym uruchomieniu" is on (`restore`) and the cell was connected when the app closed.
+ */
+export function restoresAtStart(ref: SshCellRef | undefined, hosts: readonly SshHost[], restore: boolean): boolean {
+  if (!ref) return false;
+  return (restore && ref.resume === true) || hosts.some((h) => h.id === ref.hostId && h.reconnectOnStart);
+}
+
+/** SSH cells (any project and tab) that connect by itself at start (restoresAtStart): the candidates of the first renderer load. */
+export function reconnectAtStartCells(projects: ReadonlyArray<{ tabs: ReadonlyArray<{ cells: ReadonlyArray<{ id: string; ssh?: SshCellRef }> }> }>, hosts: readonly SshHost[], restore = false): string[] {
+  return projects.flatMap((p) => p.tabs.flatMap((t) => t.cells.filter((c) => restoresAtStart(c.ssh, hosts, restore)).map((c) => c.id)));
 }
 
 /**
