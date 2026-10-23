@@ -10,14 +10,18 @@ export class DbSqlError extends Error {
 
 // ── quoting ─────────────────────────────────────────────────────────────────
 
-/** The SQL a connection speaks: Postgres, or MySQL / MariaDB (backtick identifiers, backslash escapes, # comments, DELIMITER). */
-export type SqlDialect = 'postgres' | 'mysql';
+/**
+ * The SQL a connection speaks: Postgres, MySQL / MariaDB (backtick identifiers, backslash escapes, # comments, DELIMITER) or
+ * SQLite (1.0.6: "..." identifiers, also `...` and [...], CREATE TRIGGER bodies).
+ */
+export type SqlDialect = 'postgres' | 'mysql' | 'sqlite';
 
 /**
  * Any name as a quoted identifier: "My ""odd"" table" (Postgres) or `My ``odd`` table` (MySQL, whatever sql_mode says); a NUL
  * or an empty or overlong name is refused.
  */
 export function quoteIdent(name: string, dialect: SqlDialect = 'postgres'): string {
+  // SQLite quotes names like Postgres ("..." with "" inside).
   if (typeof name !== 'string' || !name || name.length > DB_LIMITS.identifier || name.includes('\0')) throw new DbSqlError('invalid');
   return dialect === 'mysql' ? `\`${name.replace(/`/g, '``')}\`` : `"${name.replace(/"/g, '""')}"`;
 }
@@ -45,6 +49,7 @@ const DOLLAR_TAG = /^\$(?:[A-Za-z_\u0080-￿][A-Za-z0-9_\u0080-￿]*)?\$/;
  */
 export function splitSql(text: string, dialect: SqlDialect = 'postgres'): SqlSpan[] {
   if (dialect === 'mysql') return splitMysql(text);
+  if (dialect === 'sqlite') return splitSqlite(text);
   const spans: SqlSpan[] = [];
   const n = text.length;
   let i = 0;
@@ -219,6 +224,88 @@ function splitMysql(text: string): SqlSpan[] {
   }
   flush();
   return spans;
+}
+
+/**
+ * The SQLite split: semicolons outside of quotes ('...', "...", `...`, [...]; a quote is doubled to escape it), comments (--
+ * and slash-star, not nested) and the BEGIN ... END body of CREATE TRIGGER (CASE ... END inside it included).
+ */
+function splitSqlite(text: string): SqlSpan[] {
+  const spans: SqlSpan[] = [];
+  const n = text.length;
+  let i = 0;
+  let contentStart = -1;
+  let contentEnd = -1;
+  let first = '';
+  let trigger = false;
+  let depth = 0;
+  let caseDepth = 0;
+  const mark = (from: number, to: number) => { if (contentStart < 0) contentStart = from; contentEnd = to; };
+  const flush = () => {
+    if (contentStart >= 0) spans.push({ start: contentStart, end: contentEnd, text: text.slice(contentStart, contentEnd) });
+    contentStart = contentEnd = -1;
+    first = '';
+    trigger = false;
+    depth = caseDepth = 0;
+  };
+  while (i < n) {
+    const c = text[i];
+    const next = text[i + 1];
+    if (c === '-' && next === '-') { const nl = text.indexOf('\n', i); i = nl < 0 ? n : nl + 1; continue; }
+    if (c === '/' && next === '*') { const close = text.indexOf('*/', i + 2); i = close < 0 ? n : close + 2; continue; }
+    if (/\s/.test(c)) { i++; continue; }
+    if (c === "'" || c === '"' || c === '`' || c === '[') {
+      const close = c === '[' ? ']' : c;
+      const start = i;
+      i++;
+      while (i < n) {
+        if (text[i] === close) { if (close !== ']' && text[i + 1] === close) { i += 2; continue; } i++; break; }
+        i++;
+      }
+      mark(start, Math.min(i, n));
+      continue;
+    }
+    if (c === ';' && depth === 0) { flush(); i++; continue; }
+    if (IDENT_START.test(c)) {
+      const start = i;
+      while (i < n && IDENT_CHAR.test(text[i])) i++;
+      const word = text.slice(start, i).toUpperCase();
+      mark(start, i);
+      if (!first) first = word;
+      if (first === 'CREATE' && word === 'TRIGGER') trigger = true;
+      if (trigger && word === 'BEGIN') depth++;
+      else if (depth > 0 && word === 'CASE') caseDepth++;
+      else if (depth > 0 && word === 'END') { if (caseDepth > 0) caseDepth--; else depth--; }
+      continue;
+    }
+    mark(i, i + 1);
+    i++;
+  }
+  flush();
+  return spans;
+}
+
+/**
+ * The text an error position underlines: from the 0-based offset `at` to the end of the word (or quoted name) starting there,
+ * at least one character; at the very end of the text (a statement that ended too early) its last character.
+ */
+export function errorSpan(text: string, at: number): { from: number; to: number } {
+  let from = Math.max(0, Math.min(at, text.length));
+  if (from >= text.length) {
+    let end = text.length;
+    while (end > 0 && /\s/.test(text[end - 1])) end--;
+    return { from: Math.max(0, end - 1), to: Math.max(end, 1) };
+  }
+  const c = text[from];
+  let to = from + 1;
+  if (c === '"' || c === '`' || c === "'" || c === '[') {
+    const close = text.indexOf(c === '[' ? ']' : c, from + 1);
+    to = close < 0 || close - from > 200 ? from + 1 : close + 1;
+  } else if (IDENT_CHAR.test(c)) {
+    while (to < text.length && to - from < 200 && IDENT_CHAR.test(text[to])) to++;
+  }
+  if (/\s/.test(c)) { while (from > 0 && /\s/.test(text[from])) from--; to = from + 1; }
+  return { from, to };
 }
 
 /**

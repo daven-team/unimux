@@ -153,7 +153,7 @@ export class DbService<S extends DbStateLike = DbStateLike> {
   connect(connectionId: string, opts: { database?: string } = {}): { ok: true; sessionId: string } | { ok: false; error: DbErrorCode } {
     const connection = this.connections().find((c) => c.id === connectionId);
     if (!connection) return { ok: false, error: 'connectionMissing' };
-    const target = opts.database === undefined || !isSqlKind(connection.kind) || (!opts.database && connection.kind !== 'mysql') ? connection
+    const target = opts.database === undefined || !isSqlKind(connection.kind) || connection.kind === 'sqlite' || (!opts.database && connection.kind !== 'mysql') ? connection
       : { ...connection, database: opts.database || undefined };
     return this.open(target, { password: 'saved' });
   }
@@ -203,6 +203,7 @@ export class DbService<S extends DbStateLike = DbStateLike> {
       kind: c.kind, host: c.host, port: c.port, user: c.user, database: dbDefaultDatabase(c),
       tls: c.tls, ...(ca ? { ca } : {}), ...(secret !== undefined ? { password: secret } : {}), readOnly: c.readOnly,
       ...(c.statementTimeoutMs ? { statementTimeoutMs: c.statementTimeoutMs } : {}), ssh: c.ssh && key ? { dbHost: c.ssh.dbHost, dbPort: c.ssh.dbPort, tunnelKey: key, owner } : null,
+      ...(c.kind === 'sqlite' && c.path ? { path: c.path } : {}),
     };
     if (!this.deps.host.send({ t: 'dbOpen', id, config })) { this.end(entry, 'error', 'dbHostCrashed'); return; }
     if (!c.ssh || !owner) return;
@@ -467,7 +468,7 @@ export function strictConnection(raw: DbConnection): DbConnection | null {
   const c = normalizeDbConnection(raw);
   if (!c) return null;
   const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-  const fields: Array<keyof DbConnection> = ['kind', 'host', 'port', 'user', 'tls', 'caPath', 'ssh', 'readOnly', 'statementTimeoutMs', 'color', 'group'];
+  const fields: Array<keyof DbConnection> = ['kind', 'host', 'port', 'user', 'tls', 'caPath', 'ssh', 'readOnly', 'statementTimeoutMs', 'color', 'group', 'path'];
   if (!fields.every((f) => same(c[f], raw[f]))) return null;
   if (c.kind === 'postgres' && !same(c.database, raw.database ?? 'postgres')) return null;
   if (c.kind === 'redis' && !same(c.dbIndex, raw.dbIndex ?? 0)) return null;

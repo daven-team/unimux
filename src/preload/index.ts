@@ -156,6 +156,17 @@ const api: McApi = {
     sessions: () => ipcRenderer.invoke('db:sessions'),
     answer: (answer) => ipcRenderer.invoke('db:prompt:answer', answer),
     pin: (sessionIds) => ipcRenderer.send('db:pin', sessionIds),
+    history: {
+      list: (connectionId) => ipcRenderer.invoke('db:history:list', connectionId),
+      record: (connectionId, records) => ipcRenderer.send('db:history:record', connectionId, records),
+      star: (connectionId, id, star) => ipcRenderer.invoke('db:history:star', connectionId, id, star),
+      clear: (connectionId, stars) => ipcRenderer.invoke('db:history:clear', connectionId, stars === true),
+      setEnabled: (enabled) => ipcRenderer.invoke('db:history:enabled', enabled),
+    },
+    sqlite: {
+      pick: () => ipcRenderer.invoke('db:sqlite:pick'),
+      create: (path) => ipcRenderer.invoke('db:sqlite:create', path ?? null),
+    },
     pg: {
       databases: (sessionId) => ipcRenderer.invoke('db:pg', sessionId, { op: 'databases' }),
       schemas: (sessionId) => ipcRenderer.invoke('db:pg', sessionId, { op: 'schemas' }),

@@ -7,12 +7,16 @@ import { Compartment, EditorSelection, EditorState, StateEffect, StateField } fr
 import { Decoration, EditorView, keymap, type DecorationSet } from '@codemirror/view';
 import { indentWithTab } from '@codemirror/commands';
 import { indentUnit } from '@codemirror/language';
-import { MariaSQL, MySQL, PostgreSQL, sql, type SQLDialect, type SQLNamespace } from '@codemirror/lang-sql';
+import { MariaSQL, MySQL, PostgreSQL, SQLite, sql, type SQLDialect, type SQLNamespace } from '@codemirror/lang-sql';
 import { colors, theme } from '../CodeEditor';
 import { minimalChange } from '../../../../shared/textDiff';
 
 export interface SqlRunRequest { kind: 'auto' | 'script'; text: string; from: number; to: number; cursor: number }
-export interface SqlEditorApi { focus(): void; request(kind: 'auto' | 'script'): SqlRunRequest; markError(from: number, to: number): void; select(from: number, to: number): void }
+export interface SqlEditorApi {
+  focus(): void; request(kind: 'auto' | 'script'): SqlRunRequest; markError(from: number, to: number): void; select(from: number, to: number): void;
+  /** Puts `text` at the cursor (on a line of its own when the line has text) and selects it; returns where it went. */
+  insert(text: string): { from: number; to: number };
+}
 
 const setError = StateEffect.define<{ from: number; to: number } | null>();
 const errorMark = Decoration.mark({ class: 'cm-db-error' });
@@ -34,8 +38,8 @@ const requestOf = (view: EditorView, kind: 'auto' | 'script'): SqlRunRequest => 
 };
 
 /** The keywords and quoting the editor highlights: the connection's (MySQL and MariaDB since 1.0.5). */
-export type SqlEditorDialect = 'postgres' | 'mysql' | 'mariadb';
-const DIALECTS: Record<SqlEditorDialect, SQLDialect> = { postgres: PostgreSQL, mysql: MySQL, mariadb: MariaSQL };
+export type SqlEditorDialect = 'postgres' | 'mysql' | 'mariadb' | 'sqlite';
+const DIALECTS: Record<SqlEditorDialect, SQLDialect> = { postgres: PostgreSQL, mysql: MySQL, mariadb: MariaSQL, sqlite: SQLite };
 
 export function SqlEditor({ text, onChange, onRun, readOnly = false, schema, label, onApi, dialect = 'postgres' }: {
   text: string; onChange?: (text: string) => void; onRun?: (req: SqlRunRequest) => void; readOnly?: boolean;
@@ -68,6 +72,17 @@ export function SqlEditor({ text, onChange, onRun, readOnly = false, schema, lab
       request: (kind) => requestOf(editor, kind),
       markError: (from, to) => editor.dispatch({ effects: setError.of({ from, to }), selection: EditorSelection.cursor(from), scrollIntoView: true }),
       select: (from, to) => editor.dispatch({ selection: EditorSelection.range(from, to), scrollIntoView: true }),
+      insert: (text) => {
+        const range = editor.state.selection.main;
+        const line = editor.state.doc.lineAt(range.from);
+        // Over a selection, or into an empty line, as it is; on a line with text, on a new line below it.
+        const below = range.empty && line.text.trim() !== '';
+        const at = below ? line.to : range.from;
+        const from = at + (below ? 1 : 0);
+        editor.dispatch({ changes: { from: at, to: below ? at : range.to, insert: below ? `\n${text}` : text }, selection: EditorSelection.range(from, from + text.length), scrollIntoView: true });
+        editor.focus();
+        return { from, to: from + text.length };
+      },
     });
     if (!readOnly) editor.focus();
     return () => { onApi?.(null); view.current = null; editor.destroy(); };

@@ -344,3 +344,25 @@ describe('DB IPC validation', () => {
     h.pin([sid]);
   });
 });
+
+describe('DbService: SQLite connections (1.0.6)', () => {
+  const file = 'C:\\data\\shop.sqlite';
+  const sqlite: DbConnectionInput = { kind: 'sqlite', name: 'shop', host: '', port: 0, user: '', tls: 'disable', ssh: null, readOnly: true, path: file };
+
+  it('saves a file connection through the IPC validation and opens it with its path (no password, no tunnel)', async () => {
+    const t = setup();
+    const h = createDbHandlers(t.service as unknown as DbService);
+    const saved = h.save(sqlite, { keep: true });
+    expect(saved).toMatchObject({ ok: true, connection: { kind: 'sqlite', path: file, port: 0, readOnly: true } });
+    const id = (saved as { connection: DbConnection }).connection.id;
+    expect(h.save({ ...sqlite, path: 'relative.db' }, { keep: true })).toEqual({ ok: false, error: 'invalid' });
+    expect(h.save({ ...sqlite, port: 5 }, { keep: true })).toEqual({ ok: false, error: 'invalid' });
+    // Another database of the "server" does not exist for a file: the option is ignored.
+    const r = h.connect(id, { database: 'other' });
+    expect(r.ok).toBe(true);
+    await t.flush();
+    const open = t.sent.find((m) => m.t === 'dbOpen');
+    expect(open).toMatchObject({ t: 'dbOpen', config: { kind: 'sqlite', path: file, database: 'main', readOnly: true, ssh: null } });
+    expect(open && 'config' in open ? open.config.password : 'x').toBeUndefined();
+  });
+});

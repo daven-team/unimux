@@ -2,7 +2,8 @@
 // in the form (the empty panel's MySQL / MariaDB link and the + menu), tests them, shows the dolphin and, once a server showed
 // itself as MariaDB, the seal; an unreachable server shows its error. With real servers (MC_MYSQL_UI_SERVERS, the format of
 // test/db-mysql-real.int.test.ts: "mysql=root:pw@127.0.0.1:33061,mariadb=root:pw@127.0.0.1:33062") it also runs the tree,
-// table data (edit, Pokaż SQL, save), DDL, the SQL editor (script, load more, cancel, export) on each.
+// table data (edit, Pokaż SQL, save), DDL, the SQL editor (script, load more, cancel, export) on each, and (1.0.6) triggers and
+// events in the tree, every result set of a CALL and the underline of a syntax error.
 // Screenshots: D:\Projekty\_shots\105-mysql-*.png. Run `npm run build` first. Never touches the user's data dir; kills only
 // the PIDs it started; the scratch database unimux_ui is dropped again.
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -23,6 +24,10 @@ const SEED = [
   'CREATE TABLE nums (n INT PRIMARY KEY)',
   'INSERT INTO nums SELECT n FROM (WITH RECURSIVE s(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM s WHERE n < 999) SELECT n FROM s) x',
   'CREATE VIEW cheap AS SELECT id, name FROM items WHERE price < 10',
+  // 1.0.6: a procedure with two result sets, a trigger and an event.
+  'CREATE PROCEDURE two_sets() BEGIN SELECT 1 AS first; SELECT 2 AS second, 3 AS third; END',
+  'CREATE TRIGGER items_bu BEFORE UPDATE ON items FOR EACH ROW SET NEW.name = TRIM(NEW.name)',
+  "CREATE EVENT nightly ON SCHEDULE EVERY 1 DAY DISABLE COMMENT 'cleanup' DO DELETE FROM nums WHERE n < 0",
 ];
 async function seed(s, drop = false) {
   const c = await mysql.createConnection({ host: s.host, port: s.port, user: s.user, password: s.password });
@@ -206,6 +211,26 @@ try {
     await key('Enter', CTRL);
     await app.until(`!!document.querySelector('.db-tab:not([hidden]) .db-msg.error')`, 'query error', 20000);
     check((await ev(`document.querySelector('.db-tab:not([hidden]) .db-msg.error').textContent`)).includes('1146'), `${s.label}: a server error shows its MySQL code`);
+    // ── 1.0.6: CALL result sets, the error underline, triggers and events ──
+    await typeCm('CALL two_sets()');
+    await key('Enter', CTRL);
+    await app.until(`document.querySelectorAll('.db-tab:not([hidden]) .db-result-tab').length === 3`, 'two result sets', 20000);
+    check(await ev(`document.querySelectorAll('.db-tab:not([hidden]) .db-result-tab')[1].textContent.includes('#2')`) && await ev(`${cell(0, 0)}?.textContent === '1'`), `${s.label}: a CALL shows each of its result sets`);
+    await ev(`document.querySelectorAll('.db-tab:not([hidden]) .db-result-tab')[1].click()`);
+    await app.until(`${cell(0, 1)}?.textContent === '3'`, 'second result set');
+    await app.screenshot(`106-mysql-${s.label}-call.png`);
+    await typeCm('SELECT id FROM\nWHERE');
+    await key('Enter', CTRL);
+    await app.until(`!!document.querySelector('.db-tab:not([hidden]) .cm-db-error')`, 'error underline', 20000);
+    check(await ev(`document.querySelector('.db-tab:not([hidden]) .cm-db-error').textContent === 'WHERE'`), `${s.label}: a syntax error underlines the word after "near"`);
+    await app.screenshot(`106-mysql-${s.label}-error.png`);
+    for (const folder of ['Wyzwalacze', 'Zdarzenia']) await ev(`[...document.querySelectorAll('.db-row.db-folder')].find((r) => r.textContent.includes(${JSON.stringify(folder)}))?.click()`);
+    await app.until(`!!${rowByText('items_bu')} && !!${rowByText('nightly')}`, 'triggers and events', 20000);
+    check(await ev(`${rowByText('items_bu')}.textContent.includes('BEFORE UPDATE ON items') && ${rowByText('nightly')}.textContent.includes('EVERY 1 DAY')`), `${s.label}: triggers and events are listed with their details`);
+    await dbl(rowByText('items_bu'));
+    await app.until(`!!document.querySelector('.db-ddl-tab:not([hidden]) .cm-content') && document.querySelector('.db-ddl-tab:not([hidden]) .cm-content').textContent.includes('TRIGGER')`, 'trigger DDL', 20000);
+    check(true, `${s.label}: a trigger opens its CREATE TRIGGER`);
+    await app.screenshot(`106-mysql-${s.label}-trigger.png`);
     // Fold this connection: the next server's tree has the same names.
     await ev(`${rowByText(name)}.click()`);
     await app.until(`!${rowByText('items')}`, 'tree folded');

@@ -42,6 +42,18 @@ export async function listObjects(q: MyQuery, db: string): Promise<DbObjectInfo[
     return { schema: db, name: r[0] ?? '', kind, oid: 0, ...(kind === 'table' ? { rowEstimate: r[2] === null ? null : Number(r[2]) } : {}), ...opt('comment', comment) };
   });
   for (const r of routines) out.push({ schema: db, name: r[0] ?? '', kind: r[1] === 'PROCEDURE' ? 'procedure' : 'function', oid: 0, ...opt('returns', r[2]), ...opt('comment', r[3]) });
+  // Triggers and events (1.0.6) are bonuses too: a user without the TRIGGER or EVENT privilege on the database sees none.
+  try {
+    const triggers = await q(`SELECT TRIGGER_NAME, ACTION_TIMING, EVENT_MANIPULATION, EVENT_OBJECT_TABLE FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = ${lit(db)} ORDER BY TRIGGER_NAME`);
+    for (const r of triggers) out.push({ schema: db, name: r[0] ?? '', kind: 'trigger', oid: 0, ...opt('detail', [r[1], r[2], r[3] ? `ON ${r[3]}` : null].filter(Boolean).join(' ')) });
+  } catch { /* no triggers shown */ }
+  try {
+    const events = await q(`SELECT EVENT_NAME, EVENT_TYPE, INTERVAL_VALUE, INTERVAL_FIELD, EXECUTE_AT, STATUS, EVENT_COMMENT FROM information_schema.EVENTS WHERE EVENT_SCHEMA = ${lit(db)} ORDER BY EVENT_NAME`);
+    for (const r of events) {
+      const when = r[1] === 'RECURRING' ? `EVERY ${r[2] ?? '?'} ${r[3] ?? ''}`.trim() : r[4] ? `AT ${r[4]}` : r[1];
+      out.push({ schema: db, name: r[0] ?? '', kind: 'event', oid: 0, ...opt('detail', [when, r[5]].filter(Boolean).join(' · ')), ...opt('comment', r[6]) });
+    }
+  } catch { /* no events shown */ }
   return out;
 }
 
@@ -126,14 +138,17 @@ export async function tableInfo(q: MyQuery, db: string, name: string): Promise<M
   };
 }
 
-/** The CREATE statement of a table, view, sequence (MariaDB), function or procedure; null when the server shows none. */
+/** The CREATE statement of a table, view, sequence (MariaDB), function, procedure, trigger or event; null when the server shows none. */
 export async function objectDdl(q: MyQuery, db: string, name: string, kind: DbObjectKind): Promise<string | null> {
   const target = myQualified(db, name);
+  // SHOW CREATE TRIGGER: Trigger, sql_mode, SQL Original Statement, ...; SHOW CREATE EVENT: Event, sql_mode, time_zone, Create Event, ...
   const [sql, column] = kind === 'view' ? [`SHOW CREATE VIEW ${target}`, 1]
     : kind === 'sequence' ? [`SHOW CREATE SEQUENCE ${target}`, 1]
       : kind === 'function' ? [`SHOW CREATE FUNCTION ${target}`, 2]
         : kind === 'procedure' ? [`SHOW CREATE PROCEDURE ${target}`, 2]
-          : [`SHOW CREATE TABLE ${target}`, 1];
+          : kind === 'trigger' ? [`SHOW CREATE TRIGGER ${target}`, 2]
+            : kind === 'event' ? [`SHOW CREATE EVENT ${target}`, 3]
+              : [`SHOW CREATE TABLE ${target}`, 1];
   const row = (await q(sql))[0];
   const text = row?.[column as number];
   if (!text) return null;

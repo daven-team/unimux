@@ -23,6 +23,8 @@ export interface DbOpenConfig {
   password?: string;
   readOnly: boolean;
   statementTimeoutMs?: number;
+  /** SQLite: the database file (it must exist). */
+  path?: string;
   /**
    * The database address as the SSH server sees it. Sessions of one connection share one tunnel (`tunnelKey`): the `owner`
    * opens it and its sshConnect follows; the others wait for it (and fail with 'tunnel' when there is none).

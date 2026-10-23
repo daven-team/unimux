@@ -3,6 +3,9 @@
 import type { MessagePortMain } from 'electron';
 import type { DbPortMessage } from '../shared/db';
 import type { DbHostToMain, MainToDbHost } from '../shared/dbHostIpc';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { Worker } from 'worker_threads';
 import { DbHost } from './host';
 
 // pg reads PGHOST, PGUSER, PGPASSWORD, PGSSLMODE ... as defaults: the app's own settings are the only ones that count.
@@ -18,10 +21,18 @@ const logToMain = (level: 'error' | 'warn', message: string) => { try { toMain({
 process.on('uncaughtException', (error) => logToMain('error', `db host uncaught exception: ${describeError(error)}`));
 process.on('unhandledRejection', (reason) => logToMain('error', `db host unhandled rejection: ${describeError(reason)}`));
 
+// The SQLite engine thread (1.0.6): its built file is read once (from the asar in a packaged app) and run as an eval'd worker,
+// so loading it never depends on how worker threads resolve paths inside an archive. It uses built-in modules only.
+let sqliteSource: string | null = null;
+const sqliteWorker = (interrupt: SharedArrayBuffer): Worker => {
+  sqliteSource ??= readFileSync(join(__dirname, 'sqliteworker.js'), 'utf8');
+  return new Worker(sqliteSource, { eval: true, workerData: { sqliteEngine: true, interrupt } });
+};
+
 const host = new DbHost({
   toMain,
   toRenderer: (m: DbPortMessage) => { try { rendererPort?.postMessage(m); } catch { /* the renderer is reloading */ } },
-});
+}, {}, undefined, { spawn: sqliteWorker });
 
 function attachRenderer(port: MessagePortMain): void {
   rendererPort?.close();

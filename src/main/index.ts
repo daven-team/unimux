@@ -42,6 +42,8 @@ import { DbHostClient } from './dbHostClient';
 import { DbService } from './db/service';
 import { DbVault } from './db/vault';
 import { createDbHandlers, registerDbIpc } from './db/ipc';
+import { DbHistoryStore, registerDbHistoryIpc } from './db/history';
+import { registerSqliteFileIpc } from './db/sqliteFiles';
 import { DB_LIMITS, isDbSessionId } from '../shared/db';
 import type { DbHostToMain } from '../shared/dbHostIpc';
 import { claudeProjectDirName, findRecentCodexSession, listSessionsAsync } from './sessions';
@@ -884,6 +886,22 @@ function startSsh(): void {
     },
   });
   registerDbIpc({ guardedHandle, guardedOn }, createDbHandlers(db));
+  // The SQL query history (1.0.6, local only); pending changes are written before the app quits.
+  const dbHistory = new DbHistoryStore(join(DATA_DIR, 'db', 'query_history.json'), { connectionExists: (id) => state.dbConnections.some((c) => c.id === id) });
+  registerDbHistoryIpc({ guardedHandle, guardedOn }, dbHistory);
+  app.on('before-quit', () => dbHistory.flush());
+  // SQLite database files: only their paths go back to the renderer.
+  registerSqliteFileIpc({ guardedHandle, guardedOn }, {
+    open: async () => {
+      const r = await showOpen({ title: tr('Otwórz plik bazy SQLite'), properties: ['openFile'], filters: [{ name: 'SQLite', extensions: ['db', 'sqlite', 'sqlite3', 'db3'] }, { name: '*', extensions: ['*'] }] });
+      return r.canceled ? null : r.filePaths[0] ?? null;
+    },
+    save: async () => {
+      const options = { title: tr('Nowy plik bazy SQLite'), defaultPath: 'database.sqlite', filters: [{ name: 'SQLite', extensions: ['sqlite', 'db', 'sqlite3'] }] };
+      const r = isLive(win) ? await dialog.showSaveDialog(win!, options) : await dialog.showSaveDialog(options);
+      return r.canceled || !r.filePath ? null : r.filePath;
+    },
+  });
   // The CA file of a verify-full connection: only its path goes back (main reads it at connect time).
   guardedHandle('db:pickCaFile', async () => {
     const r = await showOpen({ title: tr('Wybierz plik certyfikatu CA'), properties: ['openFile'], filters: [{ name: 'PEM', extensions: ['pem', 'crt', 'cer'] }, { name: '*', extensions: ['*'] }] });

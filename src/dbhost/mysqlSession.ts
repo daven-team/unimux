@@ -14,7 +14,7 @@ import {
 import { DbSqlError, firstKeyword, splitSql } from '../shared/dbSql';
 import {
   mysqlBinaryType, mysqlCellSql, mysqlEditPreview, mysqlEditStatements, mysqlEndsTransaction, mysqlErrorText, mysqlFieldBinary, mysqlFieldKind, mysqlIsReadStatement,
-  mysqlIsUse, mysqlPageSql, mysqlReadOnlyAllows, mysqlTimeoutSql, type MysqlBuiltStatement, type MysqlFieldLike,
+  mysqlErrorPosition, mysqlIsUse, mysqlPageSql, mysqlReadOnlyAllows, mysqlTimeoutSql, type MysqlBuiltStatement, type MysqlFieldLike,
 } from '../shared/dbMysql';
 import type { DbHostOp } from '../shared/dbHostIpc';
 import { listDatabases, listObjects, listSchemas, objectDdl, tableInfo, type MyRow, type MysqlTableInfo } from './mysqlMeta';
@@ -86,7 +86,7 @@ const decoders = (fields: readonly Field[]): Array<(b: Buffer) => string | Buffe
 /**
  * One statement's answer, as it streams in: the fields of its first result set, its rows (buffered up to HIGH_ROWS / HIGH_BYTES,
  * then the connection pauses until they are taken), the OK packet of a statement without rows, and its end or error. Later
- * result sets of a CALL are dropped (their OK still counts).
+ * result sets are dropped (their OK still counts); a CALL is read by MyCall, which keeps them all.
  */
 class MyStream {
   fields: Field[] | null = null;
@@ -153,6 +153,49 @@ class MyStream {
     return this.done;
   }
 }
+
+/** The result sets a CALL shows at most (more are counted in a notice) and the rows kept of each (the rest are counted). */
+const CALL_MAX_SETS = 50;
+
+interface CallSet { fields: Field[]; rows: Raw[]; dropped: number }
+
+/**
+ * A CALL read to its end (1.0.6): every result set of the procedure with up to `rowCap` rows each (the rest counted, not kept),
+ * and the OK packet that ends it. A CALL changes data as it runs, so it is never stopped halfway for "load more".
+ */
+class MyCall {
+  sets: CallSet[] = [];
+  extraSets = 0;
+  header: Header | null = null;
+  error: unknown = null;
+  private done = false;
+  private wake: (() => void) | null = null;
+
+  constructor(conn: MyConn, sql: string, rowCap: number) {
+    const q = (conn.query as unknown as (o: object) => { on(e: string, f: (...a: never[]) => void): unknown })({ sql, rowsAsArray: true, typeCast: false });
+    let current: CallSet | null = null;
+    q.on('fields', (fields: Field[] | undefined) => {
+      if (!fields) return;
+      if (this.sets.length >= CALL_MAX_SETS) { this.extraSets++; current = null; return; }
+      current = { fields, rows: [], dropped: 0 };
+      this.sets.push(current);
+    });
+    q.on('result', (row: Raw | Header) => {
+      if (!Array.isArray(row)) { this.header = row; return; }
+      if (!current) return;
+      if (current.rows.length < rowCap) current.rows.push(row); else current.dropped++;
+    });
+    q.on('error', (e: unknown) => { this.error = e; this.finish(); });
+    q.on('end', () => this.finish());
+  }
+
+  private finish(): void { this.done = true; const w = this.wake; this.wake = null; w?.(); }
+  /** Resolves when the CALL ended (its error, if any, is in `error`). */
+  ended(): Promise<void> { return this.done ? Promise.resolve() : new Promise((r) => { this.wake = r; }); }
+}
+
+/** A CALL that failed after some of its result sets were shown: the error goes to a result of its own (`index`). */
+class CallError extends Error { constructor(readonly failure: unknown, readonly index: number) { super('call failed'); } }
 
 interface Run { queryId: string; cancelled: boolean }
 interface OpenResult { queryId: string; index: number; stream: MyStream; decode: Array<(b: Buffer) => string | Buffer>; sent: number; timer: NodeJS.Timeout | null }
@@ -472,18 +515,26 @@ export class MysqlSession {
         await this.exec(mysqlTimeoutSql(this.opts.flavor, ms));
         this.restore.push(mysqlTimeoutSql(this.opts.flavor, this.opts.statementTimeoutMs ? this.opts.statementTimeoutMs : null));
       }
+      // Results are numbered in order; a CALL with several result sets takes one number per set (the next statement follows).
+      let next = 0;
       for (let i = 0; i < spans.length; i++) {
         if (run.cancelled || this.ended) break;
         const span = spans[i];
-        this.out.port({ t: 'statement', queryId: req.queryId, index: i, start: span.start, end: span.end });
+        const index = next++;
+        this.out.port({ t: 'statement', queryId: req.queryId, index, start: span.start, end: span.end });
         const t0 = this.now();
         try {
-          await this.statement(req.queryId, i, span.text, rowCap, i === spans.length - 1);
-        } catch (error) {
-          if (this.ended) throw error;
+          if (firstKeyword(span.text) === 'CALL') next = await this.call(req.queryId, index, span, rowCap, next);
+          else await this.statement(req.queryId, index, span.text, rowCap, i === spans.length - 1);
+        } catch (thrown) {
+          if (this.ended) throw thrown;
           allOk = false;
+          const error = thrown instanceof CallError ? thrown.failure : thrown;
           const server = mysqlServerError(error);
-          this.out.port({ t: 'statementError', queryId: req.queryId, index: i, error: this.codeOf(error), ...(server ? { server } : {}), timeMs: this.now() - t0 });
+          // A syntax error names its place as "near '...' at line N": it is underlined in the editor.
+          const position = server ? mysqlErrorPosition(server.message, span.text) : null;
+          if (server && position) server.position = position;
+          this.out.port({ t: 'statementError', queryId: req.queryId, index: thrown instanceof CallError ? thrown.index : index, error: this.codeOf(error), ...(server ? { server } : {}), timeMs: this.now() - t0 });
           // An error inside a transaction leaves it open in MySQL: the state is asked for.
           try { await this.syncTx(); } catch { /* gone */ }
           if (!req.continueOnError || !server) break;
@@ -539,6 +590,38 @@ export class MysqlSession {
     if (!keep) { if (stream.header) this.setTx(stream.header); else await this.syncTx(); return; }
     this.open = { queryId, index, stream, decode: state.decode ?? [], sent, timer: null };
     this.armIdle(this.open);
+  }
+
+  /**
+   * A CALL (1.0.6): runs to its end, then every result set it answered with is a result of its own (the first takes `index`,
+   * the others the next free numbers, marked with `set`). Returns the next free number. A failure after some sets keeps them
+   * and reports the error as one more result (CallError).
+   */
+  private async call(queryId: string, index: number, span: { start: number; end: number; text: string }, rowCap: number, next: number): Promise<number> {
+    const t0 = this.now();
+    const call = new MyCall(this.conn, span.text, rowCap);
+    await this.onServer(() => call.ended());
+    const timeMs = this.now() - t0;
+    call.sets.forEach((set, k) => {
+      const at = k === 0 ? index : next++;
+      if (k > 0) this.out.port({ t: 'statement', queryId, index: at, start: span.start, end: span.end, set: k + 1 });
+      if (set.fields.length) this.out.port({ t: 'columns', queryId, index: at, columns: this.columns(set.fields) });
+      const dec = decoders(set.fields);
+      this.sendRows(queryId, at, set.rows.map((r) => r.map((v, i) => (v === null ? null : (dec[i] ?? ((b: Buffer) => b.toString('utf8')))(v)))));
+      this.out.port({ t: 'statementEnd', queryId, index: at, command: 'CALL', rowCount: set.rows.length + set.dropped, rows: set.rows.length, hasMore: false, ...(set.dropped ? { truncated: true } : {}), timeMs });
+    });
+    if (call.extraSets) this.out.port({ t: 'notice', queryId, message: `CALL: +${call.extraSets} result sets not shown (max ${CALL_MAX_SETS})`, severity: 'NOTICE' });
+    if (call.error) {
+      if (!call.sets.length) throw call.error;
+      const at = next++;
+      this.out.port({ t: 'statement', queryId, index: at, start: span.start, end: span.end, set: call.sets.length + 1 });
+      throw new CallError(call.error, at);
+    }
+    const h = call.header ?? {};
+    if (!call.sets.length) this.out.port({ t: 'statementEnd', queryId, index, command: 'CALL', rowCount: typeof h.affectedRows === 'number' ? h.affectedRows : null, rows: 0, hasMore: false, timeMs });
+    if (call.header) this.setTx(call.header); else await this.syncTx();
+    if (h.warningStatus) await this.warnings(queryId);
+    return next;
   }
 
   /** SHOW WARNINGS after a statement that had some: they arrive as notices. */

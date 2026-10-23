@@ -403,7 +403,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
                   onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
                   onContextMenu={(e) => { e.preventDefault(); fileTabMenu(e.clientX, e.clientY, doc); }}>
                   {color && <span className="tab-project" aria-hidden="true" />}
-                  <span className="tab-type-icon" aria-hidden="true">{doc.db.kind === 'table' ? <ITable /> : <DbKindIcon kind={c?.kind === 'mysql' ? 'mysql' : 'postgres'} flavor={c?.flavor} />}</span><span className="label">{doc.name}</span>
+                  <span className="tab-type-icon" aria-hidden="true">{doc.db.kind === 'table' ? <ITable /> : <DbKindIcon kind={c?.kind === 'mysql' || c?.kind === 'sqlite' ? c.kind : 'postgres'} flavor={c?.flavor} />}</span><span className="label">{doc.name}</span>
                   {doc.db.kind === 'ddl' && <span className="tab-diff-tag">DDL</span>}
                   <span className="tab-host-tag">{c?.name ?? '?'}</span>
                   {doc.dirty && <span className="file-dirty" aria-label={tr('Niezapisane zmiany')}>●</span>}

@@ -316,4 +316,30 @@ export function mysqlErrorText(errno: number | undefined, sqlState: string | und
   return errno ? `ERROR ${errno}${sqlState ? ` (${sqlState})` : ''}: ${message}` : message;
 }
 
+/**
+ * The 1-based position a syntax error names in a statement: MySQL and MariaDB say "... near 'FRM t' at line 2" (the text from
+ * the error on, cut to 80 characters, and its line in the statement); "near ''" means the statement ended too early. Null when
+ * the message names no place, or the text is not found on that line or after it.
+ */
+export function mysqlErrorPosition(message: string, sql: string): number | null {
+  const m = /near '([\s\S]*)' at line (\d+)\s*$/.exec(message);
+  if (!m) return null;
+  const near = m[1];
+  const line = Number(m[2]);
+  if (!Number.isInteger(line) || line < 1) return null;
+  let lineStart = 0;
+  for (let l = 1; l < line; l++) {
+    const nl = sql.indexOf('\n', lineStart);
+    if (nl < 0) return null;
+    lineStart = nl + 1;
+  }
+  if (!near) return sql.length + 1;
+  const at = sql.indexOf(near, lineStart);
+  if (at >= 0) return at + 1;
+  // The server may have cut the text in the middle of a character: its start is enough.
+  const head = near.slice(0, 20);
+  const at2 = head ? sql.indexOf(head, lineStart) : -1;
+  return at2 >= 0 ? at2 + 1 : null;
+}
+
 
