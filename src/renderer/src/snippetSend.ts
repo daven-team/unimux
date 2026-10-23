@@ -6,7 +6,13 @@ import type { Cell, Snippet } from '../../shared/types';
 import {
   fillSnippetVars, hasSnippetVars, initialSnippetValues, rememberSnippetValues, resolveSnippetBuiltins, snippetBuiltinsUsed, snippetUserVars,
 } from '../../shared/snippetVars';
-import { askSnippetValues, getS, update } from './store';
+import { askSnippetValues, getS, toast, update } from './store';
+
+/**
+ * A branch name goes into a shell command line: git allows names like `x$(rm -rf ~)` or `a;b`, so only plain names are filled
+ * in (letters, digits and . _ / - +); anything else stops the paste.
+ */
+const SAFE_BRANCH = /^[A-Za-z0-9._/+-]*$/;
 
 /** Notes are pasted as they are (a dragged note comes as a snippet with the note's id); snippets only when they hold a variable. */
 export const snippetNeedsValues = (snippet: Snippet): boolean =>
@@ -30,26 +36,34 @@ async function cellBranch(projectId: string, cell: Cell): Promise<string> {
  */
 export async function fillSnippetForCells(snippet: Snippet, cellIds: readonly string[]): Promise<Map<string, string> | null> {
   const vars = snippetUserVars(snippet.text);
+  const builtinsUsed = snippetBuiltinsUsed(snippet.text);
+  // The clipboard is never sent unseen (a snippet may come from an agent through automation): it is a field of the dialog,
+  // prefilled with what the clipboard holds, so the user sees (and may change) exactly what goes into the terminal.
+  const usesClipboard = builtinsUsed.has('clipboard');
   let entered: Record<string, string> = {};
-  if (vars.length) {
+  if (vars.length || usesClipboard) {
     const stored = getS().snippets.find((item) => item.id === snippet.id);
     const initial = initialSnippetValues(vars, stored?.values ?? snippet.values);
+    const clipboardText = usesClipboard ? await window.mc.clipboardRead().catch(() => '') : '';
     const values = await askSnippetValues(
       tr('Wstaw snippet „{name}”', { name: snippet.name || tr("Snippet") }), snippet.text,
-      vars.map((v) => ({ name: v.name, value: initial[v.name], ...(v.default !== undefined ? { fallback: v.default } : {}) })),
-      [...snippetBuiltinsUsed(snippet.text)],
+      [
+        ...vars.map((v) => ({ name: v.name, value: initial[v.name], ...(v.default !== undefined ? { fallback: v.default } : {}) })),
+        ...(usesClipboard ? [{ name: 'clipboard', value: clipboardText }] : []),
+      ],
+      [...builtinsUsed].filter((name) => name !== 'clipboard'),
     );
     if (!values) return null;
     entered = values;
     update((st) => {
       const current = st.snippets.find((item) => item.id === snippet.id);
       if (!current) return st;
-      const kept = rememberSnippetValues(current.values, entered, current.text);
+      // The clipboard's text is not remembered with the snippet.
+      const { clipboard: _clipboard, ...typed } = entered;
+      const kept = rememberSnippetValues(current.values, typed, current.text);
       return kept === current.values ? st : upsertSnippet(st, { ...current, values: kept ?? {} });
     });
   }
-  let clipboard: Promise<string> | null = null;
-  const readClipboard = () => (clipboard ??= window.mc.clipboardRead());
   const branches = new Map<string, Promise<string>>();
   const out = new Map<string, string>();
   for (const id of cellIds) {
@@ -63,9 +77,13 @@ export async function fillSnippetForCells(snippet: Snippet, cellIds: readonly st
         if (!branches.has(path)) branches.set(path, cellBranch(found.project.id, found.cell));
         return branches.get(path)!;
       },
-      clipboard: readClipboard,
+      clipboard: async () => entered.clipboard ?? '',
     });
-    out.set(id, fillSnippetVars(snippet.text, { ...entered, ...builtins }));
+    if (builtins.branch !== undefined && !SAFE_BRANCH.test(builtins.branch)) {
+      toast(tr('Nazwa gałęzi „{branch}” zawiera znaki, które powłoka mogłaby wykonać. Snippet nie został wklejony.', { branch: builtins.branch }), 'error');
+      return null;
+    }
+    out.set(id, fillSnippetVars(snippet.text, { ...entered, ...builtins, ...(usesClipboard ? { clipboard: entered.clipboard ?? '' } : {}) }));
   }
   return out;
 }

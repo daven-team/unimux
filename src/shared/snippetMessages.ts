@@ -1,6 +1,13 @@
 // Notes and snippets with code (1.0.6): languages, the note preview and snippet variables.
 // Each row: English, German, Spanish, French, Portuguese. Polish is the key.
 export const snippetMessages = {
+  'Nazwa gałęzi „{branch}” zawiera znaki, które powłoka mogłaby wykonać. Snippet nie został wklejony.': [
+    'The branch name “{branch}” contains characters the shell could run. The snippet was not pasted.',
+    'Der Branch-Name „{branch}“ enthält Zeichen, die die Shell ausführen könnte. Das Snippet wurde nicht eingefügt.',
+    'El nombre de la rama «{branch}» contiene caracteres que el shell podría ejecutar. El snippet no se ha pegado.',
+    'Le nom de branche « {branch} » contient des caractères que le shell pourrait exécuter. Le snippet n’a pas été collé.',
+    'O nome do branch “{branch}” contém caracteres que o shell poderia executar. O snippet não foi colado.',
+  ],
   'Zwykły tekst': ['Plain text', 'Nur Text', 'Texto sin formato', 'Texte brut', 'Texto simples'],
   'Język notatki': ['Note language', 'Sprache der Notiz', 'Lenguaje de la nota', 'Langage de la note', 'Linguagem da nota'],
   'Język snippetu': ['Snippet language', 'Sprache des Snippets', 'Lenguaje del snippet', 'Langage du snippet', 'Linguagem do snippet'],
