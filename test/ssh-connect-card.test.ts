@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SshPhase, SshPrompt, SshSessionState } from '../src/shared/ssh';
 import {
-  CONNECT_LOG_MAX, connectCardShown, connectCardView, failedStepOf, reduceConnectAttempt, type ConnectAttempt, type ConnectContext, type ConnectEvent,
+  CONNECT_LOG_MAX, connectCardKind, connectCardShown, connectCardView, failedStepOf, reduceConnectAttempt, type ConnectAttempt, type ConnectContext, type ConnectEvent,
 } from '../src/shared/sshConnect';
 
 const ctx: ConnectContext = { host: 'box.lan', endpoint: 'box.lan:2222', user: 'ola', keyLabel: 'laptop', savedPassword: true };
@@ -59,11 +59,40 @@ describe('SSH connecting card: attempt log', () => {
     expect(failedStepOf(undefined, 0)).toBe(0);
   });
 
-  it('a close before the shell is a cancel: the card goes', () => {
+  it('a close before the shell is a cancel: the card stays and says so', () => {
     const a = run([{ kind: 'start', at: 1, ctx }, session('verifying'), session('closed')]);
     expect(keys(a)?.at(-1)).toBe('Anulowano');
-    expect(a?.dismissed).toBe(true);
-    expect(connectCardShown(a, state('closed'), undefined)).toBe(false);
+    expect(a?.cancelled).toBe(true);
+    expect(connectCardShown(state('closed'), undefined)).toBe(true);
+    expect(connectCardKind(a, state('closed'), undefined)).toBe('cancelled');
+  });
+
+  it('Anuluj marks the attempt, so an error that ends it is a cancel and not a failure', () => {
+    const a = run([{ kind: 'start', at: 1, ctx }, session('authenticating'), { kind: 'cancel' }, session('error', { error: 'reset' })]);
+    expect(a?.cancelled).toBe(true);
+    expect(a?.failedStep).toBeUndefined();
+    expect(keys(a)?.at(-1)).toBe('Anulowano');
+    expect(connectCardKind(a, state('error', { error: 'reset' }), undefined)).toBe('cancelled');
+    const loop = run([{ kind: 'start', at: 1, ctx }, session('authenticating'), session('error', { error: 'cancelled' })]);
+    expect(connectCardKind(loop, state('error', { error: 'cancelled' }), undefined)).toBe('cancelled');
+  });
+
+  it('a cancel does nothing once the shell is open or the attempt is over', () => {
+    const open = run([{ kind: 'start', at: 1, ctx }, session('connected')]);
+    expect(run([{ kind: 'cancel' }], open)).toBe(open);
+    const failed = run([{ kind: 'start', at: 1, ctx }, session('error', { error: 'dns' })]);
+    expect(run([{ kind: 'cancel' }], failed)).toBe(failed);
+    expect(run([{ kind: 'cancel' }])).toBeUndefined();
+  });
+
+  it('a session that ends after the shell opened is a disconnect', () => {
+    const a = run([{ kind: 'start', at: 1, ctx }, session('connected'), session('error', { error: 'reset' })]);
+    expect(a?.cancelled).toBe(false);
+    expect(a?.log.at(-1)?.tone).toBe('error');
+    expect(connectCardKind(a, state('error', { error: 'reset' }), undefined)).toBe('disconnected');
+    const closed = run([{ kind: 'start', at: 1, ctx }, session('connected'), session('closed')]);
+    expect(keys(closed)?.at(-1)).toBe('Rozłączono');
+    expect(connectCardKind(closed, state('closed'), undefined)).toBe('disconnected');
   });
 
   it('starts from what it sees after a reload, and ignores sessions that are not connecting', () => {
@@ -75,9 +104,9 @@ describe('SSH connecting card: attempt log', () => {
   });
 
   it('a new start forgets the previous attempt', () => {
-    const failed = run([{ kind: 'start', at: 1, ctx }, session('error', { error: 'dns' }), { kind: 'dismiss' }]);
-    const again = run([{ kind: 'start', at: 20, ctx }], failed);
-    expect(again).toMatchObject({ since: 20, dismissed: false, step: 0, shell: false });
+    const cancelled = run([{ kind: 'start', at: 1, ctx }, session('verifying'), { kind: 'cancel' }, session('closed')]);
+    const again = run([{ kind: 'start', at: 20, ctx }], cancelled);
+    expect(again).toMatchObject({ since: 20, cancelled: false, step: 0, shell: false });
     expect(again?.failedStep).toBeUndefined();
     expect(again?.log).toHaveLength(1);
   });
@@ -91,21 +120,22 @@ describe('SSH connecting card: attempt log', () => {
 
 describe('SSH connecting card: when it shows', () => {
   const started = run([{ kind: 'start', at: 1, ctx }]);
-  it('shows while connecting or a prompt is open, hides once the shell is ready', () => {
-    for (const phase of ['connecting', 'verifying', 'authenticating'] as const) expect(connectCardShown(started, state(phase), undefined)).toBe(true);
-    expect(connectCardShown(undefined, state('connecting'), undefined)).toBe(true);
-    expect(connectCardShown(started, state('connected'), undefined)).toBe(false);
-    expect(connectCardShown(started, state('idle'), undefined)).toBe(false);
-    expect(connectCardShown(started, state('verifying'), hostKey)).toBe(true);
+  it('shows in every state that is not connected; only the open shell and idle (its own card) leave it out', () => {
+    for (const phase of ['connecting', 'verifying', 'authenticating', 'error', 'closed'] as const) expect(connectCardShown(state(phase), undefined)).toBe(true);
+    expect(connectCardShown(state('connected'), undefined)).toBe(false);
+    expect(connectCardShown(state('idle'), undefined)).toBe(false);
+    expect(connectCardShown(undefined, undefined)).toBe(false);
+    expect(connectCardShown(state('verifying'), hostKey)).toBe(true);
+    expect(connectCardShown(state('connected'), password('s'))).toBe(true);
   });
 
-  it('a failure before the shell keeps the card until Zamknij; one after the shell leaves the terminal', () => {
+  it('tells the kinds apart, also without an attempt (a reloaded renderer)', () => {
+    expect(connectCardKind(started, state('connecting'), undefined)).toBe('connecting');
+    expect(connectCardKind(started, state('error'), password('x'))).toBe('connecting');
     const failed = run([session('error', { error: 'refused' })], started);
-    expect(connectCardShown(failed, state('error'), undefined)).toBe(true);
-    expect(connectCardShown(run([{ kind: 'dismiss' }], failed), state('error'), undefined)).toBe(false);
-    const dropped = run([session('connected'), session('error', { error: 'reset' })], started);
-    expect(connectCardShown(dropped, state('error'), undefined)).toBe(false);
-    expect(connectCardShown(undefined, state('error'), undefined)).toBe(false);
+    expect(connectCardKind(failed, state('error', { error: 'refused' }), undefined)).toBe('failed');
+    expect(connectCardKind(undefined, state('error', { error: 'refused' }), undefined)).toBe('failed');
+    expect(connectCardKind(undefined, state('closed'), undefined)).toBe('disconnected');
   });
 });
 
@@ -132,5 +162,28 @@ describe('SSH connecting card: steps and status', () => {
     const refused = connectCardView(run([session('error', { error: 'refused' })], started), state('error', { error: 'refused' }), undefined, ctx);
     expect(states(refused)).toEqual(['failed', 'pending', 'pending']);
     expect(refused.progress).toBe(0);
+    expect(refused.ended).toBe(true);
+    expect(connectCardView(started, state('connecting'), undefined, ctx).ended).toBe(false);
+  });
+
+  it('a cancel stops at the step it reached, without red', () => {
+    const a = run([session('authenticating'), { kind: 'cancel' }, session('closed')], started);
+    const v = connectCardView(a, state('closed'), undefined, ctx);
+    expect(states(v)).toEqual(['done', 'stopped', 'pending']);
+    expect(v).toMatchObject({ kind: 'cancelled', failed: false, ended: true, progress: 0.5, status: { key: 'Anulowano' } });
+    expect(v.error).toBeUndefined();
+  });
+
+  it('a dropped session says Rozłączono with the reason; a clean end shows the exit code', () => {
+    const dropped = run([session('connected'), session('error', { error: 'reset' })], started);
+    const v = connectCardView(dropped, state('error', { error: 'reset' }), undefined, ctx);
+    expect(states(v)).toEqual(['done', 'done', 'failed']);
+    expect(v).toMatchObject({ kind: 'disconnected', failed: true, ended: true, progress: 1, status: { key: 'Rozłączono' } });
+    expect(v.error?.key).toBeTruthy();
+    const exited = run([session('connected'), session('closed', { exitCode: 0 })], started);
+    const e = connectCardView(exited, state('closed', { exitCode: 0 }), undefined, ctx);
+    expect(states(e)).toEqual(['done', 'done', 'done']);
+    expect(e).toMatchObject({ failed: false, ended: true, error: { key: 'Sesja zakończona (kod {code})', params: { code: 0 } } });
+    expect(connectCardView(undefined, state('closed'), undefined, ctx).error).toBeUndefined();
   });
 });
