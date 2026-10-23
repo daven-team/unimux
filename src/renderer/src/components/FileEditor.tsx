@@ -5,6 +5,7 @@ import { detectDelimiter, isDelimitedPath, parseDelimited } from '../../../share
 import { DataTable, ImageView, LargeTextView } from './FileViews';
 import { handleZoomKey, setFileZoom, stepFileZoom, useFileZoom } from '../fileZoom';
 import { isMarkdownPath, MarkdownPreview } from './MarkdownPreview';
+import { findKey } from '../../../shared/findText';
 import { useI18n } from '../i18n';
 import { getUi, useStore } from '../store';
 import { matchesShortcut } from '../shortcuts';
@@ -33,6 +34,8 @@ export function FileEditor() {
   /** The tab whose disk vs editor diff is shown (a conflict's "Show diff"). */
   const [diffFor, setDiffFor] = useState<string | null>(null);
   const section = useRef<HTMLElement>(null);
+  /** Opens the find widget of the code editor or the Markdown preview on screen (each sets it while mounted). */
+  const finder = useRef<((replace: boolean) => void) | null>(null);
   // Ctrl + wheel zooms (a plain wheel scrolls); the listener is native because React's wheel events are passive.
   useEffect(() => {
     const el = section.current;
@@ -59,7 +62,17 @@ export function FileEditor() {
       if (useFileStore.getState().activeFileId !== doc.id) return;
       if (matchesShortcut('editor.save', event)) {
         event.preventDefault(); event.stopPropagation(); void saveFile(doc.id);
+        return;
       }
+      // Ctrl+F / Ctrl+H with the keyboard in this tab but outside the text (the toolbar, a notice) or nowhere: find in this file.
+      // The editor and the widget handle the keys themselves; a terminal or a field elsewhere keeps them.
+      const find = findKey(event, window.mc.platform);
+      if (!find || !finder.current) return;
+      const target = event.target instanceof Element ? event.target : null;
+      const here = !!target && !!section.current?.contains(target);
+      if (here ? target.closest('.cm-editor, .find-widget') : target && target !== document.body && target !== document.documentElement) return;
+      event.preventDefault(); event.stopPropagation();
+      finder.current(find === 'replace');
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
@@ -166,8 +179,8 @@ export function FileEditor() {
         <TextDiffView disk={doc.externalText ?? ''} editor={doc.text} path={doc.source ? crumbTitle : doc.relativePath} remote={!!remote} />
       </Suspense>}
       {!tableView && !showDiff && doc.status === 'ready' && (preview
-        ? <MarkdownPreview key={doc.id} text={doc.text} projectId={doc.projectId} path={doc.relativePath} />
-        : <CodeEditor key={doc.id} id={doc.id} path={doc.relativePath} text={doc.text} wrap={doc.wrap} onChange={text => editFile(doc.id, text)} />)}
+        ? <MarkdownPreview key={doc.id} text={doc.text} projectId={doc.projectId} path={doc.relativePath} finder={finder} />
+        : <CodeEditor key={doc.id} id={doc.id} path={doc.relativePath} text={doc.text} wrap={doc.wrap} onChange={text => editFile(doc.id, text)} finder={finder} />)}
       {doc.status === 'image' && doc.view?.kind === 'image' && <ImageView src={doc.view.dataUrl} name={doc.name} size={doc.size} />}
       {doc.status === 'table' && doc.view?.kind === 'table' && <DataTable columns={doc.view.columns} types={doc.view.types} rows={doc.view.rows} note={`${doc.view.format.toUpperCase()} · ${doc.view.totalRows.toLocaleString(language)} ${{ en: 'rows', pl: 'wierszy', de: 'Zeilen', es: 'filas', fr: 'lignes', pt: 'linhas' }[language]} · ${doc.view.columns.length} ${{ en: 'columns', pl: 'kolumn', de: 'Spalten', es: 'columnas', fr: 'colonnes', pt: 'colunas' }[language]}${doc.view.rows.length < doc.view.totalRows ? ` · ${{ en: 'showing the first', pl: 'pokazano pierwsze', de: 'angezeigt: die ersten', es: 'mostrando las primeras', fr: 'affichage des premières', pt: 'a mostrar as primeiras' }[language]} ${doc.view.rows.length.toLocaleString(language)}` : ''}`} />}
       {doc.status === 'binary' && !remote && <div className="file-preview-message muted">{tr('Ten plik jest binarny lub ma nieobsługiwane kodowanie. Otwórz go w edytorze albo menedżerze plików.')}</div>}

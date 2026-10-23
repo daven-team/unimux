@@ -10,6 +10,7 @@ import { dbMessages } from './dbMessages';
 import { redisMessages } from './redisMessages';
 import { dbUiMessages } from './dbUiMessages';
 import { filesMessages } from './filesMessages';
+import { findMessages } from './findMessages';
 import { gitMessages } from './gitMessages';
 import { gitSetupMessages } from './gitSetupMessages';
 import { githubMessages } from './githubMessages';
@@ -51,6 +52,7 @@ export const messages = {
   ...redisMessages,
   ...dbUiMessages,
   ...filesMessages,
+  ...findMessages,
   ...gitMessages,
   ...gitSetupMessages,
   ...githubMessages,
