@@ -257,13 +257,14 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
               }}
             />
           ) : (
-            label && (
+            // The profile chip already names an unnamed shell cell: its label would only repeat it ("Wiersz polecenia Wiersz polecenia").
+            label && (cell.name || label !== profileName) && (
               <span className={`cell-name ${cell.name ? 'custom' : ''}`} title={`${label}\n${tr('Dwuklik: zmień nazwę')}`} onDoubleClick={() => setEditing(true)}>
                 {label}
               </span>
             )
           )}
-          {!label && !editing && !ssh && (
+          {(!label || (!cell.name && label === profileName)) && !editing && !ssh && (
             <span className="cell-name placeholder" onDoubleClick={() => setEditing(true)} title={tr("Dwuklik: nadaj nazwę")}>{tr("bez nazwy")}</span>
           )}
           {cell.worktree && (
