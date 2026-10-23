@@ -60,7 +60,9 @@ export function SqlEditor({ text, onChange, onRun, readOnly = false, schema, lab
         { key: 'Mod-Enter', preventDefault: true, run: (v) => { run.current?.(requestOf(v, 'auto')); return true; } },
         { key: 'Mod-Shift-Enter', preventDefault: true, run: (v) => { run.current?.(requestOf(v, 'script')); return true; } },
       ]),
-      basicSetup, theme, colors, indentUnit.of('  '), keymap.of([indentWithTab]), errorField,
+      // Long statements wrap: a narrow editor (the History panel open, a small cell) never hides the start of a line behind
+      // a horizontal scroll after an insert.
+      basicSetup, theme, colors, indentUnit.of('  '), keymap.of([indentWithTab]), errorField, EditorView.lineWrapping,
       language.current.of(sql({ dialect: DIALECTS[dialect], upperCaseKeywords: true, ...(schema ? { schema } : {}) })),
       EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly),
       EditorView.contentAttributes.of({ 'aria-label': label, spellcheck: 'false' }),
