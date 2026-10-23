@@ -141,7 +141,12 @@ class FindPanel implements Panel {
 /** Opens the widget (with the selection as the query) or moves the keyboard back into it; `replace` also opens the replace row. */
 export function openEditorFind(view: EditorView, replace = false): boolean {
   const wasOpen = searchPanelOpen(view.state);
+  // Opening the panel builds a new query from the selection without the replace text: keep the last one, so a "replace all"
+  // after reopening never replaces the matches with nothing.
+  const lastReplace = getSearchQuery(view.state).replace;
   openSearchPanel(view);
+  const opened = getSearchQuery(view.state);
+  if (lastReplace && !opened.replace) view.dispatch({ effects: setSearchQuery.of(queryOf(opened, { replace: lastReplace })) });
   const panel = panels.get(view);
   if (panel && (wasOpen || replace)) panel.focus(replace);
   return true;

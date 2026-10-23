@@ -133,3 +133,7 @@
   .ssh-connect-log { max-height: 220px; padding: 8px 14px; }
   .ssh-connect-actions { padding: 9px 12px; }
 }
+/* A host key or login question needs the room in a grid cell: the checklist steps aside while it is open (the status line stays). */
+@container (max-height: 520px) {
+  .ssh-connect:has(.ssh-connect-prompt) .ssh-phases { display: none; }
+}

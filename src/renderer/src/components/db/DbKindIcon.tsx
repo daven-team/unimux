@@ -17,8 +17,8 @@ const MARIADB = 'M23.157 4.412c-.676.284-.79.31-1.673.372-.65.045-.757.057-1.212
 function MysqlIcon() {
   return (
     <svg className="db-kind-icon mysql" width="16" height="16" viewBox="11.3 1.9 13.1 13.1" aria-hidden="true">
-      {/* The dolphin is line art: a thin stroke of its own colour keeps it readable at 16px. */}
-      <path fill="#4479a1" stroke="#4479a1" strokeWidth="0.45" strokeLinejoin="round" d={MYSQL} />
+      {/* The dolphin is line art: a lighter shade of MySQL's blue and a stroke of its own colour keep it readable at 16px on the dark panel. */}
+      <path fill="#5d93c9" stroke="#5d93c9" strokeWidth="0.6" strokeLinejoin="round" d={MYSQL} />
     </svg>
   );
 }
