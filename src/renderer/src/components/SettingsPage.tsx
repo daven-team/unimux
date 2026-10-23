@@ -12,6 +12,7 @@ import { AlertsSettings } from './AlertsSettings';
 import { ShortcutsSettings } from './ShortcutsSettings';
 import { isLanguage, LANGUAGES } from '../../../shared/languages';
 import { shellsForPlatform } from '../../../shared/platform';
+import { shownProfileName } from '../../../shared/profiles';
 import { USAGE_INTERVALS_MINUTES } from '../../../shared/usage';
 import { BACKGROUND_LOAD_MODES, BACKGROUND_MAX_CELLS, normalizeBackgroundLoad, type BackgroundLoadMode } from '../../../shared/backgroundLoad';
 import type { MessageKey } from '../../../shared/i18n';
@@ -139,10 +140,10 @@ export function SettingsPage() {
         <p className="settings-group-desc">{tr('Profil to gotowy sposób uruchamiania agenta: wybierasz polecenie (Claude, Codex lub zwykła powłoka), nazwę, kolor i opcje startowe. Każda nowa komórka z tym profilem startuje z tymi opcjami.')}</p>
         {profiles.map((p) => (
           <SettingsGroup key={p.id}>
-            <div className="profile-card" role="group" aria-label={p.name || tr('Nowy profil')}>
+            <div className="profile-card" role="group" aria-label={shownProfileName(p, settings.shell, tr) || tr('Nowy profil')}>
               <div className="profile-head">
-                <ColorPicker value={p.color} label={`${tr('Kolor')}: ${p.name}`} onChange={(color) => update((st) => upsertProfile(st, { ...p, color }))} />
-                <input id={`settings-profile-name-${p.id}`} className="input profile-name" aria-label={tr('Nazwa')} value={p.name} placeholder={tr('Nazwa')} onChange={(e) => update((st) => upsertProfile(st, { ...p, name: e.target.value }))} />
+                <ColorPicker value={p.color} label={`${tr('Kolor')}: ${shownProfileName(p, settings.shell, tr)}`} onChange={(color) => update((st) => upsertProfile(st, { ...p, color }))} />
+                <input id={`settings-profile-name-${p.id}`} className="input profile-name" aria-label={tr('Nazwa')} value={shownProfileName(p, settings.shell, tr)} placeholder={tr('Nazwa')} onChange={(e) => update((st) => upsertProfile(st, { ...p, name: e.target.value }))} />
                 <Select id={`settings-profile-cli-${p.id}`} className="select profile-cli" aria-label="CLI" value={p.cli} onChange={(e) => update((st) => upsertProfile(st, { ...p, cli: e.target.value as CliKind }))}>
                   <option value="claude">claude</option>
                   <option value="codex">codex</option>

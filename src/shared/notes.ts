@@ -46,3 +46,16 @@ export function rightPanelOrder(previous: readonly RightPanel[], open: Record<Ri
   const next = [...kept, ...RIGHT_PANELS.filter((panel) => open[panel] && !kept.includes(panel))];
   return next.length === previous.length && next.every((panel, i) => panel === previous[i]) ? previous : next;
 }
+
+/** localStorage key of the right column's order (App.tsx). */
+export const RIGHT_ORDER_KEY = 'mc-right-panels-v1';
+
+/** The right column's order as saved by the renderer (localStorage, see App.tsx): known panels, each once; anything else is empty. */
+export function parseRightPanelOrder(raw: string | null): readonly RightPanel[] {
+  try {
+    const value: unknown = JSON.parse(raw ?? '[]');
+    return Array.isArray(value) ? value.filter((panel, i): panel is RightPanel => (RIGHT_PANELS as readonly unknown[]).includes(panel) && value.indexOf(panel) === i) : [];
+  } catch {
+    return [];
+  }
+}

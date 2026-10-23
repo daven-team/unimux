@@ -5,6 +5,7 @@ import { cellLabel } from '../../shared/agentWork';
 import { activeProject, activeTab, findCell, getProfile } from '../../shared/state';
 import { shouldNotify, type CellStatus, type HookInfo, type StatusCause, type StatusReason } from '../../shared/status';
 import { playAlertSound } from './alertSound';
+import { profileName } from './cliUi';
 import { tr } from './i18n';
 import { getS, getUi } from './store';
 import { statusLog } from './terminals/TerminalManager';
@@ -50,7 +51,7 @@ export function alertForStatus(
   statusLog.markAlert(cellId);
   if (decision.notify) {
     burst.push({
-      event: decision.event, cellId, label: cellLabel(found.cell, getUi().sessionTitles, profile.name), errorCode: info?.error,
+      event: decision.event, cellId, label: cellLabel(found.cell, getUi().sessionTitles, profileName(profile, tr)), errorCode: info?.error,
       projectId: found.project.id, projectName: found.project.name, tabId: found.tab.id, tabName: found.tab.name,
     });
   }

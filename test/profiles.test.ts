@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cleanEnv } from '../src/shared/env';
-import { buildCliCommand, buildLaunchCommand, DEFAULT_PROFILES, posixQuote, psQuote } from '../src/shared/profiles';
+import { buildCliCommand, buildLaunchCommand, DEFAULT_PROFILES, posixQuote, psQuote, shownProfileName } from '../src/shared/profiles';
 import { INPUT_MODES_OFF } from '../src/shared/termReset';
 
 const P = Object.fromEntries(DEFAULT_PROFILES.map((p) => [p.id, p]));
@@ -152,5 +152,22 @@ describe('per-cell model overrides', () => {
     for (const model of ['a;whoami', '%PATH%', 'a`id`', '$(id)', 'a"b', '-bad', 'a b']) {
       expect(() => buildCliCommand(P.codex, { mode: 'new', model })).toThrow('Invalid model');
     }
+  });
+});
+
+describe('shownProfileName', () => {
+  const shell = DEFAULT_PROFILES.find((p) => p.cli === 'shell')!;
+  it('names the built-in shell profile after the shell chosen in Settings', () => {
+    expect(shownProfileName(shell, 'pwsh')).toBe('PowerShell');
+    expect(shownProfileName(shell, 'powershell')).toBe('Windows PowerShell');
+    expect(shownProfileName(shell, 'cmd', () => 'Command Prompt')).toBe('Command Prompt');
+    expect(shownProfileName({ ...shell, name: 'Terminal' }, 'zsh')).toBe('zsh');
+    expect(shownProfileName({ ...shell, id: 'ssh-shell' }, 'bash')).toBe('bash');
+  });
+
+  it('keeps renamed, custom and agent profile names', () => {
+    expect(shownProfileName({ ...shell, name: 'Moja konsola' }, 'cmd')).toBe('Moja konsola');
+    expect(shownProfileName({ id: 'wsl', name: 'PowerShell', cli: 'shell' }, 'cmd')).toBe('PowerShell');
+    expect(shownProfileName(DEFAULT_PROFILES[0], 'cmd')).toBe('Claude');
   });
 });

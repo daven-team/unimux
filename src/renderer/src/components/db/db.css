@@ -8,7 +8,7 @@
 .db-tree { flex: 1; min-height: 0; overflow: auto; position: relative; padding-bottom: 8px; }
 .db-row { position: absolute; left: 0; right: 0; height: 24px; display: flex; align-items: center; gap: 5px; padding-right: 8px; color: var(--text-2); cursor: default; white-space: nowrap; user-select: none; }
 .db-row:hover { background: var(--bg-hover); }
-.db-row.sel { background: var(--accent-soft); color: var(--text); }
+.db-row.sel { background: var(--selection-bg); color: var(--text); }
 .db-row svg { flex: none; color: var(--muted); }
 .db-row .db-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 .db-row .db-name.dim { color: var(--muted); }
@@ -24,7 +24,7 @@
 .db-row .db-name { flex: 0 1 auto; min-width: 2.5em; }
 .db-column .db-name, .db-constraint .db-name, .db-index .db-name { flex: 0 0 auto; max-width: calc(100% - 40px); }
 .db-tree:focus { outline: none; }
-.db-tree:focus-visible .db-row.sel { box-shadow: inset 0 0 0 1px var(--accent); }
+.db-tree:focus-visible .db-row.sel { box-shadow: inset 0 0 0 1px #ffffff14; }
 .db-args { color: var(--muted); font-size: 11px; }
 .db-folder-name { color: var(--text-2); font-size: 11.5px; }
 .db-color { flex: none; width: 8px; height: 8px; border-radius: 50%; }

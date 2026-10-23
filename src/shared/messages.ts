@@ -296,6 +296,7 @@ export const messages = {
   'Preset': ['Preset', 'Vorlage', 'Plantilla', 'Modèle', 'Predefinição'],
   'Grid': ['Grid', 'Raster', 'Cuadrícula', 'Grille', 'Grelha'],
   'Terminal': ['Terminal', 'Terminal', 'Terminal', 'Terminal', 'Terminal'],
+  'Wiersz polecenia': ['Command Prompt', 'Eingabeaufforderung', 'Símbolo del sistema', 'Invite de commandes', 'Prompt de comando'],
   'Zamknij zakładkę „{name}”': ['Close tab “{name}”', 'Tab „{name}“ schließen', 'Cerrar pestaña «{name}»', 'Fermer l’onglet « {name} »', 'Fechar separador «{name}»'],
   'Enter: aktywna · Shift+Enter: wszystkie': ['Enter: active cell · Shift+Enter: all cells', 'Enter: aktive Zelle · Umschalt+Enter: alle', 'Enter: celda activa · Mayús+Enter: todas', 'Entrée : cellule active · Maj+Entrée : toutes', 'Enter: célula ativa · Shift+Enter: todas'],
   'zamknięty grid {layout}, przywróć': ['closed grid {layout}, restore', 'geschlossenes Raster {layout}, wiederherstellen', 'cuadrícula cerrada {layout}, restaurar', 'grille fermée {layout}, rétablir', 'grelha fechada {layout}, restaurar'],

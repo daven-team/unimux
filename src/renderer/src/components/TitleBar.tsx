@@ -17,7 +17,7 @@ import { StatusBadges } from './StatusBadges';
 import { Brand } from './Brand';
 import { activateFile, closeFile, closeFiles, keepFile, useFileStore, type FileDocument } from '../files';
 import { useStatusCounts } from '../statusCounts';
-import { splitMenuItem } from '../splitView';
+import { splitMenuItems } from '../splitView';
 import { locateInFiles } from '../explorer';
 import { fullProjectPath } from '../../../shared/platform';
 import { tabsToClose } from '../../../shared/fileOps';
@@ -238,7 +238,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
         { label: tr('Zamknij'), onClick: () => void closeFile(doc.id) },
         { label: tr('Zamknij pozostałe'), disabled: idsFor('others').length === 0, onClick: () => void closeFiles(idsFor('others')) },
         { label: tr('Zamknij karty po prawej'), disabled: idsFor('right').length === 0, onClick: () => void closeFiles(idsFor('right')) },
-        { sep: true }, splitMenuItem(doc.id),
+        { sep: true }, ...splitMenuItems(doc.id),
       ]);
       return;
     }
@@ -250,7 +250,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
         { label: tr('Zamknij'), onClick: () => void closeFile(doc.id) },
         { label: tr('Zamknij pozostałe'), disabled: idsFor('others').length === 0, onClick: () => void closeFiles(idsFor('others')) },
         { label: tr('Zamknij karty po prawej'), disabled: idsFor('right').length === 0, onClick: () => void closeFiles(idsFor('right')) },
-        { sep: true }, splitMenuItem(doc.id),
+        { sep: true }, ...splitMenuItems(doc.id),
         ...(objectName ? [{ sep: true } as const, { label: tr('Kopiuj nazwę'), onClick: () => window.mc.clipboardWrite(objectName) }] : []),
       ]);
       return;
@@ -263,7 +263,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       { label: tr('Zamknij pozostałe'), disabled: idsFor('others').length === 0, onClick: () => void closeFiles(idsFor('others')) },
       { label: tr('Zamknij karty po prawej'), disabled: idsFor('right').length === 0, onClick: () => void closeFiles(idsFor('right')) },
       { label: tr('Zamknij wszystkie pliki'), onClick: () => void closeFiles(idsFor('all')) },
-      { sep: true }, splitMenuItem(doc.id),
+      { sep: true }, ...splitMenuItems(doc.id),
       { sep: true },
       { label: tr('Kopiuj ścieżkę'), onClick: () => window.mc.clipboardWrite(full) },
       // A remote file has no local path; a local file outside the projects has no project to be relative to.
