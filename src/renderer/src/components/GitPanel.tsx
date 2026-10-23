@@ -86,6 +86,7 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
   const panel = useRef<HTMLDivElement>(null);
   const [historyLayout, setHistoryLayout] = useState(readHistoryLayout);
   const [changesLayout, setChangesLayout] = useState(readChangesLayout);
+  const [changesOpen, setChangesOpen] = useState(true);
   const updateChangesLayout = (next: ChangesLayout) => { setChangesLayout(next); try { localStorage.setItem(CHANGES_KEY, JSON.stringify(next)); } catch { /* the choice just is not remembered */ } };
   const updateHistoryLayout = (next: HistoryLayout) => { setHistoryLayout(next); try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch { /* the layout just is not remembered */ } };
   const [trust, setTrust] = useState<GitTrustInfo | null>(null);
@@ -213,7 +214,8 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
     const total = panel.current?.clientHeight ?? 600;
     updateHistoryLayout({ ...historyLayout, collapsed: false, height: clampHistory((historyLayout.height ?? Math.round(total * 0.45)) + step, total) });
   };
-  const historyProps = { collapsed: historyLayout.collapsed, height: historyLayout.height, onToggle: () => updateHistoryLayout({ ...historyLayout, collapsed: !historyLayout.collapsed }) };
+  // The saved height splits the panel only while both sections are open; with Changes collapsed the history fills the rest.
+  const historyProps = { collapsed: historyLayout.collapsed, height: changesOpen ? historyLayout.height : null, onToggle: () => updateHistoryLayout({ ...historyLayout, collapsed: !historyLayout.collapsed }) };
 
   const hasLocalChanges = !!status?.files.some((f) => !f.untracked);
 
@@ -393,10 +395,11 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
         view={changesLayout.view} sort={changesLayout.sort} projectId={projectId} status={status} busy={!!busy} writable={canWrite} programsNote={programsNote}
         opts={opts} run={run} onOpen={openDiff} onMenu={fileMenu} editPath={editPath} branch={branchControl}
         onPush={status.push ? pushAfterCommit : undefined} commitSlot={commitSlot}
+        open={changesOpen} onToggle={() => setChangesOpen((v) => !v)}
       />
       {publish.dialog}
       {cloning && <GitCloneDialog target={{ kind: 'new' }} onClose={() => setCloning(false)} />}
-      <div className="git-splitter" role="separator" aria-orientation="horizontal" aria-label={tr('Zmień wysokość historii')} tabIndex={0} onPointerDown={startResize} onKeyDown={resizeKey} />
+      {changesOpen && <div className="git-splitter" role="separator" aria-orientation="horizontal" aria-label={tr('Zmień wysokość historii')} tabIndex={0} onPointerDown={startResize} onKeyDown={resizeKey} />}
       <GitHistory projectId={projectId} historyKey={historyKey} initial={status.initial} opts={opts} nonce={nonce} actions={repoActions} {...historyProps} />
     </div>
   );
