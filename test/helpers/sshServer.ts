@@ -56,6 +56,17 @@ export interface TestServerOptions {
    * that local port); `false` refuses every forward like a server with AllowTcpForwarding no.
    */
   tcpForwarding?: boolean;
+  /**
+   * 1.0.6: a small POSIX-like shell over this local folder (the remote "/" is the folder): the prompt shows the folder, `cd`,
+   * `ls`, `pwd`, `echo` and `exit` work, `vim` / `vi` / `nano` open a full-screen program (alternate screen) left with `:q`
+   * Enter or Ctrl+X, and the exec request `exec sh -s` answers the path completion script of src/shared/remotePaths.ts like a
+   * Linux server would: the shell's folder, `@busy` while a program runs, the listing of the folder asked for.
+   */
+  shellRoot?: string;
+  /** With shellRoot: the folder the shell starts in, also $HOME (default "/"). */
+  shellHome?: string;
+  /** With shellRoot: the shell reports its folder with OSC 7 at every prompt (fish, vte.sh); off: only the server knows it. */
+  shellOsc7?: boolean;
 }
 
 /** Test knobs and counters of the SFTP subsystem (mutable while the server runs). */
@@ -167,6 +178,120 @@ function lsMode(mode: number): string {
 function entryOf(name: string, st: Stats, path?: string, modes?: Map<string, number>): FileEntry {
   const attrs = attrsOf(st, path, modes);
   return { filename: name, longname: `${lsMode(attrs.mode)}    1 alice    staff ${String(st.size).padStart(8)} Jan  1 00:00 ${name}`, attrs };
+}
+
+// ── the fake shell of `shellRoot` (1.0.6) ────────────────────────────────────
+
+/** What the fake shell of one connection is doing: its folder and whether a full-screen program has the terminal. */
+interface FakeShellState { cwd: string; program: boolean }
+
+/** The local path of a remote path under `root` (null when it does not exist). */
+function shellLocal(root: string, remote: string): { path: string; dir: boolean } | null {
+  const path = join(root, ...remote.split('/').filter(Boolean));
+  try { return { path, dir: statSync(path).isDirectory() }; } catch { return null; }
+}
+
+/** Words of a command line with quotes and backslashes removed (enough for the fake shell's commands). */
+function shellWords(line: string): string[] {
+  const words: string[] = [];
+  let cur: string | null = null;
+  let quote = '';
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) { if (ch === quote) quote = ''; else cur += ch; continue; }
+    if (ch === ' ') { if (cur !== null) words.push(cur); cur = null; continue; }
+    cur ??= '';
+    if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === '\\' && i + 1 < line.length) cur += line[++i];
+    else cur += ch;
+  }
+  if (cur !== null) words.push(cur);
+  return words;
+}
+
+/** A value of the completion script: '...' parts, the '\'' escape and "$HOME". */
+function scriptValue(raw: string, home: string): string {
+  let out = '';
+  for (let i = 0; i < raw.length;) {
+    if (raw.startsWith('"$HOME"', i)) { out += home; i += 7; continue; }
+    if (raw[i] === "'") { const end = raw.indexOf("'", i + 1); out += raw.slice(i + 1, end); i = end + 1; continue; }
+    if (raw[i] === '\\') { out += raw[i + 1]; i += 2; continue; }
+    out += raw[i++];
+  }
+  return out;
+}
+
+/** Answers the path completion script (remotePaths.listScript) the way `sh -s` on a Linux server prints it. */
+function answerListing(script: string, root: string, home: string, state: FakeShellState): string {
+  if (state.program) return '@busy\n';
+  const value = (name: string) => scriptValue(new RegExp(`^${name}=(.*)$`, 'm').exec(script)?.[1] ?? "''", home);
+  const cwd = value('c') || state.cwd;
+  let out = `@cwd ${cwd}\n`;
+  if (!script.includes('ls -1ApL')) return out;
+  const asked = value('d');
+  const dir = asked ? remoteNormalize(asked, cwd) : cwd;
+  const local = shellLocal(root, dir);
+  if (!local?.dir) return `${out}@nodir\n`;
+  out += `@dir ${dir}\n`;
+  const names = readdirSync(local.path).sort().map((n) => (shellLocal(root, `${dir}/${n}`)?.dir ? `${n}/` : n));
+  return out + names.slice(0, 501).map((n) => `${n}\n`).join('');
+}
+
+/** The fake shell on one shell channel: echo, backspace, Enter runs the command; a program takes the keys until it quits. */
+function runFakeShell(stream: ServerChannel, root: string, osc7: boolean, state: FakeShellState, input: string[]): void {
+  const prompt = () => `${osc7 ? `\u001b]7;file://test-server${state.cwd.split('/').map(encodeURIComponent).join('/')}\u0007` : ''}alice@test-server:${state.cwd}$ `;
+  let line = '';
+  let keys = '';
+  stream.write(`unimux test server\r\n${prompt()}`);
+  const run = (command: string): string => {
+    const [name, ...args] = shellWords(command.trim());
+    if (!name) return '';
+    if (name === 'cd') {
+      const target = remoteNormalize(args[0] ?? '/', state.cwd);
+      const local = shellLocal(root, target);
+      if (!local?.dir) return `-sh: cd: ${args[0]}: No such file or directory\r\n`;
+      state.cwd = target;
+      return '';
+    }
+    if (name === 'pwd') return `${state.cwd}\r\n`;
+    if (name === 'echo') return `${args.join(' ')}\r\n`;
+    if (name === 'ls') {
+      const dir = remoteNormalize(args.find((a) => !a.startsWith('-')) ?? '.', state.cwd);
+      const local = shellLocal(root, dir);
+      if (!local?.dir) return `ls: cannot access '${dir}': No such file or directory\r\n`;
+      const names = readdirSync(local.path).sort().map((n) => (shellLocal(root, `${dir}/${n}`)?.dir ? `\u001b[1;34m${n}\u001b[0m` : n));
+      return names.length ? `${names.join('  ')}\r\n` : '';
+    }
+    if (name === 'vim' || name === 'vi' || name === 'nano') {
+      state.program = true;
+      keys = '';
+      return `\u001b[?1049h\u001b[H\u001b[2J"${args[0] ?? '[No Name]'}" (fake ${name}: :q Enter or Ctrl+X quits)\r\n~\r\n~\r\n`;
+    }
+    return `-sh: ${name}: command not found\r\n`;
+  };
+  stream.on('data', (chunk: Buffer) => {
+    const text = chunk.toString('utf8');
+    input.push(text);
+    for (const ch of text.replace(/\u001b\[20[01]~/g, '')) {
+      if (state.program) {
+        keys += ch;
+        if (keys.endsWith(':q\r') || ch === '\u0018') {
+          state.program = false;
+          stream.write(`\u001b[?1049l${prompt()}`);
+        }
+        continue;
+      }
+      if (ch === '\x7f') { if (line) { line = line.slice(0, -1); stream.write('\b \b'); } continue; }
+      if (ch === '\t') { stream.write('\u0007'); continue; }
+      if (ch === '\u0003') { line = ''; stream.write(`^C\r\n${prompt()}`); continue; }
+      if (ch !== '\r') { if (ch >= ' ') { line += ch; stream.write(ch); } continue; }
+      const command = line;
+      line = '';
+      if (command.trim() === 'exit') { stream.write('\r\nlogout\r\n'); stream.exit(0); stream.end(); return; }
+      const out = run(command);
+      stream.write(`\r\n${out}${state.program ? '' : prompt()}`);
+    }
+  });
 }
 
 /** Normalizes a remote path ("." and ".." resolved against `home`); the result is absolute and never leaves "/". */
@@ -375,6 +500,8 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
 
   const server = new Server({ hostKeys: [host.private], ...(opts.banner ? { banner: opts.banner } : {}) }, (conn) => {
     conns.add(conn);
+    const shellHome = remoteNormalize(opts.shellHome ?? '/', '/');
+    const shellState: FakeShellState = { cwd: shellHome, program: false };
     conn.on('close', () => conns.delete(conn));
     conn.on('error', () => undefined);
     conn.on('authentication', (ctx) => {
@@ -421,6 +548,18 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
         acceptEnv?.();
       });
       session.on('exec', (acceptExec, rejectExec, info) => {
+        if (opts.shellRoot && info.command === 'exec sh -s') {
+          const stream = acceptExec();
+          sftpStats.execs.push(info.command);
+          let script = '';
+          stream.on('data', (chunk: Buffer) => { script += chunk.toString('utf8'); });
+          stream.on('end', () => {
+            stream.write(answerListing(script, opts.shellRoot!, shellHome, shellState));
+            stream.exit(0);
+            stream.end();
+          });
+          return;
+        }
         const sudo = opts.sftpSudo;
         if (!opts.sftpRoot || !sudo) { rejectExec?.(); return; }
         const stream = acceptExec();
@@ -470,6 +609,7 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
       session.on('shell', (ok) => {
         const stream = ok();
         shells.push(stream);
+        if (opts.shellRoot) { runFakeShell(stream, opts.shellRoot, opts.shellOsc7 === true, shellState, input); return; }
         stream.write(opts.greeting ?? 'Welcome to the test server\r\n$ ');
         let line = '';
         stream.on('data', (chunk: Buffer) => {

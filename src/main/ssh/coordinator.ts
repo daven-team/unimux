@@ -13,6 +13,7 @@ import {
   hostEndpoint, isLivePhase, knownHostId, sanitizeServerText, startupInput,
   type SshConnectCellRequest, type SshErrorCode, type SshHost, type SshPhase, type SshPrompt, type SshPromptAnswer, type SshSessionState, type SshSessionsSnapshot,
 } from '../../shared/ssh';
+import { restoreCwdInput } from '../../shared/remotePaths';
 import { hostLogin, type HostLogin } from '../../shared/sshIdentity';
 import type { AppState } from '../../shared/types';
 import { checkPassphrase } from './keys';
@@ -86,7 +87,10 @@ export class SshCoordinator {
     if (!found || found.cell.ssh?.hostId !== req.hostId || !host) return { ok: false, error: 'hostMissing' };
     const existing = this.sessionsByCell.get(req.cellId);
     if (existing && isLivePhase(existing.state.phase)) return { ok: true }; // R13
-    return this.start(req.cellId, 'cell', host, { cols: req.cols, rows: req.rows, startup: startupInput(host.startupCommand) ?? undefined });
+    // A restored session (1.0.6) goes back into its last folder before the host's own startup command runs.
+    const cd = req.restoreCwd ? restoreCwdInput(found.cell.ssh.cwd) : null;
+    const startup = (cd ?? '') + (startupInput(host.startupCommand) ?? '');
+    return this.start(req.cellId, 'cell', host, { cols: req.cols, rows: req.rows, startup: startup || undefined });
   }
 
   /**

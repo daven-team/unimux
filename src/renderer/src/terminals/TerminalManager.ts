@@ -14,6 +14,7 @@ import { isFocusOrMouseReport, isUserInput, StatusTracker, type CellStatus, type
 import { hookDetail, StatusLog, type StatusTrigger } from '../../../shared/statusLog';
 import { sshModeReset } from '../../../shared/ssh';
 import { DEFAULT_SSH_THEME, sshThemeById } from '../../../shared/sshThemes';
+import type { RemoteListResult } from '../../../shared/remotePaths';
 import { EMPTY_CWD, parseOsc7, parseOsc99, trackOsc7, trackOsc99, type CwdTrack } from '../../../shared/remoteCwd';
 import { inputModesOff, isMouseReport, MouseFloodGuard, terminalModeReset } from '../../../shared/termReset';
 import { encodeWin32Key } from '../../../shared/win32input';
@@ -196,8 +197,10 @@ class TerminalManager {
   private setPort(port: MessagePort): void {
     this.port?.close();
     this.port = port;
-    // Acks owed to the previous host/port are meaningless for the new one.
+    // Acks owed to the previous host/port are meaningless for the new one, and so are its listings.
     this.acks.clear();
+    for (const done of this.listings.values()) done({ ok: false, reason: 'gone' });
+    this.listings.clear();
     if (this.ackTimer) clearTimeout(this.ackTimer);
     this.ackTimer = null;
     port.onmessage = (e) => { for (const m of unpackHostMessage(e.data as HostToRendererPort)) this.onHostMessage(m); };
@@ -232,6 +235,12 @@ class TerminalManager {
   }
 
   private onHostMessage(m: HostToRenderer): void {
+    if (m.t === 'sshListResult') {
+      const done = this.listings.get(m.reqId);
+      this.listings.delete(m.reqId);
+      done?.(m.result);
+      return;
+    }
     if (m.t === 'data' && !this.firstOutput) { this.firstOutput = true; window.mc?.startupMark?.('first-output'); }
     if (m.t === 'exit') {
       this.exited.add(m.id);
@@ -808,6 +817,25 @@ class TerminalManager {
   private remoteCwds = new Map<string, CwdTrack>();
   remoteCwd(cellId: string): string | undefined {
     return this.remoteCwds.get(cellId)?.path ?? undefined;
+  }
+  /** The shell reported a folder of another machine last (a nested ssh): this cell's server cannot complete its paths. */
+  remoteCwdForeign(cellId: string): boolean {
+    return this.remoteCwds.get(cellId)?.foreign === true;
+  }
+
+  private listings = new Map<number, (result: RemoteListResult) => void>();
+  private listingId = 0;
+
+  /** SSH path completion (1.0.6): lists a folder on the cell's own SSH connection (the Pty Host runs it, see SshManager.list). */
+  sshList(cellId: string, req: { dir: string; cwd: string | null; cwdOnly?: boolean }): Promise<RemoteListResult> {
+    if (!this.port) return Promise.resolve({ ok: false, reason: 'gone' });
+    const reqId = ++this.listingId;
+    return new Promise((resolve) => {
+      // The Pty Host gives up after 5 s itself; no answer at all (it went away) must not hold the cell's next listing.
+      const timer = setTimeout(() => { this.listings.delete(reqId); resolve({ ok: false, reason: 'gone' }); }, 8000);
+      this.listings.set(reqId, (result) => { clearTimeout(timer); resolve(result); });
+      this.post({ t: 'sshList', id: cellId, reqId, dir: req.dir, cwd: req.cwd, ...(req.cwdOnly ? { cwdOnly: true } : {}) });
+    });
   }
 
   private remoteAddon: ((cellId: string, term: Terminal) => RemoteAddon) | null = null;

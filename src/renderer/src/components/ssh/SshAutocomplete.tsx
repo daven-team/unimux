@@ -1,6 +1,7 @@
 // The popup of the SSH command autocomplete (Termius-like): matching commands under (or above) the cursor, lined up with
 // the typed command, and the rest of the chosen one as ghost text after the cursor, both in the terminal's font over its
-// character grid. State and keys: terminals/sshAutocomplete.ts.
+// character grid. State and keys: terminals/sshAutocomplete.ts. Entries of a server folder (a path word, 1.0.6) show only
+// their name, folders first and with a '/', lined up with the word; Tab and Shift+Tab cycle through them.
 import { useCallback, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import type { Suggestion } from '../../../../shared/commandSuggest';
 import { useI18n } from '../../i18n';
@@ -9,14 +10,15 @@ import { ISnippet } from '../icons';
 import './sshAutocomplete.css';
 
 function Highlighted({ item }: { item: Suggestion }) {
+  const text = item.display ?? item.text;
   const parts: ReactNode[] = [];
   let at = 0;
   for (const [start, end] of item.ranges) {
-    if (start > at) parts.push(item.text.slice(at, start));
-    parts.push(<mark key={start}>{item.text.slice(start, end)}</mark>);
+    if (start > at) parts.push(text.slice(at, start));
+    parts.push(<mark key={start}>{text.slice(start, end)}</mark>);
     at = end;
   }
-  if (at < item.text.length) parts.push(item.text.slice(at));
+  if (at < text.length) parts.push(text.slice(at));
   return <>{parts}</>;
 }
 
@@ -72,6 +74,7 @@ export function SshAutocomplete({ cellId }: { cellId: string }) {
 
   if (!view) return null;
   const snippets = view.items.some((item) => item.kind === 'snippet');
+  const paths = view.items[0]?.kind === 'path';
   const ghostChars = Array.from(view.ghost).slice(0, view.room);
   return <>
     {ghostChars.length > 0 && (
@@ -81,14 +84,15 @@ export function SshAutocomplete({ cellId }: { cellId: string }) {
     )}
     <div ref={box} className="ssh-ac" role="listbox" aria-label={tr('Podpowiedzi')} onMouseDown={(e) => e.preventDefault()}>
       {view.items.map((item, i) => (
-        <div key={item.text} role="option" aria-selected={i === view.selected} className={`ssh-ac-item${i === view.selected ? ' sel' : ''}`}
+        <div key={item.text} role="option" aria-selected={i === view.selected}
+          className={`ssh-ac-item${i === view.selected ? ' sel' : ''}${item.kind === 'path' && item.display?.endsWith('/') ? ' dir' : ''}`}
           title={item.label ? `${item.label}\n${item.text}` : item.text} onClick={() => acceptSuggestion(cellId, i)}>
           {snippets && <span className="ssh-ac-kind" title={item.kind === 'snippet' ? tr('Snippet') : undefined}>{item.kind === 'snippet' && <ISnippet />}</span>}
           <span className="ssh-ac-text"><Highlighted item={item} /></span>
           {item.label && <span className="ssh-ac-label">{item.label}</span>}
         </div>
       ))}
-      <div className="ssh-ac-foot">{tr('↓ wybierz · Enter wstaw · → dopełnij · Esc zamknij')}</div>
+      <div className="ssh-ac-foot">{paths ? tr('Tab następny · Shift+Tab poprzedni · Enter wstaw · Esc zamknij') : tr('↓ wybierz · Enter wstaw · → dopełnij · Esc zamknij')}</div>
     </div>
   </>;
 }

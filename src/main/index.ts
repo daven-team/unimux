@@ -101,8 +101,8 @@ import { cliForProfile, CLI_NAMES, isCliId, missingCli, resolveExecFile, spawnDe
 import { automationSchemas, type AutomationOperation, type McpInfo } from '../shared/automation';
 import type { StateEdit } from '../shared/stateEdits';
 import { stateChange } from '../shared/statePatch';
-import { findCell, getProfile } from '../shared/state';
-import { resumesConversation } from '../shared/ssh';
+import { findCell, getProfile, patchSshCell, unlessRestoring } from '../shared/state';
+import { resumeForPhase, resumesConversation, type SshSessionState } from '../shared/ssh';
 import { automationHintForHook, automationStatusFor } from '../shared/runtimeStatus';
 import { followedSession, shouldUpdateCellSession } from '../shared/sessionTrack';
 import type { CodexNotice } from '../shared/codexHooks';
@@ -235,7 +235,8 @@ const { guardedHandle, guardedOn } = createIpcGuard(ipcMain, fromAppWindow);
 let ssh: SshCoordinator | null = null;
 // A second instance never reads (nor backs up) the state: it only hands over to the first one and exits.
 // A state.json that stays locked ends the start here (with a message): saving the defaults over it would lose the user's data.
-let state: AppState = superseded ? defaultState(appPlatform(process.platform)) : loadStateOrFail();
+// With "Przywracaj sesje SSH po ponownym uruchomieniu" off, which sessions the last run had open means nothing for this one.
+let state: AppState = superseded ? defaultState(appPlatform(process.platform)) : unlessRestoring(loadStateOrFail());
 function loadStateOrFail(): AppState {
   try {
     return loadState(DATA_DIR, appPlatform(process.platform), { log: crashLog.warn });
@@ -815,7 +816,7 @@ function startSsh(): void {
       return isSftpSessionId(id) ? sftpHost.send(m) : isDbSessionId(id) ? dbHost.send(m) : ptyHost.sendSsh(m);
     },
     events: {
-      session: (s) => { if (isSftpSessionId(s.cellId)) sftp?.onCoordinatorSession(s); else if (isDbSessionId(s.cellId)) db?.onCoordinatorSession(s); else send('ssh:session', s); },
+      session: (s) => { if (isSftpSessionId(s.cellId)) sftp?.onCoordinatorSession(s); else if (isDbSessionId(s.cellId)) db?.onCoordinatorSession(s); else { noteSshResume(s); send('ssh:session', s); } },
       prompt: (cellId, prompt) => { if (isSftpSessionId(cellId)) sftp?.onPrompt(cellId, prompt); else if (isDbSessionId(cellId)) db?.onPrompt(cellId, prompt); else send('ssh:prompt', cellId, prompt); },
       vaultChanged,
     },
@@ -924,6 +925,17 @@ ptyHost.on('message', (m: HostToMain) => {
     send('cell:spawnError', m.id, m.message);
   }
 });
+/**
+ * 1.0.6, "Przywracaj sesje SSH po ponownym uruchomieniu": whether each SSH cell's session is connected is kept in the cell
+ * (cell.ssh.resume), so the next app start knows which ones to restore. The sessions the quit (or the end of the system
+ * session, or an update taking over) closes leave it as it was: they were connected when the app closed.
+ */
+function noteSshResume(s: SshSessionState): void {
+  if (quitting || gating || superseded || sessionEndingNow(sessionEndingAt, Date.now())) return;
+  const resume = resumeForPhase(s.phase);
+  if (resume === null || patchSshCell(state, s.cellId, { resume }) === state) return;
+  controller.change((st) => patchSshCell(st, s.cellId, { resume }));
+}
 /** Everything that ran in the Pty Host is gone: logins, the install window, MCP tokens, SSH sessions. Returns what the toast promises. */
 function forgetHostTerminals(code: unknown, stderrTail: unknown): boolean {
   // A restart before the renderer listens must still stop the app-start SSH reconnect (D5 after a Pty Host restart).

@@ -12,6 +12,7 @@ import { SettingRow, SettingsGroup } from '../SettingRow';
 export function SshAutocompleteSettings() {
   const { tr } = useI18n();
   const enabled = useStore((st) => st.s.settings.sshAutocomplete !== false);
+  const pathComplete = useStore((st) => st.s.settings.sshPathComplete !== false);
   const hosts = useStore((st) => st.s.sshHosts);
   const [status, setStatus] = useState<SshHistoryStatus | null>(null);
   const load = () => void window.mc.sshHistory.status().then(setStatus, () => setStatus({ counts: {}, readOnly: false, file: '' }));
@@ -37,6 +38,11 @@ export function SshAutocompleteSettings() {
         hint={tr('Podczas pisania polecenia pod kursorem pojawiają się pasujące polecenia z historii hosta i jednowierszowe snippety. Klawisze należą do powłoki; gdy lista jest widoczna, strzałka w dół wchodzi w nią, strzałka w prawo dopełnia szary tekst za kursorem, a Esc ją zamyka. Nie działa w programach pełnoekranowych (vim, htop, tmux).')}>
         <input id="settings-ssh-autocomplete" className="setting-switch" type="checkbox" role="switch" checked={enabled}
           onChange={(e) => update((st) => updateSettings(st, { sshAutocomplete: e.target.checked }))} />
+      </SettingRow>
+      <SettingRow title={tr('Dopełnianie ścieżek z serwera')} htmlFor="settings-ssh-path-complete"
+        hint={tr('Gdy wpisywane słowo jest ścieżką (po cd, ls, cat, vim, nano i podobnych poleceniach albo zawiera „/”), lista pokazuje pasujące pliki i foldery z serwera, foldery najpierw. Tab wstawia kolejne dopasowanie, Shift+Tab poprzednie, a Enter uruchamia polecenie. Folder jest odczytywany przez to samo połączenie SSH (polecenie ls), bez ponownego logowania.')}>
+        <input id="settings-ssh-path-complete" className="setting-switch" type="checkbox" role="switch" checked={enabled && pathComplete} disabled={!enabled}
+          onChange={(e) => update((st) => updateSettings(st, { sshPathComplete: e.target.checked }))} />
       </SettingRow>
       {readOnly && status?.file && (
         <div className="ssh-banner-warn" role="alert">

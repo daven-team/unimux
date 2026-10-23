@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Terminal as XTerminal } from '@xterm/xterm';
 import { CommandLineFollower, SETTLE_MS, type AutocompleteView } from '../src/shared/commandFollower';
 import type { KeyLike, SuggestSource } from '../src/shared/commandSuggest';
+import type { CachedListing, RemoteEntry } from '../src/shared/remotePaths';
 
 const g = globalThis as Record<string, unknown>;
 const added: string[] = [];
@@ -96,7 +97,7 @@ class FakeShell {
 const key = (k: string, mods: Partial<KeyLike> = {}): KeyLike => ({ key: k, ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, ...mods });
 const KEY_DATA: Record<string, string> = { Enter: '\r', ArrowUp: '\x1b[A', ArrowDown: '\x1b[B', ArrowRight: '\x1b[C', Escape: '\x1b', Tab: '\t', Backspace: '\x7f' };
 
-async function setup(o: { history?: string[]; snippets?: SuggestSource[]; run?: Run; prompt?: string } = {}) {
+async function setup(o: { history?: string[]; snippets?: SuggestSource[]; run?: Run; prompt?: string; paths?: (dir: string) => CachedListing | undefined; submitted?: (line: string) => void } = {}) {
   const term = new Terminal({ cols: 60, rows: 10, allowProposedApi: true });
   let clock = 10_000;
   const remembered: string[] = [];
@@ -107,6 +108,7 @@ async function setup(o: { history?: string[]; snippets?: SuggestSource[]; run?: 
     hostId: () => 'host', enabled: () => true, shown: () => true, sources: () => sources,
     lastCommand: () => remembered.at(-1), remember: (_host, command) => { remembered.push(command); },
     publish: (v) => { view = v; }, now: () => clock,
+    ...(o.paths ? { paths: o.paths } : {}), ...(o.submitted ? { submitted: o.submitted } : {}),
   });
   const shell = new FakeShell(term, o.prompt ?? PROMPT, o.run);
   term.onData((d) => { sent.push(d); follower.input(d); shell.feed(d); });
@@ -362,5 +364,69 @@ describe('the command line follower (real xterm buffer)', () => {
     await t.shell.flush();
     // "ls" was typed while the cursor still sat on the line before: where it starts is not known, so it is not kept.
     expect(t.remembered).toEqual(['cd /var/log']);
+  });
+});
+
+describe('path completion from the server (1.0.6)', () => {
+  const tree: Record<string, string[]> = {
+    '': ['TEST1', 'TEST2', 'TEST3', 'TEST10', 'notes.txt', 'docs/'],
+    '/': ['srv/', 'etc/', 'home/'],
+    '/srv/': ['ftp/', 'www/'],
+  };
+  const listing = new Map<string, CachedListing>();
+  const paths = (dir: string): CachedListing | undefined => {
+    const names = tree[dir];
+    if (!names) return null;
+    if (!listing.has(dir)) listing.set(dir, { entries: names.map((n): RemoteEntry => (n.endsWith('/') ? { name: n.slice(0, -1), dir: true } : { name: n, dir: false })) });
+    return listing.get(dir);
+  };
+
+  it('vim TEST: Tab puts each match in the line, Shift+Tab goes back, Enter runs the line', async () => {
+    const submitted: string[] = [];
+    const t = await setup({ history: ['vim TEST.log'], paths, submitted: (line) => submitted.push(line) });
+    await t.type('vim TEST');
+    expect(t.view()?.items.map((i) => i.display)).toEqual(['TEST1', 'TEST2', 'TEST3', 'TEST10']);
+    expect(t.view()?.startCol).toBe(PROMPT.length + 4);
+    await t.press('Tab');
+    expect(t.shell.line).toBe('vim TEST1');
+    expect(t.view()?.selected).toBe(0);
+    await t.press('Tab');
+    await t.press('Tab');
+    expect(t.shell.line).toBe('vim TEST3');
+    expect(t.view()?.items).toHaveLength(4);
+    await t.press('Tab');
+    await t.press('Tab');
+    expect(t.shell.line).toBe('vim TEST1');
+    await t.press('Tab', { shiftKey: true });
+    expect(t.shell.line).toBe('vim TEST10');
+    // The shell never got a Tab of its own.
+    expect(t.sent).not.toContain('\t');
+    await t.press('Enter');
+    expect(t.sent.at(-1)).toBe('\r');
+    expect(t.view()).toBeNull();
+    expect(submitted).toEqual(['vim TEST10']);
+  });
+
+  it('cd /sr: Tab completes the only folder and lists it next; typing ends a cycle', async () => {
+    const t = await setup({ paths });
+    await t.type('cd /sr');
+    expect(t.view()?.items.map((i) => i.display)).toEqual(['srv/']);
+    await t.press('Tab');
+    expect(t.shell.line).toBe('cd /srv/');
+    t.advance(400);
+    t.follower.refresh();
+    expect(t.view()?.items.map((i) => i.display)).toEqual(['ftp/', 'www/']);
+    await t.press('Tab');
+    expect(t.shell.line).toBe('cd /srv/ftp/');
+    await t.type('x');
+    expect(t.shell.line).toBe('cd /srv/ftp/x');
+  });
+
+  it('suggests the history where nothing is listed yet, and Tab then stays the shell\'s', async () => {
+    const t = await setup({ history: ['git status', 'vim TEST.log'], paths: () => undefined });
+    await t.type('vim TE');
+    expect(t.view()?.items.map((i) => i.text)).toEqual(['vim TEST.log']);
+    await t.press('Tab');
+    expect(t.sent.at(-1)).toBe('\t');
   });
 });

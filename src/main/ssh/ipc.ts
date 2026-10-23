@@ -47,7 +47,7 @@ const S = {
   byHost: z.object({ hostId: id }).strict(),
   setIdentityPassword: z.object({ identityId: id, password: secret(SSH_LIMITS.password) }).strict(),
   byIdentity: z.object({ identityId: id }).strict(),
-  connect: z.object({ cellId: id, hostId: id, cols: z.number().int().min(2).max(2000), rows: z.number().int().min(1).max(1000) }).strict(),
+  connect: z.object({ cellId: id, hostId: id, cols: z.number().int().min(2).max(2000), rows: z.number().int().min(1).max(1000), restoreCwd: z.boolean().optional() }).strict(),
   answer: z.union([
     z.object({ cellId: id, promptId: id, cancel: z.literal(true) }).strict(),
     z.object({ cellId: id, promptId: id, values: z.array(z.string().max(SSH_LIMITS.password)).max(10), remember: z.boolean().optional() }).strict(),
