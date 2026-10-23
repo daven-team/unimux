@@ -16,7 +16,7 @@ import { appPlatform, normalizeProjectPath } from '../shared/platform';
 import { detectLanguage } from '../shared/languages';
 import { CHROMIUM_WEBGL_CONTEXTS } from '../shared/terminalLimits';
 import { translate, type MessageKey, type MessageParams } from '../shared/i18n';
-import { HookServer } from './hooks';
+import { bypassProxyForHooks, HookServer } from './hooks';
 import { pathExists } from './fsProbe';
 import { PromptFiles, pruneCellFiles, removeCellFiles } from './cellFiles';
 import { applyDockIcon, windowIcon } from './appIcon';
@@ -1111,7 +1111,8 @@ async function spawnRequestUnsafe(req: SpawnCellRequest): Promise<SpawnResult> {
   }
   const baseEnv = await cliDetector.applyEnv({ ...cleanEnv(process.env), MC_CELL_ID: req.cellId }, cli ?? undefined);
   if ((killCount.get(req.cellId) ?? 0) !== killsBefore) return { ok: true }; // the cell was closed while the CLI was being looked up
-  const claudeSettingsPath = req.profile.cli === 'claude' ? hooks.writeClaudeSettings(HOOKS_DIR, req.cellId) : undefined;
+  // The detected version picks http hooks (no process per tool call) or the curl commands older versions need.
+  const claudeSettingsPath = req.profile.cli === 'claude' ? hooks.writeClaudeSettings(HOOKS_DIR, req.cellId, cliDetector.snapshot().claude?.version) : undefined;
   let mode = req.mode;
   // Claude only writes a transcript after the first prompt: resuming an unused id would fail,
   // so start a new conversation that keeps the same id instead.
@@ -1128,6 +1129,8 @@ async function spawnRequestUnsafe(req: SpawnCellRequest): Promise<SpawnResult> {
     initialPrompt = { file, text: req.startupPrompt };
   }
   const env: Record<string, string> = baseEnv;
+  // Claude Code's own requests to 127.0.0.1 (http hooks, the MCP server) would otherwise go through the user's proxy.
+  if (req.profile.cli === 'claude') bypassProxyForHooks(env);
   let mcpConfig: LaunchOptions['mcp'];
   // The token reaches Claude through its per-cell --mcp-config file only (not the environment every tool process inherits);
   // Codex can only read it from a variable (see mcpCellConfig.ts).
