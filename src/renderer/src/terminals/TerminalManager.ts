@@ -818,18 +818,16 @@ class TerminalManager {
     else if (!e.remote && e.addon) { e.addon.dispose(); e.addon = null; }
   }
 
-  /** A dim line written by the app (not part of the session output, not replayed). */
-  writeNotice(cellId: string, text: string): void {
-    this.entries.get(cellId)?.term.write(`\r\n\x1b[90m${text}\x1b[0m\r\n`);
-  }
-
   /** An SSH session ended: the modes its remote programs switched on are switched off, the alternate screen is left (I2). */
   resetSshModes(cellId: string): void {
     const e = this.entries.get(cellId);
     if (e) e.term.write(sshModeReset(this.inAlternate(e)));
   }
 
-  /** Before an SSH reconnect: like prepareSpawn, but the screen and scrollback stay (spec 6.1 step 9). */
+  /**
+   * Before an SSH connect or reconnect: like prepareSpawn, the terminal starts empty (1.0.5), so the new session never shows
+   * what an earlier session or attempt left; the cell card covers the cell until the shell opens.
+   */
   prepareReconnect(cellId: string): void {
     const e = this.entries.get(cellId);
     // A new login starts in its own folder: the old report no longer says where the shell is.
@@ -838,8 +836,8 @@ class TerminalManager {
     if (!e) return;
     e.win32 = false;
     e.guard.reset();
-    // I2: a TUI that ran when the old session went away must not leave its modes in the new one.
-    e.term.write(sshModeReset(this.inAlternate(e)));
+    // I2: a TUI that ran when the old session went away must not leave its modes in the new one (reset() clears them too).
+    e.term.reset();
     e.scanner.reset();
     e.infer.exited();
     this.setStatus(e, () => e.tracker.reset(), 'restore');

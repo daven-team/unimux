@@ -446,38 +446,13 @@ export function sshPhaseLabel(state: SshSessionState | undefined, prompt?: SshPr
   }
 }
 
-export type SshNotice =
-  | { key: '[SSH · łączenie z {endpoint}]'; params: { endpoint: string } }
-  | { key: '[SSH · połączono]' }
-  | { key: '[SSH · rozłączono]' }
-  | { key: '[SSH · błąd: {reason}]'; reason: Localized };
-
-/** The dim line the renderer writes into the terminal when a session changes phase (not part of the replay). */
-export function sshNotice(prev: SshPhase | undefined, next: SshSessionState, ctx: { host: string; endpoint: string }): SshNotice | null {
-  if (prev === next.phase) return null;
-  switch (next.phase) {
-    case 'connected': return { key: '[SSH · połączono]' };
-    case 'closed': return { key: '[SSH · rozłączono]' };
-    case 'error': return { key: '[SSH · błąd: {reason}]', reason: sshErrorText(next.error ?? 'unknown', ctx) };
-    default: return null;
-  }
-}
-
-/**
- * The "connecting" line is written by the renderer right before it sends the connect request: session events come over
- * IPC and terminal data over the Pty Host port, so an event-driven line could land after the server greeting (W4).
- */
-export function connectingNotice(ctx: { host: string; endpoint: string }): Extract<SshNotice, { key: '[SSH · łączenie z {endpoint}]' }> {
-  return { key: '[SSH · łączenie z {endpoint}]', params: { endpoint: ctx.endpoint } };
-}
-
 /**
  * I2: what a remote TUI (vim, htop) switched on - mouse tracking, application cursor keys, bracketed paste, the alternate
  * screen - must not leak into the next session. Written when a session ends and before a reconnect; never ConPTY.
  */
 export const sshModeReset = (inAlternateScreen: boolean): string => terminalModeReset(inAlternateScreen, false);
 
-/** A live session just ended (closed, error, network drop): the terminal modes are reset before the notice line. */
+/** A live session just ended (closed, error, network drop): the terminal modes are reset; the cell card says what happened. */
 export const sshSessionEnded = (prev: SshPhase | undefined, next: SshPhase): boolean => isLivePhase(prev) && !isLivePhase(next);
 
 /** M3: the pre-auth banner shown in the cell card while connecting, verifying or authenticating (spec 5); null otherwise. */
