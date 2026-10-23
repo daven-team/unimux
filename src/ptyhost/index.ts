@@ -66,6 +66,7 @@ function attachRenderer(port: MessagePortMain): void {
   rendererPort = port;
   port.on('message', (e) => {
     const m = e.data as RendererToHost;
+    if (m.t === 'sshList') { listFor(port, m); return; }
     router.message(m);
     if (m.t === 'write' && tapped.has(m.id) && m.data.includes('\x03')) toMain({ t: 'interrupt', id: m.id });
   });
@@ -78,6 +79,16 @@ function attachRenderer(port: MessagePortMain): void {
   port.start();
   router.setFlowControl(true);
   for (const h of router.histories()) toRenderer({ t: 'replay', id: h.id, data: h.data });
+}
+
+/** SSH path completion: the answer goes back on the port that asked (a reloaded renderer never gets an old one). */
+function listFor(port: MessagePortMain, m: Extract<RendererToHost, { t: 'sshList' }>): void {
+  const valid = typeof m.id === 'string' && typeof m.reqId === 'number' && typeof m.dir === 'string' && m.dir.length <= 1024
+    && (m.cwd === null || (typeof m.cwd === 'string' && m.cwd.length <= 4096));
+  if (!valid) return;
+  void ssh.list(m.id, { dir: m.dir, cwd: m.cwd, cwdOnly: m.cwdOnly === true }).then((result) => {
+    if (rendererPort === port) port.postMessage({ t: 'sshListResult', id: m.id, reqId: m.reqId, result } satisfies HostToRenderer);
+  });
 }
 
 parentPort.on('message', (e) => {

@@ -4,7 +4,7 @@
 import { layoutForCount as layoutFor } from '../../shared/layout';
 import type { AppState } from '../../shared/types';
 import { activeProject, activeTab, addCell, ensureShellProfile, findCell, removeSshHost } from '../../shared/state';
-import { hostEndpoint, promptNeedsToast, reconnectAllTargets, reconnectAtStartCells, restoredPromptToasts, sshCellStart, sshCellVisible, sshStartEffects, type SshStartDecision, sshGridName, sshSessionEnded, type SshPrompt, type SshSessionState } from '../../shared/ssh';
+import { hostEndpoint, promptNeedsToast, reconnectAllTargets, reconnectAtStartCells, restoredPromptToasts, restoresAtStart, sshCellStart, sshCellVisible, sshStartEffects, type SshStartDecision, sshGridName, sshSessionEnded, type SshPrompt, type SshSessionState } from '../../shared/ssh';
 import { menuHosts, sectionChange, sectionForDetail, type SshDetail } from '../../shared/sshView';
 import { createProject, ensureTerminal, focusCell, openTab } from './actions';
 import { gridCovered } from './splitView';
@@ -17,6 +17,7 @@ import { useSshConnectStore } from './sshConnectStore';
 import type { ConnectContext } from '../../shared/sshConnect';
 import { hostLogin } from '../../shared/sshIdentity';
 import { terminals } from './terminals/TerminalManager';
+import { forgetRestore, sessionConnected } from './sshRestore';
 
 /** SSH cells created by the user in this renderer session: they connect when their view mounts (spec 6.1 step 1). */
 export const connectOnMount = new Set<string>();
@@ -30,9 +31,9 @@ const reconnectAtStart = new Set<string>();
 /** Bumped by every cancel: an app-start connect still waiting for the sessions of main gives up. */
 let startGeneration = 0;
 
-export function markReconnectAtStart(state: Pick<AppState, 'projects' | 'sshHosts'>): void {
+export function markReconnectAtStart(state: Pick<AppState, 'projects' | 'sshHosts' | 'settings'>): void {
   reconnectAtStart.clear();
-  for (const id of reconnectAtStartCells(state.projects, state.sshHosts)) reconnectAtStart.add(id);
+  for (const id of reconnectAtStartCells(state.projects, state.sshHosts, state.settings.sshRestoreSessions === true)) reconnectAtStart.add(id);
 }
 
 /** A Pty Host restart (heard early in the boot or later): no marked cell connects by itself any more. */
@@ -86,7 +87,8 @@ function onSession(state: SshSessionState): void {
   useSshStore.getState().setSession(state);
   // I2: a network drop or a close while vim or htop ran leaves the alternate screen and the remote modes. The terminal gets no
   // status line of the app: from now on the cell card covers it and says what happened (1.0.5).
-  if (sshSessionEnded(previous, state.phase)) terminals.resetSshModes(state.cellId);
+  if (sshSessionEnded(previous, state.phase)) { terminals.resetSshModes(state.cellId); forgetRestore(state.cellId); }
+  if (state.phase === 'connected' && previous !== 'connected') sessionConnected(state.cellId);
 }
 
 function onPrompt(cellId: string, prompt: SshPrompt | null): void {
@@ -113,15 +115,17 @@ export async function initSsh(): Promise<void> {
   } finally { gate.open(); sshLoaded(); }
 }
 
-/** Called by startOnce for SSH cells (D5: never a connect without the user's intent, or the host's opt-in at app start). */
+/**
+ * Called by startOnce for SSH cells (D5: never a connect without the user's intent, the host's opt-in at app start, or the
+ * session restore of Settings > SSH for a cell that was connected when the app closed).
+ */
 export function startSshCell(cellId: string, alive: boolean, mounted: boolean): SshStartDecision {
   const found = findCell(getS(), cellId);
   if (!found?.cell.ssh) return 'idle';
-  const hostId = found.cell.ssh.hostId;
   const created = connectOnMount.delete(cellId);
   const decision = sshCellStart({
     alive, connectOnMount: created, appStart: reconnectAtStart.has(cellId), mounted,
-    reconnectOnStart: getS().sshHosts.some((h) => h.id === hostId && h.reconnectOnStart), phase: useSshStore.getState().sessions[cellId]?.phase,
+    reconnectOnStart: restoresAtStart(found.cell.ssh, getS().sshHosts, getS().settings.sshRestoreSessions === true), phase: useSshStore.getState().sessions[cellId]?.phase,
   });
   if (sshStartEffects(mounted, decision).spendMark) reconnectAtStart.delete(cellId);
   if (decision === 'connect' && created) { void connectCell(cellId); return decision; }
@@ -140,7 +144,8 @@ async function connectAtStart(cellId: string): Promise<void> {
   if (getUi().epoch !== epoch || startGeneration !== generation || !findCell(getS(), cellId)?.cell.ssh) return;
   const phase = useSshStore.getState().sessions[cellId]?.phase;
   if (phase !== undefined && phase !== 'idle') return;
-  await connectCell(cellId);
+  // A restored session goes back into its last folder (main types the cd once the shell is up).
+  await connectCell(cellId, { restoreCwd: getS().settings.sshRestoreSessions === true });
 }
 
 /** "Połącz ponownie wszystkie SSH": the tab's SSH cells that are idle, ended or failed (never connecting or connected ones). */
@@ -154,7 +159,7 @@ export function reconnectAllSsh(projectId: string, tabId: string): void {
   for (const cellId of reconnectAllTargetsOf(projectId, tabId)) void connectCell(cellId);
 }
 
-export async function connectCell(cellId: string): Promise<void> {
+export async function connectCell(cellId: string, opts: { restoreCwd?: boolean } = {}): Promise<void> {
   const found = findCell(getS(), cellId);
   const ref = found?.cell.ssh;
   if (!ref) return;
@@ -169,7 +174,7 @@ export async function connectCell(cellId: string): Promise<void> {
     useSshStore.getState().setSession({ cellId, hostId: ref.hostId, phase: 'connecting', since: Date.now() });
   }
   const { cols, rows } = terminals.size(cellId);
-  const result = await window.mc.ssh.connect({ cellId, hostId: ref.hostId, cols, rows });
+  const result = await window.mc.ssh.connect({ cellId, hostId: ref.hostId, cols, rows, ...(opts.restoreCwd ? { restoreCwd: true } : {}) });
   // A refusal before any session event: the same path as an event, so the card shows the failure.
   if (!result.ok) onSession({ cellId, hostId: ref.hostId, phase: 'error', error: result.error, since: Date.now() });
   else terminals.syncSize(cellId);

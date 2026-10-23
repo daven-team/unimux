@@ -180,6 +180,10 @@ export interface Settings {
   sshTheme: SshThemeId;
   /** Command suggestions in SSH terminals and the host command history behind them; only `false` turns them off. */
   sshAutocomplete?: boolean;
+  /** Path completion from the server in SSH terminals (1.0.6, remotePaths.ts); only `false` turns it off. */
+  sshPathComplete?: boolean;
+  /** 1.0.6: SSH cells connected when the app closed connect again at start, into the folder they were in. Off by default. */
+  sshRestoreSessions?: boolean;
   /** The top strip shows the tabs of every project ('all', 1.0.0) or only of the active project (shared/workspaceOrder.ts). */
   stripScope: StripScope;
 }

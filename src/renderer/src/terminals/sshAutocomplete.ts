@@ -1,15 +1,19 @@
 // Termius-like command autocomplete for SSH terminals: the renderer side. Every SSH terminal gets a CommandLineFollower
 // (shared/commandFollower.ts: the line, the popup's keys, what is recorded) wired to xterm's events; this module keeps the
 // per-host history cache (main stores it, src/main/ssh/commandHistory.ts), offers the snippets, and hands the popup's state
-// and the terminal's geometry to components/ssh/SshAutocomplete.tsx.
+// and the terminal's geometry to components/ssh/SshAutocomplete.tsx. Since 1.0.6 it also lists folders on the server for
+// path words (shared/remotePaths.ts: one cache per cell, the listing runs in the Pty Host on the cell's own connection).
 import type { IDisposable, Terminal } from '@xterm/xterm';
 import { atBottom } from '../../../shared/commandLine';
 import { CommandLineFollower, type AutocompleteView } from '../../../shared/commandFollower';
 import { COMMAND_HISTORY_LIMITS, frecency, recordCommand, type CommandHistoryEntry } from '../../../shared/commandHistory';
 import type { SuggestSource } from '../../../shared/commandSuggest';
+import { RemoteDirCache } from '../../../shared/remotePaths';
 import { findCell } from '../../../shared/state';
 import type { Snippet } from '../../../shared/types';
 import { getS, useStore } from '../store';
+import { useSshStore } from '../sshStore';
+import { lineSubmitted } from '../sshRestore';
 import { terminals, type RemoteAddon } from './TerminalManager';
 
 export type { AutocompleteView };
@@ -18,6 +22,8 @@ export type { AutocompleteView };
 const SNIPPET_WEIGHT = 3;
 
 const enabled = (): boolean => getS().settings.sshAutocomplete !== false;
+/** Path completion from the server: on with the suggestions unless turned off on its own. */
+const pathsEnabled = (): boolean => enabled() && getS().settings.sshPathComplete !== false;
 
 /** Where the terminal's character grid is on screen (client pixels) and the font it is drawn with. */
 export interface TerminalGeometry { left: number; top: number; cellWidth: number; cellHeight: number; fontFamily: string; fontSize: number }
@@ -123,10 +129,16 @@ function sourcesFor(hostId: string, projectId: string | undefined): SuggestSourc
 class SshTerminalAddon implements RemoteAddon {
   readonly follower: CommandLineFollower;
   private readonly disposables: IDisposable[];
+  private readonly dirs: RemoteDirCache;
 
   constructor(private readonly cellId: string, private readonly term: Terminal) {
     addons.get(cellId)?.dispose();
     addons.set(cellId, this);
+    this.dirs = new RemoteDirCache(
+      (dir, cwd) => terminals.sshList(cellId, { dir, cwd }),
+      () => this.follower.refresh(),
+      () => performance.now(),
+    );
     const follower = (this.follower = new CommandLineFollower(term, {
       hostId: () => findCell(getS(), cellId)?.cell.ssh?.hostId ?? null,
       enabled,
@@ -139,11 +151,21 @@ class SshTerminalAddon implements RemoteAddon {
       remember,
       publish: () => listeners.get(cellId)?.forEach((l) => l()),
       now: () => performance.now(),
+      // Only on the cell's own server (not after a nested ssh reported another machine's folder) and while connected.
+      paths: (dir) => {
+        if (!pathsEnabled() || terminals.remoteCwdForeign(cellId) || useSshStore.getState().sessions[cellId]?.phase !== 'connected') return null;
+        return this.dirs.get(dir, terminals.remoteCwd(cellId) ?? null);
+      },
+      submitted: (line) => { this.dirs.clear(); lineSubmitted(cellId, line); },
     }));
     const blur = () => follower.close();
     term.textarea?.addEventListener('blur', blur);
     this.disposables = [
-      term.onData((d) => follower.input(d)),
+      term.onData((d) => {
+        follower.input(d);
+        // With the suggestions off the follower reads no line: any Enter may have been a cd (the folder kept for a restore).
+        if (!enabled() && d === '\r') lineSubmitted(cellId, 'cd');
+      }),
       // The line is read once a write is parsed, never in the middle of one (a completion listing scrolls before the prompt
       // is drawn again); scrolling back only hides the popup, a full-screen program starting or ending starts the line over.
       term.onWriteParsed(() => follower.parsed()),
@@ -186,5 +208,5 @@ terminals.setRemoteAddon((cellId, term) => new SshTerminalAddon(cellId, term));
 
 // Turned off in Settings: open popups close at once (the next keystroke resets every line).
 useStore.subscribe((st, prev) => {
-  if (st.s.settings.sshAutocomplete !== prev.s.settings.sshAutocomplete) for (const a of addons.values()) a.follower.refresh();
+  if (st.s.settings.sshAutocomplete !== prev.s.settings.sshAutocomplete || st.s.settings.sshPathComplete !== prev.s.settings.sshPathComplete) for (const a of addons.values()) a.follower.refresh();
 });

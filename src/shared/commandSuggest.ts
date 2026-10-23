@@ -3,7 +3,8 @@
 // Pure, so every rule is unit tested (test/ssh-autocomplete.test.ts).
 import { fuzzyScore } from './fuzzy';
 
-export type SuggestionKind = 'history' | 'snippet';
+/** `path`: an entry of a folder on the server (remotePaths.ts), completing the path word under the cursor. */
+export type SuggestionKind = 'history' | 'snippet' | 'path';
 
 export interface SuggestSource {
   text: string;
@@ -22,6 +23,8 @@ export interface Suggestion {
   ranges: Array<[number, number]>;
   /** `text` starts with what was typed (the ghost text and → can complete it). */
   prefix: boolean;
+  /** What the popup shows instead of `text` (a path entry: its name, with '/' for a folder); `ranges` are within it. */
+  display?: string;
 }
 
 /** Items the popup shows at most. */
@@ -106,12 +109,16 @@ export interface PopupKeyState {
   count: number;
   /** Ghost text is drawn after the cursor. */
   ghost: boolean;
+  /** The items are entries of a server folder: Tab and Shift+Tab cycle through them. */
+  paths?: boolean;
 }
 
 export type PopupKeyAction =
   | { kind: 'pass'; hide: boolean }
   | { kind: 'select'; index: number }
   | { kind: 'accept'; index: number }
+  /** Tab (1) or Shift+Tab (-1) over server path entries: the next one goes into the line. */
+  | { kind: 'cycle'; step: 1 | -1 }
   | { kind: 'close' };
 
 const PASS: PopupKeyAction = { kind: 'pass', hide: false };
@@ -124,7 +131,8 @@ const MODIFIER_KEYS = new Set(['Control', 'Alt', 'AltGraph', 'Meta', 'Shift', 'C
  * A keydown while the popup is open. The shell keeps every key unless the popup is engaged: ↓ enters and walks the list, ↑
  * walks back (and leaves it from the first item) only once the list was entered, Enter inserts the chosen item (without
  * running it), → inserts the ghost text or the chosen item, Esc closes the popup. Tab, ↑ outside the list and keys with
- * modifiers go to the shell and close the popup; typing goes to the shell and keeps it.
+ * modifiers go to the shell and close the popup; typing goes to the shell and keeps it. Over server path entries Tab and
+ * Shift+Tab cycle through them instead (like a shell's menu completion).
  */
 export function popupKey(ev: KeyLike, st: PopupKeyState): PopupKeyAction {
   if (ev.isComposing || !st.count || MODIFIER_KEYS.has(ev.key)) return PASS;
@@ -145,7 +153,9 @@ export function popupKey(ev: KeyLike, st: PopupKeyState): PopupKeyAction {
       return st.selected >= 0 || st.ghost ? { kind: 'accept', index: Math.max(0, st.selected) } : PASS_HIDE;
     case 'Escape':
       return { kind: 'close' };
-    case 'Tab': case 'ArrowLeft': case 'Home': case 'End': case 'PageUp': case 'PageDown': case 'Insert':
+    case 'Tab':
+      return st.paths ? { kind: 'cycle', step: ev.shiftKey ? -1 : 1 } : PASS_HIDE;
+    case 'ArrowLeft': case 'Home': case 'End': case 'PageUp': case 'PageDown': case 'Insert':
       return PASS_HIDE;
     default:
       return PASS;
