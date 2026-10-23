@@ -20,6 +20,11 @@ import { IEdit, IGrip, IX } from './icons';
 import { ProjectIconView } from './ProjectIcon';
 import { FilePreview } from './FilePreview';
 import { formatAgo } from '../../../shared/i18n';
+import { CODE_LANGUAGES, codeLanguageLabel, normalizeCodeLanguage } from '../../../shared/codeLanguages';
+import { fillSnippetVars, SNIPPET_BUILTINS } from '../../../shared/snippetVars';
+import { LazyTextCodeEditor } from './LazyTextCodeEditor';
+import { fillTokens } from './PanelEmpty';
+import { Select } from './Select';
 
 export function Modals() {
   const modal = useStore((st) => st.ui.modal);
@@ -74,6 +79,7 @@ function DialogView({ dialog }: { dialog: Dialog }) {
   const { tr } = useI18n();
   const [value, setValue] = useState(dialog.kind === 'prompt' ? dialog.value : '');
   const [checked, setChecked] = useState(false);
+  if (dialog.kind === 'snippetVars') return <SnippetVarsDialog dialog={dialog} />;
   if (dialog.kind === 'prompt') {
     return (
       <div className="modal" style={{ width: 440 }}>
@@ -115,6 +121,45 @@ function DialogView({ dialog }: { dialog: Dialog }) {
             {a.label}
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/** The values of a snippet's variables before it is sent (snippetSend.ts): one field per variable and the text it gives. */
+function SnippetVarsDialog({ dialog }: { dialog: Extract<Dialog, { kind: 'snippetVars' }> }) {
+  const { tr } = useI18n();
+  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(dialog.fields.map((f) => [f.name, f.value])));
+  // The built-ins are filled in per cell when sending; the preview keeps them as they are written.
+  const shown = fillSnippetVars(dialog.text, { ...Object.fromEntries(dialog.builtins.map((name) => [name, `{{${name}}}`])), ...values });
+  const submit = () => dialog.onSubmit(values);
+  return (
+    <div className="modal snippet-vars" style={{ width: 480 }}>
+      <div className="modal-head"><h3>{dialog.title}</h3></div>
+      <div className="modal-body">
+        {dialog.fields.map((field, i) => (
+          <div className="field" key={field.name}>
+            <label htmlFor={`snippet-var-${i}`}><code>{field.name}</code></label>
+            <input id={`snippet-var-${i}`} className="input" autoFocus={i === 0} value={values[field.name] ?? ''} data-var={field.name}
+              placeholder={field.fallback ? tr('Domyślnie: {value}', { value: field.fallback }) : undefined}
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => setValues({ ...values, [field.name]: e.target.value })}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }} />
+          </div>
+        ))}
+        {dialog.builtins.length > 0 && (
+          <div className="muted snippet-vars-builtins">
+            {fillTokens(tr("Uzupełniane dla każdej komórki: {names}"), { names: <code>{dialog.builtins.map((name) => `{{${name}}}`).join(' ')}</code> })}
+          </div>
+        )}
+        <div className="field">
+          <label>{tr("Do wysłania")}</label>
+          <pre className="snippet-vars-preview">{shown}</pre>
+        </div>
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={closeDialog}>{tr("Anuluj")}</button>
+        <button className="btn primary" onClick={submit}>{tr("Wstaw")}</button>
       </div>
     </div>
   );
@@ -217,9 +262,13 @@ function SnippetEditor({ snippetId, projectId }: { snippetId: string | null; pro
   const existing = s.snippets.find((x) => x.id === snippetId);
   const [draft, setDraft] = useState<Snippet>(existing ?? { id: uid(), name: '', text: '', autoSend: false, projectId });
   const project = s.projects.find((p) => p.id === s.activeProjectId);
+  const language = normalizeCodeLanguage(draft.language) ?? 'shell';
   const save = () => {
     if (!draft.text.trim()) return;
-    update((st) => upsertSnippet(st, { ...draft, name: draft.name.trim() || draft.text.trim().split('\n')[0].slice(0, 40) }));
+    // Shell is the default and is not stored.
+    const { language: _language, ...rest } = draft;
+    const saved: Snippet = language === 'shell' ? rest : { ...rest, language };
+    update((st) => upsertSnippet(st, { ...saved, name: draft.name.trim() || draft.text.trim().split('\n')[0].slice(0, 40) }));
     closeModal();
   };
   return (
@@ -234,9 +283,22 @@ function SnippetEditor({ snippetId, projectId }: { snippetId: string | null; pro
           <input className="input" autoFocus value={draft.name} placeholder={tr("np. Review zmian")} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
         </div>
         <div className="field">
-          <label>{tr("Treść promptu")}</label>
-          <textarea className="textarea" value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })}
-            onKeyDown={(e) => matchesShortcut('modal.save', e) && save()} />
+          <div className="snippet-text-head">
+            <label id="snippet-text-label">{tr("Treść promptu")}</label>
+            <span style={{ flex: 1 }} />
+            <Select className="select snippet-language" value={language} aria-label={tr("Język snippetu")} title={tr("Język snippetu")}
+              onChange={(e) => setDraft({ ...draft, language: e.target.value })}>
+              {CODE_LANGUAGES.map((l) => <option key={l.id} value={l.id}>{l.id === 'text' ? tr("Zwykły tekst") : codeLanguageLabel(l.id)}</option>)}
+            </Select>
+          </div>
+          <LazyTextCodeEditor className="snippet-code" value={draft.text} language={language} markVariables ariaLabel={tr("Treść promptu")}
+            onChange={(text) => setDraft((d) => ({ ...d, text }))} onKeyDown={(e) => { if (matchesShortcut('modal.save', e)) { e.preventDefault(); e.stopPropagation(); save(); } }} />
+          <div className="snippet-vars-hint muted">
+            {fillTokens(tr("Zmienne: {example} pyta o wartość przy wysyłaniu, {builtins} wstawia aplikacja."), {
+              example: <code>{`{{${tr("nazwa")}:${tr("domyślna")}}}`}</code>,
+              builtins: <code>{SNIPPET_BUILTINS.map((name) => `{{${name}}}`).join(' ')}</code>,
+            })}
+          </div>
         </div>
         <div className="field">
           <label>{tr("Kolor")}</label>

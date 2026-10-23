@@ -34,6 +34,17 @@ export type Dialog = { id: number } & (
       /** A checkbox under the text (for example "do not ask again"); its state comes with the choice. */
       check?: string;
       onChoose: (value: string | null, checked?: boolean) => void;
+    }
+  | {
+      /** The values of a snippet's variables before it is sent (1.0.6, shared/snippetVars.ts). */
+      kind: 'snippetVars';
+      title: string;
+      /** The text with its variables, shown as a live preview of what will be sent (built-ins stay as they are). */
+      text: string;
+      fields: Array<{ name: string; value: string; fallback?: string }>;
+      /** The built-ins the text uses (filled in for each cell when it is sent). */
+      builtins: string[];
+      onSubmit: (values: Record<string, string>) => void;
     });
 
 export interface Ui {
@@ -221,6 +232,26 @@ export function askChoiceChecked(
       },
     });
     pendingPrompt = (replaced) => resolve({ value: null, checked: false, ...(replaced ? { replaced: true } : {}) });
+  });
+}
+
+/** Asks for the values of a snippet's variables; resolves with them, or null when cancelled. */
+export function askSnippetValues(
+  title: string, text: string, fields: Array<{ name: string; value: string; fallback?: string }>, builtins: string[],
+): Promise<Record<string, string> | null> {
+  const id = replaceOpenDialog();
+  return new Promise((resolve) => {
+    setUi({
+      dialog: {
+        id, kind: 'snippetVars', title, text, fields, builtins,
+        onSubmit: (values) => {
+          pendingPrompt = null;
+          setUi({ dialog: null });
+          resolve(values);
+        },
+      },
+    });
+    pendingPrompt = () => resolve(null);
   });
 }
 
