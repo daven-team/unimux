@@ -65,6 +65,8 @@ export function toValue(v: unknown): DbValue {
 }
 
 const cursorState = (cursor: Cursor): string | undefined => (cursor as unknown as { state?: string }).state;
+/** Backend messages that answer something the client sent (not the ones the server sends on its own, like notices). */
+const ANSWERS = new Set(['parseComplete', 'bindComplete', 'closeComplete', 'noData', 'portalSuspended', 'emptyQuery', 'rowDescription', 'parameterDescription', 'dataRow', 'commandComplete', 'errorMessage', 'copyInResponse', 'copyOutResponse', 'copyData', 'copyDone']);
 
 interface Reader { cursor: Cursor; fields: FieldLike[] | null; columnsSent: boolean; buffered: unknown[][]; done: boolean; batch: number; result: { command?: string; rowCount?: number | null } }
 interface OpenResult { queryId: string; index: number; reader: Reader; sent: number; timer: NodeJS.Timeout | null }
@@ -94,10 +96,26 @@ export class PgSession {
    * (PGlite sends one more than Postgres), so the next statement waits for drain() first.
    */
   private dirty = false;
+  /** The server answered something (not just a ReadyForQuery) since the last ReadyForQuery the client saw. */
+  private heard = false;
   private gone = false;
 
   constructor(readonly client: Client, private readonly opts: PgSessionOptions, private readonly out: PgSessionOut) {
-    const con = (client as unknown as { connection: { on(e: string, f: (m: { status?: string }) => void): void } }).connection;
+    const con = (client as unknown as { connection: { on(e: string, f: (m: { status?: string }) => void): void; emit(event: string | symbol, ...args: unknown[]): boolean } }).connection;
+    // A ReadyForQuery right after another one, with no answer between them, ends nothing the client sent: Postgres answers
+    // every statement (and a cursor's every Bind, Execute and Close) before its ReadyForQuery. PGlite's socket server sends an
+    // extra one for a read without a Sync, so a cursor's Close and Sync in two reads (a slow machine, a proxy) end the cursor
+    // at the Close and the Sync's ReadyForQuery comes later, when the client has sent its next statement: taken as that
+    // statement's end, it ended it early and its real answer then broke the connection. Such a ReadyForQuery is kept from the
+    // client; the transaction state it carries is the same as that of the one before it.
+    const emit = con.emit;
+    con.emit = (event: string | symbol, ...args: unknown[]): boolean => {
+      if (event === 'readyForQuery') {
+        if (!this.heard) return true;
+        this.heard = false;
+      } else if (typeof event === 'string' && ANSWERS.has(event)) this.heard = true;
+      return emit.call(con, event, ...args);
+    };
     con.on('errorMessage', () => { this.dirty = true; });
     con.on('readyForQuery', (m) => {
       const tx: DbTxStatus = m.status === 'T' ? 'transaction' : m.status === 'E' ? 'failed' : 'idle';
@@ -125,6 +143,7 @@ export class PgSession {
     this.dirty = false;
     const con = (this.client as unknown as { connection: { emit(event: string | symbol, ...args: unknown[]): boolean; query(text: string): void } }).connection;
     const emit = con.emit;
+    const passed = () => { this.heard = true; };
     await new Promise<void>((resolve) => {
       let answered = false;
       let finished = false;
@@ -139,6 +158,8 @@ export class PgSession {
         if (event === 'readyForQuery') {
           if (!answered) return true;
           finish();
+          // The marker's answer was kept from the client: this ReadyForQuery is not a stray one.
+          passed();
           return emit.call(con, event, ...args);
         }
         if (event === 'emptyQuery' || event === 'errorMessage' || event === 'commandComplete' || event === 'rowDescription' || event === 'dataRow') { answered = true; return true; }
