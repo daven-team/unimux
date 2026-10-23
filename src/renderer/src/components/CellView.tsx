@@ -7,6 +7,7 @@ import { propsEqualWithStyle } from '../../../shared/renderEquality';
 import { errorPhrase, failureLabel } from '../../../shared/alerts';
 import { cellDrawColor, getProfile, PROJECT_COLORS, updateCell } from '../../../shared/state';
 import { missingCardCli } from '../../../shared/cliStatus';
+import { shownProfileName } from '../../../shared/profiles';
 import { sshHeaderName, sshPhaseLabel, userAtEndpoint } from '../../../shared/ssh';
 import { resolveSshTheme } from '../../../shared/sshThemes';
 import { useSshStore } from '../sshStore';
@@ -48,6 +49,8 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const bodyRef = useRef<HTMLDivElement>(null);
   const profiles = useStore((st) => st.s.profiles);
   const profile = useStore((st) => getProfile(st.s, cell.profileId));
+  const shell = useStore((st) => st.s.settings.shell);
+  const profileName = shownProfileName(profile, shell, tr);
   const status = useStore((st) => st.ui.statuses[cell.id] ?? 'idle');
   useBlink(status === 'working');
   const failure = useStore((st) => st.ui.failures[cell.id]);
@@ -99,7 +102,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   };
 
   // An SSH cell is named by its host chip; the name shows next to it only when the user gave the cell one.
-  const label = ssh ? sshHeaderName(cell.name) : cellLabel(cell, sessionTitle && cell.session ? { [cell.session.id]: sessionTitle } : {}, profile.name);
+  const label = ssh ? sshHeaderName(cell.name) : cellLabel(cell, sessionTitle && cell.session ? { [cell.session.id]: sessionTitle } : {}, profileName);
 
   const sshItems = (): MenuItem[] => [
     { label: tr('Połącz ponownie'), onClick: () => void reconnectCell(cell.id) },
@@ -230,9 +233,9 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
               <span className="profile-name">{host?.label ?? tr('Host usunięty')}</span>
             </button>
           ) : (
-            <button type="button" className="profile" onClick={(e) => openMenuAt(e.currentTarget, profileItems())} title={tr("Zmień profil")} aria-label={`${tr("Zmień profil")}: ${profile.name}`}>
+            <button type="button" className="profile" onClick={(e) => openMenuAt(e.currentTarget, profileItems())} title={tr("Zmień profil")} aria-label={`${tr("Zmień profil")}: ${profileName}`}>
               <span className="pchip" style={{ background: profile.color }} />
-              <span className="profile-name">{profile.name}</span>
+              <span className="profile-name">{profileName}</span>
             </button>
           )}
           {editing ? (

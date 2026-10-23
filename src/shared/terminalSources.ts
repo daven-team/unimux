@@ -1,6 +1,7 @@
 // Where a terminal can come from. The SSH panel lists the local shells of the configured profiles and the saved SSH hosts
 // (AppState.sshHosts). A host launches as { type: 'ssh', hostId }: an SSH cell whose session runs in the Pty Host (src/ptyhost/ssh.ts).
 import { shellsForPlatform, type AppPlatform } from './platform';
+import { shownProfileName } from './profiles';
 import { userAtEndpoint, type SshHost } from './ssh';
 import type { Profile, ShellKind } from './types';
 
@@ -31,6 +32,8 @@ export interface TerminalSourceContext {
   /** The shell chosen in Settings. */
   shell: ShellKind;
   sshHosts?: readonly SshHost[];
+  /** Translates the shown name of the built-in shell profile (see shownProfileName). */
+  tr?: (key: 'Wiersz polecenia') => string;
 }
 
 export interface TerminalSourceProvider {
@@ -47,7 +50,7 @@ export const localShellProvider: TerminalSourceProvider = {
       .filter((profile) => profile.cli === 'shell')
       .map((profile) => ({
         id: `local:${profile.id}`,
-        label: profile.name,
+        label: shownProfileName(profile, ctx.shell, ctx.tr),
         kind: 'local' as const,
         detail: [shellName, profile.args.trim()].filter(Boolean).join(' '),
         launch: { type: 'profile' as const, profileId: profile.id },
