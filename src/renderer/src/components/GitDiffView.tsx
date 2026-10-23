@@ -2,11 +2,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { GIT_DIFF_LINES, parseUnifiedDiff, type GitDiffResult, type GitDiffSource } from '../../../shared/git';
 import { useI18n } from '../i18n';
+import { DiffLines } from './DiffLines';
+import type { FileFinder } from './MarkdownPreview';
 import './gitPanel.css';
 
-interface Props { projectId: string; worktree?: string; source: GitDiffSource; path: string; oldPath?: string; hash?: string }
+interface Props { projectId: string; worktree?: string; source: GitDiffSource; path: string; oldPath?: string; hash?: string; finder?: FileFinder }
 
-export default function GitDiffView({ projectId, worktree, source, path, oldPath, hash }: Props) {
+export default function GitDiffView({ projectId, worktree, source, path, oldPath, hash, finder }: Props) {
   const { tr, errorText } = useI18n();
   const [result, setResult] = useState<GitDiffResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,16 +38,7 @@ export default function GitDiffView({ projectId, worktree, source, path, oldPath
           ) : !parsed.lines.length ? (
             <div className="git-diff-message muted">{tr('Brak różnic do pokazania.')}</div>
           ) : (
-            <div className="git-diff" role="table" aria-label={tr('Zmiany w pliku')} style={{ ['--ln' as string]: `${width}ch` }}>
-              {parsed.lines.map((line, i) => (
-                <div key={i} className={`git-diff-line ${line.kind}`} role="row">
-                  <span className="ln" aria-hidden>{line.oldNo ?? ''}</span>
-                  <span className="ln" aria-hidden>{line.newNo ?? ''}</span>
-                  <span className="sign" aria-hidden>{line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ''}</span>
-                  <span className="code">{line.text || ' '}</span>
-                </div>
-              ))}
-            </div>
+            <DiffLines lines={parsed.lines} width={width} label={tr('Zmiany w pliku')} finder={finder} />
           )}
         </>
       )}

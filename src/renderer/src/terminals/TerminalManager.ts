@@ -741,6 +741,11 @@ class TerminalManager {
     this.entries.get(cellId)?.term.focus();
   }
 
+  /** The xterm of a cell, for find in its scrollback (terminalFind.tsx reads the buffer and draws decorations). */
+  xterm(cellId: string): Terminal | undefined {
+    return this.entries.get(cellId)?.term;
+  }
+
   isFocused(cellId: string): boolean {
     const e = this.entries.get(cellId);
     return !!e && document.activeElement === e.term.textarea;

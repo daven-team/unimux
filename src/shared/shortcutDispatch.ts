@@ -40,6 +40,7 @@ export function decideShortcut(event: DispatchEvent, ctx: DispatchContext): stri
     // Plain keys (F-keys) belong to the terminal and to text fields.
     if (!modified && ctx.target !== 'other') continue;
     if (ctx.target === 'input' && def.allowInInput === false) continue;
+    if (def.terminalOnly && ctx.target !== 'terminal') continue;
     if (def.id === 'tab.close') {
       // It closes the tab in front of the strip (Settings, the SSH view, a file or a grid), if there is one.
       if (ctx.settingsActive || ctx.hasTab) return def.id;
