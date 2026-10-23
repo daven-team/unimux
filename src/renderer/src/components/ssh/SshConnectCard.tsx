@@ -1,9 +1,11 @@
 // The connecting card of an SSH cell (1.0.4): the host tile, three steps (connect, sign in, terminal) on a progress track,
-// the status line, the host key and login questions, an optional log and Zamknij; on a failure the failed step is red.
+// the status line, the host key and login questions, an optional log and Anuluj; on a failure the failed step is red.
+// 1.0.5: it stays after the attempt (failed, cancelled, a dropped session) with Połącz ponownie and Zamknij komórkę.
 import { useEffect, useRef, type ComponentType } from 'react';
 import { connectingBanner, userAtEndpoint, type SshHost, type SshPrompt, type SshSessionState } from '../../../../shared/ssh';
 import { connectCardView, type ConnectStepId } from '../../../../shared/sshConnect';
 import { useI18n } from '../../i18n';
+import { removeCell } from '../../actions';
 import { connectContext, disconnectCell, reconnectCell } from '../../ssh';
 import { useSshConnectStore } from '../../sshConnectStore';
 import { useSshStore } from '../../sshStore';
@@ -30,14 +32,15 @@ export function SshConnectCard({ cellId, host, session, prompt }: { cellId: stri
   const log = attempt?.log ?? [];
   useEffect(() => { if (logsOpen && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [logsOpen, log.length]);
 
-  // Zamknij: while connecting it cancels like Rozłącz; after a failure the card goes and the terminal with its bottom bar shows.
-  const close = () => {
-    useSshConnectStore.getState().apply(cellId, { kind: 'dismiss' });
-    if (!view.failed) disconnectCell(cellId);
+  // Anuluj stops the attempt (the card then says Anulowano; an open login question has its own Anuluj); once the attempt is
+  // over, Zamknij komórkę closes the cell like its X does. The raw terminal never shows while the cell is not connected.
+  const cancel = () => {
+    useSshConnectStore.getState().apply(cellId, { kind: 'cancel' });
+    disconnectCell(cellId);
   };
   const danger = prompt?.kind === 'hostKey' && prompt.reason === 'changed';
   return (
-    <div className={`ssh-card ssh-connect${view.failed ? ' failed' : ''}${danger ? ' danger' : ''}`} role={prompt ? 'dialog' : 'group'} aria-label={host.label}>
+    <div className={`ssh-card ssh-connect is-${view.kind}${view.ended ? ' ended' : ''}${view.failed ? ' failed' : ''}${danger ? ' danger' : ''}`} role={prompt ? 'dialog' : 'group'} aria-label={host.label}>
       <div className="ssh-connect-inner">
         <div className="ssh-connect-head">
           <span className={`ssh-host-icon${host.color ? '' : ' uncolored'}`} style={host.color ? { background: host.color } : undefined} aria-hidden="true"><IServer /></span>
@@ -83,10 +86,16 @@ export function SshConnectCard({ cellId, host, session, prompt }: { cellId: stri
             ))}
           </ol>
         )}
-        <div className="ssh-connect-actions">
-          <button type="button" className="btn small" onClick={close}>{tr('Zamknij')}</button>
-          {view.failed && <button type="button" className="btn small primary" autoFocus onClick={() => void reconnectCell(cellId)}>{tr('Połącz ponownie')}</button>}
-        </div>
+        {view.ended ? (
+          <div className="ssh-connect-actions">
+            <button type="button" className="btn small" onClick={() => void removeCell(cellId)}>{tr('Zamknij komórkę')}</button>
+            <button type="button" className="btn small primary" autoFocus onClick={() => void reconnectCell(cellId)}>{tr('Połącz ponownie')}</button>
+          </div>
+        ) : !prompt && (
+          <div className="ssh-connect-actions">
+            <button type="button" className="btn small" onClick={cancel}>{tr('Anuluj')}</button>
+          </div>
+        )}
       </div>
     </div>
   );

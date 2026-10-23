@@ -30,6 +30,9 @@
 .ssh-step.active .ssh-step-label { color: var(--text); }
 .ssh-step.failed .ssh-step-node { background: color-mix(in srgb, #ef4444 13%, var(--bg-3)); border-color: #ef4444; color: #f87171; }
 .ssh-step.failed .ssh-step-label { color: #f87171; }
+/* Cancelled: the step it stopped at is outlined only (nothing failed). */
+.ssh-step.stopped .ssh-step-node { border: 1px dashed var(--text-2); color: var(--text-2); }
+.ssh-step.stopped .ssh-step-label { color: var(--text-2); }
 /* The arc around the active node turns on its own (a CSS animation, not the shared blink); static with reduced motion. */
 .ssh-step.active .ssh-step-node::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); border-right-color: var(--accent); animation: ssh-connect-spin .9s linear infinite; }
 @keyframes ssh-connect-spin { to { transform: rotate(360deg); } }
@@ -39,8 +42,9 @@
 }
 
 .ssh-connect-status { display: flex; flex-direction: column; gap: 4px; align-items: center; min-width: 0; color: var(--text-2); font-size: 12.5px; text-align: center; overflow-wrap: anywhere; }
-.ssh-connect-status.failed { color: var(--text); font-weight: 600; }
+.ssh-connect-status.failed, .ssh-connect.is-cancelled .ssh-connect-status, .ssh-connect.is-disconnected .ssh-connect-status { color: var(--text); font-weight: 600; }
 .ssh-connect-error { color: #f87171; font-size: 12px; font-weight: 400; }
+.ssh-connect-status:not(.failed) .ssh-connect-error { color: var(--muted); }
 .ssh-connect-prompt { padding: 12px; border: 1px solid #ffffff0d; border-radius: 10px; background: #202020; }
 .ssh-connect.danger .ssh-connect-prompt { border-color: #ef444466; }
 .ssh-connect-log { display: flex; flex-direction: column; gap: 2px; max-height: 140px; margin: 0; padding: 8px 10px; overflow: auto; list-style: none; border: 1px solid #ffffff0d; border-radius: 8px; background: #171717; font-family: "Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular", "Courier New", monospace; font-size: 11px; line-height: 1.5; user-select: text; }
