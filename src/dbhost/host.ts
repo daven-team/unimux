@@ -10,11 +10,14 @@ import { Socket, isIP } from 'net';
 import type { Duplex } from 'stream';
 import { TLSSocket, checkServerIdentity, connect as tlsConnect, type ConnectionOptions } from 'tls';
 import pg from 'pg';
+import mysql from 'mysql2';
 import type { SshConnectRequest } from '../shared/ipc';
-import type { DbErrorCode, DbPhase, DbPortMessage, DbResult } from '../shared/db';
+import { mysqlFlavorOf, mysqlServerLabel, type DbErrorCode, type DbPhase, type DbPortMessage, type DbResult } from '../shared/db';
+import { mysqlTimeoutSql } from '../shared/dbMysql';
 import type { DbHostOp, DbHostToMain, DbOpenConfig, MainToDbHost } from '../shared/dbHostIpc';
 import type { SshErrorCode } from '../shared/ssh';
 import { PgSession, RAW_TYPES, serverError } from './pgSession';
+import { MysqlSession, mysqlServerError } from './mysqlSession';
 import { RedisConnectError, RedisSession, openRedis, type OpenedRedis, type RedisLimits } from './redisSession';
 import { ForwardSocket, SshTunnel, TUNNEL_TIMERS, TunnelForwardError, type TunnelTimers } from './tunnel';
 
@@ -52,6 +55,9 @@ interface Session {
   client: pg.Client | null;
   pg: PgSession | null;
   redis: RedisSession | null;
+  /** MySQL / MariaDB: the connection and its session. */
+  mysqlConn: mysql.Connection | null;
+  mysql: MysqlSession | null;
   /** Redis: the connection uses TLS (prefer resolved); the Pub/Sub connection connects the same way. */
   redisTls: boolean;
   /** The password the connection used (side connections for cancel need it); dropped when the session ends. */
@@ -91,6 +97,37 @@ export function mapConnectError(error: unknown, viaTunnel = false): DbErrorCode 
   if (/^ERR_TLS|^ERR_SSL|CERT|SELF_SIGNED|UNABLE_TO|HOSTNAME|ALTNAME/.test(code) || /certificate|SSL|TLS/i.test(message)) return 'dbTls';
   if (/terminated unexpectedly|ECONNRESET|EPIPE/i.test(message + code)) return viaTunnel ? 'tunnel' : 'dbClosed';
   return 'dbFailed';
+}
+
+const ER_ACCESS_DENIED = 1045;
+/** mysql2 and Node connect errors of a MySQL / MariaDB server as the fixed codes the UI shows. */
+export function mapMysqlConnectError(error: unknown, viaTunnel = false): DbErrorCode {
+  const e = (error ?? {}) as { code?: unknown; errno?: unknown; message?: unknown; fatal?: unknown };
+  const code = typeof e.code === 'string' ? e.code : '';
+  const message = typeof e.message === 'string' ? e.message : '';
+  if (typeof e.errno === 'number' && code.startsWith('ER_')) {
+    // 1045 wrong password; 1044 no access to the database; 1698 (auth_socket and the like) and 1130 (host not allowed) refuse the login.
+    if (e.errno === ER_ACCESS_DENIED || e.errno === 1044 || e.errno === 1698) return 'dbAuth';
+    if (e.errno === 1049) return 'dbNoDatabase';
+    if (e.errno === 1130) return 'dbRefused';
+    return 'dbFailed';
+  }
+  if (code === 'ETUNNEL') return 'tunnel';
+  if (code === 'HANDSHAKE_NO_SSL_SUPPORT') return 'dbTlsUnsupported';
+  if (code === 'HANDSHAKE_SSL_ERROR') return 'dbTls';
+  if (code === 'ECONNREFUSED') return viaTunnel ? 'tunnel' : 'dbRefused';
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'EAI_NONAME') return 'dbDns';
+  if (code === 'ETIMEDOUT' || /timeout/i.test(message)) return 'dbTimeout';
+  if (/^ERR_TLS|^ERR_SSL|CERT|SELF_SIGNED|UNABLE_TO|HOSTNAME|ALTNAME/.test(code) || /certificate|SSL|TLS/i.test(message)) return 'dbTls';
+  if (/PROTOCOL_CONNECTION_LOST|ECONNRESET|EPIPE/.test(code)) return viaTunnel ? 'tunnel' : 'dbClosed';
+  return 'dbFailed';
+}
+
+/** The detail of a MySQL connect error: the server's own text, or the TLS library's reason. */
+function mysqlConnectMessage(error: unknown): string | undefined {
+  const server = mysqlServerError(error)?.message;
+  if (server) return server;
+  return mapMysqlConnectError(error) === 'dbTls' && error instanceof Error ? error.message.slice(0, 500) : undefined;
 }
 
 /** The detail of a connect error: the server's own text, or the TLS library's reason (a certificate problem). */
@@ -155,19 +192,20 @@ export class DbHost {
 
   open(id: string, config: DbOpenConfig): void {
     if (this.sessions.has(id)) this.close(id);
-    const s: Session = { id, config, phase: 'connecting', ended: false, closing: false, tunnel: null, sshWait: null, passwordAsk: null, client: null, pg: null, redis: null, redisTls: false, password: config.password };
+    const s: Session = { id, config, phase: 'connecting', ended: false, closing: false, tunnel: null, sshWait: null, passwordAsk: null, client: null, pg: null, redis: null, mysqlConn: null, mysql: null, redisTls: false, password: config.password };
     this.sessions.set(id, s);
     this.status(s, 'connecting');
     void this.start(s).catch(() => this.fail(s, 'dbFailed'));
   }
 
   private async start(s: Session): Promise<void> {
-    if (s.config.kind !== 'postgres' && s.config.kind !== 'redis') { this.fail(s, 'unsupported'); return; }
+    if (s.config.kind !== 'postgres' && s.config.kind !== 'redis' && s.config.kind !== 'mysql') { this.fail(s, 'unsupported'); return; }
     if (s.config.ssh) {
       if (!(await this.joinTunnel(s)) || !this.live(s)) return;
     }
     this.status(s, 'database');
     if (s.config.kind === 'redis') { await this.startRedis(s); return; }
+    if (s.config.kind === 'mysql') { await this.startMysql(s); return; }
     const client = await this.connectWithPassword(s);
     if (!client || !this.live(s)) { if (client) void client.end().catch(() => undefined); return; }
     s.client = client;
@@ -487,6 +525,132 @@ export class DbHost {
     this.status(s, 'connected', { ...(opened.serverVersion ? { serverVersion: opened.serverVersion } : {}), database: String(dbIndex), tls: opened.tls });
   }
 
+  // ── MySQL / MariaDB ────────────────────────────────────────────────────────
+
+  /**
+   * One mysql2 connection with the session's endpoint, TLS and login. Through SSH it rides the forwarded channel (no local
+   * port). verify-full checks the chain against the CA and the certificate against the host name (IP addresses included)
+   * before the login goes out: mysql2 alone skips the name for IP addresses.
+   */
+  private openMysqlOnce(s: Session, password: string, tlsOn: boolean, database: string): Promise<mysql.Connection> {
+    const { host, port, logicalHost } = this.endpoint(s);
+    let stream: ForwardSocket | null;
+    try { stream = this.tunnelStream(s); } catch (e) { return Promise.reject(e); }
+    stream?.connect();
+    const verify = tlsOn && s.config.tls === 'verify-full';
+    const conn = mysql.createConnection({
+      host: logicalHost, port, user: s.config.user, password, ...(database ? { database } : {}),
+      charset: 'utf8mb4', connectTimeout: this.timers.dbConnectMs, dateStrings: true, supportBigNumbers: true, bigNumberStrings: true,
+      multipleStatements: false, enableKeepAlive: true,
+      ...(tlsOn ? { ssl: verify ? { ca: s.config.ca, rejectUnauthorized: true, verifyIdentity: false } : { rejectUnauthorized: false } } : {}),
+      ...(stream ? { stream } : { host }),
+    } as mysql.ConnectionOptions);
+    if (verify) {
+      const c = conn as unknown as { startTLS(onSecure: (err?: Error) => void): void; stream: TLSSocket };
+      const startTLS = c.startTLS.bind(conn);
+      c.startTLS = (onSecure) => startTLS((err) => {
+        if (err) { onSecure(err); return; }
+        const identity = checkServerIdentity(logicalHost, c.stream.getPeerCertificate());
+        onSecure(identity ?? undefined);
+      });
+    }
+    // Errors after connect go to the session's handlers; one before is connect()'s.
+    conn.on('error', () => undefined);
+    return new Promise((resolve, reject) => {
+      conn.connect((err) => {
+        if (err) { try { conn.destroy(); } catch { /* gone */ } reject(err); return; }
+        resolve(conn);
+      });
+    });
+  }
+
+  /** prefer: TLS first, plain when the server has none. */
+  private async openMysqlTls(s: Session, password: string, database: string): Promise<{ conn: mysql.Connection; tls: boolean }> {
+    const mode = s.config.tls;
+    if (mode === 'disable') return { conn: await this.openMysqlOnce(s, password, false, database), tls: false };
+    try {
+      return { conn: await this.openMysqlOnce(s, password, true, database), tls: true };
+    } catch (error) {
+      if (mode === 'prefer' && mapMysqlConnectError(error) === 'dbTlsUnsupported') return { conn: await this.openMysqlOnce(s, password, false, database), tls: false };
+      throw error;
+    }
+  }
+
+  private async startMysql(s: Session): Promise<void> {
+    // No saved password: an empty one first (a server without one for this user logs in); refused, the user is asked.
+    let password = s.config.password;
+    let prompts = 0;
+    let opened: { conn: mysql.Connection; tls: boolean } | null = null;
+    while (!opened) {
+      if (!this.live(s)) return;
+      try {
+        opened = await this.openMysqlTls(s, password ?? '', s.config.database);
+      } catch (error) {
+        if (!this.live(s)) return;
+        const code = mapMysqlConnectError(error, !!s.config.ssh);
+        const wrongPassword = (error as { errno?: unknown }).errno === ER_ACCESS_DENIED;
+        if (!wrongPassword) { this.fail(s, code, mysqlConnectMessage(error)); return; }
+        if (prompts >= MAX_PASSWORD_PROMPTS) { this.fail(s, 'dbAuth', mysqlConnectMessage(error)); return; }
+        const typed = await this.askPassword(s, password !== undefined);
+        prompts++;
+        if (!this.live(s)) return;
+        if (typed === null) { this.fail(s, 'cancelled'); return; }
+        password = typed;
+      }
+    }
+    const conn = opened.conn;
+    if (!this.live(s)) { conn.destroy(); return; }
+    s.password = password ?? '';
+    s.mysqlConn = conn;
+    const query = (sql: string) => new Promise<unknown[][]>((resolve, reject) => {
+      conn.query({ sql, rowsAsArray: true }, (err, rows) => (err ? reject(err) : resolve(Array.isArray(rows) ? rows as unknown[][] : [])));
+    });
+    let version = '';
+    let comment = '';
+    let database = s.config.database;
+    try {
+      const row = (await query('SELECT VERSION(), @@version_comment, DATABASE()'))[0] ?? [];
+      version = String(row[0] ?? '');
+      comment = String(row[1] ?? '');
+      database = row[2] === null || row[2] === undefined ? '' : String(row[2]);
+    } catch (error) {
+      if (this.live(s)) this.fail(s, mapMysqlConnectError(error), mysqlConnectMessage(error));
+      return;
+    }
+    const flavor = mysqlFlavorOf(version, comment);
+    try {
+      if (s.config.readOnly) await query('SET SESSION TRANSACTION READ ONLY');
+      if (s.config.statementTimeoutMs) await query(mysqlTimeoutSql(flavor, s.config.statementTimeoutMs));
+    } catch (error) {
+      // A read-only connection that cannot be made read-only on the server is not opened.
+      if (this.live(s)) this.fail(s, 'dbFailed', mysqlConnectMessage(error));
+      return;
+    }
+    if (!this.live(s)) return;
+    conn.on('error', () => this.fail(s, s.tunnel ? 'tunnel' : 'dbClosed'));
+    conn.on('end', () => this.fail(s, 'dbClosed'));
+    s.mysql = new MysqlSession(conn, {
+      readOnly: s.config.readOnly, statementTimeoutMs: s.config.statementTimeoutMs ?? 0, flavor,
+      sideConnection: () => this.mysqlSide(s),
+      fatal: () => this.fail(s, 'dbFailed'),
+      ...(this.timers.cursorIdleMs !== undefined ? { cursorIdleMs: this.timers.cursorIdleMs } : {}),
+    }, {
+      port: (m) => this.out.toRenderer(m),
+      tx: (tx) => { if (this.live(s)) this.out.toMain({ t: 'dbTx', id: s.id, tx }); },
+      activity: (busy) => { if (this.live(s)) this.out.toMain({ t: 'dbActivity', id: s.id, busy }); },
+      database: (name) => { if (this.live(s)) this.out.toMain({ t: 'dbDatabase', id: s.id, database: name }); },
+    });
+    this.status(s, 'connected', { ...(version ? { serverVersion: mysqlServerLabel(version, comment) } : {}), database, tls: opened.tls });
+  }
+
+  /** A second connection for KILL QUERY (no default database: it may be gone meanwhile). */
+  private async mysqlSide(s: Session): Promise<mysql.Connection> {
+    if (!this.live(s)) throw new Error('ended');
+    const side = (await this.openMysqlTls(s, s.password ?? '', '')).conn;
+    side.on('error', () => undefined);
+    return side;
+  }
+
   private async sideConnection(s: Session): Promise<pg.Client> {
     if (!this.live(s)) throw new Error('ended');
     const side = await this.connectTls(s, s.password);
@@ -528,6 +692,16 @@ export class DbHost {
     s.pg?.end();
     s.redis?.end();
     s.redis = null;
+    const my = s.mysqlConn;
+    const busy = s.mysql?.busy() ?? false;
+    s.mysql?.end();
+    s.mysql = null;
+    s.mysqlConn = null;
+    if (my) {
+      // An idle connection says goodbye (COM_QUIT); one with a statement or an open result on it is cut.
+      if (busy) my.destroy();
+      else { my.end(() => undefined); setTimeout(() => { try { my.destroy(); } catch { /* gone */ } }, 2000).unref?.(); }
+    }
     const client = s.client;
     s.client = null;
     if (client) void client.end().catch(() => undefined);
@@ -563,6 +737,10 @@ export class DbHost {
       return s.redis.handle(op.req, op.deadline);
     }
     if (op.op === 'redis') return { ok: false, error: 'invalid' };
+    if (s.config.kind === 'mysql') {
+      if (!s.mysql || s.phase !== 'connected') return { ok: false, error: 'notConnected' };
+      return s.mysql.handle(op);
+    }
     if (!s.pg || s.phase !== 'connected') return { ok: false, error: 'notConnected' };
     return s.pg.handle(op);
   }

@@ -7,7 +7,7 @@ import { Compartment, EditorSelection, EditorState, StateEffect, StateField } fr
 import { Decoration, EditorView, keymap, type DecorationSet } from '@codemirror/view';
 import { indentWithTab } from '@codemirror/commands';
 import { indentUnit } from '@codemirror/language';
-import { PostgreSQL, sql, type SQLNamespace } from '@codemirror/lang-sql';
+import { MariaSQL, MySQL, PostgreSQL, sql, type SQLDialect, type SQLNamespace } from '@codemirror/lang-sql';
 import { colors, theme } from '../CodeEditor';
 import { minimalChange } from '../../../../shared/textDiff';
 
@@ -33,9 +33,13 @@ const requestOf = (view: EditorView, kind: 'auto' | 'script'): SqlRunRequest => 
   return { kind, text: s.doc.toString(), from: range.from, to: range.to, cursor: range.head };
 };
 
-export function SqlEditor({ text, onChange, onRun, readOnly = false, schema, label, onApi }: {
+/** The keywords and quoting the editor highlights: the connection's (MySQL and MariaDB since 1.0.5). */
+export type SqlEditorDialect = 'postgres' | 'mysql' | 'mariadb';
+const DIALECTS: Record<SqlEditorDialect, SQLDialect> = { postgres: PostgreSQL, mysql: MySQL, mariadb: MariaSQL };
+
+export function SqlEditor({ text, onChange, onRun, readOnly = false, schema, label, onApi, dialect = 'postgres' }: {
   text: string; onChange?: (text: string) => void; onRun?: (req: SqlRunRequest) => void; readOnly?: boolean;
-  schema?: SQLNamespace; label: string; onApi?: (api: SqlEditorApi | null) => void;
+  schema?: SQLNamespace; label: string; onApi?: (api: SqlEditorApi | null) => void; dialect?: SqlEditorDialect;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -53,7 +57,7 @@ export function SqlEditor({ text, onChange, onRun, readOnly = false, schema, lab
         { key: 'Mod-Shift-Enter', preventDefault: true, run: (v) => { run.current?.(requestOf(v, 'script')); return true; } },
       ]),
       basicSetup, theme, colors, indentUnit.of('  '), keymap.of([indentWithTab]), errorField,
-      language.current.of(sql({ dialect: PostgreSQL, upperCaseKeywords: true, ...(schema ? { schema } : {}) })),
+      language.current.of(sql({ dialect: DIALECTS[dialect], upperCaseKeywords: true, ...(schema ? { schema } : {}) })),
       EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly),
       EditorView.contentAttributes.of({ 'aria-label': label, spellcheck: 'false' }),
       EditorView.updateListener.of((u) => { if (u.docChanged) { const value = u.state.doc.toString(); emitted.current = value; changed.current?.(value); } }),
@@ -69,8 +73,8 @@ export function SqlEditor({ text, onChange, onRun, readOnly = false, schema, lab
     return () => { onApi?.(null); view.current = null; editor.destroy(); };
   }, [readOnly]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    view.current?.dispatch({ effects: language.current.reconfigure(sql({ dialect: PostgreSQL, upperCaseKeywords: true, ...(schema ? { schema } : {}) })) });
-  }, [schema]);
+    view.current?.dispatch({ effects: language.current.reconfigure(sql({ dialect: DIALECTS[dialect], upperCaseKeywords: true, ...(schema ? { schema } : {}) })) });
+  }, [schema, dialect]);
   useEffect(() => {
     const editor = view.current;
     if (!editor || text === emitted.current) return;

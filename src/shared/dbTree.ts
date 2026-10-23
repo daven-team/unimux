@@ -2,7 +2,7 @@
 // object folders, objects and, under a table or view, its columns, keys and indexes; for Redis (1.0.3) its DBs and, under a DB,
 // the loaded keys as a ":"-tree. Pure: the panel keeps what is expanded
 // and what was loaded; this file turns that into rows (virtualized by the panel) and says what still has to be loaded.
-import type { DbColumnInfo, DbConnection, DbConstraintInfo, DbDatabaseInfo, DbIndexInfo, DbObjectInfo, DbObjectKind, DbSchemaInfo, DbTableInfo } from './db';
+import { dbDefaultDatabase, isSqlKind, type DbColumnInfo, type DbConnection, type DbConstraintInfo, type DbDatabaseInfo, type DbIndexInfo, type DbObjectInfo, type DbObjectKind, type DbSchemaInfo, type DbTableInfo } from './db';
 import { redisDataDisplay, type RedisDbList, type RedisKeyInfo } from './dbRedis';
 import { REDIS_KEY_SEPARATOR, redisKeyRows } from './redisView';
 
@@ -155,7 +155,9 @@ export function buildDbTree(input: DbTreeInput): { rows: DbTreeRow[]; needed: Db
     if (!shown) rows.push({ key: `${key}#empty`, depth, type: 'status', status: 'empty' });
   };
 
-  const databaseRows = (ctx: Ctx, depth: number) => {
+  const databaseRows = (ctx: Ctx, depth: number, mysql: boolean) => {
+    // A MySQL database holds its objects itself (no schemas inside it).
+    if (mysql) { schemaRows(ctx, ctx.database, depth); return; }
     const key = loadKey.schemas(ctx.connectionId, ctx.database);
     const load = pending(key, depth, { kind: 'schemas', key, ...ctx });
     if (!load || load.status !== 'ready') return;
@@ -222,19 +224,19 @@ export function buildDbTree(input: DbTreeInput): { rows: DbTreeRow[]; needed: Db
     const expanded = opened(ck) && input.live(c.id);
     rows.push({ key: ck, depth, type: 'connection', connection: c, expanded });
     if (expanded && c.kind === 'redis') { redisRows(c, depth + 1); return; }
-    if (!expanded || c.kind !== 'postgres') return;
+    if (!expanded || !isSqlKind(c.kind)) return;
     const key = loadKey.databases(c.id);
     const load = pending(key, depth + 1, { kind: 'databases', key, connectionId: c.id });
     if (!load || load.status !== 'ready') return;
-    const current = c.database ?? 'postgres';
+    const current = dbDefaultDatabase(c);
     const dbs = (load.value as DbDatabaseInfo[]).filter((d) => d.allowConnections && !d.isTemplate);
-    if (!dbs.some((d) => d.name === current)) dbs.unshift({ name: current, owner: '', encoding: '', isTemplate: false, allowConnections: true, sizeBytes: null });
+    if (current && !dbs.some((d) => d.name === current)) dbs.unshift({ name: current, owner: '', encoding: '', isTemplate: false, allowConnections: true, sizeBytes: null });
     for (const d of dbs) {
       const dk = nodeKey.database(c.id, d.name);
       const isCurrent = d.name === current;
       const dbExpanded = isCurrent ? !input.open.has(`${dk}!`) : opened(dk);
       rows.push({ key: dk, depth: depth + 1, auto: isCurrent, type: 'database', connectionId: c.id, database: d.name, info: d, current: isCurrent, expanded: dbExpanded });
-      if (dbExpanded) databaseRows({ connectionId: c.id, database: d.name }, depth + 2);
+      if (dbExpanded) databaseRows({ connectionId: c.id, database: d.name }, depth + 2, c.kind === 'mysql');
     }
   };
 

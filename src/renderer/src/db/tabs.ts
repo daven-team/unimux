@@ -6,7 +6,7 @@ import type { DbColumn, DbConnection, DbConnectionInput, DbResult, DbObjectKind,
 import { DB_LIMITS } from '../../../shared/db';
 import { dbTabId, editRowLabel, failedTarget, isStagedEmpty, nextSqlName, parseHistory, parseStaged, pruneHistory, pushHistory, serializeStaged, stagedCount, stagedEdits, withoutSent, type DbEditTarget, type DbHistoryEntry, type DbStaged, type DbTabRef } from '../../../shared/dbTabs';
 import { uid } from '../../../shared/state';
-import { splitSql } from '../../../shared/dbSql';
+import { splitSql, type SqlDialect } from '../../../shared/dbSql';
 import { activateFile, editFile, setDbTabHooks, useFileStore, type FileDocument } from '../files';
 import { tr } from '../i18n';
 import { askChoice, getS, setUi } from '../store';
@@ -121,9 +121,13 @@ function openTab(ref: DbTabRef, name: string, relativePath: string, text = ''): 
 }
 
 const connName = (connectionId: string) => getS().dbConnections?.find((c) => c.id === connectionId)?.name ?? '?';
+/** The SQL a connection speaks (how its scripts split, how names are quoted). */
+export const dialectOf = (connectionId: string): SqlDialect => (getS().dbConnections?.find((c) => c.id === connectionId)?.kind === 'mysql' ? 'mysql' : 'postgres');
+/** The database part of a tab's path: MySQL without a default database shows none. */
+const dbPart = (database: string) => (database ? `${database} · ` : '');
 
 export function openTableTab(connectionId: string, database: string, schema: string, table: string, objectKind: DbObjectKind): string {
-  const id = openTab({ kind: 'table', connectionId, database, schema, table, objectKind }, table, `${connName(connectionId)} · ${database} · ${schema}.${table}`);
+  const id = openTab({ kind: 'table', connectionId, database, schema, table, objectKind }, table, `${connName(connectionId)} · ${dialectOf(connectionId) === 'mysql' ? `${schema}.${table}` : `${database} · ${schema}.${table}`}`);
   const st = tabState<TableTabState>(id, 'table');
   if (!st.columns.length && !st.loading) void loadPage(id);
   return id;
@@ -132,13 +136,13 @@ export function openTableTab(connectionId: string, database: string, schema: str
 export function openSqlTab(connectionId: string, database: string, text = ''): string {
   const used = useFileStore.getState().documents.filter((d) => d.db?.kind === 'sql' && d.db.connectionId === connectionId).map((d) => d.name);
   const name = nextSqlName(used);
-  const id = openTab({ kind: 'sql', connectionId, database, uid: uid() }, name, `${connName(connectionId)} · ${database} · ${name}`, text);
+  const id = openTab({ kind: 'sql', connectionId, database, uid: uid() }, name, `${connName(connectionId)} · ${dbPart(database)}${name}`, text);
   tabState<SqlTabState>(id, 'sql');
   return id;
 }
 
 export function openDdlTab(connectionId: string, database: string, schema: string, name: string, objectKind: DbObjectKind, args?: string): string {
-  const id = openTab({ kind: 'ddl', connectionId, database, schema, name, objectKind, ...(args ? { args } : {}) }, name, `${connName(connectionId)} · ${database} · ${schema}.${name} (DDL)`);
+  const id = openTab({ kind: 'ddl', connectionId, database, schema, name, objectKind, ...(args ? { args } : {}) }, name, `${connName(connectionId)} · ${dialectOf(connectionId) === 'mysql' ? '' : `${database} · `}${schema}.${name} (DDL)`);
   void loadDdl(id);
   return id;
 }
@@ -337,7 +341,7 @@ export async function runSql(id: string, sql: string, offset: number, opts: { re
     else if (m.t === 'statementEnd') edit(m.index, (r) => ({ ...r, command: m.command, rowCount: m.rowCount, hasMore: m.hasMore, truncated: m.truncated === true, timeMs: m.timeMs, loadingMore: false }));
     else if (m.t === 'statementError') {
       // Refused before it ran (read-only): no 'statement' message came, the split of the text says where it is.
-      const span = at(m.index) < 0 ? splitSql(sql)[m.index] : undefined;
+      const span = at(m.index) < 0 ? splitSql(sql, dialectOf(ref.connectionId))[m.index] : undefined;
       if (at(m.index) < 0) pending = [...pending, { index: m.index, start: span?.start ?? 0, end: span?.end ?? 0, columns: null, rows: [], command: null, rowCount: null, hasMore: false, closed: true, timeMs: null, error: null }];
       edit(m.index, (r) => ({ ...r, error: dbErrorMessage(m.error, m.server, ref.connectionId), readOnly: m.error === 'readOnly', ...(m.server?.position ? { position: m.server.position } : {}), timeMs: m.timeMs, loadingMore: false }));
     } else if (m.t === 'resultClosed') edit(m.index, (r) => ({ ...r, closed: true, loadingMore: false }));

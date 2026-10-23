@@ -15,7 +15,7 @@ export const dbSessionId = (uuid: string): string => `${DB_SESSION_PREFIX}${uuid
 export const isDbSessionId = (id: unknown): id is string => typeof id === 'string' && SESSION_ID.test(id);
 
 export const DB_LIMITS = {
-  connections: 500, name: 80, group: 60, host: 253, user: 128, database: 63, password: 4096, caPath: 4096, caBytes: 1024 * 1024,
+  connections: 500, name: 80, group: 60, host: 253, user: 128, database: 64, password: 4096, caPath: 4096, caBytes: 1024 * 1024,
   /** A statement timeout above a day is a typo. */
   statementTimeoutMaxMs: 24 * 3600_000,
   /** Rows a query result shows before "load more" (the default and the most one request may ask for). */
@@ -38,9 +38,34 @@ export const DB_LIMITS = {
 
 // ── connections ─────────────────────────────────────────────────────────────
 
-export type DbKind = 'postgres' | 'redis';
-export const DB_KINDS: readonly DbKind[] = ['postgres', 'redis'];
-export const DB_DEFAULT_PORT: Record<DbKind, number> = { postgres: 5432, redis: 6379 };
+/** mysql (1.0.5): MySQL and MariaDB (one wire protocol, one driver); which one a server is shows once connected (`flavor`). */
+export type DbKind = 'postgres' | 'mysql' | 'redis';
+export const DB_KINDS: readonly DbKind[] = ['postgres', 'mysql', 'redis'];
+export const DB_DEFAULT_PORT: Record<DbKind, number> = { postgres: 5432, mysql: 3306, redis: 6379 };
+/** The kinds that run SQL (the tree of databases, table tabs, SQL editors: window.mc.db.pg). */
+export const isSqlKind = (kind: DbKind): boolean => kind === 'postgres' || kind === 'mysql';
+/** A MySQL-protocol server: Oracle's MySQL (and Percona) or MariaDB. */
+export type DbMysqlFlavor = 'mysql' | 'mariadb';
+/** The flavour from VERSION() and @@version_comment: MariaDB names itself in one of them. */
+export const mysqlFlavorOf = (version: string, comment = ''): DbMysqlFlavor => (/mariadb/i.test(`${version} ${comment}`) ? 'mariadb' : 'mysql');
+/** "MariaDB 11.4.2" or "MySQL 8.0.36" from VERSION() ("11.4.2-MariaDB-ubu2404", "5.5.5-10.6.12-MariaDB", "8.0.36-log"). */
+export function mysqlServerLabel(version: string, comment = ''): string {
+  const flavor = mysqlFlavorOf(version, comment);
+  const v = version.replace(/^5\.5\.5-(?=\d+\.\d+)/, '').match(/^\d+(?:\.\d+){0,2}/)?.[0] ?? version.slice(0, 40);
+  return `${flavor === 'mariadb' ? 'MariaDB' : 'MySQL'} ${v}`;
+}
+/** The name of a connection's kind: MySQL / MariaDB shows the flavour its server was last seen as. */
+export function dbKindLabel(c: { kind: DbKind; flavor?: DbMysqlFlavor }): string {
+  if (c.kind === 'postgres') return 'PostgreSQL';
+  if (c.kind === 'redis') return 'Redis';
+  return c.flavor === 'mariadb' ? 'MariaDB' : c.flavor === 'mysql' ? 'MySQL' : 'MySQL / MariaDB';
+}
+/**
+ * The database a connection opens: Postgres its database ("postgres" by default), MySQL its default database (empty: none, the
+ * whole server), Redis its DB index as text.
+ */
+export const dbDefaultDatabase = (c: { kind: DbKind; database?: string; dbIndex?: number }): string =>
+  (c.kind === 'postgres' ? c.database ?? 'postgres' : c.kind === 'mysql' ? c.database ?? '' : String(c.dbIndex ?? 0));
 /** disable: plain; prefer: TLS when the server offers it; require: TLS without certificate checks; verify-full: TLS checked against `caPath` and the host name. */
 export type DbTlsMode = 'disable' | 'prefer' | 'require' | 'verify-full';
 export const DB_TLS_MODES: readonly DbTlsMode[] = ['disable', 'prefer', 'require', 'verify-full'];
@@ -58,10 +83,12 @@ export interface DbConnection {
   /** Without a tunnel: where the app connects. With one: unused by the connection (kept for the form). */
   host: string;
   port: number;
-  /** Postgres role; Redis ACL user (empty: the default user). */
+  /** Postgres role; MySQL user; Redis ACL user (empty: the default user). */
   user: string;
-  /** Postgres: the database the connection opens (default "postgres"). */
+  /** Postgres: the database the connection opens (default "postgres"). MySQL: the default database (absent: none). */
   database?: string;
+  /** MySQL: what the server said it is the last time it connected (main keeps it; the icon and labels show it). */
+  flavor?: DbMysqlFlavor;
   /** Redis: the DB index (default 0). */
   dbIndex?: number;
   tls: DbTlsMode;
@@ -112,16 +139,20 @@ export function normalizeDbConnection(raw: unknown): DbConnection | null {
   const host = validHost(r.host);
   if (!host) return null;
   const user = typeof r.user === 'string' ? r.user.trim() : '';
-  if (!validUser(user) || (kind === 'postgres' && !user)) return null;
+  if (!validUser(user) || (kind !== 'redis' && !user)) return null;
   const c: DbConnection = {
     id: r.id, kind, name: cleanText(r.name, DB_LIMITS.name) ?? host, host, port: isPort(r.port) ? r.port : DB_DEFAULT_PORT[kind], user,
-    tls: DB_TLS_MODES.includes(r.tls as DbTlsMode) ? r.tls as DbTlsMode : kind === 'postgres' ? 'prefer' : 'disable',
+    tls: DB_TLS_MODES.includes(r.tls as DbTlsMode) ? r.tls as DbTlsMode : kind === 'redis' ? 'disable' : 'prefer',
     ssh: null, readOnly: r.readOnly === true, createdAt: stamp(r.createdAt), updatedAt: stamp(r.updatedAt),
   };
   if (typeof r.color === 'string' && HEX_COLOR.test(r.color)) c.color = r.color;
   const group = cleanText(r.group, DB_LIMITS.group);
   if (group) c.group = group;
   if (kind === 'postgres') c.database = validDatabase(r.database) ? r.database : 'postgres';
+  if (kind === 'mysql') {
+    if (validDatabase(r.database)) c.database = r.database;
+    if (r.flavor === 'mysql' || r.flavor === 'mariadb') c.flavor = r.flavor;
+  }
   if (kind === 'redis') c.dbIndex = typeof r.dbIndex === 'number' && Number.isInteger(r.dbIndex) && r.dbIndex >= 0 && r.dbIndex <= 10_000 ? r.dbIndex : 0;
   // A connection is never weakened: verify-full without a usable CA file, or a damaged tunnel, makes it unusable (dropped)
   // instead of turning into one without certificate checks or a direct connection.
@@ -136,7 +167,7 @@ export function normalizeDbConnection(raw: unknown): DbConnection | null {
     if (!dbHost) return null;
     c.ssh = { hostId: ssh.hostId, dbHost, dbPort: ssh.dbPort };
   }
-  if (kind === 'postgres' && typeof r.statementTimeoutMs === 'number' && Number.isInteger(r.statementTimeoutMs) && r.statementTimeoutMs > 0 && r.statementTimeoutMs <= DB_LIMITS.statementTimeoutMaxMs) {
+  if (isSqlKind(kind) && typeof r.statementTimeoutMs === 'number' && Number.isInteger(r.statementTimeoutMs) && r.statementTimeoutMs > 0 && r.statementTimeoutMs <= DB_LIMITS.statementTimeoutMaxMs) {
     c.statementTimeoutMs = r.statementTimeoutMs;
   }
   return c;
@@ -169,8 +200,8 @@ export type DbDraftResult = { ok: true; value: DbConnectionInput } | { ok: false
 export function dbConnectionToDraft(c?: DbConnection, kind: DbKind = c?.kind ?? 'postgres'): DbConnectionDraft {
   return {
     kind, name: c?.name ?? '', color: c?.color, group: c?.group ?? '', host: c?.host ?? (c?.ssh ? '' : 'localhost'), port: String(c?.port ?? DB_DEFAULT_PORT[kind]),
-    user: c?.user ?? (kind === 'postgres' ? 'postgres' : ''), database: c?.database ?? 'postgres', dbIndex: String(c?.dbIndex ?? 0),
-    tls: c?.tls ?? (kind === 'postgres' ? 'prefer' : 'disable'), caPath: c?.caPath ?? '', sshHostId: c?.ssh?.hostId ?? null,
+    user: c?.user ?? (kind === 'postgres' ? 'postgres' : kind === 'mysql' ? 'root' : ''), database: c?.database ?? (kind === 'mysql' ? '' : 'postgres'), dbIndex: String(c?.dbIndex ?? 0),
+    tls: c?.tls ?? (kind === 'redis' ? 'disable' : 'prefer'), caPath: c?.caPath ?? '', sshHostId: c?.ssh?.hostId ?? null,
     sshDbHost: c?.ssh?.dbHost ?? '127.0.0.1', sshDbPort: String(c?.ssh?.dbPort ?? DB_DEFAULT_PORT[kind]), readOnly: c?.readOnly === true,
     statementTimeout: c?.statementTimeoutMs ? String(c.statementTimeoutMs / 1000) : '',
   };
@@ -192,9 +223,9 @@ export function validateDbDraft(d: DbConnectionDraft): DbDraftResult {
   const port = parsePort(d.port, DB_DEFAULT_PORT[d.kind]);
   if (port === null) errors.port = 'Nieprawidłowy port';
   const user = d.user.trim();
-  if (!validUser(user) || (d.kind === 'postgres' && !user)) errors.user = 'Podaj nazwę użytkownika';
-  const database = d.database.trim() || 'postgres';
-  if (d.kind === 'postgres' && !validDatabase(database)) errors.database = 'Nieprawidłowa nazwa bazy danych';
+  if (!validUser(user) || (d.kind !== 'redis' && !user)) errors.user = 'Podaj nazwę użytkownika';
+  const database = d.database.trim() || (d.kind === 'mysql' ? '' : 'postgres');
+  if ((d.kind === 'postgres' || (d.kind === 'mysql' && database)) && !validDatabase(database)) errors.database = 'Nieprawidłowa nazwa bazy danych';
   const dbIndex = d.dbIndex.trim() === '' ? 0 : Number(d.dbIndex.trim());
   if (d.kind === 'redis' && !(/^\d+$/.test(d.dbIndex.trim() || '0') && Number.isInteger(dbIndex) && dbIndex <= 10_000)) errors.dbIndex = 'Nieprawidłowy numer bazy';
   const caPath = d.caPath.trim();
@@ -209,7 +240,7 @@ export function validateDbDraft(d: DbConnectionDraft): DbDraftResult {
   }
   let statementTimeoutMs: number | undefined;
   const st = d.statementTimeout.trim().replace(',', '.');
-  if (d.kind === 'postgres' && st) {
+  if (isSqlKind(d.kind) && st) {
     const seconds = Number(st);
     if (!Number.isFinite(seconds) || seconds < 0 || seconds * 1000 > DB_LIMITS.statementTimeoutMaxMs) errors.statementTimeout = 'Nieprawidłowy limit czasu';
     else if (seconds > 0) statementTimeoutMs = Math.max(1, Math.round(seconds * 1000));
@@ -222,7 +253,7 @@ export function validateDbDraft(d: DbConnectionDraft): DbDraftResult {
   if (d.color && HEX_COLOR.test(d.color)) value.color = d.color;
   const group = clip(d.group.trim(), DB_LIMITS.group);
   if (group && !CONTROL.test(group)) value.group = group;
-  if (d.kind === 'postgres') value.database = database;
+  if (d.kind === 'postgres' || (d.kind === 'mysql' && database)) value.database = database;
   if (d.kind === 'redis') value.dbIndex = dbIndex;
   if (d.tls === 'verify-full') value.caPath = caPath;
   if (statementTimeoutMs) value.statementTimeoutMs = statementTimeoutMs;
@@ -234,6 +265,7 @@ export function dbEndpoint(c: Pick<DbConnection, 'kind' | 'host' | 'port' | 'ssh
   const host = c.ssh ? c.ssh.dbHost : c.host;
   const port = c.ssh ? c.ssh.dbPort : c.port;
   const h = host.includes(':') ? `[${host}]` : host;
+  if (c.kind === 'mysql') return `${h}:${port}${c.database ? `/${c.database}` : ''}`;
   return `${h}:${port}/${c.kind === 'postgres' ? c.database ?? 'postgres' : String(c.dbIndex ?? 0)}`;
 }
 
@@ -469,7 +501,8 @@ export type DbPortMessage =
 
 // ── metadata ────────────────────────────────────────────────────────────────
 
-export interface DbDatabaseInfo { name: string; owner: string; encoding: string; isTemplate: boolean; allowConnections: boolean; sizeBytes: number | null; comment?: string }
+/** `system`: MySQL's own databases (information_schema, mysql, performance_schema, sys), listed last and dimmed. */
+export interface DbDatabaseInfo { name: string; owner: string; encoding: string; isTemplate: boolean; allowConnections: boolean; sizeBytes: number | null; comment?: string; system?: boolean }
 export interface DbSchemaInfo { name: string; owner: string; system: boolean; comment?: string }
 export type DbObjectKind = 'table' | 'partitioned' | 'view' | 'matview' | 'foreign' | 'sequence' | 'function' | 'procedure';
 export interface DbObjectInfo {

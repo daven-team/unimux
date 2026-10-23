@@ -29,7 +29,8 @@ export function dbTabId(ref: DbTabRef): string {
 export function validDbTabRef(value: unknown): value is DbTabRef {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
-  if (!isUuid(v.connectionId) || !okName(v.database)) return false;
+  // An empty database: a MySQL connection without a default database.
+  if (!isUuid(v.connectionId) || !(v.database === '' || okName(v.database))) return false;
   if (v.kind === 'sql') return isUuid(v.uid);
   if (v.kind === 'table') return okName(v.schema) && okName(v.table) && OBJECT_KINDS.includes(v.objectKind as DbObjectKind);
   if (v.kind === 'ddl') return okName(v.schema) && okName(v.name) && OBJECT_KINDS.includes(v.objectKind as DbObjectKind) && (v.args === undefined || (typeof v.args === 'string' && v.args.length <= 8192));
