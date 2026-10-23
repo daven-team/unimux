@@ -28,6 +28,8 @@
   --btn-fg: #e2e2e2;
   --btn-primary-bg: #81a1c1;
   --btn-primary-bg-hover: #91afcc;
+  /* The selected row of a list or tree (Files, SFTP, DB): the steel blue of the primary buttons, not the bright --accent. */
+  --selection-bg: color-mix(in srgb, var(--btn-primary-bg) 18%, transparent);
   --btn-primary-fg: #191c22;
   --btn-ghost-hover: #ffffff12;
   font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
@@ -775,7 +777,7 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid #a8a29e; outli
 .workspace-tabs .tabs-all { margin-left: auto; }
 
 /* File tree: selection, drag and drop, inline rename, copy progress */
-.file-entry.selected { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); }
+.file-entry.selected { background: var(--selection-bg); color: var(--text); }
 .file-entry.cut { opacity: .5; }
 .file-entry.drop-target { background: color-mix(in srgb, var(--accent) 28%, transparent); outline: 1px dashed var(--accent); outline-offset: -2px; }
 .explorer-tree.drop-root { box-shadow: inset 0 0 0 1px var(--accent); }

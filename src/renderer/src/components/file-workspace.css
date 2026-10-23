@@ -62,7 +62,7 @@
 .tree-sticky-rows > .file-entry { z-index: 1; background: var(--bg-1); }
 .tree-sticky-rows > .file-entry:last-child { z-index: 0; }
 .tree-sticky-rows > .file-entry:hover { background: var(--bg-hover); }
-.tree-sticky-rows > .file-entry.selected { background: color-mix(in srgb, var(--accent) 16%, var(--bg-1)); }
+.tree-sticky-rows > .file-entry.selected { background: color-mix(in srgb, var(--btn-primary-bg) 18%, var(--bg-1)); }
 /* Indent guides: one thin line per parent level under that level's chevron (deep levels are packed closer, see shared/treeRows.ts). */
 .tree-guides { position: absolute; top: 0; bottom: 0; left: 0; width: 0; pointer-events: none; }
 .tree-guides > span { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255, 255, 255, .1); }
