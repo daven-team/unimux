@@ -172,6 +172,10 @@ export class PtyManager implements TerminalBackend {
   }
 
   /** Output history of every live terminal (for a reconnecting renderer). */
+  resetFlow(id: string): void {
+    this.entries.get(id)?.out.resetFlow();
+  }
+
   histories(): Array<{ id: string; data: string }> {
     return [...this.entries].map(([id, e]) => ({ id, data: e.out.history() }));
   }

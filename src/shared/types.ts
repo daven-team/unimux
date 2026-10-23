@@ -1,3 +1,4 @@
+import type { DetachedWindow } from './detached';
 import type { GridLayout } from './layout';
 import type { Language } from './languages';
 import type { AlertSettings } from './alerts';
@@ -215,6 +216,8 @@ export interface AppState {
    * shared/workspaceOrder.ts. Absent until the per-project orders of 0.9.x are migrated.
    */
   workspaceOrder?: string[];
+  /** Tabs in their own window (1.0.6, shared/detached.ts); written by main only. Absent when none is detached. */
+  detachedWindows?: DetachedWindow[];
   /** Saved database connections (1.0.0; no secrets: passwords live in <data>/db/vault.json, owned by main). */
   dbConnections: DbConnection[];
   /** Colours of the connection folders (1.0.3, shared/db.ts normalizeDbGroupColors); a connection shows its folder's. */

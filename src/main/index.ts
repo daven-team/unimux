@@ -24,6 +24,7 @@ import { applyDockIcon, windowIcon } from './appIcon';
 import { LARGE_VIEW_BYTES, listProjectDirectories, listProjectDirectory, listProjectDirectoryBatch, readProjectFile, statProjectFile, writeProjectFile } from './files';
 import { createTrash, registerFileOpsIpc } from './filesIpc';
 import { createIpcGuard } from './ipcGuard';
+import { closeAllDetached, fromDetachedWindow, initDetachedWindows, relayCellStatus, sendRouted, startDetachedWindows, stateChanged as detachedStateChanged } from './detachedWindows';
 import { registerGitIpc } from './gitIpc';
 import { Git } from './git';
 import { createGithubService } from './github/service';
@@ -229,7 +230,8 @@ let win: BrowserWindow | null = null;
 /** The first renderer load of this app run, for SSH hosts that reconnect at start (appStartClaim.ts). */
 const appStartClaim = createAppStartClaim();
 /** The sender check of every IPC channel that changes accounts, logins, usage, SSH data or the secret clipboard (R9). */
-const fromAppWindow = (event: { sender: unknown; senderFrame?: unknown }): boolean => isFromWindow(win, event);
+// 1.0.6: the windows main created for detached tabs (detachedWindows.ts) count as the app window too.
+const fromAppWindow = (event: { sender: unknown; senderFrame?: unknown }): boolean => isFromWindow(win, event) || fromDetachedWindow(event);
 /** The same check for every other channel that changes something (0.9.6, ipcGuard.ts); pure reads stay on ipcMain. */
 const { guardedHandle, guardedOn } = createIpcGuard(ipcMain, fromAppWindow);
 /** SSH sessions: created after app.whenReady() (safeStorage needs it), before the window (startSsh). */
@@ -523,7 +525,8 @@ const updateStrings = (): UpdateStrings => ({
   background: tr('Aktualizacja trwa dalej w tle'),
 });
 
-const send = (channel: string, ...args: unknown[]) => { safeSend(win, channel, ...args); };
+// The main window, and (1.0.6) the detached windows for the state and the messages of their own cells (detachedWindows.ts).
+const send = (channel: string, ...args: unknown[]) => { sendRouted(win, channel, args); };
 /** The OS ends the session (Windows shutdown or log-off, macOS shutdown): nothing may hold the quit any more. */
 let sessionEndingAt: number | undefined;
 /** The OS announced a session end: quits within the next minute are never held, and an open question lets the quit go on. */
@@ -595,6 +598,7 @@ const controller = new StateController(state, (snapshot) => {
   state = snapshot.state;
   ssh?.stateChanged(state);
   db?.stateChanged();
+  detachedStateChanged(state);
   const key = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}`;
   if (key !== usageKey) { usageKey = key; usage.reschedule(); }
   saver.save(state);
@@ -707,7 +711,7 @@ function createWindow(): void {
   });
   const created = win;
   // Async callbacks outlive the native window (shutdown, update hand-over); they must see "no window", not a destroyed one.
-  created.once('closed', () => { install.dispose(); if (win === created) win = null; });
+  created.once('closed', () => { install.dispose(); if (win === created) win = null; closeAllDetached(); });
   // Without background throttling the page always counts as visible, so the renderer learns from here when nobody can see it.
   const sendShown = () => { if (isLive(created)) safeSend(created, 'window:shown', created.isVisible() && !created.isMinimized()); };
   win.on('minimize', () => { usage.setActive(false); sendShown(); });
@@ -743,10 +747,31 @@ function createWindow(): void {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL);
-  else win.loadFile(join(__dirname, '../renderer/index.html'));
+  loadRenderer(win);
   startupTimer.mark('window-created');
 }
+
+/** The renderer page; a detached window (1.0.6) gets `?detached=<id>`. */
+function loadRenderer(w: BrowserWindow, query: Record<string, string> = {}): void {
+  const search = new URLSearchParams(query).toString();
+  if (process.env.ELECTRON_RENDERER_URL) void w.loadURL(search ? `${process.env.ELECTRON_RENDERER_URL}?${search}` : process.env.ELECTRON_RENDERER_URL);
+  else void w.loadFile(join(__dirname, '../renderer/index.html'), search ? { query } : undefined);
+}
+
+initDetachedWindows({
+  state: () => state,
+  change: (fn) => { controller.change(fn); },
+  mainWindow: () => win,
+  load: loadRenderer,
+  preload: join(__dirname, '../preload/index.js'),
+  icon: windowIcon,
+  pty: ptyHost,
+  isAlive: (cellId) => alive.has(cellId),
+  quitting: () => quitting,
+  offscreen: !!devEnv('MC_OFFSCREEN'),
+  devConsole: !app.isPackaged,
+  log: (message) => crashLog.warn(message),
+}, { guardedHandle, guardedOn });
 
 /** Renderer crashes reloaded without asking (3 within a minute); after that the user decides. */
 const allowRendererReload = createReloadLimiter();
@@ -1214,6 +1239,7 @@ guardedHandle('install:start', (_e, request?: unknown) => installHandlers.start(
 guardedOn('install:cancel', (_e, id?: unknown) => { installHandlers.cancel(id); });
 ipcMain.handle('install:current', () => installHandlers.current());
 guardedOn('cell:runtime', (_e, cellId: string, status: string, reason?: string, hooked?: boolean) => {
+  relayCellStatus(_e, cellId, status);
   const found = findCell(state, cellId);
   if (!found || !alive.has(cellId)) return;
   // The renderer's StatusTracker decides; heuristics (hooked = false) never yield "ready".
@@ -1636,6 +1662,8 @@ async function startMainApp(): Promise<void> {
     // Its IPC handlers are registered in the same tick as the window: the page cannot call them before it has loaded.
     startSsh();
     startupTimer.mark('ssh-started');
+    // Tabs that were in their own window at the last quit open there again.
+    startDetachedWindows();
   } catch (error) {
     // As before the window came first: without terminals or SSH the start failed (with a message), it does not run half.
     startupFailed(error);
@@ -1740,6 +1768,8 @@ app.on('before-quit', (e) => {
   send('app:before-quit');
   // Give the renderer a moment to push its final state, then wind down terminals cleanly.
   setTimeout(async () => {
+    // Detached windows close as they are (their registry stays for the next start); their pages flushed on app:before-quit.
+    closeAllDetached();
     // Never throws; a save that still fails is logged by the saver and tried again below.
     saver.flush();
     // A running swap or "Set as main" finishes first (bounded, inside the hard limit): exiting in the middle of one can leave

@@ -90,7 +90,8 @@ function run(id: string): void {
   }
 }
 
-export function useShortcuts(): void {
+/** `only`: the actions this window offers (a detached window, 1.0.6); other combos are left to the page. */
+export function useShortcuts(only?: ReadonlySet<string>): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.type !== 'keydown') return;
@@ -103,7 +104,7 @@ export function useShortcuts(): void {
         overlayOpen: !!(ui.dialog || ui.modal), paletteOpen: ui.palette, settingsActive: ui.settingsActive,
         hasProject: !!project, hasTab: !!frontKey(), target: focusTarget(e.target),
       });
-      if (!id) return;
+      if (!id || (only && !only.has(id))) return;
       e.preventDefault();
       e.stopPropagation();
       run(id);

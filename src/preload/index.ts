@@ -238,6 +238,15 @@ const api: McApi = {
   swapPending: () => ipcRenderer.invoke('accounts:swapPending'),
   clearSwapPending: () => ipcRenderer.invoke('accounts:clearSwapPending'),
   dismissAccountNotice: (id) => ipcRenderer.invoke('accounts:dismissNotice', id),
+  detach: {
+    open: (target, docs) => ipcRenderer.invoke('detach:open', target, docs),
+    dropOutside: (target, docs) => ipcRenderer.invoke('detach:dropOutside', target, docs),
+    take: () => ipcRenderer.invoke('detach:take'),
+    attach: (docs, overMain) => ipcRenderer.invoke('detach:attach', docs, overMain === true),
+    dismiss: () => ipcRenderer.invoke('detach:dismiss'),
+    requestAttach: (id) => ipcRenderer.send('detach:requestAttach', id),
+    focus: (id) => ipcRenderer.send('detach:focus', id),
+  },
   on: (channel: string, cb: (...args: any[]) => void) => {
     const listener = (_e: unknown, ...args: any[]) => cb(...args);
     ipcRenderer.on(channel, listener);

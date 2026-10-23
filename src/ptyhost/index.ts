@@ -5,14 +5,18 @@ import type { HostToMain, HostToRenderer, MainToHost, RendererToHost } from '../
 import { OutputBatcher } from './batch';
 import { PtyManager, type PtySink } from './manager';
 import { HostRouter } from './router';
+import { MAIN_WINDOW, WindowRoutes } from './routes';
 import { SshManager } from './ssh';
 
 const parentPort = process.parentPort;
-let rendererPort: MessagePortMain | null = null;
+
+/** One renderer window's data port (the main window, and since 1.0.6 each detached window) with its own output batcher. */
+interface RendererLink { port: MessagePortMain; batcher: OutputBatcher }
+const links = new Map<string, RendererLink>();
+/** Which window shows which terminal (main routes the cells of detached grids). */
+const routes = new WindowRoutes();
 
 const toMain = (m: HostToMain) => parentPort.postMessage(m);
-/** Terminal output of one event-loop turn goes out as one message (16 busy terminals would otherwise be one message each). */
-const batcher = new OutputBatcher((m) => rendererPort?.postMessage(m));
 
 /** Message and stack of an error, cut to a size the crash log can take (never the payload of a message: SSH secrets). */
 const describeError = (error: unknown): string =>
@@ -22,12 +26,13 @@ const logToMain = (level: 'error' | 'warn', message: string) => { try { toMain({
 // with it: the error is reported to main's crash log and the host keeps running.
 process.on('uncaughtException', (error) => logToMain('error', `pty host uncaught exception: ${describeError(error)}`));
 process.on('unhandledRejection', (reason) => logToMain('error', `pty host unhandled rejection: ${describeError(reason)}`));
-/** `echo`: typed output, posted at once (see OutputBatcher.data). */
+/** `echo`: typed output, posted at once (see OutputBatcher.data). False when the terminal's window has no port (yet). */
 const toRenderer = (m: HostToRenderer, echo = false): boolean => {
-  if (!rendererPort) return false;
-  if (m.t === 'data') { batcher.data(m.id, m.data, echo); return true; }
-  batcher.flush(); // output of a terminal always arrives before its exit
-  rendererPort.postMessage(m);
+  const link = links.get(routes.ownerOf(m.id));
+  if (!link) return false;
+  if (m.t === 'data') { link.batcher.data(m.id, m.data, echo); return true; }
+  link.batcher.flush(); // output of a terminal always arrives before its exit
+  link.port.postMessage(m);
   return true;
 };
 
@@ -58,27 +63,47 @@ const ssh = new SshManager(sink, {
 /** Sends renderer messages and kills to the backend that owns the terminal. */
 const router = new HostRouter([manager, ssh]);
 
-function attachRenderer(port: MessagePortMain): void {
-  rendererPort?.close();
+function attachRenderer(port: MessagePortMain, window: string): void {
+  const old = links.get(window);
   // Queued output is part of the replay tails the new renderer gets below.
-  batcher.drop();
-  router.rendererAttached();
-  rendererPort = port;
+  old?.batcher.drop();
+  old?.port.close();
+  if (window === MAIN_WINDOW) router.rendererAttached();
+  const link: RendererLink = { port, batcher: new OutputBatcher((m) => port.postMessage(m)) };
+  links.set(window, link);
   port.on('message', (e) => {
     const m = e.data as RendererToHost;
+    // A window speaks only for its own terminals (a detached grid's cells are not the main window's any more).
+    if (!routes.accepts(window, m)) return;
     if (m.t === 'sshList') { listFor(port, m); return; }
+    if (m.t === 'focus') {
+      const id = routes.focus(window, typeof m.id === 'string' ? m.id : null);
+      if (id !== undefined) router.message({ t: 'focus', id });
+      return;
+    }
     router.message(m);
-    if (m.t === 'write' && tapped.has(m.id) && m.data.includes('\x03')) toMain({ t: 'interrupt', id: m.id });
+    if (m.t === 'write' && tapped.has(m.id) && m.data.includes('')) toMain({ t: 'interrupt', id: m.id });
   });
   port.on('close', () => {
     // Only the current port counts: replacing it closes the old one after the new one is in place.
-    if (rendererPort !== port) return;
-    rendererPort = null;
-    router.setFlowControl(false);
+    if (links.get(window) !== link) return;
+    links.delete(window);
+    if (window === MAIN_WINDOW) router.setFlowControl(false);
   });
   port.start();
-  router.setFlowControl(true);
-  for (const h of router.histories()) toRenderer({ t: 'replay', id: h.id, data: h.data });
+  if (window === MAIN_WINDOW) router.setFlowControl(true);
+  for (const h of router.histories()) if (routes.ownerOf(h.id) === window) toRenderer({ t: 'replay', id: h.id, data: h.data });
+}
+
+/** A terminal moved to another window: the old window's queued output goes out first, the new one gets the replay tail. */
+function route(id: string, window: string | null): void {
+  const before = routes.set(id, window);
+  if (before === null) return;
+  links.get(before)?.batcher.flush();
+  // Acks of output the old window parsed never come from the new one.
+  router.resetFlow(id);
+  const history = router.history(id);
+  if (history !== undefined) toRenderer({ t: 'replay', id, data: history });
 }
 
 /** SSH path completion: the answer goes back on the port that asked (a reloaded renderer never gets an old one). */
@@ -87,7 +112,7 @@ function listFor(port: MessagePortMain, m: Extract<RendererToHost, { t: 'sshList
     && (m.cwd === null || (typeof m.cwd === 'string' && m.cwd.length <= 4096));
   if (!valid) return;
   void ssh.list(m.id, { dir: m.dir, cwd: m.cwd, cwdOnly: m.cwdOnly === true }).then((result) => {
-    if (rendererPort === port) port.postMessage({ t: 'sshListResult', id: m.id, reqId: m.reqId, result } satisfies HostToRenderer);
+    if ([...links.values()].some((link) => link.port === port)) port.postMessage({ t: 'sshListResult', id: m.id, reqId: m.reqId, result } satisfies HostToRenderer);
   });
 }
 
@@ -96,10 +121,13 @@ parentPort.on('message', (e) => {
 });
 
 async function handleMain(e: { data: unknown; ports: MessagePortMain[] }): Promise<void> {
-  const m = e.data as MainToHost | { t: 'port' };
+  const m = e.data as MainToHost | { t: 'port'; window?: string };
   switch (m.t) {
     case 'port':
-      attachRenderer(e.ports[0]);
+      attachRenderer(e.ports[0], typeof m.window === 'string' ? m.window : MAIN_WINDOW);
+      break;
+    case 'route':
+      route(m.id, m.window);
       break;
     case 'spawn':
       try {

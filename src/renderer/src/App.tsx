@@ -7,6 +7,7 @@ import { ptyHostRestartToast } from '../../shared/ssh';
 import type { McpInfo } from '../../shared/automation';
 import { alertForStatus } from './alerts';
 import { initQuitGuard } from './closeGuard';
+import { initDetachFollow } from './detach';
 import { noteAgentTurnEnd } from './turnRefresh';
 import { initBackgroundLoader } from './backgroundLoader';
 import { applyCliStatus, flushPendingSaves, ensureStarted, focusCell, hasBlockedCells, recheckCli, refreshSessionTitles, resetStarted, releaseCellTerminal, setAliveAtStart } from './actions';
@@ -226,6 +227,8 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   }
   bootStep(initBackgroundLoader);
   bootStep(initQuitGuard);
+  // Tabs in their own window (1.0.6): their cells' terminals leave this window and come back with them.
+  bootStep(initDetachFollow);
 }
 
 /**

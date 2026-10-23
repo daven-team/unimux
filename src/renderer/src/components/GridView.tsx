@@ -13,6 +13,13 @@ import { CellFallback, ErrorBoundary } from './ErrorBoundary';
 import { areaStyle, GridDividers } from './GridDividers';
 import { IHistory, IPlus, Logo } from './icons';
 import { ProjectIconView } from './ProjectIcon';
+import { requestAttach } from '../detach';
+import { detachedId } from '../windowRole';
+import type { AppState } from '../../../shared/types';
+
+/** The detached window of a grid, seen from the main window (a detached window draws its own grid). */
+const detachedOfGridIn = (s: AppState, tabId: string): string | null =>
+  detachedId !== null ? null : (s.detachedWindows ?? []).find((w) => w.target.kind === 'grid' && w.target.tabId === tabId)?.id ?? null;
 
 /** The key of an action as a chip; nothing while the shortcut is switched off. */
 function Kbd({ id }: { id: string }) {
@@ -29,6 +36,7 @@ export const GridView = memo(function GridView() {
   const maximized = useStore((st) => st.ui.maximizedCellId);
   const cliStatus = useStore((st) => st.ui.cliStatus);
   const tab = activeTab(project);
+  const away = useStore((st) => (tab ? detachedOfGridIn(st.s, tab.id) : null));
   const [preview, setPreview] = useState<{ tabId: string; layout: GridLayout } | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const cellOrder = tab ? tab.cells.map((c) => c.id).join() : '';
@@ -93,6 +101,22 @@ export const GridView = memo(function GridView() {
             <span><Kbd id="palette.open" />  {tr("Szukaj")}</span>
             <span><Kbd id="terminal.new" />  {tr("Terminal")}</span>
             <span><Kbd id="grid.new" />  {tr("Grid")}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 1.0.6: a grid in its own window is never drawn here (its terminals are that window's).
+  if (away) {
+    return (
+      <div className="empty detached-placeholder">
+        <div className="welcome">
+          <h2>{tab.name}</h2>
+          <div className="sub">{tr('Ten grid jest w osobnym oknie.')}</div>
+          <div className="row">
+            <button className="btn white" onClick={() => window.mc.detach.focus(away)}>{tr('Pokaż okno')}</button>
+            <button className="btn" onClick={() => requestAttach(away)}>{tr('Przypnij z powrotem')}</button>
           </div>
         </div>
       </div>
