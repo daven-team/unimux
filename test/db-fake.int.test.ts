@@ -170,6 +170,10 @@ describe('DbHost: cancel and statement timeout', () => {
     ['both (as PGlite does)', { readyAfterLoneClose: true, readyWithError: true }],
     ['a ReadyForQuery right after the error, in a read of its own', { readyWithError: 'separate' as const }],
     ['both, the error ReadyForQuery in a read of its own (PGlite in another process)',{ readyAfterLoneClose: true, readyWithError: 'separate' as const }],
+    // A slow machine: the Close and the Sync after a finished cursor reach the server in reads of their own, so the Close
+    // gets an extra ReadyForQuery and the Sync's comes later, while the next statement already waits for its answer.
+    ['the Sync after a Close in a read of its own, answered 50 ms later', { readyAfterLoneClose: true, splitCloseSync: 50 }],
+    ['all of it, the Sync after a Close answered 300 ms later', { readyAfterLoneClose: true, readyWithError: 'separate' as const, splitCloseSync: 300 }],
   ])('a row-returning statement the server refuses answers its error and leaves the session usable (%s)', async (_name, opts) => {
     // A failed cursor already sent its Sync. Closing it again sent a lone Close, which PGlite's socket server answers with an
     // extra ReadyForQuery, and PGlite also sends one right with the error: a stray ReadyForQuery ended the next statement early

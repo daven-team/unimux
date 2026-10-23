@@ -21,6 +21,11 @@ export interface FakePgOptions {
    * in a write of its own a little later, so it reaches the client in another read (PGlite's socket server in another process).
    */
   readyWithError?: boolean | 'separate';
+  /**
+   * With readyAfterLoneClose: take every Close as lone, as when its Sync reaches the server in a read of its own (a slow
+   * machine or a proxy splits the writes), and answer that Sync only this many ms after the extra ReadyForQuery.
+   */
+  splitCloseSync?: number;
 }
 
 export interface FakePg {
@@ -236,7 +241,11 @@ export async function startFakePg(opts: FakePgOptions = {}): Promise<FakePg> {
         if (type === 'C') {
           write(msg('3'));
           // Late, as from a server in another process: the client has moved on to its next statement by then.
-          if (opts.readyAfterLoneClose && !syncFollows) { await new Promise((r) => setTimeout(r, 30)); write(msg('Z', Buffer.from(b.tx))); }
+          if (opts.readyAfterLoneClose && (!syncFollows || opts.splitCloseSync !== undefined)) {
+            await new Promise((r) => setTimeout(r, 30));
+            write(msg('Z', Buffer.from(b.tx)));
+            if (opts.splitCloseSync) await new Promise((r) => setTimeout(r, opts.splitCloseSync));
+          }
           return;
         }
       });
