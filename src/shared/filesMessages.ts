@@ -103,6 +103,8 @@ export const filesMessages = {
   // The split view (1.0.4): the grid on the left, a file, diff or database tab beside it.
   'Otwórz obok gridu': ['Open beside the grid', 'Neben dem Raster öffnen', 'Abrir junto a la cuadrícula', 'Ouvrir à côté de la grille', 'Abrir ao lado da grelha'],
   'Zamknij widok obok': ['Close the side-by-side view', 'Ansicht nebeneinander schließen', 'Cerrar la vista lado a lado', 'Fermer la vue côte à côte', 'Fechar a vista lado a lado'],
+  'Zamień strony': ['Swap sides', 'Seiten tauschen', 'Intercambiar lados', 'Inverser les côtés', 'Trocar lados'],
+  'Widok obok: więcej': ['Side-by-side view: more', 'Ansicht nebeneinander: mehr', 'Vista lado a lado: más', 'Vue côte à côte : plus', 'Vista lado a lado: mais'],
   'Pokaż zmiany obok gridu': ['Show changes beside the grid', 'Änderungen neben dem Raster anzeigen', 'Mostrar cambios junto a la cuadrícula', 'Afficher les modifications à côté de la grille', 'Mostrar alterações ao lado da grelha'],
   'Szerokość gridu i pliku obok': ['Width of the grid and the file beside it', 'Breite von Raster und Datei daneben', 'Ancho de la cuadrícula y del archivo de al lado', 'Largeur de la grille et du fichier à côté', 'Largura da grelha e do ficheiro ao lado'],
   '{percent}% dla gridu': ['{percent}% for the grid', '{percent}% für das Raster', '{percent}% para la cuadrícula', '{percent}% pour la grille', '{percent}% para a grelha'],

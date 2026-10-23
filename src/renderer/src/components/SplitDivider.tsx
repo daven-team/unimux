@@ -8,6 +8,9 @@ import { terminals } from '../terminals/TerminalManager';
 export function SplitDivider() {
   const { tr } = useI18n();
   const ratio = useSplitStore((st) => st.ratio);
+  // Swapped sides (the tab on the left): the pointer and the arrows move the edge, so they work on the left side's share.
+  const swapped = useSplitStore((st) => st.swapped);
+  const flip = (share: number) => (swapped ? 1 - share : share);
   const handle = useRef<HTMLDivElement>(null);
   const drag = useRef<{ id: number; start: number } | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -57,7 +60,7 @@ export function SplitDivider() {
         const current = drag.current;
         const box = handle.current?.parentElement?.getBoundingClientRect();
         if (!current || current.id !== e.pointerId || !box) return;
-        useSplitStore.setState({ ratio: clampSplitRatio((e.clientX - box.left) / box.width, box.width) });
+        useSplitStore.setState({ ratio: clampSplitRatio(flip((e.clientX - box.left) / box.width), box.width) });
       }}
       onPointerUp={(e) => {
         finish(false);
@@ -69,11 +72,11 @@ export function SplitDivider() {
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
       onKeyDown={(e) => {
         if (e.key === 'Escape' && drag.current) { e.preventDefault(); finish(true); return; }
-        const next = splitRatioForKey(ratio, e.key, e.shiftKey, width());
+        const next = splitRatioForKey(flip(ratio), e.key, e.shiftKey, width());
         if (next === null) return;
         e.preventDefault();
         e.stopPropagation();
-        setSplitRatio(next, width());
+        setSplitRatio(flip(next), width());
       }}
     />
   );

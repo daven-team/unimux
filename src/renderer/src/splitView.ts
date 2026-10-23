@@ -14,15 +14,22 @@ function storedRatio(): number {
   } catch { return SPLIT_DEFAULT_RATIO; }
 }
 
+const swappedKey = 'mc-split-swapped-v1';
+function storedSwapped(): boolean {
+  try { return localStorage.getItem(swappedKey) === '1'; } catch { return false; }
+}
+
 interface SplitState {
   on: boolean;
   /** The grid's share of the workspace width (0..1). */
   ratio: number;
+  /** The tab on the left and the grid on the right ("Zamień strony"); kept like the ratio. */
+  swapped: boolean;
   /** Per project: the tabs last shown beside its grid, the most recent first. */
   recent: Readonly<Record<string, readonly string[]>>;
 }
 
-export const useSplitStore = create<SplitState>(() => ({ on: false, ratio: storedRatio(), recent: {} }));
+export const useSplitStore = create<SplitState>(() => ({ on: false, ratio: storedRatio(), swapped: storedSwapped(), recent: {} }));
 
 function sidesNow(): SplitSides {
   const { on, recent } = useSplitStore.getState();
@@ -64,6 +71,13 @@ export function setSplitRatio(ratio: number, width: number): void {
   try { localStorage.setItem(ratioKey, String(value)); } catch { /* kept for this run only */ }
 }
 
+/** Puts the tab on the other side of the grid (the grid keeps its width). */
+export function swapSplitSides(): void {
+  const swapped = !useSplitStore.getState().swapped;
+  useSplitStore.setState({ swapped });
+  try { localStorage.setItem(swappedKey, swapped ? '1' : '0'); } catch { /* kept for this run only */ }
+}
+
 /** The grid is hidden behind another view (Settings, SSH, a tab in front without the split): SSH prompts then announce themselves. */
 export function gridCovered(settingsActive: boolean, sshViewActive: boolean): boolean {
   return settingsActive || sshViewActive || !sidesNow().grid;
@@ -77,12 +91,12 @@ export function useShownFileId(): string | null {
   return useFileStore((st) => splitSides({ on, activeFileId: st.activeFileId, projectId, recent, documents: st.documents }).fileId);
 }
 
-/** The tab menu item: the tab beside the grid (or the split turned off when this tab already is there). */
-export function splitMenuItem(id: string): MenuItem {
+/** The tab menu items: the tab beside the grid, or, when this tab already is there, the split turned off and the sides swapped. */
+export function splitMenuItems(id: string): MenuItem[] {
   const besideNow = useSplitStore.getState().on && sidesNow().fileId === id;
   return besideNow
-    ? { label: tr('Zamknij widok obok'), onClick: closeSplit }
-    : { label: tr('Otwórz obok gridu'), onClick: () => openBesideGrid(id) };
+    ? [{ label: tr('Zamknij widok obok'), onClick: closeSplit }, { label: tr('Zamień strony'), onClick: swapSplitSides }]
+    : [{ label: tr('Otwórz obok gridu'), onClick: () => openBesideGrid(id) }];
 }
 
 /** The keyboard follows a click: a click in the grid puts its tab in front, a click beside it the file tab. */

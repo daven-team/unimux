@@ -261,6 +261,7 @@ export function App() {
   const fileOpen = shownKind !== null;
   const split = useSplitStore((st) => st.on) && fileOpen;
   const splitRatio = useSplitStore((st) => st.ratio);
+  const splitSwapped = useSplitStore((st) => st.swapped);
   const sshViewActive = useSshStore((st) => st.viewActive);
   const sshViewOpen = useSshStore((st) => st.viewOpen);
   const ready = useStore((st) => st.ready);
@@ -336,7 +337,7 @@ export function App() {
         <ErrorBoundary name="sidebar" fallback={(retry) => <PanelFallback retry={retry} className="sidebar" />}><Sidebar resize={resizeProps('sidebar')} /></ErrorBoundary>
         <div className="main">
           {workspaceTabs}
-          <div className={`workspace-content ${split && !settingsActive && !sshViewActive ? 'split' : ''}`}>
+          <div className={`workspace-content ${split && !settingsActive && !sshViewActive ? (splitSwapped ? 'split swapped' : 'split') : ''}`}>
             {/* Split view: the grid on the left, the tab beside it on the right; a click on a side puts it in front (keyboard, strip). */}
             <div className="terminal-workspace" style={{ display: (fileOpen && !split) || settingsActive || sshViewActive ? 'none' : 'flex', ...(split ? { flex: `0 1 ${clampSplitRatio(splitRatio, available - widths.sidebar - (right.length ? widths.snippets : 0)) * 100}%` } : {}) }}
               onPointerDownCapture={split ? () => focusSplitSide('grid', null) : undefined}>{gridView}</div>

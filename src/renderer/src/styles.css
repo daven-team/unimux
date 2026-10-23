@@ -792,6 +792,9 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid #a8a29e; outli
 .file-pane { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
 /* Split view (1.0.4): the grid and the tab beside it side by side, a draggable edge between them. */
 .workspace-content.split { flex-direction: row; }
+/* "Zamień strony": the tab on the left, the grid on the right (only the visual order flips; splitView.ts keeps the grid's share). */
+.workspace-content.split.swapped { flex-direction: row-reverse; }
+.file-editor .btn.icon.split-more { width: 16px; min-width: 16px; margin-left: -4px; padding: 0; }
 .workspace-content.split > .terminal-workspace, .workspace-content.split > .file-pane { min-width: 160px; }
 .split-divider { position: relative; flex: none; width: 5px; cursor: col-resize; touch-action: none; outline: none; background: var(--border); }
 .split-divider::after { content: ''; position: absolute; top: 0; bottom: 0; left: 1px; width: 3px; background: var(--accent); opacity: 0; transition: opacity .12s; }

@@ -11,8 +11,9 @@ import { getUi, useStore } from '../store';
 import { matchesShortcut } from '../shortcuts';
 import { fullProjectPath } from '../../../shared/platform';
 import { FileActionIcon, FileBreadcrumb } from './FileIcon';
-import { ISplit, IX } from './icons';
-import { closeSplit, openBesideGrid, useShownFileId, useSplitStore } from '../splitView';
+import { IChevron, ISplit, IX } from './icons';
+import { openMenuAt } from './ContextMenu';
+import { closeSplit, openBesideGrid, splitMenuItems, useShownFileId, useSplitStore } from '../splitView';
 import { sourceTitle } from '../../../shared/editorSource';
 import { ensureSession, liveSession, useRemoteSessions } from '../remoteSessions';
 import { useSftpStore } from '../sftpStore';
@@ -99,7 +100,12 @@ export function FileEditor() {
   }[language];
   const path = project ? fullProjectPath(project.path, doc.relativePath, window.mc.platform) : doc.relativePath;
   const splitLabel = splitOn ? tr('Zamknij widok obok') : tr('Otwórz obok gridu');
-  const splitButton = <button className={`btn ghost icon ${splitOn ? 'active' : ''}`} title={splitLabel} aria-label={splitLabel} aria-pressed={splitOn} data-action="split-view" onClick={() => (splitOn ? closeSplit() : openBesideGrid(doc.id))}><ISplit /></button>;
+  // While the split is on, a menu next to the button (and a right click on it) closes it or swaps the sides.
+  const splitMenu = (e: React.MouseEvent<HTMLElement>) => { e.preventDefault(); openMenuAt(e.currentTarget, splitMenuItems(doc.id)); };
+  const splitButton = <>
+    <button className={`btn ghost icon ${splitOn ? 'active' : ''}`} title={splitLabel} aria-label={splitLabel} aria-pressed={splitOn} data-action="split-view" onClick={() => (splitOn ? closeSplit() : openBesideGrid(doc.id))} onContextMenu={splitMenu}><ISplit /></button>
+    {splitOn && <button className="btn ghost icon split-more" title={tr('Widok obok: więcej')} aria-label={tr('Widok obok: więcej')} aria-haspopup="menu" data-action="split-view-menu" onClick={splitMenu}><IChevron /></button>}
+  </>;
   if (doc.diff) {
     return (
       <section ref={section} className="file-editor file-workspace-editor" aria-label={doc.relativePath} style={{ ['--file-zoom' as string]: zoom }} onKeyDownCapture={(e) => { handleZoomKey(e); }}>
