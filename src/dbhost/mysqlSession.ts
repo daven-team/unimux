@@ -159,6 +159,10 @@ const CALL_MAX_SETS = 50;
 
 interface CallSet { fields: Field[]; rows: Raw[]; dropped: number }
 
+/** What a CALL may keep in memory over all its result sets together (the rest is counted as dropped). */
+const CALL_MAX_BYTES = 64 * 1024 * 1024;
+const rawBytes = (row: Raw): number => row.reduce((n, cell) => n + (cell ? cell.length : 8), 0);
+
 /**
  * A CALL read to its end (1.0.6): every result set of the procedure with up to `rowCap` rows each (the rest counted, not kept),
  * and the OK packet that ends it. A CALL changes data as it runs, so it is never stopped halfway for "load more".
@@ -174,6 +178,10 @@ class MyCall {
   constructor(conn: MyConn, sql: string, rowCap: number) {
     const q = (conn.query as unknown as (o: object) => { on(e: string, f: (...a: never[]) => void): unknown })({ sql, rowsAsArray: true, typeCast: false });
     let current: CallSet | null = null;
+    // Caps over all sets together, not only per set: a procedure returning many sets must not hold more than a few results' worth.
+    let keptRows = 0;
+    let keptBytes = 0;
+    const totalRows = rowCap * 4;
     q.on('fields', (fields: Field[] | undefined) => {
       if (!fields) return;
       if (this.sets.length >= CALL_MAX_SETS) { this.extraSets++; current = null; return; }
@@ -183,7 +191,12 @@ class MyCall {
     q.on('result', (row: Raw | Header) => {
       if (!Array.isArray(row)) { this.header = row; return; }
       if (!current) return;
-      if (current.rows.length < rowCap) current.rows.push(row); else current.dropped++;
+      const size = rawBytes(row);
+      if (current.rows.length < rowCap && keptRows < totalRows && keptBytes + size <= CALL_MAX_BYTES) {
+        current.rows.push(row);
+        keptRows++;
+        keptBytes += size;
+      } else current.dropped++;
     });
     q.on('error', (e: unknown) => { this.error = e; this.finish(); });
     q.on('end', () => this.finish());

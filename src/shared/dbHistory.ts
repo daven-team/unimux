@@ -61,7 +61,7 @@ export function historyRecord(raw: unknown): DbHistoryRecord | null {
   const sql = redactSql(r.sql.trim());
   if (!sql || sql.length > DB_HISTORY_LIMITS.sqlChars) return null;
   const rec: DbHistoryRecord = { sql, at: Math.max(0, r.at), timeMs: Math.max(0, Math.round(r.timeMs)), rows: finite(r.rows) && r.rows >= 0 ? Math.round(r.rows) : null, ok: r.ok };
-  if (typeof r.error === 'string' && r.error.trim()) rec.error = r.error.trim().split('\n')[0].slice(0, DB_HISTORY_LIMITS.errorChars);
+  if (typeof r.error === 'string' && r.error.trim()) rec.error = redactSql(r.error.trim().split('\n')[0]).slice(0, DB_HISTORY_LIMITS.errorChars); // a server error may quote the statement (and its password)
   return rec;
 }
 
