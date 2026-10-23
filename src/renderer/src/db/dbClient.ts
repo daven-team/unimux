@@ -3,7 +3,7 @@
 // the own sessions of SQL editor tabs, pins, and the loads of the panel's tree.
 import { create } from 'zustand';
 import { setDbPins } from './pins';
-import { dbDefaultDatabase, dbErrorText, type DbConnection, type DbErrorCode, type DbPortMessage, type DbPrompt, type DbResult, type DbServerError, type DbSessionState, type DbVaultInfo } from '../../../shared/db';
+import { dbDefaultDatabase, dbErrorText, type DbConnection, type DbErrorCode, type DbKind, type DbPortMessage, type DbPrompt, type DbResult, type DbServerError, type DbSessionState, type DbVaultInfo } from '../../../shared/db';
 import { loadKey, type DbLoad, type DbLoadRequest, type RedisKeysLoad } from '../../../shared/dbTree';
 import { mergeKeys } from '../../../shared/redisView';
 import { tr } from '../i18n';
@@ -43,10 +43,11 @@ export const sharedDatabase = (connection: Pick<DbConnection, 'kind' | 'database
 export const isLive = (s: DbSessionState | undefined): boolean => !!s && (s.state === 'connected' || s.state === 'connecting');
 
 /** The text of an error of a DB call or session (translated), with the server's own words when it sent some. */
-export function dbErrorMessage(error: DbErrorCode | string, server?: DbServerError | string, connectionId?: string): string {
+export function dbErrorMessage(error: DbErrorCode | string, server?: DbServerError | string, connectionId?: string, kind?: DbKind): string {
   const connection = connectionId ? getS().dbConnections?.find((c) => c.id === connectionId) : undefined;
-  // A code the core may add later (busy, caps) reads as a generic failure until it has a text.
-  const t = dbErrorText(error as DbErrorCode, sshContext(connection?.ssh?.hostId));
+  // A code the core may add later (busy, caps) reads as a generic failure until it has a text. `kind`: of a form's draft
+  // (not saved yet, or changed), else the saved connection's.
+  const t = dbErrorText(error as DbErrorCode, sshContext(connection?.ssh?.hostId), kind ?? connection?.kind);
   const base = tr(t.key, t.params);
   const detail = typeof server === 'string' ? server : server?.message;
   return detail && detail !== base ? `${base}: ${detail}` : base;

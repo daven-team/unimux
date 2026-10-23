@@ -1,7 +1,7 @@
 // The History panel of a SQL editor tab (1.0.6): the statements this connection ran (kept by main on this computer), newest
 // first, with search, favourites and clearing. A click puts a statement at the editor's cursor, a double click (or Shift+Enter)
 // puts it there and runs it. "Zapisuj historię" turns recording off for every connection.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { searchHistory, type DbHistoryItem } from '../../../../shared/dbHistory';
 import { historyChanged, onHistoryChanged } from '../../db/tabs';
 import { useI18n } from '../../i18n';
@@ -17,14 +17,34 @@ export function SqlHistoryPanel({ connectionId, onInsert, onRun, onClose }: { co
   const [enabled, setEnabled] = useState(true);
   const [query, setQuery] = useState('');
   const [starred, setStarred] = useState(false);
+  /**
+   * Entries added while the pointer is over the list (a double click ran one): shown when it leaves, so the entry under the
+   * pointer (and its tooltip) stays where it was instead of the list moving down by one.
+   */
+  const [held, setHeld] = useState<ReadonlySet<string>>(() => new Set());
+  const hovered = useRef(false);
+  const shownIds = useRef<ReadonlySet<string> | null>(null);
   useEffect(() => {
     let alive = true;
-    const load = () => { void window.mc.db.history.list(connectionId).then((r) => { if (alive) { setEntries(r.entries); setEnabled(r.enabled); } }).catch(() => undefined); };
+    const load = () => {
+      void window.mc.db.history.list(connectionId).then((r) => {
+        if (!alive) return;
+        const before = shownIds.current;
+        if (hovered.current && before) {
+          const added = r.entries.filter((e) => !before.has(e.id)).map((e) => e.id);
+          if (added.length) setHeld((h) => new Set([...h, ...added]));
+        }
+        setEntries(r.entries);
+        setEnabled(r.enabled);
+      }).catch(() => undefined);
+    };
     load();
     const off = onHistoryChanged((id) => { if (id === connectionId) load(); });
     return () => { alive = false; off(); };
   }, [connectionId]);
-  const found = useMemo(() => searchHistory(entries ?? [], query, { starred }), [entries, query, starred]);
+  const visible = useMemo(() => (entries && held.size ? entries.filter((e) => !held.has(e.id)) : entries), [entries, held]);
+  useEffect(() => { shownIds.current = visible ? new Set(visible.map((e) => e.id)) : null; }, [visible]);
+  const found = useMemo(() => searchHistory(visible ?? [], query, { starred }), [visible, query, starred]);
   const time = useMemo(() => new Intl.DateTimeFormat(language, { dateStyle: 'short', timeStyle: 'medium' }), [language]);
   const nf = useMemo(() => new Intl.NumberFormat(language), [language]);
 
@@ -60,7 +80,8 @@ export function SqlHistoryPanel({ connectionId, onInsert, onRun, onClose }: { co
           onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape' && query) { e.stopPropagation(); setQuery(''); } }} />
         <button className={`btn small ghost db-history-starred ${starred ? 'on' : ''}`} aria-pressed={starred} title={tr('Tylko ulubione')} aria-label={tr('Tylko ulubione')} onClick={() => setStarred((v) => !v)}>{starred ? '★' : '☆'}</button>
       </div>
-      <div className="db-history-list" role="listbox" aria-label={tr('Historia zapytań')}>
+      <div className="db-history-list" role="listbox" aria-label={tr('Historia zapytań')}
+        onMouseEnter={() => { hovered.current = true; }} onMouseLeave={() => { hovered.current = false; setHeld((h) => (h.size ? new Set() : h)); }}>
         {entries === null ? <div className="db-status">{tr('Wczytywanie…')}</div>
           : !found.length ? <div className="db-status">{query || starred ? tr('Nic nie pasuje') : enabled ? tr('Historia zapytań jest pusta') : tr('Historia zapytań jest wyłączona')}</div>
             : found.slice(0, SHOWN).map((e) => (

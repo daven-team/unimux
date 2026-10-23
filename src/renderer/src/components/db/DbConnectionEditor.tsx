@@ -238,7 +238,8 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
         {testing && <DbLogin sessionId={testSession} />}
         {test && (test.ok
           ? <div className="db-test ok" role="status" data-test="ok">{tr('Połączenie działa')}{test.serverVersion ? ` · ${test.serverVersion}` : ''} · {test.timeMs} ms</div>
-          : <div className="db-test error" role="alert" data-test="error">{dbErrorMessage(test.error, test.message, connection?.id)}
+          : <div className="db-test error" role="alert" data-test="error">
+            <span className="db-test-text">{dbErrorMessage(test.error, test.message, connection?.id, sqlite ? 'sqlite' : undefined)}</span>
             {sqlite && test.error === 'dbFileMissing' && <button type="button" className="btn small" data-action="sqlite-create" onClick={() => void createSqlite(true).then(() => runTest())}>{tr('Utwórz pusty plik bazy')}</button>}
           </div>)}
       </form>

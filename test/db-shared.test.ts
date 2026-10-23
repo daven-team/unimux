@@ -107,6 +107,10 @@ describe('texts', () => {
   it('every error code has a translated text', () => {
     const codes: DbErrorCode[] = ['dbHostCrashed', 'connectionMissing', 'unsupported', 'dbAuth', 'dbRefused', 'dbDns', 'dbTimeout', 'dbTls', 'dbTlsUnsupported', 'dbNoDatabase', 'caFile', 'tunnel', 'dbClosed', 'dbFailed', 'readOnly', 'inTransaction', 'noSession', 'notConnected', 'invalid', 'noKey', 'conflict', 'notFound', 'server', 'statementTimeout', 'cancelled', 'auth'];
     for (const code of [...codes, 'busy', 'tooMany'] as DbErrorCode[]) expect(Object.hasOwn(messages, dbErrorText(code).key), code).toBe(true);
+    // A SQLite file has no server.
+    expect(dbErrorText('server', undefined, 'sqlite').key).toBe('SQLite zgłosił błąd');
+    expect(Object.hasOwn(messages, 'SQLite zgłosił błąd')).toBe(true);
+    expect(dbErrorText('server', undefined, 'mysql').key).toBe('Serwer bazy zgłosił błąd');
     for (const mode of ['disable', 'prefer', 'require', 'verify-full'] as const) {
       const { label, detail } = dbTlsModeLabel(mode);
       expect(Object.hasOwn(messages, label.key) && Object.hasOwn(messages, detail.key), mode).toBe(true);

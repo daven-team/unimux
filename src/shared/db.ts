@@ -675,8 +675,11 @@ export type DbSqliteCreateResult = { ok: true; path: string; existed: boolean } 
 
 // ── texts ───────────────────────────────────────────────────────────────────
 
-/** The text of an error; SSH codes of a tunnel read like an SSH cell's (`ssh`: the SSH host's name and endpoint). */
-export function dbErrorText(code: DbErrorCode, ssh: { host: string; endpoint: string } = { host: '', endpoint: '' }): Localized {
+/**
+ * The text of an error; SSH codes of a tunnel read like an SSH cell's (`ssh`: the SSH host's name and endpoint). `kind`: a
+ * SQLite file has no server, its errors say so.
+ */
+export function dbErrorText(code: DbErrorCode, ssh: { host: string; endpoint: string } = { host: '', endpoint: '' }, kind?: DbKind): Localized {
   switch (code) {
     case 'dbHostCrashed': return { key: 'Proces baz danych został uruchomiony ponownie' };
     case 'connectionMissing': return { key: 'To połączenie zostało usunięte' };
@@ -699,7 +702,7 @@ export function dbErrorText(code: DbErrorCode, ssh: { host: string; endpoint: st
     case 'noKey': return { key: 'Tabela nie ma klucza głównego ani unikalnego - edycja jest wyłączona' };
     case 'conflict': return { key: 'Wiersz zmienił się w międzyczasie - zmiany wycofano' };
     case 'notFound': return { key: 'Nie znaleziono obiektu' };
-    case 'server': return { key: 'Serwer bazy zgłosił błąd' };
+    case 'server': return { key: kind === 'sqlite' ? 'SQLite zgłosił błąd' : 'Serwer bazy zgłosił błąd' };
     case 'statementTimeout': return { key: 'Przekroczono limit czasu zapytania' };
     case 'keyExists': return { key: 'Klucz o tej nazwie już istnieje' };
     case 'wrongType': return { key: 'Klucz ma inny typ niż oczekiwany' };

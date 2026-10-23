@@ -92,6 +92,11 @@ function TerminalFindBox({ cellId, focus }: { cellId: string; focus: number }) {
   const decorations = useRef<Array<IDecoration | IMarker>>([]);
   /** The next paint scrolls to the current match: after typing, a toggle or a step, not after new output (the user may be reading elsewhere). */
   const reveal = useRef(true);
+  /** The view followed the output (scrolled to the bottom) when the find opened; read at the first render, before any scroll. */
+  const [openedAtBottom] = useState(() => {
+    const buffer = terminals.xterm(cellId)?.buffer.active;
+    return !buffer || buffer.viewportY >= buffer.baseY;
+  });
 
   const clearPaint = useCallback(() => {
     for (const item of decorations.current) item.dispose();
@@ -113,19 +118,22 @@ function TerminalFindBox({ cellId, focus }: { cellId: string; focus: number }) {
     const term = terminals.xterm(cellId);
     if (!term) { setResult(EMPTY); setCurrent(null); return; }
     const options = { query, ...toggles };
-    const found = findInTerminal(readRows(term), options);
     const spec = JSON.stringify(options);
     const buffer = term.buffer.active;
-    let index: number | null;
     const kept = anchor.current;
-    if (spec === searched.current && kept && !kept.marker.isDisposed && kept.marker.line >= 0) {
-      // Only the output changed: stay on the same match, or the nearest one at or above it.
+    const same = spec === searched.current && kept && !kept.marker.isDisposed && kept.marker.line >= 0;
+    // Only the output changed: stay on the same match (or the nearest one at or above it). A new query starts from the
+    // bottom of the view, searching up; over the cap the matches nearest that row are the ones counted.
+    const pivot = same ? kept.marker.line : buffer.viewportY + term.rows - 1;
+    const found = findInTerminal(readRows(term), options, undefined, pivot);
+    let index: number | null;
+    if (same) {
       const exact = found.matches.findIndex((m) => m.row === kept.marker.line && m.col === kept.col);
-      index = exact >= 0 ? exact : terminalStartMatch(found.matches, kept.marker.line);
+      index = exact >= 0 ? exact : terminalStartMatch(found.matches, pivot);
       reveal.current = false;
     } else {
       reveal.current = true;
-      index = terminalStartMatch(found.matches, buffer.viewportY + term.rows - 1);
+      index = terminalStartMatch(found.matches, pivot);
     }
     searched.current = spec;
     setResult(found);
@@ -166,6 +174,9 @@ function TerminalFindBox({ cellId, focus }: { cellId: string; focus: number }) {
   useEffect(() => () => { clearPaint(); anchor.current?.marker.dispose(); anchor.current = null; }, [clearPaint]);
 
   const close = () => {
+    // The find scrolled the view to its matches: when the terminal was following its output before, it follows it again
+    // (the new output shows, and the next find starts from the bottom, not from the old match).
+    if (openedAtBottom) terminals.xterm(cellId)?.scrollToBottom();
     closeTerminalFind(cellId);
     terminals.focus(cellId);
   };
