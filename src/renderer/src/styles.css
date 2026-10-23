@@ -47,6 +47,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:hover { background: #3a3a3a; background-clip: padding-box; border: 2px solid transparent; }
 ::-webkit-scrollbar-track { background: transparent; }
+/* Where a horizontal and a vertical bar meet (tables): no white square. */
+::-webkit-scrollbar-corner { background: transparent; }
 
 /* ── shell ─────────────────────────────────────────────────────────────── */
 .app { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--titlebar) minmax(0, 1fr) var(--statusbar); height: 100%; }
