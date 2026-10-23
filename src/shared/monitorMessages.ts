@@ -1,0 +1,43 @@
+// The Monitor panel (1.0.6): the app's processes and each cell's process tree with CPU and memory.
+// Each row: English, German, Spanish, French, Portuguese. Polish is the key.
+export const monitorMessages = {
+  'Monitor': ['Monitor', 'Monitor', 'Monitor', 'Moniteur', 'Monitor'],
+  'CPU': ['CPU', 'CPU', 'CPU', 'CPU', 'CPU'],
+  'Aplikacja': ['App', 'App', 'Aplicación', 'Application', 'Aplicação'],
+  'Proces główny': ['Main process', 'Hauptprozess', 'Proceso principal', 'Processus principal', 'Processo principal'],
+  'Okno aplikacji': ['App window', 'App-Fenster', 'Ventana de la aplicación', 'Fenêtre de l’application', 'Janela da aplicação'],
+  'Grafika (GPU)': ['Graphics (GPU)', 'Grafik (GPU)', 'Gráficos (GPU)', 'Graphismes (GPU)', 'Gráficos (GPU)'],
+  'Terminale (Pty Host)': ['Terminals (Pty Host)', 'Terminals (Pty Host)', 'Terminales (Pty Host)', 'Terminaux (Pty Host)', 'Terminais (Pty Host)'],
+  'SFTP (SFTP Host)': ['SFTP (SFTP Host)', 'SFTP (SFTP Host)', 'SFTP (SFTP Host)', 'SFTP (SFTP Host)', 'SFTP (SFTP Host)'],
+  'Bazy danych (DB Host)': ['Databases (DB Host)', 'Datenbanken (DB Host)', 'Bases de datos (DB Host)', 'Bases de données (DB Host)', 'Bases de dados (DB Host)'],
+  'Usługa: {name}': ['Service: {name}', 'Dienst: {name}', 'Servicio: {name}', 'Service : {name}', 'Serviço: {name}'],
+  'Proces pomocniczy: {name}': ['Helper process: {name}', 'Hilfsprozess: {name}', 'Proceso auxiliar: {name}', 'Processus auxiliaire : {name}', 'Processo auxiliar: {name}'],
+  'Razem: {cpu} CPU, {mem}': ['Total: {cpu} CPU, {mem}', 'Gesamt: {cpu} CPU, {mem}', 'Total: {cpu} de CPU, {mem}', 'Total : {cpu} CPU, {mem}', 'Total: {cpu} CPU, {mem}'],
+  'Odświeżane co 2 s, gdy panel jest otwarty. 100% to cały procesor ({cores} rdzeni logicznych).': [
+    'Refreshed every 2 s while the panel is open. 100% is the whole processor ({cores} logical cores).',
+    'Wird alle 2 s aktualisiert, solange das Panel offen ist. 100 % ist der ganze Prozessor ({cores} logische Kerne).',
+    'Se actualiza cada 2 s mientras el panel está abierto. 100 % es todo el procesador ({cores} núcleos lógicos).',
+    'Actualisé toutes les 2 s tant que le panneau est ouvert. 100 % correspond au processeur entier ({cores} cœurs logiques).',
+    'Atualizado a cada 2 s enquanto o painel está aberto. 100% é o processador inteiro ({cores} núcleos lógicos).',
+  ],
+  'Odczytuję procesy...': ['Reading processes...', 'Prozesse werden gelesen...', 'Leyendo procesos...', 'Lecture des processus...', 'A ler processos...'],
+  'Nie udało się odczytać procesów.': ['Could not read the processes.', 'Die Prozesse konnten nicht gelesen werden.', 'No se pudieron leer los procesos.', 'Impossible de lire les processus.', 'Não foi possível ler os processos.'],
+  'Żadna komórka nie jest uruchomiona.': ['No cell is running.', 'Keine Zelle läuft.', 'No hay ninguna celda en ejecución.', 'Aucune cellule n’est lancée.', 'Nenhuma célula está em execução.'],
+  'Pokaż komórkę': ['Show the cell', 'Zelle anzeigen', 'Mostrar la celda', 'Afficher la cellule', 'Mostrar a célula'],
+  'Zakończ proces': ['End process', 'Prozess beenden', 'Finalizar proceso', 'Terminer le processus', 'Terminar processo'],
+  'Zakończyć proces {name} (PID {pid})?': ['End process {name} (PID {pid})?', 'Prozess {name} (PID {pid}) beenden?', '¿Finalizar el proceso {name} (PID {pid})?', 'Terminer le processus {name} (PID {pid}) ?', 'Terminar o processo {name} (PID {pid})?'],
+  'Proces zostanie zamknięty od razu, bez zapisywania. Należy do komórki {cell}.': [
+    'The process is closed at once, without saving. It belongs to the cell {cell}.',
+    'Der Prozess wird sofort beendet, ohne zu speichern. Er gehört zur Zelle {cell}.',
+    'El proceso se cierra de inmediato, sin guardar. Pertenece a la celda {cell}.',
+    'Le processus est fermé immédiatement, sans enregistrer. Il appartient à la cellule {cell}.',
+    'O processo é fechado de imediato, sem guardar. Pertence à célula {cell}.',
+  ],
+  'Nie zakończono procesu: już nie działa albo nie należy do komórki.': [
+    'The process was not ended: it is no longer running or does not belong to a cell.',
+    'Der Prozess wurde nicht beendet: Er läuft nicht mehr oder gehört zu keiner Zelle.',
+    'No se finalizó el proceso: ya no se ejecuta o no pertenece a una celda.',
+    'Le processus n’a pas été terminé : il ne tourne plus ou n’appartient à aucune cellule.',
+    'O processo não foi terminado: já não está em execução ou não pertence a uma célula.',
+  ],
+} as const;

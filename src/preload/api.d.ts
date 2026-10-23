@@ -9,6 +9,7 @@ import type { AppPlatform } from '../shared/platform';
 import type { ChangelogResult } from '../shared/changelog';
 import type { AlertEventId } from '../shared/alerts';
 import type { UsageState } from '../shared/usage';
+import type { MonitorSample } from '../shared/monitor';
 import type { AdoptCopyResult, LoginRequest, LoginState, SwapResult } from '../shared/accounts';
 import type { ReplaceRequest, ReplaceResult, SearchOptions, SearchResult } from '../shared/search';
 import type { CreateResult, DeleteResult, FileOpProgress, FileOpRequest, FileOpResult, RenameResult } from '../shared/fileOps';
@@ -66,6 +67,10 @@ export interface McApi {
   /** Binds the freshest unclaimed Codex session in `cwd` to the cell (emits cell:session). */
   bindCodexSession(cellId: string, cwd: string): Promise<string | null>;
   aliveCells(): Promise<string[]>;
+  /** The Monitor panel: one process sample (null for a refused sender). */
+  monitorSample(): Promise<MonitorSample | null>;
+  /** Kills one process of a cell's tree; false when it is not one (or is gone). */
+  monitorKill(pid: number): Promise<boolean>;
   /** True only for the first renderer load of this app run (later loads and reloads get false). */
   claimAppStart(): Promise<boolean>;
   reportCellStatus(cellId: string, status: CellStatus, reason?: StatusReason, hooked?: boolean): void;

@@ -16,7 +16,8 @@ import { appPlatform, normalizeProjectPath } from '../shared/platform';
 import { detectLanguage } from '../shared/languages';
 import { CHROMIUM_WEBGL_CONTEXTS } from '../shared/terminalLimits';
 import { translate, type MessageKey, type MessageParams } from '../shared/i18n';
-import { HookServer } from './hooks';
+import { bypassProxyForHooks, HookServer } from './hooks';
+import { Monitor } from './monitor';
 import { pathExists } from './fsProbe';
 import { PromptFiles, pruneCellFiles, removeCellFiles } from './cellFiles';
 import { applyDockIcon, windowIcon } from './appIcon';
@@ -471,6 +472,8 @@ usageDeps.refreshClaude = gateProfileRefresh<RefreshOutcome>(guardDeps, familyRe
 const hooks = new HookServer();
 if (devEnv('MC_HOOK_DEBUG') === '1') hooks.debugDir = DATA_DIR;
 const alive = new Set<string>();
+/** The pty shell pid of each running cell (the Monitor panel's process trees). */
+const cellPids = new Map<string, number>();
 /** Codex session ids handed to cells this run (state may lag behind the renderer). */
 const claimedCodex = new Set<string>();
 /** Live notifications - Windows drops click handlers of garbage-collected ones. */
@@ -910,9 +913,12 @@ ptyHost.on('message', (m: HostToMain) => {
   if ('id' in m && m.id.startsWith(INSTALL_PTY_PREFIX)) { install.onHostMessage(m); return; } // the install window is not a cell
   if ('id' in m && m.id.startsWith('auth:')) return; // login windows are not cells
   if (ssh?.onHostMessage(m)) return;
-  if (m.t === 'spawned') { automation.runtimeStarted(m.id); alive.add(m.id); automation.statuses.set(m.id, 'unknown'); }
-  else if (m.t === 'exit') {
+  if (m.t === 'spawned') {
+    automation.runtimeStarted(m.id); alive.add(m.id); automation.statuses.set(m.id, 'unknown');
+    if (m.pid > 0) cellPids.set(m.id, m.pid); else cellPids.delete(m.id);
+  } else if (m.t === 'exit') {
     alive.delete(m.id);
+    cellPids.delete(m.id);
     verifiedCodex.delete(m.id);
     endCellMcp(mcp, MCP_DIR, m.id);
     automation.statuses.set(m.id, 'exited');
@@ -1123,7 +1129,8 @@ async function spawnRequestUnsafe(req: SpawnCellRequest): Promise<SpawnResult> {
   }
   const baseEnv = await cliDetector.applyEnv({ ...cleanEnv(process.env), MC_CELL_ID: req.cellId }, cli ?? undefined);
   if ((killCount.get(req.cellId) ?? 0) !== killsBefore) return { ok: true }; // the cell was closed while the CLI was being looked up
-  const claudeSettingsPath = req.profile.cli === 'claude' ? hooks.writeClaudeSettings(HOOKS_DIR, req.cellId) : undefined;
+  // The detected version picks http hooks (no process per tool call) or the curl commands older versions need.
+  const claudeSettingsPath = req.profile.cli === 'claude' ? hooks.writeClaudeSettings(HOOKS_DIR, req.cellId, cliDetector.snapshot().claude?.version) : undefined;
   let mode = req.mode;
   // Claude only writes a transcript after the first prompt: resuming an unused id would fail,
   // so start a new conversation that keeps the same id instead.
@@ -1140,6 +1147,8 @@ async function spawnRequestUnsafe(req: SpawnCellRequest): Promise<SpawnResult> {
     initialPrompt = { file, text: req.startupPrompt };
   }
   const env: Record<string, string> = baseEnv;
+  // Claude Code's own requests to 127.0.0.1 (http hooks, the MCP server) would otherwise go through the user's proxy.
+  if (req.profile.cli === 'claude') bypassProxyForHooks(env);
   let mcpConfig: LaunchOptions['mcp'];
   // The token reaches Claude through its per-cell --mcp-config file only (not the environment every tool process inherits);
   // Codex can only read it from a variable (see mcpCellConfig.ts).
@@ -1183,6 +1192,14 @@ guardedHandle('cell:killAndWait', async (_e, id: string) => {
   await ptyHost.killAndWait(id);
 }, () => undefined);
 ipcMain.handle('cell:alive', () => [...alive]);
+// The Monitor panel asks every 2 s while it is on screen; nothing samples otherwise (the snapshot helper ends 15 s after the last ask).
+const monitor = new Monitor({
+  appMetrics: () => app.getAppMetrics(),
+  cells: () => [...cellPids].filter(([id]) => alive.has(id)).map(([cellId, pid]) => ({ cellId, pid })),
+});
+guardedHandle('monitor:sample', () => monitor.sample(), () => null);
+guardedHandle('monitor:kill', (_e, pid: unknown) => monitor.kill(pid), () => false);
+app.on('will-quit', () => monitor.dispose());
 // True for the first app window renderer that asks in this app run, false for every later one (a reload, a crash reload) and
 // after a Pty Host restart: SSH hosts with "Łącz ponownie po uruchomieniu aplikacji" connect at an app start only.
 guardedHandle('app:claimStart', () => appStartClaim.claim(), () => false);

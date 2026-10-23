@@ -1,5 +1,6 @@
 // Local endpoint for agent status hooks. Claude gets a per-cell settings file (passed with
-// --settings, the user's own settings.json is untouched) whose hooks `curl` this server.
+// --settings, the user's own settings.json is untouched) whose hooks post to this server: Claude Code 2.1.63+ posts itself
+// (`type: "http"` hooks, the token in a header), older versions run `curl` through their hook shell.
 import { randomBytes } from 'crypto';
 import { EventEmitter } from 'events';
 import { appendFileSync, mkdirSync, statSync, writeFileSync } from 'fs';
@@ -172,7 +173,9 @@ export class HookServer extends EventEmitter {
 
   async start(): Promise<void> {
     this.server = createServer((req, res) => {
-      const parts = (req.url ?? '').split('/').filter(Boolean); // h/<token>/<cellId>/<event>
+      // h/<token>/<cellId>/<event>/<nonce> (curl), or k/<cellId>/<event>/<nonce> with the token as a bearer header (http hooks).
+      const parts = (req.url ?? '').split('/').filter(Boolean);
+      if (parts[0] === 'k' && req.headers.authorization === `Bearer ${this.token}`) parts.splice(0, 1, 'h', this.token);
       if (req.method !== 'POST' || parts[0] !== 'h' || parts[1] !== this.token) {
         res.writeHead(403).end();
         return;
@@ -194,22 +197,26 @@ export class HookServer extends EventEmitter {
       let body = '';
       const bigPayload = event === 'stop' || event === 'fail' || event === 'codex';
       const maxBody = event === 'codex' ? MAX_CODEX_BODY : bigPayload ? MAX_STOP_BODY : MAX_BODY;
+      // An http hook always posts its whole payload (a PostToolUse one carries the tool's output, a prompt its whole text);
+      // events whose status needs no payload never keep it.
+      const keepBody = bigPayload || BODY_EVENTS.has(event);
       req.setEncoding('utf8');
       let oversized = false;
       req.on('data', (chunk: string) => {
-        if (oversized) return;
+        if (oversized || !keepBody) return;
         body += chunk;
         if (body.length <= maxBody) return;
         // Only Stop / StopFailure may carry a large payload (last message). They must never be lost: an oversized one
-        // counts as a plain Stop / an unknown failure; any other oversized request is dropped.
+        // counts as a plain Stop / an unknown failure; any other oversized request is dropped. It is still read to the end
+        // and answered: an http hook whose connection breaks shows the user a hook error.
         oversized = true;
         body = '';
-        if (!bigPayload) req.destroy();
       });
       req.on('end', () => {
         // 204 without a body: hook stdout would otherwise be fed back to Claude as context.
         res.writeHead(204).end();
         if (!cellId || !current) return;
+        if (oversized && !bigPayload) return;
         if (event === 'codex') {
           // An oversized payload (nothing parsed) still ends the turn, just without ids.
           const notice = oversized ? {} : parseCodexNotify(body);
@@ -278,12 +285,21 @@ export class HookServer extends EventEmitter {
     return this.url(cellId, 'codex');
   }
 
-  /** Writes the per-cell Claude settings file and returns its path. */
-  writeClaudeSettings(dir: string, cellId: string): string {
+  /** Hook URL of an http hook: the token travels in the Authorization header instead of the path. */
+  headerUrl(cellId: string, event: HookUrlEvent): string {
+    return this.url(cellId, event).replace(`/h/${this.token}/`, '/k/');
+  }
+
+  /**
+   * Writes the per-cell Claude settings file and returns its path. `claudeVersion` (the detected `claude --version`) picks
+   * the hook form; an unknown version keeps the curl commands every version runs.
+   */
+  writeClaudeSettings(dir: string, cellId: string, claudeVersion?: string): string {
     mkdirSync(dir, { recursive: true });
     this.nonces.set(cellId, randomBytes(8).toString('hex')); // invalidates hooks of the previous process
     const path = join(dir, `claude-${cellId}.json`);
-    writeFileSync(path, JSON.stringify(claudeHookSettings((event) => this.url(cellId, event)), null, 2));
+    const target: HookTarget = { url: (event) => this.url(cellId, event), headerUrl: (event) => this.headerUrl(cellId, event), token: this.token };
+    writeFileSync(path, JSON.stringify(claudeHookSettings(target, claudeHookForm(claudeVersion)), null, 2), { mode: 0o600 });
     return path;
   }
 
@@ -307,14 +323,76 @@ const ASYNC_EVENTS = new Set<HookUrlEvent>(['busy', 'subagent']);
 /** Only Notification, Stop (background_tasks), StopFailure (error) and SessionStart need their payload (JSON on stdin); tool hooks would upload whole files. */
 const WITH_BODY = new Set<HookUrlEvent>(['notify', 'stop', 'fail', 'session']);
 
-/** The `hooks` settings of a Claude cell (pure, for the tests). */
-export function claudeHookSettings(url: (event: HookUrlEvent) => string): { hooks: Record<string, unknown[]> } {
-  const hook = (event: HookUrlEvent) => [
-    { hooks: [{ type: 'command', command: claudeHookCommand(url(event), WITH_BODY.has(event)), ...(ASYNC_EVENTS.has(event) ? { async: true } : {}) }] },
-  ];
+/** Small payloads the server keeps (Stop, StopFailure and Codex have their own, larger limits). */
+const BODY_EVENTS = new Set<string>(['notify', 'session']);
+
+/**
+ * How a Claude cell's hooks reach the server:
+ * - `shell`: a curl command through Claude Code's hook shell (Git Bash on Windows): two process starts per hook.
+ * - `http` (Claude Code 2.1.63+, changelog "Added HTTP hooks"): Claude Code posts the payload itself, no process at all.
+ *   SessionStart accepts only command hooks, so it stays a curl command.
+ * - `exec` (2.1.139+, changelog "Added hook `args` field (exec form)"): as `http`, and SessionStart's curl starts without a shell.
+ */
+export type ClaudeHookForm = 'shell' | 'http' | 'exec';
+const HTTP_HOOKS_SINCE = [2, 1, 63];
+const EXEC_HOOKS_SINCE = [2, 1, 139];
+
+function atLeast(version: number[], min: number[]): boolean {
+  for (let i = 0; i < min.length; i++) if (version[i] !== min[i]) return version[i] > min[i];
+  return true;
+}
+
+/** The hook form a Claude Code version supports; an unknown or unparsable version gets the curl commands. */
+export function claudeHookForm(version: string | undefined): ClaudeHookForm {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(version?.trim() ?? '');
+  if (!m) return 'shell';
+  const v = [Number(m[1]), Number(m[2]), Number(m[3])];
+  return atLeast(v, EXEC_HOOKS_SINCE) ? 'exec' : atLeast(v, HTTP_HOOKS_SINCE) ? 'http' : 'shell';
+}
+
+/** Where a cell's hooks post: the curl URL (token in the path) and the http hook URL (token in a header). */
+export interface HookTarget {
+  url: (event: HookUrlEvent) => string;
+  headerUrl: (event: HookUrlEvent) => string;
+  token: string;
+}
+
+const PROXY_VARS = /^(https?|all)_proxy$/i;
+
+/**
+ * Claude Code sends http hooks through the proxy of HTTP(S)_PROXY even to 127.0.0.1 (checked with 2.1.309: a dead proxy lost
+ * every hook); curl's `--noproxy '*'` has no http hook counterpart. A cell with a proxy therefore gets 127.0.0.1 in NO_PROXY
+ * (in every spelling it already has, else NO_PROXY; on macOS also no_proxy). Mutates and returns `env`.
+ */
+export function bypassProxyForHooks(env: Record<string, string>, platform: string = process.platform): Record<string, string> {
+  if (!Object.keys(env).some((key) => PROXY_VARS.test(key) && env[key].trim())) return env;
+  const keys = Object.keys(env).filter((key) => key.toLowerCase() === 'no_proxy');
+  if (!keys.length) keys.push(...(platform === 'win32' ? ['NO_PROXY'] : ['NO_PROXY', 'no_proxy']));
+  for (const key of keys) {
+    const list = (env[key] ?? '').split(',').map((part) => part.trim()).filter(Boolean);
+    if (!list.includes('127.0.0.1') && !list.includes('*')) env[key] = [...list, '127.0.0.1'].join(',');
+  }
+  return env;
+}
+
+/** Seconds an http hook may take; the server answers at once, so this only bounds a hung app (curl has `-m 2`). */
+const HTTP_HOOK_TIMEOUT = 5;
+
+/** The `hooks` settings of a Claude cell (pure, for the tests). A bare URL function means the curl form. */
+export function claudeHookSettings(target: HookTarget | ((event: HookUrlEvent) => string), form: ClaudeHookForm = 'shell'): { hooks: Record<string, unknown[]> } {
+  const t: HookTarget = typeof target === 'function' ? { url: target, headerUrl: target, token: '' } : target;
+  const command = (event: HookUrlEvent): Record<string, unknown> => {
+    const body = WITH_BODY.has(event);
+    if (form === 'exec') return { type: 'command', command: 'curl', args: ['-s', '--noproxy', '*', '-m', '2', '-X', 'POST', ...(body ? ['--data-binary', '@-'] : []), t.url(event)] };
+    return { type: 'command', command: claudeHookCommand(t.url(event), body), ...(ASYNC_EVENTS.has(event) ? { async: true } : {}) };
+  };
+  const http = (event: HookUrlEvent): Record<string, unknown> =>
+    ({ type: 'http', url: t.headerUrl(event), headers: { Authorization: `Bearer ${t.token}` }, timeout: HTTP_HOOK_TIMEOUT });
+  const hook = (event: HookUrlEvent) => [{ hooks: [form === 'shell' || event === 'session' ? command(event) : http(event)] }];
   // PreToolUse/PostToolUse/SubagentStop mark "still busy": the agent keeps working after a Stop that only ended a turn
-  // (background tasks) or after a permission prompt was answered. They run in the background (`async`): the tracker already
-  // ignores a busy that trails a Stop or a permission prompt, so their order relative to the other hooks does not matter.
+  // (background tasks) or after a permission prompt was answered. As curl commands they run in the background (`async`): the
+  // tracker already ignores a busy that trails a Stop or a permission prompt, so their order relative to the other hooks does
+  // not matter. An http hook cannot be async, but the local server answers within a millisecond.
   // Prompt, Stop, Notification, StopFailure and SessionStart stay synchronous: they carry the status and their order counts.
   return { hooks: {
     UserPromptSubmit: hook('prompt'), Stop: hook('stop'), Notification: hook('notify'),
