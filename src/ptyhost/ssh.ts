@@ -262,6 +262,10 @@ export class SshManager implements TerminalBackend {
     for (const s of this.sessions.values()) s.out.resetFlow();
   }
 
+  resetFlow(id: string): void {
+    this.sessions.get(id)?.out.resetFlow();
+  }
+
   histories(): Array<{ id: string; data: string }> {
     return [...this.sessions].map(([id, s]) => ({ id, data: s.out.history() }));
   }

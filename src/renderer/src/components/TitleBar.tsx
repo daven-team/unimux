@@ -29,6 +29,9 @@ import { revealScroll, scrollEdges, stepScroll, stripTabColor, wheelScroll } fro
 import { dbConnectionColor } from '../../../shared/db';
 import { useSshStore } from '../sshStore';
 import { reconnectAllSsh, reconnectAllTargetsOf, sshHostMenuItems } from '../ssh';
+import { canDetachKey, detachKey, requestAttach } from '../detach';
+import { detachedGridIds, detachedList, targetKey } from '../../../shared/detached';
+import { IPopOut } from './detachIcons';
 
 export const TitleBar = memo(function TitleBar() {
   const { tr } = useI18n();
@@ -94,6 +97,10 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
   // The SSH view has no tab (1.0.4); while it is in front no tab of the strip is.
   const sshActive = useSshStore((st) => st.viewActive);
   const stripScope = useStore((st) => st.s.settings.stripScope);
+  // 1.0.6: tabs in their own window: their grids leave the strip, a dimmed chip at its end brings the window up.
+  const detachedWindows = useStore((st) => st.s.detachedWindows);
+  const awayGrids = useMemo(() => detachedGridIds({ detachedWindows }), [detachedWindows]);
+  const [attachDrop, setAttachDrop] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [drag, setDrag] = useState<{ id: string } | null>(null);
   const [drop, setDrop] = useState<{ id: string; after: boolean } | null>(null);
@@ -132,7 +139,8 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       e.dataTransfer.effectAllowed = 'move';
       setDrag({ id });
     },
-    onDragEnd: endDrag,
+    // Dropped outside the window (no drop target took it): the tab goes to a new window under the cursor (main checks where).
+    onDragEnd: (e: DragEvent<HTMLDivElement>) => { endDrag(); if (e.dataTransfer.dropEffect === 'none' && canDetachKey(id)) void detachKey(id, 'drop'); },
     onDragOver: (e: DragEvent<HTMLDivElement>) => {
       if (!drag || drag.id === id) return;
       e.preventDefault();
@@ -264,6 +272,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       { label: tr('Zamknij karty po prawej'), disabled: idsFor('right').length === 0, onClick: () => void closeFiles(idsFor('right')) },
       { label: tr('Zamknij wszystkie pliki'), onClick: () => void closeFiles(idsFor('all')) },
       { sep: true }, splitMenuItem(doc.id),
+      ...(canDetachKey(`file:${doc.id}`) ? [{ label: tr('Przenieś do nowego okna'), onClick: () => void detachKey(`file:${doc.id}`, 'menu') }] : []),
       { sep: true },
       { label: tr('Kopiuj ścieżkę'), onClick: () => window.mc.clipboardWrite(full) },
       // A remote file has no local path; a local file outside the projects has no project to be relative to.
@@ -288,7 +297,14 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
 
   return <div className="workspace-tabs" aria-label={tr('Gridy i pliki')}>
     {(edges.canLeft || edges.canRight) && <button className="tabs-scroll no-drag" disabled={!edges.canLeft} title={tr('Przewiń karty w lewo')} aria-label={tr('Przewiń karty w lewo')} onClick={() => scrollStrip(-1)}><span className="chev-left"><IChevron /></span></button>}
-    <div className="tabs no-drag" ref={stripRef} onScroll={measure}
+    <div className={`tabs no-drag ${attachDrop ? 'attach-drop' : ''}`} ref={stripRef} onScroll={measure}
+      onDragOver={(e) => { if (!drag && e.dataTransfer.types.includes('application/x-unimux-detached')) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (!attachDrop) setAttachDrop(true); } }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setAttachDrop(false); }}
+      onDrop={(e) => {
+        setAttachDrop(false);
+        const id = e.dataTransfer.getData('application/x-unimux-detached');
+        if (!drag && id) { e.preventDefault(); requestAttach(id); }
+      }}
       onMouseDownCapture={(e) => {
         const target = e.target as HTMLElement;
         if (e.detail <= 1) firstClick.current = target.closest('.x') ? null : target.closest<HTMLElement>('[data-workspace-id]')?.dataset.workspaceId ?? null;
@@ -299,7 +315,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       </div>}
       {/* The open grids of every project (1.0.0); a click on a grid of another project switches the project. */}
       {projects.flatMap((project) => project.tabs.map((t) => {
-            if (!visible.has(`grid:${t.id}`)) return null;
+            if (!visible.has(`grid:${t.id}`) || awayGrids.has(t.id)) return null;
             const counts = countsOf(t.id);
             const color = stripTabColor({ project, grid: t });
             return (
@@ -322,6 +338,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
                     { label: tr("Nowy grid") + '…', onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
                     ...(t.cells.some((c) => c.ssh) ? [{ label: tr('Wysyłanie masowe'), onClick: () => setUi({ modal: { kind: 'broadcast', projectId: project.id, tabId: t.id } }) }] : []),
                     ...(reconnectAllTargetsOf(project.id, t.id).length ? [{ label: tr('Połącz ponownie wszystkie SSH'), onClick: () => reconnectAllSsh(project.id, t.id) }] : []),
+                    { label: tr('Przenieś do nowego okna'), onClick: () => void detachKey(`grid:${t.id}`, 'menu') },
                     { sep: true },
                     { label: tr("Zamknij (do historii)"), danger: true, onClick: () => void closeTab(project.id, t.id), hint: shortcutText('tab.close') || undefined },
                   ]);
@@ -412,6 +429,27 @@ ${tr('Podgląd: następny kliknięty plik zastąpi tę kartę. Dwuklik zachowuje
               {doc.dirty && <span className="file-dirty" aria-label={tr('Niezapisane zmiany')}>●</span>}
               <button className="x" aria-label={tr('Zamknij')} onClick={(e) => { e.stopPropagation(); void closeFile(doc.id); }}><IX /></button>
             </div>
+            );
+          })}
+          {/* 1.0.6: the tabs in their own window, dimmed at the end of the strip: a click brings the window up. */}
+          {detachedList({ detachedWindows }).map((w, i) => {
+            const grid = w.target.kind === 'grid' ? projectById.get(w.target.projectId)?.tabs.find((t) => w.target.kind === 'grid' && t.id === w.target.tabId) : undefined;
+            const name = w.target.kind === 'grid' ? grid?.name : w.target.name;
+            if (!name || (w.target.kind === 'grid' && !visible.has(targetKey(w.target)))) return null;
+            const show = () => window.mc.detach.focus(w.id);
+            return (
+              <div key={`detached:${w.id}`} className="tab detached-chip" style={{ order: 1_000_000 + i }}
+                title={tr('{name} - w osobnym oknie. Kliknij, aby je pokazać.', { name })}
+                onClick={show}
+                onContextMenu={(e) => { e.preventDefault(); openMenu(e.clientX, e.clientY, [
+                  { header: name },
+                  { label: tr('Pokaż okno'), onClick: show },
+                  { label: tr('Przypnij z powrotem'), onClick: () => requestAttach(w.id) },
+                ]); }}>
+                <span className="tab-type-icon" aria-hidden="true"><IPopOut /></span>
+                <span className="label">{name}</span>
+                {grid && <StatusBadges counts={countsOf(grid.id)} />}
+              </div>
             );
           })}
     </div>

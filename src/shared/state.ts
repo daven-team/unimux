@@ -17,6 +17,7 @@ import { normalizeSshIdentities } from './sshIdentity';
 import { DEFAULT_SSH_THEME, normalizeSshThemeId } from './sshThemes';
 import { defaultSftpPlaces, forgetRemotePlace, normalizeSftpPlaces } from './sftpView';
 import { DEFAULT_STRIP_SCOPE, normalizeStripScope, normalizeWorkspaceOrder } from './workspaceOrder';
+import { normalizeDetachedWindows, openGrids } from './detached';
 import { normalizeDbConnections, normalizeDbGroupColors } from './db';
 import { NOTE_LIMITS, normalizeNotes } from './notes';
 import type {
@@ -535,6 +536,10 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
   const workspaceOrder = normalizeWorkspaceOrder(r.workspaceOrder, new Set(normalized.projects.flatMap((p) => p.tabs.map((t) => t.id))));
   if (workspaceOrder) normalized.workspaceOrder = workspaceOrder;
   else delete normalized.workspaceOrder;
+  // Detached windows (1.0.6) of grids that are still open; a restart reopens them.
+  const detachedWindows = normalizeDetachedWindows(r.detachedWindows, openGrids(normalized.projects));
+  if (detachedWindows) normalized.detachedWindows = detachedWindows;
+  else delete normalized.detachedWindows;
   // Retention of the MCP inboxes (also drops what removed projects left behind before 0.9.3).
   normalized.automation = pruneAutomation(normalized.automation, new Set(normalized.projects.map((p) => p.id)), Date.now());
   return normalized;

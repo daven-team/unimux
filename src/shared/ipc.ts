@@ -41,6 +41,8 @@ export type MainToHost =
   | { t: 'spawn'; req: SpawnRequest }
   | { t: 'kill'; id: string; ack?: boolean }
   | { t: 'killAll' }
+  /** 1.0.6: the terminal's output goes to a detached window (null: back to the main window); that window gets its replay. */
+  | { t: 'route'; id: string; window: string | null }
   | { t: 'sshConnect'; req: SshConnectRequest }
   | { t: 'sshHostKeyAnswer'; id: string; promptId: string; accept: boolean; error?: SshErrorCode }
   | { t: 'sshAuthAnswer'; id: string; promptId: string; values: string[] | null };

@@ -23,6 +23,7 @@ import { cancelReconnectAtStart, connectOnMount, reconnectCell, startSshCell } f
 import { terminals } from './terminals/TerminalManager';
 import { activateWorkspaceKey, currentStrip } from './workspaceStrip';
 import { neighbourAfterClose } from '../../shared/workspaceOrder';
+import { cellShownHere, detachedWindowOf, windowOfCell } from './windowRole';
 
 /** Cells whose pty was started (or found alive) during this renderer session. */
 const started = new Set<string>();
@@ -38,6 +39,27 @@ const unhold = (cellId: string): void => {
 
 export function setAliveAtStart(ids: string[]): void {
   aliveAtStart = new Set(ids);
+}
+
+/**
+ * 1.0.6: the cell now shows in a detached window: this window lets go of its terminal (the pty keeps running, its output goes
+ * to that window) but keeps the status the detached window reports for it (badges, the quit question).
+ */
+export function handOverCell(cellId: string): void {
+  commitFontSize(cellId);
+  terminals.dispose(cellId, true);
+  started.delete(cellId);
+  skippedInBackground.delete(cellId);
+  aliveAtStart.delete(cellId);
+  setUi((ui) => ({
+    focusedCellId: ui.focusedCellId === cellId ? null : ui.focusedCellId,
+    maximizedCellId: ui.maximizedCellId === cellId ? null : ui.maximizedCellId,
+  }));
+}
+
+/** 1.0.6: cells that come back from a detached window: their running ptys are adopted (replayed), never started again. */
+export function adoptCells(cellIds: readonly string[]): void {
+  for (const id of cellIds) if (!started.has(id)) aliveAtStart.add(id);
 }
 
 export function resetStarted(): void {
@@ -102,6 +124,8 @@ export const isStarted = (cellId: string): boolean => started.has(cellId);
 
 function startOnce(cellId: string, beforeSpawn?: (cellId: string) => void, fromView = false): Promise<void> {
   if (started.has(cellId)) return Promise.resolve();
+  // A cell another window shows (1.0.6, a detached grid) is that window's to start: starting it here would replace its pty.
+  if (!cellShownHere(cellId)) return Promise.resolve();
   started.add(cellId);
   startListeners.forEach((l) => l());
   ensureTerminal(cellId);
@@ -124,7 +148,7 @@ function startOnce(cellId: string, beforeSpawn?: (cellId: string) => void, fromV
 /** Cells the background loader found it cannot start (missing worktree folder): they start, and report it, once opened. */
 const skippedInBackground = new Set<string>();
 export const needsBackgroundStart = (cellId: string): boolean => {
-  if (started.has(cellId) || skippedInBackground.has(cellId)) return false;
+  if (started.has(cellId) || skippedInBackground.has(cellId) || !cellShownHere(cellId)) return false;
   const found = findCell(getS(), cellId);
   if (found?.cell.ssh) return false; // SSH cells never connect in the background (D5)
   return !!found && !getUi().missingPaths[found.project.id];
@@ -465,6 +489,9 @@ export function refreshSessionTitles(projectPath: string | undefined, delay = 0)
 export function focusCell(cellId: string): void {
   const found = findCell(getS(), cellId);
   if (!found) return;
+  // A cell of a detached grid (1.0.6): its window comes up instead (it focuses the cell itself on a notification click).
+  const elsewhere = windowOfCell(cellId);
+  if (elsewhere) { window.mc.detach.focus(elsewhere); return; }
   showTerminalTabs();
   update((s) => setActiveTab(setActiveProject(s, found.project.id), found.project.id, found.tab.id));
   // Keep a maximized cell only if it is the one being focused; otherwise the target would be hidden.
@@ -684,6 +711,9 @@ export function restoreArchived(projectId: string, archivedId: string): void {
 
 /** Brings a grid to the front; a grid of another project switches the project too (1.0.0: the strip holds all projects). */
 export function selectTab(projectId: string, tab: Tab): void {
+  // A grid in its own window (1.0.6): that window comes up; the main window never shows it meanwhile.
+  const elsewhere = detachedWindowOf(`grid:${tab.id}`);
+  if (elsewhere) { window.mc.detach.focus(elsewhere.id); return; }
   showTerminalTabs();
   update((s) => focusGrid(s, projectId, tab.id));
   setUi({ maximizedCellId: null, focusedCellId: tab.cells[0]?.id ?? null });

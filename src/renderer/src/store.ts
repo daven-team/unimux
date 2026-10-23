@@ -81,6 +81,14 @@ interface Store {
   resync(): Promise<void>;
 }
 
+/**
+ * A detached window (1.0.6) shows its own tab as the active project and grid (shared/detached.ts viewOverlay); the main
+ * window shows the state as it is. Set once before the first state arrives.
+ */
+let overlay: ((s: AppState) => AppState) | null = null;
+export function setStateOverlay(fn: (s: AppState) => AppState): void { overlay = fn; }
+const view = (s: AppState): AppState => (overlay ? overlay(s) : s);
+
 const sync = new StateSync({ state: defaultState(window.mc.platform), revision: -1 }, {
   transport: { applyEdit: (edit) => window.mc.applyStateEdit(edit), loadSnapshot: () => window.mc.loadSnapshot() },
   setTimer: (fn, ms) => setTimeout(fn, ms),
@@ -88,7 +96,7 @@ const sync = new StateSync({ state: defaultState(window.mc.platform), revision: 
   // and a state equal to the shown one changes nothing, so components re-render only for what really changed.
   onState: (s) => {
     const shown = useStore.getState().s;
-    const next = shareStructure(shown, s);
+    const next = shareStructure(shown, view(s));
     if (next !== shown) useStore.setState({ s: next });
   },
   onError: (error) => toast(String(error), 'error'),
@@ -137,7 +145,7 @@ export const useStore = create<Store>((set, get) => ({
     set((st) => ({ ui: { ...st.ui, ...changes } }));
   },
   init(snapshot) {
-    set({ s: sync.init(snapshot), ready: true });
+    set({ s: view(sync.init(snapshot)), ready: true });
   },
   applyChange(change) { sync.receive(change); },
   resync() { return sync.resync(); },

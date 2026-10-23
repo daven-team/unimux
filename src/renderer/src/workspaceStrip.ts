@@ -3,6 +3,7 @@
 // WorkspaceTabs); the shortcuts walk and close what the strip shows.
 import { activeWorkspaceKey, mergeWorkspaceOrder, parseWorkspaceKey, scopeWorkspaceKeys, stepWorkspace, stripKeyOwner, stripKeys } from '../../shared/workspaceOrder';
 import { activeProject } from '../../shared/state';
+import { detachedGridIds } from '../../shared/detached';
 import { getS, getUi, setUi } from './store';
 import { activateFile, closeFile, useFileStore } from './files';
 import { useSshStore } from './sshStore';
@@ -19,7 +20,10 @@ export function currentStrip(): { shown: string[]; active: string | null } {
   const s = getS();
   const input = { settingsOpen: getUi().settingsTabOpen, projects: s.projects, files: useFileStore.getState().documents };
   const order = mergeWorkspaceOrder(s.workspaceOrder ?? [], stripKeys(input), null);
-  return { shown: scopeWorkspaceKeys(order, s.settings.stripScope, s.activeProjectId, stripKeyOwner(input)), active: frontKey() };
+  // Grids in their own window (1.0.6) are not walked or closed from here.
+  const away = detachedGridIds(s);
+  const shown = scopeWorkspaceKeys(order, s.settings.stripScope, s.activeProjectId, stripKeyOwner(input)).filter((key) => !away.has(key.slice(5)) || !key.startsWith('grid:'));
+  return { shown, active: frontKey() };
 }
 
 /** The key of the tab in front (cheap: it runs on every key press for the shortcut dispatch). */

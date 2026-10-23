@@ -9,6 +9,8 @@ export interface TerminalBackend {
   ack(id: string, chars: number): void;
   setFlowControl(on: boolean): void;
   histories(): Array<{ id: string; data: string }>;
+  /** One terminal's flow count starts again (its output moved to another window, whose acks start from zero). */
+  resetFlow?(id: string): void;
   kill(id: string, timeoutMs?: number): Promise<void>;
   killAll(timeoutMs?: number): Promise<void>;
 }
@@ -60,6 +62,9 @@ export class HostRouter {
 
   setFlowControl(on: boolean): void { for (const b of this.backends) b.setFlowControl(on); }
   histories(): Array<{ id: string; data: string }> { return this.backends.flatMap((b) => b.histories()); }
+  /** The replay tail of one terminal (undefined when no backend has it). */
+  history(id: string): string | undefined { return this.histories().find((h) => h.id === id)?.data; }
+  resetFlow(id: string): void { this.owner(id)?.resetFlow?.(id); }
   kill(id: string): Promise<void> { return this.owner(id)?.kill(id) ?? Promise.resolve(); }
   /** Settles every backend: one that rejects must not stop the others or the `killedAll` reply. */
   async killAll(): Promise<void> { await Promise.allSettled(this.backends.map((b) => b.killAll())); }

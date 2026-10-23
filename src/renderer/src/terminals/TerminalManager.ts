@@ -857,7 +857,11 @@ class TerminalManager {
     e.tracker.threads.begin(session);
   }
 
-  dispose(cellId: string): void {
+  /**
+   * `handedOver` (1.0.6): the terminal moved to a detached window and may come back; its later replay must then be kept
+   * (a closed cell's in-flight output is dropped instead).
+   */
+  dispose(cellId: string, handedOver = false): void {
     const e = this.entries.get(cellId);
     if (!e) return;
     e.resizeObs?.disconnect();
@@ -869,7 +873,7 @@ class TerminalManager {
     this.entries.delete(cellId);
     this.remoteCwds.delete(cellId);
     this.pending.delete(cellId);
-    this.disposed.add(cellId);
+    if (handedOver) this.disposed.delete(cellId); else this.disposed.add(cellId);
     if (!this.entries.size && this.statusTimer) { clearInterval(this.statusTimer); this.statusTimer = null; }
   }
 

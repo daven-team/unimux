@@ -9,6 +9,7 @@ import { codexMessages } from './codexMessages';
 import { dbMessages } from './dbMessages';
 import { redisMessages } from './redisMessages';
 import { dbUiMessages } from './dbUiMessages';
+import { detachMessages } from './detachMessages';
 import { filesMessages } from './filesMessages';
 import { findMessages } from './findMessages';
 import { gitMessages } from './gitMessages';
@@ -51,6 +52,7 @@ export const messages = {
   ...dbMessages,
   ...redisMessages,
   ...dbUiMessages,
+  ...detachMessages,
   ...filesMessages,
   ...findMessages,
   ...gitMessages,
