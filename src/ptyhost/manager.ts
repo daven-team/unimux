@@ -7,7 +7,7 @@ import * as pty from 'node-pty';
 import type { SpawnRequest } from '../shared/ipc';
 import type { ShellKind } from '../shared/types';
 import { OutputChannel } from './output';
-import type { TerminalBackend } from './router';
+import type { TerminalBackend, TerminalHistory } from './router';
 import { installSharedConout } from './sharedConout';
 
 // Windows: one ConPTY output thread for all terminals instead of a Worker (about 9 MB) per terminal (sharedConout.ts).
@@ -107,6 +107,7 @@ export class PtyManager implements TerminalBackend {
     });
     let resolveExit!: () => void;
     const out = new OutputChannel(req.id, () => this.sink, { pause: () => proc.pause(), resume: () => proc.resume() }, () => this.flowControl);
+    out.resized(Math.max(2, req.cols), Math.max(1, req.rows));
     const entry: Entry = { proc, out, exited: new Promise((r) => (resolveExit = r)) };
     this.entries.set(req.id, entry);
     this.running.add(entry);
@@ -166,6 +167,7 @@ export class PtyManager implements TerminalBackend {
     if (!e) return;
     try {
       e.proc.resize(Math.max(2, cols), Math.max(1, rows));
+      e.out.resized(Math.max(2, cols), Math.max(1, rows));
     } catch {
       // resizing a pty that is exiting throws; harmless
     }
@@ -176,8 +178,8 @@ export class PtyManager implements TerminalBackend {
     this.entries.get(id)?.out.resetFlow();
   }
 
-  histories(): Array<{ id: string; data: string }> {
-    return [...this.entries].map(([id, e]) => ({ id, data: e.out.history() }));
+  histories(): TerminalHistory[] {
+    return [...this.entries].map(([id, e]) => ({ id, ...e.out.replay() }));
   }
 
   /** Kills a terminal; resolves once it exited (bounded), so its cwd can be deleted afterwards. */

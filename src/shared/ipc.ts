@@ -1,6 +1,7 @@
 // Messages between main ⇄ pty host (control) and renderer ⇄ pty host (data, via MessagePort).
 import type { RemoteListResult } from './remotePaths';
 import type { SshErrorCode, SshPhase } from './ssh';
+import type { ReplaySize } from './replay';
 import type { ShellKind } from './types';
 
 export interface SpawnRequest {
@@ -81,7 +82,8 @@ export type RendererToHost =
 
 export type HostToRenderer =
   | { t: 'data'; id: string; data: string }
-  | { t: 'replay'; id: string; data: string }
+  /** `sizes`: the pty sizes the output was written at, as offsets into `data` (see shared/replay). */
+  | { t: 'replay'; id: string; data: string; sizes?: ReplaySize[] }
   | { t: 'exit'; id: string; code: number }
   | { t: 'sshListResult'; id: string; reqId: number; result: RemoteListResult };
 

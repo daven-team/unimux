@@ -92,7 +92,7 @@ function attachRenderer(port: MessagePortMain, window: string): void {
   });
   port.start();
   if (window === MAIN_WINDOW) router.setFlowControl(true);
-  for (const h of router.histories()) if (routes.ownerOf(h.id) === window) toRenderer({ t: 'replay', id: h.id, data: h.data });
+  for (const h of router.histories()) if (routes.ownerOf(h.id) === window) toRenderer({ t: 'replay', id: h.id, data: h.data, sizes: h.sizes });
 }
 
 /** A terminal moved to another window: the old window's queued output goes out first, the new one gets the replay tail. */
@@ -103,7 +103,7 @@ function route(id: string, window: string | null): void {
   // Acks of output the old window parsed never come from the new one.
   router.resetFlow(id);
   const history = router.history(id);
-  if (history !== undefined) toRenderer({ t: 'replay', id, data: history });
+  if (history !== undefined) toRenderer({ t: 'replay', id, data: history.data, sizes: history.sizes });
 }
 
 /** SSH path completion: the answer goes back on the port that asked (a reloaded renderer never gets an old one). */

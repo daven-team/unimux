@@ -23,6 +23,7 @@ import { confirmTerminalLink } from '../terminalLinks';
 import { applyScrollback, DEFAULT_SCROLLBACK_LINES, MAX_WEBGL_CONTEXTS, PENDING_OUTPUT_CHARS } from '../../../shared/terminalLimits';
 import { nextLossCount, planWebgl, webglBackoff, WebglLimit } from '../../../shared/webglPool';
 import { onWindowShown } from '../windowShown';
+import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
 
 // Campbell (Windows Terminal / PowerShell default) on a Cursor-like background: every local terminal, and the default SSH theme.
 export const THEME: ITheme = sshThemeById(DEFAULT_SSH_THEME).colors;
@@ -63,6 +64,10 @@ interface Entry {
   resizeObs: ResizeObserver | null;
   /** >0 while replayed history is being parsed: terminal query replies must not reach the pty. */
   replaying: number;
+  /** A fit asked for during a replay: it runs once the replay is parsed (a fit in between would parse it at the wrong size). */
+  refitAfterReplay: boolean;
+  /** The pty runs already and `lastSize` is its size (a replay told it): a presize must resize it too. */
+  ptyLive: boolean;
   lastSize: { cols: number; rows: number };
   /** Selection redraw that arrived while the terminal was parked (see `deferParkedSelection`). */
   parkedSelection: unknown[] | null;
@@ -101,7 +106,7 @@ class TerminalManager {
   private port: MessagePort | null = null;
   /** The first terminal output of this window was reported for startup.log. */
   private firstOutput = false;
-  private pending = new Map<string, Array<{ data: string; replay: boolean }>>();
+  private pending = new Map<string, Array<{ data: string; replay: boolean; sizes?: ReplaySize[] }>>();
   private exited = new Set<string>();
   private disposed = new Set<string>();
   private statusListeners = new Set<StatusListener>();
@@ -263,7 +268,7 @@ class TerminalManager {
       const q = this.pending.get(m.id) ?? [];
       this.ack(m); // queued output is bounded below, so the host need not wait for it
       if (m.t === 'replay') q.length = 0;
-      q.push({ data: m.data, replay: m.t === 'replay' });
+      q.push(m.t === 'replay' ? { data: m.data, replay: true, sizes: m.sizes } : { data: m.data, replay: false });
       // Bound memory for busy cells that are never shown: keep roughly the newest PENDING_OUTPUT_CHARS.
       let size = q.reduce((n, x) => n + x.data.length, 0);
       while (size > PENDING_OUTPUT_CHARS && q.length > 1) size -= q.shift()!.data.length;
@@ -273,7 +278,7 @@ class TerminalManager {
     if (m.t === 'replay') {
       e.term.reset();
       e.guard.reset();
-      this.writeReplay(e, m.data);
+      this.writeReplay(e, m.data, m.sizes);
     } else {
       e.term.write(m.data, () => this.ack(m));
       e.outputAt = performance.now();
@@ -301,9 +306,23 @@ class TerminalManager {
     }, 8);
   }
 
-  private writeReplay(e: Entry, data: string): void {
+  /**
+   * The replay is parsed at the sizes the pty had when it was written (see shared/replay), and only then is the terminal fitted
+   * to its box: one fit and at most one pty resize, after the replay (a detached window's grid is narrower or wider).
+   */
+  private writeReplay(e: Entry, data: string, sizes?: ReplaySize[]): void {
+    const segments = replaySegments(data, sizes);
+    const ptySize = finalReplaySize(segments);
     e.replaying++;
-    e.term.write(data, () => e.replaying--);
+    writeReplaySegments(e.term, segments, () => {
+      e.replaying--;
+      if (ptySize) { e.lastSize = ptySize; e.ptyLive = true; } // what the pty has now: the fit below resizes it when the box differs
+      if (e.replaying > 0 || this.entries.get(e.id) !== e) return;
+      if (ptySize || e.refitAfterReplay) {
+        e.refitAfterReplay = false;
+        if (this.fitHolds > 0) this.heldFits.add(e); else this.refit(e);
+      }
+    });
   }
 
   has(cellId: string): boolean {
@@ -320,6 +339,7 @@ class TerminalManager {
       if (existing.remote !== remote) {
         existing.remote = remote;
         existing.term.options.windowsPty = remote || window.mc.platform !== 'win32' ? {} : { backend: 'conpty', buildNumber: this.buildNumber || 26100 };
+        existing.term.options.reflowCursorLine = !remote && window.mc.platform === 'win32';
         this.syncAddon(existing);
       }
       return existing;
@@ -338,7 +358,9 @@ class TerminalManager {
       cursorBlink: true,
       scrollback: this.scrollback,
       allowProposedApi: true,
-      ...(window.mc.platform === 'win32' && opts.remote !== true ? { windowsPty: { backend: 'conpty' as const, buildNumber: this.buildNumber || 26100 } } : {}),
+      // ConPTY reflows its own buffer on a resize, the line with the cursor too, and does not redraw it: xterm has to reflow
+      // that line as well, or the next output lands where ConPTY thinks the reflowed prompt ends (text over the old prompt).
+      ...(window.mc.platform === 'win32' && opts.remote !== true ? { windowsPty: { backend: 'conpty' as const, buildNumber: this.buildNumber || 26100 }, reflowCursorLine: true } : {}),
       rightClickSelectsWord: false,
       drawBoldTextInBrightColors: false,
       minimumContrastRatio: 1,
@@ -353,7 +375,7 @@ class TerminalManager {
 
     const entry: Entry = {
       id: cellId, term, fit, webgl: null, shownAt: 0, outputAt: undefined, webglChangedAt: undefined, webglBlockedUntil: undefined, webglGl: null, webglGrantedAt: -Infinity, webglLosses: 0, host, tracker: new StatusTracker(), win32: false, agent: opts.agent,
-      codex: opts.codex === true, scanner: new FailureScanner(), guard: new MouseFloodGuard(), infer: new AgentInference(window.mc.platform === 'win32' && opts.remote !== true), attachedTo: null, resizeObs: null, replaying: 0, lastSize: { cols: term.cols, rows: term.rows },
+      codex: opts.codex === true, scanner: new FailureScanner(), guard: new MouseFloodGuard(), infer: new AgentInference(window.mc.platform === 'win32' && opts.remote !== true), attachedTo: null, resizeObs: null, replaying: 0, refitAfterReplay: false, ptyLive: false, lastSize: { cols: term.cols, rows: term.rows },
       parkedSelection: null, applySelection: null, remote: opts.remote === true, addon: null,
     };
     entry.tracker.setCodex(entry.codex);
@@ -448,7 +470,7 @@ class TerminalManager {
     if (queued) {
       this.pending.delete(cellId);
       for (const q of queued) {
-        if (q.replay) this.writeReplay(entry, q.data);
+        if (q.replay) this.writeReplay(entry, q.data, q.sizes);
         else term.write(q.data);
       }
     }
@@ -699,6 +721,7 @@ class TerminalManager {
   }
 
   private refit(e: Entry): void {
+    if (e.replaying > 0) { e.refitAfterReplay = true; return; }
     if (!e.attachedTo || !e.attachedTo.isConnected || !this.windowShown) return; // a hidden window refits on show
     const { clientWidth, clientHeight } = e.attachedTo;
     if (clientWidth < 20 || clientHeight < 20) return;
@@ -721,12 +744,15 @@ class TerminalManager {
    */
   presize(cellId: string, width: number, height: number): void {
     const e = this.entries.get(cellId);
-    if (!e || e.attachedTo || width < 100 || height < 60) return;
+    if (!e || e.attachedTo || e.replaying > 0 || width < 100 || height < 60) return;
     e.host.style.width = `${Math.floor(width)}px`;
     e.host.style.height = `${Math.floor(height)}px`;
     try {
       e.fit.fit();
+      const changed = e.term.cols !== e.lastSize.cols || e.term.rows !== e.lastSize.rows;
       e.lastSize = { cols: e.term.cols, rows: e.term.rows };
+      // An adopted pty (replayed) is not spawned at this size: it has to be told.
+      if (e.ptyLive && changed) this.post({ t: 'resize', id: e.id, cols: e.term.cols, rows: e.term.rows });
     } catch {
       // keep the default size
     } finally {
@@ -882,6 +908,7 @@ class TerminalManager {
     this.exited.delete(cellId);
     if (!e) return;
     e.win32 = false;
+    e.ptyLive = false;
     e.guard.reset();
     e.scanner.reset();
     e.infer.exited();
