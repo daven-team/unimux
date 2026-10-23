@@ -123,6 +123,11 @@ export const theme = EditorView.theme({
   '.cm-searchMatch': { backgroundColor: '#d8a5444a', borderRadius: '2px' },
   '.cm-searchMatch.cm-searchMatch-selected, .cm-searchMatch-selected .cm-searchMatch': { backgroundColor: '#e2a33ccc', color: '#16130c', boxShadow: '0 0 0 1px #e2a33c' },
   '.cm-searchMatch-selected *': { color: '#16130c' },
+  // The other places of the selected word (basicSetup's highlightSelectionMatches): a faint frame instead of CodeMirror's
+  // green, so comments and strings stay readable; hidden while the find widget reports an invalid expression (editorFind.tsx).
+  '.cm-selectionMatch': { backgroundColor: '#ffffff12', outline: '1px solid #ffffff2e', borderRadius: '2px' },
+  '.cm-searchMatch .cm-selectionMatch': { backgroundColor: 'transparent', outline: 'none' },
+  '&.cm-find-invalid .cm-selectionMatch': { backgroundColor: 'transparent', outline: 'none' },
 }, { dark: true });
 
 export function CodeEditor({ id, path, text, wrap, onChange, finder }: { id: string; path: string; text: string; wrap: boolean; onChange: (text: string) => void; finder?: FileFinder }) {

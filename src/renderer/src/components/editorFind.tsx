@@ -1,7 +1,7 @@
 // Find and replace inside the code editor: @codemirror/search keeps the query, the highlighting and the commands, its panel is
 // our FindWidget (a React root inside CodeMirror's top panel, floated over the text by the theme in CodeEditor.tsx).
 import { createRoot, type Root } from 'react-dom/client';
-import { EditorSelection, Prec, type EditorState, type Extension } from '@codemirror/state';
+import { EditorSelection, Prec, StateField, type EditorState, type Extension } from '@codemirror/state';
 import { EditorView, keymap, type Panel, type ViewUpdate } from '@codemirror/view';
 import { closeSearchPanel, getSearchQuery, openSearchPanel, replaceAll, replaceNext, search, searchPanelOpen, SearchQuery, setSearchQuery } from '@codemirror/search';
 import { FIND_LIMIT, matchAtOrAfter, stepMatch } from '../../../shared/findText';
@@ -152,8 +152,21 @@ export function openEditorFind(view: EditorView, replace = false): boolean {
   return true;
 }
 
+/** The widget is open on a regular expression that does not compile: the editor hides the selection matches meanwhile. */
+const isInvalid = (state: EditorState): boolean => {
+  if (!searchPanelOpen(state)) return false;
+  const query = getSearchQuery(state);
+  return !!query.search && query.regexp && !query.valid;
+};
+const invalidFind = StateField.define<boolean>({
+  create: isInvalid,
+  update: (_, tr) => isInvalid(tr.state),
+  provide: (field) => EditorView.editorAttributes.from(field, (on): Record<string, string> => (on ? { class: 'cm-find-invalid' } : {})),
+});
+
 export function editorFind(): Extension {
   return [
+    invalidFind,
     search({ top: true, literal: true, createPanel: (view) => new FindPanel(view), scrollToMatch: (range) => EditorView.scrollIntoView(range, { y: 'nearest', yMargin: 60 }) }),
     // Before basicSetup's searchKeymap: Ctrl+F also refocuses an open widget, Ctrl+H (Cmd+Alt+F) opens it with the replace row.
     Prec.highest(keymap.of([
