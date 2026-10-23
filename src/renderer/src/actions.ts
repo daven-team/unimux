@@ -23,6 +23,7 @@ import { cancelReconnectAtStart, connectOnMount, reconnectCell, startSshCell } f
 import { terminals } from './terminals/TerminalManager';
 import { activateWorkspaceKey, currentStrip } from './workspaceStrip';
 import { neighbourAfterClose } from '../../shared/workspaceOrder';
+import { fillSnippetForCells, snippetNeedsValues } from './snippetSend';
 
 /** Cells whose pty was started (or found alive) during this renderer session. */
 const started = new Set<string>();
@@ -743,11 +744,20 @@ export function sendSnippet(snippet: Snippet, target: 'focused' | 'all' | { cell
     const f = getUi().focusedCellId;
     ids = [f && tab.cells.some((c) => c.id === f) ? f : tab.cells[0].id];
   } else ids = [target.cellId];
+  // A snippet with {{variables}} asks for their values first and is filled in for each cell (snippetSend.ts).
+  if (snippetNeedsValues(snippet)) {
+    void fillSnippetForCells(snippet, ids).then((texts) => { if (texts?.size) deliverSnippet([...texts.keys()], (id) => texts.get(id)!, snippet.autoSend); });
+    return;
+  }
+  deliverSnippet(ids, () => snippet.text, snippet.autoSend);
+}
+
+function deliverSnippet(ids: string[], textFor: (cellId: string) => string, autoSend: boolean): void {
   // Cells that never started have no agent to receive the text yet (it would hit the bare shell
   // before the launch command): start them, but don't paste.
   const ready = ids.filter((id) => started.has(id));
   ids.filter((id) => !started.has(id)).forEach((id) => ensureStarted(id));
   if (ready.length < ids.length) toast(tr('Komórki w trakcie startu: {count}. Wklej do nich ponownie za chwilę.', { count: ids.length - ready.length }));
-  for (const id of ready) terminals.paste(id, snippet.text, snippet.autoSend);
+  for (const id of ready) terminals.paste(id, textFor(id), autoSend);
   if (ids.length === 1) focusCell(ids[0]);
 }

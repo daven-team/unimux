@@ -1,10 +1,11 @@
 import { shortcutText } from '../shortcuts';
 import { useI18n } from '../i18n';
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { fuzzyScore } from '../../../shared/fuzzy';
 import { formatAgo } from '../../../shared/i18n';
 import type { Note } from '../../../shared/types';
-import { NOTE_LIMITS, notePreview } from '../../../shared/notes';
+import { NOTE_LIMITS, notePreview, notePreviewMarkdown } from '../../../shared/notes';
+import { CODE_LANGUAGES, codeLanguageLabel, normalizeCodeLanguage, type CodeLanguage } from '../../../shared/codeLanguages';
 import { sendSnippet } from '../actions';
 import { editNote, moveNote, PROJECT_COLORS, removeNote, uid, upsertNote, type DropEdge } from '../../../shared/state';
 import { PANEL_LIMITS } from '../../../shared/panels';
@@ -15,10 +16,18 @@ import { dropEdge, scrollDragList } from './listDrag';
 import { openMenu, type MenuItem } from './ContextMenu';
 import { EmptyLink, fillTokens, PanelEmpty } from './PanelEmpty';
 import type { PanelResizeProps } from './PanelResizeHandle';
+import { LazyTextCodeEditor } from './LazyTextCodeEditor';
+import type { TextCodeEditorApi } from './TextCodeEditor';
+import { Select } from './Select';
 
+// The preview (marked, DOMPurify) loads on first use, like the file editor's.
+const MarkdownPreview = lazy(() => import('./MarkdownPreview').then((m) => ({ default: m.MarkdownPreview })));
 const NOTE_MIME = 'application/x-mc-note';
 /** Typing is written to the state after this pause, and at once when the editor loses focus or closes. */
 const SAVE_DELAY_MS = 500;
+
+/** Notes shown as their Markdown preview (until switched back), kept while the app runs. */
+const previewed = new Set<string>();
 
 /** Pastes a note like a snippet (without Enter), into the focused cell. */
 const pasteNote = (note: Note) => sendSnippet({ id: note.id, name: note.name, text: note.text, autoSend: false }, 'focused');
@@ -201,17 +210,20 @@ const withoutProject = (n: Note): Note => { const { projectId: _projectId, ...re
 const withoutColor = (n: Note): Note => { const { color: _color, ...rest } = n; return rest; };
 
 /**
- * One note opened in the panel: its name and a plain text area filling the panel. Changes are written after a short pause,
- * and at once on blur, on Back and when the editor goes away (another note, a closed panel, a project switch).
+ * One note opened in the panel: its name, its language and a code editor filling the panel (Markdown with highlighted code blocks
+ * by default), or its Markdown preview. Changes are written after a short pause, and at once on blur, on Back and when the editor
+ * goes away (another note, a closed panel, a project switch).
  */
 function NoteEditor({ note, focusName, onBack, onMenu }: { note: Note; focusName: boolean; onBack: () => void; onMenu: (e: React.MouseEvent) => void }) {
-  const { tr, language } = useI18n();
+  const { tr, language: uiLanguage } = useI18n();
   const [name, setName] = useState(note.name);
   const [text, setText] = useState(note.text);
+  const [preview, setPreview] = useState(previewed.has(note.id));
   const draft = useRef({ name: note.name, text: note.text });
   const timer = useRef<number | undefined>(undefined);
   const nameInput = useRef<HTMLInputElement>(null);
-  const textArea = useRef<HTMLTextAreaElement>(null);
+  const editor = useRef<TextCodeEditorApi | null>(null);
+  const language: CodeLanguage = useStore((st) => normalizeCodeLanguage(st.s.notes.find((n) => n.id === note.id)?.language)) ?? 'markdown';
   const flush = () => {
     window.clearTimeout(timer.current);
     timer.current = undefined;
@@ -226,14 +238,31 @@ function NoteEditor({ note, focusName, onBack, onMenu }: { note: Note; focusName
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(flush, SAVE_DELAY_MS);
   };
+  const setLanguage = (next: CodeLanguage) => {
+    flush();
+    update((st) => {
+      const current = st.notes.find((n) => n.id === note.id);
+      if (!current || (current.language ?? 'markdown') === next) return st;
+      // Markdown is the default and is not stored: notes of the textarea era and Markdown notes look the same on disk.
+      if (next === 'markdown') { const { language: _language, ...rest } = current; return upsertNote(st, rest); }
+      return upsertNote(st, { ...current, language: next });
+    });
+  };
+  const togglePreview = () => {
+    flush();
+    const next = !preview;
+    if (next) previewed.add(note.id); else previewed.delete(note.id);
+    setPreview(next);
+  };
   useEffect(() => {
     if (focusName) nameInput.current?.select();
-    else textArea.current?.focus();
     window.addEventListener('beforeunload', flush);
     return () => { window.removeEventListener('beforeunload', flush); if (timer.current !== undefined) flush(); };
   }, []);
   const back = () => { flush(); onBack(); };
   const updatedAt = useStore((st) => st.s.notes.find((n) => n.id === note.id)?.updatedAt ?? 0);
+  const languageName = (id: CodeLanguage) => id === 'text' ? tr("Zwykły tekst") : codeLanguageLabel(id);
+  const escapeBack = (e: React.KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); back(); } };
 
   return (
     <div className="note-editor">
@@ -242,19 +271,31 @@ function NoteEditor({ note, focusName, onBack, onMenu }: { note: Note; focusName
         <input ref={nameInput} className="note-name" aria-label={tr("Nazwa notatki")} placeholder={tr("Notatka bez nazwy")} value={name} maxLength={NOTE_LIMITS.name}
           onChange={(e) => change({ name: e.target.value })} onBlur={flush}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') { e.preventDefault(); textArea.current?.focus(); }
+            if (e.key === 'Enter') { e.preventDefault(); if (!preview) editor.current?.focus(); }
             if (e.key === 'Escape') { e.preventDefault(); back(); }
           }}
           onContextMenu={(e) => e.stopPropagation()} />
         {note.projectId && <span className="tag">{tr("Projekt")}</span>}
         <button className="btn ghost icon" title={tr("Więcej akcji")} aria-label={tr("Więcej akcji")} onClick={onMenu}><IMore /></button>
       </div>
-      <textarea ref={textArea} className="note-text" aria-label={tr("Treść notatki")} placeholder={tr("Pisz tutaj…")} value={text} spellCheck={false}
-        maxLength={NOTE_LIMITS.text} onChange={(e) => change({ text: e.target.value })} onBlur={flush}
-        onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); back(); } }}
-        onContextMenu={(e) => e.stopPropagation()} />
+      <div className="note-editor-tools">
+        <Select className="select note-language" value={language} aria-label={tr("Język notatki")} title={tr("Język notatki")} onChange={(e) => setLanguage(e.target.value as CodeLanguage)}>
+          {CODE_LANGUAGES.map((l) => <option key={l.id} value={l.id}>{languageName(l.id)}</option>)}
+        </Select>
+        <span style={{ flex: 1 }} />
+        <button className={`btn small ${preview ? 'on' : ''}`} aria-pressed={preview} title={tr("Pokaż notatkę sformatowaną jak Markdown")} onClick={togglePreview}>{tr("Podgląd")}</button>
+      </div>
+      {preview ? (
+        <div className="note-preview" onKeyDown={escapeBack} onContextMenu={(e) => e.stopPropagation()}>
+          <Suspense fallback={null}><MarkdownPreview text={notePreviewMarkdown(text, language)} projectId="" path={name.trim() || tr("Notatka bez nazwy")} codeTools={{ copyLabel: tr("Kopiuj kod") }} /></Suspense>
+        </div>
+      ) : (
+        <LazyTextCodeEditor value={text} language={language} onChange={(value) => change({ text: value })} onBlur={flush}
+          ariaLabel={tr("Treść notatki")} placeholder={tr("Pisz tutaj…")} autoFocus={!focusName} maxLength={NOTE_LIMITS.text} tabIndents
+          onKeyDown={escapeBack} onApi={(api) => { editor.current = api; }} />
+      )}
       <div className="note-editor-foot muted">
-        {updatedAt > 0 && <span>{tr('Zmieniono {ago}', { ago: formatAgo(language, updatedAt) })}</span>}
+        {updatedAt > 0 && <span>{tr('Zmieniono {ago}', { ago: formatAgo(uiLanguage, updatedAt) })}</span>}
       </div>
     </div>
   );

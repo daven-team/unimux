@@ -3,6 +3,8 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { openFile } from '../files';
 import { usePreviewFind } from './previewFind';
+import { useCodeHighlight } from '../useCodeHighlight';
+import { resolveCodeLanguage, type CodeLanguage } from '../../../shared/codeLanguages';
 import './markdown.css';
 
 export const isMarkdownPath = (path: string): boolean => /\.(md|markdown)$/i.test(path);
@@ -14,16 +16,61 @@ export function externalMarkdownUrl(href: string): string | null {
   } catch { return null; }
 }
 
-export function renderMarkdown(text: string): string {
-  // Marked parses Markdown; DOMPurify is the boundary for untrusted file HTML.
-  const fragment = DOMPurify.sanitize(marked.parse(text, { gfm: true, async: false }), {
-    ALLOWED_TAGS: ['p', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'del', 's', 'a', 'img',
-      'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'input', 'details', 'summary', 'kbd', 'sup', 'sub'],
-    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'start', 'align', 'type', 'checked', 'disabled'],
-    ALLOW_DATA_ATTR: false,
-    ALLOW_ARIA_ATTR: false,
-    RETURN_DOM_FRAGMENT: true,
+/**
+ * Code blocks with tools (notes, 1.0.6): highlighted in the language of their fence when `highlight` is given, with the language
+ * named and a copy button (`.md-code-copy`, handled by MarkdownPreview) above the code.
+ */
+export interface MarkdownCodeTools { copyLabel: string; highlight?: (text: string, language: CodeLanguage) => string }
+
+const COPY_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5"/></svg>';
+const CODE_CLASS = /^language-[\w#+.-]{1,40}$/;
+
+/** Wraps each code block in `.md-code` with a bar (its language, a copy button) and highlights the code when it can. */
+function addCodeTools(fragment: DocumentFragment, tools: MarkdownCodeTools): void {
+  fragment.querySelectorAll('pre > code').forEach((code) => {
+    const pre = code.parentElement!;
+    const info = Array.from(code.classList).find((name) => name.startsWith('language-'))?.slice('language-'.length) ?? '';
+    const language = resolveCodeLanguage(info);
+    if (language && tools.highlight) {
+      code.innerHTML = tools.highlight(code.textContent ?? '', language);
+      code.classList.add('code-hl');
+    }
+    const box = document.createElement('div');
+    box.className = 'md-code';
+    const bar = document.createElement('div');
+    bar.className = 'md-code-bar';
+    const label = document.createElement('span');
+    label.className = 'md-code-lang';
+    label.textContent = info;
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'md-code-copy';
+    copy.title = tools.copyLabel;
+    copy.setAttribute('aria-label', tools.copyLabel);
+    copy.innerHTML = COPY_ICON;
+    bar.append(label, copy);
+    pre.replaceWith(box);
+    box.append(bar, pre);
   });
+}
+
+export function renderMarkdown(text: string, codeTools?: MarkdownCodeTools): string {
+  // The language of a fenced block (class="language-ts") survives the sanitizer; any other class does not.
+  DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+    if (data.attrName === 'class' && node.nodeName === 'CODE' && CODE_CLASS.test(data.attrValue)) data.forceKeepAttr = true;
+  });
+  // Marked parses Markdown; DOMPurify is the boundary for untrusted file HTML.
+  let fragment: DocumentFragment;
+  try {
+    fragment = DOMPurify.sanitize(marked.parse(text, { gfm: true, async: false }), {
+      ALLOWED_TAGS: ['p', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'del', 's', 'a', 'img',
+        'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'input', 'details', 'summary', 'kbd', 'sup', 'sub'],
+      ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'start', 'align', 'type', 'checked', 'disabled'],
+      ALLOW_DATA_ATTR: false,
+      ALLOW_ARIA_ATTR: false,
+      RETURN_DOM_FRAGMENT: true,
+    });
+  } finally { DOMPurify.removeHook('uponSanitizeAttribute'); }
   const slugs = new Map<string, number>();
   fragment.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach((heading) => {
     const slug = (heading.textContent ?? '').toLowerCase().trim().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s+/g, '-') || 'section';
@@ -46,6 +93,7 @@ export function renderMarkdown(text: string): string {
     if (href) replacement.setAttribute('href', href);
     image.replaceWith(replacement);
   });
+  if (codeTools) addCodeTools(fragment, codeTools);
   const container = document.createElement('div');
   container.append(fragment);
   return container.innerHTML;
@@ -69,8 +117,15 @@ function projectLinkPath(href: string, path: string): string | null {
 /** Opens the find widget of the file tab on screen (Ctrl+F outside the text, see FileEditor.tsx); set by the editor or the preview. */
 export type FileFinder = RefObject<((replace: boolean) => void) | null>;
 
-export function MarkdownPreview({ text, projectId, path, finder }: { text: string; projectId: string; path: string; finder?: FileFinder }) {
-  const html = useMemo(() => renderMarkdown(text), [text]);
+export function MarkdownPreview({ text, projectId, path, finder, codeTools }: {
+  text: string; projectId: string; path: string; finder?: FileFinder;
+  /** Code blocks get a copy button and, once the languages loaded, colours (the note preview). */
+  codeTools?: { copyLabel: string };
+}) {
+  const highlighter = useCodeHighlight(!!codeTools);
+  const copyLabel = codeTools?.copyLabel;
+  const html = useMemo(() => renderMarkdown(text, copyLabel === undefined ? undefined : { copyLabel, highlight: highlighter?.highlightHtml }),
+    [text, copyLabel, highlighter]);
   const scroller = useRef<HTMLDivElement>(null);
   const article = useRef<HTMLElement>(null);
   const find = usePreviewFind(article, scroller, html);
@@ -81,6 +136,16 @@ export function MarkdownPreview({ text, projectId, path, finder }: { text: strin
   }, [finder, find.open]);
   const followLink = (event: MouseEvent<HTMLElement>) => {
     if (event.button !== 0 && event.button !== 1) return;
+    const copy = (event.target as Element).closest('.md-code-copy');
+    if (copy) {
+      if (event.button !== 0) return;
+      const code = copy.closest('.md-code')?.querySelector('pre > code');
+      // Marked ends the code of a block with a line break; the copy does not.
+      window.mc.clipboardWrite((code?.textContent ?? '').replace(/\r?\n$/, ''));
+      copy.classList.add('copied');
+      window.setTimeout(() => copy.classList.remove('copied'), 1200);
+      return;
+    }
     const anchor = (event.target as Element).closest('a');
     if (!anchor || !event.currentTarget.contains(anchor)) return;
     event.preventDefault();

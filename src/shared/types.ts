@@ -137,6 +137,10 @@ export interface Snippet {
   icon?: string;
   color?: string;
   projectId?: string;
+  /** Highlighting of the text (shared/codeLanguages.ts); absent = shell. */
+  language?: string;
+  /** The values last entered for its variables (shared/snippetVars.ts), offered again on the next send. */
+  values?: Record<string, string>;
 }
 
 /** A note of the Notes panel (1.0.4): a small plain-text page; `projectId` keeps it to one project. */
@@ -146,6 +150,8 @@ export interface Note {
   text: string;
   projectId?: string;
   color?: string;
+  /** Highlighting of the text (shared/codeLanguages.ts); absent = Markdown with highlighted code blocks. */
+  language?: string;
   /** Last change of the name or text (ms since the epoch); 0 when unknown. */
   updatedAt: number;
 }
