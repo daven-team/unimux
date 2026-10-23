@@ -1,12 +1,24 @@
 // Owns every pseudo-terminal. Independent of Electron so it can be integration-tested in Node.
 import { spawn as spawnProcess } from 'child_process';
 import { existsSync } from 'fs';
+import { createRequire } from 'module';
 import { delimiter, join } from 'path';
 import * as pty from 'node-pty';
 import type { SpawnRequest } from '../shared/ipc';
 import type { ShellKind } from '../shared/types';
 import { OutputChannel } from './output';
 import type { TerminalBackend } from './router';
+import { installSharedConout } from './sharedConout';
+
+// Windows: one ConPTY output thread for all terminals instead of a Worker (about 9 MB) per terminal (sharedConout.ts).
+// UNIMUX_CONOUT_PER_TERMINAL=1 keeps node-pty's own worker per terminal.
+if (process.platform === 'win32' && process.env.UNIMUX_CONOUT_PER_TERMINAL !== '1') {
+  try {
+    installSharedConout(createRequire(import.meta.url)('node-pty/lib/windowsConoutConnection.js') as { ConoutConnection: unknown });
+  } catch (error) {
+    console.error('unimux: shared conout not installed, node-pty keeps a worker per terminal', error);
+  }
+}
 
 export interface PtySink {
   /**

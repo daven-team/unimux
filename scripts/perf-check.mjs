@@ -9,7 +9,9 @@
 // process type, the running CSS / Web animations (document.getAnimations()) and the frames the renderer's compositor drew
 // (CDP trace, no rAF probe: a probe would itself force a frame at every vsync).
 // It fails (exit code 1) when an animation runs continuously while cells work, when the idle phase costs 1 % of a core or
-// more, or when the dot phase costs DOT_BUDGET or draws DOT_FRAMES frames a second or more.
+// more, when the dot phase costs DOT_BUDGET or draws DOT_FRAMES frames a second or more, when the Pty Host's private memory
+// at idle is over PTY_HOST_BASE_MB + PTY_HOST_PER_CELL_MB per terminal, or when restarting one cell RESTARTS times leaves
+// RESTART_GROWTH_MB or more behind in the Pty Host.
 // Usage: node scripts/perf-check.mjs [cells, default 20] [seconds per measured window, default 15] [--json] [--scrollback=N]
 //   [--projects=N]: N projects (1.0.0 grid tabs across projects); every extra project has an open grid of 4 cmd cells that is
 //   shown once at the start (its shells start) and then stays hidden behind the measured grid, all in one tab strip.
@@ -45,6 +47,15 @@ const IDLE_BUDGET = 1;
  */
 const DOT_BUDGET = 2.5;
 const DOT_FRAMES = 10;
+/**
+ * Pty Host memory at idle: one shared ConPTY output thread (src/ptyhost/sharedConout.ts) instead of a node-pty Worker per
+ * terminal (1.0.4: about 9 MB each, 288 MB for 28 cmd cells; 1.0.5: 56 MB).
+ */
+const PTY_HOST_BASE_MB = 40;
+const PTY_HOST_PER_CELL_MB = 2;
+/** Restarts of one cell, and what they may leave in the Pty Host (1.0.4 kept a Worker per ended terminal: about 98 MB for 10). */
+const RESTARTS = 10;
+const RESTART_GROWTH_MB = 25;
 
 const root = mkdtempSync(join(tmpdir(), 'unimux-perfcheck-'));
 for (const dir of ['data', 'project', 'home\\AppData\\Roaming', 'home\\AppData\\Local']) mkdirSync(join(root, dir), { recursive: true });
@@ -242,6 +253,17 @@ try {
   const quiet = idleWindows.reduce((a, b) => (b.cpu.total < a.cpu.total ? b : a));
   result.idle = { working: await working(), ...quiet, windowsTotalCpu: idleWindows.map((w) => w.cpu.total), animations: await continuous(), frames: await frames(4) };
 
+  // One cell restarted again and again (a closed or restarted cell, a relaunched CLI): nothing of the ended terminals stays.
+  const ptyHostMB = async () => (await metrics()).filter((p) => kind(p.type) === 'ptyhost').reduce((a, p) => a + p.priv / 1024, 0);
+  const restartBefore = await ptyHostMB();
+  const profile = { id: 'shell', name: 'Terminal', cli: 'shell', args: '', color: '#888888' };
+  for (let i = 0; i < RESTARTS; i++) {
+    await app.evaluate(`(async () => { await window.mc.killCellAndWait('c0'); return window.mc.spawnCell({ cellId: 'c0', cwd: ${JSON.stringify(join(root, 'project'))}, cols: 80, rows: 24, profile: ${JSON.stringify(profile)}, mode: 'new' }); })()`);
+    await sleep(700);
+  }
+  await sleep(4000);
+  result.restarts = { count: RESTARTS, ptyHostBeforeMB: +restartBefore.toFixed(1), ptyHostAfterMB: +(await ptyHostMB()).toFixed(1) };
+
   await run(0, `"${process.execPath}" "${ticker}"`);
   await app.until(`document.querySelectorAll('.cell .dot.working').length >= 1`, 'a working dot', 15000);
   // Nobody types now: the focused terminal's cursor blink is not what this phase measures.
@@ -266,6 +288,11 @@ try {
   for (const phase of ['idle', 'dot', 'busy']) {
     if (result[phase].animations.continuous > 0) failures.push(`${phase}: ${result[phase].animations.continuous} animation(s) run continuously: ${JSON.stringify(result[phase].animations.byName)}`);
   }
+  const terminals = count + (projectCount - 1) * 4;
+  const ptyHostBudget = PTY_HOST_BASE_MB + PTY_HOST_PER_CELL_MB * terminals;
+  if ((result.idle.mem.ptyhost?.privMB ?? 0) >= ptyHostBudget) failures.push(`idle: the Pty Host holds ${result.idle.mem.ptyhost.privMB} MB for ${terminals} terminals (budget ${ptyHostBudget} MB)`);
+  const growth = result.restarts.ptyHostAfterMB - result.restarts.ptyHostBeforeMB;
+  if (growth >= RESTART_GROWTH_MB) failures.push(`restarts: ${RESTARTS} restarts of one cell left ${growth.toFixed(1)} MB in the Pty Host (budget ${RESTART_GROWTH_MB} MB)`);
   if (result.dot.working < 1) failures.push('dot: no working dot on screen, the check measured nothing');
   if (result.idle.cpu.total >= IDLE_BUDGET) failures.push(`idle: ${result.idle.cpu.total} % of a core (budget ${IDLE_BUDGET} %)`);
   if (result.dot.cpu.total >= DOT_BUDGET) failures.push(`dot: ${result.dot.cpu.total} % of a core (budget ${DOT_BUDGET} %)`);
@@ -280,7 +307,8 @@ try {
       const r = result[phase];
       console.log([phase, r.working ?? '', ...types.map((t) => r.cpu[t] ?? 0), r.cpu.total, ...types.map((t) => r.mem[t]?.privMB ?? 0), r.mem.total.privMB, r.frames?.drawFramePerS ?? '', r.animations?.continuous ?? ''].join('\t'));
     }
-    console.log(failures.length ? `FAIL\n- ${failures.join('\n- ')}` : `OK: no continuous animation, idle under ${IDLE_BUDGET} % and the working dot under ${DOT_BUDGET} % of a core`);
+    console.log(`restarts: ${RESTARTS} restarts of one cell, Pty Host ${result.restarts.ptyHostBeforeMB} -> ${result.restarts.ptyHostAfterMB} MB`);
+    console.log(failures.length ? `FAIL\n- ${failures.join('\n- ')}` : `OK: no continuous animation, idle under ${IDLE_BUDGET} % and the working dot under ${DOT_BUDGET} % of a core, the Pty Host within its memory budgets`);
   }
 } finally {
   try { mainc?.close(); } catch { /* closed */ }
