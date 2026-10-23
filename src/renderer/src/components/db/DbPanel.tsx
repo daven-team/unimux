@@ -336,7 +336,7 @@ export const DbPanel = memo(function DbPanel() {
       ))}
       {Object.entries(errors).filter(([id]) => connections.some((c) => c.id === id)).map(([id, message]) => (
         <div key={id} className="db-panel-error" role="alert">
-          <strong>{connName(id)}</strong>: {message}
+          <span><strong>{connName(id)}</strong>: {message}</span>
           <button className="btn ghost icon small" aria-label={tr('Zamknij')} onClick={() => setErrors((e) => { const n = { ...e }; delete n[id]; return n; })}>×</button>
         </div>
       ))}
