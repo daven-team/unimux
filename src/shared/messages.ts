@@ -16,6 +16,7 @@ import { gitSetupMessages } from './gitSetupMessages';
 import { githubMessages } from './githubMessages';
 import { gridMessages } from './gridMessages';
 import { macUpdateMessages } from './macUpdateMessages';
+import { monitorMessages } from './monitorMessages';
 import { notesMessages } from './notesMessages';
 import { perfMessages } from './perfMessages';
 import { railMessages } from './railMessages';
@@ -58,6 +59,7 @@ export const messages = {
   ...githubMessages,
   ...gridMessages,
   ...macUpdateMessages,
+  ...monitorMessages,
   ...notesMessages,
   ...perfMessages,
   ...safetyMessages,

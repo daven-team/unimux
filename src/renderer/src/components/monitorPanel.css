@@ -1,0 +1,25 @@
+/* The Monitor panel (MonitorPanel.tsx): a summary line, then the cells (busiest first) and the app's processes. */
+.monitor { flex: 1; min-height: 0; display: flex; flex-direction: column; font-size: 12px; }
+.monitor-total { flex: none; padding: 0 14px 8px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.monitor-stale { color: var(--error); }
+.monitor-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 10px; }
+.monitor-section { padding: 10px 8px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; color: var(--muted); user-select: none; }
+.monitor-cell { margin-bottom: 6px; border-radius: 6px; background: var(--bg-2); padding: 2px 0 4px; }
+.monitor-cell-head, .monitor-row { display: grid; grid-template-columns: minmax(0, 1fr) 46px 58px 40px; align-items: center; gap: 4px; padding-right: 4px; }
+.monitor-cell-head { min-height: 34px; }
+.monitor-name { min-width: 0; display: flex; flex-direction: column; padding-left: 8px; }
+.monitor-cell-label { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.monitor-project { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.monitor-row { height: 22px; border-radius: 4px; color: var(--text-2); }
+.monitor-row:hover, .monitor-cell-head:hover { background: var(--bg-hover); }
+.monitor-row.app .monitor-proc { padding-left: 8px; }
+.monitor-proc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.monitor-cpu, .monitor-mem { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-2); }
+.monitor-mem { color: var(--muted); }
+.monitor-cpu.warm { color: var(--working); }
+.monitor-cpu.hot { color: var(--error); }
+.monitor-actions { display: flex; justify-content: flex-end; gap: 2px; opacity: 0; }
+.monitor-cell-head:hover .monitor-actions, .monitor-row:hover .monitor-actions, .monitor-actions:focus-within { opacity: 1; }
+.monitor-actions button { width: 18px; height: 18px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; display: grid; place-items: center; padding: 0; }
+.monitor-actions button:hover { background: var(--btn-ghost-hover); color: var(--text); }
+.monitor-actions button:focus-visible { outline: 1px solid var(--btn-primary-bg); opacity: 1; }

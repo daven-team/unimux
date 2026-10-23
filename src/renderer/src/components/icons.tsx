@@ -94,6 +94,8 @@ export const TGit = () => (
 );
 /** A database cylinder (the "Bazy danych" rail tile). */
 export const TDatabase = () => <T><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5" /><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" /></T>;
+/** A pulse line (the Monitor rail tile). */
+export const TMonitor = () => <T><path d="M3 12h4l2.5-6 5 12 2.5-6h4" /></T>;
 /** A terminal prompt. */
 export const TTerminal = () => <T><path d="m4 17 6-6-6-6" /><path d="M12 19h8" /></T>;
 export const TSnippet = () => <T><path d="m16 18 6-6-6-6" /><path d="m8 6-6 6 6 6" /></T>;
