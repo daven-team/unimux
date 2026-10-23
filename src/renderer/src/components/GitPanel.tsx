@@ -86,7 +86,7 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
   const panel = useRef<HTMLDivElement>(null);
   const [historyLayout, setHistoryLayout] = useState(readHistoryLayout);
   const [changesLayout, setChangesLayout] = useState(readChangesLayout);
-  const [changesOpen, setChangesOpen] = useState(true);
+  const changesOpen = !changesLayout.collapsed;
   const updateChangesLayout = (next: ChangesLayout) => { setChangesLayout(next); try { localStorage.setItem(CHANGES_KEY, JSON.stringify(next)); } catch { /* the choice just is not remembered */ } };
   const updateHistoryLayout = (next: HistoryLayout) => { setHistoryLayout(next); try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch { /* the layout just is not remembered */ } };
   const [trust, setTrust] = useState<GitTrustInfo | null>(null);
@@ -395,7 +395,7 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
         view={changesLayout.view} sort={changesLayout.sort} projectId={projectId} status={status} busy={!!busy} writable={canWrite} programsNote={programsNote}
         opts={opts} run={run} onOpen={openDiff} onMenu={fileMenu} editPath={editPath} branch={branchControl}
         onPush={status.push ? pushAfterCommit : undefined} commitSlot={commitSlot}
-        open={changesOpen} onToggle={() => setChangesOpen((v) => !v)}
+        open={changesOpen} onToggle={() => updateChangesLayout({ ...changesLayout, collapsed: changesOpen })}
       />
       {publish.dialog}
       {cloning && <GitCloneDialog target={{ kind: 'new' }} onClose={() => setCloning(false)} />}
@@ -416,13 +416,15 @@ function readHistoryLayout(): HistoryLayout {
 const clampHistory = (height: number, total: number): number => Math.round(Math.max(72, Math.min(total - 170, height)));
 
 const CHANGES_KEY = 'mc-git-changes-v1';
-interface ChangesLayout { view: ChangesView; sort: ChangesSort }
+/** The look of the Changes section; collapsed (the section folded to its header) is remembered too. */
+interface ChangesLayout { view: ChangesView; sort: ChangesSort; collapsed: boolean }
 function readChangesLayout(): ChangesLayout {
   try {
     const value = JSON.parse(localStorage.getItem(CHANGES_KEY) ?? 'null') as Partial<ChangesLayout> | null;
     return {
       view: value?.view === 'tree' ? 'tree' : 'list',
       sort: value?.sort === 'name' || value?.sort === 'status' ? value.sort : 'path',
+      collapsed: value?.collapsed === true,
     };
-  } catch { return { view: 'list', sort: 'path' }; }
+  } catch { return { view: 'list', sort: 'path', collapsed: false }; }
 }

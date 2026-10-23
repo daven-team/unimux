@@ -22,7 +22,7 @@ import { Sidebar } from './components/Sidebar';
 import { SnippetPanel } from './components/SnippetPanel';
 import { NotesPanel } from './components/NotesPanel';
 import { PanelResizeHandle } from './components/PanelResizeHandle';
-import { rightPanelOrder, type RightPanel } from '../../shared/notes';
+import { parseRightPanelOrder, RIGHT_ORDER_KEY, rightPanelOrder, type RightPanel } from '../../shared/notes';
 import { StatusBar } from './components/StatusBar';
 import { TitleBar, WorkspaceTabs } from './components/TitleBar';
 import { useShortcuts } from './shortcuts';
@@ -269,7 +269,9 @@ export function App() {
   const snippetsOpen = useStore((st) => st.s.snippetsOpen);
   const notesOpen = useStore((st) => st.s.notesOpen);
   // The right column's panels top to bottom: the one opened first stays on top (see rightPanelOrder).
-  const rightOrder = useRef<readonly RightPanel[]>([]);
+  // Remembered across restarts (localStorage), so Notes above Snippets stays that way.
+  const rightOrder = useRef<readonly RightPanel[] | null>(null);
+  rightOrder.current ??= parseRightPanelOrder(localStorage.getItem(RIGHT_ORDER_KEY));
   const collapsed = useStore((st) => st.s.sidebarCollapsed);
   const sidebarWidth = useStore((st) => st.s.sidebarWidth);
   const snippetsWidth = useStore((st) => st.s.snippetsWidth);
@@ -311,8 +313,8 @@ export function App() {
   if (!ready) return bootFailed ? <WindowFallback message={tr('Nie udało się wczytać danych aplikacji.')} retry={() => setBootFailed(false)} /> : <div className="app" />;
   // The toast too: a language that fails to load in the preview says so.
   if (!languageChosen) return <><LanguageSetup />{toastView}</>;
-  rightOrder.current = rightPanelOrder(rightOrder.current, { snippets: snippetsOpen, notes: notesOpen });
-  const right = rightOrder.current;
+  const right = rightPanelOrder(rightOrder.current, { snippets: snippetsOpen, notes: notesOpen });
+  if (right !== rightOrder.current) { rightOrder.current = right; try { localStorage.setItem(RIGHT_ORDER_KEY, JSON.stringify(right)); } catch { /* kept for this run */ } }
   const widths = fitPanelWidths(available, live.sidebar ?? sidebarWidth, live.snippets ?? snippetsWidth, collapsed, right.length > 0);
   const resizeProps = (panel: Panel) => ({
     panel,
