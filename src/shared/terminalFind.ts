@@ -21,8 +21,11 @@ export interface TerminalFindResult { matches: TerminalMatch[]; invalid: boolean
 
 const columnOf = (row: TerminalRow, offset: number): number => (row.columns ? row.columns[Math.min(offset, row.columns.length - 1)] : offset);
 
-/** Every match in the rows, in buffer order (top to bottom), as the cells to highlight. */
-export function findInTerminal(rows: readonly TerminalRow[], options: FindOptions, limit = FIND_LIMIT): TerminalFindResult {
+/**
+ * Every match in the rows, in buffer order (top to bottom), as the cells to highlight. Over `limit` matches the ones nearest
+ * `pivotRow` are kept (by default the last row: the newest output), like the find of a browser or of VS Code's terminal.
+ */
+export function findInTerminal(rows: readonly TerminalRow[], options: FindOptions, limit = FIND_LIMIT, pivotRow = rows.length - 1): TerminalFindResult {
   // Logical lines: a row and the rows that continue it. `first[i]` is the first row of line i, `offsets[r]` where row r begins in its line.
   const lines: string[] = [];
   const first: number[] = [];
@@ -32,7 +35,13 @@ export function findInTerminal(rows: readonly TerminalRow[], options: FindOption
     offsets[index] = lines[lines.length - 1].length;
     lines[lines.length - 1] += row.text;
   });
-  const found = findInItems(joinItems(lines), options, limit);
+  // The line that holds the pivot row: the last line that begins at or above it.
+  let pivot = 0;
+  for (let low = 0, high = first.length - 1; low <= high;) {
+    const mid = (low + high) >> 1;
+    if (first[mid] <= pivotRow) { pivot = mid; low = mid + 1; } else high = mid - 1;
+  }
+  const found = findInItems(joinItems(lines), options, limit, pivot);
   const matches: TerminalMatch[] = [];
   for (const { item, from, to } of found.matches) {
     const spans: TerminalSpan[] = [];

@@ -123,6 +123,34 @@ describe('find in a terminal', () => {
     expect(findInTerminal([row('日本 ok', false, [0, 2, 4, 5, 6, 7])], opts('本')).matches[0].spans).toEqual([{ row: 0, col: 2, width: 2 }]);
   });
 
+  it('over the cap keeps the matches nearest the bottom of the view, so the current one is the nearest', () => {
+    // 3000 rows, "NEEDLE" on every 250th, an "N" on every row: "N" is capped, "NEE" is not.
+    const rows = Array.from({ length: 3000 }, (_, i) => row(i % 250 === 249 ? `row ${i} NEEDLE` : `row ${i} N`));
+    const capped = findInTerminal(rows, opts('N'), 1000);
+    expect(capped.capped).toBe(true);
+    expect(capped.matches).toHaveLength(1000);
+    expect(capped.matches[999].row).toBe(2999);
+    expect(capped.matches[0].row).toBe(2000);
+    expect(terminalStartMatch(capped.matches, 2999)).toBe(999);
+    const needle = findInTerminal(rows, opts('NEE'), 1000);
+    expect(needle.matches).toHaveLength(12);
+    expect(terminalStartMatch(needle.matches, 2999)).toBe(11);
+    // A view higher up: the window holds the matches around it, newest at or above it first.
+    const middle = findInTerminal(rows, opts('N'), 1000, 1500);
+    expect(middle.matches).toHaveLength(1000);
+    expect(middle.matches[0].row).toBe(1001);
+    expect(middle.matches[999].row).toBe(2000);
+    expect(middle.matches[terminalStartMatch(middle.matches, 1500)!].row).toBe(1500);
+    // Near the end the window is shifted to keep 1000 matches.
+    const late = findInTerminal(rows, opts('N'), 1000, 2900);
+    expect(late.matches[0].row).toBe(2000);
+    expect(late.matches[999].row).toBe(2999);
+    // Near the top: the matches before the view plus the first ones after it.
+    const early = findInTerminal(rows, opts('N'), 1000, 10);
+    expect(early.matches[0].row).toBe(0);
+    expect(early.matches[999].row).toBe(999);
+  });
+
   it('starts at the newest match on screen and scrolls only when needed', () => {
     const matches = [10, 50, 90].map((r) => ({ row: r, col: 0, spans: [{ row: r, col: 0, width: 1 }] }));
     expect(terminalStartMatch(matches, 60)).toBe(1);

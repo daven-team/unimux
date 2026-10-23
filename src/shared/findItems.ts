@@ -53,17 +53,35 @@ function pieceAt(starts: readonly number[], position: number): number {
 /**
  * Every match in the pieces, in order. A match never runs from one piece into the next: when the expression would cross the
  * "\n" (`\s`, `[^x]+`), that piece is searched on its own and the search goes on at the next piece.
+ *
+ * Over `limit` matches the result is capped. Without `pivot` the first `limit` matches are kept. With `pivot` (a piece, e.g.
+ * the bottom row of a terminal's view) the `limit` matches nearest it are kept: the newest ones at or before it and the
+ * first ones after it, each side at least half of the window when the other side has more.
  */
-export function findInItems(joined: JoinedItems, options: FindOptions, limit = FIND_LIMIT): ItemFindResult {
+export function findInItems(joined: JoinedItems, options: FindOptions, limit = FIND_LIMIT, pivot?: number): ItemFindResult {
   if (!joined.starts.length || !options.query) return { matches: [], invalid: false, capped: false };
   const pattern = findPattern(options);
   if (!pattern) return { matches: [], invalid: true, capped: false };
   const { text, starts, lengths } = joined;
-  const matches: ItemMatch[] = [];
+  // `matches[head..]` is the result; with a pivot the matches before it slide through the window (head moves on).
+  let matches: ItemMatch[] = [];
+  let head = 0;
+  let after = 0;
   let capped = false;
+  let stop = false;
   let piece = 0;
+  const half = Math.max(1, limit >> 1);
   const push = (item: number, from: number, to: number): boolean => {
-    if (matches.length >= limit) { capped = true; return false; }
+    if (pivot === undefined) {
+      if (matches.length >= limit) { capped = stop = true; return false; }
+    } else if (item <= pivot) {
+      // Before the pivot: keep the newest `limit`, compacting the array now and then.
+      if (matches.length - head >= limit) { head++; capped = true; }
+      if (head >= limit) { matches = matches.slice(head); head = 0; }
+    } else if (matches.length - head >= limit) {
+      if (matches.length - head - after > half) { head++; capped = true; } else { capped = stop = true; return false; }
+    }
+    if (pivot !== undefined && item > pivot) after++;
     matches.push({ item, from, to });
     return true;
   };
@@ -81,7 +99,7 @@ export function findInItems(joined: JoinedItems, options: FindOptions, limit = F
     if (from >= end) { at = end + 1; continue; }
     if (to > end) {
       for (const [a, b] of findMatches(text.slice(start, end), options, limit).matches) if (a >= from - start && !push(piece, a, b)) break;
-      if (capped) break;
+      if (stop) break;
       at = end + 1;
       continue;
     }
@@ -89,7 +107,7 @@ export function findInItems(joined: JoinedItems, options: FindOptions, limit = F
     if (!push(piece, from - start, to - start)) break;
     at = to;
   }
-  return { matches, invalid: false, capped };
+  return { matches: head ? matches.slice(head) : matches, invalid: false, capped };
 }
 
 /** The first match index whose piece is at or after `item` (wrapping to the first match), or null without matches. */
