@@ -131,10 +131,12 @@ export class PgSession {
   private now(): number { return this.opts.now?.() ?? Date.now(); }
 
   /**
-   * Waits until the exchange of the last server error is over before anything else goes to the server. Postgres ends an
-   * error with one ReadyForQuery (for the Sync); PGlite's socket server sends one more right after the error, and from a server
-   * in another process it can come in a read of its own. Taken as the end of the next statement, it ended that statement
-   * early and the statement's real answer then broke the connection (or went to the statement after it). So an empty query
+   * Waits until the exchange of the last server error is over before anything else goes to the server, or before anything
+   * reads the transaction state: pg rejects a statement at its ErrorResponse, and the ReadyForQuery with the state after the
+   * error (failed inside a transaction) can come in a later read, so without the wait a run reported the state from before.
+   * Postgres ends an error with one ReadyForQuery (for the Sync); PGlite's socket server sends one more right after the error,
+   * and from a server in another process it can come in a read of its own. Taken as the end of the next statement, it ended
+   * that statement early and the statement's real answer then broke the connection (or went to the statement after it). So an empty query
    * goes out as a marker and every message up to its answer is kept from the client: the ReadyForQuery after the marker's
    * EmptyQueryResponse (or error) is the only one the client sees, whatever the server sent before it.
    */
@@ -248,6 +250,7 @@ export class PgSession {
 
   /** Runs the queued restores once nothing holds the connection (no transaction, no cursor); a failed one ends the session. */
   private async settle(): Promise<void> {
+    await this.drain();
     if (this.tx !== 'idle' || this.open || !this.restore.length) return;
     const restore = this.restore;
     this.restore = [];
@@ -257,6 +260,7 @@ export class PgSession {
 
   /** Re-asserts the session settings a statement may have changed (set_config in a SELECT or a page filter). */
   private async reassert(): Promise<void> {
+    await this.drain();
     if (this.tx !== 'idle' || this.open || this.overrideActive) return;
     if (this.opts.readOnly) await this.must('SET default_transaction_read_only = on');
   }
@@ -666,6 +670,7 @@ export class PgSession {
   /** All edits in one transaction; an UPDATE or DELETE that does not hit exactly one row rolls everything back. */
   private async applyEdits(req: DbEditRequest): Promise<DbResult<{ affected: number }>> {
     if (this.opts.readOnly) return fail('readOnly');
+    await this.drain();
     if (this.tx !== 'idle') return fail('inTransaction');
     const built = await this.buildEdits(req);
     if ('error' in built) return built.error;
