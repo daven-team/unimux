@@ -44,10 +44,12 @@ export const nodeKey = {
   redisFolder: (c: string, db: number, path: string) => JSON.stringify(['rf', c, db, path]),
 };
 
-export type DbFolder = 'tables' | 'views' | 'matviews' | 'sequences' | 'functions';
+export type DbFolder = 'tables' | 'views' | 'matviews' | 'sequences' | 'functions' | 'indexes' | 'triggers' | 'events';
 export type DbPart = 'columns' | 'keys' | 'indexes';
 export const FOLDER_KINDS: Record<DbFolder, readonly DbObjectKind[]> = {
   tables: ['table', 'partitioned', 'foreign'], views: ['view'], matviews: ['matview'], sequences: ['sequence'], functions: ['function', 'procedure'],
+  // 1.0.6: SQLite's indexes, the triggers of SQLite and MySQL / MariaDB, MySQL's scheduled events.
+  indexes: ['index'], triggers: ['trigger'], events: ['event'],
 };
 const FOLDERS = Object.keys(FOLDER_KINDS) as DbFolder[];
 /** Objects with columns (expandable in the tree). */
@@ -224,6 +226,8 @@ export function buildDbTree(input: DbTreeInput): { rows: DbTreeRow[]; needed: Db
     const expanded = opened(ck) && input.live(c.id);
     rows.push({ key: ck, depth, type: 'connection', connection: c, expanded });
     if (expanded && c.kind === 'redis') { redisRows(c, depth + 1); return; }
+    // A SQLite file is one database: its objects sit right under the connection.
+    if (expanded && c.kind === 'sqlite') { schemaRows({ connectionId: c.id, database: dbDefaultDatabase(c) }, dbDefaultDatabase(c), depth + 1); return; }
     if (!expanded || !isSqlKind(c.kind)) return;
     const key = loadKey.databases(c.id);
     const load = pending(key, depth + 1, { kind: 'databases', key, connectionId: c.id });

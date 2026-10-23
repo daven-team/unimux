@@ -4,7 +4,9 @@ import { randomUUID } from 'node:crypto';
 import { connect, createServer, type Socket } from 'node:net';
 import { PGlite } from '@electric-sql/pglite';
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
-import { DbHost, type DbHostTimers } from '../../src/dbhost/host';
+import { fileURLToPath } from 'node:url';
+import { Worker } from 'node:worker_threads';
+import { DbHost, type DbHostSqlite, type DbHostTimers } from '../../src/dbhost/host';
 import type { RedisLimits } from '../../src/dbhost/redisSession';
 import { dbSessionId, type DbColumn, type DbErrorCode, type DbPortMessage, type DbQueryRequest, type DbResult, type DbServerError, type DbTablePageRequest, type DbValue } from '../../src/shared/db';
 import type { DbHostOp, DbHostToMain, DbOpenConfig } from '../../src/shared/dbHostIpc';
@@ -69,9 +71,13 @@ export async function splittingProxy(targetPort: number): Promise<{ port: number
 export interface StatementResult { columns: DbColumn[]; rows: DbValue[][]; end?: Extract<DbPortMessage, { t: 'statementEnd' }>; error?: { code: DbErrorCode; server?: DbServerError }; closed: boolean; span?: { start: number; end: number } }
 export interface RunResult { statements: StatementResult[]; end: Extract<DbPortMessage, { t: 'queryEnd' }>; notices: string[] }
 
+/** The SQLite engine thread straight from its TypeScript file (Node strips the types; the file imports built-in modules only). */
+const SQLITE_WORKER = fileURLToPath(new URL('../../src/dbhost/sqliteWorker.ts', import.meta.url));
+export const sqliteSpawn = (interrupt: SharedArrayBuffer): Worker => new Worker(SQLITE_WORKER, { workerData: { sqliteEngine: true, interrupt }, execArgv: ['--no-warnings'] });
+
 export const BASE_CONFIG: DbOpenConfig = { kind: 'postgres', host: '127.0.0.1', port: 5432, user: 'postgres', database: 'postgres', tls: 'disable', readOnly: false, ssh: null };
 
-export function dbHarness(opts: { timers?: Partial<DbHostTimers>; onMain?: (m: DbHostToMain, host: DbHost) => boolean; autoPassword?: string | null; redisLimits?: Partial<RedisLimits> } = {}) {
+export function dbHarness(opts: { timers?: Partial<DbHostTimers>; onMain?: (m: DbHostToMain, host: DbHost) => boolean; autoPassword?: string | null; redisLimits?: Partial<RedisLimits>; sqlite?: Partial<DbHostSqlite> } = {}) {
   const toMain: DbHostToMain[] = [];
   const port: DbPortMessage[] = [];
   const results = new Map<number, DbResult<unknown>>();
@@ -85,7 +91,7 @@ export function dbHarness(opts: { timers?: Partial<DbHostTimers>; onMain?: (m: D
       if (m.t === 'dbPasswordPrompt' && opts.autoPassword !== undefined) void host.handle({ t: 'dbPasswordAnswer', id: m.id, promptId: m.promptId, value: opts.autoPassword });
     },
     toRenderer: (m) => port.push(m),
-  }, { killGraceMs: 300, dbConnectMs: 5000, ...opts.timers }, opts.redisLimits);
+  }, { killGraceMs: 300, dbConnectMs: 5000, ...opts.timers }, opts.redisLimits, { spawn: sqliteSpawn, ...opts.sqlite });
 
   const statuses = (id: string) => toMain.flatMap((m) => (m.t === 'dbStatus' && m.id === id ? [m] : []));
   const last = (id: string) => statuses(id).at(-1);

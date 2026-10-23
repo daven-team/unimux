@@ -55,7 +55,9 @@ CREATE FUNCTION bump() RETURNS INT DETERMINISTIC
 BEGIN
   INSERT INTO owners VALUES (99, 'from a function');
   RETURN 1;
-END`;
+END;
+CREATE TRIGGER owners_bi BEFORE INSERT ON owners FOR EACH ROW SET NEW.label = TRIM(NEW.label);
+CREATE EVENT nightly ON SCHEDULE EVERY 1 DAY DISABLE COMMENT 'cleanup' DO DELETE FROM nums WHERE n < 0`;
 
 describe.skipIf(targets.length > 0)('MySQL protocol against real servers', () => {
   it.skip('needs MC_MYSQL_TEST_SERVERS', () => undefined);
@@ -95,7 +97,10 @@ describe.skipIf(!targets.length).each(targets)('MySQL protocol against $label', 
     expect(dbs.find((d) => d.name === 'information_schema')?.system).toBe(true);
     expect(dbs.findIndex((d) => d.name === DB)).toBeLessThan(dbs.findIndex((d) => d.name === 'information_schema'));
     const objects = await h.value<DbObjectInfo[]>(id, { op: 'objects', schema: DB });
-    expect(objects.map((o) => `${o.kind}:${o.name}`).sort()).toEqual(['function:bump', 'function:twice', 'procedure:two_sets', 'table:items', 'table:nums', 'table:owners', 'view:cheap']);
+    expect(objects.map((o) => `${o.kind}:${o.name}`).sort()).toEqual(['event:nightly', 'function:bump', 'function:twice', 'procedure:two_sets', 'table:items', 'table:nums', 'table:owners', 'trigger:owners_bi', 'view:cheap']);
+    // 1.0.6: a trigger names its timing and table, an event its schedule and state.
+    expect(objects.find((o) => o.name === 'owners_bi')?.detail).toBe('BEFORE INSERT ON owners');
+    expect(objects.find((o) => o.name === 'nightly')).toMatchObject({ detail: expect.stringMatching(/^EVERY 1 DAY · (DISABLED|SLAVESIDE_DISABLED)$/), comment: 'cleanup' });
     const info = await h.value<DbTableInfo>(id, { op: 'tableInfo', schema: DB, name: 'items' });
     expect(info.primaryKey).toEqual(['id']);
     expect(info.editKey).toEqual(['id']);
@@ -113,6 +118,8 @@ describe.skipIf(!targets.length).each(targets)('MySQL protocol against $label', 
     expect(await h.value<string>(id, { op: 'ddl', schema: DB, name: 'items', kind: 'table' })).toMatch(/^CREATE TABLE `items`[\s\S]*fk_owner[\s\S]*;\n$/);
     expect(await h.value<string>(id, { op: 'ddl', schema: DB, name: 'cheap', kind: 'view' })).toMatch(/VIEW `cheap`/);
     expect(await h.value<string>(id, { op: 'ddl', schema: DB, name: 'two_sets', kind: 'procedure' })).toMatch(/PROCEDURE `two_sets`/);
+    expect(await h.value<string>(id, { op: 'ddl', schema: DB, name: 'owners_bi', kind: 'trigger' })).toMatch(/TRIGGER `?owners_bi`? BEFORE INSERT ON `?owners`? FOR EACH ROW SET NEW\.label = TRIM\(NEW\.label\);\n$/);
+    expect(await h.value<string>(id, { op: 'ddl', schema: DB, name: 'nightly', kind: 'event' })).toMatch(/EVENT `nightly` ON SCHEDULE EVERY 1 DAY[\s\S]*DO DELETE FROM nums WHERE n < 0;\n$/);
   });
 
   it('pages a table as the server writes its values, sorted, filtered and by keyset', async () => {
@@ -162,9 +169,18 @@ describe.skipIf(!targets.length).each(targets)('MySQL protocol against $label', 
   it('runs scripts: procedure bodies without DELIMITER, several result sets, errors and warnings', async () => {
     const r = await h.run(id, { sql: 'SELECT twice(21) AS v; CALL two_sets(1); SELECT * FROM nope; SELECT 1', continueOnError: true });
     expect(r.statements[0].rows).toEqual([['42']]);
+    // 1.0.6: every result set of the CALL is a result of its own.
     expect(r.statements[1].rows).toEqual([['1']]);
-    expect(r.statements[2].error?.server?.message).toMatch(/^ERROR 1146 \(42S02\): Table 'unimux_t\.nope' doesn't exist/);
-    expect(r.statements[3].rows).toEqual([['1']]);
+    expect(r.statements[1].columns.map((c) => c.name)).toEqual(['first']);
+    expect(r.statements[2].rows).toEqual([['2']]);
+    expect(r.statements[2].columns.map((c) => c.name)).toEqual(['second']);
+    expect(h.port.some((m) => m.t === 'statement' && m.queryId === r.queryId && m.index === 2 && m.set === 2)).toBe(true);
+    expect(r.statements[3].error?.server?.message).toMatch(/^ERROR 1146 \(42S02\): Table 'unimux_t\.nope' doesn't exist/);
+    expect(r.statements[4].rows).toEqual([['1']]);
+    // A procedure with one set, and a syntax error placed by its "near ... at line N".
+    expect((await h.run(id, { sql: 'CALL two_sets(0)' })).statements.map((x) => x.rows)).toEqual([[['1']]]);
+    const typo = await h.run(id, { sql: 'SELECT id FROM\nWHERE' });
+    expect(typo.statements[0].error?.server).toMatchObject({ code: '42000', position: 16 });
     const w = await h.run(id, { sql: "INSERT INTO owners VALUES (3, REPEAT('x', 60))" });
     expect(w.statements[0].error?.code).toBe('server');
     const warn = await h.run(id, { sql: "SELECT CAST('12abc' AS SIGNED)" });

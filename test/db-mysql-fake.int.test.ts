@@ -120,6 +120,50 @@ describe('DbHost MySQL: running', () => {
     expect(tx).toEqual({ ok: true, value: 'idle' });
   });
 
+  it('a CALL shows every result set of the procedure as a result of its own; the next statement follows them', async () => {
+    const s = await fake();
+    const h = dbHarness();
+    const id = await h.open(my(s.port));
+    const r = await h.run(id, { sql: 'CALL multi(); SELECT 1' });
+    expect(r.end.ok).toBe(true);
+    const starts = h.port.filter((m) => m.t === 'statement' && m.queryId === r.queryId);
+    expect(starts.map((m) => m.t === 'statement' && [m.index, m.set ?? null, m.start])).toEqual([[0, null, 0], [1, 2, 0], [2, null, 14]]);
+    expect(r.statements[0].rows).toEqual([['1'], ['2']]);
+    expect(r.statements[0].columns.map((c) => c.name)).toEqual(['a']);
+    expect(r.statements[0].end).toMatchObject({ command: 'CALL', rowCount: 2, hasMore: false });
+    expect(r.statements[1].rows).toEqual([['x']]);
+    expect(r.statements[1].columns.map((c) => c.name)).toEqual(['b']);
+    expect(r.statements[2].rows).toEqual([['1']]);
+    // Without result sets: the affected rows. Failing after a set: the set stays, the error is a result of its own.
+    expect((await h.run(id, { sql: 'CALL noop()' })).statements[0].end).toMatchObject({ command: 'CALL', rowCount: 3 });
+    const half = await h.run(id, { sql: 'CALL half()' });
+    expect(half.statements[0].rows).toEqual([['1']]);
+    expect(half.statements[1].error).toMatchObject({ code: 'server', server: { message: "ERROR 1146: Table 'shop.gone' doesn't exist" } });
+    expect(half.end.ok).toBe(false);
+  });
+
+  it('a syntax error is placed in the statement from "near ... at line N"', async () => {
+    const s = await fake();
+    const h = dbHarness();
+    const id = await h.open(my(s.port));
+    const r = await h.run(id, { sql: 'SELECT 1;\nSELECT *\n  FRM t' });
+    expect(r.statements[1].error?.server).toMatchObject({ position: 12 });
+    expect('SELECT *\n  FRM t'.slice(11)).toBe('FRM t');
+  });
+
+  it('lists triggers and events with the tables and routines, and shows their CREATE statements', async () => {
+    const s = await fake();
+    const h = dbHarness();
+    const id = await h.open(my(s.port));
+    const objects = await h.value<Array<{ name: string; kind: string; detail?: string; comment?: string }>>(id, { op: 'objects', schema: 'shop' });
+    expect(objects.map((o) => [o.kind, o.name, o.detail ?? null])).toEqual([
+      ['table', 'orders', null], ['procedure', 'multi', null], ['trigger', 'orders_ai', 'AFTER INSERT ON orders'], ['event', 'nightly', 'EVERY 1 DAY · ENABLED'],
+    ]);
+    expect(objects[3].comment).toBe('cleanup');
+    expect(await h.value(id, { op: 'ddl', schema: 'shop', name: 'orders_ai', kind: 'trigger' })).toBe('CREATE DEFINER=`root`@`%` TRIGGER `orders_ai` AFTER INSERT ON `orders` FOR EACH ROW SET @n = 1;\n');
+    expect(await h.value(id, { op: 'ddl', schema: 'shop', name: 'nightly', kind: 'event' })).toMatch(/^CREATE DEFINER=`root`@`%` EVENT `nightly` ON SCHEDULE EVERY 1 DAY/);
+  });
+
   it('USE reports the new default database', async () => {
     const s = await fake();
     const h = dbHarness();

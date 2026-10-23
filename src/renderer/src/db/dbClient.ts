@@ -39,7 +39,7 @@ export const sharedKey = (connectionId: string, database: string): string => `${
  * Redis (one per DB), the connection's default one for MySQL (a MySQL session reads every database by its qualified names).
  */
 export const sharedDatabase = (connection: Pick<DbConnection, 'kind' | 'database' | 'dbIndex'>, database?: string): string =>
-  (connection.kind === 'mysql' || database === undefined ? dbDefaultDatabase(connection) : database);
+  (connection.kind === 'mysql' || connection.kind === 'sqlite' || database === undefined ? dbDefaultDatabase(connection) : database);
 export const isLive = (s: DbSessionState | undefined): boolean => !!s && (s.state === 'connected' || s.state === 'connecting');
 
 /** The text of an error of a DB call or session (translated), with the server's own words when it sent some. */
@@ -102,7 +102,8 @@ function dropSession(st: DbStore, id: string): Partial<DbStore> {
   if (!gone) return { shared, tabSessions };
   const [connectionId, database] = gone.split('\n');
   // A MySQL connection's one shared session loaded every database of its tree.
-  const wholeServer = getS().dbConnections?.find((c) => c.id === connectionId)?.kind === 'mysql';
+  const kind = getS().dbConnections?.find((c) => c.id === connectionId)?.kind;
+  const wholeServer = kind === 'mysql' || kind === 'sqlite';
   const loads = Object.fromEntries(Object.entries(st.loads).filter(([key]) => {
     const parts = JSON.parse(key) as string[];
     if (parts[1] !== connectionId) return true;

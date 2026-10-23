@@ -122,6 +122,43 @@ export async function startFakeMysql(opts: FakeMysqlOptions = {}): Promise<FakeM
         return;
       }
       if (/^SELECT 1\b/i.test(s)) { rows([['1', LONGLONG]], [[1]]); return; }
+      // 1.0.6: a procedure with two result sets (each ends with "more results"), one that fails after its first set, one without rows.
+      const more = () => status() | 8;
+      if (/^CALL multi\(\)/i.test(s)) {
+        c.writeColumns([col('a', LONGLONG)]); c.writeTextRow(['1']); c.writeTextRow(['2']); c.writeEof(0, more());
+        c.writeColumns([col('b')]); c.writeTextRow(['x']); c.writeEof(0, more());
+        c.writeOk({ affectedRows: 0, serverStatus: status() });
+        return;
+      }
+      if (/^CALL half\(\)/i.test(s)) {
+        c.writeColumns([col('a', LONGLONG)]); c.writeTextRow(['1']); c.writeEof(0, more());
+        c.writeError({ code: 1146, message: "Table 'shop.gone' doesn't exist" });
+        return;
+      }
+      if (/^CALL noop\(\)/i.test(s)) { ok(3); return; }
+      // The catalog of a database `shop` with a trigger and an event.
+      if (/FROM information_schema\.TABLES WHERE TABLE_SCHEMA/i.test(s)) { rows([['TABLE_NAME'], ['TABLE_TYPE'], ['TABLE_ROWS'], ['TABLE_COMMENT']], [['orders', 'BASE TABLE', '10', '']]); return; }
+      if (/FROM information_schema\.ROUTINES/i.test(s)) { rows([['ROUTINE_NAME'], ['ROUTINE_TYPE'], ['DTD_IDENTIFIER'], ['ROUTINE_COMMENT']], [['multi', 'PROCEDURE', null, '']]); return; }
+      if (/FROM information_schema\.TRIGGERS/i.test(s)) { rows([['TRIGGER_NAME'], ['ACTION_TIMING'], ['EVENT_MANIPULATION'], ['EVENT_OBJECT_TABLE']], [['orders_ai', 'AFTER', 'INSERT', 'orders']]); return; }
+      if (/FROM information_schema\.EVENTS/i.test(s)) {
+        rows([['EVENT_NAME'], ['EVENT_TYPE'], ['INTERVAL_VALUE'], ['INTERVAL_FIELD'], ['EXECUTE_AT'], ['STATUS'], ['EVENT_COMMENT']], [['nightly', 'RECURRING', '1', 'DAY', null, 'ENABLED', 'cleanup']]);
+        return;
+      }
+      if (/^SHOW CREATE TRIGGER `shop`\.`orders_ai`/i.test(s)) {
+        rows([['Trigger'], ['sql_mode'], ['SQL Original Statement'], ['character_set_client']], [['orders_ai', '', 'CREATE DEFINER=`root`@`%` TRIGGER `orders_ai` AFTER INSERT ON `orders` FOR EACH ROW SET @n = 1', 'utf8mb4']]);
+        return;
+      }
+      if (/^SHOW CREATE EVENT `shop`\.`nightly`/i.test(s)) {
+        rows([['Event'], ['sql_mode'], ['time_zone'], ['Create Event']], [['nightly', '', 'SYSTEM', 'CREATE DEFINER=`root`@`%` EVENT `nightly` ON SCHEDULE EVERY 1 DAY DO DELETE FROM orders WHERE 0']]);
+        return;
+      }
+      // A syntax error names the rest of the statement from the error on and its line.
+      const typo = /^SELECT \*\s+(FRM[\s\S]*)$/i.exec(s);
+      if (typo) {
+        const line = s.slice(0, s.indexOf(typo[1])).split('\n').length;
+        c.writeError({ code: 1064, message: `You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near '${typo[1].slice(0, 80)}' at line ${line}` });
+        return;
+      }
       if (/^(UPDATE|DELETE)\b/i.test(s)) { ok(opts.affected ?? 1); return; }
       if (/^INSERT\b/i.test(s)) { ok(1); return; }
       if (/^USE\b/i.test(s)) { me.database = s.replace(/^USE\s+`?|`?$/gi, ''); ok(); return; }
