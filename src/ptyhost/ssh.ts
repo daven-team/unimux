@@ -9,7 +9,7 @@ import { sanitizeServerText, type SshErrorCode, type SshPhase } from '../shared/
 import { SshLogin, type SshAuthPromptInfo } from '../sshcore/login';
 import type { PtySink } from './manager';
 import { OutputChannel } from './output';
-import type { TerminalBackend } from './router';
+import type { TerminalBackend, TerminalHistory } from './router';
 import { isRecoverableAuthError, mapSshError } from './sshErrors';
 
 export type { SshAuthPromptInfo };
@@ -118,6 +118,7 @@ export class SshManager implements TerminalBackend {
       debug: (line) => this.events.debug?.(s.id, line),
     });
     s.out = new OutputChannel(req.id, () => this.sink, { pause: () => this.pauseStreams(s), resume: () => this.resumeStreams(s) }, () => this.flowControl);
+    s.out.resized(s.size.cols, s.size.rows);
     this.sessions.set(req.id, s);
     this.events.spawned(req.id);
     this.events.status(req.id, 'connecting');
@@ -314,6 +315,7 @@ export class SshManager implements TerminalBackend {
     const s = this.sessions.get(id);
     if (!s) return;
     s.size = { cols: Math.max(2, cols), rows: Math.max(1, rows) };
+    s.out.resized(s.size.cols, s.size.rows);
     try { s.stream?.setWindow(s.size.rows, s.size.cols, 0, 0); } catch { /* closing */ }
   }
 
@@ -328,8 +330,8 @@ export class SshManager implements TerminalBackend {
     this.sessions.get(id)?.out.resetFlow();
   }
 
-  histories(): Array<{ id: string; data: string }> {
-    return [...this.sessions].map(([id, s]) => ({ id, data: s.out.history() }));
+  histories(): TerminalHistory[] {
+    return [...this.sessions].map(([id, s]) => ({ id, ...s.out.replay() }));
   }
 
   kill(id: string, timeoutMs = this.timers.killGraceMs): Promise<void> {
