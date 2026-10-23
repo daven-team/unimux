@@ -15,8 +15,8 @@ const CELL_BUFFERS = `(() => { const s = window.__mc.useStore.getState().s; cons
 const hasLine = (index, line) => `${CELL_BUFFERS}[${index}].split('\\n').some((l) => l.trim() === ${JSON.stringify(line)})`;
 /** UI texts the checks click on or wait for, per language of SSH_CHECK_LANGUAGE (only the `cell` part is language-aware). */
 const TEXT = {
-  pl: { connecting: 'łączenie z', connect: 'Połącz', trust: 'Zaufaj i zapisz', disconnect: 'Rozłącz', reconnect: 'Połącz ponownie', crashed: 'Proces terminali został uruchomiony ponownie', crashedShort: 'Proces terminali', restartToast: 'Proces terminali się zrestartował', resumeToast: 'wznawiam rozmowy' },
-  en: { connecting: 'connecting to', connect: 'Connect', trust: 'Trust and save', disconnect: 'Disconnect', reconnect: 'Reconnect', crashed: 'The terminal process was restarted', crashedShort: 'The terminal process', restartToast: 'The terminal process restarted', resumeToast: 'resuming conversations' },
+  pl: { connect: 'Połącz', trust: 'Zaufaj i zapisz', disconnect: 'Rozłącz', reconnect: 'Połącz ponownie', crashed: 'Proces terminali został uruchomiony ponownie', crashedShort: 'Proces terminali', restartToast: 'Proces terminali się zrestartował', resumeToast: 'wznawiam rozmowy' },
+  en: { connect: 'Connect', trust: 'Trust and save', disconnect: 'Disconnect', reconnect: 'Reconnect', crashed: 'The terminal process was restarted', crashedShort: 'The terminal process', restartToast: 'The terminal process restarted', resumeToast: 'resuming conversations' },
 }[LANGUAGE];
 if (!TEXT) throw new Error(`SSH_CHECK_LANGUAGE=${LANGUAGE} has no TEXT entry`);
 /** Host cards work like Termius: a click only picks a card, its pencil opens the host editor in the details pane. */
@@ -44,8 +44,8 @@ const PARTS = {
         await app.click('.ssh-card button', TEXT.trust);
         await connectWithPassword(app, server.password, { save: true });
         await connected(app, 1);
-        // W4: the connecting notice comes before the server greeting in the terminal buffer.
-        await app.until(`(() => { const t = ${CELL_BUFFERS}[0]; const a = t.indexOf(${JSON.stringify(TEXT.connecting)}); const b = t.indexOf('unimux test server'); return a >= 0 && b > a; })()`, 'connecting notice before the greeting');
+        // 1.0.5: the terminal holds the server greeting and no status line of the app ("[SSH ...]"); the card said it all.
+        await app.until(`(() => { const t = ${CELL_BUFFERS}[0]; return t.includes('unimux test server') && !t.includes('[SSH'); })()`, 'greeting without app status lines');
         const chip = await app.evaluate(`document.querySelector('.cell-head .ssh-host')?.textContent`);
         if (chip !== host.label) throw new Error(`header chip shows "${chip}", expected the host label`);
         await app.screenshot('ssh-cell-connected.png');
@@ -53,30 +53,32 @@ const PARTS = {
         const term = `(() => { const s = window.__mc.useStore.getState().s; const p = s.projects.find((x) => x.id === s.activeProjectId); const t = p.tabs.find((x) => x.id === p.activeTabId); return window.__mc.terminals.entries.get(t.cells[0].id).term; })()`;
         await app.evaluate(`(() => { const s = window.__mc.useStore.getState().s; const p = s.projects.find((x) => x.id === s.activeProjectId); const t = p.tabs.find((x) => x.id === p.activeTabId); window.__mc.terminals.post({ t: 'write', id: t.cells[0].id, data: 'echo \x1b[?1049h\x1b[?1000h\x1b[?1h' }); return true; })()`);
         await app.until(`${term}.buffer.active.type === 'alternate' && ${term}.modes.mouseTrackingMode !== 'none'`, 'remote TUI modes on');
-        // R11: after "Rozłącz" a bar sits at the bottom of the cell and the last output stays readable.
+        // R11 (1.0.5): after "Rozłącz" the card says Rozłączono with Połącz ponownie and Zamknij komórkę.
         await app.click('.cell-head .ssh-host');
         await app.click('.menu .menu-item', TEXT.disconnect);
-        await app.until(`document.querySelector('.ssh-bar button')?.textContent === ${JSON.stringify(TEXT.reconnect)} && !document.querySelector('.ssh-card')`, 'disconnected bar');
+        await app.until(`document.querySelector('.ssh-connect.is-disconnected .ssh-connect-actions .btn.primary')?.textContent === ${JSON.stringify(TEXT.reconnect)}`, 'disconnected card');
         // I2: the end of the session left the alternate screen and switched mouse tracking and app cursor keys off.
         await app.until(`${term}.buffer.active.type === 'normal' && ${term}.modes.mouseTrackingMode === 'none' && !${term}.modes.applicationCursorKeysMode`, 'modes reset after the session ended');
         await app.screenshot('ssh-cell-closed.png');
-        // R13: "Połącz ponownie" keeps the screen; the host key is known and the password saved, so no prompt comes up.
-        await app.click('.ssh-bar button', TEXT.reconnect);
+        // R13: the host key is known and the password saved, so no prompt comes up; 1.0.5: the new session starts on a clean
+        // terminal (one greeting, nothing of the old session, no "[SSH ...]" line).
+        await app.click('.ssh-connect-actions .btn.primary', TEXT.reconnect);
         await connected(app, 1);
+        await app.until(`(() => { const t = ${CELL_BUFFERS}[0]; return t.split('\\n').filter((l) => l.trim() === 'unimux test server').length === 1 && !t.includes('[SSH') && !t.includes('echo'); })()`, 'reconnect on a clean terminal');
         await app.screenshot('ssh-cell-reconnected.png');
         // D5 after a Pty Host crash: the cell ends in the error bar and never connects by itself; "Połącz ponownie" works.
         const hosts = childPids(app.pid, 'node.mojom.NodeService');
         if (hosts.length !== 1) throw new Error(`expected one Pty Host process, found ${hosts.length}`);
         killTree(hosts[0]);
-        await app.until(`document.querySelector('.ssh-bar.error')?.textContent.includes(${JSON.stringify(TEXT.crashed)})`, 'crash bar');
+        await app.until(`document.querySelector('.ssh-connect.failed')?.textContent.includes(${JSON.stringify(TEXT.crashed)})`, 'crash card');
         // D1: only an SSH cell was live, so the toast does not promise resumed conversations.
         await app.until(`[...document.querySelectorAll('.toast')].some((t) => t.textContent === ${JSON.stringify(TEXT.restartToast)})`, 'restart toast without resuming');
         if (await app.evaluate(`[...document.querySelectorAll('.toast')].some((t) => t.textContent.includes(${JSON.stringify(TEXT.resumeToast)}))`)) throw new Error('the crash toast promises resumed conversations');
         await sleep(3000);
-        const after = await app.evaluate(`[!!document.querySelector('.ssh-bar.error'), !!document.querySelector('.ssh-card'), document.querySelector('.status-text.ssh')?.textContent ?? '']`);
+        const after = await app.evaluate(`[!!document.querySelector('.ssh-connect.failed'), !!document.querySelector('.ssh-card:not(.ssh-connect)'), document.querySelector('.status-text.ssh')?.textContent ?? '']`);
         if (!after[0] || after[1] || !after[2].includes(TEXT.crashedShort)) throw new Error(`unexpected state after the crash: ${JSON.stringify(after)}`);
         await app.screenshot('ssh-cell-after-crash.png');
-        await app.click('.ssh-bar button', TEXT.reconnect);
+        await app.click('.ssh-connect-actions .btn.primary', TEXT.reconnect);
         await connected(app, 1);
       } finally { await app.close(); }
       for (const file of ['state.json', 'ssh/vault.json', 'ssh/known_hosts.json']) {
@@ -608,9 +610,9 @@ const PARTS = {
         await app.until(`document.querySelectorAll('.cell .ssh-fingerprint').length === 3`, 'one shared host key card in three cells');
         await app.click('.ssh-card button', 'Zaufaj i zapisz');
         await app.until(`document.querySelectorAll('.cell .ssh-card').length === 0`, 'all three connected');
-        // Every cell's terminal buffer holds the connected notice and the server greeting (nothing lost to the shared prompt or an early write).
+        // Every cell's terminal buffer holds the server greeting (nothing lost to the shared prompt or an early write) and no app status line.
         const buffers = CELL_BUFFERS;
-        await app.until(`${buffers}.length === 3 && ${buffers}.every((t) => t.includes('połączono') && t.includes('unimux test server') && t.includes('$'))`, 'every cell shows the connected notice and the server greeting');
+        await app.until(`${buffers}.length === 3 && ${buffers}.every((t) => !t.includes('[SSH') && t.includes('unimux test server') && t.includes('$'))`, 'every cell shows the server greeting');
         await app.screenshot('ssh-grid-preset.png');
         // Typing into each cell reaches its own session and the echo comes back.
         for (let i = 0; i < 3; i++) {
@@ -683,7 +685,7 @@ const PARTS = {
         await app.until(`!!document.querySelector('.ssh-view .ssh-tile[data-host-id]')`, 'host tiles');
         await app.click('.ssh-view-group .ssh-group-open');
         await connected(app, 3);
-        await app.until(`${CELL_BUFFERS}.length === 3 && ${CELL_BUFFERS}.every((t) => t.includes('połączono') && t.includes('$'))`, 'three cells with a prompt');
+        await app.until(`${CELL_BUFFERS}.length === 3 && ${CELL_BUFFERS}.every((t) => !t.includes('[SSH') && t.includes('$'))`, 'three cells with a prompt');
         // "Wysyłanie masowe" in the SSH view's header targets the active grid.
         const showGrid = () => app.evaluate(`[...document.querySelectorAll('.workspace-tabs .grid-tab')].find((t) => t.textContent.includes('lab')).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))`);
         await app.click('.rail-tiles [aria-label="SSH"]');
@@ -714,7 +716,7 @@ const PARTS = {
         await app.until(`getComputedStyle(document.querySelector('.ssh-workspace')).display === 'none'`, 'grid in front');
         await app.click('.cell-head .ssh-host');
         await app.click('.menu .menu-item', 'Rozłącz');
-        await app.until(`document.querySelectorAll('.cell .ssh-bar').length === 1`, 'first cell disconnected');
+        await app.until(`document.querySelectorAll('.cell .ssh-connect.is-disconnected').length === 1`, 'first cell disconnected');
         await app.click('.rail-tiles [aria-label="SSH"]');
         await app.click('.ssh-view-head .ssh-broadcast-open', 'Wysyłanie masowe');
         await app.until(`document.querySelectorAll('.ssh-targets li').length === 3 && document.querySelectorAll('.ssh-targets li.disabled').length === 1`, 'disconnected cell disabled in the dialog');
@@ -819,7 +821,7 @@ const PARTS = {
         await app.until(`document.querySelector('.ssh-card.danger button.danger')?.disabled === true`, 'replace disabled until confirmed');
         await app.screenshot('ssh-hostkey-changed.png');
         await app.click('.ssh-card.danger button', 'Rozłącz');
-        await app.until(`!!document.querySelector('.ssh-bar.error')`, 'hostKeyChanged bar');
+        await app.until(`!!document.querySelector('.ssh-connect.failed')`, 'hostKeyChanged card');
         await app.screenshot('ssh-hostkey-changed-refused.png');
       } finally { await app.close(); }
       const files = ['state.json', 'ssh/vault.json', 'ssh/known_hosts.json'].map((f) => join(root, 'data', f)).filter(existsSync);
@@ -847,9 +849,9 @@ const PARTS = {
       const [autoCell, manualCell] = state.projects[0].tabs[0].cells.map((c) => c.id);
       const cellIs = (cellId, what) => {
         const cell = `document.querySelector('.cell[data-cell-id="${cellId}"]')`;
-        if (what === 'connected') return `(() => { const c = ${cell}; return !!c && !c.querySelector('.ssh-card') && !c.querySelector('.ssh-bar') && !c.querySelector('.status-text.ssh'); })()`;
+        if (what === 'connected') return `(() => { const c = ${cell}; return !!c && !c.querySelector('.ssh-card') && !c.querySelector('.status-text.ssh'); })()`;
         if (what === 'card') return `${cell}?.querySelector('.ssh-card button')?.textContent === 'Połącz'`;
-        return `!!${cell}?.querySelector('.ssh-bar')`; // ended
+        return `!!${cell}?.querySelector('.ssh-connect.ended')`; // ended
       };
       const tabMenu = async () => {
         await app.evaluate(`document.querySelector('.workspace-tabs .grid-tab').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 40 }))`);
@@ -869,7 +871,10 @@ const PARTS = {
         await app.until(`${cellIs(autoCell, 'connected')} && ${cellIs(manualCell, 'connected')}`, 'reconnect all connected both cells');
         if ((await tabMenu()).includes('Połącz ponownie wszystkie SSH')) throw new Error('"Połącz ponownie wszystkie SSH" still offered with every cell connected');
         await closeMenu();
-        // One cell ends: the palette offers the action and it connects only that one.
+        // One cell ends: the palette offers the action and it connects only that one. A marker in the connected cell shows it
+        // is not touched (a new connect would start on a clean terminal, 1.0.5).
+        await app.evaluate(`window.__mc.terminals.post({ t: 'write', id: ${JSON.stringify(autoCell)}, data: 'keep-auto' + String.fromCharCode(13) }), true`);
+        await app.until(`${CELL_BUFFERS}[0].includes('keep-auto')`, 'marker in the connected cell');
         await app.evaluate(`window.mc.killCell(${JSON.stringify(manualCell)}), true`);
         await app.until(cellIs(manualCell, 'ended'), 'manual cell ended');
         await app.click('button[aria-label="Szukaj wszędzie"]');
@@ -878,8 +883,8 @@ const PARTS = {
         await app.until(`document.querySelector('.palette-item.sel .ptitle')?.textContent === 'SSH: połącz ponownie wszystkie'`, 'palette entry');
         await app.press('Enter');
         await app.until(`${cellIs(autoCell, 'connected')} && ${cellIs(manualCell, 'connected')}`, 'palette reconnected the ended cell');
-        const notices = await app.evaluate(`${CELL_BUFFERS}.map((t) => t.split('\\n').filter((l) => l.includes('łączenie z')).length)`);
-        if (notices[0] !== 1 || notices[1] !== 2) throw new Error(`connecting notices per cell: ${notices} (the connected cell must not be touched)`);
+        const after = await app.evaluate(`${CELL_BUFFERS}.map((t) => [t.includes('keep-auto'), t.includes('[SSH')])`);
+        if (!after[0][0] || after.some(([, bracket]) => bracket)) throw new Error(`after the palette reconnect: ${JSON.stringify(after)} (the connected cell must not be touched, no [SSH lines)`);
         // The option in the host form of the SSH view.
         await app.click('.rail-tiles [aria-label="SSH"]');
         await app.until(`document.querySelectorAll('.ssh-view .ssh-tile[data-host-id]').length === 2`, 'host tiles');
@@ -908,7 +913,7 @@ const PARTS = {
       app = await launchApp(root);
       try {
         await app.until(cellIs(autoCell, 'connected'), 'auto cell reconnected at app start');
-        await app.until(`${CELL_BUFFERS}[0].includes('łączenie z')`, 'connecting notice in the auto cell');
+        await app.until(`${CELL_BUFFERS}[0].includes('$') && !${CELL_BUFFERS}[0].includes('[SSH')`, 'shell prompt without app status lines in the auto cell');
         await sleep(2500);
         if (!(await app.evaluate(cellIs(manualCell, 'card')))) throw new Error('the cell of the host without the option did not stay idle');
         await app.screenshot('ssh-reconnect-at-start.png');
@@ -938,8 +943,8 @@ const PARTS = {
         // The password is kept in memory for the session: a reconnect does not ask again.
         await app.click('.cell-head .ssh-host');
         await app.click('.menu .menu-item', 'Rozłącz');
-        await app.until(`document.querySelector('.ssh-bar button')?.textContent === 'Połącz ponownie'`, 'disconnected bar');
-        await app.click('.ssh-bar button', 'Połącz ponownie');
+        await app.until(`document.querySelector('.ssh-connect.ended .btn.primary')?.textContent === 'Połącz ponownie'`, 'disconnected card');
+        await app.click('.ssh-connect-actions .btn.primary', 'Połącz ponownie');
         await connected(app, 1);
         await sleep(2500); // state.json is written debounced
       } finally { await app.close(); }

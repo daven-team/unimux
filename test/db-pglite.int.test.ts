@@ -401,6 +401,28 @@ describe('DbHost on PGlite: read-only cannot be switched off (fix round 1)', () 
     await ro.db.exec('DELETE FROM r WHERE id = 2');
   });
 
+  it('a run that failed inside its transaction reports the failed state even when its ReadyForQuery comes in a later read', async () => {
+    // pg rejects a statement at its ErrorResponse; the ReadyForQuery with 'failed' came in a read of its own (fast macOS CI),
+    // so the run ended reporting the state from before ('transaction').
+    const proxy = await splittingProxy(ro.port);
+    const h = dbHarness();
+    let id: string | null = null;
+    try {
+      id = await h.open({ port: proxy.port, readOnly: true });
+      for (let i = 0; i < 2; i++) {
+        const over = await h.run(id, { sql: "BEGIN; INSERT INTO r VALUES (1, 'dup')", readWrite: true });
+        expect(over.end).toMatchObject({ ok: false, tx: 'failed' });
+        expect((await h.run(id, { sql: 'ROLLBACK' })).end).toMatchObject({ ok: true, tx: 'idle' });
+        expect((await h.run(id, { sql: 'SHOW default_transaction_read_only' })).statements[0].rows).toEqual([['on']]);
+      }
+      expect(h.last(id)?.phase).toBe('connected');
+    } finally {
+      // Closed even after a failure: a session left in a transaction holds PGlite's only backend for the next tests.
+      if (id) h.host.close(id);
+      await proxy.close();
+    }
+  });
+
   it('a page filter that switches read-only off with set_config is undone after the page', async () => {
     const h = dbHarness();
     const id = await h.open({ port: ro.port, readOnly: true });

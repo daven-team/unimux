@@ -225,7 +225,7 @@ describe('shared blink', () => {
     }
     // .brand.fx runs 2.4 s after a click on the logo; the spinners (RefreshIcon, BusyRing) and the arc of the SSH connecting
     // card exist only during a wait and turn by transform alone (static under reduced motion). Nothing else.
-    expect(infinite.sort()).toEqual(['.brand.fx .bn-fx', '.refresh-icon.spinning svg, .busy-ring', '.ssh-step.active .ssh-step-node::after'].sort());
+    expect(infinite.sort()).toEqual(['.brand.fx .bn-fx', '.refresh-icon.spinning svg, .busy-ring', '.ssh-mark.active::after'].sort());
   });
 });
 

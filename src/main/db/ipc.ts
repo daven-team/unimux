@@ -202,9 +202,10 @@ export function createDbHandlers(service: DbService) {
     },
     vaultInfo: () => service.vaultInfo(),
     connect: (connectionId: unknown, opts: unknown) => {
-      const o = z.object({ database: z.string().min(1).max(DB_LIMITS.database).optional() }).strict().optional().nullable().safeParse(opts);
+      // An empty database: MySQL without a default database (the service ignores it for other kinds).
+      const o = z.object({ database: z.string().max(DB_LIMITS.database).refine((d) => !d.includes(' ')).optional() }).strict().optional().nullable().safeParse(opts);
       if (!uuid.safeParse(connectionId).success || !o.success) return { ok: false as const, error: 'invalid' as const };
-      return service.connect(connectionId as string, o.data?.database ? { database: o.data.database } : {});
+      return service.connect(connectionId as string, o.data?.database !== undefined ? { database: o.data.database } : {});
     },
     disconnect: async (id: unknown) => (sessionId.safeParse(id).success ? service.disconnect(id as string) : { ok: false }),
     sessions: () => service.snapshot(),

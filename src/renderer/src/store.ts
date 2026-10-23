@@ -10,6 +10,7 @@ import { patchChanges } from '../../shared/renderEquality';
 import type { McpInfo } from '../../shared/automation';
 import type { LoginTarget } from '../../shared/accounts';
 import type { CliId, CliStatusMap } from '../../shared/cliStatus';
+import type { DbKind } from '../../shared/db';
 
 export type Modal =
   | { kind: 'grid'; projectId: string }
@@ -21,7 +22,7 @@ export type Modal =
   | { kind: 'file'; projectId: string; relativePath: string }
   | { kind: 'auth'; provider: 'claude' | 'codex'; target: LoginTarget }
   | { kind: 'broadcast'; projectId: string; tabId: string }
-  | { kind: 'dbConnection'; connectionId?: string; dbKind?: 'postgres' | 'redis' };
+  | { kind: 'dbConnection'; connectionId?: string; dbKind?: DbKind };
 
 export type Dialog = { id: number } & (
   | { kind: 'prompt'; title: string; value: string; placeholder?: string; onSubmit: (value: string) => void }

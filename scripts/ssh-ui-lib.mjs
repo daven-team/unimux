@@ -173,13 +173,13 @@ export async function launchApp(root, extraEnv = {}, extraArgs = []) {
 }
 
 /**
- * Waits until `count` SSH cells are connected (M1): no card, no end-of-session bar and no phase label in any of them.
- * A failed sign-in shows .ssh-bar and a phase label, so it never passes as "connected".
+ * Waits until `count` SSH cells are connected (M1): no card and no phase label in any of them.
+ * A failed sign-in shows the card and a phase label, so it never passes as "connected".
  */
 export async function connected(app, count = 1, ms = 20000) {
   await app.until(`(() => {
     const cells = [...document.querySelectorAll('.cell')].filter((c) => c.querySelector('.cell-head .ssh-host'));
-    return cells.length >= ${count} && cells.every((c) => !c.querySelector('.ssh-card') && !c.querySelector('.ssh-bar') && !c.querySelector('.status-text.ssh'));
+    return cells.length >= ${count} && cells.every((c) => !c.querySelector('.ssh-card') && !c.querySelector('.status-text.ssh'));
   })()`, `${count} SSH cell(s) connected`, ms);
 }
 

@@ -63,10 +63,11 @@ describe('PanelEmpty', () => {
     expect(runs).toBe(3);
   });
 
-  it('keeps both links of the database sentence in every language', () => {
+  it('keeps every link of the database sentence in every language', () => {
     for (const { code } of LANGUAGES) {
-      const text = translate(code, 'Dodaj połączenie z bazą {postgres} lub {redis}.');
+      const text = translate(code, 'Dodaj połączenie z bazą {postgres}, {mysql} lub {redis}.');
       expect(text, code).toContain('{postgres}');
+      expect(text, code).toContain('{mysql}');
       expect(text, code).toContain('{redis}');
       expect(translate(code, 'Możesz też {link}.'), code).toContain('{link}');
     }
@@ -82,6 +83,7 @@ describe('PanelEmpty', () => {
     const db = read('db/DbPanel.tsx');
     expect(db).toContain("onClick={() => openNewConnection('postgres')}>PostgreSQL</EmptyLink>");
     expect(db).toContain("onClick={() => openNewConnection('redis')}>Redis</EmptyLink>");
+    expect(db).toContain("onClick={() => openNewConnection('mysql')}>MySQL / MariaDB</EmptyLink>");
     // No lone + row above the empty text: the head (filter and + menu) is there only with connections.
     expect(db).toMatch(/\{connections\.length > 0 && \(\s*<div className="db-panel-head">/);
     expect(readFileSync('src/renderer/src/styles.css', 'utf8')).not.toMatch(/\.empty-state|\.es-icon/);

@@ -1,9 +1,10 @@
 // The "Bazy danych" rail panel (1.0.0): saved connections by group with their colour, type and state, and under a connected
-// Postgres connection its databases, schemas, objects and, for tables and views, columns, keys and indexes. Lists load lazily
+// Postgres connection its databases, schemas, objects and, for tables and views, columns, keys and indexes (a MySQL / MariaDB
+// connection: its databases, each holding its objects directly). Lists load lazily
 // (dbTree says what an expanded node waits for) and the rows are windowed, so schemas with thousands of tables stay light.
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { focusRedisKey, openRedisTab, viewLabel } from '../../redis/redisClient';
-import { dbEndpoint, setDbGroupColor, type DbConnection } from '../../../../shared/db';
+import { dbDefaultDatabase, dbEndpoint, dbKindLabel, isSqlKind, setDbGroupColor, type DbConnection, type DbKind } from '../../../../shared/db';
 import { redisDataDisplay } from '../../../../shared/dbRedis';
 import { PROJECT_COLORS } from '../../../../shared/state';
 import { buildDbTree, nodeKey, toggleNode, type DbFolder, type DbPart, type DbTreeRow } from '../../../../shared/dbTree';
@@ -27,7 +28,7 @@ const FOLDER_LABEL: Record<DbFolder, MessageKey> = { tables: 'Tabele', views: 'W
 const PART_LABEL: Record<DbPart, MessageKey> = { columns: 'Kolumny', keys: 'Klucze', indexes: 'Indeksy' };
 const formatCount = (n: number | null | undefined): string => (n === null || n === undefined || n < 0 ? '' : n >= 10000 ? `~${Math.round(n / 1000)}k` : `~${n}`);
 
-export const openNewConnection = (kind: 'postgres' | 'redis' = 'postgres') => setUi({ modal: { kind: 'dbConnection', dbKind: kind } });
+export const openNewConnection = (kind: DbKind = 'postgres') => setUi({ modal: { kind: 'dbConnection', dbKind: kind } });
 export const editConnection = (id: string) => setUi({ modal: { kind: 'dbConnection', connectionId: id } });
 
 export async function deleteConnection(c: DbConnection, tr: (k: MessageKey, p?: Record<string, string | number>) => string): Promise<void> {
@@ -104,9 +105,9 @@ export const DbPanel = memo(function DbPanel() {
     const isOn = live(c.id);
     openMenu(x, y, [
       { header: c.name },
-      ...(c.kind === 'postgres' ? [
+      ...(isSqlKind(c.kind) ? [
         isOn ? { label: tr('Rozłącz'), onClick: () => void disconnectAsking(c.id, c.name) } : { label: tr('Połącz'), onClick: () => void connect(c) },
-        { label: tr('Nowy edytor SQL'), onClick: () => openSqlTab(c.id, c.database ?? 'postgres') },
+        { label: tr('Nowy edytor SQL'), onClick: () => openSqlTab(c.id, dbDefaultDatabase(c)) },
         ...(isOn ? [{ label: tr('Odśwież'), onClick: () => refreshLoads((k) => k[1] === c.id) }] : []),
         { sep: true } as MenuItem,
       ] : []),
@@ -148,21 +149,24 @@ export const DbPanel = memo(function DbPanel() {
       return;
     }
     const items: MenuItem[] = [];
+    const mysql = 'connectionId' in row && connections.find((c) => c.id === row.connectionId)?.kind === 'mysql';
+    const dialect = mysql ? 'mysql' : 'postgres';
     if (row.type === 'database') {
       items.push({ header: row.database }, { label: tr('Nowy edytor SQL tutaj'), onClick: () => openSqlTab(row.connectionId, row.database) },
         { label: tr('Kopiuj nazwę'), onClick: () => window.mc.clipboardWrite(row.database) },
         { label: tr('Odśwież'), onClick: () => refreshLoads((k) => k[1] === row.connectionId && k[2] === row.database) });
     } else if (row.type === 'schema' || row.type === 'folder') {
       const schema = row.type === 'schema' ? row.schema.name : row.schema;
-      items.push({ header: schema }, { label: tr('Nowy edytor SQL tutaj'), onClick: () => openSqlTab(row.connectionId, row.database, `SET search_path TO ${quoteIdent(schema)};\n\n`) },
+      // A MySQL database is the schema: its SQL editor opens on it (USE is what its session starts with).
+      items.push({ header: schema }, { label: tr('Nowy edytor SQL tutaj'), onClick: () => (mysql ? openSqlTab(row.connectionId, schema) : openSqlTab(row.connectionId, row.database, `SET search_path TO ${quoteIdent(schema)};\n\n`)) },
         { label: tr('Kopiuj nazwę'), onClick: () => window.mc.clipboardWrite(schema) },
         { label: tr('Odśwież'), onClick: () => refreshLoads((k) => k[1] === row.connectionId && k[2] === row.database && k[3] === schema) });
     } else if (row.type === 'object') {
       const o = row.object;
-      const qualified = `${quoteIdent(o.schema)}.${quoteIdent(o.name)}`;
+      const qualified = `${quoteIdent(o.schema, dialect)}.${quoteIdent(o.name, dialect)}`;
       items.push({ header: `${o.schema}.${o.name}` });
       if (hasRows(o.kind)) items.push({ label: tr('Otwórz dane'), onClick: () => openTableTab(row.connectionId, row.database, o.schema, o.name, o.kind) });
-      items.push({ label: tr('Nowy edytor SQL tutaj'), onClick: () => openSqlTab(row.connectionId, row.database, hasRows(o.kind) ? `SELECT * FROM ${qualified} LIMIT 100;\n` : '') });
+      items.push({ label: tr('Nowy edytor SQL tutaj'), onClick: () => openSqlTab(row.connectionId, mysql ? o.schema : row.database, hasRows(o.kind) ? `SELECT * FROM ${qualified} LIMIT 100;\n` : '') });
       items.push({ label: tr('Kopiuj nazwę'), onClick: () => window.mc.clipboardWrite(o.name) });
       items.push({ label: tr('Kopiuj pełną nazwę'), onClick: () => window.mc.clipboardWrite(qualified) });
       items.push({ label: tr('Pokaż DDL'), onClick: () => openDdlTab(row.connectionId, row.database, o.schema, o.name, o.kind, o.args) });
@@ -255,9 +259,9 @@ export const DbPanel = memo(function DbPanel() {
       case 'connection': {
         const c = row.connection;
         const state = connectionState({ sessions }, c.id);
-        title = `${c.name}\n${c.user ? `${c.user}@` : ''}${dbEndpoint(c)}${c.ssh ? `\n${tr('przez SSH: {host}', { host: hostLabel(c.ssh.hostId) })}` : ''}${c.readOnly ? `\n${tr('Tylko do odczytu')}` : ''}`;
+        title = `${c.name} (${dbKindLabel(c)})\n${c.user ? `${c.user}@` : ''}${dbEndpoint(c)}${c.ssh ? `\n${tr('przez SSH: {host}', { host: hostLabel(c.ssh.hostId) })}` : ''}${c.readOnly ? `\n${tr('Tylko do odczytu')}` : ''}`;
         body = <>
-          <span title={c.kind === 'postgres' ? 'PostgreSQL' : 'Redis'}><DbKindIcon kind={c.kind} /></span>
+          <span title={dbKindLabel(c)}><DbKindIcon kind={c.kind} flavor={c.flavor} /></span>
           <span className="db-name">{c.name}</span>
           {c.readOnly && <span className="db-ro" title={tr('Tylko do odczytu')}>RO</span>}
           {c.ssh && <span className="db-meta">SSH</span>}
@@ -265,7 +269,7 @@ export const DbPanel = memo(function DbPanel() {
         </>;
         break;
       }
-      case 'database': body = <><IDatabase /><span className="db-name">{row.database}</span>{row.current && <span className="db-meta">{tr('domyślna')}</span>}</>; break;
+      case 'database': body = <><IDatabase /><span className={`db-name ${row.info.system ? 'dim' : ''}`}>{row.database}</span>{row.current && <span className="db-meta">{tr('domyślna')}</span>}</>; break;
       case 'schema': body = <><IFolder /><span className={`db-name ${row.schema.system ? 'dim' : ''}`}>{row.schema.name}</span></>; break;
       case 'folder': body = <><span className="db-folder-name">{tr(FOLDER_LABEL[row.folder])}</span><span className="db-meta">{row.count}</span></>; break;
       case 'object': {
@@ -319,6 +323,7 @@ export const DbPanel = memo(function DbPanel() {
             onClick={(e) => openMenuAt(e.currentTarget, [
               { header: tr('Nowe połączenie') },
               { label: 'PostgreSQL', onClick: () => openNewConnection('postgres') },
+              { label: 'MySQL / MariaDB', onClick: () => openNewConnection('mysql') },
               { label: 'Redis', onClick: () => openNewConnection('redis') },
             ])}><IPlus /></button>
         </div>
@@ -331,14 +336,15 @@ export const DbPanel = memo(function DbPanel() {
       ))}
       {Object.entries(errors).filter(([id]) => connections.some((c) => c.id === id)).map(([id, message]) => (
         <div key={id} className="db-panel-error" role="alert">
-          <strong>{connName(id)}</strong>: {message}
+          <span><strong>{connName(id)}</strong>: {message}</span>
           <button className="btn ghost icon small" aria-label={tr('Zamknij')} onClick={() => setErrors((e) => { const n = { ...e }; delete n[id]; return n; })}>×</button>
         </div>
       ))}
       {!connections.length ? (
         <PanelEmpty className="db-empty">
-          <p>{fillTokens(tr('Dodaj połączenie z bazą {postgres} lub {redis}.'), {
+          <p>{fillTokens(tr('Dodaj połączenie z bazą {postgres}, {mysql} lub {redis}.'), {
             postgres: <EmptyLink label={`${tr('Nowe połączenie')}: PostgreSQL`} onClick={() => openNewConnection('postgres')}>PostgreSQL</EmptyLink>,
+            mysql: <EmptyLink label={`${tr('Nowe połączenie')}: MySQL / MariaDB`} onClick={() => openNewConnection('mysql')}>MySQL / MariaDB</EmptyLink>,
             redis: <EmptyLink label={`${tr('Nowe połączenie')}: Redis`} onClick={() => openNewConnection('redis')}>Redis</EmptyLink>,
           })}</p>
           <button className="btn primary" onClick={() => openNewConnection('postgres')}>{tr('Nowe połączenie')}</button>

@@ -1,7 +1,6 @@
 /* src/renderer/src/components/ssh/ssh.css - SSH UI, existing tokens only (spec 10). */
 .ssh-card { position: absolute; inset: var(--cell-head) 0 0 0; z-index: 3; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 8px; overflow: auto; container-type: size; }
 .ssh-card.danger { box-shadow: inset 0 0 0 1px #ef4444; }
-.ssh-card-inner { display: flex; flex-direction: column; gap: 8px; max-width: 460px; width: 100%; min-width: 0; max-height: 100%; }
 .ssh-card-title { color: var(--text); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .ssh-card-title.danger { color: #ef4444; }
 .ssh-card-text, .ssh-card-hint { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -13,8 +12,6 @@
 .ssh-kv { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--muted); }
 .ssh-error { color: #ef4444; font-size: 12px; }
 .ssh-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.ssh-bar { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: var(--bg-hover); border-top: 1px solid var(--border); font-size: 12px; }
-.ssh-bar.error { color: #ef4444; }
 .cell-head .ssh-host { display: inline-flex; align-items: center; gap: 6px; }
 .cell-head .ssh-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 
@@ -30,7 +27,7 @@
 .ssh-editor .check input { accent-color: #a8a29e; }
 .ssh-row { display: flex; gap: 8px; align-items: flex-start; }
 .ssh-row > .btn { flex: none; height: 30px; }
-.ssh-row .grow, .ssh-actions .grow, .ssh-bar .grow { flex: 1; min-width: 0; }
+.ssh-row .grow, .ssh-actions .grow { flex: 1; min-width: 0; }
 .ssh-field.port { width: 96px; flex: none; }
 .ssh-tags { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .ssh-tag { display: inline-flex; align-items: center; gap: 2px; padding: 1px 4px 1px 8px; border-radius: 10px; background: var(--bg-hover); color: var(--text); font-size: 11.5px; }

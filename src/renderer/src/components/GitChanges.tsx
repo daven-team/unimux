@@ -40,6 +40,9 @@ interface Props {
   commitSlot?: ReactNode;
   /** Push after a commit ("Commit and push" in the Commit button's menu); absent while the branch has nowhere to push. */
   onPush?(): Promise<void>;
+  /** The section is expanded; the panel keeps it, so the history can take the whole height while it is collapsed. */
+  open: boolean;
+  onToggle(): void;
 }
 
 /** The message box grows with the text up to this height (six lines), then scrolls. */
@@ -54,10 +57,9 @@ const IUnstage = () => <RowIcon><path d="M3 8h10" /></RowIcon>;
 const IOpenFile = () => <RowIcon><path d="M9 1.8H4.2a1 1 0 0 0-1 1v10.4a1 1 0 0 0 1 1h3.3M9 1.8V5.5h3.8M9 1.8l3.8 3.7v2.3" /><path d="M9.5 12h5M12.5 10l2 2-2 2" /></RowIcon>;
 
 /** The Changes section: a Cursor-like pane with the commit box and the files grouped as conflicts, staged, changed and untracked. */
-export function GitChanges({ projectId, status, busy, writable, programsNote, opts, run, onOpen, onMenu, editPath, view, sort, branch, commitSlot, onPush }: Props) {
+export function GitChanges({ projectId, status, busy, writable, programsNote, opts, run, onOpen, onMenu, editPath, view, sort, branch, commitSlot, onPush, open, onToggle }: Props) {
   const { tr } = useI18n();
   useShortcutText(); // the commit shortcut in the tooltips and the placeholder follows the settings
-  const [open, setOpen] = useState(true);
   const [message, setMessage] = useState('');
   const messageBox = useRef<HTMLTextAreaElement>(null);
   const [closed, setClosed] = useState<Set<string>>(new Set());
@@ -211,7 +213,7 @@ export function GitChanges({ projectId, status, busy, writable, programsNote, op
 
   return (
     <section className={`git-changes ${open ? '' : 'collapsed'}`} aria-label={tr('Zmiany')}>
-      <div className="git-pane-head with-branch" onClick={() => setOpen((v) => !v)}>
+      <div className="git-pane-head with-branch" onClick={onToggle}>
         <button className="git-pane-toggle" aria-expanded={open}>
           <span className={`tree-chevron ${open ? 'open' : ''}`}><IChevron /></span>
           <span className="git-pane-title">{tr('Zmiany')}</span>

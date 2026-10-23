@@ -1,86 +1,139 @@
-/* The connecting card of an SSH cell (1.0.4): host tile, a three-step track, status, prompts, log. Existing tokens only. */
-.ssh-card.ssh-connect { padding: 16px; }
-.ssh-card.ssh-connect.danger { box-shadow: inset 0 0 0 1px #ef4444; }
-/* margin: auto centres it and still lets a tall card (an open prompt in a short cell) scroll from its top. */
-.ssh-connect-inner { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 480px; min-width: 0; margin: auto; }
-.ssh-connect-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.ssh-connect-head .ssh-host-icon { width: 44px; height: 44px; border-radius: 11px; }
-.ssh-connect-head .ssh-host-icon svg { width: 22px; height: 22px; }
-.ssh-connect-name { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
-.ssh-connect-name strong, .ssh-connect-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ssh-connect-name strong { color: var(--text); font-size: 14px; font-weight: 600; }
-.ssh-connect-name span { color: var(--muted); font-size: 11.5px; }
-.ssh-connect-logs-toggle { flex: none; display: inline-flex; align-items: center; gap: 6px; }
-.ssh-connect-logs-toggle svg { flex: none; width: 13px; height: 13px; }
-.ssh-connect-logs-toggle.on { background: var(--btn-ghost-hover); }
+/* The cards of an SSH cell (1.0.5): one unimux panel - the host chip, the phases as a checklist, the status with the attempt's
+   clock, prompts and the log, the buttons in a footer bar. Flat greys and the steel blue of the primary button; existing tokens. */
+.ssh-card.ssh-connect, .ssh-card.ssh-idle { display: block; padding: 0; }
+/* The frame fills the cell (the card is the size container, so the frame carries the spacing that small cells drop); margin:
+   auto on the panel centres it and still lets a tall panel (an open prompt in a short cell) scroll from its top. */
+.ssh-frame { display: flex; min-height: 100%; padding: 14px; }
+.ssh-panel {
+  --ssh-mark: 16px;
+  display: flex; flex-direction: column; width: 100%; max-width: 400px; min-width: 0; margin: auto;
+  border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); overflow: hidden;
+  animation: ssh-panel-in .16s ease-out;
+}
+@keyframes ssh-panel-in { from { opacity: 0; transform: translateY(3px); } }
+.ssh-connect.danger .ssh-panel { border-color: #ef444499; }
+.ssh-panel > * + * { border-top: 1px solid var(--border); }
 
-/* The track runs from the centre of the first node to the centre of the last; the fill follows --ssh-progress (0..1). */
-.ssh-steps { position: relative; --ssh-node: 34px; }
-.ssh-steps ol { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; padding: 0; list-style: none; }
-.ssh-steps-track { position: absolute; top: calc(var(--ssh-node) / 2 - 1px); left: calc(100% / 6); right: calc(100% / 6); height: 2px; border-radius: 1px; background: var(--border-2); }
-.ssh-steps-fill { position: absolute; inset: 0 auto 0 0; width: calc(var(--ssh-progress, 0) * 100%); border-radius: 1px; background: var(--accent); transition: width .35s ease; }
-.ssh-connect.failed .ssh-steps-fill { background: color-mix(in srgb, var(--accent) 55%, #ef4444); }
-.ssh-step { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
-.ssh-step-node { position: relative; display: inline-flex; align-items: center; justify-content: center; width: var(--ssh-node); height: var(--ssh-node); border-radius: 50%; border: 1px solid var(--border-2); background: var(--bg-3); color: var(--muted); box-sizing: border-box; transition: background .2s, color .2s, border-color .2s; }
-.ssh-step-node svg { width: 15px; height: 15px; }
-.ssh-step-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
-.ssh-step.done .ssh-step-node { background: var(--accent); border-color: var(--accent); color: #fff; }
-.ssh-step.done .ssh-step-label { color: var(--text-2); }
-.ssh-step.active .ssh-step-node { background: color-mix(in srgb, var(--accent) 13%, var(--bg-3)); border-color: transparent; color: var(--accent-text); }
-.ssh-step.active .ssh-step-label { color: var(--text); }
-.ssh-step.failed .ssh-step-node { background: color-mix(in srgb, #ef4444 13%, var(--bg-3)); border-color: #ef4444; color: #f87171; }
-.ssh-step.failed .ssh-step-label { color: #f87171; }
-/* The arc around the active node turns on its own (a CSS animation, not the shared blink); static with reduced motion. */
-.ssh-step.active .ssh-step-node::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--accent); border-right-color: var(--accent); animation: ssh-connect-spin .9s linear infinite; }
-@keyframes ssh-connect-spin { to { transform: rotate(360deg); } }
+.ssh-panel-head { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 10px 10px 12px; }
+/* The chip: the host's initials on its colour (Hosty), grey without one. */
+.ssh-chip {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px;
+  color: #fff; font-size: 11px; font-weight: 700; letter-spacing: .3px; text-shadow: 0 1px 1px #0005;
+}
+.ssh-chip.uncolored { background: #333; color: var(--text-2); text-shadow: none; }
+.ssh-panel-name { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; }
+.ssh-panel-name strong, .ssh-panel-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ssh-panel-name strong { color: var(--text); font-size: 13px; font-weight: 600; }
+.ssh-panel-name span { color: var(--muted); font-family: "Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular", monospace; font-size: 11px; }
+.ssh-connect-logs-toggle { flex: none; display: inline-flex; align-items: center; gap: 5px; }
+.ssh-connect-logs-toggle svg { flex: none; width: 13px; height: 13px; }
+.ssh-connect-logs-toggle.on { background: var(--btn-ghost-hover); color: var(--text); }
+
+/* The phases: a checklist, one row each; the mark says done, current, failed, stopped or still to come. */
+.ssh-phases { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 8px 12px; list-style: none; }
+.ssh-phase { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 22px; color: var(--muted); font-size: 12px; }
+.ssh-phase-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ssh-phase-time { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ssh-phase.done, .ssh-phase.ended { color: var(--text-2); }
+.ssh-phase.active { color: var(--text); }
+.ssh-phase.failed { color: var(--error); }
+.ssh-phase.stopped { color: var(--text-2); }
+.ssh-phase.session { margin-top: 3px; padding-top: 5px; border-top: 1px dashed var(--border-2); }
+
+.ssh-mark { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--ssh-mark); height: var(--ssh-mark); border-radius: 50%; box-sizing: border-box; }
+.ssh-mark svg { display: block; }
+/* Still to come: a small hollow dot. */
+.ssh-mark.pending::before { content: ''; width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--border-2); }
+.ssh-mark.done { background: var(--btn-primary-bg); color: var(--btn-primary-fg); }
+.ssh-mark.failed { background: #ef444426; color: var(--error); box-shadow: inset 0 0 0 1px #ef444466; }
+.ssh-mark.stopped { background: #ffffff10; color: var(--text-2); box-shadow: inset 0 0 0 1px var(--border-2); }
+/* The current phase: a thin ring with a steel blue arc that turns (transform only; static with reduced motion). */
+.ssh-mark.active { border: 1.5px solid var(--border-2); }
+.ssh-mark.active::after { content: ''; position: absolute; inset: -1.5px; border-radius: 50%; border: 1.5px solid transparent; border-top-color: var(--btn-primary-bg); animation: ssh-mark-spin .8s linear infinite; }
+@keyframes ssh-mark-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .ssh-step.active .ssh-step-node::after { animation: none; }
-  .ssh-steps-fill, .ssh-step-node { transition: none; }
+  .ssh-mark.active::after { animation: none; border-right-color: var(--btn-primary-bg); }
+  .ssh-panel { animation: none; }
 }
 
-.ssh-connect-status { display: flex; flex-direction: column; gap: 4px; align-items: center; min-width: 0; color: var(--text-2); font-size: 12.5px; text-align: center; overflow-wrap: anywhere; }
-.ssh-connect-status.failed { color: var(--text); font-weight: 600; }
-.ssh-connect-error { color: #f87171; font-size: 12px; font-weight: 400; }
-.ssh-connect-prompt { padding: 12px; border: 1px solid #ffffff0d; border-radius: 10px; background: #202020; }
-.ssh-connect.danger .ssh-connect-prompt { border-color: #ef444466; }
-.ssh-connect-log { display: flex; flex-direction: column; gap: 2px; max-height: 140px; margin: 0; padding: 8px 10px; overflow: auto; list-style: none; border: 1px solid #ffffff0d; border-radius: 8px; background: #171717; font-family: "Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular", "Courier New", monospace; font-size: 11px; line-height: 1.5; user-select: text; }
+.ssh-panel-status { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 10px; min-width: 0; padding: 9px 12px; }
+.ssh-panel-status-text { display: flex; flex: 1 1 110px; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: break-word; }
+.ssh-panel-status-text strong { color: var(--text-2); font-size: 12px; font-weight: 500; }
+.ssh-connect.ended .ssh-panel-status-text strong { color: var(--text); font-weight: 600; }
+.ssh-connect-error { color: var(--text-2); font-size: 11.5px; line-height: 1.4; }
+.ssh-panel-status.failed .ssh-connect-error { color: var(--error); }
+.ssh-clock { flex: none; color: var(--muted); font-family: "Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular", monospace; font-size: 11px; font-variant-numeric: tabular-nums; line-height: 18px; }
+
+.ssh-panel .ssh-banner { margin: 0; max-height: 96px; padding: 8px 12px; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: var(--bg-1); }
+.ssh-connect-prompt { padding: 12px; background: var(--bg-3); }
+.ssh-connect.danger .ssh-connect-prompt { background: color-mix(in srgb, #ef4444 6%, var(--bg-3)); }
+.ssh-connect-log { display: flex; flex-direction: column; gap: 2px; max-height: 140px; margin: 0; padding: 8px 12px; overflow: auto; list-style: none; background: var(--bg-1); font-family: "Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular", "Courier New", monospace; font-size: 11px; line-height: 1.5; user-select: text; }
 .ssh-connect-log li { display: flex; gap: 8px; min-width: 0; color: var(--text-2); }
 .ssh-connect-log li span { min-width: 0; overflow-wrap: anywhere; }
 .ssh-connect-log time { flex: none; color: var(--muted); }
-.ssh-connect-log li.ok span { color: #4ade80; }
-.ssh-connect-log li.error span { color: #f87171; }
-.ssh-connect-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.ssh-connect-actions .btn.primary { margin-left: auto; }
+.ssh-connect-log li.ok span { color: var(--btn-primary-bg); }
+.ssh-connect-log li.error span { color: var(--error); }
+.ssh-panel-note { margin: 0; padding: 10px 12px; color: var(--muted); font-size: 11.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.ssh-panel > .ssh-panel-note:first-child { color: var(--text-2); }
+/* The footer bar: the buttons at its end, the primary one last. */
+.ssh-connect-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; padding: 8px 10px; background: var(--bg-1); }
 
-/* A small grid cell: a smaller tile and nodes, no step labels, the log and banner shorter. */
-@container (max-width: 340px) or (max-height: 260px) {
-  .ssh-card.ssh-connect { padding: 8px 10px; }
-  .ssh-connect-inner { gap: 8px; }
-  .ssh-connect-head { gap: 8px; }
-  .ssh-connect-head .ssh-host-icon { width: 30px; height: 30px; border-radius: 8px; }
-  .ssh-connect-head .ssh-host-icon svg { width: 16px; height: 16px; }
-  .ssh-connect-name strong { font-size: 12.5px; }
-  .ssh-connect-name span { font-size: 11px; }
-  .ssh-steps { --ssh-node: 26px; }
-  .ssh-step-node svg { width: 12px; height: 12px; }
-  .ssh-step.active .ssh-step-node::after { inset: -3px; }
-  .ssh-step-label { display: none; }
-  .ssh-connect-status { font-size: 11.5px; }
+/* A small grid cell: the panel fills the cell without its frame and every row gets tighter. */
+@container (max-width: 340px) or (max-height: 300px) {
+  .ssh-frame { padding: 0; }
+  .ssh-panel { --ssh-mark: 14px; max-width: none; margin: 0 0 auto; border: 0; border-radius: 0; background: var(--bg); animation: none; }
+  .ssh-panel-head { gap: 8px; padding: 7px 8px; }
+  .ssh-chip { width: 22px; height: 22px; border-radius: 5px; font-size: 10px; }
+  .ssh-panel-name strong { font-size: 12px; }
+  .ssh-connect-logs-toggle span { display: none; }
+  .ssh-phases { padding: 6px 8px; }
+  .ssh-phase { gap: 7px; min-height: 20px; font-size: 11.5px; }
+  .ssh-panel-status { padding: 6px 8px; }
+  .ssh-panel-status-text strong { font-size: 11.5px; }
   .ssh-connect-prompt { padding: 8px; }
   .ssh-connect-log { max-height: 80px; padding: 6px 8px; }
   .ssh-connect-log time { display: none; }
-  .ssh-connect-logs-toggle span { display: none; }
-  .ssh-connect .ssh-banner { max-height: 48px; }
+  .ssh-panel .ssh-banner { max-height: 48px; padding: 6px 8px; }
+  .ssh-panel-note { padding: 6px 8px; }
+  .ssh-connect-actions { padding: 6px 8px; }
 }
-@container (max-width: 220px) {
-  .ssh-connect-head .ssh-host-icon { display: none; }
+/* A short cell: the checklist becomes one row of marks (the status line below names the phase). */
+@container (max-height: 300px) {
+  .ssh-phases { flex-direction: row; align-items: center; gap: 5px; }
+  .ssh-phase { flex: none; min-height: 16px; }
+  .ssh-phase-label, .ssh-phase-time { display: none; }
+  .ssh-phase.session { margin: 0 0 0 4px; padding: 0 0 0 9px; border-top: 0; border-left: 1px dashed var(--border-2); }
+}
+/* A narrow cell: the buttons share the width (one under the other when they do not fit). */
+@container (max-width: 260px) {
+  .ssh-connect-actions .btn { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ssh-phase-time { display: none; }
+}
+@container (max-width: 190px) {
+  .ssh-chip { display: none; }
+}
+/* A very short cell: the header, the status and the buttons are what counts (the log toggle still opens the details). */
+@container (max-height: 220px) {
+  .ssh-phases, .ssh-clock, .ssh-panel .ssh-banner { display: none; }
+  .ssh-panel-head { padding-block: 5px; }
+}
+@container (max-height: 150px) {
+  .ssh-panel-name span, .ssh-connect-error { display: none; }
 }
 /* A maximized cell: a little more room around everything. */
 @container (min-width: 760px) and (min-height: 520px) {
-  .ssh-connect-inner { max-width: 560px; gap: 18px; }
-  .ssh-steps { --ssh-node: 40px; }
-  .ssh-step-node svg { width: 17px; height: 17px; }
-  .ssh-step-label { font-size: 12px; }
-  .ssh-connect-status { font-size: 13px; }
-  .ssh-connect-log { max-height: 220px; }
+  .ssh-panel { --ssh-mark: 18px; max-width: 460px; }
+  .ssh-panel-head { padding: 12px 12px 12px 14px; }
+  .ssh-chip { width: 30px; height: 30px; border-radius: 7px; font-size: 12px; }
+  .ssh-panel-name strong { font-size: 13.5px; }
+  .ssh-phases { gap: 4px; padding: 10px 14px; }
+  .ssh-phase { font-size: 12.5px; min-height: 24px; }
+  .ssh-panel-status { padding: 11px 14px; }
+  .ssh-panel-status-text strong { font-size: 12.5px; }
+  .ssh-connect-log { max-height: 220px; padding: 8px 14px; }
+  .ssh-connect-actions { padding: 9px 12px; }
+}
+/* A host key or login question needs the room in a grid cell: the checklist steps aside while it is open (the status line stays). */
+@container (max-height: 520px) {
+  .ssh-connect:has(.ssh-connect-prompt) .ssh-phases { display: none; }
 }

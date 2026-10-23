@@ -563,13 +563,15 @@ describe('Redis: Pub/Sub', () => {
     expect((h.port as unknown as PortMsg[]).some((m) => m.t === 'redisPubSubState' && m.sessionId === id && m.state?.state === 'idle')).toBe(true);
   });
 
+  // The first flush waits 1.5 s, so all 60 messages are published before any leaves the buffer, also on a slow runner
+  // (with 200 ms a flush in the middle of the flood made room and more than 20 arrived).
   it('caps the buffered messages and reports the drops; big payloads arrive cut', async () => {
     const s = await server();
-    const h = harness({ redisLimits: { pubsubBuffer: 20, pubsubBatch: 5, pubsubFlushMs: 200, pubsubPayloadBytes: 4, scanBudgetMs: 5000 } });
+    const h = harness({ redisLimits: { pubsubBuffer: 20, pubsubBatch: 5, pubsubFlushMs: 1500, pubsubPayloadBytes: 4, scanBudgetMs: 5000 } });
     const id = await h.openRedis(s);
     await h.rv(id, { kind: 'subscribe', channels: ['flood'] });
     await Promise.all(Array.from({ length: 60 }, (_, i) => h.r(id, { kind: 'publish', channel: 'flood', message: `message ${i}` })));
-    await waitFor(() => ((h.port as unknown as PortMsg[]).filter((m) => m.t === 'redisPubSub').reduce((n, m) => n + m.messages!.length + m.dropped!, 0)) === 60, 10_000);
+    await waitFor(() => ((h.port as unknown as PortMsg[]).filter((m) => m.t === 'redisPubSub').reduce((n, m) => n + m.messages!.length + m.dropped!, 0)) === 60, 15_000);
     const batches = (h.port as unknown as PortMsg[]).filter((m) => m.t === 'redisPubSub');
     const delivered = batches.reduce((n, m) => n + m.messages!.length, 0);
     const dropped = batches.reduce((n, m) => n + m.dropped!, 0);
@@ -578,7 +580,7 @@ describe('Redis: Pub/Sub', () => {
     expect(batches.every((b) => b.messages!.length <= 5)).toBe(true);
     expect(batches[0].messages![0].payload).toEqual({ data: 'mess', bytes: 9, truncated: true });
     expect((await h.rv<RedisPubSubState>(id, { kind: 'pubsubState' })).dropped).toBe(40);
-  });
+  }, 25_000);
 
   it('the subscriber reconnects (reported) and resubscribes; closing the session closes it', async () => {
     const s = await server();

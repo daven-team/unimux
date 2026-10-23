@@ -2,7 +2,7 @@
 // 1.0.3), address, user, password (kept in the DB vault; the form only says whether one is saved), database or DB index, TLS,
 // the SSH tunnel through a saved host, read-only and the statement timeout. "Testuj połączenie" connects with the typed values (login questions appear here) and says how it went.
 import { useMemo, useState } from 'react';
-import { DB_DEFAULT_PORT, DB_TLS_MODES, dbConnectionToDraft, dbTlsModeLabel, validateDbDraft, type DbConnectionDraft, type DbDraftField, type DbKind, type DbPasswordChange, type DbTestResult, type DbTlsMode } from '../../../../shared/db';
+import { DB_DEFAULT_PORT, DB_TLS_MODES, dbConnectionToDraft, dbKindLabel, isSqlKind, dbTlsModeLabel, validateDbDraft, type DbConnectionDraft, type DbDraftField, type DbKind, type DbPasswordChange, type DbTestResult, type DbTlsMode } from '../../../../shared/db';
 import type { MessageKey } from '../../../../shared/i18n';
 import { dbErrorMessage, useDbStore } from '../../db/dbClient';
 import { useI18n } from '../../i18n';
@@ -38,7 +38,10 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
     kind,
     port: draft.port === String(DB_DEFAULT_PORT[draft.kind]) || !draft.port ? String(DB_DEFAULT_PORT[kind]) : draft.port,
     sshDbPort: draft.sshDbPort === String(DB_DEFAULT_PORT[draft.kind]) || !draft.sshDbPort ? String(DB_DEFAULT_PORT[kind]) : draft.sshDbPort,
-    user: kind === 'redis' && draft.user === 'postgres' ? '' : kind === 'postgres' && !draft.user ? 'postgres' : draft.user,
+    // The defaults of one kind become those of the other; what the user typed stays.
+    user: kind === 'redis' && (draft.user === 'postgres' || draft.user === 'root') ? '' : kind === 'postgres' && (!draft.user || draft.user === 'root') ? 'postgres'
+      : kind === 'mysql' && (!draft.user || draft.user === 'postgres') ? 'root' : draft.user,
+    database: kind === 'mysql' && draft.database === 'postgres' ? '' : kind === 'postgres' && !draft.database ? 'postgres' : draft.database,
     tls: kind === 'redis' && draft.tls === 'prefer' ? 'disable' : draft.tls,
   });
   const field = (name: DbDraftField) => errors[name] && <div className="ssh-error" role="alert">{tr(errors[name]!)}</div>;
@@ -95,6 +98,7 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
             <input className="input grow" data-field="name" value={draft.name} maxLength={80} placeholder={draft.sshHostId ? draft.sshDbHost : draft.host} onChange={(e) => set({ name: e.target.value })} />
             <Select className="select db-kind-select" value={draft.kind} data-field="kind" aria-label={tr('Typ')} disabled={!!connection} onChange={(e) => setKind(e.target.value as DbKind)}>
               <option value="postgres">PostgreSQL</option>
+              <option value="mysql">{connection?.kind === 'mysql' ? dbKindLabel(connection) : 'MySQL / MariaDB'}</option>
               <option value="redis">Redis</option>
             </Select>
           </div>
@@ -148,9 +152,10 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
           </div>
           {locked && <><span /><span className="ssh-card-hint">{tr('Nie można odczytać tego sekretu na tym komputerze. Usuń go i dodaj ponownie.')}</span></>}
           {vault?.storage === 'unavailable' && <><span /><span className="ssh-card-hint">{tr('Bezpieczne przechowywanie haseł jest niedostępne na tym komputerze - hasło nie zostanie zapisane')}</span></>}
-          {draft.kind === 'postgres' ? (<>
+          {isSqlKind(draft.kind) ? (<>
             <span className="db-label">{tr('Baza danych')}</span>
-            <div className="db-line"><input className="input grow" data-field="database" value={draft.database} spellCheck={false} placeholder="postgres" onChange={(e) => set({ database: e.target.value })} /></div>
+            <div className="db-line"><input className="input grow" data-field="database" value={draft.database} spellCheck={false} placeholder={draft.kind === 'mysql' ? tr('opcjonalnie') : 'postgres'}
+              title={draft.kind === 'mysql' ? tr('Puste: wszystkie bazy serwera, bez domyślnej') : undefined} onChange={(e) => set({ database: e.target.value })} /></div>
             {errors.database && <><span />{field('database')}</>}
           </>) : (<>
             <span className="db-label">{tr('Numer bazy')}</span>
@@ -189,10 +194,11 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
           <span />
           <label className="check"><input type="checkbox" data-field="readOnly" checked={draft.readOnly} onChange={(e) => set({ readOnly: e.target.checked })} />{tr('Tylko do odczytu')}</label>
           <span /><span className="ssh-card-hint">{tr('Bez edycji danych i bez zapytań zmieniających dane (chyba że jednorazowo na to pozwolisz).')}</span>
-          {draft.kind === 'postgres' && (<>
+          {isSqlKind(draft.kind) && (<>
             <span className="db-label">{tr('Limit czasu zapytania (s)')}</span>
             <div className="db-line"><input className="input db-port" data-field="statementTimeout" value={draft.statementTimeout} inputMode="decimal" placeholder={tr('serwera')} onChange={(e) => set({ statementTimeout: e.target.value })} /></div>
             {errors.statementTimeout && <><span />{field('statementTimeout')}</>}
+            {draft.kind === 'mysql' && <><span /><span className="ssh-card-hint">{tr('MySQL ogranicza czas tylko zapytań SELECT; MariaDB wszystkich.')}</span></>}
           </>)}
         </div>
 

@@ -281,7 +281,7 @@ try {
   await click('#terminal-view');
   await until(() => evaluate('!!document.querySelector(".ssh-view")'), 'SSH view');
   await evaluate(`(() => { const group = [...document.querySelectorAll('.ssh-view-group')].find((g) => g.querySelector('.ssh-group-head')?.textContent.includes('production')); if (!group) throw new Error('Missing production group'); group.querySelector('.ssh-group-open').click(); })()`);
-  await until(() => evaluate(`(() => { const ssh = [...document.querySelectorAll('.cell')].filter(c => c.querySelector('.cell-head .ssh-host')); return ssh.length === 3 && ssh.every(c => !c.querySelector('.ssh-card') && !c.querySelector('.ssh-bar') && !c.querySelector('.status-text.ssh')); })()`), 'three SSH sessions');
+  await until(() => evaluate(`(() => { const ssh = [...document.querySelectorAll('.cell')].filter(c => c.querySelector('.cell-head .ssh-host')); return ssh.length === 3 && ssh.every(c => !c.querySelector('.ssh-card') && !c.querySelector('.status-text.ssh')); })()`), 'three SSH sessions');
   await click('#terminal-view');
   await until(() => evaluate('document.querySelectorAll(".ssh-tile .ssh-state.connected").length === 3'), 'connected tiles');
   await evaluate(`(() => { const tile = [...document.querySelectorAll('.ssh-tile[data-host-id]')].find((t) => t.textContent.includes('web-1')); tile.closest('.ssh-host-card').querySelector('.ssh-host-edit').click(); })()`);

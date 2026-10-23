@@ -4,7 +4,7 @@
 import { layoutForCount as layoutFor } from '../../shared/layout';
 import type { AppState } from '../../shared/types';
 import { activeProject, activeTab, addCell, ensureShellProfile, findCell, removeSshHost } from '../../shared/state';
-import { connectingNotice, hostEndpoint, promptNeedsToast, reconnectAllTargets, reconnectAtStartCells, restoredPromptToasts, sshCellStart, sshCellVisible, sshStartEffects, type SshStartDecision, sshGridName, sshNotice, sshSessionEnded, type SshPrompt, type SshSessionState } from '../../shared/ssh';
+import { hostEndpoint, promptNeedsToast, reconnectAllTargets, reconnectAtStartCells, restoredPromptToasts, sshCellStart, sshCellVisible, sshStartEffects, type SshStartDecision, sshGridName, sshSessionEnded, type SshPrompt, type SshSessionState } from '../../shared/ssh';
 import { menuHosts, sectionChange, sectionForDetail, type SshDetail } from '../../shared/sshView';
 import { createProject, ensureTerminal, focusCell, openTab } from './actions';
 import { gridCovered } from './splitView';
@@ -84,14 +84,9 @@ function onSession(state: SshSessionState): void {
   const previous = useSshStore.getState().sessions[state.cellId]?.phase;
   useSshConnectStore.getState().apply(state.cellId, { kind: 'session', at: Date.now(), state, ctx: connectContext(state.hostId) });
   useSshStore.getState().setSession(state);
-  // I2: a network drop or a close while vim or htop ran leaves the alternate screen, so the notice below stays readable.
+  // I2: a network drop or a close while vim or htop ran leaves the alternate screen and the remote modes. The terminal gets no
+  // status line of the app: from now on the cell card covers it and says what happened (1.0.5).
   if (sshSessionEnded(previous, state.phase)) terminals.resetSshModes(state.cellId);
-  const notice = sshNotice(previous, state, sshContext(state.hostId));
-  if (!notice) return;
-  const text = notice.key === '[SSH · błąd: {reason}]'
-    ? tr(notice.key, { reason: tr(notice.reason.key, notice.reason.params) })
-    : tr(notice.key, 'params' in notice ? notice.params : undefined);
-  terminals.writeNotice(state.cellId, text);
 }
 
 function onPrompt(cellId: string, prompt: SshPrompt | null): void {
@@ -164,19 +159,18 @@ export async function connectCell(cellId: string): Promise<void> {
   const ref = found?.cell.ssh;
   if (!ref) return;
   ensureTerminal(cellId);
-  // A second click while the first request is still connecting writes no second line (main answers it without an event, R13).
+  // A second click while the first request is still connecting starts nothing new (main answers it without an event, R13).
   const repeated = useSshStore.getState().sessions[cellId]?.phase === 'connecting';
-  terminals.prepareReconnect(cellId);
   if (!repeated) {
-    // Written before the request leaves, so it always precedes the server greeting (W4).
-    const notice = connectingNotice(sshContext(ref.hostId));
-    terminals.writeNotice(cellId, tr(notice.key, notice.params));
+    // A new attempt starts on a clean terminal (before the request leaves, so it always precedes the server greeting, W4):
+    // nothing of an earlier session or attempt shows once the shell opens; the card covers the cell until then.
+    terminals.prepareReconnect(cellId);
     useSshConnectStore.getState().apply(cellId, { kind: 'start', at: Date.now(), ctx: connectContext(ref.hostId) });
     useSshStore.getState().setSession({ cellId, hostId: ref.hostId, phase: 'connecting', since: Date.now() });
   }
   const { cols, rows } = terminals.size(cellId);
   const result = await window.mc.ssh.connect({ cellId, hostId: ref.hostId, cols, rows });
-  // A refusal before any session event: the same path as an event, so the "[SSH · błąd: ...]" line is written too.
+  // A refusal before any session event: the same path as an event, so the card shows the failure.
   if (!result.ok) onSession({ cellId, hostId: ref.hostId, phase: 'error', error: result.error, since: Date.now() });
   else terminals.syncSize(cellId);
 }

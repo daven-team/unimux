@@ -1,6 +1,5 @@
-// Texts of the SSH connecting card (1.0.4). Each row: English, German, Spanish, French, Portuguese. Polish is the key.
+// Texts of the SSH connecting card (1.0.4, phases 1.0.5). Each row: English, German, Spanish, French, Portuguese. Polish is the key.
 export const sshConnectMessages = {
-  'Łączenie': ['Connecting', 'Verbinden', 'Conectando', 'Connexion', 'A ligar'],
   'Logowanie': ['Signing in', 'Anmelden', 'Iniciando sesión', 'Connexion au compte', 'A iniciar sessão'],
   'Pokaż logi': ['Show logs', 'Protokoll anzeigen', 'Mostrar registro', 'Afficher le journal', 'Mostrar registo'],
   'Ukryj logi': ['Hide logs', 'Protokoll ausblenden', 'Ocultar registro', 'Masquer le journal', 'Ocultar registo'],
@@ -23,4 +22,11 @@ export const sshConnectMessages = {
   'Podaj dane logowania': ['Enter your sign-in details', 'Anmeldedaten eingeben', 'Introduce tus datos de inicio de sesión', 'Saisissez vos identifiants', 'Introduza os dados de início de sessão'],
   'Sprawdzanie klucza hosta…': ['Checking the host key…', 'Hostschlüssel wird geprüft…', 'Comprobando la clave del host…', 'Vérification de la clé d’hôte…', 'A verificar a chave do host…'],
   'Logowanie jako {user} i otwieranie powłoki…': ['Signing in as {user} and opening the shell…', 'Anmeldung als {user} und Öffnen der Shell…', 'Iniciando sesión como {user} y abriendo el shell…', 'Connexion en tant que {user} et ouverture du shell…', 'A iniciar sessão como {user} e a abrir a shell…'],
+  'Połączenie z {endpoint}': ['Connect to {endpoint}', 'Verbindung zu {endpoint}', 'Conexión con {endpoint}', 'Connexion à {endpoint}', 'Ligação a {endpoint}'],
+  'Połączenie z serwerem': ['Connect to the server', 'Verbindung zum Server', 'Conexión con el servidor', 'Connexion au serveur', 'Ligação ao servidor'],
+  'Weryfikacja klucza hosta': ['Verify the host key', 'Hostschlüssel prüfen', 'Verificar la clave del host', 'Vérifier la clé d’hôte', 'Verificar a chave do host'],
+  'Otwarcie powłoki': ['Open the shell', 'Shell öffnen', 'Abrir el shell', 'Ouvrir le shell', 'Abrir a shell'],
+  'Sesja trwała {duration}': ['Session lasted {duration}', 'Sitzung dauerte {duration}', 'La sesión duró {duration}', 'La session a duré {duration}', 'A sessão durou {duration}'],
+  'Sesja zakończona': ['Session ended', 'Sitzung beendet', 'Sesión finalizada', 'Session terminée', 'Sessão terminada'],
+  'Czas próby połączenia': ['Time of the connection attempt', 'Dauer des Verbindungsversuchs', 'Tiempo del intento de conexión', 'Durée de la tentative de connexion', 'Duração da tentativa de ligação'],
 } as const;

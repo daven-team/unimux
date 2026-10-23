@@ -10,6 +10,7 @@ import { missingCardCli } from '../../../shared/cliStatus';
 import { sshHeaderName, sshPhaseLabel, userAtEndpoint } from '../../../shared/ssh';
 import { resolveSshTheme } from '../../../shared/sshThemes';
 import { useSshStore } from '../sshStore';
+import { useSshConnectStore } from '../sshConnectStore';
 import { disconnectCell, openSshView, reconnectCell, sshContext, sshHostMenuItems } from '../ssh';
 import { SshCellCard } from './ssh/SshCellCard';
 import { SshAutocomplete } from './ssh/SshAutocomplete';
@@ -61,7 +62,9 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const host = useStore((st) => (ssh ? st.s.sshHosts.find((h) => h.id === ssh.hostId) : undefined));
   const sshSession = useSshStore((st) => st.sessions[cell.id]);
   const sshPrompt = useSshStore((st) => st.prompts[cell.id]);
-  const phaseLabel = ssh ? sshPhaseLabel(sshSession, sshPrompt, sshContext(ssh.hostId)) : null;
+  // A cancelled attempt ends like a closed session; the header says what the card says ("Anulowano").
+  const sshCancelled = useSshConnectStore((st) => !!ssh && st.attempts[cell.id]?.cancelled === true && sshSession?.phase !== 'connected');
+  const phaseLabel = ssh ? (sshCancelled && !sshPrompt ? { key: 'Anulowano' as const } : sshPhaseLabel(sshSession, sshPrompt, sshContext(ssh.hostId))) : null;
   // SSH cells draw in their colour theme: the host's own, else the one of Settings > SSH (local terminals keep the app look).
   const sshThemeSetting = useStore((st) => (ssh ? st.s.settings.sshTheme : undefined));
   const sshTheme = ssh ? resolveSshTheme(host?.theme, sshThemeSetting) : undefined;

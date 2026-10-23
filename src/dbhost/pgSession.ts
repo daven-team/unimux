@@ -65,6 +65,8 @@ export function toValue(v: unknown): DbValue {
 }
 
 const cursorState = (cursor: Cursor): string | undefined => (cursor as unknown as { state?: string }).state;
+/** Backend messages that answer something the client sent (not the ones the server sends on its own, like notices). */
+const ANSWERS = new Set(['parseComplete', 'bindComplete', 'closeComplete', 'noData', 'portalSuspended', 'emptyQuery', 'rowDescription', 'parameterDescription', 'dataRow', 'commandComplete', 'errorMessage', 'copyInResponse', 'copyOutResponse', 'copyData', 'copyDone']);
 
 interface Reader { cursor: Cursor; fields: FieldLike[] | null; columnsSent: boolean; buffered: unknown[][]; done: boolean; batch: number; result: { command?: string; rowCount?: number | null } }
 interface OpenResult { queryId: string; index: number; reader: Reader; sent: number; timer: NodeJS.Timeout | null }
@@ -94,10 +96,26 @@ export class PgSession {
    * (PGlite sends one more than Postgres), so the next statement waits for drain() first.
    */
   private dirty = false;
+  /** The server answered something (not just a ReadyForQuery) since the last ReadyForQuery the client saw. */
+  private heard = false;
   private gone = false;
 
   constructor(readonly client: Client, private readonly opts: PgSessionOptions, private readonly out: PgSessionOut) {
-    const con = (client as unknown as { connection: { on(e: string, f: (m: { status?: string }) => void): void } }).connection;
+    const con = (client as unknown as { connection: { on(e: string, f: (m: { status?: string }) => void): void; emit(event: string | symbol, ...args: unknown[]): boolean } }).connection;
+    // A ReadyForQuery right after another one, with no answer between them, ends nothing the client sent: Postgres answers
+    // every statement (and a cursor's every Bind, Execute and Close) before its ReadyForQuery. PGlite's socket server sends an
+    // extra one for a read without a Sync, so a cursor's Close and Sync in two reads (a slow machine, a proxy) end the cursor
+    // at the Close and the Sync's ReadyForQuery comes later, when the client has sent its next statement: taken as that
+    // statement's end, it ended it early and its real answer then broke the connection. Such a ReadyForQuery is kept from the
+    // client; the transaction state it carries is the same as that of the one before it.
+    const emit = con.emit;
+    con.emit = (event: string | symbol, ...args: unknown[]): boolean => {
+      if (event === 'readyForQuery') {
+        if (!this.heard) return true;
+        this.heard = false;
+      } else if (typeof event === 'string' && ANSWERS.has(event)) this.heard = true;
+      return emit.call(con, event, ...args);
+    };
     con.on('errorMessage', () => { this.dirty = true; });
     con.on('readyForQuery', (m) => {
       const tx: DbTxStatus = m.status === 'T' ? 'transaction' : m.status === 'E' ? 'failed' : 'idle';
@@ -113,10 +131,12 @@ export class PgSession {
   private now(): number { return this.opts.now?.() ?? Date.now(); }
 
   /**
-   * Waits until the exchange of the last server error is over before anything else goes to the server. Postgres ends an
-   * error with one ReadyForQuery (for the Sync); PGlite's socket server sends one more right after the error, and from a server
-   * in another process it can come in a read of its own. Taken as the end of the next statement, it ended that statement
-   * early and the statement's real answer then broke the connection (or went to the statement after it). So an empty query
+   * Waits until the exchange of the last server error is over before anything else goes to the server, or before anything
+   * reads the transaction state: pg rejects a statement at its ErrorResponse, and the ReadyForQuery with the state after the
+   * error (failed inside a transaction) can come in a later read, so without the wait a run reported the state from before.
+   * Postgres ends an error with one ReadyForQuery (for the Sync); PGlite's socket server sends one more right after the error,
+   * and from a server in another process it can come in a read of its own. Taken as the end of the next statement, it ended
+   * that statement early and the statement's real answer then broke the connection (or went to the statement after it). So an empty query
    * goes out as a marker and every message up to its answer is kept from the client: the ReadyForQuery after the marker's
    * EmptyQueryResponse (or error) is the only one the client sees, whatever the server sent before it.
    */
@@ -125,6 +145,7 @@ export class PgSession {
     this.dirty = false;
     const con = (this.client as unknown as { connection: { emit(event: string | symbol, ...args: unknown[]): boolean; query(text: string): void } }).connection;
     const emit = con.emit;
+    const passed = () => { this.heard = true; };
     await new Promise<void>((resolve) => {
       let answered = false;
       let finished = false;
@@ -139,6 +160,8 @@ export class PgSession {
         if (event === 'readyForQuery') {
           if (!answered) return true;
           finish();
+          // The marker's answer was kept from the client: this ReadyForQuery is not a stray one.
+          passed();
           return emit.call(con, event, ...args);
         }
         if (event === 'emptyQuery' || event === 'errorMessage' || event === 'commandComplete' || event === 'rowDescription' || event === 'dataRow') { answered = true; return true; }
@@ -227,6 +250,7 @@ export class PgSession {
 
   /** Runs the queued restores once nothing holds the connection (no transaction, no cursor); a failed one ends the session. */
   private async settle(): Promise<void> {
+    await this.drain();
     if (this.tx !== 'idle' || this.open || !this.restore.length) return;
     const restore = this.restore;
     this.restore = [];
@@ -236,6 +260,7 @@ export class PgSession {
 
   /** Re-asserts the session settings a statement may have changed (set_config in a SELECT or a page filter). */
   private async reassert(): Promise<void> {
+    await this.drain();
     if (this.tx !== 'idle' || this.open || this.overrideActive) return;
     if (this.opts.readOnly) await this.must('SET default_transaction_read_only = on');
   }
@@ -645,6 +670,7 @@ export class PgSession {
   /** All edits in one transaction; an UPDATE or DELETE that does not hit exactly one row rolls everything back. */
   private async applyEdits(req: DbEditRequest): Promise<DbResult<{ affected: number }>> {
     if (this.opts.readOnly) return fail('readOnly');
+    await this.drain();
     if (this.tx !== 'idle') return fail('inTransaction');
     const built = await this.buildEdits(req);
     if ('error' in built) return built.error;

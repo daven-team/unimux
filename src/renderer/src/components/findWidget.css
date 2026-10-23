@@ -1,0 +1,58 @@
+/* The find widget inside one file (FindWidget.tsx): the dark box of the menus floating at the top right over the text. */
+.find-widget {
+  position: absolute; top: 6px; right: 18px; z-index: 30; display: flex; align-items: stretch; gap: 2px;
+  max-width: calc(100% - 28px); box-sizing: border-box; padding: 4px 5px 4px 4px;
+  background: #191919; border: 1px solid #343434; border-radius: 7px; box-shadow: 0 8px 28px #0009;
+  color: var(--text); font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; font-size: 12px; line-height: normal;
+  animation: find-widget-in .12s ease-out;
+}
+@keyframes find-widget-in { from { opacity: 0; transform: translateY(-6px); } }
+@media (prefers-reduced-motion: reduce) { .find-widget { animation: none; } }
+.find-rows { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.find-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
+
+/* The chevron that opens the replace row: as tall as both rows. */
+.find-expand {
+  flex: none; width: 18px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px;
+  background: transparent; color: var(--text-2); cursor: pointer;
+}
+.find-expand:hover { background: var(--btn-ghost-hover); color: var(--text); }
+.find-expand span { display: grid; transition: transform .12s; }
+.find-expand span.open { transform: rotate(90deg); }
+.find-expand:focus-visible, .find-toggle:focus-visible, .find-button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+.find-field {
+  display: flex; align-items: center; gap: 1px; width: 250px; min-width: 120px; flex: 0 1 auto; height: 26px; box-sizing: border-box;
+  padding: 0 3px 0 0; background: var(--bg); border: 1px solid var(--border-2); border-radius: 5px; margin-right: 4px;
+}
+.find-field:focus-within { border-color: #2b5a99; }
+.find-field.no-match, .find-field.no-match:focus-within { border-color: #7a3434; }
+.find-input {
+  flex: 1; min-width: 0; height: 100%; padding: 0 7px; border: 0; outline: none; background: transparent; color: var(--text);
+  font: inherit; font-size: 12.5px;
+}
+.find-input::placeholder { color: var(--muted); }
+
+.find-toggle {
+  flex: none; width: 21px; height: 19px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: var(--text-2); cursor: pointer;
+}
+.find-toggle:hover { background: var(--btn-ghost-hover); color: var(--text); }
+.find-toggle.on { background: var(--accent-soft); border-color: #3b82f670; color: var(--accent-text); }
+.find-glyph { font-family: 'Cascadia Mono', Consolas, Menlo, monospace; font-size: 11px; font-weight: 600; letter-spacing: -.3px; line-height: 1; }
+.find-glyph-word { padding: 0 1px 1px; border-bottom: 1.5px solid currentColor; }
+
+.find-count {
+  flex: none; min-width: 66px; padding: 0 6px 0 2px; color: var(--text-2); font-size: 11.5px; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.find-count.empty { color: #f0a3a3; }
+.find-button.btn.icon { width: 24px; height: 24px; flex: none; }
+.find-text-button.btn.small { height: 24px; padding: 0 8px; flex: none; color: var(--text-2); }
+
+/* Matches in the rendered previews (CSS Custom Highlight API, see MarkdownPreview.tsx); the editor has the same colours. */
+::highlight(mc-find) { background-color: #d8a5444a; }
+::highlight(mc-find-current) { background-color: #e2a33ccc; color: #16130c; }
+
+/* A preview with find: the scroller fills it, the widget floats over the scroller's top right corner. */
+.find-host { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }

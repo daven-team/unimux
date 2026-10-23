@@ -21,6 +21,8 @@ import { c, cpp, java, csharp } from '@codemirror/legacy-modes/mode/clike';
 import { standardSQL } from '@codemirror/legacy-modes/mode/sql';
 import { toml } from '@codemirror/legacy-modes/mode/toml';
 import { minimalChange } from '../../../shared/textDiff';
+import { editorFind, openEditorFind } from './editorFind';
+import type { FileFinder } from './MarkdownPreview';
 import './file-workspace.css';
 
 /** .env files: `# comments`, `export KEY=value`, quoted values and ${VAR} references. */
@@ -115,11 +117,15 @@ export const theme = EditorView.theme({
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': { backgroundColor: '#ffffff20' },
   '.cm-matchingBracket': { backgroundColor: '#ffffff18', outline: '1px solid #ffffff30' },
   '.cm-panels, .cm-tooltip': { backgroundColor: '#202020', color: '#d6d6d6', borderColor: '#393939' },
-  '.cm-searchMatch': { backgroundColor: '#bda35a30' },
-  '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: '#bda35a55' },
+  // The find widget (editorFind.tsx) floats at the top right over the text instead of pushing it down like a panel.
+  '.cm-panels.cm-panels-top': { position: 'absolute', top: '0', left: 'auto', right: '0', maxWidth: '100%', zIndex: '250', backgroundColor: 'transparent', border: 'none' },
+  '.cm-find-panel .find-widget': { position: 'relative', top: 'auto', right: 'auto', maxWidth: 'none', margin: '6px 18px 0 10px' },
+  '.cm-searchMatch': { backgroundColor: '#d8a5444a', borderRadius: '2px' },
+  '.cm-searchMatch.cm-searchMatch-selected, .cm-searchMatch-selected .cm-searchMatch': { backgroundColor: '#e2a33ccc', color: '#16130c', boxShadow: '0 0 0 1px #e2a33c' },
+  '.cm-searchMatch-selected *': { color: '#16130c' },
 }, { dark: true });
 
-export function CodeEditor({ id, path, text, wrap, onChange }: { id: string; path: string; text: string; wrap: boolean; onChange: (text: string) => void }) {
+export function CodeEditor({ id, path, text, wrap, onChange, finder }: { id: string; path: string; text: string; wrap: boolean; onChange: (text: string) => void; finder?: FileFinder }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const changed = useRef(onChange);
@@ -130,7 +136,7 @@ export function CodeEditor({ id, path, text, wrap, onChange }: { id: string; pat
   useEffect(() => {
     emitted.current = null;
     const editor = new EditorView({ parent: host.current!, state: EditorState.create({ doc: text, extensions: [
-      basicSetup, theme, colors, languageForFile(path), indentUnit.of('  '), keymap.of([indentWithTab]),
+      editorFind(), basicSetup, theme, colors, languageForFile(path), indentUnit.of('  '), keymap.of([indentWithTab]),
       EditorView.contentAttributes.of({ 'aria-label': path, spellcheck: 'false' }),
       wrapping.current.of(wrap ? EditorView.lineWrapping : []),
       EditorView.updateListener.of(update => { if (update.docChanged) { const value = update.state.doc.toString(); emitted.current = value; changed.current(value); } }),
@@ -143,6 +149,12 @@ export function CodeEditor({ id, path, text, wrap, onChange }: { id: string; pat
   }, [path]);
   // A double click on the file in the tree when its editor is already on screen (files.ts focusFileEditor).
   useEffect(() => registerEditorFocus(id, () => view.current?.focus()), [id]);
+  // Ctrl+F with the keyboard outside the text (the toolbar, the tab): FileEditor asks the editor to open its find widget.
+  useEffect(() => {
+    if (!finder) return;
+    finder.current = (replace) => { if (view.current) openEditorFind(view.current, replace); };
+    return () => { finder.current = null; };
+  }, [finder]);
   useEffect(() => {
     const editor = view.current;
     if (!editor || text === emitted.current) return;
