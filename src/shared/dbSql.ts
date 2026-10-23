@@ -10,13 +10,19 @@ export class DbSqlError extends Error {
 
 // ── quoting ─────────────────────────────────────────────────────────────────
 
-/** Any name as a quoted identifier ("My ""odd"" table"); a NUL or an empty or overlong name is refused. */
-export function quoteIdent(name: string): string {
+/** The SQL a connection speaks: Postgres, or MySQL / MariaDB (backtick identifiers, backslash escapes, # comments, DELIMITER). */
+export type SqlDialect = 'postgres' | 'mysql';
+
+/**
+ * Any name as a quoted identifier: "My ""odd"" table" (Postgres) or `My ``odd`` table` (MySQL, whatever sql_mode says); a NUL
+ * or an empty or overlong name is refused.
+ */
+export function quoteIdent(name: string, dialect: SqlDialect = 'postgres'): string {
   if (typeof name !== 'string' || !name || name.length > DB_LIMITS.identifier || name.includes('\0')) throw new DbSqlError('invalid');
-  return `"${name.replace(/"/g, '""')}"`;
+  return dialect === 'mysql' ? `\`${name.replace(/`/g, '``')}\`` : `"${name.replace(/"/g, '""')}"`;
 }
 
-export const qualifiedName = (schema: string, name: string): string => `${quoteIdent(schema)}.${quoteIdent(name)}`;
+export const qualifiedName = (schema: string, name: string, dialect: SqlDialect = 'postgres'): string => `${quoteIdent(schema, dialect)}.${quoteIdent(name, dialect)}`;
 
 /** A string literal for display (standard_conforming_strings on): quotes doubled; a NUL cannot be shown. */
 export function quoteLiteral(value: string | null): string {
@@ -37,7 +43,8 @@ const DOLLAR_TAG = /^\$(?:[A-Za-z_\u0080-￿][A-Za-z0-9_\u0080-￿]*)?\$/;
  * Splits a script at semicolons outside of quotes ('...', E'...', "..."), dollar quoting ($$...$$, $tag$...$tag$), comments
  * (--, nested slash-star) and BEGIN ATOMIC ... END bodies. Statements that hold only comments are left out.
  */
-export function splitSql(text: string): SqlSpan[] {
+export function splitSql(text: string, dialect: SqlDialect = 'postgres'): SqlSpan[] {
+  if (dialect === 'mysql') return splitMysql(text);
   const spans: SqlSpan[] = [];
   const n = text.length;
   let i = 0;
@@ -119,12 +126,107 @@ export function splitSql(text: string): SqlSpan[] {
   return spans;
 }
 
+const MYSQL_WORD = /[A-Za-z0-9_$\u0080-￿]/;
+const MYSQL_BLOCK_ENDS = new Set(['IF', 'LOOP', 'WHILE', 'REPEAT']);
+
+/**
+ * The MySQL / MariaDB split: semicolons outside of quotes ('...' and "..." with backslash escapes, `...`), comments (-- with a
+ * blank after it, #, slash-star; the executable /*! ... *\/ ones are code), the BEGIN ... END bodies of CREATE PROCEDURE /
+ * FUNCTION / TRIGGER / EVENT and of MariaDB's BEGIN NOT ATOMIC, and the mysql client's DELIMITER lines (they change the
+ * separator and are not statements themselves, so dumps run as they are).
+ */
+function splitMysql(text: string): SqlSpan[] {
+  const spans: SqlSpan[] = [];
+  const n = text.length;
+  let i = 0;
+  let delimiter = ';';
+  let contentStart = -1;
+  let contentEnd = -1;
+  let first = '';
+  let routine = false;
+  let depth = 0;
+  let caseDepth = 0;
+  let prevWord = '';
+  const mark = (from: number, to: number) => { if (contentStart < 0) contentStart = from; contentEnd = to; };
+  const flush = () => {
+    if (contentStart >= 0) spans.push({ start: contentStart, end: contentEnd, text: text.slice(contentStart, contentEnd) });
+    contentStart = contentEnd = -1;
+    first = prevWord = '';
+    routine = false;
+    depth = caseDepth = 0;
+  };
+  const nextWord = (from: number): string => /^\s*([A-Za-z_]+)/.exec(text.slice(from, from + 64))?.[1]?.toUpperCase() ?? '';
+  while (i < n) {
+    const c = text[i];
+    const next = text[i + 1];
+    if (c === '-' && next === '-' && (i + 2 >= n || /\s/.test(text[i + 2]))) { const nl = text.indexOf('\n', i); i = nl < 0 ? n : nl + 1; continue; }
+    if (c === '#') { const nl = text.indexOf('\n', i); i = nl < 0 ? n : nl + 1; continue; }
+    if (c === '/' && next === '*') {
+      const close = text.indexOf('*/', i + 2);
+      const end = close < 0 ? n : close + 2;
+      // /*!40101 SET NAMES utf8 *\/ and /*M!100100 ... *\/ run on the server: they are part of the statement.
+      if (text[i + 2] === '!' || (text[i + 2] === 'M' && text[i + 3] === '!')) mark(i, end);
+      i = end;
+      continue;
+    }
+    if (/\s/.test(c)) { i++; continue; }
+    if (contentStart < 0 && /^delimiter\s/i.test(text.slice(i, i + 10))) {
+      const nl = text.indexOf('\n', i);
+      const line = text.slice(i + 9, nl < 0 ? n : nl).trim();
+      const token = line.split(/\s+/)[0];
+      if (token) delimiter = token;
+      i = nl < 0 ? n : nl + 1;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') {
+      const start = i;
+      i++;
+      while (i < n) {
+        if (c !== '`' && text[i] === '\\') { i += 2; continue; }
+        if (text[i] === c) { if (text[i + 1] === c) { i += 2; continue; } i++; break; }
+        i++;
+      }
+      mark(start, Math.min(i, n));
+      prevWord = '';
+      continue;
+    }
+    if (depth === 0 && text.startsWith(delimiter, i)) { flush(); i += delimiter.length; continue; }
+    if (IDENT_START.test(c)) {
+      const start = i;
+      // A word ends at the DELIMITER too ("END$$").
+      while (i < n && MYSQL_WORD.test(text[i]) && !(delimiter !== ';' && text.startsWith(delimiter, i))) i++;
+      const word = text.slice(start, i).toUpperCase();
+      mark(start, i);
+      if (!first) first = word;
+      if (first === 'CREATE' && (word === 'PROCEDURE' || word === 'FUNCTION' || word === 'TRIGGER' || word === 'EVENT')) routine = true;
+      // Bodies are only counted with the ; separator: under another DELIMITER the script says where statements end itself.
+      if (delimiter === ';') {
+        if (word === 'BEGIN' && (routine || depth > 0 || (first === 'BEGIN' && nextWord(i) === 'NOT'))) depth++;
+        else if (depth > 0 && word === 'CASE' && prevWord !== 'END') caseDepth++;
+        else if (depth > 0 && word === 'END') {
+          const after = nextWord(i);
+          if (MYSQL_BLOCK_ENDS.has(after)) { /* END IF / LOOP / WHILE / REPEAT: those blocks are not counted */ }
+          else if (after === 'CASE' || caseDepth > 0) caseDepth = Math.max(0, caseDepth - 1);
+          else depth--;
+        }
+      }
+      prevWord = word;
+      continue;
+    }
+    mark(i, i + 1);
+    prevWord = '';
+    i++;
+  }
+  flush();
+  return spans;
+}
+
 /**
  * The statement the cursor is in: the one whose text (or the semicolon right after it) contains `offset`; between
  * statements, the one before the cursor; before the first, the first. Null when the script has none.
  */
-export function statementAt(text: string, offset: number): SqlSpan | null {
-  const spans = splitSql(text);
+export function statementAt(text: string, offset: number, dialect: SqlDialect = 'postgres'): SqlSpan | null {
+  const spans = splitSql(text, dialect);
   if (!spans.length) return null;
   let before: SqlSpan | null = null;
   for (const s of spans) {
@@ -323,7 +425,7 @@ export function pageSql(input: PageSqlInput, keyColumns: readonly string[] | nul
     if (!key || !byKeyOnly || input.after.length !== key.length || input.after.some((v) => typeof v !== 'string')) throw new DbSqlError('invalid');
     params.push(...input.after);
     const op = orderCols[0].desc ? '<' : '>';
-    conditions.push(`(${key.map(quoteIdent).join(', ')}) ${op} (${key.map((_, i) => `$${i + 1}`).join(', ')})`);
+    conditions.push(`(${key.map((k) => quoteIdent(k)).join(', ')}) ${op} (${key.map((_, i) => `$${i + 1}`).join(', ')})`);
     keyset = true;
   }
   const parts = [`SELECT * FROM ${qualifiedName(input.schema, input.table)}`];

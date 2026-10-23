@@ -8,6 +8,7 @@ import { addInsert, conflictRowIndex, isDeleted, rowOriginal, txToggle, parseSta
 import { uid } from '../../../../shared/state';
 import type { SQLNamespace } from '@codemirror/lang-sql';
 import { closeFile, editFile, useFileStore, type FileDocument } from '../../files';
+import { dialectOf } from '../../db/tabs';
 import { resultError, useDbStore } from '../../db/dbClient';
 import { useShownFileId } from '../../splitView';
 import {
@@ -46,7 +47,10 @@ function TabHeader({ doc, sessionId, children }: { doc: FileDocument; sessionId:
     <div className="db-tab-head">
       <span className="db-color" style={{ background: color ?? 'var(--muted)' }} />
       <strong className="db-tab-conn">{connection?.name ?? tr('To połączenie zostało usunięte')}</strong>
-      <span className="db-tab-path">{ref.database}{ref.kind === 'table' ? ` · ${ref.schema}.${ref.table}` : ref.kind === 'ddl' ? ` · ${ref.schema}.${ref.name}` : ''}</span>
+      <span className="db-tab-path">{connection?.kind === 'mysql'
+        // A MySQL database is the schema: "shop.orders", or the SQL tab's default database (none: the whole server).
+        ? (ref.kind === 'table' ? `${ref.schema}.${ref.table}` : ref.kind === 'ddl' ? `${ref.schema}.${ref.name}` : ref.database)
+        : `${ref.database}${ref.kind === 'table' ? ` · ${ref.schema}.${ref.table}` : ref.kind === 'ddl' ? ` · ${ref.schema}.${ref.name}` : ''}`}</span>
       {(session ? session.readOnly : connection?.readOnly) && <span className="db-ro" data-field="ro" title={tr('To połączenie jest tylko do odczytu')}>RO</span>}
       {session && connection && session.readOnly !== connection.readOnly && <span className="db-meta" data-field="ro-pending" title={tr('Zmiana trybu tylko do odczytu zadziała po ponownym połączeniu')}>{tr(connection.readOnly ? 'RO po ponownym połączeniu' : 'zapis po ponownym połączeniu')}</span>}
       {session?.state === 'connected' && session.tls !== undefined && <span className={`db-tls ${session.tls ? 'on' : 'off'}`} data-field="tls"
@@ -261,7 +265,7 @@ function DbTableView({ id }: { id: string }) {
         <button className="btn small ghost" title={tr('Odśwież')} aria-label={tr('Odśwież')} data-action="refresh" onClick={() => void loadPage(id)}><RefreshIcon spinning={st.loading} /></button>
         <form className="db-where" onSubmit={(e) => { e.preventDefault(); void loadPage(id, { filter, offset: 0 }); }}>
           <span className="db-where-label">WHERE</span>
-          <input className="input mono" data-field="where" value={filter} spellCheck={false} placeholder="id > 100 AND name ILIKE '%a%'" maxLength={DB_LIMITS.filter}
+          <input className="input mono" data-field="where" value={filter} spellCheck={false} placeholder={dialectOf(ref.connectionId) === 'mysql' ? "id > 100 AND name LIKE '%a%'" : "id > 100 AND name ILIKE '%a%'"} maxLength={DB_LIMITS.filter}
             title={tr('Warunek działa w transakcji tylko do odczytu, ale nie jest piaskownicą: wpisuj tylko warunki, którym ufasz.')}
             onChange={(e) => setFilter(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape' && filter) { e.stopPropagation(); setFilter(''); void loadPage(id, { filter: '', offset: 0 }); } }} />
           {st.filter && <button type="button" className="btn small ghost" onClick={() => { setFilter(''); void loadPage(id, { filter: '', offset: 0 }); }}>{tr('Wyczyść')}</button>}
@@ -339,7 +343,7 @@ function DbSqlView({ id }: { id: string }) {
   const run = (req: SqlRunRequest, opts: { readWrite?: boolean } = {}) => {
     if (req.kind === 'script') { void runSql(id, req.text, 0, opts); return; }
     if (req.to > req.from) { void runSql(id, req.text.slice(req.from, req.to), req.from, opts); return; }
-    const span = statementAt(req.text, req.cursor);
+    const span = statementAt(req.text, req.cursor, dialectOf(ref.connectionId));
     if (!span) return;
     api.current?.select(span.start, span.end);
     void runSql(id, span.text, span.start, opts);
@@ -353,7 +357,7 @@ function DbSqlView({ id }: { id: string }) {
   useEffect(() => { const err = st.results.find((r) => r.error && r.position); if (err && !st.running) showError(err); }, [st.running]); // eslint-disable-line react-hooks/exhaustive-deps
   const overrideRun = async () => {
     // Nothing of the refused run ran (read-only is checked before the first statement): the whole run goes again, shown here.
-    const statements = splitSql(st.runText);
+    const statements = splitSql(st.runText, dialectOf(ref.connectionId));
     const listed = statements.slice(0, 8).map((s, i) => `${i + 1}. ${s.text.replace(/\s+/g, ' ').slice(0, 160)}`);
     const more = statements.length > listed.length ? `\n${tr('…i jeszcze {count}', { count: statements.length - listed.length })}` : '';
     const body = `${tr('To połączenie jest tylko do odczytu. Ten jeden raz zapytanie może zmienić dane.')}\n\n${tr('Instrukcje do uruchomienia: {count}', { count: statements.length })}\n${listed.join('\n')}${more}`;
@@ -418,7 +422,7 @@ function DbSqlView({ id }: { id: string }) {
       {st.error && <div className="db-error" role="alert" data-field="error">{st.error}</div>}
       <div className="db-sql-body" ref={body}>
         <div className="db-sql-top" style={{ flexBasis: `${split * 100}%` }}>
-          <SqlEditor text={doc.text} label={doc.name} schema={schema} onApi={(a) => { api.current = a; }}
+          <SqlEditor text={doc.text} label={doc.name} schema={schema} dialect={connectionOf(ref)?.kind === 'mysql' ? (connectionOf(ref)?.flavor === 'mariadb' ? 'mariadb' : 'mysql') : 'postgres'} onApi={(a) => { api.current = a; }}
             onChange={(text) => editFile(id, text)}
             onRun={(req) => run(req)} />
         </div>

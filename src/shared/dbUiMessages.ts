@@ -16,8 +16,8 @@ export const dbUiMessages = {
   'Certyfikat CA': ['CA certificate', 'CA-Zertifikat', 'Certificado de la CA', 'Certificat de l\'AC', 'Certificado da CA'],
   'Cofnij zmiany': ['Discard changes', 'Änderungen verwerfen', 'Descartar cambios', 'Annuler les modifications', 'Descartar alterações'],
   'Cofnąć zmiany?': ['Discard the changes?', 'Änderungen verwerfen?', '¿Descartar los cambios?', 'Annuler les modifications ?', 'Descartar as alterações?'],
-  // The empty panel: {postgres} and {redis} are links that open the form of that kind.
-  'Dodaj połączenie z bazą {postgres} lub {redis}.': ['Add a {postgres} or {redis} connection.', 'Füge eine {postgres}- oder {redis}-Verbindung hinzu.', 'Añade una conexión {postgres} o {redis}.', 'Ajoutez une connexion {postgres} ou {redis}.', 'Adicione uma ligação {postgres} ou {redis}.'],
+  // The empty panel: {postgres}, {mysql} and {redis} are links that open the form of that kind.
+  'Dodaj połączenie z bazą {postgres}, {mysql} lub {redis}.': ['Add a {postgres}, {mysql} or {redis} connection.', 'Füge eine {postgres}-, {mysql}- oder {redis}-Verbindung hinzu.', 'Añade una conexión {postgres}, {mysql} o {redis}.', 'Ajoutez une connexion {postgres}, {mysql} ou {redis}.', 'Adicione uma ligação {postgres}, {mysql} ou {redis}.'],
   'Dodaj wiersz': ['Add row', 'Zeile hinzufügen', 'Añadir fila', 'Ajouter une ligne', 'Adicionar linha'],
   'Duplikuj wiersz': ['Duplicate row', 'Zeile duplizieren', 'Duplicar fila', 'Dupliquer la ligne', 'Duplicar linha'],
   'Edytuj…': ['Edit…', 'Bearbeiten…', 'Editar…', 'Modifier…', 'Editar…'],
@@ -141,6 +141,10 @@ export const dbUiMessages = {
   'Zmiany czekające na zapis: {count}.': ['Changes waiting to be saved: {count}.', 'Änderungen, die auf das Speichern warten: {count}.', 'Cambios pendientes de guardar: {count}.', 'Modifications en attente d\'enregistrement : {count}.', 'Alterações por guardar: {count}.'],
   'Zmiany do zapisania: {count}': ['Changes to save: {count}', 'Zu speichernde Änderungen: {count}', 'Cambios por guardar: {count}', 'Modifications à enregistrer : {count}', 'Alterações a guardar: {count}'],
   'Zwykle 127.0.0.1: baza słucha tylko na serwerze, a połączenie idzie tunelem SSH.': ['Usually 127.0.0.1: the database listens only on the server and the connection goes through the SSH tunnel.', 'Meist 127.0.0.1: die Datenbank lauscht nur auf dem Server, die Verbindung läuft durch den SSH-Tunnel.', 'Normalmente 127.0.0.1: la base solo escucha en el servidor y la conexión va por el túnel SSH.', 'En général 127.0.0.1 : la base n\'écoute que sur le serveur et la connexion passe par le tunnel SSH.', 'Normalmente 127.0.0.1: a base só escuta no servidor e a ligação passa pelo túnel SSH.'],
+  // The connection form of MySQL / MariaDB: the database is optional, the statement timeout covers different statements.
+  'opcjonalnie': ['optional', 'optional', 'opcional', 'facultatif', 'opcional'],
+  'Puste: wszystkie bazy serwera, bez domyślnej': ['Empty: every database of the server, none as the default', 'Leer: alle Datenbanken des Servers, keine als Standard', 'Vacío: todas las bases del servidor, ninguna predeterminada', 'Vide : toutes les bases du serveur, aucune par défaut', 'Vazio: todas as bases do servidor, nenhuma predefinida'],
+  'MySQL ogranicza czas tylko zapytań SELECT; MariaDB wszystkich.': ['MySQL limits the time of SELECT queries only; MariaDB of all statements.', 'MySQL begrenzt nur die Zeit von SELECT-Abfragen, MariaDB die aller Anweisungen.', 'MySQL limita solo el tiempo de las consultas SELECT; MariaDB el de todas.', 'MySQL ne limite que la durée des requêtes SELECT ; MariaDB celle de toutes.', 'O MySQL limita só o tempo das consultas SELECT; o MariaDB o de todas.'],
   'domyślna': ['default', 'Standard', 'predeterminada', 'par défaut', 'predefinida'],
   'około {count} wierszy': ['about {count} rows', 'etwa {count} Zeilen', 'unas {count} filas', 'environ {count} lignes', 'cerca de {count} linhas'],
   'przez SSH: {host}': ['through SSH: {host}', 'über SSH: {host}', 'por SSH: {host}', 'via SSH : {host}', 'por SSH: {host}'],

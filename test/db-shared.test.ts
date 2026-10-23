@@ -31,7 +31,7 @@ describe('normalizeDbConnection', () => {
     expect(normalizeDbConnection({ ...base, tls: 'verify-full' })).toBeNull(); // no CA file: unusable, never weakened to require
     expect(normalizeDbConnection({ ...base, tls: 'verify-full', caPath: 'C:\\ca.pem' })).toMatchObject({ tls: 'verify-full', caPath: 'C:\\ca.pem' });
     expect(normalizeDbConnection({ ...base, id: 'x' })).toBeNull();
-    expect(normalizeDbConnection({ ...base, kind: 'mysql' })).toBeNull();
+    expect(normalizeDbConnection({ ...base, kind: 'oracle' })).toBeNull();
     expect(normalizeDbConnection({ ...base, host: 'bad host' })).toBeNull();
     expect(normalizeDbConnection({ ...base, user: '' })).toBeNull();
     expect(normalizeDbConnection({ ...base, kind: 'redis', user: '' })).toMatchObject({ kind: 'redis', user: '', dbIndex: 0, port: 5432 });

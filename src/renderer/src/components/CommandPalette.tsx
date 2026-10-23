@@ -14,7 +14,7 @@ import { openSshView, reconnectAllSsh, reconnectAllTargetsOf } from '../ssh';
 import { openSftp } from '../sftp';
 import { openRedisTab, viewLabel } from '../redis/redisClient';
 import { initDb, revealConnection } from '../db/dbClient';
-import { dbEndpoint } from '../../../shared/db';
+import { dbEndpoint, dbKindLabel, isSqlKind } from '../../../shared/db';
 import { getS, getUi, setUi, toast, update, useStore } from '../store';
 import { profileOptionLabel } from '../cliUi';
 import { statusLog, terminals } from '../terminals/TerminalManager';
@@ -92,9 +92,9 @@ function PaletteInner() {
     out.push({ kind: tr('Akcja'), title: tr('Bazy danych: nowe połączenie'), run: () => setUi({ modal: { kind: 'dbConnection', dbKind: 'postgres' } }) });
     out.push({ kind: tr('Akcja'), title: tr('Bazy danych: otwórz połączenie…'), run: () => { openSidebarPanel('db'); } });
     for (const c of s.dbConnections) {
-      out.push({ kind: tr('Baza danych'), title: c.name, desc: `${c.kind === 'postgres' ? 'PostgreSQL' : 'Redis'} · ${dbEndpoint(c)}`, run: () => {
+      out.push({ kind: tr('Baza danych'), title: c.name, desc: `${dbKindLabel(c)} · ${dbEndpoint(c)}`, run: () => {
         openSidebarPanel('db');
-        if (c.kind !== 'postgres') return;
+        if (!isSqlKind(c.kind)) return;
         initDb();
         void revealConnection(c.id).then((error) => { if (error) toast(error, 'error'); });
       } });

@@ -5,7 +5,7 @@
 // disconnects a session nobody pinned after it was idle for a while. Electron-free so it is unit tested.
 import { randomUUID } from 'crypto';
 import {
-  DB_LIMITS, dbEndpoint, dbSessionId, dbStatusOf, duplicateDbConnection, isDbSessionId, isLiveDbPhase, normalizeDbConnection, removeDbConnection, upsertDbConnection,
+  DB_LIMITS, dbDefaultDatabase, dbEndpoint, dbSessionId, isSqlKind, mysqlFlavorOf, dbStatusOf, duplicateDbConnection, isDbSessionId, isLiveDbPhase, normalizeDbConnection, removeDbConnection, upsertDbConnection,
   type DbConnection, type DbConnectionInput, type DbErrorCode, type DbPasswordChange, type DbPrompt, type DbPromptAnswer, type DbResult, type DbSessionState,
   type DbSnapshot, type DbStateLike, type DbTestResult, type DbVaultInfo,
 } from '../../shared/db';
@@ -84,6 +84,8 @@ export class DbService<S extends DbStateLike = DbStateLike> {
     const now = this.now();
     const connection = strictConnection({ ...input, id: input.id ?? randomUUID(), createdAt: existing?.createdAt ?? now, updatedAt: now });
     if (!connection) return { ok: false, error: 'invalid' };
+    // The flavour a MySQL server showed stays until it connects again.
+    if (existing?.flavor && existing.kind === connection.kind) connection.flavor = existing.flavor;
     if (!('keep' in password) && this.deps.vault.readOnly()) return { ok: false, error: 'readOnly' };
     try {
       if ('set' in password) this.deps.vault.setPassword(connection.id, password.set);
@@ -151,7 +153,8 @@ export class DbService<S extends DbStateLike = DbStateLike> {
   connect(connectionId: string, opts: { database?: string } = {}): { ok: true; sessionId: string } | { ok: false; error: DbErrorCode } {
     const connection = this.connections().find((c) => c.id === connectionId);
     if (!connection) return { ok: false, error: 'connectionMissing' };
-    const target = opts.database && connection.kind === 'postgres' ? { ...connection, database: opts.database } : connection;
+    const target = opts.database === undefined || !isSqlKind(connection.kind) || (!opts.database && connection.kind !== 'mysql') ? connection
+      : { ...connection, database: opts.database || undefined };
     return this.open(target, { password: 'saved' });
   }
 
@@ -164,7 +167,7 @@ export class DbService<S extends DbStateLike = DbStateLike> {
     const entry: Entry = {
       state: {
         id, connectionId: connection.id, kind: connection.kind, state: 'connecting', phase: 'connecting', since: this.now(), readOnly: connection.readOnly,
-        database: connection.kind === 'postgres' ? connection.database ?? 'postgres' : String(connection.dbIndex ?? 0), ...(opts.test ? { test: true as const } : {}),
+        database: dbDefaultDatabase(connection), ...(opts.test ? { test: true as const } : {}),
       },
       connection, idle: null, busy: false, closing: false, own: null, ...(opts.test ? { test: opts.test } : {}), started: this.now(),
     };
@@ -197,7 +200,7 @@ export class DbService<S extends DbStateLike = DbStateLike> {
       entry.tunnelKey = key;
     }
     const config: DbOpenConfig = {
-      kind: c.kind, host: c.host, port: c.port, user: c.user, database: c.database ?? (c.kind === 'postgres' ? 'postgres' : String(c.dbIndex ?? 0)),
+      kind: c.kind, host: c.host, port: c.port, user: c.user, database: dbDefaultDatabase(c),
       tls: c.tls, ...(ca ? { ca } : {}), ...(secret !== undefined ? { password: secret } : {}), readOnly: c.readOnly,
       ...(c.statementTimeoutMs ? { statementTimeoutMs: c.statementTimeoutMs } : {}), ssh: c.ssh && key ? { dbHost: c.ssh.dbHost, dbPort: c.ssh.dbPort, tunnelKey: key, owner } : null,
     };
@@ -293,7 +296,7 @@ export class DbService<S extends DbStateLike = DbStateLike> {
         entry.state = {
           ...entry.state, state: dbStatusOf(m.phase), phase: m.phase, since: this.now(),
           ...(m.serverVersion ? { serverVersion: m.serverVersion } : {}), ...(m.database ? { database: m.database } : {}), ...(m.tls !== undefined ? { tls: m.tls } : {}),
-          ...(m.phase === 'connected' && entry.connection.kind === 'postgres' ? { tx: 'idle' as const } : {}),
+          ...(m.phase === 'connected' && isSqlKind(entry.connection.kind) ? { tx: 'idle' as const } : {}),
           ...(m.reconnect ? { reconnecting: m.reconnect } : {}),
         };
         if (!m.reconnect) delete entry.state.reconnecting;
@@ -352,7 +355,17 @@ export class DbService<S extends DbStateLike = DbStateLike> {
       void this.disconnect(entry.state.id);
       return;
     }
+    this.rememberFlavor(entry);
     this.scheduleIdle(entry);
+  }
+
+  /** MySQL: the flavour the server showed (MySQL or MariaDB) is kept on the connection for its icon and labels. */
+  private rememberFlavor(entry: Entry): void {
+    if (entry.connection.kind !== 'mysql' || !entry.state.serverVersion) return;
+    const flavor = mysqlFlavorOf(entry.state.serverVersion);
+    const id = entry.connection.id;
+    if (this.connections().find((c) => c.id === id)?.flavor === flavor) return;
+    this.deps.change((s) => ({ ...s, dbConnections: (s.dbConnections ?? []).map((c) => (c.id === id ? { ...c, flavor } : c)) }));
   }
 
   private askPassword(id: string, hostPromptId: string, retry: boolean): void {
@@ -458,6 +471,7 @@ export function strictConnection(raw: DbConnection): DbConnection | null {
   if (!fields.every((f) => same(c[f], raw[f]))) return null;
   if (c.kind === 'postgres' && !same(c.database, raw.database ?? 'postgres')) return null;
   if (c.kind === 'redis' && !same(c.dbIndex, raw.dbIndex ?? 0)) return null;
+  if (c.kind === 'mysql' && !same(c.database, raw.database || undefined)) return null;
   if (typeof raw.name !== 'string' || raw.name.trim().length > DB_LIMITS.name) return null;
   return c;
 }

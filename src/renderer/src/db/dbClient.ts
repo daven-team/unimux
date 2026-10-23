@@ -3,7 +3,7 @@
 // the own sessions of SQL editor tabs, pins, and the loads of the panel's tree.
 import { create } from 'zustand';
 import { setDbPins } from './pins';
-import { dbErrorText, type DbErrorCode, type DbPortMessage, type DbPrompt, type DbResult, type DbServerError, type DbSessionState, type DbVaultInfo } from '../../../shared/db';
+import { dbDefaultDatabase, dbErrorText, type DbConnection, type DbErrorCode, type DbPortMessage, type DbPrompt, type DbResult, type DbServerError, type DbSessionState, type DbVaultInfo } from '../../../shared/db';
 import { loadKey, type DbLoad, type DbLoadRequest, type RedisKeysLoad } from '../../../shared/dbTree';
 import { mergeKeys } from '../../../shared/redisView';
 import { tr } from '../i18n';
@@ -34,6 +34,12 @@ const readOpen = (): string[] => {
 export const useDbStore = create<DbStore>(() => ({ sessions: {}, prompts: {}, vault: null, shared: {}, tabSessions: {}, loads: {}, open: readOpen(), filter: '' }));
 
 export const sharedKey = (connectionId: string, database: string): string => `${connectionId}\n${database}`;
+/**
+ * The database whose shared session serves `database` of a connection: its own for Postgres (a session sees one database) and
+ * Redis (one per DB), the connection's default one for MySQL (a MySQL session reads every database by its qualified names).
+ */
+export const sharedDatabase = (connection: Pick<DbConnection, 'kind' | 'database' | 'dbIndex'>, database?: string): string =>
+  (connection.kind === 'mysql' || database === undefined ? dbDefaultDatabase(connection) : database);
 export const isLive = (s: DbSessionState | undefined): boolean => !!s && (s.state === 'connected' || s.state === 'connecting');
 
 /** The text of an error of a DB call or session (translated), with the server's own words when it sent some. */
@@ -95,10 +101,12 @@ function dropSession(st: DbStore, id: string): Partial<DbStore> {
   const gone = Object.entries(st.shared).find(([, sid]) => sid === id)?.[0];
   if (!gone) return { shared, tabSessions };
   const [connectionId, database] = gone.split('\n');
+  // A MySQL connection's one shared session loaded every database of its tree.
+  const wholeServer = getS().dbConnections?.find((c) => c.id === connectionId)?.kind === 'mysql';
   const loads = Object.fromEntries(Object.entries(st.loads).filter(([key]) => {
     const parts = JSON.parse(key) as string[];
     if (parts[1] !== connectionId) return true;
-    return parts[0] === 'databases' ? false : parts[2] !== database;
+    return parts[0] === 'databases' || wholeServer ? false : parts[2] !== database;
   }));
   return { shared, tabSessions, loads };
 }
@@ -159,7 +167,7 @@ const connecting = new Map<string, Promise<SessionResult>>();
 export function ensureShared(connectionId: string, database?: string): Promise<SessionResult> {
   const connection = getS().dbConnections?.find((c) => c.id === connectionId);
   if (!connection) return Promise.resolve({ ok: false, error: dbErrorMessage('connectionMissing') });
-  const db = database ?? connection.database ?? 'postgres';
+  const db = sharedDatabase(connection, database);
   const key = sharedKey(connectionId, db);
   const st = useDbStore.getState();
   const id = st.shared[key];
@@ -168,7 +176,7 @@ export function ensureShared(connectionId: string, database?: string): Promise<S
   if (running) return running;
   const p = (async (): Promise<SessionResult> => {
     // Redis: one session per DB of the tree (`database` names it), each SELECTs its DB itself (runLoad).
-    const r = await window.mc.db.connect(connectionId, connection.kind !== 'postgres' || db === (connection.database ?? 'postgres') ? undefined : { database: db });
+    const r = await window.mc.db.connect(connectionId, connection.kind !== 'postgres' || db === dbDefaultDatabase(connection) ? undefined : { database: db });
     if (!r.ok) return { ok: false, error: dbErrorMessage(r.error, undefined, connectionId) };
     useDbStore.setState((s) => ({ shared: { ...s.shared, [key]: r.sessionId } }));
     return waitSession(r.sessionId, connectionId);
@@ -180,7 +188,8 @@ export function ensureShared(connectionId: string, database?: string): Promise<S
 /** The live shared session of a connection and database, if any. */
 export function sharedSession(connectionId: string, database: string): string | null {
   const st = useDbStore.getState();
-  const id = st.shared[sharedKey(connectionId, database)];
+  const connection = getS().dbConnections?.find((c) => c.id === connectionId);
+  const id = st.shared[sharedKey(connectionId, connection ? sharedDatabase(connection, database) : database)];
   return id && isLive(st.sessions[id]) ? id : null;
 }
 
@@ -191,7 +200,7 @@ export async function connectTab(tabId: string, connectionId: string, database: 
   const st = useDbStore.getState();
   const own = st.tabSessions[tabId];
   if (own && isLive(st.sessions[own])) return waitSession(own, connectionId);
-  const r = await window.mc.db.connect(connectionId, database === (connection.database ?? 'postgres') ? undefined : { database });
+  const r = await window.mc.db.connect(connectionId, database === dbDefaultDatabase(connection) ? undefined : { database });
   if (!r.ok) return { ok: false, error: dbErrorMessage(r.error, undefined, connectionId) };
   useDbStore.setState((s) => ({ tabSessions: { ...s.tabSessions, [tabId]: r.sessionId } }));
   return waitSession(r.sessionId, connectionId);
