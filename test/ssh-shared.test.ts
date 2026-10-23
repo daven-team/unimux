@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  storageLabel, readOnlyStoreNote, knownHostsLocked, knownHostsDescription, READ_ONLY_VAULT_HINT, addressProblem, applySshSnapshot, connectingNotice, draftErrorKey, hostsUsingKey, labelFieldValue, newKeyProblem, broadcastTargets, enterSubmitsPrompt, isSshCell, promptNeedsToast, restoredPromptToasts, sshCellVisible, sshHeaderName, filterHosts, groupHosts, hostEndpoint, knownHostId, normalizeSshHosts, normalizeTags, parseFoldedGroups, sshGridName, toggleSelection,
-  broadcastProblem, broadcastRowState, broadcastSend, ptyHostRestartToast, pushHistory, resumesConversation, sshCellsOfTab, cellSourcePatch, cellSourceValue, currentBroadcastResult, connectingBanner, existingSelection, parseCellSource, sanitizeServerText, sshCellStart, sshErrorText, sshNotice, sshModeReset, sshPhaseLabel, sshSpecName, sshSessionEnded, stampBroadcastResults, startupInput, startupProblem, userAtEndpoint, validateHostDraft,
+  storageLabel, readOnlyStoreNote, knownHostsLocked, knownHostsDescription, READ_ONLY_VAULT_HINT, addressProblem, applySshSnapshot, draftErrorKey, hostsUsingKey, labelFieldValue, newKeyProblem, broadcastTargets, enterSubmitsPrompt, isSshCell, promptNeedsToast, restoredPromptToasts, sshCellVisible, sshHeaderName, filterHosts, groupHosts, hostEndpoint, knownHostId, normalizeSshHosts, normalizeTags, parseFoldedGroups, sshGridName, toggleSelection,
+  broadcastProblem, broadcastRowState, broadcastSend, ptyHostRestartToast, pushHistory, resumesConversation, sshCellsOfTab, cellSourcePatch, cellSourceValue, currentBroadcastResult, connectingBanner, existingSelection, parseCellSource, sanitizeServerText, sshCellStart, sshErrorText, sshModeReset, sshPhaseLabel, sshSpecName, sshSessionEnded, stampBroadcastResults, startupInput, startupProblem, userAtEndpoint, validateHostDraft,
   type SshHost, type SshSessionState,
 } from '../src/shared/ssh';
 import { cellDrawColor, CELL_COLORS } from '../src/shared/state';
+import { sshMessages } from '../src/shared/sshMessages';
 
 const ID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const host = (n: number, patch: Partial<SshHost> = {}): SshHost => ({ id: ID(n), label: `h${n}`, address: `h${n}.example`, port: 22, username: 'deploy', createdAt: 1, updatedAt: 1, ...patch });
@@ -104,14 +105,8 @@ describe('session texts', () => {
     expect(sshPhaseLabel(session('c', 'authenticating'), { id: 'p', kind: 'password', user: 'u', endpoint: 'e', canSave: true, retry: false })).toEqual({ key: 'czeka na hasło' });
     expect(sshPhaseLabel(session('c', 'error', { error: 'timeout' }), undefined, ctx)).toEqual({ key: 'Przekroczono czas połączenia' });
   });
-  it('writes one notice per phase change, including a dropped connection', () => {
-    expect(sshNotice(undefined, session('c', 'connecting'), ctx)).toBeNull(); // written by the renderer before the request (W4)
-    expect(connectingNotice(ctx)).toEqual({ key: '[SSH · łączenie z {endpoint}]', params: { endpoint: 'h1.example:2200' } });
-    expect(sshNotice('connecting', session('c', 'verifying'), ctx)).toBeNull();
-    expect(sshNotice('authenticating', session('c', 'connected'), ctx)).toEqual({ key: '[SSH · połączono]' });
-    expect(sshNotice('connected', session('c', 'connected'), ctx)).toBeNull();
-    expect(sshNotice('connected', session('c', 'error', { error: 'reset' }), ctx)).toEqual({ key: '[SSH · błąd: {reason}]', reason: { key: 'Połączenie zostało przerwane' } });
-    expect(sshNotice('connected', session('c', 'closed', { exitCode: 0 }), ctx)).toEqual({ key: '[SSH · rozłączono]' });
+  it('has no bracketed status lines for the terminal any more: the cell card says what a session does (1.0.5)', () => {
+    expect(Object.keys(sshMessages).filter((k) => k.startsWith('[SSH'))).toEqual([]);
   });
   it('decides what a mounted SSH cell does', () => {
     expect(sshCellStart({ alive: true, connectOnMount: true })).toBe('attach');
