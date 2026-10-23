@@ -8,6 +8,7 @@ import { displayCombo, matchShortcut, RepeatGuard, resolveShortcuts, shortcutDef
 import { addAgent, moveCellBy, moveFocus, quickTab, toggleMaximize } from './actions';
 import { closeFrontTab, cycleWorkspace, frontKey } from './workspaceStrip';
 import { getS, getUi, setUi, update, useStore } from './store';
+import { focusedTerminalCell, openTerminalFind } from './terminals/terminalFind';
 
 let cached: { overrides: unknown; platform: string; resolution: ShortcutResolution } | null = null;
 
@@ -75,6 +76,7 @@ function run(id: string): void {
     case 'notes.toggle': update((s) => ({ ...s, notesOpen: !s.notesOpen })); break;
     case 'sidebar.toggle': update((s) => ({ ...s, sidebarCollapsed: !s.sidebarCollapsed })); break;
     case 'cell.maximize': toggleMaximize(); break;
+    case 'terminal.find': { const cell = focusedTerminalCell(); if (cell) openTerminalFind(cell); break; }
     case 'tab.next': cycleWorkspace(1); break;
     case 'tab.prev': cycleWorkspace(-1); break;
     case 'cell.focus.left': moveFocus(-1, 0); break;

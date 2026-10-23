@@ -54,5 +54,16 @@
 ::highlight(mc-find) { background-color: #d8a5444a; }
 ::highlight(mc-find-current) { background-color: #e2a33ccc; color: #16130c; }
 
+/* Matches drawn as <mark> by the windowed views (diffs, tables, large files: itemFind.tsx), in the same colours. */
+mark.find-mark { background-color: #d8a5444a; color: inherit; border-radius: 2px; }
+mark.find-mark.current { background-color: #e2a33ccc; color: #16130c; box-shadow: 0 0 0 1px #e2a33c; }
+/* The table cell that holds the current match (its text may be cut off by the column width). */
+.data-cell.find-current { box-shadow: inset 0 0 0 1px #e2a33c; background: #e2a33c14; }
+.git-diff:focus, .git-diff:focus-visible { outline: none; }
+
 /* A preview with find: the scroller fills it, the widget floats over the scroller's top right corner. */
 .find-host { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* Find in a terminal cell (terminalFind.tsx): the widget floats at the top right of the terminal, below the cell header. */
+.terminal-find { position: absolute; top: var(--cell-head); left: 0; right: 0; height: 0; z-index: 12; }
+.terminal-find .find-widget { right: 16px; }

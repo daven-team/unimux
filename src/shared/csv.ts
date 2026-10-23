@@ -16,6 +16,12 @@ export function detectDelimiter(text: string, extension = ''): string {
   return best;
 }
 
+/**
+ * Rows the table view of a CSV / TSV tab parses: it draws only the rows on screen and its find searches all of them, so the
+ * whole file that was read fits (a 50 000-row export), while a runaway file still stops somewhere.
+ */
+export const TABLE_VIEW_ROWS = 200_000;
+
 export function parseDelimited(text: string, delimiter: string, maxRows = 5000): ParsedTable {
   const rows: string[][] = [];
   let row: string[] = [];

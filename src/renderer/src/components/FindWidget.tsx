@@ -41,6 +41,10 @@ export interface FindWidgetProps {
   /** Bumped to move the keyboard into the find field (and select its text) or into the replace field. */
   focusFind: number;
   focusReplace?: number;
+  /** What the box searches, for screen readers (default: "Znajdź w pliku"). */
+  label?: string;
+  /** One more key that moves the keyboard back into the find field (the terminal's own find shortcut, Ctrl+Shift+F). */
+  isFindKey?(e: KeyboardEvent): boolean;
 }
 
 const isMod = (e: KeyboardEvent) => (window.mc.platform === 'darwin' ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey);
@@ -72,7 +76,7 @@ export function FindWidget(props: FindWidgetProps) {
     else if (key === 'F3') (e.shiftKey ? props.onPrev : props.onNext)();
     else if (key === 'Enter' && field === 'find') (e.shiftKey ? props.onPrev : props.onNext)();
     else if (key === 'Enter' && field === 'replace' && replace) (isMod(e) && e.altKey ? replace.onReplaceAll : replace.onReplace)();
-    else if (shortcut === 'find' || (shortcut === 'replace' && !replace)) { findInput.current?.focus(); findInput.current?.select(); }
+    else if (shortcut === 'find' || (shortcut === 'replace' && !replace) || props.isFindKey?.(e)) { findInput.current?.focus(); findInput.current?.select(); }
     else if (shortcut === 'replace' && replace) {
       replace.onOpen(true);
       replaceInput.current?.focus();
@@ -99,7 +103,7 @@ export function FindWidget(props: FindWidgetProps) {
   );
   const replaceLabel = replace?.open ? tr('Ukryj zamianę') : tr('Pokaż zamianę');
   return (
-    <div className={`find-widget ${replace ? 'with-replace' : ''} ${replace?.open ? 'replacing' : ''}`} role="search" aria-label={tr('Znajdź w pliku')}
+    <div className={`find-widget ${replace ? 'with-replace' : ''} ${replace?.open ? 'replacing' : ''}`} role="search" aria-label={props.label ?? tr('Znajdź w pliku')}
       onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); props.onClose(); } }}>
       {replace && <button type="button" className="find-expand" title={replaceLabel} aria-label={replaceLabel} aria-expanded={replace.open} data-find="expand"
         onMouseDown={(e) => e.preventDefault()} onClick={() => replace.onOpen(!replace.open)}><span className={replace.open ? 'open' : ''}><IExpand /></span></button>}

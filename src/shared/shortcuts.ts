@@ -156,6 +156,8 @@ export interface ShortcutDef {
    * on macOS the file tree and dialogs used to accept Ctrl as well as Cmd.
    */
   aliases?: readonly string[];
+  /** Fires only while the keyboard is in a terminal (the terminal's find): elsewhere the key stays with the focused field. */
+  terminalOnly?: boolean;
   /** Why a read-only row cannot be changed. */
   reason?: MessageKey;
   /** Read-only row that is not a key press at all (Ctrl+wheel); `Mod` as above. */
@@ -182,6 +184,8 @@ export const SHORTCUTS = [
   { id: 'cell.move.right', label: 'Przesuń komórkę w prawo', group: 'grid', scope: 'cell', default: 'Mod+Alt+Shift+Right', rebindable: true, blockedInSettings: true },
   { id: 'cell.move.up', label: 'Przesuń komórkę w górę', group: 'grid', scope: 'cell', default: 'Mod+Alt+Shift+Up', rebindable: true, blockedInSettings: true },
   { id: 'cell.move.down', label: 'Przesuń komórkę w dół', group: 'grid', scope: 'cell', default: 'Mod+Alt+Shift+Down', rebindable: true, blockedInSettings: true },
+  // Ctrl+F itself belongs to the program in the terminal (readline: forward one character), so the terminal finds with Shift.
+  { id: 'terminal.find', label: 'Znajdź w terminalu', group: 'terminal', scope: 'cell', default: 'Mod+Shift+F', rebindable: true, blockedInSettings: true, terminalOnly: true },
   { id: 'snippets.toggle', label: 'Pokaż lub ukryj snippety', group: 'panels', scope: 'global', default: 'Mod+Shift+B', rebindable: true },
   { id: 'notes.toggle', label: 'Pokaż lub ukryj notatki', group: 'panels', scope: 'global', default: 'Mod+Shift+O', rebindable: true },
   { id: 'sidebar.toggle', label: 'Pokaż lub ukryj panel boczny', group: 'panels', scope: 'global', default: 'Mod+Shift+E', rebindable: true },

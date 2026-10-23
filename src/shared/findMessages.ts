@@ -1,4 +1,4 @@
-// The find widget inside one file (the code editor and the Markdown preview); the shared words (Znajdź, Zamień, Całe słowa...)
+// The find widget inside one file (the code editor, the previews, diffs, tables) and in a terminal cell; the shared words (Znajdź, Zamień, Całe słowa...)
 // come from the project-wide find and replace in updateMessages.ts.
 // Each row: English, German, Spanish, French, Portuguese. Polish is the key.
 export const findMessages = {
@@ -10,4 +10,5 @@ export const findMessages = {
   'Zamknij wyszukiwanie': ['Close find', 'Suche schließen', 'Cerrar la búsqueda', 'Fermer la recherche', 'Fechar a pesquisa'],
   'Pokaż zamianę': ['Show replace', 'Ersetzen einblenden', 'Mostrar reemplazar', 'Afficher le remplacement', 'Mostrar substituir'],
   'Ukryj zamianę': ['Hide replace', 'Ersetzen ausblenden', 'Ocultar reemplazar', 'Masquer le remplacement', 'Ocultar substituir'],
+  'Znajdź w terminalu': ['Find in terminal', 'Im Terminal suchen', 'Buscar en el terminal', 'Rechercher dans le terminal', 'Localizar no terminal'],
 } as const satisfies Record<string, readonly [string, string, string, string, string]>;

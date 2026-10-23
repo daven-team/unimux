@@ -59,7 +59,7 @@ function reveal(range: Range, scroller: HTMLElement): void {
 }
 
 /** The selected text inside `root` when it is a short single line, else ''. */
-function selectedText(root: Element | null): string {
+export function selectedText(root: Element | null): string {
   const selection = window.getSelection();
   if (!root || !selection || selection.isCollapsed || !selection.rangeCount) return '';
   if (!root.contains(selection.getRangeAt(0).commonAncestorContainer)) return '';
