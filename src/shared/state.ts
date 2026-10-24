@@ -480,7 +480,8 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
   const remapCells = <T extends { profileId: string }>(cells: T[]) => cells.map((c) => ({ ...c, profileId: remap(c.profileId) }));
   // A cell's path format override survives only as one of the known values; an SSH reference only as { hostId: string }.
   const cleanCells = (cells: Cell[]) => remapCells(cells).map((c) => {
-    const { pathMode: raw, ssh, ...rest } = c;
+    // `shell` names the shell of a running terminal: after a restart of the app nothing runs yet.
+    const { pathMode: raw, ssh, shell: _shell, ...rest } = c;
     const pathMode = normalizePathMode(raw);
     const ref = normalizeSshCellRef(ssh);
     return { ...rest, ...(pathMode ? { pathMode } : {}), ...(ref ? { ssh: ref } : {}) };

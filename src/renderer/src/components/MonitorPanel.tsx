@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { cellLabel } from '../../../shared/agentWork';
 import { formatBytes, formatCpu, MONITOR_INTERVAL_MS, type MonitorAppRow, type MonitorCell, type MonitorRow, type MonitorSample } from '../../../shared/monitor';
 import { findCell, getProfile } from '../../../shared/state';
-import { shownProfileName } from '../../../shared/profiles';
+import { cellShell, shownProfileName } from '../../../shared/profiles';
 import { focusCell, restartCell } from '../actions';
 import { useI18n } from '../i18n';
 import { askChoice, toast, useStore } from '../store';
@@ -75,7 +75,7 @@ export function MonitorPanel() {
     const found = findCell(s, cellId);
     if (!found) return null;
     // The grid and the cell's number tell apart cells with the same name (three "Wiersz polecenia" cells of one project).
-    const name = cellLabel(found.cell, sessionTitles, shownProfileName(getProfile(s, found.cell.profileId), s.settings.shell, tr));
+    const name = cellLabel(found.cell, sessionTitles, shownProfileName(getProfile(s, found.cell.profileId), cellShell(found.cell, s.settings.shell), tr));
     const index = found.tab.cells.findIndex((c) => c.id === cellId) + 1;
     // 1.0.7: the grid first: in a narrow panel the project name (the same for most rows) is what gets cut off.
     return { label: `${index}. ${name}`, project: `${found.tab.name} · ${found.project.name}`, session: !!found.cell.session };

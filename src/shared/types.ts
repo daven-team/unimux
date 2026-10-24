@@ -86,6 +86,11 @@ export interface Cell {
   ssh?: SshCellRef;
   /** 1.0.7: the SSH status bar is hidden in this cell (its right-click menu); Settings > SSH shows it again. */
   sshBarHidden?: true;
+  /**
+   * 1.0.7: the shell the cell's terminal was started with (Settings > Terminal at the time). The built-in shell profile is
+   * named after it until the cell restarts, so changing the setting does not rename running cells. Dropped on load.
+   */
+  shell?: ShellKind;
 }
 
 export interface Tab {

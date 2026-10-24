@@ -8,7 +8,7 @@ import { errorPhrase, failureLabel } from '../../../shared/alerts';
 import { failedExit, statusText } from '../../../shared/statusDetail';
 import { cellDrawColor, getProfile, PROJECT_COLORS, updateCell } from '../../../shared/state';
 import { missingCardCli } from '../../../shared/cliStatus';
-import { shownProfileName } from '../../../shared/profiles';
+import { cellShell, shownProfileName } from '../../../shared/profiles';
 import { sshHeaderName, sshPhaseLabel, userAtEndpoint } from '../../../shared/ssh';
 import { resolveSshTheme } from '../../../shared/sshThemes';
 import { useSshStore } from '../sshStore';
@@ -54,7 +54,8 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const bodyRef = useRef<HTMLDivElement>(null);
   const profiles = useStore((st) => st.s.profiles);
   const profile = useStore((st) => getProfile(st.s, cell.profileId));
-  const shell = useStore((st) => st.s.settings.shell);
+  // The shell the terminal runs (recorded at its start), not the one Settings would start now.
+  const shell = useStore((st) => cellShell(cell, st.s.settings.shell));
   const profileName = shownProfileName(profile, shell, tr);
   const status = useStore((st) => st.ui.statuses[cell.id] ?? 'idle');
   useBlink(status === 'working');
@@ -130,7 +131,8 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
 
   const profileItems = (): MenuItem[] => [
     { header: tr("Zmień profil (nowa rozmowa)") },
-    ...profiles.map((p) => ({ label: profileOptionLabel(p, cliStatus, tr), onClick: () => changeCellProfile(cell.id, p.id) })),
+    // The current profile is marked and named as the header names it (the shell it really runs, 1.0.7).
+    ...profiles.map((p) => ({ label: p.id === profile.id && profile.cli === 'shell' ? profileName : profileOptionLabel(p, cliStatus, tr), hint: p.id === profile.id ? '✓' : undefined, onClick: () => changeCellProfile(cell.id, p.id) })),
   ];
 
   const restartItems = (): MenuItem[] => ssh ? sshItems() : [
@@ -312,7 +314,12 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
               {cell.role === 'coordinator' ? <><circle cx="12" cy="5" r="2" /><circle cx="5" cy="19" r="2" /><circle cx="19" cy="19" r="2" /><path d="M12 7v6M5 17v-4h14v4" /></> : <><path d="M8 3v5m8-5v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4" />{!cell.role && <path d="m3 3 18 18" />}</>}
             </svg><span className="mcp-indicator" />
           </button>}
-          <button className="restart" aria-label={tr("Uruchom ponownie")} title={tr("Uruchom ponownie")} onClick={(e) => openMenuAt(e.currentTarget, restartItems())}><IRestart /></button>
+          <button className="restart" aria-label={tr("Uruchom ponownie")} title={tr("Uruchom ponownie")} onClick={(e) => {
+            // One choice needs no menu (a shell, an agent without a conversation): the button restarts at once.
+            const items = restartItems();
+            if (items.length === 1 && 'onClick' in items[0]) items[0].onClick();
+            else openMenuAt(e.currentTarget, items);
+          }}><IRestart /></button>
           <button aria-label={tr('Więcej akcji')} title={tr('Więcej akcji')} onClick={(e) => openMenuAt(e.currentTarget, menuItems())}><IMore /></button>
           <button className="maximize" aria-label={maximized ? tr("Przywróć siatkę") : tr("Maksymalizuj")} title={titleWithShortcut(maximized ? tr("Przywróć siatkę") : tr("Maksymalizuj"), 'cell.maximize')} onClick={() => toggleMaximize(cell.id)}>
             {maximized ? <IRestore /> : <IMax />}
