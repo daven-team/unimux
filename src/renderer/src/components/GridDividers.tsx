@@ -1,5 +1,5 @@
 import { useEffect, useRef, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
-import { dividerBox, dividers, resetDivider, resizeDivider, type Divider, type GridLayout, type Rect } from '../../../shared/layout';
+import { dividerBox, dividers, MIN_CELL_HEIGHT, MIN_CELL_WIDTH, minShareFor, resetDivider, resizeDivider, type Divider, type GridLayout, type MinShare, type Rect } from '../../../shared/layout';
 import { CELL_GAP } from '../../../shared/cellBox';
 import { useI18n } from '../i18n';
 import { terminals } from '../terminals/TerminalManager';
@@ -25,6 +25,13 @@ export const FULL_AREA: CSSProperties = areaStyle({ x0: 0, y0: 0, x1: 1, y1: 1 }
 
 const KEY_STEP = 0.02;
 
+/** 1.0.7: the shares of the grid that keep a card at least MIN_CELL_WIDTH x MIN_CELL_HEIGHT pixels (the grid element's box). */
+function minShares(grid: HTMLElement | null): MinShare | undefined {
+  if (!grid) return undefined;
+  const rect = grid.getBoundingClientRect();
+  return { col: minShareFor(rect.width - CELL_GAP, MIN_CELL_WIDTH, CELL_GAP), row: minShareFor(rect.height - CELL_GAP, MIN_CELL_HEIGHT, CELL_GAP) };
+}
+
 /**
  * Draggable dividers between the grid's areas. Each vertical divider moves one row on its own, horizontal
  * dividers move the whole line; double click restores the equal split.
@@ -35,7 +42,7 @@ export function GridDividers({ layout, onPreview, onCommit }: {
   onCommit: (layout: GridLayout) => void;
 }) {
   const { tr } = useI18n();
-  const drag = useRef<{ base: GridLayout; divider: Divider; start: number; extent: number; current: GridLayout } | null>(null);
+  const drag = useRef<{ base: GridLayout; divider: Divider; start: number; extent: number; current: GridLayout; limits?: MinShare } | null>(null);
   /** The cells are fitted once when the drag ends (see TerminalManager.holdFits). */
   const fitHold = useRef<(() => void) | null>(null);
   useEffect(() => () => { fitHold.current?.(); fitHold.current = null; }, []);
@@ -47,6 +54,7 @@ export function GridDividers({ layout, onPreview, onCommit }: {
       base: layout, divider: d, current: layout,
       start: d.axis === 'col' ? e.clientX : e.clientY,
       extent: (d.axis === 'col' ? rect.width : rect.height) - CELL_GAP, // the areas share the grid minus one gap
+      limits: minShares(e.currentTarget.parentElement),
     };
     e.currentTarget.setPointerCapture(e.pointerId);
     e.preventDefault();
@@ -57,7 +65,7 @@ export function GridDividers({ layout, onPreview, onCommit }: {
     const g = drag.current;
     if (!g || g.extent <= 0) return;
     const delta = ((g.divider.axis === 'col' ? e.clientX : e.clientY) - g.start) / g.extent;
-    g.current = resizeDivider(g.base, g.divider, delta);
+    g.current = resizeDivider(g.base, g.divider, delta, g.limits);
     onPreview(g.current);
   };
   const end = (e: PointerEvent<HTMLDivElement>) => {
@@ -76,7 +84,7 @@ export function GridDividers({ layout, onPreview, onCommit }: {
     const backward = d.axis === 'col' ? 'ArrowLeft' : 'ArrowUp';
     if (e.key !== forward && e.key !== backward) return;
     e.preventDefault();
-    onCommit(resizeDivider(layout, d, (e.key === forward ? 1 : -1) * KEY_STEP));
+    onCommit(resizeDivider(layout, d, (e.key === forward ? 1 : -1) * KEY_STEP, minShares(e.currentTarget.parentElement)));
   };
 
   return <>

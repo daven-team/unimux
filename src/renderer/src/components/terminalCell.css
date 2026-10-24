@@ -130,6 +130,9 @@
 :root[data-blink] .terminal-cell .cell-icon .dot.working { box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 4px #f5b94266; }
 /* Exited: a hollow grey ring; a failed turn (waiting.error) stays red. */
 .terminal-cell .cell-icon .dot.exited { background: var(--card-bg); box-shadow: 0 0 0 2px var(--card-bg), inset 0 0 0 2px #7a7a7a; }
+/* A non-zero exit code (1.0.7): red like the pill, a filled dot at the prompt, a red ring once the process ended. */
+.terminal-cell .cell-icon .dot.error { background: var(--error); }
+.terminal-cell .cell-icon .dot.exited.error { background: var(--card-bg); box-shadow: 0 0 0 2px var(--card-bg), inset 0 0 0 2px var(--error); }
 
 .terminal-cell .cell-head .idx {
   flex: none;
@@ -141,8 +144,8 @@
 
 /* The name keeps its width (the details after it give way first) and truncates only when it alone is too long. */
 .terminal-cell .cell-head .cell-name {
-  flex: 0 0 auto;
-  max-width: calc(100% - 44px);
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   color: #ececec;
   font-size: 12.5px;
@@ -157,22 +160,33 @@
 
 .terminal-cell .cell-name-input { flex: 1; min-width: 60px; max-width: 240px; height: 22px; background: var(--bg); border-color: var(--btn-primary-bg); border-radius: 5px; font-size: 12px; }
 
-/* Muted details after the name; they give way first when the header is short. */
+/* Muted details after the name; they give way first when the header is short. 1.0.7: they get only the room the name
+   leaves (flex-basis 0); a detail that does not fit whole wraps onto a hidden second line, the first one ellipsizes, and
+   all of them go when that room is too small for a readable piece (the container query below), never a lone letter. */
 .terminal-cell .cell-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-width: 0;
+  height: 24px;
   overflow: hidden;
   color: #7a7a7a;
   white-space: nowrap;
+  container: cell-meta / inline-size;
 }
 
 .terminal-cell .meta-item {
   flex: 0 1 auto;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
+  line-height: 24px;
   text-overflow: ellipsis;
+}
+
+@container cell-meta (max-width: 52px) {
+  .terminal-cell .cell-head .cell-meta > .meta-item { display: none; }
 }
 
 .terminal-cell .meta-item + .meta-item::before { content: '·'; margin: 0 6px; color: #4a4a4a; }
@@ -191,10 +205,11 @@
 .terminal-cell .meta-item.endpoint { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 10.5px; }
 
 /* The status as a small pill: working amber, waiting for you green, a failed turn red, the rest grey. */
-/* The status pill sits beside the actions: at most a third of the header, so the name always keeps the rest. */
+/* The status pill sits beside the actions. 1.0.7: it comes before the details and the name (they shrink first), up to
+   about half of the header; only a longer reason ellipsizes (its full text is the pill's title). */
 .terminal-cell .cell-head .status-text {
   flex: 0 0 auto;
-  max-width: 34%;
+  max-width: 52%;
   height: 18px;
   padding: 0 7px;
   overflow: hidden;
@@ -264,9 +279,22 @@
   .terminal-cell .cell-head .idx { display: none; }
 }
 
+@container (max-width: 260px) {
+  .terminal-cell .cell-head .status-text { max-width: 44%; }
+}
+
 @container (max-width: 200px) {
   .terminal-cell .cell-head .cell-meta,
   .terminal-cell .cell-head .status-text { display: none; }
+}
+
+/* Narrower than a cell may be dragged (MIN_CELL_WIDTH, a small window): the icon with its status dot and the "more" menu,
+   which holds every action of the cell. */
+@container (max-width: 120px) {
+  .terminal-cell .cell-head .cell-name,
+  .terminal-cell .cell-head .cell-name-input,
+  .terminal-cell .cell-head .muted-mark,
+  .terminal-cell .cell-head .actions .close { display: none; }
 }
 
 /* ── body ───────────────────────────────────────────────────────────────── */
