@@ -109,6 +109,11 @@ export const TSettings = () => (
   </T>
 );
 
+/** A small robot: the AI team panel (tasks and messages of the agents) in the title bar, instead of the letters "AI". */
+export const TTeam = () => (
+  <T><path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M2 14h2M20 14h2M15 13v2M9 13v2" /></T>
+);
+
 /** Compact, bold plus for pill buttons. */
 export const IPlusBold = () => (
   <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">

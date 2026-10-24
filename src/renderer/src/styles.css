@@ -72,8 +72,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .app-body { display: flex; min-width: 0; min-height: 0; }
 .main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 
-.team-toggle { position: relative; font-size: 11px; font-weight: 700; }
-.team-count { position: absolute; right: -3px; top: -3px; min-width: 14px; padding: 1px 3px; border-radius: 6px; background: var(--accent); color: white; font-size: 9px; }
+.team-toggle { position: relative; }
+.team-count { position: absolute; right: -3px; top: -3px; min-width: 14px; padding: 1px 3px; border-radius: var(--radius-md); background: var(--btn-primary-bg); color: var(--btn-primary-fg); font-size: 9px; font-weight: 700; line-height: 11px; }
 .coordinator-mark { color: #a78bfa; font-size: 10px; }
 .automation-panel { position: relative; flex: 0 1 var(--automation-height, 310px); min-height: 140px; display: flex; flex-direction: column; background: var(--bg-2); border-top: 1px solid var(--border-2); }
 /* The saved height is only a flex basis: in a short window the panel shrinks (down to 140px) so the grid keeps at least 200px. */
@@ -362,8 +362,8 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .palette { width: 640px; }
 .palette input { width: 100%; border: 0; border-bottom: 1px solid var(--border); background: transparent; padding: 14px 16px; font-size: 14px; outline: none; }
 .palette-list { overflow-y: auto; padding: 6px; max-height: 60vh; }
-.palette-item { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; cursor: pointer; color: var(--text-2); }
-.palette-item.sel { background: #1d2a40; color: #f0f0f0; }
+.palette-item { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--radius-md); cursor: pointer; color: var(--text-2); }
+.palette-item.sel { background: color-mix(in srgb, var(--btn-primary-bg) 20%, #161616); color: #f0f0f0; }
 .palette-item .kind { width: 74px; flex: none; font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
 .palette-item .ptitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-item .pdesc { color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
@@ -393,7 +393,10 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .cli.claude { background: #3a2216; color: #f0a37f; }
 .cli.codex { background: #102a22; color: #5fd4ac; }
 .cli.shell { background: #222; color: #aaa; }
-.tabs-switch { display: flex; gap: 4px; }
+.tabs-switch { display: flex; gap: var(--space-1); padding: var(--space-1); border: 1px solid var(--border); border-radius: var(--radius-md); background: #141414; }
+.tabs-switch > button { height: 22px; padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: 11.5px; white-space: nowrap; cursor: pointer; }
+.tabs-switch > button:hover { background: #ffffff08; color: var(--text); }
+.tabs-switch > button.on { background: #2c2c2c; color: #f0f0f0; }
 
 /* context menu + toast */
 .menu { position: fixed; z-index: 60; min-width: 250px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; padding: 5px; background: #191919; border: 1px solid #343434; border-radius: 7px; box-shadow: 0 8px 28px #0008; }
@@ -410,6 +413,14 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .usage-spinner { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; }
 .menu-sep { height: 1px; background: #ffffff09; margin: 5px -5px; }
 .menu-label { padding: 4px 12px 3px; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: #828282; text-transform: uppercase; letter-spacing: .4px; }
+/* 1.0.7: menus with icons. One 14px icon column (empty for an item without an icon); headers and colour rows line up with the labels. */
+.menu.with-icons .menu-item { gap: var(--space-4); }
+.menu.with-icons .menu-item .kbd { margin-left: var(--space-6); }
+.menu-icon { flex: none; width: 14px; height: 14px; display: grid; place-items: center; color: #9a9a9a; }
+.menu-icon svg { width: 14px; height: 14px; }
+.menu-item:hover .menu-icon, .menu-item:focus-visible .menu-icon { color: var(--text); }
+.menu-item.danger .menu-icon { color: inherit; }
+.menu.with-icons > .menu-label, .menu.with-icons > .colors { padding-left: 34px; }
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 70; padding: 9px 14px; border-radius: 8px; background: #1f1f1f; border: 1px solid var(--border-2); color: var(--text); box-shadow: 0 12px 40px #000a; max-width: 70vw; }
 .toast.error { background: #2a1414; border-color: #5b2626; color: #fecaca; }
 .colors { display: flex; gap: 6px; padding: 4px 10px 6px; }
@@ -438,7 +449,8 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 
 .rpanel .side-title, .side-section .side-title { align-items: center; }
 .side-section .side-title { padding: 0 2px 6px 6px; }
-.rpanel .side-title { padding: 10px 12px 6px 14px; }
+/* 1.0.7: the right panels' titles sit on the same line as the left panel's title (.side-panel-title), the actions at the right edge. */
+.rpanel .side-title { min-height: 31px; padding: 5px var(--space-3) 2px 14px; }
 .brand-name { font-weight: 600; letter-spacing: .1px; color: #ececec; }
 
 /* ── brand: white wordmark with random color moments ──────────────────── */
@@ -562,7 +574,8 @@ select option { background: #171717; color: var(--text); }
 .re-del:disabled { opacity: .25; cursor: default; }
 
 /* cell table */
-.cell-table { grid-template-columns: 22px 120px 100px 105px minmax(160px, 1fr) 54px; }
+/* 1.0.7: the profile column fits "Claude Code" (it was cut to "Claude Co..."). */
+.cell-table { grid-template-columns: 22px minmax(96px, 120px) 124px 105px minmax(160px, 1fr) 54px; }
 .cell-table > span:last-child, .cell-table .hd:last-of-type { text-align: center; }
 .snip-btn { height: 28px; padding: 0 10px; flex: none; gap: 6px; }
 .prompt-wrap .input { height: 28px; }
@@ -633,6 +646,9 @@ select option { background: #171717; color: var(--text); }
 .titlebar .tb-btn { width: 26px; min-width: 26px; height: 26px; padding: 0; }
 .titlebar .tb-btn svg { width: 15px; height: 15px; }
 .titlebar .tb-btn.on { background: #252525; }
+/* 1.0.7: the title bar buttons in three groups (search | panels | settings), split by thin rules. */
+.row.tb-groups { gap: var(--space-1); }
+.tb-sep { flex: none; width: 1px; height: 14px; margin: 0 var(--space-2); background: var(--border-2); }
 
 /* snippet name hugs its tag */
 .snippet .s-name { flex: 0 1 auto; }
@@ -885,6 +901,18 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid var(--focus-ri
   .settings-nav { width: 150px; }
   .settings-content { padding: 0 8px 24px 0; }
 }
+/* 1.0.7: a narrow page (a small window, both side panels open) puts the sections above the content as a wrapping row, so the
+   rows keep their width instead of a 380px column beside the list. */
+@container (max-width: 680px) {
+  .settings-page { flex-direction: column; justify-content: flex-start; gap: var(--space-6); padding: var(--space-6) var(--space-6) 0; }
+  .settings-nav { width: auto; overflow: visible; }
+  .settings-nav-title { padding: 0 2px var(--space-4); }
+  .settings-search { margin-bottom: var(--space-4); }
+  .settings-nav [role=tablist] { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  .settings-nav button { width: auto; margin: 0; padding: 5px 9px; }
+  .settings-content { flex: 1; max-width: none; padding: 0 var(--space-2) var(--space-6) 0; }
+  .settings-content h2 { margin-bottom: var(--space-6); font-size: 16px; }
+}
 @container (max-width: 430px) {
   .setting-row { flex-wrap: wrap; gap: 8px; }
   .setting-copy { flex-basis: 100%; }
@@ -901,18 +929,6 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid var(--focus-ri
 .mcp-control.disabled .mcp-indicator { display: none; }
 .agent-mcp-status { color: #c6ad7c; font-size: 10px; }
 .agent-mcp-status.connected { color: #86cda0; }
-/* 1.0.7: a narrow page (a small window, both side panels open) puts the sections above the content as a wrapping row, so the
-   rows keep their width instead of a 380px column beside the list. */
-@container (max-width: 680px) {
-  .settings-page { flex-direction: column; justify-content: flex-start; gap: var(--space-6); padding: var(--space-6) var(--space-6) 0; }
-  .settings-nav { width: auto; overflow: visible; }
-  .settings-nav-title { padding: 0 2px var(--space-4); }
-  .settings-search { margin-bottom: var(--space-4); }
-  .settings-nav [role=tablist] { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-  .settings-nav button { width: auto; margin: 0; padding: 5px 9px; }
-  .settings-content { flex: 1; max-width: none; padding: 0 var(--space-2) var(--space-6) 0; }
-  .settings-content h2 { margin-bottom: var(--space-6); font-size: 16px; }
-}
 .link-confirm-address { padding: 12px; border: 1px solid #353535; border-radius: 6px; background: #111; word-break: break-all; white-space: pre-wrap; font-family: Consolas, monospace; }
 
 .role-select { display: inline-flex; align-items: center; justify-content: space-between; gap: 12px; text-align: left; min-height: 28px; cursor: pointer; background-image: none !important; padding: 4px 8px !important; }

@@ -100,7 +100,7 @@ export function AutomationPanel() {
       <button className={`btn small ${state.automation.paused ? 'paused' : ''}`} disabled={busy} onClick={() => void run('set_paused', { paused: !state.automation.paused })}>
         {tr(state.automation.paused ? 'Wznów automatyzację' : 'Wstrzymaj automatyzację')}
       </button>
-      <button className="btn small" aria-label={tr('Zamknij')} onClick={() => setUi({ automationOpen: false })}><IX /></button>
+      <button className="btn ghost icon" aria-label={tr('Zamknij')} title={tr('Zamknij')} onClick={() => setUi({ automationOpen: false })}><IX /></button>
     </div>
     <div className="automation-tabs" role="tablist" aria-label={tr('Zespół AI')}>
       {(['agents', 'tasks', 'messages', 'activity'] as const).map((item) => <button key={item} role="tab" aria-selected={tab === item} className={tab === item ? 'active' : ''} onClick={() => { setTab(item); setSelectedTaskId(null); setComposing(false); }}>
