@@ -223,7 +223,8 @@ export function createSshHandlers(deps: SshIpcDeps) {
     },
     async connect(raw: unknown): Promise<{ ok: true } | { ok: false; error: SshErrorCode }> {
       const p = S.connect.safeParse(raw);
-      if (!p.success) return { ok: false, error: 'unknown' };
+      // A request of the wrong shape is named as such (not "unknown"): nothing was sent to the server.
+      if (!p.success) return { ok: false, error: 'badRequest' };
       const state = deps.state();
       if (findCell(state, p.data.cellId)?.cell.ssh?.hostId !== p.data.hostId || !state.sshHosts.some((h) => h.id === p.data.hostId)) return { ok: false, error: 'hostMissing' };
       return deps.coordinator.connect(p.data);

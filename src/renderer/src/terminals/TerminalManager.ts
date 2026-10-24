@@ -12,7 +12,7 @@ import { AgentInference, keySequence, type InferredAgent, type ScreenLine, type 
 import { FailureScanner } from '../../../shared/outputFailure';
 import { isFocusOrMouseReport, isUserInput, sameDetail, StatusTracker, type CellStatus, type HookEvent, type HookInfo, type StatusCause, type StatusDetail, type StatusReason } from '../../../shared/status';
 import { hookDetail, StatusLog, type StatusTrigger } from '../../../shared/statusLog';
-import { parseShellMark } from '../../../shared/shellIntegration';
+import { parseShellMark, type ShellMarkKind } from '../../../shared/shellIntegration';
 import { sshModeReset } from '../../../shared/ssh';
 import { DEFAULT_SSH_THEME, sshThemeById } from '../../../shared/sshThemes';
 import type { RemoteListResult } from '../../../shared/remotePaths';
@@ -26,6 +26,7 @@ import { applyScrollback, DEFAULT_SCROLLBACK_LINES, MAX_WEBGL_CONTEXTS, PENDING_
 import { nextLossCount, planWebgl, webglBackoff, WebglLimit } from '../../../shared/webglPool';
 import { onWindowShown } from '../windowShown';
 import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
+import { cursorOffset, reflowedCursor, type WrapBuffer } from '../../../shared/cursorReflow';
 
 /** The background of a cell card (--card-bg in styles.css): a local terminal draws on the card itself (1.0.7). */
 export const CARD_BG = '#131313';
@@ -70,6 +71,8 @@ interface Entry {
   resizeObs: ResizeObserver | null;
   /** >0 while replayed history is being parsed: terminal query replies must not reach the pty. */
   replaying: number;
+  /** 1.0.7: the prompt marks seen in the replay being parsed (the last one, a C among them, the prompts), see replayedMarks. */
+  replayMarks: { last: ShellMarkKind; sawStart: boolean; prompts: number } | null;
   /** A fit asked for during a replay: it runs once the replay is parsed (a fit in between would parse it at the wrong size). */
   refitAfterReplay: boolean;
   /** The pty runs already and `lastSize` is its size (a replay told it): a presize must resize it too. */
@@ -267,7 +270,7 @@ class TerminalManager {
         e.infer.exited();
         e.term.write(inputModesOff(this.conpty(e)));
         if (!e.remote) e.term.write(`\r\n\x1b[90m[${tr('Terminal')} · ${tr('zakończony')}]\x1b[0m\r\n`);
-        this.setStatus(e, () => e.tracker.exited(), 'exit');
+        this.setStatus(e, () => e.tracker.exited(m.code), 'exit');
       }
       this.exitListeners.forEach((l) => l(m.id));
       return;
@@ -327,10 +330,15 @@ class TerminalManager {
     const segments = replaySegments(data, sizes);
     const ptySize = finalReplaySize(segments);
     e.replaying++;
+    e.replayMarks = null; // a replay is the whole history: only its own marks count
     writeReplaySegments(e.term, segments, () => {
       e.replaying--;
       if (ptySize) { e.lastSize = ptySize; e.ptyLive = true; } // what the pty has now: the fit below resizes it when the box differs
       if (e.replaying > 0 || this.entries.get(e.id) !== e) return;
+      // The shell still runs where the history left it (at its prompt, or in a command): the status starts from there.
+      const marks = e.replayMarks;
+      e.replayMarks = null;
+      if (marks) this.setStatus(e, () => e.tracker.replayedMarks(marks, performance.now()), 'shell');
       if (ptySize || e.refitAfterReplay) {
         e.refitAfterReplay = false;
         if (this.fitHolds > 0) this.heldFits.add(e); else this.refit(e);
@@ -389,7 +397,7 @@ class TerminalManager {
 
     const entry: Entry = {
       id: cellId, term, fit, webgl: null, shownAt: 0, outputAt: undefined, webglChangedAt: undefined, webglBlockedUntil: undefined, webglGl: null, webglGrantedAt: -Infinity, webglLosses: 0, host, tracker: new StatusTracker(), win32: false, agent: opts.agent,
-      codex: opts.codex === true, scanner: new FailureScanner(), guard: new MouseFloodGuard(), infer: new AgentInference(window.mc.platform === 'win32' && opts.remote !== true), attachedTo: null, resizeObs: null, replaying: 0, refitAfterReplay: false, ptyLive: false, lastSize: { cols: term.cols, rows: term.rows },
+      codex: opts.codex === true, scanner: new FailureScanner(), guard: new MouseFloodGuard(), infer: new AgentInference(window.mc.platform === 'win32' && opts.remote !== true), attachedTo: null, resizeObs: null, replaying: 0, replayMarks: null, refitAfterReplay: false, ptyLive: false, lastSize: { cols: term.cols, rows: term.rows },
       parkedSelection: null, applySelection: null, remote: opts.remote === true, addon: null,
     };
     entry.tracker.setCodex(entry.codex);
@@ -437,6 +445,10 @@ class TerminalManager {
     const shellMark = (payload: string) => {
       const mark = parseShellMark(payload);
       if (mark && entry.replaying === 0) this.setStatus(entry, () => entry.tracker.shellMark(mark.kind, performance.now(), mark.code), 'shell');
+      else if (mark && mark.kind !== 'D') {
+        const seen = entry.replayMarks;
+        entry.replayMarks = { last: mark.kind, sawStart: (seen?.sawStart ?? false) || mark.kind === 'C', prompts: (seen?.prompts ?? 0) + (mark.kind === 'A' ? 1 : 0) };
+      }
       return true;
     };
     term.parser.registerOscHandler(133, shellMark);
@@ -747,13 +759,36 @@ class TerminalManager {
     e.attachedTo = null;
   }
 
+  /**
+   * fit() of a terminal. A ConPTY terminal reflows the line with the cursor (reflowCursorLine) but xterm leaves the cursor's
+   * column as it was; it goes back to its place in the reflowed line, where ConPTY has it (shared/cursorReflow.ts, 1.0.7).
+   */
+  private fitTerm(e: Entry): void {
+    const view = (): WrapBuffer => {
+      const b = e.term.buffer.active;
+      return { cursorRow: b.baseY + b.cursorY, cursorX: b.cursorX, isWrapped: (row) => b.getLine(row)?.isWrapped === true };
+    };
+    // Only a terminal at rest (a prompt): with output still on its way the parsed buffer is not where ConPTY's cursor is.
+    const quiet = e.outputAt === undefined || performance.now() - e.outputAt > 250;
+    const track = e.term.options.reflowCursorLine === true && e.term.buffer.active.type === 'normal' && quiet && e.tracker.status !== 'working';
+    const cols = e.term.cols;
+    const offset = track ? cursorOffset(view(), cols) : 0;
+    e.fit.fit();
+    if (!track || e.term.cols === cols) return;
+    const to = reflowedCursor(view(), offset, e.term.cols);
+    if (!to) return;
+    const y = to.row - e.term.buffer.active.baseY;
+    if (y < 0 || y >= e.term.rows) return;
+    e.term.write(`[${y + 1};${to.x + 1}H`); // to the terminal only: nothing reaches the pty
+  }
+
   private refit(e: Entry): void {
     if (e.replaying > 0) { e.refitAfterReplay = true; return; }
     if (!e.attachedTo || !e.attachedTo.isConnected || !this.windowShown) return; // a hidden window refits on show
     const { clientWidth, clientHeight } = e.attachedTo;
     if (clientWidth < 20 || clientHeight < 20) return;
     try {
-      e.fit.fit();
+      this.fitTerm(e);
     } catch {
       return;
     }
@@ -775,7 +810,7 @@ class TerminalManager {
     e.host.style.width = `${Math.floor(width)}px`;
     e.host.style.height = `${Math.floor(height)}px`;
     try {
-      e.fit.fit();
+      this.fitTerm(e);
       const changed = e.term.cols !== e.lastSize.cols || e.term.rows !== e.lastSize.rows;
       e.lastSize = { cols: e.term.cols, rows: e.term.rows };
       // An adopted pty (replayed) is not spawned at this size: it has to be told.

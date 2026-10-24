@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { cleanEnv } from '../src/shared/env';
-import { buildCliCommand, buildLaunchCommand, DEFAULT_PROFILES, posixQuote, psQuote, shownProfileName } from '../src/shared/profiles';
+import { buildCliCommand, buildLaunchCommand, DEFAULT_PROFILES, cellShell, posixQuote, psQuote, shownProfileName } from '../src/shared/profiles';
+import { addProject, addTab, defaultState, normalizeState } from '../src/shared/state';
+import { layoutForCount } from '../src/shared/layout';
 import { INPUT_MODES_OFF } from '../src/shared/termReset';
 
 const P = Object.fromEntries(DEFAULT_PROFILES.map((p) => [p.id, p]));
@@ -170,4 +172,27 @@ describe('shownProfileName', () => {
     expect(shownProfileName({ id: 'wsl', name: 'PowerShell', cli: 'shell' }, 'cmd')).toBe('PowerShell');
     expect(shownProfileName(DEFAULT_PROFILES[0], 'cmd')).toBe('Claude');
   });
+
+  it('1.0.7: a running cell keeps the name of the shell it was started with when Settings change', () => {
+    expect(shownProfileName(shell, cellShell({ shell: 'cmd' }, 'pwsh'), () => 'Wiersz polecenia')).toBe('Wiersz polecenia');
+    expect(shownProfileName(shell, cellShell({}, 'pwsh'))).toBe('PowerShell');
+    expect(cellShell(undefined, 'bash')).toBe('bash');
+  });
+
+  it('1.0.7: the recorded shell of a cell is dropped on load (nothing runs after a restart of the app)', () => {
+    const s = createProjectState();
+    const loaded = normalizeState(JSON.parse(JSON.stringify(s.withShell)), 'win32')!;
+    expect(loaded.projects[0].tabs[0].cells[0].shell).toBeUndefined();
+    expect(loaded.projects[0].tabs[0].cells[0].pathMode).toBe('shell');
+  });
 });
+
+function createProjectState() {
+  let st = defaultState('win32');
+  st = addProject(st, { name: 'P', path: 'C:\\p' });
+  const projectId = st.projects[0].id;
+  st = addTab(st, projectId, { name: 'G', layout: layoutForCount(1), cells: [{ profileId: 'shell' }] });
+  const tab = st.projects[0].tabs[0];
+  const withShell = { ...st, projects: [{ ...st.projects[0], tabs: [{ ...tab, cells: [{ ...tab.cells[0], shell: 'cmd' as const, pathMode: 'shell' as const }] }] }] };
+  return { withShell };
+}

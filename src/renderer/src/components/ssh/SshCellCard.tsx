@@ -5,7 +5,7 @@ import { type SshHost, type SshPrompt, type SshSessionState } from '../../../../
 import { useI18n } from '../../i18n';
 import { connectCell } from '../../ssh';
 import { connectCardShown } from '../../../../shared/sshConnect';
-import { SshConnectCard, SshPanelHead } from './SshConnectCard';
+import { SshConnectCard } from './SshConnectCard';
 import './ssh.css';
 
 export function SshCellCard({ cellId, host, session, prompt }: { cellId: string; host: SshHost | undefined; session: SshSessionState | undefined; prompt: SshPrompt | undefined }) {
@@ -21,8 +21,8 @@ export function SshCellCard({ cellId, host, session, prompt }: { cellId: string;
   if ((session?.phase ?? 'idle') !== 'idle') return null;
   return (
     <div className="ssh-card ssh-idle" role="group" aria-label={host.label}>
+      {/* 1.0.7: no host head here - the cell's own header already names the host and user@address right above. */}
       <div className="ssh-frame"><div className="ssh-panel">
-        <SshPanelHead host={host} />
         <p className="ssh-panel-note">{tr('Sesja SSH nie jest wznawiana po ponownym uruchomieniu aplikacji')}</p>
         <div className="ssh-connect-actions">
           <button className="btn small primary" autoFocus onClick={() => void connectCell(cellId)}>{tr('Połącz')}</button>

@@ -49,3 +49,6 @@
 /* Settings > SSH: the items of the bar as a row of checkboxes. */
 .ssh-bar-setting-items { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px 14px; }
 .ssh-bar-setting-items label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.ssh-bar-setting-off { opacity: .45; }
+.ssh-bar-setting-off input { filter: grayscale(1); }
+.ssh-bar-setting-items label:has(input:disabled) { cursor: default; }

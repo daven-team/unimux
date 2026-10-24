@@ -226,6 +226,9 @@ export async function spawnCell(cellId: string, mode: 'new' | 'resume'): Promise
     update((s) => updateCell(s, cellId, { session }));
   }
 
+  // The cell is named after the shell it starts with until its next start (Settings > Terminal may change meanwhile).
+  const shell = getS().settings.shell;
+  if (findCell(getS(), cellId)?.cell.shell !== shell) update((s) => updateCell(s, cellId, { shell }));
   terminals.prepareSpawn(cellId, mode === 'resume' && sameCli ? cell.session : undefined);
   setUi((ui) => {
     const { [cellId]: _, ...rest } = ui.cellErrors;

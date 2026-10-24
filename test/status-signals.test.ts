@@ -387,3 +387,47 @@ describe('agent cells with prompt marks: the CLI ends', () => {
     expect(s.t.detail).toEqual({ kind: 'input' });
   });
 });
+
+describe('1.0.7 fixes: replayed marks, exit codes', () => {
+  it('a cmd.exe cell moved to another window (replay ending at its prompt): the first command is exact at once', () => {
+    const s = sim({ agent: false });
+    s.t.replayedMarks({ last: 'B', sawStart: false, prompts: 3 }, 0);
+    expect(s.t.status).toBe('idle');
+    s.input(1000, true);
+    expect(s.t.status).toBe('working');
+    expect(s.t.detail).toEqual({ kind: 'command' });
+    s.run(1000, 4000); // a 3 s ping: silence never ends it
+    expect(s.t.status).toBe('working');
+    s.mark(4000, 'D'); s.mark(4000, 'A');
+    expect(s.t.status).toBe('idle'); // quick: no "waiting for you"
+    expect(s.changes.some((c) => c.to === 'waiting')).toBe(false);
+  });
+
+  it('a replay that ends inside a command (pwsh C) keeps the cell working until its prompt', () => {
+    const s = sim({ agent: false });
+    s.t.replayedMarks({ last: 'C', sawStart: true, prompts: 2 }, 0);
+    expect(s.t.status).toBe('working');
+    s.run(0, 20_000);
+    expect(s.t.status).toBe('working');
+    s.mark(20_000, 'D', 0); s.mark(20_000, 'A');
+    expect(s.t.status).toBe('waiting');
+  });
+
+  it('an agent cell whose replay shows a prompt after its C is a shell again', () => {
+    const s = sim({ agent: true });
+    s.t.replayedMarks({ last: 'B', sawStart: true, prompts: 2 }, 0);
+    s.mark(1000, 'C');
+    expect(s.t.status).toBe('working');
+    expect(s.t.detail).toEqual({ kind: 'command' });
+  });
+
+  it('the process of the cell ends with its exit code; 0 is no detail', () => {
+    const a = new StatusTracker();
+    a.exited(3);
+    expect(a.status).toBe('exited');
+    expect(a.detail).toEqual({ kind: 'exit-code', code: 3 });
+    const b = new StatusTracker();
+    b.exited(0);
+    expect(b.detail).toBeUndefined();
+  });
+});

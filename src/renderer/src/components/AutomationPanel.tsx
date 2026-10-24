@@ -1,5 +1,5 @@
 import { Select } from './Select';
-import { shownProfileName } from '../../../shared/profiles';
+import { cellShell, shownProfileName } from '../../../shared/profiles';
 import { RoleSelect } from './RoleSelect';
 import { changeAgentRole } from '../agentRoles';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
@@ -119,7 +119,7 @@ export function AutomationPanel() {
       }}>
         <label>{tr('Odbiorca')}<Select className="select" value={targetId} disabled={busy || !recipients.length} onChange={(e) => setTarget(e.target.value)}>
           {!recipients.length && <option value="">{tr('Brak agentów')}</option>}
-          {recipients.map(({ cell, grid }) => <option key={cell.id} value={cell.id}>{grid.name} · {cell.name ?? shownProfileName(getProfile(state, cell.profileId), state.settings.shell, tr)}</option>)}
+          {recipients.map(({ cell, grid }) => <option key={cell.id} value={cell.id}>{grid.name} · {cell.name ?? shownProfileName(getProfile(state, cell.profileId), cellShell(cell, state.settings.shell), tr)}</option>)}
         </Select></label>
         {tab === 'tasks' && <label>{tr('Tytuł zadania')}<input className="input" disabled={busy} required maxLength={140} value={title} onChange={(e) => setTitle(e.target.value)} /></label>}
         <label>{tr(tab === 'tasks' ? 'Treść zadania' : 'Wiadomość')}<textarea className="textarea" disabled={busy} required maxLength={32000} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></label>
@@ -131,7 +131,7 @@ export function AutomationPanel() {
           <p className="muted">{tr('Koordynator może tworzyć zespoły i przydzielać zadania innym agentom.')}</p>
           {!agents.length && <p className="automation-empty">{tr('Brak agentów')}</p>}
           {agents.map(({ cell, grid }) => <article className="automation-card" key={cell.id}>
-            <div className="row"><strong>{cell.name ?? shownProfileName(getProfile(state, cell.profileId), state.settings.shell, tr)}</strong><span className="grow" /><span className="muted">{tr(runtimeLabels[runtime[cell.id] ?? 'unknown'])}</span></div>
+            <div className="row"><strong>{cell.name ?? shownProfileName(getProfile(state, cell.profileId), cellShell(cell, state.settings.shell), tr)}</strong><span className="grow" /><span className="muted">{tr(runtimeLabels[runtime[cell.id] ?? 'unknown'])}</span></div>
             {cell.role && <span className={`agent-mcp-status ${info.connectedCellIds?.includes(cell.id) ? 'connected' : ''}`}>{tr(info.connectedCellIds?.includes(cell.id) ? 'MCP działa' : info.configuredCellIds?.includes(cell.id) ? 'MCP skonfigurowane · oczekiwanie na agenta' : 'Wymaga restartu')}
               {!info.configuredCellIds?.includes(cell.id) && <button className="btn small" onClick={() => void changeAgentRole(cell.id, cell.role!)}>{tr('Uruchom ponownie')}</button>}</span>}
             <span className="muted">{grid.name}{cell.worktree ? ` · ${cell.worktree.branch}` : ''}</span>

@@ -175,7 +175,10 @@ export async function connectCell(cellId: string, opts: { restoreCwd?: boolean }
     useSshConnectStore.getState().apply(cellId, { kind: 'start', at: Date.now(), ctx: connectContext(ref.hostId) });
     useSshStore.getState().setSession({ cellId, hostId: ref.hostId, phase: 'connecting', since: Date.now() });
   }
-  const { cols, rows } = terminals.size(cellId);
+  // A cell not laid out yet (hidden, a tab in the background) may report a size main refuses: ask for a sane one.
+  const size = terminals.size(cellId);
+  const cols = Math.min(2000, Math.max(2, Math.round(size.cols) || 80));
+  const rows = Math.min(1000, Math.max(1, Math.round(size.rows) || 24));
   const result = await window.mc.ssh.connect({ cellId, hostId: ref.hostId, cols, rows, ...(opts.restoreCwd ? { restoreCwd: true } : {}) });
   // A refusal before any session event: the same path as an event, so the card shows the failure.
   if (!result.ok) onSession({ cellId, hostId: ref.hostId, phase: 'error', error: result.error, since: Date.now() });

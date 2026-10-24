@@ -7,6 +7,8 @@ import { createProject, quickTab, swapCellSlots } from '../actions';
 import { playCellMotion } from '../gridMotion';
 import { setUi, update, useStore } from '../store';
 import { profileOptionLabel } from '../cliUi';
+import { cellShell, shownProfileName } from '../../../shared/profiles';
+import { sshHeaderName } from '../../../shared/ssh';
 import { useCellDrag, type DragContext } from './useCellDrag';
 import { CellView } from './CellView';
 import { CellFallback, ErrorBoundary } from './ErrorBoundary';
@@ -49,6 +51,13 @@ export const GridView = memo(function GridView() {
   const dragProfile = useStore((st) => {
     const moving = drag && activeTab(activeProject(st.s))?.cells.find((c) => c.id === drag.id);
     return moving ? getProfile(st.s, moving.profileId) : undefined;
+  });
+  // The ghost names the cell as its header does: an SSH cell after its host, a shell after the shell it really runs.
+  const dragName = useStore((st) => {
+    const moving = drag && activeTab(activeProject(st.s))?.cells.find((c) => c.id === drag.id);
+    if (!moving) return undefined;
+    if (moving.ssh) return sshHeaderName(moving.name) || st.s.sshHosts.find((h) => h.id === moving.ssh!.hostId)?.label;
+    return shownProfileName(getProfile(st.s, moving.profileId), cellShell(moving, st.s.settings.shell), tr);
   });
   const dragTitle = useStore((st) => {
     const moving = drag && activeTab(activeProject(st.s))?.cells.find((c) => c.id === drag.id);
@@ -129,7 +138,7 @@ export const GridView = memo(function GridView() {
   const canDrag = !maxCell && tab.cells.length > 1;
   const dragged = drag ? tab.cells.find((c) => c.id === drag.id) : undefined;
   const targetIndex = drag?.target ? tab.cells.findIndex((c) => c.id === drag.target) : -1;
-  const draggedLabel = dragged && (dragged.name ?? dragTitle ?? dragProfile?.name);
+  const draggedLabel = dragged && (dragged.name ?? dragTitle ?? dragName);
   return (
     <div ref={gridRef} className={`grid ${preview ? 'resizing' : ''} ${drag ? 'dragging' : ''}`}>
       {tab.cells.map((cell, i) => {
