@@ -1,7 +1,14 @@
 import { useShortcutText } from '../shortcuts';
 import { useI18n } from '../i18n';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { fuzzyFilter } from '../../../shared/fuzzy';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  IBranch, IDatabase, IFolder, IGrid, IHistory, IKey, IMax, IPlus, IPrompt, IRestart, IServer, ISettings, ISidebar, ISnippet, IUpload, IX,
+  IArrowLeft, IArrowRight, IArrowUp,
+} from './icons';
+import { ICodeEditor, ICopy, IMoveDown, IRefresh } from './menuIcons';
+import { ICalendar, ICapture, INoteBlank } from './notesIcons';
+import { strictFieldFilter } from '../../../shared/fuzzy';
+import type { MessageKey } from '../../../shared/i18n';
 import { describeLayout } from '../../../shared/layout';
 import { activeProject, activeTab } from '../../../shared/state';
 import type { SessionInfo } from '../../../shared/types';
@@ -25,7 +32,22 @@ interface Item {
   kind: string;
   title: string;
   desc?: string;
+  /** 1.0.7: a 14px icon like the menus'; without one the row shows its kind's icon. */
+  icon?: ReactNode;
   run: (shift: boolean) => void;
+}
+
+/** The icon of a row without its own: by its kind (projects, tabs, snippets, notes, sessions…). */
+function kindIcon(kind: string, tr: (key: MessageKey) => string): ReactNode {
+  if (kind === tr('Projekt')) return <IFolder />;
+  if (kind === tr('Zakładka') || kind === tr('Preset')) return <IGrid />;
+  if (kind === tr('Snippet')) return <ISnippet />;
+  if (kind === tr('Notatka')) return <INoteBlank />;
+  if (kind === tr('Baza danych') || kind === 'Redis') return <IDatabase />;
+  if (kind === tr('Historia')) return <IHistory />;
+  if (kind === '+ agent') return <IPlus />;
+  // Terminal profiles and resumable sessions of a CLI.
+  return <IPrompt />;
 }
 
 export function CommandPalette() {
@@ -56,46 +78,47 @@ function PaletteInner() {
     const tab = activeTab(project);
     const focused = getUi().focusedCellId;
     // actions first so short queries like "his" / "ust" find them
-    out.push({ kind: tr('Akcja'), title: tr("Nowy projekt") + '…', run: () => void createProject() });
+    out.push({ kind: tr('Akcja'), title: tr("Nowy projekt") + '…', icon: <IPlus />, run: () => void createProject() });
     // SSH editors need no project: after "Nowy terminal (zakładka)" with a project (L16), right here without one.
     const ssh: Item[] = [
-      { kind: tr('Akcja'), title: tr('SSH: hosty i klucze'), run: () => openSshView() },
-      { kind: tr('Akcja'), title: tr('SSH: nowy host'), run: () => openSshView({ kind: 'host' }) },
-      { kind: tr('Akcja'), title: tr('SSH: nowy klucz'), run: () => openSshView({ kind: 'newKey' }) },
-      { kind: tr('Akcja'), title: tr('SFTP: połącz z hostem…'), run: () => openSftp({ picker: true }) },
+      { kind: tr('Akcja'), title: tr('SSH: hosty i klucze'), icon: <IServer />, run: () => openSshView() },
+      { kind: tr('Akcja'), title: tr('SSH: nowy host'), icon: <IServer />, run: () => openSshView({ kind: 'host' }) },
+      { kind: tr('Akcja'), title: tr('SSH: nowy klucz'), icon: <IKey />, run: () => openSshView({ kind: 'newKey' }) },
+      { kind: tr('Akcja'), title: tr('SFTP: połącz z hostem…'), icon: <IUpload />, run: () => openSftp({ picker: true }) },
     ];
     if (!project) out.push(...ssh);
     if (project) {
-      out.push({ kind: tr('Akcja'), title: tr("Nowy grid / preset…"), desc: keys('grid.new') || undefined, run: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) });
-      out.push({ kind: tr('Akcja'), title: tr("Nowy terminal (zakładka)"), desc: keys('terminal.new') || undefined, run: () => quickTab() });
+      out.push({ kind: tr('Akcja'), title: tr("Nowy grid / preset…"), icon: <IGrid />, desc: keys('grid.new') || undefined, run: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) });
+      out.push({ kind: tr('Akcja'), title: tr("Nowy terminal (zakładka)"), icon: <IPrompt />, desc: keys('terminal.new') || undefined, run: () => quickTab() });
       out.push(...ssh);
-      if (tab?.cells.some((c) => c.ssh)) out.push({ kind: tr('Akcja'), title: tr('SSH: wysyłanie masowe'), run: () => setUi({ modal: { kind: 'broadcast', projectId: project.id, tabId: tab.id } }) });
-      if (tab && reconnectAllTargetsOf(project.id, tab.id).length) out.push({ kind: tr('Akcja'), title: tr('SSH: połącz ponownie wszystkie'), run: () => reconnectAllSsh(project.id, tab.id) });
-      out.push({ kind: tr('Akcja'), title: tr("Historia projektu"), desc: keys('history.open') || undefined, run: () => setUi({ modal: { kind: 'history', projectId: project.id } }) });
-      out.push({ kind: tr('Akcja'), title: tr("Otwórz folder projektu"), run: () => window.mc.openPath(project.path) });
-      out.push({ kind: tr('Akcja'), title: tr("Otwórz projekt w Cursorze"), run: () => window.mc.openInEditor(project.path) });
-      if (tab) out.push({ kind: tr('Akcja'), title: tr('Zamknij zakładkę „{name}”', { name: tab.name }), desc: keys('tab.close') || undefined, run: () => void closeTab(project.id, tab.id) });
+      if (tab?.cells.some((c) => c.ssh)) out.push({ kind: tr('Akcja'), title: tr('SSH: wysyłanie masowe'), icon: <IServer />, run: () => setUi({ modal: { kind: 'broadcast', projectId: project.id, tabId: tab.id } }) });
+      if (tab && reconnectAllTargetsOf(project.id, tab.id).length) out.push({ kind: tr('Akcja'), title: tr('SSH: połącz ponownie wszystkie'), icon: <IRefresh />, run: () => reconnectAllSsh(project.id, tab.id) });
+      out.push({ kind: tr('Akcja'), title: tr("Historia projektu"), icon: <IHistory />, desc: keys('history.open') || undefined, run: () => setUi({ modal: { kind: 'history', projectId: project.id } }) });
+      out.push({ kind: tr('Akcja'), title: tr("Otwórz folder projektu"), icon: <IFolder />, run: () => window.mc.openPath(project.path) });
+      out.push({ kind: tr('Akcja'), title: tr("Otwórz projekt w Cursorze"), icon: <ICodeEditor />, run: () => window.mc.openInEditor(project.path) });
+      if (tab) out.push({ kind: tr('Akcja'), title: tr('Zamknij zakładkę „{name}”', { name: tab.name }), icon: <IX />, desc: keys('tab.close') || undefined, run: () => void closeTab(project.id, tab.id) });
     }
     if (focused) {
-      out.push({ kind: tr('Akcja'), title: tr("Maksymalizuj / przywróć komórkę"), desc: keys('cell.maximize') || undefined, run: () => toggleMaximize(focused) });
-      out.push({ kind: tr('Akcja'), title: tr("Komórka: wznów rozmowę od nowa (restart)"), run: () => restartCell(focused, 'resume') });
-      out.push({ kind: tr('Akcja'), title: tr("Komórka: nowa rozmowa"), run: () => restartCell(focused, 'new') });
-      out.push({ kind: tr('Akcja'), title: tr("Komórka: zresetuj terminal (tryby myszy i klawiatury)"), run: () => { terminals.resetInput(focused); toast(tr("Terminal zresetowany - historia została zachowana.")); } });
+      out.push({ kind: tr('Akcja'), title: tr("Maksymalizuj / przywróć komórkę"), icon: <IMax />, desc: keys('cell.maximize') || undefined, run: () => toggleMaximize(focused) });
+      out.push({ kind: tr('Akcja'), title: tr("Komórka: wznów rozmowę od nowa (restart)"), icon: <IRestart />, run: () => restartCell(focused, 'resume') });
+      out.push({ kind: tr('Akcja'), title: tr("Komórka: nowa rozmowa"), icon: <IPlus />, run: () => restartCell(focused, 'new') });
+      out.push({ kind: tr('Akcja'), title: tr("Komórka: zresetuj terminal (tryby myszy i klawiatury)"), icon: <IRefresh />, run: () => { terminals.resetInput(focused); toast(tr("Terminal zresetowany - historia została zachowana.")); } });
       const moves: Array<[string, string, number, number]> = [
         [tr('Komórka: przesuń w lewo'), 'left', -1, 0], [tr('Komórka: przesuń w prawo'), 'right', 1, 0],
         [tr('Komórka: przesuń w górę'), 'up', 0, -1], [tr('Komórka: przesuń w dół'), 'down', 0, 1],
       ];
-      for (const [title, arrow, dx, dy] of moves) out.push({ kind: tr('Akcja'), title, desc: keys(`cell.move.${arrow}`) || undefined, run: () => moveCellBy(dx, dy) });
+      const arrowIcon: Record<string, ReactNode> = { left: <IArrowLeft />, right: <IArrowRight />, up: <IArrowUp />, down: <IMoveDown /> };
+      for (const [title, arrow, dx, dy] of moves) out.push({ kind: tr('Akcja'), title, icon: arrowIcon[arrow], desc: keys(`cell.move.${arrow}`) || undefined, run: () => moveCellBy(dx, dy) });
     }
-    out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj snippety"), desc: keys('snippets.toggle') || undefined, run: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) });
-    out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj notatki"), desc: keys('notes.toggle') || undefined, run: () => update((st) => ({ ...st, notesOpen: !st.notesOpen })) });
-    out.push({ kind: tr('Akcja'), title: tr('Notatki: nowa notatka'), run: () => createNote() });
-    out.push({ kind: tr('Akcja'), title: tr('Notatki: notatka dzienna'), run: () => createNote('daily') });
-    out.push({ kind: tr('Akcja'), title: tr('Notatki: nowa z zaznaczonego tekstu'), desc: keys('notes.capture') || undefined, run: () => captureSelectionToNote() });
-    out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj panel projektów"), desc: keys('sidebar.toggle') || undefined, run: () => update((st) => ({ ...st, sidebarCollapsed: !st.sidebarCollapsed })) });
-    out.push({ kind: tr('Akcja'), title: tr('Panel: Git'), run: () => { openSidebarPanel('git'); } });
-    out.push({ kind: tr('Akcja'), title: tr('Bazy danych: nowe połączenie'), run: () => setUi({ modal: { kind: 'dbConnection', dbKind: 'postgres' } }) });
-    out.push({ kind: tr('Akcja'), title: tr('Bazy danych: otwórz połączenie…'), run: () => { openSidebarPanel('db'); } });
+    out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj snippety"), icon: <ISnippet />, desc: keys('snippets.toggle') || undefined, run: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) });
+    out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj notatki"), icon: <INoteBlank />, desc: keys('notes.toggle') || undefined, run: () => update((st) => ({ ...st, notesOpen: !st.notesOpen })) });
+    out.push({ kind: tr('Akcja'), title: tr('Notatki: nowa notatka'), icon: <INoteBlank />, run: () => createNote() });
+    out.push({ kind: tr('Akcja'), title: tr('Notatki: notatka dzienna'), icon: <ICalendar />, run: () => createNote('daily') });
+    out.push({ kind: tr('Akcja'), title: tr('Notatki: nowa z zaznaczonego tekstu'), icon: <ICapture />, desc: keys('notes.capture') || undefined, run: () => captureSelectionToNote() });
+    out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj panel projektów"), icon: <ISidebar />, desc: keys('sidebar.toggle') || undefined, run: () => update((st) => ({ ...st, sidebarCollapsed: !st.sidebarCollapsed })) });
+    out.push({ kind: tr('Akcja'), title: tr('Panel: Git'), icon: <IBranch />, run: () => { openSidebarPanel('git'); } });
+    out.push({ kind: tr('Akcja'), title: tr('Bazy danych: nowe połączenie'), icon: <IDatabase />, run: () => setUi({ modal: { kind: 'dbConnection', dbKind: 'postgres' } }) });
+    out.push({ kind: tr('Akcja'), title: tr('Bazy danych: otwórz połączenie…'), icon: <IDatabase />, run: () => { openSidebarPanel('db'); } });
     for (const c of s.dbConnections) {
       out.push({ kind: tr('Baza danych'), title: c.name, desc: `${dbKindLabel(c)} · ${dbEndpoint(c)}`, run: () => {
         openSidebarPanel('db');
@@ -104,9 +127,9 @@ function PaletteInner() {
         void revealConnection(c.id).then((error) => { if (error) toast(error, 'error'); });
       } });
     }
-    out.push({ kind: tr('Akcja'), title: tr("Nowy snippet") + '…', run: () => setUi({ modal: { kind: 'snippet', snippetId: null } }) });
-    out.push({ kind: tr('Akcja'), title: tr("Ustawienia"), run: () => setUi({ settingsTabOpen: true, settingsActive: true }) });
-    out.push({ kind: tr('Akcja'), title: tr('Skopiuj dziennik statusów'), run: () => {
+    out.push({ kind: tr('Akcja'), title: tr("Nowy snippet") + '…', icon: <ISnippet />, run: () => setUi({ modal: { kind: 'snippet', snippetId: null } }) });
+    out.push({ kind: tr('Akcja'), title: tr("Ustawienia"), icon: <ISettings />, run: () => setUi({ settingsTabOpen: true, settingsActive: true }) });
+    out.push({ kind: tr('Akcja'), title: tr('Skopiuj dziennik statusów'), icon: <ICopy />, run: () => {
       if (!statusLog.size) { toast(tr('Dziennik statusów jest jeszcze pusty')); return; }
       window.mc.clipboardWrite(statusLog.toText());
       toast(tr('Skopiowano dziennik statusów. Wpisów: {count}', { count: statusLog.size }));
@@ -145,7 +168,8 @@ function PaletteInner() {
   }, [s, sessions, project, tr, cliStatus, keys]);
 
   // Only a new query or new items filter again; moving the highlight (mouse, arrows) just re-renders the list.
-  const results = useMemo(() => fuzzyFilter(items, q, (i) => `${i.title} ${i.kind} ${i.desc ?? ''}`, 80), [items, q]);
+  // 1.0.7: strict matching (word starts and contiguous runs, the title first), no scattered single letters.
+  const results = useMemo(() => strictFieldFilter(items, q, (i) => [i.title, i.kind, i.desc ?? ''], 80), [items, q]);
   useEffect(() => setSel(0), [q]);
   useEffect(() => {
     listRef.current?.querySelector('.palette-item.sel')?.scrollIntoView({ block: 'nearest' });
@@ -177,6 +201,7 @@ function PaletteInner() {
             <div key={i} className={`palette-item ${i === sel ? 'sel' : ''}`} onMouseMove={() => { if (i !== sel) setSel(i); }} onClick={(e) => run(item, e.shiftKey)}>
               {/* 1.0.7: the kind names a run of items once (its first row), not every row. */}
               <span className="kind">{results[i - 1]?.kind === item.kind ? '' : item.kind}</span>
+              <span className="picon" aria-hidden="true">{item.icon ?? kindIcon(item.kind, tr)}</span>
               <span className="ptitle">{item.title}</span>
               {item.desc && <span className="pdesc">{item.desc}</span>}
             </div>
