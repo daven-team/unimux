@@ -11,27 +11,16 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
   assert.equal(await evaluate('document.querySelectorAll(".workspace-tabs .tab").length >= 2'), true);
   assert.equal(await evaluate('document.querySelectorAll(".sidebar .list-drag-grip, .explorer-foot").length'), 0);
   assert.equal(await evaluate('document.querySelectorAll(".project[draggable=true]").length'), 3);
+  // 1.0.7 card header: the name and the muted details share one baseline (the details are smaller on purpose).
   assert.ok(await evaluate(`(() => {
     const head = document.querySelector('.cell-head');
-    const status = document.createElement('span');
-    status.className = 'status-text working';
-    status.textContent = 'working…';
-    head.querySelector('.cell-heading').append(status);
-    try {
-      const elements = [head.querySelector('.cell-name'), head.querySelector('.profile'), status];
-      const styles = elements.map(el => getComputedStyle(el));
-      const centers = elements.map(el => {
-        const target = el.querySelector('.profile-name') ?? el;
-        const text = [...target.childNodes].find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
-        const range = document.createRange();
-        range.selectNodeContents(text);
-        const rect = range.getBoundingClientRect();
-        return rect.y + rect.height / 2;
-      });
-      return styles.every(style => style.fontSize === styles[0].fontSize)
-        && Math.max(...centers) - Math.min(...centers) < 1;
-    } finally { status.remove(); }
-  })()`), 'cell title, profile and working status use aligned text');
+    const name = head?.querySelector('.cell-name');
+    const meta = head?.querySelector('.cell-meta .meta-item');
+    if (!name) return false;
+    if (!meta) return true;
+    const center = (el) => { const r = el.getBoundingClientRect(); return r.y + r.height / 2; };
+    return Math.abs(center(name) - center(meta)) < 2;
+  })()`), 'cell name and details are aligned in the card header');
   assert.equal(await evaluate('document.querySelectorAll(".brand .brand-version").length'), 0);
   await until(() => evaluate(`document.querySelector('.statusbar .sb-version')?.textContent === ${JSON.stringify(`v${version}`)}`), 'running version in footer');
   assert.ok(await evaluate('!document.querySelector(".statusbar").textContent.toLowerCase().includes("unimux")'), 'footer omits brand name');

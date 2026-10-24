@@ -10,6 +10,7 @@ import type { ChangelogResult } from '../shared/changelog';
 import type { AlertEventId } from '../shared/alerts';
 import type { UsageState } from '../shared/usage';
 import type { MonitorSample } from '../shared/monitor';
+import type { ContextUsage } from '../shared/contextUsage';
 import type { AdoptCopyResult, LoginRequest, LoginState, SwapResult } from '../shared/accounts';
 import type { ReplaceRequest, ReplaceResult, SearchOptions, SearchResult } from '../shared/search';
 import type { CreateResult, DeleteResult, FileOpProgress, FileOpRequest, FileOpResult, RenameResult } from '../shared/fileOps';
@@ -19,7 +20,7 @@ import type { SshApi, SshPrompt, SshSessionState, SshVaultInfo } from '../shared
 import type { LocalFilesApi, SftpApi, SftpSessionState } from '../shared/sftp';
 import type { DbApi, DbPrompt, DbSessionState, DbVaultInfo } from '../shared/db';
 import type { SshHistoryApi } from '../shared/commandHistory';
-import type { DetachedTarget } from '../shared/detached';
+import type { DetachedTarget, DetachedWork, OpenInMain } from '../shared/detached';
 
 export type DetachResult = { ok: true; id: string } | { ok: false; error: string };
 import type { AppState, CellSession, Profile, ProjectDirectory, ProjectFilePreview, SessionInfo, UpdateState, Worktree, WorktreeInspection, WorktreeInspectResult, WorktreeRemoveResult } from '../shared/types';
@@ -69,6 +70,8 @@ export interface McApi {
   killCellAndWait(cellId: string): Promise<void>;
   /** Binds the freshest unclaimed Codex session in `cwd` to the cell (emits cell:session). */
   bindCodexSession(cellId: string, cwd: string): Promise<string | null>;
+  /** How full the context window of the cell's conversation is (read now); null when unknown. Later changes come as cell:context. */
+  contextUsage(cellId: string): Promise<ContextUsage | null>;
   aliveCells(): Promise<string[]>;
   /** The Monitor panel: one process sample (null for a refused sender). */
   monitorSample(): Promise<MonitorSample | null>;
@@ -190,6 +193,14 @@ export interface McApi {
     /** From the main window: asks a detached window to give its tab back. */
     requestAttach(id: string): void;
     focus(id: string): void;
+    /** 1.0.8, in a detached window: its unsaved database work (null: none), counted by the main window's quit question. */
+    work(work: DetachedWork | null): void;
+    /** 1.0.8, in the main window: what the detached windows reported (after a reload). */
+    works(): Promise<Array<{ id: string; work: DetachedWork }>>;
+    /** 1.0.8, in a detached window: a new database or Redis tab opens in the main window. */
+    openInMain(request: OpenInMain): void;
+    /** 1.0.8, in a closing detached window: it needs longer to give its tab back (a question is open); main waits. */
+    stay(): void;
   };
   /** In a detached window: it is being closed, its tab goes back (detach.attach). */
   on(channel: 'detach:closing', cb: () => void): () => void;
@@ -197,6 +208,10 @@ export interface McApi {
   on(channel: 'detach:returned', cb: (back: { id: string; target: DetachedTarget; docs: unknown[]; alive: string[] }) => void): () => void;
   /** In the main window: the status of a cell shown in a detached window. */
   on(channel: 'detach:status', cb: (cellId: string, status: CellStatus) => void): () => void;
+  /** 1.0.8, in the main window: a detached window's unsaved database work changed (null: none or gone). */
+  on(channel: 'detach:work', cb: (id: string, work: DetachedWork | null) => void): () => void;
+  /** 1.0.8, in the main window: a detached window opens a tab here. */
+  on(channel: 'detach:openInMain', cb: (request: OpenInMain) => void): () => void;
   on(channel: 'auth:state', cb: (state: LoginState) => void): () => void;
   on(channel: 'install:state', cb: (state: InstallState) => void): () => void;
   on(channel: 'cli:changed', cb: (status: CliStatusMap) => void): () => void;
@@ -205,6 +220,7 @@ export interface McApi {
   on(channel: 'cell:restarted', cb: (cellId: string) => void): () => void;
   on(channel: 'cell:hook', cb: (cellId: string, event: HookEvent, info?: HookInfo) => void): () => void;
   on(channel: 'cell:session', cb: (cellId: string, session: CellSession) => void): () => void;
+  on(channel: 'cell:context', cb: (cellId: string, usage: ContextUsage | null) => void): () => void;
   on(channel: 'cell:spawnError', cb: (cellId: string, message: string) => void): () => void;
   /** A notice from the main process, already translated (e.g. Claude http hooks found blocked). */
   on(channel: 'app:notice', cb: (text: string) => void): () => void;

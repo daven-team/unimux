@@ -34,6 +34,8 @@ export class SftpService {
   private shown: string | null = null;
   /** Hosts with unsaved editor tabs (0.9.9): their sessions are not disconnected for being idle. */
   private pinned = new Set<string>();
+  /** The pinned hosts of each window (1.0.8: 'main' and detached windows); `pinned` is their union. */
+  private pinsBy = new Map<string, Set<string>>();
 
   constructor(private readonly deps: SftpServiceDeps) {}
 
@@ -184,16 +186,19 @@ export class SftpService {
     for (const e of this.sessions.values()) this.scheduleIdle(e);
   }
 
-  /** The renderer reloads or crashed: the new page starts with the view hidden and only reports a change, so main counts it closed. */
-  rendererGone(): void {
-    if (this.viewOpen) this.viewClosed();
-    // The new page reports its unsaved editor tabs again.
-    if (this.pinned.size) this.pinHosts([]);
+  /**
+   * A window reloads, crashed or closed. The main window's new page starts with the view hidden and only reports a change, so
+   * main counts it closed; any window's page reports its unsaved editor tabs again.
+   */
+  rendererGone(window = 'main'): void {
+    if (window === 'main' && this.viewOpen) this.viewClosed();
+    if (this.pinsBy.has(window)) this.pinHosts([], window);
   }
 
-  /** The hosts of editor tabs with unsaved changes: their sessions stay connected while the view is closed. */
-  pinHosts(hostIds: string[]): void {
-    this.pinned = new Set(hostIds);
+  /** The hosts of a window's editor tabs with unsaved changes: their sessions stay connected while the view is closed. */
+  pinHosts(hostIds: string[], window = 'main'): void {
+    if (hostIds.length) this.pinsBy.set(window, new Set(hostIds)); else this.pinsBy.delete(window);
+    this.pinned = new Set([...this.pinsBy.values()].flatMap((set) => [...set]));
     for (const e of this.sessions.values()) this.scheduleIdle(e);
   }
 

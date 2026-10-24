@@ -14,8 +14,9 @@ import { activateFile, useFileStore, type FileDocument } from '../files';
 import { tr } from '../i18n';
 import { getS, setUi } from '../store';
 import { useSshStore } from '../sshStore';
-import { dropRedisDrafts } from './redisDrafts';
+import { dropRedisDrafts, exportRedisDrafts, importRedisDrafts } from './redisDrafts';
 import { sshContext } from '../ssh';
+import { detachedId } from '../windowRole';
 
 /** Pub/Sub of one session: the subscriber's state and the received messages (kept while the tab is hidden). */
 export interface RedisPubSubTab {
@@ -46,6 +47,8 @@ export interface RedisStore {
 export const useRedisStore = create<RedisStore>(() => ({ sessions: {}, prompts: {}, tabSessions: {}, tabErrors: {}, pubsub: {} }));
 
 const isLive = (s: DbSessionState | undefined): boolean => !!s && (s.state === 'connected' || s.state === 'connecting');
+/** Tabs that went to another window (1.0.8), with the session they took (null: none): closing them here never ends it. */
+const movedAway = new Map<string, string | null>();
 
 // ── texts of failures ───────────────────────────────────────────────────────
 
@@ -100,6 +103,8 @@ export function openRedisTab(connectionId: string, view: RedisTabView, db?: numb
   const c = connectionOf(connectionId);
   if (!c || c.kind !== 'redis') return null;
   const index = db ?? c.dbIndex ?? 0;
+  // 1.0.8: a detached window shows its one tab: another view opens in the main window.
+  if (detachedId !== null) { window.mc.detach.openInMain({ kind: 'redis', connectionId, view, db: index }); return null; }
   const existing = useFileStore.getState().documents.find((d) => d.redis && d.redis.connectionId === connectionId && d.redis.view === view && (view !== 'keys' || d.redis.db === index));
   setUi({ settingsActive: false });
   useSshStore.setState({ viewActive: false });
@@ -143,6 +148,18 @@ export function moveTabToDb(tabId: string, db: number): void {
 const forgetters = new Set<(tabId: string) => void>();
 /** A view module registers how to drop what it keeps for a tab (called when the tab closes). */
 export function onForgetTab(fn: (tabId: string) => void): void { forgetters.add(fn); }
+
+/** 1.0.8: how a view module hands what it keeps for a tab to another window (plain data) and takes it there. */
+interface TabCarry { take(tabId: string): unknown; give(tabId: string, data: unknown): void }
+const carriers = new Map<string, TabCarry>();
+/** What arrived for a view module not loaded yet (its module loads when the tab is first shown): given when it registers. */
+const arrived = new Map<string, Map<string, unknown>>();
+export function onCarryTab(name: string, carry: TabCarry): void {
+  carriers.set(name, carry);
+  const waiting = arrived.get(name);
+  arrived.delete(name);
+  for (const [tabId, data] of waiting ?? []) carry.give(tabId, data);
+}
 
 // ── sessions ────────────────────────────────────────────────────────────────
 
@@ -351,7 +368,7 @@ export function initRedis(): void {
     openTabs = now;
     if (!closed.length) return;
     for (const tab of closed) {
-      releaseTab(tab);
+      if (movedAway.has(tab)) { forgetMovedTab(tab, movedAway.get(tab) ?? null); movedAway.delete(tab); } else releaseTab(tab);
       dropRedisDrafts(tab);
       for (const forget of forgetters) forget(tab);
     }
@@ -362,4 +379,87 @@ export function initRedis(): void {
     });
   });
   useRedisStore.subscribe((st, prev) => { if (st.tabSessions !== prev.tabSessions) setDbPins('redis', Object.values(st.tabSessions)); });
+}
+
+// ── moving a tab to another window (1.0.8) ──────────────────────────────────
+
+/**
+ * What a Redis tab takes to another window: its session when no other tab here shares it, or when it is the Pub/Sub view (its
+ * subscriptions live on that session: the other tabs here log in again when they next need it); otherwise the shared session
+ * stays and the tab logs in again there. Also its Pub/Sub messages, why it has no session, its unsaved values and what its view kept.
+ */
+export interface RedisTabHandoff { sessionId?: string; pubsub?: RedisPubSubTab; problem?: RedisTabProblem; drafts: unknown; views: Record<string, unknown> }
+
+export function exportRedisTab(tabId: string): RedisTabHandoff {
+  const st = useRedisStore.getState();
+  const sid = st.tabSessions[tabId];
+  const alone = !!sid && isLive(st.sessions[sid]) && (refOf(tabId)?.view === 'pubsub' || tabsOf(st, sid).every((t) => t === tabId || !docOf(t)));
+  const views: Record<string, unknown> = {};
+  for (const [name, carry] of carriers) { try { const data = carry.take(tabId); if (data !== undefined) views[name] = data; } catch { /* left behind */ } }
+  return {
+    ...(alone ? { sessionId: sid, ...(st.pubsub[sid] ? { pubsub: st.pubsub[sid] } : {}) } : {}),
+    ...(st.tabErrors[tabId] ? { problem: st.tabErrors[tabId] } : {}),
+    drafts: exportRedisDrafts(tabId), views,
+  };
+}
+
+/**
+ * The tab is about to leave this window (the move went through) taking `sessionId` along (null: none): that session must not
+ * end when its document goes.
+ */
+export function markRedisTabMoved(tabId: string, sessionId: string | null): void { movedAway.set(tabId, sessionId); }
+
+/**
+ * A moved tab's document went: it leaves its session here without ending it. A session it took along is the other window's now:
+ * the tabs here that shared it let go of it too (they log in again on their next action).
+ */
+function forgetMovedTab(tabId: string, taken: string | null): void {
+  useRedisStore.setState((st) => {
+    const sid = st.tabSessions[tabId];
+    if (!sid) return {};
+    const tabSessions = Object.fromEntries(Object.entries(st.tabSessions).filter(([tab, s]) => tab !== tabId && (taken === null || s !== taken)));
+    if (Object.values(tabSessions).includes(sid)) return { tabSessions };
+    const pubsub = { ...st.pubsub };
+    delete pubsub[sid];
+    return { tabSessions, pubsub };
+  });
+}
+
+/**
+ * A Redis tab that comes from another window takes its session, messages and values over, before its document arrives (its view
+ * must find the session, never log in again). `sessions`: main's live sessions (db.sessions()).
+ */
+export function adoptRedisTab(tabId: string, raw: unknown, sessions: readonly DbSessionState[]): void {
+  initRedis();
+  if (!raw || typeof raw !== 'object') return;
+  const h = raw as Partial<RedisTabHandoff>;
+  importRedisDrafts(tabId, h.drafts);
+  for (const [name, data] of Object.entries(h.views && typeof h.views === 'object' ? h.views : {})) {
+    const carry = carriers.get(name);
+    if (carry) carry.give(tabId, data);
+    else arrived.set(name, new Map([...(arrived.get(name) ?? []), [tabId, data]]));
+  }
+  if (h.problem && typeof h.problem.text === 'string') useRedisStore.setState((st) => ({ tabErrors: { ...st.tabErrors, [tabId]: { text: h.problem!.text, closed: !!h.problem!.closed } } }));
+  const sid = typeof h.sessionId === 'string' ? h.sessionId : null;
+  if (!sid) return;
+  // The session's state comes from main (this window may never have seen it): a session that still runs is joined, not opened again.
+  const state = sessions.find((s) => s.id === sid && s.kind === 'redis' && isLive(s));
+  if (!state) return;
+  useRedisStore.setState((st) => ({
+    sessions: st.sessions[sid] ? st.sessions : { ...st.sessions, [sid]: state },
+    tabSessions: { ...st.tabSessions, [tabId]: sid },
+    ...(h.pubsub && typeof h.pubsub === 'object' ? { pubsub: { ...st.pubsub, [sid]: { ...h.pubsub, held: Array.isArray(h.pubsub.held) ? h.pubsub.held : [] } } } : {}),
+  }));
+}
+
+/** A Redis tab of a detached window opened again after a restart (the same tab id; it logs in when shown). */
+export function reopenRedisTab(ref: RedisTabRef, name: string, relativePath: string): string {
+  initRedis();
+  const id = redisTabId(ref);
+  if (!docOf(id)) {
+    const doc: FileDocument = { id, projectId: '', relativePath, name, text: '', savedText: '', diskText: '', status: 'ready', saving: false, error: null, wrap: false, redis: ref };
+    useFileStore.setState((s) => ({ documents: [...s.documents, doc] }));
+  }
+  activateFile(id);
+  return id;
 }

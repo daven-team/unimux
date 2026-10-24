@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import {
-  advanceBar, barScript, diskLevel, formatBytes, formatMemory, formatRate, formatUptime, normalizeBarItems, osIdOf, parseBar,
+  advanceBar, barScript, barStageWidth, diskLevel, fitBar, formatBytes, formatMemory, formatRate, formatUptime, formatUptimeLong, formatUptimeShort,
+  memoryPercent, normalizeBarItems, osIdOf, parseBar, splitWho, type BarStage,
   parseDf, parseWho, rootDisk, shownBarItems, sparklinePoints, SSH_BAR_HISTORY,
 } from '../src/shared/sshBar';
 
@@ -347,8 +348,8 @@ describe('advanceBar', () => {
 
 describe('formatting', () => {
   it('writes memory in the unit of the total with the locale decimal sign', () => {
-    expect(formatMemory({ total: 1004500 * 1024, available: 763000 * 1024 }, 'pl')).toBe('0,23 GB / 0,96 GB');
-    expect(formatMemory({ total: 16 * 1024 ** 3, available: 4 * 1024 ** 3 }, 'en')).toBe('12.0 GB / 16.0 GB');
+    expect(formatMemory({ total: 1004500 * 1024, available: 763000 * 1024 }, 'pl')).toBe('0,23/0,96 GB');
+    expect(formatMemory({ total: 16 * 1024 ** 3, available: 4 * 1024 ** 3 }, 'en')).toBe('12.0/16.0 GB');
     expect(formatBytes(0, 'en')).toBe('0 B');
     expect(formatBytes(1536, 'en')).toBe('1.50 KB');
     expect(formatRate(52_000, 'de')).toBe('50,8 KB/s');
@@ -366,9 +367,88 @@ describe('formatting', () => {
   });
 
   it('switches items off only with false', () => {
-    expect(shownBarItems(undefined)).toEqual(['host', 'cpu', 'mem', 'net', 'user', 'disk']);
-    expect(shownBarItems({ net: false, user: true })).toEqual(['host', 'cpu', 'mem', 'user', 'disk']);
+    expect(shownBarItems(undefined)).toEqual(['host', 'cpu', 'mem', 'net', 'uptime', 'user', 'disk']);
+    expect(shownBarItems({ net: false, user: true })).toEqual(['host', 'cpu', 'mem', 'uptime', 'user', 'disk']);
     expect(normalizeBarItems({ net: false, user: true, bogus: false })).toEqual({ net: false });
     expect(normalizeBarItems('x')).toBeUndefined();
+    expect(normalizeBarItems({ uptime: false })).toEqual({ uptime: false });
+  });
+
+  it('writes the short forms: memory share, compact rates, uptime in the app language', () => {
+    expect(memoryPercent({ total: 1000, available: 630 })).toBeCloseTo(37);
+    expect(memoryPercent({ total: 0, available: 0 })).toBe(0);
+    expect(formatRate(9000, 'pl', true)).toBe('8,8K/s');
+    expect(formatRate(40_000, 'en', true)).toBe('39K/s');
+    expect(formatRate(300, 'en', true)).toBe('300B/s');
+    expect(formatRate(5 * 1024 ** 2, 'en', true)).toBe('5.0M/s');
+    expect(formatUptimeShort(297 * 86400 + 5000, 'pl')).toBe('297 dni');
+    expect(formatUptimeShort(86400, 'pl')).toBe('1 dzień');
+    expect(formatUptimeShort(297 * 86400, 'en')).toBe('297 days');
+    expect(formatUptimeShort(5 * 3600 + 12 * 60 + 30, 'pl')).toBe('5 h 12 min');
+    expect(formatUptimeShort(5 * 3600 + 12 * 60, 'pl', true)).toBe('5 h');
+    expect(formatUptimeShort(720, 'de')).toBe('12 min');
+    expect(formatUptimeShort(297 * 86400, 'pl', true)).toMatch(/^297\s?d/);
+    expect(formatUptimeShort(297 * 86400, 'pl', true)).toBe('297 d');
+    expect(formatUptimeLong(14 * 86400 + 6 * 3600, 'pl')).toBe('14 dni 6 h');
+    expect(formatUptimeLong(5 * 3600 + 12 * 60, 'en')).toBe('5 h 12 min');
+  });
+});
+
+describe('the user item', () => {
+  const w = (user: string, tty: string, self = false) => ({ user, tty, from: '', since: '', self });
+  it('lists everyone else first and the cell’s own session last', () => {
+    const { others, self } = splitWho([w('root', 'pts/0', true), w('root', 'pts/1'), w('backup', 'pts/2')], 'root');
+    expect(others.map((x) => x.tty)).toEqual(['pts/1', 'pts/2']);
+    expect(self?.tty).toBe('pts/0');
+  });
+
+  it('takes the first row of the same user when no tty was found, and works without any row', () => {
+    const { others, self } = splitWho([w('backup', 'pts/2'), w('daniel', 'pts/3'), w('daniel', 'pts/4')], 'daniel');
+    expect(self).toMatchObject({ tty: 'pts/3', self: true });
+    expect(others.map((x) => x.tty)).toEqual(['pts/2', 'pts/4']);
+    expect(splitWho([], 'x')).toEqual({ others: [], self: undefined });
+    expect(splitWho([w('a', 'pts/0')], undefined)).toEqual({ others: [w('a', 'pts/0')], self: undefined });
+  });
+});
+
+describe('fitBar', () => {
+  const all = ['host', 'cpu', 'mem', 'net', 'uptime', 'user', 'disk'] as const;
+  const widths = {
+    host: { full: 120, compact: 120 }, cpu: { full: 90, compact: 90, bare: 46 }, mem: { full: 100, compact: 46 },
+    net: { full: 150, compact: 90 }, uptime: { full: 60, compact: 44 }, user: { full: 70, compact: 70 }, disk: { full: 60, compact: 40 },
+  };
+  const at = (room: number, current?: BarStage) => fitBar(all, widths, room, 12, 90, current);
+
+  it('keeps everything in full while it fits, then shortens values, then the sparkline, then drops items', () => {
+    // Full: 90 (host at most hostMin) + 90 + 100 + 150 + 60 + 70 + 60 + 6 gaps of 12 = 692.
+    expect(barStageWidth({ compact: false, spark: true, items: [...all] }, widths, 12, 90)).toBe(692);
+    expect(at(692)).toEqual({ compact: false, spark: true, items: [...all], rank: 0 });
+    expect(at(691)).toEqual({ compact: true, spark: true, items: [...all], rank: 1 });
+    // Short forms without the sparkline: 90 + 46 + 46 + 90 + 44 + 70 + 40 + 72 = 498.
+    expect(at(540)).toEqual({ compact: true, spark: false, items: [...all], rank: 2 });
+    expect(at(498).rank).toBe(2);
+    expect(at(497).rank).toBeGreaterThan(2);
+  });
+
+  it('drops by priority but keeps a less important item that still fits, the first one always', () => {
+    expect(at(450).items).toEqual(['host', 'cpu', 'mem', 'net', 'uptime', 'disk']);
+    // The network does not fit any more, the user (less important, narrower) does.
+    expect(at(400).items).toEqual(['host', 'cpu', 'mem', 'uptime', 'user', 'disk']);
+    expect(at(340).items).toEqual(['host', 'cpu', 'mem', 'uptime', 'disk']);
+    expect(at(300).items).toEqual(['host', 'cpu', 'mem', 'disk']);
+    expect(at(10).items).toEqual(['host']);
+    expect(fitBar(['mem', 'disk'], widths, 10, 12, 90).items).toEqual(['mem']);
+    expect(at(300).rank).toBeLessThan(at(10).rank);
+  });
+
+  it('comes back to a roomier stage only with a few pixels to spare', () => {
+    const compact = at(691);
+    expect(at(692, compact)).toBe(compact);
+    expect(at(700, compact).rank).toBe(0);
+    const tight = at(300);
+    expect(at(305, tight)).toEqual(tight);
+    expect(at(318, tight)).toEqual(tight);
+    expect(at(350, tight).items).toEqual(['host', 'cpu', 'mem', 'uptime', 'disk']);
+    expect(at(200, at(692)).rank).toBe(at(200).rank);
   });
 });

@@ -1,0 +1,44 @@
+/* The context meter among the muted details of a cell header (ContextMeter.tsx): a tiny bar and "Kontekst 32%". */
+.terminal-cell .meta-item.context-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.terminal-cell .context-meter .context-bar {
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.terminal-cell .context-meter .context-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: #8a8a8a;
+}
+
+.terminal-cell .context-meter .context-text { white-space: nowrap; }
+.terminal-cell .context-meter .context-short { display: none; white-space: nowrap; }
+
+/* A narrow header keeps the bar and the number ("92%") and drops the word; the meter is never cut mid-number. */
+@container cell-meta (max-width: 200px) {
+  .terminal-cell .context-meter .context-text { display: none; }
+  .terminal-cell .context-meter .context-short { display: inline; }
+}
+/* Below the width where the other details go, the meter stays as the number alone (a nearly full context must stay visible). */
+@container cell-meta (max-width: 52px) {
+  .terminal-cell .cell-head .cell-meta > .meta-item.context-meter { display: inline-flex; }
+  .terminal-cell .context-meter .context-bar { display: none; }
+}
+
+.terminal-cell .context-meter.warn { color: #d9a441; }
+.terminal-cell .context-meter.warn .context-bar > span { background: #d9a441; }
+.terminal-cell .context-meter.high { color: #e5534b; }
+.terminal-cell .context-meter.high .context-bar > span { background: #e5534b; }

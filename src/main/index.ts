@@ -25,7 +25,7 @@ import { applyDockIcon, windowIcon } from './appIcon';
 import { LARGE_VIEW_BYTES, listProjectDirectories, listProjectDirectory, listProjectDirectoryBatch, readProjectFile, statProjectFile, writeProjectFile } from './files';
 import { createTrash, registerFileOpsIpc } from './filesIpc';
 import { createIpcGuard } from './ipcGuard';
-import { closeAllDetached, fromDetachedWindow, initDetachedWindows, relayCellStatus, sendRouted, startDetachedWindows, stateChanged as detachedStateChanged } from './detachedWindows';
+import { closeAllDetached, fromDetachedWindow, initDetachedWindows, relayCellStatus, senderWindow, sendRouted, startDetachedWindows, stateChanged as detachedStateChanged } from './detachedWindows';
 import { registerGitIpc } from './gitIpc';
 import { Git } from './git';
 import { createGithubService } from './github/service';
@@ -49,6 +49,7 @@ import { registerNoteFilesIpc } from './noteFiles';
 import { DB_LIMITS, isDbSessionId } from '../shared/db';
 import type { DbHostToMain } from '../shared/dbHostIpc';
 import { claudeProjectDirName, findRecentCodexSession, listSessionsAsync } from './sessions';
+import { ContextTracker } from './contextUsage';
 import { createSaver, flushUntilSaved, loadState, StateUnreadableError } from './store';
 import { updateHandoverCommitted, blockUpdateVersion, canInstallNow, checkForUpdates, getUpdateState, handOver, initUpdater, isPortableBuild, isUpdateDownloaded, onUpdateTargetChange, previousMacUpdate, recheckUpdate, signalMacUpdateReady, updateHandoffStarted, updateTarget, RELEASES_URL, startupCheck, startupDownload, updatesEnabled } from './updater';
 import { createUpdateUiGuard } from './updateUiGuard';
@@ -481,6 +482,18 @@ if (devEnv('MC_HOOK_DEBUG') === '1') hooks.debugDir = DATA_DIR;
 const hookWatch = new HttpHookWatch({ ...hookFallbackFile(join(DATA_DIR, 'claude-hook-fallback.json')),
   onFallback: () => send('app:notice', tr('Statusy Claude nie docierają przez hooki HTTP (blokuje je polityka allowedHttpHookUrls albo komórka uruchamia starszą wersję claude). Od następnego uruchomienia agenta unimux użyje hooków poleceń.')) });
 const alive = new Set<string>();
+/** "Kontekst 32%" in the card header: read from the conversation's transcript when a hook of the cell says something happened. */
+const contextTracker = new ContextTracker({
+  target: (cellId) => {
+    const found = findCell(state, cellId);
+    const session = found?.cell.session;
+    if (!found || !session || found.cell.ssh || getProfile(state, found.cell.profileId).cli !== session.cli) return null;
+    return { cli: session.cli, sessionId: session.id, cwd: found.cell.worktree?.path ?? found.project.path, modelHint: found.cell.model };
+  },
+  emit: (cellId, usage) => send('cell:context', cellId, usage),
+  claudeDir: () => process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude'),
+  codexHome: () => usageDeps.codexHome(),
+});
 /** The pty shell pid of each running cell (the Monitor panel's process trees). */
 const cellPids = new Map<string, number>();
 /** Codex session ids handed to cells this run (state may lag behind the renderer). */
@@ -590,6 +603,7 @@ function forgetCell(id: string): void {
   // A process that still runs keeps its hook settings and MCP config (Claude may read them again); the next start prunes them.
   if (alive.has(id)) return;
   hooks.forget(id);
+  contextTracker.forget(id);
   void removeCellFiles(cellFileDirs, id);
   automation.forgetCell(id);
 }
@@ -625,6 +639,7 @@ const automation = new AutomationService(controller, {
     await Promise.all(ids.map((id) => ptyHost.killAndWait(id)));
   },
   isCellRunning: (cellId) => alive.has(cellId),
+  contextOf: (cellId) => contextTracker.current(cellId),
   restartAgent: async (cellId) => {
     const found = findCell(state, cellId);
     if (!found || !alive.has(cellId)) return { restarted: false, reason: 'Agent is not running.' };
@@ -677,6 +692,7 @@ async function startMcp(retries = 2): Promise<void> {
   mcpStarting = false;
   send('mcp:info', mcpInfo());
 }
+guardedHandle('context:get', (_e, cellId: unknown) => (typeof cellId === 'string' && findCell(state, cellId) ? contextTracker.get(cellId) : null), () => null);
 guardedHandle('mcp:retry', async () => { if (!mcp.getInfo().running) await startMcp(0); return mcpInfo(); }, () => mcpInfo());
 
 function createWindow(): void {
@@ -773,6 +789,9 @@ initDetachedWindows({
   preload: join(__dirname, '../preload/index.js'),
   icon: windowIcon,
   pty: ptyHost,
+  ports: [dbHost, sftpHost],
+  routeDbSessions: (sessions, window) => dbHost.route(sessions, window),
+  rendererGone: (window) => { sftp?.rendererGone(window); db?.rendererGone(window); },
   isAlive: (cellId) => alive.has(cellId),
   quitting: () => quitting,
   offscreen: !!devEnv('MC_OFFSCREEN'),
@@ -868,7 +887,7 @@ function startSsh(): void {
       hostCrashed: () => send('sftp:hostCrashed'),
     },
   });
-  registerSftpIpc({ guardedHandle, guardedOn }, createSftpHandlers(sftp));
+  registerSftpIpc({ guardedHandle, guardedOn }, createSftpHandlers(sftp), senderWindow);
   const dbVault = new DbVault(join(DATA_DIR, 'db', 'vault.json'), cipher);
   db = new DbService<AppState>({
     coordinator, host: dbHost, vault: dbVault,
@@ -890,7 +909,7 @@ function startSsh(): void {
       vaultChanged: () => send('db:vault:changed', dbVault.info()),
     },
   });
-  registerDbIpc({ guardedHandle, guardedOn }, createDbHandlers(db));
+  registerDbIpc({ guardedHandle, guardedOn }, createDbHandlers(db), senderWindow);
   // The SQL query history (1.0.6, local only); pending changes are written before the app quits.
   const dbHistory = new DbHistoryStore(join(DATA_DIR, 'db', 'query_history.json'), { connectionExists: (id) => state.dbConnections.some((c) => c.id === id) });
   registerDbHistoryIpc({ guardedHandle, guardedOn }, dbHistory);
@@ -1080,13 +1099,18 @@ hooks.on('hook', (cellId: string, event: string, info?: unknown) => {
   const hint = automationHintForHook(event);
   if (hint) automation.statuses.set(cellId, hint);
   send('cell:hook', cellId, event, info);
+  contextTracker.poke(cellId, event === 'stop' || event === 'stopbg' || event === 'fail' || event === 'compacted');
 });
+
+// A Claude hook payload named the conversation's transcript (it lives in the config folder of the account the cell runs with).
+hooks.on('transcript', (_cellId: string, sessionId: string, path: string) => contextTracker.noteTranscript(sessionId, path));
 
 // SessionStart ends the "background tasks still running" mode of the cell (they belong to a previous conversation).
 hooks.on('sessionstart', (cellId: string, source?: string) => {
   if (!findCell(state, cellId)) return;
   hookWatch.hook(cellId, 'session');
   send('cell:hook', cellId, 'session', { source });
+  contextTracker.poke(cellId, true);
 });
 
 // The user switched conversation inside a running Claude (/resume, /clear): follow it so a restart
@@ -1112,6 +1136,7 @@ hooks.on('codex', (cellId: string, notice: CodexNotice) => {
   const found = findCell(state, cellId);
   if (!found || !alive.has(cellId) || getProfile(state, found.cell.profileId).cli !== 'codex') return; // stale or foreign
   codexHooked.add(cellId);
+  contextTracker.poke(cellId, true);
   send('cell:hook', cellId, 'stop', { codex: true, ...(notice.turnId ? { turnId: notice.turnId } : {}), ...(notice.threadId ? { threadId: notice.threadId } : {}) });
 });
 

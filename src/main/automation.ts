@@ -4,6 +4,7 @@ import { layoutForCount, layoutFromRows } from '../shared/layout';
 import type { AppState, Cell, Tab, Worktree } from '../shared/types';
 import { CLI_NAMES, type CliId } from '../shared/cliStatus';
 import type { StateController } from './stateController';
+import type { ContextUsage } from '../shared/contextUsage';
 
 export interface AutomationDependencies {
   createWorktree(path: string, name: string): Promise<Worktree>;
@@ -13,10 +14,15 @@ export interface AutomationDependencies {
   missingCli?(profileId: string): CliId | undefined;
   stopCells?(ids: string[]): Promise<void>;
   isCellRunning?(cellId: string): boolean;
+  /** How full the context window of the cell's conversation is, when known. */
+  contextOf?(cellId: string): ContextUsage | null;
   /** Runtime must verify a confirmed, compatible session before killing and relaunching; never type a shell command. */
   restartAgent?(cellId: string): Promise<{ restarted: boolean; reason?: string }>;
   deliver(cellId: string, text: string): Promise<void>;
 }
+/** list_agents: the context window use of an agent's conversation, when known. */
+const contextField = (usage: ContextUsage | null | undefined) =>
+  usage ? { context: { percent: usage.percent, tokens: usage.tokens, window: usage.window } } : {};
 const READS = new Set<AutomationOperation>(['get_context', 'read_inbox', 'list_agents', 'list_library', 'get_snippet', 'get_tasks', 'get_messages', 'wait_for']);
 const CLOSED = new Set(['completed', 'cancelled']);
 /** wait_for wakes on every state change; this safety tick only covers a change it could have missed. */
@@ -146,6 +152,7 @@ export class AutomationService {
           gridId: tab.id, gridName: tab.name, gridColor: tab.color, profileId: cell.profileId, model: cell.model, color: cell.color,
           role: cell.role ?? null,
           status: this.statuses.get(cell.id) ?? 'unknown', cwd: cell.worktree?.path ?? project.path,
+          ...contextField(this.deps.contextOf?.(cell.id)),
           tasks: this.state.get().automation.tasks.filter((t) => t.cellId === cell.id && !CLOSED.has(t.status)).map(({ id, title, status }) => ({ id, title, status })),
         })));
       }

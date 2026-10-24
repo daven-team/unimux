@@ -3,6 +3,7 @@
 // Quitting also asks while SFTP transfers run (always: the shutdown would cancel them), before the agents question.
 import { allCellIds, namesList, shouldConfirmClose, workingAgents } from '../../shared/agentWork';
 import { isActive } from '../../shared/sftp';
+import { NO_WORK, sumWork, type DetachedWork } from '../../shared/detached';
 import { updateSettings } from '../../shared/state';
 import { tr } from './i18n';
 import { useSftpStore } from './sftpStore';
@@ -61,6 +62,15 @@ export function setDatabaseQuitWork(work: QuitWork): void {
   work.subscribe(() => databaseChanged());
   databaseChanged();
 }
+
+/** 1.0.8: the unsaved database work of the detached windows (they report it through main), by window id. */
+const awayWork = new Map<string, DetachedWork>();
+export function setDetachedWork(windowId: string, work: DetachedWork | null): void {
+  if (work) awayWork.set(windowId, work); else if (!awayWork.delete(windowId)) return;
+  databaseChanged();
+}
+/** What the detached windows hold together (the quit question counts it with this window's own). */
+export const detachedWork = (): DetachedWork => (awayWork.size ? sumWork(awayWork.values()) : NO_WORK);
 
 /**
  * Tells main whether quitting must ask first (some agent works and the setting is on, or SFTP transfers run), so a quit with

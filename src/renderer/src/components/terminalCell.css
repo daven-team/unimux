@@ -2,8 +2,13 @@
    placed by GridDividers.areaStyle). Inside: the header (the icon with the status dot, the name, muted details, the status,
    the actions), the body with the terminal on the card's own background, and the footer slot (CellFoot.tsx).
 
-   The frame paints above the header, the xterm canvases and the cards over the terminal: a shadow on the cell itself paints
-   beneath those children and loses its edges. The focus ring outside the card is a plain box-shadow of the cell. */
+   1.0.8: the frame is one ring of even width all around the card: the border of .cell-frame, an overlay with the card's
+   radius that paints above the header, the xterm canvases and the cards over the terminal (a shadow on the cell itself
+   paints beneath those children). Hover, colour, status, focus and drop change only the colour and width of that ring.
+   A border, unlike the inset box-shadow it replaces, is snapped to whole device pixels, so the hairline stays one even line
+   at 125 % and 150 % Windows scaling instead of a blurred two-pixel edge on some sides. Nothing else draws over the edges
+   or the corners (1.0.7 had a coloured bar along the top, thicker than the sides and square against the rounded corners,
+   and a soft focus glow outside the card). */
 .cell.terminal-cell {
   isolation: isolate;
   overflow: hidden;
@@ -12,22 +17,27 @@
   --cell-frame-width: 1px;
   /* The steel blue of the primary buttons marks the focused card; a coloured cell uses its own colour (--cc). */
   --cell-ring: var(--btn-primary-bg);
+  /* The header's background (a coloured cell tints it); the status dot's cut-out ring uses it too. */
+  --cell-head-bg: var(--card-bg);
 }
 
 .terminal-cell:hover { --cell-frame-color: #2c2c2c; }
 
+/* A coloured cell: its colour on the whole frame and a faint wash of it on the header. */
 .terminal-cell.colored {
   --cell-ring: var(--cc);
-  --cell-frame-color: color-mix(in srgb, var(--cc) 30%, var(--card-border));
+  --cell-frame-color: color-mix(in srgb, var(--cc) 55%, var(--card-border));
+  --cell-head-bg: color-mix(in srgb, var(--cc) 7%, var(--card-bg));
 }
 
 /* A card that waits for you (or whose turn failed) tints its frame, so it stands out in a full grid at a glance. */
 .terminal-cell[data-status="waiting"] { --cell-frame-color: color-mix(in srgb, var(--waiting) 32%, var(--card-border)); }
 .terminal-cell[data-status="error"] { --cell-frame-color: color-mix(in srgb, var(--error) 40%, var(--card-border)); }
 
+/* The focused card: the same ring, two pixels wide, in the steel blue or the cell's colour. */
 .terminal-cell.focused {
-  --cell-frame-color: color-mix(in srgb, var(--cell-ring) 75%, transparent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--cell-ring) 16%, transparent);
+  --cell-frame-color: var(--cell-ring);
+  --cell-frame-width: 2px;
 }
 
 .terminal-cell.drop,
@@ -41,8 +51,8 @@
   inset: 0;
   z-index: 9;
   pointer-events: none;
+  border: var(--cell-frame-width) solid var(--cell-frame-color);
   border-radius: inherit;
-  box-shadow: inset 0 0 0 var(--cell-frame-width) var(--cell-frame-color);
 }
 
 /* ── header ─────────────────────────────────────────────────────────────── */
@@ -57,6 +67,7 @@
   padding: 0 6px 0 8px;
   overflow: hidden;
   border-bottom: 1px solid #1d1d1d;
+  background: var(--cell-head-bg);
   color: var(--muted);
   font-size: 11.5px;
   line-height: 18px;
@@ -65,10 +76,10 @@
   container-type: inline-size;
 }
 
-/* A coloured cell: its colour as a thin bar along the top of the card (the rounded corners clip it). */
-.terminal-cell.colored > .cell-head { box-shadow: inset 0 2px 0 var(--cc); }
-
+/* 1.0.8: the heading is as tall as the header, so the status dot on the icon's corner and its pulse fit in its box (it clips
+   its content; at its natural 24 px height it cut off the lower part of the dot). */
 .terminal-cell .cell-heading {
+  align-self: stretch;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -116,23 +127,46 @@
 .terminal-cell .cell-icon-tile.host.uncolored { background: #333; color: var(--text-2); text-shadow: none; }
 .terminal-cell .cell-icon:hover .cell-icon-tile.host { filter: brightness(1.12); }
 
-/* The dot (styles.css .dot): working blinks its halo with the shared timer (blink.ts), never a CSS animation. */
+/* The dot (styles.css .dot) on the icon's lower right corner, cut out of the tile by a ring of the header's colour.
+   8 px is a whole number of device pixels at 100, 125, 150 and 200 % scaling, so it stays round (9 px came out 11 x 12). */
 .terminal-cell .cell-icon .dot {
   position: absolute;
-  right: -3px;
-  bottom: -3px;
-  width: 9px;
-  height: 9px;
-  box-shadow: 0 0 0 2px var(--card-bg);
+  right: -2px;
+  bottom: -2px;
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 0 2px var(--cell-head-bg);
 }
 
 .terminal-cell .cell-icon .dot.idle { background: #4b4b4b; }
-:root[data-blink] .terminal-cell .cell-icon .dot.working { box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 4px #f5b94266; }
+/* 1.0.8: a working dot sends out a soft ring, one wave every 1.4 s (the shared 1 Hz blink of blink.ts showed as a two-frame
+   flicker). Only transform and opacity change, so the compositor runs it without style, layout or paint work; it exists only
+   while the cell works and stands still as a faint halo under reduced motion. It reaches 3 px past the dot, inside the header. */
+.terminal-cell .cell-icon .dot.working::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: var(--working);
+  opacity: 0;
+  pointer-events: none;
+  animation: cell-dot-pulse 1.4s cubic-bezier(.2, .6, .35, 1) infinite;
+}
+
+@keyframes cell-dot-pulse {
+  from { opacity: .55; transform: scale(.6); }
+  to { opacity: 0; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-cell .cell-icon .dot.working::after { animation: none; opacity: .22; transform: none; }
+}
+
 /* Exited: a hollow grey ring; a failed turn (waiting.error) stays red. */
-.terminal-cell .cell-icon .dot.exited { background: var(--card-bg); box-shadow: 0 0 0 2px var(--card-bg), inset 0 0 0 2px #7a7a7a; }
+.terminal-cell .cell-icon .dot.exited { background: var(--cell-head-bg); box-shadow: 0 0 0 2px var(--cell-head-bg), inset 0 0 0 2px #7a7a7a; }
 /* A non-zero exit code (1.0.7): red like the pill, a filled dot at the prompt, a red ring once the process ended. */
 .terminal-cell .cell-icon .dot.error { background: var(--error); }
-.terminal-cell .cell-icon .dot.exited.error { background: var(--card-bg); box-shadow: 0 0 0 2px var(--card-bg), inset 0 0 0 2px var(--error); }
+.terminal-cell .cell-icon .dot.exited.error { background: var(--cell-head-bg); box-shadow: 0 0 0 2px var(--cell-head-bg), inset 0 0 0 2px var(--error); }
 
 .terminal-cell .cell-head .idx {
   flex: none;

@@ -292,3 +292,44 @@ export async function revealConnection(connectionId: string): Promise<string | n
   const r = await ensureShared(connectionId);
   return r.ok ? null : r.error;
 }
+
+// ── tabs moving between windows (1.0.8) ─────────────────────────────────────
+
+/** The session a database tab takes to another window: a SQL tab its own one, a table or DDL tab the shared one it uses. */
+export interface DbSessionHandoff { own?: string; shared?: { key: string; sessionId: string } }
+
+export function exportTabSession(tabId: string, connectionId: string, database: string, kind: 'table' | 'sql' | 'ddl'): DbSessionHandoff {
+  const st = useDbStore.getState();
+  if (kind === 'sql') { const own = st.tabSessions[tabId]; return own && isLive(st.sessions[own]) ? { own } : {}; }
+  const connection = getS().dbConnections?.find((c) => c.id === connectionId);
+  if (!connection) return {};
+  const key = sharedKey(connectionId, sharedDatabase(connection, database));
+  const id = st.shared[key];
+  return id && isLive(st.sessions[id]) ? { shared: { key, sessionId: id } } : {};
+}
+
+/** The tab left this window: its own session goes with it (never ended here); a shared one stays for this window's other tabs. */
+export function forgetTabSession(tabId: string): void {
+  if (!(tabId in useDbStore.getState().tabSessions)) return;
+  useDbStore.setState((s) => { const tabSessions = { ...s.tabSessions }; delete tabSessions[tabId]; return { tabSessions }; });
+}
+
+/**
+ * A tab comes from another window: its sessions are used here from now on (and pinned by this window). `current`: main's
+ * sessions (db.sessions()), so a session that is still connected is never opened again (no second login, an open transaction stays).
+ */
+export function adoptTabSession(tabId: string, handoff: DbSessionHandoff, current: readonly DbSessionState[]): void {
+  initDb();
+  const ids = [handoff.own, handoff.shared?.sessionId].filter((x): x is string => typeof x === 'string');
+  if (!ids.length) return;
+  const live = new Map(current.filter(isLive).map((s) => [s.id, s]));
+  useDbStore.setState((st) => {
+    const sessions = { ...st.sessions };
+    for (const id of ids) { const s = live.get(id); if (s && !sessions[id]) sessions[id] = s; }
+    const own = handoff.own && live.has(handoff.own) ? { tabSessions: { ...st.tabSessions, [tabId]: handoff.own } } : {};
+    const current = handoff.shared ? st.shared[handoff.shared.key] : undefined;
+    const shared = handoff.shared && live.has(handoff.shared.sessionId) && !(current && isLive(st.sessions[current]))
+      ? { shared: { ...st.shared, [handoff.shared.key]: handoff.shared.sessionId } } : {};
+    return { sessions, ...own, ...shared };
+  });
+}

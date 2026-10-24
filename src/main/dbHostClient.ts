@@ -5,7 +5,7 @@ import { MessageChannelMain, utilityProcess, type UtilityProcess, type WebConten
 import { EventEmitter } from 'events';
 import { join } from 'path';
 import type { DbResult } from '../shared/db';
-import type { DbHostOp, DbHostToMain, MainToDbHost } from '../shared/dbHostIpc';
+import type { DbHostOp, DbHostPortControl, DbHostToMain, MainToDbHost } from '../shared/dbHostIpc';
 
 export const DB_STDERR_TAIL_BYTES = 8 * 1024;
 /** How long main waits for an operation's answer (a run itself answers once accepted; its rows go to the port). */
@@ -25,12 +25,14 @@ export interface DbHostLink {
   ensure(): boolean;
   running(): boolean;
   send(m: MainToDbHost): boolean;
-  request(id: string, op: DbHostOp): Promise<DbResult<unknown>>;
+  /** `window`: the window that asked (1.0.8; absent: the main window): the results on the DB port go there. */
+  request(id: string, op: DbHostOp, window?: string): Promise<DbResult<unknown>>;
 }
 
 export class DbHostClient extends EventEmitter implements DbHostLink {
   private child: UtilityProcess | null = null;
-  private renderer: WebContents | null = null;
+  /** The windows with a port (1.0.8): 'main', and detached windows by id; connected again after a host restart. */
+  private renderers = new Map<string, WebContents>();
   private crashes: number[] = [];
   private fatal = false;
   private shuttingDown = false;
@@ -79,7 +81,7 @@ export class DbHostClient extends EventEmitter implements DbHostLink {
       if (this.crashes.length > 5) this.fatal = true;
       this.emit('crashed', code, this.stderrTail);
     });
-    if (this.renderer) this.connectRenderer(this.renderer);
+    for (const [window, wc] of [...this.renderers]) this.connectRenderer(wc, window);
   }
 
   private failPending(): void {
@@ -87,13 +89,18 @@ export class DbHostClient extends EventEmitter implements DbHostLink {
     this.pending.clear();
   }
 
-  /** Gives the renderer the DB port (again after a renderer reload or a host restart). */
-  connectRenderer(wc: WebContents): void {
-    this.renderer = wc;
+  /** Gives a window its DB port (again after a reload or a host restart). `window`: 'main', or a detached window's id (1.0.8). */
+  connectRenderer(wc: WebContents, window = 'main'): void {
+    this.renderers.set(window, wc);
     if (!this.child || wc.isDestroyed()) return;
     const { port1, port2 } = new MessageChannelMain();
-    this.child.postMessage({ t: 'port' }, [port1]);
+    this.child.postMessage(window === 'main' ? { t: 'port' } : { t: 'port', window }, [port1]);
     wc.postMessage('db-port', null, [port2]);
+  }
+
+  /** A detached window closed: a restarted host does not connect it again. */
+  forgetRenderer(window: string): void {
+    if (window !== 'main') this.renderers.delete(window);
   }
 
   /** Never log these messages: dbOpen and sshConnect carry secrets. False when no host runs. */
@@ -103,7 +110,12 @@ export class DbHostClient extends EventEmitter implements DbHostLink {
     return true;
   }
 
-  request(id: string, op: DbHostOp): Promise<DbResult<unknown>> {
+  /** A tab moved to another window (1.0.8): the Pub/Sub messages of its sessions follow it (null: the main window). */
+  route(sessions: string[], window: string | null): void {
+    if (this.child && sessions.length) this.child.postMessage({ t: 'dbRoute', sessions, window } satisfies DbHostPortControl);
+  }
+
+  request(id: string, op: DbHostOp, window?: string): Promise<DbResult<unknown>> {
     if (!this.child) return Promise.resolve({ ok: false, error: 'noSession' });
     const reqId = this.nextReq++;
     const timeoutMs = dbOpTimeoutMs(op);
@@ -112,7 +124,7 @@ export class DbHostClient extends EventEmitter implements DbHostLink {
     return new Promise((resolve) => {
       const timer = setTimeout(() => { this.pending.delete(reqId); resolve({ ok: false, error: 'dbTimeout' }); }, timeoutMs);
       this.pending.set(reqId, { resolve, timer });
-      this.child!.postMessage({ t: 'dbOp', reqId, id, op: sent } satisfies MainToDbHost);
+      this.child!.postMessage({ t: 'dbOp', reqId, id, op: sent, ...(window && window !== 'main' ? { window } : {}) } satisfies MainToDbHost);
     });
   }
 

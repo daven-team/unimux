@@ -4,13 +4,18 @@
 // (redisClient drops a closed tab's drafts). Closing a tab with drafts asks first, and so does quitting (closeGuard's database step).
 import { create } from 'zustand';
 import { tr } from '../i18n';
-import { askChoice } from '../store';
+import { askChoice, toast } from '../store';
 
 /**
  * One unsaved edit: what the editor shows again when it comes back (`value`), and how to save it without the editor (null: the
  * input of a new item, which "Save" on closing drops).
  */
-export interface RedisDraft<T = unknown> { value: T; save: (() => Promise<boolean>) | null }
+export interface RedisDraft<T = unknown> {
+  value: T;
+  save: (() => Promise<boolean>) | null;
+  /** 1.0.8: an edit that came with the tab from another window and whose editor has not taken it back yet (it cannot be saved without it). */
+  moved?: boolean;
+}
 
 interface DraftStore {
   /** tab id -> slot -> draft. A slot names the DB, the key, the type and the part being edited. */
@@ -68,6 +73,11 @@ export const redisDirtyTabs = (): number => Object.keys(useRedisDrafts.getState(
  */
 export async function saveRedisDrafts(tabId: string): Promise<boolean> {
   const tab = useRedisDrafts.getState().drafts[tabId] ?? {};
+  // 1.0.8: an edit that came from another window has no save of its own until its editor is shown again: the tab stays open.
+  if (Object.values(tab).some((d) => d.moved && !d.save)) {
+    toast(tr('Otwórz klucz, aby zapisać przeniesioną wartość, albo odrzuć zmiany.'), 'error');
+    return false;
+  }
   for (const [slot, draft] of Object.entries(tab)) {
     if (!draft.save) continue;
     if (!await draft.save()) return false;
@@ -106,6 +116,35 @@ export async function confirmCloseRedis(doc: { id: string; name: string }): Prom
 
 /** The line of the database quit question about unsaved Redis values (null: none). */
 export function redisQuitLine(): string | null {
-  const count = redisDraftTotal();
-  return count ? tr('Niezapisane wartości Redis: {count}. Zostaną utracone.', { count }) : null;
+  return redisQuitText(redisDraftTotal());
+}
+/** The same line for a count (1.0.8: the detached windows' values counted in). */
+export const redisQuitText = (count: number): string | null => (count ? tr('Niezapisane wartości Redis: {count}. Zostaną utracone.', { count }) : null);
+
+// ── a tab moving to another window (1.0.8) ──────────────────────────────────
+
+/** The typed values and the open items of a tab, as plain data (the save functions stay: the editor makes them again there). */
+export interface RedisDraftsHandoff { drafts: Record<string, { value: unknown; saveable: boolean }>; memory: Record<string, unknown> }
+
+export function exportRedisDrafts(tabId: string): RedisDraftsHandoff {
+  const st = useRedisDrafts.getState();
+  return {
+    drafts: Object.fromEntries(Object.entries(st.drafts[tabId] ?? {}).map(([slot, d]) => [slot, { value: d.value, saveable: !!d.save || !!d.moved }])),
+    memory: { ...(st.memory[tabId] ?? {}) },
+  };
+}
+
+/**
+ * The values of a tab that came from another window. Each waits for its editor: when the key's view shows it again, the editor
+ * takes the value back and can save it (until then "Save" when closing the tab cannot save it and keeps the tab open).
+ */
+export function importRedisDrafts(tabId: string, raw: unknown): void {
+  if (!raw || typeof raw !== 'object') return;
+  const h = raw as Partial<RedisDraftsHandoff>;
+  const drafts = h.drafts && typeof h.drafts === 'object' ? Object.entries(h.drafts).filter(([, d]) => !!d && typeof d === 'object' && 'value' in d) : [];
+  const memory = h.memory && typeof h.memory === 'object' ? h.memory : {};
+  useRedisDrafts.setState((st) => ({
+    drafts: drafts.length ? { ...st.drafts, [tabId]: Object.fromEntries(drafts.map(([slot, d]) => [slot, { value: d.value, save: null, ...(d.saveable ? { moved: true } : {}) } as RedisDraft])) } : st.drafts,
+    memory: Object.keys(memory).length ? { ...st.memory, [tabId]: { ...memory } } : st.memory,
+  }));
 }

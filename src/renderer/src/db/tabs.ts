@@ -2,7 +2,7 @@
 // the strip, its order, Mod+Tab, closing and drafts work as for files. What a tab shows (rows, results, its session) lives
 // here, outside React, so switching tabs keeps it. Staged edits of a table tab are its draft text; a SQL tab's text is the script.
 import { create } from 'zustand';
-import type { DbColumn, DbConnection, DbConnectionInput, DbResult, DbObjectKind, DbSort, DbTableInfo, DbTxStatus, DbValue } from '../../../shared/db';
+import type { DbColumn, DbConnection, DbConnectionInput, DbResult, DbObjectKind, DbSessionState, DbSort, DbTableInfo, DbTxStatus, DbValue } from '../../../shared/db';
 import { DB_LIMITS } from '../../../shared/db';
 import { dbTabId, editRowLabel, failedTarget, isStagedEmpty, nextSqlName, parseHistory, parseStaged, serializeStaged, stagedCount, stagedEdits, withoutSent, type DbEditTarget, type DbStaged, type DbTabRef } from '../../../shared/dbTabs';
 import { DB_HISTORY_LIMITS, type DbHistoryRecord } from '../../../shared/dbHistory';
@@ -11,10 +11,11 @@ import { splitSql, type SqlDialect } from '../../../shared/dbSql';
 import { activateFile, editFile, setDbTabHooks, useFileStore, type FileDocument } from '../files';
 import { tr } from '../i18n';
 import { askChoice, getS, setUi } from '../store';
-import { setDatabaseQuitWork } from '../closeGuard';
+import { detachedWork, setDatabaseQuitWork } from '../closeGuard';
 import { useSshStore } from '../sshStore';
-import { confirmCloseRedis, redisDraftTotal, redisQuitLine, useRedisDrafts } from '../redis/redisDrafts';
-import { connectTab, dbErrorMessage, disconnectConnection, ensureShared, initDb, liveSessionsOf, onQuery, releaseTab, resultError, useDbStore } from './dbClient';
+import { detachedId, detachedWindowOf } from '../windowRole';
+import { confirmCloseRedis, redisDraftTotal, redisQuitLine, redisQuitText, useRedisDrafts } from '../redis/redisDrafts';
+import { adoptTabSession, connectTab, dbErrorMessage, disconnectConnection, ensureShared, exportTabSession, forgetTabSession, initDb, liveSessionsOf, onQuery, releaseTab, resultError, useDbStore, type DbSessionHandoff } from './dbClient';
 
 // ── runtime state ───────────────────────────────────────────────────────────
 
@@ -110,11 +111,14 @@ export const connectionOf = (ref: DbTabRef | undefined): DbConnection | undefine
 
 // ── opening tabs ────────────────────────────────────────────────────────────
 
-function openTab(ref: DbTabRef, name: string, relativePath: string, text = ''): string {
+function openTab(ref: DbTabRef, name: string, relativePath: string, text = '', here = false): string {
   initDb();
+  const id = dbTabId(ref);
+  // 1.0.8: the tab is in its own window: that window comes up (one tab per table, never a second copy here).
+  const away = here ? undefined : detachedWindowOf(`file:${id}`);
+  if (away) { window.mc.detach.focus(away.id); return id; }
   setUi({ settingsActive: false });
   useSshStore.setState({ viewActive: false });
-  const id = dbTabId(ref);
   if (!useFileStore.getState().documents.some((d) => d.id === id)) {
     const doc: FileDocument = { id, projectId: '', relativePath, name, db: ref, text, savedText: '', diskText: '', status: 'ready', saving: false, error: null, wrap: false };
     useFileStore.setState((s) => ({ documents: [...s.documents, doc] }));
@@ -135,12 +139,15 @@ const dbPart = (database: string) => (database ? `${database} · ` : '');
 export function openTableTab(connectionId: string, database: string, schema: string, table: string, objectKind: DbObjectKind): string {
   const dialect = dialectOf(connectionId);
   const id = openTab({ kind: 'table', connectionId, database, schema, table, objectKind }, table, `${connName(connectionId)} · ${dialect === 'sqlite' ? table : dialect === 'mysql' ? `${schema}.${table}` : `${database} · ${schema}.${table}`}`);
+  if (!docOf(id)) return id; // in its own window
   const st = tabState<TableTabState>(id, 'table');
   if (!st.columns.length && !st.loading) void loadPage(id);
   return id;
 }
 
 export function openSqlTab(connectionId: string, database: string, text = ''): string {
+  // 1.0.8: a detached window shows its one tab: a new SQL tab opens in the main window.
+  if (detachedId !== null) { window.mc.detach.openInMain({ kind: 'sql', connectionId, database, text }); return ''; }
   const used = useFileStore.getState().documents.filter((d) => d.db?.kind === 'sql' && d.db.connectionId === connectionId).map((d) => d.name);
   const name = nextSqlName(used);
   const id = openTab({ kind: 'sql', connectionId, database, uid: uid() }, name, `${connName(connectionId)} · ${dialectOf(connectionId) === 'sqlite' ? '' : dbPart(database)}${name}`, text);
@@ -513,7 +520,8 @@ export function initDbTabs(): void {
   migrateOldHistory();
   setDbTabHooks({ confirmClose, closed });
   setDatabaseQuitWork({
-    pending: () => openTransactions() > 0 || stagedTabs() > 0 || redisDraftTotal() > 0,
+    // 1.0.8: the detached windows' tabs count too (they report their work; see closeGuard detachedWork).
+    pending: () => { const away = detachedWork(); return openTransactions() + away.tx > 0 || stagedTabs() + away.staged > 0 || redisDraftTotal() + away.redis > 0; },
     ask: confirmQuitDatabase,
     subscribe: (changed) => {
       useDbStore.subscribe((st, prev) => { if (st.sessions !== prev.sessions || st.tabSessions !== prev.tabSessions) changed(); });
@@ -529,9 +537,10 @@ export function initDbTabs(): void {
  * values are lost).
  */
 async function confirmQuitDatabase(): Promise<boolean> {
-  const tx = openTransactions();
-  const staged = stagedTabs();
-  const redis = redisQuitLine();
+  const away = detachedWork();
+  const tx = openTransactions() + away.tx;
+  const staged = stagedTabs() + away.staged;
+  const redis = away.redis ? redisQuitText(redisDraftTotal() + away.redis) : redisQuitLine();
   if (!tx && !staged && !redis) return true;
   const lines = [
     ...(tx ? [tr('Otwarte transakcje: {count}. Zostaną wycofane (ROLLBACK).', { count: tx })] : []),
@@ -542,4 +551,110 @@ async function confirmQuitDatabase(): Promise<boolean> {
     { label: tr('Zakończ mimo to'), value: 'quit', danger: true },
   ]);
   return choice === 'quit';
+}
+
+/** This window's unsaved database work (a detached window reports it to the main window's quit question). */
+export const databaseWork = (): { tx: number; staged: number; redis: number } => ({ tx: openTransactions(), staged: stagedTabs(), redis: redisDraftTotal() });
+
+// ── moving a tab to another window (1.0.8) ──────────────────────────────────
+
+/** What a database tab takes to another window: what it shows (rows, results) and its session. */
+export interface DbTabHandoff { tab?: TabState; session: DbSessionHandoff }
+/** Characters of a tab's state that travel at most; larger results stay behind (the tab loads or runs again there). */
+const HANDOFF_STATE_MAX = 24 * 1024 * 1024;
+
+/**
+ * Whether the tab is in the middle of something that cannot move: a query that runs ('query': its rows arrive in this window),
+ * or a page, a save or a DDL that loads ('busy': it ends in a moment).
+ */
+export function dbTabBusy(id: string): 'query' | 'busy' | null {
+  const st = useDbTabs.getState()[id];
+  if (!st) return null;
+  if (st.kind === 'sql') return st.running ? 'query' : st.connecting ? 'busy' : null;
+  if (st.kind === 'table') return st.loading || st.saving ? 'busy' : null;
+  return st.loading ? 'busy' : null;
+}
+
+/** Waits (at most `ms`) until the tab is not busy; true when it is idle. */
+export async function waitDbTabIdle(id: string, ms: number): Promise<boolean> {
+  const until = Date.now() + ms;
+  while (dbTabBusy(id) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
+  return !dbTabBusy(id);
+}
+
+/**
+ * A running query of a tab that should move: the user is asked to stop it first (its rows cannot follow the tab). True when
+ * nothing runs (any more); false keeps the tab where it is.
+ */
+export async function settleQueryBeforeMove(id: string): Promise<boolean> {
+  if (dbTabBusy(id) !== 'query') return true;
+  const choice = await askChoice(tr('Zapytanie wciąż trwa'), tr('Kartę można przenieść, gdy zapytanie się skończy. Przerwać je teraz?'), [
+    { label: tr('Przerwij i przenieś'), value: 'cancel', danger: true },
+  ]);
+  if (choice !== 'cancel') return false;
+  await cancelSql(id);
+  return waitDbTabIdle(id, 10_000);
+}
+
+/** The state a tab takes along (plain data; nothing in flight). */
+export function exportDbTab(id: string): DbTabHandoff | null {
+  const ref = docOf(id)?.db;
+  if (!ref) return null;
+  const st = useDbTabs.getState()[id];
+  let tab: TabState | undefined = !st ? undefined
+    : st.kind === 'sql' ? { ...st, running: false, connecting: false, results: st.results.map((r) => ({ ...r, loadingMore: false })) }
+      : st.kind === 'table' ? { ...st, loading: false, saving: false } : { ...st, loading: false };
+  try {
+    if (tab && JSON.stringify(tab).length > HANDOFF_STATE_MAX) {
+      // Too much to carry: a table loads its page again there, a SQL tab keeps its script and says why the results are gone.
+      tab = tab.kind === 'table' ? { ...tab, rows: [], columns: [], info: null, sessionId: null }
+        : tab.kind === 'sql' ? { ...tab, results: [], queryId: null, shown: 0, error: tr('Wyniki były zbyt duże, aby je przenieść. Uruchom zapytanie ponownie.') } : undefined;
+    }
+  } catch { tab = undefined; }
+  return { ...(tab ? { tab } : {}), session: exportTabSession(id, ref.connectionId, ref.database, ref.kind) };
+}
+
+/** The tab went to another window: what it kept here goes, its own session is not ended (the other window uses it now). */
+export function forgetMovedDbTab(id: string): void {
+  queryListeners.get(id)?.();
+  queryListeners.delete(id);
+  forgetTabSession(id);
+  useDbTabs.setState((st) => { if (!(id in st)) return st; const next = { ...st }; delete next[id]; return next; });
+}
+
+const TAB_KINDS = new Set(['table', 'sql', 'ddl']);
+/**
+ * A tab that comes from another window takes its state and sessions over, before its document arrives (its view must find them,
+ * never load or log in again). `sessions`: main's sessions (db.sessions()).
+ */
+export function adoptDbTab(id: string, ref: DbTabRef, raw: unknown, sessions: readonly DbSessionState[]): void {
+  if (!raw || typeof raw !== 'object') return;
+  initDbTabs();
+  const h = raw as Partial<DbTabHandoff>;
+  const tab = h.tab && typeof h.tab === 'object' && TAB_KINDS.has(h.tab.kind) && h.tab.kind === ref.kind ? h.tab : undefined;
+  if (tab) useDbTabs.setState((st) => ({ ...st, [id]: tab }));
+  if (h.session && typeof h.session === 'object') adoptTabSession(id, h.session, sessions);
+  // "Wczytaj więcej" of a result with an open cursor: its rows now come to this window.
+  if (tab?.kind === 'sql' && tab.queryId && tab.results.some((r) => r.hasMore && !r.closed)) followMore(id, tab.queryId);
+}
+
+/** Rows of "Wczytaj więcej" of a moved SQL tab's last run (the run itself ended in the other window). */
+function followMore(id: string, queryId: string): void {
+  queryListeners.get(id)?.();
+  const edit = (index: number, change: (r: SqlResult) => SqlResult) => patchTab<SqlTabState>(id, (t) => ({ results: t.results.map((r) => (r.index === index ? change(r) : r)) }));
+  const off = onQuery(queryId, (m) => {
+    if (m.t === 'rows') edit(m.index, (r) => {
+      const room = Math.max(0, DB_UI_MAX_ROWS - r.rows.length);
+      return { ...r, rows: [...r.rows, ...m.rows.slice(0, room)], ...(m.rows.length >= room ? { capped: true } : {}) };
+    });
+    else if (m.t === 'statementEnd') edit(m.index, (r) => ({ ...r, rowCount: m.rowCount, hasMore: m.hasMore, timeMs: m.timeMs, loadingMore: false }));
+    else if (m.t === 'statementError') edit(m.index, (r) => ({ ...r, error: dbErrorMessage(m.error, m.server, docOf(id)?.db?.connectionId), loadingMore: false }));
+    else if (m.t === 'resultClosed') edit(m.index, (r) => ({ ...r, closed: true, loadingMore: false }));
+  });
+  queryListeners.set(id, off);
+}
+
+/** A database tab of a detached window opened again after a restart (its view loads on a new session, asking as usual). */
+export function reopenDbTab(ref: DbTabRef, name: string, relativePath: string): string {
+  return openTab(ref, name, relativePath, '', true);
 }

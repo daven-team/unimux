@@ -9,7 +9,7 @@ import { isBinaryData, REDIS_EDITABLE_TYPES, redisDataDisplay, redisDataKey, typ
 import { afterPatternCount, afterPatternDelete, folderPattern, formatBytes, formatTtl, mergeKeys, parseTtlInput, REDIS_KEY_SEPARATOR, redisKeyRows, scanPattern, validScore, type RedisKeyRow } from '../../../../shared/redisView';
 import { useI18n } from '../../i18n';
 import { askChoice, toast } from '../../store';
-import { moveTabToDb, onForgetTab, resultText, takeKeyFocus, useKeyFocus, whereText, withTab } from '../../redis/redisClient';
+import { moveTabToDb, onCarryTab, onForgetTab, resultText, takeKeyFocus, useKeyFocus, whereText, withTab } from '../../redis/redisClient';
 import { openMenu } from '../ContextMenu';
 import { Select } from '../Select';
 import { IChevron, IPlus, ISearch } from '../icons';
@@ -44,6 +44,11 @@ const getB = (tabId: string): BrowserState => useBrowsers.getState()[tabId] ?? f
 const patchB = (tabId: string, patch: Partial<BrowserState> | ((b: BrowserState) => Partial<BrowserState>)) =>
   useBrowsers.setState((st) => { const b = st[tabId] ?? fresh(); return { [tabId]: { ...b, ...(typeof patch === 'function' ? patch(b) : patch) } }; });
 onForgetTab((tabId) => { loadTokens.delete(tabId); useBrowsers.setState((st) => { const next = { ...st }; delete next[tabId]; return next; }, true); });
+// 1.0.8: what the browser loaded and had open goes along when the tab moves to another window.
+onCarryTab('keys', {
+  take: (tabId) => useBrowsers.getState()[tabId],
+  give: (tabId, data) => { if (data && typeof data === 'object') useBrowsers.setState({ [tabId]: { ...fresh(), ...(data as Partial<BrowserState>), loading: false } }); },
+});
 
 const PAGE_KEYS = 500;
 const ROW = 26;

@@ -154,6 +154,22 @@ export function logStopDebug(enabled: boolean, dir: string, cellId: string, body
 }
 const CELL_ID = /^[\w-]{1,64}$/;
 
+/**
+ * The transcript a Claude hook payload names (`transcript_path`, with its `session_id`): the context meter reads it. Only the
+ * main conversation's (a subagent's payload carries agent_id); the path must be a `<session id>.jsonl` file.
+ */
+export function transcriptOf(p: Record<string, unknown> | null): { sessionId: string; path: string } | null {
+  if (!p || (p.agent_id !== undefined && p.agent_id !== null)) return null;
+  const { session_id: sessionId, transcript_path: path } = p;
+  if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId) || typeof path !== 'string' || path.length > 1024) return null;
+  return path.replace(/\\/g, '/').toLowerCase().endsWith(`/${sessionId.toLowerCase()}.jsonl`) ? { sessionId, path } : null;
+}
+
+function noteTranscript(server: EventEmitter, cellId: string, p: Record<string, unknown> | null): void {
+  const t = transcriptOf(p);
+  if (t) server.emit('transcript', cellId, t.sessionId, t.path);
+}
+
 /** True when a Notification hook payload (JSON on stdin) is a real request for the user. */
 export function isAttentionNotification(body: string): boolean {
   try {
@@ -335,6 +351,7 @@ export class HookServer extends EventEmitter {
         }
         if (event === 'session') {
           const parsed = parseSessionStart(body);
+          noteTranscript(this, cellId, parseObject(body));
           if (parsed) {
             logStopDebug(!!this.debugDir, this.debugDir ?? '', cellId, body, 'session');
             this.emit('session', cellId, parsed.sessionId, parsed.source);
@@ -357,6 +374,7 @@ export class HookServer extends EventEmitter {
         if (event === 'stop') {
           logStopDebug(!!this.debugDir, this.debugDir ?? '', cellId, body);
           const parsed = parseObject(body);
+          noteTranscript(this, cellId, parsed);
           this.emit('hook', cellId, hasActiveBackgroundWork(parsed) ? 'stopbg' : 'stop', stopInfo(parsed));
           return;
         }

@@ -2,16 +2,23 @@
 // window adopts them, like a reloaded window) and gets the grid's own tools: add a cell, maximize, the cell menus. A file tab
 // keeps its editor or diff and its unsaved text. No sidebar, no strip of other tabs. "Przypnij z powrotem", the close button
 // or dragging the tab onto the main window puts it back. See main/detachedWindows.ts and shared/detached.ts.
+// 1.0.8: a database, Redis or remote file tab too: it keeps its sessions (an open transaction, Pub/Sub), what it showed and its
+// unsaved values; this window reports its unsaved database work to the main window's quit question.
 import { useEffect, useState, type DragEvent } from 'react';
-import { DETACHED_FILE_SHORTCUTS, DETACHED_GRID_SHORTCUTS, findDetached, viewOverlay } from '../../../shared/detached';
+import { cleanWork, DETACHED_FILE_SHORTCUTS, DETACHED_GRID_SHORTCUTS, findDetached, viewOverlay } from '../../../shared/detached';
 import { activeProject, activeTab, findCell, getProfile, updateCell } from '../../../shared/state';
 import { describeLayout } from '../../../shared/layout';
 import { isAuxPtyId } from '../../../shared/cliInstall';
 import { ptyHostRestartToast } from '../../../shared/ssh';
 import { addAgent, applyCliStatus, ensureStarted, flushPendingSaves, focusCell, releaseCellTerminal, resetStarted, setAliveAtStart } from '../actions';
 import { alertForStatus } from '../alerts';
-import { adoptDocuments, portableDoc, reopenTarget } from '../detach';
-import { activateFile, draftStorageKey, useFileStore } from '../files';
+import { adoptDocuments, portableDoc, reopenTarget, tabHandoff } from '../detach';
+import { activateFile, draftStorageKey, useFileStore, watchFilesOnDisk } from '../files';
+import { databaseWork, dbTabBusy, initDbTabs } from '../db/tabs';
+import { useDbStore } from '../db/dbClient';
+import { initRedis } from '../redis/redisClient';
+import { useRedisDrafts } from '../redis/redisDrafts';
+import { initSftpFollow } from '../sftp';
 import { chosenLanguage, loadLanguage, tr, useI18n } from '../i18n';
 import { reportError } from '../errorReport';
 import { useShortcuts, shortcutText, titleWithShortcut } from '../shortcuts';
@@ -26,7 +33,8 @@ import { openMenuAt, ContextMenuHost } from './ContextMenu';
 import { ErrorBoundary, PanelFallback, WindowFallback } from './ErrorBoundary';
 import { FileIcon } from './FileIcon';
 import { GridView } from './GridView';
-import { IChevron, IPlusBold, TGrid } from './icons';
+import { IChevron, IPlusBold, ITable, TGrid } from './icons';
+import { DbKindIcon } from './db/DbKindIcon';
 import { IAttachBack } from './detachIcons';
 import { LazyScreen } from './LazyScreen';
 import { Modals } from './Modals';
@@ -35,6 +43,8 @@ import { useStatusCounts } from '../statusCounts';
 import './detached.css';
 
 const loadFileEditor = () => import('./FileEditor').then((m) => ({ default: m.FileEditor }));
+const loadRedisTab = () => import('./redis/RedisTabView').then((m) => ({ default: m.RedisTabView }));
+const loadDbTab = () => import('./db/DbTabView').then((m) => ({ default: m.DbTabView }));
 
 // The window's own tab is the active project (and grid) for everything in this renderer.
 if (detachedId !== null) setStateOverlay((s) => viewOverlay(s, findDetached(s, detachedId!)?.target ?? null));
@@ -42,15 +52,27 @@ if (detachedId !== null) setStateOverlay((s) => viewOverlay(s, findDetached(s, d
 let booted = false;
 let attaching = false;
 
-/** Back into the main window: the file's document (unsaved text included) goes with it; main closes this window. */
-export async function attachBack(overMain = false): Promise<boolean> {
+/**
+ * Back into the main window: the file's document (unsaved text included) goes with it, and a database or Redis tab's handoff
+ * (its sessions, what it showed, its unsaved values; a query that runs is asked about first); main closes this window.
+ * `closing`: the window's close button asked (main waits only a moment unless this window says it needs longer).
+ */
+export async function attachBack(overMain = false, closing = false): Promise<boolean> {
   if (attaching) return false;
   const entry = thisDetached();
   if (!entry) return false;
   attaching = true;
   try {
     flushPendingSaves();
-    const docs = entry.target.kind === 'file' ? useFileStore.getState().documents.filter((d) => d.id === (entry.target as { fileId: string }).fileId).map(portableDoc) : [];
+    const fileId = entry.target.kind === 'file' ? entry.target.fileId : null;
+    const docOf = () => useFileStore.getState().documents.find((d) => d.id === fileId);
+    const before = docOf();
+    // A question (a query that runs) or a page that loads takes longer than main waits for a closing window.
+    if (closing && before?.db && dbTabBusy(before.id)) window.mc.detach.stay();
+    const handoff = before ? await tabHandoff(before) : null;
+    if (handoff === false) return false;
+    const doc = docOf();
+    const docs: unknown[] = doc ? [portableDoc(doc), ...(handoff ? [handoff] : [])] : [];
     return await window.mc.detach.attach(docs, overMain);
   } catch (error) {
     reportError('detach', error);
@@ -73,7 +95,7 @@ async function boot(): Promise<void> {
   window.addEventListener('beforeunload', flushPendingSaves);
   document.addEventListener('visibilitychange', () => { if (document.hidden) flushPendingSaves(); });
   window.mc.on('cli:changed', applyCliStatus);
-  window.mc.on('detach:closing', () => { void attachBack(); });
+  window.mc.on('detach:closing', () => { void attachBack(false, true); });
   const [snapshot, alive, mcpInfo, cliStatus] = await Promise.all([
     window.mc.loadSnapshot(), window.mc.aliveCells(), window.mc.getMcpInfo(), window.mc.cliStatus().catch(() => ({})),
   ]);
@@ -125,11 +147,33 @@ async function boot(): Promise<void> {
   });
   const entry = thisDetached();
   if (entry?.target.kind === 'file') {
+    // 1.0.8: database, Redis and remote file tabs: their sessions, ports and prompts work here as in the main window.
+    initDbTabs();
+    initRedis();
+    watchFilesOnDisk();
+    void initSftpFollow();
     await openTarget(entry.target);
     followClose(entry.target.fileId);
+    reportWork();
   }
   const tab = activeTab(activeProject(getS()));
   setUi({ focusedCellId: tab?.cells[0]?.id ?? null });
+}
+
+/** This window's unsaved database work goes to the main window (its quit question counts it), whenever it changes. */
+function reportWork(): void {
+  let last = '';
+  const send = () => {
+    const work = cleanWork(databaseWork());
+    const key = JSON.stringify(work);
+    if (key === last) return;
+    last = key;
+    window.mc.detach.work(work);
+  };
+  useDbStore.subscribe((st, prev) => { if (st.sessions !== prev.sessions || st.tabSessions !== prev.tabSessions) send(); });
+  useFileStore.subscribe((st, prev) => { if (st.documents !== prev.documents) send(); });
+  useRedisDrafts.subscribe((st, prev) => { if (st.drafts !== prev.drafts) send(); });
+  send();
 }
 
 /** The file tab closed here (its own close button, after the save question): the window goes, nothing returns to the main window. */
@@ -144,7 +188,7 @@ function followClose(fileId: string): void {
 /** The file of a detached tab: the document handed over, else the draft kept for this window, else read again. */
 async function openTarget(target: Extract<NonNullable<ReturnType<typeof thisDetached>>['target'], { kind: 'file' }>): Promise<void> {
   const handed = await window.mc.detach.take().catch(() => []);
-  if (adoptDocuments(handed)) {
+  if (await adoptDocuments(handed)) {
     // The draft reaches this window's storage now, not after the usual delay.
     flushPendingSaves();
     return;
@@ -158,6 +202,11 @@ export function DetachedApp() {
   const ready = useStore((st) => st.ready);
   const entry = useStore((st) => (detachedId === null ? undefined : findDetached(st.s, detachedId)));
   const kind = entry?.target.kind;
+  // What the file tab is: a database, a Redis or an editor view.
+  const view = useFileStore((st) => {
+    const d = entry?.target.kind === 'file' ? st.documents.find((x) => x.id === (entry.target as { fileId: string }).fileId) : undefined;
+    return d?.redis ? 'redis' : d?.db ? 'db' : 'file';
+  });
   const [failed, setFailed] = useState(false);
   useEffect(() => { if (!failed) boot().catch((error) => { reportError('boot', error); booted = false; setFailed(true); }); }, [failed]);
   useEffect(() => {
@@ -174,7 +223,7 @@ export function DetachedApp() {
       <div className="detached-body">
         {kind === 'grid'
           ? <div className="terminal-workspace"><GridView /></div>
-          : <div className="file-pane"><LazyScreen load={loadFileEditor} /></div>}
+          : <div className="file-pane"><LazyScreen load={view === 'redis' ? loadRedisTab : view === 'db' ? loadDbTab : loadFileEditor} key={view} /></div>}
       </div>
       <ErrorBoundary name="modals" fallback={(retry) => <PanelFallback retry={() => { setUi({ modal: null }); retry(); }} className="modal-failed" />}><Modals /></ErrorBoundary>
       <ContextMenuHost />
@@ -197,11 +246,20 @@ function DetachedTitleBar() {
   const lastProfileId = useStore((st) => st.s.settings.lastProfileId);
   const cliStatus = useStore((st) => st.ui.cliStatus);
   const dirty = useFileStore((st) => st.documents.some((d) => entry?.target.kind === 'file' && d.id === entry.target.fileId && d.text !== d.savedText));
+  // 1.0.8: a database, Redis or remote tab belongs to no project: its icon and where it is (connection, host) instead.
+  const doc = useFileStore((st) => (entry?.target.kind === 'file' ? st.documents.find((d) => d.id === (entry.target as { fileId: string }).fileId) : undefined));
+  const connection = useStore((st) => { const id = doc?.db?.connectionId ?? doc?.redis?.connectionId; return id ? st.s.dbConnections?.find((c) => c.id === id) : undefined; });
+  const hostLabel = useStore((st) => (doc?.source?.kind === 'remote' ? st.s.sshHosts.find((h) => h.id === (doc.source as { hostId: string }).hostId)?.label : undefined));
   const countsOf = useStatusCounts();
   if (!entry) return null;
   const grid = entry.target.kind === 'grid';
   const name = grid ? tab?.name ?? '' : entry.target.kind === 'file' ? entry.target.name : '';
-  const color = project?.color;
+  const outside = entry.target.kind === 'file' && !entry.target.projectId;
+  const color = outside ? undefined : project?.color;
+  const icon = grid ? <TGrid /> : doc?.redis ? <DbKindIcon kind="redis" /> : doc?.db?.kind === 'table' ? <ITable />
+    : doc?.db ? <DbKindIcon kind={connection?.kind === 'mysql' || connection?.kind === 'sqlite' ? connection.kind : 'postgres'} flavor={connection?.flavor} /> : <FileIcon name={name} />;
+  // A Redis tab is named after its connection: its view and DB say where it is ("cache · Pub/Sub · DB 0").
+  const where = !outside ? project?.name : doc?.redis ? doc.relativePath : doc?.db ? connection?.name : hostLabel ? `${hostLabel}:${doc?.relativePath ?? ''}` : doc?.relativePath;
   const agentMenu = (el: HTMLElement) => openMenuAt(el, [
     { header: tr('Dodaj komórkę do siatki') },
     ...profiles.map((p) => ({ label: profileOptionLabel(p, cliStatus, tr), color: p.color, onClick: () => void addAgent(p.id), hint: p.id === lastProfileId ? shortcutText('agent.add') || undefined : undefined })),
@@ -227,13 +285,13 @@ function DetachedTitleBar() {
       <div className="detached-tab no-drag" {...dragProps} style={color ? { ['--project-color' as string]: color } : undefined}
         title={tr('Przeciągnij na główne okno, aby przypiąć z powrotem')}>
         {color && <span className="tab-project" aria-hidden="true" />}
-        <span className="tab-type-icon" aria-hidden="true">{grid ? <TGrid /> : <FileIcon name={name} />}</span>
+        <span className="tab-type-icon" aria-hidden="true">{icon}</span>
         <span className="label">{name}</span>
         {grid && tab && <span className="size">{describeLayout(tab.layout)}</span>}
         {grid && tab && <StatusBadges counts={countsOf(tab.id)} />}
         {dirty && <span className="file-dirty" aria-label={tr('Niezapisane zmiany')}>●</span>}
       </div>
-      {project && <span className="detached-project">{project.name}</span>}
+      {where && <span className="detached-project" title={doc?.relativePath}>{where}</span>}
       <div className="spacer" />
       <div className="row no-drag detached-tools">
         {grid && tab && <>
