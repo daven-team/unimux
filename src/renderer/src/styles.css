@@ -17,7 +17,12 @@
   --error: #f87171;
   --titlebar: 36px;
   /* Height of a grid cell's header; drop overlays and cell cards start right below it (cellBodyBox measures the real header; keep CELL_HEAD_HEIGHT in shared/cellBox.ts equal). */
-  --cell-head: 30px;
+  --cell-head: 34px;
+  /* 1.0.7 cell cards: a card on the slightly darker grid; a local terminal draws on --card-bg (CARD_BG in TerminalManager.ts). */
+  --grid-bg: #0a0a0a;
+  --card-bg: #131313;
+  --card-border: #232323;
+  --card-radius: 8px;
   --statusbar: 24px;
   --radius: 7px;
   /* Buttons (Cursor-like): flat fills, a small radius. Secondary is neutral grey, primary steel blue with dark text. Cursor's grey
@@ -203,40 +208,18 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .titlebar .spacer { flex: 1; align-self: stretch; }
 
 /* ── grid ──────────────────────────────────────────────────────────────── */
-.grid { position: relative; flex: 1; min-height: 0; background: var(--border); }
+/* 1.0.7: the cells are cards on a darker ground (the gaps between them: CELL_GAP, GridDividers.areaStyle); terminalCell.css draws them. */
+.grid { position: relative; flex: 1; min-height: 0; background: var(--grid-bg); }
 .grid.resizing { user-select: none; }
-.cell { position: absolute; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
-.cell.focused { box-shadow: inset 0 0 0 1px #2c4c7c; }
-.cell.drop { box-shadow: inset 0 0 0 2px var(--accent); }
+.cell { position: absolute; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--card-bg); border-radius: var(--card-radius); }
 .cell-path-drop, .cell-snippet-drop { position: absolute; inset: var(--cell-head) 0 0 0; z-index: 8; display: grid; place-items: center; background: #3b82f61a; box-shadow: inset 0 0 0 2px var(--accent); color: var(--accent-text); font-size: 13px; pointer-events: none; animation: cell-drop-in .15s ease-out; }
 .cell-path-drop.blocked { background: #f8717114; box-shadow: inset 0 0 0 2px var(--error); color: #fecaca; }
 @media (prefers-reduced-motion: reduce) { .cell-path-drop, .cell-snippet-drop { animation: none; } }
 .cell-snippet-drop { background: #3b82f610; box-shadow: none; }
-.cell-head {
-  height: var(--cell-head); flex: none; display: flex; align-items: center; gap: 7px; padding: 0 6px 0 9px; min-width: 0; overflow: hidden;
-  border-bottom: 1px solid #1a1a1a; color: var(--muted); font-size: 11.5px; line-height: 18px; user-select: none; cursor: default;
-}
-.cell.focused .cell-head { color: var(--text-2); background: #111317; }
-.cell-head .idx { flex: none; font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; }
-.cell-head .profile { display: flex; align-items: center; flex: none; gap: 5px; padding: 0 5px; height: 20px; border-radius: 5px; cursor: pointer; white-space: nowrap; }
-.cell-head .profile:hover { background: var(--bg-hover); color: var(--text); }
-.cell-head .pchip { width: 8px; height: 8px; border-radius: 2px; }
-.cell-head .branch { max-width: 20%; min-width: 0; color: #9aa7ff; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cell-head .status-text { flex: none; font-size: inherit; line-height: inherit; white-space: nowrap; }
-.cell-head .status-text.working { color: var(--working); }
-.cell-head .status-text.waiting { color: var(--waiting); }
-.cell-head .status-text.exited { color: var(--error); }
-.cell-head .status-text.error { color: var(--error); font-weight: 600; }
-.cell-head .muted-mark { flex: none; display: inline-flex; color: var(--text-2); opacity: .8; }
-.cell-head .grow { flex: 0; }
-.cell-head .actions { flex: none; display: flex; gap: 1px; opacity: .55; }
-.cell:hover .cell-head .actions, .cell.focused .cell-head .actions { opacity: 1; }
-.cell-head .actions button { width: 22px; height: 20px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
-.cell-head .actions button:hover { background: var(--bg-hover); color: var(--text); }
-.cell-body { flex: 1; min-height: 0; position: relative; padding: 4px 0 0 8px; }
+/* The card header and body: terminalCell.css. */
 .term-host { width: 100%; height: 100%; }
 /* Placeholder for a cell whose agent CLI is not installed; shrinks gracefully with the cell. */
-.cli-missing { position: absolute; inset: var(--cell-head) 0 0 0; z-index: 3; background: var(--bg); container-type: size; display: flex; align-items: center; justify-content: center; padding: 8px; overflow: hidden; }
+.cli-missing { position: absolute; inset: var(--cell-head) 0 0 0; z-index: 3; background: var(--card-bg); container-type: size; display: flex; align-items: center; justify-content: center; padding: 8px; overflow: hidden; }
 .cli-missing-inner { display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 440px; min-width: 0; max-height: 100%; text-align: center; }
 .cli-missing-title { max-width: 100%; color: var(--text); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cli-missing-text { color: var(--muted); font-size: 11.5px; line-height: 1.35; }
@@ -251,7 +234,7 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .cli-banner.armed { background: #3a2a12; border-color: #8a6420; }
 .cli-banner .grow { flex: 1; min-width: 200px; }
 .term-host .xterm { height: 100%; }
-.term-host .xterm-viewport { background: var(--bg) !important; }
+.term-host .xterm-viewport { background: var(--card-bg) !important; }
 .cell-error {
   position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 10px 12px; border-radius: var(--radius);
   background: #2a1414; border: 1px solid #5b2626; color: #fecaca; display: flex; gap: 10px; align-items: stretch; z-index: 2;
@@ -456,11 +439,7 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
   .brand.fx .bn-fx { animation: none; }
 }
 
-/* ── cell names ─────────────────────────────────────────────────────────── */
-.cell-head .cell-name { flex: 1; min-width: 0; color: #e6e6e6; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
-.cell-head .cell-name:not(.custom) { font-weight: 500; color: var(--text-2); }
-.cell-head .cell-name.placeholder { color: #737373; font-weight: 400; }
-.cell-head .cell-name.placeholder:hover { color: var(--muted); }
+/* ── cell names (the header itself: terminalCell.css) ─────────────────────── */
 .cell-name-input { flex: 1; min-width: 0; width: 180px; height: 20px; background: var(--bg); border: 1px solid var(--accent); border-radius: 4px; padding: 0 5px; outline: none; font-size: 11.5px; }
 
 /* ── project icons ──────────────────────────────────────────────────────── */
@@ -619,16 +598,6 @@ select option { background: #171717; color: var(--text); }
 
 /* snippet name hugs its tag */
 .snippet .s-name { flex: 0 1 auto; }
-
-/* ── colored cells ──────────────────────────────────────────────────────── */
-.cell.colored { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cc) 35%, transparent); }
-.cell.colored .cell-head {
-  background: color-mix(in srgb, var(--cc) 14%, #101010);
-  border-bottom-color: color-mix(in srgb, var(--cc) 35%, #1a1a1a);
-  box-shadow: inset 0 2px 0 var(--cc);
-}
-.cell.colored .cell-head .cell-name { color: color-mix(in srgb, var(--cc) 55%, #ffffff); }
-.cell.colored.focused { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cc) 75%, transparent); }
 
 /* ── update pill ────────────────────────────────────────────────────────── */
 .update-pill {
@@ -925,19 +894,20 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid #a8a29e; outli
 .grid-divider { position: absolute; z-index: 6; touch-action: none; outline: none; }
 .grid-divider.col { width: 11px; margin-left: -5px; cursor: col-resize; }
 .grid-divider.row { height: 11px; margin-top: -5px; cursor: row-resize; }
-.grid-divider::after { content: ''; position: absolute; background: var(--accent); opacity: 0; transition: opacity .12s .08s; }
-.grid-divider.col::after { left: 4px; right: 4px; top: 0; bottom: 0; }
-.grid-divider.row::after { top: 4px; bottom: 4px; left: 0; right: 0; }
+.grid-divider::after { content: ''; position: absolute; border-radius: 2px; background: var(--btn-primary-bg); opacity: 0; transition: opacity .12s .08s; }
+/* The line shows in the gap between two cards, short of their rounded corners. */
+.grid-divider.col::after { left: 4px; right: 4px; top: 14px; bottom: 14px; }
+.grid-divider.row::after { top: 4px; bottom: 4px; left: 14px; right: 14px; }
 .grid-divider:hover::after, .grid-divider:focus-visible::after, .grid.resizing .grid-divider:active::after { opacity: 1; }
 
 /* ── dragging a cell by its header ─────────────────────────────────────── */
 .cell-head.draggable { cursor: grab; }
-.cell-head.draggable button, .cell-head.draggable .profile { cursor: pointer; }
+.cell-head.draggable button { cursor: pointer; }
 body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-select: none !important; }
 .grid.dragging .cell-body, .grid.dragging .grid-divider { pointer-events: none; }
 .cell.drag-source { opacity: .4; transition: opacity .15s; }
 .cell-drop-target {
-  position: absolute; z-index: 7; pointer-events: none; display: grid; place-items: center;
+  position: absolute; z-index: 7; pointer-events: none; display: grid; place-items: center; border-radius: var(--card-radius);
   background: #3b82f61f; box-shadow: inset 0 0 0 2px var(--accent); color: var(--accent-text); font-size: 13px;
   animation: cell-drop-in .15s ease-out;
 }
@@ -1075,7 +1045,7 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .modal.auth { width: 720px; }
 .auth-note { padding: 0 16px 10px; font-size: 12px; line-height: 1.5; }
 /* A flex basis, not a fixed height: in a short window the terminal shrinks so the modal (max 82vh) needs no scrolling. */
-.auth-terminal { flex: 0 1 min(300px, 45vh); min-height: 96px; margin: 0 16px; border: 1px solid var(--border-2); border-radius: 8px; background: #0d0d0d; padding: 6px; overflow: hidden; }
+.auth-terminal { flex: 0 1 min(300px, 45vh); min-height: 96px; margin: 0 16px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--card-bg); padding: 6px; overflow: hidden; }
 .auth-status { display: flex; align-items: center; gap: 8px; padding: 10px 16px 12px; font-size: 12.5px; }
 .auth-status.ok { color: var(--waiting); }
 .auth-status.bad { color: var(--error); }

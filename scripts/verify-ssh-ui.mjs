@@ -46,8 +46,9 @@ const PARTS = {
         await connected(app, 1);
         // 1.0.5: the terminal holds the server greeting and no status line of the app ("[SSH ...]"); the card said it all.
         await app.until(`(() => { const t = ${CELL_BUFFERS}[0]; return t.includes('unimux test server') && !t.includes('[SSH'); })()`, 'greeting without app status lines');
-        const chip = await app.evaluate(`document.querySelector('.cell-head .ssh-host')?.textContent`);
-        if (chip !== host.label) throw new Error(`header chip shows "${chip}", expected the host label`);
+        // 1.0.7: the host chip shows the host's initials; the card's title is the host's name.
+        const chip = await app.evaluate(`document.querySelector('.cell-head .cell-name')?.textContent`);
+        if (chip !== host.label) throw new Error(`header shows "${chip}", expected the host label`);
         await app.screenshot('ssh-cell-connected.png');
         // I2: a remote program switches on the alternate screen and mouse tracking (the echo shell echoes the escape sequences).
         const term = `(() => { const s = window.__mc.useStore.getState().s; const p = s.projects.find((x) => x.id === s.activeProjectId); const t = p.tabs.find((x) => x.id === p.activeTabId); return window.__mc.terminals.entries.get(t.cells[0].id).term; })()`;

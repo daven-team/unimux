@@ -81,7 +81,7 @@
 /* A small grid cell: the panel fills the cell without its frame and every row gets tighter. */
 @container (max-width: 340px) or (max-height: 300px) {
   .ssh-frame { padding: 0; }
-  .ssh-panel { --ssh-mark: 14px; max-width: none; margin: 0 0 auto; border: 0; border-radius: 0; background: var(--bg); animation: none; }
+  .ssh-panel { --ssh-mark: 14px; max-width: none; margin: 0 0 auto; border: 0; border-radius: 0; background: var(--card-bg); animation: none; }
   .ssh-panel-head { gap: 8px; padding: 7px 8px; }
   .ssh-chip { width: 22px; height: 22px; border-radius: 5px; font-size: 10px; }
   .ssh-panel-name strong { font-size: 12px; }

@@ -1,30 +1,33 @@
-/* The frame paints above the header, xterm canvases and missing-CLI card. A
-   shadow on the cell itself paints beneath those children and loses its edges. */
+/* 1.0.7: a grid cell is a card - rounded, a hairline frame, a gap of the darker grid around it (CELL_GAP in shared/cellBox.ts,
+   placed by GridDividers.areaStyle). Inside: the header (the icon with the status dot, the name, muted details, the status,
+   the actions), the body with the terminal on the card's own background, and the footer slot (CellFoot.tsx).
+
+   The frame paints above the header, the xterm canvases and the cards over the terminal: a shadow on the cell itself paints
+   beneath those children and loses its edges. The focus ring outside the card is a plain box-shadow of the cell. */
 .cell.terminal-cell {
   isolation: isolate;
   overflow: hidden;
   box-shadow: none;
-  --cell-frame-color: transparent;
+  --cell-frame-color: var(--card-border);
   --cell-frame-width: 1px;
+  /* The steel blue of the primary buttons marks the focused card; a coloured cell uses its own colour (--cc). */
+  --cell-ring: var(--btn-primary-bg);
 }
 
-.cell.terminal-cell.focused,
-.cell.terminal-cell.colored,
-.cell.terminal-cell.drop,
-.cell.terminal-cell.colored.focused {
-  box-shadow: none;
-}
+.terminal-cell:hover { --cell-frame-color: #2c2c2c; }
 
 .terminal-cell.colored {
-  --cell-frame-color: color-mix(in srgb, var(--cc) 35%, transparent);
+  --cell-ring: var(--cc);
+  --cell-frame-color: color-mix(in srgb, var(--cc) 30%, var(--card-border));
 }
+
+/* A card that waits for you (or whose turn failed) tints its frame, so it stands out in a full grid at a glance. */
+.terminal-cell[data-status="waiting"] { --cell-frame-color: color-mix(in srgb, var(--waiting) 32%, var(--card-border)); }
+.terminal-cell[data-status="error"] { --cell-frame-color: color-mix(in srgb, var(--error) 40%, var(--card-border)); }
 
 .terminal-cell.focused {
-  --cell-frame-color: var(--accent);
-}
-
-.terminal-cell.colored.focused {
-  --cell-frame-color: color-mix(in srgb, var(--cc) 75%, var(--accent));
+  --cell-frame-color: color-mix(in srgb, var(--cell-ring) 75%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--cell-ring) 16%, transparent);
 }
 
 .terminal-cell.drop,
@@ -38,101 +41,267 @@
   inset: 0;
   z-index: 9;
   pointer-events: none;
+  border-radius: inherit;
   box-shadow: inset 0 0 0 var(--cell-frame-width) var(--cell-frame-color);
 }
 
-/* The header height is --cell-head (styles.css); keep the terminal body padding in sync with cellBodyBox. */
+/* ── header ─────────────────────────────────────────────────────────────── */
+/* Its height is --cell-head (styles.css; CELL_HEAD_HEIGHT in shared/cellBox.ts). */
 .terminal-cell > .cell-head {
+  height: var(--cell-head);
+  flex: none;
+  display: flex;
+  align-items: center;
   gap: 6px;
-  padding-inline: 9px 6px;
+  min-width: 0;
+  padding: 0 6px 0 8px;
+  overflow: hidden;
+  border-bottom: 1px solid #1d1d1d;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 18px;
+  user-select: none;
+  cursor: default;
+  container-type: inline-size;
 }
 
-/* Native overlay scrollbars can paint above the frame's stacking layer. Keep
-   xterm 1px inside its right/bottom edges, preserving the total 8px/4px padding
-   used to fit background terminals in cellBodyBox. */
-.terminal-cell > .cell-body {
-  padding: 3px 1px 1px 7px;
-}
-
-/* An SSH cell's colour theme (CellView sets --term-bg): the padding around xterm and its viewport take the theme background. */
-.terminal-cell > .cell-body {
-  background: var(--term-bg, transparent);
-}
-
-.terminal-cell > .cell-body .term-host .xterm-viewport {
-  background: var(--term-bg, var(--bg)) !important;
-}
+/* A coloured cell: its colour as a thin bar along the top of the card (the rounded corners clip it). */
+.terminal-cell.colored > .cell-head { box-shadow: inset 0 2px 0 var(--cc); }
 
 .terminal-cell .cell-heading {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   flex: 1;
   min-width: 0;
   overflow: hidden;
 }
 
-.terminal-cell .cell-head .profile {
-  height: 24px;
-  min-width: 24px;
-  max-width: 40%;
-  flex: 0 1 auto;
-  padding: 0 5px;
+/* The icon of the cell (agent logo, shell prompt, SSH host chip); the status dot sits on its corner. */
+.terminal-cell .cell-icon {
+  position: relative;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
   border: 0;
+  border-radius: 6px;
   background: transparent;
   color: inherit;
-  font: inherit;
+  cursor: pointer;
 }
 
-.terminal-cell .profile-name,
-.terminal-cell .cell-head .branch > span {
+.terminal-cell .cell-icon-tile {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: #1c1c1c;
+  box-shadow: inset 0 0 0 1px #2a2a2a;
+  color: var(--text-2);
+}
+
+.terminal-cell .cell-icon:hover .cell-icon-tile { background: #252525; box-shadow: inset 0 0 0 1px #383838; color: var(--text); }
+
+.terminal-cell .cell-icon-tile.host {
+  box-shadow: none;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .2px;
+  text-shadow: 0 1px 1px #0005;
+}
+
+.terminal-cell .cell-icon-tile.host.uncolored { background: #333; color: var(--text-2); text-shadow: none; }
+.terminal-cell .cell-icon:hover .cell-icon-tile.host { filter: brightness(1.12); }
+
+/* The dot (styles.css .dot): working blinks its halo with the shared timer (blink.ts), never a CSS animation. */
+.terminal-cell .cell-icon .dot {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 9px;
+  height: 9px;
+  box-shadow: 0 0 0 2px var(--card-bg);
+}
+
+.terminal-cell .cell-icon .dot.idle { background: #4b4b4b; }
+:root[data-blink] .terminal-cell .cell-icon .dot.working { box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 4px #f5b94266; }
+/* Exited: a hollow grey ring; a failed turn (waiting.error) stays red. */
+.terminal-cell .cell-icon .dot.exited { background: var(--card-bg); box-shadow: 0 0 0 2px var(--card-bg), inset 0 0 0 2px #7a7a7a; }
+
+.terminal-cell .cell-head .idx {
+  flex: none;
+  color: #5c5c5c;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The name keeps its width (the details after it give way first) and truncates only when it alone is too long. */
+.terminal-cell .cell-head .cell-name {
+  flex: 0 0 auto;
+  max-width: calc(100% - 44px);
   overflow: hidden;
+  color: #ececec;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+
+.terminal-cell .cell-head .cell-name:not(.custom) { color: #d0d0d0; font-weight: 500; }
+
+.terminal-cell .cell-name-input { flex: 1; min-width: 60px; max-width: 240px; height: 22px; background: var(--bg); border-color: var(--btn-primary-bg); border-radius: 5px; font-size: 12px; }
+
+/* Muted details after the name; they give way first when the header is short. */
+.terminal-cell .cell-meta {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: #7a7a7a;
+  white-space: nowrap;
+}
+
+.terminal-cell .meta-item {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminal-cell .meta-item + .meta-item::before { content: '·'; margin: 0 6px; color: #4a4a4a; }
+
+.terminal-cell .meta-item.branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #9aa7ff;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 10.5px;
+}
+
+.terminal-cell .meta-item.branch > svg { flex: none; }
+.terminal-cell .meta-item.branch > span { overflow: hidden; text-overflow: ellipsis; }
+.terminal-cell .meta-item.endpoint { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 10.5px; }
+
+/* The status as a small pill: working amber, waiting for you green, a failed turn red, the rest grey. */
+/* The status pill sits beside the actions: at most a third of the header, so the name always keeps the rest. */
+.terminal-cell .cell-head .status-text {
+  flex: 0 0 auto;
+  max-width: 34%;
+  height: 18px;
+  padding: 0 7px;
+  overflow: hidden;
+  border-radius: 9px;
+  background: #ffffff0d;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.terminal-cell .cell-head .profile:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
+.terminal-cell .cell-head .status-text.working { background: color-mix(in srgb, var(--working) 13%, transparent); color: var(--working); }
+.terminal-cell .cell-head .status-text.waiting { background: color-mix(in srgb, var(--waiting) 12%, transparent); color: var(--waiting); }
+.terminal-cell .cell-head .status-text.exited { color: var(--muted); }
+.terminal-cell .cell-head .status-text.error { background: color-mix(in srgb, var(--error) 14%, transparent); color: var(--error); font-weight: 600; }
+.terminal-cell .cell-head .status-text.ssh { color: var(--text-2); }
 
-.terminal-cell .cell-head .pchip,
-.terminal-cell .cell-head svg {
-  flex: none;
-}
+.terminal-cell .cell-head .muted-mark { flex: none; display: inline-flex; color: var(--text-2); opacity: .8; }
 
-.terminal-cell .cell-head .cell-name {
-  line-height: 24px;
-}
-
-.terminal-cell .cell-head .branch {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.terminal-cell .cell-head .status-text {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 30%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
+/* Compact icon actions on the right: dim until the card is hovered or focused. */
 .terminal-cell .cell-head .actions {
+  flex: none;
+  display: flex;
   align-items: center;
   gap: 1px;
+  opacity: .5;
+  transition: opacity .12s;
 }
+
+.terminal-cell:hover .cell-head .actions,
+.terminal-cell.focused .cell-head .actions,
+.terminal-cell .cell-head .actions:focus-within { opacity: 1; }
 
 .terminal-cell .cell-head .actions button {
   flex: none;
   width: 24px;
   height: 24px;
   padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
   line-height: 1;
+  cursor: pointer;
 }
 
+.terminal-cell .cell-head .actions button:hover { background: #ffffff10; color: var(--text); }
+.terminal-cell .cell-head .actions button.close:hover { background: color-mix(in srgb, var(--error) 18%, transparent); color: #fecaca; }
+
 .terminal-cell .cell-head button:focus-visible {
-  outline: 1px solid var(--accent);
+  outline: 1px solid var(--btn-primary-bg);
   outline-offset: -1px;
 }
+
+/* A narrow card: the actions that are also in the "more" menu go first, then the index and the details, then the status pill
+   (the dot on the icon still shows the status). */
+@container (max-width: 400px) {
+  .terminal-cell .cell-head .actions .restart { display: none; }
+}
+
+@container (max-width: 300px) {
+  .terminal-cell .cell-head .actions .maximize,
+  .terminal-cell .cell-head .actions .mcp-control { display: none; }
+  .terminal-cell .cell-head .idx { display: none; }
+}
+
+@container (max-width: 200px) {
+  .terminal-cell .cell-head .cell-meta,
+  .terminal-cell .cell-head .status-text { display: none; }
+}
+
+/* ── body ───────────────────────────────────────────────────────────────── */
+/* The terminal and what is drawn over it (cards, drop hints, find). Overlays placed below the header (top: var(--cell-head))
+   start at the top of the body instead. */
+.terminal-cell > .cell-main {
+  --cell-head: 0px;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The terminal inside the card: keep the padding equal to CELL_BODY_PADDING (shared/cellBox.ts), which fits terminals that
+   are not shown yet. An SSH cell's colour theme (CellView sets --term-bg) paints the body; a local terminal draws on the card. */
+.terminal-cell > .cell-main > .cell-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  padding: 6px 6px 8px 10px;
+  background: var(--term-bg, transparent);
+}
+
+.terminal-cell > .cell-main > .cell-body .term-host .xterm-viewport {
+  background: var(--term-bg, var(--card-bg)) !important;
+}
+
+
+/* ── footer slot ────────────────────────────────────────────────────────── */
+/* CellFoot.tsx renders into it (e.g. the SSH status bar of an SSH cell); empty, it takes no space. */
+.terminal-cell > .cell-foot {
+  flex: none;
+  min-width: 0;
+  border-top: 1px solid #1d1d1d;
+}
+
+.terminal-cell > .cell-foot:empty { display: none; }
