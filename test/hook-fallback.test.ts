@@ -158,3 +158,18 @@ describe('the claude version a cell really runs', () => {
     expect(claudeHookForm(found)).toBe('shell');
   });
 });
+
+describe('globMatch', () => {
+  it('matches like the anchored wildcard patterns of allowedHttpHookUrls, in linear time', async () => {
+    const { globMatch } = await import('../src/main/hookFallback');
+    expect(globMatch('http://127.0.0.1:*', 'http://127.0.0.1:5123/k/a')).toBe(true);
+    expect(globMatch('https://*.example.com/*', 'http://127.0.0.1:5123/k/a')).toBe(false);
+    expect(globMatch('*', 'anything')).toBe(true);
+    expect(globMatch('http://127.0.0.1:5123/k/a', 'http://127.0.0.1:5123/k/a')).toBe(true);
+    expect(globMatch('a*b*c', 'axxbyyc')).toBe(true);
+    expect(globMatch('a*b*c', 'axxbyy')).toBe(false);
+    const started = Date.now();
+    expect(globMatch(`${'*a'.repeat(1000)}b`, 'a'.repeat(5000))).toBe(false);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+});

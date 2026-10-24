@@ -128,7 +128,24 @@ export function httpHookUrlAllowed(texts: Array<string | null>, url: string): bo
     for (const p of list) if (typeof p === 'string') patterns.push(p);
   }
   if (!listed) return true;
-  return patterns.some((p) => new RegExp(`^${p.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`).test(url));
+  // Patterns come from settings files (a project's too): a linear glob match, never a regex built from them.
+  return patterns.some((p) => p.length <= 2048 && globMatch(p, url));
+}
+
+/** `*` matches any run of characters; linear time (greedy with one backtrack point, no regex). */
+export function globMatch(pattern: string, text: string): boolean {
+  let p = 0;
+  let t = 0;
+  let star = -1;
+  let mark = 0;
+  while (t < text.length) {
+    if (p < pattern.length && pattern[p] !== '*' && pattern[p] === text[t]) { p++; t++; }
+    else if (p < pattern.length && pattern[p] === '*') { star = p++; mark = t; }
+    else if (star !== -1) { p = star + 1; t = ++mark; }
+    else return false;
+  }
+  while (p < pattern.length && pattern[p] === '*') p++;
+  return p === pattern.length;
 }
 
 /** Reads the settings files (small JSON files; a missing or unreadable one counts as absent). */
