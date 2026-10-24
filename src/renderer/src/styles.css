@@ -25,9 +25,26 @@
   --card-radius: 8px;
   --statusbar: 24px;
   --radius: 7px;
+  /* Spacing scale (1.0.7): paddings and gaps of panels, headers, menus and dialogs come from these steps. */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 24px;
+  /* Corner radii: small controls (buttons, inputs, chips), medium surfaces (menus, list rows, tiles), large surfaces (dialogs, settings cards). */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  /* Keyboard focus everywhere (lists, trees, buttons, switches, the rail): the steel blue of the selection and the primary buttons. */
+  --focus-ring: #8fb0d4;
+  /* Square icon buttons of panel headers and toolbars, and the icons inside them. */
+  --icon-btn: 24px;
+  --icon-size: 15px;
   /* Buttons (Cursor-like): flat fills, a small radius. Secondary is neutral grey, primary steel blue with dark text. Cursor's grey
      is #626262 on a #272727 toast; #4d4d4d keeps about the same step in lightness on unimux's darker panels and modals. */
-  --btn-radius: 4px;
+  --btn-radius: var(--radius-sm);
   --btn-bg: #4d4d4d;
   --btn-bg-hover: #595959;
   --btn-fg: #e2e2e2;
@@ -60,15 +77,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .app-body { display: flex; min-width: 0; min-height: 0; }
 .main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 
-.team-toggle { position: relative; font-size: 11px; font-weight: 700; }
-.team-count { position: absolute; right: -3px; top: -3px; min-width: 14px; padding: 1px 3px; border-radius: 6px; background: var(--accent); color: white; font-size: 9px; }
+.team-toggle { position: relative; }
+.team-count { position: absolute; right: -3px; top: -3px; min-width: 14px; padding: 1px 3px; border-radius: var(--radius-md); background: var(--btn-primary-bg); color: var(--btn-primary-fg); font-size: 9px; font-weight: 700; line-height: 11px; }
 .coordinator-mark { color: #a78bfa; font-size: 10px; }
 .automation-panel { position: relative; flex: 0 1 var(--automation-height, 310px); min-height: 140px; display: flex; flex-direction: column; background: var(--bg-2); border-top: 1px solid var(--border-2); }
 /* The saved height is only a flex basis: in a short window the panel shrinks (down to 140px) so the grid keeps at least 200px. */
 .main:has(> .automation-panel) > .workspace-content { min-height: 200px; }
 .automation-splitter { position: absolute; left: 0; right: 0; top: -4px; height: 7px; z-index: 3; cursor: row-resize; touch-action: none; }
 .automation-splitter::after { content: ''; position: absolute; left: 0; right: 0; top: 3px; height: 1px; background: transparent; transition: background .12s, height .12s, top .12s; }
-.automation-splitter:hover::after, .automation-splitter:focus-visible::after, .automation-splitter.dragging::after { top: 2px; height: 3px; background: var(--accent); }
+.automation-splitter:hover::after, .automation-splitter:focus-visible::after, .automation-splitter.dragging::after { top: 2px; height: 3px; background: var(--btn-primary-bg); }
 .automation-splitter:focus-visible { outline: none; }
 @media (prefers-reduced-motion: reduce) { .automation-splitter::after { transition: none; } }
 .automation-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px; }
@@ -78,7 +95,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .mcp-state.connected { color: #4ade80; }
 .automation-tabs { display: flex; gap: 5px; border-bottom: 1px solid var(--border); padding: 0 12px; }
 .automation-tabs button { padding: 6px 9px; background: transparent; border: 0; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
-.automation-tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+.automation-tabs button.active { color: var(--text); border-bottom-color: var(--btn-primary-bg); }
 .automation-content { flex: 1; min-height: 0; display: flex; }
 .automation-compose { width: 270px; max-width: 40%; flex: none; padding: 12px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
 .automation-compose label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 11px; }
@@ -145,7 +162,7 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .rail-tiles { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px 0; }
 .rail-tile { position: relative; width: 100%; height: 36px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 0; background: transparent; color: #7f7f7f; cursor: pointer; transition: color .12s; }
 .rail-tile:hover { color: var(--text); }
-.rail-tile:focus-visible { outline: 1px solid var(--accent); outline-offset: -4px; border-radius: 6px; }
+.rail-tile:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -4px; border-radius: 6px; }
 .rail-tile svg { width: 20px; height: 20px; stroke-width: 1.5; shape-rendering: geometricPrecision; }
 .rail-tile.on { color: #f2f2f2; }
 .rail-tile.on::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 0 2px 2px 0; background: var(--btn-primary-bg); }
@@ -328,8 +345,8 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .palette { width: 640px; }
 .palette input { width: 100%; border: 0; border-bottom: 1px solid var(--border); background: transparent; padding: 14px 16px; font-size: 14px; outline: none; }
 .palette-list { overflow-y: auto; padding: 6px; max-height: 60vh; }
-.palette-item { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; cursor: pointer; color: var(--text-2); }
-.palette-item.sel { background: #1d2a40; color: #f0f0f0; }
+.palette-item { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--radius-md); cursor: pointer; color: var(--text-2); }
+.palette-item.sel { background: color-mix(in srgb, var(--btn-primary-bg) 20%, #161616); color: #f0f0f0; }
 .palette-item .kind { width: 74px; flex: none; font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
 .palette-item .ptitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-item .pdesc { color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
@@ -359,7 +376,10 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .cli.claude { background: #3a2216; color: #f0a37f; }
 .cli.codex { background: #102a22; color: #5fd4ac; }
 .cli.shell { background: #222; color: #aaa; }
-.tabs-switch { display: flex; gap: 4px; }
+.tabs-switch { display: flex; gap: var(--space-1); padding: var(--space-1); border: 1px solid var(--border); border-radius: var(--radius-md); background: #141414; }
+.tabs-switch > button { height: 22px; padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: 11.5px; white-space: nowrap; cursor: pointer; }
+.tabs-switch > button:hover { background: #ffffff08; color: var(--text); }
+.tabs-switch > button.on { background: #2c2c2c; color: #f0f0f0; }
 
 /* context menu + toast */
 .menu { position: fixed; z-index: 60; min-width: 250px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; padding: 5px; background: #191919; border: 1px solid #343434; border-radius: 7px; box-shadow: 0 8px 28px #0008; }
@@ -376,6 +396,14 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .usage-spinner { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; }
 .menu-sep { height: 1px; background: #ffffff09; margin: 5px -5px; }
 .menu-label { padding: 4px 12px 3px; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: #828282; text-transform: uppercase; letter-spacing: .4px; }
+/* 1.0.7: menus with icons. One 14px icon column (empty for an item without an icon); headers and colour rows line up with the labels. */
+.menu.with-icons .menu-item { gap: var(--space-4); }
+.menu.with-icons .menu-item .kbd { margin-left: var(--space-6); }
+.menu-icon { flex: none; width: 14px; height: 14px; display: grid; place-items: center; color: #9a9a9a; }
+.menu-icon svg { width: 14px; height: 14px; }
+.menu-item:hover .menu-icon, .menu-item:focus-visible .menu-icon { color: var(--text); }
+.menu-item.danger .menu-icon { color: inherit; }
+.menu.with-icons > .menu-label, .menu.with-icons > .colors { padding-left: 34px; }
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 70; padding: 9px 14px; border-radius: 8px; background: #1f1f1f; border: 1px solid var(--border-2); color: var(--text); box-shadow: 0 12px 40px #000a; max-width: 70vw; }
 .toast.error { background: #2a1414; border-color: #5b2626; color: #fecaca; }
 .colors { display: flex; gap: 6px; padding: 4px 10px 6px; }
@@ -404,7 +432,8 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 
 .rpanel .side-title, .side-section .side-title { align-items: center; }
 .side-section .side-title { padding: 0 2px 6px 6px; }
-.rpanel .side-title { padding: 10px 12px 6px 14px; }
+/* 1.0.7: the right panels' titles sit on the same line as the left panel's title (.side-panel-title), the actions at the right edge. */
+.rpanel .side-title { min-height: 31px; padding: 5px var(--space-3) 2px 14px; }
 .brand-name { font-weight: 600; letter-spacing: .1px; color: #ececec; }
 
 /* ── brand: white wordmark with random color moments ──────────────────── */
@@ -524,7 +553,8 @@ select option { background: #171717; color: var(--text); }
 .re-del:disabled { opacity: .25; cursor: default; }
 
 /* cell table */
-.cell-table { grid-template-columns: 22px 120px 100px 105px minmax(160px, 1fr) 54px; }
+/* 1.0.7: the profile column fits "Claude Code" (it was cut to "Claude Co..."). */
+.cell-table { grid-template-columns: 22px minmax(96px, 120px) 124px 105px minmax(160px, 1fr) 54px; }
 .cell-table > span:last-child, .cell-table .hd:last-of-type { text-align: center; }
 .snip-btn { height: 28px; padding: 0 10px; flex: none; gap: 6px; }
 .prompt-wrap .input { height: 28px; }
@@ -595,6 +625,9 @@ select option { background: #171717; color: var(--text); }
 .titlebar .tb-btn { width: 26px; min-width: 26px; height: 26px; padding: 0; }
 .titlebar .tb-btn svg { width: 15px; height: 15px; }
 .titlebar .tb-btn.on { background: #252525; }
+/* 1.0.7: the title bar buttons in three groups (search | panels | settings), split by thin rules. */
+.row.tb-groups { gap: var(--space-1); }
+.tb-sep { flex: none; width: 1px; height: 14px; margin: 0 var(--space-2); background: var(--border-2); }
 
 /* snippet name hugs its tag */
 .snippet .s-name { flex: 0 1 auto; }
@@ -622,7 +655,7 @@ select option { background: #171717; color: var(--text); }
 .panel-resize { position: absolute; top: 0; bottom: 0; width: 8px; z-index: 35; cursor: col-resize; touch-action: none; outline: none; }
 .panel-resize.edge-sidebar { right: -4px; }
 .panel-resize.edge-snippets { left: -4px; }
-.panel-resize::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: #a8a29e; opacity: 0; transition: opacity .12s; }
+.panel-resize::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: var(--btn-primary-bg); opacity: 0; transition: opacity .12s; }
 .panel-resize:hover::after, .panel-resize:focus-visible::after, .panel-resize.dragging::after { opacity: 1; }
 .panel-resizing, .panel-resizing * { cursor: col-resize !important; user-select: none !important; }
 .sidebar-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -630,7 +663,7 @@ select option { background: #171717; color: var(--text); }
 .sidebar .sub-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .project-avatar { flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; cursor: pointer; }
 .project-avatar:hover { box-shadow: 0 0 0 2px #ffffff28; }
-button:focus-visible, .snippet:focus-visible { outline: 1px solid #a8a29e; outline-offset: 2px; }
+button:focus-visible, .snippet:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; }
 .rpanel .help-pop { right: -40px; left: auto; white-space: normal; }
 
 /* Project icon editing */
@@ -768,17 +801,28 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid #a8a29e; outli
 .file-editor .btn.icon.split-more { width: 16px; min-width: 16px; margin-left: -4px; padding: 0; }
 .workspace-content.split > .terminal-workspace, .workspace-content.split > .file-pane { min-width: 160px; }
 .split-divider { position: relative; flex: none; width: 5px; cursor: col-resize; touch-action: none; outline: none; background: var(--border); }
-.split-divider::after { content: ''; position: absolute; top: 0; bottom: 0; left: 1px; width: 3px; background: var(--accent); opacity: 0; transition: opacity .12s; }
+.split-divider::after { content: ''; position: absolute; top: 0; bottom: 0; left: 1px; width: 3px; background: var(--btn-primary-bg); opacity: 0; transition: opacity .12s; }
 .split-divider:hover::after, .split-divider:focus-visible::after, .split-divider.dragging::after { opacity: 1; }
 .settings-workspace { flex: 1; min-width: 0; min-height: 0; container-type: inline-size; }
 .settings-page { display: flex; justify-content: center; flex: 1; min-width: 0; min-height: 0; gap: 40px; padding: 48px clamp(32px, 4vw, 64px) 32px; background: #181818; }
 .settings-nav { width: 180px; flex: none; padding: 0; border: 0; overflow-y: auto; }
 .settings-nav-title { display: flex; align-items: center; gap: 7px; padding: 0 9px 16px; color: var(--text); font-weight: 600; font-size: 12px; }
 .settings-nav-title svg { width: 14px; height: 14px; color: var(--muted); }
-.settings-nav button { display: block; width: 100%; margin: 2px 0; padding: 7px 9px; border: 0; border-radius: 4px; background: transparent; color: var(--text-2); text-align: left; font-size: 11.5px; cursor: pointer; }
+.settings-nav button { display: block; width: 100%; margin: 2px 0; padding: 7px 9px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; font-size: 12px; cursor: pointer; }
+/* 1.0.7: the search box of Settings, above the sections; while it has text the page shows every matching row of every section. */
+.settings-search { display: flex; align-items: center; gap: var(--space-3); height: 28px; margin: 0 0 var(--space-5); padding: 0 var(--space-4); border: 1px solid #ffffff0d; border-radius: var(--radius-md); background: #141414; color: var(--muted); cursor: text; }
+.settings-search:focus-within { border-color: #2b5a99; }
+.settings-search svg { flex: none; width: 13px; height: 13px; }
+.settings-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: none; background: transparent; color: var(--text); font-size: 12px; }
+.settings-search input::-webkit-search-cancel-button { filter: grayscale(1) brightness(1.6); cursor: pointer; }
+.settings-section + .settings-section { margin-top: 32px; }
+.settings-content .settings-section > h2 { margin-bottom: 14px; font-size: 15px; }
+.settings-content [data-search-hidden] { display: none !important; }
+.settings-no-match { margin: 0; color: var(--muted); font-size: 12.5px; }
+.settings-group-head + .settings-group { margin-top: -14px; }
 .settings-nav button:hover { background: #ffffff06; color: var(--text); }
 .settings-nav button.on { background: #ffffff0b; }
-.settings-nav button:focus-visible { outline: 2px solid #a8a29e; outline-offset: 2px; }
+.settings-nav button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .settings-content { flex: 1; min-width: 0; max-width: 812px; padding: 0 12px 32px 0; overflow-y: auto; container-type: inline-size; }
 .settings-content h2 { margin: 0 0 24px; max-width: 800px; color: var(--text); font-size: 18px; font-weight: 600; }
 .settings-groups { display: flex; flex-direction: column; gap: 22px; max-width: 800px; }
@@ -805,14 +849,14 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid #a8a29e; outli
 .setting-switch::before { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform .12s; }
 .settings-card input.setting-switch:checked { background: #3a9d67; }
 .setting-switch:checked::before { transform: translateX(12px); }
-.settings-card input.setting-switch:focus-visible { outline: 1px solid #aaa; outline-offset: 2px; box-shadow: none; }
+.settings-card input.setting-switch:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; box-shadow: none; }
 .setting-switch:disabled { opacity: .45; cursor: default; }
 .settings-profile-heading { display: flex; align-items: center; justify-content: space-between; color: #b4b4b4; font-size: 12px; }
 .setting-control .row.alert-quiet { flex-wrap: nowrap; gap: 6px; }
 .setting-control .alert-quiet .input { width: 84px; }
 .settings-card .row { flex-wrap: wrap; gap: 12px; }
 .settings-card .check { line-height: 1.6; }
-.settings-card input[type=checkbox], .settings-card input[type=range] { accent-color: #a8a29e; }
+.settings-card input[type=checkbox], .settings-card input[type=range] { accent-color: var(--btn-primary-bg); }
 .refresh-button { gap: 8px; padding: 0 12px; }
 .refresh-button:disabled { opacity: .5; cursor: wait; }
 @media (max-width: 900px) {
@@ -825,6 +869,18 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid #a8a29e; outli
   .settings-page { gap: 24px; padding: 36px 24px 24px; }
   .settings-nav { width: 150px; }
   .settings-content { padding: 0 8px 24px 0; }
+}
+/* 1.0.7: a narrow page (a small window, both side panels open) puts the sections above the content as a wrapping row, so the
+   rows keep their width instead of a 380px column beside the list. */
+@container (max-width: 680px) {
+  .settings-page { flex-direction: column; justify-content: flex-start; gap: var(--space-6); padding: var(--space-6) var(--space-6) 0; }
+  .settings-nav { width: auto; overflow: visible; }
+  .settings-nav-title { padding: 0 2px var(--space-4); }
+  .settings-search { margin-bottom: var(--space-4); }
+  .settings-nav [role=tablist] { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  .settings-nav button { width: auto; margin: 0; padding: 5px 9px; }
+  .settings-content { flex: 1; max-width: none; padding: 0 var(--space-2) var(--space-6) 0; }
+  .settings-content h2 { margin-bottom: var(--space-6); font-size: 16px; }
 }
 @container (max-width: 430px) {
   .setting-row { flex-wrap: wrap; gap: 8px; }
@@ -866,16 +922,16 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid #a8a29e; outli
 .statusbar { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 0 8px 0 12px; border-top: 1px solid var(--border); background: var(--bg-1); color: var(--muted); font-size: 11px; user-select: none; }
 .statusbar > * { flex: none; }
 .sb-spacer { flex: 1; }
-.sb-version { display: inline-flex; align-items: center; gap: 7px; height: 20px; padding: 0 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text-2); font: inherit; font-variant-numeric: tabular-nums; letter-spacing: .01em; cursor: pointer; }
+.sb-version { display: inline-flex; align-items: center; gap: 7px; height: 18px; padding: 0 7px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; font-variant-numeric: tabular-nums; letter-spacing: .01em; cursor: pointer; }
 .sb-version:hover { background: var(--bg-hover); color: var(--text); }
-.sb-version:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sb-version:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .sb-dot.err { background: var(--error); }
 .sb-item { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
-.sb-btn { display: inline-flex; align-items: center; gap: 6px; height: 18px; padding: 0 7px; border: 0; border-radius: 4px; background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
+.sb-btn { display: inline-flex; align-items: center; gap: 6px; height: 18px; padding: 0 7px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
 .sb-btn:hover { background: var(--bg-hover); color: var(--text); }
-.sb-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.sb-action { background: var(--accent-soft); color: var(--accent-text); }
-.sb-action:hover { background: #3b82f640; color: #dbe8ff; }
+.sb-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.sb-action { background: color-mix(in srgb, var(--btn-primary-bg) 16%, transparent); color: #b9cde2; }
+.sb-action:hover { background: color-mix(in srgb, var(--btn-primary-bg) 28%, transparent); color: #e3edf7; }
 .sb-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
 .sb-dot.ok { background: var(--waiting); }
 .statusbar { gap: 8px; }
@@ -1085,7 +1141,13 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .alert-fieldset:disabled { opacity: .45; }
 /* Notifications: one row per event (name, switch, sound, test) */
 .settings-card .alert-events { padding: 0 !important; }
-.alert-event-head, .alert-event-row { display: grid; grid-template-columns: minmax(110px, 1fr) 150px minmax(0, 280px); align-items: center; column-gap: 12px; padding: 0 2px; }
+.alert-event-head, .alert-event-row { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(90px, 150px) minmax(150px, 280px); align-items: center; column-gap: 12px; padding: 0 2px; }
+/* 1.0.7: a narrow card puts the sound and its test button on a row of their own under the event, instead of squeezing the select to nothing. */
+@container (max-width: 460px) {
+  .alert-event-head, .alert-event-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 8px; }
+  .alert-event-head span:nth-child(3) { display: none; }
+  .alert-event-row .alert-event-sound { grid-column: 1 / -1; }
+}
 .alert-event-head { min-height: 30px; color: #8f8f8f; font-size: 11px; font-weight: 600; }
 .alert-event-head span { white-space: nowrap; }
 .alert-event-head span:nth-child(2) { text-align: center; }
@@ -1134,3 +1196,8 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 
 /* Database tabs in the strip (1.0.0): the connection's colour is the tab's chip, so its name tag stays neutral. */
 .workspace-tabs .tab.db-tab-strip .tab-host-tag, .workspace-tabs .tab.redis-strip-tab .tab-host-tag { background: #ffffff10; color: var(--text-2); }
+
+/* 1.0.7: the icon buttons of the panel headers (Files, Git, AI limits, Snippets, Notes) draw one icon size with one stroke
+   weight, the weight of the title bar icons; before they mixed 11 to 16px icons and 1 to 1.8px strokes. */
+:is(.explorer-heading-actions, .git-pane-actions, .usage-head) > .btn.ghost.icon > svg,
+.rpanel .side-title .sq > svg { width: var(--icon-size); height: var(--icon-size); stroke-width: 1.4px; }

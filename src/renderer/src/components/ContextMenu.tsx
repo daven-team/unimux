@@ -1,10 +1,11 @@
 import { useI18n } from '../i18n';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { create } from 'zustand';
 
 export type MenuItem =
-  /** color: a small swatch before the label (a profile's or an SSH host's colour). */
-  | { label: string; onClick: () => void; danger?: boolean; hint?: string; disabled?: boolean; color?: string }
+  /** color: a small swatch before the label (a profile's or an SSH host's colour). icon: a 14px icon before the label (1.0.7);
+   *  once one item of a menu has an icon, every item keeps the icon column, so the labels stay in one line. */
+  | { label: string; onClick: () => void; danger?: boolean; hint?: string; disabled?: boolean; color?: string; icon?: ReactNode }
   | { sep: true }
   | { header: string }
   | { colors: string[]; onPick: (color: string) => void };
@@ -75,8 +76,9 @@ export function ContextMenuHost() {
   }, [menu]);
 
   if (!menu) return null;
+  const withIcons = menu.items.some((item) => 'icon' in item && !!item.icon);
   return (
-    <div className="menu" role="menu" ref={ref} style={{ left: pos.x, top: pos.y }} onContextMenu={(e) => e.preventDefault()}>
+    <div className={`menu ${withIcons ? 'with-icons' : ''}`} role="menu" ref={ref} style={{ left: pos.x, top: pos.y }} onContextMenu={(e) => e.preventDefault()}>
       {menu.items.map((item, i) => {
         if ('sep' in item) return <div key={i} className="menu-sep" role="separator" />;
         if ('header' in item) return <div key={i} className="menu-label">{item.header}</div>;
@@ -90,6 +92,7 @@ export function ContextMenuHost() {
           );
         return (
           <button key={i} type="button" role="menuitem" tabIndex={item.disabled ? -1 : 0} className={`menu-item ${item.danger ? 'danger' : ''} ${item.disabled ? 'disabled' : ''}`} aria-disabled={item.disabled || undefined} onClick={() => { if (item.disabled) return; close(); item.onClick(); }}>
+            {withIcons && <span className="menu-icon" aria-hidden="true">{item.icon}</span>}
             <span style={{ flex: 1 }}>{item.color && <span className="menu-swatch" style={{ background: item.color }} aria-hidden="true" />}{item.label}</span>
             {item.hint && <span className="kbd">{item.hint}</span>}
           </button>

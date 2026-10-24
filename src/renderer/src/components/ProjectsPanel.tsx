@@ -12,7 +12,7 @@ import { closeTab, createProject, relocateProject, removeProject, selectTab, swi
 import { askText, setUi, update, useStore } from '../store';
 import { useSshStore } from '../sshStore';
 import { openMenu } from './ContextMenu';
-import { IFolder, IGrid, IHistory, IPlus } from './icons';
+import { IEdit, IFile, IFolder, IGrid, IHistory, IPlus, IX } from './icons';
 import { dropEdge, scrollDragList } from './listDrag';
 import { PanelEmpty } from './PanelEmpty';
 import { StatusBadges } from './StatusBadges';
@@ -113,22 +113,19 @@ export function ProjectsPanel({ resize }: PanelProps) {
     const index = projects.findIndex((item) => item.id === p.id);
     openMenu(e.clientX, e.clientY, [
       { header: p.name },
-      { label: tr("Edytuj projekt (nazwa, ikona)…"), onClick: () => setUi({ modal: { kind: 'project', projectId: p.id } }) },
-      { label: tr("Zmień nazwę"), onClick: async () => {
-        const name = await askText(tr("Nazwa projektu"), p.name);
-        if (name?.trim()) update((st) => updateProject(st, p.id, { name: name.trim() }));
-      } },
+      // 1.0.7: no separate "Zmień nazwę" here: the project editor renames as well.
+      { label: tr("Edytuj projekt (nazwa, ikona)…"), icon: <IEdit />, onClick: () => setUi({ modal: { kind: 'project', projectId: p.id } }) },
       { colors: PROJECT_COLORS, onPick: (color) => update((st) => updateProject(st, p.id, { color })) },
       ...(index > 0 ? [{ label: tr("Przesuń wyżej"), onClick: () => update((st) => moveProject(st, p.id, projects[index - 1].id, 'before')) }] : []),
       ...(index < projects.length - 1 ? [{ label: tr("Przesuń niżej"), onClick: () => update((st) => moveProject(st, p.id, projects[index + 1].id, 'after')) }] : []),
       { sep: true },
-      { label: tr("Przeglądaj pliki projektu"), onClick: () => openFiles(p) },
-      { label: tr("Otwórz folder"), onClick: () => window.mc.openPath(p.path) },
+      { label: tr("Przeglądaj pliki projektu"), icon: <IFile />, onClick: () => openFiles(p) },
+      { label: tr("Otwórz folder"), icon: <IFolder />, onClick: () => window.mc.openPath(p.path) },
       { label: tr("Otwórz w Cursorze"), onClick: () => window.mc.openInEditor(p.path) },
-      { label: tr("Historia"), onClick: () => setUi({ modal: { kind: 'history', projectId: p.id } }) },
+      { label: tr("Historia"), icon: <IHistory />, onClick: () => setUi({ modal: { kind: 'history', projectId: p.id } }) },
       { label: tr("Zmień folder…"), onClick: () => void relocateProject(p.id) },
       { sep: true },
-      { label: tr("Usuń z listy"), danger: true, onClick: () => void removeProject(p.id) },
+      { label: tr("Usuń z listy"), icon: <IX />, danger: true, onClick: () => void removeProject(p.id) },
     ]);
   };
 

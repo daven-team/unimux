@@ -77,7 +77,8 @@ export function MonitorPanel() {
     // The grid and the cell's number tell apart cells with the same name (three "Wiersz polecenia" cells of one project).
     const name = cellLabel(found.cell, sessionTitles, shownProfileName(getProfile(s, found.cell.profileId), s.settings.shell, tr));
     const index = found.tab.cells.findIndex((c) => c.id === cellId) + 1;
-    return { label: `${index}. ${name}`, project: `${found.project.name} · ${found.tab.name}`, session: !!found.cell.session };
+    // 1.0.7: the grid first: in a narrow panel the project name (the same for most rows) is what gets cut off.
+    return { label: `${index}. ${name}`, project: `${found.tab.name} · ${found.project.name}`, session: !!found.cell.session };
   };
   const kill = async (cell: MonitorCell, row: MonitorRow, label: string) => {
     const choice = await askChoice(

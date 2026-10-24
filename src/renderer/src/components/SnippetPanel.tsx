@@ -68,18 +68,8 @@ export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
   return (
     <aside className="rpanel" aria-label={tr("Panel snippetów")} onContextMenu={backgroundMenu}>
       <div className="side-title">
-        <span className="row" style={{ gap: 6 }}>
-
-          {tr("Snippety")}
-          <span className="help">
-            ?
-            <span className="help-pop">
-              <span className="kbd">{tr("Klik")}</span><span>{tr("Wklej do aktywnej komórki")}</span>
-              <span className="kbd">{tr("Shift + klik")}</span><span>{tr("wklej do wszystkich")}</span>
-              <span className="kbd">{tr("Przeciągnij")}</span><span>{tr("na komórkę albo zmień kolejność")}</span>
-            </span>
-          </span>
-        </span>
+        {/* 1.0.7: the title alone, like the other panels; each snippet's tooltip says what a click, Shift+click and a drag do. */}
+        <span>{tr("Snippety")}</span>
         <button className="sq" title={tr("Nowy snippet")} aria-label={tr("Nowy snippet")} onClick={() => create()}><IPlus /></button>
       </div>
       {/* Nothing to show or search here (an empty library, or only other projects' snippets): the empty state. */}

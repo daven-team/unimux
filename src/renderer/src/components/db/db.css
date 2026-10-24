@@ -164,7 +164,7 @@
 .db-history-list { flex: 1; min-height: 0; overflow-y: auto; }
 .db-history-item { display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border); cursor: pointer; }
 .db-history-item:hover { background: var(--bg-hover); }
-.db-history-item:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.db-history-item:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; }
 .db-history-star { flex: none; width: 20px; height: 20px; border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 20px; padding: 0; border-radius: 4px; }
 .db-history-star:hover { background: var(--bg-2); color: var(--text); }
 .db-history-star.on { color: #fbbf24; }

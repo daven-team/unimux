@@ -167,7 +167,8 @@ function PaletteInner() {
         <div className="palette-list" ref={listRef}>
           {results.map((item, i) => (
             <div key={i} className={`palette-item ${i === sel ? 'sel' : ''}`} onMouseMove={() => { if (i !== sel) setSel(i); }} onClick={(e) => run(item, e.shiftKey)}>
-              <span className="kind">{item.kind}</span>
+              {/* 1.0.7: the kind names a run of items once (its first row), not every row. */}
+              <span className="kind">{results[i - 1]?.kind === item.kind ? '' : item.kind}</span>
               <span className="ptitle">{item.title}</span>
               {item.desc && <span className="pdesc">{item.desc}</span>}
             </div>

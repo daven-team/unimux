@@ -21,6 +21,7 @@ import { monitorMessages } from './monitorMessages';
 import { notesMessages } from './notesMessages';
 import { snippetMessages } from './snippetMessages';
 import { perfMessages } from './perfMessages';
+import { polishMessages } from './polishMessages';
 import { railMessages } from './railMessages';
 import { settingsMessages } from './settingsMessages';
 import { sftpMessages } from './sftpMessages';
@@ -66,6 +67,7 @@ export const messages = {
   ...notesMessages,
   ...snippetMessages,
   ...perfMessages,
+  ...polishMessages,
   ...safetyMessages,
   ...stabilityMessages,
   ...railMessages,
