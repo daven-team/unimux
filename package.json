@@ -1,7 +1,7 @@
 {
   "name": "unimux",
   "productName": "unimux",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Mission control for your AI coding agents. Run a wall of Claude Code and Codex terminals side by side, get pinged when one needs you, pick up any conversation after a restart, and commit, edit and review without leaving the grid. Windows and macOS.",
   "author": "ajzak, azozowsky",
   "contributors": [
