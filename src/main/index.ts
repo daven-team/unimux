@@ -44,6 +44,7 @@ import { DbVault } from './db/vault';
 import { createDbHandlers, registerDbIpc } from './db/ipc';
 import { DbHistoryStore, registerDbHistoryIpc } from './db/history';
 import { registerSqliteFileIpc } from './db/sqliteFiles';
+import { registerNoteFilesIpc } from './noteFiles';
 import { DB_LIMITS, isDbSessionId } from '../shared/db';
 import type { DbHostToMain } from '../shared/dbHostIpc';
 import { claudeProjectDirName, findRecentCodexSession, listSessionsAsync } from './sessions';
@@ -922,6 +923,17 @@ function startSsh(): void {
     if (!path) return { ok: false, cancelled: true };
     try { await writeFile(path, text, 'utf8'); return { ok: true, path }; } catch { return { ok: false }; }
   }, () => ({ ok: false }));
+  // Notes (1.0.7): pasted images in <data>/note-images and a note exported through the save dialog (MC_NOTES_EXPORT_DIR: checks).
+  registerNoteFilesIpc({ guardedHandle, guardedOn }, {
+    dataDir: DATA_DIR,
+    exportDir: process.env.MC_NOTES_EXPORT_DIR && !app.isPackaged ? process.env.MC_NOTES_EXPORT_DIR : null,
+    pickSavePath: async (name) => {
+      const ext = name.split('.').pop() ?? 'md';
+      const options = { title: tr('Eksportuj notatkę'), defaultPath: name, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] };
+      const r = isLive(win) ? await dialog.showSaveDialog(win!, options) : await dialog.showSaveDialog(options);
+      return r.canceled || !r.filePath ? null : r.filePath;
+    },
+  });
   registerSshIpc(ipcMain, createSshHandlers({
     coordinator, vault, knownHosts, drafts: new KeyDrafts(),
     state: () => state,

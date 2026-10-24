@@ -24,6 +24,7 @@ export function normalizeNotes(raw: unknown): Note[] {
       ...(typeof r.projectId === 'string' && r.projectId ? { projectId: r.projectId } : {}),
       ...(typeof r.color === 'string' && COLOR.test(r.color) ? { color: r.color } : {}),
       ...(normalizeCodeLanguage(r.language) ? { language: normalizeCodeLanguage(r.language) } : {}),
+      ...(r.pinned === true ? { pinned: true } : {}),
       updatedAt: typeof r.updatedAt === 'number' && Number.isFinite(r.updatedAt) && r.updatedAt > 0 ? Math.round(r.updatedAt) : 0,
     });
   }

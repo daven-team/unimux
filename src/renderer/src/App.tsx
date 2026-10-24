@@ -35,6 +35,7 @@ const loadFileEditor = () => import('./components/FileEditor').then((m) => ({ de
 const loadRedisTab = () => import('./components/redis/RedisTabView').then((m) => ({ default: m.RedisTabView }));
 const loadSshView = () => import('./components/ssh/SshView').then((m) => ({ default: m.SshView }));
 const loadDbTab = () => import('./components/db/DbTabView').then((m) => ({ default: m.DbTabView }));
+const loadNoteTab = () => import('./components/NoteTabView').then((m) => ({ default: m.NoteTabView }));
 const loadSettingsPage = () => import('./components/SettingsPage').then((m) => ({ default: m.SettingsPage }));
 import { useFileStore, watchFilesOnDisk } from './files';
 import { cancelReconnectAtStart, initSsh, markReconnectAtStart } from './ssh';
@@ -260,7 +261,7 @@ export function App() {
   // Tabs of files outside the projects (remote and local SFTP files, projectId '') show in every project.
   // The tab on screen: the one in front, or with the split view on the one beside the grid (shared/splitView.ts).
   const shownFileId = useShownFileId();
-  const shownKind = useFileStore((st) => { const doc = st.documents.find((d) => d.id === shownFileId); return !doc ? null : doc.redis ? 'redis' : doc.db ? 'db' : 'file'; });
+  const shownKind = useFileStore((st) => { const doc = st.documents.find((d) => d.id === shownFileId); return !doc ? null : doc.redis ? 'redis' : doc.db ? 'db' : doc.note ? 'note' : 'file'; });
   const fileOpen = shownKind !== null;
   const split = useSplitStore((st) => st.on) && fileOpen;
   const splitRatio = useSplitStore((st) => st.ratio);
@@ -348,7 +349,7 @@ export function App() {
             {settingsTabOpen && <div className="settings-workspace" style={{ display: settingsActive ? 'flex' : 'none' }}><LazyScreen load={loadSettingsPage} /></div>}
             {sshViewOpen && <div className="ssh-workspace" style={{ display: sshViewActive && !settingsActive ? 'flex' : 'none' }}><LazyScreen load={loadSshView} /></div>}
             {!settingsActive && !sshViewActive && fileOpen && <div className="file-pane" onPointerDownCapture={split ? () => focusSplitSide('file', shownFileId) : undefined}>
-              <LazyScreen load={shownKind === 'redis' ? loadRedisTab : shownKind === 'db' ? loadDbTab : loadFileEditor} key={shownKind} />
+              <LazyScreen load={shownKind === 'redis' ? loadRedisTab : shownKind === 'db' ? loadDbTab : shownKind === 'note' ? loadNoteTab : loadFileEditor} key={shownKind} />
             </div>}
           </div>
           {automationOpen && <LazyScreen load={loadAutomationPanel} />}

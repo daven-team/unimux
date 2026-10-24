@@ -5,6 +5,7 @@ import { openFile } from '../files';
 import { usePreviewFind } from './previewFind';
 import { useCodeHighlight } from '../useCodeHighlight';
 import { resolveCodeLanguage, type CodeLanguage } from '../../../shared/codeLanguages';
+import { noteImageName, splitTags } from '../../../shared/noteTools';
 import './markdown.css';
 
 export const isMarkdownPath = (path: string): boolean => /\.(md|markdown)$/i.test(path);
@@ -54,7 +55,35 @@ function addCodeTools(fragment: DocumentFragment, tools: MarkdownCodeTools): voi
   });
 }
 
-export function renderMarkdown(text: string, codeTools?: MarkdownCodeTools): string {
+/**
+ * Notes (1.0.7): `tasks` = how many tasks the note's text holds (shared/noteTools.ts noteTasks): when the preview shows as many
+ * checkboxes, they can be clicked (each carries its index); `noteImages`: images saved with the notes stay images, loaded later;
+ * `tags`: #tags outside code and links become chips (`.md-tag`, a click filters the notes). A note keeps its line breaks.
+ */
+export interface MarkdownNoteOptions { tasks?: number; noteImages?: boolean; tags?: boolean }
+
+/** #tags in the text of a note's preview as chips; never inside code, a link or a heading's anchor. */
+function markTags(fragment: DocumentFragment): void {
+  const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT);
+  const texts: Text[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (node.nodeValue?.includes('#') && !node.parentElement?.closest('code, pre, a, kbd')) texts.push(node as Text);
+  }
+  for (const text of texts) {
+    const parts = splitTags(text.nodeValue ?? '');
+    if (parts.length === 1 && typeof parts[0] === 'string') continue;
+    text.replaceWith(...parts.map((part) => {
+      if (typeof part === 'string') return part;
+      const chip = document.createElement('span');
+      chip.className = 'md-tag';
+      chip.dataset.tag = part.tag;
+      chip.textContent = part.raw;
+      return chip;
+    }));
+  }
+}
+
+export function renderMarkdown(text: string, codeTools?: MarkdownCodeTools, note?: MarkdownNoteOptions): string {
   // The language of a fenced block (class="language-ts") survives the sanitizer; any other class does not.
   DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
     if (data.attrName === 'class' && node.nodeName === 'CODE' && CODE_CLASS.test(data.attrValue)) data.forceKeepAttr = true;
@@ -62,7 +91,7 @@ export function renderMarkdown(text: string, codeTools?: MarkdownCodeTools): str
   // Marked parses Markdown; DOMPurify is the boundary for untrusted file HTML.
   let fragment: DocumentFragment;
   try {
-    fragment = DOMPurify.sanitize(marked.parse(text, { gfm: true, async: false }), {
+    fragment = DOMPurify.sanitize(marked.parse(text, { gfm: true, async: false, breaks: !!note }), {
       ALLOWED_TAGS: ['p', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'del', 's', 'a', 'img',
         'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'input', 'details', 'summary', 'kbd', 'sup', 'sub'],
       ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'start', 'align', 'type', 'checked', 'disabled'],
@@ -78,14 +107,48 @@ export function renderMarkdown(text: string, codeTools?: MarkdownCodeTools): str
     slugs.set(slug, count + 1);
     heading.id = `markdown-${slug}${count ? `-${count}` : ''}`;
   });
-  fragment.querySelectorAll('input').forEach((input) => {
-    if (input.type !== 'checkbox') { input.remove(); return; }
-    input.disabled = true;
+  fragment.querySelectorAll('input').forEach((input) => { if (input.type !== 'checkbox') input.remove(); });
+  // An empty task (`- [ ]` with nothing after it) is no task for GFM; a note shows it as an empty checkbox to fill in.
+  if (note?.tasks !== undefined) fragment.querySelectorAll('li').forEach((li) => {
+    // A loose list wraps the item in a paragraph.
+    const holder = li.childNodes.length === 1 && li.firstElementChild?.tagName === 'P' ? li.firstElementChild : li;
+    const m = holder.childNodes.length === 1 && holder.firstChild?.nodeType === Node.TEXT_NODE ? /^\s*\[([ xX])\]\s*$/.exec(holder.textContent ?? '') : null;
+    if (!m) return;
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = m[1] !== ' ';
+    holder.replaceChildren(box);
+  });
+  const boxes = Array.from(fragment.querySelectorAll('input'));
+  const clickable = note?.tasks !== undefined && note.tasks === boxes.length;
+  boxes.forEach((input, index) => {
+    input.disabled = !clickable;
+    if (clickable) {
+      input.dataset.task = String(index);
+      input.closest('li')?.classList.add('md-task', ...(input.checked ? ['done'] : []));
+      // The task's own words in one span (a done task is struck through, its nested list is not).
+      const words = document.createElement('span');
+      words.className = 'md-task-text';
+      for (let node = input.nextSibling; node && !(node instanceof HTMLElement && /^(UL|OL|P|DIV|PRE|BLOCKQUOTE|TABLE)$/.test(node.tagName));) {
+        const next: ChildNode | null = node.nextSibling;
+        words.append(node);
+        node = next;
+      }
+      input.after(words);
+    }
     input.setAttribute('aria-label', input.parentElement?.textContent?.trim() || 'Markdown task');
   });
   // The app CSP does not permit remote or arbitrary local image loads. Keep the
   // descriptive image text visible and make HTTP(S) images explicit links.
   fragment.querySelectorAll('img').forEach((image) => {
+    const saved = note?.noteImages ? noteImageName(image.getAttribute('src') ?? '') : null;
+    if (saved) {
+      // Read by MarkdownPreview from the data folder (a data: URL); no src until then.
+      image.removeAttribute('src');
+      image.dataset.noteImage = saved;
+      image.className = 'note-image';
+      return;
+    }
     const label = image.alt || image.title || 'Image';
     const href = externalMarkdownUrl(image.getAttribute('src') ?? '');
     const replacement = document.createElement(href ? 'a' : 'em');
@@ -93,6 +156,7 @@ export function renderMarkdown(text: string, codeTools?: MarkdownCodeTools): str
     if (href) replacement.setAttribute('href', href);
     image.replaceWith(replacement);
   });
+  if (note?.tags) markTags(fragment);
   if (codeTools) addCodeTools(fragment, codeTools);
   const container = document.createElement('div');
   container.append(fragment);
@@ -117,15 +181,23 @@ function projectLinkPath(href: string, path: string): string | null {
 /** Opens the find widget of the file tab on screen (Ctrl+F outside the text, see FileEditor.tsx); set by the editor or the preview. */
 export type FileFinder = RefObject<((replace: boolean) => void) | null>;
 
-export function MarkdownPreview({ text, projectId, path, finder, codeTools }: {
+export function MarkdownPreview({ text, projectId, path, finder, codeTools, note, onToggleTask, onTag, onDoubleClick }: {
   text: string; projectId: string; path: string; finder?: FileFinder;
+  /** A note's preview (1.0.7): clickable tasks and its saved images. */
+  note?: MarkdownNoteOptions;
+  onToggleTask?: (index: number, checked: boolean) => void;
+  onTag?: (tag: string) => void;
+  onDoubleClick?: (e: MouseEvent<HTMLElement>) => void;
   /** Code blocks get a copy button and, once the languages loaded, colours (the note preview). */
   codeTools?: { copyLabel: string };
 }) {
   const highlighter = useCodeHighlight(!!codeTools);
   const copyLabel = codeTools?.copyLabel;
-  const html = useMemo(() => renderMarkdown(text, copyLabel === undefined ? undefined : { copyLabel, highlight: highlighter?.highlightHtml }),
-    [text, copyLabel, highlighter]);
+  const tasks = note?.tasks;
+  const noteImages = note?.noteImages;
+  const tags = note?.tags;
+  const html = useMemo(() => renderMarkdown(text, copyLabel === undefined ? undefined : { copyLabel, highlight: highlighter?.highlightHtml }, tasks === undefined && !noteImages && !tags ? undefined : { tasks, noteImages, tags }),
+    [text, copyLabel, highlighter, tasks, noteImages, tags]);
   const scroller = useRef<HTMLDivElement>(null);
   const article = useRef<HTMLElement>(null);
   const find = usePreviewFind(article, scroller, html);
@@ -134,8 +206,23 @@ export function MarkdownPreview({ text, projectId, path, finder, codeTools }: {
     finder.current = () => find.open();
     return () => { finder.current = null; };
   }, [finder, find.open]);
+  useEffect(() => {
+    if (!noteImages || !article.current) return;
+    let live = true;
+    article.current.querySelectorAll<HTMLImageElement>('img[data-note-image]').forEach((image) => {
+      void loadNoteImage(image.dataset.noteImage!).then((url) => { if (live && url) image.src = url; else if (live) image.classList.add('missing'); });
+    });
+    return () => { live = false; };
+  }, [html, noteImages]);
   const followLink = (event: MouseEvent<HTMLElement>) => {
     if (event.button !== 0 && event.button !== 1) return;
+    const box = (event.target as Element).closest('input[data-task]') as HTMLInputElement | null;
+    if (box) {
+      if (event.button === 0) onToggleTask?.(Number(box.dataset.task), box.checked);
+      return;
+    }
+    const chip = (event.target as Element).closest('.md-tag') as HTMLElement | null;
+    if (chip) { if (event.button === 0) onTag?.(chip.dataset.tag ?? ''); return; }
     const copy = (event.target as Element).closest('.md-code-copy');
     if (copy) {
       if (event.button !== 0) return;
@@ -165,9 +252,17 @@ export function MarkdownPreview({ text, projectId, path, finder, codeTools }: {
   };
   return <div className="markdown-preview-host find-host" onKeyDown={find.onKeyDown}>
     <div ref={scroller} className="markdown-preview-scroll" tabIndex={0}>
-      <article ref={article} className="markdown-preview" aria-label={path} onClick={followLink} onAuxClick={followLink}
+      <article ref={article} className="markdown-preview" aria-label={path} onClick={followLink} onAuxClick={followLink} onDoubleClick={onDoubleClick}
         dangerouslySetInnerHTML={{ __html: html }} />
     </div>
     {find.widget}
   </div>;
+}
+
+/** Images of the notes read once per run (a data: URL; null when the file is gone). */
+const noteImageCache = new Map<string, Promise<string | null>>();
+export function loadNoteImage(name: string): Promise<string | null> {
+  let found = noteImageCache.get(name);
+  if (!found) { found = window.mc.notes.readImage(name).catch(() => null); noteImageCache.set(name, found); }
+  return found;
 }

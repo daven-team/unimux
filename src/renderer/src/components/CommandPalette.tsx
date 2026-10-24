@@ -18,6 +18,8 @@ import { dbEndpoint, dbKindLabel, isSqlKind } from '../../../shared/db';
 import { getS, getUi, setUi, toast, update, useStore } from '../store';
 import { profileOptionLabel } from '../cliUi';
 import { statusLog, terminals } from '../terminals/TerminalManager';
+import { captureSelectionToNote, createNote, openNoteInPanel, openNoteTab } from '../notesUi';
+import { noteExcerpt } from '../../../shared/noteTools';
 
 interface Item {
   kind: string;
@@ -87,6 +89,9 @@ function PaletteInner() {
     }
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj snippety"), desc: keys('snippets.toggle') || undefined, run: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj notatki"), desc: keys('notes.toggle') || undefined, run: () => update((st) => ({ ...st, notesOpen: !st.notesOpen })) });
+    out.push({ kind: tr('Akcja'), title: tr('Notatki: nowa notatka'), run: () => createNote() });
+    out.push({ kind: tr('Akcja'), title: tr('Notatki: notatka dzienna'), run: () => createNote('daily') });
+    out.push({ kind: tr('Akcja'), title: tr('Notatki: nowa z zaznaczonego tekstu'), desc: keys('notes.capture') || undefined, run: () => captureSelectionToNote() });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj panel projektów"), desc: keys('sidebar.toggle') || undefined, run: () => update((st) => ({ ...st, sidebarCollapsed: !st.sidebarCollapsed })) });
     out.push({ kind: tr('Akcja'), title: tr('Panel: Git'), run: () => { openSidebarPanel('git'); } });
     out.push({ kind: tr('Akcja'), title: tr('Bazy danych: nowe połączenie'), run: () => setUi({ modal: { kind: 'dbConnection', dbKind: 'postgres' } }) });
@@ -114,6 +119,9 @@ function PaletteInner() {
         out.push({ kind: 'Redis', title: view === 'keys' ? tr('Otwórz przeglądarkę Redis: {name}', { name: c.name }) : `${c.name}: ${viewLabel(view)}`, desc: dbEndpoint(c), run: () => { openRedisTab(c.id, view); } });
       }
     }
+    // 1.0.7: notes of the project on screen and the global ones; Enter opens one in the panel, Shift+Enter in a tab.
+    for (const n of s.notes.filter((x) => !x.projectId || x.projectId === project?.id).slice(0, 200))
+      out.push({ kind: tr('Notatka'), title: n.name.trim() || tr('Notatka bez nazwy'), desc: noteExcerpt(n.text, [], 1).slice(0, 80) || undefined, run: (shift) => (shift ? openNoteTab(n) : openNoteInPanel(n.id)) });
     for (const p of s.projects) out.push({ kind: tr('Projekt'), title: p.name, desc: p.path, run: () => switchProject(p.id) });
     for (const p of s.projects)
       for (const t of p.tabs)

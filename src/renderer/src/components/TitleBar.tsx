@@ -32,6 +32,8 @@ import { reconnectAllSsh, reconnectAllTargetsOf, sshHostMenuItems } from '../ssh
 import { canDetachKey, detachKey, requestAttach } from '../detach';
 import { detachedGridIds, detachedList, targetKey } from '../../../shared/detached';
 import { IPopOut } from './detachIcons';
+import { noteIdOfTab } from '../../../shared/noteTools';
+import { openNoteInPanel } from '../notesUi';
 
 export const TitleBar = memo(function TitleBar() {
   const { tr } = useI18n();
@@ -263,6 +265,19 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       ]);
       return;
     }
+    const noteId = noteIdOfTab(doc.id);
+    if (noteId) {
+      openMenu(x, y, [
+        { header: doc.name },
+        { label: tr('Zamknij'), onClick: () => void closeFile(doc.id) },
+        { label: tr('Zamknij pozostałe'), disabled: idsFor('others').length === 0, onClick: () => void closeFiles(idsFor('others')) },
+        { label: tr('Zamknij karty po prawej'), disabled: idsFor('right').length === 0, onClick: () => void closeFiles(idsFor('right')) },
+        { sep: true }, ...splitMenuItems(doc.id),
+        { sep: true },
+        { label: tr('Pokaż w panelu notatek'), onClick: () => openNoteInPanel(noteId) },
+      ]);
+      return;
+    }
     const owner = projects.find((p) => p.id === doc.projectId);
     const full = doc.source ? doc.source.path : owner ? fullProjectPath(owner.path, doc.relativePath, window.mc.platform) : doc.relativePath;
     openMenu(x, y, [
@@ -391,6 +406,21 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
               );
             }
             const owner = projectById.get(doc.projectId);
+            // 1.0.7: a note of the Notes panel as a tab (its name follows the note, it never has unsaved changes).
+            if (noteIdOfTab(doc.id)) {
+              const color = stripTabColor({ project: owner });
+              return (
+                <div key={doc.id} {...dragProps(`file:${doc.id}`)} data-project-id={owner?.id} style={stripTabStyle(order.indexOf(`file:${doc.id}`), color)}
+                  className={`tab file-tab note-strip-tab ${activeKey === `file:${doc.id}` ? 'active' : ''}`} title={`${tr('Notatka')}: ${doc.name}`}
+                  onClick={() => activateFile(doc.id)} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void closeFile(doc.id); } }}
+                  onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
+                  onContextMenu={(e) => { e.preventDefault(); fileTabMenu(e.clientX, e.clientY, doc); }}>
+                  {color && <span className="tab-project" aria-hidden="true" />}
+                  <span className="tab-type-icon" aria-hidden="true"><TNote /></span><span className="label">{doc.name}</span>
+                  <button className="x" aria-label={tr('Zamknij')} onClick={(e) => { e.stopPropagation(); void closeFile(doc.id); }}><IX /></button>
+                </div>
+              );
+            }
             if (doc.db) {
               const c = dbConnection(doc.db.connectionId);
               const color = stripTabColor({ connection: c ? { color: dbConnectionColor(dbGroupColors, c) } : null });

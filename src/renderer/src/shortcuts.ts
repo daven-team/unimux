@@ -9,6 +9,7 @@ import { addAgent, moveCellBy, moveFocus, quickTab, toggleMaximize } from './act
 import { closeFrontTab, cycleWorkspace, frontKey } from './workspaceStrip';
 import { getS, getUi, setUi, update, useStore } from './store';
 import { focusedTerminalCell, openTerminalFind } from './terminals/terminalFind';
+import { captureSelectionToNote } from './notesUi';
 
 let cached: { overrides: unknown; platform: string; resolution: ShortcutResolution } | null = null;
 
@@ -74,6 +75,7 @@ function run(id: string): void {
     case 'tab.close': closeFrontTab(); break;
     case 'snippets.toggle': update((s) => ({ ...s, snippetsOpen: !s.snippetsOpen })); break;
     case 'notes.toggle': update((s) => ({ ...s, notesOpen: !s.notesOpen })); break;
+    case 'notes.capture': captureSelectionToNote(); break;
     case 'sidebar.toggle': update((s) => ({ ...s, sidebarCollapsed: !s.sidebarCollapsed })); break;
     case 'cell.maximize': toggleMaximize(); break;
     case 'terminal.find': { const cell = focusedTerminalCell(); if (cell) openTerminalFind(cell); break; }
