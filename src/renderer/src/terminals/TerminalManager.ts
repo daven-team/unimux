@@ -26,6 +26,7 @@ import { applyScrollback, DEFAULT_SCROLLBACK_LINES, MAX_WEBGL_CONTEXTS, PENDING_
 import { nextLossCount, planWebgl, webglBackoff, WebglLimit } from '../../../shared/webglPool';
 import { onWindowShown } from '../windowShown';
 import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
+import { cursorOffset, reflowedCursor, type WrapBuffer } from '../../../shared/cursorReflow';
 
 /** The background of a cell card (--card-bg in styles.css): a local terminal draws on the card itself (1.0.7). */
 export const CARD_BG = '#131313';
@@ -758,13 +759,36 @@ class TerminalManager {
     e.attachedTo = null;
   }
 
+  /**
+   * fit() of a terminal. A ConPTY terminal reflows the line with the cursor (reflowCursorLine) but xterm leaves the cursor's
+   * column as it was; it goes back to its place in the reflowed line, where ConPTY has it (shared/cursorReflow.ts, 1.0.7).
+   */
+  private fitTerm(e: Entry): void {
+    const view = (): WrapBuffer => {
+      const b = e.term.buffer.active;
+      return { cursorRow: b.baseY + b.cursorY, cursorX: b.cursorX, isWrapped: (row) => b.getLine(row)?.isWrapped === true };
+    };
+    // Only a terminal at rest (a prompt): with output still on its way the parsed buffer is not where ConPTY's cursor is.
+    const quiet = e.outputAt === undefined || performance.now() - e.outputAt > 250;
+    const track = e.term.options.reflowCursorLine === true && e.term.buffer.active.type === 'normal' && quiet && e.tracker.status !== 'working';
+    const cols = e.term.cols;
+    const offset = track ? cursorOffset(view(), cols) : 0;
+    e.fit.fit();
+    if (!track || e.term.cols === cols) return;
+    const to = reflowedCursor(view(), offset, e.term.cols);
+    if (!to) return;
+    const y = to.row - e.term.buffer.active.baseY;
+    if (y < 0 || y >= e.term.rows) return;
+    e.term.write(`[${y + 1};${to.x + 1}H`); // to the terminal only: nothing reaches the pty
+  }
+
   private refit(e: Entry): void {
     if (e.replaying > 0) { e.refitAfterReplay = true; return; }
     if (!e.attachedTo || !e.attachedTo.isConnected || !this.windowShown) return; // a hidden window refits on show
     const { clientWidth, clientHeight } = e.attachedTo;
     if (clientWidth < 20 || clientHeight < 20) return;
     try {
-      e.fit.fit();
+      this.fitTerm(e);
     } catch {
       return;
     }
@@ -786,7 +810,7 @@ class TerminalManager {
     e.host.style.width = `${Math.floor(width)}px`;
     e.host.style.height = `${Math.floor(height)}px`;
     try {
-      e.fit.fit();
+      this.fitTerm(e);
       const changed = e.term.cols !== e.lastSize.cols || e.term.rows !== e.lastSize.rows;
       e.lastSize = { cols: e.term.cols, rows: e.term.rows };
       // An adopted pty (replayed) is not spawned at this size: it has to be told.

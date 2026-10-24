@@ -8,7 +8,7 @@ import { activeProject, activeTab, findCell, getProfile, updateCell } from '../.
 import { describeLayout } from '../../../shared/layout';
 import { isAuxPtyId } from '../../../shared/cliInstall';
 import { ptyHostRestartToast } from '../../../shared/ssh';
-import { addAgent, applyCliStatus, ensureStarted, flushPendingSaves, focusCell, releaseCellTerminal, resetStarted, setAliveAtStart, toggleMaximize } from '../actions';
+import { addAgent, applyCliStatus, ensureStarted, flushPendingSaves, focusCell, releaseCellTerminal, resetStarted, setAliveAtStart } from '../actions';
 import { alertForStatus } from '../alerts';
 import { adoptDocuments, portableDoc, reopenTarget } from '../detach';
 import { activateFile, draftStorageKey, useFileStore } from '../files';
@@ -26,7 +26,7 @@ import { openMenuAt, ContextMenuHost } from './ContextMenu';
 import { ErrorBoundary, PanelFallback, WindowFallback } from './ErrorBoundary';
 import { FileIcon } from './FileIcon';
 import { GridView } from './GridView';
-import { IChevron, IMax, IPlusBold, IRestore, TGrid } from './icons';
+import { IChevron, IPlusBold, TGrid } from './icons';
 import { IAttachBack } from './detachIcons';
 import { LazyScreen } from './LazyScreen';
 import { Modals } from './Modals';
@@ -196,8 +196,6 @@ function DetachedTitleBar() {
   const profiles = useStore((st) => st.s.profiles);
   const lastProfileId = useStore((st) => st.s.settings.lastProfileId);
   const cliStatus = useStore((st) => st.ui.cliStatus);
-  const maximized = useStore((st) => st.ui.maximizedCellId);
-  const focused = useStore((st) => st.ui.focusedCellId);
   const dirty = useFileStore((st) => st.documents.some((d) => entry?.target.kind === 'file' && d.id === entry.target.fileId && d.text !== d.savedText));
   const countsOf = useStatusCounts();
   if (!entry) return null;
@@ -215,7 +213,6 @@ function DetachedTitleBar() {
     { sep: true as const },
     ...sshHostMenuItems('Komórka SSH'),
   ]);
-  const maxTarget = maximized ?? focused ?? tab?.cells[0]?.id ?? null;
   // Dragged onto the main window (anywhere over it), the tab goes back; dropped elsewhere nothing happens.
   const dragProps = {
     draggable: true,
@@ -240,8 +237,7 @@ function DetachedTitleBar() {
       <div className="spacer" />
       <div className="row no-drag detached-tools">
         {grid && tab && <>
-          <button className="tb-btn" disabled={!maxTarget} title={titleWithShortcut(maximized ? tr('Przywróć') : tr('Maksymalizuj'), 'cell.maximize')} aria-label={maximized ? tr('Przywróć') : tr('Maksymalizuj')}
-            onClick={() => maxTarget && toggleMaximize(maxTarget)}>{maximized ? <IRestore /> : <IMax />}</button>
+          {/* 1.0.7: no grid-wide maximize button here: every cell has its own (and the shortcut stays), a lone square looked lost. */}
           <button className="tb-add" title={titleWithShortcut(tr('Dodaj agenta do siatki'), 'agent.add')} onClick={(e) => agentMenu(e.currentTarget)}>
             <IPlusBold />  {tr('Dodaj')} <IChevron />
           </button>
