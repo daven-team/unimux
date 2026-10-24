@@ -290,7 +290,7 @@ export const BROADCAST_CHANNELS: ReadonlySet<string> = new Set([
 ]);
 /** Messages about one cell (its id is the first argument, or `cellId` of the first argument): they go to the window showing it. */
 export const CELL_CHANNELS: ReadonlySet<string> = new Set([
-  'cell:hook', 'cell:session', 'cell:restarted', 'cell:spawnError', 'focus-cell', 'ssh:session', 'ssh:prompt',
+  'cell:hook', 'cell:session', 'cell:context', 'cell:restarted', 'cell:spawnError', 'focus-cell', 'ssh:session', 'ssh:prompt',
 ]);
 
 /** A message's receivers: null = the main window, '*' = every window, else a detached window's id. */

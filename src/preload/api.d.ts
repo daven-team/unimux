@@ -10,6 +10,7 @@ import type { ChangelogResult } from '../shared/changelog';
 import type { AlertEventId } from '../shared/alerts';
 import type { UsageState } from '../shared/usage';
 import type { MonitorSample } from '../shared/monitor';
+import type { ContextUsage } from '../shared/contextUsage';
 import type { AdoptCopyResult, LoginRequest, LoginState, SwapResult } from '../shared/accounts';
 import type { ReplaceRequest, ReplaceResult, SearchOptions, SearchResult } from '../shared/search';
 import type { CreateResult, DeleteResult, FileOpProgress, FileOpRequest, FileOpResult, RenameResult } from '../shared/fileOps';
@@ -69,6 +70,8 @@ export interface McApi {
   killCellAndWait(cellId: string): Promise<void>;
   /** Binds the freshest unclaimed Codex session in `cwd` to the cell (emits cell:session). */
   bindCodexSession(cellId: string, cwd: string): Promise<string | null>;
+  /** How full the context window of the cell's conversation is (read now); null when unknown. Later changes come as cell:context. */
+  contextUsage(cellId: string): Promise<ContextUsage | null>;
   aliveCells(): Promise<string[]>;
   /** The Monitor panel: one process sample (null for a refused sender). */
   monitorSample(): Promise<MonitorSample | null>;
@@ -205,6 +208,7 @@ export interface McApi {
   on(channel: 'cell:restarted', cb: (cellId: string) => void): () => void;
   on(channel: 'cell:hook', cb: (cellId: string, event: HookEvent, info?: HookInfo) => void): () => void;
   on(channel: 'cell:session', cb: (cellId: string, session: CellSession) => void): () => void;
+  on(channel: 'cell:context', cb: (cellId: string, usage: ContextUsage | null) => void): () => void;
   on(channel: 'cell:spawnError', cb: (cellId: string, message: string) => void): () => void;
   /** A notice from the main process, already translated (e.g. Claude http hooks found blocked). */
   on(channel: 'app:notice', cb: (text: string) => void): () => void;

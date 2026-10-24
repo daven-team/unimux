@@ -28,6 +28,7 @@ const api: McApi = {
   killCell: (cellId) => ipcRenderer.send('cell:kill', cellId),
   killCellAndWait: (cellId) => ipcRenderer.invoke('cell:killAndWait', cellId),
   bindCodexSession: (cellId, cwd) => ipcRenderer.invoke('codex:bind', cellId, cwd),
+  contextUsage: (cellId) => ipcRenderer.invoke('context:get', cellId),
   aliveCells: () => ipcRenderer.invoke('cell:alive'),
   monitorSample: () => ipcRenderer.invoke('monitor:sample'),
   monitorKill: (pid) => ipcRenderer.invoke('monitor:kill', pid),

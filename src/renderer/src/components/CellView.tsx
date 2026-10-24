@@ -34,6 +34,7 @@ import { IBranch, IMax, IMore, IPrompt, IRestart, IRestore, IX } from './icons';
 import { ProviderIcon } from './ProviderIcons';
 import { hostInitials } from './ssh/SshConnectCard';
 import { CellFoot } from './CellFoot';
+import { ContextMeter } from './ContextMeter';
 import './terminalCell.css';
 
 export const SNIPPET_MIME = 'application/x-mc-snippet';
@@ -279,8 +280,10 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
               {shownName}
             </span>
           )}
-          {/* Muted details: the profile when the name is not it, the model, the worktree branch, user@host of an SSH cell. */}
-          {!editing && (metaProfile || cell.model || cell.worktree || (ssh && host)) && <span className="cell-meta">
+          {/* Muted details: the context use of an agent's conversation, the profile when the name is not it, the model, the
+              worktree branch, user@host of an SSH cell. */}
+          {!editing && (metaProfile || cell.model || cell.worktree || (ssh && host) || (!ssh && cell.session)) && <span className="cell-meta">
+            {!ssh && cell.session && <ContextMeter cell={cell} />}
             {metaProfile && <span className="meta-item">{profileName}</span>}
             {cell.model && <span className="meta-item model" title={cell.model}>{cell.model}</span>}
             {cell.worktree && (
