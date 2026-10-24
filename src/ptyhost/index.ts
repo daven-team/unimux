@@ -76,6 +76,7 @@ function attachRenderer(port: MessagePortMain, window: string): void {
     // A window speaks only for its own terminals (a detached grid's cells are not the main window's any more).
     if (!routes.accepts(window, m)) return;
     if (m.t === 'sshList') { listFor(port, m); return; }
+    if (m.t === 'sshStats') { statsFor(port, m); return; }
     if (m.t === 'focus') {
       const id = routes.focus(window, typeof m.id === 'string' ? m.id : null);
       if (id !== undefined) router.message({ t: 'focus', id });
@@ -113,6 +114,14 @@ function listFor(port: MessagePortMain, m: Extract<RendererToHost, { t: 'sshList
   if (!valid) return;
   void ssh.list(m.id, { dir: m.dir, cwd: m.cwd, cwdOnly: m.cwdOnly === true }).then((result) => {
     if ([...links.values()].some((link) => link.port === port)) port.postMessage({ t: 'sshListResult', id: m.id, reqId: m.reqId, result } satisfies HostToRenderer);
+  });
+}
+
+/** SSH status bar: like listFor, the answer goes back on the port that asked. */
+function statsFor(port: MessagePortMain, m: Extract<RendererToHost, { t: 'sshStats' }>): void {
+  if (typeof m.id !== 'string' || typeof m.reqId !== 'number') return;
+  void ssh.stats(m.id, m.first === true).then((result) => {
+    if ([...links.values()].some((link) => link.port === port)) port.postMessage({ t: 'sshStatsResult', id: m.id, reqId: m.reqId, result } satisfies HostToRenderer);
   });
 }
 

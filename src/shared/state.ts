@@ -15,6 +15,7 @@ import { normalizeShortcutOverrides } from './shortcuts';
 import { normalizeSshCellRef, normalizeSshHosts, patchSshCellRef, type SshCellRef, type SshHost } from './ssh';
 import { normalizeSshIdentities } from './sshIdentity';
 import { DEFAULT_SSH_THEME, normalizeSshThemeId } from './sshThemes';
+import { normalizeBarItems } from './sshBar';
 import { defaultSftpPlaces, forgetRemotePlace, normalizeSftpPlaces } from './sftpView';
 import { DEFAULT_STRIP_SCOPE, normalizeStripScope, normalizeWorkspaceOrder } from './workspaceOrder';
 import { normalizeDetachedWindows, openGrids } from './detached';
@@ -526,6 +527,7 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
       backgroundLoad: normalizeBackgroundLoad(r.settings?.backgroundLoad),
       scrollbackLines: normalizeScrollback(r.settings?.scrollbackLines),
       sshTheme: normalizeSshThemeId(r.settings?.sshTheme),
+      sshStatusBarItems: normalizeBarItems(r.settings?.sshStatusBarItems),
       stripScope: normalizeStripScope(r.settings?.stripScope),
       shortcuts: normalizeShortcutOverrides(r.settings?.shortcuts, platform),
       // The retired notifications / waitingSound* keys only seed the alerts when none are saved yet; they are never written again.

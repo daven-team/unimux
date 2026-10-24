@@ -15,6 +15,7 @@ import { useSshConnectStore } from '../sshConnectStore';
 import { disconnectCell, openSshView, reconnectCell, sshContext, sshHostMenuItems } from '../ssh';
 import { SshCellCard } from './ssh/SshCellCard';
 import { SshAutocomplete } from './ssh/SshAutocomplete';
+import { SshStatusBar } from './ssh/SshStatusBar';
 import { openSftp } from '../sftp';
 import { profileOptionLabel } from '../cliUi';
 import { CliMissingCard } from './CliMissingCard';
@@ -301,6 +302,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
         </span>
       </div>
       <div className="cell-body" ref={bodyRef} style={lackingCli ? { visibility: 'hidden' } : sshTheme ? { ['--term-bg' as string]: sshTheme.colors.background } : undefined} />
+      {ssh && <SshStatusBar cell={cell} />}
       <span className="cell-frame" aria-hidden="true" />
       {!lackingCli && <TerminalFind cellId={cell.id} />}
       {pathDrop && <div className={`cell-path-drop ${pathDrop.blocked ? 'blocked' : ''}`} role="status">{pathDrop.blocked ? tr(ssh ? 'Ścieżki lokalne nie działają w sesji SSH' : 'Komórka nie jest uruchomiona') : dropLabel(pathDrop.target)}</div>}
