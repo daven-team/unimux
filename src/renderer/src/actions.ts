@@ -445,9 +445,11 @@ export function releaseCellTerminal(cellId: string): void {
   setUi((ui) => {
     const { [cellId]: _s, ...statuses } = ui.statuses;
     const { [cellId]: _f, ...failures } = ui.failures;
+    const { [cellId]: _d, ...statusDetails } = ui.statusDetails;
     return {
       statuses,
       failures,
+      statusDetails,
       focusedCellId: ui.focusedCellId === cellId ? null : ui.focusedCellId,
       maximizedCellId: ui.maximizedCellId === cellId ? null : ui.maximizedCellId,
     };

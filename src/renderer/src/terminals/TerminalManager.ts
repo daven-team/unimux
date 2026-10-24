@@ -10,8 +10,9 @@ import type { BoundThread } from '../../../shared/codexHooks';
 import { screenWaitsForBackground } from '../../../shared/backgroundWait';
 import { AgentInference, keySequence, type InferredAgent, type ScreenLine, type ScreenState } from '../../../shared/agentInfer';
 import { FailureScanner } from '../../../shared/outputFailure';
-import { isFocusOrMouseReport, isUserInput, StatusTracker, type CellStatus, type HookEvent, type HookInfo, type StatusCause, type StatusReason } from '../../../shared/status';
+import { isFocusOrMouseReport, isUserInput, sameDetail, StatusTracker, type CellStatus, type HookEvent, type HookInfo, type StatusCause, type StatusDetail, type StatusReason } from '../../../shared/status';
 import { hookDetail, StatusLog, type StatusTrigger } from '../../../shared/statusLog';
+import { parseShellMark } from '../../../shared/shellIntegration';
 import { sshModeReset } from '../../../shared/ssh';
 import { DEFAULT_SSH_THEME, sshThemeById } from '../../../shared/sshThemes';
 import type { RemoteListResult } from '../../../shared/remotePaths';
@@ -117,6 +118,7 @@ class TerminalManager {
   private statusListeners = new Set<StatusListener>();
   private exitListeners = new Set<(cellId: string) => void>();
   private bindListeners = new Set<(cellId: string, thread: BoundThread) => void>();
+  private detailListeners = new Set<(cellId: string, detail: StatusDetail | undefined) => void>();
   private floodListeners = new Set<(cellId: string) => void>();
   /** Where a terminal is opened (xterm measures its glyphs there, so it has a real size). */
   private staging: HTMLDivElement;
@@ -346,6 +348,7 @@ class TerminalManager {
       existing.agent = opts.agent;
       existing.codex = opts.codex === true;
       existing.tracker.setCodex(existing.codex);
+      existing.tracker.setAgent(existing.agent);
       const remote = opts.remote === true;
       if (existing.remote !== remote) {
         existing.remote = remote;
@@ -390,8 +393,12 @@ class TerminalManager {
       parkedSelection: null, applySelection: null, remote: opts.remote === true, addon: null,
     };
     entry.tracker.setCodex(entry.codex);
+    entry.tracker.setAgent(entry.agent);
     entry.tracker.onBind = (thread) => this.bindListeners.forEach((l) => l(cellId, thread));
     entry.tracker.bgGuard = () => this.screenWaits(entry);
+    // Prompt marks say "a command runs" only; a full-screen program, an agent typed by hand or a command run in an agent cell
+    // after its CLI ended is judged by its output (see StatusTracker.output).
+    entry.tracker.interactiveGuard = () => this.inAlternate(entry) || entry.agent || entry.infer.agent !== null;
     this.entries.set(cellId, entry);
     this.syncAddon(entry);
     this.statusTimer ??= setInterval(() => this.tickStatuses(), 400);
@@ -425,6 +432,15 @@ class TerminalManager {
       if (entry.remote) this.remoteCwds.set(cellId, trackOsc7(this.remoteCwds.get(cellId) ?? EMPTY_CWD, parseOsc7(payload)));
       return true;
     });
+    // Prompt marks of the shell (OSC 133, and VS Code's OSC 633 from a remote shell set up for it): command running vs at the
+    // prompt, the exit code, and an agent CLI that ended back to its shell (shellIntegration.ts). A replay is history, not news.
+    const shellMark = (payload: string) => {
+      const mark = parseShellMark(payload);
+      if (mark && entry.replaying === 0) this.setStatus(entry, () => entry.tracker.shellMark(mark.kind, performance.now(), mark.code), 'shell');
+      return true;
+    };
+    term.parser.registerOscHandler(133, shellMark);
+    term.parser.registerOscHandler(633, shellMark);
     term.onBell(() => {
       if (entry.agent && entry.replaying === 0) this.setStatus(entry, () => entry.tracker.osc9(), 'osc9');
     });
@@ -983,6 +999,17 @@ class TerminalManager {
     return () => this.statusListeners.delete(l);
   }
 
+  /** The short reason of a cell's status changed (tool, permission, exit code...; see StatusDetail), with or without a status change. */
+  onDetail(l: (cellId: string, detail: StatusDetail | undefined) => void): () => void {
+    this.detailListeners.add(l);
+    return () => this.detailListeners.delete(l);
+  }
+
+  /** The current status detail of a cell (undefined when there is none). */
+  detail(cellId: string): StatusDetail | undefined {
+    return this.entries.get(cellId)?.tracker.detail;
+  }
+
   /** A Codex turn end was committed and names the thread the cell's stored session should become. */
   onCodexBind(l: (cellId: string, thread: BoundThread) => void): () => void {
     this.bindListeners.add(l);
@@ -1005,9 +1032,15 @@ class TerminalManager {
 
   private setStatus(e: Entry, change: () => unknown, trigger: StatusTrigger, info?: HookInfo): void {
     const prev = e.tracker.status;
+    const prevDetail = e.tracker.detail;
     const result = change();
     const { status, lastCause, lastReason, lastError } = e.tracker;
-    const hookEvent = trigger === 'stop' || trigger === 'stopbg' || trigger === 'notify' || trigger === 'busy' || trigger === 'fail' || trigger === 'prompt' || trigger === 'session';
+    if (!sameDetail(prevDetail, e.tracker.detail)) {
+      const detail = e.tracker.detail;
+      this.detailListeners.forEach((l) => l(e.id, detail));
+    }
+    const hookEvent = trigger === 'stop' || trigger === 'stopbg' || trigger === 'notify' || trigger === 'busy' || trigger === 'fail' || trigger === 'prompt' || trigger === 'session'
+      || trigger === 'idle' || trigger === 'compact' || trigger === 'compacted';
     // Transitions are always logged; hook events that changed nothing only when they matter (busy spam would evict the history).
     const changed = status !== prev;
     if (changed || result === 'renotify' || (hookEvent && (trigger !== 'busy' || result === 'ignored'))) {

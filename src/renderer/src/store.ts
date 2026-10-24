@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { defaultState } from '../../shared/state';
-import type { CellStatus } from '../../shared/status';
+import type { CellStatus, StatusDetail } from '../../shared/status';
 import type { AppState } from '../../shared/types';
 import type { StateSnapshot } from '../../shared/stateEdits';
 import type { StateChange } from '../../shared/statePatch';
@@ -51,6 +51,8 @@ export interface Ui {
   statuses: Record<string, CellStatus>;
   /** Cells whose last turn failed (waiting with reason error) and why: a StopFailure code or 'usage-limit'. */
   failures: Record<string, string>;
+  /** The short reason of a cell's status (tool, permission, exit code...), see shared/statusDetail.ts; absent when there is none. */
+  statusDetails: Record<string, StatusDetail>;
   focusedCellId: string | null;
   maximizedCellId: string | null;
   palette: boolean;
@@ -118,6 +120,7 @@ export const useStore = create<Store>((set, get) => ({
   ui: {
     statuses: {},
     failures: {},
+    statusDetails: {},
     focusedCellId: null,
     maximizedCellId: null,
     palette: false,

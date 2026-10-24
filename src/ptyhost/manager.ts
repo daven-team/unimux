@@ -1,10 +1,12 @@
 // Owns every pseudo-terminal. Independent of Electron so it can be integration-tested in Node.
 import { spawn as spawnProcess } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { createRequire } from 'module';
 import { delimiter, join } from 'path';
 import * as pty from 'node-pty';
 import type { SpawnRequest } from '../shared/ipc';
+import { withShellIntegration, type ShellLaunch } from '../shared/shellIntegration';
 import type { ShellKind } from '../shared/types';
 import { OutputChannel } from './output';
 import type { TerminalBackend, TerminalHistory } from './router';
@@ -70,6 +72,27 @@ export function resolveShell(kind: ShellKind, env: Record<string, string>, platf
   return { file: 'powershell.exe', args: ['-NoLogo'] };
 }
 
+const writtenFiles = new Map<string, string>();
+
+/**
+ * The shell launch with its prompt marks (shellIntegration.ts): the helper files it needs are written once per content into
+ * the temp folder. A write that fails starts the shell untouched (the status then falls back to the output heuristics).
+ */
+export function integratedLaunch(kind: ShellKind, launch: ShellLaunch, platform = process.platform, dir = join(tmpdir(), 'unimux-shell')): ShellLaunch {
+  const spec = withShellIntegration(kind, launch, { dir, platform });
+  try {
+    for (const [file, content] of Object.entries(spec.files)) {
+      if (writtenFiles.get(file) === content && existsSync(file)) continue;
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(file, content, { mode: 0o644 });
+      writtenFiles.set(file, content);
+    }
+  } catch {
+    return launch;
+  }
+  return { file: spec.file, args: spec.args, env: spec.env };
+}
+
 export class PtyManager implements TerminalBackend {
   private entries = new Map<string, Entry>();
   /**
@@ -96,13 +119,13 @@ export class PtyManager implements TerminalBackend {
 
   spawn(req: SpawnRequest): number {
     if (this.entries.has(req.id)) void this.kill(req.id);
-    const { file, args } = resolveShell(req.shell, req.env);
+    const { file, args, env } = integratedLaunch(req.shell, { ...resolveShell(req.shell, req.env), env: req.env });
     const proc = pty.spawn(file, args, {
       name: 'xterm-256color',
       cols: Math.max(2, req.cols),
       rows: Math.max(1, req.rows),
       cwd: req.cwd,
-      env: { ...req.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'unimux' },
+      env: { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'unimux' },
       ...(process.platform === 'win32' ? { useConpty: true, useConptyDll: true } : {}),
     });
     let resolveExit!: () => void;

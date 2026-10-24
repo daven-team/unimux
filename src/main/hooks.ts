@@ -11,11 +11,26 @@ import { parseCodexNotify, type CodexNotice } from '../shared/codexHooks';
 import { SESSION_ID } from '../shared/sessionTrack';
 import type { HookEvent, HookInfo } from '../shared/status';
 
-/** URL events: the status events plus SubagentStop, which reaches the tracker as a "subagent" busy hook, and Codex's notify. */
-export type HookUrlEvent = HookEvent | 'subagent' | 'codex';
+/**
+ * URL events: the status events plus SubagentStop, which reaches the tracker as a "subagent" busy hook, and Codex's notify.
+ * Claude Code 2.1.78+ also gets the precise ones (see claudeExtendedHooks): pre / post = Pre/PostToolUse with the tool name,
+ * permission = PermissionRequest (the moment a permission dialog opens), subagentstart, compact / compacted = Pre/PostCompact,
+ * elicit / elicited = an MCP server's input request and its answer.
+ */
+export type HookUrlEvent = HookEvent | 'subagent' | 'codex' | ToolUrlEvent;
+type ToolUrlEvent = 'pre' | 'post' | 'permission' | 'subagentstart' | 'compact' | 'compacted' | 'elicit' | 'elicited';
 const EVENTS: HookUrlEvent[] = ['prompt', 'stop', 'stopbg', 'notify', 'busy', 'fail', 'subagent', 'codex'];
-/** Notification types that do not mean "the agent needs you now" (idle_prompt follows Stop, or fires mid-work). */
-const IGNORED_NOTIFICATIONS = new Set(['idle_prompt', 'auth_success']);
+const TOOL_EVENTS = new Set<string>(['pre', 'post', 'permission', 'subagentstart', 'compact', 'compacted', 'elicit', 'elicited']);
+/** Notification types that do not mean "the agent needs you now"; idle_prompt is its own (quiet) event, see notificationEvent. */
+const IGNORED_NOTIFICATIONS = new Set(['auth_success', 'elicitation_complete', 'elicitation_response', 'agent_completed', 'plugin_notification', 'quota_auto_resume_disabled']);
+/** Notification types that are a question for the user, and what kind of question. */
+const ATTENTION_NOTIFICATIONS: Record<string, NonNullable<HookInfo['need']>> = {
+  permission_prompt: 'permission', elicitation_dialog: 'elicitation', elicitation_url_dialog: 'elicitation',
+  agent_needs_input: 'input', quota_auto_resume_stale: 'input',
+};
+/** How much of a tool hook's payload is read: its head (tool name and ids come first) and its tail (tool_use_id after a large input). */
+const TOOL_HEAD = 16 * 1024;
+const TOOL_TAIL = 2 * 1024;
 const MAX_BODY = 16 * 1024;
 /** The Stop / StopFailure payload carries last_assistant_message, so it may be much larger. */
 const MAX_STOP_BODY = 512 * 1024;
@@ -149,6 +164,92 @@ export function isAttentionNotification(body: string): boolean {
   }
 }
 
+/**
+ * What a Notification hook means for the status: a question for the user (with its kind), idle_prompt (Claude has been idle
+ * at its prompt for a minute: a quiet end of a turn whose Stop was lost), a usage-limit wait that resumed by itself, or nothing.
+ * Unknown types (and unparsable payloads) stay a question for the user: better one alert too many than a missed one.
+ */
+export function notificationEvent(body: string): { event: HookEvent; info?: HookInfo } | null {
+  let type: unknown;
+  try {
+    type = (JSON.parse(body) as { notification_type?: unknown }).notification_type;
+  } catch {
+    return { event: 'notify' };
+  }
+  if (typeof type !== 'string') return { event: 'notify' };
+  if (IGNORED_NOTIFICATIONS.has(type)) return null;
+  if (type === 'idle_prompt') return { event: 'idle' };
+  if (type === 'quota_auto_resume_fired') return { event: 'prompt' };
+  const need = Object.hasOwn(ATTENTION_NOTIFICATIONS, type) ? ATTENTION_NOTIFICATIONS[type] : undefined;
+  return { event: 'notify', info: need ? { need } : {} };
+}
+
+const TOOL_NAME = /^[\w.:@/-]{1,80}$/;
+const TOOL_USE_ID = /^[\w-]{1,100}$/;
+
+/** A string field of the payload's top level read from raw text: a quote right after `{` or `,` is never inside a JSON string. */
+function rawField(text: string, key: string, last = false): string | undefined {
+  const re = new RegExp(`[{,]\\s*"${key}"\\s*:\\s*"([^"\\\\]{1,100})"`, 'g');
+  let found: string | undefined;
+  for (const m of text.matchAll(re)) {
+    found = m[1];
+    if (!last) break;
+  }
+  return found;
+}
+
+export interface ToolHookFacts {
+  tool?: string;
+  toolUseId?: string;
+  agentType?: string;
+  inSubagent?: boolean;
+  trigger?: 'manual' | 'auto';
+}
+
+/**
+ * The facts of a tool hook payload (tool name, tool_use_id, the subagent, the compaction trigger) from its head, plus its tail
+ * when the payload was longer (a PostToolUse payload carries the tool's whole output). Never any input or output text.
+ */
+export function toolHookFacts(head: string, tail = ''): ToolHookFacts {
+  const whole = tail ? null : parseObject(head);
+  const get = (key: string, last = false): unknown => (whole ? whole[key] : rawField(last ? `${head}${tail}` : head, key, last));
+  const tool = get('tool_name');
+  const id = get('tool_use_id', true);
+  const agentType = get('agent_type');
+  const agentId = get('agent_id');
+  const trigger = get('trigger');
+  return {
+    ...(typeof tool === 'string' && TOOL_NAME.test(tool) ? { tool } : {}),
+    ...(typeof id === 'string' && TOOL_USE_ID.test(id) ? { toolUseId: id } : {}),
+    ...(typeof agentType === 'string' && TOOL_NAME.test(agentType) ? { agentType } : {}),
+    ...(typeof agentId === 'string' && agentId ? { inSubagent: true } : {}),
+    ...(trigger === 'manual' || trigger === 'auto' ? { trigger } : {}),
+  };
+}
+
+/** Tools that always open a question for the user before they run (their PreToolUse is the moment it opens). */
+const QUESTION_TOOLS = new Set(['AskUserQuestion']);
+
+/** The status event of one of the precise Claude hooks (see HookUrlEvent); null when it says nothing. */
+export function toolHookEvent(event: string, head: string, tail = ''): { event: HookEvent; info: HookInfo } | null {
+  const f = toolHookFacts(head, tail);
+  const tool = f.tool ? { tool: f.tool } : {};
+  const id = f.toolUseId ? { toolUseId: f.toolUseId } : {};
+  switch (event) {
+    case 'pre':
+      if (f.tool && QUESTION_TOOLS.has(f.tool)) return { event: 'notify', info: { need: 'question', immediate: true, ...tool, ...id } };
+      return { event: 'busy', info: { ...tool, ...id } };
+    case 'post': return { event: 'busy', info: { ...tool, ...id, toolEnd: true } };
+    case 'permission': return { event: 'notify', info: { need: 'permission', immediate: true, ...tool } };
+    case 'subagentstart': return { event: 'busy', info: { subagent: true, subagentStart: true, ...(f.agentType ? { agentType: f.agentType } : {}) } };
+    case 'compact': return { event: 'compact', info: f.trigger ? { trigger: f.trigger } : {} };
+    case 'compacted': return { event: 'compacted', info: f.trigger ? { trigger: f.trigger } : {} };
+    case 'elicit': return { event: 'notify', info: { need: 'elicitation', immediate: true } };
+    case 'elicited': return { event: 'busy', info: { answered: true } };
+    default: return null;
+  }
+}
+
 /** Extracts the conversation id from a SessionStart payload; null for anything malformed. Never logs the body. */
 export function parseSessionStart(body: string): { sessionId: string; source: string | undefined } | null {
   try {
@@ -195,6 +296,9 @@ export class HookServer extends EventEmitter {
       // Each spawn gets a fresh nonce: late requests of a killed process (or old-format URLs without one) are dropped.
       const current = this.nonces.get(cellId) === parts[4] && parts[4] !== undefined;
       let body = '';
+      // Precise tool hooks: only the head and the tail of the payload are kept (never "oversized", never dropped).
+      const toolEvent = TOOL_EVENTS.has(event);
+      let tail = '';
       const bigPayload = event === 'stop' || event === 'fail' || event === 'codex';
       const maxBody = event === 'codex' ? MAX_CODEX_BODY : bigPayload ? MAX_STOP_BODY : MAX_BODY;
       // An http hook always posts its whole payload (a PostToolUse one carries the tool's output, a prompt its whole text);
@@ -203,6 +307,12 @@ export class HookServer extends EventEmitter {
       req.setEncoding('utf8');
       let oversized = false;
       req.on('data', (chunk: string) => {
+        if (toolEvent) {
+          const room = TOOL_HEAD - body.length;
+          if (room > 0) body += chunk.slice(0, room);
+          if (chunk.length > room) tail = (tail + chunk.slice(Math.max(0, room))).slice(-TOOL_TAIL);
+          return;
+        }
         if (oversized || !keepBody) return;
         body += chunk;
         if (body.length <= maxBody) return;
@@ -233,8 +343,17 @@ export class HookServer extends EventEmitter {
           }
           return;
         }
+        if (toolEvent) {
+          const mapped = toolHookEvent(event, body, tail);
+          if (mapped) this.emit('hook', cellId, mapped.event, mapped.info);
+          return;
+        }
         if (!EVENTS.includes(event)) return;
-        if (event === 'notify' && !isAttentionNotification(body)) return;
+        if (event === 'notify') {
+          const mapped = notificationEvent(body);
+          if (mapped) this.emit('hook', cellId, mapped.event, mapped.info);
+          return;
+        }
         if (event === 'stop') {
           logStopDebug(!!this.debugDir, this.debugDir ?? '', cellId, body);
           const parsed = parseObject(body);
@@ -299,7 +418,7 @@ export class HookServer extends EventEmitter {
     this.nonces.set(cellId, randomBytes(8).toString('hex')); // invalidates hooks of the previous process
     const path = join(dir, `claude-${cellId}.json`);
     const target: HookTarget = { url: (event) => this.url(cellId, event), headerUrl: (event) => this.headerUrl(cellId, event), token: this.token };
-    writeFileSync(path, JSON.stringify(claudeHookSettings(target, form), null, 2), { mode: 0o600 });
+    writeFileSync(path, JSON.stringify(claudeHookSettings(target, form, claudeExtendedHooks(claudeVersion)), null, 2), { mode: 0o600 });
     return path;
   }
 
@@ -342,6 +461,18 @@ function atLeast(version: number[], min: number[]): boolean {
   return true;
 }
 
+/**
+ * 2.1.78 is the first version with every event of the precise set (changelog: SubagentStart 2.0.43, PermissionRequest 2.0.45,
+ * Elicitation / ElicitationResult / PostCompact 2.1.76, StopFailure 2.1.78). Older or unknown versions keep the basic set.
+ */
+const EXTENDED_HOOKS_SINCE = [2, 1, 78];
+
+/** True when the Claude Code version gets the precise status hooks (PermissionRequest, tool names, compaction...). */
+export function claudeExtendedHooks(version: string | undefined): boolean {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(version?.trim() ?? '');
+  return !!m && atLeast([Number(m[1]), Number(m[2]), Number(m[3])], EXTENDED_HOOKS_SINCE);
+}
+
 /** The hook form a Claude Code version supports; an unknown or unparsable version gets the curl commands. */
 export function claudeHookForm(version: string | undefined): ClaudeHookForm {
   const m = /^(\d+)\.(\d+)\.(\d+)/.exec(version?.trim() ?? '');
@@ -379,7 +510,7 @@ export function bypassProxyForHooks(env: Record<string, string>, platform: strin
 const HTTP_HOOK_TIMEOUT = 5;
 
 /** The `hooks` settings of a Claude cell (pure, for the tests). A bare URL function means the curl form. */
-export function claudeHookSettings(target: HookTarget | ((event: HookUrlEvent) => string), form: ClaudeHookForm = 'shell'): { hooks: Record<string, unknown[]> } {
+export function claudeHookSettings(target: HookTarget | ((event: HookUrlEvent) => string), form: ClaudeHookForm = 'shell', extended = false): { hooks: Record<string, unknown[]> } {
   const t: HookTarget = typeof target === 'function' ? { url: target, headerUrl: target, token: '' } : target;
   const command = (event: HookUrlEvent): Record<string, unknown> => {
     const body = WITH_BODY.has(event);
@@ -394,12 +525,22 @@ export function claudeHookSettings(target: HookTarget | ((event: HookUrlEvent) =
   // tracker already ignores a busy that trails a Stop or a permission prompt, so their order relative to the other hooks does
   // not matter. An http hook cannot be async, but the local server answers within a millisecond.
   // Prompt, Stop, Notification, StopFailure and SessionStart stay synchronous: they carry the status and their order counts.
-  return { hooks: {
+  const basic = {
     UserPromptSubmit: hook('prompt'), Stop: hook('stop'), Notification: hook('notify'),
     PreToolUse: hook('busy'), PostToolUse: hook('busy'), SubagentStop: hook('subagent'),
     // /resume and /clear start a different conversation; the payload carries its session_id.
     SessionStart: hook('session'),
     // A turn that ends with an API error (rate limit, billing, auth...) fires StopFailure, never Stop.
     StopFailure: hook('fail'),
+  };
+  if (!extended || form === 'shell') return { hooks: basic };
+  // The precise set (http hooks: Claude Code posts the payload itself, the server keeps only its head and tail).
+  // PermissionRequest fires the moment a permission dialog opens; the Notification `permission_prompt` only after about six
+  // seconds without a keystroke (hooks docs), so it stays as the fallback. The server answers 204: no decision, the dialog shows.
+  return { hooks: {
+    ...basic,
+    PreToolUse: hook('pre'), PostToolUse: hook('post'), PostToolUseFailure: hook('post'), PermissionDenied: hook('post'),
+    PermissionRequest: hook('permission'), SubagentStart: hook('subagentstart'),
+    PreCompact: hook('compact'), PostCompact: hook('compacted'), Elicitation: hook('elicit'), ElicitationResult: hook('elicited'),
   } };
 }

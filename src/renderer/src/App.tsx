@@ -216,6 +216,16 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
     if (current?.cli === 'codex' && current.id.toLowerCase() === thread.id && (current.confirmed || !thread.confirmed)) return;
     update((s) => updateCell(s, cellId, { session: { cli: 'codex', id: thread.id, confirmed: thread.confirmed } }));
   });
+  // The short reason of a status ("czeka na zgodę: Bash", "praca: Edit") for the cell card.
+  terminals.onDetail((cellId, detail) => {
+    if (isAuxPtyId(cellId)) return;
+    setUi((ui) => {
+      if (detail) return { statusDetails: { ...ui.statusDetails, [cellId]: detail } };
+      if (!(cellId in ui.statusDetails)) return {};
+      const { [cellId]: _d, ...statusDetails } = ui.statusDetails;
+      return { statusDetails };
+    });
+  });
   terminals.onExit((cellId) => {
     if (isAuxPtyId(cellId)) return; // login and install windows are not cells
     // Shell exited (e.g. user typed `exit`) - keep the cell, offer a restart from its header.

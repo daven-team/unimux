@@ -4,7 +4,8 @@ import type { CellStatus, HookInfo, StatusCause, StatusReason } from './status';
 export const STATUS_LOG_LIMIT = 300;
 
 /** What moved the status: a hook event name or one of the local sources. */
-export type StatusTrigger = 'prompt' | 'stop' | 'stopbg' | 'notify' | 'busy' | 'fail' | 'session' | 'tick-stall' | 'output' | 'input' | 'osc9' | 'restore' | 'exit';
+export type StatusTrigger = 'prompt' | 'stop' | 'stopbg' | 'notify' | 'busy' | 'fail' | 'session' | 'idle' | 'compact' | 'compacted'
+  | 'tick-stall' | 'output' | 'input' | 'osc9' | 'shell' | 'restore' | 'exit';
 
 export interface StatusLogEntry {
   /** Epoch milliseconds. */
@@ -41,6 +42,10 @@ export function hookDetail(info?: HookInfo): string {
   if (info.subagent) out.push('subagent');
   if (info.error) out.push(`error=${info.error}`);
   if (info.source) out.push(`source=${info.source}`);
+  if (info.need) out.push(`need=${info.need}`);
+  if (info.tool) out.push(`tool=${info.tool.slice(0, 40)}`);
+  if (info.toolEnd) out.push('tool_end');
+  if (info.trigger) out.push(`trigger=${info.trigger}`);
   return out.join(' ');
 }
 

@@ -5,6 +5,7 @@ import { useI18n } from '../i18n';
 import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { propsEqualWithStyle } from '../../../shared/renderEquality';
 import { errorPhrase, failureLabel } from '../../../shared/alerts';
+import { statusText } from '../../../shared/statusDetail';
 import { cellDrawColor, getProfile, PROJECT_COLORS, updateCell } from '../../../shared/state';
 import { missingCardCli } from '../../../shared/cliStatus';
 import { shownProfileName } from '../../../shared/profiles';
@@ -58,6 +59,9 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const status = useStore((st) => st.ui.statuses[cell.id] ?? 'idle');
   useBlink(status === 'working');
   const failure = useStore((st) => st.ui.failures[cell.id]);
+  // The short reason of the status ("czeka na zgodę: Bash", "praca: Edit", "kod wyjścia 1"), see shared/statusDetail.ts.
+  const statusDetail = useStore((st) => st.ui.statusDetails[cell.id]);
+  const statusLabel = statusText(status, failure !== undefined ? 'error' : undefined, statusDetail, failure);
   const focused = useStore((st) => st.ui.focusedCellId === cell.id);
   const mcpInfo = useStore((st) => st.ui.mcpInfo);
   const error = useStore((st) => st.ui.cellErrors[cell.id]);
@@ -291,7 +295,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
           ? <span className="status-text ssh">{tr(phaseLabel.key, phaseLabel.params)}</span>
           : status === 'waiting' && failure !== undefined
           ? <span className="status-text error" title={tr(errorPhrase(failure))}>{tr(failureLabel(failure))}</span>
-          : status !== 'idle' && <span className={`status-text ${status}`}>{status === 'working' ? tr('pracuje') : status === 'waiting' ? tr('czeka na Ciebie') : tr('zakończony')}{status === 'working' ? '…' : ''}</span>}
+          : statusLabel && <span className={`status-text ${status}`} title={tr(statusLabel.key, statusLabel.params)}>{tr(statusLabel.key, statusLabel.params)}{status === 'working' ? '…' : ''}</span>}
         <span className="actions">
           {profile.cli !== 'shell' && !ssh && <button className={`mcp-control ${cell.role ?? 'disabled'} ${mcpInfo.connectedCellIds?.includes(cell.id) ? 'connected' : ''}`}
             aria-label={`${tr('Rola / MCP')}: ${tr(cell.role === 'coordinator' ? 'Koordynator' : cell.role === 'worker' ? 'Wykonawca' : 'Bez MCP')}`}
