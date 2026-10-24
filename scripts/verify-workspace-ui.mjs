@@ -62,7 +62,7 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
   await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: handle.x + 45, y: handle.y, button: 'left', clickCount: 1 });
   await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 500, y: 200 });
   await until(() => evaluate('!document.documentElement.classList.contains("panel-resizing") && !document.querySelector(".panel-resize.dragging")'), 'resize cleanup');
-  assert.equal(await evaluate('getComputedStyle(document.querySelector(".panel-resize"), "::after").backgroundColor'), 'rgb(168, 162, 158)');
+  assert.equal(await evaluate('getComputedStyle(document.querySelector(".panel-resize"), "::after").backgroundColor'), 'rgb(129, 161, 193)', 'the resize line is the steel blue of the selection (1.0.7)');
   await openFilesPanel();
   await until(() => evaluate('!!document.querySelector(".file-entry[title=src]")'), 'file tree');
   assert.equal(await evaluate('!!document.querySelector(".files-panel .project-add-inline")'), false, 'Files panel omits Add project');
