@@ -213,7 +213,7 @@ describe('shared blink', () => {
     expect(blink.running).toBe(false);
   });
 
-  it('leaves no infinite CSS animation in the renderer styles except the short brand effect and the spinners', () => {
+  it('leaves no infinite CSS animation in the renderer styles except the short brand effect, the spinners and the working dot pulse', () => {
     const cssFiles = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
       .flatMap((e) => (e.isDirectory() ? cssFiles(join(dir, e.name)) : e.name.endsWith('.css') ? [join(dir, e.name)] : []));
     const infinite: string[] = [];
@@ -224,8 +224,11 @@ describe('shared blink', () => {
       }
     }
     // .brand.fx runs 2.4 s after a click on the logo; the spinners (RefreshIcon, BusyRing) and the arc of the SSH connecting
-    // card exist only during a wait and turn by transform alone (static under reduced motion). Nothing else.
-    expect(infinite.sort()).toEqual(['.brand.fx .bn-fx', '.refresh-icon.spinning svg, .busy-ring', '.ssh-mark.active::after'].sort());
+    // card exist only during a wait and turn by transform alone (static under reduced motion). 1.0.8: the pulse of a working
+    // cell's status dot (the shared 1 Hz blink read as a two-frame flicker) exists only while the cell works and changes
+    // transform and opacity alone, so the compositor runs it without main-thread work (static under reduced motion).
+    // Nothing else.
+    expect(infinite.sort()).toEqual(['.brand.fx .bn-fx', '.refresh-icon.spinning svg, .busy-ring', '.ssh-mark.active::after', '.terminal-cell .cell-icon .dot.working::after'].sort());
   });
 });
 
