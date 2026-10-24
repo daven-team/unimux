@@ -34,6 +34,12 @@ export const sftpViewMessages = {
   'Do przodu': ['Forward', 'Vorwärts', 'Adelante', 'Suivant', 'Avançar'],
   'W górę': ['Up', 'Nach oben', 'Arriba', 'Dossier parent', 'Para cima'],
   'Ścieżka': ['Path', 'Pfad', 'Ruta', 'Chemin', 'Caminho'],
+  // 1.0.8: a typed path
+  'Kliknij, aby wpisać ścieżkę ({key})': ['Click to type a path ({key})', 'Klicken, um einen Pfad einzugeben ({key})', 'Haz clic para escribir una ruta ({key})', 'Cliquez pour saisir un chemin ({key})', 'Clique para escrever um caminho ({key})'],
+  'Wpisz ścieżkę': ['Type a path', 'Pfad eingeben', 'Escribe una ruta', 'Saisissez un chemin', 'Escreva um caminho'],
+  'Edytuj ścieżkę': ['Edit path', 'Pfad bearbeiten', 'Editar ruta', 'Modifier le chemin', 'Editar caminho'],
+  'Skopiowano ścieżkę': ['Path copied', 'Pfad kopiert', 'Ruta copiada', 'Chemin copié', 'Caminho copiado'],
+  'Pasujące foldery': ['Matching folders', 'Passende Ordner', 'Carpetas coincidentes', 'Dossiers correspondants', 'Pastas correspondentes'],
   'Filtruj': ['Filter', 'Filtern', 'Filtrar', 'Filtrer', 'Filtrar'],
   'Akcje': ['Actions', 'Aktionen', 'Acciones', 'Actions', 'Ações'],
   'Data modyfikacji': ['Date modified', 'Änderungsdatum', 'Fecha de modificación', 'Date de modification', 'Data de modificação'],
