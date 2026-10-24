@@ -5,6 +5,7 @@ import { StringDecoder } from 'string_decoder';
 import { Client, type ClientChannel } from 'ssh2';
 import type { SshConnectRequest } from '../shared/ipc';
 import { listScript, parseListing, REMOTE_LIST_MAX_BYTES, type RemoteListResult } from '../shared/remotePaths';
+import { barScript, SSH_BAR_MAX_BYTES, SSH_BAR_TIMEOUT_MS, type SshStatsRun } from '../shared/sshBar';
 import { sanitizeServerText, type SshErrorCode, type SshPhase } from '../shared/ssh';
 import { SshLogin, type SshAuthPromptInfo } from '../sshcore/login';
 import type { PtySink } from './manager';
@@ -82,6 +83,8 @@ interface Session {
   /** A listing runs on an exec channel; `listWaiting` is the newest one asked meanwhile (older ones were cancelled). */
   listing?: boolean;
   listWaiting?: ListJob | null;
+  /** A status bar run is on an exec channel (one at a time per session). */
+  stats?: boolean;
 }
 
 export class SshManager implements TerminalBackend {
@@ -309,6 +312,52 @@ export class SshManager implements TerminalBackend {
     } catch {
       finish({ ok: false, reason: 'failed' });
     }
+  }
+
+  /**
+   * The SSH status bar (1.0.7): runs sshBar.barScript on an exec channel of the cell's own connection, like list(). One run at
+   * a time per session (a second one meanwhile answers `busy`); a run cut by the timeout or the byte limit keeps what it
+   * printed. Reports the round trip and the bytes. Never rejects.
+   */
+  stats(id: string, first: boolean): Promise<SshStatsRun> {
+    const s = this.sessions.get(id);
+    if (!s || !this.live(s) || s.phase !== 'connected' || !s.stream) return Promise.resolve({ ok: false, reason: 'gone' });
+    if (s.stats) return Promise.resolve({ ok: false, reason: 'busy' });
+    s.stats = true;
+    const started = performance.now();
+    return new Promise((resolve) => {
+      let done = false;
+      let channel: ClientChannel | undefined;
+      const chunks: Buffer[] = [];
+      let size = 0;
+      const finish = (result: SshStatsRun | null, partial = false) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        s.stats = false;
+        try { channel?.close(); } catch { /* gone */ }
+        resolve(result ?? { ok: true, text: Buffer.concat(chunks).subarray(0, SSH_BAR_MAX_BYTES).toString('utf8'), ms: Math.round(performance.now() - started), bytes: size, partial });
+      };
+      const timer = setTimeout(() => finish(null, true), SSH_BAR_TIMEOUT_MS);
+      try {
+        s.client.exec('exec sh -s', (err, ch) => {
+          if (err || !ch) { finish({ ok: false, reason: this.live(s) ? 'unsupported' : 'gone' }); return; }
+          channel = ch;
+          if (done) { try { ch.close(); } catch { /* gone */ } return; }
+          ch.on('data', (chunk: Buffer) => {
+            size += chunk.length;
+            if (size <= SSH_BAR_MAX_BYTES) chunks.push(chunk); else { chunks.push(chunk); finish(null, true); }
+          });
+          ch.stderr.resume();
+          ch.on('error', () => finish({ ok: false, reason: 'failed' }));
+          ch.stderr.on('error', () => undefined);
+          ch.on('close', () => finish(null));
+          ch.end(barScript(first));
+        });
+      } catch {
+        finish({ ok: false, reason: 'failed' });
+      }
+    });
   }
 
   resize(id: string, cols: number, rows: number): void {

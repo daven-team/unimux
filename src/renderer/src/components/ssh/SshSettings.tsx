@@ -1,5 +1,5 @@
 // Settings, section "SSH" (D12, spec 9 step 5): where secrets are kept, forgetting remembered passphrases, the session
-// restore after a restart (1.0.6, sshRestore.ts), the terminal theme, the trusted host keys.
+// restore after a restart (1.0.6, sshRestore.ts), the terminal theme, the status bar (1.0.7), the trusted host keys.
 // The SSH view lists the same known hosts (Znane hosty, useKnownHosts). A store that opened read-only (unreadable, wrong shape, malformed entry or a newer format) is explained here, with its file path.
 import { knownHostsDescription, readOnlyStoreNote, storageLabel } from '../../../../shared/ssh';
 import { useI18n } from '../../i18n';
@@ -9,6 +9,7 @@ import { useSshStore } from '../../sshStore';
 import { SettingRow, SettingsGroup } from '../SettingRow';
 import { SshThemeSettings } from './SshThemePicker';
 import { SshAutocompleteSettings } from './SshAutocompleteSettings';
+import { SshBarSettings } from './SshBarSettings';
 import { useKnownHosts } from './useKnownHosts';
 
 export function SshSettings() {
@@ -37,6 +38,7 @@ export function SshSettings() {
       </SettingRow>
     </SettingsGroup>
     <SshThemeSettings />
+    <SshBarSettings />
     <SettingsGroup title={tr('Znane hosty')}
       description={tr(knownHostsDescription(status?.knownHostsFile), { file: status?.knownHostsFile ?? '' })}>
       {hostsNote && <div className="ssh-banner-warn" role="alert">{tr(hostsNote, { file: status?.knownHostsFile ?? '' })}</div>}

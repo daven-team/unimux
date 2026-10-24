@@ -4,8 +4,9 @@
 // go at any time. Keep a bar one line high (about 24px, see terminalCell.css) and give it its own memoized component that
 // subscribes to its own store slice: CellView never re-renders for terminal output and the foot must not make it.
 import type { Cell } from '../../../shared/types';
+import { SshStatusBar } from './ssh/SshStatusBar';
 
 /** The bar under a cell's terminal; `cell` is the cell of the card (an SSH cell has `cell.ssh`). */
-export function CellFoot(_props: { cell: Cell }) {
-  return null;
+export function CellFoot({ cell }: { cell: Cell }) {
+  return cell.ssh ? <SshStatusBar cell={cell} /> : null;
 }

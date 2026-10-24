@@ -15,6 +15,7 @@ import { hookDetail, StatusLog, type StatusTrigger } from '../../../shared/statu
 import { sshModeReset } from '../../../shared/ssh';
 import { DEFAULT_SSH_THEME, sshThemeById } from '../../../shared/sshThemes';
 import type { RemoteListResult } from '../../../shared/remotePaths';
+import type { SshStatsRun } from '../../../shared/sshBar';
 import { EMPTY_CWD, parseOsc7, parseOsc99, trackOsc7, trackOsc99, type CwdTrack } from '../../../shared/remoteCwd';
 import { inputModesOff, isMouseReport, MouseFloodGuard, terminalModeReset } from '../../../shared/termReset';
 import { encodeWin32Key } from '../../../shared/win32input';
@@ -244,6 +245,12 @@ class TerminalManager {
   }
 
   private onHostMessage(m: HostToRenderer): void {
+    if (m.t === 'sshStatsResult') {
+      const done = this.statRuns.get(m.reqId);
+      this.statRuns.delete(m.reqId);
+      done?.(m.result);
+      return;
+    }
     if (m.t === 'sshListResult') {
       const done = this.listings.get(m.reqId);
       this.listings.delete(m.reqId);
@@ -865,6 +872,19 @@ class TerminalManager {
       const timer = setTimeout(() => { this.listings.delete(reqId); resolve({ ok: false, reason: 'gone' }); }, 8000);
       this.listings.set(reqId, (result) => { clearTimeout(timer); resolve(result); });
       this.post({ t: 'sshList', id: cellId, reqId, dir: req.dir, cwd: req.cwd, ...(req.cwdOnly ? { cwdOnly: true } : {}) });
+    });
+  }
+
+  private statRuns = new Map<number, (result: SshStatsRun) => void>();
+
+  /** SSH status bar (1.0.7): one run of sshBar.barScript on the cell's own SSH connection (see SshManager.stats). */
+  sshStats(cellId: string, first: boolean): Promise<SshStatsRun> {
+    if (!this.port) return Promise.resolve({ ok: false, reason: 'gone' });
+    const reqId = ++this.listingId;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { this.statRuns.delete(reqId); resolve({ ok: false, reason: 'gone' }); }, 8000);
+      this.statRuns.set(reqId, (result) => { clearTimeout(timer); resolve(result); });
+      this.post({ t: 'sshStats', id: cellId, reqId, first });
     });
   }
 

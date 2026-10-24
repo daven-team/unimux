@@ -1,6 +1,7 @@
 // Messages between main ⇄ pty host (control) and renderer ⇄ pty host (data, via MessagePort).
 import type { RemoteListResult } from './remotePaths';
 import type { SshErrorCode, SshPhase } from './ssh';
+import type { SshStatsRun } from './sshBar';
 import type { ReplaySize } from './replay';
 import type { ShellKind } from './types';
 
@@ -78,14 +79,17 @@ export type RendererToHost =
    * SSH path completion (1.0.6): list `dir` (as typed, relative to `cwd` or the shell's own folder) on the cell's own SSH
    * connection; `cwdOnly` asks only for the shell's folder. Answered with `sshListResult` and the same `reqId`.
    */
-  | { t: 'sshList'; id: string; reqId: number; dir: string; cwd: string | null; cwdOnly?: boolean };
+  | { t: 'sshList'; id: string; reqId: number; dir: string; cwd: string | null; cwdOnly?: boolean }
+  /** SSH status bar (1.0.7): runs sshBar.barScript on the cell's own connection (`first`: also the system). Answered with `sshStatsResult`. */
+  | { t: 'sshStats'; id: string; reqId: number; first: boolean };
 
 export type HostToRenderer =
   | { t: 'data'; id: string; data: string }
   /** `sizes`: the pty sizes the output was written at, as offsets into `data` (see shared/replay). */
   | { t: 'replay'; id: string; data: string; sizes?: ReplaySize[] }
   | { t: 'exit'; id: string; code: number }
-  | { t: 'sshListResult'; id: string; reqId: number; result: RemoteListResult };
+  | { t: 'sshListResult'; id: string; reqId: number; result: RemoteListResult }
+  | { t: 'sshStatsResult'; id: string; reqId: number; result: SshStatsRun };
 
 /** What travels on the port: single messages, or the output of several terminals flushed in the same tick ([id, data] pairs, in order). */
 export type HostToRendererPort = HostToRenderer | { t: 'dataBatch'; items: Array<[string, string]> };
