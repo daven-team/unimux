@@ -1,12 +1,13 @@
 // The status bar under a connected SSH terminal (1.0.7): the server's system and name, CPU with a sparkline, memory, network,
-// the user and the root disk, read over the cell's own connection (shared/sshBar.ts, renderer/sshBar.ts). Runs only while
-// the bar is on screen and the window is shown. Hovering the CPU, the user and the disk opens a small card with the details;
-// the right-click menu hides the bar here, everywhere, or single items. A narrow cell drops the least important items.
+// uptime, the user and the root disk, read over the cell's own connection (shared/sshBar.ts, renderer/sshBar.ts). Runs only
+// while the bar is on screen and the window is shown. Hovering the CPU, the user and the disk opens a small card with the
+// details; the right-click menu hides the bar here, everywhere, or single items. A narrow cell first shortens the values,
+// then drops the sparkline, then the least important items (fitBar).
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  diskLevel, formatBytes, formatMemory, formatRate, formatUptime, rootDisk, shownBarItems, sparklinePoints, SSH_BAR_INTERVAL_MS, SSH_BAR_PRIORITY,
-  type SshBarItem,
+  diskLevel, fitBar, formatBytes, formatMemory, formatRate, formatUptime, formatUptimeShort, memoryPercent, rootDisk, shownBarItems,
+  sparklinePoints, splitWho, SSH_BAR_INTERVAL_MS, SSH_BAR_ITEMS, type BarItemWidths, type BarStage, type SshBarItem, type WhoEntry,
 } from '../../../../shared/sshBar';
 import { updateCell, updateSettings } from '../../../../shared/state';
 import { placeTooltip } from '../../../../shared/tooltipPosition';
@@ -27,7 +28,7 @@ import './sshBar.css';
 const HOST_MIN = 90;
 
 export const BAR_ITEM_LABELS: Record<SshBarItem, MessageKey> = {
-  host: 'Host i system', cpu: 'Procesor', mem: 'Pamięć', net: 'Sieć', user: 'Użytkownicy', disk: 'Dysk',
+  host: 'Host i system', cpu: 'Procesor', mem: 'Pamięć', net: 'Sieć', uptime: 'Czas działania', user: 'Użytkownicy', disk: 'Dysk',
 };
 
 /** Shows the bar in every SSH cell again: the setting on and every per-cell hide cleared. */
@@ -62,6 +63,7 @@ export function SshStatusBar({ cell }: { cell: Cell }) {
 function Bar({ cell }: { cell: Cell }) {
   const { tr, language } = useI18n();
   const ref = useRef<HTMLDivElement>(null);
+  const measure = useRef<HTMLDivElement>(null);
   const entry = useSshBarStore((st) => st.bars[cell.id]);
   const host = useStore((st) => st.s.sshHosts.find((h) => h.id === cell.ssh?.hostId));
   const toggles = useStore((st) => st.s.settings.sshStatusBarItems);
@@ -84,9 +86,10 @@ function Bar({ cell }: { cell: Cell }) {
     return () => setBarActive(cell.id, false);
   }, [cell.id, active]);
 
-  // A narrow cell drops items from the end of SSH_BAR_PRIORITY (measured: values and host names vary in width).
-  const [drop, setDrop] = useState<ReadonlySet<SshBarItem>>(() => new Set());
-  const widths = useRef<Partial<Record<SshBarItem, number>>>({});
+  // 1.0.8: one compact row, left to right. Every item is measured in each of its forms in a hidden copy of the bar (a
+  // dropped or shortened item has no width on screen to measure), and fitBar picks the roomiest layout that fits: full
+  // values, then short ones ("24%" for the memory), then no sparkline, then items dropped by SSH_BAR_PRIORITY.
+  const [stage, setStage] = useState<BarStage | undefined>(undefined);
   const [, setResized] = useState(0);
   useEffect(() => {
     const el = ref.current;
@@ -95,45 +98,48 @@ function Bar({ cell }: { cell: Cell }) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  useLayoutEffect(() => {
-    const bar = ref.current;
-    if (!bar) return;
-    const present: SshBarItem[] = [];
-    for (const el of bar.querySelectorAll<HTMLElement>(':scope > [data-item]')) {
-      const item = el.dataset.item as SshBarItem;
-      present.push(item);
-      // The natural width: a host name squeezed by the flex layout must not be measured squeezed (it would then always "fit").
-      const text = el.querySelector<HTMLElement>('.ssh-bar-text');
-      if (!drop.has(item)) widths.current[item] = el.offsetWidth + (text ? Math.max(0, text.scrollWidth - text.clientWidth) : 0);
-    }
-    const style = getComputedStyle(bar);
-    const gap = parseFloat(style.columnGap) || 0;
-    // Each item is checked before its own gap is paid: the k-th item sees k - 1 gaps taken, as the layout has them.
-    let room = bar.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
-    const next = new Set<SshBarItem>();
-    let full = false;
-    for (const item of SSH_BAR_PRIORITY) {
-      if (!present.includes(item)) continue;
-      // The host name shrinks with an ellipsis down to HOST_MIN.
-      const w = item === 'host' ? Math.min(widths.current.host ?? 0, HOST_MIN) : widths.current[item] ?? 0;
-      // A dropped item comes back only with a few pixels to spare, so a rate that grows and shrinks by a digit does not make
-      // the next item blink in and out every reading.
-      const slack = drop.has(item) ? 8 : 0;
-      if (!full && w + slack <= room) room -= w + gap; else { full = true; next.add(item); }
-    }
-    if (next.size !== drop.size || [...next].some((i) => !drop.has(i))) setDrop(next);
-  });
 
-  if (entry?.stopped) return null;
   const track = entry?.track ?? null;
-  // Nothing on screen until the first answer (a server without sh never shows a bar): an empty line the observer can see.
-  if (!track) return <div ref={ref} className="ssh-bar ssh-bar-pending" aria-hidden="true" />;
   const sample = track?.sample;
   const items = new Set(shownBarItems(toggles));
   const name = sample?.host ?? host?.address ?? '';
   const os = track?.os;
   const icon = os && os.id !== 'unknown' ? OS_ICONS[os.id] : null;
   const disk = sample ? rootDisk(sample.disks) : undefined;
+  const cpu = track?.cpuPercent;
+  const mem = sample?.mem;
+  const uptime = sample?.uptime;
+  const rx = track?.rx;
+  const tx = track?.tx;
+  const who = splitWho(sample?.who ?? [], sample?.user);
+  // The items switched on that have something to show (a rate needs two runs).
+  const has: Record<SshBarItem, boolean> = {
+    host: true, cpu: cpu !== undefined, mem: !!mem, net: rx !== undefined && tx !== undefined, uptime: uptime !== undefined, user: !!sample?.user, disk: !!disk,
+  };
+  const present = track ? SSH_BAR_ITEMS.filter((item) => items.has(item) && has[item]) : [];
+
+  useLayoutEffect(() => {
+    const bar = ref.current;
+    const box = measure.current;
+    if (!bar || !box) return;
+    const widths: Partial<Record<SshBarItem, BarItemWidths>> = {};
+    for (const el of box.querySelectorAll<HTMLElement>('[data-measure]')) {
+      const [item, form] = el.dataset.measure!.split(':') as [SshBarItem, keyof BarItemWidths];
+      (widths[item] ??= { full: 0, compact: 0 })[form] = el.getBoundingClientRect().width;
+    }
+    const style = getComputedStyle(bar);
+    const gap = parseFloat(style.columnGap) || 0;
+    const room = bar.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+    const next = fitBar(present, widths, room, gap, HOST_MIN, stage);
+    if (!stage || next.rank !== stage.rank || next.compact !== stage.compact || next.spark !== stage.spark || next.items.join() !== stage.items.join()) setStage(next);
+  });
+
+  if (entry?.stopped) return null;
+  // Nothing on screen until the first answer (a server without sh never shows a bar): an empty line the observer can see.
+  if (!track) return <div ref={ref} className="ssh-bar ssh-bar-pending" aria-hidden="true" />;
+  // Until measured everything in full; the layout effect corrects it before the first paint.
+  const layout = stage ?? { compact: false, spark: true, items: present, rank: 0 };
+  const visible = present.filter((item) => layout.items.includes(item));
   const run = entry?.run;
   const hostTitle = [
     os?.name, sample?.kernel,
@@ -149,7 +155,7 @@ function Bar({ cell }: { cell: Cell }) {
       { label: tr('Ukryj pasek we wszystkich komórkach SSH'), icon: <IEyeOff />, onClick: () => update((st) => updateSettings(st, { sshStatusBar: false })) },
       { sep: true },
       { header: tr('Elementy paska') },
-      ...(Object.keys(BAR_ITEM_LABELS) as SshBarItem[]).map((item) => {
+      ...SSH_BAR_ITEMS.map((item) => {
         const on = items.has(item);
         // The last item shown stays: hiding the whole bar has its own entries.
         return { label: tr(BAR_ITEM_LABELS[item]), icon: on ? <ICheck /> : undefined, disabled: on && shownItems.length === 1, onClick: () => setBarItem(item, !on) };
@@ -158,64 +164,84 @@ function Bar({ cell }: { cell: Cell }) {
     openMenu(e.clientX, e.clientY, entries);
   };
 
-  const cpu = track?.cpuPercent;
   const fmtPct = (v: number) => `${new Intl.NumberFormat(language, { maximumFractionDigits: 0 }).format(v)}%`;
-  const at = (item: SshBarItem) => ({ 'data-item': item, ...(drop.has(item) ? { 'data-drop': '' } : {}) });
-  return (
-    <div ref={ref} className="ssh-bar" role="status" aria-label={tr('Pasek stanu serwera')} onContextMenu={menu}>
-      {items.has('host') && (
-        <span {...at('host')} className="ssh-bar-item ssh-bar-host" title={hostTitle || undefined}>
-          {icon ? (
-            <svg className="ssh-bar-logo" viewBox="0 0 24 24" aria-hidden="true" style={{ color: icon.color }}><path fill="currentColor" d={icon.path} /></svg>
-          ) : <IServer />}
-          <span className="ssh-bar-text">{name}</span>
-        </span>
-      )}
-      {items.has('cpu') && cpu !== undefined && (
-        <HoverCard attrs={at('cpu')} className="ssh-bar-cpu" content={() => (
+  /** The inside of an item in its full or short form: the same in the bar and in the hidden copy that measures it. */
+  const body = (item: SshBarItem, compact: boolean, spark: boolean): ReactNode => {
+    switch (item) {
+      case 'host': return <>
+        {icon ? (
+          <svg className="ssh-bar-logo" viewBox="0 0 24 24" aria-hidden="true" style={{ color: icon.color }}><path fill="currentColor" d={icon.path} /></svg>
+        ) : <IServer />}
+        <span className="ssh-bar-text">{name}</span>
+      </>;
+      case 'cpu': return <>
+        <ICpu /><span className="ssh-bar-text ssh-bar-num ssh-bar-pct3">{fmtPct(cpu ?? 0)}</span>
+        {spark && <Sparkline history={track.cpuHistory} />}
+      </>;
+      case 'mem': return <>
+        <IMem />
+        {compact
+          ? <span className="ssh-bar-text ssh-bar-num ssh-bar-pct3">{fmtPct(memoryPercent(mem!))}</span>
+          : <span className="ssh-bar-text ssh-bar-num">{formatMemory(mem!, language)}</span>}
+      </>;
+      // Up and down apart, like MobaXterm: sending first.
+      case 'net': return <>
+        <span className="ssh-bar-dir"><IUp /><span className={`ssh-bar-text ssh-bar-num ${compact ? 'ssh-bar-rate-short' : 'ssh-bar-rate'}`}>{formatRate(tx!, language, compact)}</span></span>
+        <span className="ssh-bar-dir"><IDown /><span className={`ssh-bar-text ssh-bar-num ${compact ? 'ssh-bar-rate-short' : 'ssh-bar-rate'}`}>{formatRate(rx!, language, compact)}</span></span>
+      </>;
+      case 'uptime': return <><IClock /><span className="ssh-bar-text">{formatUptimeShort(uptime!, language, compact)}</span></>;
+      case 'user': return <>
+        <IUser /><span className="ssh-bar-text">{sample!.user}</span>
+        {who.others.length > 0 && <span className="ssh-bar-more">+{who.others.length}</span>}
+      </>;
+      case 'disk': return <><IDisk /><span className="ssh-bar-text ssh-bar-num">{compact ? `${disk!.percent}%` : `${disk!.mount}: ${disk!.percent}%`}</span></>;
+    }
+  };
+
+  const whoRow = (w: WhoEntry, i: number) => (
+    <tr key={i} className={w.self ? 'self' : undefined}>
+      <td>{w.user}{w.self && <span className="ssh-bar-you">{tr('(ty)')}</span>}</td><td>{w.tty || '-'}</td><td>{w.from || '-'}</td><td>{w.since || '-'}</td>
+    </tr>
+  );
+  const shownItem = (it: SshBarItem): ReactNode => {
+    const inner = body(it, layout.compact, layout.spark);
+    const attrs = { 'data-item': it };
+    switch (it) {
+      case 'host': return <span key={it} {...attrs} className="ssh-bar-item ssh-bar-host" title={hostTitle || undefined}>{inner}</span>;
+      case 'cpu': return (
+        <HoverCard key={it} attrs={attrs} className="ssh-bar-cpu" content={() => (
           <table className="ssh-bar-table"><tbody>
-            <tr><th>{tr('Procesor')}</th><td>{fmtPct(cpu)}</td></tr>
-            {track?.ncpu !== undefined && <tr><th>{tr('Rdzenie')}</th><td>{track.ncpu}</td></tr>}
+            <tr><th>{tr('Procesor')}</th><td>{fmtPct(cpu ?? 0)}</td></tr>
+            {track.ncpu !== undefined && <tr><th>{tr('Rdzenie')}</th><td>{track.ncpu}</td></tr>}
             {sample?.load && <tr><th>{tr('Obciążenie (1, 5, 15 min)')}</th><td>{sample.load.map((v) => new Intl.NumberFormat(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v)).join(' / ')}</td></tr>}
-            {sample?.uptime !== undefined && <tr><th>{tr('Czas działania')}</th><td>{formatUptime(sample.uptime)}</td></tr>}
+            {uptime !== undefined && <tr><th>{tr('Czas działania')}</th><td>{formatUptime(uptime)}</td></tr>}
           </tbody></table>
-        )}>
-          <ICpu /><span className="ssh-bar-text ssh-bar-num">{fmtPct(cpu)}</span>
-          <Sparkline history={track?.cpuHistory ?? []} />
-        </HoverCard>
-      )}
-      {items.has('mem') && sample?.mem && (
-        <span {...at('mem')} className="ssh-bar-item ssh-bar-mem" title={tr('Pamięć: {used} z {total} zajęte ({percent})', {
-          used: formatBytes(sample.mem.total - sample.mem.available, language), total: formatBytes(sample.mem.total, language),
-          percent: fmtPct(((sample.mem.total - sample.mem.available) / sample.mem.total) * 100),
-        })}>
-          <IMem /><span className="ssh-bar-text">{formatMemory(sample.mem, language)}</span>
-        </span>
-      )}
-      {items.has('net') && track?.rx !== undefined && track.tx !== undefined && (
-        <span {...at('net')} className="ssh-bar-item ssh-bar-net" title={tr('Sieć (wszystkie interfejsy poza lo): odbiór {rx}, wysyłanie {tx}', { rx: formatRate(track.rx, language), tx: formatRate(track.tx, language) })}>
-          <span className="ssh-bar-text"><span className="ssh-bar-arrow" aria-hidden="true">↓</span>{formatRate(track.rx, language)} <span className="ssh-bar-arrow" aria-hidden="true">↑</span>{formatRate(track.tx, language)}</span>
-        </span>
-      )}
-      {items.has('user') && sample?.user && (
-        <HoverCard attrs={at('user')} className="ssh-bar-user" content={() => (
-          sample.who.length ? (
+        )}>{inner}</HoverCard>
+      );
+      case 'mem': return (
+        <span key={it} {...attrs} className="ssh-bar-item ssh-bar-mem" title={tr('Pamięć: {used} z {total} zajęte ({percent})', {
+          used: formatBytes(mem!.total - mem!.available, language), total: formatBytes(mem!.total, language), percent: fmtPct(memoryPercent(mem!)),
+        })}>{inner}</span>
+      );
+      case 'net': return (
+        <span key={it} {...attrs} className="ssh-bar-item ssh-bar-net" title={tr('Sieć (wszystkie interfejsy poza lo): odbiór {rx}, wysyłanie {tx}', { rx: formatRate(rx!, language), tx: formatRate(tx!, language) })}>{inner}</span>
+      );
+      case 'uptime': return (
+        <span key={it} {...attrs} className="ssh-bar-item ssh-bar-uptime" title={tr('Czas działania serwera: {time}', { time: formatUptime(uptime!) })}>{inner}</span>
+      );
+      case 'user': return (
+        <HoverCard key={it} attrs={attrs} className="ssh-bar-user" content={() => (
+          who.self || who.others.length ? (
             <table className="ssh-bar-table ssh-bar-cols">
               <thead><tr><th>{tr('Użytkownik')}</th><th>{tr('Terminal')}</th><th>{tr('Skąd')}</th><th>{tr('Zalogowany od')}</th></tr></thead>
-              <tbody>{sample.who.map((w, i) => (
-                <tr key={i} className={w.self ? 'self' : undefined}>
-                  <td>{w.user}{w.self && <span className="ssh-bar-you">{tr('(ty)')}</span>}</td><td>{w.tty || '-'}</td><td>{w.from || '-'}</td><td>{w.since || '-'}</td>
-                </tr>
-              ))}</tbody>
+              {/* 1.0.8: everyone else first, this session last. */}
+              <tbody>{[...who.others, ...(who.self ? [who.self] : [])].map(whoRow)}</tbody>
             </table>
           ) : <p className="ssh-bar-note">{tr('Serwer nie podał listy zalogowanych')}</p>
-        )}>
-          <IUser /><span className="ssh-bar-text">{sample.user}</span>
-          {sample.who.length > 1 && <span className="ssh-bar-count">{sample.who.length}</span>}
-        </HoverCard>
-      )}
-      {items.has('disk') && disk && (
-        <HoverCard attrs={at('disk')} className={`ssh-bar-disk ${diskLevel(disk.percent)}`} content={() => (
+        )}>{inner}</HoverCard>
+      );
+      case 'disk': return (
+        <HoverCard key={it} attrs={attrs} className={`ssh-bar-disk ${diskLevel(disk!.percent)}`} content={() => (
           <table className="ssh-bar-table ssh-bar-cols">
             <thead><tr><th>{tr('Montowanie')}</th><th>{tr('Rozmiar')}</th><th>{tr('Użyte')}</th><th>{tr('Wolne')}</th><th>%</th></tr></thead>
             <tbody>{sample!.disks.map((d) => (
@@ -225,10 +251,24 @@ function Bar({ cell }: { cell: Cell }) {
               </tr>
             ))}</tbody>
           </table>
-        )}>
-          <IDisk /><span className="ssh-bar-text">{disk.mount}: {disk.percent}%</span>
-        </HoverCard>
-      )}
+        )}>{inner}</HoverCard>
+      );
+    }
+  };
+
+  return (
+    <div ref={ref} className="ssh-bar" role="status" aria-label={tr('Pasek stanu serwera')} data-stage={layout.rank} onContextMenu={menu}>
+      {visible.map(shownItem)}
+      {/* Every item in every form, out of sight: fitBar's widths. */}
+      <div ref={measure} className="ssh-bar-measure" aria-hidden="true">
+        {present.map((it) => (
+          <span key={it}>
+            <span data-measure={`${it}:full`} className={`ssh-bar-item ssh-bar-${it}`}>{body(it, false, true)}</span>
+            <span data-measure={`${it}:compact`} className={`ssh-bar-item ssh-bar-${it}`}>{body(it, true, true)}</span>
+            {it === 'cpu' && <span data-measure="cpu:bare" className="ssh-bar-item ssh-bar-cpu">{body(it, true, false)}</span>}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -248,8 +288,8 @@ function HoverCard({ className, attrs, content, children }: { className: string;
     // Above the bar first: the bar is at the bottom of the cell.
     const placed = placeTooltip({ left: a.left, right: a.right, top: a.top, bottom: a.top }, { width: c.width, height: c.height }, { width: window.innerWidth, height: window.innerHeight });
     const above = a.top - 6 - c.height;
-    // 1.0.7: within the cell's card when it fits there (the disk sits at the right edge, the CPU near the left one), so the
-    // card never spills over the next cell or a side panel; a card wider than the cell is centred on the window's clamp.
+    // 1.0.7: within the cell's card when it fits there, so the card never spills over the next cell or a side panel; a card
+    // wider than the cell is centred on the window's clamp.
     const cell = ref.current.closest('.cell')?.getBoundingClientRect();
     const left = cell ? clampInto(placed.left, c.width, Math.max(cell.left + 6, 6), Math.min(cell.right - 6, window.innerWidth - 6)) : placed.left;
     setPos({ left, top: above >= 6 ? above : placed.top });
@@ -290,5 +330,8 @@ const icon = (children: ReactNode) => (
 const IServer = () => icon(<><rect x="2.5" y="2.5" width="11" height="4.5" rx="1" /><rect x="2.5" y="9" width="11" height="4.5" rx="1" /><path d="M5 4.75h.01M5 11.25h.01" /></>);
 const ICpu = () => icon(<><rect x="4" y="4" width="8" height="8" rx="1" /><path d="M6.5 6.5h3v3h-3zM6 1.5V4M10 1.5V4M6 12v2.5M10 12v2.5M1.5 6H4M1.5 10H4M12 6h2.5M12 10h2.5" /></>);
 const IMem = () => icon(<><rect x="1.5" y="4.5" width="13" height="6" rx="1" /><path d="M4.5 10.5v2M8 10.5v2M11.5 10.5v2M4.5 6.75v1.5M8 6.75v1.5M11.5 6.75v1.5" /></>);
+const IUp = () => icon(<path d="M8 13V3.5M4.5 7 8 3.5 11.5 7" />);
+const IDown = () => icon(<path d="M8 3v9.5M4.5 9 8 12.5 11.5 9" />);
+const IClock = () => icon(<><circle cx="8" cy="8" r="6" /><path d="M8 4.75V8l2.25 1.5" /></>);
 const IUser = () => icon(<><circle cx="8" cy="5.5" r="2.75" /><path d="M2.75 14c.6-2.9 2.7-4.5 5.25-4.5s4.65 1.6 5.25 4.5" /></>);
 const IDisk = () => icon(<><rect x="1.5" y="4" width="13" height="8" rx="1.5" /><path d="M4.5 9.5h.01M7 9.5h5" /></>);

@@ -1,30 +1,34 @@
 /* The SSH status bar (SshStatusBar): one slim row under the terminal of a connected SSH cell. */
 .ssh-bar {
-  flex: none; display: flex; align-items: center; gap: 14px; height: 22px; min-width: 0; padding: 0 9px;
+  flex: none; display: flex; align-items: center; justify-content: flex-start; gap: 12px; height: 22px; min-width: 0; padding: 0 9px;
   border-top: 1px solid var(--border); background: var(--bg-1); color: var(--text-2);
   font-size: 11px; line-height: 1; white-space: nowrap; overflow: hidden; user-select: none; position: relative; z-index: 1;
 }
 .ssh-bar.ssh-bar-pending { height: 0; border-top: 0; }
-.ssh-bar-item { display: inline-flex; align-items: center; gap: 5px; min-width: 0; flex: none; cursor: default; }
+/* 1.0.8: one row left to right with even gaps, no spacer; fitBar (shared/sshBar.ts) shortens and drops items to fit. */
+.ssh-bar-item { display: inline-flex; align-items: center; gap: 4px; min-width: 0; flex: none; cursor: default; }
 .ssh-bar-host { flex: 0 1 auto; color: var(--text); }
 .ssh-bar-host .ssh-bar-text { overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
 .ssh-bar-logo { width: 12px; height: 12px; flex: none; }
 .ssh-bar-icon { flex: none; color: var(--muted); }
-.ssh-bar-num { font-variant-numeric: tabular-nums; min-width: 2.6em; text-align: right; }
-.ssh-bar-mem .ssh-bar-text, .ssh-bar-net .ssh-bar-text { font-variant-numeric: tabular-nums; }
+/* Numbers in tabular digits, right-aligned in a fixed least width, so a value that changes does not shift the row. */
+.ssh-bar-num { font-variant-numeric: tabular-nums; text-align: right; }
+.ssh-bar-pct3 { min-width: 3.4ch; }
+.ssh-bar-rate { min-width: 8ch; }
+.ssh-bar-rate-short { min-width: 3.6ch; }
+.ssh-bar-dir { display: inline-flex; align-items: center; gap: 2px; }
+.ssh-bar-dir + .ssh-bar-dir { margin-left: 10px; }
 .ssh-bar-spark { flex: none; color: var(--waiting); }
 .ssh-bar-spark-base { stroke: var(--border-2); stroke-width: 1; }
 .ssh-bar-spark-fill { fill: currentColor; stroke: none; opacity: .18; }
-.ssh-bar-arrow { color: var(--muted); margin-right: 2px; }
-.ssh-bar-count { padding: 1px 4px; border-radius: 6px; background: var(--bg-3); color: var(--text-2); font-size: 10px; }
+.ssh-bar-more { color: var(--muted); font-variant-numeric: tabular-nums; }
 .ssh-bar-disk.warn { color: var(--working); }
 .ssh-bar-disk.full { color: var(--error); }
 .ssh-bar-disk.warn .ssh-bar-icon, .ssh-bar-disk.full .ssh-bar-icon { color: currentColor; }
-/* The disk goes to the far right, like the clock of a status bar. */
-.ssh-bar-disk { margin-left: auto; }
 
-/* A narrow cell drops the least important items (SshStatusBar measures them, sshBar.ts SSH_BAR_PRIORITY). */
-.ssh-bar > [data-drop] { display: none; }
+/* Every item in every form, out of sight and out of the row: SshStatusBar measures them here. */
+.ssh-bar-measure { position: absolute; left: 0; top: 0; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.ssh-bar-measure > span { display: flex; width: max-content; }
 
 /* The hover card of the CPU, the user and the disk: the dark bubble of the tooltips, as a small table. */
 .ssh-bar-card {
@@ -43,6 +47,8 @@
 .ssh-bar-pct.warn { color: var(--working); }
 .ssh-bar-pct.full { color: var(--error); }
 .ssh-bar-table tr.self td { color: var(--accent-text); }
+/* Your own session last, set off from the others above it. */
+.ssh-bar-table tbody tr.self:not(:first-child) td { border-top: 1px solid #343434; padding-top: 3px; }
 .ssh-bar-you { margin-left: 6px; color: var(--muted); }
 .ssh-bar-note { margin: 0; color: var(--text-2); }
 
