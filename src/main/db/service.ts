@@ -65,6 +65,8 @@ export class DbService<S extends DbStateLike = DbStateLike> {
   private sessions = new Map<string, Entry>();
   private tunnels = new Map<string, TunnelRef>();
   private pinned = new Set<string>();
+  /** The pins of each window (1.0.8: 'main' and detached windows); `pinned` is their union. */
+  private pinsBy = new Map<string, Set<string>>();
 
   constructor(private readonly deps: DbServiceDeps<S>) {}
 
@@ -418,13 +420,14 @@ export class DbService<S extends DbStateLike = DbStateLike> {
     return { sessions: [...this.sessions.values()].map((e) => e.state), prompts };
   }
 
-  async op(sessionId: string, op: DbHostOp): Promise<DbResult<unknown>> {
+  /** `window`: the window that asked (1.0.8): its results arrive on that window's DB port. */
+  async op(sessionId: string, op: DbHostOp, window?: string): Promise<DbResult<unknown>> {
     const entry = this.sessions.get(sessionId);
     if (!entry) return { ok: false, error: 'noSession' };
     if (entry.state.phase !== 'connected') return { ok: false, error: 'notConnected' };
     // Every operation counts as use: the idle timer starts again.
     this.scheduleIdle(entry);
-    return this.deps.host.request(sessionId, op);
+    return this.deps.host.request(sessionId, op, window);
   }
 
   hostCrashed(): void {
@@ -433,14 +436,16 @@ export class DbService<S extends DbStateLike = DbStateLike> {
     this.deps.events.hostCrashed();
   }
 
-  /** The sessions open tabs use: never disconnected for being idle. */
-  pin(sessionIds: string[]): void {
-    this.pinned = new Set(sessionIds.filter((id) => isDbSessionId(id)).slice(0, 1000));
+  /** The sessions open tabs of a window use (each window sends its whole list): never disconnected for being idle. */
+  pin(sessionIds: string[], window = 'main'): void {
+    const ids = new Set(sessionIds.filter((id) => isDbSessionId(id)).slice(0, 1000));
+    if (ids.size) this.pinsBy.set(window, ids); else this.pinsBy.delete(window);
+    this.pinned = new Set([...this.pinsBy.values()].flatMap((set) => [...set]));
     for (const e of this.sessions.values()) this.scheduleIdle(e);
   }
 
-  /** The renderer reloads or crashed: the new page pins its tabs again. */
-  rendererGone(): void { this.pin([]); }
+  /** A window reloads, crashed or closed: its page (if any) pins its tabs again. */
+  rendererGone(window = 'main'): void { this.pin([], window); }
 
   private kept(entry: Entry): boolean {
     return entry.state.phase !== 'connected' || entry.busy || this.pinned.has(entry.state.id);

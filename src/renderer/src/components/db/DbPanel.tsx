@@ -56,6 +56,7 @@ export const DbPanel = memo(function DbPanel() {
   const sshHosts = useStore((st) => st.s.sshHosts);
   const sessions = useDbStore((st) => st.sessions);
   const shared = useDbStore((st) => st.shared);
+  const tabSessions = useDbStore((st) => st.tabSessions);
   const prompts = useDbStore((st) => st.prompts);
   const loads = useDbStore((st) => st.loads);
   const openList = useDbStore((st) => st.open);
@@ -249,7 +250,9 @@ export const DbPanel = memo(function DbPanel() {
   const hostLabel = (id: string) => sshHosts.find((h) => h.id === id)?.label ?? '?';
   // Redis sessions of tabs show their own login; the panel's (the tree's DBs) ask here.
   const panelSessions = new Set(Object.values(shared));
-  const promptSessions = Object.values(sessions).filter((s) => !s.test && (s.kind !== 'redis' || panelSessions.has(s.id)) && prompts[s.id]);
+  // 1.0.8: only this window's sessions (a tab in its own window asks there).
+  const ownSessions = new Set([...panelSessions, ...Object.values(tabSessions)]);
+  const promptSessions = Object.values(sessions).filter((s) => !s.test && (s.kind !== 'redis' ? ownSessions.has(s.id) : panelSessions.has(s.id)) && prompts[s.id]);
   const connName = (id: string) => connections.find((c) => c.id === id)?.name ?? '?';
 
   const renderRow = (row: DbTreeRow, index: number) => {

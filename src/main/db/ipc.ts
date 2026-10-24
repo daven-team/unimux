@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { DB_KINDS, DB_LIMITS, DB_OBJECT_KINDS, DB_TLS_MODES, isDbSessionId, type DbConnectionInput, type DbPasswordChange, type DbPromptAnswer, type DbResult } from '../../shared/db';
 import type { DbHostOp } from '../../shared/dbHostIpc';
 import { REDIS_LIMITS, type RedisOp } from '../../shared/dbRedis';
-import type { IpcGuard } from '../ipcGuard';
+import type { IpcGuard, IpcSenderEvent } from '../ipcGuard';
 import type { DbService } from './service';
 
 const uuid = z.string().uuid();
@@ -216,23 +216,25 @@ export function createDbHandlers(service: DbService) {
       const a = answer.safeParse(raw);
       return a.success ? service.answer(a.data as DbPromptAnswer) : { ok: false };
     },
-    pg: async (id: unknown, raw: unknown): Promise<DbResult<unknown>> => {
+    /** `window` (1.0.8): the asking window, whose DB port gets the results. */
+    pg: async (id: unknown, raw: unknown, window?: string): Promise<DbResult<unknown>> => {
       const s = sessionId.safeParse(id), o = op.safeParse(raw);
-      return s.success && o.success ? service.op(s.data, o.data as DbHostOp) : INVALID;
+      return s.success && o.success ? service.op(s.data, o.data as DbHostOp, window) : INVALID;
     },
-    redis: async (id: unknown, raw: unknown): Promise<DbResult<unknown>> => {
+    redis: async (id: unknown, raw: unknown, window?: string): Promise<DbResult<unknown>> => {
       const s = sessionId.safeParse(id), o = redisOp.safeParse(raw);
       if (!s.success || !o.success) return INVALID;
       if (totalBytes(o.data) > REDIS_LIMITS.writeBytes) return INVALID;
-      return service.op(s.data, { op: 'redis', req: o.data as RedisOp });
+      return service.op(s.data, { op: 'redis', req: o.data as RedisOp }, window);
     },
-    pin: (ids: unknown) => { const p = z.array(sessionId).max(1000).safeParse(ids); if (p.success) service.pin(p.data); },
+    pin: (ids: unknown, window?: string) => { const p = z.array(sessionId).max(1000).safeParse(ids); if (p.success) service.pin(p.data, window); },
   };
 }
 
 export type DbHandlers = ReturnType<typeof createDbHandlers>;
 
-export function registerDbIpc(guard: IpcGuard, h: DbHandlers): void {
+/** `windowOf` (1.0.8): which window sent a message ('main' or a detached window's id). */
+export function registerDbIpc(guard: IpcGuard, h: DbHandlers, windowOf: (e: IpcSenderEvent) => string = () => 'main'): void {
   const no = () => ({ ok: false });
   guard.guardedHandle('db:connections:save', (_e, input: unknown, change: unknown) => h.save(input, change), () => ({ ok: false, error: 'invalid' }));
   guard.guardedHandle('db:connections:delete', (_e, id: unknown) => h.remove(id), no);
@@ -243,7 +245,7 @@ export function registerDbIpc(guard: IpcGuard, h: DbHandlers): void {
   guard.guardedHandle('db:disconnect', (_e, id: unknown) => h.disconnect(id), no);
   guard.guardedHandle('db:sessions', () => h.sessions(), () => ({ sessions: [], prompts: [] }));
   guard.guardedHandle('db:prompt:answer', (_e, a: unknown) => h.answer(a), no);
-  guard.guardedHandle('db:pg', (_e, id: unknown, o: unknown) => h.pg(id, o), () => INVALID);
-  guard.guardedHandle('db:redis', (_e, id: unknown, o: unknown) => h.redis(id, o), () => INVALID);
-  guard.guardedOn('db:pin', (_e, ids: unknown) => h.pin(ids));
+  guard.guardedHandle('db:pg', (e, id: unknown, o: unknown) => h.pg(id, o, windowOf(e)), () => INVALID);
+  guard.guardedHandle('db:redis', (e, id: unknown, o: unknown) => h.redis(id, o, windowOf(e)), () => INVALID);
+  guard.guardedOn('db:pin', (e, ids: unknown) => h.pin(ids, windowOf(e)));
 }

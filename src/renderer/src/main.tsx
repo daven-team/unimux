@@ -22,7 +22,10 @@ import { useSftpStore } from './sftpStore';
 import { useFileStore } from './files';
 import * as files from './files';
 import * as detach from './detach';
-(window as unknown as { __mc: unknown }).__mc = { actions, useStore, terminals, useSftpStore, useFileStore, files, detach };
+import * as dbTabs from './db/tabs';
+import * as dbClient from './db/dbClient';
+import * as redis from './redis/redisClient';
+(window as unknown as { __mc: unknown }).__mc = { actions, useStore, terminals, useSftpStore, useFileStore, files, detach, dbTabs, dbClient, redis };
 
 // A file dropped anywhere the app does not handle must never make the window navigate to it.
 for (const type of ['dragover', 'drop'] as const) {

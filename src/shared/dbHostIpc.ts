@@ -60,9 +60,18 @@ export type MainToDbHost =
   | { t: 'dbOpen'; id: string; config: DbOpenConfig }
   /** The database password the user typed (null: cancelled). */
   | { t: 'dbPasswordAnswer'; id: string; promptId: string; value: string | null }
-  | { t: 'dbOp'; reqId: number; id: string; op: DbHostOp }
+  /** window (1.0.8): the window that asked (absent: the main window); its results go to that window's DB port. */
+  | { t: 'dbOp'; reqId: number; id: string; op: DbHostOp; window?: string }
   | { t: 'dbClose'; id: string }
   | { t: 'shutdown' };
+
+/**
+ * Messages the DB Host's entry handles itself (1.0.8): a window's DB port (absent window: the main window's), and a tab that
+ * moved to another window taking its sessions' Pub/Sub messages along (window null: the main window).
+ */
+export type DbHostPortControl =
+  | { t: 'port'; window?: string }
+  | { t: 'dbRoute'; sessions: string[]; window: string | null };
 
 export type DbHostToMain =
   | Extract<HostToMain, { t: 'sshStatus' | 'sshHostKey' | 'sshAuthPrompt' | 'log' }>

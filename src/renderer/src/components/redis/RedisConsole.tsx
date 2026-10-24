@@ -9,7 +9,7 @@ import { parseRedisCommandLine, redisCommandName, redisDataDisplay, type RedisDa
 import { afterConsoleError, completeCommand, consoleRoute, historyLine, isMapReply, pushHistory, replyText } from '../../../../shared/redisView';
 import { useI18n } from '../../i18n';
 import { askChoice, toast } from '../../store';
-import { connectionOf, onForgetTab, openRedisTab, resultText, whereText, withTab } from '../../redis/redisClient';
+import { connectionOf, onCarryTab, onForgetTab, openRedisTab, resultText, whereText, withTab } from '../../redis/redisClient';
 import { openMenuAt } from '../ContextMenu';
 import { IMore } from '../icons';
 import type { RedisViewProps } from './RedisTabView';
@@ -26,6 +26,16 @@ const SHOW_ITEMS = 200, SHOW_NESTED = 50, SHOW_STEP = 1000;
 const useOutputs = create<Record<string, Entry[]>>(() => ({}));
 onForgetTab((tabId) => useOutputs.setState((st) => { const next = { ...st }; delete next[tabId]; return next; }, true));
 let nextId = 1;
+// 1.0.8: the output goes along when the tab moves to another window (a note's button stays behind: it acted in that window).
+onCarryTab('console', {
+  take: (tabId) => useOutputs.getState()[tabId]?.map((e) => (e.kind === 'note' ? { ...e, action: undefined } : e)),
+  give: (tabId, data) => {
+    if (!Array.isArray(data)) return;
+    const entries = (data as Entry[]).filter((e) => e && typeof e.id === 'number').slice(-MAX_ENTRIES);
+    nextId = Math.max(nextId, ...entries.map((e) => e.id + 1));
+    useOutputs.setState({ [tabId]: entries });
+  },
+});
 type NewEntry = Entry extends infer E ? (E extends Entry ? Omit<E, 'id'> : never) : never;
 const push = (tabId: string, entry: NewEntry) =>
   useOutputs.setState((st) => ({ [tabId]: [...(st[tabId] ?? []), { ...entry, id: nextId++ } as Entry].slice(-MAX_ENTRIES) }));

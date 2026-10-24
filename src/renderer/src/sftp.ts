@@ -92,6 +92,22 @@ export const sftpVisible = (): boolean => {
 };
 
 let booted = false;
+/**
+ * 1.0.8, a detached window: no SFTP view there, but its editor tab follows the moves and renames the queue finishes (the port
+ * reaches every window); the hosts of the sessions come from their events.
+ */
+export async function initSftpFollow(): Promise<void> {
+  if (booted) return;
+  booted = true;
+  window.mc.on('sftp:session', onSession);
+  window.mc.on('sftp:hostCrashed', onHostCrashed);
+  try {
+    const snapshot = await window.mc.sftp.sessions();
+    for (const s of snapshot.sessions) if (!lastState.has(s.id)) lastState.set(s.id, s);
+    useSftpStore.setState((st) => ({ sessionHosts: { ...Object.fromEntries(snapshot.sessions.map((s) => [s.id, s.hostId])), ...st.sessionHosts } }));
+  } catch { /* no sessions yet */ }
+}
+
 export async function initSftp(): Promise<void> {
   if (booted) return;
   booted = true;
