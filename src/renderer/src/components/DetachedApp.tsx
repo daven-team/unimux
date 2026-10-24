@@ -109,6 +109,16 @@ async function boot(): Promise<void> {
     const found = findCell(getS(), cellId);
     if (!hooked && found && !found.cell.session && getProfile(getS(), found.cell.profileId).cli === 'codex') void window.mc.bindCodexSession(cellId, found.cell.worktree?.path ?? found.project.path);
   });
+  // The short reason of a status ("czeka na zgodę: Bash", "praca: Edit") for the cell card.
+  terminals.onDetail((cellId, detail) => {
+    if (isAuxPtyId(cellId)) return;
+    setUi((ui) => {
+      if (detail) return { statusDetails: { ...ui.statusDetails, [cellId]: detail } };
+      if (!(cellId in ui.statusDetails)) return {};
+      const { [cellId]: _d, ...statusDetails } = ui.statusDetails;
+      return { statusDetails };
+    });
+  });
   terminals.onExit((cellId) => {
     if (isAuxPtyId(cellId)) return;
     setUi((ui) => { const { [cellId]: _f, ...failures } = ui.failures; return { statuses: { ...ui.statuses, [cellId]: 'exited' }, failures }; });

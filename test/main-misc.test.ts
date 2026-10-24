@@ -32,7 +32,7 @@ describe('HookServer', () => {
     s.stop();
   });
 
-  it('ignores idle_prompt notifications but reports permission prompts', async () => {
+  it('reports idle_prompt as its own (quiet) idle event, permission prompts as notify', async () => {
     const s = new HookServer();
     await s.start();
     const got: string[] = [];
@@ -41,7 +41,7 @@ describe('HookServer', () => {
     await post('notify', { notification_type: 'idle_prompt' });
     await post('notify', { notification_type: 'permission_prompt' });
     await post('busy', {});
-    expect(got).toEqual(['c1:notify', 'c1:busy']);
+    expect(got).toEqual(['c1:idle', 'c1:notify', 'c1:busy']);
     expect(isAttentionNotification('not json')).toBe(true);
     s.stop();
   });

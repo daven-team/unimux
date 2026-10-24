@@ -272,6 +272,8 @@ export const ERROR_PHRASES: Record<string, MessageKey> = {
   unknown: 'nieznany błąd',
   /** Codex: "You've hit your usage limit" in its output. */
   'usage-limit': 'limit osiągnięty',
+  /** The agent CLI ended in the middle of a turn with nobody at the keyboard (status.ts, agent cells with prompt marks). */
+  'cli-exited': 'CLI zakończył działanie',
 };
 
 /** Error codes that mean "a limit was reached": the cell header says so instead of a generic error. */
