@@ -23,6 +23,8 @@ export function ContextMeter({ cell }: { cell: Cell }) {
     <span className={`meta-item context-meter ${level}`} title={title}>
       <span className="context-bar" aria-hidden="true"><span style={{ width: `${Math.max(2, usage.percent)}%` }} /></span>
       <span className="context-text">{tr('Kontekst {percent}%', { percent: usage.percent })}</span>
+      {/* Narrow headers show the number alone (the word goes first, never the number). */}
+      <span className="context-short">{usage.percent}%</span>
     </span>
   );
 }

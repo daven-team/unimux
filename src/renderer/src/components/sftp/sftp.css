@@ -27,6 +27,7 @@
 .sftp-pathbar .btn:disabled { opacity: .35; cursor: default; }
 .sftp-crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 1px; height: 26px; padding: 0 6px; margin-left: 4px; overflow: hidden; background: #171717; border: 1px solid #ffffff0d; border-radius: 6px; font-size: 12px; white-space: nowrap; scrollbar-width: none; overflow-x: auto; }
 .sftp-crumbs::-webkit-scrollbar { display: none; }
+.sftp-crumbs.cut { -webkit-mask-image: linear-gradient(to right, transparent 0, #000 22px); mask-image: linear-gradient(to right, transparent 0, #000 22px); }
 .sftp-crumb { display: inline-flex; align-items: center; flex: none; }
 .sftp-crumb-sep { color: var(--muted); padding: 0 1px; }
 .sftp-crumb button { border: 0; background: transparent; color: var(--text-2); font-size: 12px; padding: 1px 4px; border-radius: 4px; cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }

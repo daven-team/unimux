@@ -66,7 +66,13 @@ export function PathBar(p: PathBarProps) {
   const copyable = shown !== '';
 
   // The end of a long path (the current folder) stays in view.
-  useLayoutEffect(() => { const el = crumbBar.current; if (el) el.scrollLeft = el.scrollWidth; }, [p.crumbs, p.editing]);
+  // The end of a long path stays in view; the cut start fades out instead of showing half a letter.
+  useLayoutEffect(() => {
+    const el = crumbBar.current;
+    if (!el) return;
+    el.scrollLeft = el.scrollWidth;
+    el.classList.toggle('cut', el.scrollLeft > 0);
+  }, [p.crumbs, p.editing]);
 
   // Each edit starts with the whole path selected.
   useLayoutEffect(() => {
@@ -197,7 +203,7 @@ export function PathBar(p: PathBarProps) {
   }
   return (
     <>
-      <nav ref={crumbBar} className="sftp-crumbs" aria-label={tr('Ścieżka')} title={tr('Kliknij, aby wpisać ścieżkę ({key})', { key: editKey })}
+      <nav ref={crumbBar} onScroll={(e) => e.currentTarget.classList.toggle('cut', e.currentTarget.scrollLeft > 0)} className="sftp-crumbs" aria-label={tr('Ścieżka')} title={tr('Kliknij, aby wpisać ścieżkę ({key})', { key: editKey })}
         onClick={(e) => { if (!(e.target as Element).closest('button')) p.onEditing(true); }}
         onContextMenu={(e) => { e.preventDefault(); barMenu(e.clientX, e.clientY); }}>
         {p.crumbs.map((c, i) => (

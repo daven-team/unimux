@@ -24,7 +24,19 @@
   background: #8a8a8a;
 }
 
-.terminal-cell .context-meter .context-text { overflow: hidden; text-overflow: ellipsis; }
+.terminal-cell .context-meter .context-text { white-space: nowrap; }
+.terminal-cell .context-meter .context-short { display: none; white-space: nowrap; }
+
+/* A narrow header keeps the bar and the number ("92%") and drops the word; the meter is never cut mid-number. */
+@container cell-meta (max-width: 200px) {
+  .terminal-cell .context-meter .context-text { display: none; }
+  .terminal-cell .context-meter .context-short { display: inline; }
+}
+/* Below the width where the other details go, the meter stays as the number alone (a nearly full context must stay visible). */
+@container cell-meta (max-width: 52px) {
+  .terminal-cell .cell-head .cell-meta > .meta-item.context-meter { display: inline-flex; }
+  .terminal-cell .context-meter .context-bar { display: none; }
+}
 
 .terminal-cell .context-meter.warn { color: #d9a441; }
 .terminal-cell .context-meter.warn .context-bar > span { background: #d9a441; }
