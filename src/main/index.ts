@@ -25,7 +25,7 @@ import { applyDockIcon, windowIcon } from './appIcon';
 import { LARGE_VIEW_BYTES, listProjectDirectories, listProjectDirectory, listProjectDirectoryBatch, readProjectFile, statProjectFile, writeProjectFile } from './files';
 import { createTrash, registerFileOpsIpc } from './filesIpc';
 import { createIpcGuard } from './ipcGuard';
-import { closeAllDetached, fromDetachedWindow, initDetachedWindows, relayCellStatus, sendRouted, startDetachedWindows, stateChanged as detachedStateChanged } from './detachedWindows';
+import { closeAllDetached, fromDetachedWindow, initDetachedWindows, relayCellStatus, senderWindow, sendRouted, startDetachedWindows, stateChanged as detachedStateChanged } from './detachedWindows';
 import { registerGitIpc } from './gitIpc';
 import { Git } from './git';
 import { createGithubService } from './github/service';
@@ -789,6 +789,9 @@ initDetachedWindows({
   preload: join(__dirname, '../preload/index.js'),
   icon: windowIcon,
   pty: ptyHost,
+  ports: [dbHost, sftpHost],
+  routeDbSessions: (sessions, window) => dbHost.route(sessions, window),
+  rendererGone: (window) => { sftp?.rendererGone(window); db?.rendererGone(window); },
   isAlive: (cellId) => alive.has(cellId),
   quitting: () => quitting,
   offscreen: !!devEnv('MC_OFFSCREEN'),
@@ -884,7 +887,7 @@ function startSsh(): void {
       hostCrashed: () => send('sftp:hostCrashed'),
     },
   });
-  registerSftpIpc({ guardedHandle, guardedOn }, createSftpHandlers(sftp));
+  registerSftpIpc({ guardedHandle, guardedOn }, createSftpHandlers(sftp), senderWindow);
   const dbVault = new DbVault(join(DATA_DIR, 'db', 'vault.json'), cipher);
   db = new DbService<AppState>({
     coordinator, host: dbHost, vault: dbVault,
@@ -906,7 +909,7 @@ function startSsh(): void {
       vaultChanged: () => send('db:vault:changed', dbVault.info()),
     },
   });
-  registerDbIpc({ guardedHandle, guardedOn }, createDbHandlers(db));
+  registerDbIpc({ guardedHandle, guardedOn }, createDbHandlers(db), senderWindow);
   // The SQL query history (1.0.6, local only); pending changes are written before the app quits.
   const dbHistory = new DbHistoryStore(join(DATA_DIR, 'db', 'query_history.json'), { connectionExists: (id) => state.dbConnections.some((c) => c.id === id) });
   registerDbHistoryIpc({ guardedHandle, guardedOn }, dbHistory);

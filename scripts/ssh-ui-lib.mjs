@@ -118,7 +118,7 @@ export async function launchApp(root, extraEnv = {}, extraArgs = []) {
   let target;
   for (let i = 0; i < 150 && !target; i++) {
     await sleep(200);
-    try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === 'page' && t.url.includes('index.html')); } catch { /* starting */ }
+    try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === 'page' && t.url.includes('index.html') && !t.url.includes('detached=')); } catch { /* starting */ }
   }
   if (!target) { killTree(child.pid); throw new Error(`the app window did not appear\n${stderr}`); }
   const ws = new WebSocket(target.webSocketDebuggerUrl);
@@ -169,7 +169,8 @@ export async function launchApp(root, extraEnv = {}, extraArgs = []) {
   await cdp('Runtime.enable');
   await cdp('Page.enable');
   await until(`!!document.querySelector('.app .workspace-tabs')`, 'app ready');
-  return { pid: child.pid, cdp, evaluate, until, click, setValue, press, insertText, screenshot, close };
+  // `debugPort`: the DevTools port, for other windows of the app (1.0.8 detached windows: their own page targets).
+  return { pid: child.pid, debugPort: port, cdp, evaluate, until, click, setValue, press, insertText, screenshot, close };
 }
 
 /**

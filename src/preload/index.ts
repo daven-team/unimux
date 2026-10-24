@@ -263,6 +263,10 @@ const api: McApi = {
     dismiss: () => ipcRenderer.invoke('detach:dismiss'),
     requestAttach: (id) => ipcRenderer.send('detach:requestAttach', id),
     focus: (id) => ipcRenderer.send('detach:focus', id),
+    work: (work) => ipcRenderer.send('detach:work', work),
+    works: () => ipcRenderer.invoke('detach:works'),
+    openInMain: (request) => ipcRenderer.send('detach:openInMain', request),
+    stay: () => ipcRenderer.send('detach:stay'),
   },
   on: (channel: string, cb: (...args: any[]) => void) => {
     const listener = (_e: unknown, ...args: any[]) => cb(...args);

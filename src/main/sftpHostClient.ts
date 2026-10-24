@@ -31,7 +31,8 @@ export interface SftpHostLink {
 
 export class SftpHostClient extends EventEmitter implements SftpHostLink {
   private child: UtilityProcess | null = null;
-  private renderer: WebContents | null = null;
+  /** The windows with a port (1.0.8): 'main', and detached windows by id; connected again after a host restart. */
+  private renderers = new Map<string, WebContents>();
   private crashes: number[] = [];
   private fatal = false;
   private shuttingDown = false;
@@ -80,7 +81,7 @@ export class SftpHostClient extends EventEmitter implements SftpHostLink {
       if (this.crashes.length > 5) this.fatal = true;
       this.emit('crashed', code, this.stderrTail);
     });
-    if (this.renderer) this.connectRenderer(this.renderer);
+    for (const [window, wc] of [...this.renderers]) this.connectRenderer(wc, window);
   }
 
   private failPending(error: 'sftpHostCrashed'): void {
@@ -88,13 +89,18 @@ export class SftpHostClient extends EventEmitter implements SftpHostLink {
     this.pending.clear();
   }
 
-  /** Gives the renderer the transfer port (again after a renderer reload or a host restart). */
-  connectRenderer(wc: WebContents): void {
-    this.renderer = wc;
+  /** Gives a window its transfer port (again after a reload or a host restart). `window`: 'main', or a detached window's id (1.0.8). */
+  connectRenderer(wc: WebContents, window = 'main'): void {
+    this.renderers.set(window, wc);
     if (!this.child || wc.isDestroyed()) return;
     const { port1, port2 } = new MessageChannelMain();
-    this.child.postMessage({ t: 'port' }, [port1]);
+    this.child.postMessage(window === 'main' ? { t: 'port' } : { t: 'port', window }, [port1]);
     wc.postMessage('sftp-port', null, [port2]);
+  }
+
+  /** A detached window closed: a restarted host does not connect it again. */
+  forgetRenderer(window: string): void {
+    if (window !== 'main') this.renderers.delete(window);
   }
 
   /** Never log these messages: sshConnect carries secrets. False when no host runs. */

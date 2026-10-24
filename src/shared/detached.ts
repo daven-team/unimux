@@ -1,7 +1,14 @@
-// Tabs pulled out of the main window into their own window (1.0.6): a grid (its terminals keep running) or a file / diff tab.
+// Tabs pulled out of the main window into their own window (1.0.6): a grid (its terminals keep running) or a file / diff tab;
+// 1.0.8 adds database (table, SQL, DDL), Redis and remote (SFTP) file tabs.
 // The registry lives in AppState.detachedWindows and is written by main only (the renderer asks main to detach or attach).
-// Pure logic: the registry, which window owns which cell, where a window opens, which messages go to which window.
+// Pure logic: the registry, which window owns which cell, where a window opens, which messages go to which window, what a
+// moving tab takes along and the unsaved work a detached window reports for the quit question.
 import type { AppState, Project } from './types';
+import { DB_LIMITS, isDbSessionId } from './db';
+import { validDbTabRef, type DbTabRef } from './dbTabs';
+import { REDIS_TAB_VIEWS, validRedisTabRef, type RedisTabRef, type RedisTabView } from './redisView';
+import { validRemotePath } from './sftp';
+import { isUuid } from './ssh';
 
 /** Detached windows at most (each is a renderer process). */
 export const DETACHED_LIMIT = 8;
@@ -20,7 +27,13 @@ export interface DisplayArea { id: number; workArea: Rect }
 export type DetachedReopen =
   | { kind: 'project'; projectId: string; relativePath: string }
   | { kind: 'diff'; projectId: string; diff: { source: 'working' | 'staged' | 'commit' | 'untracked'; path: string; oldPath?: string; hash?: string; worktree?: string } }
-  | { kind: 'local'; path: string };
+  | { kind: 'local'; path: string }
+  /** 1.0.8: a remote file of a saved SSH host (read again over SFTP, logging in with the usual prompts). */
+  | { kind: 'remote'; hostId: string; path: string }
+  /** 1.0.8: a database tab (table data, SQL editor or DDL), opened again on a new session; `path`: its tooltip line. */
+  | { kind: 'db'; ref: DbTabRef; path: string }
+  /** 1.0.8: a Redis view (the same tab id: its uid is kept). */
+  | { kind: 'redis'; ref: RedisTabRef; path: string };
 
 export type DetachedTarget =
   | { kind: 'grid'; projectId: string; tabId: string }
@@ -52,6 +65,9 @@ function cleanReopen(raw: unknown): DetachedReopen | undefined {
   if (!isRecord(raw)) return undefined;
   if (raw.kind === 'project' && isId(raw.projectId) && isText(raw.relativePath)) return { kind: 'project', projectId: raw.projectId, relativePath: raw.relativePath };
   if (raw.kind === 'local' && isText(raw.path)) return { kind: 'local', path: raw.path };
+  if (raw.kind === 'remote' && isUuid(raw.hostId) && validRemotePath(raw.path)) return { kind: 'remote', hostId: raw.hostId, path: raw.path };
+  if (raw.kind === 'db' && validDbTabRef(raw.ref) && isText(raw.path)) return { kind: 'db', ref: raw.ref, path: raw.path };
+  if (raw.kind === 'redis' && validRedisTabRef(raw.ref) && isText(raw.path)) return { kind: 'redis', ref: raw.ref, path: raw.path };
   if (raw.kind === 'diff' && isId(raw.projectId) && isRecord(raw.diff) && isText(raw.diff.path) && (DIFF_SOURCES as readonly unknown[]).includes(raw.diff.source)) {
     const d = raw.diff;
     return {
@@ -287,6 +303,8 @@ export function boundsBeside(main: Rect | null, size: { width: number; height: n
 /** Messages every window of the app needs (the state, the CLI and MCP status, a Pty Host restart, the quit). */
 export const BROADCAST_CHANNELS: ReadonlySet<string> = new Set([
   'state:changed', 'cli:changed', 'mcp:info', 'ptyhost:crashed', 'ptyhost:fatal', 'app:before-quit', 'ssh:vault:changed',
+  // 1.0.8: database, Redis and remote file tabs live in any window; each window shows the sessions and prompts of its own tabs.
+  'db:session', 'db:prompt', 'db:hostCrashed', 'db:vault:changed', 'sftp:session', 'sftp:prompt', 'sftp:hostCrashed',
 ]);
 /** Messages about one cell (its id is the first argument, or `cellId` of the first argument): they go to the window showing it. */
 export const CELL_CHANNELS: ReadonlySet<string> = new Set([
@@ -326,4 +344,66 @@ export function detachedTitle(s: Pick<AppState, 'projects'>, target: DetachedTar
   const project = s.projects.find((p) => p.id === target.projectId);
   const tab = project?.tabs.find((t) => t.id === target.tabId);
   return tab ? `${tab.name} - ${project!.name} - unimux` : 'unimux';
+}
+
+// -- what a moving tab takes along (1.0.8) ------------------------------------
+
+/**
+ * The runtime state of a database or Redis tab that travels with it to the other window (next to its document): the tab's
+ * own state (rows, results; staged edits and the script live in the document), the sessions it keeps using and its unsaved
+ * Redis values. `dbSessions`: the DB sessions whose Pub/Sub messages must follow the tab (main reroutes them).
+ */
+export interface TabHandoff { handoff: 'tab'; fileId: string; dbSessions: string[]; db?: unknown; redis?: unknown }
+
+export const isTabHandoff = (x: unknown): x is TabHandoff => isRecord(x) && x.handoff === 'tab' && isText(x.fileId) && Array.isArray(x.dbSessions);
+
+/** Documents and handoffs of a detach or attach, apart (only handoffs of documents that travel too). */
+export function splitHandoffs(items: readonly unknown[]): { docs: unknown[]; handoffs: TabHandoff[] } {
+  const docs = items.filter((x) => !isTabHandoff(x));
+  const ids = new Set(docs.map((d) => (isRecord(d) && typeof d.id === 'string' ? d.id : null)));
+  return { docs, handoffs: items.filter(isTabHandoff).filter((h) => ids.has(h.fileId)) };
+}
+
+/** The DB sessions the handoffs take along: valid session ids only, each once, at most 32. */
+export function handoffSessions(handoffs: readonly TabHandoff[]): string[] {
+  return [...new Set(handoffs.flatMap((h) => h.dbSessions.filter((id) => isDbSessionId(id))))].slice(0, 32);
+}
+
+// -- unsaved work of a detached window (1.0.8) --------------------------------
+
+/** What a detached window holds that quitting would lose or end: open transactions, tables with staged edits, unsaved Redis values. */
+export interface DetachedWork { tx: number; staged: number; redis: number }
+export const NO_WORK: DetachedWork = { tx: 0, staged: 0, redis: 0 };
+const workCount = (x: unknown): number => (typeof x === 'number' && Number.isInteger(x) && x >= 0 ? Math.min(x, 100_000) : 0);
+export const hasWork = (w: DetachedWork): boolean => w.tx + w.staged + w.redis > 0;
+
+/** A report from a window, repaired (null: nothing pending). */
+export function cleanWork(raw: unknown): DetachedWork | null {
+  if (!isRecord(raw)) return null;
+  const work = { tx: workCount(raw.tx), staged: workCount(raw.staged), redis: workCount(raw.redis) };
+  return hasWork(work) ? work : null;
+}
+
+export function sumWork(list: Iterable<DetachedWork>): DetachedWork {
+  const out = { ...NO_WORK };
+  for (const w of list) { out.tx += w.tx; out.staged += w.staged; out.redis += w.redis; }
+  return out;
+}
+
+// -- tabs a detached window opens in the main window (1.0.8) ------------------
+
+/** "Open in the SQL editor" of a DDL tab, the view switch of a Redis tab: the new tab opens in the main window, not in the detached one. */
+export type OpenInMain =
+  | { kind: 'sql'; connectionId: string; database: string; text: string }
+  | { kind: 'redis'; connectionId: string; view: RedisTabView; db: number };
+
+export function cleanOpenInMain(raw: unknown): OpenInMain | null {
+  if (!isRecord(raw) || !isUuid(raw.connectionId)) return null;
+  if (raw.kind === 'sql' && typeof raw.database === 'string' && raw.database.length <= DB_LIMITS.database && typeof raw.text === 'string' && raw.text.length <= DB_LIMITS.sql) {
+    return { kind: 'sql', connectionId: raw.connectionId, database: raw.database, text: raw.text };
+  }
+  if (raw.kind === 'redis' && (REDIS_TAB_VIEWS as readonly unknown[]).includes(raw.view) && typeof raw.db === 'number' && Number.isInteger(raw.db) && raw.db >= 0 && raw.db <= 10_000) {
+    return { kind: 'redis', connectionId: raw.connectionId, view: raw.view as RedisTabView, db: raw.db };
+  }
+  return null;
 }

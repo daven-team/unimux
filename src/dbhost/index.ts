@@ -2,7 +2,8 @@
 // go straight to the renderer over a transferred MessagePort. Database connections and SSH tunnels never leave this process.
 import type { MessagePortMain } from 'electron';
 import type { DbPortMessage } from '../shared/db';
-import type { DbHostToMain, MainToDbHost } from '../shared/dbHostIpc';
+import type { DbHostPortControl, DbHostToMain, MainToDbHost } from '../shared/dbHostIpc';
+import { DbPortRoutes, MAIN_DB_WINDOW, pickPort } from '../shared/dbPortRoutes';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { Worker } from 'worker_threads';
@@ -12,7 +13,10 @@ import { DbHost } from './host';
 for (const key of Object.keys(process.env)) if (/^PG[A-Z_]+$/.test(key)) delete process.env[key];
 
 const parentPort = process.parentPort;
-let rendererPort: MessagePortMain | null = null;
+/** The DB port of each window (1.0.8): 'main', and detached windows by id. */
+const rendererPorts = new Map<string, MessagePortMain>();
+/** Which window gets which result (the window that asked; a moved tab's Pub/Sub follows it). */
+const routes = new DbPortRoutes();
 
 const toMain = (m: DbHostToMain) => parentPort.postMessage(m);
 const describeError = (error: unknown): string => (error instanceof Error ? error.stack ?? error.message : String(error)).slice(0, 4000);
@@ -31,19 +35,22 @@ const sqliteWorker = (interrupt: SharedArrayBuffer): Worker => {
 
 const host = new DbHost({
   toMain,
-  toRenderer: (m: DbPortMessage) => { try { rendererPort?.postMessage(m); } catch { /* the renderer is reloading */ } },
+  toRenderer: (m: DbPortMessage) => { try { pickPort(rendererPorts, routes.target(m))?.postMessage(m); } catch { /* the renderer is reloading */ } },
 }, {}, undefined, { spawn: sqliteWorker });
 
-function attachRenderer(port: MessagePortMain): void {
-  rendererPort?.close();
-  rendererPort = port;
-  port.on('close', () => { if (rendererPort === port) rendererPort = null; });
+function attachRenderer(port: MessagePortMain, window: string): void {
+  rendererPorts.get(window)?.close();
+  rendererPorts.set(window, port);
+  port.on('close', () => { if (rendererPorts.get(window) === port) rendererPorts.delete(window); });
   port.start();
 }
 
 // Never log the messages themselves: dbOpen and sshConnect carry secrets.
 parentPort.on('message', (e: { data: unknown; ports: MessagePortMain[] }) => {
-  const m = e.data as MainToDbHost | { t: 'port' };
-  if (m.t === 'port') { if (e.ports[0]) attachRenderer(e.ports[0]); return; }
+  const m = e.data as MainToDbHost | DbHostPortControl;
+  if (m.t === 'port') { if (e.ports[0]) attachRenderer(e.ports[0], typeof m.window === 'string' && m.window ? m.window : MAIN_DB_WINDOW); return; }
+  if (m.t === 'dbRoute') { if (Array.isArray(m.sessions)) routes.moveSessions(m.sessions.filter((x) => typeof x === 'string'), m.window); return; }
+  if (m.t === 'dbOp') routes.noteOp(m.id, m.op, m.window);
+  else if (m.t === 'dbClose') routes.forgetSession(m.id);
   void host.handle(m).catch((error) => logToMain('error', `db host message failed: ${describeError(error)}`));
 });

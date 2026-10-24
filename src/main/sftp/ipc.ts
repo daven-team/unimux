@@ -8,7 +8,7 @@ import {
 import { SSH_LIMITS, type SshPromptAnswer } from '../../shared/ssh';
 import type { SftpOp } from '../../shared/sftpHostIpc';
 import { cleanStamp, validEditorSave } from '../../shared/editorSource';
-import type { IpcGuard } from '../ipcGuard';
+import type { IpcGuard, IpcSenderEvent } from '../ipcGuard';
 import { validLocalPath } from '../localFiles';
 import type { SftpService } from './service';
 
@@ -111,7 +111,7 @@ export function createSftpHandlers(service: SftpService) {
     writeFile: (id: unknown, path: unknown, save: unknown) => (remotePath.safeParse(path).success && validEditorSave(save)
       ? run(id, { op: 'writeFile', path: path as string, save: { text: save.text, baseline: save.baseline, encoding: save.encoding, expected: cleanStamp(save.expected), ...(save.allowOwnerChange ? { allowOwnerChange: true } : {}) } })
       : INVALID),
-    pinHosts: (hostIds: unknown) => { const h = z.array(uuid).max(200).safeParse(hostIds); if (h.success) service.pinHosts(h.data); },
+    pinHosts: (hostIds: unknown, window?: string) => { const h = z.array(uuid).max(200).safeParse(hostIds); if (h.success) service.pinHosts(h.data, window); },
     viewOpened: (shown: unknown) => service.viewOpened(sessionId.safeParse(shown).success ? shown as string : null),
     viewClosed: () => service.viewClosed(),
   };
@@ -119,7 +119,8 @@ export function createSftpHandlers(service: SftpService) {
 
 export type SftpHandlers = ReturnType<typeof createSftpHandlers>;
 
-export function registerSftpIpc(guard: IpcGuard, h: SftpHandlers): void {
+/** `windowOf` (1.0.8): which window sent a message ('main' or a detached window's id). */
+export function registerSftpIpc(guard: IpcGuard, h: SftpHandlers, windowOf: (e: IpcSenderEvent) => string = () => 'main'): void {
   const no = () => ({ ok: false });
   const invalid = () => INVALID;
   guard.guardedHandle('sftp:connect', (_e, hostId: unknown, initialPath: unknown, opts: unknown) => h.connect(hostId, initialPath, opts), () => ({ ok: false, error: 'unknown' }));
@@ -144,7 +145,8 @@ export function registerSftpIpc(guard: IpcGuard, h: SftpHandlers): void {
   guard.guardedHandle('sftp:statFile', (_e, id: unknown, path: unknown) => h.statFile(id, path), invalid);
   guard.guardedHandle('sftp:readFile', (_e, id: unknown, path: unknown) => h.readFile(id, path), invalid);
   guard.guardedHandle('sftp:writeFile', (_e, id: unknown, path: unknown, save: unknown) => h.writeFile(id, path, save), invalid);
-  guard.guardedOn('sftp:pinHosts', (_e, hostIds: unknown) => h.pinHosts(hostIds));
-  guard.guardedOn('sftp:viewOpened', (_e, shown: unknown) => h.viewOpened(shown));
-  guard.guardedOn('sftp:viewClosed', () => h.viewClosed());
+  guard.guardedOn('sftp:pinHosts', (e, hostIds: unknown) => h.pinHosts(hostIds, windowOf(e)));
+  // The SFTP view lives in the main window only: a detached window never opens or closes it.
+  guard.guardedOn('sftp:viewOpened', (e, shown: unknown) => { if (windowOf(e) === 'main') h.viewOpened(shown); });
+  guard.guardedOn('sftp:viewClosed', (e) => { if (windowOf(e) === 'main') h.viewClosed(); });
 }
