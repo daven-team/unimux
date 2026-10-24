@@ -34,19 +34,21 @@ const sections = ["Ogólne", "Terminal", "Powiadomienia i dźwięki", "Agenci", 
 /**
  * Hides, inside the rendered sections, what does not match the search: the rows of a settings card, then the groups and sections
  * left without a row. A hit in a section or group title keeps all of it. Marks with data-search-hidden (display: none in CSS),
- * so React's own markup stays as it is; returns whether anything is left.
+ * so React's own markup stays as it is; returns how many rows each section keeps (the navigation shows the counts).
  */
-function applySearch(root: HTMLElement, query: string): boolean {
+function applySearch(root: HTMLElement, query: string): number[] {
   for (const el of root.querySelectorAll('[data-search-hidden]')) el.removeAttribute('data-search-hidden');
   const hide = (el: Element) => el.setAttribute('data-search-hidden', '');
   const hit = (el: Element | null | undefined) => !!el && settingsSearchMatches(el.textContent ?? '', query);
-  let any = false;
+  const counts: number[] = [];
   for (const section of root.querySelectorAll<HTMLElement>('.settings-section')) {
     const sectionHit = hit(section.querySelector(':scope > h2'));
     let sectionAny = false;
+    let shown = 0;
     // The shortcuts list filters itself (ShortcutsSettings gets the query): it counts when it still shows a row.
     for (const self of section.querySelectorAll('[data-search-self]')) {
-      if (sectionHit || self.querySelector('.shortcut-row')) sectionAny = true;
+      const rows = self.querySelectorAll('.shortcut-row').length;
+      if (sectionHit || rows) { sectionAny = true; shown += rows; }
       else hide(self.closest('.settings-group') ?? self);
     }
     for (const group of section.querySelectorAll<HTMLElement>('.settings-group')) {
@@ -54,17 +56,18 @@ function applySearch(root: HTMLElement, query: string): boolean {
       const groupHit = sectionHit || hit(group.querySelector(':scope > .settings-group-title')) || hit(group.querySelector(':scope > .settings-group-desc'));
       const rows = Array.from(group.querySelectorAll(':scope > .settings-card > *'));
       let groupAny = groupHit && !rows.length;
+      if (groupAny) shown += 1;
       for (const row of rows) {
-        if (groupHit || hit(row)) groupAny = true;
+        if (groupHit || hit(row)) { groupAny = true; shown += 1; }
         else hide(row);
       }
       if (groupAny) sectionAny = true;
       else hide(group);
     }
     if (!sectionAny) hide(section);
-    any ||= sectionAny;
+    counts.push(sectionAny ? Math.max(1, shown) : 0);
   }
-  return any;
+  return counts;
 }
 
 export function SettingsPage() {
@@ -74,7 +77,9 @@ export function SettingsPage() {
   const profiles = useStore((st) => st.s.profiles);
   const [section, setSection] = useState(0);
   const [query, setQuery] = useState('');
-  const [noMatch, setNoMatch] = useState(false);
+  // While searching: how many rows each section keeps (the navigation's badges); empty when not searching.
+  const [hits, setHits] = useState<number[]>([]);
+  const noMatch = hits.length > 0 && hits.every((n) => n === 0);
   const settingsId = useId();
   const contentRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -90,8 +95,11 @@ export function SettingsPage() {
   useLayoutEffect(() => {
     const root = contentRef.current;
     if (!root) return;
-    if (!searching) { setNoMatch(false); return; }
-    const run = () => setNoMatch(!applySearch(root, query));
+    if (!searching) { setHits([]); return; }
+    const run = () => {
+      const next = applySearch(root, query);
+      setHits((prev) => (prev.length === next.length && prev.every((n, i) => n === next[i]) ? prev : next));
+    };
     run();
     let frame = 0;
     const observer = new MutationObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(run); });
@@ -218,7 +226,14 @@ export function SettingsPage() {
         {sections.map((label, index) => <button key={label} type="button" role="tab"
           id={`${settingsId}-section-${index}`} aria-controls={`${settingsId}-content`} aria-selected={!searching && section === index}
           tabIndex={section === index ? 0 : -1} ref={(element) => { sectionRefs.current[index] = element; }}
-          className={!searching && section === index ? 'on' : ''} onClick={() => selectSection(index)}
+          className={!searching && section === index ? 'on' : searching && !hits[index] ? 'no-hits' : ''}
+          title={searching && hits[index] ? tr('Znalezione ustawienia: {count}', { count: hits[index] }) : undefined}
+          onClick={() => {
+            // While searching, a section with hits scrolls to its results; any other click opens the section.
+            const found = searching && hits[index] ? contentRef.current?.querySelectorAll<HTMLElement>('.settings-section')[index] : undefined;
+            if (found) found.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            else selectSection(index);
+          }}
           onKeyDown={(event) => {
             const next = event.key === 'ArrowDown' ? (index + 1) % sections.length
               : event.key === 'ArrowUp' ? (index + sections.length - 1) % sections.length
@@ -227,7 +242,7 @@ export function SettingsPage() {
             event.preventDefault();
             selectSection(next);
             sectionRefs.current[next]?.focus();
-          }}>{tr(label)}</button>)}
+          }}><span className="settings-nav-label">{tr(label)}</span>{searching && hits[index] > 0 && <span className="settings-nav-count" aria-hidden="true">{hits[index]}</span>}</button>)}
       </div>
     </nav>
     <div className="settings-content" ref={contentRef} role="tabpanel" id={`${settingsId}-content`}

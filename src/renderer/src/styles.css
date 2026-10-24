@@ -808,7 +808,11 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid var(--focus-ri
 .settings-nav { width: 180px; flex: none; padding: 0; border: 0; overflow-y: auto; }
 .settings-nav-title { display: flex; align-items: center; gap: 7px; padding: 0 9px 16px; color: var(--text); font-weight: 600; font-size: 12px; }
 .settings-nav-title svg { width: 14px; height: 14px; color: var(--muted); }
-.settings-nav button { display: block; width: 100%; margin: 2px 0; padding: 7px 9px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; font-size: 12px; cursor: pointer; }
+.settings-nav button { display: flex; align-items: center; gap: 6px; width: 100%; margin: 2px 0; padding: 7px 9px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; font-size: 12px; cursor: pointer; }
+/* 1.0.7: while searching, each section shows how many settings it found; a section without any fades. */
+.settings-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-nav-count { flex: none; min-width: 18px; height: 16px; padding: 0 5px; border-radius: 8px; background: color-mix(in srgb, var(--btn-primary-bg) 38%, #1c1c1c); color: #ececec; font-size: 10.5px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.settings-nav button.no-hits { color: var(--muted); opacity: .6; }
 /* 1.0.7: the search box of Settings, above the sections; while it has text the page shows every matching row of every section. */
 .settings-search { display: flex; align-items: center; gap: var(--space-3); height: 28px; margin: 0 0 var(--space-5); padding: 0 var(--space-4); border: 1px solid #ffffff0d; border-radius: var(--radius-md); background: #141414; color: var(--muted); cursor: text; }
 .settings-search:focus-within { border-color: #2b5a99; }
