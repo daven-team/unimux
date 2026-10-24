@@ -15,7 +15,7 @@ export function SshBarSettings() {
   return (
     <SettingsGroup title={tr('Pasek stanu')}>
       <SettingRow title={tr('Pasek stanu pod terminalami SSH')} htmlFor="settings-ssh-bar"
-        hint={tr('Pod terminalem połączonej komórki SSH: system i nazwa hosta, procesor, pamięć, sieć, zalogowani użytkownicy i zajętość dysku. Dane są odczytywane co 3 sekundy tym samym połączeniem SSH (krótki skrypt sh, bez ponownego logowania i bez wpisów w historii powłoki), tylko gdy komórka jest widoczna. Prawy przycisk myszy na pasku ukrywa go lub wybrane elementy.')}>
+        hint={tr('Pod terminalem połączonej komórki SSH: system i nazwa hosta, procesor, pamięć, sieć, czas działania, zalogowani użytkownicy i zajętość dysku. Dane są odczytywane co 3 sekundy tym samym połączeniem SSH (krótki skrypt sh, bez ponownego logowania i bez wpisów w historii powłoki), tylko gdy komórka jest widoczna. Prawy przycisk myszy na pasku ukrywa go lub wybrane elementy.')}>
         <input id="settings-ssh-bar" className="setting-switch" type="checkbox" role="switch" checked={enabled}
           onChange={(e) => update((st) => updateSettings(st, { sshStatusBar: e.target.checked }))} />
       </SettingRow>

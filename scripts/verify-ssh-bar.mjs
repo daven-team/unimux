@@ -2,6 +2,9 @@
 // Real-app check of the 1.0.7 SSH status bar against scripts/ssh-test-server.mjs --bar debian (canned /proc answers) and
 // --bar windows (a server without sh): the bar fills in, the CPU, user and disk cards, the right-click menu, no runs while
 // the grid is hidden, hiding it in one cell and showing it again from Settings, narrow cells, and the back-off.
+// 1.0.8: the uptime item, the user item ("root+2", the cell's own session last in its card), and the layout at cells of
+// 1600/1100/800/600/450/350 px: one row from the left with even gaps, short forms before dropped items, no item hidden while
+// a roomier layout would fit, and back to everything when the cell grows again (screenshots ssh-bar-width-<px>.png).
 // Optional: SSH_BAR_REAL='[{"label":"alpine","port":2222,"user":"root","password":"...","keys":["<base64 host key blob>"]}]'
 // checks real servers on 127.0.0.1 too (throwaway Linux containers): the bar fills in from their /proc, the cards, the cadence.
 // Scratch data dir and home only (ssh-ui-lib.mjs); screenshots go to D:\Projekty\_shots\ssh-bar-*.png.
@@ -15,6 +18,39 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
 const CALLS = `(() => { const t = window.__mc.terminals; if (!t.__barCalls) { t.__barCalls = 0; const run = t.sshStats.bind(t); t.sshStats = (...a) => { t.__barCalls++; return run(...a); }; } return t.__barCalls; })()`;
 const BAR = `document.querySelector('.ssh-bar')`;
 const TEXT = (cls) => `(document.querySelector('.ssh-bar ${cls}')?.textContent ?? null)`;
+/**
+ * The bar's layout as laid out: the items shown with their text, the gaps between them, the free room at the end, and what
+ * would still have fitted in that free room (from the hidden measuring copy): a dropped item, the sparkline, the full forms.
+ */
+const LAYOUT = `(() => {
+  const bar = document.querySelector('.ssh-bar'); const cs = getComputedStyle(bar); const b = bar.getBoundingClientRect();
+  const shown = [...bar.querySelectorAll(':scope > [data-item]')]; const r = shown.map((e) => e.getBoundingClientRect());
+  const inner = { left: b.left + bar.clientLeft + parseFloat(cs.paddingLeft), right: b.left + bar.clientLeft + bar.clientWidth - parseFloat(cs.paddingRight) };
+  const widths = {};
+  for (const el of bar.querySelectorAll('[data-measure]')) { const [i, f] = el.dataset.measure.split(':'); (widths[i] ??= {})[f] = Math.round(el.getBoundingClientRect().width * 10) / 10; }
+  const present = Object.keys(widths); const gap = parseFloat(cs.columnGap);
+  const items = shown.map((e) => e.dataset.item);
+  const free = r.length ? inner.right - r[r.length - 1].right : 0;
+  const spark = !!bar.querySelector(':scope > [data-item=cpu] .ssh-bar-spark');
+  const compact = !!bar.querySelector(':scope > [data-item=mem]') && !/GB|MB/.test(bar.querySelector(':scope > [data-item=mem]').textContent);
+  const dropped = present.filter((i) => !items.includes(i));
+  // With the 8 px a layout needs to spare before it grows back.
+  const fits = (px) => px <= free - 8;
+  const missed = [
+    ...dropped.filter((i) => fits(gap + (i === 'cpu' ? widths[i].bare : widths[i].compact))).map((i) => 'item ' + i),
+    ...(!dropped.length && !spark && widths.cpu && fits(widths.cpu.compact - widths.cpu.bare) ? ['sparkline'] : []),
+    ...(!dropped.length && spark && compact && fits(present.reduce((n, i) => n + Math.min(i === 'host' ? 90 : Infinity, widths[i].full) - Math.min(i === 'host' ? 90 : Infinity, widths[i].compact), 0)) ? ['full forms'] : []),
+  ];
+  return {
+    bar: Math.round(b.width), room: Math.round((inner.right - inner.left) * 10) / 10, stage: Number(bar.dataset.stage), widths,
+    texts: shown.map((e) => e.dataset.item + ':' + e.textContent), compact, spark,
+    gaps: r.slice(1).map((x, i) => Math.round((x.left - r[i].right) * 10) / 10),
+    start: r.length ? Math.round((r[0].left - inner.left) * 10) / 10 : 0,
+    free: Math.round(free * 10) / 10, missed,
+    hostCut: (() => { const t = bar.querySelector(':scope > [data-item=host] .ssh-bar-text'); return t ? t.scrollWidth > t.clientWidth : false; })(),
+    overflow: bar.scrollWidth - bar.clientWidth,
+  };
+})()`;
 
 /** A screenshot of the area around the bar (and an open card or menu). */
 async function shotBar(app, name, extra = 0) {
@@ -76,11 +112,17 @@ await run('debian', ['--bar', 'debian'], async (app) => {
   await app.until(`document.querySelector('.ssh-bar-spark polyline') !== null`, 'sparkline', 15000);
   check((await app.evaluate(TEXT('.ssh-bar-host'))) === 'srv36', `host name (${await app.evaluate(TEXT('.ssh-bar-host'))})`);
   check(await app.evaluate(`!!document.querySelector('.ssh-bar-host .ssh-bar-logo path')`), 'Debian logo');
-  check((await app.evaluate(TEXT('.ssh-bar-mem'))) === '0,23 GB / 0,96 GB', `memory (${await app.evaluate(TEXT('.ssh-bar-mem'))})`);
+  check((await app.evaluate(TEXT('.ssh-bar-mem'))) === '0,23/0,96 GB', `memory (${await app.evaluate(TEXT('.ssh-bar-mem'))})`);
   check(/^\/: 92%$/.test(await app.evaluate(TEXT('.ssh-bar-disk'))), `root disk (${await app.evaluate(TEXT('.ssh-bar-disk'))})`);
   check(await app.evaluate(`document.querySelector('.ssh-bar-disk').classList.contains('full')`), 'disk over 90 % is red');
-  check(/^root3$/.test(await app.evaluate(TEXT('.ssh-bar-user'))), `user with the session count (${await app.evaluate(TEXT('.ssh-bar-user'))})`);
+  check(/^root\+2$/.test(await app.evaluate(TEXT('.ssh-bar-user'))), `user with the other sessions (${await app.evaluate(TEXT('.ssh-bar-user'))})`);
+  check((await app.evaluate(TEXT('.ssh-bar-uptime'))) === '14 dni', `uptime (${await app.evaluate(TEXT('.ssh-bar-uptime'))})`);
+  const upTitle = await app.evaluate(`document.querySelector('.ssh-bar-uptime').getAttribute('title') ?? document.querySelector('.ssh-bar-uptime').getAttribute('data-mc-title')`);
+  check(upTitle === 'Czas działania serwera: 14 d 6 h', `uptime tooltip (${JSON.stringify(upTitle)})`);
   await app.until(`${TEXT('.ssh-bar-net')} !== null`, 'network rate', 10000);
+  check(await app.evaluate(`document.querySelectorAll('.ssh-bar > .ssh-bar-net .ssh-bar-dir').length === 2`), 'network up and down apart');
+  const order = await app.evaluate(`[...document.querySelectorAll('.ssh-bar > [data-item]')].map((e) => e.dataset.item)`);
+  check(JSON.stringify(order) === JSON.stringify(['host', 'cpu', 'mem', 'net', 'uptime', 'user', 'disk']), `items left to right (${JSON.stringify(order)})`);
   const body = await app.evaluate(`(() => { const c = document.querySelector('.cell-body').getBoundingClientRect(); const b = ${BAR}.getBoundingClientRect(); return { body: c.bottom, bar: b.top, h: b.height }; })()`);
   check(Math.abs(body.body - body.bar) <= 1 && body.h <= 24, `bar under the terminal body (${JSON.stringify(body)})`);
   await sleep(4000);
@@ -93,7 +135,8 @@ await run('debian', ['--bar', 'debian'], async (app) => {
   await away(app);
   await hover(app, '.ssh-bar-user');
   const who = await app.evaluate(`[...document.querySelectorAll('.ssh-bar-card tbody tr')].map((r) => r.textContent)`);
-  check(who.length === 3 && who[0].includes('(ty)') && !who[1].includes('(ty)'), `who card marks you (${JSON.stringify(who)})`);
+  check(who.length === 3 && who[2].includes('(ty)') && !who[0].includes('(ty)') && !who[1].includes('(ty)') && who[2].includes('pts/0'),
+    `who card lists the others first and you last (${JSON.stringify(who)})`);
   await shotBar(app, 'ssh-bar-who.png');
   await away(app);
   await hover(app, '.ssh-bar-disk');
@@ -127,6 +170,13 @@ await run('debian', ['--bar', 'debian'], async (app) => {
   check(await app.evaluate(`document.querySelector('#settings-ssh-bar').checked`), 'bar on by default');
   await app.evaluate(`document.querySelector('#settings-ssh-bar').scrollIntoView({ block: 'center' }), true`);
   await app.screenshot('ssh-bar-settings.png');
+  // The uptime has its own switch among the items.
+  const UPTIME_BOX = `[...document.querySelectorAll('.ssh-bar-setting-items label')].find((l) => l.textContent === 'Czas działania')?.querySelector('input')`;
+  check(await app.evaluate(`${UPTIME_BOX}?.checked === true`), 'uptime switch in Settings, on');
+  await app.evaluate(`${UPTIME_BOX}.click(), true`);
+  await app.until(`window.__mc.useStore.getState().s.settings.sshStatusBarItems?.uptime === false`, 'uptime switched off');
+  await app.evaluate(`${UPTIME_BOX}.click(), true`);
+  await app.until(`!window.__mc.useStore.getState().s.settings.sshStatusBarItems?.uptime`, 'uptime switched on again');
   await app.evaluate(`window.__mc.useStore.getState().setUi({ settingsTabOpen: false, settingsActive: false }), true`);
   await app.until(`!document.querySelector('.settings-tab')`, 'settings tab closed');
   await app.until(`(${CALLS}) > ${h1}`, 'runs again once visible', 5000);
@@ -148,16 +198,37 @@ await run('debian', ['--bar', 'debian'], async (app) => {
   await app.click('.menu button', 'Sieć');
   await app.until(`!!document.querySelector('.ssh-bar-net')`, 'network item on');
 
-  // Narrow cells drop items by priority.
-  for (const width of [1100, 900, 780, 640, 520]) {
-    await app.cdp('Emulation.setDeviceMetricsOverride', { width, height: 700, deviceScaleFactor: 1, mobile: false });
-    await sleep(400);
-    const shown = await app.evaluate(`[...document.querySelectorAll('.ssh-bar > .ssh-bar-item')].filter((e) => getComputedStyle(e).display !== 'none').map((e) => e.className.split(' ')[1].replace('ssh-bar-', ''))`);
-    const overflow = await app.evaluate(`(() => { const b = ${BAR}; return b.scrollWidth - b.clientWidth; })()`);
-    console.log(`     ${width}px: bar ${await app.evaluate(`Math.round(${BAR}.getBoundingClientRect().width)`)}px, ${JSON.stringify(shown)}, overflow ${overflow}`);
-    check(overflow <= 0, `no clipped item at a ${width}px window`);
-    await shotBar(app, `ssh-bar-narrow-${width}.png`, -120);
+  // 1.0.8: cells of several widths (the window sized so the cell gets it): one row from the left with even gaps, short forms
+  // before dropped items, and no item shortened or dropped while the roomier layout would fit.
+  const offset = await app.evaluate(`window.innerWidth - document.querySelector('.ssh-bar').closest('.cell').getBoundingClientRect().width`);
+  const stageWidth = await app.evaluate(LAYOUT);
+  console.log(`     window minus cell: ${Math.round(offset)}px; widths ${JSON.stringify(stageWidth.widths)}`);
+  const layoutChecks = (width, l) => {
+    check(l.overflow <= 0, `${width}px: no clipped item (${l.overflow})`);
+    check(l.start <= 1, `${width}px: the row starts at the left (${l.start})`);
+    check(l.gaps.every((g) => Math.abs(g - 12) <= 1), `${width}px: even gaps (${JSON.stringify(l.gaps)})`);
+    check(!l.missed.length, `${width}px: nothing shortened or dropped while it would fit (${JSON.stringify(l.missed)}, free ${l.free})`);
+    check(l.free >= -1, `${width}px: everything within the bar (${l.free})`);
+  };
+  for (const width of [1600, 1100, 800, 600, 520, 450, 400, 350, 300, 250, 1600]) {
+    await app.cdp('Emulation.setDeviceMetricsOverride', { width: Math.round(width + offset), height: 700, deviceScaleFactor: 1, mobile: false });
+    await sleep(500);
+    const l = await app.evaluate(LAYOUT);
+    console.log(`     ${width}px cell (bar ${l.bar}px, room ${l.room}): stage ${l.stage}${l.compact ? ' short' : ''}${l.spark ? ' spark' : ''} ${JSON.stringify(l.texts)}, gaps ${JSON.stringify(l.gaps)}, free ${l.free}${l.hostCut ? ', host cut' : ''}`);
+    layoutChecks(width, l);
+    if (width >= 600) check(l.stage === 0 && l.texts.length === 7, `${width}px: every item in full`);
+    check(l.texts.some((t) => t.startsWith('host:')) && (width < 300 || l.texts.some((t) => t.startsWith('cpu:'))), `${width}px: host and CPU kept`);
+    await shotBar(app, `ssh-bar-width-${width}.png`, -120);
   }
+  // A cell dragged narrower and wider pixel by pixel: the layout follows without gaps or clipping either way.
+  let sweepBad = 0;
+  for (const width of [...Array.from({ length: 41 }, (_, i) => 640 - i * 10), ...Array.from({ length: 41 }, (_, i) => 240 + i * 10)]) {
+    await app.cdp('Emulation.setDeviceMetricsOverride', { width: Math.round(width + offset), height: 700, deviceScaleFactor: 1, mobile: false });
+    await sleep(60);
+    const l = await app.evaluate(LAYOUT);
+    if (l.overflow > 0 || l.free < -1 || l.missed.length || !l.gaps.every((g) => Math.abs(g - 12) <= 1)) { sweepBad++; console.log(`     sweep ${width}px: ${JSON.stringify(l)}`); }
+  }
+  check(sweepBad === 0, `dragging the cell from 640 to 240 px and back: always fitted (${sweepBad} bad)`);
   await app.cdp('Emulation.setDeviceMetricsOverride', { width: 1500, height: 800, deviceScaleFactor: 1, mobile: false });
   await sleep(400);
   Object.assign(p, await app.evaluate(`(() => { const r = document.querySelector('.ssh-bar-mem').getBoundingClientRect(); return { x: r.left + 10, y: r.top + 8 }; })()`));

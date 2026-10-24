@@ -24,11 +24,11 @@ export type SshStatsRun =
   | { ok: true; text: string; ms: number; bytes: number; partial: boolean }
   | { ok: false; reason: 'busy' | 'gone' | 'unsupported' | 'failed' };
 
-export type SshBarItem = 'host' | 'cpu' | 'mem' | 'disk' | 'net' | 'user';
-/** Left to right; a narrow cell drops them from the end of SSH_BAR_PRIORITY first. */
-export const SSH_BAR_ITEMS: readonly SshBarItem[] = ['host', 'cpu', 'mem', 'net', 'user', 'disk'];
-/** Most important first: a narrow cell keeps the start of this list. */
-export const SSH_BAR_PRIORITY: readonly SshBarItem[] = ['host', 'cpu', 'mem', 'disk', 'net', 'user'];
+export type SshBarItem = 'host' | 'cpu' | 'mem' | 'disk' | 'net' | 'uptime' | 'user';
+/** Left to right, like MobaXterm's bar (1.0.8: the machine's uptime between the network and the user). */
+export const SSH_BAR_ITEMS: readonly SshBarItem[] = ['host', 'cpu', 'mem', 'net', 'uptime', 'user', 'disk'];
+/** Most important first: a narrow cell keeps the start of this list (fitBar). */
+export const SSH_BAR_PRIORITY: readonly SshBarItem[] = ['host', 'cpu', 'mem', 'disk', 'uptime', 'net', 'user'];
 
 export type OsId = 'debian' | 'ubuntu' | 'mint' | 'centos' | 'rhel' | 'rocky' | 'alma' | 'fedora' | 'arch' | 'alpine' | 'suse' | 'linux' | 'freebsd' | 'macos' | 'unknown';
 
@@ -394,15 +394,27 @@ export function formatBytes(bytes: number, locale: string, unit?: number): strin
   return `${new Intl.NumberFormat(locale, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v)} ${UNITS[i]}`;
 }
 
-/** Memory as "used / total" in one unit, GB from half a GB of total on ("0,23 GB / 0,96 GB"). */
+/** Memory as "used/total" in one unit, GB from half a GB of total on ("0,23/0,96 GB"). */
 export function formatMemory(mem: { total: number; available: number }, locale: string): string {
   let unit = 0;
   while (unit < UNITS.length - 1 && mem.total >= 1024 ** (unit + 1) * 0.5) unit++;
-  return `${formatBytes(mem.total - mem.available, locale, unit)} / ${formatBytes(mem.total, locale, unit)}`;
+  return `${formatBytes(mem.total - mem.available, locale, unit).replace(/ \S+$/, '')}/${formatBytes(mem.total, locale, unit)}`;
 }
 
-/** A transfer rate ("0 B/s", "12,4 KB/s"). */
-export const formatRate = (bytesPerSecond: number, locale: string): string => `${formatBytes(Math.max(0, bytesPerSecond), locale)}/s`;
+/** The share of memory in use, 0 to 100. */
+export const memoryPercent = (mem: { total: number; available: number }): number => (mem.total > 0 ? ((mem.total - mem.available) / mem.total) * 100 : 0);
+
+/** A transfer rate ("0 B/s", "12,4 KB/s"); `compact`: one decimal at most, a one-letter unit, no "/s" ("8,8K", "312K"). */
+export function formatRate(bytesPerSecond: number, locale: string, compact = false): string {
+  const full = formatBytes(Math.max(0, bytesPerSecond), locale);
+  if (!compact) return `${full}/s`;
+  let i = 0;
+  const b = Math.max(0, bytesPerSecond);
+  while (i < UNITS.length - 1 && b >= 1024 ** (i + 1) * 0.995) i++;
+  const v = b / 1024 ** i;
+  const digits = i === 0 || v >= 10 ? 0 : 1;
+  return `${new Intl.NumberFormat(locale, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v)}${i === 0 ? 'B' : UNITS[i][0]}`;
+}
 
 /** An uptime as days, hours and minutes ("12 d 3 h", "3 h 5 min", "4 min"). */
 export function formatUptime(seconds: number): string {
@@ -412,6 +424,84 @@ export function formatUptime(seconds: number): string {
   if (d > 0) return `${d} d ${h} h`;
   if (h > 0) return `${h} h ${m} min`;
   return `${m} min`;
+}
+
+/**
+ * The machine's uptime for the bar, short and in the app's language: whole days from one day on ("297 dni", "1 day"),
+ * hours and minutes below ("5 h 12 min", "12 min"). `compact`: "297 d.", "5 h".
+ */
+export function formatUptimeShort(seconds: number, locale: string, compact = false): string {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return new Intl.NumberFormat(locale, { style: 'unit', unit: 'day', unitDisplay: compact ? 'narrow' : 'long' }).format(d);
+  if (h > 0) return compact ? `${h} h` : `${h} h ${m} min`;
+  return `${m} min`;
+}
+
+/**
+ * The logged-in sessions as the user card lists them: everyone else first, the cell's own session last. When no row is
+ * marked as the cell's own (no tty found), the first row of the same user stands for it.
+ */
+export function splitWho(who: WhoEntry[], user: string | undefined): { others: WhoEntry[]; self: WhoEntry | undefined } {
+  let at = who.findIndex((w) => w.self);
+  if (at < 0 && user) at = who.findIndex((w) => w.user === user);
+  return { others: who.filter((_, i) => i !== at), self: at >= 0 ? { ...who[at], self: true } : undefined };
+}
+
+/**
+ * One way to lay the bar out: values in their full or short form ("0,23/0,96 GB" or "24%"), the CPU sparkline or not, and
+ * the items shown. `rank` orders them from the roomiest (0: everything in full) to the tightest.
+ */
+export interface BarStage { compact: boolean; spark: boolean; items: SshBarItem[]; rank: number }
+/** Measured widths of an item in px: its full and short forms, and (the CPU) the short form without the sparkline. */
+export interface BarItemWidths { full: number; compact: number; bare?: number }
+
+/** The width one item takes in a stage, the host name counted at most at `hostMin` (it shrinks with an ellipsis). */
+function itemWidth(item: SshBarItem, w: BarItemWidths | undefined, compact: boolean, spark: boolean, hostMin: number): number {
+  if (!w) return 0;
+  const px = compact ? (item === 'cpu' && !spark ? w.bare ?? w.compact : w.compact) : w.full;
+  return item === 'host' ? Math.min(px, hostMin) : px;
+}
+
+/** The width a stage takes: its items with the gaps between them. */
+export function barStageWidth(stage: Omit<BarStage, 'rank'>, widths: Partial<Record<SshBarItem, BarItemWidths>>, gap: number, hostMin: number): number {
+  const total = stage.items.reduce((n, item) => n + itemWidth(item, widths[item], stage.compact, stage.spark, hostMin), 0);
+  return total + gap * Math.max(0, stage.items.length - 1);
+}
+
+/** The roomiest stage that fits `room` (see fitBar). */
+function fitIn(present: readonly SshBarItem[], widths: Partial<Record<SshBarItem, BarItemWidths>>, room: number, gap: number, hostMin: number): BarStage {
+  const whole: Array<[boolean, boolean]> = present.includes('cpu') ? [[false, true], [true, true], [true, false]] : [[false, true], [true, true]];
+  for (let i = 0; i < whole.length; i++) {
+    const stage = { compact: whole[i][0], spark: whole[i][1], items: [...present], rank: i };
+    if (barStageWidth(stage, widths, gap, hostMin) <= room) return stage;
+  }
+  // Items go by SSH_BAR_PRIORITY, but a less important one that still fits stays: no free room while something is hidden.
+  // The most important item present always stays (the host name shrinks).
+  const keep = new Set<SshBarItem>();
+  let used = 0;
+  for (const item of SSH_BAR_PRIORITY) {
+    if (!present.includes(item)) continue;
+    const need = itemWidth(item, widths[item], true, false, hostMin) + (keep.size ? gap : 0);
+    if (!keep.size || used + need <= room) { keep.add(item); used += need; }
+  }
+  const items = present.filter((item) => keep.has(item));
+  return { compact: true, spark: false, items, rank: 3 + present.length - items.length };
+}
+
+/**
+ * The layout of the bar for `room` px: everything in full while it fits; then short forms; then no sparkline; then items
+ * dropped by SSH_BAR_PRIORITY. Coming back to a roomier stage than `current` needs `slack` px to spare, so a rate that grows
+ * and shrinks by a digit does not make items blink.
+ */
+export function fitBar(present: readonly SshBarItem[], widths: Partial<Record<SshBarItem, BarItemWidths>>, room: number, gap: number, hostMin: number, current?: BarStage, slack = 8): BarStage {
+  const best = fitIn(present, widths, room, gap, hostMin);
+  if (!current || best.rank >= current.rank) return best;
+  const grown = fitIn(present, widths, room - slack, gap, hostMin);
+  if (grown.rank < current.rank) return grown;
+  const still = current.items.every((item) => present.includes(item)) && barStageWidth(current, widths, gap, hostMin) <= room;
+  return still ? current : best;
 }
 
 /** The SVG polyline of the sparkline in a `width` x `height` box (0 % at the bottom); empty below two samples. */
