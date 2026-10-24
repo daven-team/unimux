@@ -16,7 +16,8 @@ import { captureSelectionToNote, closeNoteInPanel, createNote, importNoteFiles, 
 const setQ = (next: string | ((q: string) => string)) => setNotesQuery(typeof next === 'function' ? next(useNotesUi.getState().query) : next);
 import { noteMenuItems, noteTitle, togglePin } from '../noteMenu';
 import { SNIPPET_MIME } from './CellView';
-import { IChevron, IPlus, IX } from './icons';
+import { ICheck, IChevron, IPlus, IX } from './icons';
+import { IEyeOff, IWidth } from './menuIcons';
 import { ICalendar, ICapture, IChecklist, IImport, INoteBlank, IPeople, IPin, ISort } from './notesIcons';
 import { dropEdge, scrollDragList } from './listDrag';
 import { openMenu, openMenuAt, type MenuItem } from './ContextMenu';
@@ -96,19 +97,19 @@ export function NotesPanel({ resize }: { resize: PanelResizeProps }) {
   const hide = () => update((st) => ({ ...st, notesOpen: false }));
   const newItems = (): MenuItem[] => [
     { header: tr('Nowa notatka') },
-    { label: tr('Pusta notatka'), onClick: () => createNote() },
-    { label: tr('Notatka dzienna'), onClick: () => createNote('daily') },
-    { label: tr('Spotkanie'), onClick: () => createNote('meeting') },
-    { label: tr('Lista zadań'), onClick: () => createNote('checklist') },
-    ...(projectId ? [{ label: tr('Nowa notatka tylko w tym projekcie'), onClick: () => createNote(null, projectId) }] : []),
+    { label: tr('Pusta notatka'), icon: <INoteBlank />, onClick: () => createNote() },
+    { label: tr('Notatka dzienna'), icon: <ICalendar />, onClick: () => createNote('daily') },
+    { label: tr('Spotkanie'), icon: <IPeople />, onClick: () => createNote('meeting') },
+    { label: tr('Lista zadań'), icon: <IChecklist size={14} />, onClick: () => createNote('checklist') },
+    ...(projectId ? [{ label: tr('Nowa notatka tylko w tym projekcie'), icon: <IPlus />, onClick: () => createNote(null, projectId) }] : []),
     { sep: true },
-    { label: tr('Z zaznaczonego tekstu'), hint: shortcutText('notes.capture') || undefined, onClick: captureSelectionToNote },
-    { label: tr('Importuj pliki .md…'), onClick: pickNoteFiles },
+    { label: tr('Z zaznaczonego tekstu'), icon: <ICapture />, hint: shortcutText('notes.capture') || undefined, onClick: captureSelectionToNote },
+    { label: tr('Importuj pliki .md…'), icon: <IImport />, onClick: pickNoteFiles },
   ];
   const sortItems = (): MenuItem[] => [
     { header: tr('Kolejność') },
     ...([['manual', tr('Własna (przeciągnij)')], ['recent', tr('Ostatnio zmienione')], ['name', tr('Nazwa')]] as const)
-      .map(([id, label]) => ({ label, hint: sort === id ? '✓' : undefined, onClick: () => setSort(id) })),
+      .map(([id, label]) => ({ label, icon: sort === id ? <ICheck /> : undefined, onClick: () => setSort(id) })),
   ];
   const backgroundMenu = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button, input, textarea, .note-card, .note-editor')) return;
@@ -118,8 +119,8 @@ export function NotesPanel({ resize }: { resize: PanelResizeProps }) {
       { sep: true },
       ...sortItems(),
       { sep: true },
-      { label: tr('Przywróć szerokość panelu'), onClick: () => resize.onFinish(PANEL_LIMITS.snippets.default) },
-      { label: tr('Ukryj panel notatek'), hint: shortcutText('notes.toggle') || undefined, onClick: hide },
+      { label: tr('Przywróć szerokość panelu'), icon: <IWidth />, onClick: () => resize.onFinish(PANEL_LIMITS.snippets.default) },
+      { label: tr('Ukryj panel notatek'), icon: <IEyeOff />, hint: shortcutText('notes.toggle') || undefined, onClick: hide },
     ]);
   };
   const cardMenu = (e: React.MouseEvent, n: Note) => {

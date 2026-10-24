@@ -11,7 +11,7 @@ import { newRequestId } from '../../../shared/gitUi';
 import { useI18n } from '../i18n';
 import { toast } from '../store';
 import type { MenuItem } from './ContextMenu';
-import { IX } from './icons';
+import { IUpload, IX } from './icons';
 import { RefreshIcon } from './Spinner';
 import './gitPublish.css';
 
@@ -72,8 +72,8 @@ export function useGitPublish({ projectId, folder, branch, opts, onChanged }: Op
     readStored();
   };
   const menu = (state: MenuState): MenuItem[] => [
-    ...(state.hasRemote === false ? [{ label: tr('Opublikuj na GitHubie'), hint: state.initial ? tr('najpierw commit') : undefined, disabled: !state.idle || state.initial || !state.branch, onClick: open }] : []),
-    ...(stored !== null ? [{ label: tr('Wyloguj z GitHuba'), hint: stored || undefined, onClick: () => void signOut() }] : []),
+    ...(state.hasRemote === false ? [{ label: tr('Opublikuj na GitHubie'), icon: <IUpload />, hint: state.initial ? tr('najpierw commit') : undefined, disabled: !state.idle || state.initial || !state.branch, onClick: open }] : []),
+    ...(stored !== null ? [{ label: tr('Wyloguj z GitHuba'), icon: <IX />, hint: stored || undefined, onClick: () => void signOut() }] : []),
   ];
   const dialog = shown ? createPortal(
     <PublishDialog

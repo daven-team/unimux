@@ -5,6 +5,8 @@ import { setUi, toast } from '../store';
 import { focusFileEditor, openFile, treeOpen } from '../files';
 import { openBesideGrid } from '../splitView';
 import { openMenu } from './ContextMenu';
+import { IArrowLeft, ICollapseAll, IEdit, IExpandAll, IFile, IFolder, ILink, IPrompt, ISearch, ISplit, IView } from './icons';
+import { ICodeEditor, ICopy, IDuplicate, IPaste, IRefresh, IScissors, ITrash } from './menuIcons';
 import { FileIcon, FolderIcon, TreeChevron } from './FileIcon';
 import { RefreshIcon, useHoldBusy } from './Spinner';
 import { refreshGitBadges, useGitBadgeSync, useProjectBadges } from '../git/gitBadges';
@@ -430,29 +432,29 @@ export function ProjectExplorer({ project }: { project: Project }) {
         { header: multi ? shown.join(', ') + (more ? ` +${more}` : '') : entry.name },
         ...(multi ? [] : [
           folder
-            ? { label: expanded.has(entry.path) ? tr("Zwiń folder") : tr("Rozwiń folder"), onClick: () => toggleFolder(project.id, entry.path) }
-            : { label: tr("Podgląd pliku"), onClick: () => void openFile(project.id, entry.path, 'preview') },
-          ...(!folder ? [{ label: tr('Otwórz obok gridu'), onClick: () => { void openFile(project.id, entry.path, 'keep'); openBesideGrid(); } }] : []),
-          ...(!folder ? [{ label: tr("Otwórz w edytorze"), onClick: () => window.mc.openInEditor(fullPath) }] : []),
-          { label: tr("Pokaż w menedżerze plików"), onClick: () => window.mc.revealPath(fullPath) },
+            ? { label: expanded.has(entry.path) ? tr("Zwiń folder") : tr("Rozwiń folder"), icon: <IFolder />, onClick: () => toggleFolder(project.id, entry.path) }
+            : { label: tr("Podgląd pliku"), icon: <IView />, onClick: () => void openFile(project.id, entry.path, 'preview') },
+          ...(!folder ? [{ label: tr('Otwórz obok gridu'), icon: <ISplit />, onClick: () => { void openFile(project.id, entry.path, 'keep'); openBesideGrid(); } }] : []),
+          ...(!folder ? [{ label: tr("Otwórz w edytorze"), icon: <ICodeEditor />, onClick: () => window.mc.openInEditor(fullPath) }] : []),
+          { label: tr("Pokaż w menedżerze plików"), icon: <IFolder />, onClick: () => window.mc.revealPath(fullPath) },
           { sep: true as const },
-          { label: tr("Nowy plik") + '…', onClick: () => void createEntry(project.id, dir, 'file') },
-          { label: tr("Nowy folder") + '…', onClick: () => void createEntry(project.id, dir, 'directory') },
+          { label: tr("Nowy plik") + '…', icon: <IFile />, onClick: () => void createEntry(project.id, dir, 'file') },
+          { label: tr("Nowy folder") + '…', icon: <IFolder />, onClick: () => void createEntry(project.id, dir, 'directory') },
         ]),
         { sep: true },
-        ...(multi ? [] : [{ label: tr("Zmień nazwę"), hint: shortcutText('tree.rename') || undefined, onClick: () => { showRow(entry.path, false); startRename(entry.path); } }]),
-        { label: tr("Dodaj do rozmowy"), disabled: !focusedCellId(), onClick: () => addTreePathsToFocusedCell(project.id, targets) },
-        { label: tr("Duplikuj"), onClick: () => void duplicateEntries(project.id, targets) },
-        { label: tr("Wytnij"), hint: shortcutText('tree.cut') || undefined, onClick: () => copyToClipboard(project.id, targets, 'cut') },
-        { label: tr("Kopiuj"), hint: shortcutText('tree.copy') || undefined, onClick: () => copyToClipboard(project.id, targets, 'copy') },
-        { label: tr("Wklej"), hint: shortcutText('tree.paste') || undefined, disabled: !canPaste || multi, onClick: () => void pasteInto(project.id, dir) },
+        ...(multi ? [] : [{ label: tr("Zmień nazwę"), icon: <IEdit />, hint: shortcutText('tree.rename') || undefined, onClick: () => { showRow(entry.path, false); startRename(entry.path); } }]),
+        { label: tr("Dodaj do rozmowy"), icon: <IPrompt />, disabled: !focusedCellId(), onClick: () => addTreePathsToFocusedCell(project.id, targets) },
+        { label: tr("Duplikuj"), icon: <IDuplicate />, onClick: () => void duplicateEntries(project.id, targets) },
+        { label: tr("Wytnij"), icon: <IScissors />, hint: shortcutText('tree.cut') || undefined, onClick: () => copyToClipboard(project.id, targets, 'cut') },
+        { label: tr("Kopiuj"), icon: <ICopy />, hint: shortcutText('tree.copy') || undefined, onClick: () => copyToClipboard(project.id, targets, 'copy') },
+        { label: tr("Wklej"), icon: <IPaste />, hint: shortcutText('tree.paste') || undefined, disabled: !canPaste || multi, onClick: () => void pasteInto(project.id, dir) },
         ...(multi ? [] : [
           { sep: true as const },
-          { label: tr("Kopiuj ścieżkę"), onClick: () => window.mc.clipboardWrite(fullPath) },
-          { label: tr("Kopiuj ścieżkę względną"), onClick: () => window.mc.clipboardWrite(entry.path) },
+          { label: tr("Kopiuj ścieżkę"), icon: <ILink />, onClick: () => window.mc.clipboardWrite(fullPath) },
+          { label: tr("Kopiuj ścieżkę względną"), icon: <ILink />, onClick: () => window.mc.clipboardWrite(entry.path) },
         ]),
         { sep: true },
-        { label: tr("Przenieś do kosza"), danger: true, hint: shortcutText('tree.delete') || undefined, onClick: () => void trashEntries(project.id, targets) },
+        { label: tr("Przenieś do kosza"), icon: <ITrash />, danger: true, hint: shortcutText('tree.delete') || undefined, onClick: () => void trashEntries(project.id, targets) },
       ]);
     },
     dragStart: (e, entry) => {
@@ -534,30 +536,30 @@ export function ProjectExplorer({ project }: { project: Project }) {
     e.stopPropagation();
     openMenu(e.clientX, e.clientY, [
       { header: project.name },
-      { label: tr("Nowy plik") + '…', onClick: () => void createEntry(project.id, '', 'file') },
-      { label: tr("Nowy folder") + '…', onClick: () => void createEntry(project.id, '', 'directory') },
-      { label: tr("Wklej"), hint: shortcutText('tree.paste') || undefined, disabled: !clipboard || clipboard.projectId !== project.id, onClick: () => void pasteInto(project.id, '') },
+      { label: tr("Nowy plik") + '…', icon: <IFile />, onClick: () => void createEntry(project.id, '', 'file') },
+      { label: tr("Nowy folder") + '…', icon: <IFolder />, onClick: () => void createEntry(project.id, '', 'directory') },
+      { label: tr("Wklej"), icon: <IPaste />, hint: shortcutText('tree.paste') || undefined, disabled: !clipboard || clipboard.projectId !== project.id, onClick: () => void pasteInto(project.id, '') },
       { sep: true },
-      { label: tr("Odśwież pliki"), onClick: reload },
-      { label: tr("Znajdź i zamień w plikach…"), onClick: findInFiles },
-      { label: toggleAllLabel, onClick: toggleAll },
-      { label: tr("Otwórz folder w menedżerze plików"), onClick: () => window.mc.openPath(project.path) },
-      { label: tr("Otwórz projekt w edytorze"), onClick: () => window.mc.openInEditor(project.path) },
+      { label: tr("Odśwież pliki"), icon: <IRefresh />, onClick: reload },
+      { label: tr("Znajdź i zamień w plikach…"), icon: <ISearch />, onClick: findInFiles },
+      { label: toggleAllLabel, icon: anyOpen ? <ICollapseAll /> : <IExpandAll />, onClick: toggleAll },
+      { label: tr("Otwórz folder w menedżerze plików"), icon: <IFolder />, onClick: () => window.mc.openPath(project.path) },
+      { label: tr("Otwórz projekt w edytorze"), icon: <ICodeEditor />, onClick: () => window.mc.openInEditor(project.path) },
       { sep: true },
-      { label: tr("Kopiuj ścieżkę projektu"), onClick: () => window.mc.clipboardWrite(project.path) },
-      { label: tr("Wróć do projektów"), onClick: () => setUi({ sidebarView: 'projects' }) },
+      { label: tr("Kopiuj ścieżkę projektu"), icon: <ILink />, onClick: () => window.mc.clipboardWrite(project.path) },
+      { label: tr("Wróć do projektów"), icon: <IArrowLeft />, onClick: () => setUi({ sidebarView: 'projects' }) },
     ]);
   };
   const moreActions = (e: React.MouseEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     openMenu(rect.right, rect.bottom, [
       { header: project.name },
-      { label: tr('Znajdź i zamień w plikach…'), onClick: findInFiles },
-      { label: toggleAllLabel, onClick: toggleAll },
+      { label: tr('Znajdź i zamień w plikach…'), icon: <ISearch />, onClick: findInFiles },
+      { label: toggleAllLabel, icon: anyOpen ? <ICollapseAll /> : <IExpandAll />, onClick: toggleAll },
       { sep: true },
-      { label: tr('Otwórz folder w menedżerze plików'), onClick: () => window.mc.openPath(project.path) },
-      { label: tr('Otwórz projekt w edytorze'), onClick: () => window.mc.openInEditor(project.path) },
-      { label: tr('Wróć do projektów'), onClick: () => setUi({ sidebarView: 'projects' }) },
+      { label: tr('Otwórz folder w menedżerze plików'), icon: <IFolder />, onClick: () => window.mc.openPath(project.path) },
+      { label: tr('Otwórz projekt w edytorze'), icon: <ICodeEditor />, onClick: () => window.mc.openInEditor(project.path) },
+      { label: tr('Wróć do projektów'), icon: <IArrowLeft />, onClick: () => setUi({ sidebarView: 'projects' }) },
     ]);
   };
 
