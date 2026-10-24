@@ -176,6 +176,8 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   });
   window.mc.on('cell:spawnError', (cellId, message) => setUi((ui) => ({ cellErrors: { ...ui.cellErrors, [cellId]: message } })));
   window.mc.on('focus-cell', (cellId) => focusCell(cellId));
+  // A one-time notice from the main process, already in the app language (http hooks found blocked).
+  window.mc.on('app:notice', (text: string) => toast(text));
   window.mc.on('ptyhost:crashed', (resumes) => {
     // D1: SSH cells do not resume (D5), so the toast promises conversations only when a Claude or Codex cell was running.
     toast(tr(ptyHostRestartToast(resumes !== false)), 'error');

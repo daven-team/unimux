@@ -292,14 +292,14 @@ export class HookServer extends EventEmitter {
 
   /**
    * Writes the per-cell Claude settings file and returns its path. `claudeVersion` (the detected `claude --version`) picks
-   * the hook form; an unknown version keeps the curl commands every version runs.
+   * the hook form; an unknown version keeps the curl commands every version runs. `form` overrides it (http hooks found blocked).
    */
-  writeClaudeSettings(dir: string, cellId: string, claudeVersion?: string): string {
+  writeClaudeSettings(dir: string, cellId: string, claudeVersion?: string, form: ClaudeHookForm = claudeHookForm(claudeVersion)): string {
     mkdirSync(dir, { recursive: true });
     this.nonces.set(cellId, randomBytes(8).toString('hex')); // invalidates hooks of the previous process
     const path = join(dir, `claude-${cellId}.json`);
     const target: HookTarget = { url: (event) => this.url(cellId, event), headerUrl: (event) => this.headerUrl(cellId, event), token: this.token };
-    writeFileSync(path, JSON.stringify(claudeHookSettings(target, claudeHookForm(claudeVersion)), null, 2), { mode: 0o600 });
+    writeFileSync(path, JSON.stringify(claudeHookSettings(target, form), null, 2), { mode: 0o600 });
     return path;
   }
 

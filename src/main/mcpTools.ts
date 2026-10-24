@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { WAIT_MAX_SECONDS, automationSchemas, type AgentRole, type AgentTask, type AutomationOperation } from '../shared/automation';
+import { translate } from '../shared/i18n';
 import { findCell } from '../shared/state';
 import type { AutomationService } from './automation';
 
@@ -9,13 +10,31 @@ import type { AutomationService } from './automation';
  * poorly), role-specific tool lists, long explanations behind the `help` tool, compact results. The service operations
  * in automation.ts keep their full shapes (the UI uses them); the old operation names stay callable but unlisted.
  */
-export interface McpToolContext { service: AutomationService; actorId: string; signal?: AbortSignal }
+/** The answer to an elicitation (MCP `elicitation/create`, form mode); `cancel` also stands for a timeout or a failed request. */
+export interface ElicitAnswer { action: 'accept' | 'decline' | 'cancel'; content?: Record<string, unknown> }
+/** Asks the user through the agent's client; absent when the client cannot (no elicitation capability, or a stateless request). */
+export type Elicit = (message: string, requestedSchema: { type: 'object'; properties: Record<string, unknown>; required?: string[] }) => Promise<ElicitAnswer>;
+export interface McpToolContext {
+  service: AutomationService; actorId: string; signal?: AbortSignal;
+  elicit?: Elicit;
+  /** The call runs as an MCP task (the client polls tasks/get): a wait may last up to TASK_WAIT_MAX_SECONDS. */
+  task?: boolean;
+  /** Texts the user reads (elicitation prompts) in the app language; the tool texts for models stay English. */
+  tr?: (key: McpUserText, params?: Record<string, string | number>) => string;
+}
+/** Polish keys of the texts shown to the user in elicitations (translated in automationMessages.ts). */
+export type McpUserText = 'Kilku agentów nazywa się „{name}”. Którego wybrać?' | 'Agent' |
+  '{agent} chce zamknąć grid „{grid}” i anulować niedokończone zadania ({count}). Zgodzić się?' | 'Zamknij grid i anuluj zadania';
+/** How long a wait_for that runs as an MCP task may wait (the plain call stays at WAIT_MAX_SECONDS). */
+export const TASK_WAIT_MAX_SECONDS = 3600;
 export interface McpTool {
   name: string;
   description: string;
   roles: readonly AgentRole[];
   /** Hand-written JSON Schema the client sees. */
   inputSchema: { type: 'object'; properties: Record<string, unknown>; required?: string[] };
+  /** MCP tasks (2025-11-25): `optional` lets a client with task support run the call as a task it polls. */
+  execution?: { taskSupport: 'optional' };
   /** Argument validation in the MCP layer (types and key set); the service validates values precisely. */
   schema: z.ZodObject<z.ZodRawShape>;
   annotations: { readOnlyHint: boolean; destructiveHint: boolean; openWorldHint: boolean };
@@ -86,6 +105,51 @@ function expandCells(cells: unknown[]): unknown[] {
   return out;
 }
 
+const say = (ctx: McpToolContext, key: McpUserText, params?: Record<string, string | number>) => (ctx.tr ?? ((k, p) => translate('en', k, p)))(key, params);
+/** How long the user has to answer an elicitation before it counts as cancelled. */
+export const ELICIT_TIMEOUT_MS = 120_000;
+
+/**
+ * A cell argument that is not a cell ID but an agent's exact name (models often pass names): a unique match becomes its ID;
+ * several matches ask the user to pick one (elicitation) or fail with the candidates. Anything else is left to the service.
+ */
+async function resolveCellId(value: unknown, ctx: McpToolContext): Promise<unknown> {
+  if (typeof value !== 'string' || !value.trim() || findCell(ctx.service.state.get(), value)) return value;
+  const rows = await ctx.service.execute('list_agents', {}, ctx.actorId) as Array<{ cellId: string; name: string; gridName: string }>;
+  const wanted = value.trim().toLowerCase();
+  const matches = rows.filter((r) => r.name.trim().toLowerCase() === wanted);
+  if (matches.length === 1) return matches[0].cellId;
+  if (matches.length < 2) return value;
+  const answer = await ctx.elicit?.(say(ctx, 'Kilku agentów nazywa się „{name}”. Którego wybrać?', { name: value.trim() }), {
+    type: 'object', required: ['cellId'],
+    properties: { cellId: { type: 'string', title: say(ctx, 'Agent'), oneOf: matches.map((m) => ({ const: m.cellId, title: `${m.name} (${m.gridName})` })) } },
+  });
+  const picked = answer?.action === 'accept' ? answer.content?.cellId : undefined;
+  if (typeof picked === 'string' && matches.some((m) => m.cellId === picked)) return picked;
+  throw new Error(`Ambiguous agent name "${value}": ${matches.map((m) => `${m.cellId} (${m.gridName})`).join(', ')}. Pass the cell ID from list_agents.`);
+}
+
+/** Open tasks of a grid's cells (the reason close_grid needs cancelTasks). */
+function unfinishedInGrid(service: AutomationService, gridId: string): { grid?: string; count: number } {
+  const state = service.state.get();
+  const tab = state.projects.flatMap((p) => p.tabs).find((t) => t.id === gridId);
+  if (!tab) return { count: 0 };
+  const ids = new Set(tab.cells.map((c) => c.id));
+  return { grid: tab.name, count: state.automation.tasks.filter((t) => ids.has(t.cellId) && t.status !== 'completed' && t.status !== 'cancelled').length };
+}
+
+/** wait_for as an MCP task: the service's bounded wait in WAIT_MAX_SECONDS slices until something happens or the task's own deadline. */
+async function longWait(a: Record<string, unknown>, ctx: McpToolContext): Promise<unknown> {
+  const requested = typeof a.timeoutSec === 'number' ? a.timeoutSec : WAIT_MAX_SECONDS;
+  if (!Number.isInteger(requested) || requested < 1 || requested > TASK_WAIT_MAX_SECONDS) throw new Error(`timeoutSec must be an integer from 1 to ${TASK_WAIT_MAX_SECONDS} for a task.`);
+  const deadline = Date.now() + requested * 1000;
+  for (;;) {
+    const left = Math.ceil((deadline - Date.now()) / 1000);
+    const r = await ctx.service.execute('wait_for', { ...a, timeoutSec: Math.max(1, Math.min(WAIT_MAX_SECONDS, left)) }, ctx.actorId, ctx.signal) as { event: string };
+    if (r.event !== 'timeout' || ctx.signal?.aborted || deadline - Date.now() <= 0) return r;
+  }
+}
+
 // --- help ---
 const MESSAGE_CLIP = 8000;
 const HELP: Record<string, string> = {
@@ -145,12 +209,12 @@ export const MCP_TOOLS: McpTool[] = [
         messages: r.messages.map((m) => compact({ id: m.id, from: m.fromCellId, text: clip(m.text, messageCap, a.acknowledge ? 'kept unread; read_inbox full:true for all' : 'full:true for all') })),
         ...compact({ acknowledgedMessageIds: r.acknowledgedMessageIds, more: r.hasMoreTasks || r.hasMoreMessages || undefined }) };
     } },
-  { name: 'wait_for', roles: both, annotations: READ,
-    description: `Block up to timeoutSec (max ${WAIT_MAX_SECONDS}) instead of polling. Without taskIds: returns when you get an unread message or a startable queued task. With taskIds (open tasks): returns when any (all:true: every) is completed/blocked/cancelled. Returns at once if already true; event "timeout" means nothing happened.`,
+  { name: 'wait_for', roles: both, annotations: READ, execution: { taskSupport: 'optional' },
+    description: `Block up to timeoutSec (max ${WAIT_MAX_SECONDS}; as an MCP task max ${TASK_WAIT_MAX_SECONDS}) instead of polling. Without taskIds: returns when you get an unread message or a startable queued task. With taskIds (open tasks): returns when any (all:true: every) is completed/blocked/cancelled. Returns at once if already true; event "timeout" means nothing happened.`,
     inputSchema: obj({ taskIds: strings('open task IDs to watch'), all: bool(), timeoutSec: int('default 30') }),
     schema: z.object({ taskIds: z.array(z.string()).optional(), all: z.boolean().optional(), timeoutSec: z.number().int().optional() }).strict(),
-    async run(a, { service, actorId, signal }) {
-      const r = await service.execute('wait_for', a, actorId, signal) as { event: string; tasks?: Array<{ id: string; status: string; summary?: string; blockedReason?: string }> };
+    async run(a, ctx) {
+      const r = await (ctx.task ? longWait(a, ctx) : ctx.service.execute('wait_for', a, ctx.actorId, ctx.signal)) as { event: string; tasks?: Array<{ id: string; status: string; summary?: string; blockedReason?: string }> };
       return r.tasks ? { ...r, tasks: r.tasks.map((t) => compact({ ...t, summary: clip(t.summary, 300, 'get_tasks ids for all'), blockedReason: clip(t.blockedReason, 300, '') })) } : r;
     } },
   { name: 'update_task', roles: both, annotations: WRITE, roleOverrides: { coordinator: { annotations: DESTRUCTIVE } },
@@ -158,16 +222,26 @@ export const MCP_TOOLS: McpTool[] = [
     inputSchema: obj({ taskId: str(), status: oneOf(['in_progress', 'blocked', 'completed', 'cancelled']), blockedReason: str(),
       result: obj({ summary: str('what was done'), files: strings('changed files'), tests: strings('tests run and outcome'), branch: str(), commit: str() }, ['summary']) }, ['taskId', 'status']),
     schema: automationSchemas.update_task,
-    async run(a, { service, actorId }) { const t = await service.execute('update_task', a, actorId) as AgentTask; return { id: t.id, status: t.status }; } },
+    async run(a, { service, actorId }) {
+      try {
+        const t = await service.execute('update_task', a, actorId) as AgentTask;
+        return { id: t.id, status: t.status };
+      } catch (error) {
+        // The model guessed or mistyped an id: say where the valid ones are.
+        if (error instanceof Error && error.message === 'Task not found.') throw new Error(`Task not found: ${String(a.taskId)}. Task IDs come from read_inbox${service.roleOf(actorId) === 'coordinator' ? ' or get_tasks' : ''}.`);
+        throw error;
+      }
+    } },
   { name: 'send_message', roles: both, annotations: ASK,
     description: 'Send text to another agent in your project (persisted inbox, best-effort native delivery to verified Codex sessions).',
-    inputSchema: obj({ toCellId: str('cell ID'), text: str() }, ['toCellId', 'text']), schema: automationSchemas.send_message,
-    async run(a, { service, actorId }) { return created(await service.execute('send_message', a, actorId) as { id: string; delivery: string; deliveryError?: string }); } },
+    inputSchema: obj({ toCellId: str('cell ID (an exact agent name also works)'), text: str() }, ['toCellId', 'text']), schema: automationSchemas.send_message,
+    async run(a, ctx) { return created(await ctx.service.execute('send_message', { ...a, toCellId: await resolveCellId(a.toCellId, ctx) }, ctx.actorId) as { id: string; delivery: string; deliveryError?: string }); } },
   { name: 'create_task', roles: lead, annotations: ASK,
     description: 'Coordinator: assign a tracked task to a cell. dependsOn (task IDs) keeps it blocked until they complete. Delivery is not completion; wait_for the result.',
-    inputSchema: obj({ cellId: str(), title: str(), prompt: str('full instructions'), dependsOn: strings('prerequisite task IDs') }, ['cellId', 'title', 'prompt']), schema: automationSchemas.create_task,
-    async run(a, { service, actorId }) {
-      const t = await service.execute('create_task', a, actorId) as TaskView;
+    inputSchema: obj({ cellId: str('cell ID (an exact agent name also works)'), title: str(), prompt: str('full instructions'), dependsOn: strings('prerequisite task IDs') }, ['cellId', 'title', 'prompt']), schema: automationSchemas.create_task,
+    async run(a, ctx) {
+      const { service, actorId } = ctx;
+      const t = await service.execute('create_task', { ...a, cellId: await resolveCellId(a.cellId, ctx) }, actorId) as TaskView;
       const open = (a.dependsOn as string[] | undefined)?.filter((id) => service.state.get().automation.tasks.find((x) => x.id === id)?.status !== 'completed');
       return created(t, open);
     } },
@@ -187,7 +261,8 @@ export const MCP_TOOLS: McpTool[] = [
     description: 'Prompt library. action list (default): snippet IDs/names and team presets; get: text of snippetId; save: create/update {name,text,snippetId?,autoSend?}; apply: assign snippetId to cellId as a task.',
     inputSchema: obj({ action: oneOf(['list', 'get', 'save', 'apply']), snippetId: str(), cellId: str(), name: str(), text: str(), autoSend: bool('paste and submit') }),
     schema: z.object({ action: z.enum(['list', 'get', 'save', 'apply']).optional(), snippetId: z.string().optional(), cellId: z.string().optional(), name: z.string().optional(), text: z.string().optional(), autoSend: z.boolean().optional() }).strict(),
-    async run(a, { service, actorId }) {
+    async run(a, ctx) {
+      const { service, actorId } = ctx;
       switch (a.action ?? 'list') {
         case 'list': {
           const r = await service.execute('list_library', {}, actorId) as { snippets: Array<{ id: string; name: string; projectId?: string }>; presets: Array<{ id: string; name: string; cells: unknown[] }> };
@@ -195,7 +270,7 @@ export const MCP_TOOLS: McpTool[] = [
         }
         case 'get': { const s = await service.execute('get_snippet', { snippetId: a.snippetId }, actorId) as { id: string; name: string; text: string; autoSend?: boolean }; return compact({ id: s.id, name: s.name, text: s.text, autoSend: s.autoSend || undefined }); }
         case 'save': { const s = await service.execute('save_snippet', { id: a.snippetId, name: a.name, text: a.text, autoSend: a.autoSend ?? false }, actorId) as { id: string; name: string }; return { id: s.id, name: s.name }; }
-        default: return created(await service.execute('apply_snippet', { snippetId: a.snippetId, cellId: a.cellId }, actorId) as { id: string; delivery: string });
+        default: return created(await service.execute('apply_snippet', { snippetId: a.snippetId, cellId: await resolveCellId(a.cellId, ctx) }, actorId) as { id: string; delivery: string });
       }
     } },
   { name: 'update_agent', roles: both, annotations: ASK,
@@ -203,9 +278,10 @@ export const MCP_TOOLS: McpTool[] = [
     description: 'Change name, color, profileId or model of an agent (default: yourself; others: coordinator). Empty string clears color/model. Launch changes apply at next start (needsRestart); restart:true requests a safe restart.',
     inputSchema: obj({ cellId: str('default: yourself'), name: str(), color: str('#rrggbb'), profileId: str(), model: str('CLI model id'), restart: bool() }),
     schema: z.object({ cellId: z.string().optional(), name: z.string().optional(), color: z.string().nullable().optional(), profileId: z.string().optional(), model: z.string().nullable().optional(), restart: z.boolean().optional() }).strict(),
-    async run(a, { service, actorId }) {
+    async run(a, ctx) {
+      const { service, actorId } = ctx;
       const { cellId, color, model, ...rest } = a;
-      const r = await service.execute('update_agent', { ...rest, cellId: cellId ?? actorId, ...(color !== undefined ? { color: color === '' ? null : color } : {}), ...(model !== undefined ? { model: model === '' ? null : model } : {}) }, actorId) as
+      const r = await service.execute('update_agent', { ...rest, cellId: cellId === undefined ? actorId : await resolveCellId(cellId, ctx), ...(color !== undefined ? { color: color === '' ? null : color } : {}), ...(model !== undefined ? { model: model === '' ? null : model } : {}) }, actorId) as
         { cellId: string; restarted: boolean; needsRestart: boolean; restartReason?: string };
       return compact({ cellId: r.cellId, needsRestart: r.needsRestart || undefined, restarted: r.restarted || undefined, restartReason: clip(r.restartReason, 200, '') });
     } },
@@ -227,7 +303,23 @@ export const MCP_TOOLS: McpTool[] = [
   { name: 'close_grid', roles: lead, annotations: DESTRUCTIVE,
     description: 'Coordinator: stop a finished grid\'s agents and archive it (not your own grid). cancelTasks:true if tasks are unfinished.',
     inputSchema: obj({ gridId: str(), cancelTasks: bool() }, ['gridId']), schema: automationSchemas.close_grid,
-    async run(a, { service, actorId }) { const r = await service.execute('close_grid', a, actorId) as { archivedGridId: string; stoppedCellIds: string[] }; return { archived: r.archivedGridId, stopped: r.stoppedCellIds.length }; } },
+    async run(a, ctx) {
+      const { service, actorId } = ctx;
+      let args = a;
+      // Unfinished tasks: a client that can ask the user (elicitation) gets the user's decision instead of an error the model
+      // might "fix" by itself with cancelTasks:true.
+      const open = a.cancelTasks ? { count: 0 } : unfinishedInGrid(service, a.gridId as string);
+      if (open.count && ctx.elicit) {
+        const me = findCell(service.state.get(), actorId)?.cell.name ?? actorId;
+        const answer = await ctx.elicit(say(ctx, '{agent} chce zamknąć grid „{grid}” i anulować niedokończone zadania ({count}). Zgodzić się?', { agent: me, grid: open.grid ?? '', count: open.count }), {
+          type: 'object', required: ['confirm'], properties: { confirm: { type: 'boolean', title: say(ctx, 'Zamknij grid i anuluj zadania'), default: false } },
+        });
+        if (answer.action !== 'accept' || answer.content?.confirm !== true) throw new Error(`The user did not confirm closing the grid (${open.count} unfinished tasks stay). Do not retry with cancelTasks:true unless the user asks.`);
+        args = { ...a, cancelTasks: true };
+      }
+      const r = await service.execute('close_grid', args, actorId) as { archivedGridId: string; stoppedCellIds: string[] };
+      return { archived: r.archivedGridId, stopped: r.stoppedCellIds.length };
+    } },
   { name: 'update_grid', roles: lead, annotations: WRITE,
     description: 'Coordinator: rename a grid. color is only stored, not shown (tabs show the project color); empty clears.',
     inputSchema: obj({ gridId: str(), name: str(), color: str('#rrggbb, stored only') }, ['gridId']),
@@ -259,13 +351,13 @@ export const LEGACY_OPERATIONS: ReadonlySet<string> = new Set<AutomationOperatio
 ]);
 
 const byName = new Map(MCP_TOOLS.map((tool) => [tool.name, tool]));
-const listed = new Map<AgentRole, Array<Pick<McpTool, 'name' | 'description' | 'inputSchema' | 'annotations'>>>();
+const listed = new Map<AgentRole, Array<Pick<McpTool, 'name' | 'description' | 'inputSchema' | 'annotations' | 'execution'>>>();
 /** The tools/list payload for a role; built once (the definitions are static). */
 export function toolsForRole(role: AgentRole | undefined) {
   if (!role) return [];
   let list = listed.get(role);
   if (!list) {
-    list = MCP_TOOLS.filter((tool) => tool.roles.includes(role)).map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations, ...tool.roleOverrides?.[role] }));
+    list = MCP_TOOLS.filter((tool) => tool.roles.includes(role)).map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, annotations: tool.annotations, ...(tool.execution ? { execution: tool.execution } : {}), ...tool.roleOverrides?.[role] }));
     listed.set(role, list);
   }
   return list;
@@ -274,6 +366,11 @@ export function toolsForRole(role: AgentRole | undefined) {
 const formatZod = (error: z.ZodError) => error.issues.slice(0, 5).map((i) => `${i.path.join('.') || 'arguments'}: ${i.message}`).join('; ');
 export const isZodError = (error: unknown): error is z.ZodError => error instanceof z.ZodError;
 export const describeError = (error: unknown): string => isZodError(error) ? `Invalid arguments - ${formatZod(error)}` : error instanceof Error ? error.message : 'Operation failed.';
+
+/** True when a tool may run as an MCP task (a task-augmented tools/call). */
+export function supportsTask(name: string): boolean {
+  return byName.get(name)?.execution?.taskSupport === 'optional';
+}
 
 /** Runs a tool by name; null when the name is unknown. Unlisted legacy operation names run through the service directly. */
 export async function callTool(name: string, rawArgs: unknown, ctx: McpToolContext): Promise<unknown | null> {
