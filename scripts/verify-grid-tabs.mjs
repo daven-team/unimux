@@ -155,8 +155,8 @@ try {
 
   // 6. The cells become "agents" (profile cli claude in Settings; the running shells stay shells).
   await app.click('.tb-btn[aria-label="Settings"]');
-  await app.until(`[...document.querySelectorAll('.settings-nav [role=tab]')].some((t) => t.textContent === 'Agent profiles')`, 'settings page');
-  await app.click('.settings-nav [role=tab]', 'Agent profiles');
+  await app.until(`[...document.querySelectorAll('.settings-nav [role=tab]')].some((t) => t.textContent === 'Agents')`, 'settings page');
+  await app.click('.settings-nav [role=tab]', 'Agents');
   await app.until(`!!document.querySelector('#settings-profile-cli-fake')`, 'profile card');
   await app.click('#settings-profile-cli-fake');
   await app.click('[role=option]', 'claude');
@@ -221,8 +221,8 @@ try {
 
   // The profile goes back to a plain shell, so the cells start again after the restart (no real CLI is ever looked for).
   await app.click('.tb-btn[aria-label="Settings"]');
-  await app.until(`[...document.querySelectorAll('.settings-nav [role=tab]')].some((t) => t.textContent === 'Agent profiles')`, 'settings page (back to shell)');
-  await app.click('.settings-nav [role=tab]', 'Agent profiles');
+  await app.until(`[...document.querySelectorAll('.settings-nav [role=tab]')].some((t) => t.textContent === 'Agents')`, 'settings page (back to shell)');
+  await app.click('.settings-nav [role=tab]', 'Agents');
   await app.until(`!!document.querySelector('#settings-profile-cli-fake')`, 'profile card (back to shell)');
   await app.click('#settings-profile-cli-fake');
   await app.click('[role=option]', 'shell');

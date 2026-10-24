@@ -10,6 +10,7 @@ import {
 } from '../../../shared/shortcuts';
 import type { MessageKey } from '../../../shared/i18n';
 import { setShortcutRecording } from '../shortcuts';
+import { settingsSearchMatches } from '../../../shared/settingsSearch';
 import './shortcuts.css';
 
 const platform = () => window.mc.platform;
@@ -126,7 +127,8 @@ const problemText = (problem: NonNullable<ShortcutResolution['problems'][string]
   }
 };
 
-export function ShortcutsSettings() {
+/** `search`: the query of the Settings search box (1.0.7); it replaces this page's own search field while it is set. */
+export function ShortcutsSettings({ search }: { search?: string } = {}) {
   const { tr } = useI18n();
   const overrides = useStore((st) => st.s.settings.shortcuts);
   const resolution = useMemo(() => resolveShortcuts(overrides, platform()), [overrides]);
@@ -163,20 +165,25 @@ export function ShortcutsSettings() {
     setAnnounce(tr('Przywrócono wszystkie domyślne skróty.'));
   };
 
-  const needle = query.trim().toLowerCase();
-  const visible = (def: ShortcutDef) => !needle || [tr(def.label), tr(GROUP_LABEL[def.group]), keysOf(def)].some((text) => text.toLowerCase().includes(needle));
+  const outside = search !== undefined;
+  const needle = (outside ? search : query).trim().toLowerCase();
+  const visible = (def: ShortcutDef) => !needle || (outside
+    ? settingsSearchMatches(`${tr('Skróty klawiszowe')} ${tr(def.label)} ${tr(GROUP_LABEL[def.group])} ${keysOf(def)}`, needle)
+    : [tr(def.label), tr(GROUP_LABEL[def.group]), keysOf(def)].some((text) => text.toLowerCase().includes(needle)));
   const changed = Object.keys(overrides ?? {}).length > 0;
   const groups = SHORTCUT_GROUPS.map((group) => ({ group, defs: SHORTCUT_DEFS.filter((def) => def.group === group && visible(def)) })).filter((entry) => entry.defs.length);
 
   return (
-    <div className="shortcuts-settings">
-      <div className="muted">{tr('Kliknij „Zmień”, a potem naciśnij nową kombinację klawiszy. Dwie akcje nie mogą mieć tego samego skrótu, a klawisze zarezerwowane przez system i terminal są niedostępne.')}</div>
-      <div className="shortcuts-toolbar">
-        <input type="search" className="input" aria-label={tr('Szukaj skrótu')} placeholder={tr('Szukaj skrótu…')} value={query} onChange={(event) => setQuery(event.target.value)} />
-        <button type="button" className="btn" disabled={!changed} onClick={() => void resetAll()}>{tr('Przywróć wszystkie domyślne')}</button>
-      </div>
+    <div className="shortcuts-settings" data-search-self={outside ? '' : undefined}>
+      {!outside && <>
+        <div className="muted">{tr('Kliknij „Zmień”, a potem naciśnij nową kombinację klawiszy. Dwie akcje nie mogą mieć tego samego skrótu, a klawisze zarezerwowane przez system i terminal są niedostępne.')}</div>
+        <div className="shortcuts-toolbar">
+          <input type="search" className="input" aria-label={tr('Szukaj skrótu')} placeholder={tr('Szukaj skrótu…')} value={query} onChange={(event) => setQuery(event.target.value)} />
+          <button type="button" className="btn" disabled={!changed} onClick={() => void resetAll()}>{tr('Przywróć wszystkie domyślne')}</button>
+        </div>
+      </>}
       <div className="sr-only" role="status" aria-live="polite">{announce}</div>
-      {!groups.length && <div className="muted">{tr('Nic nie znaleziono.')}</div>}
+      {!groups.length && !outside && <div className="muted">{tr('Nic nie znaleziono.')}</div>}
       {groups.map(({ group, defs }) => (
         <section key={group} className="shortcut-group" aria-label={tr(GROUP_LABEL[group])}>
           <h3>{tr(GROUP_LABEL[group])}</h3>
@@ -204,7 +211,7 @@ export function ShortcutsSettings() {
                 {def.rebindable && !active && (
                   <div className="shortcut-actions">
                     <button type="button" className="btn small" aria-label={`${tr('Zmień')}: ${name}`} onClick={() => setRecording(def.id)}>{tr('Zmień')}</button>
-                    <button type="button" className="btn small ghost" aria-label={`${tr('Wyłącz')}: ${name}`} disabled={source === 'disabled'} onClick={() => commit(def, null)}>{tr('Wyłącz')}</button>
+                    <button type="button" className="btn small ghost hover-only" aria-label={`${tr('Wyłącz')}: ${name}`} disabled={source === 'disabled'} onClick={() => commit(def, null)}>{tr('Wyłącz')}</button>
                     <button type="button" className="btn small ghost" aria-label={`${tr('Domyślny')}: ${name}`} disabled={source === 'default' && !problem} onClick={() => reset(def)}>{tr('Domyślny')}</button>
                   </div>
                 )}

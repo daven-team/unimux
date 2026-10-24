@@ -823,7 +823,18 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid var(--focus-ri
 .settings-nav { width: 180px; flex: none; padding: 0; border: 0; overflow-y: auto; }
 .settings-nav-title { display: flex; align-items: center; gap: 7px; padding: 0 9px 16px; color: var(--text); font-weight: 600; font-size: 12px; }
 .settings-nav-title svg { width: 14px; height: 14px; color: var(--muted); }
-.settings-nav button { display: block; width: 100%; margin: 2px 0; padding: 7px 9px; border: 0; border-radius: 4px; background: transparent; color: var(--text-2); text-align: left; font-size: 11.5px; cursor: pointer; }
+.settings-nav button { display: block; width: 100%; margin: 2px 0; padding: 7px 9px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; font-size: 12px; cursor: pointer; }
+/* 1.0.7: the search box of Settings, above the sections; while it has text the page shows every matching row of every section. */
+.settings-search { display: flex; align-items: center; gap: var(--space-3); height: 28px; margin: 0 0 var(--space-5); padding: 0 var(--space-4); border: 1px solid #ffffff0d; border-radius: var(--radius-md); background: #141414; color: var(--muted); cursor: text; }
+.settings-search:focus-within { border-color: #2b5a99; }
+.settings-search svg { flex: none; width: 13px; height: 13px; }
+.settings-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: none; background: transparent; color: var(--text); font-size: 12px; }
+.settings-search input::-webkit-search-cancel-button { filter: grayscale(1) brightness(1.6); cursor: pointer; }
+.settings-section + .settings-section { margin-top: 32px; }
+.settings-content .settings-section > h2 { margin-bottom: 14px; font-size: 15px; }
+.settings-content [data-search-hidden] { display: none !important; }
+.settings-no-match { margin: 0; color: var(--muted); font-size: 12.5px; }
+.settings-group-head + .settings-group { margin-top: -14px; }
 .settings-nav button:hover { background: #ffffff06; color: var(--text); }
 .settings-nav button.on { background: #ffffff0b; }
 .settings-nav button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
@@ -890,6 +901,18 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid var(--focus-ri
 .mcp-control.disabled .mcp-indicator { display: none; }
 .agent-mcp-status { color: #c6ad7c; font-size: 10px; }
 .agent-mcp-status.connected { color: #86cda0; }
+/* 1.0.7: a narrow page (a small window, both side panels open) puts the sections above the content as a wrapping row, so the
+   rows keep their width instead of a 380px column beside the list. */
+@container (max-width: 680px) {
+  .settings-page { flex-direction: column; justify-content: flex-start; gap: var(--space-6); padding: var(--space-6) var(--space-6) 0; }
+  .settings-nav { width: auto; overflow: visible; }
+  .settings-nav-title { padding: 0 2px var(--space-4); }
+  .settings-search { margin-bottom: var(--space-4); }
+  .settings-nav [role=tablist] { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  .settings-nav button { width: auto; margin: 0; padding: 5px 9px; }
+  .settings-content { flex: 1; max-width: none; padding: 0 var(--space-2) var(--space-6) 0; }
+  .settings-content h2 { margin-bottom: var(--space-6); font-size: 16px; }
+}
 .link-confirm-address { padding: 12px; border: 1px solid #353535; border-radius: 6px; background: #111; word-break: break-all; white-space: pre-wrap; font-family: Consolas, monospace; }
 
 .role-select { display: inline-flex; align-items: center; justify-content: space-between; gap: 12px; text-align: left; min-height: 28px; cursor: pointer; background-image: none !important; padding: 4px 8px !important; }
@@ -1132,7 +1155,13 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .alert-fieldset:disabled { opacity: .45; }
 /* Notifications: one row per event (name, switch, sound, test) */
 .settings-card .alert-events { padding: 0 !important; }
-.alert-event-head, .alert-event-row { display: grid; grid-template-columns: minmax(110px, 1fr) 150px minmax(0, 280px); align-items: center; column-gap: 12px; padding: 0 2px; }
+.alert-event-head, .alert-event-row { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(90px, 150px) minmax(150px, 280px); align-items: center; column-gap: 12px; padding: 0 2px; }
+/* 1.0.7: a narrow card puts the sound and its test button on a row of their own under the event, instead of squeezing the select to nothing. */
+@container (max-width: 460px) {
+  .alert-event-head, .alert-event-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 8px; }
+  .alert-event-head span:nth-child(3) { display: none; }
+  .alert-event-row .alert-event-sound { grid-column: 1 / -1; }
+}
 .alert-event-head { min-height: 30px; color: #8f8f8f; font-size: 11px; font-weight: 600; }
 .alert-event-head span { white-space: nowrap; }
 .alert-event-head span:nth-child(2) { text-align: center; }
