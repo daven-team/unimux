@@ -3,7 +3,7 @@ import { useI18n } from '../i18n';
 import { memo, useMemo, useState } from 'react';
 import { fuzzyScore } from '../../../shared/fuzzy';
 import { normalizeCodeLanguage } from '../../../shared/codeLanguages';
-import { snippetVarMatches } from '../../../shared/snippetVars';
+import { SNIPPET_BUILTINS, snippetVarMatches } from '../../../shared/snippetVars';
 import { useCodeHighlight } from '../useCodeHighlight';
 import type { Snippet } from '../../../shared/types';
 import { sendSnippet } from '../actions';
@@ -17,6 +17,7 @@ import { dropEdge, scrollDragList } from './listDrag';
 import { openMenu } from './ContextMenu';
 import { EmptyLink, fillTokens, PanelEmpty } from './PanelEmpty';
 import type { PanelResizeProps } from './PanelResizeHandle';
+import { HelpPopover } from './HelpPopover';
 
 export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
   const { tr } = useI18n();
@@ -69,8 +70,26 @@ export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
   return (
     <aside className="rpanel" aria-label={tr("Panel snippetów")} onContextMenu={backgroundMenu}>
       <div className="side-title">
-        {/* 1.0.7: the title alone, like the other panels; each snippet's tooltip says what a click, Shift+click and a drag do. */}
-        <span>{tr("Snippety")}</span>
+        <span className="row" style={{ gap: 6 }}>
+          {tr("Snippety")}
+          <HelpPopover
+            label={tr('Pomoc: {panel}', { panel: tr("Snippety") })}
+            intro={tr("Zapisane prompty i polecenia, które wklejasz do terminali jednym kliknięciem.")}
+            rows={[
+              [tr("Klik"), tr("wklej do aktywnej komórki")],
+              [tr("Shift + klik"), tr("wklej do wszystkich")],
+              [tr("Przeciągnij"), tr("na komórkę albo zmień kolejność")],
+              [tr("Prawy klik"), tr("edytuj, duplikuj, kopiuj, przesuń albo usuń")],
+            ]}
+            footer={<>
+              <span className="help-line">{fillTokens(tr("Zmienne: {example} pyta o wartość przy wysyłaniu, {builtins} wstawia aplikacja."), {
+                example: <code>{`{{${tr("nazwa")}}}`}</code>,
+                builtins: <code>{SNIPPET_BUILTINS.map((name) => `{{${name}}}`).join(' ')}</code>,
+              })}</span>
+              <span className="help-line">{tr("Snippet jest wspólny dla wszystkich projektów albo tylko dla jednego (etykieta Projekt).")}</span>
+            </>}
+          />
+        </span>
         <button className="sq" title={tr("Nowy snippet")} aria-label={tr("Nowy snippet")} onClick={() => create()}><IPlus /></button>
       </div>
       {/* Nothing to show or search here (an empty library, or only other projects' snippets): the empty state. */}

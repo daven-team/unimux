@@ -27,4 +27,9 @@ export const snippetMessages = {
   'Uzupełniane dla każdej komórki: {names}': ['Filled in for each cell: {names}', 'Für jede Zelle ausgefüllt: {names}', 'Se rellenan para cada celda: {names}', 'Remplies pour chaque cellule : {names}', 'Preenchidas para cada célula: {names}'],
   'Do wysłania': ['To be sent', 'Wird gesendet', 'Se enviará', 'À envoyer', 'A enviar'],
   'Wstaw': ['Insert', 'Einfügen', 'Insertar', 'Insérer', 'Inserir'],
+  // The "?" help card of the Snippets panel (1.0.8).
+  'Zapisane prompty i polecenia, które wklejasz do terminali jednym kliknięciem.': ['Saved prompts and commands you paste into the terminals with one click.', 'Gespeicherte Prompts und Befehle, die du mit einem Klick in die Terminals einfügst.', 'Prompts y comandos guardados que pegas en los terminales con un clic.', 'Prompts et commandes enregistrés que vous collez dans les terminaux en un clic.', 'Prompts e comandos guardados que cola nos terminais com um clique.'],
+  'wklej do aktywnej komórki': ['paste into the active cell', 'in die aktive Zelle einfügen', 'pegar en la celda activa', 'coller dans la cellule active', 'colar na célula ativa'],
+  'edytuj, duplikuj, kopiuj, przesuń albo usuń': ['edit, duplicate, copy, move or delete', 'bearbeiten, duplizieren, kopieren, verschieben oder löschen', 'editar, duplicar, copiar, mover o eliminar', 'modifier, dupliquer, copier, déplacer ou supprimer', 'editar, duplicar, copiar, mover ou eliminar'],
+  'Snippet jest wspólny dla wszystkich projektów albo tylko dla jednego (etykieta Projekt).': ['A snippet is shared by all projects or kept in one (the Project tag).', 'Ein Snippet gilt für alle Projekte oder nur für eines (das Etikett Projekt).', 'Un fragmento se comparte entre todos los proyectos o es solo de uno (la etiqueta Proyecto).', 'Un extrait est partagé par tous les projets ou propre à un seul (l’étiquette Projet).', 'Um excerto é partilhado por todos os projetos ou só de um (a etiqueta Projeto).'],
 } as const;
