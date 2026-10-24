@@ -21,6 +21,13 @@ export const sshMessages = {
   'Serwer nie otworzył powłoki': ['The server did not open a shell', 'Der Server hat keine Shell geöffnet', 'El servidor no abrió una shell', 'Le serveur n’a pas ouvert de shell', 'O servidor não abriu uma shell'],
   'Proces terminali został uruchomiony ponownie': ['The terminal process was restarted', 'Der Terminalprozess wurde neu gestartet', 'El proceso de terminales se reinició', 'Le processus des terminaux a été redémarré', 'O processo dos terminais foi reiniciado'],
   'Anulowano': ['Cancelled', 'Abgebrochen', 'Cancelado', 'Annulé', 'Cancelado'],
+  'Aplikacja odrzuciła żądanie połączenia (nieprawidłowy rozmiar terminala lub identyfikator komórki) - spróbuj połączyć ponownie': [
+    'The app rejected the connection request (invalid terminal size or cell id) - try connecting again',
+    'Die App hat die Verbindungsanfrage abgelehnt (ungültige Terminalgröße oder Zellen-ID) - versuche erneut zu verbinden',
+    'La aplicación rechazó la solicitud de conexión (tamaño de terminal o id de celda no válidos) - intenta conectar de nuevo',
+    'L’application a refusé la demande de connexion (taille de terminal ou id de cellule non valide) - réessayez de vous connecter',
+    'A aplicação recusou o pedido de ligação (tamanho do terminal ou id da célula inválido) - tente ligar novamente',
+  ],
   'Nieznany błąd SSH': ['Unknown SSH error', 'Unbekannter SSH-Fehler', 'Error SSH desconocido', 'Erreur SSH inconnue', 'Erro SSH desconhecido'],
   'Podaj adres hosta': ['Enter the host address', 'Gib die Hostadresse ein', 'Introduce la dirección del host', 'Saisissez l’adresse de l’hôte', 'Introduza o endereço do anfitrião'],
   'Nieprawidłowy adres hosta': ['Invalid host address', 'Ungültige Hostadresse', 'Dirección del host no válida', 'Adresse d’hôte non valide', 'Endereço do anfitrião inválido'],

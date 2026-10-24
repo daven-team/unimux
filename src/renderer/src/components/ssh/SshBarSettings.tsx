@@ -19,8 +19,9 @@ export function SshBarSettings() {
         <input id="settings-ssh-bar" className="setting-switch" type="checkbox" role="switch" checked={enabled}
           onChange={(e) => update((st) => updateSettings(st, { sshStatusBar: e.target.checked }))} />
       </SettingRow>
-      <SettingRow title={tr('Elementy paska')}>
-        <span className="ssh-bar-setting-items">
+      {/* With the bar switched off its items cannot be changed: the row is dimmed, not only the inputs (1.0.7). */}
+      <SettingRow title={<span className={enabled ? undefined : 'ssh-bar-setting-off'}>{tr('Elementy paska')}</span>}>
+        <span className={`ssh-bar-setting-items${enabled ? '' : ' ssh-bar-setting-off'}`} aria-disabled={!enabled || undefined}>
           {SSH_BAR_ITEMS.map((item) => (
             <label key={item} className="check">
               <input type="checkbox" checked={shown.has(item)} disabled={!enabled || (shown.has(item) && shown.size === 1)}

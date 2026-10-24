@@ -48,8 +48,8 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 describe('ssh IPC handlers', () => {
   it('rejects malformed payloads before anything runs', async () => {
     const h = createSshHandlers(deps);
-    expect(await h.connect({ cellId: 'x', hostId: HOST, cols: 80, rows: 24 })).toEqual({ ok: false, error: 'unknown' });
-    expect(await h.connect({ cellId: state.projects[0].tabs[0].cells[0].id, hostId: HOST, cols: 80, rows: 24, extra: 1 })).toEqual({ ok: false, error: 'unknown' });
+    expect(await h.connect({ cellId: 'x', hostId: HOST, cols: 80, rows: 24 })).toEqual({ ok: false, error: 'badRequest' });
+    expect(await h.connect({ cellId: state.projects[0].tabs[0].cells[0].id, hostId: HOST, cols: 80, rows: 24, extra: 1 })).toEqual({ ok: false, error: 'badRequest' });
     expect(await h.draftFromText({ privateKey: 'x'.repeat(64 * 1024 + 1) })).toEqual({ ok: false, error: 'invalid' });
     expect(await h.setPassword({ hostId: HOST, password: 'x'.repeat(1025) })).toEqual({ ok: false, error: 'invalid' });
     expect(await h.answer({ cellId: HOST, promptId: HOST, values: Array(11).fill('a') })).toEqual({ ok: false });

@@ -100,10 +100,13 @@ function Bar({ cell }: { cell: Cell }) {
     for (const el of bar.querySelectorAll<HTMLElement>(':scope > [data-item]')) {
       const item = el.dataset.item as SshBarItem;
       present.push(item);
-      if (!drop.has(item)) widths.current[item] = el.offsetWidth;
+      // The natural width: a host name squeezed by the flex layout must not be measured squeezed (it would then always "fit").
+      const text = el.querySelector<HTMLElement>('.ssh-bar-text');
+      if (!drop.has(item)) widths.current[item] = el.offsetWidth + (text ? Math.max(0, text.scrollWidth - text.clientWidth) : 0);
     }
     const style = getComputedStyle(bar);
     const gap = parseFloat(style.columnGap) || 0;
+    // Each item is checked before its own gap is paid: the k-th item sees k - 1 gaps taken, as the layout has them.
     let room = bar.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
     const next = new Set<SshBarItem>();
     let full = false;
@@ -111,7 +114,10 @@ function Bar({ cell }: { cell: Cell }) {
       if (!present.includes(item)) continue;
       // The host name shrinks with an ellipsis down to HOST_MIN.
       const w = item === 'host' ? Math.min(widths.current.host ?? 0, HOST_MIN) : widths.current[item] ?? 0;
-      if (!full && w <= room) room -= w + gap; else { full = true; next.add(item); }
+      // A dropped item comes back only with a few pixels to spare, so a rate that grows and shrinks by a digit does not make
+      // the next item blink in and out every reading.
+      const slack = drop.has(item) ? 8 : 0;
+      if (!full && w + slack <= room) room -= w + gap; else { full = true; next.add(item); }
     }
     if (next.size !== drop.size || [...next].some((i) => !drop.has(i))) setDrop(next);
   });
@@ -240,7 +246,11 @@ function HoverCard({ className, attrs, content, children }: { className: string;
     // Above the bar first: the bar is at the bottom of the cell.
     const placed = placeTooltip({ left: a.left, right: a.right, top: a.top, bottom: a.top }, { width: c.width, height: c.height }, { width: window.innerWidth, height: window.innerHeight });
     const above = a.top - 6 - c.height;
-    setPos({ left: placed.left, top: above >= 6 ? above : placed.top });
+    // 1.0.7: within the cell's card when it fits there (the disk sits at the right edge, the CPU near the left one), so the
+    // card never spills over the next cell or a side panel; a card wider than the cell is centred on the window's clamp.
+    const cell = ref.current.closest('.cell')?.getBoundingClientRect();
+    const left = cell ? clampInto(placed.left, c.width, Math.max(cell.left + 6, 6), Math.min(cell.right - 6, window.innerWidth - 6)) : placed.left;
+    setPos({ left, top: above >= 6 ? above : placed.top });
   }, [open]);
   return (
     <span ref={ref} {...attrs} className={`ssh-bar-item ${className}`}
@@ -253,6 +263,12 @@ function HoverCard({ className, attrs, content, children }: { className: string;
       )}
     </span>
   );
+}
+
+/** `left` moved so a box of `width` lies within [lo, hi]; unchanged when it cannot fit there. */
+function clampInto(left: number, width: number, lo: number, hi: number): number {
+  if (width > hi - lo) return left;
+  return Math.min(Math.max(left, lo), hi - width);
 }
 
 function Sparkline({ history }: { history: number[] }) {
