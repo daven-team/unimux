@@ -6,7 +6,7 @@ import { useI18n } from '../i18n';
 import { formatAgo } from '../../../shared/i18n';
 import type { Note } from '../../../shared/types';
 import { NOTE_LIMITS, notePreviewMarkdown } from '../../../shared/notes';
-import { noteTags, noteTasks, toggleTask, toggleTaskLine } from '../../../shared/noteTools';
+import { noteTags, noteTasks, noteWordCount, toggleTask, toggleTaskLine } from '../../../shared/noteTools';
 import { CODE_LANGUAGES, codeLanguageLabel, normalizeCodeLanguage, type CodeLanguage } from '../../../shared/codeLanguages';
 import { editNote, upsertNote } from '../../../shared/state';
 import { update, useStore } from '../store';
@@ -28,8 +28,6 @@ const SAVE_DELAY_MS = 500;
 export type NoteMode = 'edit' | 'preview' | 'split';
 /** The mode each note was last shown in, per place (panel or tab), kept while the app runs. */
 const modes = new Map<string, NoteMode>();
-
-const words = (text: string): number => (text.match(/[\p{L}\p{N}][\p{L}\p{N}'’_-]*/gu) ?? []).length;
 
 export function NoteEditor({ note, variant, rename = false, fresh = false, cursor = null, focusSeq = 0, onBack }: {
   note: Note;
@@ -120,7 +118,8 @@ export function NoteEditor({ note, variant, rename = false, fresh = false, curso
   const counted = tasks.filter((t) => t.text);
   const done = counted.filter((t) => t.checked).length;
   const tags = useMemo(() => noteTags(text), [text]);
-  const count = useMemo(() => words(text), [text]);
+  // Markdown syntax (task boxes, link targets, fences) is no words: ticking a task keeps the count (noteWordCount).
+  const count = useMemo(() => noteWordCount(text, markdown), [text, markdown]);
   const menu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();

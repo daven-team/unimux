@@ -5,12 +5,12 @@ import { Compartment, EditorState, type Extension } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { indentWithTab } from '@codemirror/commands';
 import { HighlightStyle, indentUnit, StreamLanguage, syntaxHighlighting } from '@codemirror/language';
-import { tags } from '@lezer/highlight';
+import { styleTags, tags } from '@lezer/highlight';
 import { javascript } from '@codemirror/lang-javascript';
 import { json } from '@codemirror/lang-json';
 import { css } from '@codemirror/lang-css';
 import { html } from '@codemirror/lang-html';
-import { markdown } from '@codemirror/lang-markdown';
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { python } from '@codemirror/lang-python';
 import { yaml } from '@codemirror/legacy-modes/mode/yaml';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
@@ -71,7 +71,8 @@ function languageForFile(path: string): Extension {
     case 'json': case 'jsonc': return json();
     case 'css': return css();
     case 'html': case 'htm': case 'svg': return html();
-    case 'md': case 'markdown': return markdown();
+    // GFM: "- [x]" is a task box (drawn like the list mark), not a link.
+    case 'md': case 'markdown': return markdown({ base: markdownLanguage, extensions: [{ props: [styleTags({ TaskMarker: tags.processingInstruction })] }] });
     case 'py': case 'pyw': return python();
     case 'yaml': case 'yml': return StreamLanguage.define(yaml);
     case 'sh': case 'bash': case 'zsh': return StreamLanguage.define(shell);
