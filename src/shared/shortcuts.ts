@@ -188,6 +188,8 @@ export const SHORTCUTS = [
   { id: 'terminal.find', label: 'Znajdź w terminalu', group: 'terminal', scope: 'cell', default: 'Mod+Shift+F', rebindable: true, blockedInSettings: true, terminalOnly: true },
   { id: 'snippets.toggle', label: 'Pokaż lub ukryj snippety', group: 'panels', scope: 'global', default: 'Mod+Shift+B', rebindable: true },
   { id: 'notes.toggle', label: 'Pokaż lub ukryj notatki', group: 'panels', scope: 'global', default: 'Mod+Shift+O', rebindable: true },
+  // 1.0.7: quick capture; the selection of the terminal in focus (or of an editor) becomes a note.
+  { id: 'notes.capture', label: 'Nowa notatka z zaznaczonego tekstu', group: 'panels', scope: 'global', default: 'Mod+Shift+L', rebindable: true },
   { id: 'sidebar.toggle', label: 'Pokaż lub ukryj panel boczny', group: 'panels', scope: 'global', default: 'Mod+Shift+E', rebindable: true },
   { id: 'git.commit', label: 'Git: zatwierdź zmiany (commit)', group: 'panels', scope: 'git-panel', default: 'Mod+Enter', rebindable: true, aliases: ['Ctrl+Enter'] },
   { id: 'editor.save', label: 'Zapisz plik w edytorze', group: 'files', scope: 'editor', default: 'Mod+S', rebindable: true },

@@ -156,6 +156,8 @@ export interface Note {
   color?: string;
   /** Highlighting of the text (shared/codeLanguages.ts); absent = Markdown with highlighted code blocks. */
   language?: string;
+  /** Pinned to the top of the list (1.0.7); absent = not pinned. */
+  pinned?: boolean;
   /** Last change of the name or text (ms since the epoch); 0 when unknown. */
   updatedAt: number;
 }

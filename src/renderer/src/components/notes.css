@@ -1,0 +1,152 @@
+/* Notes (1.0.7): the cards of the Notes panel, its search with tags, the empty state, the note editor (panel and tab). */
+
+/* ── panel head, search, tags ───────────────────────────────────────────── */
+.notes-new { display: inline-flex; align-items: center; }
+.notes-new .notes-new-more { width: 16px; min-width: 16px; margin-left: -2px; }
+.notes-new .notes-new-more svg { width: 10px; height: 10px; }
+
+.notes-search { position: relative; display: flex; align-items: center; gap: 2px; margin: 0 6px 6px 10px; }
+.notes-search .search { flex: 1; min-width: 0; margin: 0; padding-right: 24px; }
+.notes-search-clear {
+  position: absolute; right: 30px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; display: grid; place-items: center;
+  border: 0; border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer;
+}
+.notes-search-clear:hover { color: var(--text); background: var(--btn-ghost-hover); }
+.notes-search .notes-sort { width: 24px; height: 24px; color: var(--muted); }
+.notes-search .notes-sort.on { color: var(--accent-text); }
+
+.notes-tags { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 8px; max-height: 52px; overflow: hidden; }
+.note-tag {
+  display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 9px; border: 1px solid transparent;
+  background: #ffffff0c; color: #9fb0c3; font-size: 10.5px; line-height: 1; cursor: pointer; white-space: nowrap; max-width: 140px;
+  overflow: hidden; text-overflow: ellipsis; transition: background .12s, color .12s, border-color .12s;
+}
+.note-tag:hover { background: #ffffff16; color: #cfdcea; }
+.note-tag.on { background: var(--accent-soft); border-color: #3b82f655; color: var(--accent-text); }
+.note-tag.small { height: 16px; padding: 0 6px; font-size: 10px; }
+span.note-tag:not(.small) { cursor: default; }
+
+.notes-section {
+  display: flex; align-items: center; gap: 5px; padding: 8px 12px 4px; font-size: 10px; font-weight: 600; letter-spacing: .6px;
+  text-transform: uppercase; color: var(--muted); flex: none;
+}
+
+/* ── cards ───────────────────────────────────────────────────────────────── */
+.notes-panel .note-card { padding: 8px 10px 8px 12px; gap: 3px; }
+.notes-panel .note-card[data-colored] { border-left-width: 3px; padding-left: 11px; }
+.notes-panel .note-card.pinned { background: #ffffff04; }
+.notes-panel .note-card.pinned:hover { background: #ffffff0c; }
+.notes-panel .note-card:focus-visible { outline: 1px solid #2b5a99; outline-offset: -1px; }
+.notes-panel .note-card .s-head { gap: 6px; }
+.notes-panel .note-card .s-name { flex: 1 1 auto; font-weight: 500; }
+.notes-panel .note-card .nc-time { flex: none; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.notes-panel .note-card .nc-pin {
+  flex: none; width: 18px; height: 18px; margin: -2px -4px -2px 0; display: grid; place-items: center; border: 0; border-radius: 4px;
+  background: transparent; color: var(--muted); cursor: pointer; opacity: 0; transition: opacity .12s, color .12s;
+}
+.notes-panel .note-card:hover .nc-pin, .notes-panel .note-card:focus-within .nc-pin { opacity: .75; }
+.notes-panel .note-card .nc-pin:hover { opacity: 1; color: var(--text); background: var(--btn-ghost-hover); }
+.notes-panel .note-card .nc-pin.on { opacity: 1; color: #e6b450; }
+.notes-panel .note-card .n-text { white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.notes-panel .note-card .n-text.empty { font-style: italic; opacity: .7; }
+.notes-panel .note-card mark { background: #f5b94238; color: #f3e2bd; border-radius: 2px; padding: 0 1px; }
+.notes-panel .note-card .nc-progress { display: flex; align-items: center; gap: 7px; margin: 1px 0; }
+.notes-panel .note-card .nc-bar { flex: 1; height: 4px; border-radius: 2px; background: #ffffff12; overflow: hidden; }
+.notes-panel .note-card .nc-bar i { display: block; height: 100%; border-radius: 2px; background: #4ade80b0; transition: width .25s ease; }
+.notes-panel .note-card .nc-count { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.notes-panel .note-card .nc-progress.all .nc-count { color: #86efac; }
+.notes-panel .note-card .nc-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+
+/* ── empty state ─────────────────────────────────────────────────────────── */
+.notes-empty { padding: 22px 16px 16px; text-align: center; overflow-y: auto; }
+.notes-empty-art { position: relative; width: 74px; height: 58px; margin: 4px auto 14px; }
+.notes-empty-art span {
+  position: absolute; left: 0; right: 0; height: 40px; border-radius: 7px; border: 1px solid #3a3f47; background: #1a1d22;
+}
+.notes-empty-art span:nth-child(1) { top: 0; transform: rotate(-7deg) translateX(-6px); opacity: .55; }
+.notes-empty-art span:nth-child(2) { top: 6px; transform: rotate(5deg) translateX(6px); opacity: .75; }
+.notes-empty-art span:nth-child(3) {
+  top: 14px; border-color: #4a5462; background: linear-gradient(#232831, #1c2026);
+  box-shadow: inset 3px 0 0 #81a1c1, 0 6px 16px #0008;
+}
+.notes-empty-art span:nth-child(3)::before, .notes-empty-art span:nth-child(3)::after {
+  content: ''; position: absolute; left: 12px; height: 3px; border-radius: 2px; background: #ffffff26;
+}
+.notes-empty-art span:nth-child(3)::before { top: 12px; width: 34px; }
+.notes-empty-art span:nth-child(3)::after { top: 21px; width: 22px; }
+.notes-empty-title { margin: 0 0 6px; font-size: 13px; color: var(--text); font-weight: 500; }
+.notes-empty > .muted { margin: 0 auto 14px; max-width: 260px; font-size: 11.5px; line-height: 1.55; }
+.notes-templates { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0 0 14px; }
+.notes-templates button {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 11px 6px 9px; border: 1px solid var(--border);
+  border-radius: 7px; background: #ffffff05; color: var(--text-2); font-size: 11.5px; cursor: pointer; transition: background .12s, border-color .12s, color .12s;
+}
+.notes-templates button:hover { background: #ffffff0d; border-color: #3a3f47; color: var(--text); }
+.notes-templates button svg { width: 16px; height: 16px; color: #81a1c1; }
+.notes-empty-foot { margin: 0 0 6px; font-size: 11.5px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.notes-panel .link-btn {
+  display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: none; color: var(--accent-text); cursor: pointer; font: inherit;
+}
+.notes-panel .link-btn:hover { text-decoration: underline; }
+.notes-panel .link-btn svg { width: 12px; height: 12px; }
+
+/* Files dragged over the panel. */
+.notes-drop-hint {
+  position: absolute; inset: 8px; z-index: 6; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  border: 1.5px dashed #3b82f6aa; border-radius: 9px; background: #0d0f12e6; color: var(--accent-text); font-size: 12px; text-align: center;
+  padding: 16px; pointer-events: none;
+}
+.notes-drop-hint svg { width: 20px; height: 20px; }
+
+/* ── the editor (panel and tab) ──────────────────────────────────────────── */
+.note-editor[data-colored] .note-editor-head { box-shadow: inset 3px 0 0 color-mix(in srgb, var(--sc) 75%, transparent); }
+.note-editor .note-pin.on { color: #e6b450; }
+.note-editor-tools { flex-wrap: wrap; row-gap: 4px; }
+.note-modes { display: inline-flex; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; flex: none; }
+.note-modes button {
+  height: 22px; padding: 0 9px; border: 0; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; transition: background .12s, color .12s;
+}
+.note-modes button + button { border-left: 1px solid var(--border); }
+.note-modes button:hover { color: var(--text); background: #ffffff08; }
+.note-modes button.on { background: #303740; color: #eef3f9; }
+.note-body { flex: 1; min-height: 0; display: flex; }
+.note-body > .text-code-editor, .note-body > .note-preview { flex: 1 1 0; min-width: 0; }
+.mode-split .note-body > .text-code-editor { margin-right: 4px; }
+.mode-split .note-body > .note-preview { margin-left: 4px; }
+.note-preview-empty {
+  flex: 1; margin: 0; border: 0; background: transparent; color: var(--muted); font-style: italic; font-size: 12px; cursor: text;
+}
+.note-preview-empty:hover { color: var(--text-2); }
+.note-editor-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.note-foot-tasks { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.note-foot-tasks.all { color: #86efac; }
+.note-hint { opacity: .75; cursor: help; }
+.note-head-tags { display: inline-flex; gap: 4px; min-width: 0; overflow: hidden; }
+
+/* Tasks in a note's preview: real checkboxes, a done task struck through. */
+.note-preview .markdown-preview li.md-task { list-style: none; position: relative; }
+.note-preview .markdown-preview li.md-task > input[type='checkbox'],
+.note-preview .markdown-preview li.md-task > p > input[type='checkbox'] {
+  position: absolute; left: -20px; top: .38em; width: 13px; height: 13px; margin: 0; accent-color: #4ade80; cursor: pointer;
+}
+.note-preview .markdown-preview .md-tag {
+  display: inline-block; padding: 0 6px; border-radius: 9px; background: #ffffff0f; color: #9fb0c3; font-size: .88em; line-height: 1.55;
+  cursor: pointer; transition: background .12s, color .12s;
+}
+.note-preview .markdown-preview .md-tag:hover { background: var(--accent-soft); color: var(--accent-text); }
+.note-preview .markdown-preview li.md-task.done > .md-task-text,
+.note-preview .markdown-preview li.md-task.done > p > .md-task-text { color: var(--muted); text-decoration: line-through; text-decoration-color: #ffffff4d; }
+.note-preview .markdown-preview img.note-image { display: block; max-width: 100%; height: auto; margin: 6px 0; border-radius: 6px; border: 1px solid var(--border); }
+.note-preview .markdown-preview img.note-image.missing { min-width: 120px; min-height: 28px; background: #ffffff08; }
+
+/* ── a note as a tab ─────────────────────────────────────────────────────── */
+.note-tab { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.note-editor-tab { padding: 14px 10px 0; }
+.note-editor-tab .note-editor-head { padding: 0 8px 8px; gap: 6px; }
+.note-editor-tab .note-name { height: 34px; font-size: 18px; font-weight: 600; padding: 0 8px; }
+.note-editor-tab .note-editor-tools { padding: 0 10px 10px; }
+.note-editor-tab .note-editor-foot { padding: 6px 12px 8px; }
+.note-editor-tab:not(.mode-split) .note-body > * { max-width: 920px; }
+.note-editor-tab:not(.mode-split) .note-body { justify-content: center; }
+.note-editor-tab .text-code-editor .cm-editor { font-size: 13.5px; }
+.note-editor-tab .note-preview .markdown-preview { font-size: 14px; padding: 18px 24px 48px; }
