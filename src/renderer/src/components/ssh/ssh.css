@@ -1,5 +1,5 @@
 /* src/renderer/src/components/ssh/ssh.css - SSH UI, existing tokens only (spec 10). */
-.ssh-card { position: absolute; inset: var(--cell-head) 0 0 0; z-index: 3; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 8px; overflow: auto; container-type: size; }
+.ssh-card { position: absolute; inset: var(--cell-head) 0 0 0; z-index: 3; background: var(--card-bg); display: flex; align-items: center; justify-content: center; padding: 8px; overflow: auto; container-type: size; }
 .ssh-card.danger { box-shadow: inset 0 0 0 1px #ef4444; }
 .ssh-card-title { color: var(--text); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .ssh-card-title.danger { color: #ef4444; }

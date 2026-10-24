@@ -10,7 +10,7 @@ import { profileOptionLabel } from '../cliUi';
 import { useCellDrag, type DragContext } from './useCellDrag';
 import { CellView } from './CellView';
 import { CellFallback, ErrorBoundary } from './ErrorBoundary';
-import { areaStyle, GridDividers } from './GridDividers';
+import { areaStyle, FULL_AREA, GridDividers } from './GridDividers';
 import { IHistory, IPlus, Logo } from './icons';
 import { ProjectIconView } from './ProjectIcon';
 import { requestAttach } from '../detach';
@@ -135,7 +135,7 @@ export const GridView = memo(function GridView() {
       {tab.cells.map((cell, i) => {
         if (maxCell && cell.id !== maxCell.id) return null;
         const rect = rects[i] ?? rects[rects.length - 1];
-        const style = maxCell || !rect ? { left: 0, top: 0, width: '100%', height: '100%' } : areaStyle(rect);
+        const style = maxCell || !rect ? FULL_AREA : areaStyle(rect);
         // One cell that fails to draw keeps its box with a retry; the other cells and its terminal are unaffected.
         return <ErrorBoundary key={cell.id} name="cell" fallback={(retry) => <CellFallback style={style} retry={retry} />}>
           <CellView cell={cell} index={i} style={style} maximized={!!maxCell}

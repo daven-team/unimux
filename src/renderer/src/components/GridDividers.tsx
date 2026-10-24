@@ -1,18 +1,27 @@
 import { useEffect, useRef, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
 import { dividerBox, dividers, resetDivider, resizeDivider, type Divider, type GridLayout, type Rect } from '../../../shared/layout';
+import { CELL_GAP } from '../../../shared/cellBox';
 import { useI18n } from '../i18n';
 import { terminals } from '../terminals/TerminalManager';
 
-/** Snap shared edges to CSS pixels, then reserve a 1px grid line. Fractional
- * origins blur a thin frame, especially on the bottom/right after a resize. */
+const HALF_GAP = CELL_GAP / 2;
+
+/** Where a share of the grid lies (1.0.7): the areas share the grid minus one gap, half a gap stays on each outer edge. */
+const gridPos = (share: number) => `calc(${HALF_GAP}px + ${share} * (100% - ${CELL_GAP}px))`;
+
+/** The card of an area: half a gap inside each of its edges (a gap between two cards, a gap at the grid's edge). Edges snap
+ * to CSS pixels: fractional origins blur the card's thin frame, especially on the bottom/right after a resize. */
 export function areaStyle(rect: Rect): CSSProperties {
-  const edge = (share: number) => `round(nearest, ${share * 100}%, 1px)`;
+  const edge = (share: number) => `round(nearest, ${gridPos(share)}, 1px)`;
   return {
-    left: edge(rect.x0), top: edge(rect.y0),
-    width: `calc(${edge(rect.x1)} - ${edge(rect.x0)} - 1px)`,
-    height: `calc(${edge(rect.y1)} - ${edge(rect.y0)} - 1px)`,
+    left: `calc(${edge(rect.x0)} + ${HALF_GAP}px)`, top: `calc(${edge(rect.y0)} + ${HALF_GAP}px)`,
+    width: `calc(${edge(rect.x1)} - ${edge(rect.x0)} - ${CELL_GAP}px)`,
+    height: `calc(${edge(rect.y1)} - ${edge(rect.y0)} - ${CELL_GAP}px)`,
   };
 }
+
+/** A maximized cell: the whole grid as one card. */
+export const FULL_AREA: CSSProperties = areaStyle({ x0: 0, y0: 0, x1: 1, y1: 1 });
 
 const KEY_STEP = 0.02;
 
@@ -37,7 +46,7 @@ export function GridDividers({ layout, onPreview, onCommit }: {
     drag.current = {
       base: layout, divider: d, current: layout,
       start: d.axis === 'col' ? e.clientX : e.clientY,
-      extent: d.axis === 'col' ? rect.width : rect.height,
+      extent: (d.axis === 'col' ? rect.width : rect.height) - CELL_GAP, // the areas share the grid minus one gap
     };
     e.currentTarget.setPointerCapture(e.pointerId);
     e.preventDefault();
@@ -74,8 +83,8 @@ export function GridDividers({ layout, onPreview, onCommit }: {
     {dividers(layout).map((d) => {
       const box = dividerBox(layout, d);
       const style: CSSProperties = d.axis === 'col'
-        ? { left: `${box.pos * 100}%`, top: `${box.start * 100}%`, height: `${(box.end - box.start) * 100}%` }
-        : { top: `${box.pos * 100}%`, left: `${box.start * 100}%`, width: `${(box.end - box.start) * 100}%` };
+        ? { left: gridPos(box.pos), top: gridPos(box.start), height: `calc(${box.end - box.start} * (100% - ${CELL_GAP}px))` }
+        : { top: gridPos(box.pos), left: gridPos(box.start), width: `calc(${box.end - box.start} * (100% - ${CELL_GAP}px))` };
       return <div
         key={`${d.axis}:${d.line}:${d.from}`}
         className={`grid-divider ${d.axis}`}

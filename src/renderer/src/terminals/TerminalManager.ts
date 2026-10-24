@@ -25,8 +25,12 @@ import { nextLossCount, planWebgl, webglBackoff, WebglLimit } from '../../../sha
 import { onWindowShown } from '../windowShown';
 import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
 
-// Campbell (Windows Terminal / PowerShell default) on a Cursor-like background: every local terminal, and the default SSH theme.
-export const THEME: ITheme = sshThemeById(DEFAULT_SSH_THEME).colors;
+/** The background of a cell card (--card-bg in styles.css): a local terminal draws on the card itself (1.0.7). */
+export const CARD_BG = '#131313';
+
+// Campbell (Windows Terminal / PowerShell default), the colours of the default SSH theme, on the card's background: every
+// local terminal. SSH cells keep their theme's own background (CellView paints the card body with it).
+export const THEME: ITheme = { ...sshThemeById(DEFAULT_SSH_THEME).colors, background: CARD_BG, cursorAccent: CARD_BG };
 
 const FONT = '"Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular", "Courier New", monospace';
 
