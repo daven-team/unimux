@@ -195,7 +195,9 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; padding: 0 5px; height: 17px; border-radius: 9px; background: #1f1f1f; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .badge.working { color: var(--working); background: #f5b94214; }
 .badge.waiting { color: var(--waiting); background: #4ade8016; }
-.badge.exited { color: var(--error); background: #f8717114; }
+/* Exited cleanly: neutral; with a non-zero exit code: the error colour (the cell's pill and dot agree, 1.0.7). */
+.badge.exited { color: var(--muted); background: #ffffff0d; }
+.badge.failed { color: var(--error); background: #f8717114; }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: #3a3a3a; }
 /* No CSS animation here: a running one presents a frame at every vsync. blink.ts flips data-blink on <html> twice a second

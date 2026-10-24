@@ -17,7 +17,7 @@ export interface StatusText {
  * Returns null where nothing needs saying (an idle cell without a detail).
  */
 export function statusText(status: CellStatus, reason: StatusReason | undefined, detail: StatusDetail | undefined, error?: string): StatusText | null {
-  if (status === 'exited') return { key: 'zakończony' };
+  if (status === 'exited') return detail?.kind === 'exit-code' && detail.code ? { key: 'zakończony (kod {code})', params: { code: detail.code } } : { key: 'zakończony' };
   if (status === 'working') {
     if (detail?.kind === 'tool' && detail.tool) return { key: 'praca: {tool}', params: { tool: detail.tool } };
     if (detail?.kind === 'subagent') return detail.tool ? { key: 'subagent: {name}', params: { name: detail.tool } } : { key: 'subagent pracuje' };
@@ -41,4 +41,12 @@ export function statusText(status: CellStatus, reason: StatusReason | undefined,
   if (detail?.kind === 'cli-exited') return detail.code ? { key: 'CLI zakończył działanie (kod {code})', params: { code: detail.code } } : { key: 'CLI zakończył działanie' };
   if (detail?.kind === 'exit-code' && detail.code !== undefined) return { key: 'kod wyjścia {code}', params: { code: detail.code } };
   return null;
+}
+
+/**
+ * 1.0.7: a non-zero exit code (of the last command, of the agent CLI, of the cell's process) is an error wherever it shows:
+ * the pill, the dot and the badges of the tab and the project use the error colour; code 0 stays neutral.
+ */
+export function failedExit(detail: StatusDetail | undefined): boolean {
+  return (detail?.kind === 'exit-code' || detail?.kind === 'cli-exited') && !!detail.code;
 }

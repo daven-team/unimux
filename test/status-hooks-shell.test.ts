@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { claudeExtendedHooks, claudeHookSettings, HookServer, notificationEvent, toolHookEvent, toolHookFacts, type HookTarget } from '../src/main/hooks';
 import { integratedLaunch } from '../src/ptyhost/manager';
 import { BASH_INIT, cmdPrompt, encodePowerShell, parseShellMark, POWERSHELL_SCRIPT, withShellIntegration } from '../src/shared/shellIntegration';
-import { statusText } from '../src/shared/statusDetail';
+import { failedExit, statusText } from '../src/shared/statusDetail';
 import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -148,6 +148,14 @@ describe('status labels', () => {
     expect(statusText('waiting', 'error', undefined, 'cli-exited')).toEqual({ key: 'CLI zakończył działanie' });
     expect(statusText('waiting', 'done', undefined)).toEqual({ key: 'czeka na Ciebie' });
     expect(statusText('idle', undefined, { kind: 'exit-code', code: 3 })).toEqual({ key: 'kod wyjścia {code}', params: { code: 3 } });
+    // 1.0.7: the exit code of the cell's own process is named; a non-zero code of any kind is an error everywhere.
+    expect(statusText('exited', undefined, { kind: 'exit-code', code: 3 })).toEqual({ key: 'zakończony (kod {code})', params: { code: 3 } });
+    expect(statusText('exited', undefined, undefined)).toEqual({ key: 'zakończony' });
+    expect(failedExit({ kind: 'exit-code', code: 5 })).toBe(true);
+    expect(failedExit({ kind: 'cli-exited', code: 1 })).toBe(true);
+    expect(failedExit({ kind: 'cli-exited' })).toBe(false);
+    expect(failedExit({ kind: 'command' })).toBe(false);
+    expect(failedExit(undefined)).toBe(false);
     expect(statusText('idle', undefined, { kind: 'cli-exited', code: 1 })).toEqual({ key: 'CLI zakończył działanie (kod {code})', params: { code: 1 } });
     expect(statusText('idle', undefined, undefined)).toBeNull();
     expect(statusText('exited', undefined, undefined)).toEqual({ key: 'zakończony' });

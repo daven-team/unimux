@@ -5,7 +5,7 @@ import { useI18n } from '../i18n';
 import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { propsEqualWithStyle } from '../../../shared/renderEquality';
 import { errorPhrase, failureLabel } from '../../../shared/alerts';
-import { statusText } from '../../../shared/statusDetail';
+import { failedExit, statusText } from '../../../shared/statusDetail';
 import { cellDrawColor, getProfile, PROJECT_COLORS, updateCell } from '../../../shared/state';
 import { missingCardCli } from '../../../shared/cliStatus';
 import { shownProfileName } from '../../../shared/profiles';
@@ -115,7 +115,9 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
     : cellLabel(cell, sessionTitle && cell.session ? { [cell.session.id]: sessionTitle } : {}, profileName);
   /** The profile shows among the details only when the title is not already it. */
   const metaProfile = !ssh && shownName !== profileName;
-  const dotClass = `${status}${status === 'waiting' && failure !== undefined ? ' error' : ''}`;
+  // A non-zero exit code (the last command, the CLI, the process) is an error in the dot and the pill alike (1.0.7).
+  const exitFailed = failedExit(statusDetail);
+  const dotClass = `${status}${(status === 'waiting' && failure !== undefined) || exitFailed ? ' error' : ''}`;
 
   const sshItems = (): MenuItem[] => [
     { label: tr('Połącz ponownie'), onClick: () => void reconnectCell(cell.id) },
@@ -295,7 +297,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
           ? <span className="status-text ssh">{tr(phaseLabel.key, phaseLabel.params)}</span>
           : status === 'waiting' && failure !== undefined
           ? <span className="status-text error" title={tr(errorPhrase(failure))}>{tr(failureLabel(failure))}</span>
-          : statusLabel && <span className={`status-text ${status}`} title={tr(statusLabel.key, statusLabel.params)}>{tr(statusLabel.key, statusLabel.params)}{status === 'working' ? '…' : ''}</span>}
+          : statusLabel && <span className={`status-text ${status}${exitFailed ? ' error' : ''}`} title={tr(statusLabel.key, statusLabel.params)}>{tr(statusLabel.key, statusLabel.params)}{status === 'working' ? '…' : ''}</span>}
         <span className="actions">
           {profile.cli !== 'shell' && !ssh && <button className={`mcp-control ${cell.role ?? 'disabled'} ${mcpInfo.connectedCellIds?.includes(cell.id) ? 'connected' : ''}`}
             aria-label={`${tr('Rola / MCP')}: ${tr(cell.role === 'coordinator' ? 'Koordynator' : cell.role === 'worker' ? 'Wykonawca' : 'Bez MCP')}`}

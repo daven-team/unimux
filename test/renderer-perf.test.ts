@@ -97,6 +97,17 @@ describe('status badge counts', () => {
     expect(counts[projectCountsKey(s.projects[0].id)]).toEqual({ working: 1, waiting: 1, exited: 1 });
     expect(counts[s.projects[1].tabs[0].id] ?? NO_COUNTS).toEqual({ working: 0, waiting: 0, exited: 0 });
   });
+
+  it('1.0.7: an exit with a non-zero code counts as failed (the red badge), a clean one does not', () => {
+    const s = twoProjects();
+    const [a, b] = s.projects[0].tabs[0].cells;
+    const counts = statusCountsOf(s.projects, { [a.id]: 'exited', [b.id]: 'exited' }, { [a.id]: { kind: 'exit-code', code: 3 } });
+    expect(counts[s.projects[0].tabs[0].id]).toEqual({ working: 0, waiting: 0, exited: 2, failed: 1 });
+    expect(counts[projectCountsKey(s.projects[0].id)]).toEqual({ working: 0, waiting: 0, exited: 2, failed: 1 });
+    // A failed command at the prompt (idle) is not an exited cell.
+    expect(statusCountsOf(s.projects, { [a.id]: 'idle', [b.id]: 'exited' }, { [a.id]: { kind: 'exit-code', code: 1 } })[s.projects[0].tabs[0].id])
+      .toEqual({ working: 0, waiting: 0, exited: 1 });
+  });
 });
 
 describe('windowed history rows', () => {

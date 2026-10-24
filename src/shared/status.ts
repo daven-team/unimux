@@ -765,13 +765,53 @@ export class StatusTracker {
     return 'applied';
   }
 
-  exited(): void {
+  /** The process of the cell ended; `code` is its exit code (a non-zero one is shown and drawn as an error). */
+  exited(code?: number): void {
     this.status = 'exited';
     this.pendingEnd = null;
     this.background = false;
     this.longBackground = false;
-    this.detail = undefined;
+    this.detail = code ? { kind: 'exit-code', code } : undefined;
     this.commandRunning = false;
+  }
+
+  /**
+   * 1.0.7: the prompt marks of a replayed history (a terminal handed over to another window, or adopted again): the shell
+   * that is still running was last seen at its prompt (A / B) or running a command (C). The new tracker starts from that,
+   * so the first command after a move is exact instead of guessed from output. Nothing is alerted.
+   */
+  replayedMarks(marks: { last: ShellMarkKind; sawStart: boolean; prompts: number }, now: number): void {
+    if (this.status === 'exited') return;
+    this.marked = true;
+    if (marks.sawStart) this.markedStart = true;
+    if (!this.shellMode) {
+      // An agent cell: a C was its CLI's launch; a prompt after a C means the CLI already ended back to its shell.
+      if (marks.last === 'C') this.agentLaunched = true;
+      else if (marks.sawStart) this.agentGone = true;
+      else this.promptsSeen = Math.max(this.promptsSeen, marks.prompts);
+      if (!this.shellMode) { this.atPrompt = marks.last !== 'C'; return; }
+    }
+    if (marks.last === 'C') {
+      this.atPrompt = false;
+      if (this.commandRunning) return;
+      this.commandRunning = true;
+      this.commandSince = now;
+      this.turnObserved = true;
+      this.armed = true;
+      this.lastOutput = now;
+      this.detail = { kind: 'command' };
+      this.set('working', 'hook');
+      return;
+    }
+    if (marks.last === 'A' || marks.last === 'B') {
+      this.atPrompt = true;
+      if (this.shellMode && this.commandRunning) {
+        this.commandRunning = false;
+        this.armed = false;
+        this.detail = undefined;
+        if (this.status === 'working') this.set('idle', 'heuristic');
+      }
+    }
   }
 
   reset(): void {
@@ -869,6 +909,8 @@ export interface StatusCounts {
   working: number;
   waiting: number;
   exited: number;
+  /** 1.0.7: how many of the exited ended with a non-zero code (absent = none); see statusCountsOf. */
+  failed?: number;
 }
 
 export function aggregate(list: Iterable<CellStatus>): StatusCounts {

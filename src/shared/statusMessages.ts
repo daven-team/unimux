@@ -25,4 +25,6 @@ export const statusMessages = {
   'kod wyjścia {code}': ['exit code {code}', 'Exit-Code {code}', 'código de salida {code}', 'code de sortie {code}', 'código de saída {code}'],
   'CLI zakończył działanie': ['the CLI has ended', 'die CLI wurde beendet', 'la CLI terminó', 'la CLI s’est arrêtée', 'a CLI terminou'],
   'CLI zakończył działanie (kod {code})': ['the CLI has ended (code {code})', 'die CLI wurde beendet (Code {code})', 'la CLI terminó (código {code})', 'la CLI s’est arrêtée (code {code})', 'a CLI terminou (código {code})'],
+  'zakończony (kod {code})': ['exited (code {code})', 'beendet (Code {code})', 'finalizado (código {code})', 'terminé (code {code})', 'terminado (código {code})'],
+  'zakończony z błędem': ['exited with an error', 'mit Fehler beendet', 'finalizado con error', 'terminé avec une erreur', 'terminado com erro'],
 } as const;
