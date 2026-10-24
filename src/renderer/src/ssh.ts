@@ -9,6 +9,8 @@ import { menuHosts, sectionChange, sectionForDetail, type SshDetail } from '../.
 import { createProject, ensureTerminal, focusCell, openTab } from './actions';
 import { gridCovered } from './splitView';
 import type { MenuItem } from './components/ContextMenu';
+import { createElement } from 'react';
+import { IPlus, IServer } from './components/icons';
 import { tr } from './i18n';
 import type { MessageKey } from '../../shared/i18n';
 import { askChoice, getS, getUi, setUi, toast, update } from './store';
@@ -173,7 +175,10 @@ export async function connectCell(cellId: string, opts: { restoreCwd?: boolean }
     useSshConnectStore.getState().apply(cellId, { kind: 'start', at: Date.now(), ctx: connectContext(ref.hostId) });
     useSshStore.getState().setSession({ cellId, hostId: ref.hostId, phase: 'connecting', since: Date.now() });
   }
-  const { cols, rows } = terminals.size(cellId);
+  // A cell not laid out yet (hidden, a tab in the background) may report a size main refuses: ask for a sane one.
+  const size = terminals.size(cellId);
+  const cols = Math.min(2000, Math.max(2, Math.round(size.cols) || 80));
+  const rows = Math.min(1000, Math.max(1, Math.round(size.rows) || 24));
   const result = await window.mc.ssh.connect({ cellId, hostId: ref.hostId, cols, rows, ...(opts.restoreCwd ? { restoreCwd: true } : {}) });
   // A refusal before any session event: the same path as an event, so the card shows the failure.
   if (!result.ok) onSession({ cellId, hostId: ref.hostId, phase: 'error', error: result.error, since: Date.now() });
@@ -213,8 +218,8 @@ export function sshHostMenuItems(header: MessageKey): MenuItem[] {
     { header: tr(header) },
     ...(shown.length
       ? shown.map((h) => ({ label: h.label, hint: h.group, color: h.color ?? (anyColor ? 'transparent' : undefined), onClick: () => void openHostInCell(h.id, 'cell') }))
-      : [{ label: tr('Dodaj host SSH…'), onClick: () => openSshView({ kind: 'host' }) }]),
-    ...(more ? [{ label: tr('Wszystkie hosty…'), onClick: () => openSshView() }] : []),
+      : [{ label: tr('Dodaj host SSH…'), icon: createElement(IPlus), onClick: () => openSshView({ kind: 'host' }) }]),
+    ...(more ? [{ label: tr('Wszystkie hosty…'), icon: createElement(IServer), onClick: () => openSshView() }] : []),
   ];
 }
 

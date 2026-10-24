@@ -1,22 +1,27 @@
 import { useI18n } from '../i18n';
 import type { StatusCounts } from '../../../shared/status';
 
-/** ◐ working · ● waiting for you · ✕ exited */
+/**
+ * ◐ working · ● waiting for you · ✕ exited. 1.0.7: an exit with a non-zero code is a red ✕ (like the cell's pill and dot),
+ * a clean exit a grey one.
+ */
 export function StatusBadges({ counts }: { counts: StatusCounts }) {
   const { tr } = useI18n();
-  const items: Array<[keyof StatusCounts, string, string]> = [
-    ['working', '◐', tr("pracuje")],
-    ['waiting', '●', tr("czeka na Ciebie")],
-    ['exited', '✕', tr("zakończony")],
+  const failed = counts.failed ?? 0;
+  const items: Array<[string, string, number, string]> = [
+    ['working', '◐', counts.working, tr("pracuje")],
+    ['waiting', '●', counts.waiting, tr("czeka na Ciebie")],
+    ['failed', '✕', failed, tr("zakończony z błędem")],
+    ['exited', '✕', counts.exited - failed, tr("zakończony")],
   ];
-  const shown = items.filter(([k]) => counts[k] > 0);
+  const shown = items.filter(([, , n]) => n > 0);
   if (!shown.length) return null;
   return (
     <span className="badges">
-      {shown.map(([k, icon, label]) => (
-        <span key={k} className={`badge ${k}`} title={`${counts[k]} ${label}`}>
+      {shown.map(([k, icon, n, label]) => (
+        <span key={k} className={`badge ${k}`} title={`${n} ${label}`}>
           {icon}
-          <span>{counts[k]}</span>
+          <span>{n}</span>
         </span>
       ))}
     </span>

@@ -185,7 +185,8 @@ try {
   await evaluate('Array.from(document.querySelectorAll(".menu-item")).find(b => b.textContent.includes("Bez MCP")).click()');
   await evaluate('Array.from(document.querySelectorAll(".modal-foot button")).find(b => b.textContent.startsWith("Otwórz grid")).click()');
   await until(async () => (await snapshot()).state.projects[0].tabs.length === 3, 'ordinary UI grid');
-  const plainGrid = (await snapshot()).state.projects[0].tabs.at(-1);
+  // The new grid opens next to the active one, so it is found by id, not by position.
+  const plainGrid = (await snapshot()).state.projects[0].tabs.find((t) => t.id !== 'smoke-grid' && t.id !== created.gridId);
   assert.equal(plainGrid.cells[0].role, undefined);
   assert.equal(plainGrid.cells[0].startupPrompt?.includes('update_task') ?? false, false);
   await until(() => evaluate('document.querySelectorAll(".cell").length === 1'), 'ordinary grid rendered');

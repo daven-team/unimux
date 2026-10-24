@@ -104,7 +104,18 @@ Only Codex honours the tool hints, and it asks the user before a call unless the
 
 A user who trusts the team can pre-approve tools in Codex with `default_tools_approval_mode` or `tools.<name>.approval_mode` under `[mcp_servers.unimux]`.
 
-You can check the connection without a model: `node scripts/mcp-serve.mjs` starts the server with fake dependencies, then `claude mcp add --transport http ...` / `codex mcp add --url ... --bearer-token-env-var ...` with a temporary `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, and `claude mcp list`, show the connection state.
+You can check the connection without a model: `node scripts/mcp-serve.mjs` starts the server with fake dependencies, then `claude mcp add --transport http ...` / `codex mcp add --url ... --bearer-token-env-var ...` with a temporary `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, and `claude mcp list`, show the connection state. `npm run test:mcp` does all of that automatically with the installed CLIs and a local mock of the model API.
+
+Claude Code 2.1.x defers MCP tools behind its ToolSearch: the model first sees only the tool names (`mcp__unimux__read_inbox`, ...) and the server instructions, and loads the schemas when it needs them.
+
+**Questions to the user (elicitations).** A client that declares the elicitation capability (Claude Code does) gets an MCP session; a tool call can then ask the user through the agent's own window instead of failing:
+
+- `close_grid` on a grid with unfinished tasks asks whether to cancel them and close the grid (without the question it needs `cancelTasks: true`).
+- `send_message`, `create_task`, `snippets` `apply` and `update_agent` accept an exact agent name instead of a cell ID; when several agents share the name, the user picks one.
+
+A declined or unanswered question (2 minutes; `claude -p` always declines) ends the call with an error and changes nothing. Clients without elicitation keep the stateless connection and the previous answers.
+
+**MCP tasks.** `wait_for` is task-capable (`execution.taskSupport: "optional"`, MCP 2025-11-25): a client with task support can run it as a task it polls (`tasks/get`, `tasks/result`, `tasks/cancel`) and wait up to 3600 s instead of 45 s. A task belongs to the cell's token (other cells never see it) and ends when the cell restarts. Claude Code 2.1.310 and Codex 0.162 do not create tasks yet, so they keep the plain call.
 
 ## Migration from 0.6.7
 

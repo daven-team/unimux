@@ -129,6 +129,13 @@ export interface McApi {
   dbPickCaFile(): Promise<string | null>;
   /** Saves an exported result where the user picks in the save dialog. */
   dbExport(name: string, text: string): Promise<{ ok: boolean; path?: string; cancelled?: boolean }>;
+  /** Notes (1.0.7): pasted images kept in the data folder (resolves to the image name, null when refused) and a note saved as a file. */
+  notes: {
+    saveImage(bytes: Uint8Array, mime: string): Promise<string | null>;
+    /** The image as a data URL, null when it is gone or the name is not one the app gave. */
+    readImage(name: string): Promise<string | null>;
+    exportFile(name: string, text: string): Promise<{ ok: boolean; path?: string; cancelled?: boolean }>;
+  };
   /** The local pane of the SFTP view: any folder, drives, home, new folder, rename, trash, show in Explorer/Finder. */
   localFs: LocalFilesApi;
   /** The command history of SSH hosts for the terminal autocomplete (kept by main on this computer only). */
@@ -199,6 +206,8 @@ export interface McApi {
   on(channel: 'cell:hook', cb: (cellId: string, event: HookEvent, info?: HookInfo) => void): () => void;
   on(channel: 'cell:session', cb: (cellId: string, session: CellSession) => void): () => void;
   on(channel: 'cell:spawnError', cb: (cellId: string, message: string) => void): () => void;
+  /** A notice from the main process, already translated (e.g. Claude http hooks found blocked). */
+  on(channel: 'app:notice', cb: (text: string) => void): () => void;
   on(channel: 'focus-cell', cb: (cellId: string) => void): () => void;
   on(channel: 'ptyhost:crashed', cb: (resumesConversation: boolean) => void): () => void;
   /** The Pty Host crashed too often and is not restarted until the user asks for it (cells show why they do not start). */

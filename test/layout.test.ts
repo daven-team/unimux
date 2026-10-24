@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  areaRects, createLayout, describeLayout, dividerBox, dividers, growLayout, layoutForCount, layoutFromRows, mergeRect, MIN_AREA_SHARE,
+  areaRects, createLayout, describeLayout, dividerBox, dividers, growLayout, layoutForCount, layoutFromRows, mergeRect, MIN_AREA_SHARE, minShareFor,
   removeArea, resetDivider, resizeDivider, rowCountsOf, unmergeAll, type GridLayout,
 } from '../src/shared/layout';
 
@@ -282,5 +282,34 @@ describe('resizable splits', () => {
     const l = grid(2, 1);
     expect(resizeDivider(l, { axis: 'col', line: 0, from: 0, to: 0 }, 1)).toEqual(l);
     expect(resizeDivider(l, { axis: 'col', line: 2, from: 0, to: 0 }, 1)).toEqual(l);
+  });
+});
+
+describe('1.0.7 minimum cell size of a divider drag', () => {
+  it('minShareFor turns pixels into a share, at least MIN_AREA_SHARE and at most half', () => {
+    expect(minShareFor(2000, 160, 8)).toBe(MIN_AREA_SHARE);
+    expect(minShareFor(800, 160, 8)).toBeCloseTo(0.21);
+    expect(minShareFor(200, 160, 8)).toBe(0.5);
+    expect(minShareFor(0, 160)).toBe(MIN_AREA_SHARE);
+  });
+
+  it('a column divider stops where the narrower cell would go below the pixel minimum', () => {
+    const layout = layoutForCount(4); // 2x2
+    const col = dividers(layout).find((d) => d.axis === 'col')!;
+    const min = minShareFor(800, 160, 8);
+    const firstRow = (l: GridLayout) => Math.min(...areaRects(l).filter((r) => r.y0 === 0).map((r) => r.x1 - r.x0));
+    expect(firstRow(resizeDivider(layout, col, -0.45, { col: min }))).toBeCloseTo(min, 5);
+    expect(firstRow(resizeDivider(layout, col, 0.45, { col: min }))).toBeCloseTo(min, 5);
+    // Without limits the old 10 % floor applies.
+    expect(firstRow(resizeDivider(layout, col, -0.45))).toBeCloseTo(MIN_AREA_SHARE, 5);
+  });
+
+  it('in a grid whose columns are independent (cols mode) the row limit still applies to heights', () => {
+    const layout = layoutForCount(4);
+    const row = dividers(layout).find((d) => d.axis === 'row' && d.from === 0 && d.to === 0);
+    if (!row) return; // a 2x2 grid offers whole row lines only
+    const moved = resizeDivider(layout, row, -0.45, { col: 0.1, row: 0.3 });
+    const heights = areaRects(moved).map((r) => r.y1 - r.y0);
+    expect(Math.min(...heights)).toBeGreaterThanOrEqual(0.3 - 1e-6);
   });
 });

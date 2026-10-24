@@ -10,11 +10,13 @@ import type { BoundThread } from '../../../shared/codexHooks';
 import { screenWaitsForBackground } from '../../../shared/backgroundWait';
 import { AgentInference, keySequence, type InferredAgent, type ScreenLine, type ScreenState } from '../../../shared/agentInfer';
 import { FailureScanner } from '../../../shared/outputFailure';
-import { isFocusOrMouseReport, isUserInput, StatusTracker, type CellStatus, type HookEvent, type HookInfo, type StatusCause, type StatusReason } from '../../../shared/status';
+import { isFocusOrMouseReport, isUserInput, sameDetail, StatusTracker, type CellStatus, type HookEvent, type HookInfo, type StatusCause, type StatusDetail, type StatusReason } from '../../../shared/status';
 import { hookDetail, StatusLog, type StatusTrigger } from '../../../shared/statusLog';
+import { parseShellMark, type ShellMarkKind } from '../../../shared/shellIntegration';
 import { sshModeReset } from '../../../shared/ssh';
 import { DEFAULT_SSH_THEME, sshThemeById } from '../../../shared/sshThemes';
 import type { RemoteListResult } from '../../../shared/remotePaths';
+import type { SshStatsRun } from '../../../shared/sshBar';
 import { EMPTY_CWD, parseOsc7, parseOsc99, trackOsc7, trackOsc99, type CwdTrack } from '../../../shared/remoteCwd';
 import { inputModesOff, isMouseReport, MouseFloodGuard, terminalModeReset } from '../../../shared/termReset';
 import { encodeWin32Key } from '../../../shared/win32input';
@@ -24,9 +26,14 @@ import { applyScrollback, DEFAULT_SCROLLBACK_LINES, MAX_WEBGL_CONTEXTS, PENDING_
 import { nextLossCount, planWebgl, webglBackoff, WebglLimit } from '../../../shared/webglPool';
 import { onWindowShown } from '../windowShown';
 import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
+import { cursorOffset, reflowedCursor, type WrapBuffer } from '../../../shared/cursorReflow';
 
-// Campbell (Windows Terminal / PowerShell default) on a Cursor-like background: every local terminal, and the default SSH theme.
-export const THEME: ITheme = sshThemeById(DEFAULT_SSH_THEME).colors;
+/** The background of a cell card (--card-bg in styles.css): a local terminal draws on the card itself (1.0.7). */
+export const CARD_BG = '#131313';
+
+// Campbell (Windows Terminal / PowerShell default), the colours of the default SSH theme, on the card's background: every
+// local terminal. SSH cells keep their theme's own background (CellView paints the card body with it).
+export const THEME: ITheme = { ...sshThemeById(DEFAULT_SSH_THEME).colors, background: CARD_BG, cursorAccent: CARD_BG };
 
 const FONT = '"Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular", "Courier New", monospace';
 
@@ -64,6 +71,8 @@ interface Entry {
   resizeObs: ResizeObserver | null;
   /** >0 while replayed history is being parsed: terminal query replies must not reach the pty. */
   replaying: number;
+  /** 1.0.7: the prompt marks seen in the replay being parsed (the last one, a C among them, the prompts), see replayedMarks. */
+  replayMarks: { last: ShellMarkKind; sawStart: boolean; prompts: number } | null;
   /** A fit asked for during a replay: it runs once the replay is parsed (a fit in between would parse it at the wrong size). */
   refitAfterReplay: boolean;
   /** The pty runs already and `lastSize` is its size (a replay told it): a presize must resize it too. */
@@ -112,6 +121,7 @@ class TerminalManager {
   private statusListeners = new Set<StatusListener>();
   private exitListeners = new Set<(cellId: string) => void>();
   private bindListeners = new Set<(cellId: string, thread: BoundThread) => void>();
+  private detailListeners = new Set<(cellId: string, detail: StatusDetail | undefined) => void>();
   private floodListeners = new Set<(cellId: string) => void>();
   /** Where a terminal is opened (xterm measures its glyphs there, so it has a real size). */
   private staging: HTMLDivElement;
@@ -240,6 +250,12 @@ class TerminalManager {
   }
 
   private onHostMessage(m: HostToRenderer): void {
+    if (m.t === 'sshStatsResult') {
+      const done = this.statRuns.get(m.reqId);
+      this.statRuns.delete(m.reqId);
+      done?.(m.result);
+      return;
+    }
     if (m.t === 'sshListResult') {
       const done = this.listings.get(m.reqId);
       this.listings.delete(m.reqId);
@@ -254,7 +270,7 @@ class TerminalManager {
         e.infer.exited();
         e.term.write(inputModesOff(this.conpty(e)));
         if (!e.remote) e.term.write(`\r\n\x1b[90m[${tr('Terminal')} · ${tr('zakończony')}]\x1b[0m\r\n`);
-        this.setStatus(e, () => e.tracker.exited(), 'exit');
+        this.setStatus(e, () => e.tracker.exited(m.code), 'exit');
       }
       this.exitListeners.forEach((l) => l(m.id));
       return;
@@ -314,10 +330,15 @@ class TerminalManager {
     const segments = replaySegments(data, sizes);
     const ptySize = finalReplaySize(segments);
     e.replaying++;
+    e.replayMarks = null; // a replay is the whole history: only its own marks count
     writeReplaySegments(e.term, segments, () => {
       e.replaying--;
       if (ptySize) { e.lastSize = ptySize; e.ptyLive = true; } // what the pty has now: the fit below resizes it when the box differs
       if (e.replaying > 0 || this.entries.get(e.id) !== e) return;
+      // The shell still runs where the history left it (at its prompt, or in a command): the status starts from there.
+      const marks = e.replayMarks;
+      e.replayMarks = null;
+      if (marks) this.setStatus(e, () => e.tracker.replayedMarks(marks, performance.now()), 'shell');
       if (ptySize || e.refitAfterReplay) {
         e.refitAfterReplay = false;
         if (this.fitHolds > 0) this.heldFits.add(e); else this.refit(e);
@@ -335,6 +356,7 @@ class TerminalManager {
       existing.agent = opts.agent;
       existing.codex = opts.codex === true;
       existing.tracker.setCodex(existing.codex);
+      existing.tracker.setAgent(existing.agent);
       const remote = opts.remote === true;
       if (existing.remote !== remote) {
         existing.remote = remote;
@@ -375,12 +397,16 @@ class TerminalManager {
 
     const entry: Entry = {
       id: cellId, term, fit, webgl: null, shownAt: 0, outputAt: undefined, webglChangedAt: undefined, webglBlockedUntil: undefined, webglGl: null, webglGrantedAt: -Infinity, webglLosses: 0, host, tracker: new StatusTracker(), win32: false, agent: opts.agent,
-      codex: opts.codex === true, scanner: new FailureScanner(), guard: new MouseFloodGuard(), infer: new AgentInference(window.mc.platform === 'win32' && opts.remote !== true), attachedTo: null, resizeObs: null, replaying: 0, refitAfterReplay: false, ptyLive: false, lastSize: { cols: term.cols, rows: term.rows },
+      codex: opts.codex === true, scanner: new FailureScanner(), guard: new MouseFloodGuard(), infer: new AgentInference(window.mc.platform === 'win32' && opts.remote !== true), attachedTo: null, resizeObs: null, replaying: 0, replayMarks: null, refitAfterReplay: false, ptyLive: false, lastSize: { cols: term.cols, rows: term.rows },
       parkedSelection: null, applySelection: null, remote: opts.remote === true, addon: null,
     };
     entry.tracker.setCodex(entry.codex);
+    entry.tracker.setAgent(entry.agent);
     entry.tracker.onBind = (thread) => this.bindListeners.forEach((l) => l(cellId, thread));
     entry.tracker.bgGuard = () => this.screenWaits(entry);
+    // Prompt marks say "a command runs" only; a full-screen program, an agent typed by hand or a command run in an agent cell
+    // after its CLI ended is judged by its output (see StatusTracker.output).
+    entry.tracker.interactiveGuard = () => this.inAlternate(entry) || entry.agent || entry.infer.agent !== null;
     this.entries.set(cellId, entry);
     this.syncAddon(entry);
     this.statusTimer ??= setInterval(() => this.tickStatuses(), 400);
@@ -414,6 +440,19 @@ class TerminalManager {
       if (entry.remote) this.remoteCwds.set(cellId, trackOsc7(this.remoteCwds.get(cellId) ?? EMPTY_CWD, parseOsc7(payload)));
       return true;
     });
+    // Prompt marks of the shell (OSC 133, and VS Code's OSC 633 from a remote shell set up for it): command running vs at the
+    // prompt, the exit code, and an agent CLI that ended back to its shell (shellIntegration.ts). A replay is history, not news.
+    const shellMark = (payload: string) => {
+      const mark = parseShellMark(payload);
+      if (mark && entry.replaying === 0) this.setStatus(entry, () => entry.tracker.shellMark(mark.kind, performance.now(), mark.code), 'shell');
+      else if (mark && mark.kind !== 'D') {
+        const seen = entry.replayMarks;
+        entry.replayMarks = { last: mark.kind, sawStart: (seen?.sawStart ?? false) || mark.kind === 'C', prompts: (seen?.prompts ?? 0) + (mark.kind === 'A' ? 1 : 0) };
+      }
+      return true;
+    };
+    term.parser.registerOscHandler(133, shellMark);
+    term.parser.registerOscHandler(633, shellMark);
     term.onBell(() => {
       if (entry.agent && entry.replaying === 0) this.setStatus(entry, () => entry.tracker.osc9(), 'osc9');
     });
@@ -720,13 +759,36 @@ class TerminalManager {
     e.attachedTo = null;
   }
 
+  /**
+   * fit() of a terminal. A ConPTY terminal reflows the line with the cursor (reflowCursorLine) but xterm leaves the cursor's
+   * column as it was; it goes back to its place in the reflowed line, where ConPTY has it (shared/cursorReflow.ts, 1.0.7).
+   */
+  private fitTerm(e: Entry): void {
+    const view = (): WrapBuffer => {
+      const b = e.term.buffer.active;
+      return { cursorRow: b.baseY + b.cursorY, cursorX: b.cursorX, isWrapped: (row) => b.getLine(row)?.isWrapped === true };
+    };
+    // Only a terminal at rest (a prompt): with output still on its way the parsed buffer is not where ConPTY's cursor is.
+    const quiet = e.outputAt === undefined || performance.now() - e.outputAt > 250;
+    const track = e.term.options.reflowCursorLine === true && e.term.buffer.active.type === 'normal' && quiet && e.tracker.status !== 'working';
+    const cols = e.term.cols;
+    const offset = track ? cursorOffset(view(), cols) : 0;
+    e.fit.fit();
+    if (!track || e.term.cols === cols) return;
+    const to = reflowedCursor(view(), offset, e.term.cols);
+    if (!to) return;
+    const y = to.row - e.term.buffer.active.baseY;
+    if (y < 0 || y >= e.term.rows) return;
+    e.term.write(`[${y + 1};${to.x + 1}H`); // to the terminal only: nothing reaches the pty
+  }
+
   private refit(e: Entry): void {
     if (e.replaying > 0) { e.refitAfterReplay = true; return; }
     if (!e.attachedTo || !e.attachedTo.isConnected || !this.windowShown) return; // a hidden window refits on show
     const { clientWidth, clientHeight } = e.attachedTo;
     if (clientWidth < 20 || clientHeight < 20) return;
     try {
-      e.fit.fit();
+      this.fitTerm(e);
     } catch {
       return;
     }
@@ -748,7 +810,7 @@ class TerminalManager {
     e.host.style.width = `${Math.floor(width)}px`;
     e.host.style.height = `${Math.floor(height)}px`;
     try {
-      e.fit.fit();
+      this.fitTerm(e);
       const changed = e.term.cols !== e.lastSize.cols || e.term.rows !== e.lastSize.rows;
       e.lastSize = { cols: e.term.cols, rows: e.term.rows };
       // An adopted pty (replayed) is not spawned at this size: it has to be told.
@@ -864,6 +926,19 @@ class TerminalManager {
     });
   }
 
+  private statRuns = new Map<number, (result: SshStatsRun) => void>();
+
+  /** SSH status bar (1.0.7): one run of sshBar.barScript on the cell's own SSH connection (see SshManager.stats). */
+  sshStats(cellId: string, first: boolean): Promise<SshStatsRun> {
+    if (!this.port) return Promise.resolve({ ok: false, reason: 'gone' });
+    const reqId = ++this.listingId;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { this.statRuns.delete(reqId); resolve({ ok: false, reason: 'gone' }); }, 8000);
+      this.statRuns.set(reqId, (result) => { clearTimeout(timer); resolve(result); });
+      this.post({ t: 'sshStats', id: cellId, reqId, first });
+    });
+  }
+
   private remoteAddon: ((cellId: string, term: Terminal) => RemoteAddon) | null = null;
 
   /** Installs the add-on of SSH terminals (once, at startup); terminals that exist already get it too. */
@@ -959,6 +1034,17 @@ class TerminalManager {
     return () => this.statusListeners.delete(l);
   }
 
+  /** The short reason of a cell's status changed (tool, permission, exit code...; see StatusDetail), with or without a status change. */
+  onDetail(l: (cellId: string, detail: StatusDetail | undefined) => void): () => void {
+    this.detailListeners.add(l);
+    return () => this.detailListeners.delete(l);
+  }
+
+  /** The current status detail of a cell (undefined when there is none). */
+  detail(cellId: string): StatusDetail | undefined {
+    return this.entries.get(cellId)?.tracker.detail;
+  }
+
   /** A Codex turn end was committed and names the thread the cell's stored session should become. */
   onCodexBind(l: (cellId: string, thread: BoundThread) => void): () => void {
     this.bindListeners.add(l);
@@ -981,9 +1067,15 @@ class TerminalManager {
 
   private setStatus(e: Entry, change: () => unknown, trigger: StatusTrigger, info?: HookInfo): void {
     const prev = e.tracker.status;
+    const prevDetail = e.tracker.detail;
     const result = change();
     const { status, lastCause, lastReason, lastError } = e.tracker;
-    const hookEvent = trigger === 'stop' || trigger === 'stopbg' || trigger === 'notify' || trigger === 'busy' || trigger === 'fail' || trigger === 'prompt' || trigger === 'session';
+    if (!sameDetail(prevDetail, e.tracker.detail)) {
+      const detail = e.tracker.detail;
+      this.detailListeners.forEach((l) => l(e.id, detail));
+    }
+    const hookEvent = trigger === 'stop' || trigger === 'stopbg' || trigger === 'notify' || trigger === 'busy' || trigger === 'fail' || trigger === 'prompt' || trigger === 'session'
+      || trigger === 'idle' || trigger === 'compact' || trigger === 'compacted';
     // Transitions are always logged; hook events that changed nothing only when they matter (busy spam would evict the history).
     const changed = status !== prev;
     if (changed || result === 'renotify' || (hookEvent && (trigger !== 'busy' || result === 'ignored'))) {

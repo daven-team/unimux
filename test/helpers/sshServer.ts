@@ -67,6 +67,12 @@ export interface TestServerOptions {
   shellHome?: string;
   /** With shellRoot: the shell reports its folder with OSC 7 at every prompt (fish, vte.sh); off: only the server knows it. */
   shellOsc7?: boolean;
+  /**
+   * 1.0.7: answers the status bar script (src/shared/sshBar.ts, an `exec sh -s` whose script starts "# unimux status bar")
+   * like a Debian or Alpine server would (counters that grow from run to run), or like a Windows server whose shell has no
+   * sh ('windows'). Every run is counted in `barRuns`.
+   */
+  bar?: 'debian' | 'alpine' | 'windows';
 }
 
 /** Test knobs and counters of the SFTP subsystem (mutable while the server runs). */
@@ -89,6 +95,8 @@ export interface SftpServerStats {
   modes: Map<string, number>;
   /** Exec commands received (sudo), in order. */
   execs: string[];
+  /** Status bar runs answered (see `bar`), with the time each arrived. */
+  barRuns: number[];
   /** Environment requests of exec channels ("LC_ALL=C"). */
   envs: string[];
   /** Bytes a sudo -S run received before it printed its prompt (a password written too early). */
@@ -235,6 +243,50 @@ function answerListing(script: string, root: string, home: string, state: FakeSh
   out += `@dir ${dir}\n`;
   const names = readdirSync(local.path).sort().map((n) => (shellLocal(root, `${dir}/${n}`)?.dir ? `${n}/` : n));
   return out + names.slice(0, 501).map((n) => `${n}\n`).join('');
+}
+
+/** What a Debian or Alpine server prints for the status bar script (sshBar.barScript); counters grow with `run`. */
+function answerBar(kind: 'debian' | 'alpine', first: boolean, run: number): string {
+  const wave = (n: number) => Math.round(30 + 25 * Math.sin(n / 3) + (n % 4) * 6);
+  let busy = 0;
+  for (let i = 1; i <= run; i++) busy += wave(i);
+  const total = run * 400;
+  const rx = run * 40_000 + (run % 3) * 9000;
+  const tx = run * 9_000;
+  const debian = kind === 'debian';
+  return [
+    'Last login: Fri Oct 24 09:12:01 2026 from 192.168.1.20',
+    '@v 1',
+    `@host ${debian ? 'srv36' : 'alpine-box'}`,
+    `@kernel Linux ${debian ? '6.1.0-18-amd64' : '6.6.14-0-virt'}`,
+    ...(first ? (debian
+      ? ['@osr PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"', '@osr ID=debian', '@ncpu 2']
+      : ['@osr ID=alpine', '@osr PRETTY_NAME="Alpine Linux v3.19"', '@ncpu 1']) : []),
+    `@user ${debian ? 'root' : 'alice'}`,
+    `@stat cpu  ${busy} 0 0 ${total - busy} 0 0 0 0 0 0`,
+    '@mem MemTotal:        1004500 kB',
+    `@mem MemAvailable:     ${763000 - (run % 5) * 1000} kB`,
+    `@net   eth0: ${rx} 10 0 0 0 0 0 0 ${tx} 10 0 0 0 0 0 0`,
+    '@net     lo: 5000 10 0 0 0 0 0 0 5000 10 0 0 0 0 0 0',
+    '@load 0.08 0.03 0.01 1/123 4567',
+    '@uptime 1234567.89 2345678.12',
+    '@tty pts/0',
+    ...(debian ? [
+      '@who root     pts/0        2026-10-24 09:12 (192.168.1.20)',
+      '@who root     pts/1        2026-10-24 10:40 (10.0.0.7)',
+      '@who backup   pts/2        2026-10-23 22:05 (10.0.0.12)',
+      '@df /dev/sda1        20511312 17804216   1641840      92% /',
+      '@df udev               484608        0    484608       0% /dev',
+      '@df /dev/sdb1       102687672 80000000  17428000      83% /srv/data',
+      '@df /dev/sdc1       512000000 40000000 446000000       9% /var/backups',
+    ] : [
+      '@who USER       TTY      IDLE      TIME            HOST',
+      '@who alice      pts/0    00:00     Oct 24 10:22:33 192.168.56.1',
+      '@df /dev/sda3              7854264   900000   6527264  13% /',
+    ]),
+    '@end',
+    '',
+  ].join('\n');
 }
 
 /** The fake shell on one shell channel: echo, backspace, Enter runs the command; a program takes the keys until it quits. */
@@ -494,7 +546,7 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
   const input: string[] = [];
   const shells: ServerChannel[] = [];
   const conns = new Set<Connection>();
-  const sftpStats: SftpServerStats = { delayMs: 0, openWrites: 0, maxOpenWrites: 0, ops: [], failWritesAfter: null, written: 0, renameFail: null, chmods: [], modes: new Map(), execs: [], envs: [], sudoEarlyInput: 0, opens: [], owners: new Map() };
+  const sftpStats: SftpServerStats = { delayMs: 0, openWrites: 0, maxOpenWrites: 0, ops: [], failWritesAfter: null, written: 0, renameFail: null, chmods: [], modes: new Map(), execs: [], barRuns: [], envs: [], sudoEarlyInput: 0, opens: [], owners: new Map() };
   const sftpExt = { posixRename: opts.sftpPosixRename === true, lsetstat: opts.sftpLsetstat === true };
   const forwards: TestServer['forwards'] = [];
 
@@ -548,12 +600,25 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
         acceptEnv?.();
       });
       session.on('exec', (acceptExec, rejectExec, info) => {
-        if (opts.shellRoot && info.command === 'exec sh -s') {
+        if ((opts.shellRoot || opts.bar) && info.command === 'exec sh -s') {
           const stream = acceptExec();
           sftpStats.execs.push(info.command);
           let script = '';
           stream.on('data', (chunk: Buffer) => { script += chunk.toString('utf8'); });
           stream.on('end', () => {
+            if (script.startsWith('# unimux status bar')) {
+              sftpStats.barRuns.push(Date.now());
+              if (opts.bar === 'windows' || !opts.bar) {
+                stream.stderr.write("'exec' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n");
+                stream.exit(1);
+              } else {
+                stream.write(answerBar(opts.bar, script.includes('/etc/os-release'), sftpStats.barRuns.length));
+                stream.exit(0);
+              }
+              stream.end();
+              return;
+            }
+            if (!opts.shellRoot) { stream.exit(127); stream.end(); return; }
             stream.write(answerListing(script, opts.shellRoot!, shellHome, shellState));
             stream.exit(0);
             stream.end();

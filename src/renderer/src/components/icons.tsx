@@ -32,7 +32,9 @@ export const IChangelog = () => <Svg><path d="M3 3.5h10M3 8h10M3 12.5h6" /><path
 export const ICloud = () => <Svg size={12}><path d="M4.5 12.5a3 3 0 0 1-.4-5.97 4 4 0 0 1 7.7 1.07A2.5 2.5 0 0 1 11.5 12.5z" /></Svg>;
 export const ITag = () => <Svg size={11}><path d="M8.6 2H13a1 1 0 0 1 1 1v4.4a1 1 0 0 1-.3.7l-5.6 5.6a1 1 0 0 1-1.4 0L2.3 9.3a1 1 0 0 1 0-1.4l5.6-5.6a1 1 0 0 1 .7-.3z" /><path d="M11 5h.01" /></Svg>;
 export const IMore = () => <Svg><path d="M3.5 8h.01M8 8h.01M12.5 8h.01" strokeWidth="2.6" /></Svg>;
-export const IServer = () => <Svg><rect x="2.5" y="2.5" width="11" height="4.5" rx="1.2" /><rect x="2.5" y="9" width="11" height="4.5" rx="1.2" /><path d="M5 4.75h.01M5 11.25h.01" strokeWidth="2" /></Svg>;
+/** A shell prompt ">_" (the icon of a shell cell). */
+export const IPrompt = () => <Svg size={13}><path d="M3.5 4.5 7 8l-3.5 3.5M8.5 12h4" /></Svg>;
+export const IServer =() => <Svg><rect x="2.5" y="2.5" width="11" height="4.5" rx="1.2" /><rect x="2.5" y="9" width="11" height="4.5" rx="1.2" /><path d="M5 4.75h.01M5 11.25h.01" strokeWidth="2" /></Svg>;
 export const IKey = () => <Svg><circle cx="5.5" cy="10.5" r="3" /><path d="M7.6 8.4 13.5 2.5M11.5 4.5l1.5 1.5M10 6l1.2 1.2" /></Svg>;
 export const IShield = () => <Svg><path d="M8 1.8 13 3.8v3.8c0 3-2.1 5.4-5 6.6-2.9-1.2-5-3.6-5-6.6V3.8z" /><path d="m5.8 8 1.6 1.6 2.9-3" /></Svg>;
 export const IDatabase = () => <Svg><ellipse cx="8" cy="3.8" rx="5" ry="1.8" /><path d="M3 3.8v8.4c0 1 2.2 1.8 5 1.8s5-.8 5-1.8V3.8M3 8c0 1 2.2 1.8 5 1.8S13 9 13 8" /></Svg>;
@@ -107,6 +109,11 @@ export const TSettings = () => (
     <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
     <circle cx="12" cy="12" r="3" />
   </T>
+);
+
+/** A small robot: the AI team panel (tasks and messages of the agents) in the title bar, instead of the letters "AI". */
+export const TTeam = () => (
+  <T><path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M2 14h2M20 14h2M15 13v2M9 13v2" /></T>
 );
 
 /** Compact, bold plus for pill buttons. */

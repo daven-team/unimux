@@ -139,6 +139,41 @@ export class CliDetector {
     return entries.length ? withPath(env, joinPath(entries, platform), platform) : env;
   }
 
+  /**
+   * Version of the binary a cell started with `env` really runs. The detection prefers known install folders, but the cell's
+   * shell types the bare name and takes the first PATH entry that has it: an older npm install earlier on the PATH is what the
+   * cell gets. Then that binary is asked (`--version`, cached per path, at most `waitMs`; undefined when unknown or slow).
+   * A command the user's PowerShell resolves itself (source `shell`: alias, function, profile PATH) keeps the detected version.
+   */
+  async versionFor(cli: CliId, env: Record<string, string | undefined>, waitMs = 2000): Promise<string | undefined> {
+    const { platform } = this.deps;
+    const detected = this.cache.get(cli);
+    if (detected?.state === 'found' && detected.source === 'shell') return detected.version;
+    const names = executableNames(cli, platform, getEnv(env, 'PATHEXT', platform));
+    let first: string | null = null;
+    for (const dir of splitPath(getEnv(env, 'PATH', platform), platform)) {
+      for (const name of names) {
+        const full = this.path.join(dir, name);
+        if (await this.deps.isFile(full)) { first = full; break; }
+      }
+      if (first) break;
+    }
+    const same = (a: string, b: string) => (platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+    // Not on the PATH (an alias or a login-shell PATH) or the detected binary's folder itself: the detection is right.
+    if (!first || (detected?.path && same(this.path.dirname(first), this.path.dirname(detected.path)))) return detected?.version;
+    const cached = this.pathVersions.get(first);
+    if (cached && this.deps.now() - cached.at <= FOUND_TTL_MS) return cached.version;
+    const path = first;
+    const run = this.verify(cli, path, 'path').then((status) => {
+      this.pathVersions.set(path, { version: status.version, at: this.deps.now() });
+      return status.version;
+    }).catch(() => undefined);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const slow = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), waitMs); });
+    try { return await Promise.race([run, slow]); } finally { clearTimeout(timer); }
+  }
+  private pathVersions = new Map<string, { version: string | undefined; at: number }>();
+
   private refresh(cli: CliId): Promise<CliStatus> {
     const existing = this.inflight.get(cli);
     if (existing) return existing;

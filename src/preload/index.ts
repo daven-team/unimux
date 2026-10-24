@@ -145,6 +145,11 @@ const api: McApi = {
   },
   dbPickCaFile: () => ipcRenderer.invoke('db:pickCaFile'),
   dbExport: (name, text) => ipcRenderer.invoke('db:export', name, text),
+  notes: {
+    saveImage: (bytes, mime) => ipcRenderer.invoke('notes:image:save', bytes, mime),
+    readImage: (name) => ipcRenderer.invoke('notes:image:read', name),
+    exportFile: (name, text) => ipcRenderer.invoke('notes:export', name, text),
+  },
   db: {
     saveConnection: (input, password) => ipcRenderer.invoke('db:connections:save', input, password),
     deleteConnection: (id) => ipcRenderer.invoke('db:connections:delete', id),

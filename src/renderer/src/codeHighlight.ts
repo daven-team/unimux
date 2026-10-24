@@ -1,12 +1,12 @@
 // The CodeMirror languages of notes and snippets with code (1.0.6), loaded on demand (see useCodeHighlight.ts): the editor's
 // language and a static highlighter for snippet cards and the code blocks of a note's Markdown preview.
 import { StreamLanguage, type Language } from '@codemirror/language';
-import { classHighlighter, highlightTree } from '@lezer/highlight';
+import { classHighlighter, highlightTree, styleTags, tags } from '@lezer/highlight';
 import { javascript } from '@codemirror/lang-javascript';
 import { json } from '@codemirror/lang-json';
 import { css } from '@codemirror/lang-css';
 import { html } from '@codemirror/lang-html';
-import { markdown } from '@codemirror/lang-markdown';
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { python } from '@codemirror/lang-python';
 import { yaml } from '@codemirror/legacy-modes/mode/yaml';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
@@ -18,13 +18,18 @@ import { standardSQL } from '@codemirror/legacy-modes/mode/sql';
 import { toml } from '@codemirror/legacy-modes/mode/toml';
 import { highlightRuns, resolveCodeLanguage, runsToHtml, type CodeLanguage, type HighlightRange } from '../../shared/codeLanguages';
 
+/** A task box (`[x]`) styled like the list mark next to it; GFM tags it as an atom, which the editor paints as a keyword. */
+const TASK_MARKER_PLAIN = { props: [styleTags({ TaskMarker: tags.processingInstruction })] };
+
 const cache = new Map<CodeLanguage, Language | null>();
 
 function build(id: CodeLanguage): Language | null {
   switch (id) {
     case 'text': return null;
     // Markdown highlights the code of a fenced block in the language named after the fence (```ts, ```sql, ```bash ...).
-    case 'markdown': return markdown({ codeLanguages: (info) => {
+    // GFM (markdownLanguage): "- [x]" is a task marker, not a link (drawn like the list's "-", not as a keyword), and
+    // tables and ~~strikes~~ are known (1.0.7).
+    case 'markdown': return markdown({ base: markdownLanguage, extensions: [TASK_MARKER_PLAIN], codeLanguages: (info) => {
       const inner = resolveCodeLanguage(info);
       return inner && inner !== 'markdown' ? codeLanguage(inner) : null;
     } }).language;

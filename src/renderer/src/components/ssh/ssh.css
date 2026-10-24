@@ -1,5 +1,5 @@
 /* src/renderer/src/components/ssh/ssh.css - SSH UI, existing tokens only (spec 10). */
-.ssh-card { position: absolute; inset: var(--cell-head) 0 0 0; z-index: 3; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 8px; overflow: auto; container-type: size; }
+.ssh-card { position: absolute; inset: var(--cell-head) 0 0 0; z-index: 3; background: var(--card-bg); display: flex; align-items: center; justify-content: center; padding: 8px; overflow: auto; container-type: size; }
 .ssh-card.danger { box-shadow: inset 0 0 0 1px #ef4444; }
 .ssh-card-title { color: var(--text); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .ssh-card-title.danger { color: #ef4444; }
@@ -24,7 +24,7 @@
 .ssh-editor .styled-select { min-height: 30px; padding: 4px 8px; }
 .ssh-editor textarea.input { resize: vertical; }
 .ssh-editor .check { font-size: 12px; }
-.ssh-editor .check input { accent-color: #a8a29e; }
+.ssh-editor .check input { accent-color: var(--btn-primary-bg); }
 .ssh-row { display: flex; gap: 8px; align-items: flex-start; }
 .ssh-row > .btn { flex: none; height: 30px; }
 .ssh-row .grow, .ssh-actions .grow { flex: 1; min-width: 0; }
@@ -53,7 +53,7 @@
 /* Host groups of the SSH view. IChevron points down by default, so a folded group turns it to the right (L7). */
 .ssh-group-head { display: flex; align-items: center; gap: 4px; width: calc(100% - 12px); margin: 2px 6px 0 6px; padding: 2px 4px; background: none; border: 0; color: var(--muted); font-size: 11px; cursor: pointer; border-radius: 4px; text-align: left; }
 .ssh-group-head:hover { background: var(--bg-hover); }
-.ssh-group-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ssh-group-head:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .ssh-group-head .chev-right svg { transform: rotate(-90deg); }
 .ssh-group-head .chev-down, .ssh-group-head .chev-right { display: inline-flex; flex: none; }
 .ssh-group-head .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -79,7 +79,7 @@
 .ssh-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr)); gap: 6px; margin: 4px 0 0; }
 .ssh-tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 8px 12px; border: 1px solid #ffffff0d; border-radius: 8px; background: #202020; color: var(--text); text-align: left; cursor: pointer; }
 .ssh-tile:hover { background: #262626; }
-.ssh-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ssh-tile:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .ssh-tile.current { border-color: var(--accent); }
 .ssh-tile.selected { background: var(--bg-hover); box-shadow: inset 3px 0 0 var(--accent); }
 .ssh-tile-name { max-width: calc(100% - 14px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
@@ -115,7 +115,7 @@
 .ssh-group-tiles { display: flex; flex-wrap: wrap; gap: 6px; }
 .ssh-group-tile { display: inline-flex; align-items: center; gap: 8px; max-width: 240px; height: 30px; padding: 0 10px 0 12px; border: 1px solid #ffffff0d; border-radius: 8px; background: #202020; color: var(--text-2); font-size: 12px; cursor: pointer; }
 .ssh-group-tile:hover { background: #262626; color: var(--text); }
-.ssh-group-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ssh-group-tile:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .ssh-group-tile.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
 .ssh-group-tile-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ssh-group-tile-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 8px; background: #ffffff0f; color: var(--muted); font-size: 11px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
@@ -176,7 +176,7 @@
 .ssh-host-edit { position: absolute; top: 50%; right: 8px; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); cursor: pointer; opacity: 0; transform: translateY(-50%); }
 .ssh-host-card:hover .ssh-host-edit, .ssh-host-tile.picked + .ssh-host-edit, .ssh-host-edit:focus-visible { opacity: 1; }
 .ssh-host-edit:hover { background: #ffffff14; color: var(--text); }
-.ssh-host-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ssh-host-edit:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 /* The keychain (Klucze): identities above the keys. */
 .ssh-view-subtitle { margin: 0; color: var(--text-2); font-size: 12px; font-weight: 600; }
 .ssh-tile.ssh-identity-tile { flex-direction: row; align-items: center; gap: 10px; }
@@ -199,7 +199,7 @@
 .ssh-he-trail { position: absolute; top: 50%; right: 4px; display: inline-flex; gap: 2px; transform: translateY(-50%); }
 .ssh-he-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
 .ssh-he-icon-btn:hover { background: #ffffff12; color: var(--text); }
-.ssh-he-icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ssh-he-icon-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 /* Tags: the chips and the input share one field that grows a line at a time. */
 .ssh-he-input.ssh-he-tags { flex-wrap: wrap; gap: 4px; min-height: 34px; padding: 3px 6px 3px 34px; box-sizing: border-box; border: 1px solid #ffffff0d; border-radius: 8px; background: #171717; }
 .ssh-he-tags .ssh-he-lead { top: 17px; }
@@ -212,7 +212,7 @@
 .ssh-he-chip-meta { flex: 1; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .ssh-he-add { display: inline-flex; align-self: flex-start; align-items: center; gap: 6px; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font-size: 12.5px; cursor: pointer; }
 .ssh-he-add:hover { background: #ffffff0d; color: var(--text); }
-.ssh-he-add:focus-visible, .ssh-he-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ssh-he-add:focus-visible, .ssh-he-more:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .ssh-he-combo { position: relative; }
 .ssh-he-suggest { position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; left: 0; max-height: 240px; margin: 0; padding: 4px; overflow: auto; list-style: none; border: 1px solid #343434; border-radius: 10px; background: #1c1c1c; box-shadow: 0 8px 24px #0008; }
 .ssh-he-suggest li { position: relative; display: flex; align-items: center; min-height: 40px; padding: 4px 8px 4px 34px; border-radius: 7px; cursor: pointer; }

@@ -13,8 +13,8 @@ import { cellShownHere, detachedId } from './windowRole';
 import { activateWorkspaceKey, currentStrip } from './workspaceStrip';
 
 /** A file tab that can go to its own window: an editor or diff of a project file or a local file (not a database view, not a remote file). */
-export function canDetachFile(doc: Pick<FileDocument, 'db' | 'redis' | 'source' | 'saving'>): boolean {
-  return !doc.db && !doc.redis && doc.source?.kind !== 'remote' && !doc.saving;
+export function canDetachFile(doc: Pick<FileDocument, 'db' | 'redis' | 'source' | 'saving' | 'note'>): boolean {
+  return !doc.db && !doc.redis && !doc.note && doc.source?.kind !== 'remote' && !doc.saving;
 }
 
 function reopenOf(doc: FileDocument): DetachedReopen {

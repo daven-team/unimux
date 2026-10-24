@@ -12,7 +12,8 @@ import { closeTab, createProject, relocateProject, removeProject, selectTab, swi
 import { askText, setUi, update, useStore } from '../store';
 import { useSshStore } from '../sshStore';
 import { openMenu } from './ContextMenu';
-import { IFolder, IGrid, IHistory, IPlus } from './icons';
+import { IEdit, IFile, IFolder, IGrid, IHistory, IPlus, ISnippet, IX } from './icons';
+import { ICodeEditor, IEye, IEyeOff, IMoveDown, IMoveUp, IWidth } from './menuIcons';
 import { dropEdge, scrollDragList } from './listDrag';
 import { PanelEmpty } from './PanelEmpty';
 import { StatusBadges } from './StatusBadges';
@@ -43,13 +44,13 @@ function TabList({ project, active, countsOf }: { project: Project; active: bool
               e.stopPropagation();
               openMenu(e.clientX, e.clientY, [
                 { header: t.name },
-                { label: tr("Zmień nazwę gridu…"), onClick: async () => {
+                { label: tr("Zmień nazwę gridu…"), icon: <IEdit />, onClick: async () => {
                   const name = await askText(tr("Nazwa gridu"), t.name);
                   if (name?.trim()) update((s) => renameTab(s, project.id, t.id, name.trim()));
                 } },
-                { label: tr("Nowy grid") + '…', onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
+                { label: tr("Nowy grid") + '…', icon: <IGrid />, onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
                 { sep: true },
-                { label: tr("Zamknij grid"), onClick: () => void closeTab(project.id, t.id) },
+                { label: tr("Zamknij grid"), icon: <IX />, onClick: () => void closeTab(project.id, t.id) },
               ]);
             }}
             onClick={() => selectTab(project.id, t)}
@@ -91,19 +92,19 @@ export function ProjectsPanel({ resize }: PanelProps) {
     e.preventDefault();
     openMenu(e.clientX, e.clientY, [
       { header: tr("Panel projektów") },
-      { label: tr("Dodaj projekt") + '…', onClick: () => void createProject() },
+      { label: tr("Dodaj projekt") + '…', icon: <IPlus />, onClick: () => void createProject() },
       ...(project ? [
-        { label: tr("Nowy grid") + '…', onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
-        { label: tr("Przeglądaj pliki projektu"), onClick: () => openFiles(project) },
+        { label: tr("Nowy grid") + '…', icon: <IGrid />, onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
+        { label: tr("Przeglądaj pliki projektu"), icon: <IFile />, onClick: () => openFiles(project) },
       ] : []),
       { sep: true },
-      { label: tr("Nowy snippet") + '…', onClick: () => {
+      { label: tr("Nowy snippet") + '…', icon: <ISnippet />, onClick: () => {
         update((st) => ({ ...st, snippetsOpen: true }));
         setUi({ modal: { kind: 'snippet', snippetId: null } });
       } },
-      { label: snippetsOpen ? tr("Ukryj snippety") : tr("Pokaż snippety"), hint: shortcutText('snippets.toggle') || undefined, onClick: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) },
+      { label: snippetsOpen ? tr("Ukryj snippety") : tr("Pokaż snippety"), icon: snippetsOpen ? <IEyeOff /> : <IEye />, hint: shortcutText('snippets.toggle') || undefined, onClick: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) },
       { sep: true },
-      { label: tr("Przywróć szerokość panelu"), onClick: () => resize.onFinish(PANEL_LIMITS.sidebar.default) },
+      { label: tr("Przywróć szerokość panelu"), icon: <IWidth />, onClick: () => resize.onFinish(PANEL_LIMITS.sidebar.default) },
     ]);
   };
 
@@ -113,22 +114,19 @@ export function ProjectsPanel({ resize }: PanelProps) {
     const index = projects.findIndex((item) => item.id === p.id);
     openMenu(e.clientX, e.clientY, [
       { header: p.name },
-      { label: tr("Edytuj projekt (nazwa, ikona)…"), onClick: () => setUi({ modal: { kind: 'project', projectId: p.id } }) },
-      { label: tr("Zmień nazwę"), onClick: async () => {
-        const name = await askText(tr("Nazwa projektu"), p.name);
-        if (name?.trim()) update((st) => updateProject(st, p.id, { name: name.trim() }));
-      } },
+      // 1.0.7: no separate "Zmień nazwę" here: the project editor renames as well.
+      { label: tr("Edytuj projekt (nazwa, ikona)…"), icon: <IEdit />, onClick: () => setUi({ modal: { kind: 'project', projectId: p.id } }) },
       { colors: PROJECT_COLORS, onPick: (color) => update((st) => updateProject(st, p.id, { color })) },
-      ...(index > 0 ? [{ label: tr("Przesuń wyżej"), onClick: () => update((st) => moveProject(st, p.id, projects[index - 1].id, 'before')) }] : []),
-      ...(index < projects.length - 1 ? [{ label: tr("Przesuń niżej"), onClick: () => update((st) => moveProject(st, p.id, projects[index + 1].id, 'after')) }] : []),
+      ...(index > 0 ? [{ label: tr("Przesuń wyżej"), icon: <IMoveUp />, onClick: () => update((st) => moveProject(st, p.id, projects[index - 1].id, 'before')) }] : []),
+      ...(index < projects.length - 1 ? [{ label: tr("Przesuń niżej"), icon: <IMoveDown />, onClick: () => update((st) => moveProject(st, p.id, projects[index + 1].id, 'after')) }] : []),
       { sep: true },
-      { label: tr("Przeglądaj pliki projektu"), onClick: () => openFiles(p) },
-      { label: tr("Otwórz folder"), onClick: () => window.mc.openPath(p.path) },
-      { label: tr("Otwórz w Cursorze"), onClick: () => window.mc.openInEditor(p.path) },
-      { label: tr("Historia"), onClick: () => setUi({ modal: { kind: 'history', projectId: p.id } }) },
-      { label: tr("Zmień folder…"), onClick: () => void relocateProject(p.id) },
+      { label: tr("Przeglądaj pliki projektu"), icon: <IFile />, onClick: () => openFiles(p) },
+      { label: tr("Otwórz folder"), icon: <IFolder />, onClick: () => window.mc.openPath(p.path) },
+      { label: tr("Otwórz w Cursorze"), icon: <ICodeEditor />, onClick: () => window.mc.openInEditor(p.path) },
+      { label: tr("Historia"), icon: <IHistory />, onClick: () => setUi({ modal: { kind: 'history', projectId: p.id } }) },
+      { label: tr("Zmień folder…"), icon: <IFolder />, onClick: () => void relocateProject(p.id) },
       { sep: true },
-      { label: tr("Usuń z listy"), danger: true, onClick: () => void removeProject(p.id) },
+      { label: tr("Usuń z listy"), icon: <IX />, danger: true, onClick: () => void removeProject(p.id) },
     ]);
   };
 

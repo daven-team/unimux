@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cellBodyBox, chooseGridSize } from '../src/shared/cellBox';
+import { CELL_GAP, cellBodyBox, chooseGridSize } from '../src/shared/cellBox';
 import { createLayout } from '../src/shared/layout';
 
 describe('where a background terminal is fitted', () => {
@@ -18,10 +18,13 @@ describe('where a background terminal is fitted', () => {
     expect(chooseGridSize([{ width: 0, height: 0 }, { width: 100, height: 50 }], null)).toBeNull();
   });
 
-  it('computes the body of a cell: its share of the grid minus header, padding and the grid line', () => {
-    const box = cellBodyBox(createLayout(3, 1), 1, { width: 900, height: 600 }, 30)!;
-    expect(box.width).toBeCloseTo(900 / 3 - 9, 5);
-    expect(box.height).toBeCloseTo(600 - 35, 5);
+  it('computes the body of a cell card: its share of the grid without the gaps, minus header and padding', () => {
+    // 1.0.7: the areas share the grid minus one gap; a card keeps half a gap on each side; the terminal is padded 10/6 and 6/8.
+    const box = cellBodyBox(createLayout(3, 1), 1, { width: 906, height: 606 }, 34)!;
+    expect(CELL_GAP).toBe(6);
+    expect(box.width).toBeCloseTo(300 - 6 - 16, 5);
+    expect(box.height).toBeCloseTo(600 - 6 - 34 - 14, 5);
+    expect(cellBodyBox(createLayout(3, 1), 1, { width: 906, height: 606 }, 34, 24)!.height).toBeCloseTo(box.height - 24, 5);
     expect(cellBodyBox(createLayout(3, 1), 7, { width: 900, height: 600 })).toBeNull();
   });
 });

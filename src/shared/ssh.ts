@@ -116,7 +116,9 @@ export type SshErrorCode = 'dns' | 'refused' | 'timeout' | 'unreachable' | 'rese
   /** 1.0.0: the DB Host (which runs the SSH tunnels of database sessions) restarted. */
   | 'dbHostCrashed'
   /** SFTP through sudo (0.9.9): wrong password, requiretty, not allowed, no sftp-server found, anything else. */
-  | 'sudoPassword' | 'sudoTty' | 'sudoDenied' | 'sudoNoServer' | 'sudoFailed' | 'sudoMissing';
+  | 'sudoPassword' | 'sudoTty' | 'sudoDenied' | 'sudoNoServer' | 'sudoFailed' | 'sudoMissing'
+  /** 1.0.7: main refused the connect request itself (its shape: ids, terminal size), before any network step. */
+  | 'badRequest';
 
 export interface SshSessionState {
   cellId: string;
@@ -460,6 +462,7 @@ export function sshErrorText(code: SshErrorCode, ctx: { host: string; endpoint: 
     case 'sudoFailed': return { key: 'Nie udało się uruchomić SFTP przez sudo' };
     case 'sudoMissing': return { key: 'Na serwerze nie ma polecenia sudo' };
     case 'cancelled': return { key: 'Anulowano' };
+    case 'badRequest': return { key: 'Aplikacja odrzuciła żądanie połączenia (nieprawidłowy rozmiar terminala lub identyfikator komórki) - spróbuj połączyć ponownie' };
     default: return { key: 'Nieznany błąd SSH' };
   }
 }

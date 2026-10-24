@@ -117,6 +117,19 @@ export function describeLayout(layout: GridLayout): string {
 export type Axis = 'col' | 'row';
 /** No area may shrink below this share of the grid while a divider is dragged. */
 export const MIN_AREA_SHARE = 0.1;
+/** 1.0.7: no cell gets narrower than this many pixels by a divider (its header still shows the icon, the name and the menu). */
+export const MIN_CELL_WIDTH = 160;
+/** No cell gets shorter than this many pixels by a divider. */
+export const MIN_CELL_HEIGHT = 90;
+
+/**
+ * The smallest share an area may get on an axis of `extent` pixels: MIN_AREA_SHARE, or more when that many pixels
+ * (plus the gap of the card) would be narrower than `minPx`.
+ */
+export function minShareFor(extent: number, minPx: number, gap = 0): number {
+  if (!(extent > 0)) return MIN_AREA_SHARE;
+  return Math.max(MIN_AREA_SHARE, Math.min(0.5, (minPx + gap) / extent));
+}
 
 const validSizes = (sizes: readonly number[] | null | undefined, n: number): sizes is number[] =>
   !!sizes && sizes.length === n && sizes.every((v) => Number.isFinite(v) && v > 0);
@@ -250,15 +263,18 @@ export function dividerBox(layout: GridLayout, d: Divider): { pos: number; start
   return { pos: sum(rows, 0, dr.line) / sum(rows), start: Math.min(...rects.map((q) => q.x0)), end: Math.max(...rects.map((q) => q.x1)) };
 }
 
+/** The smallest share of an area per screen axis (see minShareFor); MIN_AREA_SHARE where absent. */
+export interface MinShare { col?: number; row?: number }
+
 /** Clamp range for moving grid line `line` of a weight list by a fraction of its total. */
-function moveLimits(weights: number[], spans: Array<{ start: number; size: number }>, line: number): [number, number] {
+function moveLimits(weights: number[], spans: Array<{ start: number; size: number }>, line: number, minShare = MIN_AREA_SHARE): [number, number] {
   const total = sum(weights);
   let lo = -(weights[line - 1] / total) + 1e-6;
   let hi = weights[line] / total - 1e-6;
   for (const { start, size } of spans) {
     const width = sum(weights, start, start + size) / total;
-    if (start + size === line) lo = Math.max(lo, Math.min(0, MIN_AREA_SHARE - width));
-    else if (start === line) hi = Math.min(hi, Math.max(0, width - MIN_AREA_SHARE));
+    if (start + size === line) lo = Math.max(lo, Math.min(0, minShare - width));
+    else if (start === line) hi = Math.min(hi, Math.max(0, width - minShare));
   }
   return [lo, hi];
 }
@@ -285,11 +301,11 @@ function withRowColSizes(r: GridLayout, sizes: Array<number[] | null>): GridLayo
   return { ...rest, rowColSizes: custom };
 }
 
-function resizeR(r: GridLayout, d: Divider, delta: number): GridLayout {
+function resizeR(r: GridLayout, d: Divider, delta: number, minShare?: MinShare): GridLayout {
   if (d.axis === 'row') {
     const weights = rowWeightsR(r);
     if (d.line < 1 || d.line >= weights.length) return r;
-    const [lo, hi] = moveLimits(weights, r.areas.map((a) => along(a, 'row')), d.line);
+    const [lo, hi] = moveLimits(weights, r.areas.map((a) => along(a, 'row')), d.line, minShare?.row);
     return withRowSizes(r, shift(weights, d.line, Math.min(hi, Math.max(lo, delta))));
   }
   if (d.line < 1 || d.line >= r.cols) return r;
@@ -297,7 +313,7 @@ function resizeR(r: GridLayout, d: Divider, delta: number): GridLayout {
   let hi = Infinity;
   for (let t = d.from; t <= d.to; t++) {
     const touching = r.areas.filter((a) => a.row <= t && t < a.row + a.rowSpan && (a.col + a.colSpan === d.line || a.col === d.line));
-    const [l, h] = moveLimits(colWeightsR(r, t), touching.map((a) => along(a, 'col')), d.line);
+    const [l, h] = moveLimits(colWeightsR(r, t), touching.map((a) => along(a, 'col')), d.line, minShare?.col);
     lo = Math.max(lo, l); hi = Math.min(hi, h);
   }
   const clamped = Math.min(hi, Math.max(lo, delta));
@@ -310,13 +326,15 @@ function resizeR(r: GridLayout, d: Divider, delta: number): GridLayout {
  * Moves a divider by `delta` (fraction of the grid, positive = right/down), clamped so no area gets too small.
  * Dragging half of a line while no axis is independent yet makes that axis the independent one.
  */
-export function resizeDivider(layout: GridLayout, d: Divider, delta: number): GridLayout {
+export function resizeDivider(layout: GridLayout, d: Divider, delta: number, minShare?: MinShare): GridLayout {
   const r = canon(layout);
   const dr = layout.mode === 'cols' ? swapAxis(d) : d;
   if (dr.axis === 'row' && !hasJog(r) && !(dr.from === 0 && dr.to === r.cols - 1)) {
-    return resizeDivider(flipMode(layout), d, delta);
+    return resizeDivider(flipMode(layout), d, delta, minShare);
   }
-  return fromCanon(layout, resizeR(r, dr, delta));
+  // The canonical form of a cols-mode grid is transposed: its "col" limit is the screen's row limit.
+  const limits = minShare && layout.mode === 'cols' ? { col: minShare.row, row: minShare.col } : minShare;
+  return fromCanon(layout, resizeR(r, dr, delta, limits));
 }
 
 /** Swaps the independent axis of a grid whose axes are still free. */

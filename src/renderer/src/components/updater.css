@@ -1,13 +1,13 @@
 /* Kept separate so updater and brand styling can be integrated independently. */
 .titlebar .interactive-brand { padding-right: 8px; }
 .brand-trigger { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 5px 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; isolation: isolate; -webkit-app-region: no-drag; }
-.brand-trigger:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 4px; border-radius: 5px; }
+.brand-trigger:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; border-radius: 5px; }
 .brand-burst { position: absolute; inset: -5px -8px; border-radius: 12px; pointer-events: none; z-index: -1; background: radial-gradient(ellipse, color-mix(in srgb, var(--fx) 26%, transparent), transparent 72%); animation: brand-bloom 2.4s ease-out both; }
 @keyframes brand-bloom { 0% { opacity: 0; transform: scale(.75); } 20% { opacity: 1; transform: scale(1.12); } 100% { opacity: 0; transform: scale(1.35); } }
 .updater-badge { -webkit-app-region: no-drag; flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 7px; min-height: 27px; margin: 0 6px; padding: 4px 10px; border: 1px solid #ffffff24; border-radius: 8px; background: #171d29; color: #dbeafe; font-size: 11px; line-height: 1.3; white-space: nowrap; }
 button.updater-badge { cursor: pointer; }
 button.updater-badge:hover { border-color: #93c5fd80; background: #26344b; }
-.updater-badge:focus-visible, .updater-error button:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
+.updater-badge:focus-visible, .updater-error button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .updater-action { color: #e0f2fe; background: linear-gradient(115deg, #234278, #323063); box-shadow: 0 0 16px #60a5fa15; }
 .updater-dot { width: 6px; height: 6px; border-radius: 50%; background: #86efac; box-shadow: 0 0 9px #86efac66; }
 .updater-download { display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-width: 230px; padding: 3px 10px; }

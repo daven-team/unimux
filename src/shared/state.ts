@@ -15,6 +15,7 @@ import { normalizeShortcutOverrides } from './shortcuts';
 import { normalizeSshCellRef, normalizeSshHosts, patchSshCellRef, type SshCellRef, type SshHost } from './ssh';
 import { normalizeSshIdentities } from './sshIdentity';
 import { DEFAULT_SSH_THEME, normalizeSshThemeId } from './sshThemes';
+import { normalizeBarItems } from './sshBar';
 import { defaultSftpPlaces, forgetRemotePlace, normalizeSftpPlaces } from './sftpView';
 import { DEFAULT_STRIP_SCOPE, normalizeStripScope, normalizeWorkspaceOrder } from './workspaceOrder';
 import { normalizeDetachedWindows, openGrids } from './detached';
@@ -479,7 +480,8 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
   const remapCells = <T extends { profileId: string }>(cells: T[]) => cells.map((c) => ({ ...c, profileId: remap(c.profileId) }));
   // A cell's path format override survives only as one of the known values; an SSH reference only as { hostId: string }.
   const cleanCells = (cells: Cell[]) => remapCells(cells).map((c) => {
-    const { pathMode: raw, ssh, ...rest } = c;
+    // `shell` names the shell of a running terminal: after a restart of the app nothing runs yet.
+    const { pathMode: raw, ssh, shell: _shell, ...rest } = c;
     const pathMode = normalizePathMode(raw);
     const ref = normalizeSshCellRef(ssh);
     return { ...rest, ...(pathMode ? { pathMode } : {}), ...(ref ? { ssh: ref } : {}) };
@@ -526,6 +528,7 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
       backgroundLoad: normalizeBackgroundLoad(r.settings?.backgroundLoad),
       scrollbackLines: normalizeScrollback(r.settings?.scrollbackLines),
       sshTheme: normalizeSshThemeId(r.settings?.sshTheme),
+      sshStatusBarItems: normalizeBarItems(r.settings?.sshStatusBarItems),
       stripScope: normalizeStripScope(r.settings?.stripScope),
       shortcuts: normalizeShortcutOverrides(r.settings?.shortcuts, platform),
       // The retired notifications / waitingSound* keys only seed the alerts when none are saved yet; they are never written again.

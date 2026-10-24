@@ -2,7 +2,7 @@
 .ssh-theme-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .ssh-theme-tile { display: flex; flex-direction: column; gap: 7px; min-width: 0; padding: 6px 6px 7px; border: 1px solid #ffffff0d; border-radius: 10px; background: #1a1a1a; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
 .ssh-theme-tile:hover { border-color: #ffffff26; color: var(--text); }
-.ssh-theme-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ssh-theme-tile:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .ssh-theme-tile.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-soft); color: var(--text); }
 .ssh-theme-name { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 2px; font-size: 12px; line-height: 16px; }
 .ssh-theme-name .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

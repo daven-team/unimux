@@ -121,7 +121,7 @@ describe('MCP protocol behaviour (official SDK client)', () => {
     const h = await setup();
     const client = await connect(h, h.worker.id);
     expect(client.getServerVersion()).toMatchObject({ name: 'unimux' });
-    expect(client.getServerCapabilities()).toEqual({ tools: {} });
+    expect(client.getServerCapabilities()).toEqual({ tools: {}, tasks: { list: {}, cancel: {}, requests: { tools: { call: {} } } } });
     expect(client.getInstructions()).toContain(h.worker.id);
     expect(client.getInstructions()).toContain('worker');
     const result = await client.callTool({ name: 'get_context', arguments: {} });
@@ -223,7 +223,8 @@ describe('MCP protocol behaviour (official SDK client)', () => {
     expect(denied).toMatchObject({ isError: true });
     expect(text(denied)).toContain('coordinator');
     const notFound = await client.callTool({ name: 'update_task', arguments: { taskId: 'missing', status: 'in_progress' } });
-    expect(text(notFound)).toBe('Task not found.');
+    // The id the model sent and where valid ids come from (a worker has no get_tasks).
+    expect(text(notFound)).toBe('Task not found: missing. Task IDs come from read_inbox.');
     expect(h.controller.get().automation.events).toEqual([]);
   });
   it('keeps the old one-tool-per-operation names callable (unlisted) with role checks', async () => {

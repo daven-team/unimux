@@ -195,11 +195,12 @@ function HistoryModal({ projectId }: { projectId: string }) {
     <div className="modal wide">
       <div className="modal-head">
         <h3>{tr('Historia')} · {project.name}</h3>
-        <div className="tabs-switch">
-          <button className={`btn small ${view === 'sessions' ? 'primary' : ''}`} onClick={() => setView('sessions')}>{tr("Czaty Claude / Codex")} {sessions ? `(${sessions.length})` : ''}</button>
-          <button className={`btn small ${view === 'archive' ? 'primary' : ''}`} onClick={() => setView('archive')}>{tr('Zamknięte gridy ({count})', { count: project.archive.length })}</button>
+        {/* 1.0.7: a segmented switch (two views of one list), not two buttons of which one looks like the main action. */}
+        <div className="tabs-switch" role="tablist" aria-label={tr('Historia')}>
+          <button type="button" role="tab" aria-selected={view === 'sessions'} className={view === 'sessions' ? 'on' : ''} onClick={() => setView('sessions')}>{tr("Czaty Claude / Codex")} {sessions ? `(${sessions.length})` : ''}</button>
+          <button type="button" role="tab" aria-selected={view === 'archive'} className={view === 'archive' ? 'on' : ''} onClick={() => setView('archive')}>{tr('Zamknięte gridy ({count})', { count: project.archive.length })}</button>
         </div>
-        <button className="btn ghost icon" onClick={closeModal}><IX /></button>
+        <button className="btn ghost icon" aria-label={tr('Zamknij')} onClick={closeModal}><IX /></button>
       </div>
       <div className="modal-body">
         <input className="input" autoFocus placeholder={tr("Szukaj…")} value={q} onChange={(e) => setQ(e.target.value)} />

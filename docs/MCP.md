@@ -77,7 +77,18 @@ Wskazówki narzędzi uwzględnia tylko Codex: pyta użytkownika przed wywołanie
 
 Użytkownik, który ufa zespołowi, może zatwierdzić narzędzia z góry w Codexie przez `default_tools_approval_mode` lub `tools.<nazwa>.approval_mode` w `[mcp_servers.unimux]`.
 
-Połączenie można sprawdzić bez modelu: `node scripts/mcp-serve.mjs` uruchamia serwer z atrapami, a `claude mcp add --transport http ...` / `codex mcp add --url ... --bearer-token-env-var ...` z tymczasowym `CLAUDE_CONFIG_DIR` / `CODEX_HOME` oraz `claude mcp list` pokazują stan połączenia.
+Połączenie można sprawdzić bez modelu: `node scripts/mcp-serve.mjs` uruchamia serwer z atrapami, a `claude mcp add --transport http ...` / `codex mcp add --url ... --bearer-token-env-var ...` z tymczasowym `CLAUDE_CONFIG_DIR` / `CODEX_HOME` oraz `claude mcp list` pokazują stan połączenia. `npm run test:mcp` robi to wszystko automatycznie z zainstalowanymi CLI i lokalną atrapą API modelu.
+
+Claude Code 2.1.x odkłada narzędzia MCP za swoim ToolSearch: model widzi najpierw tylko nazwy narzędzi (`mcp__unimux__read_inbox`, ...) i instrukcje serwera, a schematy wczytuje, gdy ich potrzebuje.
+
+**Pytania do użytkownika (elicitations).** Klient, który deklaruje obsługę elicitation (Claude Code tak), dostaje sesję MCP; wywołanie narzędzia może wtedy zapytać użytkownika w oknie samego agenta zamiast zakończyć się błędem:
+
+- `close_grid` na gridzie z niedokończonymi zadaniami pyta, czy je anulować i zamknąć grid (bez pytania potrzebne jest `cancelTasks: true`).
+- `send_message`, `create_task`, `snippets` `apply` i `update_agent` przyjmują dokładną nazwę agenta zamiast ID komórki; gdy kilku agentów ma tę nazwę, użytkownik wybiera jednego.
+
+Odrzucone albo nieodebrane pytanie (2 minuty; `claude -p` zawsze odrzuca) kończy wywołanie błędem i niczego nie zmienia. Klienci bez elicitation zostają przy bezstanowym połączeniu i dotychczasowych odpowiedziach.
+
+**Zadania MCP (tasks).** `wait_for` obsługuje zadania (`execution.taskSupport: "optional"`, MCP 2025-11-25): klient z ich obsługą może uruchomić je jako zadanie, które odpytuje (`tasks/get`, `tasks/result`, `tasks/cancel`), i czekać do 3600 s zamiast 45 s. Zadanie należy do tokenu komórki (inne komórki go nie widzą) i kończy się z restartem komórki. Claude Code 2.1.310 i Codex 0.162 jeszcze nie tworzą zadań, więc korzystają ze zwykłego wywołania.
 
 ## Migracja z 0.6.7
 

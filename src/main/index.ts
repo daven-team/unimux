@@ -16,7 +16,8 @@ import { appPlatform, normalizeProjectPath } from '../shared/platform';
 import { detectLanguage } from '../shared/languages';
 import { CHROMIUM_WEBGL_CONTEXTS } from '../shared/terminalLimits';
 import { translate, type MessageKey, type MessageParams } from '../shared/i18n';
-import { bypassProxyForHooks, HookServer } from './hooks';
+import { bypassProxyForHooks, claudeHookForm, HookServer } from './hooks';
+import { claudeSettingsFiles, HttpHookWatch, hookFallbackFile, httpHookUrlAllowed, readSettingsTexts } from './hookFallback';
 import { Monitor } from './monitor';
 import { pathExists } from './fsProbe';
 import { PromptFiles, pruneCellFiles, removeCellFiles } from './cellFiles';
@@ -44,6 +45,7 @@ import { DbVault } from './db/vault';
 import { createDbHandlers, registerDbIpc } from './db/ipc';
 import { DbHistoryStore, registerDbHistoryIpc } from './db/history';
 import { registerSqliteFileIpc } from './db/sqliteFiles';
+import { registerNoteFilesIpc } from './noteFiles';
 import { DB_LIMITS, isDbSessionId } from '../shared/db';
 import type { DbHostToMain } from '../shared/dbHostIpc';
 import { claudeProjectDirName, findRecentCodexSession, listSessionsAsync } from './sessions';
@@ -475,6 +477,9 @@ const familyRenew = gateFamilyRefresh(accounts, () => cswapRoster, (dir) => (log
 usageDeps.refreshClaude = gateProfileRefresh<RefreshOutcome>(guardDeps, familyRenew, refreshBlocked);
 const hooks = new HookServer();
 if (devEnv('MC_HOOK_DEBUG') === '1') hooks.debugDir = DATA_DIR;
+/** Claude cells whose http hooks never arrive (a managed allowedHttpHookUrls policy, an older claude) fall back to command hooks. */
+const hookWatch = new HttpHookWatch({ ...hookFallbackFile(join(DATA_DIR, 'claude-hook-fallback.json')),
+  onFallback: () => send('app:notice', tr('Statusy Claude nie docierają przez hooki HTTP (blokuje je polityka allowedHttpHookUrls albo komórka uruchamia starszą wersję claude). Od następnego uruchomienia agenta unimux użyje hooków poleceń.')) });
 const alive = new Set<string>();
 /** The pty shell pid of each running cell (the Monitor panel's process trees). */
 const cellPids = new Map<string, number>();
@@ -650,7 +655,7 @@ const automation = new AutomationService(controller, {
     });
   },
 });
-const mcp = new UnimuxMcpServer(automation, { log: (message) => crashLog.warn(message) });
+const mcp = new UnimuxMcpServer(automation, { log: (message) => crashLog.warn(message), tr: (key, params) => tr(key, params) });
 const mcpInfo = (): McpInfo => ({ ...mcp.getInfo(), error: mcpError, ...(mcpStarting && !mcp.getInfo().running ? { starting: true } : {}) });
 /** Tells the renderer what changed instead of being polled (the renderer keeps a slow fallback poll). */
 const pushLater = (push: () => void) => {
@@ -922,6 +927,17 @@ function startSsh(): void {
     if (!path) return { ok: false, cancelled: true };
     try { await writeFile(path, text, 'utf8'); return { ok: true, path }; } catch { return { ok: false }; }
   }, () => ({ ok: false }));
+  // Notes (1.0.7): pasted images in <data>/note-images and a note exported through the save dialog (MC_NOTES_EXPORT_DIR: checks).
+  registerNoteFilesIpc({ guardedHandle, guardedOn }, {
+    dataDir: DATA_DIR,
+    exportDir: process.env.MC_NOTES_EXPORT_DIR && !app.isPackaged ? process.env.MC_NOTES_EXPORT_DIR : null,
+    pickSavePath: async (name) => {
+      const ext = name.split('.').pop() ?? 'md';
+      const options = { title: tr('Eksportuj notatkę'), defaultPath: name, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] };
+      const r = isLive(win) ? await dialog.showSaveDialog(win!, options) : await dialog.showSaveDialog(options);
+      return r.canceled || !r.filePath ? null : r.filePath;
+    },
+  });
   registerSshIpc(ipcMain, createSshHandlers({
     coordinator, vault, knownHosts, drafts: new KeyDrafts(),
     state: () => state,
@@ -961,6 +977,7 @@ ptyHost.on('message', (m: HostToMain) => {
     if (m.pid > 0) cellPids.set(m.id, m.pid); else cellPids.delete(m.id);
   } else if (m.t === 'exit') {
     alive.delete(m.id);
+    hookWatch.forget(m.id);
     cellPids.delete(m.id);
     verifiedCodex.delete(m.id);
     endCellMcp(mcp, MCP_DIR, m.id);
@@ -1057,6 +1074,7 @@ ptyHost.on('fatal', (code: unknown, stderrTail: unknown) => {
 
 hooks.on('hook', (cellId: string, event: string, info?: unknown) => {
   if (!findCell(state, cellId)) return; // stale or foreign id
+  hookWatch.hook(cellId, event);
   // Immediate hints only for events the tracker always applies; busy is left to the tracker (it may ignore late tool hooks)
   // and reaches automation through cell:runtime.
   const hint = automationHintForHook(event);
@@ -1067,6 +1085,7 @@ hooks.on('hook', (cellId: string, event: string, info?: unknown) => {
 // SessionStart ends the "background tasks still running" mode of the cell (they belong to a previous conversation).
 hooks.on('sessionstart', (cellId: string, source?: string) => {
   if (!findCell(state, cellId)) return;
+  hookWatch.hook(cellId, 'session');
   send('cell:hook', cellId, 'session', { source });
 });
 
@@ -1171,9 +1190,16 @@ async function spawnRequestUnsafe(req: SpawnCellRequest): Promise<SpawnResult> {
     }
   }
   const baseEnv = await cliDetector.applyEnv({ ...cleanEnv(process.env), MC_CELL_ID: req.cellId }, cli ?? undefined);
+  // The version of the claude this cell's PATH really starts (an older install earlier on the PATH must not get http hooks).
+  const claudeVersion = req.profile.cli === 'claude' ? await cliDetector.versionFor('claude', baseEnv).catch(() => undefined) : undefined;
   if ((killCount.get(req.cellId) ?? 0) !== killsBefore) return { ok: true }; // the cell was closed while the CLI was being looked up
   // The detected version picks http hooks (no process per tool call) or the curl commands older versions need.
-  const claudeSettingsPath = req.profile.cli === 'claude' ? hooks.writeClaudeSettings(HOOKS_DIR, req.cellId, cliDetector.snapshot().claude?.version) : undefined;
+  let claudeForm = hookWatch.formFor(claudeHookForm(claudeVersion), claudeVersion);
+  // An allowedHttpHookUrls list (managed policy, user or project settings) that does not allow 127.0.0.1 drops every http hook.
+  if (req.profile.cli === 'claude' && claudeForm !== 'shell'
+    && !httpHookUrlAllowed(readSettingsTexts(claudeSettingsFiles(process.platform, homedir(), baseEnv, req.cwd)), `http://127.0.0.1:${hooks.port}/k/${req.cellId}/stop/0`)) claudeForm = 'shell';
+  const claudeSettingsPath = req.profile.cli === 'claude' ? hooks.writeClaudeSettings(HOOKS_DIR, req.cellId, claudeVersion, claudeForm) : undefined;
+  if (req.profile.cli === 'claude') hookWatch.spawned(req.cellId, claudeForm, claudeVersion); else hookWatch.forget(req.cellId);
   let mode = req.mode;
   // Claude only writes a transcript after the first prompt: resuming an unused id would fail,
   // so start a new conversation that keeps the same id instead.
@@ -1218,6 +1244,7 @@ async function spawnRequestUnsafe(req: SpawnCellRequest): Promise<SpawnResult> {
 }
 guardedOn('cell:kill', (_e, id: string) => {
   noteKill(id);
+  hookWatch.forget(id);
   ssh?.killed(id);
   endCellMcp(mcp, MCP_DIR, id);
   verifiedCodex.delete(id);
@@ -1260,6 +1287,7 @@ guardedOn('cell:runtime', (_e, cellId: string, status: string, reason?: string, 
   relayCellStatus(_e, cellId, status);
   const found = findCell(state, cellId);
   if (!found || !alive.has(cellId)) return;
+  hookWatch.status(cellId, status, hooked === true);
   // The renderer's StatusTracker decides; heuristics (hooked = false) never yield "ready".
   const next = automationStatusFor(status, reason, hooked === true, automation.statuses.get(cellId));
   if (next) automation.statuses.set(cellId, next);

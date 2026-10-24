@@ -19,7 +19,7 @@
 .find-expand:hover { background: var(--btn-ghost-hover); color: var(--text); }
 .find-expand span { display: grid; transition: transform .12s; }
 .find-expand span.open { transform: rotate(90deg); }
-.find-expand:focus-visible, .find-toggle:focus-visible, .find-button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.find-expand:focus-visible, .find-toggle:focus-visible, .find-button:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; }
 
 .find-field {
   display: flex; align-items: center; gap: 1px; width: 250px; min-width: 120px; flex: 0 1 auto; height: 26px; box-sizing: border-box;

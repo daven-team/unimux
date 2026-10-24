@@ -1,0 +1,54 @@
+/* The SSH status bar (SshStatusBar): one slim row under the terminal of a connected SSH cell. */
+.ssh-bar {
+  flex: none; display: flex; align-items: center; gap: 14px; height: 22px; min-width: 0; padding: 0 9px;
+  border-top: 1px solid var(--border); background: var(--bg-1); color: var(--text-2);
+  font-size: 11px; line-height: 1; white-space: nowrap; overflow: hidden; user-select: none; position: relative; z-index: 1;
+}
+.ssh-bar.ssh-bar-pending { height: 0; border-top: 0; }
+.ssh-bar-item { display: inline-flex; align-items: center; gap: 5px; min-width: 0; flex: none; cursor: default; }
+.ssh-bar-host { flex: 0 1 auto; color: var(--text); }
+.ssh-bar-host .ssh-bar-text { overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.ssh-bar-logo { width: 12px; height: 12px; flex: none; }
+.ssh-bar-icon { flex: none; color: var(--muted); }
+.ssh-bar-num { font-variant-numeric: tabular-nums; min-width: 2.6em; text-align: right; }
+.ssh-bar-mem .ssh-bar-text, .ssh-bar-net .ssh-bar-text { font-variant-numeric: tabular-nums; }
+.ssh-bar-spark { flex: none; color: var(--waiting); }
+.ssh-bar-spark-base { stroke: var(--border-2); stroke-width: 1; }
+.ssh-bar-spark-fill { fill: currentColor; stroke: none; opacity: .18; }
+.ssh-bar-arrow { color: var(--muted); margin-right: 2px; }
+.ssh-bar-count { padding: 1px 4px; border-radius: 6px; background: var(--bg-3); color: var(--text-2); font-size: 10px; }
+.ssh-bar-disk.warn { color: var(--working); }
+.ssh-bar-disk.full { color: var(--error); }
+.ssh-bar-disk.warn .ssh-bar-icon, .ssh-bar-disk.full .ssh-bar-icon { color: currentColor; }
+/* The disk goes to the far right, like the clock of a status bar. */
+.ssh-bar-disk { margin-left: auto; }
+
+/* A narrow cell drops the least important items (SshStatusBar measures them, sshBar.ts SSH_BAR_PRIORITY). */
+.ssh-bar > [data-drop] { display: none; }
+
+/* The hover card of the CPU, the user and the disk: the dark bubble of the tooltips, as a small table. */
+.ssh-bar-card {
+  position: fixed; z-index: 100000; max-width: min(520px, calc(100vw - 12px)); box-sizing: border-box;
+  padding: 6px 9px; border-radius: 6px; background: #1a1a1a; border: 1px solid #343434; box-shadow: 0 6px 20px #000a;
+  color: var(--text); font-size: 11.5px; line-height: 1.45; pointer-events: none;
+}
+.ssh-bar-table { border-collapse: collapse; }
+.ssh-bar-table th, .ssh-bar-table td { padding: 1px 0; text-align: left; white-space: nowrap; font-weight: 400; }
+.ssh-bar-table th { color: var(--text-2); padding-right: 14px; }
+.ssh-bar-table td { font-variant-numeric: tabular-nums; }
+.ssh-bar-cols th, .ssh-bar-cols td { padding-right: 14px; }
+.ssh-bar-cols th:last-child, .ssh-bar-cols td:last-child { padding-right: 0; }
+.ssh-bar-cols thead th { color: var(--muted); font-size: 10.5px; padding-bottom: 3px; }
+.ssh-bar-mount { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.ssh-bar-pct.warn { color: var(--working); }
+.ssh-bar-pct.full { color: var(--error); }
+.ssh-bar-table tr.self td { color: var(--accent-text); }
+.ssh-bar-you { margin-left: 6px; color: var(--muted); }
+.ssh-bar-note { margin: 0; color: var(--text-2); }
+
+/* Settings > SSH: the items of the bar as a row of checkboxes. */
+.ssh-bar-setting-items { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px 14px; }
+.ssh-bar-setting-items label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.ssh-bar-setting-off { opacity: .45; }
+.ssh-bar-setting-off input { filter: grayscale(1); }
+.ssh-bar-setting-items label:has(input:disabled) { cursor: default; }

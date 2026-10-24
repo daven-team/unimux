@@ -9,6 +9,7 @@ import type { Overrides as ShortcutOverrides } from './shortcuts';
 import type { SshCellRef, SshHost } from './ssh';
 import type { SshIdentity } from './sshIdentity';
 import type { SshThemeId } from './sshThemes';
+import type { SshBarItem } from './sshBar';
 import type { SftpPlaces } from './sftpView';
 import type { DbConnection } from './db';
 import type { StripScope } from './workspaceOrder';
@@ -83,6 +84,13 @@ export interface Cell {
   pathMode?: PathMode;
   /** Present = an SSH cell: a session to this saved host instead of a local shell (the profile is a shell profile). */
   ssh?: SshCellRef;
+  /** 1.0.7: the SSH status bar is hidden in this cell (its right-click menu); Settings > SSH shows it again. */
+  sshBarHidden?: true;
+  /**
+   * 1.0.7: the shell the cell's terminal was started with (Settings > Terminal at the time). The built-in shell profile is
+   * named after it until the cell restarts, so changing the setting does not rename running cells. Dropped on load.
+   */
+  shell?: ShellKind;
 }
 
 export interface Tab {
@@ -153,6 +161,8 @@ export interface Note {
   color?: string;
   /** Highlighting of the text (shared/codeLanguages.ts); absent = Markdown with highlighted code blocks. */
   language?: string;
+  /** Pinned to the top of the list (1.0.7); absent = not pinned. */
+  pinned?: boolean;
   /** Last change of the name or text (ms since the epoch); 0 when unknown. */
   updatedAt: number;
 }
@@ -191,6 +201,10 @@ export interface Settings {
   sshPathComplete?: boolean;
   /** 1.0.6: SSH cells connected when the app closed connect again at start, into the folder they were in. Off by default. */
   sshRestoreSessions?: boolean;
+  /** 1.0.7: the status bar under connected SSH terminals (sshBar.ts); only `false` turns it off. */
+  sshStatusBar?: boolean;
+  /** 1.0.7: items of the SSH status bar switched off (`false`); absent = shown. */
+  sshStatusBarItems?: Partial<Record<SshBarItem, boolean>>;
   /** The top strip shows the tabs of every project ('all', 1.0.0) or only of the active project (shared/workspaceOrder.ts). */
   stripScope: StripScope;
 }

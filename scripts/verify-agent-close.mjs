@@ -47,8 +47,8 @@ try {
   await app.until(`document.querySelectorAll('.xterm').length >= 1`, 'terminals');
   // The profile becomes an agent profile (the running shells are not restarted).
   await app.click('.tb-btn[aria-label="Settings"]');
-  await app.until(`[...document.querySelectorAll('.settings-nav [role=tab]')].some((t) => t.textContent === 'Agent profiles')`, 'settings page');
-  await app.click('.settings-nav [role=tab]', 'Agent profiles');
+  await app.until(`[...document.querySelectorAll('.settings-nav [role=tab]')].some((t) => t.textContent === 'Agents')`, 'settings page');
+  await app.click('.settings-nav [role=tab]', 'Agents');
   await app.until(`!!document.querySelector('#settings-profile-cli-fake')`, 'profile card');
   await app.click('#settings-profile-cli-fake');
   await app.click('[role=option]', 'claude');
@@ -115,8 +115,8 @@ try {
 
   // 5. The setting shows off in Settings and turns back on there.
   await app.click('.tb-btn[aria-label="Settings"]');
-  await app.until(`[...document.querySelectorAll('.settings-nav [role=tab]')].some((t) => t.textContent === 'App settings')`, 'settings page 2');
-  await app.click('.settings-nav [role=tab]', 'App settings');
+  await app.until(`[...document.querySelectorAll('.settings-nav [role=tab]')].some((t) => t.textContent === 'General')`, 'settings page 2');
+  await app.click('.settings-nav [role=tab]', 'General');
   await app.until(`!!document.querySelector('#settings-confirm-close')`, 'setting switch');
   if (await app.evaluate(`document.querySelector('#settings-confirm-close').checked`)) throw new Error('the setting is still on');
   await app.click('#settings-confirm-close');

@@ -5,9 +5,10 @@ import { useI18n } from '../i18n';
 import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { propsEqualWithStyle } from '../../../shared/renderEquality';
 import { errorPhrase, failureLabel } from '../../../shared/alerts';
+import { failedExit, statusText } from '../../../shared/statusDetail';
 import { cellDrawColor, getProfile, PROJECT_COLORS, updateCell } from '../../../shared/state';
 import { missingCardCli } from '../../../shared/cliStatus';
-import { shownProfileName } from '../../../shared/profiles';
+import { cellShell, shownProfileName } from '../../../shared/profiles';
 import { sshHeaderName, sshPhaseLabel, userAtEndpoint } from '../../../shared/ssh';
 import { resolveSshTheme } from '../../../shared/sshThemes';
 import { useSshStore } from '../sshStore';
@@ -30,7 +31,10 @@ import { terminals } from '../terminals/TerminalManager';
 import { TerminalFind } from '../terminals/terminalFind';
 import { useBlink } from '../blink';
 import { openMenu, openMenuAt, type MenuItem } from './ContextMenu';
-import { IBranch, IMax, IRestart, IRestore, IX } from './icons';
+import { IBranch, IMax, IMore, IPrompt, IRestart, IRestore, IX } from './icons';
+import { ProviderIcon } from './ProviderIcons';
+import { hostInitials } from './ssh/SshConnectCard';
+import { CellFoot } from './CellFoot';
 import './terminalCell.css';
 
 export const SNIPPET_MIME = 'application/x-mc-snippet';
@@ -50,11 +54,15 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const bodyRef = useRef<HTMLDivElement>(null);
   const profiles = useStore((st) => st.s.profiles);
   const profile = useStore((st) => getProfile(st.s, cell.profileId));
-  const shell = useStore((st) => st.s.settings.shell);
+  // The shell the terminal runs (recorded at its start), not the one Settings would start now.
+  const shell = useStore((st) => cellShell(cell, st.s.settings.shell));
   const profileName = shownProfileName(profile, shell, tr);
   const status = useStore((st) => st.ui.statuses[cell.id] ?? 'idle');
   useBlink(status === 'working');
   const failure = useStore((st) => st.ui.failures[cell.id]);
+  // The short reason of the status ("czeka na zgodę: Bash", "praca: Edit", "kod wyjścia 1"), see shared/statusDetail.ts.
+  const statusDetail = useStore((st) => st.ui.statusDetails[cell.id]);
+  const statusLabel = statusText(status, failure !== undefined ? 'error' : undefined, statusDetail, failure);
   const focused = useStore((st) => st.ui.focusedCellId === cell.id);
   const mcpInfo = useStore((st) => st.ui.mcpInfo);
   const error = useStore((st) => st.ui.cellErrors[cell.id]);
@@ -102,8 +110,15 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
     setUi({ focusedCellId: cell.id });
   };
 
-  // An SSH cell is named by its host chip; the name shows next to it only when the user gave the cell one.
-  const label = ssh ? sshHeaderName(cell.name) : cellLabel(cell, sessionTitle && cell.session ? { [cell.session.id]: sessionTitle } : {}, profileName);
+  // The card's title: the user's name, else the conversation title, else the profile (an SSH cell: else the host's name).
+  const shownName = ssh
+    ? sshHeaderName(cell.name) || host?.label || tr('Host usunięty')
+    : cellLabel(cell, sessionTitle && cell.session ? { [cell.session.id]: sessionTitle } : {}, profileName);
+  /** The profile shows among the details only when the title is not already it. */
+  const metaProfile = !ssh && shownName !== profileName;
+  // A non-zero exit code (the last command, the CLI, the process) is an error in the dot and the pill alike (1.0.7).
+  const exitFailed = failedExit(statusDetail);
+  const dotClass = `${status}${(status === 'waiting' && failure !== undefined) || exitFailed ? ' error' : ''}`;
 
   const sshItems = (): MenuItem[] => [
     { label: tr('Połącz ponownie'), onClick: () => void reconnectCell(cell.id) },
@@ -116,7 +131,8 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
 
   const profileItems = (): MenuItem[] => [
     { header: tr("Zmień profil (nowa rozmowa)") },
-    ...profiles.map((p) => ({ label: profileOptionLabel(p, cliStatus, tr), onClick: () => changeCellProfile(cell.id, p.id) })),
+    // The current profile is marked and named as the header names it (the shell it really runs, 1.0.7).
+    ...profiles.map((p) => ({ label: p.id === profile.id && profile.cli === 'shell' ? profileName : profileOptionLabel(p, cliStatus, tr), hint: p.id === profile.id ? '✓' : undefined, onClick: () => changeCellProfile(cell.id, p.id) })),
   ];
 
   const restartItems = (): MenuItem[] => ssh ? sshItems() : [
@@ -139,40 +155,44 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
 
   const dropLabel = (target: DropTarget) => tr(target === 'claude' ? 'Upuść: @ścieżka (Claude)' : target === 'codex' ? 'Upuść: ścieżka (Codex)' : 'Upuść: ścieżka w cudzysłowie (powłoka)');
 
+  /** Every action of the cell: the header's context menu and its "more" button. */
+  const menuItems = (): MenuItem[] => [
+    { label: tr("Zmień nazwę"), onClick: () => setEditing(true) },
+    ...(cell.name ? [{ label: tr("Przywróć nazwę automatyczną"), onClick: () => renameCell(cell.id, '') }] : []),
+    { header: tr("Kolor") },
+    { colors: PROJECT_COLORS, onPick: (c: string) => setCellColor(cell.id, c) },
+    // Only a colour the cell shows: an automatic accent behind the host's colour has nothing to remove.
+    ...(cell.color && color === cell.color ? [{ label: tr("Usuń kolor"), onClick: () => setCellColor(cell.id, undefined) }] : []),
+    { sep: true },
+    ...restartItems(),
+    ...(!ssh && profile.cli === 'shell' ? [{ sep: true as const }, ...pathModeItems()] : []),
+    ...(!ssh && profile.cli !== 'shell' ? [
+      { label: cell.muted ? tr("Włącz alerty tej komórki") : tr("Wycisz alerty tej komórki"), onClick: () => update((s) => updateCell(s, cell.id, { muted: cell.muted ? undefined : true })) },
+    ] : []),
+    { label: maximized ? tr("Przywróć siatkę") : tr("Maksymalizuj"), onClick: () => toggleMaximize(cell.id), hint: shortcutText('cell.maximize') || undefined },
+    { label: tr("Zresetuj terminal"), onClick: () => { terminals.resetInput(cell.id); setFloodHint(false); toast(tr("Terminal zresetowany - historia została zachowana.")); } },
+    ...(!ssh ? [{ sep: true as const }, ...profileItems()] : []),
+    ...(!ssh && profile.cli !== 'shell' ? [
+      { sep: true as const },
+      { label: tr('Bez MCP'), onClick: () => { void changeAgentRole(cell.id, null); } },
+      { label: tr('Koordynator'), onClick: () => { void changeAgentRole(cell.id, 'coordinator'); } },
+      { label: tr('Wykonawca'), onClick: () => { void changeAgentRole(cell.id, 'worker'); } },
+    ] : []),
+    { sep: true },
+    ...sshHostMenuItems('Dodaj komórkę SSH'),
+    { sep: true },
+    { label: tr("Zamknij komórkę"), danger: true, onClick: () => void removeCell(cell.id) },
+  ];
+
   const headerMenu = (e: React.MouseEvent) => {
     e.preventDefault();
-    openMenu(e.clientX, e.clientY, [
-      { label: tr("Zmień nazwę"), onClick: () => setEditing(true) },
-      ...(cell.name ? [{ label: tr("Przywróć nazwę automatyczną"), onClick: () => renameCell(cell.id, '') }] : []),
-      { header: tr("Kolor") },
-      { colors: PROJECT_COLORS, onPick: (c: string) => setCellColor(cell.id, c) },
-      // Only a colour the cell shows: an automatic accent behind the host's colour has nothing to remove.
-      ...(cell.color && color === cell.color ? [{ label: tr("Usuń kolor"), onClick: () => setCellColor(cell.id, undefined) }] : []),
-      { sep: true },
-      ...restartItems(),
-      ...(!ssh && profile.cli === 'shell' ? [{ sep: true as const }, ...pathModeItems()] : []),
-      ...(!ssh && profile.cli !== 'shell' ? [
-        { label: cell.muted ? tr("Włącz alerty tej komórki") : tr("Wycisz alerty tej komórki"), onClick: () => update((s) => updateCell(s, cell.id, { muted: cell.muted ? undefined : true })) },
-      ] : []),
-      { label: maximized ? tr("Przywróć siatkę") : tr("Maksymalizuj"), onClick: () => toggleMaximize(cell.id), hint: shortcutText('cell.maximize') || undefined },
-      { label: tr("Zresetuj terminal"), onClick: () => { terminals.resetInput(cell.id); setFloodHint(false); toast(tr("Terminal zresetowany - historia została zachowana.")); } },
-      ...(!ssh ? [{ sep: true as const }, ...profileItems()] : []),
-      ...(!ssh && profile.cli !== 'shell' ? [
-        { sep: true as const },
-        { label: tr('Bez MCP'), onClick: () => { void changeAgentRole(cell.id, null); } },
-        { label: tr('Koordynator'), onClick: () => { void changeAgentRole(cell.id, 'coordinator'); } },
-        { label: tr('Wykonawca'), onClick: () => { void changeAgentRole(cell.id, 'worker'); } },
-      ] : []),
-      { sep: true },
-      ...sshHostMenuItems('Dodaj komórkę SSH'),
-      { sep: true },
-      { label: tr("Zamknij komórkę"), danger: true, onClick: () => void removeCell(cell.id) },
-    ]);
+    openMenu(e.clientX, e.clientY, menuItems());
   };
 
   return (
     <div
       data-cell-id={cell.id}
+      data-status={status === 'waiting' && failure !== undefined ? 'error' : status}
       className={`cell terminal-cell ${focused ? 'focused' : ''} ${drop ? 'drop' : ''} ${color ? 'colored' : ''} ${dragSource ? 'drag-source' : ''}`}
       style={color ? { ...style, ['--cc' as string]: color } : style}
       onMouseDownCapture={markFocused}
@@ -226,19 +246,19 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
         onDoubleClick={(e) => (e.target as HTMLElement).closest('button,.cell-name,input') || toggleMaximize(cell.id)}
       >
         <div className="cell-heading">
-          <span className="idx">{index + 1}</span>
-          <span className={`dot ${status}${status === 'waiting' && failure !== undefined ? ' error' : ''}`} />
+          {/* The cell's icon (its agent, a shell, or the SSH host's chip) opens the profile or host menu; the status dot sits on it. */}
           {ssh ? (
-            <button type="button" className="profile ssh-host" onClick={(e) => openMenuAt(e.currentTarget, sshItems())} title={host ? userAtEndpoint(host) : tr('Host usunięty')}>
-              <span className="ssh-dot" style={{ background: host?.color ?? 'var(--muted)' }} />
-              <span className="profile-name">{host?.label ?? tr('Host usunięty')}</span>
+            <button type="button" className="cell-icon ssh-host" onClick={(e) => openMenuAt(e.currentTarget, sshItems())} title={host ? userAtEndpoint(host) : tr('Host usunięty')} aria-label={host?.label ?? tr('Host usunięty')}>
+              <span className={`cell-icon-tile host${host?.color ? '' : ' uncolored'}`} style={host?.color ? { background: host.color } : undefined}>{hostInitials(host?.label ?? '?')}</span>
+              <span className={`dot ${dotClass}`} />
             </button>
           ) : (
-            <button type="button" className="profile" onClick={(e) => openMenuAt(e.currentTarget, profileItems())} title={tr("Zmień profil")} aria-label={`${tr("Zmień profil")}: ${profileName}`}>
-              <span className="pchip" style={{ background: profile.color }} />
-              <span className="profile-name">{profileName}</span>
+            <button type="button" className="cell-icon" onClick={(e) => openMenuAt(e.currentTarget, profileItems())} title={`${profileName}\n${tr("Zmień profil")}`} aria-label={`${tr("Zmień profil")}: ${profileName}`}>
+              <span className="cell-icon-tile">{profile.cli === 'shell' ? <IPrompt /> : <ProviderIcon provider={profile.cli} size={14} />}</span>
+              <span className={`dot ${dotClass}`} />
             </button>
           )}
+          <span className="idx">{index + 1}</span>
           {editing ? (
             <input
               className="cell-name-input"
@@ -257,28 +277,29 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
               }}
             />
           ) : (
-            // The profile chip already names an unnamed shell cell: its label would only repeat it ("Wiersz polecenia Wiersz polecenia").
-            label && (cell.name || label !== profileName) && (
-              <span className={`cell-name ${cell.name ? 'custom' : ''}`} title={`${label}\n${tr('Dwuklik: zmień nazwę')}`} onDoubleClick={() => setEditing(true)}>
-                {label}
-              </span>
-            )
+            <span className={`cell-name ${cell.name ? 'custom' : ''}`} title={`${shownName}\n${tr(cell.name ? 'Dwuklik: zmień nazwę' : 'Dwuklik: nadaj nazwę')}`} onDoubleClick={() => setEditing(true)}>
+              {shownName}
+            </span>
           )}
-          {(!label || (!cell.name && label === profileName)) && !editing && !ssh && (
-            <span className="cell-name placeholder" onDoubleClick={() => setEditing(true)} title={tr("Dwuklik: nadaj nazwę")}>{tr("bez nazwy")}</span>
-          )}
-          {cell.worktree && (
-            <span className="branch" title={cell.worktree.path}><IBranch /><span>{cell.worktree.branch}</span></span>
-          )}
-          {phaseLabel
-            ? <span className="status-text ssh">{tr(phaseLabel.key, phaseLabel.params)}</span>
-            : status === 'waiting' && failure !== undefined
-            ? <span className="status-text error" title={tr(errorPhrase(failure))}>{tr(failureLabel(failure))}</span>
-            : status !== 'idle' && <span className={`status-text ${status}`}>{status === 'working' ? tr('pracuje') : status === 'waiting' ? tr('czeka na Ciebie') : tr('zakończony')}{status === 'working' ? '…' : ''}</span>}
+          {/* Muted details: the profile when the name is not it, the model, the worktree branch, user@host of an SSH cell. */}
+          {!editing && (metaProfile || cell.model || cell.worktree || (ssh && host)) && <span className="cell-meta">
+            {metaProfile && <span className="meta-item">{profileName}</span>}
+            {cell.model && <span className="meta-item model" title={cell.model}>{cell.model}</span>}
+            {cell.worktree && (
+              <span className="meta-item branch" title={cell.worktree.path}><IBranch /><span>{cell.worktree.branch || cell.worktree.path}</span></span>
+            )}
+            {ssh && host && <span className="meta-item endpoint" title={userAtEndpoint(host)}>{userAtEndpoint(host)}</span>}
+          </span>}
           {cell.muted && <span className="muted-mark" title={tr("Alerty tej komórki są wyciszone")} aria-label={tr("Alerty tej komórki są wyciszone")}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0M3 3l18 18" /></svg>
           </span>}
         </div>
+        {/* The status as a pill beside the actions: it never pushes the name away, the details give way first. */}
+        {phaseLabel
+          ? <span className="status-text ssh">{tr(phaseLabel.key, phaseLabel.params)}</span>
+          : status === 'waiting' && failure !== undefined
+          ? <span className="status-text error" title={tr(errorPhrase(failure))}>{tr(failureLabel(failure))}</span>
+          : statusLabel && <span className={`status-text ${status}${exitFailed ? ' error' : ''}`} title={tr(statusLabel.key, statusLabel.params)}>{tr(statusLabel.key, statusLabel.params)}{status === 'working' ? '…' : ''}</span>}
         <span className="actions">
           {profile.cli !== 'shell' && !ssh && <button className={`mcp-control ${cell.role ?? 'disabled'} ${mcpInfo.connectedCellIds?.includes(cell.id) ? 'connected' : ''}`}
             aria-label={`${tr('Rola / MCP')}: ${tr(cell.role === 'coordinator' ? 'Koordynator' : cell.role === 'worker' ? 'Wykonawca' : 'Bez MCP')}`}
@@ -293,33 +314,44 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
               {cell.role === 'coordinator' ? <><circle cx="12" cy="5" r="2" /><circle cx="5" cy="19" r="2" /><circle cx="19" cy="19" r="2" /><path d="M12 7v6M5 17v-4h14v4" /></> : <><path d="M8 3v5m8-5v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4" />{!cell.role && <path d="m3 3 18 18" />}</>}
             </svg><span className="mcp-indicator" />
           </button>}
-          <button aria-label={tr("Uruchom ponownie")} title={tr("Uruchom ponownie")} onClick={(e) => openMenuAt(e.currentTarget, restartItems())}><IRestart /></button>
-          <button aria-label={maximized ? tr("Przywróć siatkę") : tr("Maksymalizuj")} title={titleWithShortcut(maximized ? tr("Przywróć siatkę") : tr("Maksymalizuj"), 'cell.maximize')} onClick={() => toggleMaximize(cell.id)}>
+          <button className="restart" aria-label={tr("Uruchom ponownie")} title={tr("Uruchom ponownie")} onClick={(e) => {
+            // One choice needs no menu (a shell, an agent without a conversation): the button restarts at once.
+            const items = restartItems();
+            if (items.length === 1 && 'onClick' in items[0]) items[0].onClick();
+            else openMenuAt(e.currentTarget, items);
+          }}><IRestart /></button>
+          <button aria-label={tr('Więcej akcji')} title={tr('Więcej akcji')} onClick={(e) => openMenuAt(e.currentTarget, menuItems())}><IMore /></button>
+          <button className="maximize" aria-label={maximized ? tr("Przywróć siatkę") : tr("Maksymalizuj")} title={titleWithShortcut(maximized ? tr("Przywróć siatkę") : tr("Maksymalizuj"), 'cell.maximize')} onClick={() => toggleMaximize(cell.id)}>
             {maximized ? <IRestore /> : <IMax />}
           </button>
-          <button aria-label={tr("Zamknij komórkę")} title={tr("Zamknij komórkę")} onClick={() => void removeCell(cell.id)}><IX /></button>
+          <button className="close" aria-label={tr("Zamknij komórkę")} title={tr("Zamknij komórkę")} onClick={() => void removeCell(cell.id)}><IX /></button>
         </span>
       </div>
-      <div className="cell-body" ref={bodyRef} style={lackingCli ? { visibility: 'hidden' } : sshTheme ? { ['--term-bg' as string]: sshTheme.colors.background } : undefined} />
+      {/* The card's body: the terminal and everything drawn over it (the overlays are placed from its top, terminalCell.css). */}
+      <div className="cell-main">
+        <div className="cell-body" ref={bodyRef} style={lackingCli ? { visibility: 'hidden' } : sshTheme ? { ['--term-bg' as string]: sshTheme.colors.background } : undefined} />
+        {!lackingCli && <TerminalFind cellId={cell.id} />}
+        {pathDrop && <div className={`cell-path-drop ${pathDrop.blocked ? 'blocked' : ''}`} role="status">{pathDrop.blocked ? tr(ssh ? 'Ścieżki lokalne nie działają w sesji SSH' : 'Komórka nie jest uruchomiona') : dropLabel(pathDrop.target)}</div>}
+        {drop && !pathDrop && <div className="cell-snippet-drop" role="status">{tr('Upuść, aby wkleić')}</div>}
+        {lackingCli && <CliMissingCard cli={lackingCli} cellId={cell.id} onChangeProfile={(anchor) => openMenuAt(anchor, profileItems())} />}
+        {ssh && <SshCellCard cellId={cell.id} host={host} session={sshSession} prompt={sshPrompt} />}
+        {ssh && <SshAutocomplete cellId={cell.id} />}
+        {floodHint && !error && (
+          <div className="cell-hint" role="status">
+            <span className="grow">{tr("Terminal wysyłał zdarzenia myszy do powłoki - zresetowano tryb")}</span>
+            <button className="btn small" onClick={() => setFloodHint(false)}>{tr("Zamknij")}</button>
+          </div>
+        )}
+        {error && (
+          <div className="cell-error">
+            <span className="grow">{errorText(error)}</span>
+            <button className="btn small" onClick={() => restartCell(cell.id, cell.session ? 'resume' : 'new')}>{tr("Spróbuj ponownie")}</button>
+          </div>
+        )}
+      </div>
+      {/* The footer slot (1.0.7): a bar under the terminal inside the card, e.g. the SSH status bar; see CellFoot.tsx. */}
+      <div className="cell-foot"><CellFoot cell={cell} /></div>
       <span className="cell-frame" aria-hidden="true" />
-      {!lackingCli && <TerminalFind cellId={cell.id} />}
-      {pathDrop && <div className={`cell-path-drop ${pathDrop.blocked ? 'blocked' : ''}`} role="status">{pathDrop.blocked ? tr(ssh ? 'Ścieżki lokalne nie działają w sesji SSH' : 'Komórka nie jest uruchomiona') : dropLabel(pathDrop.target)}</div>}
-      {drop && !pathDrop && <div className="cell-snippet-drop" role="status">{tr('Upuść, aby wkleić')}</div>}
-      {lackingCli && <CliMissingCard cli={lackingCli} cellId={cell.id} onChangeProfile={(anchor) => openMenuAt(anchor, profileItems())} />}
-      {ssh && <SshCellCard cellId={cell.id} host={host} session={sshSession} prompt={sshPrompt} />}
-      {ssh && <SshAutocomplete cellId={cell.id} />}
-      {floodHint && !error && (
-        <div className="cell-hint" role="status">
-          <span className="grow">{tr("Terminal wysyłał zdarzenia myszy do powłoki - zresetowano tryb")}</span>
-          <button className="btn small" onClick={() => setFloodHint(false)}>{tr("Zamknij")}</button>
-        </div>
-      )}
-      {error && (
-        <div className="cell-error">
-          <span className="grow">{errorText(error)}</span>
-          <button className="btn small" onClick={() => restartCell(cell.id, cell.session ? 'resume' : 'new')}>{tr("Spróbuj ponownie")}</button>
-        </div>
-      )}
     </div>
   );
 }, propsEqualWithStyle);

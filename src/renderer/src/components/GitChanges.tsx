@@ -9,7 +9,8 @@ import {
 } from '../../../shared/gitUi';
 import { openMenuAt } from './ContextMenu';
 import { FileIcon } from './FileIcon';
-import { ICheck, IChevron, IFolder } from './icons';
+import { ICheck, IChevron, IFolder, IUpload } from './icons';
+import { ICommit } from './menuIcons';
 import { matchesShortcut, titleWithShortcut, useShortcutText } from '../shortcuts';
 
 type Source = 'working' | 'staged' | 'untracked';
@@ -103,8 +104,8 @@ export function GitChanges({ projectId, status, busy, writable, programsNote, op
   };
 
   const openCommitMenu = (button: HTMLElement) => openMenuAt(button, [
-    { label: tr('Commit'), onClick: () => void commitNow() },
-    { label: tr('Commit i push'), onClick: () => void commitNow(true) },
+    { label: tr('Commit'), icon: <ICommit />, onClick: () => void commitNow() },
+    { label: tr('Commit i push'), icon: <IUpload />, onClick: () => void commitNow(true) },
   ]);
 
   const letterOfGroup = (id: ChangeGroup, file: GitFileChange): Letter => (id === 'conflict' ? CONFLICT_LETTER : id === 'staged' ? letterOf(file.x) : letterOf(file.untracked ? '?' : file.y));

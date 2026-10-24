@@ -1,10 +1,12 @@
 // Owns every pseudo-terminal. Independent of Electron so it can be integration-tested in Node.
 import { spawn as spawnProcess } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { createRequire } from 'module';
 import { delimiter, join } from 'path';
 import * as pty from 'node-pty';
 import type { SpawnRequest } from '../shared/ipc';
+import { withShellIntegration, type ShellLaunch } from '../shared/shellIntegration';
 import type { ShellKind } from '../shared/types';
 import { OutputChannel } from './output';
 import type { TerminalBackend, TerminalHistory } from './router';
@@ -70,6 +72,44 @@ export function resolveShell(kind: ShellKind, env: Record<string, string>, platf
   return { file: 'powershell.exe', args: ['-NoLogo'] };
 }
 
+const writtenFiles = new Map<string, string>();
+
+/**
+ * The shell launch with its prompt marks (shellIntegration.ts): the helper files it needs are written once per content into
+ * the temp folder. A write that fails starts the shell untouched (the status then falls back to the output heuristics).
+ */
+/**
+ * A folder only this user can write: the shell runs the init file in it, so on a shared /tmp another user must not be able to
+ * plant or swap it. Per-user name, created 0700, and checked (a real directory, ours, not writable by others) before use.
+ */
+function privateDir(dir: string): boolean {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const st = lstatSync(dir);
+  if (!st.isDirectory() || st.isSymbolicLink()) return false;
+  if (process.platform !== 'win32' && typeof process.getuid === 'function' && (st.uid !== process.getuid() || (st.mode & 0o022) !== 0)) return false;
+  return true;
+}
+
+const defaultShellDir = (): string => join(tmpdir(), `unimux-shell-${typeof process.getuid === 'function' ? process.getuid() : 'user'}`);
+
+export function integratedLaunch(kind: ShellKind, launch: ShellLaunch, platform = process.platform, dir = defaultShellDir()): ShellLaunch {
+  const spec = withShellIntegration(kind, launch, { dir, platform });
+  try {
+    if (Object.keys(spec.files).length && !privateDir(dir)) return launch;
+    for (const [file, content] of Object.entries(spec.files)) {
+      // Checked on disk every time (not only the cache): a file changed behind our back is written again.
+      if (writtenFiles.get(file) === content && existsSync(file) && readFileSync(file, 'utf8') === content) continue;
+      const temp = `${file}.${process.pid}.tmp`;
+      writeFileSync(temp, content, { mode: 0o600, flag: 'wx' });
+      renameSync(temp, file);
+      writtenFiles.set(file, content);
+    }
+  } catch {
+    return launch;
+  }
+  return { file: spec.file, args: spec.args, env: spec.env };
+}
+
 export class PtyManager implements TerminalBackend {
   private entries = new Map<string, Entry>();
   /**
@@ -96,13 +136,13 @@ export class PtyManager implements TerminalBackend {
 
   spawn(req: SpawnRequest): number {
     if (this.entries.has(req.id)) void this.kill(req.id);
-    const { file, args } = resolveShell(req.shell, req.env);
+    const { file, args, env } = integratedLaunch(req.shell, { ...resolveShell(req.shell, req.env), env: req.env });
     const proc = pty.spawn(file, args, {
       name: 'xterm-256color',
       cols: Math.max(2, req.cols),
       rows: Math.max(1, req.rows),
       cwd: req.cwd,
-      env: { ...req.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'unimux' },
+      env: { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'unimux' },
       ...(process.platform === 'win32' ? { useConpty: true, useConptyDll: true } : {}),
     });
     let resolveExit!: () => void;

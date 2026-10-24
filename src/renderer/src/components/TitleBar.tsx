@@ -10,7 +10,7 @@ import { addAgent, closeTab, selectTab } from '../actions';
 import { setUi, update, useStore } from '../store';
 import { profileOptionLabel } from '../cliUi';
 import { openMenu, openMenuAt } from './ContextMenu';
-import { IChevron, IPlusBold, ISearch, ITable, IX, TGrid, THistory, TSettings, TNote, TSidebar, TSnippet } from './icons';
+import { IChevron, IEdit, IGrid, IPlusBold, IRestart, ISearch, ITable, IX, TGrid, TSettings, TNote, TSidebar, TSnippet, TTeam } from './icons';
 import { DbKindIcon } from './db/DbKindIcon';
 import { FileIcon } from './FileIcon';
 import { StatusBadges } from './StatusBadges';
@@ -32,6 +32,8 @@ import { reconnectAllSsh, reconnectAllTargetsOf, sshHostMenuItems } from '../ssh
 import { canDetachKey, detachKey, requestAttach } from '../detach';
 import { detachedGridIds, detachedList, targetKey } from '../../../shared/detached';
 import { IPopOut } from './detachIcons';
+import { noteIdOfTab } from '../../../shared/noteTools';
+import { openNoteInPanel } from '../notesUi';
 
 export const TitleBar = memo(function TitleBar() {
   const { tr } = useI18n();
@@ -39,7 +41,6 @@ export const TitleBar = memo(function TitleBar() {
   const sidebarCollapsed = useStore((st) => st.s.sidebarCollapsed);
   const snippetsOpen = useStore((st) => st.s.snippetsOpen);
   const notesOpen = useStore((st) => st.s.notesOpen);
-  const projectId = useStore((st) => activeProject(st.s)?.id);
   const automationOpen = useStore((st) => st.ui.automationOpen);
   const settingsActive = useStore((st) => st.ui.settingsActive);
   const pendingTasks = useStore((st) => st.s.automation.tasks.filter((t) => !['completed', 'cancelled'].includes(t.status)).length);
@@ -47,15 +48,18 @@ export const TitleBar = memo(function TitleBar() {
     <div className="titlebar">
       <Brand collapsed={sidebarCollapsed} />
       <div className="spacer" />
-      <div className="row no-drag" style={{ gap: 2 }}>
+      {/* 1.0.7: three groups - search, the panels (left, bottom, right), settings. History left the bar: the project list,
+          the project menu, the palette and Ctrl+Shift+H open it. */}
+      <div className="row no-drag tb-groups">
         <button className="tb-btn" title={titleWithShortcut(tr("Szukaj wszędzie"), 'palette.open')} aria-label={tr("Szukaj wszędzie")} onClick={() => setUi({ palette: true })}><ISearch /></button>
-        <button className={`tb-btn team-toggle ${automationOpen ? 'on' : ''}`} title={tr('Zadania i wiadomości agentów')} onClick={() => setUi({ automationOpen: !automationOpen })}>
-          AI{pendingTasks > 0 && <span className="team-count">{pendingTasks}</span>}
+        <span className="tb-sep" aria-hidden="true" />
+        <button className={`tb-btn ${!sidebarCollapsed ? 'on' : ''}`} title={titleWithShortcut(tr("Panel boczny"), 'sidebar.toggle')} aria-label={tr("Panel boczny")} aria-pressed={!sidebarCollapsed} onClick={() => update((st) => ({ ...st, sidebarCollapsed: !st.sidebarCollapsed }))}><TSidebar /></button>
+        <button className={`tb-btn team-toggle ${automationOpen ? 'on' : ''}`} title={tr('Zespół AI: zadania i wiadomości agentów')} aria-label={tr('Zespół AI')} aria-pressed={automationOpen} onClick={() => setUi({ automationOpen: !automationOpen })}>
+          <TTeam />{pendingTasks > 0 && <span className="team-count">{pendingTasks}</span>}
         </button>
-        {projectId && <button className="tb-btn" title={titleWithShortcut(tr("Historia czatów i gridów"), 'history.open')} onClick={() => setUi({ modal: { kind: 'history', projectId } })}><THistory /></button>}
-        <button className={`tb-btn ${snippetsOpen ? 'on' : ''}`} title={titleWithShortcut(tr("Snippety"), 'snippets.toggle')} onClick={() => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen }))}><TSnippet /></button>
-        <button className={`tb-btn ${notesOpen ? 'on' : ''}`} title={titleWithShortcut(tr("Notatki"), 'notes.toggle')} aria-label={tr("Notatki")} onClick={() => update((st) => ({ ...st, notesOpen: !st.notesOpen }))}><TNote /></button>
-        <button className={`tb-btn ${!sidebarCollapsed ? 'on' : ''}`} title={titleWithShortcut(tr("Panel projektów"), 'sidebar.toggle')} onClick={() => update((st) => ({ ...st, sidebarCollapsed: !st.sidebarCollapsed }))}><TSidebar /></button>
+        <button className={`tb-btn ${snippetsOpen ? 'on' : ''}`} title={titleWithShortcut(tr("Snippety"), 'snippets.toggle')} aria-label={tr("Snippety")} aria-pressed={snippetsOpen} onClick={() => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen }))}><TSnippet /></button>
+        <button className={`tb-btn ${notesOpen ? 'on' : ''}`} title={titleWithShortcut(tr("Notatki"), 'notes.toggle')} aria-label={tr("Notatki")} aria-pressed={notesOpen} onClick={() => update((st) => ({ ...st, notesOpen: !st.notesOpen }))}><TNote /></button>
+        <span className="tb-sep" aria-hidden="true" />
         <button className={`tb-btn ${settingsActive ? 'on' : ''}`} title={tr("Ustawienia")} aria-label={tr("Ustawienia")} onClick={() => setUi({ settingsTabOpen: true, settingsActive: true })}><TSettings /></button>
       </div>
     </div>
@@ -263,6 +267,19 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       ]);
       return;
     }
+    const noteId = noteIdOfTab(doc.id);
+    if (noteId) {
+      openMenu(x, y, [
+        { header: doc.name },
+        { label: tr('Zamknij'), onClick: () => void closeFile(doc.id) },
+        { label: tr('Zamknij pozostałe'), disabled: idsFor('others').length === 0, onClick: () => void closeFiles(idsFor('others')) },
+        { label: tr('Zamknij karty po prawej'), disabled: idsFor('right').length === 0, onClick: () => void closeFiles(idsFor('right')) },
+        { sep: true }, ...splitMenuItems(doc.id),
+        { sep: true },
+        { label: tr('Pokaż w panelu notatek'), onClick: () => openNoteInPanel(noteId) },
+      ]);
+      return;
+    }
     const owner = projects.find((p) => p.id === doc.projectId);
     const full = doc.source ? doc.source.path : owner ? fullProjectPath(owner.path, doc.relativePath, window.mc.platform) : doc.relativePath;
     openMenu(x, y, [
@@ -331,19 +348,19 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
                 onContextMenu={(e) => {
                   e.preventDefault();
                   openMenu(e.clientX, e.clientY, [
-                    { label: tr("Zmień nazwę"), onClick: () => setEditing(t.id) },
+                    { label: tr("Zmień nazwę"), icon: <IEdit />, onClick: () => setEditing(t.id) },
                     // The strip shows the project's colour (not the grid's own), so this is what the swatches change.
                     { header: tr('Kolor projektu') },
                     { colors: PROJECT_COLORS, onPick: (color) => update((st) => updateProject(st, project.id, { color })) },
-                    { label: tr("Nowy grid") + '…', onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
+                    { label: tr("Nowy grid") + '…', icon: <IGrid />, onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
                     ...(t.cells.some((c) => c.ssh) ? [{ label: tr('Wysyłanie masowe'), onClick: () => setUi({ modal: { kind: 'broadcast', projectId: project.id, tabId: t.id } }) }] : []),
-                    ...(reconnectAllTargetsOf(project.id, t.id).length ? [{ label: tr('Połącz ponownie wszystkie SSH'), onClick: () => reconnectAllSsh(project.id, t.id) }] : []),
-                    { label: tr('Przenieś do nowego okna'), onClick: () => void detachKey(`grid:${t.id}`, 'menu') },
+                    ...(reconnectAllTargetsOf(project.id, t.id).length ? [{ label: tr('Połącz ponownie wszystkie SSH'), icon: <IRestart />, onClick: () => reconnectAllSsh(project.id, t.id) }] : []),
+                    { label: tr('Przenieś do nowego okna'), icon: <IPopOut />, onClick: () => void detachKey(`grid:${t.id}`, 'menu') },
                     { sep: true },
-                    { label: tr("Zamknij (do historii)"), danger: true, onClick: () => void closeTab(project.id, t.id), hint: shortcutText('tab.close') || undefined },
+                    { label: tr("Zamknij (do historii)"), icon: <IX />, danger: true, onClick: () => void closeTab(project.id, t.id), hint: shortcutText('tab.close') || undefined },
                   ]);
                 }}
-                title={`${tr('Projekt: {name}', { name: project.name })}\n${tr("Dwuklik lub prawy klik: zmień nazwę · środkowy przycisk: zamknij")}`}
+                title={`${tr('Projekt: {name}', { name: project.name })}\n${tr("Dwuklik: zmień nazwę · prawy klik: menu · środkowy klik: zamknij")}`}
               >
                 {color && <span className="tab-project" aria-hidden="true" />}
                 <span className="tab-type-icon" aria-hidden="true"><TGrid /></span>
@@ -391,6 +408,21 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
               );
             }
             const owner = projectById.get(doc.projectId);
+            // 1.0.7: a note of the Notes panel as a tab (its name follows the note, it never has unsaved changes).
+            if (noteIdOfTab(doc.id)) {
+              const color = stripTabColor({ project: owner });
+              return (
+                <div key={doc.id} {...dragProps(`file:${doc.id}`)} data-project-id={owner?.id} style={stripTabStyle(order.indexOf(`file:${doc.id}`), color)}
+                  className={`tab file-tab note-strip-tab ${activeKey === `file:${doc.id}` ? 'active' : ''}`} title={`${tr('Notatka')}: ${doc.name}`}
+                  onClick={() => activateFile(doc.id)} onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); void closeFile(doc.id); } }}
+                  onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
+                  onContextMenu={(e) => { e.preventDefault(); fileTabMenu(e.clientX, e.clientY, doc); }}>
+                  {color && <span className="tab-project" aria-hidden="true" />}
+                  <span className="tab-type-icon" aria-hidden="true"><TNote /></span><span className="label">{doc.name}</span>
+                  <button className="x" aria-label={tr('Zamknij')} onClick={(e) => { e.stopPropagation(); void closeFile(doc.id); }}><IX /></button>
+                </div>
+              );
+            }
             if (doc.db) {
               const c = dbConnection(doc.db.connectionId);
               const color = stripTabColor({ connection: c ? { color: dbConnectionColor(dbGroupColors, c) } : null });

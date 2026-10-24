@@ -66,6 +66,8 @@
 
 .ssh-panel .ssh-banner { margin: 0; max-height: 96px; padding: 8px 12px; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: var(--bg-1); }
 .ssh-connect-prompt { padding: 12px; background: var(--bg-3); }
+/* The buttons of a login or host key question sit at the right end, like those of the footer bar below (1.0.7). */
+.ssh-connect-prompt .ssh-actions { justify-content: flex-end; }
 .ssh-connect.danger .ssh-connect-prompt { background: color-mix(in srgb, #ef4444 6%, var(--bg-3)); }
 .ssh-connect-log { display: flex; flex-direction: column; gap: 2px; max-height: 140px; margin: 0; padding: 8px 12px; overflow: auto; list-style: none; background: var(--bg-1); font-family: "Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular", "Courier New", monospace; font-size: 11px; line-height: 1.5; user-select: text; }
 .ssh-connect-log li { display: flex; gap: 8px; min-width: 0; color: var(--text-2); }
@@ -81,7 +83,7 @@
 /* A small grid cell: the panel fills the cell without its frame and every row gets tighter. */
 @container (max-width: 340px) or (max-height: 300px) {
   .ssh-frame { padding: 0; }
-  .ssh-panel { --ssh-mark: 14px; max-width: none; margin: 0 0 auto; border: 0; border-radius: 0; background: var(--bg); animation: none; }
+  .ssh-panel { --ssh-mark: 14px; max-width: none; margin: 0 0 auto; border: 0; border-radius: 0; background: var(--card-bg); animation: none; }
   .ssh-panel-head { gap: 8px; padding: 7px 8px; }
   .ssh-chip { width: 22px; height: 22px; border-radius: 5px; font-size: 10px; }
   .ssh-panel-name strong { font-size: 12px; }

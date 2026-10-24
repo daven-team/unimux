@@ -23,6 +23,11 @@ export function shownProfileName(profile: Pick<Profile, 'id' | 'name' | 'cli'>, 
   return shell === 'cmd' ? tr('Wiersz polecenia') : SHELL_NAMES[shell] ?? profile.name;
 }
 
+/** The shell a cell's name follows: the one its terminal was started with, else the one of Settings > Terminal. */
+export function cellShell(cell: { shell?: ShellKind } | undefined, setting: ShellKind): ShellKind {
+  return cell?.shell ?? setting;
+}
+
 /** Profiles shipped by earlier versions, folded into their base profile. */
 export const RETIRED_PROFILES: Record<string, string> = { 'claude-opus': 'claude', 'codex-high': 'codex' };
 /** How long Codex waits for one unimux MCP tool call (its default is 60 s). */

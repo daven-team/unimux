@@ -21,6 +21,7 @@ import { monitorMessages } from './monitorMessages';
 import { notesMessages } from './notesMessages';
 import { snippetMessages } from './snippetMessages';
 import { perfMessages } from './perfMessages';
+import { polishMessages } from './polishMessages';
 import { railMessages } from './railMessages';
 import { settingsMessages } from './settingsMessages';
 import { sftpMessages } from './sftpMessages';
@@ -35,6 +36,7 @@ import { sshThemeMessages } from './sshThemeMessages';
 import { sshViewMessages } from './sshViewMessages';
 import { sshHostsMessages } from './sshHostsMessages';
 import { sshAutocompleteMessages } from './sshAutocompleteMessages';
+import { sshBarMessages } from './sshBarMessages';
 import { safetyMessages } from './safetyMessages';
 import { stabilityMessages } from './stabilityMessages';
 import { statusMessages } from './statusMessages';
@@ -66,6 +68,7 @@ export const messages = {
   ...notesMessages,
   ...snippetMessages,
   ...perfMessages,
+  ...polishMessages,
   ...safetyMessages,
   ...stabilityMessages,
   ...railMessages,
@@ -82,6 +85,7 @@ export const messages = {
   ...sshViewMessages,
   ...sshHostsMessages,
   ...sshAutocompleteMessages,
+  ...sshBarMessages,
   ...statusMessages,
   ...swapMessages,
   ...termMessages,
