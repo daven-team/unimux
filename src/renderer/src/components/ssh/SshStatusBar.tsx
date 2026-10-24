@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  diskLevel, fitBar, formatBytes, formatMemory, formatRate, formatUptime, formatUptimeShort, memoryPercent, rootDisk, shownBarItems,
+  diskLevel, fitBar, formatBytes, formatMemory, formatRate, formatUptimeLong, formatUptimeShort, memoryPercent, rootDisk, shownBarItems,
   sparklinePoints, splitWho, SSH_BAR_INTERVAL_MS, SSH_BAR_ITEMS, type BarItemWidths, type BarStage, type SshBarItem, type WhoEntry,
 } from '../../../../shared/sshBar';
 import { updateCell, updateSettings } from '../../../../shared/state';
@@ -214,7 +214,7 @@ function Bar({ cell }: { cell: Cell }) {
             <tr><th>{tr('Procesor')}</th><td>{fmtPct(cpu ?? 0)}</td></tr>
             {track.ncpu !== undefined && <tr><th>{tr('Rdzenie')}</th><td>{track.ncpu}</td></tr>}
             {sample?.load && <tr><th>{tr('Obciążenie (1, 5, 15 min)')}</th><td>{sample.load.map((v) => new Intl.NumberFormat(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v)).join(' / ')}</td></tr>}
-            {uptime !== undefined && <tr><th>{tr('Czas działania')}</th><td>{formatUptime(uptime)}</td></tr>}
+            {uptime !== undefined && <tr><th>{tr('Czas działania')}</th><td>{formatUptimeLong(uptime, language)}</td></tr>}
           </tbody></table>
         )}>{inner}</HoverCard>
       );
@@ -227,7 +227,7 @@ function Bar({ cell }: { cell: Cell }) {
         <span key={it} {...attrs} className="ssh-bar-item ssh-bar-net" title={tr('Sieć (wszystkie interfejsy poza lo): odbiór {rx}, wysyłanie {tx}', { rx: formatRate(rx!, language), tx: formatRate(tx!, language) })}>{inner}</span>
       );
       case 'uptime': return (
-        <span key={it} {...attrs} className="ssh-bar-item ssh-bar-uptime" title={tr('Czas działania serwera: {time}', { time: formatUptime(uptime!) })}>{inner}</span>
+        <span key={it} {...attrs} className="ssh-bar-item ssh-bar-uptime" title={tr('Czas działania serwera: {time}', { time: formatUptimeLong(uptime!, language) })}>{inner}</span>
       );
       case 'user': return (
         <HoverCard key={it} attrs={attrs} className="ssh-bar-user" content={() => (

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import {
-  advanceBar, barScript, barStageWidth, diskLevel, fitBar, formatBytes, formatMemory, formatRate, formatUptime, formatUptimeShort,
+  advanceBar, barScript, barStageWidth, diskLevel, fitBar, formatBytes, formatMemory, formatRate, formatUptime, formatUptimeLong, formatUptimeShort,
   memoryPercent, normalizeBarItems, osIdOf, parseBar, splitWho, type BarStage,
   parseDf, parseWho, rootDisk, shownBarItems, sparklinePoints, SSH_BAR_HISTORY,
 } from '../src/shared/sshBar';
@@ -377,10 +377,10 @@ describe('formatting', () => {
   it('writes the short forms: memory share, compact rates, uptime in the app language', () => {
     expect(memoryPercent({ total: 1000, available: 630 })).toBeCloseTo(37);
     expect(memoryPercent({ total: 0, available: 0 })).toBe(0);
-    expect(formatRate(9000, 'pl', true)).toBe('8,8K');
-    expect(formatRate(40_000, 'en', true)).toBe('39K');
-    expect(formatRate(300, 'en', true)).toBe('300B');
-    expect(formatRate(5 * 1024 ** 2, 'en', true)).toBe('5.0M');
+    expect(formatRate(9000, 'pl', true)).toBe('8,8K/s');
+    expect(formatRate(40_000, 'en', true)).toBe('39K/s');
+    expect(formatRate(300, 'en', true)).toBe('300B/s');
+    expect(formatRate(5 * 1024 ** 2, 'en', true)).toBe('5.0M/s');
     expect(formatUptimeShort(297 * 86400 + 5000, 'pl')).toBe('297 dni');
     expect(formatUptimeShort(86400, 'pl')).toBe('1 dzień');
     expect(formatUptimeShort(297 * 86400, 'en')).toBe('297 days');
@@ -388,6 +388,9 @@ describe('formatting', () => {
     expect(formatUptimeShort(5 * 3600 + 12 * 60, 'pl', true)).toBe('5 h');
     expect(formatUptimeShort(720, 'de')).toBe('12 min');
     expect(formatUptimeShort(297 * 86400, 'pl', true)).toMatch(/^297\s?d/);
+    expect(formatUptimeShort(297 * 86400, 'pl', true)).toBe('297 d');
+    expect(formatUptimeLong(14 * 86400 + 6 * 3600, 'pl')).toBe('14 dni 6 h');
+    expect(formatUptimeLong(5 * 3600 + 12 * 60, 'en')).toBe('5 h 12 min');
   });
 });
 

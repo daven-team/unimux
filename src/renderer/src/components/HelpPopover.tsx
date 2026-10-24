@@ -21,7 +21,7 @@ export function HelpPopover({ label, intro, rows, footer }: { label: string; int
   const pop = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [pinned, setPinned] = useState(false);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; maxHeight?: number } | null>(null);
   const closeTimer = useRef(0);
 
   const close = useCallback(() => {
@@ -46,8 +46,14 @@ export function HelpPopover({ label, intro, rows, footer }: { label: string; int
     const card = pop.current;
     if (!anchor || !card) return;
     const size = card.getBoundingClientRect();
-    const at = placeTooltip(anchor.getBoundingClientRect(), { width: size.width, height: size.height }, { width: window.innerWidth, height: window.innerHeight }, 6, MARGIN);
-    setPos({ left: at.left, top: at.top });
+    const rect = anchor.getBoundingClientRect();
+    const at = placeTooltip(rect, { width: size.width, height: size.height }, { width: window.innerWidth, height: window.innerHeight }, 6, MARGIN);
+    // Flipped above the "?" it would cover the panel's own header: stay below and scroll inside when the window is short,
+    // unless even a short card would not fit there.
+    const below = rect.bottom + 6;
+    const room = window.innerHeight - MARGIN - below;
+    if (at.top < rect.top && room >= 160) setPos({ left: at.left, top: below, maxHeight: room });
+    else setPos({ left: at.left, top: at.top });
   }, []);
   useLayoutEffect(() => { if (open) place(); }, [open, place, intro, rows, footer]);
 
@@ -106,7 +112,7 @@ export function HelpPopover({ label, intro, rows, footer }: { label: string; int
           id={id}
           role="tooltip"
           className={`help-pop ${pos ? 'on' : ''}`}
-          style={pos ? { left: pos.left, top: pos.top } : undefined}
+          style={pos ? { left: pos.left, top: pos.top, ...(pos.maxHeight ? { maxHeight: pos.maxHeight, overflowY: 'auto' } : {}) } : undefined}
           onPointerEnter={show}
           onPointerLeave={leave}
           // React events bubble through the portal to the panel: its own background menu is not for the card.

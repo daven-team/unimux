@@ -404,7 +404,7 @@ export function formatMemory(mem: { total: number; available: number }, locale: 
 /** The share of memory in use, 0 to 100. */
 export const memoryPercent = (mem: { total: number; available: number }): number => (mem.total > 0 ? ((mem.total - mem.available) / mem.total) * 100 : 0);
 
-/** A transfer rate ("0 B/s", "12,4 KB/s"); `compact`: one decimal at most, a one-letter unit, no "/s" ("8,8K", "312K"). */
+/** A transfer rate ("0 B/s", "12,4 KB/s"); `compact`: one decimal at most and a one-letter unit ("8,8K/s", "312K/s"). */
 export function formatRate(bytesPerSecond: number, locale: string, compact = false): string {
   const full = formatBytes(Math.max(0, bytesPerSecond), locale);
   if (!compact) return `${full}/s`;
@@ -413,7 +413,7 @@ export function formatRate(bytesPerSecond: number, locale: string, compact = fal
   while (i < UNITS.length - 1 && b >= 1024 ** (i + 1) * 0.995) i++;
   const v = b / 1024 ** i;
   const digits = i === 0 || v >= 10 ? 0 : 1;
-  return `${new Intl.NumberFormat(locale, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v)}${i === 0 ? 'B' : UNITS[i][0]}`;
+  return `${new Intl.NumberFormat(locale, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v)}${i === 0 ? 'B' : UNITS[i][0]}/s`;
 }
 
 /** An uptime as days, hours and minutes ("12 d 3 h", "3 h 5 min", "4 min"). */
@@ -434,9 +434,16 @@ export function formatUptimeShort(seconds: number, locale: string, compact = fal
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return new Intl.NumberFormat(locale, { style: 'unit', unit: 'day', unitDisplay: compact ? 'narrow' : 'long' }).format(d);
+  if (d > 0) return compact ? `${d} d` : new Intl.NumberFormat(locale, { style: 'unit', unit: 'day', unitDisplay: 'long' }).format(d);
   if (h > 0) return compact ? `${h} h` : `${h} h ${m} min`;
   return `${m} min`;
+}
+
+/** The uptime for tooltips, in the same words as the bar: "14 dni 6 h", "5 h 12 min", "12 min". */
+export function formatUptimeLong(seconds: number, locale: string): string {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  return d > 0 ? `${formatUptimeShort(seconds, locale)} ${h} h` : formatUptimeShort(seconds, locale);
 }
 
 /**
