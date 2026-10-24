@@ -2,6 +2,7 @@
 // Each row: English, German, Spanish, French, Portuguese. Polish is the key.
 export const polishMessages = {
   'Szukaj w ustawieniach': ['Search settings', 'Einstellungen durchsuchen', 'Buscar en los ajustes', 'Rechercher dans les paramètres', 'Pesquisar nas definições'],
+  'Znalezione ustawienia: {count}': ['Matching settings: {count}', 'Gefundene Einstellungen: {count}', 'Ajustes encontrados: {count}', 'Paramètres trouvés : {count}', 'Definições encontradas: {count}'],
   'Dwuklik: zmień nazwę · prawy klik: menu · środkowy klik: zamknij': [
     'Double-click: rename · right-click: menu · middle-click: close',
     'Doppelklick: umbenennen · Rechtsklick: Menü · Mittelklick: schließen',

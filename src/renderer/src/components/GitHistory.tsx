@@ -9,7 +9,8 @@ import { baseName, chipRefs, dirName, letterOf } from '../../../shared/gitUi';
 import { openMenu } from './ContextMenu';
 import { FileIcon } from './FileIcon';
 import { GitGraph, GRAPH_ROW, graphLanes } from './GitGraph';
-import { IBranch, IChevron, ICloud, ITag, IX } from './icons';
+import { IBranch, IChevron, ICloud, ITag, IView, IX } from './icons';
+import { ICopy } from './menuIcons';
 
 /** Loaded rows stop here: the list stays light, a filter or the search finds older commits. */
 const MAX_LOADED = 3000;
@@ -177,8 +178,8 @@ const CommitRow = memo(function CommitRow({ commit, row, lanes, language, onSele
       onContextMenu={(e) => {
         e.preventDefault();
         openMenu(e.clientX, e.clientY, [
-          { label: tr('Pokaż szczegóły'), onClick: () => onSelect(commit) },
-          { label: tr('Kopiuj hash'), onClick: () => window.mc.clipboardWrite(commit.hash) },
+          { label: tr('Pokaż szczegóły'), icon: <IView />, onClick: () => onSelect(commit) },
+          { label: tr('Kopiuj hash'), icon: <ICopy />, onClick: () => window.mc.clipboardWrite(commit.hash) },
         ]);
       }}
     >

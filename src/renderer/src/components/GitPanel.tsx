@@ -21,7 +21,8 @@ import { GitSetup } from './GitSetup';
 import { GitCloneDialog } from './GitClone';
 import { GitPublishButton, useGitPublish } from './GitPublish';
 import { refreshGitBadges } from '../git/gitBadges';
-import { IBranch, IChevron, IMore } from './icons';
+import { IBranch, ICheck, IChevron, ICloud, IDownload, IFile, IFolder, ILink, IMore, ISplit, IUpload } from './icons';
+import { ICodeEditor, IDiff, IRefresh } from './menuIcons';
 import { RefreshIcon, useHoldBusy } from './Spinner';
 import './gitPanel.css';
 
@@ -278,37 +279,37 @@ function RepoView({ projectId, projectPath }: { projectId: string; projectPath: 
     const relative = editPath(file);
     const folder = file.path.endsWith('/');
     openMenu(e.clientX, e.clientY, [
-      { label: tr('Pokaż zmiany'), disabled: folder, onClick: () => openDiff(file, source) },
-      { label: tr('Pokaż zmiany obok gridu'), disabled: folder, onClick: () => { openDiff(file, source, true); openBesideGrid(); } },
-      { label: tr('Otwórz w edytorze'), disabled: !relative, onClick: () => { if (relative) void openFile(projectId, relative); } },
-      { label: tr('Pokaż w panelu plików'), disabled: !relative, onClick: () => { if (relative) locateInFiles(projectId, relative); } },
+      { label: tr('Pokaż zmiany'), icon: <IDiff />, disabled: folder, onClick: () => openDiff(file, source) },
+      { label: tr('Pokaż zmiany obok gridu'), icon: <ISplit />, disabled: folder, onClick: () => { openDiff(file, source, true); openBesideGrid(); } },
+      { label: tr('Otwórz w edytorze'), icon: <ICodeEditor />, disabled: !relative, onClick: () => { if (relative) void openFile(projectId, relative); } },
+      { label: tr('Pokaż w panelu plików'), icon: <IFile />, disabled: !relative, onClick: () => { if (relative) locateInFiles(projectId, relative); } },
       { sep: true },
-      { label: tr('Kopiuj ścieżkę względną'), onClick: () => window.mc.clipboardWrite(file.path) },
+      { label: tr('Kopiuj ścieżkę względną'), icon: <ILink />, onClick: () => window.mc.clipboardWrite(file.path) },
     ]);
   };
 
   /** The "..." menu of the panel: how the changes are shown and ordered, and the everyday actions (Cursor's menu, limited to what the panel can do). */
   const openOverflow = (button: HTMLElement) => {
-    const mark = (on: boolean): string | undefined => (on ? '✓' : undefined);
+    const mark = (on: boolean) => (on ? <ICheck /> : undefined);
     const idle = !busy && canWrite;
     openMenuAt(button, [
       { header: tr('Widok zmian') },
-      { label: tr('Lista'), hint: mark(changesLayout.view === 'list'), onClick: () => updateChangesLayout({ ...changesLayout, view: 'list' }) },
-      { label: tr('Drzewo'), hint: mark(changesLayout.view === 'tree'), onClick: () => updateChangesLayout({ ...changesLayout, view: 'tree' }) },
+      { label: tr('Lista'), icon: mark(changesLayout.view === 'list'), onClick: () => updateChangesLayout({ ...changesLayout, view: 'list' }) },
+      { label: tr('Drzewo'), icon: mark(changesLayout.view === 'tree'), onClick: () => updateChangesLayout({ ...changesLayout, view: 'tree' }) },
       { sep: true },
       { header: tr('Sortuj zmiany') },
-      { label: tr('Według nazwy'), hint: mark(changesLayout.sort === 'name'), onClick: () => updateChangesLayout({ ...changesLayout, sort: 'name' }) },
-      { label: tr('Według ścieżki'), hint: mark(changesLayout.sort === 'path'), onClick: () => updateChangesLayout({ ...changesLayout, sort: 'path' }) },
-      { label: tr('Według statusu'), hint: mark(changesLayout.sort === 'status'), onClick: () => updateChangesLayout({ ...changesLayout, sort: 'status' }) },
+      { label: tr('Według nazwy'), icon: mark(changesLayout.sort === 'name'), onClick: () => updateChangesLayout({ ...changesLayout, sort: 'name' }) },
+      { label: tr('Według ścieżki'), icon: mark(changesLayout.sort === 'path'), onClick: () => updateChangesLayout({ ...changesLayout, sort: 'path' }) },
+      { label: tr('Według statusu'), icon: mark(changesLayout.sort === 'status'), onClick: () => updateChangesLayout({ ...changesLayout, sort: 'status' }) },
       { sep: true },
-      { label: 'Pull', disabled: !idle || !status?.upstream, onClick: pullNow },
-      { label: 'Push', disabled: !idle || !status?.push || (!status.ahead && !status.push.setUpstream), onClick: () => void pushNow() },
-      { label: 'Fetch', disabled: !idle, onClick: fetchNow },
+      { label: 'Pull', icon: <IDownload />, disabled: !idle || !status?.upstream, onClick: pullNow },
+      { label: 'Push', icon: <IUpload />, disabled: !idle || !status?.push || (!status.ahead && !status.push.setUpstream), onClick: () => void pushNow() },
+      { label: 'Fetch', icon: <ICloud />, disabled: !idle, onClick: fetchNow },
       ...publish.menu({ hasRemote: status?.hasRemote, initial: !!status?.initial, branch: status?.branch ?? null, idle }),
-      { label: tr('Przełącz na gałąź…'), onClick: () => void openBranches(button) },
-      { label: tr('Klonuj repozytorium…'), onClick: () => setCloning(true) },
+      { label: tr('Przełącz na gałąź…'), icon: <IBranch />, onClick: () => void openBranches(button) },
+      { label: tr('Klonuj repozytorium…'), icon: <IFolder />, onClick: () => setCloning(true) },
       { sep: true },
-      { label: tr('Odśwież'), onClick: () => void refreshNow() },
+      { label: tr('Odśwież'), icon: <IRefresh />, onClick: () => void refreshNow() },
     ]);
   };
 

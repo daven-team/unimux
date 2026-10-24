@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  codeLineFlags, exportFileName, foldText, hitRanges, isImportableNoteFile, isNoteImageName, noteExcerpt, noteFromFile, noteFromTemplate,
-  noteImageMarkdown, noteImageName, noteImageNames, noteMatches, noteTags, noteTasks, normalizeNoteSort, parseNoteQuery, plainLine,
+  captureSourceLine, codeLineFlags, exportFileName, foldText, hitRanges, isImportableNoteFile, isNoteImageName, noteExcerpt, noteFromFile, noteFromTemplate,
+  noteImageMarkdown, noteImageName, noteImageNames, noteMatches, noteTags, noteTasks, noteWordCount, normalizeNoteSort, parseNoteQuery, plainLine,
   sortNotes, splitTags, tagCounts, taskProgress, toggleTask, toggleTaskLine, type NoteTemplateWords,
 } from '../src/shared/noteTools';
 import { normalizeNotes } from '../src/shared/notes';
@@ -191,5 +191,36 @@ describe('note images', () => {
   it('links an image and lists the linked ones', () => {
     expect(noteImageMarkdown(name, 'a [b]')).toBe(`![a b](note-images/${name})`);
     expect(noteImageNames(`${noteImageMarkdown(name)} and again note-images/${name}`)).toEqual([name]);
+  });
+});
+
+describe('note word count', () => {
+  it('does not count task boxes, so ticking a task keeps the count', () => {
+    const open = '# Lista zadań\n\n- [ ] Kupić mleko #zakupy\n- [ ] Zrobić review #praca\n- [ ] Trzecie zadanie';
+    expect(noteWordCount(open)).toBe(10);
+    expect(noteWordCount(open.replace('- [ ] Trzecie', '- [x] Trzecie'))).toBe(10);
+    expect(noteWordCount('1. [X] done\n> - [x] quoted')).toBe(2);
+  });
+
+  it('counts what a reader sees: link texts, not targets, images or fences', () => {
+    expect(noteWordCount('See [the docs](https://example.com/a-b) and ![image](note-images/x.png).')).toBe(4);
+    expect(noteWordCount('[ref]: https://example.com/page\nText [here][ref]')).toBe(2);
+    expect(noteWordCount('```bash\nnpm run build\n```')).toBe(3);
+    expect(noteWordCount('**bold** _it_ `code`')).toBe(3);
+  });
+
+  it('counts every word of a code note', () => {
+    expect(noteWordCount('- [x] a', false)).toBe(2);
+  });
+});
+
+describe('capture source line', () => {
+  const at = new Date(2026, 9, 24, 3, 36);
+  it('names the cell and its grid', () => {
+    expect(captureSourceLine({ cell: 'Budowanie', grid: 'Siatka 2x2' }, at)).toBe('_Budowanie · Siatka 2x2 · 2026-10-24 03:36_');
+  });
+  it('keeps the italics whole and skips missing parts', () => {
+    expect(captureSourceLine({ cell: 'my_cell*', grid: '' }, at)).toBe('_my cell · 2026-10-24 03:36_');
+    expect(captureSourceLine(null, at)).toBe('_2026-10-24 03:36_');
   });
 });

@@ -6,6 +6,10 @@ import { sendSnippet } from './actions';
 import { tr } from './i18n';
 import { askChoice, getS, update } from './store';
 import type { MenuItem } from './components/ContextMenu';
+import { createElement } from 'react';
+import { IDownload, IEdit, IFolder, IPrompt } from './components/icons';
+import { ICopy, IMoveDown, IMoveUp, IPaste, ITrash } from './components/menuIcons';
+import { IOpenTab, IPanelRight, IPin, INoteBlank } from './components/notesIcons';
 import { exportNote, openNoteInPanel, openNoteTab } from './notesUi';
 
 export const noteTitle = (n: Pick<Note, 'name'>): string => n.name.trim() || tr('Notatka bez nazwy');
@@ -41,13 +45,13 @@ export function noteMenuItems(n: Note, ctx: NoteMenuContext): MenuItem[] {
   const projectId = getS().activeProjectId;
   return [
     { header: noteTitle(n) },
-    ...(ctx.onOpen ? [{ label: tr('Otwórz'), onClick: ctx.onOpen }] : []),
+    ...(ctx.onOpen ? [{ label: tr('Otwórz'), icon: createElement(INoteBlank), onClick: ctx.onOpen }] : []),
     ...(ctx.place === 'tab'
-      ? [{ label: tr('Pokaż w panelu notatek'), onClick: () => openNoteInPanel(n.id) }]
-      : [{ label: tr('Otwórz w karcie'), onClick: () => openNoteTab(current(n)) }]),
-    ...(ctx.onRename ? [{ label: tr('Zmień nazwę'), onClick: ctx.onRename }] : []),
-    { label: n.pinned ? tr('Odepnij') : tr('Przypnij na górze'), onClick: () => togglePin(n) },
-    { label: tr('Duplikuj'), onClick: () => update((st) => {
+      ? [{ label: tr('Pokaż w panelu notatek'), icon: createElement(IPanelRight), onClick: () => openNoteInPanel(n.id) }]
+      : [{ label: tr('Otwórz w karcie'), icon: createElement(IOpenTab), onClick: () => openNoteTab(current(n)) }]),
+    ...(ctx.onRename ? [{ label: tr('Zmień nazwę'), icon: createElement(IEdit), onClick: ctx.onRename }] : []),
+    { label: n.pinned ? tr('Odepnij') : tr('Przypnij na górze'), icon: createElement(IPin, { size: 14, on: !!n.pinned }), onClick: () => togglePin(n) },
+    { label: tr('Duplikuj'), icon: createElement(ICopy), onClick: () => update((st) => {
       const source = st.notes.find((x) => x.id === n.id) ?? n;
       const { pinned: _pinned, ...rest } = source;
       const copy: Note = { ...rest, id: uid(), name: tr('{name} (kopia)', { name: noteTitle(source) }).slice(0, NOTE_LIMITS.name), updatedAt: Date.now() };
@@ -55,20 +59,20 @@ export function noteMenuItems(n: Note, ctx: NoteMenuContext): MenuItem[] {
       return moveNote(upsertNote(st, copy), copy.id, n.id, 'after');
     }) },
     { sep: true },
-    { label: tr('Kopiuj treść'), disabled: !n.text, onClick: () => window.mc.clipboardWrite(current(n).text) },
-    { label: tr('Wklej do aktywnej komórki'), disabled: !n.text, onClick: () => pasteNote(current(n)) },
-    { label: tr('Eksportuj do pliku…'), onClick: () => void exportNote(current(n)) },
+    { label: tr('Kopiuj treść'), icon: createElement(IPaste), disabled: !n.text, onClick: () => window.mc.clipboardWrite(current(n).text) },
+    { label: tr('Wklej do aktywnej komórki'), icon: createElement(IPrompt), disabled: !n.text, onClick: () => pasteNote(current(n)) },
+    { label: tr('Eksportuj do pliku…'), icon: createElement(IDownload), onClick: () => void exportNote(current(n)) },
     ...(ctx.onMoveUp || ctx.onMoveDown ? [{ sep: true } as const] : []),
-    ...(ctx.onMoveUp ? [{ label: tr('Przesuń wyżej'), onClick: ctx.onMoveUp }] : []),
-    ...(ctx.onMoveDown ? [{ label: tr('Przesuń niżej'), onClick: ctx.onMoveDown }] : []),
+    ...(ctx.onMoveUp ? [{ label: tr('Przesuń wyżej'), icon: createElement(IMoveUp), onClick: ctx.onMoveUp }] : []),
+    ...(ctx.onMoveDown ? [{ label: tr('Przesuń niżej'), icon: createElement(IMoveDown), onClick: ctx.onMoveDown }] : []),
     ...(projectId || n.projectId ? [n.projectId
-      ? { label: tr('We wszystkich projektach'), onClick: () => update((st) => upsertNote(st, withoutProject(current(n)))) }
-      : { label: tr('Tylko w tym projekcie'), onClick: () => update((st) => upsertNote(st, { ...current(n), projectId: projectId! })) }] : []),
+      ? { label: tr('We wszystkich projektach'), icon: createElement(IFolder), onClick: () => update((st) => upsertNote(st, withoutProject(current(n)))) }
+      : { label: tr('Tylko w tym projekcie'), icon: createElement(IFolder), onClick: () => update((st) => upsertNote(st, { ...current(n), projectId: projectId! })) }] : []),
     { sep: true },
     { header: tr('Kolor') },
     { colors: PROJECT_COLORS, onPick: (color) => update((st) => upsertNote(st, { ...(st.notes.find((x) => x.id === n.id) ?? n), color })) },
     ...(n.color ? [{ label: tr('Bez koloru'), onClick: () => update((st) => upsertNote(st, withoutColor(st.notes.find((x) => x.id === n.id) ?? n))) }] : []),
     { sep: true },
-    { label: tr('Usuń notatkę'), danger: true, onClick: () => void confirmDeleteNote(n) },
+    { label: tr('Usuń notatkę'), icon: createElement(ITrash), danger: true, onClick: () => void confirmDeleteNote(n) },
   ];
 }

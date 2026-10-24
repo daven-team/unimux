@@ -18,6 +18,8 @@ import { useSshStore } from '../../sshStore';
 import { toast, update, useStore } from '../../store';
 import { isWindowShown, onWindowShown } from '../../windowShown';
 import { openMenu, type MenuItem } from '../ContextMenu';
+import { ICheck } from '../icons';
+import { IEyeOff } from '../menuIcons';
 import { OS_ICONS } from './osIcons';
 import './sshBar.css';
 
@@ -137,14 +139,14 @@ function Bar({ cell }: { cell: Cell }) {
     e.stopPropagation();
     const shownItems = shownBarItems(toggles);
     const entries: MenuItem[] = [
-      { label: tr('Ukryj pasek w tej komórce'), onClick: () => { update((st) => updateCell(st, cell.id, { sshBarHidden: true })); toast(tr('Pasek ukryty w tej komórce. Przywrócisz go w Ustawienia > SSH.')); } },
-      { label: tr('Ukryj pasek we wszystkich komórkach SSH'), onClick: () => update((st) => updateSettings(st, { sshStatusBar: false })) },
+      { label: tr('Ukryj pasek w tej komórce'), icon: <IEyeOff />, onClick: () => { update((st) => updateCell(st, cell.id, { sshBarHidden: true })); toast(tr('Pasek ukryty w tej komórce. Przywrócisz go w Ustawienia > SSH.')); } },
+      { label: tr('Ukryj pasek we wszystkich komórkach SSH'), icon: <IEyeOff />, onClick: () => update((st) => updateSettings(st, { sshStatusBar: false })) },
       { sep: true },
       { header: tr('Elementy paska') },
       ...(Object.keys(BAR_ITEM_LABELS) as SshBarItem[]).map((item) => {
         const on = items.has(item);
         // The last item shown stays: hiding the whole bar has its own entries.
-        return { label: tr(BAR_ITEM_LABELS[item]), hint: on ? '✓' : undefined, disabled: on && shownItems.length === 1, onClick: () => setBarItem(item, !on) };
+        return { label: tr(BAR_ITEM_LABELS[item]), icon: on ? <ICheck /> : undefined, disabled: on && shownItems.length === 1, onClick: () => setBarItem(item, !on) };
       }),
     ];
     openMenu(e.clientX, e.clientY, entries);

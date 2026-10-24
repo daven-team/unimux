@@ -9,6 +9,8 @@ import { menuHosts, sectionChange, sectionForDetail, type SshDetail } from '../.
 import { createProject, ensureTerminal, focusCell, openTab } from './actions';
 import { gridCovered } from './splitView';
 import type { MenuItem } from './components/ContextMenu';
+import { createElement } from 'react';
+import { IPlus, IServer } from './components/icons';
 import { tr } from './i18n';
 import type { MessageKey } from '../../shared/i18n';
 import { askChoice, getS, getUi, setUi, toast, update } from './store';
@@ -213,8 +215,8 @@ export function sshHostMenuItems(header: MessageKey): MenuItem[] {
     { header: tr(header) },
     ...(shown.length
       ? shown.map((h) => ({ label: h.label, hint: h.group, color: h.color ?? (anyColor ? 'transparent' : undefined), onClick: () => void openHostInCell(h.id, 'cell') }))
-      : [{ label: tr('Dodaj host SSH…'), onClick: () => openSshView({ kind: 'host' }) }]),
-    ...(more ? [{ label: tr('Wszystkie hosty…'), onClick: () => openSshView() }] : []),
+      : [{ label: tr('Dodaj host SSH…'), icon: createElement(IPlus), onClick: () => openSshView({ kind: 'host' }) }]),
+    ...(more ? [{ label: tr('Wszystkie hosty…'), icon: createElement(IServer), onClick: () => openSshView() }] : []),
   ];
 }
 

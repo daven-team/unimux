@@ -117,6 +117,49 @@ export function taskProgress(text: string): { done: number; total: number } {
   return { done: tasks.filter((t) => t.checked).length, total: tasks.length };
 }
 
+/**
+ * The quiet first line of a note captured from a selection: where it came from (the cell as its header names it and its
+ * grid) and when, in italics: `_Budowanie · Siatka 2x2 · 2026-10-24 03:36_`.
+ */
+export function captureSourceLine(origin: { cell?: string; grid?: string } | null, date: Date): string {
+  const clock = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  // Underscores and asterisks of a name would end the italics early.
+  const clean = (s: string | undefined) => s?.replace(/[_*]/g, ' ').replace(/\s+/g, ' ').trim() || '';
+  const parts = [clean(origin?.cell), clean(origin?.grid)].filter(Boolean);
+  return `_${[...parts, `${isoDate(date)} ${clock}`].join(' · ')}_`;
+}
+
+const WORD =/[\p{L}\p{N}][\p{L}\p{N}'’_-]*/gu;
+/** A list item's marker (`-`, `1.`) with its task box (`[x]`), after any quote marks. */
+const LIST_MARK = /^\s*(?:>\s?)*\s*(?:[-*+]|\d{1,9}[.)])\s+(?:\[[ xX]\](?=\s|$))?/;
+
+/**
+ * The words of a note as the editor's footer counts them. In Markdown only what a reader sees: task boxes (`[x]`), images,
+ * link targets, reference definitions and the info of code fences are no words, so ticking a task keeps the count.
+ */
+export function noteWordCount(text: string, markdown = true): number {
+  if (!markdown) return (text.match(WORD) ?? []).length;
+  const lines = lineSplit(text);
+  const code = codeLineFlags(lines);
+  let count = 0;
+  lines.forEach((line, i) => {
+    if (code[i]) {
+      // The fence itself (and its language) is no text; the code inside counts.
+      if (!FENCE.test(line)) count += (line.match(WORD) ?? []).length;
+      return;
+    }
+    if (/^\s*\[[^\]]+\]:\s*\S/.test(line)) return; // [id]: https://... reference definition
+    const shown = line
+      .replace(LIST_MARK, ' ')
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ') // images
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // [text](url): the text
+      .replace(/\[([^\]]*)\]\[[^\]]*\]/g, '$1') // [text][id]
+      .replace(/<(?:https?|mailto):[^>\s]*>/gi, ' ');
+    count += (shown.match(WORD) ?? []).length;
+  });
+  return count;
+}
+
 /** The text with task `index` (as counted by noteTasks) ticked or unticked; the same text when there is no such task. */
 export function toggleTask(text: string, index: number, checked?: boolean): string {
   const task = noteTasks(text)[index];

@@ -1,11 +1,14 @@
 // Notes (1.0.7), the renderer's side outside the panel: which note the panel shows, new notes (blank, from a template, from
 // a selection, from files), a note as a tab, export and pasted images. The panel and the note tab both use these.
 import { create } from 'zustand';
-import type { Note } from '../../shared/types';
+import type { Cell, Note } from '../../shared/types';
 import { NOTE_LIMITS } from '../../shared/notes';
-import { findCell, moveNote, uid, upsertNote } from '../../shared/state';
+import { findCell, getProfile, moveNote, uid, upsertNote } from '../../shared/state';
+import { cellLabel } from '../../shared/agentWork';
+import { shownProfileName } from '../../shared/profiles';
+import { sshHeaderName } from '../../shared/ssh';
 import {
-  exportFileName, IMPORT_MAX_BYTES, isImportableNoteFile, isoDate, noteFromFile, noteFromTemplate, noteImageMarkdown,
+  captureSourceLine, exportFileName, IMPORT_MAX_BYTES, isImportableNoteFile, isoDate, noteFromFile, noteFromTemplate, noteImageMarkdown,
   NOTE_IMAGE_MAX_BYTES, NOTE_IMAGE_TYPES, plainLine, type NoteTemplateId,
 } from '../../shared/noteTools';
 import { chosenLanguage, tr } from './i18n';
@@ -77,6 +80,13 @@ function fenced(text: string): string {
   return `${fence}\n${text}\n${fence}\n`;
 }
 
+/** A cell's label as its header shows it: an SSH cell its name or host, others their name, conversation title or profile. */
+function shownCellLabel(cell: Cell): string {
+  const s = getS();
+  if (cell.ssh) return sshHeaderName(cell.name) || s.sshHosts.find((h) => h.id === cell.ssh!.hostId)?.label || tr('Terminal');
+  return cellLabel(cell, getUi().sessionTitles, shownProfileName(getProfile(s, cell.profileId), s.settings.shell, tr));
+}
+
 /**
  * Quick capture (Mod+Shift+L, the palette, the panel's menu): the selected text of the terminal in focus, of an editor or of
  * the page becomes a new note. Terminal output goes into a code block (its spacing kept); the first line names the note.
@@ -88,10 +98,9 @@ export function captureSelectionToNote(): void {
   if (!text.trim()) { toast(tr('Zaznacz tekst w terminalu albo w edytorze, aby zrobić z niego notatkę.')); return; }
   const first = plainLine(text.split('\n').find((line) => line.trim()) ?? '').replace(/\s+/g, ' ');
   const name = first.length > 60 ? `${first.slice(0, 57).trimEnd()}…` : first || tr('Zaznaczenie {date}', { date: isoDate(new Date()) });
-  // Where it came from: the cell's name and the time, in a quiet line above the captured text.
-  const cell = fromTerminal.trim() && cellId ? findCell(getS(), cellId)?.cell : undefined;
-  const now = new Date();
-  const source = `_${cell ? `${cell.name?.trim() || tr('Terminal')} · ` : ''}${isoDate(now)} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}_\n\n`;
+  // Where it came from: the cell as its header names it, its grid and the time, in a quiet line above the captured text.
+  const found = fromTerminal.trim() && cellId ? findCell(getS(), cellId) : null;
+  const source = `${captureSourceLine(found ? { cell: shownCellLabel(found.cell), grid: found.tab.name } : null, new Date())}\n\n`;
   const body = source + (fromTerminal.trim() ? fenced(text) : `${text}\n`);
   const note = addNote({ name, text: body });
   openNoteInPanel(note.id, { fresh: false });

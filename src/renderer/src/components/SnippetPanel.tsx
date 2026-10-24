@@ -11,7 +11,8 @@ import { moveSnippet, removeSnippet, uid, upsertSnippet, type DropEdge } from '.
 import { PANEL_LIMITS } from '../../../shared/panels';
 import { askChoice, setUi, update, useStore } from '../store';
 import { SNIPPET_MIME } from './CellView';
-import { IEdit, IPlus } from './icons';
+import { IEdit, IFolder, IGrid, IPlus, IPrompt } from './icons';
+import { ICopy, IEyeOff, IMoveDown, IMoveUp, IPaste, ITrash, IWidth } from './menuIcons';
 import { dropEdge, scrollDragList } from './listDrag';
 import { openMenu } from './ContextMenu';
 import { EmptyLink, fillTokens, PanelEmpty } from './PanelEmpty';
@@ -36,11 +37,11 @@ export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
     e.preventDefault();
     openMenu(e.clientX, e.clientY, [
       { header: tr("Snippety") },
-      { label: tr("Nowy snippet") + '…', onClick: () => create() },
-      ...(projectId ? [{ label: tr("Nowy snippet tylko w tym projekcie…"), onClick: () => create(projectId) }] : []),
+      { label: tr("Nowy snippet") + '…', icon: <IPlus />, onClick: () => create() },
+      ...(projectId ? [{ label: tr("Nowy snippet tylko w tym projekcie…"), icon: <IFolder />, onClick: () => create(projectId) }] : []),
       { sep: true },
-      { label: tr("Przywróć szerokość panelu"), onClick: () => resize.onFinish(PANEL_LIMITS.snippets.default) },
-      { label: tr("Ukryj panel snippetów"), hint: shortcutText('snippets.toggle') || undefined, onClick: () => update((st) => ({ ...st, snippetsOpen: false })) },
+      { label: tr("Przywróć szerokość panelu"), icon: <IWidth />, onClick: () => resize.onFinish(PANEL_LIMITS.snippets.default) },
+      { label: tr("Ukryj panel snippetów"), icon: <IEyeOff />, hint: shortcutText('snippets.toggle') || undefined, onClick: () => update((st) => ({ ...st, snippetsOpen: false })) },
     ]);
   };
   const snippetMenu = (e: React.MouseEvent, sn: Snippet) => {
@@ -49,16 +50,16 @@ export function SnippetPanel({ resize }: { resize: PanelResizeProps }) {
     const index = visible.findIndex((item) => item.id === sn.id);
     openMenu(e.clientX, e.clientY, [
       { header: sn.name },
-      { label: tr("Wklej do aktywnej komórki"), onClick: () => use(sn, false) },
-      { label: tr("Wklej do wszystkich komórek"), onClick: () => use(sn, true) },
+      { label: tr("Wklej do aktywnej komórki"), icon: <IPrompt />, onClick: () => use(sn, false) },
+      { label: tr("Wklej do wszystkich komórek"), icon: <IGrid />, onClick: () => use(sn, true) },
       { sep: true },
-      { label: tr("Edytuj snippet") + '…', onClick: () => setUi({ modal: { kind: 'snippet', snippetId: sn.id } }) },
-      { label: tr("Duplikuj snippet"), onClick: () => update((st) => upsertSnippet(st, { ...sn, id: uid(), name: tr('{name} (kopia)', { name: sn.name }) })) },
-      { label: tr("Kopiuj treść"), onClick: () => window.mc.clipboardWrite(sn.text) },
-      ...(index > 0 ? [{ label: tr("Przesuń wyżej"), onClick: () => update((st) => moveSnippet(st, sn.id, visible[index - 1].id, 'before')) }] : []),
-      ...(index < visible.length - 1 ? [{ label: tr("Przesuń niżej"), onClick: () => update((st) => moveSnippet(st, sn.id, visible[index + 1].id, 'after')) }] : []),
+      { label: tr("Edytuj snippet") + '…', icon: <IEdit />, onClick: () => setUi({ modal: { kind: 'snippet', snippetId: sn.id } }) },
+      { label: tr("Duplikuj snippet"), icon: <ICopy />, onClick: () => update((st) => upsertSnippet(st, { ...sn, id: uid(), name: tr('{name} (kopia)', { name: sn.name }) })) },
+      { label: tr("Kopiuj treść"), icon: <IPaste />, onClick: () => window.mc.clipboardWrite(sn.text) },
+      ...(index > 0 ? [{ label: tr("Przesuń wyżej"), icon: <IMoveUp />, onClick: () => update((st) => moveSnippet(st, sn.id, visible[index - 1].id, 'before')) }] : []),
+      ...(index < visible.length - 1 ? [{ label: tr("Przesuń niżej"), icon: <IMoveDown />, onClick: () => update((st) => moveSnippet(st, sn.id, visible[index + 1].id, 'after')) }] : []),
       { sep: true },
-      { label: tr("Usuń snippet"), danger: true, onClick: async () => {
+      { label: tr("Usuń snippet"), icon: <ITrash />, danger: true, onClick: async () => {
         const choice = await askChoice(tr('Usunąć snippet „{name}”?', { name: sn.name }), tr("Zapisany prompt zostanie usunięty z biblioteki."), [{ label: tr("Usuń"), value: 'yes', danger: true }]);
         if (choice === 'yes') update((st) => removeSnippet(st, sn.id));
       } },
