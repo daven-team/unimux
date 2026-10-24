@@ -5,7 +5,7 @@
 .ssh-nav-item:hover:not(:disabled) { background: #ffffff08; color: var(--text); }
 .ssh-nav-item.on { background: #ffffff0f; color: var(--text); }
 .ssh-nav-item.on svg { color: var(--text); }
-.ssh-nav-item:focus-visible { outline: 2px solid #a8a29e; outline-offset: -2px; }
+.ssh-nav-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .ssh-nav-item:disabled { cursor: default; opacity: .5; }
 .ssh-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ssh-nav-count { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }

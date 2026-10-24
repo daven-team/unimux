@@ -73,7 +73,7 @@
   border: 0; border-radius: 3px; background: var(--git-action); color: var(--git-action-text); font-size: 12.5px; font-weight: 500; white-space: nowrap; cursor: pointer;
 }
 .git-action-btn:hover:not(:disabled) { background: var(--git-action-hover); }
-.git-action-btn:focus-visible { outline: 1px solid #c9d8e6; outline-offset: 1px; }
+.git-action-btn:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 1px; }
 .git-action-btn:disabled { opacity: .45; cursor: default; }
 .git-action-btn svg { display: block; flex: none; stroke-width: 1.6px; }
 .git-split > .git-action-btn:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }

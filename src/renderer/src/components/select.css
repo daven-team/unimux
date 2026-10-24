@@ -3,8 +3,8 @@
 .styled-select > svg { width: 12px; height: 12px; flex: none; color: #969696; }
 .styled-select:hover:not(:disabled) { border-color: #555; background-color: #222; }
 .styled-select.select:focus { outline: none; border-color: #383838; }
-.styled-select:focus-visible { outline: none; box-shadow: none; border-color: #898989; }
-.settings-card .styled-select:focus-visible { box-shadow: inset 0 0 0 1px #898989; }
+.styled-select:focus-visible { outline: none; box-shadow: none; border-color: var(--focus-ring); }
+.settings-card .styled-select:focus-visible { box-shadow: inset 0 0 0 1px var(--focus-ring); }
 .styled-select[aria-expanded="true"] { outline: none; box-shadow: none; }
 .styled-select:disabled { opacity: .45; cursor: default; }
 .select-popup { position: fixed; z-index: 10000; padding: 6px 5px; overflow-y: auto; border: 1px solid #343434; border-radius: 12px; background: #181818; color: #ededed; box-shadow: 0 3px 10px #0005; outline: none; font-size: 12px; }
