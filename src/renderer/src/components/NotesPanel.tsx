@@ -23,6 +23,7 @@ import { dropEdge, scrollDragList } from './listDrag';
 import { openMenu, openMenuAt, type MenuItem } from './ContextMenu';
 import type { PanelResizeProps } from './PanelResizeHandle';
 import { NoteEditor } from './NoteEditor';
+import { HelpPopover } from './HelpPopover';
 import './notes.css';
 
 const NOTE_MIME = 'application/x-mc-note';
@@ -153,16 +154,20 @@ export function NotesPanel({ resize }: { resize: PanelResizeProps }) {
       <div className="side-title">
         <span className="row" style={{ gap: 6 }}>
           {tr('Notatki')}
-          <span className="help">
-            ?
-            <span className="help-pop">
-              <span className="kbd">{tr('Klik')}</span><span>{tr('otwórz notatkę')}</span>
-              <span className="kbd">{tr('Przeciągnij')}</span><span>{tr('zmień kolejność albo wklej do komórki')}</span>
-              <span className="kbd">#tag</span><span>{tr('słowo z # w treści to tag; kliknij go, aby filtrować')}</span>
-              <span className="kbd">- [ ]</span><span>{tr('zadanie; odhacz je w podglądzie albo Ctrl+Enter')}</span>
-              {shortcutText('notes.capture') && <><span className="kbd">{shortcutText('notes.capture')}</span><span>{tr('notatka z zaznaczonego tekstu')}</span></>}
-            </span>
-          </span>
+          <HelpPopover
+            label={tr('Pomoc: {panel}', { panel: tr('Notatki') })}
+            intro={tr('Pomysły, listy zadań i fragmenty kodu zawsze pod ręką, obok terminali.')}
+            rows={[
+              [tr('Klik'), tr('otwórz notatkę')],
+              [tr('Prawy klik'), tr('otwórz w karcie, wklej do komórki, przypnij i więcej')],
+              [tr('Przeciągnij'), tr('zmień kolejność albo wklej do komórki')],
+              ['#tag', tr('słowo z # w treści to tag; kliknij go, aby filtrować')],
+              ['- [ ]', tr('zadanie; odhacz je w podglądzie albo Ctrl+Enter')],
+              ...(shortcutText('notes.capture') ? [[shortcutText('notes.capture'), tr('notatka z zaznaczonego tekstu')] as const] : []),
+              ['.md', tr('upuść pliki .md lub .txt na panel, aby dodać je jako notatki')],
+            ]}
+            footer={tr('Notatka jest wspólna dla wszystkich projektów albo tylko dla jednego (etykieta Projekt).')}
+          />
         </span>
         <span className="notes-new">
           <button className="sq" title={tr('Nowa notatka')} aria-label={tr('Nowa notatka')} onClick={() => createNote()}><IPlus /></button>

@@ -257,6 +257,8 @@ export const messages = {
   'Klik': ['Click', 'Klick', 'Clic', 'Clic', 'Clique'],
   'Shift + klik': ['Shift + click', 'Umschalt + Klick', 'Mayús + clic', 'Maj + clic', 'Shift + clique'],
   'Przeciągnij': ['Drag', 'Ziehen', 'Arrastrar', 'Glisser', 'Arrastar'],
+  'Prawy klik': ['Right-click', 'Rechtsklick', 'Clic derecho', 'Clic droit', 'Clique direito'],
+  'Pomoc: {panel}': ['Help: {panel}', 'Hilfe: {panel}', 'Ayuda: {panel}', 'Aide : {panel}', 'Ajuda: {panel}'],
   'na komórkę albo zmień kolejność': ['onto a cell or to reorder', 'auf eine Zelle oder zum Umsortieren', 'a una celda o para reordenar', 'sur une cellule ou pour réordonner', 'para uma célula ou para reordenar'],
   'Przeciągnij snippet, aby zmienić kolejność': ['Drag snippet to reorder', 'Snippet zum Umsortieren ziehen', 'Arrastra el fragmento para reordenar', 'Faites glisser l’extrait pour réordonner', 'Arraste o excerto para mudar a ordem'],
   'Klik: wklej do aktywnej komórki · Shift+klik: do wszystkich · przeciągnij na komórkę': ['Click: paste into active cell · Shift+click: all cells · drag onto a cell', 'Klick: in aktive Zelle einfügen · Umschalt+Klick: alle Zellen · auf eine Zelle ziehen', 'Clic: pegar en la celda activa · Mayús+clic: todas · arrastrar a una celda', 'Clic : coller dans la cellule active · Maj+clic : toutes · glisser sur une cellule', 'Clique: colar na célula ativa · Shift+clique: todas · arrastar para uma célula'],
