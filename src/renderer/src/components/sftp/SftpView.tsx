@@ -2,11 +2,12 @@
 // Windows, home on macOS), the server on the right ("Połącz z hostem" with "Wybierz host" until a saved host is connected;
 // login prompts appear in the pane), and the transfer queue at the bottom. One session at a time (src/renderer/src/sftp.ts).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { planRemoteMove, safeEntryName, sftpErrorText, validRemoteName, posixJoin, posixParent, type SftpErrorCode, type TransferRequest } from '../../../../shared/sftp';
+import { planRemoteMove, safeEntryName, sftpErrorText, validRemoteName, posixBasename, posixJoin, posixParent, type SftpErrorCode, type TransferRequest } from '../../../../shared/sftp';
 import {
-  deleteCountText, deleteNames, DRIVES, dropRequest, isFolderLike, outsideFolder, localCrumbs, localJoin, localParent, planLocalMove, rememberLocalPath, rememberRemotePath, remoteCrumbs,
+  deleteCountText, deleteNames, DRIVES, dropRequest, isFolderLike, outsideFolder, localBasename, localCrumbs, localJoin, localParent, planLocalMove, rememberLocalPath, rememberRemotePath, remoteCrumbs,
   type PaneEntry, type SftpDragPayload,
 } from '../../../../shared/sftpView';
+import { needsHome, resolveLocalInput, resolveRemoteInput } from '../../../../shared/sftpPathInput';
 import { paneMenu, type PaneAction, type PaneMenuInput } from '../../../../shared/sftpMenu';
 import { displayCombo, parseDefault } from '../../../../shared/shortcuts';
 import { sshErrorText, userAtEndpoint } from '../../../../shared/ssh';
@@ -29,6 +30,7 @@ import { HostPicker } from './HostPicker';
 import { PermissionsDialog } from './PermissionsDialog';
 import { TransferPanel } from './TransferPanel';
 import { useFolder, type Listing } from './useFolder';
+import type { PathInput, PathSubmit } from './PathBar';
 import './sftp.css';
 import { isFileLike } from '../../../../shared/editorSource';
 import { openLocalEntry, openRemoteEntry } from '../../remoteOpen';
@@ -62,7 +64,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
       return { ok: true, path: DRIVES, truncated: false, entries: drives.map((d) => ({ name: d.replace(/\\$/, ''), path: d, kind: 'dir', size: 0, mtime: 0, permissions: '' })) };
     }
     const r = await window.mc.localFs.list(path);
-    return r.ok ? { ok: true, path: r.value.path, entries: r.value.entries, truncated: r.value.truncated } : { ok: false, error: errorText(r.error) };
+    return r.ok ? { ok: true, path: r.value.path, entries: r.value.entries, truncated: r.value.truncated } : { ok: false, error: errorText(r.error), code: r.error };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tr]);
   const local = useFolder(listLocal, (p) => localParent(p, flavor), (p) => { if (p !== DRIVES) update((s) => ({ ...s, sftp: rememberLocalPath(s.sftp, p) })); });
@@ -84,7 +86,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
     const id = useSftpStore.getState().sessionId;
     if (!id) return { ok: false, error: errorText('notConnected') };
     const r = await window.mc.sftp.list(id, path);
-    return r.ok ? { ok: true, path: r.value.path, entries: r.value.entries, truncated: r.value.truncated } : { ok: false, error: errorText(r.error) };
+    return r.ok ? { ok: true, path: r.value.path, entries: r.value.entries, truncated: r.value.truncated } : { ok: false, error: errorText(r.error), code: r.error };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tr]);
   const remote = useFolder(listRemote, (p) => (p === '/' ? null : posixParent(p)), (p) => {
@@ -240,6 +242,69 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
 
   const goLocal = (path: string) => void local.go(path);
 
+  // ── typed paths (1.0.8): the path bar of a pane takes a path to go to ──
+  /** The login folder of the session ("~" in the remote pane), asked once per session. */
+  const remoteHome = useRef<{ sessionId: string; home: string } | null>(null);
+  const homeOf = async (side: 'local' | 'remote'): Promise<string | null> => {
+    if (side === 'local') return rootsRef.current?.home ?? null;
+    if (!sessionId) return null;
+    if (remoteHome.current?.sessionId === sessionId) return remoteHome.current.home;
+    const r = await window.mc.sftp.realpath(sessionId, '.');
+    if (!r.ok) return null;
+    remoteHome.current = { sessionId, home: r.value };
+    return r.value;
+  };
+  const resolveTyped = async (side: 'local' | 'remote', text: string): Promise<string | null> => {
+    const home = needsHome(text) ? await homeOf(side) : null;
+    return side === 'local' ? resolveLocalInput(text, localDir, home, flavor) : resolveRemoteInput(text, remoteDir, home);
+  };
+  /** A file (or a link to one) on the server: a typed path to it opens its folder. */
+  const remoteIsFile = async (path: string): Promise<boolean> => {
+    if (!sessionId) return false;
+    const r = await window.mc.sftp.stat(sessionId, path);
+    return r.ok && (r.value.kind === 'file' || (r.value.kind === 'symlink' && r.value.target === 'file'));
+  };
+  const submitPath = async (side: 'local' | 'remote', text: string): Promise<PathSubmit> => {
+    if (side === 'remote' && !connected) return { ok: false, error: errorText('notConnected') };
+    const nav = side === 'local' ? local : remote;
+    const target = await resolveTyped(side, text);
+    if (!target) return { ok: false, error: errorText('invalid') };
+    const failed = (r: { error: string }): PathSubmit => ({ ok: false, error: r.error || errorText('failed') });
+    const r = await nav.tryGo(target);
+    if (r.ok || r.code === 'superseded') return { ok: true };
+    const file = side === 'local' ? r.code === 'notADirectory' : r.code !== 'notConnected' && await remoteIsFile(target);
+    if (!file) return failed(r);
+    const parent = side === 'local' ? localParent(target, flavor) : posixParent(target);
+    if (parent === null || parent === DRIVES) return failed(r);
+    const there = await nav.tryGo(parent);
+    if (!there.ok && there.code !== 'superseded') return failed(there);
+    return { ok: true, select: side === 'local' ? localBasename(target, flavor) : posixBasename(target) };
+  };
+  const folderNames = async (side: 'local' | 'remote', dirText: string): Promise<string[] | null> => {
+    const here = side === 'local' ? localDir : remoteDir;
+    if (side === 'local' && !dirText && here === DRIVES) return (rootsRef.current?.drives ?? []).map((d) => d.replace(/\\$/, ''));
+    const dir = dirText ? await resolveTyped(side, dirText) : here;
+    if (!dir || dir === DRIVES) return null;
+    if (side === 'local') {
+      const r = await window.mc.localFs.list(dir);
+      return r.ok ? r.value.entries.filter((e) => isFolderLike(e)).map((e) => e.name) : null;
+    }
+    if (!sessionId || !connected) return null;
+    const r = await window.mc.sftp.list(sessionId, dir);
+    return r.ok ? r.value.entries.filter((e) => isFolderLike(e)).map((e) => e.name) : null;
+  };
+  // The functions read the latest render through a ref, so the inputs stay the same objects (the bar's suggestions keep).
+  const typed = useRef({ submitPath, folderNames });
+  typed.current = { submitPath, folderNames };
+  const localPathInput = useMemo<PathInput>(() => ({
+    flavor, insensitive: flavor === 'win32' || window.mc.platform === 'darwin',
+    submit: (text) => typed.current.submitPath('local', text), folders: (dir) => typed.current.folderNames('local', dir),
+  }), [flavor]);
+  const remotePathInput = useMemo<PathInput>(() => ({
+    flavor: 'posix', insensitive: false,
+    submit: (text) => typed.current.submitPath('remote', text), folders: (dir) => typed.current.folderNames('remote', dir),
+  }), []);
+
   // ── menus: a right click on entries, on the empty list, and Actions (only what can run, see shared/sftpMenu.ts) ──
   const platform = window.mc.platform;
   const keyHint = (template: string): string | undefined => { const combo = parseDefault(template, platform); return combo ? displayCombo(combo, platform) : undefined; };
@@ -366,7 +431,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
     <div className="sftp-view">
       {compactNav && <div className="sftp-nav"><SshNav compact /></div>}
       <div className="sftp-panes">
-        <FilePane side="local" label={tr('Lokalne pliki')} head={localHead} folder={local.folder} crumbs={localCrumbList} extraColumns={false}
+        <FilePane side="local" label={tr('Lokalne pliki')} head={localHead} folder={local.folder} crumbs={localCrumbList} pathInput={localPathInput} extraColumns={false}
           onOpen={goLocal} onOpenFile={openLocal} onBack={local.back} onForward={local.forward} onUp={local.up}
           menu={(place, sel) => paneMenuItems('local', place, sel)}
           onDelete={(sel) => void localDelete(sel)} onRename={(e) => void localRename(e)}
@@ -380,7 +445,7 @@ export function SftpView({ compactNav }: { compactNav: boolean }) {
             void enqueue(null, { direction: 'local-copy', sources, targetDir: dir });
           }}
           dropDisabled={localDir === DRIVES} />
-        <FilePane side="remote" label={tr('Pliki na serwerze')} head={pickerOpen ? null : remoteHead} folder={remote.folder} crumbs={remoteCrumbList} extraColumns
+        <FilePane side="remote" label={tr('Pliki na serwerze')} head={pickerOpen ? null : remoteHead} folder={remote.folder} crumbs={remoteCrumbList} pathInput={remotePathInput} extraColumns
           onOpen={(p) => void remote.go(p)} onOpenFile={openRemote} onBack={remote.back} onForward={remote.forward} onUp={remote.up}
           menu={(place, sel) => paneMenuItems('remote', place, sel)}
           onDelete={(sel) => void remoteDelete(sel)} onRename={(e) => void remoteRename(e)}

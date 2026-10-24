@@ -8,6 +8,7 @@
 // 1.0.4: a drag that starts outside the entries' names (the empty list, the other columns of a row) draws a marquee like
 // Explorer: the rows it touches are selected live (Ctrl/Cmd adds to the selection) and the list scrolls near its edges.
 // An entry drags from its icon or name.
+// 1.0.8: the path bar takes a typed path (PathBar.tsx): a click on it, Ctrl+L, F4 or Alt+D.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { rowSlots, rowWindow } from '../../../../shared/virtualRows';
 import {
@@ -22,6 +23,7 @@ import { openMenu, openMenuAt, type MenuItem } from '../ContextMenu';
 import { FileIcon, FolderIcon } from '../FileIcon';
 import { IArrowLeft, IArrowRight, IArrowUp, IChevron, ILink, ISearch } from '../icons';
 import { RefreshIcon, useHoldBusy } from '../Spinner';
+import { PathBar, type PathInput } from './PathBar';
 
 export const ROW_HEIGHT = 26;
 /** A press moves this far (px) before it becomes a marquee; less is a click. */
@@ -55,6 +57,8 @@ export interface PaneProps {
   head: ReactNode;
   folder: PaneFolder;
   crumbs: Crumb[];
+  /** How the path bar reads a typed path (1.0.8). */
+  pathInput: PathInput;
   /** Remote panes add Permissions and Owner. */
   extraColumns: boolean;
   onOpen(path: string): void;
@@ -107,7 +111,9 @@ export function FilePane(p: PaneProps) {
   const [sel, setSel] = useState<Selection>(EMPTY_SELECTION);
   const [over, setOver] = useState<string | null>(null);
   const list = useRef<HTMLDivElement>(null);
-  const crumbBar = useRef<HTMLElement>(null);
+  const [editingPath, setEditingPath] = useState(false);
+  /** A typed path to a file opened its folder: this entry (by name) gets selected once it is listed. */
+  const [pendingSelect, setPendingSelect] = useState<string | null>(null);
   const [view, setView] = useState({ top: 0, height: 400 });
   // A compact date in the column, the long one in its tooltip.
   const dates = useMemo(() => new Intl.DateTimeFormat(language, { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }), [language]);
@@ -116,8 +122,6 @@ export function FilePane(p: PaneProps) {
   // A new folder starts unfiltered, unselected and at the top.
   useEffect(() => { setFilter(''); setSel(EMPTY_SELECTION); if (list.current) list.current.scrollTop = 0; }, [p.folder.path]);
 
-  // The end of a long path (the current folder) stays in view.
-  useLayoutEffect(() => { const el = crumbBar.current; if (el) el.scrollLeft = el.scrollWidth; }, [p.crumbs]);
   const rows = useMemo(() => sortEntries(filterEntries(p.folder.entries, filter), sort), [p.folder.entries, filter, sort]);
   const order = useMemo(() => rows.filter((r) => !r.unsafeName).map((r) => r.path), [rows]);
   const byPath = useMemo(() => new Map(rows.map((r) => [r.path, r])), [rows]);
@@ -147,6 +151,18 @@ export function FilePane(p: PaneProps) {
     if (top < el.scrollTop) el.scrollTop = top;
     else if (top + ROW_HEIGHT > el.scrollTop + el.clientHeight) el.scrollTop = top + ROW_HEIGHT - el.clientHeight;
   };
+  // The file a typed path named: selected and scrolled into view (the exact name first, else one that differs in case).
+  useEffect(() => {
+    if (pendingSelect === null || p.folder.loading) return;
+    const hit = rows.find((r) => r.name === pendingSelect && !r.unsafeName)
+      ?? rows.find((r) => r.name.toLocaleLowerCase() === pendingSelect.toLocaleLowerCase() && !r.unsafeName);
+    setPendingSelect(null);
+    if (!hit) return;
+    setSel(clickSelect(EMPTY_SELECTION, order, hit.path));
+    reveal(rows.indexOf(hit));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSelect, rows, p.folder.loading]);
+
   const move = (m: number | 'home' | 'end', extend: boolean) => {
     const next = moveSelect(sel, order, m, extend);
     setSel(next);
@@ -178,6 +194,9 @@ export function FilePane(p: PaneProps) {
         case 'x': case 'X': if (mod && !e.shiftKey && !e.altKey) { if (selected.length) p.onCut(selected); return true; } return false;
         case 'v': case 'V': if (mod && !e.shiftKey && !e.altKey) { p.onPaste(); return true; } return false;
         case 'Escape': if (sel.paths.length) { setSel(EMPTY_SELECTION); return true; } return false;
+        case 'F4': if (!mod && !e.altKey && !e.shiftKey) { setEditingPath(true); return true; } return false;
+        case 'l': case 'L': if (mod && !e.shiftKey && !e.altKey) { setEditingPath(true); return true; } return false;
+        case 'd': case 'D': if (e.altKey && !mod && !e.shiftKey) { setEditingPath(true); return true; } return false;
         default: return false;
       }
     })();
@@ -363,14 +382,8 @@ export function FilePane(p: PaneProps) {
         <button type="button" className="btn ghost icon" aria-label={tr('Wstecz')} title={tr('Wstecz')} disabled={!f.canBack} onClick={p.onBack}><IArrowLeft /></button>
         <button type="button" className="btn ghost icon" aria-label={tr('Do przodu')} title={tr('Do przodu')} disabled={!f.canForward} onClick={p.onForward}><IArrowRight /></button>
         <button type="button" className="btn ghost icon" aria-label={tr('W górę')} title={tr('W górę')} disabled={!f.canUp} onClick={p.onUp}><IArrowUp /></button>
-        <nav ref={crumbBar} className="sftp-crumbs" aria-label={tr('Ścieżka')}>
-          {p.crumbs.map((c, i) => (
-            <span key={c.path} className="sftp-crumb">
-              {i > 0 && c.label !== '/' && p.crumbs[i - 1].label !== '/' && <span className="sftp-crumb-sep">/</span>}
-              <button type="button" className={`${i === p.crumbs.length - 1 ? 'on' : ''}${over === c.path && c.path !== f.path ? ' drop' : ''}`} title={c.path} data-folder-path={c.path} onClick={() => p.onOpen(c.path)}>{c.label}</button>
-            </span>
-          ))}
-        </nav>
+        <PathBar path={f.path} crumbs={p.crumbs} over={over} input={p.pathInput} editing={editingPath && !p.placeholder} onEditing={setEditingPath}
+          onOpen={p.onOpen} onSelect={setPendingSelect} onDone={() => list.current?.focus({ preventScroll: true })} />
         <button type="button" className={`btn ghost icon sftp-refresh${refreshing ? ' busy' : ''}`} aria-label={tr('Odśwież')} title={refreshing ? tr('Odświeżanie…') : tr('Odśwież')} aria-busy={refreshing}
           disabled={f.path === null} onClick={p.onRefresh}><RefreshIcon spinning={refreshing} /></button>
       </div>

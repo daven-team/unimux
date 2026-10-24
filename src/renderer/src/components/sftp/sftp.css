@@ -32,6 +32,22 @@
 .sftp-crumb button { border: 0; background: transparent; color: var(--text-2); font-size: 12px; padding: 1px 4px; border-radius: 4px; cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .sftp-crumb button:hover { background: #ffffff0d; color: var(--text); }
 .sftp-crumb button.on { color: var(--text); }
+/* 1.0.8: the empty end of the bar turns it into a field (a text cursor, like the address bar of Explorer). */
+.sftp-crumbs { cursor: text; }
+.sftp-crumbs-rest { flex: 1 0 12px; align-self: stretch; }
+.sftp-crumbs:hover { border-color: #ffffff1a; }
+.sftp-pathbar .btn.sftp-copy-path { margin-left: 2px; }
+.sftp-path-edit { position: relative; flex: 1; min-width: 0; margin-left: 4px; }
+.sftp-path-input { width: 100%; height: 26px; box-sizing: border-box; padding: 0 9px; background: #171717; border: 1px solid color-mix(in srgb, var(--btn-primary-bg) 70%, transparent); border-radius: 6px; outline: none; color: var(--text); font-size: 12px; font-family: inherit; }
+.sftp-path-input::selection { background: color-mix(in srgb, var(--btn-primary-bg) 45%, transparent); }
+.sftp-path-edit.invalid .sftp-path-input { border-color: var(--error); }
+.sftp-path-suggestions, .sftp-path-error { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 3px); box-sizing: border-box; background: #191919; border: 1px solid #343434; border-radius: 7px; box-shadow: 0 8px 28px #0008; }
+.sftp-path-suggestions { max-height: 260px; overflow-y: auto; margin: 0; padding: 4px; list-style: none; }
+.sftp-path-suggestions li { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border-radius: 4px; color: #d4d4d4; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.sftp-path-suggestions li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sftp-path-suggestions li svg { flex: none; color: #c9a86a; }
+.sftp-path-suggestions li.on { background: #333; color: #fff; }
+.sftp-path-error { padding: 7px 10px; border-color: color-mix(in srgb, var(--error) 55%, #343434); color: var(--error); font-size: 11.5px; overflow-wrap: anywhere; }
 
 .sftp-table { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* The column tracks live on .sftp-table, inside the pane container, so the @container rules below drop a column's track
