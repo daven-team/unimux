@@ -201,7 +201,8 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: #3a3a3a; }
 /* No CSS animation here: a running one presents a frame at every vsync. blink.ts flips data-blink on <html> twice a second
-   while a cell works, and the halo shows in one phase (a calm 1 Hz blink). */
+   while something holds it, and the halo shows in one phase (a calm 1 Hz blink). 1.0.8: the dot on a cell's icon no longer
+   holds it; it pulses with a compositor-only CSS animation instead (terminalCell.css). */
 .dot.working { background: var(--working); }
 :root[data-blink] .dot.working { box-shadow: 0 0 0 3px #f5b94259; }
 .dot.waiting { background: var(--waiting); }

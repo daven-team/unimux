@@ -29,7 +29,6 @@ import { addDroppedFilesToCell, addPathsToCell, cellDropFormat, cellRefusesPaths
 import { setUi, toast, update, useStore } from '../store';
 import { terminals } from '../terminals/TerminalManager';
 import { TerminalFind } from '../terminals/terminalFind';
-import { useBlink } from '../blink';
 import { openMenu, openMenuAt, type MenuItem } from './ContextMenu';
 import { IBranch, IMax, IMore, IPrompt, IRestart, IRestore, IX } from './icons';
 import { ProviderIcon } from './ProviderIcons';
@@ -58,7 +57,6 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const shell = useStore((st) => cellShell(cell, st.s.settings.shell));
   const profileName = shownProfileName(profile, shell, tr);
   const status = useStore((st) => st.ui.statuses[cell.id] ?? 'idle');
-  useBlink(status === 'working');
   const failure = useStore((st) => st.ui.failures[cell.id]);
   // The short reason of the status ("czeka na zgodę: Bash", "praca: Edit", "kod wyjścia 1"), see shared/statusDetail.ts.
   const statusDetail = useStore((st) => st.ui.statusDetails[cell.id]);
