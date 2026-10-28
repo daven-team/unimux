@@ -1,6 +1,6 @@
-import { execFile } from 'child_process';
 import { existsSync } from 'fs';
 import { cleanEnv } from '../shared/env';
+import { execCall, type ExecCall } from './offMainExec';
 
 export interface CodexLaunch {
   /** The detected Codex binary or shim. */
@@ -12,7 +12,7 @@ export interface CodexLaunch {
 }
 
 /** How `codex queue` is started: the program, its arguments, extra environment and the time it may take. */
-export interface CodexQueueCall { file: string; args: string[]; env: Record<string, string>; timeout: number }
+export type CodexQueueCall = ExecCall;
 
 const QUEUE_SCRIPT = (target: string) =>
   `$ErrorActionPreference = 'Stop'; try { & ${target} queue --thread $env:UNIMUX_TARGET_SESSION --message $env:UNIMUX_TASK_MESSAGE; exit $LASTEXITCODE } catch { exit 1 }`;
@@ -42,12 +42,11 @@ export function codexQueueCall(sessionId: string, message: string, launch: Codex
   };
 }
 
-export function queueCodexMessage(sessionId: string, message: string, launch: CodexLaunch = {}): Promise<void> {
-  const call = codexQueueCall(sessionId, message, launch);
-  return new Promise((resolve, reject) => {
-    execFile(call.file, call.args, { env: call.env, windowsHide: true, timeout: call.timeout, maxBuffer: 256 * 1024 }, (error) => {
-      if (error) reject(new Error('Native Codex delivery failed. Check that this Codex version supports queue and the session is running. The item remains in the inbox.'));
-      else resolve();
-    });
-  });
+/**
+ * `run` starts the call and tells whether it succeeded; main passes execOffMain (a utility process starts codex.exe, see
+ * offMainExec.ts), the default runs it in this process.
+ */
+export async function queueCodexMessage(sessionId: string, message: string, launch: CodexLaunch = {}, run: (call: ExecCall) => Promise<boolean> = execCall): Promise<void> {
+  const ok = await run(codexQueueCall(sessionId, message, launch));
+  if (!ok) throw new Error('Native Codex delivery failed. Check that this Codex version supports queue and the session is running. The item remains in the inbox.');
 }

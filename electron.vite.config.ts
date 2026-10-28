@@ -14,6 +14,8 @@ export default defineConfig({
           ptyhost: resolve(__dirname, 'src/ptyhost/index.ts'),
           sftphost: resolve(__dirname, 'src/sftphost/index.ts'),
           dbhost: resolve(__dirname, 'src/dbhost/index.ts'),
+          // Starts one program for main (`codex queue`) so a slow process start never blocks it (1.0.9, main/offMainExec.ts).
+          exechost: resolve(__dirname, 'src/exechost/index.ts'),
           // The SQLite engine thread of the DB Host (built-in modules only: it is run as an eval'd worker).
           sqliteworker: resolve(__dirname, 'src/dbhost/sqliteWorker.ts'),
           updatesplash: resolve(__dirname, 'src/updatesplash/index.ts'),

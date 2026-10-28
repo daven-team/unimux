@@ -12,5 +12,5 @@
     "types": ["node"],
     "composite": true
   },
-  "include": ["electron.vite.config.ts", "electron.vite.messages.ts", "vitest.config.ts", "src/main/**/*", "src/preload/**/*", "src/ptyhost/**/*", "src/sshcore/**/*", "src/sftphost/**/*", "src/dbhost/**/*", "src/updatesplash/**/*", "src/shared/**/*", "test/**/*"]
+  "include": ["electron.vite.config.ts", "electron.vite.messages.ts", "vitest.config.ts", "src/main/**/*", "src/preload/**/*", "src/ptyhost/**/*", "src/sshcore/**/*", "src/sftphost/**/*", "src/dbhost/**/*", "src/exechost/**/*", "src/updatesplash/**/*", "src/shared/**/*", "test/**/*"]
 }

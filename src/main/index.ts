@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { execFile, spawn } from 'child_process';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, safeStorage, shell, type NativeImage, type OpenDialogOptions, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, safeStorage, shell, utilityProcess, type NativeImage, type OpenDialogOptions, type WebContents } from 'electron';
 import { createQuitConfirm, isQuitAnswer, sessionEndingNow } from './quitConfirm';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { homedir, hostname } from 'os';
@@ -99,6 +99,7 @@ import { electronCipher, SshVault } from './ssh/vault';
 import { AutomationService } from './automation';
 import { UnimuxMcpServer } from './mcp';
 import { queueCodexMessage } from './agentDelivery';
+import { execOffMain, type ExecHostChild } from './offMainExec';
 import { CliDetector } from './cliDetect';
 import { createCliHandlers, createInstallHandlers } from './cliIpc';
 import { InstallManager } from './cliInstall';
@@ -703,11 +704,15 @@ const automation = new AutomationService(controller, {
     await queueCodexMessage(sessionId, text, {
       command: codex?.state === 'found' ? codex.path : undefined,
       env: await cliDetector.applyEnv(cleanEnv(process.env), 'codex'),
-    });
+    }, (call) => execOffMain(call, forkExecHost));
   },
 });
 const mcp = new UnimuxMcpServer(automation, { log: (message) => crashLog.warn(message), tr: (key, params) => tr(key, params) });
 const mcpInfo = (): McpInfo => ({ ...mcp.getInfo(), error: mcpError, ...(mcpStarting && !mcp.getInfo().running ? { starting: true } : {}) });
+/** A short-lived utility process that starts one program for main (`codex queue`, see offMainExec.ts). No inherited stdio. */
+function forkExecHost(): ExecHostChild {
+  return utilityProcess.fork(join(__dirname, 'exechost.js'), [], { serviceName: 'unimux Exec Host', stdio: 'ignore' });
+}
 /** Tells the renderer what changed instead of being polled (the renderer keeps a slow fallback poll). */
 const pushLater = (push: () => void) => {
   let timer: ReturnType<typeof setTimeout> | undefined;
