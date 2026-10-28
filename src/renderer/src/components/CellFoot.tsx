@@ -5,8 +5,10 @@
 // subscribes to its own store slice: CellView never re-renders for terminal output and the foot must not make it.
 import type { Cell } from '../../../shared/types';
 import { SshStatusBar } from './ssh/SshStatusBar';
+import { PromptQueueBar } from './PromptQueueBar';
 
 /** The bar under a cell's terminal; `cell` is the cell of the card (an SSH cell has `cell.ssh`). */
 export function CellFoot({ cell }: { cell: Cell }) {
-  return cell.ssh ? <SshStatusBar cell={cell} /> : null;
+  // An agent cell shows its prompt queue (1.0.9) while prompts wait or its panel is open.
+  return cell.ssh ? <SshStatusBar cell={cell} /> : <PromptQueueBar cell={cell} />;
 }

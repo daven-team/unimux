@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { defaultState } from '../../shared/state';
 import type { CellStatus, StatusDetail } from '../../shared/status';
 import type { AppState } from '../../shared/types';
+import type { WaitMark } from '../../shared/waiting';
 import type { StateSnapshot } from '../../shared/stateEdits';
 import type { StateChange } from '../../shared/statePatch';
 import { StateSync } from '../../shared/stateSync';
@@ -16,6 +17,8 @@ export type Modal =
   | { kind: 'grid'; projectId: string }
   | { kind: 'history'; projectId: string }
   | { kind: 'changelog' }
+  /** Search across every Claude Code and Codex conversation (1.0.9). */
+  | { kind: 'conversations' }
   | { kind: 'search'; projectId: string }
   | { kind: 'snippet'; snippetId: string | null; projectId?: string }
   | { kind: 'project'; projectId: string }
@@ -53,6 +56,11 @@ export interface Ui {
   failures: Record<string, string>;
   /** The short reason of a cell's status (tool, permission, exit code...), see shared/statusDetail.ts; absent when there is none. */
   statusDetails: Record<string, StatusDetail>;
+  /**
+   * 1.0.9: what each cell waits for and since when (shared/waiting.ts): this window's own cells (renderer/waiting.ts), and in
+   * the main window also the cells of the detached windows, as they report them.
+   */
+  waits: Record<string, WaitMark>;
   focusedCellId: string | null;
   maximizedCellId: string | null;
   palette: boolean;
@@ -121,6 +129,7 @@ export const useStore = create<Store>((set, get) => ({
     statuses: {},
     failures: {},
     statusDetails: {},
+    waits: {},
     focusedCellId: null,
     maximizedCellId: null,
     palette: false,

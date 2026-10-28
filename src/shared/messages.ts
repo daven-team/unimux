@@ -7,6 +7,7 @@ import { automationMessages } from './automationMessages';
 import { cliMessages } from './cliMessages';
 import { codexMessages } from './codexMessages';
 import { contextMessages } from './contextMessages';
+import { convSearchMessages } from './convSearchMessages';
 import { dbMessages } from './dbMessages';
 import { redisMessages } from './redisMessages';
 import { dbUiMessages } from './dbUiMessages';
@@ -23,6 +24,7 @@ import { notesMessages } from './notesMessages';
 import { snippetMessages } from './snippetMessages';
 import { perfMessages } from './perfMessages';
 import { polishMessages } from './polishMessages';
+import { queueMessages } from './queueMessages';
 import { railMessages } from './railMessages';
 import { settingsMessages } from './settingsMessages';
 import { sftpMessages } from './sftpMessages';
@@ -47,6 +49,7 @@ import { terminalPanelMessages } from './terminalPanelMessages';
 import { updateMessages } from './updateMessages';
 import { usageMessages } from './usageMessages';
 import { uxMessages } from './uxMessages';
+import { waitingMessages } from './waitingMessages';
 export const messages = {
   ...agentModeMessages,
   ...agentWorkMessages,
@@ -55,6 +58,7 @@ export const messages = {
   ...cliMessages,
   ...codexMessages,
   ...contextMessages,
+  ...convSearchMessages,
   ...dbMessages,
   ...redisMessages,
   ...dbUiMessages,
@@ -71,6 +75,7 @@ export const messages = {
   ...snippetMessages,
   ...perfMessages,
   ...polishMessages,
+  ...queueMessages,
   ...safetyMessages,
   ...stabilityMessages,
   ...railMessages,
@@ -95,6 +100,7 @@ export const messages = {
   ...updateMessages,
   ...usageMessages,
   ...uxMessages,
+  ...waitingMessages,
   'Wybierz język': ['Choose your language', 'Sprache wählen', 'Elige tu idioma', 'Choisissez votre langue', 'Escolha o seu idioma'],
   'Nie udało się wczytać tego języka. Spróbuj ponownie.': ['Could not load this language. Please try again.', 'Diese Sprache konnte nicht geladen werden. Bitte versuche es erneut.', 'No se pudo cargar este idioma. Inténtalo de nuevo.', 'Impossible de charger cette langue. Veuillez réessayer.', 'Não foi possível carregar este idioma. Tente novamente.'],
   'Witaj w unimux': ['Welcome to unimux', 'Willkommen bei unimux', 'Bienvenido a unimux', 'Bienvenue dans unimux', 'Bem-vindo ao unimux'],

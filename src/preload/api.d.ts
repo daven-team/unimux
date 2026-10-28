@@ -10,6 +10,7 @@ import type { ChangelogResult } from '../shared/changelog';
 import type { AlertEventId } from '../shared/alerts';
 import type { UsageState } from '../shared/usage';
 import type { MonitorSample } from '../shared/monitor';
+import type { ConvQuery, ConvSearchResult, ConvTranscript } from '../shared/convSearch';
 import type { ContextUsage } from '../shared/contextUsage';
 import type { AdoptCopyResult, LoginRequest, LoginState, SwapResult } from '../shared/accounts';
 import type { ReplaceRequest, ReplaceResult, SearchOptions, SearchResult } from '../shared/search';
@@ -21,6 +22,7 @@ import type { LocalFilesApi, SftpApi, SftpSessionState } from '../shared/sftp';
 import type { DbApi, DbPrompt, DbSessionState, DbVaultInfo } from '../shared/db';
 import type { SshHistoryApi } from '../shared/commandHistory';
 import type { DetachedTarget, DetachedWork, OpenInMain } from '../shared/detached';
+import type { WaitMark } from '../shared/waiting';
 
 export type DetachResult = { ok: true; id: string } | { ok: false; error: string };
 import type { AppState, CellSession, Profile, ProjectDirectory, ProjectFilePreview, SessionInfo, UpdateState, Worktree, WorktreeInspection, WorktreeInspectResult, WorktreeRemoveResult } from '../shared/types';
@@ -113,6 +115,11 @@ export interface McApi {
   /** code 'conflict': the file on disk is not `expectedText` any more (nothing written). */
   writeProjectFile(projectId: string, relativePath: string, text: string, expectedText: string): Promise<{ ok: true } | { ok: false; error: string; code?: 'conflict' }>;
   listSessions(projectPath: string): Promise<SessionInfo[]>;
+  /** Search across every Claude Code and Codex conversation (1.0.9) and the read-only transcript of a result. */
+  conversations: {
+    search(query: ConvQuery): Promise<ConvSearchResult>;
+    transcript(file: string): Promise<ConvTranscript>;
+  };
   isGitRepo(path: string): Promise<boolean>;
   createWorktree(projectPath: string, name: string): Promise<Worktree>;
   /** What removing the worktree would lose (uncommitted files, commits the project's HEAD cannot reach). */
@@ -143,7 +150,15 @@ export interface McApi {
   localFs: LocalFilesApi;
   /** The command history of SSH hosts for the terminal autocomplete (kept by main on this computer only). */
   sshHistory: SshHistoryApi;
-  notify(n: { title: string; body: string; cellId: string }): void;
+  /**
+   * An OS notification; a click shows the window and `cellId`. 1.0.9: `actions` 'answer' (with the cell's permission `token`)
+   * offers Zezwól / Odrzuć / Pokaż, 'show' only Pokaż (when the setting is on).
+   */
+  notify(n: { title: string; body: string; cellId: string; actions?: 'answer' | 'show'; token?: string }): void;
+  /** 1.0.9: an answer from a notification could not be typed (the cell changed): show the window and the cell instead. */
+  showCell(cellId: string): void;
+  /** 1.0.9: an agent needs the user: flash this window's taskbar button / bounce the Dock icon if the window is not focused. */
+  flashAttention(): void;
   openExternal(url: string): void;
   openPath(path: string): void;
   revealPath(path: string): void;
@@ -201,6 +216,14 @@ export interface McApi {
     openInMain(request: OpenInMain): void;
     /** 1.0.8, in a closing detached window: it needs longer to give its tab back (a question is open); main waits. */
     stay(): void;
+    /** 1.0.9, from any window: what one of its cells waits for (null: nothing any more); main passes a detached window's on. */
+    wait(cellId: string, mark: WaitMark | null): void;
+    /** 1.0.9: the waits main kept (the main window: every cell's; a detached window: its own cells'). */
+    waits(): Promise<Array<{ cellId: string; mark: WaitMark }>>;
+    /** 1.0.9, in a detached window: "next / previous waiting cell" (the main window picks the cell). */
+    waitStep(dir: 1 | -1): void;
+    /** 1.0.9, from the main window: shows a cell in whichever window has it (that window comes up and focuses it). */
+    revealCell(cellId: string): void;
   };
   /** In a detached window: it is being closed, its tab goes back (detach.attach). */
   on(channel: 'detach:closing', cb: () => void): () => void;
@@ -212,6 +235,10 @@ export interface McApi {
   on(channel: 'detach:work', cb: (id: string, work: DetachedWork | null) => void): () => void;
   /** 1.0.8, in the main window: a detached window opens a tab here. */
   on(channel: 'detach:openInMain', cb: (request: OpenInMain) => void): () => void;
+  /** 1.0.9, in the main window: what a cell of a detached window waits for (null: nothing any more). */
+  on(channel: 'detach:wait', cb: (cellId: string, mark: WaitMark | null) => void): () => void;
+  /** 1.0.9, in the main window: "next / previous waiting cell" was pressed in a detached window. */
+  on(channel: 'waiting:step', cb: (dir: 1 | -1) => void): () => void;
   on(channel: 'auth:state', cb: (state: LoginState) => void): () => void;
   on(channel: 'install:state', cb: (state: InstallState) => void): () => void;
   on(channel: 'cli:changed', cb: (status: CliStatusMap) => void): () => void;
@@ -225,6 +252,7 @@ export interface McApi {
   /** A notice from the main process, already translated (e.g. Claude http hooks found blocked). */
   on(channel: 'app:notice', cb: (text: string) => void): () => void;
   on(channel: 'focus-cell', cb: (cellId: string) => void): () => void;
+  on(channel: 'notify:answer', cb: (cellId: string, token: string, answer: 'allow' | 'deny') => void): () => void;
   on(channel: 'ptyhost:crashed', cb: (resumesConversation: boolean) => void): () => void;
   /** The Pty Host crashed too often and is not restarted until the user asks for it (cells show why they do not start). */
   on(channel: 'ptyhost:fatal', cb: () => void): () => void;

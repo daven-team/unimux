@@ -309,6 +309,8 @@ export const BROADCAST_CHANNELS: ReadonlySet<string> = new Set([
 /** Messages about one cell (its id is the first argument, or `cellId` of the first argument): they go to the window showing it. */
 export const CELL_CHANNELS: ReadonlySet<string> = new Set([
   'cell:hook', 'cell:session', 'cell:context', 'cell:restarted', 'cell:spawnError', 'focus-cell', 'ssh:session', 'ssh:prompt',
+  // 1.0.9: Allow / Deny clicked in a permission notification: the window that holds the cell's terminal answers it.
+  'notify:answer',
 ]);
 
 /** A message's receivers: null = the main window, '*' = every window, else a detached window's id. */
@@ -334,9 +336,10 @@ export function routeMessage(channel: string, args: readonly unknown[], owners: 
 /** The app-wide shortcuts that work in a detached window (no strip, no side panels, no new grids there). */
 export const DETACHED_GRID_SHORTCUTS: ReadonlySet<string> = new Set([
   'agent.add', 'cell.maximize', 'cell.focus.left', 'cell.focus.right', 'cell.focus.up', 'cell.focus.down',
-  'cell.move.left', 'cell.move.right', 'cell.move.up', 'cell.move.down', 'terminal.find',
+  'cell.move.left', 'cell.move.right', 'cell.move.up', 'cell.move.down', 'terminal.find', 'cell.queue', 'waiting.next', 'waiting.prev',
 ]);
-export const DETACHED_FILE_SHORTCUTS: ReadonlySet<string> = new Set();
+/** 1.0.9: "next / previous waiting cell" works from any window (the main window picks the cell). */
+export const DETACHED_FILE_SHORTCUTS: ReadonlySet<string> = new Set(['waiting.next', 'waiting.prev']);
 
 /** The window's title: the tab's name and the app's. */
 export function detachedTitle(s: Pick<AppState, 'projects'>, target: DetachedTarget): string {

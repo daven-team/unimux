@@ -8,9 +8,11 @@ import type { McpInfo } from '../../shared/automation';
 import { alertForStatus } from './alerts';
 import { initQuitGuard } from './closeGuard';
 import { initDetachFollow } from './detach';
+import { initPromptQueue } from './promptQueue';
+import { initWaitTracking, revealCell } from './waiting';
 import { noteAgentTurnEnd } from './turnRefresh';
 import { initBackgroundLoader } from './backgroundLoader';
-import { applyCliStatus, flushPendingSaves, ensureStarted, focusCell, hasBlockedCells, recheckCli, refreshSessionTitles, resetStarted, releaseCellTerminal, setAliveAtStart } from './actions';
+import { applyCliStatus, flushPendingSaves, ensureStarted, hasBlockedCells, recheckCli, refreshSessionTitles, resetStarted, releaseCellTerminal, setAliveAtStart } from './actions';
 import { CommandPalette } from './components/CommandPalette';
 import { ContextMenuHost } from './components/ContextMenu';
 import { ErrorBoundary, PanelFallback, WindowFallback } from './components/ErrorBoundary';
@@ -29,6 +31,7 @@ import { TitleBar, WorkspaceTabs } from './components/TitleBar';
 import { useShortcuts } from './shortcuts';
 import { getS, getUi, setUi, toast, update, useStore } from './store';
 import { terminals } from './terminals/TerminalManager';
+import { isPermissionAnswer } from '../../shared/permissionAction';
 // Rarely used screens load on demand: the editor alone (CodeMirror, language packs, Markdown preview) is about a third of the bundle.
 const loadAutomationPanel = () => import('./components/AutomationPanel').then((m) => ({ default: m.AutomationPanel }));
 const loadFileEditor = () => import('./components/FileEditor').then((m) => ({ default: m.FileEditor }));
@@ -176,7 +179,9 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
     if (found && session.cli === 'claude') refreshSessionTitles(found.project.path, 1500);
   });
   window.mc.on('cell:spawnError', (cellId, message) => setUi((ui) => ({ cellErrors: { ...ui.cellErrors, [cellId]: message } })));
-  window.mc.on('focus-cell', (cellId) => focusCell(cellId));
+  // 1.0.9: Zezwól / Odrzuć from a permission notification; a stale one (the cell changed since) only shows the cell.
+  window.mc.on('notify:answer', (cellId, token, answer) => { if (!isPermissionAnswer(answer) || !terminals.answerPermission(cellId, token, answer)) window.mc.showCell(cellId); });
+  window.mc.on('focus-cell', (cellId) => revealCell(cellId));
   // A one-time notice from the main process, already in the app language (http hooks found blocked).
   window.mc.on('app:notice', (text: string) => toast(text));
   window.mc.on('ptyhost:crashed', (resumes) => {
@@ -242,6 +247,10 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   bootStep(initQuitGuard);
   // Tabs in their own window (1.0.6): their cells' terminals leave this window and come back with them.
   bootStep(initDetachFollow);
+  // 1.0.9: queued prompts of agent cells go out when their agent finished its turn.
+  bootStep(initPromptQueue);
+  // 1.0.9: what the cells wait for (the "Czeka na Ciebie" list), this window's and the detached windows'.
+  bootStep(initWaitTracking);
 }
 
 /**

@@ -171,6 +171,7 @@ export const SHORTCUTS = [
   { id: 'terminal.new', label: 'Nowa zakładka z jednym terminalem', group: 'grid', scope: 'global', default: 'Mod+Shift+T', rebindable: true },
   { id: 'agent.add', label: 'Dodaj agenta do siatki', group: 'grid', scope: 'global', default: 'Mod+Shift+N', rebindable: true },
   { id: 'grid.new', label: 'Nowy grid lub preset', group: 'grid', scope: 'global', default: 'Mod+Shift+G', rebindable: true, requiresProject: true },
+  { id: 'conversations.search', label: 'Szukaj we wszystkich rozmowach Claude i Codex', group: 'general', scope: 'global', default: 'Mod+Alt+F', rebindable: true },
   { id: 'history.open', label: 'Historia czatów i gridów', group: 'grid', scope: 'global', default: 'Mod+Shift+H', rebindable: true, requiresProject: true },
   { id: 'tab.close', label: 'Zamknij kartę na wierzchu (grid, plik, SSH, ustawienia)', group: 'grid', scope: 'global', default: 'Mod+Shift+W', rebindable: true },
   { id: 'tab.next', label: 'Następna karta', group: 'grid', scope: 'global', default: 'Mod+Tab', rebindable: true },
@@ -184,6 +185,11 @@ export const SHORTCUTS = [
   { id: 'cell.move.right', label: 'Przesuń komórkę w prawo', group: 'grid', scope: 'cell', default: 'Mod+Alt+Shift+Right', rebindable: true, blockedInSettings: true },
   { id: 'cell.move.up', label: 'Przesuń komórkę w górę', group: 'grid', scope: 'cell', default: 'Mod+Alt+Shift+Up', rebindable: true, blockedInSettings: true },
   { id: 'cell.move.down', label: 'Przesuń komórkę w dół', group: 'grid', scope: 'cell', default: 'Mod+Alt+Shift+Down', rebindable: true, blockedInSettings: true },
+  // 1.0.9: the prompt queue of the cell in focus, with its add field ready (renderer/promptQueue.ts).
+  { id: 'cell.queue', label: 'Dodaj prompt do kolejki komórki', group: 'grid', scope: 'cell', default: 'Mod+Shift+D', rebindable: true, blockedInSettings: true },
+  // 1.0.9: the cells that wait for you (shared/waiting.ts), longest waiting first, across every grid and window.
+  { id: 'waiting.next', label: 'Następna komórka, która czeka na Ciebie', group: 'grid', scope: 'global', default: 'Mod+Alt+PageDown', rebindable: true },
+  { id: 'waiting.prev', label: 'Poprzednia komórka, która czeka na Ciebie', group: 'grid', scope: 'global', default: 'Mod+Alt+PageUp', rebindable: true },
   // Ctrl+F itself belongs to the program in the terminal (readline: forward one character), so the terminal finds with Shift.
   { id: 'terminal.find', label: 'Znajdź w terminalu', group: 'terminal', scope: 'cell', default: 'Mod+Shift+F', rebindable: true, blockedInSettings: true, terminalOnly: true },
   { id: 'snippets.toggle', label: 'Pokaż lub ukryj snippety', group: 'panels', scope: 'global', default: 'Mod+Shift+B', rebindable: true },

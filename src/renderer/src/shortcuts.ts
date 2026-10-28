@@ -10,6 +10,8 @@ import { closeFrontTab, cycleWorkspace, frontKey } from './workspaceStrip';
 import { getS, getUi, setUi, update, useStore } from './store';
 import { focusedTerminalCell, openTerminalFind } from './terminals/terminalFind';
 import { captureSelectionToNote } from './notesUi';
+import { openQueue } from './promptQueue';
+import { stepToWaiting } from './waiting';
 
 let cached: { overrides: unknown; platform: string; resolution: ShortcutResolution } | null = null;
 
@@ -70,6 +72,7 @@ function run(id: string): void {
     case 'terminal.new': quickTab(); break;
     case 'agent.add': void addAgent(getS().settings.lastProfileId); break;
     case 'grid.new': if (project) setUi({ modal: { kind: 'grid', projectId: project.id } }); break;
+    case 'conversations.search': setUi((ui) => ({ modal: ui.modal?.kind === 'conversations' ? null : { kind: 'conversations' } })); break;
     case 'history.open': if (project) setUi({ modal: { kind: 'history', projectId: project.id } }); break;
     // The tab in front, whatever its kind: with a file or the SSH view in front this never closes the grid behind it.
     case 'tab.close': closeFrontTab(); break;
@@ -78,6 +81,7 @@ function run(id: string): void {
     case 'notes.capture': captureSelectionToNote(); break;
     case 'sidebar.toggle': update((s) => ({ ...s, sidebarCollapsed: !s.sidebarCollapsed })); break;
     case 'cell.maximize': toggleMaximize(); break;
+    case 'cell.queue': openQueue(); break;
     case 'terminal.find': { const cell = focusedTerminalCell(); if (cell) openTerminalFind(cell); break; }
     case 'tab.next': cycleWorkspace(1); break;
     case 'tab.prev': cycleWorkspace(-1); break;
@@ -89,6 +93,8 @@ function run(id: string): void {
     case 'cell.move.right': moveCellBy(1, 0); break;
     case 'cell.move.up': moveCellBy(0, -1); break;
     case 'cell.move.down': moveCellBy(0, 1); break;
+    case 'waiting.next': stepToWaiting(1); break;
+    case 'waiting.prev': stepToWaiting(-1); break;
   }
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cleanEnv } from '../src/shared/env';
-import { buildCliCommand, buildLaunchCommand, DEFAULT_PROFILES, cellShell, posixQuote, psQuote, shownProfileName } from '../src/shared/profiles';
+import { buildCliCommand, buildLaunchCommand, DEFAULT_PROFILES, cellShell, genericProfileName, posixQuote, psQuote, shownProfileName } from '../src/shared/profiles';
 import { addProject, addTab, defaultState, normalizeState } from '../src/shared/state';
 import { layoutForCount } from '../src/shared/layout';
 import { INPUT_MODES_OFF } from '../src/shared/termReset';
@@ -171,6 +171,20 @@ describe('shownProfileName', () => {
     expect(shownProfileName({ ...shell, name: 'Moja konsola' }, 'cmd')).toBe('Moja konsola');
     expect(shownProfileName({ id: 'wsl', name: 'PowerShell', cli: 'shell' }, 'cmd')).toBe('PowerShell');
     expect(shownProfileName(DEFAULT_PROFILES[0], 'cmd')).toBe('Claude');
+  });
+
+  it('1.0.9: tells the names that only repeat the cell icon (the header leaves them out) from the ones the user gave', () => {
+    expect(genericProfileName(DEFAULT_PROFILES[0])).toBe(true);
+    expect(genericProfileName(DEFAULT_PROFILES[1])).toBe(true);
+    expect(genericProfileName({ id: 'x', name: ' claude ', cli: 'claude' })).toBe(true);
+    expect(genericProfileName({ id: 'x', name: 'Claude  Code', cli: 'claude' })).toBe(true);
+    expect(genericProfileName({ id: 'x', name: 'OpenAI Codex', cli: 'codex' })).toBe(true);
+    expect(genericProfileName(shell)).toBe(true);
+    expect(genericProfileName({ ...shell, name: 'Terminal' })).toBe(true);
+    expect(genericProfileName({ id: 'opus', name: 'Claude Opus', cli: 'claude' })).toBe(false);
+    expect(genericProfileName({ id: 'x', name: 'Codex', cli: 'claude' })).toBe(false);
+    expect(genericProfileName({ ...shell, name: 'Moja konsola' })).toBe(false);
+    expect(genericProfileName({ id: 'wsl', name: 'PowerShell', cli: 'shell' })).toBe(false);
   });
 
   it('1.0.7: a running cell keeps the name of the shell it was started with when Settings change', () => {

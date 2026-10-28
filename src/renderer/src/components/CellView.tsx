@@ -1,4 +1,5 @@
 import { changeAgentRole } from '../agentRoles';
+import { useBlink } from '../blink';
 import { cellLabel } from '../../../shared/agentWork';
 import { shortcutText, titleWithShortcut, useShortcutText } from '../shortcuts';
 import { useI18n } from '../i18n';
@@ -8,7 +9,7 @@ import { errorPhrase, failureLabel } from '../../../shared/alerts';
 import { failedExit, statusText } from '../../../shared/statusDetail';
 import { cellDrawColor, getProfile, PROJECT_COLORS, updateCell } from '../../../shared/state';
 import { missingCardCli } from '../../../shared/cliStatus';
-import { cellShell, shownProfileName } from '../../../shared/profiles';
+import { cellShell, genericProfileName, shownProfileName } from '../../../shared/profiles';
 import { sshHeaderName, sshPhaseLabel, userAtEndpoint } from '../../../shared/ssh';
 import { resolveSshTheme } from '../../../shared/sshThemes';
 import { useSshStore } from '../sshStore';
@@ -34,6 +35,7 @@ import { IBranch, IMax, IMore, IPrompt, IRestart, IRestore, IX } from './icons';
 import { ProviderIcon } from './ProviderIcons';
 import { hostInitials } from './ssh/SshConnectCard';
 import { CellFoot } from './CellFoot';
+import { openQueue } from '../promptQueue';
 import { ContextMeter } from './ContextMeter';
 import './terminalCell.css';
 
@@ -113,10 +115,15 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const shownName = ssh
     ? sshHeaderName(cell.name) || host?.label || tr('Host usunięty')
     : cellLabel(cell, sessionTitle && cell.session ? { [cell.session.id]: sessionTitle } : {}, profileName);
-  /** The profile shows among the details only when the title is not already it. */
-  const metaProfile = !ssh && shownName !== profileName;
+  /**
+   * The profile shows among the details only when the title is not already it and its name says more than the icon does
+   * (1.0.9: "Claude" next to the Claude mark was noise; the icon's tooltip still names the profile).
+   */
+  const metaProfile = !ssh && shownName !== profileName && !genericProfileName(profile);
   // A non-zero exit code (the last command, the CLI, the process) is an error in the dot and the pill alike (1.0.7).
   const exitFailed = failedExit(statusDetail);
+  // A working dot ripples smoothly for its first waves, then steps with the shared pulse (terminalCell.css, blink.ts).
+  useBlink(status === 'working');
   const dotClass = `${status}${(status === 'waiting' && failure !== undefined) || exitFailed ? ' error' : ''}`;
 
   const sshItems = (): MenuItem[] => [
@@ -166,6 +173,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
     ...restartItems(),
     ...(!ssh && profile.cli === 'shell' ? [{ sep: true as const }, ...pathModeItems()] : []),
     ...(!ssh && profile.cli !== 'shell' ? [
+      { label: tr('Kolejka promptów…'), hint: shortcutText('cell.queue') || undefined, onClick: () => openQueue(cell.id) },
       { label: cell.muted ? tr("Włącz alerty tej komórki") : tr("Wycisz alerty tej komórki"), onClick: () => update((s) => updateCell(s, cell.id, { muted: cell.muted ? undefined : true })) },
     ] : []),
     { label: maximized ? tr("Przywróć siatkę") : tr("Maksymalizuj"), onClick: () => toggleMaximize(cell.id), hint: shortcutText('cell.maximize') || undefined },
@@ -280,7 +288,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
               {shownName}
             </span>
           )}
-          {/* Muted details: the context use of an agent's conversation, the profile when the name is not it, the model, the
+          {/* Muted details: the context use of an agent's conversation, a custom profile when the name is not it, the model, the
               worktree branch, user@host of an SSH cell. */}
           {!editing && (metaProfile || cell.model || cell.worktree || (ssh && host) || (!ssh && cell.session)) && <span className="cell-meta">
             {!ssh && cell.session && <ContextMeter cell={cell} />}

@@ -10,7 +10,7 @@ import { activeProject, activeTab, findCell, getProfile, updateCell } from '../.
 import { describeLayout } from '../../../shared/layout';
 import { isAuxPtyId } from '../../../shared/cliInstall';
 import { ptyHostRestartToast } from '../../../shared/ssh';
-import { addAgent, applyCliStatus, ensureStarted, flushPendingSaves, focusCell, releaseCellTerminal, resetStarted, setAliveAtStart } from '../actions';
+import { addAgent, applyCliStatus, ensureStarted, flushPendingSaves, releaseCellTerminal, resetStarted, setAliveAtStart } from '../actions';
 import { alertForStatus } from '../alerts';
 import { adoptDocuments, portableDoc, reopenTarget, tabHandoff } from '../detach';
 import { activateFile, draftStorageKey, useFileStore, watchFilesOnDisk } from '../files';
@@ -23,11 +23,14 @@ import { chosenLanguage, loadLanguage, tr, useI18n } from '../i18n';
 import { reportError } from '../errorReport';
 import { useShortcuts, shortcutText, titleWithShortcut } from '../shortcuts';
 import { initSsh, sshHostMenuItems } from '../ssh';
+import { initPromptQueue } from '../promptQueue';
 import { useSshStore } from '../sshStore';
 import { getS, setStateOverlay, setUi, toast, useStore } from '../store';
 import { terminals } from '../terminals/TerminalManager';
+import { isPermissionAnswer } from '../../../shared/permissionAction';
 import { profileOptionLabel } from '../cliUi';
 import { noteAgentTurnEnd } from '../turnRefresh';
+import { initWaitTracking, revealCell } from '../waiting';
 import { detachedId, thisDetached } from '../windowRole';
 import { openMenuAt, ContextMenuHost } from './ContextMenu';
 import { ErrorBoundary, PanelFallback, WindowFallback } from './ErrorBoundary';
@@ -107,12 +110,16 @@ async function boot(): Promise<void> {
   terminals.setScrollback(getS().settings.scrollbackLines);
   useStore.subscribe((st, prev) => { if (st.s.settings.scrollbackLines !== prev.s.settings.scrollbackLines) terminals.setScrollback(st.s.settings.scrollbackLines); });
   await initSsh().catch((error) => reportError('boot', error));
+  // 1.0.9: this window serves the prompt queues of the cells it holds.
+  initPromptQueue();
   window.mc.on('mcp:info', (info) => setUi({ mcpInfo: info }));
   window.mc.on('cell:restarted', (cellId) => { terminals.prepareSpawn(cellId); terminals.syncSize(cellId); });
   window.mc.on('cell:hook', (cellId, event, info) => terminals.hook(cellId, event, info));
   window.mc.on('cell:session', (cellId, session) => useStore.getState().update((s) => updateCell(s, cellId, { session })));
   window.mc.on('cell:spawnError', (cellId, message) => setUi((ui) => ({ cellErrors: { ...ui.cellErrors, [cellId]: message } })));
-  window.mc.on('focus-cell', (cellId) => focusCell(cellId));
+  // 1.0.9: Zezwól / Odrzuć from a permission notification; a stale one (the cell changed since) only shows the cell.
+  window.mc.on('notify:answer', (cellId, token, answer) => { if (!isPermissionAnswer(answer) || !terminals.answerPermission(cellId, token, answer)) window.mc.showCell(cellId); });
+  window.mc.on('focus-cell', (cellId) => revealCell(cellId));
   window.mc.on('automation:start-cells', (ids) => ids.forEach((id) => ensureStarted(id)));
   window.mc.on('ptyhost:crashed', (resumes) => { toast(tr(ptyHostRestartToast(resumes !== false)), 'error'); resetStarted(); });
   window.mc.on('ptyhost:fatal', () => { toast(tr('Proces terminali wielokrotnie się wysypał.'), 'error'); resetStarted(); });
@@ -158,6 +165,8 @@ async function boot(): Promise<void> {
   }
   const tab = activeTab(activeProject(getS()));
   setUi({ focusedCellId: tab?.cells[0]?.id ?? null });
+  // 1.0.9: this window's cells report what they wait for; the main window lists them.
+  initWaitTracking();
 }
 
 /** This window's unsaved database work goes to the main window (its quit question counts it), whenever it changes. */

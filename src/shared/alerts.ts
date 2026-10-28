@@ -36,6 +36,14 @@ export interface AlertSettings {
   notifyWhenFocused: boolean;
   quietHours: QuietHours;
   events: Record<AlertEventId, EventAlert>;
+  /** 1.0.9: "Zezwól" / "Odrzuć" / "Pokaż" in the notification of a permission request (see shared/permissionAction). */
+  notificationActions: boolean;
+  /** 1.0.9: flash the taskbar button (Windows) / bounce the Dock icon once (macOS) when an agent needs you in an unfocused window. */
+  flashWindow: boolean;
+  /** 1.0.9: the number of agents waiting for you on the taskbar button (Windows overlay) / the Dock icon (macOS badge). */
+  taskbarBadge: boolean;
+  /** 1.0.9: Windows: the taskbar button shows an indeterminate progress while any agent works. */
+  taskbarProgress: boolean;
 }
 
 export const DEFAULT_ALERT_VOLUME = 0.7;
@@ -59,6 +67,10 @@ export function defaultAlerts(): AlertSettings {
       attention: { notify: true, sound: { ...DEFAULT_EVENT_SOUNDS.attention } },
       error: { notify: true, sound: { ...DEFAULT_EVENT_SOUNDS.error } },
     },
+    notificationActions: true,
+    flashWindow: true,
+    taskbarBadge: true,
+    taskbarProgress: true,
   };
 }
 
@@ -112,6 +124,10 @@ export function normalizeAlerts(value: unknown): AlertSettings {
     notifyWhenFocused: typeof r.notifyWhenFocused === 'boolean' ? r.notifyWhenFocused : d.notifyWhenFocused,
     quietHours: normalizeQuietHours(r.quietHours),
     events: { done: event('done'), attention: event('attention'), error: event('error') },
+    notificationActions: typeof r.notificationActions === 'boolean' ? r.notificationActions : d.notificationActions,
+    flashWindow: typeof r.flashWindow === 'boolean' ? r.flashWindow : d.flashWindow,
+    taskbarBadge: typeof r.taskbarBadge === 'boolean' ? r.taskbarBadge : d.taskbarBadge,
+    taskbarProgress: typeof r.taskbarProgress === 'boolean' ? r.taskbarProgress : d.taskbarProgress,
   };
 }
 

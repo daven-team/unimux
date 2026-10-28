@@ -179,6 +179,7 @@ describe('alerts normalization', () => {
         attention: { notify: true, sound: { kind: 'system' } },
         error: { notify: true, sound: { kind: 'preset', id: 'retro' } },
       },
+      notificationActions: false, flashWindow: false, taskbarBadge: false, taskbarProgress: false,
     };
     expect(normalizeAlerts(JSON.parse(JSON.stringify(raw)))).toEqual(raw);
   });
@@ -189,7 +190,7 @@ describe('alerts normalization', () => {
     expect(normalizeAlerts('x')).toEqual(d);
     expect(normalizeAlerts([])).toEqual(d);
     const bad = normalizeAlerts({
-      volume: 'loud', notifyWhenFocused: 1, quietHours: { enabled: 'yes', start: '7pm', end: 5 },
+      volume: 'loud', notifyWhenFocused: 1, notificationActions: 'no', taskbarBadge: 0, quietHours: { enabled: 'yes', start: '7pm', end: 5 },
       events: {
         done: { notify: 'x', sound: { kind: 'preset', id: 'nope' } },
         attention: { notify: false, sound: { kind: 'file', path: 5 } },

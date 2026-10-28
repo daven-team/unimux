@@ -10,7 +10,8 @@ import { ICalendar, ICapture, INoteBlank } from './notesIcons';
 import { strictFieldFilter } from '../../../shared/fuzzy';
 import type { MessageKey } from '../../../shared/i18n';
 import { describeLayout } from '../../../shared/layout';
-import { activeProject, activeTab } from '../../../shared/state';
+import { activeProject, activeTab, findCell } from '../../../shared/state';
+import { openQueue, queueCapable } from '../promptQueue';
 import type { SessionInfo } from '../../../shared/types';
 import {
   addAgent, closeTab, createProject, moveCellBy, openTab, quickTab, restartCell, restoreArchived, resumeSession, selectTab,
@@ -27,6 +28,11 @@ import { profileOptionLabel } from '../cliUi';
 import { statusLog, terminals } from '../terminals/TerminalManager';
 import { captureSelectionToNote, createNote, openNoteInPanel, openNoteTab } from '../notesUi';
 import { noteExcerpt } from '../../../shared/noteTools';
+import { cellOwners } from '../../../shared/detached';
+import { waitAge, waitText } from '../../../shared/waiting';
+import { currentWaiting, revealWaiting, stepToWaiting } from '../waiting';
+import { waitingRowInfo } from './WaitingPanel';
+import { TWaiting } from './icons';
 
 interface Item {
   kind: string;
@@ -77,6 +83,16 @@ function PaletteInner() {
     const out: Item[] = [];
     const tab = activeTab(project);
     const focused = getUi().focusedCellId;
+    // 1.0.9: the cells that wait for you come first (there are few, and they are what the user is most likely after).
+    const waitingNow = Date.now();
+    const owners = cellOwners(s);
+    for (const entry of currentWaiting()) {
+      const info = waitingRowInfo(s, entry, getUi().sessionTitles, tr, owners);
+      if (!info) continue;
+      const what = waitText(entry);
+      const age = waitAge(entry.since, waitingNow);
+      out.push({ kind: tr('Czeka na Ciebie'), title: info.label, icon: <TWaiting />, desc: `${tr(what.key, what.params)} · ${tr(age.key, age.params)} · ${info.place}`, run: () => revealWaiting(entry.cellId) });
+    }
     // actions first so short queries like "his" / "ust" find them
     out.push({ kind: tr('Akcja'), title: tr("Nowy projekt") + '…', icon: <IPlus />, run: () => void createProject() });
     // SSH editors need no project: after "Nowy terminal (zakładka)" with a project (L16), right here without one.
@@ -102,6 +118,9 @@ function PaletteInner() {
       out.push({ kind: tr('Akcja'), title: tr("Maksymalizuj / przywróć komórkę"), icon: <IMax />, desc: keys('cell.maximize') || undefined, run: () => toggleMaximize(focused) });
       out.push({ kind: tr('Akcja'), title: tr("Komórka: wznów rozmowę od nowa (restart)"), icon: <IRestart />, run: () => restartCell(focused, 'resume') });
       out.push({ kind: tr('Akcja'), title: tr("Komórka: nowa rozmowa"), icon: <IPlus />, run: () => restartCell(focused, 'new') });
+      // 1.0.9: the prompt queue of the focused agent cell, with its add field ready.
+      const focusedCell = findCell(s, focused)?.cell;
+      if (focusedCell && queueCapable(s, focusedCell)) out.push({ kind: tr('Akcja'), title: tr('Komórka: dodaj prompt do kolejki'), icon: <IPlus />, desc: keys('cell.queue') || undefined, run: () => openQueue(focused) });
       out.push({ kind: tr('Akcja'), title: tr("Komórka: zresetuj terminal (tryby myszy i klawiatury)"), icon: <IRefresh />, run: () => { terminals.resetInput(focused); toast(tr("Terminal zresetowany - historia została zachowana.")); } });
       const moves: Array<[string, string, number, number]> = [
         [tr('Komórka: przesuń w lewo'), 'left', -1, 0], [tr('Komórka: przesuń w prawo'), 'right', 1, 0],
@@ -110,6 +129,7 @@ function PaletteInner() {
       const arrowIcon: Record<string, ReactNode> = { left: <IArrowLeft />, right: <IArrowRight />, up: <IArrowUp />, down: <IMoveDown /> };
       for (const [title, arrow, dx, dy] of moves) out.push({ kind: tr('Akcja'), title, icon: arrowIcon[arrow], desc: keys(`cell.move.${arrow}`) || undefined, run: () => moveCellBy(dx, dy) });
     }
+    out.push({ kind: tr('Akcja'), title: tr('Szukaj w rozmowach Claude i Codex…'), icon: <IHistory />, desc: keys('conversations.search') || undefined, run: () => setUi({ modal: { kind: 'conversations' } }) });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj snippety"), icon: <ISnippet />, desc: keys('snippets.toggle') || undefined, run: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj notatki"), icon: <INoteBlank />, desc: keys('notes.toggle') || undefined, run: () => update((st) => ({ ...st, notesOpen: !st.notesOpen })) });
     out.push({ kind: tr('Akcja'), title: tr('Notatki: nowa notatka'), icon: <INoteBlank />, run: () => createNote() });
@@ -117,6 +137,9 @@ function PaletteInner() {
     out.push({ kind: tr('Akcja'), title: tr('Notatki: nowa z zaznaczonego tekstu'), icon: <ICapture />, desc: keys('notes.capture') || undefined, run: () => captureSelectionToNote() });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj panel projektów"), icon: <ISidebar />, desc: keys('sidebar.toggle') || undefined, run: () => update((st) => ({ ...st, sidebarCollapsed: !st.sidebarCollapsed })) });
     out.push({ kind: tr('Akcja'), title: tr('Panel: Git'), icon: <IBranch />, run: () => { openSidebarPanel('git'); } });
+    if (getS().settings.sidePanels?.waiting) out.push({ kind: tr('Akcja'), title: tr('Czeka na Ciebie: pokaż listę'), icon: <TWaiting />, run: () => { openSidebarPanel('waiting'); } });
+    out.push({ kind: tr('Akcja'), title: tr('Następna komórka, która czeka na Ciebie'), icon: <TWaiting />, desc: keys('waiting.next') || undefined, run: () => stepToWaiting(1) });
+    out.push({ kind: tr('Akcja'), title: tr('Poprzednia komórka, która czeka na Ciebie'), icon: <TWaiting />, desc: keys('waiting.prev') || undefined, run: () => stepToWaiting(-1) });
     out.push({ kind: tr('Akcja'), title: tr('Bazy danych: nowe połączenie'), icon: <IDatabase />, run: () => setUi({ modal: { kind: 'dbConnection', dbKind: 'postgres' } }) });
     out.push({ kind: tr('Akcja'), title: tr('Bazy danych: otwórz połączenie…'), icon: <IDatabase />, run: () => { openSidebarPanel('db'); } });
     for (const c of s.dbConnections) {

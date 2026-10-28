@@ -9,9 +9,10 @@
 //   unavailableReason optional: the tile is shown but disabled, with this reason as its tooltip
 import type { ComponentType, ReactNode } from 'react';
 import type { MessageKey } from '../../shared/i18n';
-import { gitPanelReason, type PanelContext, type PanelDef } from '../../shared/sidebarPanels';
+import { gitPanelReason, optionalPanelOn, type PanelContext, type PanelDef } from '../../shared/sidebarPanels';
 import { FilesPanel } from './components/FilesPanel';
-import { TDatabase, TFiles, TGit, TMonitor, TProjects, TTerminal } from './components/icons';
+import { TDatabase, TFiles, TGit, TMonitor, TProjects, TTerminal, TWaiting } from './components/icons';
+import { WaitingBadge, WaitingPanel } from './components/WaitingPanel';
 import type { PanelResizeProps } from './components/PanelResizeHandle';
 import { LazyScreen } from './components/LazyScreen';
 import { ProjectsPanel } from './components/ProjectsPanel';
@@ -39,6 +40,8 @@ export interface SidebarPanel extends Omit<PanelDef, 'unavailableReason'> {
   /** What a view tile does when clicked. */
   onActivate?: () => void;
   unavailableReason?: (ctx: PanelContext) => MessageKey | null;
+  /** 1.0.9: a count on the tile (it follows the store itself, so the rail does not re-render for it). */
+  badge?: ComponentType;
 }
 
 export const SIDEBAR_PANELS: readonly SidebarPanel[] = [
@@ -49,5 +52,8 @@ export const SIDEBAR_PANELS: readonly SidebarPanel[] = [
   { id: 'db', label: 'Bazy danych', icon: TDatabase, component: DbPanelLazy },
   { id: 'terminal', label: 'SSH', icon: TTerminal, opensView: true, onActivate: () => openSshView() },
   // What loads the computer: samples only while it is open (1.0.6).
-  { id: 'monitor', label: 'Monitor', icon: TMonitor, component: MonitorPanelLazy },
+  { id: 'monitor', label: 'Monitor', icon: TMonitor, component: MonitorPanelLazy, available: optionalPanelOn('monitor') },
+  // Monitor and "Czeka na Ciebie" are off by default (1.0.9): Settings > Ogólne switches them on.
+  // 1.0.9: every cell that needs you (a question, a permission, an error, a turn you have not seen), across grids and windows.
+  { id: 'waiting', label: 'Czeka na Ciebie', icon: TWaiting, component: WaitingPanel, badge: WaitingBadge, available: optionalPanelOn('waiting') },
 ];

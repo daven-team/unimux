@@ -131,6 +131,12 @@ export function AlertsSettings() {
       <SettingRow title={tr('Powiadamiaj i graj dźwięk także w aktywnym oknie')} htmlFor="settings-alert-focused" hint={tr('Domyślnie, gdy patrzysz na komórkę w aktywnym oknie aplikacji, nie dostajesz ani powiadomienia, ani dźwięku. Po włączeniu dostaniesz je zawsze, gdy agent skończy pracę, potrzebuje Ciebie albo zgłosi błąd.')}>
         <input id="settings-alert-focused" className="setting-switch" type="checkbox" role="switch" checked={alerts.notifyWhenFocused} onChange={(e) => setAlerts((a) => ({ ...a, notifyWhenFocused: e.target.checked }))} />
       </SettingRow>
+      <SettingRow title={tr('Przyciski w powiadomieniach o zgodę')} htmlFor="settings-alert-actions" hint={tr('Gdy agent prosi o zgodę na użycie narzędzia, powiadomienie ma przyciski Zezwól, Odrzuć i Pokaż. Zezwól i Odrzuć odpowiadają tylko wtedy, gdy to samo okno zgody jest wciąż otwarte i nic w komórce się nie zmieniło; inaczej tylko pokazują komórkę. Dotyczy Claude Code i Codex.')}>
+        <input id="settings-alert-actions" className="setting-switch" type="checkbox" role="switch" checked={alerts.notificationActions} onChange={(e) => setAlerts((a) => ({ ...a, notificationActions: e.target.checked }))} />
+      </SettingRow>
+      <SettingRow title={tr('Zwróć uwagę na okno, gdy agent potrzebuje Ciebie')} htmlFor="settings-alert-flash" hint={tr('Tylko gdy okno nie jest aktywne. Windows: przycisk aplikacji na pasku zadań miga, aż przejdziesz do okna. macOS: ikona w Docku podskakuje raz.')}>
+        <input id="settings-alert-flash" className="setting-switch" type="checkbox" role="switch" checked={alerts.flashWindow} onChange={(e) => setAlerts((a) => ({ ...a, flashWindow: e.target.checked }))} />
+      </SettingRow>
       <SettingRow title={tr('Godziny ciszy')} htmlFor="settings-quiet-enabled" hint={`${tr('Nie powiadamiaj i nie graj dźwięku w godzinach ciszy')}. ${tr('Ciche godziny mogą przechodzić przez północ, np. od 22:00 do 07:00.')}`}>
         <div className="row alert-quiet">
           <label htmlFor="settings-quiet-start">{tr('Od')}</label>
@@ -144,5 +150,13 @@ export function AlertsSettings() {
       </SettingRow>
     </SettingsGroup>
     </fieldset>
+    <SettingsGroup title={tr('Pasek zadań i Dock')}>
+      <SettingRow title={tr('Liczba agentów czekających na Ciebie')} htmlFor="settings-taskbar-badge" hint={tr('Windows: czerwona plakietka z liczbą na przycisku aplikacji na pasku zadań. macOS: plakietka na ikonie w Docku. Liczą się agenci, którzy czekają na zgodę albo odpowiedź, we wszystkich oknach; wyciszone komórki nie.')}>
+        <input id="settings-taskbar-badge" className="setting-switch" type="checkbox" role="switch" checked={alerts.taskbarBadge} onChange={(e) => setAlerts((a) => ({ ...a, taskbarBadge: e.target.checked }))} />
+      </SettingRow>
+      {window.mc.platform === 'win32' && <SettingRow title={tr('Postęp na pasku zadań, gdy agenci pracują')} htmlFor="settings-taskbar-progress" hint={tr('Przycisk aplikacji na pasku zadań pokazuje animowany pasek postępu, dopóki pracuje choć jeden agent.')}>
+        <input id="settings-taskbar-progress" className="setting-switch" type="checkbox" role="switch" checked={alerts.taskbarProgress} onChange={(e) => setAlerts((a) => ({ ...a, taskbarProgress: e.target.checked }))} />
+      </SettingRow>}
+    </SettingsGroup>
   </>;
 }

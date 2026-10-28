@@ -57,6 +57,10 @@ const api: McApi = {
   transferProjectEntries: (projectId, request) => ipcRenderer.invoke('fs:transfer', projectId, request),
   cancelFileOp: (opId) => ipcRenderer.send('fs:cancelOp', opId),
   listSessions: (projectPath) => ipcRenderer.invoke('sessions:list', projectPath),
+  conversations: {
+    search: (query) => ipcRenderer.invoke('conv:search', query),
+    transcript: (file) => ipcRenderer.invoke('conv:transcript', file),
+  },
   isGitRepo: (path) => ipcRenderer.invoke('git:isRepo', path),
   createWorktree: (projectPath, name) => ipcRenderer.invoke('git:createWorktree', projectPath, name),
   inspectWorktree: (projectPath, wt) => ipcRenderer.invoke('git:inspectWorktree', projectPath, wt),
@@ -228,6 +232,8 @@ const api: McApi = {
     status: () => ipcRenderer.invoke('ssh:history:status'),
   },
   notify: (n) => ipcRenderer.send('notify', n),
+  showCell: (cellId) => ipcRenderer.send('notify:show', cellId),
+  flashAttention: () => ipcRenderer.send('attention:flash'),
   openExternal: (url) => ipcRenderer.send('shell:openExternal', url),
   openPath: (path) => ipcRenderer.send('shell:openPath', path),
   revealPath: (path) => ipcRenderer.send('shell:revealPath', path),
@@ -267,6 +273,10 @@ const api: McApi = {
     works: () => ipcRenderer.invoke('detach:works'),
     openInMain: (request) => ipcRenderer.send('detach:openInMain', request),
     stay: () => ipcRenderer.send('detach:stay'),
+    wait: (cellId, mark) => ipcRenderer.send('detach:wait', cellId, mark),
+    waits: () => ipcRenderer.invoke('detach:waits'),
+    waitStep: (dir) => ipcRenderer.send('detach:waitStep', dir),
+    revealCell: (cellId) => ipcRenderer.send('detach:revealCell', cellId),
   },
   on: (channel: string, cb: (...args: any[]) => void) => {
     const listener = (_e: unknown, ...args: any[]) => cb(...args);

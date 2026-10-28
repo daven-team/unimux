@@ -20,6 +20,7 @@ import type { SshStatsRun } from '../../../shared/sshBar';
 import { EMPTY_CWD, parseOsc7, parseOsc99, trackOsc7, trackOsc99, type CwdTrack } from '../../../shared/remoteCwd';
 import { inputModesOff, isMouseReport, MouseFloodGuard, terminalModeReset } from '../../../shared/termReset';
 import { encodeWin32Key } from '../../../shared/win32input';
+import { mayAnswer, permissionAsk, permissionKeys, type PermissionAnswer, type PermissionCellState } from '../../../shared/permissionAction';
 import { tr } from '../i18n';
 import { confirmTerminalLink } from '../terminalLinks';
 import { applyScrollback, DEFAULT_SCROLLBACK_LINES, MAX_WEBGL_CONTEXTS, PENDING_OUTPUT_CHARS } from '../../../shared/terminalLimits';
@@ -39,6 +40,8 @@ const FONT = '"Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular
 
 interface Entry {
   id: string;
+  /** performance.now() of the last key the user typed into this terminal (the prompt queue must not send over it). */
+  typedAt?: number;
   term: Terminal;
   fit: FitAddon;
   webgl: WebglAddon | null;
@@ -85,6 +88,8 @@ interface Entry {
   remote: boolean;
   /** The add-on of an SSH terminal (command autocomplete), see setRemoteAddon. */
   addon: RemoteAddon | null;
+  /** 1.0.9: bumped on every status or detail change and every keystroke: a notification's answer token names one value. */
+  askEpoch: number;
 }
 
 /** What SSH terminals get on top (the command autocomplete, sshAutocomplete.ts): a look at every key first, and a dispose. */
@@ -112,6 +117,8 @@ export interface EnsureOptions {
 
 class TerminalManager {
   private entries = new Map<string, Entry>();
+  /** Part of every permission answer token: a token of an earlier page (before a reload) never matches. */
+  private readonly askNonce = Math.random().toString(36).slice(2, 10);
   private port: MessagePort | null = null;
   /** The first terminal output of this window was reported for startup.log. */
   private firstOutput = false;
@@ -350,6 +357,21 @@ class TerminalManager {
     return this.entries.has(cellId);
   }
 
+  /** When the user last typed into the cell's terminal (performance.now()); -Infinity when never. */
+  typedAt(cellId: string): number {
+    return this.entries.get(cellId)?.typedAt ?? -Infinity;
+  }
+
+  /** Precise signals (Claude hooks, the Codex notify hook) drive the cell's status. */
+  hooked(cellId: string): boolean {
+    return this.entries.get(cellId)?.tracker.isHooked ?? false;
+  }
+
+  /** The program in the terminal switched bracketed paste on: a multi-line paste arrives as one block. */
+  bracketedPaste(cellId: string): boolean {
+    return this.entries.get(cellId)?.term.modes.bracketedPasteMode ?? false;
+  }
+
   ensure(cellId: string, opts: EnsureOptions): Entry {
     const existing = this.entries.get(cellId);
     if (existing) {
@@ -398,7 +420,7 @@ class TerminalManager {
     const entry: Entry = {
       id: cellId, term, fit, webgl: null, shownAt: 0, outputAt: undefined, webglChangedAt: undefined, webglBlockedUntil: undefined, webglGl: null, webglGrantedAt: -Infinity, webglLosses: 0, host, tracker: new StatusTracker(), win32: false, agent: opts.agent,
       codex: opts.codex === true, scanner: new FailureScanner(), guard: new MouseFloodGuard(), infer: new AgentInference(window.mc.platform === 'win32' && opts.remote !== true), attachedTo: null, resizeObs: null, replaying: 0, replayMarks: null, refitAfterReplay: false, ptyLive: false, lastSize: { cols: term.cols, rows: term.rows },
-      parkedSelection: null, applySelection: null, remote: opts.remote === true, addon: null,
+      parkedSelection: null, applySelection: null, remote: opts.remote === true, addon: null, askEpoch: 0,
     };
     entry.tracker.setCodex(entry.codex);
     entry.tracker.setAgent(entry.agent);
@@ -1045,6 +1067,44 @@ class TerminalManager {
     return this.entries.get(cellId)?.tracker.detail;
   }
 
+  private askState(e: Entry): PermissionCellState {
+    const t = e.tracker;
+    return { status: t.status, reason: t.lastReason, detail: t.detail, hooked: t.isHooked, agent: e.agent && !e.remote, codex: e.codex };
+  }
+
+  /** The bottom rows of the cell's screen (the active buffer, whatever is scrolled into view). */
+  private screenRows(e: Entry): string[] {
+    const buffer = e.term.buffer.active;
+    const rows: string[] = [];
+    for (let y = 0; y < e.term.rows; y++) rows.push(buffer.getLine(buffer.baseY + y)?.translateToString(true) ?? '');
+    return rows;
+  }
+
+  /**
+   * 1.0.9: the token a permission notification carries when its Allow / Deny may be offered: the cell is in an answerable
+   * permission state (see permissionAsk) and its screen shows the dialog with "Yes" highlighted. Null: only "Pokaż".
+   */
+  permissionToken(cellId: string): string | null {
+    const e = this.entries.get(cellId);
+    if (!e || e.replaying > 0 || !permissionAsk(this.askState(e))) return null;
+    return mayAnswer({ token: 'probe', current: 'probe', state: this.askState(e), screen: this.screenRows(e) }) ? `${this.askNonce}.${e.askEpoch}` : null;
+  }
+
+  /**
+   * 1.0.9: Allow / Deny from a notification. Types Enter (the highlighted "Yes") or Esc into the cell only when nothing changed
+   * since the notification (same token), the cell is still in that permission state and the dialog is on screen; false
+   * otherwise (the caller then only shows the cell). Counts as the user's keystroke for the status, like the keyboard.
+   */
+  answerPermission(cellId: string, token: unknown, answer: PermissionAnswer): boolean {
+    const e = this.entries.get(cellId);
+    if (!e || e.replaying > 0) return false;
+    const current = `${this.askNonce}.${e.askEpoch}`;
+    if (!mayAnswer({ token, current, state: this.askState(e), screen: this.screenRows(e) })) return false;
+    this.userInput(e, answer === 'allow', answer === 'deny');
+    this.post({ t: 'write', id: cellId, data: permissionKeys(answer, e.win32) });
+    return true;
+  }
+
   /** A Codex turn end was committed and names the thread the cell's stored session should become. */
   onCodexBind(l: (cellId: string, thread: BoundThread) => void): () => void {
     this.bindListeners.add(l);
@@ -1058,6 +1118,7 @@ class TerminalManager {
 
   /** User keystrokes can change the status (answering a prompt), so listeners must hear about it. */
   private userInput(e: Entry, submitted: boolean, interrupt = false): void {
+    e.typedAt = performance.now();
     this.setStatus(e, () => {
       const now = performance.now();
       e.tracker.input(now, submitted);
@@ -1070,6 +1131,8 @@ class TerminalManager {
     const prevDetail = e.tracker.detail;
     const result = change();
     const { status, lastCause, lastReason, lastError } = e.tracker;
+    // Any change (or keystroke, or a new Codex approval) makes an open notification's Allow / Deny stale (see permissionToken).
+    if (status !== prev || !sameDetail(prevDetail, e.tracker.detail) || result === 'renotify' || trigger === 'input' || trigger === 'osc9' || trigger === 'restore' || trigger === 'exit') e.askEpoch++;
     if (!sameDetail(prevDetail, e.tracker.detail)) {
       const detail = e.tracker.detail;
       this.detailListeners.forEach((l) => l(e.id, detail));
