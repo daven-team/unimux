@@ -11,6 +11,7 @@ import { getS, getUi, setUi, update, useStore } from './store';
 import { focusedTerminalCell, openTerminalFind } from './terminals/terminalFind';
 import { captureSelectionToNote } from './notesUi';
 import { openQueue } from './promptQueue';
+import { stepToWaiting } from './waiting';
 
 let cached: { overrides: unknown; platform: string; resolution: ShortcutResolution } | null = null;
 
@@ -91,6 +92,8 @@ function run(id: string): void {
     case 'cell.move.right': moveCellBy(1, 0); break;
     case 'cell.move.up': moveCellBy(0, -1); break;
     case 'cell.move.down': moveCellBy(0, 1); break;
+    case 'waiting.next': stepToWaiting(1); break;
+    case 'waiting.prev': stepToWaiting(-1); break;
   }
 }
 

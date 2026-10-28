@@ -92,10 +92,10 @@ describe('git and terminal tiles', () => {
     expect(resolvePanelId([git], 'git', none)).toBe(DEFAULT_PANEL);
   });
 
-  it('keeps the rail order Projects, Files, Git, Databases (1.0.0), SSH, Monitor (1.0.6) and the SSH tile always available', () => {
+  it('keeps the rail order Projects, Files, Git, Databases (1.0.0), SSH, Monitor (1.0.6), Czeka na Ciebie (1.0.9) and the SSH tile always available', () => {
     const source = readFileSync('src/renderer/src/panelRegistry.tsx', 'utf8');
     const entries = source.split(/\r?\n/).filter((line) => /^\s*\{ id: '/.test(line));
-    expect(entries.map((line) => /id: '([a-z]+)'/.exec(line)![1])).toEqual(['projects', 'files', 'git', 'db', 'terminal', 'monitor']);
+    expect(entries.map((line) => /id: '([a-z]+)'/.exec(line)![1])).toEqual(['projects', 'files', 'git', 'db', 'terminal', 'monitor', 'waiting']);
     const terminal = entries.find((line) => line.includes("id: 'terminal'"))!;
     expect(terminal).toContain("label: 'SSH'");
     expect(terminal).not.toContain('unavailableReason');

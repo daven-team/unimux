@@ -21,6 +21,7 @@ import type { LocalFilesApi, SftpApi, SftpSessionState } from '../shared/sftp';
 import type { DbApi, DbPrompt, DbSessionState, DbVaultInfo } from '../shared/db';
 import type { SshHistoryApi } from '../shared/commandHistory';
 import type { DetachedTarget, DetachedWork, OpenInMain } from '../shared/detached';
+import type { WaitMark } from '../shared/waiting';
 
 export type DetachResult = { ok: true; id: string } | { ok: false; error: string };
 import type { AppState, CellSession, Profile, ProjectDirectory, ProjectFilePreview, SessionInfo, UpdateState, Worktree, WorktreeInspection, WorktreeInspectResult, WorktreeRemoveResult } from '../shared/types';
@@ -209,6 +210,14 @@ export interface McApi {
     openInMain(request: OpenInMain): void;
     /** 1.0.8, in a closing detached window: it needs longer to give its tab back (a question is open); main waits. */
     stay(): void;
+    /** 1.0.9, from any window: what one of its cells waits for (null: nothing any more); main passes a detached window's on. */
+    wait(cellId: string, mark: WaitMark | null): void;
+    /** 1.0.9: the waits main kept (the main window: every cell's; a detached window: its own cells'). */
+    waits(): Promise<Array<{ cellId: string; mark: WaitMark }>>;
+    /** 1.0.9, in a detached window: "next / previous waiting cell" (the main window picks the cell). */
+    waitStep(dir: 1 | -1): void;
+    /** 1.0.9, from the main window: shows a cell in whichever window has it (that window comes up and focuses it). */
+    revealCell(cellId: string): void;
   };
   /** In a detached window: it is being closed, its tab goes back (detach.attach). */
   on(channel: 'detach:closing', cb: () => void): () => void;
@@ -220,6 +229,10 @@ export interface McApi {
   on(channel: 'detach:work', cb: (id: string, work: DetachedWork | null) => void): () => void;
   /** 1.0.8, in the main window: a detached window opens a tab here. */
   on(channel: 'detach:openInMain', cb: (request: OpenInMain) => void): () => void;
+  /** 1.0.9, in the main window: what a cell of a detached window waits for (null: nothing any more). */
+  on(channel: 'detach:wait', cb: (cellId: string, mark: WaitMark | null) => void): () => void;
+  /** 1.0.9, in the main window: "next / previous waiting cell" was pressed in a detached window. */
+  on(channel: 'waiting:step', cb: (dir: 1 | -1) => void): () => void;
   on(channel: 'auth:state', cb: (state: LoginState) => void): () => void;
   on(channel: 'install:state', cb: (state: InstallState) => void): () => void;
   on(channel: 'cli:changed', cb: (status: CliStatusMap) => void): () => void;

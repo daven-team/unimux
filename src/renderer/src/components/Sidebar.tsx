@@ -75,6 +75,7 @@ export function Sidebar({ resize }: { resize: PanelResizeProps }) {
             const reason = panel.unavailableReason?.(ctx) ?? null;
             const shown = railTileShown(panel, { collapsed, activeId: active.id, viewActive: sshActive, settingsActive });
             const Icon = panel.icon;
+            const Badge = panel.badge;
             const label = tr(panel.label);
             return (
               <button
@@ -92,7 +93,7 @@ export function Sidebar({ resize }: { resize: PanelResizeProps }) {
                 tabIndex={(sshMode ? !!panel.opensView : panel.id === active.id) ? 0 : -1}
                 title={reason ? tr(reason) : shown && (!panel.opensView || !collapsed) ? `${label} · ${tr("Kliknij ponownie, aby zwinąć panel")}` : label}
                 onClick={() => { if (panelOpenable(panel, ctx)) choose(panel); }}
-              ><Icon /></button>
+              ><Icon />{Badge && <Badge />}</button>
             );
           })}
         </div>

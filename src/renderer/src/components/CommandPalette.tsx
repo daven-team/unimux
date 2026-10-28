@@ -28,6 +28,11 @@ import { profileOptionLabel } from '../cliUi';
 import { statusLog, terminals } from '../terminals/TerminalManager';
 import { captureSelectionToNote, createNote, openNoteInPanel, openNoteTab } from '../notesUi';
 import { noteExcerpt } from '../../../shared/noteTools';
+import { cellOwners } from '../../../shared/detached';
+import { waitAge, waitText } from '../../../shared/waiting';
+import { currentWaiting, revealWaiting, stepToWaiting } from '../waiting';
+import { waitingRowInfo } from './WaitingPanel';
+import { TWaiting } from './icons';
 
 interface Item {
   kind: string;
@@ -78,6 +83,16 @@ function PaletteInner() {
     const out: Item[] = [];
     const tab = activeTab(project);
     const focused = getUi().focusedCellId;
+    // 1.0.9: the cells that wait for you come first (there are few, and they are what the user is most likely after).
+    const waitingNow = Date.now();
+    const owners = cellOwners(s);
+    for (const entry of currentWaiting()) {
+      const info = waitingRowInfo(s, entry, getUi().sessionTitles, tr, owners);
+      if (!info) continue;
+      const what = waitText(entry);
+      const age = waitAge(entry.since, waitingNow);
+      out.push({ kind: tr('Czeka na Ciebie'), title: info.label, icon: <TWaiting />, desc: `${tr(what.key, what.params)} · ${tr(age.key, age.params)} · ${info.place}`, run: () => revealWaiting(entry.cellId) });
+    }
     // actions first so short queries like "his" / "ust" find them
     out.push({ kind: tr('Akcja'), title: tr("Nowy projekt") + '…', icon: <IPlus />, run: () => void createProject() });
     // SSH editors need no project: after "Nowy terminal (zakładka)" with a project (L16), right here without one.
@@ -121,6 +136,9 @@ function PaletteInner() {
     out.push({ kind: tr('Akcja'), title: tr('Notatki: nowa z zaznaczonego tekstu'), icon: <ICapture />, desc: keys('notes.capture') || undefined, run: () => captureSelectionToNote() });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj panel projektów"), icon: <ISidebar />, desc: keys('sidebar.toggle') || undefined, run: () => update((st) => ({ ...st, sidebarCollapsed: !st.sidebarCollapsed })) });
     out.push({ kind: tr('Akcja'), title: tr('Panel: Git'), icon: <IBranch />, run: () => { openSidebarPanel('git'); } });
+    out.push({ kind: tr('Akcja'), title: tr('Czeka na Ciebie: pokaż listę'), icon: <TWaiting />, run: () => { openSidebarPanel('waiting'); } });
+    out.push({ kind: tr('Akcja'), title: tr('Następna komórka, która czeka na Ciebie'), icon: <TWaiting />, desc: keys('waiting.next') || undefined, run: () => stepToWaiting(1) });
+    out.push({ kind: tr('Akcja'), title: tr('Poprzednia komórka, która czeka na Ciebie'), icon: <TWaiting />, desc: keys('waiting.prev') || undefined, run: () => stepToWaiting(-1) });
     out.push({ kind: tr('Akcja'), title: tr('Bazy danych: nowe połączenie'), icon: <IDatabase />, run: () => setUi({ modal: { kind: 'dbConnection', dbKind: 'postgres' } }) });
     out.push({ kind: tr('Akcja'), title: tr('Bazy danych: otwórz połączenie…'), icon: <IDatabase />, run: () => { openSidebarPanel('db'); } });
     for (const c of s.dbConnections) {

@@ -16,6 +16,7 @@ import {
   splitHandoffs, targetKey, type DetachedWindow, type DetachedWork, type DisplayArea,
 } from '../shared/detached';
 import type { AppState } from '../shared/types';
+import { normalizeWaitMark, type WaitMark } from '../shared/waiting';
 import type { IpcGuard, IpcSenderEvent } from './ipcGuard';
 import { isFromWindow, isLive, safeSend } from './safeWindow';
 
@@ -94,6 +95,29 @@ function pageGone(id: string, closed: boolean): void {
 }
 
 /**
+ * 1.0.9: what every cell waits for (shared/waiting.ts), as the window that shows it reports it. The main window keeps the
+ * "Czeka na Ciebie" list of every window: it hears the detached windows' reports, and after a reload asks for all of them; a
+ * detached window takes those of its cells when it opens (a grid that moved keeps how long its cells have been waiting).
+ */
+const waits = new Map<string, WaitMark>();
+
+/** Every window's waits by cell id (also for a taskbar count of the cells that need the user). */
+export const cellWaits = (): ReadonlyMap<string, WaitMark> => waits;
+
+function setWait(fromDetached: boolean, cellId: string, mark: WaitMark | null): void {
+  if (!mark && !waits.has(cellId)) return;
+  if (mark) waits.set(cellId, mark); else waits.delete(cellId);
+  if (fromDetached) safeSend(deps?.mainWindow() ?? null, 'detach:wait', cellId, mark);
+}
+
+/** Cells that are gone (closed, their grid closed) lose their wait. */
+function pruneWaits(state: AppState): void {
+  if (!waits.size) return;
+  const alive = new Set(state.projects.flatMap((p) => p.tabs.flatMap((t) => t.cells.map((c) => c.id))));
+  for (const cellId of [...waits.keys()]) if (!alive.has(cellId)) waits.delete(cellId);
+}
+
+/**
  * Sends a main-to-renderer message to the windows that need it: state and status to all, a cell's messages to the window that
  * shows the cell, everything else to the main window (see routeMessage).
  */
@@ -147,6 +171,7 @@ export function startDetachedWindows(): void {
 export function stateChanged(state: AppState): void {
   const d = deps;
   if (!d) return;
+  pruneWaits(state);
   const repaired = normalizeDetachedWindows(state.detachedWindows, openGrids(state.projects));
   if (JSON.stringify(repaired) !== JSON.stringify(state.detachedWindows)) {
     // A grid closed by MCP or a resync: its window goes (the change is made outside this listener).
@@ -404,11 +429,40 @@ function registerIpc({ guardedHandle, guardedOn }: Pick<IpcGuard, 'guardedHandle
     safeSend(main, 'detach:openInMain', request);
     showWindow(main);
   });
+  // 1.0.9: a window reports what one of its cells waits for (null: nothing any more); a detached window's report goes on to the
+  // main window, which lists every window's cells.
+  guardedOn('detach:wait', (e, cellId: unknown, raw: unknown) => {
+    const id = windowIdOf(e.sender);
+    if (typeof cellId !== 'string' || (owners.get(cellId) ?? null) !== id) return;
+    setWait(id !== null, cellId, raw === null ? null : normalizeWaitMark(raw));
+  });
+  // The main window gets every wait (after a reload), a detached window those of its own cells (when it opens).
+  guardedHandle('detach:waits', (e) => {
+    const id = windowIdOf(e.sender);
+    return [...waits].filter(([cellId]) => id === null || owners.get(cellId) === id).map(([cellId, mark]) => ({ cellId, mark }));
+  }, () => []);
+  // 1.0.9: "next / previous waiting cell" pressed in a detached window: the main window (which has the whole list) picks the cell.
+  guardedOn('detach:waitStep', (e, dir: unknown) => {
+    if (windowIdOf(e.sender) === null) return;
+    safeSend(deps?.mainWindow() ?? null, 'waiting:step', dir === -1 ? -1 : 1);
+  });
+  // 1.0.9: from the main window: show a cell wherever it is (its window comes to the front and focuses the cell).
+  guardedOn('detach:revealCell', (e, cellId: unknown) => {
+    const main = deps?.mainWindow() ?? null;
+    if (windowIdOf(e.sender) !== null || typeof cellId !== 'string' || !deps || !findCellIn(deps.state(), cellId)) return;
+    const owner = owners.get(cellId);
+    const w = owner ? windows.get(owner) : main;
+    if (!w || !isLive(w)) return;
+    showWindow(w);
+    safeSend(w, 'focus-cell', cellId);
+  });
   guardedOn('detach:focus', (_e, id: unknown) => {
     const w = typeof id === 'string' ? windows.get(id) : undefined;
     if (w) showWindow(w);
   });
 }
+
+const findCellIn = (state: AppState, cellId: string): boolean => state.projects.some((p) => p.tabs.some((t) => t.cells.some((c) => c.id === cellId)));
 
 /** The app quits or the main window closed: every detached window closes as it is (the next start reopens it). */
 export function closeAllDetached(): void {

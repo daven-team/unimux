@@ -97,6 +97,8 @@ export const TGit = () => (
 /** A database cylinder (the "Bazy danych" rail tile). */
 export const TDatabase = () => <T><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5" /><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" /></T>;
 /** A pulse line (the Monitor rail tile). */
+// 1.0.9: the "Czeka na Ciebie" tile: a bell.
+export const TWaiting = () => <T><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></T>;
 export const TMonitor = () => <T><path d="M3 12h4l2.5-6 5 12 2.5-6h4" /></T>;
 /** A terminal prompt. */
 export const TTerminal = () => <T><path d="m4 17 6-6-6-6" /><path d="M12 19h8" /></T>;
