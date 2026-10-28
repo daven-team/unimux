@@ -23,6 +23,7 @@ import { notesMessages } from './notesMessages';
 import { snippetMessages } from './snippetMessages';
 import { perfMessages } from './perfMessages';
 import { polishMessages } from './polishMessages';
+import { queueMessages } from './queueMessages';
 import { railMessages } from './railMessages';
 import { settingsMessages } from './settingsMessages';
 import { sftpMessages } from './sftpMessages';
@@ -71,6 +72,7 @@ export const messages = {
   ...snippetMessages,
   ...perfMessages,
   ...polishMessages,
+  ...queueMessages,
   ...safetyMessages,
   ...stabilityMessages,
   ...railMessages,

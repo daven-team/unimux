@@ -13,6 +13,7 @@ import type { SshBarItem } from './sshBar';
 import type { SftpPlaces } from './sftpView';
 import type { DbConnection } from './db';
 import type { StripScope } from './workspaceOrder';
+import type { PromptQueue } from './promptQueue';
 
 export type CliKind = 'claude' | 'codex' | 'shell';
 /** A forced path format of a shell cell: Claude (@path), Codex (plain path) or the quoted shell form. */
@@ -91,6 +92,8 @@ export interface Cell {
    * named after it until the cell restarts, so changing the setting does not rename running cells. Dropped on load.
    */
   shell?: ShellKind;
+  /** 1.0.9: prompts waiting to be sent when the agent finishes its turn (shared/promptQueue.ts); absent when none waits. */
+  promptQueue?: PromptQueue;
 }
 
 export interface Tab {

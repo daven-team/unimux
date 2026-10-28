@@ -10,6 +10,7 @@ import { closeFrontTab, cycleWorkspace, frontKey } from './workspaceStrip';
 import { getS, getUi, setUi, update, useStore } from './store';
 import { focusedTerminalCell, openTerminalFind } from './terminals/terminalFind';
 import { captureSelectionToNote } from './notesUi';
+import { openQueue } from './promptQueue';
 
 let cached: { overrides: unknown; platform: string; resolution: ShortcutResolution } | null = null;
 
@@ -78,6 +79,7 @@ function run(id: string): void {
     case 'notes.capture': captureSelectionToNote(); break;
     case 'sidebar.toggle': update((s) => ({ ...s, sidebarCollapsed: !s.sidebarCollapsed })); break;
     case 'cell.maximize': toggleMaximize(); break;
+    case 'cell.queue': openQueue(); break;
     case 'terminal.find': { const cell = focusedTerminalCell(); if (cell) openTerminalFind(cell); break; }
     case 'tab.next': cycleWorkspace(1); break;
     case 'tab.prev': cycleWorkspace(-1); break;

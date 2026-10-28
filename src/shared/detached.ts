@@ -334,7 +334,7 @@ export function routeMessage(channel: string, args: readonly unknown[], owners: 
 /** The app-wide shortcuts that work in a detached window (no strip, no side panels, no new grids there). */
 export const DETACHED_GRID_SHORTCUTS: ReadonlySet<string> = new Set([
   'agent.add', 'cell.maximize', 'cell.focus.left', 'cell.focus.right', 'cell.focus.up', 'cell.focus.down',
-  'cell.move.left', 'cell.move.right', 'cell.move.up', 'cell.move.down', 'terminal.find',
+  'cell.move.left', 'cell.move.right', 'cell.move.up', 'cell.move.down', 'terminal.find', 'cell.queue',
 ]);
 export const DETACHED_FILE_SHORTCUTS: ReadonlySet<string> = new Set();
 

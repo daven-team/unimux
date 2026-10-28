@@ -34,6 +34,7 @@ import { IBranch, IMax, IMore, IPrompt, IRestart, IRestore, IX } from './icons';
 import { ProviderIcon } from './ProviderIcons';
 import { hostInitials } from './ssh/SshConnectCard';
 import { CellFoot } from './CellFoot';
+import { openQueue } from '../promptQueue';
 import { ContextMeter } from './ContextMeter';
 import './terminalCell.css';
 
@@ -166,6 +167,7 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
     ...restartItems(),
     ...(!ssh && profile.cli === 'shell' ? [{ sep: true as const }, ...pathModeItems()] : []),
     ...(!ssh && profile.cli !== 'shell' ? [
+      { label: tr('Kolejka promptów…'), hint: shortcutText('cell.queue') || undefined, onClick: () => openQueue(cell.id) },
       { label: cell.muted ? tr("Włącz alerty tej komórki") : tr("Wycisz alerty tej komórki"), onClick: () => update((s) => updateCell(s, cell.id, { muted: cell.muted ? undefined : true })) },
     ] : []),
     { label: maximized ? tr("Przywróć siatkę") : tr("Maksymalizuj"), onClick: () => toggleMaximize(cell.id), hint: shortcutText('cell.maximize') || undefined },

@@ -10,7 +10,8 @@ import { ICalendar, ICapture, INoteBlank } from './notesIcons';
 import { strictFieldFilter } from '../../../shared/fuzzy';
 import type { MessageKey } from '../../../shared/i18n';
 import { describeLayout } from '../../../shared/layout';
-import { activeProject, activeTab } from '../../../shared/state';
+import { activeProject, activeTab, findCell } from '../../../shared/state';
+import { openQueue, queueCapable } from '../promptQueue';
 import type { SessionInfo } from '../../../shared/types';
 import {
   addAgent, closeTab, createProject, moveCellBy, openTab, quickTab, restartCell, restoreArchived, resumeSession, selectTab,
@@ -102,6 +103,9 @@ function PaletteInner() {
       out.push({ kind: tr('Akcja'), title: tr("Maksymalizuj / przywróć komórkę"), icon: <IMax />, desc: keys('cell.maximize') || undefined, run: () => toggleMaximize(focused) });
       out.push({ kind: tr('Akcja'), title: tr("Komórka: wznów rozmowę od nowa (restart)"), icon: <IRestart />, run: () => restartCell(focused, 'resume') });
       out.push({ kind: tr('Akcja'), title: tr("Komórka: nowa rozmowa"), icon: <IPlus />, run: () => restartCell(focused, 'new') });
+      // 1.0.9: the prompt queue of the focused agent cell, with its add field ready.
+      const focusedCell = findCell(s, focused)?.cell;
+      if (focusedCell && queueCapable(s, focusedCell)) out.push({ kind: tr('Akcja'), title: tr('Komórka: dodaj prompt do kolejki'), icon: <IPlus />, desc: keys('cell.queue') || undefined, run: () => openQueue(focused) });
       out.push({ kind: tr('Akcja'), title: tr("Komórka: zresetuj terminal (tryby myszy i klawiatury)"), icon: <IRefresh />, run: () => { terminals.resetInput(focused); toast(tr("Terminal zresetowany - historia została zachowana.")); } });
       const moves: Array<[string, string, number, number]> = [
         [tr('Komórka: przesuń w lewo'), 'left', -1, 0], [tr('Komórka: przesuń w prawo'), 'right', 1, 0],
