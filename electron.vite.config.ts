@@ -7,7 +7,7 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
-      minify: 'esbuild',
+      minify: process.env.MC_NOMINIFY ? false : 'esbuild',
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
@@ -39,6 +39,6 @@ export default defineConfig({
     // splitMessages: each language's translations are a chunk of their own, only the active one is loaded.
     plugins: [react(), splitMessages()],
     // The renderer used to ship unminified (2.2 MB for the main chunk, 1.5 MB for the editor): minified it loads and parses much faster.
-    build: { minify: 'esbuild', cssMinify: true },
+    build: { minify: process.env.MC_NOMINIFY ? false : 'esbuild', cssMinify: true },
   },
 });

@@ -147,11 +147,21 @@ describe('CliDetector on Windows', () => {
     ...patch,
   });
 
-  it('finds claude.exe in the documented %USERPROFILE%\\.local\\bin and runs it directly', async () => {
+  it('finds claude.exe in the documented %USERPROFILE%\\.local\\bin and asks it through cmd.exe', async () => {
+    // 1.0.9: spawning a big .exe directly blocked the main process for about 0.8 s (codex.exe, CreateProcess is synchronous).
     const w = win({ files: new Set(['C:\\Users\\a\\.local\\bin\\claude.exe']) });
     const status = await detector(w).get('claude');
     expect(status).toMatchObject({ state: 'found', path: 'C:\\Users\\a\\.local\\bin\\claude.exe', source: 'known' });
-    expect(w.calls[0].file).toBe('C:\\Users\\a\\.local\\bin\\claude.exe');
+    expect(w.calls[0].file).toBe('C:\\Windows\\System32\\cmd.exe');
+    expect(w.calls[0].args).toEqual(['/d', '/s', '/c', '""C:\\Users\\a\\.local\\bin\\claude.exe" --version"']);
+    expect(w.calls[0].options.verbatim).toBe(true);
+  });
+
+  it('runs an .exe directly when its path cannot be quoted for cmd.exe', async () => {
+    const w = win({ files: new Set(['C:\\100%\\claude.exe']), env: { Path: 'C:\\100%', PATHEXT: '.EXE', ComSpec: 'C:\\Windows\\System32\\cmd.exe' } });
+    expect(await detector(w).get('claude')).toMatchObject({ state: 'found', version: '2.1.211' });
+    expect(w.calls[0].file).toBe('C:\\100%\\claude.exe');
+    expect(w.calls[0].args).toEqual(['--version']);
     expect(w.calls[0].options.verbatim).toBe(false);
   });
 
