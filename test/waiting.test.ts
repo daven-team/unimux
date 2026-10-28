@@ -136,11 +136,21 @@ describe('the list across grids', () => {
     // A cell that is not listed (a finished turn just read): the oldest one.
     expect(stepWaiting(list, 'd', 1)).toBe('b');
     // ... unless its place is known: the step goes on from there.
-    expect(stepWaiting(list, 'gone', 1, 200)).toBe('c');
+    expect(stepWaiting(list, 'gone', 1, 150)).toBe('c');
     expect(stepWaiting(list, 'gone', 1, 250)).toBe('a');
     expect(stepWaiting(list, 'gone', 1, 999)).toBe('b');
     expect(stepWaiting(list, 'gone', -1, 250)).toBe('e');
     expect(stepWaiting(list, 'gone', -1, 50)).toBe('a');
+    // Equal times: the remembered order decides (c and e waited since 200; c was read, so next is e, previous b).
+    const order = list.map((e) => e.cellId);
+    const without = list.filter((e) => e.cellId !== 'c');
+    expect(stepWaiting(without, 'c', 1, 200, order)).toBe('e');
+    expect(stepWaiting(without, 'c', -1, 200, order)).toBe('b');
+    // The read cell was the last one: wrap around to the oldest; the first one going back: the newest.
+    expect(stepWaiting(list.filter((e) => e.cellId !== 'a'), 'a', 1, 300, order)).toBe('b');
+    expect(stepWaiting(list.filter((e) => e.cellId !== 'b'), 'b', -1, 100, order)).toBe('a');
+    // Cells of the old order that left meanwhile are skipped.
+    expect(stepWaiting(list.filter((e) => e.cellId !== 'c' && e.cellId !== 'e'), 'c', 1, 200, order)).toBe('a');
     expect(stepWaiting([], 'b', 1)).toBeNull();
     expect(stepWaiting([{ cellId: 'x', since: 1 }], 'x', 1)).toBe('x');
   });

@@ -36,6 +36,15 @@ let tracking = false;
 let cursor: string | null = null;
 /** How long the cursor's cell had been waiting when it was shown: the place in the list once it is read and gone. */
 let cursorSince: number | undefined;
+/** The list (cell ids, in order) when the cursor was set: where "next" goes on once the cursor's cell has left it. */
+let cursorOrder: string[] = [];
+
+/** Puts the cursor on a cell, remembering its place in the list as it is now. */
+function setCursor(cellId: string, waits: Readonly<Record<string, WaitMark>>): void {
+  cursor = cellId;
+  cursorSince = waits[cellId]?.since;
+  cursorOrder = currentWaiting().map((e) => e.cellId);
+}
 let queued = false;
 
 /** The user is looking at this window: it has the keyboard focus and is not minimized. */
@@ -96,7 +105,7 @@ export function initWaitTracking(): void {
     if (a.statuses !== b.statuses || a.statusDetails !== b.statusDetails || a.failures !== b.failures || a.focusedCellId !== b.focusedCellId
       || st.s.projects !== prev.s.projects || st.s.detachedWindows !== prev.s.detachedWindows) schedule();
     // The user moved to another cell: "next" goes on from there.
-    if (a.focusedCellId !== b.focusedCellId && a.focusedCellId && a.focusedCellId !== cursor) { cursor = a.focusedCellId; cursorSince = a.waits[cursor]?.since; }
+    if (a.focusedCellId !== b.focusedCellId && a.focusedCellId && a.focusedCellId !== cursor) setCursor(a.focusedCellId, a.waits);
   });
   // Coming back to the window: the focused cell has been seen.
   window.addEventListener('focus', schedule);
@@ -168,8 +177,7 @@ export function useWaitClock(active: boolean): number {
 
 /** Shows a cell wherever it is: its grid comes to the front (its window, if detached) and its terminal gets the focus. */
 export function revealWaiting(cellId: string): void {
-  cursor = cellId;
-  cursorSince = getUi().waits[cellId]?.since;
+  setCursor(cellId, getUi().waits);
   if (!ownsCell(cellOwners(getS()), detachedId, cellId)) {
     // Main brings up the window that has the cell and has it focus the cell.
     if (detachedId === null) window.mc.detach.revealCell(cellId);
@@ -199,7 +207,7 @@ function flashCard(cellId: string): void {
 export function stepToWaiting(dir: 1 | -1): void {
   if (detachedId !== null) { window.mc.detach.waitStep(dir); return; }
   const list = currentWaiting();
-  const target = cursor ? stepWaiting(list, cursor, dir, cursorSince) : stepWaiting(list, getUi().focusedCellId, dir);
+  const target = cursor ? stepWaiting(list, cursor, dir, cursorSince, cursorOrder) : stepWaiting(list, getUi().focusedCellId, dir);
   if (!target) { toast(tr('Nic na Ciebie nie czeka.')); return; }
   revealWaiting(target);
 }

@@ -163,19 +163,29 @@ export function entriesFromKey(key: string): WaitingEntry[] {
 
 /**
  * "Next / previous waiting cell": the entry after (`dir` 1) or before (-1) the current one, wrapping around. A current one
- * that is not listed any more (a finished turn or an error that was just read) still marks the place when its `since` is
- * given: the step goes to the first entry that waited less long (going back: the last that waited longer). Without a place,
- * the oldest entry (going back: the newest).
+ * that is not listed any more (a finished turn or an error that was just read) still marks the place:
+ *   - `order`, the list as it was when the current cell was chosen: the step goes to the next (previous) cell of that order
+ *     that is still listed. This is exact even when several cells started waiting at the same moment.
+ *   - else `currentSince`: the first entry that waited less long (going back: the last that waited longer).
+ * Without a place, the oldest entry (going back: the newest).
  */
 export function stepWaiting(
-  entries: ReadonlyArray<Pick<WaitingEntry, 'cellId' | 'since'>>, current: string | null | undefined, dir: 1 | -1, currentSince?: number,
+  entries: ReadonlyArray<Pick<WaitingEntry, 'cellId' | 'since'>>, current: string | null | undefined, dir: 1 | -1,
+  currentSince?: number, order?: readonly string[],
 ): string | null {
   const n = entries.length;
   if (!n) return null;
   const i = current ? entries.findIndex((e) => e.cellId === current) : -1;
   if (i >= 0) return entries[(i + dir + n) % n].cellId;
+  const k = current && order ? order.indexOf(current) : -1;
+  if (k >= 0) {
+    const listed = new Set(entries.map((e) => e.cellId));
+    for (let j = k + dir; j >= 0 && j < order!.length; j += dir) if (listed.has(order![j])) return order![j];
+    // Nothing of the old order left on that side: wrap around.
+    return entries[dir > 0 ? 0 : n - 1].cellId;
+  }
   if (currentSince !== undefined) {
-    if (dir > 0) return (entries.find((e) => e.since >= currentSince) ?? entries[0]).cellId;
+    if (dir > 0) return (entries.find((e) => e.since > currentSince) ?? entries[0]).cellId;
     return ([...entries].reverse().find((e) => e.since < currentSince) ?? entries[n - 1]).cellId;
   }
   return entries[dir > 0 ? 0 : n - 1].cellId;

@@ -158,55 +158,63 @@ try {
   await main.shot('01-waiting-panel');
 
   // A click on the finished turn shows the cell and reads it: it leaves the list.
-  const doneSince = await main.evaluate(`${store}.ui.waits['${ids.done}'].since`);
+  const cells = async (app = main) => (await app.evaluate(rows)).map((r) => r.cell);
+  /** What "next" / "previous" from `from` must reach: the following (preceding) cell of `order` that is listed in `now`. */
+  const neighbour = (order, now, from, dir) => {
+    const k = order.indexOf(from);
+    for (let j = k + dir; j >= 0 && j < order.length; j += dir) if (now.includes(order[j])) return order[j];
+    return dir > 0 ? now[0] : now[now.length - 1];
+  };
+  const beforeClick = await cells();
   await main.evaluate(`document.querySelector('.waiting-row[data-cell="${ids.done}"]').click()`);
   await main.until(`${store}.ui.focusedCellId === '${ids.done}' && !document.querySelector('.waiting-row[data-cell="${ids.done}"]')`, 'the read turn leaves the list');
   check(await main.evaluate(`!!document.querySelector('.cell[data-cell-id="${ids.done}"].wait-flash')`), 'the card flashes');
   await main.shot('02-after-click');
 
   // Next / previous from the keyboard: the read cell left the list but keeps its place, so "next" goes on from there.
-  const left = await main.evaluate(`[...document.querySelectorAll('.waiting-row')].map((r) => ({ cell: r.dataset.cell, since: ${store}.ui.waits[r.dataset.cell].since }))`);
-  const firstIdx = Math.max(0, left.findIndex((e) => e.since >= doneSince));
-  const mainCell = (i) => left[(i + left.length) % left.length].cell;
-  // The steps below stay among the main window's cells (perm, ask); the detached ones come later.
-  const at = left.map((e) => e.cell);
+  const first = neighbour(beforeClick, await cells(), ids.done, 1);
   await pressStep(main, 1);
-  const first = mainCell(firstIdx);
   await main.until(`${store}.ui.focusedCellId === '${first}'`, `next goes on from the read cell's place (${first})`, 5000) && check(true, 'next waiting cell (Ctrl+Alt+PageDown) goes on from the place of the read cell');
-  // Back to the oldest and on from there.
-  await main.evaluate(`window.__mc.actions.focusCell('${at[0]}')`);
+  // From a question (it never leaves the list by being seen) to the following cell and back.
+  await main.evaluate(`window.__mc.actions.focusCell('${ids.perm}')`);
+  await main.until(`${store}.ui.focusedCellId === '${ids.perm}'`, 'focus on the permission cell', 3000);
+  const fromPerm = await cells();
+  const second = neighbour(fromPerm, fromPerm, ids.perm, 1);
   await pressStep(main, 1);
-  await main.until(`${store}.ui.focusedCellId === '${at[1]}'`, `next goes on (${at[1]})`, 5000) && check(true, 'next goes from the focused cell to the following one');
+  await main.until(`${store}.ui.focusedCellId === '${second}'`, `next goes on (${second})`, 5000) && check(true, 'next goes from the focused cell to the following one');
+  // The cell just reached may have been read (an error, a finished turn) and left the list: "previous" still goes back.
   await pressStep(main, -1);
-  await main.until(`${store}.ui.focusedCellId === '${at[0]}'`, 'previous goes back', 5000) && check(true, 'previous waiting cell goes back');
+  await main.until(`${store}.ui.focusedCellId === '${ids.perm}'`, 'previous goes back', 5000) && check(true, 'previous waiting cell goes back');
 
   // "Recenzja" moves to its own window: its rows stay and say so.
   await main.evaluate(`window.__mc.detach.detachKey('grid:${tabB}', 'menu')`);
   side = await connect((url) => url.includes('detached='));
   await side.cdp('Emulation.setDeviceMetricsOverride', { width: 1000, height: 600, deviceScaleFactor: 1, mobile: false });
   await side.until(`document.querySelectorAll('.cell').length === 2`, 'the detached grid');
-  // The steps above may have read the failed turn already (it then left the list); the permission-free muted cell is still there.
-  await main.until(`(() => { const r = ${rows}.filter((x) => x.place?.startsWith('Recenzja')); return r.length > 0 && r.every((x) => x.place.includes('w osobnym oknie')); })()`, 'detached rows marked "w osobnym oknie"')
-    && check(true, 'rows of the detached grid are kept and marked "w osobnym oknie"');
   // A new permission in the detached window reaches the main window's list.
   await side.until(`!!window.__mc.terminals.has('${ids.quiet}')`, 'detached terminal');
   await side.evaluate(`window.__mc.terminals.paste('${ids.quiet}', 'again', true)`);
   await main.until(`(() => { const r = ${rows}.find((x) => x.cell === '${ids.quiet}'); return r?.what === 'czeka na zgodę: Edit'; })()`, 'the detached permission reaches the main list', 20000)
     && check(true, 'a permission asked in the detached window shows in the main list');
+  // The keyboard steps above may have read both cells of this grid (a failed turn and a finished one leave the list once seen);
+  // the permission just asked keeps one listed for sure.
+  const marked = await main.until(`(() => { const r = ${rows}.filter((x) => x.place?.startsWith('Recenzja')); return r.length > 0 && r.every((x) => x.place.includes('w osobnym oknie')); })()`, 'detached rows marked "w osobnym oknie"');
+  if (marked) check(true, 'rows of the detached grid are kept and marked "w osobnym oknie"');
+  else console.log(await main.evaluate(rows));
   await main.shot('03-detached-rows');
   await side.shot('04-detached-window');
 
   // The step goes into the detached window: it focuses the cell there.
-  const all = (await main.evaluate(rows)).map((r) => r.cell);
+  const all = await cells();
   const detachedCells = new Set([ids.fail, ids.quiet]);
   const target = all.find((id) => detachedCells.has(id) && !detachedCells.has(all[(all.indexOf(id) - 1 + all.length) % all.length]));
-  await main.evaluate(`window.__mc.actions.focusCell('${all[(all.indexOf(target) - 1 + all.length) % all.length]}')`);
-  await sleep(300);
+  const before = all[(all.indexOf(target) - 1 + all.length) % all.length];
+  await main.evaluate(`window.__mc.actions.focusCell('${before}')`);
+  await main.until(`${store}.ui.focusedCellId === '${before}'`, 'focus before the detached cell', 3000);
   await pressStep(main, 1);
   await side.until(`${store}.ui.focusedCellId === '${target}'`, `next goes into the detached window (${target})`, 8000) && check(true, 'next waiting cell focuses a cell of the detached window');
-  // From the detached window the shortcut asks the main window, which picks the next one.
-  const now = (await main.evaluate(rows)).map((r) => r.cell);
-  const expected = now.includes(target) ? now[(now.indexOf(target) + 1) % now.length] : now[0];
+  // From the detached window the shortcut asks the main window, which goes on from the cell it showed last.
+  const expected = neighbour(all, all.filter((id) => id !== target), target, 1);
   await pressStep(side, 1);
   const where = detachedCells.has(expected) ? side : main;
   await where.until(`${store}.ui.focusedCellId === '${expected}'`, `next from the detached window goes to ${expected}`, 8000)
