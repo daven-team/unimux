@@ -171,6 +171,7 @@ export const SHORTCUTS = [
   { id: 'terminal.new', label: 'Nowa zakładka z jednym terminalem', group: 'grid', scope: 'global', default: 'Mod+Shift+T', rebindable: true },
   { id: 'agent.add', label: 'Dodaj agenta do siatki', group: 'grid', scope: 'global', default: 'Mod+Shift+N', rebindable: true },
   { id: 'grid.new', label: 'Nowy grid lub preset', group: 'grid', scope: 'global', default: 'Mod+Shift+G', rebindable: true, requiresProject: true },
+  { id: 'conversations.search', label: 'Szukaj we wszystkich rozmowach Claude i Codex', group: 'general', scope: 'global', default: 'Mod+Shift+D', rebindable: true },
   { id: 'history.open', label: 'Historia czatów i gridów', group: 'grid', scope: 'global', default: 'Mod+Shift+H', rebindable: true, requiresProject: true },
   { id: 'tab.close', label: 'Zamknij kartę na wierzchu (grid, plik, SSH, ustawienia)', group: 'grid', scope: 'global', default: 'Mod+Shift+W', rebindable: true },
   { id: 'tab.next', label: 'Następna karta', group: 'grid', scope: 'global', default: 'Mod+Tab', rebindable: true },

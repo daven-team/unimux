@@ -72,6 +72,7 @@ function run(id: string): void {
     case 'terminal.new': quickTab(); break;
     case 'agent.add': void addAgent(getS().settings.lastProfileId); break;
     case 'grid.new': if (project) setUi({ modal: { kind: 'grid', projectId: project.id } }); break;
+    case 'conversations.search': setUi((ui) => ({ modal: ui.modal?.kind === 'conversations' ? null : { kind: 'conversations' } })); break;
     case 'history.open': if (project) setUi({ modal: { kind: 'history', projectId: project.id } }); break;
     // The tab in front, whatever its kind: with a file or the SSH view in front this never closes the grid behind it.
     case 'tab.close': closeFrontTab(); break;

@@ -10,6 +10,7 @@ import type { ChangelogResult } from '../shared/changelog';
 import type { AlertEventId } from '../shared/alerts';
 import type { UsageState } from '../shared/usage';
 import type { MonitorSample } from '../shared/monitor';
+import type { ConvQuery, ConvSearchResult, ConvTranscript } from '../shared/convSearch';
 import type { ContextUsage } from '../shared/contextUsage';
 import type { AdoptCopyResult, LoginRequest, LoginState, SwapResult } from '../shared/accounts';
 import type { ReplaceRequest, ReplaceResult, SearchOptions, SearchResult } from '../shared/search';
@@ -114,6 +115,11 @@ export interface McApi {
   /** code 'conflict': the file on disk is not `expectedText` any more (nothing written). */
   writeProjectFile(projectId: string, relativePath: string, text: string, expectedText: string): Promise<{ ok: true } | { ok: false; error: string; code?: 'conflict' }>;
   listSessions(projectPath: string): Promise<SessionInfo[]>;
+  /** Search across every Claude Code and Codex conversation (1.0.9) and the read-only transcript of a result. */
+  conversations: {
+    search(query: ConvQuery): Promise<ConvSearchResult>;
+    transcript(file: string): Promise<ConvTranscript>;
+  };
   isGitRepo(path: string): Promise<boolean>;
   createWorktree(projectPath: string, name: string): Promise<Worktree>;
   /** What removing the worktree would lose (uncommitted files, commits the project's HEAD cannot reach). */

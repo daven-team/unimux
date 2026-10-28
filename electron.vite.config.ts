@@ -17,6 +17,8 @@ export default defineConfig({
           // The SQLite engine thread of the DB Host (built-in modules only: it is run as an eval'd worker).
           sqliteworker: resolve(__dirname, 'src/dbhost/sqliteWorker.ts'),
           updatesplash: resolve(__dirname, 'src/updatesplash/index.ts'),
+          // The conversation search thread (1.0.9): run as an eval'd worker as well, so main imports only its types.
+          convsearch: resolve(__dirname, 'src/convsearch/worker.ts'),
         },
         // Lazy dependencies (MCP SDK, electron-updater) stay `require` behind a promise: the CommonJS builds they ship are loaded,
         // never a second ESM copy through import().
