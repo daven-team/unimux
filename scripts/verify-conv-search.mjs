@@ -98,7 +98,7 @@ const shot = async (name) => {
   writeFileSync(join(shots, name), Buffer.from(data, 'base64'));
 };
 const key = async (code, k, modifiers) => {
-  for (const type of ['keyDown', 'keyUp']) await app.cdp('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: { KeyD: 68, Enter: 13, ArrowDown: 40 }[code] ?? 0, modifiers });
+  for (const type of ['keyDown', 'keyUp']) await app.cdp('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: { KeyD: 68, KeyF: 70, Enter: 13, ArrowDown: 40 }[code] ?? 0, modifiers });
 };
 /** The option of the open list box whose whole text is `text`. */
 const pick = (text) => app.evaluate(`(() => { const o = [...document.querySelectorAll('[role=option]')].find((e) => e.textContent.trim() === ${JSON.stringify(text)}); if (!o) throw new Error('option ' + ${JSON.stringify(text)}); o.click(); return true; })()`);
@@ -106,8 +106,8 @@ const snapshot = () => app.evaluate(`window.mc.loadSnapshot().then((s) => s.stat
 const hitTitles = () => app.evaluate(`[...document.querySelectorAll('.conv-hit .conv-title')].map((e) => e.textContent)`);
 const openSearch = async () => {
   await app.evaluate(`document.activeElement?.blur?.(), true`);
-  await key('KeyD', 'D', 2 | 8);
-  await app.until(`!!document.querySelector('.modal.conv-search')`, 'search opened by Ctrl+Shift+D');
+  await key('KeyF', 'f', 1 | 2);
+  await app.until(`!!document.querySelector('.modal.conv-search')`, 'search opened by Ctrl+Alt+F');
 };
 const query = async (text) => {
   await app.setValue('.conv-search .conv-query', text);
