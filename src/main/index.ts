@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { execFile, spawn } from 'child_process';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, powerMonitor, safeStorage, shell, type OpenDialogOptions } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, safeStorage, shell, type NativeImage, type OpenDialogOptions, type WebContents } from 'electron';
 import { createQuitConfirm, isQuitAnswer, sessionEndingNow } from './quitConfirm';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { homedir, hostname } from 'os';
@@ -115,7 +115,11 @@ import { followedSession, shouldUpdateCellSession } from '../shared/sessionTrack
 import type { CodexNotice } from '../shared/codexHooks';
 import { isSoundFile, SOUND_EXTENSIONS } from '../shared/sound';
 import { loadEventSound } from './alertSound';
-import { notificationOptions } from './notifyOptions';
+import { notificationActions, notificationOptions } from './notifyOptions';
+import { createTaskbar } from './taskbar';
+import { isCellStatus, isStatusReason } from '../shared/taskbarState';
+import { badgePngs } from './badgeImage';
+import { isPermissionAnswer, isPermissionToken } from '../shared/permissionAction';
 import { migrateDataDir } from './dataDirMigration';
 import { updateWindowAlive } from './updateRuntime';
 import { atomicWriteFileSync } from './atomicWrite';
@@ -506,6 +510,30 @@ const cellPids = new Map<string, number>();
 const claimedCodex = new Set<string>();
 /** Live notifications - Windows drops click handlers of garbage-collected ones. */
 const notifications = new Set<Notification>();
+/**
+ * 1.0.9: the taskbar button (Windows overlay with the number of agents waiting for you, progress while any works) and the
+ * Dock badge (macOS); the statuses come from every window (cell:runtime), see taskbar.ts.
+ */
+const taskbar = createTaskbar<NativeImage>({
+  platform: process.platform,
+  *cells() {
+    for (const p of state.projects) for (const t of p.tabs) for (const c of t.cells) yield { id: c.id, muted: c.muted, agent: getProfile(state, c.profileId).cli !== 'shell' };
+  },
+  alive: () => alive,
+  settings: () => state.settings.alerts,
+  setOverlay: (image, description) => { withLiveWindow(win, (w) => { try { w.setOverlayIcon(image, description); } catch { /* no taskbar button */ } }); },
+  setProgress: (mode) => { withLiveWindow(win, (w) => { try { w.setProgressBar(mode === 'indeterminate' ? 2 : -1, mode === 'indeterminate' ? { mode: 'indeterminate' } : undefined); } catch { /* no taskbar button */ } }); },
+  setDockBadge: (text) => { try { app.dock?.setBadge(text); } catch { /* no Dock */ } },
+  image: (label) => {
+    const image = nativeImage.createEmpty();
+    for (const { scaleFactor, size, png } of badgePngs(label)) image.addRepresentation({ scaleFactor, width: size, height: size, buffer: png });
+    return image;
+  },
+  describe: (count) => (count > 9 ? tr('Ponad 9 agentów czeka na Ciebie') : tr('Agenci czekający na Ciebie: {count}', { count })),
+  setTimer: (fn, ms) => setTimeout(fn, ms),
+  clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+});
+app.on('will-quit', () => taskbar.dispose());
 /** Only sessions explicitly chosen by the user authorize native message delivery. */
 const verifiedCodex = new Map<string, string>();
 let mcpError: string | undefined;
@@ -610,6 +638,7 @@ function forgetCell(id: string): void {
   if (alive.has(id)) return;
   hooks.forget(id);
   contextTracker.forget(id);
+  taskbar.forget(id);
   void removeCellFiles(cellFileDirs, id);
   automation.forgetCell(id);
 }
@@ -626,6 +655,7 @@ const controller = new StateController(state, (snapshot) => {
   ssh?.stateChanged(state);
   db?.stateChanged();
   detachedStateChanged(state);
+  if (snapshot.state.projects !== previous.projects || snapshot.state.settings.alerts !== previous.settings.alerts || snapshot.state.profiles !== previous.profiles) taskbar.invalidate();
   const key = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}`;
   if (key !== usageKey) { usageKey = key; usage.reschedule(); }
   saver.save(state);
@@ -746,11 +776,11 @@ function createWindow(): void {
   win.on('minimize', () => { usage.setActive(false); sendShown(); });
   win.on('hide', () => { usage.setActive(false); sendShown(); });
   win.on('restore', () => { usage.setActive(true); sendShown(); });
-  win.on('show', () => { usage.setActive(true); sendShown(); });
-  win.on('focus', () => cliDetector.invalidateRegistry());
+  win.on('show', () => { usage.setActive(true); sendShown(); taskbar.reapply(); });
+  win.on('focus', () => { cliDetector.invalidateRegistry(); created.flashFrame(false); });
   if (!app.isPackaged) win.webContents.on('console-message', (e) => e.level !== 'debug' && console.log('[renderer]', e.level, e.message));
   // The install window lives in the renderer: a reload or crash must not leave an invisible install running.
-  win.webContents.on('did-start-loading', () => { install.dispose(); quitConfirm.rendererGone(); sftp?.rendererGone(); db?.rendererGone(); localFiles.rendererGone(); });
+  win.webContents.on('did-start-loading', () => { taskbar.forgetWindow('main'); install.dispose(); quitConfirm.rendererGone(); sftp?.rendererGone(); db?.rendererGone(); localFiles.rendererGone(); });
   // The close button (or Alt+F4, or the last window on macOS) while agents work: the renderer asks first.
   win.on('close', (e) => { if (quitConfirm.hold()) e.preventDefault(); });
   win.webContents.on('render-process-gone', (_e, details) => {
@@ -797,7 +827,7 @@ initDetachedWindows({
   pty: ptyHost,
   ports: [dbHost, sftpHost],
   routeDbSessions: (sessions, window) => dbHost.route(sessions, window),
-  rendererGone: (window) => { sftp?.rendererGone(window); db?.rendererGone(window); },
+  rendererGone: (window) => { sftp?.rendererGone(window); db?.rendererGone(window); taskbar.forgetWindow(window); },
   isAlive: (cellId) => alive.has(cellId),
   quitting: () => quitting,
   offscreen: !!devEnv('MC_OFFSCREEN'),
@@ -1316,6 +1346,7 @@ guardedOn('install:cancel', (_e, id?: unknown) => { installHandlers.cancel(id); 
 ipcMain.handle('install:current', () => installHandlers.current());
 guardedOn('cell:runtime', (_e, cellId: string, status: string, reason?: string, hooked?: boolean) => {
   relayCellStatus(_e, cellId, status);
+  if (typeof cellId === 'string' && isCellStatus(status)) taskbar.status(cellId, { status, reason: isStatusReason(reason) ? reason : undefined }, senderWindow(_e));
   const found = findCell(state, cellId);
   if (!found || !alive.has(cellId)) return;
   hookWatch.status(cellId, status, hooked === true);
@@ -1426,10 +1457,22 @@ guardedHandle('git:createWorktree', (_e, p: string, name: string) => createWorkt
 guardedHandle('git:inspectWorktree', (_e, p: string, wt: Worktree): Promise<WorktreeInspectResult> => inspectWorktree(p, wt).then((inspection) => ({ ok: true as const, inspection }), (error: Error) => ({ ok: false as const, error: error.message })), () => ({ ok: false, error: 'Refused.' }));
 guardedHandle('git:removeWorktree', (_e, p: string, wt: Worktree, del: boolean, confirmed?: WorktreeInspection) => removeWorktree(p, wt, del, confirmed ?? undefined), () => Promise.reject(new Error('Refused.')));
 
-guardedOn('notify', (_e, n: { title: string; body: string; cellId: string }) => {
+/** Shows the main window and the cell (a notification click, "Pokaż", or an answer that came too late). */
+function showCell(cellId: string | undefined): void {
+  withLiveWindow(win, (w) => {
+    if (w.isMinimized()) w.restore();
+    w.show();
+    w.focus();
+  });
+  if (cellId) send('focus-cell', cellId);
+}
+guardedOn('notify', (_e, n: { title: string; body: string; cellId: string; actions?: unknown; token?: unknown }) => {
   if (!n || typeof n !== 'object' || typeof n.title !== 'string' || typeof n.body !== 'string' || (n.cellId !== undefined && typeof n.cellId !== 'string')) return;
   if (!Notification.isSupported()) return;
-  const notification = new Notification(notificationOptions(n));
+  // 1.0.9: Zezwól / Odrzuć / Pokaż (or only Pokaż) for one cell's permission request; see shared/permissionAction.
+  const kind = n.cellId && state.settings.alerts.notificationActions ? (n.actions === 'answer' && isPermissionToken(n.token) ? 'answer' : n.actions === 'show' ? 'show' : null) : null;
+  const buttons = kind ? notificationActions(kind, process.platform, tr) : [];
+  const notification = new Notification({ ...notificationOptions(n), ...(buttons.length ? { actions: buttons.map((b) => ({ type: 'button' as const, text: b.text })) } : {}) });
   notifications.add(notification);
   // Toasts parked in the Action Center never close by themselves: only the newest ones keep their click handler.
   trimNotifications(notifications);
@@ -1438,14 +1481,27 @@ guardedOn('notify', (_e, n: { title: string; body: string; cellId: string }) => 
   notification.on('failed', forget);
   notification.on('click', () => {
     forget();
-    withLiveWindow(win, (w) => {
-      if (w.isMinimized()) w.restore();
-      w.show();
-      w.focus();
-    });
-    if (n.cellId) send('focus-cell', n.cellId);
+    showCell(n.cellId);
+  });
+  notification.on('action', (details, legacyIndex) => {
+    forget();
+    const index = typeof details?.actionIndex === 'number' ? details.actionIndex : legacyIndex;
+    const answer = buttons[index]?.answer;
+    // The window that holds the cell's terminal checks that the dialog is still the same before it types anything.
+    if (isPermissionAnswer(answer) && n.cellId && isPermissionToken(n.token)) send('notify:answer', n.cellId, n.token, answer);
+    else showCell(n.cellId);
   });
   notification.show();
+});
+guardedOn('notify:show', (_e, cellId: unknown) => { if (typeof cellId === 'string' && findCell(state, cellId)) showCell(cellId); });
+/** An agent needs the user (the alert rules allowed it): the sender's window flashes its taskbar button / bounces the Dock icon. */
+guardedOn('attention:flash', (e) => {
+  if (!state.settings.alerts.flashWindow) return;
+  const w = BrowserWindow.fromWebContents(e.sender as WebContents);
+  if (!w || !isLive(w) || w.isFocused() || devEnv('MC_OFFSCREEN')) return;
+  w.flashFrame(true);
+  // Windows keeps flashing until the window comes to the front; stop it explicitly then (macOS bounces once by itself).
+  w.once('focus', () => { if (isLive(w)) w.flashFrame(false); });
 });
 /** Errors of the renderer (error boundaries, window.onerror, unhandled rejections) for crash.log; packaged builds keep no console. */
 const allowRendererReport = createReportLimiter();

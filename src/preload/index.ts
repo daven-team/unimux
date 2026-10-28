@@ -228,6 +228,8 @@ const api: McApi = {
     status: () => ipcRenderer.invoke('ssh:history:status'),
   },
   notify: (n) => ipcRenderer.send('notify', n),
+  showCell: (cellId) => ipcRenderer.send('notify:show', cellId),
+  flashAttention: () => ipcRenderer.send('attention:flash'),
   openExternal: (url) => ipcRenderer.send('shell:openExternal', url),
   openPath: (path) => ipcRenderer.send('shell:openPath', path),
   revealPath: (path) => ipcRenderer.send('shell:revealPath', path),
