@@ -33,7 +33,16 @@ export interface ManagedAccount extends AccountIdentity {
    * once the live login proves to be this record's own or the record is signed in again.
    */
   heldTokens?: string;
+  /**
+   * Set while the record is the live login because the app itself made it main (1.0.9): when that swap started (`at`),
+   * the SHA-256 (hex, never the token) of the refresh token it swapped in (`from`) and whether the copy was the app's own
+   * family before (`own`). When the app switches it out again these prove whether cswap may hold the tokens it leaves with
+   * (see `keptOwnFamily`), so an adopted copy is not offered for renewal again after every switch. Dropped once it leaves.
+   */
+  appSwap?: AppSwap;
 }
+
+export interface AppSwap { at: number; from?: string; own?: true }
 
 /** The identity last seen in the live Claude Code login and the record it belongs to. */
 export interface LiveIdentity extends AccountIdentity { recordId?: string }

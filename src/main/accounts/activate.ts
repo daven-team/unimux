@@ -5,8 +5,8 @@
 // swap recoverable; the 0.9.0 exchange in swap.ts only remains for its version-1 journals.
 import { join } from 'path';
 import {
-  compareIdentity, custodyOf, identityFields, identityFromOauthAccount, isAccountId,
-  type AccountIdentity, type ManagedAccount, type SwapError, type SwapRecovery, type SwapResult,
+  compareIdentity, custodyOf, familyOf, identityFields, identityFromOauthAccount, isAccountId,
+  type AccountIdentity, type AppSwap, type ManagedAccount, type TokenFamily, type SwapError, type SwapRecovery, type SwapResult,
 } from '../../shared/accounts';
 import { LockTimeout, withClaudeLocks, type LockDeps } from './claudeLocks';
 import type { CswapRoster } from './cswap';
@@ -33,6 +33,11 @@ export interface ActivateDeps {
   delay(ms: number): Promise<void>;
   /** cswap's roster (R7); `{ present: false }` without cswap. */
   cswap(): Promise<CswapRoster>;
+  /**
+   * Whether cswap may have saved this account's tokens at `since` or later (`cswapWroteSince`). Absent: always yes, so a
+   * copy the app switches out stays the live family (never renewed while cswap lists it).
+   */
+  cswapWroteSince?(identity: AccountIdentity, roster: CswapRoster, since: number): Promise<boolean>;
   fs?: SwapFs;
   locks?: LockDeps;
 }
@@ -226,24 +231,50 @@ async function exchange(deps: ActivateDeps, fs: SwapFs, paths: Paths, roster: Cs
     await removeBackups(deps, fs);
     throw error instanceof Fail ? error : new Fail('write');
   }
-  finishRoles(store, outgoingId, target.id, identityFromOauthAccount(targetAccount));
+  // Still under the locks, after the last write: whatever cswap saved up to now is seen by the check.
+  const outgoingFamily = !keepOutgoing && existing && await keptOwnFamily(deps, roster, store.get(existing.id), liveOauth?.refreshToken) ? 'own' : 'live';
+  const targetSwap: AppSwap = {
+    at: journal.startedAt,
+    ...(typeof targetOauth.refreshToken === 'string' ? { from: heldTokenHash(targetOauth.refreshToken) } : {}),
+    ...(familyOf(target) === 'own' ? { own: true as const } : {}),
+  };
+  finishRoles(store, outgoingId, target.id, identityFromOauthAccount(targetAccount), { outgoingFamily, targetSwap });
   try { await removeBackups(deps, fs); } catch { /* removed at the next start */ }
   return { ok: true, ...(str(targetAccount.emailAddress) ? { email: str(targetAccount.emailAddress) } : {}) };
 }
 
 /**
- * The roles follow the files: the outgoing record now holds the only copy of its login (the live family), the target is
- * live. Its family becomes `live` too: Claude Code renews it from now on and cswap may back it up, so once it leaves the
- * live login again it is never renewed by the app while cswap lists it. The live login is exactly its saved copy now, so
- * a hold on its tokens (`heldTokens`) is over.
+ * The roles follow the files: the outgoing record now holds the only copy of its login, the target is live. The target's
+ * family becomes `live`: Claude Code renews it from now on and cswap may back it up. The outgoing copy is the live family
+ * too (never renewed by the app while cswap lists it), unless `keptOwnFamily` proved that cswap cannot hold it: then it
+ * is the app's own again and the limits panel does not offer "renew in unimux" after every switch (1.0.9). The target
+ * notes how the app made it main (`appSwap`) for that proof; the outgoing one's note is over. The live login is exactly
+ * the target's saved copy now, so a hold on its tokens (`heldTokens`) is over.
  */
-function finishRoles(store: AccountsStore, outgoingId: string, targetId: string, identity: AccountIdentity): void {
+function finishRoles(store: AccountsStore, outgoingId: string, targetId: string, identity: AccountIdentity, roles: { outgoingFamily: TokenFamily; targetSwap: AppSwap }): void {
   store.setCustody(outgoingId, 'app');
-  store.setFamily(outgoingId, 'live');
+  store.setFamily(outgoingId, roles.outgoingFamily);
+  store.setAppSwap(outgoingId, undefined);
   store.setCustody(targetId, 'live');
   store.setFamily(targetId, 'live');
+  store.setAppSwap(targetId, roles.targetSwap);
   store.setHeldTokens(targetId, undefined);
   store.setLive({ ...identityFields(identity), recordId: targetId });
+}
+
+/**
+ * The record the app switches out may be renewed by the app from now on (family `own`) only when cswap provably holds none
+ * of the tokens it leaves with: the app itself made it main (`appSwap`), cswap wrote no copy of that account since, and
+ * either it was the app's own family before (an adopted copy or an app login, which cswap never had) or Claude Code has
+ * renewed it since (the refresh token differs from the one swapped in: new tokens, minted after the swap, that only cswap
+ * writing a copy could have reached). Anything unknown keeps it the live family.
+ */
+export async function keptOwnFamily(deps: Pick<ActivateDeps, 'cswapWroteSince'>, roster: CswapRoster, record: ManagedAccount | undefined, refreshToken: unknown): Promise<boolean> {
+  const swap = record?.appSwap;
+  if (!record || !swap || custodyOf(record) !== 'live' || record.heldTokens || !deps.cswapWroteSince) return false;
+  const rotated = !!swap.from && typeof refreshToken === 'string' && !!refreshToken && heldTokenHash(refreshToken) !== swap.from;
+  if (!swap.own && !rotated) return false;
+  try { return !(await deps.cswapWroteSince(record, roster, swap.at)); } catch { return false; }
 }
 
 /**
@@ -436,8 +467,11 @@ async function recoverV2(deps: ActivateDeps, fs: SwapFs, info: Rec): Promise<Swa
     const target = store.get(targetId);
     const liveJson = paths ? await readSnap(fs, paths.claudeJson) : null;
     const liveId = identityFromOauthAccount(liveJson?.data.oauthAccount);
-    if (target && custodyOf(target) !== 'quarantined' && compareIdentity(liveId, target) === 'same') finishRoles(store, outgoingId, targetId, liveId);
-    else if (store.get(outgoingId)) store.setFamily(outgoingId, 'live');
+    if (target && custodyOf(target) !== 'quarantined' && compareIdentity(liveId, target) === 'same') {
+      // Nothing proves here what cswap may hold of the outgoing login: it stays the live family.
+      const at = typeof info.startedAt === 'number' && Number.isFinite(info.startedAt) ? info.startedAt : deps.now();
+      finishRoles(store, outgoingId, targetId, liveId, { outgoingFamily: 'live', targetSwap: { at, ...(familyOf(target) === 'own' ? { own: true as const } : {}) } });
+    } else if (store.get(outgoingId)) { store.setFamily(outgoingId, 'live'); store.setAppSwap(outgoingId, undefined); }
     await removeBackups(deps, fs);
     return 'none';
   }
