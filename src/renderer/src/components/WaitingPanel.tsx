@@ -80,7 +80,7 @@ export function WaitingPanel() {
   };
 
   return (
-    <div className="waiting">
+    <div className="waiting-panel">
       {anyMuted && (
         <label className="waiting-filter" title={tr('Komórki z wyciszonymi alertami nie są liczone w plakietce.')}>
           <input type="checkbox" checked={hideMuted} onChange={(e) => setHideMuted(e.target.checked)} />

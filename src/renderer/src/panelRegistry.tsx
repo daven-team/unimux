@@ -9,7 +9,7 @@
 //   unavailableReason optional: the tile is shown but disabled, with this reason as its tooltip
 import type { ComponentType, ReactNode } from 'react';
 import type { MessageKey } from '../../shared/i18n';
-import { gitPanelReason, type PanelContext, type PanelDef } from '../../shared/sidebarPanels';
+import { gitPanelReason, optionalPanelOn, type PanelContext, type PanelDef } from '../../shared/sidebarPanels';
 import { FilesPanel } from './components/FilesPanel';
 import { TDatabase, TFiles, TGit, TMonitor, TProjects, TTerminal, TWaiting } from './components/icons';
 import { WaitingBadge, WaitingPanel } from './components/WaitingPanel';
@@ -52,7 +52,8 @@ export const SIDEBAR_PANELS: readonly SidebarPanel[] = [
   { id: 'db', label: 'Bazy danych', icon: TDatabase, component: DbPanelLazy },
   { id: 'terminal', label: 'SSH', icon: TTerminal, opensView: true, onActivate: () => openSshView() },
   // What loads the computer: samples only while it is open (1.0.6).
-  { id: 'monitor', label: 'Monitor', icon: TMonitor, component: MonitorPanelLazy },
+  { id: 'monitor', label: 'Monitor', icon: TMonitor, component: MonitorPanelLazy, available: optionalPanelOn('monitor') },
+  // Monitor and "Czeka na Ciebie" are off by default (1.0.9): Settings > Ogólne switches them on.
   // 1.0.9: every cell that needs you (a question, a permission, an error, a turn you have not seen), across grids and windows.
-  { id: 'waiting', label: 'Czeka na Ciebie', icon: TWaiting, component: WaitingPanel, badge: WaitingBadge },
+  { id: 'waiting', label: 'Czeka na Ciebie', icon: TWaiting, component: WaitingPanel, badge: WaitingBadge, available: optionalPanelOn('waiting') },
 ];

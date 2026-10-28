@@ -1,5 +1,5 @@
 /* "Czeka na Ciebie" (WaitingPanel.tsx): one row per cell that needs you, longest waiting first. */
-.waiting { flex: 1; min-height: 0; display: flex; flex-direction: column; font-size: 12px; }
+.waiting-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; font-size: 12px; }
 .waiting-filter { flex: none; display: flex; align-items: center; gap: 6px; padding: 0 14px 8px; color: var(--text-2); cursor: pointer; user-select: none; }
 .waiting-filter input { margin: 0; }
 .waiting-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 10px; display: flex; flex-direction: column; gap: 4px; }

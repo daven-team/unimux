@@ -5,7 +5,28 @@ import type { MessageKey } from './i18n';
 import type { AppPlatform } from './platform';
 
 /** `git`: what a probe of the active project found (null: not known yet, which never blocks the tile). */
-export interface PanelContext { hasProject: boolean; platform: AppPlatform; git?: GitProbe | null }
+export interface PanelContext {
+  hasProject: boolean;
+  platform: AppPlatform;
+  git?: GitProbe | null;
+  /** 1.0.9: the optional panels the user switched on in the settings (`settings.sidePanels`); absent = off. */
+  optional?: Partial<Record<OptionalPanel, boolean>>;
+}
+
+/** 1.0.9: panels the rail shows only when switched on in the settings (off by default). */
+export const OPTIONAL_PANELS = ['monitor', 'waiting'] as const;
+export type OptionalPanel = typeof OPTIONAL_PANELS[number];
+
+/** `available` of an optional panel: shown only when its switch is on. */
+export const optionalPanelOn = (id: OptionalPanel) => (ctx: PanelContext): boolean => ctx.optional?.[id] === true;
+
+/** Keeps only `true` switches of known optional panels (a stored value from any version). */
+export function normalizeSidePanels(value: unknown): Partial<Record<OptionalPanel, boolean>> | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const out: Partial<Record<OptionalPanel, boolean>> = {};
+  for (const id of OPTIONAL_PANELS) if ((value as Record<string, unknown>)[id] === true) out[id] = true;
+  return Object.keys(out).length ? out : undefined;
+}
 
 /** What the rail needs to know about a panel. */
 export interface PanelDef {

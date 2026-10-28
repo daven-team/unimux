@@ -73,7 +73,7 @@ writeFileSync(join(data, 'state.json'), JSON.stringify({
     { id: tabB, name: 'Recenzja', layout: { cols: 2, rows: 1, areas: [area(0, 0), area(1, 0)] },
       cells: [claudeCell('fail', 'Recenzent'), claudeCell('quiet', 'Dokumentacja', { muted: true })] },
   ] }],
-  settings: { language: 'pl', shell: process.platform === 'win32' ? 'cmd' : 'bash', backgroundLoad: 'all', lastProfileId: 'claude', alerts: { enabled: false } },
+  settings: { language: 'pl', shell: process.platform === 'win32' ? 'cmd' : 'bash', backgroundLoad: 'all', lastProfileId: 'claude', alerts: { enabled: false }, sidePanels: { waiting: true } },
 }));
 
 const env = { ...process.env, MC_DATA_DIR: data, MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port), USERPROFILE: home, HOME: home, APPDATA: join(home, 'AppData', 'Roaming'), LOCALAPPDATA: join(home, 'AppData', 'Local') };

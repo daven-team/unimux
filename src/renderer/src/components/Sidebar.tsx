@@ -30,7 +30,8 @@ export function Sidebar({ resize }: { resize: PanelResizeProps }) {
   useGitProbeSync(projectId, projectPath);
   const git = useGitProbe(projectId);
   const rail = useRef<HTMLDivElement>(null);
-  const ctx = { hasProject, platform: window.mc.platform, git };
+  const optional = useStore((st) => st.s.settings.sidePanels);
+  const ctx = { hasProject, platform: window.mc.platform, git, optional };
   const panels = visiblePanels(SIDEBAR_PANELS, ctx);
   const contentPanels = panels.filter((panel) => !panel.opensView);
   const view = resolvePanelId(panels, wanted, ctx);

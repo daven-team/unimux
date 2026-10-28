@@ -10,7 +10,7 @@ import { getS, setUi, toast, update } from './store';
 /** Shows the panel (ending SSH mode, unfolding the sidebar when it is folded); a panel that cannot be opened now says why in a toast. Returns whether it opened. */
 export function openSidebarPanel(id: string): boolean {
   const project = activeProject(getS());
-  const ctx = { hasProject: !!project, platform: window.mc.platform, git: getGitProbe(project?.id) };
+  const ctx = { hasProject: !!project, platform: window.mc.platform, git: getGitProbe(project?.id), optional: getS().settings.sidePanels };
   const panel = visiblePanels(SIDEBAR_PANELS, ctx).find((p) => p.id === id);
   if (!panel) return false;
   if (!panelOpenable(panel, ctx)) {

@@ -132,6 +132,15 @@ export function SettingsPage() {
             </Select>
           </SettingRow>
         </SettingsGroup>
+        {/* 1.0.9: optional tiles of the left rail, off by default. */}
+        <SettingsGroup title={tr('Panele po lewej')}>
+          <SettingRow title={tr('Panel „Monitor”')} htmlFor="settings-panel-monitor" hint={tr('Co obciąża komputer: procesor i pamięć agentów, terminali i aplikacji. Dodaje kafelek na lewym pasku.')}>
+            <input id="settings-panel-monitor" className="setting-switch" type="checkbox" role="switch" checked={settings.sidePanels?.monitor === true} onChange={(e) => setSetting({ sidePanels: { ...settings.sidePanels, monitor: e.target.checked } })} />
+          </SettingRow>
+          <SettingRow title={tr('Panel „Czeka na Ciebie”')} htmlFor="settings-panel-waiting" hint={tr('Lista komórek, które czekają na Ciebie, ze wszystkich gridów i okien, z licznikiem na kafelku. Skróty do następnej i poprzedniej czekającej komórki działają także bez niego.')}>
+            <input id="settings-panel-waiting" className="setting-switch" type="checkbox" role="switch" checked={settings.sidePanels?.waiting === true} onChange={(e) => setSetting({ sidePanels: { ...settings.sidePanels, waiting: e.target.checked } })} />
+          </SettingRow>
+        </SettingsGroup>
         <SettingsGroup title={tr('Aktualizacje')}>
           <SettingRow title={tr('Sposób instalowania aktualizacji')} htmlFor="settings-updates" hint={{
               manual: tr('Aplikacja startuje od razu. Aktualizacje pobierają się w tle, a przycisk w stopce zainstaluje je, gdy zechcesz.'),

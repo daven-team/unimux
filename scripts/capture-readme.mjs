@@ -427,7 +427,7 @@ const appState = {
   profiles: [{ id: 'claude', name: 'Claude Code', cli: 'claude', args: '', color: '#d97757' }, { id: 'codex', name: 'Codex', cli: 'codex', args: '', color: '#10a37f' }, { id: 'shell', name: 'Terminal', cli: 'shell', args: '', color: '#7a7a7a' }],
   snippets,
   presets: [{ id: 'review-team', name: 'Review team', layout: layout2x2, cells: ['Coordinator', 'Frontend', 'Backend', 'Tests'].map((name, i) => ({ name, profileId: i % 2 ? 'codex' : 'claude', role: i ? 'worker' : 'coordinator', worktree: false, prompt: ['Plan and coordinate the review.', 'Review the storefront accessibility.', 'Review catalog validation.', 'Check edge cases and tests.'][i] })) }],
-  settings: { language: 'en', fontSize: 13, notifications: false, showAiUsage: false, shell: process.platform === 'win32' ? 'cmd' : 'bash', lastProfileId: 'claude' },
+  settings: { language: 'en', fontSize: 13, notifications: false, showAiUsage: false, shell: process.platform === 'win32' ? 'cmd' : 'bash', lastProfileId: 'claude', sidePanels: { monitor: true } },
   sidebarCollapsed: false, snippetsOpen: false, notesOpen: false, sidebarWidth: 230, snippetsWidth: 260,
 };
 writeFileSync(join(data, 'state.json'), JSON.stringify(appState));

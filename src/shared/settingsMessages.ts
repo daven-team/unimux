@@ -72,4 +72,21 @@ export const settingsMessages = {
     'La barre n’affiche que les grilles et fichiers du projet actif (et les onglets hors projets). Choisir un autre projet à gauche affiche ses onglets.',
     'A barra mostra só os grids e ficheiros do projeto ativo (e os separadores fora dos projetos). Escolher outro projeto à esquerda mostra os seus separadores.',
   ],
+  'Panele po lewej': ['Panels on the left', 'Bereiche links', 'Paneles a la izquierda', 'Panneaux à gauche', 'Painéis à esquerda'],
+  'Panel „Monitor”': ['The “Monitor” panel', 'Bereich „Monitor“', 'Panel «Monitor»', 'Panneau « Moniteur »', 'Painel “Monitor”'],
+  'Co obciąża komputer: procesor i pamięć agentów, terminali i aplikacji. Dodaje kafelek na lewym pasku.': [
+    'What loads the computer: processor and memory of the agents, terminals and the app. Adds a tile to the left bar.',
+    'Was den Computer belastet: Prozessor und Speicher der Agenten, Terminals und der App. Fügt eine Kachel zur linken Leiste hinzu.',
+    'Qué carga el ordenador: procesador y memoria de los agentes, terminales y la aplicación. Añade un icono a la barra izquierda.',
+    'Ce qui charge l’ordinateur : processeur et mémoire des agents, des terminaux et de l’application. Ajoute une tuile à la barre de gauche.',
+    'O que carrega o computador: processador e memória dos agentes, terminais e da aplicação. Adiciona um ícone à barra da esquerda.',
+  ],
+  'Panel „Czeka na Ciebie”': ['The “Waiting for you” panel', 'Bereich „Wartet auf dich“', 'Panel «Esperándote»', 'Panneau « Vous attend »', 'Painel “À sua espera”'],
+  'Lista komórek, które czekają na Ciebie, ze wszystkich gridów i okien, z licznikiem na kafelku. Skróty do następnej i poprzedniej czekającej komórki działają także bez niego.': [
+    'A list of the cells waiting for you, from every grid and window, with a count on its tile. The shortcuts to the next and previous waiting cell work without it too.',
+    'Eine Liste der Zellen, die auf dich warten, aus allen Grids und Fenstern, mit einer Zahl auf der Kachel. Die Tastenkürzel zur nächsten und vorigen wartenden Zelle funktionieren auch ohne ihn.',
+    'Una lista de las celdas que te esperan, de todos los grids y ventanas, con un contador en su icono. Los atajos a la celda siguiente y anterior que espera funcionan también sin él.',
+    'Une liste des cellules qui vous attendent, de toutes les grilles et fenêtres, avec un compteur sur sa tuile. Les raccourcis vers la cellule suivante et précédente qui attend fonctionnent aussi sans lui.',
+    'Uma lista das células à sua espera, de todos os grids e janelas, com um contador no ícone. Os atalhos para a célula seguinte e anterior à espera funcionam também sem ele.',
+  ],
 } as const;

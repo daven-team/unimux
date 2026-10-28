@@ -18,6 +18,7 @@ import { DEFAULT_SSH_THEME, normalizeSshThemeId } from './sshThemes';
 import { normalizeBarItems } from './sshBar';
 import { defaultSftpPlaces, forgetRemotePlace, normalizeSftpPlaces } from './sftpView';
 import { DEFAULT_STRIP_SCOPE, normalizeStripScope, normalizeWorkspaceOrder } from './workspaceOrder';
+import { normalizeSidePanels } from './sidebarPanels';
 import { normalizeDetachedWindows, openGrids } from './detached';
 import { normalizeDbConnections, normalizeDbGroupColors } from './db';
 import { NOTE_LIMITS, normalizeNotes } from './notes';
@@ -533,6 +534,7 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
       sshTheme: normalizeSshThemeId(r.settings?.sshTheme),
       sshStatusBarItems: normalizeBarItems(r.settings?.sshStatusBarItems),
       stripScope: normalizeStripScope(r.settings?.stripScope),
+      sidePanels: normalizeSidePanels(r.settings?.sidePanels),
       shortcuts: normalizeShortcutOverrides(r.settings?.shortcuts, platform),
       // The retired notifications / waitingSound* keys only seed the alerts when none are saved yet; they are never written again.
       alerts: readAlerts(r.settings as Record<string, unknown> | undefined),

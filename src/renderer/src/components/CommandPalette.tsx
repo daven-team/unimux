@@ -137,7 +137,7 @@ function PaletteInner() {
     out.push({ kind: tr('Akcja'), title: tr('Notatki: nowa z zaznaczonego tekstu'), icon: <ICapture />, desc: keys('notes.capture') || undefined, run: () => captureSelectionToNote() });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj panel projektów"), icon: <ISidebar />, desc: keys('sidebar.toggle') || undefined, run: () => update((st) => ({ ...st, sidebarCollapsed: !st.sidebarCollapsed })) });
     out.push({ kind: tr('Akcja'), title: tr('Panel: Git'), icon: <IBranch />, run: () => { openSidebarPanel('git'); } });
-    out.push({ kind: tr('Akcja'), title: tr('Czeka na Ciebie: pokaż listę'), icon: <TWaiting />, run: () => { openSidebarPanel('waiting'); } });
+    if (getS().settings.sidePanels?.waiting) out.push({ kind: tr('Akcja'), title: tr('Czeka na Ciebie: pokaż listę'), icon: <TWaiting />, run: () => { openSidebarPanel('waiting'); } });
     out.push({ kind: tr('Akcja'), title: tr('Następna komórka, która czeka na Ciebie'), icon: <TWaiting />, desc: keys('waiting.next') || undefined, run: () => stepToWaiting(1) });
     out.push({ kind: tr('Akcja'), title: tr('Poprzednia komórka, która czeka na Ciebie'), icon: <TWaiting />, desc: keys('waiting.prev') || undefined, run: () => stepToWaiting(-1) });
     out.push({ kind: tr('Akcja'), title: tr('Bazy danych: nowe połączenie'), icon: <IDatabase />, run: () => setUi({ modal: { kind: 'dbConnection', dbKind: 'postgres' } }) });

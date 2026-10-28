@@ -210,6 +210,8 @@ export interface Settings {
   sshStatusBarItems?: Partial<Record<SshBarItem, boolean>>;
   /** The top strip shows the tabs of every project ('all', 1.0.0) or only of the active project (shared/workspaceOrder.ts). */
   stripScope: StripScope;
+  /** 1.0.9: optional panels of the left rail switched on (`true`); absent = off (shared/sidebarPanels.ts). */
+  sidePanels?: Partial<Record<'monitor' | 'waiting', boolean>>;
 }
 
 export interface AppState {

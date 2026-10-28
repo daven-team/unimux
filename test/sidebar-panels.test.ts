@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_PANEL, gitPanelReason, panelOpenable, railClick, railTileAction, railTileShown, railFocusTarget, resolvePanelId, sidePanelContent, visiblePanels, type PanelContext, type PanelDef,
+  DEFAULT_PANEL, gitPanelReason, normalizeSidePanels, optionalPanelOn, panelOpenable, railClick, railTileAction, railTileShown, railFocusTarget, resolvePanelId, sidePanelContent, visiblePanels, type PanelContext, type PanelDef,
 } from '../src/shared/sidebarPanels';
 import { defaultState, normalizeState } from '../src/shared/state';
 
@@ -170,5 +170,20 @@ describe('SSH mode in the side panel (0.9.2)', () => {
 
   it('sends a view that waits behind Settings to the background when a panel is chosen', () => {
     expect(railTileAction({ collapsed: false, view: 'projects', viewActive: true, settingsActive: true }, { id: 'files' })).toEqual({ collapsed: false, view: 'files', openView: false, leaveView: true });
+  });
+});
+
+describe('optional panels (1.0.9)', () => {
+  const defs = [{ id: 'projects' }, { id: 'monitor', available: optionalPanelOn('monitor') }, { id: 'waiting', available: optionalPanelOn('waiting') }];
+  const base = { hasProject: true, platform: 'win32' as const };
+  it('hides Monitor and "Czeka na Ciebie" until switched on', () => {
+    expect(visiblePanels(defs, base).map((d) => d.id)).toEqual(['projects']);
+    expect(visiblePanels(defs, { ...base, optional: { waiting: true } }).map((d) => d.id)).toEqual(['projects', 'waiting']);
+    expect(visiblePanels(defs, { ...base, optional: { monitor: true, waiting: false } }).map((d) => d.id)).toEqual(['projects', 'monitor']);
+  });
+  it('keeps only true switches of known panels', () => {
+    expect(normalizeSidePanels(undefined)).toBeUndefined();
+    expect(normalizeSidePanels({ monitor: 'yes', waiting: false, other: true })).toBeUndefined();
+    expect(normalizeSidePanels({ monitor: true, waiting: true, other: true })).toEqual({ monitor: true, waiting: true });
   });
 });
