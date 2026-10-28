@@ -12,6 +12,7 @@ import { closeDialog, closeModal, setUi, update, useStore, type Dialog } from '.
 import { AuthModal } from './AuthModal';
 import { closeInstall, InstallModal } from './InstallModal';
 import { ChangelogModal } from './Changelog';
+import { ConversationSearch } from './ConversationSearch';
 import { FindReplaceModal } from './FindReplace';
 import { GridDialog } from './GridDialog';
 import { BroadcastDialog } from './ssh/BroadcastDialog';
@@ -52,6 +53,7 @@ export function Modals() {
           {modal.kind === 'grid' && <GridDialog projectId={modal.projectId} />}
           {modal.kind === 'history' && <HistoryModal projectId={modal.projectId} />}
           {modal.kind === 'changelog' && <ChangelogModal />}
+          {modal.kind === 'conversations' && <ConversationSearch />}
           {modal.kind === 'search' && <FindReplaceModal key={modal.projectId} projectId={modal.projectId} />}
           {modal.kind === 'snippet' && <SnippetEditor key={modal.snippetId ?? modal.projectId ?? 'new'} snippetId={modal.snippetId} projectId={modal.projectId} />}
           {modal.kind === 'project' && <ProjectEditor key={modal.projectId} projectId={modal.projectId} />}

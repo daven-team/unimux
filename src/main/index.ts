@@ -49,6 +49,7 @@ import { registerNoteFilesIpc } from './noteFiles';
 import { DB_LIMITS, isDbSessionId } from '../shared/db';
 import type { DbHostToMain } from '../shared/dbHostIpc';
 import { claudeProjectDirName, findRecentCodexSession, listSessionsAsync } from './sessions';
+import { convWorkerFile, createConvSearchClient, sanitizeQuery } from './convSearchClient';
 import { ContextTracker } from './contextUsage';
 import { createSaver, flushUntilSaved, loadState, StateUnreadableError } from './store';
 import { updateHandoverCommitted, blockUpdateVersion, canInstallNow, checkForUpdates, getUpdateState, handOver, initUpdater, isPortableBuild, isUpdateDownloaded, onUpdateTargetChange, previousMacUpdate, recheckUpdate, signalMacUpdateReady, updateHandoffStarted, updateTarget, RELEASES_URL, startupCheck, startupDownload, updatesEnabled } from './updater';
@@ -1401,6 +1402,21 @@ function projectWorktrees(projectPath: string): Worktree[] {
     .flatMap((p) => [...p.tabs, ...p.archive].flatMap((t) => t.cells.flatMap((c) => (c.worktree ? [c.worktree] : []))));
 }
 ipcMain.handle('sessions:list', (_e, projectPath: string) => listSessionsAsync(homedir(), projectPath, projectWorktrees(projectPath), currentBranch));
+// Search across every Claude Code and Codex conversation (1.0.9): a worker thread indexes the transcripts (src/convsearch).
+const convSearch = createConvSearchClient({
+  workerFile: convWorkerFile(__dirname),
+  data: () => ({
+    claudeRoots: [process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')],
+    codexRoots: [usageDeps.codexHome()],
+    cacheFile: join(DATA_DIR, 'conversation-index.bin'),
+  }),
+  log: (message) => crashLog.warn(message),
+});
+guardedHandle('conv:search', (_e, query: unknown) => convSearch.search(sanitizeQuery(query)),
+  () => ({ hits: [], total: 0, conversations: 0, projects: [], indexing: null, tookMs: 0 }));
+guardedHandle('conv:transcript', (_e, file: unknown) => (typeof file === 'string' && file ? convSearch.transcript(file) : { ok: false, messages: [], capped: false }),
+  () => ({ ok: false, messages: [], capped: false }));
+app.on('will-quit', () => { void convSearch.stop(); });
 // "Publish to GitHub" (src/main/github): the sign-in unimux stores there also lets fetch, pull and push reach https://github.com.
 const github = createGithubService({
   dataDir: DATA_DIR,

@@ -16,6 +16,8 @@ export type Modal =
   | { kind: 'grid'; projectId: string }
   | { kind: 'history'; projectId: string }
   | { kind: 'changelog' }
+  /** Search across every Claude Code and Codex conversation (1.0.9). */
+  | { kind: 'conversations' }
   | { kind: 'search'; projectId: string }
   | { kind: 'snippet'; snippetId: string | null; projectId?: string }
   | { kind: 'project'; projectId: string }

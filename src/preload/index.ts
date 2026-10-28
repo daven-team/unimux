@@ -57,6 +57,10 @@ const api: McApi = {
   transferProjectEntries: (projectId, request) => ipcRenderer.invoke('fs:transfer', projectId, request),
   cancelFileOp: (opId) => ipcRenderer.send('fs:cancelOp', opId),
   listSessions: (projectPath) => ipcRenderer.invoke('sessions:list', projectPath),
+  conversations: {
+    search: (query) => ipcRenderer.invoke('conv:search', query),
+    transcript: (file) => ipcRenderer.invoke('conv:transcript', file),
+  },
   isGitRepo: (path) => ipcRenderer.invoke('git:isRepo', path),
   createWorktree: (projectPath, name) => ipcRenderer.invoke('git:createWorktree', projectPath, name),
   inspectWorktree: (projectPath, wt) => ipcRenderer.invoke('git:inspectWorktree', projectPath, wt),
