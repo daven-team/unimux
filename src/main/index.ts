@@ -76,7 +76,7 @@ import {
 import { backupLiveBeforeLogin, reconcileLive, reconcileWhenIdle, resyncOutgoingWhenIdle, type ReconcileDeps } from './accounts/reconcile';
 import { resyncActiveBackup } from './accounts/resync';
 import { accountsPanelInfo, claudeRefs } from './accounts/refs';
-import { cswapRosterPath, readCswapRoster, type CswapRoster } from './accounts/cswap';
+import { cswapRosterPath, cswapWroteSince, readCswapRoster, type CswapRoster } from './accounts/cswap';
 import { readManagedIdentity } from './accounts/identity';
 import { migrateAccounts, type MigrationDeps } from './accounts/migrate';
 import { LoginManager } from './auth/login';
@@ -416,6 +416,7 @@ const activateDeps = (): ActivateDeps => ({
   refresh: (dir) => renewProfile(dir),
   delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   cswap: () => readCswapRoster(cswapRosterPath(homedir(), process.env, process.platform)),
+  cswapWroteSince: (identity, roster, since) => cswapWroteSince(cswapRosterPath(homedir(), process.env, process.platform), roster, identity, since),
 });
 const guardDeps = { swapRunning: isSwapRunning, swapPending: () => hasPendingSwap(swapDeps()), swapPendingNow: () => isSwapUnresolved() || isActivationRecoveryPending(), readOnly: () => accounts.readOnly() };
 /** The live Claude login's identity (`~/.claude.json`), null when nobody is signed in; throws when the file cannot be read or parsed. */
@@ -444,6 +445,11 @@ const reconcileDeps = (): ReconcileDeps => {
     ...(paths && process.platform !== 'darwin'
       ? { resync: (recordId: string, identity: AccountIdentity) => resyncActiveBackup({ paths, store: accounts, seen: resyncSeen, delay: (ms) => new Promise((r) => setTimeout(r, ms)) }, recordId, identity) }
       : {}),
+    // The roster is read fresh: this runs on account changes only, never on every poll.
+    cswapWroteSince: async (identity, since) => {
+      const path = cswapRosterPath(homedir(), process.env, process.platform);
+      return cswapWroteSince(path, await readCswapRoster(path), identity, since);
+    },
     now: () => Date.now(),
   };
 };

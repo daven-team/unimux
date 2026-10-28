@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +7,7 @@ import {
   activateAccount, activationJournalPending, checkActivationTarget, clearPendingActivation, isActivationRecoveryPending, recoverActivationWithRetry,
   recoverInterruptedActivation, startActivationRecoveryRetry, type ActivateDeps,
 } from '../src/main/accounts/activate';
-import type { CswapRoster } from '../src/main/accounts/cswap';
+import { cswapWroteSince, type CswapRoster } from '../src/main/accounts/cswap';
 import { reconcileLive, reconcileWhenIdle } from '../src/main/accounts/reconcile';
 import { withProfileLock } from '../src/main/accounts/refresh';
 import { resyncActiveBackup } from '../src/main/accounts/resync';
@@ -537,5 +537,116 @@ describe('an external switch after an app swap (investigation test 12)', () => {
     const { usage } = await fetchClaude(fetchDeps, refs[1]);
     expect(usage.status).toBe('elsewhere');
     expect(refreshClaude).not.toHaveBeenCalled();
+  });
+});
+
+describe('switching back and forth while cswap lists every account (1.0.9: the renew offer came back after every switch)', () => {
+  const both = (): CswapRoster => ({ present: true, accounts: [{ email: 'a@x.com', accountUuid: 'uuid-A' }, { email: 'x@x.com', accountUuid: 'uuid-X' }] });
+  const ruleOf = (id: string) => claudeRefs({ records: store.list(), dirOf: (r) => store.dirOf(r), live: store.live(), cswap: roster, platform: 'win32' }).find((r) => r.id === `claude:${id}`)?.renew;
+  const reconcile = (identity: AccountIdentity) => reconcileLive({ store, readLiveIdentity: async () => identity, now: () => NOW });
+  const idA = { email: 'a@x.com', accountUuid: 'uuid-A', organizationUuid: 'org-A' };
+  const idX = { email: 'x@x.com', accountUuid: 'uuid-X', organizationUuid: 'org-X' };
+
+  it('an adopted copy stays the app\'s own after the app makes it main and switches away again', async () => {
+    roster = both();
+    let written = false;
+    const d = (): ActivateDeps => ({ ...deps(), cswapWroteSince: async () => written });
+    // T was adopted (family own): the app may renew it.
+    expect(ruleOf(T)).toBe('allowed');
+    expect((await activateAccount(d(), T)).ok).toBe(true);
+    await reconcile(idX); // the poll after the app's own swap
+    expect((await activateAccount(d(), A)).ok).toBe(true);
+    await reconcile(idA);
+    expect(store.get(T)).toMatchObject({ custody: 'app', family: 'own' });
+    expect(ruleOf(T)).toBe('allowed');
+    // Once more, with two polls while it is main.
+    expect((await activateAccount(d(), T)).ok).toBe(true);
+    await reconcile(idX);
+    await reconcile(idX);
+    expect((await activateAccount(d(), A)).ok).toBe(true);
+    await reconcile(idA);
+    expect(ruleOf(T)).toBe('allowed');
+    // cswap backed up T's live login meanwhile (its resync): cswap holds the newest tokens, so it is not renewed any more.
+    expect((await activateAccount(d(), T)).ok).toBe(true);
+    written = true;
+    expect((await activateAccount(d(), A)).ok).toBe(true);
+    expect(store.get(T)).toMatchObject({ custody: 'app', family: 'live' });
+    expect(ruleOf(T)).toBe('held-by-cswap');
+  });
+
+  it('a copy of the live family becomes the app\'s own once Claude Code rotated it after the app\'s swap and cswap wrote nothing since', async () => {
+    roster = both();
+    const d = (): ActivateDeps => ({ ...deps(), cswapWroteSince: async () => false });
+    store.setFamily(T, 'live');
+    expect((await activateAccount(d(), T)).ok).toBe(true);
+    // Not rotated: the live tokens are the very copy the app swapped in, cswap may hold it from earlier.
+    expect((await activateAccount(d(), A)).ok).toBe(true);
+    expect(ruleOf(T)).toBe('held-by-cswap');
+    expect((await activateAccount(d(), T)).ok).toBe(true);
+    // Claude Code renewed the login while it was main: new tokens nobody else saw.
+    put(liveCreds(), { ...json(liveCreds()), claudeAiOauth: { ...creds('X2').claudeAiOauth } });
+    expect((await activateAccount(d(), A)).ok).toBe(true);
+    expect(store.get(T)).toMatchObject({ custody: 'app', family: 'own' });
+    expect(ruleOf(T)).toBe('allowed');
+  });
+
+  it('without a cswap check (unknown) and after a switch by another tool nothing becomes the app\'s own', async () => {
+    roster = both();
+    expect((await activateAccount(deps(), T)).ok).toBe(true);
+    expect((await activateAccount(deps(), A)).ok).toBe(true);
+    expect(store.get(T)?.family).toBe('live');
+    store.setFamily(T, 'own');
+    const d = (): ActivateDeps => ({ ...deps(), cswapWroteSince: async () => false });
+    expect((await activateAccount(d(), T)).ok).toBe(true);
+    // cswap switches back to A: T left the live login through another tool.
+    put(liveCreds(), creds('A3'));
+    put(liveJson(), { oauthAccount: account('A', 'a@x.com') });
+    await reconcile(idA);
+    expect(store.get(T)).toMatchObject({ custody: 'foreign', family: 'live' });
+    expect(store.get(T)?.appSwap).toBeUndefined();
+  });
+
+  it('the app\'s main re-login keeps an adopted copy its own only while cswap wrote nothing (reconcile, own change)', async () => {
+    roster = both();
+    const d = (): ActivateDeps => ({ ...deps(), cswapWroteSince: async () => false });
+    expect((await activateAccount(d(), T)).ok).toBe(true);
+    expect(store.get(T)?.appSwap).toMatchObject({ at: NOW, own: true });
+    const swapSnapshot = store.get(T);
+    await reconcileLive({ store, readLiveIdentity: async () => idA, now: () => NOW, cswapWroteSince: async () => false }, { ownChange: true });
+    expect(store.get(T)).toMatchObject({ custody: 'app', family: 'own' });
+    // The same with a cswap copy written meanwhile: the live family.
+    store.commit({ ...swapSnapshot!, custody: 'live' });
+    store.setLive({ ...idX, recordId: T });
+    await reconcileLive({ store, readLiveIdentity: async () => idA, now: () => NOW, cswapWroteSince: async () => true }, { ownChange: true });
+    expect(store.get(T)).toMatchObject({ custody: 'app', family: 'live' });
+  });
+});
+
+describe('cswapWroteSince (only file names and times of cswap\'s credentials are read)', () => {
+  const rosterPath = () => join(home, '.claude-swap-backup', 'sequence.json');
+  const credFile = (name: string, at: number) => {
+    const path = join(home, '.claude-swap-backup', 'credentials', name);
+    put(path, 'encrypted');
+    utimesSync(path, at / 1000, at / 1000);
+  };
+  const listed: CswapRoster = { present: true, accounts: [{ email: 'X@x.com', accountUuid: 'uuid-X' }] };
+  const x = { email: 'x@x.com', accountUuid: 'uuid-X' };
+
+  it('tells by the file times of that account whether cswap saved it since', async () => {
+    credFile('.creds-1-x@x.com.enc', NOW - 60_000);
+    credFile('.creds-2-other@x.com.enc', NOW + 60_000);
+    expect(await cswapWroteSince(rosterPath(), listed, x, NOW)).toBe(false);
+    credFile('.creds-1-x@x.com.enc.prev', NOW + 1_000);
+    expect(await cswapWroteSince(rosterPath(), listed, x, NOW)).toBe(true);
+  });
+
+  it('answers yes whenever it cannot tell, and no for an account cswap does not list or without cswap', async () => {
+    expect(await cswapWroteSince(rosterPath(), listed, x, NOW)).toBe(true); // no credentials folder
+    credFile('.creds-2-other@x.com.enc', NOW - 60_000);
+    expect(await cswapWroteSince(rosterPath(), listed, x, NOW)).toBe(true); // no file of that account
+    expect(await cswapWroteSince(rosterPath(), { present: true, accounts: null }, x, NOW)).toBe(true);
+    expect(await cswapWroteSince(rosterPath(), { present: true, accounts: [{ accountUuid: 'uuid-X' }] }, { accountUuid: 'uuid-X' }, NOW)).toBe(true);
+    expect(await cswapWroteSince(rosterPath(), { present: true, accounts: [{ email: 'o@x.com', accountUuid: 'uuid-O' }] }, x, NOW)).toBe(false);
+    expect(await cswapWroteSince(rosterPath(), { present: false }, x, NOW)).toBe(false);
   });
 });

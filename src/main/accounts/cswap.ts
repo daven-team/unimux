@@ -1,7 +1,8 @@
 // Read-only view of claude-swap's roster (`sequence.json`: e-mail, uuid, organizationUuid per account; no tokens). cswap's
-// files are never written. It only decides which saved accounts this app must not renew or swap in (R6, R7).
-import { readFile, stat } from 'fs/promises';
-import { isAbsolute, join } from 'path';
+// files are never written, and of its credentials only the file names and times are read (never their content). It only
+// decides which saved accounts this app must not renew or swap in (R6, R7).
+import { readdir, readFile, stat } from 'fs/promises';
+import { dirname, isAbsolute, join } from 'path';
 import { compareIdentity, identityFields, type AccountIdentity } from '../../shared/accounts';
 
 export type CswapRoster = { present: false } | { present: true; accounts: AccountIdentity[] | null };
@@ -41,6 +42,38 @@ export async function readCswapRoster(path: string): Promise<CswapRoster> {
         .map((a) => identityFields({ email: a.email, accountUuid: a.uuid, organizationUuid: a.organizationUuid, org: a.organizationName })),
     };
   } catch { return { present: true, accounts: null }; }
+}
+
+/** File timestamps may be coarse (2 s on FAT); a write this close before `since` still counts as after it. */
+const MTIME_SLACK_MS = 2_000;
+
+export interface CswapFilesFs {
+  readdir(path: string): Promise<string[]>;
+  mtimeMs(path: string): Promise<number>;
+}
+const nodeCswapFs: CswapFilesFs = { readdir: (path) => readdir(path), mtimeMs: async (path) => (await stat(path)).mtimeMs };
+
+/**
+ * Whether cswap may have saved this account's tokens at `since` or later. cswap keeps one credentials file per account in
+ * `<backup root>/credentials` (`.creds-<n>-<email>.enc`, plus `.prev`) and rewrites it whenever it backs up or resyncs the
+ * live login; the files are only listed and their times read, never opened. Anything unclear answers true (conservative):
+ * an unreadable roster or folder, an account without an e-mail, or no file of that account (cswap may keep it elsewhere,
+ * e.g. a keyring). An account cswap does not list was never saved by it.
+ */
+export async function cswapWroteSince(rosterPath: string, roster: CswapRoster, identity: AccountIdentity, since: number, fs: CswapFilesFs = nodeCswapFs): Promise<boolean> {
+  if (!roster.present) return false;
+  if (roster.accounts === null) return true;
+  const listed = roster.accounts.filter((entry) => compareIdentity(entry, identity) !== 'different');
+  if (!listed.length) return false;
+  const emails = [...new Set([identity, ...listed].map((i) => i.email?.trim().toLowerCase()).filter((e): e is string => !!e))];
+  if (!emails.length) return true;
+  const dir = join(dirname(rosterPath), 'credentials');
+  try {
+    const mine = (await fs.readdir(dir)).filter((name) => emails.some((email) => name.toLowerCase().includes(`-${email}`)));
+    if (!mine.length) return true;
+    for (const name of mine) if ((await fs.mtimeMs(join(dir, name))) >= since - MTIME_SLACK_MS) return true;
+    return false;
+  } catch { return true; }
 }
 
 /** cswap may hold a copy of this account's tokens. An unreadable roster holds everything (conservative). */

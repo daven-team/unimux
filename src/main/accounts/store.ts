@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, rmSync, statSync } from 'fs';
 import { atomicWriteFileSync } from '../atomicWrite';
 import { join } from 'path';
 import {
-  identityFields, isAccountId, type AccountCustody, type AccountIdentity, type AccountNotice, type AccountNoticeKind,
+  identityFields, isAccountId, type AccountCustody, type AppSwap, type AccountIdentity, type AccountNotice, type AccountNoticeKind,
   type LiveIdentity, type ManagedAccount, type TokenFamily,
 } from '../../shared/accounts';
 import { readJsonFile } from '../ssh/files';
@@ -43,7 +43,17 @@ function parseAccount(value: unknown): ManagedAccount | null {
   if (value.family === 'own' || value.family === 'live') account.family = value.family as TokenFamily;
   if (isAccountId(value.duplicateOf)) account.duplicateOf = value.duplicateOf;
   if (typeof value.heldTokens === 'string' && /^[0-9a-f]{64}$/.test(value.heldTokens)) account.heldTokens = value.heldTokens;
+  const swap = parseAppSwap(value.appSwap);
+  if (swap) account.appSwap = swap;
   return account;
+}
+
+function parseAppSwap(value: unknown): AppSwap | undefined {
+  if (!isRecord(value) || typeof value.at !== 'number' || !Number.isFinite(value.at)) return undefined;
+  const swap: AppSwap = { at: value.at };
+  if (typeof value.from === 'string' && /^[0-9a-f]{64}$/.test(value.from)) swap.from = value.from;
+  if (value.own === true) swap.own = true;
+  return swap;
 }
 
 function parseLive(value: unknown): LiveIdentity | undefined {
@@ -187,6 +197,11 @@ export class AccountsStore {
     if (hash === undefined && !this.get(id)?.heldTokens) return;
     this.patch(id, { heldTokens: hash });
   }
+  /** Sets or (undefined) drops `appSwap`; a record without it is not written again. */
+  setAppSwap(id: string, swap: AppSwap | undefined): void {
+    if (swap === undefined && !this.get(id)?.appSwap) return;
+    this.patch(id, { appSwap: swap });
+  }
 
   remove(id: string): void {
     if (!isAccountId(id)) return;
@@ -209,7 +224,7 @@ export class AccountsStore {
   }
 
   /** `undefined` in the patch removes the field; the record is validated again, so a bad value never reaches the file. */
-  private patch(id: string, fields: Record<string, string | undefined>): void {
+  private patch(id: string, fields: Record<string, unknown>): void {
     this.change((f) => {
       const index = f.claude.findIndex((entry) => entry.id === id);
       if (index < 0) return;

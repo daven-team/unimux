@@ -17,6 +17,8 @@ export interface ReconcileDeps {
   readLiveIdentity(): Promise<AccountIdentity | null>;
   /** Refreshes the active record's backup from the live login; absent where the live login is not a file (macOS Keychain). */
   resync?(recordId: string, identity: AccountIdentity): Promise<ResyncResult>;
+  /** Whether cswap may have saved this account's tokens at `since` or later (`cswapWroteSince`); absent: always yes. */
+  cswapWroteSince?(identity: AccountIdentity, since: number): Promise<boolean>;
   now(): number;
 }
 
@@ -53,7 +55,13 @@ export async function reconcileLive(deps: ReconcileDeps, opts: { ownChange?: boo
       // is the very one the set-aside loop uses (against the holder), so a record is always either set aside or marked.
       if (active && current && compareIdentity(record, active) === 'same') continue;
       // It left the live login. Whoever switched it holds the newest tokens; ours may be consumed, so they are never renewed.
+      // An own change (the app's main re-login, its copy backed up first) keeps an adopted copy the app's own when cswap
+      // wrote no copy of it while it was main (see keptOwnFamily in activate.ts); anything else is the live family.
+      const keepOwn = !!opts.ownChange && !!record.appSwap?.own && !record.heldTokens && !!deps.cswapWroteSince
+        && !(await deps.cswapWroteSince(record, record.appSwap.at).catch(() => true));
       store.setCustody(record.id, opts.ownChange ? 'app' : 'foreign');
+      store.setFamily(record.id, keepOwn ? 'own' : 'live');
+      store.setAppSwap(record.id, undefined);
       if (!opts.ownChange) store.addNotice({ kind: current ? 'switchedOut' : 'loggedOut', at, recordId: record.id, ...(record.email ? { email: record.email } : {}) });
       changed = true;
     }
@@ -65,7 +73,8 @@ export async function reconcileLive(deps: ReconcileDeps, opts: { ownChange?: boo
         store.addNotice({ kind: 'quarantined', at, recordId: record.id, ...(record.email ? { email: record.email } : {}) });
         changed = true;
       }
-      if (custodyOf(holder) !== 'live') { store.setCustody(holder.id, 'live'); changed = true; }
+      // Signed in outside the app's own swap: no proof of what cswap holds of it (the note of an earlier swap is over).
+      if (custodyOf(holder) !== 'live') { store.setCustody(holder.id, 'live'); store.setAppSwap(holder.id, undefined); changed = true; }
       // Its tokens are the live family now (Claude Code renews them, cswap may back them up): once it leaves the live login
       // it is never renewed by the app while cswap lists it, also when the app itself switched it out.
       if (familyOf(holder) !== 'live') { store.setFamily(holder.id, 'live'); changed = true; }
