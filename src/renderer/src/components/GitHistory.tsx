@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { formatAgo } from '../../../shared/i18n';
 import { GIT_LOG_PAGE, layoutGraph, type GitCommit, type GitCommitDetails, type GitRef, type GraphRow } from '../../../shared/git';
 import type { Language } from '../../../shared/languages';
@@ -101,10 +101,15 @@ export function GitHistory({ projectId, historyKey, initial, opts, nonce, collap
   const focusedIndex = focusedHash ? commits.findIndex((c) => c.hash === focusedHash) : -1;
   const slots = rowSlots(view, commits.length, focusedIndex >= 0 ? [focusedIndex] : []);
 
-  if (selected) return <GitCommitView projectId={projectId} commit={selected} opts={opts} actions={actions} onBack={() => setSelected(null)} />;
+  // The height set with the splitter holds for the list and for a commit's details alike (1.0.9: the details took the default
+  // 45 % split, so opening a commit moved the History header away from where the user had dragged it).
+  const sized = !collapsed && !!height;
+  const sizeStyle = sized ? { flex: `0 1 ${height}px` } : undefined;
+
+  if (selected) return <GitCommitView projectId={projectId} commit={selected} opts={opts} actions={actions} sized={sized} style={sizeStyle} onBack={() => setSelected(null)} />;
 
   return (
-    <section className={`git-history ${collapsed ? 'collapsed' : height ? 'sized' : ''}`} aria-label={tr('Historia')} style={!collapsed && height ? { flex: `0 1 ${height}px` } : undefined}>
+    <section className={`git-history ${collapsed ? 'collapsed' : sized ? 'sized' : ''}`} aria-label={tr('Historia')} style={sizeStyle}>
       {/* The whole header toggles the section (the button is its keyboard handle); the buttons on the right stop the click. */}
       <div className={onToggle ? 'git-pane-head' : 'git-pane-head static'} onClick={onToggle}>
         {onToggle
@@ -209,7 +214,9 @@ function RefChip({ gitRef }: { gitRef: GitRef }) {
 }
 
 /** One commit: message, stats and its files (a click on a file opens the diff). The header keeps the repository buttons. */
-function GitCommitView({ projectId, commit, opts, actions, onBack }: { projectId: string; commit: GitCommit; opts: { worktree?: string }; actions?: ReactNode; onBack(): void }) {
+function GitCommitView({ projectId, commit, opts, actions, sized, style, onBack }: {
+  projectId: string; commit: GitCommit; opts: { worktree?: string }; actions?: ReactNode; sized: boolean; style?: CSSProperties; onBack(): void;
+}) {
   const { tr, language, errorText } = useI18n();
   const [details, setDetails] = useState<GitCommitDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -225,7 +232,7 @@ function GitCommitView({ projectId, commit, opts, actions, onBack }: { projectId
 
   const { shown } = chipRefs(commit.refs, 8);
   return (
-    <section className="git-history git-details" aria-label={tr('Szczegóły commita')}>
+    <section className={`git-history git-details${sized ? ' sized' : ''}`} aria-label={tr('Szczegóły commita')} style={style}>
       <div className="git-pane-head" onClick={onBack}>
         <button className="git-pane-toggle"><span className="tree-chevron git-back-chevron"><IChevron /></span><span className="git-pane-title">{tr('Historia')}</span></button>
         {actions && <span className="git-pane-actions" onClick={(e) => e.stopPropagation()}>{actions}</span>}
