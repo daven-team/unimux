@@ -8,9 +8,10 @@ import type { McpInfo } from '../../shared/automation';
 import { alertForStatus } from './alerts';
 import { initQuitGuard } from './closeGuard';
 import { initDetachFollow } from './detach';
+import { initWaitTracking, revealCell } from './waiting';
 import { noteAgentTurnEnd } from './turnRefresh';
 import { initBackgroundLoader } from './backgroundLoader';
-import { applyCliStatus, flushPendingSaves, ensureStarted, focusCell, hasBlockedCells, recheckCli, refreshSessionTitles, resetStarted, releaseCellTerminal, setAliveAtStart } from './actions';
+import { applyCliStatus, flushPendingSaves, ensureStarted, hasBlockedCells, recheckCli, refreshSessionTitles, resetStarted, releaseCellTerminal, setAliveAtStart } from './actions';
 import { CommandPalette } from './components/CommandPalette';
 import { ContextMenuHost } from './components/ContextMenu';
 import { ErrorBoundary, PanelFallback, WindowFallback } from './components/ErrorBoundary';
@@ -176,7 +177,7 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
     if (found && session.cli === 'claude') refreshSessionTitles(found.project.path, 1500);
   });
   window.mc.on('cell:spawnError', (cellId, message) => setUi((ui) => ({ cellErrors: { ...ui.cellErrors, [cellId]: message } })));
-  window.mc.on('focus-cell', (cellId) => focusCell(cellId));
+  window.mc.on('focus-cell', (cellId) => revealCell(cellId));
   // A one-time notice from the main process, already in the app language (http hooks found blocked).
   window.mc.on('app:notice', (text: string) => toast(text));
   window.mc.on('ptyhost:crashed', (resumes) => {
@@ -242,6 +243,8 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   bootStep(initQuitGuard);
   // Tabs in their own window (1.0.6): their cells' terminals leave this window and come back with them.
   bootStep(initDetachFollow);
+  // 1.0.9: what the cells wait for (the "Czeka na Ciebie" list), this window's and the detached windows'.
+  bootStep(initWaitTracking);
 }
 
 /**

@@ -267,6 +267,10 @@ const api: McApi = {
     works: () => ipcRenderer.invoke('detach:works'),
     openInMain: (request) => ipcRenderer.send('detach:openInMain', request),
     stay: () => ipcRenderer.send('detach:stay'),
+    wait: (cellId, mark) => ipcRenderer.send('detach:wait', cellId, mark),
+    waits: () => ipcRenderer.invoke('detach:waits'),
+    waitStep: (dir) => ipcRenderer.send('detach:waitStep', dir),
+    revealCell: (cellId) => ipcRenderer.send('detach:revealCell', cellId),
   },
   on: (channel: string, cb: (...args: any[]) => void) => {
     const listener = (_e: unknown, ...args: any[]) => cb(...args);

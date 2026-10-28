@@ -1,0 +1,33 @@
+/* "Czeka na Ciebie" (WaitingPanel.tsx): one row per cell that needs you, longest waiting first. */
+.waiting { flex: 1; min-height: 0; display: flex; flex-direction: column; font-size: 12px; }
+.waiting-filter { flex: none; display: flex; align-items: center; gap: 6px; padding: 0 14px 8px; color: var(--text-2); cursor: pointer; user-select: none; }
+.waiting-filter input { margin: 0; }
+.waiting-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 10px; display: flex; flex-direction: column; gap: 4px; }
+.waiting-row { position: relative; width: 100%; display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; padding: 7px 8px 7px 10px; border: 0; border-radius: 6px; background: var(--bg-2); color: var(--text-2); text-align: left; font: inherit; cursor: pointer; }
+.waiting-row::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; border-radius: 0 2px 2px 0; background: var(--waiting); }
+.waiting-row.attention::before { background: var(--working); }
+.waiting-row.error::before { background: var(--error); }
+.waiting-row:hover { background: var(--bg-hover); }
+.waiting-row:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; }
+.waiting-row.muted { opacity: .62; }
+.waiting-agent { display: grid; place-items: center; height: 18px; color: var(--muted); }
+.waiting-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.waiting-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.waiting-name { flex: 1; min-width: 0; color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.waiting-muted { flex: none; display: inline-grid; color: var(--muted); }
+.waiting-age { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.waiting-what { color: var(--waiting); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.waiting-row.attention .waiting-what { color: var(--working); }
+.waiting-row.error .waiting-what { color: var(--error); }
+.waiting-place { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The count on the rail tile. */
+.rail-badge { position: absolute; top: 4px; right: 7px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--working); color: #1a1a1a; font-size: 10px; font-weight: 700; line-height: 15px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
+
+/* A cell shown from the list (or a notification): its card lights up once. */
+.cell.wait-flash { animation: wait-flash 1.2s ease-out 1; }
+@keyframes wait-flash {
+  0%, 30% { box-shadow: inset 0 0 0 2px var(--working); }
+  100% { box-shadow: inset 0 0 0 2px transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .cell.wait-flash { animation: none; box-shadow: inset 0 0 0 2px var(--working); } }

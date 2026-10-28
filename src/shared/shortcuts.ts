@@ -184,6 +184,9 @@ export const SHORTCUTS = [
   { id: 'cell.move.right', label: 'Przesuń komórkę w prawo', group: 'grid', scope: 'cell', default: 'Mod+Alt+Shift+Right', rebindable: true, blockedInSettings: true },
   { id: 'cell.move.up', label: 'Przesuń komórkę w górę', group: 'grid', scope: 'cell', default: 'Mod+Alt+Shift+Up', rebindable: true, blockedInSettings: true },
   { id: 'cell.move.down', label: 'Przesuń komórkę w dół', group: 'grid', scope: 'cell', default: 'Mod+Alt+Shift+Down', rebindable: true, blockedInSettings: true },
+  // 1.0.9: the cells that wait for you (shared/waiting.ts), longest waiting first, across every grid and window.
+  { id: 'waiting.next', label: 'Następna komórka, która czeka na Ciebie', group: 'grid', scope: 'global', default: 'Mod+Alt+PageDown', rebindable: true },
+  { id: 'waiting.prev', label: 'Poprzednia komórka, która czeka na Ciebie', group: 'grid', scope: 'global', default: 'Mod+Alt+PageUp', rebindable: true },
   // Ctrl+F itself belongs to the program in the terminal (readline: forward one character), so the terminal finds with Shift.
   { id: 'terminal.find', label: 'Znajdź w terminalu', group: 'terminal', scope: 'cell', default: 'Mod+Shift+F', rebindable: true, blockedInSettings: true, terminalOnly: true },
   { id: 'snippets.toggle', label: 'Pokaż lub ukryj snippety', group: 'panels', scope: 'global', default: 'Mod+Shift+B', rebindable: true },
