@@ -375,7 +375,11 @@ export class CliDetector {
     let file = path;
     let args = ['--version'];
     let verbatim = false;
-    if (platform === 'win32' && /\.(cmd|bat)$/i.test(path)) {
+    // Windows: through cmd.exe, also for an .exe. Starting a big binary (codex.exe is over 300 MB) blocks the thread that calls
+    // CreateProcess for about 0.8 s while it is mapped and scanned; started by cmd.exe that wait is cmd's, and the main process
+    // (IPC, the first spawns, every window) goes on after about 10 ms. An .exe whose path cannot be quoted is run directly.
+    const shim = /\.(cmd|bat)$/i.test(path);
+    if (platform === 'win32' && (shim || quoteForCmd(path))) {
       // Inside quotes `& | < > ^` are literal (`C:\Users\R&D` works); only `"`, `%` and line breaks cannot be quoted.
       const quoted = quoteForCmd(path);
       if (!quoted) return { ...base, reason: 'versionFailed' };
