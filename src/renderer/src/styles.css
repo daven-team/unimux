@@ -200,15 +200,12 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .badge.failed { color: var(--error); background: #f8717114; }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: #3a3a3a; }
-/* No CSS animation here: a running one presents a frame at every vsync. blink.ts flips data-blink on <html> twice a second
-   while something holds it, and the halo shows in one phase (a calm 1 Hz blink). 1.0.8: the dot on a cell's icon no longer
-   holds it; it pulses with a compositor-only CSS animation instead (terminalCell.css). */
+/* No CSS animation here: a running one presents a frame at every vsync. The dots of lists and tabs stay still; the dot on a
+   cell's icon ripples (terminalCell.css), stepped by the shared pulse of blink.ts after its first smooth waves (1.0.9). */
 .dot.working { background: var(--working); }
-:root[data-blink] .dot.working { box-shadow: 0 0 0 3px #f5b94259; }
 .dot.waiting { background: var(--waiting); }
 .dot.exited { background: var(--error); }
 .dot.waiting.error { background: var(--error); }
-@media (prefers-reduced-motion: reduce) { :root[data-blink] .dot.working { box-shadow: none; } }
 
 /* ── tab bar (inside titlebar) ─────────────────────────────────────────── */
 .tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; flex: 0 1 auto; scrollbar-width: none; }
@@ -1033,11 +1030,18 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .fr-line ins { background: #4ade8024; color: #bbf7d0; text-decoration: none; border-radius: 2px; }
 
 /* ── AI account limits (docked above the status bar) ───────────────────── */
-.usage-panel { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 4px 10px 6px; border-top: 1px solid var(--border); background: var(--bg-1); font-size: 11px; color: var(--text-2); max-height: 40vh; overflow-y: auto; }
+.usage-panel { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 0 10px 6px; border-top: 1px solid var(--border); background: var(--bg-1); font-size: 11px; color: var(--text-2); max-height: 40vh; overflow-y: auto; }
 /* Docked under the side panel content: at most 35% of the side panel, so the panel above keeps room in a short window (the
    cards scroll). The collapsed rail variant (.rail-foot) keeps 40vh. */
 .side-panel > .usage-panel { max-height: min(40vh, 35%); }
-.usage-head { display: flex; align-items: center; gap: 6px; }
+/* 1.0.9: the header (title, add, refresh) stays at the top of the panel while the cards scroll under it, so the panel can be
+   collapsed without scrolling back up. It carries the panel's top padding and spans its full width, on the panel's opaque
+   background (the panel has no top padding of its own, so it sticks at the very edge with nothing showing above it). */
+.usage-head { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 6px; margin: 0 -10px; padding: 4px 10px 0; background: var(--bg-1); }
+/* A hairline under the header shows once the cards scroll beneath it (a scroll-driven animation: it moves only with the
+   scroll position, never on its own). */
+.usage-head { animation: usage-head-edge linear both; animation-timeline: scroll(nearest block); animation-range: 0 8px; }
+@keyframes usage-head-edge { from { box-shadow: 0 1px 0 transparent; } to { box-shadow: 0 1px 0 var(--border); } }
 .usage-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: transparent; color: var(--text-2); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
 .usage-title:hover { color: var(--text); }
 .usage-chevron { display: inline-grid; transition: transform .15s; }
