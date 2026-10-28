@@ -1,0 +1,57 @@
+/* The prompt queue of an agent cell (PromptQueueBar): a slim row in the cell footer and a panel above it. */
+.queue-bar {
+  flex: none; display: flex; align-items: center; gap: 8px; height: 22px; min-width: 0; padding: 0 4px 0 6px;
+  background: var(--bg-1); color: var(--text-2); font-size: 11px; line-height: 1; white-space: nowrap; overflow: hidden;
+  user-select: none;
+}
+.queue-badge {
+  display: inline-flex; align-items: center; gap: 5px; height: 17px; padding: 0 7px; flex: none;
+  border: 1px solid var(--border-2); border-radius: 9px; background: transparent; color: var(--text); font-size: 11px; cursor: pointer;
+}
+.queue-badge:hover, .queue-badge.on { background: var(--btn-ghost-hover); border-color: var(--accent); }
+.queue-bar.paused .queue-badge { border-color: color-mix(in srgb, var(--working) 55%, transparent); }
+.queue-bar.due .queue-badge { border-color: var(--waiting); }
+.queue-state { flex: none; color: var(--muted); line-height: 16px; }
+.queue-bar.paused .queue-state { color: var(--working); }
+.queue-bar.due .queue-state { color: var(--waiting); }
+.queue-next { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); line-height: 16px; }
+.queue-next::before { content: '›'; margin-right: 5px; color: var(--muted); }
+.queue-actions { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
+.queue-btn {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 18px; padding: 0 4px;
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: 11px; cursor: pointer;
+}
+.queue-btn:hover { background: var(--btn-ghost-hover); color: var(--text); }
+
+.queue-panel {
+  position: fixed; z-index: 60; display: flex; flex-direction: column; max-height: min(460px, 70vh);
+  background: var(--bg-1); border: 1px solid var(--border-2); border-radius: var(--radius-md); box-shadow: 0 10px 30px #0009;
+  color: var(--text); font-size: 12px;
+}
+.queue-panel-head { display: flex; align-items: center; gap: 8px; padding: 7px 6px 6px 10px; border-bottom: 1px solid var(--border); }
+.queue-panel-title { font-weight: 600; flex: none; }
+.queue-panel-hint { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
+.queue-list { list-style: none; margin: 0; padding: 4px; overflow-y: auto; min-height: 0; flex: 1 1 auto; }
+.queue-item {
+  display: flex; align-items: flex-start; gap: 6px; padding: 5px 4px; border-radius: var(--radius-sm); border-top: 2px solid transparent;
+}
+.queue-item:hover { background: var(--bg-hover); }
+.queue-item.dragging { opacity: .45; }
+.queue-item.over { border-top-color: var(--accent); }
+.queue-grip { flex: none; color: var(--muted); cursor: grab; padding-top: 2px; }
+.queue-index { flex: none; min-width: 1.6ch; color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 1px; }
+.queue-text {
+  flex: 1 1 auto; min-width: 0; white-space: pre-wrap; word-break: break-word; cursor: text;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4;
+}
+.queue-edit, .queue-compose textarea {
+  flex: 1 1 auto; min-width: 0; resize: vertical; font: inherit; line-height: 1.4; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border-2); border-radius: var(--radius-sm); padding: 4px 6px;
+}
+.queue-edit:focus, .queue-compose textarea:focus { outline: none; border-color: var(--focus-ring); }
+.queue-item-actions { display: inline-flex; gap: 2px; flex: none; opacity: .55; }
+.queue-item:hover .queue-item-actions { opacity: 1; }
+.queue-compose { display: flex; padding: 6px 8px 0; border-top: 1px solid var(--border); }
+.queue-compose textarea { width: 100%; }
+.queue-panel-foot { display: flex; align-items: center; gap: 6px; padding: 6px 8px 8px; }
+.queue-panel-foot .grow { flex: 1; }

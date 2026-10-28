@@ -21,6 +21,7 @@ import { DEFAULT_STRIP_SCOPE, normalizeStripScope, normalizeWorkspaceOrder } fro
 import { normalizeDetachedWindows, openGrids } from './detached';
 import { normalizeDbConnections, normalizeDbGroupColors } from './db';
 import { NOTE_LIMITS, normalizeNotes } from './notes';
+import { normalizePromptQueue } from './promptQueue';
 import type {
   AppState, ArchivedTab, Cell, Note, Preset, PresetCell, Profile, Project, Settings, Snippet, Tab, Worktree,
 } from './types';
@@ -481,10 +482,12 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
   // A cell's path format override survives only as one of the known values; an SSH reference only as { hostId: string }.
   const cleanCells = (cells: Cell[]) => remapCells(cells).map((c) => {
     // `shell` names the shell of a running terminal: after a restart of the app nothing runs yet.
-    const { pathMode: raw, ssh, shell: _shell, ...rest } = c;
+    const { pathMode: raw, ssh, shell: _shell, promptQueue: rawQueue, ...rest } = c;
     const pathMode = normalizePathMode(raw);
     const ref = normalizeSshCellRef(ssh);
-    return { ...rest, ...(pathMode ? { pathMode } : {}), ...(ref ? { ssh: ref } : {}) };
+    // 1.0.9: queued prompts survive a restart, paused: nothing is sent by itself right after a launch.
+    const promptQueue = normalizePromptQueue(rawQueue, true);
+    return { ...rest, ...(pathMode ? { pathMode } : {}), ...(ref ? { ssh: ref } : {}), ...(promptQueue ? { promptQueue } : {}) };
   });
   const cleanPresetCells = (cells: PresetCell[]) => remapCells(cells).map((c) => {
     const { sshHostId, ...rest } = c;

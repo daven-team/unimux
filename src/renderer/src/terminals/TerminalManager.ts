@@ -39,6 +39,8 @@ const FONT = '"Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular
 
 interface Entry {
   id: string;
+  /** performance.now() of the last key the user typed into this terminal (the prompt queue must not send over it). */
+  typedAt?: number;
   term: Terminal;
   fit: FitAddon;
   webgl: WebglAddon | null;
@@ -348,6 +350,21 @@ class TerminalManager {
 
   has(cellId: string): boolean {
     return this.entries.has(cellId);
+  }
+
+  /** When the user last typed into the cell's terminal (performance.now()); -Infinity when never. */
+  typedAt(cellId: string): number {
+    return this.entries.get(cellId)?.typedAt ?? -Infinity;
+  }
+
+  /** Precise signals (Claude hooks, the Codex notify hook) drive the cell's status. */
+  hooked(cellId: string): boolean {
+    return this.entries.get(cellId)?.tracker.isHooked ?? false;
+  }
+
+  /** The program in the terminal switched bracketed paste on: a multi-line paste arrives as one block. */
+  bracketedPaste(cellId: string): boolean {
+    return this.entries.get(cellId)?.term.modes.bracketedPasteMode ?? false;
   }
 
   ensure(cellId: string, opts: EnsureOptions): Entry {
@@ -1058,6 +1075,7 @@ class TerminalManager {
 
   /** User keystrokes can change the status (answering a prompt), so listeners must hear about it. */
   private userInput(e: Entry, submitted: boolean, interrupt = false): void {
+    e.typedAt = performance.now();
     this.setStatus(e, () => {
       const now = performance.now();
       e.tracker.input(now, submitted);
