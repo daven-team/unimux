@@ -26,6 +26,7 @@ import { initSsh, sshHostMenuItems } from '../ssh';
 import { useSshStore } from '../sshStore';
 import { getS, setStateOverlay, setUi, toast, useStore } from '../store';
 import { terminals } from '../terminals/TerminalManager';
+import { isPermissionAnswer } from '../../../shared/permissionAction';
 import { profileOptionLabel } from '../cliUi';
 import { noteAgentTurnEnd } from '../turnRefresh';
 import { detachedId, thisDetached } from '../windowRole';
@@ -113,6 +114,8 @@ async function boot(): Promise<void> {
   window.mc.on('cell:session', (cellId, session) => useStore.getState().update((s) => updateCell(s, cellId, { session })));
   window.mc.on('cell:spawnError', (cellId, message) => setUi((ui) => ({ cellErrors: { ...ui.cellErrors, [cellId]: message } })));
   window.mc.on('focus-cell', (cellId) => focusCell(cellId));
+  // 1.0.9: Zezwól / Odrzuć from a permission notification; a stale one (the cell changed since) only shows the cell.
+  window.mc.on('notify:answer', (cellId, token, answer) => { if (!isPermissionAnswer(answer) || !terminals.answerPermission(cellId, token, answer)) window.mc.showCell(cellId); });
   window.mc.on('automation:start-cells', (ids) => ids.forEach((id) => ensureStarted(id)));
   window.mc.on('ptyhost:crashed', (resumes) => { toast(tr(ptyHostRestartToast(resumes !== false)), 'error'); resetStarted(); });
   window.mc.on('ptyhost:fatal', () => { toast(tr('Proces terminali wielokrotnie się wysypał.'), 'error'); resetStarted(); });

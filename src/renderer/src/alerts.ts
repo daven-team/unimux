@@ -8,7 +8,8 @@ import { playAlertSound } from './alertSound';
 import { profileName } from './cliUi';
 import { tr } from './i18n';
 import { getS, getUi } from './store';
-import { statusLog } from './terminals/TerminalManager';
+import { statusLog, terminals } from './terminals/TerminalManager';
+import { noticeActions } from '../../shared/permissionAction';
 
 function isVisible(cellId: string): boolean {
   const tab = activeTab(activeProject(getS()));
@@ -24,7 +25,13 @@ export function alertBody(event: AlertEventId, name: string, errorCode?: string)
 
 /** Notifications wait about a second for others: a burst of turn ends becomes one notification per event. */
 const burst = createAlertBurst<AlertItem>((items) => {
-  for (const group of groupAlerts(items)) window.mc.notify(alertNotice(tr, group));
+  for (const group of groupAlerts(items)) {
+    const notice = alertNotice(tr, group);
+    // 1.0.9: a single cell's permission dialog gets Zezwól / Odrzuć / Pokaż; its token is taken now, when the toast goes out.
+    const enabled = getS().settings.alerts.notificationActions;
+    const token = enabled && group.length === 1 && group[0].event === 'attention' ? terminals.permissionToken(notice.cellId) : null;
+    window.mc.notify({ ...notice, ...noticeActions({ event: group[0].event, cells: group.length, enabled, token }) });
+  }
 }, { setTimer: (fn, ms) => window.setTimeout(fn, ms), clearTimer: (timer) => window.clearTimeout(timer as number) });
 
 const allowSound = createAlertSoundThrottle();
@@ -56,6 +63,8 @@ export function alertForStatus(
     });
   }
   if (decision.sound) void playAlertSound(decision.event, decision.sound);
+  // 1.0.9: the taskbar button flashes (the Dock icon bounces once) when the window is not focused; main checks the focus.
+  if (decision.event === 'attention' && s.settings.alerts.flashWindow && !document.hasFocus()) window.mc.flashAttention();
 }
 
 let previewing = false;

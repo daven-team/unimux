@@ -143,7 +143,15 @@ export interface McApi {
   localFs: LocalFilesApi;
   /** The command history of SSH hosts for the terminal autocomplete (kept by main on this computer only). */
   sshHistory: SshHistoryApi;
-  notify(n: { title: string; body: string; cellId: string }): void;
+  /**
+   * An OS notification; a click shows the window and `cellId`. 1.0.9: `actions` 'answer' (with the cell's permission `token`)
+   * offers Zezwól / Odrzuć / Pokaż, 'show' only Pokaż (when the setting is on).
+   */
+  notify(n: { title: string; body: string; cellId: string; actions?: 'answer' | 'show'; token?: string }): void;
+  /** 1.0.9: an answer from a notification could not be typed (the cell changed): show the window and the cell instead. */
+  showCell(cellId: string): void;
+  /** 1.0.9: an agent needs the user: flash this window's taskbar button / bounce the Dock icon if the window is not focused. */
+  flashAttention(): void;
   openExternal(url: string): void;
   openPath(path: string): void;
   revealPath(path: string): void;
@@ -225,6 +233,7 @@ export interface McApi {
   /** A notice from the main process, already translated (e.g. Claude http hooks found blocked). */
   on(channel: 'app:notice', cb: (text: string) => void): () => void;
   on(channel: 'focus-cell', cb: (cellId: string) => void): () => void;
+  on(channel: 'notify:answer', cb: (cellId: string, token: string, answer: 'allow' | 'deny') => void): () => void;
   on(channel: 'ptyhost:crashed', cb: (resumesConversation: boolean) => void): () => void;
   /** The Pty Host crashed too often and is not restarted until the user asks for it (cells show why they do not start). */
   on(channel: 'ptyhost:fatal', cb: () => void): () => void;

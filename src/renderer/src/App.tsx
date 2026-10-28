@@ -29,6 +29,7 @@ import { TitleBar, WorkspaceTabs } from './components/TitleBar';
 import { useShortcuts } from './shortcuts';
 import { getS, getUi, setUi, toast, update, useStore } from './store';
 import { terminals } from './terminals/TerminalManager';
+import { isPermissionAnswer } from '../../shared/permissionAction';
 // Rarely used screens load on demand: the editor alone (CodeMirror, language packs, Markdown preview) is about a third of the bundle.
 const loadAutomationPanel = () => import('./components/AutomationPanel').then((m) => ({ default: m.AutomationPanel }));
 const loadFileEditor = () => import('./components/FileEditor').then((m) => ({ default: m.FileEditor }));
@@ -177,6 +178,8 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   });
   window.mc.on('cell:spawnError', (cellId, message) => setUi((ui) => ({ cellErrors: { ...ui.cellErrors, [cellId]: message } })));
   window.mc.on('focus-cell', (cellId) => focusCell(cellId));
+  // 1.0.9: Zezwól / Odrzuć from a permission notification; a stale one (the cell changed since) only shows the cell.
+  window.mc.on('notify:answer', (cellId, token, answer) => { if (!isPermissionAnswer(answer) || !terminals.answerPermission(cellId, token, answer)) window.mc.showCell(cellId); });
   // A one-time notice from the main process, already in the app language (http hooks found blocked).
   window.mc.on('app:notice', (text: string) => toast(text));
   window.mc.on('ptyhost:crashed', (resumes) => {
