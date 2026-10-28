@@ -194,6 +194,20 @@ describe('shared blink', () => {
     expect(attrs.has('data-blink')).toBe(false);
   });
 
+  it('1.0.9: steps through more phases for the ripple of the working dot and shows none once stopped', () => {
+    const shown: (number | null)[] = [];
+    const pulse = new SharedBlink((phase) => shown.push(phase), 5, 200);
+    const release = pulse.hold();
+    vi.advanceTimersByTime(200 * 6);
+    expect(shown).toEqual([1, 2, 3, 4, 0, 1, 2]);
+    expect(vi.getTimerCount()).toBe(1);
+    release();
+    expect(shown.at(-1)).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+    pulse.hold();
+    expect(shown.at(-1)).toBe(1);
+  });
+
   it('runs no timer while not allowed (hidden window, reduced motion) and resumes afterwards', () => {
     const { attrs, blink } = fakeRoot();
     const release = blink.hold();
@@ -227,8 +241,9 @@ describe('shared blink', () => {
     // card exist only during a wait and turn by transform alone (static under reduced motion). 1.0.8: the pulse of a working
     // cell's status dot (the shared 1 Hz blink read as a two-frame flicker) exists only while the cell works and changes
     // transform and opacity alone, so the compositor runs it without main-thread work (static under reduced motion).
-    // Nothing else.
-    expect(infinite.sort()).toEqual(['.brand.fx .bn-fx', '.refresh-icon.spinning svg, .busy-ring', '.ssh-mark.active::after', '.terminal-cell .cell-icon .dot.working::after'].sort());
+    // 1.0.9: that pulse ran at every vsync while a cell worked (241 frames a second, 43 % of a core with 16 cells); it runs two
+    // smooth waves now and then steps with the shared pulse. Nothing else.
+    expect(infinite.sort()).toEqual(['.brand.fx .bn-fx', '.refresh-icon.spinning svg, .busy-ring', '.ssh-mark.active::after'].sort());
   });
 });
 

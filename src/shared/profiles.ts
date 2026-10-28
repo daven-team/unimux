@@ -23,6 +23,18 @@ export function shownProfileName(profile: Pick<Profile, 'id' | 'name' | 'cli'>, 
   return shell === 'cmd' ? tr('Wiersz polecenia') : SHELL_NAMES[shell] ?? profile.name;
 }
 
+/**
+ * A profile named only after what it runs ("Claude", "Codex", the built-in shell's shipped name): the cell's icon already says
+ * that, so the header does not repeat it among the details (1.0.9). A profile the user named otherwise tells more and is kept.
+ */
+export function genericProfileName(profile: Pick<Profile, 'id' | 'name' | 'cli'>): boolean {
+  if (profile.cli === 'shell') return BUILT_IN_SHELL_IDS.has(profile.id) && BUILT_IN_SHELL_NAMES.has(profile.name.trim());
+  const name = profile.name.trim().replace(/\s+/g, ' ').toLowerCase();
+  return GENERIC_AGENT_NAMES[profile.cli]?.includes(name) || DEFAULT_PROFILES.some((p) => p.cli === profile.cli && p.name.toLowerCase() === name);
+}
+/** The product names of the agents, as a profile is often called (lower case). */
+const GENERIC_AGENT_NAMES: Partial<Record<Profile['cli'], string[]>> = { claude: ['claude', 'claude code'], codex: ['codex', 'codex cli', 'openai codex'] };
+
 /** The shell a cell's name follows: the one its terminal was started with, else the one of Settings > Terminal. */
 export function cellShell(cell: { shell?: ShellKind } | undefined, setting: ShellKind): ShellKind {
   return cell?.shell ?? setting;

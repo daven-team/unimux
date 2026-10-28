@@ -139,27 +139,49 @@
 }
 
 .terminal-cell .cell-icon .dot.idle { background: #4b4b4b; }
-/* 1.0.8: a working dot sends out a soft ring, one wave every 1.4 s (the shared 1 Hz blink of blink.ts showed as a two-frame
-   flicker). Only transform and opacity change, so the compositor runs it without style, layout or paint work; it exists only
-   while the cell works and stands still as a faint halo under reduced motion. It reaches 3 px past the dot, inside the header. */
+/* A working dot sends out ripples: a ring in full colour grows from the dot's edge to almost twice its size and fades.
+   1.0.8 ran one filled halo 3 px wide with an infinite CSS animation: it faded out in the first third of each 1.4 s wave (a
+   front-loaded easing), so it read as a short flicker, hardly seen, and it made Chromium present a frame at every vsync
+   while any cell worked (241 frames a second, 43 % of a core with 16 cells on a 240 Hz display; budget 2.5 %).
+   1.0.9: when the cell starts working, two rings half a wave apart ripple smoothly for two waves (a finite animation, about
+   3.5 s); then the ring steps with the shared pulse of blink.ts (data-pulse on <html>: three sizes and a rest, four frames
+   a second, the cost of the old 1 Hz blink times 2). Only transform and opacity change and each ring is its own layer
+   (will-change), so neither the waves nor the steps cost style, layout or paint work beyond the one attribute.
+   A ring is drawn at its largest size and scaled down (it stays sharp); it ends 7.5 px from the dot's centre, inside the
+   heading (CELL_HEAD_HEIGHT 34 with its 1 px border, the icon 22: the dot's centre is about 7.5 px above the header's
+   bottom). The rings exist only while the cell works; without the pulse (reduced motion, a hidden window) one ring stands
+   still around the dot. */
+.terminal-cell .cell-icon .dot.working::before,
 .terminal-cell .cell-icon .dot.working::after {
   content: '';
   position: absolute;
-  inset: -3px;
+  inset: -4px;
+  border: 1.5px solid var(--working);
   border-radius: 50%;
-  background: var(--working);
-  opacity: 0;
+  opacity: .5;
+  transform: scale(.75);
   pointer-events: none;
-  animation: cell-dot-pulse 1.4s cubic-bezier(.2, .6, .35, 1) infinite;
+  will-change: transform, opacity;
+  animation: cell-dot-ripple 1.4s cubic-bezier(.25, .4, .45, 1) 2;
 }
 
-@keyframes cell-dot-pulse {
-  from { opacity: .55; transform: scale(.6); }
-  to { opacity: 0; transform: scale(1); }
+.terminal-cell .cell-icon .dot.working::after { opacity: 0; animation-delay: .7s; }
+
+@keyframes cell-dot-ripple {
+  from { opacity: .95; transform: scale(.5); }
+  55% { opacity: .5; }
+  to { opacity: 0; transform: scale(.94); }
 }
+
+/* The steps of the shared pulse once the waves are over (an animation, while it runs, wins over these). */
+:root[data-pulse] .terminal-cell .cell-icon .dot.working::before { opacity: 0; transform: scale(.5); }
+:root[data-pulse="1"] .terminal-cell .cell-icon .dot.working::before { opacity: .95; transform: scale(.66); }
+:root[data-pulse="2"] .terminal-cell .cell-icon .dot.working::before { opacity: .6; transform: scale(.8); }
+:root[data-pulse="3"] .terminal-cell .cell-icon .dot.working::before { opacity: .25; transform: scale(.94); }
 
 @media (prefers-reduced-motion: reduce) {
-  .terminal-cell .cell-icon .dot.working::after { animation: none; opacity: .22; transform: none; }
+  .terminal-cell .cell-icon .dot.working::before { animation: none; will-change: auto; }
+  .terminal-cell .cell-icon .dot.working::after { content: none; }
 }
 
 /* Exited: a hollow grey ring; a failed turn (waiting.error) stays red. */
