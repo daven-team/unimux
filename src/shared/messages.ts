@@ -18,6 +18,7 @@ import { gitMessages } from './gitMessages';
 import { gitSetupMessages } from './gitSetupMessages';
 import { githubMessages } from './githubMessages';
 import { gridMessages } from './gridMessages';
+import { templateMessages } from './templateMessages';
 import { macUpdateMessages } from './macUpdateMessages';
 import { monitorMessages } from './monitorMessages';
 import { notesMessages } from './notesMessages';
@@ -70,6 +71,7 @@ export const messages = {
   ...gitSetupMessages,
   ...githubMessages,
   ...gridMessages,
+  ...templateMessages,
   ...macUpdateMessages,
   ...monitorMessages,
   ...notesMessages,
@@ -167,7 +169,7 @@ export const messages = {
   'Zamkniętych zostanie {count} terminali.': ['Terminals to close: {count}.', 'Zu schließende Terminals: {count}.', 'Terminales que se cerrarán: {count}.', 'Terminaux à fermer : {count}.', 'Terminais a fechar: {count}.'],
   '+{count} więcej': ['+{count} more', '+{count} weitere', '+{count} más', '+{count} autres', '+{count} mais'],
   'Nowy grid': ['New grid', 'Neues Raster', 'Nueva cuadrícula', 'Nouvelle grille', 'Nova grelha'],
-  'Nowy grid / preset…': ['New grid / preset…', 'Neues Raster / Vorlage…', 'Nueva cuadrícula / plantilla…', 'Nouvelle grille / modèle…', 'Nova grelha / predefinição…'],
+  'Nowy grid / szablon…': ['New grid / template…', 'Neues Raster / Vorlage…', 'Nueva cuadrícula / plantilla…', 'Nouvelle grille / modèle…', 'Nova grelha / predefinição…'],
   'Otwórz grid terminali albo pojedynczy terminal z wybranym agentem.': ['Open a terminal grid or a single terminal with your chosen agent.', 'Öffne ein Terminalraster oder ein einzelnes Terminal mit dem gewählten Agenten.', 'Abre una cuadrícula de terminales o un terminal con el agente elegido.', 'Ouvrez une grille de terminaux ou un terminal avec l’agent de votre choix.', 'Abra uma grelha de terminais ou um terminal com o agente escolhido.'],
   'Nowa zakładka z jednym terminalem': ['New tab with one terminal', 'Neuer Tab mit einem Terminal', 'Nueva pestaña con un terminal', 'Nouvel onglet avec un terminal', 'Novo separador com um terminal'],
   'Nowy terminal (zakładka)': ['New terminal (tab)', 'Neues Terminal (Tab)', 'Nuevo terminal (pestaña)', 'Nouveau terminal (onglet)', 'Novo terminal (separador)'],
@@ -283,15 +285,15 @@ export const messages = {
   'Bez ikony': ['No icon', 'Kein Symbol', 'Sin icono', 'Sans icône', 'Sem ícone'],
   'Od razu wyślij (Enter po wklejeniu)': ['Send immediately (Enter after paste)', 'Sofort senden (Enter nach Einfügen)', 'Enviar al instante (Enter tras pegar)', 'Envoyer immédiatement (Entrée après collage)', 'Enviar imediatamente (Enter após colar)'],
   'Tylko w projekcie „{name}”': ['Only in project “{name}”', 'Nur im Projekt „{name}“', 'Solo en el proyecto «{name}»', 'Uniquement dans le projet « {name} »', 'Apenas no projeto «{name}»'],
-  'Nazwa presetu': ['Preset name', 'Vorlagenname', 'Nombre de la plantilla', 'Nom du modèle', 'Nome da predefinição'],
-  'Gdzie zapisać preset?': ['Where should the preset be saved?', 'Wo soll die Vorlage gespeichert werden?', '¿Dónde guardar la plantilla?', 'Où enregistrer le modèle ?', 'Onde guardar a predefinição?'],
-  'Preset globalny jest dostępny we wszystkich projektach.': ['A global preset is available in all projects.', 'Eine globale Vorlage ist in allen Projekten verfügbar.', 'Una plantilla global está disponible en todos los proyectos.', 'Un modèle global est disponible dans tous les projets.', 'Uma predefinição global está disponível em todos os projetos.'],
+  'Nazwa szablonu': ['Template name', 'Vorlagenname', 'Nombre de la plantilla', 'Nom du modèle', 'Nome da predefinição'],
+  'Gdzie zapisać szablon?': ['Where should the template be saved?', 'Wo soll die Vorlage gespeichert werden?', '¿Dónde guardar la plantilla?', 'Où enregistrer le modèle ?', 'Onde guardar a predefinição?'],
+  'Szablon globalny jest dostępny we wszystkich projektach.': ['A global template is available in all projects.', 'Eine globale Vorlage ist in allen Projekten verfügbar.', 'Una plantilla global está disponible en todos los proyectos.', 'Un modèle global est disponible dans tous les projets.', 'Uma predefinição global está disponível em todos os projetos.'],
   'Tylko ten projekt': ['This project only', 'Nur dieses Projekt', 'Solo este proyecto', 'Ce projet uniquement', 'Apenas este projeto'],
   'Globalnie': ['Globally', 'Global', 'Globalmente', 'Globalement', 'Globalmente'],
   'Rzędy o różnej liczbie komórek': ['Rows with different cell counts', 'Zeilen mit unterschiedlicher Zellenanzahl', 'Filas con distintas cantidades de celdas', 'Lignes avec différents nombres de cellules', 'Linhas com diferentes números de células'],
-  'Preset projektu': ['Project preset', 'Projektvorlage', 'Plantilla del proyecto', 'Modèle du projet', 'Predefinição do projeto'],
-  'Preset globalny': ['Global preset', 'Globale Vorlage', 'Plantilla global', 'Modèle global', 'Predefinição global'],
-  'Usuń preset': ['Delete preset', 'Vorlage löschen', 'Eliminar plantilla', 'Supprimer le modèle', 'Eliminar predefinição'],
+  'Szablon projektu': ['Project template', 'Projektvorlage', 'Plantilla del proyecto', 'Modèle du projet', 'Predefinição do projeto'],
+  'Szablon globalny': ['Global template', 'Globale Vorlage', 'Plantilla global', 'Modèle global', 'Predefinição global'],
+  'Usuń szablon': ['Delete template', 'Vorlage löschen', 'Eliminar plantilla', 'Supprimer le modèle', 'Eliminar predefinição'],
   'Scal': ['Merge', 'Zusammenführen', 'Combinar', 'Fusionner', 'Unir'],
   'Rozdziel': ['Split', 'Teilen', 'Dividir', 'Séparer', 'Dividir'],
   'Wyczyść': ['Clear', 'Leeren', 'Limpiar', 'Effacer', 'Limpar'],
@@ -307,7 +309,7 @@ export const messages = {
   'Prompt dla wszystkich': ['Prompt for all', 'Prompt für alle', 'Prompt para todas', 'Prompt pour toutes', 'Prompt para todas'],
   'Wyczyść prompty': ['Clear prompts', 'Prompts leeren', 'Limpiar prompts', 'Effacer les prompts', 'Limpar prompts'],
   'worktree dla wszystkich': ['worktree for all', 'Worktree für alle', 'worktree para todas', 'worktree pour toutes', 'worktree para todas'],
-  'Zapisz jako preset': ['Save as preset', 'Als Vorlage speichern', 'Guardar como plantilla', 'Enregistrer comme modèle', 'Guardar como predefinição'],
+  'Zapisz jako szablon…': ['Save as template…', 'Als Vorlage speichern…', 'Guardar como plantilla…', 'Enregistrer comme modèle…', 'Guardar como predefinição…'],
   'Otwórz grid ({count})': ['Open grid ({count})', 'Raster öffnen ({count})', 'Abrir cuadrícula ({count})', 'Ouvrir la grille ({count})', 'Abrir grelha ({count})'],
   'np. backend': ['e.g. backend', 'z. B. Backend', 'p. ej. backend', 'ex. backend', 'ex. backend'],
   'nie dotyczy PowerShella': ['not applicable to a shell', 'nicht für Shells verfügbar', 'no se aplica a un intérprete', 'sans objet pour un shell', 'não se aplica a uma shell'],
@@ -315,7 +317,7 @@ export const messages = {
   'Wstaw snippet': ['Insert snippet', 'Snippet einfügen', 'Insertar fragmento', 'Insérer un extrait', 'Inserir excerto'],
   'Akcja': ['Action', 'Aktion', 'Acción', 'Action', 'Ação'],
   'Zakładka': ['Tab', 'Tab', 'Pestaña', 'Onglet', 'Separador'],
-  'Preset': ['Preset', 'Vorlage', 'Plantilla', 'Modèle', 'Predefinição'],
+  'Szablon': ['Template', 'Vorlage', 'Plantilla', 'Modèle', 'Predefinição'],
   'Grid': ['Grid', 'Raster', 'Cuadrícula', 'Grille', 'Grelha'],
   'Terminal': ['Terminal', 'Terminal', 'Terminal', 'Terminal', 'Terminal'],
   'Wiersz polecenia': ['Command Prompt', 'Eingabeaufforderung', 'Símbolo del sistema', 'Invite de commandes', 'Prompt de comando'],

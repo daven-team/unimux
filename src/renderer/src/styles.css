@@ -555,7 +555,11 @@ select option { background: #171717; color: var(--text); }
 
 /* cell table */
 /* 1.0.7: the profile column fits "Claude Code" (it was cut to "Claude Co..."). */
-.cell-table { grid-template-columns: 22px minmax(96px, 120px) 124px 105px minmax(160px, 1fr) 54px; }
+.cell-table { grid-template-columns: 22px minmax(96px, 120px) 124px 105px minmax(140px, 1fr) minmax(90px, 130px) 54px; }
+/* 1.1.1 grid templates: the start folder in the preview and the template chips */
+.preview .grid-template-dir { margin-top: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preview .pc-wt + .grid-template-dir { margin-top: 2px; }
+.presets .grid-template-chip { max-width: 220px; }
 .cell-table > span:last-child, .cell-table .hd:last-of-type { text-align: center; }
 .snip-btn { height: 28px; padding: 0 10px; flex: none; gap: 6px; }
 .prompt-wrap .input { height: 28px; }

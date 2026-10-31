@@ -5,14 +5,16 @@ import { useEffect, useState } from 'react';
 import {
   createLayout, describeLayout, layoutForCount, layoutFromRows, MAX_COLS, MAX_ROWS, mergeRect, rowCountsOf, unmergeAll, type GridLayout,
 } from '../../../shared/layout';
-import { ensureShellProfile, getProfile, removePreset, uid, upsertPreset } from '../../../shared/state';
+import { ensureShellProfile, getProfile, uid, upsertPreset } from '../../../shared/state';
+import { normalizeTemplateCell, TEMPLATE_LIMITS, templatesFor } from '../../../shared/gridTemplates';
 import { cellSourcePatch, cellSourceValue, type SshHost } from '../../../shared/ssh';
 import { CLI_NAMES, missingCli, missingClis, type CliStatusMap } from '../../../shared/cliStatus';
 import { profileName, profileOptionLabel } from '../cliUi';
 import type { PresetCell } from '../../../shared/types';
 import { offerInstall, openTab, showCliInstructions } from '../actions';
-import { askChoice, askText, closeModal, update, useStore } from '../store';
-import { openMenuAt } from './ContextMenu';
+import { askChoice, askText, closeModal, toast, update, useStore } from '../store';
+import { deleteTemplate, resolveTemplateCells, templateMenuItems } from '../templates';
+import { openMenu, openMenuAt } from './ContextMenu';
 import { IChevron, ISnippet, IX } from './icons';
 
 const QUICK = [1, 2, 4, 6, 9, 12];
@@ -44,7 +46,7 @@ export function GridDialog({ projectId }: { projectId: string }) {
   useEffect(() => setArmed(false), [lackingKey]);
 
   if (!project) return null;
-  const presets = s.presets.filter((p) => !p.projectId || p.projectId === projectId);
+  const presets = templatesFor(s.presets, projectId);
   const snippets = s.snippets.filter((x) => !x.projectId || x.projectId === projectId);
   const n = layout.areas.length;
 
@@ -74,18 +76,22 @@ export function GridDialog({ projectId }: { projectId: string }) {
     if (lackingCells > 0 && !armed) { setArmed(true); return; }
     closeModal();
     if (cells.slice(0, n).some((c) => c.sshHostId)) update((st) => ensureShellProfile(st).s);
-    void openTab(projectId, layout, cells.slice(0, n), name.trim() || undefined);
+    // 1.1.1: cell folders are relative to the project root (or absolute); a missing one falls back to the root with a note.
+    const tabName = name.trim() || undefined;
+    void resolveTemplateCells(project.path, cells.slice(0, n)).then((resolved) => openTab(projectId, layout, resolved, tabName));
   };
 
   const savePreset = async () => {
-    const presetName = await askText(tr("Nazwa presetu"), name || `${describeLayout(layout)} ${cells[0].sshHostId ? tr('SSH') : profileName(getProfile(s, cells[0].profileId), tr)}`);
+    const presetName = await askText(tr('Nazwa szablonu'), name || `${describeLayout(layout)} ${cells[0].sshHostId ? tr('SSH') : profileName(getProfile(s, cells[0].profileId), tr)}`);
     if (!presetName?.trim()) return;
-    const scope = await askChoice(tr("Gdzie zapisać preset?"), tr("Preset globalny jest dostępny we wszystkich projektach."), [
+    const scope = await askChoice(tr('Gdzie zapisać szablon?'), tr('Szablon globalny jest dostępny we wszystkich projektach.'), [
       { label: tr("Tylko ten projekt"), value: 'project' },
       { label: tr("Globalnie"), value: 'global', primary: true },
     ]);
     if (!scope) return;
-    const preset = { id: uid(), name: presetName.trim(), layout, cells: cells.slice(0, n), ...(scope === 'project' ? { projectId } : {}) };
+    if (s.presets.length >= TEMPLATE_LIMITS.count) { toast(tr('Osiągnięto limit szablonów ({count}). Usuń któryś, żeby zapisać nowy.', { count: TEMPLATE_LIMITS.count }), 'error'); return; }
+    const saved = cells.slice(0, n).map((c) => normalizeTemplateCell(c) ?? { profileId: c.profileId, worktree: false });
+    const preset = { id: uid(), name: presetName.trim().slice(0, TEMPLATE_LIMITS.name), layout, cells: saved, ...(scope === 'project' ? { projectId } : {}) };
     update((st) => upsertPreset(st, preset));
   };
 
@@ -95,8 +101,9 @@ export function GridDialog({ projectId }: { projectId: string }) {
     setLayout(p.layout);
     // A preset can name a host that was deleted since: that cell becomes a plain shell cell here.
     const known = (c: PresetCell): PresetCell => (c.sshHostId && !hosts.some((h) => h.id === c.sshHostId) ? { ...c, sshHostId: undefined } : c);
-    setCells((cs) => cs.map((x, i) => (p.cells[i] ? known(p.cells[i]) : { ...x, name: undefined, prompt: undefined })));
+    setCells((cs) => cs.map((x, i) => (p.cells[i] ? known(p.cells[i]) : { ...x, name: undefined, prompt: undefined, dir: undefined, muted: undefined })));
     setSelected(new Set());
+    if (!name.trim()) setName(p.name);
   };
 
   const hc = hover?.c ?? (layout.rowCounts ? 0 : layout.cols);
@@ -128,9 +135,11 @@ export function GridDialog({ projectId }: { projectId: string }) {
           ))}
           {presets.length > 0 && <span className="muted" style={{ alignSelf: 'center', margin: '0 4px' }}>·</span>}
           {presets.map((p) => (
-            <span key={p.id} className="btn small" onClick={() => loadPreset(p.id)} title={p.projectId ? tr("Preset projektu") : tr("Preset globalny")}>
+            <span key={p.id} className="btn small grid-template-chip" onClick={() => loadPreset(p.id)}
+              onContextMenu={(e) => { e.preventDefault(); openMenu(e.clientX, e.clientY, templateMenuItems(p, projectId)); }}
+              title={`${p.projectId ? tr('Szablon projektu') : tr('Szablon globalny')} · ${describeLayout(p.layout)}\n${tr('Kliknij, aby wczytać · prawy klik: zmień nazwę, zaktualizuj, usuń')}`}>
               {p.name}
-              <span onClick={(e) => { e.stopPropagation(); update((st) => removePreset(st, p.id)); }} title={tr("Usuń preset")} style={{ opacity: 0.6, display: 'grid' }}>
+              <span onClick={(e) => { e.stopPropagation(); void deleteTemplate(p.id); }} title={tr('Usuń szablon')} style={{ opacity: 0.6, display: 'grid' }}>
                 <IX />
               </span>
             </span>
@@ -203,6 +212,7 @@ export function GridDialog({ projectId }: { projectId: string }) {
                       </>
                     )}
                     {cells[i].worktree && !cells[i].sshHostId && <span className="pc-wt">⎇ worktree</span>}
+                    {cells[i].dir && !cells[i].worktree && !cells[i].sshHostId && <span className="pc-wt grid-template-dir" title={cells[i].dir}>{cells[i].dir}</span>}
                   </div>
                 </div>
               );
@@ -237,6 +247,7 @@ export function GridDialog({ projectId }: { projectId: string }) {
           <span className="hd">{tr("Profil")}</span>
           <span className="hd">{tr('Rola / MCP')}</span>
           <span className="hd">{tr("Prompt startowy")}</span>
+          <span className="hd" title={tr('Folder startowy: względny do katalogu projektu albo ścieżka bezwzględna')}>{tr('Folder')}</span>
           <span className="hd">{isRepo ? 'Worktree' : ''}</span>
           {layout.areas.map((_, i) => (
             <CellRow
@@ -272,7 +283,7 @@ export function GridDialog({ projectId }: { projectId: string }) {
         )}
       </div>
       <div className="modal-foot">
-        <button className="btn" onClick={() => void savePreset()}>{tr("Zapisz jako preset")}</button>
+        <button className="btn" onClick={() => void savePreset()}>{tr('Zapisz jako szablon…')}</button>
         <span style={{ flex: 1 }} />
         <button className="btn" onClick={closeModal}>{tr("Anuluj")}</button>
         <button className="btn white" onClick={open}>{armed && lackingCells > 0 ? tr('Utwórz mimo to ({count})', { count: n }) : tr('Otwórz grid ({count})', { count: n })}</button>
@@ -324,6 +335,11 @@ function CellRow({ index, cell, profiles, hosts, cliStatus, snippets, isRepo, on
             </button>
           )}
         </span>
+      )}
+      {isSsh ? <span /> : (
+        <input className="input" placeholder={tr('katalog projektu')} value={cell.worktree ? '' : (cell.dir ?? '')} disabled={cell.worktree}
+          title={cell.worktree ? tr('Komórka z worktree startuje w swoim worktree') : tr('Folder startowy: względny do katalogu projektu albo ścieżka bezwzględna')}
+          onChange={(e) => onChange({ dir: e.target.value || undefined })} />
       )}
       <span className="wt">{isRepo && !isSsh && <input type="checkbox" checked={cell.worktree} onChange={(e) => onChange({ worktree: e.target.checked })} />}</span>
     </>

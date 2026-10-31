@@ -10,6 +10,7 @@ import { addAgent, closeTab, selectTab } from '../actions';
 import { getS, setUi, update, useStore } from '../store';
 import { agentTargets } from '../../../shared/agentPrompt';
 import { openAgentPrompt } from '../agentPrompt';
+import { newGridFromTemplateItems, saveGridAsTemplate } from '../templates';
 import { profileOptionLabel } from '../cliUi';
 import { openMenu, openMenuAt } from './ContextMenu';
 import { IChevron, IEdit, IGrid, IPlusBold, IRestart, ISearch, ITable, IX, TGrid, TSettings, TNote, TSidebar, TSnippet, TTeam } from './icons';
@@ -314,6 +315,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       ] : []),
       { sep: true as const },
       ...sshHostMenuItems('Komórka SSH'),
+      ...(project ? newGridFromTemplateItems(project.id) : []),
     ]);
 
   return <div className="workspace-tabs" aria-label={tr('Gridy i pliki')}>
@@ -357,6 +359,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
                     { header: tr('Kolor projektu') },
                     { colors: PROJECT_COLORS, onPick: (color) => update((st) => updateProject(st, project.id, { color })) },
                     { label: tr("Nowy grid") + '…', icon: <IGrid />, onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
+                    { label: tr('Zapisz jako szablon…'), icon: <TGrid />, onClick: () => void saveGridAsTemplate(project.id, t.id) },
                     ...(agentTargets(getS()).some((a) => a.tabId === t.id) ? [{ label: tr('Wyślij prompt do agentów tego gridu…'), hint: shortcutText('agents.prompt') || undefined, onClick: () => openAgentPrompt(t.id) }] : []),
                     ...(t.cells.some((c) => c.ssh) ? [{ label: tr('Wysyłanie masowe'), onClick: () => setUi({ modal: { kind: 'broadcast', projectId: project.id, tabId: t.id } }) }] : []),
                     ...(reconnectAllTargetsOf(project.id, t.id).length ? [{ label: tr('Połącz ponownie wszystkie SSH'), icon: <IRestart />, onClick: () => reconnectAllSsh(project.id, t.id) }] : []),
