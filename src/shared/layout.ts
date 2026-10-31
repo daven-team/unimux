@@ -356,3 +356,26 @@ export function resetDivider(layout: GridLayout, d: Divider): GridLayout {
   const middle = rows.reduce((a, w) => a + (at(w, dr.line - 1) + at(w, dr.line + 1)) / 2, 0) / rows.length;
   return fromCanon(layout, resizeR(r, dr, middle - here));
 }
+
+const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+const isNumbers = (v: unknown): boolean => Array.isArray(v) && v.every((n) => typeof n === 'number' && Number.isFinite(n));
+const isNumberRows = (v: unknown): boolean => Array.isArray(v) && v.every((row) => row === null || isNumbers(row));
+
+/** A saved layout the grid can draw for `count` cells: one area per cell inside the grid, size fields of the right type. */
+export function isUsableLayout(layout: unknown, count: number): layout is GridLayout {
+  if (!isRecord(layout)) return false;
+  const { cols, rows, areas } = layout;
+  if (!Number.isInteger(cols) || !Number.isInteger(rows) || (cols as number) < 1 || (rows as number) < 1) return false;
+  // Row-based layouts use the LCM of their row counts as tracks (60 for 5, 4, 3); either axis in cols mode.
+  if ((cols as number) > 60 || (rows as number) > 60) return false;
+  if (!Array.isArray(areas) || areas.length !== count) return false;
+  const inside = areas.every((a) => isRecord(a)
+    && [a.col, a.row, a.colSpan, a.rowSpan].every((n) => Number.isInteger(n))
+    && (a.col as number) >= 0 && (a.row as number) >= 0 && (a.colSpan as number) >= 1 && (a.rowSpan as number) >= 1
+    && (a.col as number) + (a.colSpan as number) <= (cols as number) && (a.row as number) + (a.rowSpan as number) <= (rows as number));
+  if (!inside) return false;
+  if (layout.mode !== undefined && layout.mode !== 'cols') return false;
+  for (const field of ['rowCounts', 'rowSizes', 'colSizes'] as const) if (layout[field] !== undefined && !isNumbers(layout[field])) return false;
+  for (const field of ['rowColSizes', 'colRowSizes'] as const) if (layout[field] !== undefined && !isNumberRows(layout[field])) return false;
+  return true;
+}

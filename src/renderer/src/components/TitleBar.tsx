@@ -7,6 +7,7 @@ import type { Project } from '../../../shared/types';
 import { describeLayout } from '../../../shared/layout';
 import { activeProject, renameTab, updateProject, updateSettings, PROJECT_COLORS } from '../../../shared/state';
 import { addAgent, closeTab, selectTab } from '../actions';
+import { newGridFromTemplateItems, saveGridAsTemplate } from '../templates';
 import { setUi, update, useStore } from '../store';
 import { profileOptionLabel } from '../cliUi';
 import { openMenu, openMenuAt } from './ContextMenu';
@@ -312,6 +313,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
       ] : []),
       { sep: true as const },
       ...sshHostMenuItems('Komórka SSH'),
+      ...(project ? newGridFromTemplateItems(project.id) : []),
     ]);
 
   return <div className="workspace-tabs" aria-label={tr('Gridy i pliki')}>
@@ -355,6 +357,7 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
                     { header: tr('Kolor projektu') },
                     { colors: PROJECT_COLORS, onPick: (color) => update((st) => updateProject(st, project.id, { color })) },
                     { label: tr("Nowy grid") + '…', icon: <IGrid />, onClick: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) },
+                    { label: tr('Zapisz jako szablon…'), icon: <TGrid />, onClick: () => void saveGridAsTemplate(project.id, t.id) },
                     ...(t.cells.some((c) => c.ssh) ? [{ label: tr('Wysyłanie masowe'), onClick: () => setUi({ modal: { kind: 'broadcast', projectId: project.id, tabId: t.id } }) }] : []),
                     ...(reconnectAllTargetsOf(project.id, t.id).length ? [{ label: tr('Połącz ponownie wszystkie SSH'), icon: <IRestart />, onClick: () => reconnectAllSsh(project.id, t.id) }] : []),
                     { label: tr('Przenieś do nowego okna'), icon: <IPopOut />, onClick: () => void detachKey(`grid:${t.id}`, 'menu') },

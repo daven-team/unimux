@@ -111,7 +111,7 @@ import { cliForProfile, CLI_NAMES, isCliId, missingCli, resolveExecFile, spawnDe
 import { automationSchemas, type AutomationOperation, type McpInfo } from '../shared/automation';
 import type { StateEdit } from '../shared/stateEdits';
 import { stateChange } from '../shared/statePatch';
-import { findCell, getProfile, patchSshCell, unlessRestoring } from '../shared/state';
+import { cellCwd, findCell, getProfile, patchSshCell, unlessRestoring } from '../shared/state';
 import { resumeForPhase, resumesConversation, type SshSessionState } from '../shared/ssh';
 import { automationHintForHook, automationStatusFor } from '../shared/runtimeStatus';
 import { followedSession, shouldUpdateCellSession } from '../shared/sessionTrack';
@@ -502,7 +502,7 @@ const contextTracker = new ContextTracker({
     const found = findCell(state, cellId);
     const session = found?.cell.session;
     if (!found || !session || found.cell.ssh || getProfile(state, found.cell.profileId).cli !== session.cli) return null;
-    return { cli: session.cli, sessionId: session.id, cwd: found.cell.worktree?.path ?? found.project.path, modelHint: found.cell.model };
+    return { cli: session.cli, sessionId: session.id, cwd: cellCwd(found.project, found.cell), modelHint: found.cell.model };
   },
   emit: (cellId, usage) => send('cell:context', cellId, usage),
   claudeDir: () => process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude'),
@@ -701,7 +701,7 @@ const automation = new AutomationService(controller, {
     const profile = getProfile(state, found.cell.profileId);
     const session = found.cell.session;
     if (!session || session.cli !== profile.cli || !session.confirmed) return { restarted: false, reason: 'Choose a compatible conversation from History before restarting through MCP.' };
-    const cwd = found.cell.worktree?.path ?? found.project.path;
+    const cwd = cellCwd(found.project, found.cell);
     if (!(await pathExists(cwd))) return { restarted: false, reason: 'Project folder does not exist.' };
     if (!alive.has(cellId)) return { restarted: false, reason: 'Agent is not running.' };
     endCellMcp(mcp, MCP_DIR, cellId);
@@ -1213,7 +1213,7 @@ function boundCodexIds(): Set<string> {
  */
 guardedHandle('codex:bind', async (_e, cellId: string, cwd: string) => {
   const peers = state.projects.flatMap((p) => p.tabs.flatMap((t) => t.cells
-    .filter((c) => alive.has(c.id) && getProfile(state, c.profileId).cli === 'codex' && (c.worktree?.path ?? p.path) === cwd)));
+    .filter((c) => alive.has(c.id) && getProfile(state, c.profileId).cli === 'codex' && cellCwd(p, c) === cwd)));
   // Shared-directory simultaneous starts are ambiguous. Never guess a message recipient.
   if (peers.length !== 1 || peers[0].id !== cellId) return null;
   if (codexHooked.has(cellId)) return null; // its notify hook binds the exact thread; a timestamp guess must never overwrite it

@@ -73,14 +73,20 @@ export const taskResultSchema = z.object({
 const gridCell = z.object({
   profileId: id, name: name.optional(), role: role.optional(), color: color.optional(), model: model.optional(),
   prompt: text.optional(), worktree: z.boolean().default(false),
+  // 1.1.1, grid templates opened by the user: an absolute start folder (refused for agents) and muted alerts.
+  dir: z.string().min(1).max(1000).optional(), muted: z.literal(true).optional(),
 }).strict();
 /** A cell launched by an agent: `after` lists positions (0-based, earlier cells only) whose startup tasks must finish first. */
 const launchCell = gridCell.extend({ after: z.array(z.number().int().min(0).max(19)).max(19).optional() }).strict();
+const sizes = z.array(z.number().positive().finite().max(1e6)).max(60);
 const gridLayout = z.object({
   cols: z.number().int().min(1).max(60), rows: z.number().int().min(1).max(4),
   areas: z.array(z.object({ col: z.number().int().min(0).max(59), row: z.number().int().min(0).max(3),
     colSpan: z.number().int().min(1).max(60), rowSpan: z.number().int().min(1).max(4) }).strict()).min(1).max(20),
   rowCounts: z.array(z.number().int().min(1).max(5)).min(1).max(4).optional(),
+  // 1.1.1: the dragged track sizes a grid template keeps.
+  rowSizes: sizes.optional(), colSizes: sizes.optional(), rowColSizes: z.array(sizes.nullable()).max(60).optional(),
+  colRowSizes: z.array(sizes.nullable()).max(60).optional(), mode: z.literal('cols').optional(),
 }).strict();
 export const automationSchemas = {
   get_context: z.object({}).strict(),

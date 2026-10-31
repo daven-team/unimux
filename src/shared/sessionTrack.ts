@@ -25,12 +25,12 @@ export function shouldUpdateCellSession(i: SessionUpdateInput): boolean {
   return i.known && i.isClaude && i.alive && SESSION_ID.test(i.reportedId) && i.currentId !== i.reportedId;
 }
 
-/** Project folder plus every distinct worktree folder of its cells (their conversations live there). */
+/** Project folder plus every distinct worktree folder and own folder (1.1.1) of its cells (their conversations live there). */
 export function sessionSearchPaths(projectPath: string, state: AppState): string[] {
   const paths = [projectPath];
   const project = state.projects.find((p) => p.path === projectPath);
   for (const t of project ? [...project.tabs, ...project.archive] : [])
-    for (const c of t.cells) if (c.worktree?.path && !paths.includes(c.worktree.path)) paths.push(c.worktree.path);
+    for (const c of t.cells) for (const folder of [c.worktree?.path, c.dir]) if (folder && !paths.includes(folder)) paths.push(folder);
   return paths;
 }
 

@@ -1,7 +1,7 @@
 import { chosenLanguage, loadLanguage, tr, useI18n } from './i18n';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { fitPanelWidths, MIN_WORKSPACE_WIDTH, RAIL_WIDTH, type Panel } from '../../shared/panels';
-import { activeProject, activeTab, findCell, getProfile, updateCell } from '../../shared/state';
+import { activeProject, activeTab, cellCwd, findCell, getProfile, updateCell } from '../../shared/state';
 import { isAuxPtyId } from '../../shared/cliInstall';
 import { ptyHostRestartToast } from '../../shared/ssh';
 import type { McpInfo } from '../../shared/automation';
@@ -260,7 +260,7 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
 function bindCodexSession(cellId: string): void {
   const found = findCell(getS(), cellId);
   if (!found || found.cell.session || getProfile(getS(), found.cell.profileId).cli !== 'codex') return;
-  void window.mc.bindCodexSession(cellId, found.cell.worktree?.path ?? found.project.path);
+  void window.mc.bindCodexSession(cellId, cellCwd(found.project, found.cell));
 }
 
 // Parts without props, created once: when the app re-renders (a side panel edge dragged, a view switched) React skips them;

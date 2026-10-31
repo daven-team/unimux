@@ -1,7 +1,7 @@
 // Actions of the conversation search (1.0.9): where a found conversation can be resumed, and resuming it in the project
 // (or worktree) that holds its folder. A folder no project holds yet is added as a project first.
 import { folderOwner, normalizeFolder, type ConvHit, type FolderProject } from '../../shared/convSearch';
-import { activeProject, activeTab, findCell, getProfile } from '../../shared/state';
+import { activeProject, activeTab, cellCwd, findCell, getProfile } from '../../shared/state';
 import type { AppState, SessionInfo } from '../../shared/types';
 import { addProjectFolder, focusCell, resumeSession, switchProject } from './actions';
 import { tr } from './i18n';
@@ -36,7 +36,7 @@ export function focusedCellUse(s: AppState, ui: Pick<Ui, 'focusedCellId' | 'stat
   const owner = folderOwner(folderProjects(s), hit.cwd);
   if (!owner || owner.projectId !== project.id) return { ok: false, reason: 'project' };
   if (cell.ssh) return { ok: false, reason: 'ssh' };
-  if (normalizeFolder(cell.worktree?.path ?? project.path) !== normalizeFolder(owner.worktree?.path ?? project.path)) return { ok: false, reason: 'folder' };
+  if (normalizeFolder(cellCwd(project, cell)) !== normalizeFolder(owner.worktree?.path ?? project.path)) return { ok: false, reason: 'folder' };
   const status = ui.statuses[id];
   const cli = getProfile(s, cell.profileId).cli;
   if ((status === 'working' || status === 'waiting') && cli !== 'shell') return { ok: false, reason: 'busy' };

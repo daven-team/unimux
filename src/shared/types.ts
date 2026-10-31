@@ -77,6 +77,8 @@ export interface Cell {
   /** Sent to the agent as its first prompt on the next new-conversation start, then cleared. */
   startupPrompt?: string;
   worktree?: Worktree;
+  /** 1.1.1: the absolute folder the cell starts in when it has no worktree (from a grid template or the grid dialog); absent = the project folder. */
+  dir?: string;
   session?: CellSession;
   fontSize?: number;
   /** The user muted this cell's alerts (notification and sound); its status is still shown. */
@@ -131,8 +133,16 @@ export interface PresetCell {
   prompt?: string;
   /** The cell connects to this saved host when the preset is opened (a deleted host gives a local shell). */
   sshHostId?: string;
+  /**
+   * 1.1.1: the folder the cell starts in: relative to the project root with "/" when it was inside it, else absolute; absent = the
+   * project root. A folder missing in the target project falls back to the root (shared/gridTemplates.ts).
+   */
+  dir?: string;
+  /** 1.1.1: the cell starts with its alerts muted. */
+  muted?: true;
 }
 
+/** A grid template (UI: "szablon"; 1.1.1). Stored as `presets` for MCP's save_preset / presetId; no sessions, no secrets. */
 export interface Preset {
   id: string;
   name: string;

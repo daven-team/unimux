@@ -6,7 +6,7 @@
 // unsaved values; this window reports its unsaved database work to the main window's quit question.
 import { useEffect, useState, type DragEvent } from 'react';
 import { cleanWork, DETACHED_FILE_SHORTCUTS, DETACHED_GRID_SHORTCUTS, findDetached, viewOverlay } from '../../../shared/detached';
-import { activeProject, activeTab, findCell, getProfile, updateCell } from '../../../shared/state';
+import { activeProject, activeTab, cellCwd, findCell, getProfile, updateCell } from '../../../shared/state';
 import { describeLayout } from '../../../shared/layout';
 import { isAuxPtyId } from '../../../shared/cliInstall';
 import { ptyHostRestartToast } from '../../../shared/ssh';
@@ -136,7 +136,7 @@ async function boot(): Promise<void> {
     if (prev === 'working') noteAgentTurnEnd(cellId);
     alertForStatus(cellId, status, prev, cause, reason, hooked, info);
     const found = findCell(getS(), cellId);
-    if (!hooked && found && !found.cell.session && getProfile(getS(), found.cell.profileId).cli === 'codex') void window.mc.bindCodexSession(cellId, found.cell.worktree?.path ?? found.project.path);
+    if (!hooked && found && !found.cell.session && getProfile(getS(), found.cell.profileId).cli === 'codex') void window.mc.bindCodexSession(cellId, cellCwd(found.project, found.cell));
   });
   // The short reason of a status ("czeka na zgodę: Bash", "praca: Edit") for the cell card.
   terminals.onDetail((cellId, detail) => {

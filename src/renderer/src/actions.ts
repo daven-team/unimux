@@ -5,7 +5,7 @@ import { normalizeProjectPath } from '../../shared/platform';
 import { layoutForCount } from '../../shared/layout';
 import { CELL_HEAD_HEIGHT, cellBodyBox, chooseGridSize, type Size } from '../../shared/cellBox';
 import {
-  activeProject, activeTab, addCell, addProject, addTab, cellWorktreeUse, closeTab as closeTabState, ensureShellProfile, findCell, getProfile,
+  activeProject, activeTab, addCell, addProject, addTab, cellCwd, cellWorktreeUse, closeTab as closeTabState, ensureShellProfile, findCell, getProfile,
   removeCell as removeCellState, removeProject as removeProjectState, restoreTab, setActiveProject, setActiveTab, focusGrid,
   swapCells as swapCellsState, uid, updateCell, updateSettings,
 } from '../../shared/state';
@@ -238,7 +238,7 @@ export async function spawnCell(cellId: string, mode: 'new' | 'resume'): Promise
   let r: Awaited<ReturnType<typeof window.mc.spawnCell>>;
   try {
     r = await window.mc.spawnCell({
-      cellId, cwd: cell.worktree?.path ?? project.path, cols, rows, profile, mode, sessionId, ...(forcedCells.has(cellId) ? { force: true } : {}),
+      cellId, cwd: cellCwd(project, cell), cols, rows, profile, mode, sessionId, ...(forcedCells.has(cellId) ? { force: true } : {}),
       sessionConfirmed: mode === 'resume' && cell.session?.confirmed === true,
       startupPrompt: mode === 'new' && profile.cli !== 'shell' ? cell.startupPrompt : undefined,
     });
@@ -612,6 +612,10 @@ export interface TabSpecCell {
   session?: CellSession;
   /** A saved SSH host: the cell becomes an SSH session (a deleted host gives a local shell). */
   sshHostId?: string;
+  /** 1.1.1: the absolute folder the cell starts in (a grid template's folder, resolved by templates.ts); absent = the project folder. */
+  dir?: string;
+  /** 1.1.1: the cell starts with its alerts muted. */
+  muted?: true;
 }
 
 /** Opens a new tab and resolves to the ids of its cells (none when it could not be created). */
@@ -629,7 +633,8 @@ export async function openTab(projectId: string, layout: GridLayout, cells: TabS
         cells: layout.areas.map((_, i) => {
           const spec = cells[i] ?? cells[cells.length - 1] ?? { profileId: getS().settings.lastProfileId, worktree: false };
           return { profileId: spec.profileId, model: spec.model, color: spec.color, role: getProfile(getS(), spec.profileId).cli === 'shell' ? undefined : spec.role, name: spec.name?.trim() || undefined,
-            worktree: spec.worktree, prompt: getProfile(getS(), spec.profileId).cli === 'shell' ? undefined : spec.prompt?.trim() || undefined };
+            worktree: spec.worktree, prompt: getProfile(getS(), spec.profileId).cli === 'shell' ? undefined : spec.prompt?.trim() || undefined,
+            ...(spec.dir && !spec.worktree ? { dir: spec.dir } : {}), ...(spec.muted ? { muted: true as const } : {}) };
         }),
       }) as { gridId: string; cellIds: string[] };
       update((s) => setActiveTab(setActiveProject(s, projectId), projectId, created.gridId));
@@ -643,7 +648,7 @@ export async function openTab(projectId: string, layout: GridLayout, cells: TabS
   // A preset can outlive the shell profile it names; SSH cells always get a present one.
   let sshProfileId: string | undefined;
   if (cells.some((cell) => cell.sshHostId)) update((s) => { const r = ensureShellProfile(s); sshProfileId = r.profileId; return r.s; });
-  const specs: Array<{ model?: string; color?: string; profileId: string; role?: import('../../shared/automation').AgentRole; name?: string; startupPrompt?: string; worktree?: Worktree; session?: CellSession; ssh?: { hostId: string } }> = [];
+  const specs: Array<{ model?: string; color?: string; profileId: string; role?: import('../../shared/automation').AgentRole; name?: string; startupPrompt?: string; worktree?: Worktree; session?: CellSession; ssh?: { hostId: string }; dir?: string; muted?: true }> = [];
   for (let i = 0; i < layout.areas.length; i++) {
     const spec = cells[i] ?? cells[cells.length - 1] ?? { profileId: getS().settings.lastProfileId, worktree: false };
     let worktree: Worktree | undefined = spec.sshHostId ? undefined : spec.existingWorktree;
@@ -655,7 +660,8 @@ export async function openTab(projectId: string, layout: GridLayout, cells: TabS
       }
     }
     const host = spec.sshHostId ? getS().sshHosts.find((h) => h.id === spec.sshHostId) : undefined;
-    specs.push({ profileId: host && sshProfileId ? sshProfileId : spec.profileId, model: spec.model, color: spec.color, role: host ? undefined : spec.role, name: sshSpecName(spec.name, host), startupPrompt: host ? undefined : spec.prompt, worktree, session: spec.session, ...(host ? { ssh: { hostId: host.id } } : {}) });
+    specs.push({ profileId: host && sshProfileId ? sshProfileId : spec.profileId, model: spec.model, color: spec.color, role: host ? undefined : spec.role, name: sshSpecName(spec.name, host), startupPrompt: host ? undefined : spec.prompt, worktree, session: spec.session, ...(host ? { ssh: { hostId: host.id } } : {}),
+      ...(spec.dir && !host ? { dir: spec.dir } : {}), ...(spec.muted ? { muted: true as const } : {}) });
   }
   update((s) => setActiveProject(addTab(s, projectId, { name: tabName, layout, cells: specs }), projectId));
   const tab = activeTab(getS().projects.find((p) => p.id === projectId) ?? null);

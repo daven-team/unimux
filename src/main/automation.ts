@@ -1,5 +1,6 @@
 import { automationSchemas, isClosedTask, projectCount, pruneAutomation, PROJECT_ITEM_LIMIT, taskPrompt, type AgentMessage, type AgentRole, type AgentRuntimeStatus, type AgentTask, type AutomationOperation, type AutomationState } from '../shared/automation';
-import { CELL_COLORS, closeTab, addTab, findCell, getProfile, setActiveTab, uid, updateCell, upsertPreset, upsertSnippet } from '../shared/state';
+import { normalizeCellDir } from '../shared/gridTemplates';
+import { CELL_COLORS, cellCwd, closeTab, addTab, findCell, getProfile, setActiveTab, uid, updateCell, upsertPreset, upsertSnippet } from '../shared/state';
 import { layoutForCount, layoutFromRows } from '../shared/layout';
 import type { AppState, Cell, Tab, Worktree } from '../shared/types';
 import { CLI_NAMES, type CliId } from '../shared/cliStatus';
@@ -118,7 +119,7 @@ export class AutomationService {
         if (!actorId) return { paused: this.state.get().automation.paused };
         const { project, cell, tab } = this.actor(actorId);
         return { cellId: cell.id, role: this.role(actorId), projectId: project.id, projectName: project.name,
-          cwd: cell.worktree?.path ?? project.path, gridId: tab.id, profileId: cell.profileId, model: cell.model, paused: this.state.get().automation.paused,
+          cwd: cellCwd(project, cell), gridId: tab.id, profileId: cell.profileId, model: cell.model, paused: this.state.get().automation.paused,
           profiles: this.state.get().profiles.map(({ id, name, cli }) => ({ id, name, cli })) };
       }
       case 'read_inbox': {
@@ -151,7 +152,7 @@ export class AutomationService {
           cellId: cell.id, name: cell.name ?? getProfile(this.state.get(), cell.profileId).name,
           gridId: tab.id, gridName: tab.name, gridColor: tab.color, profileId: cell.profileId, model: cell.model, color: cell.color,
           role: cell.role ?? null,
-          status: this.statuses.get(cell.id) ?? 'unknown', cwd: cell.worktree?.path ?? project.path,
+          status: this.statuses.get(cell.id) ?? 'unknown', cwd: cellCwd(project, cell),
           ...contextField(this.deps.contextOf?.(cell.id)),
           tasks: this.state.get().automation.tasks.filter((t) => t.cellId === cell.id && !CLOSED.has(t.status)).map(({ id, title, status }) => ({ id, title, status })),
         })));
@@ -214,6 +215,7 @@ export class AutomationService {
         const existing = this.state.get().presets.find((p) => p.id === a.id);
         if (existing && existing.projectId !== project.id) throw new Error('Preset belongs to another scope.');
         this.validateCells(a.cells);
+        if (actorId && a.cells.some((c) => c.dir)) throw new Error('Cell folders are not available to agents.');
         const layout = this.layout(a.cells.length, a.rows);
         const preset = { id: a.id ?? uid(), name: a.name, projectId: project.id, layout, cells: a.cells };
         this.state.change((s) => this.log(upsertPreset(s, preset), project.id, 'preset', preset.name, actorId));
@@ -458,6 +460,7 @@ export class AutomationService {
     if (a.presetId && a.cells) throw new Error('Specify either cells or presetId.');
     const cells = a.cells ?? preset?.cells;
     if (!cells?.length || cells.length > 20) throw new Error('Specify 1 to 20 cells or a presetId.');
+    if (actorId && a.cells?.some((c) => c.dir)) throw new Error('Cell folders are not available to agents.');
     this.validateCells(cells);
     const afterOf = (i: number) => (cells[i] as { after?: number[] }).after;
     const tracked = (i: number) => !!(cells[i].prompt && cells[i].role);
@@ -493,7 +496,11 @@ export class AutomationService {
         const worktree = cell.worktree ? await this.deps.createWorktree(project.path, `${a.name || existing?.tab.name}-${uid().slice(0, 8)}-${i + 1}`) : undefined;
         if (worktree) created.push(worktree);
         if (signal?.aborted) throw new Error(CANCELLED);
-        specs.push({ profileId: cell.profileId, role: cell.role, name: cell.name, color: cell.color ?? (actorId ? CELL_COLORS[((existing?.tab.cells.length ?? 0) + i) % CELL_COLORS.length] : undefined), model: cell.model, worktree });
+        // A template's folder (resolved and absolute; only the user's own cells, checked above) and muted flag (1.1.1). A presetId
+        // keeps the template's relative form, so its folders are not used here.
+        const dir = a.cells ? normalizeCellDir(cell.dir) : undefined;
+        specs.push({ profileId: cell.profileId, role: cell.role, name: cell.name, color: cell.color ?? (actorId ? CELL_COLORS[((existing?.tab.cells.length ?? 0) + i) % CELL_COLORS.length] : undefined), model: cell.model, worktree,
+          ...(dir ? { dir } : {}), ...(cell.muted ? { muted: true as const } : {}) });
       }
       let gridId = '';
       const cellIds: string[] = [];

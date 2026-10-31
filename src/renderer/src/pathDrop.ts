@@ -1,6 +1,6 @@
 // Puts files and folders (dragged from the Files tree, or added from its context menu) into a cell's input, never submitting.
 import { buildPathText, capItems, dropAbsPath, dropBlock, MAX_DROP_ITEMS, parsePathPayload, resolveDropTarget, validRelPath, type DropTarget, type PathItem } from '../../shared/pathDrop';
-import { activeProject, activeTab, findCell, getProfile } from '../../shared/state';
+import { activeProject, activeTab, cellCwd, findCell, getProfile } from '../../shared/state';
 import { ensureStarted, focusCell, isStarted } from './actions';
 import { kindOf } from './explorer';
 import { tr } from './i18n';
@@ -25,8 +25,8 @@ export function cellDropFormat(cellId: string): { target: DropTarget; cwd: strin
   const profile = getProfile(state, found.cell.profileId);
   const inferred = profile.cli === 'shell' ? terminals.inferredAgent(cellId) : null;
   const target = resolveDropTarget(profile.cli, found.cell.pathMode, inferred?.agent ?? null);
-  const cellCwd = found.cell.worktree?.path ?? found.project.path;
-  return { target, cwd: inferred && inferred.agent === target && inferred.cwd ? inferred.cwd : cellCwd };
+  const cellFolder = cellCwd(found.project, found.cell);
+  return { target, cwd: inferred && inferred.agent === target && inferred.cwd ? inferred.cwd : cellFolder };
 }
 
 /** Validated items of a drag payload (the raw string comes from the DOM and is untrusted). */
