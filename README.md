@@ -55,7 +55,7 @@ Around the agents it has the tools you reach for while they work: files, Git, SS
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/grid-dialog.png" alt="New grid dialog with a review-team preset: a 2x2 layout, Claude Code and Codex profiles, MCP roles and startup prompts" /></td>
+    <td width="50%"><img src="docs/screenshots/grid-dialog.png" alt="New grid dialog with a review-team template: a 2x2 layout, Claude Code and Codex profiles, MCP roles and startup prompts" /></td>
     <td width="50%"><img src="docs/screenshots/detached.png" alt="A grid of four shells in its own window with Add and Attach back" /></td>
   </tr>
   <tr>
@@ -204,7 +204,7 @@ On macOS, use `Cmd` instead of `Ctrl`. Every shortcut can be changed in **Settin
 | Shortcut | Action |
 |---|---|
 | `Ctrl+K` | Command palette |
-| `Ctrl+Shift+G` | New grid or preset |
+| `Ctrl+Shift+G` | New grid or grid template |
 | `Ctrl+Shift+T` | New tab with a single terminal |
 | `Ctrl+Shift+H` | History of conversations and grids |
 | `Ctrl+Shift+M` | Maximize or restore the cell |
@@ -212,6 +212,10 @@ On macOS, use `Cmd` instead of `Ctrl`. Every shortcut can be changed in **Settin
 | `Ctrl+Tab` | Recently used tab (hold `Ctrl` to go further back) |
 | `Ctrl+Shift+B` / `Ctrl+Shift+O` | Snippets / Notes |
 | `Ctrl+Shift+F` | Find in a terminal |
+| `Ctrl+Alt+F` | Search all Claude and Codex conversations |
+| `Ctrl+Shift+U` | One prompt to several agents |
+| `Ctrl+Shift+D` | Prompt queue of the focused cell |
+| `Ctrl+Alt+PageDown` / `PageUp` | Next / previous cell that waits for you |
 
 The full list is in [Keyboard shortcuts](docs/SHORTCUTS.md).
 

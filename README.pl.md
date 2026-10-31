@@ -49,7 +49,7 @@ po które sięgasz w trakcie ich pracy: pliki, Git, SSH i SFTP, bazy danych, not
 
 | Nowy grid | Grid we własnym oknie |
 | --- | --- |
-| ![Okno nowego gridu z presetem zespołu recenzji: układ 2x2, profile, role MCP i prompty](docs/screenshots/grid-dialog.png) | ![Grid czterech powłok we własnym oknie z przyciskami Dodaj i Przypnij z powrotem](docs/screenshots/detached.png) |
+| ![Okno nowego gridu z szablonem zespołu recenzji: układ 2x2, profile, role MCP i prompty](docs/screenshots/grid-dialog.png) | ![Grid czterech powłok we własnym oknie z przyciskami Dodaj i Przypnij z powrotem](docs/screenshots/detached.png) |
 | **Plik obok gridu** | **Paleta `Ctrl+K`** |
 | ![Podgląd Markdown pliku README.md obok gridu czterech powłok](docs/screenshots/split.png) | ![Paleta poleceń z wynikami dla „new”](docs/screenshots/palette.png) |
 
@@ -139,7 +139,7 @@ Na macOS zamiast `Ctrl` używasz `Cmd`. Każdy skrót można zmienić w **Ustawi
 | Skrót | Działanie |
 |---|---|
 | `Ctrl+K` | Paleta poleceń |
-| `Ctrl+Shift+G` | Nowy grid albo preset |
+| `Ctrl+Shift+G` | Nowy grid albo szablon gridu |
 | `Ctrl+Shift+T` | Nowa karta z jednym terminalem |
 | `Ctrl+Shift+H` | Historia rozmów i gridów |
 | `Ctrl+Shift+M` | Maksymalizuj albo przywróć komórkę |
@@ -147,6 +147,10 @@ Na macOS zamiast `Ctrl` używasz `Cmd`. Każdy skrót można zmienić w **Ustawi
 | `Ctrl+Tab` | Ostatnio używana karta (przytrzymaj `Ctrl`, aby cofnąć się dalej) |
 | `Ctrl+Shift+B` / `Ctrl+Shift+O` | Snippety / notatki |
 | `Ctrl+Shift+F` | Szukaj w terminalu |
+| `Ctrl+Alt+F` | Szukaj we wszystkich rozmowach Claude i Codex |
+| `Ctrl+Shift+U` | Jeden prompt do wielu agentów |
+| `Ctrl+Shift+D` | Kolejka promptów komórki w fokusie |
+| `Ctrl+Alt+PageDown` / `PageUp` | Następna / poprzednia komórka, która czeka na Ciebie |
 
 Pełna lista: [skróty klawiszowe](docs/SHORTCUTS.md) (po angielsku).
 

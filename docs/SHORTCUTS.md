@@ -8,7 +8,7 @@ These are the defaults. Every one of them can be changed, disabled or restored i
 |---|---|
 | `Ctrl+K` / `Ctrl+Shift+P` | Command palette |
 | `Ctrl+Shift+T` | New tab with a single terminal |
-| `Ctrl+Shift+G` | New grid or preset |
+| `Ctrl+Shift+G` | New grid or grid template |
 | `Ctrl+Shift+N` | Add an agent to the current grid |
 | `Ctrl+Shift+W` | Close the tab in front: a grid (it goes to History), a file, the SSH view or Settings |
 | `Ctrl+Shift+H` | History of conversations and grids |
@@ -17,6 +17,10 @@ These are the defaults. Every one of them can be changed, disabled or restored i
 | `Ctrl+Alt+Shift+Arrows` | Swap the focused cell with its neighbour (or drag a cell by its header onto another one) |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Recently used tab of the strip (grids of all projects, files): a tap toggles between the last two, holding `Ctrl` and pressing `Tab` again walks further with a switcher, releasing `Ctrl` switches (also `Ctrl` on macOS). "Next tab" / "Previous tab" in strip order have no key by default and can be bound in Settings |
 | `Ctrl+Shift+B` / `Ctrl+Shift+E` | Toggle snippets / projects panel |
+| `Ctrl+Alt+F` | Search every Claude Code and Codex conversation of all projects |
+| `Ctrl+Shift+U` | Send one prompt to several agents (Claude and Codex cells of every grid and window) |
+| `Ctrl+Shift+D` | Add a prompt to the queue of the focused agent cell |
+| `Ctrl+Alt+PageDown` / `Ctrl+Alt+PageUp` | Next / previous cell that waits for you (also from a detached window) |
 | `Ctrl+Wheel` | Zoom a single cell |
 
 Plain `Ctrl+T`, `Ctrl+B` and `Ctrl+W` in terminals are left alone on purpose: Claude Code and Codex use them.
