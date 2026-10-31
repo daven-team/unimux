@@ -157,6 +157,8 @@ export interface McApi {
   notify(n: { title: string; body: string; cellId: string; actions?: 'answer' | 'show'; token?: string }): void;
   /** 1.0.9: an answer from a notification could not be typed (the cell changed): show the window and the cell instead. */
   showCell(cellId: string): void;
+  /** 1.1.1: shows a sample limit warning (the "Test" button of the limit warnings). */
+  testLimitAlert(): void;
   /** 1.0.9: an agent needs the user: flash this window's taskbar button / bounce the Dock icon if the window is not focused. */
   flashAttention(): void;
   openExternal(url: string): void;
@@ -273,6 +275,8 @@ export interface McApi {
   on(channel: 'app:confirm-quit', cb: () => void): () => void;
   on(channel: 'update:state', cb: (s: UpdateState) => void): () => void;
   on(channel: 'usage:state', cb: (state: UsageState) => void): () => void;
+  /** A limit warning was clicked (1.1.1): open the AI account limits panel. */
+  on(channel: 'usage:open', cb: () => void): () => void;
   on(channel: 'accounts:swapPending', cb: (pending: boolean) => void): () => void;
   on(channel: 'state:changed', cb: (change: StateChange) => void): () => void;
   on(channel: 'fs:progress', cb: (progress: FileOpProgress) => void): () => void;

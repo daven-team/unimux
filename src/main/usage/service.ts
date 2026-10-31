@@ -10,6 +10,11 @@ import { sanitizeUsage } from './sanitize';
 export const MIN_GAP_MS = 20_000;
 /** At most one read of an account in this window: the usage endpoint allows about 28-30 reads an hour per account and client. */
 export const MIN_IDENTITY_GAP_MS = 180_000;
+/**
+ * The first run after a start and the refresh button read every account at once, except one read in this short window
+ * (a quick restart loop, a double click); rate-limit holds stay in force.
+ */
+export const EAGER_GUARD_MS = 30_000;
 /** Added to the Retry-After of a 429: the limit often re-triggers right after the stated deadline (cswap's measured value). */
 export const RETRY_AFTER_MARGIN_MS = 15 * 60_000;
 const WATCH_MS = 20_000;
@@ -55,6 +60,8 @@ export interface UsageServiceOptions {
   notices?(): AccountNotice[];
   /** The saved accounts file's read-only state and the set-aside cards, sent with every state. */
   accountsInfo?(): Pick<UsageState, 'accountsReadOnly' | 'setAside' | 'duplicateCopies'>;
+  /** Keep polling on the interval while the window is hidden or minimized (1.1.1: limit warnings are on). */
+  pollHidden?(): boolean;
   /** E-mail of the account signed in to Claude Code, when known: lets a 0.9.0 cache entry of the live card be checked. */
   liveEmail?(): string | undefined;
 }
@@ -86,6 +93,10 @@ export class UsageService {
   private followUp: Promise<UsageState> | undefined;
   /** Whether any caller that joined the follow-up run was manual (the refresh button). */
   private followUpManual = false;
+  /** The next run reads every account at once (the refresh button), with only the short EAGER_GUARD_MS guard. */
+  private eagerRequested = false;
+  /** No run yet in this process: the first one is eager (persisted read times of the previous process mostly do not count). */
+  private firstRun = true;
   private lastRun = 0;
   private running = false;
   private active = true;
@@ -142,11 +153,11 @@ export class UsageService {
     this.syncWatch();
   }
 
-  /** The window was hidden or shown: no polling while hidden, a catch-up read on return when data is stale. */
+  /** The window was hidden or shown: no polling while hidden (unless `pollHidden`), a catch-up read on return when data is stale. */
   setActive(active: boolean): void {
     this.active = active;
     this.syncWatch();
-    if (!active) { this.clearTimer(); return; }
+    if (!active) { if (!this.options.pollHidden?.()) this.clearTimer(); return; }
     const interval = this.options.intervalMs();
     if (this.running && this.options.enabled() && interval > 0 && this.now() - this.lastRun >= interval) void this.kick();
     this.schedule();
@@ -185,6 +196,16 @@ export class UsageService {
     return this.pending;
   }
 
+  /**
+   * The refresh button: reads every account now - only one read in the last EAGER_GUARD_MS and a rate-limit hold (whose card
+   * tells when it is retried) are skipped - and resolves once all reads finished. A run already in flight is followed by one.
+   */
+  refreshNow(): Promise<UsageState> {
+    if (!this.options.enabled()) return Promise.resolve(this.getState());
+    this.eagerRequested = true;
+    return this.refresh(true, true);
+  }
+
   /** Fire-and-forget refresh that can never reject. */
   private kick(): Promise<void> {
     return this.refresh().then(() => undefined, () => undefined);
@@ -198,7 +219,7 @@ export class UsageService {
   private schedule(): void {
     this.clearTimer();
     const interval = this.options.intervalMs();
-    if (!this.running || !this.active || !this.options.enabled() || interval <= 0) return;
+    if (!this.running || (!this.active && !this.options.pollHidden?.()) || !this.options.enabled() || interval <= 0) return;
     this.timer = setTimeout(() => { void this.kick().then(() => this.schedule()); }, interval);
     this.timer.unref?.();
   }
@@ -208,12 +229,19 @@ export class UsageService {
     this.lastRun = started;
     const subjects = new Set(this.subjects);
     this.subjects.clear();
+    // The first run of this process and the refresh button read every account now (anti-429 spacing: only the short guard).
+    // Holds after a failure are a separate rule: the first run keeps every persisted hold, the button only rate-limit holds.
+    const eager = this.eagerRequested || this.firstRun;
+    this.eagerRequested = false;
+    this.firstRun = false;
+    const spacing = this.options.minIdentityGapMs ?? MIN_IDENTITY_GAP_MS;
+    const gap = eager ? Math.min(EAGER_GUARD_MS, spacing) : spacing;
     if (this.options.beforeRun) { try { await this.options.beforeRun(); } catch { /* the poll still runs */ } }
     const accounts = this.refs(true);
     this.prune(accounts);
     // An action about any card of an account (also the saved card sharing the live login's account) makes it a subject.
     const subjectKeys = new Set(accounts.filter((ref) => this.isSubject(ref, this.keyOf(ref), subjects)).map((ref) => this.keyOf(ref)));
-    await Promise.all(this.onePerAccount(accounts).map((ref) => this.update(ref, started, manual, subjectKeys.has(this.keyOf(ref)))));
+    await Promise.all(this.onePerAccount(accounts).map((ref) => this.update(ref, started, manual, subjectKeys.has(this.keyOf(ref)), gap)));
     this.prune(this.options.accounts());
     // Whatever of a 0.9.0 cache found no account by now is history.
     this.legacyUsage.clear();
@@ -293,7 +321,7 @@ export class UsageService {
     return subjects.has(ref.id) || subjects.has(key) || (subjects.has(LIVE_CARD) && ref.provider === 'claude' && !ref.configDir);
   }
 
-  private async update(ref: AccountRef, now: number, manual: boolean, subject: boolean): Promise<void> {
+  private async update(ref: AccountRef, now: number, manual: boolean, subject: boolean, gap: number): Promise<void> {
     const key = this.keyOf(ref);
     const { id, provider } = ref;
     const hold = this.backoff.get(key);
@@ -303,7 +331,7 @@ export class UsageService {
     const asProfile = !!ref.configDir;
     // Spacing applies to the same copy of the sign-in; an account that moved between the live login and a profile is read once.
     const sameRole = (this.readAsProfile.get(key) ?? asProfile) === asProfile;
-    if (!subject && sameRole && last !== undefined && now - last < (this.options.minIdentityGapMs ?? MIN_IDENTITY_GAP_MS)) return;
+    if (!subject && sameRole && last !== undefined && now - last < gap) return;
     this.lastRead.set(key, now);
     this.readAsProfile.set(key, asProfile);
     let result: FetchResult;
@@ -414,10 +442,15 @@ export class UsageService {
         : (Array.isArray(raw?.providers) ? raw.providers : []).map((u): [string, unknown] => [typeof (u as { accountId?: unknown } | null)?.accountId === 'string' ? (u as { accountId: string }).accountId : '', u]);
       for (const [key, entry] of entries) {
         const usage = sanitizeUsage(entry);
-        if (!key || !usage?.windows.length) continue;
-        // Only the numbers survive a restart; the failure that may have been stored with them is history.
-        const { error: _error, retryAt: _retryAt, attemptAt: _attemptAt, ...numbers } = usage;
-        (legacy ? this.legacyUsage : this.providers).set(key, { ...numbers, status: 'ok', source: 'cache' });
+        // An expired sign-in (or a copy the app may not renew whose token ran out) survives a restart as such: its card says
+        // "Sign-in expired" at once instead of showing its old numbers as if they were valid (1.1.1).
+        const signIn = !legacy && (usage?.status === 'expired' || usage?.status === 'elsewhere');
+        if (!key || !usage || (!usage.windows.length && !signIn)) continue;
+        // Otherwise only the numbers survive a restart; the failure that may have been stored with them is history.
+        const { error, retryAt: _retryAt, attemptAt: _attemptAt, ...numbers } = usage;
+        (legacy ? this.legacyUsage : this.providers).set(key, signIn
+          ? { ...numbers, ...(error ? { error } : {}), source: 'cache' }
+          : { ...numbers, status: 'ok', source: 'cache' });
       }
       const held = typeof raw?.backoff === 'object' && raw.backoff !== null && !Array.isArray(raw.backoff) ? Object.entries(raw.backoff) : [];
       for (const [key, value] of held) {
@@ -438,7 +471,8 @@ export class UsageService {
     try {
       mkdirSync(dirname(this.options.cacheFile), { recursive: true });
       const keys = [...new Set(this.options.accounts().map((ref) => this.keyOf(ref)))];
-      const entries = keys.flatMap((key) => { const usage = this.providers.get(key); return usage?.windows.length ? [{ key, usage }] : []; });
+      const kept = (usage: ProviderUsage | undefined): usage is ProviderUsage => !!usage && (usage.windows.length > 0 || usage.status === 'expired' || usage.status === 'elsewhere');
+      const entries = keys.flatMap((key) => { const usage = this.providers.get(key); return kept(usage) ? [{ key, usage }] : []; });
       const backoff = Object.fromEntries(keys.flatMap((key) => { const hold = this.backoff.get(key); return hold && hold.until > this.now() ? [[key, hold]] : []; }));
       const reads = Object.fromEntries(keys.flatMap((key) => { const at = this.lastRead.get(key); return at !== undefined ? [[key, at]] : []; }));
       atomicWriteFileSync(this.options.cacheFile, JSON.stringify({ version: CACHE_VERSION, entries, backoff, reads }));

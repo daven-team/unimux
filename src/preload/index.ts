@@ -233,6 +233,7 @@ const api: McApi = {
   },
   notify: (n) => ipcRenderer.send('notify', n),
   showCell: (cellId) => ipcRenderer.send('notify:show', cellId),
+  testLimitAlert: () => ipcRenderer.send('alerts:testLimit'),
   flashAttention: () => ipcRenderer.send('attention:flash'),
   openExternal: (url) => ipcRenderer.send('shell:openExternal', url),
   openPath: (path) => ipcRenderer.send('shell:openPath', path),

@@ -87,6 +87,9 @@ import { custodyOf, identityFields, type AccountIdentity, type LoginRequest } fr
 import { claudeCredentialsStamp, profileSource, readClaudeCredentials, readClaudeIdentity, readCodexCredentials, readLiveClaudeIdentity, systemCredentialSource } from './usage/credentials';
 import { fetchClaude, fetchCodex, type FetcherDeps } from './usage/fetchers';
 import { UsageService } from './usage/service';
+import { LimitAlerter } from './limitAlerts';
+import { limitNoticeText, type LimitNotice } from '../shared/limitAlerts';
+import type { AlertSettings } from '../shared/alerts';
 import { MAIN_ACCOUNTS } from '../shared/usage';
 import type { UpdateStrings } from '../shared/updateProgress';
 import { createWorktree, currentBranch, inspectWorktree, isGitRepo, removeWorktree } from './worktree';
@@ -317,7 +320,21 @@ const usage = new UsageService({
     ? { accountsReadOnly: join(DATA_DIR, 'accounts', 'accounts.json') }
     : accountsPanelInfo(accounts.list(), login.parkedIds())),
   liveEmail: () => accounts.live()?.email,
+  // Limit warnings must also come while the window is minimized or in the tray: the poll then goes on at its interval.
+  pollHidden: () => limitPollingWanted(state.settings.alerts),
 });
+/** Whether any limit warning can be raised, so polling continues while the window is hidden. */
+function limitPollingWanted(alerts: AlertSettings): boolean {
+  return alerts.enabled && alerts.limits.enabled && (alerts.limits.fiveHour.enabled || alerts.limits.sevenDay.enabled);
+}
+/** 1.1.1: limit warnings (OS notifications) after every poll and at the reset times; remembered across restarts. */
+const limitAlerts = new LimitAlerter({
+  file: join(DATA_DIR, 'limit-alerts.json'),
+  alerts: () => state.settings.alerts,
+  providers: () => usage.getState().providers,
+  show: (notice) => showLimitNotice(notice),
+});
+usage.onChange((snapshot) => limitAlerts.onState(snapshot.providers));
 /** Finds Claude Code / Codex even when the app's own PATH lacks them (GUI launch on macOS, installer run after start on Windows). */
 const cliDetector = new CliDetector(systemCliDeps({
   disableRegistry: !app.isPackaged && process.env.MC_CLI_NO_REGISTRY === '1',
@@ -340,7 +357,7 @@ const execText = async (command: string, args: string[], env: NodeJS.ProcessEnv)
 /** Bumped when a cell is killed, so a spawn that was waiting for the detection does not resurrect it. */
 const killCount = new Map<string, number>();
 const noteKill = (id: string) => killCount.set(id, (killCount.get(id) ?? 0) + 1);
-let usageKey = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}`;
+let usageKey = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}:${limitPollingWanted(state.settings.alerts)}`;
 const ptyHost = new PtyHostClient();
 /** The SFTP Host (0.9.8): started on the first SFTP use, never at app start. */
 const sftpHost = new SftpHostClient();
@@ -675,7 +692,8 @@ const controller = new StateController(state, (snapshot) => {
   db?.stateChanged();
   detachedStateChanged(state);
   if (snapshot.state.projects !== previous.projects || snapshot.state.settings.alerts !== previous.settings.alerts || snapshot.state.profiles !== previous.profiles) taskbar.invalidate();
-  const key = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}`;
+  if (snapshot.state.settings.alerts !== previous.settings.alerts) limitAlerts.settingsChanged();
+  const key = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}:${limitPollingWanted(state.settings.alerts)}`;
   if (key !== usageKey) { usageKey = key; usage.reschedule(); }
   saver.save(state);
   send('state:changed', stateChange(previous, snapshot));
@@ -1531,6 +1549,29 @@ guardedOn('notify', (_e, n: { title: string; body: string; cellId: string; actio
   });
   notification.show();
 });
+/** A limit warning (1.1.1): a click brings the app to the front with the AI account limits panel open. */
+function showLimitNotice(notice: LimitNotice): void {
+  if (!Notification.isSupported()) return;
+  const language = state.settings.language ?? detectLanguage([app.getLocale()]);
+  const notification = new Notification(notificationOptions(limitNoticeText(notice, tr, language, Date.now())));
+  notifications.add(notification);
+  trimNotifications(notifications);
+  const forget = () => notifications.delete(notification);
+  notification.on('close', forget);
+  notification.on('failed', forget);
+  notification.on('click', () => {
+    forget();
+    showCell(undefined);
+    send('usage:open');
+  });
+  notification.show();
+}
+/** The "Test" button of the limit warnings: a sample warning for the first account with an e-mail. */
+guardedOn('alerts:testLimit', () => {
+  const account = usage.getState().providers.find((p) => p.email && p.status !== 'signedOut');
+  const limits = state.settings.alerts.limits;
+  showLimitNotice({ kind: 'threshold', provider: account?.provider ?? 'claude', ...(account?.email ? { email: account.email } : {}), window: '5h', percent: limits.fiveHour.percent, resetsAt: Math.floor(Date.now() / 1000) + 2 * 3600 });
+});
 guardedOn('notify:show', (_e, cellId: unknown) => { if (typeof cellId === 'string' && findCell(state, cellId)) showCell(cellId); });
 /** An agent needs the user (the alert rules allowed it): the sender's window flashes its taskbar button / bounces the Dock icon. */
 guardedOn('attention:flash', (e) => {
@@ -1596,7 +1637,8 @@ guardedHandle('changelog:get', (_e, force: boolean) => changelog.get(force), () 
 // Accounts, login and usage (0.9.3): everything that changes something only answers the app window (accountsIpc.ts).
 registerAccountIpc(ipcMain, {
   getUsage: () => usage.getState(),
-  refreshUsage: () => usage.refresh(true),
+  // The refresh button reads every account now (1.1.1), not only those past their 3-minute spacing.
+  refreshUsage: () => usage.refreshNow(),
   startLogin: (request) => {
     if (typeof request !== 'object' || request === null || Array.isArray(request)) return { ok: false, error: 'invalid request' };
     return loginBlock(guardDeps, request).then((block) => (block ? { ok: false as const, error: block } : login.start(request as LoginRequest)));

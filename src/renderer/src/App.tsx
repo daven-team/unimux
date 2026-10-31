@@ -1,7 +1,7 @@
 import { chosenLanguage, loadLanguage, tr, useI18n } from './i18n';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { fitPanelWidths, MIN_WORKSPACE_WIDTH, RAIL_WIDTH, type Panel } from '../../shared/panels';
-import { activeProject, activeTab, findCell, getProfile, updateCell } from '../../shared/state';
+import { activeProject, activeTab, findCell, getProfile, updateCell, updateSettings } from '../../shared/state';
 import { isAuxPtyId } from '../../shared/cliInstall';
 import { ptyHostRestartToast } from '../../shared/ssh';
 import type { McpInfo } from '../../shared/automation';
@@ -182,6 +182,11 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   // 1.0.9: Zezwól / Odrzuć from a permission notification; a stale one (the cell changed since) only shows the cell.
   window.mc.on('notify:answer', (cellId, token, answer) => { if (!isPermissionAnswer(answer) || !terminals.answerPermission(cellId, token, answer)) window.mc.showCell(cellId); });
   window.mc.on('focus-cell', (cellId) => revealCell(cellId));
+  // 1.1.1: a limit warning was clicked: the side panel and the AI account limits in it are unfolded and scrolled into view.
+  window.mc.on('usage:open', () => {
+    update((st) => updateSettings({ ...st, sidebarCollapsed: false }, { usageCollapsed: false }));
+    window.setTimeout(() => document.querySelector('.side-panel .usage-panel')?.scrollIntoView({ block: 'nearest' }), 100);
+  });
   // A one-time notice from the main process, already in the app language (http hooks found blocked).
   window.mc.on('app:notice', (text: string) => toast(text));
   window.mc.on('ptyhost:crashed', (resumes) => {
