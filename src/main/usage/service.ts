@@ -60,6 +60,8 @@ export interface UsageServiceOptions {
   notices?(): AccountNotice[];
   /** The saved accounts file's read-only state and the set-aside cards, sent with every state. */
   accountsInfo?(): Pick<UsageState, 'accountsReadOnly' | 'setAside' | 'duplicateCopies'>;
+  /** Keep polling on the interval while the window is hidden or minimized (1.1.1: limit warnings are on). */
+  pollHidden?(): boolean;
   /** E-mail of the account signed in to Claude Code, when known: lets a 0.9.0 cache entry of the live card be checked. */
   liveEmail?(): string | undefined;
 }
@@ -151,11 +153,11 @@ export class UsageService {
     this.syncWatch();
   }
 
-  /** The window was hidden or shown: no polling while hidden, a catch-up read on return when data is stale. */
+  /** The window was hidden or shown: no polling while hidden (unless `pollHidden`), a catch-up read on return when data is stale. */
   setActive(active: boolean): void {
     this.active = active;
     this.syncWatch();
-    if (!active) { this.clearTimer(); return; }
+    if (!active) { if (!this.options.pollHidden?.()) this.clearTimer(); return; }
     const interval = this.options.intervalMs();
     if (this.running && this.options.enabled() && interval > 0 && this.now() - this.lastRun >= interval) void this.kick();
     this.schedule();
@@ -217,7 +219,7 @@ export class UsageService {
   private schedule(): void {
     this.clearTimer();
     const interval = this.options.intervalMs();
-    if (!this.running || !this.active || !this.options.enabled() || interval <= 0) return;
+    if (!this.running || (!this.active && !this.options.pollHidden?.()) || !this.options.enabled() || interval <= 0) return;
     this.timer = setTimeout(() => { void this.kick().then(() => this.schedule()); }, interval);
     this.timer.unref?.();
   }
