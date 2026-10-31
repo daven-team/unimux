@@ -25,7 +25,8 @@ import { applyDockIcon, windowIcon } from './appIcon';
 import { LARGE_VIEW_BYTES, listProjectDirectories, listProjectDirectory, listProjectDirectoryBatch, readProjectFile, statProjectFile, writeProjectFile } from './files';
 import { createTrash, registerFileOpsIpc } from './filesIpc';
 import { createIpcGuard } from './ipcGuard';
-import { closeAllDetached, fromDetachedWindow, initDetachedWindows, relayCellStatus, senderWindow, sendRouted, startDetachedWindows, stateChanged as detachedStateChanged } from './detachedWindows';
+import { registerAgentPromptIpc } from './agentPrompt';
+import { cellWindow, closeAllDetached, fromDetachedWindow, initDetachedWindows, relayCellStatus, senderWindow, sendRouted, startDetachedWindows, stateChanged as detachedStateChanged } from './detachedWindows';
 import { registerGitIpc } from './gitIpc';
 import { Git } from './git';
 import { createGithubService } from './github/service';
@@ -1489,6 +1490,8 @@ const gitProject = {
   worktreePaths: (projectId: string) => state.projects.find((p) => p.id === projectId)?.tabs.flatMap((t) => t.cells.flatMap((c) => (c.worktree ? [c.worktree.path] : []))) ?? [],
 };
 registerGitIpc({ ...gitProject, git: gitEngine, allowed: fromAppWindow });
+// 1.1.1: one prompt to several agent cells, each sent by the window that holds the cell.
+registerAgentPromptIpc({ guardedHandle, guardedOn }, cellWindow);
 registerGithubIpc({ guardedHandle }, github.handlers(gitEngine, gitProject));
 ipcMain.handle('git:isRepo', (_e, p: string) => isGitRepo(p));
 guardedHandle('git:createWorktree', (_e, p: string, name: string) => createWorktree(p, name), () => Promise.reject(new Error('Refused.')));

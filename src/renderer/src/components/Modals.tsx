@@ -16,6 +16,7 @@ import { ConversationSearch } from './ConversationSearch';
 import { FindReplaceModal } from './FindReplace';
 import { GridDialog } from './GridDialog';
 import { BroadcastDialog } from './ssh/BroadcastDialog';
+import { AgentPromptDialog } from './AgentPromptDialog';
 import { DbConnectionEditor } from './db/DbConnectionEditor';
 import { IEdit, IGrip, IX } from './icons';
 import { ProjectIconView } from './ProjectIcon';
@@ -59,6 +60,7 @@ export function Modals() {
           {modal.kind === 'project' && <ProjectEditor key={modal.projectId} projectId={modal.projectId} />}
           {modal.kind === 'file' && <FilePreview projectId={modal.projectId} relativePath={modal.relativePath} />}
           {modal.kind === 'broadcast' && <BroadcastDialog key={modal.tabId} projectId={modal.projectId} tabId={modal.tabId} />}
+          {modal.kind === 'agentPrompt' && <AgentPromptDialog tabId={modal.tabId} />}
           {modal.kind === 'dbConnection' && <DbConnectionEditor key={modal.connectionId ?? 'new'} connectionId={modal.connectionId} kind={modal.dbKind} />}
           {modal.kind === 'auth' && <AuthModal key={`${modal.provider}:${JSON.stringify(modal.target)}`} provider={modal.provider} target={modal.target} />}
         </div>

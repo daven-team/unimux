@@ -25,6 +25,7 @@ import { snippetMessages } from './snippetMessages';
 import { perfMessages } from './perfMessages';
 import { polishMessages } from './polishMessages';
 import { queueMessages } from './queueMessages';
+import { agentPromptMessages } from './agentPromptMessages';
 import { railMessages } from './railMessages';
 import { settingsMessages } from './settingsMessages';
 import { sftpMessages } from './sftpMessages';
@@ -76,6 +77,7 @@ export const messages = {
   ...perfMessages,
   ...polishMessages,
   ...queueMessages,
+  ...agentPromptMessages,
   ...safetyMessages,
   ...stabilityMessages,
   ...railMessages,

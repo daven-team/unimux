@@ -24,6 +24,7 @@ import { reportError } from '../errorReport';
 import { useShortcuts, shortcutText, titleWithShortcut } from '../shortcuts';
 import { initSsh, sshHostMenuItems } from '../ssh';
 import { initPromptQueue } from '../promptQueue';
+import { initAgentPrompt } from '../agentPrompt';
 import { useSshStore } from '../sshStore';
 import { getS, setStateOverlay, setUi, toast, useStore } from '../store';
 import { terminals } from '../terminals/TerminalManager';
@@ -112,6 +113,8 @@ async function boot(): Promise<void> {
   await initSsh().catch((error) => reportError('boot', error));
   // 1.0.9: this window serves the prompt queues of the cells it holds.
   initPromptQueue();
+  // 1.1.1: one prompt to several agents, for the cells this window holds.
+  initAgentPrompt();
   window.mc.on('mcp:info', (info) => setUi({ mcpInfo: info }));
   window.mc.on('cell:restarted', (cellId) => { terminals.prepareSpawn(cellId); terminals.syncSize(cellId); });
   window.mc.on('cell:hook', (cellId, event, info) => terminals.hook(cellId, event, info));

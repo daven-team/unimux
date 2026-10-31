@@ -9,6 +9,7 @@ import { alertForStatus } from './alerts';
 import { initQuitGuard } from './closeGuard';
 import { initDetachFollow } from './detach';
 import { initPromptQueue } from './promptQueue';
+import { initAgentPrompt } from './agentPrompt';
 import { initWaitTracking, revealCell } from './waiting';
 import { noteAgentTurnEnd } from './turnRefresh';
 import { initBackgroundLoader } from './backgroundLoader';
@@ -249,6 +250,8 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   bootStep(initDetachFollow);
   // 1.0.9: queued prompts of agent cells go out when their agent finished its turn.
   bootStep(initPromptQueue);
+  // 1.1.1: one prompt to several agents: this window sends to the cells it holds.
+  bootStep(initAgentPrompt);
   // 1.0.9: what the cells wait for (the "Czeka na Ciebie" list), this window's and the detached windows'.
   bootStep(initWaitTracking);
 }
