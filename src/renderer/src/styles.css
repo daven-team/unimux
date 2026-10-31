@@ -485,7 +485,8 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .color-row button.on { border-color: #fff; }
 
 /* ── grid dialog cell table ─────────────────────────────────────────────── */
-.cell-table { display: grid; grid-template-columns: 26px 140px 120px 1fr auto; gap: 6px 8px; align-items: center; max-height: 230px; overflow-y: auto; padding-right: 4px; }
+/* 1.1.1: in a short window the table keeps its height (up to 230 px) and the dialog body scrolls instead of the table shrinking to nothing. */
+.cell-table { display: grid; grid-template-columns: 26px 140px 120px 1fr auto; gap: 6px 8px; align-items: center; max-height: 230px; overflow-y: auto; flex-shrink: 0; padding-right: 4px; }
 .cell-table .hd { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
 .cell-table .num { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
 .cell-table .input, .cell-table .select { padding: 4px 7px; font-size: 12px; min-width: 0; }
