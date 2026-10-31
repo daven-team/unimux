@@ -1,7 +1,7 @@
 import { MAIN_ACCOUNTS, heldByOf, type AccountRef, type ProviderUsage } from '../../shared/usage';
 import type { RefreshOutcome } from '../accounts/refresh';
 import { readCodexLog } from './codexLog';
-import { profileSource, readClaudeCredentials, readClaudeIdentity, readCodexCredentials, type ClaudeCredentials, type CredentialSource } from './credentials';
+import { profileSource, readClaudeCredentials, readClaudeIdentity, readClearedClaudeLogin, readCodexCredentials, type ClaudeCredentials, type CredentialSource } from './credentials';
 import { parseClaudeUsage, parseCodexPlan, parseCodexRateLimits } from './parse';
 import { parseRetryAfter } from './retryAfter';
 
@@ -61,10 +61,18 @@ async function readClaude(deps: FetcherDeps, ref: AccountRef): Promise<FetchResu
   const reread = async (): Promise<ClaudeCredentials | null> => { await sleep(REREAD_DELAY_MS); return readClaudeCredentials(source); };
   let credentials: ClaudeCredentials | null = await readClaudeCredentials(source);
   if (!credentials && isMain) credentials = await reread();
-  if (!credentials) return { usage: base };
-  const identity = await readClaudeIdentity(source);
   const heldBy = isMain ? undefined : heldByOf(ref.renew);
+  if (!credentials) {
+    // Claude Code cleared this login after its renewal was rejected ("Login expired"): a dead sign-in, not a signed-out one.
+    const cleared = await readClearedClaudeLogin(source);
+    if (!cleared) return { usage: base };
+    const identity = await readClaudeIdentity(source);
+    return { usage: { ...base, plan: cleared.plan, email: identity.email, org: identity.org, ...(heldBy ? { heldBy } : {}), status: 'expired', error: 'login-dead' } };
+  }
+  const identity = await readClaudeIdentity(source);
   const known: ProviderUsage = { ...base, plan: credentials.plan, email: identity.email, org: identity.org, ...(heldBy ? { heldBy } : {}) };
+  // A saved copy of a login Claude Code cleared as dead (`deadTokens`): sign-in expired, nothing is sent anywhere.
+  if (!isMain && ref.deadTokens && credentials.refreshHash === ref.deadTokens) return { usage: { ...known, status: 'expired', error: 'login-dead' } };
   // Only saved accounts whose token family lives nowhere else are renewed here (R6): the live login belongs to Claude Code,
   // and renewing a family another tool also holds invalidates one of the two copies.
   const refresh = isMain || heldBy ? undefined : deps.refreshClaude;

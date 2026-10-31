@@ -3,12 +3,13 @@
 // locks, so neither Claude Code nor cswap can write in between, and with no network while they are held. The target keeps
 // its profile copy as a backup that is never renewed while it is live. A version-2 journal plus backups make an interrupted
 // swap recoverable; the 0.9.0 exchange in swap.ts only remains for its version-1 journals.
-import { join } from 'path';
+import { dirname, join } from 'path';
 import {
   compareIdentity, custodyOf, familyOf, identityFields, identityFromOauthAccount, isAccountId,
   type AccountIdentity, type AppSwap, type ManagedAccount, type TokenFamily, type SwapError, type SwapRecovery, type SwapResult,
 } from '../../shared/accounts';
 import { LockTimeout, withClaudeLocks, type LockDeps } from './claudeLocks';
+import { deadTokenHash, isClearedLogin, savedCopyDead, savedRefreshToken } from './dead';
 import type { CswapRoster } from './cswap';
 import { gateFamilyRefresh } from './guards';
 import { renewRule } from './refs';
@@ -57,7 +58,11 @@ const MIN_VALID_MS = 60_000;
 /** What the family gate answers for a profile it may not renew (never a real refresh outcome: compared by identity). */
 const BLOCKED: RefreshOutcome = { kind: 'transient', detail: { reason: 'blocked' } };
 
-interface Journal { version: 2; phase: Phase; outgoingId: string; targetId: string; created: boolean; outCredsExisted: boolean; outJsonExisted: boolean; startedAt: number }
+/**
+ * `outgoingId` is null when there was no usable live login to save (1.0.10: no credentials, or a login Claude Code cleared as
+ * dead); `liveCredsExisted` false when Claude Code's credentials file did not exist (absent in older journals: it existed).
+ */
+interface Journal { version: 2; phase: Phase; outgoingId: string | null; targetId: string; created: boolean; outCredsExisted: boolean; outJsonExisted: boolean; liveCredsExisted: boolean; startedAt: number }
 
 class Fail extends Error {
   constructor(readonly code: SwapError, readonly email?: string) { super(code); }
@@ -127,6 +132,8 @@ async function perform(deps: ActivateDeps, fs: SwapFs, targetId: string): Promis
   const refusal = activationRefusal(target, store.live(), roster, freshAt(snap, deps.now()));
   if (refusal || !target) throw new Fail(refusal?.error ?? 'noTarget', refusal?.email);
   if (!validOauth(oauthOf(snap))) throw new Fail('noTarget', target.email);
+  // A copy of a login Claude Code cleared as dead is never swapped in nor sent to the token endpoint.
+  if (await savedCopyDead(fs, dir, target)) throw new Fail('dead', target.email);
   // Network only outside the locks, and only through the one family rule (the same gate the background renewals use).
   if (!freshAt(snap, deps.now())) {
     const renew = gateFamilyRefresh(store, () => roster, (d) => deps.refresh(d), BLOCKED);
@@ -154,7 +161,7 @@ function withProfileLocks<T>(dirs: string[], fn: () => Promise<T>): Promise<T> {
   return first === undefined ? fn() : withProfileLock(first, () => withProfileLocks(rest, fn));
 }
 
-interface Originals { liveCreds: Snap; liveJson: Snap; liveAccount: Rec; outCreds: Snap | null; outJson: Snap | null; outDir: string; writtenCreds: string; targetIdentity: AccountIdentity }
+interface Originals { liveCreds: Snap | null; liveJson: Snap; liveAccount: Rec | null; outCreds: Snap | null; outJson: Snap | null; outDir: string | null; writtenCreds: string; targetIdentity: AccountIdentity }
 
 async function exchange(deps: ActivateDeps, fs: SwapFs, paths: Paths, roster: CswapRoster, targetId: string, dir: string, locked: Set<string>): Promise<SwapResult> {
   const { store } = deps;
@@ -163,11 +170,21 @@ async function exchange(deps: ActivateDeps, fs: SwapFs, paths: Paths, roster: Cs
   const liveOauth = oauthOf(liveCreds);
   const liveAccount = liveJson && isRecord(liveJson.data.oauthAccount) ? liveJson.data.oauthAccount : null;
   const liveIdentity = identityFromOauthAccount(liveAccount);
-  if (!liveCreds || !liveJson || !validOauth(liveOauth) || !liveAccount || (!liveIdentity.email && !liveIdentity.accountUuid)) throw new Fail('noMain');
+  const identified = !!liveAccount && (!!liveIdentity.email || !!liveIdentity.accountUuid);
+  // Claude Code's config holds far more than the login: it is never created here.
+  if (!liveJson) throw new Fail('noMain');
+  // A usable live login is saved into its record first, so it must be known whose it is.
+  const usable = !!liveCreds && validOauth(liveOauth);
+  if (usable && !identified) throw new Fail('noMain');
+  // No usable live login (1.0.10): no credentials file at all, or a login without a refresh token (Claude Code cleared it
+  // after its renewal was rejected, see dead.ts). There is no token family to save then, and the target simply becomes the
+  // live login. A credentials file that exists but cannot be parsed is never overwritten: it may hold a login.
+  if (!liveCreds && (await fs.readFile(paths.credentials)) !== null) throw new Fail('noMain');
+  const dead = !!liveCreds && isClearedLogin(liveCreds.data);
   // Checked again under the locks against whoever is signed in right now (the stored live identity may lag behind).
   const target = store.get(targetId);
   const targetSnap = await readSnap(fs, join(dir, '.credentials.json'));
-  const refusal = activationRefusal(target, liveIdentity, roster, freshAt(targetSnap, deps.now()));
+  const refusal = activationRefusal(target, identified ? liveIdentity : null, roster, freshAt(targetSnap, deps.now()));
   if (refusal || !target) throw new Fail(refusal?.error ?? 'noTarget', refusal?.email);
   const targetOauth = oauthOf(targetSnap);
   if (!validOauth(targetOauth)) throw new Fail('noTarget', target.email);
@@ -176,43 +193,48 @@ async function exchange(deps: ActivateDeps, fs: SwapFs, paths: Paths, roster: Cs
     ? targetJson.data.oauthAccount
     : { emailAddress: target.email, ...(target.org ? { organizationName: target.org } : {}), ...(target.accountUuid ? { accountUuid: target.accountUuid } : {}), ...(target.organizationUuid ? { organizationUuid: target.organizationUuid } : {}) };
   // The outgoing login goes into its own record (the one the app knows as live first); an account the app did not know
-  // gets one, so a login is never dropped.
-  const same = store.list().filter((r) => custodyOf(r) !== 'quarantined' && compareIdentity(r, liveIdentity) === 'same');
+  // gets one, so a login is never dropped. Without a usable login the record (if any) keeps its own saved copy.
+  const same = identified ? store.list().filter((r) => custodyOf(r) !== 'quarantined' && compareIdentity(r, liveIdentity) === 'same') : [];
   const named = store.live()?.recordId;
   const existing = same.find((r) => r.id === named) ?? same.find((r) => custodyOf(r) === 'live') ?? same[0];
   // The live login changed after the profile locks were chosen: its record is not locked, so try again later.
   if (existing && !locked.has(existing.id)) throw new Fail('busy');
-  const created = !existing;
+  const created = usable && !existing;
   // Live tokens that an interrupted swap may have left under this identity (`heldTokens`) are not this account's: its own
   // saved copy stays as it is.
   const keepOutgoing = !!existing?.heldTokens && typeof liveOauth?.refreshToken === 'string' && heldTokenHash(liveOauth.refreshToken) === existing.heldTokens;
-  const outgoingId = existing?.id ?? store.prepare().id;
-  const outDir = store.dirOf(outgoingId);
-  const outCreds = await readSnap(fs, join(outDir, '.credentials.json'));
-  const outJson = await readSnap(fs, join(outDir, '.claude.json'));
-  const journal: Journal = { version: 2, phase: 'backed-up', outgoingId, targetId: target.id, created, outCredsExisted: !!outCreds, outJsonExisted: !!outJson, startedAt: deps.now() };
+  const saveOutgoing = usable && !keepOutgoing;
+  const outgoingId = existing?.id ?? (created ? store.prepare().id : null);
+  const outDir = outgoingId ? store.dirOf(outgoingId) : null;
+  const outCreds = outDir ? await readSnap(fs, join(outDir, '.credentials.json')) : null;
+  const outJson = outDir ? await readSnap(fs, join(outDir, '.claude.json')) : null;
+  const journal: Journal = {
+    version: 2, phase: 'backed-up', outgoingId, targetId: target.id, created, outCredsExisted: !!outCreds, outJsonExisted: !!outJson,
+    liveCredsExisted: !!liveCreds, startedAt: deps.now(),
+  };
   const write = (path: string, data: string) => atomicWrite(deps, fs, path, data);
   // The phase is advanced BEFORE each step, so it says how far the swap may have got.
   const advance = async (phase: Phase) => { journal.phase = phase; await write(join(deps.backupDir, JOURNAL), JSON.stringify(journal)); };
-  const writtenCreds = JSON.stringify({ ...liveCreds.data, claudeAiOauth: targetOauth });
+  const writtenCreds = JSON.stringify({ ...(liveCreds?.data ?? {}), claudeAiOauth: targetOauth });
   try {
     // Backups inside the try: a failure before the first journal write still removes them (no live file was touched yet).
     await fs.mkdir(deps.backupDir);
-    await write(join(deps.backupDir, BACKUP.liveCreds), liveCreds.text);
+    if (liveCreds) await write(join(deps.backupDir, BACKUP.liveCreds), liveCreds.text);
     await write(join(deps.backupDir, BACKUP.liveJson), liveJson.text);
     if (outCreds) await write(join(deps.backupDir, BACKUP.outCreds), outCreds.text);
     if (outJson) await write(join(deps.backupDir, BACKUP.outJson), outJson.text);
     await advance('backed-up');
     // A record for an account the app did not know is committed only once the journal names it, so a crash never leaves
     // a record without files that the recovery does not know about.
-    if (created) store.commit({ id: outgoingId, addedAt: deps.now(), ...identityFields(liveIdentity), custody: 'live', family: 'live' });
+    if (created && outgoingId) store.commit({ id: outgoingId, addedAt: deps.now(), ...identityFields(liveIdentity), custody: 'live', family: 'live' });
     await advance('outgoing-saved');
-    if (!keepOutgoing) {
+    if (saveOutgoing && outDir) {
       await fs.mkdir(outDir);
       await write(join(outDir, '.credentials.json'), JSON.stringify({ ...(outCreds?.data ?? {}), claudeAiOauth: liveOauth }));
       await write(join(outDir, '.claude.json'), JSON.stringify({ ...(outJson?.data ?? {}), oauthAccount: liveAccount }, null, 2));
     }
     await advance('live-creds-written');
+    if (!liveCreds) await fs.mkdir(dirname(paths.credentials));
     await write(paths.credentials, writtenCreds);
     await advance('live-json-written');
     const nowJson = await readSnap(fs, paths.claudeJson);
@@ -227,18 +249,30 @@ async function exchange(deps: ActivateDeps, fs: SwapFs, paths: Paths, roster: Cs
     const clean = await rollback(deps, fs, paths, journal, { liveCreds, liveJson, liveAccount, outCreds, outJson, outDir, writtenCreds, targetIdentity });
     if (!clean) throw new Fail('manual');
     // The record goes before the journal: a crash in between is repaired by the recovery, which removes it again.
-    if (created) store.remove(outgoingId);
+    if (created && outgoingId) store.remove(outgoingId);
     await removeBackups(deps, fs);
     throw error instanceof Fail ? error : new Fail('write');
   }
-  // Still under the locks, after the last write: whatever cswap saved up to now is seen by the check.
-  const outgoingFamily = !keepOutgoing && existing && await keptOwnFamily(deps, roster, store.get(existing.id), liveOauth?.refreshToken) ? 'own' : 'live';
+  // Still under the locks, after the last write: whatever cswap saved up to now is seen by the check. A record that received
+  // nothing keeps the family of its own saved copy.
+  const before = existing ? store.get(existing.id) : undefined;
+  const outgoingFamily: TokenFamily = !usable
+    ? familyOf(before ?? {})
+    : !keepOutgoing && existing && await keptOwnFamily(deps, roster, before, liveOauth?.refreshToken) ? 'own' : 'live';
   const targetSwap: AppSwap = {
     at: journal.startedAt,
     ...(typeof targetOauth.refreshToken === 'string' ? { from: heldTokenHash(targetOauth.refreshToken) } : {}),
     ...(familyOf(target) === 'own' ? { own: true as const } : {}),
   };
   finishRoles(store, outgoingId, target.id, identityFromOauthAccount(targetAccount), { outgoingFamily, targetSwap });
+  // The login that left was cleared by Claude Code as dead: the record's saved copy (the same family; its profile lock is
+  // held here) is marked dead too, so its card says "Sign-in expired" and nothing ever sends it anywhere.
+  if (dead && existing && outDir && !before?.heldTokens) {
+    try {
+      const token = await savedRefreshToken(fs, outDir);
+      if (token) store.setDeadTokens(existing.id, deadTokenHash(token));
+    } catch { /* only the card's text depends on it */ }
+  }
   try { await removeBackups(deps, fs); } catch { /* removed at the next start */ }
   return { ok: true, ...(str(targetAccount.emailAddress) ? { email: str(targetAccount.emailAddress) } : {}) };
 }
@@ -251,10 +285,12 @@ async function exchange(deps: ActivateDeps, fs: SwapFs, paths: Paths, roster: Cs
  * notes how the app made it main (`appSwap`) for that proof; the outgoing one's note is over. The live login is exactly
  * the target's saved copy now, so a hold on its tokens (`heldTokens`) is over.
  */
-function finishRoles(store: AccountsStore, outgoingId: string, targetId: string, identity: AccountIdentity, roles: { outgoingFamily: TokenFamily; targetSwap: AppSwap }): void {
-  store.setCustody(outgoingId, 'app');
-  store.setFamily(outgoingId, roles.outgoingFamily);
-  store.setAppSwap(outgoingId, undefined);
+function finishRoles(store: AccountsStore, outgoingId: string | null, targetId: string, identity: AccountIdentity, roles: { outgoingFamily: TokenFamily; targetSwap: AppSwap }): void {
+  if (outgoingId && store.get(outgoingId)) {
+    store.setCustody(outgoingId, 'app');
+    store.setFamily(outgoingId, roles.outgoingFamily);
+    store.setAppSwap(outgoingId, undefined);
+  }
   store.setCustody(targetId, 'live');
   store.setFamily(targetId, 'live');
   store.setAppSwap(targetId, roles.targetSwap);
@@ -286,17 +322,19 @@ export async function keptOwnFamily(deps: Pick<ActivateDeps, 'cswapWroteSince'>,
 async function rollback(deps: ActivateDeps, fs: SwapFs, paths: Paths, journal: Journal, o: Originals): Promise<boolean> {
   const reached = (phase: Phase) => ORDER.indexOf(journal.phase) >= ORDER.indexOf(phase);
   const liveId = identityFromOauthAccount(o.liveAccount);
+  // The config still names whoever it named before (no account at all when it named none).
+  const asBefore = (snap: Snap) => (o.liveAccount ? compareIdentity(identityFromOauthAccount(snap.data.oauthAccount), liveId) === 'same' : !isRecord(snap.data.oauthAccount));
   let creds: Snap | null = null;
   let json: Snap | null = null;
   try {
     if (reached('live-creds-written')) {
       creds = await readSnap(fs, paths.credentials);
-      if (!creds || (creds.text !== o.writtenCreds && creds.text !== o.liveCreds.text)) return false;
+      // Without credentials before, nothing (or exactly what was written) may be there now.
+      if (o.liveCreds ? !creds || (creds.text !== o.writtenCreds && creds.text !== o.liveCreds.text) : creds !== null && creds.text !== o.writtenCreds) return false;
     }
     if (reached('live-json-written')) {
       json = await readSnap(fs, paths.claudeJson);
-      const now = identityFromOauthAccount(json?.data.oauthAccount);
-      if (!json || (compareIdentity(now, o.targetIdentity) !== 'same' && compareIdentity(now, liveId) !== 'same')) return false;
+      if (!json || (compareIdentity(identityFromOauthAccount(json.data.oauthAccount), o.targetIdentity) !== 'same' && !asBefore(json))) return false;
     }
   } catch { return false; }
   let clean = true;
@@ -304,18 +342,27 @@ async function rollback(deps: ActivateDeps, fs: SwapFs, paths: Paths, journal: J
   // Each restore is guarded: the file must still be exactly what was inspected above.
   const still = (path: string, text: string) => async () => (await fs.readFile(path)) === text;
   const credsNow = creds;
-  if (credsNow && credsNow.text !== o.liveCreds.text) {
-    await step(() => atomicWrite(deps, fs, paths.credentials, o.liveCreds.text, still(paths.credentials, credsNow.text)));
+  const liveCreds = o.liveCreds;
+  if (credsNow && credsNow.text !== liveCreds?.text) {
+    await step(async () => {
+      if (liveCreds) { await atomicWrite(deps, fs, paths.credentials, liveCreds.text, still(paths.credentials, credsNow.text)); return; }
+      // There were no credentials before: the file this swap created goes again (only while it is exactly what was written).
+      if (!(await still(paths.credentials, credsNow.text)())) throw new Error('changed');
+      await fs.rm(paths.credentials);
+    });
   }
   const jsonNow = json;
-  if (jsonNow && compareIdentity(identityFromOauthAccount(jsonNow.data.oauthAccount), liveId) !== 'same') {
-    await step(() => atomicWrite(deps, fs, paths.claudeJson, JSON.stringify({ ...jsonNow.data, oauthAccount: o.liveAccount }, null, 2), still(paths.claudeJson, jsonNow.text)));
+  if (jsonNow && !asBefore(jsonNow)) {
+    const { oauthAccount: _target, ...rest } = jsonNow.data;
+    const restored = o.liveAccount ? { ...jsonNow.data, oauthAccount: o.liveAccount } : rest;
+    await step(() => atomicWrite(deps, fs, paths.claudeJson, JSON.stringify(restored, null, 2), still(paths.claudeJson, jsonNow.text)));
   }
   // The outgoing record's new copy is the only one of its login until the live files are restored.
   if (!clean) return false;
-  if (reached('outgoing-saved')) {
-    await step(() => (o.outCreds ? atomicWrite(deps, fs, join(o.outDir, '.credentials.json'), o.outCreds.text) : fs.rm(join(o.outDir, '.credentials.json'))));
-    await step(() => (o.outJson ? atomicWrite(deps, fs, join(o.outDir, '.claude.json'), o.outJson.text) : fs.rm(join(o.outDir, '.claude.json'))));
+  const outDir = o.outDir;
+  if (reached('outgoing-saved') && outDir) {
+    await step(() => (o.outCreds ? atomicWrite(deps, fs, join(outDir, '.credentials.json'), o.outCreds.text) : fs.rm(join(outDir, '.credentials.json'))));
+    await step(() => (o.outJson ? atomicWrite(deps, fs, join(outDir, '.claude.json'), o.outJson.text) : fs.rm(join(outDir, '.claude.json'))));
   }
   return clean;
 }
@@ -458,8 +505,11 @@ export async function recoverInterruptedActivation(deps: ActivateDeps): Promise<
 async function recoverV2(deps: ActivateDeps, fs: SwapFs, info: Rec): Promise<SwapRecovery | 'locked'> {
   const { store } = deps;
   const phase = info.phase as Phase;
-  const { outgoingId, targetId } = info;
-  if (!ORDER.includes(phase) || !isAccountId(outgoingId) || !isAccountId(targetId)) return 'manual';
+  const { targetId } = info;
+  // null: there was no usable live login to save (1.0.10); older journals always name the outgoing record.
+  const outgoingId = info.outgoingId === null ? null : info.outgoingId;
+  if (!ORDER.includes(phase) || (outgoingId !== null && !isAccountId(outgoingId)) || !isAccountId(targetId)) return 'manual';
+  const liveCredsExisted = info.liveCredsExisted !== false;
   const paths = swapPaths(deps);
   if (phase === 'verified') {
     // The outgoing record holds the live family it received either way. The other roles only when the target is still
@@ -471,13 +521,13 @@ async function recoverV2(deps: ActivateDeps, fs: SwapFs, info: Rec): Promise<Swa
       // Nothing proves here what cswap may hold of the outgoing login: it stays the live family.
       const at = typeof info.startedAt === 'number' && Number.isFinite(info.startedAt) ? info.startedAt : deps.now();
       finishRoles(store, outgoingId, targetId, liveId, { outgoingFamily: 'live', targetSwap: { at, ...(familyOf(target) === 'own' ? { own: true as const } : {}) } });
-    } else if (store.get(outgoingId)) { store.setFamily(outgoingId, 'live'); store.setAppSwap(outgoingId, undefined); }
+    } else if (outgoingId && store.get(outgoingId)) { store.setFamily(outgoingId, 'live'); store.setAppSwap(outgoingId, undefined); }
     await removeBackups(deps, fs);
     return 'none';
   }
   if (phase === 'backed-up') {
     // The record before the journal: a crash in between leaves the journal, and the next start removes it again.
-    if (info.created === true) store.remove(outgoingId);
+    if (info.created === true && outgoingId) store.remove(outgoingId);
     await removeBackups(deps, fs);
     return 'none';
   }
@@ -487,17 +537,19 @@ async function recoverV2(deps: ActivateDeps, fs: SwapFs, info: Rec): Promise<Swa
   const liveJsonB = await read(BACKUP.liveJson);
   const outCredsB = await read(BACKUP.outCreds);
   const outJsonB = await read(BACKUP.outJson);
-  if (liveB === null || liveJsonB === null) return 'manual';
+  if ((liveCredsExisted && liveB === null) || liveJsonB === null) return 'manual';
   if ((info.outCredsExisted === true && outCredsB === null) || (info.outJsonExisted === true && outJsonB === null)) return 'manual';
   let liveAccountB: unknown;
   try { liveAccountB = (JSON.parse(liveJsonB) as Rec).oauthAccount; } catch { return 'manual'; }
-  if (!isRecord(liveAccountB)) return 'manual';
+  // A config without an account is possible only when there was no usable login (nothing was saved from it).
+  if (!isRecord(liveAccountB) && outgoingId !== null) return 'manual';
+  const oldAccount = isRecord(liveAccountB) ? liveAccountB : null;
   try {
     const targetRecord = store.get(targetId);
     return await withClaudeLocks(paths, async (): Promise<SwapRecovery> => {
       const live = await readSnap(fs, paths.credentials);
       const targetCreds = await readSnap(fs, join(store.dirOf(targetId), '.credentials.json'));
-      const untouched = live?.text === liveB;
+      const untouched = liveB !== null ? live?.text === liveB : (await fs.readFile(paths.credentials)) === null;
       // Still exactly the target's login that was written (nobody renewed it since): the old one may go back.
       const liveRefresh = str(oauthOf(live)?.refreshToken);
       const ours = !!liveRefresh && liveRefresh === str(oauthOf(targetCreds)?.refreshToken);
@@ -505,16 +557,19 @@ async function recoverV2(deps: ActivateDeps, fs: SwapFs, info: Rec): Promise<Swa
       // The identity too must be the old one or the target's; anything else was written by someone else and is kept.
       const nowJson = await readSnap(fs, paths.claudeJson);
       const nowId = identityFromOauthAccount(nowJson?.data.oauthAccount);
-      const oldJson = !!nowJson && compareIdentity(nowId, identityFromOauthAccount(liveAccountB)) === 'same';
+      const oldJson = !!nowJson && (oldAccount ? compareIdentity(nowId, identityFromOauthAccount(oldAccount)) === 'same' : !isRecord(nowJson.data.oauthAccount));
       if (nowJson && !oldJson && !(targetRecord && compareIdentity(nowId, targetRecord) === 'same')) return 'manual';
-      if (!untouched) await atomicWrite(deps, fs, paths.credentials, liveB);
+      if (!untouched) { if (liveB !== null) await atomicWrite(deps, fs, paths.credentials, liveB); else await fs.rm(paths.credentials); }
       if (nowJson && !oldJson) {
-        await atomicWrite(deps, fs, paths.claudeJson, JSON.stringify({ ...nowJson.data, oauthAccount: liveAccountB }, null, 2));
+        const { oauthAccount: _target, ...rest } = nowJson.data;
+        await atomicWrite(deps, fs, paths.claudeJson, JSON.stringify(oldAccount ? { ...nowJson.data, oauthAccount: oldAccount } : rest, null, 2));
       }
-      const outDir = store.dirOf(outgoingId);
-      if (outCredsB !== null) await atomicWrite(deps, fs, join(outDir, '.credentials.json'), outCredsB); else await fs.rm(join(outDir, '.credentials.json'));
-      if (outJsonB !== null) await atomicWrite(deps, fs, join(outDir, '.claude.json'), outJsonB); else await fs.rm(join(outDir, '.claude.json'));
-      if (info.created === true) store.remove(outgoingId);
+      if (outgoingId) {
+        const outDir = store.dirOf(outgoingId);
+        if (outCredsB !== null) await atomicWrite(deps, fs, join(outDir, '.credentials.json'), outCredsB); else await fs.rm(join(outDir, '.credentials.json'));
+        if (outJsonB !== null) await atomicWrite(deps, fs, join(outDir, '.claude.json'), outJsonB); else await fs.rm(join(outDir, '.claude.json'));
+        if (info.created === true) store.remove(outgoingId);
+      }
       await removeBackups(deps, fs);
       return 'recovered';
     }, deps.locks);

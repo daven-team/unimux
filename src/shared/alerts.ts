@@ -42,8 +42,6 @@ export interface AlertSettings {
   flashWindow: boolean;
   /** 1.0.9: the number of agents waiting for you on the taskbar button (Windows overlay) / the Dock icon (macOS badge). */
   taskbarBadge: boolean;
-  /** 1.0.9: Windows: the taskbar button shows an indeterminate progress while any agent works. */
-  taskbarProgress: boolean;
 }
 
 export const DEFAULT_ALERT_VOLUME = 0.7;
@@ -70,7 +68,6 @@ export function defaultAlerts(): AlertSettings {
     notificationActions: true,
     flashWindow: true,
     taskbarBadge: true,
-    taskbarProgress: true,
   };
 }
 
@@ -127,7 +124,6 @@ export function normalizeAlerts(value: unknown): AlertSettings {
     notificationActions: typeof r.notificationActions === 'boolean' ? r.notificationActions : d.notificationActions,
     flashWindow: typeof r.flashWindow === 'boolean' ? r.flashWindow : d.flashWindow,
     taskbarBadge: typeof r.taskbarBadge === 'boolean' ? r.taskbarBadge : d.taskbarBadge,
-    taskbarProgress: typeof r.taskbarProgress === 'boolean' ? r.taskbarProgress : d.taskbarProgress,
   };
 }
 

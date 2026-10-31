@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { updateSettings } from '../../../shared/state';
 import type { AccountNotice, LoginTarget } from '../../../shared/accounts';
-import { adoptCopyOffered, claudeLoginActions, diagnosticLabel, effectivePercent, formatDuration, makeMainOffered, shortAccountName, shortDuration, summaryAccounts, usageBand, usageDiagnostics, usageErrorKind, usageSummary, type ProviderUsage, type SetAsideAccount, type UsageProvider, type UsageWindow } from '../../../shared/usage';
+import { adoptCopyOffered, cardState, claudeLoginActions, diagnosticLabel, effectivePercent, formatDuration, makeMainOffered, shortAccountName, shortDuration, summaryAccounts, usageBand, usageDiagnostics, usageErrorKind, usageSummary, type ProviderUsage, type SetAsideAccount, type UsageProvider, type UsageWindow } from '../../../shared/usage';
 import { cswapNoteText, noticeText, setAsideText, usageErrorKey } from '../../../shared/usageMessages';
 import { useI18n } from '../i18n';
 import { swapErrorKey, swapErrorText } from '../../../shared/swapMessages';
@@ -15,8 +15,12 @@ import { BusyRing, RefreshIcon, useHoldBusy } from './Spinner';
 const DORMANT_NOTE = 'Token dostępu wygasł - Claude Code odświeży go przy najbliższym użyciu. Uruchom sesję Claude (albo wyślij wiadomość), a limity wrócą.';
 const HELD_NOTE = {
   live: 'To konto jest teraz zalogowane w Claude Code - jego limity pokazuje karta oznaczona jako główna.',
-  'switched-out': 'To konto zostało przełączone poza aplikacją (cswap lub /login). Kopia logowania w aplikacji może być nieaktualna, więc nie jest odnawiana. Przełącz je tam, gdzie jest aktywne, albo zaloguj się tu ponownie.',
+  'switched-out': 'Przełączone poza aplikacją (cswap lub /login), więc aplikacja nie odnawia tej kopii.',
 } as const;
+const DORMANT_SHORT = 'Limity wrócą po następnej wiadomości w Claude.';
+const FORBIDDEN_NOTE = 'Odmowa dostępu (HTTP 403), np. wstrzymana subskrypcja. Logowanie jest ważne - ponowne logowanie nie pomoże.';
+const FORBIDDEN_SHORT = 'Odmowa dostępu (HTTP 403)';
+const CSWAP_NOTE = 'Kopię tego logowania ma też cswap, więc aplikacja jej nie odnawia.';
 const ADOPT_LABEL = 'Odświeżaj tę kopię w unimuxie';
 const ADOPT_BODY = 'Od teraz unimux będzie sam odnawiał tę kopię logowania.\n\nTo bezpieczne, jeśli logowano się do tego konta w unimuxie. Jeśli kopia pochodzi z „Ustaw jako główne” w starszej wersji, cswap może stracić swój token dla tego konta - wtedy wystarczy raz zalogować się do niego ponownie w cswap.\n\n„Zaloguj ponownie” pozostaje dostępne dla logowań, które naprawdę wygasły.';
 const ADOPT_FAILED = 'Nie udało się zmienić sposobu odnawiania tej kopii.';
@@ -86,7 +90,9 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
   const providerName = NAMES[usage.provider];
   const name = usage.email || providerName;
   const age = formatDuration((now - usage.fetchedAt) / 1000);
-  const expired = usage.status === 'expired';
+  // One of a few fixed states (cardState): the same situation always looks the same, whatever the reason behind it.
+  const state = cardState(usage);
+  const expired = state === 'expired';
   const dormant = usage.status === 'dormant';
   const removeAccount = async () => {
     const choice = await askChoice(
@@ -114,9 +120,8 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
       toast(tr(ADOPT_FAILED), 'error');
     }
   };
-  // Every held-by-cswap state but an expired sign-in names the action (fresh, stale numbers, access token run out).
+  // The longer explanation of a copy cswap also holds is a tooltip; "Renew this copy in unimux" is in the card's menu.
   const cswapNote = usage.heldBy === 'cswap' ? cswapNoteText(usage.status) : undefined;
-  const adoptButton = canAdopt ? <button className="btn small primary" disabled={busy} onClick={() => void adoptCopy()}>{tr(ADOPT_LABEL)}</button> : null;
 
   const copyDiagnostics = () => {
     window.mc.clipboardWrite(usageDiagnostics(usage, Date.now(), diagnosticLabel(usage, savedIndex)));
@@ -134,68 +139,43 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
     && (kind === 'refreshLimited' || kind === 'refresh' || heldElsewhere) && claudeLoginActions(window.mc.platform, true).managedAccounts;
   const failureText = tr(usageErrorKey(kind, usage.provider), { name: providerName, retry });
 
+  // Details of a state are a tooltip at most: the card itself shows one short line and, when expired, one button.
+  const heldTitle = usage.heldBy === 'cswap' ? tr(cswapNote ?? CSWAP_NOTE) : usage.heldBy ? tr(HELD_NOTE[usage.heldBy]) : undefined;
+  const windows = usage.windows.map((window) => <WindowRow key={window.id} window={window} now={now} language={language} />);
   let body;
-  if (expired) {
+  if (state === 'expired') {
+    // The same row for every expired sign-in (a rejected renewal, a dead main login, a dead or outdated copy).
     body = (
-      <div className="usage-expired" title={reasonTitle}>
+      <div className="usage-expired" title={heldTitle ?? reasonTitle}>
         <span className="usage-note">{tr('Logowanie wygasło')}</span>
         <button className="btn small primary" onClick={() => openAuth(usage.provider, reloginTarget(usage))}>{tr('Zaloguj ponownie')}</button>
       </div>
     );
-  } else if (usage.status === 'forbidden') {
-    body = (
-      <>
-        {usage.windows.map((window) => <WindowRow key={window.id} window={window} now={now} language={language} />)}
-        <p className="usage-note warn" title={reasonTitle}>{tr('Odmowa dostępu (HTTP 403), np. wstrzymana subskrypcja. Logowanie jest ważne - ponowne logowanie nie pomoże.')}</p>
-      </>
-    );
-  } else if (usage.status === 'elsewhere') {
-    body = (
-      <>
-        {usage.windows.map((window) => <WindowRow key={window.id} window={window} now={now} language={language} />)}
-        {usage.windows.length > 0 && <p className="usage-note">{tr('dane sprzed {age}', { age })}</p>}
-        {usage.heldBy !== 'cswap' && <p className="usage-note">{tr(HELD_NOTE[usage.heldBy ?? 'switched-out'])}</p>}
-        {cswapNote && <p className="usage-note">{tr(cswapNote)}</p>}
-        {usage.heldBy !== 'live' && (
-          <div className="usage-empty-buttons">
-            {adoptButton}
-            <button className="btn small" onClick={() => openAuth(usage.provider, reloginTarget(usage))}>{tr('Zaloguj ponownie')}</button>
-          </div>
-        )}
-      </>
-    );
-  } else if (dormant) {
-    // Calm state: the numbers are the last known ones, Claude Code renews the token itself.
-    body = (
-      <>
-        {usage.windows.map((window) => <WindowRow key={window.id} window={window} now={now} language={language} />)}
-        {usage.windows.length > 0 && <p className="usage-note">{tr('dane sprzed {age}', { age })}</p>}
-        <p className="usage-note">{tr(DORMANT_NOTE)}</p>
-      </>
-    );
-  } else if (usage.status === 'apiKey') {
+  } else if (state === 'apiKey') {
     body = <p className="usage-note">{tr('Codex: logowanie kluczem API, brak limitów.')}</p>;
-  } else if (!usage.windows.length) {
-    body = (
-      <>
-        <p className={`usage-note ${calm ? '' : 'warn'}`} title={reasonTitle}>{failureText}</p>
-      </>
-    );
+  } else if (state === 'unavailable') {
+    const text = usage.status === 'forbidden' ? tr(FORBIDDEN_SHORT) : dormant ? tr(DORMANT_SHORT) : failureText;
+    const title = usage.status === 'forbidden' ? tr(FORBIDDEN_NOTE) : dormant ? tr(DORMANT_NOTE) : reasonTitle;
+    body = <p className={`usage-note ${calm || dormant ? '' : 'warn'}`} title={title}>{text}</p>;
   } else {
+    // `ok` and `stale`: the numbers, then at most one short line (why they are old). 1.1.0: whose copy this is (cswap, an
+    // outside switch) is only a tooltip: a card with valid limits looks like every other one.
+    const ageNote = usage.source === 'log' ? tr('stan z ostatniej sesji, sprzed {age}', { age }) : state === 'stale' ? tr('dane sprzed {age}', { age }) : '';
     const failed = usage.status === 'error';
-    const ageNote = usage.source === 'log' ? tr('stan z ostatniej sesji, sprzed {age}', { age })
-      : usage.source === 'cache' ? tr('dane sprzed {age}', { age }) : '';
-    const hint = failed ? failureText : ageNote;
+    const line = usage.status === 'forbidden' ? tr(FORBIDDEN_SHORT)
+      : failed ? (ageNote ? `${failureText} (${ageNote})` : failureText)
+      : ageNote;
+    const title = usage.status === 'forbidden' ? tr(FORBIDDEN_NOTE) : failed ? reasonTitle : dormant ? tr(DORMANT_NOTE) : heldTitle;
     body = (
       <>
-        {usage.windows.map((window) => <WindowRow key={window.id} window={window} now={now} language={language} />)}
-        {hint && <p className={`usage-note ${failed && !calm ? 'warn' : ''}`} title={failed ? reasonTitle : undefined}>{failed && ageNote ? `${hint} (${ageNote})` : hint}</p>}
+        {!line && heldTitle ? <div className="usage-windows-held" title={heldTitle}>{windows}</div> : windows}
+        {line && <p className={`usage-note ${(failed && !calm) || usage.status === 'forbidden' ? 'warn' : ''}`} title={title}>{line}</p>}
       </>
     );
   }
 
   return (
-    <div className={`usage-card ${expired ? 'expired' : ''} ${dormant ? 'dormant' : ''} ${usage.status === 'error' && usage.windows.length ? 'stale' : ''} ${swapping === usage.accountId ? 'busy' : ''}`} title={usage.org || undefined} aria-busy={swapping === usage.accountId || undefined}>
+    <div className={`usage-card ${expired ? 'expired' : ''} ${dormant && !expired ? 'dormant' : ''} ${state === 'stale' && usage.status === 'error' ? 'stale' : ''} ${swapping === usage.accountId ? 'busy' : ''}`} title={usage.org || undefined} aria-busy={swapping === usage.accountId || undefined}>
       <div className="usage-card-head">
         <ProviderIcon provider={usage.provider} />
         <span className="usage-account" title={name}>{name}</span>
@@ -224,12 +204,6 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
         )}
       </div>
       {body}
-      {cswapNote && usage.status !== 'elsewhere' && (
-        <>
-          <p className="usage-note">{tr(cswapNote)}</p>
-          {adoptButton && <div className="usage-empty-buttons">{adoptButton}</div>}
-        </>
-      )}
     </div>
   );
 }
@@ -331,10 +305,15 @@ export function UsagePanel() {
   };
   const makeMain = async (target: ProviderUsage) => {
     if (swapping !== null) return;
-    const current = providers.find((usage) => usage.active)?.email || tr('obecne konto główne');
+    const main = providers.find((usage) => usage.provider === 'claude' && usage.active);
+    const current = main?.email || tr('obecne konto główne');
     const name = target.email || NAMES.claude;
     const exhausted = target.windows.some((window) => effectivePercent(window, Date.now()) >= 100);
-    const body = tr('Logowanie obecnego konta głównego ({current}) zostanie zapisane na jego karcie, a wybrane konto stanie się głównym logowaniem Claude Code. Na czas zamiany aplikacja blokuje pliki logowania tak samo jak Claude Code. Otwarte sesje Claude zwykle przejmują nowe logowanie przy następnej wiadomości - sesję, która tego nie zrobi, wystarczy zrestartować lub wznowić.', { current })
+    // The main sign-in expired or is gone: there is nothing to save, the swap simply puts the chosen account in its place.
+    const noMainLogin = !main || main.status === 'expired' || main.status === 'signedOut';
+    const body = (noMainLogin
+      ? tr('Obecne konto główne ({current}) nie ma ważnego logowania, więc nie ma czego zapisywać. Wybrane konto stanie się głównym logowaniem Claude Code. Otwarte sesje Claude zwykle przejmują nowe logowanie przy następnej wiadomości - sesję, która tego nie zrobi, wystarczy zrestartować lub wznowić.', { current })
+      : tr('Logowanie obecnego konta głównego ({current}) zostanie zapisane na jego karcie, a wybrane konto stanie się głównym logowaniem Claude Code. Na czas zamiany aplikacja blokuje pliki logowania tak samo jak Claude Code. Otwarte sesje Claude zwykle przejmują nowe logowanie przy następnej wiadomości - sesję, która tego nie zrobi, wystarczy zrestartować lub wznowić.', { current }))
       + (exhausted ? `\n\n${tr('Limity tego konta są wyczerpane (100%), więc sesje mogą nie działać do czasu resetu.')}` : '');
     const choice = await askChoice(tr('Ustawić {name} jako konto główne?', { name }), body, [{ label: tr('Ustaw jako główne'), value: 'yes', primary: true }]);
     if (choice !== 'yes') return;
@@ -433,7 +412,7 @@ export function UsagePanel() {
             );
           })}
         </div>
-      ) : <p className="usage-note">{providers.some((usage) => usage.status === 'dormant') ? tr(DORMANT_NOTE) : summary}</p>)}
+      ) : <p className="usage-note">{providers.some((usage) => usage.status === 'dormant') ? tr(DORMANT_SHORT) : summary}</p>)}
       {!collapsed && (
         <>
           {swapPending && (

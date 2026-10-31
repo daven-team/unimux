@@ -35,30 +35,28 @@ export function badgeLabel(count: number): string | null {
   return count > 9 ? '9+' : String(Math.floor(count));
 }
 
-export interface TaskbarSettings { taskbarBadge: boolean; taskbarProgress: boolean }
+export interface TaskbarSettings { taskbarBadge: boolean }
 
 export interface TaskbarView {
   /** Windows overlay icon label (null = none). */
   overlay: string | null;
-  /** Windows progress of the taskbar button. */
-  progress: 'none' | 'indeterminate';
   /** macOS Dock badge text ('' = none). */
   dock: string;
 }
 
-export const NO_TASKBAR: TaskbarView = Object.freeze({ overlay: null, progress: 'none', dock: '' });
+export const NO_TASKBAR: TaskbarView = Object.freeze({ overlay: null, dock: '' });
 
 /** What the taskbar button / the Dock icon should show for the counts on this platform. */
 export function taskbarView(counts: TaskbarCounts, settings: TaskbarSettings, platform: string): TaskbarView {
   const count = settings.taskbarBadge ? counts.attention : 0;
   if (platform === 'win32') {
-    return { overlay: badgeLabel(count), progress: settings.taskbarProgress && counts.working > 0 ? 'indeterminate' : 'none', dock: '' };
+    return { overlay: badgeLabel(count), dock: '' };
   }
-  if (platform === 'darwin') return { overlay: null, progress: 'none', dock: count > 0 ? String(count) : '' };
+  if (platform === 'darwin') return { overlay: null, dock: count > 0 ? String(count) : '' };
   return NO_TASKBAR;
 }
 
-export const sameView = (a: TaskbarView, b: TaskbarView): boolean => a.overlay === b.overlay && a.progress === b.progress && a.dock === b.dock;
+export const sameView = (a: TaskbarView, b: TaskbarView): boolean => a.overlay === b.overlay && a.dock === b.dock;
 
 const STATUSES = new Set<string>(['idle', 'working', 'waiting', 'exited']);
 const REASONS = new Set<string>(['done', 'attention', 'error']);

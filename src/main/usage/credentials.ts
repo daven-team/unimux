@@ -151,6 +151,25 @@ export async function readClaudeCredentials(source: CredentialSource): Promise<C
   } catch { return null; }
 }
 
+/**
+ * A Claude login that Claude Code itself cleared after the token endpoint rejected its refresh token for good (see
+ * accounts/dead.ts): the login object is still there with its plan, but both tokens are empty strings. Null for anything
+ * else (a usable login, no login at all, the environment token, an unreadable file). Never holds a token.
+ */
+export async function readClearedClaudeLogin(source: CredentialSource): Promise<{ plan?: string } | null> {
+  if (source.env.CLAUDE_CODE_OAUTH_TOKEN?.trim()) return null;
+  const directory = source.env.CLAUDE_CONFIG_DIR?.trim() || join(source.home, '.claude');
+  let raw = await source.readFile(join(directory, '.credentials.json'));
+  if (!raw && source.platform === 'darwin') raw = await source.keychain();
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const oauth = isRecord(parsed) && isRecord(parsed.claudeAiOauth) ? parsed.claudeAiOauth : undefined;
+    if (!oauth || oauth.accessToken !== '' || oauth.refreshToken !== '') return null;
+    return { plan: claudePlanLabel(oauth.subscriptionType, oauth.rateLimitTier) };
+  } catch { return null; }
+}
+
 export interface CodexCredentials {
   mode: 'chatgpt' | 'apiKey';
   accessToken?: string;

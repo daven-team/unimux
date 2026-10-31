@@ -1,5 +1,5 @@
-// 1.0.9: the taskbar button (Windows: overlay badge with the number of agents waiting for you, an indeterminate progress
-// while any agent works) and the Dock icon (macOS: the same number as its badge). Main hears every window's statuses
+// 1.0.9: the taskbar button (Windows: overlay badge with the number of agents waiting for you; 1.1.0 dropped the
+// progress bar while agents work) and the Dock icon (macOS: the same number as its badge). Main hears every window's statuses
 // (cell:runtime, detached grids included), so the counts cover all grids. Cheap by design: statuses only mark the view dirty,
 // one debounced pass computes it, and the OS is called only when what it shows changes. Badge images are drawn once per label.
 import { NO_TASKBAR, sameView, taskbarCounts, taskbarView, type CellRuntime, type TaskbarCell, type TaskbarSettings, type TaskbarView } from '../shared/taskbarState';
@@ -11,7 +11,6 @@ export interface TaskbarDeps<Image> {
   settings(): TaskbarSettings;
   /** Windows: the main window's taskbar button (no-ops when the window is gone). */
   setOverlay(image: Image | null, description: string): void;
-  setProgress(mode: TaskbarView['progress']): void;
   /** macOS: the Dock badge. */
   setDockBadge(text: string): void;
   /** The overlay image of a label (1..9, 9+); cached here, so it is drawn once per label. */
@@ -36,6 +35,8 @@ export interface Taskbar {
   invalidate(): void;
   /** The taskbar button was recreated (window shown again, Explorer restarted): show the current view again. */
   reapply(): void;
+  /** The badge images changed (drawn with the system font): draw the current one again. */
+  redraw(): void;
   /** Runs a pending update now (tests, quit). */
   flush(): void;
   view(): TaskbarView;
@@ -64,7 +65,6 @@ export function createTaskbar<Image>(deps: TaskbarDeps<Image>): Taskbar {
       const count = next.overlay === null ? 0 : next.overlay === '9+' ? 10 : Number(next.overlay);
       deps.setOverlay(next.overlay === null ? null : imageOf(next.overlay), next.overlay === null ? '' : deps.describe(count));
     }
-    if (force || next.progress !== prev.progress) deps.setProgress(next.progress);
     if (force || next.dock !== prev.dock) deps.setDockBadge(next.dock);
   };
 
@@ -102,6 +102,10 @@ export function createTaskbar<Image>(deps: TaskbarDeps<Image>): Taskbar {
       if (changed) schedule();
     },
     invalidate: schedule,
+    redraw() {
+      images.clear();
+      if (!disposed && applied.overlay !== null) apply(compute(), true);
+    },
     reapply() {
       if (disposed) return;
       if (timer !== undefined) { deps.clearTimer(timer); timer = undefined; }

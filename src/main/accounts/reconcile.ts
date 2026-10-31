@@ -19,6 +19,8 @@ export interface ReconcileDeps {
   resync?(recordId: string, identity: AccountIdentity): Promise<ResyncResult>;
   /** Whether cswap may have saved this account's tokens at `since` or later (`cswapWroteSince`); absent: always yes. */
   cswapWroteSince?(identity: AccountIdentity, since: number): Promise<boolean>;
+  /** The record's saved copy is the login Claude Code cleared as dead (`savedCopyDead` in dead.ts); absent: never. */
+  savedCopyDead?(record: ManagedAccount): Promise<boolean>;
   now(): number;
 }
 
@@ -59,10 +61,13 @@ export async function reconcileLive(deps: ReconcileDeps, opts: { ownChange?: boo
       // wrote no copy of it while it was main (see keptOwnFamily in activate.ts); anything else is the live family.
       const keepOwn = !!opts.ownChange && !!record.appSwap?.own && !record.heldTokens && !!deps.cswapWroteSince
         && !(await deps.cswapWroteSince(record, record.appSwap.at).catch(() => true));
+      const dead = !opts.ownChange && !!deps.savedCopyDead && await deps.savedCopyDead(record).catch(() => false);
       store.setCustody(record.id, opts.ownChange ? 'app' : 'foreign');
       store.setFamily(record.id, keepOwn ? 'own' : 'live');
       store.setAppSwap(record.id, undefined);
-      if (!opts.ownChange) store.addNotice({ kind: current ? 'switchedOut' : 'loggedOut', at, recordId: record.id, ...(record.email ? { email: record.email } : {}) });
+      // 1.0.10: an outside switch gets no banner: the card itself says it in one line (or "Sign-in expired" when the login
+      // that left was dead). A sign-out with nobody signed in afterwards is still told, unless that login was dead anyway.
+      if (!opts.ownChange && !current && !dead) store.addNotice({ kind: 'loggedOut', at, recordId: record.id, ...(record.email ? { email: record.email } : {}) });
       changed = true;
     }
     if (active && current) {
@@ -167,7 +172,8 @@ export async function backupLiveBeforeLogin(
     } catch { look.backup = 'failed'; }
     if (!ran) { reason = look.backup === 'failed' ? 'failed' : 'busy'; continue; }
     // `held`: the live tokens are not the record's own (see resyncActiveBackup); its saved copy stays and nothing is dropped.
-    if (look.backup === 'copied' || look.backup === 'unchanged' || look.backup === 'missing' || look.backup === 'held') return;
+    // `dead`: Claude Code cleared the live login (nothing left to back up; the record's copy is marked dead).
+    if (look.backup === 'copied' || look.backup === 'unchanged' || look.backup === 'missing' || look.backup === 'held' || look.backup === 'dead') return;
     if (look.live === 'none' && look.backup === 'none') return;
     if (!resync && look.live === 'present') return;
     reason = look.backup === 'none' ? 'unread' : look.backup;

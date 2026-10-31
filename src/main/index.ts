@@ -68,7 +68,7 @@ import { AccountsStore } from './accounts/store';
 import { dismissAccountNotice, gateFamilyRefresh, gateProfileRefresh, handleAdoptCopy, handleRemoveAccount, loginBlock } from './accounts/guards';
 import { registerAccountIpc } from './accountsIpc';
 import { createSecretClipboard } from '../shared/sshClipboard';
-import { clearPendingSwap, hasPendingSwap, isSwapRunning, isSwapUnresolved, recoverInterruptedSwap, swapIdle, swapPaths, type SwapDeps } from './accounts/swap';
+import { clearPendingSwap, hasPendingSwap, isSwapRunning, isSwapUnresolved, nodeSwapFs, recoverInterruptedSwap, swapIdle, swapPaths, type SwapDeps } from './accounts/swap';
 import { QUIT_SWAP_AFTER_CELLS_MS, QUIT_SWAP_WAIT_MS, waitUntilIdle } from './quitWait';
 import {
   activateAccount, activationJournalPending, checkActivationTarget, clearPendingActivation, isActivationRecoveryPending, recoverActivationWithRetry,
@@ -76,7 +76,8 @@ import {
 } from './accounts/activate';
 import { backupLiveBeforeLogin, reconcileLive, reconcileWhenIdle, resyncOutgoingWhenIdle, type ReconcileDeps } from './accounts/reconcile';
 import { resyncActiveBackup } from './accounts/resync';
-import { accountsPanelInfo, claudeRefs } from './accounts/refs';
+import { savedCopyDead } from './accounts/dead';
+import { accountsPanelInfo, claudeRefs, panelNotices } from './accounts/refs';
 import { cswapRosterPath, cswapWroteSince, readCswapRoster, type CswapRoster } from './accounts/cswap';
 import { readManagedIdentity } from './accounts/identity';
 import { migrateAccounts, type MigrationDeps } from './accounts/migrate';
@@ -120,7 +121,7 @@ import { loadEventSound } from './alertSound';
 import { notificationActions, notificationOptions } from './notifyOptions';
 import { createTaskbar } from './taskbar';
 import { isCellStatus, isStatusReason } from '../shared/taskbarState';
-import { badgePngs } from './badgeImage';
+import { BADGE_SCALES, badgePngs, BADGE_SIZE, fontBadgeScript, parseFontBadges } from './badgeImage';
 import { isPermissionAnswer, isPermissionToken } from '../shared/permissionAction';
 import { migrateDataDir } from './dataDirMigration';
 import { updateWindowAlive } from './updateRuntime';
@@ -310,7 +311,7 @@ const usage = new UsageService({
     else await reconcileIdle();
   },
   watchLive: true,
-  notices: () => accounts.notices(),
+  notices: () => panelNotices(accounts.notices()),
   // An unreadable accounts.json is explained in the panel; set-aside cards are listed with what to do about them.
   accountsInfo: () => (accounts.readOnly()
     ? { accountsReadOnly: join(DATA_DIR, 'accounts', 'accounts.json') }
@@ -456,6 +457,7 @@ const reconcileDeps = (): ReconcileDeps => {
       const path = cswapRosterPath(homedir(), process.env, process.platform);
       return cswapWroteSince(path, await readCswapRoster(path), identity, since);
     },
+    savedCopyDead: (record) => savedCopyDead(nodeSwapFs, accounts.dirOf(record.id), record),
     now: () => Date.now(),
   };
 };
@@ -513,7 +515,7 @@ const claimedCodex = new Set<string>();
 /** Live notifications - Windows drops click handlers of garbage-collected ones. */
 const notifications = new Set<Notification>();
 /**
- * 1.0.9: the taskbar button (Windows overlay with the number of agents waiting for you, progress while any works) and the
+ * 1.0.9: the taskbar button (Windows overlay with the number of agents waiting for you) and the
  * Dock badge (macOS); the statuses come from every window (cell:runtime), see taskbar.ts.
  */
 const taskbar = createTaskbar<NativeImage>({
@@ -524,10 +526,14 @@ const taskbar = createTaskbar<NativeImage>({
   alive: () => alive,
   settings: () => state.settings.alerts,
   setOverlay: (image, description) => { withLiveWindow(win, (w) => { try { w.setOverlayIcon(image, description); } catch { /* no taskbar button */ } }); },
-  setProgress: (mode) => { withLiveWindow(win, (w) => { try { w.setProgressBar(mode === 'indeterminate' ? 2 : -1, mode === 'indeterminate' ? { mode: 'indeterminate' } : undefined); } catch { /* no taskbar button */ } }); },
   setDockBadge: (text) => { try { app.dock?.setBadge(text); } catch { /* no Dock */ } },
   image: (label) => {
     const image = nativeImage.createEmpty();
+    const drawn = fontBadges?.get(label);
+    if (drawn) {
+      BADGE_SCALES.forEach((scaleFactor, i) => { const size = Math.round(BADGE_SIZE * scaleFactor); image.addRepresentation({ scaleFactor, width: size, height: size, dataURL: drawn[i] }); });
+      return image;
+    }
     for (const { scaleFactor, size, png } of badgePngs(label)) image.addRepresentation({ scaleFactor, width: size, height: size, buffer: png });
     return image;
   },
@@ -536,6 +542,17 @@ const taskbar = createTaskbar<NativeImage>({
   clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
 });
 app.on('will-quit', () => taskbar.dispose());
+/** 1.1.0: the overlay badges drawn by the main window with the system font (null until drawn; the stroke digits stand in). */
+let fontBadges: Map<string, string[]> | null = null;
+function drawFontBadges(w: BrowserWindow): void {
+  if (process.platform !== 'win32' || fontBadges) return;
+  w.webContents.executeJavaScript(fontBadgeScript(), true).then((value: unknown) => {
+    const parsed = parseFontBadges(value);
+    if (!parsed) return;
+    fontBadges = parsed;
+    taskbar.redraw();
+  }).catch(() => { /* the stroke digits stay */ });
+}
 /** Only sessions explicitly chosen by the user authorize native message delivery. */
 const verifiedCodex = new Map<string, string>();
 let mcpError: string | undefined;
@@ -807,7 +824,7 @@ function createWindow(): void {
   // Windows ends the session without before-quit: the last changes are written now (the renderer was asked to send its own).
   win.on('query-session-end', () => { markSessionEnding(); send('app:before-quit'); });
   win.on('session-end', () => { saver.flush(); });
-  win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { ptyHost.connectRenderer(win.webContents); sftpHost.connectRenderer(win.webContents); dbHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
+  win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { drawFontBadges(win); ptyHost.connectRenderer(win.webContents); sftpHost.connectRenderer(win.webContents); dbHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };

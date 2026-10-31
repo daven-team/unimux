@@ -27,17 +27,17 @@ describe('taskbarCounts', () => {
 });
 
 describe('taskbarView', () => {
-  const on = { taskbarBadge: true, taskbarProgress: true };
+  const on = { taskbarBadge: true };
   it('maps the counts per platform and setting', () => {
     expect(badgeLabel(0)).toBeNull();
     expect(badgeLabel(3)).toBe('3');
     expect(badgeLabel(10)).toBe('9+');
-    expect(taskbarView({ attention: 2, working: 1 }, on, 'win32')).toEqual({ overlay: '2', progress: 'indeterminate', dock: '' });
-    expect(taskbarView({ attention: 12, working: 0 }, on, 'win32')).toEqual({ overlay: '9+', progress: 'none', dock: '' });
-    expect(taskbarView({ attention: 2, working: 1 }, { taskbarBadge: false, taskbarProgress: false }, 'win32')).toEqual({ overlay: null, progress: 'none', dock: '' });
-    expect(taskbarView({ attention: 12, working: 1 }, on, 'darwin')).toEqual({ overlay: null, progress: 'none', dock: '12' });
-    expect(taskbarView({ attention: 2, working: 1 }, { taskbarBadge: false, taskbarProgress: true }, 'darwin').dock).toBe('');
-    expect(taskbarView({ attention: 2, working: 1 }, on, 'linux')).toEqual({ overlay: null, progress: 'none', dock: '' });
+    expect(taskbarView({ attention: 2, working: 1 }, on, 'win32')).toEqual({ overlay: '2', dock: '' });
+    expect(taskbarView({ attention: 12, working: 0 }, on, 'win32')).toEqual({ overlay: '9+', dock: '' });
+    expect(taskbarView({ attention: 2, working: 1 }, { taskbarBadge: false }, 'win32')).toEqual({ overlay: null, dock: '' });
+    expect(taskbarView({ attention: 12, working: 1 }, on, 'darwin')).toEqual({ overlay: null, dock: '12' });
+    expect(taskbarView({ attention: 2, working: 1 }, { taskbarBadge: false }, 'darwin').dock).toBe('');
+    expect(taskbarView({ attention: 2, working: 1 }, on, 'linux')).toEqual({ overlay: null, dock: '' });
   });
 
   it('validates reported statuses', () => {
@@ -52,7 +52,7 @@ function harness(platform = 'win32') {
   const calls: string[] = [];
   const timers: Array<{ fn: () => void; ms: number; cleared: boolean }> = [];
   const alive = new Set(['a', 'b']);
-  const settings = { taskbarBadge: true, taskbarProgress: true };
+  const settings = { taskbarBadge: true };
   const cellList: TaskbarCell[] = [{ id: 'a', agent: true }, { id: 'b', agent: true }];
   let drawn = 0;
   const taskbar = createTaskbar<string>({
@@ -61,7 +61,6 @@ function harness(platform = 'win32') {
     alive: () => alive,
     settings: () => settings,
     setOverlay: (image, description) => calls.push(`overlay:${image}:${description}`),
-    setProgress: (mode) => calls.push(`progress:${mode}`),
     setDockBadge: (text) => calls.push(`dock:${text}`),
     image: (label) => { drawn++; return `img${label}`; },
     describe: (count) => `${count} waiting`,
@@ -82,7 +81,7 @@ describe('createTaskbar', () => {
     expect(h.timers[0].ms).toBe(TASKBAR_DEBOUNCE_MS);
     expect(h.calls).toEqual([]);
     h.tick();
-    expect(h.calls).toEqual(['overlay:img1:1 waiting', 'progress:indeterminate']);
+    expect(h.calls).toEqual(['overlay:img1:1 waiting']);
     // The same status again schedules nothing.
     h.taskbar.status('a', { status: 'waiting', reason: 'attention' });
     expect(h.timers).toHaveLength(0);
@@ -90,7 +89,7 @@ describe('createTaskbar', () => {
     h.taskbar.status('b', { status: 'waiting', reason: 'done' });
     h.taskbar.status('b', { status: 'working' });
     h.tick();
-    expect(h.calls).toHaveLength(2);
+    expect(h.calls).toHaveLength(1);
   });
 
   it('draws each badge once and clears everything when the cells go', () => {
@@ -121,13 +120,12 @@ describe('createTaskbar', () => {
     h.tick();
     h.calls.length = 0;
     h.cellList[0] = { id: 'a', agent: true, muted: true };
-    h.settings.taskbarProgress = false;
     h.taskbar.invalidate();
     h.tick();
-    expect(h.calls).toEqual(['overlay:null:', 'progress:none']);
+    expect(h.calls).toEqual(['overlay:null:']);
     h.calls.length = 0;
     h.taskbar.reapply();
-    expect(h.calls).toEqual(['overlay:null:', 'progress:none', 'dock:']);
+    expect(h.calls).toEqual(['overlay:null:', 'dock:']);
   });
 
   it('macOS: the Dock badge only', () => {
@@ -136,7 +134,7 @@ describe('createTaskbar', () => {
     h.taskbar.status('b', { status: 'waiting', reason: 'attention' });
     h.tick();
     expect(h.calls).toEqual(['dock:2']);
-    expect(h.taskbar.view()).toEqual({ overlay: null, progress: 'none', dock: '2' });
+    expect(h.taskbar.view()).toEqual({ overlay: null, dock: '2' });
   });
 
   it('stops after dispose', () => {

@@ -53,7 +53,8 @@ describe('reconcileLive', () => {
     expect(store.get(p)?.custody).toBe('live');
     expect(store.get(g)?.custody).toBe('foreign');
     expect(holders(A)).toHaveLength(1);
-    expect(store.notices()).toEqual([expect.objectContaining({ kind: 'switchedOut', email: 'g@x.com', recordId: g })]);
+    // 1.0.10: an outside switch is no banner any more; G's card says it (custody foreign).
+    expect(store.notices()).toEqual([]);
     expect(store.live()).toEqual({ ...A, recordId: p });
   });
 
@@ -159,7 +160,7 @@ describe('reconcileLive', () => {
     await reconcileLive(deps());
     expect(store.list().filter((r) => custodyOf(r) === 'live').map((r) => r.id)).toEqual([holder]);
     expect(store.get(other)?.custody).toBe('foreign');
-    expect(store.notices()).toEqual([expect.objectContaining({ kind: 'switchedOut', recordId: other })]);
+    expect(store.notices()).toEqual([]);
   });
 
   it('changes nothing when the live identity cannot be read', async () => {
