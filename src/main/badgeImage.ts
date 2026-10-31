@@ -154,3 +154,49 @@ export function badgePngs(label: string): Array<{ scaleFactor: number; size: num
     return { scaleFactor, size, png: encodePng(renderBadge(label, size), size, size) };
   });
 }
+
+/** Every label the overlay can show (badgeLabel: 1..9, then 9+). */
+export const BADGE_LABELS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '9+'] as const;
+
+/**
+ * 1.1.0: the page script that draws the badges with the system's own font (bold Segoe UI on a red disc, the way chat apps
+ * badge their taskbar button), run once in the main window: the stroke digits above stay only as the fallback until it ran.
+ * It returns `{ label: [dataURL per BADGE_SCALES] }`; it touches nothing on the page.
+ */
+export function fontBadgeScript(): string {
+  const sizes = BADGE_SCALES.map((scale) => Math.round(BADGE_SIZE * scale));
+  return `(() => {
+    const out = {};
+    for (const label of ${JSON.stringify(BADGE_LABELS)}) {
+      out[label] = ${JSON.stringify(sizes)}.map((s) => {
+        const c = document.createElement('canvas');
+        c.width = s; c.height = s;
+        const g = c.getContext('2d');
+        g.fillStyle = '#e8372e';
+        g.beginPath(); g.arc(s / 2, s / 2, s / 2, 0, Math.PI * 2); g.fill();
+        g.fillStyle = '#ffffff';
+        g.font = '700 ' + (s * (label.length > 1 ? 0.58 : 0.74)).toFixed(2) + 'px "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif';
+        g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+        const m = g.measureText(label);
+        const w = m.actualBoundingBoxLeft + m.actualBoundingBoxRight;
+        const h = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
+        g.fillText(label, (s - w) / 2 + m.actualBoundingBoxLeft, (s - h) / 2 + m.actualBoundingBoxAscent);
+        return c.toDataURL('image/png');
+      });
+    }
+    return out;
+  })()`;
+}
+
+/** The answer of fontBadgeScript, checked: every label with one PNG data URL per scale, or null. */
+export function parseFontBadges(value: unknown): Map<string, string[]> | null {
+  if (!value || typeof value !== 'object') return null;
+  const out = new Map<string, string[]>();
+  for (const label of BADGE_LABELS) {
+    const urls = (value as Record<string, unknown>)[label];
+    if (!Array.isArray(urls) || urls.length !== BADGE_SCALES.length) return null;
+    if (!urls.every((u) => typeof u === 'string' && u.startsWith('data:image/png;base64,') && u.length < 200_000)) return null;
+    out.set(label, urls as string[]);
+  }
+  return out;
+}

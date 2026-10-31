@@ -154,9 +154,6 @@ export function AlertsSettings() {
       <SettingRow title={tr('Liczba agentów czekających na Ciebie')} htmlFor="settings-taskbar-badge" hint={tr('Windows: czerwona plakietka z liczbą na przycisku aplikacji na pasku zadań. macOS: plakietka na ikonie w Docku. Liczą się agenci, którzy czekają na zgodę albo odpowiedź, we wszystkich oknach; wyciszone komórki nie.')}>
         <input id="settings-taskbar-badge" className="setting-switch" type="checkbox" role="switch" checked={alerts.taskbarBadge} onChange={(e) => setAlerts((a) => ({ ...a, taskbarBadge: e.target.checked }))} />
       </SettingRow>
-      {window.mc.platform === 'win32' && <SettingRow title={tr('Postęp na pasku zadań, gdy agenci pracują')} htmlFor="settings-taskbar-progress" hint={tr('Przycisk aplikacji na pasku zadań pokazuje animowany pasek postępu, dopóki pracuje choć jeden agent.')}>
-        <input id="settings-taskbar-progress" className="setting-switch" type="checkbox" role="switch" checked={alerts.taskbarProgress} onChange={(e) => setAlerts((a) => ({ ...a, taskbarProgress: e.target.checked }))} />
-      </SettingRow>}
     </SettingsGroup>
   </>;
 }

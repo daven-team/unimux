@@ -179,7 +179,7 @@ describe('alerts normalization', () => {
         attention: { notify: true, sound: { kind: 'system' } },
         error: { notify: true, sound: { kind: 'preset', id: 'retro' } },
       },
-      notificationActions: false, flashWindow: false, taskbarBadge: false, taskbarProgress: false,
+      notificationActions: false, flashWindow: false, taskbarBadge: false,
     };
     expect(normalizeAlerts(JSON.parse(JSON.stringify(raw)))).toEqual(raw);
   });

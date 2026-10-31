@@ -86,12 +86,4 @@ export const alertMessages = {
     'Windows : un badge rouge avec le nombre sur le bouton de l’application dans la barre des tâches. macOS : un badge sur l’icône du Dock. Compte les agents qui attendent une autorisation ou une réponse, dans toutes les fenêtres ; les cellules en sourdine ne comptent pas.',
     'Windows: um emblema vermelho com o número no botão da aplicação na barra de tarefas. macOS: um emblema no ícone da Dock. Conta os agentes que esperam uma permissão ou uma resposta, em todas as janelas; as células silenciadas não contam.',
   ],
-  'Postęp na pasku zadań, gdy agenci pracują': ['Taskbar progress while agents work', 'Fortschritt in der Taskleiste, während Agenten arbeiten', 'Progreso en la barra de tareas mientras trabajan los agentes', 'Progression dans la barre des tâches pendant que les agents travaillent', 'Progresso na barra de tarefas enquanto os agentes trabalham'],
-  'Przycisk aplikacji na pasku zadań pokazuje animowany pasek postępu, dopóki pracuje choć jeden agent.': [
-    'The app’s taskbar button shows an animated progress bar while at least one agent works.',
-    'Die Schaltfläche der App in der Taskleiste zeigt einen animierten Fortschrittsbalken, solange mindestens ein Agent arbeitet.',
-    'El botón de la aplicación en la barra de tareas muestra una barra de progreso animada mientras trabaje al menos un agente.',
-    'Le bouton de l’application dans la barre des tâches affiche une barre de progression animée tant qu’au moins un agent travaille.',
-    'O botão da aplicação na barra de tarefas mostra uma barra de progresso animada enquanto pelo menos um agente trabalha.',
-  ],
 } as const satisfies Record<string, readonly [string, string, string, string, string]>;
