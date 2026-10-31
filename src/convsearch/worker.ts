@@ -3,6 +3,8 @@
 // code bundled into it.
 import { parentPort, workerData } from 'worker_threads';
 import { ConvIndexer } from './indexer';
+import { locateSession, readExport } from './exporter';
+import type { ConvExportData, ConvExportSource } from '../shared/convExport';
 import type { ConvWorkerData, ConvWorkerReply, ConvWorkerRequest } from './protocol';
 
 const data = workerData as ConvWorkerData;
@@ -21,6 +23,9 @@ port.on('message', (m: ConvWorkerRequest) => {
       } else if (m.t === 'transcript') {
         await indexer.load();
         reply({ t: 'reply', id: m.id, result: await indexer.transcript(m.file) });
+      } else if (m.t === 'export') {
+        await indexer.load();
+        reply({ t: 'reply', id: m.id, result: await exportOf(m.source) });
       } else if (m.t === 'stats') {
         reply({ t: 'reply', id: m.id, result: { ...indexer.stats, files: indexer.size(), indexing: indexer.indexing, heapUsed: process.memoryUsage().heapUsed } });
       } else if (m.t === 'shutdown') {
@@ -32,3 +37,22 @@ port.on('message', (m: ConvWorkerRequest) => {
     }
   })();
 });
+
+/** 1.1.1: a conversation for the Markdown export: a file the index knows, or the newest transcript of a cell's session. */
+async function exportOf(source: ConvExportSource): Promise<ConvExportData> {
+  const failed = (error: string, cli: 'claude' | 'codex' = 'claude'): ConvExportData =>
+    ({ ok: false, error, cli, id: '', title: '', cwd: '', startedAt: 0, updatedAt: 0, items: [], capped: false });
+  let file: string | null = null;
+  let cli: 'claude' | 'codex';
+  if ('file' in source) {
+    const known = indexer.cliOf(source.file);
+    if (!known) return failed('unknown');
+    file = source.file;
+    cli = known;
+  } else {
+    cli = source.cli;
+    file = indexer.fileOf(cli, source.id) ?? await locateSession(cli, source.id, data);
+    if (!file) return failed('not-found', cli);
+  }
+  try { return await readExport(file, cli); } catch (error) { return failed(String((error as Error)?.message ?? error), cli); }
+}

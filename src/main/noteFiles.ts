@@ -12,7 +12,7 @@ const EXPORT_MAX = 4 * 1024 * 1024;
 export interface NoteFilesDeps {
   dataDir: string;
   /** The save dialog: the chosen path, or null when cancelled. */
-  pickSavePath(defaultName: string): Promise<string | null>;
+  pickSavePath(defaultName: string, kind?: 'conversation'): Promise<string | null>;
   /** Real-app checks of an unpackaged build: exports go into this folder without the dialog. */
   exportDir?: string | null;
 }
@@ -42,9 +42,10 @@ export async function readNoteImage(dataDir: string, name: unknown): Promise<str
 export function registerNoteFilesIpc(guard: IpcGuard, deps: NoteFilesDeps): void {
   guard.guardedHandle('notes:image:save', (_e, bytes: unknown, mime: unknown) => saveNoteImage(deps.dataDir, bytes, mime).catch(() => null), () => null);
   guard.guardedHandle('notes:image:read', (_e, name: unknown) => readNoteImage(deps.dataDir, name), () => null);
-  guard.guardedHandle('notes:export', async (_e, name: unknown, text: unknown) => {
+  // 1.1.1: a conversation exported to Markdown is saved the same way (only the dialog's title differs).
+  guard.guardedHandle('notes:export', async (_e, name: unknown, text: unknown, kind: unknown) => {
     if (typeof name !== 'string' || !name || name.length > 200 || /[\\/\0]/.test(name) || typeof text !== 'string' || text.length > EXPORT_MAX) return { ok: false };
-    const path = deps.exportDir ? join(deps.exportDir, basename(name)) : await deps.pickSavePath(name);
+    const path = deps.exportDir ? join(deps.exportDir, basename(name)) : await deps.pickSavePath(name, kind === 'conversation' ? kind : undefined);
     if (!path) return { ok: false, cancelled: true };
     try { await writeFile(path, text, 'utf8'); return { ok: true, path }; } catch { return { ok: false }; }
   }, () => ({ ok: false }));

@@ -231,10 +231,16 @@ try {
   await until(`${shownText} === 'edited, not saved'`, 'draft after a click on the tab');
   check(true, 'an unsaved string edit is still there after another tab was in front (click back)');
   await evaluate(`document.activeElement?.blur(), true`);
-  await key('Tab', 'Tab', 9, 2);
-  await until(`!document.querySelector('.redis-string-text')`, 'Mod+Tab to the next tab');
-  await key('Tab', 'Tab', 9, 2 | 8);
-  await until(`${shownText} === 'edited, not saved'`, 'draft after Mod+Shift+Tab');
+  // 1.1.1: Ctrl+Tab goes to the recently used tab when Ctrl is released; a second tap comes back.
+  const ctrlTab = async () => {
+    await app.cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 2 });
+    await key('Tab', 'Tab', 9, 2);
+    await app.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 0 });
+  };
+  await ctrlTab();
+  await until(`!document.querySelector('.redis-string-text')`, 'Ctrl+Tab to the recently used tab');
+  await ctrlTab();
+  await until(`${shownText} === 'edited, not saved'`, 'draft after Ctrl+Tab back');
   check((await cmd('GET', 'draft:1')).v === 'original', 'Mod+Tab away and back keeps the unsaved edit, and nothing was written');
   await evaluate(`${browserTab}.querySelector('.x').click(), true`);
   await until(`(document.querySelector('.modal-head')?.textContent ?? '').includes('Redis')`, 'close question');

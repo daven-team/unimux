@@ -38,7 +38,7 @@ po które sięgasz w trakcie ich pracy: pliki, Git, SSH i SFTP, bazy danych, not
 
 ### Agenci w gridzie
 
-- **Gridy** od jednej komórki do 5×4, układy rzędami (`3+2`), scalanie komórek i kilka gridów w projekcie. Pasek kart pokazuje gridy i pliki wszystkich projektów (albo tylko aktywnego), a `Ctrl+Tab` przełącza między nimi.
+- **Gridy** od jednej komórki do 5×4, układy rzędami (`3+2`), scalanie komórek i kilka gridów w projekcie. Pasek kart pokazuje gridy i pliki wszystkich projektów (albo tylko aktywnego), a `Ctrl+Tab` przełącza na ostatnio używaną.
 - **Komórki jako karty**: każda komórka ma nagłówek z ikoną agenta (iskra Claude, chmurka Codex, znak zachęty powłoki albo host SSH), statusem, nazwą, szczegółami (profil, model, gałąź worktree, user@host) i własnym kolorem.
 - **Każda komórka** ma nazwę, kolor, prompt startowy, profil Claude Code / Codex / powłoka, model, rolę MCP i opcjonalny osobny `git worktree`. Przed zamknięciem komórki z worktree aplikacja sprawdza niezacommitowane pliki i niescalone commity.
 - **Statusy z powodem**: ◐ pracuje („praca: Edit”), ● czeka na Ciebie, „czeka na zgodę: Bash” od razu, gdy agent pyta o pozwolenie, i czerwony kod wyjścia, gdy polecenie albo CLI zawiedzie. Powiadomienie i dźwięk mówią, który agent skończył albo Cię potrzebuje.
@@ -144,7 +144,7 @@ Na macOS zamiast `Ctrl` używasz `Cmd`. Każdy skrót można zmienić w **Ustawi
 | `Ctrl+Shift+H` | Historia rozmów i gridów |
 | `Ctrl+Shift+M` | Maksymalizuj albo przywróć komórkę |
 | `Ctrl+Alt+Strzałki` | Przejście między komórkami |
-| `Ctrl+Tab` | Następna karta |
+| `Ctrl+Tab` | Ostatnio używana karta (przytrzymaj `Ctrl`, aby cofnąć się dalej) |
 | `Ctrl+Shift+B` / `Ctrl+Shift+O` | Snippety / notatki |
 | `Ctrl+Shift+F` | Szukaj w terminalu |
 

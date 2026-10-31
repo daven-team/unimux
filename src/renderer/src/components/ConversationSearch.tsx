@@ -8,7 +8,7 @@ import type { MessageKey } from '../../../shared/i18n';
 import { formatAgo } from '../../../shared/i18n';
 import { copySessionId, focusedCellUse, openCellOf, resumeConversation, type FocusedUse } from '../conversationSearch';
 import { useI18n } from '../i18n';
-import { closeModal, useStore } from '../store';
+import { closeModal, setUi, useStore } from '../store';
 import { IX } from './icons';
 import { Select } from './Select';
 import './conversationSearch.css';
@@ -46,20 +46,26 @@ const FOCUSED_REASON: Record<Exclude<FocusedUse, { ok: true }>['reason'], Messag
   ssh: 'Aktywna komórka to sesja SSH.',
 };
 
-export function ConversationSearch() {
+/** What the search showed last (1.1.1): coming back from the export of a result restores it. */
+interface SearchView { q: string; cli: 'all' | 'claude' | 'codex'; role: 'all' | 'user' | 'assistant'; project: string; range: Range; from: string; to: string; sel: number }
+let lastView: SearchView | null = null;
+
+export function ConversationSearch({ restore = false }: { restore?: boolean }) {
   const { tr, language } = useI18n();
+  const [start] = useState(() => (restore ? lastView : null));
   const s = useStore((st) => st.s);
   const focusedId = useStore((st) => st.ui.focusedCellId);
   const statuses = useStore((st) => st.ui.statuses);
-  const [q, setQ] = useState('');
-  const [cli, setCli] = useState<'all' | 'claude' | 'codex'>('all');
-  const [role, setRole] = useState<'all' | 'user' | 'assistant'>('all');
-  const [project, setProject] = useState('');
-  const [range, setRange] = useState<Range>('any');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  const [q, setQ] = useState(start?.q ?? '');
+  const [cli, setCli] = useState<'all' | 'claude' | 'codex'>(start?.cli ?? 'all');
+  const [role, setRole] = useState<'all' | 'user' | 'assistant'>(start?.role ?? 'all');
+  const [project, setProject] = useState(start?.project ?? '');
+  const [range, setRange] = useState<Range>(start?.range ?? 'any');
+  const [from, setFrom] = useState(start?.from ?? '');
+  const [to, setTo] = useState(start?.to ?? '');
   const [result, setResult] = useState<ConvSearchResult | null>(null);
-  const [sel, setSel] = useState(0);
+  const [sel, setSel] = useState(start?.sel ?? 0);
+  const keepSel = useRef(!!start);
   const [focusIndex, setFocusIndex] = useState<number | null>(null);
   const [transcript, setTranscript] = useState<{ file: string; data: ConvTranscript } | null>(null);
   const seq = useRef(0);
@@ -91,7 +97,12 @@ export function ConversationSearch() {
     return () => window.clearTimeout(timer);
   }, [query, poll]);
 
-  useEffect(() => { setSel(0); setFocusIndex(null); }, [query]);
+  useEffect(() => {
+    // The first query of a restored view keeps its selection.
+    if (keepSel.current) { keepSel.current = false; return; }
+    setSel(0); setFocusIndex(null);
+  }, [query]);
+  useEffect(() => { lastView = { q, cli, role, project, range, from, to, sel }; }, [q, cli, role, project, range, from, to, sel]);
 
   const hits = result?.hits ?? [];
   const current: ConvHit | undefined = hits[Math.min(sel, hits.length - 1)];
@@ -253,6 +264,7 @@ export function ConversationSearch() {
                     </>
                   )}
                   <button className="btn small" onClick={() => copySessionId(current)}>{tr('Kopiuj ID')}</button>
+                  <button className="btn small" onClick={() => setUi({ modal: { kind: 'convExport', source: { file: current.file }, back: 'conversations' } })}>{tr('Eksportuj do Markdown…')}</button>
                   <span className="conv-id muted" title={current.id}>{current.id}</span>
                 </div>
               </div>

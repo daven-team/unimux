@@ -44,7 +44,7 @@ Around the agents it has the tools you reach for while they work: files, Git, SS
 
 ### Agents in a grid
 
-- **Grids** from 1 cell up to 5×4, row layouts like `3+2`, merged cells and several grids per project. The tab strip shows the grids and files of every project (or only the active one), and `Ctrl+Tab` switches between them.
+- **Grids** from 1 cell up to 5×4, row layouts like `3+2`, merged cells and several grids per project. The tab strip shows the grids and files of every project (or only the active one), and `Ctrl+Tab` switches to the recently used one.
 - **Cells as cards**: each cell has a header with the agent's icon (the Claude spark, the Codex cloud, a shell prompt or the SSH host), its status, name, details such as profile, model, worktree branch or user@host, and its own color.
 - **Per-cell setup**: name, color, startup prompt, Claude Code / Codex / shell profile, model, MCP role and an optional isolated `git worktree`. Closing a worktree cell checks for uncommitted files and unmerged commits first.
 - **Statuses with a reason**: ◐ working ("working: Edit"), ● waiting for you, "needs approval: Bash" the moment a permission question opens, and a red exit code when a command or CLI fails. A desktop notification and a sound tell you which agent finished or needs you.
@@ -209,7 +209,7 @@ On macOS, use `Cmd` instead of `Ctrl`. Every shortcut can be changed in **Settin
 | `Ctrl+Shift+H` | History of conversations and grids |
 | `Ctrl+Shift+M` | Maximize or restore the cell |
 | `Ctrl+Alt+Arrows` | Move between cells |
-| `Ctrl+Tab` | Next tab |
+| `Ctrl+Tab` | Recently used tab (hold `Ctrl` to go further back) |
 | `Ctrl+Shift+B` / `Ctrl+Shift+O` | Snippets / Notes |
 | `Ctrl+Shift+F` | Find in a terminal |
 

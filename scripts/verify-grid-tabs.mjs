@@ -5,7 +5,7 @@
 // The cells are cmd shells (cmd.exe is in the cut PATH), so they start and the screenshots show working terminals.
 // Checks: the grids of two projects are tabs of one strip (project colour bar, project name in the tooltip, the project name as a
 // prefix when two grids share a name); clicking a grid of the other project switches the project (sidebar and Files follow);
-// Mod+Tab walks the whole strip across projects; a drag across projects reorders the strip and the order survives a restart
+// Ctrl+Tab goes to the recently used tabs across projects (1.1.1); a drag across projects reorders the strip and the order survives a restart
 // (state.json); closing a grid with a working agent asks (Cancel keeps it); Mod+Shift+W with a file tab in front closes only
 // the file tab, not the grid with the working agent behind it; "All tabs" groups by project.
 // Screenshots: D:\Projekty\_shots\100-tabs-*.png
@@ -66,6 +66,12 @@ try {
   };
   const CTRL = 2;
   const SHIFT = 8;
+  /** 1.1.1: Ctrl+Tab switches when Ctrl is released (held, it walks further through the recently used tabs). */
+  const ctrlTab = async (modifiers) => {
+    await app.cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: CTRL });
+    await key('Tab', 'Tab', 9, modifiers);
+    await app.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 0 });
+  };
 
   // 1. Both projects' grids are tabs of the strip.
   await app.until(`document.querySelectorAll('.tab.grid-tab').length === 4`, 'four grid tabs');
@@ -92,23 +98,23 @@ try {
   await app.screenshot('100-tabs-switch.png');
   ok('a click on a grid of the other project switches the project, the sidebar and Files');
 
-  // 3. Mod+Tab walks the whole strip across projects.
+  // 3. Ctrl+Tab goes to the recently used tabs across projects (1.1.1; until 1.1.0 it walked the strip order).
   // The strip starts in the sidebar order (no saved order yet): Alpha / Main, Alpha / Notes, Beta / Build, Beta / Main.
   const initial = await strip();
   if (JSON.stringify(initial) !== JSON.stringify([T.alphaMain, T.alphaNotes, T.betaBuild, T.betaMain].map((id) => `grid:${id}`))) fail(`initial strip: ${JSON.stringify(initial)}`);
   await selectTab(T.alphaNotes);
   await projectIs('Alpha', 'Alpha / Notes in front');
   await app.evaluate(`(document.activeElement?.blur(), true)`);
-  await key('Tab', 'Tab', 9, CTRL);
-  await app.until(`document.querySelector('.workspace-tabs .tab.active')?.dataset.workspaceId === ${JSON.stringify(`grid:${T.betaBuild}`)}`, 'Mod+Tab from Alpha / Notes to Beta / Build', 5000);
-  await projectIs('Beta', 'Mod+Tab switched to Beta');
-  await key('Tab', 'Tab', 9, CTRL | SHIFT);
-  await app.until(`document.querySelector('.workspace-tabs .tab.active')?.dataset.workspaceId === ${JSON.stringify(`grid:${T.alphaNotes}`)}`, 'Mod+Shift+Tab back to Alpha / Notes', 5000);
-  await key('Tab', 'Tab', 9, CTRL | SHIFT);
-  await key('Tab', 'Tab', 9, CTRL | SHIFT);
-  await app.until(`document.querySelector('.workspace-tabs .tab.active')?.dataset.workspaceId === ${JSON.stringify(`grid:${T.betaMain}`)}`, 'Mod+Shift+Tab wraps to the last tab', 5000);
+  // Used most recently: Alpha / Notes, Beta / Build, Alpha / Main, Beta / Main.
+  await ctrlTab(CTRL);
+  await app.until(`document.querySelector('.workspace-tabs .tab.active')?.dataset.workspaceId === ${JSON.stringify(`grid:${T.betaBuild}`)}`, 'Ctrl+Tab from Alpha / Notes to Beta / Build', 5000);
+  await projectIs('Beta', 'Ctrl+Tab switched to Beta');
+  await ctrlTab(CTRL);
+  await app.until(`document.querySelector('.workspace-tabs .tab.active')?.dataset.workspaceId === ${JSON.stringify(`grid:${T.alphaNotes}`)}`, 'Ctrl+Tab back to Alpha / Notes', 5000);
+  await ctrlTab(CTRL | SHIFT);
+  await app.until(`document.querySelector('.workspace-tabs .tab.active')?.dataset.workspaceId === ${JSON.stringify(`grid:${T.betaMain}`)}`, 'Ctrl+Shift+Tab to the least recently used tab', 5000);
   await selectTab(T.betaBuild);
-  ok('Mod+Tab and Mod+Shift+Tab walk the whole strip across projects and wrap around');
+  ok('Ctrl+Tab toggles between the two recently used tabs across projects, Ctrl+Shift+Tab goes to the least recent one');
 
   // 4. Drag Beta / Build before Alpha / Main (across projects); the order is saved in state.json.
   const dragCard = async (source, target, after) => {
@@ -164,7 +170,7 @@ try {
   // Settings is a tab of the strip: Mod+Tab leaves it (it used to be blocked there).
   if ((await activeKey()) !== 'settings') fail(`Settings not in front: ${await activeKey()}`);
   await app.evaluate(`(document.activeElement?.blur(), true)`);
-  await key('Tab', 'Tab', 9, CTRL);
+  await ctrlTab(CTRL);
   await app.until(`!!document.querySelector('.workspace-tabs .tab.active') && document.querySelector('.workspace-tabs .tab.active').dataset.workspaceId !== 'settings'`, 'Mod+Tab leaves Settings', 5000);
   if (!(await app.evaluate(`!!document.querySelector('.settings-tab')`))) fail('Mod+Tab closed Settings');
   ok(`Mod+Tab leaves Settings (now ${await activeKey()})`);

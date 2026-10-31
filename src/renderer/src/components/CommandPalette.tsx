@@ -2,7 +2,7 @@ import { useShortcutText } from '../shortcuts';
 import { useI18n } from '../i18n';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  IBranch, IDatabase, IFolder, IGrid, IHistory, IKey, IMax, IPlus, IPrompt, IRestart, IServer, ISettings, ISidebar, ISnippet, IUpload, IX,
+  IBranch, IDatabase, IFolder, IGrid, IHistory, IKey, IMax, IPlus, IPrompt, IRestart, IServer, ISettings, ISidebar, ISnippet, IDownload, IUpload, IX,
   IArrowLeft, IArrowRight, IArrowUp,
 } from './icons';
 import { ICodeEditor, ICopy, IMoveDown, IRefresh } from './menuIcons';
@@ -15,6 +15,7 @@ import { openQueue, queueCapable } from '../promptQueue';
 import { openAgentPrompt } from '../agentPrompt';
 import { agentTargets } from '../../../shared/agentPrompt';
 import { ProviderIcon } from './ProviderIcons';
+import { cellCanExport, exportCellConversation } from '../convExport';
 import type { SessionInfo } from '../../../shared/types';
 import {
   addAgent, closeTab, createProject, moveCellBy, quickTab, restartCell, restoreArchived, resumeSession, selectTab,
@@ -127,6 +128,7 @@ function PaletteInner() {
       // 1.0.9: the prompt queue of the focused agent cell, with its add field ready.
       const focusedCell = findCell(s, focused)?.cell;
       if (focusedCell && queueCapable(s, focusedCell)) out.push({ kind: tr('Akcja'), title: tr('Komórka: dodaj prompt do kolejki'), icon: <IPlus />, desc: keys('cell.queue') || undefined, run: () => openQueue(focused) });
+      if (focusedCell?.session && cellCanExport(focused)) out.push({ kind: tr('Akcja'), title: tr('Komórka: eksportuj rozmowę do Markdown…'), icon: <IDownload />, run: () => exportCellConversation(focused) });
       out.push({ kind: tr('Akcja'), title: tr("Komórka: zresetuj terminal (tryby myszy i klawiatury)"), icon: <IRefresh />, run: () => { terminals.resetInput(focused); toast(tr("Terminal zresetowany - historia została zachowana.")); } });
       const moves: Array<[string, string, number, number]> = [
         [tr('Komórka: przesuń w lewo'), 'left', -1, 0], [tr('Komórka: przesuń w prawo'), 'right', 1, 0],

@@ -15,7 +15,7 @@ These are the defaults. Every one of them can be changed, disabled or restored i
 | `Ctrl+Shift+M` | Maximize or restore the cell (or double click its header) |
 | `Ctrl+Alt+Arrows` | Move between cells |
 | `Ctrl+Alt+Shift+Arrows` | Swap the focused cell with its neighbour (or drag a cell by its header onto another one) |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab of the strip (grids of all projects, files) |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Recently used tab of the strip (grids of all projects, files): a tap toggles between the last two, holding `Ctrl` and pressing `Tab` again walks further with a switcher, releasing `Ctrl` switches (also `Ctrl` on macOS). "Next tab" / "Previous tab" in strip order have no key by default and can be bound in Settings |
 | `Ctrl+Shift+B` / `Ctrl+Shift+E` | Toggle snippets / projects panel |
 | `Ctrl+Wheel` | Zoom a single cell |
 

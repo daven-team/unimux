@@ -11,6 +11,7 @@ import type { AlertEventId } from '../shared/alerts';
 import type { UsageState } from '../shared/usage';
 import type { MonitorSample } from '../shared/monitor';
 import type { ConvQuery, ConvSearchResult, ConvTranscript } from '../shared/convSearch';
+import type { ConvExportData, ConvExportSource } from '../shared/convExport';
 import type { ContextUsage } from '../shared/contextUsage';
 import type { AdoptCopyResult, LoginRequest, LoginState, SwapResult } from '../shared/accounts';
 import type { ReplaceRequest, ReplaceResult, SearchOptions, SearchResult } from '../shared/search';
@@ -120,6 +121,7 @@ export interface McApi {
   conversations: {
     search(query: ConvQuery): Promise<ConvSearchResult>;
     transcript(file: string): Promise<ConvTranscript>;
+    exportData(source: ConvExportSource): Promise<ConvExportData>;
   };
   isGitRepo(path: string): Promise<boolean>;
   createWorktree(projectPath: string, name: string): Promise<Worktree>;
@@ -145,7 +147,7 @@ export interface McApi {
     saveImage(bytes: Uint8Array, mime: string): Promise<string | null>;
     /** The image as a data URL, null when it is gone or the name is not one the app gave. */
     readImage(name: string): Promise<string | null>;
-    exportFile(name: string, text: string): Promise<{ ok: boolean; path?: string; cancelled?: boolean }>;
+    exportFile(name: string, text: string, kind?: 'conversation'): Promise<{ ok: boolean; path?: string; cancelled?: boolean }>;
   };
   /** The local pane of the SFTP view: any folder, drives, home, new folder, rename, trash, show in Explorer/Finder. */
   localFs: LocalFilesApi;

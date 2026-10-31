@@ -8,6 +8,7 @@ import { cliMessages } from './cliMessages';
 import { codexMessages } from './codexMessages';
 import { contextMessages } from './contextMessages';
 import { convSearchMessages } from './convSearchMessages';
+import { convExportMessages } from './convExportMessages';
 import { dbMessages } from './dbMessages';
 import { redisMessages } from './redisMessages';
 import { dbUiMessages } from './dbUiMessages';
@@ -61,6 +62,7 @@ export const messages = {
   ...codexMessages,
   ...contextMessages,
   ...convSearchMessages,
+  ...convExportMessages,
   ...dbMessages,
   ...redisMessages,
   ...dbUiMessages,

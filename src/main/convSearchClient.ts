@@ -6,6 +6,7 @@ import { join } from 'path';
 import { Worker } from 'worker_threads';
 // Types only: anything main imports from the thread's modules would become a chunk the eval'd thread cannot load.
 import type { ConvQuery, ConvSearchResult, ConvTranscript } from '../shared/convSearch';
+import type { ConvExportData, ConvExportSource } from '../shared/convExport';
 import type { ConvWorkerData, ConvWorkerReply, ConvWorkerRequest } from '../convsearch/protocol';
 
 const IDLE_MS = 10 * 60 * 1000;
@@ -87,6 +88,12 @@ export function createConvSearchClient(opts: ConvSearchClientOptions) {
         return { ok: false, messages: [], capped: false, error: String((error as Error)?.message ?? error) };
       }
     },
+    /** 1.1.1: a whole conversation for the Markdown export (read on the thread, never in main). */
+    async exportData(source: ConvExportSource): Promise<ConvExportData> {
+      try { return await call<ConvExportData>({ t: 'export', source }, 120_000); } catch (error) {
+        return { ok: false, error: String((error as Error)?.message ?? error), cli: 'claude', id: '', title: '', cwd: '', startedAt: 0, updatedAt: 0, items: [], capped: false };
+      }
+    },
     stats: () => call<Record<string, unknown>>({ t: 'stats' }),
     stop,
   };
@@ -108,4 +115,12 @@ export function sanitizeQuery(raw: unknown): ConvQuery {
   if (to !== undefined) out.to = to;
   if (limit !== undefined) out.limit = Math.max(1, Math.min(500, Math.floor(limit)));
   return out;
+}
+
+/** An export request as it arrives over IPC: a file path or a session of a known CLI with a plain id; null for anything else. */
+export function sanitizeExportSource(raw: unknown): ConvExportSource | null {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  if (typeof r.file === 'string' && r.file && r.file.length <= 4096) return { file: r.file };
+  if ((r.cli === 'claude' || r.cli === 'codex') && typeof r.id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(r.id)) return { cli: r.cli, id: r.id };
+  return null;
 }
