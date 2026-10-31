@@ -174,8 +174,12 @@ export const SHORTCUTS = [
   { id: 'conversations.search', label: 'Szukaj we wszystkich rozmowach Claude i Codex', group: 'general', scope: 'global', default: 'Mod+Alt+F', rebindable: true },
   { id: 'history.open', label: 'Historia czatów i gridów', group: 'grid', scope: 'global', default: 'Mod+Shift+H', rebindable: true, requiresProject: true },
   { id: 'tab.close', label: 'Zamknij kartę na wierzchu (grid, plik, SSH, ustawienia)', group: 'grid', scope: 'global', default: 'Mod+Shift+W', rebindable: true },
-  { id: 'tab.next', label: 'Następna karta', group: 'grid', scope: 'global', default: 'Mod+Tab', rebindable: true },
-  { id: 'tab.prev', label: 'Poprzednia karta', group: 'grid', scope: 'global', default: 'Mod+Shift+Tab', rebindable: true },
+  // 1.1.1: like a browser or an IDE, Ctrl+Tab goes to the previously used tab (held: further back, with the switcher), also on
+  // macOS, where Cmd+Tab belongs to the system. The strip order (next / previous tab) has no key of its own by default.
+  { id: 'tab.next', label: 'Ostatnio używana karta (przytrzymaj, aby przejść dalej)', group: 'grid', scope: 'global', default: 'Ctrl+Tab', rebindable: true },
+  { id: 'tab.prev', label: 'Ostatnio używane karty wstecz', group: 'grid', scope: 'global', default: 'Ctrl+Shift+Tab', rebindable: true },
+  { id: 'tab.right', label: 'Następna karta', group: 'grid', scope: 'global', default: null, rebindable: true },
+  { id: 'tab.left', label: 'Poprzednia karta', group: 'grid', scope: 'global', default: null, rebindable: true },
   { id: 'cell.maximize', label: 'Maksymalizuj lub przywróć komórkę', group: 'grid', scope: 'cell', default: 'Mod+Shift+M', rebindable: true, blockedInSettings: true },
   { id: 'cell.focus.left', label: 'Przejdź do komórki po lewej', group: 'grid', scope: 'cell', default: 'Mod+Alt+Left', rebindable: true, blockedInSettings: true },
   { id: 'cell.focus.right', label: 'Przejdź do komórki po prawej', group: 'grid', scope: 'cell', default: 'Mod+Alt+Right', rebindable: true, blockedInSettings: true },

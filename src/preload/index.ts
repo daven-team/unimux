@@ -60,6 +60,7 @@ const api: McApi = {
   conversations: {
     search: (query) => ipcRenderer.invoke('conv:search', query),
     transcript: (file) => ipcRenderer.invoke('conv:transcript', file),
+    exportData: (source) => ipcRenderer.invoke('conv:export', source),
   },
   isGitRepo: (path) => ipcRenderer.invoke('git:isRepo', path),
   createWorktree: (projectPath, name) => ipcRenderer.invoke('git:createWorktree', projectPath, name),
@@ -153,7 +154,7 @@ const api: McApi = {
   notes: {
     saveImage: (bytes, mime) => ipcRenderer.invoke('notes:image:save', bytes, mime),
     readImage: (name) => ipcRenderer.invoke('notes:image:read', name),
-    exportFile: (name, text) => ipcRenderer.invoke('notes:export', name, text),
+    exportFile: (name, text, kind) => ipcRenderer.invoke('notes:export', name, text, kind),
   },
   db: {
     saveConnection: (input, password) => ipcRenderer.invoke('db:connections:save', input, password),

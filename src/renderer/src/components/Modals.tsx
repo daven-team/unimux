@@ -13,6 +13,7 @@ import { AuthModal } from './AuthModal';
 import { closeInstall, InstallModal } from './InstallModal';
 import { ChangelogModal } from './Changelog';
 import { ConversationSearch } from './ConversationSearch';
+import { ConvExportDialog } from './ConvExportDialog';
 import { FindReplaceModal } from './FindReplace';
 import { GridDialog } from './GridDialog';
 import { BroadcastDialog } from './ssh/BroadcastDialog';
@@ -40,6 +41,8 @@ export function Modals() {
       if (dialog) closeDialog();
       // A running install is never dismissed by accident (its X asks to cancel).
       else if (install) { if (!install.locked) closeInstall(); }
+      // 1.1.1: the export of a found conversation goes back to the search.
+      else if (modal?.kind === 'convExport' && modal.back) setUi({ modal: { kind: 'conversations', restore: true } });
       else closeModal();
     };
     window.addEventListener('keydown', onKey, true);
@@ -53,7 +56,8 @@ export function Modals() {
           {modal.kind === 'grid' && <GridDialog projectId={modal.projectId} />}
           {modal.kind === 'history' && <HistoryModal projectId={modal.projectId} />}
           {modal.kind === 'changelog' && <ChangelogModal />}
-          {modal.kind === 'conversations' && <ConversationSearch />}
+          {modal.kind === 'conversations' && <ConversationSearch restore={!!modal.restore} />}
+          {modal.kind === 'convExport' && <ConvExportDialog source={modal.source} back={modal.back} />}
           {modal.kind === 'search' && <FindReplaceModal key={modal.projectId} projectId={modal.projectId} />}
           {modal.kind === 'snippet' && <SnippetEditor key={modal.snippetId ?? modal.projectId ?? 'new'} snippetId={modal.snippetId} projectId={modal.projectId} />}
           {modal.kind === 'project' && <ProjectEditor key={modal.projectId} projectId={modal.projectId} />}

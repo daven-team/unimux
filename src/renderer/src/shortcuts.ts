@@ -12,6 +12,7 @@ import { focusedTerminalCell, openTerminalFind } from './terminals/terminalFind'
 import { captureSelectionToNote } from './notesUi';
 import { openQueue } from './promptQueue';
 import { stepToWaiting } from './waiting';
+import { stepTabSwitch } from './tabSwitcher';
 
 let cached: { overrides: unknown; platform: string; resolution: ShortcutResolution } | null = null;
 
@@ -65,7 +66,7 @@ function focusTarget(target: EventTarget | null): 'terminal' | 'input' | 'other'
   return 'other';
 }
 
-function run(id: string): void {
+function run(id: string, e: KeyboardEvent): void {
   const project = activeProject(getS());
   switch (id) {
     case 'palette.open': case 'palette.openAlt': setUi((ui) => ({ palette: !ui.palette })); break;
@@ -83,8 +84,11 @@ function run(id: string): void {
     case 'cell.maximize': toggleMaximize(); break;
     case 'cell.queue': openQueue(); break;
     case 'terminal.find': { const cell = focusedTerminalCell(); if (cell) openTerminalFind(cell); break; }
-    case 'tab.next': cycleWorkspace(1); break;
-    case 'tab.prev': cycleWorkspace(-1); break;
+    // 1.1.1: recently used tabs (hold the modifier to walk further); the strip order has its own, unbound actions.
+    case 'tab.next': stepTabSwitch(1, e); break;
+    case 'tab.prev': stepTabSwitch(-1, e); break;
+    case 'tab.right': cycleWorkspace(1); break;
+    case 'tab.left': cycleWorkspace(-1); break;
     case 'cell.focus.left': moveFocus(-1, 0); break;
     case 'cell.focus.right': moveFocus(1, 0); break;
     case 'cell.focus.up': moveFocus(0, -1); break;
@@ -115,7 +119,7 @@ export function useShortcuts(only?: ReadonlySet<string>): void {
       if (!id || (only && !only.has(id))) return;
       e.preventDefault();
       e.stopPropagation();
-      run(id);
+      run(id, e);
     };
     const onUp = (e: KeyboardEvent) => repeats.release(e);
     window.addEventListener('keydown', onKey, true);

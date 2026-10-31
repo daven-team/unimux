@@ -49,7 +49,7 @@ import { registerNoteFilesIpc } from './noteFiles';
 import { DB_LIMITS, isDbSessionId } from '../shared/db';
 import type { DbHostToMain } from '../shared/dbHostIpc';
 import { claudeProjectDirName, findRecentCodexSession, listSessionsAsync } from './sessions';
-import { convWorkerFile, createConvSearchClient, sanitizeQuery } from './convSearchClient';
+import { convWorkerFile, createConvSearchClient, sanitizeExportSource, sanitizeQuery } from './convSearchClient';
 import { ContextTracker } from './contextUsage';
 import { createSaver, flushUntilSaved, loadState, StateUnreadableError } from './store';
 import { updateHandoverCommitted, blockUpdateVersion, canInstallNow, checkForUpdates, getUpdateState, handOver, initUpdater, isPortableBuild, isUpdateDownloaded, onUpdateTargetChange, previousMacUpdate, recheckUpdate, signalMacUpdateReady, updateHandoffStarted, updateTarget, RELEASES_URL, startupCheck, startupDownload, updatesEnabled } from './updater';
@@ -1009,9 +1009,9 @@ function startSsh(): void {
   registerNoteFilesIpc({ guardedHandle, guardedOn }, {
     dataDir: DATA_DIR,
     exportDir: process.env.MC_NOTES_EXPORT_DIR && !app.isPackaged ? process.env.MC_NOTES_EXPORT_DIR : null,
-    pickSavePath: async (name) => {
+    pickSavePath: async (name, kind) => {
       const ext = name.split('.').pop() ?? 'md';
-      const options = { title: tr('Eksportuj notatkę'), defaultPath: name, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] };
+      const options = { title: kind === 'conversation' ? tr('Eksportuj rozmowę do Markdown') : tr('Eksportuj notatkę'), defaultPath: name, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] };
       const r = isLive(win) ? await dialog.showSaveDialog(win!, options) : await dialog.showSaveDialog(options);
       return r.canceled || !r.filePath ? null : r.filePath;
     },
@@ -1475,6 +1475,9 @@ guardedHandle('conv:search', (_e, query: unknown) => convSearch.search(sanitizeQ
   () => ({ hits: [], total: 0, conversations: 0, projects: [], indexing: null, tookMs: 0 }));
 guardedHandle('conv:transcript', (_e, file: unknown) => (typeof file === 'string' && file ? convSearch.transcript(file) : { ok: false, messages: [], capped: false }),
   () => ({ ok: false, messages: [], capped: false }));
+// 1.1.1: a conversation for the Markdown export (the renderer renders and saves it through notes:export or the clipboard).
+const noExport = { ok: false, cli: 'claude' as const, id: '', title: '', cwd: '', startedAt: 0, updatedAt: 0, items: [], capped: false };
+guardedHandle('conv:export', (_e, raw: unknown) => { const source = sanitizeExportSource(raw); return source ? convSearch.exportData(source) : noExport; }, () => noExport);
 app.on('will-quit', () => { void convSearch.stop(); });
 // "Publish to GitHub" (src/main/github): the sign-in unimux stores there also lets fetch, pull and push reach https://github.com.
 const github = createGithubService({

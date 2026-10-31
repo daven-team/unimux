@@ -348,8 +348,12 @@ describe('the default map reproduces the old behaviour', () => {
     ['F2', 'tree.rename'], ['Delete', 'tree.delete'], ['Ctrl+C', 'tree.copy'], ['Ctrl+X', 'tree.cut'], ['Ctrl+V', 'tree.paste'],
     ['Ctrl+Z', 'tree.undo'], ['Ctrl+A', 'tree.selectAll'], ['Ctrl+S', 'editor.save'], ['Ctrl+Enter', 'modal.save'],
   ];
-  /** The old keys on this platform: Ctrl is the primary modifier, which is Cmd on macOS. */
-  const platformKeys = (text: string, platform: AppPlatform) => (platform === 'darwin' ? text.replace(/\bCtrl\b/, 'Meta') : text);
+  /**
+   * The old keys on this platform: Ctrl is the primary modifier, which is Cmd on macOS. Since 1.1.1 Ctrl+Tab (recently used
+   * tabs) is Ctrl on macOS too: Cmd+Tab belongs to the system and never reached the app.
+   */
+  const ctrlTab = (text: string) => /^Ctrl\+(Shift\+)?Tab$/.test(text);
+  const platformKeys = (text: string, platform: AppPlatform) => (platform === 'darwin' && !ctrlTab(text) ? text.replace(/\bCtrl\b/, 'Meta') : text);
   const base = (platform: AppPlatform, extra: Partial<DispatchContext> = {}): DispatchContext => ({
     resolution: resolveShortcuts({}, platform), languageChosen: true, recording: false, overlayOpen: false, paletteOpen: false,
     settingsActive: false, hasProject: true, hasTab: true, target: 'other', ...extra,
@@ -365,7 +369,7 @@ describe('the default map reproduces the old behaviour', () => {
     it(`shows the same labels as before on ${platform}`, () => {
       const resolved = resolveShortcuts({}, platform);
       for (const [keys, action] of [...OLD_TABLE, ...OLD_LOCAL.map(([k, a]) => [k, a] as [string, string])]) {
-        expect(displayCombo(resolved.combos[action]!, platform), action).toBe(shortcutLabel(platform, keys));
+        expect(displayCombo(resolved.combos[action]!, platform), action).toBe(platform === 'darwin' && ctrlTab(keys) ? keys : shortcutLabel(platform, keys));
       }
     });
   }
@@ -389,7 +393,7 @@ describe('the default map reproduces the old behaviour', () => {
     if (ctrlShift && e.code === 'KeyB') return 'snippets.toggle';
     if (ctrlShift && e.code === 'KeyE') return 'sidebar.toggle';
     // 1.0.0: Settings is a tab of the strip, so Mod+Tab also leaves it (it used to be blocked there).
-    if (ctrl && e.code === 'Tab') return e.shiftKey ? 'tab.prev' : 'tab.next';
+    if (e.code === 'Tab' && (platform === 'darwin' ? e.ctrlKey && !e.metaKey && !e.altKey : ctrl)) return e.shiftKey ? 'tab.prev' : 'tab.next';
     if (settingsActive) return null;
     if (ctrlShift && e.code === 'KeyM') return 'cell.maximize';
     if (primary && e.altKey && !e.getModifierState?.('AltGraph')) {

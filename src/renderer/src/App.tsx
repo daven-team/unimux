@@ -29,6 +29,7 @@ import { parseRightPanelOrder, RIGHT_ORDER_KEY, rightPanelOrder, type RightPanel
 import { StatusBar } from './components/StatusBar';
 import { TitleBar, WorkspaceTabs } from './components/TitleBar';
 import { useShortcuts } from './shortcuts';
+import { TabSwitcher } from './components/TabSwitcher';
 import { getS, getUi, setUi, toast, update, useStore } from './store';
 import { terminals } from './terminals/TerminalManager';
 import { isPermissionAnswer } from '../../shared/permissionAction';
@@ -273,6 +274,7 @@ const commandPalette = <ErrorBoundary name="palette" fallback={() => null}><Comm
 const modals = <ErrorBoundary name="modals" fallback={(retry) => <PanelFallback retry={() => { setUi({ modal: null }); retry(); }} className="modal-failed" />}><Modals /></ErrorBoundary>;
 const contextMenuHost = <ContextMenuHost />;
 const toastView = <Toast />;
+const tabSwitcher = <ErrorBoundary name="tab-switcher" fallback={() => null}><TabSwitcher /></ErrorBoundary>;
 
 export function App() {
   const { language } = useI18n();
@@ -387,6 +389,7 @@ export function App() {
       </div>
       {statusBar}
       {commandPalette}
+      {tabSwitcher}
       {modals}
       {contextMenuHost}
       {toastView}
