@@ -20,7 +20,7 @@ const HELD_NOTE = {
 const DORMANT_SHORT = 'Limity wrócą po następnej wiadomości w Claude.';
 const FORBIDDEN_NOTE = 'Odmowa dostępu (HTTP 403), np. wstrzymana subskrypcja. Logowanie jest ważne - ponowne logowanie nie pomoże.';
 const FORBIDDEN_SHORT = 'Odmowa dostępu (HTTP 403)';
-const CSWAP_SHORT = 'Kopię tego logowania ma też cswap, więc aplikacja jej nie odnawia.';
+const CSWAP_NOTE = 'Kopię tego logowania ma też cswap, więc aplikacja jej nie odnawia.';
 const ADOPT_LABEL = 'Odświeżaj tę kopię w unimuxie';
 const ADOPT_BODY = 'Od teraz unimux będzie sam odnawiał tę kopię logowania.\n\nTo bezpieczne, jeśli logowano się do tego konta w unimuxie. Jeśli kopia pochodzi z „Ustaw jako główne” w starszej wersji, cswap może stracić swój token dla tego konta - wtedy wystarczy raz zalogować się do niego ponownie w cswap.\n\n„Zaloguj ponownie” pozostaje dostępne dla logowań, które naprawdę wygasły.';
 const ADOPT_FAILED = 'Nie udało się zmienić sposobu odnawiania tej kopii.';
@@ -140,7 +140,7 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
   const failureText = tr(usageErrorKey(kind, usage.provider), { name: providerName, retry });
 
   // Details of a state are a tooltip at most: the card itself shows one short line and, when expired, one button.
-  const heldTitle = usage.heldBy === 'cswap' && cswapNote ? tr(cswapNote) : usage.heldBy && usage.heldBy !== 'cswap' ? tr(HELD_NOTE[usage.heldBy]) : undefined;
+  const heldTitle = usage.heldBy === 'cswap' ? tr(cswapNote ?? CSWAP_NOTE) : usage.heldBy ? tr(HELD_NOTE[usage.heldBy]) : undefined;
   const windows = usage.windows.map((window) => <WindowRow key={window.id} window={window} now={now} language={language} />);
   let body;
   if (state === 'expired') {
@@ -158,16 +158,17 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
     const title = usage.status === 'forbidden' ? tr(FORBIDDEN_NOTE) : dormant ? tr(DORMANT_NOTE) : reasonTitle;
     body = <p className={`usage-note ${calm || dormant ? '' : 'warn'}`} title={title}>{text}</p>;
   } else {
-    // `ok` and `stale`: the numbers, then at most one short line (why they are old, or whose copy this is).
+    // `ok` and `stale`: the numbers, then at most one short line (why they are old). 1.1.0: whose copy this is (cswap, an
+    // outside switch) is only a tooltip: a card with valid limits looks like every other one.
     const ageNote = usage.source === 'log' ? tr('stan z ostatniej sesji, sprzed {age}', { age }) : state === 'stale' ? tr('dane sprzed {age}', { age }) : '';
     const failed = usage.status === 'error';
     const line = usage.status === 'forbidden' ? tr(FORBIDDEN_SHORT)
       : failed ? (ageNote ? `${failureText} (${ageNote})` : failureText)
-      : ageNote || (usage.heldBy === 'switched-out' ? tr(HELD_NOTE['switched-out']) : usage.heldBy === 'cswap' ? tr(CSWAP_SHORT) : '');
+      : ageNote;
     const title = usage.status === 'forbidden' ? tr(FORBIDDEN_NOTE) : failed ? reasonTitle : dormant ? tr(DORMANT_NOTE) : heldTitle;
     body = (
       <>
-        {windows}
+        {!line && heldTitle ? <div className="usage-windows-held" title={heldTitle}>{windows}</div> : windows}
         {line && <p className={`usage-note ${(failed && !calm) || usage.status === 'forbidden' ? 'warn' : ''}`} title={title}>{line}</p>}
       </>
     );

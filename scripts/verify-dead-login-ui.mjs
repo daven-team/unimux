@@ -105,9 +105,9 @@ try {
     await app.evaluate(`window.mc.refreshUsage().then(() => true)`);
     // The live file watch (20 s) or the refresh picks the switch up.
     try {
-      await app.until(`!!${card('app')}?.querySelector('.usage-chip.main') && ${card('support')}?.textContent.includes('Przełączone poza aplikacją')`, 'outside switch picked up', 60_000);
+      await app.until(`!!${card('app')}?.querySelector('.usage-chip.main') && !!${card('support')}?.querySelector('[title*="cswap lub"], [data-mc-title*="cswap lub"]')`, 'outside switch picked up', 60_000);
     } catch (error) {
-      console.log(await app.evaluate(`[...document.querySelectorAll('.usage-card')].map((c) => c.textContent).join(' | ')`));
+      console.log(await app.evaluate(`[...document.querySelectorAll('.usage-card')].map((c) => c.textContent + ' [' + [...c.querySelectorAll('[title],[data-mc-title]')].map((e) => e.className + '=' + (e.getAttribute('title') ?? e.getAttribute('data-mc-title'))).join('; ') + ']').join(' | ')`));
       throw error;
     }
     await app.until(`${card('daniel')}.textContent.includes('Logowanie wygasło')`, 'daniel still expired');
@@ -173,7 +173,12 @@ try {
   });
   const card = (name) => `[...document.querySelectorAll('.usage-card')].find((c) => c.textContent.includes('${name}@example.com'))`;
   try {
-    await app.until(`${card('fresh')}?.textContent.includes('20%') && ${card('rejected')}?.textContent.includes('Logowanie wygasło') && ${card('outdated')}?.textContent.includes('Logowanie wygasło') && ${card('denied')}?.textContent.includes('HTTP 403') && ${card('cswapped')}?.textContent.includes('ma też cswap') && ${card('main')}?.textContent.includes('dane sprzed')`, 'all card states', 40_000);
+    try {
+      await app.until(`${card('fresh')}?.textContent.includes('20%') && ${card('cswapped')}?.textContent.includes('55%') && ${card('rejected')}?.textContent.includes('Logowanie wygasło') && ${card('outdated')}?.textContent.includes('Logowanie wygasło') && ${card('denied')}?.textContent.includes('HTTP 403') && !!${card('cswapped')}?.querySelector('[title*="cswap"], [data-mc-title*="cswap"]') && !${card('cswapped')}?.textContent.includes('trzyma kopię') && ${card('main')}?.textContent.includes('dane sprzed')`, 'all card states', 40_000);
+    } catch (error) {
+      console.log(await app.evaluate(`[...document.querySelectorAll('.usage-card')].map((c) => c.textContent + ' [' + [...c.querySelectorAll('[title],[data-mc-title]')].map((e) => e.className + '=' + (e.getAttribute('title') ?? e.getAttribute('data-mc-title'))).join('; ') + ']').join(' | ')`));
+      throw error;
+    }
     const [rejectedRow, outdatedRow] = [await app.evaluate(expiredRow(card('rejected'))), await app.evaluate(expiredRow(card('outdated')))];
     if (!rejectedRow || rejectedRow !== outdatedRow) throw new Error('expired rows differ');
     if (await app.evaluate(`${card('outdated')}.textContent.includes('%') || ${card('rejected')}.textContent.includes('%')`)) throw new Error('old numbers on an expired card');

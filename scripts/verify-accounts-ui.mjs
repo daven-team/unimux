@@ -111,7 +111,7 @@ try {
     await app.evaluate(`[...document.querySelectorAll('.modal-foot button')].find((b) => b.textContent === 'Ustaw jako główne').click()`);
   };
   try {
-    await app.until(`!!${card('fresh')} && !!${card('stale')} && ${card('fresh')}.textContent.includes('Kopię tego logowania ma też cswap')`, 'cswap cards with the short hint');
+    await app.until(`!!${card('fresh')} && !!${card('stale')} && !!${card('fresh')}.querySelector('[title*="cswap"], [data-mc-title*="cswap"]') && !${card('fresh')}.textContent.includes('ma też cswap')`, 'cswap cards with the short hint');
     await app.screenshot('091-accounts-cswap-hint.png');
     await makeMain('stale');
     await app.until(`document.body.textContent.includes('Konto stale@example.com jest zarządzane poza aplikacją')`, 'stale copy refused with the foreign text');
