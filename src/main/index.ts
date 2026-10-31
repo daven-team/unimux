@@ -1596,7 +1596,8 @@ guardedHandle('changelog:get', (_e, force: boolean) => changelog.get(force), () 
 // Accounts, login and usage (0.9.3): everything that changes something only answers the app window (accountsIpc.ts).
 registerAccountIpc(ipcMain, {
   getUsage: () => usage.getState(),
-  refreshUsage: () => usage.refresh(true),
+  // The refresh button reads every account now (1.1.1), not only those past their 3-minute spacing.
+  refreshUsage: () => usage.refreshNow(),
   startLogin: (request) => {
     if (typeof request !== 'object' || request === null || Array.isArray(request)) return { ok: false, error: 'invalid request' };
     return loginBlock(guardDeps, request).then((block) => (block ? { ok: false as const, error: block } : login.start(request as LoginRequest)));
