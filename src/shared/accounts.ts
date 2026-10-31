@@ -40,6 +40,13 @@ export interface ManagedAccount extends AccountIdentity {
    * (see `keptOwnFamily`), so an adopted copy is not offered for renewal again after every switch. Dropped once it leaves.
    */
   appSwap?: AppSwap;
+  /**
+   * SHA-256 (hex, never the token) of the refresh token in this record's saved copy that is known to be dead (1.0.10): Claude
+   * Code cleared that login on disk after the token endpoint rejected it (invalid_grant) while this account was main, and the
+   * saved copy is of the same family. The card shows "Sign-in expired" and the copy is never sent anywhere. It only applies
+   * while the saved copy still holds exactly that token, so signing in again ends it by itself.
+   */
+  deadTokens?: string;
 }
 
 export interface AppSwap { at: number; from?: string; own?: true }

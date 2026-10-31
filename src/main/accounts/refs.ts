@@ -1,6 +1,6 @@
 // The Claude cards of the limits panel: one per account. The live login is read through Claude Code's files and never
 // renewed here; a saved account is renewed only when its token family lives nowhere else (R6).
-import { compareIdentity, custodyOf, familyOf, identityKey, type LiveIdentity, type ManagedAccount } from '../../shared/accounts';
+import { compareIdentity, custodyOf, familyOf, identityKey, type AccountNotice, type LiveIdentity, type ManagedAccount } from '../../shared/accounts';
 import type { AccountRef, SetAsideAccount } from '../../shared/usage';
 import { cswapHolds, type CswapRoster } from './cswap';
 
@@ -40,6 +40,14 @@ export function accountsPanelInfo(records: ManagedAccount[], parkedIds: string[]
   };
 }
 
+/**
+ * The notices the limits panel shows. An outside switch (`switchedOut`, 0.9.1 to 1.0.9) is no longer a banner (1.0.10): the
+ * card of the account that left says it in one line, or "Sign-in expired" when that login was dead. Older ones stay hidden.
+ */
+export function panelNotices(notices: AccountNotice[]): AccountNotice[] {
+  return notices.filter((notice) => notice.kind !== 'switchedOut');
+}
+
 export interface RefsInput { records: ManagedAccount[]; dirOf(id: string): string; live: LiveIdentity | null; cswap: CswapRoster; platform: NodeJS.Platform }
 
 /** The live login first (one record), then every other visible record. Codex is added by the caller. */
@@ -54,7 +62,10 @@ export function claudeRefs(input: RefsInput): AccountRef[] {
   if (input.platform === 'darwin') return refs;
   for (const record of visible) {
     if (record.id === active?.id) continue;
-    refs.push({ id: `claude:${record.id}`, provider: 'claude', configDir: input.dirOf(record.id), key: identityKey(record) ?? `claude:${record.id}`, renew: renewRule(record, input.live, input.cswap) });
+    refs.push({
+      id: `claude:${record.id}`, provider: 'claude', configDir: input.dirOf(record.id), key: identityKey(record) ?? `claude:${record.id}`,
+      renew: renewRule(record, input.live, input.cswap), ...(record.deadTokens ? { deadTokens: record.deadTokens } : {}),
+    });
   }
   return refs;
 }

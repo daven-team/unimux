@@ -26,6 +26,8 @@ export interface AccountRef {
   active?: boolean;
   /** Saved Claude account: whether this app may renew its tokens, and why not (R6). */
   renew?: 'allowed' | 'held-by-live' | 'held-by-cswap' | 'switched-out';
+  /** Saved Claude account: SHA-256 of the refresh token known dead (`ManagedAccount.deadTokens`); main process only. */
+  deadTokens?: string;
 }
 
 export const MAIN_ACCOUNTS: AccountRef[] = [
@@ -70,8 +72,9 @@ export function heldByOf(renew: AccountRef['renew']): ProviderUsage['heldBy'] {
  * outside switch. A copy cswap may hold too is offered as well: the main process swaps it in while its access token is
  * fresh and otherwise refuses with a text that says what to do.
  */
-export function makeMainOffered(usage: Pick<ProviderUsage, 'provider' | 'managed' | 'active' | 'heldBy'>): boolean {
-  return usage.provider === 'claude' && !!usage.managed && !usage.active && (!usage.heldBy || usage.heldBy === 'cswap');
+export function makeMainOffered(usage: Pick<ProviderUsage, 'provider' | 'managed' | 'active' | 'heldBy'> & { status?: UsageStatus }): boolean {
+  // An expired sign-in (also a held copy whose access token ran out) cannot become the main one: its card offers signing in again.
+  return usage.provider === 'claude' && !!usage.managed && !usage.active && usage.status !== 'expired' && usage.status !== 'elsewhere' && (!usage.heldBy || usage.heldBy === 'cswap');
 }
 
 /**
@@ -145,9 +148,32 @@ export function shortAccountName(email: string | undefined, fallback: string, ma
   return local ? local.slice(0, max) : fallback;
 }
 
-/** Accounts that show numbers: not expired and either ok or carrying windows. */
+/**
+ * The few states a limits card can be in (1.0.10); every underlying reason maps onto one of them, so the same situation
+ * always looks the same and offers the same action:
+ * - `ok`: current limits;
+ * - `stale`: limits from an earlier read (cached, Claude Code renews the token on next use, a temporary failure), with
+ *   their age in one short line;
+ * - `expired`: sign-in expired - one "Sign in again" button and nothing else. Any card whose limits can only come back
+ *   through a new sign-in: a rejected renewal, a main login Claude Code cleared as dead, a dead copy, and a saved copy the
+ *   app may not renew (switched out elsewhere, or a copy cswap also holds) whose access token ran out;
+ * - `unavailable`: no numbers right now (temporary failure, access denied), one short line;
+ * - `apiKey`: Codex with an API key, which has no limits.
+ */
+export type CardState = 'ok' | 'stale' | 'expired' | 'unavailable' | 'apiKey';
+
+export function cardState(usage: Pick<ProviderUsage, 'status' | 'windows' | 'source' | 'heldBy'>): CardState {
+  if (usage.status === 'apiKey') return 'apiKey';
+  if (usage.status === 'expired') return 'expired';
+  // Held only by the live login (its numbers are on the main card) is not a sign-in problem.
+  if (usage.status === 'elsewhere' && usage.heldBy !== 'live') return 'expired';
+  if (!usage.windows.length) return 'unavailable';
+  return usage.status === 'ok' && usage.source === 'live' ? 'ok' : 'stale';
+}
+
+/** Accounts that show numbers: not signed out, not an expired sign-in (old numbers never pass as current), with windows or ok. */
 export function summaryAccounts(providers: ProviderUsage[]): ProviderUsage[] {
-  return providers.filter((u) => u.status !== 'signedOut' && u.status !== 'expired' && u.status !== 'apiKey' && (u.status === 'ok' || u.windows.length > 0));
+  return providers.filter((u) => u.status !== 'signedOut' && u.status !== 'apiKey' && cardState(u) !== 'expired' && (u.status === 'ok' || u.windows.length > 0));
 }
 
 /** "Claude 17% · Claude 40% · Codex 8%"; several Claude accounts are told apart by the e-mail name. Empty when nothing to show. */

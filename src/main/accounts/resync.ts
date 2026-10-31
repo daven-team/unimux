@@ -7,6 +7,7 @@ import { createHash } from 'crypto';
 import { join } from 'path';
 import { compareIdentity, identityFromOauthAccount, type AccountIdentity } from '../../shared/accounts';
 import { LockTimeout, withClaudeLocks, type LockDeps } from './claudeLocks';
+import { deadTokenHash, isClearedLogin } from './dead';
 import { withProfileLock } from './refresh';
 import type { AccountsStore } from './store';
 import { atomicWrite, isRecord, nodeSwapFs, readSnap, type SwapFs } from './swap';
@@ -15,15 +16,17 @@ import { atomicWrite, isRecord, nodeSwapFs, readSnap, type SwapFs } from './swap
  * `settling`: the live files changed since the previous look; nothing is copied until they read the same twice in a row.
  * `held`: the live tokens are the ones held for this record (`heldTokens`, an interrupted swap may have left another
  * account's tokens under its identity): nothing is copied, its own saved copy stays.
+ * `dead`: Claude Code cleared this account's live login after a rejected renewal (see dead.ts): nothing is copied, and the
+ * record's saved copy (the same token family, so dead too) is marked dead (`deadTokens`).
  */
-export type ResyncResult = 'copied' | 'unchanged' | 'mismatch' | 'missing' | 'locked' | 'settling' | 'held';
+export type ResyncResult = 'copied' | 'unchanged' | 'mismatch' | 'missing' | 'locked' | 'settling' | 'held' | 'dead';
 
 /** SHA-256 (hex) of a refresh token, the only form in which a held token is kept (`ManagedAccount.heldTokens`). */
 export const heldTokenHash = (refreshToken: string): string => createHash('sha256').update(refreshToken).digest('hex');
 
 export interface ResyncDeps {
   paths: { credentials: string; claudeJson: string };
-  store: Pick<AccountsStore, 'dirOf' | 'setFamily' | 'get' | 'setHeldTokens'>;
+  store: Pick<AccountsStore, 'dirOf' | 'setFamily' | 'get' | 'setHeldTokens' | 'setDeadTokens'>;
   delay(ms: number): Promise<void>;
   fs?: SwapFs;
   locks?: LockDeps;
@@ -53,6 +56,9 @@ export async function resyncActiveBackup(deps: ResyncDeps, recordId: string, exp
       const creds = await readSnap(fs, deps.paths.credentials);
       const json = await readSnap(fs, deps.paths.claudeJson);
       const oauth = creds && isRecord(creds.data.claudeAiOauth) ? creds.data.claudeAiOauth : null;
+      if (creds && json && isClearedLogin(creds.data)) {
+        return compareIdentity(identityFromOauthAccount(json.data.oauthAccount), expected) === 'same' ? 'dead' : 'mismatch';
+      }
       if (!creds || !json || !oauth || typeof oauth.refreshToken !== 'string' || !oauth.refreshToken) return 'missing';
       const account = json.data.oauthAccount;
       if (compareIdentity(identityFromOauthAccount(account), expected) !== 'same') return 'mismatch';
@@ -61,6 +67,19 @@ export async function resyncActiveBackup(deps: ResyncDeps, recordId: string, exp
   } catch (error) {
     if (error instanceof LockTimeout) return 'locked';
     throw error;
+  }
+  if (live === 'dead') {
+    const dir = deps.store.dirOf(recordId);
+    // The saved copy is the live family the record kept backing up, so it went with the live login. Tokens held as not the
+    // record's own (`heldTokens`) prove nothing about its copy: then nothing is marked.
+    await withProfileLock(dir, async () => {
+      const own = await readSnap(fs, join(dir, '.credentials.json'));
+      const ownOauth = own && isRecord(own.data.claudeAiOauth) ? own.data.claudeAiOauth : null;
+      const token = typeof ownOauth?.refreshToken === 'string' ? ownOauth.refreshToken : '';
+      const record = deps.store.get(recordId);
+      if (token && record && !record.heldTokens) deps.store.setDeadTokens(recordId, deadTokenHash(token));
+    });
+    return 'dead';
   }
   if (typeof live === 'string') return live;
   const { oauth, account, sig } = live;
@@ -85,7 +104,7 @@ export async function resyncActiveBackup(deps: ResyncDeps, recordId: string, exp
     await fs.mkdir(dir);
     if (!sameTokens) await atomicWrite(deps, fs, join(dir, '.credentials.json'), JSON.stringify({ ...(own?.data ?? {}), claudeAiOauth: oauth }));
     if (!sameAccount) await atomicWrite(deps, fs, join(dir, '.claude.json'), JSON.stringify({ ...(ownJson?.data ?? {}), oauthAccount: account }, null, 2));
-    if (!sameTokens) deps.store.setFamily(recordId, 'live');
+    if (!sameTokens) { deps.store.setFamily(recordId, 'live'); deps.store.setDeadTokens(recordId, undefined); }
     return 'copied';
   });
 }

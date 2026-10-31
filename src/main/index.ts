@@ -68,7 +68,7 @@ import { AccountsStore } from './accounts/store';
 import { dismissAccountNotice, gateFamilyRefresh, gateProfileRefresh, handleAdoptCopy, handleRemoveAccount, loginBlock } from './accounts/guards';
 import { registerAccountIpc } from './accountsIpc';
 import { createSecretClipboard } from '../shared/sshClipboard';
-import { clearPendingSwap, hasPendingSwap, isSwapRunning, isSwapUnresolved, recoverInterruptedSwap, swapIdle, swapPaths, type SwapDeps } from './accounts/swap';
+import { clearPendingSwap, hasPendingSwap, isSwapRunning, isSwapUnresolved, nodeSwapFs, recoverInterruptedSwap, swapIdle, swapPaths, type SwapDeps } from './accounts/swap';
 import { QUIT_SWAP_AFTER_CELLS_MS, QUIT_SWAP_WAIT_MS, waitUntilIdle } from './quitWait';
 import {
   activateAccount, activationJournalPending, checkActivationTarget, clearPendingActivation, isActivationRecoveryPending, recoverActivationWithRetry,
@@ -76,7 +76,8 @@ import {
 } from './accounts/activate';
 import { backupLiveBeforeLogin, reconcileLive, reconcileWhenIdle, resyncOutgoingWhenIdle, type ReconcileDeps } from './accounts/reconcile';
 import { resyncActiveBackup } from './accounts/resync';
-import { accountsPanelInfo, claudeRefs } from './accounts/refs';
+import { savedCopyDead } from './accounts/dead';
+import { accountsPanelInfo, claudeRefs, panelNotices } from './accounts/refs';
 import { cswapRosterPath, cswapWroteSince, readCswapRoster, type CswapRoster } from './accounts/cswap';
 import { readManagedIdentity } from './accounts/identity';
 import { migrateAccounts, type MigrationDeps } from './accounts/migrate';
@@ -310,7 +311,7 @@ const usage = new UsageService({
     else await reconcileIdle();
   },
   watchLive: true,
-  notices: () => accounts.notices(),
+  notices: () => panelNotices(accounts.notices()),
   // An unreadable accounts.json is explained in the panel; set-aside cards are listed with what to do about them.
   accountsInfo: () => (accounts.readOnly()
     ? { accountsReadOnly: join(DATA_DIR, 'accounts', 'accounts.json') }
@@ -456,6 +457,7 @@ const reconcileDeps = (): ReconcileDeps => {
       const path = cswapRosterPath(homedir(), process.env, process.platform);
       return cswapWroteSince(path, await readCswapRoster(path), identity, since);
     },
+    savedCopyDead: (record) => savedCopyDead(nodeSwapFs, accounts.dirOf(record.id), record),
     now: () => Date.now(),
   };
 };
