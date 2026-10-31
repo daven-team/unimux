@@ -72,8 +72,8 @@ export function verdictFor(cellId: string): QueueVerdict {
     failure,
     detail: ui.statusDetails[cellId],
     hooked: terminals.hooked(cellId),
-    typed: terminals.typedAt(cellId) > (settledAt.get(cellId) ?? -Infinity),
-    sent: useQueueRuntime.getState().sent[cellId] === true,
+    typed: typedSinceSettled(cellId),
+    sent: promptPending(cellId),
   });
 }
 
@@ -110,6 +110,16 @@ function send(cellId: string, itemId?: string): boolean {
   }
   cancelCountdown(cellId);
   editQueue(cellId, (q) => removeQueued(q, item.id));
+  deliverPrompt(cellId, item.text);
+  return true;
+}
+
+/**
+ * Pastes a prompt into an agent cell and presses Enter, the way the queue does (also for "send one prompt to several agents",
+ * renderer/agentPrompt.ts): a prompt sent at the end of a turn waits for its turn to start (else the queue pauses), and the paste
+ * and its Enter do not count as the user typing.
+ */
+export function deliverPrompt(cellId: string, text: string): void {
   // Sent while the agent works ("send now"): it lands in the agent's own input queue, the running turn is not "its" turn.
   if (getUi().statuses[cellId] !== 'working') {
     setRuntime((r) => ({ sent: { ...r.sent, [cellId]: true } }));
@@ -122,11 +132,15 @@ function send(cellId: string, itemId?: string): boolean {
       editQueue(cellId, (q) => pauseQueue(q, 'noTurn'));
     }, QUEUE_NO_TURN_MS));
   }
-  terminals.paste(cellId, item.text, true, { focus: false });
+  terminals.paste(cellId, text, true, { focus: false });
   // The paste and its Enter are our own keys, not the user typing.
   settledAt.set(cellId, performance.now() + 1000);
-  return true;
 }
+
+/** The user typed into the cell's terminal after its last turn end (or the last prompt sent to it). */
+export const typedSinceSettled = (cellId: string): boolean => terminals.typedAt(cellId) > (settledAt.get(cellId) ?? -Infinity);
+/** A prompt was sent to the cell and the turn it should start has not begun yet. */
+export const promptPending = (cellId: string): boolean => useQueueRuntime.getState().sent[cellId] === true;
 
 // ── actions of the UI ───────────────────────────────────────────────────────
 

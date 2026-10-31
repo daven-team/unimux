@@ -170,12 +170,16 @@ export const SHORTCUTS = [
   { id: 'modal.save', label: 'Zapisz w oknie dialogowym (np. snippet, projekt)', group: 'general', scope: 'modal', default: 'Mod+Enter', rebindable: true, aliases: ['Ctrl+Enter'] },
   { id: 'terminal.new', label: 'Nowa zakładka z jednym terminalem', group: 'grid', scope: 'global', default: 'Mod+Shift+T', rebindable: true },
   { id: 'agent.add', label: 'Dodaj agenta do siatki', group: 'grid', scope: 'global', default: 'Mod+Shift+N', rebindable: true },
-  { id: 'grid.new', label: 'Nowy grid lub preset', group: 'grid', scope: 'global', default: 'Mod+Shift+G', rebindable: true, requiresProject: true },
+  { id: 'grid.new', label: 'Nowy grid lub szablon', group: 'grid', scope: 'global', default: 'Mod+Shift+G', rebindable: true, requiresProject: true },
   { id: 'conversations.search', label: 'Szukaj we wszystkich rozmowach Claude i Codex', group: 'general', scope: 'global', default: 'Mod+Alt+F', rebindable: true },
   { id: 'history.open', label: 'Historia czatów i gridów', group: 'grid', scope: 'global', default: 'Mod+Shift+H', rebindable: true, requiresProject: true },
   { id: 'tab.close', label: 'Zamknij kartę na wierzchu (grid, plik, SSH, ustawienia)', group: 'grid', scope: 'global', default: 'Mod+Shift+W', rebindable: true },
-  { id: 'tab.next', label: 'Następna karta', group: 'grid', scope: 'global', default: 'Mod+Tab', rebindable: true },
-  { id: 'tab.prev', label: 'Poprzednia karta', group: 'grid', scope: 'global', default: 'Mod+Shift+Tab', rebindable: true },
+  // 1.1.1: like a browser or an IDE, Ctrl+Tab goes to the previously used tab (held: further back, with the switcher), also on
+  // macOS, where Cmd+Tab belongs to the system. The strip order (next / previous tab) has no key of its own by default.
+  { id: 'tab.next', label: 'Ostatnio używana karta (przytrzymaj, aby przejść dalej)', group: 'grid', scope: 'global', default: 'Ctrl+Tab', rebindable: true },
+  { id: 'tab.prev', label: 'Ostatnio używane karty wstecz', group: 'grid', scope: 'global', default: 'Ctrl+Shift+Tab', rebindable: true },
+  { id: 'tab.right', label: 'Następna karta', group: 'grid', scope: 'global', default: null, rebindable: true },
+  { id: 'tab.left', label: 'Poprzednia karta', group: 'grid', scope: 'global', default: null, rebindable: true },
   { id: 'cell.maximize', label: 'Maksymalizuj lub przywróć komórkę', group: 'grid', scope: 'cell', default: 'Mod+Shift+M', rebindable: true, blockedInSettings: true },
   { id: 'cell.focus.left', label: 'Przejdź do komórki po lewej', group: 'grid', scope: 'cell', default: 'Mod+Alt+Left', rebindable: true, blockedInSettings: true },
   { id: 'cell.focus.right', label: 'Przejdź do komórki po prawej', group: 'grid', scope: 'cell', default: 'Mod+Alt+Right', rebindable: true, blockedInSettings: true },
@@ -188,6 +192,8 @@ export const SHORTCUTS = [
   // 1.0.9: the prompt queue of the cell in focus, with its add field ready (renderer/promptQueue.ts).
   { id: 'cell.queue', label: 'Dodaj prompt do kolejki komórki', group: 'grid', scope: 'cell', default: 'Mod+Shift+D', rebindable: true, blockedInSettings: true },
   // 1.0.9: the cells that wait for you (shared/waiting.ts), longest waiting first, across every grid and window.
+  // 1.1.1: one prompt to several Claude and Codex cells (components/AgentPromptDialog.tsx).
+  { id: 'agents.prompt', label: 'Wyślij prompt do wielu agentów', group: 'grid', scope: 'global', default: 'Mod+Shift+U', rebindable: true },
   { id: 'waiting.next', label: 'Następna komórka, która czeka na Ciebie', group: 'grid', scope: 'global', default: 'Mod+Alt+PageDown', rebindable: true },
   { id: 'waiting.prev', label: 'Poprzednia komórka, która czeka na Ciebie', group: 'grid', scope: 'global', default: 'Mod+Alt+PageUp', rebindable: true },
   // Ctrl+F itself belongs to the program in the terminal (readline: forward one character), so the terminal finds with Shift.

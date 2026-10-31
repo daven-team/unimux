@@ -1,7 +1,7 @@
 // Snippets with variables (1.0.6): before a snippet is pasted, the user fills its {{variables}} in a small dialog (the last values
 // prefilled) and the built-ins are worked out for each target cell: {{project}}, {{path}}, {{branch}}, {{date}}, {{clipboard}}.
 import { tr } from './i18n';
-import { findCell, upsertSnippet } from '../../shared/state';
+import { cellCwd, findCell, upsertSnippet } from '../../shared/state';
 import type { Cell, Snippet } from '../../shared/types';
 import {
   fillSnippetVars, hasSnippetVars, initialSnippetValues, rememberSnippetValues, resolveSnippetBuiltins, snippetBuiltinsUsed, snippetUserVars,
@@ -69,7 +69,7 @@ export async function fillSnippetForCells(snippet: Snippet, cellIds: readonly st
   for (const id of cellIds) {
     const found = findCell(getS(), id);
     if (!found) continue;
-    const path = found.cell.worktree?.path ?? found.project.path;
+    const path = cellCwd(found.project, found.cell);
     const builtins = await resolveSnippetBuiltins(snippet.text, {
       project: found.project.name,
       path,

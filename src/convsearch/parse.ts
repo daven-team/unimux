@@ -20,6 +20,8 @@ export interface ConvMeta {
 export const newMeta = (): ConvMeta => ({ cwd: '', firstTs: 0, lastTs: 0 });
 
 export type MessageSink = (role: ConvRole, text: string, ts: number) => void;
+/** A tool call of the agent (1.1.1 Markdown export): its name and the raw input (Claude) or arguments (Codex). */
+export type ToolSink = (name: string, input: unknown, ts: number) => void;
 
 const bytes = (s: string) => Buffer.from(s, 'latin1');
 const has = (buf: Buffer, start: number, end: number, needle: Buffer) => buf.subarray(start, end).indexOf(needle) >= 0;
@@ -79,7 +81,7 @@ function userPrompt(meta: ConvMeta, text: string): void {
 }
 
 /** One parsed Claude line. */
-export function claudeEntry(meta: ConvMeta, e: any, sink: MessageSink): void {
+export function claudeEntry(meta: ConvMeta, e: any, sink: MessageSink, tools?: ToolSink): void {
   if (!e || typeof e !== 'object') return;
   if (!meta.id && typeof e.sessionId === 'string' && e.sessionId) meta.id = e.sessionId;
   if (!meta.cwd && typeof e.cwd === 'string' && e.cwd) meta.cwd = e.cwd;
@@ -95,6 +97,9 @@ export function claudeEntry(meta: ConvMeta, e: any, sink: MessageSink): void {
     if (typeof msg.model === 'string' && msg.model && !msg.model.startsWith('<')) meta.model = msg.model;
     const text = textParts(msg.content, ['text']).join('\n\n').trim();
     if (text) sink('assistant', text, ts);
+    if (tools && Array.isArray(msg.content)) {
+      for (const part of msg.content) if (part?.type === 'tool_use' && typeof part.name === 'string') tools(part.name, part.input, ts);
+    }
     return;
   }
   const text = textParts(msg.content, ['text']).filter((t) => !isInjected(t)).join('\n\n').trim();
@@ -104,7 +109,7 @@ export function claudeEntry(meta: ConvMeta, e: any, sink: MessageSink): void {
 }
 
 /** One parsed Codex line. Messages come from response_item (the model's input and output); event_msg copies are skipped. */
-export function codexEntry(meta: ConvMeta, e: any, sink: MessageSink): void {
+export function codexEntry(meta: ConvMeta, e: any, sink: MessageSink, tools?: ToolSink): void {
   if (!e || typeof e !== 'object') return;
   const p = e.payload;
   if (!p || typeof p !== 'object') return;
@@ -123,6 +128,13 @@ export function codexEntry(meta: ConvMeta, e: any, sink: MessageSink): void {
     if (!meta.cwd && typeof p.cwd === 'string') meta.cwd = p.cwd;
     return;
   }
+  if (tools && e.type === 'response_item' && CODEX_TOOL_TYPES.has(p.type)) {
+    seen(meta, ts);
+    if (p.type === 'local_shell_call') tools('shell', p.action, ts);
+    else if (p.type === 'web_search_call') tools('web_search', p.action, ts);
+    else if (typeof p.name === 'string') tools(p.name, p.type === 'custom_tool_call' ? p.input : p.arguments, ts);
+    return;
+  }
   if (e.type !== 'response_item' || p.type !== 'message') return;
   if (p.role !== 'user' && p.role !== 'assistant') return;
   seen(meta, ts);
@@ -138,6 +150,25 @@ export function codexEntry(meta: ConvMeta, e: any, sink: MessageSink): void {
 }
 
 export const entryFor = (cli: ConvCli) => (cli === 'claude' ? claudeEntry : codexEntry);
+
+const CODEX_TOOL_TYPES = new Set(['function_call', 'custom_tool_call', 'local_shell_call', 'web_search_call']);
+const C_TOOL_USE = bytes('"type":"tool_use"');
+const X_TOOL_CALLS = ['"type":"function_call"', '"type":"custom_tool_call"', '"type":"local_shell_call"', '"type":"web_search_call"'].map(bytes);
+
+/** Like feedLine, for the Markdown export (1.1.1): the agent's tool calls are wanted too (their output never is). */
+export function feedExportLine(cli: ConvCli, meta: ConvMeta, buf: Buffer, start: number, end: number, sink: MessageSink, tools: ToolSink): boolean {
+  let wanted = wantedFor(cli)(buf, start, end);
+  if (!wanted && end - start > 20) {
+    wanted = cli === 'claude'
+      ? has(buf, start, end, C_ASSISTANT) && (!meta.model || has(buf, start, end, C_TOOL_USE))
+      : has(buf, start, end, X_ITEM) && X_TOOL_CALLS.some((needle) => has(buf, start, end, needle));
+  }
+  if (!wanted) return false;
+  let e: unknown;
+  try { e = JSON.parse(buf.toString('utf8', start, end)); } catch { return false; }
+  try { (cli === 'claude' ? claudeEntry : codexEntry)(meta, e, sink, tools); } catch { /* an odd shape - skip the line */ }
+  return true;
+}
 
 /**
  * Feeds one raw line: checked on its bytes, decoded and parsed only when it can matter. Returns whether it was a complete,

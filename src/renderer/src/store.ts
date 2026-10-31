@@ -12,19 +12,24 @@ import type { McpInfo } from '../../shared/automation';
 import type { LoginTarget } from '../../shared/accounts';
 import type { CliId, CliStatusMap } from '../../shared/cliStatus';
 import type { DbKind } from '../../shared/db';
+import type { ConvExportSource } from '../../shared/convExport';
 
 export type Modal =
   | { kind: 'grid'; projectId: string }
   | { kind: 'history'; projectId: string }
   | { kind: 'changelog' }
   /** Search across every Claude Code and Codex conversation (1.0.9). */
-  | { kind: 'conversations' }
+  | { kind: 'conversations'; restore?: boolean }
+  /** Export of one conversation to Markdown (1.1.1); `back`: opened from the conversation search, closing returns there. */
+  | { kind: 'convExport'; source: ConvExportSource; back?: 'conversations' }
   | { kind: 'search'; projectId: string }
   | { kind: 'snippet'; snippetId: string | null; projectId?: string }
   | { kind: 'project'; projectId: string }
   | { kind: 'file'; projectId: string; relativePath: string }
   | { kind: 'auth'; provider: 'claude' | 'codex'; target: LoginTarget }
   | { kind: 'broadcast'; projectId: string; tabId: string }
+  /** 1.1.1: one prompt to several agent cells; `tabId` = the grid whose agents are checked first. */
+  | { kind: 'agentPrompt'; tabId?: string }
   | { kind: 'dbConnection'; connectionId?: string; dbKind?: DbKind };
 
 export type Dialog = { id: number } & (

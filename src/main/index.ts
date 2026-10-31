@@ -25,7 +25,8 @@ import { applyDockIcon, windowIcon } from './appIcon';
 import { LARGE_VIEW_BYTES, listProjectDirectories, listProjectDirectory, listProjectDirectoryBatch, readProjectFile, statProjectFile, writeProjectFile } from './files';
 import { createTrash, registerFileOpsIpc } from './filesIpc';
 import { createIpcGuard } from './ipcGuard';
-import { closeAllDetached, fromDetachedWindow, initDetachedWindows, relayCellStatus, senderWindow, sendRouted, startDetachedWindows, stateChanged as detachedStateChanged } from './detachedWindows';
+import { registerAgentPromptIpc } from './agentPrompt';
+import { cellWindow, closeAllDetached, fromDetachedWindow, initDetachedWindows, relayCellStatus, senderWindow, sendRouted, startDetachedWindows, stateChanged as detachedStateChanged } from './detachedWindows';
 import { registerGitIpc } from './gitIpc';
 import { Git } from './git';
 import { createGithubService } from './github/service';
@@ -49,7 +50,7 @@ import { registerNoteFilesIpc } from './noteFiles';
 import { DB_LIMITS, isDbSessionId } from '../shared/db';
 import type { DbHostToMain } from '../shared/dbHostIpc';
 import { claudeProjectDirName, findRecentCodexSession, listSessionsAsync } from './sessions';
-import { convWorkerFile, createConvSearchClient, sanitizeQuery } from './convSearchClient';
+import { convWorkerFile, createConvSearchClient, sanitizeExportSource, sanitizeQuery } from './convSearchClient';
 import { ContextTracker } from './contextUsage';
 import { createSaver, flushUntilSaved, loadState, StateUnreadableError } from './store';
 import { updateHandoverCommitted, blockUpdateVersion, canInstallNow, checkForUpdates, getUpdateState, handOver, initUpdater, isPortableBuild, isUpdateDownloaded, onUpdateTargetChange, previousMacUpdate, recheckUpdate, signalMacUpdateReady, updateHandoffStarted, updateTarget, RELEASES_URL, startupCheck, startupDownload, updatesEnabled } from './updater';
@@ -87,6 +88,9 @@ import { custodyOf, identityFields, type AccountIdentity, type LoginRequest } fr
 import { claudeCredentialsStamp, profileSource, readClaudeCredentials, readClaudeIdentity, readCodexCredentials, readLiveClaudeIdentity, systemCredentialSource } from './usage/credentials';
 import { fetchClaude, fetchCodex, type FetcherDeps } from './usage/fetchers';
 import { UsageService } from './usage/service';
+import { LimitAlerter } from './limitAlerts';
+import { limitNoticeText, type LimitNotice } from '../shared/limitAlerts';
+import type { AlertSettings } from '../shared/alerts';
 import { MAIN_ACCOUNTS } from '../shared/usage';
 import type { UpdateStrings } from '../shared/updateProgress';
 import { createWorktree, currentBranch, inspectWorktree, isGitRepo, removeWorktree } from './worktree';
@@ -111,7 +115,7 @@ import { cliForProfile, CLI_NAMES, isCliId, missingCli, resolveExecFile, spawnDe
 import { automationSchemas, type AutomationOperation, type McpInfo } from '../shared/automation';
 import type { StateEdit } from '../shared/stateEdits';
 import { stateChange } from '../shared/statePatch';
-import { findCell, getProfile, patchSshCell, unlessRestoring } from '../shared/state';
+import { cellCwd, findCell, getProfile, patchSshCell, unlessRestoring } from '../shared/state';
 import { resumeForPhase, resumesConversation, type SshSessionState } from '../shared/ssh';
 import { automationHintForHook, automationStatusFor } from '../shared/runtimeStatus';
 import { followedSession, shouldUpdateCellSession } from '../shared/sessionTrack';
@@ -317,7 +321,21 @@ const usage = new UsageService({
     ? { accountsReadOnly: join(DATA_DIR, 'accounts', 'accounts.json') }
     : accountsPanelInfo(accounts.list(), login.parkedIds())),
   liveEmail: () => accounts.live()?.email,
+  // Limit warnings must also come while the window is minimized or in the tray: the poll then goes on at its interval.
+  pollHidden: () => limitPollingWanted(state.settings.alerts),
 });
+/** Whether any limit warning can be raised, so polling continues while the window is hidden. */
+function limitPollingWanted(alerts: AlertSettings): boolean {
+  return alerts.enabled && alerts.limits.enabled && (alerts.limits.fiveHour.enabled || alerts.limits.sevenDay.enabled);
+}
+/** 1.1.1: limit warnings (OS notifications) after every poll and at the reset times; remembered across restarts. */
+const limitAlerts = new LimitAlerter({
+  file: join(DATA_DIR, 'limit-alerts.json'),
+  alerts: () => state.settings.alerts,
+  providers: () => usage.getState().providers,
+  show: (notice) => showLimitNotice(notice),
+});
+usage.onChange((snapshot) => limitAlerts.onState(snapshot.providers));
 /** Finds Claude Code / Codex even when the app's own PATH lacks them (GUI launch on macOS, installer run after start on Windows). */
 const cliDetector = new CliDetector(systemCliDeps({
   disableRegistry: !app.isPackaged && process.env.MC_CLI_NO_REGISTRY === '1',
@@ -340,7 +358,7 @@ const execText = async (command: string, args: string[], env: NodeJS.ProcessEnv)
 /** Bumped when a cell is killed, so a spawn that was waiting for the detection does not resurrect it. */
 const killCount = new Map<string, number>();
 const noteKill = (id: string) => killCount.set(id, (killCount.get(id) ?? 0) + 1);
-let usageKey = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}`;
+let usageKey = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}:${limitPollingWanted(state.settings.alerts)}`;
 const ptyHost = new PtyHostClient();
 /** The SFTP Host (0.9.8): started on the first SFTP use, never at app start. */
 const sftpHost = new SftpHostClient();
@@ -502,7 +520,7 @@ const contextTracker = new ContextTracker({
     const found = findCell(state, cellId);
     const session = found?.cell.session;
     if (!found || !session || found.cell.ssh || getProfile(state, found.cell.profileId).cli !== session.cli) return null;
-    return { cli: session.cli, sessionId: session.id, cwd: found.cell.worktree?.path ?? found.project.path, modelHint: found.cell.model };
+    return { cli: session.cli, sessionId: session.id, cwd: cellCwd(found.project, found.cell), modelHint: found.cell.model };
   },
   emit: (cellId, usage) => send('cell:context', cellId, usage),
   claudeDir: () => process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude'),
@@ -675,7 +693,8 @@ const controller = new StateController(state, (snapshot) => {
   db?.stateChanged();
   detachedStateChanged(state);
   if (snapshot.state.projects !== previous.projects || snapshot.state.settings.alerts !== previous.settings.alerts || snapshot.state.profiles !== previous.profiles) taskbar.invalidate();
-  const key = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}`;
+  if (snapshot.state.settings.alerts !== previous.settings.alerts) limitAlerts.settingsChanged();
+  const key = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}:${limitPollingWanted(state.settings.alerts)}`;
   if (key !== usageKey) { usageKey = key; usage.reschedule(); }
   saver.save(state);
   send('state:changed', stateChange(previous, snapshot));
@@ -701,7 +720,7 @@ const automation = new AutomationService(controller, {
     const profile = getProfile(state, found.cell.profileId);
     const session = found.cell.session;
     if (!session || session.cli !== profile.cli || !session.confirmed) return { restarted: false, reason: 'Choose a compatible conversation from History before restarting through MCP.' };
-    const cwd = found.cell.worktree?.path ?? found.project.path;
+    const cwd = cellCwd(found.project, found.cell);
     if (!(await pathExists(cwd))) return { restarted: false, reason: 'Project folder does not exist.' };
     if (!alive.has(cellId)) return { restarted: false, reason: 'Agent is not running.' };
     endCellMcp(mcp, MCP_DIR, cellId);
@@ -1009,9 +1028,9 @@ function startSsh(): void {
   registerNoteFilesIpc({ guardedHandle, guardedOn }, {
     dataDir: DATA_DIR,
     exportDir: process.env.MC_NOTES_EXPORT_DIR && !app.isPackaged ? process.env.MC_NOTES_EXPORT_DIR : null,
-    pickSavePath: async (name) => {
+    pickSavePath: async (name, kind) => {
       const ext = name.split('.').pop() ?? 'md';
-      const options = { title: tr('Eksportuj notatkę'), defaultPath: name, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] };
+      const options = { title: kind === 'conversation' ? tr('Eksportuj rozmowę do Markdown') : tr('Eksportuj notatkę'), defaultPath: name, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] };
       const r = isLive(win) ? await dialog.showSaveDialog(win!, options) : await dialog.showSaveDialog(options);
       return r.canceled || !r.filePath ? null : r.filePath;
     },
@@ -1213,7 +1232,7 @@ function boundCodexIds(): Set<string> {
  */
 guardedHandle('codex:bind', async (_e, cellId: string, cwd: string) => {
   const peers = state.projects.flatMap((p) => p.tabs.flatMap((t) => t.cells
-    .filter((c) => alive.has(c.id) && getProfile(state, c.profileId).cli === 'codex' && (c.worktree?.path ?? p.path) === cwd)));
+    .filter((c) => alive.has(c.id) && getProfile(state, c.profileId).cli === 'codex' && cellCwd(p, c) === cwd)));
   // Shared-directory simultaneous starts are ambiguous. Never guess a message recipient.
   if (peers.length !== 1 || peers[0].id !== cellId) return null;
   if (codexHooked.has(cellId)) return null; // its notify hook binds the exact thread; a timestamp guess must never overwrite it
@@ -1475,6 +1494,9 @@ guardedHandle('conv:search', (_e, query: unknown) => convSearch.search(sanitizeQ
   () => ({ hits: [], total: 0, conversations: 0, projects: [], indexing: null, tookMs: 0 }));
 guardedHandle('conv:transcript', (_e, file: unknown) => (typeof file === 'string' && file ? convSearch.transcript(file) : { ok: false, messages: [], capped: false }),
   () => ({ ok: false, messages: [], capped: false }));
+// 1.1.1: a conversation for the Markdown export (the renderer renders and saves it through notes:export or the clipboard).
+const noExport = { ok: false, cli: 'claude' as const, id: '', title: '', cwd: '', startedAt: 0, updatedAt: 0, items: [], capped: false };
+guardedHandle('conv:export', (_e, raw: unknown) => { const source = sanitizeExportSource(raw); return source ? convSearch.exportData(source) : noExport; }, () => noExport);
 app.on('will-quit', () => { void convSearch.stop(); });
 // "Publish to GitHub" (src/main/github): the sign-in unimux stores there also lets fetch, pull and push reach https://github.com.
 const github = createGithubService({
@@ -1489,6 +1511,8 @@ const gitProject = {
   worktreePaths: (projectId: string) => state.projects.find((p) => p.id === projectId)?.tabs.flatMap((t) => t.cells.flatMap((c) => (c.worktree ? [c.worktree.path] : []))) ?? [],
 };
 registerGitIpc({ ...gitProject, git: gitEngine, allowed: fromAppWindow });
+// 1.1.1: one prompt to several agent cells, each sent by the window that holds the cell.
+registerAgentPromptIpc({ guardedHandle, guardedOn }, cellWindow);
 registerGithubIpc({ guardedHandle }, github.handlers(gitEngine, gitProject));
 ipcMain.handle('git:isRepo', (_e, p: string) => isGitRepo(p));
 guardedHandle('git:createWorktree', (_e, p: string, name: string) => createWorktree(p, name), () => Promise.reject(new Error('Refused.')));
@@ -1530,6 +1554,29 @@ guardedOn('notify', (_e, n: { title: string; body: string; cellId: string; actio
     else showCell(n.cellId);
   });
   notification.show();
+});
+/** A limit warning (1.1.1): a click brings the app to the front with the AI account limits panel open. */
+function showLimitNotice(notice: LimitNotice): void {
+  if (!Notification.isSupported()) return;
+  const language = state.settings.language ?? detectLanguage([app.getLocale()]);
+  const notification = new Notification(notificationOptions(limitNoticeText(notice, tr, language, Date.now())));
+  notifications.add(notification);
+  trimNotifications(notifications);
+  const forget = () => notifications.delete(notification);
+  notification.on('close', forget);
+  notification.on('failed', forget);
+  notification.on('click', () => {
+    forget();
+    showCell(undefined);
+    send('usage:open');
+  });
+  notification.show();
+}
+/** The "Test" button of the limit warnings: a sample warning for the first account with an e-mail. */
+guardedOn('alerts:testLimit', () => {
+  const account = usage.getState().providers.find((p) => p.email && p.status !== 'signedOut');
+  const limits = state.settings.alerts.limits;
+  showLimitNotice({ kind: 'threshold', provider: account?.provider ?? 'claude', ...(account?.email ? { email: account.email } : {}), window: '5h', percent: limits.fiveHour.percent, resetsAt: Math.floor(Date.now() / 1000) + 2 * 3600 });
 });
 guardedOn('notify:show', (_e, cellId: unknown) => { if (typeof cellId === 'string' && findCell(state, cellId)) showCell(cellId); });
 /** An agent needs the user (the alert rules allowed it): the sender's window flashes its taskbar button / bounces the Dock icon. */
@@ -1596,7 +1643,8 @@ guardedHandle('changelog:get', (_e, force: boolean) => changelog.get(force), () 
 // Accounts, login and usage (0.9.3): everything that changes something only answers the app window (accountsIpc.ts).
 registerAccountIpc(ipcMain, {
   getUsage: () => usage.getState(),
-  refreshUsage: () => usage.refresh(true),
+  // The refresh button reads every account now (1.1.1), not only those past their 3-minute spacing.
+  refreshUsage: () => usage.refreshNow(),
   startLogin: (request) => {
     if (typeof request !== 'object' || request === null || Array.isArray(request)) return { ok: false, error: 'invalid request' };
     return loginBlock(guardDeps, request).then((block) => (block ? { ok: false as const, error: block } : login.start(request as LoginRequest)));

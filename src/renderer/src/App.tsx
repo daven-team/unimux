@@ -1,7 +1,7 @@
 import { chosenLanguage, loadLanguage, tr, useI18n } from './i18n';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { fitPanelWidths, MIN_WORKSPACE_WIDTH, RAIL_WIDTH, type Panel } from '../../shared/panels';
-import { activeProject, activeTab, findCell, getProfile, updateCell } from '../../shared/state';
+import { activeProject, activeTab, cellCwd, findCell, getProfile, updateCell, updateSettings } from '../../shared/state';
 import { isAuxPtyId } from '../../shared/cliInstall';
 import { ptyHostRestartToast } from '../../shared/ssh';
 import type { McpInfo } from '../../shared/automation';
@@ -9,6 +9,7 @@ import { alertForStatus } from './alerts';
 import { initQuitGuard } from './closeGuard';
 import { initDetachFollow } from './detach';
 import { initPromptQueue } from './promptQueue';
+import { initAgentPrompt } from './agentPrompt';
 import { initWaitTracking, revealCell } from './waiting';
 import { noteAgentTurnEnd } from './turnRefresh';
 import { initBackgroundLoader } from './backgroundLoader';
@@ -29,6 +30,7 @@ import { parseRightPanelOrder, RIGHT_ORDER_KEY, rightPanelOrder, type RightPanel
 import { StatusBar } from './components/StatusBar';
 import { TitleBar, WorkspaceTabs } from './components/TitleBar';
 import { useShortcuts } from './shortcuts';
+import { TabSwitcher } from './components/TabSwitcher';
 import { getS, getUi, setUi, toast, update, useStore } from './store';
 import { terminals } from './terminals/TerminalManager';
 import { isPermissionAnswer } from '../../shared/permissionAction';
@@ -182,6 +184,11 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   // 1.0.9: Zezwól / Odrzuć from a permission notification; a stale one (the cell changed since) only shows the cell.
   window.mc.on('notify:answer', (cellId, token, answer) => { if (!isPermissionAnswer(answer) || !terminals.answerPermission(cellId, token, answer)) window.mc.showCell(cellId); });
   window.mc.on('focus-cell', (cellId) => revealCell(cellId));
+  // 1.1.1: a limit warning was clicked: the side panel and the AI account limits in it are unfolded and scrolled into view.
+  window.mc.on('usage:open', () => {
+    update((st) => updateSettings({ ...st, sidebarCollapsed: false }, { usageCollapsed: false }));
+    window.setTimeout(() => document.querySelector('.side-panel .usage-panel')?.scrollIntoView({ block: 'nearest' }), 100);
+  });
   // A one-time notice from the main process, already in the app language (http hooks found blocked).
   window.mc.on('app:notice', (text: string) => toast(text));
   window.mc.on('ptyhost:crashed', (resumes) => {
@@ -249,6 +256,8 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   bootStep(initDetachFollow);
   // 1.0.9: queued prompts of agent cells go out when their agent finished its turn.
   bootStep(initPromptQueue);
+  // 1.1.1: one prompt to several agents: this window sends to the cells it holds.
+  bootStep(initAgentPrompt);
   // 1.0.9: what the cells wait for (the "Czeka na Ciebie" list), this window's and the detached windows'.
   bootStep(initWaitTracking);
 }
@@ -260,7 +269,7 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
 function bindCodexSession(cellId: string): void {
   const found = findCell(getS(), cellId);
   if (!found || found.cell.session || getProfile(getS(), found.cell.profileId).cli !== 'codex') return;
-  void window.mc.bindCodexSession(cellId, found.cell.worktree?.path ?? found.project.path);
+  void window.mc.bindCodexSession(cellId, cellCwd(found.project, found.cell));
 }
 
 // Parts without props, created once: when the app re-renders (a side panel edge dragged, a view switched) React skips them;
@@ -273,6 +282,7 @@ const commandPalette = <ErrorBoundary name="palette" fallback={() => null}><Comm
 const modals = <ErrorBoundary name="modals" fallback={(retry) => <PanelFallback retry={() => { setUi({ modal: null }); retry(); }} className="modal-failed" />}><Modals /></ErrorBoundary>;
 const contextMenuHost = <ContextMenuHost />;
 const toastView = <Toast />;
+const tabSwitcher = <ErrorBoundary name="tab-switcher" fallback={() => null}><TabSwitcher /></ErrorBoundary>;
 
 export function App() {
   const { language } = useI18n();
@@ -387,6 +397,7 @@ export function App() {
       </div>
       {statusBar}
       {commandPalette}
+      {tabSwitcher}
       {modals}
       {contextMenuHost}
       {toastView}

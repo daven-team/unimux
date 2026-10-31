@@ -2,7 +2,7 @@ import { useShortcutText } from '../shortcuts';
 import { useI18n } from '../i18n';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  IBranch, IDatabase, IFolder, IGrid, IHistory, IKey, IMax, IPlus, IPrompt, IRestart, IServer, ISettings, ISidebar, ISnippet, IUpload, IX,
+  IBranch, IDatabase, IFolder, IGrid, IHistory, IKey, IMax, IPlus, IPrompt, IRestart, IServer, ISettings, ISidebar, ISnippet, IDownload, IUpload, IX,
   IArrowLeft, IArrowRight, IArrowUp,
 } from './icons';
 import { ICodeEditor, ICopy, IMoveDown, IRefresh } from './menuIcons';
@@ -12,12 +12,18 @@ import type { MessageKey } from '../../../shared/i18n';
 import { describeLayout } from '../../../shared/layout';
 import { activeProject, activeTab, findCell } from '../../../shared/state';
 import { openQueue, queueCapable } from '../promptQueue';
+import { openAgentPrompt } from '../agentPrompt';
+import { agentTargets } from '../../../shared/agentPrompt';
+import { ProviderIcon } from './ProviderIcons';
+import { cellCanExport, exportCellConversation } from '../convExport';
 import type { SessionInfo } from '../../../shared/types';
 import {
-  addAgent, closeTab, createProject, moveCellBy, openTab, quickTab, restartCell, restoreArchived, resumeSession, selectTab,
+  addAgent, closeTab, createProject, moveCellBy, quickTab, restartCell, restoreArchived, resumeSession, selectTab,
   sendSnippet, switchProject, toggleMaximize,
 } from '../actions';
 import { openSidebarPanel } from '../panelActions';
+import { openTemplate, saveGridAsTemplate } from '../templates';
+import { templatesFor } from '../../../shared/gridTemplates';
 import { openSshView, reconnectAllSsh, reconnectAllTargetsOf } from '../ssh';
 import { openSftp } from '../sftp';
 import { openRedisTab, viewLabel } from '../redis/redisClient';
@@ -46,7 +52,7 @@ interface Item {
 /** The icon of a row without its own: by its kind (projects, tabs, snippets, notes, sessions…). */
 function kindIcon(kind: string, tr: (key: MessageKey) => string): ReactNode {
   if (kind === tr('Projekt')) return <IFolder />;
-  if (kind === tr('Zakładka') || kind === tr('Preset')) return <IGrid />;
+  if (kind === tr('Zakładka') || kind === tr('Szablon')) return <IGrid />;
   if (kind === tr('Snippet')) return <ISnippet />;
   if (kind === tr('Notatka')) return <INoteBlank />;
   if (kind === tr('Baza danych') || kind === 'Redis') return <IDatabase />;
@@ -104,7 +110,7 @@ function PaletteInner() {
     ];
     if (!project) out.push(...ssh);
     if (project) {
-      out.push({ kind: tr('Akcja'), title: tr("Nowy grid / preset…"), icon: <IGrid />, desc: keys('grid.new') || undefined, run: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) });
+      out.push({ kind: tr('Akcja'), title: tr('Nowy grid / szablon…'), icon: <IGrid />, desc: keys('grid.new') || undefined, run: () => setUi({ modal: { kind: 'grid', projectId: project.id } }) });
       out.push({ kind: tr('Akcja'), title: tr("Nowy terminal (zakładka)"), icon: <IPrompt />, desc: keys('terminal.new') || undefined, run: () => quickTab() });
       out.push(...ssh);
       if (tab?.cells.some((c) => c.ssh)) out.push({ kind: tr('Akcja'), title: tr('SSH: wysyłanie masowe'), icon: <IServer />, run: () => setUi({ modal: { kind: 'broadcast', projectId: project.id, tabId: tab.id } }) });
@@ -112,6 +118,7 @@ function PaletteInner() {
       out.push({ kind: tr('Akcja'), title: tr("Historia projektu"), icon: <IHistory />, desc: keys('history.open') || undefined, run: () => setUi({ modal: { kind: 'history', projectId: project.id } }) });
       out.push({ kind: tr('Akcja'), title: tr("Otwórz folder projektu"), icon: <IFolder />, run: () => window.mc.openPath(project.path) });
       out.push({ kind: tr('Akcja'), title: tr("Otwórz projekt w Cursorze"), icon: <ICodeEditor />, run: () => window.mc.openInEditor(project.path) });
+      if (tab) out.push({ kind: tr('Akcja'), title: tr('Zapisz grid „{name}” jako szablon…', { name: tab.name }), icon: <IGrid />, run: () => void saveGridAsTemplate(project.id, tab.id) });
       if (tab) out.push({ kind: tr('Akcja'), title: tr('Zamknij zakładkę „{name}”', { name: tab.name }), icon: <IX />, desc: keys('tab.close') || undefined, run: () => void closeTab(project.id, tab.id) });
     }
     if (focused) {
@@ -121,6 +128,7 @@ function PaletteInner() {
       // 1.0.9: the prompt queue of the focused agent cell, with its add field ready.
       const focusedCell = findCell(s, focused)?.cell;
       if (focusedCell && queueCapable(s, focusedCell)) out.push({ kind: tr('Akcja'), title: tr('Komórka: dodaj prompt do kolejki'), icon: <IPlus />, desc: keys('cell.queue') || undefined, run: () => openQueue(focused) });
+      if (focusedCell?.session && cellCanExport(focused)) out.push({ kind: tr('Akcja'), title: tr('Komórka: eksportuj rozmowę do Markdown…'), icon: <IDownload />, run: () => exportCellConversation(focused) });
       out.push({ kind: tr('Akcja'), title: tr("Komórka: zresetuj terminal (tryby myszy i klawiatury)"), icon: <IRefresh />, run: () => { terminals.resetInput(focused); toast(tr("Terminal zresetowany - historia została zachowana.")); } });
       const moves: Array<[string, string, number, number]> = [
         [tr('Komórka: przesuń w lewo'), 'left', -1, 0], [tr('Komórka: przesuń w prawo'), 'right', 1, 0],
@@ -129,6 +137,8 @@ function PaletteInner() {
       const arrowIcon: Record<string, ReactNode> = { left: <IArrowLeft />, right: <IArrowRight />, up: <IArrowUp />, down: <IMoveDown /> };
       for (const [title, arrow, dx, dy] of moves) out.push({ kind: tr('Akcja'), title, icon: arrowIcon[arrow], desc: keys(`cell.move.${arrow}`) || undefined, run: () => moveCellBy(dx, dy) });
     }
+    // 1.1.1: one prompt to several Claude and Codex cells (every grid and window).
+    if (agentTargets(s).length) out.push({ kind: tr('Akcja'), title: tr('Wyślij prompt do wielu agentów…'), icon: <ProviderIcon provider="claude" size={14} />, desc: keys('agents.prompt') || undefined, run: () => openAgentPrompt() });
     out.push({ kind: tr('Akcja'), title: tr('Szukaj w rozmowach Claude i Codex…'), icon: <IHistory />, desc: keys('conversations.search') || undefined, run: () => setUi({ modal: { kind: 'conversations' } }) });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj snippety"), icon: <ISnippet />, desc: keys('snippets.toggle') || undefined, run: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj notatki"), icon: <INoteBlank />, desc: keys('notes.toggle') || undefined, run: () => update((st) => ({ ...st, notesOpen: !st.notesOpen })) });
@@ -175,8 +185,9 @@ function PaletteInner() {
     for (const sn of s.snippets.filter((x) => !x.projectId || x.projectId === project?.id))
       out.push({ kind: tr('Snippet'), title: sn.name, desc: tr("Enter: aktywna · Shift+Enter: wszystkie"), run: (shift) => sendSnippet(sn, shift ? 'all' : 'focused') });
     if (project) {
-      for (const pr of s.presets.filter((x) => !x.projectId || x.projectId === project.id))
-        out.push({ kind: tr('Preset'), title: pr.name, desc: describeLayout(pr.layout), run: () => void openTab(project.id, pr.layout, pr.cells) });
+      // 1.1.1: grid templates; their folders are resolved against this project (a missing one falls back to its root).
+      for (const pr of templatesFor(s.presets, project.id))
+        out.push({ kind: tr('Szablon'), title: tr('Nowy grid z szablonu: {name}', { name: pr.name }), desc: `${describeLayout(pr.layout)} · ${pr.projectId ? tr('Szablon projektu') : tr('Szablon globalny')}`, run: () => void openTemplate(project.id, pr.id) });
       for (const pf of s.profiles) {
         const label = profileOptionLabel(pf, cliStatus, tr);
         out.push({ kind: '+ agent', title: label, desc: tr("Dodaj komórkę do siatki"), run: () => void addAgent(pf.id) });

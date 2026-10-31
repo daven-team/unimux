@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FetchResult } from '../src/main/usage/fetchers';
-import { MIN_GAP_MS, MIN_IDENTITY_GAP_MS, RETRY_AFTER_MARGIN_MS, UsageService } from '../src/main/usage/service';
+import { EAGER_GUARD_MS, MIN_GAP_MS, MIN_IDENTITY_GAP_MS, RETRY_AFTER_MARGIN_MS, UsageService } from '../src/main/usage/service';
 import { MAIN_ACCOUNTS, type AccountRef, type ProviderUsage, type UsageProvider } from '../src/shared/usage';
 
 /** Spacing and Retry-After margin off: these tests check other rules. */
@@ -552,10 +552,10 @@ describe('usage keyed by account identity (W1)', () => {
     expect(fetchAccount).toHaveBeenCalledTimes(3);
   });
 
-  it('keeps the read spacing across a restart', async () => {
+  it('keeps a short read guard across a restart (1.1.1: the start read ignores older reads, see usage-restart.test.ts)', async () => {
     const fetchAccount = vi.fn(async () => ok('claude', 10));
     await new UsageService({ accounts: () => [refA], fetchAccount, cacheFile, enabled: () => true, intervalMs: () => 0 }).refresh(true, true);
-    vi.advanceTimersByTime(30_000);
+    vi.advanceTimersByTime(EAGER_GUARD_MS - 1_000);
     await new UsageService({ accounts: () => [refA], fetchAccount, cacheFile, enabled: () => true, intervalMs: () => 0 }).refresh(true, true);
     expect(fetchAccount).toHaveBeenCalledTimes(1);
   });
@@ -799,7 +799,7 @@ describe('task 12 fix round 1', () => {
     expect(xCalls()).toBe(2);
   });
 
-  it('keeps the read spacing after a restart also when the last read left no numbers', async () => {
+  it('keeps the short start guard after a restart also when the last read left no numbers', async () => {
     const results: Array<(ref: AccountRef) => FetchResult> = [
       (ref) => ({ usage: { accountId: ref.id, provider: 'claude', status: 'forbidden', fetchedAt: Date.now(), source: 'live', windows: [], error: 'http-403' } }),
       (ref) => failing('claude', 'expired', undefined, ref.id),
@@ -809,8 +809,8 @@ describe('task 12 fix round 1', () => {
       rmSync(cacheFile, { force: true });
       const fetchAccount = vi.fn(async (ref: AccountRef) => result(ref));
       await new UsageService({ accounts: () => [live], fetchAccount, cacheFile, enabled: () => true, intervalMs: () => 0 }).refresh(true, true);
-      vi.advanceTimersByTime(30_000);
-      // The refresh button: it may bypass a forbidden hold, never the spacing.
+      vi.advanceTimersByTime(EAGER_GUARD_MS - 1_000);
+      // The first run after a restart: it reads at once, except an account read in the last 30 seconds.
       await new UsageService({ accounts: () => [live], fetchAccount, cacheFile, enabled: () => true, intervalMs: () => 0 }).refresh(true, true);
       expect(fetchAccount).toHaveBeenCalledOnce();
     }

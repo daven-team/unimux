@@ -1,5 +1,6 @@
 // Pure state transitions. Every function returns a new AppState and never mutates its input.
-import { growLayout, layoutForCount, MAX_CELLS, removeArea, type GridLayout } from './layout';
+import { growLayout, isUsableLayout, layoutForCount, MAX_CELLS, removeArea, type GridLayout } from './layout';
+import { normalizeCellDir, normalizePresets } from './gridTemplates';
 import { DEFAULT_PROFILES, RETIRED_PROFILES } from './profiles';
 import { isLanguage } from './languages';
 import { defaultShell, shellsForPlatform, type AppPlatform } from './platform';
@@ -24,8 +25,10 @@ import { normalizeDbConnections, normalizeDbGroupColors } from './db';
 import { NOTE_LIMITS, normalizeNotes } from './notes';
 import { normalizePromptQueue } from './promptQueue';
 import type {
-  AppState, ArchivedTab, Cell, Note, Preset, PresetCell, Profile, Project, Settings, Snippet, Tab, Worktree,
+  AppState, ArchivedTab, Cell, Note, Preset, Profile, Project, Settings, Snippet, Tab, Worktree,
 } from './types';
+
+export { isUsableLayout };
 
 export const ARCHIVE_LIMIT = 50;
 export const PROJECT_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#a855f7', '#06b6d4', '#ec4899', '#84cc16'];
@@ -64,7 +67,7 @@ const mapProject = (s: AppState, projectId: string, fn: (p: Project) => Project)
 const mapTab = (s: AppState, projectId: string, tabId: string, fn: (t: Tab) => Tab): AppState =>
   mapProject(s, projectId, (p) => ({ ...p, tabs: p.tabs.map((t) => (t.id === tabId ? fn(t) : t)) }));
 
-type CellInput = { color?: string; model?: string; profileId: string; role?: Cell['role']; name?: string; startupPrompt?: string; worktree?: Worktree; session?: Cell['session']; ssh?: SshCellRef };
+type CellInput = { color?: string; model?: string; profileId: string; role?: Cell['role']; name?: string; startupPrompt?: string; worktree?: Worktree; session?: Cell['session']; ssh?: SshCellRef; dir?: string; muted?: true };
 
 /** Accent colors handed out to new cells, in order; also used for agents created by a coordinator. */
 export const CELL_COLORS = ['#60a5fa', '#a78bfa', '#34d399', '#fbbf24', '#fb7185', '#22d3ee', '#c084fc', '#a3e635',
@@ -98,6 +101,9 @@ const newCell = (c: CellInput, color?: string): Cell => ({
   ...(c.worktree ? { worktree: c.worktree } : {}),
   ...(c.session ? { session: c.session } : {}),
   ...(c.ssh ? { ssh: { hostId: c.ssh.hostId } } : {}),
+  // 1.1.1: an SSH cell or a worktree decides its folder by itself.
+  ...(c.dir && !c.ssh && !c.worktree ? { dir: c.dir } : {}),
+  ...(c.muted ? { muted: true as const } : {}),
 });
 
 // ── projects ────────────────────────────────────────────────────────────────
@@ -431,31 +437,13 @@ export function ensureShellProfile(s: AppState): { s: AppState; profileId: strin
 export const getProfile = (s: AppState, id: string): Profile =>
   s.profiles.find((p) => p.id === id) ?? s.profiles.find((p) => p.cli === 'shell') ?? s.profiles[0];
 
+/** The folder a cell's terminal starts in: its worktree, else its own folder (1.1.1), else the project folder. */
+export const cellCwd = (project: Pick<Project, 'path'>, cell: Pick<Cell, 'worktree' | 'dir'>): string => cell.worktree?.path ?? cell.dir ?? project.path;
+
 export const activeProject = (s: AppState): Project | null => s.projects.find((p) => p.id === s.activeProjectId) ?? null;
 export const activeTab = (p: Project | null): Tab | null => p?.tabs.find((t) => t.id === p.activeTabId) ?? null;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-const isNumbers = (v: unknown): boolean => Array.isArray(v) && v.every((n) => typeof n === 'number' && Number.isFinite(n));
-const isNumberRows = (v: unknown): boolean => Array.isArray(v) && v.every((row) => row === null || isNumbers(row));
-
-/** A saved layout the grid can draw for `count` cells: one area per cell inside the grid, size fields of the right type. */
-export function isUsableLayout(layout: unknown, count: number): layout is GridLayout {
-  if (!isRecord(layout)) return false;
-  const { cols, rows, areas } = layout;
-  if (!Number.isInteger(cols) || !Number.isInteger(rows) || (cols as number) < 1 || (rows as number) < 1) return false;
-  // Row-based layouts use the LCM of their row counts as tracks (60 for 5, 4, 3); either axis in cols mode.
-  if ((cols as number) > 60 || (rows as number) > 60) return false;
-  if (!Array.isArray(areas) || areas.length !== count) return false;
-  const inside = areas.every((a) => isRecord(a)
-    && [a.col, a.row, a.colSpan, a.rowSpan].every((n) => Number.isInteger(n))
-    && (a.col as number) >= 0 && (a.row as number) >= 0 && (a.colSpan as number) >= 1 && (a.rowSpan as number) >= 1
-    && (a.col as number) + (a.colSpan as number) <= (cols as number) && (a.row as number) + (a.rowSpan as number) <= (rows as number));
-  if (!inside) return false;
-  if (layout.mode !== undefined && layout.mode !== 'cols') return false;
-  for (const field of ['rowCounts', 'rowSizes', 'colSizes'] as const) if (layout[field] !== undefined && !isNumbers(layout[field])) return false;
-  for (const field of ['rowColSizes', 'colRowSizes'] as const) if (layout[field] !== undefined && !isNumberRows(layout[field])) return false;
-  return true;
-}
 
 /**
  * One saved tab, repaired so the grid can draw it: cells without an id or profile are dropped (at most MAX_CELLS stay) and a
@@ -483,16 +471,14 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
   // A cell's path format override survives only as one of the known values; an SSH reference only as { hostId: string }.
   const cleanCells = (cells: Cell[]) => remapCells(cells).map((c) => {
     // `shell` names the shell of a running terminal: after a restart of the app nothing runs yet.
-    const { pathMode: raw, ssh, shell: _shell, promptQueue: rawQueue, ...rest } = c;
+    const { pathMode: raw, ssh, shell: _shell, promptQueue: rawQueue, dir: rawDir, ...rest } = c;
     const pathMode = normalizePathMode(raw);
+    // 1.1.1: the folder a cell starts in survives only as an absolute path.
+    const dir = normalizeCellDir(rawDir);
     const ref = normalizeSshCellRef(ssh);
     // 1.0.9: queued prompts survive a restart, paused: nothing is sent by itself right after a launch.
     const promptQueue = normalizePromptQueue(rawQueue, true);
-    return { ...rest, ...(pathMode ? { pathMode } : {}), ...(ref ? { ssh: ref } : {}), ...(promptQueue ? { promptQueue } : {}) };
-  });
-  const cleanPresetCells = (cells: PresetCell[]) => remapCells(cells).map((c) => {
-    const { sshHostId, ...rest } = c;
-    return typeof sshHostId === 'string' && sshHostId.length <= 64 ? { ...rest, sshHostId } : rest;
+    return { ...rest, ...(pathMode ? { pathMode } : {}), ...(ref ? { ssh: ref } : {}), ...(promptQueue ? { promptQueue } : {}), ...(dir ? { dir } : {}) };
   });
   const profiles = (Array.isArray(r.profiles) && r.profiles.length ? r.profiles : d.profiles).filter((p) => !(p.id in RETIRED_PROFILES));
   const normalized = {
@@ -508,7 +494,8 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
     sidebarWidth: normalizePanelWidth(r.sidebarWidth, 'sidebar'),
     snippetsWidth: normalizePanelWidth(r.snippetsWidth, 'snippets'),
     profiles: profiles.length ? profiles : d.profiles,
-    presets: (Array.isArray(r.presets) ? r.presets : []).map((p) => ({ ...p, cells: cleanPresetCells(p.cells ?? []) })),
+    // 1.1.1: grid templates are capped and repaired (shared/gridTemplates.ts).
+    presets: normalizePresets(r.presets, remap),
     snippets: Array.isArray(r.snippets) ? r.snippets : [],
     notes: normalizeNotes(r.notes),
     notesOpen: r.notesOpen === true,

@@ -38,7 +38,7 @@ po które sięgasz w trakcie ich pracy: pliki, Git, SSH i SFTP, bazy danych, not
 
 ### Agenci w gridzie
 
-- **Gridy** od jednej komórki do 5×4, układy rzędami (`3+2`), scalanie komórek i kilka gridów w projekcie. Pasek kart pokazuje gridy i pliki wszystkich projektów (albo tylko aktywnego), a `Ctrl+Tab` przełącza między nimi.
+- **Gridy** od jednej komórki do 5×4, układy rzędami (`3+2`), scalanie komórek i kilka gridów w projekcie. Pasek kart pokazuje gridy i pliki wszystkich projektów (albo tylko aktywnego), a `Ctrl+Tab` przełącza na ostatnio używaną.
 - **Komórki jako karty**: każda komórka ma nagłówek z ikoną agenta (iskra Claude, chmurka Codex, znak zachęty powłoki albo host SSH), statusem, nazwą, szczegółami (profil, model, gałąź worktree, user@host) i własnym kolorem.
 - **Każda komórka** ma nazwę, kolor, prompt startowy, profil Claude Code / Codex / powłoka, model, rolę MCP i opcjonalny osobny `git worktree`. Przed zamknięciem komórki z worktree aplikacja sprawdza niezacommitowane pliki i niescalone commity.
 - **Statusy z powodem**: ◐ pracuje („praca: Edit”), ● czeka na Ciebie, „czeka na zgodę: Bash” od razu, gdy agent pyta o pozwolenie, i czerwony kod wyjścia, gdy polecenie albo CLI zawiedzie. Powiadomienie i dźwięk mówią, który agent skończył albo Cię potrzebuje.
@@ -49,7 +49,7 @@ po które sięgasz w trakcie ich pracy: pliki, Git, SSH i SFTP, bazy danych, not
 
 | Nowy grid | Grid we własnym oknie |
 | --- | --- |
-| ![Okno nowego gridu z presetem zespołu recenzji: układ 2x2, profile, role MCP i prompty](docs/screenshots/grid-dialog.png) | ![Grid czterech powłok we własnym oknie z przyciskami Dodaj i Przypnij z powrotem](docs/screenshots/detached.png) |
+| ![Okno nowego gridu z szablonem zespołu recenzji: układ 2x2, profile, role MCP i prompty](docs/screenshots/grid-dialog.png) | ![Grid czterech powłok we własnym oknie z przyciskami Dodaj i Przypnij z powrotem](docs/screenshots/detached.png) |
 | **Plik obok gridu** | **Paleta `Ctrl+K`** |
 | ![Podgląd Markdown pliku README.md obok gridu czterech powłok](docs/screenshots/split.png) | ![Paleta poleceń z wynikami dla „new”](docs/screenshots/palette.png) |
 
@@ -139,14 +139,18 @@ Na macOS zamiast `Ctrl` używasz `Cmd`. Każdy skrót można zmienić w **Ustawi
 | Skrót | Działanie |
 |---|---|
 | `Ctrl+K` | Paleta poleceń |
-| `Ctrl+Shift+G` | Nowy grid albo preset |
+| `Ctrl+Shift+G` | Nowy grid albo szablon gridu |
 | `Ctrl+Shift+T` | Nowa karta z jednym terminalem |
 | `Ctrl+Shift+H` | Historia rozmów i gridów |
 | `Ctrl+Shift+M` | Maksymalizuj albo przywróć komórkę |
 | `Ctrl+Alt+Strzałki` | Przejście między komórkami |
-| `Ctrl+Tab` | Następna karta |
+| `Ctrl+Tab` | Ostatnio używana karta (przytrzymaj `Ctrl`, aby cofnąć się dalej) |
 | `Ctrl+Shift+B` / `Ctrl+Shift+O` | Snippety / notatki |
 | `Ctrl+Shift+F` | Szukaj w terminalu |
+| `Ctrl+Alt+F` | Szukaj we wszystkich rozmowach Claude i Codex |
+| `Ctrl+Shift+U` | Jeden prompt do wielu agentów |
+| `Ctrl+Shift+D` | Kolejka promptów komórki w fokusie |
+| `Ctrl+Alt+PageDown` / `PageUp` | Następna / poprzednia komórka, która czeka na Ciebie |
 
 Pełna lista: [skróty klawiszowe](docs/SHORTCUTS.md) (po angielsku).
 

@@ -1,7 +1,7 @@
 import { Select } from './Select';
 import { SettingRow, SettingsGroup } from './SettingRow';
 import { useEffect, useRef, useState } from 'react';
-import { ALERT_EVENTS, isTime, normalizeVolume, type AlertEventId, type AlertSettings, type SoundChoice } from '../../../shared/alerts';
+import { ALERT_EVENTS, isTime, LIMIT_PERCENTS, normalizeVolume, type AlertEventId, type AlertSettings, type LimitAlertSettings, type SoundChoice } from '../../../shared/alerts';
 import { SOUND_PRESETS, getPreset } from '../../../shared/soundPresets';
 import { updateSettings } from '../../../shared/state';
 import type { MessageKey } from '../../../shared/i18n';
@@ -71,6 +71,21 @@ export function AlertsSettings() {
     setAnnounce(tr('Głośność ustawiona na {value}%', { value: percent }));
     void previewVolume(volume);
   };
+  const limits = alerts.limits;
+  const showAiUsage = useStore((st) => st.s.settings.showAiUsage);
+  const setLimits = (patch: Partial<LimitAlertSettings>) => setAlerts((a) => ({ ...a, limits: { ...a.limits, ...patch } }));
+  const limitWindow = (id: 'fiveHour' | 'sevenDay', title: string) => {
+    const config = limits[id];
+    // A threshold saved outside the list (an older or edited state) is still shown as it is.
+    const percents = LIMIT_PERCENTS.includes(config.percent) ? LIMIT_PERCENTS : [...LIMIT_PERCENTS, config.percent].sort((a, b) => a - b);
+    return <SettingRow title={title} htmlFor={`settings-limit-${id}`}>
+      <Select id={`settings-limit-${id}-percent`} className="select alert-limit-percent" aria-label={tr('Próg: {window}', { window: title })} value={String(config.percent)} disabled={!limits.enabled || !config.enabled}
+        onChange={(e) => setLimits({ [id]: { ...config, percent: Number(e.target.value) } })}>
+        {percents.map((percent) => <option key={percent} value={String(percent)}>{tr('od {percent}%', { percent })}</option>)}
+      </Select>
+      <input id={`settings-limit-${id}`} className="setting-switch" type="checkbox" role="switch" checked={config.enabled} disabled={!limits.enabled} onChange={(e) => setLimits({ [id]: { ...config, enabled: e.target.checked } })} />
+    </SettingRow>;
+  };
   const quiet = alerts.quietHours;
   const setQuiet = (patch: Partial<typeof quiet>) => setAlerts((a) => ({ ...a, quietHours: { ...a.quietHours, ...patch } }));
 
@@ -109,6 +124,17 @@ export function AlertsSettings() {
           </div>;
         })}
       </div>
+    </SettingsGroup>
+    <SettingsGroup title={tr('Limity kont AI')} description={tr('Powiadomienie systemowe, gdy konto Claude lub Codex wykorzysta wybraną część limitu: raz na konto, okno i okres limitu, także po ponownym uruchomieniu aplikacji. Nie dotyczy kont z wygasłym logowaniem. Kliknięcie otwiera panel limitów. Godziny ciszy obowiązują.')}>
+      <SettingRow title={tr('Ostrzeżenia o limitach')} htmlFor="settings-limits-enabled" hint={showAiUsage ? undefined : tr('Działa tylko przy włączonym panelu limitów kont AI.')}>
+        <button type="button" className="btn alert-test" disabled={!limits.enabled} aria-label={tr('Test: {event}', { event: tr('Ostrzeżenia o limitach') })} onClick={() => window.mc.testLimitAlert()}>{tr('Test')}</button>
+        <input id="settings-limits-enabled" className="setting-switch" type="checkbox" role="switch" checked={limits.enabled} onChange={(e) => setLimits({ enabled: e.target.checked })} />
+      </SettingRow>
+      {limitWindow('fiveHour', tr('Limit 5-godzinny'))}
+      {limitWindow('sevenDay', tr('Limit 7-dniowy'))}
+      <SettingRow title={tr('Powiadom, gdy limit znowu jest dostępny')} htmlFor="settings-limits-resets" hint={tr('Po resecie okna, które przekroczyło próg.')}>
+        <input id="settings-limits-resets" className="setting-switch" type="checkbox" role="switch" checked={limits.resets} disabled={!limits.enabled} onChange={(e) => setLimits({ resets: e.target.checked })} />
+      </SettingRow>
     </SettingsGroup>
     <SettingsGroup title={tr('Ogólne')}>
       <SettingRow title={tr('Głośność')} htmlFor="settings-alert-volume">

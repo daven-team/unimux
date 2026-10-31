@@ -27,6 +27,29 @@ export interface QuietHours {
   end: string;
 }
 
+/** 1.1.1: one window's limit warning: on/off and the used percent at which it is raised. */
+export interface LimitWindowAlert {
+  enabled: boolean;
+  percent: number;
+}
+
+/** 1.1.1: OS notifications about the AI account limits (see shared/limitAlerts). */
+export interface LimitAlertSettings {
+  /** The group's own switch (the alerts master switch and quiet hours apply on top). */
+  enabled: boolean;
+  fiveHour: LimitWindowAlert;
+  sevenDay: LimitWindowAlert;
+  /** Also tell when a window that crossed its threshold reset ("limit 5 h available again"). */
+  resets: boolean;
+}
+
+/** The thresholds offered in the settings (used percent). */
+export const LIMIT_PERCENTS: readonly number[] = [50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100];
+
+export function defaultLimitAlerts(): LimitAlertSettings {
+  return { enabled: true, fiveHour: { enabled: true, percent: 80 }, sevenDay: { enabled: true, percent: 90 }, resets: false };
+}
+
 export interface AlertSettings {
   /** The master switch: false silences every alert (popups and sounds) whatever the events below say. */
   enabled: boolean;
@@ -42,6 +65,8 @@ export interface AlertSettings {
   flashWindow: boolean;
   /** 1.0.9: the number of agents waiting for you on the taskbar button (Windows overlay) / the Dock icon (macOS badge). */
   taskbarBadge: boolean;
+  /** 1.1.1: warnings when an AI account's limit crosses a threshold. */
+  limits: LimitAlertSettings;
 }
 
 export const DEFAULT_ALERT_VOLUME = 0.7;
@@ -68,6 +93,7 @@ export function defaultAlerts(): AlertSettings {
     notificationActions: true,
     flashWindow: true,
     taskbarBadge: true,
+    limits: defaultLimitAlerts(),
   };
 }
 
@@ -106,6 +132,24 @@ export function normalizeSoundChoice(value: unknown, fallback: SoundChoice): Sou
   return { ...fallback };
 }
 
+const isLimitPercent = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100;
+
+/** Reads saved limit warnings; every missing or corrupt field falls back to its default. */
+export function normalizeLimitAlerts(value: unknown): LimitAlertSettings {
+  const r = isObject(value) ? value : {};
+  const d = defaultLimitAlerts();
+  const windowAlert = (raw: unknown, fallback: LimitWindowAlert): LimitWindowAlert => {
+    const w = isObject(raw) ? raw : {};
+    return { enabled: typeof w.enabled === 'boolean' ? w.enabled : fallback.enabled, percent: isLimitPercent(w.percent) ? w.percent : fallback.percent };
+  };
+  return {
+    enabled: typeof r.enabled === 'boolean' ? r.enabled : d.enabled,
+    fiveHour: windowAlert(r.fiveHour, d.fiveHour),
+    sevenDay: windowAlert(r.sevenDay, d.sevenDay),
+    resets: typeof r.resets === 'boolean' ? r.resets : d.resets,
+  };
+}
+
 /** Reads a saved `alerts` object; every missing or corrupt field falls back to its default. */
 export function normalizeAlerts(value: unknown): AlertSettings {
   const r = isObject(value) ? value : {};
@@ -124,6 +168,7 @@ export function normalizeAlerts(value: unknown): AlertSettings {
     notificationActions: typeof r.notificationActions === 'boolean' ? r.notificationActions : d.notificationActions,
     flashWindow: typeof r.flashWindow === 'boolean' ? r.flashWindow : d.flashWindow,
     taskbarBadge: typeof r.taskbarBadge === 'boolean' ? r.taskbarBadge : d.taskbarBadge,
+    limits: normalizeLimitAlerts(r.limits),
   };
 }
 

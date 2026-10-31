@@ -11,6 +11,7 @@ import type { AlertEventId } from '../shared/alerts';
 import type { UsageState } from '../shared/usage';
 import type { MonitorSample } from '../shared/monitor';
 import type { ConvQuery, ConvSearchResult, ConvTranscript } from '../shared/convSearch';
+import type { ConvExportData, ConvExportSource } from '../shared/convExport';
 import type { ContextUsage } from '../shared/contextUsage';
 import type { AdoptCopyResult, LoginRequest, LoginState, SwapResult } from '../shared/accounts';
 import type { ReplaceRequest, ReplaceResult, SearchOptions, SearchResult } from '../shared/search';
@@ -23,6 +24,7 @@ import type { DbApi, DbPrompt, DbSessionState, DbVaultInfo } from '../shared/db'
 import type { SshHistoryApi } from '../shared/commandHistory';
 import type { DetachedTarget, DetachedWork, OpenInMain } from '../shared/detached';
 import type { WaitMark } from '../shared/waiting';
+import type { AgentPromptOutcome, AgentPromptRequest } from '../shared/agentPrompt';
 
 export type DetachResult = { ok: true; id: string } | { ok: false; error: string };
 import type { AppState, CellSession, Profile, ProjectDirectory, ProjectFilePreview, SessionInfo, UpdateState, Worktree, WorktreeInspection, WorktreeInspectResult, WorktreeRemoveResult } from '../shared/types';
@@ -119,6 +121,7 @@ export interface McApi {
   conversations: {
     search(query: ConvQuery): Promise<ConvSearchResult>;
     transcript(file: string): Promise<ConvTranscript>;
+    exportData(source: ConvExportSource): Promise<ConvExportData>;
   };
   isGitRepo(path: string): Promise<boolean>;
   createWorktree(projectPath: string, name: string): Promise<Worktree>;
@@ -144,7 +147,7 @@ export interface McApi {
     saveImage(bytes: Uint8Array, mime: string): Promise<string | null>;
     /** The image as a data URL, null when it is gone or the name is not one the app gave. */
     readImage(name: string): Promise<string | null>;
-    exportFile(name: string, text: string): Promise<{ ok: boolean; path?: string; cancelled?: boolean }>;
+    exportFile(name: string, text: string, kind?: 'conversation'): Promise<{ ok: boolean; path?: string; cancelled?: boolean }>;
   };
   /** The local pane of the SFTP view: any folder, drives, home, new folder, rename, trash, show in Explorer/Finder. */
   localFs: LocalFilesApi;
@@ -157,8 +160,14 @@ export interface McApi {
   notify(n: { title: string; body: string; cellId: string; actions?: 'answer' | 'show'; token?: string }): void;
   /** 1.0.9: an answer from a notification could not be typed (the cell changed): show the window and the cell instead. */
   showCell(cellId: string): void;
+  /** 1.1.1: shows a sample limit warning (the "Test" button of the limit warnings). */
+  testLimitAlert(): void;
   /** 1.0.9: an agent needs the user: flash this window's taskbar button / bounce the Dock icon if the window is not focused. */
   flashAttention(): void;
+  /** 1.1.1: one prompt to several agent cells: probe or send; each cell's window decides and answers (main/agentPrompt.ts). */
+  agentPrompt(req: AgentPromptRequest): Promise<Record<string, AgentPromptOutcome>>;
+  /** The answer of this window to an `agents:prompt:run` request for its own cells. */
+  agentPromptDone(requestId: string, answer: Record<string, AgentPromptOutcome>): void;
   openExternal(url: string): void;
   openPath(path: string): void;
   revealPath(path: string): void;
@@ -252,6 +261,8 @@ export interface McApi {
   /** A notice from the main process, already translated (e.g. Claude http hooks found blocked). */
   on(channel: 'app:notice', cb: (text: string) => void): () => void;
   on(channel: 'focus-cell', cb: (cellId: string) => void): () => void;
+  /** 1.1.1: probe or send a prompt to cells this window holds; answer with agentPromptDone. */
+  on(channel: 'agents:prompt:run', cb: (requestId: string, req: AgentPromptRequest) => void): () => void;
   on(channel: 'notify:answer', cb: (cellId: string, token: string, answer: 'allow' | 'deny') => void): () => void;
   on(channel: 'ptyhost:crashed', cb: (resumesConversation: boolean) => void): () => void;
   /** The Pty Host crashed too often and is not restarted until the user asks for it (cells show why they do not start). */
@@ -273,6 +284,8 @@ export interface McApi {
   on(channel: 'app:confirm-quit', cb: () => void): () => void;
   on(channel: 'update:state', cb: (s: UpdateState) => void): () => void;
   on(channel: 'usage:state', cb: (state: UsageState) => void): () => void;
+  /** A limit warning was clicked (1.1.1): open the AI account limits panel. */
+  on(channel: 'usage:open', cb: () => void): () => void;
   on(channel: 'accounts:swapPending', cb: (pending: boolean) => void): () => void;
   on(channel: 'state:changed', cb: (change: StateChange) => void): () => void;
   on(channel: 'fs:progress', cb: (progress: FileOpProgress) => void): () => void;

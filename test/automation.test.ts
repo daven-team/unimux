@@ -393,3 +393,28 @@ describe('review fixes: ownership, launch settings, inbox acknowledgement', () =
     await expect(f.service.execute('get_context', {}, sshCell.id)).rejects.toThrow();
   });
 });
+
+// 1.1.1 grid templates (test/grid-templates.test.ts covers capture, apply and normalisation).
+describe('opening a template through create_grid', () => {
+  it('keeps folders, muted flags and sizes for the user and refuses folders from agents', async () => {
+    const f = automationFixture();
+    const layout = { ...layoutForCount(2), colSizes: [3, 1] };
+    const created = await f.service.execute('create_grid', { projectId: f.project.id, name: 'From template', layout, cells: [
+      { profileId: 'claude', dir: 'D:/own/web', muted: true }, { profileId: 'codex', dir: 'relative' },
+    ] }) as { gridId: string };
+    const tab = f.controller.get().projects[0].tabs.find((t) => t.id === created.gridId)!;
+    expect(tab.layout.colSizes).toEqual([3, 1]);
+    expect(tab.cells[0]).toMatchObject({ dir: 'D:/own/web', muted: true });
+    expect(tab.cells[1].dir).toBeUndefined();
+    await expect(f.service.execute('create_grid', { name: 'Agent', cells: [{ profileId: 'codex', dir: 'D:/elsewhere' }] }, f.coordinator.id)).rejects.toThrow('not available to agents');
+    await expect(f.service.execute('save_preset', { name: 'Agent', cells: [{ profileId: 'codex', dir: 'D:/elsewhere' }] }, f.coordinator.id)).rejects.toThrow('not available to agents');
+  });
+  it('ignores a template folder when an agent starts it by presetId', async () => {
+    const f = automationFixture();
+    f.controller.change((s) => upsertPreset(s, { id: 'tp', name: 'T', layout: layoutForCount(1), cells: [{ profileId: 'codex', worktree: false, dir: 'web', muted: true }] }));
+    const created = await f.service.execute('create_grid', { name: 'P', presetId: 'tp' }, f.coordinator.id) as { gridId: string };
+    const tab = f.controller.get().projects[0].tabs.find((t) => t.id === created.gridId)!;
+    expect(tab.cells[0].dir).toBeUndefined();
+    expect(tab.cells[0].muted).toBe(true);
+  });
+});

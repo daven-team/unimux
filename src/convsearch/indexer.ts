@@ -260,6 +260,16 @@ export class ConvIndexer {
     return { ok: true, messages, capped: doc.capped };
   }
 
+  /** The CLI of an indexed file (undefined for a file the index does not know: nothing else is read on request). */
+  cliOf(file: string): ConvCli | undefined { return this.entries.get(file)?.cli; }
+
+  /** The newest indexed file of a session, if the index holds it. */
+  fileOf(cli: ConvCli, id: string): string | null {
+    let best: Entry | null = null;
+    for (const e of this.entries.values()) if (e.cli === cli && e.doc.id === id && (!best || e.mtimeMs > best.mtimeMs)) best = e;
+    return best?.file ?? null;
+  }
+
   /** Test hook. */
   size(): number { return this.entries.size; }
 }

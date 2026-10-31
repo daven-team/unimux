@@ -138,6 +138,13 @@ export function sendRouted(main: BrowserWindow | null, channel: string, args: un
   }
 }
 
+/** 1.1.1: the window that holds a cell's terminal: a detached grid's window, else the main window (null when gone). */
+export function cellWindow(cellId: string): BrowserWindow | null {
+  const owner = owners.get(cellId);
+  const w = owner ? windows.get(owner) : undefined;
+  return w ?? deps?.mainWindow() ?? null;
+}
+
 /** A detached window reported a cell status: the main window learns it too (its badges, its quit question). */
 export function relayCellStatus(event: IpcSenderEvent, cellId: unknown, status: unknown): void {
   if (!deps || typeof cellId !== 'string' || typeof status !== 'string' || windowIdOf(event.sender) === null) return;
