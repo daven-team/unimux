@@ -111,7 +111,7 @@ try {
     await app.evaluate(`[...document.querySelectorAll('.modal-foot button')].find((b) => b.textContent === 'Ustaw jako główne').click()`);
   };
   try {
-    await app.until(`!!${card('fresh')} && !!${card('stale')} && ${card('fresh')}.textContent.includes('cswap też trzyma kopię')`, 'cswap cards with the hint');
+    await app.until(`!!${card('fresh')} && !!${card('stale')} && ${card('fresh')}.textContent.includes('Kopię tego logowania ma też cswap')`, 'cswap cards with the short hint');
     await app.screenshot('091-accounts-cswap-hint.png');
     await makeMain('stale');
     await app.until(`document.body.textContent.includes('Konto stale@example.com jest zarządzane poza aplikacją')`, 'stale copy refused with the foreign text');
@@ -174,10 +174,9 @@ try {
   const card = `[...document.querySelectorAll('.usage-card')].find((c) => c.textContent.includes('kept@example.com'))`;
   const label = 'Odświeżaj tę kopię w unimuxie';
   try {
-    // Held by cswap with an access token that already ran out: the note names the action, which is the primary button next
-    // to "Sign in again", and no renewal happens on its own.
-    await app.until(`!!${card} && ${card}.textContent.includes('token dostępu tej kopii wygasł') && ${card}.textContent.includes('wybierz „${label}”') && ${card}.querySelector('.usage-empty-buttons button.primary')?.textContent === '${label}'`, 'expired held card names the action');
-    await app.until(`!!${card} && [...${card}.querySelectorAll('button')].some((b) => b.textContent === '${label}') && [...${card}.querySelectorAll('button')].some((b) => b.textContent === 'Zaloguj ponownie')`, 'adopt action on the held card');
+    // Held by cswap with an access token that already ran out (1.0.10): the same "Sign-in expired" row as every expired
+    // sign-in, the explanation as a tooltip, "Renew this copy" in the card's menu; no renewal happens on its own.
+    await app.until(`!!${card} && ${card}.textContent.includes('Logowanie wygasło') && ${card}.querySelector('.usage-expired')?.title.includes('token dostępu tej kopii wygasł') && ${card}.querySelector('.usage-expired button.primary')?.textContent === 'Zaloguj ponownie'`, 'expired held card');
     // The notices are hidden and the card is scrolled into view for the screenshots.
     for (let i = 0; i < 5 && await app.evaluate(`document.querySelectorAll('.usage-notices .usage-warning').length`); i++) {
       await app.evaluate(`[...document.querySelectorAll('.usage-notices button')].find((b) => b.textContent === 'Ukryj')?.click() ?? true`);

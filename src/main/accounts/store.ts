@@ -43,6 +43,7 @@ function parseAccount(value: unknown): ManagedAccount | null {
   if (value.family === 'own' || value.family === 'live') account.family = value.family as TokenFamily;
   if (isAccountId(value.duplicateOf)) account.duplicateOf = value.duplicateOf;
   if (typeof value.heldTokens === 'string' && /^[0-9a-f]{64}$/.test(value.heldTokens)) account.heldTokens = value.heldTokens;
+  if (typeof value.deadTokens === 'string' && /^[0-9a-f]{64}$/.test(value.deadTokens)) account.deadTokens = value.deadTokens;
   const swap = parseAppSwap(value.appSwap);
   if (swap) account.appSwap = swap;
   return account;
@@ -196,6 +197,11 @@ export class AccountsStore {
   setHeldTokens(id: string, hash: string | undefined): void {
     if (hash === undefined && !this.get(id)?.heldTokens) return;
     this.patch(id, { heldTokens: hash });
+  }
+  /** Sets or (undefined) drops `deadTokens`; a record without it is not written again. */
+  setDeadTokens(id: string, hash: string | undefined): void {
+    if (this.get(id)?.deadTokens === hash) return;
+    this.patch(id, { deadTokens: hash });
   }
   /** Sets or (undefined) drops `appSwap`; a record without it is not written again. */
   setAppSwap(id: string, swap: AppSwap | undefined): void {
