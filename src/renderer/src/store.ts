@@ -25,6 +25,8 @@ export type Modal =
   | { kind: 'file'; projectId: string; relativePath: string }
   | { kind: 'auth'; provider: 'claude' | 'codex'; target: LoginTarget }
   | { kind: 'broadcast'; projectId: string; tabId: string }
+  /** 1.1.1: one prompt to several agent cells; `tabId` = the grid whose agents are checked first. */
+  | { kind: 'agentPrompt'; tabId?: string }
   | { kind: 'dbConnection'; connectionId?: string; dbKind?: DbKind };
 
 export type Dialog = { id: number } & (

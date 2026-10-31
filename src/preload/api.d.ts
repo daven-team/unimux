@@ -23,6 +23,7 @@ import type { DbApi, DbPrompt, DbSessionState, DbVaultInfo } from '../shared/db'
 import type { SshHistoryApi } from '../shared/commandHistory';
 import type { DetachedTarget, DetachedWork, OpenInMain } from '../shared/detached';
 import type { WaitMark } from '../shared/waiting';
+import type { AgentPromptOutcome, AgentPromptRequest } from '../shared/agentPrompt';
 
 export type DetachResult = { ok: true; id: string } | { ok: false; error: string };
 import type { AppState, CellSession, Profile, ProjectDirectory, ProjectFilePreview, SessionInfo, UpdateState, Worktree, WorktreeInspection, WorktreeInspectResult, WorktreeRemoveResult } from '../shared/types';
@@ -161,6 +162,10 @@ export interface McApi {
   testLimitAlert(): void;
   /** 1.0.9: an agent needs the user: flash this window's taskbar button / bounce the Dock icon if the window is not focused. */
   flashAttention(): void;
+  /** 1.1.1: one prompt to several agent cells: probe or send; each cell's window decides and answers (main/agentPrompt.ts). */
+  agentPrompt(req: AgentPromptRequest): Promise<Record<string, AgentPromptOutcome>>;
+  /** The answer of this window to an `agents:prompt:run` request for its own cells. */
+  agentPromptDone(requestId: string, answer: Record<string, AgentPromptOutcome>): void;
   openExternal(url: string): void;
   openPath(path: string): void;
   revealPath(path: string): void;
@@ -254,6 +259,8 @@ export interface McApi {
   /** A notice from the main process, already translated (e.g. Claude http hooks found blocked). */
   on(channel: 'app:notice', cb: (text: string) => void): () => void;
   on(channel: 'focus-cell', cb: (cellId: string) => void): () => void;
+  /** 1.1.1: probe or send a prompt to cells this window holds; answer with agentPromptDone. */
+  on(channel: 'agents:prompt:run', cb: (requestId: string, req: AgentPromptRequest) => void): () => void;
   on(channel: 'notify:answer', cb: (cellId: string, token: string, answer: 'allow' | 'deny') => void): () => void;
   on(channel: 'ptyhost:crashed', cb: (resumesConversation: boolean) => void): () => void;
   /** The Pty Host crashed too often and is not restarted until the user asks for it (cells show why they do not start). */

@@ -12,6 +12,9 @@ import type { MessageKey } from '../../../shared/i18n';
 import { describeLayout } from '../../../shared/layout';
 import { activeProject, activeTab, findCell } from '../../../shared/state';
 import { openQueue, queueCapable } from '../promptQueue';
+import { openAgentPrompt } from '../agentPrompt';
+import { agentTargets } from '../../../shared/agentPrompt';
+import { ProviderIcon } from './ProviderIcons';
 import type { SessionInfo } from '../../../shared/types';
 import {
   addAgent, closeTab, createProject, moveCellBy, openTab, quickTab, restartCell, restoreArchived, resumeSession, selectTab,
@@ -129,6 +132,8 @@ function PaletteInner() {
       const arrowIcon: Record<string, ReactNode> = { left: <IArrowLeft />, right: <IArrowRight />, up: <IArrowUp />, down: <IMoveDown /> };
       for (const [title, arrow, dx, dy] of moves) out.push({ kind: tr('Akcja'), title, icon: arrowIcon[arrow], desc: keys(`cell.move.${arrow}`) || undefined, run: () => moveCellBy(dx, dy) });
     }
+    // 1.1.1: one prompt to several Claude and Codex cells (every grid and window).
+    if (agentTargets(s).length) out.push({ kind: tr('Akcja'), title: tr('Wyślij prompt do wielu agentów…'), icon: <ProviderIcon provider="claude" size={14} />, desc: keys('agents.prompt') || undefined, run: () => openAgentPrompt() });
     out.push({ kind: tr('Akcja'), title: tr('Szukaj w rozmowach Claude i Codex…'), icon: <IHistory />, desc: keys('conversations.search') || undefined, run: () => setUi({ modal: { kind: 'conversations' } }) });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj snippety"), icon: <ISnippet />, desc: keys('snippets.toggle') || undefined, run: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj notatki"), icon: <INoteBlank />, desc: keys('notes.toggle') || undefined, run: () => update((st) => ({ ...st, notesOpen: !st.notesOpen })) });

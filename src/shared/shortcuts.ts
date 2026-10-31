@@ -188,6 +188,8 @@ export const SHORTCUTS = [
   // 1.0.9: the prompt queue of the cell in focus, with its add field ready (renderer/promptQueue.ts).
   { id: 'cell.queue', label: 'Dodaj prompt do kolejki komórki', group: 'grid', scope: 'cell', default: 'Mod+Shift+D', rebindable: true, blockedInSettings: true },
   // 1.0.9: the cells that wait for you (shared/waiting.ts), longest waiting first, across every grid and window.
+  // 1.1.1: one prompt to several Claude and Codex cells (components/AgentPromptDialog.tsx).
+  { id: 'agents.prompt', label: 'Wyślij prompt do wielu agentów', group: 'grid', scope: 'global', default: 'Mod+Shift+U', rebindable: true },
   { id: 'waiting.next', label: 'Następna komórka, która czeka na Ciebie', group: 'grid', scope: 'global', default: 'Mod+Alt+PageDown', rebindable: true },
   { id: 'waiting.prev', label: 'Poprzednia komórka, która czeka na Ciebie', group: 'grid', scope: 'global', default: 'Mod+Alt+PageUp', rebindable: true },
   // Ctrl+F itself belongs to the program in the terminal (readline: forward one character), so the terminal finds with Shift.
