@@ -1,0 +1,160 @@
+// 1.1.2: the automatic account switch in the limits panel (a header menu and a subtle state line) and the drag handle on
+// the panel's top edge that makes it taller or shorter.
+import { useEffect, useRef, useState, type RefObject } from 'react';
+import { accountKey, autoSwitchOn, autoSwitchStatus, enableAutoSwitch, type AutoSwitchSettings } from '../../../shared/autoSwitch';
+import { updateSettings } from '../../../shared/state';
+import { claudeLoginActions, type ProviderUsage, type UsageProvider } from '../../../shared/usage';
+import { useI18n } from '../i18n';
+import { setUi, update } from '../store';
+import { terminals } from '../terminals/TerminalManager';
+import { openMenuAt, type MenuItem } from './ContextMenu';
+
+type Tr = ReturnType<typeof useI18n>['tr'];
+const NAMES: Record<UsageProvider, string> = { claude: 'Claude', codex: 'Codex' };
+const CHECK = '✓';
+
+/** The accounts of a provider the switch can name (main and saved, with an e-mail or card id), for the menus and settings. */
+export function switchAccounts(providers: ProviderUsage[], provider: UsageProvider): Array<{ key: string; label: string }> {
+  const seen = new Set<string>();
+  return providers.filter((usage) => usage.provider === provider && usage.status !== 'signedOut' && (usage.active || usage.managed)).flatMap((usage) => {
+    const key = accountKey(usage);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ key, label: usage.email || NAMES[provider] }];
+  });
+}
+
+/** Whether the switch has anything to choose from for this provider here (a main and a saved account; Claude not on macOS). */
+export function switchUseful(providers: ProviderUsage[], provider: UsageProvider): boolean {
+  if (provider === 'claude' && !claudeLoginActions(window.mc.platform, true).managedAccounts) return false;
+  return providers.some((u) => u.provider === provider && u.active) && providers.some((u) => u.provider === provider && u.managed && !u.active);
+}
+
+export const setAutoSwitch = (change: (current: AutoSwitchSettings) => AutoSwitchSettings) =>
+  update((st) => updateSettings(st, { accountSwitch: change(st.settings.accountSwitch) }));
+
+/** Settings at the automatic switch's rows (Notifications and sounds section). */
+export const openSwitchSettings = () => setUi({ settingsTabOpen: true, settingsActive: true, settingsSection: { index: 2, focus: 'settings-switch-enabled', seq: Date.now() } });
+
+/** The header menu: on/off, mode, target and primary account per provider, return home and a link to the full settings. */
+export function openAutoSwitchMenu(el: HTMLElement, settings: AutoSwitchSettings, providers: ProviderUsage[], tr: Tr): void {
+  const mark = (on: boolean) => (on ? CHECK : undefined);
+  const items: MenuItem[] = [
+    { label: settings.enabled ? tr('Wyłącz automatyczne przełączanie') : tr('Przełączaj konto Claude automatycznie'), onClick: () => setAutoSwitch((s) => (s.enabled ? { ...s, enabled: false } : enableAutoSwitch(s, providers))) },
+    { header: tr('Gdy jest konto z zapasem') },
+    { label: tr('Zapytaj w powiadomieniu'), hint: mark(settings.mode === 'ask'), disabled: !settings.enabled, onClick: () => setAutoSwitch((s) => ({ ...s, mode: 'ask' })) },
+    { label: tr('Przełącz od razu'), hint: mark(settings.mode === 'switch'), disabled: !settings.enabled, onClick: () => setAutoSwitch((s) => ({ ...s, mode: 'switch' })) },
+  ];
+  for (const provider of ['claude', 'codex'] as const) {
+    if (!switchUseful(providers, provider) || (provider === 'codex' && !settings.codex)) continue;
+    const accounts = switchAccounts(providers, provider);
+    const prefix = provider === 'codex' ? 'Codex: ' : '';
+    items.push({ header: `${prefix}${tr('Przełączaj na')}` });
+    items.push({ label: tr('Konto z największym zapasem'), hint: mark(!settings.target[provider]), disabled: !settings.enabled, onClick: () => setAutoSwitch((s) => { const target = { ...s.target }; delete target[provider]; return { ...s, target }; }) });
+    for (const account of accounts) items.push({ label: account.label, hint: mark(settings.target[provider] === account.key), disabled: !settings.enabled, onClick: () => setAutoSwitch((s) => ({ ...s, target: { ...s.target, [provider]: account.key } })) });
+    items.push({ header: `${prefix}${tr('Konto podstawowe')}` });
+    items.push({ label: tr('Brak'), hint: mark(!settings.primary[provider]), disabled: !settings.enabled, onClick: () => setAutoSwitch((s) => { const primary = { ...s.primary }; delete primary[provider]; return { ...s, primary }; }) });
+    for (const account of accounts) items.push({ label: account.label, hint: mark(settings.primary[provider] === account.key), disabled: !settings.enabled, onClick: () => setAutoSwitch((s) => ({ ...s, primary: { ...s.primary, [provider]: account.key } })) });
+  }
+  items.push({ sep: true });
+  items.push({ label: tr('Wracaj na konto podstawowe po resecie'), hint: mark(settings.returnHome), disabled: !settings.enabled, onClick: () => setAutoSwitch((s) => ({ ...s, returnHome: !s.returnHome })) });
+  if (switchUseful(providers, 'codex')) items.push({ label: tr('Także konta Codex'), hint: mark(settings.codex), disabled: !settings.enabled, onClick: () => setAutoSwitch((s) => ({ ...s, codex: !s.codex })) });
+  items.push({ sep: true });
+  items.push({ label: tr('Ustawienia przełączania (progi)…'), onClick: openSwitchSettings });
+  openMenuAt(el, items);
+}
+
+/** "Auto: wł. · największy zapas · wraca na a@x" under the header, per provider that has something to switch; click: the menu. */
+export function AutoSwitchLine({ settings, providers, away }: { settings: AutoSwitchSettings; providers: ProviderUsage[]; away?: Partial<Record<UsageProvider, string>> }) {
+  const { tr } = useI18n();
+  const lines = (['claude', 'codex'] as const).filter((p) => switchUseful(providers, p) && (p === 'claude' || autoSwitchOn(settings, 'codex')));
+  if (!lines.length) return null;
+  return <>
+    {lines.map((provider) => {
+      const text = autoSwitchStatus(settings, provider, { away: away ?? {} }, tr);
+      const label = lines.length > 1 ? `${NAMES[provider]} ${text}` : text;
+      return <button key={provider} type="button" className={`usage-auto-line ${autoSwitchOn(settings, provider) ? 'on' : ''}`} title={`${tr('Automatyczne przełączanie kont')}: ${label}`}
+        onClick={(e) => openAutoSwitchMenu(e.currentTarget, settings, providers, tr)}>{label}</button>;
+    })}
+  </>;
+}
+
+const HEIGHT_KEY = 'mc-usage-height-v1';
+export const USAGE_MIN_HEIGHT = 80;
+/** The part of the side panel the panel above always keeps. */
+const KEEP_ABOVE = 140;
+
+function readHeight(): number | null {
+  try {
+    const value = Number(localStorage.getItem(HEIGHT_KEY));
+    return Number.isFinite(value) && value >= USAGE_MIN_HEIGHT ? Math.round(value) : null;
+  } catch { return null; }
+}
+
+/** The saved height of the limits panel (null: the CSS default) and its setter (`save` writes it, null resets it). */
+export function useUsageHeight(): [number | null, (height: number | null, save: boolean) => void] {
+  const [height, setHeight] = useState<number | null>(readHeight);
+  const change = (next: number | null, save: boolean) => {
+    setHeight(next);
+    if (!save) return;
+    try { if (next === null) localStorage.removeItem(HEIGHT_KEY); else localStorage.setItem(HEIGHT_KEY, String(next)); } catch { /* not remembered */ }
+  };
+  return [height, change];
+}
+
+/**
+ * The drag handle on the top edge of the limits panel: up makes it taller. Arrow keys (Shift: bigger steps), Home/End;
+ * double-click resets to the default height. The panel above keeps at least KEEP_ABOVE pixels.
+ */
+export function UsageResizeHandle({ panel, onChange }: { panel: RefObject<HTMLElement | null>; onChange: (height: number | null, save: boolean) => void }) {
+  const { tr } = useI18n();
+  const drag = useRef<{ id: number; y: number; start: number; last: number | null; release: () => void } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => () => drag.current?.release(), []);
+  const maxHeight = () => Math.max(USAGE_MIN_HEIGHT, (panel.current?.parentElement?.clientHeight ?? 600) - KEEP_ABOVE);
+  const clamp = (value: number) => Math.round(Math.max(USAGE_MIN_HEIGHT, Math.min(maxHeight(), value)));
+  const current = () => panel.current?.offsetHeight ?? USAGE_MIN_HEIGHT;
+  const finish = () => {
+    const d = drag.current;
+    if (!d) return;
+    drag.current = null;
+    setDragging(false);
+    if (d.last !== null) onChange(d.last, true);
+    setTimeout(d.release, 0);
+  };
+  return <div
+    className={`usage-resize ${dragging ? 'dragging' : ''}`}
+    role="separator"
+    aria-orientation="horizontal"
+    aria-label={tr('Zmień wysokość panelu limitów')}
+    title={tr('Zmień wysokość panelu limitów')}
+    tabIndex={0}
+    onDoubleClick={() => onChange(null, true)}
+    onPointerDown={(e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      drag.current?.release();
+      drag.current = { id: e.pointerId, y: e.clientY, start: current(), last: null, release: terminals.holdFits() };
+      setDragging(true);
+    }}
+    onPointerMove={(e) => {
+      const d = drag.current;
+      if (!d || d.id !== e.pointerId) return;
+      d.last = clamp(d.start - (e.clientY - d.y));
+      onChange(d.last, false);
+    }}
+    onPointerUp={finish}
+    onPointerCancel={finish}
+    onLostPointerCapture={finish}
+    onKeyDown={(e) => {
+      const step = e.shiftKey ? 60 : 20;
+      const next = e.key === 'ArrowUp' ? current() + step : e.key === 'ArrowDown' ? current() - step
+        : e.key === 'Home' ? USAGE_MIN_HEIGHT : e.key === 'End' ? Number.POSITIVE_INFINITY : null;
+      if (next === null) return;
+      e.preventDefault();
+      e.stopPropagation();
+      onChange(clamp(next), true);
+    }}
+  />;
+}

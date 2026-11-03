@@ -2,7 +2,7 @@ import { Select } from './Select';
 import { SettingRow, SettingsGroup } from './SettingRow';
 import { ColorPicker } from './ColorPicker';
 import { ProfileOptions } from './ProfileOptions';
-import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { pickLanguage, useI18n } from '../i18n';
 import { update, useStore } from '../store';
 import { updateSettings, upsertProfile, removeProfile, uid } from '../../../shared/state';
@@ -90,6 +90,14 @@ export function SettingsPage() {
     contentRef.current?.scrollTo({ top: 0 });
   };
   const setSetting = (patch: Partial<typeof settings>) => update((st) => updateSettings(st, patch));
+  // 1.1.2: "Ustawienia przełączania" of the limits panel opens a section here and scrolls to its row.
+  const sectionRequest = useStore((st) => st.ui.settingsSection);
+  useEffect(() => {
+    if (!sectionRequest) return;
+    selectSection(Math.max(0, Math.min(sections.length - 1, sectionRequest.index)));
+    const focus = sectionRequest.focus;
+    if (focus) setTimeout(() => document.getElementById(focus)?.scrollIntoView({ block: 'center' }), 50);
+  }, [sectionRequest?.seq]);
   // While searching, a section may re-render on its own (a list loads, a setting changes) and add rows: the filter runs again
   // on every change of the markup (only childList, so its own data-search-hidden marks do not trigger it).
   useLayoutEffect(() => {

@@ -39,6 +39,9 @@ import { waitAge, waitText } from '../../../shared/waiting';
 import { currentWaiting, revealWaiting, stepToWaiting } from '../waiting';
 import { waitingRowInfo } from './WaitingPanel';
 import { TWaiting } from './icons';
+import { useUsage } from '../usage';
+import { switchToBest } from './UsagePanel';
+import { claudeLoginActions } from '../../../shared/usage';
 
 interface Item {
   kind: string;
@@ -73,6 +76,7 @@ function PaletteInner() {
   const keys = useShortcutText();
   const s = useStore((st) => st.s);
   const cliStatus = useStore((st) => st.ui.cliStatus);
+  const { providers: usageCards } = useUsage();
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -139,6 +143,12 @@ function PaletteInner() {
     }
     // 1.1.1: one prompt to several Claude and Codex cells (every grid and window).
     if (agentTargets(s).length) out.push({ kind: tr('Akcja'), title: tr('Wyślij prompt do wielu agentów…'), icon: <ProviderIcon provider="claude" size={14} />, desc: keys('agents.prompt') || undefined, run: () => openAgentPrompt() });
+    // 1.1.2: switch the main account to the saved one with the most room (Claude needs managed profiles: not on macOS).
+    for (const provider of ['claude', 'codex'] as const) {
+      const supported = provider === 'codex' || claudeLoginActions(window.mc.platform, true).managedAccounts;
+      if (!supported || !usageCards.some((u) => u.provider === provider && u.active) || !usageCards.some((u) => u.provider === provider && u.managed && !u.active)) continue;
+      out.push({ kind: tr('Akcja'), title: tr('{provider}: przełącz na konto z największym zapasem', { provider: provider === 'claude' ? 'Claude' : 'Codex' }), icon: <ProviderIcon provider={provider} size={14} />, run: () => void switchToBest(provider, tr) });
+    }
     out.push({ kind: tr('Akcja'), title: tr('Szukaj w rozmowach Claude i Codex…'), icon: <IHistory />, desc: keys('conversations.search') || undefined, run: () => setUi({ modal: { kind: 'conversations' } }) });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj snippety"), icon: <ISnippet />, desc: keys('snippets.toggle') || undefined, run: () => update((st) => ({ ...st, snippetsOpen: !st.snippetsOpen })) });
     out.push({ kind: tr('Akcja'), title: tr("Pokaż / ukryj notatki"), icon: <INoteBlank />, desc: keys('notes.toggle') || undefined, run: () => update((st) => ({ ...st, notesOpen: !st.notesOpen })) });
@@ -199,7 +209,7 @@ function PaletteInner() {
         out.push({ kind: x.cli, title: x.title, desc: tr("wznów w nowej zakładce · Shift: w nowej komórce"), run: (shift) => resumeSession(x, shift ? 'newCell' : 'newTab') });
     }
     return out;
-  }, [s, sessions, project, tr, cliStatus, keys]);
+  }, [s, sessions, project, tr, cliStatus, keys, usageCards]);
 
   // Only a new query or new items filter again; moving the highlight (mouse, arrows) just re-renders the list.
   // 1.0.7: strict matching (word starts and contiguous runs, the title first), no scattered single letters.

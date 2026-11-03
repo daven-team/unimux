@@ -84,14 +84,21 @@ import { readManagedIdentity } from './accounts/identity';
 import { migrateAccounts, type MigrationDeps } from './accounts/migrate';
 import { LoginManager } from './auth/login';
 import { identityRewritten, restoreProfile, snapshotProfile } from './auth/profileSnapshot';
-import { custodyOf, identityFields, type AccountIdentity, type LoginRequest } from '../shared/accounts';
+import { custodyOf, identityFields, type AccountIdentity, type LoginRequest, type SwapResult } from '../shared/accounts';
 import { claudeCredentialsStamp, profileSource, readClaudeCredentials, readClaudeIdentity, readCodexCredentials, readLiveClaudeIdentity, systemCredentialSource } from './usage/credentials';
 import { fetchClaude, fetchCodex, type FetcherDeps } from './usage/fetchers';
 import { UsageService } from './usage/service';
 import { LimitAlerter } from './limitAlerts';
 import { limitNoticeText, type LimitNotice } from '../shared/limitAlerts';
 import type { AlertSettings } from '../shared/alerts';
-import { MAIN_ACCOUNTS } from '../shared/usage';
+import { MAIN_ACCOUNTS, type AccountRef } from '../shared/usage';
+import { CodexAccountsStore } from './accounts/codexStore';
+import { activateCodexAccount, checkCodexTarget, isCodexSwapRunning, readLiveCodexIdentity, reconcileCodexLive, type CodexActivateDeps } from './accounts/codexActivate';
+import { CodexLoginManager } from './auth/codexLogin';
+import { codexIdentityKey, compareCodexIdentity, isCodexAccountId, type CodexIdentity } from '../shared/codexAccounts';
+import { AutoSwitcher } from './autoSwitch';
+import { autoSwitchOn, autoSwitchText, type SwitchNotice } from '../shared/autoSwitch';
+import { codexProfileSource } from './usage/credentials';
 import type { UpdateStrings } from '../shared/updateProgress';
 import { createWorktree, currentBranch, inspectWorktree, isGitRepo, removeWorktree } from './worktree';
 import { StateController } from './stateController';
@@ -283,6 +290,21 @@ const refreshLimits = createRefreshLimits(join(DATA_DIR, 'refresh-limits.json'))
 const tokenFetch = createTokenFetch(usageDeps.fetch);
 const renewProfile = (dir: string) => refreshClaudeProfile(dir, { fetch: tokenFetch, now: usageDeps.now, limits: refreshLimits, userAgent: `unimux/${app.getVersion()}`, tokenUrl: app.isPackaged ? undefined : process.env.MC_USAGE_CLAUDE_TOKEN_URL });
 const accounts = new AccountsStore(join(DATA_DIR, 'accounts'));
+/** 1.1.2: the saved Codex accounts (their own CODEX_HOME profiles) and who is in the live Codex login. */
+const codexAccounts = new CodexAccountsStore(join(DATA_DIR, 'codex-accounts'));
+const codexActivateDeps = (): CodexActivateDeps => ({ store: codexAccounts, liveHome: () => usageDeps.codexHome(), now: () => Date.now() });
+let codexLive: CodexIdentity | null = readLiveCodexIdentity(codexActivateDeps());
+/** The live Codex card and every saved Codex account that is not the live one (its numbers are on the live card). */
+function codexRefs(): AccountRef[] {
+  const records = codexAccounts.list();
+  const liveKey = codexLive ? codexIdentityKey(codexLive) : undefined;
+  const main: AccountRef = { ...MAIN_ACCOUNTS[1], ...(liveKey ? { key: liveKey } : {}), ...(records.length ? { active: true } : {}) };
+  const saved = records.filter((record) => !(codexLive && compareCodexIdentity(record, codexLive) === 'same')).map((record): AccountRef => {
+    const key = codexIdentityKey(record);
+    return { id: `codex:${record.id}`, provider: 'codex', configDir: codexAccounts.dirOf(record.id), ...(key ? { key } : {}), ...(record.outdated ? { renew: 'switched-out' as const } : {}) };
+  });
+  return [main, ...saved];
+}
 /** cswap's roster, read before every poll (R6); `{ present: false }` without cswap. */
 let cswapRoster: CswapRoster = { present: false };
 /** How long a poll waits for the retry of failed profile restores before it reads the accounts. */
@@ -290,9 +312,9 @@ const PARKED_RESTORE_WAIT_MS = 2_000;
 const usage = new UsageService({
   accounts: () => [
     ...claudeRefs({ records: accounts.list(), dirOf: (id) => accounts.dirOf(id), live: accounts.live(), cswap: cswapRoster, platform: process.platform }),
-    MAIN_ACCOUNTS[1],
+    ...codexRefs(),
   ],
-  fetchAccount: (ref) => (ref.provider === 'claude' ? fetchClaude(usageDeps, ref) : fetchCodex(usageDeps)),
+  fetchAccount: (ref) => (ref.provider === 'claude' ? fetchClaude(usageDeps, ref) : fetchCodex(usageDeps, ref)),
   cacheFile: join(DATA_DIR, 'usage-cache.json'),
   credentialsStamp: (ref) => (ref.provider === 'claude' && !ref.configDir ? claudeCredentialsStamp(usageDeps.credentials) : Promise.resolve(null)),
   enabled: () => state.settings.showAiUsage,
@@ -300,6 +322,8 @@ const usage = new UsageService({
   // Every poll first looks at who is signed in to Claude Code (cswap switch, /login); never while a swap or a login runs.
   // The swap slot is held meanwhile, so a "Set as main" or a recovery can never interleave with the role changes.
   beforeRun: async () => {
+    // Who is in the live Codex login (an outside switch marks the copy that left as possibly outdated); never during a Codex swap.
+    if (!isCodexSwapRunning()) codexLive = reconcileCodexLive(codexActivateDeps());
     cswapRoster = await readCswapRoster(cswapRosterPath(homedir(), process.env, process.platform));
     // An activation whose recovery found Claude Code's locks busy is retried first; the live login is not reconciled while
     // its journal exists (the live files may be half written).
@@ -317,12 +341,17 @@ const usage = new UsageService({
   watchLive: true,
   notices: () => panelNotices(accounts.notices()),
   // An unreadable accounts.json is explained in the panel; set-aside cards are listed with what to do about them.
-  accountsInfo: () => (accounts.readOnly()
-    ? { accountsReadOnly: join(DATA_DIR, 'accounts', 'accounts.json') }
-    : accountsPanelInfo(accounts.list(), login.parkedIds())),
+  // 1.1.2: with the offer of an automatic switch the user is asked about.
+  accountsInfo: () => ({
+    ...(accounts.readOnly()
+      ? { accountsReadOnly: join(DATA_DIR, 'accounts', 'accounts.json') }
+      : accountsPanelInfo(accounts.list(), login.parkedIds())),
+    switchOffer: autoSwitch.currentOffer() ?? undefined,
+    switchAway: autoSwitch.away(),
+  }),
   liveEmail: () => accounts.live()?.email,
   // Limit warnings must also come while the window is minimized or in the tray: the poll then goes on at its interval.
-  pollHidden: () => limitPollingWanted(state.settings.alerts),
+  pollHidden: () => limitPollingWanted(state.settings.alerts) || autoSwitchOn(state.settings.accountSwitch, 'claude') || autoSwitchOn(state.settings.accountSwitch, 'codex'),
 });
 /** Whether any limit warning can be raised, so polling continues while the window is hidden. */
 function limitPollingWanted(alerts: AlertSettings): boolean {
@@ -336,6 +365,33 @@ const limitAlerts = new LimitAlerter({
   show: (notice) => showLimitNotice(notice),
 });
 usage.onChange((snapshot) => limitAlerts.onState(snapshot.providers));
+/** A card id (`claude:<record>` / `codex:<record>`) to its record id. */
+const recordOfCard = (cardId: string): string => cardId.replace(/^(claude|codex):/, '');
+/** Anything that changes the account files runs or is unresolved: no automatic switch now. */
+const accountWorkBusy = (): boolean => isSwapRunning() || isCodexSwapRunning() || login.isActive() || codexLogin.isActive() || isSwapUnresolved() || isActivationRecoveryPending() || quitting;
+/**
+ * 1.1.2: the automatic switch at a limit (Claude; Codex when chosen). It uses the same "make main" as the card's menu, with
+ * the family rules checked again right before; running Claude cells keep their process (Claude Code reads the new login on
+ * its next request), Codex cells pick it up when they renew their token or are restarted.
+ */
+const autoSwitch: AutoSwitcher = new AutoSwitcher({
+  file: join(DATA_DIR, 'auto-switch.json'),
+  settings: () => state.settings.accountSwitch,
+  providers: () => usage.getState().providers,
+  // Claude profiles need files for the live login (macOS keeps it in the Keychain).
+  supported: (provider) => provider === 'codex' || process.platform !== 'darwin',
+  busy: accountWorkBusy,
+  validate: async (provider, cardId) => {
+    const id = recordOfCard(cardId);
+    if (provider === 'codex') return isCodexAccountId(id) ? checkCodexTarget(codexActivateDeps(), id) : { ok: false, error: 'invalid' };
+    if (await hasPendingSwap(swapDeps()).catch(() => true)) return { ok: false, error: 'pending' };
+    return checkActivationTarget(activateDeps(), id);
+  },
+  swap: (provider, cardId) => (provider === 'codex' ? makeMainCodex(recordOfCard(cardId)) : makeMainClaude(recordOfCard(cardId))),
+  notify: (event) => showSwitchNotice(event),
+  changed: () => send('usage:state', usage.getState()),
+});
+usage.onChange((snapshot) => { void autoSwitch.onState(snapshot.providers).catch(() => undefined); });
 /** Finds Claude Code / Codex even when the app's own PATH lacks them (GUI launch on macOS, installer run after start on Windows). */
 const cliDetector = new CliDetector(systemCliDeps({
   disableRegistry: !app.isPackaged && process.env.MC_CLI_NO_REGISTRY === '1',
@@ -422,6 +478,53 @@ const login = new LoginManager({
   profilesSupported: process.platform !== 'darwin',
   swapRunning: isSwapRunning,
 });
+/** 1.1.2: "Dodaj konto Codex" / signing a saved Codex card in again: `codex login` in that account's own CODEX_HOME. */
+const codexLogin = new CodexLoginManager({
+  store: codexAccounts,
+  spawnPty: (spec) => ptyHost.spawn({
+    id: spec.id, cwd: homedir(), cols: 100, rows: 28,
+    env: { ...cleanEnv(process.env), ...spec.env }, shell: state.settings.shell, command: spec.command,
+  }),
+  killPty: (id) => ptyHost.kill(id),
+  fingerprint: async (dir) => {
+    const credentials = await readCodexCredentials(codexProfileSource(usageDeps.credentials, dir));
+    return credentials?.accessToken ? sha256(credentials.accessToken) : null;
+  },
+  identity: async (dir) => {
+    const credentials = await readCodexCredentials(codexProfileSource(usageDeps.credentials, dir));
+    if (!credentials || credentials.mode !== 'chatgpt') return null;
+    return { ...(credentials.email ? { email: credentials.email } : {}), ...(credentials.userId ? { userId: credentials.userId } : {}), ...(credentials.accountId ? { accountId: credentials.accountId } : {}) };
+  },
+  liveIdentity: () => readLiveCodexIdentity(codexActivateDeps()),
+  readAuth: async (dir) => { try { return readFileSync(join(dir, 'auth.json'), 'utf8'); } catch { return null; } },
+  restoreAuth: async (dir, raw) => {
+    if (raw === null) rmSync(join(dir, 'auth.json'), { force: true });
+    else atomicWriteFileSync(join(dir, 'auth.json'), raw, { mode: 0o600 });
+  },
+  busy: () => isSwapRunning() || isCodexSwapRunning(),
+  emit: (s) => send('auth:state', s),
+  onChanged: (recordId) => { void usage.refresh(true, true, `codex:${recordId}`); },
+});
+/** "Make main" of a saved Claude account (the card's menu, an offer and the automatic switch share it). */
+async function makeMainClaude(id: unknown): Promise<SwapResult> {
+  const result = await handleMakeMain({
+    loginActive: () => login.isActive() || codexLogin.isActive(),
+    validate: (accountId) => checkActivationTarget(activateDeps(), accountId),
+    swap: (accountId) => activateAccount(activateDeps(), accountId),
+    onSwapped: () => { if (typeof id === 'string') void usage.refresh(true, true, `claude:${id}`); },
+  }, id);
+  void pushSwapPending();
+  return result;
+}
+/** 1.1.2: "make main" of a saved Codex account: its auth.json goes into the live CODEX_HOME, the outgoing login into its record. */
+async function makeMainCodex(id: unknown): Promise<SwapResult> {
+  if (!isCodexAccountId(id)) return { ok: false, error: 'invalid' };
+  if (login.isActive() || codexLogin.isActive()) return { ok: false, error: 'busy' };
+  const result = await activateCodexAccount(codexActivateDeps(), id).catch((): SwapResult => ({ ok: false, error: 'write' }));
+  codexLive = readLiveCodexIdentity(codexActivateDeps());
+  if (result.ok) void usage.refresh(true, true);
+  return result;
+}
 const swapDeps = (): SwapDeps => ({
   home: homedir(),
   env: process.env,
@@ -1572,6 +1675,33 @@ function showLimitNotice(notice: LimitNotice): void {
   });
   notification.show();
 }
+/**
+ * 1.1.2: what the automatic switch did or offers. An offer has a "Przełącz na X" button (Windows and macOS); a click on any
+ * of them opens the limits panel, which shows the offer too.
+ */
+function showSwitchNotice(event: SwitchNotice): void {
+  if (!Notification.isSupported()) return;
+  const language = state.settings.language ?? detectLanguage([app.getLocale()]);
+  const text = autoSwitchText(event, tr, language, Date.now());
+  const toName = (event.toEmail || (event.provider === 'claude' ? 'Claude' : 'Codex')).slice(0, 60);
+  const buttons = (event.kind === 'offer' || event.kind === 'returnOffer') && (process.platform === 'win32' || process.platform === 'darwin') ? [{ type: 'button' as const, text: tr('Przełącz na {to}', { to: toName }) }] : [];
+  const notification = new Notification({ ...notificationOptions(text), ...(buttons.length ? { actions: buttons } : {}) });
+  notifications.add(notification);
+  trimNotifications(notifications);
+  const forget = () => notifications.delete(notification);
+  const openPanel = () => { showCell(undefined); send('usage:open'); };
+  notification.on('close', forget);
+  notification.on('failed', forget);
+  notification.on('click', () => { forget(); openPanel(); });
+  notification.on('action', () => {
+    forget();
+    void autoSwitch.acceptOffer().then((result) => {
+      if (result.ok) showSwitchNotice({ kind: event.kind === 'returnOffer' ? 'returned' : 'switched', provider: event.provider, fromEmail: event.fromEmail, toEmail: result.email ?? event.toEmail, window: event.window, percent: event.percent });
+      else { openPanel(); showSwitchNotice({ kind: 'failed', provider: event.provider, toEmail: event.toEmail }); }
+    }).catch(() => undefined);
+  });
+  notification.show();
+}
 /** The "Test" button of the limit warnings: a sample warning for the first account with an e-mail. */
 guardedOn('alerts:testLimit', () => {
   const account = usage.getState().providers.find((p) => p.email && p.status !== 'signedOut');
@@ -1647,9 +1777,17 @@ registerAccountIpc(ipcMain, {
   refreshUsage: () => usage.refreshNow(),
   startLogin: (request) => {
     if (typeof request !== 'object' || request === null || Array.isArray(request)) return { ok: false, error: 'invalid request' };
+    // 1.1.2: a saved Codex account (new or signed in again) logs in into its own profile, never into ~/.codex.
+    const { provider, target } = request as { provider?: unknown; target?: { type?: unknown } };
+    if (provider === 'codex' && target && typeof target === 'object' && target.type !== 'main') {
+      if (isSwapRunning() || isCodexSwapRunning()) return { ok: false, error: 'busy' };
+      if (login.isActive()) login.dispose();
+      return codexLogin.start(target);
+    }
+    if (codexLogin.isActive()) codexLogin.dispose();
     return loginBlock(guardDeps, request).then((block) => (block ? { ok: false as const, error: block } : login.start(request as LoginRequest)));
   },
-  cancelLogin: (id) => { if (typeof id === 'string') login.cancel(id); },
+  cancelLogin: (id) => { if (typeof id === 'string') { login.cancel(id); codexLogin.cancel(id); } },
   removeAccount: (id) => handleRemoveAccount({
     ...guardDeps,
     isLive: (accountId) => accounts.live()?.recordId === accountId || custodyOf(accounts.get(accountId) ?? {}) === 'live',
@@ -1657,16 +1795,7 @@ registerAccountIpc(ipcMain, {
     remove: (accountId) => accounts.remove(accountId),
     onRemoved: () => { void usage.refresh(true, true); },
   }, id),
-  makeMain: async (id) => {
-    const result = await handleMakeMain({
-      loginActive: () => login.isActive(),
-      validate: (accountId) => checkActivationTarget(activateDeps(), accountId),
-      swap: (accountId) => activateAccount(activateDeps(), accountId),
-      onSwapped: () => { if (typeof id === 'string') void usage.refresh(true, true, `claude:${id}`); },
-    }, id);
-    void pushSwapPending();
-    return result;
-  },
+  makeMain: (id) => makeMainClaude(id),
   /** "Renew this copy in unimux": the user confirmed that a saved copy cswap also lists is the app's own login. */
   adoptCopy: (id) => handleAdoptCopy({
     ...guardDeps,
@@ -1692,6 +1821,25 @@ registerAccountIpc(ipcMain, {
     } finally {
       send('usage:state', usage.getState());
     }
+  },
+  // `{ provider, to? }`: `to` is an account key (e-mail) the user picked; without it the account with the most room.
+  switchBest: (payload) => {
+    const { provider, to } = (payload && typeof payload === 'object' ? payload : {}) as { provider?: unknown; to?: unknown };
+    if (provider !== 'claude' && provider !== 'codex') return { ok: false, error: 'invalid' };
+    return autoSwitch.switchNow(provider, typeof to === 'string' && to.length <= 160 ? to.toLowerCase() : undefined);
+  },
+  acceptSwitch: () => autoSwitch.acceptOffer(),
+  dismissSwitch: () => { autoSwitch.dismissOffer(); },
+  makeMainCodex: (id) => makeMainCodex(id),
+  removeCodex: (id) => {
+    if (!isCodexAccountId(id) || !codexAccounts.get(id)) return { ok: false };
+    if (isCodexSwapRunning()) return { ok: false, error: 'busy' };
+    try {
+      codexLogin.cancelFor(id);
+      codexAccounts.remove(id);
+    } catch { return { ok: false, error: 'readOnly' }; }
+    void usage.refresh(true, true);
+    return { ok: true };
   },
 }, fromAppWindow, accountsReady.promise, () => quitting);
 usage.onChange((snapshot) => send('usage:state', snapshot));

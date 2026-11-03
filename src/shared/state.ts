@@ -9,6 +9,7 @@ import { normalizePathMode } from './pathDrop';
 import { defaultAutomation, pruneAutomation } from './automation';
 import { USAGE_INTERVALS_MINUTES } from './usage';
 import { defaultAlerts, LEGACY_ALERT_KEYS, readAlerts } from './alerts';
+import { defaultAutoSwitch, normalizeAutoSwitch } from './autoSwitch';
 import { DEFAULT_UPDATE_MODE, normalizeUpdateMode } from './updateMode';
 import { DEFAULT_BACKGROUND_LOAD, normalizeBackgroundLoad } from './backgroundLoad';
 import { DEFAULT_SCROLLBACK_LINES, normalizeScrollback } from './terminalLimits';
@@ -50,7 +51,7 @@ export function defaultState(platform: AppPlatform = 'win32'): AppState {
     sftp: defaultSftpPlaces(),
     dbConnections: [],
     dbGroupColors: {},
-    settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true, scrollbackLines: DEFAULT_SCROLLBACK_LINES, sshTheme: DEFAULT_SSH_THEME, stripScope: DEFAULT_STRIP_SCOPE },
+    settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), accountSwitch: defaultAutoSwitch(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true, scrollbackLines: DEFAULT_SCROLLBACK_LINES, sshTheme: DEFAULT_SSH_THEME, stripScope: DEFAULT_STRIP_SCOPE },
     sidebarCollapsed: false,
     snippetsOpen: true,
     notesOpen: false,
@@ -525,6 +526,7 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
       shortcuts: normalizeShortcutOverrides(r.settings?.shortcuts, platform),
       // The retired notifications / waitingSound* keys only seed the alerts when none are saved yet; they are never written again.
       alerts: readAlerts(r.settings as Record<string, unknown> | undefined),
+      accountSwitch: normalizeAutoSwitch(r.settings?.accountSwitch),
     },
     // A damaged project (no id or path) or tab is dropped or repaired on its own instead of rejecting the whole file.
     projects: (r.projects as unknown[]).filter((p): p is Project => isRecord(p) && typeof p.id === 'string' && typeof p.path === 'string').map((p) => ({

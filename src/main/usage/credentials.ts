@@ -177,6 +177,15 @@ export interface CodexCredentials {
   expiresAt?: number;
   plan?: string;
   email?: string;
+  /** 1.1.2: the ChatGPT user (`chatgpt_user_id`), which tells two accounts of one workspace apart. */
+  userId?: string;
+  /** A refresh token is present (Codex renews the access token on its next use when this login is the live one). */
+  hasRefresh?: boolean;
+}
+
+/** 1.1.2: the same source seen through a Codex profile directory (its own CODEX_HOME). */
+export function codexProfileSource(source: CredentialSource, dir: string): CredentialSource {
+  return { ...source, env: { ...source.env, CODEX_HOME: dir } };
 }
 
 export async function readCodexCredentials(source: CredentialSource): Promise<CodexCredentials | null> {
@@ -193,6 +202,7 @@ export async function readCodexCredentials(source: CredentialSource): Promise<Co
   const accessClaims = decodeJwtClaims(accessToken);
   const authClaim = idClaims?.['https://api.openai.com/auth'] ?? accessClaims?.['https://api.openai.com/auth'];
   const plan = isRecord(authClaim) && typeof authClaim.chatgpt_plan_type === 'string' ? authClaim.chatgpt_plan_type : undefined;
+  const userId = isRecord(authClaim) ? [authClaim.chatgpt_user_id, authClaim.user_id].find((v): v is string => typeof v === 'string' && !!v) : undefined;
   return {
     mode: 'chatgpt',
     accessToken,
@@ -200,5 +210,7 @@ export async function readCodexCredentials(source: CredentialSource): Promise<Co
     expiresAt: typeof accessClaims?.exp === 'number' ? accessClaims.exp * 1000 : undefined,
     plan,
     email: typeof idClaims?.email === 'string' ? idClaims.email : undefined,
+    ...(userId ? { userId } : {}),
+    ...(typeof tokens.refresh_token === 'string' && tokens.refresh_token ? { hasRefresh: true } : {}),
   };
 }

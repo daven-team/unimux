@@ -10,7 +10,7 @@ const FOREIGN = { sender: 'login-window' };
 function setup(ready?: Promise<unknown>, stopped?: () => boolean) {
   const calls: string[] = [];
   const usage = { claude: [], codex: [] };
-  const handlers = Object.fromEntries((['getUsage', 'refreshUsage', 'startLogin', 'cancelLogin', 'removeAccount', 'makeMain', 'adoptCopy', 'swapPending', 'clearSwapPending', 'dismissNotice'] as const)
+  const handlers = Object.fromEntries((['getUsage', 'refreshUsage', 'startLogin', 'cancelLogin', 'removeAccount', 'makeMain', 'adoptCopy', 'swapPending', 'clearSwapPending', 'dismissNotice', 'switchBest', 'acceptSwitch', 'dismissSwitch', 'makeMainCodex', 'removeCodex'] as const)
     .map((name) => [name, (payload?: unknown) => { calls.push(`${name}:${String(payload)}`); return name === 'getUsage' ? usage : { ok: true }; }])) as unknown as AccountIpcHandlers;
   const invokes = new Map<string, (event: { sender: unknown }, payload?: unknown) => unknown>();
   const sends = new Map<string, (event: { sender: unknown }, payload?: unknown) => void>();

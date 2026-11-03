@@ -3,6 +3,10 @@ import { SettingRow, SettingsGroup } from './SettingRow';
 import { useEffect, useRef, useState } from 'react';
 import { ALERT_EVENTS, isTime, LIMIT_PERCENTS, normalizeVolume, type AlertEventId, type AlertSettings, type LimitAlertSettings, type SoundChoice } from '../../../shared/alerts';
 import { SOUND_PRESETS, getPreset } from '../../../shared/soundPresets';
+import { AUTO_SWITCH_COOLDOWNS, AUTO_SWITCH_PERCENTS, enableAutoSwitch, type AutoSwitchSettings } from '../../../shared/autoSwitch';
+import type { UsageProvider } from '../../../shared/usage';
+import { useUsage } from '../usage';
+import { switchAccounts } from './UsageAutoSwitch';
 import { updateSettings } from '../../../shared/state';
 import type { MessageKey } from '../../../shared/i18n';
 import { previewVolume, testAlert } from '../alerts';
@@ -86,6 +90,34 @@ export function AlertsSettings() {
       <input id={`settings-limit-${id}`} className="setting-switch" type="checkbox" role="switch" checked={config.enabled} disabled={!limits.enabled} onChange={(e) => setLimits({ [id]: { ...config, enabled: e.target.checked } })} />
     </SettingRow>;
   };
+  // 1.1.2: the automatic switch of the main account (its own settings key; not silenced by the alerts master switch).
+  const autoSwitch = useStore((st) => st.s.settings.accountSwitch);
+  const setAutoSwitch = (patch: Partial<AutoSwitchSettings>) => update((st) => updateSettings(st, { accountSwitch: { ...st.settings.accountSwitch, ...patch } }));
+  const switchWindow = (id: 'fiveHour' | 'sevenDay', title: string) => {
+    const config = autoSwitch[id];
+    const percents = AUTO_SWITCH_PERCENTS.includes(config.percent) ? AUTO_SWITCH_PERCENTS : [...AUTO_SWITCH_PERCENTS, config.percent].sort((a, b) => a - b);
+    return <SettingRow title={title} htmlFor={`settings-switch-${id}`}>
+      <Select id={`settings-switch-${id}-percent`} className="select alert-limit-percent" aria-label={tr('Próg: {window}', { window: title })} value={String(config.percent)} disabled={!autoSwitch.enabled || !config.enabled}
+        onChange={(e) => setAutoSwitch({ [id]: { ...config, percent: Number(e.target.value) } })}>
+        {percents.map((percent) => <option key={percent} value={String(percent)}>{tr('od {percent}%', { percent })}</option>)}
+      </Select>
+      <input id={`settings-switch-${id}`} className="setting-switch" type="checkbox" role="switch" checked={config.enabled} disabled={!autoSwitch.enabled} onChange={(e) => setAutoSwitch({ [id]: { ...config, enabled: e.target.checked } })} />
+    </SettingRow>;
+  };
+  const { providers: usageCards } = useUsage();
+  /** "Przełączaj na" and "Konto podstawowe" of one provider: the accounts the panel knows (the saved choice stays listed). */
+  const accountSelect = (provider: UsageProvider, field: 'target' | 'primary', title: string, none: string) => {
+    const accounts = switchAccounts(usageCards, provider);
+    const value = autoSwitch[field][provider] ?? '';
+    const listed = value && !accounts.some((a) => a.key === value) ? [...accounts, { key: value, label: value }] : accounts;
+    return <SettingRow title={title} htmlFor={`settings-switch-${field}-${provider}`}>
+      <Select id={`settings-switch-${field}-${provider}`} className="select" value={value} disabled={!autoSwitch.enabled}
+        onChange={(e) => setAutoSwitch({ [field]: { ...autoSwitch[field], [provider]: e.target.value || undefined } })}>
+        <option value="">{none}</option>
+        {listed.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
+      </Select>
+    </SettingRow>;
+  };
   const quiet = alerts.quietHours;
   const setQuiet = (patch: Partial<typeof quiet>) => setAlerts((a) => ({ ...a, quietHours: { ...a.quietHours, ...patch } }));
 
@@ -136,6 +168,36 @@ export function AlertsSettings() {
         <input id="settings-limits-resets" className="setting-switch" type="checkbox" role="switch" checked={limits.resets} disabled={!limits.enabled} onChange={(e) => setLimits({ resets: e.target.checked })} />
       </SettingRow>
     </SettingsGroup>
+    </fieldset>
+    <SettingsGroup title={tr('Automatyczne przełączanie kont')} description={tr('Gdy konto główne przekroczy próg, aplikacja przełącza na wybrane konto albo na zapisane konto z największym zapasem (przy równym zapasie - z najwcześniejszym resetem): tylko z ważnym logowaniem, poniżej progów i takie, którego zasady cswap nie blokują. Nigdy w trakcie zamiany ani logowania, najwyżej raz na wybrany czas i nigdy z powrotem na konto opuszczone z powodu limitu przed jego resetem. Gdy żadne konto nie ma zapasu, konto główne zostaje, a aplikacja powie o tym raz. Otwarte sesje Claude działają dalej i przejmują nowe logowanie przy następnej wiadomości.')}>
+      <SettingRow title={tr('Przełączaj konto Claude automatycznie')} htmlFor="settings-switch-enabled" hint={showAiUsage ? undefined : tr('Działa tylko przy włączonym panelu limitów kont AI.')}>
+        <input id="settings-switch-enabled" className="setting-switch" type="checkbox" role="switch" checked={autoSwitch.enabled} onChange={(e) => update((st) => updateSettings(st, { accountSwitch: e.target.checked ? enableAutoSwitch(st.settings.accountSwitch, usageCards) : { ...st.settings.accountSwitch, enabled: false } }))} />
+      </SettingRow>
+      {switchWindow('fiveHour', tr('Limit 5-godzinny'))}
+      {switchWindow('sevenDay', tr('Limit 7-dniowy'))}
+      <SettingRow title={tr('Gdy jest konto z zapasem')} htmlFor="settings-switch-mode">
+        <Select id="settings-switch-mode" className="select" value={autoSwitch.mode} disabled={!autoSwitch.enabled} onChange={(e) => setAutoSwitch({ mode: e.target.value === 'switch' ? 'switch' : 'ask' })}>
+          <option value="ask">{tr('Zapytaj w powiadomieniu')}</option>
+          <option value="switch">{tr('Przełącz od razu')}</option>
+        </Select>
+      </SettingRow>
+      {accountSelect('claude', 'target', tr('Przełączaj na'), tr('Konto z największym zapasem'))}
+      {accountSelect('claude', 'primary', tr('Konto podstawowe'), tr('Brak'))}
+      <SettingRow title={tr('Wracaj na konto podstawowe po resecie')} htmlFor="settings-switch-return" hint={tr('Gdy konto podstawowe opuszczone z powodu limitu znowu jest poniżej progów po swoim resecie.')}>
+        <input id="settings-switch-return" className="setting-switch" type="checkbox" role="switch" checked={autoSwitch.returnHome} disabled={!autoSwitch.enabled} onChange={(e) => setAutoSwitch({ returnHome: e.target.checked })} />
+      </SettingRow>
+      <SettingRow title={tr('Najwyżej jedno przełączenie na')} htmlFor="settings-switch-cooldown">
+        <Select id="settings-switch-cooldown" className="select" value={String(autoSwitch.cooldownMinutes)} disabled={!autoSwitch.enabled} onChange={(e) => setAutoSwitch({ cooldownMinutes: Number(e.target.value) })}>
+          {AUTO_SWITCH_COOLDOWNS.map((minutes) => <option key={minutes} value={String(minutes)}>{tr('{minutes} min', { minutes })}</option>)}
+        </Select>
+      </SettingRow>
+      <SettingRow title={tr('Także konta Codex')} htmlFor="settings-switch-codex" hint={tr('Konta Codex zapisane w aplikacji. Otwarte sesje Codex mogą korzystać z poprzedniego konta, dopóki nie uruchomisz ich ponownie.')}>
+        <input id="settings-switch-codex" className="setting-switch" type="checkbox" role="switch" checked={autoSwitch.codex} disabled={!autoSwitch.enabled} onChange={(e) => setAutoSwitch({ codex: e.target.checked })} />
+      </SettingRow>
+      {autoSwitch.codex && accountSelect('codex', 'target', `Codex: ${tr('Przełączaj na')}`, tr('Konto z największym zapasem'))}
+      {autoSwitch.codex && accountSelect('codex', 'primary', `Codex: ${tr('Konto podstawowe')}`, tr('Brak'))}
+    </SettingsGroup>
+    <fieldset className="alert-fieldset" disabled={!alerts.enabled}>
     <SettingsGroup title={tr('Ogólne')}>
       <SettingRow title={tr('Głośność')} htmlFor="settings-alert-volume">
         <input id="settings-alert-volume" type="range" min={0} max={100} value={volumePercent} aria-valuetext={`${volumePercent}%`}

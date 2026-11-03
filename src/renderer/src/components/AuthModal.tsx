@@ -81,7 +81,7 @@ export function AuthModal({ provider, target }: { provider: 'claude' | 'codex'; 
   }, [status]);
 
   const title = provider === 'codex'
-    ? tr('Zaloguj się do Codex')
+    ? target.type === 'new' ? tr('Dodaj konto Codex') : tr('Zaloguj się do Codex')
     : target.type === 'new' ? tr('Dodaj konto Claude') : target.type === 'main' && !hadMain ? tr('Zaloguj się do Claude') : tr('Zaloguj ponownie do Claude');
   const email = current?.email ?? '';
   const waiting = status === 'waiting';
@@ -126,7 +126,7 @@ export function AuthModal({ provider, target }: { provider: 'claude' | 'codex'; 
         <span>{line}</span>
       </div>
       <div className="modal-foot">
-        {status === 'mismatch' && !!current?.expected && <button className="btn primary" onClick={() => setUi({ modal: { kind: 'auth', provider: 'claude', target: { type: 'new' } } })}>{tr('Dodaj jako nowe konto')}</button>}
+        {status === 'mismatch' && !!current?.expected && <button className="btn primary" onClick={() => setUi({ modal: { kind: 'auth', provider, target: { type: 'new' } } })}>{tr('Dodaj jako nowe konto')}</button>}
         <button className="btn" onClick={closeModal}>{waiting ? tr('Anuluj') : tr('Zamknij')}</button>
       </div>
     </div>
