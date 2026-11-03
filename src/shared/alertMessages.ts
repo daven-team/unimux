@@ -59,8 +59,6 @@ export const alertMessages = {
   // 1.0.9: buttons of a permission notification, the taskbar button and the Dock icon.
   'Zezwól': ['Allow', 'Erlauben', 'Permitir', 'Autoriser', 'Permitir'],
   'Odrzuć': ['Deny', 'Ablehnen', 'Rechazar', 'Refuser', 'Recusar'],
-  'Agenci czekający na Ciebie: {count}': ['Agents waiting for you: {count}', 'Agenten, die auf dich warten: {count}', 'Agentes que te esperan: {count}', 'Agents qui vous attendent : {count}', 'Agentes à sua espera: {count}'],
-  'Ponad 9 agentów czeka na Ciebie': ['More than 9 agents are waiting for you', 'Mehr als 9 Agenten warten auf dich', 'Más de 9 agentes te esperan', 'Plus de 9 agents vous attendent', 'Mais de 9 agentes estão à sua espera'],
   'Przyciski w powiadomieniach o zgodę': ['Buttons in permission notifications', 'Schaltflächen in Berechtigungsbenachrichtigungen', 'Botones en las notificaciones de permiso', 'Boutons dans les notifications d’autorisation', 'Botões nas notificações de permissão'],
   'Gdy agent prosi o zgodę na użycie narzędzia, powiadomienie ma przyciski Zezwól, Odrzuć i Pokaż. Zezwól i Odrzuć odpowiadają tylko wtedy, gdy to samo okno zgody jest wciąż otwarte i nic w komórce się nie zmieniło; inaczej tylko pokazują komórkę. Dotyczy Claude Code i Codex.': [
     'When an agent asks for permission to use a tool, the notification has Allow, Deny and Show buttons. Allow and Deny answer only while the same permission dialog is still open and nothing in the cell has changed; otherwise they only show the cell. Applies to Claude Code and Codex.',
@@ -79,12 +77,12 @@ export const alertMessages = {
   ],
   'Pasek zadań i Dock': ['Taskbar and Dock', 'Taskleiste und Dock', 'Barra de tareas y Dock', 'Barre des tâches et Dock', 'Barra de tarefas e Dock'],
   'Liczba agentów czekających na Ciebie': ['Number of agents waiting for you', 'Anzahl der Agenten, die auf dich warten', 'Número de agentes que te esperan', 'Nombre d’agents qui vous attendent', 'Número de agentes à sua espera'],
-  'Windows: czerwona plakietka z liczbą na przycisku aplikacji na pasku zadań. macOS: plakietka na ikonie w Docku. Liczą się agenci, którzy czekają na zgodę albo odpowiedź, we wszystkich oknach; wyciszone komórki nie.': [
-    'Windows: a red badge with the number on the app’s taskbar button. macOS: a badge on the Dock icon. Counts the agents waiting for a permission or an answer, in all windows; muted cells do not count.',
-    'Windows: ein rotes Abzeichen mit der Zahl auf der Schaltfläche der App in der Taskleiste. macOS: ein Abzeichen auf dem Dock-Symbol. Gezählt werden Agenten, die auf eine Erlaubnis oder Antwort warten, in allen Fenstern; stummgeschaltete Zellen nicht.',
-    'Windows: una insignia roja con el número en el botón de la aplicación en la barra de tareas. macOS: una insignia en el icono del Dock. Cuenta los agentes que esperan un permiso o una respuesta, en todas las ventanas; las celdas silenciadas no cuentan.',
-    'Windows : un badge rouge avec le nombre sur le bouton de l’application dans la barre des tâches. macOS : un badge sur l’icône du Dock. Compte les agents qui attendent une autorisation ou une réponse, dans toutes les fenêtres ; les cellules en sourdine ne comptent pas.',
-    'Windows: um emblema vermelho com o número no botão da aplicação na barra de tarefas. macOS: um emblema no ícone da Dock. Conta os agentes que esperam uma permissão ou uma resposta, em todas as janelas; as células silenciadas não contam.',
+  'Plakietka z liczbą na ikonie w Docku. Liczą się agenci, którzy czekają na zgodę albo odpowiedź, we wszystkich oknach; wyciszone komórki nie.': [
+    'A badge with the number on the Dock icon. Counts the agents waiting for a permission or an answer, in all windows; muted cells do not count.',
+    'Ein Abzeichen mit der Zahl auf dem Dock-Symbol. Gezählt werden Agenten, die auf eine Erlaubnis oder Antwort warten, in allen Fenstern; stummgeschaltete Zellen nicht.',
+    'Una insignia con el número en el icono del Dock. Cuenta los agentes que esperan un permiso o una respuesta, en todas las ventanas; las celdas silenciadas no cuentan.',
+    'Un badge avec le nombre sur l’icône du Dock. Compte les agents qui attendent une autorisation ou une réponse, dans toutes les fenêtres ; les cellules en sourdine ne comptent pas.',
+    'Um emblema com o número no ícone da Dock. Conta os agentes que esperam uma permissão ou uma resposta, em todas as janelas; as células silenciadas não contam.',
   ],
   // 1.1.1: limit warnings of the AI accounts.
   'Konto {account}: limit {window} wykorzystany w {percent}%, reset o {time}': ['Account {account}: {window} limit {percent}% used, resets at {time}', 'Konto {account}: {window}-Limit zu {percent}% genutzt, Reset um {time}', 'Cuenta {account}: límite de {window} usado al {percent}%, se restablece a las {time}', 'Compte {account} : limite {window} utilisée à {percent}%, réinitialisation à {time}', 'Conta {account}: limite de {window} usado a {percent}%, reposição às {time}'],

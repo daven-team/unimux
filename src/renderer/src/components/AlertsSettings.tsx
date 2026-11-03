@@ -176,10 +176,11 @@ export function AlertsSettings() {
       </SettingRow>
     </SettingsGroup>
     </fieldset>
-    <SettingsGroup title={tr('Pasek zadań i Dock')}>
-      <SettingRow title={tr('Liczba agentów czekających na Ciebie')} htmlFor="settings-taskbar-badge" hint={tr('Windows: czerwona plakietka z liczbą na przycisku aplikacji na pasku zadań. macOS: plakietka na ikonie w Docku. Liczą się agenci, którzy czekają na zgodę albo odpowiedź, we wszystkich oknach; wyciszone komórki nie.')}>
+    {/* 1.1.2: the Dock badge only (the Windows taskbar overlay is gone). */}
+    {window.mc.platform === 'darwin' && <SettingsGroup title={tr('Pasek zadań i Dock')}>
+      <SettingRow title={tr('Liczba agentów czekających na Ciebie')} htmlFor="settings-taskbar-badge" hint={tr('Plakietka z liczbą na ikonie w Docku. Liczą się agenci, którzy czekają na zgodę albo odpowiedź, we wszystkich oknach; wyciszone komórki nie.')}>
         <input id="settings-taskbar-badge" className="setting-switch" type="checkbox" role="switch" checked={alerts.taskbarBadge} onChange={(e) => setAlerts((a) => ({ ...a, taskbarBadge: e.target.checked }))} />
       </SettingRow>
-    </SettingsGroup>
+    </SettingsGroup>}
   </>;
 }

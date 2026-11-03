@@ -4,7 +4,7 @@
 // inspector. The OS notification is not shown: Notification.show is replaced there, so the test can see the buttons and press
 // them (emitting the 'action' event Electron emits for a button). setOverlayIcon / setProgressBar are recorded.
 // Checks: the permission notification carries Allow / Deny / Show and Allow types Enter into the cell; a second (stale) press
-// types nothing and only shows the cell; Deny types Esc; no buttons once the setting is off; the overlay badge (with all
+// types nothing and only shows the cell; Deny types Esc; no buttons once the setting is off; no taskbar overlay badge (1.1.2) (was: with all
 // scale factors) follows the statuses (no progress since 1.1.0); a muted cell does not count; the attention flash is asked.
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -104,19 +104,16 @@ try {
   if (log.some((e) => 'progress' in e)) throw new Error(`taskbar progress set: ${JSON.stringify(log)}`);
   ok('a working agent sets no taskbar progress');
 
-  // 2. PermissionRequest: notification with Allow / Deny / Show, overlay badge "1" with every scale, progress off, flash asked.
+  // 2. PermissionRequest: notification with Allow / Deny / Show, no taskbar overlay, flash asked.
   await hook('notify', { need: 'permission', immediate: true, tool: 'Bash' });
   await sleep(2000);
   let notes = await shown();
   if (notes.length !== 1 || JSON.stringify(notes[0].actions) !== JSON.stringify(['Allow', 'Deny', 'Show']) || notes[0].body !== 'Reviewer needs you') throw new Error(`notification: ${JSON.stringify(notes)} cell: ${JSON.stringify(await app.evaluate(cellDebug))}`);
   ok(`the permission notification offers ${notes[0].actions.join(' / ')}`);
   log = await taskbarLog();
-  const overlay = last(log, 'overlay');
-  if (!overlay?.overlay || overlay.overlay.empty || JSON.stringify(overlay.overlay.size) !== JSON.stringify({ width: 16, height: 16 }) || overlay.overlay.scales.length !== 4 || overlay.description !== 'Agents waiting for you: 1') throw new Error(`overlay: ${JSON.stringify(log)}`);
-  // The badge is drawn with the system font by the main window (1.1.0): its PNGs go next to the screenshots for a look.
-  const shots = process.argv[2];
-  if (shots) overlay.overlay.png.forEach((b64, i) => writeFileSync(join(shots, `badge-1-x${overlay.overlay.scales[i]}.png`), Buffer.from(b64, 'base64')));
-  ok(`overlay badge: 16x16 with scales ${overlay.overlay.scales.join(', ')}, "${overlay.description}"`);
+  // 1.1.2: no taskbar overlay on Windows any more.
+  if (log.some((e) => 'overlay' in e && e.overlay)) throw new Error(`taskbar overlay set: ${JSON.stringify(log)}`);
+  ok('no taskbar overlay badge is set');
   if ((await main.evaluate('__flash')) < 1) throw new Error('no attention flash asked');
   ok('the attention flash is asked for an unfocused window');
 
@@ -165,15 +162,15 @@ try {
   await hook('busy', { tool: 'AskUserQuestion', toolUseId: 'toolu_3', toolEnd: true });
   await sleep(1200);
   log = await taskbarLog();
-  if (last(log, 'overlay')?.overlay !== null) throw new Error(`badge not cleared (muted cell counted?): ${JSON.stringify(log)}`);
-  ok('the badge clears when only a muted cell waits');
+  if (log.some((e) => 'overlay' in e && e.overlay)) throw new Error(`taskbar overlay set: ${JSON.stringify(log)}`);
+  ok('still no taskbar overlay after more waiting cells');
 
   // 8. The setting off: no buttons at all.
   await app.click('.tb-btn[aria-label="Settings"]');
   await app.until(`[...document.querySelectorAll('.settings-nav [role=tab]')].some((t) => t.textContent.includes('Notifications'))`, 'settings nav');
   await app.click('.settings-nav [role=tab]', 'Notifications');
   await app.until(`!!document.querySelector('#settings-alert-actions')`, 'actions switch');
-  if (!(await app.evaluate(`document.querySelector('#settings-alert-actions').checked && document.querySelector('#settings-taskbar-badge').checked && document.querySelector('#settings-alert-flash').checked`))) throw new Error('new switches not on by default');
+  if (!(await app.evaluate(`document.querySelector('#settings-alert-actions').checked && document.querySelector('#settings-alert-flash').checked`))) throw new Error('new switches not on by default');
   await app.click('#settings-alert-actions');
   await sleep(300);
   await selectTab('Main');

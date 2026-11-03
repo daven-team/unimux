@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { execFile, spawn } from 'child_process';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, safeStorage, shell, utilityProcess, type NativeImage, type OpenDialogOptions, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, powerMonitor, safeStorage, shell, utilityProcess, type OpenDialogOptions, type WebContents } from 'electron';
 import { createQuitConfirm, isQuitAnswer, sessionEndingNow } from './quitConfirm';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { homedir, hostname } from 'os';
@@ -125,7 +125,6 @@ import { loadEventSound } from './alertSound';
 import { notificationActions, notificationOptions } from './notifyOptions';
 import { createTaskbar } from './taskbar';
 import { isCellStatus, isStatusReason } from '../shared/taskbarState';
-import { BADGE_SCALES, badgePngs, BADGE_SIZE, fontBadgeScript, parseFontBadges } from './badgeImage';
 import { isPermissionAnswer, isPermissionToken } from '../shared/permissionAction';
 import { migrateDataDir } from './dataDirMigration';
 import { updateWindowAlive } from './updateRuntime';
@@ -533,44 +532,21 @@ const claimedCodex = new Set<string>();
 /** Live notifications - Windows drops click handlers of garbage-collected ones. */
 const notifications = new Set<Notification>();
 /**
- * 1.0.9: the taskbar button (Windows overlay with the number of agents waiting for you) and the
- * Dock badge (macOS); the statuses come from every window (cell:runtime), see taskbar.ts.
+ * 1.0.9: the Dock badge (macOS) with the number of agents waiting for you; the statuses come from every window
+ * (cell:runtime), see taskbar.ts.
  */
-const taskbar = createTaskbar<NativeImage>({
+const taskbar = createTaskbar({
   platform: process.platform,
   *cells() {
     for (const p of state.projects) for (const t of p.tabs) for (const c of t.cells) yield { id: c.id, muted: c.muted, agent: getProfile(state, c.profileId).cli !== 'shell' };
   },
   alive: () => alive,
   settings: () => state.settings.alerts,
-  setOverlay: (image, description) => { withLiveWindow(win, (w) => { try { w.setOverlayIcon(image, description); } catch { /* no taskbar button */ } }); },
   setDockBadge: (text) => { try { app.dock?.setBadge(text); } catch { /* no Dock */ } },
-  image: (label) => {
-    const image = nativeImage.createEmpty();
-    const drawn = fontBadges?.get(label);
-    if (drawn) {
-      BADGE_SCALES.forEach((scaleFactor, i) => { const size = Math.round(BADGE_SIZE * scaleFactor); image.addRepresentation({ scaleFactor, width: size, height: size, dataURL: drawn[i] }); });
-      return image;
-    }
-    for (const { scaleFactor, size, png } of badgePngs(label)) image.addRepresentation({ scaleFactor, width: size, height: size, buffer: png });
-    return image;
-  },
-  describe: (count) => (count > 9 ? tr('Ponad 9 agentów czeka na Ciebie') : tr('Agenci czekający na Ciebie: {count}', { count })),
   setTimer: (fn, ms) => setTimeout(fn, ms),
   clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
 });
 app.on('will-quit', () => taskbar.dispose());
-/** 1.1.0: the overlay badges drawn by the main window with the system font (null until drawn; the stroke digits stand in). */
-let fontBadges: Map<string, string[]> | null = null;
-function drawFontBadges(w: BrowserWindow): void {
-  if (process.platform !== 'win32' || fontBadges) return;
-  w.webContents.executeJavaScript(fontBadgeScript(), true).then((value: unknown) => {
-    const parsed = parseFontBadges(value);
-    if (!parsed) return;
-    fontBadges = parsed;
-    taskbar.redraw();
-  }).catch(() => { /* the stroke digits stay */ });
-}
 /** Only sessions explicitly chosen by the user authorize native message delivery. */
 const verifiedCodex = new Map<string, string>();
 let mcpError: string | undefined;
@@ -843,7 +819,7 @@ function createWindow(): void {
   // Windows ends the session without before-quit: the last changes are written now (the renderer was asked to send its own).
   win.on('query-session-end', () => { markSessionEnding(); send('app:before-quit'); });
   win.on('session-end', () => { saver.flush(); });
-  win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { drawFontBadges(win); ptyHost.connectRenderer(win.webContents); sftpHost.connectRenderer(win.webContents); dbHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
+  win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { ptyHost.connectRenderer(win.webContents); sftpHost.connectRenderer(win.webContents); dbHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };

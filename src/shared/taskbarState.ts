@@ -29,34 +29,23 @@ export function taskbarCounts(cells: Iterable<TaskbarCell>, runtime: ReadonlyMap
   return counts;
 }
 
-/** The text of the badge: 1..9, then "9+" (a taskbar overlay has room for two characters). */
-export function badgeLabel(count: number): string | null {
-  if (!Number.isFinite(count) || count < 1) return null;
-  return count > 9 ? '9+' : String(Math.floor(count));
-}
-
 export interface TaskbarSettings { taskbarBadge: boolean }
 
+/** 1.1.2: only the macOS Dock badge is left (the Windows taskbar overlay was dropped at the user's request). */
 export interface TaskbarView {
-  /** Windows overlay icon label (null = none). */
-  overlay: string | null;
   /** macOS Dock badge text ('' = none). */
   dock: string;
 }
 
-export const NO_TASKBAR: TaskbarView = Object.freeze({ overlay: null, dock: '' });
+export const NO_TASKBAR: TaskbarView = Object.freeze({ dock: '' });
 
-/** What the taskbar button / the Dock icon should show for the counts on this platform. */
+/** What the Dock icon should show for the counts on this platform (nothing elsewhere). */
 export function taskbarView(counts: TaskbarCounts, settings: TaskbarSettings, platform: string): TaskbarView {
   const count = settings.taskbarBadge ? counts.attention : 0;
-  if (platform === 'win32') {
-    return { overlay: badgeLabel(count), dock: '' };
-  }
-  if (platform === 'darwin') return { overlay: null, dock: count > 0 ? String(count) : '' };
-  return NO_TASKBAR;
+  return platform === 'darwin' ? { dock: count > 0 ? String(count) : '' } : NO_TASKBAR;
 }
 
-export const sameView = (a: TaskbarView, b: TaskbarView): boolean => a.overlay === b.overlay && a.dock === b.dock;
+export const sameView = (a: TaskbarView, b: TaskbarView): boolean => a.dock === b.dock;
 
 const STATUSES = new Set<string>(['idle', 'working', 'waiting', 'exited']);
 const REASONS = new Set<string>(['done', 'attention', 'error']);
