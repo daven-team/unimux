@@ -11,6 +11,8 @@ ipcRenderer.on('db-port', (e) => window.postMessage('mc:db-port', '*', e.ports))
 
 const api: McApi = {
   platform: appPlatform(process.platform),
+  // TEMPORARY (1.1.2 review): the status indicator design from MC_STATUS_STYLE (src/main/statusStyle.ts).
+  statusStyle: process.argv.find((a) => a.startsWith('--mc-status-style='))?.slice('--mc-status-style='.length),
   loadState: () => ipcRenderer.invoke('state:load'),
   loadSnapshot: () => ipcRenderer.invoke('state:snapshot'),
   applyStateEdit: (edit) => ipcRenderer.invoke('state:edit', edit),
