@@ -163,7 +163,8 @@ details.team-section[open] > summary h4::before { transform: rotate(90deg); }
 .team-agent-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 
 .team-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.team-event { display: grid; grid-template-columns: 44px minmax(90px, 160px) 90px minmax(0, 1fr); align-items: center; gap: 10px; padding: 4px 8px; border-radius: 5px; }
+.team-event { display: grid; grid-template-columns: 118px minmax(90px, 160px) 90px minmax(0, 1fr); align-items: center; gap: 10px; padding: 4px 8px; border-radius: 5px; }
+.team-event .team-age { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .team-event-action { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .team-event-action.task_completed { color: var(--waiting); }
 .team-event-action.task_blocked { color: var(--working); }

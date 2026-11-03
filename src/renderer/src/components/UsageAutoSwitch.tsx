@@ -67,13 +67,18 @@ export function openAutoSwitchMenu(el: HTMLElement, settings: AutoSwitchSettings
 /** "Auto: wł. · największy zapas · wraca na a@x" under the header, per provider that has something to switch; click: the menu. */
 export function AutoSwitchLine({ settings, providers, away }: { settings: AutoSwitchSettings; providers: ProviderUsage[]; away?: Partial<Record<UsageProvider, string>> }) {
   const { tr } = useI18n();
-  const lines = (['claude', 'codex'] as const).filter((p) => switchUseful(providers, p) && (p === 'claude' || autoSwitchOn(settings, 'codex')));
+  // 1.1.2: shown whenever the switch is on, so it is always visible that a watcher looks after the limits.
+  if (!settings.enabled) return null;
+  const lines = (['claude', 'codex'] as const).filter((p) => autoSwitchOn(settings, p) && (p === 'claude' ? claudeLoginActions(window.mc.platform, true).managedAccounts : providers.some((u) => u.provider === 'codex')));
   if (!lines.length) return null;
+  const limits = [settings.fiveHour.enabled ? `5 h ${settings.fiveHour.percent}%` : '', settings.sevenDay.enabled ? `7 d ${settings.sevenDay.percent}%` : ''].filter(Boolean).join(', ');
   return <>
     {lines.map((provider) => {
-      const text = autoSwitchStatus(settings, provider, { away: away ?? {} }, tr);
+      const parts = [autoSwitchStatus(settings, provider, { away: away ?? {} }, tr), tr('pilnuje limitów: {limits}', { limits })];
+      if (!switchUseful(providers, provider)) parts.push(tr('dodaj drugie konto, aby było na co przełączać'));
+      const text = parts.join(' · ');
       const label = lines.length > 1 ? `${NAMES[provider]} ${text}` : text;
-      return <button key={provider} type="button" className={`usage-auto-line ${autoSwitchOn(settings, provider) ? 'on' : ''}`} title={`${tr('Automatyczne przełączanie kont')}: ${label}`}
+      return <button key={provider} type="button" className="usage-auto-line on" title={`${tr('Automatyczne przełączanie kont')}: ${label}`}
         onClick={(e) => openAutoSwitchMenu(e.currentTarget, settings, providers, tr)}>{label}</button>;
     })}
   </>;

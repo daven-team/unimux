@@ -11,7 +11,8 @@ import { openMenuAt } from './ContextMenu';
 import { IChevron, IPlus } from './icons';
 import { ProviderIcon } from './ProviderIcons';
 import { BusyRing, RefreshIcon, useHoldBusy } from './Spinner';
-import { AutoSwitchLine, openAutoSwitchMenu, switchUseful, UsageResizeHandle, useUsageHeight } from './UsageAutoSwitch';
+import { AutoSwitchLine, openAutoSwitchMenu, setAutoSwitch, UsageResizeHandle, useUsageHeight } from './UsageAutoSwitch';
+import { enableAutoSwitch } from '../../../shared/autoSwitch';
 
 const DORMANT_NOTE = 'Token dostępu wygasł - Claude Code odświeży go przy najbliższym użyciu. Uruchom sesję Claude (albo wyślij wiadomość), a limity wrócą.';
 const HELD_NOTE = {
@@ -452,6 +453,9 @@ export function UsagePanel() {
   const toggle = () => update((st) => updateSettings(st, { usageCollapsed: !collapsed }));
   // No Claude login can be saved while accounts.json is read-only: the entries stay visible, disabled, with the reason.
   const readOnlyHint = accountsReadOnly ? tr('Niedostępne: pliku kont aplikacji nie da się bezpiecznie odczytać (szczegóły w panelu limitów).') : undefined;
+  // Claude switching needs managed accounts (not on macOS); Codex accounts switch everywhere.
+  const autoAvailable = claudeLogin.managedAccounts || hasCodex;
+  const autoOn = settings.accountSwitch.enabled;
   const openAddMenu = (el: HTMLElement) => openMenuAt(el, [
     ...(claudeLogin.menu === 'new' ? [{ label: tr('Dodaj konto Claude'), disabled: !!readOnlyHint, onClick: () => openAuth('claude', { type: 'new' }) }] : []),
     ...(claudeLogin.menu === 'main' ? [{ label: tr('Zaloguj się do Claude'), disabled: !!readOnlyHint, onClick: () => openAuth('claude', { type: 'main' }) }] : []),
@@ -469,9 +473,18 @@ export function UsagePanel() {
           {tr('Limity kont AI')}
         </button>
         <button className="btn ghost icon" onClick={(e) => openAddMenu(e.currentTarget)} title={tr('Dodaj konto')} aria-label={tr('Dodaj konto')}><IPlus /></button>
-        {(switchUseful(visible, 'claude') || switchUseful(visible, 'codex')) && (
-          <button className={`btn ghost icon usage-auto-btn ${settings.accountSwitch.enabled ? 'on' : ''}`} aria-haspopup="menu" title={tr('Automatyczne przełączanie kont')} aria-label={tr('Automatyczne przełączanie kont')}
-            onClick={(e) => openAutoSwitchMenu(e.currentTarget, settings.accountSwitch, visible, tr)}><AutoIcon /></button>
+        {/* 1.1.2: the automatic switch is switched on and off right here; the arrow opens its options. While it is on, the pill
+            shows that a watcher looks after the limits of the main account. */}
+        {autoAvailable && (
+          <span className={`usage-auto-pill ${autoOn ? 'on' : ''}`}>
+            <button type="button" className="usage-auto-toggle" role="switch" aria-checked={autoOn}
+              title={autoOn ? tr('Automatyczne przełączanie pilnuje limitów konta głównego i przełącza, gdy przekroczy próg. Kliknij, aby wyłączyć.') : tr('Włącz automatyczne przełączanie kont')}
+              onClick={() => setAutoSwitch((current) => (current.enabled ? { ...current, enabled: false } : enableAutoSwitch(current, visible)))}>
+              <AutoIcon /><span>Auto</span><span className="usage-auto-dot" aria-hidden />
+            </button>
+            <button type="button" className="usage-auto-more" aria-haspopup="menu" title={tr('Opcje automatycznego przełączania')} aria-label={tr('Opcje automatycznego przełączania')}
+              onClick={(e) => openAutoSwitchMenu(e.currentTarget, settings.accountSwitch, visible, tr)}><IChevron /></button>
+          </span>
         )}
         <button className="btn ghost icon" onClick={() => void refresh()} disabled={spinning} title={tr('Odśwież limity')} aria-label={tr('Odśwież limity')}><RefreshIcon spinning={spinning} /></button>
       </div>
