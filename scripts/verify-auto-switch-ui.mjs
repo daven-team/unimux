@@ -139,9 +139,10 @@ setTimeout(() => { fs.writeFileSync(path.join(process.env.CODEX_HOME, 'auth.json
     if (danielCopy.claudeAiOauth.accessToken !== 'fake-access-daniel') throw new Error('daniel\'s login was not kept on its card');
     ok('daniel\'s login is kept on its card');
     await app.until(`${card('support')}?.textContent.includes('główne')`, 'support marked main', 30_000);
-    await app.until(`!!document.querySelector('.usage-auto-line')`, 'state line');
-    const line = await app.evaluate(`document.querySelector('.usage-auto-line').textContent`);
-    if (line !== 'pilnuje limitów: 5 h 95%, 7 d 98% · największy zapas · wraca na daniel@example.com') throw new Error(`state line: ${line}`);
+    // 1.1.2: no state line; the header shows a green eye with "Pilnuje" and the details as its tooltip.
+    await app.until(`!!document.querySelector('.usage-auto.on .usage-auto-open')`, 'watching mark');
+    const line = await app.evaluate(`(() => { const b = document.querySelector('.usage-auto-open'); return b.textContent + ' | ' + (b.getAttribute('title') ?? b.getAttribute('data-mc-title')); })()`);
+    if (!line.includes('pilnuje limitów: 5 h 95%, 7 d 98% · największy zapas · wraca na daniel@example.com')) throw new Error(`switcher mark: ${line}`);
     if (!(await app.evaluate(`document.querySelector('.usage-auto-switch').checked`))) throw new Error('the Switcher switch in the header is not on');
     ok(`the panel shows "${line}"`);
     await sleep(1500);
@@ -168,7 +169,7 @@ setTimeout(() => { fs.writeFileSync(path.join(process.env.CODEX_HOME, 'auth.json
     };
     await app.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
     await sleep(300);
-    const line0 = await centerOf('.usage-auto-line');
+    const line0 = await centerOf('.usage-auto-open');
     await mouseAt(line0.x, line0.y);
     await app.until(`!!document.querySelector('.switcher-pop.on')`, 'switcher card');
     if (await app.evaluate(`!!document.querySelector('.menu')`)) throw new Error('a context menu opened instead of the card');
@@ -233,7 +234,7 @@ setTimeout(() => { fs.writeFileSync(path.join(process.env.CODEX_HOME, 'auth.json
     await app.evaluate(`document.querySelector('#switcher-pop-enabled').focus()`);
     await keyPress('Escape', 27);
     await app.until(`!document.querySelector('.switcher-pop')`, 'card closed by Esc');
-    await app.until(`document.activeElement?.classList.contains('usage-auto-line')`, 'focus back on the row');
+    await app.until(`document.activeElement?.classList.contains('usage-auto-open')`, 'focus back on the row');
     ok('Esc closes the card and the focus goes back to the state row');
     // A right click on the header switch opens it too; a click elsewhere closes it.
     const toggle = await centerOf('.usage-auto');
@@ -248,7 +249,7 @@ setTimeout(() => { fs.writeFileSync(path.join(process.env.CODEX_HOME, 'auth.json
       await app.cdp('Emulation.setDeviceMetricsOverride', { width: Math.round(1280 / zoom), height: Math.round(1000 / zoom), deviceScaleFactor: zoom, mobile: false });
       await app.evaluate(`(() => { document.querySelector('.side-panel').style.width = ${width ? `'${width}px'` : `''`}; return true; })()`);
       await sleep(300);
-      await app.evaluate(`document.querySelector('.usage-auto-line').click(), true`);
+      await app.evaluate(`document.querySelector('.usage-auto-open').click(), true`);
       await app.until(`!!document.querySelector('.switcher-pop.on')`, `card at ${zoom * 100} %`);
       await sleep(200);
       b = await popRect();
@@ -311,10 +312,10 @@ setTimeout(() => { fs.writeFileSync(path.join(process.env.CODEX_HOME, 'auth.json
     await app.until(`!!${card('alice')} && ${card('bob')}?.textContent.includes('główne')`, 'codex cards after the swap', 30_000);
     await shoot(app, '5-codex-after-make-main.png');
 
-    // 6. The header: the title on one line, the "Switcher" switch; then the settings section through the menu's link.
+    // 6. The header: the title on one line, the Switcher (on: an eye and "Pilnuje"); then the settings section through the menu's link.
     const head = await app.evaluate(`(() => { const t = document.querySelector('.usage-title-text'); return { title: t.textContent, oneLine: getComputedStyle(t).whiteSpace === 'nowrap' && t.getBoundingClientRect().height < 20, label: document.querySelector('.usage-auto-label').textContent, aria: document.querySelector('.usage-panel').getAttribute('aria-label') }; })()`);
     if (head.title !== 'Konta i limity' || head.aria !== 'Konta i limity' || !head.oneLine) throw new Error(`panel title: ${JSON.stringify(head)}`);
-    if (head.label !== 'Switcher') throw new Error(`header switch label: ${head.label}`);
+    if (head.label !== 'Pilnuje') throw new Error(`header switcher label while on: ${head.label}`);
     ok(`the header says "${head.title}" on one line with the "${head.label}" switch`);
     await app.evaluate(`(() => { document.querySelector('.usage-head').id = 'usage-head-shot'; return true; })()`);
     await shoot(app, '6-panel-header.png', '#usage-head-shot');
@@ -322,7 +323,7 @@ setTimeout(() => { fs.writeFileSync(path.join(process.env.CODEX_HOME, 'auth.json
     const narrow = await app.evaluate(`(() => { const p = document.querySelector('.side-panel'); const old = p.style.width; p.style.width = '190px'; const t = document.querySelector('.usage-title-text'); const r = { truncated: t.scrollWidth > t.clientWidth, height: t.getBoundingClientRect().height, auto: document.querySelector('.usage-auto').getBoundingClientRect().width }; p.style.width = old; return r; })()`);
     if (narrow.height > 20 || narrow.auto < 40) throw new Error(`narrow header: ${JSON.stringify(narrow)}`);
     ok(`narrow side panel: the title stays on one line (${narrow.truncated ? 'ellipsized' : 'fits'}), the Switcher keeps its label`);
-    await app.click('.usage-auto-line');
+    await app.click('.usage-auto-open');
     await app.until(`!!document.querySelector('.switcher-pop.on .switcher-pop-link')`, 'Switcher card (settings link)');
     await app.click('.switcher-pop-link');
     await app.until(`!document.querySelector('.switcher-pop')`, 'card closed by its link');

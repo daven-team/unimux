@@ -12,7 +12,7 @@ import { IChevron, IPlus } from './icons';
 import { ProviderIcon } from './ProviderIcons';
 import { BusyRing, RefreshIcon, useHoldBusy } from './Spinner';
 import { SwitcherPopover } from './SwitcherPopover';
-import { AutoSwitchLine, setAutoSwitch, UsageResizeHandle, useUsageHeight } from './UsageAutoSwitch';
+import { setAutoSwitch, switcherSummary, UsageResizeHandle, useUsageHeight } from './UsageAutoSwitch';
 import { enableAutoSwitch } from '../../../shared/autoSwitch';
 
 const DORMANT_NOTE = 'Token dostępu wygasł - Claude Code odświeży go przy najbliższym użyciu. Uruchom sesję Claude (albo wyślij wiadomość), a limity wrócą.';
@@ -98,6 +98,16 @@ const openAuth = (provider: UsageProvider, target: LoginTarget) => setUi({ modal
 /** The login target that renews this account. */
 function reloginTarget(usage: ProviderUsage): LoginTarget {
   return usage.managed && !usage.active ? { type: 'account', id: recordId(usage) } : { type: 'main' };
+}
+
+/** An eye: the Switcher watches the accounts. */
+function WatchIcon() {
+  return <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8Z" /><circle cx="8" cy="8" r="2" /></svg>;
+}
+
+/** Two arrows: switching between accounts. */
+function SwitchIcon() {
+  return <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M2.5 5.5h10M10 3l2.5 2.5L10 8" /><path d="M13.5 10.5h-10M6 8l-2.5 2.5L6 13" /></svg>;
 }
 
 function KebabIcon() {
@@ -472,19 +482,23 @@ export function UsagePanel() {
           <span className="usage-title-text">{tr('Konta i limity')}</span>
         </button>
         <button className="btn ghost icon" onClick={(e) => openAddMenu(e.currentTarget)} title={tr('Dodaj konto')} aria-label={tr('Dodaj konto')}><IPlus /></button>
-        {/* 1.1.2: the automatic switch is switched on and off right here; the arrow opens its options. While it is on, the pill
-            shows that a watcher looks after the limits of the main account. */}
+        {/* 1.1.2: the Switcher in the header: its switch turns it on and off; its mark and word open its card. While it is on,
+            a green eye and "Pilnuje" say that it watches the accounts (the details are the tooltip). */}
         {autoAvailable && (
-          <label className={`usage-auto ${autoOn ? 'on' : ''}`} onContextMenu={(e) => { e.preventDefault(); setSwitcherAnchor(e.currentTarget); }}
-            title={autoOn ? tr('Automatyczne przełączanie pilnuje limitów konta głównego i przełącza, gdy przekroczy próg. Kliknij, aby wyłączyć.') : tr('Włącz automatyczne przełączanie kont')}>
-            <span className="usage-auto-label">{tr('Switcher')}</span>
+          <span className={`usage-auto ${autoOn ? 'on' : ''}`} onContextMenu={(e) => { e.preventDefault(); setSwitcherAnchor(e.currentTarget.querySelector<HTMLElement>('.usage-auto-open')); }}>
+            <button type="button" className="usage-auto-open" aria-haspopup="dialog" aria-expanded={!!switcherAnchor}
+              title={switcherSummary(settings.accountSwitch, visible, switchAway, tr)}
+              onClick={(e) => { const el = e.currentTarget; setSwitcherAnchor((current) => (current === el ? null : el)); }}>
+              {autoOn ? <WatchIcon /> : <SwitchIcon />}
+              <span className="usage-auto-label">{autoOn ? tr('Pilnuje') : tr('Switcher')}</span>
+            </button>
             <input type="checkbox" role="switch" className="usage-auto-switch" checked={autoOn} aria-label={tr('Automatyczne przełączanie kont')}
+              title={autoOn ? tr('Automatyczne przełączanie pilnuje limitów konta głównego i przełącza, gdy przekroczy próg. Kliknij, aby wyłączyć.') : tr('Włącz automatyczne przełączanie kont')}
               onChange={() => setAutoSwitch((current) => (current.enabled ? { ...current, enabled: false } : enableAutoSwitch(current, visible)))} />
-          </label>
+          </span>
         )}
         <button className="btn ghost icon" onClick={() => void refresh()} disabled={spinning} title={tr('Odśwież limity')} aria-label={tr('Odśwież limity')}><RefreshIcon spinning={spinning} /></button>
       </div>
-      {!collapsed && <AutoSwitchLine settings={settings.accountSwitch} providers={visible} away={switchAway} open={!!switcherAnchor} onOpen={(el) => setSwitcherAnchor((current) => (current === el ? null : el))} />}
       {switcherAnchor && <SwitcherPopover anchor={switcherAnchor} panel={section.current} settings={settings.accountSwitch} providers={visible} onClose={closeSwitcher} />}
       {collapsed && (shown.length ? (
         <div className="usage-mini-list">

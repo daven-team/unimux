@@ -991,24 +991,25 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .usage-resize:hover::after, .usage-resize:focus-visible::after, .usage-resize.dragging::after { height: 3px; background: var(--btn-primary-bg); }
 .usage-resize:focus-visible { outline: none; }
 @media (prefers-reduced-motion: reduce) { .usage-resize::after { transition: none; } }
-/* 1.1.2: the automatic switch: "Switcher" with a small switch in the header; while it is on, one quiet row under the header
-   (a steady green dot, what it watches, an arrow to its options). */
-.usage-auto { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 3px 0 5px; border-radius: 5px; color: var(--muted); font-size: 10.5px; cursor: pointer; user-select: none; }
-.usage-auto:hover { background: var(--btn-ghost-hover); color: var(--text-2); }
-.usage-auto.on { color: var(--text-2); }
+/* 1.1.2: the Switcher in the header: its mark and word (they open its card) and a small switch. Off: a grey arrows mark and
+   "Switcher"; on: a green eye and "Pilnuje" ("Watching"), so it is plain that it watches the accounts. */
+.usage-auto { flex: none; display: inline-flex; align-items: center; gap: 2px; height: 22px; padding-right: 3px; border-radius: 5px; }
+.usage-auto-open { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 4px 0 5px; border: 0; border-radius: 5px; background: none; color: var(--muted); font: inherit; font-size: 10.5px; cursor: pointer; }
+.usage-auto-open:hover, .usage-auto-open[aria-expanded="true"] { background: var(--btn-ghost-hover); color: var(--text-2); }
+.usage-auto-open:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; }
+.usage-auto.on .usage-auto-open { color: #7fcf9f; }
+.usage-auto.on .usage-auto-open:hover, .usage-auto.on .usage-auto-open[aria-expanded="true"] { color: #9fe0b8; }
+.usage-auto-open > svg { flex: none; }
 .usage-auto-label { letter-spacing: .2px; white-space: nowrap; }
+/* A narrow side panel keeps the title readable: the word goes, the mark stays (the tooltip says it). */
+.usage-head { container-type: inline-size; }
+@container (max-width: 250px) { .usage-auto-label { display: none; } }
 /* Scoped under .usage-auto so it wins over the app-wide checkbox look (input[type='checkbox']). */
 .usage-auto input.usage-auto-switch { position: relative; display: block; width: 22px; height: 12px; border: 0; border-radius: 7px; background: #474747; box-shadow: none; transition: background .12s; }
 .usage-auto input.usage-auto-switch::before { content: ''; position: absolute; top: 2px; left: 2px; width: 8px; height: 8px; border-radius: 50%; background: #d4d4d4; transition: transform .12s, background .12s; }
 .usage-auto input.usage-auto-switch:checked { background: #3a9d67; border: 0; }
 .usage-auto input.usage-auto-switch:checked::before { transform: translateX(10px); background: #fff; }
 .usage-auto input.usage-auto-switch:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; box-shadow: none; }
-.usage-auto-line { flex: none; display: flex; align-items: center; gap: 6px; width: calc(100% + 8px); min-width: 0; margin: 0 -4px; padding: 2px 4px; border: 0; border-radius: 5px; background: none; color: var(--text-2); font: inherit; font-size: 10.5px; line-height: 16px; text-align: left; cursor: pointer; }
-.usage-auto-line:hover, .usage-auto-line.on { background: var(--btn-ghost-hover); color: var(--text); }
-.usage-auto-line:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; }
-.usage-auto-line-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #3a9d67; box-shadow: 0 0 0 2px #3a9d6726; }
-.usage-auto-line-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.usage-auto-line-more { flex: none; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .usage-auto input.usage-auto-switch, .usage-auto input.usage-auto-switch::before { transition: none; } }
 .usage-switch-offer { border-color: var(--btn-primary-bg); }
 /* 1.0.9: the header (title, add, refresh) stays at the top of the panel while the cards scroll under it, so the panel can be

@@ -2,6 +2,7 @@
 // the panel's top edge that makes it taller or shorter.
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { accountKey, autoSwitchOn, autoSwitchStatus, type AutoSwitchSettings } from '../../../shared/autoSwitch';
+import type { Translate } from '../../../shared/alertBurst';
 import { updateSettings } from '../../../shared/state';
 import { claudeLoginActions, type ProviderUsage, type UsageProvider } from '../../../shared/usage';
 import { useI18n } from '../i18n';
@@ -36,30 +37,21 @@ export const openAccountSettings = (focus = 'settings-switch-enabled') => setUi(
 export const openSwitchSettings = () => openAccountSettings();
 
 /** "Switcher: wł. · największy zapas · wraca na a@x" under the header, per provider that has something to switch; click: the Switcher card. */
-export function AutoSwitchLine({ settings, providers, away, open, onOpen }: { settings: AutoSwitchSettings; providers: ProviderUsage[]; away?: Partial<Record<UsageProvider, string>>; open?: boolean; onOpen: (el: HTMLElement) => void }) {
-  const { tr } = useI18n();
-  // 1.1.2: shown whenever the switch is on, so it is always visible that a watcher looks after the limits.
-  if (!settings.enabled) return null;
+/**
+ * 1.1.2: what the Switcher watches, for the tooltip of its header control (no line of its own under the header): the limits,
+ * where it switches to and where it goes back, per provider it watches.
+ */
+export function switcherSummary(settings: AutoSwitchSettings, providers: ProviderUsage[], away: Partial<Record<UsageProvider, string>> | undefined, tr: Translate): string {
+  if (!settings.enabled) return tr('Włącz automatyczne przełączanie kont');
   const lines = (['claude', 'codex'] as const).filter((p) => autoSwitchOn(settings, p) && (p === 'claude' ? claudeLoginActions(window.mc.platform, true).managedAccounts : providers.some((u) => u.provider === 'codex')));
-  if (!lines.length) return null;
   const limits = [settings.fiveHour.enabled ? `5 h ${settings.fiveHour.percent}%` : '', settings.sevenDay.enabled ? `7 d ${settings.sevenDay.percent}%` : ''].filter(Boolean).join(', ');
-  return <>
-    {lines.map((provider) => {
-      // The dot says it is on; the line says what it watches, where it switches to and where it goes back.
-      const rest = autoSwitchStatus(settings, provider, { away: away ?? {} }, tr).split(' · ').slice(1);
-      const parts = [tr('pilnuje limitów: {limits}', { limits }), ...rest];
-      if (!switchUseful(providers, provider)) parts.push(tr('dodaj drugie konto, aby było na co przełączać'));
-      const text = parts.join(' · ');
-      const label = lines.length > 1 ? `${NAMES[provider]}: ${text}` : text;
-      return <button key={provider} type="button" className={`usage-auto-line ${open ? 'on' : ''}`} aria-haspopup="dialog" aria-expanded={!!open} title={`${tr('Opcje automatycznego przełączania')}
-${label}`}
-        onClick={(e) => onOpen(e.currentTarget)}>
-        <span className="usage-auto-line-dot" aria-hidden />
-        <span className="usage-auto-line-text">{label}</span>
-        <svg className="usage-auto-line-more" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m4 6 4 4 4-4" /></svg>
-      </button>;
-    })}
-  </>;
+  const rows = lines.map((provider) => {
+    const rest = autoSwitchStatus(settings, provider, { away: away ?? {} }, tr).split(' · ').slice(1);
+    const parts = [tr('pilnuje limitów: {limits}', { limits }), ...rest];
+    if (!switchUseful(providers, provider)) parts.push(tr('dodaj drugie konto, aby było na co przełączać'));
+    return `${lines.length > 1 ? `${NAMES[provider]}: ` : ''}${parts.join(' · ')}`;
+  });
+  return [tr('Switcher pilnuje kont'), ...rows, tr('Kliknij, aby zmienić ustawienia.')].join('\n');
 }
 
 const HEIGHT_KEY = 'mc-usage-height-v1';
