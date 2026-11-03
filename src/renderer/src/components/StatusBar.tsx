@@ -5,6 +5,8 @@ import { BackgroundLoadHint } from './BackgroundLoadHint';
 import { IChangelog } from './icons';
 import { RefreshIcon, useHoldBusy } from './Spinner';
 import { formatUpdateBytes, requestUpdateCheck, useUpdateState } from './UpdateBadge';
+import { IX } from './icons';
+import { cancelWaitingUpdate, requestUpdateInstall, useUpdateWait } from '../updateGuard';
 import './updater.css';
 
 /** Full-width bottom bar: running version and live update status, with the update action. */
@@ -17,8 +19,20 @@ export function StatusBar() {
   const check = () => { setClicked(true); requestUpdateCheck(); setTimeout(() => setClicked(false), 50); };
   const version = u.version ?? '';
   let currentTitle = '';
+  // 1.1.2: the update button first checks what an update would interrupt (updateGuard.ts).
+  const install = () => { void requestUpdateInstall(u.status); };
+  const waiting = useUpdateWait((st) => st.pending);
 
   const status = (() => {
+    // Waiting for the agents (and the other work) to finish: a click says what for; the X stops waiting.
+    if (waiting && ['available', 'downloading', 'ready'].includes(u.status)) {
+      return <span className="sb-update-wait">
+        <button className="sb-btn sb-action" data-update-wait onClick={install} title={tr('Kliknij, aby zobaczyć, na co czeka aktualizacja')}>
+          <span className="sb-dot" aria-hidden />{tr(waiting.text.key, waiting.text.params)}
+        </button>
+        <button className="sb-btn uw-cancel" data-update-wait-cancel onClick={cancelWaitingUpdate} title={tr('Nie czekaj na aktualizację')} aria-label={tr('Nie czekaj na aktualizację')}><IX /></button>
+      </span>;
+    }
     switch (u.status) {
       case 'current': {
         const when = u.checkedAt ? new Date(u.checkedAt).toLocaleTimeString(language) : '';
@@ -36,13 +50,13 @@ export function StatusBar() {
         // The download runs in the background; a click opens the one update window, which finishes the download and installs.
         return u.portable
           ? <span className="sb-item" role="status" title={tr('Pobieranie aktualizacji w tle')}>{progress}</span>
-          : <button className="sb-btn sb-action" onClick={() => window.mc.installUpdate()} title={tr('Kliknij, aby otworzyć okno aktualizacji - zainstaluje się po pobraniu')}>{progress}</button>;
+          : <button className="sb-btn sb-action" onClick={install} title={tr('Kliknij, aby otworzyć okno aktualizacji - zainstaluje się po pobraniu')}>{progress}</button>;
       }
       case 'ready':
-        return <button className="sb-btn sb-action" onClick={() => window.mc.installUpdate()} title={tr('Aktualizacja potrwa chwilę, rozmowy wznowią się same')}><span className="sb-dot new" aria-hidden />{tr('Wersja {version} gotowa - Zainstaluj', { version })}</button>;
+        return <button className="sb-btn sb-action" onClick={install} title={tr('Aktualizacja potrwa chwilę, rozmowy wznowią się same')}><span className="sb-dot new" aria-hidden />{tr('Wersja {version} gotowa - Zainstaluj', { version })}</button>;
       case 'available':
         // Without in-app installation (portable build, macOS app that cannot replace itself) only the download page is offered.
-        if (!u.portable) return <button className="sb-btn sb-action" onClick={() => window.mc.installUpdate()} title={tr('Aktualizacja potrwa chwilę, rozmowy wznowią się same')}><span className="sb-dot new" aria-hidden />{tr('Dostępna wersja {version} - Aktualizuj', { version })}</button>;
+        if (!u.portable) return <button className="sb-btn sb-action" onClick={install} title={tr('Aktualizacja potrwa chwilę, rozmowy wznowią się same')}><span className="sb-dot new" aria-hidden />{tr('Dostępna wersja {version} - Aktualizuj', { version })}</button>;
         return <button className="sb-btn sb-action" onClick={() => window.mc.openReleases()} title={u.message ? errorText(u.message) : tr('Otwórz stronę pobierania')}><span className="sb-dot new" aria-hidden />{tr('Nowa wersja {version} · pobierz', { version })}</button>;
       case 'unavailable':
         return <span className="sb-item sb-muted" role="status">{errorText(u.message ?? '')}</span>;

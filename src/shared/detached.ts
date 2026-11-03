@@ -375,21 +375,33 @@ export function handoffSessions(handoffs: readonly TabHandoff[]): string[] {
 // -- unsaved work of a detached window (1.0.8) --------------------------------
 
 /** What a detached window holds that quitting would lose or end: open transactions, tables with staged edits, unsaved Redis values. */
-export interface DetachedWork { tx: number; staged: number; redis: number }
+/**
+ * The unsaved work a detached window reports: database work (1.0.8: open transactions, staged table edits, Redis values) and,
+ * 1.1.2, its unsaved editor files and running saves (the update question lists them; quitting keeps them as drafts).
+ */
+export interface DetachedWork { tx: number; staged: number; redis: number; files?: number; saving?: number }
 export const NO_WORK: DetachedWork = { tx: 0, staged: 0, redis: 0 };
 const workCount = (x: unknown): number => (typeof x === 'number' && Number.isInteger(x) && x >= 0 ? Math.min(x, 100_000) : 0);
-export const hasWork = (w: DetachedWork): boolean => w.tx + w.staged + w.redis > 0;
+export const hasWork = (w: DetachedWork): boolean => w.tx + w.staged + w.redis + (w.files ?? 0) + (w.saving ?? 0) > 0;
 
-/** A report from a window, repaired (null: nothing pending). */
+/** A report from a window, repaired (null: nothing pending). The editor counts are present only when not zero. */
 export function cleanWork(raw: unknown): DetachedWork | null {
   if (!isRecord(raw)) return null;
-  const work = { tx: workCount(raw.tx), staged: workCount(raw.staged), redis: workCount(raw.redis) };
+  const work: DetachedWork = { tx: workCount(raw.tx), staged: workCount(raw.staged), redis: workCount(raw.redis) };
+  const files = workCount(raw.files);
+  const saving = workCount(raw.saving);
+  if (files) work.files = files;
+  if (saving) work.saving = saving;
   return hasWork(work) ? work : null;
 }
 
 export function sumWork(list: Iterable<DetachedWork>): DetachedWork {
-  const out = { ...NO_WORK };
-  for (const w of list) { out.tx += w.tx; out.staged += w.staged; out.redis += w.redis; }
+  const out: DetachedWork = { ...NO_WORK };
+  for (const w of list) {
+    out.tx += w.tx; out.staged += w.staged; out.redis += w.redis;
+    if (w.files) out.files = (out.files ?? 0) + w.files;
+    if (w.saving) out.saving = (out.saving ?? 0) + w.saving;
+  }
   return out;
 }
 

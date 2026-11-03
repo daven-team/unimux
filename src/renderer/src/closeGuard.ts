@@ -54,7 +54,11 @@ export async function confirmQuitTransfers(): Promise<boolean> {
  * Unsaved database work (1.0.0: open transactions of SQL tabs, staged edits of table tabs). The database module registers it
  * when it starts, so this file does not load it: `pending` says whether quitting must ask, `ask` asks (true: quit anyway).
  */
-export interface QuitWork { pending(): boolean; ask(): Promise<boolean>; subscribe(changed: () => void): void }
+export interface QuitWork {
+  pending(): boolean; ask(): Promise<boolean>; subscribe(changed: () => void): void;
+  /** 1.1.2: this window's own counts (the update question adds the detached windows' ones). */
+  counts?(): { tx: number; staged: number; redis: number };
+}
 let databaseWork: QuitWork | null = null;
 let databaseChanged: () => void = () => {};
 export function setDatabaseQuitWork(work: QuitWork): void {
@@ -62,6 +66,9 @@ export function setDatabaseQuitWork(work: QuitWork): void {
   work.subscribe(() => databaseChanged());
   databaseChanged();
 }
+
+/** This window's unsaved database work (none while the database module has not started). */
+export const databaseCounts = (): { tx: number; staged: number; redis: number } => databaseWork?.counts?.() ?? { tx: 0, staged: 0, redis: 0 };
 
 /** 1.0.8: the unsaved database work of the detached windows (they report it through main), by window id. */
 const awayWork = new Map<string, DetachedWork>();

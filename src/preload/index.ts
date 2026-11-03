@@ -253,6 +253,7 @@ const api: McApi = {
   getUpdate: () => ipcRenderer.invoke('update:get'),
   checkUpdates: () => ipcRenderer.invoke('update:check'),
   installUpdate: () => ipcRenderer.send('update:install'),
+  updateBusy: () => ipcRenderer.invoke('update:busy'),
   openReleases: () => ipcRenderer.send('update:open'),
   getChangelog: (force) => ipcRenderer.invoke('changelog:get', !!force),
   getUsage: () => ipcRenderer.invoke('usage:get'),

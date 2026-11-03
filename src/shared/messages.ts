@@ -51,6 +51,7 @@ import { swapMessages } from './swapMessages';
 import { termMessages } from './termMessages';
 import { terminalPanelMessages } from './terminalPanelMessages';
 import { updateMessages } from './updateMessages';
+import { updateWaitMessages } from './updateWaitMessages';
 import { usageMessages } from './usageMessages';
 import { uxMessages } from './uxMessages';
 import { waitingMessages } from './waitingMessages';
@@ -107,6 +108,7 @@ export const messages = {
   ...termMessages,
   ...terminalPanelMessages,
   ...updateMessages,
+  ...updateWaitMessages,
   ...usageMessages,
   ...uxMessages,
   ...waitingMessages,

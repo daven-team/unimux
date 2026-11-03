@@ -35,15 +35,22 @@ export type Modal =
   | { kind: 'agentPrompt'; tabId?: string }
   | { kind: 'dbConnection'; connectionId?: string; dbKind?: DbKind };
 
+/** One group of a dialog's list: a heading, the names it covers and what will happen to them ('kept': nothing is lost). */
+export interface DialogGroup { key: string; title: string; names: string[]; note: string; tone: 'wait' | 'kept' }
+
 export type Dialog = { id: number } & (
   | { kind: 'prompt'; title: string; value: string; placeholder?: string; onSubmit: (value: string) => void }
   | {
       kind: 'confirm';
       title: string;
       body: string;
-      actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean }>;
+      actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean; title?: string }>;
       /** A checkbox under the text (for example "do not ask again"); its state comes with the choice. */
       check?: string;
+      /** 1.1.2: a grouped list under the text (the update question: what would be interrupted, with the cell names). */
+      groups?: DialogGroup[];
+      /** The label of the button that closes the dialog without a choice (default "Anuluj"). */
+      cancelLabel?: string;
       onChoose: (value: string | null, checked?: boolean) => void;
     }
   | {
@@ -226,13 +233,14 @@ export function askText(title: string, value = '', placeholder?: string): Promis
 
 export function askChoice(
   title: string, body: string,
-  actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean }>,
+  actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean; title?: string }>,
+  extra: { groups?: DialogGroup[]; cancelLabel?: string } = {},
 ): Promise<string | null> {
   const id = replaceOpenDialog();
   return new Promise((resolve) => {
     setUi({
       dialog: {
-        id, kind: 'confirm', title, body, actions,
+        id, kind: 'confirm', title, body, actions, ...extra,
         onChoose: (v) => {
           pendingPrompt = null;
           setUi({ dialog: null });
