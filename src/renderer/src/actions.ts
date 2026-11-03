@@ -15,7 +15,7 @@ import { snapshotCellRects } from './gridMotion';
 import { sessionSearchPaths } from '../../shared/sessionTrack';
 import { sshSpecName, sshStartEffects } from '../../shared/ssh';
 import type { CellSession, Profile, SessionInfo, Snippet, Tab, Worktree, WorktreeInspection, WorktreeInspectResult, WorktreeRemoveResult } from '../../shared/types';
-import { askChoice, getS, getUi, setUi, toast, update } from './store';
+import { askChoice, getS, getUi, setUi, toast, update, type InstallThen } from './store';
 import { confirmCloseWorking } from './closeGuard';
 import { namesList, workingAgents } from '../../shared/agentWork';
 import { flushDrafts, showTerminalTabs } from './files';
@@ -306,9 +306,9 @@ export function showCliInstructions(cli: CliId): void {
 }
 
 /** "Zainstaluj": the single entry point of the install flow (cell card, new-grid banner, menus, palette). Opens the install window; nothing runs until the user confirms there. */
-export function offerInstall(cli: CliId): void {
+export function offerInstall(cli: CliId, then?: InstallThen): void {
   if (getUi().install?.locked) return; // an install is running: it is never replaced behind the user's back
-  setUi({ install: { cli, locked: false } });
+  setUi({ install: { cli, locked: false, ...(then ? { then } : {}) } });
 }
 
 export function restartCell(cellId: string, mode: 'new' | 'resume'): void {

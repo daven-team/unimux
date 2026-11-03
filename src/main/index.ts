@@ -82,10 +82,10 @@ import { accountsPanelInfo, claudeRefs, panelNotices } from './accounts/refs';
 import { cswapRosterPath, cswapWroteSince, readCswapRoster, type CswapRoster } from './accounts/cswap';
 import { readManagedIdentity } from './accounts/identity';
 import { migrateAccounts, type MigrationDeps } from './accounts/migrate';
-import { LoginManager } from './auth/login';
+import { LoginManager, type KnownIdentity } from './auth/login';
 import { identityRewritten, restoreProfile, snapshotProfile } from './auth/profileSnapshot';
-import { custodyOf, identityFields, type AccountIdentity, type LoginRequest } from '../shared/accounts';
-import { claudeCredentialsStamp, profileSource, readClaudeCredentials, readClaudeIdentity, readCodexCredentials, readLiveClaudeIdentity, systemCredentialSource } from './usage/credentials';
+import { compareIdentity, custodyOf, identityFields, type AccountIdentity, type LoginRequest } from '../shared/accounts';
+import { claudeCredentialsStamp, claudeLoginPresence, profileSource, readClaudeCredentials, readClaudeIdentity, readCodexCredentials, readSignedInClaudeIdentity, systemCredentialSource } from './usage/credentials';
 import { fetchClaude, fetchCodex, type FetcherDeps } from './usage/fetchers';
 import { UsageService } from './usage/service';
 import { LimitAlerter } from './limitAlerts';
@@ -369,10 +369,14 @@ let db: DbService<AppState> | null = null;
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const login = new LoginManager({
   store: accounts,
-  spawnPty: (spec) => ptyHost.spawn({
-    id: spec.id, cwd: homedir(), cols: 100, rows: 28,
-    env: { ...cleanEnv(process.env), ...spec.env }, shell: state.settings.shell, command: spec.command,
-  }),
+  // The CLI runs from where it was detected (an install made after the app started is not on the app's own PATH yet).
+  spawnPty: async (spec) => {
+    const cli = spec.command.startsWith('codex') ? 'codex' : 'claude';
+    const env = await cliDetector.applyEnv(cleanEnv(process.env), cli).catch(() => cleanEnv(process.env));
+    ptyHost.spawn({ id: spec.id, cwd: homedir(), cols: 100, rows: 28, env: { ...env, ...spec.env }, shell: state.settings.shell, command: spec.command });
+  },
+  cliMissing: async (provider) => (await cliDetector.get(provider, { waitMs: CLI_WAIT_MS }).catch(() => undefined))?.state === 'missing',
+  hasMainLogin: async () => process.platform === 'darwin' || (await claudeLoginPresence(usageDeps.credentials)) !== 'absent',
   killPty: (id) => ptyHost.kill(id),
   resetCredentialCache: () => usageDeps.credentials.resetKeychainCache?.(),
   fingerprint: async (provider, configDir) => {
@@ -392,12 +396,19 @@ const login = new LoginManager({
     return readClaudeIdentity(usageDeps.credentials);
   },
   knownIdentities: async () => {
-    // An unreadable live login must not hide the saved accounts from the duplicate check.
+    // An unreadable live login must not hide the saved accounts from the duplicate check. An identity in ~/.claude.json
+    // without a Claude login next to it (Claude Desktop, an earlier sign-in) is nobody signed in (readSignedInClaudeIdentity).
     const live = await readLiveIdentity().catch(() => null);
-    return [
-      ...(live ? [{ ...live, live: true }] : []),
-      ...accounts.list().filter((a) => custodyOf(a) !== 'quarantined').map((a) => ({ ...identityFields(a), recordId: a.id })),
-    ];
+    const liveRecordId = live ? accounts.live()?.recordId : undefined;
+    const records = accounts.list().filter((a) => custodyOf(a) !== 'quarantined');
+    const known: KnownIdentity[] = live ? [{ ...live, live: true }] : [];
+    for (const record of records) {
+      const holdsLive = !!live && (record.id === liveRecordId || compareIdentity(record, live) === 'same');
+      // A profile that holds no login at all (only a cleanly missing file counts) and is not the live login is no account.
+      const empty = !holdsLive && (await claudeLoginPresence(profileSource(usageDeps.credentials, accounts.dirOf(record.id))).catch(() => 'unknown' as const)) === 'absent';
+      known.push({ ...identityFields(record), recordId: record.id, ...(holdsLive ? { live: true } : {}), ...(empty ? { empty: true } : {}) });
+    }
+    return known;
   },
   snapshotProfile,
   restoreProfile,
@@ -444,8 +455,8 @@ const activateDeps = (): ActivateDeps => ({
   cswapWroteSince: (identity, roster, since) => cswapWroteSince(cswapRosterPath(homedir(), process.env, process.platform), roster, identity, since),
 });
 const guardDeps = { swapRunning: isSwapRunning, swapPending: () => hasPendingSwap(swapDeps()), swapPendingNow: () => isSwapUnresolved() || isActivationRecoveryPending(), readOnly: () => accounts.readOnly() };
-/** The live Claude login's identity (`~/.claude.json`), null when nobody is signed in; throws when the file cannot be read or parsed. */
-const readLiveIdentity = () => readLiveClaudeIdentity(usageDeps.credentials);
+/** The live Claude login's identity (`~/.claude.json`), null when nobody is signed in (also an identity without a Claude login next to it); throws when a file cannot be read or parsed. */
+const readLiveIdentity = () => readSignedInClaudeIdentity(usageDeps.credentials);
 /** One more try of a version-2 recovery that found Claude Code's locks busy (from the polls and from its own timer). */
 async function retryActivationRecovery(): Promise<void> {
   if (quitting) return; // no new account work once the app quits
@@ -475,7 +486,10 @@ const reconcileDeps = (): ReconcileDeps => {
       const path = cswapRosterPath(homedir(), process.env, process.platform);
       return cswapWroteSince(path, await readCswapRoster(path), identity, since);
     },
-    savedCopyDead: (record) => savedCopyDead(nodeSwapFs, accounts.dirOf(record.id), record),
+    // The "signed out" notice says the app kept its copy: a record without any saved login (1.1.1 adopted an identity Claude
+    // Desktop left in ~/.claude.json) has none to keep, so it gets no notice either, like a dead copy.
+    savedCopyDead: async (record) => (await savedCopyDead(nodeSwapFs, accounts.dirOf(record.id), record))
+      || (await claudeLoginPresence(profileSource(usageDeps.credentials, accounts.dirOf(record.id)))) === 'absent',
     now: () => Date.now(),
   };
 };
