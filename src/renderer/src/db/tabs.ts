@@ -523,6 +523,7 @@ export function initDbTabs(): void {
     // 1.0.8: the detached windows' tabs count too (they report their work; see closeGuard detachedWork).
     pending: () => { const away = detachedWork(); return openTransactions() + away.tx > 0 || stagedTabs() + away.staged > 0 || redisDraftTotal() + away.redis > 0; },
     ask: confirmQuitDatabase,
+    counts: () => databaseWork(),
     subscribe: (changed) => {
       useDbStore.subscribe((st, prev) => { if (st.sessions !== prev.sessions || st.tabSessions !== prev.tabSessions) changed(); });
       useFileStore.subscribe((st, prev) => { if (st.documents !== prev.documents) changed(); });

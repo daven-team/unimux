@@ -1841,6 +1841,9 @@ usage.onChange((snapshot) => send('usage:state', snapshot));
 guardedHandle('update:check', () => checkForUpdates(), () => undefined);
 ipcMain.handle('update:get', () => ({ ...getUpdateState(), currentVersion: app.getVersion() }));
 guardedOn('update:install', () => openInstallWindow());
+// 1.1.2: what main knows of the work an update would interrupt (the renderer asks before it starts an update): an account swap
+// or an account login in progress.
+guardedHandle('update:busy', () => ({ swap: isSwapRunning() || isCodexSwapRunning(), login: login.isActive() || codexLogin.isActive() }), () => ({ swap: false, login: false }));
 guardedOn('update:open', () => shell.openExternal(RELEASES_URL));
 /** `cursor` / `code` found on PATH, looked up without blocking main (a slow PATH on network drives) and kept for a few minutes. */
 let editorLookup: { at: number; found: Promise<string | undefined> } | undefined;

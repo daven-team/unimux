@@ -184,6 +184,8 @@ export interface McApi {
   getUpdate(): Promise<UpdateState & { currentVersion: string }>;
   checkUpdates(): Promise<void>;
   installUpdate(): void;
+  /** 1.1.2: an account swap or login in progress (the update question waits for it). */
+  updateBusy(): Promise<{ swap: boolean; login: boolean }>;
   openReleases(): void;
   getChangelog(force?: boolean): Promise<ChangelogResult>;
   getUsage(): Promise<UsageState>;

@@ -13,7 +13,7 @@ import { ptyHostRestartToast } from '../../../shared/ssh';
 import { addAgent, applyCliStatus, ensureStarted, flushPendingSaves, releaseCellTerminal, resetStarted, setAliveAtStart } from '../actions';
 import { alertForStatus } from '../alerts';
 import { adoptDocuments, portableDoc, reopenTarget, tabHandoff } from '../detach';
-import { activateFile, draftStorageKey, useFileStore, watchFilesOnDisk } from '../files';
+import { activateFile, draftStorageKey, isFileDirty, useFileStore, watchFilesOnDisk } from '../files';
 import { databaseWork, dbTabBusy, initDbTabs } from '../db/tabs';
 import { useDbStore } from '../db/dbClient';
 import { initRedis } from '../redis/redisClient';
@@ -172,11 +172,13 @@ async function boot(): Promise<void> {
   initWaitTracking();
 }
 
-/** This window's unsaved database work goes to the main window (its quit question counts it), whenever it changes. */
+/** This window's unsaved database and editor work goes to the main window (its quit and update questions count it), whenever it changes. */
 function reportWork(): void {
   let last = '';
   const send = () => {
-    const work = cleanWork(databaseWork());
+    // 1.1.2: its unsaved editor files and running saves too (the main window's update question lists them).
+    const docs = useFileStore.getState().documents;
+    const work = cleanWork({ ...databaseWork(), files: docs.filter(isFileDirty).length, saving: docs.filter((d) => d.saving).length });
     const key = JSON.stringify(work);
     if (key === last) return;
     last = key;
