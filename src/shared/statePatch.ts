@@ -69,7 +69,14 @@ export type Patch =
   /** Object: patched or added keys, deleted keys. */
   | { o: Record<string, Patch>; d?: string[] }
   /** Keyed array in its new order: an id = unchanged entry, `p` = patched entry, `v` = new entry. */
-  | { a: Array<string | { id: string; p: Patch } | { v: unknown }> };
+  | { a: Array<string | { id: string; p: Patch } | { v: unknown }> }
+  /**
+   * Keyed array that kept its order (1.1.2): `drop` entries left the front, `at` patches entries in place ([index in the new
+   * array, id, patch]) and `add` entries were appended. The usual shape of the MCP lists (a task changed, a message or an
+   * activity event appended, the oldest event dropped): it names only what changed, where `a` lists every id (500 tasks,
+   * 200 events: about 20 KB per MCP event).
+   */
+  | { s: { drop?: number; at?: Array<[number, string, Patch]>; add?: unknown[] } };
 
 /** What the renderer is told after every change: the new revision as a patch against `base` (revision - 1). */
 export type StateChange =
@@ -93,6 +100,8 @@ export function diffState(prev: unknown, next: unknown): Patch | null {
   }
   if (isKeyed(prev) && isKeyed(next)) {
     const before = new Map(prev.map((v) => [v.id, v]));
+    const ordered = keptOrder(prev, next, before);
+    if (ordered !== undefined) return ordered;
     const a = next.map((item): string | { id: string; p: Patch } | { v: unknown } => {
       const old = before.get(item.id);
       if (!old) return { v: item };
@@ -102,6 +111,27 @@ export function diffState(prev: unknown, next: unknown): Patch | null {
     return a.length === prev.length && a.every((op, i) => op === prev[i].id) ? null : { a };
   }
   return equal(prev, next) ? null : { v: next };
+}
+
+/**
+ * The `s` patch of a keyed array whose surviving entries kept their order: a dropped front, in-place changes and appended new
+ * entries. Null when the change has another shape (an entry removed from the middle or the end, a move, a reappearing id).
+ */
+function keptOrder(prev: Array<{ id: string }>, next: Array<{ id: string }>, before: Map<string, unknown>): Patch | null | undefined {
+  const firstKept = next.length && before.has(next[0].id) ? prev.findIndex((v) => v.id === next[0].id) : prev.length;
+  const kept = prev.length - firstKept;
+  if (next.length < kept) return undefined;
+  const at: Array<[number, string, Patch]> = [];
+  for (let i = 0; i < kept; i++) {
+    const old = prev[firstKept + i], item = next[i];
+    if (item.id !== old.id) return undefined;
+    const p = diffState(old, item);
+    if (p) at.push([i, item.id, p]);
+  }
+  const add = next.slice(kept);
+  if (add.some((item) => before.has(item.id))) return undefined;
+  if (!firstKept && !at.length && !add.length) return null;
+  return { s: { ...(firstKept ? { drop: firstKept } : {}), ...(at.length ? { at } : {}), ...(add.length ? { add } : {}) } };
 }
 
 export class PatchError extends Error {}
@@ -120,6 +150,17 @@ export function applyPatch(value: unknown, patch: Patch): unknown {
     return result;
   }
   if (!isKeyed(value)) throw new PatchError('patch of a list does not fit the value');
+  if ('s' in patch) {
+    const { drop = 0, at = [], add = [] } = patch.s;
+    if (drop > value.length) throw new PatchError('patch drops more entries than the list has');
+    const result: unknown[] = value.slice(drop);
+    for (const [index, id, p] of at) {
+      const found = result[index] as { id?: unknown } | undefined;
+      if (!found || found.id !== id) throw new PatchError(`missing entry ${id}`);
+      result[index] = applyPatch(found, p);
+    }
+    return [...result, ...add];
+  }
   const before = new Map(value.map((v) => [v.id, v]));
   return patch.a.map((op) => {
     if (typeof op === 'string') {

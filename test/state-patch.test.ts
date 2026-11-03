@@ -104,6 +104,54 @@ describe('state patches', () => {
   });
 });
 
+describe('keyed lists that kept their order (1.1.2: the MCP lists)', () => {
+  const item = (id: string, n = 0) => ({ id, n, text: `entry ${id}` });
+  const list = (count: number) => Array.from({ length: count }, (_, i) => item(`id-${i}`));
+
+  it('names only what changed: an appended entry, a dropped front, an entry changed in place', () => {
+    const before = { events: list(200), tasks: list(500) };
+    const appended = { ...before, events: [...before.events.slice(1), item('new')] };
+    const patch = diffState(before, appended)!;
+    expect(patch).toEqual({ o: { events: { s: { drop: 1, add: [item('new')] } } } });
+    expect(JSON.stringify(patch).length).toBeLessThan(80);
+    const changed = { ...before, tasks: before.tasks.map((t, i) => i === 321 ? { ...t, n: 7 } : t) };
+    expect(diffState(before, changed)).toEqual({ o: { tasks: { s: { at: [[321, 'id-321', { o: { n: { v: 7 } } }]] } } } });
+    expect(applyPatch(clone(before), diffState(before, changed)!)).toEqual(changed);
+    expect(applyPatch(clone(before), patch)).toEqual(appended);
+  });
+
+  it('falls back to the full id list for removals in the middle, moves and reappearing ids, and always round-trips', () => {
+    const random = rng(3);
+    let state = { items: list(30) };
+    for (let step = 0; step < 600; step++) {
+      let items = [...state.items];
+      switch (Math.floor(random() * 6)) {
+        case 0: items.push(item(`n-${step}`)); break;
+        case 1: items = items.slice(Math.floor(random() * 3)); break;
+        case 2: if (items.length) items[Math.floor(random() * items.length)] = { ...items[Math.floor(random() * items.length)], n: step }; break;
+        case 3: if (items.length > 2) items.splice(1 + Math.floor(random() * (items.length - 2)), 1); break;
+        case 4: if (items.length > 1) items.reverse(); break;
+        default: items = items.slice(0, Math.max(0, items.length - 1)); break;
+      }
+      // Ids stay unique (a keyed list); a duplicate from case 2 is replaced by its own entry.
+      const seen = new Set<string>();
+      items = items.filter((x) => !seen.has(x.id) && !!seen.add(x.id));
+      const next = { items };
+      const patch = diffState(state, next);
+      expect(patch ? applyPatch(clone(state), patch) : state, `step ${step}`).toEqual(next);
+      state = next;
+    }
+  });
+
+  it('refuses an in-place patch whose entry is not where the patch says (the renderer then asks for a snapshot)', () => {
+    const before = { items: list(5) };
+    const after = { items: before.items.map((t, i) => i === 2 ? { ...t, n: 1 } : t) };
+    const patch = diffState(before, after)!;
+    expect(() => applyPatch({ items: [item('x'), ...before.items] }, patch)).toThrow(/missing entry/);
+    expect(() => applyPatch({ items: [] }, { o: { items: { s: { drop: 3 } } } })).toThrow(/drops more/);
+  });
+});
+
 describe('pruned edits', () => {
   it('merge exactly like the full edit, also against a state that moved on meanwhile', () => {
     const random = rng(11);

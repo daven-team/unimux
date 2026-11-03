@@ -114,7 +114,7 @@ import { INSTALL_PTY_PREFIX } from '../shared/cliInstall';
 import { cliForProfile, CLI_NAMES, isCliId, missingCli, resolveExecFile, spawnDecision, type CliId, type CliStatus } from '../shared/cliStatus';
 import { automationSchemas, type AutomationOperation, type McpInfo } from '../shared/automation';
 import type { StateEdit } from '../shared/stateEdits';
-import { stateChange } from '../shared/statePatch';
+import { createStateBroadcaster, type StateBroadcaster } from './stateBroadcast';
 import { cellCwd, findCell, getProfile, patchSshCell, unlessRestoring } from '../shared/state';
 import { resumeForPhase, resumesConversation, type SshSessionState } from '../shared/ssh';
 import { automationHintForHook, automationStatusFor } from '../shared/runtimeStatus';
@@ -617,7 +617,8 @@ const updateStrings = (): UpdateStrings => ({
 });
 
 // The main window, and (1.0.6) the detached windows for the state and the messages of their own cells (detachedWindows.ts).
-const send = (channel: string, ...args: unknown[]) => { sendRouted(win, channel, args); };
+// Any other message waits for the batched state changes (stateBroadcast.ts): a message naming new cells never overtakes them.
+const send = (channel: string, ...args: unknown[]) => { if (channel !== 'state:changed') stateBroadcast?.flush(); sendRouted(win, channel, args); };
 /** The OS ends the session (Windows shutdown or log-off, macOS shutdown): nothing may hold the quit any more. */
 let sessionEndingAt: number | undefined;
 /** The OS announced a session end: quits within the next minute are never held, and an open question lets the quit go on. */
@@ -679,7 +680,9 @@ function forgetCell(id: string): void {
   void removeCellFiles(cellFileDirs, id);
   automation.forgetCell(id);
 }
-const controller = new StateController(state, (snapshot) => {
+/** Agents' MCP changes reach the windows in batches (one patch per burst, not per change). */
+let stateBroadcast: StateBroadcaster | undefined;
+const controller = new StateController(state, (snapshot, batch) => {
   if (snapshot.state.projects !== state.projects) {
     // One pass over each state (a lookup per cell was quadratic in the number of cells).
     const roles = cellIdsOf(snapshot.state, true, (cell) => !!cell.role);
@@ -697,8 +700,9 @@ const controller = new StateController(state, (snapshot) => {
   const key = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}:${limitPollingWanted(state.settings.alerts)}`;
   if (key !== usageKey) { usageKey = key; usage.reschedule(); }
   saver.save(state);
-  send('state:changed', stateChange(previous, snapshot));
+  stateBroadcast!.changed(snapshot, batch);
 });
+stateBroadcast = createStateBroadcaster({ initial: controller.snapshot(), send: (change) => send('state:changed', change) });
 const automation = new AutomationService(controller, {
   createWorktree,
   // Rolls back worktrees it has just created: nothing is in them yet, so the unforced removal goes through.
@@ -1247,7 +1251,7 @@ guardedHandle('codex:bind', async (_e, cellId: string, cwd: string) => {
 // ── ipc ─────────────────────────────────────────────────────────────────────
 
 ipcMain.handle('state:load', () => state);
-ipcMain.handle('state:snapshot', () => controller.snapshot());
+ipcMain.handle('state:snapshot', () => { stateBroadcast?.flush(); return controller.snapshot(); });
 // The answer is an acknowledgement; the new state reaches the renderer once, as the patch `state:changed` carries.
 // A foreign sender is refused the way an edit the controller rejects is: a rejected call.
 guardedHandle('state:edit', (_e, edit: StateEdit) => { const { revision, editId } = controller.apply(edit); return { revision, editId }; }, () => Promise.reject(new Error('Refused.')));

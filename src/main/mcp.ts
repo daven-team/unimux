@@ -21,6 +21,8 @@ export interface McpServerOptions {
   log?: (message: string) => void;
   /** Translates the texts the user reads in elicitations (the app language); English when absent. */
   tr?: McpToolContext['tr'];
+  /** How often a waiting wait_for sends progress to a client that asked for it (tests shorten it). */
+  progressEveryMs?: number;
 }
 const MAX_BODY = 256 * 1024;
 /** Sessions (clients that can answer elicitations) per token and in total; the oldest of a token is closed for a new one. */
@@ -102,6 +104,18 @@ function wantsSession(body: unknown): boolean {
     return !!elicitation && typeof elicitation === 'object' && ('form' in elicitation || Object.keys(elicitation).length === 0);
   });
 }
+/**
+ * A stateless tools/call that asks for progress (`_meta.progressToken`) from a client that accepts SSE: it is answered as an
+ * SSE stream, so the progress notifications of a long wait_for can travel before the result (a JSON answer has no room for them).
+ */
+function wantsProgress(body: unknown, accept: string | undefined): boolean {
+  if (!accept?.includes('text/event-stream')) return false;
+  return messagesOf(body).some((m) => {
+    const msg = m as { method?: unknown; params?: { _meta?: { progressToken?: unknown } } } | null;
+    const token = msg?.method === 'tools/call' ? msg.params?._meta?.progressToken : undefined;
+    return typeof token === 'string' || typeof token === 'number';
+  });
+}
 /** The body as text, or null when it is larger than MAX_BODY (it is still read to the end, so the 413 reaches the client). */
 function readBody(req: IncomingMessage): Promise<string | null> {
   return new Promise((resolve, reject) => {
@@ -128,12 +142,14 @@ export class UnimuxMcpServer {
   /** MCP tasks per token: another cell's token never sees them. */
   private taskStores = new Map<string, InMemoryTaskStore>();
   private info: McpInfo = { running: false };
-  private readonly limits: Required<Omit<McpServerOptions, 'log' | 'tr'>>;
+  private readonly limits: Required<Omit<McpServerOptions, 'log' | 'tr' | 'progressEveryMs'>>;
+  private readonly progressEveryMs: number | undefined;
   private readonly log: (message: string) => void;
   private readonly tr: McpToolContext['tr'];
   private readonly changeListeners = new Set<() => void>();
   constructor(private readonly service: AutomationService, options: McpServerOptions = {}) {
-    const { log, tr, ...limits } = options;
+    const { log, tr, progressEveryMs, ...limits } = options;
+    this.progressEveryMs = progressEveryMs;
     this.limits = { rateLimit: { burst: 120, perSecond: 60 }, maxInFlightPerToken: 8, maxInFlight: 256, now: () => performance.now(), ...limits };
     this.log = log ?? (() => undefined);
     this.tr = tr;
@@ -299,7 +315,7 @@ export class UnimuxMcpServer {
     }
 
     const server = this.buildServer(sdk, token, actorId, { abort });
-    const transport = new sdk.StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    const transport = new sdk.StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: !wantsProgress(body, req.headers.accept) });
     this.connections.add(server);
     res.once('close', () => {
       this.release(token, abort, controllers);
@@ -336,6 +352,10 @@ export class UnimuxMcpServer {
       const requestAbort = mode.session ? mode.session.requests.get(extra.requestId) : mode.abort;
       const signal = requestAbort ? AbortSignal.any([extra.signal, requestAbort.signal]) : extra.signal;
       const base = { service: this.service, actorId, tr: this.tr };
+      const progressToken = extra._meta?.progressToken;
+      const onProgress = progressToken === undefined ? undefined : (progress: number, total: number, message: string) => {
+        void extra.sendNotification({ method: 'notifications/progress', params: { progressToken, progress, total, message } }).catch(() => undefined);
+      };
       if (params.task) {
         if (!live()) throw new McpError(ErrorCode.InvalidRequest, 'Agent connection has expired.');
         if (!supportsTask(params.name)) throw new McpError(ErrorCode.MethodNotFound, `Tool ${params.name} does not run as a task.`);
@@ -346,7 +366,7 @@ export class UnimuxMcpServer {
       let value: unknown;
       try {
         if (!live()) throw new Error('Agent connection has expired.');
-        value = await callTool(params.name, params.arguments, { ...base, signal, elicit });
+        value = await callTool(params.name, params.arguments, { ...base, signal, elicit, onProgress, progressEveryMs: this.progressEveryMs });
         // Revoked while the call was running (a waiting wait_for is aborted by revokeCell): do not hand out the result.
         if (!live()) throw new Error('Agent connection has expired.');
       } catch (error) {

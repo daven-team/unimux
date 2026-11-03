@@ -46,6 +46,15 @@ for (const [name, args] of [['get_context', {}], ['list_agents', {}], ['read_inb
   sizes.push({ tool: name, error: !!r.isError, textChars: text.length, structuredChars: r.structuredContent ? JSON.stringify(r.structuredContent).length : 0, estTokens: tokens(text.length + (r.structuredContent ? JSON.stringify(r.structuredContent).length : 0)) });
 }
 console.table(sizes);
+// A worker calls read_inbox at the start and the end of every task: with 3 open tasks of ~2000 chars each, what the second call costs.
+{
+  const worker = await connect(h.reviewer.id);
+  for (let i = 0; i < 3; i++) await call(coordinator, 'create_task', { cellId: h.reviewer.id, title: `Repeat ${i}`, prompt: 'Change the module and its tests carefully. '.repeat(45) });
+  const chars = async (args) => (await call(worker, 'read_inbox', args)).content.map((c) => c.text ?? '').join('').length;
+  const first = await chars({}), second = await chars({}), full = await chars({ full: true });
+  console.table([{ read_inbox: '3 open tasks', firstChars: first, secondChars: second, secondTokens: tokens(second), fullChars: full }]);
+  await worker.close();
+}
 
 const time = async (n, concurrency) => {
   const lat = [];
