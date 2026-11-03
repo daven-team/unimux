@@ -1,5 +1,4 @@
 import { createHash } from 'crypto';
-import { statusStyleArgs } from './statusStyle';
 import { execFile, spawn } from 'child_process';
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, powerMonitor, safeStorage, shell, utilityProcess, type OpenDialogOptions, type WebContents } from 'electron';
 import { createQuitConfirm, isQuitAnswer, sessionEndingNow } from './quitConfirm';
@@ -887,7 +886,7 @@ function createWindow(): void {
     show: false,
     webPreferences: {
       // Sandboxed: the preload uses only contextBridge, ipcRenderer, webUtils and the sandbox's process object.
-      preload: join(__dirname, '../preload/index.js'), sandbox: true, contextIsolation: true, additionalArguments: statusStyleArgs(),
+      preload: join(__dirname, '../preload/index.js'), sandbox: true, contextIsolation: true,
       // Status ticks and alerts keep their 400 ms cadence and output keeps flowing while the window is minimized or covered;
       // the renderer stops drawing terminals on its own while minimized or hidden ('window:shown').
       backgroundThrottling: false,

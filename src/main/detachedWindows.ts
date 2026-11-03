@@ -19,7 +19,6 @@ import type { AppState } from '../shared/types';
 import { normalizeWaitMark, type WaitMark } from '../shared/waiting';
 import type { IpcGuard, IpcSenderEvent } from './ipcGuard';
 import { isFromWindow, isLive, safeSend } from './safeWindow';
-import { statusStyleArgs } from './statusStyle';
 
 export interface DetachedDeps {
   state(): AppState;
@@ -236,7 +235,7 @@ function createWindow(entry: DetachedWindow, state: AppState): void {
       : { titleBarOverlay: { color: '#0d0d0d', symbolColor: '#8a8a8a', height: DETACHED_TITLE_HEIGHT } }),
     show: false,
     // The same preload and sandbox as the main window (R9: main trusts only windows it created here).
-    webPreferences: { preload: d.preload, sandbox: true, contextIsolation: true, backgroundThrottling: false, spellcheck: false, additionalArguments: statusStyleArgs() },
+    webPreferences: { preload: d.preload, sandbox: true, contextIsolation: true, backgroundThrottling: false, spellcheck: false },
     ...(d.offscreen ? { skipTaskbar: true, focusable: false } : {}),
   });
   const id = entry.id;

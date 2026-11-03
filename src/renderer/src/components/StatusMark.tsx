@@ -4,27 +4,10 @@ import { useBlink } from '../blink';
 /**
  * One visual language for a status wherever it shows (the badges of a tab and a project, the mark on a cell's icon, the
  * status in the cell header): working, waiting for you (a finished turn), asking (a permission, a question, an MCP form),
- * an error, exited, idle. Colours: --st-* in statusStyles.css.
- *
- * TEMPORARY (1.1.2 review): three designs, picked with MC_STATUS_STYLE=a|b|c (src/main/statusStyle.ts); the one chosen stays
- * and the others go.
- *   a - crisp SVG marks (a turning arc, filled discs with a cut-out check, "!" and cross, a ring);
- *   b - plain dots (working breathes with the shared pulse);
- *   c - small rounded squares and a three-step activity mark for working.
+ * an error, exited, idle. Colours: --st-* in statusStyles.css. 1.1.2: crisp SVG marks (a turning arc, filled discs with a
+ * cut-out check, "!" and cross, a ring), each state with its own shape, so they read apart without the colour too.
  */
 export type StatusKind = 'working' | 'done' | 'ask' | 'error' | 'exited' | 'idle';
-export type StatusStyle = 'a' | 'b' | 'c';
-
-export const STATUS_STYLE: StatusStyle = (() => {
-  const picked = typeof window !== 'undefined' ? window.mc?.statusStyle : undefined;
-  return picked === 'a' || picked === 'b' || picked === 'c' ? picked : 'a';
-})();
-
-/** Puts the design on <html> (data-status-style) for the CSS. */
-export function applyStatusStyle(): void {
-  document.documentElement.dataset.statusStyle = STATUS_STYLE;
-}
-
 /** The kind of a cell's status for the mark. */
 export function statusKind(status: string, error: boolean, detailKind?: string): StatusKind {
   if (error) return 'error';
@@ -39,16 +22,8 @@ export function StatusMark({ kind, className = '' }: { kind: StatusKind; classNa
   // The working mark steps with the shared pulse (blink.ts): no CSS animation runs while agents work.
   useBlink(kind === 'working');
   const mask = `sm${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
-  const cls = `smark smark-${STATUS_STYLE} ${kind}${className ? ` ${className}` : ''}`;
-  if (STATUS_STYLE === 'b') return <span className={cls} aria-hidden="true" />;
-  if (STATUS_STYLE === 'c') {
-    return (
-      <span className={cls} aria-hidden="true">
-        {kind === 'working' ? <><i /><i /><i /></> : <i />}
-      </span>
-    );
-  }
-  // a: a 12-unit SVG drawn at the size the CSS gives it; the cut-outs are masks, so the mark sits on any background.
+  const cls = `smark ${kind}${className ? ` ${className}` : ''}`;
+  // A 12-unit SVG drawn at the size the CSS gives it; the cut-outs are masks, so the mark sits on any background.
   return (
     <span className={cls} aria-hidden="true">
       <svg viewBox="0 0 12 12" width="100%" height="100%">

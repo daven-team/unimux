@@ -48,8 +48,6 @@ export interface SpawnCellRequest {
 
 export interface McApi {
   platform: AppPlatform;
-  /** TEMPORARY (1.1.2 review): the status indicator design picked by MC_STATUS_STYLE (a, b or c), if any. */
-  statusStyle?: string;
   loadState(): Promise<AppState>;
   loadSnapshot(): Promise<StateSnapshot>;
   applyStateEdit(edit: StateEdit): Promise<StateAck>;

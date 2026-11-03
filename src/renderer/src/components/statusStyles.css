@@ -2,8 +2,7 @@
    header. One palette for every place, less saturated than the old pills; whole-pixel sizes (8 and 12 px stay whole at
    100, 125, 150 and 200 % scaling). No infinite animation: a working mark steps with the shared pulse of blink.ts
    (data-pulse on <html>, four phases of 320 ms, only while a working mark is shown), and the first turn of the arc (a) is
-   a finite animation. Under reduced motion (no pulse) every mark stands still.
-   TEMPORARY (1.1.2 review): three designs under :root[data-status-style="a|b|c"] (MC_STATUS_STYLE); one stays. */
+   a finite animation. Under reduced motion (no pulse) every mark stands still. */
 :root {
   --st-working: #d8a650;
   --st-done: #5fbf86;
@@ -34,67 +33,17 @@
 /* ── the header: plain small text with its mark ──────────────────────────────────────────────────────────────────── */
 .terminal-cell .cell-head .status-text.exited { color: var(--muted); }
 
-/* ════ a: crisp SVG marks ═══════════════════════════════════════════════════════════════════════════════════════ */
-.smark-a { width: 12px; height: 12px; }
-.smark-a.working .arc { transform-origin: 6px 6px; animation: smark-turn .8s linear 4; }
+/* ── the marks: 12 px SVGs ───────────────────────────────────────────────────────────────────────────────────────── */
+.smark { width: 12px; height: 12px; }
+.smark.working .arc { transform-origin: 6px 6px; animation: smark-turn .8s linear 4; }
 @keyframes smark-turn { to { transform: rotate(360deg); } }
 /* Then quarter turns with the shared pulse (the finite turn, while it runs, wins over these). */
-:root[data-pulse="1"] .smark-a.working .arc { transform: rotate(90deg); }
-:root[data-pulse="2"] .smark-a.working .arc { transform: rotate(180deg); }
-:root[data-pulse="3"] .smark-a.working .arc { transform: rotate(270deg); }
-.terminal-cell .cell-icon .cell-dot.smark-a { right: -3px; bottom: -3px; }
-:root[data-status-style="a"] .terminal-cell .cell-head .status-text.error { color: #f0a3a3; }
-
-/* ════ b: plain dots ════════════════════════════════════════════════════════════════════════════════════════════ */
-.smark-b { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-.smark-b.exited { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
-.smark-b.idle { width: 6px; height: 6px; margin: 1px; }
-/* Asking: the dot with a thin ring around it, so it reads apart from a finished turn without the colour. */
-.smark-b.ask { box-shadow: 0 0 0 2px var(--smark-ground, var(--bg-1)), 0 0 0 3px currentColor; width: 6px; height: 6px; margin: 1px; }
-/* Working breathes: four still steps of the shared pulse, opacity only. */
-:root[data-pulse="1"] .smark-b.working { opacity: .8; }
-:root[data-pulse="2"] .smark-b.working { opacity: .5; }
-:root[data-pulse="3"] .smark-b.working { opacity: .8; }
-.terminal-cell .cell-icon .cell-dot.smark-b { right: -2px; bottom: -2px; background: currentColor; }
-.terminal-cell .cell-icon .cell-dot.smark-b.exited { background: var(--cell-head-bg); }
-.terminal-cell .cell-icon .cell-dot.smark-b.ask { --smark-ground: var(--cell-head-bg); right: -1px; bottom: -1px; }
-.terminal-cell .cell-head .status-text .smark-b.ask { --smark-ground: var(--cell-head-bg); }
-.tab.active .smark-b.ask { --smark-ground: var(--bg-3); }
-.badge .smark-b { width: 6px; height: 6px; }
-.badge .smark-b.exited { box-shadow: inset 0 0 0 1px currentColor; }
-:root[data-status-style="b"] .terminal-cell .cell-head .status-text { gap: 7px; }
-:root[data-status-style="b"] .terminal-cell .cell-head .status-text.working { color: color-mix(in srgb, var(--st-working) 70%, var(--text-2)); }
-:root[data-status-style="b"] .terminal-cell .cell-head .status-text.done { color: color-mix(in srgb, var(--st-done) 70%, var(--text-2)); }
-:root[data-status-style="b"] .terminal-cell .cell-head .status-text.ask { color: color-mix(in srgb, var(--st-ask) 70%, var(--text-2)); }
-:root[data-status-style="b"] .terminal-cell .cell-head .status-text.error { color: color-mix(in srgb, var(--st-error) 80%, var(--text-2)); }
-
-/* ════ c: rounded squares, a three-step activity mark, an outlined header chip ═════════════════════════════════ */
-.smark-c { width: 8px; height: 8px; }
-.smark-c > i { position: absolute; inset: 0; border-radius: 2px; background: currentColor; }
-.smark-c.exited > i { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
-.smark-c.ask > i { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
-.smark-c.ask > i::after { content: ''; position: absolute; inset: 3px; border-radius: 1px; background: currentColor; }
-.smark-c.idle > i { inset: 1px; opacity: .8; }
-/* Working: three bars; the shared pulse lights one after another (the fourth step rests), opacity only. */
-.smark-c.working { display: inline-flex; gap: 2px; width: 10px; }
-.smark-c.working > i { position: static; width: 2px; height: 8px; border-radius: 1px; }
-:root[data-pulse] .smark-c.working > i { opacity: .28; }
-:root[data-pulse="1"] .smark-c.working > i:nth-child(1),
-:root[data-pulse="2"] .smark-c.working > i:nth-child(2),
-:root[data-pulse="3"] .smark-c.working > i:nth-child(3) { opacity: 1; }
-:root[data-pulse="0"] .smark-c.working > i { opacity: .55; }
-.terminal-cell .cell-icon .cell-dot.smark-c { right: -2px; bottom: -2px; border-radius: 3px; }
-.badge .smark-c:not(.working) { width: 7px; height: 7px; }
-:root[data-status-style="c"] .terminal-cell .cell-head .status-text {
-  height: 20px; padding: 0 7px; gap: 6px; border-radius: 5px;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 22%, transparent);
-}
-:root[data-status-style="c"] .terminal-cell .cell-head .status-text.working { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st-working) 34%, transparent); }
-:root[data-status-style="c"] .terminal-cell .cell-head .status-text.done { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st-done) 34%, transparent); }
-:root[data-status-style="c"] .terminal-cell .cell-head .status-text.ask { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st-ask) 40%, transparent); color: var(--text); }
-:root[data-status-style="c"] .terminal-cell .cell-head .status-text.error { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st-error) 40%, transparent); color: #f0a3a3; }
-:root[data-status-style="c"] .terminal-cell .cell-head .status-text.ssh { padding: 0; box-shadow: none; }
+:root[data-pulse="1"] .smark.working .arc { transform: rotate(90deg); }
+:root[data-pulse="2"] .smark.working .arc { transform: rotate(180deg); }
+:root[data-pulse="3"] .smark.working .arc { transform: rotate(270deg); }
+.terminal-cell .cell-icon .cell-dot.smark { right: -3px; bottom: -3px; }
+.terminal-cell .cell-head .status-text.error { color: #f0a3a3; }
 
 @media (prefers-reduced-motion: reduce) {
-  .smark-a.working .arc { animation: none; }
+  .smark.working .arc { animation: none; }
 }
