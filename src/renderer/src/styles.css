@@ -1114,6 +1114,7 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 
 .modal.auth { width: 720px; }
 .auth-note { padding: 0 16px 10px; font-size: 12px; line-height: 1.5; }
+.auth-paste-note { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 /* A flex basis, not a fixed height: in a short window the terminal shrinks so the modal (max 82vh) needs no scrolling. */
 .auth-terminal { flex: 0 1 min(300px, 45vh); min-height: 96px; margin: 0 16px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--card-bg); padding: 6px; overflow: hidden; }
 .auth-status { display: flex; align-items: center; gap: 8px; padding: 10px 16px 12px; font-size: 12.5px; }

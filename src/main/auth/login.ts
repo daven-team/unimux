@@ -6,15 +6,24 @@ import { LiveBackupFailed } from '../accounts/reconcile';
 import type { AccountsStore } from '../accounts/store';
 import type { ProfileSnapshot } from './profileSnapshot';
 
-/** An account the app knows: the live login (`live`) or a saved record. */
-export interface KnownIdentity extends AccountIdentity { recordId?: string; live?: boolean }
+/**
+ * An account the app knows: the live login (`live`, also a record holding it) or a saved record. `empty`: a record whose
+ * profile holds no Claude login at all and that is not the signed-in live login (an identity left in `~/.claude.json` by
+ * Claude Desktop or an earlier sign-in, adopted without credentials). It never blocks a login as a duplicate; a new login of
+ * that account replaces it.
+ */
+export interface KnownIdentity extends AccountIdentity { recordId?: string; live?: boolean; empty?: boolean }
 /** What a finished login changed, so the usage panel reads exactly that account at once. */
 export interface LoginChange { provider: 'claude' | 'codex'; recordId?: string; ownChange?: boolean }
 
 export interface LoginDeps {
   store: AccountsStore;
   /** Starts the login command in a pty; `env` holds only the extra variables. */
-  spawnPty(spec: { id: string; env: Record<string, string>; command: string }): void;
+  spawnPty(spec: { id: string; env: Record<string, string>; command: string }): void | Promise<void>;
+  /** True when the provider's CLI is known not to be installed: the login does not start (`cliMissing`), the app offers the install. */
+  cliMissing?(provider: 'claude' | 'codex'): Promise<boolean>;
+  /** False when Claude Code has no main login (nothing in `~/.claude/.credentials.json`): a new account is offered as main. */
+  hasMainLogin?(): Promise<boolean>;
   killPty(id: string): void;
   /** Fingerprint (never the token) of the credentials the login writes, or null when there are none yet. */
   fingerprint(provider: 'claude' | 'codex', configDir: string | undefined): Promise<string | null>;
@@ -108,6 +117,12 @@ export class LoginManager {
     } else if (target.type !== 'new' && target.type !== 'main') {
       return invalid;
     }
+    // A missing CLI would only print "command not found" in the login terminal: the renderer offers the install instead.
+    if (this.deps.cliMissing) {
+      let missing = false;
+      try { missing = (await this.deps.cliMissing(provider)) === true; } catch { missing = false; }
+      if (missing) return { ok: false, error: 'cliMissing' };
+    }
 
     if (this.current) this.cancel(this.current.id);
 
@@ -175,7 +190,7 @@ export class LoginManager {
     if (session.ended) return { ok: false, error: 'cancelled' };
 
     try {
-      this.deps.spawnPty({
+      await this.deps.spawnPty({
         id: session.ptyId,
         // A user-level token or API key must not override the profile's own login.
         env: session.configDir ? { CLAUDE_CONFIG_DIR: session.configDir, CLAUDE_CODE_OAUTH_TOKEN: '', ANTHROPIC_API_KEY: '' } : {},
@@ -186,6 +201,8 @@ export class LoginManager {
       this.discard(session);
       return { ok: false, error: 'spawn' };
     }
+    // Cancelled while the terminal was being started: it must not keep running behind a closed dialog.
+    if (session.ended) { this.kill(session); return { ok: false, error: 'cancelled' }; }
 
     session.poll = setInterval(() => void this.tick(session), this.deps.pollMs ?? 1500);
     session.timeout = setTimeout(() => this.onTimeout(session), this.deps.timeoutMs ?? 600000);
@@ -360,16 +377,29 @@ export class LoginManager {
     try { known = await this.deps.knownIdentities(); } catch { known = []; }
     if (session.ended) return;
     const self = target.type === 'account' ? target.id : undefined;
-    if (known.some((k) => k.recordId !== self && compareIdentity(k, identity) === 'same')) {
+    // The live login has no record id: it is compared too (a re-login of a card skips only that card itself).
+    const sameAccount = known.filter((k) => (self === undefined || k.recordId !== self) && compareIdentity(k, identity) === 'same');
+    // Only a login the app really holds is a duplicate: the signed-in live login or a saved card with a login in it.
+    const holder = sameAccount.find((k) => k.live && !k.empty) ?? sameAccount.find((k) => !k.empty);
+    if (holder) {
       if (!(await this.restoreOrReport(session, email, expected))) return;
-      this.finish(session, { sessionId: session.id, status: 'duplicate', ...(email ? { email } : {}) }, true);
+      const named = holder.email ?? email;
+      this.finish(session, { sessionId: session.id, status: 'duplicate', ...(named ? { email: named } : {}), duplicateOf: holder.live ? 'main' : 'saved' }, true);
       return;
     }
     if (target.type === 'new') {
+      let offerMain = false;
+      try { offerMain = this.deps.hasMainLogin ? !(await this.deps.hasMainLogin()) : false; } catch { offerMain = false; }
+      if (session.ended) return;
       const recordId = session.pendingId as string;
       this.deps.store.commit({ id: recordId, addedAt: Date.now(), ...identityFields(identity), custody: 'app', family: 'own' });
       session.pendingId = undefined;
-      this.finish(session, { sessionId: session.id, status: 'success', ...(email ? { email } : {}) }, false);
+      // Records of this account without any login (see KnownIdentity.empty) are replaced by the new one, so one card is left.
+      for (const stale of sameAccount) {
+        if (!stale.empty || !stale.recordId || stale.recordId === recordId) continue;
+        try { this.deps.store.remove(stale.recordId); } catch { /* read-only: the empty record stays hidden */ }
+      }
+      this.finish(session, { sessionId: session.id, status: 'success', ...(email ? { email } : {}), recordId, ...(offerMain ? { offerMain: true as const } : {}) }, false);
       this.deps.onChanged({ provider: 'claude', recordId });
       return;
     }

@@ -171,6 +171,9 @@ async function exchange(deps: ActivateDeps, fs: SwapFs, paths: Paths, roster: Cs
   const liveAccount = liveJson && isRecord(liveJson.data.oauthAccount) ? liveJson.data.oauthAccount : null;
   const liveIdentity = identityFromOauthAccount(liveAccount);
   const identified = !!liveAccount && (!!liveIdentity.email || !!liveIdentity.accountUuid);
+  // 1.1.2: an identity in the config without any Claude login in the credentials file (left there by Claude Desktop or an
+  // earlier sign-in) is nobody signed in: it is neither "already main" nor an outgoing account (see readSignedInClaudeIdentity).
+  const signedIn = identified && !!liveCreds && isRecord(liveCreds.data.claudeAiOauth);
   // Claude Code's config holds far more than the login: it is never created here.
   if (!liveJson) throw new Fail('noMain');
   // A usable live login is saved into its record first, so it must be known whose it is.
@@ -184,7 +187,7 @@ async function exchange(deps: ActivateDeps, fs: SwapFs, paths: Paths, roster: Cs
   // Checked again under the locks against whoever is signed in right now (the stored live identity may lag behind).
   const target = store.get(targetId);
   const targetSnap = await readSnap(fs, join(dir, '.credentials.json'));
-  const refusal = activationRefusal(target, identified ? liveIdentity : null, roster, freshAt(targetSnap, deps.now()));
+  const refusal = activationRefusal(target, signedIn ? liveIdentity : null, roster, freshAt(targetSnap, deps.now()));
   if (refusal || !target) throw new Fail(refusal?.error ?? 'noTarget', refusal?.email);
   const targetOauth = oauthOf(targetSnap);
   if (!validOauth(targetOauth)) throw new Fail('noTarget', target.email);
@@ -194,7 +197,8 @@ async function exchange(deps: ActivateDeps, fs: SwapFs, paths: Paths, roster: Cs
     : { emailAddress: target.email, ...(target.org ? { organizationName: target.org } : {}), ...(target.accountUuid ? { accountUuid: target.accountUuid } : {}), ...(target.organizationUuid ? { organizationUuid: target.organizationUuid } : {}) };
   // The outgoing login goes into its own record (the one the app knows as live first); an account the app did not know
   // gets one, so a login is never dropped. Without a usable login the record (if any) keeps its own saved copy.
-  const same = identified ? store.list().filter((r) => custodyOf(r) !== 'quarantined' && compareIdentity(r, liveIdentity) === 'same') : [];
+  // Never the target itself: with a leftover identity of its own account (no login, see signedIn) it is not an outgoing one.
+  const same = identified ? store.list().filter((r) => r.id !== targetId && custodyOf(r) !== 'quarantined' && compareIdentity(r, liveIdentity) === 'same') : [];
   const named = store.live()?.recordId;
   const existing = same.find((r) => r.id === named) ?? same.find((r) => custodyOf(r) === 'live') ?? same[0];
   // The live login changed after the profile locks were chosen: its record is not locked, so try again later.

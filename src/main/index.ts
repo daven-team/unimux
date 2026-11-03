@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { execFile, spawn } from 'child_process';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, safeStorage, shell, utilityProcess, type NativeImage, type OpenDialogOptions, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, powerMonitor, safeStorage, shell, utilityProcess, type OpenDialogOptions, type WebContents } from 'electron';
 import { createQuitConfirm, isQuitAnswer, sessionEndingNow } from './quitConfirm';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { homedir, hostname } from 'os';
@@ -82,10 +82,10 @@ import { accountsPanelInfo, claudeRefs, panelNotices } from './accounts/refs';
 import { cswapRosterPath, cswapWroteSince, readCswapRoster, type CswapRoster } from './accounts/cswap';
 import { readManagedIdentity } from './accounts/identity';
 import { migrateAccounts, type MigrationDeps } from './accounts/migrate';
-import { LoginManager } from './auth/login';
+import { LoginManager, type KnownIdentity } from './auth/login';
 import { identityRewritten, restoreProfile, snapshotProfile } from './auth/profileSnapshot';
-import { custodyOf, identityFields, type AccountIdentity, type LoginRequest, type SwapResult } from '../shared/accounts';
-import { claudeCredentialsStamp, profileSource, readClaudeCredentials, readClaudeIdentity, readCodexCredentials, readLiveClaudeIdentity, systemCredentialSource } from './usage/credentials';
+import { compareIdentity, custodyOf, identityFields, type AccountIdentity, type LoginRequest, type SwapResult } from '../shared/accounts';
+import { claudeCredentialsStamp, claudeLoginPresence, profileSource, readClaudeCredentials, readClaudeIdentity, readCodexCredentials, readSignedInClaudeIdentity, systemCredentialSource } from './usage/credentials';
 import { fetchClaude, fetchCodex, type FetcherDeps } from './usage/fetchers';
 import { UsageService } from './usage/service';
 import { LimitAlerter } from './limitAlerts';
@@ -132,7 +132,6 @@ import { loadEventSound } from './alertSound';
 import { notificationActions, notificationOptions } from './notifyOptions';
 import { createTaskbar } from './taskbar';
 import { isCellStatus, isStatusReason } from '../shared/taskbarState';
-import { BADGE_SCALES, badgePngs, BADGE_SIZE, fontBadgeScript, parseFontBadges } from './badgeImage';
 import { isPermissionAnswer, isPermissionToken } from '../shared/permissionAction';
 import { migrateDataDir } from './dataDirMigration';
 import { updateWindowAlive } from './updateRuntime';
@@ -425,10 +424,14 @@ let db: DbService<AppState> | null = null;
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const login = new LoginManager({
   store: accounts,
-  spawnPty: (spec) => ptyHost.spawn({
-    id: spec.id, cwd: homedir(), cols: 100, rows: 28,
-    env: { ...cleanEnv(process.env), ...spec.env }, shell: state.settings.shell, command: spec.command,
-  }),
+  // The CLI runs from where it was detected (an install made after the app started is not on the app's own PATH yet).
+  spawnPty: async (spec) => {
+    const cli = spec.command.startsWith('codex') ? 'codex' : 'claude';
+    const env = await cliDetector.applyEnv(cleanEnv(process.env), cli).catch(() => cleanEnv(process.env));
+    ptyHost.spawn({ id: spec.id, cwd: homedir(), cols: 100, rows: 28, env: { ...env, ...spec.env }, shell: state.settings.shell, command: spec.command });
+  },
+  cliMissing: async (provider) => (await cliDetector.get(provider, { waitMs: CLI_WAIT_MS }).catch(() => undefined))?.state === 'missing',
+  hasMainLogin: async () => process.platform === 'darwin' || (await claudeLoginPresence(usageDeps.credentials)) !== 'absent',
   killPty: (id) => ptyHost.kill(id),
   resetCredentialCache: () => usageDeps.credentials.resetKeychainCache?.(),
   fingerprint: async (provider, configDir) => {
@@ -448,12 +451,19 @@ const login = new LoginManager({
     return readClaudeIdentity(usageDeps.credentials);
   },
   knownIdentities: async () => {
-    // An unreadable live login must not hide the saved accounts from the duplicate check.
+    // An unreadable live login must not hide the saved accounts from the duplicate check. An identity in ~/.claude.json
+    // without a Claude login next to it (Claude Desktop, an earlier sign-in) is nobody signed in (readSignedInClaudeIdentity).
     const live = await readLiveIdentity().catch(() => null);
-    return [
-      ...(live ? [{ ...live, live: true }] : []),
-      ...accounts.list().filter((a) => custodyOf(a) !== 'quarantined').map((a) => ({ ...identityFields(a), recordId: a.id })),
-    ];
+    const liveRecordId = live ? accounts.live()?.recordId : undefined;
+    const records = accounts.list().filter((a) => custodyOf(a) !== 'quarantined');
+    const known: KnownIdentity[] = live ? [{ ...live, live: true }] : [];
+    for (const record of records) {
+      const holdsLive = !!live && (record.id === liveRecordId || compareIdentity(record, live) === 'same');
+      // A profile that holds no login at all (only a cleanly missing file counts) and is not the live login is no account.
+      const empty = !holdsLive && (await claudeLoginPresence(profileSource(usageDeps.credentials, accounts.dirOf(record.id))).catch(() => 'unknown' as const)) === 'absent';
+      known.push({ ...identityFields(record), recordId: record.id, ...(holdsLive ? { live: true } : {}), ...(empty ? { empty: true } : {}) });
+    }
+    return known;
   },
   snapshotProfile,
   restoreProfile,
@@ -547,8 +557,8 @@ const activateDeps = (): ActivateDeps => ({
   cswapWroteSince: (identity, roster, since) => cswapWroteSince(cswapRosterPath(homedir(), process.env, process.platform), roster, identity, since),
 });
 const guardDeps = { swapRunning: isSwapRunning, swapPending: () => hasPendingSwap(swapDeps()), swapPendingNow: () => isSwapUnresolved() || isActivationRecoveryPending(), readOnly: () => accounts.readOnly() };
-/** The live Claude login's identity (`~/.claude.json`), null when nobody is signed in; throws when the file cannot be read or parsed. */
-const readLiveIdentity = () => readLiveClaudeIdentity(usageDeps.credentials);
+/** The live Claude login's identity (`~/.claude.json`), null when nobody is signed in (also an identity without a Claude login next to it); throws when a file cannot be read or parsed. */
+const readLiveIdentity = () => readSignedInClaudeIdentity(usageDeps.credentials);
 /** One more try of a version-2 recovery that found Claude Code's locks busy (from the polls and from its own timer). */
 async function retryActivationRecovery(): Promise<void> {
   if (quitting) return; // no new account work once the app quits
@@ -578,7 +588,10 @@ const reconcileDeps = (): ReconcileDeps => {
       const path = cswapRosterPath(homedir(), process.env, process.platform);
       return cswapWroteSince(path, await readCswapRoster(path), identity, since);
     },
-    savedCopyDead: (record) => savedCopyDead(nodeSwapFs, accounts.dirOf(record.id), record),
+    // The "signed out" notice says the app kept its copy: a record without any saved login (1.1.1 adopted an identity Claude
+    // Desktop left in ~/.claude.json) has none to keep, so it gets no notice either, like a dead copy.
+    savedCopyDead: async (record) => (await savedCopyDead(nodeSwapFs, accounts.dirOf(record.id), record))
+      || (await claudeLoginPresence(profileSource(usageDeps.credentials, accounts.dirOf(record.id)))) === 'absent',
     now: () => Date.now(),
   };
 };
@@ -636,44 +649,21 @@ const claimedCodex = new Set<string>();
 /** Live notifications - Windows drops click handlers of garbage-collected ones. */
 const notifications = new Set<Notification>();
 /**
- * 1.0.9: the taskbar button (Windows overlay with the number of agents waiting for you) and the
- * Dock badge (macOS); the statuses come from every window (cell:runtime), see taskbar.ts.
+ * 1.0.9: the Dock badge (macOS) with the number of agents waiting for you; the statuses come from every window
+ * (cell:runtime), see taskbar.ts.
  */
-const taskbar = createTaskbar<NativeImage>({
+const taskbar = createTaskbar({
   platform: process.platform,
   *cells() {
     for (const p of state.projects) for (const t of p.tabs) for (const c of t.cells) yield { id: c.id, muted: c.muted, agent: getProfile(state, c.profileId).cli !== 'shell' };
   },
   alive: () => alive,
   settings: () => state.settings.alerts,
-  setOverlay: (image, description) => { withLiveWindow(win, (w) => { try { w.setOverlayIcon(image, description); } catch { /* no taskbar button */ } }); },
   setDockBadge: (text) => { try { app.dock?.setBadge(text); } catch { /* no Dock */ } },
-  image: (label) => {
-    const image = nativeImage.createEmpty();
-    const drawn = fontBadges?.get(label);
-    if (drawn) {
-      BADGE_SCALES.forEach((scaleFactor, i) => { const size = Math.round(BADGE_SIZE * scaleFactor); image.addRepresentation({ scaleFactor, width: size, height: size, dataURL: drawn[i] }); });
-      return image;
-    }
-    for (const { scaleFactor, size, png } of badgePngs(label)) image.addRepresentation({ scaleFactor, width: size, height: size, buffer: png });
-    return image;
-  },
-  describe: (count) => (count > 9 ? tr('Ponad 9 agentów czeka na Ciebie') : tr('Agenci czekający na Ciebie: {count}', { count })),
   setTimer: (fn, ms) => setTimeout(fn, ms),
   clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
 });
 app.on('will-quit', () => taskbar.dispose());
-/** 1.1.0: the overlay badges drawn by the main window with the system font (null until drawn; the stroke digits stand in). */
-let fontBadges: Map<string, string[]> | null = null;
-function drawFontBadges(w: BrowserWindow): void {
-  if (process.platform !== 'win32' || fontBadges) return;
-  w.webContents.executeJavaScript(fontBadgeScript(), true).then((value: unknown) => {
-    const parsed = parseFontBadges(value);
-    if (!parsed) return;
-    fontBadges = parsed;
-    taskbar.redraw();
-  }).catch(() => { /* the stroke digits stay */ });
-}
 /** Only sessions explicitly chosen by the user authorize native message delivery. */
 const verifiedCodex = new Map<string, string>();
 let mcpError: string | undefined;
@@ -946,7 +936,7 @@ function createWindow(): void {
   // Windows ends the session without before-quit: the last changes are written now (the renderer was asked to send its own).
   win.on('query-session-end', () => { markSessionEnding(); send('app:before-quit'); });
   win.on('session-end', () => { saver.flush(); });
-  win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { drawFontBadges(win); ptyHost.connectRenderer(win.webContents); sftpHost.connectRenderer(win.webContents); dbHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
+  win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { ptyHost.connectRenderer(win.webContents); sftpHost.connectRenderer(win.webContents); dbHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };

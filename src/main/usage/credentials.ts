@@ -103,6 +103,51 @@ export async function readLiveClaudeIdentity(
   return identity.email || identity.accountUuid ? identity : null;
 }
 
+/** Whether a credentials file holds a Claude login: `unknown` when it exists but cannot be read or parsed right now. */
+export type ClaudeLoginPresence = 'present' | 'absent' | 'unknown';
+
+/**
+ * Whether `.credentials.json` of the source (CLAUDE_CONFIG_DIR, else `~/.claude`) holds a Claude login - a usable one or one
+ * Claude Code cleared as dead (both keep `claudeAiOauth`). A missing file or one with other entries only (MCP sign-ins) is
+ * `absent`. Never reads the Keychain and never exposes a token.
+ */
+export async function claudeLoginPresence(
+  source: Pick<CredentialSource, 'env' | 'home'>,
+  read: (path: string) => Promise<string> = (path) => readFile(path, 'utf8'),
+): Promise<ClaudeLoginPresence> {
+  if (source.env.CLAUDE_CODE_OAUTH_TOKEN?.trim()) return 'present';
+  const directory = source.env.CLAUDE_CONFIG_DIR?.trim() || join(source.home, '.claude');
+  let raw: string;
+  try {
+    raw = await read(join(directory, '.credentials.json'));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'absent' : 'unknown';
+  }
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { return 'unknown'; }
+  if (!isRecord(parsed)) return 'unknown';
+  return isRecord(parsed.claudeAiOauth) ? 'present' : 'absent';
+}
+
+/**
+ * Who is signed in to Claude Code, for the account roles and the duplicate check of a login. `~/.claude.json` alone does not
+ * make a login: Claude Desktop (its built-in Claude Code) and an earlier sign-in leave an `oauthAccount` there while
+ * `~/.claude/.credentials.json` holds no Claude login, and such an identity is nobody signed in (null). Throws
+ * `LiveIdentityUnknown` when either file cannot be read right now. On macOS the login is in the Keychain, so the config
+ * file decides there as before.
+ */
+export async function readSignedInClaudeIdentity(
+  source: Pick<CredentialSource, 'env' | 'home' | 'platform'>,
+  read: (path: string) => Promise<string> = (path) => readFile(path, 'utf8'),
+): Promise<AccountIdentity | null> {
+  const identity = await readLiveClaudeIdentity(source, read);
+  if (!identity || source.platform === 'darwin') return identity;
+  const presence = await claudeLoginPresence(source, read);
+  if (presence === 'unknown') throw new LiveIdentityUnknown();
+  return presence === 'present' ? identity : null;
+}
+
 export interface ClaudeCredentials {
   accessToken: string;
   expiresAt?: number;

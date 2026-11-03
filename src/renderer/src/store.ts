@@ -14,6 +14,9 @@ import type { CliId, CliStatusMap } from '../../shared/cliStatus';
 import type { DbKind } from '../../shared/db';
 import type { ConvExportSource } from '../../shared/convExport';
 
+/** What the install window does once the CLI is installed: the login it was opened for starts by itself. */
+export interface InstallThen { provider: CliId; target: LoginTarget }
+
 export type Modal =
   | { kind: 'grid'; projectId: string }
   | { kind: 'history'; projectId: string }
@@ -89,7 +92,7 @@ export interface Ui {
   /** Detected Claude Code / Codex binaries; a missing entry means "not checked yet" (never blocks a start). */
   cliStatus: CliStatusMap;
   /** The install window of a missing CLI; it sits above every modal. `locked` = an install runs (it cannot be dismissed by accident). */
-  install: { cli: CliId; locked: boolean } | null;
+  install: { cli: CliId; locked: boolean; then?: InstallThen } | null;
   /** Cells whose start was skipped because their CLI is not installed (they show the install card and start by themselves once it is found). */
   heldCells: Record<string, true>;
   /** Progress of the background loader while it still has cells to start (null otherwise). */
