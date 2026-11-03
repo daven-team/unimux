@@ -128,6 +128,11 @@ export interface LoginState {
   expected?: string;
   /** `restore`: the login was another account and the card's previous login could not be put back (`expected` names the card). */
   error?: 'timeout' | 'spawn' | 'identity' | 'restore';
+  /** `duplicate`: the login is the account signed in to Claude Code (`main`) or a saved card (`saved`); `email` names that one. */
+  duplicateOf?: 'main' | 'saved';
+  /** `success` of a new account: its record, and `offerMain` when Claude Code has no main login it could replace. */
+  recordId?: string;
+  offerMain?: true;
 }
 
 const ACCOUNT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
