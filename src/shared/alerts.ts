@@ -43,8 +43,13 @@ export interface LimitAlertSettings {
   resets: boolean;
 }
 
-/** The thresholds offered in the settings (used percent). */
-export const LIMIT_PERCENTS: readonly number[] = [50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100];
+/** 1.1.2: a threshold (used percent) is any whole number in this range; the settings pick it with a slider. */
+export const THRESHOLD_MIN = 1;
+export const THRESHOLD_MAX = 100;
+
+/** A saved threshold: a whole percent from THRESHOLD_MIN to THRESHOLD_MAX (every older choice of the fixed lists is one). */
+export const isThresholdPercent = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= THRESHOLD_MIN && value <= THRESHOLD_MAX;
 
 export function defaultLimitAlerts(): LimitAlertSettings {
   return { enabled: true, fiveHour: { enabled: true, percent: 80 }, sevenDay: { enabled: true, percent: 90 }, resets: false };
@@ -132,15 +137,13 @@ export function normalizeSoundChoice(value: unknown, fallback: SoundChoice): Sou
   return { ...fallback };
 }
 
-const isLimitPercent = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100;
-
 /** Reads saved limit warnings; every missing or corrupt field falls back to its default. */
 export function normalizeLimitAlerts(value: unknown): LimitAlertSettings {
   const r = isObject(value) ? value : {};
   const d = defaultLimitAlerts();
   const windowAlert = (raw: unknown, fallback: LimitWindowAlert): LimitWindowAlert => {
     const w = isObject(raw) ? raw : {};
-    return { enabled: typeof w.enabled === 'boolean' ? w.enabled : fallback.enabled, percent: isLimitPercent(w.percent) ? w.percent : fallback.percent };
+    return { enabled: typeof w.enabled === 'boolean' ? w.enabled : fallback.enabled, percent: isThresholdPercent(w.percent) ? w.percent : fallback.percent };
   };
   return {
     enabled: typeof r.enabled === 'boolean' ? r.enabled : d.enabled,

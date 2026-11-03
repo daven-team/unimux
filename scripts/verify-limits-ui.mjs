@@ -4,7 +4,7 @@
 // Checks: a restart with a 1.1.0 usage cache shows the expired and switched-out cards as "Sign-in expired" at once (never
 // their old numbers) and reads every account right away although the last reads were a minute ago; the refresh button reads
 // at once and spins until the reads are back; crossing the 5-hour threshold gives exactly one notification (not again on the
-// next read nor after a restart); a click on it opens the limits panel. Screenshots of the settings group and the panel.
+// next read nor after a restart); a click on it opens the limits panel. Screenshots of the settings group (Settings > Konta i limity since 1.1.2) and the panel.
 // Run: npm run build && node scripts/verify-limits-ui.mjs [shots dir]   (default: <tmp>/unimux-limits-shots)
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -143,7 +143,7 @@ try {
     ok(`the refresh button read support at once (${Date.now() - pressed} ms with a ${delayMs} ms slow server) and spun until the read was back`);
     await sleep(500);
     let notes = await shown(main);
-    if (notes.length !== 1 || notes[0].body !== `Konto support@example.com: limit 5 h wykorzystany w 85%, reset o ${new Date(Date.now() + 2 * 3_600_000).toLocaleTimeString('pl', { hour: '2-digit', minute: '2-digit' })}` || notes[0].title !== 'Limity kont AI') throw new Error(`notifications: ${JSON.stringify(notes)}`);
+    if (notes.length !== 1 || notes[0].body !== `Konto support@example.com: limit 5 h wykorzystany w 85%, reset o ${new Date(Date.now() + 2 * 3_600_000).toLocaleTimeString('pl', { hour: '2-digit', minute: '2-digit' })}` || notes[0].title !== 'Konta i limity') throw new Error(`notifications: ${JSON.stringify(notes)}`);
     ok(`one notification: "${notes[0].title}: ${notes[0].body}"`);
     await shoot(app, '3-after-refresh-85.png');
 
@@ -166,14 +166,14 @@ try {
     await app.until(`!document.querySelector('.sidebar.collapsed') && !!document.querySelector('.side-panel .usage-panel .usage-card')`, 'limits panel opened by the click');
     ok('a click on the notification unfolds the side panel with the limits');
 
-    // 5. Settings: the new group, screenshot.
+    // 5. Settings: the group in the "Konta i limity" section (1.1.2; the thresholds are sliders), screenshot.
     await app.click('.tb-btn[aria-label="Ustawienia"]');
-    await app.until(`[...document.querySelectorAll('.settings-nav [role=tab]')].some((t) => t.textContent.includes('Powiadomienia'))`, 'settings');
-    await app.click('.settings-nav [role=tab]', 'Powiadomienia');
+    await app.until(`[...document.querySelectorAll('.settings-nav [role=tab]')].some((t) => t.textContent === 'Konta i limity')`, 'settings');
+    await app.click('.settings-nav [role=tab]', 'Konta i limity');
     await app.until(`!!document.querySelector('#settings-limits-enabled')`, 'limit settings');
     const group = `[...document.querySelectorAll('.settings-group')].find((g) => g.querySelector('#settings-limits-enabled'))`;
-    const values = await app.evaluate(`({ on: document.querySelector('#settings-limits-enabled').checked, five: document.querySelector('#settings-limit-fiveHour-percent').textContent.trim(), seven: document.querySelector('#settings-limit-sevenDay-percent').textContent.trim(), resets: document.querySelector('#settings-limits-resets').checked })`);
-    if (JSON.stringify(values) !== JSON.stringify({ on: true, five: 'od 80%', seven: 'od 90%', resets: false })) throw new Error(`defaults: ${JSON.stringify(values)}`);
+    const values = await app.evaluate(`({ on: document.querySelector('#settings-limits-enabled').checked, five: document.querySelector('#settings-limit-fiveHour-percent').value, seven: document.querySelector('#settings-limit-sevenDay-percent').value, kind: document.querySelector('#settings-limit-fiveHour-percent').type, resets: document.querySelector('#settings-limits-resets').checked })`);
+    if (JSON.stringify(values) !== JSON.stringify({ on: true, five: '80', seven: '90', kind: 'range', resets: false })) throw new Error(`defaults: ${JSON.stringify(values)}`);
     await app.evaluate(`(() => { const g = ${group}; g.id = 'limits-group'; g.scrollIntoView(); return true; })()`);
     await shoot(app, '4-settings-limit-warnings.png', '#limits-group');
     await app.evaluate(`[...${group}.querySelectorAll('button')].find((b) => b.textContent === 'Test').click(), true`);

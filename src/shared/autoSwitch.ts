@@ -10,7 +10,7 @@
  * limit reset. With a primary account ("konto podstawowe") and "return after the reset" on, the app goes back to it once it
  * was left automatically and is usable again. When no account has room it stays and says so once per limit period.
  */
-import type { LimitWindowAlert } from './alerts';
+import { isThresholdPercent, type LimitWindowAlert } from './alerts';
 import type { MessageKey, MessageParams } from './i18n';
 import { cardState, effectivePercent, type ProviderUsage, type UsageProvider, type UsageWindow } from './usage';
 
@@ -35,7 +35,6 @@ export interface AutoSwitchSettings {
   returnHome: boolean;
 }
 
-export const AUTO_SWITCH_PERCENTS: readonly number[] = [80, 85, 90, 95, 97, 98, 99, 100];
 export const AUTO_SWITCH_COOLDOWNS: readonly number[] = [5, 15, 30, 60];
 
 export function defaultAutoSwitch(): AutoSwitchSettings {
@@ -46,7 +45,6 @@ export function defaultAutoSwitch(): AutoSwitchSettings {
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-const isPercent = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100;
 const isKey = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 160;
 
 function perProvider(value: unknown): Partial<Record<UsageProvider, string>> {
@@ -61,7 +59,7 @@ export function normalizeAutoSwitch(value: unknown): AutoSwitchSettings {
   const d = defaultAutoSwitch();
   const windowOf = (raw: unknown, fallback: LimitWindowAlert): LimitWindowAlert => {
     const w = isObject(raw) ? raw : {};
-    return { enabled: typeof w.enabled === 'boolean' ? w.enabled : fallback.enabled, percent: isPercent(w.percent) ? w.percent : fallback.percent };
+    return { enabled: typeof w.enabled === 'boolean' ? w.enabled : fallback.enabled, percent: isThresholdPercent(w.percent) ? w.percent : fallback.percent };
   };
   return {
     enabled: typeof r.enabled === 'boolean' ? r.enabled : d.enabled,
@@ -382,7 +380,7 @@ export function resetClock(resetsAt: number, language: string, nowMs: number, tr
 
 /** What the notifications and the panel say about a switch, an offer, no room anywhere or a failed attempt. */
 export function autoSwitchText(event: SwitchNotice, tr: Translate, language = 'pl', nowMs = Date.now()): { title: string; body: string } {
-  const title = tr('Limity kont AI');
+  const title = tr('Konta i limity');
   const to = nameOf(event.toEmail, event.provider);
   const from = nameOf(event.fromEmail, event.provider);
   const window = event.window === '7d' ? tr('7 dni') : '5 h';
@@ -401,10 +399,10 @@ export function autoSwitchText(event: SwitchNotice, tr: Translate, language = 'p
   }
 }
 
-/** The subtle state line of the limits panel: "Auto: wł. · wraca na A" / "Auto: wył.". */
+/** The subtle state line of the limits panel: "Switcher: wł. · wraca na A" / "Switcher: wył.". */
 export function autoSwitchStatus(settings: AutoSwitchSettings, provider: UsageProvider, memory: Pick<AutoSwitchMemory, 'away'> | undefined, tr: Translate): string {
-  if (!autoSwitchOn(settings, provider)) return tr('Auto: wył.');
-  const parts = [tr('Auto: wł.')];
+  if (!autoSwitchOn(settings, provider)) return tr('Switcher: wył.');
+  const parts = [tr('Switcher: wł.')];
   const target = settings.target[provider];
   parts.push(target ? tr('na {account}', { account: target }) : tr('największy zapas'));
   const primary = settings.primary[provider];

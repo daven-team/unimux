@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { updateSettings } from '../../../shared/state';
 import type { AccountNotice, LoginTarget } from '../../../shared/accounts';
 import { adoptCopyOffered, cardState, claudeLoginActions, diagnosticLabel, effectivePercent, formatDuration, makeMainOffered, shortAccountName, shortDuration, summaryAccounts, usageBand, usageDiagnostics, usageErrorKind, usageSummary, type ProviderUsage, type SetAsideAccount, type UsageProvider, type UsageWindow } from '../../../shared/usage';
@@ -11,7 +11,8 @@ import { openMenuAt } from './ContextMenu';
 import { IChevron, IPlus } from './icons';
 import { ProviderIcon } from './ProviderIcons';
 import { BusyRing, RefreshIcon, useHoldBusy } from './Spinner';
-import { AutoSwitchLine, openAutoSwitchMenu, setAutoSwitch, UsageResizeHandle, useUsageHeight } from './UsageAutoSwitch';
+import { SwitcherPopover } from './SwitcherPopover';
+import { AutoSwitchLine, setAutoSwitch, UsageResizeHandle, useUsageHeight } from './UsageAutoSwitch';
 import { enableAutoSwitch } from '../../../shared/autoSwitch';
 
 const DORMANT_NOTE = 'Token dostępu wygasł - Claude Code odświeży go przy najbliższym użyciu. Uruchom sesję Claude (albo wyślij wiadomość), a limity wrócą.';
@@ -300,6 +301,9 @@ export function UsagePanel() {
   // 1.1.2: the panel's own height (drag handle on its top edge), remembered across restarts.
   const [height, setHeight] = useUsageHeight();
   const section = useRef<HTMLElement>(null);
+  // 1.1.2: the Switcher card, anchored to the row (or the header switch) it was opened from.
+  const [switcherAnchor, setSwitcherAnchor] = useState<HTMLElement | null>(null);
+  const closeSwitcher = useCallback(() => setSwitcherAnchor(null), []);
   const [now, setNow] = useState(() => Date.now());
   const [refreshing, setRefreshing] = useState(false);
   const spinning = useHoldBusy(refreshing, 700);
@@ -459,28 +463,29 @@ export function UsagePanel() {
     hasCodex ? { label: tr('Dodaj konto Codex'), onClick: () => openAuth('codex', { type: 'new' }) } : { label: tr('Zaloguj się do Codex'), onClick: () => openAuth('codex', { type: 'main' }) },
   ]);
   return (
-    <section ref={section} className={`usage-panel ${height && !collapsed ? 'sized' : ''}`} aria-label={tr('Limity kont AI')} style={height && !collapsed ? { '--usage-height': `${height}px` } as CSSProperties : undefined}>
+    <section ref={section} className={`usage-panel ${height && !collapsed ? 'sized' : ''}`} aria-label={tr('Konta i limity')} style={height && !collapsed ? { '--usage-height': `${height}px` } as CSSProperties : undefined}>
       <div className="usage-head">
         {!collapsed && <UsageResizeHandle panel={section} onChange={setHeight} />}
-        <button className="usage-title" onClick={toggle} aria-expanded={!collapsed} title={collapsed ? tr('Rozwiń limity kont AI') : tr('Zwiń limity kont AI')}>
+        <button className="usage-title" onClick={toggle} aria-expanded={!collapsed} title={collapsed ? tr('Rozwiń konta i limity') : tr('Zwiń konta i limity')}>
           {/* The chevron points where the panel goes: up to expand, down to collapse. */}
           <span className={`usage-chevron ${collapsed ? 'up' : ''}`}><IChevron /></span>
-          {tr('Limity kont AI')}
+          <span className="usage-title-text">{tr('Konta i limity')}</span>
         </button>
         <button className="btn ghost icon" onClick={(e) => openAddMenu(e.currentTarget)} title={tr('Dodaj konto')} aria-label={tr('Dodaj konto')}><IPlus /></button>
         {/* 1.1.2: the automatic switch is switched on and off right here; the arrow opens its options. While it is on, the pill
             shows that a watcher looks after the limits of the main account. */}
         {autoAvailable && (
-          <label className={`usage-auto ${autoOn ? 'on' : ''}`} onContextMenu={(e) => { e.preventDefault(); openAutoSwitchMenu(e.currentTarget, settings.accountSwitch, visible, tr); }}
+          <label className={`usage-auto ${autoOn ? 'on' : ''}`} onContextMenu={(e) => { e.preventDefault(); setSwitcherAnchor(e.currentTarget); }}
             title={autoOn ? tr('Automatyczne przełączanie pilnuje limitów konta głównego i przełącza, gdy przekroczy próg. Kliknij, aby wyłączyć.') : tr('Włącz automatyczne przełączanie kont')}>
-            <span className="usage-auto-label">Auto</span>
+            <span className="usage-auto-label">{tr('Switcher')}</span>
             <input type="checkbox" role="switch" className="usage-auto-switch" checked={autoOn} aria-label={tr('Automatyczne przełączanie kont')}
               onChange={() => setAutoSwitch((current) => (current.enabled ? { ...current, enabled: false } : enableAutoSwitch(current, visible)))} />
           </label>
         )}
         <button className="btn ghost icon" onClick={() => void refresh()} disabled={spinning} title={tr('Odśwież limity')} aria-label={tr('Odśwież limity')}><RefreshIcon spinning={spinning} /></button>
       </div>
-      {!collapsed && <AutoSwitchLine settings={settings.accountSwitch} providers={visible} away={switchAway} />}
+      {!collapsed && <AutoSwitchLine settings={settings.accountSwitch} providers={visible} away={switchAway} open={!!switcherAnchor} onOpen={(el) => setSwitcherAnchor((current) => (current === el ? null : el))} />}
+      {switcherAnchor && <SwitcherPopover anchor={switcherAnchor} panel={section.current} settings={settings.accountSwitch} providers={visible} onClose={closeSwitcher} />}
       {collapsed && (shown.length ? (
         <div className="usage-mini-list">
           {shown.map((usage) => {

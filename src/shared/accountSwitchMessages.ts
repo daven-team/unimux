@@ -1,7 +1,15 @@
 // 1.1.2: the automatic switch of the main AI account at a limit, several Codex accounts and the resizable limits panel.
 export const accountSwitchMessages = {
-  'Auto: wył.': ['Auto: off', 'Auto: aus', 'Auto: desactivado', 'Auto : désactivé', 'Auto: desligado'],
-  'Auto: wł.': ['Auto: on', 'Auto: an', 'Auto: activado', 'Auto : activé', 'Auto: ligado'],
+  'Switcher: wył.': ['Switcher: off', 'Switcher: aus', 'Switcher: desactivado', 'Switcher : désactivé', 'Switcher: desligado'],
+  'Switcher: wł.': ['Switcher: on', 'Switcher: an', 'Switcher: activado', 'Switcher : activé', 'Switcher: ligado'],
+  // The label of the header switch of the limits panel: a product word, the same in every language.
+  'Switcher': ['Switcher', 'Switcher', 'Switcher', 'Switcher', 'Switcher'],
+  'Zapytaj': ['Ask', 'Fragen', 'Preguntar', 'Demander', 'Perguntar'],
+  'Największy zapas': ['Most room', 'Größte Reserve', 'Mayor margen', 'Plus de marge', 'Maior margem'],
+  'Pilnuje limitów konta głównego i przełącza, gdy przekroczy próg.': ['Watches the limits of the main account and switches when it crosses a threshold.', 'Überwacht die Limits des Hauptkontos und wechselt, wenn es eine Schwelle überschreitet.', 'Vigila los límites de la cuenta principal y cambia cuando supera un umbral.', 'Surveille les limites du compte principal et change quand il dépasse un seuil.', 'Vigia os limites da conta principal e troca quando ultrapassa um limiar.'],
+  'Wyłączony. Włącz, aby przełączać konto przy limicie.': ['Off. Turn it on to switch the account at a limit.', 'Aus. Einschalten, um das Konto bei einem Limit zu wechseln.', 'Desactivado. Actívalo para cambiar de cuenta al llegar a un límite.', 'Désactivé. Activez-le pour changer de compte à une limite.', 'Desligado. Ligue-o para trocar de conta num limite.'],
+  'Wszystkie ustawienia…': ['All settings…', 'Alle Einstellungen…', 'Todos los ajustes…', 'Tous les réglages…', 'Todas as definições…'],
+  'Switcher kont': ['Account switcher', 'Konto-Switcher', 'Switcher de cuentas', 'Switcher de comptes', 'Switcher de contas'],
   'Automatyczne przełączanie kont': ['Automatic account switching', 'Automatischer Kontowechsel', 'Cambio automático de cuenta', 'Changement automatique de compte', 'Troca automática de conta'],
   'Dodaj konto Codex': ['Add Codex account', 'Codex-Konto hinzufügen', 'Añadir cuenta de Codex', 'Ajouter un compte Codex', 'Adicionar conta Codex'],
   'Gdy jest konto z zapasem': ['When an account has room', 'Wenn ein Konto Reserve hat', 'Cuando una cuenta tiene margen', 'Quand un compte a de la marge', 'Quando uma conta tem margem'],
