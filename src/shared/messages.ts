@@ -1,5 +1,6 @@
 // Each row contains English, German, Spanish, French and Portuguese translations.
 // Polish uses the source message (the key). Placeholders must match across a row.
+import { accountSwitchMessages } from './accountSwitchMessages';
 import { agentModeMessages } from './agentModeMessages';
 import { agentWorkMessages } from './agentWorkMessages';
 import { alertMessages } from './alertMessages';
@@ -54,6 +55,7 @@ import { usageMessages } from './usageMessages';
 import { uxMessages } from './uxMessages';
 import { waitingMessages } from './waitingMessages';
 export const messages = {
+  ...accountSwitchMessages,
   ...agentModeMessages,
   ...agentWorkMessages,
   ...alertMessages,

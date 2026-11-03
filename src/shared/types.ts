@@ -2,6 +2,7 @@ import type { DetachedWindow } from './detached';
 import type { GridLayout } from './layout';
 import type { Language } from './languages';
 import type { AlertSettings } from './alerts';
+import type { AutoSwitchSettings } from './autoSwitch';
 import type { UpdateMode } from './updateMode';
 import type { AgentRole, AutomationState } from './automation';
 import type { BackgroundLoadMode } from './backgroundLoad';
@@ -198,6 +199,8 @@ export interface Settings {
   usageCollapsed: boolean;
   /** Notifications and sounds for the agent events (finished, needs you, error); replaces the retired `notifications` and `waitingSound*` keys. */
   alerts: AlertSettings;
+  /** 1.1.2: switching the main Claude (and optionally Codex) account automatically at a limit (see shared/autoSwitch). */
+  accountSwitch: AutoSwitchSettings;
   /** Which grids start in the background after launch (see shared/backgroundLoad.ts). */
   backgroundLoad: BackgroundLoadMode;
   /** Keyboard shortcuts the user changed: action id to combo (`Ctrl+Shift+E`), or null when the shortcut is switched off (see shared/shortcuts.ts). */

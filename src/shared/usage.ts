@@ -1,5 +1,6 @@
 /** Limits of the user's Claude and Codex accounts: types and pure helpers shared by main process and window. */
 import type { AccountNotice } from './accounts';
+import type { SwitchOffer } from './autoSwitch';
 export type UsageProvider = 'claude' | 'codex';
 export type UsageStatus = 'ok' | 'signedOut' | 'expired' | 'dormant' | 'apiKey' | 'error' | 'elsewhere' | 'forbidden';
 /* `dormant`: the main Claude login's access token is past its expiry but a refresh token exists; Claude Code renews it on next use. Not an error. */
@@ -101,6 +102,10 @@ export interface UsageState {
   setAside?: SetAsideAccount[];
   /** Records set aside as a second copy of an account whose holder still exists: only these offer "Delete copy". */
   duplicateCopies?: string[];
+  /** 1.1.2: an automatic switch the user is asked about ("Switch to X"), until taken, hidden or no longer true. */
+  switchOffer?: SwitchOffer;
+  /** 1.1.2: per provider, the primary account the automatic switch left and returns to (the panel's state line). */
+  switchAway?: Partial<Record<UsageProvider, string>>;
 }
 
 export const USAGE_INTERVALS_MINUTES = [1, 5, 15] as const;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { updateSettings } from '../../../shared/state';
 import type { AccountNotice, LoginTarget } from '../../../shared/accounts';
 import { adoptCopyOffered, cardState, claudeLoginActions, diagnosticLabel, effectivePercent, formatDuration, makeMainOffered, shortAccountName, shortDuration, summaryAccounts, usageBand, usageDiagnostics, usageErrorKind, usageSummary, type ProviderUsage, type SetAsideAccount, type UsageProvider, type UsageWindow } from '../../../shared/usage';
@@ -11,6 +11,7 @@ import { openMenuAt } from './ContextMenu';
 import { IChevron, IPlus } from './icons';
 import { ProviderIcon } from './ProviderIcons';
 import { BusyRing, RefreshIcon, useHoldBusy } from './Spinner';
+import { AutoSwitchLine, openAutoSwitchMenu, switchUseful, UsageResizeHandle, useUsageHeight } from './UsageAutoSwitch';
 
 const DORMANT_NOTE = 'Token dostępu wygasł - Claude Code odświeży go przy najbliższym użyciu. Uruchom sesję Claude (albo wyślij wiadomość), a limity wrócą.';
 const HELD_NOTE = {
@@ -29,13 +30,39 @@ const ADOPT_READ_ONLY = 'Nie można teraz zmieniać kont: pliku kont aplikacji n
 const NAMES: Record<UsageProvider, string> = { claude: 'Claude', codex: 'Codex' };
 const READ_ONLY_REMOVE = 'Nie można teraz usuwać kont: pliku kont aplikacji nie da się bezpiecznie odczytać (szczegóły w panelu limitów).';
 const LIVE_REMOVE = 'Konta głównego nie można usunąć. Najpierw ustaw jako główne inne konto.';
+const CODEX_DORMANT = 'Token dostępu tej kopii wygasł. Codex odnowi go, gdy to konto będzie głównym - wtedy limity wrócą.';
+const CODEX_OUTDATED = 'To konto przełączono poza aplikacją, więc ta kopia logowania może być nieaktualna. Zaloguj się do niego ponownie.';
+/** The record id of a saved card (`claude:<id>` / `codex:<id>`). */
+const recordId = (usage: ProviderUsage) => usage.accountId.replace(/^(claude|codex):/, '');
+
+/** 1.1.2: "make main" of a saved Codex card: a valid copy that is not the live login and not switched out elsewhere. */
+export function codexMakeMainOffered(usage: Pick<ProviderUsage, 'provider' | 'managed' | 'active' | 'heldBy' | 'status'>): boolean {
+  return usage.provider === 'codex' && !!usage.managed && !usage.active && !usage.heldBy && usage.status !== 'expired' && usage.status !== 'elsewhere' && usage.status !== 'signedOut';
+}
 
 /** Removes a saved Claude account (or a set-aside copy of one); refusals are told in a toast. */
-async function removeSaved(id: string, tr: ReturnType<typeof useI18n>['tr']): Promise<void> {
+async function removeSaved(id: string, tr: ReturnType<typeof useI18n>['tr'], provider: UsageProvider = 'claude'): Promise<void> {
   try {
+    if (provider === 'codex') {
+      const result = await window.mc.removeCodexAccount(id);
+      if (!result.ok && result.error) toast(result.error === 'readOnly' ? tr(READ_ONLY_REMOVE) : tr(swapErrorKey(result.error)), 'error');
+      return;
+    }
     const result = await window.mc.removeAccount(id);
     if (!result.ok && result.error) toast(result.error === 'readOnly' ? tr(READ_ONLY_REMOVE) : result.error === 'live' ? tr(LIVE_REMOVE) : tr(swapErrorKey(result.error)), 'error');
   } catch { /* the next usage refresh shows the real state */ }
+}
+
+/** 1.1.2: "switch now to the account with the most room" (limits panel and palette); the outcome is told in a toast. */
+export async function switchToBest(provider: UsageProvider, tr: ReturnType<typeof useI18n>['tr']): Promise<void> {
+  try {
+    const result = await window.mc.switchToBest(provider);
+    if (result.ok) toast(tr('Konto główne: {email}', { email: result.email ?? NAMES[provider] }));
+    else if (result.error === 'noTarget') toast(tr('Żadne inne zapisane konto {provider} nie ma teraz więcej zapasu niż konto główne.', { provider: NAMES[provider] }));
+    else { const text = swapErrorText({ error: result.error, email: result.email }); toast(tr(text.key, text.params), 'error'); }
+  } catch {
+    toast(tr('Nie udało się zmienić konta głównego.'), 'error');
+  }
 }
 
 function Bar({ percent, label }: { percent: number; label: string }) {
@@ -68,25 +95,32 @@ const openAuth = (provider: UsageProvider, target: LoginTarget) => setUi({ modal
 
 /** The login target that renews this account. */
 function reloginTarget(usage: ProviderUsage): LoginTarget {
-  return usage.managed && !usage.active && usage.provider === 'claude' ? { type: 'account', id: usage.accountId.replace(/^claude:/, '') } : { type: 'main' };
+  return usage.managed && !usage.active ? { type: 'account', id: recordId(usage) } : { type: 'main' };
+}
+
+/** Two arrows in a loop: the automatic switch. */
+function AutoIcon() {
+  return <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3 6.5a5 5 0 0 1 8.6-2.6L13 5.3" /><path d="M13 2.5v2.8h-2.8" /><path d="M13 9.5a5 5 0 0 1-8.6 2.6L3 10.7" /><path d="M3 13.5v-2.8h2.8" /></svg>;
 }
 
 function KebabIcon() {
   return <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden><circle cx="8" cy="3.5" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="12.5" r="1.2" /></svg>;
 }
 
-function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onMakeMain }: {
+function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onMakeMain, onSwitchBest }: {
   usage: ProviderUsage; now: number; language: string; showMain: boolean;
   /** Position among the saved Claude accounts (1-based); names the account in diagnostics instead of its e-mail. */
   savedIndex: number;
   /** Account id whose swap is running (any card is locked meanwhile), or null. */
   swapping: string | null; onMakeMain: (usage: ProviderUsage) => void;
+  /** 1.1.2: on the main card, when another saved account of its provider exists: switch to the one with the most room. */
+  onSwitchBest?: () => void;
 }) {
   const { tr } = useI18n();
   const busy = swapping !== null;
   // On macOS Claude keeps its tokens in the Keychain, so the main login cannot be exchanged there.
   // A saved copy that already is the main login cannot become it again.
-  const canMakeMain = makeMainOffered(usage) && claudeLoginActions(window.mc.platform, true).managedAccounts;
+  const canMakeMain = (makeMainOffered(usage) && claudeLoginActions(window.mc.platform, true).managedAccounts) || codexMakeMainOffered(usage);
   const providerName = NAMES[usage.provider];
   const name = usage.email || providerName;
   const age = formatDuration((now - usage.fetchedAt) / 1000);
@@ -101,7 +135,7 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
       [{ label: tr('Usuń konto'), value: 'yes', danger: true }],
     );
     if (choice !== 'yes') return;
-    await removeSaved(usage.accountId.replace(/^claude:/, ''), tr);
+    await removeSaved(recordId(usage), tr, usage.provider);
   };
 
   // "Renew this copy in unimux": only after the user confirms; the main process checks the record again.
@@ -135,12 +169,15 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
   // A saved Claude account whose sign-in cannot be renewed (server limits, rejected renewal, a copy cswap or an outside switch
   // holds) must never leave the user stuck: signing in again is always offered. Not on access denied (403): the sign-in is valid.
   const heldElsewhere = usage.heldBy === 'cswap' || usage.heldBy === 'switched-out';
-  const canRelogin = usage.managed && !usage.active && usage.provider === 'claude' && !expired && usage.status !== 'forbidden'
-    && (kind === 'refreshLimited' || kind === 'refresh' || heldElsewhere) && claudeLoginActions(window.mc.platform, true).managedAccounts;
+  const canRelogin = (usage.managed && !usage.active && usage.provider === 'claude' && !expired && usage.status !== 'forbidden'
+    && (kind === 'refreshLimited' || kind === 'refresh' || heldElsewhere) && claudeLoginActions(window.mc.platform, true).managedAccounts)
+    // A saved Codex copy can always be signed in again (into its own profile).
+    || (usage.provider === 'codex' && !!usage.managed && !usage.active && !expired);
   const failureText = tr(usageErrorKey(kind, usage.provider), { name: providerName, retry });
 
   // Details of a state are a tooltip at most: the card itself shows one short line and, when expired, one button.
-  const heldTitle = usage.heldBy === 'cswap' ? tr(cswapNote ?? CSWAP_NOTE) : usage.heldBy ? tr(HELD_NOTE[usage.heldBy]) : undefined;
+  const heldTitle = usage.provider === 'codex' && usage.heldBy ? tr(CODEX_OUTDATED)
+    : usage.heldBy === 'cswap' ? tr(cswapNote ?? CSWAP_NOTE) : usage.heldBy ? tr(HELD_NOTE[usage.heldBy]) : undefined;
   const windows = usage.windows.map((window) => <WindowRow key={window.id} window={window} now={now} language={language} />);
   let body;
   if (state === 'expired') {
@@ -154,8 +191,9 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
   } else if (state === 'apiKey') {
     body = <p className="usage-note">{tr('Codex: logowanie kluczem API, brak limitów.')}</p>;
   } else if (state === 'unavailable') {
-    const text = usage.status === 'forbidden' ? tr(FORBIDDEN_SHORT) : dormant ? tr(DORMANT_SHORT) : failureText;
-    const title = usage.status === 'forbidden' ? tr(FORBIDDEN_NOTE) : dormant ? tr(DORMANT_NOTE) : reasonTitle;
+    const codexDormant = dormant && usage.provider === 'codex';
+    const text = usage.status === 'forbidden' ? tr(FORBIDDEN_SHORT) : codexDormant ? tr(CODEX_DORMANT) : dormant ? tr(DORMANT_SHORT) : failureText;
+    const title = usage.status === 'forbidden' ? tr(FORBIDDEN_NOTE) : codexDormant ? tr(CODEX_DORMANT) : dormant ? tr(DORMANT_NOTE) : reasonTitle;
     body = <p className={`usage-note ${calm || dormant ? '' : 'warn'}`} title={title}>{text}</p>;
   } else {
     // `ok` and `stale`: the numbers, then at most one short line (why they are old). 1.1.0: whose copy this is (cswap, an
@@ -195,6 +233,7 @@ function AccountCard({ usage, now, language, showMain, savedIndex, swapping, onM
             title={tr('Menu konta')}
             onClick={(e) => openMenuAt(e.currentTarget, [
               ...(canMakeMain ? [{ label: tr('Ustaw jako główne'), disabled: busy, onClick: () => onMakeMain(usage) }] : []),
+              ...(onSwitchBest ? [{ label: tr('Przełącz teraz na konto z największym zapasem'), disabled: busy, onClick: onSwitchBest }] : []),
               ...(canAdopt ? [{ label: tr(ADOPT_LABEL), disabled: busy, onClick: () => void adoptCopy() }] : []),
               ...(canRelogin ? [{ label: tr('Zaloguj ponownie to konto'), disabled: busy, onClick: () => openAuth(usage.provider, reloginTarget(usage)) }] : []),
               { label: tr('Skopiuj diagnostykę'), onClick: copyDiagnostics },
@@ -261,7 +300,10 @@ export function UsagePanel() {
   const { tr, language } = useI18n();
   const settings = useStore((st) => st.s.settings);
   const rail = useStore((st) => st.s.sidebarCollapsed);
-  const { providers, notices = [], setAside = [], duplicateCopies = [], accountsReadOnly } = useUsage();
+  const { providers, notices = [], setAside = [], duplicateCopies = [], accountsReadOnly, switchOffer, switchAway } = useUsage();
+  // 1.1.2: the panel's own height (drag handle on its top edge), remembered across restarts.
+  const [height, setHeight] = useUsageHeight();
+  const section = useRef<HTMLElement>(null);
   const [now, setNow] = useState(() => Date.now());
   const [refreshing, setRefreshing] = useState(false);
   const spinning = useHoldBusy(refreshing, 700);
@@ -305,6 +347,7 @@ export function UsagePanel() {
   };
   const makeMain = async (target: ProviderUsage) => {
     if (swapping !== null) return;
+    if (target.provider === 'codex') { await makeMainCodex(target); return; }
     const main = providers.find((usage) => usage.provider === 'claude' && usage.active);
     const current = main?.email || tr('obecne konto główne');
     const name = target.email || NAMES.claude;
@@ -329,6 +372,44 @@ export function UsagePanel() {
       if (alive.current) setSwapping(null);
     }
   };
+  const makeMainCodex = async (target: ProviderUsage) => {
+    const main = providers.find((usage) => usage.provider === 'codex' && usage.active);
+    const current = main?.email || tr('obecne konto główne');
+    const name = target.email || NAMES.codex;
+    const choice = await askChoice(tr('Ustawić {name} jako konto główne?', { name }),
+      tr('Logowanie obecnego konta głównego Codex ({current}) zostanie zapisane na jego karcie, a logowanie wybranego konta trafi do folderu Codex. Sesje, historia i ustawienia Codex zostają bez zmian. Otwarte sesje Codex mogą korzystać z poprzedniego konta, dopóki nie uruchomisz ich ponownie.', { current }),
+      [{ label: tr('Ustaw jako główne'), value: 'yes', primary: true }]);
+    if (choice !== 'yes') return;
+    setSwapping(target.accountId);
+    try {
+      const result = await window.mc.makeMainCodexAccount(recordId(target));
+      if (result.ok) toast(result.email ? tr('Konto główne: {email}', { email: result.email }) : tr('Zmieniono konto główne.'));
+      else { const text = swapErrorText({ error: result.error, email: result.email ?? target.email }); toast(tr(text.key, text.params), 'error'); }
+    } catch {
+      toast(tr('Nie udało się zmienić konta głównego.'), 'error');
+    } finally {
+      if (alive.current) setSwapping(null);
+    }
+  };
+  const switchBest = async (provider: UsageProvider) => {
+    if (swapping !== null) return;
+    const main = providers.find((usage) => usage.provider === provider && usage.active);
+    setSwapping(main?.accountId ?? `${provider}:best`);
+    try { await switchToBest(provider, tr); } finally { if (alive.current) setSwapping(null); }
+  };
+  const acceptOffer = async () => {
+    if (swapping !== null || !switchOffer) return;
+    setSwapping(switchOffer.to);
+    try {
+      const result = await window.mc.acceptSwitchOffer();
+      if (result.ok) toast(tr('Konto główne: {email}', { email: result.email ?? switchOffer.toEmail ?? NAMES[switchOffer.provider] }));
+      else { const text = swapErrorText({ error: result.error, email: result.email ?? switchOffer.toEmail }); toast(tr(text.key, text.params), 'error'); }
+    } catch {
+      toast(tr('Nie udało się zmienić konta głównego.'), 'error');
+    } finally {
+      if (alive.current) setSwapping(null);
+    }
+  };
   const summary = usageSummary(providers, now) || tr('Konta AI');
   // Tooltip of one account: name plus every window, e.g. "Claude · 5 h 12% · 7 days 40%".
   const accountDetail = (usage: ProviderUsage, nowMs: number) => [
@@ -337,7 +418,11 @@ export function UsagePanel() {
   ].join(' · ');
   const updated = visible.length ? new Date(Math.max(...visible.map((usage) => usage.fetchedAt))).toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' }) : '';
   const claudeCount = visible.filter((usage) => usage.provider === 'claude').length;
+  const codexCount = visible.filter((usage) => usage.provider === 'codex').length;
   const hasCodex = visible.some((usage) => usage.provider === 'codex');
+  /** The main card offers "switch to the account with the most room" once another saved account of its provider exists. */
+  const switchOffered = (usage: ProviderUsage) => usage.active && visible.some((other) => other.provider === usage.provider && other.managed && !other.active)
+    && (usage.provider === 'codex' || claudeLoginActions(window.mc.platform, true).managedAccounts);
   // On macOS Claude keeps its tokens in the Keychain, so isolated profiles cannot work there.
   const claudeLogin = claudeLoginActions(window.mc.platform, visible.some((usage) => usage.provider === 'claude' && usage.active));
 
@@ -371,19 +456,26 @@ export function UsagePanel() {
     ...(claudeLogin.menu === 'new' ? [{ label: tr('Dodaj konto Claude'), disabled: !!readOnlyHint, onClick: () => openAuth('claude', { type: 'new' }) }] : []),
     ...(claudeLogin.menu === 'main' ? [{ label: tr('Zaloguj się do Claude'), disabled: !!readOnlyHint, onClick: () => openAuth('claude', { type: 'main' }) }] : []),
     ...(readOnlyHint && claudeLogin.menu ? [{ label: readOnlyHint, disabled: true, onClick: () => undefined }] : []),
-    ...(hasCodex ? [] : [{ label: tr('Zaloguj się do Codex'), onClick: () => openAuth('codex', { type: 'main' }) }]),
+    // 1.1.2: a second Codex account signs in into its own profile.
+    hasCodex ? { label: tr('Dodaj konto Codex'), onClick: () => openAuth('codex', { type: 'new' }) } : { label: tr('Zaloguj się do Codex'), onClick: () => openAuth('codex', { type: 'main' }) },
   ]);
   return (
-    <section className="usage-panel" aria-label={tr('Limity kont AI')}>
+    <section ref={section} className={`usage-panel ${height && !collapsed ? 'sized' : ''}`} aria-label={tr('Limity kont AI')} style={height && !collapsed ? { '--usage-height': `${height}px` } as CSSProperties : undefined}>
       <div className="usage-head">
+        {!collapsed && <UsageResizeHandle panel={section} onChange={setHeight} />}
         <button className="usage-title" onClick={toggle} aria-expanded={!collapsed} title={collapsed ? tr('Rozwiń limity kont AI') : tr('Zwiń limity kont AI')}>
           {/* The chevron points where the panel goes: up to expand, down to collapse. */}
           <span className={`usage-chevron ${collapsed ? 'up' : ''}`}><IChevron /></span>
           {tr('Limity kont AI')}
         </button>
         <button className="btn ghost icon" onClick={(e) => openAddMenu(e.currentTarget)} title={tr('Dodaj konto')} aria-label={tr('Dodaj konto')}><IPlus /></button>
+        {(switchUseful(visible, 'claude') || switchUseful(visible, 'codex')) && (
+          <button className={`btn ghost icon usage-auto-btn ${settings.accountSwitch.enabled ? 'on' : ''}`} aria-haspopup="menu" title={tr('Automatyczne przełączanie kont')} aria-label={tr('Automatyczne przełączanie kont')}
+            onClick={(e) => openAutoSwitchMenu(e.currentTarget, settings.accountSwitch, visible, tr)}><AutoIcon /></button>
+        )}
         <button className="btn ghost icon" onClick={() => void refresh()} disabled={spinning} title={tr('Odśwież limity')} aria-label={tr('Odśwież limity')}><RefreshIcon spinning={spinning} /></button>
       </div>
+      {!collapsed && <AutoSwitchLine settings={settings.accountSwitch} providers={visible} away={switchAway} />}
       {collapsed && (shown.length ? (
         <div className="usage-mini-list">
           {shown.map((usage) => {
@@ -421,10 +513,24 @@ export function UsagePanel() {
               <button className="btn small" onClick={() => void clearWarning()}>{tr('Wyczyść ostrzeżenie')}</button>
             </div>
           )}
+          {switchOffer && (
+            <div className="usage-warning usage-switch-offer" role="status">
+              <p className="usage-note">{switchOffer.reason === 'return'
+                ? tr('Konto podstawowe {to} znowu ma zapas.', { to: switchOffer.toEmail ?? NAMES[switchOffer.provider] })
+                : tr('Limit {window} konta {from} wykorzystany w {percent}%. Konto {to} ma zapas.', {
+                  window: switchOffer.window === '7d' ? tr('7 dni') : '5 h', percent: switchOffer.percent ?? 0,
+                  from: switchOffer.fromEmail ?? NAMES[switchOffer.provider], to: switchOffer.toEmail ?? NAMES[switchOffer.provider],
+                })}</p>
+              <div className="usage-empty-buttons">
+                <button className="btn small primary" disabled={swapping !== null} onClick={() => void acceptOffer()}>{tr('Przełącz na {to}', { to: switchOffer.toEmail ?? NAMES[switchOffer.provider] })}</button>
+                <button className="btn small ghost" onClick={() => void window.mc.dismissSwitchOffer().catch(() => undefined)}>{tr('Ukryj')}</button>
+              </div>
+            </div>
+          )}
           <AccountNotices notices={notices} setAside={setAside} copies={duplicateCopies} readOnlyPath={accountsReadOnly} />
           {visible.length ? (
             <>
-              {visible.map((usage) => <AccountCard key={usage.accountId} usage={usage} savedIndex={visible.filter((u) => u.managed && u.provider === 'claude').indexOf(usage) + 1} now={now} language={language} showMain={claudeCount > 1} swapping={swapping} onMakeMain={(target) => void makeMain(target)} />)}
+              {visible.map((usage) => <AccountCard key={usage.accountId} usage={usage} savedIndex={visible.filter((u) => u.managed && u.provider === usage.provider).indexOf(usage) + 1} now={now} language={language} showMain={(usage.provider === 'claude' ? claudeCount : codexCount) > 1} swapping={swapping} onMakeMain={(target) => void makeMain(target)} {...(switchOffered(usage) ? { onSwitchBest: () => void switchBest(usage.provider) } : {})} />)}
               {updated && <p className="usage-note">{tr('Zaktualizowano {time}', { time: updated })}</p>}
             </>
           ) : (

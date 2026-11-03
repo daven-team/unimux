@@ -70,13 +70,13 @@ describe('Codex credentials', () => {
     const id = jwt({ email: 'me@example.com', 'https://api.openai.com/auth': { chatgpt_plan_type: 'plus' } });
     put('.codex/auth.json', chatgpt(access, id));
     expect(await readCodexCredentials(source())).toEqual({
-      mode: 'chatgpt', accessToken: access, accountId: 'acc-1', expiresAt: 1781010642000, plan: 'plus', email: 'me@example.com',
+      mode: 'chatgpt', accessToken: access, accountId: 'acc-1', expiresAt: 1781010642000, plan: 'plus', email: 'me@example.com', hasRefresh: true,
     });
   });
 
   it('works when the tokens carry no readable claims', async () => {
     put('.codex/auth.json', chatgpt('opaque', 'opaque'));
-    expect(await readCodexCredentials(source())).toEqual({ mode: 'chatgpt', accessToken: 'opaque', accountId: 'acc-1', expiresAt: undefined, plan: undefined, email: undefined });
+    expect(await readCodexCredentials(source())).toEqual({ mode: 'chatgpt', accessToken: 'opaque', accountId: 'acc-1', expiresAt: undefined, plan: undefined, email: undefined, hasRefresh: true });
   });
 
   it('recognises API key logins, which have no limits', async () => {

@@ -115,7 +115,7 @@ export function AuthModal({ provider, target }: { provider: 'claude' | 'codex'; 
   };
 
   const title = provider === 'codex'
-    ? tr('Zaloguj się do Codex')
+    ? target.type === 'new' ? tr('Dodaj konto Codex') : tr('Zaloguj się do Codex')
     : target.type === 'new' ? tr('Dodaj konto Claude') : target.type === 'main' && !hadMain ? tr('Zaloguj się do Claude') : tr('Zaloguj ponownie do Claude');
   const email = current?.email ?? '';
   const waiting = status === 'waiting';
@@ -173,7 +173,7 @@ export function AuthModal({ provider, target }: { provider: 'claude' | 'codex'; 
       <div className="modal-foot">
         {refusal === 'cliMissing' && <button className="btn primary auth-install" onClick={install}>{tr('Zainstaluj {name}', { name: cliName })}</button>}
         {offerMain && <button className="btn primary auth-make-main" disabled={makingMain} onClick={() => void makeMain()}>{tr('Ustaw jako główne')}</button>}
-        {status === 'mismatch' && !!current?.expected && <button className="btn primary" onClick={() => setUi({ modal: { kind: 'auth', provider: 'claude', target: { type: 'new' } } })}>{tr('Dodaj jako nowe konto')}</button>}
+        {status === 'mismatch' && !!current?.expected && <button className="btn primary" onClick={() => setUi({ modal: { kind: 'auth', provider, target: { type: 'new' } } })}>{tr('Dodaj jako nowe konto')}</button>}
         <button className="btn" onClick={closeModal}>{waiting ? tr('Anuluj') : tr('Zamknij')}</button>
       </div>
     </div>

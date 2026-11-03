@@ -59,7 +59,7 @@ export interface UsageServiceOptions {
   /** Notices about the saved accounts, sent with every state. */
   notices?(): AccountNotice[];
   /** The saved accounts file's read-only state and the set-aside cards, sent with every state. */
-  accountsInfo?(): Pick<UsageState, 'accountsReadOnly' | 'setAside' | 'duplicateCopies'>;
+  accountsInfo?(): Pick<UsageState, 'accountsReadOnly' | 'setAside' | 'duplicateCopies' | 'switchOffer' | 'switchAway'>;
   /** Keep polling on the interval while the window is hidden or minimized (1.1.1: limit warnings are on). */
   pollHidden?(): boolean;
   /** E-mail of the account signed in to Claude Code, when known: lets a 0.9.0 cache entry of the live card be checked. */
@@ -133,6 +133,8 @@ export class UsageService {
       ...(info.accountsReadOnly ? { accountsReadOnly: info.accountsReadOnly } : {}),
       ...(info.setAside?.length ? { setAside: info.setAside } : {}),
       ...(info.duplicateCopies?.length ? { duplicateCopies: info.duplicateCopies } : {}),
+      ...(info.switchOffer ? { switchOffer: info.switchOffer } : {}),
+      ...(info.switchAway && Object.keys(info.switchAway).length ? { switchAway: info.switchAway } : {}),
     };
   }
 

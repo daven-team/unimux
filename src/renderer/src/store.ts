@@ -86,6 +86,8 @@ export interface Ui {
   automationOpen: boolean;
   settingsTabOpen: boolean;
   settingsActive: boolean;
+  /** 1.1.2: open Settings at a section and scroll to an element (`seq` makes a repeated request count). */
+  settingsSection: { index: number; focus?: string; seq: number } | null;
   mcpInfo: McpInfo;
   /** Detected Claude Code / Codex binaries; a missing entry means "not checked yet" (never blocks a start). */
   cliStatus: CliStatusMap;
@@ -151,6 +153,7 @@ export const useStore = create<Store>((set, get) => ({
     sidebarView: 'projects',
     automationOpen: false,
     settingsTabOpen: false,
+    settingsSection: null,
     settingsActive: false,
     mcpInfo: { running: false },
     cliStatus: {},

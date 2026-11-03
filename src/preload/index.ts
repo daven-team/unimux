@@ -265,6 +265,11 @@ const api: McApi = {
   swapPending: () => ipcRenderer.invoke('accounts:swapPending'),
   clearSwapPending: () => ipcRenderer.invoke('accounts:clearSwapPending'),
   dismissAccountNotice: (id) => ipcRenderer.invoke('accounts:dismissNotice', id),
+  switchToBest: (provider, to) => ipcRenderer.invoke('accounts:switchBest', { provider, ...(to ? { to } : {}) }),
+  acceptSwitchOffer: () => ipcRenderer.invoke('accounts:acceptSwitch'),
+  dismissSwitchOffer: () => ipcRenderer.invoke('accounts:dismissSwitch'),
+  makeMainCodexAccount: (id) => ipcRenderer.invoke('accounts:makeMainCodex', id),
+  removeCodexAccount: (id) => ipcRenderer.invoke('accounts:removeCodex', id),
   detach: {
     open: (target, docs) => ipcRenderer.invoke('detach:open', target, docs),
     dropOutside: (target, docs) => ipcRenderer.invoke('detach:dropOutside', target, docs),

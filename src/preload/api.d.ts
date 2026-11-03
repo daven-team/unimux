@@ -202,6 +202,17 @@ export interface McApi {
   clearSwapPending(): Promise<{ ok: boolean; error?: 'locked' }>;
   /** Hides a notice about the saved accounts (the state is pushed again on 'usage:state'). */
   dismissAccountNotice(id: string): Promise<void>;
+  /**
+   * 1.1.2: make the saved account with the most room the main one, or the account `to` (an e-mail); never one over a
+   * threshold of the automatic switch (`noTarget`: none can take over).
+   */
+  switchToBest(provider: 'claude' | 'codex', to?: string): Promise<SwapResult>;
+  /** 1.1.2: "Switch to X" of the offer in the limits panel, and hiding it. */
+  acceptSwitchOffer(): Promise<SwapResult>;
+  dismissSwitchOffer(): Promise<void>;
+  /** 1.1.2: saved Codex accounts (id without the `codex:` prefix). */
+  makeMainCodexAccount(id: string): Promise<SwapResult>;
+  removeCodexAccount(id: string): Promise<{ ok: boolean; error?: 'busy' | 'readOnly' }>;
   /** 1.0.6: tabs in their own window (main/detachedWindows.ts). Documents are FileDocument objects of the renderer. */
   detach: {
     /** From the main window: the tab goes to a new window (on another display when there is one). */

@@ -1039,6 +1039,20 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 /* Docked under the side panel content: at most 35% of the side panel, so the panel above keeps room in a short window (the
    cards scroll). The collapsed rail variant (.rail-foot) keeps 40vh. */
 .side-panel > .usage-panel { max-height: min(40vh, 35%); }
+/* 1.1.2: a height set with the drag handle on the top edge replaces the default cap (the side panel above keeps room: the
+   handle clamps it, and a smaller window still shrinks the panel). */
+.side-panel > .usage-panel.sized { max-height: calc(100% - 140px); height: var(--usage-height); min-height: 80px; }
+.usage-resize { position: absolute; left: 0; right: 0; top: 0; height: 5px; z-index: 4; cursor: row-resize; touch-action: none; }
+.usage-resize::after { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: transparent; transition: background .12s, height .12s; }
+.usage-resize:hover::after, .usage-resize:focus-visible::after, .usage-resize.dragging::after { height: 3px; background: var(--btn-primary-bg); }
+.usage-resize:focus-visible { outline: none; }
+@media (prefers-reduced-motion: reduce) { .usage-resize::after { transition: none; } }
+.usage-auto-btn.on { color: var(--btn-primary-bg); }
+/* The automatic switch's state: one quiet line under the header, a click opens its menu. */
+.usage-auto-line { flex: none; display: block; width: 100%; min-width: 0; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 10.5px; line-height: 16px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.usage-auto-line.on { color: var(--text-2); }
+.usage-auto-line:hover { color: var(--text); text-decoration: underline; }
+.usage-switch-offer { border-color: var(--btn-primary-bg); }
 /* 1.0.9: the header (title, add, refresh) stays at the top of the panel while the cards scroll under it, so the panel can be
    collapsed without scrolling back up. It carries the panel's top padding and spans its full width, on the panel's opaque
    background (the panel has no top padding of its own, so it sticks at the very edge with nothing showing above it). */
