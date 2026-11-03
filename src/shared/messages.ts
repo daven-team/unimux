@@ -54,6 +54,7 @@ import { updateMessages } from './updateMessages';
 import { usageMessages } from './usageMessages';
 import { uxMessages } from './uxMessages';
 import { waitingMessages } from './waitingMessages';
+import { teamPanelMessages } from './teamPanelMessages';
 export const messages = {
   ...accountSwitchMessages,
   ...agentModeMessages,
@@ -109,6 +110,7 @@ export const messages = {
   ...usageMessages,
   ...uxMessages,
   ...waitingMessages,
+  ...teamPanelMessages,
   'Wybierz język': ['Choose your language', 'Sprache wählen', 'Elige tu idioma', 'Choisissez votre langue', 'Escolha o seu idioma'],
   'Nie udało się wczytać tego języka. Spróbuj ponownie.': ['Could not load this language. Please try again.', 'Diese Sprache konnte nicht geladen werden. Bitte versuche es erneut.', 'No se pudo cargar este idioma. Inténtalo de nuevo.', 'Impossible de charger cette langue. Veuillez réessayer.', 'Não foi possível carregar este idioma. Tente novamente.'],
   'Witaj w unimux': ['Welcome to unimux', 'Willkommen bei unimux', 'Bienvenido a unimux', 'Bienvenue dans unimux', 'Bem-vindo ao unimux'],

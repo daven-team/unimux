@@ -15,13 +15,14 @@ import { normalizeDetachedWindows, openGrids } from '../shared/detached';
 export class StateController {
   private revision = 0;
   private readonly listeners = new Set<() => void>();
-  constructor(private state: AppState, private readonly changed: (snapshot: StateSnapshot) => void) {}
+  constructor(private state: AppState, private readonly changed: (snapshot: StateSnapshot, batch: boolean) => void) {}
   get(): AppState { return this.state; }
   snapshot(): StateSnapshot { return { state: this.state, revision: this.revision }; }
-  change(fn: (state: AppState) => AppState, editId?: string): StateSnapshot {
+  /** `batch`: the windows may hear of this change together with the next ones (an agent's MCP call, see stateBroadcast.ts). */
+  change(fn: (state: AppState) => AppState, editId?: string, batch = false): StateSnapshot {
     this.state = fn(this.state);
     const snapshot = { state: this.state, revision: ++this.revision, editId };
-    this.changed(snapshot);
+    this.changed(snapshot, batch);
     for (const listener of [...this.listeners]) listener();
     return snapshot;
   }
