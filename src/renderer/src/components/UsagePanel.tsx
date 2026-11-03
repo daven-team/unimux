@@ -99,11 +99,6 @@ function reloginTarget(usage: ProviderUsage): LoginTarget {
   return usage.managed && !usage.active ? { type: 'account', id: recordId(usage) } : { type: 'main' };
 }
 
-/** Two arrows in a loop: the automatic switch. */
-function AutoIcon() {
-  return <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M3 6.5a5 5 0 0 1 8.6-2.6L13 5.3" /><path d="M13 2.5v2.8h-2.8" /><path d="M13 9.5a5 5 0 0 1-8.6 2.6L3 10.7" /><path d="M3 13.5v-2.8h2.8" /></svg>;
-}
-
 function KebabIcon() {
   return <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden><circle cx="8" cy="3.5" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="8" cy="12.5" r="1.2" /></svg>;
 }
@@ -476,15 +471,12 @@ export function UsagePanel() {
         {/* 1.1.2: the automatic switch is switched on and off right here; the arrow opens its options. While it is on, the pill
             shows that a watcher looks after the limits of the main account. */}
         {autoAvailable && (
-          <span className={`usage-auto-pill ${autoOn ? 'on' : ''}`}>
-            <button type="button" className="usage-auto-toggle" role="switch" aria-checked={autoOn}
-              title={autoOn ? tr('Automatyczne przełączanie pilnuje limitów konta głównego i przełącza, gdy przekroczy próg. Kliknij, aby wyłączyć.') : tr('Włącz automatyczne przełączanie kont')}
-              onClick={() => setAutoSwitch((current) => (current.enabled ? { ...current, enabled: false } : enableAutoSwitch(current, visible)))}>
-              <AutoIcon /><span>Auto</span><span className="usage-auto-dot" aria-hidden />
-            </button>
-            <button type="button" className="usage-auto-more" aria-haspopup="menu" title={tr('Opcje automatycznego przełączania')} aria-label={tr('Opcje automatycznego przełączania')}
-              onClick={(e) => openAutoSwitchMenu(e.currentTarget, settings.accountSwitch, visible, tr)}><IChevron /></button>
-          </span>
+          <label className={`usage-auto ${autoOn ? 'on' : ''}`} onContextMenu={(e) => { e.preventDefault(); openAutoSwitchMenu(e.currentTarget, settings.accountSwitch, visible, tr); }}
+            title={autoOn ? tr('Automatyczne przełączanie pilnuje limitów konta głównego i przełącza, gdy przekroczy próg. Kliknij, aby wyłączyć.') : tr('Włącz automatyczne przełączanie kont')}>
+            <span className="usage-auto-label">Auto</span>
+            <input type="checkbox" role="switch" className="usage-auto-switch" checked={autoOn} aria-label={tr('Automatyczne przełączanie kont')}
+              onChange={() => setAutoSwitch((current) => (current.enabled ? { ...current, enabled: false } : enableAutoSwitch(current, visible)))} />
+          </label>
         )}
         <button className="btn ghost icon" onClick={() => void refresh()} disabled={spinning} title={tr('Odśwież limity')} aria-label={tr('Odśwież limity')}><RefreshIcon spinning={spinning} /></button>
       </div>

@@ -138,15 +138,16 @@ setTimeout(() => { fs.writeFileSync(path.join(process.env.CODEX_HOME, 'auth.json
     await app.until(`${card('support')}?.textContent.includes('główne')`, 'support marked main', 30_000);
     await app.until(`!!document.querySelector('.usage-auto-line')`, 'state line');
     const line = await app.evaluate(`document.querySelector('.usage-auto-line').textContent`);
-    if (line !== 'Auto: wł. · największy zapas · wraca na daniel@example.com') throw new Error(`state line: ${line}`);
+    if (line !== 'pilnuje limitów: 5 h 95%, 7 d 98% · największy zapas · wraca na daniel@example.com') throw new Error(`state line: ${line}`);
+    if (!(await app.evaluate(`document.querySelector('.usage-auto-switch').checked`))) throw new Error('the Auto switch in the header is not on');
     ok(`the panel shows "${line}"`);
     await sleep(1500);
     notes = await shown();
     if (notes.filter((n) => n.body.startsWith('Przełączono')).length !== 1) throw new Error(`repeated switch notices: ${JSON.stringify(notes)}`);
     await shoot(app, '1-after-auto-switch.png');
 
-    // 2. The auto-switch menu in the panel header.
-    await app.click('.usage-auto-btn');
+    // 2. The auto-switch options open from the state line under the header.
+    await app.click('.usage-auto-line');
     await app.until(`[...document.querySelectorAll('.menu button')].some((b) => b.textContent.includes('Konto z największym zapasem'))`, 'auto menu');
     const items = await app.evaluate(`[...document.querySelectorAll('.menu button, .menu [role=presentation], .menu .menu-header')].map((b) => b.textContent.trim()).filter(Boolean)`);
     ok(`header menu: ${items.join(' | ')}`);

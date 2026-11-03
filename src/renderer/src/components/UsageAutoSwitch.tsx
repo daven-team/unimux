@@ -74,12 +74,19 @@ export function AutoSwitchLine({ settings, providers, away }: { settings: AutoSw
   const limits = [settings.fiveHour.enabled ? `5 h ${settings.fiveHour.percent}%` : '', settings.sevenDay.enabled ? `7 d ${settings.sevenDay.percent}%` : ''].filter(Boolean).join(', ');
   return <>
     {lines.map((provider) => {
-      const parts = [autoSwitchStatus(settings, provider, { away: away ?? {} }, tr), tr('pilnuje limitów: {limits}', { limits })];
+      // The dot says it is on; the line says what it watches, where it switches to and where it goes back.
+      const rest = autoSwitchStatus(settings, provider, { away: away ?? {} }, tr).split(' · ').slice(1);
+      const parts = [tr('pilnuje limitów: {limits}', { limits }), ...rest];
       if (!switchUseful(providers, provider)) parts.push(tr('dodaj drugie konto, aby było na co przełączać'));
       const text = parts.join(' · ');
-      const label = lines.length > 1 ? `${NAMES[provider]} ${text}` : text;
-      return <button key={provider} type="button" className="usage-auto-line on" title={`${tr('Automatyczne przełączanie kont')}: ${label}`}
-        onClick={(e) => openAutoSwitchMenu(e.currentTarget, settings, providers, tr)}>{label}</button>;
+      const label = lines.length > 1 ? `${NAMES[provider]}: ${text}` : text;
+      return <button key={provider} type="button" className="usage-auto-line" aria-haspopup="menu" title={`${tr('Opcje automatycznego przełączania')}
+${label}`}
+        onClick={(e) => openAutoSwitchMenu(e.currentTarget, settings, providers, tr)}>
+        <span className="usage-auto-line-dot" aria-hidden />
+        <span className="usage-auto-line-text">{label}</span>
+        <svg className="usage-auto-line-more" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m4 6 4 4 4-4" /></svg>
+      </button>;
     })}
   </>;
 }

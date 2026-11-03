@@ -1004,11 +1004,25 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .usage-resize:hover::after, .usage-resize:focus-visible::after, .usage-resize.dragging::after { height: 3px; background: var(--btn-primary-bg); }
 .usage-resize:focus-visible { outline: none; }
 @media (prefers-reduced-motion: reduce) { .usage-resize::after { transition: none; } }
-.usage-auto-btn.on { color: var(--btn-primary-bg); }
-/* The automatic switch's state: one quiet line under the header, a click opens its menu. */
-.usage-auto-line { flex: none; display: block; width: 100%; min-width: 0; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 10.5px; line-height: 16px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
-.usage-auto-line.on { color: var(--text-2); }
-.usage-auto-line:hover { color: var(--text); text-decoration: underline; }
+/* 1.1.2: the automatic switch: "Auto" with a small switch in the header; while it is on, one quiet row under the header
+   (a steady green dot, what it watches, an arrow to its options). */
+.usage-auto { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 4px 0 6px; border-radius: 5px; color: var(--muted); font-size: 10.5px; cursor: pointer; user-select: none; }
+.usage-auto:hover { background: var(--btn-ghost-hover); color: var(--text-2); }
+.usage-auto.on { color: var(--text-2); }
+.usage-auto-label { letter-spacing: .2px; }
+/* Scoped under .usage-auto so it wins over the app-wide checkbox look (input[type='checkbox']). */
+.usage-auto input.usage-auto-switch { position: relative; display: block; width: 22px; height: 12px; border: 0; border-radius: 7px; background: #474747; box-shadow: none; transition: background .12s; }
+.usage-auto input.usage-auto-switch::before { content: ''; position: absolute; top: 2px; left: 2px; width: 8px; height: 8px; border-radius: 50%; background: #d4d4d4; transition: transform .12s, background .12s; }
+.usage-auto input.usage-auto-switch:checked { background: #3a9d67; border: 0; }
+.usage-auto input.usage-auto-switch:checked::before { transform: translateX(10px); background: #fff; }
+.usage-auto input.usage-auto-switch:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; box-shadow: none; }
+.usage-auto-line { flex: none; display: flex; align-items: center; gap: 6px; width: calc(100% + 8px); min-width: 0; margin: 0 -4px; padding: 2px 4px; border: 0; border-radius: 5px; background: none; color: var(--text-2); font: inherit; font-size: 10.5px; line-height: 16px; text-align: left; cursor: pointer; }
+.usage-auto-line:hover { background: var(--btn-ghost-hover); color: var(--text); }
+.usage-auto-line:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; }
+.usage-auto-line-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #3a9d67; box-shadow: 0 0 0 2px #3a9d6726; }
+.usage-auto-line-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.usage-auto-line-more { flex: none; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .usage-auto input.usage-auto-switch, .usage-auto input.usage-auto-switch::before { transition: none; } }
 .usage-switch-offer { border-color: var(--btn-primary-bg); }
 /* 1.0.9: the header (title, add, refresh) stays at the top of the panel while the cards scroll under it, so the panel can be
    collapsed without scrolling back up. It carries the panel's top padding and spans its full width, on the panel's opaque
@@ -1018,7 +1032,7 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
    scroll position, never on its own). */
 .usage-head { animation: usage-head-edge linear both; animation-timeline: scroll(nearest block); animation-range: 0 8px; }
 @keyframes usage-head-edge { from { box-shadow: 0 1px 0 transparent; } to { box-shadow: 0 1px 0 var(--border); } }
-.usage-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: transparent; color: var(--text-2); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.usage-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; display: flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: transparent; color: var(--text-2); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
 .usage-title:hover { color: var(--text); }
 .usage-chevron { display: inline-grid; transition: transform .15s; }
 .usage-chevron.up { transform: rotate(180deg); }
