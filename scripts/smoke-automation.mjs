@@ -121,17 +121,17 @@ try {
   await until(() => evaluate('Boolean(document.querySelector(".automation-panel"))'), 'team panel');
 
   // Compact task cards keep the composer hidden until requested.
-  assert.equal(await evaluate('!!document.querySelector(".automation-compose")'), false);
-  await evaluate('Array.from(document.querySelectorAll(".automation-head button")).find(b => b.textContent.includes("Nowe zadanie")).click()');
-  await until(() => evaluate('!!document.querySelector(".automation-compose")'), 'task composer');
+  assert.equal(await evaluate('!!document.querySelector(".team-compose")'), false);
+  await evaluate('document.querySelector(".team-new-task").click()');
+  await until(() => evaluate('!!document.querySelector(".team-compose")'), 'task composer');
   // Submit the actual React form.
   await evaluate(`(() => {
-    const form = document.querySelector('.automation-compose');
+    const form = document.querySelector('.team-compose');
     const set = (el, value, prototype) => { Object.getOwnPropertyDescriptor(prototype, 'value').set.call(el, value); el.dispatchEvent(new Event('input', { bubbles: true })); };
     set(form.querySelector('input'), 'Zadanie z formularza', HTMLInputElement.prototype);
     set(form.querySelector('textarea'), 'Sprawdź panel zadań', HTMLTextAreaElement.prototype);
   })()`);
-  await evaluate('document.querySelector(".automation-compose").requestSubmit()');
+  await evaluate('document.querySelector(".team-compose").requestSubmit()');
   await until(async () => (await snapshot()).state.automation.tasks.some((t) => t.title === 'Zadanie z formularza'), 'task form submit');
 
   const coordinator = await mcpClient('smoke-coordinator');
@@ -158,18 +158,20 @@ try {
   assert.equal((await call(coordinator, 'snippets')).snippets[0].name, 'Review checklist');
   assert.equal((await call(backend, 'wait_for', { timeoutSec: 1 })).event, 'timeout');
   assert.equal((await backend.listTools()).tools.some((tool) => tool.name === 'create_grid'), false);
-  await until(() => evaluate('!!Array.from(document.querySelectorAll(".task-open")).find(b => b.textContent.includes("Backend"))'), 'compact task cards');
-  await evaluate('Array.from(document.querySelectorAll(".task-open")).find(b => b.textContent.includes("Backend")).click()');
-  await until(() => evaluate('document.querySelector(".automation-list").textContent.includes("Backend sprawdzony")'), 'task result rendering');
+  // The done group may start collapsed while tasks are open.
+  await evaluate('document.querySelectorAll(".team-group-toggle[aria-expanded=false]").forEach((b) => b.click())');
+  await until(() => evaluate('!!Array.from(document.querySelectorAll(".team-task-row")).find(b => b.textContent.includes("Backend"))'), 'task rows');
+  await evaluate('Array.from(document.querySelectorAll(".team-task-row")).find(b => b.textContent.includes("Backend")).click()');
+  await until(() => evaluate('document.querySelector(".team-detail").textContent.includes("Backend sprawdzony")'), 'task result rendering');
   await screenshot('tasks');
 
-  await evaluate('Array.from(document.querySelectorAll(".automation-tabs button")).find(b => b.textContent === "Agenci").click()');
+  await evaluate('document.querySelector(".team-tab[data-tab=agents]").click()');
   await screenshot('agents');
-  await evaluate('Array.from(document.querySelectorAll(".automation-head button")).find(b => b.textContent.includes("Wstrzymaj")).click()');
+  await evaluate('Array.from(document.querySelectorAll(".team-head button")).find(b => b.getAttribute("aria-label")?.includes("Wstrzymaj")).click()');
   await until(async () => (await snapshot()).state.automation.paused, 'pause control');
   const denied = await coordinator.callTool({ name: 'send_message', arguments: { toCellId: 'smoke-worker', text: 'Denied while paused' } });
   assert.equal(denied.isError, true);
-  await evaluate('Array.from(document.querySelectorAll(".automation-head button")).find(b => b.textContent.includes("Wznów")).click()');
+  await evaluate('Array.from(document.querySelectorAll(".team-head button")).find(b => b.getAttribute("aria-label")?.includes("Wznów")).click()');
   await until(async () => !(await snapshot()).state.automation.paused, 'resume control');
 
   // Check the grid editor and narrow-window layout.
@@ -193,7 +195,7 @@ try {
   await evaluate('Array.from(document.querySelectorAll(".workspace-tabs .tab")).find(b => b.textContent.includes("Team")).dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }))');
   await until(async () => (await snapshot()).state.projects[0].activeTabId === 'smoke-grid', 'return to original grid');
   await until(() => evaluate('innerWidth <= 1100 && innerHeight <= 700 && document.querySelector(".automation-panel").getBoundingClientRect().bottom <= innerHeight && document.querySelector(".automation-panel").getBoundingClientRect().height >= 180'), 'narrow panel layout');
-  await evaluate('Array.from(document.querySelectorAll(".automation-tabs button")).find(b => b.textContent.startsWith("Zadania")).click()');
+  await evaluate('document.querySelector(".team-tab[data-tab=tasks]").click()');
   await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
   assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
   await screenshot('tasks-narrow');

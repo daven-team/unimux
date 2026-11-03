@@ -88,36 +88,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .automation-splitter:hover::after, .automation-splitter:focus-visible::after, .automation-splitter.dragging::after { top: 2px; height: 3px; background: var(--btn-primary-bg); }
 .automation-splitter:focus-visible { outline: none; }
 @media (prefers-reduced-motion: reduce) { .automation-splitter::after { transition: none; } }
-.automation-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px; }
-.automation-head strong { font-size: 12px; }
-.automation-panel .grow { flex: 1; min-width: 0; }
-.mcp-state { font-size: 10px; color: var(--muted); }
-.mcp-state.connected { color: #4ade80; }
-.automation-tabs { display: flex; gap: 5px; border-bottom: 1px solid var(--border); padding: 0 12px; }
-.automation-tabs button { padding: 6px 9px; background: transparent; border: 0; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
-.automation-tabs button.active { color: var(--text); border-bottom-color: var(--btn-primary-bg); }
-.automation-content { flex: 1; min-height: 0; display: flex; }
-.automation-compose { width: 270px; max-width: 40%; flex: none; padding: 12px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
-.automation-compose label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 11px; }
-.automation-compose textarea { min-height: 60px; resize: vertical; }
-.automation-compose .input, .automation-compose .select { width: 100%; }
-.automation-compose p { font-size: 10px; line-height: 1.5; margin: 0; }
-.automation-list { flex: 1; min-width: 0; overflow-y: auto; padding: 10px 12px; }
-.automation-card { padding: 10px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 7px; display: flex; flex-direction: column; gap: 7px; }
-.automation-card strong { font-size: 12px; overflow-wrap: anywhere; }
-.automation-card .row { gap: 7px; }
-.automation-card .wrap { flex-wrap: wrap; }
-.automation-card .select { font-size: 11px; }
-.automation-card summary { cursor: pointer; font-size: 11px; color: var(--muted); }
-.automation-card p { margin: 3px 0; }
-.automation-card .muted, .automation-list > .muted { font-size: 11px; }
-.automation-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
-.automation-empty { color: var(--muted); font-size: 12px; padding: 14px 12px; }
-.task-state { color: var(--muted); font-size: 10px; flex: none; }
-.task-completed .task-state { color: #4ade80; }
-.task-blocked .task-state, .blocked-reason { color: #fbbf24; }
-.automation-note { padding: 6px 12px; font-size: 11px; color: #fbbf24; }
-.automation-head .paused { color: #fbbf24; }
 
 .titlebar {
   display: flex; align-items: center; gap: 8px; padding: 0 140px 0 0;
@@ -889,8 +859,6 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid var(--focus-ri
 .mcp-indicator { position: absolute; right: 3px; bottom: 2px; width: 4px; height: 4px; border-radius: 50%; background: #78716c; box-shadow: 0 0 0 2px var(--bg-1); }
 .mcp-control.connected .mcp-indicator { background: var(--waiting); }
 .mcp-control.disabled .mcp-indicator { display: none; }
-.agent-mcp-status { color: #c6ad7c; font-size: 10px; }
-.agent-mcp-status.connected { color: #86cda0; }
 .link-confirm-address { padding: 12px; border: 1px solid #353535; border-radius: 6px; background: #111; word-break: break-all; white-space: pre-wrap; font-family: Consolas, monospace; }
 
 .role-select { display: inline-flex; align-items: center; justify-content: space-between; gap: 12px; text-align: left; min-height: 28px; cursor: pointer; background-image: none !important; padding: 4px 8px !important; }
@@ -899,17 +867,6 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid var(--focus-ri
 .role-select.worker { color: #a7d8bc; border-color: #6ba88440; }
 .role-select:disabled { cursor: default; opacity: .4; }
 
-.task-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; align-content: start; }
-.automation-card.task-summary { padding: 0; margin: 0; overflow: hidden; min-width: 0; border-radius: 6px; background: #151515; }
-.task-open { display: flex; flex-direction: column; gap: 7px; padding: 11px 12px; width: 100%; min-height: 86px; text-align: left; background: transparent; border: 0; cursor: pointer; }
-.task-open:hover { background: #ffffff05; }
-.task-summary-head { display: flex; align-items: center; gap: 8px; width: 100%; }
-.task-summary-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-summary-head .task-state { border: 1px solid #ffffff12; border-radius: 4px; padding: 2px 5px; font-size: 9px; }
-.task-summary-foot { display: flex; justify-content: space-between; gap: 8px; width: 100%; color: #747474; font-size: 10px; }
-.task-back { margin-bottom: 10px; }
-.task-detail-list .automation-card { max-width: 900px; }
-.task-detail .automation-text { max-width: 100%; }
 
 /* ── status bar ────────────────────────────────────────────────────────── */
 .statusbar { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 0 8px 0 12px; border-top: 1px solid var(--border); background: var(--bg-1); color: var(--muted); font-size: 11px; user-select: none; }
