@@ -1,5 +1,5 @@
 // The working dot of a cell steps from one shared timer (shared/blink.ts) once its smooth first waves are over: the timer puts
-// the phase on <html> as `data-pulse` and CSS draws it (terminalCell.css: the ripple of `.cell-icon .dot.working`). No CSS
+// the phase on <html> as `data-pulse` and CSS draws it (statusStyles.css: the working marks). No CSS
 // animation runs continuously while agents work. The timer stops while the window is hidden or minimized and while the
 // system asks for reduced motion (the dot then shows a still ring).
 import { useEffect } from 'react';

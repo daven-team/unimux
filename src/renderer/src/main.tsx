@@ -6,8 +6,12 @@ import { ErrorBoundary, WindowFallback } from './components/ErrorBoundary';
 import { TooltipHost } from './components/TooltipHost';
 import { installErrorReporting } from './errorReport';
 import './styles.css';
+import './components/statusStyles.css';
+import { applyStatusStyle } from './components/StatusMark';
 
 installErrorReporting();
+// TEMPORARY (1.1.2 review): the status indicator design (MC_STATUS_STYLE, StatusMark.tsx).
+applyStatusStyle();
 // The last resort: a render error no inner boundary caught leaves a "reload the window" card, not a blank window.
 // The tooltip host sits beside the app: titles get the styled bubble on the boot and language screens and the fallback too.
 // A detached window (1.0.6, `?detached=<id>`) shows one tab with its own title bar instead of the whole app.
