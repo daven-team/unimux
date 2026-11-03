@@ -3,7 +3,7 @@ import { nodeMajor, NPM_NODE_MIN, type InstallOptions, type InstallReason, type 
 import { CLI_NAMES, type CliId, type InstallMethod } from '../../../shared/cliStatus';
 import { recheckCli, showCliInstructions } from '../actions';
 import { useI18n } from '../i18n';
-import { askChoice, getUi, setUi, toast } from '../store';
+import { askChoice, getUi, setUi, toast, useStore } from '../store';
 import { terminals } from '../terminals/TerminalManager';
 import { useUsage } from '../usage';
 import { IX } from './icons';
@@ -13,6 +13,9 @@ import { RefreshIcon } from './Spinner';
 export const closeInstall = (): void => setUi({ install: null });
 
 type Session = { sessionId: string; ptyId: string };
+
+/** After a successful install opened for a login: how long the result stays on screen before that login starts. */
+const CONTINUE_AFTER_MS = 1500;
 
 const METHOD_NAMES: Record<InstallMethod, string> = { native: '', winget: 'WinGet', brew: 'Homebrew', npm: 'npm' };
 
@@ -38,6 +41,8 @@ export function InstallModal({ cli }: { cli: CliId }) {
   /** The user cancelled while the start request was still in flight. */
   const cancelWhileStarting = useRef(false);
   const { providers } = useUsage();
+  /** The login this window was opened for (the CLI was missing); it starts by itself once the install succeeded. */
+  const then = useStore((st) => st.ui.install?.then);
 
   const loadOptions = () => {
     setOptions(undefined);
@@ -75,8 +80,16 @@ export function InstallModal({ cli }: { cli: CliId }) {
   const locked = starting || status === 'running';
 
   useEffect(() => {
-    setUi({ install: { cli, locked } });
+    // The pending login (`then`) stays with the window.
+    setUi((ui) => ({ install: { cli, locked, ...(ui.install?.cli === cli && ui.install.then ? { then: ui.install.then } : {}) } }));
   }, [cli, locked]);
+
+  const succeeded = live?.status === 'succeeded';
+  useEffect(() => {
+    if (!succeeded || !then) return;
+    const timer = setTimeout(() => setUi({ install: null, modal: { kind: 'auth', provider: then.provider, target: then.target } }), CONTINUE_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [succeeded, then]);
 
   useEffect(() => {
     const el = container.current;
@@ -128,7 +141,7 @@ export function InstallModal({ cli }: { cli: CliId }) {
   const chooseAnother = () => { dropSession(); loadOptions(); };
 
   const needsLogin = !providers.some((usage) => usage.provider === cli && usage.status !== 'signedOut');
-  const login = () => setUi({ install: null, modal: { kind: 'auth', provider: cli, target: { type: 'main' } } });
+  const login = () => setUi({ install: null, modal: { kind: 'auth', provider: then?.provider ?? cli, target: then?.target ?? { type: 'main' } } });
   const recheck = async () => {
     await recheckCli(cli);
     if (getUi().cliStatus[cli]?.state === 'found') { toast(tr('Wykryto: {name}', { name })); closeInstall(); }
@@ -220,6 +233,7 @@ export function InstallModal({ cli }: { cli: CliId }) {
           {live?.status === 'succeeded' && (
             <div className="install-result">
               <div className="auth-status ok"><span>{live.version ? tr('Zainstalowano {name} {version}', { name, version: live.version }) : tr('Zainstalowano {name}.', { name })}</span></div>
+              {then && <div className="auth-status wait"><RefreshIcon spinning /><span>{tr('Za chwilę uruchomi się logowanie…')}</span></div>}
               {cli === 'claude' && method === 'native' && live.dir && (
                 <div className="install-pathnote muted">
                   <span>{tr('Aby używać „{command}” także w innych terminalach, dodaj katalog {dir} do PATH.', { command: cli, dir: live.dir })}</span>
@@ -254,7 +268,7 @@ export function InstallModal({ cli }: { cli: CliId }) {
         {live?.status === 'succeeded' && (
           <>
             <button className="btn" onClick={closeInstall}>{tr('Zamknij')}</button>
-            {needsLogin && <button className="btn primary install-login" onClick={login}>{tr('Zaloguj się do {name}', { name })}</button>}
+            {(needsLogin || !!then) && <button className="btn primary install-login" onClick={login}>{tr('Zaloguj się do {name}', { name })}</button>}
           </>
         )}
         {live?.status === 'failed' && (

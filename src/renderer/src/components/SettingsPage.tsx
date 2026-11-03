@@ -2,18 +2,19 @@ import { Select } from './Select';
 import { SettingRow, SettingsGroup } from './SettingRow';
 import { ColorPicker } from './ColorPicker';
 import { ProfileOptions } from './ProfileOptions';
-import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { pickLanguage, useI18n } from '../i18n';
 import { update, useStore } from '../store';
 import { updateSettings, upsertProfile, removeProfile, uid } from '../../../shared/state';
 import type { CliKind, ShellKind } from '../../../shared/types';
 import { normalizeUpdateMode } from '../../../shared/updateMode';
 import { AlertsSettings } from './AlertsSettings';
+import { AccountsSettings } from './AccountsSettings';
+import { SETTINGS_SECTIONS } from '../settingsSections';
 import { ShortcutsSettings } from './ShortcutsSettings';
 import { isLanguage, LANGUAGES } from '../../../shared/languages';
 import { shellsForPlatform } from '../../../shared/platform';
 import { shownProfileName } from '../../../shared/profiles';
-import { USAGE_INTERVALS_MINUTES } from '../../../shared/usage';
 import { BACKGROUND_LOAD_MODES, BACKGROUND_MAX_CELLS, normalizeBackgroundLoad, type BackgroundLoadMode } from '../../../shared/backgroundLoad';
 import type { MessageKey } from '../../../shared/i18n';
 import { DEFAULT_SCROLLBACK_LINES, normalizeScrollback, SCROLLBACK_CHOICES } from '../../../shared/terminalLimits';
@@ -28,8 +29,8 @@ const BACKGROUND_HINT: Record<BackgroundLoadMode, MessageKey> = {
   project: 'Pozostałe zakładki aktywnego projektu startują w tle (do {max} sesji po uruchomieniu). Inne projekty i reszta sesji startują po otwarciu.',
   all: 'Zakładki wszystkich projektów startują w tle, po kolei (do {max} sesji po uruchomieniu). Reszta startuje po otwarciu. Zużywa więcej pamięci i procesora.',
 };
-// 1.0.7: six sections instead of eight. Updates joined the general settings; the AI account limits sit with the agent profiles.
-const sections = ["Ogólne", "Terminal", "Powiadomienia i dźwięki", "Agenci", "Skróty klawiszowe", "SSH"] as const;
+// 1.0.7: six sections instead of eight (updates joined the general settings). 1.1.2: "Konta i limity" (see settingsSections).
+const sections = SETTINGS_SECTIONS;
 
 /**
  * Hides, inside the rendered sections, what does not match the search: the rows of a settings card, then the groups and sections
@@ -90,6 +91,18 @@ export function SettingsPage() {
     contentRef.current?.scrollTo({ top: 0 });
   };
   const setSetting = (patch: Partial<typeof settings>) => update((st) => updateSettings(st, patch));
+  // 1.1.2: "Ustawienia przełączania" of the limits panel opens a section here and scrolls to its row (and focuses it).
+  const sectionRequest = useStore((st) => st.ui.settingsSection);
+  useEffect(() => {
+    if (!sectionRequest) return;
+    selectSection(Math.max(0, Math.min(sections.length - 1, sectionRequest.index)));
+    const focus = sectionRequest.focus;
+    if (focus) setTimeout(() => {
+      const el = document.getElementById(focus);
+      el?.scrollIntoView({ block: 'center' });
+      el?.focus({ preventScroll: true });
+    }, 50);
+  }, [sectionRequest?.seq]);
   // While searching, a section may re-render on its own (a list loads, a setting changes) and add rows: the filter runs again
   // on every change of the markup (only childList, so its own data-search-hidden marks do not trigger it).
   useLayoutEffect(() => {
@@ -180,18 +193,8 @@ export function SettingsPage() {
         </SettingRow>
       </SettingsGroup>;
       case 2: return <AlertsSettings />;
-      case 3: return <>
-        <SettingsGroup title={tr('Limity kont AI')}>
-          <SettingRow title={tr('Pokazuj limity kont AI')} htmlFor="settings-ai-usage" hint={tr('Pasek zużycia limitów Claude i Codex w panelu bocznym.')}>
-            <input id="settings-ai-usage" className="setting-switch" type="checkbox" role="switch" checked={settings.showAiUsage} onChange={(e) => setSetting({ showAiUsage: e.target.checked })} />
-          </SettingRow>
-          <SettingRow title={tr('Odświeżanie limitów')} htmlFor="settings-usage-interval" hint={tr('Jak często odświeżać zużycie limitów.')}>
-            <Select id="settings-usage-interval" className="select" value={settings.usageIntervalMinutes}
-              onChange={(e) => setSetting({ usageIntervalMinutes: Number(e.target.value) })}>
-              {USAGE_INTERVALS_MINUTES.map((minutes) => <option key={minutes} value={minutes}>{tr('co {count} min', { count: minutes })}</option>)}
-            </Select>
-          </SettingRow>
-        </SettingsGroup>
+      case 3: return <AccountsSettings />;
+      case 4: return <>
         <section className="settings-group settings-group-head">
           <h3 className="settings-group-title">{tr('Profile agentów')}</h3>
           <p className="settings-group-desc">{tr('Profil to gotowy sposób uruchamiania agenta: wybierasz polecenie (Claude, Codex lub zwykła powłoka), nazwę, kolor i opcje startowe. Każda nowa komórka z tym profilem startuje z tymi opcjami.')}</p>
@@ -217,7 +220,7 @@ export function SettingsPage() {
           <button className="btn" onClick={() => update((st) => upsertProfile(st, { id: uid(), name: tr("Nowy profil"), cli: 'claude', args: '', color: '#8b5cf6' }))}>{tr("+ Dodaj profil")}</button>
         </div>}
       </>;
-      case 4: return <SettingsGroup><ShortcutsSettings search={searching ? query : undefined} /></SettingsGroup>;
+      case 5: return <SettingsGroup><ShortcutsSettings search={searching ? query : undefined} /></SettingsGroup>;
       default: return <SshSettings />;
     }
   };

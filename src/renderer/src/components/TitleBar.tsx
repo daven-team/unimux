@@ -234,14 +234,15 @@ export const WorkspaceTabs = memo(function WorkspaceTabs() {
     const projectOf = (key: string) => gridProject.get(key)?.id ?? (documents.find((d) => `file:${d.id}` === key)?.projectId || null);
     const groups = groupWorkspaceKeys(shown, projectOf, projects.map((p) => p.id));
     openMenuAt(el, [
-      // 1.0.4: the same switch as in Settings > App: the tabs of every project, or only of the project on screen.
-      { label: tr('Tylko karty aktywnego projektu'), hint: stripScope === 'project' ? '✓' : undefined, onClick: () => update((st) => updateSettings(st, { stripScope: stripScope === 'project' ? 'all' : 'project' })) },
-      { sep: true as const },
       { header: tr('Wszystkie karty') },
       ...groups.flatMap((group) => [
         ...(group.projectId ? [{ header: projects.find((p) => p.id === group.projectId)?.name ?? '' }] : []),
         ...group.keys.flatMap(item),
       ]),
+      { sep: true as const },
+      // 1.0.4: the same switch as in Settings > App: the tabs of every project, or only of the project on screen. 1.1.2: an
+      // option at the end of the list, not its first row (it read as the selected tab).
+      { label: tr('Tylko karty aktywnego projektu'), hint: stripScope === 'project' ? '✓' : undefined, onClick: () => update((st) => updateSettings(st, { stripScope: stripScope === 'project' ? 'all' : 'project' })) },
     ]);
   };
   const fileTabMenu = (x: number, y: number, doc: FileTab) => {

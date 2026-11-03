@@ -114,7 +114,7 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
   await key('Escape', 'Escape');
   assert.ok(await evaluate('(() => { const page = document.querySelector(".settings-page").getBoundingClientRect(); const nav = document.querySelector(".settings-nav").getBoundingClientRect(); const content = document.querySelector(".settings-content").getBoundingClientRect(); return nav.left - page.left >= 24 && nav.top - page.top >= 36 && content.left - nav.right >= 24 && page.right - content.right >= 24 && getComputedStyle(document.querySelector(".settings-card")).borderTopWidth === "0px"; })()'), 'settings have outer margins, top space and a borderless card');
   const sectionLabels = await evaluate('[...document.querySelectorAll(".settings-nav button")].map(button => button.textContent.trim())');
-  assert.equal(sectionLabels.length, 6); // SSH joined in 0.9.0; 1.0.7 folded Updates into General and AI accounts into Agents
+  assert.equal(sectionLabels.length, 7); // SSH joined in 0.9.0; 1.0.7 folded Updates into General; 1.1.2 added Accounts & limits
   for (const label of sectionLabels) {
     await click('.settings-nav button', label);
     await until(() => evaluate(`document.querySelector('.settings-content h2')?.textContent === ${JSON.stringify(label)}`), `settings section ${label}`);
@@ -125,7 +125,7 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
       assert.ok(await evaluate('[...document.querySelectorAll(".settings-card input[role=switch]")].every(input => { const r = input.getBoundingClientRect(); return r.width === 28 && r.height === 16; })'), 'switch tracks retain their dimensions');
       await screenshot('settings-notifications');
     }
-    if (label === 'Agents') {
+    if (label === 'Accounts & limits') {
       const before = await evaluate('document.querySelector("#settings-ai-usage").checked');
       await click('#settings-ai-usage');
       await until(() => evaluate(`document.querySelector('#settings-ai-usage').checked === ${!before}`), 'AI usage toggle');

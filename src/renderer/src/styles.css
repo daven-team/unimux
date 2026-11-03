@@ -88,36 +88,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .automation-splitter:hover::after, .automation-splitter:focus-visible::after, .automation-splitter.dragging::after { top: 2px; height: 3px; background: var(--btn-primary-bg); }
 .automation-splitter:focus-visible { outline: none; }
 @media (prefers-reduced-motion: reduce) { .automation-splitter::after { transition: none; } }
-.automation-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px; }
-.automation-head strong { font-size: 12px; }
-.automation-panel .grow { flex: 1; min-width: 0; }
-.mcp-state { font-size: 10px; color: var(--muted); }
-.mcp-state.connected { color: #4ade80; }
-.automation-tabs { display: flex; gap: 5px; border-bottom: 1px solid var(--border); padding: 0 12px; }
-.automation-tabs button { padding: 6px 9px; background: transparent; border: 0; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
-.automation-tabs button.active { color: var(--text); border-bottom-color: var(--btn-primary-bg); }
-.automation-content { flex: 1; min-height: 0; display: flex; }
-.automation-compose { width: 270px; max-width: 40%; flex: none; padding: 12px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
-.automation-compose label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 11px; }
-.automation-compose textarea { min-height: 60px; resize: vertical; }
-.automation-compose .input, .automation-compose .select { width: 100%; }
-.automation-compose p { font-size: 10px; line-height: 1.5; margin: 0; }
-.automation-list { flex: 1; min-width: 0; overflow-y: auto; padding: 10px 12px; }
-.automation-card { padding: 10px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 7px; display: flex; flex-direction: column; gap: 7px; }
-.automation-card strong { font-size: 12px; overflow-wrap: anywhere; }
-.automation-card .row { gap: 7px; }
-.automation-card .wrap { flex-wrap: wrap; }
-.automation-card .select { font-size: 11px; }
-.automation-card summary { cursor: pointer; font-size: 11px; color: var(--muted); }
-.automation-card p { margin: 3px 0; }
-.automation-card .muted, .automation-list > .muted { font-size: 11px; }
-.automation-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
-.automation-empty { color: var(--muted); font-size: 12px; padding: 14px 12px; }
-.task-state { color: var(--muted); font-size: 10px; flex: none; }
-.task-completed .task-state { color: #4ade80; }
-.task-blocked .task-state, .blocked-reason { color: #fbbf24; }
-.automation-note { padding: 6px 12px; font-size: 11px; color: #fbbf24; }
-.automation-head .paused { color: #fbbf24; }
 
 .titlebar {
   display: flex; align-items: center; gap: 8px; padding: 0 140px 0 0;
@@ -192,20 +162,7 @@ html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .project-add-inline:hover { border-color: #78716c; background: var(--bg-hover); color: var(--text); }
 .side-footer .project-add-inline { margin-top: 0; }
 
-.badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; padding: 0 5px; height: 17px; border-radius: 9px; background: #1f1f1f; color: var(--text-2); font-variant-numeric: tabular-nums; }
-.badge.working { color: var(--working); background: #f5b94214; }
-.badge.waiting { color: var(--waiting); background: #4ade8016; }
-/* Exited cleanly: neutral; with a non-zero exit code: the error colour (the cell's pill and dot agree, 1.0.7). */
-.badge.exited { color: var(--muted); background: #ffffff0d; }
-.badge.failed { color: var(--error); background: #f8717114; }
-
-.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: #3a3a3a; }
-/* No CSS animation here: a running one presents a frame at every vsync. The dots of lists and tabs stay still; the dot on a
-   cell's icon ripples (terminalCell.css), stepped by the shared pulse of blink.ts after its first smooth waves (1.0.9). */
-.dot.working { background: var(--working); }
-.dot.waiting { background: var(--waiting); }
-.dot.exited { background: var(--error); }
-.dot.waiting.error { background: var(--error); }
+/* The status badges of tabs and projects (a mark and a count): statusStyles.css. */
 
 /* ── tab bar (inside titlebar) ─────────────────────────────────────────── */
 .tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; flex: 0 1 auto; scrollbar-width: none; }
@@ -838,11 +795,11 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid var(--focus-ri
 .setting-hint { margin-top: 1px; color: #b4b4b4; font-size: 12px; line-height: 1.45; }
 .setting-control { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 0 1 auto; min-width: 0; max-width: 42%; }
 .setting-control .input { height: 28px; padding: 4px 8px; }
-.settings-card input.setting-switch { appearance: none; position: relative; width: 28px; height: 16px; flex: none; margin: 0; border: 0; border-radius: 9px; background: #484848; cursor: pointer; }
+.settings-card input.setting-switch, .switcher-pop input.setting-switch { appearance: none; position: relative; width: 28px; height: 16px; flex: none; margin: 0; border: 0; border-radius: 9px; background: #484848; cursor: pointer; }
 .setting-switch::before { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform .12s; }
-.settings-card input.setting-switch:checked { background: #3a9d67; }
+.settings-card input.setting-switch:checked, .switcher-pop input.setting-switch:checked { background: #3a9d67; }
 .setting-switch:checked::before { transform: translateX(12px); }
-.settings-card input.setting-switch:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; box-shadow: none; }
+.settings-card input.setting-switch:focus-visible, .switcher-pop input.setting-switch:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; box-shadow: none; }
 .setting-switch:disabled { opacity: .45; cursor: default; }
 .settings-profile-heading { display: flex; align-items: center; justify-content: space-between; color: #b4b4b4; font-size: 12px; }
 .setting-control .row.alert-quiet { flex-wrap: nowrap; gap: 6px; }
@@ -889,8 +846,6 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid var(--focus-ri
 .mcp-indicator { position: absolute; right: 3px; bottom: 2px; width: 4px; height: 4px; border-radius: 50%; background: #78716c; box-shadow: 0 0 0 2px var(--bg-1); }
 .mcp-control.connected .mcp-indicator { background: var(--waiting); }
 .mcp-control.disabled .mcp-indicator { display: none; }
-.agent-mcp-status { color: #c6ad7c; font-size: 10px; }
-.agent-mcp-status.connected { color: #86cda0; }
 .link-confirm-address { padding: 12px; border: 1px solid #353535; border-radius: 6px; background: #111; word-break: break-all; white-space: pre-wrap; font-family: Consolas, monospace; }
 
 .role-select { display: inline-flex; align-items: center; justify-content: space-between; gap: 12px; text-align: left; min-height: 28px; cursor: pointer; background-image: none !important; padding: 4px 8px !important; }
@@ -899,17 +854,6 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid var(--focus-ri
 .role-select.worker { color: #a7d8bc; border-color: #6ba88440; }
 .role-select:disabled { cursor: default; opacity: .4; }
 
-.task-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; align-content: start; }
-.automation-card.task-summary { padding: 0; margin: 0; overflow: hidden; min-width: 0; border-radius: 6px; background: #151515; }
-.task-open { display: flex; flex-direction: column; gap: 7px; padding: 11px 12px; width: 100%; min-height: 86px; text-align: left; background: transparent; border: 0; cursor: pointer; }
-.task-open:hover { background: #ffffff05; }
-.task-summary-head { display: flex; align-items: center; gap: 8px; width: 100%; }
-.task-summary-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-summary-head .task-state { border: 1px solid #ffffff12; border-radius: 4px; padding: 2px 5px; font-size: 9px; }
-.task-summary-foot { display: flex; justify-content: space-between; gap: 8px; width: 100%; color: #747474; font-size: 10px; }
-.task-back { margin-bottom: 10px; }
-.task-detail-list .automation-card { max-width: 900px; }
-.task-detail .automation-text { max-width: 100%; }
 
 /* ── status bar ────────────────────────────────────────────────────────── */
 .statusbar { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 0 8px 0 12px; border-top: 1px solid var(--border); background: var(--bg-1); color: var(--muted); font-size: 11px; user-select: none; }
@@ -1034,21 +978,52 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .fr-line del { background: #f8717128; color: #fecaca; text-decoration: line-through; border-radius: 2px; }
 .fr-line ins { background: #4ade8024; color: #bbf7d0; text-decoration: none; border-radius: 2px; }
 
-/* ── AI account limits (docked above the status bar) ───────────────────── */
+/* ── Accounts & limits (docked above the status bar) ───────────────────── */
 .usage-panel { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 0 10px 6px; border-top: 1px solid var(--border); background: var(--bg-1); font-size: 11px; color: var(--text-2); max-height: 40vh; overflow-y: auto; }
 /* Docked under the side panel content: at most 35% of the side panel, so the panel above keeps room in a short window (the
    cards scroll). The collapsed rail variant (.rail-foot) keeps 40vh. */
 .side-panel > .usage-panel { max-height: min(40vh, 35%); }
+/* 1.1.2: a height set with the drag handle on the top edge replaces the default cap (the side panel above keeps room: the
+   handle clamps it, and a smaller window still shrinks the panel). */
+.side-panel > .usage-panel.sized { max-height: calc(100% - 140px); height: var(--usage-height); min-height: 80px; }
+.usage-resize { position: absolute; left: 0; right: 0; top: 0; height: 5px; z-index: 4; cursor: row-resize; touch-action: none; }
+.usage-resize::after { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: transparent; transition: background .12s, height .12s; }
+.usage-resize:hover::after, .usage-resize:focus-visible::after, .usage-resize.dragging::after { height: 3px; background: var(--btn-primary-bg); }
+.usage-resize:focus-visible { outline: none; }
+@media (prefers-reduced-motion: reduce) { .usage-resize::after { transition: none; } }
+/* 1.1.2: the Switcher in the header: its mark and word (they open its card) and a small switch. Off: a grey arrows mark and
+   "Switcher"; on: a green eye and "Pilnuje" ("Watching"), so it is plain that it watches the accounts. */
+.usage-auto { flex: none; display: inline-flex; align-items: center; gap: 2px; height: 22px; padding-right: 3px; border-radius: 5px; }
+.usage-auto-open { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 4px 0 5px; border: 0; border-radius: 5px; background: none; color: var(--muted); font: inherit; font-size: 10.5px; cursor: pointer; }
+.usage-auto-open:hover, .usage-auto-open[aria-expanded="true"] { background: var(--btn-ghost-hover); color: var(--text-2); }
+.usage-auto-open:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; }
+.usage-auto.on .usage-auto-open { color: #7fcf9f; }
+.usage-auto.on .usage-auto-open:hover, .usage-auto.on .usage-auto-open[aria-expanded="true"] { color: #9fe0b8; }
+.usage-auto-open > svg { flex: none; }
+.usage-auto-label { letter-spacing: .2px; white-space: nowrap; }
+/* A narrow side panel keeps the title readable: the word goes, the mark stays (the tooltip says it). */
+.usage-head { container-type: inline-size; }
+@container (max-width: 250px) { .usage-auto-label { display: none; } }
+/* Scoped under .usage-auto so it wins over the app-wide checkbox look (input[type='checkbox']). */
+.usage-auto input.usage-auto-switch { position: relative; display: block; width: 22px; height: 12px; border: 0; border-radius: 7px; background: #474747; box-shadow: none; transition: background .12s; }
+.usage-auto input.usage-auto-switch::before { content: ''; position: absolute; top: 2px; left: 2px; width: 8px; height: 8px; border-radius: 50%; background: #d4d4d4; transition: transform .12s, background .12s; }
+.usage-auto input.usage-auto-switch:checked { background: #3a9d67; border: 0; }
+.usage-auto input.usage-auto-switch:checked::before { transform: translateX(10px); background: #fff; }
+.usage-auto input.usage-auto-switch:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; box-shadow: none; }
+@media (prefers-reduced-motion: reduce) { .usage-auto input.usage-auto-switch, .usage-auto input.usage-auto-switch::before { transition: none; } }
+.usage-switch-offer { border-color: var(--btn-primary-bg); }
 /* 1.0.9: the header (title, add, refresh) stays at the top of the panel while the cards scroll under it, so the panel can be
    collapsed without scrolling back up. It carries the panel's top padding and spans its full width, on the panel's opaque
    background (the panel has no top padding of its own, so it sticks at the very edge with nothing showing above it). */
-.usage-head { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 6px; margin: 0 -10px; padding: 4px 10px 0; background: var(--bg-1); }
+.usage-head { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 4px; margin: 0 -10px; padding: 4px 10px 0; background: var(--bg-1); }
 /* A hairline under the header shows once the cards scroll beneath it (a scroll-driven animation: it moves only with the
    scroll position, never on its own). */
 .usage-head { animation: usage-head-edge linear both; animation-timeline: scroll(nearest block); animation-range: 0 8px; }
 @keyframes usage-head-edge { from { box-shadow: 0 1px 0 transparent; } to { box-shadow: 0 1px 0 var(--border); } }
-.usage-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: transparent; color: var(--text-2); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.usage-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; display: flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: transparent; color: var(--text-2); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
 .usage-title:hover { color: var(--text); }
+/* The title stays on one line and ellipsizes in a narrow side panel. */
+.usage-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-chevron { display: inline-grid; transition: transform .15s; }
 .usage-chevron.up { transform: rotate(180deg); }
 .usage-summary { font-weight: 400; color: var(--text-2); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1100,6 +1075,7 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 
 .modal.auth { width: 720px; }
 .auth-note { padding: 0 16px 10px; font-size: 12px; line-height: 1.5; }
+.auth-paste-note { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 /* A flex basis, not a fixed height: in a short window the terminal shrinks so the modal (max 82vh) needs no scrolling. */
 .auth-terminal { flex: 0 1 min(300px, 45vh); min-height: 96px; margin: 0 16px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--card-bg); padding: 6px; overflow: hidden; }
 .auth-status { display: flex; align-items: center; gap: 8px; padding: 10px 16px 12px; font-size: 12.5px; }
@@ -1164,6 +1140,21 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .settings-card .alert-event-sound .styled-select { max-width: none; width: 100%; }
 .alert-file { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11.5px; }
 .alert-volume-value { width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+/* 1.1.2: threshold sliders (Konta i limity): a thin track filled with the accent up to the value, a round thumb, the value
+   as a tabular number. --fill is the value's share of the range (0..1); the fill ends under the thumb's centre. */
+.threshold-slider { display: inline-flex; align-items: center; gap: 10px; }
+.threshold-slider input[type=range] { -webkit-appearance: none; appearance: none; width: 160px; min-width: 80px; height: 18px; margin: 0; padding: 0; background: transparent; cursor: pointer; }
+.threshold-slider input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px;
+  background: linear-gradient(to right, var(--btn-primary-bg) 0 calc(7px + (100% - 14px) * var(--fill, 0)), #ffffff1f calc(7px + (100% - 14px) * var(--fill, 0)) 100%); }
+.threshold-slider input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; margin-top: -5px; border: 0; border-radius: 50%; background: #e6e6e6; box-shadow: 0 0 0 1px #00000059, 0 1px 2px #00000066; transition: transform .1s; }
+.threshold-slider input[type=range]:hover::-webkit-slider-thumb { transform: scale(1.1); }
+.threshold-slider input[type=range]:focus { outline: none; }
+.threshold-slider input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 1px #00000059, 0 0 0 4px var(--accent-soft), 0 0 0 5px var(--focus-ring); }
+.threshold-slider.disabled { opacity: .45; }
+.threshold-slider input[type=range]:disabled { cursor: default; }
+.threshold-slider input[type=range]:disabled::-webkit-slider-thumb { transform: none; }
+.threshold-slider-value { width: 34px; text-align: right; color: #d4d4d4; font-size: 12px; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .threshold-slider input[type=range]::-webkit-slider-thumb { transition: none; } }
 
 /* Agent profiles: one compact card per profile */
 .profile-card { display: flex; flex-direction: column; gap: 8px; padding: 10px 2px; }

@@ -1,5 +1,5 @@
 import { changeAgentRole } from '../agentRoles';
-import { useBlink } from '../blink';
+import { StatusMark, statusKind } from './StatusMark';
 import { cellLabel } from '../../../shared/agentWork';
 import { shortcutText, titleWithShortcut, useShortcutText } from '../shortcuts';
 import { useI18n } from '../i18n';
@@ -123,9 +123,8 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const metaProfile = !ssh && shownName !== profileName && !genericProfileName(profile);
   // A non-zero exit code (the last command, the CLI, the process) is an error in the dot and the pill alike (1.0.7).
   const exitFailed = failedExit(statusDetail);
-  // A working dot ripples smoothly for its first waves, then steps with the shared pulse (terminalCell.css, blink.ts).
-  useBlink(status === 'working');
-  const dotClass = `${status}${(status === 'waiting' && failure !== undefined) || exitFailed ? ' error' : ''}`;
+  // 1.1.2: one mark for the icon's corner and the header (StatusMark.tsx); an SSH cell's header has its own phase text.
+  const markKind = statusKind(status, (status === 'waiting' && failure !== undefined) || exitFailed, statusDetail?.kind);
 
   const sshItems = (): MenuItem[] => [
     { label: tr('Połącz ponownie'), onClick: () => void reconnectCell(cell.id) },
@@ -260,12 +259,12 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
           {ssh ? (
             <button type="button" className="cell-icon ssh-host" onClick={(e) => openMenuAt(e.currentTarget, sshItems())} title={host ? userAtEndpoint(host) : tr('Host usunięty')} aria-label={host?.label ?? tr('Host usunięty')}>
               <span className={`cell-icon-tile host${host?.color ? '' : ' uncolored'}`} style={host?.color ? { background: host.color } : undefined}>{hostInitials(host?.label ?? '?')}</span>
-              <span className={`dot ${dotClass}`} />
+              <StatusMark kind={markKind} className="cell-dot" />
             </button>
           ) : (
             <button type="button" className="cell-icon" onClick={(e) => openMenuAt(e.currentTarget, profileItems())} title={`${profileName}\n${tr("Zmień profil")}`} aria-label={`${tr("Zmień profil")}: ${profileName}`}>
               <span className="cell-icon-tile">{profile.cli === 'shell' ? <IPrompt /> : <ProviderIcon provider={profile.cli} size={14} />}</span>
-              <span className={`dot ${dotClass}`} />
+              <StatusMark kind={markKind} className="cell-dot" />
             </button>
           )}
           <span className="idx">{index + 1}</span>
@@ -310,8 +309,8 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
         {phaseLabel
           ? <span className="status-text ssh">{tr(phaseLabel.key, phaseLabel.params)}</span>
           : status === 'waiting' && failure !== undefined
-          ? <span className="status-text error" title={tr(errorPhrase(failure))}>{tr(failureLabel(failure))}</span>
-          : statusLabel && <span className={`status-text ${status}${exitFailed ? ' error' : ''}`} title={tr(statusLabel.key, statusLabel.params)}>{tr(statusLabel.key, statusLabel.params)}{status === 'working' ? '…' : ''}</span>}
+          ? <span className="status-text error" title={tr(errorPhrase(failure))}><StatusMark kind="error" /><span className="label">{tr(failureLabel(failure))}</span></span>
+          : statusLabel && <span className={`status-text ${status} ${markKind}${exitFailed ? ' error' : ''}`} title={tr(statusLabel.key, statusLabel.params)}><StatusMark kind={markKind} /><span className="label">{tr(statusLabel.key, statusLabel.params)}</span></span>}
         <span className="actions">
           {profile.cli !== 'shell' && !ssh && <button className={`mcp-control ${cell.role ?? 'disabled'} ${mcpInfo.connectedCellIds?.includes(cell.id) ? 'connected' : ''}`}
             aria-label={`${tr('Rola / MCP')}: ${tr(cell.role === 'coordinator' ? 'Koordynator' : cell.role === 'worker' ? 'Wykonawca' : 'Bez MCP')}`}

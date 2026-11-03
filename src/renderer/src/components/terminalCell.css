@@ -127,68 +127,7 @@
 .terminal-cell .cell-icon-tile.host.uncolored { background: #333; color: var(--text-2); text-shadow: none; }
 .terminal-cell .cell-icon:hover .cell-icon-tile.host { filter: brightness(1.12); }
 
-/* The dot (styles.css .dot) on the icon's lower right corner, cut out of the tile by a ring of the header's colour.
-   8 px is a whole number of device pixels at 100, 125, 150 and 200 % scaling, so it stays round (9 px came out 11 x 12). */
-.terminal-cell .cell-icon .dot {
-  position: absolute;
-  right: -2px;
-  bottom: -2px;
-  width: 8px;
-  height: 8px;
-  box-shadow: 0 0 0 2px var(--cell-head-bg);
-}
-
-.terminal-cell .cell-icon .dot.idle { background: #4b4b4b; }
-/* A working dot sends out ripples: a ring in full colour grows from the dot's edge to almost twice its size and fades.
-   1.0.8 ran one filled halo 3 px wide with an infinite CSS animation: it faded out in the first third of each 1.4 s wave (a
-   front-loaded easing), so it read as a short flicker, hardly seen, and it made Chromium present a frame at every vsync
-   while any cell worked (241 frames a second, 43 % of a core with 16 cells on a 240 Hz display; budget 2.5 %).
-   1.0.9: when the cell starts working, two rings half a wave apart ripple smoothly for two waves (a finite animation, about
-   3.5 s); then the ring steps with the shared pulse of blink.ts (data-pulse on <html>: three sizes and a rest, four frames
-   a second, the cost of the old 1 Hz blink times 2). Only transform and opacity change and each ring is its own layer
-   (will-change), so neither the waves nor the steps cost style, layout or paint work beyond the one attribute.
-   A ring is drawn at its largest size and scaled down (it stays sharp); it ends 7.5 px from the dot's centre, inside the
-   heading (CELL_HEAD_HEIGHT 34 with its 1 px border, the icon 22: the dot's centre is about 7.5 px above the header's
-   bottom). The rings exist only while the cell works; without the pulse (reduced motion, a hidden window) one ring stands
-   still around the dot. */
-.terminal-cell .cell-icon .dot.working::before,
-.terminal-cell .cell-icon .dot.working::after {
-  content: '';
-  position: absolute;
-  inset: -4px;
-  border: 1.5px solid var(--working);
-  border-radius: 50%;
-  opacity: .5;
-  transform: scale(.75);
-  pointer-events: none;
-  will-change: transform, opacity;
-  animation: cell-dot-ripple 1.4s cubic-bezier(.25, .4, .45, 1) 2;
-}
-
-.terminal-cell .cell-icon .dot.working::after { opacity: 0; animation-delay: .7s; }
-
-@keyframes cell-dot-ripple {
-  from { opacity: .95; transform: scale(.5); }
-  55% { opacity: .5; }
-  to { opacity: 0; transform: scale(.94); }
-}
-
-/* The steps of the shared pulse once the waves are over (an animation, while it runs, wins over these). */
-:root[data-pulse] .terminal-cell .cell-icon .dot.working::before { opacity: 0; transform: scale(.5); }
-:root[data-pulse="1"] .terminal-cell .cell-icon .dot.working::before { opacity: .95; transform: scale(.66); }
-:root[data-pulse="2"] .terminal-cell .cell-icon .dot.working::before { opacity: .6; transform: scale(.8); }
-:root[data-pulse="3"] .terminal-cell .cell-icon .dot.working::before { opacity: .25; transform: scale(.94); }
-
-@media (prefers-reduced-motion: reduce) {
-  .terminal-cell .cell-icon .dot.working::before { animation: none; will-change: auto; }
-  .terminal-cell .cell-icon .dot.working::after { content: none; }
-}
-
-/* Exited: a hollow grey ring; a failed turn (waiting.error) stays red. */
-.terminal-cell .cell-icon .dot.exited { background: var(--cell-head-bg); box-shadow: 0 0 0 2px var(--cell-head-bg), inset 0 0 0 2px #7a7a7a; }
-/* A non-zero exit code (1.0.7): red like the pill, a filled dot at the prompt, a red ring once the process ended. */
-.terminal-cell .cell-icon .dot.error { background: var(--error); }
-.terminal-cell .cell-icon .dot.exited.error { background: var(--cell-head-bg); box-shadow: 0 0 0 2px var(--cell-head-bg), inset 0 0 0 2px var(--error); }
+/* The status mark on the icon's lower right corner: statusStyles.css (1.1.2). */
 
 .terminal-cell .cell-head .idx {
   flex: none;
@@ -260,29 +199,24 @@
 .terminal-cell .meta-item.branch > span { overflow: hidden; text-overflow: ellipsis; }
 .terminal-cell .meta-item.endpoint { font-family: 'Cascadia Mono', Consolas, monospace; font-size: 10.5px; }
 
-/* The status as a small pill: working amber, waiting for you green, a failed turn red, the rest grey. */
-/* The status pill sits beside the actions. 1.0.7: it comes before the details and the name (they shrink first), up to
-   about half of the header; only a longer reason ellipsizes (its full text is the pill's title). */
+/* The status beside the actions: a mark and the text (statusStyles.css draws them, 1.1.2). 1.0.7: it comes before the
+   details and the name (they shrink first), up to about half of the header; only a longer reason ellipsizes (its full text
+   is the title). */
 .terminal-cell .cell-head .status-text {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   max-width: 52%;
-  height: 18px;
-  padding: 0 7px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
   overflow: hidden;
-  border-radius: 9px;
-  background: #ffffff0d;
   color: var(--text-2);
-  font-size: 11px;
-  line-height: 18px;
-  text-overflow: ellipsis;
+  font-size: 11.5px;
   white-space: nowrap;
 }
 
-.terminal-cell .cell-head .status-text.working { background: color-mix(in srgb, var(--working) 13%, transparent); color: var(--working); }
-.terminal-cell .cell-head .status-text.waiting { background: color-mix(in srgb, var(--waiting) 12%, transparent); color: var(--waiting); }
-.terminal-cell .cell-head .status-text.exited { color: var(--muted); }
-.terminal-cell .cell-head .status-text.error { background: color-mix(in srgb, var(--error) 14%, transparent); color: var(--error); font-weight: 600; }
-.terminal-cell .cell-head .status-text.ssh { color: var(--text-2); }
+.terminal-cell .cell-head .status-text > .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 .terminal-cell .cell-head .muted-mark { flex: none; display: inline-flex; color: var(--text-2); opacity: .8; }
 

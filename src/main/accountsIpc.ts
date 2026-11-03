@@ -14,6 +14,14 @@ export interface AccountIpcHandlers {
   swapPending(): unknown;
   clearSwapPending(): unknown;
   dismissNotice(id: unknown): unknown;
+  /** 1.1.2: "switch now to the account with the most room" (payload: the provider). */
+  switchBest(provider: unknown): unknown;
+  /** 1.1.2: "Switch to X" of the current offer, and hiding it. */
+  acceptSwitch(): unknown;
+  dismissSwitch(): unknown;
+  /** 1.1.2: saved Codex accounts: make main, remove. */
+  makeMainCodex(id: unknown): unknown;
+  removeCodex(id: unknown): unknown;
 }
 
 type InvokeName = Exclude<keyof AccountIpcHandlers, 'cancelLogin'>;
@@ -22,6 +30,8 @@ type InvokeName = Exclude<keyof AccountIpcHandlers, 'cancelLogin'>;
 export const GUARDED_ACCOUNT_CHANNELS = {
   'usage:refresh': 'refreshUsage', 'auth:start': 'startLogin', 'accounts:remove': 'removeAccount', 'accounts:makeMain': 'makeMain',
   'accounts:adoptCopy': 'adoptCopy', 'accounts:clearSwapPending': 'clearSwapPending', 'accounts:dismissNotice': 'dismissNotice',
+  'accounts:switchBest': 'switchBest', 'accounts:acceptSwitch': 'acceptSwitch', 'accounts:dismissSwitch': 'dismissSwitch',
+  'accounts:makeMainCodex': 'makeMainCodex', 'accounts:removeCodex': 'removeCodex',
 } as const satisfies Record<string, InvokeName>;
 
 /** Sends (no answer) that change something. */
@@ -42,6 +52,11 @@ export function accountRefusal(channel: GuardedAccountChannel, handlers: Pick<Ac
     case 'accounts:adoptCopy': return { ok: false, error: 'invalid' };
     case 'accounts:clearSwapPending': return { ok: false };
     case 'accounts:dismissNotice': return undefined;
+    case 'accounts:switchBest': return { ok: false, error: 'invalid' };
+    case 'accounts:acceptSwitch': return { ok: false, error: 'invalid' };
+    case 'accounts:dismissSwitch': return undefined;
+    case 'accounts:makeMainCodex': return { ok: false, error: 'invalid' };
+    case 'accounts:removeCodex': return { ok: false };
   }
 }
 

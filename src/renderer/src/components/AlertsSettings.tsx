@@ -1,13 +1,14 @@
 import { Select } from './Select';
 import { SettingRow, SettingsGroup } from './SettingRow';
 import { useEffect, useRef, useState } from 'react';
-import { ALERT_EVENTS, isTime, LIMIT_PERCENTS, normalizeVolume, type AlertEventId, type AlertSettings, type LimitAlertSettings, type SoundChoice } from '../../../shared/alerts';
+import { ALERT_EVENTS, isTime, normalizeVolume, type AlertEventId, type AlertSettings, type SoundChoice } from '../../../shared/alerts';
 import { SOUND_PRESETS, getPreset } from '../../../shared/soundPresets';
 import { updateSettings } from '../../../shared/state';
 import type { MessageKey } from '../../../shared/i18n';
 import { previewVolume, testAlert } from '../alerts';
 import { useI18n } from '../i18n';
 import { getS, toast, update, useStore } from '../store';
+import { openAccountSettings } from './UsageAutoSwitch';
 
 const EVENT_LABELS: Record<AlertEventId, MessageKey> = {
   done: 'Skończył pracę',
@@ -20,7 +21,10 @@ const selectValue = (sound: SoundChoice) => (sound.kind === 'preset' ? `preset:$
 
 const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
-/** The "Notifications and sounds" settings: one row per agent event, volume, the active-window option and quiet hours. */
+/**
+ * The "Notifications and sounds" settings: one row per agent event, volume, the active-window option and quiet hours.
+ * 1.1.2: the limit warnings and the account switcher moved to their own section (AccountsSettings).
+ */
 export function AlertsSettings() {
   const { tr } = useI18n();
   const alerts = useStore((st) => st.s.settings.alerts);
@@ -71,21 +75,6 @@ export function AlertsSettings() {
     setAnnounce(tr('Głośność ustawiona na {value}%', { value: percent }));
     void previewVolume(volume);
   };
-  const limits = alerts.limits;
-  const showAiUsage = useStore((st) => st.s.settings.showAiUsage);
-  const setLimits = (patch: Partial<LimitAlertSettings>) => setAlerts((a) => ({ ...a, limits: { ...a.limits, ...patch } }));
-  const limitWindow = (id: 'fiveHour' | 'sevenDay', title: string) => {
-    const config = limits[id];
-    // A threshold saved outside the list (an older or edited state) is still shown as it is.
-    const percents = LIMIT_PERCENTS.includes(config.percent) ? LIMIT_PERCENTS : [...LIMIT_PERCENTS, config.percent].sort((a, b) => a - b);
-    return <SettingRow title={title} htmlFor={`settings-limit-${id}`}>
-      <Select id={`settings-limit-${id}-percent`} className="select alert-limit-percent" aria-label={tr('Próg: {window}', { window: title })} value={String(config.percent)} disabled={!limits.enabled || !config.enabled}
-        onChange={(e) => setLimits({ [id]: { ...config, percent: Number(e.target.value) } })}>
-        {percents.map((percent) => <option key={percent} value={String(percent)}>{tr('od {percent}%', { percent })}</option>)}
-      </Select>
-      <input id={`settings-limit-${id}`} className="setting-switch" type="checkbox" role="switch" checked={config.enabled} disabled={!limits.enabled} onChange={(e) => setLimits({ [id]: { ...config, enabled: e.target.checked } })} />
-    </SettingRow>;
-  };
   const quiet = alerts.quietHours;
   const setQuiet = (patch: Partial<typeof quiet>) => setAlerts((a) => ({ ...a, quietHours: { ...a.quietHours, ...patch } }));
 
@@ -124,17 +113,6 @@ export function AlertsSettings() {
           </div>;
         })}
       </div>
-    </SettingsGroup>
-    <SettingsGroup title={tr('Limity kont AI')} description={tr('Powiadomienie systemowe, gdy konto Claude lub Codex wykorzysta wybraną część limitu: raz na konto, okno i okres limitu, także po ponownym uruchomieniu aplikacji. Nie dotyczy kont z wygasłym logowaniem. Kliknięcie otwiera panel limitów. Godziny ciszy obowiązują.')}>
-      <SettingRow title={tr('Ostrzeżenia o limitach')} htmlFor="settings-limits-enabled" hint={showAiUsage ? undefined : tr('Działa tylko przy włączonym panelu limitów kont AI.')}>
-        <button type="button" className="btn alert-test" disabled={!limits.enabled} aria-label={tr('Test: {event}', { event: tr('Ostrzeżenia o limitach') })} onClick={() => window.mc.testLimitAlert()}>{tr('Test')}</button>
-        <input id="settings-limits-enabled" className="setting-switch" type="checkbox" role="switch" checked={limits.enabled} onChange={(e) => setLimits({ enabled: e.target.checked })} />
-      </SettingRow>
-      {limitWindow('fiveHour', tr('Limit 5-godzinny'))}
-      {limitWindow('sevenDay', tr('Limit 7-dniowy'))}
-      <SettingRow title={tr('Powiadom, gdy limit znowu jest dostępny')} htmlFor="settings-limits-resets" hint={tr('Po resecie okna, które przekroczyło próg.')}>
-        <input id="settings-limits-resets" className="setting-switch" type="checkbox" role="switch" checked={limits.resets} disabled={!limits.enabled} onChange={(e) => setLimits({ resets: e.target.checked })} />
-      </SettingRow>
     </SettingsGroup>
     <SettingsGroup title={tr('Ogólne')}>
       <SettingRow title={tr('Głośność')} htmlFor="settings-alert-volume">
@@ -176,10 +154,17 @@ export function AlertsSettings() {
       </SettingRow>
     </SettingsGroup>
     </fieldset>
-    <SettingsGroup title={tr('Pasek zadań i Dock')}>
-      <SettingRow title={tr('Liczba agentów czekających na Ciebie')} htmlFor="settings-taskbar-badge" hint={tr('Windows: czerwona plakietka z liczbą na przycisku aplikacji na pasku zadań. macOS: plakietka na ikonie w Docku. Liczą się agenci, którzy czekają na zgodę albo odpowiedź, we wszystkich oknach; wyciszone komórki nie.')}>
-        <input id="settings-taskbar-badge" className="setting-switch" type="checkbox" role="switch" checked={alerts.taskbarBadge} onChange={(e) => setAlerts((a) => ({ ...a, taskbarBadge: e.target.checked }))} />
+    {/* 1.1.2: the limit warnings and the switcher have their own section now; this row leads there. */}
+    <SettingsGroup>
+      <SettingRow title={tr('Ostrzeżenia o limitach i Switcher kont')} hint={tr('Są teraz w sekcji „Konta i limity”.')}>
+        <button type="button" className="btn" onClick={() => openAccountSettings('settings-limits-enabled')}>{tr('Otwórz')}</button>
       </SettingRow>
     </SettingsGroup>
+    {/* 1.1.2: the Dock badge only (the Windows taskbar overlay is gone). */}
+    {window.mc.platform === 'darwin' && <SettingsGroup title={tr('Pasek zadań i Dock')}>
+      <SettingRow title={tr('Liczba agentów czekających na Ciebie')} htmlFor="settings-taskbar-badge" hint={tr('Plakietka z liczbą na ikonie w Docku. Liczą się agenci, którzy czekają na zgodę albo odpowiedź, we wszystkich oknach; wyciszone komórki nie.')}>
+        <input id="settings-taskbar-badge" className="setting-switch" type="checkbox" role="switch" checked={alerts.taskbarBadge} onChange={(e) => setAlerts((a) => ({ ...a, taskbarBadge: e.target.checked }))} />
+      </SettingRow>
+    </SettingsGroup>}
   </>;
 }

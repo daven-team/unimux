@@ -1,7 +1,7 @@
 import { MAIN_ACCOUNTS, heldByOf, type AccountRef, type ProviderUsage } from '../../shared/usage';
 import type { RefreshOutcome } from '../accounts/refresh';
 import { readCodexLog } from './codexLog';
-import { profileSource, readClaudeCredentials, readClaudeIdentity, readClearedClaudeLogin, readCodexCredentials, type ClaudeCredentials, type CredentialSource } from './credentials';
+import { codexProfileSource, profileSource, readClaudeCredentials, readClaudeIdentity, readClearedClaudeLogin, readCodexCredentials, type ClaudeCredentials, type CredentialSource } from './credentials';
 import { parseClaudeUsage, parseCodexPlan, parseCodexRateLimits } from './parse';
 import { parseRetryAfter } from './retryAfter';
 
@@ -146,13 +146,28 @@ async function readClaude(deps: FetcherDeps, ref: AccountRef): Promise<FetchResu
   }
 }
 
-export async function fetchCodex(deps: FetcherDeps): Promise<FetchResult> {
+export async function fetchCodex(deps: FetcherDeps, ref: AccountRef = MAIN_ACCOUNTS[1]): Promise<FetchResult> {
   const now = deps.now();
-  const base: ProviderUsage = { accountId: 'codex:main', provider: 'codex', status: 'signedOut', windows: [], fetchedAt: now, source: 'live' };
-  const credentials = await readCodexCredentials(deps.credentials);
+  // 1.1.2: a saved Codex profile is read from its own CODEX_HOME; its tokens are never renewed here (only Codex CLI renews,
+  // and only the live login), so an expired access token waits until the account is made main.
+  const profile = ref.configDir;
+  const heldBy = profile ? heldByOf(ref.renew) : undefined;
+  const base: ProviderUsage = {
+    accountId: ref.id, provider: 'codex', status: 'signedOut', windows: [], fetchedAt: now, source: 'live',
+    ...(profile ? { managed: true } : {}), ...(ref.active ? { active: true } : {}), ...(heldBy ? { heldBy } : {}),
+  };
+  const credentials = await readCodexCredentials(profile ? codexProfileSource(deps.credentials, profile) : deps.credentials);
   if (!credentials) return { usage: base };
   if (credentials.mode === 'apiKey') return { usage: { ...base, status: 'apiKey' } };
   const known: ProviderUsage = { ...base, plan: credentials.plan, email: credentials.email };
+  if (profile) {
+    if (credentials.expiresAt !== undefined && credentials.expiresAt <= now + EXPIRY_MARGIN_MS) {
+      return { usage: { ...known, status: heldBy ? 'elsewhere' : credentials.hasRefresh ? 'dormant' : 'expired', ...(heldBy ? {} : { error: 'token-expired' }) } };
+    }
+    return readCodexLimits(deps, credentials, known, now, async (status, error, retry) => ({
+      usage: { ...known, status: status === 'expired' && heldBy ? 'elsewhere' : status, ...(error ? { error } : {}) }, ...(retry !== undefined ? { retryAfterMs: retry } : {}),
+    }));
+  }
 
   /** Network-free answer from the last Codex session; the real failure is reported when there is none. */
   const fromLog = async (status: 'expired' | 'error', error?: string, retry?: number): Promise<FetchResult> => {
@@ -166,17 +181,22 @@ export async function fetchCodex(deps: FetcherDeps): Promise<FetchResult> {
   };
 
   if (credentials.expiresAt !== undefined && credentials.expiresAt <= now + EXPIRY_MARGIN_MS) return fromLog('expired');
+  return readCodexLimits(deps, credentials, known, now, fromLog);
+}
+
+/** One request to the Codex usage endpoint; every failure goes to `fail` (the live login falls back to its session log). */
+async function readCodexLimits(deps: FetcherDeps, credentials: { accessToken?: string; accountId?: string }, known: ProviderUsage, now: number, fail: (status: 'expired' | 'error', error?: string, retry?: number) => Promise<FetchResult>): Promise<FetchResult> {
   try {
     const headers: Record<string, string> = { Accept: 'application/json', Authorization: `Bearer ${credentials.accessToken}` };
     if (credentials.accountId) headers['ChatGPT-Account-Id'] = credentials.accountId;
     const response = await deps.fetch(deps.codexUrl, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-    if (response.status === 401 || response.status === 403) return fromLog('expired');
-    if (!response.ok) return fromLog('error', `http-${response.status}`, retryAfterMs(response, now));
+    if (response.status === 401 || response.status === 403) return fail('expired');
+    if (!response.ok) return fail('error', `http-${response.status}`, retryAfterMs(response, now));
     const body: unknown = await response.json();
     const windows = parseCodexRateLimits(body, now);
-    if (!windows) return fromLog('error', 'bad-response');
+    if (!windows) return fail('error', 'bad-response');
     return { usage: { ...known, plan: parseCodexPlan(body) ?? known.plan, status: 'ok', windows } };
   } catch (error) {
-    return fromLog('error', errorKind(error));
+    return fail('error', errorKind(error));
   }
 }

@@ -6,6 +6,7 @@ import { ErrorBoundary, WindowFallback } from './components/ErrorBoundary';
 import { TooltipHost } from './components/TooltipHost';
 import { installErrorReporting } from './errorReport';
 import './styles.css';
+import './components/statusStyles.css';
 
 installErrorReporting();
 // The last resort: a render error no inner boundary caught leaves a "reload the window" card, not a blank window.

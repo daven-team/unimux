@@ -111,10 +111,21 @@ function DialogView({ dialog }: { dialog: Dialog }) {
     );
   }
   return (
-    <div className="modal" style={{ width: 460 }}>
+    <div className={`modal${dialog.groups ? ' uw-dialog' : ''}`} style={{ width: dialog.groups ? 520 : 460 }}>
       <div className="modal-head"><h3>{dialog.title}</h3></div>
       <div className="modal-body">
         <div className="muted" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{dialog.body}</div>
+        {dialog.groups && dialog.groups.length > 0 && (
+          <ul className="uw-groups">
+            {dialog.groups.map((g) => (
+              <li key={g.key} className={`uw-group uw-${g.tone}`} data-group={g.key}>
+                <div className="uw-title">{g.title}</div>
+                {g.names.length > 0 && <div className="uw-names">{g.names.join(', ')}</div>}
+                <div className="uw-note">{g.note}</div>
+              </li>
+            ))}
+          </ul>
+        )}
         {dialog.check && (
           <label className="dialog-check" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
             <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
@@ -123,9 +134,9 @@ function DialogView({ dialog }: { dialog: Dialog }) {
         )}
       </div>
       <div className="modal-foot">
-        <button className="btn" onClick={closeDialog}>{tr("Anuluj")}</button>
+        <button className="btn" onClick={closeDialog}>{dialog.cancelLabel ?? tr("Anuluj")}</button>
         {dialog.actions.map((a) => (
-          <button key={a.value} autoFocus={a.primary} className={`btn ${a.danger ? 'danger' : ''} ${a.primary ? 'primary' : ''}`} onClick={() => dialog.onChoose(a.value, checked)}>
+          <button key={a.value} autoFocus={a.primary} title={a.title} data-value={a.value} className={`btn ${a.danger ? 'danger' : ''} ${a.primary ? 'primary' : ''}`} onClick={() => dialog.onChoose(a.value, checked)}>
             {a.label}
           </button>
         ))}

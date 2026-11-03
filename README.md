@@ -38,7 +38,7 @@ Around the agents it has the tools you reach for while they work: files, Git, SS
 - **Databases**: Postgres, MySQL / MariaDB, SQLite and Redis, also through an SSH tunnel
 - **Files and editor**: a fast file tree, editor tabs, find and replace, Markdown preview, CSV and Parquet tables
 - **Notes, snippets and the `Ctrl+K` palette** for prompts, checklists and everything else
-- **AI account limits** for Claude and Codex, and an **optional MCP** for coordinator / worker teams
+- **Accounts & limits** for Claude and Codex, and an **optional MCP** for coordinator / worker teams
 - **Native terminals**: ConPTY on Windows (with hold Space to dictate), login shells on macOS, GPU rendering
 - UI in English, Polish, German, Spanish, French and Portuguese
 
@@ -74,7 +74,7 @@ Around the agents it has the tools you reach for while they work: files, Git, SS
 
 ### AI accounts and MCP
 
-- **AI account limits**: the 5-hour and weekly limits of every Claude account the app knows and of Codex. On Windows you can save several Claude accounts and switch the one Claude Code uses.
+- **Accounts & limits**: the 5-hour and weekly limits of every Claude account the app knows and of Codex. On Windows you can save several Claude accounts and switch the one Claude Code uses; the **Switcher** in the panel header can do it for you at a limit. Its thresholds and the limit warnings are in Settings > Accounts & limits.
 - **Optional MCP** for teams: give cells a **Coordinator** or **Worker** role and they get local tools for tasks, messages, snippets and background grids. A coordinator can start a whole team with one call and wait for its tasks instead of polling. Agents can ask you for a decision (MCP elicitations, for example before closing a grid with open tasks), address other agents by name, and run the wait as a long MCP task where the client supports it. See [Agents and local MCP](docs/MCP.en.md).
 
 ### SSH and SFTP

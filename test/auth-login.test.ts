@@ -107,7 +107,8 @@ describe('LoginManager', () => {
     const res = await runSuccess(h, { provider: 'claude', target: { type: 'new' } });
     expect(res.ok).toBe(true);
     expect(h.states.map((s) => s.status)).toEqual(['waiting', 'duplicate']);
-    expect(h.states[1].email).toBe('New@Example.com');
+    // The saved card that holds the account is named (1.1.2), with its own spelling.
+    expect(h.states[1]).toMatchObject({ email: 'new@example.com', duplicateOf: 'saved' });
     expect(store.list()).toEqual([]);
     expect(existsSync(join(base, 'accounts', 'claude'))).toBe(true);
     const spec = h.mock.spawnPty.mock.calls[0][0];

@@ -43,9 +43,10 @@ export function accountsPanelInfo(records: ManagedAccount[], parkedIds: string[]
 /**
  * The notices the limits panel shows. An outside switch (`switchedOut`, 0.9.1 to 1.0.9) is no longer a banner (1.0.10): the
  * card of the account that left says it in one line, or "Sign-in expired" when that login was dead. Older ones stay hidden.
+ * 1.1.2: "Added X, now signed in to Claude Code" (`adopted`) is no banner either: the new card itself shows the account.
  */
 export function panelNotices(notices: AccountNotice[]): AccountNotice[] {
-  return notices.filter((notice) => notice.kind !== 'switchedOut');
+  return notices.filter((notice) => notice.kind !== 'switchedOut' && notice.kind !== 'adopted');
 }
 
 export interface RefsInput { records: ManagedAccount[]; dirOf(id: string): string; live: LiveIdentity | null; cswap: CswapRoster; platform: NodeJS.Platform }

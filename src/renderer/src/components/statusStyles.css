@@ -1,0 +1,49 @@
+/* 1.1.2: the status marks (StatusMark.tsx) in the badges of tabs and projects, on a cell icon's corner and in the cell
+   header. One palette for every place, less saturated than the old pills; whole-pixel sizes (8 and 12 px stay whole at
+   100, 125, 150 and 200 % scaling). No infinite animation: a working mark steps with the shared pulse of blink.ts
+   (data-pulse on <html>, four phases of 320 ms, only while a working mark is shown), and the first turn of the arc (a) is
+   a finite animation. Under reduced motion (no pulse) every mark stands still. */
+:root {
+  --st-working: #d8a650;
+  --st-done: #5fbf86;
+  --st-ask: #7ea7ef;
+  --st-error: #ec7474;
+  --st-exited: #7a7a7a;
+  --st-idle: #5a5a5a;
+}
+
+.smark { position: relative; flex: none; display: inline-block; color: var(--st-idle); }
+.smark.working { color: var(--st-working); }
+.smark.done { color: var(--st-done); }
+.smark.ask { color: var(--st-ask); }
+.smark.error { color: var(--st-error); }
+.smark.exited { color: var(--st-exited); }
+.smark > svg { display: block; overflow: visible; }
+
+/* ── the badges: a mark and a plain tabular count, no pill ───────────────────────────────────────────────────────── */
+.badge { display: inline-flex; align-items: center; gap: 4px; height: 16px; color: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums; line-height: 16px; }
+.badge .n { min-width: 6px; }
+.badge.exited .n { color: var(--muted); }
+.project .badges, .tab-item .badges, .grid-tab .badges { gap: 8px; }
+.grid-tab .badges { margin-left: 6px; }
+
+/* ── the corner of a cell's icon: the mark cut out of the tile by a ring of the header's colour ─────────────────── */
+.terminal-cell .cell-icon .cell-dot { position: absolute; border-radius: 50%; background: var(--cell-head-bg); box-shadow: 0 0 0 2px var(--cell-head-bg); }
+
+/* ── the header: plain small text with its mark ──────────────────────────────────────────────────────────────────── */
+.terminal-cell .cell-head .status-text.exited { color: var(--muted); }
+
+/* ── the marks: 12 px SVGs ───────────────────────────────────────────────────────────────────────────────────────── */
+.smark { width: 12px; height: 12px; }
+.smark.working .arc { transform-origin: 6px 6px; animation: smark-turn .8s linear 4; }
+@keyframes smark-turn { to { transform: rotate(360deg); } }
+/* Then quarter turns with the shared pulse (the finite turn, while it runs, wins over these). */
+:root[data-pulse="1"] .smark.working .arc { transform: rotate(90deg); }
+:root[data-pulse="2"] .smark.working .arc { transform: rotate(180deg); }
+:root[data-pulse="3"] .smark.working .arc { transform: rotate(270deg); }
+.terminal-cell .cell-icon .cell-dot.smark { right: -3px; bottom: -3px; }
+.terminal-cell .cell-head .status-text.error { color: #f0a3a3; }
+
+@media (prefers-reduced-motion: reduce) {
+  .smark.working .arc { animation: none; }
+}

@@ -14,6 +14,9 @@ import type { CliId, CliStatusMap } from '../../shared/cliStatus';
 import type { DbKind } from '../../shared/db';
 import type { ConvExportSource } from '../../shared/convExport';
 
+/** What the install window does once the CLI is installed: the login it was opened for starts by itself. */
+export interface InstallThen { provider: CliId; target: LoginTarget }
+
 export type Modal =
   | { kind: 'grid'; projectId: string }
   | { kind: 'history'; projectId: string }
@@ -32,15 +35,22 @@ export type Modal =
   | { kind: 'agentPrompt'; tabId?: string }
   | { kind: 'dbConnection'; connectionId?: string; dbKind?: DbKind };
 
+/** One group of a dialog's list: a heading, the names it covers and what will happen to them ('kept': nothing is lost). */
+export interface DialogGroup { key: string; title: string; names: string[]; note: string; tone: 'wait' | 'kept' }
+
 export type Dialog = { id: number } & (
   | { kind: 'prompt'; title: string; value: string; placeholder?: string; onSubmit: (value: string) => void }
   | {
       kind: 'confirm';
       title: string;
       body: string;
-      actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean }>;
+      actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean; title?: string }>;
       /** A checkbox under the text (for example "do not ask again"); its state comes with the choice. */
       check?: string;
+      /** 1.1.2: a grouped list under the text (the update question: what would be interrupted, with the cell names). */
+      groups?: DialogGroup[];
+      /** The label of the button that closes the dialog without a choice (default "Anuluj"). */
+      cancelLabel?: string;
       onChoose: (value: string | null, checked?: boolean) => void;
     }
   | {
@@ -83,11 +93,13 @@ export interface Ui {
   automationOpen: boolean;
   settingsTabOpen: boolean;
   settingsActive: boolean;
+  /** 1.1.2: open Settings at a section and scroll to an element (`seq` makes a repeated request count). */
+  settingsSection: { index: number; focus?: string; seq: number } | null;
   mcpInfo: McpInfo;
   /** Detected Claude Code / Codex binaries; a missing entry means "not checked yet" (never blocks a start). */
   cliStatus: CliStatusMap;
   /** The install window of a missing CLI; it sits above every modal. `locked` = an install runs (it cannot be dismissed by accident). */
-  install: { cli: CliId; locked: boolean } | null;
+  install: { cli: CliId; locked: boolean; then?: InstallThen } | null;
   /** Cells whose start was skipped because their CLI is not installed (they show the install card and start by themselves once it is found). */
   heldCells: Record<string, true>;
   /** Progress of the background loader while it still has cells to start (null otherwise). */
@@ -148,6 +160,7 @@ export const useStore = create<Store>((set, get) => ({
     sidebarView: 'projects',
     automationOpen: false,
     settingsTabOpen: false,
+    settingsSection: null,
     settingsActive: false,
     mcpInfo: { running: false },
     cliStatus: {},
@@ -220,13 +233,14 @@ export function askText(title: string, value = '', placeholder?: string): Promis
 
 export function askChoice(
   title: string, body: string,
-  actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean }>,
+  actions: Array<{ label: string; value: string; danger?: boolean; primary?: boolean; title?: string }>,
+  extra: { groups?: DialogGroup[]; cancelLabel?: string } = {},
 ): Promise<string | null> {
   const id = replaceOpenDialog();
   return new Promise((resolve) => {
     setUi({
       dialog: {
-        id, kind: 'confirm', title, body, actions,
+        id, kind: 'confirm', title, body, actions, ...extra,
         onChoose: (v) => {
           pendingPrompt = null;
           setUi({ dialog: null });

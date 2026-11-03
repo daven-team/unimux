@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { LoginState, LoginTarget } from '../../../shared/accounts';
-import { swapErrorKey } from '../../../shared/swapMessages';
+import { CLI_NAMES } from '../../../shared/cliStatus';
+import { swapErrorKey, swapErrorText } from '../../../shared/swapMessages';
+import { offerInstall } from '../actions';
 import { useI18n } from '../i18n';
 import { useUsage } from '../usage';
-import { closeModal, setUi } from '../store';
+import { closeModal, setUi, toast } from '../store';
 import { terminals } from '../terminals/TerminalManager';
 import { IX } from './icons';
 import { RefreshIcon } from './Spinner';
@@ -17,7 +19,9 @@ export function AuthModal({ provider, target }: { provider: 'claude' | 'codex'; 
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [startFailed, setStartFailed] = useState(false);
   /** Why the main process refused to start the login (a swap runs or is unresolved), if it did. */
-  const [refusal, setRefusal] = useState<'busy' | 'pending' | 'backup' | 'restore' | 'readOnly' | null>(null);
+  const [refusal, setRefusal] = useState<'busy' | 'pending' | 'backup' | 'restore' | 'readOnly' | 'cliMissing' | null>(null);
+  /** "Set as main" of the new account is running. */
+  const [makingMain, setMakingMain] = useState(false);
   /** `backup` refusal: the outgoing main account whose sign-in could not be backed up. */
   const [refusalEmail, setRefusalEmail] = useState('');
   // The latest state may arrive before startLogin resolves, so it is matched to the session at render time.
@@ -37,7 +41,7 @@ export function AuthModal({ provider, target }: { provider: 'claude' | 'codex'; 
       if (!res.ok) {
         if (!cancelled) {
           setStartFailed(true);
-          if (res.error === 'busy' || res.error === 'pending' || res.error === 'backup' || res.error === 'restore' || res.error === 'readOnly') setRefusal(res.error);
+          if (res.error === 'busy' || res.error === 'pending' || res.error === 'backup' || res.error === 'restore' || res.error === 'readOnly' || res.error === 'cliMissing') setRefusal(res.error);
           setRefusalEmail(res.email ?? '');
         }
         return;
@@ -68,20 +72,50 @@ export function AuthModal({ provider, target }: { provider: 'claude' | 'codex'; 
     if (!ptyId || !el) return;
     terminals.attach(ptyId, el);
     terminals.focus(ptyId);
-    return () => terminals.detach(ptyId, el);
+    // Back from the browser: the code is pasted into this terminal, so it gets the keyboard again.
+    const refocus = () => terminals.focus(ptyId);
+    window.addEventListener('focus', refocus);
+    return () => { window.removeEventListener('focus', refocus); terminals.detach(ptyId, el); };
   }, [ptyId]);
 
   const current = state && state.sessionId === sessionId ? state : null;
   const status = startFailed ? 'failed' : current?.status ?? 'waiting';
+  /** A new account while Claude Code has no main login: the window stays open and offers to make it main. */
+  const offerMain = status === 'success' && current?.offerMain === true && !!current.recordId;
 
   useEffect(() => {
-    if (status !== 'success') return;
+    if (status !== 'success' || offerMain) return;
     const timer = setTimeout(closeModal, CLOSE_AFTER_SUCCESS_MS);
     return () => clearTimeout(timer);
-  }, [status]);
+  }, [status, offerMain]);
+
+  const cliName = CLI_NAMES[provider];
+  /** The CLI is not installed: the install window opens and starts this very login once it succeeds. */
+  const install = () => { closeModal(); offerInstall(provider, { provider, target }); };
+  const pasteCode = async () => {
+    if (!ptyId) return;
+    let text = '';
+    try { text = (await window.mc.clipboardRead()).trim(); } catch { text = ''; }
+    if (!text) { toast(tr('Schowek jest pusty. Skopiuj kod z przeglądarki i spróbuj ponownie.')); terminals.focus(ptyId); return; }
+    terminals.paste(ptyId, text, true);
+  };
+  const makeMain = async () => {
+    const id = current?.recordId;
+    if (!id || makingMain) return;
+    setMakingMain(true);
+    try {
+      const result = await window.mc.makeMainAccount(id);
+      if (result.ok) { toast(result.email ? tr('Konto główne: {email}', { email: result.email }) : tr('Zmieniono konto główne.')); closeModal(); }
+      else { const text = swapErrorText({ error: result.error, email: result.email ?? current?.email }); toast(tr(text.key, text.params), 'error'); }
+    } catch {
+      toast(tr('Nie udało się zmienić konta głównego.'), 'error');
+    } finally {
+      setMakingMain(false);
+    }
+  };
 
   const title = provider === 'codex'
-    ? tr('Zaloguj się do Codex')
+    ? target.type === 'new' ? tr('Dodaj konto Codex') : tr('Zaloguj się do Codex')
     : target.type === 'new' ? tr('Dodaj konto Claude') : target.type === 'main' && !hadMain ? tr('Zaloguj się do Claude') : tr('Zaloguj ponownie do Claude');
   const email = current?.email ?? '';
   const waiting = status === 'waiting';
@@ -91,8 +125,13 @@ export function AuthModal({ provider, target }: { provider: 'claude' | 'codex'; 
   const parkedEmail = target.type === 'account' ? setAside.find((card) => card.recordId === target.id)?.email : undefined;
 
   let line: string;
-  if (status === 'success') line = email ? tr('Zalogowano jako {email}', { email }) : tr('Zalogowano.');
+  if (offerMain) line = email
+    ? tr('Dodano konto {email}. Claude Code nie ma teraz głównego logowania - możesz ustawić to konto jako główne.', { email })
+    : tr('Dodano konto. Claude Code nie ma teraz głównego logowania - możesz ustawić to konto jako główne.');
+  else if (status === 'success') line = email ? tr('Zalogowano jako {email}', { email }) : tr('Zalogowano.');
+  else if (status === 'duplicate' && email && current?.duplicateOf === 'main') line = tr('To konto jest już zalogowane w Claude Code jako konto główne ({email}).', { email });
   else if (status === 'duplicate' && email) line = tr('To konto jest już dodane ({email}).', { email });
+  else if (startFailed && refusal === 'cliMissing') line = tr('{name} nie jest zainstalowany. Zainstaluj go w aplikacji, a logowanie uruchomi się samo po instalacji.', { name: cliName });
   else if (status === 'mismatch' && email && current?.expected) line = tr('Zalogowano jako {email}, a ta karta należy do {expected}. Nic nie zmieniono.', { email, expected: current.expected });
   else if (status === 'mismatch' && current?.expected) line = tr('Zalogowano na inne konto niż {expected}. Nic nie zmieniono.', { expected: current.expected });
   else if (startFailed && refusal === 'readOnly') line = tr('Nie można zapisać nowego logowania: pliku kont aplikacji nie da się bezpiecznie odczytać. Napraw albo usuń ten plik (szczegóły w panelu limitów) i uruchom aplikację ponownie.');
@@ -120,13 +159,21 @@ export function AuthModal({ provider, target }: { provider: 'claude' | 'codex'; 
         <button className="btn ghost icon" onClick={closeModal} aria-label={tr('Zamknij')}><IX /></button>
       </div>
       {!refused && <div className="auth-note muted">{tr('Dokończ logowanie w przeglądarce. Okno zamknie się samo, gdy logowanie się powiedzie.')}</div>}
+      {!refused && provider === 'claude' && (
+        <div className="auth-note muted auth-paste-note">
+          <span>{tr('Jeśli przeglądarka pokazała kod, wklej go tutaj ({keys}) i naciśnij Enter.', { keys: window.mc.platform === 'darwin' ? 'Cmd+V' : 'Ctrl+V' })}</span>
+          {waiting && ptyId && <button className="btn small auth-paste" onClick={() => void pasteCode()}>{tr('Wklej kod')}</button>}
+        </div>
+      )}
       {!refused && <div className="auth-terminal" ref={container} />}
       <div className={`auth-status ${waiting ? 'wait' : status === 'success' ? 'ok' : 'bad'}`}>
         {waiting && <RefreshIcon spinning />}
         <span>{line}</span>
       </div>
       <div className="modal-foot">
-        {status === 'mismatch' && !!current?.expected && <button className="btn primary" onClick={() => setUi({ modal: { kind: 'auth', provider: 'claude', target: { type: 'new' } } })}>{tr('Dodaj jako nowe konto')}</button>}
+        {refusal === 'cliMissing' && <button className="btn primary auth-install" onClick={install}>{tr('Zainstaluj {name}', { name: cliName })}</button>}
+        {offerMain && <button className="btn primary auth-make-main" disabled={makingMain} onClick={() => void makeMain()}>{tr('Ustaw jako główne')}</button>}
+        {status === 'mismatch' && !!current?.expected && <button className="btn primary" onClick={() => setUi({ modal: { kind: 'auth', provider, target: { type: 'new' } } })}>{tr('Dodaj jako nowe konto')}</button>}
         <button className="btn" onClick={closeModal}>{waiting ? tr('Anuluj') : tr('Zamknij')}</button>
       </div>
     </div>

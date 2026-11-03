@@ -138,7 +138,7 @@ type Translate = (key: MessageKey, params?: MessageParams) => string;
 export function limitNoticeText(notice: LimitNotice, tr: Translate, language: string, nowMs: number): { title: string; body: string } {
   const account = (notice.email || (notice.provider === 'claude' ? 'Claude' : 'Codex')).slice(0, 60);
   const window = notice.window === '5h' ? '5 h' : tr('7 dni');
-  const title = tr('Limity kont AI');
+  const title = tr('Konta i limity');
   if (notice.kind === 'reset') return { title, body: tr('Konto {account}: limit {window} znowu dostępny', { account, window }) };
   const at = new Date(notice.resetsAt * 1000);
   const time = at.toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' });

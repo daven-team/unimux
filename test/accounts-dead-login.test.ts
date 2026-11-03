@@ -259,12 +259,13 @@ describe('bug 3: an outside switch away from the account', () => {
     expect(ref.renew).toBe('switched-out');
   });
 
-  it('hides switch-out banners stored by older versions', () => {
+  it('hides switch-out banners stored by older versions and "added" banners (1.1.2)', () => {
     const notices = [
       { id: '1', kind: 'switchedOut' as const, at: 1, email: 'd@x.com' },
       { id: '2', kind: 'adopted' as const, at: 2, email: 'g@x.com' },
+      { id: '3', kind: 'quarantined' as const, at: 3, email: 'q@x.com' },
     ];
-    expect(panelNotices(notices).map((n) => n.id)).toEqual(['2']);
+    expect(panelNotices(notices).map((n) => n.id)).toEqual(['3']);
   });
 });
 

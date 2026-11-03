@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { execFile, spawn } from 'child_process';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, safeStorage, shell, utilityProcess, type NativeImage, type OpenDialogOptions, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, Notification, powerMonitor, safeStorage, shell, utilityProcess, type OpenDialogOptions, type WebContents } from 'electron';
 import { createQuitConfirm, isQuitAnswer, sessionEndingNow } from './quitConfirm';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { homedir, hostname } from 'os';
@@ -82,16 +82,23 @@ import { accountsPanelInfo, claudeRefs, panelNotices } from './accounts/refs';
 import { cswapRosterPath, cswapWroteSince, readCswapRoster, type CswapRoster } from './accounts/cswap';
 import { readManagedIdentity } from './accounts/identity';
 import { migrateAccounts, type MigrationDeps } from './accounts/migrate';
-import { LoginManager } from './auth/login';
+import { LoginManager, type KnownIdentity } from './auth/login';
 import { identityRewritten, restoreProfile, snapshotProfile } from './auth/profileSnapshot';
-import { custodyOf, identityFields, type AccountIdentity, type LoginRequest } from '../shared/accounts';
-import { claudeCredentialsStamp, profileSource, readClaudeCredentials, readClaudeIdentity, readCodexCredentials, readLiveClaudeIdentity, systemCredentialSource } from './usage/credentials';
+import { compareIdentity, custodyOf, identityFields, type AccountIdentity, type LoginRequest, type SwapResult } from '../shared/accounts';
+import { claudeCredentialsStamp, claudeLoginPresence, profileSource, readClaudeCredentials, readClaudeIdentity, readCodexCredentials, readSignedInClaudeIdentity, systemCredentialSource } from './usage/credentials';
 import { fetchClaude, fetchCodex, type FetcherDeps } from './usage/fetchers';
 import { UsageService } from './usage/service';
 import { LimitAlerter } from './limitAlerts';
 import { limitNoticeText, type LimitNotice } from '../shared/limitAlerts';
 import type { AlertSettings } from '../shared/alerts';
-import { MAIN_ACCOUNTS } from '../shared/usage';
+import { MAIN_ACCOUNTS, type AccountRef } from '../shared/usage';
+import { CodexAccountsStore } from './accounts/codexStore';
+import { activateCodexAccount, checkCodexTarget, isCodexSwapRunning, readLiveCodexIdentity, reconcileCodexLive, type CodexActivateDeps } from './accounts/codexActivate';
+import { CodexLoginManager } from './auth/codexLogin';
+import { codexIdentityKey, compareCodexIdentity, isCodexAccountId, type CodexIdentity } from '../shared/codexAccounts';
+import { AutoSwitcher } from './autoSwitch';
+import { autoSwitchOn, autoSwitchText, type SwitchNotice } from '../shared/autoSwitch';
+import { codexProfileSource } from './usage/credentials';
 import type { UpdateStrings } from '../shared/updateProgress';
 import { createWorktree, currentBranch, inspectWorktree, isGitRepo, removeWorktree } from './worktree';
 import { StateController } from './stateController';
@@ -114,7 +121,7 @@ import { INSTALL_PTY_PREFIX } from '../shared/cliInstall';
 import { cliForProfile, CLI_NAMES, isCliId, missingCli, resolveExecFile, spawnDecision, type CliId, type CliStatus } from '../shared/cliStatus';
 import { automationSchemas, type AutomationOperation, type McpInfo } from '../shared/automation';
 import type { StateEdit } from '../shared/stateEdits';
-import { stateChange } from '../shared/statePatch';
+import { createStateBroadcaster, type StateBroadcaster } from './stateBroadcast';
 import { cellCwd, findCell, getProfile, patchSshCell, unlessRestoring } from '../shared/state';
 import { resumeForPhase, resumesConversation, type SshSessionState } from '../shared/ssh';
 import { automationHintForHook, automationStatusFor } from '../shared/runtimeStatus';
@@ -125,7 +132,6 @@ import { loadEventSound } from './alertSound';
 import { notificationActions, notificationOptions } from './notifyOptions';
 import { createTaskbar } from './taskbar';
 import { isCellStatus, isStatusReason } from '../shared/taskbarState';
-import { BADGE_SCALES, badgePngs, BADGE_SIZE, fontBadgeScript, parseFontBadges } from './badgeImage';
 import { isPermissionAnswer, isPermissionToken } from '../shared/permissionAction';
 import { migrateDataDir } from './dataDirMigration';
 import { updateWindowAlive } from './updateRuntime';
@@ -283,6 +289,21 @@ const refreshLimits = createRefreshLimits(join(DATA_DIR, 'refresh-limits.json'))
 const tokenFetch = createTokenFetch(usageDeps.fetch);
 const renewProfile = (dir: string) => refreshClaudeProfile(dir, { fetch: tokenFetch, now: usageDeps.now, limits: refreshLimits, userAgent: `unimux/${app.getVersion()}`, tokenUrl: app.isPackaged ? undefined : process.env.MC_USAGE_CLAUDE_TOKEN_URL });
 const accounts = new AccountsStore(join(DATA_DIR, 'accounts'));
+/** 1.1.2: the saved Codex accounts (their own CODEX_HOME profiles) and who is in the live Codex login. */
+const codexAccounts = new CodexAccountsStore(join(DATA_DIR, 'codex-accounts'));
+const codexActivateDeps = (): CodexActivateDeps => ({ store: codexAccounts, liveHome: () => usageDeps.codexHome(), now: () => Date.now() });
+let codexLive: CodexIdentity | null = readLiveCodexIdentity(codexActivateDeps());
+/** The live Codex card and every saved Codex account that is not the live one (its numbers are on the live card). */
+function codexRefs(): AccountRef[] {
+  const records = codexAccounts.list();
+  const liveKey = codexLive ? codexIdentityKey(codexLive) : undefined;
+  const main: AccountRef = { ...MAIN_ACCOUNTS[1], ...(liveKey ? { key: liveKey } : {}), ...(records.length ? { active: true } : {}) };
+  const saved = records.filter((record) => !(codexLive && compareCodexIdentity(record, codexLive) === 'same')).map((record): AccountRef => {
+    const key = codexIdentityKey(record);
+    return { id: `codex:${record.id}`, provider: 'codex', configDir: codexAccounts.dirOf(record.id), ...(key ? { key } : {}), ...(record.outdated ? { renew: 'switched-out' as const } : {}) };
+  });
+  return [main, ...saved];
+}
 /** cswap's roster, read before every poll (R6); `{ present: false }` without cswap. */
 let cswapRoster: CswapRoster = { present: false };
 /** How long a poll waits for the retry of failed profile restores before it reads the accounts. */
@@ -290,9 +311,9 @@ const PARKED_RESTORE_WAIT_MS = 2_000;
 const usage = new UsageService({
   accounts: () => [
     ...claudeRefs({ records: accounts.list(), dirOf: (id) => accounts.dirOf(id), live: accounts.live(), cswap: cswapRoster, platform: process.platform }),
-    MAIN_ACCOUNTS[1],
+    ...codexRefs(),
   ],
-  fetchAccount: (ref) => (ref.provider === 'claude' ? fetchClaude(usageDeps, ref) : fetchCodex(usageDeps)),
+  fetchAccount: (ref) => (ref.provider === 'claude' ? fetchClaude(usageDeps, ref) : fetchCodex(usageDeps, ref)),
   cacheFile: join(DATA_DIR, 'usage-cache.json'),
   credentialsStamp: (ref) => (ref.provider === 'claude' && !ref.configDir ? claudeCredentialsStamp(usageDeps.credentials) : Promise.resolve(null)),
   enabled: () => state.settings.showAiUsage,
@@ -300,6 +321,8 @@ const usage = new UsageService({
   // Every poll first looks at who is signed in to Claude Code (cswap switch, /login); never while a swap or a login runs.
   // The swap slot is held meanwhile, so a "Set as main" or a recovery can never interleave with the role changes.
   beforeRun: async () => {
+    // Who is in the live Codex login (an outside switch marks the copy that left as possibly outdated); never during a Codex swap.
+    if (!isCodexSwapRunning()) codexLive = reconcileCodexLive(codexActivateDeps());
     cswapRoster = await readCswapRoster(cswapRosterPath(homedir(), process.env, process.platform));
     // An activation whose recovery found Claude Code's locks busy is retried first; the live login is not reconciled while
     // its journal exists (the live files may be half written).
@@ -317,12 +340,17 @@ const usage = new UsageService({
   watchLive: true,
   notices: () => panelNotices(accounts.notices()),
   // An unreadable accounts.json is explained in the panel; set-aside cards are listed with what to do about them.
-  accountsInfo: () => (accounts.readOnly()
-    ? { accountsReadOnly: join(DATA_DIR, 'accounts', 'accounts.json') }
-    : accountsPanelInfo(accounts.list(), login.parkedIds())),
+  // 1.1.2: with the offer of an automatic switch the user is asked about.
+  accountsInfo: () => ({
+    ...(accounts.readOnly()
+      ? { accountsReadOnly: join(DATA_DIR, 'accounts', 'accounts.json') }
+      : accountsPanelInfo(accounts.list(), login.parkedIds())),
+    switchOffer: autoSwitch.currentOffer() ?? undefined,
+    switchAway: autoSwitch.away(),
+  }),
   liveEmail: () => accounts.live()?.email,
   // Limit warnings must also come while the window is minimized or in the tray: the poll then goes on at its interval.
-  pollHidden: () => limitPollingWanted(state.settings.alerts),
+  pollHidden: () => limitPollingWanted(state.settings.alerts) || autoSwitchOn(state.settings.accountSwitch, 'claude') || autoSwitchOn(state.settings.accountSwitch, 'codex'),
 });
 /** Whether any limit warning can be raised, so polling continues while the window is hidden. */
 function limitPollingWanted(alerts: AlertSettings): boolean {
@@ -336,6 +364,33 @@ const limitAlerts = new LimitAlerter({
   show: (notice) => showLimitNotice(notice),
 });
 usage.onChange((snapshot) => limitAlerts.onState(snapshot.providers));
+/** A card id (`claude:<record>` / `codex:<record>`) to its record id. */
+const recordOfCard = (cardId: string): string => cardId.replace(/^(claude|codex):/, '');
+/** Anything that changes the account files runs or is unresolved: no automatic switch now. */
+const accountWorkBusy = (): boolean => isSwapRunning() || isCodexSwapRunning() || login.isActive() || codexLogin.isActive() || isSwapUnresolved() || isActivationRecoveryPending() || quitting;
+/**
+ * 1.1.2: the automatic switch at a limit (Claude; Codex when chosen). It uses the same "make main" as the card's menu, with
+ * the family rules checked again right before; running Claude cells keep their process (Claude Code reads the new login on
+ * its next request), Codex cells pick it up when they renew their token or are restarted.
+ */
+const autoSwitch: AutoSwitcher = new AutoSwitcher({
+  file: join(DATA_DIR, 'auto-switch.json'),
+  settings: () => state.settings.accountSwitch,
+  providers: () => usage.getState().providers,
+  // Claude profiles need files for the live login (macOS keeps it in the Keychain).
+  supported: (provider) => provider === 'codex' || process.platform !== 'darwin',
+  busy: accountWorkBusy,
+  validate: async (provider, cardId) => {
+    const id = recordOfCard(cardId);
+    if (provider === 'codex') return isCodexAccountId(id) ? checkCodexTarget(codexActivateDeps(), id) : { ok: false, error: 'invalid' };
+    if (await hasPendingSwap(swapDeps()).catch(() => true)) return { ok: false, error: 'pending' };
+    return checkActivationTarget(activateDeps(), id);
+  },
+  swap: (provider, cardId) => (provider === 'codex' ? makeMainCodex(recordOfCard(cardId)) : makeMainClaude(recordOfCard(cardId))),
+  notify: (event) => showSwitchNotice(event),
+  changed: () => send('usage:state', usage.getState()),
+});
+usage.onChange((snapshot) => { void autoSwitch.onState(snapshot.providers).catch(() => undefined); });
 /** Finds Claude Code / Codex even when the app's own PATH lacks them (GUI launch on macOS, installer run after start on Windows). */
 const cliDetector = new CliDetector(systemCliDeps({
   disableRegistry: !app.isPackaged && process.env.MC_CLI_NO_REGISTRY === '1',
@@ -369,10 +424,14 @@ let db: DbService<AppState> | null = null;
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const login = new LoginManager({
   store: accounts,
-  spawnPty: (spec) => ptyHost.spawn({
-    id: spec.id, cwd: homedir(), cols: 100, rows: 28,
-    env: { ...cleanEnv(process.env), ...spec.env }, shell: state.settings.shell, command: spec.command,
-  }),
+  // The CLI runs from where it was detected (an install made after the app started is not on the app's own PATH yet).
+  spawnPty: async (spec) => {
+    const cli = spec.command.startsWith('codex') ? 'codex' : 'claude';
+    const env = await cliDetector.applyEnv(cleanEnv(process.env), cli).catch(() => cleanEnv(process.env));
+    ptyHost.spawn({ id: spec.id, cwd: homedir(), cols: 100, rows: 28, env: { ...env, ...spec.env }, shell: state.settings.shell, command: spec.command });
+  },
+  cliMissing: async (provider) => (await cliDetector.get(provider, { waitMs: CLI_WAIT_MS }).catch(() => undefined))?.state === 'missing',
+  hasMainLogin: async () => process.platform === 'darwin' || (await claudeLoginPresence(usageDeps.credentials)) !== 'absent',
   killPty: (id) => ptyHost.kill(id),
   resetCredentialCache: () => usageDeps.credentials.resetKeychainCache?.(),
   fingerprint: async (provider, configDir) => {
@@ -392,12 +451,19 @@ const login = new LoginManager({
     return readClaudeIdentity(usageDeps.credentials);
   },
   knownIdentities: async () => {
-    // An unreadable live login must not hide the saved accounts from the duplicate check.
+    // An unreadable live login must not hide the saved accounts from the duplicate check. An identity in ~/.claude.json
+    // without a Claude login next to it (Claude Desktop, an earlier sign-in) is nobody signed in (readSignedInClaudeIdentity).
     const live = await readLiveIdentity().catch(() => null);
-    return [
-      ...(live ? [{ ...live, live: true }] : []),
-      ...accounts.list().filter((a) => custodyOf(a) !== 'quarantined').map((a) => ({ ...identityFields(a), recordId: a.id })),
-    ];
+    const liveRecordId = live ? accounts.live()?.recordId : undefined;
+    const records = accounts.list().filter((a) => custodyOf(a) !== 'quarantined');
+    const known: KnownIdentity[] = live ? [{ ...live, live: true }] : [];
+    for (const record of records) {
+      const holdsLive = !!live && (record.id === liveRecordId || compareIdentity(record, live) === 'same');
+      // A profile that holds no login at all (only a cleanly missing file counts) and is not the live login is no account.
+      const empty = !holdsLive && (await claudeLoginPresence(profileSource(usageDeps.credentials, accounts.dirOf(record.id))).catch(() => 'unknown' as const)) === 'absent';
+      known.push({ ...identityFields(record), recordId: record.id, ...(holdsLive ? { live: true } : {}), ...(empty ? { empty: true } : {}) });
+    }
+    return known;
   },
   snapshotProfile,
   restoreProfile,
@@ -422,6 +488,53 @@ const login = new LoginManager({
   profilesSupported: process.platform !== 'darwin',
   swapRunning: isSwapRunning,
 });
+/** 1.1.2: "Dodaj konto Codex" / signing a saved Codex card in again: `codex login` in that account's own CODEX_HOME. */
+const codexLogin = new CodexLoginManager({
+  store: codexAccounts,
+  spawnPty: (spec) => ptyHost.spawn({
+    id: spec.id, cwd: homedir(), cols: 100, rows: 28,
+    env: { ...cleanEnv(process.env), ...spec.env }, shell: state.settings.shell, command: spec.command,
+  }),
+  killPty: (id) => ptyHost.kill(id),
+  fingerprint: async (dir) => {
+    const credentials = await readCodexCredentials(codexProfileSource(usageDeps.credentials, dir));
+    return credentials?.accessToken ? sha256(credentials.accessToken) : null;
+  },
+  identity: async (dir) => {
+    const credentials = await readCodexCredentials(codexProfileSource(usageDeps.credentials, dir));
+    if (!credentials || credentials.mode !== 'chatgpt') return null;
+    return { ...(credentials.email ? { email: credentials.email } : {}), ...(credentials.userId ? { userId: credentials.userId } : {}), ...(credentials.accountId ? { accountId: credentials.accountId } : {}) };
+  },
+  liveIdentity: () => readLiveCodexIdentity(codexActivateDeps()),
+  readAuth: async (dir) => { try { return readFileSync(join(dir, 'auth.json'), 'utf8'); } catch { return null; } },
+  restoreAuth: async (dir, raw) => {
+    if (raw === null) rmSync(join(dir, 'auth.json'), { force: true });
+    else atomicWriteFileSync(join(dir, 'auth.json'), raw, { mode: 0o600 });
+  },
+  busy: () => isSwapRunning() || isCodexSwapRunning(),
+  emit: (s) => send('auth:state', s),
+  onChanged: (recordId) => { void usage.refresh(true, true, `codex:${recordId}`); },
+});
+/** "Make main" of a saved Claude account (the card's menu, an offer and the automatic switch share it). */
+async function makeMainClaude(id: unknown): Promise<SwapResult> {
+  const result = await handleMakeMain({
+    loginActive: () => login.isActive() || codexLogin.isActive(),
+    validate: (accountId) => checkActivationTarget(activateDeps(), accountId),
+    swap: (accountId) => activateAccount(activateDeps(), accountId),
+    onSwapped: () => { if (typeof id === 'string') void usage.refresh(true, true, `claude:${id}`); },
+  }, id);
+  void pushSwapPending();
+  return result;
+}
+/** 1.1.2: "make main" of a saved Codex account: its auth.json goes into the live CODEX_HOME, the outgoing login into its record. */
+async function makeMainCodex(id: unknown): Promise<SwapResult> {
+  if (!isCodexAccountId(id)) return { ok: false, error: 'invalid' };
+  if (login.isActive() || codexLogin.isActive()) return { ok: false, error: 'busy' };
+  const result = await activateCodexAccount(codexActivateDeps(), id).catch((): SwapResult => ({ ok: false, error: 'write' }));
+  codexLive = readLiveCodexIdentity(codexActivateDeps());
+  if (result.ok) void usage.refresh(true, true);
+  return result;
+}
 const swapDeps = (): SwapDeps => ({
   home: homedir(),
   env: process.env,
@@ -444,8 +557,8 @@ const activateDeps = (): ActivateDeps => ({
   cswapWroteSince: (identity, roster, since) => cswapWroteSince(cswapRosterPath(homedir(), process.env, process.platform), roster, identity, since),
 });
 const guardDeps = { swapRunning: isSwapRunning, swapPending: () => hasPendingSwap(swapDeps()), swapPendingNow: () => isSwapUnresolved() || isActivationRecoveryPending(), readOnly: () => accounts.readOnly() };
-/** The live Claude login's identity (`~/.claude.json`), null when nobody is signed in; throws when the file cannot be read or parsed. */
-const readLiveIdentity = () => readLiveClaudeIdentity(usageDeps.credentials);
+/** The live Claude login's identity (`~/.claude.json`), null when nobody is signed in (also an identity without a Claude login next to it); throws when a file cannot be read or parsed. */
+const readLiveIdentity = () => readSignedInClaudeIdentity(usageDeps.credentials);
 /** One more try of a version-2 recovery that found Claude Code's locks busy (from the polls and from its own timer). */
 async function retryActivationRecovery(): Promise<void> {
   if (quitting) return; // no new account work once the app quits
@@ -475,7 +588,10 @@ const reconcileDeps = (): ReconcileDeps => {
       const path = cswapRosterPath(homedir(), process.env, process.platform);
       return cswapWroteSince(path, await readCswapRoster(path), identity, since);
     },
-    savedCopyDead: (record) => savedCopyDead(nodeSwapFs, accounts.dirOf(record.id), record),
+    // The "signed out" notice says the app kept its copy: a record without any saved login (1.1.1 adopted an identity Claude
+    // Desktop left in ~/.claude.json) has none to keep, so it gets no notice either, like a dead copy.
+    savedCopyDead: async (record) => (await savedCopyDead(nodeSwapFs, accounts.dirOf(record.id), record))
+      || (await claudeLoginPresence(profileSource(usageDeps.credentials, accounts.dirOf(record.id)))) === 'absent',
     now: () => Date.now(),
   };
 };
@@ -533,44 +649,21 @@ const claimedCodex = new Set<string>();
 /** Live notifications - Windows drops click handlers of garbage-collected ones. */
 const notifications = new Set<Notification>();
 /**
- * 1.0.9: the taskbar button (Windows overlay with the number of agents waiting for you) and the
- * Dock badge (macOS); the statuses come from every window (cell:runtime), see taskbar.ts.
+ * 1.0.9: the Dock badge (macOS) with the number of agents waiting for you; the statuses come from every window
+ * (cell:runtime), see taskbar.ts.
  */
-const taskbar = createTaskbar<NativeImage>({
+const taskbar = createTaskbar({
   platform: process.platform,
   *cells() {
     for (const p of state.projects) for (const t of p.tabs) for (const c of t.cells) yield { id: c.id, muted: c.muted, agent: getProfile(state, c.profileId).cli !== 'shell' };
   },
   alive: () => alive,
   settings: () => state.settings.alerts,
-  setOverlay: (image, description) => { withLiveWindow(win, (w) => { try { w.setOverlayIcon(image, description); } catch { /* no taskbar button */ } }); },
   setDockBadge: (text) => { try { app.dock?.setBadge(text); } catch { /* no Dock */ } },
-  image: (label) => {
-    const image = nativeImage.createEmpty();
-    const drawn = fontBadges?.get(label);
-    if (drawn) {
-      BADGE_SCALES.forEach((scaleFactor, i) => { const size = Math.round(BADGE_SIZE * scaleFactor); image.addRepresentation({ scaleFactor, width: size, height: size, dataURL: drawn[i] }); });
-      return image;
-    }
-    for (const { scaleFactor, size, png } of badgePngs(label)) image.addRepresentation({ scaleFactor, width: size, height: size, buffer: png });
-    return image;
-  },
-  describe: (count) => (count > 9 ? tr('Ponad 9 agentów czeka na Ciebie') : tr('Agenci czekający na Ciebie: {count}', { count })),
   setTimer: (fn, ms) => setTimeout(fn, ms),
   clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
 });
 app.on('will-quit', () => taskbar.dispose());
-/** 1.1.0: the overlay badges drawn by the main window with the system font (null until drawn; the stroke digits stand in). */
-let fontBadges: Map<string, string[]> | null = null;
-function drawFontBadges(w: BrowserWindow): void {
-  if (process.platform !== 'win32' || fontBadges) return;
-  w.webContents.executeJavaScript(fontBadgeScript(), true).then((value: unknown) => {
-    const parsed = parseFontBadges(value);
-    if (!parsed) return;
-    fontBadges = parsed;
-    taskbar.redraw();
-  }).catch(() => { /* the stroke digits stay */ });
-}
 /** Only sessions explicitly chosen by the user authorize native message delivery. */
 const verifiedCodex = new Map<string, string>();
 let mcpError: string | undefined;
@@ -617,7 +710,8 @@ const updateStrings = (): UpdateStrings => ({
 });
 
 // The main window, and (1.0.6) the detached windows for the state and the messages of their own cells (detachedWindows.ts).
-const send = (channel: string, ...args: unknown[]) => { sendRouted(win, channel, args); };
+// Any other message waits for the batched state changes (stateBroadcast.ts): a message naming new cells never overtakes them.
+const send = (channel: string, ...args: unknown[]) => { if (channel !== 'state:changed') stateBroadcast?.flush(); sendRouted(win, channel, args); };
 /** The OS ends the session (Windows shutdown or log-off, macOS shutdown): nothing may hold the quit any more. */
 let sessionEndingAt: number | undefined;
 /** The OS announced a session end: quits within the next minute are never held, and an open question lets the quit go on. */
@@ -679,7 +773,9 @@ function forgetCell(id: string): void {
   void removeCellFiles(cellFileDirs, id);
   automation.forgetCell(id);
 }
-const controller = new StateController(state, (snapshot) => {
+/** Agents' MCP changes reach the windows in batches (one patch per burst, not per change). */
+let stateBroadcast: StateBroadcaster | undefined;
+const controller = new StateController(state, (snapshot, batch) => {
   if (snapshot.state.projects !== state.projects) {
     // One pass over each state (a lookup per cell was quadratic in the number of cells).
     const roles = cellIdsOf(snapshot.state, true, (cell) => !!cell.role);
@@ -697,8 +793,9 @@ const controller = new StateController(state, (snapshot) => {
   const key = `${state.settings.showAiUsage}:${state.settings.usageIntervalMinutes}:${limitPollingWanted(state.settings.alerts)}`;
   if (key !== usageKey) { usageKey = key; usage.reschedule(); }
   saver.save(state);
-  send('state:changed', stateChange(previous, snapshot));
+  stateBroadcast!.changed(snapshot, batch);
 });
+stateBroadcast = createStateBroadcaster({ initial: controller.snapshot(), send: (change) => send('state:changed', change) });
 const automation = new AutomationService(controller, {
   createWorktree,
   // Rolls back worktrees it has just created: nothing is in them yet, so the unforced removal goes through.
@@ -843,7 +940,7 @@ function createWindow(): void {
   // Windows ends the session without before-quit: the last changes are written now (the renderer was asked to send its own).
   win.on('query-session-end', () => { markSessionEnding(); send('app:before-quit'); });
   win.on('session-end', () => { saver.flush(); });
-  win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { drawFontBadges(win); ptyHost.connectRenderer(win.webContents); sftpHost.connectRenderer(win.webContents); dbHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
+  win.webContents.on('did-finish-load', () => { startupTimer.mark('did-finish-load'); hungReloadRequested = false; if (isLive(win)) { ptyHost.connectRenderer(win.webContents); sftpHost.connectRenderer(win.webContents); dbHost.connectRenderer(win.webContents); void accountsReady.promise.then(pushSwapPending); sendShown(); } });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -1247,7 +1344,7 @@ guardedHandle('codex:bind', async (_e, cellId: string, cwd: string) => {
 // ── ipc ─────────────────────────────────────────────────────────────────────
 
 ipcMain.handle('state:load', () => state);
-ipcMain.handle('state:snapshot', () => controller.snapshot());
+ipcMain.handle('state:snapshot', () => { stateBroadcast?.flush(); return controller.snapshot(); });
 // The answer is an acknowledgement; the new state reaches the renderer once, as the patch `state:changed` carries.
 // A foreign sender is refused the way an edit the controller rejects is: a rejected call.
 guardedHandle('state:edit', (_e, edit: StateEdit) => { const { revision, editId } = controller.apply(edit); return { revision, editId }; }, () => Promise.reject(new Error('Refused.')));
@@ -1572,6 +1669,33 @@ function showLimitNotice(notice: LimitNotice): void {
   });
   notification.show();
 }
+/**
+ * 1.1.2: what the automatic switch did or offers. An offer has a "Przełącz na X" button (Windows and macOS); a click on any
+ * of them opens the limits panel, which shows the offer too.
+ */
+function showSwitchNotice(event: SwitchNotice): void {
+  if (!Notification.isSupported()) return;
+  const language = state.settings.language ?? detectLanguage([app.getLocale()]);
+  const text = autoSwitchText(event, tr, language, Date.now());
+  const toName = (event.toEmail || (event.provider === 'claude' ? 'Claude' : 'Codex')).slice(0, 60);
+  const buttons = (event.kind === 'offer' || event.kind === 'returnOffer') && (process.platform === 'win32' || process.platform === 'darwin') ? [{ type: 'button' as const, text: tr('Przełącz na {to}', { to: toName }) }] : [];
+  const notification = new Notification({ ...notificationOptions(text), ...(buttons.length ? { actions: buttons } : {}) });
+  notifications.add(notification);
+  trimNotifications(notifications);
+  const forget = () => notifications.delete(notification);
+  const openPanel = () => { showCell(undefined); send('usage:open'); };
+  notification.on('close', forget);
+  notification.on('failed', forget);
+  notification.on('click', () => { forget(); openPanel(); });
+  notification.on('action', () => {
+    forget();
+    void autoSwitch.acceptOffer().then((result) => {
+      if (result.ok) showSwitchNotice({ kind: event.kind === 'returnOffer' ? 'returned' : 'switched', provider: event.provider, fromEmail: event.fromEmail, toEmail: result.email ?? event.toEmail, window: event.window, percent: event.percent });
+      else { openPanel(); showSwitchNotice({ kind: 'failed', provider: event.provider, toEmail: event.toEmail }); }
+    }).catch(() => undefined);
+  });
+  notification.show();
+}
 /** The "Test" button of the limit warnings: a sample warning for the first account with an e-mail. */
 guardedOn('alerts:testLimit', () => {
   const account = usage.getState().providers.find((p) => p.email && p.status !== 'signedOut');
@@ -1647,9 +1771,17 @@ registerAccountIpc(ipcMain, {
   refreshUsage: () => usage.refreshNow(),
   startLogin: (request) => {
     if (typeof request !== 'object' || request === null || Array.isArray(request)) return { ok: false, error: 'invalid request' };
+    // 1.1.2: a saved Codex account (new or signed in again) logs in into its own profile, never into ~/.codex.
+    const { provider, target } = request as { provider?: unknown; target?: { type?: unknown } };
+    if (provider === 'codex' && target && typeof target === 'object' && target.type !== 'main') {
+      if (isSwapRunning() || isCodexSwapRunning()) return { ok: false, error: 'busy' };
+      if (login.isActive()) login.dispose();
+      return codexLogin.start(target);
+    }
+    if (codexLogin.isActive()) codexLogin.dispose();
     return loginBlock(guardDeps, request).then((block) => (block ? { ok: false as const, error: block } : login.start(request as LoginRequest)));
   },
-  cancelLogin: (id) => { if (typeof id === 'string') login.cancel(id); },
+  cancelLogin: (id) => { if (typeof id === 'string') { login.cancel(id); codexLogin.cancel(id); } },
   removeAccount: (id) => handleRemoveAccount({
     ...guardDeps,
     isLive: (accountId) => accounts.live()?.recordId === accountId || custodyOf(accounts.get(accountId) ?? {}) === 'live',
@@ -1657,16 +1789,7 @@ registerAccountIpc(ipcMain, {
     remove: (accountId) => accounts.remove(accountId),
     onRemoved: () => { void usage.refresh(true, true); },
   }, id),
-  makeMain: async (id) => {
-    const result = await handleMakeMain({
-      loginActive: () => login.isActive(),
-      validate: (accountId) => checkActivationTarget(activateDeps(), accountId),
-      swap: (accountId) => activateAccount(activateDeps(), accountId),
-      onSwapped: () => { if (typeof id === 'string') void usage.refresh(true, true, `claude:${id}`); },
-    }, id);
-    void pushSwapPending();
-    return result;
-  },
+  makeMain: (id) => makeMainClaude(id),
   /** "Renew this copy in unimux": the user confirmed that a saved copy cswap also lists is the app's own login. */
   adoptCopy: (id) => handleAdoptCopy({
     ...guardDeps,
@@ -1693,12 +1816,34 @@ registerAccountIpc(ipcMain, {
       send('usage:state', usage.getState());
     }
   },
+  // `{ provider, to? }`: `to` is an account key (e-mail) the user picked; without it the account with the most room.
+  switchBest: (payload) => {
+    const { provider, to } = (payload && typeof payload === 'object' ? payload : {}) as { provider?: unknown; to?: unknown };
+    if (provider !== 'claude' && provider !== 'codex') return { ok: false, error: 'invalid' };
+    return autoSwitch.switchNow(provider, typeof to === 'string' && to.length <= 160 ? to.toLowerCase() : undefined);
+  },
+  acceptSwitch: () => autoSwitch.acceptOffer(),
+  dismissSwitch: () => { autoSwitch.dismissOffer(); },
+  makeMainCodex: (id) => makeMainCodex(id),
+  removeCodex: (id) => {
+    if (!isCodexAccountId(id) || !codexAccounts.get(id)) return { ok: false };
+    if (isCodexSwapRunning()) return { ok: false, error: 'busy' };
+    try {
+      codexLogin.cancelFor(id);
+      codexAccounts.remove(id);
+    } catch { return { ok: false, error: 'readOnly' }; }
+    void usage.refresh(true, true);
+    return { ok: true };
+  },
 }, fromAppWindow, accountsReady.promise, () => quitting);
 usage.onChange((snapshot) => send('usage:state', snapshot));
 // A check changes the update state (and may start a download); a foreign sender gets nothing done.
 guardedHandle('update:check', () => checkForUpdates(), () => undefined);
 ipcMain.handle('update:get', () => ({ ...getUpdateState(), currentVersion: app.getVersion() }));
 guardedOn('update:install', () => openInstallWindow());
+// 1.1.2: what main knows of the work an update would interrupt (the renderer asks before it starts an update): an account swap
+// or an account login in progress.
+guardedHandle('update:busy', () => ({ swap: isSwapRunning() || isCodexSwapRunning(), login: login.isActive() || codexLogin.isActive() }), () => ({ swap: false, login: false }));
 guardedOn('update:open', () => shell.openExternal(RELEASES_URL));
 /** `cursor` / `code` found on PATH, looked up without blocking main (a slow PATH on network drives) and kept for a few minutes. */
 let editorLookup: { at: number; found: Promise<string | undefined> } | undefined;
