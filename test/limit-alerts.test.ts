@@ -29,6 +29,11 @@ describe('limit warning settings', () => {
     expect(normalizeLimitAlerts({ enabled: 'yes', fiveHour: { enabled: false, percent: 150 }, sevenDay: { percent: 70.5 }, resets: true }))
       .toEqual({ enabled: true, fiveHour: { enabled: false, percent: 80 }, sevenDay: { enabled: true, percent: 90 }, resets: true });
   });
+
+  it('keeps any whole threshold from 1 to 100 (1.1.2: a slider instead of fixed steps)', () => {
+    for (const percent of [1, 37, 50, 99, 100]) expect(normalizeLimitAlerts({ fiveHour: { enabled: true, percent } }).fiveHour.percent).toBe(percent);
+    for (const percent of [0, 101, 50.5, '50', null]) expect(normalizeLimitAlerts({ sevenDay: { enabled: true, percent } }).sevenDay.percent).toBe(90);
+  });
 });
 
 describe('evaluateLimits', () => {
@@ -100,7 +105,7 @@ describe('limitNoticeText', () => {
   const tr = (language: 'pl' | 'en') => (key: Parameters<typeof translate>[1], params?: Record<string, string | number>) => translate(language, key, params);
   it('names the account, the window, the percent and the reset time', () => {
     const notice: LimitNotice = { kind: 'threshold', provider: 'claude', email: 'support@example.com', window: '5h', percent: 82, resetsAt: Math.floor(new Date(2026, 9, 31, 21, 0).getTime() / 1000) };
-    expect(limitNoticeText(notice, tr('pl'), 'pl', NOW)).toEqual({ title: 'Limity kont AI', body: 'Konto support@example.com: limit 5 h wykorzystany w 82%, reset o 21:00' });
+    expect(limitNoticeText(notice, tr('pl'), 'pl', NOW)).toEqual({ title: 'Konta i limity', body: 'Konto support@example.com: limit 5 h wykorzystany w 82%, reset o 21:00' });
     expect(limitNoticeText(notice, tr('en'), 'en', NOW).body).toMatch(/^Account support@example\.com: 5 h limit 82% used, resets at /);
   });
 

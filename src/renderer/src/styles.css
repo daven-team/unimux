@@ -808,11 +808,11 @@ button:focus-visible, .snippet:focus-visible { outline: 1px solid var(--focus-ri
 .setting-hint { margin-top: 1px; color: #b4b4b4; font-size: 12px; line-height: 1.45; }
 .setting-control { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 0 1 auto; min-width: 0; max-width: 42%; }
 .setting-control .input { height: 28px; padding: 4px 8px; }
-.settings-card input.setting-switch { appearance: none; position: relative; width: 28px; height: 16px; flex: none; margin: 0; border: 0; border-radius: 9px; background: #484848; cursor: pointer; }
+.settings-card input.setting-switch, .switcher-pop input.setting-switch { appearance: none; position: relative; width: 28px; height: 16px; flex: none; margin: 0; border: 0; border-radius: 9px; background: #484848; cursor: pointer; }
 .setting-switch::before { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform .12s; }
-.settings-card input.setting-switch:checked { background: #3a9d67; }
+.settings-card input.setting-switch:checked, .switcher-pop input.setting-switch:checked { background: #3a9d67; }
 .setting-switch:checked::before { transform: translateX(12px); }
-.settings-card input.setting-switch:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; box-shadow: none; }
+.settings-card input.setting-switch:focus-visible, .switcher-pop input.setting-switch:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; box-shadow: none; }
 .setting-switch:disabled { opacity: .45; cursor: default; }
 .settings-profile-heading { display: flex; align-items: center; justify-content: space-between; color: #b4b4b4; font-size: 12px; }
 .setting-control .row.alert-quiet { flex-wrap: nowrap; gap: 6px; }
@@ -991,7 +991,7 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .fr-line del { background: #f8717128; color: #fecaca; text-decoration: line-through; border-radius: 2px; }
 .fr-line ins { background: #4ade8024; color: #bbf7d0; text-decoration: none; border-radius: 2px; }
 
-/* ── AI account limits (docked above the status bar) ───────────────────── */
+/* ── Accounts & limits (docked above the status bar) ───────────────────── */
 .usage-panel { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 0 10px 6px; border-top: 1px solid var(--border); background: var(--bg-1); font-size: 11px; color: var(--text-2); max-height: 40vh; overflow-y: auto; }
 /* Docked under the side panel content: at most 35% of the side panel, so the panel above keeps room in a short window (the
    cards scroll). The collapsed rail variant (.rail-foot) keeps 40vh. */
@@ -1004,12 +1004,12 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .usage-resize:hover::after, .usage-resize:focus-visible::after, .usage-resize.dragging::after { height: 3px; background: var(--btn-primary-bg); }
 .usage-resize:focus-visible { outline: none; }
 @media (prefers-reduced-motion: reduce) { .usage-resize::after { transition: none; } }
-/* 1.1.2: the automatic switch: "Auto" with a small switch in the header; while it is on, one quiet row under the header
+/* 1.1.2: the automatic switch: "Switcher" with a small switch in the header; while it is on, one quiet row under the header
    (a steady green dot, what it watches, an arrow to its options). */
-.usage-auto { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 4px 0 6px; border-radius: 5px; color: var(--muted); font-size: 10.5px; cursor: pointer; user-select: none; }
+.usage-auto { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 3px 0 5px; border-radius: 5px; color: var(--muted); font-size: 10.5px; cursor: pointer; user-select: none; }
 .usage-auto:hover { background: var(--btn-ghost-hover); color: var(--text-2); }
 .usage-auto.on { color: var(--text-2); }
-.usage-auto-label { letter-spacing: .2px; }
+.usage-auto-label { letter-spacing: .2px; white-space: nowrap; }
 /* Scoped under .usage-auto so it wins over the app-wide checkbox look (input[type='checkbox']). */
 .usage-auto input.usage-auto-switch { position: relative; display: block; width: 22px; height: 12px; border: 0; border-radius: 7px; background: #474747; box-shadow: none; transition: background .12s; }
 .usage-auto input.usage-auto-switch::before { content: ''; position: absolute; top: 2px; left: 2px; width: 8px; height: 8px; border-radius: 50%; background: #d4d4d4; transition: transform .12s, background .12s; }
@@ -1017,7 +1017,7 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .usage-auto input.usage-auto-switch:checked::before { transform: translateX(10px); background: #fff; }
 .usage-auto input.usage-auto-switch:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; box-shadow: none; }
 .usage-auto-line { flex: none; display: flex; align-items: center; gap: 6px; width: calc(100% + 8px); min-width: 0; margin: 0 -4px; padding: 2px 4px; border: 0; border-radius: 5px; background: none; color: var(--text-2); font: inherit; font-size: 10.5px; line-height: 16px; text-align: left; cursor: pointer; }
-.usage-auto-line:hover { background: var(--btn-ghost-hover); color: var(--text); }
+.usage-auto-line:hover, .usage-auto-line.on { background: var(--btn-ghost-hover); color: var(--text); }
 .usage-auto-line:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; }
 .usage-auto-line-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #3a9d67; box-shadow: 0 0 0 2px #3a9d6726; }
 .usage-auto-line-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1027,13 +1027,15 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 /* 1.0.9: the header (title, add, refresh) stays at the top of the panel while the cards scroll under it, so the panel can be
    collapsed without scrolling back up. It carries the panel's top padding and spans its full width, on the panel's opaque
    background (the panel has no top padding of its own, so it sticks at the very edge with nothing showing above it). */
-.usage-head { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 6px; margin: 0 -10px; padding: 4px 10px 0; background: var(--bg-1); }
+.usage-head { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 4px; margin: 0 -10px; padding: 4px 10px 0; background: var(--bg-1); }
 /* A hairline under the header shows once the cards scroll beneath it (a scroll-driven animation: it moves only with the
    scroll position, never on its own). */
 .usage-head { animation: usage-head-edge linear both; animation-timeline: scroll(nearest block); animation-range: 0 8px; }
 @keyframes usage-head-edge { from { box-shadow: 0 1px 0 transparent; } to { box-shadow: 0 1px 0 var(--border); } }
 .usage-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; display: flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: transparent; color: var(--text-2); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
 .usage-title:hover { color: var(--text); }
+/* The title stays on one line and ellipsizes in a narrow side panel. */
+.usage-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-chevron { display: inline-grid; transition: transform .15s; }
 .usage-chevron.up { transform: rotate(180deg); }
 .usage-summary { font-weight: 400; color: var(--text-2); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1150,6 +1152,21 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .settings-card .alert-event-sound .styled-select { max-width: none; width: 100%; }
 .alert-file { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11.5px; }
 .alert-volume-value { width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+/* 1.1.2: threshold sliders (Konta i limity): a thin track filled with the accent up to the value, a round thumb, the value
+   as a tabular number. --fill is the value's share of the range (0..1); the fill ends under the thumb's centre. */
+.threshold-slider { display: inline-flex; align-items: center; gap: 10px; }
+.threshold-slider input[type=range] { -webkit-appearance: none; appearance: none; width: 160px; min-width: 80px; height: 18px; margin: 0; padding: 0; background: transparent; cursor: pointer; }
+.threshold-slider input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px;
+  background: linear-gradient(to right, var(--btn-primary-bg) 0 calc(7px + (100% - 14px) * var(--fill, 0)), #ffffff1f calc(7px + (100% - 14px) * var(--fill, 0)) 100%); }
+.threshold-slider input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; margin-top: -5px; border: 0; border-radius: 50%; background: #e6e6e6; box-shadow: 0 0 0 1px #00000059, 0 1px 2px #00000066; transition: transform .1s; }
+.threshold-slider input[type=range]:hover::-webkit-slider-thumb { transform: scale(1.1); }
+.threshold-slider input[type=range]:focus { outline: none; }
+.threshold-slider input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 1px #00000059, 0 0 0 4px var(--accent-soft), 0 0 0 5px var(--focus-ring); }
+.threshold-slider.disabled { opacity: .45; }
+.threshold-slider input[type=range]:disabled { cursor: default; }
+.threshold-slider input[type=range]:disabled::-webkit-slider-thumb { transform: none; }
+.threshold-slider-value { width: 34px; text-align: right; color: #d4d4d4; font-size: 12px; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .threshold-slider input[type=range]::-webkit-slider-thumb { transition: none; } }
 
 /* Agent profiles: one compact card per profile */
 .profile-card { display: flex; flex-direction: column; gap: 8px; padding: 10px 2px; }

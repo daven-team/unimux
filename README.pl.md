@@ -32,7 +32,7 @@ po które sięgasz w trakcie ich pracy: pliki, Git, SSH i SFTP, bazy danych, not
 - **Bazy danych**: Postgres, MySQL / MariaDB, SQLite i Redis, także przez tunel SSH
 - **Pliki i edytor**: szybkie drzewo plików, karty edytora, szukanie i zamiana, podgląd Markdown, tabele CSV i Parquet
 - **Notatki, snippety i paleta `Ctrl+K`** na prompty, listy kontrolne i całą resztę
-- **Limity kont AI** dla Claude i Codex oraz **opcjonalny MCP** dla zespołów koordynator / wykonawcy
+- **Konta i limity** dla Claude i Codex oraz **opcjonalny MCP** dla zespołów koordynator / wykonawcy
 - **Natywne terminale**: ConPTY na Windowsie (z dyktowaniem przez przytrzymanie spacji), powłoki logowania na macOS, renderowanie na GPU
 - Interfejs po polsku, angielsku, niemiecku, hiszpańsku, francusku i portugalsku
 
@@ -55,7 +55,7 @@ po które sięgasz w trakcie ich pracy: pliki, Git, SSH i SFTP, bazy danych, not
 
 ### Konta AI i MCP
 
-- **Limity kont AI**: limity 5-godzinne i tygodniowe każdego znanego konta Claude oraz Codex. Na Windowsie możesz zapisać kilka kont Claude i przełączać to, z którego korzysta Claude Code.
+- **Konta i limity**: limity 5-godzinne i tygodniowe każdego znanego konta Claude oraz Codex. Na Windowsie możesz zapisać kilka kont Claude i przełączać to, z którego korzysta Claude Code; **Switcher** w nagłówku panelu może to zrobić sam przy limicie. Jego progi i ostrzeżenia o limitach są w Ustawieniach > Konta i limity.
 - **Opcjonalny MCP** dla zespołów: nadaj komórkom rolę **Koordynator** albo **Wykonawca**, a dostaną lokalne narzędzia do zadań, wiadomości, snippetów i gridów w tle. Koordynator uruchamia cały zespół jednym wywołaniem i czeka na zadania zamiast odpytywać. Agenci mogą zapytać Cię o decyzję (elicytacje MCP, np. przed zamknięciem gridu z otwartymi zadaniami), wskazywać innych agentów po nazwie i czekać jako długie zadanie MCP, jeśli klient to obsługuje. Zobacz [Agenci i lokalny MCP](docs/MCP.md).
 
 ### SSH i SFTP

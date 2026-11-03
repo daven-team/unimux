@@ -1,0 +1,42 @@
+/* 1.1.2: the Switcher's card (SwitcherPopover), in the look of the app's menus and help cards. */
+.switcher-pop {
+  position: fixed; left: 0; top: 0; z-index: 80; box-sizing: border-box; display: flex; flex-direction: column;
+  width: 288px; max-width: calc(100vw - 16px); overflow-y: auto;
+  padding: 10px 12px 8px; background: #191919; border: 1px solid #343434; border-radius: 8px; box-shadow: 0 8px 28px #0008;
+  font-size: 11.5px; line-height: 1.4; color: var(--text-2); text-align: left;
+  visibility: hidden; opacity: 0; transform: translateY(-3px); transition: opacity .12s, transform .12s;
+}
+.switcher-pop.on { visibility: visible; opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .switcher-pop { transition: none; } }
+.switcher-pop-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.switcher-pop-title { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.switcher-pop-title label { color: var(--text); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.switcher-pop-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #5a5a5a; }
+.switcher-pop-dot.on { background: #3a9d67; box-shadow: 0 0 0 2px #3a9d6726; }
+.switcher-pop-state { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+.switcher-pop-body { min-width: 0; margin: 10px 0 0; padding: 10px 0 0; border: 0; border-top: 1px solid #2a2a2a; display: flex; flex-direction: column; gap: 10px; transition: opacity .12s; }
+.switcher-pop-body:disabled { opacity: .45; }
+.switcher-pop-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.switcher-pop-field > label, .switcher-pop-label { color: #a3a3a3; font-size: 10.5px; font-weight: 600; }
+.switcher-pop-accounts { display: flex; flex-direction: column; gap: 8px; }
+.switcher-pop .switcher-pop-select { width: 100%; max-width: none; height: 26px; font-size: 11.5px; }
+/* The mode: a two-part segmented control. */
+.switcher-pop-segments { display: grid; grid-template-columns: 1fr 1fr; padding: 2px; gap: 2px; border-radius: 6px; background: #111; border: 1px solid #2c2c2c; }
+.switcher-pop-segments button { min-width: 0; height: 22px; padding: 0 6px; border: 0; border-radius: 4px; background: transparent; color: var(--text-2); font: inherit; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.switcher-pop-segments button:hover:not(:disabled) { color: var(--text); background: #ffffff0d; }
+.switcher-pop-segments button.on { background: #2e2e2e; color: var(--text); box-shadow: 0 1px 2px #0006; }
+.switcher-pop-segments button:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; }
+.switcher-pop-segments button:disabled { cursor: default; }
+.switcher-pop-thresholds { display: flex; flex-direction: column; gap: 4px; }
+.switcher-pop-threshold { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.switcher-pop-threshold .switcher-pop-label { flex: none; font-weight: 500; color: var(--text-2); font-size: 11px; }
+.switcher-pop .threshold-slider { gap: 8px; }
+.switcher-pop .threshold-slider input[type=range] { width: 128px; min-width: 60px; }
+.switcher-pop .threshold-slider-value { width: 32px; font-size: 11px; }
+.switcher-pop-switch { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text-2); font-size: 11px; cursor: pointer; }
+.switcher-pop-switch > span { min-width: 0; }
+.switcher-pop-switch .setting-switch { flex: none; }
+.switcher-pop-foot { margin-top: 10px; padding-top: 7px; border-top: 1px solid #2a2a2a; }
+.switcher-pop-link { padding: 2px 0; border: 0; background: none; color: var(--accent-text); font: inherit; font-size: 11px; cursor: pointer; }
+.switcher-pop-link:hover { text-decoration: underline; }
+.switcher-pop-link:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; border-radius: 3px; }

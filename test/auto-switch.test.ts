@@ -33,6 +33,12 @@ describe('automatic account switch: settings', () => {
     expect(normalizeAutoSwitch(undefined)).toEqual(d);
   });
 
+  it('keeps any whole threshold from 1 to 100 (1.1.2: a slider instead of fixed steps)', () => {
+    const d = defaultAutoSwitch();
+    for (const percent of [1, 50, 63, 95, 100]) expect(normalizeAutoSwitch({ fiveHour: { enabled: true, percent } }).fiveHour.percent).toBe(percent);
+    for (const percent of [0, 101, 72.5, -5, '80', NaN]) expect(normalizeAutoSwitch({ sevenDay: { enabled: true, percent } }).sevenDay.percent).toBe(d.sevenDay.percent);
+  });
+
   it('turning it on makes the current main accounts primary (an existing choice stays)', () => {
     const providers = [card('a@x.com', 10, 10, { active: true }), card('b@x.com', 10, 10)];
     expect(enableAutoSwitch(defaultAutoSwitch(), providers)).toMatchObject({ enabled: true, primary: { claude: 'a@x.com' } });
@@ -183,8 +189,8 @@ describe('automatic account switch: texts', () => {
     expect(autoSwitchText({ kind: 'switched', provider: 'claude', toEmail: 'support@x.com', fromEmail: 'daniel@x.com', window: '5h', percent: 96 }, tr as never).body)
       .toBe('Przełączono na support@x.com: limit 5 h konta daniel@x.com wykorzystany w 96%');
     expect(autoSwitchText({ kind: 'exhausted', provider: 'claude', toEmail: 'b@x.com', resetsAt: S + H }, tr as never, 'pl', NOW).body).toMatch(/^Wszystkie konta przekroczyły próg, najbliższy reset: b@x.com o \d\d:\d\d$/);
-    expect(autoSwitchStatus(on({ primary: { claude: 'a@x.com' } }), 'claude', { away: { claude: 'a@x.com' } }, tr as never)).toBe('Auto: wł. · największy zapas · wraca na a@x.com');
-    expect(autoSwitchStatus(defaultAutoSwitch(), 'claude', undefined, tr as never)).toBe('Auto: wył.');
+    expect(autoSwitchStatus(on({ primary: { claude: 'a@x.com' } }), 'claude', { away: { claude: 'a@x.com' } }, tr as never)).toBe('Switcher: wł. · największy zapas · wraca na a@x.com');
+    expect(autoSwitchStatus(defaultAutoSwitch(), 'claude', undefined, tr as never)).toBe('Switcher: wył.');
   });
 });
 

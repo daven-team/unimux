@@ -1,7 +1,7 @@
 import type { AccountNotice } from './accounts';
 import type { UsageErrorKind, UsageStatus } from './usage';
 export const usageMessages = {
-  'Limity kont AI': ['AI account limits', 'Limits der KI-Konten', 'Límites de cuentas de IA', 'Limites des comptes IA', 'Limites das contas de IA'],
+  'Konta i limity': ['Accounts & limits', 'Konten und Limits', 'Cuentas y límites', 'Comptes et limites', 'Contas e limites'],
   'Konta AI': ['AI accounts', 'KI-Konten', 'Cuentas de IA', 'Comptes IA', 'Contas de IA'],
   '5 godz.': ['5 h', '5 Std.', '5 h', '5 h', '5 h'],
   '7 dni': ['7 days', '7 Tage', '7 días', '7 jours', '7 dias'],
@@ -9,8 +9,8 @@ export const usageMessages = {
   'za {time}': ['in {time}', 'in {time}', 'en {time}', 'dans {time}', 'em {time}'],
   'Zaktualizowano {time}': ['Updated {time}', 'Aktualisiert {time}', 'Actualizado {time}', 'Mis à jour {time}', 'Atualizado {time}'],
   'Odśwież limity': ['Refresh limits', 'Limits aktualisieren', 'Actualizar límites', 'Actualiser les limites', 'Atualizar limites'],
-  'Zwiń limity kont AI': ['Collapse AI account limits', 'Limits der KI-Konten einklappen', 'Contraer límites de cuentas de IA', 'Réduire les limites des comptes IA', 'Recolher limites das contas de IA'],
-  'Rozwiń limity kont AI': ['Expand AI account limits', 'Limits der KI-Konten ausklappen', 'Expandir límites de cuentas de IA', 'Développer les limites des comptes IA', 'Expandir limites das contas de IA'],
+  'Zwiń konta i limity': ['Collapse accounts & limits', 'Konten und Limits einklappen', 'Contraer cuentas y límites', 'Réduire comptes et limites', 'Recolher contas e limites'],
+  'Rozwiń konta i limity': ['Expand accounts & limits', 'Konten und Limits ausklappen', 'Expandir cuentas y límites', 'Développer comptes et limites', 'Expandir contas e limites'],
   '{name}: nie zalogowano. Uruchom {command} w terminalu.': ['{name}: not signed in. Run {command} in a terminal.', '{name}: nicht angemeldet. Führe {command} in einem Terminal aus.', '{name}: sin sesión iniciada. Ejecuta {command} en una terminal.', '{name} : non connecté. Exécutez {command} dans un terminal.', '{name}: sem sessão iniciada. Execute {command} num terminal.'],
   '{name}: otwórz {command}, aby odświeżyć logowanie.': ['{name}: open {command} to renew the sign-in.', '{name}: Öffne {command}, um die Anmeldung zu erneuern.', '{name}: abre {command} para renovar el inicio de sesión.', '{name} : ouvrez {command} pour renouveler la connexion.', '{name}: abra {command} para renovar o início de sessão.'],
   'Codex: logowanie kluczem API, brak limitów.': ['Codex: signed in with an API key, no limits to show.', 'Codex: Anmeldung mit API-Schlüssel, keine Limits.', 'Codex: sesión con clave de API, sin límites que mostrar.', 'Codex : connexion par clé API, pas de limites à afficher.', 'Codex: sessão com chave de API, sem limites para mostrar.'],
@@ -55,7 +55,7 @@ export const usageMessages = {
   'Nie udało się odczytać konta po zalogowaniu.': ['Could not read the account after signing in.', 'Das Konto konnte nach der Anmeldung nicht gelesen werden.', 'No se pudo leer la cuenta tras iniciar sesión.', 'Impossible de lire le compte après la connexion.', 'Não foi possível ler a conta após o início de sessão.'],
   'Brak podłączonych kont. Dodaj konto, aby zobaczyć limity.': ['No accounts connected. Add one to see your limits.', 'Keine Konten verbunden. Füge eines hinzu, um deine Limits zu sehen.', 'No hay cuentas conectadas. Añade una para ver tus límites.', 'Aucun compte connecté. Ajoutez-en un pour voir vos limites.', 'Nenhuma conta ligada. Adicione uma para ver os seus limites.'],
   'główne': ['main', 'Haupt', 'principal', 'principal', 'principal'],
-  'Pokazuj limity kont AI': ['Show AI account limits', 'Limits der KI-Konten anzeigen', 'Mostrar límites de cuentas de IA', 'Afficher les limites des comptes IA', 'Mostrar limites das contas de IA'],
+  'Pokazuj panel „Konta i limity”': ['Show the “Accounts & limits” panel', 'Bereich „Konten und Limits“ anzeigen', 'Mostrar el panel «Cuentas y límites»', 'Afficher le panneau « Comptes et limites »', 'Mostrar o painel “Contas e limites”'],
   'Odświeżanie limitów': ['Refresh limits', 'Limits aktualisieren', 'Actualización de límites', 'Actualisation des limites', 'Atualização dos limites'],
   'co {count} min': ['every {count} min', 'alle {count} Min.', 'cada {count} min', 'toutes les {count} min', 'a cada {count} min'],
   '{name}: serwer Anthropic odmówił odpowiedzi (429). Ponowna próba {retry}.': ['{name}: the Anthropic server declined to answer (429). Trying again {retry}.', '{name}: Der Anthropic-Server hat die Antwort verweigert (429). Neuer Versuch {retry}.', '{name}: el servidor de Anthropic se negó a responder (429). Se reintentará {retry}.', '{name} : le serveur d’Anthropic a refusé de répondre (429). Nouvel essai {retry}.', '{name}: o servidor da Anthropic recusou responder (429). Nova tentativa {retry}.'],
