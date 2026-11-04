@@ -9,17 +9,17 @@
 // focusable. Chromium still produces frames at the display rate there (the recorder checks the idle rate first), but the
 // GPU presentation of an off-screen window may differ from an on-screen one: the numbers are main-thread frame pacing.
 // Scenarios (each action repeated --reps times, idle frames between actions count too):
-//   tabs      grid tab to grid tab (16 -> 12 -> 4 cells), settings tab and back
+//   tabs      first visit of the other grids (once), grid tab to grid tab (16 -> 12 -> 4 cells), settings tab and back
 //   projects  project to project (sidebar)
 //   scroll    wheel over a terminal with 20k lines of scrollback, dragging its scrollbar, wheel while it prints
 //   panels    settings (open, every section), Git panel and a commit, AI team, waiting, monitor, palette, all-tabs menu,
 //             conversation search, limits panel fold
 //   resize    window, sidebar edge, grid divider, limits panel handle
 //   window    detach a grid into its own window and back, maximize a cell and back
-// Usage: node scripts/bench-jank.mjs [--reps=5] [--only=tabs,projects,scroll,panels,resize,window] [--out=file.json]
+// Usage: node scripts/bench-jank.mjs [--reps=5] [--profile=<scenario>] [--trace=<scenario>] [--gpu-cache=<dir>] [--only=tabs,projects,scroll,panels,resize,window] [--out=file.json]
 //        node scripts/bench-jank.mjs --compare=a.json,b.json[,c.json,d.json]   (interleaved runs: a,c = before; b,d = after)
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { removeScratch } from './app-env.mjs';
@@ -55,6 +55,37 @@ const outFile = opt('out');
 if (opt('app')) process.chdir(opt('app'));
 /** --profile=<scenario prefix>[,...]: a CPU profile of those scenarios (saved to D:\Projekty\_jank, top functions printed). */
 const profileOf = opt('profile', '').split(',').filter(Boolean);
+/**
+ * --trace=<scenario prefix>[,...]: a Chromium trace of those scenarios (saved to D:\Projekty\_jank, opens in DevTools'
+ * Performance panel); the main-thread tasks over 25 ms are printed with what they spent their time on. For slow frames
+ * without a long script (LoAF lists scripts only), e.g. style, paint or a first use of a font.
+ */
+const traceOf = opt('trace', '').split(',').filter(Boolean);
+/**
+ * --gpu-cache=<dir>: Chromium's GPU shader caches are kept in <dir> between runs (copied into the scratch data dir before the
+ * start and back after the exit). A fresh data dir compiles every raster shader on first use (a 30 to 50 ms frame in the GPU
+ * process the first time a panel shows a new kind of drawing); an installed app has them on disk after its first sessions.
+ */
+const gpuCache = opt('gpu-cache');
+const GPU_CACHE_DIRS = ['GPUCache', 'ShaderCache', 'GrShaderCache', 'GraphiteDawnCache', 'DawnGraphiteCache', 'DawnWebGPUCache'];
+
+/** Main-thread tasks of the renderer over 25 ms in a trace, each with its heaviest nested events. */
+function traceTop(events) {
+  const main = events.find((e) => e.ph === 'M' && e.name === 'thread_name' && e.args?.name === 'CrRendererMain');
+  if (!main) return ['no renderer main thread in the trace'];
+  const own = events.filter((e) => e.pid === main.pid && e.tid === main.tid && e.ph === 'X' && typeof e.dur === 'number').sort((a, b) => a.ts - b.ts);
+  const tasks = own.filter((e) => e.name === 'ThreadControllerImpl::RunTask' || e.name === 'RunTask');
+  const t0 = own[0]?.ts ?? 0;
+  const lines = [];
+  for (const task of tasks.filter((t) => t.dur > 25_000).sort((a, b) => b.dur - a.dur).slice(0, 8)) {
+    const inside = own.filter((e) => e !== task && e.ts >= task.ts && e.ts + e.dur <= task.ts + task.dur);
+    const by = new Map();
+    for (const e of inside) { const k = e.name + (e.args?.data?.functionName ? ` ${e.args.data.functionName}` : '') + (e.args?.data?.url ? ` ${String(e.args.data.url).split('/').pop()}` : ''); by.set(k, (by.get(k) ?? 0) + e.dur); }
+    const top = [...by].filter(([, d]) => d >= 2000).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, d]) => `${(d / 1000).toFixed(1)} ${k}`);
+    lines.push(`${(task.dur / 1000).toFixed(1)} ms at +${((task.ts - t0) / 1000).toFixed(0)}: ${top.join(' | ')}`);
+  }
+  return lines;
+}
 const SCRATCH = 'D:\\Projekty';
 
 /** Top functions of a CDP profile by self time and by total (inclusive) time. */
@@ -161,6 +192,7 @@ const RECORDER = `(() => {
 })()`;
 
 // ---------------------------------------------------------------- app
+if (gpuCache) for (const d of GPU_CACHE_DIRS) if (existsSync(join(gpuCache, d))) cpSync(join(gpuCache, d), join(root, 'data', d), { recursive: true });
 const inspectPort = await new Promise((resolve) => { const s = createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const app = await launchApp(root, { MC_CLI_NO_REGISTRY: '1' }, [`--inspect=${inspectPort}`]);
 const result = { at: new Date().toISOString(), reps, scenarios: {} };
@@ -219,6 +251,20 @@ try {
     await sleep(600);
     const profiling = profileOf.some((p) => name.startsWith(p));
     if (profiling) { await app.cdp('Profiler.enable'); await app.cdp('Profiler.setSamplingInterval', { interval: 200 }); await app.cdp('Profiler.start'); }
+    // A trace goes through a connection of its own (its data comes as events).
+    let tracer = null;
+    if (traceOf.some((p) => name.startsWith(p))) {
+      const page = (await (await fetch(`http://127.0.0.1:${app.debugPort}/json/list`)).json()).find((t) => t.type === 'page' && t.url.includes('index.html') && !t.url.includes('detached='));
+      const ws = new WebSocket(page.webSocketDebuggerUrl);
+      await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
+      const events = [];
+      let done;
+      const complete = new Promise((resolve) => { done = resolve; });
+      ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.method === 'Tracing.dataCollected') events.push(...m.params.value); if (m.method === 'Tracing.tracingComplete') done(); };
+      ws.send(JSON.stringify({ id: 1, method: 'Tracing.start', params: { transferMode: 'ReportEvents', traceConfig: { includedCategories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'blink', 'cc', 'gpu', 'toplevel', 'v8.execute', 'blink.user_timing', 'loading'] } } }));
+      await sleep(300);
+      tracer = { ws, events, complete };
+    }
     const metrics = async () => Object.fromEntries((await app.cdp('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]));
     const m0 = await metrics();
     await ev('__jank.start()');
@@ -235,6 +281,16 @@ try {
       writeFileSync(file, JSON.stringify(profile));
       console.error(`    profile: ${file}`);
       for (const line of profileTop(profile)) console.error(`    ${line}`);
+    }
+    if (tracer) {
+      tracer.ws.send(JSON.stringify({ id: 2, method: 'Tracing.end' }));
+      await tracer.complete;
+      tracer.ws.close();
+      const file = join(SCRATCH, '_jank', `${name.replace(/\W+/g, '-')}.trace.json`);
+      mkdirSync(join(SCRATCH, '_jank'), { recursive: true });
+      writeFileSync(file, JSON.stringify({ traceEvents: tracer.events }));
+      console.error(`    trace: ${file}`);
+      for (const line of traceTop(tracer.events)) console.error(`    ${line}`);
     }
     if (opt('instrument')) r.inst = await ev('(window.__inst || []).splice(0)');
     result.scenarios[name] = r;
@@ -253,7 +309,14 @@ try {
   /** A rail tile: a click on the tile of the open panel would fold the side panel instead. */
   const showPanel = async (id) => { if (!(await ev(`document.querySelector('#${id}-view')?.getAttribute('aria-selected') === 'true' && !document.querySelector('.sidebar.collapsed')`))) await click(`#${id}-view`); };
   await showPanel('projects');
-  for (const id of ['a12', 'a4', 'a16']) { await selectTab(id); await sleep(1500); }
+  // The first visits are measured once (no reps), after the background start (BACKGROUND_MAX_CELLS = 12) started the 12-cell
+  // grid and the window was idle for a while; the 4-cell grid was not started.
+  if (only.has('tabs')) {
+    await app.until(`${JSON.stringify(T.a12.cells.map((c) => c.id))}.every((id) => window.__mc.terminals.has(id))`, 'background start', 60000).catch(() => console.error('    the 12-cell grid was not started in the background'));
+    await sleep(4000);
+  }
+  if (only.has('tabs')) await measure('tab first visit', async () => { for (const id of ['a12', 'a4', 'a16']) { await selectTab(id); await sleep(1500); } });
+  else for (const id of ['a12', 'a4', 'a16']) { await selectTab(id); await sleep(1500); }
   for (let i = 0; i < 2; i++) await type(T.a12.cells[i].id, `"${process.execPath}" "${WRITER}"`).catch(() => {});
   for (const p of ['Beta', 'Gamma', 'Alpha']) { await selectProject(p); await sleep(2000); }
   await ev('document.activeElement?.blur(), true');
@@ -370,6 +433,7 @@ try {
 } finally {
   try { main?.close(); } catch { /* closed */ }
   await app.close();
+  if (gpuCache) for (const d of GPU_CACHE_DIRS) if (existsSync(join(root, 'data', d))) cpSync(join(root, 'data', d), join(gpuCache, d), { recursive: true, force: true });
   removeScratch(root);
 }
 const text = JSON.stringify(result, null, 1);

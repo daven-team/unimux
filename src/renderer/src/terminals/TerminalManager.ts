@@ -24,7 +24,7 @@ import { mayAnswer, permissionAsk, permissionKeys, type PermissionAnswer, type P
 import { tr } from '../i18n';
 import { confirmTerminalLink } from '../terminalLinks';
 import { applyScrollback, DEFAULT_SCROLLBACK_LINES, MAX_WEBGL_CONTEXTS, PENDING_OUTPUT_CHARS } from '../../../shared/terminalLimits';
-import { nextLossCount, planWebgl, WEBGL_GRANT_BUDGET_MS, webglBackoff, WebglLimit } from '../../../shared/webglPool';
+import { nextLossCount, pickPrewarm, planWebgl, WEBGL_GRANT_BUDGET_MS, WEBGL_PREWARM_GAP_MS, WEBGL_PREWARM_IDLE_MS, WEBGL_PREWARM_QUIET_MS, webglBackoff, WebglLimit, type WebglCandidate } from '../../../shared/webglPool';
 import { onWindowShown } from '../windowShown';
 import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
 import { cursorOffset, reflowedCursor, type WrapBuffer } from '../../../shared/cursorReflow';
@@ -37,6 +37,11 @@ export const CARD_BG = '#131313';
 const FIT_BUDGET_MS = 8;
 /** Window size changes closer together than this are a drag of the window edge (see the constructor). */
 const WINDOW_DRAG_MS = 150;
+
+/** Loses a GL context now, so Chromium stops counting it before the garbage collector would. */
+function loseGl(gl: WebGL2RenderingContext | null): void {
+  try { if (gl && !gl.isContextLost()) gl.getExtension('WEBGL_lose_context')?.loseContext(); } catch { /* already gone */ }
+}
 
 // Campbell (Windows Terminal / PowerShell default), the colours of the default SSH theme, on the card's background: every
 // local terminal. SSH cells keep their theme's own background (CellView paints the card body with it).
@@ -180,12 +185,15 @@ class TerminalManager {
     setInterval(() => {
       if (this.webglLimit.recover(performance.now())) console.warn(`WebGL contexts limit raised to ${this.webglLimit.limit}`);
       if (this.needsWebgl()) this.balanceWebgl();
+      else if (this.windowShown && pickPrewarm(this.webglCandidates(), this.webglLimit.limit, performance.now())) this.schedulePrewarm();
     }, 1000);
     document.addEventListener('focusin', () => { if (this.needsWebgl()) this.balanceWebgl(); this.syncHostFocus(); });
     // During focusout the next element does not have the focus yet: look once the move is done.
     document.addEventListener('focusout', () => setTimeout(() => this.syncHostFocus(), 0));
     // Capture: the event does not bubble, and xterm reports a lost context only 3 s later (after waiting for a restore).
     document.addEventListener('webglcontextlost', (ev) => this.contextLost(ev.target), true);
+    const input = () => { this.inputAt = performance.now(); };
+    for (const type of ['keydown', 'pointerdown', 'wheel'] as const) window.addEventListener(type, input, { capture: true, passive: true });
     // A window edge being dragged: as for a panel edge (holdFits), the cells are fitted once the size stops changing instead
     // of at every pause of the pointer (each fit of a 16-cell grid reflowed every scrollback). A single change (maximize,
     // restore, snap) is fitted at once as before; only a second change within WINDOW_DRAG_MS starts the hold.
@@ -224,6 +232,7 @@ class TerminalManager {
       if (e.attachedTo) this.refit(e);
     }
     this.balanceWebgl();
+    this.schedulePrewarm();
     const refocus = this.refocus ? this.entries.get(this.refocus) : undefined;
     this.refocus = null;
     if (refocus?.attachedTo && (!document.activeElement || document.activeElement === document.body)) refocus.term.focus();
@@ -459,6 +468,7 @@ class TerminalManager {
     this.syncAddon(entry);
     this.statusTimer ??= setInterval(() => this.tickStatuses(), 400);
     this.deferParkedSelection(entry);
+    this.schedulePrewarm();
 
     // ConPTY asks its host terminal for win32-input-mode with CSI ? 9001 h.
     const setW32 = (on: boolean) => (params: (number | number[])[]) => {
@@ -773,11 +783,7 @@ class TerminalManager {
   private balanceWebgl(frame?: number): void {
     if (!this.windowShown) return;
     const now = performance.now();
-    const focused = document.activeElement;
-    const plan = planWebgl([...this.entries.values()].map((o) => ({
-      id: o.id, hasWebgl: o.webgl !== null, attached: o.attachedTo !== null, shownAt: o.shownAt, focused: focused !== null && focused === o.term.textarea,
-      outputAt: o.outputAt, changedAt: o.webglChangedAt, blockedUntil: o.webglBlockedUntil,
-    })), this.webglLimit.limit, now);
+    const plan = planWebgl(this.webglCandidates(), this.webglLimit.limit, now);
     // A victim is given back only while it is where the plan saw it (a parked one shown again meanwhile keeps its context).
     this.planReleases = plan.release.map((id) => ({ id, attached: this.entries.get(id)?.attachedTo != null }));
     this.planGrants = plan.grant;
@@ -785,6 +791,42 @@ class TerminalManager {
     // frame, so one frame never gets two slices.
     if (frame !== undefined) this.continueWebgl(frame);
     else this.queueSlice();
+  }
+
+  private webglCandidates(): WebglCandidate[] {
+    const focused = document.activeElement;
+    return [...this.entries.values()].map((o) => ({
+      id: o.id, hasWebgl: o.webgl !== null, attached: o.attachedTo !== null, shownAt: o.shownAt, focused: focused !== null && focused === o.term.textarea,
+      outputAt: o.outputAt, changedAt: o.webglChangedAt, blockedUntil: o.webglBlockedUntil,
+    }));
+  }
+
+  private prewarmHandle = 0;
+  /** The last key press, pointer press or wheel turn anywhere in the window (prewarming waits for a quiet moment). */
+  private inputAt = -Infinity;
+  private prewarmRetry: number | undefined;
+
+  /**
+   * Parked terminals (a grid not on screen, started in the background or shown before the window was minimized) get their
+   * context in idle time, one per idle callback, while plenty of the pool is free (webglPool.ts pickPrewarm). The first
+   * switch to their grid then draws through WebGL at once: without it every cell drew through xterm's DOM renderer (about
+   * 6 ms per cell and frame) until the contexts were created a few per frame. Shown terminals always come first: nothing is
+   * prewarmed while a plan still hands out contexts.
+   */
+  private schedulePrewarm(): void {
+    if (this.prewarmHandle || this.prewarmRetry !== undefined || typeof requestIdleCallback !== 'function') return;
+    this.prewarmHandle = requestIdleCallback((deadline) => { this.prewarmHandle = 0; this.prewarmWebgl(deadline); });
+  }
+
+  private prewarmWebgl(deadline: IdleDeadline): void {
+    if (!this.windowShown || this.planGrants.length) return;
+    const now = performance.now();
+    const id = pickPrewarm(this.webglCandidates(), this.webglLimit.limit, now);
+    const e = id ? this.entries.get(id) : undefined;
+    if (!e) return;
+    if (deadline.timeRemaining() >= WEBGL_PREWARM_IDLE_MS || now - this.inputAt >= WEBGL_PREWARM_QUIET_MS) this.createWebgl(e, now);
+    // Short idle periods (frames keep coming): the next one a little later rather than at every frame.
+    this.prewarmRetry = window.setTimeout(() => { this.prewarmRetry = undefined; this.schedulePrewarm(); }, WEBGL_PREWARM_GAP_MS);
   }
 
   private queueSlice(): void {
@@ -859,7 +901,7 @@ class TerminalManager {
     if (!webgl) return;
     e.webgl = null;
     e.webglGl = null;
-    try { if (webglGl && !webglGl.isContextLost()) webglGl.getExtension('WEBGL_lose_context')?.loseContext(); } catch { /* already gone */ }
+    loseGl(webglGl);
     try { webgl.dispose(); } catch { /* the canvas is gone with the context */ }
   }
 
@@ -1186,8 +1228,13 @@ class TerminalManager {
     this.fitQueue.delete(e);
     e.addon?.dispose();
     e.unsyncViewport?.();
-    this.releaseWebgl(e);
-    e.term.dispose();
+    // The context is given back first (as in releaseWebgl), the addon goes with the terminal: disposed on its own it would
+    // bring up the DOM renderer of a terminal that is about to go and redraw it (12 ms per cell when a grid was detached).
+    const gl = e.webglGl;
+    e.webgl = null;
+    e.webglGl = null;
+    loseGl(gl);
+    try { e.term.dispose(); } catch { /* the canvas is gone with the context */ }
     e.host.remove();
     this.entries.delete(cellId);
     this.remoteCwds.delete(cellId);

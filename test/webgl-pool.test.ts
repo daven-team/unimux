@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CHROMIUM_WEBGL_CONTEXTS, MAX_WEBGL_CONTEXTS } from '../src/shared/terminalLimits';
 import { MAX_CELLS } from '../src/shared/layout';
-import { nextLossCount, planWebgl, WEBGL_BUSY_MS, WEBGL_EVICT_MS, WEBGL_HEALTHY_MS, WEBGL_HOLD_MS, WEBGL_MIN_LIMIT, WEBGL_RECOVER_MS, webglBackoff, WebglLimit, type WebglCandidate } from '../src/shared/webglPool';
+import { nextLossCount, pickPrewarm, planWebgl, WEBGL_BUSY_MS, WEBGL_EVICT_MS, WEBGL_HEALTHY_MS, WEBGL_HOLD_MS, WEBGL_MIN_LIMIT, WEBGL_PREWARM_RESERVE, WEBGL_RECOVER_MS, webglBackoff, WebglLimit, type WebglCandidate } from '../src/shared/webglPool';
 
 const NOW = 100_000;
 const c = (id: string, hasWebgl: boolean, attached: boolean, extra: Partial<WebglCandidate> = {}): WebglCandidate => ({ id, hasWebgl, attached, shownAt: 0, ...extra });
@@ -61,7 +61,7 @@ describe('WebGL context pool', () => {
   });
 
   it('a 20-cell grid gets 20 contexts after a long run of swaps settles, with no swap back', () => {
-    // Simulates a plan every second: 24 slots, 20 shown cells: everyone has one after the first plan.
+    // Simulates a plan every second: MAX_WEBGL_CONTEXTS slots, 20 shown cells: everyone has one after the first plan.
     const cells = Array.from({ length: 20 }, (_, i) => c(`c${i}`, false, true, busy));
     const plan = planWebgl(cells, MAX_WEBGL_CONTEXTS, NOW);
     expect(plan.grant).toHaveLength(20);
@@ -153,8 +153,25 @@ describe('WebGL context pool', () => {
 
   it('released and disposed contexts are lost explicitly first, so Chromium counts what we count', () => {
     const source = readFileSync('src/renderer/src/terminals/TerminalManager.ts', 'utf8');
-    expect(source).toMatch(/getExtension\('WEBGL_lose_context'\)\?\.loseContext\(\);[^\n]*\n\s*try \{ webgl\.dispose\(\);/);
-    expect(source).toMatch(/this\.releaseWebgl\(e\);\n\s*e\.term\.dispose\(\);/);
+    expect(source).toMatch(/getExtension\('WEBGL_lose_context'\)\?\.loseContext\(\);/);
+    expect(source).toMatch(/loseGl\(webglGl\);\n\s*try \{ webgl\.dispose\(\);/);
+    // A disposed terminal loses its context, then the addon goes with the terminal (no DOM renderer for a terminal that goes).
+    expect(source).toMatch(/loseGl\(gl\);\n\s*try \{ e\.term\.dispose\(\); \}/);
     expect(source).not.toMatch(/\.webgl\?\.dispose\(\)/);
+  });
+
+  it('prewarms the most recently shown parked terminal, never shown ones in their order, none on screen or backing off', () => {
+    const all = [c('shown', false, true), c('n1', false, false), c('n2', false, false), c('back', false, false, { shownAt: 9, blockedUntil: NOW + 1 }), c('held', true, false, { shownAt: 8 })];
+    expect(pickPrewarm(all, 64, NOW)).toBe('n1');
+    expect(pickPrewarm([...all, c('recent', false, false, { shownAt: 5 })], 64, NOW)).toBe('recent');
+    expect(pickPrewarm([c('shown', false, true)], 64, NOW)).toBeNull();
+  });
+
+  it('prewarming leaves room for a full grid, and does nothing when the limit was lowered', () => {
+    const held = (n: number) => Array.from({ length: n }, (_, i) => c(`h${i}`, true, i < 4));
+    expect(WEBGL_PREWARM_RESERVE).toBeGreaterThanOrEqual(MAX_CELLS);
+    expect(pickPrewarm([...held(MAX_WEBGL_CONTEXTS - WEBGL_PREWARM_RESERVE - 1), c('p', false, false)], MAX_WEBGL_CONTEXTS, NOW)).toBe('p');
+    expect(pickPrewarm([...held(MAX_WEBGL_CONTEXTS - WEBGL_PREWARM_RESERVE), c('p', false, false)], MAX_WEBGL_CONTEXTS, NOW)).toBeNull();
+    expect(pickPrewarm([...held(4), c('p', false, false)], 16, NOW)).toBeNull();
   });
 });
