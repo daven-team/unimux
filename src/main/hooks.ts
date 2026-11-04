@@ -292,6 +292,17 @@ export class HookServer extends EventEmitter {
     this.server = createServer((req, res) => {
       // h/<token>/<cellId>/<event>/<nonce> (curl), or k/<cellId>/<event>/<nonce> with the token as a bearer header (http hooks).
       const parts = (req.url ?? '').split('/').filter(Boolean);
+      // 1.1.4: x/<cellId>/<nonce>/<exit code>: the launch line's tail says the agent CLI ended (termReset.ts withResetTail).
+      // The spawn's nonce is the whole credential (the typed line never carries the token); it only reports that end.
+      if (parts[0] === 'x') {
+        res.writeHead(req.method === 'POST' ? 204 : 403).end();
+        req.resume();
+        const cellId = parts[1] ?? '';
+        if (req.method !== 'POST' || !CELL_ID.test(cellId) || !parts[2] || this.nonces.get(cellId) !== parts[2]) return;
+        const code = /^-?\d{1,10}$/.test(parts[3] ?? '') ? Number(parts[3]) : undefined;
+        this.emit('cliexit', cellId, code);
+        return;
+      }
       if (parts[0] === 'k' && req.headers.authorization === `Bearer ${this.token}`) parts.splice(0, 1, 'h', this.token);
       if (req.method !== 'POST' || parts[0] !== 'h' || parts[1] !== this.token) {
         res.writeHead(403).end();
@@ -420,6 +431,16 @@ export class HookServer extends EventEmitter {
   prepareCodex(cellId: string): string {
     this.nonces.set(cellId, randomBytes(8).toString('hex'));
     return this.url(cellId, 'codex');
+  }
+
+  /**
+   * 1.1.4: the URL the launch line posts the CLI's exit code to (`/<code>` appended by the shell). Call it after the spawn's
+   * nonce was made (writeClaudeSettings / prepareCodex); a later spawn's nonce makes it stale.
+   */
+  exitUrl(cellId: string): string {
+    let nonce = this.nonces.get(cellId);
+    if (!nonce) this.nonces.set(cellId, (nonce = randomBytes(8).toString('hex')));
+    return `http://127.0.0.1:${this.port}/x/${cellId}/${nonce}`;
   }
 
   /** Hook URL of an http hook: the token travels in the Authorization header instead of the path. */

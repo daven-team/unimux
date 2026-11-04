@@ -4,7 +4,7 @@
 // Shell: Windows PowerShell (the `pwsh` kind without PowerShell 7 installed), so the prompt goes through Get-Content.
 // Usage: npm run build && node scripts/verify-team-start.mjs   (and TEAM_SHELL=cmd for the order of the arguments)
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -31,6 +31,8 @@ writeFileSync(join(agents, 'fake-claude.mjs'), [
   "if (args[0] === '--version') { console.log('2.1.318 (Claude Code)'); process.exit(0); }",
   `process.stdout.write(readFileSync(${JSON.stringify(join(root, 'burst.txt'))}, 'utf8'));`,
   `writeFileSync(${JSON.stringify(starts)} + '/' + randomUUID() + '.txt', 'START ' + JSON.stringify(args));`,
+  // 1.1.4: a worker whose CLI ends at once (exit code 1), as the variadic --mcp-config made real workers do.
+  "if (args.some((a) => a.includes('EXIT_NOW'))) process.exit(1);",
   "console.log('unimux-fake-claude-ready');",
   'setInterval(() => {}, 1 << 30);',
 ].join('\n'));
@@ -66,7 +68,8 @@ const until = async (fn, label, ms = 30000) => {
   while (Date.now() < end) { const v = await fn(); if (v) return v; await sleep(150); }
   throw new Error(`Timeout waiting for ${label}\n${output.slice(-1500)}`);
 };
-const startLines = () => readdirSync(starts).map((f) => readFileSync(join(starts, f), 'utf8').trim()).filter(Boolean);
+const startLines = () => readdirSync(starts).map((f) => ({ f, t: statSync(join(starts, f)).mtimeMs })).sort((a, b) => a.t - b.t)
+  .map(({ f }) => readFileSync(join(starts, f), 'utf8').trim()).filter(Boolean);
 let socket, client, failed = false;
 const check = (ok, line) => { console.log(`${ok ? 'OK  ' : 'FAIL'} ${line}`); if (!ok) failed = true; };
 try {
@@ -109,6 +112,34 @@ try {
   await sleep(6000);
   lines = startLines().filter((l) => !l.includes(`${LEAD}.json`) && !l.includes('11111111-2222'));
   check(lines.length === 4, `showing the grid did not start the workers again: ${lines.length} starts`);
+  // 1.1.4: the coordinator got its delegation rules as system instructions (default mode "Sam, gdy się opłaca").
+  const leadStarts = () => startLines().filter((l) => l.includes(`${LEAD}.json`));
+  check(leadStarts()[0]?.includes('--append-system-prompt') && leadStarts()[0].includes('create_grid'), `the coordinator starts with --append-system-prompt: ${leadStarts()[0]?.slice(0, 200)}`);
+  const leadArgv = JSON.parse(leadStarts()[0].slice('START '.length));
+  const rulesArg = leadArgv[leadArgv.indexOf('--append-system-prompt') + 1] ?? '';
+  check(rulesArg.startsWith('unimux delegation rules') && rulesArg.endsWith('wait_for.'), `the rules reach the CLI as one whole argument: ${rulesArg.slice(0, 80)}...${rulesArg.slice(-30)}`);
+  // 1.1.4: a worker whose CLI ends at once is "exited" for the team: wait_for hears it long before its timeout.
+  const crash = JSON.parse((await client.callTool({ name: 'create_grid', arguments: { name: 'Crash', cells: [{ profileId: 'claude', role: 'worker', name: 'EXIT_NOW worker', prompt: 'Crash test task' }] } })).content[0].text);
+  const crashId = crash.cellIds[0], crashTask = crash.tasks[crashId];
+  const t0 = Date.now();
+  const crashWait = JSON.parse((await client.callTool({ name: 'wait_for', arguments: { taskIds: [crashTask], timeoutSec: 40 } })).content[0].text);
+  const waitedMs = Date.now() - t0;
+  check(crashWait.event === 'exited' && waitedMs < 30000, `wait_for reports the crashed worker as exited after ${waitedMs} ms: ${JSON.stringify(crashWait).slice(0, 200)}`);
+  const agentsText = (await client.callTool({ name: 'list_agents', arguments: {} })).content[0].text;
+  const findRow = (v) => Array.isArray(v) ? v.map(findRow).find(Boolean) : v && typeof v === 'object' ? (Object.values(v).includes(crashId) ? v : Object.values(v).map(findRow).find(Boolean)) : undefined;
+  const crashRow = JSON.stringify(findRow(JSON.parse(agentsText)) ?? agentsText);
+  check(crashRow.includes('exited') && !crashRow.includes('unknown'), `list_agents shows it exited: ${crashRow.slice(0, 200)}`);
+  // Restarting it (the user's restart: resume, downgraded to a new conversation as it never started) carries its task again.
+  await evaluate(`window.__mc.actions.restartCell(${JSON.stringify(crashId)}, 'resume')`);
+  const crashStarts = () => startLines().filter((l) => l.includes('EXIT_NOW'));
+  await until(() => crashStarts().length >= 2, 'the restart of the crashed worker');
+  check(crashStarts().every((l) => l.includes(`[Unimux task ${crashTask}]`)), `the restarted worker got its task again: ${crashStarts().map((l) => l.slice(0, 120)).join(' | ')}`);
+  // "Tylko na prośbę": the next start of the coordinator has no delegation rules.
+  await evaluate(`window.__mc.useStore.getState().update((s) => ({ ...s, settings: { ...s.settings, delegation: { mode: 'ask', maxAgents: 4 } } }))`);
+  const before = leadStarts().length;
+  await evaluate(`window.__mc.actions.restartCell(${JSON.stringify(LEAD)}, 'new')`);
+  await until(() => leadStarts().length > before, 'the coordinator restart');
+  check(!leadStarts().at(-1).includes('--append-system-prompt'), `in "Tylko na prośbę" the coordinator starts without --append-system-prompt: ${leadStarts().at(-1).slice(0, 200)}`);
   const left = existsSync(join(data, 'prompts')) ? readdirSync(join(data, 'prompts')) : [];
   console.log(`prompt files left: ${left.length}`);
   console.log(`terminal text of a worker: ${JSON.stringify(await evaluate(`(() => { const t = window.__mc.terminals; const id = ${JSON.stringify(created.cellIds[0])}; const x = t.xterm?.(id); if (!x) return null; const b = x.buffer.active; const out = []; for (let i = 0; i < b.length; i++) { const l = b.getLine(i)?.translateToString(true); if (l) out.push(l); } return out.join('\\n').slice(-1500); })()`))}`);

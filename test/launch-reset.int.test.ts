@@ -94,3 +94,25 @@ describe.skipIf(windows)('POSIX launch line (real bash)', () => {
     expect(out).toMatch(RESET);
   }, 40000);
 });
+
+// 1.1.4: the tail of a role cell posts the CLI's exit code to the hook server (cmd needs `call` for the late %errorlevel%).
+describe.skipIf(!hasPowerShell || !existsSync(`${process.env.SystemRoot ?? 'C:\\Windows'}\\System32\\curl.exe`))('exit post of the launch line (real shells)', () => {
+  async function withServer(run: (url: string, posts: string[]) => Promise<void>) {
+    const { createServer } = await import('http');
+    const posts: string[] = [];
+    const server = createServer((req, res) => { posts.push(`${req.method} ${req.url}`); res.writeHead(204).end(); });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    const port = (server.address() as { port: number }).port;
+    try { await run(`http://127.0.0.1:${port}/x/cell-1/0123456789abcdef`, posts); } finally { server.close(); }
+  }
+  for (const shell of ['powershell', 'cmd'] as const) {
+    it(`${shell}: posts the exit code after the CLI, and the reset still runs`, async () => {
+      await withServer(async (url, posts) => {
+        const out = await typeLine(shell, withResetTail('cmd /c exit 3', shell, url), { until: () => RESET });
+        expect(out).toMatch(RESET);
+        await waitFor(() => posts.length > 0, 10000, 'the exit post');
+        expect(posts).toEqual(['POST /x/cell-1/0123456789abcdef/3']);
+      });
+    }, 40000);
+  }
+});

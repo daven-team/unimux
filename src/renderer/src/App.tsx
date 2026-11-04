@@ -204,7 +204,8 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
 
   terminals.onStatus((cellId, status, prev, cause, reason, hooked, info) => {
     if (isAuxPtyId(cellId)) return; // login and install windows are not cells
-    window.mc.reportCellStatus(cellId, status, reason, hooked, terminals.detail(cellId)?.kind === 'cli-exited');
+    const ended = terminals.detail(cellId);
+    window.mc.reportCellStatus(cellId, status, reason, hooked, ended?.kind === 'cli-exited', ended?.kind === 'cli-exited' ? ended.code : undefined);
     setUi((ui) => {
       const { [cellId]: previous, ...rest } = ui.failures;
       const failures = status === 'waiting' && reason === 'error' ? { ...rest, [cellId]: info?.error ?? 'unknown' } : previous === undefined ? ui.failures : rest;
@@ -231,6 +232,8 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
   // The short reason of a status ("czeka na zgodę: Bash", "praca: Edit") for the cell card.
   terminals.onDetail((cellId, detail) => {
     if (isAuxPtyId(cellId)) return;
+    // 1.1.4: a CLI that ended right after starting leaves the status idle (no status change to report): main hears the end here.
+    if (detail?.kind === 'cli-exited') window.mc.reportCellStatus(cellId, terminals.status(cellId), undefined, false, true, detail.code);
     setUi((ui) => {
       if (detail) return { statusDetails: { ...ui.statusDetails, [cellId]: detail } };
       if (!(cellId in ui.statusDetails)) return {};

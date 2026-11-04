@@ -45,12 +45,28 @@ const psEsc = () => `[char]27+'[?${WIN32_PARAMS.join(';')}l'+[char]27+'[<u'`;
  * - bash / zsh: `trap : INT; cli; printf ...; trap - INT` (a no-op INT handler keeps the list going when the CLI is killed by
  *   SIGINT; without it the shell abandons the rest of the line).
  * One line, the CLI command verbatim inside. Prints nothing visible. Windows shells never clear `?1004` (see WIN32_PARAMS).
+ * `exitUrl` (1.1.4, agent cells with an MCP role): the tail also posts the CLI's exit code to the local hook server, so main
+ * learns that the CLI ended even when no window shows the cell (curl, which Windows 10+ and macOS ship).
  */
-export function withResetTail(cli: string, shell: ShellKind = 'pwsh'): string {
-  if (shell === 'cmd') return `${cli} & powershell -NoProfile -NonInteractive -Command "[Console]::Write(${psEsc()})" 2>nul`;
-  if (shell === 'zsh' || shell === 'bash') return `trap : INT; ${cli}; printf '\\033[?${INPUT_MODE_PARAMS.join(';')}l\\033[<u'; trap - INT`;
-  return `try { ${cli} } finally { [Console]::Write(${psEsc()}) }`;
+export function withResetTail(cli: string, shell: ShellKind = 'pwsh', exitUrl?: string): string {
+  const url = exitUrl && EXIT_URL.test(exitUrl) ? exitUrl : undefined;
+  if (shell === 'cmd') {
+    // `call` expands %^errorlevel% only when it runs, after the CLI (a plain %errorlevel% is expanded when the line is read).
+    const post = url ? `call curl.exe -s --noproxy * -m 2 -X POST ${url}/%^errorlevel% >nul 2>&1 & ` : '';
+    return `${cli} & ${post}powershell -NoProfile -NonInteractive -Command "[Console]::Write(${psEsc()})" 2>nul`;
+  }
+  if (shell === 'zsh' || shell === 'bash') {
+    const reset = `printf '\\033[?${INPUT_MODE_PARAMS.join(';')}l\\033[<u'`;
+    if (!url) return `trap : INT; ${cli}; ${reset}; trap - INT`;
+    return `trap : INT; ${cli}; __mc_exit=$?; curl -s --noproxy '*' -m 2 -X POST '${url}/'$__mc_exit >/dev/null 2>&1; ${reset}; trap - INT`;
+  }
+  if (!url) return `try { ${cli} } finally { [Console]::Write(${psEsc()}) }`;
+  // The post comes first in every shell (cmd needs it before its PowerShell); the CLI's exit code is kept for the prompt.
+  return `try { ${cli} } finally { $__mcExit = $LASTEXITCODE; curl.exe -s --noproxy '*' -m 2 -X POST "${url}/$__mcExit" *> $null; [Console]::Write(${psEsc()}); $global:LASTEXITCODE = $__mcExit }`;
 }
+
+/** The only URLs the tail posts to: the local hook server's exit route (no quotes or shell characters can come along). */
+const EXIT_URL = /^http:\/\/127\.0\.0\.1:\d{1,5}\/x\/[\w-]{1,64}\/[a-f0-9]{8,64}$/;
 
 /** SGR / normal / X10 mouse reports (`ESC[<Cb;Cx;CyM|m`, `ESC[M` + 3 bytes): what a terminal in mouse-tracking mode writes. */
 export function isMouseReport(data: string): boolean {

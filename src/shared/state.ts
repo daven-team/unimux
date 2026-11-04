@@ -1,4 +1,5 @@
 // Pure state transitions. Every function returns a new AppState and never mutates its input.
+import { DEFAULT_DELEGATION, normalizeDelegation } from './delegation';
 import { growLayout, isUsableLayout, layoutForCount, MAX_CELLS, removeArea, type GridLayout } from './layout';
 import { normalizeCellDir, normalizePresets } from './gridTemplates';
 import { DEFAULT_PROFILES, RETIRED_PROFILES } from './profiles';
@@ -51,7 +52,7 @@ export function defaultState(platform: AppPlatform = 'win32'): AppState {
     sftp: defaultSftpPlaces(),
     dbConnections: [],
     dbGroupColors: {},
-    settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), accountSwitch: defaultAutoSwitch(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true, scrollbackLines: DEFAULT_SCROLLBACK_LINES, sshTheme: DEFAULT_SSH_THEME, stripScope: DEFAULT_STRIP_SCOPE },
+    settings: { language: null, fontSize: 13, shell: defaultShell(platform), lastProfileId: 'claude', updateMode: DEFAULT_UPDATE_MODE, showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false, alerts: defaultAlerts(), accountSwitch: defaultAutoSwitch(), backgroundLoad: DEFAULT_BACKGROUND_LOAD, shortcuts: {}, confirmCloseWorking: true, scrollbackLines: DEFAULT_SCROLLBACK_LINES, sshTheme: DEFAULT_SSH_THEME, stripScope: DEFAULT_STRIP_SCOPE, delegation: { ...DEFAULT_DELEGATION } },
     sidebarCollapsed: false,
     snippetsOpen: true,
     notesOpen: false,
@@ -527,6 +528,7 @@ export function normalizeState(raw: unknown, platform: AppPlatform = 'win32'): A
       // The retired notifications / waitingSound* keys only seed the alerts when none are saved yet; they are never written again.
       alerts: readAlerts(r.settings as Record<string, unknown> | undefined),
       accountSwitch: normalizeAutoSwitch(r.settings?.accountSwitch),
+      delegation: normalizeDelegation(r.settings?.delegation),
     },
     // A damaged project (no id or path) or tab is dropped or repaired on its own instead of rejecting the whole file.
     projects: (r.projects as unknown[]).filter((p): p is Project => isRecord(p) && typeof p.id === 'string' && typeof p.path === 'string').map((p) => ({

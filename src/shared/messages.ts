@@ -11,6 +11,7 @@ import { contextMessages } from './contextMessages';
 import { convSearchMessages } from './convSearchMessages';
 import { convExportMessages } from './convExportMessages';
 import { dbMessages } from './dbMessages';
+import { delegationMessages } from './delegationMessages';
 import { redisMessages } from './redisMessages';
 import { dbUiMessages } from './dbUiMessages';
 import { detachMessages } from './detachMessages';
@@ -68,6 +69,7 @@ export const messages = {
   ...convSearchMessages,
   ...convExportMessages,
   ...dbMessages,
+  ...delegationMessages,
   ...redisMessages,
   ...dbUiMessages,
   ...detachMessages,
