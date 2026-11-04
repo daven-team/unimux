@@ -17,6 +17,12 @@ export interface WebglCandidate {
   blockedUntil?: number;
 }
 
+/**
+ * Time one frame may spend creating WebGL contexts (each compiles its shaders, about 10 ms on a desktop GPU); the rest of a
+ * plan follows in the next frames, so a grid coming to the front never freezes the window for all its contexts at once.
+ */
+export const WEBGL_GRANT_BUDGET_MS = 8;
+
 /** An on-screen terminal keeps a context it just got, and waits after losing one, at least this long (no thrashing). */
 export const WEBGL_HOLD_MS = 4000;
 /** Output this recent makes a terminal "busy": it may take a context from a quiet one on screen. */
