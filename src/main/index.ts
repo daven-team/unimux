@@ -11,7 +11,7 @@ import { cleanEnv } from '../shared/env';
 import type { HostToMain } from '../shared/ipc';
 import { buildLaunchCommand, type LaunchOptions } from '../shared/profiles';
 import { coordinatorSystemRules, delegationOf } from '../shared/delegation';
-import { resumeTaskPrompt, startupTaskPrompt } from '../shared/teamPrompts';
+import { readyStartupTasks, resumeTaskPrompt, startupTaskPrompt } from '../shared/teamPrompts';
 import { endCellMcp, prepareCellMcp } from './mcpCellConfig';
 import type { AppState, Worktree, WorktreeInspection, WorktreeInspectResult } from '../shared/types';
 import { appPlatform, normalizeProjectPath } from '../shared/platform';
@@ -1495,6 +1495,11 @@ async function spawnRequestUnsafe(req: SpawnCellRequest): Promise<SpawnResult> {
   const promptText = mode === 'new'
     ? (role ? startupTaskPrompt(state.automation.tasks, req.cellId, role, req.startupPrompt) : req.startupPrompt)
     : role && req.resumeWithTasks === true && req.sessionConfirmed === true ? resumeTaskPrompt(state.automation.tasks, req.cellId, role) : undefined;
+  // The tasks handed over in the startup prompt count as delivered there (no second notice through the prompt queue).
+  if (mode === 'new' && role && promptText?.trim()) {
+    const handed = new Set(readyStartupTasks(state.automation.tasks, req.cellId).filter((t) => t.delivery === 'pending').map((t) => t.id));
+    if (handed.size) controller.change((st) => ({ ...st, automation: { ...st.automation, tasks: st.automation.tasks.map((t) => (handed.has(t.id) ? { ...t, delivery: 'startup' as const } : t)) } }));
+  }
   let initialPrompt: { file: string; text: string } | undefined;
   if (promptText?.trim()) {
     mkdirSync(PROMPTS_DIR, { recursive: true });

@@ -13,8 +13,16 @@ const own = (tasks: readonly AgentTask[], cellId: string, status: AgentTask['sta
  * stored startupPrompt: a plain text (a grid template's prompt) goes first; a copy of a task prompt is replaced by the inbox.
  * Undefined when there is nothing to say.
  */
+/** Queued tasks of the cell whose prerequisites (dependsOn) all completed: the ones a new start may hand over. */
+export function readyStartupTasks(tasks: readonly AgentTask[], cellId: string): AgentTask[] {
+  const done = new Set(tasks.filter((t) => t.status === 'completed').map((t) => t.id));
+  return own(tasks, cellId, 'queued').filter((t) => (t.dependsOn ?? []).every((id) => done.has(id)));
+}
+
 export function startupTaskPrompt(tasks: readonly AgentTask[], cellId: string, role: AgentRole, fallback?: string): string | undefined {
-  const queued = own(tasks, cellId, 'queued');
+  // A task still waiting for its prerequisites is not handed over at the start (it is delivered once they complete; the
+  // stored prompt of such a cell tells it to wait).
+  const queued = readyStartupTasks(tasks, cellId);
   const claimed = own(tasks, cellId, 'in_progress');
   const plain = fallback?.trim() && !fallback.trimStart().startsWith('[Unimux task ') ? fallback.trim() : undefined;
   if (!queued.length && !claimed.length) return fallback?.trim() ? fallback : undefined;
