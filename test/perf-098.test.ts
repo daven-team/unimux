@@ -227,7 +227,7 @@ describe('shared blink', () => {
     expect(blink.running).toBe(false);
   });
 
-  it('leaves no infinite CSS animation in the renderer styles except the short brand effect, the spinners and the working dot pulse', () => {
+  it('leaves no infinite CSS animation in the renderer styles except the short brand effect, the spinners and the turning working mark', () => {
     const cssFiles = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
       .flatMap((e) => (e.isDirectory() ? cssFiles(join(dir, e.name)) : e.name.endsWith('.css') ? [join(dir, e.name)] : []));
     const infinite: string[] = [];
@@ -243,7 +243,7 @@ describe('shared blink', () => {
     // transform and opacity alone, so the compositor runs it without main-thread work (static under reduced motion).
     // 1.0.9: that pulse ran at every vsync while a cell worked (241 frames a second, 43 % of a core with 16 cells); it runs two
     // smooth waves now and then steps with the shared pulse. Nothing else.
-    expect(infinite.sort()).toEqual(['.brand.fx .bn-fx', '.refresh-icon.spinning svg, .busy-ring', '.ssh-mark.active::after'].sort());
+    expect(infinite.sort()).toEqual(['.brand.fx .bn-fx', '.refresh-icon.spinning svg, .busy-ring', '.ssh-mark.active::after', '.smark.working > svg'].sort());
   });
 });
 

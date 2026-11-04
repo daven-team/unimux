@@ -1,8 +1,8 @@
 /* 1.1.2: the status marks (StatusMark.tsx) in the badges of tabs and projects, on a cell icon's corner and in the cell
    header. One palette for every place, less saturated than the old pills; whole-pixel sizes (8 and 12 px stay whole at
-   100, 125, 150 and 200 % scaling). No infinite animation: a working mark steps with the shared pulse of blink.ts
-   (data-pulse on <html>, four phases of 320 ms, only while a working mark is shown), and the first turn of the arc (a) is
-   a finite animation. Under reduced motion (no pulse) every mark stands still. */
+   100, 125, 150 and 200 % scaling). 1.1.3: a working mark turns smoothly the whole time: the svg is its own layer and
+   only its transform animates, so the compositor turns it without style, layout or paint work on the page (the old
+   quarter steps restyled the whole document every 320 ms and looked choppy). Under reduced motion every mark stands still. */
 :root {
   --st-working: #d8a650;
   --st-done: #5fbf86;
@@ -35,15 +35,11 @@
 
 /* ── the marks: 12 px SVGs ───────────────────────────────────────────────────────────────────────────────────────── */
 .smark { width: 12px; height: 12px; }
-.smark.working .arc { transform-origin: 6px 6px; animation: smark-turn .8s linear 4; }
+.smark.working > svg { will-change: transform; animation: smark-turn 1s linear infinite; }
 @keyframes smark-turn { to { transform: rotate(360deg); } }
-/* Then quarter turns with the shared pulse (the finite turn, while it runs, wins over these). */
-:root[data-pulse="1"] .smark.working .arc { transform: rotate(90deg); }
-:root[data-pulse="2"] .smark.working .arc { transform: rotate(180deg); }
-:root[data-pulse="3"] .smark.working .arc { transform: rotate(270deg); }
 .terminal-cell .cell-icon .cell-dot.smark { right: -3px; bottom: -3px; }
 .terminal-cell .cell-head .status-text.error { color: #f0a3a3; }
 
 @media (prefers-reduced-motion: reduce) {
-  .smark.working .arc { animation: none; }
+  .smark.working > svg { animation: none; }
 }
