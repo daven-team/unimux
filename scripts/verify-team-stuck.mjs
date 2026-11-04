@@ -133,7 +133,9 @@ try {
   log('rows show how long a task is in its state');
   const tags = await text('.team-task-row .team-stuck-tag');
   assert.ok(tags.some((t) => t.startsWith('Agent zakończył działanie')), `ended badge: ${tags}`);
-  assert.ok(tags.includes('Agent zamknięty'), 'closed badge');
+  // 1.1.4: the task of the agent in the closed grid was cancelled at start ("agent closed"); it is not stuck any more.
+  const docs = (await snapshot()).tasks.find((t) => t.id === 't-docs');
+  assert.ok(docs?.status === 'cancelled' && docs.cancelReason === 'agent closed', `the closed agent's task is cancelled: ${JSON.stringify(docs)}`);
   assert.ok(!(await text('.team-task-row')).find((r) => r.includes('Orders page'))?.includes('Agent'), 'the running web worker has no badge');
   log(`badges: ${tags.join(', ')}`);
   const head = await text('.team-stuck-title');
@@ -143,14 +145,12 @@ try {
   // The QA worker runs but never connects: after 90 s without MCP (plus up to one 30 s tick of the panel's clock).
   await until(async () => (await text('.team-stuck-row')).some((t) => t.includes('QA')), 'the never-started QA worker', 140000);
   const all = await text('.team-stuck-title');
-  assert.equal(all[0], '4 zadania stoją: agent nie działa');
+  assert.equal(all[0], '3 zadania stoją: agent nie działa');
   log(`banner: ${all[0]}`);
   await shot('11-stuck-banner-all');
   assert.ok(await clickText('.team-task-row', 'End-to-end checkout tests'));
   await until(() => evaluate(`Boolean(document.querySelector('.team-stuck-callout'))`), 'the reason in the task detail');
   await shot('12-stuck-detail-never-started');
-  assert.ok(await clickText('.team-task-row', 'Document the orders API'));
-  await shot('13-stuck-detail-closed');
   assert.ok(await clickText('.automation-panel [role=tab]', 'Agenci'));
   const agentRuns = await text('.team-agent-run');
   console.log(`     agents: ${agentRuns.join(' | ')}`);
@@ -161,15 +161,6 @@ try {
   console.log(`     ended agent tooltip: ${apiTitle}`);
   await shot('14-stuck-agents');
   assert.ok(await clickText('.automation-panel [role=tab]', 'Zadania'));
-
-  // "Przydziel ponownie" of the archived agent's task: a new task for the chosen worker, the old one cancelled.
-  // The picker offers a worker that runs first (Web; API and QA are stuck themselves).
-  const picked = await evaluate(`[...document.querySelectorAll('.team-stuck-row')].find((r) => r.textContent.includes('Docs'))?.querySelector('.team-reassign-agent')?.textContent`);
-  assert.ok(picked?.startsWith('Web'), `the picker offers the running worker: ${picked}`);
-  assert.ok(await evaluate(`(() => { const row = [...document.querySelectorAll('.team-stuck-row')].find((r) => r.textContent.includes('Docs')); const b = [...row.querySelectorAll('button')].find((x) => x.textContent.includes('Przydziel ponownie')); b?.click(); return !!b; })()`));
-  const moved = await until(async () => { const a = await snapshot(); return a.tasks.find((t) => t.title === 'Document the orders API' && t.cellId === WEB) && a.tasks.find((t) => t.id === 't-docs')?.status === 'cancelled' && a; }, 'reassigned to the web worker');
-  assert.ok(moved);
-  log('"Przydziel ponownie" gave the archived agent\'s task to the web worker and cancelled the old one');
 
   // "Uruchom ponownie z zadaniem" of the API worker: it starts again with its task.
   const before = startsOf(API).length;

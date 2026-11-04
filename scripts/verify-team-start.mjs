@@ -48,7 +48,7 @@ writeFileSync(join(data, 'state.json'), JSON.stringify({
   }] }],
   profiles: [{ id: 'claude', name: 'Claude', cli: 'claude', args: '', color: '#d97757' }, { id: 'shell', name: 'Terminal', cli: 'shell', args: '', color: '#7a7a7a' }],
   automation: { paused: false, tasks: [], messages: [], events: [] },
-  snippets: [], presets: [], settings: { language: 'pl', fontSize: 13, notifications: false, shell: process.env.TEAM_SHELL ?? 'pwsh', lastProfileId: 'claude', backgroundLoad: 'project' },
+  snippets: [], presets: [], settings: { language: 'pl', fontSize: 13, notifications: false, shell: process.env.TEAM_SHELL ?? 'pwsh', lastProfileId: 'claude', backgroundLoad: 'project', delegation: { mode: 'auto', maxAgents: 20 } },
   sidebarCollapsed: false, snippetsOpen: false, sidebarWidth: 228, snippetsWidth: 210,
 }));
 const home = scratchHome(root);

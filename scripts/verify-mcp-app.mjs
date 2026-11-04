@@ -24,8 +24,8 @@ for (const dir of [data, agents, project]) mkdirSync(dir);
 const win = process.platform === 'win32';
 // A fake Claude Code 2.1.310: `--version` answers like the real one (http hooks), anything else just stays at the prompt.
 writeFileSync(join(agents, win ? 'claude.cmd' : 'claude'), win
-  ? '@echo off\r\nif "%~1"=="--version" goto ver\r\necho unimux-fake-claude-ready\r\nexit /b 0\r\n:ver\r\necho 2.1.310 (Claude Code)\r\n'
-  : '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.310 (Claude Code)"; exit 0; fi\necho unimux-fake-claude-ready\n');
+  ? '@echo off\r\nif "%~1"=="--version" goto ver\r\necho unimux-fake-claude-ready\r\nping -n 100000 127.0.0.1 >nul\r\nexit /b 0\r\n:ver\r\necho 2.1.310 (Claude Code)\r\n'
+  : '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "2.1.310 (Claude Code)"; exit 0; fi\necho unimux-fake-claude-ready\nsleep 100000\n');
 if (!win) chmodSync(join(agents, 'claude'), 0o755);
 const LEAD = 'mcp-lead', WORKER = 'mcp-worker';
 writeFileSync(join(data, 'state.json'), JSON.stringify({
