@@ -22,7 +22,9 @@
 .team-tab:hover { color: var(--text-2); }
 .team-tab.on { color: var(--text); }
 .team-tab.on::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px 2px 0 0; background: var(--btn-primary-bg); }
-.team-tab:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -3px; border-radius: 4px; }
+/* 1.1.3: a soft ring inside the tab instead of a hard box around it. */
+.team-tab:focus-visible { outline: none; }
+.team-tab:focus-visible::before { content: ''; position: absolute; inset: 5px 2px; border-radius: 6px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--focus-ring) 70%, transparent); pointer-events: none; }
 .team-tab-count { min-width: 16px; height: 16px; padding: 0 5px; box-sizing: border-box; border-radius: 8px; background: var(--bg-3); color: var(--text-2); font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
 .team-tab-count.alert { background: var(--accent); color: #fff; }
 
@@ -147,19 +149,25 @@ details.team-section[open] > summary h4::before { transform: rotate(90deg); }
 .team-reply { flex: none; display: flex; align-items: flex-end; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border); }
 .team-reply-text { flex: 1; min-width: 0; min-height: 30px; max-height: 120px; resize: vertical; box-sizing: border-box; }
 
-.team-agents { display: flex; flex-direction: column; gap: 2px; }
-.team-agent { display: grid; grid-template-columns: 16px minmax(120px, 1fr) auto auto auto; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; }
+/* 1.1.3: the rows share the list's columns (subgrid), so states, chips and role menus line up whatever their text. */
+.team-agents { display: grid; grid-template-columns: 16px minmax(120px, 1fr) auto auto; row-gap: 2px; column-gap: 10px; }
+.team-agent-actions .role-select { min-width: 118px; }
+.team-agent { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; padding: 6px 8px; border-radius: 6px; }
 .team-agent:hover { background: var(--bg-hover); }
 .team-agent .team-row-title { flex: 0 1 auto; }
-.team-runtime { font-size: 11px; color: var(--muted); white-space: nowrap; }
-.team-runtime.working { color: var(--working); }
-.team-runtime.ready { color: var(--waiting); }
-.team-runtime.needs_attention { color: var(--working); }
-.team-runtime.exited { color: var(--muted); }
-.team-mcp-agent { font-size: 10.5px; white-space: nowrap; }
-.team-mcp-agent.on { color: #86cda0; }
-.team-mcp-agent.wait { color: #c6ad7c; }
-.team-mcp-agent.off { color: var(--muted); }
+/* Two fixed columns, so the words and the MCP chips line up from row to row (an agent without a role leaves the chip column empty). */
+.team-agent-state { display: grid; grid-template-columns: minmax(120px, auto) 50px; align-items: center; column-gap: 10px; white-space: nowrap; }
+.team-agent-state > .team-agent-run { justify-self: end; }
+.team-agent-state > .team-agent-mcp { grid-column: 2; justify-self: start; }
+.team-agent-run { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-2); }
+.team-agent-run.unknown, .team-agent-run.exited { color: var(--muted); }
+.team-agent-mcp { display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px; border: 1px solid #ffffff12; border-radius: 9px; background: #ffffff06;
+  color: var(--text-2); font-size: 10px; font-weight: 600; letter-spacing: .3px; cursor: default; }
+.team-agent-mcp-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--st-idle); }
+.team-agent-mcp.on .team-agent-mcp-dot { background: var(--st-done); }
+.team-agent-mcp.wait .team-agent-mcp-dot { background: var(--st-working); }
+.team-agent-mcp.off { color: var(--muted); }
+.team-agent-mcp.off .team-agent-mcp-dot { background: var(--st-error); }
 .team-agent-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 
 .team-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
