@@ -129,7 +129,7 @@ async function boot(): Promise<void> {
   terminals.onStatus((cellId, status, prev, cause, reason, hooked, info) => {
     if (isAuxPtyId(cellId)) return;
     // Main relays the status to the main window too (its badges and its quit question count this grid's agents).
-    window.mc.reportCellStatus(cellId, status, reason, hooked);
+    window.mc.reportCellStatus(cellId, status, reason, hooked, terminals.detail(cellId)?.kind === 'cli-exited');
     setUi((ui) => {
       const { [cellId]: previous, ...rest } = ui.failures;
       const failures = status === 'waiting' && reason === 'error' ? { ...rest, [cellId]: info?.error ?? 'unknown' } : previous === undefined ? ui.failures : rest;

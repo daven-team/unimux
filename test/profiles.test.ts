@@ -32,6 +32,20 @@ describe('buildCliCommand', () => {
     expect(buildCliCommand(P.claude, { mode: 'resume', sessionId: 'x', initialPrompt })).toBe('claude --resume x');
   });
 
+  it('puts a Claude startup prompt before the options, where the variadic --mcp-config cannot take it as a config file', () => {
+    // Claude Code 2.1.3xx: --mcp-config <configs...> reads every following word up to the next option.
+    const initialPrompt = { file: 'C:/p/t.txt', text: '[Unimux task 1] Test' };
+    const mcp = { url: 'http://127.0.0.1:1/mcp', claudeConfigPath: 'C:\d\mcp\c.json' };
+    for (const shell of ['pwsh', 'cmd', 'bash'] as const) {
+      const command = buildCliCommand({ ...P.claude, args: '--model opus' }, { mode: 'new', sessionId: 'u1', shell, claudeSettingsPath: 'C:\s.json', mcp, initialPrompt })!;
+      const words = command.split(' ');
+      expect(words[0]).toBe('claude');
+      expect(words[1]).not.toMatch(/^--/);
+      expect(command.indexOf('--mcp-config')).toBeGreaterThan(command.indexOf(words[1]));
+      expect(command.endsWith('--model opus')).toBe(true);
+    }
+  });
+
   it('double-quotes the settings path for cmd', () => {
     expect(buildCliCommand(P.claude, { mode: 'new', sessionId: 'u1', claudeSettingsPath: 'C:/a b/x.json', shell: 'cmd' }))
       .toBe('claude --session-id u1 --settings "C:/a b/x.json"');

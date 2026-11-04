@@ -86,8 +86,12 @@ export function buildCliCommand(profile: Profile, opts: LaunchOptions): string |
   // A cell override replaces a profile's model flag instead of giving the CLI duplicates.
   const args = (opts.model ? profile.args.replace(/(?:^|\s)(?:--model(?:=|\s+)|-m\s+)(?:"[^"]*"|'[^']*'|[^\s]+)/g, ' ') : profile.args).trim();
   const parts: string[] = [];
+  // 1.1.3: Claude Code takes several files after --mcp-config (2.1.3xx), so a prompt after the options would be read as one
+  // more config file ("MCP config file not found: <the task>") and the CLI would exit: the prompt goes first.
+  const claudePrompt = profile.cli === 'claude' && opts.mode === 'new' && opts.initialPrompt?.text.trim() ? promptArg(opts.initialPrompt, opts.shell) : null;
   if (profile.cli === 'claude') {
     parts.push('claude');
+    if (claudePrompt) parts.push(claudePrompt);
     if (opts.sessionId) parts.push(opts.mode === 'resume' ? '--resume' : '--session-id', opts.sessionId);
     if (opts.claudeSettingsPath) parts.push('--settings', shellQuote(opts.claudeSettingsPath, opts.shell));
     if (opts.mcp?.claudeConfigPath) parts.push('--mcp-config', shellQuote(opts.mcp.claudeConfigPath, opts.shell));
@@ -115,7 +119,7 @@ export function buildCliCommand(profile: Profile, opts: LaunchOptions): string |
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(opts.model)) throw new Error('Invalid model name.');
     parts.push('--model', shellQuote(opts.model, opts.shell));
   }
-  if (opts.mode === 'new' && opts.initialPrompt?.text.trim()) parts.push(promptArg(opts.initialPrompt, opts.shell));
+  if (!claudePrompt && opts.mode === 'new' && opts.initialPrompt?.text.trim()) parts.push(promptArg(opts.initialPrompt, opts.shell));
   return parts.join(' ');
 }
 

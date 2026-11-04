@@ -2,7 +2,7 @@
 // task, exactly once, and showing their grid later does not start them again without it. Scratch data dir and home, a
 // stand-in `claude` that records every start (its arguments, with the prompt when one came along) and stays running.
 // Shell: Windows PowerShell (the `pwsh` kind without PowerShell 7 installed), so the prompt goes through Get-Content.
-// Usage: npm run build && node scripts/verify-team-start.mjs
+// Usage: npm run build && node scripts/verify-team-start.mjs   (and TEAM_SHELL=cmd for the order of the arguments)
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -22,13 +22,19 @@ writeFileSync(join(root, 'burst.txt'), `\x1b[38;5;208m${'x'.repeat(150)}\x1b[0m\
 const starts = join(root, 'starts');
 mkdirSync(starts);
 // The stand-in: --version answers; otherwise one line per start, then it waits like an interactive agent.
-writeFileSync(join(agents, 'claude.cmd'), [
-  '@echo off', 'if "%~1"=="--version" goto ver',
-  // Like a real agent's first screen: a burst of output before it does anything else (a terminal nobody drains blocks here).
-  `type "${join(root, 'burst.txt')}"`,
-  // One file per start, named by its session id: parallel starts appending to one file would lose lines.
-  `>"${join(starts, '%~2.txt')}" echo START %*`,
-  'echo unimux-fake-claude-ready', 'ping -n 100000 127.0.0.1 >nul', 'exit /b 0', ':ver', 'echo 2.1.318 (Claude Code)', ''].join('\r\n'));
+// A Node stand-in behind claude.cmd: it gets the arguments exactly as the shell passed them (a multi-line prompt included),
+// records them in a file of its own (parallel starts never share one), prints a burst like a real first screen and waits.
+writeFileSync(join(agents, 'fake-claude.mjs'), [
+  "import { writeFileSync, readFileSync } from 'node:fs';",
+  "import { randomUUID } from 'node:crypto';",
+  "const args = process.argv.slice(2);",
+  "if (args[0] === '--version') { console.log('2.1.318 (Claude Code)'); process.exit(0); }",
+  `process.stdout.write(readFileSync(${JSON.stringify(join(root, 'burst.txt'))}, 'utf8'));`,
+  `writeFileSync(${JSON.stringify(starts)} + '/' + randomUUID() + '.txt', 'START ' + JSON.stringify(args));`,
+  "console.log('unimux-fake-claude-ready');",
+  'setInterval(() => {}, 1 << 30);',
+].join('\n'));
+writeFileSync(join(agents, 'claude.cmd'), `@echo off\r\n"${process.execPath}" "${join(agents, 'fake-claude.mjs')}" %*\r\n`);
 const LEAD = 'lead';
 writeFileSync(join(data, 'state.json'), JSON.stringify({
   version: 1, activeProjectId: 'p', projects: [{ id: 'p', name: 'Bot', path: project, color: '#3b82f6', archive: [], activeTabId: 'g', tabs: [{
@@ -90,6 +96,12 @@ try {
   let lines = startLines().filter((l) => !l.includes(`${LEAD}.json`) && !l.includes('11111111-2222'));
   check(lines.length === 4, `the 4 workers started in the background: ${lines.length} starts`);
   check(lines.length > 0 && lines.every((l) => l.includes('Unimux task')), `every start carried its task: ${lines.map((l) => l.slice(0, 140)).join(' | ')}`);
+  // The task is the first argument, whole, and --mcp-config gets only its file (Claude Code reads every word after it up to the next option).
+  // Through PowerShell the multi-line task reaches the .cmd stand-in cut at its first line break (cmd's batch argument
+  // parsing; the real claude.exe gets it whole), so the argument order is checked with TEAM_SHELL=cmd.
+  const argv = lines.map((l) => JSON.parse(l.slice('START '.length)));
+  if (process.env.TEAM_SHELL === 'cmd') check(argv.length > 0 && argv.every((a) => a[0].startsWith('[Unimux task') && a[0].includes('Tylko') && a[a.indexOf('--mcp-config') + 1].endsWith('.json') && (a[a.indexOf('--mcp-config') + 2] ?? '--').startsWith('--')),
+    'the task is the first argument and --mcp-config is followed by its file only');
   console.log(`wait_for: ${await waited}`);
   // Show the grid: nothing starts again.
   const shown = await evaluate(`(() => { const b = [...document.querySelectorAll('[role=tab], .grid-tab, .tab-item')].find((e) => e.textContent.includes('Paczka')); b?.click(); return !!b; })()`);

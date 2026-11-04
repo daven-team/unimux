@@ -1485,12 +1485,14 @@ ipcMain.handle('install:options', (_e, cli?: unknown) => installHandlers.options
 guardedHandle('install:start', (_e, request?: unknown) => installHandlers.start(request), () => ({ ok: false, error: 'invalid' }));
 guardedOn('install:cancel', (_e, id?: unknown) => { installHandlers.cancel(id); });
 ipcMain.handle('install:current', () => installHandlers.current());
-guardedOn('cell:runtime', (_e, cellId: string, status: string, reason?: string, hooked?: boolean) => {
+guardedOn('cell:runtime', (_e, cellId: string, status: string, reason?: string, hooked?: boolean, cliEnded?: boolean) => {
   relayCellStatus(_e, cellId, status);
   if (typeof cellId === 'string' && isCellStatus(status)) taskbar.status(cellId, { status, reason: isStatusReason(reason) ? reason : undefined }, senderWindow(_e));
   const found = findCell(state, cellId);
   if (!found || !alive.has(cellId)) return;
   hookWatch.status(cellId, status, hooked === true);
+  // 1.1.3: the agent CLI ended inside a shell that still runs: for the team it has exited (a coordinator's wait_for hears it).
+  if (cliEnded === true) { automation.statuses.set(cellId, 'exited'); return; }
   // The renderer's StatusTracker decides; heuristics (hooked = false) never yield "ready".
   const next = automationStatusFor(status, reason, hooked === true, automation.statuses.get(cellId));
   if (next) automation.statuses.set(cellId, next);

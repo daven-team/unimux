@@ -83,7 +83,8 @@ export interface McApi {
   monitorKill(pid: number): Promise<boolean>;
   /** True only for the first renderer load of this app run (later loads and reloads get false). */
   claimAppStart(): Promise<boolean>;
-  reportCellStatus(cellId: string, status: CellStatus, reason?: StatusReason, hooked?: boolean): void;
+  /** `cliEnded`: the agent CLI ended and its shell is back at the prompt (the terminal process still runs). */
+  reportCellStatus(cellId: string, status: CellStatus, reason?: StatusReason, hooked?: boolean, cliEnded?: boolean): void;
   /** True while quitting must ask first (an agent is working and the confirmation is on): main then sends 'app:confirm-quit'. */
   setQuitGuard(ask: boolean): void;
   /** The answer to 'app:confirm-quit': 'asking' at once (the dialog is open), then 'quit' or 'cancel'. */

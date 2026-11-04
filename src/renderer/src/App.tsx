@@ -204,7 +204,7 @@ async function bootRest(mcpInfo: Awaited<ReturnType<typeof window.mc.getMcpInfo>
 
   terminals.onStatus((cellId, status, prev, cause, reason, hooked, info) => {
     if (isAuxPtyId(cellId)) return; // login and install windows are not cells
-    window.mc.reportCellStatus(cellId, status, reason, hooked);
+    window.mc.reportCellStatus(cellId, status, reason, hooked, terminals.detail(cellId)?.kind === 'cli-exited');
     setUi((ui) => {
       const { [cellId]: previous, ...rest } = ui.failures;
       const failures = status === 'waiting' && reason === 'error' ? { ...rest, [cellId]: info?.error ?? 'unknown' } : previous === undefined ? ui.failures : rest;
