@@ -37,8 +37,7 @@
 
 /* ── the marks: 12 px SVGs ───────────────────────────────────────────────────────────────────────────────────────── */
 .smark { width: 12px; height: 12px; }
-.smark.working > svg { will-change: transform; animation: smark-turn 1s steps(60) infinite; }
-@keyframes smark-turn { to { transform: rotate(360deg); } }
+.smark.working > svg { will-change: transform; animation: mc-spin 1s steps(60) infinite; }
 .terminal-cell .cell-icon .cell-dot.smark { right: -3px; bottom: -3px; }
 .terminal-cell .cell-head .status-text.error { color: #f0a3a3; }
 

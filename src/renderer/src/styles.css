@@ -933,10 +933,12 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 
 /* ── refresh feedback ──────────────────────────────────────────────────── */
 .refresh-icon { display: inline-grid; place-items: center; line-height: 0; }
-/* Spinners (RefreshIcon while spinning, BusyRing) turn smoothly. The animation exists only while one is rendered, which is
-   only during a wait, so it does not keep the GPU presenting frames when nothing is busy. Static with reduced motion. */
+/* Spinners (RefreshIcon while spinning, BusyRing) turn exactly like every other turning mark of the app (1.1.3: one turn a
+   second at up to 60 frames, a compositor-only transform; see statusStyles.css). The animation exists only while one is
+   rendered, which is only during a wait, so it does not keep the GPU presenting frames when nothing is busy. Static with
+   reduced motion. */
 @keyframes mc-spin { to { transform: rotate(360deg); } }
-.refresh-icon.spinning svg, .busy-ring { animation: mc-spin .9s linear infinite; }
+.refresh-icon.spinning svg, .busy-ring { will-change: transform; animation: mc-spin 1s steps(60) infinite; }
 .busy-ring { display: inline-block; }
 .statusbar .refresh-icon svg { width: 12px; height: 12px; }
 @media (prefers-reduced-motion: reduce) { .refresh-icon.spinning svg, .busy-ring { animation: none; } }

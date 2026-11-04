@@ -231,18 +231,25 @@ describe('shared blink', () => {
     const cssFiles = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
       .flatMap((e) => (e.isDirectory() ? cssFiles(join(dir, e.name)) : e.name.endsWith('.css') ? [join(dir, e.name)] : []));
     const infinite: string[] = [];
+    const spinners: Array<[string, string]> = [];
     for (const file of cssFiles(join(root, 'src/renderer/src'))) {
       const css = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
       for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-        if (/animation\s*:[^;]*\binfinite\b/.test(rule[2])) infinite.push(rule[1].trim());
+        const animation = /animation\s*:([^;]*\binfinite\b[^;]*)/.exec(rule[2]);
+        if (!animation) continue;
+        infinite.push(rule[1].trim());
+        if (!rule[1].includes('.brand')) spinners.push([rule[1].trim(), animation[1].trim()]);
       }
     }
+    // 1.1.3: every turning mark turns the same way: one turn a second at up to 60 frames, a compositor-only transform.
+    for (const [selector, animation] of spinners) expect(`${selector}: ${animation}`).toBe(`${selector}: mc-spin 1s steps(60) infinite`);
     // .brand.fx runs 2.4 s after a click on the logo; the spinners (RefreshIcon, BusyRing) and the arc of the SSH connecting
     // card exist only during a wait and turn by transform alone (static under reduced motion). 1.0.8: the pulse of a working
     // cell's status dot (the shared 1 Hz blink read as a two-frame flicker) exists only while the cell works and changes
     // transform and opacity alone, so the compositor runs it without main-thread work (static under reduced motion).
     // 1.0.9: that pulse ran at every vsync while a cell worked (241 frames a second, 43 % of a core with 16 cells); it runs two
-    // smooth waves now and then steps with the shared pulse. Nothing else.
+    // smooth waves now and then steps with the shared pulse. 1.1.3: it turns again the whole time, at up to 60 frames a
+    // second like every spinner (the display rate composited the window up to 150 times a second). Nothing else.
     expect(infinite.sort()).toEqual(['.brand.fx .bn-fx', '.refresh-icon.spinning svg, .busy-ring', '.ssh-mark.active::after', '.smark.working > svg'].sort());
   });
 });
