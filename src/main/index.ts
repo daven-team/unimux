@@ -229,7 +229,8 @@ const APP_USER_MODEL_ID = app.isPackaged ? 'com.unimux.app' : 'com.unimux.app.de
 if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID);
 
 if (devEnv('MC_DEBUG_PORT')) app.commandLine.appendSwitch('remote-debugging-port', devEnv('MC_DEBUG_PORT')!);
-// Every cell of a 5x4 grid draws through WebGL: Chromium's default of 16 active contexts would leave the rest on the slow DOM renderer.
+// Every cell of a 5x4 grid draws through WebGL, and parked grids keep their contexts: Chromium's default of 16 active contexts
+// would leave the rest on the slow DOM renderer (see terminalLimits.ts).
 app.commandLine.appendSwitch('max-active-webgl-contexts', String(CHROMIUM_WEBGL_CONTEXTS));
 // Module code keeps running after app.quit(), so every later step checks `superseded` instead of assuming the exit is immediate.
 // The lock is keyed by the userData directory (set above), so a run with MC_DATA_DIR only excludes other runs on the same folder:

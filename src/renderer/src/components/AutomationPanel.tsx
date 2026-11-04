@@ -21,6 +21,7 @@ import { PanelEmpty } from './PanelEmpty';
 import { ProviderIcon } from './ProviderIcons';
 import { RoleSelect } from './RoleSelect';
 import { Select } from './Select';
+import { StatusMark, type StatusKind } from './StatusMark';
 import './teamPanel.css';
 
 type Tr = ReturnType<typeof useI18n>['tr'];
@@ -29,6 +30,8 @@ interface Agent { cell: Cell; grid: Tab; name: string; cli: 'claude' | 'codex' }
 
 const taskLabels = { queued: 'W kolejce', in_progress: 'W trakcie', blocked: 'Zablokowane', completed: 'Ukończone', cancelled: 'Anulowane' } as const;
 const runtimeLabels = { starting: 'Uruchamianie', working: 'pracuje', ready: 'Gotowy', needs_attention: 'Wymaga uwagi', unknown: 'Brak potwierdzenia', exited: 'zakończony' } as const;
+/** 1.1.3: the agent's state drawn with the app's status marks (the same as on its tab and cell). */
+const runtimeMarks: Record<AgentRuntimeStatus, StatusKind> = { starting: 'working', working: 'working', ready: 'done', needs_attention: 'ask', unknown: 'idle', exited: 'exited' };
 const groupLabels = { progress: 'W trakcie', open: 'Otwarte', done: 'Zakończone' } as const;
 const tabLabels = { tasks: 'Zadania', messages: 'Wiadomości', agents: 'Agenci', activity: 'Aktywność' } as const;
 /** What an activity entry did (automation.ts log actions); others show no label. */
@@ -468,8 +471,16 @@ function AgentsView({ ctx, info, runtime, tasks, projectId }: { ctx: Ctx; info: 
             <span className="team-row-line"><span className="team-row-title">{name}</span>{open > 0 && <span className="team-group-count" title={tr('Otwarte zadania: {n}', { n: open })}>{open}</span>}</span>
             <span className="team-row-meta"><span>{grid.name}{cell.worktree ? ` · ${cell.worktree.branch}` : ''}</span></span>
           </span>
-          <span className={`team-runtime ${status}`}>{runtime ? tr(runtimeLabels[status]) : '…'}</span>
-          {cell.role ? <span className={`team-mcp-agent ${connected ? 'on' : configured ? 'wait' : 'off'}`}>{tr(connected ? 'MCP działa' : configured ? 'MCP skonfigurowane · oczekiwanie na agenta' : 'Wymaga restartu')}</span> : <span className="team-mcp-agent off">{tr('Bez MCP')}</span>}
+          {/* 1.1.3: one quiet state cluster: the status mark with its word, and an MCP chip whose dot says connected, waiting
+              for the agent or needing a restart (the full sentence in its tooltip). No chip without a role: the role menu says "Bez MCP". */}
+          <span className="team-agent-state">
+            <span className={`team-agent-run ${status}`}>{runtime ? <><StatusMark kind={runtimeMarks[status]} />{tr(runtimeLabels[status])}</> : '…'}</span>
+            {cell.role && (() => {
+              const mcp = connected ? 'on' : configured ? 'wait' : 'off';
+              const label = tr(connected ? 'MCP działa' : configured ? 'MCP skonfigurowane · oczekiwanie na agenta' : 'Wymaga restartu');
+              return <span className={`team-agent-mcp ${mcp}`} title={label} aria-label={label}><span className="team-agent-mcp-dot" aria-hidden="true" />MCP</span>;
+            })()}
+          </span>
           <span className="team-agent-actions">
             <RoleSelect value={cell.role} disabled={busy} onChange={(role) => void changeAgentRole(cell.id, role ?? null)} />
             {cell.role && !configured && <button type="button" className="btn small" onClick={() => void changeAgentRole(cell.id, cell.role!)}>{tr('Uruchom ponownie')}</button>}

@@ -1,4 +1,6 @@
 // Which terminals keep a WebGL renderer. Pure, so the policy is tested without a browser.
+import { MAX_CELLS } from './layout';
+
 export interface WebglCandidate {
   id: string;
   /** Currently has a WebGL context. */
@@ -16,6 +18,12 @@ export interface WebglCandidate {
   /** No new context before this time (a lost context backs off). */
   blockedUntil?: number;
 }
+
+/**
+ * Time one frame may spend creating WebGL contexts (each compiles its shaders, about 10 ms on a desktop GPU); the rest of a
+ * plan follows in the next frames, so a grid coming to the front never freezes the window for all its contexts at once.
+ */
+export const WEBGL_GRANT_BUDGET_MS = 8;
 
 /** An on-screen terminal keeps a context it just got, and waits after losing one, at least this long (no thrashing). */
 export const WEBGL_HOLD_MS = 4000;
@@ -65,6 +73,39 @@ export function planWebgl(candidates: readonly WebglCandidate[], limit: number, 
     swapped = true;
   }
   return { grant, release };
+}
+
+/**
+ * Contexts left free when parked terminals get one in idle time (prewarm, see pickPrewarm): room for a full grid (MAX_CELLS)
+ * that is shown next, so that prewarming never takes the contexts a shown grid needs and is never undone by the plan.
+ */
+export const WEBGL_PREWARM_RESERVE = MAX_CELLS;
+/** Idle time an idle callback must still have to create a context (its shaders take about 10 ms). */
+export const WEBGL_PREWARM_IDLE_MS = 12;
+/**
+ * Frames that keep coming (a terminal printing, a high refresh rate) leave idle periods shorter than that: a context is then
+ * created anyway once there was no input for this long, in a task of its own (nothing the person waits for is on screen).
+ */
+export const WEBGL_PREWARM_QUIET_MS = 2000;
+/** Time between two prewarmed contexts when the idle periods are short. */
+export const WEBGL_PREWARM_GAP_MS = 250;
+
+/**
+ * The parked terminal that gets a context next in idle time, or null: one that has none and is not backing off, the most
+ * recently shown first (never shown ones in the order given, the order the cells were created), while fewer than
+ * `limit - WEBGL_PREWARM_RESERVE` contexts exist. Showing its grid later then finds the context ready instead of drawing
+ * through the DOM renderer while contexts are created a few per frame.
+ */
+export function pickPrewarm(candidates: readonly WebglCandidate[], limit: number, now: number): string | null {
+  let held = 0;
+  for (const c of candidates) if (c.hasWebgl) held++;
+  if (held >= limit - WEBGL_PREWARM_RESERVE) return null;
+  let best: WebglCandidate | null = null;
+  for (const c of candidates) {
+    if (c.attached || c.hasWebgl || (c.blockedUntil !== undefined && c.blockedUntil > now)) continue;
+    if (!best || c.shownAt > best.shownAt) best = c;
+  }
+  return best?.id ?? null;
 }
 
 /** Back-off after a lost context: 2 s, doubling with each loss in a row, at most a minute. */

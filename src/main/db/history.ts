@@ -119,7 +119,7 @@ export class DbHistoryStore {
   }
 }
 
-const uuid = z.string().uuid();
+const uuid = z.guid();
 
 /** `window.mc.db.history`: from the app window only (the guard); bad arguments get the empty answer. */
 export function registerDbHistoryIpc(guard: IpcGuard, store: DbHistoryStore): void {

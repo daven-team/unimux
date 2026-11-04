@@ -33,15 +33,14 @@ export function AccountsSettings() {
   /** One threshold row: the slider (any whole percent) and the window's own switch. */
   const thresholdRow = (kind: 'limit' | 'switch', id: Window, title: string) => {
     const config = kind === 'limit' ? limits[id] : autoSwitch[id];
-    const groupOn = kind === 'limit' ? limits.enabled : autoSwitch.enabled;
     const set = (patch: Partial<LimitWindowAlert>) => {
       if (kind === 'limit') setLimits((current) => ({ [id]: { ...current[id], ...patch } }));
       else setAutoSwitch((current) => ({ [id]: { ...current[id], ...patch } }));
     };
     return <SettingRow title={title} htmlFor={`settings-${kind}-${id}`}>
-      <PercentSlider id={`settings-${kind}-${id}-percent`} label={tr('Próg: {window}', { window: title })} value={config.percent} disabled={!groupOn || !config.enabled}
+      <PercentSlider id={`settings-${kind}-${id}-percent`} label={tr('Próg: {window}', { window: title })} value={config.percent} disabled={!config.enabled}
         onCommit={(percent) => set({ percent })} />
-      <input id={`settings-${kind}-${id}`} className="setting-switch" type="checkbox" role="switch" checked={config.enabled} disabled={!groupOn}
+      <input id={`settings-${kind}-${id}`} className="setting-switch" type="checkbox" role="switch" checked={config.enabled}
         onChange={(e) => set({ enabled: e.target.checked })} />
     </SettingRow>;
   };
@@ -52,7 +51,7 @@ export function AccountsSettings() {
     const value = autoSwitch[field][provider] ?? '';
     const listed = value && !accounts.some((a) => a.key === value) ? [...accounts, { key: value, label: value }] : accounts;
     return <SettingRow title={title} htmlFor={`settings-switch-${field}-${provider}`}>
-      <Select id={`settings-switch-${field}-${provider}`} className="select" value={value} disabled={!autoSwitch.enabled}
+      <Select id={`settings-switch-${field}-${provider}`} className="select" value={value}
         onChange={(e) => { const key = e.target.value || undefined; setAutoSwitch((current) => ({ [field]: { ...current[field], [provider]: key } })); }}>
         <option value="">{none}</option>
         {listed.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
@@ -80,7 +79,7 @@ export function AccountsSettings() {
       {thresholdRow('switch', 'fiveHour', tr('Limit 5-godzinny'))}
       {thresholdRow('switch', 'sevenDay', tr('Limit 7-dniowy'))}
       <SettingRow title={tr('Gdy jest konto z zapasem')} htmlFor="settings-switch-mode">
-        <Select id="settings-switch-mode" className="select" value={autoSwitch.mode} disabled={!autoSwitch.enabled} onChange={(e) => { const mode = e.target.value === 'switch' ? 'switch' : 'ask'; setAutoSwitch(() => ({ mode })); }}>
+        <Select id="settings-switch-mode" className="select" value={autoSwitch.mode} onChange={(e) => { const mode = e.target.value === 'switch' ? 'switch' : 'ask'; setAutoSwitch(() => ({ mode })); }}>
           <option value="ask">{tr('Zapytaj w powiadomieniu')}</option>
           <option value="switch">{tr('Przełącz od razu')}</option>
         </Select>
@@ -88,15 +87,15 @@ export function AccountsSettings() {
       {accountSelect('claude', 'target', tr('Przełączaj na'), tr('Konto z największym zapasem'))}
       {accountSelect('claude', 'primary', tr('Konto podstawowe'), tr('Brak'))}
       <SettingRow title={tr('Wracaj na konto podstawowe po resecie')} htmlFor="settings-switch-return" hint={tr('Gdy konto podstawowe opuszczone z powodu limitu znowu jest poniżej progów po swoim resecie.')}>
-        <input id="settings-switch-return" className="setting-switch" type="checkbox" role="switch" checked={autoSwitch.returnHome} disabled={!autoSwitch.enabled} onChange={(e) => { const returnHome = e.target.checked; setAutoSwitch(() => ({ returnHome })); }} />
+        <input id="settings-switch-return" className="setting-switch" type="checkbox" role="switch" checked={autoSwitch.returnHome} onChange={(e) => { const returnHome = e.target.checked; setAutoSwitch(() => ({ returnHome })); }} />
       </SettingRow>
       <SettingRow title={tr('Najwyżej jedno przełączenie na')} htmlFor="settings-switch-cooldown">
-        <Select id="settings-switch-cooldown" className="select" value={String(autoSwitch.cooldownMinutes)} disabled={!autoSwitch.enabled} onChange={(e) => { const cooldownMinutes = Number(e.target.value); setAutoSwitch(() => ({ cooldownMinutes })); }}>
+        <Select id="settings-switch-cooldown" className="select" value={String(autoSwitch.cooldownMinutes)} onChange={(e) => { const cooldownMinutes = Number(e.target.value); setAutoSwitch(() => ({ cooldownMinutes })); }}>
           {AUTO_SWITCH_COOLDOWNS.map((minutes) => <option key={minutes} value={String(minutes)}>{tr('{minutes} min', { minutes })}</option>)}
         </Select>
       </SettingRow>
       <SettingRow title={tr('Także konta Codex')} htmlFor="settings-switch-codex" hint={tr('Konta Codex zapisane w aplikacji. Otwarte sesje Codex mogą korzystać z poprzedniego konta, dopóki nie uruchomisz ich ponownie.')}>
-        <input id="settings-switch-codex" className="setting-switch" type="checkbox" role="switch" checked={autoSwitch.codex} disabled={!autoSwitch.enabled} onChange={(e) => { const codex = e.target.checked; setAutoSwitch(() => ({ codex })); }} />
+        <input id="settings-switch-codex" className="setting-switch" type="checkbox" role="switch" checked={autoSwitch.codex} onChange={(e) => { const codex = e.target.checked; setAutoSwitch(() => ({ codex })); }} />
       </SettingRow>
       {autoSwitch.codex && accountSelect('codex', 'target', `Codex: ${tr('Przełączaj na')}`, tr('Konto z największym zapasem'))}
       {autoSwitch.codex && accountSelect('codex', 'primary', `Codex: ${tr('Konto podstawowe')}`, tr('Brak'))}
@@ -111,7 +110,7 @@ export function AccountsSettings() {
       {thresholdRow('limit', 'fiveHour', tr('Limit 5-godzinny'))}
       {thresholdRow('limit', 'sevenDay', tr('Limit 7-dniowy'))}
       <SettingRow title={tr('Powiadom, gdy limit znowu jest dostępny')} htmlFor="settings-limits-resets" hint={tr('Po resecie okna, które przekroczyło próg.')}>
-        <input id="settings-limits-resets" className="setting-switch" type="checkbox" role="switch" checked={limits.resets} disabled={!limits.enabled} onChange={(e) => { const resets = e.target.checked; setLimits(() => ({ resets })); }} />
+        <input id="settings-limits-resets" className="setting-switch" type="checkbox" role="switch" checked={limits.resets} onChange={(e) => { const resets = e.target.checked; setLimits(() => ({ resets })); }} />
       </SettingRow>
     </SettingsGroup>
   </>;

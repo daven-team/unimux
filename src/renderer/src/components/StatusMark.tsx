@@ -1,5 +1,4 @@
 import { useId } from 'react';
-import { useBlink } from '../blink';
 
 /**
  * One visual language for a status wherever it shows (the badges of a tab and a project, the mark on a cell's icon, the
@@ -19,8 +18,6 @@ export function statusKind(status: string, error: boolean, detailKind?: string):
 
 /** The mark of a status; `className` places it (the badges, the header, the icon's corner). Decorative: the text says it. */
 export function StatusMark({ kind, className = '' }: { kind: StatusKind; className?: string }) {
-  // The working mark steps with the shared pulse (blink.ts): no CSS animation runs while agents work.
-  useBlink(kind === 'working');
   const mask = `sm${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   const cls = `smark ${kind}${className ? ` ${className}` : ''}`;
   // A 12-unit SVG drawn at the size the CSS gives it; the cut-outs are masks, so the mark sits on any background.

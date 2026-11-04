@@ -33,7 +33,7 @@ export function splitMessages(): Plugin {
   let tables: Promise<Tables> | undefined;
   return {
     name: 'mc-split-messages',
-    // After esbuild: the table files are plain JavaScript by then (no `as const satisfies`).
+    // After the TypeScript transform (Oxc since Vite 8): the table files are plain JavaScript by then (no `as const satisfies`).
     enforce: 'post',
     buildStart() { tables = undefined; },
     resolveId(id) { return id.startsWith(VIRTUAL) ? `\0${id}` : null; },

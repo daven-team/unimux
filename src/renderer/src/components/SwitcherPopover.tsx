@@ -130,7 +130,7 @@ export function SwitcherPopover({ anchor, panel, settings, providers, onClose }:
       const id = `switcher-pop-${field}-${provider}`;
       return <div className="switcher-pop-field">
         <label htmlFor={id}>{prefix}{title}</label>
-        <Select id={id} className="select switcher-pop-select" value={value} disabled={!on}
+        <Select id={id} className="select switcher-pop-select" value={value}
           onChange={(e) => { const key = e.target.value || undefined; set((current) => ({ [field]: { ...current[field], [provider]: key } })); }}>
           <option value="">{none}</option>
           {listed.map((o) => <option key={o.key} value={o.key} title={o.label}>{o.label}</option>)}
@@ -158,9 +158,9 @@ export function SwitcherPopover({ anchor, panel, settings, providers, onClose }:
           aria-describedby="switcher-pop-state" />
       </div>
       <p id="switcher-pop-state" className="switcher-pop-state">
-        {on ? tr('Pilnuje limitów konta głównego i przełącza, gdy przekroczy próg.') : tr('Wyłączony. Włącz, aby przełączać konto przy limicie.')}
+        {on ? tr('Pilnuje limitów konta głównego i przełącza, gdy przekroczy próg.') : tr('Wyłączony. Ustaw opcje i włącz, aby przełączać konto przy limicie.')}
       </p>
-      <fieldset className="switcher-pop-body" disabled={!on}>
+      <fieldset className="switcher-pop-body">
         <div className="switcher-pop-field">
           <span className="switcher-pop-label" id="switcher-pop-mode">{tr('Gdy jest konto z zapasem')}</span>
           <div className="switcher-pop-segments" role="radiogroup" aria-labelledby="switcher-pop-mode">
@@ -175,7 +175,7 @@ export function SwitcherPopover({ anchor, panel, settings, providers, onClose }:
             const title = id === 'fiveHour' ? tr('Limit 5-godzinny') : tr('Limit 7-dniowy');
             return <div key={id} className="switcher-pop-threshold">
               <span className="switcher-pop-label">{title}</span>
-              <PercentSlider id={`switcher-pop-${id}`} label={tr('Próg: {window}', { window: title })} value={settings[id].percent} disabled={!on || !settings[id].enabled}
+              <PercentSlider id={`switcher-pop-${id}`} label={tr('Próg: {window}', { window: title })} value={settings[id].percent} disabled={!settings[id].enabled}
                 onCommit={(percent) => set((current) => ({ [id]: { ...current[id], percent } }))} />
             </div>;
           })}

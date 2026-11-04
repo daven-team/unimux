@@ -49,8 +49,7 @@
 .ssh-mark.stopped { background: #ffffff10; color: var(--text-2); box-shadow: inset 0 0 0 1px var(--border-2); }
 /* The current phase: a thin ring with a steel blue arc that turns (transform only; static with reduced motion). */
 .ssh-mark.active { border: 1.5px solid var(--border-2); }
-.ssh-mark.active::after { content: ''; position: absolute; inset: -1.5px; border-radius: 50%; border: 1.5px solid transparent; border-top-color: var(--btn-primary-bg); animation: ssh-mark-spin .8s linear infinite; }
-@keyframes ssh-mark-spin { to { transform: rotate(360deg); } }
+.ssh-mark.active::after { content: ''; position: absolute; inset: -1.5px; border-radius: 50%; border: 1.5px solid transparent; border-top-color: var(--btn-primary-bg); will-change: transform; animation: mc-spin 1s steps(60) infinite; }
 @media (prefers-reduced-motion: reduce) {
   .ssh-mark.active::after { animation: none; border-right-color: var(--btn-primary-bg); }
   .ssh-panel { animation: none; }

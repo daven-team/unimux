@@ -12,7 +12,7 @@ import type { IpcGuard, IpcSenderEvent } from '../ipcGuard';
 import { validLocalPath } from '../localFiles';
 import type { SftpService } from './service';
 
-const uuid = z.string().uuid();
+const uuid = z.guid();
 const sessionId = z.string().refine(isSftpSessionId);
 const remotePath = z.string().refine(validRemotePath);
 const remotePaths = z.array(remotePath).min(1).max(SFTP_LIMITS.paths);

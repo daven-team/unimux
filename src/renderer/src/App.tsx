@@ -365,11 +365,17 @@ export function App() {
       setLive((current) => { const next = { ...current }; delete next[panel]; return next; });
     },
   });
+  // The panel widths are custom properties of the few parts that use them (display: contents wrappers), not of the whole app:
+  // a custom property changed on the root restyled every element of the grid at each move of a panel edge (about 12 ms a
+  // move with a 16-cell grid).
+  const sidebarWidthVar = { '--sidebar-width': `${widths.sidebar}px` } as CSSProperties;
   return (
-    <div className="app" style={{ '--sidebar-width': `${widths.sidebar}px`, '--snippets-width': `${widths.snippets}px` } as CSSProperties}>
-      {titleBar}
+    <div className="app">
+      <div className="app-width-scope" style={sidebarWidthVar}>{titleBar}</div>
       <div className="app-body" ref={body}>
-        <ErrorBoundary name="sidebar" fallback={(retry) => <PanelFallback retry={retry} className="sidebar" />}><Sidebar resize={resizeProps('sidebar')} /></ErrorBoundary>
+        <div className="app-width-scope" style={sidebarWidthVar}>
+          <ErrorBoundary name="sidebar" fallback={(retry) => <PanelFallback retry={retry} className="sidebar" />}><Sidebar resize={resizeProps('sidebar')} /></ErrorBoundary>
+        </div>
         <div className="main">
           {workspaceTabs}
           <div className={`workspace-content ${split && !settingsActive && !sshViewActive ? (splitSwapped ? 'split swapped' : 'split') : ''}`}>
@@ -387,7 +393,7 @@ export function App() {
         </div>
         {right.length > 0 && (
           // One column, one width and one resize handle; with both panels open each takes half of its height.
-          <div className={`rcolumn ${right.length > 1 ? 'split' : ''}`}>
+          <div className={`rcolumn ${right.length > 1 ? 'split' : ''}`} style={{ '--snippets-width': `${widths.snippets}px` } as CSSProperties}>
             <PanelResizeHandle {...resizeProps('snippets')} />
             {right.map((panel) => panel === 'snippets'
               ? <ErrorBoundary key="snippets" name="snippets" fallback={(retry) => <PanelFallback retry={retry} />}><SnippetPanel resize={resizeProps('snippets')} /></ErrorBoundary>
@@ -398,7 +404,7 @@ export function App() {
       {statusBar}
       {commandPalette}
       {tabSwitcher}
-      {modals}
+      <div className="app-width-scope" style={sidebarWidthVar}>{modals}</div>
       {contextMenuHost}
       {toastView}
     </div>
