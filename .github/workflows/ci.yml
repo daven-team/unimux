@@ -26,7 +26,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       # No install scripts: tsc needs the packages' types only (no Electron binary, no native node-pty build on Linux).
       - run: npm ci --ignore-scripts --no-audit --no-fund
@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
         env:
@@ -97,7 +97,7 @@ jobs:
       - if: steps.downloads.outputs.cache-hit != 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - if: steps.downloads.outputs.cache-hit != 'true'
         run: npm ci
@@ -119,7 +119,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
       - run: node scripts/check-release-tag.mjs
 
   build:
@@ -168,7 +168,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       # The key follows the Electron and electron-builder versions only: npm version rewrites package-lock.json on every
       # release, so a lockfile hash never matched between main and the tag pushed with it.
