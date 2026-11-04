@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { parseAst, transformWithEsbuild } from 'vite';
+import { parseAst, transformWithOxc } from 'vite';
 import { describe, expect, it } from 'vitest';
 import { splitMessages } from '../electron.vite.messages';
 import { MESSAGE_COLUMN, translate, type MessageKey } from '../src/shared/i18n';
@@ -35,7 +35,7 @@ describe('per-language message chunks of the renderer build', () => {
     expect(files.length).toBeGreaterThan(20);
     for (const file of files) {
       const path = join(shared, file);
-      const { code } = await transformWithEsbuild(readFileSync(path, 'utf8'), path, { loader: 'ts' });
+      const { code } = await transformWithOxc(readFileSync(path, 'utf8'), path, { lang: 'ts' });
       const result = call<{ code: string } | null>(plugin.transform, code, path);
       expect(result, file).not.toBeNull();
       expect(result!.code).toContain('__mcMessageTable');
@@ -48,7 +48,7 @@ describe('per-language message chunks of the renderer build', () => {
     }
     expect(warnings).toEqual([]);
     // Helpers next to a table keep working on keys only.
-    const swap = await transformWithEsbuild(readFileSync(join(shared, 'swapMessages.ts'), 'utf8'), 'swapMessages.ts', { loader: 'ts' });
+    const swap = await transformWithOxc(readFileSync(join(shared, 'swapMessages.ts'), 'utf8'), 'swapMessages.ts', { lang: 'ts' });
     expect(call<{ code: string }>(plugin.transform, swap.code, join(shared, 'swapMessages.ts')).code).toContain('function swapErrorKey');
   }, 60000);
 
