@@ -5,6 +5,7 @@
 import { spawn } from 'child_process';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { safeSend } from '../main/safeWindow';
 import { closeAction, UpdateProgressModel, type UpdateSplashConfig, type UpdateStage } from '../shared/updateProgress';
@@ -82,10 +83,11 @@ function dropHeartbeat(): void {
 function cleanupAndExit(): void {
   dropHeartbeat();
   // The runtime copy is locked while this process lives. A GUI-subsystem Electron in node mode removes it
-  // afterwards without ever creating a console window (no shell involved).
+  // afterwards without ever creating a console window (no shell involved). It starts outside the copy: a working directory
+  // inside it would keep the emptied folder itself locked.
   try {
     const script = `setTimeout(()=>{try{require('fs').rmSync(${JSON.stringify(config.runtimeDir)},{recursive:true,force:true,maxRetries:10,retryDelay:500})}catch{}},3000)`;
-    spawn(config.appExe, ['-e', script], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }).unref();
+    spawn(config.appExe, ['-e', script], { detached: true, stdio: 'ignore', windowsHide: true, cwd: tmpdir(), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }).unref();
   } catch { /* the app removes leftovers on its next start */ }
   app.exit(0);
 }
