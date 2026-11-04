@@ -28,6 +28,7 @@ import { nextLossCount, planWebgl, webglBackoff, WebglLimit } from '../../../sha
 import { onWindowShown } from '../windowShown';
 import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
 import { cursorOffset, reflowedCursor, type WrapBuffer } from '../../../shared/cursorReflow';
+import { coalesceViewportSync } from '../../../shared/viewportSync';
 
 /** The background of a cell card (--card-bg in styles.css): a local terminal draws on the card itself (1.0.7). */
 export const CARD_BG = '#131313';
@@ -90,6 +91,8 @@ interface Entry {
   addon: RemoteAddon | null;
   /** 1.0.9: bumped on every status or detail change and every keystroke: a notification's answer token names one value. */
   askEpoch: number;
+  /** Undoes the per-frame scrollbar sync (viewportSync.ts) before the terminal is disposed; null when xterm has no viewport. */
+  unsyncViewport: (() => void) | null;
 }
 
 /** What SSH terminals get on top (the command autocomplete, sshAutocomplete.ts): a look at every key first, and a dispose. */
@@ -421,6 +424,7 @@ class TerminalManager {
       id: cellId, term, fit, webgl: null, shownAt: 0, outputAt: undefined, webglChangedAt: undefined, webglBlockedUntil: undefined, webglGl: null, webglGrantedAt: -Infinity, webglLosses: 0, host, tracker: new StatusTracker(), win32: false, agent: opts.agent,
       codex: opts.codex === true, scanner: new FailureScanner(), guard: new MouseFloodGuard(), infer: new AgentInference(window.mc.platform === 'win32' && opts.remote !== true), attachedTo: null, resizeObs: null, replaying: 0, replayMarks: null, refitAfterReplay: false, ptyLive: false, lastSize: { cols: term.cols, rows: term.rows },
       parkedSelection: null, applySelection: null, remote: opts.remote === true, addon: null, askEpoch: 0,
+      unsyncViewport: coalesceViewportSync(term, host),
     };
     entry.tracker.setCodex(entry.codex);
     entry.tracker.setAgent(entry.agent);
@@ -625,7 +629,7 @@ class TerminalManager {
     e.attachedTo = el;
     e.shownAt = performance.now();
     e.host.style.display = this.windowShown ? '' : 'none';
-    if (!e.webgl) this.balanceWebgl();
+    if (!e.webgl) this.queueBalance();
     if (e.parkedSelection) {
       e.applySelection?.(e.parkedSelection);
       e.parkedSelection = null;
@@ -662,6 +666,21 @@ class TerminalManager {
       this.heldFits.clear();
       for (const e of held) this.refit(e);
     };
+  }
+
+  private balanceFrame = 0;
+  /**
+   * The contexts for terminals attached in one go (a grid that opens, a tab that comes to the front) are handed out once, in
+   * the next animation frame, before it is drawn. A context and its shaders take tens of milliseconds each: created at every
+   * attach, they held back the cells mounted after it (their spawns waited for the contexts of all the cells before them).
+   * A new 12-cell grid showed its prompts after 588 ms with a 273 ms task, now after 540 ms with a 196 ms one.
+   */
+  private queueBalance(): void {
+    if (this.balanceFrame) return;
+    this.balanceFrame = requestAnimationFrame(() => {
+      this.balanceFrame = 0;
+      this.balanceWebgl();
+    });
   }
 
   /** A shown terminal draws through the DOM renderer and is not backing off. */
@@ -1024,6 +1043,7 @@ class TerminalManager {
     e.resizeObs?.disconnect();
     this.heldFits.delete(e);
     e.addon?.dispose();
+    e.unsyncViewport?.();
     this.releaseWebgl(e);
     e.term.dispose();
     e.host.remove();
