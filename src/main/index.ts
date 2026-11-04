@@ -1356,7 +1356,8 @@ guardedHandle('automation:execute', (_e, operation: AutomationOperation, input: 
 }, () => Promise.reject(new Error('Unknown operation.')));
 
 guardedHandle('cell:spawn', (_e, req: SpawnCellRequest) => spawnRequest(req), (): SpawnResult => ({ ok: false, error: 'invalid request' }));
-type SpawnResult = { ok: true } | { ok: false; error: string; cliMissing?: CliId; cliStatus?: CliStatus };
+/** `startedWithPrompt`: the startup prompt went to the CLI (the renderer then forgets it; a later start must not send it again). */
+type SpawnResult = { ok: true; startedWithPrompt?: boolean } | { ok: false; error: string; cliMissing?: CliId; cliStatus?: CliStatus };
 async function spawnRequest(req: SpawnCellRequest): Promise<SpawnResult> {
   // A file write that fails (an antivirus lock on the hooks file, a full disk) answers with an error the cell shows, never a
   // rejected call that leaves the cell blank with an MCP token issued.
@@ -1441,7 +1442,7 @@ async function spawnRequestUnsafe(req: SpawnCellRequest): Promise<SpawnResult> {
   queuePrompt(req.cellId, initialPrompt?.file ?? null);
   ptyHost.spawn({ id: req.cellId, cwd: req.cwd, cols: req.cols, rows: req.rows, env, shell: state.settings.shell, command });
   startupTimer.mark('first-spawn');
-  return { ok: true };
+  return { ok: true, startedWithPrompt: !!initialPrompt };
 }
 guardedOn('cell:kill', (_e, id: string) => {
   noteKill(id);

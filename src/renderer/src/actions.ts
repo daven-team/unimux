@@ -240,14 +240,16 @@ export async function spawnCell(cellId: string, mode: 'new' | 'resume'): Promise
     r = await window.mc.spawnCell({
       cellId, cwd: cellCwd(project, cell), cols, rows, profile, mode, sessionId, ...(forcedCells.has(cellId) ? { force: true } : {}),
       sessionConfirmed: mode === 'resume' && cell.session?.confirmed === true,
-      startupPrompt: mode === 'new' && profile.cli !== 'shell' ? cell.startupPrompt : undefined,
+      // 1.1.3: also with a "resume" of a session that never started (not confirmed): main starts it as a new conversation
+      // then, and a worker created by create_grid must get its task in it instead of starting empty.
+      startupPrompt: profile.cli !== 'shell' && (mode === 'new' || !cell.session?.confirmed) ? cell.startupPrompt : undefined,
     });
   } catch (error) {
     // The call itself failed (main threw): the cell says so instead of staying blank.
     r = { ok: false, error: tr('Nie udało się uruchomić terminala: {error}', { error: error instanceof Error ? error.message : String(error) }) };
   }
-  // The startup prompt is a one-shot: later restarts must not send it again.
-  if (r.ok && cell.startupPrompt && mode === 'new') update((s) => updateCell(s, cellId, { startupPrompt: undefined }));
+  // The startup prompt is a one-shot: once main started the CLI with it, later restarts must not send it again.
+  if (r.ok && cell.startupPrompt && (r.startedWithPrompt || mode === 'new')) update((s) => updateCell(s, cellId, { startupPrompt: undefined }));
   if (!r.ok && r.cliMissing) {
     // The renderer's picture was stale (still unknown): main knows the CLI is missing.
     const cli = r.cliMissing;

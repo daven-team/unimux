@@ -56,7 +56,7 @@ export interface McApi {
   retryMcp(): Promise<McpInfo>;
   automation<K extends AutomationOperation>(operation: K, input: AutomationInput<K>): Promise<unknown>;
   /** `cliMissing` = the profile's CLI is not installed: nothing was spawned. */
-  spawnCell(req: SpawnCellRequest): Promise<{ ok: true } | { ok: false; error: string; cliMissing?: CliId; cliStatus?: CliStatus }>;
+  spawnCell(req: SpawnCellRequest): Promise<{ ok: true; startedWithPrompt?: boolean } | { ok: false; error: string; cliMissing?: CliId; cliStatus?: CliStatus }>;
   /** Detected Claude Code / Codex binaries (may still be empty while the first scan runs; `cli:changed` follows). */
   cliStatus(): Promise<CliStatusMap>;
   /** Forgets cached results and detects again (one CLI or both). */
