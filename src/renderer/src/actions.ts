@@ -199,7 +199,8 @@ function presizeForLayout(cellId: string): void {
   if (box) terminals.presize(cellId, box.width, box.height);
 }
 
-export async function spawnCell(cellId: string, mode: 'new' | 'resume'): Promise<void> {
+/** `withTasks` (1.1.4): the user asked for this start; a resumed agent with an MCP role is told about its open tasks. */
+export async function spawnCell(cellId: string, mode: 'new' | 'resume', opts: { withTasks?: boolean } = {}): Promise<void> {
   const found = findCell(getS(), cellId);
   if (!found) return;
   const { project, cell } = found;
@@ -243,6 +244,7 @@ export async function spawnCell(cellId: string, mode: 'new' | 'resume'): Promise
       // 1.1.3: also with a "resume" of a session that never started (not confirmed): main starts it as a new conversation
       // then, and a worker created by create_grid must get its task in it instead of starting empty.
       startupPrompt: profile.cli !== 'shell' && (mode === 'new' || !cell.session?.confirmed) ? cell.startupPrompt : undefined,
+      ...(opts.withTasks && cell.role ? { resumeWithTasks: true } : {}),
     });
   } catch (error) {
     // The call itself failed (main threw): the cell says so instead of staying blank.
@@ -314,8 +316,22 @@ export function offerInstall(cli: CliId, then?: InstallThen): void {
 }
 
 export function restartCell(cellId: string, mode: 'new' | 'resume'): void {
-  void spawnCell(cellId, mode);
+  // An agent with an MCP role that the user restarts and resumes continues its open tasks (1.1.4).
+  if (mode === 'resume' && findCell(getS(), cellId)?.cell.role) restartAgentWithTasks(cellId);
+  else void spawnCell(cellId, mode);
   requestAnimationFrame(() => terminals.focus(cellId));
+}
+
+/**
+ * 1.1.4: the user's restart of an AI team agent (the cell menu, the team panel). It resumes its conversation when it has one
+ * and, when the agent has open tasks (a coordinator also the tasks it waits for), passes a short note telling it to go on
+ * with them (main builds it, see shared/teamPrompts.ts); without a conversation it starts a new one with its unclaimed tasks.
+ * The automatic resume at app start never goes through here: it must not spend usage by itself.
+ */
+export function restartAgentWithTasks(cellId: string): Promise<void> {
+  const found = findCell(getS(), cellId);
+  if (!found) return Promise.resolve();
+  return spawnCell(cellId, found.cell.session ? 'resume' : 'new', { withTasks: true });
 }
 
 export function changeCellProfile(cellId: string, profileId: string): void {

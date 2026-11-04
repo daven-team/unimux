@@ -44,6 +44,8 @@ export interface SpawnCellRequest {
   sessionConfirmed?: boolean;
   /** First prompt for a new conversation. */
   startupPrompt?: string;
+  /** 1.1.4: the user restarted an agent with an MCP role: a resumed conversation gets a note about its open tasks (restartAgentWithTasks). */
+  resumeWithTasks?: boolean;
 }
 
 export interface McApi {
@@ -84,7 +86,7 @@ export interface McApi {
   /** True only for the first renderer load of this app run (later loads and reloads get false). */
   claimAppStart(): Promise<boolean>;
   /** `cliEnded`: the agent CLI ended and its shell is back at the prompt (the terminal process still runs). */
-  reportCellStatus(cellId: string, status: CellStatus, reason?: StatusReason, hooked?: boolean, cliEnded?: boolean): void;
+  reportCellStatus(cellId: string, status: CellStatus, reason?: StatusReason, hooked?: boolean, cliEnded?: boolean, exitCode?: number): void;
   /** True while quitting must ask first (an agent is working and the confirmation is on): main then sends 'app:confirm-quit'. */
   setQuitGuard(ask: boolean): void;
   /** The answer to 'app:confirm-quit': 'asking' at once (the dialog is open), then 'quit' or 'cancel'. */
