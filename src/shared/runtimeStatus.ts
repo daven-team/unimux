@@ -16,9 +16,10 @@ export function automationStatusFor(
   if (status === 'working') return 'working';
   if (status === 'waiting') {
     if (hooked) return reason === 'attention' || reason === 'error' ? 'needs_attention' : 'ready';
-    return current === 'ready' ? null : 'needs_attention';
+    return current === 'ready' || current === 'exited' ? null : 'needs_attention';
   }
-  if (status === 'idle') return current === 'ready' ? null : 'unknown';
+  // 1.1.4: an agent CLI that ended stays exited while its shell idles (until it works again or starts anew).
+  if (status === 'idle') return current === 'ready' || current === 'exited' ? null : 'unknown';
   return null;
 }
 

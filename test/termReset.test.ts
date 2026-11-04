@@ -29,7 +29,7 @@ describe('mode reset sequences', () => {
   });
   it('wraps the CLI per shell and writes the escape character through the shell, not literally', () => {
     const cli = "claude --settings 'C:\\a b\\x.json'";
-    const ps = `try { ${cli} } finally { [Console]::Write([char]27+'[?1000;1002;1003;1005;1006;1015;2004l'+[char]27+'[<u') }`;
+    const ps = `try { ${cli} } finally { $global:__unimuxExit = $LASTEXITCODE; [Console]::Write([char]27+'[?1000;1002;1003;1005;1006;1015;2004l'+[char]27+'[<u') }`;
     expect(withResetTail(cli, 'pwsh')).toBe(ps);
     expect(withResetTail(cli, 'powershell')).toBe(ps);
     expect(withResetTail(cli)).toBe(ps);

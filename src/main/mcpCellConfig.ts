@@ -17,10 +17,16 @@ const isPosix = () => process.platform !== 'win32';
 /** The per-cell Claude MCP config file (the cleanup in cellFiles.ts knows the same name). */
 export const claudeMcpConfigPath = (dir: string, cellId: string): string => join(dir, `${cellId}.json`);
 
+/**
+ * Claude Code's per-server tool timeout (ms) for unimux: above the longest wait_for of a Claude caller (600 s, shared/automation.ts).
+ * It also raises Claude Code's per-request first-byte timer, which is otherwise 60 s for HTTP servers (1.1.4).
+ */
+export const CLAUDE_MCP_TIMEOUT_MS = 660_000;
 /** The Claude Code MCP config of a cell: the local http server with the cell's token as a literal header. */
 export function claudeMcpConfig(url: string, token: string): string {
-  return JSON.stringify({ mcpServers: { unimux: { type: 'http', url, headers: { Authorization: `Bearer ${token}` } } } });
+  return JSON.stringify({ mcpServers: { unimux: { type: 'http', url, headers: { Authorization: `Bearer ${token}` }, timeout: CLAUDE_MCP_TIMEOUT_MS } } });
 }
+
 
 /**
  * Writes the cell's Claude MCP config atomically and private to the user: 0600 in a 0700 folder on POSIX; on Windows the

@@ -22,6 +22,7 @@ import { normalizeStripScope } from '../../../shared/workspaceOrder';
 import { searchText, settingsSearchMatches } from '../../../shared/settingsSearch';
 import { ISearch, IX, TSettings } from './icons';
 import { SshSettings } from './ssh/SshSettings';
+import { delegationOf, MAX_AGENTS_MAX, MAX_AGENTS_MIN, normalizeDelegation, normalizeMaxAgents } from '../../../shared/delegation';
 
 const BACKGROUND_LABEL: Record<BackgroundLoadMode, MessageKey> = { visible: 'Tylko widoczne (jak dotąd)', project: 'Zakładki aktywnego projektu', all: 'Wszystkie projekty' };
 const BACKGROUND_HINT: Record<BackgroundLoadMode, MessageKey> = {
@@ -91,6 +92,7 @@ export function SettingsPage() {
     contentRef.current?.scrollTo({ top: 0 });
   };
   const setSetting = (patch: Partial<typeof settings>) => update((st) => updateSettings(st, patch));
+  const delegation = delegationOf({ settings });
   // 1.1.2: "Ustawienia przełączania" of the limits panel opens a section here and scrolls to its row (and focuses it).
   const sectionRequest = useStore((st) => st.ui.settingsSection);
   useEffect(() => {
@@ -219,6 +221,22 @@ export function SettingsPage() {
         {!searching && <div>
           <button className="btn" onClick={() => update((st) => upsertProfile(st, { id: uid(), name: tr("Nowy profil"), cli: 'claude', args: '', color: '#8b5cf6' }))}>{tr("+ Dodaj profil")}</button>
         </div>}
+        {/* 1.1.4: how a coordinator delegates (shared/delegation.ts); applies at the coordinator's next start. */}
+        <SettingsGroup title={tr('Zespół AI: koordynator')}>
+          <SettingRow title={tr('Kiedy koordynator tworzy agentów')} htmlFor="settings-delegation-mode" hint={tr(delegation.mode === 'auto'
+            ? 'Gdy zadanie jest duże i dzieli się na niezależne części, koordynator sam tworzy zespół albo zleca części istniejącym wykonawcom. Małe zadania robi sam i zawsze mówi, co zlecił. Działa od następnego uruchomienia koordynatora.'
+            : 'Koordynator tworzy agentów tylko wtedy, gdy o to poprosisz. Działa od następnego uruchomienia koordynatora.')}>
+            <Select id="settings-delegation-mode" className="select" value={delegation.mode}
+              onChange={(e) => setSetting({ delegation: normalizeDelegation({ ...delegation, mode: e.target.value }) })}>
+              <option value="auto">{tr('Sam, gdy się opłaca')}</option>
+              <option value="ask">{tr('Tylko na prośbę')}</option>
+            </Select>
+          </SettingRow>
+          <SettingRow title={tr('Najwięcej agentów naraz')} htmlFor="settings-delegation-max" hint={tr('Ilu agentów koordynator może używać jednocześnie ({min}-{max}). Więcej agentów to szybsza praca i większe zużycie limitów.', { min: MAX_AGENTS_MIN, max: MAX_AGENTS_MAX })}>
+            <input id="settings-delegation-max" className="input" type="number" min={MAX_AGENTS_MIN} max={MAX_AGENTS_MAX} value={delegation.maxAgents} style={{ width: 72 }}
+              onChange={(e) => setSetting({ delegation: { ...delegation, maxAgents: normalizeMaxAgents(e.target.value) } })} />
+          </SettingRow>
+        </SettingsGroup>
       </>;
       case 5: return <SettingsGroup><ShortcutsSettings search={searching ? query : undefined} /></SettingsGroup>;
       default: return <SshSettings />;

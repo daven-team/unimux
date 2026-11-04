@@ -19,7 +19,8 @@ describe('automation schemas after zod 4', () => {
     expect(inbox).toEqual({ acknowledge: false, openOnly: false, limit: 50, offset: 0 });
     expect(Object.keys(inbox)).toEqual(['acknowledge', 'openOnly', 'limit', 'offset']);
     expect(automationSchemas.read_inbox.parse({ limit: 7, acknowledge: undefined })).toEqual({ acknowledge: false, openOnly: false, limit: 7, offset: 0 });
-    expect(automationSchemas.wait_for.parse({})).toEqual({ all: false, timeoutSec: 30 });
+    // 1.1.4: no fixed default; the service picks it (and the cap) by the caller's CLI.
+    expect(automationSchemas.wait_for.parse({})).toEqual({ all: false });
     expect(automationSchemas.get_messages.parse({ unreadOnly: false })).toEqual({ unreadOnly: false, limit: 50, offset: 0 });
     // A null is not "missing": it fails instead of taking the default.
     fail(automationSchemas.read_inbox, { acknowledge: null });
@@ -56,7 +57,7 @@ describe('automation schemas after zod 4', () => {
     expect(grid.cells).toEqual([{ profileId: 'p', muted: true, dir: 'C:/x', after: [0], worktree: false }]);
     fail(automationSchemas.create_grid, { name: 'G', cells: [{ profileId: 'p', muted: false }] });
     expect(automationSchemas.set_role.parse({ cellId: 'c', role: null })).toEqual({ cellId: 'c', role: null });
-    fail(automationSchemas.wait_for, { timeoutSec: 46 });
+    fail(automationSchemas.wait_for, { timeoutSec: 601 });
     fail(automationSchemas.create_grid, { name: 'G', layout: { cols: 1, rows: 1, areas: [{ col: 0, row: 0, colSpan: 1, rowSpan: 1 }], rowSizes: [Infinity] } });
   });
 

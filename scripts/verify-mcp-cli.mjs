@@ -9,6 +9,7 @@
 //   3. `codex exec` with the same -c overrides a Codex cell gets (url, bearer_token_env_var) against a mock Responses API: the
 //      "model" calls get_context through the mcp__unimux namespace.
 // Usage: node scripts/verify-mcp-cli.mjs   (nothing reaches the real ~/.claude, ~/.codex or any API).
+//        MCP_CLI_WAIT=600 node scripts/verify-mcp-cli.mjs   also runs a long wait_for in each CLI (the per-CLI wait caps).
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -77,6 +78,8 @@ function claudeMock(turns) {
 const resultText = (r) => (Array.isArray(r?.content) ? r.content.map((c) => c.text ?? '').join('') : String(r?.content ?? ''));
 
 const report = [];
+/** MCP_CLI_WAIT=<seconds> adds the long wait_for checks (Claude up to 600 s, Codex up to 170 s); off by default (they take minutes). */
+const waitSec = Number(process.env.MCP_CLI_WAIT) || 0;
 const h = await startMcpHarness(undefined, { rateLimit: false });
 const servers = [];
 try {
@@ -133,6 +136,25 @@ try {
     assert.match(resultText(byId.toolu_close), /did not confirm/);
     assert.ok(h.controller.get().projects[0].tabs.some((t) => t.id === side.gridId), 'an unconfirmed close_grid closes nothing');
     report.push(`claude close_grid elicitation (-p answers cancel): ${resultText(byId.toolu_close).split('\n')[0].slice(0, 90)}`);
+
+    // MCP_CLI_WAIT=<seconds>: a wait_for that long, as a Claude cell runs it (the per-cell config with its `timeout`): it must
+    // end with the server's own "timeout" answer, not with a client-side abort (60 s first-byte timer, 5 minute idle timer).
+    if (waitSec) {
+      const waitMock = claudeMock([
+        [{ id: 'toolu_search2', name: 'ToolSearch', input: { query: 'select:mcp__unimux__wait_for', max_results: 1 } }],
+        [{ id: 'toolu_wait', name: 'mcp__unimux__wait_for', input: { timeoutSec: Math.min(waitSec, 600) } }],
+      ]);
+      servers.push(waitMock.server);
+      const waitEnv = { ...env, ANTHROPIC_BASE_URL: await listen(waitMock.server) };
+      const started = Date.now();
+      const waited = await run('claude', ['-p', 'Wait.', '--mcp-config', writeClaudeMcpConfig(join(root, 'mcp'), h.coordinator.id, h.url, h.server.issueToken(h.coordinator.id)), '--strict-mcp-config',
+        '--output-format', 'json', '--allowedTools', 'mcp__unimux__wait_for', '--model', 'claude-sonnet-4-5'], { cwd: project, env: waitEnv, timeout: (waitSec + 120) * 1000 });
+      const answer = waitMock.seen.results.find((r) => r.tool_use_id === 'toolu_wait');
+      report.push(`claude wait_for ${Math.min(waitSec, 600)} s: ${resultText(answer).slice(0, 80)} after ${Math.round((Date.now() - started) / 1000)} s`);
+      assert.equal(waited.code, 0, waited.stdout + waited.stderr);
+      assert.ok(answer && !answer.is_error, `wait_for ended with an error: ${resultText(answer)}`);
+      assert.match(resultText(answer), /"event":"timeout"/);
+    }
   } else report.push('claude: not installed, skipped');
 
   if (await installed('codex')) {
@@ -172,6 +194,40 @@ try {
     const text = typeof output === 'string' ? output : JSON.stringify(output);
     assert.ok(text.includes(h.worker.id), `codex got get_context: ${text}`);
     report.push(`codex exec: get_context answered for the worker cell; sessions open: ${h.server.sessionCount}`);
+
+    // MCP_CLI_WAIT: the longest wait_for of a Codex caller (170 s) within its tool_timeout_sec of 180.
+    if (waitSec) {
+      let waitOutput;
+      const waitMock = createServer((req, res) => {
+        let body = '';
+        req.on('data', (c) => { body += c; });
+        req.on('end', () => {
+          const request = JSON.parse(body || '{}');
+          const ns = (request.tools ?? []).find((t) => t.name === 'mcp__unimux');
+          const done = (request.input ?? []).find((i) => i.type === 'function_call_output' && i.call_id === 'call_wait');
+          if (done) waitOutput = done.output;
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          const send = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
+          send('response.created', { response: { id: 'resp_wait' } });
+          const item = ns && !done
+            ? { type: 'function_call', id: 'fc_wait', call_id: 'call_wait', name: 'wait_for', namespace: 'mcp__unimux', arguments: JSON.stringify({ timeoutSec: Math.min(waitSec, 170) }) }
+            : { type: 'message', id: 'msg_wait', role: 'assistant', content: [{ type: 'output_text', text: 'DONE' }] };
+          send('response.output_item.done', { output_index: 0, item });
+          send('response.completed', { response: { id: 'resp_wait', usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } });
+          res.end();
+        });
+      });
+      servers.push(waitMock);
+      const waitBase = await listen(waitMock);
+      const waitArgs = args.map((arg) => arg.replace(base, waitBase)).slice(0, -1).concat('Wait with unimux wait_for.');
+      const started = Date.now();
+      const waited = await run('codex', waitArgs, { cwd: project, timeout: (waitSec + 120) * 1000, env: { ...process.env, CODEX_HOME: home, MOCK_KEY: 'mock', UNIMUX_MCP_TOKEN: h.server.issueToken(h.worker.id), NO_PROXY: '127.0.0.1' } });
+      const text = typeof waitOutput === 'string' ? waitOutput : JSON.stringify(waitOutput);
+      report.push(`codex wait_for ${Math.min(waitSec, 170)} s: ${String(text).slice(0, 80)} after ${Math.round((Date.now() - started) / 1000)} s`);
+      assert.match(waited.stdout, /DONE/, waited.stdout + waited.stderr);
+      assert.match(String(text), /timeout/);
+      assert.doesNotMatch(String(text), /timed out|deadline|error/i);
+    }
   } else report.push('codex: not installed, skipped');
   console.log(report.join('\n'));
   console.log('MCP CLI end-to-end check passed.');

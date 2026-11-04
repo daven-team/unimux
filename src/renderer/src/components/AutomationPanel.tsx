@@ -7,12 +7,16 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type Keyboard
 import { isClosedTask, taskPrompt, type AgentMessage, type AgentRuntimeStatus, type AgentTask, type AutomationInput, type AutomationOperation, type TaskStatus } from '../../../shared/automation';
 import { cellShell, shownProfileName } from '../../../shared/profiles';
 import { getProfile } from '../../../shared/state';
-import { activityOf, groupTasks, messageThreads, openPrerequisites, reassignInput, resultText, teamCounts, threadMessages, type TaskGroupId } from '../../../shared/teamPanel';
+import {
+  activityOf, agentStuck, groupTasks, messageThreads, openPrerequisites, polishPlural, reassignInput, resultText, stateSince, stuckAgents, taskStuck, teamCounts, threadMessages,
+  type Stuck, type StuckAgent, type TaskGroupId,
+} from '../../../shared/teamPanel';
 import type { AppState, Cell, Tab } from '../../../shared/types';
 import { waitAge } from '../../../shared/waiting';
 import { focusCell } from '../actions';
 import { changeAgentRole } from '../agentRoles';
 import { useI18n } from '../i18n';
+import { agentStartedAt, HEALTH_BASELINE, noteStatuses, restartAgentWithTasks, useCliExits } from '../teamHealth';
 import { terminals } from '../terminals/TerminalManager';
 import { askChoice, setUi, toast, useStore } from '../store';
 import { useWaitClock } from '../waiting';
@@ -45,7 +49,7 @@ const CopyIcon = () => <svg width="12" height="12" viewBox="0 0 16 16" fill="non
 const OpenIcon = () => <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M9 3h4v4M13 3 7.5 8.5M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3" /></svg>;
 
 /** The mark of an agent (Claude's spark, Codex's cloud) or the user. */
-function Mark({ agent }: { agent?: Agent }) {
+function Mark({ agent }: { agent?: Pick<Agent, 'cli'> }) {
   return <span className="team-mark">{agent ? <ProviderIcon provider={agent.cli} size={12} /> : <IPrompt />}</span>;
 }
 
@@ -53,6 +57,35 @@ function Mark({ agent }: { agent?: Agent }) {
 function Age({ at, now, tr, language }: { at: number; now: number; tr: Tr; language: string }) {
   const age = waitAge(at, now);
   return <time className="team-age" dateTime={new Date(at).toISOString()} title={new Date(at).toLocaleString(language)}>{tr(age.key, age.params)}</time>;
+}
+
+/** 1.1.4: "W kolejce od 4 min", how long an open task is in its state (live with the panel's clock). */
+const stateLabels = { queued: 'W kolejce od {time}', in_progress: 'W trakcie od {time}', blocked: 'Zablokowane od {time}' } as const;
+const ageText = (since: number, now: number, tr: Tr) => {
+  const age = waitAge(since, now);
+  return age.key === 'teraz' ? tr('< 1 min') : tr(age.key, age.params);
+};
+function StateAge({ task, now, tr, language }: { task: AgentTask; now: number; tr: Tr; language: string }) {
+  if (isClosedTask(task)) return <Age at={task.updatedAt} now={now} tr={tr} language={language} />;
+  const since = stateSince(task);
+  return <time className="team-age team-state-age" dateTime={new Date(since).toISOString()} title={new Date(since).toLocaleString(language)}>
+    {tr(stateLabels[task.status as keyof typeof stateLabels], { time: ageText(since, now, tr) })}
+  </time>;
+}
+
+/** The words and the mark of a stuck task (shared/teamPanel.ts taskStuck): the badge says what, the tooltip why. */
+const stuckMarks: Record<Stuck['kind'], StatusKind> = { 'never-started': 'idle', ended: 'error', closed: 'exited', waiting: 'ask' };
+function stuckWords(stuck: Stuck, task: AgentTask, now: number, tr: Tr): { label: string; hint: string } {
+  switch (stuck.kind) {
+    case 'never-started': return { label: tr('Agent nie wystartował'), hint: tr('Agent nie połączył się z MCP od {time}. Zadanie do niego nie dotrze, dopóki agent nie wystartuje.', { time: ageText(Math.max(task.createdAt, agentStartedAt(task.cellId) ?? 0, HEALTH_BASELINE), now, tr) }) };
+    case 'ended': return { label: stuck.code ? tr('Agent zakończył działanie (kod {code})', { code: stuck.code }) : tr('Agent zakończył działanie'), hint: tr('CLI agenta zakończył działanie, więc nikt nie pracuje nad zadaniem.') };
+    case 'closed': return { label: tr('Agent zamknięty'), hint: tr(stuck.archived ? 'Siatka agenta jest zamknięta (w historii). Przydziel zadanie innemu agentowi albo je anuluj.' : 'Komórka agenta jest zamknięta. Przydziel zadanie innemu agentowi albo je anuluj.') };
+    case 'waiting': return { label: tr('Czeka na Ciebie'), hint: tr('Agent czeka na Twoją odpowiedź.') };
+  }
+}
+function StuckTag({ stuck, task, now, tr }: { stuck: Stuck; task: AgentTask; now: number; tr: Tr }) {
+  const { label, hint } = stuckWords(stuck, task, now, tr);
+  return <span className={`team-tag team-stuck-tag ${stuck.kind}`} title={hint}><StatusMark kind={stuckMarks[stuck.kind]} />{label}</span>;
 }
 
 const clock = (at: number, language: string) => {
@@ -95,7 +128,17 @@ export function AutomationPanel() {
     })) ?? [];
   }, [project, profiles, shell, tr]);
   const agentOf = useMemo(() => new Map(agents.map((a) => [a.cell.id, a])), [agents]);
-  const name = (cellId?: string) => cellId ? agentOf.get(cellId)?.name ?? tr('Agent niedostępny') : tr('Ty');
+  /** 1.1.4: agents of closed grids (the project's history) keep their name on their tasks. */
+  const archived = useMemo(() => {
+    const s = { profiles } as AppState;
+    return new Map(project?.archive.flatMap((grid) => grid.cells.flatMap((cell) => {
+      const profile = getProfile(s, cell.profileId);
+      return profile.cli === 'shell' ? [] : [[cell.id, { name: cell.name ?? shownProfileName(profile, cellShell(cell, shell), tr), cli: profile.cli }] as const];
+    })) ?? []);
+  }, [project, profiles, shell, tr]);
+  const name = (cellId?: string) => !cellId ? tr('Ty') : agentOf.get(cellId)?.name ?? (archived.has(cellId) ? tr('{name} (zamknięta siatka)', { name: archived.get(cellId)!.name }) : tr('Agent niedostępny'));
+  /** The mark of a task's agent: its CLI's icon, also in a closed grid; none for a cell that is gone. */
+  const markOf = (cellId?: string): Pick<Agent, 'cli'> | undefined => cellId ? agentOf.get(cellId) ?? archived.get(cellId) : undefined;
   const filterId = filter && agentOf.has(filter) ? filter : null;
   const tasks = useMemo(() => automation.tasks.filter((t) => t.projectId === project?.id), [automation.tasks, project?.id]);
   const messages = useMemo(() => automation.messages.filter((m) => m.projectId === project?.id), [automation.messages, project?.id]);
@@ -111,12 +154,12 @@ export function AutomationPanel() {
     const refresh = async () => {
       try {
         const list = await window.mc.automation('list_agents', { projectId: project.id }) as Array<{ cellId: string; status: AgentRuntimeStatus }>;
-        if (!disposed) setRuntime(Object.fromEntries(list.map((a) => [a.cellId, a.status])));
+        if (!disposed) setRuntime((prev) => { const next = Object.fromEntries(list.map((a) => [a.cellId, a.status])); noteStatuses(prev, next); return next; });
       } catch { /* The project may have been removed while the request was pending. */ }
     };
     void refresh();
-    // Main pushes every status change; the slow poll is only a fallback.
-    const off = window.mc.on('automation:statuses', (statuses) => { if (!disposed) setRuntime(statuses); });
+    // Main pushes every status change; the slow poll is only a fallback. A "starting" agent counts as started now (stuck tasks).
+    const off = window.mc.on('automation:statuses', (statuses) => { if (!disposed) setRuntime((prev) => { noteStatuses(prev, statuses); return statuses; }); });
     const timer = window.setInterval(() => void refresh(), 15000);
     return () => { disposed = true; off(); clearInterval(timer); };
   }, [project?.id]);
@@ -144,7 +187,35 @@ export function AutomationPanel() {
     );
     if (choice === 'yes') remove(kind);
   };
-  const ctx: Ctx = { tr, language, now, busy, paused: automation.paused, agents, agentOf, name, run, copy, remove, removeAll, removable, filterId };
+  // 1.1.4: why open tasks do not move, from what the panel already has (cells, MCP connections, runtime, the terminals' exits).
+  const exits = useCliExits(useMemo(() => agents.map((a) => a.cell.id), [agents]));
+  const stuck = useMemo(() => {
+    const map = new Map<string, Stuck>();
+    for (const task of tasks) {
+      const open = agentOf.has(task.cellId);
+      const exit = exits.get(task.cellId);
+      const s = taskStuck(task, {
+        open, archived: !open && archived.has(task.cellId), connected: !!info.connectedCellIds?.includes(task.cellId), runtime: runtime?.[task.cellId],
+        cliExited: !!exit, exitCode: exit?.code, startedAt: agentStartedAt(task.cellId),
+      }, now, HEALTH_BASELINE);
+      // With the MCP server down no agent can connect: its own banner says that, not one per task.
+      if (s && !(s.kind === 'never-started' && !info.running)) map.set(task.id, s);
+    }
+    return map;
+  }, [tasks, agentOf, archived, exits, info.connectedCellIds, info.running, runtime, now]);
+  const stuckList = useMemo(() => stuckAgents(filterId ? tasks.filter((t) => t.cellId === filterId) : tasks, stuck), [tasks, stuck, filterId]);
+  const stuckCells = useMemo(() => new Set(stuckAgents(tasks, stuck).map((a) => a.cellId)), [tasks, stuck]);
+  const restart = (cellId: string) => { restartAgentWithTasks(cellId); toast(tr('Uruchamiam ponownie: {name}', { name: name(cellId) })); };
+  /** An open task of a closed agent goes to another one: a new task with the same instructions, the old one cancelled. */
+  const reassign = async (ids: readonly string[], cellId: string) => {
+    for (const task of tasks.filter((t) => ids.includes(t.id) && !isClosedTask(t))) {
+      if (!(await run('create_task', reassignInput(task, cellId)))) return;
+      await run('update_task', { taskId: task.id, status: 'cancelled' });
+    }
+    toast(tr('Przydzielono: {name}', { name: name(cellId) }));
+  };
+  const cancel = async (ids: readonly string[]) => { for (const taskId of ids) if (!(await run('update_task', { taskId, status: 'cancelled' }))) return; };
+  const ctx: Ctx = { tr, language, now, busy, paused: automation.paused, agents, agentOf, name, run, copy, remove, removeAll, removable, filterId, stuck, restart, reassign, cancel, markOf, stuckCells };
 
   const tabs: Array<{ id: TabId; count?: number; alert?: boolean }> = [
     { id: 'tasks', count: counts.openTasks }, { id: 'messages', count: counts.unread, alert: counts.unread > 0 }, { id: 'agents', count: agents.length }, { id: 'activity' },
@@ -188,10 +259,11 @@ export function AutomationPanel() {
       <span>{tr('Serwer MCP nie działa. Agenci nie widzą zadań ani wiadomości, dopóki nie wystartuje.')}{info.error ? ` (${info.error})` : ''}</span>
       <button type="button" className="btn small" disabled={busy} onClick={() => { setBusy(true); void window.mc.retryMcp().then((mcpInfo) => setUi({ mcpInfo })).catch(() => {}).finally(() => setBusy(false)); }}>{tr('Spróbuj ponownie')}</button>
     </div>}
+    {project && tab === 'tasks' && stuckList.length > 0 && <StuckBanner ctx={ctx} list={stuckList} tasks={tasks} />}
     {!project ? <PanelEmpty className="team-empty"><p>{tr('Najpierw dodaj projekt')}</p></PanelEmpty>
       : tab === 'tasks' ? <TasksView ctx={ctx} tasks={tasks} selectedId={selectedTaskId} select={setSelectedTaskId} composing={composing} setComposing={setComposing} />
       : tab === 'messages' ? <MessagesView ctx={ctx} messages={messages} thread={thread} setThread={setThread} />
-      : tab === 'agents' ? <AgentsView ctx={ctx} info={info} runtime={runtime} tasks={tasks} projectId={project.id} />
+      : tab === 'agents' ? <AgentsView ctx={ctx} info={info} runtime={runtime} tasks={tasks} projectId={project.id} exits={exits} />
       : <ActivityView ctx={ctx} projectId={project.id} />}
   </section>;
 }
@@ -204,6 +276,80 @@ interface Ctx {
   remove: (kind: 'task' | 'message', ids?: string[]) => void;
   removeAll: (kind: 'task' | 'message', count: number) => Promise<void>;
   removable: (task: AgentTask) => boolean;
+  /** 1.1.4: why an open task is stuck, by task id, and the fixes. */
+  stuck: ReadonlyMap<string, Stuck>;
+  restart: (cellId: string) => void;
+  reassign: (taskIds: readonly string[], cellId: string) => Promise<void>;
+  cancel: (taskIds: readonly string[]) => Promise<void>;
+  markOf: (cellId?: string) => Pick<Agent, 'cli'> | undefined;
+  /** Agents with a stuck task (not counting a wait for the user). */
+  stuckCells: ReadonlySet<string>;
+}
+
+/** The banner's title: "2 zadania stoją: agent nie działa" (the Polish plural picks the key). */
+const stuckTitle = (n: number, tr: Tr) => {
+  const form = polishPlural(n);
+  return form === 'one' ? tr('Zadanie stoi: agent nie działa') : tr(form === 'few' ? '{n} zadania stoją: agent nie działa' : '{n} zadań stoi: agent nie działa', { n });
+};
+const restartLabel = (n: number): 'Uruchom ponownie z zadaniem' | 'Uruchom ponownie z zadaniami' => n === 1 ? 'Uruchom ponownie z zadaniem' : 'Uruchom ponownie z zadaniami';
+
+/** Agents an open task of a closed agent can go to instead: open cells with a role; running workers first, then other workers. */
+function reassignTargets(ctx: Ctx, except?: string): Agent[] {
+  const rank = (a: Agent) => (a.cell.role === 'worker' ? 0 : 2) + (ctx.stuckCells.has(a.cell.id) ? 1 : 0);
+  return ctx.agents.filter((a) => a.cell.role && a.cell.id !== except).sort((a, b) => rank(a) - rank(b));
+}
+
+/** "Przydziel ponownie" to another agent: the picker and its button (an archived or closed agent's open tasks). */
+function ReassignTo({ ctx, taskIds, except }: { ctx: Ctx; taskIds: readonly string[]; except?: string }) {
+  const { tr, busy, paused } = ctx;
+  const targets = reassignTargets(ctx, except);
+  const [pick, setPick] = useState('');
+  const target = targets.some((a) => a.cell.id === pick) ? pick : targets[0]?.cell.id ?? '';
+  if (!targets.length) return null;
+  return <span className="team-reassign">
+    <Select className="select team-reassign-agent" aria-label={tr('Przydziel komu')} title={tr('Przydziel komu')} value={target} disabled={busy} onChange={(e) => setPick(e.target.value)}>
+      {targets.map((a) => <option key={a.cell.id} value={a.cell.id}>{a.name} · {a.grid.name}</option>)}
+    </Select>
+    <button type="button" className="btn small" disabled={busy || paused || !target} onClick={() => void ctx.reassign(taskIds, target)}>{tr('Przydziel ponownie')}</button>
+  </span>;
+}
+
+/**
+ * 1.1.4: at the top of the tasks when open tasks cannot move because their agent does not run: one row per agent with the
+ * reason and the fix (restart it with its tasks and show it, or for a closed agent assign the tasks to another one or cancel).
+ */
+function StuckBanner({ ctx, list, tasks }: { ctx: Ctx; list: StuckAgent[]; tasks: AgentTask[] }) {
+  const { tr, name, busy, now } = ctx;
+  const count = list.reduce((n, a) => n + a.taskIds.length, 0);
+  const restartable = list.filter((a) => a.kind !== 'closed');
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  return <div className="team-stuck" role="alert">
+    <div className="team-stuck-head">
+      <StatusMark kind="error" />
+      <strong className="team-stuck-title">{stuckTitle(count, tr)}</strong>
+      <span className="team-grow" />
+      {restartable.length > 1 && <button type="button" className="btn small" disabled={busy} onClick={() => restartable.forEach((a) => ctx.restart(a.cellId))}>{tr('Uruchom ponownie wszystkich')}</button>}
+    </div>
+    <ul className="team-stuck-list">
+      {list.map((a) => {
+        const first = byId.get(a.taskIds[0])!;
+        const titles = a.taskIds.map((id) => byId.get(id)?.title).filter(Boolean).join('\n');
+        return <li key={a.cellId} className="team-stuck-row">
+          <span className="team-who"><Mark agent={ctx.markOf(a.cellId)} /><span className="team-stuck-name">{name(a.cellId)}</span></span>
+          <StuckTag stuck={a} task={first} now={now} tr={tr} />
+          <span className="team-stuck-count" title={titles}>{tr('zadania: {n}', { n: a.taskIds.length })}</span>
+          <span className="team-grow" />
+          {a.kind === 'closed' ? <>
+            <ReassignTo ctx={ctx} taskIds={a.taskIds} except={a.cellId} />
+            <button type="button" className="btn small ghost team-danger" disabled={busy} onClick={() => void ctx.cancel(a.taskIds)}>{tr(a.taskIds.length === 1 ? 'Anuluj zadanie' : 'Anuluj zadania')}</button>
+          </> : <>
+            <button type="button" className="btn small primary" disabled={busy} onClick={() => ctx.restart(a.cellId)}>{tr(restartLabel(a.taskIds.length))}</button>
+            <button type="button" className="btn small" onClick={() => focusCell(a.cellId)}><OpenIcon /> {tr('Pokaż agenta')}</button>
+          </>}
+        </li>;
+      })}
+    </ul>
+  </div>;
 }
 
 function McpPill({ info, tr }: { info: ReturnType<typeof useStore.getState>['ui']['mcpInfo']; tr: Tr }) {
@@ -269,15 +415,17 @@ function StatusDot({ status }: { status: TaskStatus }) {
 }
 
 function TaskRow({ ctx, task, tasks, selected, onSelect }: { ctx: Ctx; task: AgentTask; tasks: AgentTask[]; selected: boolean; onSelect: () => void }) {
-  const { tr, name, agentOf } = ctx;
+  const { tr, name } = ctx;
   const waits = task.status === 'queued' ? openPrerequisites(task, tasks).length : 0;
+  const stuck = ctx.stuck.get(task.id);
   return <div role="listitem">
-    <button type="button" className={`team-task-row ${task.status} ${selected ? 'on' : ''}`} aria-current={selected || undefined} onClick={onSelect}>
+    <button type="button" className={`team-task-row ${task.status} ${selected ? 'on' : ''} ${stuck ? `stuck ${stuck.kind}` : ''}`} aria-current={selected || undefined} onClick={onSelect}>
       <StatusDot status={task.status} />
       <span className="team-row-main">
-        <span className="team-row-line"><span className="team-row-title" title={task.title}>{task.title}</span><Age at={task.updatedAt} now={ctx.now} tr={tr} language={ctx.language} /></span>
+        <span className="team-row-line"><span className="team-row-title" title={task.title}>{task.title}</span><StateAge task={task} now={ctx.now} tr={tr} language={ctx.language} /></span>
         <span className="team-row-meta">
-          <span className="team-who"><Mark agent={task.fromCellId ? agentOf.get(task.fromCellId) : undefined} />{name(task.fromCellId)}<span className="team-arrow">→</span><Mark agent={agentOf.get(task.cellId)} />{name(task.cellId)}</span>
+          <span className="team-who"><Mark agent={ctx.markOf(task.fromCellId)} />{name(task.fromCellId)}<span className="team-arrow">→</span><Mark agent={ctx.markOf(task.cellId)} />{name(task.cellId)}</span>
+          {stuck && <StuckTag stuck={stuck} task={task} now={ctx.now} tr={tr} />}
           {task.status === 'blocked' && <span className="team-tag warn">{tr('Zablokowane')}</span>}
           {waits > 0 && <span className="team-tag">{tr('czeka na zadania: {n}', { n: waits })}</span>}
           {task.delivery === 'pending' && !isClosedTask(task) && <span className="team-tag" title={task.deliveryError}>{tr('W skrzynce agenta')}</span>}
@@ -293,6 +441,9 @@ function TaskDetail({ ctx, task, tasks, select }: { ctx: Ctx; task: AgentTask; t
   const open = !isClosedTask(task);
   const waits = openPrerequisites(task, tasks);
   const agent = agentOf.get(task.cellId);
+  const stuck = ctx.stuck.get(task.id);
+  const words = stuck && stuckWords(stuck, task, ctx.now, tr);
+  const openOfAgent = tasks.filter((t) => t.cellId === task.cellId && !isClosedTask(t)).length;
   return <article className={`team-detail ${task.status}`} aria-label={task.title}>
     <div className="team-detail-head">
       <span className={`team-chip ${task.status}`}><StatusDot status={task.status} />{tr(taskLabels[task.status])}</span>
@@ -300,11 +451,21 @@ function TaskDetail({ ctx, task, tasks, select }: { ctx: Ctx; task: AgentTask; t
       <button type="button" className="team-icon-btn team-task-back" aria-label={tr('Zamknij')} title={tr('Zamknij')} onClick={() => select(null)}><IX /></button>
     </div>
     <div className="team-detail-meta">
-      <span className="team-who"><Mark agent={task.fromCellId ? agentOf.get(task.fromCellId) : undefined} />{name(task.fromCellId)}<span className="team-arrow">→</span><Mark agent={agent} />{name(task.cellId)}{agent ? <span className="team-muted"> · {agent.grid.name}</span> : null}</span>
+      <span className="team-who"><Mark agent={ctx.markOf(task.fromCellId)} />{name(task.fromCellId)}<span className="team-arrow">→</span><Mark agent={ctx.markOf(task.cellId)} />{name(task.cellId)}{agent ? <span className="team-muted"> · {agent.grid.name}</span> : null}</span>
+      {open && <StateAge task={task} now={ctx.now} tr={tr} language={language} />}
       <span>{tr('Utworzono {time}', { time: clock(task.createdAt, language) })}</span>
       {task.updatedAt !== task.createdAt && <span>{tr('Zmieniono {time}', { time: clock(task.updatedAt, language) })}</span>}
       <span>{tr(task.delivery === 'native' ? 'Przekazano do sesji' : task.delivery === 'startup' ? 'Prompt startowy' : 'W skrzynce agenta')}</span>
     </div>
+    {stuck && words && <div className={`team-callout team-stuck-callout ${stuck.kind}`} role="status">
+      <strong><StatusMark kind={stuckMarks[stuck.kind]} />{words.label}</strong>
+      <p className="team-text">{words.hint}</p>
+      <div className="team-callout-actions">
+        {(stuck.kind === 'never-started' || stuck.kind === 'ended') && <button type="button" className="btn small primary" disabled={busy} onClick={() => ctx.restart(task.cellId)}>{tr(restartLabel(openOfAgent))}</button>}
+        {stuck.kind === 'closed' && <ReassignTo ctx={ctx} taskIds={[task.id]} except={task.cellId} />}
+        {agent && stuck.kind !== 'closed' && <button type="button" className="btn small" onClick={() => focusCell(task.cellId)}><OpenIcon /> {tr('Pokaż agenta')}</button>}
+      </div>
+    </div>}
     {task.blockedReason && <div className="team-callout warn"><strong>{tr('Zablokowane')}</strong><p className="team-text">{task.blockedReason}</p></div>}
     {waits.length > 0 && <div className="team-callout"><strong>{tr('Czeka na')}</strong>
       <span className="team-deps">{waits.map((w) => <button key={w.id} type="button" className="team-dep" disabled={!w.task} onClick={() => w.task && select(w.id)}>{w.task ? <><StatusDot status={w.task.status} />{w.task.title}</> : w.id}</button>)}</span>
@@ -453,7 +614,7 @@ function MessageComposer({ ctx, to }: { ctx: Ctx; to: string | null }) {
 
 // ── agents and activity ──────────────────────────────────────────────────────
 
-function AgentsView({ ctx, info, runtime, tasks, projectId }: { ctx: Ctx; info: ReturnType<typeof useStore.getState>['ui']['mcpInfo']; runtime: Record<string, AgentRuntimeStatus> | null; tasks: AgentTask[]; projectId: string }) {
+function AgentsView({ ctx, info, runtime, tasks, projectId, exits }: { ctx: Ctx; info: ReturnType<typeof useStore.getState>['ui']['mcpInfo']; runtime: Record<string, AgentRuntimeStatus> | null; tasks: AgentTask[]; projectId: string; exits: ReadonlyMap<string, { code?: number }> }) {
   const { tr, busy, filterId } = ctx;
   const shown = filterId ? ctx.agents.filter((a) => a.cell.id === filterId) : ctx.agents;
   if (!ctx.agents.length) return <PanelEmpty className="team-empty"><p>{tr('Brak agentów')}</p><p>{tr('Koordynator może tworzyć zespoły i przydzielać zadania innym agentom.')}</p></PanelEmpty>;
@@ -465,7 +626,15 @@ function AgentsView({ ctx, info, runtime, tasks, projectId }: { ctx: Ctx; info: 
         const connected = info.connectedCellIds?.includes(cell.id);
         const configured = info.configuredCellIds?.includes(cell.id);
         const open = tasks.filter((t) => t.cellId === cell.id && !isClosedTask(t)).length;
-        return <div key={cell.id} role="listitem" className="team-agent">
+        // 1.1.4: an agent its open tasks wait on shows why (an ended CLI with its code, never started); the exit code is in the tooltip.
+        const stuck = agentStuck(cell.id, tasks, ctx.stuck);
+        const code = exits.get(cell.id)?.code ?? (stuck?.kind === 'ended' ? stuck.code : undefined);
+        const ended = stuck?.kind === 'ended' || (status === 'exited' && !!code);
+        const never = stuck?.kind === 'never-started';
+        const runKind: StatusKind = ended ? 'error' : never ? 'idle' : runtimeMarks[status];
+        const runText = ended ? (code ? tr('Zakończony (kod {code})', { code }) : tr('Zakończony')) : never ? tr('Nie wystartował') : tr(runtimeLabels[status]);
+        const runTitle = code ? tr('CLI zakończył działanie (kod {code})', { code }) : stuck && stuck.kind !== 'waiting' ? stuckWords(stuck, tasks.find((t) => t.cellId === cell.id && ctx.stuck.get(t.id)?.kind === stuck.kind)!, ctx.now, tr).hint : undefined;
+        return <div key={cell.id} role="listitem" className={`team-agent ${ended ? 'stuck ended' : never ? 'stuck never-started' : ''}`}>
           <span className="team-mark"><ProviderIcon provider={cli} size={14} /></span>
           <span className="team-agent-main">
             <span className="team-row-line"><span className="team-row-title">{name}</span>{open > 0 && <span className="team-group-count" title={tr('Otwarte zadania: {n}', { n: open })}>{open}</span>}</span>
@@ -474,7 +643,7 @@ function AgentsView({ ctx, info, runtime, tasks, projectId }: { ctx: Ctx; info: 
           {/* 1.1.3: one quiet state cluster: the status mark with its word, and an MCP chip whose dot says connected, waiting
               for the agent or needing a restart (the full sentence in its tooltip). No chip without a role: the role menu says "Bez MCP". */}
           <span className="team-agent-state">
-            <span className={`team-agent-run ${status}`}>{runtime ? <><StatusMark kind={runtimeMarks[status]} />{tr(runtimeLabels[status])}</> : '…'}</span>
+            <span className={`team-agent-run ${status} ${ended ? 'ended' : never ? 'never-started' : ''}`} title={runTitle}>{runtime || ended || never ? <><StatusMark kind={runKind} />{runText}</> : '…'}</span>
             {cell.role && (() => {
               const mcp = connected ? 'on' : configured ? 'wait' : 'off';
               const label = tr(connected ? 'MCP działa' : configured ? 'MCP skonfigurowane · oczekiwanie na agenta' : 'Wymaga restartu');
@@ -482,9 +651,11 @@ function AgentsView({ ctx, info, runtime, tasks, projectId }: { ctx: Ctx; info: 
             })()}
           </span>
           <span className="team-agent-actions">
-            <RoleSelect value={cell.role} disabled={busy} onChange={(role) => void changeAgentRole(cell.id, role ?? null)} />
-            {cell.role && !configured && <button type="button" className="btn small" onClick={() => void changeAgentRole(cell.id, cell.role!)}>{tr('Uruchom ponownie')}</button>}
+            {/* 1.1.4: the buttons only some rows have come first, so the role menus and the open icons stay in one column. */}
+            {cell.role && !configured && !(ended || never) && <button type="button" className="btn small" onClick={() => void changeAgentRole(cell.id, cell.role!)}>{tr('Uruchom ponownie')}</button>}
+            {(ended || never) && open > 0 && <button type="button" className="btn small primary" disabled={busy} onClick={() => ctx.restart(cell.id)}>{tr(restartLabel(open))}</button>}
             {cli === 'codex' && !cell.session?.confirmed && <button type="button" className="btn small ghost" onClick={() => { focusCell(cell.id); setUi({ modal: { kind: 'history', projectId } }); }}>{tr('Wybierz sesję z historii')}</button>}
+            <RoleSelect value={cell.role} disabled={busy} onChange={(role) => void changeAgentRole(cell.id, role ?? null)} />
             <button type="button" className="team-icon-btn" title={tr('Otwórz agenta')} aria-label={tr('Otwórz agenta')} onClick={() => focusCell(cell.id)}><OpenIcon /></button>
           </span>
         </div>;

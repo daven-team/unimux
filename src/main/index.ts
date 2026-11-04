@@ -10,6 +10,8 @@ import type { SpawnCellRequest } from '../preload/api';
 import { cleanEnv } from '../shared/env';
 import type { HostToMain } from '../shared/ipc';
 import { buildLaunchCommand, type LaunchOptions } from '../shared/profiles';
+import { coordinatorSystemRules, delegationOf } from '../shared/delegation';
+import { readyStartupTasks, resumeTaskPrompt, startupTaskPrompt } from '../shared/teamPrompts';
 import { endCellMcp, prepareCellMcp } from './mcpCellConfig';
 import type { AppState, Worktree, WorktreeInspection, WorktreeInspectResult } from '../shared/types';
 import { appPlatform, normalizeProjectPath } from '../shared/platform';
@@ -109,7 +111,7 @@ import { KeyDrafts } from './ssh/keys';
 import { KnownHostsStore } from './ssh/knownHosts';
 import { writePrivateFile } from './ssh/files';
 import { electronCipher, SshVault } from './ssh/vault';
-import { AutomationService } from './automation';
+import { AutomationService, queueNotice } from './automation';
 import { UnimuxMcpServer } from './mcp';
 import { queueCodexMessage } from './agentDelivery';
 import { execOffMain, type ExecHostChild } from './offMainExec';
@@ -122,7 +124,8 @@ import { cliForProfile, CLI_NAMES, isCliId, missingCli, resolveExecFile, spawnDe
 import { automationSchemas, type AutomationOperation, type McpInfo } from '../shared/automation';
 import type { StateEdit } from '../shared/stateEdits';
 import { createStateBroadcaster, type StateBroadcaster } from './stateBroadcast';
-import { cellCwd, findCell, getProfile, patchSshCell, unlessRestoring } from '../shared/state';
+import { cellCwd, findCell, getProfile, patchSshCell, uid, unlessRestoring, updateCell } from '../shared/state';
+
 import { resumeForPhase, resumesConversation, type SshSessionState } from '../shared/ssh';
 import { automationHintForHook, automationStatusFor } from '../shared/runtimeStatus';
 import { followedSession, shouldUpdateCellSession } from '../shared/sessionTrack';
@@ -783,7 +786,10 @@ const controller = new StateController(state, (snapshot, batch) => {
     for (const id of cellIdsOf(state, true, (cell) => !!cell.role)) if (!roles.has(id)) mcp.revokeCell(id);
     const kept = cellIdsOf(snapshot.state, false);
     for (const id of cellIdsOf(state, false)) if (!kept.has(id)) forgetCell(id);
+    // 1.1.4: open tasks of agents the user closed or archived are cancelled ("agent closed"), after this change settled.
+    queueMicrotask(() => automation.cancelOrphans());
   }
+
   const previous = state;
   state = snapshot.state;
   ssh?.stateChanged(state);
@@ -829,20 +835,71 @@ const automation = new AutomationService(controller, {
     if (result.ok) send('cell:restarted', cellId);
     return { restarted: result.ok, reason: result.ok ? undefined : result.error };
   },
+  startAgent: (cellId) => startExitedAgent(cellId),
+  // 1.1.4: a short inbox notice ("unimux: new task ...: read_inbox") reaches every running team agent. A Codex session the
+  // user chose (verified) takes it through `codex queue`; any other agent (Claude, a fresh Codex) gets it through its prompt
+  // queue, which sends it when the agent sits idle at its prompt and pauses for permissions, questions and the user typing.
   deliver: async (cellId, text) => {
     const found = findCell(state, cellId);
-    if (!found || !alive.has(cellId)) throw new Error('Agent is not running. The item is available in its MCP inbox.');
-    if (getProfile(state, found.cell.profileId).cli !== 'codex') throw new Error('Available in the MCP inbox. Use Paste to insert it into this agent without submitting.');
+    if (!found || !alive.has(cellId) || automation.statuses.get(cellId) === 'exited') throw new Error('Agent is not running. The item is available in its MCP inbox.');
     const sessionId = verifiedCodex.get(cellId);
-    if (!sessionId || found.cell.session?.id !== sessionId) throw new Error('Session identity is not verified. The item is available in the MCP inbox.');
-    const codex = await cliDetector.get('codex', { waitMs: CLI_WAIT_MS }).catch(() => undefined);
-    await queueCodexMessage(sessionId, text, {
-      command: codex?.state === 'found' ? codex.path : undefined,
-      env: await cliDetector.applyEnv(cleanEnv(process.env), 'codex'),
-    }, (call) => execOffMain(call, forkExecHost));
+    if (getProfile(state, found.cell.profileId).cli === 'codex' && sessionId && found.cell.session?.id === sessionId) {
+      try {
+        const codex = await cliDetector.get('codex', { waitMs: CLI_WAIT_MS }).catch(() => undefined);
+        await queueCodexMessage(sessionId, text, {
+          command: codex?.state === 'found' ? codex.path : undefined,
+          env: await cliDetector.applyEnv(cleanEnv(process.env), 'codex'),
+        }, (call) => execOffMain(call, forkExecHost));
+        return;
+      } catch { /* the prompt queue below still reaches it */ }
+    }
+    let queued = false;
+    controller.change((s) => {
+      const cell = findCell(s, cellId)?.cell;
+      if (!cell) return s;
+      const next = queueNotice(cell.promptQueue, text, uid());
+      queued = next !== cell.promptQueue;
+      return queued ? updateCell(s, cellId, { promptQueue: next }) : s;
+    }, undefined, true);
+    if (!queued) throw new Error('The prompt queue of this agent is full. The item is available in its MCP inbox.');
   },
 });
-const mcp = new UnimuxMcpServer(automation, { log: (message) => crashLog.warn(message), tr: (key, params) => tr(key, params) });
+/**
+ * update_agent restart:true of a team agent whose CLI or terminal ended (1.1.4): the cell starts again the way a restart from
+ * the cell menu does (its conversation resumes when it has a confirmed one, else a new one starts); the renderer is told so
+ * its terminal follows the new process.
+ */
+async function startExitedAgent(cellId: string): Promise<{ started: boolean; reason?: string }> {
+  const found = findCell(state, cellId);
+  if (!found || found.cell.ssh) return { started: false, reason: 'Agent cell not found.' };
+  const profile = getProfile(state, found.cell.profileId);
+  if (profile.cli === 'shell') return { started: false, reason: 'Choose an AI agent profile.' };
+  const cwd = cellCwd(found.project, found.cell);
+  if (!(await pathExists(cwd))) return { started: false, reason: 'Project folder does not exist; ask the user.' };
+  if (alive.has(cellId)) {
+    endCellMcp(mcp, MCP_DIR, cellId);
+    verifiedCodex.delete(cellId);
+    alive.delete(cellId);
+    noteKill(cellId);
+    await ptyHost.killAndWait(cellId);
+  }
+  const session = found.cell.session?.cli === profile.cli ? found.cell.session : undefined;
+  let sessionId = session?.id;
+  if (!session && profile.cli === 'claude') {
+    sessionId = uid();
+    controller.change((s) => updateCell(s, cellId, { session: { cli: 'claude', id: sessionId! } }));
+  }
+  const startupPrompt = findCell(state, cellId)?.cell.startupPrompt;
+  const result = await spawnRequest({ cellId, cwd, profile, mode: session ? 'resume' : 'new', sessionId, sessionConfirmed: session?.confirmed === true,
+    cols: 100, rows: 30, ...(startupPrompt && (!session || !session.confirmed) ? { startupPrompt } : {}) });
+  if (result.ok) {
+    if (result.startedWithPrompt) controller.change((s) => updateCell(s, cellId, { startupPrompt: undefined }));
+    send('cell:restarted', cellId);
+  }
+  return { started: result.ok, reason: result.ok ? undefined : result.error };
+}
+const mcp = new UnimuxMcpServer(automation, { log: (message) => crashLog.warn(message), tr: (key, params) => tr(key, params), version: app.getVersion() });
+
 const mcpInfo = (): McpInfo => ({ ...mcp.getInfo(), error: mcpError, ...(mcpStarting && !mcp.getInfo().running ? { starting: true } : {}) });
 /** A short-lived utility process that starts one program for main (`codex queue`, see offMainExec.ts). No inherited stdio. */
 function forkExecHost(): ExecHostChild {
@@ -1177,7 +1234,9 @@ ptyHost.on('message', (m: HostToMain) => {
     verifiedCodex.delete(m.id);
     endCellMcp(mcp, MCP_DIR, m.id);
     automation.statuses.set(m.id, 'exited');
+    automation.noteExit(m.id, m.code);
     releasePrompt(m.id);
+
   } else if (m.t === 'spawnError') {
     releasePrompt(m.id);
     alive.delete(m.id);
@@ -1278,6 +1337,25 @@ hooks.on('hook', (cellId: string, event: string, info?: unknown) => {
   contextTracker.poke(cellId, event === 'stop' || event === 'stopbg' || event === 'fail' || event === 'compacted');
 });
 
+/** 1.1.4: the user's Codex config sets its own developer_instructions (a top-level key): a coordinator's rules must not replace them. */
+function userCodexInstructions(env: Record<string, string>): boolean {
+  try {
+    const text = readFileSync(join(env.CODEX_HOME || join(homedir(), '.codex'), 'config.toml'), 'utf8');
+    const top = text.split(/^\s*\[/m)[0];
+    return /^\s*developer_instructions\s*=/m.test(top);
+  } catch { return false; }
+}
+/** 1.1.4: the exit code of the last agent CLI of a cell that ended (absent while it runs or when the shell did not say). */
+const cliExitCodes = new Map<string, number>();
+/** The agent CLI of a cell ended (its shell still runs): for the team it has exited, so a coordinator's wait_for hears it. */
+function cliEnd(cellId: string, code: number | undefined): void {
+  if (!findCell(state, cellId) || !alive.has(cellId)) return;
+  if (code !== undefined) cliExitCodes.set(cellId, code);
+  automation.statuses.set(cellId, 'exited');
+}
+// The launch line's tail posted the end of the CLI (role cells, see termReset.ts): main hears it without any window.
+hooks.on('cliexit', (cellId: string, code?: number) => cliEnd(cellId, code));
+
 // A Claude hook payload named the conversation's transcript (it lives in the config folder of the account the cell runs with).
 hooks.on('transcript', (_cellId: string, sessionId: string, path: string) => contextTracker.noteTranscript(sessionId, path));
 
@@ -1356,7 +1434,8 @@ guardedHandle('automation:execute', (_e, operation: AutomationOperation, input: 
 }, () => Promise.reject(new Error('Unknown operation.')));
 
 guardedHandle('cell:spawn', (_e, req: SpawnCellRequest) => spawnRequest(req), (): SpawnResult => ({ ok: false, error: 'invalid request' }));
-type SpawnResult = { ok: true } | { ok: false; error: string; cliMissing?: CliId; cliStatus?: CliStatus };
+/** `startedWithPrompt`: the startup prompt went to the CLI (the renderer then forgets it; a later start must not send it again). */
+type SpawnResult = { ok: true; startedWithPrompt?: boolean } | { ok: false; error: string; cliMissing?: CliId; cliStatus?: CliStatus };
 async function spawnRequest(req: SpawnCellRequest): Promise<SpawnResult> {
   // A file write that fails (an antivirus lock on the hooks file, a full disk) answers with an error the cell shows, never a
   // rejected call that leaves the cell blank with an MCP token issued.
@@ -1409,12 +1488,24 @@ async function spawnRequestUnsafe(req: SpawnCellRequest): Promise<SpawnResult> {
     if (!existsSync(file)) mode = 'new';
   }
   if (mode === 'resume' && !req.sessionId) mode = 'new';
+  const roleCell = req.profile.cli !== 'shell' ? findCell(state, req.cellId)?.cell : undefined;
+  const role = roleCell?.ssh ? undefined : roleCell?.role;
+  // 1.1.4: a cell with an MCP role starts a new conversation with the tasks of its inbox it has not claimed (its stored
+  // startupPrompt is a one-shot the renderer clears after the first start); a resume the user asked for gets a short note.
+  const promptText = mode === 'new'
+    ? (role ? startupTaskPrompt(state.automation.tasks, req.cellId, role, req.startupPrompt) : req.startupPrompt)
+    : role && req.resumeWithTasks === true && req.sessionConfirmed === true ? resumeTaskPrompt(state.automation.tasks, req.cellId, role) : undefined;
+  // The tasks handed over in the startup prompt count as delivered there (no second notice through the prompt queue).
+  if (mode === 'new' && role && promptText?.trim()) {
+    const handed = new Set(readyStartupTasks(state.automation.tasks, req.cellId).filter((t) => t.delivery === 'pending').map((t) => t.id));
+    if (handed.size) controller.change((st) => ({ ...st, automation: { ...st.automation, tasks: st.automation.tasks.map((t) => (handed.has(t.id) ? { ...t, delivery: 'startup' as const } : t)) } }));
+  }
   let initialPrompt: { file: string; text: string } | undefined;
-  if (mode === 'new' && req.startupPrompt?.trim()) {
+  if (promptText?.trim()) {
     mkdirSync(PROMPTS_DIR, { recursive: true });
     const file = join(PROMPTS_DIR, `${req.cellId}-${(++promptSeq).toString(36)}.txt`);
-    writeFileSync(file, req.startupPrompt, 'utf8');
-    initialPrompt = { file, text: req.startupPrompt };
+    writeFileSync(file, promptText, 'utf8');
+    initialPrompt = { file, text: promptText };
   }
   const env: Record<string, string> = baseEnv;
   // Claude Code's own requests to 127.0.0.1 (http hooks, the MCP server) would otherwise go through the user's proxy.
@@ -1431,8 +1522,15 @@ async function spawnRequestUnsafe(req: SpawnCellRequest): Promise<SpawnResult> {
     codexNotifyUrl = hooks.prepareCodex(req.cellId);
     codexHooked.delete(req.cellId);
   }
+  // 1.1.4: a coordinator gets its delegation rules as system instructions (none in "ask" mode, see shared/delegation.ts);
+  // the user's own Codex developer_instructions are never replaced. Role cells report the end of their CLI to main.
+  const systemPrompt = mcpConfig && role === 'coordinator' && !(req.profile.cli === 'codex' && userCodexInstructions(env))
+    ? coordinatorSystemRules(delegationOf(state)) ?? undefined : undefined;
   const command = buildLaunchCommand(req.profile, { mode, sessionId: req.sessionId, claudeSettingsPath, codexNotifyUrl,
-    shell: state.settings.shell, model: findCell(state, req.cellId)?.cell.model, initialPrompt, mcp: mcpConfig }) ?? undefined;
+    shell: state.settings.shell, model: findCell(state, req.cellId)?.cell.model, mcp: mcpConfig, systemPrompt,
+    ...(mode === 'new' ? { initialPrompt } : { resumePrompt: initialPrompt }),
+    ...(mcpConfig ? { exitUrl: hooks.exitUrl(req.cellId) } : {}) }) ?? undefined;
+  cliExitCodes.delete(req.cellId);
   verifiedCodex.delete(req.cellId);
   if (req.profile.cli === 'codex' && mode === 'resume' && req.sessionId && req.sessionConfirmed) verifiedCodex.set(req.cellId, req.sessionId);
   automation.runtimeStarted(req.cellId);
@@ -1441,7 +1539,7 @@ async function spawnRequestUnsafe(req: SpawnCellRequest): Promise<SpawnResult> {
   queuePrompt(req.cellId, initialPrompt?.file ?? null);
   ptyHost.spawn({ id: req.cellId, cwd: req.cwd, cols: req.cols, rows: req.rows, env, shell: state.settings.shell, command });
   startupTimer.mark('first-spawn');
-  return { ok: true };
+  return { ok: true, startedWithPrompt: !!initialPrompt };
 }
 guardedOn('cell:kill', (_e, id: string) => {
   noteKill(id);
@@ -1484,12 +1582,14 @@ ipcMain.handle('install:options', (_e, cli?: unknown) => installHandlers.options
 guardedHandle('install:start', (_e, request?: unknown) => installHandlers.start(request), () => ({ ok: false, error: 'invalid' }));
 guardedOn('install:cancel', (_e, id?: unknown) => { installHandlers.cancel(id); });
 ipcMain.handle('install:current', () => installHandlers.current());
-guardedOn('cell:runtime', (_e, cellId: string, status: string, reason?: string, hooked?: boolean) => {
+guardedOn('cell:runtime', (_e, cellId: string, status: string, reason?: string, hooked?: boolean, cliEnded?: boolean, exitCode?: number) => {
   relayCellStatus(_e, cellId, status);
   if (typeof cellId === 'string' && isCellStatus(status)) taskbar.status(cellId, { status, reason: isStatusReason(reason) ? reason : undefined }, senderWindow(_e));
   const found = findCell(state, cellId);
   if (!found || !alive.has(cellId)) return;
   hookWatch.status(cellId, status, hooked === true);
+  // 1.1.3: the agent CLI ended inside a shell that still runs: for the team it has exited (a coordinator's wait_for hears it).
+  if (cliEnded === true) { cliEnd(cellId, typeof exitCode === 'number' && Number.isInteger(exitCode) ? exitCode : undefined); return; }
   // The renderer's StatusTracker decides; heuristics (hooked = false) never yield "ready".
   const next = automationStatusFor(status, reason, hooked === true, automation.statuses.get(cellId));
   if (next) automation.statuses.set(cellId, next);

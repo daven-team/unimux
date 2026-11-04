@@ -44,6 +44,8 @@ export interface SpawnCellRequest {
   sessionConfirmed?: boolean;
   /** First prompt for a new conversation. */
   startupPrompt?: string;
+  /** 1.1.4: the user restarted an agent with an MCP role: a resumed conversation gets a note about its open tasks (restartAgentWithTasks). */
+  resumeWithTasks?: boolean;
 }
 
 export interface McApi {
@@ -56,7 +58,7 @@ export interface McApi {
   retryMcp(): Promise<McpInfo>;
   automation<K extends AutomationOperation>(operation: K, input: AutomationInput<K>): Promise<unknown>;
   /** `cliMissing` = the profile's CLI is not installed: nothing was spawned. */
-  spawnCell(req: SpawnCellRequest): Promise<{ ok: true } | { ok: false; error: string; cliMissing?: CliId; cliStatus?: CliStatus }>;
+  spawnCell(req: SpawnCellRequest): Promise<{ ok: true; startedWithPrompt?: boolean } | { ok: false; error: string; cliMissing?: CliId; cliStatus?: CliStatus }>;
   /** Detected Claude Code / Codex binaries (may still be empty while the first scan runs; `cli:changed` follows). */
   cliStatus(): Promise<CliStatusMap>;
   /** Forgets cached results and detects again (one CLI or both). */
@@ -83,7 +85,8 @@ export interface McApi {
   monitorKill(pid: number): Promise<boolean>;
   /** True only for the first renderer load of this app run (later loads and reloads get false). */
   claimAppStart(): Promise<boolean>;
-  reportCellStatus(cellId: string, status: CellStatus, reason?: StatusReason, hooked?: boolean): void;
+  /** `cliEnded`: the agent CLI ended and its shell is back at the prompt (the terminal process still runs). */
+  reportCellStatus(cellId: string, status: CellStatus, reason?: StatusReason, hooked?: boolean, cliEnded?: boolean, exitCode?: number): void;
   /** True while quitting must ask first (an agent is working and the confirmation is on): main then sends 'app:confirm-quit'. */
   setQuitGuard(ask: boolean): void;
   /** The answer to 'app:confirm-quit': 'asking' at once (the dialog is open), then 'quit' or 'cancel'. */

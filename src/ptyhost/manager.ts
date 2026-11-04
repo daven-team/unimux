@@ -69,7 +69,10 @@ export function resolveShell(kind: ShellKind, env: Record<string, string>, platf
   // An absolute path: node-pty resolves bare names only through this process's own (possibly stale) PATH.
   const pwsh = kind === 'pwsh' ? findOnPath('pwsh.exe', env) : null;
   if (pwsh) return { file: pwsh, args: ['-NoLogo'] };
-  return { file: 'powershell.exe', args: ['-NoLogo'] };
+  // Windows PowerShell by its absolute path too (a bare name depends on this process's PATH, which may lack System32's subfolder).
+  const windowsPowerShell = findOnPath('powershell.exe', env)
+    ?? [join(env.SystemRoot ?? env.SYSTEMROOT ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')].find((file) => existsSync(file));
+  return { file: windowsPowerShell ?? 'powershell.exe', args: ['-NoLogo'] };
 }
 
 const writtenFiles = new Map<string, string>();

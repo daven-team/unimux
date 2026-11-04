@@ -11,6 +11,7 @@ import { contextMessages } from './contextMessages';
 import { convSearchMessages } from './convSearchMessages';
 import { convExportMessages } from './convExportMessages';
 import { dbMessages } from './dbMessages';
+import { delegationMessages } from './delegationMessages';
 import { redisMessages } from './redisMessages';
 import { dbUiMessages } from './dbUiMessages';
 import { detachMessages } from './detachMessages';
@@ -37,6 +38,7 @@ import { sftpViewMessages } from './sftpViewMessages';
 import { remoteEditMessages } from './remoteEditMessages';
 import { shortcutMessages } from './shortcutMessages';
 import { sshMessages } from './sshMessages';
+import { startScreenMessages } from './startScreenMessages';
 import { sshConnectMessages } from './sshConnectMessages';
 import { sshModeMessages } from './sshModeMessages';
 import { sshThemeMessages } from './sshThemeMessages';
@@ -68,6 +70,7 @@ export const messages = {
   ...convSearchMessages,
   ...convExportMessages,
   ...dbMessages,
+  ...delegationMessages,
   ...redisMessages,
   ...dbUiMessages,
   ...detachMessages,
@@ -96,6 +99,7 @@ export const messages = {
   ...remoteEditMessages,
   ...shortcutMessages,
   ...sshMessages,
+  ...startScreenMessages,
   ...sshConnectMessages,
   ...sshModeMessages,
   ...sshThemeMessages,

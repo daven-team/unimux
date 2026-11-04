@@ -1,3 +1,4 @@
+import type { DelegationSettings } from './delegation';
 import type { DetachedWindow } from './detached';
 import type { GridLayout } from './layout';
 import type { Language } from './languages';
@@ -225,6 +226,8 @@ export interface Settings {
   stripScope: StripScope;
   /** 1.0.9: optional panels of the left rail switched on (`true`); absent = off (shared/sidebarPanels.ts). */
   sidePanels?: Partial<Record<'monitor' | 'waiting', boolean>>;
+  /** 1.1.4: how a coordinator delegates and how many agents it uses at once (Settings > Agenci, shared/delegation.ts). */
+  delegation: DelegationSettings;
 }
 
 export interface AppState {

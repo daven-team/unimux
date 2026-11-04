@@ -1,5 +1,7 @@
 import { codexHookOverrides } from './codexHooks';
+import { shellSafeText } from './delegation';
 import { withResetTail } from './termReset';
+import { startClear } from './startScreen';
 import type { Profile, ShellKind } from './types';
 
 export const DEFAULT_PROFILES: Profile[] = [
@@ -73,6 +75,23 @@ export interface LaunchOptions {
    * (keeping newlines and quotes intact); cmd gets the text inline on one line.
    */
   initialPrompt?: { file: string; text: string };
+  /**
+   * 1.1.4: a prompt for a resumed conversation (the user restarted an agent that has open tasks); same form as initialPrompt.
+   * Claude: `claude <prompt> --resume <id>`, Codex: `codex resume <id> ... <prompt>`.
+   */
+  resumePrompt?: { file: string; text: string };
+  /**
+   * 1.1.4: extra system instructions (a coordinator's delegation rules): Claude `--append-system-prompt`, Codex
+   * `-c developer_instructions`. One line of plain words (see delegation.ts shellSafeText); cleaned again here.
+   */
+  systemPrompt?: string;
+  /** 1.1.4: URL the launch line posts to once the CLI ended (with its exit code), see termReset.ts withResetTail. */
+  exitUrl?: string;
+}
+
+/** Quotes the system instructions as one argument of the cell's shell (plain words only, see shellSafeText). */
+function systemArg(text: string, shell: ShellKind = 'pwsh'): string {
+  return shell === 'cmd' ? `"${shellSafeText(text)}"` : shellQuote(shellSafeText(text), shell);
 }
 
 function promptArg(p: { file: string; text: string }, shell: ShellKind = 'pwsh'): string {
@@ -86,11 +105,19 @@ export function buildCliCommand(profile: Profile, opts: LaunchOptions): string |
   // A cell override replaces a profile's model flag instead of giving the CLI duplicates.
   const args = (opts.model ? profile.args.replace(/(?:^|\s)(?:--model(?:=|\s+)|-m\s+)(?:"[^"]*"|'[^']*'|[^\s]+)/g, ' ') : profile.args).trim();
   const parts: string[] = [];
+  // 1.1.3: Claude Code takes several files after --mcp-config (2.1.3xx), so a prompt after the options would be read as one
+  // more config file ("MCP config file not found: <the task>") and the CLI would exit: the prompt goes first.
+  const prompt = opts.mode === 'new' ? opts.initialPrompt : opts.sessionId ? opts.resumePrompt : undefined;
+  const claudePrompt = profile.cli === 'claude' && prompt?.text.trim() ? promptArg(prompt, opts.shell) : null;
+  const system = opts.systemPrompt ? shellSafeText(opts.systemPrompt) : '';
   if (profile.cli === 'claude') {
     parts.push('claude');
+    if (claudePrompt) parts.push(claudePrompt);
     if (opts.sessionId) parts.push(opts.mode === 'resume' ? '--resume' : '--session-id', opts.sessionId);
     if (opts.claudeSettingsPath) parts.push('--settings', shellQuote(opts.claudeSettingsPath, opts.shell));
     if (opts.mcp?.claudeConfigPath) parts.push('--mcp-config', shellQuote(opts.mcp.claudeConfigPath, opts.shell));
+    // One argument (`--append-system-prompt <prompt>`), never variadic: it may stand before --mcp-config.
+    if (system) parts.push('--append-system-prompt', systemArg(system, opts.shell));
   } else if (profile.cli === 'codex') {
     parts.push('codex');
     if (opts.mode === 'resume' && opts.sessionId) parts.push('resume', opts.sessionId);
@@ -107,6 +134,8 @@ export function buildCliCommand(profile: Profile, opts: LaunchOptions): string |
       // Codex gives a tool 60 s by default; create_grid with worktrees and close_grid can take longer (a number: no quoting).
       parts.push('-c', `mcp_servers.unimux.tool_timeout_sec=${MCP_TOOL_TIMEOUT_SEC}`);
     }
+    // A TOML literal string (single quotes; the text has none): PowerShell 5.1 passes it whole, cmd within its double quotes.
+    if (system) parts.push('-c', opts.shell === 'cmd' ? `"developer_instructions='${system}'"` : shellQuote(`developer_instructions='${system}'`, opts.shell));
   } else {
     return null;
   }
@@ -115,15 +144,16 @@ export function buildCliCommand(profile: Profile, opts: LaunchOptions): string |
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(opts.model)) throw new Error('Invalid model name.');
     parts.push('--model', shellQuote(opts.model, opts.shell));
   }
-  if (opts.mode === 'new' && opts.initialPrompt?.text.trim()) parts.push(promptArg(opts.initialPrompt, opts.shell));
+  if (!claudePrompt && profile.cli !== 'claude' && prompt?.text.trim()) parts.push(promptArg(prompt, opts.shell));
   return parts.join(' ');
 }
 
 /**
- * Line typed into the cell's shell to start the agent: the command, then a tail that runs when the CLI returned (also after a
- * crash or kill) and switches off the mouse / focus / paste modes a dead CLI leaves on (see termReset.ts). Null for shell profiles.
+ * Line typed into the cell's shell to start the agent: a clear (1.1.5: the launch line never stays on screen, the cell's start
+ * card covers it until the CLI is up, see startScreen.ts), the command, then a tail that runs when the CLI returned (also after
+ * a crash or kill) and switches off the mouse / focus / paste modes a dead CLI leaves on (see termReset.ts). Null for shell profiles.
  */
 export function buildLaunchCommand(profile: Profile, opts: LaunchOptions): string | null {
   const command = buildCliCommand(profile, opts);
-  return command === null ? null : withResetTail(command, opts.shell);
+  return command === null ? null : startClear(opts.shell) + withResetTail(command, opts.shell, opts.exitUrl);
 }
