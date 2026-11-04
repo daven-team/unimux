@@ -45,5 +45,8 @@ export function LazyScreen({ load, panel }: { load: Loader; panel?: boolean }) {
     if (!screen) { screen = lazy(load); screens.set(load, screen); }
     return screen;
   }, [load, attempt]);
-  return <Boundary panel={panel} onRetry={() => setAttempt((n) => n + 1)}><Suspense fallback={null}><Screen /></Suspense></Boundary>;
+  // 1.1.3: while a side panel's code loads, an empty column holds its place: the usage box under it stays at the bottom of
+  // the sidebar instead of jumping up for a few frames (scripts/verify-sidebar-anchor.mjs).
+  const fallback = panel ? <div className="sidebar-content" aria-busy="true" /> : null;
+  return <Boundary panel={panel} onRetry={() => setAttempt((n) => n + 1)}><Suspense fallback={fallback}><Screen /></Suspense></Boundary>;
 }
