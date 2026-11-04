@@ -1,4 +1,4 @@
-import { automationSchemas, isClosedTask, projectCount, pruneAutomation, PROJECT_ITEM_LIMIT, taskPrompt, type AgentMessage, type AgentRole, type AgentRuntimeStatus, type AgentTask, type AutomationOperation, type AutomationState } from '../shared/automation';
+import { automationSchemas, isClosedTask, projectCount, pruneAutomation, PROJECT_ITEM_LIMIT, taskPrompt, waitMaxFor, type AgentMessage, type AgentRole, type AgentRuntimeStatus, type AgentTask, type AutomationOperation, type AutomationState } from '../shared/automation';
 import { normalizeCellDir } from '../shared/gridTemplates';
 import { CELL_COLORS, cellCwd, closeTab, addTab, findCell, getProfile, setActiveTab, uid, updateCell, upsertPreset, upsertSnippet } from '../shared/state';
 import { layoutForCount, layoutFromRows } from '../shared/layout';
@@ -6,6 +6,9 @@ import type { AppState, Cell, Tab, Worktree } from '../shared/types';
 import { CLI_NAMES, type CliId } from '../shared/cliStatus';
 import type { StateController } from './stateController';
 import type { ContextUsage } from '../shared/contextUsage';
+import { delegationRefusal } from '../shared/delegation';
+import { reassignInput } from '../shared/teamPanel';
+import { enqueuePrompt, type PromptQueue } from '../shared/promptQueue';
 
 export interface AutomationDependencies {
   createWorktree(path: string, name: string): Promise<Worktree>;
@@ -19,7 +22,37 @@ export interface AutomationDependencies {
   contextOf?(cellId: string): ContextUsage | null;
   /** Runtime must verify a confirmed, compatible session before killing and relaunching; never type a shell command. */
   restartAgent?(cellId: string): Promise<{ restarted: boolean; reason?: string }>;
+  /** Starts an agent whose CLI or terminal ended again, the way the app starts a cell (1.1.4, update_agent restart:true). */
+  startAgent?(cellId: string): Promise<{ started: boolean; reason?: string }>;
+  /** Tells a running agent that something waits in its MCP inbox (a short notice, see AutomationService.deliver). */
   deliver(cellId: string, text: string): Promise<void>;
+}
+/** What the MCP server knows of a cell's client: connected (listed or called tools since its token was issued), waiting, off. */
+export type McpConnection = 'connected' | 'waiting' | 'off';
+export interface McpProbe { connection(cellId: string): McpConnection }
+/** An agent of a watched open task that never connected to MCP this long after its start counts as stalled (wait_for). */
+export const STALL_CONNECT_MS = 90_000;
+/** An agent of a watched open task that waits for the user (permission, question) this long counts as stalled. */
+export const STALL_ATTENTION_MS = 120_000;
+/** How long after an agent's exit wait_for tells it (see waitFor). */
+export const EXIT_GRACE_MS = 1000;
+
+/** The model-facing note of an item the agent was not told about yet (never an instruction to retry). */
+export const QUEUED_NOTE = 'Queued for the worker; it sees it on read_inbox/wait_for.';
+/** Queue items of unimux notices carry this id prefix: the next notice is merged into one that was not sent yet. */
+export const NOTICE_PREFIX = 'unimux-';
+/**
+ * Adds an inbox notice to a cell's prompt queue (shared/promptQueue.ts): it goes out when the agent sits idle at its prompt.
+ * A notice that has not gone out yet is merged with the new one, so a burst of tasks costs the agent one turn.
+ */
+export function queueNotice(queue: PromptQueue | undefined, text: string, id: string): PromptQueue | undefined {
+  const pending = queue?.items.find((item) => item.id.startsWith(NOTICE_PREFIX));
+  if (!pending) return enqueuePrompt(queue, text, `${NOTICE_PREFIX}${id}`, true);
+  const strip = (t: string) => t.replace(/^unimux: /, '').replace(/: read_inbox$/, '');
+  const parts = strip(pending.text).split('; ');
+  const next = parts.length >= 5 || pending.text.startsWith('unimux: several ')
+ ? 'unimux: several new tasks and messages: read_inbox' : `unimux: ${[...parts, strip(text)].join('; ')}: read_inbox`;
+  return { ...queue!, items: queue!.items.map((item) => item === pending ? { ...item, text: next } : item) };
 }
 /** list_agents: the context window use of an agent's conversation, when known. */
 const contextField = (usage: ContextUsage | null | undefined) =>
@@ -30,7 +63,9 @@ const CLOSED = new Set(['completed', 'cancelled']);
 export type WaitResult =
   | { event: 'timeout' | 'cancelled' }
   | { event: 'inbox'; unreadMessages: number; queuedTasks: number }
-  | { event: 'tasks' | 'exited'; tasks: Array<{ id: string; status: string; summary?: string; blockedReason?: string }>; exitedCellIds?: string[] };
+  | { event: 'tasks' | 'exited' | 'stalled'; tasks: WaitRow[]; exitedCellIds?: string[]; stalled?: Array<{ cellId: string; reason: string; sinceSec: number }> }
+  | { event: 'alreadyClosed'; tasks: WaitRow[]; hint: string };
+type WaitRow = { id: string; status: string; summary?: string; blockedReason?: string; reason?: string };
 const UI_ONLY = new Set<AutomationOperation>(['set_paused', 'set_role', 'mark_pasted', 'remove_items']);
 const taskLimit = `Task limit reached (${PROJECT_ITEM_LIMIT} open tasks in this project). Complete or cancel some first.`;
 const messageLimit = `Message limit reached (${PROJECT_ITEM_LIMIT} unread messages in this project). Read some first.`;
@@ -44,6 +79,9 @@ interface IdempotentEntry { at: number; controller: AbortController; callers: nu
 export class StatusMap extends Map<string, AgentRuntimeStatus> {
   onChange?: () => void;
   private listeners?: Set<() => void>;
+  /** When each cell entered its current status (Date.now()). */
+  private sinceAt = new Map<string, number>();
+  since(key: string): number | undefined { return this.sinceAt.get(key); }
   subscribe(listener: () => void): () => void {
     (this.listeners ??= new Set()).add(listener);
     return () => { this.listeners?.delete(listener); };
@@ -54,12 +92,15 @@ export class StatusMap extends Map<string, AgentRuntimeStatus> {
   }
   override set(key: string, value: AgentRuntimeStatus): this {
     const changed = super.get(key) !== value;
+    // Map's constructor may call set before the field exists.
+    if (this.sinceAt && (changed || !this.sinceAt.has(key))) this.sinceAt.set(key, Date.now());
     super.set(key, value);
     if (changed) this.changed();
     return this;
   }
   override delete(key: string): boolean {
     const deleted = super.delete(key);
+    this.sinceAt.delete(key);
     if (deleted) this.changed();
     return deleted;
   }
@@ -71,11 +112,40 @@ export class AutomationService {
   /** Call on a confirmed runtime spawn so a user-initiated restart clears deferred launch settings. */
   runtimeStarted(cellId: string): void {
     this.pendingRestart.delete(cellId); this.seenInbox.delete(cellId); this.exitNoticed.delete(cellId); this.shownPrompts.delete(cellId);
+    this.startedAt.set(cellId, Date.now());
+    this.exitCodes.delete(cellId);
     // It runs again: a later exit is news to the agents waiting on its tasks.
     for (const noticed of this.exitNoticed.values()) noticed.delete(cellId);
+    // What could not be told while it was not running is told now (the prompt queue waits until it sits idle at its prompt).
+    const timer = setTimeout(() => void this.deliverPendingTo(cellId), 1000);
+    (timer as { unref?: () => void }).unref?.();
   }
+  /** The cell's terminal ended with this exit code (list_agents verbose). */
+  noteExit(cellId: string, code: number | undefined): void { if (typeof code === 'number') this.exitCodes.set(cellId, code); }
   /** The cell left the state for good. */
-  forgetCell(cellId: string): void { this.pendingRestart.delete(cellId); this.seenInbox.delete(cellId); this.exitNoticed.delete(cellId); this.shownPrompts.delete(cellId); this.statuses.delete(cellId); }
+  forgetCell(cellId: string): void { this.pendingRestart.delete(cellId); this.seenInbox.delete(cellId); this.exitNoticed.delete(cellId); this.shownPrompts.delete(cellId); this.statuses.delete(cellId); this.startedAt.delete(cellId); this.exitCodes.delete(cellId); }
+  /** When each cell's agent was last started in this run of the app (Date.now()). */
+  private startedAt = new Map<string, number>();
+  private exitCodes = new Map<string, number>();
+  /** The MCP server tells whether a cell's client connected (set by UnimuxMcpServer). */
+  mcpProbe?: McpProbe;
+  /** Why an agent of an open task is stalled now (with a key that is new for each episode), or when it would be. */
+  private stall(cellId: string, now: number): { reason: string; key: string; since: number } | { at: number } | undefined {
+    const status = this.statuses.get(cellId);
+    if (status === 'exited' || status === undefined) return undefined;
+    const started = this.startedAt.get(cellId);
+    const connection = this.mcpProbe?.connection(cellId);
+    if (started !== undefined && connection && connection !== 'connected') {
+      if (now - started >= STALL_CONNECT_MS) return { reason: 'never connected to unimux MCP since its start (stuck at a login, trust or startup question?): tell the user', key: `connect@${started}`, since: started };
+      return { at: started + STALL_CONNECT_MS };
+    }
+    const since = this.statuses.since(cellId);
+    if (status === 'needs_attention' && since !== undefined) {
+      if (now - since >= STALL_ATTENTION_MS) return { reason: 'waits for the user (a permission or a question): tell the user', key: `attention@${since}`, since };
+      return { at: since + STALL_ATTENTION_MS };
+    }
+    return undefined;
+  }
   /** Task prompts read_inbox has shown an agent in full during this run of its CLI: the next listings leave them out (1.1.2). */
   private shownPrompts = new Map<string, Set<string>>();
   promptsShown(cellId: string): Set<string> {
@@ -92,7 +162,29 @@ export class AutomationService {
   }
   private delivering = new Set<string>();
   private recent = new Map<string, IdempotentEntry>();
-  constructor(readonly state: StateController, private readonly deps: AutomationDependencies) {}
+  constructor(readonly state: StateController, private readonly deps: AutomationDependencies) {
+    // Orphans of an earlier version (tasks of agents closed or archived before 1.1.4) are cleaned when the service starts.
+    this.cancelOrphans();
+  }
+  /**
+   * Cancels open tasks whose cell is in no grid of its project any more ("agent closed": the user closed or archived it), so
+   * nobody waits for them forever; a coordinator's wait_for on them hears it. Main calls it after the grids changed.
+   */
+  cancelOrphans(): number {
+    const s = this.state.get();
+    const inTabs = new Set<string>();
+    for (const project of s.projects) for (const tab of project.tabs) for (const cell of tab.cells) inTabs.add(`${project.id}/${cell.id}`);
+    const orphans = s.automation.tasks.filter((t) => !isClosedTask(t) && !inTabs.has(`${t.projectId}/${t.cellId}`));
+    if (!orphans.length) return 0;
+    const ids = new Set(orphans.map((t) => t.id));
+    const now = Date.now();
+    this.state.change((state) => {
+      let next: AppState = { ...state, automation: { ...state.automation, tasks: state.automation.tasks.map((t) => ids.has(t.id) && !isClosedTask(t) ? { ...t, status: 'cancelled' as const, cancelReason: 'agent closed', updatedAt: now } : t) } };
+      for (const t of orphans) next = this.log(next, t.projectId, 'task_cancelled', `${t.title} (agent closed)`, t.cellId);
+      return next;
+    }, undefined, true);
+    return orphans.length;
+  }
 
   private actor(cellId: string) {
     const found = findCell(this.state.get(), cellId);
@@ -116,12 +208,13 @@ export class AutomationService {
   }
   private target(cellId: string, actorId?: string) {
     const found = findCell(this.state.get(), cellId);
-    if (!found || !found.cell.role || !!found.cell.ssh || getProfile(this.state.get(), found.cell.profileId).cli === 'shell') throw new Error('Target must be an active agent cell with MCP enabled.');
+    if (!found || !found.cell.role || !!found.cell.ssh || getProfile(this.state.get(), found.cell.profileId).cli === 'shell') throw new Error('Target must be an active agent cell with MCP enabled: see list_agents for cell IDs.');
     this.project(found.project.id, actorId);
     return found;
   }
   private coordinator(actorId?: string) {
-    if (actorId && this.role(actorId) !== 'coordinator') throw new Error('This operation requires the coordinator role.');
+    if (actorId && this.role(actorId) !== 'coordinator') throw new Error('This operation requires the coordinator role: ask your coordinator (send_message) instead.');
+
   }
   private log(state: AppState, projectId: string, action: string, detail: string, cellId?: string): AppState {
     return { ...state, automation: { ...state.automation, events: [...state.automation.events,
@@ -176,6 +269,9 @@ export class AutomationService {
           gridId: tab.id, gridName: tab.name, gridColor: tab.color, profileId: cell.profileId, model: cell.model, color: cell.color,
           role: cell.role ?? null,
           status: this.statuses.get(cell.id) ?? 'unknown', cwd: cellCwd(project, cell),
+          mcp: (cell.role ? this.mcpProbe?.connection(cell.id) ?? 'off' : 'off') as McpConnection,
+          ...(this.statuses.since(cell.id) !== undefined ? { since: Math.max(0, Math.round((Date.now() - this.statuses.since(cell.id)!) / 1000)) } : {}),
+          ...(this.exitCodes.has(cell.id) ? { lastExitCode: this.exitCodes.get(cell.id) } : {}),
           ...contextField(this.deps.contextOf?.(cell.id)),
           tasks: this.state.get().automation.tasks.filter((t) => t.cellId === cell.id && !CLOSED.has(t.status)).map(({ id, title, status }) => ({ id, title, status })),
         })));
@@ -250,8 +346,9 @@ export class AutomationService {
         if (actorId && actorId !== a.cellId) this.coordinator(actorId);
         for (const dependencyId of a.dependsOn ?? []) {
           const dependency = this.state.get().automation.tasks.find((t) => t.id === dependencyId);
-          if (!dependency || dependency.projectId !== found.project.id) throw new Error('Task dependencies must exist in this project.');
+          if (!dependency || dependency.projectId !== found.project.id) throw new Error(`Task dependency not found in this project: ${dependencyId}. Task IDs come from get_tasks.`);
         }
+        if (actorId && actorId !== a.cellId) { const refusal = delegationRefusal(this.state.get(), actorId, { taskCellId: a.cellId }); if (refusal) throw new Error(refusal); }
         const task: AgentTask = { ...a, ...(a.dependsOn ? { dependsOn: [...new Set(a.dependsOn)] } : {}), id: uid(), projectId: found.project.id, fromCellId: actorId,
           status: 'queued', delivery: 'pending', createdAt: Date.now(), updatedAt: Date.now() };
         this.state.change((s) => {
@@ -276,13 +373,20 @@ export class AutomationService {
         if (!task) throw new Error('Task not found.');
         this.project(task.projectId, actorId);
         if (actorId && task.cellId !== actorId) this.coordinator(actorId);
-        if (['completed', 'cancelled'].includes(task.status)) throw new Error('Task is already closed.');
-        if (a.status === 'in_progress' && this.blockedBy(task).length) throw new Error('Task dependencies have not completed.');
-        if (a.status === 'completed' && !a.result) throw new Error('Completed tasks require a result.');
-        if (a.status === 'blocked' && !a.blockedReason) throw new Error('Blocked tasks require a reason.');
+        if (a.cellId !== undefined) return this.reassign(task, a.cellId, actorId);
+        if (!a.status) throw new Error('Pass status (in_progress, blocked, completed, cancelled), or cellId to reassign the task.');
+        if (['completed', 'cancelled'].includes(task.status)) throw new Error(`Task is already closed (${task.status}) and cannot be reopened; update_task {taskId, cellId} makes a new task of a cancelled one.`);
+
+        const blockedBy = this.blockedBy(task);
+        if (a.status === 'in_progress' && blockedBy.length) throw new Error(`Task dependencies have not completed: blockedBy [${blockedBy.join(', ')}]; wait_for them.`);
+        if (a.status === 'completed' && !a.result) throw new Error('Completed tasks require a result: pass result {summary, files, tests}.');
+        if (a.status === 'blocked' && !a.blockedReason) throw new Error('Blocked tasks require a reason: pass blockedReason.');
         const next: AgentTask = { ...task, status: a.status, result: a.result, blockedReason: a.blockedReason, updatedAt: Date.now() };
         this.state.change((s) => this.log({ ...s, automation: { ...s.automation, tasks: s.automation.tasks.map((t) => t.id === task.id ? next : t) } }, task.projectId, `task_${a.status}`, task.title, actorId), undefined, !!actorId);
-        if (a.status !== 'cancelled') this.statuses.set(task.cellId, a.status === 'in_progress' ? 'working' : a.status === 'blocked' ? 'needs_attention' : 'ready');
+        // Only the agent's own report says what it does now; a coordinator closing a dead worker's task must not hide "exited".
+        const alive = (this.deps.isCellRunning?.(task.cellId) ?? true) && this.statuses.get(task.cellId) !== 'exited';
+        if (a.status !== 'cancelled' && actorId === task.cellId && alive) this.statuses.set(task.cellId, a.status === 'in_progress' ? 'working' : a.status === 'blocked' ? 'needs_attention' : 'ready');
+        if (a.status === 'completed') await this.deliverReady(task.id);
         return next;
       }
       case 'send_message': {
@@ -448,7 +552,8 @@ export class AutomationService {
     if (a.profileId !== undefined) patch.profileId = a.profileId;
     if (a.model !== undefined) patch.model = a.model ?? undefined;
     const launchChanged = (a.profileId !== undefined && a.profileId !== found.cell.profileId) || (a.model !== undefined && (a.model ?? undefined) !== found.cell.model);
-    const running = this.deps.isCellRunning?.(a.cellId) ?? this.statuses.get(a.cellId) !== 'exited';
+    // A terminal whose agent CLI ended (status exited) runs no agent: a restart starts it again instead.
+    const running = (this.deps.isCellRunning?.(a.cellId) ?? true) && this.statuses.get(a.cellId) !== 'exited';
     this.state.change((s) => this.log(updateCell(s, a.cellId, patch), found.project.id, 'agent_updated', a.name ?? found.cell.name ?? a.cellId, actorId));
     if (launchChanged && running) this.pendingRestart.add(a.cellId);
     if (!running) this.pendingRestart.delete(a.cellId);
@@ -457,6 +562,14 @@ export class AutomationService {
       if (!this.deps.restartAgent) restartReason = 'Safe runtime restart is unavailable.';
       else {
         try { const result = await this.deps.restartAgent(a.cellId); restarted = result.restarted; restartReason = result.reason; }
+        catch (error) { restartReason = error instanceof Error ? error.message : String(error); }
+      }
+    } else if (a.restart) {
+      // 1.1.4: an exited team agent starts again (its new start carries its open tasks); it was a silent no-op before.
+      if (!found.cell.role) restartReason = 'Only team agents (with a role) can be started again through MCP; ask the user to restart the cell.';
+      else if (!this.deps.startAgent) restartReason = 'Starting an exited agent is unavailable here; ask the user to restart the cell.';
+      else {
+        try { const result = await this.deps.startAgent(a.cellId); restarted = result.started; restartReason = result.started ? 'The agent had exited; it was started again.' : result.reason; }
         catch (error) { restartReason = error instanceof Error ? error.message : String(error); }
       }
     }
@@ -509,6 +622,7 @@ export class AutomationService {
     }
     if (covered.size !== layout.cols * layout.rows) throw new Error('Grid areas must cover the full layout.');
     if (actorId && project.tabs.reduce((n, t) => n + t.cells.length, 0) + cells.length > 100) throw new Error('Agent-created grids are limited to 100 project cells.');
+    if (actorId) { const refusal = delegationRefusal(this.state.get(), actorId, { newAgents: cells.length }); if (refusal) throw new Error(refusal); }
     const newTasks = cells.filter((c) => c.prompt && c.role).length;
     if (newTasks && projectCount(this.makeRoom(this.state.get(), { tasks: { [project.id]: newTasks } }).tasks, project.id) + newTasks > PROJECT_ITEM_LIMIT) throw new Error(taskLimit);
     const created: Worktree[] = [];
@@ -564,13 +678,16 @@ export class AutomationService {
             continue;
           }
           const dependsOn = [...new Set(afterOf(i) ?? [])].map((j) => taskIds.get(j)!);
+          // A task that waits for others (after) is not the startup prompt: the agent would start it at once, or poll wait_for
+          // turn after turn. It starts with a short "wait to be told" prompt instead (one cheap turn, which also makes its
+          // CLI report turn ends, so the prompt queue can reach it), and the task goes to it when its prerequisites complete.
           const task: AgentTask = { id: uid(), projectId: project.id, cellId: cell.id, fromCellId: actorId,
-            title: cells[i].name ?? `${a.name || grid.name} ${i + 1}`, prompt: cells[i].prompt!, status: 'queued', delivery: 'startup', createdAt: Date.now(), updatedAt: Date.now(),
+            title: cells[i].name ?? `${a.name || grid.name} ${i + 1}`, prompt: cells[i].prompt!, status: 'queued', delivery: dependsOn.length ? 'pending' : 'startup', createdAt: Date.now(), updatedAt: Date.now(),
             ...(dependsOn.length ? { dependsOn } : {}) };
           taskIds.set(i, task.id);
           taskByCell[cell.id] = task.id;
           tasks.push(task);
-          next = updateCell(next, cell.id, { startupPrompt: taskPrompt(task) });
+          next = updateCell(next, cell.id, { startupPrompt: dependsOn.length ? waitingPrompt(task) : taskPrompt(task) });
         }
         next = { ...next, automation: { ...next.automation, tasks: [...next.automation.tasks, ...tasks] } };
         // Automation must preserve the user's active project/tab and keyboard focus.
@@ -605,30 +722,74 @@ export class AutomationService {
     if (!actorId) throw new Error('Waiting requires an authenticated agent.');
     const own = this.actor(actorId).project;
     const ids = a.taskIds ? [...new Set(a.taskIds)] : undefined;
+    const closedAtStart = new Set<string>();
     for (const taskId of ids ?? []) {
       const task = this.state.get().automation.tasks.find((t) => t.id === taskId);
-      if (!task) throw new Error(`Task not found: ${taskId}`);
+      if (!task) throw new Error(`Task not found: ${taskId}. Task IDs come from get_tasks or read_inbox.`);
+      if (isClosedTask(task)) closedAtStart.add(task.id);
       this.project(task.projectId, actorId);
       // Same visibility as get_tasks: workers only see their own tasks, coordinators the project's.
       if (task.cellId !== actorId && this.role(actorId) !== 'coordinator') throw new Error('Task not found.');
     }
-    const row = (t: AgentTask) => ({ id: t.id, status: t.status, summary: t.result?.summary, blockedReason: t.blockedReason });
+    const cap = waitMaxFor(getProfile(this.state.get(), this.actor(actorId).cell.profileId).cli);
+    const timeoutSec = a.timeoutSec ?? Math.min(60, cap);
+    if (timeoutSec > cap) throw new Error(`timeoutSec is at most ${cap} for your CLI; call wait_for again after a timeout.`);
+    const row = (t: AgentTask) => ({ id: t.id, status: t.status, summary: t.result?.summary, blockedReason: t.blockedReason, reason: t.cancelReason });
+    // Already closed ids would make every call return at once (a hot loop): they are answered once, with a hint.
+    if (ids) {
+      const listed = ids.map((taskId) => this.state.get().automation.tasks.find((t) => t.id === taskId)!);
+      if (listed.every(isClosedTask)) return Promise.resolve({ event: 'alreadyClosed', tasks: listed.map(row), hint: 'These tasks are closed already; wait_for only open task IDs (get_tasks lists them).' });
+    }
+    let nextCheck: number | undefined;
     const check = (): WaitResult | undefined => {
       const snapshot = this.state.get();
       this.actor(actorId);
       const tasks = snapshot.automation.tasks;
+      nextCheck = undefined;
       if (ids) {
         const listed = ids.map((taskId) => tasks.find((t) => t.id === taskId)).filter((t): t is AgentTask => !!t);
-        const finished = listed.filter((t) => t.status !== 'queued' && t.status !== 'in_progress');
-        if (a.all ? listed.length > 0 && finished.length === listed.length : finished.length > 0) return { event: 'tasks', tasks: listed.map(row) };
+        // Tasks that were closed when the wait began do not end it (the caller passed them along with open ones).
+        const finished = listed.filter((t) => t.status !== 'queued' && t.status !== 'in_progress' && !closedAtStart.has(t.id));
+        const done = listed.filter((t) => t.status !== 'queued' && t.status !== 'in_progress');
+        if (a.all ? listed.length > 0 && done.length === listed.length : finished.length > 0) return { event: 'tasks', tasks: listed.map(row) };
+        const open = [...new Set(listed.filter((t) => t.status === 'queued' || t.status === 'in_progress').map((t) => t.cellId))];
+        // An agent that left the grids has its tasks cancelled ("agent closed"): that change ends the wait with event "tasks".
+        if (open.some((cellId) => !snapshot.projects.some((p) => p.tabs.some((t) => t.cells.some((c) => c.id === cellId))))) {
+          if (this.cancelOrphans()) return undefined;
+        }
         const noticed = this.exitNoticed.get(actorId);
-        const exited = [...new Set(listed.filter((t) => t.status === 'queued' || t.status === 'in_progress').map((t) => t.cellId))]
-          .filter((cellId) => !noticed?.has(cellId) && (this.statuses.get(cellId) === 'exited' || !findCell(snapshot, cellId)));
+        const now = Date.now();
+        // An exit is told after a short grace: a grid the user closes stops its agents first and leaves the tabs a moment later,
+        // and then the waiter hears the cancellation instead of an exit.
+        const exited = open.filter((cellId) => {
+          if (noticed?.has(cellId)) return false;
+          if (!findCell(snapshot, cellId)) return true;
+          if (this.statuses.get(cellId) !== 'exited') return false;
+          const since = this.statuses.since(cellId) ?? 0;
+          if (now - since >= EXIT_GRACE_MS) return true;
+          nextCheck = Math.min(nextCheck ?? Infinity, since + EXIT_GRACE_MS);
+          return false;
+        });
         if (exited.length) {
           const set = noticed ?? new Set<string>();
           for (const cellId of exited) set.add(cellId);
           this.exitNoticed.set(actorId, set);
           return { event: 'exited', exitedCellIds: exited, tasks: listed.map(row) };
+        }
+        // Agents that never got going or wait for the user: told once per waiter and episode (a new start or attention is new).
+        const stalledSeen = this.stallNoticed.get(actorId) ?? new Set<string>();
+        const stalled: Array<{ cellId: string; reason: string; sinceSec: number }> = [];
+        for (const cellId of open) {
+          const stall = this.stall(cellId, now);
+          if (!stall) continue;
+          if ('at' in stall) { nextCheck = Math.min(nextCheck ?? Infinity, stall.at); continue; }
+          if (stalledSeen.has(`${cellId}:${stall.key}`)) continue;
+          stalledSeen.add(`${cellId}:${stall.key}`);
+          stalled.push({ cellId, reason: stall.reason, sinceSec: Math.round((now - stall.since) / 1000) });
+        }
+        if (stalled.length) {
+          this.stallNoticed.set(actorId, stalledSeen);
+          return { event: 'stalled', stalled, tasks: listed.map(row) };
         }
         return undefined;
       }
@@ -652,7 +813,7 @@ export class AutomationService {
         if (error !== undefined) reject(error); else resolve(result!);
       };
       const cancelled = () => finish({ event: 'cancelled' });
-      const evaluate = () => {
+      let evaluate = () => {
         queued = false;
         if (done) return;
         try { const result = check(); if (result) finish(result); } catch (error) { finish(undefined, error); }
@@ -662,11 +823,24 @@ export class AutomationService {
       if (signal?.aborted) { cancelled(); return; }
       evaluate();
       if (done) return;
+      let scheduled: number | undefined;
+      const schedule = () => { if (nextCheck !== undefined && nextCheck !== scheduled) { scheduled = nextCheck; this.recheckAt(nextCheck, wake, offs); } };
+      const evaluateBefore = evaluate;
+      evaluate = () => { evaluateBefore(); if (!done) schedule(); };
+      schedule();
       offs.push(this.state.subscribe(wake), this.statuses.subscribe(wake));
       signal?.addEventListener('abort', cancelled, { once: true });
-      timer = setTimeout(() => finish({ event: 'timeout' }), a.timeoutSec * 1000);
+      timer = setTimeout(() => finish({ event: 'timeout' }), timeoutSec * 1000);
     });
   }
+  /** A timer for the moment an agent of a watched task would count as stalled (stalls are about time, not about changes). */
+  private recheckAt(at: number | undefined, wake: () => void, offs: Array<() => void>): void {
+    if (at === undefined) return;
+    const timer = setTimeout(wake, Math.max(0, at - Date.now()) + 50);
+    offs.push(() => clearTimeout(timer));
+  }
+  /** Stalled agents a waiter was told about (cellId:episode). */
+  private stallNoticed = new Map<string, Set<string>>();
   /** Agents that exited while a waiter watched their tasks, per waiter: told once, until that agent starts again. */
   private exitNoticed = new Map<string, Set<string>>();
   /** Tasks by id, built once per tasks array (a listing asked a linear search per dependency of every task). */
@@ -701,8 +875,12 @@ export class AutomationService {
     try {
       if (this.state.get().automation.paused) throw new Error('Automation is paused by the user.');
       this.target(cellId, actorId);
-      const prompt = kind === 'task' ? taskPrompt(item as AgentTask) : `[Unimux message ${id} from ${item.fromCellId ?? 'user'}]\n${(item as AgentMessage).text}\nRead it with read_inbox (acknowledge:true).`;
-      await this.deps.deliver(cellId, prompt);
+      // A short notice, not the text: the agent reads the item itself (read_inbox), so nothing long is typed into its prompt.
+      const from = item.fromCellId ? findCell(this.state.get(), item.fromCellId)?.cell.name ?? item.fromCellId : 'the user';
+      const notice = kind === 'task'
+        ? `unimux: new task ${id} "${(item as AgentTask).title.slice(0, 80)}" from ${from}: read_inbox`
+        : `unimux: new message ${id} from ${from}: read_inbox`;
+      await this.deps.deliver(cellId, notice);
     } catch (error) { deliveryError = error instanceof Error ? error.message : String(error); }
     finally { this.delivering.delete(id); }
     this.state.change((s) => ({ ...s, automation: { ...s.automation,
@@ -711,4 +889,41 @@ export class AutomationService {
     } }), undefined, !!actorId);
     return { delivery: deliveryError ? 'pending' : 'native', deliveryError };
   }
+  /** A task completed: the pending tasks that waited only for it are delivered now (create_task dependsOn, create_grid after). */
+  private async deliverReady(completedId: string): Promise<void> {
+    const ready = this.state.get().automation.tasks.filter((t) => t.status === 'queued' && t.delivery === 'pending' && t.dependsOn?.includes(completedId) && this.blockedBy(t).length === 0);
+    for (const task of ready) await this.deliver('task', task.id).catch(() => undefined);
+  }
+  /** The agent started: its pending items (not told while it did not run) are told now. */
+  private async deliverPendingTo(cellId: string): Promise<void> {
+    const automation = this.state.get().automation;
+    if (automation.paused || this.statuses.get(cellId) === 'exited') return;
+    for (const task of automation.tasks.filter((t) => t.cellId === cellId && t.status === 'queued' && t.delivery === 'pending' && this.blockedBy(t).length === 0)) await this.deliver('task', task.id).catch(() => undefined);
+    for (const message of automation.messages.filter((m) => m.toCellId === cellId && !m.readAt && m.delivery === 'pending')) await this.deliver('message', message.id).catch(() => undefined);
+  }
+  /**
+   * update_task {taskId, cellId} (coordinator): a queued task moves to another agent and is delivered there; a cancelled one
+   * (an agent that was closed) becomes a new task for that agent (teamPanel.reassignInput). Others cannot move.
+   */
+  private async reassign(task: AgentTask, cellId: string, actorId?: string) {
+    this.coordinator(actorId);
+    const found = this.target(cellId, actorId);
+    if (found.project.id !== task.projectId) throw new Error('Target must be an agent of the task\'s project: see list_agents.');
+    if (task.status === 'cancelled' || task.status === 'completed') {
+      if (task.status === 'completed') throw new Error('Task is already completed; use create_task for new work.');
+      return this.execute('create_task', { ...reassignInput({ ...task, cellId }), ...(task.dependsOn?.length ? { dependsOn: task.dependsOn } : {}) }, actorId);
+    }
+    if (task.status !== 'queued') throw new Error(`Only a queued task can move to another agent (this one is ${task.status}); cancel it and create_task instead.`);
+    if (task.cellId === cellId) return task;
+    const next: AgentTask = { ...task, cellId, delivery: 'pending', deliveryError: undefined, updatedAt: Date.now() };
+    this.state.change((s) => this.log({ ...s, automation: { ...s.automation, tasks: s.automation.tasks.map((t) => t.id === task.id ? next : t) } }, task.projectId, 'task_reassigned', task.title, actorId), undefined, !!actorId);
+    await this.deliver('task', task.id, actorId).catch(() => undefined);
+    return this.state.get().automation.tasks.find((t) => t.id === task.id) ?? next;
+  }
 }
+
+/** The startup prompt of an agent whose task waits for other tasks (create_grid after): wait to be told, do not poll. */
+export const waitingPrompt = (task: AgentTask): string =>
+  `[Unimux] Your task ${task.id} "${task.title}" starts after tasks ${(task.dependsOn ?? []).join(', ')} complete. ` +
+  'Do not start it and do not poll: unimux will tell you here when it is ready (then read_inbox). Reply only "waiting" now.';
+
