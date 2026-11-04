@@ -31,6 +31,7 @@ export const SHELL_INTEGRATION_ENV = 'UNIMUX_SHELL_INTEGRATION';
  * PowerShell (5.1 and 7): the profile loads as usual, then this wraps the prompt function (D + A before, B after the user's
  * own prompt, which may be oh-my-posh or starship) and PSReadLine's line reader (C once a line was accepted). $? and
  * $LASTEXITCODE are kept for the user's prompt. Without PSReadLine there is no C; the app then takes Enter at the prompt.
+ * 1.1.5: an agent's launch line leaves its CLI's exit code in $__unimuxExit (termReset.ts): D carries that code once.
  */
 export const POWERSHELL_SCRIPT = [
   'if (-not $global:__unimuxShell) {',
@@ -40,7 +41,8 @@ export const POWERSHELL_SCRIPT = [
   '    $ok = $global:?',
   '    $code = $global:LASTEXITCODE',
   '    $e = [char]27; $b = [char]7',
-  '    $status = if ($ok) { 0 } elseif ($code -is [int] -and $code -ne 0) { $code } else { 1 }',
+  '    $cli = $global:__unimuxExit; $global:__unimuxExit = $null',
+  '    $status = if ($cli -is [int]) { $cli } elseif ($ok) { 0 } elseif ($code -is [int] -and $code -ne 0) { $code } else { 1 }',
   '    $text = if ($global:__unimuxPrompt) { & $global:__unimuxPrompt } else { "PS $($executionContext.SessionState.Path.CurrentLocation)> " }',
   '    $global:LASTEXITCODE = $code',
   '    "$e]133;D;$status$b$e]133;A$b$text$e]133;B$b"',

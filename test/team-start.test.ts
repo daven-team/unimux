@@ -107,7 +107,7 @@ describe('launch lines of team agents', () => {
   it('posts the end of the CLI with its exit code from the reset tail of every shell', () => {
     const url = 'http://127.0.0.1:5555/x/cell-1/0123456789abcdef';
     const ps = buildLaunchCommand(P.claude, { mode: 'new', exitUrl: url })!;
-    expect(ps).toMatch(/^try \{ claude \} finally \{ \$__mcExit = \$LASTEXITCODE; curl\.exe -s --noproxy '\*' -m 2 -X POST "http:\/\/127\.0\.0\.1:5555\/x\/cell-1\/0123456789abcdef\/\$__mcExit" \*> \$null; \[Console\]::Write\(.*\); \$global:LASTEXITCODE = \$__mcExit \}$/);
+    expect(ps).toMatch(/^Clear-Host; try \{ claude \} finally \{ \$__mcExit = \$LASTEXITCODE; curl\.exe -s --noproxy '\*' -m 2 -X POST "http:\/\/127\.0\.0\.1:5555\/x\/cell-1\/0123456789abcdef\/\$__mcExit" \*> \$null; \[Console\]::Write\(.*\); \$global:LASTEXITCODE = \$__mcExit; \$global:__unimuxExit = \$__mcExit \}$/);
     expect(withResetTail('claude', 'cmd', url)).toMatch(/^claude & call curl\.exe -s --noproxy \* -m 2 -X POST http:\/\/127\.0\.0\.1:5555\/x\/cell-1\/0123456789abcdef\/%\^errorlevel% >nul 2>&1 & powershell /);
     expect(withResetTail('claude', 'bash', url)).toContain(`claude; __mc_exit=$?; curl -s --noproxy '*' -m 2 -X POST '${url}/'$__mc_exit >/dev/null 2>&1; printf`);
     // Anything but the hook server's exit route is ignored (nothing foreign is typed into a shell).

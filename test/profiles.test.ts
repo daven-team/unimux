@@ -90,7 +90,7 @@ describe('buildCliCommand', () => {
 });
 
 describe('buildLaunchCommand (typed line with the terminal reset)', () => {
-  const PS_TAIL = / finally \{ \[Console\]::Write\(\[char\]27\+'\[\?1000;1002;1003;1005;1006;1015;2004l'\+\[char\]27\+'\[<u'\) \}$/;
+  const PS_TAIL = / finally \{ \$global:__unimuxExit = \$LASTEXITCODE; \[Console\]::Write\(\[char\]27\+'\[\?1000;1002;1003;1005;1006;1015;2004l'\+\[char\]27\+'\[<u'\) \}$/;
   it('carries the exact CLI command inside, on one line, for every shell', () => {
     for (const shell of ['pwsh', 'powershell', 'cmd', 'zsh', 'bash'] as const) {
       for (const profile of [P.claude, P.codex]) {
@@ -106,12 +106,12 @@ describe('buildLaunchCommand (typed line with the terminal reset)', () => {
   it('wraps PowerShell in try/finally (also runs after Ctrl+C), cmd with & and POSIX shells with ;', () => {
     for (const shell of ['pwsh', 'powershell'] as const) {
       const line = buildLaunchCommand(P.claude, { mode: 'new', shell })!;
-      expect(line.startsWith('try { claude } finally { ')).toBe(true);
+      expect(line.startsWith('Clear-Host; try { claude } finally { ')).toBe(true);
       expect(line).toMatch(PS_TAIL);
     }
     expect(buildLaunchCommand(P.claude, { mode: 'new' })).toMatch(PS_TAIL);
-    expect(buildLaunchCommand(P.claude, { mode: 'new', shell: 'cmd' })).toMatch(/^claude & powershell -NoProfile -NonInteractive -Command "\[Console\]::Write\(.*\)" 2>nul$/);
-    for (const shell of ['zsh', 'bash'] as const) expect(buildLaunchCommand(P.codex, { mode: 'new', shell })).toMatch(/^trap : INT; codex -c tui\.notifications=true; printf '\\033\[\?1000;.*1004;2004l.*; trap - INT$/);
+    expect(buildLaunchCommand(P.claude, { mode: 'new', shell: 'cmd' })).toMatch(/^cls & claude & powershell -NoProfile -NonInteractive -Command "\[Console\]::Write\(.*\)" 2>nul$/);
+    for (const shell of ['zsh', 'bash'] as const) expect(buildLaunchCommand(P.codex, { mode: 'new', shell })).toMatch(/^printf '\\033\[H\\033\[2J\\033\[3J'; trap : INT; codex -c tui\.notifications=true; printf '\\033\[\?1000;.*1004;2004l.*; trap - INT$/);
   });
   it('writes the escape character through the shell, never typed into the line', () => {
     for (const shell of ['pwsh', 'cmd', 'zsh'] as const) expect(buildLaunchCommand(P.claude, { mode: 'new', shell })).not.toContain('\x1b');
@@ -121,7 +121,7 @@ describe('buildLaunchCommand (typed line with the terminal reset)', () => {
   it('leaves the initial prompt and its quoting alone', () => {
     const initialPrompt = { file: 'C:/p/c1.txt', text: 'napraw "bug"' };
     expect(buildLaunchCommand(P.claude, { mode: 'new', initialPrompt })!).toContain("try { claude (Get-Content -Raw -Encoding utf8 -LiteralPath 'C:/p/c1.txt') } finally {");
-    expect(buildLaunchCommand(P.claude, { mode: 'new', shell: 'cmd', initialPrompt })!.startsWith(`claude "napraw 'bug'" & `)).toBe(true);
+    expect(buildLaunchCommand(P.claude, { mode: 'new', shell: 'cmd', initialPrompt })!.startsWith(`cls & claude "napraw 'bug'" & `)).toBe(true);
   });
   it('never clears win32-input-mode (ConPTY owns it) nor, on Windows shells, focus reports', () => {
     expect(INPUT_MODES_OFF).not.toContain('9001');

@@ -20,9 +20,10 @@ import { SshAutocomplete } from './ssh/SshAutocomplete';
 import { openSftp } from '../sftp';
 import { profileOptionLabel } from '../cliUi';
 import { CliMissingCard } from './CliMissingCard';
+import { CellStartCard, useStartScreen } from './CellStartCard';
 import type { Cell } from '../../../shared/types';
 import {
-  changeCellProfile, ensureStarted, ensureTerminal, removeCell, renameCell, restartCell, sendSnippet, setCellColor, toggleMaximize,
+  changeCellProfile, ensureStarted, ensureTerminal, removeCell, renameCell, restartAgentWithTasks, restartCell, sendSnippet, setCellColor, toggleMaximize,
 } from '../actions';
 import { PATH_MIME, type DropTarget } from '../../../shared/pathDrop';
 import type { PathMode } from '../../../shared/types';
@@ -92,6 +93,9 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
   const [pathDrop, setPathDrop] = useState<{ blocked: boolean; target: DropTarget } | null>(null);
   const [editing, setEditing] = useState(false);
   const [floodHint, setFloodHint] = useState(false);
+  // 1.1.5: the start card of an agent cell (CellStartCard.tsx); never over an SSH session, a missing CLI or a failed spawn.
+  const startScreen = useStartScreen(cell.id);
+  const startCli = !ssh && !lackingCli && !error && profile.cli !== 'shell' ? profile.cli : null;
 
   // The terminal stopped feeding a shell with the mouse reports it was echoing (see termReset.ts).
   useEffect(() => terminals.onMouseFlood((id) => { if (id === cell.id) setFloodHint(true); }), [cell.id]);
@@ -345,6 +349,8 @@ export const CellView = memo(function CellView({ cell, index, style, maximized, 
         {pathDrop && <div className={`cell-path-drop ${pathDrop.blocked ? 'blocked' : ''}`} role="status">{pathDrop.blocked ? tr(ssh ? 'Ścieżki lokalne nie działają w sesji SSH' : 'Komórka nie jest uruchomiona') : dropLabel(pathDrop.target)}</div>}
         {drop && !pathDrop && <div className="cell-snippet-drop" role="status">{tr('Upuść, aby wkleić')}</div>}
         {lackingCli && <CliMissingCard cli={lackingCli} cellId={cell.id} onChangeProfile={(anchor) => openMenuAt(anchor, profileItems())} />}
+        {startScreen && startCli && <CellStartCard cellId={cell.id} cli={startCli} name={profileName} screen={startScreen}
+          onRestart={() => { if (cell.role) void restartAgentWithTasks(cell.id); else restartCell(cell.id, cell.session ? 'resume' : 'new'); }} />}
         {ssh && <SshCellCard cellId={cell.id} host={host} session={sshSession} prompt={sshPrompt} />}
         {ssh && <SshAutocomplete cellId={cell.id} />}
         {floodHint && !error && (
