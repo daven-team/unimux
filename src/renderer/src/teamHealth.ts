@@ -1,10 +1,10 @@
 // 1.1.4: what the "Zespół AI" panel needs to tell a stuck team (shared/teamPanel.ts taskStuck): when each agent last
 // started, which agent CLIs ended (the terminal's cli-exited detail), and the restart that gives an agent its open tasks.
 import { useEffect, useState } from 'react';
-import { isClosedTask, taskPrompt, type AgentRuntimeStatus } from '../../shared/automation';
-import { findCell, updateCell } from '../../shared/state';
-import { restartCell } from './actions';
-import { getS, update } from './store';
+import type { AgentRuntimeStatus } from '../../shared/automation';
+import { findCell } from '../../shared/state';
+import { restartAgentWithTasks as restartRoleCell } from './actions';
+import { getS } from './store';
 import { terminals } from './terminals/TerminalManager';
 
 /** The earliest moment an agent could have connected: this window's start (agents start again with the app). */
@@ -55,19 +55,11 @@ export function useCliExits(cellIds: readonly string[]): ReadonlyMap<string, Cli
 }
 
 /**
- * "Uruchom ponownie z zadaniem": the agent starts again and gets its open tasks.
- *
- * Interim version until actions.ts has `restartAgentWithTasks(cellId)` (built in parallel with the launch changes, it returns a
- * Promise); then this body becomes `noteAgentStart(cellId); void restartAgentWithTasks(cellId);` (import it from './actions'
- * under another name, or rename this one). Until then: the open tasks go in the cell's
- * one-shot startup prompt and the cell starts again through the cells' own restart (restartCell): a new conversation when
- * none of the tasks was started (a CLI that failed at its first start has no conversation to resume), else the same one.
+ * "Uruchom ponownie z zadaniem": the agent starts again and gets its open tasks (actions.ts: a new conversation built from its
+ * queued tasks, or a resume with a note about them).
  */
 export function restartAgentWithTasks(cellId: string): void {
-  const found = findCell(getS(), cellId);
-  if (!found) return;
-  const open = getS().automation.tasks.filter((t) => t.cellId === cellId && !isClosedTask(t)).sort((a, b) => a.createdAt - b.createdAt);
-  if (open.length) update((s) => updateCell(s, cellId, { startupPrompt: open.map(taskPrompt).join('\n\n---\n\n') }));
+  if (!findCell(getS(), cellId)) return;
   noteAgentStart(cellId);
-  restartCell(cellId, open.some((t) => t.status !== 'queued') ? 'resume' : 'new');
+  void restartRoleCell(cellId);
 }
