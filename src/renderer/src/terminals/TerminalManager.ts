@@ -24,7 +24,7 @@ import { mayAnswer, permissionAsk, permissionKeys, type PermissionAnswer, type P
 import { tr } from '../i18n';
 import { confirmTerminalLink } from '../terminalLinks';
 import { applyScrollback, DEFAULT_SCROLLBACK_LINES, MAX_WEBGL_CONTEXTS, PENDING_OUTPUT_CHARS } from '../../../shared/terminalLimits';
-import { nextLossCount, planWebgl, webglBackoff, WebglLimit } from '../../../shared/webglPool';
+import { nextLossCount, planWebgl, WEBGL_GRANT_BUDGET_MS, webglBackoff, WebglLimit } from '../../../shared/webglPool';
 import { onWindowShown } from '../windowShown';
 import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
 import { cursorOffset, reflowedCursor, type WrapBuffer } from '../../../shared/cursorReflow';
@@ -32,6 +32,11 @@ import { coalesceViewportSync } from '../../../shared/viewportSync';
 
 /** The background of a cell card (--card-bg in styles.css): a local terminal draws on the card itself (1.0.7). */
 export const CARD_BG = '#131313';
+
+/** Time one frame may spend fitting terminals to resized cells (see TerminalManager.runFits). */
+const FIT_BUDGET_MS = 8;
+/** Window size changes closer together than this are a drag of the window edge (see the constructor). */
+const WINDOW_DRAG_MS = 150;
 
 // Campbell (Windows Terminal / PowerShell default), the colours of the default SSH theme, on the card's background: every
 // local terminal. SSH cells keep their theme's own background (CellView paints the card body with it).
@@ -73,6 +78,8 @@ interface Entry {
   infer: AgentInference;
   attachedTo: HTMLElement | null;
   resizeObs: ResizeObserver | null;
+  /** The box (clientWidth x clientHeight) of the cell the terminal was last fitted to. */
+  fitBox?: string;
   /** >0 while replayed history is being parsed: terminal query replies must not reach the pty. */
   replaying: number;
   /** 1.0.7: the prompt marks seen in the replay being parsed (the last one, a C among them, the prompts), see replayedMarks. */
@@ -179,6 +186,21 @@ class TerminalManager {
     document.addEventListener('focusout', () => setTimeout(() => this.syncHostFocus(), 0));
     // Capture: the event does not bubble, and xterm reports a lost context only 3 s later (after waiting for a restore).
     document.addEventListener('webglcontextlost', (ev) => this.contextLost(ev.target), true);
+    // A window edge being dragged: as for a panel edge (holdFits), the cells are fitted once the size stops changing instead
+    // of at every pause of the pointer (each fit of a 16-cell grid reflowed every scrollback). A single change (maximize,
+    // restore, snap) is fitted at once as before; only a second change within WINDOW_DRAG_MS starts the hold.
+    let lastResize = -Infinity;
+    let releaseHold: (() => void) | null = null;
+    let quiet: number | undefined;
+    window.addEventListener('resize', () => {
+      const now = performance.now();
+      const dragging = now - lastResize < WINDOW_DRAG_MS;
+      lastResize = now;
+      if (!dragging && !releaseHold) return;
+      releaseHold ??= this.holdFits();
+      clearTimeout(quiet);
+      quiet = window.setTimeout(() => { const release = releaseHold; releaseHold = null; release?.(); }, WINDOW_DRAG_MS);
+    });
   }
 
   /**
@@ -630,19 +652,72 @@ class TerminalManager {
     e.shownAt = performance.now();
     e.host.style.display = this.windowShown ? '' : 'none';
     if (!e.webgl) this.queueBalance();
-    if (e.parkedSelection) {
+    // Without a context the selection would be drawn twice (by the DOM renderer now, by WebGL a frame later): the balance
+    // applies it once the terminal has its renderer (continueWebgl).
+    if (e.parkedSelection && e.webgl) {
       e.applySelection?.(e.parkedSelection);
       e.parkedSelection = null;
     }
     e.resizeObs?.disconnect();
     let t: number | undefined;
     e.resizeObs = new ResizeObserver(() => {
+      // The first report of every observation, and any report of a box that is the size the terminal was last fitted to,
+      // changes nothing: a grid coming to the front fitted its cells again 25 ms later for nothing (about 0.5 ms each).
+      if (e.fitBox === `${el.clientWidth}x${el.clientHeight}`) return;
       clearTimeout(t);
       if (this.fitHolds > 0) { this.heldFits.add(e); return; }
-      t = window.setTimeout(() => { if (this.fitHolds > 0) this.heldFits.add(e); else this.refit(e); }, 25);
+      t = window.setTimeout(() => { if (this.fitHolds > 0) this.heldFits.add(e); else this.queueFit(e); }, 25);
     });
     e.resizeObs.observe(el);
-    this.refit(e);
+    // The fit waits until every terminal of this commit is in place (a microtask): fitting each one right after inserting it
+    // made the browser lay out the page again for every cell (16 layouts, 26 ms, when a 16-cell grid came to the front).
+    // Whoever needs the size before that (a spawn, size(), xterm()) gets the fit first (flushFits).
+    this.pendingFits.add(e);
+    if (!this.fitsQueued) {
+      this.fitsQueued = true;
+      queueMicrotask(() => this.flushFits());
+    }
+  }
+
+  /** Terminals attached in this task whose fit is still due (see attach). */
+  private pendingFits = new Set<Entry>();
+  private fitsQueued = false;
+
+  private flushFits(): void {
+    this.fitsQueued = false;
+    if (!this.pendingFits.size) return;
+    const due = [...this.pendingFits];
+    this.pendingFits.clear();
+    for (const e of due) this.refit(e);
+  }
+
+  /** Terminals whose box changed (a resized window, panel or grid divider), fitted in the next frames (see runFits). */
+  private fitQueue = new Set<Entry>();
+  private fitFrame = 0;
+
+  private queueFit(e: Entry): void {
+    this.fitQueue.add(e);
+    if (!this.fitFrame) this.fitFrame = requestAnimationFrame(() => this.runFits());
+  }
+
+  /**
+   * A fit reflows the terminal's scrollback and resizes its canvas (a new drawing buffer): 2 to 10 ms each, so 15 cells of a
+   * grid fitted after a window or panel resize held one frame for 35 to 50 ms. Each frame now fits for at most
+   * FIT_BUDGET_MS (at least one terminal, the focused one first); the rest follow in the next frames.
+   */
+  private runFits(): void {
+    this.fitFrame = 0;
+    const started = performance.now();
+    const focused = [...this.fitQueue].find((e) => document.activeElement === e.term.textarea);
+    const order = focused ? [focused, ...[...this.fitQueue].filter((e) => e !== focused)] : [...this.fitQueue];
+    let fitted = 0;
+    for (const e of order) {
+      if (fitted > 0 && performance.now() - started >= FIT_BUDGET_MS) break;
+      this.fitQueue.delete(e);
+      this.refit(e);
+      fitted++;
+    }
+    if (this.fitQueue.size) this.fitFrame = requestAnimationFrame(() => this.runFits());
   }
 
   private fitHolds = 0;
@@ -662,9 +737,8 @@ class TerminalManager {
       released = true;
       this.fitHolds = Math.max(0, this.fitHolds - 1);
       if (this.fitHolds > 0) return;
-      const held = [...this.heldFits];
+      for (const e of this.heldFits) this.queueFit(e);
       this.heldFits.clear();
-      for (const e of held) this.refit(e);
     };
   }
 
@@ -677,9 +751,9 @@ class TerminalManager {
    */
   private queueBalance(): void {
     if (this.balanceFrame) return;
-    this.balanceFrame = requestAnimationFrame(() => {
+    this.balanceFrame = requestAnimationFrame((frame) => {
       this.balanceFrame = 0;
-      this.balanceWebgl();
+      this.balanceWebgl(frame);
     });
   }
 
@@ -696,7 +770,7 @@ class TerminalManager {
    * quiet ones; a parked terminal keeps its context only while one is free. A shown terminal never thrashes: it keeps a new
    * context for a few seconds and at most one context per plan moves between cells on screen.
    */
-  private balanceWebgl(): void {
+  private balanceWebgl(frame?: number): void {
     if (!this.windowShown) return;
     const now = performance.now();
     const focused = document.activeElement;
@@ -704,17 +778,77 @@ class TerminalManager {
       id: o.id, hasWebgl: o.webgl !== null, attached: o.attachedTo !== null, shownAt: o.shownAt, focused: focused !== null && focused === o.term.textarea,
       outputAt: o.outputAt, changedAt: o.webglChangedAt, blockedUntil: o.webglBlockedUntil,
     })), this.webglLimit.limit, now);
-    for (const id of plan.release) {
-      const victim = this.entries.get(id);
-      if (!victim?.webgl) continue;
-      this.releaseWebgl(victim);
-      victim.webglChangedAt = now;
-    }
-    for (const id of plan.grant) {
-      const e = this.entries.get(id);
-      if (e && !e.webgl) this.createWebgl(e, now);
-    }
+    // A victim is given back only while it is where the plan saw it (a parked one shown again meanwhile keeps its context).
+    this.planReleases = plan.release.map((id) => ({ id, attached: this.entries.get(id)?.attachedTo != null }));
+    this.planGrants = plan.grant;
+    // In an animation frame (queueBalance) the first slice is this frame's; from an event or a timer it waits for the next
+    // frame, so one frame never gets two slices.
+    if (frame !== undefined) this.continueWebgl(frame);
+    else this.queueSlice();
   }
+
+  private queueSlice(): void {
+    if (this.sliceFrame) return;
+    this.sliceFrame = requestAnimationFrame((frame) => { this.sliceFrame = 0; this.continueWebgl(frame); });
+  }
+
+  /** The rest of the last plan, carried out over the next frames (see continueWebgl). */
+  private planReleases: Array<{ id: string; attached: boolean }> = [];
+  private planGrants: string[] = [];
+
+  /**
+   * Carries out the plan in slices: a context compiles its shaders synchronously (about 10 ms each), so a 12-cell grid
+   * coming to the front created 12 of them in one frame (a 200 ms freeze on every tab or project switch). Each frame now
+   * creates contexts for at most WEBGL_GRANT_BUDGET_MS (at least one, the most wanted first: focused, busy, then the rest);
+   * the others draw with xterm's DOM renderer until their turn a frame or a few later.
+   */
+  private continueWebgl(frame: number): void {
+    if (!this.windowShown) { this.planReleases = []; this.planGrants = []; return; }
+    // Callbacks of one frame share its timestamp: a second slice in the same frame waits for the next one.
+    if (frame === this.lastSlice) { this.queueSlice(); return; }
+    this.lastSlice = frame;
+    const started = performance.now();
+    const limit = this.webglLimit.limit;
+    let held = 0;
+    for (const e of this.entries.values()) if (e.webgl) held++;
+    const releaseOne = (): boolean => {
+      while (this.planReleases.length) {
+        const { id, attached } = this.planReleases.shift()!;
+        const victim = this.entries.get(id);
+        if (!victim?.webgl || (victim.attachedTo !== null) !== attached) continue;
+        this.releaseWebgl(victim);
+        victim.webglChangedAt = started;
+        held--;
+        return true;
+      }
+      return false;
+    };
+    // A lowered limit: the excess goes at once.
+    while (held > limit && releaseOne()) { /* released */ }
+    let granted = 0;
+    while (this.planGrants.length) {
+      if (granted > 0 && performance.now() - started >= WEBGL_GRANT_BUDGET_MS) break;
+      const e = this.entries.get(this.planGrants[0]);
+      if (!e || e.webgl || !e.attachedTo) { this.planGrants.shift(); continue; }
+      if (held >= limit && !releaseOne()) { this.planGrants = []; break; }
+      this.planGrants.shift();
+      this.createWebgl(e, performance.now());
+      if (e.webgl) held++;
+      granted++;
+    }
+    if (!this.planGrants.length) this.planReleases = [];
+    // A selection that changed while a terminal was parked is drawn once it has its renderer for good (see attach).
+    for (const e of this.entries.values()) {
+      if (e.parkedSelection && e.attachedTo && (e.webgl || !this.planGrants.includes(e.id))) {
+        e.applySelection?.(e.parkedSelection);
+        e.parkedSelection = null;
+      }
+    }
+    if (this.planGrants.length) this.queueSlice();
+  }
+
+  private sliceFrame = 0;
+  private lastSlice = -1;
 
   /**
    * Gives a terminal's context back. A disposed WebglAddon leaves its context to the garbage collector, and until then
@@ -794,6 +928,8 @@ class TerminalManager {
     e.resizeObs?.disconnect();
     e.resizeObs = null;
     this.heldFits.delete(e);
+    this.pendingFits.delete(e);
+    this.fitQueue.delete(e);
     e.shownAt = performance.now();
     // The WebGL context stays with the parked terminal (xterm pauses it while hidden), so showing the grid again is instant.
     this.parking.appendChild(e.host);
@@ -833,6 +969,7 @@ class TerminalManager {
     } catch {
       return;
     }
+    e.fitBox = `${clientWidth}x${clientHeight}`;
     if (e.term.cols !== e.lastSize.cols || e.term.rows !== e.lastSize.rows) {
       e.lastSize = { cols: e.term.cols, rows: e.term.rows };
       e.tracker.environment(performance.now()); // the agent redraws after a resize
@@ -866,11 +1003,13 @@ class TerminalManager {
 
   /** Re-sends the current size (e.g. right after a spawn that raced with a resize). */
   syncSize(cellId: string): void {
+    this.flushFits();
     const e = this.entries.get(cellId);
     if (e) this.post({ t: 'resize', id: cellId, cols: e.term.cols, rows: e.term.rows });
   }
 
   size(cellId: string): { cols: number; rows: number } {
+    this.flushFits();
     const e = this.entries.get(cellId);
     return e ? { cols: e.term.cols, rows: e.term.rows } : { cols: 120, rows: 30 };
   }
@@ -881,6 +1020,7 @@ class TerminalManager {
 
   /** The xterm of a cell, for find in its scrollback (terminalFind.tsx reads the buffer and draws decorations). */
   xterm(cellId: string): Terminal | undefined {
+    this.flushFits();
     return this.entries.get(cellId)?.term;
   }
 
@@ -1042,6 +1182,8 @@ class TerminalManager {
     if (!e) return;
     e.resizeObs?.disconnect();
     this.heldFits.delete(e);
+    this.pendingFits.delete(e);
+    this.fitQueue.delete(e);
     e.addon?.dispose();
     e.unsyncViewport?.();
     this.releaseWebgl(e);
