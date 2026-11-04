@@ -29,7 +29,7 @@ export interface SshIpcDeps {
   hostname(): string;
 }
 
-const id = z.string().uuid();
+const id = z.guid();
 const label = z.string().trim().min(1).max(SSH_LIMITS.label);
 const secret = (max: number) => z.string().min(1).max(max);
 const passphrase = secret(SSH_LIMITS.passphrase);

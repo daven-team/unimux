@@ -7,7 +7,7 @@ import { REDIS_LIMITS, type RedisOp } from '../../shared/dbRedis';
 import type { IpcGuard, IpcSenderEvent } from '../ipcGuard';
 import type { DbService } from './service';
 
-const uuid = z.string().uuid();
+const uuid = z.guid();
 const sessionId = z.string().refine(isDbSessionId);
 const name = z.string().min(1).max(DB_LIMITS.identifier).refine((s) => !s.includes('\0'));
 const text = (max: number) => z.string().max(max);
