@@ -17,7 +17,7 @@ export function automationFixture() {
     createWorktree: vi.fn(async (path: string, name: string) => ({ path: `${path}-wt-${name}`, branch: `mc/${name}` })),
     isCellRunning: vi.fn(() => true),
     restartAgent: vi.fn(async (): Promise<{ restarted: boolean; reason?: string }> => ({ restarted: true })),
-    removeWorktree: vi.fn(async () => {}), startCells: vi.fn(), deliver: vi.fn(async () => {}),
+    removeWorktree: vi.fn(async () => {}), startCells: vi.fn<(ids: string[]) => void>(), deliver: vi.fn(async () => {}),
   };
   return { service: new AutomationService(controller, deps), controller, deps, project, coordinator, worker, outsider };
 }
