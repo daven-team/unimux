@@ -1,8 +1,9 @@
 /* 1.1.2: the status marks (StatusMark.tsx) in the badges of tabs and projects, on a cell icon's corner and in the cell
    header. One palette for every place, less saturated than the old pills; whole-pixel sizes (8 and 12 px stay whole at
-   100, 125, 150 and 200 % scaling). 1.1.3: a working mark turns smoothly the whole time: the svg is its own layer and
-   only its transform animates, so the compositor turns it without style, layout or paint work on the page (the old
-   quarter steps restyled the whole document every 320 ms and looked choppy). Under reduced motion every mark stands still. */
+   100, 125, 150 and 200 % scaling). 1.1.3: a working mark turns the whole time at 15 steps a second: the svg is its own
+   layer and only its transform animates, so the compositor turns it without layout or paint work (the old quarter steps
+   restyled the whole document every 320 ms and looked choppy). Not `linear`: that composites the window at the display
+   rate (scripts/bench-perf.mjs, 8 working cells: linear 23 % of a core, 15 steps 8 %, still 1.6 %). Under reduced motion every mark stands still. */
 :root {
   --st-working: #d8a650;
   --st-done: #5fbf86;
@@ -35,7 +36,7 @@
 
 /* ── the marks: 12 px SVGs ───────────────────────────────────────────────────────────────────────────────────────── */
 .smark { width: 12px; height: 12px; }
-.smark.working > svg { will-change: transform; animation: smark-turn 1s linear infinite; }
+.smark.working > svg { will-change: transform; animation: smark-turn 1s steps(15) infinite; }
 @keyframes smark-turn { to { transform: rotate(360deg); } }
 .terminal-cell .cell-icon .cell-dot.smark { right: -3px; bottom: -3px; }
 .terminal-cell .cell-head .status-text.error { color: #f0a3a3; }
