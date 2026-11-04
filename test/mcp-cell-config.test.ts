@@ -33,7 +33,9 @@ describe('per-cell MCP token delivery', () => {
     expect(command).toContain('--mcp-config');
     expect(command).not.toContain(TOKEN);
     const config = JSON.parse(readFileSync(mcp.claudeConfigPath!, 'utf8'));
-    expect(config).toEqual({ mcpServers: { unimux: { type: 'http', url: URL, headers: { Authorization: `Bearer ${TOKEN}` } } } });
+    // timeout: above the longest wait_for of a Claude caller (600 s); it also lifts Claude Code's 60 s first-byte timer.
+    expect(config).toEqual({ mcpServers: { unimux: { type: 'http', url: URL, headers: { Authorization: `Bearer ${TOKEN}` }, timeout: 660_000 } } });
+
     expect(readFileSync(mcp.claudeConfigPath!, 'utf8')).not.toContain('${');
     // Atomic write: no temp file is left next to the config.
     expect(readdirSync(dirs.mcp)).toEqual(['c1.json']);

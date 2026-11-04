@@ -21,6 +21,8 @@ export interface AgentTask {
   delivery: 'pending' | 'startup' | 'native' | 'pasted';
   deliveryError?: string;
   blockedReason?: string;
+  /** Why a task was cancelled without its coordinator (1.1.4: "agent closed" when its cell left the grids). */
+  cancelReason?: string;
   result?: TaskResult;
   createdAt: number;
   updatedAt: number;
@@ -54,8 +56,17 @@ export interface AutomationState {
 export interface McpInfo { running: boolean; starting?: boolean; url?: string; error?: string; configuredCellIds?: string[]; connectedCellIds?: string[] }
 export type AgentRuntimeStatus = 'starting' | 'working' | 'ready' | 'needs_attention' | 'unknown' | 'exited';
 
-/** Longest bounded wait; below the default 60 s tool timeout of Codex and the HTTP stack. */
+/** Longest bounded wait for a caller whose CLI is not known; below the default 60 s tool timeout of Codex and the HTTP stack. */
 export const WAIT_MAX_SECONDS = 45;
+/**
+ * Longest bounded wait per CLI of the caller (1.1.4). Codex cells get tool_timeout_sec=180 (shared/profiles.ts), so 170 s
+ * stays below it. Claude Code's tool timeout is long by default (MCP_TOOL_TIMEOUT, about 28 h), its per-request first-byte
+ * timer is raised by the per-cell config's `timeout` (mcpCellConfig.ts) and its 5 minute idle timer is reset by the progress
+ * notifications wait_for sends every 10 s; 600 s was checked with scripts/verify-mcp-cli.mjs.
+ */
+export const WAIT_MAX_BY_CLI: Readonly<Record<string, number>> = { codex: 170, claude: 600 };
+export const WAIT_SCHEMA_MAX = 600;
+export const waitMaxFor = (cli: string | undefined): number => (cli && WAIT_MAX_BY_CLI[cli]) || WAIT_MAX_SECONDS;
 const id = z.string().min(1).max(128);
 const PROJECT_ITEM_LIMIT_SCHEMA = 500;
 const name = z.string().trim().min(1).max(140);
@@ -116,7 +127,8 @@ export const automationSchemas = {
   }).strict(),
   create_task: z.object({ cellId: id, title: name, prompt: text, dependsOn: z.array(id).max(50).optional() }).strict(),
   get_tasks: z.object({ readyOnly: z.boolean().default(false), projectId: id.optional(), cellId: id.optional(), ids: z.array(id).min(1).max(50).optional(), status: z.enum(['queued', 'in_progress', 'blocked', 'completed', 'cancelled']).optional(), limit: z.number().int().min(1).max(100).default(50), offset: z.number().int().min(0).default(0) }).strict(),
-  update_task: z.object({ taskId: id, status: z.enum(['in_progress', 'blocked', 'completed', 'cancelled']), blockedReason: text.optional(), result: taskResultSchema.optional() }).strict(),
+  /** `cellId` (coordinator) reassigns a queued task, or makes a new task of a cancelled one (teamPanel.reassignInput). */
+  update_task: z.object({ taskId: id, status: z.enum(['in_progress', 'blocked', 'completed', 'cancelled']).optional(), cellId: id.optional(), blockedReason: text.optional(), result: taskResultSchema.optional() }).strict(),
   send_message: z.object({ toCellId: id, text }).strict(),
   get_messages: z.object({ projectId: id.optional(), unreadOnly: z.boolean().default(true), limit: z.number().int().min(1).max(100).default(50), offset: z.number().int().min(0).default(0) }).strict(),
   acknowledge_message: z.object({ messageId: id }).strict(),
@@ -124,7 +136,7 @@ export const automationSchemas = {
   set_role: z.object({ cellId: id, role: role.nullable() }).strict(),
   deliver_task: z.object({ taskId: id }).strict(),
   deliver_message: z.object({ messageId: id }).strict(),
-  wait_for: z.object({ taskIds: z.array(id).min(1).max(50).optional(), all: z.boolean().default(false), timeoutSec: z.number().int().min(1).max(WAIT_MAX_SECONDS).default(30) }).strict(),
+  wait_for: z.object({ taskIds: z.array(id).min(1).max(50).optional(), all: z.boolean().default(false), timeoutSec: z.number().int().min(1).max(WAIT_SCHEMA_MAX).optional() }).strict(),
   mark_pasted: z.object({ kind: z.enum(['task', 'message']), id }).strict(),
   /** The user removes finished items (closed tasks, read messages) of a project: the listed ones, or all of them. */
   remove_items: z.object({ projectId: id, kind: z.enum(['task', 'message']), ids: z.array(id).min(1).max(PROJECT_ITEM_LIMIT_SCHEMA).optional() }).strict(),

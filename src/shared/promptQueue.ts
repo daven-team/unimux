@@ -25,6 +25,8 @@ export const QUEUE_PAUSES: readonly QueuePause[] = ['user', 'restart', 'permissi
 export interface QueuedPrompt {
   id: string;
   text: string;
+  /** 1.1.4: a short unimux notice to an AI team agent (a task or message in its MCP inbox), not a prompt the user wrote. */
+  auto?: true;
 }
 
 /** Persisted on the cell (`Cell.promptQueue`); absent when the cell has no queued prompt and is not paused. */
@@ -49,8 +51,10 @@ export function normalizePromptQueue(raw: unknown, launch = false): PromptQueue 
     if (items.length >= QUEUE_MAX_ITEMS) break;
     if (!isRecord(item) || typeof item.id !== 'string' || !item.id || item.id.length > 64 || seen.has(item.id)) continue;
     if (typeof item.text !== 'string' || !item.text.trim()) continue;
+    // A notice of an earlier run is stale at a launch: the agent's inbox still holds the item and its new start lists it.
+    if (item.auto === true && launch) continue;
     seen.add(item.id);
-    items.push({ id: item.id, text: item.text.slice(0, QUEUE_MAX_TEXT) });
+    items.push({ id: item.id, text: item.text.slice(0, QUEUE_MAX_TEXT), ...(item.auto === true ? { auto: true as const } : {}) });
   }
   if (!items.length) return undefined;
   const saved = QUEUE_PAUSES.includes(raw.paused as QueuePause) ? raw.paused as QueuePause : undefined;
@@ -63,10 +67,10 @@ const settle = (items: QueuedPrompt[], paused: QueuePause | undefined): PromptQu
   !items.length ? undefined : paused ? { items, paused } : { items };
 
 /** Appends a prompt (blank text and a full queue change nothing). */
-export function enqueuePrompt(queue: PromptQueue | undefined, text: string, id: string): PromptQueue | undefined {
+export function enqueuePrompt(queue: PromptQueue | undefined, text: string, id: string, auto = false): PromptQueue | undefined {
   const items = queue?.items ?? [];
   if (!text.trim() || items.length >= QUEUE_MAX_ITEMS) return queue;
-  return settle([...items, { id, text: text.slice(0, QUEUE_MAX_TEXT) }], queue?.paused);
+  return settle([...items, { id, text: text.slice(0, QUEUE_MAX_TEXT), ...(auto ? { auto: true as const } : {}) }], queue?.paused);
 }
 
 /** Replaces the text of one prompt; a blank text removes it. */
@@ -148,7 +152,10 @@ export function queueVerdict(queue: PromptQueue | undefined, signal: QueueSignal
   const { status, reason, detail } = signal;
   if (status === 'exited' || detail?.kind === 'cli-exited') return { kind: 'pause', reason: 'exited' };
   if (status === 'working') return { kind: 'wait', why: 'working' };
-  if (status === 'idle') return { kind: 'wait', why: 'first' };
+  // A unimux notice may also reach an agent that sits at its first prompt (an AI team agent started without a task), once
+  // precise signals (Claude's hooks) show its CLI is up; a prompt the user wrote still waits for a turn end.
+  if (status === 'idle') return queue.items[0].auto && signal.hooked && !signal.typed ? { kind: 'ready' } : { kind: 'wait', why: 'first' };
+
   // waiting: the turn ended, or the agent needs the user.
   if (reason === 'error' || signal.failure !== undefined) return { kind: 'pause', reason: signal.failure === 'usage-limit' ? 'limit' : 'error' };
   if (detail?.kind === 'permission') return { kind: 'pause', reason: 'permission' };

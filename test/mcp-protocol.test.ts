@@ -48,8 +48,8 @@ describe('token footprint', () => {
   it('shows workers none of the coordinator-only tools', async () => {
     const h = await setup();
     const names = (await (await connect(h, h.worker.id)).listTools()).tools.map((t) => t.name);
-    for (const name of ['create_grid', 'close_grid', 'update_grid', 'save_preset', 'create_task', 'get_tasks', 'deliver']) expect(names).not.toContain(name);
-    for (const name of ['get_context', 'read_inbox', 'wait_for', 'update_task', 'send_message', 'snippets', 'update_agent', 'list_agents', 'help']) expect(names).toContain(name);
+    for (const name of ['create_grid', 'close_grid', 'update_grid', 'save_preset', 'create_task', 'get_tasks', 'deliver', 'snippets']) expect(names).not.toContain(name);
+    for (const name of ['get_context', 'read_inbox', 'wait_for', 'update_task', 'send_message', 'update_agent', 'list_agents', 'help']) expect(names).toContain(name);
   });
 });
 
@@ -82,7 +82,9 @@ describe('tool definitions are portable across Claude Code and Codex', () => {
   });
   it('keeps the advertised properties in step with what the tools accept', () => {
     // Accepted but intentionally not advertised (kept for older prompts or because help documents them).
-    const hidden: Record<string, string[]> = { list_agents: ['projectId'], read_inbox: ['offset', 'openOnly'], get_tasks: ['projectId'], create_grid: ['layout', 'projectId'], save_preset: ['id'] };
+    // 1.1.4: grid colors are no longer advertised (stored only, never shown); update_task's cellId is the coordinator's variant.
+    const hidden: Record<string, string[]> = { list_agents: ['projectId'], read_inbox: ['offset', 'openOnly'], get_tasks: ['projectId'], create_grid: ['layout', 'projectId', 'color'], save_preset: ['id'],
+      update_grid: ['color'], update_task: ['cellId'] };
     for (const tool of MCP_TOOLS) {
       const advertised = Object.keys(tool.inputSchema.properties).sort();
       const accepted = Object.keys(tool.schema.shape).filter((key) => !(hidden[tool.name] ?? []).includes(key)).sort();
@@ -104,8 +106,8 @@ describe('tool definitions are portable across Claude Code and Codex', () => {
     const quiet = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
     const read = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
     expect(hints('worker')).toMatchObject({ get_context: read, list_agents: read, wait_for: read, help: read, read_inbox: quiet, update_task: quiet,
-      send_message: ask, snippets: ask, update_agent: ask });
-    expect(hints('coordinator')).toMatchObject({ get_tasks: read, create_task: ask, create_grid: ask, deliver: ask, update_agent: ask, snippets: ask,
+      send_message: ask, update_agent: ask });
+    expect(hints('coordinator')).toMatchObject({ get_tasks: read, create_task: ask, create_grid: ask, update_agent: ask, snippets: ask,
       update_task: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }, close_grid: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
       update_grid: quiet, save_preset: quiet, read_inbox: quiet });
   });
@@ -159,13 +161,14 @@ describe('MCP protocol behaviour (official SDK client)', () => {
     expect((await call(worker, 'read_inbox')).tasks).toEqual([]);
     expect((await call(worker, 'read_inbox', { closed: true })).tasks).toHaveLength(1);
     const sent = await call(lead, 'send_message', { toCellId: h.worker.id, text: 'thanks' });
-    expect(sent.delivery).toBe('pending');
+    expect(sent).toMatchObject({ delivery: 'queued', note: 'Queued for the worker; it sees it on read_inbox/wait_for.' });
+    expect(JSON.stringify(sent)).not.toMatch(/Paste|deliveryError/);
     expect(await call(worker, 'read_inbox', { acknowledge: true })).toMatchObject({ messages: [{ id: sent.id, text: 'thanks' }], acknowledgedMessageIds: [sent.id] });
     expect((await call(worker, 'read_inbox')).messages).toEqual([]);
     expect(await call(worker, 'wait_for', { timeoutSec: 1 })).toEqual({ event: 'timeout' });
-    const snippet = await call(worker, 'snippets', { action: 'save', name: 'Checklist', text: 'Run tests' });
-    expect((await call(worker, 'snippets')).snippets).toMatchObject([{ id: snippet.id, name: 'Checklist' }]);
-    expect(await call(worker, 'snippets', { action: 'get', snippetId: snippet.id })).toMatchObject({ text: 'Run tests' });
+    const snippet = await call(lead, 'snippets', { action: 'save', name: 'Checklist', text: 'Run tests' });
+    expect((await call(lead, 'snippets')).snippets).toMatchObject([{ id: snippet.id, name: 'Checklist' }]);
+    expect(await call(lead, 'snippets', { action: 'get', snippetId: snippet.id })).toMatchObject({ text: 'Run tests' });
     expect((await call(lead, 'snippets', { action: 'apply', snippetId: snippet.id, cellId: h.reviewer.id })).id).toBeTruthy();
     expect(await call(worker, 'update_agent', { name: 'Backend 2', color: '#112233' })).toEqual({ cellId: h.worker.id });
     expect(h.controller.get().projects[0].tabs[0].cells[1]).toMatchObject({ name: 'Backend 2', color: '#112233' });
@@ -247,7 +250,7 @@ describe('MCP protocol behaviour (official SDK client)', () => {
     const worker = await connect(h, h.worker.id);
     const long = 'x'.repeat(20000);
     const created = data(await lead.callTool({ name: 'create_task', arguments: { cellId: h.worker.id, title: 'Long', prompt: long } }));
-    expect(Object.keys(created).sort()).toEqual(['delivery', 'deliveryError', 'id', 'status']);
+    expect(Object.keys(created).sort()).toEqual(['delivery', 'id', 'note', 'status']);
     for (let i = 0; i < 30; i++) await lead.callTool({ name: 'create_task', arguments: { cellId: h.reviewer.id, title: `T${i}`, prompt: 'short' } });
     const page = data(await lead.callTool({ name: 'get_tasks', arguments: { limit: 10 } }));
     expect(page.tasks).toHaveLength(10);
@@ -338,7 +341,12 @@ describe('wait_for', () => {
     expect(data(await lead.callTool({ name: 'wait_for', arguments: { taskIds: [a.id, b.id], all: true, timeoutSec: 1 } }))).toEqual({ event: 'timeout' });
     const unknown = await lead.callTool({ name: 'wait_for', arguments: { taskIds: ['nope'], timeoutSec: 1 } });
     expect(unknown.isError).toBe(true);
-    expect((await lead.callTool({ name: 'wait_for', arguments: { timeoutSec: 600 } })).isError).toBe(true);
+    expect((await lead.callTool({ name: 'wait_for', arguments: { timeoutSec: 601 } })).isError).toBe(true);
+    // The cap follows the caller's CLI: a Codex worker (tool_timeout_sec 180) may wait 170 s at most.
+    const codexCap = await worker.callTool({ name: 'wait_for', arguments: { timeoutSec: 171 } });
+    expect(codexCap.isError).toBe(true);
+    expect(JSON.stringify(codexCap.content)).toContain('at most 170');
+
   });
   it('stops waiting when the client disconnects and frees the request slot', async () => {
     const h = await setup({ rateLimit: false, maxInFlightPerToken: 1 });

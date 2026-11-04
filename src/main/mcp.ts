@@ -6,7 +6,8 @@ import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/se
 import type { InMemoryTaskStore } from '@modelcontextprotocol/sdk/experimental/tasks/stores/in-memory.js';
 import type { McpInfo } from '../shared/automation';
 import { findCell } from '../shared/state';
-import type { AutomationService } from './automation';
+import type { AutomationService, McpConnection } from './automation';
+import { delegationOf } from '../shared/delegation';
 import { ELICIT_TIMEOUT_MS, callTool, describeError, mcpInstructions, supportsTask, toolsForRole, type Elicit, type McpToolContext } from './mcpTools';
 
 export interface McpServerOptions {
@@ -23,6 +24,8 @@ export interface McpServerOptions {
   tr?: McpToolContext['tr'];
   /** How often a waiting wait_for sends progress to a client that asked for it (tests shorten it). */
   progressEveryMs?: number;
+  /** The version the server reports in `initialize` (the app's version). */
+  version?: string;
 }
 const MAX_BODY = 256 * 1024;
 /** Sessions (clients that can answer elicitations) per token and in total; the oldest of a token is closed for a new one. */
@@ -142,14 +145,18 @@ export class UnimuxMcpServer {
   /** MCP tasks per token: another cell's token never sees them. */
   private taskStores = new Map<string, InMemoryTaskStore>();
   private info: McpInfo = { running: false };
-  private readonly limits: Required<Omit<McpServerOptions, 'log' | 'tr' | 'progressEveryMs'>>;
+  private readonly limits: Required<Omit<McpServerOptions, 'log' | 'tr' | 'progressEveryMs' | 'version'>>;
+  private readonly version: string;
   private readonly progressEveryMs: number | undefined;
   private readonly log: (message: string) => void;
   private readonly tr: McpToolContext['tr'];
   private readonly changeListeners = new Set<() => void>();
   constructor(private readonly service: AutomationService, options: McpServerOptions = {}) {
-    const { log, tr, progressEveryMs, ...limits } = options;
+    const { log, tr, progressEveryMs, version, ...limits } = options;
+    this.version = version ?? '0.0.0';
     this.progressEveryMs = progressEveryMs;
+    // wait_for and list_agents ask whether a cell's agent connected (an agent that never did is "stalled").
+    service.mcpProbe = { connection: (cellId) => this.connection(cellId) };
     this.limits = { rateLimit: { burst: 120, perSecond: 60 }, maxInFlightPerToken: 8, maxInFlight: 256, now: () => performance.now(), ...limits };
     this.log = log ?? (() => undefined);
     this.tr = tr;
@@ -158,6 +165,11 @@ export class UnimuxMcpServer {
     const now = this.limits.now();
     const connected = [...this.lastSeen].filter(([cellId, at]) => this.tokenOf.has(cellId) && now - at < CONNECTED_WINDOW_MS).map(([cellId]) => cellId);
     return { ...this.info, configuredCellIds: [...this.tokenOf.keys()], connectedCellIds: connected };
+  }
+  /** connected: the cell's agent listed or called tools since its token was issued; waiting: token issued, not seen yet; off: no token. */
+  connection(cellId: string): McpConnection {
+    if (!this.tokenOf.has(cellId)) return 'off';
+    return this.lastSeen.has(cellId) ? 'connected' : 'waiting';
   }
   /** Open client sessions (diagnostics and tests). */
   get sessionCount(): number { return this.sessions.size; }
@@ -336,9 +348,10 @@ export class UnimuxMcpServer {
     const { Server, CallToolRequestSchema, ListToolsRequestSchema, ErrorCode, McpError } = sdk;
     const found = findCell(this.service.state.get(), actorId);
     const role = this.service.roleOf(actorId);
-    const server = new Server({ name: 'unimux', version: '1.1.0' }, {
+    const server = new Server({ name: 'unimux', version: this.version }, {
       capabilities: { tools: {}, tasks: { list: {}, cancel: {}, requests: { tools: { call: {} } } } },
-      instructions: mcpInstructions(role, { cellId: actorId, name: found?.cell.name, project: found?.project.name }),
+      instructions: mcpInstructions(role, { cellId: actorId, name: found?.cell.name, project: found?.project.name }, delegationOf(this.service.state.get())),
+
       taskStore: this.taskStoreFor(sdk, token),
     });
     server.setRequestHandler(ListToolsRequestSchema, async () => {
