@@ -1,14 +1,15 @@
 import { resolve } from 'path';
-import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
+import { defineConfig } from 'electron-vite';
 import react from '@vitejs/plugin-react';
 import { splitMessages } from './electron.vite.messages';
 
 export default defineConfig({
+  // Dependencies stay external in main and the preload: electron-vite 6 does that by default (`build.externalizeDeps`).
   main: {
-    plugins: [externalizeDepsPlugin()],
     build: {
-      minify: process.env.MC_NOMINIFY ? false : 'esbuild',
-      rollupOptions: {
+      // Vite 8 minifies with Oxc (the Rolldown minifier); esbuild is no longer installed with Vite.
+      minify: process.env.MC_NOMINIFY ? false : 'oxc',
+      rolldownOptions: {
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
           ptyhost: resolve(__dirname, 'src/ptyhost/index.ts'),
@@ -29,9 +30,8 @@ export default defineConfig({
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
     build: {
-      rollupOptions: {
+      rolldownOptions: {
         input: {
           index: resolve(__dirname, 'src/preload/index.ts'),
           updatesplash: resolve(__dirname, 'src/updatesplash/preload.ts'),
@@ -43,6 +43,6 @@ export default defineConfig({
     // splitMessages: each language's translations are a chunk of their own, only the active one is loaded.
     plugins: [react(), splitMessages()],
     // The renderer used to ship unminified (2.2 MB for the main chunk, 1.5 MB for the editor): minified it loads and parses much faster.
-    build: { minify: process.env.MC_NOMINIFY ? false : 'esbuild', cssMinify: true },
+    build: { minify: process.env.MC_NOMINIFY ? false : 'oxc', cssMinify: true },
   },
 });
