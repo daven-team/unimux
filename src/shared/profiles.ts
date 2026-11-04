@@ -1,6 +1,7 @@
 import { codexHookOverrides } from './codexHooks';
 import { shellSafeText } from './delegation';
 import { withResetTail } from './termReset';
+import { startClear } from './startScreen';
 import type { Profile, ShellKind } from './types';
 
 export const DEFAULT_PROFILES: Profile[] = [
@@ -148,10 +149,11 @@ export function buildCliCommand(profile: Profile, opts: LaunchOptions): string |
 }
 
 /**
- * Line typed into the cell's shell to start the agent: the command, then a tail that runs when the CLI returned (also after a
- * crash or kill) and switches off the mouse / focus / paste modes a dead CLI leaves on (see termReset.ts). Null for shell profiles.
+ * Line typed into the cell's shell to start the agent: a clear (1.1.5: the launch line never stays on screen, the cell's start
+ * card covers it until the CLI is up, see startScreen.ts), the command, then a tail that runs when the CLI returned (also after
+ * a crash or kill) and switches off the mouse / focus / paste modes a dead CLI leaves on (see termReset.ts). Null for shell profiles.
  */
 export function buildLaunchCommand(profile: Profile, opts: LaunchOptions): string | null {
   const command = buildCliCommand(profile, opts);
-  return command === null ? null : withResetTail(command, opts.shell, opts.exitUrl);
+  return command === null ? null : startClear(opts.shell) + withResetTail(command, opts.shell, opts.exitUrl);
 }

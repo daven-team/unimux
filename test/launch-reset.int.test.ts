@@ -3,6 +3,7 @@ import { existsSync } from 'fs';
 import { describe, expect, it } from 'vitest';
 import { cleanEnv } from '../src/shared/env';
 import { withResetTail } from '../src/shared/termReset';
+import { startClear } from '../src/shared/startScreen';
 import { PtyManager } from '../src/ptyhost/manager';
 import type { ShellKind } from '../src/shared/types';
 
@@ -115,4 +116,28 @@ describe.skipIf(!hasPowerShell || !existsSync(`${process.env.SystemRoot ?? 'C:\\
       });
     }, 40000);
   }
+});
+
+// 1.1.5: the clear in front of the launch line runs in the shell before the CLI: the screen and the scrollback are erased
+// (ED 2 + ED 3, which xterm applies) after the typed echo and before the CLI's first output, and the reset still runs after it.
+describe.skipIf(!hasPowerShell)('start clear of the launch line (real shells in ConPTY)', () => {
+  for (const shell of ['powershell', 'cmd'] as const) {
+    it(`${shell}: erases the screen and the scrollback between the typed line and the CLI`, async () => {
+      const cli = shell === 'cmd' ? 'echo CLI-OUT-^1' : "[Console]::Out.WriteLine('CLI-OUT-'+'1')";
+      const out = await typeLine(shell, startClear(shell) + withResetTail(cli, shell), { until: () => RESET });
+      const cleared = out.lastIndexOf('\x1b[3J');
+      expect(out.lastIndexOf('\x1b[2J', cleared)).toBeGreaterThan(-1);
+      expect(cleared).toBeGreaterThan(out.indexOf(startClear(shell).trim()));
+      expect(cleared).toBeLessThan(out.indexOf('CLI-OUT-1'));
+      expect(out.indexOf('CLI-OUT-1')).toBeLessThan(out.search(RESET));
+    }, 30000);
+  }
+});
+
+// 1.1.5: the prompt mark after an agent's launch line carries the CLI's exit code (the start card's "kod wyjścia"), once.
+describe.skipIf(!hasPowerShell)('exit code in the prompt mark after the launch line (real powershell.exe)', () => {
+  it('reports the code of the CLI, not the success of the reset tail', async () => {
+    const out = await typeLine('powershell', `${withResetTail('cmd /c exit 3', 'powershell')}\recho next`, { until: () => /133;D;3\x07[\s\S]*133;D;0\x07/ });
+    expect(out).toMatch(/\x1b\]133;D;3\x07/);
+  }, 30000);
 });

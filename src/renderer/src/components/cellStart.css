@@ -1,0 +1,61 @@
+/* 1.1.5: the start card of an agent cell (CellStartCard.tsx): the panel of the SSH connecting card (sshConnect.css) with the
+   provider mark, the title and the shared BusyRing; failed, the same panel with the error lines, the output and the buttons. */
+.cell-start { position: absolute; inset: var(--cell-head) 0 0 0; z-index: 3; overflow: auto; background: var(--card-bg); container-type: size; }
+.cell-start-frame { display: flex; min-height: 100%; padding: 14px; }
+.cell-start-panel {
+  display: flex; flex-direction: column; width: 100%; max-width: 400px; min-width: 0; margin: auto;
+  border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); overflow: hidden;
+  animation: cell-start-in .16s ease-out;
+}
+.cell-start.failed .cell-start-panel { max-width: 460px; }
+@keyframes cell-start-in { from { opacity: 0; transform: translateY(3px); } }
+.cell-start-panel > * + * { border-top: 1px solid var(--border); }
+
+.cell-start-head { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 10px 12px; }
+/* The provider mark on a tile like the cell header's icon; a failed start gets the error mark on its corner. */
+.cell-start-mark { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px; background: var(--bg-3); box-shadow: inset 0 0 0 1px var(--border); }
+.cell-start-mark .provider-icon { display: block; }
+.cell-start-mark .cell-start-badge { position: absolute; right: -3px; bottom: -3px; border-radius: 50%; background: var(--bg-2); box-shadow: 0 0 0 2px var(--bg-2); }
+.cell-start-name { display: flex; flex: 1; flex-direction: column; gap: 1px; min-width: 0; }
+.cell-start-name strong, .cell-start-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell-start-name strong { color: var(--text); font-size: 13px; font-weight: 600; }
+.cell-start-name span { color: var(--muted); font-size: 11.5px; }
+.cell-start.failed .cell-start-name span { color: var(--st-error); }
+/* A BusyRing: it turns with the shared .busy-ring animation (styles.css) only while the card is shown. */
+.cell-start-ring { flex: none; width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid var(--border-2); border-top-color: var(--btn-primary-bg); }
+
+.cell-start pre { margin: 0; font-family: "Cascadia Mono", "Cascadia Code", Consolas, Menlo, "SFMono-Regular", monospace; font-size: 11.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }
+.cell-start-error { padding: 9px 12px; max-height: 120px; overflow: auto; color: #f0a3a3; background: color-mix(in srgb, #ef4444 6%, var(--bg-2)); }
+.cell-start-output { display: flex; flex-direction: column; min-width: 0; }
+.cell-start-toggle { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 11.5px; text-align: left; cursor: pointer; }
+.cell-start-toggle:hover { color: var(--text); }
+.cell-start-toggle svg { flex: none; }
+.cell-start pre.cell-start-tail { max-height: 180px; padding: 8px 12px; overflow: auto; border-top: 1px solid var(--border); background: var(--bg-1); color: var(--text-2); font-size: 11px; }
+/* The footer bar: the buttons at its end, the primary one last (as on the SSH card). */
+.cell-start-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; padding: 8px 10px; background: var(--bg-1); }
+/* While starting the only button is a quiet way to the terminal: no footer bar under the title. */
+.cell-start:not(.failed) .cell-start-panel > .cell-start-actions { margin-top: -6px; padding-top: 0; border-top: 0; background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cell-start-panel { animation: none; }
+}
+/* A small grid cell: the panel fills the cell without its frame. */
+@container (max-width: 340px) or (max-height: 260px) {
+  .cell-start-frame { padding: 0; }
+  .cell-start-panel { max-width: none; margin: 0 0 auto; border: 0; border-radius: 0; background: var(--card-bg); animation: none; }
+  .cell-start:not(.failed) .cell-start-panel { margin: auto 0; }
+  .cell-start-head { gap: 8px; padding: 7px 8px; }
+  .cell-start-error, .cell-start-toggle, .cell-start pre.cell-start-tail { padding-inline: 8px; }
+  .cell-start-actions { padding: 6px 8px; }
+}
+@container (max-height: 200px) {
+  .cell-start-output { display: none; }
+  .cell-start-error { max-height: 54px; }
+}
+@container (max-height: 120px) {
+  .cell-start-name span, .cell-start:not(.failed) .cell-start-actions { display: none; }
+}
+@container (max-width: 220px) {
+  .cell-start-mark { display: none; }
+  .cell-start-actions .btn { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}

@@ -29,6 +29,7 @@ import { onWindowShown } from '../windowShown';
 import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
 import { cursorOffset, reflowedCursor, type WrapBuffer } from '../../../shared/cursorReflow';
 import { coalesceViewportSync } from '../../../shared/viewportSync';
+import { showsLaunchLine, StartWatch, type StartScreen } from '../../../shared/startScreen';
 
 /** The background of a cell card (--card-bg in styles.css): a local terminal draws on the card itself (1.0.7). */
 export const CARD_BG = '#131313';
@@ -105,6 +106,9 @@ interface Entry {
   askEpoch: number;
   /** Undoes the per-frame scrollbar sync (viewportSync.ts) before the terminal is disposed; null when xterm has no viewport. */
   unsyncViewport: (() => void) | null;
+  /** 1.1.5: the start card of an agent cell (startScreen.ts) and the timer of its next decision. */
+  start: StartWatch;
+  startTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /** What SSH terminals get on top (the command autocomplete, sshAutocomplete.ts): a look at every key first, and a dispose. */
@@ -145,6 +149,7 @@ class TerminalManager {
   private bindListeners = new Set<(cellId: string, thread: BoundThread) => void>();
   private detailListeners = new Set<(cellId: string, detail: StatusDetail | undefined) => void>();
   private floodListeners = new Set<(cellId: string) => void>();
+  private startListeners = new Set<(cellId: string) => void>();
   /** Where a terminal is opened (xterm measures its glyphs there, so it has a real size). */
   private staging: HTMLDivElement;
   /** Where terminals wait while no cell shows them: `display: none` so the browser spends no style or layout work on them (xterm pauses its renderer by itself). */
@@ -312,6 +317,7 @@ class TerminalManager {
         e.term.write(inputModesOff(this.conpty(e)));
         if (!e.remote) e.term.write(`\r\n\x1b[90m[${tr('Terminal')} · ${tr('zakończony')}]\x1b[0m\r\n`);
         this.setStatus(e, () => e.tracker.exited(m.code), 'exit');
+        this.startStep(e, e.start.stop());
       }
       this.exitListeners.forEach((l) => l(m.id));
       return;
@@ -333,11 +339,16 @@ class TerminalManager {
       return;
     }
     if (m.t === 'replay') {
+      this.startStep(e, e.start.stop());
       e.term.reset();
       e.guard.reset();
       this.writeReplay(e, m.data, m.sizes);
     } else {
-      e.term.write(m.data, () => this.ack(m));
+      e.term.write(m.data, () => {
+        this.ack(m);
+        // During a start, after the clear: the CLI's first visible output (see startScreen.ts).
+        if (e.start.awaitingOutput && this.entries.get(e.id) === e) this.startStep(e, e.start.output(performance.now(), this.screenShows(e)));
+      });
       e.outputAt = performance.now();
       if (!e.agent) e.infer.output(performance.now());
       if (e.guard.watching(performance.now())) e.guard.output(performance.now(), m.data, this.inAlternate(e));
@@ -456,6 +467,7 @@ class TerminalManager {
       codex: opts.codex === true, scanner: new FailureScanner(), guard: new MouseFloodGuard(), infer: new AgentInference(window.mc.platform === 'win32' && opts.remote !== true), attachedTo: null, resizeObs: null, replaying: 0, replayMarks: null, refitAfterReplay: false, ptyLive: false, lastSize: { cols: term.cols, rows: term.rows },
       parkedSelection: null, applySelection: null, remote: opts.remote === true, addon: null, askEpoch: 0,
       unsyncViewport: coalesceViewportSync(term, host),
+      start: new StartWatch(), startTimer: null,
     };
     entry.tracker.setCodex(entry.codex);
     entry.tracker.setAgent(entry.agent);
@@ -482,6 +494,14 @@ class TerminalManager {
       if (params.some((p) => typeof p === 'number' && p >= 1000 && p <= 1003)) entry.guard.reset();
       return false;
     });
+    // 1.1.5: the launch line starts with a clear (startScreen.ts): an erase of the display while the launch line is on screen
+    // is that clear, the CLI comes next. Looked at only while a start card waits for it; xterm still erases as usual.
+    term.parser.registerCsiHandler({ final: 'J' }, (params) => {
+      if (entry.start.awaitingClear && entry.replaying === 0 && (params[0] === 2 || params[0] === 3)) {
+        this.startStep(entry, entry.start.cleared(performance.now(), showsLaunchLine(this.bufferLines(entry))));
+      }
+      return false;
+    });
     // Codex (tui.notifications) and others signal "needs attention" with OSC 9.
     term.parser.registerOscHandler(9, (payload) => {
       // 9;4;... = progress, 9;9;... = cwd reporting (oh-my-posh etc.) - not notifications.
@@ -502,8 +522,11 @@ class TerminalManager {
     // prompt, the exit code, and an agent CLI that ended back to its shell (shellIntegration.ts). A replay is history, not news.
     const shellMark = (payload: string) => {
       const mark = parseShellMark(payload);
-      if (mark && entry.replaying === 0) this.setStatus(entry, () => entry.tracker.shellMark(mark.kind, performance.now(), mark.code), 'shell');
-      else if (mark && mark.kind !== 'D') {
+      if (mark && entry.replaying === 0) {
+        this.setStatus(entry, () => entry.tracker.shellMark(mark.kind, performance.now(), mark.code), 'shell');
+        // The shell's prompt back during a start: the CLI ended (the lines are read before the prompt is drawn).
+        this.startStep(entry, entry.start.shellMark(mark.kind, mark.code, performance.now(), () => this.bufferLines(entry)));
+      } else if (mark && mark.kind !== 'D') {
         const seen = entry.replayMarks;
         entry.replayMarks = { last: mark.kind, sawStart: (seen?.sawStart ?? false) || mark.kind === 'C', prompts: (seen?.prompts ?? 0) + (mark.kind === 'A' ? 1 : 0) };
       }
@@ -1197,6 +1220,7 @@ class TerminalManager {
     e.term.reset();
     e.scanner.reset();
     e.infer.exited();
+    this.startStep(e, e.start.stop());
     this.setStatus(e, () => e.tracker.reset(), 'restore');
   }
 
@@ -1213,6 +1237,57 @@ class TerminalManager {
     e.term.reset();
     this.setStatus(e, () => e.tracker.reset(), 'restore');
     e.tracker.threads.begin(session);
+    // 1.1.5: an agent cell shows its start card until the CLI is up (a plain shell or an SSH session never does).
+    this.startStep(e, e.agent && !e.remote ? e.start.begin(performance.now(), !!session) : e.start.stop());
+  }
+
+  // ── the start card (startScreen.ts) ───────────────────────────────────────
+
+  /** The start card of a cell: starting, failed, or null (the terminal shows). */
+  startScreen(cellId: string): StartScreen | null {
+    return this.entries.get(cellId)?.start.screen ?? null;
+  }
+
+  /** Called with the cell id whenever its start card changes. */
+  onStartScreen(l: (cellId: string) => void): () => void {
+    this.startListeners.add(l);
+    return () => this.startListeners.delete(l);
+  }
+
+  /** "Pokaż terminal": the card goes, the terminal with its whole output shows. */
+  showTerminal(cellId: string): void {
+    const e = this.entries.get(cellId);
+    if (e) this.startStep(e, e.start.stop());
+  }
+
+  /** Publishes a change of the card and arms the timer of its next decision (the settle, the safety timeout). */
+  private startStep(e: Entry, changed: boolean): void {
+    if (changed) this.startListeners.forEach((l) => l(e.id));
+    if (e.startTimer) { clearTimeout(e.startTimer); e.startTimer = null; }
+    const at = e.start.nextAt();
+    if (at === undefined || this.entries.get(e.id) !== e) return;
+    e.startTimer = setTimeout(() => { e.startTimer = null; this.startStep(e, e.start.tick(performance.now())); }, Math.max(0, at - performance.now()) + 5);
+  }
+
+  /** The terminal's recent lines (the active buffer, wrapped rows joined into their logical line). */
+  private bufferLines(e: Entry, max = 400): string[] {
+    const buffer = e.term.buffer.active;
+    const lines: string[] = [];
+    for (let y = Math.max(0, buffer.length - max); y < buffer.length; y++) {
+      const line = buffer.getLine(y);
+      if (!line) continue;
+      const text = line.translateToString(true);
+      if (line.isWrapped && lines.length) lines[lines.length - 1] = lines[lines.length - 1].padEnd(e.term.cols) + text;
+      else lines.push(text);
+    }
+    return lines;
+  }
+
+  /** Something is on the screen (any non-blank cell in view). */
+  private screenShows(e: Entry): boolean {
+    const buffer = e.term.buffer.active;
+    for (let y = 0; y < e.term.rows; y++) if (buffer.getLine(buffer.baseY + y)?.translateToString(true).trim()) return true;
+    return false;
   }
 
   /**
@@ -1228,6 +1303,7 @@ class TerminalManager {
     this.fitQueue.delete(e);
     e.addon?.dispose();
     e.unsyncViewport?.();
+    if (e.startTimer) { clearTimeout(e.startTimer); e.startTimer = null; }
     // The context is given back first (as in releaseWebgl), the addon goes with the terminal: disposed on its own it would
     // bring up the DOM renderer of a terminal that is about to go and redraw it (12 ms per cell when a grid was detached).
     const gl = e.webglGl;
@@ -1253,6 +1329,8 @@ class TerminalManager {
     const e = this.entries.get(cellId);
     if (!e) return;
     this.setStatus(e, () => e.tracker.hook(event, performance.now(), info), event, info);
+    // Any hook (SessionStart, a Codex notify...) says the CLI runs: its start card goes.
+    this.startStep(e, e.start.hook(performance.now()));
   }
 
   /** Claude Code's screen shows it waiting for background work (agent cells only, never a shell or SSH session); see bgGuard. */

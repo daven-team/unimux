@@ -60,9 +60,10 @@ export function withResetTail(cli: string, shell: ShellKind = 'pwsh', exitUrl?: 
     if (!url) return `trap : INT; ${cli}; ${reset}; trap - INT`;
     return `trap : INT; ${cli}; __mc_exit=$?; curl -s --noproxy '*' -m 2 -X POST '${url}/'$__mc_exit >/dev/null 2>&1; ${reset}; trap - INT`;
   }
-  if (!url) return `try { ${cli} } finally { [Console]::Write(${psEsc()}) }`;
+  // 1.1.5: the CLI's exit code is kept for the prompt's D mark (shellIntegration.ts): `$?` after the tail is always true.
+  if (!url) return `try { ${cli} } finally { $global:__unimuxExit = $LASTEXITCODE; [Console]::Write(${psEsc()}) }`;
   // The post comes first in every shell (cmd needs it before its PowerShell); the CLI's exit code is kept for the prompt.
-  return `try { ${cli} } finally { $__mcExit = $LASTEXITCODE; curl.exe -s --noproxy '*' -m 2 -X POST "${url}/$__mcExit" *> $null; [Console]::Write(${psEsc()}); $global:LASTEXITCODE = $__mcExit }`;
+  return `try { ${cli} } finally { $__mcExit = $LASTEXITCODE; curl.exe -s --noproxy '*' -m 2 -X POST "${url}/$__mcExit" *> $null; [Console]::Write(${psEsc()}); $global:LASTEXITCODE = $__mcExit; $global:__unimuxExit = $__mcExit }`;
 }
 
 /** The only URLs the tail posts to: the local hook server's exit route (no quotes or shell characters can come along). */

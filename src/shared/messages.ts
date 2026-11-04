@@ -38,6 +38,7 @@ import { sftpViewMessages } from './sftpViewMessages';
 import { remoteEditMessages } from './remoteEditMessages';
 import { shortcutMessages } from './shortcutMessages';
 import { sshMessages } from './sshMessages';
+import { startScreenMessages } from './startScreenMessages';
 import { sshConnectMessages } from './sshConnectMessages';
 import { sshModeMessages } from './sshModeMessages';
 import { sshThemeMessages } from './sshThemeMessages';
@@ -98,6 +99,7 @@ export const messages = {
   ...remoteEditMessages,
   ...shortcutMessages,
   ...sshMessages,
+  ...startScreenMessages,
   ...sshConnectMessages,
   ...sshModeMessages,
   ...sshThemeMessages,
