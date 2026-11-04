@@ -1,0 +1,47 @@
+name: Dependency report
+
+# Weekly: one issue "Dependency report" listing major updates that Dependabot skips on purpose (dependabot.yml ignores
+# semver-major) and every npm audit advisory. The issue is updated in place and closed once nothing is left.
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: deps-report
+  cancel-in-progress: true
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Install without scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Collect outdated packages and advisories
+        run: |
+          npm outdated --json > "$RUNNER_TEMP/outdated.json" || true
+          npm audit --json > "$RUNNER_TEMP/audit.json" || true
+      - name: Write the report
+        run: node scripts/deps-report.mjs "$RUNNER_TEMP/outdated.json" "$RUNNER_TEMP/audit.json" "$RUNNER_TEMP/report.md"
+      - name: Update the issue
+        run: |
+          set -euo pipefail
+          title="Dependency report"
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number,title -q ".[] | select(.title == \"$title\") | .number" | head -n1)
+          if [ -s "$RUNNER_TEMP/report.md" ]; then
+            if [ -n "$number" ]; then gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/report.md"
+            else gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$RUNNER_TEMP/report.md"; fi
+          elif [ -n "$number" ]; then
+            gh issue close "$number" --repo "$GITHUB_REPOSITORY" --comment "Nothing left: no major updates pending and no npm audit advisories."
+          fi
