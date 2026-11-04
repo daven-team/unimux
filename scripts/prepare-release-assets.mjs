@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import yaml from 'js-yaml';
+import { dump, load } from 'js-yaml';
 
 const [root, version] = process.argv.slice(2);
 assert.ok(root, 'Provide the CI artifact directory');
@@ -14,7 +14,7 @@ let preferredMac;
 for (const platform of ['windows-x64', 'macos-x64', 'macos-arm64']) {
   const directory = join(root, `unimux-${platform}`);
   const manifestName = platform.startsWith('macos') ? 'latest-mac.yml' : 'latest.yml';
-  const manifest = yaml.load(readFileSync(join(directory, manifestName), 'utf8'));
+  const manifest = load(readFileSync(join(directory, manifestName), 'utf8'));
   assert.equal(manifest.version, version);
   for (const file of manifest.files) {
     assert.equal(file.url, basename(file.url));
@@ -33,7 +33,7 @@ for (const platform of ['windows-x64', 'macos-x64', 'macos-arm64']) {
   }
 }
 assert.equal(new Set(macFiles.map(file => file.url)).size, macFiles.length);
-writeFileSync(join(output, 'latest-mac.yml'), yaml.dump({ ...preferredMac, files: macFiles }));
+writeFileSync(join(output, 'latest-mac.yml'), dump({ ...preferredMac, files: macFiles }));
 const expected = [
   `unimux-Setup-${version}.exe`,
   `unimux-Setup-${version}.exe.blockmap`,
