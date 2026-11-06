@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "test-bridge",
-  "description": "Check flavour only (feature test-bridge, build.rs): the real-app harness command for the app windows.",
+  "description": "Check flavour only (feature test-bridge, build.rs): the real-app harness command and the SP5 pty spike commands for the app windows.",
   "windows": ["main", "detached-*"],
-  "permissions": ["allow-test-bridge"]
+  "permissions": ["allow-test-bridge", "allow-spike-pty-attach", "allow-spike-pty"]
 }

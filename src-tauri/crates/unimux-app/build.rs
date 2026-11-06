@@ -17,6 +17,8 @@ fn main() {
         "update_splash_close",
         "update_splash_open",
         "test_bridge",
+        "spike_pty_attach",
+        "spike_pty",
     ];
     // Capabilities: capabilities/*.json always; capabilities-check/*.json (the test_bridge grant) only in builds with the
     // test-bridge feature, so a release build ships no grant for a command it does not contain.
