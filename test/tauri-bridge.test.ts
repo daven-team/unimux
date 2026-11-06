@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { createMcApi, type McTransport } from '../src/preload/mcApi';
-import { createTauriTransport, McNotYetError, type TauriDeps } from '../src/renderer/src/bridge/transport';
+import { createPortPoster, createTauriTransport, McNotYetError, type TauriDeps } from '../src/renderer/src/bridge/transport';
 // @ts-expect-error plain JS module without types
 import { buildContract, contractText, contractTs } from '../scripts/gen-ipc-contract.mjs';
 
@@ -66,7 +66,7 @@ function fakeDeps(over: Partial<TauriDeps> = {}) {
   const store = new Map<string, string>();
   const logs: string[] = [];
   const deps: TauriDeps = {
-    invoke: async (command, args) => { invocations.push({ command, args }); return null; },
+    invoke: async (command, args) => { invocations.push({ command, args: args as Record<string, unknown> }); return null; },
     listen: async () => () => {},
     log: (m) => logs.push(m),
     storage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => { store.set(k, v); } },
@@ -90,7 +90,7 @@ describe('Tauri transport', () => {
   });
 
   it('rejects an unported invoke with McNotYetError and logs an unported send once', async () => {
-    const { deps, logs } = fakeDeps({ invoke: async (command, args) => { throw { code: 'MC_NOT_YET', message: `${String(args.cmd)} is not available yet in this build`, command: args.cmd }; } });
+    const { deps, logs } = fakeDeps({ invoke: async (_command, args) => { const cmd = (args as Record<string, unknown>).cmd; throw { code: 'MC_NOT_YET', message: `${String(cmd)} is not available yet in this build`, command: cmd }; } });
     const t = createTauriTransport(boot, deps);
     const error = await t.invoke('git:probe', 'p1').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(McNotYetError);
@@ -110,7 +110,7 @@ describe('Tauri transport', () => {
   });
 
   it('sends undefined arguments as null (JSON) and gives Uint8Array answers back as bytes', async () => {
-    const { deps, invocations } = fakeDeps({ invoke: async (command, args) => { invocations.push({ command, args }); return new Uint8Array([1, 2]).buffer; } });
+    const { deps, invocations } = fakeDeps({ invoke: async (command, args) => { invocations.push({ command, args: args as Record<string, unknown> }); return new Uint8Array([1, 2]).buffer; } });
     const result = await createTauriTransport(boot, deps).invoke('sound:load', 'done', undefined);
     expect(invocations[0]).toEqual({ command: 'mc_invoke', args: { cmd: 'sound:load', args: ['done', null] } });
     expect(result).toEqual(new Uint8Array([1, 2]));
@@ -142,10 +142,84 @@ describe('Tauri transport', () => {
     expect(cb.mock.calls).toEqual([['c1', 'stop', undefined], ['c1', 'notify', { text: 'x' }]]);
   });
 
+  it('replaces lone surrogates (values and keys) before the call, so serde_json does not refuse a whole state:edit', async () => {
+    const { deps, invocations } = fakeDeps();
+    const ok = { name: 'fine 😀', list: ['a'] };
+    await createTauriTransport(boot, deps).invoke('state:edit', { id: 'e', next: { name: 'Proj \ud83d', ['\udc00k']: ['x\ude00', ok] } }, ok);
+    const args = invocations[0].args as { args: unknown[] };
+    const r = String.fromCharCode(0xfffd);
+    expect(JSON.stringify(args.args[0])).toBe(JSON.stringify({ id: 'e', next: { name: `Proj ${r}`, [`${r}k`]: [`x${r}`, ok] } }));
+    expect(args.args[1]).toBe(ok); // nothing to repair: not copied
+    expect(invocations[0].command).toBe('mc_invoke');
+  });
+
+  it('sends a Uint8Array argument as the raw body of mc_invoke_raw with the other arguments in ASCII headers', async () => {
+    const calls: Array<{ command: string; args: unknown; options?: { headers: Record<string, string> } }> = [];
+    const { deps } = fakeDeps({ invoke: async (command, args, options) => { calls.push({ command, args, options }); return null; } });
+    const api = createMcApi(createTauriTransport(boot, deps));
+    const png = new Uint8Array([137, 80, 78, 71]);
+    await api.notes.saveImage(png, 'image/png ąę');
+    expect(calls[0].command).toBe('mc_invoke_raw');
+    expect(calls[0].args).toBe(png);
+    expect(calls[0].options?.headers).toEqual({ 'mc-cmd': 'notes:image:save', 'mc-args': '[null,"image/png \\u0105\\u0119"]', 'mc-raw-index': '0' });
+    expect(JSON.parse(calls[0].options!.headers['mc-args'])).toEqual([null, 'image/png ąę']);
+  });
+
+  it('decodes framed binary answers, bytes nested in objects included (unimux_ipc::binary)', async () => {
+    // encode(json!({"data": part(0), "name": "done.wav", "more": [part(1), null]}), [[1,2,3], []]) of the Rust tests.
+    const header = new TextEncoder().encode(JSON.stringify({ value: { data: { $mcBytes: 0 }, name: 'done.wav', more: [{ $mcBytes: 1 }, null] }, parts: [3, 0] }));
+    const frame = new Uint8Array(8 + header.length + 3);
+    frame.set([0x4d, 0x43, 0x42, 0x31]);
+    new DataView(frame.buffer).setUint32(4, header.length, true);
+    frame.set(header, 8);
+    frame.set([1, 2, 3], 8 + header.length);
+    const { deps } = fakeDeps({ invoke: async () => frame.buffer });
+    const result = await createTauriTransport(boot, deps).invoke('sound:load', 'done') as { data: Uint8Array; name: string; more: unknown[] };
+    expect(result.data).toBeInstanceOf(Uint8Array);
+    expect([...result.data]).toEqual([1, 2, 3]);
+    expect(result.name).toBe('done.wav');
+    expect(result.more[0]).toBeInstanceOf(Uint8Array);
+    expect(result.more[1]).toBeNull();
+  });
+
+  it('drops every subscription of the page on dispose (pagehide), the late ones too', async () => {
+    const stops: Array<ReturnType<typeof vi.fn>> = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const { deps } = fakeDeps({ listen: async () => { await gate; const stop = vi.fn(); stops.push(stop); return stop; } });
+    const t = createTauriTransport(boot, deps);
+    const off = t.on('cli:changed', () => {});
+    t.on('cell:hook', () => {});
+    t.on('state:changed', () => {});
+    off();
+    expect(t.subscriptionCount()).toBe(2);
+    t.dispose();
+    expect(t.subscriptionCount()).toBe(0);
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(stops).toHaveLength(3);
+    for (const stop of stops) expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('batches port messages per task and numbers the batches in order', async () => {
+    const posts: Array<{ session: string; seq: number; kind: string; messages: unknown[] }> = [];
+    const tasks: Array<() => void> = [];
+    const post = createPortPoster('pty', 's1', async (a) => { posts.push(a); }, (f) => tasks.push(f));
+    post({ t: 'write', d: 'a' });
+    post({ t: 'write', d: 'b' });
+    tasks.shift()!();
+    post({ t: 'resize', c: 80 });
+    tasks.shift()!();
+    expect(posts).toEqual([
+      { session: 's1', seq: 1, kind: 'pty', messages: [{ t: 'write', d: 'a' }, { t: 'write', d: 'b' }] },
+      { session: 's1', seq: 2, kind: 'pty', messages: [{ t: 'resize', c: 80 }] },
+    ]);
+  });
+
   it('keeps a state:edit sent right before a reload and replays it on the next page', async () => {
     // First page: the edit goes out, the page unloads before the answer.
     const pending: Array<() => void> = [];
-    const first = fakeDeps({ invoke: (command, args) => new Promise((r) => { first.invocations.push({ command, args }); pending.push(() => r({ revision: 1 })); }) });
+    const first = fakeDeps({ invoke: (command, args) => new Promise((r) => { first.invocations.push({ command, args: args as Record<string, unknown> }); pending.push(() => r({ revision: 1 })); }) });
     const t1 = createTauriTransport(boot, first.deps);
     void t1.invoke('state:edit', { id: 'edit-1', base: { a: 1 }, next: { a: 2 } });
     expect(JSON.parse(first.store.get('mc:journal')!)).toHaveProperty(['state:edit:edit-1']);

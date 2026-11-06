@@ -7,6 +7,8 @@
 //   test/golden/state-diff.jsonl     {prev, next} -> diffState
 //   test/golden/translate.jsonl      {language, key, params} -> translate
 //   test/golden/atomic-write.jsonl   {file, pid, ms, counter} -> the temp name tempPathFor would give
+//   test/golden/state-load.jsonl     {text} (JSON.stringify output, lone surrogates included) -> what 1.2.0 reads: JSON.parse
+//                                     accepts it, a lone surrogate becomes U+FFFD (a Rust string cannot hold one)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -126,12 +128,31 @@ function atomicWriteNames() {
   return [[1234, 1762430400123, 0], [1, 0, 35], [99999, 1792067400000, 36]].map(([pid, ms, counter]) => ({ file: 'state.json', pid, ms, counter, out: `state.json.${pid}.${ms.toString(36)}${counter.toString(36)}.tmp` }));
 }
 
+/** Texts JSON.stringify writes for strings and keys with unpaired surrogates (a 1.1.x state.json): JSON.parse accepts them. */
+function stateLoad() {
+  const hi = '\ud83d';
+  const lo = '\ude00';
+  const strings = [`Proj ${hi}`, `${lo}x`, `${hi}${hi}${lo}`, `${hi}${lo}`, `a${lo}${hi}b`, '\\ud800 literal', '\u{1F600}'.slice(0, 1), 'plain ąę €', ''];
+  const wellFormed = (v) => {
+    if (typeof v === 'string') return v.toWellFormed();
+    if (Array.isArray(v)) return v.map(wellFormed);
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k.toWellFormed(), wellFormed(x)]));
+    return v;
+  };
+  return strings.map((s, i) => {
+    const text = JSON.stringify({ version: 1, projects: [{ id: `p${i}`, name: s, dir: 'C:/x', tabs: [] }], notes: { [s || 'k']: [s, 1] } });
+    const parsed = JSON.parse(text);
+    return { text, jsonParseAccepts: JSON.stringify(parsed) === text, out: JSON.stringify(wellFormed(parsed)) };
+  });
+}
+
 const files = {
   'default-state.json': `${JSON.stringify({ win32: defaultState('win32'), darwin: defaultState('darwin') }, null, 1)}\n`,
   'state-merge.jsonl': jsonl(stateMerge()),
   'state-diff.jsonl': jsonl(stateDiff()),
   'translate.jsonl': jsonl(translations()),
   'atomic-write.jsonl': jsonl(atomicWriteNames()),
+  'state-load.jsonl': jsonl(stateLoad()),
 };
 
 const check = process.argv.includes('--check');

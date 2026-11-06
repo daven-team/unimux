@@ -4,9 +4,77 @@
 //! A load and save without an edit must give the same bytes, so numbers use ECMAScript's Number::toString (ryu-js: `1` for a
 //! whole float, `1e21`, `1.5e-7`) and strings use the JSON.stringify escaping (`\"`, `\\`, `\b \f \n \r \t`, other control
 //! characters as lowercase `\u00xx`, nothing else escaped).
+//!
+//! [`parse`] accepts what `JSON.parse` accepts in text JSON.stringify wrote: since ES2019 JSON.stringify writes an unpaired
+//! UTF-16 surrogate (half an emoji cut by `.slice()`, text pasted from a broken source) as `\udXXX`, which JSON.parse reads back
+//! and serde_json rejects. A Rust string cannot hold a lone surrogate, so it becomes U+FFFD.
 
 use serde_json::{Number, Value};
 use std::fmt::Write as _;
+
+/// `JSON.parse(text)`: like `serde_json::from_str`, but an escaped unpaired surrogate (in a value or a key) reads as U+FFFD
+/// instead of failing the whole text. Valid pairs stay as they are.
+pub fn parse(text: &str) -> serde_json::Result<Value> {
+    match serde_json::from_str(text) {
+        Ok(v) => Ok(v),
+        Err(e) => match replace_lone_surrogates(text) {
+            Some(fixed) => serde_json::from_str(&fixed),
+            None => Err(e),
+        },
+    }
+}
+
+fn hex4(b: &[u8], at: usize) -> Option<u32> {
+    let digits = b.get(at..at + 4)?;
+    let mut n = 0u32;
+    for &d in digits {
+        n = n * 16 + (d as char).to_digit(16)?;
+    }
+    Some(n)
+}
+
+/// The text with every `\uD800`-`\uDFFF` escape that is not half of a high + low pair replaced by `\ufffd`; None when there is
+/// none. Only escapes are looked at: a raw lone surrogate cannot occur in UTF-8 text.
+pub fn replace_lone_surrogates(text: &str) -> Option<String> {
+    let b = text.as_bytes();
+    let is_high = |u: u32| (0xD800..0xDC00).contains(&u);
+    let is_low = |u: u32| (0xDC00..0xE000).contains(&u);
+    let mut out: Option<String> = None;
+    let mut copied = 0;
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != b'\\' {
+            i += 1;
+            continue;
+        }
+        if b.get(i + 1) != Some(&b'u') {
+            // `\\`, `\"`, `\n` ...: the escaped character never starts another escape.
+            i += 2;
+            continue;
+        }
+        let Some(unit) = hex4(b, i + 2) else {
+            i += 2;
+            continue;
+        };
+        if is_high(unit) && b.get(i + 6) == Some(&b'\\') && b.get(i + 7) == Some(&b'u') && hex4(b, i + 8).is_some_and(is_low) {
+            i += 12;
+            continue;
+        }
+        if !is_high(unit) && !is_low(unit) {
+            i += 6;
+            continue;
+        }
+        // Backslashes are ASCII, so `copied` and `i` are always character boundaries.
+        let o = out.get_or_insert_with(|| String::with_capacity(text.len()));
+        o.push_str(&text[copied..i]);
+        o.push_str("\\ufffd");
+        i += 6;
+        copied = i;
+    }
+    let mut o = out?;
+    o.push_str(&text[copied..]);
+    Some(o)
+}
 
 /// `JSON.stringify(value)` (compact).
 pub fn stringify(value: &Value) -> String {
@@ -159,6 +227,21 @@ mod tests {
     fn strings_like_javascript() {
         let v = json!({"a": "x\"y\\z\n\t\u{1}\u{1f}é€😀\u{2028}"});
         assert_eq!(stringify(&v), "{\"a\":\"x\\\"y\\\\z\\n\\t\\u0001\\u001fé€😀\u{2028}\"}");
+    }
+
+    #[test]
+    fn lone_surrogates_read_as_replacement_characters() {
+        let text = r#"{"a":"Proj \ud83d","\udc00k":["x\ude00y","\ud83d\ude00","\\ud800",1],"b":"\ud800\ud800\udc00"}"#;
+        assert!(serde_json::from_str::<Value>(text).is_err());
+        let v = parse(text).unwrap();
+        assert_eq!(v["a"], "Proj \u{fffd}");
+        assert_eq!(v["\u{fffd}k"][0], "x\u{fffd}y");
+        assert_eq!(v["\u{fffd}k"][1], "😀");
+        assert_eq!(v["\u{fffd}k"][2], "\\ud800");
+        assert_eq!(v["b"], "\u{fffd}\u{10000}");
+        assert_eq!(replace_lone_surrogates(r#"{"a":"\ud83d\ude00 \\udc00"}"#), None);
+        assert!(parse("{not json").is_err());
+        assert!(parse(r#"{"a":"\ud83d"#).is_err());
     }
 
     #[test]

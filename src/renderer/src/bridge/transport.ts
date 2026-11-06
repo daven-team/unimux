@@ -1,6 +1,7 @@
-// The Tauri transport of window.mc (1.2.0, PLAN F4): request/answer over `mc_invoke`, ordered fire-and-forget over `mc_send`,
-// push events over Tauri events scoped to this window, the three MessagePorts over Tauri channels. Kept free of the Tauri
-// packages (they are injected) so test/tauri-bridge.test.ts drives it with fakes.
+// The Tauri transport of window.mc (1.2.0, PLAN F4): request/answer over `mc_invoke` (or `mc_invoke_raw` when an argument is
+// a Uint8Array), ordered fire-and-forget over `mc_send`, push events over Tauri events scoped to this window, the three
+// MessagePorts over Tauri channels (mc.ts). Kept free of the Tauri packages (they are injected) so test/tauri-bridge.test.ts
+// drives it with fakes.
 import type { McTransport } from '../../../preload/mcApi';
 import type { AppPlatform } from '../../../shared/platform';
 import { EVENT_OPTIONAL_ARGS } from './contract.gen';
@@ -24,7 +25,8 @@ export interface BootInfo {
 }
 
 export interface TauriDeps {
-  invoke(command: string, args: Record<string, unknown>): Promise<unknown>;
+  /** `args` is the JSON object of a command, or the raw body (bytes) of `mc_invoke_raw` with its headers. */
+  invoke(command: string, args: Record<string, unknown> | Uint8Array, options?: { headers: Record<string, string> }): Promise<unknown>;
   /** Listens to an event addressed to this window; resolves to the unlisten function. */
   listen(event: string, cb: (payload: unknown) => void): Promise<() => void>;
   /** Logs a problem once in a while (console in dev, crash.log through app:reportError later). */
@@ -47,10 +49,87 @@ export function toError(error: unknown, channel: string): Error {
   return e;
 }
 
-/** JSON has no undefined: positional undefined arguments travel as null (Rust reads both as absent). */
-const wireArgs = (args: unknown[]): unknown[] => args.map((a) => (a === undefined ? null : a));
+/** An unpaired UTF-16 surrogate (half an emoji cut by `.slice()`, text pasted from a broken source). */
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+const LONE_SURROGATES = new RegExp(LONE_SURROGATE.source, 'g');
 
-export function createTauriTransport(boot: BootInfo, deps: TauriDeps): McTransport & { replayJournal(): Promise<void>; notYetLogged: Set<string> } {
+const isWellFormed = (s: string): boolean => {
+  const native = (s as { isWellFormed?: () => boolean }).isWellFormed;
+  return native ? native.call(s) : !LONE_SURROGATE.test(s);
+};
+
+/**
+ * `value` with every unpaired surrogate (in strings and object keys) replaced by U+FFFD, copying only what changes.
+ * JSON.stringify writes a lone surrogate as `\udXXX`, which serde_json rejects, so Tauri would refuse the whole call (a
+ * state:edit with one broken note). Rust reads a state.json written by 1.1.x the same way (unimux_core::js_json::parse).
+ */
+export function wellFormed(value: unknown): unknown {
+  if (typeof value === 'string') return isWellFormed(value) ? value : value.replace(LONE_SURROGATES, '\ufffd');
+  if (Array.isArray(value)) {
+    let out: unknown[] | null = null;
+    value.forEach((item, i) => {
+      const next = wellFormed(item);
+      if (next !== item) (out ??= value.slice())[i] = next;
+    });
+    return out ?? value;
+  }
+  if (value !== null && typeof value === 'object') {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return value; // Uint8Array, Date ...: as they are
+    const entries = Object.entries(value as Record<string, unknown>);
+    const changed = entries.some(([k, item]) => !isWellFormed(k) || wellFormed(item) !== item);
+    if (!changed) return value;
+    return Object.fromEntries(entries.map(([k, item]) => [wellFormed(k) as string, wellFormed(item)]));
+  }
+  return value;
+}
+
+/** JSON has no undefined: positional undefined arguments travel as null (Rust reads both as absent). */
+const wireArgs = (args: unknown[]): unknown[] => args.map((a) => (a === undefined ? null : wellFormed(a)));
+
+const isBytes = (a: unknown): a is Uint8Array | ArrayBuffer => a instanceof Uint8Array || a instanceof ArrayBuffer;
+
+/** JSON with every non-ASCII character escaped: HTTP header values (`mc-args`) must be ISO-8859-1. */
+export const asciiJson = (value: unknown): string =>
+  JSON.stringify(value).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+
+const FRAME_MAGIC = [0x4d, 0x43, 0x42, 0x31]; // "MCB1"
+
+/**
+ * A raw answer of Rust (unimux_ipc::binary): `MCB1`, a u32 LE header length, the header `{value, parts}` and the byte parts.
+ * `{"$mcBytes": i}` inside the value becomes part i as a Uint8Array, so bytes can sit inside an object (sound:load's
+ * `{ data: Uint8Array | null }`). A buffer without the magic is taken as plain bytes.
+ */
+export function decodeBinaryReply(buffer: ArrayBuffer): unknown {
+  const bytes = new Uint8Array(buffer);
+  if (bytes.length < 8 || FRAME_MAGIC.some((b, i) => bytes[i] !== b)) return bytes;
+  const length = new DataView(buffer).getUint32(4, true);
+  const header = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + length))) as { value: unknown; parts: number[] };
+  const parts: Uint8Array[] = [];
+  let at = 8 + length;
+  for (const n of header.parts) { parts.push(bytes.slice(at, at + n)); at += n; }
+  const revive = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(revive);
+    if (v !== null && typeof v === 'object') {
+      const o = v as Record<string, unknown>;
+      const keys = Object.keys(o);
+      if (keys.length === 1 && keys[0] === '$mcBytes' && typeof o.$mcBytes === 'number') return parts[o.$mcBytes] ?? null;
+      return Object.fromEntries(keys.map((k) => [k, revive(o[k])]));
+    }
+    return v;
+  };
+  return revive(header.value);
+}
+
+export type TauriTransport = McTransport & {
+  replayJournal(): Promise<void>;
+  notYetLogged: Set<string>;
+  /** Drops every event subscription of this page (pagehide). */
+  dispose(): void;
+  subscriptionCount(): number;
+};
+
+export function createTauriTransport(boot: BootInfo, deps: TauriDeps): TauriTransport {
   const session = deps.newSession();
   let seq = 0;
   const notYetLogged = new Set<string>();
@@ -73,12 +152,26 @@ export function createTauriTransport(boot: BootInfo, deps: TauriDeps): McTranspo
 
   async function rawInvoke(channel: string, args: unknown[]): Promise<unknown> {
     try {
-      const result = await deps.invoke('mc_invoke', { cmd: channel, args: wireArgs(args) });
-      return result instanceof ArrayBuffer ? new Uint8Array(result) : result;
+      const rawAt = args.findIndex(isBytes);
+      let result: unknown;
+      if (rawAt >= 0) {
+        // A Uint8Array argument (notes:image:save): the bytes are the raw body, the rest travels in headers (no JSON number
+        // array, no base64). One per call; a second one would go as JSON.
+        const raw = args[rawAt] as Uint8Array | ArrayBuffer;
+        const rest = wireArgs(args.map((a, i) => (i === rawAt ? null : a)));
+        const headers = { 'mc-cmd': channel, 'mc-args': asciiJson(rest), 'mc-raw-index': String(rawAt) };
+        result = await deps.invoke('mc_invoke_raw', raw instanceof Uint8Array ? raw : new Uint8Array(raw), { headers });
+      } else {
+        result = await deps.invoke('mc_invoke', { cmd: channel, args: wireArgs(args) });
+      }
+      return result instanceof ArrayBuffer ? decodeBinaryReply(result) : result;
     } catch (error) {
       throw toError(error, channel);
     }
   }
+
+  /** Every live event subscription of this page, so a reload or navigation can drop them all (dispose). */
+  const subscriptions = new Set<() => void>();
 
   return {
     platform: boot.platform,
@@ -94,6 +187,7 @@ export function createTauriTransport(boot: BootInfo, deps: TauriDeps): McTranspo
       return call;
     },
     send(channel, ...args) {
+      // Every send takes a number, also one Rust refuses: Rust fills the slot (SendQueue::skip), so the next is not held.
       seq += 1;
       deps.invoke('mc_send', { session, seq, cmd: channel, args: wireArgs(args) }).catch((error) => {
         const e = toError(error, channel);
@@ -103,6 +197,13 @@ export function createTauriTransport(boot: BootInfo, deps: TauriDeps): McTranspo
     on(channel, cb) {
       let unlisten: (() => void) | null = null;
       let cancelled = false;
+      const off = () => {
+        cancelled = true;
+        subscriptions.delete(off);
+        unlisten?.();
+        unlisten = null;
+      };
+      subscriptions.add(off);
       const optional = EVENT_OPTIONAL_ARGS[channel] ?? [];
       deps.listen(channel, (payload) => {
         if (cancelled) return;
@@ -114,12 +215,17 @@ export function createTauriTransport(boot: BootInfo, deps: TauriDeps): McTranspo
         else unlisten = stop;
       }, (error) => logOnce(`listen:${channel}`, `window.mc.on(${channel}) failed: ${String(error)}`));
       // Synchronous, and safe before listen() resolved: the late unlisten runs as soon as it arrives.
-      return () => {
-        cancelled = true;
-        unlisten?.();
-        unlisten = null;
-      };
+      return off;
     },
+    /**
+     * Tauri keeps JS listeners per webview label until the window is destroyed, not per page: without this every reload
+     * (Ctrl+R, the ErrorBoundary, the journaled reload) would leave a full set of dead listener ids that each later emit
+     * carries along.
+     */
+    dispose() {
+      for (const off of [...subscriptions]) off();
+    },
+    subscriptionCount: () => subscriptions.size,
     /** Sends again what the previous page of this window left unanswered (its last edits before a reload). */
     async replayJournal() {
       const pending = journal.read();
@@ -128,5 +234,32 @@ export function createTauriTransport(boot: BootInfo, deps: TauriDeps): McTranspo
         try { await rawInvoke(channel, args); } catch (error) { deps.log(`replayed ${channel} failed: ${String((error as Error)?.message ?? error)}`); }
       }
     },
+  };
+}
+
+/**
+ * Renderer -> host messages of a port (pty: write, resize, ack...), in order. Every message of one task is batched into one
+ * `mc_port_post` numbered per page load like sends (Tauri runs invokes concurrently; a MessagePort kept the order) and Rust
+ * delivers the batches by number (SendQueue, lane `<label>\0port:<kind>`).
+ */
+export function createPortPoster(
+  kind: string,
+  session: string,
+  post: (args: { session: string; seq: number; kind: string; messages: unknown[] }) => Promise<unknown>,
+  schedule: (flush: () => void) => void = queueMicrotask,
+): (message: unknown) => void {
+  let seq = 0;
+  let batch: unknown[] | null = null;
+  return (message) => {
+    if (!batch) {
+      batch = [];
+      schedule(() => {
+        const messages = batch ?? [];
+        batch = null;
+        seq += 1;
+        void post({ session, seq, kind, messages: wellFormed(messages) as unknown[] }).catch(() => undefined);
+      });
+    }
+    batch.push(message);
   };
 }

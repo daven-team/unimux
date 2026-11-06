@@ -1,25 +1,36 @@
 //! The sender guard (port of src/main/ipcGuard.ts + safeWindow.ts isFromWindow). Every channel that changes something runs
-//! only for the app's own windows: the label `main` or a registered `detached-<uuid>`, loaded from the app origin, top-level
-//! frame. Tauri capabilities already grant the mc_* commands only to those labels (an update window cannot call them at all);
+//! only for the app's own windows: the label `main` or a registered `detached-<uuid>` whose page is loaded from the app
+//! origin, and the request itself must come from that origin (the `Origin` header of the IPC request, when the transport has
+//! one). Tauri capabilities already grant the mc_* commands only to those labels (an update window cannot call them at all);
 //! this check is the second line and also covers windows that were closed or never registered.
+//!
+//! Frames: Electron's isFromWindow also refused subframes. A Tauri command cannot tell a same-origin iframe from the page
+//! (both send the same Origin), so that part is not claimed here; it rests on the CSP (`default-src 'self'`: no foreign
+//! frame can load) and on the renderer creating no same-origin iframes. A cross-origin frame's request carries its own
+//! Origin and is refused by the request-origin rule.
 
 use std::collections::HashSet;
 
 use parking_lot::RwLock;
 
-/// Who called: the webview label, the URL of the calling document and whether it is the top-level frame.
+/// Who called: the webview label, the webview's top-level URL and the `Origin` header of the IPC request (None when the
+/// transport has no headers, like Tauri's postMessage fallback).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Caller {
     pub label: String,
     pub url: String,
-    pub main_frame: bool,
+    pub request_origin: Option<String>,
 }
 
 impl Caller {
     pub fn new(label: impl Into<String>, url: impl Into<String>) -> Self {
-        Self { label: label.into(), url: url.into(), main_frame: true }
+        Self { label: label.into(), url: url.into(), request_origin: None }
     }
-    /// The origin of the calling document (`scheme://host[:port]`), empty when it has none.
+    pub fn with_request_origin(mut self, origin: Option<String>) -> Self {
+        self.request_origin = origin;
+        self
+    }
+    /// The origin of the webview's top-level document (`scheme://host[:port]`), empty when it has none.
     pub fn origin(&self) -> &str {
         origin_of(&self.url)
     }
@@ -77,7 +88,7 @@ pub fn is_open(command: &str) -> bool {
     OPEN_COMMANDS.iter().any(|(c, _)| *c == command)
 }
 
-/// The production guard: `main` or a registered detached window, from one of the app origins, top-level frame only.
+/// The production guard: `main` or a registered detached window, page and request from one of the app origins.
 #[derive(Debug)]
 pub struct WindowGuard {
     app_origins: Vec<String>,
@@ -102,11 +113,13 @@ impl WindowGuard {
 
 impl Guard for WindowGuard {
     fn allowed(&self, caller: &Caller) -> bool {
-        if !caller.main_frame {
-            return false;
-        }
         let origin = caller.origin();
         if !self.app_origins.iter().any(|o| o.eq_ignore_ascii_case(origin)) {
+            return false;
+        }
+        if let Some(request) = &caller.request_origin
+            && !origin_of(request).eq_ignore_ascii_case(origin)
+        {
             return false;
         }
         caller.label == "main" || self.detached.read().contains(&caller.label)
@@ -167,10 +180,13 @@ mod tests {
     }
 
     #[test]
-    fn a_subframe_is_refused() {
-        let mut c = Caller::new("main", "http://tauri.localhost/index.html");
-        c.main_frame = false;
-        assert!(!guard().allowed(&c));
+    fn a_request_from_another_origin_is_refused() {
+        let page = "http://tauri.localhost/index.html";
+        assert!(guard().allowed(&Caller::new("main", page).with_request_origin(Some("http://tauri.localhost".into()))));
+        assert!(guard().allowed(&Caller::new("main", page).with_request_origin(None)));
+        // A cross-origin frame inside the app page (or a page that navigated away): its own Origin.
+        assert!(!guard().allowed(&Caller::new("main", page).with_request_origin(Some("https://example.com".into()))));
+        assert!(!guard().allowed(&Caller::new("main", page).with_request_origin(Some("null".into()))));
     }
 
     #[test]

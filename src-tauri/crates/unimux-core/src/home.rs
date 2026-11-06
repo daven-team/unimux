@@ -28,13 +28,12 @@ pub fn codex_dir() -> PathBuf {
     }
 }
 
-/// `app.getPath('appData')`: %APPDATA% on Windows (honouring the variable like Electron), ~/Library/Application Support on
-/// macOS, XDG_CONFIG_HOME or ~/.config elsewhere.
+/// `app.getPath('appData')`: on Windows the shell's known folder FOLDERID_RoamingAppData (`dirs::data_dir`), like Electron,
+/// which ignores the %APPDATA% variable: a launcher or script that sets a different APPDATA must not move 1.2.0 to another
+/// data dir than 1.1.x uses. ~/Library/Application Support on macOS, XDG_CONFIG_HOME or ~/.config elsewhere. Tests keep off
+/// the real profile with MC_DATA_DIR (dev-overrides builds only), never through this function.
 pub fn app_data_dir() -> PathBuf {
     if cfg!(windows) {
-        if let Some(v) = std::env::var_os("APPDATA").filter(|v| !v.is_empty()) {
-            return PathBuf::from(v);
-        }
         return dirs::data_dir().unwrap_or_else(|| home_dir().join("AppData").join("Roaming"));
     }
     if cfg!(target_os = "macos") {

@@ -211,6 +211,7 @@ See PLAN.md "1.2.0 release gate". Tick here when verified.
 | 2026-11-06 | Critic review of the four docs against the source | 1.2.0 = 34 packages, 98 agent-days; total 93 / 298. |
 | 2026-11-06 | User decisions recorded (decision log above) | ALL AT ONCE: PLAN.md rewritten into waves 0 to 7 (93 packages, 291.5 agent-days + 20-25 percent integration, about 11 to 13 calendar weeks with 6 agents); sidecar-only packages dropped (S2, A3, A4, A5, A7, P3b, N2, B2 mirror, I10, R1-R4 sweeps); 1.3-1.6 packages folded in; new packages: F1-F14 foundation, SP6 + U2 + U5 custom update window, W1 caption buttons, F6 Electron singleton compat, X1 script migration, R1 Electron removal. ARCHITECTURE.md rewritten for the single Rust process. |
 | 2026-11-06 | Wave 0 foundation (F1-F14) implemented on `tauri-1.2.0` | See "Wave 0 report" below: 116 cargo tests, 3,946 vitest cases, smoke-tauri 26/26, Electron compat 7/7; F8 open, F11 / F12 partial; spikes SP1-SP9 not started |
+| 2026-11-06 | Review findings on wave 0 fixed (3 major, 11 minor; none skipped) | See "Review fixes" below: 123 cargo tests, 3,951 vitest cases, smoke-tauri 34/34, Electron compat 21/21 (14 simultaneous-start offsets) |
 
 
 ## Wave 0 report (2026-11-06)
@@ -229,18 +230,38 @@ See PLAN.md "1.2.0 release gate". Tick here when verified.
 |---|---|
 | `cargo fmt --all --check` | clean |
 | `cargo clippy --workspace --all-targets -- -D warnings` (default, with dev-overrides + test-bridge, and --release) | clean |
-| `cargo test --workspace` (default and with the features) | 116 passed (core 46 + 2 golden, ipc 21, state 32 + 2 golden, exec 7, platform 2, update 1, app 3) |
-| `cargo test -p unimux-core -p unimux-state --release` | 82 passed (incl. "release build ignores MC_DATA_DIR") |
+| `cargo test --workspace` (default, with the features, and `--release`) | 123 passed each (core 47 + 2 golden, ipc 24, state 33 + 3 golden, exec 7, platform 2, update 1, app 3); the release run covers the `cfg(not(dev_overrides))` branches and "release build ignores MC_DATA_DIR" |
 | `cargo build --workspace` and `--release` | ok |
 | `npm run build:check` | src-tauri/target/check/release/unimux.exe |
-| `npm run build:release` | src-tauri/target/release/unimux.exe + bundle/nsis/unimux_1.2.0_x64-setup.exe (5.1 MB); the binary contains neither `--remote-debugging-port` nor `test_bridge` |
-| `npm run typecheck`, `npm test` | ok; 258 files / 3,946 tests passed (10 skipped as before) |
+| `npm run build:release` | src-tauri/target/release/unimux.exe + bundle/nsis/unimux_1.2.0_x64-setup.exe (5.14 MB); grep counts release / check: `MC_DATA_DIR` 0 / 1, `MC_DEBUG_PORT` 0 / 1, `test_bridge` 0 / 2, `--remote-debugging-port` 0 / 1, `test-bridge` (capability) 0 / 1 |
+| `npm run typecheck`, `npm test` | ok; 258 files / 3,951 tests passed (10 skipped as before) |
 | `npm run build` (Electron) | ok; the Electron app starts and window.mc works (compat check) |
 | `npm run gen:check`, `node scripts/porting-count.mjs --check` | up to date; 57 / 2,138 main-side cases done |
 | `npm run ipc:report` | 6 / 245 methods implemented (state 3/3, app 3/5), fallbacks cell:alive and mcp:info |
-| `npm run smoke:tauri` | 26/26, three runs: a 1.1.4-shaped state.json in a scratch dir loads (2 projects, 3 grids incl. 2x2 and 3x2, visible), a renderer edit is saved atomically within 4 s in JSON.stringify form with unknown keys and key order kept, crash.log gets renderer reports and panics, McNotYetError for unported calls, the guard refuses update-gate, a second start exits 0, quit + restart keeps the edit, startup.log gets a line per launch, no Tauri files appear in the real profile. Screenshots: artifacts/tauri-smoke/*.png |
-| `node scripts/check-electron-compat.mjs` | 7/7: Tauri refused while Electron runs on the dir and the reverse; the refused side never writes state.json |
+| `npm run smoke:tauri` | 34/34 (after the review fixes; 26/26 before, three runs): a 1.1.4-shaped state.json in a scratch dir loads (2 projects, 3 grids incl. 2x2 and 3x2, visible), a renderer edit is saved atomically within 4 s in JSON.stringify form with unknown keys and key order kept, crash.log gets renderer reports and panics, McNotYetError for unported calls, the guard refuses update-gate, a second start exits 0, quit + restart keeps the edit, startup.log gets a line per launch, no Tauri files appear in the real profile. Screenshots: artifacts/tauri-smoke/*.png |
+| `node scripts/check-electron-compat.mjs` | 21/21: Tauri refused while Electron runs on the dir and the reverse; the refused side never writes state.json; Electron and Tauri started together at 14 offsets (-40 to +1000 ms): always exactly one runs (Tauri wins up to +110 ms, Electron from +120 ms) |
 | grep `3.0.0-alpha` in Cargo.lock / package-lock.json | none |
+
+### Review fixes (2026-11-06)
+
+All 14 confirmed findings of the wave 0 review are fixed; none was skipped.
+
+| finding | fix | checked by |
+|---|---|---|
+| major: a state.json with a lone UTF-16 surrogate (JSON.stringify writes `\udXXX`, JSON.parse reads it) was treated as corrupt, renamed and replaced by defaults | `unimux_core::js_json::parse`: serde_json first, on failure every unpaired `\uD800-\uDFFF` escape becomes `\ufffd` (a Rust string cannot hold a lone surrogate; byte parity is kept for every other string). `read_state` uses it. The bridge makes every renderer payload well-formed (`wellFormed` in transport.ts, values and keys), because Tauri's own IPC parse would refuse the whole call | golden `test/golden/state-load.jsonl` (9 texts written by Node, lone high / low in values and keys, valid pairs, an escaped backslash) through parse and the whole load_state; store test; vitest; smoke: a fixture with half an emoji loads with no `state.json.bak-*`, a renderer edit with a lone surrogate is saved |
+| major: a send refused before it was queued (not yet / refused / unknown) used a sequence number that never reached the SendQueue, so the next send waited the 2 s gap timeout (renderer-boot was 3074 ms) | `SendQueue::skip(label, session, seq)` fills the slot (pending items are `Option<T>`); `mc_send` calls it before returning the error | cargo `a_refused_send_does_not_hold_the_next_one`; smoke: reportError after two not-yet sends reaches crash.log in 35 ms; startup.log now shows renderer-boot 871-1062 ms |
+| minor: `app_data_dir()` honoured %APPDATA% (Electron ignores it) | Windows: `dirs::data_dir()` (SHGetKnownFolderPath FOLDERID_RoamingAppData) only; doc fixed. Scratch runs keep using MC_DATA_DIR | code; smoke isolation check |
+| minor: startup race when 1.1.x and 1.2.0 start at the same moment | under Electron's named startup mutex we look for the window again, take `<data dir>/lockfile` like Chromium (write, share read, delete on close; a held one means Electron owns the dir) and create our window before releasing it. The mutex name is NOT Chromium's `ChromeProcessSingletonStartup!`: Electron 45 uses `Local\<app name>ProcessSingletonStartup`, verified by holding candidate names while starting a scratch Electron app named unimux (only `Local\unimuxProcessSingletonStartup` made `requestSingleInstanceLock()` wait, 2.1 s) | check-electron-compat: 14 simultaneous-start offsets, always exactly one instance |
+| minor: JS event listeners leaked in Rust on every reload | the transport tracks every subscription; mc.ts disposes them all on `pagehide` (not for a persisted bfcache page) | vitest (late listens too); smoke: 46 subscriptions before a reload, 0 at pagehide, events reach the reloaded page. Not measured: Tauri's internal listener table (pub(crate)) |
+| minor: pty port posts could be reordered | port messages are batched per task and numbered per page load (`createPortPoster`); `mc_port_post(session, seq, kind, messages)` goes through a second SendQueue with lanes `<label>\0port:<kind>` | vitest batching/numbering; the SendQueue ordering tests |
+| minor: SendQueue::forget / Ports::detach_window never called | `forget_on_destroy` (WindowEvent::Destroyed) on the main window builder (W5 adds it to detached windows) calls `AppContext::window_destroyed`: send and port lanes (forget also drops `<label>\0...` sub-lanes, so the worker task ends), port sinks, detached registration | cargo `forget_removes_the_window_and_its_sub_lanes`; smoke: test-bridge `lanes` = 1 send lane |
+| minor: Uint8Array never used the raw path; nested binary results had no defined form | the transport sends a Uint8Array / ArrayBuffer argument as the raw body of `mc_invoke_raw` (`mc-cmd`, ASCII-escaped `mc-args`, `mc-raw-index` headers). Binary results: `Reply::Binary { value, parts }` and `Reply::Bytes` leave as one frame (`unimux_ipc::binary`: `MCB1`, header length, `{value, parts}` with `{"$mcBytes": i}` placeholders, the parts), decoded by `decodeBinaryReply`; ARCHITECTURE section 3 documents it | cargo binary tests; vitest (notes.saveImage headers, a nested frame); smoke: notes.saveImage reaches the router through mc_invoke_raw |
+| minor: release capability granted test_bridge | `allow-test-bridge` moved to `capabilities-check/test-bridge.json`; build.rs picks `./capabilities*/*.json` only with the test-bridge feature, else `./capabilities/*.json`. `allow-mc-invoke-raw` stays: the bridge uses it now | release binary has no `test-bridge` capability string; the check build has it and the smoke uses it |
+| minor: macOS reused Electron's entitlements | own `crates/unimux-app/entitlements.mac.plist`, empty dict with the reason; packages add keys when they prove the need | config (macOS not built yet) |
+| minor: CI release check only grepped `--remote-debugging-port` | fails on `MC_DATA_DIR`, `MC_DEBUG_PORT`, `test_bridge` on every OS; `--remote-debugging-port` on Windows only (built in cfg(windows) only) | local grep counts above |
+| minor: CI never clippy'd / tested the release-only code of unimux-app | `cargo clippy --workspace --all-targets --release -- -D warnings` and `cargo test --workspace --release` replace the core/state-only release test | run locally: clean, 123 passed |
+| minor: Tauri's drag-drop handler broke HTML5 drag and drop on Windows | `.disable_drag_drop_handler()` on the main window builder (OS file paths come with W3) | code; HTML5 drags are not exercised by a script yet (W3 real-app list) |
+| minor: the guard's "top-level frame only" rule was never enforced | `Caller.main_frame` removed. The guard now also compares the IPC request's `Origin` header (from `tauri::ipc::Request`) with the page origin, which refuses a cross-origin frame; a same-origin iframe cannot be told apart by a Tauri command, so the docs (guard.rs, ARCHITECTURE, PLAN F2) say it rests on the CSP and on the renderer creating no iframes (it creates none) | cargo `a_request_from_another_origin_is_refused`; smoke: real requests carry `Origin: http://tauri.localhost` and are allowed, a probe with another origin is refused |
 
 ### Open issues after wave 0
 
@@ -253,7 +274,9 @@ See PLAN.md "1.2.0 release gate". Tick here when verified.
 7. `pathForFile` returns '' in Tauri (an HTML5 File has no path in WebView2) until W3 adds `pathsForFiles`.
 8. The installer file name is Tauri's default (`unimux_1.2.0_x64-setup.exe`); U4 renames it to `unimux-Setup-X.exe`.
 9. The golden corpus covers state merge/diff, translate and temp names only; normalize, routeMessage, launch lines and the update progress model come with their packages.
-10. Detached windows, the gate and the update window are not created yet, so the guard's detached registration is only unit-tested.
+10. Detached windows, the gate and the update window are not created yet, so the guard's detached registration and the destroy cleanup (`forget_on_destroy`) are only unit-tested and wired on the main window.
+11. HTML5 drag and drop (tab reorder / detach, snippets, notes, tree, SFTP) is enabled again by `disable_drag_drop_handler()` but no script drags yet; W3 adds the real-app drag checks with the OS file drop.
+12. The macOS half of the startup race (Electron's SingletonLock / SingletonSocket) is still R3; the Windows half (startup mutex + lockfile) is done.
 
 ### How to run
 

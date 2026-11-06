@@ -58,6 +58,9 @@ async function fixtureState() {
   s.snippets = [{ id: 'snip-1', name: 'status', text: 'git status' }];
   // A key 1.2.0 does not know (a newer version wrote it): it must survive load and save untouched.
   s.zzFromTheFuture = { kept: true, list: [3, 1.5, 'ą'] };
+  // Half an emoji (JSON.stringify writes it as an escaped lone surrogate; JSON.parse in 1.1.x reads it back): the file must
+  // load, not be kept aside as corrupt.
+  s.snippets.push({ id: 'snip-lone', name: `cut ${'\u{1F600}'.slice(0, 1)}`, text: 'x' });
   return s;
 }
 
@@ -129,7 +132,9 @@ try {
     check('saved text is JSON.stringify of itself (JS-compatible writer)', JSON.stringify(JSON.parse(saved)) === saved);
     const parsed = JSON.parse(saved);
     check('unknown key kept on save', JSON.stringify(parsed.zzFromTheFuture) === JSON.stringify(fixture.zzFromTheFuture));
-    const paths = changedPaths(JSON.parse(before), parsed);
+    // The one repair Rust makes on load: a lone surrogate reads as U+FFFD (a Rust string cannot hold one).
+    const wellFormed = (v) => (typeof v === 'string' ? v.toWellFormed() : Array.isArray(v) ? v.map(wellFormed) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k.toWellFormed(), wellFormed(x)])) : v);
+    const paths = changedPaths(wellFormed(JSON.parse(before)), parsed);
     check('the edit changed settings.fontSize and nothing else (key order kept)', paths.length === 1 && paths[0] === '.settings.fontSize', paths.join(', '));
     console.log(`info: fields the renderer itself changed at boot: ${changedPaths(fixture, JSON.parse(before)).join(', ') || 'none'}`);
   }
@@ -150,10 +155,47 @@ try {
   // ── a not-yet command answers with the typed error ───────────────────────
   const notYet = await page.evaluate(`window.mc.git.probe('proj-unimux').then(() => 'resolved', (e) => e.name + ':' + e.code + ':' + e.command)`);
   check('unported command rejects with McNotYetError', notYet === 'McNotYetError:MC_NOT_YET:git:probe', notYet);
+  const lone = await page.evaluate(`window.__mc.useStore.getState().s.snippets.find((x) => x.id === 'snip-lone')?.name`);
+  check('a state.json with a lone surrogate loads (not kept aside as corrupt)', lone === 'cut \ufffd' && !listDir(dataDir).some((n) => n.startsWith('state.json.bak-')), JSON.stringify(lone));
+  const raw = await page.evaluate(`window.mc.notes.saveImage(new Uint8Array([1, 2, 3]), 'image/png').then(() => 'resolved', (e) => e.name + ':' + e.command)`);
+  check('a Uint8Array argument goes through mc_invoke_raw (granted, routed)', raw === 'McNotYetError:notes:image:save', raw);
+  // A refused send (not yet) must not hold the next one for the 2 s gap timeout.
+  const t0 = Date.now();
+  await page.evaluate(`(window.mc.cliOpenDocs('claude'), window.mc.systemBeep(), window.mc.reportError('order', 'after two not-yet sends'), 1)`);
+  let orderMs = null;
+  for (let i = 0; i < 80 && orderMs === null; i++) {
+    await sleep(25);
+    if (/error renderer order: after two not-yet sends$/m.test(readText(join(dataDir, 'crash.log')))) orderMs = Date.now() - t0;
+  }
+  check('a send after refused sends is delivered without the gap timeout', orderMs !== null && orderMs < 1000, `${orderMs} ms`);
+  const lonePost = await page.evaluate(`(window.__mc.useStore.getState().update((s) => ({ ...s, snippets: s.snippets.map((x) => x.id === 'snip-1' ? { ...x, name: 'edit ' + String.fromCharCode(0xd83d) } : x) })), 'ok')`).catch((e) => String(e));
+  let loneSaved = null;
+  for (let i = 0; i < 40 && !loneSaved; i++) {
+    await sleep(100);
+    try { const sn = JSON.parse(readText(stateFile)).snippets.find((x) => x.id === 'snip-1'); if (sn?.name.startsWith('edit ')) loneSaved = sn.name; } catch { /* mid-rename */ }
+  }
+  check('a renderer edit with a lone surrogate is saved (not refused by the IPC)', lonePost === 'ok' && loneSaved === 'edit \ufffd', JSON.stringify(loneSaved));
   const probe = await bridge(page, 'probe', { label: 'update-gate' });
   check('guard refuses the update-gate label', probe.allowed === false);
   const probeMain = await bridge(page, 'probe');
-  check('guard allows the main window', probeMain.allowed === true, probeMain.url);
+  check('guard allows the main window (its IPC requests carry the page origin)', probeMain.allowed === true && probeMain.requestOrigin === 'http://tauri.localhost', `${probeMain.url} origin ${probeMain.requestOrigin}`);
+  const probeFrame = await bridge(page, 'probe', { requestOrigin: 'https://example.com' });
+  check('guard refuses a request whose Origin is not the page origin', probeFrame.allowed === false);
+
+  // ── a reload drops the page's listeners and the bridge works again ───────
+  const subsBefore = await page.evaluate('window.__MC_TAURI__.transport.subscriptionCount()');
+  await page.evaluate(`window.addEventListener('pagehide', () => { sessionStorage.setItem('smoke:subsAtHide', String(window.__MC_TAURI__.transport.subscriptionCount())); }); setTimeout(() => location.reload(), 50); 1`);
+  await sleep(1500);
+  await waitFor(page, 'window.__mc?.useStore?.getState?.().ready === true', 45000, 'renderer ready after reload');
+  const subsAtHide = await page.evaluate(`sessionStorage.getItem('smoke:subsAtHide')`);
+  check('pagehide disposes every event subscription of the page', subsBefore > 10 && subsAtHide === '0', `${subsBefore} before, ${subsAtHide} at pagehide`);
+  await page.evaluate(`window.__smokeNotice = null; window.__MC_TAURI__.transport.on('app:notice', (...a) => { window.__smokeNotice = a; }); 1`);
+  await sleep(300);
+  await bridge(page, 'emit', { event: 'app:notice', args: ['after reload'] });
+  const notice = await waitFor(page, 'window.__smokeNotice', 5000, 'event after reload').catch(() => null);
+  check('events reach the reloaded page', JSON.stringify(notice) === '["after reload"]', JSON.stringify(notice));
+  const lanes = await bridge(page, 'lanes');
+  check('one send lane for the main window', lanes.sends === 1, JSON.stringify(lanes));
 
   // ── second instance ──────────────────────────────────────────────────────
   const second = launchApp({ dataDir, scratch });

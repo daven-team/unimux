@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements of the Tauri build (1.2.0), signed with the hardened runtime. Deliberately empty: the Rust process does not
+  JIT (WKWebView's JIT runs in Apple's WebContent process) and loads no unsigned libraries, so Electron's allow-jit,
+  allow-unsigned-executable-memory and disable-library-validation (resources/entitlements.mac.plist) are not carried over.
+  A package adds a key only when it proves it needs one (for example com.apple.security.automation.apple-events for
+  osascript), with the reason next to it.
+-->
+<plist version="1.0">
+  <dict/>
+</plist>

@@ -10,7 +10,6 @@
     "allow-mc-send",
     "allow-mc-invoke-raw",
     "allow-mc-port-attach",
-    "allow-mc-port-post",
-    "allow-test-bridge"
+    "allow-mc-port-post"
   ]
 }

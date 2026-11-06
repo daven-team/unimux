@@ -11,7 +11,7 @@ use parking_lot::{Condvar, Mutex};
 use serde_json::Value;
 
 use unimux_core::atomic_write::{AtomicWriteOptions, atomic_write, is_transient};
-use unimux_core::js_json::stringify;
+use unimux_core::js_json::{parse, stringify};
 use unimux_core::json_file::backup_path;
 
 use crate::normalize::{Normalizer, Platform};
@@ -69,7 +69,8 @@ fn read_state(path: &Path, platform: Platform, normalizer: &dyn Normalizer, seam
         Ok(t) => t.trim_start_matches('\u{feff}'),
         Err(_) => return ReadResult::Corrupt,
     };
-    match serde_json::from_str::<Value>(text) {
+    // js_json::parse: what JSON.parse accepts (an escaped lone surrogate written by 1.1.x must not make the file "corrupt").
+    match parse(text) {
         Ok(raw) => match normalizer.normalize(raw, platform) {
             Some(state) => ReadResult::Ok(state),
             None => ReadResult::Corrupt,
@@ -407,6 +408,21 @@ mod tests {
             .collect();
         assert_eq!(kept.len(), 1);
         assert_eq!(fs::read_to_string(dir.path().join(&kept[0])).unwrap(), "{not json");
+    }
+
+    #[test]
+    fn a_lone_surrogate_written_by_1_1_x_loads_and_is_not_kept_as_corrupt() {
+        let dir = tempfile::tempdir().unwrap();
+        // JSON.stringify({ ..., name: 'Proj \ud83d' }) of 1.1.x; JSON.parse reads it back.
+        let text = r#"{"version":1,"projects":[{"id":"p1","name":"Proj \ud83d","dir":"C:/x","tabs":[]}],"\udc00":1}"#;
+        fs::write(dir.path().join(FILE), text).unwrap();
+        let s = load(dir.path());
+        assert_eq!(s["projects"][0]["name"], "Proj \u{fffd}");
+        assert_eq!(s["\u{fffd}"], 1);
+        assert_eq!(fs::read_to_string(dir.path().join(FILE)).unwrap(), text);
+        let names: Vec<String> =
+            fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert!(!names.iter().any(|n| n.starts_with("state.json.bak-")), "{names:?}");
     }
 
     #[test]

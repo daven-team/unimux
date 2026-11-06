@@ -1,7 +1,7 @@
 // Electron 1.1.x and the Tauri build on the same data dir (PLAN F6, release gate item 6): never both at once. Starts the
 // Electron build of this tree (`npm run build`, the 1.1.4 code with the shared window.mc table) and the Tauri `check` build on
-// one scratch data dir, each while the other runs, and checks that the second one hands over and exits without writing
-// state.json. Also checks that the Electron preload still provides window.mc after the mcApi.ts refactor.
+// one scratch data dir, each while the other runs and both at the same moment (a few offsets), and checks that the second
+// one hands over and exits without writing state.json. Also checks that the Electron preload still provides window.mc after the mcApi.ts refactor.
 //
 //   npm run build && npm run build:check && node scripts/check-electron-compat.mjs
 import { spawn } from 'node:child_process';
@@ -73,6 +73,24 @@ try {
   await tPage.evaluate(`window.__TAURI_INTERNALS__.invoke('test_bridge', { op: 'quit', args: null })`).catch(() => undefined);
   tPage.close();
   await waitExit(app, 15000);
+  await sleep(1500);
+
+  // ── both at the same moment (the startup race: Electron's startup mutex and lockfile) ─────────────────────
+  // Offsets in ms: positive starts Electron first, negative starts Tauri first. Exactly one may stay; the other exits.
+  // Electron needs a few hundred ms to reach requestSingleInstanceLock, so the large positive offsets sweep the crossing point.
+  for (const offset of [0, -40, 40, 60, 70, 80, 90, 100, 110, 120, 135, 150, 300, 1000]) {
+    const runs = [];
+    const startElectron = () => { const c = launchElectron(); children.push(c); runs.push({ kind: 'electron', child: c }); };
+    const startTauri = () => { const c = launchApp({ dataDir, scratch }); children.push(c); runs.push({ kind: 'tauri', child: c }); };
+    if (offset >= 0) { startElectron(); await sleep(offset); startTauri(); } else { startTauri(); await sleep(-offset); startElectron(); }
+    // Long enough for the loser to hand over and exit and for the winner to be fully up.
+    await sleep(12000);
+    const alive = runs.filter((r) => r.child.exitCode === null).map((r) => r.kind);
+    check(`started together (offset ${offset} ms): exactly one instance owns the dir`, alive.length === 1, `running: ${alive.join(', ') || 'none'}`);
+    for (const r of runs) killTree(r.child);
+    for (const r of runs) await waitExit(r.child, 10000);
+    await sleep(1500);
+  }
 } catch (error) {
   console.error(error);
   results.push({ name: 'aborted', ok: false });

@@ -146,6 +146,21 @@ fn main() {
                     Box::pin(async move { router.run_send(call).await })
                 }),
             ));
+            // Port messages (pty write/resize/ack) in order per window and port, like a MessagePort.
+            let ports = ctx.ports.clone();
+            let crash = ctx.crash.clone();
+            let _ = ctx.port_posts.set(SendQueue::new(
+                Duration::from_secs(2),
+                Arc::new(move |post: ipc::PortPost| {
+                    for message in post.messages {
+                        if let Err(e) = ports.post(&post.kind, &post.label, message) {
+                            crash.warn(&format!("port {} post from {}: {e}", post.kind, post.label));
+                            break;
+                        }
+                    }
+                    Box::pin(async {})
+                }),
+            ));
             ctx.mark("app-ready");
             // The startup gate (U1) runs here and may hold the main window back; wave 0 always proceeds.
             windows::create_main(app.handle(), &ctx)?;

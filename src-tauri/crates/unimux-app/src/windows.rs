@@ -76,7 +76,10 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
         })
         .devtools(cfg!(dev_overrides))
         .zoom_hotkeys_enabled(false)
-        .browser_extensions_enabled(false);
+        .browser_extensions_enabled(false)
+        // HTML5 drag and drop (tab reorder and detach, snippets, notes, the explorer, SFTP) needs WebView2's own drop
+        // target; Tauri's handler would replace it. OS file drops get their paths through W3 (pathsForFiles).
+        .disable_drag_drop_handler();
     #[cfg(windows)]
     {
         builder = builder
@@ -92,6 +95,7 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
     ctx.mark("window-created");
     apply_webview_settings(&window);
     watch_window_state(&window, ctx.clone());
+    forget_on_destroy(&window, ctx.clone());
 
     // The page may never report (a renderer stuck in boot): show the window after 5 s anyway.
     let fallback = ctx.clone();
@@ -146,6 +150,17 @@ pub fn focus_main(ctx: &AppContext) {
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
+}
+
+/// Frees what a window leaves behind (send and port lanes, port sinks, detached registration) once it is destroyed. Every
+/// app window (main and, from W5, the detached ones) is built with this.
+pub fn forget_on_destroy(window: &WebviewWindow, ctx: Arc<AppContext>) {
+    let label = window.label().to_string();
+    window.on_window_event(move |event| {
+        if matches!(event, WindowEvent::Destroyed) {
+            ctx.window_destroyed(&label);
+        }
+    });
 }
 
 /// `window:shown` (false while minimized or hidden) and `window:maximized`, sent to that window on every change.

@@ -33,3 +33,24 @@ fn diff_state_matches_the_ts_reference_and_applies() {
         assert_eq!(stringify(&applied), stringify(&row["next"]), "row {i}: apply(diff(a, b), a) == b");
     }
 }
+
+#[test]
+fn a_state_json_with_lone_surrogates_loads_like_json_parse_reads_it() {
+    let rows = rows("state-load.jsonl");
+    assert!(rows.len() >= 8);
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(row["jsonParseAccepts"], true, "row {i}");
+        let text = row["text"].as_str().unwrap();
+        let parsed = unimux_core::js_json::parse(text).unwrap_or_else(|e| panic!("row {i}: {e}"));
+        assert_eq!(stringify(&parsed), row["out"].as_str().unwrap(), "row {i}");
+        // The whole load: state.json stays where it is (not renamed to a .bak-<ISO> as corrupt).
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("state.json"), text).unwrap();
+        let options = unimux_state::store::LoadOptions::default();
+        let state =
+            unimux_state::store::load_state(dir.path(), unimux_state::Platform::Win32, &unimux_state::PassThrough, &options)
+                .unwrap();
+        assert_eq!(stringify(&state), row["out"].as_str().unwrap(), "row {i}");
+        assert_eq!(std::fs::read_to_string(dir.path().join("state.json")).unwrap(), text, "row {i}");
+    }
+}

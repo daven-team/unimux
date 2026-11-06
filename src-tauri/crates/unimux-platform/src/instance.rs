@@ -8,8 +8,11 @@
 //! - while running we own such a window ourselves and answer WM_COPYDATA, so a 1.1.x started later forwards to us and quits
 //!   instead of writing state.json, and a second 1.2.0 does the same.
 //!
-//! An exclusive lock on `<data dir>/instance.lock` closes the start-up race between two 1.2.0 processes. Keyed by data dir,
-//! so parallel `MC_DATA_DIR` runs coexist.
+//! Starts at the same moment are serialized like Chromium's ProcessSingleton::Create does it: under Electron's named startup
+//! mutex (`Local\unimuxProcessSingletonStartup`) we look for the window again, take `<data dir>/lockfile` the way Chromium
+//! takes it (an Electron that cannot open it gives up) and create our window before the mutex is released. An exclusive lock
+//! on `<data dir>/instance.lock` also closes the race between two 1.2.0 processes. Keyed by data dir, so parallel
+//! `MC_DATA_DIR` runs coexist.
 //!
 //! macOS/Unix (wave 0): the lock plus a Unix socket `<data dir>/instance.sock` with the same START message. The Electron
 //! compatibility on macOS (SingletonLock / SingletonSocket / SingletonCookie) is the macOS half of F6, done in R3.
@@ -43,6 +46,10 @@ pub enum Acquire {
 pub struct InstanceGuard {
     _lock: File,
     lock_path: PathBuf,
+    /// `<data dir>/lockfile`, held like Chromium holds it (write access, read sharing, deleted on close): an Electron 1.1.x
+    /// that gets past the window check is refused it and quits.
+    #[cfg(windows)]
+    _chromium_lock: Option<File>,
     #[cfg(windows)]
     _window: win::MessageWindow,
 }
@@ -91,40 +98,55 @@ pub fn acquire(data_dir: &Path, on_second: OnSecond) -> io::Result<Acquire> {
     let title = data_dir.display().to_string();
     #[cfg(windows)]
     {
-        if let Some(found) = win::find(&title) {
-            return Ok(if win::notify(found, &current_cwd(), &current_command_line()) {
-                Acquire::Forwarded
-            } else {
-                Acquire::Busy
-            });
-        }
-        let Some((lock, lock_path)) = try_lock(data_dir)? else {
-            // Another 1.2.0 is starting: wait for its window and hand over.
+        let forward = |hwnd| {
+            if win::notify(hwnd, &current_cwd(), &current_command_line()) { Acquire::Forwarded } else { Acquire::Busy }
+        };
+        // Another instance is starting (it holds the dir but has no window yet): wait for its window and hand over.
+        let wait_for_window = || {
             let start = Instant::now();
             while start.elapsed() < Duration::from_secs(5) {
                 if let Some(found) = win::find(&title) {
-                    return Ok(if win::notify(found, &current_cwd(), &current_command_line()) {
-                        Acquire::Forwarded
-                    } else {
-                        Acquire::Busy
-                    });
+                    return forward(found);
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
-            return Ok(Acquire::Busy);
+            Acquire::Busy
+        };
+        if let Some(found) = win::find(&title) {
+            return Ok(forward(found));
+        }
+        // Chromium's ProcessSingleton::Create, step by step: the startup mutex Electron 1.1.x takes too, a second look for
+        // the window under it, `<data dir>/lockfile`, then our window, all before the mutex is released. A 1.1.x starting at
+        // the same moment either sees our window or is refused the lockfile; we either see its window or its lockfile.
+        let startup = win::StartupMutex::acquire();
+        if let Some(found) = win::find(&title) {
+            drop(startup);
+            return Ok(forward(found));
+        }
+        let Some((lock, lock_path)) = try_lock(data_dir)? else {
+            drop(startup);
+            return Ok(wait_for_window());
+        };
+        let chromium_lock = match win::open_chromium_lockfile(data_dir) {
+            win::ChromiumLock::Held(file) => Some(file),
+            win::ChromiumLock::Unavailable => None,
+            win::ChromiumLock::Owned => {
+                // Electron holds `lockfile`: it owns the dir (its window follows within milliseconds).
+                drop(startup);
+                drop(lock);
+                return Ok(wait_for_window());
+            }
         };
         let window = win::MessageWindow::create(&title, on_second)?;
-        // A 1.1.x that created its window between our check and our window: it owns the dir.
+        drop(startup);
+        // Defensive: a window of another process that appeared anyway (a 1.1.x that skipped the mutex): it owns the dir.
         if let Some(other) = win::find_other(&title, window.hwnd()) {
             drop(window);
+            drop(chromium_lock);
             drop(lock);
-            return Ok(if win::notify(other, &current_cwd(), &current_command_line()) {
-                Acquire::Forwarded
-            } else {
-                Acquire::Busy
-            });
+            return Ok(forward(other));
         }
-        Ok(Acquire::Primary(InstanceGuard { _lock: lock, lock_path, _window: window }))
+        Ok(Acquire::Primary(InstanceGuard { _lock: lock, lock_path, _chromium_lock: chromium_lock, _window: window }))
     }
     #[cfg(unix)]
     {
@@ -198,6 +220,80 @@ pub mod win {
     use windows::core::{HSTRING, PCWSTR, w};
 
     const CLASS: PCWSTR = w!("Chrome_MessageWindow");
+    /// Electron's ProcessSingleton names its startup mutex `Local\<app name>ProcessSingletonStartup` (Chromium's own is
+    /// `Local\ChromeProcessSingletonStartup!`); the app name of 1.1.x is `unimux`. Checked against Electron 45: a held
+    /// `Local\unimuxProcessSingletonStartup` makes `requestSingleInstanceLock()` wait.
+    const STARTUP_MUTEX: PCWSTR = w!("Local\\unimuxProcessSingletonStartup");
+    /// How long we wait for that mutex (Chromium waits forever; an instance holds it for a few milliseconds).
+    const STARTUP_MUTEX_WAIT_MS: u32 = 10_000;
+
+    /// The startup mutex, owned until dropped (released on the thread that took it: `acquire` never moves it).
+    pub struct StartupMutex(Option<windows::Win32::Foundation::HANDLE>);
+
+    impl StartupMutex {
+        /// Takes the mutex; a failure or a timeout gives a guard that holds nothing (the lockfile and window checks remain).
+        pub fn acquire() -> Self {
+            use windows::Win32::Foundation::{CloseHandle, WAIT_ABANDONED, WAIT_OBJECT_0};
+            use windows::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};
+            // SAFETY: a named mutex created without initial ownership, then waited on (Chromium's sequence).
+            unsafe {
+                let Ok(handle) = CreateMutexW(None, false, STARTUP_MUTEX) else { return Self(None) };
+                let r = WaitForSingleObject(handle, STARTUP_MUTEX_WAIT_MS);
+                if r == WAIT_OBJECT_0 || r == WAIT_ABANDONED {
+                    Self(Some(handle))
+                } else {
+                    let _ = CloseHandle(handle);
+                    Self(None)
+                }
+            }
+        }
+    }
+
+    impl Drop for StartupMutex {
+        fn drop(&mut self) {
+            use windows::Win32::Foundation::CloseHandle;
+            use windows::Win32::System::Threading::ReleaseMutex;
+            if let Some(handle) = self.0.take() {
+                // SAFETY: owned by this thread since acquire().
+                unsafe {
+                    let _ = ReleaseMutex(handle);
+                    let _ = CloseHandle(handle);
+                }
+            }
+        }
+    }
+
+    /// Opens `<data dir>/lockfile` the way Chromium does (GENERIC_WRITE, FILE_SHARE_READ, CREATE_ALWAYS,
+    /// FILE_FLAG_DELETE_ON_CLOSE). None when another process holds it (Electron owns the dir). Any other failure (a read-only
+    /// dir...) does not stop the start: the window and the instance.lock still decide.
+    pub fn open_chromium_lockfile(data_dir: &Path) -> ChromiumLock {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 0x1;
+        const FILE_FLAG_DELETE_ON_CLOSE: u32 = 0x0400_0000;
+        const ERROR_ACCESS_DENIED: i32 = 5;
+        const ERROR_SHARING_VIOLATION: i32 = 32;
+        let opened = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_DELETE_ON_CLOSE)
+            .open(data_dir.join("lockfile"));
+        match opened {
+            Ok(file) => ChromiumLock::Held(file),
+            // A held lockfile answers a sharing violation; one that is being deleted on close answers access denied.
+            Err(e) if matches!(e.raw_os_error(), Some(ERROR_SHARING_VIOLATION | ERROR_ACCESS_DENIED)) => ChromiumLock::Owned,
+            Err(_) => ChromiumLock::Unavailable,
+        }
+    }
+
+    pub enum ChromiumLock {
+        Held(File),
+        /// Another process (Electron) holds it.
+        Owned,
+        /// Could not be opened for another reason.
+        Unavailable,
+    }
 
     /// The window of the instance that owns `title` (the data dir), if any.
     pub fn find(title: &str) -> Option<HWND> {

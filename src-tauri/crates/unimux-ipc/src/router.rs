@@ -42,11 +42,25 @@ impl Call {
     }
 }
 
-/// What a handler answers: JSON, or raw bytes (delivered to JS as an ArrayBuffer without base64).
+/// What a handler answers: JSON, raw bytes (a Uint8Array in JS), or JSON with byte parts inside (`{ data: Uint8Array }`,
+/// placeholders from [`crate::binary::part`]). Both binary forms travel as one raw response without base64
+/// ([`crate::binary`]).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Reply {
     Json(Value),
     Bytes(Vec<u8>),
+    Binary { value: Value, parts: Vec<Vec<u8>> },
+}
+
+impl Reply {
+    /// The raw response body of a binary reply; a JSON reply comes back as `Err(value)`.
+    pub fn raw_body(self) -> Result<Vec<u8>, Value> {
+        match self {
+            Reply::Json(v) => Err(v),
+            Reply::Bytes(b) => Ok(crate::binary::encode(&crate::binary::part(0), &[b])),
+            Reply::Binary { value, parts } => Ok(crate::binary::encode(&value, &parts)),
+        }
+    }
 }
 
 impl From<Value> for Reply {

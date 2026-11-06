@@ -3,30 +3,35 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { createMcApi } from '../../../preload/mcApi';
-import { createTauriTransport, McNotYetError, type BootInfo } from './transport';
+import { createPortPoster, createTauriTransport, McNotYetError, type BootInfo, type TauriTransport } from './transport';
 
 declare global {
   interface Window {
     __MC_BOOT__?: BootInfo;
-    __MC_TAURI__?: { McNotYetError: typeof McNotYetError; transport: ReturnType<typeof createTauriTransport> };
+    __MC_TAURI__?: { McNotYetError: typeof McNotYetError; transport: TauriTransport };
   }
 }
 
 const fallbackBoot = (): BootInfo => ({ platform: /Mac/.test(navigator.platform) ? 'darwin' : 'win32', windowsBuild: 0, label: 'main' });
 const boot: BootInfo = window.__MC_BOOT__ ?? fallbackBoot();
 const current = getCurrentWebviewWindow();
+const newSession = () => (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
 
 const transport = createTauriTransport(boot, {
-  invoke: (command, args) => invoke(command, args),
+  invoke: (command, args, options) => invoke(command, args, options),
   listen: (event, cb) => current.listen(event, (e) => cb(e.payload)),
   log: (message) => console.warn(`[mc] ${message}`),
   storage: (() => { try { return window.sessionStorage; } catch { return null; } })(),
-  newSession: () => (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`),
+  newSession,
 });
 
 window.mc = createMcApi(transport);
 window.__MC_TAURI__ = { McNotYetError, transport };
 void transport.replayJournal();
+
+// A reload or navigation: Tauri would keep this page's listeners for the window's whole life (they are keyed by webview
+// label), so they are dropped here. A page kept in the back/forward cache (persisted) keeps them.
+window.addEventListener('pagehide', (e) => { if (!e.persisted) transport.dispose(); });
 
 /**
  * The MessagePorts of 1.1.4 (`mc:pty-port`, `mc:sftp-port`, `mc:db-port`): a real MessageChannel whose far end is wired to a
@@ -43,7 +48,11 @@ async function attachPort(kind: 'pty' | 'sftp' | 'db'): Promise<void> {
     if ((error as { code?: string })?.code !== 'MC_NOT_YET') console.warn(`[mc] ${kind} port: ${String((error as Error)?.message ?? JSON.stringify(error))}`);
     return;
   }
-  if (kind === 'pty') pair.port2.onmessage = (e) => { void invoke('mc_port_post', { kind, message: e.data }).catch(() => undefined); };
+  if (kind === 'pty') {
+    // In order, like the MessagePort of 1.1.4: batched per task and numbered (Rust delivers by number).
+    const post = createPortPoster(kind, newSession(), (args) => invoke('mc_port_post', args));
+    pair.port2.onmessage = (e) => post(e.data);
+  }
   pair.port2.start();
   window.postMessage(`mc:${kind}-port`, '*', [pair.port1]);
 }

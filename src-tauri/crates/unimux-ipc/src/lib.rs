@@ -5,11 +5,13 @@
 //!   sender guard runs centrally for every channel that is not in [`guard::OPEN_COMMANDS`], so no handler can forget it.
 //! - [`send_queue`]: `ipcRenderer.send` ordering for fire-and-forget calls (Tauri invokes run concurrently).
 //! - [`events`]: push events with scopes (broadcast, main, window, cell) and the "flush the state first" hook.
+//! - [`binary`]: the frame of binary results (bytes inside a JSON value) on the raw path.
 //! - [`ports`]: the three MessagePort replacements (pty, sftp, db) backed by Tauri channels; owners register later.
 //!
 //! How a domain adds a command: in `unimux-app/src/commands/<domain>.rs`, `r.invoke("git:status", move |call| async move
 //! { ... })`. Nothing else is edited: the contract already lists the channel, the report counts it as implemented.
 
+pub mod binary;
 pub mod contract;
 pub mod error;
 pub mod events;

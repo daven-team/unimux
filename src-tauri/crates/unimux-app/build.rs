@@ -18,6 +18,14 @@ fn main() {
         "update_splash_open",
         "test_bridge",
     ];
-    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(commands)))
-        .expect("tauri-build");
+    // Capabilities: capabilities/*.json always; capabilities-check/*.json (the test_bridge grant) only in builds with the
+    // test-bridge feature, so a release build ships no grant for a command it does not contain.
+    let test_bridge = std::env::var_os("CARGO_FEATURE_TEST_BRIDGE").is_some();
+    println!("cargo::rerun-if-changed=capabilities");
+    println!("cargo::rerun-if-changed=capabilities-check");
+    let pattern = if test_bridge { "./capabilities*/*.json" } else { "./capabilities/*.json" };
+    let attributes = tauri_build::Attributes::new()
+        .capabilities_path_pattern(pattern)
+        .app_manifest(tauri_build::AppManifest::new().commands(commands));
+    tauri_build::try_build(attributes).expect("tauri-build");
 }

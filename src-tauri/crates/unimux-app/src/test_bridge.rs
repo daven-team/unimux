@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use tauri::ipc::Request;
 use tauri::{State, Webview};
 
 use unimux_ipc::{Caller, IpcError, Scope};
@@ -14,6 +15,7 @@ use crate::context::AppContext;
 pub async fn test_bridge(
     webview: Webview,
     ctx: State<'_, Arc<AppContext>>,
+    request: Request<'_>,
     op: String,
     args: Option<Value>,
 ) -> Result<Value, IpcError> {
@@ -50,8 +52,18 @@ pub async fn test_bridge(
                 .and_then(Value::as_str)
                 .map(str::to_string)
                 .unwrap_or_else(|| webview.url().map(|u| u.to_string()).unwrap_or_default());
-            let caller = Caller::new(label, url);
-            Ok(json!({ "label": caller.label, "url": caller.url, "allowed": ctx.guard_allows(&caller) }))
+            // Default: the Origin header of this very request (what mc_invoke sees for this page).
+            let origin = match args.get("requestOrigin") {
+                Some(v) => v.as_str().map(str::to_string),
+                None => request.headers().get("origin").and_then(|v| v.to_str().ok()).map(str::to_string),
+            };
+            let caller = Caller::new(label, url).with_request_origin(origin);
+            Ok(json!({
+                "label": caller.label,
+                "url": caller.url,
+                "requestOrigin": caller.request_origin,
+                "allowed": ctx.guard_allows(&caller),
+            }))
         }
         // Ends the app the normal way (the Exit event saves the state).
         "quit" => {
@@ -60,6 +72,11 @@ pub async fn test_bridge(
             }
             Ok(Value::Null)
         }
+        // Live send / port lanes (a destroyed window must leave none behind).
+        "lanes" => Ok(json!({
+            "sends": ctx.sends.get().map(|q| q.lane_count()),
+            "portPosts": ctx.port_posts.get().map(|q| q.lane_count()),
+        })),
         "report" => Ok(serde_json::to_value(ctx.router().report()).unwrap_or(Value::Null)),
         _ => Err(fail(&format!("unknown op {op}"))),
     }

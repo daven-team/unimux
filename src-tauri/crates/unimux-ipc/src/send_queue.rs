@@ -1,7 +1,9 @@
 //! `ipcRenderer.send` ordering. Tauri runs invokes concurrently, so the bridge numbers every send of a page load (`session`,
 //! `seq` from 1) and this queue hands them to the router strictly in that order, one at a time per window. A sequence number
 //! that never arrives (a call lost while the page unloaded) holds the window's later sends for at most `gap_timeout`, then
-//! they run anyway. A new session of a window (a reload) starts over.
+//! they run anyway. A new session of a window (a reload) starts over. A send that is refused before it is queued (not yet
+//! ported, unknown, guard) still takes its number: [`SendQueue::skip`] fills the slot so the next send is not held back.
+//! Lanes are keyed by any string: one per window for `mc_send`, one per window and port for the port posts.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -16,7 +18,8 @@ type Deliver<T> = Arc<dyn Fn(T) -> futures::future::BoxFuture<'static, ()> + Sen
 struct Lane<T> {
     session: String,
     next: u64,
-    pending: BTreeMap<u64, T>,
+    /// None: a number that was used by a refused send (nothing to deliver, only the order moves on).
+    pending: BTreeMap<u64, Option<T>>,
     tx: mpsc::UnboundedSender<T>,
     /// Bumped whenever the lane moves on; a gap timer only acts when nothing moved since it was armed.
     epoch: u64,
@@ -36,6 +39,15 @@ impl<T: Send + 'static> SendQueue<T> {
 
     /// Queues `item` with its sequence number. Must run inside a tokio runtime.
     pub fn submit(&self, label: &str, session: &str, seq: u64, item: T) {
+        self.put(label, session, seq, Some(item));
+    }
+
+    /// Marks `seq` as used without anything to deliver (a send refused before it was queued).
+    pub fn skip(&self, label: &str, session: &str, seq: u64) {
+        self.put(label, session, seq, None);
+    }
+
+    fn put(&self, label: &str, session: &str, seq: u64, item: Option<T>) {
         let mut lanes = self.lanes.lock();
         match lanes.get_mut(label) {
             None => {
@@ -74,7 +86,9 @@ impl<T: Send + 'static> SendQueue<T> {
 
     fn drain(lane: &mut Lane<T>) {
         while let Some(item) = lane.pending.remove(&lane.next) {
-            let _ = lane.tx.send(item);
+            if let Some(item) = item {
+                let _ = lane.tx.send(item);
+            }
             lane.next += 1;
             lane.epoch += 1;
         }
@@ -100,9 +114,16 @@ impl<T: Send + 'static> SendQueue<T> {
         });
     }
 
-    /// Forgets a closed window's lane.
+    /// Forgets a closed window's lanes (the key itself and every `<label>\0...` sub-lane); their workers end once what was
+    /// already handed to them is delivered.
     pub fn forget(&self, label: &str) {
-        self.lanes.lock().remove(label);
+        let sub = format!("{label}\0");
+        self.lanes.lock().retain(|key, _| key != label && !key.starts_with(&sub));
+    }
+
+    /// Number of live lanes (tests, leak checks).
+    pub fn lane_count(&self) -> usize {
+        self.lanes.lock().len()
     }
 }
 
@@ -175,6 +196,32 @@ mod tests {
         q.submit("main", "s1", 4, ("main".into(), 4));
         tokio::time::sleep(Duration::from_millis(10)).await;
         assert_eq!(seen.lock().iter().map(|x| x.1).collect::<Vec<_>>(), vec![1, 3, 4]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_refused_send_does_not_hold_the_next_one() {
+        let (seen, deliver) = collecting();
+        let q = SendQueue::new(Duration::from_millis(2000), deliver);
+        q.skip("main", "s1", 1);
+        q.submit("main", "s1", 2, ("main".into(), 2));
+        q.skip("main", "s1", 3);
+        q.skip("main", "s1", 4);
+        q.submit("main", "s1", 5, ("main".into(), 5));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(seen.lock().iter().map(|x| x.1).collect::<Vec<_>>(), vec![2, 5]);
+    }
+
+    #[tokio::test]
+    async fn forget_removes_the_window_and_its_sub_lanes() {
+        let (_seen, deliver) = collecting();
+        let q = SendQueue::new(Duration::from_secs(5), deliver);
+        q.submit("detached-a", "s1", 1, ("a".into(), 1));
+        q.submit("detached-a\0pty", "s1", 1, ("a".into(), 1));
+        q.submit("detached-ab", "s1", 1, ("ab".into(), 1));
+        q.submit("main", "s1", 1, ("main".into(), 1));
+        assert_eq!(q.lane_count(), 4);
+        q.forget("detached-a");
+        assert_eq!(q.lane_count(), 2);
     }
 
     #[tokio::test]

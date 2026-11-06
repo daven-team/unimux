@@ -68,6 +68,8 @@ pub struct AppContext {
     pub ports: Arc<Ports>,
     pub router: OnceLock<Arc<Router>>,
     pub sends: OnceLock<SendQueue<Call>>,
+    /// The renderer -> host port messages, in order per window and port (lanes `<label>\0port:<kind>`).
+    pub port_posts: OnceLock<SendQueue<crate::ipc::PortPost>>,
     /// `claimAppStart`: true only for the first renderer load of this run.
     pub app_start_unclaimed: AtomicBool,
     pub report_limiter: Mutex<ReportLimiter>,
@@ -122,6 +124,7 @@ impl AppContext {
             ports: Arc::new(Ports::new()),
             router: OnceLock::new(),
             sends: OnceLock::new(),
+            port_posts: OnceLock::new(),
             app_start_unclaimed: AtomicBool::new(true),
             report_limiter: Mutex::new(ReportLimiter::default()),
             main_shown: AtomicBool::new(false),
@@ -146,6 +149,19 @@ impl AppContext {
     pub fn flush_state(&self) -> bool {
         self.broadcaster.flush();
         self.saver.flush_until_saved(Duration::from_secs(3), Duration::from_millis(250))
+    }
+
+    /// A window is gone (WindowEvent::Destroyed): its send and port lanes (and their worker tasks), its port sinks and its
+    /// detached registration go with it. Labels of detached windows are unique, so nothing else would ever free them.
+    pub fn window_destroyed(&self, label: &str) {
+        if let Some(q) = self.sends.get() {
+            q.forget(label);
+        }
+        if let Some(q) = self.port_posts.get() {
+            q.forget(label);
+        }
+        self.ports.detach_window(label);
+        self.guard.forget_detached(label);
     }
 
     pub fn claim_app_start(&self) -> bool {

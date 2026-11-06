@@ -69,8 +69,11 @@ jobs:
         working-directory: src-tauri
       - run: cargo test --workspace
         working-directory: src-tauri
-      # The release rules (MC_* overrides compiled out) are only active without debug assertions.
-      - run: cargo test -p unimux-core -p unimux-state --release
+      # The release rules (MC_* overrides, the DevTools port and the dev server origin compiled out: `cfg(not(dev_overrides))`
+      # in unimux-app, PACKAGED in unimux-core) are only active in release builds, so they get their own clippy and tests.
+      - run: cargo clippy --workspace --all-targets --release -- -D warnings
+        working-directory: src-tauri
+      - run: cargo test --workspace --release
         working-directory: src-tauri
       - run: cargo test --workspace --features unimux-app/dev-overrides,unimux-app/test-bridge,unimux-core/dev-overrides
         working-directory: src-tauri
@@ -108,7 +111,15 @@ jobs:
         run: |
           bin="src-tauri/target/${{ matrix.target }}/release/${{ matrix.binary }}"
           test -f "$bin"
-          if grep -a -c -- '--remote-debugging-port' "$bin"; then echo "::error::the release binary contains --remote-debugging-port"; exit 1; fi
+          # MC_DATA_DIR (the dev-overrides env reads) and test_bridge (the harness command) are in every dev-overrides /
+          # test-bridge binary on every OS and absent from a release one.
+          for marker in MC_DATA_DIR MC_DEBUG_PORT test_bridge; do
+            if grep -a -q -- "$marker" "$bin"; then echo "::error::the release binary contains $marker"; exit 1; fi
+          done
+          # The DevTools switch is built only on Windows (browser_args is used inside cfg(windows)), so it is checked there.
+          if [ "${{ runner.os }}" = "Windows" ] && grep -a -q -- '--remote-debugging-port' "$bin"; then
+            echo "::error::the release binary contains --remote-debugging-port"; exit 1
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unimux-tauri-${{ matrix.target }}
