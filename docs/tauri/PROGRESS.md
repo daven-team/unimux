@@ -310,3 +310,9 @@ Szacunek: około 290 dni pracy agentów + 20-25 procent na integrację, czyli re
 3. **Kopia zapasowa klucza podpisywania offline.** W folderze `D:\Projekty\_unimux-tauri-keys` leży też plik z hasłem; warto przenieść hasło do menedżera haseł i zrobić kopię klucza na nośniku offline (utrata klucza = koniec aktualizacji dla wersji Tauri). Agenci nie czytają tych plików.
 4. **Brakuje Windows 11 SDK** (sprawdzone 2026-11-06: nie ma kernel32.lib ani rc.exe). Proszę doinstalować w instalatorze Visual Studio składnik "Windows 11 SDK" (obciążenie "Programowanie aplikacji klasycznych w C++"). Do tego czasu buildy używają kopii SDK z oficjalnych pakietów NuGet Microsoftu w `%LOCALAPPDATA%\unimux-build` (po instalacji SDK można ten folder usunąć).
 5. Akceptacja wersji testowej przed wydaniem i przeczytanie `docs/releases/1.2.0.md`.
+
+
+## User feedback 2026-11-06
+
+- Update window: the text arrow looked wrong (fixed in resources/update-splash: drawn chevron), the window must not be always-on-top (fixed in src/updatesplash for Electron; required for U2), and the UAC prompt must come to the front (U2 requirement).
+- Tauri check build: the system title bar shows above unimux's own title bar; W1 must remove it (decorations: false, own drag region, caption buttons like 1.1.4).
