@@ -7,11 +7,12 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use tauri::ipc::{Channel, InvokeBody, InvokeResponseBody, Request, Response};
-use tauri::{State, Webview};
+use tauri::{AppHandle, Manager, State, Webview};
 
 use unimux_ipc::{Call, Caller, IpcError, PortSink, Reply};
 
 use crate::context::AppContext;
+use crate::update_window::UpdateWindow;
 
 /// The caller: the webview's label and top-level URL, and the `Origin` header of this IPC request (the document that made
 /// the call; absent on Tauri's postMessage fallback).
@@ -144,17 +145,29 @@ pub struct PortPost {
     pub messages: Vec<Value>,
 }
 
-/// window.updateSplash of the update windows (U1 / U2 fill these; wave 0 has no gate window yet).
+/// window.updateSplash of the update windows: the update window process (`--update-window`, SP6) answers through its
+/// [`UpdateWindow`] state; the startup gate window of the app process comes with U1.
 #[tauri::command]
-pub async fn update_splash_init() -> Result<Value, IpcError> {
-    Err(IpcError::NotYet { command: "update-splash:init".into() })
+pub async fn update_splash_init(app: AppHandle) -> Result<Value, IpcError> {
+    match app.try_state::<Arc<UpdateWindow>>() {
+        Some(win) => Ok(win.init_info()),
+        None => Err(IpcError::NotYet { command: "update-splash:init".into() }),
+    }
 }
 
 #[tauri::command]
-pub async fn update_splash_close() {}
+pub async fn update_splash_close(app: AppHandle) {
+    if let Some(win) = app.try_state::<Arc<UpdateWindow>>() {
+        win.inner().request_close();
+    }
+}
 
 #[tauri::command]
-pub async fn update_splash_open() {}
+pub async fn update_splash_open(app: AppHandle) {
+    if let Some(win) = app.try_state::<Arc<UpdateWindow>>() {
+        win.open_app();
+    }
+}
 
 impl AppContext {
     pub fn guard_allows(&self, caller: &Caller) -> bool {

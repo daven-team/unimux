@@ -306,6 +306,16 @@ pub fn spawn_detached(
     env: Option<HashMap<OsString, OsString>>,
     cwd: Option<PathBuf>,
 ) -> Result<u32, ExecError> {
+    spawn_detached_child(program, env, cwd).map(|child| child.id())
+}
+
+/// [`spawn_detached`] that keeps the [`Child`], for a caller that waits for the exit code (the update window runs the
+/// installer this way: if the window dies, the installer still finishes). Dropping the Child neither kills nor waits.
+pub fn spawn_detached_child(
+    program: &Program,
+    env: Option<HashMap<OsString, OsString>>,
+    cwd: Option<PathBuf>,
+) -> Result<Child, ExecError> {
     let make = || {
         let mut cmd = command(program);
         cmd.env_clear();
@@ -323,12 +333,12 @@ pub fn spawn_detached(
         let mut cmd = make();
         cmd.creation_flags(base | CREATE_BREAKAWAY_FROM_JOB);
         match cmd.spawn() {
-            Ok(child) => Ok(child.id()),
+            Ok(child) => Ok(child),
             // A job that forbids breakaway (some CI runners, terminals): start it inside, the best that is possible.
             Err(_) => {
                 let mut cmd = make();
                 cmd.creation_flags(base);
-                cmd.spawn().map(|c| c.id()).map_err(|source| ExecError::Spawn { program: program_name(program), source })
+                cmd.spawn().map_err(|source| ExecError::Spawn { program: program_name(program), source })
             }
         }
     }
@@ -343,7 +353,34 @@ pub fn spawn_detached(
                 Ok(())
             });
         }
-        cmd.spawn().map(|c| c.id()).map_err(|source| ExecError::Spawn { program: program_name(program), source })
+        cmd.spawn().map_err(|source| ExecError::Spawn { program: program_name(program), source })
+    }
+}
+
+/// Whether the process `pid` still runs (`process.kill(pid, 0)` of updatesplash: a process we may not query counts as alive).
+pub fn process_alive(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, STILL_ACTIVE};
+        use windows::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+        // SAFETY: a query-only handle that is closed again.
+        unsafe {
+            match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                Ok(handle) => {
+                    let mut code = 0u32;
+                    let alive = GetExitCodeProcess(handle, &mut code).is_ok() && code == STILL_ACTIVE.0 as u32;
+                    let _ = CloseHandle(handle);
+                    alive
+                }
+                Err(e) => e.code() == ERROR_ACCESS_DENIED.to_hresult(),
+            }
+        }
+    }
+    #[cfg(unix)]
+    {
+        // SAFETY: signal 0 only checks the pid.
+        let r = unsafe { libc::kill(pid as i32, 0) };
+        r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
     }
 }
 
@@ -446,5 +483,16 @@ mod tests {
             thread::sleep(Duration::from_millis(25));
         }
         assert!(marker.exists());
+    }
+
+    #[test]
+    fn a_detached_child_reports_its_exit_code_and_liveness() {
+        assert!(process_alive(std::process::id()));
+        let mut child = spawn_detached_child(&shell("exit 3"), None, None).unwrap();
+        let pid = child.id();
+        let status = child.wait().unwrap();
+        assert_eq!(status.code(), Some(3));
+        // Reaped (Unix) / ended (Windows): no longer alive.
+        assert!(!process_alive(pid));
     }
 }
