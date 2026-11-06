@@ -1,5 +1,3 @@
-| F14 | undefined | verified (Windows) | 2026-11-06 | 2026-11-06 | 2026-11-06 | unimux-exec: CREATE_NO_WINDOW, suspended start + Job Object kill-on-close (tree killed on timeout / cap), process group on Unix, cleanEnv, raw command lines, 256 KiB caps, timeouts, spawn_detached with breakaway fallback; 7 tests. Open: macOS run, survives-app-exit test for detached launches |
-
 The orchestrator updates this file after every step. Status values: `todo`, `in progress`, `done` (code merged into `tauri-1.2.0`), `verified` (acceptance tests from PLAN.md passed). Dates are filled in when a status changes.
 
 Branch: `tauri-1.2.0`. Specs: ARCHITECTURE.md, PLAN.md, INVENTORY.md. Plan: ALL AT ONCE (one release, 1.2.0, fully Rust + Tauri v2, no Node sidecar).
@@ -16,7 +14,7 @@ Branch: `tauri-1.2.0`. Specs: ARCHITECTURE.md, PLAN.md, INVENTORY.md. Plan: ALL 
 | 2026-11-06 | **`Local State` without a usable key: match 1.1.4.** A missing `encrypted_key`, a DPAPI key that does not unwrap or a non-object file gets a new key with the other prefs kept; a non-JSON file goes to `Local State.bad` first; only a key in an unknown format stays unavailable. | SP2 review (parity rule) | ARCHITECTURE section 7, PLAN B2, spikes/SP2.md; unimux-oscrypt `Origin::Replaced`; verified against real 1.1.4 (spike checks F/G/H). |
 | 2026-11-06 | **Keep publishing latest.yml / latest-mac.yml** so Electron 1.1.x installs update into 1.2.0. | user | U3 transition, U4 asset list, every release from now on. |
 
-Still open (see the Polish section at the end): macOS identifier com.ajzakomator.app + one Keychain prompt, fallback bridge release 1.1.5 if SP3/SP4 fail, Mac access, 1.1.4 test data.
+Still open (see the Polish section at the end): macOS identifier com.ajzakomator.app + one Keychain prompt, fallback bridge release 1.1.5 if SP3/SP4 fail, Mac access, VM image, 1.1.4 test data, the SP1 acceptance substitute, SP5 criterion 4 (60 fps under a 20 x 1 MB/s flood) partly met.
 
 ## Status
 
@@ -37,7 +35,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | F11 | Main window, startup gate order, window state, WebView settings | done (partial) | 2026-11-06 | 2026-11-06 |  | main window created in code (1600x1000 / 1100x700 offscreen, min 800x500, #0d0d0d, hidden until page load or renderer-boot, 5 s fallback), __MC_BOOT__ init script, identical browser args for every webview, WebView2 data folder DATA_DIR/webview2, default context menus / browser accelerators / zoom / status bar off, devtools only with dev overrides, NonClientRegion support on, window:shown + window:maximized, offscreen shows without activation. Native title bar kept until W1. Open: StartupGate trait and the update-gate window (only the hook point in setup), automated key / zoom / minimize checks |
 | F12 | CI skeleton | done (not run) | 2026-11-06 | 2026-11-06 |  | .github/workflows/tauri.yml: Windows + macOS checks (gen drift, porting check, 3.0.0-alpha grep, typecheck, vitest, fmt, clippy x2, cargo test incl. --release), 3 build jobs with the U4 names, release asserts no --remote-debugging-port, artifacts. Not pushed, so no CI run yet; macOS never compiled |
 | F13 | Real-app harness base | done | 2026-11-06 | 2026-11-06 | 2026-11-06 | scripts/tauri-app.mjs (check build only, scratch home + data dir, CDP client, kill of our own tree, real-profile markers), scripts/smoke-tauri.mjs 26/26 (3 runs), test-bridge commands state / flush / paths / emit / panic / probe / report / quit. Open: X1 moves the 44 verify scripts |
-| F14 | Exec helper and env | todo | | | | |
+| F14 | Exec helper and env | verified (Windows) | 2026-11-06 | 2026-11-06 | 2026-11-06 | unimux-exec: CREATE_NO_WINDOW, suspended start + Job Object kill-on-close (tree killed on timeout / cap), process group on Unix, cleanEnv, raw command lines, 256 KiB caps, timeouts, spawn_detached with breakaway fallback; 7 tests. Open: macOS run, survives-app-exit test for detached launches |
 
 ### Wave 0b: spikes
 
@@ -48,10 +46,10 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | SP3 | Windows 1.1.4 -> Tauri NSIS hand-over | todo | | | | needs the VirtualBox Windows VM image |
 | SP4 | macOS 1.1.4 engine accepts the Tauri zip | todo | | | | needs a Mac |
 | SP5 | Rust ConPTY + Channel | done (partly verified) | 2026-11-06 | 2026-11-06 | | branch `tauri-pkg-SP5`, findings in spikes/SP5.md. Own windows-crate ConPTY wrapper in unimux-pty (bundled conpty.dll 1.23, flags 0 + Release like node-pty, Job Object, close off-thread while draining, writer thread, TimerResolution), frames + per-window batcher + byte-ack flow gate, check-only spike commands. Met: render parity (PowerShell, Claude Code, resize reflow, win32-input-mode, focus 1004), 50 close-under-flood rounds no deadlock, idle echo at or below 1.1.4 in all interleaved pairs. Partly: 20 x 1 MB/s at 60 fps (met with the 16 ms batcher for synthetic 20 MB/s and for most ConPTY runs; runs where ConPTY passed 13 to 20 MB/s dropped 45 to 72 frames over 50 ms, 1.1.4 drops more). See SP5 open issues. Review fixes (2026-11-06): with the dll + Release the exit is reported when the output pipe ends, so a `start /b` child that outlives the shell keeps running and printing as in 1.1.4 (the 1 s close stays for the in-box API only); kill in node-pty's order (input, ClosePseudoConsole, TerminateProcess(shell, 1), then TerminateJobObject); job without kill-on-close, so detached programs survive a shell that ended by itself; Job created before the pseudoconsole, a Drop on Shared closes a pseudoconsole a failed spawn left, ResumeThread checked, threads started writer, waiter, reader; plane: a respawn mutes the old pty's data and exit frames, an entry whose exit came before its insert is dropped, flow counter, paused flag and gate change under one lock. New cargo cases: start /b child after shell exit, detached child survives a normal exit and dies with a kill, close alone under flood with a paused reader, plane respawn without stale frames (fails on the old code), 40 terminals ending at once leave the plane empty. Verified: cargo test -p unimux-pty 18 of 18 (twice, parallel), clippy clean, npm test 3951 passed, run.mjs render / close / latency / flood (20 cells exited in 246 ms, idle echo p50 1.6 ms, flood 179 fps over50 0) |
-| SP6 | Custom update window process | partial (Windows green, macOS open) | 2026-11-06 | | 2026-11-06 (Windows) | `node scripts/spike-update-window.mjs --build`: after the review fixes (rebased on tauri-1.2.0) 88/88 in 3 consecutive full runs (cases main, guard, failed, headless; scratch install dirs, spike product `unimux-sp6`), `--visible` 51/51, `--prestage` 32/32; copy `unimux-update.exe`, installer `/S /UPDATE --updated /D=` through ShellExecuteExW, never topmost / never focused, supervision independent of WebView2 and after the timeout; findings and timings in spikes/SP6.md; macOS swap + `codesign --verify` and the real UAC prompt not done (no Mac, no VM). See "SP6 open issues" |
+| SP6 | Custom update window process | done (Windows verified, macOS open) | 2026-11-06 | 2026-11-06 | 2026-11-06 (Windows) | `node scripts/spike-update-window.mjs --build`: after the review fixes (rebased on tauri-1.2.0) 88/88 in 3 consecutive full runs (cases main, guard, failed, headless; scratch install dirs, spike product `unimux-sp6`), `--visible` 51/51, `--prestage` 32/32; copy `unimux-update.exe`, installer `/S /UPDATE --updated /D=` through ShellExecuteExW, never topmost / never focused, supervision independent of WebView2 and after the timeout; findings and timings in spikes/SP6.md; macOS swap + `codesign --verify` and the real UAC prompt not done (no Mac, no VM). See "SP6 open issues" |
 | SP7 | russh coverage | verified (Windows), review fixed | 2026-11-06 | 2026-11-06 | 2026-11-06 | docs/tauri/spikes/SP7.md. Keys: 116-file corpus (ssh-keygen 10.0p2, OpenSSL 3.5.7, PuTTYgen 0.83, 1.1.4's generateKey, 3 hand-made DEK-Info files) vs the real 1.1.4 parsePrivateKey under Electron 45, each with no / the right / a wrong passphrase: 76 accepted; the S2 prototype `port_parse` (1.1.4 text checks, refusals, `legacy_pem` for traditional PEM: AES-128/192/256-CBC and -CTR, DES-EDE3-CBC, BF-CBC; then russh 0.65.1) gives all 348 answers identically (ok + metadata or the error code); russh alone loads 57 of the 76 (19 PEM gaps) and 26 files 1.1.4 refuses (both lists asserted); PPK v2 through ssh-key (no own parser); malformed DEK-Info never panics. Servers (scripts/sp7/matrix.mjs, Docker, containers and images removed by id): OpenSSH 10 current / old offer / SHA-1 only / CBC only, OpenSSH 5.9, Dropbear 2025 x2, Dropbear 2016; real 1.1.4 SshLogin under Electron 45 vs the russh probe (SshLogin method order over the server's lists, 1.1.4 offer): same outcome and SshErrorCode, the same methods sent and the same algorithms in all 104 logins, 21/21 host keys byte-identical to the 1.1.4 known_hosts.json entries; russh DEFAULT fails on the OpenSSH 5.x/6.x offer (no common MAC), so S3 uses `ssh2_preferred()`; connect to authenticated p50 81 ms (ssh2) vs 80 ms (russh) |
 | SP8 | MCP wire with real CLIs | verified (Windows) | 2026-11-06 | 2026-11-06 | 2026-11-06 | **Decision: custom dispatcher on hyper 1.12 / axum 0.8.9, no rmcp** (spikes/SP8.md). Prototype `crates/unimux-mcp/examples/sp8/custom.rs`: 52 / 52 HTTP-level cases identical to the 1.1.4 TS server (rmcp 3.9: 7 / 52); Claude Code 2.1.319 and codex-cli 0.162.1 on a scratch home with mock models: tools/list + tools/call + progress + elicitation round trip (Claude cancel and hook accept, Codex decline) + abort 1 ms after a killed CLI closes its connection; cargo `sp8_wire` 10 tests + 2 unit tests. Review fixes (2026-11-06): tasks/list cursor paging, ttl restarted on completion / cancel and abort on expiry, `notifications/cancelled` for a timed-out or aborted elicitation, no answer for a client-cancelled request, strict JSONRPCMessageSchema, lossy UTF-8 body, 1.1.4 error texts (no prefix on "has no result stored", zod issues for bad method params), elicitation answer validation, session-scoped tasks, no session for a token revoked mid-body. Open: see "Open issues after SP8" |
-| SP9 | DB wire fidelity | verified (branch tauri-pkg-SP9, not merged) | 2026-11-06 | | 2026-11-06 | docs/tauri/spikes/SP9.md. Value goldens byte-identical to 1.1.4 (written through the real 1.1.4 DB host): PG 13.23 + 18.6 39/39 statements on both paths, MySQL 8.4.13 28/28, MariaDB 11.8.9 29/29, Redis 8 39/39, plus startup / connect bytes and logins. Custom paths: PG own frame layer (3.2 BackendKeyData, NegotiateProtocolVersion, lossy strings, node-postgres' CopyFail text), MySQL own framing / COM_QUERY in the session charset / column parser (MariaDB extended metadata, names in the column charset) / mysql2's LOAD DATA LOCAL error, Redis own RESP2 client (resumable reader, `RedisConn` with fail-all-pending and no resend, `reconnect` 300 / 1000 / 2000 ms; connect bytes and drop / reconnect measured on it; redis crate dropped: non-UTF-8 status lines end its connection, 500 ms default timeout). All serverText cuts keep a split high surrogate like JS. Review fixes 2026-11-06 (3 major, 7 minor findings, all fixed): see SP9.md. Spike code in unimux-db `wire/`; `node scripts/spike-db-wire.mjs` (own Docker containers, `--rm`, removed by id also on Ctrl+C; server tests `#[ignore]`d in a plain cargo test) |
+| SP9 | DB wire fidelity | verified (Windows) | 2026-11-06 | 2026-11-06 | 2026-11-06 | docs/tauri/spikes/SP9.md. Value goldens byte-identical to 1.1.4 (written through the real 1.1.4 DB host): PG 13.23 + 18.6 39/39 statements on both paths, MySQL 8.4.13 28/28, MariaDB 11.8.9 29/29, Redis 8 39/39, plus startup / connect bytes and logins. Custom paths: PG own frame layer (3.2 BackendKeyData, NegotiateProtocolVersion, lossy strings, node-postgres' CopyFail text), MySQL own framing / COM_QUERY in the session charset / column parser (MariaDB extended metadata, names in the column charset) / mysql2's LOAD DATA LOCAL error, Redis own RESP2 client (resumable reader, `RedisConn` with fail-all-pending and no resend, `reconnect` 300 / 1000 / 2000 ms; connect bytes and drop / reconnect measured on it; redis crate dropped: non-UTF-8 status lines end its connection, 500 ms default timeout). All serverText cuts keep a split high surrogate like JS. Review fixes 2026-11-06 (3 major, 7 minor findings, all fixed): see SP9.md. Spike code in unimux-db `wire/`; `node scripts/spike-db-wire.mjs` (own Docker containers, `--rm`, removed by id also on Ctrl+C; server tests `#[ignore]`d in a plain cargo test) |
 
 ### Wave 1
 
@@ -166,6 +164,7 @@ Updated after every merge (`npm run ipc:report`, `node scripts/porting-count.mjs
 |---|---|---|---|---|
 | 2026-11-06 | 0 / 245 | 0 / 45 | 0 / about 1,815 | 0 / 44 |
 | 2026-11-06 (wave 0) | 6 / 245 (+2 fallbacks) | 4 / 44 emitted (state:changed, window:shown, window:maximized, test emit) | 57 / 2,138 | 0 / 44 (smoke-tauri 26/26 and check-electron-compat 7/7 are new) |
+| 2026-11-06 (wave 0b merged) | 6 / 245 (+2 fallbacks; contract 248 incl. 3 sync members) | 4 / 44 emitted | 69 / 2,146 | 0 / 44 (smoke-tauri 34/34, check-electron-compat 21/21, spike-sp1 25/25, sp5 render + close ok) |
 
 ## 1.2.0 release gate checklist
 
@@ -192,7 +191,7 @@ See PLAN.md "1.2.0 release gate". Tick here when verified.
 | item | status |
 |---|---|
 | Visual Studio 2026 C++ tools (VC Tools x86/x64) | installed |
-| Windows 11 SDK | **missing** (2026-11-06: no kernel32.lib / rc.exe on the machine, vswhere does not list the VS 18 install). Wave 0 builds use a user-level copy of Microsoft's NuGet packages Microsoft.Windows.SDK.CPP + .x64 10.0.28000.2957 in `%LOCALAPPDATA%\unimux-build\winsdk-10.0.28000.2957`, picked up by `scripts/msvc-run.mjs` (which also loads vcvars64.bat). Proper fix: add "Windows 11 SDK" in the Visual Studio installer; that folder can be deleted afterwards |
+| Windows 11 SDK | installed (10.0.28000, checked 2026-11-06: kernel32.lib under Windows Kits\10\Lib\10.0.28000.0; `scripts/msvc-run.mjs` now takes the installed SDK from vcvars and no longer needs the user-level copy in `%LOCALAPPDATA%\unimux-build\winsdk-10.0.28000.2957`, which can be deleted) |
 | Rust 1.99.1 MSVC, cargo on PATH | installed |
 | Node 26 LTS (npm) | installed (build tool only) |
 | WebView2 Runtime 156 | installed |
@@ -213,6 +212,7 @@ See PLAN.md "1.2.0 release gate". Tick here when verified.
 | 2026-11-06 | User decisions recorded (decision log above) | ALL AT ONCE: PLAN.md rewritten into waves 0 to 7 (93 packages, 291.5 agent-days + 20-25 percent integration, about 11 to 13 calendar weeks with 6 agents); sidecar-only packages dropped (S2, A3, A4, A5, A7, P3b, N2, B2 mirror, I10, R1-R4 sweeps); 1.3-1.6 packages folded in; new packages: F1-F14 foundation, SP6 + U2 + U5 custom update window, W1 caption buttons, F6 Electron singleton compat, X1 script migration, R1 Electron removal. ARCHITECTURE.md rewritten for the single Rust process. |
 | 2026-11-06 | Wave 0 foundation (F1-F14) implemented on `tauri-1.2.0` | See "Wave 0 report" below: 116 cargo tests, 3,946 vitest cases, smoke-tauri 26/26, Electron compat 7/7; F8 open, F11 / F12 partial; spikes SP1-SP9 not started |
 | 2026-11-06 | Review findings on wave 0 fixed (3 major, 11 minor; none skipped) | See "Review fixes" below: 123 cargo tests, 3,951 vitest cases, smoke-tauri 34/34, Electron compat 21/21 (14 simultaneous-start offsets) |
+| 2026-11-06 | Wave 0b integration: F8, SP1, SP2, SP5, SP6, SP7, SP8, SP9 merged into `tauri-1.2.0` (with their review fixes) | See "Wave 0b integration" below: fmt / clippy x3 clean, cargo test 244 / 249 (features) / 244 (release) passed, 8 Docker-only ignored; vitest 3,952 passed; smoke-tauri 34/34; Electron build + compat 21/21 |
 
 
 ## Wave 0 report (2026-11-06)
@@ -272,7 +272,7 @@ All 14 confirmed findings of the wave 0 review are fixed; none was skipped.
    - ~~F8c~~ fixed: the inbox retention sorts with a port of V8's TimSort (normalize/timsort.rs), so NaN timestamps order like 1.1.4 and never panic (golden js-sort.jsonl and the retention rows of normalize-state.jsonl).
    - F8d: `linux` is not a Platform (only win32 / darwin are shipped); 1.1.4 never ran there.
    - F8e: the corpus is 11 MB (normalize-state 7.3 MB, after-edit 3.8 MB, seeds 0.2 MB); `npm run gen:check` regenerates it in about 10 s.
-2. **Windows SDK** is not installed (see install status). Builds work through `scripts/msvc-run.mjs` and a user-level SDK copy; CI runners have the SDK.
+2. ~~Windows SDK missing~~ installed 2026-11-06 (see install status).
 3. **CI never ran** (branch not pushed). macOS was never compiled; the Unix code paths (instance socket, process groups, setsid) are untested.
 4. F11: no StartupGate trait / update-gate window yet, the native title bar is kept (W1), Ctrl+R / F5 / zoom / minimize behaviour is not checked by a script, renderer crash handling is W6.
 5. Quit is the plain Tauri exit plus a final state flush: no quit confirmation, wind-down registry or session-end handling (W6).
@@ -328,7 +328,7 @@ Verified on Windows after the fixes: `cargo fmt --all --check`; `cargo clippy -p
 7. `UpdateProgressModel` port has unit tests only; TS goldens are U2.
 8. `signal_update_ready` is the minimal form (no heartbeat wait, no clearGateFailureIfUpdated): U3.
 9. The real productName `unimux` installer was not run on this machine on purpose (second Apps & features entry, the user's real app runs); U2/U4 in the VM.
-10. Run it: `node scripts/spike-update-window.mjs --build` (builds the spike installer into `src-tauri/target/sp6`, then runs the cases main, guard, failed, headless, each installing into its own scratch dir and uninstalling); later runs without `--build`; `--case=main,guard` picks cases; `--visible` keeps the main case's window on screen (MC_UPDATE_VISIBLE=1, never takes the focus); `--prestage` stages and warms the copy first; `--keep` keeps the scratch dir. Screenshots and timings in artifacts/tauri-sp6/.
+10. Run it: `node scripts/spike-update-window.mjs --build` (builds the spike installer into `src-tauri/target/sp6`, then runs the cases main, guard, failed, headless, each installing into its own scratch dir and uninstalling); later runs without `--build`; `--case=main,guard` picks cases; the headless case (broken WebView2 folder, shows an Edge dialog on the desktop) runs only with `UNIMUX_SPIKE_BROKEN_WEBVIEW=1`; `--visible` keeps the main case's window on screen (MC_UPDATE_VISIBLE=1, never takes the focus); `--prestage` stages and warms the copy first; `--keep` keeps the scratch dir. Screenshots and timings in artifacts/tauri-sp6/.
 11. Observation for W6: after `quit` the main app's WebView2 processes took 3-30 s to end on the loaded machine.
 
 ### Review fixes: SP7 (2026-11-06)
@@ -386,6 +386,55 @@ Verification: `cargo fmt --all --check`, `cargo clippy -p unimux-mcp --all-targe
 - Release flavour: `npm run build:release` (unsigned NSIS installer; the MC_* overrides are compiled out, so it always uses %APPDATA%\unimux: do not run it for tests).
 - cargo directly: `cd src-tauri && node ../scripts/msvc-run.mjs cargo test --workspace` (loads the MSVC environment and the SDK fallback).
 
+## Wave 0b integration (2026-11-06)
+
+### Merged into `tauri-1.2.0` (all with `--no-ff`)
+
+| package | merged branch | merge | status after the merge |
+|---|---|---|---|
+| F8 | `tauri-pkg-F8-fixes` (= `tauri-pkg-F8` + its review fixes) | 0604fcc | verified (Windows) |
+| SP1 | `tauri-pkg-SP1` (review fixes on the branch) | 41fb8ac | done (Windows, acceptance substituted; user decision pending) |
+| SP2 | `tauri-pkg-SP2-fixes` (= `tauri-pkg-SP2` + review fixes) | e6016c7 | verified (Windows); Mac half open |
+| SP5 | `worktree-wf_b57fdc79-7b0-32` (= `tauri-pkg-SP5` + review fixes) | 8692640 | done (partly verified) |
+| SP6 | `tauri-pkg-SP6-fixes` (review fixes, rebased on 6868341; replaces `tauri-pkg-SP6`, whose commit 1d26bd7 is the same change before the rebase) | cd51ec2 | done (Windows verified, macOS open) |
+| SP7 | `tauri-pkg-SP7` (review fixes on the branch) | e709a16 | verified (Windows) |
+| SP8 | `tauri-pkg-SP8` (review fixes on the branch) | 8bd91ec | verified (Windows) |
+| SP9 | `worktree-wf_b57fdc79-7b0-16` (= `tauri-pkg-SP9` + review fixes) | ea210c2 | verified (Windows) |
+
+Conflicts were only in the docs (PLAN / PROGRESS / ARCHITECTURE rows, merged per package; the P2 row of PLAN.md combines SP1's shared-buffer decision and bounded-posts acceptance with SP5's frame format, 16 / 4 ms batcher and host-side DA1), in unimux-app (`build.rs` command list, `main.rs` modules and handlers, `capabilities-check/test-bridge.json`, `test_bridge.rs`: both sides kept, so the check build has the SP1 channel bench, the SP5 pty spike commands and the SP6 update commands together) and in the workspace `Cargo.toml` / `Cargo.lock` (union of the dependencies: `aes` / `cbc` pinned `=0.9.4` / `=0.2.1` for SP2 and SP7, `getrandom` 0.4.3 for oscrypt and the SP8 spike, which only calls `getrandom::fill`, one `bytes` entry for SP8 and SP9; every package version of the SP7, SP8 and SP9 lock files is in the merged lock).
+
+Integration fixes: the SP7 review-findings table moved back under its heading in this file (merge resolution); the SP6 spike's broken-WebView2 case (`headless`) runs only with `UNIMUX_SPIKE_BROKEN_WEBVIEW=1`, so no Edge "cannot create data directory" box appears on the desktop. No code breakage came out of the merges.
+
+### Verified after the merges (Windows 11 26200, 2026-11-06)
+
+| command | result |
+|---|---|
+| `cargo fmt --all --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` (default; `--features unimux-app/dev-overrides,unimux-app/test-bridge`; `--release`) | clean, all three |
+| `cargo test --workspace` (default / with the features / `--release`) | 244 / 249 / 244 passed, 0 failed; 8 ignored each (the SP9 Docker server tests, run by `node scripts/spike-db-wire.mjs`) |
+| `npm run typecheck` | ok |
+| `npm test` | 259 files / 3,952 tests passed (10 skipped as before) |
+| `npm run gen:check`, `node scripts/porting-count.mjs --check` | up to date (contract 248 members / 215 channels / 44 events; messages 2,720 rows; goldens); 69 / 2,146 main-side cases done |
+| `npm run build:check` | src-tauri/target/check/release/unimux.exe |
+| `npm run smoke:tauri` | 34/34 |
+| `node scripts/spike-sp1.mjs` (short run) | 25/25 (shared buffer p50 0.20 ms, real profile untouched) |
+| `node scripts/sp5/run.mjs render close` | render parity checks ok (win32-input-mode, DA1, focus 1004, resize reflow, Claude cell); 20 cells exited in 241 ms, 0 terminals left |
+| `npm run build` (Electron) | ok |
+| `node scripts/check-electron-compat.mjs` | 21/21 |
+
+Not run at the integration: the SP6 harness (`spike-update-window.mjs`, installs a spike product; its own 88/88 runs are recorded in the SP6 row), the SP7 / SP9 Docker matrices, the SP8 CLI scenarios, the SP2 1.1.4 round trip and `spike-sp1.mjs --long`; each was run by its package (see the rows). The release build (`npm run build:release`) was not rebuilt.
+
+### Not done after wave 0b
+
+1. **SP3 and SP4 are not started** (VirtualBox Windows image and a Mac are missing), so release gate item 1 stays open.
+2. **No macOS run at all**: SP1 WKWebView IPC, SP2 Keychain half, SP5 Unix pty, SP6 bundle swap + `codesign --verify`, SP7 / SP8 / SP9 macOS; CI was never run (branch not pushed).
+3. **Two acceptance items wait for the user**: the SP1 substitute (transport-only shared buffer instead of "Channel p50 < 2 ms into 20 xterm") and SP5 criterion 4 (20 cells x 1 MB/s at 60 fps only partly met; 1.1.4 drops more frames under the same load).
+4. Echo under a 19-cell flood is slower than 1.1.4 in the median (SP5 issue 1): input for P2.
+5. conpty.dll / OpenConsole.exe still come from node-pty's copy in node_modules (`UNIMUX_CONPTY_DIR`); P1 commits them under src-tauri/resources/conpty/x64.
+6. Spike-only dependencies stay as dev-dependencies until their packages: rmcp (M1 removes), redis crate (D9 drops), russh / ssh-key / aes / cbc / des / md5 / ctr / blowfish in unimux-ssh (S2 / S3 make them normal ones).
+7. Load-sensitive tests seen by the packages (not at this integration): `unimux-exec output_over_the_cap_is_truncated_and_the_tree_ends`, `unimux-pty job_object_kills_the_whole_tree`, a few vitest timing cases. All passed in the runs above.
+8. Branches and worktrees: all 16 package / review worktrees under `.claude/worktrees` were clean or held only a stale pre-fix index (the review fixes were committed from detached worktrees), had no junctions and were removed; `git worktree prune` run. Deleted: tauri-pkg-F8, -F8-fixes, -SP1, -SP2, -SP2-fixes, -SP5, -SP6-fixes, -SP7, -SP8, -SP9 and the worktree-wf_b57fdc79-7b0-* branches (`git branch -d`); `tauri-pkg-SP6` with `-D` because its commit 1d26bd7 is in `tauri-1.2.0` only as the rebased 599fb11 (`git cherry` shows it as applied). This also removed the 1.3 GB `src-tauri/target/sp6` of the SP6 worktree.
+
 ## Do zainstalowania / do decyzji użytkownika
 
 ### Decyzje podjęte 2026-11-06
@@ -401,19 +450,25 @@ Szacunek: około 290 dni pracy agentów + 20-25 procent na integrację, czyli re
 
 1. **macOS: identyfikator com.ajzakomator.app zostaje** (zachowuje uprawnienia systemowe i zgodność z aktualizatorem 1.1.x). Po aktualizacji macOS raz zapyta o dostęp do pęku kluczy ("Zawsze zezwalaj"). Akceptujesz?
 2. **Plan awaryjny.** Jeśli testy przejścia (SP3/SP4) nie wyjdą, potrzebne będzie wydanie pomostowe 1.1.5 na Electronie. Zgoda?
-3. **Kopia testowych danych 1.1.4** (KOPIA, nie oryginał `%APPDATA%\unimux`) albo zgoda, żebym utworzył syntetyczne dane w 1.1.4 pod `MC_DATA_DIR` z testowymi hasłami SSH/DB i tokenem GitHub.
+3. **Kopia testowych danych 1.1.4** (KOPIA, nie oryginał `%APPDATA%\unimux`) albo zgoda, żebym utworzył syntetyczne dane w 1.1.4 pod `MC_DATA_DIR` z testowymi hasłami SSH/DB i tokenem GitHub. Przyda się też F8: zanonimizowane prawdziwe pliki state.json można dopisać jako ziarna do `test/golden/normalize-seeds.jsonl` i uruchomić `npm run gen:goldens` (opcjonalnie).
+4. **SP1: zastępcze kryterium akceptacji.** "Channel p50 < 2 ms przy 20 x 1 MB/s do 20 terminali xterm" nie spełnia żaden transport (sam renderer xterm nie wyrabia 60 fps przy takim obciążeniu). Propozycja: liczyć sam transport (wspólny bufor WebView2: p50 0,2-0,3 ms, spełnione), kryterium "do xterm" przenieść do SP5, a sprawdzenie WKWebView do W2 / pierwszego uruchomienia na Macu. Zgoda? Do tego czasu SP1 ma status "done", nie "verified".
+5. **SP5: kryterium 4 spełnione częściowo.** 20 terminali po 1 MB/s trzyma 60 fps przy syntetycznym 20 MB/s i w większości przebiegów ConPTY, ale gdy ConPTY przepuszcza 13-20 MB/s, 45-72 klatki trwają ponad 50 ms (1.1.4 przy tym samym obciążeniu gubi ich więcej). Akceptujesz SP5 tak jak jest, czy zostawiamy to jako cel wydajności dla P2? Przy okazji: echo przy 19 zalewanych terminalach jest w medianie wolniejsze niż w 1.1.4 (13-28 ms wobec 9-13 ms); to zadanie dla P2.
 
 ### Do zrobienia po Twojej stronie (gdy będzie potrzebne)
 
 1. **Obraz Windows dla VirtualBox** (np. oficjalna maszyna deweloperska Windows 11 albo ISO z licencją) do testu aktualizacji 1.1.4 -> 1.2.0 (spike SP3, potem U3). Nigdy na Twoim prawdziwym profilu.
 2. **Dostęp do Maca** (Apple Silicon, Xcode Command Line Tools, Rust) do testu pęku kluczy, aktualizatora 1.1.4 -> 1.2.0, okna aktualizacji i ręcznej listy kontrolnej (SP2, SP4, R3).
 3. **Kopia zapasowa klucza podpisywania offline.** W folderze `D:\Projekty\_unimux-tauri-keys` leży też plik z hasłem; warto przenieść hasło do menedżera haseł i zrobić kopię klucza na nośniku offline (utrata klucza = koniec aktualizacji dla wersji Tauri). Agenci nie czytają tych plików.
-4. **Brakuje Windows 11 SDK** (sprawdzone 2026-11-06: nie ma kernel32.lib ani rc.exe). Proszę doinstalować w instalatorze Visual Studio składnik "Windows 11 SDK" (obciążenie "Programowanie aplikacji klasycznych w C++"). Do tego czasu buildy używają kopii SDK z oficjalnych pakietów NuGet Microsoftu w `%LOCALAPPDATA%\unimux-build` (po instalacji SDK można ten folder usunąć).
+4. ~~Brakuje Windows 11 SDK~~ zainstalowany (10.0.28000, sprawdzone 2026-11-06), buildy go używają. Można usunąć folder `%LOCALAPPDATA%\unimux-build` (kopia SDK z NuGet, już niepotrzebna).
 5. Akceptacja wersji testowej przed wydaniem i przeczytanie `docs/releases/1.2.0.md`.
+6. **Sprzątanie po spike SP5** (opcjonalnie): usuń folder `D:\Projekty\_tmp-094rend-zQPAwx` (agent nie mógł go usunąć, EPERM) oraz dzisiejsze foldery `D:\Projekty\_tmp-ssh-latency-*`, jeśli żaden inny agent ich nie używa.
+7. **Opcjonalnie: powtórzyć pomiar SP1 na bezczynnym komputerze** (bez gry i ciężkich programów): `npm run build:check && node scripts/spike-sp1.mjs --long`. Pomiary wave 0b szły przy 94-100 procent obciążenia CPU; kolejność transportów była zawsze ta sama, ale liczby bezwzględne warto powtórzyć.
+8. **Opcjonalnie: drugie konto Windows**, żeby zmierzyć, co robi Electron 1.1.4 z kluczem DPAPI innego użytkownika w `Local State` (SP2; dziś symulowane blobem, który się nie rozpakowuje).
+9. **Mac** (punkt 2) blokuje teraz konkretnie: WKWebView IPC i transport danych na macOS (SP1), pęk kluczy z 1.1.4 i jedno "Zawsze zezwalaj" (SP2), podmianę paczki .app i `codesign --verify` (SP6), SP4 oraz testy F8 / SP5 / SP7 / SP8 / SP9 na macOS. **Obraz VM Windows** (punkt 1) blokuje SP3 i próbę prawdziwego instalatora `unimux` z monitem UAC (SP6 / U2).
 
 
 ## User feedback 2026-11-06
 
 - Update window: the text arrow looked wrong (fixed in resources/update-splash: drawn chevron), the window must not be always-on-top (fixed in src/updatesplash for Electron; required for U2), and the UAC prompt must come to the front (U2 requirement).
 - Tauri check build: the system title bar shows above unimux's own title bar; W1 must remove it (decorations: false, own drag region, caption buttons like 1.1.4).
-- 2026-11-06: an Edge dialog "cannot create data directory ...\unimux-sp6-*\headless\unimux-updater\webview2-broken\EBWebView" popped up on the user's desktop several times. Source: scripts/spike-update-window.mjs (SP6 fixes, worktree -22) deliberately hands WebView2 a file as its data folder. To do after wave 0b: gate that case behind UNIMUX_SPIKE_BROKEN_WEBVIEW=1 and add the writable-folder pre-check to the updater (PLAN.md U2/SP6).
+- 2026-11-06: an Edge dialog "cannot create data directory ...\unimux-sp6-*\headless\unimux-updater\webview2-broken\EBWebView" popped up on the user's desktop several times. Source: scripts/spike-update-window.mjs (SP6 fixes, worktree -22) deliberately hands WebView2 a file as its data folder. Gated at the wave 0b integration: the headless case runs only with UNIMUX_SPIKE_BROKEN_WEBVIEW=1 (commit "fix: SP6 spike runs the broken-WebView2 case only ..."). Still to do in U2: the writable-folder pre-check in the updater and the main app (PLAN.md U2/SP6).
