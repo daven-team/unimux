@@ -11,10 +11,12 @@
 //                                     accepts it, a lone surrogate becomes U+FFFD (a Rust string cannot hold one)
 //   test/golden/normalize-state.jsonl   {platform, now, input} -> normalizeState (see scripts/goldens-normalize.mjs)
 //   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
+//   test/golden/hook-payloads.jsonl, hook-server.jsonl  the hook server (see scripts/goldens-hooks.mjs)
 //   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
 //                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
+import { hookPayloadRows, hookServerRows } from './goldens-hooks.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
@@ -23,9 +25,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = resolve(root, 'test/golden');
 const load = async (file) => (await runnerImport(resolve(root, file), { configFile: false, logLevel: 'silent', root })).module;
 
-const [{ defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { translate }, { messages }, { normalizeEditedState }] = await Promise.all([
+const [{ defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { translate }, { messages }, { normalizeEditedState }, hooks, codexHooks] = await Promise.all([
   load('src/shared/state.ts'), load('src/shared/stateEdits.ts'), load('src/shared/statePatch.ts'), load('src/shared/i18n.ts'), load('src/shared/messages.ts'),
-  load('src/main/stateController.ts'),
+  load('src/main/stateController.ts'), load('src/main/hooks.ts'), load('src/shared/codexHooks.ts'),
 ]);
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
@@ -177,6 +179,8 @@ const files = {
   'normalize-state.jsonl': jsonl(normalizeRows({ normalizeState, root })),
   'state-after-edit.jsonl': jsonl(afterEditRows({ normalizeState, normalizeEditedState })),
   'js-sort.jsonl': jsonl(jsSort()),
+  'hook-payloads.jsonl': jsonl(hookPayloadRows({ hooks, codexHooks })),
+  'hook-server.jsonl': jsonl(await hookServerRows(hooks)),
 };
 
 const check = process.argv.includes('--check');

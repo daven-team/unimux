@@ -88,6 +88,30 @@ pub async fn test_bridge(
                 .map(|(label, name, at)| json!({ "label": label, "name": name, "at": at }))
                 .collect::<Vec<_>>()
         )),
+        // H1: the hook server as the harness needs it: port, token, a cell's URLs (a fresh nonce with `renew: true`) and,
+        // until P3 tracks running processes, which cells count as alive (`alive: [ids]`).
+        "hooks" => {
+            if let Some(list) = args.get("alive").and_then(Value::as_array) {
+                let ids: std::collections::HashSet<String> = list.iter().filter_map(Value::as_str).map(str::to_string).collect();
+                ctx.hooks.set_alive(move |cell| ids.contains(cell));
+            }
+            let server = &ctx.hooks.server;
+            let cell = args.get("cell").and_then(Value::as_str);
+            if let Some(cell) = cell
+                && args.get("renew").and_then(Value::as_bool) == Some(true)
+            {
+                server.renew_nonce(cell);
+            }
+            let urls = cell.map(|c| {
+                json!({
+                    "url": server.url(c, "EVENT"),
+                    "headerUrl": server.header_url(c, "EVENT"),
+                    "codex": server.url(c, "codex"),
+                    "exit": server.exit_url(c),
+                })
+            });
+            Ok(json!({ "port": server.port(), "token": server.token(), "cell": urls }))
+        }
         // A second app window (SP1: same browser arguments on two windows; `browserArgs: "different"` shows the 0x8007139F
         // failure a mismatch causes). W5 builds the real detached windows.
         "openWindow" => crate::spike_windows::open_window(&ctx, &args).await,

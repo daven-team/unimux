@@ -8,6 +8,7 @@
 mod channel_bench;
 mod commands;
 mod context;
+mod hooks;
 mod ipc;
 #[cfg(feature = "test-bridge")]
 mod spike_pty;
@@ -185,6 +186,8 @@ fn main() {
             ctx.mark("app-ready");
             // The startup gate (U1) runs here and may hold the main window back; wave 0 always proceeds.
             windows::create_main(app.handle(), &ctx)?;
+            // In parallel with the window (1.1.4: hooks.start next to the cell file prune and the MCP server).
+            hooks::start(&ctx);
             startup::mark_started();
             Ok(())
         })
@@ -197,6 +200,7 @@ fn main() {
     let run_ctx = ctx.clone();
     app.run(move |_app, event| {
         if let RunEvent::Exit = event {
+            hooks::stop(&run_ctx);
             // The last save (W6 adds the full wind-down: quit confirmation, hosts, MCP, hooks).
             if !run_ctx.flush_state() {
                 run_ctx.crash.error("state could not be saved before exit");
