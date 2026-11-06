@@ -75,6 +75,14 @@ tempfile = "3"
 windows = "0.62.2"
 libc = "0.2"
 webview2-com = "0.39.1"
+aes-gcm = "0.11.1"
+aes = "0.9.4"
+cbc = "0.2.1"
+pbkdf2 = { version = "0.13.0", default-features = false, features = ["hmac"] }
+sha1 = "0.11.0"
+zeroize = "1.9.1"
+getrandom = "0.4.3"
+security-framework = "3.7.0"
 
 [profile.release]
 lto = "thin"

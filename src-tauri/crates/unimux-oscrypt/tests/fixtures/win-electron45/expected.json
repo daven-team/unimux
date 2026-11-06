@@ -1,0 +1,17 @@
+{
+ "electron": "45.2.2",
+ "chrome": "156.0.8078.80",
+ "ssh/vault.json": [
+  {
+   "passphrase": "key passphrase ł",
+   "privateKeyStartsWith": "-----BEGIN OPENSSH PRIVATE KEY-----"
+  },
+  "ssh-pass zażółć 🔑 \"quoted\" \\ end"
+ ],
+ "db/vault.json": [
+  "db-pass Ünïcode 数据库"
+ ],
+ "github/token.json": [
+  "gho_sp2SpikeThrowawayToken0123456789abcdef"
+ ]
+}
