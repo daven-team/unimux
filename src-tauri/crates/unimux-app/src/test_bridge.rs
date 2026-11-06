@@ -78,6 +78,21 @@ pub async fn test_bridge(
             "portPosts": ctx.port_posts.get().map(|q| q.lane_count()),
         })),
         "report" => Ok(serde_json::to_value(ctx.router().report()).unwrap_or(Value::Null)),
+        // Rust's wall clock (ms since the Unix epoch) for the page's clock offset (Channel latency, SP1).
+        "clock" => Ok(json!({ "now": crate::channel_bench::epoch_ms() })),
+        // Renderer startup marks with the window that sent them (a hidden window reaches renderer-boot, SP1).
+        "marks" => Ok(json!(
+            ctx.test_marks
+                .lock()
+                .iter()
+                .map(|(label, name, at)| json!({ "label": label, "name": name, "at": at }))
+                .collect::<Vec<_>>()
+        )),
+        // A second app window (SP1: same browser arguments on two windows; `browserArgs: "different"` shows the 0x8007139F
+        // failure a mismatch causes). W5 builds the real detached windows.
+        "openWindow" => crate::spike_windows::open_window(&ctx, &args).await,
+        // Minimize / hide / WebView2 IsVisible of a window and how it looks afterwards (SP1 background timers).
+        "window" => crate::spike_windows::window_op(&ctx, &args).await,
         _ => Err(fail(&format!("unknown op {op}"))),
     }
 }

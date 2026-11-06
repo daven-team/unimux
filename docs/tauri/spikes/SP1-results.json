@@ -1,0 +1,1478 @@
+{
+  "date": "2026-11-06T15:56:12.508Z",
+  "checks": [
+    {
+      "name": "IPC uses the custom protocol (http://ipc.localhost), not postMessage",
+      "ok": true,
+      "detail": "300 ipc.localhost fetches for 300 invokes, 0 postMessage calls; sample http://ipc.localhost/test_bridge, http://ipc.localhost/test_bridge, http://ipc.localhost/test_bridge"
+    },
+    {
+      "name": "CSP of tauri.conf.json is applied and enforced",
+      "ok": true,
+      "detail": "blocked: Failed to fetch; violations connect-src http://127.0.0.1:9/"
+    },
+    {
+      "name": "no CSP violation from the IPC itself",
+      "ok": true,
+      "detail": "connect-src http://127.0.0.1:9/"
+    },
+    {
+      "name": "a second window with the same browser args opens (no 0x8007139F)",
+      "ok": true,
+      "detail": "{\"ok\":true,\"label\":\"detached-sp1\",\"url\":\"index.html?sp1=hidden\",\"buildMs\":201.932}"
+    },
+    {
+      "name": "the hidden window reaches renderer-boot while never shown",
+      "ok": true,
+      "detail": "boot yes, {\"label\":\"detached-sp1\",\"visible\":false,\"minimized\":false,\"hwndVisible\":false,\"iconic\":false,\"controllerVisible\":true}"
+    },
+    {
+      "name": "the hidden window uses the custom protocol too",
+      "ok": true,
+      "detail": "113 ipc.localhost fetches, visibility visible"
+    },
+    {
+      "name": "a window with DIFFERENT browser args on the same data folder fails (the reason every webview uses the same string)",
+      "ok": true,
+      "detail": "{\"ok\":false,\"label\":\"detached-sp1bad\",\"error\":\"runtime error: failed to create webview: WebView2 error: WindowsError(Error { code: HRESULT(0x8007139F), message: \\\"Grupa lub zasób nie jest w odpowiednim stanie, aby można było wykonać żądaną operację.\\\" })\",\"buildMs\":15.546600000000002}"
+    },
+    {
+      "name": "the 400 ms status tick of TerminalManager is running (20 cells)",
+      "ok": true,
+      "detail": "{\"hasStatusTick\":true,\"statusTimer\":true,\"at\":5617.199999999255}"
+    },
+    {
+      "name": "window state during the phase: visible (shown)",
+      "ok": true,
+      "detail": "{\"label\":\"main\",\"visible\":true,\"minimized\":false,\"hwndVisible\":true,\"iconic\":false,\"controllerVisible\":true}"
+    },
+    {
+      "name": "400 ms timers keep running: visible",
+      "ok": true,
+      "detail": "plain 30/30 max gap 402 ms, tick 31 max gap 403 ms, visibility visible, window {\"label\":\"main\",\"visible\":true,\"minimized\":false,\"hwndVisible\":true,\"iconic\":false,\"controllerVisible\":true}"
+    },
+    {
+      "name": "window state during the phase: minimized (WM_SYSCOMMAND SC_MINIMIZE) (minimizedLikeAUser)",
+      "ok": true,
+      "detail": "{\"label\":\"main\",\"visible\":true,\"minimized\":true,\"hwndVisible\":true,\"iconic\":true,\"controllerVisible\":true}"
+    },
+    {
+      "name": "400 ms timers keep running: minimized (WM_SYSCOMMAND SC_MINIMIZE)",
+      "ok": true,
+      "detail": "plain 30/30 max gap 403 ms, tick 30 max gap 403 ms, visibility visible, window {\"label\":\"main\",\"visible\":true,\"minimized\":true,\"hwndVisible\":true,\"iconic\":true,\"controllerVisible\":true}"
+    },
+    {
+      "name": "window state during the phase: restored (shown)",
+      "ok": true,
+      "detail": "{\"label\":\"main\",\"visible\":true,\"minimized\":false,\"hwndVisible\":true,\"iconic\":false,\"controllerVisible\":true}"
+    },
+    {
+      "name": "400 ms timers keep running: restored",
+      "ok": true,
+      "detail": "plain 15/15 max gap 402 ms, tick 15 max gap 400 ms, visibility visible, window {\"label\":\"main\",\"visible\":true,\"minimized\":false,\"hwndVisible\":true,\"iconic\":false,\"controllerVisible\":true}"
+    },
+    {
+      "name": "window state during the phase: window hidden (ShowWindow SW_HIDE) (hiddenWindow)",
+      "ok": true,
+      "detail": "{\"label\":\"main\",\"visible\":false,\"minimized\":false,\"hwndVisible\":false,\"iconic\":false,\"controllerVisible\":true}"
+    },
+    {
+      "name": "400 ms timers keep running: window hidden (ShowWindow SW_HIDE)",
+      "ok": true,
+      "detail": "plain 30/30 max gap 404 ms, tick 30 max gap 403 ms, visibility visible, window {\"label\":\"main\",\"visible\":false,\"minimized\":false,\"hwndVisible\":false,\"iconic\":false,\"controllerVisible\":true}"
+    },
+    {
+      "name": "window state during the phase: WebView2 controller IsVisible(false) (shownWebviewInvisible)",
+      "ok": true,
+      "detail": "{\"label\":\"main\",\"visible\":true,\"minimized\":false,\"hwndVisible\":true,\"iconic\":false,\"controllerVisible\":false}"
+    },
+    {
+      "name": "window state during the phase: minimized + IsVisible(false) (minimizedWebviewInvisible)",
+      "ok": true,
+      "detail": "{\"label\":\"main\",\"visible\":true,\"minimized\":true,\"hwndVisible\":true,\"iconic\":true,\"controllerVisible\":false}"
+    },
+    {
+      "name": "window state during the phase: minimized 390 s (WM_SYSCOMMAND; intensive throttling starts after 5 min hidden) (minimizedLikeAUser)",
+      "ok": true,
+      "detail": "{\"label\":\"main\",\"visible\":true,\"minimized\":true,\"hwndVisible\":true,\"iconic\":true,\"controllerVisible\":true}"
+    },
+    {
+      "name": "400 ms timers keep running: minimized 390 s (WM_SYSCOMMAND; intensive throttling starts after 5 min hidden)",
+      "ok": true,
+      "detail": "plain 975/975 max gap 424 ms, tick 975 max gap 421 ms, visibility visible, window {\"label\":\"main\",\"visible\":true,\"minimized\":true,\"hwndVisible\":true,\"iconic\":true,\"controllerVisible\":true}"
+    },
+    {
+      "name": "window state during the phase: restored again (shown)",
+      "ok": true,
+      "detail": "{\"label\":\"main\",\"visible\":true,\"minimized\":false,\"hwndVisible\":true,\"iconic\":false,\"controllerVisible\":true}"
+    },
+    {
+      "name": "400 ms timers keep running: restored again",
+      "ok": true,
+      "detail": "plain 15/15 max gap 402 ms, tick 15 max gap 401 ms, visibility visible, window {\"label\":\"main\",\"visible\":true,\"minimized\":false,\"hwndVisible\":true,\"iconic\":false,\"controllerVisible\":true}"
+    },
+    {
+      "name": "400 ms timer keeps running: a window that was never shown",
+      "ok": true,
+      "detail": "plain 1176/1176 in 471 s, max gap 425 ms, rAF 112354, visibility visible, window {\"label\":\"detached-sp1\",\"visible\":false,\"minimized\":false,\"hwndVisible\":false,\"iconic\":false,\"controllerVisible\":true}"
+    },
+    {
+      "name": "20 xterm instances are on screen (5x4 grid)",
+      "ok": true,
+      "detail": "20"
+    },
+    {
+      "name": "substitute acceptance, transport only: WebView2 shared buffer (one UI-thread post in flight, no timer), 20 x 1 MB/s, p50 + clock bound < 2 ms at the full rate",
+      "ok": true,
+      "detail": "p50 0.313 ms (clock +-0.809 ms, drift 0.017 ms), p95 3.696 ms, p99 15.125 ms, 20 MB/s, 17612 messages for 19200 frames, fps 238.3"
+    },
+    {
+      "name": "every frame arrives, in order, no send error",
+      "ok": true,
+      "detail": "local:19200/19200/0 local:4800/4800/0 perFrame:19200/19200/0 batched:19200/19200/0 batched:19200/19200/0 pull:19200/19200/0 sharedBuffer:19200/19200/0 sharedBuffer:19200/19200/0 sharedBuffer:19200/19200/0 sharedBuffer:19200/19200/0 sharedBuffer:76800/76800/0 sharedBuffer:38400/38400/0 perFrame:4800/4800/0 batched:4800/4800/0 pull:4800/4800/0 sharedBuffer:4800/4800/0 sharedBuffer:19200/19200/0 perFrame:960/960/0 perFrame:19200/19200/0 pull:19200/19200/0 sharedBuffer:19200/19200/0"
+    },
+    {
+      "name": "real profile untouched",
+      "ok": true,
+      "detail": "C:\\Users\\azozo\\AppData\\Roaming\\unimux\\migrated-from.json 77 1792168511456"
+    }
+  ],
+  "numbers": {
+    "ipc": {
+      "ipc": 300,
+      "sample": [
+        "http://ipc.localhost/test_bridge",
+        "http://ipc.localhost/test_bridge",
+        "http://ipc.localhost/test_bridge"
+      ],
+      "total": 300,
+      "duringProbe": 300,
+      "postMessageCalls": 0,
+      "invokeRttMs": {
+        "n": 200,
+        "min": 1,
+        "p50": 2,
+        "p95": 3.1,
+        "p99": 11.8,
+        "max": 37.9,
+        "mean": 2.286
+      },
+      "loadStateRttMs": {
+        "n": 100,
+        "min": 1.2,
+        "p50": 1.7,
+        "p95": 2.5,
+        "p99": 2.8,
+        "max": 2.8,
+        "mean": 1.769
+      },
+      "cspHeader": "img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost; default-src 'self'; script-src 'self' 'sha256-0TjLchM+TdKl9s5x/7FvPVzv6SxKQH1Pb58PKH9KO5c=' 'sha256-0d8AKrAO2vCi4hSAMz9nX3TB+F+rWc66pPHmvtk5jxE=' 'sha256-2bAV9b8j+NubFfMcEsmHhNr5TaGK9048470vy9eR/DQ=' 'sha256-52GHndTqNExfSCyigtzEJKIrkV1fVzyBolEXUIJwUd4=' 'sha256-5EyGvqnwBgYpJl/vYnwfEl3NnaOu9uxqNaaQL4ZNNro=' 'sha256-5zvF14fVBJsXFbp3UzTuyY3jZleBaQEO46UNq/Hppdg=' 'sha256-6elHW1TSa0amXibXuqn2AdC8L5iYkGJ4Ipr5sOdpAfM=' 'sha256-6hMevxxl3MDQCuT4HWvr1bijPIgyRZatsUbSHov2L+g=' 'sha256-6xgLd7ChypIoGCislba5lKxYNGXOGqq16AfHLCsIZH0=' 'sha256-7F9ts3NL3VM7Y8Tf4qrO3dDTE7+zf9ziv49F0Hk/e90=' 'sha256-7d7dCJBEY6YEeToxooiEom/4XDZa6G0dN6Ys9Z3dkDY=' 'sha256-DLR2fxsSH8vN10/0oWQqYjxbAKK1O6kpMrElfDq3N9o=' 'sha256-DxHcBNAeJ8S0eM5S59BJExQ8eTM73wTcqw77cfzNEQM=' 'sha256-Ju2Fy/k3SfEh7REE2y0qW9628CbIJ2QqSmCG5Rf1Scg=' 'sha256-KxSHbI9pL8KWrTw1tYW0z2oNnGb0zBcUv0VRXCvlf5U=' 'sha256-Lo+AYc2C6o6l20eaVjYe0sic/qLLWab/FGVk8MUdMWA=' 'sha256-ML0ZKOzx1MwzOlnJIkxpLhhPX3/dBDirXQrPua8NjW4=' 'sha256-NCxGoWdRhZP3iFQqWG4GAUy79UX7XGw8I/ZAys8Xsb8=' 'sha256-Nm5xbLn46HpVl3Xfyg9J1axMvaSbTgljAUHrCwiFH0U=' 'sha256-O5VIiWNDQTwfID2+t7O6j45AmU+qBw2plahxVK0+pJE=' 'sha256-PZq5kni8dezGck109hTExEQSnm6GqLogzes0ZrZtpBg=' 'sha256-PnV1VJ/gBv5/BDEry7gKMnwZjjCT8L6oe8YKNyAeWlA=' 'sha256-SRx7DJvCvyfO1tD3q7CoHhFFqanaIuxRiwym2c0GBoc=' 'sha256-SmPVJnIvQtAMyNpE++JyHr1tDx9BHVTnFn7z4Bf5x10=' 'sha256-U57wpDNH6oddWjWLPWvkZlaqc58wefqtXsa7e8ITJSg=' 'sha256-U8Au61zUTk+bo9ImwBWI8JXtDQkc+CI5WUA6MiSPz+M=' 'sha256-UDnnXuC4YrYTxy83DTSQR0dF3AQTJ8R4SKGYXRCtwFk=' 'sha256-UfLu55ePMjZd8s3cYzuIxbGVznaqVsdiAhenRStqv1w=' 'sha256-VI0dvzIefSroBPzBWLWIcGp8UvjKF13hSQxsy02+Vbc=' 'sha256-WqjPMED6JyCWNITgXDAjl4N1P4yZkid8Dx50tdnA1FA=' 'sha256-Xpd8eN0e22l0ItG4f9KRkeunqYbB2xY7phuRdL9UE7o=' 'sha256-ZYTeLjLf2AiYSXxURv9YWxhmc/bik0+wKW2k3YaaKxY=' 'sha256-aEr3kHBYAVTOfsdkCq+eTLoeyrVVvSFWA19QabGD2K8=' 'sha256-erXFVn+0+ungXyAUsKvw2IxhSKhgxsUVEVjcDNZOweE=' 'sha256-fYtQCqQ6sRowSmI4c3paIYFhyo2Ezcfd1Ye3HxTAUfw=' 'sha256-gMo3kc77JH7Iz65kXfLc9oc9VTTGOcTNwCMTrmOcx7Y=' 'sha256-hqzyeyJmU/Hsri+d1WM0R73tUgixWzd/j5hNSnPbzsM=' 'sha256-k2QNik3+VFdPPfa0eN866Cnbl7I4223/y7Qa+sZeOvQ=' 'sha256-l1aJf5kxjiRzI93EvNNmHxwU6BlzbvLTrTW5zowJ2GA=' 'sha256-lQu0ytbVyamk0ursBGt20jDV2BedfEoc0xrnjYr5zpA=' 'sha256-n1xO+OX0vV7ORMeAYyO+VuuyOrmRchXzrqQaqBhGYrg=' 'sha256-p1xnIR5fjAkwjJYnQjYkgij7S87Yo7WwhMZOh/oTpZw=' 'sha256-pmRNYC3ZG0Lwn1NrCc9oiMHBV7RNDGMRkmWzgFYWihQ=' 'sha256-pthtfcRTUZGVVCa7bm5LbjKlfZwGycKzm8QblBFptjI=' 'sha256-qA95O9+QSymvwCM/Lc+Yo2txQdgPArK+YWZ8gfB+P8I=' 'sha256-vR0S6uoASNqD826Fpy+jY+oBN6oaT/J2WTI+7m7Ms7M=' 'sha256-x35oDVQhCXsZFKi8wEAZlrHovm3VIWXZo2jxIFDvTc4=' 'sha256-z72zc5W8Nje1iTgTvCF9WoLlVWsw90m1eLsp89CO5uw='",
+      "foreignFetch": "blocked: Failed to fetch",
+      "cspViolations": [
+        "connect-src http://127.0.0.1:9/"
+      ]
+    },
+    "hiddenWindow": {
+      "ipc": {
+        "ipc": 113,
+        "sample": [
+          "http://ipc.localhost/mc_port_attach",
+          "http://ipc.localhost/mc_port_attach",
+          "http://ipc.localhost/mc_port_attach"
+        ],
+        "total": 138
+      },
+      "visibility": "visible",
+      "state": {
+        "label": "detached-sp1",
+        "visible": false,
+        "minimized": false,
+        "hwndVisible": false,
+        "iconic": false,
+        "controllerVisible": true
+      },
+      "bootAt": 1793980580559.2205
+    },
+    "mismatchedArgs": {
+      "ok": false,
+      "label": "detached-sp1bad",
+      "error": "runtime error: failed to create webview: WebView2 error: WindowsError(Error { code: HRESULT(0x8007139F), message: \"Grupa lub zasób nie jest w odpowiednim stanie, aby można było wykonać żądaną operację.\" })",
+      "buildMs": 15.546600000000002
+    },
+    "timers": [
+      {
+        "phase": "visible",
+        "seconds": 12.033,
+        "expected": 30,
+        "plain": 30,
+        "plainMaxGapMs": 402,
+        "plainGaps": {
+          "n": 29,
+          "min": 398.5,
+          "p50": 400.1,
+          "p95": 401.1,
+          "p99": 401.6,
+          "max": 401.6,
+          "mean": 400.072
+        },
+        "tick": 31,
+        "tickMaxGapMs": 403,
+        "rafPerSec": 239.9,
+        "visibility": "visible",
+        "windowState": {
+          "label": "main",
+          "visible": true,
+          "minimized": false,
+          "hwndVisible": true,
+          "iconic": false,
+          "controllerVisible": true
+        },
+        "expectState": "shown",
+        "stateOk": true
+      },
+      {
+        "phase": "minimized (WM_SYSCOMMAND SC_MINIMIZE)",
+        "seconds": 12.055,
+        "expected": 30,
+        "plain": 30,
+        "plainMaxGapMs": 403,
+        "plainGaps": {
+          "n": 29,
+          "min": 396.2,
+          "p50": 400,
+          "p95": 403,
+          "p99": 403.1,
+          "max": 403.1,
+          "mean": 399.921
+        },
+        "tick": 30,
+        "tickMaxGapMs": 403,
+        "rafPerSec": 239.8,
+        "visibility": "visible",
+        "windowState": {
+          "label": "main",
+          "visible": true,
+          "minimized": true,
+          "hwndVisible": true,
+          "iconic": true,
+          "controllerVisible": true
+        },
+        "expectState": "minimizedLikeAUser",
+        "stateOk": true
+      },
+      {
+        "phase": "restored",
+        "seconds": 6.045,
+        "expected": 15,
+        "plain": 15,
+        "plainMaxGapMs": 402,
+        "plainGaps": {
+          "n": 14,
+          "min": 398.8,
+          "p50": 400.2,
+          "p95": 401.5,
+          "p99": 401.5,
+          "max": 401.5,
+          "mean": 400.086
+        },
+        "tick": 15,
+        "tickMaxGapMs": 400,
+        "rafPerSec": 239.4,
+        "visibility": "visible",
+        "windowState": {
+          "label": "main",
+          "visible": true,
+          "minimized": false,
+          "hwndVisible": true,
+          "iconic": false,
+          "controllerVisible": true
+        },
+        "expectState": "shown",
+        "stateOk": true
+      },
+      {
+        "phase": "window hidden (ShowWindow SW_HIDE)",
+        "seconds": 12.02,
+        "expected": 30,
+        "plain": 30,
+        "plainMaxGapMs": 404,
+        "plainGaps": {
+          "n": 29,
+          "min": 396.8,
+          "p50": 400,
+          "p95": 403.3,
+          "p99": 403.7,
+          "max": 403.7,
+          "mean": 399.952
+        },
+        "tick": 30,
+        "tickMaxGapMs": 403,
+        "rafPerSec": 239.9,
+        "visibility": "visible",
+        "windowState": {
+          "label": "main",
+          "visible": false,
+          "minimized": false,
+          "hwndVisible": false,
+          "iconic": false,
+          "controllerVisible": true
+        },
+        "expectState": "hiddenWindow",
+        "stateOk": true
+      },
+      {
+        "phase": "WebView2 controller IsVisible(false)",
+        "seconds": 12.521,
+        "expected": 31,
+        "plain": 16,
+        "plainMaxGapMs": 2776,
+        "plainGaps": {
+          "n": 15,
+          "min": 24.6,
+          "p50": 400,
+          "p95": 2776.4,
+          "p99": 2776.4,
+          "max": 2776.4,
+          "mean": 783.72
+        },
+        "tick": 14,
+        "tickMaxGapMs": 2806,
+        "rafPerSec": 0,
+        "visibility": "hidden",
+        "windowState": {
+          "label": "main",
+          "visible": true,
+          "minimized": false,
+          "hwndVisible": true,
+          "iconic": false,
+          "controllerVisible": false
+        },
+        "expectState": "shownWebviewInvisible",
+        "stateOk": true
+      },
+      {
+        "phase": "minimized + IsVisible(false)",
+        "seconds": 12.019,
+        "expected": 30,
+        "plain": 28,
+        "plainMaxGapMs": 720,
+        "plainGaps": {
+          "n": 27,
+          "min": 206.8,
+          "p50": 401.2,
+          "p95": 694.5,
+          "p99": 720.2,
+          "max": 720.2,
+          "mean": 438.17
+        },
+        "tick": 28,
+        "tickMaxGapMs": 849,
+        "rafPerSec": 0,
+        "visibility": "hidden",
+        "windowState": {
+          "label": "main",
+          "visible": true,
+          "minimized": true,
+          "hwndVisible": true,
+          "iconic": true,
+          "controllerVisible": false
+        },
+        "expectState": "minimizedWebviewInvisible",
+        "stateOk": true
+      },
+      {
+        "phase": "minimized 390 s (WM_SYSCOMMAND; intensive throttling starts after 5 min hidden)",
+        "seconds": 390.005,
+        "expected": 975,
+        "plain": 975,
+        "plainMaxGapMs": 424,
+        "plainGaps": {
+          "n": 974,
+          "min": 378.4,
+          "p50": 400,
+          "p95": 403,
+          "p99": 405.3,
+          "max": 423.5,
+          "mean": 400.001
+        },
+        "tick": 975,
+        "tickMaxGapMs": 421,
+        "rafPerSec": 238.6,
+        "visibility": "visible",
+        "windowState": {
+          "label": "main",
+          "visible": true,
+          "minimized": true,
+          "hwndVisible": true,
+          "iconic": true,
+          "controllerVisible": true
+        },
+        "expectState": "minimizedLikeAUser",
+        "stateOk": true
+      },
+      {
+        "phase": "restored again",
+        "seconds": 6.003,
+        "expected": 15,
+        "plain": 15,
+        "plainMaxGapMs": 402,
+        "plainGaps": {
+          "n": 14,
+          "min": 397.8,
+          "p50": 400.1,
+          "p95": 402,
+          "p99": 402,
+          "max": 402,
+          "mean": 400.071
+        },
+        "tick": 15,
+        "tickMaxGapMs": 401,
+        "rafPerSec": 239.9,
+        "visibility": "visible",
+        "windowState": {
+          "label": "main",
+          "visible": true,
+          "minimized": false,
+          "hwndVisible": true,
+          "iconic": false,
+          "controllerVisible": true
+        },
+        "expectState": "shown",
+        "stateOk": true
+      }
+    ],
+    "hiddenWindowTimer": {
+      "seconds": 470.746,
+      "plain": 1176,
+      "expected": 1176,
+      "maxGapMs": 425,
+      "raf": 112354,
+      "visibility": "visible",
+      "windowState": {
+        "label": "detached-sp1",
+        "visible": false,
+        "minimized": false,
+        "hwndVisible": false,
+        "iconic": false,
+        "controllerVisible": true
+      }
+    },
+    "clock": {
+      "offsetMs": -0.07763671875,
+      "bestRttMs": 1.10009765625,
+      "boundMs": 0.550048828125,
+      "note": "recalibrated before and after every bench, see channel[].clock"
+    },
+    "channel": [
+      {
+        "mode": "local",
+        "streams": 20,
+        "bytesPerSec": 1048576,
+        "chunk": 16384,
+        "sink": "xterm",
+        "seconds": 15,
+        "framesSent": 19200,
+        "framesReceived": 19200,
+        "messages": 19200,
+        "maxMessageBytes": 0,
+        "mbPerSecReceived": 20,
+        "drainedAfterMs": 26,
+        "arriveMs": {
+          "n": 19200,
+          "min": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0.1,
+          "mean": 0
+        },
+        "parsedMs": {
+          "n": 19200,
+          "min": 4.5,
+          "p50": 22.8,
+          "p95": 69.3,
+          "p99": 104.2,
+          "max": 141.9,
+          "mean": 27.376
+        },
+        "clock": {
+          "offsetBeforeMs": -0.094,
+          "offsetAfterMs": -0.132,
+          "driftMs": -0.037,
+          "boundMs": 0.55
+        },
+        "postStalls": 0,
+        "fps": 109.1,
+        "maxFrameGapMs": 110,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 0,
+        "senderAvgSendMs": 0,
+        "senderMaxLagMs": 0,
+        "sendErrors": 0,
+        "machineCpuPercent": 48
+      },
+      {
+        "mode": "local",
+        "streams": 20,
+        "bytesPerSec": 262144,
+        "chunk": 16384,
+        "sink": "xterm",
+        "seconds": 15,
+        "framesSent": 4800,
+        "framesReceived": 4800,
+        "messages": 4800,
+        "maxMessageBytes": 0,
+        "mbPerSecReceived": 5,
+        "drainedAfterMs": 21,
+        "arriveMs": {
+          "n": 4800,
+          "min": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0.2,
+          "mean": 0.001
+        },
+        "parsedMs": {
+          "n": 4800,
+          "min": 4.4,
+          "p50": 5.7,
+          "p95": 7.5,
+          "p99": 10,
+          "max": 26.8,
+          "mean": 5.901
+        },
+        "clock": {
+          "offsetBeforeMs": -0.067,
+          "offsetAfterMs": -0.078,
+          "driftMs": -0.011,
+          "boundMs": 0.55
+        },
+        "postStalls": 0,
+        "fps": 238.1,
+        "maxFrameGapMs": 13,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 0,
+        "senderAvgSendMs": 0,
+        "senderMaxLagMs": 0,
+        "sendErrors": 0,
+        "machineCpuPercent": 53
+      },
+      {
+        "mode": "perFrame",
+        "streams": 20,
+        "bytesPerSec": 1048576,
+        "chunk": 16384,
+        "sink": "none",
+        "seconds": 15,
+        "framesSent": 19200,
+        "framesReceived": 19200,
+        "messages": 19200,
+        "maxMessageBytes": 0,
+        "mbPerSecReceived": 20,
+        "drainedAfterMs": 77,
+        "arriveMs": {
+          "n": 19200,
+          "min": 1.52,
+          "p50": 2.743,
+          "p95": 129.001,
+          "p99": 190.617,
+          "max": 227.943,
+          "mean": 18.488
+        },
+        "parsedMs": {
+          "n": 0
+        },
+        "clock": {
+          "offsetBeforeMs": -0.088,
+          "offsetAfterMs": -0.03,
+          "driftMs": 0.058,
+          "boundMs": 0.579
+        },
+        "postStalls": 0,
+        "fps": 214,
+        "maxFrameGapMs": 84,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 2.925,
+        "senderAvgSendMs": 0.03,
+        "senderMaxLagMs": 0,
+        "sendErrors": 0,
+        "machineCpuPercent": 58
+      },
+      {
+        "mode": "batched",
+        "streams": 20,
+        "bytesPerSec": 1048576,
+        "chunk": 16384,
+        "sink": "none",
+        "flushMs": 0,
+        "seconds": 15,
+        "framesSent": 19200,
+        "framesReceived": 19200,
+        "messages": 19103,
+        "maxMessageBytes": 65552,
+        "mbPerSecReceived": 20,
+        "drainedAfterMs": 76,
+        "arriveMs": {
+          "n": 19200,
+          "min": 1.498,
+          "p50": 2.597,
+          "p95": 108.645,
+          "p99": 202.585,
+          "max": 267.739,
+          "mean": 16.081
+        },
+        "parsedMs": {
+          "n": 0
+        },
+        "clock": {
+          "offsetBeforeMs": -0.085,
+          "offsetAfterMs": -0.112,
+          "driftMs": -0.028,
+          "boundMs": 0.564
+        },
+        "postStalls": 0,
+        "fps": 218.1,
+        "maxFrameGapMs": 101,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 0.721,
+        "senderAvgSendMs": 0.009,
+        "senderMaxLagMs": 0,
+        "sendErrors": 0,
+        "machineCpuPercent": 46
+      },
+      {
+        "mode": "batched",
+        "streams": 20,
+        "bytesPerSec": 1048576,
+        "chunk": 16384,
+        "sink": "none",
+        "flushMs": 4,
+        "seconds": 15,
+        "framesSent": 19200,
+        "framesReceived": 19200,
+        "messages": 3484,
+        "maxMessageBytes": 163880,
+        "mbPerSecReceived": 20,
+        "drainedAfterMs": 30,
+        "arriveMs": {
+          "n": 19200,
+          "min": 2.006,
+          "p50": 5.137,
+          "p95": 8.349,
+          "p99": 154.579,
+          "max": 280.556,
+          "mean": 8.369
+        },
+        "parsedMs": {
+          "n": 0
+        },
+        "clock": {
+          "offsetBeforeMs": -0.041,
+          "offsetAfterMs": -0.16,
+          "driftMs": -0.119,
+          "boundMs": 0.66
+        },
+        "postStalls": 0,
+        "fps": 235.3,
+        "maxFrameGapMs": 101,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 0.291,
+        "senderAvgSendMs": 0.004,
+        "senderMaxLagMs": 0,
+        "sendErrors": 0,
+        "machineCpuPercent": 39
+      },
+      {
+        "mode": "pull",
+        "streams": 20,
+        "bytesPerSec": 1048576,
+        "chunk": 16384,
+        "sink": "none",
+        "seconds": 15,
+        "framesSent": 19200,
+        "framesReceived": 19200,
+        "messages": 5985,
+        "maxMessageBytes": 1065220,
+        "mbPerSecReceived": 20,
+        "drainedAfterMs": 33,
+        "arriveMs": {
+          "n": 19200,
+          "min": 0.753,
+          "p50": 2.837,
+          "p95": 8.577,
+          "p99": 15.546,
+          "max": 61.662,
+          "mean": 3.689
+        },
+        "parsedMs": {
+          "n": 0
+        },
+        "clock": {
+          "offsetBeforeMs": -0.125,
+          "offsetAfterMs": -0.143,
+          "driftMs": -0.018,
+          "boundMs": 0.959
+        },
+        "postStalls": 0,
+        "fps": 239.1,
+        "maxFrameGapMs": 28,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 4.655,
+        "senderAvgSendMs": 0.009,
+        "senderMaxLagMs": 16.1,
+        "sendErrors": 0,
+        "machineCpuPercent": 61
+      },
+      {
+        "mode": "sharedBuffer",
+        "streams": 20,
+        "bytesPerSec": 1048576,
+        "chunk": 16384,
+        "sink": "none",
+        "flushMs": 0,
+        "seconds": 15,
+        "framesSent": 19200,
+        "framesReceived": 19200,
+        "messages": 17612,
+        "maxMessageBytes": 1294652,
+        "mbPerSecReceived": 20,
+        "drainedAfterMs": 28,
+        "arriveMs": {
+          "n": 19200,
+          "min": 0.031,
+          "p50": 0.313,
+          "p95": 3.696,
+          "p99": 15.125,
+          "max": 61.632,
+          "mean": 1.062
+        },
+        "parsedMs": {
+          "n": 0
+        },
+        "clock": {
+          "offsetBeforeMs": -0.131,
+          "offsetAfterMs": -0.114,
+          "driftMs": 0.017,
+          "boundMs": 0.809
+        },
+        "postStalls": 0,
+        "fps": 238.3,
+        "maxFrameGapMs": 21,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 9.216,
+        "senderAvgSendMs": 0.021,
+        "senderMaxLagMs": 117,
+        "sendErrors": 0,
+        "machineCpuPercent": 70
+      },
+      {
+        "mode": "sharedBuffer",
+        "streams": 20,
+        "bytesPerSec": 1048576,
+        "chunk": 16384,
+        "sink": "none",
+        "flushMs": 1,
+        "seconds": 15,
+        "framesSent": 19200,
+        "framesReceived": 19200,
+        "messages": 9754,
+        "maxMessageBytes": 98328,
+        "mbPerSecReceived": 20,
+        "drainedAfterMs": 26,
+        "arriveMs": {
+          "n": 19200,
+          "min": 0.075,
+          "p50": 1.204,
+          "p95": 1.872,
+          "p99": 3.442,
+          "max": 12.428,
+          "mean": 1.217
+        },
+        "parsedMs": {
+          "n": 0
+        },
+        "clock": {
+          "offsetBeforeMs": -0.086,
+          "offsetAfterMs": -0.082,
+          "driftMs": 0.004,
+          "boundMs": 0.652
+        },
+        "postStalls": 0,
+        "fps": 239.8,
+        "maxFrameGapMs": 14,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 0.37,
+        "senderAvgSendMs": 0.004,
+        "senderMaxLagMs": 0,
+        "sendErrors": 0,
+        "machineCpuPercent": 34
+      },
+      {
+        "mode": "sharedBuffer",
+        "streams": 20,
+        "bytesPerSec": 1048576,
+        "chunk": 16384,
+        "sink": "none",
+        "flushMs": 2,
+        "seconds": 15,
+        "framesSent": 19200,
+        "framesReceived": 19200,
+        "messages": 5904,
+        "maxMessageBytes": 114716,
+        "mbPerSecReceived": 20,
+        "drainedAfterMs": 27,
+        "arriveMs": {
+          "n": 19200,
+          "min": 0.006,
+          "p50": 1.676,
+          "p95": 2.826,
+          "p99": 3.539,
+          "max": 10.976,
+          "mean": 1.711
+        },
+        "parsedMs": {
+          "n": 0
+        },
+        "clock": {
+          "offsetBeforeMs": -0.105,
+          "offsetAfterMs": -0.201,
+          "driftMs": -0.097,
+          "boundMs": 0.698
+        },
+        "postStalls": 0,
+        "fps": 239.8,
+        "maxFrameGapMs": 15,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 0.358,
+        "senderAvgSendMs": 0.004,
+        "senderMaxLagMs": 0,
+        "sendErrors": 0,
+        "machineCpuPercent": 27
+      },
+      {
+        "mode": "sharedBuffer",
+        "streams": 20,
+        "bytesPerSec": 1048576,
+        "chunk": 16384,
+        "sink": "none",
+        "flushMs": 4,
+        "seconds": 15,
+        "framesSent": 19200,
+        "framesReceived": 19200,
+        "messages": 3263,
+        "maxMessageBytes": 229432,
+        "mbPerSecReceived": 20,
+        "drainedAfterMs": 30,
+        "arriveMs": {
+          "n": 19200,
+          "min": 0.143,
+          "p50": 2.92,
+          "p95": 5.022,
+          "p99": 5.601,
+          "max": 15.469,
+          "mean": 2.944
+        },
+        "parsedMs": {
+          "n": 0
+        },
+        "clock": {
+          "offsetBeforeMs": -0.108,
+          "offsetAfterMs": -0.108,
+          "driftMs": 0,
+          "boundMs": 0.55
+        },
+        "postStalls": 0,
+        "fps": 239.9,
+        "maxFrameGapMs": 14,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 2.703,
+        "senderAvgSendMs": 0.005,
+        "senderMaxLagMs": 0,
+        "sendErrors": 0,
+        "machineCpuPercent": 42
+      },
+      {
+        "mode": "sharedBuffer",
+        "streams": 20,
+        "bytesPerSec": 1048576,
+        "chunk": 4096,
+        "sink": "none",
+        "flushMs": 0,
+        "seconds": 15,
+        "framesSent": 76800,
+        "framesReceived": 76800,
+        "messages": 38172,
+        "maxMessageBytes": 319800,
+        "mbPerSecReceived": 20,
+        "drainedAfterMs": 25,
+        "arriveMs": {
+          "n": 76800,
+          "min": 0.081,
+          "p50": 0.429,
+          "p95": 1.633,
+          "p99": 7.142,
+          "max": 19.647,
+          "mean": 0.7
+        },
+        "parsedMs": {
+          "n": 0
+        },
+        "clock": {
+          "offsetBeforeMs": -0.105,
+          "offsetAfterMs": -0.01,
+          "driftMs": 0.095,
+          "boundMs": 0.748
+        },
+        "postStalls": 0,
+        "fps": 239,
+        "maxFrameGapMs": 21,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 0.91,
+        "senderAvgSendMs": 0.009,
+        "senderMaxLagMs": 11.8,
+        "sendErrors": 0,
+        "machineCpuPercent": 66
+      },
+      {
+        "mode": "sharedBuffer",
+        "streams": 20,
+        "bytesPerSec": 2097152,
+        "chunk": 16384,
+        "sink": "none",
+        "flushMs": 0,
+        "seconds": 15,
+        "framesSent": 38400,
+        "framesReceived": 38400,
+        "messages": 24433,
+        "maxMessageBytes": 7325436,
+        "mbPerSecReceived": 40,
+        "drainedAfterMs": 136,
+        "arriveMs": {
+          "n": 38400,
+          "min": 0.071,
+          "p50": 0.588,
+          "p95": 50.892,
+          "p99": 131.088,
+          "max": 232.417,
+          "mean": 8.506
+        },
+        "parsedMs": {
+          "n": 0
+        },
+        "clock": {
+          "offsetBeforeMs": -0.105,
+          "offsetAfterMs": -0.064,
+          "driftMs": 0.041,
+          "boundMs": 1.071
+        },
+        "postStalls": 0,
+        "fps": 233.7,
+        "maxFrameGapMs": 68,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 72.781,
+        "senderAvgSendMs": 0.108,
+        "senderMaxLagMs": 82.9,
+        "sendErrors": 0,
+        "machineCpuPercent": 79
+      },
+      {
+        "mode": "perFrame",
+        "streams": 20,
+        "bytesPerSec": 262144,
+        "chunk": 16384,
+        "sink": "xterm",
+        "seconds": 15,
+        "framesSent": 4800,
+        "framesReceived": 4800,
+        "messages": 4800,
+        "maxMessageBytes": 0,
+        "mbPerSecReceived": 5,
+        "drainedAfterMs": 405,
+        "arriveMs": {
+          "n": 4800,
+          "min": 18.51,
+          "p50": 568.915,
+          "p95": 1142.399,
+          "p99": 1249.57,
+          "max": 1293.342,
+          "mean": 592.591
+        },
+        "parsedMs": {
+          "n": 4800,
+          "min": 23.11,
+          "p50": 600.089,
+          "p95": 1162.78,
+          "p99": 1282.111,
+          "max": 1341.29,
+          "mean": 621.931
+        },
+        "clock": {
+          "offsetBeforeMs": -0.127,
+          "offsetAfterMs": -0.052,
+          "driftMs": 0.075,
+          "boundMs": 1.237
+        },
+        "postStalls": 0,
+        "fps": 107,
+        "maxFrameGapMs": 114,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 53.796,
+        "senderAvgSendMs": 0.621,
+        "senderMaxLagMs": 99.4,
+        "sendErrors": 0,
+        "machineCpuPercent": 100
+      },
+      {
+        "mode": "batched",
+        "streams": 20,
+        "bytesPerSec": 262144,
+        "chunk": 16384,
+        "sink": "xterm",
+        "flushMs": 4,
+        "seconds": 15,
+        "framesSent": 4800,
+        "framesReceived": 4800,
+        "messages": 3387,
+        "maxMessageBytes": 98328,
+        "mbPerSecReceived": 5,
+        "drainedAfterMs": 31,
+        "arriveMs": {
+          "n": 4800,
+          "min": 2.158,
+          "p50": 30.124,
+          "p95": 61.773,
+          "p99": 119.316,
+          "max": 219.421,
+          "mean": 31.582
+        },
+        "parsedMs": {
+          "n": 4800,
+          "min": 3.358,
+          "p50": 36.094,
+          "p95": 70.709,
+          "p99": 158.323,
+          "max": 234.621,
+          "mean": 37.694
+        },
+        "clock": {
+          "offsetBeforeMs": 0.079,
+          "offsetAfterMs": -0.097,
+          "driftMs": -0.175,
+          "boundMs": 1.338
+        },
+        "postStalls": 0,
+        "fps": 169.4,
+        "maxFrameGapMs": 103,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 1.544,
+        "senderAvgSendMs": 0.008,
+        "senderMaxLagMs": 0,
+        "sendErrors": 0,
+        "machineCpuPercent": 79
+      },
+      {
+        "mode": "pull",
+        "streams": 20,
+        "bytesPerSec": 262144,
+        "chunk": 16384,
+        "sink": "xterm",
+        "seconds": 15,
+        "framesSent": 4800,
+        "framesReceived": 4800,
+        "messages": 3692,
+        "maxMessageBytes": 114716,
+        "mbPerSecReceived": 5,
+        "drainedAfterMs": 35,
+        "arriveMs": {
+          "n": 4800,
+          "min": 0.676,
+          "p50": 4.801,
+          "p95": 8.426,
+          "p99": 11.331,
+          "max": 28.944,
+          "mean": 4.911
+        },
+        "parsedMs": {
+          "n": 4800,
+          "min": 1.548,
+          "p50": 6.035,
+          "p95": 9.736,
+          "p99": 12.664,
+          "max": 30.144,
+          "mean": 6.159
+        },
+        "clock": {
+          "offsetBeforeMs": -0.098,
+          "offsetAfterMs": -0.075,
+          "driftMs": 0.023,
+          "boundMs": 0.812
+        },
+        "postStalls": 0,
+        "fps": 239.8,
+        "maxFrameGapMs": 10,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 0.639,
+        "senderAvgSendMs": 0.007,
+        "senderMaxLagMs": 0,
+        "sendErrors": 0,
+        "machineCpuPercent": 61
+      },
+      {
+        "mode": "sharedBuffer",
+        "streams": 20,
+        "bytesPerSec": 262144,
+        "chunk": 16384,
+        "sink": "xterm",
+        "flushMs": 0,
+        "seconds": 15,
+        "framesSent": 4800,
+        "framesReceived": 4800,
+        "messages": 4793,
+        "maxMessageBytes": 49164,
+        "mbPerSecReceived": 5,
+        "drainedAfterMs": 55,
+        "arriveMs": {
+          "n": 4800,
+          "min": 0.135,
+          "p50": 1.778,
+          "p95": 11.374,
+          "p99": 26.29,
+          "max": 127.319,
+          "mean": 3.631
+        },
+        "parsedMs": {
+          "n": 4800,
+          "min": 0.58,
+          "p50": 2.744,
+          "p95": 21.103,
+          "p99": 48.525,
+          "max": 134.519,
+          "mean": 5.87
+        },
+        "clock": {
+          "offsetBeforeMs": -0.121,
+          "offsetAfterMs": -0.07,
+          "driftMs": 0.051,
+          "boundMs": 0.975
+        },
+        "postStalls": 0,
+        "fps": 228.1,
+        "maxFrameGapMs": 70,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 6.503,
+        "senderAvgSendMs": 0.018,
+        "senderMaxLagMs": 0,
+        "sendErrors": 0,
+        "machineCpuPercent": 64
+      },
+      {
+        "mode": "sharedBuffer",
+        "streams": 20,
+        "bytesPerSec": 262144,
+        "chunk": 4096,
+        "sink": "xterm",
+        "flushMs": 0,
+        "seconds": 15,
+        "framesSent": 19200,
+        "framesReceived": 19200,
+        "messages": 17237,
+        "maxMessageBytes": 225500,
+        "mbPerSecReceived": 5,
+        "drainedAfterMs": 53,
+        "arriveMs": {
+          "n": 19200,
+          "min": 0.159,
+          "p50": 11.353,
+          "p95": 24.656,
+          "p99": 42.286,
+          "max": 67.541,
+          "mean": 12.792
+        },
+        "parsedMs": {
+          "n": 19200,
+          "min": 0.637,
+          "p50": 19.956,
+          "p95": 38.529,
+          "p99": 61.931,
+          "max": 113.784,
+          "mean": 21.988
+        },
+        "clock": {
+          "offsetBeforeMs": -0.122,
+          "offsetAfterMs": -0.081,
+          "driftMs": 0.041,
+          "boundMs": 0.92
+        },
+        "postStalls": 0,
+        "fps": 121.7,
+        "maxFrameGapMs": 52,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 37.399,
+        "senderAvgSendMs": 0.06,
+        "senderMaxLagMs": 107.2,
+        "sendErrors": 0,
+        "machineCpuPercent": 88
+      },
+      {
+        "mode": "perFrame",
+        "streams": 1,
+        "bytesPerSec": 1048576,
+        "chunk": 16384,
+        "sink": "xterm",
+        "seconds": 15,
+        "framesSent": 960,
+        "framesReceived": 960,
+        "messages": 960,
+        "maxMessageBytes": 0,
+        "mbPerSecReceived": 1,
+        "drainedAfterMs": 60,
+        "arriveMs": {
+          "n": 960,
+          "min": 1.78,
+          "p50": 2.573,
+          "p95": 3.672,
+          "p99": 4.565,
+          "max": 6.031,
+          "mean": 2.681
+        },
+        "parsedMs": {
+          "n": 960,
+          "min": 2.179,
+          "p50": 3.162,
+          "p95": 4.47,
+          "p99": 5.438,
+          "max": 6.832,
+          "mean": 3.271
+        },
+        "clock": {
+          "offsetBeforeMs": -0.128,
+          "offsetAfterMs": -0.091,
+          "driftMs": 0.037,
+          "boundMs": 0.668
+        },
+        "postStalls": 0,
+        "fps": 239.8,
+        "maxFrameGapMs": 16,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 0.42,
+        "senderAvgSendMs": 0.046,
+        "senderMaxLagMs": 0,
+        "sendErrors": 0,
+        "machineCpuPercent": 42
+      },
+      {
+        "mode": "perFrame",
+        "streams": 20,
+        "bytesPerSec": 1048576,
+        "chunk": 16384,
+        "sink": "xterm",
+        "seconds": 15,
+        "framesSent": 19200,
+        "framesReceived": 19200,
+        "messages": 19200,
+        "maxMessageBytes": 0,
+        "mbPerSecReceived": 20,
+        "drainedAfterMs": 3415,
+        "arriveMs": {
+          "n": 19200,
+          "min": 5.077,
+          "p50": 4168.554,
+          "p95": 5275.718,
+          "p99": 5543.427,
+          "max": 5685.303,
+          "mean": 3782.727
+        },
+        "parsedMs": {
+          "n": 9993,
+          "min": 6.577,
+          "p50": 5889.02,
+          "p95": 11520.381,
+          "p99": 11861.09,
+          "max": 12117.542,
+          "mean": 6223.726
+        },
+        "clock": {
+          "offsetBeforeMs": -0.14,
+          "offsetAfterMs": -0.114,
+          "driftMs": 0.026,
+          "boundMs": 0.663
+        },
+        "postStalls": 0,
+        "fps": 10.5,
+        "maxFrameGapMs": 132,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 12.207,
+        "senderAvgSendMs": 0.048,
+        "senderMaxLagMs": 0,
+        "sendErrors": 0,
+        "machineCpuPercent": 55
+      },
+      {
+        "mode": "pull",
+        "streams": 20,
+        "bytesPerSec": 1048576,
+        "chunk": 16384,
+        "sink": "xterm",
+        "seconds": 15,
+        "framesSent": 19200,
+        "framesReceived": 19200,
+        "messages": 931,
+        "maxMessageBytes": 950504,
+        "mbPerSecReceived": 20,
+        "drainedAfterMs": 41,
+        "arriveMs": {
+          "n": 19200,
+          "min": 2.198,
+          "p50": 26.609,
+          "p95": 54.755,
+          "p99": 67.828,
+          "max": 85.081,
+          "mean": 28.607
+        },
+        "parsedMs": {
+          "n": 19200,
+          "min": 3.298,
+          "p50": 34.048,
+          "p95": 68.88,
+          "p99": 84.692,
+          "max": 105.975,
+          "mean": 36.59
+        },
+        "clock": {
+          "offsetBeforeMs": -0.11,
+          "offsetAfterMs": -0.086,
+          "driftMs": 0.024,
+          "boundMs": 0.612
+        },
+        "postStalls": 0,
+        "fps": 132.9,
+        "maxFrameGapMs": 42,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 1.916,
+        "senderAvgSendMs": 0.008,
+        "senderMaxLagMs": 0,
+        "sendErrors": 0,
+        "machineCpuPercent": 36
+      },
+      {
+        "mode": "sharedBuffer",
+        "streams": 20,
+        "bytesPerSec": 1048576,
+        "chunk": 16384,
+        "sink": "xterm",
+        "flushMs": 0,
+        "seconds": 15,
+        "framesSent": 19200,
+        "framesReceived": 19200,
+        "messages": 18369,
+        "maxMessageBytes": 393312,
+        "mbPerSecReceived": 20,
+        "drainedAfterMs": 874,
+        "arriveMs": {
+          "n": 19200,
+          "min": 0.4,
+          "p50": 38.878,
+          "p95": 302.099,
+          "p99": 351.247,
+          "max": 369.25,
+          "mean": 76.883
+        },
+        "parsedMs": {
+          "n": 19200,
+          "min": 0.9,
+          "p50": 63.949,
+          "p95": 643.05,
+          "p99": 976.236,
+          "max": 1261.379,
+          "mean": 140.952
+        },
+        "clock": {
+          "offsetBeforeMs": -0.129,
+          "offsetAfterMs": -0.052,
+          "driftMs": 0.077,
+          "boundMs": 0.739
+        },
+        "postStalls": 0,
+        "fps": 36.4,
+        "maxFrameGapMs": 121,
+        "longTasks": 0,
+        "longTaskMs": 0,
+        "outOfOrder": 0,
+        "senderMaxSendMs": 32.223,
+        "senderAvgSendMs": 0.02,
+        "senderMaxLagMs": 34,
+        "sendErrors": 0,
+        "machineCpuPercent": 70
+      }
+    ],
+    "planAcceptanceAsWritten": [
+      {
+        "mode": "perFrame",
+        "arriveP50": 4168.554,
+        "parsedP50": 5889.02,
+        "fps": 10.5,
+        "met": false
+      },
+      {
+        "mode": "sharedBuffer",
+        "arriveP50": 38.878,
+        "parsedP50": 63.949,
+        "fps": 36.4,
+        "met": false
+      },
+      {
+        "mode": "pull",
+        "arriveP50": 26.609,
+        "parsedP50": 34.048,
+        "fps": 132.9,
+        "met": false
+      }
+    ],
+    "paths": {
+      "dataDir": "C:\\Users\\azozo\\AppData\\Local\\Temp\\unimux-sp1-K7uYFb\\data",
+      "crashLog": "C:\\Users\\azozo\\AppData\\Local\\Temp\\unimux-sp1-K7uYFb\\data\\crash.log",
+      "startupLog": "C:\\Users\\azozo\\AppData\\Local\\Temp\\unimux-sp1-K7uYFb\\data\\startup.log"
+    }
+  }
+}

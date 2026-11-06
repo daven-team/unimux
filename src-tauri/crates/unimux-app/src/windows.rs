@@ -126,7 +126,7 @@ pub fn show_main(ctx: &AppContext) {
 }
 
 #[cfg(windows)]
-fn show_without_focus(window: &WebviewWindow) {
+pub(crate) fn show_without_focus(window: &WebviewWindow) {
     use windows::Win32::UI::WindowsAndMessaging::{SW_SHOWNOACTIVATE, ShowWindow};
     if let Ok(hwnd) = window.hwnd() {
         // SAFETY: the window's own handle; SW_SHOWNOACTIVATE never activates it.
@@ -137,7 +137,7 @@ fn show_without_focus(window: &WebviewWindow) {
 }
 
 #[cfg(not(windows))]
-fn show_without_focus(window: &WebviewWindow) {
+pub(crate) fn show_without_focus(window: &WebviewWindow) {
     let _ = window.show();
 }
 
@@ -186,7 +186,7 @@ fn watch_window_state(window: &WebviewWindow, ctx: Arc<AppContext>) {
 /// WebView2 settings of 1.1.4's BrowserWindow: no default context menu, no browser accelerators (Ctrl+R/F5/P/F reach the
 /// app), no zoom (Ctrl+wheel), non-client regions for the W1 caption buttons.
 #[cfg(windows)]
-fn apply_webview_settings(window: &WebviewWindow) {
+pub(crate) fn apply_webview_settings(window: &WebviewWindow) {
     use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2Settings3, ICoreWebView2Settings9};
     use windows::core::Interface;
     let _ = window.with_webview(|webview| {
@@ -211,7 +211,7 @@ fn apply_webview_settings(window: &WebviewWindow) {
 }
 
 #[cfg(not(windows))]
-fn apply_webview_settings(_window: &WebviewWindow) {}
+pub(crate) fn apply_webview_settings(_window: &WebviewWindow) {}
 
 #[cfg(test)]
 mod tests {
