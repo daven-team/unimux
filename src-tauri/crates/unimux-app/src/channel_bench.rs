@@ -13,7 +13,8 @@
 //! - `pull`: the same queue, drained by the page with `test_channel_pull` (a raw invoke answered as soon as data is queued,
 //!   or after 100 ms empty): one request in flight, no eval.
 //! - `sharedBuffer` (Windows): the flusher writes the queue into a WebView2 shared buffer and posts it with
-//!   `ICoreWebView2_17::PostSharedBufferToScript` (the page gets `sharedbufferreceived`), no eval, no fetch.
+//!   `ICoreWebView2_17::PostSharedBufferToScript` (the page gets `sharedbufferreceived`), no eval, no fetch. One closure
+//!   in flight on the UI thread; no backpressure from the renderer (see `post_shared_buffer`).
 //!
 //! The command answers when every stream has ended and the queue is drained, with the sender-side numbers.
 
@@ -130,6 +131,8 @@ struct Hub {
     producers_done: AtomicBool,
     messages: AtomicU64,
     max_message: AtomicU64,
+    /// sharedBuffer: posts whose UI-thread closure took longer than 2 s (still awaited, not counted as errors).
+    post_stalls: AtomicU64,
 }
 
 impl Hub {
@@ -231,14 +234,23 @@ fn flusher(hub: Arc<Hub>, flush: Duration, send: Box<dyn Fn(Vec<u8>) -> bool + S
     errors
 }
 
+/// Posts one batch as a WebView2 shared buffer and waits until the UI thread has called `PostSharedBufferToScript`.
+///
+/// What "one post in flight" covers: the flusher does not queue a second closure on the UI thread while one is pending,
+/// so a busy UI thread makes the next batch bigger. It does NOT cover the renderer: `PostSharedBufferToScript` returns
+/// before the page handled the buffer, so when the page is the bottleneck the posts (each its own shared-memory section
+/// until `releaseBuffer`) queue in the renderer with about one frame each (SP1: 287 ms arrive p50 into 20 xterm at
+/// 20 x 1 MB/s). The production sender (P2) must bound that with the FlowGate byte acks or a page-side release ack.
+///
+/// A UI thread that takes longer than 2 s is waited for (counted in `post_stalls`), never answered with a second post:
+/// giving up would leave the first closure queued and post the next batch while it is still pending. Only a dropped
+/// closure (the window is gone) or a failed COM call returns false, and that batch is lost.
 #[cfg(windows)]
-fn post_shared_buffer(webview: &Webview, bytes: Vec<u8>) -> bool {
+fn post_shared_buffer(webview: &Webview, hub: &Hub, bytes: Vec<u8>) -> bool {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_SHARED_BUFFER_ACCESS_READ_ONLY, ICoreWebView2_17, ICoreWebView2Environment12,
     };
     use windows::core::{Interface, w};
-    // One post in flight: the flusher waits until the UI thread has posted this one, so a busy UI thread makes the next
-    // batch bigger instead of letting posts pile up in the event loop.
     let (tx, rx) = std::sync::mpsc::channel::<bool>();
     let queued = webview
         .with_webview(move |platform| {
@@ -261,11 +273,30 @@ fn post_shared_buffer(webview: &Webview, bytes: Vec<u8>) -> bool {
             let _ = tx.send(posted.is_ok());
         })
         .is_ok();
-    queued && rx.recv_timeout(Duration::from_secs(2)).unwrap_or(false)
+    if !queued {
+        return false;
+    }
+    await_post(&rx, hub, Duration::from_secs(2))
+}
+
+/// Waits for the UI-thread closure's answer however long it takes; every `stall` without one counts once in
+/// `hub.post_stalls`. False when the closure was dropped without answering or answered with a failure.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn await_post(rx: &std::sync::mpsc::Receiver<bool>, hub: &Hub, stall: Duration) -> bool {
+    use std::sync::mpsc::RecvTimeoutError;
+    loop {
+        match rx.recv_timeout(stall) {
+            Ok(posted) => return posted,
+            Err(RecvTimeoutError::Timeout) => {
+                hub.post_stalls.fetch_add(1, Ordering::Relaxed);
+            }
+            Err(RecvTimeoutError::Disconnected) => return false,
+        }
+    }
 }
 
 #[cfg(not(windows))]
-fn post_shared_buffer(_webview: &Webview, _bytes: Vec<u8>) -> bool {
+fn post_shared_buffer(_webview: &Webview, _hub: &Hub, _bytes: Vec<u8>) -> bool {
     false
 }
 
@@ -283,7 +314,8 @@ fn run(plan: Plan, channel: Channel<InvokeResponseBody>, webview: Webview) -> Va
         }
         Mode::SharedBuffer => {
             let (h, w) = (hub.clone(), webview.clone());
-            Some(std::thread::spawn(move || flusher(h, plan.flush, Box::new(move |b| post_shared_buffer(&w, b)))))
+            let posting = h.clone();
+            Some(std::thread::spawn(move || flusher(h, plan.flush, Box::new(move |b| post_shared_buffer(&w, &posting, b)))))
         }
         Mode::PerFrame | Mode::Pull => None,
     };
@@ -334,6 +366,7 @@ fn run(plan: Plan, channel: Channel<InvokeResponseBody>, webview: Webview) -> Va
         "maxLagMs": stats.iter().map(|s| ms(s.max_lag)).fold(0.0, f64::max),
         "messages": if plan.mode == Mode::PerFrame { frames } else { hub.messages.load(Ordering::Relaxed) },
         "maxMessageBytes": hub.max_message.load(Ordering::Relaxed),
+        "postStalls": hub.post_stalls.load(Ordering::Relaxed),
     })
 }
 
@@ -406,6 +439,23 @@ mod tests {
         let t = Instant::now();
         assert!(hub.take(Duration::from_secs(5)).is_empty());
         assert!(t.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_slow_post_is_waited_for_and_counted_not_failed() {
+        let hub = Hub::default();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let late = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(120));
+            tx.send(true).unwrap();
+        });
+        assert!(await_post(&rx, &hub, Duration::from_millis(25)));
+        late.join().unwrap();
+        assert!(hub.post_stalls.load(Ordering::Relaxed) >= 2);
+        // A dropped closure (window gone) is a failure, not a hang.
+        let (tx, rx) = std::sync::mpsc::channel::<bool>();
+        drop(tx);
+        assert!(!await_post(&rx, &hub, Duration::from_millis(25)));
     }
 
     #[test]

@@ -100,11 +100,10 @@ impl WindowGuard {
     pub fn new(app_origins: Vec<String>) -> Self {
         Self { app_origins, detached: RwLock::new(HashSet::new()) }
     }
-    /// A detached window was created by the app (W5 calls this; its label is `detached-<uuid>`).
-    pub fn register_detached(&self, label: &str) {
-        if label.starts_with("detached-") {
-            self.detached.write().insert(label.to_string());
-        }
+    /// A detached window was created by the app (W5 calls this; its label is `detached-<uuid>`). True when the label was
+    /// not registered before: a caller that undoes a failed window build must only forget a label it registered itself.
+    pub fn register_detached(&self, label: &str) -> bool {
+        label.starts_with("detached-") && self.detached.write().insert(label.to_string())
     }
     pub fn forget_detached(&self, label: &str) {
         self.detached.write().remove(label);
@@ -164,8 +163,9 @@ mod tests {
     #[test]
     fn a_registered_detached_window_is_allowed_until_forgotten() {
         let g = guard();
-        g.register_detached("detached-abc");
-        g.register_detached("main-imposter");
+        assert!(g.register_detached("detached-abc"));
+        assert!(!g.register_detached("detached-abc"), "a second registration is not new");
+        assert!(!g.register_detached("main-imposter"));
         assert!(g.allowed(&Caller::new("detached-abc", "http://tauri.localhost/index.html?detached=abc")));
         assert!(!g.allowed(&Caller::new("main-imposter", "http://tauri.localhost/index.html")));
         g.forget_detached("detached-abc");

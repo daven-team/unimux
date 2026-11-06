@@ -6,8 +6,11 @@
 //   3. Tauri IPC goes through the custom protocol (http://ipc.localhost on WebView2) under the CSP of tauri.conf.json, not
 //      the postMessage fallback; the CSP is active (a foreign fetch is blocked).
 //   4. The 400 ms status tick of TerminalManager (and a plain 400 ms setInterval) keeps running while the window is
-//      minimized, hidden, or its WebView2 controller is IsVisible(false).
-//   5. Raw binary Channel frames (InvokeResponseBody::Raw) into 20 xterm instances at 1 MB/s each: latency p50/p95/p99, fps.
+//      minimized like a user does it (WM_SYSCOMMAND, WS_VISIBLE + iconic), hidden, never shown, or its WebView2 controller
+//      is IsVisible(false) (informational); every phase is gated on the window state it read back.
+//   5. Rust -> page binary data at 20 x 1 MB/s: tauri Channel (per frame, batched), pull, WebView2 shared buffer, transport
+//      only and into the 20 xterm instances: latency p50/p95/p99 (clock recalibrated around every bench), fps. Gate: the
+//      substitute acceptance (shared buffer, transport only); the PLAN wording (into xterm) is reported as INFO.
 //
 //   npm run build:check && node scripts/spike-sp1.mjs [--long] [--keep] [--phase-seconds=N] [--bench-seconds=N]
 //
@@ -77,7 +80,7 @@ const timerInstall = `(() => {
   }
   setInterval(() => { rec.plain.push(performance.now()); rec.vis.push(document.visibilityState); }, 400);
   const raf = () => { rec.raf++; requestAnimationFrame(raf); }; requestAnimationFrame(raf);
-  return { hasStatusTick: !!t?.__sp1, statusTimer: !!t?.statusTimer };
+  return { hasStatusTick: !!t?.__sp1, statusTimer: !!t?.statusTimer, at: performance.now() };
 })()`;
 
 const timerSnapshot = `(() => { const r = window.__sp1Timers; return { now: performance.now(), tick: r.tick.length, plain: r.plain.length, raf: r.raf }; })()`;
@@ -232,22 +235,45 @@ function benchScript({ streams, bytesPerSec, chunk, seconds, sink, mode, flushMs
 const cpuSample = () => cpus().reduce((a, c) => { const t = Object.values(c.times).reduce((x, y) => x + y, 0); return { idle: a.idle + c.times.idle, total: a.total + t }; }, { idle: 0, total: 0 });
 const cpuBusy = (a, b) => Math.round((1 - (b.idle - a.idle) / (b.total - a.total)) * 100);
 
-async function bench(page, offset, cfg) {
+/**
+ * Offset of the Rust clock (SystemTime, ms since the epoch) against the page clock (timeOrigin + performance.now()), as the
+ * midpoint of the fastest of 80 round trips. Its error bound is half that round trip (the reply can be stamped anywhere
+ * inside it), not the spread of the best samples. The wall clock drifts against the monotonic one (about 0.3 ms in 2 to 3
+ * minutes on the dev box), so every bench calibrates right before and right after itself.
+ */
+async function calibrate(page) {
+  const cal = [];
+  for (let i = 0; i < 80; i++) cal.push(await page.evaluate(`(async () => { const c = () => performance.timeOrigin + performance.now(); const a = c(); const r = await ${tb('clock')}; const b = c(); return { rtt: b - a, offset: r.now - (a + b) / 2 }; })()`));
+  cal.sort((a, b) => a.rtt - b.rtt);
+  return { offsetMs: cal[0].offset, bestRttMs: cal[0].rtt, boundMs: cal[0].rtt / 2 };
+}
+
+async function bench(page, cfg) {
+  const before = await calibrate(page);
   const c0 = cpuSample();
-  const r = await page.evaluate(benchScript(cfg, offset));
+  const r = await page.evaluate(benchScript(cfg, before.offsetMs));
   const machineCpu = cpuBusy(c0, cpuSample());
+  const after = await calibrate(page);
+  // Latencies were computed with the offset from before the bench; move them to the mean of before and after (the clock
+  // drifts linearly over a bench) and record the drift and the error bound.
+  const mean = (before.offsetMs + after.offsetMs) / 2;
+  // ('local' stamps and reads its frames with the page clock alone: nothing to correct.)
+  const shift = cfg.mode === 'local' ? 0 : mean - before.offsetMs;
+  const r3 = (x) => Math.round(x * 1000) / 1000;
+  const clock = { offsetBeforeMs: r3(before.offsetMs), offsetAfterMs: r3(after.offsetMs), driftMs: r3(after.offsetMs - before.offsetMs), boundMs: r3(Math.max(before.boundMs, after.boundMs) + Math.abs(shift)) };
   const s = r.sender;
   const row = {
     ...cfg,
     framesSent: s.frames, framesReceived: r.frames, messages: r.messages, maxMessageBytes: s.maxMessageBytes,
     mbPerSecReceived: Math.round((r.bytes / cfg.seconds / 1048576) * 100) / 100, drainedAfterMs: Math.round(r.drainedMs),
-    arriveMs: stats(r.arrive), parsedMs: stats(r.parsed), fps: Math.round(r.fps * 10) / 10, maxFrameGapMs: Math.round(r.maxFrameGap),
+    arriveMs: stats(r.arrive.map((x) => x + shift)), parsedMs: stats(r.parsed.map((x) => x + shift)), clock, postStalls: s.postStalls ?? 0,
+    fps: Math.round(r.fps * 10) / 10, maxFrameGapMs: Math.round(r.maxFrameGap),
     longTasks: r.longTasks, longTaskMs: Math.round(r.longTaskMs), outOfOrder: r.outOfOrder,
     senderMaxSendMs: Math.round(s.maxSendMs * 1000) / 1000, senderAvgSendMs: Math.round(s.avgSendMs * 1000) / 1000,
     senderMaxLagMs: Math.round(s.maxLagMs * 10) / 10, sendErrors: s.sendErrors, machineCpuPercent: machineCpu,
   };
   const flush = cfg.mode === 'batched' || cfg.mode === 'sharedBuffer' ? ` flush ${cfg.flushMs ?? 4} ms` : '';
-  console.log(`  ${cfg.mode} ${cfg.streams} x ${cfg.bytesPerSec / 1048576} MB/s chunk ${cfg.chunk}${flush} -> ${cfg.sink}: arrive p50 ${row.arriveMs.p50} p95 ${row.arriveMs.p95} p99 ${row.arriveMs.p99} max ${row.arriveMs.max} ms; parsed p50 ${row.parsedMs.p50 ?? '-'} p95 ${row.parsedMs.p95 ?? '-'} ms; ${row.framesReceived}/${row.framesSent} frames in ${row.messages} messages, ${row.mbPerSecReceived} MB/s, drained +${row.drainedAfterMs} ms, fps ${row.fps}, max frame gap ${row.maxFrameGapMs} ms, long tasks ${row.longTasks} (${row.longTaskMs} ms), machine CPU ${machineCpu}%`);
+  console.log(`  ${cfg.mode} ${cfg.streams} x ${cfg.bytesPerSec / 1048576} MB/s chunk ${cfg.chunk}${flush} -> ${cfg.sink}: arrive p50 ${row.arriveMs.p50} p95 ${row.arriveMs.p95} p99 ${row.arriveMs.p99} max ${row.arriveMs.max} ms; parsed p50 ${row.parsedMs.p50 ?? '-'} p95 ${row.parsedMs.p95 ?? '-'} ms; ${row.framesReceived}/${row.framesSent} frames in ${row.messages} messages, ${row.mbPerSecReceived} MB/s, drained +${row.drainedAfterMs} ms, fps ${row.fps}, max frame gap ${row.maxFrameGapMs} ms, long tasks ${row.longTasks} (${row.longTaskMs} ms), machine CPU ${machineCpu}%, clock drift ${clock.driftMs} ms, bound +-${clock.boundMs} ms${row.postStalls ? `, ${row.postStalls} post stalls` : ''}`);
   return row;
 }
 
@@ -297,14 +323,14 @@ try {
   check('the hidden window reaches renderer-boot while never shown', !!boot2 && state2.hwndVisible === false && state2.visible === false, `boot ${boot2 ? 'yes' : 'no'}, ${JSON.stringify(state2)}`);
   const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
   const hiddenTarget = list.find((t) => t.url.includes('sp1=hidden'));
-  let hidden;
+  let hidden, hiddenTimerAt;
   if (hiddenTarget) {
     hidden = await connectPage(port, { match: hiddenTarget.id });
     const hipc = await hidden.evaluate(ipcProbe);
     const hvis = await hidden.evaluate('document.visibilityState');
     results.numbers.hiddenWindow = { ipc: hipc, visibility: hvis, state: state2, bootAt: boot2?.at };
     check('the hidden window uses the custom protocol too', hipc.ipc > 0, `${hipc.ipc} ipc.localhost fetches, visibility ${hvis}`);
-    await hidden.evaluate(timerInstall);
+    hiddenTimerAt = (await hidden.evaluate(timerInstall)).at;
   } else check('the hidden window is a DevTools target', false, list.map((t) => t.url).join(', '));
 
   const bad = await page.evaluate(tb('openWindow', { label: 'detached-sp1bad', url: 'index.html?sp1=bad', visible: false, browserArgs: 'different', register: false }));
@@ -317,47 +343,63 @@ try {
   const inst = await page.evaluate(timerInstall);
   check('the 400 ms status tick of TerminalManager is running (20 cells)', inst.hasStatusTick && inst.statusTimer, JSON.stringify(inst));
   const win = (action) => page.evaluate(tb('window', { label: 'main', action }));
+  // Every phase records the window state it ran in and has to be in the state it claims: a minimized window like a
+  // user's is WS_VISIBLE + iconic (on the taskbar), a hidden one is not WS_VISIBLE, a shown one is WS_VISIBLE and not
+  // iconic. Minimize and restore go through WM_SYSCOMMAND (sysMinimize / sysRestore), what a caption click does: in an
+  // offscreen run tao's `minimize()` adds SW_HIDE (tao's VISIBLE flag is unset after the raw SW_SHOWNOACTIVATE show), so
+  // it would measure a hidden window instead (the 2026-11-06 first run did).
+  const shown = (s) => s?.hwndVisible === true && s?.iconic === false;
+  const minimizedLikeAUser = (s) => s?.hwndVisible === true && s?.iconic === true;
+  const hiddenWindow = (s) => s?.hwndVisible === false;
+  const shownWebviewInvisible = (s) => shown(s) && s.controllerVisible === false;
+  const minimizedWebviewInvisible = (s) => minimizedLikeAUser(s) && s.controllerVisible === false;
   const phases = [];
-  phases.push(await timerPhase(page, 'visible', phaseSeconds));
-  let st;
-  phases.push(await timerPhase(page, 'minimized', phaseSeconds, async () => { st = await win('minimize'); console.log(`  minimize -> ${JSON.stringify(st)}`); }, async () => { await win('unminimize'); }));
-  phases[phases.length - 1].windowState = st;
-  phases.push(await timerPhase(page, 'restored', phaseSeconds / 2));
-  phases.push(await timerPhase(page, 'window hidden (ShowWindow SW_HIDE)', phaseSeconds, async () => { st = await win('hide'); console.log(`  hide -> ${JSON.stringify(st)}`); }, async () => { await win('show'); }));
-  phases[phases.length - 1].windowState = st;
-  phases.push(await timerPhase(page, 'WebView2 controller IsVisible(false)', phaseSeconds, async () => { st = await win('webviewHide'); console.log(`  IsVisible(false) -> ${JSON.stringify(st)}`); }, async () => { await win('webviewShow'); }));
-  phases[phases.length - 1].windowState = st;
-  phases.push(await timerPhase(page, 'minimized + IsVisible(false)', phaseSeconds, async () => { await win('minimize'); st = await win('webviewHide'); }, async () => { await win('webviewShow'); await win('unminimize'); }));
-  phases[phases.length - 1].windowState = st;
-  if (long) phases.push(await timerPhase(page, `minimized ${longSeconds} s (intensive throttling starts after 5 min hidden)`, longSeconds, async () => { await win('minimize'); }, async () => { await win('unminimize'); }));
-  phases.push(await timerPhase(page, 'restored again', phaseSeconds / 2));
-  if (hidden) {
-    const from = { tick: 0, plain: 0, raf: 0 };
-    const h = await hidden.evaluate(timerSince(from));
-    const g = gaps(h.plain, h.plain[0] ?? 0, h.now);
-    results.numbers.hiddenWindowTimer = { plain: h.plain.length, maxGapMs: Math.round(Math.max(...g.slice(1))), raf: h.raf, visibility: h.visibility };
-    console.log(`  never-shown window: plain ${h.plain.length} ticks, max gap ${results.numbers.hiddenWindowTimer.maxGapMs} ms, rAF ${h.raf}, visibility ${h.visibility}`);
-  }
+  const phase = async (name, seconds, enter, leave, expect) => {
+    let st;
+    const row = await timerPhase(page, name, seconds, async () => { st = enter ? await enter() : await win('state'); console.log(`  ${name} -> ${JSON.stringify(st)}`); }, leave);
+    row.windowState = st;
+    row.expectState = expect.name;
+    row.stateOk = expect(st);
+    phases.push(row);
+  };
+  await phase('visible', phaseSeconds, null, null, shown);
+  await phase('minimized (WM_SYSCOMMAND SC_MINIMIZE)', phaseSeconds, () => win('sysMinimize'), () => win('sysRestore'), minimizedLikeAUser);
+  await phase('restored', phaseSeconds / 2, null, null, shown);
+  // SW_HIDE directly: in an offscreen run tao's hide() is a no-op (its VISIBLE flag is unset), see sysHide.
+  await phase('window hidden (ShowWindow SW_HIDE)', phaseSeconds, () => win('sysHide'), () => win('show'), hiddenWindow);
+  await phase('WebView2 controller IsVisible(false)', phaseSeconds, () => win('webviewHide'), () => win('webviewShow'), shownWebviewInvisible);
+  await phase('minimized + IsVisible(false)', phaseSeconds, async () => { await win('sysMinimize'); return win('webviewHide'); }, async () => { await win('webviewShow'); await win('sysRestore'); }, minimizedWebviewInvisible);
+  if (long) await phase(`minimized ${longSeconds} s (WM_SYSCOMMAND; intensive throttling starts after 5 min hidden)`, longSeconds, () => win('sysMinimize'), () => win('sysRestore'), minimizedLikeAUser);
+  await phase('restored again', phaseSeconds / 2, null, null, shown);
   results.numbers.timers = phases;
   for (const p of phases) {
     const okPlain = p.plain >= p.expected * 0.9 && p.plainMaxGapMs < 1200;
     const okTick = p.tick >= p.expected * 0.9 && p.tickMaxGapMs < 1200;
-    const detail = `plain ${p.plain}/${p.expected} max gap ${p.plainMaxGapMs} ms, tick ${p.tick} max gap ${p.tickMaxGapMs} ms, visibility ${p.visibility}`;
+    const detail = `plain ${p.plain}/${p.expected} max gap ${p.plainMaxGapMs} ms, tick ${p.tick} max gap ${p.tickMaxGapMs} ms, visibility ${p.visibility}, window ${JSON.stringify(p.windowState)}`;
+    check(`window state during the phase: ${p.phase} (${p.expectState})`, p.stateOk, JSON.stringify(p.windowState));
     // IsVisible(false) is what wry does for Webview::hide() only, never on minimize or window hide (wry 0.57.1
     // parent_subclass_proc): recorded to show why the app must never call it, not a gate.
     if (p.phase.includes('IsVisible(false)')) console.log(`INFO 400 ms timers with ${p.phase}: ${detail}`);
     else check(`400 ms timers keep running: ${p.phase}`, okPlain && okTick, detail);
   }
+  if (hidden) {
+    // The never-shown window: plain 400 ms timer since timerInstall ran in it (the first gap counts, so a stall right
+    // after the install shows too). Its status tick is not gated: a detached window without cells has no terminals.
+    const h = await hidden.evaluate(timerSince({ tick: 0, plain: 0, raf: 0 }));
+    const g = gaps(h.plain, hiddenTimerAt, h.now);
+    const span = h.now - hiddenTimerAt;
+    const expected = Math.floor(span / 400);
+    const hs = await page.evaluate(tb('window', { label: 'detached-sp1', action: 'state' }));
+    results.numbers.hiddenWindowTimer = { seconds: Math.round(span) / 1000, plain: h.plain.length, expected, maxGapMs: Math.round(Math.max(...g)), raf: h.raf, visibility: h.visibility, windowState: hs };
+    check('400 ms timer keeps running: a window that was never shown', h.plain.length >= expected * 0.9 && Math.max(...g) < 1200 && hs.hwndVisible === false, `plain ${h.plain.length}/${expected} in ${Math.round(span / 1000)} s, max gap ${Math.round(Math.max(...g))} ms, rAF ${h.raf}, visibility ${h.visibility}, window ${JSON.stringify(hs)}`);
+  }
   await shotMain('after-timers');
   }
 
   // --- 5. Channel bench --------------------------------------------------------------------------------------------------
-  const cal = [];
-  for (let i = 0; i < 60; i++) cal.push(await page.evaluate(`(async () => { const c = () => performance.timeOrigin + performance.now(); const a = c(); const r = await ${tb('clock')}; const b = c(); return { rtt: b - a, offset: r.now - (a + b) / 2 }; })()`));
-  cal.sort((a, b) => a.rtt - b.rtt);
-  const offset = cal[0].offset;
-  results.numbers.clock = { offsetMs: offset, bestRttMs: cal[0].rtt, offsetSpreadMs: Math.max(...cal.slice(0, 10).map((c) => c.offset)) - Math.min(...cal.slice(0, 10).map((c) => c.offset)) };
-  console.log(`  clock offset Rust - page ${offset.toFixed(3)} ms (best rtt ${cal[0].rtt.toFixed(3)} ms, spread of the 10 best ${results.numbers.clock.offsetSpreadMs.toFixed(3)} ms)`);
+  const clock0 = await calibrate(page);
+  results.numbers.clock = { ...clock0, note: 'recalibrated before and after every bench, see channel[].clock' };
+  console.log(`  clock offset Rust - page ${clock0.offsetMs.toFixed(3)} ms (best rtt ${clock0.bestRttMs.toFixed(3)} ms, so +-${clock0.boundMs.toFixed(3)} ms)`);
   const xtermCount = await page.evaluate(`Array.from({ length: 20 }, (_, i) => window.__mc.terminals.xterm('cell-' + (i + 1))).filter((t) => t && t.element?.isConnected).length`);
   check('20 xterm instances are on screen (5x4 grid)', xtermCount === 20, `${xtermCount}`);
   const MB = 1048576;
@@ -391,7 +433,7 @@ try {
     { mode: 'pull', streams: 20, bytesPerSec: MB, chunk: 16384, sink: 'xterm' },
     { mode: 'sharedBuffer', streams: 20, bytesPerSec: MB, chunk: 16384, sink: 'xterm', flushMs: 0 },
   ].filter((c) => !only || only.includes(c.mode));
-  for (const c of plan) runs.push(await bench(page, offset, { ...c, seconds: benchSeconds }));
+  for (const c of plan) runs.push(await bench(page, { ...c, seconds: benchSeconds }));
   results.numbers.channel = runs;
   await shotMain('after-bench');
   const at = (mode, { chunk = 16384, sink = 'xterm', rate = MB, flush, streams = 20 } = {}) => runs.find((r) => r.mode === mode && r.chunk === chunk && r.sink === sink && r.streams === streams && r.bytesPerSec === rate && (flush === undefined || r.flushMs === flush));
@@ -400,7 +442,12 @@ try {
   info('Tauri Channel, one batched message per flush, 20 x 1 MB/s, transport only', at('batched', { sink: 'none', flush: 0 }));
   info('pull (raw invoke long poll), 20 x 1 MB/s, transport only', at('pull', { sink: 'none' }));
   const shared = at('sharedBuffer', { sink: 'none', flush: 0 });
-  if (shared) check('chosen data plane (WebView2 shared buffer, one post in flight, no timer): 20 x 1 MB/s p50 < 2 ms at the full rate', shared.arriveMs.p50 < 2 && shared.mbPerSecReceived >= 19.5, `p50 ${shared.arriveMs.p50} ms, p95 ${shared.arriveMs.p95} ms, p99 ${shared.arriveMs.p99} ms, ${shared.mbPerSecReceived} MB/s, ${shared.messages} messages, fps ${shared.fps}`);
+  // The SUBSTITUTE acceptance (transport only, WebView2 shared buffer instead of tauri Channel; see SP1.md): p50 plus the
+  // clock error bound under 2 ms at the full rate. The PLAN wording ("Channel ... into 20 xterm") is reported below.
+  if (shared) check('substitute acceptance, transport only: WebView2 shared buffer (one UI-thread post in flight, no timer), 20 x 1 MB/s, p50 + clock bound < 2 ms at the full rate', shared.arriveMs.p50 + shared.clock.boundMs < 2 && shared.mbPerSecReceived >= 19.5, `p50 ${shared.arriveMs.p50} ms (clock +-${shared.clock.boundMs} ms, drift ${shared.clock.driftMs} ms), p95 ${shared.arriveMs.p95} ms, p99 ${shared.arriveMs.p99} ms, ${shared.mbPerSecReceived} MB/s, ${shared.messages} messages for ${shared.framesSent} frames, fps ${shared.fps}`);
+  const asWritten = [at('perFrame', { flush: undefined }), at('sharedBuffer', { flush: 0 }), at('pull')].filter(Boolean);
+  for (const r of asWritten) console.log(`INFO PLAN acceptance as written (into 20 xterm, 20 x 1 MB/s, p50 < 2 ms) NOT met by ${r.mode}: arrive p50 ${r.arriveMs.p50} ms, parsed p50 ${r.parsedMs.p50} ms, fps ${r.fps}, ${r.messages} messages for ${r.framesSent} frames`);
+  results.numbers.planAcceptanceAsWritten = asWritten.map((r) => ({ mode: r.mode, arriveP50: r.arriveMs.p50, parsedP50: r.parsedMs.p50, fps: r.fps, met: r.arriveMs.p50 < 2 }));
   const local = at('local', { rate: Q });
   const sharedQ = at('sharedBuffer', { rate: Q, flush: 0 });
   // Into xterm the renderer's own parse and paint dominate (see 'local'); recorded, compared in SP1.md, not a gate.

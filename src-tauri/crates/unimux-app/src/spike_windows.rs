@@ -28,9 +28,12 @@ pub async fn open_window(ctx: &Arc<AppContext>, args: &Value) -> Result<Value, I
     let visible = args.get("visible").and_then(Value::as_bool).unwrap_or(false);
     let different = args.get("browserArgs").and_then(Value::as_str) == Some("different");
     let app = ctx.app().ok_or_else(|| fail("no app yet"))?.clone();
-    if args.get("register").and_then(Value::as_bool).unwrap_or(true) {
-        ctx.guard.register_detached(&label);
+    // A taken label belongs to a live window: refuse it before touching the guard, so a failed build can never drop the
+    // live window's registration (W5 builds detached windows the same way).
+    if app.get_webview_window(&label).is_some() {
+        return Ok(json!({ "ok": false, "label": label, "error": "a window with this label exists", "buildMs": 0.0 }));
     }
+    let registered = args.get("register").and_then(Value::as_bool).unwrap_or(true) && ctx.guard.register_detached(&label);
     let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.clone().into()))
         .title("unimux")
         .inner_size(1100.0, 700.0)
@@ -60,7 +63,9 @@ pub async fn open_window(ctx: &Arc<AppContext>, args: &Value) -> Result<Value, I
             Ok(json!({ "ok": true, "label": label, "url": url, "buildMs": started.elapsed().as_secs_f64() * 1000.0 }))
         }
         Err(e) => {
-            ctx.guard.forget_detached(&label);
+            if registered {
+                ctx.guard.forget_detached(&label);
+            }
             Ok(
                 json!({ "ok": false, "label": label, "error": e.to_string(), "buildMs": started.elapsed().as_secs_f64() * 1000.0 }),
             )
@@ -76,6 +81,14 @@ pub async fn window_op(ctx: &Arc<AppContext>, args: &Value) -> Result<Value, Ipc
     let done = match action {
         "minimize" => window.minimize(),
         "unminimize" => window.unminimize(),
+        // What a click on the caption's minimize button / a restore from the taskbar does: WM_SYSCOMMAND to the window.
+        // Unlike `minimize()` it never goes through tao's flag diff, which adds SW_HIDE when tao's VISIBLE flag is unset
+        // (an offscreen run shows the window with a raw ShowWindow), so the window stays WS_VISIBLE + iconic like a user's.
+        "sysMinimize" => sys_command(&window, SysCommand::Minimize),
+        "sysRestore" => sys_command(&window, SysCommand::Restore),
+        // ShowWindow(SW_HIDE), what tao's `hide()` does for a window tao knows is visible. In an offscreen run tao's flag
+        // is unset, so `hide()` would be a no-op and the "hidden" phase would measure a shown window.
+        "sysHide" => sys_command(&window, SysCommand::Hide),
         "hide" => window.hide(),
         "show" => show_quietly(ctx, &window),
         "close" => window.destroy(),
@@ -93,6 +106,43 @@ pub async fn window_op(ctx: &Arc<AppContext>, args: &Value) -> Result<Value, Ipc
         tokio::time::sleep(Duration::from_millis(150)).await;
     }
     Ok(window_state(&window).await)
+}
+
+#[derive(Clone, Copy)]
+enum SysCommand {
+    Minimize,
+    Restore,
+    Hide,
+}
+
+#[cfg(windows)]
+fn sys_command(window: &WebviewWindow, cmd: SysCommand) -> tauri::Result<()> {
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        PostMessageW, SC_MINIMIZE, SC_RESTORE, SW_HIDE, ShowWindowAsync, WM_SYSCOMMAND,
+    };
+    let hwnd = windows::Win32::Foundation::HWND(window.hwnd()?.0);
+    let sc = match cmd {
+        SysCommand::Minimize => SC_MINIMIZE,
+        SysCommand::Restore => SC_RESTORE,
+        SysCommand::Hide => {
+            // SAFETY: the window's own handle; the async variant runs on the window's UI thread.
+            let _ = unsafe { ShowWindowAsync(hwnd, SW_HIDE) };
+            return Ok(());
+        }
+    };
+    // SAFETY: posts a system command to the window's own handle; its UI thread handles it like a caption click.
+    let _ = unsafe { PostMessageW(Some(hwnd), WM_SYSCOMMAND, WPARAM(sc as usize), LPARAM(0)) };
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn sys_command(window: &WebviewWindow, cmd: SysCommand) -> tauri::Result<()> {
+    match cmd {
+        SysCommand::Minimize => window.minimize(),
+        SysCommand::Restore => window.unminimize(),
+        SysCommand::Hide => window.hide(),
+    }
 }
 
 /// Shows a window again; an offscreen run (MC_OFFSCREEN) never activates it.
