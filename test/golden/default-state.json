@@ -1,0 +1,270 @@
+{
+ "win32": {
+  "version": 1,
+  "automation": {
+   "paused": false,
+   "tasks": [],
+   "messages": [],
+   "events": []
+  },
+  "projects": [],
+  "activeProjectId": null,
+  "profiles": [
+   {
+    "id": "claude",
+    "name": "Claude",
+    "cli": "claude",
+    "args": "",
+    "color": "#d97757"
+   },
+   {
+    "id": "codex",
+    "name": "Codex",
+    "cli": "codex",
+    "args": "",
+    "color": "#10a37f"
+   },
+   {
+    "id": "shell",
+    "name": "PowerShell",
+    "cli": "shell",
+    "args": "",
+    "color": "#7a7a7a"
+   }
+  ],
+  "presets": [],
+  "snippets": [],
+  "notes": [],
+  "sshHosts": [],
+  "sshIdentities": [],
+  "sftp": {
+   "remotePaths": {}
+  },
+  "dbConnections": [],
+  "dbGroupColors": {},
+  "settings": {
+   "language": null,
+   "fontSize": 13,
+   "shell": "pwsh",
+   "lastProfileId": "claude",
+   "updateMode": "manual",
+   "showAiUsage": true,
+   "usageIntervalMinutes": 5,
+   "usageCollapsed": false,
+   "alerts": {
+    "enabled": true,
+    "volume": 0.7,
+    "notifyWhenFocused": false,
+    "quietHours": {
+     "enabled": false,
+     "start": "22:00",
+     "end": "07:00"
+    },
+    "events": {
+     "done": {
+      "notify": true,
+      "sound": {
+       "kind": "preset",
+       "id": "ding-dong"
+      }
+     },
+     "attention": {
+      "notify": true,
+      "sound": {
+       "kind": "preset",
+       "id": "alert"
+      }
+     },
+     "error": {
+      "notify": true,
+      "sound": {
+       "kind": "preset",
+       "id": "low-warn"
+      }
+     }
+    },
+    "notificationActions": true,
+    "flashWindow": true,
+    "taskbarBadge": true,
+    "limits": {
+     "enabled": true,
+     "fiveHour": {
+      "enabled": true,
+      "percent": 80
+     },
+     "sevenDay": {
+      "enabled": true,
+      "percent": 90
+     },
+     "resets": false
+    }
+   },
+   "accountSwitch": {
+    "enabled": false,
+    "codex": false,
+    "fiveHour": {
+     "enabled": true,
+     "percent": 95
+    },
+    "sevenDay": {
+     "enabled": true,
+     "percent": 98
+    },
+    "mode": "ask",
+    "cooldownMinutes": 15,
+    "target": {},
+    "primary": {},
+    "returnHome": true
+   },
+   "backgroundLoad": "project",
+   "shortcuts": {},
+   "confirmCloseWorking": true,
+   "scrollbackLines": 5000,
+   "sshTheme": "unimux-dark",
+   "stripScope": "all",
+   "delegation": {
+    "mode": "auto",
+    "maxAgents": 4
+   }
+  },
+  "sidebarCollapsed": false,
+  "snippetsOpen": true,
+  "notesOpen": false,
+  "sidebarWidth": 228,
+  "snippetsWidth": 280
+ },
+ "darwin": {
+  "version": 1,
+  "automation": {
+   "paused": false,
+   "tasks": [],
+   "messages": [],
+   "events": []
+  },
+  "projects": [],
+  "activeProjectId": null,
+  "profiles": [
+   {
+    "id": "claude",
+    "name": "Claude",
+    "cli": "claude",
+    "args": "",
+    "color": "#d97757"
+   },
+   {
+    "id": "codex",
+    "name": "Codex",
+    "cli": "codex",
+    "args": "",
+    "color": "#10a37f"
+   },
+   {
+    "id": "shell",
+    "name": "Terminal",
+    "cli": "shell",
+    "args": "",
+    "color": "#7a7a7a"
+   }
+  ],
+  "presets": [],
+  "snippets": [],
+  "notes": [],
+  "sshHosts": [],
+  "sshIdentities": [],
+  "sftp": {
+   "remotePaths": {}
+  },
+  "dbConnections": [],
+  "dbGroupColors": {},
+  "settings": {
+   "language": null,
+   "fontSize": 13,
+   "shell": "zsh",
+   "lastProfileId": "claude",
+   "updateMode": "manual",
+   "showAiUsage": true,
+   "usageIntervalMinutes": 5,
+   "usageCollapsed": false,
+   "alerts": {
+    "enabled": true,
+    "volume": 0.7,
+    "notifyWhenFocused": false,
+    "quietHours": {
+     "enabled": false,
+     "start": "22:00",
+     "end": "07:00"
+    },
+    "events": {
+     "done": {
+      "notify": true,
+      "sound": {
+       "kind": "preset",
+       "id": "ding-dong"
+      }
+     },
+     "attention": {
+      "notify": true,
+      "sound": {
+       "kind": "preset",
+       "id": "alert"
+      }
+     },
+     "error": {
+      "notify": true,
+      "sound": {
+       "kind": "preset",
+       "id": "low-warn"
+      }
+     }
+    },
+    "notificationActions": true,
+    "flashWindow": true,
+    "taskbarBadge": true,
+    "limits": {
+     "enabled": true,
+     "fiveHour": {
+      "enabled": true,
+      "percent": 80
+     },
+     "sevenDay": {
+      "enabled": true,
+      "percent": 90
+     },
+     "resets": false
+    }
+   },
+   "accountSwitch": {
+    "enabled": false,
+    "codex": false,
+    "fiveHour": {
+     "enabled": true,
+     "percent": 95
+    },
+    "sevenDay": {
+     "enabled": true,
+     "percent": 98
+    },
+    "mode": "ask",
+    "cooldownMinutes": 15,
+    "target": {},
+    "primary": {},
+    "returnHome": true
+   },
+   "backgroundLoad": "project",
+   "shortcuts": {},
+   "confirmCloseWorking": true,
+   "scrollbackLines": 5000,
+   "sshTheme": "unimux-dark",
+   "stripScope": "all",
+   "delegation": {
+    "mode": "auto",
+    "maxAgents": 4
+   }
+  },
+  "sidebarCollapsed": false,
+  "snippetsOpen": true,
+  "notesOpen": false,
+  "sidebarWidth": 228,
+  "snippetsWidth": 280
+ }
+}
