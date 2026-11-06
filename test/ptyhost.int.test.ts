@@ -1,7 +1,7 @@
 import { basename } from 'path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { cleanEnv } from '../src/shared/env';
-import { PtyManager } from '../src/ptyhost/manager';
+import { createPtyManager, hostTargets, type PtyHost, type PtySinkLike } from './helpers/nodeHost';
 
 function collect() {
   const out = new Map<string, string>();
@@ -26,10 +26,22 @@ const env = cleanEnv(process.env);
 const shell = process.platform === 'win32' ? 'pwsh' : 'bash';
 const alternateShell = process.platform === 'win32' ? 'cmd' : 'zsh';
 
-describe('PtyManager (real PTY)', () => {
+// B1 dual host: the TS PtyManager in this process ("node") and the Rust port through unimux-hostd ("rust"); see
+// test/helpers/nodeHost.ts for UNIMUX_HOST_TARGETS / UNIMUX_HOSTD.
+describe.each(hostTargets())('PtyManager (real PTY, %s host)', (target) => {
+  const open: PtyHost[] = [];
+  afterEach(async () => {
+    for (const m of open.splice(0)) await m.close();
+  });
+  async function manager(sink: PtySinkLike): Promise<PtyHost> {
+    const m = await createPtyManager(target, sink);
+    open.push(m);
+    return m;
+  }
+
   it('runs the startup command in the given cwd and reports exit', async () => {
     const { out, exits, sink } = collect();
-    const m = new PtyManager(sink);
+    const m = await manager(sink);
     m.spawn({ id: 'a', cwd: process.cwd(), cols: 100, rows: 30, env, shell, command: process.platform === 'win32'
       ? 'echo "mc-$((1+1))-ok"; (Get-Location).Path'
       : 'printf "mc-%s-ok\\n" "$((1+1))"; pwd' });
@@ -38,12 +50,12 @@ describe('PtyManager (real PTY)', () => {
     m.resize('a', 80, 20);
     m.write('a', 'exit\r');
     await waitFor(() => exits.has('a'));
-    expect(m.has('a')).toBe(false);
+    expect(await m.has('a')).toBe(false);
   });
 
   it('killAll resolves once all terminals are gone', async () => {
     const { out, sink } = collect();
-    const m = new PtyManager(sink);
+    const m = await manager(sink);
     m.spawn({ id: 'x', cwd: process.cwd(), cols: 80, rows: 24, env, shell });
     m.spawn({ id: 'y', cwd: process.cwd(), cols: 80, rows: 24, env, shell: alternateShell });
     // Killing a ConPTY while its shell is still starting can crash the native module; wait until both shells are up.
@@ -52,15 +64,15 @@ describe('PtyManager (real PTY)', () => {
     const t0 = Date.now();
     await m.killAll(5000);
     expect(Date.now() - t0).toBeLessThan(5000);
-    expect(m.has('x') || m.has('y')).toBe(false);
+    expect((await m.has('x')) || (await m.has('y'))).toBe(false);
   });
 
   it('keeps a replay history per terminal', async () => {
     const { out, sink } = collect();
-    const m = new PtyManager(sink);
+    const m = await manager(sink);
     m.spawn({ id: 'h', cwd: process.cwd(), cols: 80, rows: 24, env, shell: alternateShell, command: process.platform === 'win32' ? 'echo replay-me' : 'printf "replay-%s\\n" me' });
     await waitFor(() => (out.get('h') ?? '').includes('replay-me'));
-    expect(m.histories().find((h) => h.id === 'h')!.data).toContain('replay-me');
+    expect((await m.histories()).find((h) => h.id === 'h')!.data).toContain('replay-me');
     await m.killAll();
   });
 });

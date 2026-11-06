@@ -69,6 +69,12 @@ jobs:
         working-directory: src-tauri
       - run: cargo test --workspace
         working-directory: src-tauri
+      # B1 dual host: the existing .int suites against the Rust code through unimux-hostd (docs/tauri/HOSTD.md). The node
+      # host of the same suites runs in `npm test` above.
+      - name: .int suites on the Rust host (unimux-hostd)
+        run: npm run test:hostd
+        env:
+          UNIMUX_HOST_TARGETS: rust
       # The release rules (MC_* overrides, the DevTools port and the dev server origin compiled out: `cfg(not(dev_overrides))`
       # in unimux-app, PACKAGED in unimux-core) are only active in release builds, so they get their own clippy and tests.
       - run: cargo clippy --workspace --all-targets --release -- -D warnings
