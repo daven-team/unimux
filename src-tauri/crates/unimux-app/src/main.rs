@@ -10,6 +10,8 @@ mod commands;
 mod context;
 mod ipc;
 #[cfg(feature = "test-bridge")]
+mod spike_pty;
+#[cfg(feature = "test-bridge")]
 mod spike_windows;
 mod startup;
 #[cfg(feature = "test-bridge")]
@@ -203,7 +205,9 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
             ipc::update_splash_open,
             test_bridge::test_bridge,
             channel_bench::test_channel_bench,
-            channel_bench::test_channel_pull
+            channel_bench::test_channel_pull,
+            spike_pty::spike_pty_attach,
+            spike_pty::spike_pty
         ]
     }
     #[cfg(not(feature = "test-bridge"))]

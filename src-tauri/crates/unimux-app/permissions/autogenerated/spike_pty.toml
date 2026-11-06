@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-spike-pty"
+description = "Enables the spike_pty command without any pre-configured scope."
+commands.allow = ["spike_pty"]
+
+[[permission]]
+identifier = "deny-spike-pty"
+description = "Denies the spike_pty command without any pre-configured scope."
+commands.deny = ["spike_pty"]

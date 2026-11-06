@@ -4069,9 +4069,11 @@ dependencies = [
 name = "unimux-pty"
 version = "1.2.0"
 dependencies = [
+ "parking_lot 0.13.0",
  "serde_json",
  "unimux-core",
  "unimux-ipc",
+ "windows",
 ]
 
 [[package]]

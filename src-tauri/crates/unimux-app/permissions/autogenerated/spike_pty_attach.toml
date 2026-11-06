@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-spike-pty-attach"
+description = "Enables the spike_pty_attach command without any pre-configured scope."
+commands.allow = ["spike_pty_attach"]
+
+[[permission]]
+identifier = "deny-spike-pty-attach"
+description = "Denies the spike_pty_attach command without any pre-configured scope."
+commands.deny = ["spike_pty_attach"]

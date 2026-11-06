@@ -1,0 +1,180 @@
+[
+ {
+  "file": "file",
+  "args": [],
+  "line": "file"
+ },
+ {
+  "file": "file",
+  "args": [
+   "foo"
+  ],
+  "line": "file foo"
+ },
+ {
+  "file": "file",
+  "args": [
+   "foo",
+   "bar"
+  ],
+  "line": "file foo bar"
+ },
+ {
+  "file": "file",
+  "args": [
+   ""
+  ],
+  "line": "file \"\""
+ },
+ {
+  "file": "file",
+  "args": [
+   "foo bar"
+  ],
+  "line": "file \"foo bar\""
+ },
+ {
+  "file": "file",
+  "args": [
+   "\"foo bar\""
+  ],
+  "line": "file \\\"foo bar\\\""
+ },
+ {
+  "file": "file",
+  "args": [
+   "\"foo\""
+  ],
+  "line": "file \\\"foo\\\""
+ },
+ {
+  "file": "file",
+  "args": [
+   "foo\"bar"
+  ],
+  "line": "file foo\\\"bar"
+ },
+ {
+  "file": "file",
+  "args": [
+   "\"foo bar"
+  ],
+  "line": "file \"\\\"foo bar\""
+ },
+ {
+  "file": "file",
+  "args": [
+   "foo bar\""
+  ],
+  "line": "file \"foo bar\\\"\""
+ },
+ {
+  "file": "file",
+  "args": [
+   "foo\\bar"
+  ],
+  "line": "file foo\\bar"
+ },
+ {
+  "file": "file",
+  "args": [
+   "foo\\"
+  ],
+  "line": "file foo\\"
+ },
+ {
+  "file": "file",
+  "args": [
+   "foo bar\\"
+  ],
+  "line": "file \"foo bar\\\\\""
+ },
+ {
+  "file": "file",
+  "args": [
+   "foo\\\"bar"
+  ],
+  "line": "file foo\\\\\\\"bar"
+ },
+ {
+  "file": "file",
+  "args": [
+   " "
+  ],
+  "line": "file  "
+ },
+ {
+  "file": "file",
+  "args": [
+   "\t"
+  ],
+  "line": "file \t"
+ },
+ {
+  "file": "file",
+  "args": [
+   "a\tb"
+  ],
+  "line": "file \"a\tb\""
+ },
+ {
+  "file": "file",
+  "args": [
+   "\""
+  ],
+  "line": "file \\\""
+ },
+ {
+  "file": "file",
+  "args": [
+   "\"\""
+  ],
+  "line": "file \\\"\\\""
+ },
+ {
+  "file": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+  "args": [
+   "-NoLogo"
+  ],
+  "line": "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -NoLogo"
+ },
+ {
+  "file": "cmd.exe",
+  "args": [],
+  "line": "cmd.exe"
+ },
+ {
+  "file": "x",
+  "args": [
+   "ą ę",
+   "zażółć",
+   "😀 x"
+  ],
+  "line": "x \"ą ę\" zażółć \"😀 x\""
+ },
+ {
+  "file": "x",
+  "args": [
+   "a b\\\\"
+  ],
+  "line": "x \"a b\\\\\\\\\""
+ },
+ {
+  "file": "x",
+  "args": [
+   "-Command",
+   "& { Write-Host \"a b\" }"
+  ],
+  "line": "x -Command \"& { Write-Host \\\"a b\\\" }\""
+ },
+ {
+  "file": "claude",
+  "args": [
+   "--mcp-config",
+   "C:\\Users\\a b\\mcp.json",
+   "--",
+   "do it"
+  ],
+  "line": "claude --mcp-config \"C:\\Users\\a b\\mcp.json\" -- \"do it\""
+ }
+]
