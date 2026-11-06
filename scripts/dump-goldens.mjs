@@ -9,7 +9,12 @@
 //   test/golden/atomic-write.jsonl   {file, pid, ms, counter} -> the temp name tempPathFor would give
 //   test/golden/state-load.jsonl     {text} (JSON.stringify output, lone surrogates included) -> what 1.2.0 reads: JSON.parse
 //                                     accepts it, a lone surrogate becomes U+FFFD (a Rust string cannot hold one)
+//   test/golden/normalize-state.jsonl   {platform, now, input} -> normalizeState (see scripts/goldens-normalize.mjs)
+//   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
+//   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
+//                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
@@ -18,8 +23,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = resolve(root, 'test/golden');
 const load = async (file) => (await runnerImport(resolve(root, file), { configFile: false, logLevel: 'silent', root })).module;
 
-const [{ defaultState }, { mergeStateEdit }, { diffState }, { translate }, { messages }] = await Promise.all([
+const [{ defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { translate }, { messages }, { normalizeEditedState }] = await Promise.all([
   load('src/shared/state.ts'), load('src/shared/stateEdits.ts'), load('src/shared/statePatch.ts'), load('src/shared/i18n.ts'), load('src/shared/messages.ts'),
+  load('src/main/stateController.ts'),
 ]);
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
@@ -146,6 +152,21 @@ function stateLoad() {
   });
 }
 
+/** V8's sort of indexes by `key(a) - key(b)` with NaN keys: the order only TimSort itself reproduces. */
+function jsSort() {
+  const r = rng(1211);
+  const rows = [];
+  for (let i = 0; i < 400; i++) {
+    const n = 1 + Math.floor(r() * (i < 200 ? 100 : 1500));
+    const nan = [0, 0.05, 0.3, 0.7][i % 4];
+    const runs = i % 5 === 0;
+    const keys = Array.from({ length: n }, (_, k) => (r() < nan ? null : runs ? (i % 10 === 0 ? n - k : k) + Math.floor(r() * 3) : Math.floor(r() * (i % 3 ? 50 : 100_000))));
+    const key = (k) => (keys[k] === null ? NaN : keys[k]);
+    rows.push({ keys, order: keys.map((_, k) => k).sort((a, b) => key(a) - key(b)) });
+  }
+  return rows;
+}
+
 const files = {
   'default-state.json': `${JSON.stringify({ win32: defaultState('win32'), darwin: defaultState('darwin') }, null, 1)}\n`,
   'state-merge.jsonl': jsonl(stateMerge()),
@@ -153,6 +174,9 @@ const files = {
   'translate.jsonl': jsonl(translations()),
   'atomic-write.jsonl': jsonl(atomicWriteNames()),
   'state-load.jsonl': jsonl(stateLoad()),
+  'normalize-state.jsonl': jsonl(normalizeRows({ normalizeState, root })),
+  'state-after-edit.jsonl': jsonl(afterEditRows({ normalizeState, normalizeEditedState })),
+  'js-sort.jsonl': jsonl(jsSort()),
 };
 
 const check = process.argv.includes('--check');

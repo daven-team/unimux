@@ -71,9 +71,11 @@ fn read_state(path: &Path, platform: Platform, normalizer: &dyn Normalizer, seam
     };
     // js_json::parse: what JSON.parse accepts (an escaped lone surrogate written by 1.1.x must not make the file "corrupt").
     match parse(text) {
-        Ok(raw) => match normalizer.normalize(raw, platform) {
-            Some(state) => ReadResult::Ok(state),
-            None => ReadResult::Corrupt,
+        // A panic of the normalizer counts like a throw of normalizeState in 1.1.4: the file is corrupt, the .bak or the
+        // default state is used, and the app starts instead of failing on every launch.
+        Ok(raw) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| normalizer.normalize(raw, platform))) {
+            Ok(Some(state)) => ReadResult::Ok(state),
+            Ok(None) | Err(_) => ReadResult::Corrupt,
         },
         Err(_) => ReadResult::Corrupt,
     }
@@ -408,6 +410,30 @@ mod tests {
             .collect();
         assert_eq!(kept.len(), 1);
         assert_eq!(fs::read_to_string(dir.path().join(&kept[0])).unwrap(), "{not json");
+    }
+
+    #[test]
+    fn a_panicking_normalizer_counts_as_corrupt_and_the_bak_is_used() {
+        struct Panics;
+        impl Normalizer for Panics {
+            fn normalize(&self, raw: Value, platform: Platform) -> Option<Value> {
+                if raw.get("from").is_some() {
+                    return PassThrough.normalize(raw, platform);
+                }
+                panic!("normalizer bug");
+            }
+            fn default_state(&self, platform: Platform) -> Value {
+                PassThrough.default_state(platform)
+            }
+            fn after_edit(&self, merged: Value, previous: &Value) -> Result<Value, String> {
+                PassThrough.after_edit(merged, previous)
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(FILE), r#"{"version":1,"projects":[]}"#).unwrap();
+        fs::write(dir.path().join("state.json.bak"), r#"{"version":1,"projects":[],"from":"bak"}"#).unwrap();
+        let s = load_state(dir.path(), Platform::Win32, &Panics, &LoadOptions::default()).unwrap();
+        assert_eq!(s["from"], "bak");
     }
 
     #[test]

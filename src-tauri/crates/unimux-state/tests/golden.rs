@@ -12,6 +12,131 @@ fn rows(name: &str) -> Vec<Value> {
     text.lines().filter(|l| !l.trim().is_empty()).map(|l| serde_json::from_str(l).unwrap()).collect()
 }
 
+/// Rows read like JSON.parse reads them (array-index keys first), as the TS side saw its inputs.
+fn js_rows(name: &str) -> Vec<Value> {
+    let path = format!("{}/../../../test/golden/{name}", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    text.lines().filter(|l| !l.trim().is_empty()).map(|l| unimux_core::js_json::parse(l).unwrap()).collect()
+}
+
+/// Where two JSON texts first differ (for a readable failure).
+fn first_difference(a: &str, b: &str) -> String {
+    let at = a.bytes().zip(b.bytes()).position(|(x, y)| x != y).unwrap_or(a.len().min(b.len()));
+    let from = at.saturating_sub(120);
+    let cut = |s: &str| s.get(from..(at + 120).min(s.len())).unwrap_or("").to_string();
+    format!("at byte {at}:\n  rust: ...{}\n  ts:   ...{}", cut(a), cut(b))
+}
+
+#[test]
+fn normalize_state_matches_the_ts_reference() {
+    use unimux_state::normalize::state::{Env, normalize_state};
+    let rows = js_rows("normalize-state.jsonl");
+    assert!(rows.len() >= 1000, "{} rows", rows.len());
+    let mut failures = Vec::new();
+    let mut nulls = 0;
+    for (i, row) in rows.iter().enumerate() {
+        let platform = if row["platform"] == "darwin" { unimux_state::Platform::Darwin } else { unimux_state::Platform::Win32 };
+        let mut n = 0u64;
+        let mut uid = || {
+            n += 1;
+            format!("00000000-0000-4000-8000-{n:012}")
+        };
+        let mut env = Env { now_ms: row["now"].as_f64().unwrap(), uid: &mut uid };
+        let ours = normalize_state(&row["input"], platform, &mut env).map(|v| stringify(&v));
+        let want = row["out"].as_str().map(str::to_string);
+        if want.is_none() {
+            nulls += 1;
+        }
+        if ours != want {
+            let detail = match (&ours, &want) {
+                (Some(a), Some(b)) => first_difference(a, b),
+                _ => format!(
+                    "rust {:?}, ts {:?}",
+                    ours.as_ref().map(|s| &s[..s.len().min(200)]),
+                    want.as_ref().map(|s| &s[..s.len().min(200)])
+                ),
+            };
+            failures.push(format!("row {i} ({}): {detail}", row["platform"]));
+        }
+    }
+    assert!(nulls > 10, "the corpus must hold rejected states too");
+    assert!(
+        failures.is_empty(),
+        "{} of {} rows differ:\n{}",
+        failures.len(),
+        rows.len(),
+        failures.iter().take(8).cloned().collect::<Vec<_>>().join("\n")
+    );
+}
+
+/// A state that went through normalizeState once is written back unchanged by the next start (load + save of a 1.1.4
+/// state.json without an edit keeps its bytes), on both platforms.
+#[test]
+fn a_normalized_state_loads_and_saves_unchanged() {
+    let rows = js_rows("normalize-state.jsonl");
+    let mut checked = 0;
+    for (i, row) in rows.iter().enumerate() {
+        let Some(text) = row["out"].as_str() else { continue };
+        // Some damaged states take two starts to settle in 1.1.4 too (a cell whose profile id was "constructor").
+        if row["stable"] != true {
+            continue;
+        }
+        let platform = if row["platform"] == "darwin" { unimux_state::Platform::Darwin } else { unimux_state::Platform::Win32 };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("state.json"), text).unwrap();
+        let options = unimux_state::store::LoadOptions::default();
+        let state = unimux_state::store::load_state(dir.path(), platform, &unimux_state::StateNormalizer, &options).unwrap();
+        // The inbox retention looks at the real clock: states with tasks or messages (which may age) are not compared exactly.
+        let written = &row["out"];
+        let written: Value = unimux_core::js_json::parse(written.as_str().unwrap()).unwrap();
+        let ages = written["automation"]["tasks"].as_array().is_some_and(|t| !t.is_empty())
+            || written["automation"]["messages"].as_array().is_some_and(|m| !m.is_empty());
+        if !ages {
+            assert_eq!(stringify(&state), text, "row {i}");
+            checked += 1;
+        }
+    }
+    assert!(checked > 500, "{checked} states checked");
+}
+
+#[test]
+fn edit_normalization_matches_the_ts_reference() {
+    use unimux_state::normalize::state::normalize_edited_state;
+    let rows = js_rows("state-after-edit.jsonl");
+    assert!(rows.len() >= 200, "{} rows", rows.len());
+    let mut failures = Vec::new();
+    let (mut errors, mut limits) = (0, 0);
+    for (i, row) in rows.iter().enumerate() {
+        let ours = normalize_edited_state(row["next"].clone(), &row["prev"]);
+        match (&ours, row.get("error")) {
+            (Ok(v), None) => {
+                let (a, b) = (stringify(v), row["out"].as_str().unwrap_or_default().to_string());
+                if a != b {
+                    failures.push(format!("row {i}: {}", first_difference(&a, &b)));
+                }
+            }
+            (Err(e), Some(ts)) => {
+                errors += 1;
+                // The cell limit is a message the renderer shows; a TypeError is only "the edit was refused".
+                let limit = ts == "Concurrent grid change exceeds the cell limit.";
+                limits += usize::from(limit);
+                if limit != (e == "Concurrent grid change exceeds the cell limit.") {
+                    failures.push(format!("row {i}: rust {e:?}, ts {ts}"));
+                }
+            }
+            (a, b) => failures.push(format!("row {i}: rust {:?}, ts {b:?}", a.as_ref().map(|_| "ok"))),
+        }
+    }
+    assert!(errors > 10 && limits > 3, "{errors} errors, {limits} cell limit errors");
+    assert!(
+        failures.is_empty(),
+        "{} of {} rows differ:\n{}",
+        failures.len(),
+        rows.len(),
+        failures.iter().take(8).cloned().collect::<Vec<_>>().join("\n")
+    );
+}
+
 #[test]
 fn merge_state_edit_matches_the_ts_reference() {
     let rows = rows("state-merge.jsonl");
@@ -53,4 +178,21 @@ fn a_state_json_with_lone_surrogates_loads_like_json_parse_reads_it() {
         assert_eq!(stringify(&state), row["out"].as_str().unwrap(), "row {i}");
         assert_eq!(std::fs::read_to_string(dir.path().join("state.json")).unwrap(), text, "row {i}");
     }
+}
+
+#[test]
+fn the_retention_sort_orders_like_v8_even_for_nan_keys() {
+    let rows = rows("js-sort.jsonl");
+    assert_eq!(rows.len(), 400);
+    let mut bad = Vec::new();
+    for (i, row) in rows.iter().enumerate() {
+        let keys: Vec<f64> = row["keys"].as_array().unwrap().iter().map(|k| k.as_f64().unwrap_or(f64::NAN)).collect();
+        let want: Vec<usize> = row["order"].as_array().unwrap().iter().map(|k| k.as_u64().unwrap() as usize).collect();
+        let mut got: Vec<usize> = (0..keys.len()).collect();
+        unimux_state::normalize::timsort::sort_by(&mut got, |a, b| keys[*a] - keys[*b]);
+        if got != want {
+            bad.push(i);
+        }
+    }
+    assert!(bad.is_empty(), "{} of {} rows differ: {:?}", bad.len(), rows.len(), &bad[..bad.len().min(20)]);
 }

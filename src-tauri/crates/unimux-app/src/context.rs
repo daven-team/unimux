@@ -16,7 +16,7 @@ use unimux_core::startup_timing::{StartupLog, StartupTimer};
 use unimux_ipc::{Call, EventSink, Events, Ports, Router, Scope, SendQueue, WindowGuard};
 use unimux_state::broadcast::StateBroadcaster;
 use unimux_state::store::Saver;
-use unimux_state::{Normalizer, PassThrough, Platform, StateController};
+use unimux_state::{Normalizer, Platform, StateController, StateNormalizer};
 
 /// Origins the app windows load from: production (WebView2 `http://tauri.localhost`, WKWebView `tauri://localhost`) and the
 /// Vite dev server of `npm run tauri dev`.
@@ -86,7 +86,7 @@ impl AppContext {
         startup_log: Arc<StartupLog>,
         state: Value,
     ) -> Arc<Self> {
-        let normalizer: Arc<dyn Normalizer> = Arc::new(PassThrough);
+        let normalizer: Arc<dyn Normalizer> = Arc::new(StateNormalizer);
         let controller = Arc::new(StateController::new(state, normalizer.clone()));
         let crash_for_saver = crash.clone();
         let saver = Saver::new(data_dir.clone(), Arc::new(move |m: &str| crash_for_saver.warn(m)));

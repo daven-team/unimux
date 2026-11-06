@@ -24,7 +24,7 @@ use unimux_ipc::{Call, Contract, RouterBuilder, SendQueue};
 use unimux_platform::instance::{Acquire, acquire};
 use unimux_state::normalize::unless_restoring;
 use unimux_state::store::{LoadOptions, load_state};
-use unimux_state::{Normalizer, PassThrough, Platform};
+use unimux_state::{Normalizer, Platform, StateNormalizer};
 
 use crate::context::AppContext;
 
@@ -46,7 +46,7 @@ fn print_routes() -> i32 {
         Arc::new(RollingLog::new(dir.join("crash.log"), None)),
         Arc::new(StartupTimer::new(Instant::now())),
         Arc::new(StartupLog::new(dir.join("startup.log"), "")),
-        PassThrough.default_state(Platform::current()),
+        StateNormalizer.default_state(Platform::current()),
     );
     let builder = build_router(&ctx);
     let errors = builder.errors().to_vec();
@@ -115,7 +115,7 @@ fn main() {
     // The state is Rust's from the first wave: a locked state.json stops the start (nothing is overwritten).
     let crash_for_load = crash.clone();
     let log = move |m: &str| crash_for_load.warn(m);
-    let state = match load_state(&data_dir, Platform::current(), &PassThrough, &LoadOptions { log: &log, seams: None }) {
+    let state = match load_state(&data_dir, Platform::current(), &StateNormalizer, &LoadOptions { log: &log, seams: None }) {
         Ok(state) => unless_restoring(state),
         Err(e) => startup::startup_failed(&e.to_string(), Some(&e.path)),
     };

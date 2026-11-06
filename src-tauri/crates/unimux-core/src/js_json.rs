@@ -15,12 +15,78 @@ use std::fmt::Write as _;
 /// `JSON.parse(text)`: like `serde_json::from_str`, but an escaped unpaired surrogate (in a value or a key) reads as U+FFFD
 /// instead of failing the whole text. Valid pairs stay as they are.
 pub fn parse(text: &str) -> serde_json::Result<Value> {
-    match serde_json::from_str(text) {
-        Ok(v) => Ok(v),
+    let mut value: Value = match serde_json::from_str(text) {
+        Ok(v) => v,
         Err(e) => match replace_lone_surrogates(text) {
-            Some(fixed) => serde_json::from_str(&fixed),
-            None => Err(e),
+            Some(fixed) => serde_json::from_str(&fixed)?,
+            None => return Err(e),
         },
+    };
+    order_like_js(&mut value);
+    Ok(value)
+}
+
+/// An array index as a property key ("0", "17", at most 2^32 - 2, no leading zero): JavaScript objects list these first, in
+/// ascending order, before every other key (which keep their insertion order).
+pub fn index_key(key: &str) -> Option<u32> {
+    let b = key.as_bytes();
+    if b.is_empty() || b.len() > 10 || !b.iter().all(u8::is_ascii_digit) || (b.len() > 1 && b[0] == b'0') {
+        return None;
+    }
+    let n: u64 = key.parse().ok()?;
+    (n < u64::from(u32::MAX)).then_some(n as u32)
+}
+
+/// Puts the keys of every object of `value` in the order a JavaScript object has them (array indexes first, ascending, then
+/// the rest in insertion order), as JSON.parse and any object built in JS would. Objects already in that order are not touched.
+pub fn order_like_js(value: &mut Value) {
+    match value {
+        Value::Array(items) => items.iter_mut().for_each(order_like_js),
+        Value::Object(map) => {
+            for (_, item) in map.iter_mut() {
+                order_like_js(item);
+            }
+            order_map_like_js(map);
+        }
+        _ => {}
+    }
+}
+
+/// [`order_like_js`] for one object (not its children).
+pub fn order_map_like_js(map: &mut serde_json::Map<String, Value>) {
+    let mut last: Option<u32> = None;
+    let mut seen_named = false;
+    let mut in_order = true;
+    for key in map.keys() {
+        match index_key(key) {
+            Some(n) => {
+                if seen_named || last.is_some_and(|l| l > n) {
+                    in_order = false;
+                    break;
+                }
+                last = Some(n);
+            }
+            None => seen_named = true,
+        }
+    }
+    if in_order {
+        return;
+    }
+    let old = std::mem::take(map);
+    let mut indexed: Vec<(u32, String, Value)> = Vec::new();
+    let mut named: Vec<(String, Value)> = Vec::new();
+    for (k, v) in old {
+        match index_key(&k) {
+            Some(n) => indexed.push((n, k, v)),
+            None => named.push((k, v)),
+        }
+    }
+    indexed.sort_by_key(|(n, _, _)| *n);
+    for (_, k, v) in indexed {
+        map.insert(k, v);
+    }
+    for (k, v) in named {
+        map.insert(k, v);
     }
 }
 
@@ -264,5 +330,17 @@ mod tests {
         let c: Value = serde_json::from_str(r#"{"a":1.0,"b":2}"#).unwrap();
         assert!(!js_equal(&a, &b));
         assert!(js_equal(&a, &c));
+    }
+
+    #[test]
+    fn parse_orders_index_keys_like_json_parse() {
+        // JSON.parse lists 2 and 10 first; "01" and 2^32 - 1 are no array indexes and keep their places.
+        let v = parse(r#"{"b":1,"10":2,"a":{"z":0,"3":1},"2":4,"01":5,"4294967295":6}"#).unwrap();
+        assert_eq!(stringify(&v), r#"{"2":4,"10":2,"b":1,"a":{"3":1,"z":0},"01":5,"4294967295":6}"#);
+        assert_eq!(index_key("4294967294"), Some(4_294_967_294));
+        assert_eq!(index_key("4294967295"), None);
+        assert_eq!(index_key("-1"), None);
+        let plain = r#"{"0":1,"7":2,"x":3}"#;
+        assert_eq!(stringify(&parse(plain).unwrap()), plain);
     }
 }

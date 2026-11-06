@@ -1,8 +1,24 @@
-//! The normalization seam. 1.1.4 runs `normalizeState` (src/shared/state.ts and the normalizers it calls) on load and a part
-//! of it on every renderer edit (stateController.ts apply). Package F8 ports all of it behind [`Normalizer`], gated by the
-//! golden corpus. Until then [`PassThrough`] keeps a valid state (version 1 with a projects list) exactly as it is, and the
-//! default state comes from the golden corpus written by the TS code itself (test/golden/default-state.json), so a fresh
-//! start gets the same defaults as 1.1.4.
+//! The normalization of the state (PLAN F8). 1.1.4 runs `normalizeState` (src/shared/state.ts and the normalizers it calls)
+//! on load and `normalizeEditedState` (src/main/stateController.ts) on every renderer edit. Both are ported here with the
+//! JavaScript semantics they depend on ([`js`]): key order of spreads, `undefined` fields dropped by JSON.stringify, UTF-16
+//! lengths, names inherited from Object.prototype, and the places where the TS code throws (the file then counts as corrupt).
+//! The golden corpus (test/golden/normalize-state.jsonl, state-after-edit.jsonl, written by scripts/dump-goldens.mjs from the
+//! TS code) checks every answer byte for byte; the TS copies stay for the renderer and CI fails when they drift apart.
+//!
+//! - [`state`]: defaultState, normalizeState (profiles, settings, projects / tabs / cells, unique grid ids, active fallbacks,
+//!   strip order, detached windows, inbox retention) and the edit normalization.
+//! - [`settings`], [`shortcuts`]: the settings normalizers. [`grid`]: layouts, templates, prompt queues, notes.
+//!   [`remote`]: SSH hosts / identities / cell refs, SFTP places, database connections and folder colours.
+//!   [`windows`]: workspace order, detached windows, pruneAutomation. [`timsort`]: V8's Array.prototype.sort.
+
+pub mod grid;
+pub mod js;
+pub mod remote;
+pub mod settings;
+pub mod shortcuts;
+pub mod state;
+pub mod timsort;
+pub mod windows;
 
 use serde_json::{Map, Value};
 
@@ -33,23 +49,27 @@ pub trait Normalizer: Send + Sync {
     fn after_edit(&self, merged: Value, previous: &Value) -> Result<Value, String>;
 }
 
-/// Wave 0: valid states pass unchanged; detached windows stay main's (a renderer edit never adds, moves or removes one).
+/// The 1.1.4 rules ([`state::normalize_state`], [`state::normalize_edited_state`]) with the real clock and random grid ids.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct StateNormalizer;
+
+impl Normalizer for StateNormalizer {
+    fn normalize(&self, raw: Value, platform: Platform) -> Option<Value> {
+        let mut uid = || uuid::Uuid::new_v4().to_string();
+        let mut env = state::Env { now_ms: unimux_core::time::now_ms() as f64, uid: &mut uid };
+        state::normalize_state(&raw, platform, &mut env)
+    }
+    fn default_state(&self, platform: Platform) -> Value {
+        state::default_state(platform)
+    }
+    fn after_edit(&self, merged: Value, previous: &Value) -> Result<Value, String> {
+        state::normalize_edited_state(merged, previous)
+    }
+}
+
+/// Valid states pass unchanged (a test seam for the store and the controller); detached windows stay main's.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PassThrough;
-
-static DEFAULTS: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| {
-    serde_json::from_str(include_str!("../../../../test/golden/default-state.json")).unwrap_or(Value::Null)
-});
-
-/// `defaultState(platform)` as 1.1.4 computes it (from the golden corpus).
-pub fn golden_default_state(platform: Platform) -> Value {
-    DEFAULTS.get(platform.as_str()).cloned().unwrap_or_else(|| {
-        let mut m = Map::new();
-        m.insert("version".into(), Value::from(1));
-        m.insert("projects".into(), Value::Array(vec![]));
-        Value::Object(m)
-    })
-}
 
 impl Normalizer for PassThrough {
     fn normalize(&self, raw: Value, _platform: Platform) -> Option<Value> {
@@ -60,7 +80,7 @@ impl Normalizer for PassThrough {
         Some(raw)
     }
     fn default_state(&self, platform: Platform) -> Value {
-        golden_default_state(platform)
+        state::default_state(platform)
     }
     fn after_edit(&self, mut merged: Value, previous: &Value) -> Result<Value, String> {
         let Some(out) = merged.as_object_mut() else { return Err("the edited state is not an object".into()) };
@@ -119,12 +139,30 @@ mod tests {
     }
 
     #[test]
-    fn defaults_come_from_the_ts_code() {
-        let d = golden_default_state(Platform::Win32);
-        assert_eq!(d["version"], 1);
-        assert_eq!(d["settings"]["fontSize"], 13);
-        assert!(d["profiles"].as_array().is_some_and(|p| !p.is_empty()));
-        assert_ne!(golden_default_state(Platform::Darwin)["settings"]["shell"], d["settings"]["shell"]);
+    fn defaults_match_the_ts_code() {
+        let golden: Value = serde_json::from_str(include_str!("../../../../../test/golden/default-state.json")).unwrap();
+        for platform in [Platform::Win32, Platform::Darwin] {
+            let ours = state::default_state(platform);
+            assert_eq!(unimux_core::js_json::stringify(&ours), unimux_core::js_json::stringify(&golden[platform.as_str()]));
+            assert_eq!(StateNormalizer.default_state(platform), ours);
+        }
+        assert_eq!(state::default_state(Platform::Darwin)["profiles"][2]["name"], "Terminal");
+    }
+
+    #[test]
+    fn the_language_rule_of_existing_installations() {
+        // A state without a language (an installation from before the language choice) keeps Polish; an unknown one asks again.
+        let s = |settings: Value| {
+            StateNormalizer.normalize(json!({"version": 1, "projects": [], "settings": settings}), Platform::Win32).unwrap()
+        };
+        assert_eq!(s(json!({}))["settings"]["language"], "pl");
+        assert_eq!(s(json!({"language": "de"}))["settings"]["language"], "de");
+        assert_eq!(s(json!({"language": "xx"}))["settings"]["language"], Value::Null);
+        assert_eq!(s(json!({"language": null}))["settings"]["language"], Value::Null);
+        assert_eq!(
+            StateNormalizer.normalize(json!({"version": 1, "projects": []}), Platform::Darwin).unwrap()["settings"]["shell"],
+            "zsh"
+        );
     }
 
     #[test]

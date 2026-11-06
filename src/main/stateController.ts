@@ -32,35 +32,40 @@ export class StateController {
     return () => { this.listeners.delete(listener); };
   }
   apply(edit: StateEdit): StateSnapshot {
-    return this.change((state) => {
-      const next = mergeStateEdit(state, edit);
-      // The renderer cannot store arbitrary alert values (unknown presets, relative or UNC sound paths): they are normalized here.
-      // SSH hosts edited in the renderer are normalized the same way (R6), and so are the SFTP places, the scrollback setting and the SSH theme.
-      const sftp = normalizeSftpPlaces(next.sftp);
-      // Database connections edited in the renderer (reordering, grouping) are normalized like SSH hosts.
-      const db = normalizeDbConnections(next.dbConnections);
-      const dbConnections = JSON.stringify(db) === JSON.stringify(next.dbConnections) ? next.dbConnections : db;
-      const identities = normalizeSshIdentities(next.sshIdentities);
-      const sshIdentities = JSON.stringify(identities) === JSON.stringify(next.sshIdentities) ? next.sshIdentities : identities;
-      const projects = next.projects.map((project) => {
-        const tabs = project.tabs.map((tab) => {
-          if (tab.cells.length < 1 || tab.cells.length > MAX_CELLS) throw new Error('Concurrent grid change exceeds the cell limit.');
-          return tab.layout.areas.length === tab.cells.length ? tab : { ...tab, layout: layoutForCount(tab.cells.length) };
-        });
-        // Untouched projects keep their identity, so the change that is sent on is computed cheaply.
-        return tabs.every((tab, i) => tab === project.tabs[i]) ? project : { ...project, tabs };
-      });
-      const out: AppState = { ...next, sshHosts: normalizeSshHosts(next.sshHosts), sshIdentities, dbConnections, dbGroupColors: normalizeDbGroupColors(next.dbGroupColors ?? {}, dbConnections), sftp: JSON.stringify(sftp) === JSON.stringify(next.sftp) ? next.sftp : sftp, settings: { ...next.settings, alerts: normalizeAlerts(next.settings.alerts), scrollbackLines: normalizeScrollback(next.settings.scrollbackLines), sshTheme: normalizeSshThemeId(next.settings.sshTheme) }, projects };
-      // The strip order from the renderer is repaired like at load (known kinds of keys, open grids, no duplicates, a limit);
-      // an order that needs no repair keeps its identity.
-      const order = normalizeWorkspaceOrder(next.workspaceOrder, new Set(projects.flatMap((p) => p.tabs.map((t) => t.id))));
-      if (order === undefined) delete out.workspaceOrder;
-      else if (!sameOrder(order, next.workspaceOrder)) out.workspaceOrder = order;
-      // Detached windows (1.0.6) are main's: a renderer edit never adds, moves or removes one; a grid it closed drops its window.
-      const detached = normalizeDetachedWindows(state.detachedWindows, openGrids(projects));
-      if (detached === undefined) delete out.detachedWindows;
-      else out.detachedWindows = JSON.stringify(detached) === JSON.stringify(state.detachedWindows) ? state.detachedWindows! : detached;
-      return out;
-    }, edit.id);
+    return this.change((state) => normalizeEditedState(mergeStateEdit(state, edit), state), edit.id);
   }
+}
+
+/**
+ * The normalization of a renderer edit after the merge (`state`: main's state before it). Pure, so the Rust port
+ * (src-tauri/crates/unimux-state/src/normalize.rs) is checked against it by the golden corpus (scripts/dump-goldens.mjs).
+ */
+export function normalizeEditedState(next: AppState, state: AppState): AppState {
+  // The renderer cannot store arbitrary alert values (unknown presets, relative or UNC sound paths): they are normalized here.
+  // SSH hosts edited in the renderer are normalized the same way (R6), and so are the SFTP places, the scrollback setting and the SSH theme.
+  const sftp = normalizeSftpPlaces(next.sftp);
+  // Database connections edited in the renderer (reordering, grouping) are normalized like SSH hosts.
+  const db = normalizeDbConnections(next.dbConnections);
+  const dbConnections = JSON.stringify(db) === JSON.stringify(next.dbConnections) ? next.dbConnections : db;
+  const identities = normalizeSshIdentities(next.sshIdentities);
+  const sshIdentities = JSON.stringify(identities) === JSON.stringify(next.sshIdentities) ? next.sshIdentities : identities;
+  const projects = next.projects.map((project) => {
+    const tabs = project.tabs.map((tab) => {
+      if (tab.cells.length < 1 || tab.cells.length > MAX_CELLS) throw new Error('Concurrent grid change exceeds the cell limit.');
+      return tab.layout.areas.length === tab.cells.length ? tab : { ...tab, layout: layoutForCount(tab.cells.length) };
+    });
+    // Untouched projects keep their identity, so the change that is sent on is computed cheaply.
+    return tabs.every((tab, i) => tab === project.tabs[i]) ? project : { ...project, tabs };
+  });
+  const out: AppState = { ...next, sshHosts: normalizeSshHosts(next.sshHosts), sshIdentities, dbConnections, dbGroupColors: normalizeDbGroupColors(next.dbGroupColors ?? {}, dbConnections), sftp: JSON.stringify(sftp) === JSON.stringify(next.sftp) ? next.sftp : sftp, settings: { ...next.settings, alerts: normalizeAlerts(next.settings.alerts), scrollbackLines: normalizeScrollback(next.settings.scrollbackLines), sshTheme: normalizeSshThemeId(next.settings.sshTheme) }, projects };
+  // The strip order from the renderer is repaired like at load (known kinds of keys, open grids, no duplicates, a limit);
+  // an order that needs no repair keeps its identity.
+  const order = normalizeWorkspaceOrder(next.workspaceOrder, new Set(projects.flatMap((p) => p.tabs.map((t) => t.id))));
+  if (order === undefined) delete out.workspaceOrder;
+  else if (!sameOrder(order, next.workspaceOrder)) out.workspaceOrder = order;
+  // Detached windows (1.0.6) are main's: a renderer edit never adds, moves or removes one; a grid it closed drops its window.
+  const detached = normalizeDetachedWindows(state.detachedWindows, openGrids(projects));
+  if (detached === undefined) delete out.detachedWindows;
+  else out.detachedWindows = JSON.stringify(detached) === JSON.stringify(state.detachedWindows) ? state.detachedWindows! : detached;
+  return out;
 }
