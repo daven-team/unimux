@@ -9,7 +9,10 @@ license.workspace = true
 [dependencies]
 unimux-core.workspace = true
 unimux-ipc.workspace = true
+unimux-exec.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
 base64.workspace = true
+tempfile.workspace = true

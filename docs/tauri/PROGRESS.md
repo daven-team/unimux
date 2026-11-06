@@ -47,7 +47,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | SP3 | Windows 1.1.4 -> Tauri NSIS hand-over | todo | | | | needs the VirtualBox Windows VM image |
 | SP4 | macOS 1.1.4 engine accepts the Tauri zip | todo | | | | needs a Mac |
 | SP5 | Rust ConPTY + Channel | todo | | | | |
-| SP6 | Custom update window process | todo | | | | |
+| SP6 | Custom update window process | partial (Windows green, macOS open) | 2026-11-06 | | 2026-11-06 (Windows) | `node scripts/spike-update-window.mjs --build`: 29/29 in the last 3 runs (scratch install dir, spike product `unimux-sp6`); copy `unimux-update.exe`, installer `/S /UPDATE --updated /D=`, window before wind-down; findings and timings in spikes/SP6.md; macOS swap + `codesign --verify` not done (no Mac). See "SP6 open issues" |
 | SP7 | russh coverage | todo | | | | Docker |
 | SP8 | MCP wire with real CLIs | todo | | | | scratch home |
 | SP9 | DB wire fidelity | todo | | | | Docker |
@@ -277,6 +277,20 @@ All 14 confirmed findings of the wave 0 review are fixed; none was skipped.
 10. Detached windows, the gate and the update window are not created yet, so the guard's detached registration and the destroy cleanup (`forget_on_destroy`) are only unit-tested and wired on the main window.
 11. HTML5 drag and drop (tab reorder / detach, snippets, notes, tree, SFTP) is enabled again by `disable_drag_drop_handler()` but no script drags yet; W3 adds the real-app drag checks with the OS file drop.
 12. The macOS half of the startup race (Electron's SingletonLock / SingletonSocket) is still R3; the Windows half (startup mutex + lockfile) is done.
+
+### SP6 open issues (2026-11-06)
+
+Verified on Windows: `cargo fmt --all --check`; `cargo clippy --release -p unimux-exec -p unimux-update -p unimux-app --all-targets -- -D warnings` with and without `dev-overrides,test-bridge`; `cargo test --release` of those crates (exec 8, update 10, app 5); `npm run typecheck`; `npm run gen:check`; vitest update-runtime + tauri-bridge (TS unchanged, only resources/update-splash/index.html); the harness above.
+
+1. macOS half of SP6 not done (no Mac): bundle swap from a temp-dir copy, `codesign --verify`; the window mode was never compiled on macOS (CI not run). Goes with U5 / R3.
+2. Escape / X / Alt+F4 hide-while-working is implemented but not driven by a script (U2 acceptance).
+3. The error stage reuses `slow` / `slowHint` for a failed installer; no own translated text yet (U2).
+4. Session end (logout / shutdown) does not yet let the window close at once (W6).
+5. `UpdateProgressModel` port has unit tests only; TS goldens are U2.
+6. `signal_update_ready` is the minimal form (no heartbeat wait, no clearGateFailureIfUpdated): U3.
+7. The real productName `unimux` installer was not run on this machine on purpose (second Apps & features entry, the user's real app runs); U2/U4 in the VM.
+8. Run it: `node scripts/spike-update-window.mjs --build` (builds the spike installer into `src-tauri/target/sp6`, then installs it into a scratch dir, runs the hand-over, uninstalls); later runs without `--build`; `--prestage` stages and warms the copy first; `--keep` keeps the scratch dir. Screenshots and timings in artifacts/tauri-sp6/.
+9. Observation for W6: after `quit` the main app's WebView2 processes took 3-30 s to end on the loaded machine.
 
 ### How to run
 

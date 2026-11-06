@@ -10,7 +10,14 @@ mod ipc;
 mod startup;
 #[cfg(feature = "test-bridge")]
 mod test_bridge;
+mod update_window;
 mod windows;
+
+/// The Tauri context (config, embedded frontend, capabilities). Expanded once: the app and the update window mode share it,
+/// so the frontend is embedded only once.
+fn tauri_context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -62,6 +69,14 @@ fn main() {
     let started = Instant::now();
     if let Some(code) = startup::legacy_entry() {
         std::process::exit(code);
+    }
+    // The update window process (a copy of this exe in %LOCALAPPDATA%\unimux-updater) and its cleanup: before the data dir,
+    // the instance lock and crash.log, none of which they touch.
+    if let Some(config) = update_window::config_arg() {
+        std::process::exit(update_window::run(&config, tauri_context()));
+    }
+    if let Some(cleanup) = update_window::cleanup_arg() {
+        std::process::exit(update_window::run_cleanup(&cleanup));
     }
     if std::env::args().any(|a| a == "--ipc-routes") && !unimux_core::PACKAGED {
         std::process::exit(print_routes());
@@ -129,7 +144,7 @@ fn main() {
     let _ = ctx.router.set(Arc::new(builder.build(ctx.guard.clone())));
     *second.lock() = Some(ctx.clone());
 
-    let tauri_ctx = tauri::generate_context!();
+    let tauri_ctx = tauri_context();
     let setup_ctx = ctx.clone();
     let app = tauri::Builder::default()
         .manage(ctx.clone())

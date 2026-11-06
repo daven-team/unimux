@@ -2,6 +2,12 @@
 //!
 //! Skeleton created by wave 0 (F1/F2). The owning packages fill it in (see docs/tauri/PLAN.md); its commands are registered in
 //! `unimux-app/src/commands/update.rs`, which calls into this crate.
+//!
+//! SP6 added [`progress`] (UpdateProgressModel port) and [`window`] (the update window hand-over and file protocol); the
+//! window process itself is `unimux-app/src/update_window.rs`.
+
+pub mod progress;
+pub mod window;
 
 /// The updater public key (minisign, key id 817A07BB564AC8D0) exactly as `tauri signer generate` wrote it to
 /// `unimux-updater.key.pub`: base64 of the two-line minisign public key file. Embedded at build time; the downloaded artifact of a

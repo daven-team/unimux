@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <title>unimux</title>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self' data:; script-src 'self'" />
+    <!-- connect-src: Tauri's IPC custom protocol for the 1.2.0 update windows (without it every call falls back to postMessage after a CSP refusal); Electron makes no requests. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self' data:; script-src 'self'; connect-src ipc: http://ipc.localhost" />
     <link rel="stylesheet" href="splash.css" />
   </head>
   <body>

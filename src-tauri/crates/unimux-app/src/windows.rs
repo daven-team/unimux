@@ -117,6 +117,10 @@ pub fn show_main(ctx: &AppContext) {
         return;
     };
     ctx.mark("window-shown");
+    // signalUpdateReady (1.1.4 did it on ready-to-show): completes the update window's last step. U3 adds the heartbeat wait
+    // and clearGateFailureIfUpdated.
+    let data_dir = ctx.data_dir.clone();
+    std::thread::spawn(move || unimux_update::window::signal_update_ready(&data_dir, unimux_core::VERSION));
     if ctx.overrides.offscreen {
         show_without_focus(&window);
     } else {
