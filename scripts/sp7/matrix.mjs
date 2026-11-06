@@ -1,11 +1,14 @@
 // SP7: russh 0.65.1 against 1.1.4's ssh2 1.17 on real servers in Docker (OpenSSH 10 with four configs, OpenSSH 5.9,
 // Dropbear 2025 and 2016). For every server:
 //   - logins: the 1.1.4 path (scripts/sp7/ssh2-side.mjs under Electron: SshLogin, auth order, prompts) and the russh probe
-//     (src-tauri/crates/unimux-ssh/examples/sp7_probe.rs) with the same credentials; compared: success, negotiated algorithms;
+//     (src-tauri/crates/unimux-ssh/examples/sp7_probe.rs) with the same credentials; the probe picks its methods from the
+//     server's method lists in SshLogin's order; compared: success, the SshErrorCode (mapSshError vs the probe's error_code),
+//     the sequence of methods sent ("-> none", "-> publickey", ..., "-> false") and the negotiated algorithms;
 //   - host keys: for each host key algorithm, ssh2 trusts the key into a 1.1.4 known_hosts.json (KnownHostsStore) and russh
 //     must present the same bytes (base64 of the blob equal to the stored entry);
 //   - profiles: russh's own defaults and the "legacy" profile (SHA-1 kex + CBC) next to the 1.1.4 offer;
-//   - timing: 10 publickey logins per side on OpenSSH 10 (p50 / p95).
+//   - timing: 10 publickey logins per side on OpenSSH 10 (p50 / p95), both from the start of the connect to authenticated
+//     (ssh2's 'ready' event, the probe's ms.authenticated).
 // Containers are started with ids recorded and removed by id at the end (never a prune). Images: scripts/sp7/docker/*.
 //
 //   cargo build -p unimux-ssh --example sp7_probe   (in src-tauri)
@@ -120,23 +123,26 @@ const fp = (b64) => `SHA256:${createHash('sha256').update(Buffer.from(b64, 'base
 const blobType = (b64) => { const b = Buffer.from(b64, 'base64'); return b.subarray(4, 4 + b.readUInt32BE(0)).toString('latin1'); };
 const pct = (xs, p) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))]; };
 
-/** Login cases: the 1.1.4 request and the russh steps that send the same methods in the same order (SshLogin's order). */
+/**
+ * Login cases: the 1.1.4 request (SshLogin) and the same credentials for the probe, which chooses its methods from the
+ * server's lists in SshLogin's order. Keyboard-interactive prompts are answered with `answers` on both sides.
+ */
 function loginCases(port) {
   const cases = [];
   for (const [label, file, enc] of USER_KEYS) {
     const text = readFileSync(join(keysDir, file), 'utf8');
-    // A refused key goes on to keyboard-interactive in 1.1.4 (3 tries, answered "nope"); russh does the same steps.
+    // A refused key goes on to keyboard-interactive where the server offers it (3 tries, answered "nope").
     cases.push({ id: `publickey ${label}`, ssh2: { user: 'sp7', privateKey: text, ...(enc ? { passphrase: PASS } : {}), answers: ['nope'], exec: 'echo sp7-ok' },
-      russh: { user: 'sp7', steps: [{ method: 'publickey', keyFile: join(keysDir, file), ...(enc ? { passphrase: PASS } : {}) }, ...Array.from({ length: 3 }, () => ({ method: 'kbd', answers: ['nope'] }))], exec: 'echo sp7-ok' } });
+      russh: { user: 'sp7', login: { keyFile: join(keysDir, file), ...(enc ? { passphrase: PASS } : {}), answers: ['nope'] }, exec: 'echo sp7-ok' } });
   }
-  cases.push({ id: 'saved password', ssh2: { user: 'sp7', password: 'sp7-pw', exec: 'echo sp7-ok' }, russh: { user: 'sp7', steps: [{ method: 'password', password: 'sp7-pw' }], exec: 'echo sp7-ok' } });
+  cases.push({ id: 'saved password', ssh2: { user: 'sp7', password: 'sp7-pw', exec: 'echo sp7-ok' }, russh: { user: 'sp7', login: { password: 'sp7-pw' }, exec: 'echo sp7-ok' } });
   cases.push({ id: 'password prompt', ssh2: { user: 'sp7', password: undefined, allowPasswordPrompt: true, promptPassword: 'sp7-pw', exec: 'echo sp7-ok' },
-    russh: { user: 'sp7', steps: [{ method: 'none' }, { method: 'password', password: 'sp7-pw' }], exec: 'echo sp7-ok' } });
+    russh: { user: 'sp7', login: { allowPasswordPrompt: true, promptPassword: 'sp7-pw' }, exec: 'echo sp7-ok' } });
   cases.push({ id: 'keyboard-interactive', ssh2: { user: 'kbd', answers: ['kbd-pw'], exec: 'echo sp7-ok' },
-    russh: { user: 'kbd', steps: [{ method: 'none' }, { method: 'kbd', answers: ['kbd-pw'] }], exec: 'echo sp7-ok' } });
-  // 1.1.4 goes on to keyboard-interactive after a refused saved password (3 tries, each answered "nope" here).
+    russh: { user: 'kbd', login: { answers: ['kbd-pw'] }, exec: 'echo sp7-ok' } });
+  // 1.1.4 goes on to keyboard-interactive after a refused saved password where the server offers it (3 tries, "nope").
   cases.push({ id: 'wrong saved password', ssh2: { user: 'sp7', password: 'nope', answers: ['nope'] },
-    russh: { user: 'sp7', steps: [{ method: 'password', password: 'nope' }, ...Array.from({ length: 3 }, () => ({ method: 'kbd', answers: ['nope'] }))] } });
+    russh: { user: 'sp7', login: { password: 'nope', answers: ['nope'] } } });
   return cases.map((c) => ({ ...c, ssh2: { kind: 'login', id: c.id, host: '127.0.0.1', port, ...c.ssh2 }, russh: { host: '127.0.0.1', port, profile: 'ssh2', ...c.russh } }));
 }
 
@@ -163,7 +169,7 @@ async function serverRun(server, dir, akDir) {
 
   // Host keys, one algorithm at a time.
   const hk2 = await ssh2Side(HOST_KEY_ALGS.map((alg) => ({ kind: 'hostkey', id: alg, host: '127.0.0.1', port, user: 'sp7', hostKeyAlg: alg, knownHostsFile: known })), dir);
-  const hkr = await russhSide(HOST_KEY_ALGS.map((alg) => ({ host: '127.0.0.1', port, user: 'sp7', profile: 'legacy', hostKeyAlgs: [alg], steps: [] })), dir);
+  const hkr = await russhSide(HOST_KEY_ALGS.map((alg) => ({ host: '127.0.0.1', port, user: 'sp7', profile: 'legacy', hostKeyAlgs: [alg] })), dir);
   const stored = existsSync(known) ? JSON.parse(readFileSync(known, 'utf8')).entries : [];
   HOST_KEY_ALGS.forEach((alg, i) => {
     const a = hk2[i];
@@ -182,7 +188,7 @@ async function serverRun(server, dir, akDir) {
   }
 
   // Offer profiles: one saved-password login each.
-  const pw = { host: '127.0.0.1', port, user: 'sp7', steps: [{ method: 'password', password: 'sp7-pw' }] };
+  const pw = { host: '127.0.0.1', port, user: 'sp7', login: { password: 'sp7-pw' } };
   const prof = await russhSide(['ssh2', 'russh', 'legacy'].map((profile) => ({ ...pw, profile })), dir);
   result.profiles = ['ssh2', 'russh', 'legacy'].map((profile, i) => ({ profile, ok: prof[i].ok, names: prof[i].names, error: prof[i].error }));
 
@@ -191,11 +197,11 @@ async function serverRun(server, dir, akDir) {
     const key = join(keysDir, 'ssh2-ed25519.key');
     const n = 10;
     const t2 = await ssh2Side(Array.from({ length: n }, (_, i) => ({ kind: 'login', id: `t${i}`, host: '127.0.0.1', port, user: 'sp7', privateKey: readFileSync(key, 'utf8') })), dir);
-    const tr = await russhSide(Array.from({ length: n }, () => ({ host: '127.0.0.1', port, user: 'sp7', profile: 'ssh2', steps: [{ method: 'publickey', keyFile: key }] })), dir);
+    const tr = await russhSide(Array.from({ length: n }, () => ({ host: '127.0.0.1', port, user: 'sp7', profile: 'ssh2', login: { keyFile: key } })), dir);
     result.timing = {
       runs: n,
       ssh2: { p50: pct(t2.map((x) => x.ms.ready), 50), p95: pct(t2.map((x) => x.ms.ready), 95), kexP50: pct(t2.map((x) => x.ms.kex), 50) },
-      russh: { p50: pct(tr.map((x) => x.ms.total), 50), p95: pct(tr.map((x) => x.ms.total), 95), kexP50: pct(tr.map((x) => x.ms.kex), 50) },
+      russh: { p50: pct(tr.map((x) => x.ms.authenticated), 50), p95: pct(tr.map((x) => x.ms.authenticated), 95), kexP50: pct(tr.map((x) => x.ms.kex), 50) },
     };
   }
   return result;
@@ -225,18 +231,23 @@ const names = (n) => (n ? `${n.kex} / ${n.hostKey} / ${n.cipher}${aead(n.cipher)
 // With an AEAD cipher (GCM, chacha20-poly1305) no MAC is used: ssh2 reports '' and russh the first common name.
 const aead = (c) => /gcm|poly1305/.test(c ?? '');
 const sameNames = (a, b) => !!(a && b && a.kex === b.kex && a.hostKey === b.hostKey && a.cipher === b.cipher && (aead(a.cipher) || a.mac === b.mac));
-/** A short form of a russh failure for the tables (the full text stays in matrix.json). */
+/** A short form of a russh result for the tables: the SshErrorCode, plus the cause of a protocol failure (full text in matrix.json). */
 const russhShort = (x) => {
   if (x.ok) return 'ok';
-  const m = /No common (\w+) algorithm/.exec(x.error ?? '');
-  if (m) return `fail (no common ${m[1].toLowerCase()})`;
-  return `fail (${x.error ?? x.steps?.map((st) => st.error ?? (st.success ? 'ok' : 'denied')).join(',')})`;
+  const m = /No common (\w+) algorithm/i.exec(x.error ?? '');
+  return `fail (${x.code ?? 'unknown'}${m ? `: no common ${m[1].toLowerCase()}` : ''})`;
 };
+/** ssh2's choices in the auth handler ("-> none", "-> publickey", ..., "-> false"), without the method lists. */
+const ssh2Sent = (l) => (l.methodsSeen ?? []).filter((m) => typeof m === 'string' && m.startsWith('-> '));
+const sameList = (a, b) => JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
+const flow = (xs) => (xs?.length ? xs.map((x) => x.slice(3)).join(', ') : '-');
 const summary = results.map((r) => ({
   server: r.server, banner: r.banner,
   logins: r.logins.map((l) => ({
     id: l.id, ssh2: l.ssh2.ok ? 'ok' : `fail (${l.ssh2.code ?? l.ssh2.error})`, russh: russhShort(l.russh), legacy: russhShort(l.legacy), russhError: l.russh.error, legacyNames: l.legacy.names,
-    sameOutcome: !!l.ssh2.ok === !!l.russh.ok, sameAlgorithms: !l.ssh2.ok || sameNames(l.ssh2.names, l.russh.names),
+    sameOutcome: !!l.ssh2.ok === !!l.russh.ok && (!!l.ssh2.ok || l.ssh2.code === l.russh.code),
+    sameMethods: sameList(ssh2Sent(l.ssh2), l.russh.methods), sent: { ssh2: ssh2Sent(l.ssh2), russh: l.russh.methods ?? [] },
+    ssh2Code: l.ssh2.code, russhCode: l.russh.code, sameAlgorithms: !l.ssh2.ok || sameNames(l.ssh2.names, l.russh.names),
     ssh2Names: l.ssh2.names, russhNames: l.russh.names, ssh2Methods: l.ssh2.methodsSeen, ssh2Events: l.ssh2.events, ssh2Error: l.ssh2.error, russhSteps: l.russh.steps, ssh2Prompts: l.ssh2.prompts, banner: { ssh2: l.ssh2.banner ?? null, russh: l.russh.banner ?? null },
   })),
   hostKeys: r.hostKeys, profiles: r.profiles, timing: r.timing,
@@ -246,9 +257,12 @@ if (!only) writeFileSync(resolve(root, 'test/golden/sp7/matrix.json'),`${JSON.st
 
 for (const r of summary) {
   console.log(`\n### ${r.server} (\`${r.banner}\`)\n`);
-  console.log('| login | 1.1.4 (ssh2) | russh, 1.1.4 offer | same algorithms | russh, legacy offer |');
-  console.log('|---|---|---|---|---|');
-  for (const l of r.logins) console.log(`| ${l.id} | ${l.ssh2} | ${l.russh} | ${l.sameAlgorithms ? 'yes' : `NO: ${names(l.ssh2Names)} vs ${names(l.russhNames)}`} | ${l.legacy} |`);
+  console.log('| login | 1.1.4 (ssh2) | russh, 1.1.4 offer | methods sent (1.1.4 = russh) | same algorithms | russh, legacy offer |');
+  console.log('|---|---|---|---|---|---|');
+  for (const l of r.logins) {
+    const sent = l.sameMethods ? flow(l.sent.ssh2) : `NO: ${flow(l.sent.ssh2)} vs ${flow(l.sent.russh)}`;
+    console.log(`| ${l.id} | ${l.ssh2} | ${l.russh} | ${sent} | ${l.sameAlgorithms ? 'yes' : `NO: ${names(l.ssh2Names)} vs ${names(l.russhNames)}`} | ${l.legacy} |`);
+  }
   const first = r.logins.find((l) => l.ssh2Names || l.russhNames || l.legacyNames);
   console.log(`\nnegotiated: 1.1.4 ${names(first?.ssh2Names)}; russh ${names(first?.russhNames)}; russh legacy offer ${names(first?.legacyNames)}\n`);
   console.log('| host key algorithm | ssh2 | russh | known_hosts.json entry equal |');
@@ -257,8 +271,8 @@ for (const r of summary) {
   console.log('\n| russh profile | saved-password login | negotiated |');
   console.log('|---|---|---|');
   for (const p of r.profiles) console.log(`| ${p.profile} | ${russhShort(p)} | ${names(p.names)} |`);
-  if (r.timing) console.log(`\ntiming (${r.timing.runs} publickey ed25519 logins, ms to authenticated): ssh2 p50 ${r.timing.ssh2.p50} p95 ${r.timing.ssh2.p95} (kex ${r.timing.ssh2.kexP50}); russh p50 ${r.timing.russh.p50} p95 ${r.timing.russh.p95} (kex ${r.timing.russh.kexP50})`);
+  if (r.timing) console.log(`\ntiming (${r.timing.runs} publickey ed25519 logins, ms from connect to authenticated): ssh2 p50 ${r.timing.ssh2.p50} p95 ${r.timing.ssh2.p95} (kex ${r.timing.ssh2.kexP50}); russh p50 ${r.timing.russh.p50} p95 ${r.timing.russh.p95} (kex ${r.timing.russh.kexP50})`);
 }
-const bad = summary.flatMap((r) => [...r.logins.filter((l) => !l.sameOutcome || !l.sameAlgorithms).map((l) => `${r.server}: ${l.id}`), ...r.hostKeys.filter((h) => (h.ssh2 || h.russh) && !h.equal).map((h) => `${r.server}: host key ${h.alg}`)]);
+const bad = summary.flatMap((r) => [...r.logins.filter((l) => !l.sameOutcome || !l.sameMethods || !l.sameAlgorithms).map((l) => `${r.server}: ${l.id}`), ...r.hostKeys.filter((h) => (h.ssh2 || h.russh) && !h.equal).map((h) => `${r.server}: host key ${h.alg}`)]);
 console.log(bad.length ? `\nDIFFERENCES:\n${bad.join('\n')}` : '\nno differences between 1.1.4 and russh (1.1.4 offer)');
 process.exit(bad.length ? 1 : 0);

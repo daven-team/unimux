@@ -18,6 +18,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -63,6 +72,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -108,6 +126,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -153,6 +180,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -198,6 +234,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -244,6 +289,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -289,6 +343,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -335,6 +398,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -381,6 +453,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -427,6 +508,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> password"
+      ],
+      "russh": [
+       "-> password"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -472,6 +562,17 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> none",
+       "-> password"
+      ],
+      "russh": [
+       "-> none",
+       "-> password"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -539,6 +640,17 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> none",
+       "-> keyboard-interactive"
+      ],
+      "russh": [
+       "-> none",
+       "-> keyboard-interactive"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -573,7 +685,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -616,8 +728,8 @@
     {
      "id": "wrong saved password",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "curve25519-sha256@libssh.org",
       "hostKey": "ssh-ed25519",
@@ -626,6 +738,25 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> password",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ],
+      "russh": [
+       "-> password",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -685,7 +816,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -707,7 +838,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -729,7 +860,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -910,14 +1041,14 @@
    "timing": {
     "runs": 10,
     "ssh2": {
-     "p50": 87,
-     "p95": 150,
-     "kexP50": 58
+     "p50": 81,
+     "p95": 81,
+     "kexP50": 45
     },
     "russh": {
-     "p50": 100,
-     "p95": 168,
-     "kexP50": 64
+     "p50": 80,
+     "p95": 81,
+     "kexP50": 44
     }
    }
   },
@@ -928,8 +1059,8 @@
     {
      "id": "publickey ed25519",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "diffie-hellman-group-exchange-sha256",
       "hostKey": "ssh-rsa",
@@ -938,6 +1069,25 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ],
+      "russh": [
+       "-> publickey",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "diffie-hellman-group-exchange-sha256",
@@ -997,7 +1147,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1019,7 +1169,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1041,7 +1191,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1109,8 +1259,8 @@
     {
      "id": "publickey ecdsa256",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "diffie-hellman-group-exchange-sha256",
       "hostKey": "ssh-rsa",
@@ -1119,6 +1269,25 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ],
+      "russh": [
+       "-> publickey",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "diffie-hellman-group-exchange-sha256",
@@ -1178,7 +1347,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1200,7 +1369,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1222,7 +1391,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1290,8 +1459,8 @@
     {
      "id": "publickey ecdsa384",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "diffie-hellman-group-exchange-sha256",
       "hostKey": "ssh-rsa",
@@ -1300,6 +1469,25 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ],
+      "russh": [
+       "-> publickey",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "diffie-hellman-group-exchange-sha256",
@@ -1359,7 +1547,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1381,7 +1569,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1403,7 +1591,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1471,8 +1659,8 @@
     {
      "id": "publickey ecdsa521",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "diffie-hellman-group-exchange-sha256",
       "hostKey": "ssh-rsa",
@@ -1481,6 +1669,25 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ],
+      "russh": [
+       "-> publickey",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "diffie-hellman-group-exchange-sha256",
@@ -1540,7 +1747,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1562,7 +1769,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1584,7 +1791,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1662,6 +1869,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "diffie-hellman-group-exchange-sha256",
@@ -1698,8 +1914,8 @@
     {
      "id": "publickey ed25519 enc (1.1.4 generated)",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "diffie-hellman-group-exchange-sha256",
       "hostKey": "ssh-rsa",
@@ -1708,6 +1924,25 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ],
+      "russh": [
+       "-> publickey",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "diffie-hellman-group-exchange-sha256",
@@ -1767,7 +2002,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1789,7 +2024,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1811,7 +2046,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -1889,6 +2124,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "diffie-hellman-group-exchange-sha256",
@@ -1935,6 +2179,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "diffie-hellman-group-exchange-sha256",
@@ -1981,6 +2234,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "diffie-hellman-group-exchange-sha256",
@@ -2027,6 +2289,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> password"
+      ],
+      "russh": [
+       "-> password"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "diffie-hellman-group-exchange-sha256",
@@ -2072,6 +2343,17 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> none",
+       "-> password"
+      ],
+      "russh": [
+       "-> none",
+       "-> password"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "diffie-hellman-group-exchange-sha256",
@@ -2139,6 +2421,17 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> none",
+       "-> keyboard-interactive"
+      ],
+      "russh": [
+       "-> none",
+       "-> keyboard-interactive"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "diffie-hellman-group-exchange-sha256",
@@ -2173,7 +2466,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -2216,8 +2509,8 @@
     {
      "id": "wrong saved password",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "diffie-hellman-group-exchange-sha256",
       "hostKey": "ssh-rsa",
@@ -2226,6 +2519,25 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> password",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ],
+      "russh": [
+       "-> password",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "diffie-hellman-group-exchange-sha256",
@@ -2285,7 +2597,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -2307,7 +2619,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -2329,7 +2641,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -2500,8 +2812,8 @@
     {
      "id": "publickey ed25519",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common kex)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (protocol: no common kex)",
+     "legacy": "fail (auth)",
      "russhError": "connect: No common Kex algorithm - ours: [\"curve25519-sha256@libssh.org\", \"curve25519-sha256\", \"ecdh-sha2-nistp256\", \"ecdh-sha2-nistp384\", \"ecdh-sha2-nistp521\", \"diffie-hellman-group-exchange-sha256\", \"diffie-hellman-group14-sha256\", \"diffie-hellman-group15-sha512\", \"diffie-hellman-group16-sha512\", \"diffie-hellman-group17-sha512\", \"diffie-hellman-group18-sha512\"], theirs: [\"diffie-hellman-group14-sha1\", \"diffie-hellman-group-exchange-sha1\", \"diffie-hellman-group1-sha1\", \"ext-info-s\", \"kex-strict-s-v00@openssh.com\"]",
      "legacyNames": {
       "kex": "diffie-hellman-group-exchange-sha1",
@@ -2511,6 +2823,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -2527,8 +2846,8 @@
     {
      "id": "publickey ecdsa256",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common kex)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (protocol: no common kex)",
+     "legacy": "fail (auth)",
      "russhError": "connect: No common Kex algorithm - ours: [\"curve25519-sha256@libssh.org\", \"curve25519-sha256\", \"ecdh-sha2-nistp256\", \"ecdh-sha2-nistp384\", \"ecdh-sha2-nistp521\", \"diffie-hellman-group-exchange-sha256\", \"diffie-hellman-group14-sha256\", \"diffie-hellman-group15-sha512\", \"diffie-hellman-group16-sha512\", \"diffie-hellman-group17-sha512\", \"diffie-hellman-group18-sha512\"], theirs: [\"diffie-hellman-group14-sha1\", \"diffie-hellman-group-exchange-sha1\", \"diffie-hellman-group1-sha1\", \"ext-info-s\", \"kex-strict-s-v00@openssh.com\"]",
      "legacyNames": {
       "kex": "diffie-hellman-group-exchange-sha1",
@@ -2538,6 +2857,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -2554,8 +2880,8 @@
     {
      "id": "publickey ecdsa384",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common kex)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (protocol: no common kex)",
+     "legacy": "fail (auth)",
      "russhError": "connect: No common Kex algorithm - ours: [\"curve25519-sha256@libssh.org\", \"curve25519-sha256\", \"ecdh-sha2-nistp256\", \"ecdh-sha2-nistp384\", \"ecdh-sha2-nistp521\", \"diffie-hellman-group-exchange-sha256\", \"diffie-hellman-group14-sha256\", \"diffie-hellman-group15-sha512\", \"diffie-hellman-group16-sha512\", \"diffie-hellman-group17-sha512\", \"diffie-hellman-group18-sha512\"], theirs: [\"diffie-hellman-group14-sha1\", \"diffie-hellman-group-exchange-sha1\", \"diffie-hellman-group1-sha1\", \"ext-info-s\", \"kex-strict-s-v00@openssh.com\"]",
      "legacyNames": {
       "kex": "diffie-hellman-group-exchange-sha1",
@@ -2565,6 +2891,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -2581,8 +2914,8 @@
     {
      "id": "publickey ecdsa521",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common kex)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (protocol: no common kex)",
+     "legacy": "fail (auth)",
      "russhError": "connect: No common Kex algorithm - ours: [\"curve25519-sha256@libssh.org\", \"curve25519-sha256\", \"ecdh-sha2-nistp256\", \"ecdh-sha2-nistp384\", \"ecdh-sha2-nistp521\", \"diffie-hellman-group-exchange-sha256\", \"diffie-hellman-group14-sha256\", \"diffie-hellman-group15-sha512\", \"diffie-hellman-group16-sha512\", \"diffie-hellman-group17-sha512\", \"diffie-hellman-group18-sha512\"], theirs: [\"diffie-hellman-group14-sha1\", \"diffie-hellman-group-exchange-sha1\", \"diffie-hellman-group1-sha1\", \"ext-info-s\", \"kex-strict-s-v00@openssh.com\"]",
      "legacyNames": {
       "kex": "diffie-hellman-group-exchange-sha1",
@@ -2592,6 +2925,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -2608,7 +2948,7 @@
     {
      "id": "publickey rsa3072",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common kex)",
+     "russh": "fail (protocol: no common kex)",
      "legacy": "ok",
      "russhError": "connect: No common Kex algorithm - ours: [\"curve25519-sha256@libssh.org\", \"curve25519-sha256\", \"ecdh-sha2-nistp256\", \"ecdh-sha2-nistp384\", \"ecdh-sha2-nistp521\", \"diffie-hellman-group-exchange-sha256\", \"diffie-hellman-group14-sha256\", \"diffie-hellman-group15-sha512\", \"diffie-hellman-group16-sha512\", \"diffie-hellman-group17-sha512\", \"diffie-hellman-group18-sha512\"], theirs: [\"diffie-hellman-group14-sha1\", \"diffie-hellman-group-exchange-sha1\", \"diffie-hellman-group1-sha1\", \"ext-info-s\", \"kex-strict-s-v00@openssh.com\"]",
      "legacyNames": {
@@ -2619,6 +2959,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -2635,8 +2982,8 @@
     {
      "id": "publickey ed25519 enc (1.1.4 generated)",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common kex)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (protocol: no common kex)",
+     "legacy": "fail (auth)",
      "russhError": "connect: No common Kex algorithm - ours: [\"curve25519-sha256@libssh.org\", \"curve25519-sha256\", \"ecdh-sha2-nistp256\", \"ecdh-sha2-nistp384\", \"ecdh-sha2-nistp521\", \"diffie-hellman-group-exchange-sha256\", \"diffie-hellman-group14-sha256\", \"diffie-hellman-group15-sha512\", \"diffie-hellman-group16-sha512\", \"diffie-hellman-group17-sha512\", \"diffie-hellman-group18-sha512\"], theirs: [\"diffie-hellman-group14-sha1\", \"diffie-hellman-group-exchange-sha1\", \"diffie-hellman-group1-sha1\", \"ext-info-s\", \"kex-strict-s-v00@openssh.com\"]",
      "legacyNames": {
       "kex": "diffie-hellman-group-exchange-sha1",
@@ -2646,6 +2993,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -2662,7 +3016,7 @@
     {
      "id": "publickey rsa3072 enc (OpenSSH)",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common kex)",
+     "russh": "fail (protocol: no common kex)",
      "legacy": "ok",
      "russhError": "connect: No common Kex algorithm - ours: [\"curve25519-sha256@libssh.org\", \"curve25519-sha256\", \"ecdh-sha2-nistp256\", \"ecdh-sha2-nistp384\", \"ecdh-sha2-nistp521\", \"diffie-hellman-group-exchange-sha256\", \"diffie-hellman-group14-sha256\", \"diffie-hellman-group15-sha512\", \"diffie-hellman-group16-sha512\", \"diffie-hellman-group17-sha512\", \"diffie-hellman-group18-sha512\"], theirs: [\"diffie-hellman-group14-sha1\", \"diffie-hellman-group-exchange-sha1\", \"diffie-hellman-group1-sha1\", \"ext-info-s\", \"kex-strict-s-v00@openssh.com\"]",
      "legacyNames": {
@@ -2673,6 +3027,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -2689,7 +3050,7 @@
     {
      "id": "publickey rsa2048 PEM AES-128",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common kex)",
+     "russh": "fail (protocol: no common kex)",
      "legacy": "ok",
      "russhError": "connect: No common Kex algorithm - ours: [\"curve25519-sha256@libssh.org\", \"curve25519-sha256\", \"ecdh-sha2-nistp256\", \"ecdh-sha2-nistp384\", \"ecdh-sha2-nistp521\", \"diffie-hellman-group-exchange-sha256\", \"diffie-hellman-group14-sha256\", \"diffie-hellman-group15-sha512\", \"diffie-hellman-group16-sha512\", \"diffie-hellman-group17-sha512\", \"diffie-hellman-group18-sha512\"], theirs: [\"diffie-hellman-group14-sha1\", \"diffie-hellman-group-exchange-sha1\", \"diffie-hellman-group1-sha1\", \"ext-info-s\", \"kex-strict-s-v00@openssh.com\"]",
      "legacyNames": {
@@ -2700,6 +3061,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -2716,7 +3084,7 @@
     {
      "id": "publickey rsa2048 PPK v2 enc",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common kex)",
+     "russh": "fail (protocol: no common kex)",
      "legacy": "ok",
      "russhError": "connect: No common Kex algorithm - ours: [\"curve25519-sha256@libssh.org\", \"curve25519-sha256\", \"ecdh-sha2-nistp256\", \"ecdh-sha2-nistp384\", \"ecdh-sha2-nistp521\", \"diffie-hellman-group-exchange-sha256\", \"diffie-hellman-group14-sha256\", \"diffie-hellman-group15-sha512\", \"diffie-hellman-group16-sha512\", \"diffie-hellman-group17-sha512\", \"diffie-hellman-group18-sha512\"], theirs: [\"diffie-hellman-group14-sha1\", \"diffie-hellman-group-exchange-sha1\", \"diffie-hellman-group1-sha1\", \"ext-info-s\", \"kex-strict-s-v00@openssh.com\"]",
      "legacyNames": {
@@ -2727,6 +3095,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -2743,7 +3118,7 @@
     {
      "id": "saved password",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common kex)",
+     "russh": "fail (protocol: no common kex)",
      "legacy": "ok",
      "russhError": "connect: No common Kex algorithm - ours: [\"curve25519-sha256@libssh.org\", \"curve25519-sha256\", \"ecdh-sha2-nistp256\", \"ecdh-sha2-nistp384\", \"ecdh-sha2-nistp521\", \"diffie-hellman-group-exchange-sha256\", \"diffie-hellman-group14-sha256\", \"diffie-hellman-group15-sha512\", \"diffie-hellman-group16-sha512\", \"diffie-hellman-group17-sha512\", \"diffie-hellman-group18-sha512\"], theirs: [\"diffie-hellman-group14-sha1\", \"diffie-hellman-group-exchange-sha1\", \"diffie-hellman-group1-sha1\", \"ext-info-s\", \"kex-strict-s-v00@openssh.com\"]",
      "legacyNames": {
@@ -2754,6 +3129,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -2770,7 +3152,7 @@
     {
      "id": "password prompt",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common kex)",
+     "russh": "fail (protocol: no common kex)",
      "legacy": "ok",
      "russhError": "connect: No common Kex algorithm - ours: [\"curve25519-sha256@libssh.org\", \"curve25519-sha256\", \"ecdh-sha2-nistp256\", \"ecdh-sha2-nistp384\", \"ecdh-sha2-nistp521\", \"diffie-hellman-group-exchange-sha256\", \"diffie-hellman-group14-sha256\", \"diffie-hellman-group15-sha512\", \"diffie-hellman-group16-sha512\", \"diffie-hellman-group17-sha512\", \"diffie-hellman-group18-sha512\"], theirs: [\"diffie-hellman-group14-sha1\", \"diffie-hellman-group-exchange-sha1\", \"diffie-hellman-group1-sha1\", \"ext-info-s\", \"kex-strict-s-v00@openssh.com\"]",
      "legacyNames": {
@@ -2781,6 +3163,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -2797,7 +3186,7 @@
     {
      "id": "keyboard-interactive",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common kex)",
+     "russh": "fail (protocol: no common kex)",
      "legacy": "ok",
      "russhError": "connect: No common Kex algorithm - ours: [\"curve25519-sha256@libssh.org\", \"curve25519-sha256\", \"ecdh-sha2-nistp256\", \"ecdh-sha2-nistp384\", \"ecdh-sha2-nistp521\", \"diffie-hellman-group-exchange-sha256\", \"diffie-hellman-group14-sha256\", \"diffie-hellman-group15-sha512\", \"diffie-hellman-group16-sha512\", \"diffie-hellman-group17-sha512\", \"diffie-hellman-group18-sha512\"], theirs: [\"diffie-hellman-group14-sha1\", \"diffie-hellman-group-exchange-sha1\", \"diffie-hellman-group1-sha1\", \"ext-info-s\", \"kex-strict-s-v00@openssh.com\"]",
      "legacyNames": {
@@ -2808,6 +3197,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -2824,8 +3220,8 @@
     {
      "id": "wrong saved password",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common kex)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (protocol: no common kex)",
+     "legacy": "fail (auth)",
      "russhError": "connect: No common Kex algorithm - ours: [\"curve25519-sha256@libssh.org\", \"curve25519-sha256\", \"ecdh-sha2-nistp256\", \"ecdh-sha2-nistp384\", \"ecdh-sha2-nistp521\", \"diffie-hellman-group-exchange-sha256\", \"diffie-hellman-group14-sha256\", \"diffie-hellman-group15-sha512\", \"diffie-hellman-group16-sha512\", \"diffie-hellman-group17-sha512\", \"diffie-hellman-group18-sha512\"], theirs: [\"diffie-hellman-group14-sha1\", \"diffie-hellman-group-exchange-sha1\", \"diffie-hellman-group1-sha1\", \"ext-info-s\", \"kex-strict-s-v00@openssh.com\"]",
      "legacyNames": {
       "kex": "diffie-hellman-group-exchange-sha1",
@@ -2835,6 +3231,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -2949,7 +3352,7 @@
     {
      "id": "publickey ed25519",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common cipher)",
+     "russh": "fail (protocol: no common cipher)",
      "legacy": "ok",
      "russhError": "connect: No common Cipher algorithm - ours: [\"aes128-gcm@openssh.com\", \"aes256-gcm@openssh.com\", \"aes128-ctr\", \"aes192-ctr\", \"aes256-ctr\"], theirs: [\"aes128-cbc\", \"aes192-cbc\", \"aes256-cbc\", \"3des-cbc\"]",
      "legacyNames": {
@@ -2960,6 +3363,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -2976,7 +3386,7 @@
     {
      "id": "publickey ecdsa256",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common cipher)",
+     "russh": "fail (protocol: no common cipher)",
      "legacy": "ok",
      "russhError": "connect: No common Cipher algorithm - ours: [\"aes128-gcm@openssh.com\", \"aes256-gcm@openssh.com\", \"aes128-ctr\", \"aes192-ctr\", \"aes256-ctr\"], theirs: [\"aes128-cbc\", \"aes192-cbc\", \"aes256-cbc\", \"3des-cbc\"]",
      "legacyNames": {
@@ -2987,6 +3397,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -3003,7 +3420,7 @@
     {
      "id": "publickey ecdsa384",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common cipher)",
+     "russh": "fail (protocol: no common cipher)",
      "legacy": "ok",
      "russhError": "connect: No common Cipher algorithm - ours: [\"aes128-gcm@openssh.com\", \"aes256-gcm@openssh.com\", \"aes128-ctr\", \"aes192-ctr\", \"aes256-ctr\"], theirs: [\"aes128-cbc\", \"aes192-cbc\", \"aes256-cbc\", \"3des-cbc\"]",
      "legacyNames": {
@@ -3014,6 +3431,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -3030,7 +3454,7 @@
     {
      "id": "publickey ecdsa521",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common cipher)",
+     "russh": "fail (protocol: no common cipher)",
      "legacy": "ok",
      "russhError": "connect: No common Cipher algorithm - ours: [\"aes128-gcm@openssh.com\", \"aes256-gcm@openssh.com\", \"aes128-ctr\", \"aes192-ctr\", \"aes256-ctr\"], theirs: [\"aes128-cbc\", \"aes192-cbc\", \"aes256-cbc\", \"3des-cbc\"]",
      "legacyNames": {
@@ -3041,6 +3465,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -3057,7 +3488,7 @@
     {
      "id": "publickey rsa3072",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common cipher)",
+     "russh": "fail (protocol: no common cipher)",
      "legacy": "ok",
      "russhError": "connect: No common Cipher algorithm - ours: [\"aes128-gcm@openssh.com\", \"aes256-gcm@openssh.com\", \"aes128-ctr\", \"aes192-ctr\", \"aes256-ctr\"], theirs: [\"aes128-cbc\", \"aes192-cbc\", \"aes256-cbc\", \"3des-cbc\"]",
      "legacyNames": {
@@ -3068,6 +3499,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -3084,7 +3522,7 @@
     {
      "id": "publickey ed25519 enc (1.1.4 generated)",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common cipher)",
+     "russh": "fail (protocol: no common cipher)",
      "legacy": "ok",
      "russhError": "connect: No common Cipher algorithm - ours: [\"aes128-gcm@openssh.com\", \"aes256-gcm@openssh.com\", \"aes128-ctr\", \"aes192-ctr\", \"aes256-ctr\"], theirs: [\"aes128-cbc\", \"aes192-cbc\", \"aes256-cbc\", \"3des-cbc\"]",
      "legacyNames": {
@@ -3095,6 +3533,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -3111,7 +3556,7 @@
     {
      "id": "publickey rsa3072 enc (OpenSSH)",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common cipher)",
+     "russh": "fail (protocol: no common cipher)",
      "legacy": "ok",
      "russhError": "connect: No common Cipher algorithm - ours: [\"aes128-gcm@openssh.com\", \"aes256-gcm@openssh.com\", \"aes128-ctr\", \"aes192-ctr\", \"aes256-ctr\"], theirs: [\"aes128-cbc\", \"aes192-cbc\", \"aes256-cbc\", \"3des-cbc\"]",
      "legacyNames": {
@@ -3122,6 +3567,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -3138,7 +3590,7 @@
     {
      "id": "publickey rsa2048 PEM AES-128",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common cipher)",
+     "russh": "fail (protocol: no common cipher)",
      "legacy": "ok",
      "russhError": "connect: No common Cipher algorithm - ours: [\"aes128-gcm@openssh.com\", \"aes256-gcm@openssh.com\", \"aes128-ctr\", \"aes192-ctr\", \"aes256-ctr\"], theirs: [\"aes128-cbc\", \"aes192-cbc\", \"aes256-cbc\", \"3des-cbc\"]",
      "legacyNames": {
@@ -3149,6 +3601,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -3165,7 +3624,7 @@
     {
      "id": "publickey rsa2048 PPK v2 enc",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common cipher)",
+     "russh": "fail (protocol: no common cipher)",
      "legacy": "ok",
      "russhError": "connect: No common Cipher algorithm - ours: [\"aes128-gcm@openssh.com\", \"aes256-gcm@openssh.com\", \"aes128-ctr\", \"aes192-ctr\", \"aes256-ctr\"], theirs: [\"aes128-cbc\", \"aes192-cbc\", \"aes256-cbc\", \"3des-cbc\"]",
      "legacyNames": {
@@ -3176,6 +3635,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -3192,7 +3658,7 @@
     {
      "id": "saved password",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common cipher)",
+     "russh": "fail (protocol: no common cipher)",
      "legacy": "ok",
      "russhError": "connect: No common Cipher algorithm - ours: [\"aes128-gcm@openssh.com\", \"aes256-gcm@openssh.com\", \"aes128-ctr\", \"aes192-ctr\", \"aes256-ctr\"], theirs: [\"aes128-cbc\", \"aes192-cbc\", \"aes256-cbc\", \"3des-cbc\"]",
      "legacyNames": {
@@ -3203,6 +3669,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -3219,7 +3692,7 @@
     {
      "id": "password prompt",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common cipher)",
+     "russh": "fail (protocol: no common cipher)",
      "legacy": "ok",
      "russhError": "connect: No common Cipher algorithm - ours: [\"aes128-gcm@openssh.com\", \"aes256-gcm@openssh.com\", \"aes128-ctr\", \"aes192-ctr\", \"aes256-ctr\"], theirs: [\"aes128-cbc\", \"aes192-cbc\", \"aes256-cbc\", \"3des-cbc\"]",
      "legacyNames": {
@@ -3230,6 +3703,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -3246,7 +3726,7 @@
     {
      "id": "keyboard-interactive",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common cipher)",
+     "russh": "fail (protocol: no common cipher)",
      "legacy": "ok",
      "russhError": "connect: No common Cipher algorithm - ours: [\"aes128-gcm@openssh.com\", \"aes256-gcm@openssh.com\", \"aes128-ctr\", \"aes192-ctr\", \"aes256-ctr\"], theirs: [\"aes128-cbc\", \"aes192-cbc\", \"aes256-cbc\", \"3des-cbc\"]",
      "legacyNames": {
@@ -3257,6 +3737,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -3273,8 +3760,8 @@
     {
      "id": "wrong saved password",
      "ssh2": "fail (protocol)",
-     "russh": "fail (no common cipher)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (protocol: no common cipher)",
+     "legacy": "fail (auth)",
      "russhError": "connect: No common Cipher algorithm - ours: [\"aes128-gcm@openssh.com\", \"aes256-gcm@openssh.com\", \"aes128-ctr\", \"aes192-ctr\", \"aes256-ctr\"], theirs: [\"aes128-cbc\", \"aes192-cbc\", \"aes256-cbc\", \"3des-cbc\"]",
      "legacyNames": {
       "kex": "curve25519-sha256@libssh.org",
@@ -3284,6 +3771,13 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [],
+      "russh": []
+     },
+     "ssh2Code": "protocol",
+     "russhCode": "protocol",
      "sameAlgorithms": true,
      "russhNames": null,
      "ssh2Methods": [],
@@ -3402,8 +3896,8 @@
     {
      "id": "publickey ed25519",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "ecdh-sha2-nistp256",
       "hostKey": "ecdsa-sha2-nistp256",
@@ -3412,6 +3906,25 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ],
+      "russh": [
+       "-> publickey",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "ecdh-sha2-nistp256",
@@ -3471,7 +3984,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -3493,7 +4006,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -3515,7 +4028,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -3593,6 +4106,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "ecdh-sha2-nistp256",
@@ -3638,6 +4160,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "ecdh-sha2-nistp256",
@@ -3683,6 +4214,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "ecdh-sha2-nistp256",
@@ -3728,6 +4268,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "ecdh-sha2-nistp256",
@@ -3764,8 +4313,8 @@
     {
      "id": "publickey ed25519 enc (1.1.4 generated)",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "ecdh-sha2-nistp256",
       "hostKey": "ecdsa-sha2-nistp256",
@@ -3774,6 +4323,25 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ],
+      "russh": [
+       "-> publickey",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "ecdh-sha2-nistp256",
@@ -3833,7 +4401,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -3855,7 +4423,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -3877,7 +4445,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -3955,6 +4523,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "ecdh-sha2-nistp256",
@@ -4001,6 +4578,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "ecdh-sha2-nistp256",
@@ -4047,6 +4633,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "ecdh-sha2-nistp256",
@@ -4093,6 +4688,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> password"
+      ],
+      "russh": [
+       "-> password"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "ecdh-sha2-nistp256",
@@ -4138,6 +4742,17 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> none",
+       "-> password"
+      ],
+      "russh": [
+       "-> none",
+       "-> password"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "ecdh-sha2-nistp256",
@@ -4205,6 +4820,17 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> none",
+       "-> keyboard-interactive"
+      ],
+      "russh": [
+       "-> none",
+       "-> keyboard-interactive"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "ecdh-sha2-nistp256",
@@ -4239,7 +4865,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -4282,8 +4908,8 @@
     {
      "id": "wrong saved password",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "ecdh-sha2-nistp256",
       "hostKey": "ecdsa-sha2-nistp256",
@@ -4292,6 +4918,25 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> password",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ],
+      "russh": [
+       "-> password",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> keyboard-interactive",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "ecdh-sha2-nistp256",
@@ -4351,7 +4996,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -4373,7 +5018,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -4395,7 +5040,7 @@
        "partial": false
       },
       {
-       "method": "kbd",
+       "method": "keyboard-interactive",
        "prompts": [
         {
          "name": "",
@@ -4583,6 +5228,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -4628,6 +5282,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -4673,6 +5336,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -4718,6 +5390,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -4763,6 +5444,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -4809,6 +5499,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -4854,6 +5553,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -4900,6 +5608,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -4946,6 +5663,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -4992,6 +5718,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> password"
+      ],
+      "russh": [
+       "-> password"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5037,6 +5772,17 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> none",
+       "-> password"
+      ],
+      "russh": [
+       "-> none",
+       "-> password"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5092,8 +5838,8 @@
     {
      "id": "keyboard-interactive",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied)",
-     "legacy": "fail (denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "curve25519-sha256@libssh.org",
       "hostKey": "ssh-ed25519",
@@ -5102,6 +5848,19 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> none",
+       "-> false"
+      ],
+      "russh": [
+       "-> none",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5139,16 +5898,6 @@
         "password"
        ],
        "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
       }
      ],
      "ssh2Prompts": [],
@@ -5160,8 +5909,8 @@
     {
      "id": "wrong saved password",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "curve25519-sha256@libssh.org",
       "hostKey": "ssh-ed25519",
@@ -5170,6 +5919,19 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> password",
+       "-> false"
+      ],
+      "russh": [
+       "-> password",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5201,36 +5963,6 @@
      "russhSteps": [
       {
        "method": "password",
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
        "success": false,
        "remaining": [
         "publickey",
@@ -5370,6 +6102,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5415,6 +6156,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5460,6 +6210,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5505,6 +6264,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5550,6 +6318,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5596,6 +6373,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5641,6 +6427,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5687,6 +6482,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5733,6 +6537,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5779,6 +6592,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> password"
+      ],
+      "russh": [
+       "-> password"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5824,6 +6646,17 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> none",
+       "-> password"
+      ],
+      "russh": [
+       "-> none",
+       "-> password"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5879,8 +6712,8 @@
     {
      "id": "keyboard-interactive",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied)",
-     "legacy": "fail (denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "curve25519-sha256@libssh.org",
       "hostKey": "ssh-ed25519",
@@ -5889,6 +6722,19 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> none",
+       "-> false"
+      ],
+      "russh": [
+       "-> none",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5926,16 +6772,6 @@
         "password"
        ],
        "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
       }
      ],
      "ssh2Prompts": [],
@@ -5947,8 +6783,8 @@
     {
      "id": "wrong saved password",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "curve25519-sha256@libssh.org",
       "hostKey": "ssh-ed25519",
@@ -5957,6 +6793,19 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> password",
+       "-> false"
+      ],
+      "russh": [
+       "-> password",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -5988,36 +6837,6 @@
      "russhSteps": [
       {
        "method": "password",
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
        "success": false,
        "remaining": [
         "publickey",
@@ -6147,8 +6966,8 @@
     {
      "id": "publickey ed25519",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "curve25519-sha256@libssh.org",
       "hostKey": "ecdsa-sha2-nistp256",
@@ -6157,6 +6976,19 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey",
+       "-> false"
+      ],
+      "russh": [
+       "-> publickey",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -6194,36 +7026,6 @@
         "password"
        ],
        "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
       }
      ],
      "ssh2Prompts": [],
@@ -6245,6 +7047,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -6290,6 +7101,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -6335,6 +7155,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -6380,6 +7209,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -6416,8 +7254,8 @@
     {
      "id": "publickey ed25519 enc (1.1.4 generated)",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "curve25519-sha256@libssh.org",
       "hostKey": "ecdsa-sha2-nistp256",
@@ -6426,6 +7264,19 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey",
+       "-> false"
+      ],
+      "russh": [
+       "-> publickey",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -6463,36 +7314,6 @@
         "password"
        ],
        "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
       }
      ],
      "ssh2Prompts": [],
@@ -6514,6 +7335,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -6560,6 +7390,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -6606,6 +7445,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> publickey"
+      ],
+      "russh": [
+       "-> publickey"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -6652,6 +7500,15 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> password"
+      ],
+      "russh": [
+       "-> password"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -6697,6 +7554,17 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> none",
+       "-> password"
+      ],
+      "russh": [
+       "-> none",
+       "-> password"
+      ]
+     },
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -6752,8 +7620,8 @@
     {
      "id": "keyboard-interactive",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied)",
-     "legacy": "fail (denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "curve25519-sha256@libssh.org",
       "hostKey": "ecdsa-sha2-nistp256",
@@ -6762,6 +7630,19 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> none",
+       "-> false"
+      ],
+      "russh": [
+       "-> none",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -6799,16 +7680,6 @@
         "password"
        ],
        "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
       }
      ],
      "ssh2Prompts": [],
@@ -6820,8 +7691,8 @@
     {
      "id": "wrong saved password",
      "ssh2": "fail (auth)",
-     "russh": "fail (denied,denied,denied,denied)",
-     "legacy": "fail (denied,denied,denied,denied)",
+     "russh": "fail (auth)",
+     "legacy": "fail (auth)",
      "legacyNames": {
       "kex": "curve25519-sha256@libssh.org",
       "hostKey": "ecdsa-sha2-nistp256",
@@ -6830,6 +7701,19 @@
       "compression": "None"
      },
      "sameOutcome": true,
+     "sameMethods": true,
+     "sent": {
+      "ssh2": [
+       "-> password",
+       "-> false"
+      ],
+      "russh": [
+       "-> password",
+       "-> false"
+      ]
+     },
+     "ssh2Code": "auth",
+     "russhCode": "auth",
      "sameAlgorithms": true,
      "ssh2Names": {
       "kex": "curve25519-sha256@libssh.org",
@@ -6861,36 +7745,6 @@
      "russhSteps": [
       {
        "method": "password",
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
-       "success": false,
-       "remaining": [
-        "publickey",
-        "password"
-       ],
-       "partial": false
-      },
-      {
-       "method": "kbd",
-       "prompts": [],
        "success": false,
        "remaining": [
         "publickey",

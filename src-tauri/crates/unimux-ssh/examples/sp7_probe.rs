@@ -1,11 +1,14 @@
 //! SP7 probe: one russh 0.65.1 login against a test server, driven by scripts/sp7/matrix.mjs.
 //!
 //! `sp7_probe '<json spec>'` or `sp7_probe @spec.json` prints one JSON line per spec (a spec or a list of specs). Spec:
-//! `{host, port, user, profile: "ssh2" | "russh" | "legacy", hostKeyAlgs?: [name], steps: [{method: "none"} |
-//!   {method: "password", password} | {method: "publickey", keyFile, passphrase?} | {method: "kbd", answers: [..]}],
-//!   exec?: "command", timeoutMs?}`.
-//! Result: `{ok, error?, hostKey: {algorithm, type, base64}, names: {kex, hostKey, cipher, mac, compression}, banner?,
-//!   steps: [{method, success, remaining?, partial?, rsaHash?, prompts?}], exec?: {stdout, exitStatus}, ms: {...}}`.
+//! `{host, port, user, profile: "ssh2" | "russh" | "legacy", hostKeyAlgs?: [name], login?: {keyFile?, passphrase?, password?,
+//!   allowPasswordPrompt?, promptPassword?, answers?: [..]}, exec?: "command", timeoutMs?}`. Without `login` the probe only
+//!   connects (host key checks). With it, the methods follow 1.1.4's SshLogin order against the server's method lists
+//!   (`AuthOrder`), so the sequence can be compared with ssh2's.
+//! Result: `{ok, code?, error?, hostKey: {algorithm, type, base64}, names: {kex, hostKey, cipher, mac, compression}, banner?,
+//!   methods: ["-> none", "-> password", ..., "-> false"], steps: [{method, success, remaining?, partial?, rsaHash?, prompts?}],
+//!   exec?: {stdout, exitStatus}, ms: {connect, kex, auth, authenticated, total}}`. `code` is the SshErrorCode 1.1.4 maps the
+//!   matching ssh2 error to (`error_code`).
 //! Profiles: "russh" is `Preferred::DEFAULT`; "ssh2" mirrors what ssh2 1.17 offers under Electron 45 (the 1.1.4 offer, see
 //! scripts/sp7/ssh2-defaults.cjs); "legacy" is "ssh2" plus the SHA-1 kex and the AES-CBC ciphers ssh2 supports but does not
 //! offer by default.
@@ -144,6 +147,156 @@ fn methods(m: &russh::MethodSet) -> Vec<String> {
     m.iter().map(String::from).collect()
 }
 
+/// The SshErrorCode 1.1.4's mapSshError (src/ptyhost/sshErrors.ts) gives the matching ssh2 / socket error; the S3 table.
+fn error_code(e: &russh::Error) -> &'static str {
+    use russh::Error as E;
+    match e {
+        E::IO(io) => io_code(io),
+        E::ConnectionTimeout | E::KeepaliveTimeout | E::InactivityTimeout | E::Elapsed(_) => "timeout",
+        // ssh2: level 'handshake' / 'protocol' or "no matching ..." -> protocol.
+        E::NoCommonAlgo { .. }
+        | E::KexInit
+        | E::Kex
+        | E::Version
+        | E::UnknownAlgo
+        | E::WrongServerSig
+        | E::StrictKeyExchangeViolation { .. }
+        | E::DecryptionError
+        | E::PacketAuth
+        | E::PacketSize(_)
+        | E::Inconsistent => "protocol",
+        // ssh2: level 'client-authentication' -> auth.
+        E::NotAuthenticated | E::NoAuthMethod | E::UnsupportedAuthMethod => "auth",
+        // ssh2 ends with 'close' and no error (mapSshError(undefined) -> unknown).
+        _ => "unknown",
+    }
+}
+
+fn io_code(e: &std::io::Error) -> &'static str {
+    use std::io::ErrorKind as K;
+    match e.kind() {
+        K::ConnectionRefused => "refused",
+        K::TimedOut => "timeout",
+        K::HostUnreachable | K::NetworkUnreachable | K::NetworkDown => "unreachable",
+        K::ConnectionReset | K::BrokenPipe | K::ConnectionAborted => "reset",
+        // ENOTFOUND / EAI_AGAIN: getaddrinfo failures (WSAHOST_NOT_FOUND, WSATRY_AGAIN, WSANO_DATA on Windows).
+        _ if matches!(e.raw_os_error(), Some(11001 | 11002 | 11004)) || e.to_string().contains("lookup") => "dns",
+        _ => "unknown",
+    }
+}
+
+/// The credentials of one login, the fields of 1.1.4's SshConnectRequest that SshLogin reads plus the prompt answers.
+struct LoginSpec {
+    key_file: Option<String>,
+    passphrase: Option<String>,
+    password: Option<String>,
+    allow_password_prompt: bool,
+    prompt_password: String,
+    answers: Vec<String>,
+}
+
+impl LoginSpec {
+    fn from(v: &Value) -> LoginSpec {
+        let s = |k: &str| v[k].as_str().filter(|x| !x.is_empty()).map(String::from);
+        LoginSpec {
+            key_file: s("keyFile"),
+            passphrase: s("passphrase"),
+            password: s("password"),
+            allow_password_prompt: v["allowPasswordPrompt"] == true,
+            prompt_password: s("promptPassword").unwrap_or_default(),
+            answers: v["answers"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .unwrap_or_default(),
+        }
+    }
+}
+
+enum Choice {
+    None,
+    PublicKey,
+    SavedPassword,
+    PromptPassword,
+    Keyboard,
+}
+
+/// The method sequence of 1.1.4's SshLogin.nextAuth (src/sshcore/login.ts): the queued steps (publickey, then the saved
+/// password) while the server allows them, then `none` before the server has named its methods, then the password prompt and
+/// keyboard-interactive, 3 tries each, then give up. `methods` is None until the server answered a request.
+struct AuthOrder {
+    queue: Vec<Choice>,
+    password_tries: u32,
+    keyboard_tries: u32,
+}
+
+impl AuthOrder {
+    fn new(spec: &LoginSpec) -> AuthOrder {
+        let mut queue = Vec::new();
+        if spec.key_file.is_some() {
+            queue.push(Choice::PublicKey);
+        }
+        if spec.password.is_some() {
+            queue.push(Choice::SavedPassword);
+        }
+        AuthOrder { queue, password_tries: 0, keyboard_tries: 0 }
+    }
+
+    fn next(&mut self, methods: Option<&[String]>, allow_password_prompt: bool) -> Option<Choice> {
+        let has = |m: &str| methods.is_some_and(|ms| ms.iter().any(|x| x == m));
+        let allows = |m: &str| methods.is_none() || has(m);
+        while !self.queue.is_empty() {
+            let step = self.queue.remove(0);
+            match step {
+                Choice::PublicKey if allows("publickey") => return Some(step),
+                Choice::SavedPassword if allows("password") => return Some(step),
+                _ => {}
+            }
+        }
+        if methods.is_none() {
+            return Some(Choice::None);
+        }
+        if has("password") && allow_password_prompt && self.password_tries < 3 {
+            self.password_tries += 1;
+            return Some(Choice::PromptPassword);
+        }
+        if has("keyboard-interactive") && self.keyboard_tries < 3 {
+            self.keyboard_tries += 1;
+            return Some(Choice::Keyboard);
+        }
+        None
+    }
+}
+
+/// One keyboard-interactive exchange: every info request answered (an empty one with an empty list, like SshLogin).
+async fn keyboard(
+    handle: &mut client::Handle<Probe>,
+    user: &str,
+    answers: &[String],
+    timeout: Duration,
+    rec: &mut Value,
+) -> Result<client::AuthResult, russh::Error> {
+    let mut prompts = Vec::new();
+    let mut r = tokio::time::timeout(timeout, handle.authenticate_keyboard_interactive_start(user, None)).await?;
+    let mut rounds = 0;
+    let result = loop {
+        match r? {
+            KeyboardInteractiveAuthResponse::InfoRequest { name, instructions, prompts: p } if rounds < 5 => {
+                rounds += 1;
+                prompts.push(json!({ "name": name, "instructions": instructions, "prompts": p.iter().map(|x| json!({ "prompt": x.prompt, "echo": x.echo })).collect::<Vec<_>>() }));
+                let reply: Vec<String> = (0..p.len()).map(|i| answers.get(i).cloned().unwrap_or_default()).collect();
+                r = tokio::time::timeout(timeout, handle.authenticate_keyboard_interactive_respond(reply)).await?;
+            }
+            KeyboardInteractiveAuthResponse::InfoRequest { .. } => break Err(russh::Error::Inconsistent),
+            KeyboardInteractiveAuthResponse::Success => break Ok(client::AuthResult::Success),
+            KeyboardInteractiveAuthResponse::Failure { remaining_methods, partial_success } => {
+                break Ok(client::AuthResult::Failure { remaining_methods, partial_success });
+            }
+        }
+    };
+    rec["prompts"] = json!(prompts);
+    result
+}
+
 async fn run(spec: Value) -> Value {
     let start = Instant::now();
     let seen = Arc::new(Mutex::new(Seen::default()));
@@ -172,116 +325,114 @@ async fn run(spec: Value) -> Value {
     let connect_ms = start.elapsed().as_millis() as u64;
     let mut handle = match connected {
         Ok(Ok(h)) => h,
-        Ok(Err(e)) => return finish(out, &seen, json!({ "connect": connect_ms }), Some(format!("connect: {e}"))),
-        Err(_) => return finish(out, &seen, json!({ "connect": connect_ms }), Some("connect: timeout".into())),
+        Ok(Err(e)) => {
+            out["code"] = json!(error_code(&e));
+            return finish(out, &seen, json!({ "connect": connect_ms }), Some(format!("connect: {e}")));
+        }
+        Err(_) => {
+            out["code"] = json!("timeout");
+            return finish(out, &seen, json!({ "connect": connect_ms }), Some("connect: timeout".into()));
+        }
+    };
+    let Some(login) = spec.get("login").map(LoginSpec::from) else {
+        // Host key only: connected, no authentication.
+        let _ = handle.disconnect(russh::Disconnect::ByApplication, "", "en").await;
+        let kex_ms = seen.lock().unwrap().kex_at.map(|d| d.as_millis() as u64);
+        out["ok"] = json!(true);
+        return finish(out, &seen, json!({ "connect": connect_ms, "kex": kex_ms }), None);
     };
     let auth_start = Instant::now();
+    let mut order = AuthOrder::new(&login);
+    let mut server_methods: Option<Vec<String>> = None;
     let mut steps = Vec::new();
+    let mut sent = Vec::new();
     let mut success = false;
     let mut error = None;
-    for step in spec["steps"].as_array().cloned().unwrap_or_default() {
-        let method = step["method"].as_str().unwrap_or("").to_string();
-        let mut rec = json!({ "method": method });
-        let res = match method.as_str() {
-            "none" => tokio::time::timeout(timeout, handle.authenticate_none(&user)).await,
-            "password" => {
-                tokio::time::timeout(timeout, handle.authenticate_password(&user, step["password"].as_str().unwrap_or(""))).await
+    let mut authenticated_ms = None;
+    loop {
+        let Some(choice) = order.next(server_methods.as_deref(), login.allow_password_prompt) else {
+            // SshLogin's next(false): ssh2 then fails with "All configured authentication methods failed" (auth).
+            sent.push("-> false".to_string());
+            out["code"] = json!("auth");
+            break;
+        };
+        let name = match choice {
+            Choice::None => "none",
+            Choice::PublicKey => "publickey",
+            Choice::SavedPassword | Choice::PromptPassword => "password",
+            Choice::Keyboard => "keyboard-interactive",
+        };
+        sent.push(format!("-> {name}"));
+        let mut rec = json!({ "method": name });
+        let res: Result<client::AuthResult, russh::Error> = match choice {
+            Choice::None => {
+                tokio::time::timeout(timeout, handle.authenticate_none(&user)).await.map_err(Into::into).and_then(|r| r)
             }
-            "publickey" => {
-                let text = std::fs::read_to_string(step["keyFile"].as_str().unwrap_or("")).unwrap_or_default();
-                let key = match decode_secret_key(&text, step["passphrase"].as_str()) {
-                    Ok(k) => k,
+            Choice::SavedPassword | Choice::PromptPassword => {
+                let pw = if matches!(choice, Choice::SavedPassword) {
+                    login.password.clone().unwrap_or_default()
+                } else {
+                    login.prompt_password.clone()
+                };
+                tokio::time::timeout(timeout, handle.authenticate_password(&user, pw)).await.map_err(Into::into).and_then(|r| r)
+            }
+            Choice::PublicKey => {
+                let text = std::fs::read_to_string(login.key_file.as_deref().unwrap_or("")).unwrap_or_default();
+                match decode_secret_key(&text, login.passphrase.as_deref()) {
+                    Ok(key) => {
+                        let hash = if key.algorithm().is_rsa() {
+                            let h = handle.best_supported_rsa_hash().await.ok().flatten().flatten();
+                            rec["rsaHash"] = json!(format!("{h:?}"));
+                            h
+                        } else {
+                            None
+                        };
+                        tokio::time::timeout(
+                            timeout,
+                            handle.authenticate_publickey(&user, PrivateKeyWithHashAlg::new(Arc::new(key), hash)),
+                        )
+                        .await
+                        .map_err(Into::into)
+                        .and_then(|r| r)
+                    }
                     Err(e) => {
+                        // 1.1.4 never gets here (the key was parsed when it was stored); the step is skipped.
                         rec["error"] = json!(format!("key: {e}"));
                         steps.push(rec);
                         continue;
                     }
-                };
-                let hash = if key.algorithm().is_rsa() {
-                    let h = handle.best_supported_rsa_hash().await.ok().flatten().flatten();
-                    rec["rsaHash"] = json!(format!("{h:?}"));
-                    h
-                } else {
-                    None
-                };
-                tokio::time::timeout(
-                    timeout,
-                    handle.authenticate_publickey(&user, PrivateKeyWithHashAlg::new(Arc::new(key), hash)),
-                )
-                .await
-            }
-            "kbd" => {
-                let answers: Vec<String> = step["answers"]
-                    .as_array()
-                    .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-                    .unwrap_or_default();
-                let mut prompts = Vec::new();
-                let mut r = tokio::time::timeout(timeout, handle.authenticate_keyboard_interactive_start(&user, None)).await;
-                let mut rounds = 0;
-                let final_result = loop {
-                    match r {
-                        Ok(Ok(KeyboardInteractiveAuthResponse::InfoRequest { name, instructions, prompts: p })) if rounds < 5 => {
-                            rounds += 1;
-                            prompts.push(json!({ "name": name, "instructions": instructions, "prompts": p.iter().map(|x| json!({ "prompt": x.prompt, "echo": x.echo })).collect::<Vec<_>>() }));
-                            let reply: Vec<String> = (0..p.len()).map(|i| answers.get(i).cloned().unwrap_or_default()).collect();
-                            r = tokio::time::timeout(timeout, handle.authenticate_keyboard_interactive_respond(reply)).await;
-                        }
-                        Ok(Ok(KeyboardInteractiveAuthResponse::Success)) => break json!({ "success": true }),
-                        Ok(Ok(KeyboardInteractiveAuthResponse::Failure { remaining_methods, partial_success })) => {
-                            break json!({ "success": false, "remaining": methods(&remaining_methods), "partial": partial_success });
-                        }
-                        Ok(Ok(KeyboardInteractiveAuthResponse::InfoRequest { .. })) => {
-                            break json!({ "success": false, "error": "too many rounds" });
-                        }
-                        Ok(Err(e)) => break json!({ "success": false, "error": e.to_string() }),
-                        Err(_) => break json!({ "success": false, "error": "timeout" }),
-                    }
-                };
-                rec["prompts"] = json!(prompts);
-                for (k, v) in final_result.as_object().unwrap() {
-                    rec[k] = v.clone();
                 }
-                success = rec["success"] == true;
-                steps.push(rec);
-                if success {
-                    break;
-                }
-                continue;
             }
-            other => {
-                rec["error"] = json!(format!("unknown method {other}"));
-                steps.push(rec);
-                continue;
-            }
+            Choice::Keyboard => keyboard(&mut handle, &user, &login.answers, timeout, &mut rec).await,
         };
         match res {
-            Ok(Ok(client::AuthResult::Success)) => {
+            Ok(client::AuthResult::Success) => {
                 rec["success"] = json!(true);
+                steps.push(rec);
                 success = true;
+                authenticated_ms = Some(start.elapsed().as_millis() as u64);
+                break;
             }
-            Ok(Ok(client::AuthResult::Failure { remaining_methods, partial_success })) => {
+            Ok(client::AuthResult::Failure { remaining_methods, partial_success }) => {
                 rec["success"] = json!(false);
                 rec["remaining"] = json!(methods(&remaining_methods));
                 rec["partial"] = json!(partial_success);
+                server_methods = Some(methods(&remaining_methods));
+                steps.push(rec);
             }
-            Ok(Err(e)) => {
+            Err(e) => {
                 rec["success"] = json!(false);
                 rec["error"] = json!(e.to_string());
+                out["code"] = json!(error_code(&e));
                 error = Some(format!("auth: {e}"));
+                steps.push(rec);
+                break;
             }
-            Err(_) => {
-                rec["success"] = json!(false);
-                rec["error"] = json!("timeout");
-                error = Some("auth: timeout".into());
-            }
-        }
-        steps.push(rec);
-        if success || error.is_some() {
-            break;
         }
     }
     let auth_ms = auth_start.elapsed().as_millis() as u64;
     out["steps"] = json!(steps);
+    out["methods"] = json!(sent);
     out["authenticated"] = json!(success);
     if success && let Some(cmd) = spec["exec"].as_str() {
         let exec = async {
@@ -307,10 +458,12 @@ async fn run(spec: Value) -> Value {
     let _ = handle.disconnect(russh::Disconnect::ByApplication, "", "en").await;
     out["ok"] = json!(success && error.is_none());
     let kex_ms = seen.lock().unwrap().kex_at.map(|d| d.as_millis() as u64);
+    // `authenticated`: from the start of the connect to the auth success, the point ssh2's 'ready' event marks (the timing
+    // compares this one); `total` also holds the exec and the disconnect.
     finish(
         out,
         &seen,
-        json!({ "connect": connect_ms, "kex": kex_ms, "auth": auth_ms, "total": start.elapsed().as_millis() as u64 }),
+        json!({ "connect": connect_ms, "kex": kex_ms, "auth": auth_ms, "authenticated": authenticated_ms, "total": start.elapsed().as_millis() as u64 }),
         error,
     )
 }

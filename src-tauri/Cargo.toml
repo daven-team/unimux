@@ -79,11 +79,14 @@ webview2-com = "0.39.1"
 russh = { version = "=0.65.1", default-features = false, features = ["ring", "rsa", "flate2"] }
 # The ssh-key russh pins; "tdes" adds 3des-cbc OpenSSH key files (1.1.4 reads them). SP7.
 ssh-key = { version = "=0.7.0-rc.11", default-features = false, features = ["tdes"] }
-# Legacy encrypted PEM (Proc-Type: 4,ENCRYPTED) decryption, own code (SP7 prototype, S2): same versions russh pulls in.
+# Legacy encrypted PEM (Proc-Type: 4,ENCRYPTED) decryption, own code (SP7 prototype, S2): AES-CBC/CTR, DES-EDE3-CBC, BF-CBC;
+# the same versions russh and bcrypt-pbkdf pull in.
 aes = "=0.9.4"
 cbc = "=0.2.1"
 des = "=0.9.0"
 md5 = "=0.8.1"
+ctr = "=0.10.1"
+blowfish = "=0.10.0"
 
 [profile.release]
 lto = "thin"

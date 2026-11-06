@@ -5,6 +5,33 @@
 set -eu
 P=sp7-pass
 cd /out
+
+# Added after the SP7 review: the other DEK-Info ciphers 1.1.4 decrypts (AES-CTR, Blowfish-CBC), ciphers it refuses, and
+# malformed DEK-Info IVs (ssh2 reads the IV with Buffer.from(hex), which stops at the first non-hex pair). Needs the base
+# files pem-rsa2048.key, pem-ec256.key and pem-rsa2048-aes128.key. `sh /gen-keys.sh --review-additions` writes only these.
+review_additions() {
+  for c in aes-128-ctr aes-192-ctr aes-256-ctr bf-cbc aes-256-cfb aes-128-ofb des-cbc des-ede-cbc; do
+    openssl rsa -traditional -in pem-rsa2048.key -$c -provider legacy -provider default -passout pass:$P -out pem-rsa2048-$c.key 2>/dev/null
+  done
+  for c in aes-128-ctr aes-256-ctr bf-cbc; do
+    openssl ec -in pem-ec256.key -$c -provider legacy -provider default -passout pass:$P -out pem-ec256-$c.key 2>/dev/null
+  done
+  iv=$(sed -n 's/^DEK-Info: AES-128-CBC,//p' pem-rsa2048-aes128.key)
+  dek() { sed "s/^DEK-Info: .*/DEK-Info: $1/" pem-rsa2048-aes128.key > "pem-rsa2048-aes128-$2.key"; }
+  dek "AES-128-CBC,0é$(echo "$iv" | cut -c3-)" iv-nonascii
+  dek "AES-128-CBC,$(echo "$iv" | cut -c1-16)" iv-short
+  dek "AES-128-CBC,g$(echo "$iv" | cut -c2-)" iv-badhex
+  dek "AES-128-CBC,${iv}zz" iv-trailing-junk
+  dek "AES-128-CBC,${iv}0" iv-odd-length
+  dek "AES-128-CBC" no-iv
+  dek "aes-128-cbc,$(echo "$iv" | tr 'A-F' 'a-f')" lowercase
+}
+if [ "${1:-}" = --review-additions ]; then
+  review_additions
+  ls | wc -l
+  exit 0
+fi
+
 rm -f ./*.key ./*.ppk
 { ssh -V 2>&1; openssl version; puttygen --version | head -1; } > tools.txt
 
@@ -89,4 +116,5 @@ for f in openssh-ed25519-enc.key pem-rsa2048-aes128.key ppk2-rsa-enc.ppk; do
   sed 's/$/\r/' "$f" > "crlf-$f"
 done
 rm -f ./*.pub
+review_additions
 ls | wc -l
