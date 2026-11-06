@@ -3,5 +3,5 @@
   "identifier": "test-bridge",
   "description": "Check flavour only (feature test-bridge, build.rs): the real-app harness command for the app windows.",
   "windows": ["main", "detached-*"],
-  "permissions": ["allow-test-bridge"]
+  "permissions": ["allow-test-bridge", "allow-test-channel-bench", "allow-test-channel-pull"]
 }

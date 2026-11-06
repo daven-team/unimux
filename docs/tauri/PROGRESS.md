@@ -42,7 +42,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 
 | id | title | status | started | done | verified | notes |
 |---|---|---|---|---|---|---|
-| SP1 | WebView2 shell behaviour | todo | | | | |
+| SP1 | WebView2 shell behaviour | verified (Windows) | 2026-11-06 | 2026-11-06 | 2026-11-06 | branch `tauri-pkg-SP1`, docs/tauri/spikes/SP1.md, `node scripts/spike-sp1.mjs` 17/17 (+ `--long`): same browser args on 2 windows ok, different args give 0x8007139F; wry never sets IsVisible(false) on minimize, the 400 ms status tick stays exact minimized 390 s / hidden / never shown (no Rust tick needed; never call Webview::hide()); hidden window reaches renderer-boot; IPC = http://ipc.localhost custom protocol (302 fetches / 300 invokes, 0 postMessage) under the F2 CSP; tauri Channel misses 20 x 1 MB/s (seconds of backlog), WebView2 shared buffer (one post in flight) p50 0.33 ms / p95 1.24 ms: decision recorded in ARCHITECTURE section 3 and PLAN P2 / SP5 / D12. Open: WKWebView IPC check (no Mac, CI not run), macOS data plane, numbers at 94-100 % machine CPU |
 | SP2 | Electron safeStorage both directions | todo | | | | Mac half needs a Mac |
 | SP3 | Windows 1.1.4 -> Tauri NSIS hand-over | todo | | | | needs the VirtualBox Windows VM image |
 | SP4 | macOS 1.1.4 engine accepts the Tauri zip | todo | | | | needs a Mac |
@@ -277,6 +277,15 @@ All 14 confirmed findings of the wave 0 review are fixed; none was skipped.
 10. Detached windows, the gate and the update window are not created yet, so the guard's detached registration and the destroy cleanup (`forget_on_destroy`) are only unit-tested and wired on the main window.
 11. HTML5 drag and drop (tab reorder / detach, snippets, notes, tree, SFTP) is enabled again by `disable_drag_drop_handler()` but no script drags yet; W3 adds the real-app drag checks with the OS file drop.
 12. The macOS half of the startup race (Electron's SingletonLock / SingletonSocket) is still R3; the Windows half (startup mutex + lockfile) is done.
+
+### Open issues after SP1 (2026-11-06)
+
+1. **WKWebView IPC not checked**: the SP1 scope item "WKWebView in CI uses the same IPC" was not run (no Mac, CI never ran, no CDP on macOS; needs the W2 eval bridge). Tauri 2.12.5 uses `ipc://localhost` there by default, which the CSP allows.
+2. **macOS data plane not measured**: WKWebView has no shared buffer; the plan is the pull transport (raw invoke long poll, 4.6 ms p50 on WebView2) until SP5 / W2 measure it on a Mac.
+3. **Renderer limit**: 20 xterm could not parse and paint 20 x 1 MB/s on the dev box even with no IPC (20 fps); the FlowGate (P2) must hold producers back, and SP5's 60 fps target has to be compared with Electron 1.1.4 on the same machine and load.
+4. **Load during the measurements**: the machine was at 94-100 percent CPU from other programs; repeat `node scripts/spike-sp1.mjs --long` on an idle machine for clean absolute numbers (the ranking was the same in all four runs).
+5. The shared-buffer sender exists only as the check-build bench (`channel_bench.rs`); P2 builds the production one (per-window sender, fallback to Channel when `ICoreWebView2_17` is missing, bridge `sharedbufferreceived` -> fake port).
+6. `unimux-exec` `output_over_the_cap_is_truncated_and_the_tree_ends` failed once (20 s timeout) in a full workspace run at 100 percent machine CPU and passed on rerun; not touched by SP1, looks load-sensitive.
 
 ### How to run
 

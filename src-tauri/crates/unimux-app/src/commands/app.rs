@@ -28,6 +28,8 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
                 return;
             }
             c.mark(name);
+            #[cfg(feature = "test-bridge")]
+            c.test_marks.lock().push((call.caller.label.clone(), name.to_string(), crate::channel_bench::epoch_ms()));
             // The renderer booted: show the main window if the page-load event did not already.
             if name == "renderer-boot" && call.caller.is_main() {
                 crate::windows::show_main(&c);

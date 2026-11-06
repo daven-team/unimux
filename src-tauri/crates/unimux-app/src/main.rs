@@ -4,9 +4,13 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(feature = "test-bridge")]
+mod channel_bench;
 mod commands;
 mod context;
 mod ipc;
+#[cfg(feature = "test-bridge")]
+mod spike_windows;
 mod startup;
 #[cfg(feature = "test-bridge")]
 mod test_bridge;
@@ -197,7 +201,9 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
             ipc::update_splash_init,
             ipc::update_splash_close,
             ipc::update_splash_open,
-            test_bridge::test_bridge
+            test_bridge::test_bridge,
+            channel_bench::test_channel_bench,
+            channel_bench::test_channel_pull
         ]
     }
     #[cfg(not(feature = "test-bridge"))]
