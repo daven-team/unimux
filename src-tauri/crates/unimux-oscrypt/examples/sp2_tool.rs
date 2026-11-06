@@ -43,12 +43,13 @@ fn file_secrets(path: &Path) -> Vec<String> {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let dir = PathBuf::from(args.get(1).expect("usage: sp2_tool <inspect|rewrite|export-key|fresh> <data dir>"));
+    let dir = PathBuf::from(args.get(1).expect("usage: sp2_tool <inspect|rewrite|export-key|fresh|seal> <data dir>"));
     match args[0].as_str() {
         "inspect" => inspect(&dir),
         "rewrite" => rewrite(&dir),
         "export-key" => export_key(&dir),
         "fresh" => fresh(&dir, &args[2..]),
+        "seal" => seal(&dir, &args[2..]),
         other => panic!("unknown command {other}"),
     }
 }
@@ -134,6 +135,11 @@ fn export_key(_dir: &Path) {
 
 fn fresh(dir: &Path, texts: &[String]) {
     assert!(!local_state::path(dir).exists(), "fresh needs a dir without Local State");
+    seal(dir, texts);
+}
+
+/// Opens the dir whatever its `Local State` looks like and encrypts `texts` with the key it ends up with.
+fn seal(dir: &Path, texts: &[String]) {
     let (cipher, open_ms) = open(dir);
     let blobs: serde_json::Map<String, Value> =
         texts.iter().map(|t| (t.clone(), Value::String(STANDARD.encode(cipher.encrypt(t).unwrap())))).collect();

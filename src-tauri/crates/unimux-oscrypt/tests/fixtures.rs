@@ -111,10 +111,20 @@ fn local_state_unwraps_to_the_fixture_key_for_the_spike_user() {
             assert_eq!(cipher.storage(), unimux_oscrypt::Storage::Dpapi);
             let blob = &blobs("electron", "db/vault.json")[0];
             assert_eq!(cipher.decrypt(blob).unwrap().as_str(), fixture_cipher().decrypt(blob).unwrap().as_str());
+            assert_eq!(
+                std::fs::read(local_state::path(tmp.path())).unwrap(),
+                std::fs::read(dir().join("Local State")).unwrap(),
+                "a usable key is never rewritten"
+            );
         }
-        other => eprintln!("skipped: the fixture Local State belongs to another Windows user ({other:?})"),
+        // Another Windows user: Chromium (kDecryptionFailed) and unimux store a new key, the old blobs stay locked.
+        unimux_oscrypt::Origin::Replaced(reason) => {
+            eprintln!("the fixture Local State belongs to another Windows user: {reason}");
+            assert_eq!(cipher.storage(), unimux_oscrypt::Storage::Dpapi);
+            assert!(cipher.decrypt(&blobs("electron", "db/vault.json")[0]).is_err());
+        }
+        other => panic!("unexpected origin {other:?}"),
     }
-    assert_eq!(std::fs::read(local_state::path(tmp.path())).unwrap(), std::fs::read(dir().join("Local State")).unwrap());
 }
 
 #[test]

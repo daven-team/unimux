@@ -9,6 +9,9 @@
 // C. 1.1.4 starts again: its vaults report nothing locked and its safeStorage decrypts every Rust blob to the same text.
 // D. Fresh install: Rust creates Local State in a new dir; 1.1.4 started on that dir decrypts Rust's blobs, keeps the key,
 //    and Rust decrypts what 1.1.4 wrote there.
+// E. An idle 1.1.4 run leaves a key in Local State.
+// F/G/H. A Local State without a usable key: a DPAPI blob nobody can unwrap (another Windows user's data dir) and a file
+//    that is not JSON. 1.1.4 and Rust both store a new key, keep the other prefs, and agree on that key.
 // Never touches the real %APPDATA%\unimux, ~/.claude or ~/.codex; kills only the processes it started.
 import { execFileSync } from 'node:child_process';
 import { createCipheriv, createHash, pbkdf2Sync, randomBytes } from 'node:crypto';
@@ -207,6 +210,60 @@ try {
   const idleAfter = existsSync(idleLocal) ? JSON.parse(readFileSync(idleLocal, 'utf8')) : null;
   console.log('E: Local State after an idle 1.1.4 run:', idleAfter ? { keys: Object.keys(idleAfter), osCrypt: Object.keys(idleAfter.os_crypt ?? {}) } : 'none');
   check('E: an idle 1.1.4 run still leaves an os_crypt key (so "Local State exists" implies "key exists")', !idleAfter || !!idleAfter.os_crypt?.encrypted_key);
+
+  // ---------- F/G/H: a Local State without a usable key (Chromium OSCryptImpl::Init kDecryptionFailed / not JSON) ----------
+  const makeRoot = (name, localState) => {
+    const base = join(root, name);
+    for (const dir of ['data', 'project', 'home/AppData/Roaming', 'home/AppData/Local']) mkdirSync(join(base, dir), { recursive: true });
+    writeState(base, sshState({ projectPath: join(base, 'project') }));
+    if (localState !== undefined) writeFileSync(join(base, 'data', 'Local State'), localState);
+    return base;
+  };
+  const localJson = (base) => JSON.parse(readFileSync(join(base, 'data', 'Local State'), 'utf8'));
+  // A DPAPI blob no user can unwrap (what a data dir of another Windows user looks like), plus a pref that must survive.
+  const foreignKey = Buffer.concat([Buffer.from('DPAPI'), Buffer.from([1, 0, 0, 0]), randomBytes(200)]).toString('base64');
+  const foreignLocal = JSON.stringify({ browser: { sp2_marker: 'keep me' }, os_crypt: { audit_enabled: true, encrypted_key: foreignKey } });
+
+  // F: 1.1.4 on a foreign key: does it stay available and store a new key (what Rust now does too)?
+  const fRoot = makeRoot('foreign-electron', foreignLocal);
+  const f = await start(fRoot);
+  const fAvailable = await f.main.evaluate('__el.safeStorage.isEncryptionAvailable()');
+  check('F: 1.1.4 on a foreign DPAPI key stays available', fAvailable === true);
+  if (fAvailable) await writeToken(f.main, join(fRoot, 'data'));
+  await quit(f);
+  const fLocal = localJson(fRoot);
+  check('F: 1.1.4 stored a new key in Local State', fLocal.os_crypt?.encrypted_key && fLocal.os_crypt.encrypted_key !== foreignKey);
+  check('F: 1.1.4 kept the other prefs', fLocal.browser?.sp2_marker === 'keep me');
+  const fInspect = rustJson('inspect', join(fRoot, 'data'));
+  check('F: Rust reads the key 1.1.4 stored and decrypts its blob', fInspect.origin === 'Existing' && texts(fInspect, 'github/token.json')[0] === SECRETS.github, fInspect.origin);
+
+  // G: Rust on a foreign key, then 1.1.4: one key for both.
+  const gRoot = makeRoot('foreign-rust', foreignLocal);
+  const gTexts = ['foreign ssh pw ą'];
+  const g = rustJson('seal', join(gRoot, 'data'), ...gTexts);
+  check('G: Rust on a foreign DPAPI key stores a new key', g.origin.startsWith('Replaced') && localJson(gRoot).os_crypt.encrypted_key !== foreignKey, g.origin);
+  check('G: Rust kept the other prefs', localJson(gRoot).browser?.sp2_marker === 'keep me');
+  const gKey = localJson(gRoot).os_crypt.encrypted_key;
+  const gApp = await start(gRoot);
+  const decG = await electronDecrypt(gApp.main, gTexts.map((t) => g.blobs[t]));
+  await quit(gApp);
+  check('G: 1.1.4 decrypts blobs made with the key Rust stored', decG.every((r, i) => r.text === gTexts[i]), decG.map((r) => r.error ?? 'ok'));
+  check('G: 1.1.4 kept the key Rust stored', localJson(gRoot).os_crypt.encrypted_key === gKey);
+
+  // H: a Local State that is not JSON.
+  const hRoot = makeRoot('broken-electron', '{broken');
+  const h = await start(hRoot);
+  const hAvailable = await h.main.evaluate('__el.safeStorage.isEncryptionAvailable()');
+  if (hAvailable) await writeToken(h.main, join(hRoot, 'data'));
+  await quit(h);
+  const hBad = join(hRoot, 'data', 'Local State.bad');
+  console.log(`H: 1.1.4 on a non-JSON Local State: available ${hAvailable}, Local State.bad ${existsSync(hBad) ? readFileSync(hBad, 'utf8') : 'none'}`);
+  check('H: 1.1.4 on a non-JSON Local State stays available and moves it to Local State.bad', hAvailable === true && existsSync(hBad) && readFileSync(hBad, 'utf8') === '{broken');
+  const hInspect = rustJson('inspect', join(hRoot, 'data'));
+  check('H: Rust reads the key 1.1.4 created there', hInspect.origin === 'Existing' && texts(hInspect, 'github/token.json')[0] === SECRETS.github, hInspect.origin);
+  const hRust = makeRoot('broken-rust', '{broken');
+  const hr = rustJson('seal', join(hRust, 'data'), 'x');
+  check('H: Rust on a non-JSON Local State moves it to Local State.bad and creates a key', hr.origin === 'Created' && readFileSync(join(hRust, 'data', 'Local State.bad'), 'utf8') === '{broken', hr.origin);
 
   // ---------- measurements ----------
   const decryptMicros = allA.map((e) => e.decryptMicros);

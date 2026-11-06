@@ -27,11 +27,22 @@ pub fn account_name(app_name: &str) -> String {
     format!("{app_name} Key")
 }
 
-/// The password bytes, or None when the Keychain refused (locked, denied, no default keychain).
-pub fn password(app_name: &str) -> Option<Zeroizing<Vec<u8>>> {
+/// How the password was obtained (for `Origin` in startup.log).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Found {
+    /// Step 1: the `<app> Key` item.
+    Existing,
+    /// Step 2: the legacy `<app>` item (copied to `<app> Key`).
+    Migrated,
+    /// Step 3: a new random password was stored.
+    Created,
+}
+
+/// The password bytes and how they were found, or None when the Keychain refused (locked, denied, no default keychain).
+pub fn password(app_name: &str) -> Option<(Zeroizing<Vec<u8>>, Found)> {
     let (service, account) = (service_name(app_name), account_name(app_name));
     match get_generic_password(&service, &account) {
-        Ok(found) => return Some(Zeroizing::new(found)),
+        Ok(found) => return Some((Zeroizing::new(found), Found::Existing)),
         Err(e) if e.code() == ITEM_NOT_FOUND => {}
         Err(_) => return None,
     }
@@ -41,7 +52,7 @@ pub fn password(app_name: &str) -> Option<Zeroizing<Vec<u8>>> {
             if set_generic_password(&service, &account, &legacy).is_ok() {
                 let _ = delete_generic_password(&service, app_name);
             }
-            return Some(legacy);
+            return Some((legacy, Found::Migrated));
         }
         Err(e) if e.code() == ITEM_NOT_FOUND => {}
         Err(_) => return None,
@@ -50,5 +61,5 @@ pub fn password(app_name: &str) -> Option<Zeroizing<Vec<u8>>> {
     getrandom::fill(random.as_mut()).ok()?;
     let created = Zeroizing::new(STANDARD.encode(random.as_ref()).into_bytes());
     set_generic_password(&service, &account, &created).ok()?;
-    Some(created)
+    Some((created, Found::Created))
 }
