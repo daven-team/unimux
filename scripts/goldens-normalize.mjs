@@ -344,6 +344,40 @@ function diskText(value) {
   return JSON.stringify(wellFormed(JSON.parse(text)));
 }
 
+/** States with more than PROJECT_ITEM_LIMIT finished items in one project, some with a readAt / updatedAt that is missing,
+ * a string or an object (NaN in the retention sort). */
+function retentionStates() {
+  const r = rng(1210);
+  const pick = (xs) => xs[Math.floor(r() * xs.length)];
+  const damaged = () => pick([undefined, '2026-11-05T10:00:00Z', { at: 1 }, 'x', [1, 2], null, '17']);
+  const states = [];
+  for (let i = 0; i < 24; i++) {
+    const unread = 400 + Math.floor(r() * 100);
+    const read = 30 + Math.floor(r() * 120);
+    const nanShare = [0.05, 0.33, 0.6, 0.95][i % 4];
+    const messages = [];
+    for (let k = 0; k < unread + read; k++) {
+      const m = { id: `m${k}`, projectId: k % 7 === 6 && i % 3 === 0 ? 'q' : 'p', from: 'a', to: 'b', text: `t${k}`, createdAt: NOW - Math.floor(r() * 5_000_000) };
+      if (k >= unread || r() < 0.1) m.readAt = r() < nanShare ? damaged() : NOW - Math.floor(r() * 1000);
+      messages.push(m);
+    }
+    // Interleave read and unread so the runs TimSort finds are short and the merges gallop.
+    if (i % 2) messages.reverse();
+    for (let k = messages.length - 1; k > 0 && i % 4 >= 2; k--) { const j = Math.floor(r() * (k + 1)); [messages[k], messages[j]] = [messages[j], messages[k]]; }
+    const tasks = [];
+    if (i % 3 === 1) {
+      for (let k = 0; k < 520 + Math.floor(r() * 60); k++) {
+        const done = r() < 0.7;
+        const t = { id: `t${k}`, projectId: 'p', title: `t${k}`, prompt: 'x', status: done ? pick(['completed', 'failed', 'cancelled']) : 'pending', createdAt: NOW - 10_000, updatedAt: r() < nanShare ? damaged() : NOW - Math.floor(r() * 100_000) };
+        if (k % 50 === 7) t.dependsOn = [`t${k - 3}`];
+        tasks.push(t);
+      }
+    }
+    states.push({ version: 1, projects: [{ id: 'p', name: 'p', path: '/p', tabs: [] }, { id: 'q', name: 'q', path: '/q', tabs: [] }], automation: { paused: false, tasks, messages, events: [] } });
+  }
+  return states;
+}
+
 export function normalizeRows({ normalizeState, root }) {
   const seeds = readFileSync(`${root}/test/golden/normalize-seeds.jsonl`, 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
   const inputs = [];
@@ -359,6 +393,9 @@ export function normalizeRows({ normalizeState, root }) {
     const base = i % 6 === 0 ? richState() : bases[Math.floor(r() * bases.length)];
     inputs.push({ platform: r() < 0.5 ? 'win32' : 'darwin', input: damage(base, r, 1 + Math.floor(r() * 5)) });
   }
+  // Appended last so the rows above keep their `now`: projects over the 500-item cap with damaged timestamps, where the
+  // retention comparator answers NaN and only V8's TimSort order gives the 1.1.4 result.
+  retentionStates().forEach((input, i) => inputs.push({ platform: i % 2 ? 'darwin' : 'win32', input }));
   return inputs.map(({ platform, input }, i) => {
     const now = NOW + i * 1000;
     const text = JSON.stringify(input);
@@ -395,6 +432,23 @@ export function afterEditRows({ normalizeState, normalizeEditedState }) {
     let error = null;
     try { out = diskText(normalizeEditedState(JSON.parse(nextText), JSON.parse(JSON.stringify(prevJson)))); } catch (e) { error = String(e?.message ?? e); }
     rows.push({ prev: prevJson, next: JSON.parse(nextText), ...(error === null ? { out } : { error }) });
+  }
+  // A hand-built edit whose cells / areas are objects with an own `length` (any JSON value): TS reads the property as is.
+  const prev = JSON.parse(JSON.stringify(withWorld(NOW, () => normalizeState(richState(), 'win32'))));
+  const lengths = [2, '2', 1, '1', ' 3 ', 2.5, 0, 21, '21', 'abc', null, true, [3], [], {}, '0x2', undefined];
+  for (const target of ['cells', 'areas']) {
+    for (const length of lengths) {
+      const next = JSON.parse(JSON.stringify(prev));
+      const tab = next.projects[0].tabs[0];
+      const shape = length === undefined ? {} : { length };
+      if (target === 'cells') tab.cells = shape;
+      else tab.layout.areas = shape;
+      const nextText = JSON.stringify(next);
+      let out = null;
+      let error = null;
+      try { out = diskText(normalizeEditedState(JSON.parse(nextText), JSON.parse(JSON.stringify(prev)))); } catch (e) { error = String(e?.message ?? e); }
+      rows.push({ prev, next: JSON.parse(nextText), ...(error === null ? { out } : { error }) });
+    }
   }
   return rows;
 }

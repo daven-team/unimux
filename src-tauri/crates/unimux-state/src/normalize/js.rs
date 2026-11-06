@@ -319,12 +319,14 @@ pub fn spread_into(out: &mut Map<String, Value>, v: Option<&Value>) {
     }
 }
 
-/// `v.length` as the TS code reads it: arrays and strings have one, anything else is undefined; null / undefined throw.
-pub fn length(v: Option<&Value>) -> Js<Option<f64>> {
+/// `v.length` as the TS code reads it: the UTF-16 length of a string, the length of an array, the own `length` property of an
+/// object (any JSON value), undefined (`None`) for the rest; null / undefined throw.
+pub fn length(v: Option<&Value>) -> Js<Option<Value>> {
     match v {
         None | Some(Value::Null) => Err(Throw),
-        Some(Value::Array(a)) => Ok(Some(a.len() as f64)),
-        Some(Value::String(s)) => Ok(Some(len16(s) as f64)),
+        Some(Value::Array(a)) => Ok(Some(Value::from(a.len()))),
+        Some(Value::String(s)) => Ok(Some(Value::from(len16(s)))),
+        Some(Value::Object(o)) => Ok(o.get("length").cloned()),
         Some(_) => Ok(None),
     }
 }

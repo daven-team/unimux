@@ -11,6 +11,8 @@
 //                                     accepts it, a lone surrogate becomes U+FFFD (a Rust string cannot hold one)
 //   test/golden/normalize-state.jsonl   {platform, now, input} -> normalizeState (see scripts/goldens-normalize.mjs)
 //   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
+//   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
+//                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
 import { dirname, resolve } from 'node:path';
@@ -150,6 +152,21 @@ function stateLoad() {
   });
 }
 
+/** V8's sort of indexes by `key(a) - key(b)` with NaN keys: the order only TimSort itself reproduces. */
+function jsSort() {
+  const r = rng(1211);
+  const rows = [];
+  for (let i = 0; i < 400; i++) {
+    const n = 1 + Math.floor(r() * (i < 200 ? 100 : 1500));
+    const nan = [0, 0.05, 0.3, 0.7][i % 4];
+    const runs = i % 5 === 0;
+    const keys = Array.from({ length: n }, (_, k) => (r() < nan ? null : runs ? (i % 10 === 0 ? n - k : k) + Math.floor(r() * 3) : Math.floor(r() * (i % 3 ? 50 : 100_000))));
+    const key = (k) => (keys[k] === null ? NaN : keys[k]);
+    rows.push({ keys, order: keys.map((_, k) => k).sort((a, b) => key(a) - key(b)) });
+  }
+  return rows;
+}
+
 const files = {
   'default-state.json': `${JSON.stringify({ win32: defaultState('win32'), darwin: defaultState('darwin') }, null, 1)}\n`,
   'state-merge.jsonl': jsonl(stateMerge()),
@@ -159,6 +176,7 @@ const files = {
   'state-load.jsonl': jsonl(stateLoad()),
   'normalize-state.jsonl': jsonl(normalizeRows({ normalizeState, root })),
   'state-after-edit.jsonl': jsonl(afterEditRows({ normalizeState, normalizeEditedState })),
+  'js-sort.jsonl': jsonl(jsSort()),
 };
 
 const check = process.argv.includes('--check');

@@ -394,17 +394,22 @@ fn edited(next: Value, previous: &Value) -> Result<Value, Edit> {
         let mut out_tabs = Vec::with_capacity(tabs.len());
         let mut changed = false;
         for tab in tabs {
+            // `tab.cells.length < 1 || tab.cells.length > MAX_CELLS` compares ToNumber of whatever the property holds (an
+            // object may carry its own `length`, a numeric string counts as its number, NaN passes).
             let cells = js::length(js::get_strict(Some(tab), "cells")?)?;
-            if cells.is_some_and(|c| c < 1.0 || c > MAX_CELLS as f64) {
+            let count = js::to_number(cells.as_ref());
+            if count < 1.0 || count > MAX_CELLS as f64 {
                 return Err(Edit::Limit);
             }
             let areas = js::length(js::get_strict(js::get_strict(Some(tab), "layout")?, "areas")?)?;
-            if areas == cells {
+            if js::strict_eq(areas.as_ref(), cells.as_ref()) {
                 out_tabs.push(tab.clone());
                 continue;
             }
-            // layoutForCount(undefined) throws (no grow step fits NaN).
-            let Some(count) = cells else { return Err(Edit::Type) };
+            // layoutForCount(n) floors ToNumber(n); NaN finds no grow step and throws.
+            if count.is_nan() {
+                return Err(Edit::Type);
+            }
             let mut t = tab.as_object().cloned().ok_or(Edit::Type)?;
             t.insert("layout".into(), grid::layout_for_count(count));
             out_tabs.push(Value::Object(t));

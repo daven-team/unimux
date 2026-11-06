@@ -3,6 +3,7 @@
 
 use super::js::{self, Js, Throw};
 use super::remote::valid_remote_path;
+use super::timsort;
 use serde_json::{Map, Value, json};
 
 /// `normalizeWorkspaceOrder(raw, gridIds)`: None (absent stays absent) or the repaired list.
@@ -301,10 +302,9 @@ pub fn prune_automation(automation: &mut Map<String, Value>, project_ids: &[&str
             let mut over = list.len() as f64 - dropped_count as f64 - PROJECT_ITEM_LIMIT;
             if over > 0.0 {
                 let mut sorted = removable.clone();
-                sorted.sort_by(|a, b| {
-                    let d = finished_at(&items[*a]) - finished_at(&items[*b]);
-                    d.partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal)
-                });
+                // `[...removable].sort((a, b) => finishedAt(a) - finishedAt(b))`: a damaged timestamp makes the comparator
+                // inconsistent (NaN), so this follows V8's TimSort to keep the order 1.1.4 keeps (and never panics).
+                timsort::sort_by(&mut sorted, |a, b| finished_at(&items[*a]) - finished_at(&items[*b]));
                 for i in sorted {
                     if over <= 0.0 {
                         break;

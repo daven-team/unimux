@@ -9,7 +9,7 @@
 //!   strip order, detached windows, inbox retention) and the edit normalization.
 //! - [`settings`], [`shortcuts`]: the settings normalizers. [`grid`]: layouts, templates, prompt queues, notes.
 //!   [`remote`]: SSH hosts / identities / cell refs, SFTP places, database connections and folder colours.
-//!   [`windows`]: workspace order, detached windows, pruneAutomation.
+//!   [`windows`]: workspace order, detached windows, pruneAutomation. [`timsort`]: V8's Array.prototype.sort.
 
 pub mod grid;
 pub mod js;
@@ -17,6 +17,7 @@ pub mod remote;
 pub mod settings;
 pub mod shortcuts;
 pub mod state;
+pub mod timsort;
 pub mod windows;
 
 use serde_json::{Map, Value};

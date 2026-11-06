@@ -179,3 +179,20 @@ fn a_state_json_with_lone_surrogates_loads_like_json_parse_reads_it() {
         assert_eq!(std::fs::read_to_string(dir.path().join("state.json")).unwrap(), text, "row {i}");
     }
 }
+
+#[test]
+fn the_retention_sort_orders_like_v8_even_for_nan_keys() {
+    let rows = rows("js-sort.jsonl");
+    assert_eq!(rows.len(), 400);
+    let mut bad = Vec::new();
+    for (i, row) in rows.iter().enumerate() {
+        let keys: Vec<f64> = row["keys"].as_array().unwrap().iter().map(|k| k.as_f64().unwrap_or(f64::NAN)).collect();
+        let want: Vec<usize> = row["order"].as_array().unwrap().iter().map(|k| k.as_u64().unwrap() as usize).collect();
+        let mut got: Vec<usize> = (0..keys.len()).collect();
+        unimux_state::normalize::timsort::sort_by(&mut got, |a, b| keys[*a] - keys[*b]);
+        if got != want {
+            bad.push(i);
+        }
+    }
+    assert!(bad.is_empty(), "{} of {} rows differ: {:?}", bad.len(), rows.len(), &bad[..bad.len().min(20)]);
+}
