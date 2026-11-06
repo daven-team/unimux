@@ -1,0 +1,135 @@
+//! The MC_* run and debug switches. Electron honoured them only when `!app.isPackaged`; here they are read only in builds with
+//! the `dev-overrides` feature or in debug builds (dev and check flavours). Release builds compile the reads out and see `None` for each.
+//! MC_CELL_ID is the per-terminal variable, not an override.
+
+use std::path::PathBuf;
+
+/// Every override the app reads, in one place (INVENTORY: the 16 MC_* switches).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DevOverrides {
+    pub data_dir: Option<PathBuf>,
+    pub debug_port: Option<u16>,
+    pub offscreen: bool,
+    pub hook_debug: bool,
+    pub ssh_debug: bool,
+    pub ssh_no_safestorage: bool,
+    pub trash_dir: Option<PathBuf>,
+    pub db_export_dir: Option<PathBuf>,
+    pub notes_export_dir: Option<PathBuf>,
+    pub cli_no_registry: bool,
+    pub cli_probe_profile: Option<String>,
+    pub install_command_override: Option<String>,
+    pub usage_claude_url: Option<String>,
+    pub usage_codex_url: Option<String>,
+    pub usage_claude_token_url: Option<String>,
+    pub update_feed: Option<String>,
+}
+
+/// The names, for docs and the release check (a release binary must not read them).
+pub const OVERRIDE_NAMES: [&str; 16] = [
+    "MC_DATA_DIR",
+    "MC_DEBUG_PORT",
+    "MC_OFFSCREEN",
+    "MC_HOOK_DEBUG",
+    "MC_SSH_DEBUG",
+    "MC_SSH_NO_SAFESTORAGE",
+    "MC_TRASH_DIR",
+    "MC_DB_EXPORT_DIR",
+    "MC_NOTES_EXPORT_DIR",
+    "MC_CLI_NO_REGISTRY",
+    "MC_CLI_PROBE_PROFILE",
+    "MC_INSTALL_COMMAND_OVERRIDE",
+    "MC_USAGE_CLAUDE_URL",
+    "MC_USAGE_CODEX_URL",
+    "MC_USAGE_CLAUDE_TOKEN_URL",
+    "MC_UPDATE_FEED",
+];
+
+impl DevOverrides {
+    /// Reads the process environment (always empty in a release build).
+    pub fn from_env() -> Self {
+        Self::from_lookup(|name| std::env::var(name).ok())
+    }
+
+    /// Reads from any lookup; `enabled` decides like the build feature does.
+    pub fn from_lookup_enabled(enabled: bool, get: impl Fn(&str) -> Option<String>) -> Self {
+        if !enabled {
+            return Self::default();
+        }
+        // `process.env[name] || undefined`: an empty value counts as unset.
+        let s = |n: &str| get(n).filter(|v| !v.is_empty());
+        let flag = |n: &str| s(n).is_some_and(|v| v != "0");
+        Self {
+            data_dir: s("MC_DATA_DIR").map(PathBuf::from),
+            debug_port: s("MC_DEBUG_PORT").and_then(|v| v.trim().parse().ok()).filter(|p| *p != 0),
+            offscreen: flag("MC_OFFSCREEN"),
+            hook_debug: flag("MC_HOOK_DEBUG"),
+            ssh_debug: flag("MC_SSH_DEBUG"),
+            ssh_no_safestorage: flag("MC_SSH_NO_SAFESTORAGE"),
+            trash_dir: s("MC_TRASH_DIR").map(PathBuf::from),
+            db_export_dir: s("MC_DB_EXPORT_DIR").map(PathBuf::from),
+            notes_export_dir: s("MC_NOTES_EXPORT_DIR").map(PathBuf::from),
+            cli_no_registry: flag("MC_CLI_NO_REGISTRY"),
+            cli_probe_profile: s("MC_CLI_PROBE_PROFILE"),
+            install_command_override: s("MC_INSTALL_COMMAND_OVERRIDE"),
+            usage_claude_url: s("MC_USAGE_CLAUDE_URL"),
+            usage_codex_url: s("MC_USAGE_CODEX_URL"),
+            usage_claude_token_url: s("MC_USAGE_CLAUDE_TOKEN_URL"),
+            update_feed: s("MC_UPDATE_FEED"),
+        }
+    }
+
+    /// The overrides of this build: read with `dev-overrides`, none without it.
+    pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Self {
+        #[cfg(any(feature = "dev-overrides", debug_assertions))]
+        {
+            Self::from_lookup_enabled(true, get)
+        }
+        #[cfg(not(any(feature = "dev-overrides", debug_assertions)))]
+        {
+            let _ = get;
+            Self::default()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let map: std::collections::HashMap<String, String> = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        move |k| map.get(k).cloned()
+    }
+
+    #[test]
+    fn reads_when_enabled() {
+        let o = DevOverrides::from_lookup_enabled(
+            true,
+            env(&[("MC_DATA_DIR", "C:/scratch"), ("MC_DEBUG_PORT", "9333"), ("MC_OFFSCREEN", "1"), ("MC_UPDATE_FEED", "")]),
+        );
+        assert_eq!(o.data_dir, Some(PathBuf::from("C:/scratch")));
+        assert_eq!(o.debug_port, Some(9333));
+        assert!(o.offscreen);
+        assert_eq!(o.update_feed, None);
+    }
+
+    #[test]
+    fn ignored_when_disabled() {
+        let o = DevOverrides::from_lookup_enabled(false, env(&[("MC_DATA_DIR", "C:/scratch")]));
+        assert_eq!(o, DevOverrides::default());
+    }
+
+    /// The release flavour (no feature, no debug assertions: `cargo test --release`) ignores MC_DATA_DIR whatever the environment says.
+    #[cfg(not(any(feature = "dev-overrides", debug_assertions)))]
+    #[test]
+    fn release_build_ignores_the_environment() {
+        assert_eq!(DevOverrides::from_lookup(env(&[("MC_DATA_DIR", "C:/scratch")])).data_dir, None);
+    }
+
+    #[cfg(any(feature = "dev-overrides", debug_assertions))]
+    #[test]
+    fn dev_build_reads_the_environment() {
+        assert_eq!(DevOverrides::from_lookup(env(&[("MC_DATA_DIR", "C:/scratch")])).data_dir, Some(PathBuf::from("C:/scratch")));
+    }
+}

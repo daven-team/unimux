@@ -1,0 +1,24 @@
+[package]
+name = "unimux-core"
+description = "Pure building blocks: data dir, atomic writes, JSON files, crash.log, startup timing, home dir, i18n, JS-compatible JSON"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+# Electron's `!app.isPackaged`: the MC_* run and debug overrides are read only with this feature (see dev_overrides.rs).
+dev-overrides = []
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ryu-js.workspace = true
+dirs.workspace = true
+junction.workspace = true
+dunce.workspace = true
+parking_lot.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
