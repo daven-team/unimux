@@ -1,0 +1,82 @@
+//! The one registration point of window.mc commands. Every domain has its own file, created in wave 0 so later packages
+//! (each in its own worktree) only edit their file. The order does not matter: the router rejects a channel registered twice.
+
+use std::sync::Arc;
+
+use unimux_ipc::RouterBuilder;
+
+use crate::context::AppContext;
+
+pub mod accounts;
+pub mod agents;
+pub mod app;
+pub mod db;
+pub mod fallbacks;
+pub mod files;
+pub mod git;
+pub mod github;
+pub mod mcp;
+pub mod os;
+pub mod pty;
+pub mod sftp;
+pub mod ssh;
+pub mod state;
+pub mod update;
+pub mod window;
+
+pub fn register_all(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
+    fallbacks::register(r, ctx);
+    app::register(r, ctx);
+    state::register(r, ctx);
+    window::register(r, ctx);
+    os::register(r, ctx);
+    pty::register(r, ctx);
+    agents::register(r, ctx);
+    mcp::register(r, ctx);
+    files::register(r, ctx);
+    git::register(r, ctx);
+    github::register(r, ctx);
+    ssh::register(r, ctx);
+    sftp::register(r, ctx);
+    db::register(r, ctx);
+    accounts::register(r, ctx);
+    update::register(r, ctx);
+}
+
+#[cfg(test)]
+mod tests {
+    //! The contract test of the app (PLAN F3): every registration matches the contract, and the wave 0 channels are in.
+    use super::*;
+    use std::time::Instant;
+    use unimux_core::crash_log::RollingLog;
+    use unimux_core::dev_overrides::DevOverrides;
+    use unimux_core::startup_timing::{StartupLog, StartupTimer};
+    use unimux_ipc::Contract;
+    use unimux_ipc::router::Status;
+
+    #[test]
+    fn every_registration_matches_the_contract() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = AppContext::new(
+            dir.path().to_path_buf(),
+            DevOverrides::default(),
+            Arc::new(RollingLog::crash_log(dir.path())),
+            Arc::new(StartupTimer::new(Instant::now())),
+            Arc::new(StartupLog::new(dir.path().join("startup.log"), "")),
+            serde_json::json!({"version": 1, "projects": []}),
+        );
+        let mut builder = RouterBuilder::new(Contract::embedded());
+        register_all(&mut builder, &ctx);
+        assert!(builder.errors().is_empty(), "{:?}", builder.errors());
+        let router = builder.build(ctx.guard.clone());
+        let report = router.report();
+        assert_eq!(report.len(), 215);
+        for channel in ["state:load", "state:snapshot", "state:edit", "app:claimStart", "app:startupMark", "app:reportError"] {
+            assert_eq!(report[channel], Status::Implemented, "{channel}");
+        }
+        for channel in ["cell:alive", "mcp:info"] {
+            assert_eq!(report[channel], Status::Fallback, "{channel}");
+        }
+        ctx.saver.stop();
+    }
+}
