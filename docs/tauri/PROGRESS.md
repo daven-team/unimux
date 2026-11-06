@@ -58,7 +58,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | P1 | Rust pty core | todo | | | | |
 | B1 | Dual host test harness (unimux-hostd) | todo | | | | |
 | B2 | unimux-oscrypt production | todo | | | | |
-| B3 | Rust http_fetch | todo | | | | PAC check in the VM |
+| B3 | Rust http_fetch | code done, VM check open | 2026-11-06 | | 2026-11-06 | unimux-net on hyper + rustls (no reqwest); 40 cargo tests incl. WinHTTP PAC; the PAC-configured VM check is open (no VM image, SP3 deferred), see "Open issues: B3" |
 | W1 | Windows caption buttons that look like today | todo | | | | reference images from 1.1.4 first |
 | W2 | macOS window chrome, app menu, WebKit compatibility | todo | | | | |
 | W3 | OS file drop and localStorage import | todo | | | | |
@@ -377,6 +377,19 @@ Verification: `cargo fmt --all --check`, `cargo clippy -p unimux-mcp --all-targe
 6. The redis crate stays a dev-dependency of unimux-db only to keep the measured gaps reproducible; D9 can drop it (and the workspace pin) once its own tests replace that comparison.
 7. D7: after `SET NAMES` / `SET CHARACTER SET` mysql2 encodes queries and decodes column names in the session charset; `wire::mycharset` does it for utf8, latin1 / binary, ascii, ucs2 / utf16-le and cesu8 and refuses queries in the iconv-lite-only encodings (cp1250, koi8r, sjis, big5 ...). D7 adds iconv-lite's tables for those.
 8. D9: the reconnect handshake (`auth`, `client setname unimux`, `select` of the previously selected DB) is taken from the ioredis source (`wire::redis::reconnect_sequence`); D9 adds a golden for it through RedisSession.
+
+### Open issues: B3 (http_fetch, 2026-11-06)
+
+Verified on Windows 11 26200: `cargo fmt --check`, `cargo clippy -p unimux-net --all-targets -D warnings`, `cargo test -p unimux-net` (11 unit + 29 integration tests, all green; `UNIMUX_NET_ONLINE=1` adds a real GET to api.github.com over h2 and HTTP/1.1 with the system proxy and the Windows certificate store: 200), `cargo check --workspace`. macOS: `cargo clippy -p unimux-net --target aarch64-apple-darwin --all-targets -D warnings` is clean (run in a throwaway rust:1.99-slim container with clang and stub libc headers for ring's C code; nothing run on a Mac).
+
+Acceptance: the mock server asserts the exact token renewal header set and order on the wire (content-type, user-agent `unimux/<ver>`, content-length, connection: close, host, like Node's http.request in 1.1.4), redirect refusal, the 1 MB cap (with and without Content-Length), timeout, abort, connect-failure classification and direct-then-proxy fallback; the token-transport cases and the request cases of usage-fetchers are ported; update feed / download redirect rules (5 hops, trusted hosts per hop) and the GitHub / changelog header sets are covered; a PAC script served locally is evaluated by WinHTTP (`WinHttpGetProxyForUrlEx`) and the request goes through the proxy it names.
+
+1. **Not met: "a PAC-configured VM fetches a URL through the proxy".** No VM image (SP3 deferred). The local substitute evaluates a real PAC file through WinHTTP and fetches through the proxy, but it passes the PAC URL directly instead of reading it from Internet Options (the user's settings are read only, never changed by a test), and WPAD discovery (DHCP / DNS) is not exercised. To do with the SP3 / U3 VM: set "Use setup script" and "Automatically detect settings" in the VM, run `cargo test -p unimux-net` plus `UNIMUX_NET_ONLINE=1`.
+2. Header name case: hyper writes header names in lower case; 1.1.4's Node transport sent the caller's names as given by `Headers` (lower case too) but `Host` capitalised. Order matches; only `host` vs `Host` differs (hyper offers no public way to set the case of one header).
+3. WinHTTP drops `SOCKS5` entries of a PAC answer (Chromium would use them); `SOCKS` (v4) entries are kept. Internet Options' manual `socks=` entries are used as SOCKS v4 like Chromium.
+4. Proxies that need authentication (407) are reported as connect failures; 1.1.4 (Chromium) could answer NTLM / Negotiate challenges with the logon session. Not implemented; affects only users behind an authenticating proxy.
+5. The macOS proxy path (`CFNetworkCopyProxiesForURL`, PAC URL and inline PAC script on a private run loop mode) is compile-checked only.
+6. Consumers (A3, A5, A6, G8, U1) build their requests from `unimux_net::calls` (header sets, timeouts, redirect rules and URLs from 1.1.4 in one place); B3 registers no Tauri command of its own.
 
 ### How to run
 

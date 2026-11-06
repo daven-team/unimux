@@ -16,7 +16,7 @@ The judges preferred design 3, but the user decided on 2026-11-06: **1.2.0 ships
 
 - Terminal data plane in Rust (ConPTY with sideloaded conpty.dll + OpenConsole.exe, Job Objects, FlowGate/TailBuffer/OutputChannel, binary frames posted as WebView2 shared buffers on Windows, decided in SP1; `tauri::ipc::Channel` only for low-rate traffic).
 - `unimux-oscrypt` reads AND writes the Chromium 'v10' format, so 1.1.4 can still read files written by 1.2.0 (downgrade safety).
-- Rust `http_fetch` (reqwest with system proxy incl. PAC/WPAD) for every network call that used Chromium networking.
+- Rust `http_fetch` (unimux-net: own client on hyper + rustls with the OS certificate verifier, system proxy per URL incl. PAC/WPAD; not reqwest, which always adds `Accept: */*`, decided in B3) for every network call that used Chromium networking.
 - Golden corpus + `test/PORTING.md` before the first port of business logic; every port is gated by both.
 - Generated IPC contract from `src/preload/api.d.ts` with a typed "not yet" error, so the real UI runs from wave 0 and the contract counter shows progress.
 - `unimux-hostd` stdio test binary so the existing Node `.int` suites and fake servers drive the Rust code.
@@ -82,7 +82,7 @@ src-tauri/
     unimux-exec/      process spawn, Job Objects / process groups, cleanEnv, kill tree, spawn_detached
     unimux-pty/       ConPTY wrapper, Unix pty, OutputChannel/FlowGate/EchoClock/TailBuffer, batcher, router,
                       shell integration, launch line, cell spawn, install manager
-    unimux-net/       http_fetch (reqwest, proxy resolution incl. PAC/WPAD), exact header control
+    unimux-net/       http_fetch (hyper + rustls, proxy resolution incl. PAC/WPAD), exact header control
     unimux-oscrypt/   Electron safeStorage compat, read + write
     unimux-git/       runner, caches, parsers, trust, mutations, worktrees, GitHub publish
     unimux-files/     listing, preview, save, file ops, search/replace, notes, fs probes, monitor, changelog
@@ -105,7 +105,7 @@ Version pins (checked with cargo search/info on 2026-11-06; crates.io and npm al
 - tokio 1.54.1, serde 1.0.229, serde_json 1.0.154 (preserve_order, float_roundtrip), thiserror 2.0.21, parking_lot 0.13.0, uuid 1.29.0, sha2 0.11.1, base64 0.23.1
 - windows 0.62.2, webview2-com 0.39.1, tauri-winrt-notification 0.8.1, objc2-* 0.3.2, security-framework 3.7.0
 - aes-gcm 0.11.1, aes 0.9.4, cbc 0.2.1, pbkdf2 0.13.0, zeroize 1.9.1
-- reqwest 0.13.5 (rustls, no gzip), junction 2.1.0, dunce 1.0.5, fs4 (instance lock), interprocess 2.x (second-instance socket), rusty-leveldb 4.0.2, process-wrap 10.0.1
+- http_fetch (B3): no reqwest; hyper 1.12.0 client connections + rustls 0.23.46 (ring) + rustls-platform-verifier 0.7.1, http 1.5.0, url 2.5.8 (rcgen 0.14.10 in tests); junction 2.1.0, dunce 1.0.5, fs4 (instance lock), interprocess 2.x (second-instance socket), rusty-leveldb 4.0.2, process-wrap 10.0.1
 - russh 0.65.1 (SP7: `default-features = false, features = ["ring", "rsa", "flate2"]`, the same ring backend as rustls, no aws-lc-sys) with its pinned ssh-key =0.7.0-rc.11 plus feature `tdes`; legacy encrypted PEM through aes 0.9.4 / cbc 0.2.1 / ctr 0.10.1 / des 0.9.0 / blowfish 0.10.0 / md5 0.8.1 (own code, S2); the client offers exactly the 1.1.4 algorithm list (ssh2 1.17 defaults under Electron 45), see docs/tauri/spikes/SP7.md
 - russh-sftp 3.0.1, postgres-protocol 0.6.12, mysql_common 0.38.2, redis 1.8.1, rusqlite 0.41.1 (bundled, column_metadata), rustls 0.23.46 + tokio-rustls 0.26.6 (ring provider), axum 0.8.9, hyper 1.12.0, rmcp 3.9.0 (decided in SP8), fancy-regex 0.20.0, icu_collator 2.4.0, encoding_rs 0.8.44, trash 5.3.0
 
