@@ -98,7 +98,7 @@ impl Fake {
         let worker_tools = fixture["workerTools"].as_array().cloned().unwrap_or_default();
         let instructions = fixture["instructions"].as_str().unwrap_or_default().to_string();
         let open_grids =
-            Mutex::new(["grid-side".to_string(), "grid-side2".to_string(), "grid-side3".to_string()].into_iter().collect());
+            Mutex::new(["grid-side", "grid-side2", "grid-side3", "grid-side4"].map(String::from).into_iter().collect());
         Self { tools, worker_tools, instructions, events: EventLog::default(), open_grids }
     }
 

@@ -18,7 +18,7 @@ export function http(url, { method = 'POST', headers = {}, body, stopAfterMs, ti
     req.on('error', (e) => resolve({ status: 0, headers: {}, text: String(e.code ?? e), ms: Date.now() - started }));
     req.setTimeout(timeoutMs, () => req.destroy(new Error('timeout')));
     if (stopAfterMs) setTimeout(() => { req.destroy(); resolve({ status: 'closed', headers: {}, text: '', ms: Date.now() - started }); }, stopAfterMs);
-    req.end(body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body));
+    req.end(body === undefined ? undefined : typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
   });
 }
 
@@ -57,6 +57,42 @@ export function outcome(res, { drop = [], keepHeaders = [] } = {}) {
   const type = String(res.headers['content-type'] ?? '').split(';')[0] || null;
   const headers = Object.fromEntries(keepHeaders.map((h) => [h, res.headers[h] === undefined ? null : maskText(String(res.headers[h]))]));
   return { status: res.status, type, ...(keepHeaders.length ? { headers } : {}), messages: mask(messages(res), drop), ...(res.extra ? { extra: res.extra } : {}) };
+}
+
+/**
+ * A POST whose SSE answer is read as it arrives: `onFrame(message, stream)` sees every JSON-RPC message; the stream is
+ * closed by the caller (or after `ms`), and the result lists the messages seen until then (not whether the server ended it).
+ */
+function stream(url, token, headers, body, { ms = 3000, onFrame = () => {} } = {}) {
+  const u = new URL(url);
+  return new Promise((resolve) => {
+    const seen = [];
+    let text = '';
+    let status = 0;
+    let done = false;
+    const finish = () => { if (done) return; done = true; req.destroy(); resolve({ status, messages: seen }); };
+    const req = httpRequest({ host: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'content-type': 'application/json', accept: ACCEPT, ...auth(token), ...headers } }, (res) => {
+      status = res.statusCode;
+      res.on('data', (c) => {
+        text += c;
+        let cut;
+        while ((cut = text.indexOf('\n\n')) >= 0) {
+          const block = text.slice(0, cut);
+          text = text.slice(cut + 2);
+          const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n');
+          if (!data.trim()) continue;
+          const message = JSON.parse(data);
+          seen.push(message);
+          onFrame(message, { finish });
+        }
+      });
+      res.on('end', () => setTimeout(finish, 50));
+      res.on('error', finish);
+    });
+    req.on('error', finish);
+    setTimeout(finish, ms);
+    req.end(JSON.stringify(body));
+  });
 }
 
 /** The cases; each returns one outcome (or an object of named outcomes). */
@@ -220,6 +256,146 @@ export function cases(srv) {
         await new Promise((r) => setTimeout(r, 100));
       }
       return { outcome: 'not noticed within 4 s' };
+    },
+    // ----- added with the SP8 review fixes -----
+    'tasks/list pages 10 at a time (nextCursor), unknown cursor -> -32602': async () => {
+      const t = await lead();
+      const ids = [];
+      for (let i = 0; i < 12; i++) {
+        const r = await post(srv.url, t, { jsonrpc: '2.0', id: i, method: 'tools/call', params: { name: 'wait_for', arguments: { timeoutSec: 30 }, task: {} } });
+        ids.push(messages(r)[0]?.result?.task?.taskId);
+      }
+      const first = await post(srv.url, t, { jsonrpc: '2.0', id: 20, method: 'tasks/list', params: {} });
+      const cursor = messages(first)[0]?.result?.nextCursor;
+      const second = await post(srv.url, t, { jsonrpc: '2.0', id: 21, method: 'tasks/list', params: { cursor } });
+      const bad = await post(srv.url, t, { jsonrpc: '2.0', id: 22, method: 'tasks/list', params: { cursor: 'nope' } });
+      const badType = await post(srv.url, t, { jsonrpc: '2.0', id: 23, method: 'tasks/list', params: { cursor: 5 } });
+      for (const [i, taskId] of ids.entries()) await post(srv.url, t, { jsonrpc: '2.0', id: 100 + i, method: 'tasks/cancel', params: { taskId } });
+      const page = (r) => { const m = messages(r)[0]?.result; return { keys: Object.keys(m ?? {}), count: m?.tasks?.length, order: m?.tasks?.map((x) => ids.indexOf(x.taskId)) }; };
+      return { first: page(first), cursorIsTenth: cursor === ids[9], second: page(second), bad: outcome(bad), badType: outcome(badType) };
+    },
+    'strict JSON-RPC messages (ids, params, extra keys, error responses)': async () => {
+      const t = await lead();
+      const send = async (raw) => outcome(await post(srv.url, t, raw));
+      return {
+        fractionId: await send({ jsonrpc: '2.0', id: 1.5, method: 'ping' }),
+        wholeFloatId: await send('{"jsonrpc":"2.0","id":2.0,"method":"ping"}'),
+        unsafeId: await send({ jsonrpc: '2.0', id: 2 ** 53, method: 'ping' }),
+        paramsArray: await send({ jsonrpc: '2.0', id: 1, method: 'ping', params: [] }),
+        paramsNull: await send({ jsonrpc: '2.0', id: 1, method: 'ping', params: null }),
+        extraKey: await send({ jsonrpc: '2.0', id: 1, method: 'ping', foo: 1 }),
+        badProgressToken: await send({ jsonrpc: '2.0', id: 1, method: 'ping', params: { _meta: { progressToken: 1.5 } } }),
+        notificationWithParamsString: await send({ jsonrpc: '2.0', method: 'notifications/initialized', params: 'x' }),
+        errorWithoutId: await send({ jsonrpc: '2.0', error: { code: -1, message: 'x' } }),
+        errorWithNullId: await send({ jsonrpc: '2.0', id: null, error: { code: -1, message: 'x' } }),
+        errorFractionCode: await send({ jsonrpc: '2.0', id: 1, error: { code: 1.5, message: 'x' } }),
+        resultArray: await send({ jsonrpc: '2.0', id: 1, result: [] }),
+        resultObject: await send({ jsonrpc: '2.0', id: 1, result: {} }),
+      };
+    },
+    'invalid UTF-8 in the body becomes U+FFFD (not -32700)': async () => {
+      const body = Buffer.concat([Buffer.from('{"jsonrpc":"2.0","id":1,"method":"ping","params":{"x":"a'), Buffer.from([0xff, 0xc3]), Buffer.from('"}}')]);
+      return outcome(await post(srv.url, await lead(), body));
+    },
+    'tasks/result after tasks/cancel -> -32603 without prefix': async () => {
+      const t = await lead();
+      const created = await post(srv.url, t, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'wait_for', arguments: { timeoutSec: 30 }, task: {} } });
+      const taskId = messages(created)[0]?.result?.task?.taskId;
+      await post(srv.url, t, { jsonrpc: '2.0', id: 2, method: 'tasks/cancel', params: { taskId } });
+      return outcome(await post(srv.url, t, { jsonrpc: '2.0', id: 3, method: 'tasks/result', params: { taskId } }));
+    },
+    'request params failing the method schema -> -32603 zod issues': async () => {
+      const t = await lead();
+      const send = async (method, params) => outcome(await post(srv.url, t, { jsonrpc: '2.0', id: 1, method, ...(params === undefined ? {} : { params }) }));
+      return {
+        callNoName: await send('tools/call', { arguments: {} }),
+        callNameNumber: await send('tools/call', { name: 5 }),
+        callNoParams: await send('tools/call'),
+        callArgumentsArray: await send('tools/call', { name: 'get_context', arguments: [] }),
+        callTaskString: await send('tools/call', { name: 'wait_for', task: 'x' }),
+        callTtlString: await send('tools/call', { name: 'get_context', task: { ttl: 'x' } }),
+        getNoTaskId: await send('tasks/get', {}),
+        resultNoParams: await send('tasks/result'),
+        cancelTaskIdNumber: await send('tasks/cancel', { taskId: 1 }),
+      };
+    },
+    'MCP task ttl with a fraction is kept': async () => {
+      const r = await post(srv.url, await lead(), { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'wait_for', arguments: { timeoutSec: 1 }, task: { ttl: 70000.5 } } });
+      return outcome(r);
+    },
+    'session tools/call cancelled by notifications/cancelled gets no answer': async () => {
+      const t = await lead(); const id = await session(t);
+      await inSession(t, id, { jsonrpc: '2.0', method: 'notifications/initialized' });
+      const headers = { 'mcp-session-id': id, 'mcp-protocol-version': '2025-11-25' };
+      let cancelStatus;
+      const s = stream(srv.url, t, headers, { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'wait_for', arguments: { timeoutSec: 20 }, _meta: { progressToken: 'p' } } }, { ms: 3500 });
+      await new Promise((r) => setTimeout(r, 500));
+      cancelStatus = (await inSession(t, id, { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 7, reason: 'user' } })).status;
+      const { status, messages: seen } = await s;
+      return { status, cancelStatus, messages: mask(seen, ['message']) };
+    },
+    'elicitation aborted by notifications/cancelled (with and without reason)': async () => {
+      const run = async (grid, reason) => {
+        const t = await lead(); const id = await session(t);
+        await inSession(t, id, { jsonrpc: '2.0', method: 'notifications/initialized' });
+        const headers = { 'mcp-session-id': id, 'mcp-protocol-version': '2025-11-25' };
+        const s = stream(srv.url, t, headers, { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'close_grid', arguments: { gridId: grid } } }, {
+          ms: 2500,
+          onFrame: (m) => { if (m.method === 'elicitation/create') void inSession(t, id, { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 9, ...(reason ? { reason } : {}) } }); },
+        });
+        const { status, messages: seen } = await s;
+        return { status, messages: mask(seen, ['message', 'title']) };
+      };
+      return { withReason: await run(srv.openGrid4, 'user closed'), withoutReason: await run(srv.openGrid4) };
+    },
+    'elicitation answers failing ElicitResultSchema or the requested schema count as cancel': async () => {
+      const run = async (reply) => {
+        const t = await lead(); const id = await session(t);
+        await inSession(t, id, { jsonrpc: '2.0', method: 'notifications/initialized' });
+        const headers = { 'mcp-session-id': id, 'mcp-protocol-version': '2025-11-25' };
+        const { status, messages: seen } = await stream(srv.url, t, headers, { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'close_grid', arguments: { gridId: srv.openGrid4 } } }, {
+          ms: 4000,
+          onFrame: (m, s) => {
+            if (m.method === 'elicitation/create') void inSession(t, id, { jsonrpc: '2.0', id: m.id, ...reply });
+            if (m.id === 9) s.finish();
+          },
+        });
+        const answer = seen.find((m) => m.id === 9);
+        return { status, isError: answer?.result?.isError ?? null, text: answer?.result?.content?.[0]?.text?.slice(0, 40) ?? null };
+      };
+      return {
+        contentNotMatchingSchema: await run({ result: { action: 'accept', content: { confirm: 'yes' } } }),
+        missingRequired: await run({ result: { action: 'accept', content: {} } }),
+        unknownAction: await run({ result: { action: 'yes', content: { confirm: true } } }),
+        nestedContent: await run({ result: { action: 'accept', content: { confirm: { v: true } } } }),
+        errorAnswer: await run({ error: { code: -1, message: 'no' } }),
+        declineWithNullContent: await run({ result: { action: 'decline', content: null } }),
+        // Accepted by the tool if passed through unchecked, so these two tell a validating server from one that is not.
+        confirmPlusNestedValue: await run({ result: { action: 'accept', content: { confirm: true, extra: { a: 1 } } } }),
+        confirmPlusNumberArray: await run({ result: { action: 'accept', content: { confirm: true, list: [1] } } }),
+      };
+    },
+    'a task created in a session is hidden from other sessions of the token, not from stateless calls': async () => {
+      const t = await lead();
+      const a = await session(t); const b = await session(t);
+      const first = (r) => messages(r)[0];
+      const created = first(await inSession(t, a, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'wait_for', arguments: { timeoutSec: 30 }, task: {} } }));
+      const taskId = created?.result?.task?.taskId;
+      const stateless = first(await post(srv.url, t, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'wait_for', arguments: { timeoutSec: 30 }, task: {} } }))?.result?.task?.taskId;
+      const count = (r) => first(r)?.result?.tasks?.length ?? first(r);
+      const out = {
+        getFromB: mask(first(await inSession(t, b, { jsonrpc: '2.0', id: 3, method: 'tasks/get', params: { taskId } })), []),
+        getFromA: first(await inSession(t, a, { jsonrpc: '2.0', id: 4, method: 'tasks/get', params: { taskId } }))?.result?.status ?? null,
+        getStateless: first(await post(srv.url, t, { jsonrpc: '2.0', id: 5, method: 'tasks/get', params: { taskId } }))?.result?.status ?? null,
+        listA: count(await inSession(t, a, { jsonrpc: '2.0', id: 6, method: 'tasks/list', params: {} })),
+        listB: count(await inSession(t, b, { jsonrpc: '2.0', id: 7, method: 'tasks/list', params: {} })),
+        listStateless: count(await post(srv.url, t, { jsonrpc: '2.0', id: 8, method: 'tasks/list', params: {} })),
+        cancelFromB: mask(first(await inSession(t, b, { jsonrpc: '2.0', id: 9, method: 'tasks/cancel', params: { taskId } })), []),
+        resultFromB: mask(first(await inSession(t, b, { jsonrpc: '2.0', id: 10, method: 'tasks/result', params: { taskId } })), []),
+      };
+      await post(srv.url, t, { jsonrpc: '2.0', id: 11, method: 'tasks/cancel', params: { taskId } });
+      await post(srv.url, t, { jsonrpc: '2.0', id: 12, method: 'tasks/cancel', params: { taskId: stateless } });
+      return out;
     },
   };
 }

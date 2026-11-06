@@ -52,6 +52,8 @@ async function startTs() {
   const side = await h.service.execute('create_grid', { name: 'Side', cells: [{ profileId: 'codex', role: 'worker', name: 'Side worker', prompt: 'Work' }] }, h.coordinator.id);
   const side2 = await h.service.execute('create_grid', { name: 'Side 2', cells: [{ profileId: 'codex', role: 'worker', name: 'Side worker 2', prompt: 'Work' }] }, h.coordinator.id);
   const side3 = await h.service.execute('create_grid', { name: 'Side 3', cells: [{ profileId: 'codex', role: 'worker', name: 'Side worker 3', prompt: 'Work' }] }, h.coordinator.id);
+  // Asked and never closed by the elicitation-cancel / invalid-answer protocol cases (a server that does not validate closes it).
+  const side4 = await h.service.execute('create_grid', { name: 'Side 4', cells: [{ profileId: 'codex', role: 'worker', name: 'Side worker 4', prompt: 'Work' }] }, h.coordinator.id);
   // The same call-start / call-end events the Rust fake logs, from the automation service the tools call.
   const events = [];
   const execute = h.service.execute.bind(h.service);
@@ -62,7 +64,7 @@ async function startTs() {
     catch (e) { events.push({ kind: 'call-end', tool: op, outcome: signal?.aborted ? 'aborted' : 'error', at: Date.now() }); throw e; }
   };
   return {
-    url: h.url, lead: h.coordinator.id, worker: h.worker.id, openGrid: side.gridId, openGrid2: side2.gridId, openGrid3: side3.gridId,
+    url: h.url, lead: h.coordinator.id, worker: h.worker.id, openGrid: side.gridId, openGrid2: side2.gridId, openGrid3: side3.gridId, openGrid4: side4.gridId,
     issue: async (cell) => h.server.issueToken(cell), revoke: async (cell) => h.server.revokeCell(cell),
     events: async () => events, sessions: async () => h.server.sessionCount,
     closed: () => h.controller.get().projects[0].tabs.every((t) => t.id !== side.gridId),
@@ -81,7 +83,7 @@ async function startRust(kind) {
   const hello = await next();
   let closedGrid = false;
   return {
-    url: hello.url, lead: 'cell-lead', worker: 'cell-worker', openGrid: 'grid-side', openGrid2: 'grid-side2', openGrid3: 'grid-side3',
+    url: hello.url, lead: 'cell-lead', worker: 'cell-worker', openGrid: 'grid-side', openGrid2: 'grid-side2', openGrid3: 'grid-side3', openGrid4: 'grid-side4',
     issue: async (cell) => (await ask({ cmd: 'issue', cell })).token, revoke: async (cell) => { await ask({ cmd: 'revoke', cell }); },
     events: async () => (await ask({ cmd: 'events' })).events,
     sessions: async () => (await ask({ cmd: 'events' })).sessions,

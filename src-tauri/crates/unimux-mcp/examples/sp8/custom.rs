@@ -8,10 +8,15 @@
 //!   version header 400, which is what Claude Code's `server/discover` probe for 2026-07-28 gets);
 //! - stateless JSON by default, SSE for a stateless tools/call with a progressToken and an SSE Accept, a session (SSE for
 //!   every request, `: keepalive` every 15 s) for an `initialize` that declares form elicitation; 256 sessions, 4 per token;
-//! - elicitation/create on the calling tool call's stream, answered by a later POST of the same session (120 s, cancel on
-//!   failure); notifications/progress; notifications/cancelled;
-//! - MCP tasks of protocol 2025-11-25 (tools/call `params.task`, tasks/get, tasks/result, tasks/list, tasks/cancel), 16 per
-//!   token, ttl clamped to 60 s..1 h, pollInterval 2000, private to the token;
+//! - elicitation/create on the calling tool call's stream, answered by a later POST of the same session (120 s; a timeout
+//!   or an abort sends `notifications/cancelled` for it on the same stream; an answer that fails ElicitResultSchema or the
+//!   requested schema counts as cancel); notifications/progress; notifications/cancelled (the cancelled request gets no
+//!   answer);
+//! - the SDK's strict JSONRPCMessageSchema; the body decoded as Node's `Buffer.toString('utf8')` (invalid bytes U+FFFD);
+//! - MCP tasks of protocol 2025-11-25 (tools/call `params.task`, tasks/get, tasks/result, tasks/list paged 10 at a time with
+//!   nextCursor, tasks/cancel), 16 per token, ttl clamped to 60 s..1 h and restarted when the task completes or is cancelled
+//!   (InMemoryTaskStore), a working task that expires is aborted, pollInterval 2000, private to the token and to the
+//!   creating session (InMemoryTaskStore.lookup);
 //! - cancellation by drop: the request's CancellationToken is cancelled when hyper drops the handler future (JSON mode) or
 //!   the response body (SSE mode), i.e. when the client goes away.
 
@@ -59,6 +64,10 @@ pub struct Config {
     pub rate: Option<(f64, f64)>,
     pub max_in_flight_per_token: usize,
     pub max_in_flight: usize,
+    /// The lower clamp of a task's ttl (60 s; tests lower it to drive the expiry).
+    pub min_task_ttl: Duration,
+    /// How long an elicitation waits for its answer (120 s; tests lower it).
+    pub elicit_timeout: Duration,
 }
 
 impl Default for Config {
@@ -69,6 +78,8 @@ impl Default for Config {
             rate: Some((120.0, 60.0)),
             max_in_flight_per_token: 8,
             max_in_flight: 256,
+            min_task_ttl: Duration::from_millis(MIN_TASK_TTL_MS),
+            elicit_timeout: ELICIT_TIMEOUT,
         }
     }
 }
@@ -83,15 +94,53 @@ struct Session {
     pending: Mutex<HashMap<String, oneshot::Sender<Value>>>,
     next_id: AtomicU64,
     /// The running client requests of this session (notifications/cancelled ends one).
-    requests: Mutex<HashMap<String, CancellationToken>>,
+    requests: Mutex<HashMap<String, Arc<RequestState>>>,
     form_elicitation: bool,
 }
+
+/// One running client request.
+struct RequestState {
+    cancel: CancellationToken,
+    /// Set by the client's notifications/cancelled, to the abort reason as the SDK stringifies it. Such a request gets no
+    /// answer (SDK `_onrequest`: `if (abortController.signal.aborted) return;`).
+    client_reason: Mutex<Option<String>>,
+}
+
+impl RequestState {
+    fn new(cancel: CancellationToken) -> Arc<Self> {
+        Arc::new(Self { cancel, client_reason: Mutex::new(None) })
+    }
+    fn cancelled_by_client(&self) -> bool {
+        self.client_reason.lock().is_some()
+    }
+    /// `String(signal.reason)`: the client's reason, else the DOMException of a bare `abort()`.
+    fn abort_reason(&self) -> String {
+        self.client_reason.lock().clone().unwrap_or_else(|| ABORT_REASON.to_string())
+    }
+}
+
+/// `String(new DOMException('This operation was aborted', 'AbortError'))`, the reason of `controller.abort()`.
+const ABORT_REASON: &str = "AbortError: This operation was aborted";
+/// `String(McpError(RequestTimeout, 'Request timed out'))`, the reason of an SDK request timeout.
+const TIMEOUT_REASON: &str = "McpError: MCP error -32001: Request timed out";
 
 struct TaskEntry {
     task: Value,
     result: Option<Value>,
     cancel: CancellationToken,
     changed: Arc<tokio::sync::Notify>,
+    /// The session the task was created in (None: a stateless request); InMemoryTaskStore.lookup hides it from others.
+    session: Option<String>,
+    /// Bumped whenever the cleanup timer is (re)armed; an older timer that fires finds a newer value and does nothing.
+    expiry: u64,
+}
+
+/// InMemoryTaskStore.lookup: a task of a session is visible to that session and to callers without a session.
+fn visible(entry: &TaskEntry, session: Option<&str>) -> bool {
+    match (session, entry.session.as_deref()) {
+        (Some(caller), Some(owner)) => caller == owner,
+        _ => true,
+    }
 }
 
 #[derive(Default)]
@@ -224,9 +273,20 @@ fn is_request(m: &Value) -> bool {
     m["method"].is_string() && (m["id"].is_string() || m["id"].is_number())
 }
 
+/// The key of a JSON-RPC id as a JS Map sees it: strings and numbers differ, `7.0` and `7` are the same number.
 fn id_key(id: &Value) -> String {
-    id.to_string()
+    normalize_number(id).to_string()
 }
+
+/// A whole number written with a fraction or an exponent (`2.0`, `1e3`) as JSON.parse + JSON.stringify give it back.
+fn normalize_number(v: &Value) -> Value {
+    match v.as_f64() {
+        Some(f) if v.is_f64() && f.fract() == 0.0 && f.abs() <= MAX_SAFE_INTEGER => json!(f as i64),
+        _ => v.clone(),
+    }
+}
+
+const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
 
 /// An `initialize` from a client that can answer form elicitations (`elicitation: {}` is the older spelling).
 fn wants_session(body: &Value) -> bool {
@@ -250,17 +310,51 @@ fn wants_progress(body: &Value, accept: Option<&str>) -> bool {
     })
 }
 
-/// A JSON-RPC 2.0 request, notification, response or error (the SDK's JSONRPCMessageSchema, loosely).
+/// zod 4 `z.number().int()`: a safe integer.
+fn is_int(v: &Value) -> bool {
+    v.as_f64().is_some_and(|f| f.fract() == 0.0 && f.abs() <= MAX_SAFE_INTEGER)
+}
+
+/// RequestIdSchema / ProgressTokenSchema: a string or an integer.
+fn is_id(v: &Value) -> bool {
+    v.is_string() || is_int(v)
+}
+
+/// RequestMetaSchema (loose): `progressToken` a string or an integer, `io.modelcontextprotocol/related-task` an object
+/// with a string `taskId`.
+fn meta_ok(meta: &Value) -> bool {
+    let Some(meta) = meta.as_object() else { return false };
+    meta.get("progressToken").is_none_or(is_id)
+        && meta.get("io.modelcontextprotocol/related-task").is_none_or(|t| t.is_object() && t["taskId"].is_string())
+}
+
+/// BaseRequestParamsSchema.loose() / NotificationsParamsSchema.loose(): an object whose `_meta` is RequestMetaSchema.
+fn params_ok(params: &Value) -> bool {
+    params.as_object().is_some_and(|p| p.get("_meta").is_none_or(meta_ok))
+}
+
+/// The SDK's JSONRPCMessageSchema: the union of the four `.strict()` schemas (request, notification, result response, error
+/// response), so extra top-level keys, a non-integer id or a params value that is not an object are refused.
 fn valid_message(m: &Value) -> bool {
     let Some(obj) = m.as_object() else { return false };
     if obj.get("jsonrpc") != Some(&json!("2.0")) {
         return false;
     }
-    if let Some(method) = obj.get("method") {
-        return method.is_string() && obj.get("id").is_none_or(|id| id.is_string() || id.is_number());
-    }
-    let id_ok = obj.get("id").is_some_and(|id| id.is_string() || id.is_number());
-    id_ok && (obj.contains_key("result") || obj.contains_key("error"))
+    let only = |keys: &[&str]| obj.keys().all(|k| keys.contains(&k.as_str()));
+    let request = only(&["jsonrpc", "id", "method", "params"])
+        && obj.get("id").is_some_and(is_id)
+        && obj.get("method").is_some_and(Value::is_string)
+        && obj.get("params").is_none_or(params_ok);
+    let notification = only(&["jsonrpc", "method", "params"])
+        && obj.get("method").is_some_and(Value::is_string)
+        && obj.get("params").is_none_or(params_ok);
+    let response = only(&["jsonrpc", "id", "result"])
+        && obj.get("id").is_some_and(is_id)
+        && obj.get("result").is_some_and(|r| r.is_object() && r.get("_meta").is_none_or(meta_ok));
+    let error = only(&["jsonrpc", "id", "error"])
+        && obj.get("id").is_none_or(is_id)
+        && obj.get("error").is_some_and(|e| e.is_object() && is_int(&e["code"]) && e["message"].is_string());
+    request || notification || response || error
 }
 
 /// Releases the request's in-flight slot and fires its abort when the response is done or dropped (Node's `res.on('close')`).
@@ -398,7 +492,9 @@ async fn handle(State(shared): State<Arc<Shared>>, req: Request) -> Response {
         BodyRead::TooLarge => return json_error(StatusCode::PAYLOAD_TOO_LARGE, -32000, "Request body too large."),
         BodyRead::Timeout => return empty(StatusCode::REQUEST_TIMEOUT),
     };
-    let Ok(body) = serde_json::from_slice::<Value>(&raw) else {
+    // mcp.ts readBody: `Buffer.concat(chunks).toString('utf8')`, which replaces invalid bytes with U+FFFD (maximal subparts,
+    // as from_utf8_lossy), then JSON.parse.
+    let Ok(body) = serde_json::from_str::<Value>(&String::from_utf8_lossy(&raw)) else {
         return json_error(StatusCode::BAD_REQUEST, -32700, "Parse error: invalid JSON.");
     };
 
@@ -411,12 +507,26 @@ async fn handle(State(shared): State<Arc<Shared>>, req: Request) -> Response {
     }
     let session_slot = wants_session(&body) && shared.inner.lock().sessions.len() < MAX_SESSIONS;
     if session_slot {
+        // Revoked while the body was read: the session must not outlive its token (mcp.ts answers 401 before the transport
+        // checks). transport() checks again under the lock that inserts the session.
+        if !token_live(&shared, &token, &cell, &token_cancel) {
+            return empty(StatusCode::UNAUTHORIZED);
+        }
         return transport(&shared, &headers, body, Mode::NewSession { token, cell, token_cancel }, release, guard).await;
     }
     shared.inner.lock().stateless_in_flight += 1;
     release.stateless = true;
     let json_mode = !wants_progress(&body, header_str(&headers, "accept"));
     transport(&shared, &headers, body, Mode::Stateless { token, cell, json: json_mode }, release, guard).await
+}
+
+/// The token still belongs to the cell and was not revoked (revoke_cell cancels `token_cancel`; issue_token revokes first).
+fn token_live(shared: &Shared, token: &str, cell: &str, token_cancel: &CancellationToken) -> bool {
+    token_live_in(&shared.inner.lock(), token, cell, token_cancel)
+}
+
+fn token_live_in(inner: &Inner, token: &str, cell: &str, token_cancel: &CancellationToken) -> bool {
+    !token_cancel.is_cancelled() && inner.tokens.get(token).is_some_and(|c| c == cell)
 }
 
 enum BodyRead {
@@ -497,9 +607,14 @@ async fn transport(
     if body.as_array().is_some_and(|a| a.len() > 100) {
         return json_error(StatusCode::BAD_REQUEST, -32600, "Invalid Request: Batch must not exceed 100 messages");
     }
-    let messages: Vec<Value> = messages_of(&body).into_iter().cloned().collect();
+    let mut messages: Vec<Value> = messages_of(&body).into_iter().cloned().collect();
     if !messages.iter().all(valid_message) {
         return json_error(StatusCode::BAD_REQUEST, -32700, "Parse error: Invalid JSON-RPC message");
+    }
+    for m in &mut messages {
+        if let Some(id) = m.get_mut("id") {
+            *id = normalize_number(id);
+        }
     }
     let is_init = messages.iter().any(|m| m["method"] == "initialize" && is_request(m));
     if is_init {
@@ -535,6 +650,10 @@ async fn transport(
                 form_elicitation: messages.iter().any(|m| form_elicitation(&m["params"]["capabilities"])),
             });
             let mut inner = shared.inner.lock();
+            // Checked under the lock revoke_cell takes, so a revoke either sees this session (and closes it) or wins here.
+            if !token_live_in(&inner, &token, &cell, &token_cancel) {
+                return empty(StatusCode::UNAUTHORIZED);
+            }
             inner.sessions.insert(session.id.clone(), session.clone());
             inner.session_order.push(session.id.clone());
             trim_sessions(&mut inner, &token);
@@ -583,18 +702,24 @@ async fn transport(
         }
         let ctx = ctx.clone();
         let tx = tx.clone();
-        let request_abort = abort.child_token();
+        let state = RequestState::new(abort.child_token());
         if let Some(s) = &session {
-            s.requests.lock().insert(id_key(&m["id"]), request_abort.clone());
+            s.requests.lock().insert(id_key(&m["id"]), state.clone());
         }
-        // Every long operation observes request_abort, so the call ends (and logs) on its own when the client goes away.
+        // Every long operation observes the request's cancel, so the call ends (and logs) on its own when the client goes
+        // away. A request the client cancelled gets no answer; its stream ends once nothing else is pending on it.
         tokio::spawn(async move {
             let id = id_key(&m["id"]);
-            let answer = dispatch_with(&ctx, m, Some(tx.clone()), request_abort).await;
+            let answer = dispatch_with(&ctx, m, Some(tx.clone()), state.clone()).await;
             if let Some(s) = &ctx.session {
-                s.requests.lock().remove(&id);
+                let mut requests = s.requests.lock();
+                if requests.get(&id).is_some_and(|r| Arc::ptr_eq(r, &state)) {
+                    requests.remove(&id);
+                }
             }
-            let _ = tx.send(answer);
+            if !state.cancelled_by_client() {
+                let _ = tx.send(answer);
+            }
         });
     }
     drop(tx);
@@ -612,11 +737,14 @@ fn accept_message(shared: &Arc<Shared>, session: Option<&Session>, m: &Value) {
         }
         return;
     }
-    if m["method"] == "notifications/cancelled" {
+    // CancelledNotificationSchema: a reason that is not a string fails the parse and the notification is dropped.
+    let reason = &m["params"]["reason"];
+    if m["method"] == "notifications/cancelled" && (reason.is_null() || reason.is_string()) {
         let request = session.requests.lock().get(&id_key(&m["params"]["requestId"])).cloned();
-        if let Some(cancel) = request {
+        if let Some(state) = request {
             shared.fake.events.push(json!({ "kind": "client-cancelled" }));
-            cancel.cancel();
+            state.client_reason.lock().get_or_insert_with(|| reason.as_str().unwrap_or(ABORT_REASON).to_string());
+            state.cancel.cancel();
         }
     }
 }
@@ -632,6 +760,10 @@ struct ReqCtx {
 impl ReqCtx {
     fn live(&self) -> bool {
         self.shared.inner.lock().tokens.get(&self.token).is_some_and(|c| *c == self.cell)
+    }
+    /// The transport's session id, which the SDK passes to every task store call.
+    fn session_id(&self) -> Option<&str> {
+        self.session.as_deref().map(|s| s.id.as_str())
     }
 }
 
@@ -654,19 +786,88 @@ fn mcp_error(id: &Value, code: i64, message: &str) -> Value {
 }
 
 async fn dispatch(ctx: &Arc<ReqCtx>, m: Value, out: Option<mpsc::UnboundedSender<Value>>) -> Value {
-    dispatch_with(ctx, m, out, ctx.abort.clone()).await
+    dispatch_with(ctx, m, out, RequestState::new(ctx.abort.clone())).await
+}
+
+/// zod 4's `received` name of a value (`undefined` for a missing key).
+fn received(v: Option<&Value>) -> &'static str {
+    match v {
+        None => "undefined",
+        Some(Value::Null) => "null",
+        Some(Value::Bool(_)) => "boolean",
+        Some(Value::Number(_)) => "number",
+        Some(Value::String(_)) => "string",
+        Some(Value::Array(_)) => "array",
+        Some(Value::Object(_)) => "object",
+    }
+}
+
+/// A zod 4 `invalid_type` issue, in zod's key order.
+fn type_issue(expected: &str, path: &[&str], got: Option<&Value>) -> Value {
+    json!({ "expected": expected, "code": "invalid_type", "path": path,
+        "message": format!("Invalid input: expected {expected}, received {}", received(got)) })
+}
+
+/// The request schema checks the SDK's setRequestHandler runs (parseWithCompat) for the methods whose params it reads:
+/// a failure throws a ZodError, which the SDK answers as -32603 with `error.message` (the issues, JSON with 2 spaces).
+fn schema_issues(method: &str, params: Option<&Value>) -> Vec<Value> {
+    let object = |p: Option<&Value>| p.is_some_and(Value::is_object);
+    let field = |name: &str| params.and_then(|p| p.get(name));
+    let mut issues = Vec::new();
+    match method {
+        "tools/call" | "tasks/get" | "tasks/result" | "tasks/cancel" if !object(params) => {
+            issues.push(type_issue("object", &["params"], params));
+        }
+        "tools/call" => {
+            let task = field("task");
+            if task.is_some() && !object(task) {
+                issues.push(type_issue("object", &["params", "task"], task));
+            } else if let Some(ttl) = task.and_then(|t| t.get("ttl"))
+                && !ttl.is_number()
+            {
+                issues.push(type_issue("number", &["params", "task", "ttl"], Some(ttl)));
+            }
+            if !field("name").is_some_and(Value::is_string) {
+                issues.push(type_issue("string", &["params", "name"], field("name")));
+            }
+            if let Some(arguments) = field("arguments")
+                && !arguments.is_object()
+            {
+                issues.push(type_issue("record", &["params", "arguments"], Some(arguments)));
+            }
+        }
+        "tasks/get" | "tasks/result" | "tasks/cancel" if !field("taskId").is_some_and(Value::is_string) => {
+            issues.push(type_issue("string", &["params", "taskId"], field("taskId")));
+        }
+        "tasks/list" => {
+            if let Some(cursor) = field("cursor")
+                && !cursor.is_string()
+            {
+                issues.push(type_issue("string", &["params", "cursor"], Some(cursor)));
+            }
+        }
+        _ => {}
+    }
+    issues
 }
 
 async fn dispatch_with(
     ctx: &Arc<ReqCtx>,
     m: Value,
     out: Option<mpsc::UnboundedSender<Value>>,
-    cancel: CancellationToken,
+    state: Arc<RequestState>,
 ) -> Value {
     let id = m["id"].clone();
     let params = &m["params"];
     let fake = &ctx.shared.fake;
-    match m["method"].as_str().unwrap_or("") {
+    let method = m["method"].as_str().unwrap_or("");
+    let issues = schema_issues(method, m.get("params"));
+    if !issues.is_empty() {
+        let message = serde_json::to_string_pretty(&issues).unwrap_or_default();
+        return error(&id, -32603, &message);
+    }
+    let cancel = state.cancel.clone();
+    match method {
         "initialize" => {
             let asked = params["protocolVersion"].as_str().unwrap_or("");
             let version = if SUPPORTED.contains(&asked) { asked } else { LATEST };
@@ -685,26 +886,25 @@ async fn dispatch_with(
             fake.events.push(json!({ "kind": "tools-list", "cell": ctx.cell }));
             result(&id, json!({ "tools": fake.tools_for(&ctx.cell) }))
         }
-        "tools/call" => tools_call(ctx, &id, params, out, cancel).await,
+        "tools/call" => tools_call(ctx, &id, params, out, state).await,
         "tasks/get" => {
             let inner = ctx.shared.inner.lock();
-            match find_task(&inner, &ctx.token, params["taskId"].as_str().unwrap_or("")) {
+            match find_task(&inner, &ctx.token, ctx.session_id(), params["taskId"].as_str().unwrap_or("")) {
                 Some(t) => result(&id, t.task.clone()),
                 None => mcp_error(&id, -32602, "Failed to retrieve task: Task not found"),
             }
         }
         "tasks/result" => task_result(ctx, &id, params["taskId"].as_str().unwrap_or(""), cancel).await,
-        "tasks/list" => {
-            let inner = ctx.shared.inner.lock();
-            let tasks: Vec<Value> =
-                inner.tasks.get(&ctx.token).map(|v| v.iter().take(10).map(|(_, t)| t.task.clone()).collect()).unwrap_or_default();
-            result(&id, json!({ "tasks": tasks, "_meta": {} }))
-        }
+        "tasks/list" => list_tasks(ctx, &id, params["cursor"].as_str()),
         "tasks/cancel" => {
             let task_id = params["taskId"].as_str().unwrap_or("");
             let mut inner = ctx.shared.inner.lock();
-            let Some(entry) =
-                inner.tasks.get_mut(&ctx.token).and_then(|v| v.iter_mut().find(|(i, _)| i == task_id)).map(|(_, t)| t)
+            let session = ctx.session_id();
+            let Some(entry) = inner
+                .tasks
+                .get_mut(&ctx.token)
+                .and_then(|v| v.iter_mut().find(|(i, t)| i == task_id && visible(t, session)))
+                .map(|(_, t)| t)
             else {
                 return mcp_error(&id, -32602, &format!("Task not found: {task_id}"));
             };
@@ -722,6 +922,10 @@ async fn dispatch_with(
             for (k, v) in entry.task.as_object().cloned().unwrap_or_default() {
                 answer.insert(k, v);
             }
+            // updateTaskStatus to a terminal status restarts the cleanup timer.
+            let ttl = ttl_of(entry);
+            drop(inner);
+            arm_expiry(&ctx.shared, &ctx.token, task_id, ttl);
             result(&id, Value::Object(answer))
         }
         _ => error(&id, -32601, "Method not found"),
@@ -733,8 +937,9 @@ async fn tools_call(
     id: &Value,
     params: &Value,
     out: Option<mpsc::UnboundedSender<Value>>,
-    cancel: CancellationToken,
+    state: Arc<RequestState>,
 ) -> Value {
+    let cancel = state.cancel.clone();
     let name = params["name"].as_str().unwrap_or("").to_string();
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
     let fake = ctx.shared.fake.clone();
@@ -745,12 +950,16 @@ async fn tools_call(
         if !Fake::supports_task(&name) {
             return mcp_error(id, -32601, &format!("Tool {name} does not run as a task."));
         }
-        return start_task(ctx, id, &name, args, params["task"]["ttl"].as_u64());
+        return start_task(ctx, id, &name, args, params["task"]["ttl"].as_f64());
     }
     let progress: Option<Progress> = match (&out, &params["_meta"]["progressToken"]) {
         (Some(tx), token) if token.is_string() || token.is_number() => {
-            let (tx, token) = (tx.clone(), token.clone());
+            let (tx, token, state) = (tx.clone(), token.clone(), state.clone());
             Some(Arc::new(move |progress: f64, total: f64, message: String| {
+                // extra.sendNotification: nothing once the client cancelled the request.
+                if state.cancelled_by_client() {
+                    return;
+                }
                 let _ = tx.send(json!({ "method": "notifications/progress",
                     "params": { "progressToken": token, "progress": js_number(progress), "total": js_number(total), "message": message },
                     "jsonrpc": "2.0" }));
@@ -759,7 +968,9 @@ async fn tools_call(
         _ => None,
     };
     let elicit: Option<Elicit> = match (&ctx.session, &out) {
-        (Some(session), Some(tx)) if session.form_elicitation => Some(elicit_on(session.clone(), tx.clone(), cancel.clone())),
+        (Some(session), Some(tx)) if session.form_elicitation => {
+            Some(elicit_on(session.clone(), tx.clone(), state.clone(), ctx.shared.cfg.elicit_timeout))
+        }
         _ => None,
     };
     if !ctx.live() {
@@ -793,40 +1004,284 @@ fn js_number(n: f64) -> Value {
     if n.fract() == 0.0 && n.abs() < 9.0e15 { json!(n as i64) } else { json!(n) }
 }
 
-/// elicitation/create on the calling tool call's stream; the answer comes back as a POST of the same session.
-fn elicit_on(session: Arc<Session>, tx: mpsc::UnboundedSender<Value>, cancel: CancellationToken) -> Elicit {
+/// An elicitation/create waiting for its answer. Dropped while armed (the tool stopped waiting because its call was
+/// aborted), it does what the SDK's `cancel(reason)` does: forget the request and send `notifications/cancelled` for it on
+/// the call's stream, unless the session is closed (the SDK's transport is closed then and sends nothing).
+struct PendingElicit {
+    session: Arc<Session>,
+    tx: mpsc::UnboundedSender<Value>,
+    id: Value,
+    state: Arc<RequestState>,
+    armed: bool,
+}
+
+impl PendingElicit {
+    fn cancel(&mut self, reason: &str) {
+        self.armed = false;
+        self.session.pending.lock().remove(&id_key(&self.id));
+        if !self.session.cancel.is_cancelled() {
+            let _ = self.tx.send(json!({ "jsonrpc": "2.0", "method": "notifications/cancelled",
+                "params": { "requestId": self.id, "reason": reason } }));
+        }
+    }
+    fn answered(&mut self) {
+        self.armed = false;
+        self.session.pending.lock().remove(&id_key(&self.id));
+    }
+}
+
+impl Drop for PendingElicit {
+    fn drop(&mut self) {
+        if self.armed {
+            let reason = self.state.abort_reason();
+            self.cancel(&reason);
+        }
+    }
+}
+
+/// elicitation/create on the calling tool call's stream; the answer comes back as a POST of the same session. A timeout or
+/// an abort of the call sends `notifications/cancelled` for it (SDK Protocol.request), so the client closes its prompt.
+fn elicit_on(session: Arc<Session>, tx: mpsc::UnboundedSender<Value>, state: Arc<RequestState>, timeout: Duration) -> Elicit {
     Arc::new(move |message: String, schema: Value| {
-        let (session, tx, cancel) = (session.clone(), tx.clone(), cancel.clone());
+        let (session, tx, state) = (session.clone(), tx.clone(), state.clone());
         Box::pin(async move {
+            let cancelled = ElicitAnswer { action: "cancel".into(), content: None };
+            // `options.signal.throwIfAborted()` before anything is sent.
+            if state.cancel.is_cancelled() || session.cancel.is_cancelled() {
+                return cancelled;
+            }
             let n = session.next_id.fetch_add(1, Ordering::Relaxed);
             let id = json!(n);
             let (answer_tx, answer_rx) = oneshot::channel();
             session.pending.lock().insert(id_key(&id), answer_tx);
             let request = json!({ "method": "elicitation/create", "params": { "mode": "form", "message": message, "requestedSchema": schema },
                 "jsonrpc": "2.0", "id": id });
-            let cancelled = ElicitAnswer { action: "cancel".into(), content: None };
             if tx.send(request).is_err() {
+                session.pending.lock().remove(&id_key(&id));
                 return cancelled;
             }
+            let mut pending = PendingElicit { session: session.clone(), tx, id, state: state.clone(), armed: true };
             let answer = tokio::select! {
-                a = tokio::time::timeout(ELICIT_TIMEOUT, answer_rx) => a.ok().and_then(Result::ok),
-                () = cancel.cancelled() => None,
-                () = session.cancel.cancelled() => None,
+                a = answer_rx => a.ok(),
+                () = tokio::time::sleep(timeout) => {
+                    pending.cancel(TIMEOUT_REASON);
+                    return cancelled;
+                }
+                () = state.cancel.cancelled() => {
+                    pending.cancel(&state.abort_reason());
+                    return cancelled;
+                }
+                () = session.cancel.cancelled() => {
+                    pending.cancel(ABORT_REASON);
+                    return cancelled;
+                }
             };
-            session.pending.lock().remove(&id_key(&id));
-            match answer {
-                Some(m) if m["result"]["action"].is_string() => ElicitAnswer {
-                    action: m["result"]["action"].as_str().unwrap_or("cancel").to_string(),
-                    content: m["result"].get("content").cloned(),
-                },
-                _ => cancelled,
-            }
+            pending.answered();
+            answer.and_then(|m| elicit_answer(&m, &schema)).unwrap_or(cancelled)
         })
     })
 }
 
-fn find_task<'a>(inner: &'a Inner, token: &str, task_id: &str) -> Option<&'a TaskEntry> {
-    inner.tasks.get(token)?.iter().find(|(i, _)| i == task_id).map(|(_, t)| t)
+/// The SDK's elicitInput on an answer: ElicitResultSchema (action accept / decline / cancel, content null or a record of
+/// string, number, boolean or string array values), then for an accept with content the ajv check against the requested
+/// schema. Any failure (also an error response) is None, which mcp.ts elicitFor turns into `cancel`.
+fn elicit_answer(m: &Value, schema: &Value) -> Option<ElicitAnswer> {
+    let result = m.get("result")?.as_object()?;
+    if !result.get("_meta").is_none_or(meta_ok) {
+        return None;
+    }
+    let action = result.get("action")?.as_str()?;
+    if !["accept", "decline", "cancel"].contains(&action) {
+        return None;
+    }
+    let content = match result.get("content") {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(c)) => {
+            let primitive = |v: &Value| {
+                v.is_string()
+                    || v.is_number()
+                    || v.is_boolean()
+                    || v.as_array().is_some_and(|items| items.iter().all(Value::is_string))
+            };
+            if !c.values().all(primitive) {
+                return None;
+            }
+            Some(Value::Object(c.clone()))
+        }
+        Some(_) => return None,
+    };
+    if action == "accept"
+        && let Some(content) = &content
+        && !schema_ok(schema, content)
+    {
+        return None;
+    }
+    Some(ElicitAnswer { action: action.to_string(), content })
+}
+
+/// JSON values as ajv compares them for `const` / `enum` (numbers by value).
+fn json_eq(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x.as_f64() == y.as_f64(),
+        (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(p, q)| json_eq(p, q)),
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| json_eq(v, w)))
+        }
+        _ => a == b,
+    }
+}
+
+fn type_ok(name: &str, v: &Value) -> bool {
+    match name {
+        "string" => v.is_string(),
+        "number" => v.is_number(),
+        "integer" => v.as_f64().is_some_and(|f| f.fract() == 0.0),
+        "boolean" => v.is_boolean(),
+        "object" => v.is_object(),
+        "array" => v.is_array(),
+        "null" => v.is_null(),
+        _ => false,
+    }
+}
+
+/// The part of JSON Schema (ajv, strict off) that elicitation schemas use: type, enum, const, required, properties,
+/// additionalProperties, items, oneOf / anyOf / allOf / not, string length (code points), number and array bounds. Other
+/// keywords (title, description, default, format) do not constrain, as with ajv without ajv-formats.
+fn schema_ok(schema: &Value, v: &Value) -> bool {
+    let Some(s) = schema.as_object() else { return schema.as_bool() != Some(false) };
+    let num = |k: &str| s.get(k).and_then(Value::as_f64);
+    if let Some(t) = s.get("type") {
+        let ok = match t {
+            Value::String(name) => type_ok(name, v),
+            Value::Array(names) => names.iter().filter_map(Value::as_str).any(|n| type_ok(n, v)),
+            _ => true,
+        };
+        if !ok {
+            return false;
+        }
+    }
+    if let Some(Value::Array(options)) = s.get("enum")
+        && !options.iter().any(|o| json_eq(o, v))
+    {
+        return false;
+    }
+    if let Some(c) = s.get("const")
+        && !json_eq(c, v)
+    {
+        return false;
+    }
+    if let Some(obj) = v.as_object() {
+        if let Some(Value::Array(required)) = s.get("required")
+            && !required.iter().filter_map(Value::as_str).all(|k| obj.contains_key(k))
+        {
+            return false;
+        }
+        let props = s.get("properties").and_then(Value::as_object);
+        for (k, value) in obj {
+            match props.and_then(|p| p.get(k)) {
+                Some(sub) if !schema_ok(sub, value) => return false,
+                Some(_) => {}
+                None => {
+                    if let Some(extra) = s.get("additionalProperties")
+                        && !schema_ok(extra, value)
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    if let Some(items) = v.as_array() {
+        if let Some(sub) = s.get("items").filter(|i| i.is_object() || i.is_boolean())
+            && !items.iter().all(|i| schema_ok(sub, i))
+        {
+            return false;
+        }
+        let n = items.len() as f64;
+        if num("minItems").is_some_and(|m| n < m) || num("maxItems").is_some_and(|m| n > m) {
+            return false;
+        }
+    }
+    if let Some(text) = v.as_str() {
+        let n = text.chars().count() as f64;
+        if num("minLength").is_some_and(|m| n < m) || num("maxLength").is_some_and(|m| n > m) {
+            return false;
+        }
+    }
+    if let Some(x) = v.as_f64() {
+        let out = num("minimum").is_some_and(|m| x < m)
+            || num("maximum").is_some_and(|m| x > m)
+            || num("exclusiveMinimum").is_some_and(|m| x <= m)
+            || num("exclusiveMaximum").is_some_and(|m| x >= m);
+        if out {
+            return false;
+        }
+    }
+    let subs = |k: &str| s.get(k).and_then(Value::as_array).map(|a| a.iter().filter(|sub| schema_ok(sub, v)).count());
+    let all = s.get("allOf").and_then(Value::as_array).map(Vec::len);
+    if subs("oneOf").is_some_and(|n| n != 1) || subs("anyOf") == Some(0) || all.is_some_and(|n| subs("allOf") != Some(n)) {
+        return false;
+    }
+    !s.get("not").is_some_and(|sub| schema_ok(sub, v))
+}
+
+fn find_task<'a>(inner: &'a Inner, token: &str, session: Option<&str>, task_id: &str) -> Option<&'a TaskEntry> {
+    inner.tasks.get(token)?.iter().find(|(i, t)| i == task_id && visible(t, session)).map(|(_, t)| t)
+}
+
+/// InMemoryTaskStore.listTasks: the tasks the caller can look up, in creation order, 10 per page; `nextCursor` is the last
+/// id of the page when more remain, and a cursor that is not one of those ids is refused.
+fn list_tasks(ctx: &Arc<ReqCtx>, id: &Value, cursor: Option<&str>) -> Value {
+    const PAGE_SIZE: usize = 10;
+    let inner = ctx.shared.inner.lock();
+    let session = ctx.session_id();
+    let all: Vec<&(String, TaskEntry)> =
+        inner.tasks.get(&ctx.token).map(|v| v.iter().filter(|(_, t)| visible(t, session)).collect()).unwrap_or_default();
+    let start = match cursor.filter(|c| !c.is_empty()) {
+        None => 0,
+        Some(c) => match all.iter().position(|(i, _)| i == c) {
+            Some(index) => index + 1,
+            None => return mcp_error(id, -32602, &format!("Failed to list tasks: Invalid cursor: {c}")),
+        },
+    };
+    let page: Vec<&(String, TaskEntry)> = all.iter().skip(start).take(PAGE_SIZE).copied().collect();
+    let mut answer = Map::new();
+    answer.insert("tasks".into(), Value::Array(page.iter().map(|(_, t)| t.task.clone()).collect()));
+    if start + PAGE_SIZE < all.len()
+        && let Some((last, _)) = page.last()
+    {
+        answer.insert("nextCursor".into(), json!(last));
+    }
+    answer.insert("_meta".into(), json!({}));
+    result(id, Value::Object(answer))
+}
+
+fn ttl_of(entry: &TaskEntry) -> Duration {
+    Duration::from_secs_f64(entry.task["ttl"].as_f64().unwrap_or(0.0).max(0.0) / 1000.0)
+}
+
+/// (Re)arms the task's cleanup timer to `ttl` from now (InMemoryTaskStore createTask, storeTaskResult and a terminal
+/// updateTaskStatus). When it fires the task is deleted, and a task still working is aborted (mcp.ts startTask's 1 s watch
+/// aborts the call when the task is gone).
+fn arm_expiry(shared: &Arc<Shared>, token: &str, task_id: &str, ttl: Duration) {
+    let generation = {
+        let mut inner = shared.inner.lock();
+        let Some((_, entry)) = inner.tasks.get_mut(token).and_then(|v| v.iter_mut().find(|(i, _)| i == task_id)) else {
+            return;
+        };
+        entry.expiry += 1;
+        entry.expiry
+    };
+    let (shared, token, task_id) = (shared.clone(), token.to_string(), task_id.to_string());
+    tokio::spawn(async move {
+        tokio::time::sleep(ttl).await;
+        let mut inner = shared.inner.lock();
+        let Some(tasks) = inner.tasks.get_mut(&token) else { return };
+        let Some(index) = tasks.iter().position(|(i, t)| *i == task_id && t.expiry == generation) else { return };
+        let (_, entry) = tasks.remove(index);
+        entry.cancel.cancel();
+        entry.changed.notify_waiters();
+    });
 }
 
 /// `new Date().toISOString()`.
@@ -848,8 +1303,9 @@ fn iso_now() -> String {
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{millis:03}Z", rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
-fn start_task(ctx: &Arc<ReqCtx>, id: &Value, name: &str, args: Value, ttl: Option<u64>) -> Value {
+fn start_task(ctx: &Arc<ReqCtx>, id: &Value, name: &str, args: Value, ttl: Option<f64>) -> Value {
     let mut inner = ctx.shared.inner.lock();
+    // The running cap counts every task of the token (store.getAllTasks(), no session filter).
     let running =
         inner.tasks.get(&ctx.token).map(|v| v.iter().filter(|(_, t)| t.task["status"] == "working").count()).unwrap_or(0);
     if running >= MAX_RUNNING_TASKS {
@@ -858,9 +1314,12 @@ fn start_task(ctx: &Arc<ReqCtx>, id: &Value, name: &str, args: Value, ttl: Optio
     let mut raw = [0u8; 16];
     getrandom::fill(&mut raw).expect("os random");
     let task_id: String = raw.iter().map(|b| format!("{b:02x}")).collect();
-    let ttl = ttl.unwrap_or(TASK_TTL_MS).clamp(MIN_TASK_TTL_MS, TASK_TTL_MS);
+    // `Math.min(Math.max(ttl ?? TASK_TTL_MS, MIN_TASK_TTL_MS), TASK_TTL_MS)` in ms; any number (a fraction stays).
+    let min_ttl = ctx.shared.cfg.min_task_ttl.as_secs_f64() * 1000.0;
+    let ttl_ms = ttl.unwrap_or(TASK_TTL_MS as f64).max(min_ttl).min(TASK_TTL_MS as f64);
+    let ttl = Duration::from_secs_f64(ttl_ms / 1000.0);
     let created = iso_now();
-    let task = json!({ "taskId": task_id, "status": "working", "ttl": ttl, "createdAt": created, "lastUpdatedAt": created, "pollInterval": TASK_POLL_MS });
+    let task = json!({ "taskId": task_id, "status": "working", "ttl": js_number(ttl_ms), "createdAt": created, "lastUpdatedAt": created, "pollInterval": TASK_POLL_MS });
     let Some(token_cancel) = inner.token_cancel.get(&ctx.token).cloned() else {
         return mcp_error(id, -32600, "Agent connection has expired.");
     };
@@ -868,9 +1327,17 @@ fn start_task(ctx: &Arc<ReqCtx>, id: &Value, name: &str, args: Value, ttl: Optio
     let changed = Arc::new(tokio::sync::Notify::new());
     inner.tasks.entry(ctx.token.clone()).or_default().push((
         task_id.clone(),
-        TaskEntry { task: task.clone(), result: None, cancel: cancel.clone(), changed: changed.clone() },
+        TaskEntry {
+            task: task.clone(),
+            result: None,
+            cancel: cancel.clone(),
+            changed: changed.clone(),
+            session: ctx.session_id().map(str::to_string),
+            expiry: 0,
+        },
     ));
     drop(inner);
+    arm_expiry(&ctx.shared, &ctx.token, &task_id, ttl);
     let (shared, token, cell, name) = (ctx.shared.clone(), ctx.token.clone(), ctx.cell.clone(), name.to_string());
     let tid = task_id.clone();
     tokio::spawn(async move {
@@ -892,6 +1359,7 @@ fn start_task(ctx: &Arc<ReqCtx>, id: &Value, name: &str, args: Value, ttl: Optio
             Err(CallError::Aborted) => error_content("This operation was aborted"),
         };
         let mut inner = shared.inner.lock();
+        let mut stored = false;
         if let Some((_, entry)) = inner.tasks.get_mut(&token).and_then(|v| v.iter_mut().find(|(i, _)| *i == tid))
             && entry.task["status"] == "working"
         {
@@ -899,15 +1367,12 @@ fn start_task(ctx: &Arc<ReqCtx>, id: &Value, name: &str, args: Value, ttl: Optio
             entry.task["lastUpdatedAt"] = json!(iso_now());
             entry.result = Some(content);
             entry.changed.notify_waiters();
+            stored = true;
         }
-    });
-    // Expiry after the ttl (1.1.4 keeps a task and its result for its ttl).
-    let (shared, token) = (ctx.shared.clone(), ctx.token.clone());
-    let tid = task_id;
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(ttl)).await;
-        if let Some(v) = shared.inner.lock().tasks.get_mut(&token) {
-            v.retain(|(i, _)| *i != tid);
+        drop(inner);
+        // storeTaskResult restarts the cleanup timer: the result is kept for a full ttl after completion.
+        if stored {
+            arm_expiry(&shared, &token, &tid, ttl);
         }
     });
     result(id, json!({ "task": task }))
@@ -918,13 +1383,14 @@ async fn task_result(ctx: &Arc<ReqCtx>, id: &Value, task_id: &str, cancel: Cance
     loop {
         let changed = {
             let inner = ctx.shared.inner.lock();
-            let Some(entry) = find_task(&inner, &ctx.token, task_id) else {
+            let Some(entry) = find_task(&inner, &ctx.token, ctx.session_id(), task_id) else {
                 return mcp_error(id, -32602, &format!("Task not found: {task_id}"));
             };
             let status = entry.task["status"].as_str().unwrap_or("");
             if ["completed", "failed", "cancelled"].contains(&status) {
                 let Some(mut answer) = entry.result.clone() else {
-                    return mcp_error(id, -32603, &format!("Task {task_id} has no result stored"));
+                    // getTaskResult throws a plain Error: no `MCP error` prefix.
+                    return error(id, -32603, &format!("Task {task_id} has no result stored"));
                 };
                 answer["_meta"] = json!({ "io.modelcontextprotocol/related-task": { "taskId": task_id } });
                 return result(id, answer);
@@ -951,9 +1417,60 @@ fn trim_sessions(inner: &mut Inner, token: &str) {
 fn close_session(inner: &mut Inner, id: &str) {
     if let Some(session) = inner.sessions.remove(id) {
         session.cancel.cancel();
-        for (_, cancel) in session.requests.lock().drain() {
-            cancel.cancel();
+        for (_, state) in session.requests.lock().drain() {
+            state.cancel.cancel();
         }
     }
     inner.session_order.retain(|s| s != id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strict_jsonrpc_messages() {
+        let ok = |v: Value| valid_message(&v);
+        assert!(ok(json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" })));
+        assert!(ok(json!({ "jsonrpc": "2.0", "id": "a", "method": "ping", "params": { "_meta": { "progressToken": 3 } } })));
+        assert!(ok(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })));
+        assert!(ok(json!({ "jsonrpc": "2.0", "id": 1, "result": {} })));
+        assert!(ok(json!({ "jsonrpc": "2.0", "error": { "code": -1, "message": "x", "data": [1] } })));
+        assert!(!ok(json!({ "jsonrpc": "2.0", "id": 1.5, "method": "ping" })));
+        assert!(!ok(json!({ "jsonrpc": "2.0", "id": 9_007_199_254_740_992u64, "method": "ping" })));
+        assert!(!ok(json!({ "jsonrpc": "2.0", "id": 1, "method": "ping", "params": [] })));
+        assert!(!ok(json!({ "jsonrpc": "2.0", "id": 1, "method": "ping", "foo": 1 })));
+        assert!(!ok(json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -1, "message": "x" } })));
+        assert!(!ok(json!({ "jsonrpc": "2.0", "id": 1, "result": [] })));
+        assert!(!ok(json!({ "jsonrpc": "2.0", "id": 1, "method": "ping",
+            "params": { "_meta": { "io.modelcontextprotocol/related-task": {} } } })));
+        assert_eq!(id_key(&json!(7.0)), id_key(&json!(7)));
+        assert_ne!(id_key(&json!("7")), id_key(&json!(7)));
+    }
+
+    #[test]
+    fn elicitation_answers_are_checked_like_elicit_input() {
+        let confirm = json!({ "type": "object", "required": ["confirm"],
+            "properties": { "confirm": { "type": "boolean", "default": false } } });
+        let answer = |result: Value| elicit_answer(&json!({ "jsonrpc": "2.0", "id": 0, "result": result }), &confirm);
+        let accepted = answer(json!({ "action": "accept", "content": { "confirm": true } })).unwrap();
+        assert_eq!((accepted.action.as_str(), accepted.content), ("accept", Some(json!({ "confirm": true }))));
+        assert!(answer(json!({ "action": "accept", "content": { "confirm": "yes" } })).is_none());
+        assert!(answer(json!({ "action": "accept", "content": {} })).is_none());
+        assert!(answer(json!({ "action": "yes" })).is_none());
+        assert!(answer(json!({ "action": "accept", "content": { "confirm": true, "x": { "a": 1 } } })).is_none());
+        assert!(answer(json!({ "action": "accept", "content": [true] })).is_none());
+        let declined = answer(json!({ "action": "decline", "content": null })).unwrap();
+        assert_eq!((declined.action.as_str(), declined.content), ("decline", None));
+        // A decline is not checked against the schema (only an accept with content is).
+        assert!(answer(json!({ "action": "decline", "content": { "confirm": "no" } })).is_some());
+        let refused = json!({ "jsonrpc": "2.0", "id": 0, "error": { "code": -1, "message": "x" } });
+        assert!(elicit_answer(&refused, &confirm).is_none());
+        // The agent picker (mcpTools resolveCell): a string out of oneOf consts.
+        let pick = json!({ "type": "object", "required": ["cellId"], "properties": { "cellId": { "type": "string",
+            "title": "Agent", "oneOf": [{ "const": "a", "title": "A" }, { "const": "b", "title": "B" }] } } });
+        let picked = |id: Value| schema_ok(&pick, &json!({ "cellId": id }));
+        assert!(picked(json!("a")) && picked(json!("b")));
+        assert!(!picked(json!("c")) && !picked(json!(1)));
+    }
 }

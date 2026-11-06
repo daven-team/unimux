@@ -25,9 +25,29 @@ fn fixture() -> Value {
 }
 
 async fn start() -> (custom::CustomServer, Arc<fake::Fake>) {
+    start_with(custom::Config::default()).await
+}
+
+async fn start_with(cfg: custom::Config) -> (custom::CustomServer, Arc<fake::Fake>) {
     let fake = Arc::new(fake::Fake::new(&fixture()));
-    let cfg = custom::Config { rate: None, progress_every: Duration::from_millis(300), ..custom::Config::default() };
+    let cfg = custom::Config { rate: None, progress_every: Duration::from_millis(300), ..cfg };
     (custom::CustomServer::start(fake.clone(), cfg).await.unwrap(), fake)
+}
+
+fn initialize() -> Value {
+    json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize",
+        "params": { "protocolVersion": "2025-11-25", "capabilities": { "elicitation": { "form": {} } }, "clientInfo": { "name": "t", "version": "1" } } })
+}
+
+async fn open_session(url: &str, token: &str) -> String {
+    let (status, head, _) = exchange(url, request(url, token, &[], &initialize())).await;
+    assert_eq!(status, 200);
+    head.lines().find_map(|l| l.strip_prefix("mcp-session-id: ")).unwrap().trim().to_string()
+}
+
+async fn json_call(url: &str, token: &str, body: &Value) -> Value {
+    let (_, _, text) = exchange(url, request(url, token, &[], body)).await;
+    serde_json::from_str(&text).unwrap_or(Value::Null)
 }
 
 fn addr(url: &str) -> String {
@@ -244,6 +264,83 @@ async fn session_elicitation_round_trip() {
     assert!(seen.contains(r#"{\"archived\":\"grid-side\",\"stopped\":1}"#), "{seen}");
     assert!(fake.events.all().iter().any(|e| e["kind"] == "elicit" && e["action"] == "accept"));
     assert_eq!(server.session_count(), 1);
+}
+
+/// A token revoked while an initialize body is still arriving must not end up with a session (mcp.ts: 401 after the SDK
+/// loaded when `tokens.get(token) !== actorId`).
+#[tokio::test]
+async fn a_token_revoked_mid_body_gets_no_session() {
+    let (server, _) = start().await;
+    let token = server.issue_token("cell-lead");
+    let raw = request(&server.url, &token, &[], &initialize());
+    let (head, body) = raw.split_once("\r\n\r\n").unwrap();
+    let mut stream = TcpStream::connect(addr(&server.url)).await.unwrap();
+    stream.write_all(format!("{head}\r\n\r\n{}", &body[..10]).as_bytes()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    server.revoke_cell("cell-lead");
+    stream.write_all(&body.as_bytes()[10..]).await.unwrap();
+    let mut out = Vec::new();
+    stream.read_to_end(&mut out).await.unwrap();
+    let text = String::from_utf8_lossy(&out);
+    assert!(text.starts_with("HTTP/1.1 401"), "{text}");
+    assert!(!text.to_ascii_lowercase().contains("mcp-session-id"), "{text}");
+    assert_eq!(server.session_count(), 0);
+}
+
+/// InMemoryTaskStore: the ttl restarts when the result is stored, and mcp.ts aborts a working task once it is gone.
+#[tokio::test]
+async fn task_ttl_restarts_on_completion_and_expiry_aborts_a_working_task() {
+    let (server, fake) = start_with(custom::Config { min_task_ttl: Duration::ZERO, ..custom::Config::default() }).await;
+    let token = server.issue_token("cell-lead");
+    let from = fake.events.all().len();
+    let task = |id: u64, timeout: f64, ttl: u64| {
+        let mut body = call(id, json!({ "timeoutSec": timeout }));
+        body["params"]["task"] = json!({ "ttl": ttl });
+        body
+    };
+    let get = |id: &str| json!({ "jsonrpc": "2.0", "id": 9, "method": "tasks/get", "params": { "taskId": id } });
+    let long = json_call(&server.url, &token, &task(1, 30.0, 600)).await;
+    let long = long["result"]["task"]["taskId"].as_str().unwrap().to_string();
+    let short = json_call(&server.url, &token, &task(2, 0.5, 800)).await;
+    let short = short["result"]["task"]["taskId"].as_str().unwrap().to_string();
+    let started = Instant::now();
+    // The long one expires at 600 ms while it still works: gone, and its call aborted.
+    let end = wait_event(&fake, from, "call-end", Duration::from_secs(3)).await.unwrap();
+    assert_eq!(end["outcome"], "ok", "the short call ends first (500 ms)");
+    tokio::time::sleep_until(tokio::time::Instant::from_std(started + Duration::from_millis(900))).await;
+    let ends: Vec<Value> = fake.events.all().into_iter().skip(from).filter(|e| e["kind"] == "call-end").collect();
+    assert_eq!(ends.len(), 2, "the expired working task's call was aborted: {ends:?}");
+    assert_eq!(ends[1]["outcome"], "aborted");
+    assert_eq!(json_call(&server.url, &token, &get(&long)).await["error"]["code"], -32602);
+    // The short one completed at ~500 ms; created + ttl (800 ms) has passed, completion + ttl (~1300 ms) has not.
+    tokio::time::sleep_until(tokio::time::Instant::from_std(started + Duration::from_millis(1000))).await;
+    assert_eq!(json_call(&server.url, &token, &get(&short)).await["result"]["status"], "completed");
+    tokio::time::sleep_until(tokio::time::Instant::from_std(started + Duration::from_millis(1700))).await;
+    assert_eq!(json_call(&server.url, &token, &get(&short)).await["error"]["code"], -32602);
+}
+
+/// An unanswered elicitation times out: the server sends `notifications/cancelled` for it on the call's stream (SDK
+/// Protocol.request timeout), and the call goes on with `cancel`.
+#[tokio::test]
+async fn an_elicitation_timeout_sends_notifications_cancelled() {
+    let (server, _) =
+        start_with(custom::Config { elicit_timeout: Duration::from_millis(300), ..custom::Config::default() }).await;
+    let token = server.issue_token("cell-lead");
+    let session = open_session(&server.url, &token).await;
+    let headers = [("Mcp-Session-Id", session.as_str()), ("Mcp-Protocol-Version", "2025-11-25")];
+    let ask = json!({ "jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": { "name": "close_grid", "arguments": { "gridId": "grid-side" } } });
+    let (status, _, body) = exchange(&server.url, request(&server.url, &token, &headers, &ask)).await;
+    assert_eq!(status, 200);
+    let messages = sse_messages(&body);
+    assert_eq!(messages.len(), 3, "{body}");
+    assert_eq!(messages[0]["method"], "elicitation/create");
+    assert_eq!(
+        messages[1],
+        json!({ "jsonrpc": "2.0", "method": "notifications/cancelled",
+            "params": { "requestId": messages[0]["id"], "reason": "McpError: MCP error -32001: Request timed out" } })
+    );
+    assert_eq!(messages[2]["id"], 5);
+    assert_eq!(messages[2]["result"]["isError"], true);
 }
 
 /// The rmcp candidate keeps a session call running after its client went away (no abort before the tool's own end).
