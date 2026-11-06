@@ -13,8 +13,10 @@
 //   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
 //   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
 //                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
+//   test/golden/files-*.jsonl        project files: name order, path checks, previews, saves (see scripts/goldens-files.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
+import { filesGoldens } from './goldens-files.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
@@ -27,6 +29,7 @@ const [{ defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { tr
   load('src/shared/state.ts'), load('src/shared/stateEdits.ts'), load('src/shared/statePatch.ts'), load('src/shared/i18n.ts'), load('src/shared/messages.ts'),
   load('src/main/stateController.ts'),
 ]);
+const fileGoldens = await filesGoldens(await load('src/main/files.ts'));
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
 function rng(seed) {
@@ -177,6 +180,11 @@ const files = {
   'normalize-state.jsonl': jsonl(normalizeRows({ normalizeState, root })),
   'state-after-edit.jsonl': jsonl(afterEditRows({ normalizeState, normalizeEditedState })),
   'js-sort.jsonl': jsonl(jsSort()),
+  'files-collate.jsonl': jsonl(fileGoldens.collate),
+  'files-path.jsonl': jsonl(fileGoldens.paths),
+  'files-preview.jsonl': jsonl(fileGoldens.preview),
+  'files-save.jsonl': jsonl(fileGoldens.save),
+  'files-parquet.jsonl': jsonl(fileGoldens.parquet),
 };
 
 const check = process.argv.includes('--check');

@@ -69,6 +69,9 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
         .initialization_script(boot_script(ctx, MAIN))
         .on_navigation(allow_navigation)
         .on_page_load(move |_window, payload| {
+            if payload.event() == PageLoadEvent::Started {
+                page_ctx.main_page_started();
+            }
             if payload.event() == PageLoadEvent::Finished {
                 page_ctx.mark("page-loaded");
                 show_main(&page_ctx);

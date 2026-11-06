@@ -66,7 +66,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | W5 | Detached windows and event routing | todo | | | | |
 | W6 | Lifecycle: quit, session end, renderer crash and hang | todo | | | | |
 | G1 | Git runner, env scrub, caches, canonical paths | todo | | | | |
-| G5 | Project files: listing, preview, save, local files | todo | | | | |
+| G5 | Project files: listing, preview, save, local files | verified (Windows) | 2026-11-06 | 2026-11-06 | 2026-11-06 | branch `tauri-pkg-G5`. unimux-files: Node path.win32/posix port for the containment check (285 path goldens), realpath + junction containment, icu_collator pl numeric/base name order (406 collate goldens incl. 400 random rows vs V8), 2000-entry listing cap, batch (500), BFS directory walk (2500), previews 256 KiB / 8 MiB / images 20 MiB as raw bytes (the bridge's `withImageDataUrl` builds 1.1.4's data: URL), BOMs, encoding_rs fatal UTF-8 / UTF-16 decode, control chars (109 preview goldens), Parquet table (feature `parquet`, default on; 13 goldens vs 1.1.4 hyparquet over fixtures from `--example parquet_fixtures`: all codecs, page v2, nested LIST/MAP/struct, INT96, decimals, UUID, FLOAT16, damaged files), conflict-safe save (`.mc-save-<uuid>` staging, line endings + BOM + UTF-16 kept, per-file lock; 50 save goldens), `local:readFile/statFile/writeFile` (forbidden roots DATA_DIR, DATA_DIR/webview2, exe dir, unimux-updater; UNC/device paths; opened set of 500, cleared on a main page reload). A lone surrogate in a save's new text is refused by the bridge (Rust only sees well-formed strings). cargo: unimux-files 43 tests (+ no-default-features), unimux-app 3 files tests; 22 PORTING rows (files 17, editor-source 5). files-disk / files-preview / files-follow / files-retarget are renderer tests and pass unchanged in vitest. Real app: `node scripts/verify-tauri-files.mjs` 10/10 in 3 runs (list, open, edit, Ctrl+S keeps BOM + CRLF, conflict notice, PNG, Parquet, real profile untouched). See 'G5 open issues'. |
 | H1 | Hook server | todo | | | | |
 | H3 | CLI detector | todo | | | | |
 | H5 | Conversation search | todo | | | | |
@@ -378,6 +378,14 @@ Verification: `cargo fmt --all --check`, `cargo clippy -p unimux-mcp --all-targe
 7. D7: after `SET NAMES` / `SET CHARACTER SET` mysql2 encodes queries and decodes column names in the session charset; `wire::mycharset` does it for utf8, latin1 / binary, ascii, ucs2 / utf16-le and cesu8 and refuses queries in the iconv-lite-only encodings (cp1250, koi8r, sjis, big5 ...). D7 adds iconv-lite's tables for those.
 8. D9: the reconnect handshake (`auth`, `client setname unimux`, `select` of the previously selected DB) is taken from the ioredis source (`wire::redis::reconnect_sequence`); D9 adds a golden for it through RedisSession.
 
+### G5 open issues (2026-11-06)
+
+1. **INT96 nested in a list or struct** keeps the parquet record reader's `Int96::to_millis` (nanoseconds of the day floored); hyparquet truncates the whole nanosecond count toward zero, so a pre-1970 value with a sub-millisecond part shows 1 ms later. Top-level INT96 columns are read raw and match exactly (golden `types.parquet`).
+2. **Parquet corpus is written by parquet-rs only** (`cargo run -p unimux-files --example parquet_fixtures -- ../test/golden/parquet`). No files from Spark / pyarrow / DuckDB yet; a legacy LIST whose repeated group has more than one field (not "list like") and the BSON / INTERVAL refusal paths beyond `bson.parquet` are not compared with hyparquet.
+3. **macOS**: compile-checked only (`cargo check -p unimux-files --all-targets --no-default-features --target aarch64-apple-darwin` clean). With the `parquet` feature the cross check stops at zstd-sys (no C cross compiler here); a native macOS CI run builds it. The macOS forbidden roots (bundle Resources, ~/Library/WebKit and Caches for both bundle ids) are untested.
+4. `test/redis-drafts.test.ts` (2 cases, not G5) timed out once in a full `npm test` run under load and passed alone (6/6).
+5. `scripts/goldens-files.mjs` loads src/main/files.ts through a vite SSR server for the Parquet rows (1.1.4 imports hyparquet lazily, which a closed `runnerImport` runner refuses).
+
 ### How to run
 
 - Dev: `npm run tauri dev` (Vite on 5174 + a debug build; MC_* overrides are on in debug builds). Not exercised in wave 0.
@@ -385,6 +393,7 @@ Verification: `cargo fmt --all --check`, `cargo clippy -p unimux-mcp --all-targe
 - Manual run on scratch data: `MC_DATA_DIR=<scratch> MC_DEBUG_PORT=9333 src-tauri/target/check/release/unimux.exe` (add `MC_OFFSCREEN=1` for a window that never takes focus); DevTools at http://127.0.0.1:9333.
 - Release flavour: `npm run build:release` (unsigned NSIS installer; the MC_* overrides are compiled out, so it always uses %APPDATA%\unimux: do not run it for tests).
 - cargo directly: `cd src-tauri && node ../scripts/msvc-run.mjs cargo test --workspace` (loads the MSVC environment and the SDK fallback).
+- Files panel (G5): `npm run build:check`, then `node scripts/verify-tauri-files.mjs` (`--keep` keeps the scratch dir; screenshots in artifacts/tauri-files/).
 
 ## Wave 0b integration (2026-11-06)
 

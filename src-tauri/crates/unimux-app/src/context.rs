@@ -78,6 +78,9 @@ pub struct AppContext {
     /// Check build only: every renderer startup mark with the window label and the time (test_bridge `marks`).
     #[cfg(feature = "test-bridge")]
     pub test_marks: Mutex<Vec<(String, String, f64)>>,
+    /// What runs when the main window's page starts loading (a reload; 1.1.4 `did-start-loading`): the domains drop what
+    /// belonged to the old page (G5: the local files it opened).
+    pub main_page_hooks: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl AppContext {
@@ -133,7 +136,21 @@ impl AppContext {
             main_shown: AtomicBool::new(false),
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
+            main_page_hooks: Mutex::new(Vec::new()),
         })
+    }
+
+    /// Registers `hook` for every start of a page load in the main window (reloads included).
+    pub fn on_main_page_started(&self, hook: impl Fn() + Send + Sync + 'static) {
+        self.main_page_hooks.lock().push(Arc::new(hook));
+    }
+
+    /// The main window's page started loading (windows.rs, PageLoadEvent::Started).
+    pub fn main_page_started(&self) {
+        let hooks: Vec<_> = self.main_page_hooks.lock().clone();
+        for hook in hooks {
+            hook();
+        }
     }
 
     pub fn app(&self) -> Option<&AppHandle> {

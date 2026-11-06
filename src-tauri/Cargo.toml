@@ -108,6 +108,12 @@ redis = { version = "1.8.1", default-features = false, features = ["tokio-comp"]
 fallible-iterator = "0.2.0"
 # mysql_common needs one flate2 backend: the pure Rust one (no C zlib build).
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# G5: the file tree's name order (Intl.Collator('pl', {numeric, sensitivity: 'base'})) and TextDecoder's fatal decode.
+icu_collator = "2.4.0"
+icu_locale_core = "2.4.0"
+encoding_rs = "0.8.44"
+# G5: the Parquet table preview (1.1.4 hyparquet + hyparquet-compressors: snappy, gzip, brotli, zstd, lz4, lz4_raw); no arrow.
+parquet = { version = "60.1.0", default-features = false, features = ["snap", "brotli", "flate2-rust_backend", "lz4", "zstd"] }
 
 [profile.release]
 lto = "thin"

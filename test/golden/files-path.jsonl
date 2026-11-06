@@ -1,0 +1,285 @@
+{"flavor":"win32","root":"C:\\proj","rel":"","resolvedRoot":"C:\\proj","resolved":"C:\\proj","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":".","resolvedRoot":"C:\\proj","resolved":"C:\\proj","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"a","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"a/b","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"a\\b\\..\\c","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a\\c","relAbsolute":false,"relative":"a\\c","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"..","resolvedRoot":"C:\\proj","resolved":"C:\\","relAbsolute":false,"relative":"..","inside":false}
+{"flavor":"win32","root":"C:\\proj","rel":"../x","resolvedRoot":"C:\\proj","resolved":"C:\\x","relAbsolute":false,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"C:\\proj","rel":"..\\proj\\x","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\x","relAbsolute":false,"relative":"x","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"..foo","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\..foo","relAbsolute":false,"relative":"..foo","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"a/../../x","resolvedRoot":"C:\\proj","resolved":"C:\\x","relAbsolute":false,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"C:\\proj","rel":"C:\\proj\\a","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a","relAbsolute":true,"relative":"a","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"C:x","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\x","relAbsolute":false,"relative":"x","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"/x","resolvedRoot":"C:\\proj","resolved":"C:\\x","relAbsolute":true,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"C:\\proj","rel":"\\x","resolvedRoot":"C:\\proj","resolved":"C:\\x","relAbsolute":true,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"C:\\proj","rel":"D:\\proj","resolvedRoot":"C:\\proj","resolved":"D:\\proj","relAbsolute":true,"relative":"D:\\proj","inside":false}
+{"flavor":"win32","root":"C:\\proj","rel":"a//b///c","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a\\b\\c","relAbsolute":false,"relative":"a\\b\\c","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"a/./b/.","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"./../proj/a","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"a/b/","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"ŁĄKA/ż","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\ŁĄKA\\ż","relAbsolute":false,"relative":"ŁĄKA\\ż","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"..\\..\\..","resolvedRoot":"C:\\proj","resolved":"C:\\","relAbsolute":false,"relative":"..","inside":false}
+{"flavor":"win32","root":"C:\\proj","rel":"a\\..\\..\\proj\\b","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\b","relAbsolute":false,"relative":"b","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"...","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\...","relAbsolute":false,"relative":"...","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":". ./x","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\. .\\x","relAbsolute":false,"relative":". .\\x","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"a:b","resolvedRoot":"C:\\proj","resolved":"a:\\b","relAbsolute":false,"relative":"a:\\b","inside":false}
+{"flavor":"win32","root":"C:\\proj","rel":"\\\\other\\share","resolvedRoot":"C:\\proj","resolved":"\\\\other\\share\\","relAbsolute":true,"relative":"\\\\other\\share\\","inside":false}
+{"flavor":"win32","root":"C:\\proj","rel":"//?/C:/x","resolvedRoot":"C:\\proj","resolved":"\\\\?\\C:\\x","relAbsolute":true,"relative":"\\\\?\\C:\\x","inside":false}
+{"flavor":"win32","root":"C:\\proj","rel":"PROJ","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"x/../../PROJ/y","resolvedRoot":"C:\\proj","resolved":"C:\\PROJ\\y","relAbsolute":false,"relative":"y","inside":true}
+{"flavor":"win32","root":"C:\\proj","rel":"repo/../../share/repo/z","resolvedRoot":"C:\\proj","resolved":"C:\\share\\repo\\z","relAbsolute":false,"relative":"..\\share\\repo\\z","inside":false}
+{"flavor":"win32","root":"C:\\proj\\","rel":"","resolvedRoot":"C:\\proj","resolved":"C:\\proj","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":".","resolvedRoot":"C:\\proj","resolved":"C:\\proj","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"a","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"a/b","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"a\\b\\..\\c","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a\\c","relAbsolute":false,"relative":"a\\c","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"..","resolvedRoot":"C:\\proj","resolved":"C:\\","relAbsolute":false,"relative":"..","inside":false}
+{"flavor":"win32","root":"C:\\proj\\","rel":"../x","resolvedRoot":"C:\\proj","resolved":"C:\\x","relAbsolute":false,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"C:\\proj\\","rel":"..\\proj\\x","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\x","relAbsolute":false,"relative":"x","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"..foo","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\..foo","relAbsolute":false,"relative":"..foo","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"a/../../x","resolvedRoot":"C:\\proj","resolved":"C:\\x","relAbsolute":false,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"C:\\proj\\","rel":"C:\\proj\\a","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a","relAbsolute":true,"relative":"a","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"C:x","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\x","relAbsolute":false,"relative":"x","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"/x","resolvedRoot":"C:\\proj","resolved":"C:\\x","relAbsolute":true,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"C:\\proj\\","rel":"\\x","resolvedRoot":"C:\\proj","resolved":"C:\\x","relAbsolute":true,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"C:\\proj\\","rel":"D:\\proj","resolvedRoot":"C:\\proj","resolved":"D:\\proj","relAbsolute":true,"relative":"D:\\proj","inside":false}
+{"flavor":"win32","root":"C:\\proj\\","rel":"a//b///c","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a\\b\\c","relAbsolute":false,"relative":"a\\b\\c","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"a/./b/.","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"./../proj/a","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"a/b/","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"ŁĄKA/ż","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\ŁĄKA\\ż","relAbsolute":false,"relative":"ŁĄKA\\ż","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"..\\..\\..","resolvedRoot":"C:\\proj","resolved":"C:\\","relAbsolute":false,"relative":"..","inside":false}
+{"flavor":"win32","root":"C:\\proj\\","rel":"a\\..\\..\\proj\\b","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\b","relAbsolute":false,"relative":"b","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"...","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\...","relAbsolute":false,"relative":"...","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":". ./x","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\. .\\x","relAbsolute":false,"relative":". .\\x","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"a:b","resolvedRoot":"C:\\proj","resolved":"a:\\b","relAbsolute":false,"relative":"a:\\b","inside":false}
+{"flavor":"win32","root":"C:\\proj\\","rel":"\\\\other\\share","resolvedRoot":"C:\\proj","resolved":"\\\\other\\share\\","relAbsolute":true,"relative":"\\\\other\\share\\","inside":false}
+{"flavor":"win32","root":"C:\\proj\\","rel":"//?/C:/x","resolvedRoot":"C:\\proj","resolved":"\\\\?\\C:\\x","relAbsolute":true,"relative":"\\\\?\\C:\\x","inside":false}
+{"flavor":"win32","root":"C:\\proj\\","rel":"PROJ","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"x/../../PROJ/y","resolvedRoot":"C:\\proj","resolved":"C:\\PROJ\\y","relAbsolute":false,"relative":"y","inside":true}
+{"flavor":"win32","root":"C:\\proj\\","rel":"repo/../../share/repo/z","resolvedRoot":"C:\\proj","resolved":"C:\\share\\repo\\z","relAbsolute":false,"relative":"..\\share\\repo\\z","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":".","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"a","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł\\a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"a/b","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"a\\b\\..\\c","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł\\a\\c","relAbsolute":false,"relative":"a\\c","inside":true}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"..","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania","relAbsolute":false,"relative":"..","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"../x","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\x","relAbsolute":false,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"..\\proj\\x","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\proj\\x","relAbsolute":false,"relative":"..\\proj\\x","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"..foo","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł\\..foo","relAbsolute":false,"relative":"..foo","inside":true}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"a/../../x","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\x","relAbsolute":false,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"C:\\proj\\a","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"C:\\proj\\a","relAbsolute":true,"relative":"..\\..\\..\\proj\\a","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"C:x","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"C:\\Users\\Ania\\Projekt Ł\\x","relAbsolute":false,"relative":"x","inside":true}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"/x","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\x","relAbsolute":true,"relative":"..\\..\\..\\x","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"\\x","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\x","relAbsolute":true,"relative":"..\\..\\..\\x","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"D:\\proj","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"D:\\proj","relAbsolute":true,"relative":"D:\\proj","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"a//b///c","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł\\a\\b\\c","relAbsolute":false,"relative":"a\\b\\c","inside":true}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"a/./b/.","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"./../proj/a","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\proj\\a","relAbsolute":false,"relative":"..\\proj\\a","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"a/b/","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"ŁĄKA/ż","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł\\ŁĄKA\\ż","relAbsolute":false,"relative":"ŁĄKA\\ż","inside":true}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"..\\..\\..","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\","relAbsolute":false,"relative":"..\\..\\..","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"a\\..\\..\\proj\\b","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\proj\\b","relAbsolute":false,"relative":"..\\proj\\b","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"...","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł\\...","relAbsolute":false,"relative":"...","inside":true}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":". ./x","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł\\. .\\x","relAbsolute":false,"relative":". .\\x","inside":true}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"a:b","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"a:\\b","relAbsolute":false,"relative":"a:\\b","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"\\\\other\\share","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"\\\\other\\share\\","relAbsolute":true,"relative":"\\\\other\\share\\","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"//?/C:/x","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"\\\\?\\C:\\x","relAbsolute":true,"relative":"\\\\?\\C:\\x","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"PROJ","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł\\PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"x/../../PROJ/y","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\PROJ\\y","relAbsolute":false,"relative":"..\\PROJ\\y","inside":false}
+{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"repo/../../share/repo/z","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\share\\repo\\z","relAbsolute":false,"relative":"..\\share\\repo\\z","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"win32","root":"D:/work/app","rel":".","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"win32","root":"D:/work/app","rel":"a","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"win32","root":"D:/work/app","rel":"a/b","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"D:/work/app","rel":"a\\b\\..\\c","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\a\\c","relAbsolute":false,"relative":"a\\c","inside":true}
+{"flavor":"win32","root":"D:/work/app","rel":"..","resolvedRoot":"D:\\work\\app","resolved":"D:\\work","relAbsolute":false,"relative":"..","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"../x","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\x","relAbsolute":false,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"..\\proj\\x","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\proj\\x","relAbsolute":false,"relative":"..\\proj\\x","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"..foo","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\..foo","relAbsolute":false,"relative":"..foo","inside":true}
+{"flavor":"win32","root":"D:/work/app","rel":"a/../../x","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\x","relAbsolute":false,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"C:\\proj\\a","resolvedRoot":"D:\\work\\app","resolved":"C:\\proj\\a","relAbsolute":true,"relative":"C:\\proj\\a","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"C:x","resolvedRoot":"D:\\work\\app","resolved":"C:\\x","relAbsolute":false,"relative":"C:\\x","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"/x","resolvedRoot":"D:\\work\\app","resolved":"D:\\x","relAbsolute":true,"relative":"..\\..\\x","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"\\x","resolvedRoot":"D:\\work\\app","resolved":"D:\\x","relAbsolute":true,"relative":"..\\..\\x","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"D:\\proj","resolvedRoot":"D:\\work\\app","resolved":"D:\\proj","relAbsolute":true,"relative":"..\\..\\proj","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"a//b///c","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\a\\b\\c","relAbsolute":false,"relative":"a\\b\\c","inside":true}
+{"flavor":"win32","root":"D:/work/app","rel":"a/./b/.","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"D:/work/app","rel":"./../proj/a","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\proj\\a","relAbsolute":false,"relative":"..\\proj\\a","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"a/b/","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"D:/work/app","rel":"ŁĄKA/ż","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\ŁĄKA\\ż","relAbsolute":false,"relative":"ŁĄKA\\ż","inside":true}
+{"flavor":"win32","root":"D:/work/app","rel":"..\\..\\..","resolvedRoot":"D:\\work\\app","resolved":"D:\\","relAbsolute":false,"relative":"..\\..","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"a\\..\\..\\proj\\b","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\proj\\b","relAbsolute":false,"relative":"..\\proj\\b","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"...","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\...","relAbsolute":false,"relative":"...","inside":true}
+{"flavor":"win32","root":"D:/work/app","rel":". ./x","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\. .\\x","relAbsolute":false,"relative":". .\\x","inside":true}
+{"flavor":"win32","root":"D:/work/app","rel":"a:b","resolvedRoot":"D:\\work\\app","resolved":"a:\\b","relAbsolute":false,"relative":"a:\\b","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"\\\\other\\share","resolvedRoot":"D:\\work\\app","resolved":"\\\\other\\share\\","relAbsolute":true,"relative":"\\\\other\\share\\","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"//?/C:/x","resolvedRoot":"D:\\work\\app","resolved":"\\\\?\\C:\\x","relAbsolute":true,"relative":"\\\\?\\C:\\x","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"PROJ","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
+{"flavor":"win32","root":"D:/work/app","rel":"x/../../PROJ/y","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\PROJ\\y","relAbsolute":false,"relative":"..\\PROJ\\y","inside":false}
+{"flavor":"win32","root":"D:/work/app","rel":"repo/../../share/repo/z","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\share\\repo\\z","relAbsolute":false,"relative":"..\\share\\repo\\z","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":".","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"a","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"a/b","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"a\\b\\..\\c","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\a\\c","relAbsolute":false,"relative":"a\\c","inside":true}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"..","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\","relAbsolute":false,"relative":"..","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"../x","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\x","relAbsolute":false,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"..\\proj\\x","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\proj\\x","relAbsolute":false,"relative":"..\\proj\\x","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"..foo","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\..foo","relAbsolute":false,"relative":"..foo","inside":true}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"a/../../x","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\x","relAbsolute":false,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"C:\\proj\\a","resolvedRoot":"\\\\server\\share\\repo","resolved":"C:\\proj\\a","relAbsolute":true,"relative":"C:\\proj\\a","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"C:x","resolvedRoot":"\\\\server\\share\\repo","resolved":"C:\\x","relAbsolute":false,"relative":"C:\\x","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"/x","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\x","relAbsolute":true,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"\\x","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\x","relAbsolute":true,"relative":"..\\x","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"D:\\proj","resolvedRoot":"\\\\server\\share\\repo","resolved":"D:\\proj","relAbsolute":true,"relative":"D:\\proj","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"a//b///c","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\a\\b\\c","relAbsolute":false,"relative":"a\\b\\c","inside":true}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"a/./b/.","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"./../proj/a","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\proj\\a","relAbsolute":false,"relative":"..\\proj\\a","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"a/b/","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"ŁĄKA/ż","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\ŁĄKA\\ż","relAbsolute":false,"relative":"ŁĄKA\\ż","inside":true}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"..\\..\\..","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\","relAbsolute":false,"relative":"..","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"a\\..\\..\\proj\\b","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\proj\\b","relAbsolute":false,"relative":"..\\proj\\b","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"...","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\...","relAbsolute":false,"relative":"...","inside":true}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":". ./x","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\. .\\x","relAbsolute":false,"relative":". .\\x","inside":true}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"a:b","resolvedRoot":"\\\\server\\share\\repo","resolved":"a:\\b","relAbsolute":false,"relative":"a:\\b","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"\\\\other\\share","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\other\\share\\","relAbsolute":true,"relative":"\\\\other\\share\\","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"//?/C:/x","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\?\\C:\\x","relAbsolute":true,"relative":"\\\\?\\C:\\x","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"PROJ","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"x/../../PROJ/y","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\PROJ\\y","relAbsolute":false,"relative":"..\\PROJ\\y","inside":false}
+{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"repo/../../share/repo/z","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\share\\repo\\z","relAbsolute":false,"relative":"..\\share\\repo\\z","inside":false}
+{"flavor":"win32","root":"C:\\","rel":"","resolvedRoot":"C:\\","resolved":"C:\\","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"win32","root":"C:\\","rel":".","resolvedRoot":"C:\\","resolved":"C:\\","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"a","resolvedRoot":"C:\\","resolved":"C:\\a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"a/b","resolvedRoot":"C:\\","resolved":"C:\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"a\\b\\..\\c","resolvedRoot":"C:\\","resolved":"C:\\a\\c","relAbsolute":false,"relative":"a\\c","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"..","resolvedRoot":"C:\\","resolved":"C:\\","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"../x","resolvedRoot":"C:\\","resolved":"C:\\x","relAbsolute":false,"relative":"x","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"..\\proj\\x","resolvedRoot":"C:\\","resolved":"C:\\proj\\x","relAbsolute":false,"relative":"proj\\x","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"..foo","resolvedRoot":"C:\\","resolved":"C:\\..foo","relAbsolute":false,"relative":"..foo","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"a/../../x","resolvedRoot":"C:\\","resolved":"C:\\x","relAbsolute":false,"relative":"x","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"C:\\proj\\a","resolvedRoot":"C:\\","resolved":"C:\\proj\\a","relAbsolute":true,"relative":"proj\\a","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"C:x","resolvedRoot":"C:\\","resolved":"C:\\x","relAbsolute":false,"relative":"x","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"/x","resolvedRoot":"C:\\","resolved":"C:\\x","relAbsolute":true,"relative":"x","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"\\x","resolvedRoot":"C:\\","resolved":"C:\\x","relAbsolute":true,"relative":"x","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"D:\\proj","resolvedRoot":"C:\\","resolved":"D:\\proj","relAbsolute":true,"relative":"D:\\proj","inside":false}
+{"flavor":"win32","root":"C:\\","rel":"a//b///c","resolvedRoot":"C:\\","resolved":"C:\\a\\b\\c","relAbsolute":false,"relative":"a\\b\\c","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"a/./b/.","resolvedRoot":"C:\\","resolved":"C:\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"./../proj/a","resolvedRoot":"C:\\","resolved":"C:\\proj\\a","relAbsolute":false,"relative":"proj\\a","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"a/b/","resolvedRoot":"C:\\","resolved":"C:\\a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"ŁĄKA/ż","resolvedRoot":"C:\\","resolved":"C:\\ŁĄKA\\ż","relAbsolute":false,"relative":"ŁĄKA\\ż","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"..\\..\\..","resolvedRoot":"C:\\","resolved":"C:\\","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"a\\..\\..\\proj\\b","resolvedRoot":"C:\\","resolved":"C:\\proj\\b","relAbsolute":false,"relative":"proj\\b","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"...","resolvedRoot":"C:\\","resolved":"C:\\...","relAbsolute":false,"relative":"...","inside":true}
+{"flavor":"win32","root":"C:\\","rel":". ./x","resolvedRoot":"C:\\","resolved":"C:\\. .\\x","relAbsolute":false,"relative":". .\\x","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"a:b","resolvedRoot":"C:\\","resolved":"a:\\b","relAbsolute":false,"relative":"a:\\b","inside":false}
+{"flavor":"win32","root":"C:\\","rel":"\\\\other\\share","resolvedRoot":"C:\\","resolved":"\\\\other\\share\\","relAbsolute":true,"relative":"\\\\other\\share\\","inside":false}
+{"flavor":"win32","root":"C:\\","rel":"//?/C:/x","resolvedRoot":"C:\\","resolved":"\\\\?\\C:\\x","relAbsolute":true,"relative":"\\\\?\\C:\\x","inside":false}
+{"flavor":"win32","root":"C:\\","rel":"PROJ","resolvedRoot":"C:\\","resolved":"C:\\PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"x/../../PROJ/y","resolvedRoot":"C:\\","resolved":"C:\\PROJ\\y","relAbsolute":false,"relative":"PROJ\\y","inside":true}
+{"flavor":"win32","root":"C:\\","rel":"repo/../../share/repo/z","resolvedRoot":"C:\\","resolved":"C:\\share\\repo\\z","relAbsolute":false,"relative":"share\\repo\\z","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":".","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"a","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"a/b","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"a/b/../c","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a/c","relAbsolute":false,"relative":"a/c","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"..","resolvedRoot":"/home/ania/proj","resolved":"/home/ania","relAbsolute":false,"relative":"..","inside":false}
+{"flavor":"posix","root":"/home/ania/proj","rel":"../x","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/x","relAbsolute":false,"relative":"../x","inside":false}
+{"flavor":"posix","root":"/home/ania/proj","rel":"../proj/x","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/x","relAbsolute":false,"relative":"x","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"..foo","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/..foo","relAbsolute":false,"relative":"..foo","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"a/../../x","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/x","relAbsolute":false,"relative":"../x","inside":false}
+{"flavor":"posix","root":"/home/ania/proj","rel":"/home/ania/proj/a","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a","relAbsolute":true,"relative":"a","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"/x","resolvedRoot":"/home/ania/proj","resolved":"/x","relAbsolute":true,"relative":"../../../x","inside":false}
+{"flavor":"posix","root":"/home/ania/proj","rel":"a//b","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"a/./b/.","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"./../proj/a","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"a\\b","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"ŁĄKA/ż","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/ŁĄKA/ż","relAbsolute":false,"relative":"ŁĄKA/ż","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"../../..","resolvedRoot":"/home/ania/proj","resolved":"/","relAbsolute":false,"relative":"../../..","inside":false}
+{"flavor":"posix","root":"/home/ania/proj","rel":"...","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/...","relAbsolute":false,"relative":"...","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"PROJ","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
+{"flavor":"posix","root":"/home/ania/proj","rel":"x/../../proj/y","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/y","relAbsolute":false,"relative":"y","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":".","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"a","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"a/b","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"a/b/../c","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a/c","relAbsolute":false,"relative":"a/c","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"..","resolvedRoot":"/home/ania/proj","resolved":"/home/ania","relAbsolute":false,"relative":"..","inside":false}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"../x","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/x","relAbsolute":false,"relative":"../x","inside":false}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"../proj/x","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/x","relAbsolute":false,"relative":"x","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"..foo","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/..foo","relAbsolute":false,"relative":"..foo","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"a/../../x","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/x","relAbsolute":false,"relative":"../x","inside":false}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"/home/ania/proj/a","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a","relAbsolute":true,"relative":"a","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"/x","resolvedRoot":"/home/ania/proj","resolved":"/x","relAbsolute":true,"relative":"../../../x","inside":false}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"a//b","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"a/./b/.","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"./../proj/a","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"a\\b","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"ŁĄKA/ż","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/ŁĄKA/ż","relAbsolute":false,"relative":"ŁĄKA/ż","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"../../..","resolvedRoot":"/home/ania/proj","resolved":"/","relAbsolute":false,"relative":"../../..","inside":false}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"...","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/...","relAbsolute":false,"relative":"...","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"PROJ","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
+{"flavor":"posix","root":"/home/ania/proj/","rel":"x/../../proj/y","resolvedRoot":"/home/ania/proj","resolved":"/home/ania/proj/y","relAbsolute":false,"relative":"y","inside":true}
+{"flavor":"posix","root":"/","rel":"","resolvedRoot":"/","resolved":"/","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"posix","root":"/","rel":".","resolvedRoot":"/","resolved":"/","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"posix","root":"/","rel":"a","resolvedRoot":"/","resolved":"/a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"posix","root":"/","rel":"a/b","resolvedRoot":"/","resolved":"/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"/","rel":"a/b/../c","resolvedRoot":"/","resolved":"/a/c","relAbsolute":false,"relative":"a/c","inside":true}
+{"flavor":"posix","root":"/","rel":"..","resolvedRoot":"/","resolved":"/","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"posix","root":"/","rel":"../x","resolvedRoot":"/","resolved":"/x","relAbsolute":false,"relative":"x","inside":true}
+{"flavor":"posix","root":"/","rel":"../proj/x","resolvedRoot":"/","resolved":"/proj/x","relAbsolute":false,"relative":"proj/x","inside":true}
+{"flavor":"posix","root":"/","rel":"..foo","resolvedRoot":"/","resolved":"/..foo","relAbsolute":false,"relative":"..foo","inside":true}
+{"flavor":"posix","root":"/","rel":"a/../../x","resolvedRoot":"/","resolved":"/x","relAbsolute":false,"relative":"x","inside":true}
+{"flavor":"posix","root":"/","rel":"/home/ania/proj/a","resolvedRoot":"/","resolved":"/home/ania/proj/a","relAbsolute":true,"relative":"home/ania/proj/a","inside":true}
+{"flavor":"posix","root":"/","rel":"/x","resolvedRoot":"/","resolved":"/x","relAbsolute":true,"relative":"x","inside":true}
+{"flavor":"posix","root":"/","rel":"a//b","resolvedRoot":"/","resolved":"/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"/","rel":"a/./b/.","resolvedRoot":"/","resolved":"/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"/","rel":"./../proj/a","resolvedRoot":"/","resolved":"/proj/a","relAbsolute":false,"relative":"proj/a","inside":true}
+{"flavor":"posix","root":"/","rel":"a\\b","resolvedRoot":"/","resolved":"/a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"posix","root":"/","rel":"ŁĄKA/ż","resolvedRoot":"/","resolved":"/ŁĄKA/ż","relAbsolute":false,"relative":"ŁĄKA/ż","inside":true}
+{"flavor":"posix","root":"/","rel":"../../..","resolvedRoot":"/","resolved":"/","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"posix","root":"/","rel":"...","resolvedRoot":"/","resolved":"/...","relAbsolute":false,"relative":"...","inside":true}
+{"flavor":"posix","root":"/","rel":"PROJ","resolvedRoot":"/","resolved":"/PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
+{"flavor":"posix","root":"/","rel":"x/../../proj/y","resolvedRoot":"/","resolved":"/proj/y","relAbsolute":false,"relative":"proj/y","inside":true}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/Projekt Ł","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":".","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/Projekt Ł","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"a","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/Projekt Ł/a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"a/b","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/Projekt Ł/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"a/b/../c","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/Projekt Ł/a/c","relAbsolute":false,"relative":"a/c","inside":true}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"..","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A","relAbsolute":false,"relative":"..","inside":false}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"../x","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/x","relAbsolute":false,"relative":"../x","inside":false}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"../proj/x","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/proj/x","relAbsolute":false,"relative":"../proj/x","inside":false}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"..foo","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/Projekt Ł/..foo","relAbsolute":false,"relative":"..foo","inside":true}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"a/../../x","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/x","relAbsolute":false,"relative":"../x","inside":false}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"/home/ania/proj/a","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/home/ania/proj/a","relAbsolute":true,"relative":"../../../home/ania/proj/a","inside":false}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"/x","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/x","relAbsolute":true,"relative":"../../../x","inside":false}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"a//b","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/Projekt Ł/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"a/./b/.","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/Projekt Ł/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"./../proj/a","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/proj/a","relAbsolute":false,"relative":"../proj/a","inside":false}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"a\\b","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/Projekt Ł/a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"ŁĄKA/ż","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/Projekt Ł/ŁĄKA/ż","relAbsolute":false,"relative":"ŁĄKA/ż","inside":true}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"../../..","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/","relAbsolute":false,"relative":"../../..","inside":false}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"...","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/Projekt Ł/...","relAbsolute":false,"relative":"...","inside":true}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"PROJ","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/Projekt Ł/PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
+{"flavor":"posix","root":"/Users/A/Projekt Ł","rel":"x/../../proj/y","resolvedRoot":"/Users/A/Projekt Ł","resolved":"/Users/A/proj/y","relAbsolute":false,"relative":"../proj/y","inside":false}
+{"flavor":"posix","root":"//double","rel":"","resolvedRoot":"/double","resolved":"/double","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"posix","root":"//double","rel":".","resolvedRoot":"/double","resolved":"/double","relAbsolute":false,"relative":"","inside":true}
+{"flavor":"posix","root":"//double","rel":"a","resolvedRoot":"/double","resolved":"/double/a","relAbsolute":false,"relative":"a","inside":true}
+{"flavor":"posix","root":"//double","rel":"a/b","resolvedRoot":"/double","resolved":"/double/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"//double","rel":"a/b/../c","resolvedRoot":"/double","resolved":"/double/a/c","relAbsolute":false,"relative":"a/c","inside":true}
+{"flavor":"posix","root":"//double","rel":"..","resolvedRoot":"/double","resolved":"/","relAbsolute":false,"relative":"..","inside":false}
+{"flavor":"posix","root":"//double","rel":"../x","resolvedRoot":"/double","resolved":"/x","relAbsolute":false,"relative":"../x","inside":false}
+{"flavor":"posix","root":"//double","rel":"../proj/x","resolvedRoot":"/double","resolved":"/proj/x","relAbsolute":false,"relative":"../proj/x","inside":false}
+{"flavor":"posix","root":"//double","rel":"..foo","resolvedRoot":"/double","resolved":"/double/..foo","relAbsolute":false,"relative":"..foo","inside":true}
+{"flavor":"posix","root":"//double","rel":"a/../../x","resolvedRoot":"/double","resolved":"/x","relAbsolute":false,"relative":"../x","inside":false}
+{"flavor":"posix","root":"//double","rel":"/home/ania/proj/a","resolvedRoot":"/double","resolved":"/home/ania/proj/a","relAbsolute":true,"relative":"../home/ania/proj/a","inside":false}
+{"flavor":"posix","root":"//double","rel":"/x","resolvedRoot":"/double","resolved":"/x","relAbsolute":true,"relative":"../x","inside":false}
+{"flavor":"posix","root":"//double","rel":"a//b","resolvedRoot":"/double","resolved":"/double/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"//double","rel":"a/./b/.","resolvedRoot":"/double","resolved":"/double/a/b","relAbsolute":false,"relative":"a/b","inside":true}
+{"flavor":"posix","root":"//double","rel":"./../proj/a","resolvedRoot":"/double","resolved":"/proj/a","relAbsolute":false,"relative":"../proj/a","inside":false}
+{"flavor":"posix","root":"//double","rel":"a\\b","resolvedRoot":"/double","resolved":"/double/a\\b","relAbsolute":false,"relative":"a\\b","inside":true}
+{"flavor":"posix","root":"//double","rel":"ŁĄKA/ż","resolvedRoot":"/double","resolved":"/double/ŁĄKA/ż","relAbsolute":false,"relative":"ŁĄKA/ż","inside":true}
+{"flavor":"posix","root":"//double","rel":"../../..","resolvedRoot":"/double","resolved":"/","relAbsolute":false,"relative":"..","inside":false}
+{"flavor":"posix","root":"//double","rel":"...","resolvedRoot":"/double","resolved":"/double/...","relAbsolute":false,"relative":"...","inside":true}
+{"flavor":"posix","root":"//double","rel":"PROJ","resolvedRoot":"/double","resolved":"/double/PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
+{"flavor":"posix","root":"//double","rel":"x/../../proj/y","resolvedRoot":"/double","resolved":"/proj/y","relAbsolute":false,"relative":"../proj/y","inside":false}

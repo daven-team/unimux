@@ -84,6 +84,13 @@ export function wellFormed(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Saves 1.1.4 refused because the new text held an unpaired surrogate ('Nieprawidłowa treść pliku.'). Rust never sees one
+ * (wellFormed would turn it into U+FFFD and the file would get a replacement character), so the bridge answers them itself.
+ */
+const REFUSE_ILL_FORMED_TEXT = new Map<string, number>([['fs:writeProjectFile', 2], ['local:writeFile', 1]]);
+const INVALID_TEXT = { ok: false, error: 'Nieprawidłowa treść pliku.' };
+
 /** JSON has no undefined: positional undefined arguments travel as null (Rust reads both as absent). */
 const wireArgs = (args: unknown[]): unknown[] => args.map((a) => (a === undefined ? null : wellFormed(a)));
 
@@ -151,6 +158,9 @@ export function createTauriTransport(boot: BootInfo, deps: TauriDeps): TauriTran
   };
 
   async function rawInvoke(channel: string, args: unknown[]): Promise<unknown> {
+    const textAt = REFUSE_ILL_FORMED_TEXT.get(channel);
+    const text = textAt === undefined ? undefined : args[textAt];
+    if (typeof text === 'string' && !isWellFormed(text)) return { ...INVALID_TEXT };
     try {
       const rawAt = args.findIndex(isBytes);
       let result: unknown;
