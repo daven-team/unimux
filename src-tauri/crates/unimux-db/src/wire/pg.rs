@@ -421,7 +421,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PgConn<S> {
                     return Ok(done);
                 }
                 Frame::Msg(backend::Message::CopyInResponse(_)) => {
-                    frontend::copy_fail("COPY is not supported", &mut self.out)?;
+                    // what node-postgres answers (pg/lib/query.js handleCopyInResponse); the server reports
+                    // "COPY from stdin failed: No source stream defined"
+                    frontend::copy_fail("No source stream defined", &mut self.out)?;
                     self.flush().await?;
                 }
                 Frame::Msg(backend::Message::CopyOutResponse(_) | backend::Message::CopyData(_) | backend::Message::CopyDone) => {

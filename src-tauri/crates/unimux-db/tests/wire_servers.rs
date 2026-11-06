@@ -1,7 +1,8 @@
 //! SP9: the Rust spike clients against the 1.1.4 goldens in test/golden/db-wire/ (written from node-postgres, mysql2 and
 //! ioredis through the real 1.1.4 DB host by test/db-wire-sp9.int.test.ts). The offline golden always runs; the server
-//! tests run when MC_SP9_SERVERS names servers (scripts/spike-db-wire.mjs starts them in Docker and sets it) and print
-//! their measurements (`--nocapture`).
+//! tests are `#[ignore]`d in a plain `cargo test` and run with `--include-ignored` by scripts/spike-db-wire.mjs, which
+//! starts the servers in Docker, sets MC_SP9_SERVERS and passes name filters for the kinds it started. A server test that
+//! runs without a server of its kind fails instead of passing empty. Measurements are printed (`--nocapture`).
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -10,14 +11,15 @@ use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use unimux_core::js_json::write_string;
 use unimux_db::wire::mysql::{MyColumn, MyConfig, MyConn, MyResult};
 use unimux_db::wire::pg::{PgConfig, PgConn, PgStatement, PgWireError, Protocol, parse_tag, send_cancel};
-use unimux_db::wire::redis::{REPLY_NODES, RETRY_DELAYS_MS, Raw, RespReader, encode_command, reply};
+use unimux_db::wire::redis::{
+    CallError, REPLY_NODES, Raw, ReconnectEvent, RedisConn, connect_sequence, reconnect, reconnect_sequence, reply,
+};
 use unimux_db::wire::tap::tap;
-use unimux_db::wire::value::{DbValue, node_utf8, row_json, text_value, to_value, utf16_len};
+use unimux_db::wire::value::{DbValue, head_json, node_utf8, row_json, server_text, text_value, to_value, utf16_len};
 
 #[derive(Debug, Clone, Deserialize)]
 struct Server {
@@ -29,13 +31,14 @@ struct Server {
     password: String,
 }
 
+/// The servers of these kinds; panics when there is none, so a server test never passes without having checked anything.
 fn servers(kind: &[&str]) -> Vec<Server> {
-    let Ok(text) = std::env::var("MC_SP9_SERVERS") else {
-        eprintln!("no MC_SP9_SERVERS: server checks skipped (scripts/spike-db-wire.mjs runs them)");
-        return Vec::new();
-    };
+    let text = std::env::var("MC_SP9_SERVERS")
+        .expect("MC_SP9_SERVERS is not set: the server checks run through node scripts/spike-db-wire.mjs");
     let all: Vec<Server> = serde_json::from_str(&text).expect("MC_SP9_SERVERS is JSON");
-    all.into_iter().filter(|s| kind.contains(&s.kind.as_str())).collect()
+    let found: Vec<Server> = all.into_iter().filter(|s| kind.contains(&s.kind.as_str())).collect();
+    assert!(!found.is_empty(), "MC_SP9_SERVERS has no {kind:?} server");
+    found
 }
 
 fn dir() -> PathBuf {
@@ -119,7 +122,8 @@ fn compare(file: &str, produced: &[String]) -> Vec<String> {
         bad.push(format!("{file}: {} golden lines, {} produced", golden.len(), produced.len()));
     }
     for (i, (g, p)) in golden.iter().zip(produced).enumerate() {
-        let gv: Value = serde_json::from_str(g).unwrap();
+        // serde_json refuses the lone surrogate escapes JSON.stringify writes (`\ud83d`); such a line is compared as text
+        let gv: Value = serde_json::from_str(g).unwrap_or(Value::Null);
         let ok = match gv.get("sha256").and_then(Value::as_str) {
             Some(h) => {
                 let mine: String = Sha256::digest(p.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
@@ -255,14 +259,21 @@ async fn host_j(st: &PgStatement, s: &Server, db: &str, rel: &mut Relnames) -> J
     }
     let mut o = vec![("columns", J::Arr(columns)), ("rows", rows_j(&values(&st.rows, 1000)))];
     if let Some(e) = &st.error {
-        let mut server = vec![("code", J::s(e.code())), ("message", J::s(e.message()))];
+        let mut server = vec![("code", J::s(e.code())), ("message", J::Raw(head_json(&server_text(e.message()))))];
         if let Some(p) = e.field(b'P').and_then(|p| p.parse::<u64>().ok()).filter(|p| *p > 0) {
             server.push(("position", J::n(p)));
         }
         if let Some(d) = e.field(b'D').filter(|d| !d.is_empty()) {
-            server.push(("detail", J::s(d)));
+            server.push(("detail", J::Raw(head_json(&server_text(d)))));
         }
-        o.push(("error", J::Obj(vec![("code", J::s("server")), ("server", J::Obj(server))])));
+        // pgSession's code of a server error (no cancel was requested here)
+        let code = match e.code() {
+            "57014" if e.message().to_lowercase().contains("statement timeout") => "statementTimeout",
+            "57014" => "cancelled",
+            "25006" => "readOnly",
+            _ => "server",
+        };
+        o.push(("error", J::Obj(vec![("code", J::s(code)), ("server", J::Obj(server))])));
     }
     J::Obj(o)
 }
@@ -293,7 +304,15 @@ async fn simple_j(st: &PgStatement, s: &Server, db: &str, rel: &mut Relnames) ->
     ])
 }
 
+/// `returnsRows` (src/shared/dbSql.ts) for the corpus statements (no comments or quoted RETURNING there).
+fn returns_rows(sql: &str) -> bool {
+    const ROW_KEYWORDS: [&str; 9] = ["SELECT", "WITH", "VALUES", "TABLE", "SHOW", "EXPLAIN", "FETCH", "EXECUTE", "CALL"];
+    ROW_KEYWORDS.contains(&first_keyword(sql).as_str())
+        || sql.split(|c: char| !c.is_ascii_alphanumeric() && c != '_').any(|w| w.eq_ignore_ascii_case("RETURNING"))
+}
+
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs MC_SP9_SERVERS (node scripts/spike-db-wire.mjs)"]
 async fn pg_values_match_node_postgres() {
     let corpus: Value = serde_json::from_str(&read("pg-corpus.json")).unwrap();
     for s in servers(&["postgres"]) {
@@ -308,7 +327,13 @@ async fn pg_values_match_node_postgres() {
             if !hosts.contains_key(db) {
                 hosts.insert(db.to_owned(), pg(&s, db, &s.user, &s.password, Protocol::V3_0).await.unwrap());
             }
-            let host = hosts.get_mut(db).unwrap().cursor_query(sql, 100).await.unwrap();
+            // pgSession.statement: a row-returning statement through a cursor, any other as a simple query
+            let conn = hosts.get_mut(db).unwrap();
+            let host = if returns_rows(sql) {
+                conn.cursor_query(sql, 100).await.unwrap()
+            } else {
+                conn.simple_query(sql).await.unwrap().pop().unwrap()
+            };
             let host = host_j(&host, &s, db, &mut rel).await;
             let mut fresh = pg(&s, db, &s.user, &s.password, Protocol::V3_0).await.unwrap();
             fresh.notices.clear();
@@ -324,6 +349,7 @@ async fn pg_values_match_node_postgres() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs MC_SP9_SERVERS (node scripts/spike-db-wire.mjs)"]
 async fn pg_startup_and_logins_match_node_postgres() {
     for s in servers(&["postgres"]) {
         let cfg = PgConfig { user: "sp9_none".into(), database: "postgres".into(), password: None, protocol: Protocol::V3_0 };
@@ -357,6 +383,7 @@ async fn pg_startup_and_logins_match_node_postgres() {
 
 /// Cancels a pg_sleep with a CancelRequest for each protocol; PostgreSQL 18 under 3.2 sends a 32-byte key.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs MC_SP9_SERVERS (node scripts/spike-db-wire.mjs)"]
 async fn pg_cancel_with_3_0_and_3_2_keys() {
     for s in servers(&["postgres"]) {
         for protocol in [Protocol::V3_0, Protocol::V3_2] {
@@ -501,13 +528,19 @@ fn my_statements(sql: &str, results: &[MyResult]) -> Vec<J> {
                 if let Some(st) = state {
                     server.push(("code", J::s(st)));
                 }
-                server.push(("message", J::s(message)));
+                server.push(("message", J::Raw(head_json(&server_text(&message)))));
                 out.push(J::Obj(vec![
                     ("columns", J::Arr(vec![])),
                     ("rows", J::Arr(vec![])),
                     ("error", J::Obj(vec![("code", J::s("server")), ("server", J::Obj(server))])),
                 ]));
             }
+            // an Error without errno: mysqlSession.codeOf gives dbClosed and mysqlServerError nothing
+            MyResult::ClientError(_) => out.push(J::Obj(vec![
+                ("columns", J::Arr(vec![])),
+                ("rows", J::Arr(vec![])),
+                ("error", J::Obj(vec![("code", J::s("dbClosed"))])),
+            ])),
             MyResult::Ok { affected_rows, .. } => {
                 if call && has_sets {
                     continue;
@@ -561,6 +594,7 @@ fn my_statements(sql: &str, results: &[MyResult]) -> Vec<J> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs MC_SP9_SERVERS (node scripts/spike-db-wire.mjs)"]
 async fn mysql_values_match_mysql2() {
     let corpus: Value = serde_json::from_str(&read("mysql-corpus.json")).unwrap();
     for s in servers(&["mysql", "mariadb"]) {
@@ -593,6 +627,7 @@ async fn mysql_values_match_mysql2() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs MC_SP9_SERVERS (node scripts/spike-db-wire.mjs)"]
 async fn mysql_logins_caching_sha2_full_and_fast() {
     for s in servers(&["mysql", "mariadb"]) {
         let mut admin = my(&s, &s.user, &s.password, None).await.unwrap();
@@ -632,30 +667,16 @@ async fn mysql_logins_caching_sha2_full_and_fast() {
 
 // ── Redis ──
 
-struct Resp {
-    stream: TcpStream,
-    reader: RespReader,
+/// The own client (`wire::redis::RedisConn`) on a plain TCP stream.
+async fn own(s: &Server) -> RedisConn {
+    let stream = TcpStream::connect((s.host.as_str(), s.port)).await.unwrap();
+    stream.set_nodelay(true).unwrap();
+    RedisConn::start(stream)
 }
 
-impl Resp {
-    async fn open(s: &Server) -> Resp {
-        let stream = TcpStream::connect((s.host.as_str(), s.port)).await.unwrap();
-        stream.set_nodelay(true).unwrap();
-        Resp { stream, reader: RespReader::default() }
-    }
-    async fn call(&mut self, argv: &[Vec<u8>]) -> Raw {
-        let refs: Vec<&[u8]> = argv.iter().map(Vec::as_slice).collect();
-        self.stream.write_all(&encode_command(&refs)).await.unwrap();
-        loop {
-            if let Some(v) = self.reader.next_reply().unwrap() {
-                return v;
-            }
-            let mut buf = vec![0u8; 64 * 1024];
-            let n = self.stream.read(&mut buf).await.unwrap();
-            assert!(n > 0, "connection closed");
-            self.reader.push(&buf[..n]);
-        }
-    }
+async fn call(c: &RedisConn, argv: &[Vec<u8>]) -> Raw {
+    let refs: Vec<&[u8]> = argv.iter().map(Vec::as_slice).collect();
+    c.call(&refs).await.unwrap()
 }
 
 fn argv_of(v: &Value) -> Vec<Vec<u8>> {
@@ -669,27 +690,6 @@ fn argv_of(v: &Value) -> Vec<Vec<u8>> {
         .collect()
 }
 
-/// The 1.1.4 connect sequence (ioredis with connectionName, disableClientInfo, enableReadyCheck off, then openRedis's PING,
-/// SELECT and INFO server), in ioredis' lower case.
-fn connect_sequence(user: &str, password: Option<&str>, db: u32) -> Vec<Vec<Vec<u8>>> {
-    let mut seq: Vec<Vec<Vec<u8>>> = Vec::new();
-    if let Some(pw) = password {
-        let mut auth = vec![b"auth".to_vec()];
-        if !user.is_empty() {
-            auth.push(user.as_bytes().to_vec());
-        }
-        auth.push(pw.as_bytes().to_vec());
-        seq.push(auth);
-    }
-    seq.push(vec![b"client".to_vec(), b"setname".to_vec(), b"unimux".to_vec()]);
-    seq.push(vec![b"ping".to_vec()]);
-    if db != 0 {
-        seq.push(vec![b"select".to_vec(), db.to_string().into_bytes()]);
-    }
-    seq.push(vec![b"info".to_vec(), b"server".to_vec()]);
-    seq
-}
-
 fn status_map() -> std::collections::HashMap<String, bool> {
     read("redis8.jsonl")
         .lines()
@@ -699,9 +699,9 @@ fn status_map() -> std::collections::HashMap<String, bool> {
 }
 
 async fn redis_setup(s: &Server, corpus: &Value) {
-    let mut admin = Resp::open(s).await;
+    let admin = own(s).await;
     for argv in corpus["setup"].as_array().unwrap() {
-        admin.call(&argv_of(argv)).await;
+        call(&admin, &argv_of(argv)).await;
     }
 }
 
@@ -748,25 +748,25 @@ fn reply_line(id: &str, status: bool, raw: &Raw) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs MC_SP9_SERVERS (node scripts/spike-db-wire.mjs)"]
 async fn redis_replies_match_ioredis() {
     let corpus: Value = serde_json::from_str(&read("redis-corpus.json")).unwrap();
     // statuses of the big replies are not in their hashed lines: the classification says false for EVAL
     let statuses = status_map();
     for s in servers(&["redis"]) {
-        // 1. the own RESP2 reader
+        // 1. the own RESP2 client, opened with the 1.1.4 connect sequence
         redis_setup(&s, &corpus).await;
-        let mut console = Resp::open(&s).await;
-        for cmd in connect_sequence("", None, 0) {
-            console.call(&cmd).await;
-        }
-        let mut own = Vec::new();
+        let stream = TcpStream::connect((s.host.as_str(), s.port)).await.unwrap();
+        let (console, info) = RedisConn::open(stream, "", None, 0).await.unwrap();
+        assert!(info.starts_with(b"# Server"));
+        let mut own_lines = Vec::new();
         for (id, argv) in console_commands(&corpus) {
-            let raw = console.call(&argv).await;
-            own.push(reply_line(&id, statuses.get(&id).copied().unwrap_or(false), &raw));
+            let raw = call(&console, &argv).await;
+            own_lines.push(reply_line(&id, statuses.get(&id).copied().unwrap_or(false), &raw));
         }
-        assert_clean(compare(&format!("{}.jsonl", s.label), &own));
+        assert_clean(compare(&format!("{}.jsonl", s.label), &own_lines));
 
-        // 2. the redis crate (MultiplexedConnection over the same kind of stream), on a fresh setup
+        // 2. the redis crate (MultiplexedConnection over the same kind of stream), on a fresh setup: shows its gap
         redis_setup(&s, &corpus).await;
         let mut via_crate = Vec::new();
         let mut crate_failures = Vec::new();
@@ -829,26 +829,17 @@ async fn open_mux(s: &Server) -> (redis::aio::MultiplexedConnection, tokio::task
     (c, d)
 }
 
+/// The bytes the own client writes on connect (`RedisConn::open`), against what ioredis + openRedis wrote.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs MC_SP9_SERVERS (node scripts/spike-db-wire.mjs)"]
 async fn redis_connect_sequence_matches_ioredis() {
     for s in servers(&["redis"]) {
         let mut lines = Vec::new();
         for (case, user, pw, db) in [("default", "", None, 0), ("acl", "sp9", Some("pw"), 2)] {
             let stream = TcpStream::connect((s.host.as_str(), s.port)).await.unwrap();
             let (stream, view) = tap(stream);
-            // through the redis crate with nothing of its own on connect (RESP2, no AUTH / SELECT / CLIENT SETINFO)
-            let info = redis::RedisConnectionInfo::default().set_skip_set_lib_name();
-            let cfg = redis::AsyncConnectionConfig::new().set_response_timeout(None).set_connection_timeout(None);
-            let (mut c, driver) = redis::aio::MultiplexedConnection::new_with_config(&info, stream, cfg).await.unwrap();
-            let d = tokio::spawn(driver);
-            for argv in connect_sequence(user, pw, db) {
-                let mut cmd = redis::cmd(std::str::from_utf8(&argv[0]).unwrap());
-                for a in &argv[1..] {
-                    cmd.arg(a.as_slice());
-                }
-                c.send_packed_command(&cmd).await.unwrap();
-            }
-            d.abort();
+            let (c, _info) = RedisConn::open(stream, user, pw, db).await.unwrap();
+            c.close();
             lines.push(
                 J::Obj(vec![
                     ("case", J::s(case)),
@@ -858,6 +849,11 @@ async fn redis_connect_sequence_matches_ioredis() {
             );
         }
         assert_clean(compare(&format!("{}-connect.jsonl", s.label), &lines));
+        // a wrong password: the connect sequence stops at AUTH with the server's error
+        let stream = TcpStream::connect((s.host.as_str(), s.port)).await.unwrap();
+        let r = RedisConn::open(stream, "sp9", Some("wrong"), 0).await.map(|_| ());
+        println!("{}: wrong password -> {r:?}", s.label);
+        assert!(matches!(r, Err(CallError::Server(m)) if m.starts_with("WRONGPASS")));
     }
 }
 
@@ -892,27 +888,27 @@ async fn switchable_proxy(
     (port, up, kill)
 }
 
-/// What 1.1.4's retryStrategy does (attempts 1..3 after 300 / 1000 / 2000 ms, no resend of pending commands), built over
-/// the redis crate: a dropped connection is seen by the Tap (EOF) and by the driver future ending.
+/// 1.1.4's drop and retryStrategy behaviour, run over the own client (`RedisConn`) and the own loop (`wire::redis::reconnect`):
+/// a pending command fails at once and is never written again, the drop is seen without a command in flight, a later
+/// command on the dropped connection is refused at once, attempts after 300 / 1000 / 2000 ms, closed after 3 failures.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs MC_SP9_SERVERS (node scripts/spike-db-wire.mjs)"]
 async fn redis_drop_and_reconnect_like_ioredis() {
     for s in servers(&["redis"]) {
         let (port, up, kill) = switchable_proxy(&s).await;
-        let proxy = Server { host: "127.0.0.1".into(), port, ..s.clone() };
-        let connect = |p: Server| async move {
-            let stream = TcpStream::connect((p.host.as_str(), p.port)).await?;
-            let (stream, view) = tap(stream);
-            let info = redis::RedisConnectionInfo::default().set_skip_set_lib_name();
-            let cfg = redis::AsyncConnectionConfig::new().set_response_timeout(None).set_connection_timeout(None);
-            let (mut c, driver) =
-                redis::aio::MultiplexedConnection::new_with_config(&info, stream, cfg).await.map_err(std::io::Error::other)?;
-            let done = tokio::spawn(driver);
-            // the first reply proves the server is there (a refused proxy connection closes before it)
-            c.send_packed_command(redis::cmd("PING").arg("x")).await.map_err(std::io::Error::other)?;
-            Ok::<_, std::io::Error>((c, view, done))
+        // a reconnect attempt: a new stream plus ioredis' reconnect handshake; a refused proxy connection closes before
+        // the first reply, so the handshake fails with Dropped
+        let attempt = move || async move {
+            let stream = TcpStream::connect(("127.0.0.1", port)).await.map_err(|_| CallError::NotWritable)?;
+            let c = RedisConn::start(stream);
+            for argv in reconnect_sequence("", None, None) {
+                let refs: Vec<&[u8]> = argv.iter().map(Vec::as_slice).collect();
+                c.call(&refs).await?;
+            }
+            Ok::<_, CallError>(c)
         };
 
-        // 1. the default response timeout of the crate (500 ms) would cut a slow console command: it has to be off
+        // 0. the gap of the redis crate that rules it out here: its default response timeout (500 ms) cuts a slow command
         let stream = TcpStream::connect((s.host.as_str(), s.port)).await.unwrap();
         let info = redis::RedisConnectionInfo::default().set_skip_set_lib_name();
         let (mut d, drv) =
@@ -921,39 +917,56 @@ async fn redis_drop_and_reconnect_like_ioredis() {
         let t = Instant::now();
         let r = d.send_packed_command(redis::cmd("BLPOP").arg("sp9_nokey").arg("1")).await;
         println!(
-            "{}: default config BLPOP 1 s -> {:?} after {} ms",
+            "{}: redis crate, default config, BLPOP 1 s -> {:?} after {} ms",
             s.label,
             r.as_ref().map(|_| ()).map_err(|e| e.to_string()),
             t.elapsed().as_millis()
         );
         assert!(r.is_err_and(|e| e.is_timeout()));
+        // the own client has no response timeout (the console's own timeouts are D10's)
+        let c = own(&s).await;
+        let t = Instant::now();
+        let r = c.call(&[b"blpop".as_slice(), b"sp9_nokey", b"1"]).await;
+        assert_eq!(r, Ok(Raw::Null));
+        assert!(t.elapsed() >= Duration::from_millis(950));
 
-        // 2. a drop while a command is pending: the command fails, the drop is seen, nothing is sent again
-        let (mut c, view, done) = connect(proxy.clone()).await.unwrap();
-        let mut c2 = c.clone();
-        let pending = tokio::spawn(async move { c2.send_packed_command(redis::cmd("BLPOP").arg("sp9_nokey").arg("5")).await });
+        // 1. a drop while a command is pending: it fails, the drop is seen, nothing is written again
+        let stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let (stream, view) = tap(stream);
+        let (c, _) = RedisConn::open(stream, "", None, 0).await.unwrap();
+        let c = std::sync::Arc::new(c);
+        let c2 = c.clone();
+        let pending = tokio::spawn(async move { c2.call(&[b"blpop".as_slice(), b"sp9_nokey", b"5"]).await });
         tokio::time::sleep(Duration::from_millis(200)).await;
         let dropped = Instant::now();
         let _ = kill.send(());
         let r = tokio::time::timeout(Duration::from_secs(3), pending).await.expect("pending command ends").unwrap();
         let fail_ms = dropped.elapsed().as_millis();
-        let mut ended = view.ended.clone();
+        let mut ended = c.ended();
         tokio::time::timeout(Duration::from_secs(3), ended.wait_for(|e| *e)).await.expect("drop seen").unwrap();
         let seen_ms = dropped.elapsed().as_millis();
-        tokio::time::timeout(Duration::from_secs(3), done).await.expect("driver ends").unwrap();
-        let after = c.send_packed_command(&redis::cmd("PING")).await;
+        let after = c.call(&[b"ping".as_slice()]).await;
         println!(
-            "{}: drop -> pending BLPOP {:?} after {fail_ms} ms, EOF seen after {seen_ms} ms, next command {:?}",
+            "{}: drop -> pending BLPOP {r:?} after {fail_ms} ms ({}), end seen after {seen_ms} ms, next command {after:?} ({})",
             s.label,
-            r.as_ref().map(|_| ()).map_err(|e| e.to_string()),
-            after.as_ref().map(|_| ()).map_err(|e| e.to_string())
+            r.as_ref().map_err(|e| e.message(true)).err().unwrap_or_default(),
+            after.as_ref().map_err(|e| e.message(true)).err().unwrap_or_default(),
         );
-        assert!(r.is_err() && after.is_err());
-        let written = String::from_utf8_lossy(&view.written()).matches("BLPOP").count();
+        assert_eq!(r, Err(CallError::Dropped));
+        assert_eq!(after, Err(CallError::NotWritable));
+        assert!(fail_ms < 1000, "{fail_ms} ms");
+        let written = String::from_utf8_lossy(&view.written()).matches("blpop").count();
         assert_eq!(written, 1, "the pending command is not sent again");
 
-        // 3. reconnect: attempts 1..3 after RETRY_DELAYS; the server back on attempt 2 -> reconnected
-        let mut events = Vec::new();
+        // 2. a drop with nothing in flight is seen by the driver's read
+        let (idle, _) = RedisConn::open(TcpStream::connect(("127.0.0.1", port)).await.unwrap(), "", None, 0).await.unwrap();
+        let dropped = Instant::now();
+        let _ = kill.send(());
+        let mut ended = idle.ended();
+        tokio::time::timeout(Duration::from_secs(3), ended.wait_for(|e| *e)).await.expect("idle drop seen").unwrap();
+        println!("{}: idle drop seen after {} ms", s.label, dropped.elapsed().as_millis());
+
+        // 3. reconnect: the server back after 800 ms -> attempt 1 (300 ms) refused, attempt 2 (+1000 ms) reconnects
         let start = Instant::now();
         up.store(false, std::sync::atomic::Ordering::SeqCst);
         let up3 = up.clone();
@@ -961,31 +974,33 @@ async fn redis_drop_and_reconnect_like_ioredis() {
             tokio::time::sleep(Duration::from_millis(800)).await;
             up3.store(true, std::sync::atomic::Ordering::SeqCst);
         });
-        let mut reconnected = false;
-        for attempt in 1..=unimux_db::wire::redis::RECONNECT_ATTEMPTS {
-            tokio::time::sleep(Duration::from_millis(RETRY_DELAYS_MS[(attempt - 1) as usize])).await;
-            events.push(format!("reconnecting({attempt}) at {} ms", start.elapsed().as_millis()));
-            if connect(proxy.clone()).await.is_ok() {
-                events.push(format!("reconnected at {} ms", start.elapsed().as_millis()));
-                reconnected = true;
-                break;
-            }
-        }
+        let mut events = Vec::new();
+        let back = reconnect(|_| attempt(), |e| events.push((e, start.elapsed().as_millis()))).await;
         println!("{}: {events:?}", s.label);
-        assert!(reconnected);
-        assert_eq!(events.len(), 3, "attempt 1 refused, attempt 2 reconnects");
+        let back = back.expect("reconnected");
+        assert_eq!(call(&back, &[b"ping".to_vec()]).await, Raw::Bytes(b"PONG".to_vec()));
+        let kinds: Vec<ReconnectEvent> = events.iter().map(|e| e.0).collect();
+        assert_eq!(kinds, [ReconnectEvent::Reconnecting(1), ReconnectEvent::Reconnecting(2), ReconnectEvent::Reconnected]);
+        assert!((1300..2300).contains(&events[2].1), "{events:?}");
 
         // 4. the server never comes back: three attempts, then closed (300 + 1000 + 2000 ms)
         up.store(false, std::sync::atomic::Ordering::SeqCst);
+        let _ = kill.send(());
         let start = Instant::now();
-        let mut attempts = 0;
-        for attempt in 1..=unimux_db::wire::redis::RECONNECT_ATTEMPTS {
-            tokio::time::sleep(Duration::from_millis(RETRY_DELAYS_MS[(attempt - 1) as usize])).await;
-            attempts += 1;
-            assert!(connect(proxy.clone()).await.is_err());
-        }
-        let closed_ms = start.elapsed().as_millis();
-        println!("{}: {attempts} refused attempts, closed after {closed_ms} ms", s.label);
-        assert!((3300..4500).contains(&closed_ms));
+        let mut events = Vec::new();
+        let gone = reconnect(|_| attempt(), |e| events.push((e, start.elapsed().as_millis()))).await;
+        println!("{}: {events:?}", s.label);
+        assert!(gone.is_none());
+        let kinds: Vec<ReconnectEvent> = events.iter().map(|e| e.0).collect();
+        assert_eq!(
+            kinds,
+            [
+                ReconnectEvent::Reconnecting(1),
+                ReconnectEvent::Reconnecting(2),
+                ReconnectEvent::Reconnecting(3),
+                ReconnectEvent::Closed
+            ]
+        );
+        assert!((3300..4500).contains(&events[3].1), "{events:?}");
     }
 }

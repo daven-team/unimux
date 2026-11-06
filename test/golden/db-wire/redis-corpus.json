@@ -50,6 +50,8 @@
     { "id": "info_server_head", "argv": ["EVAL", "return string.sub(redis.call('INFO', 'server'), 1, 9)", "0"] },
     { "id": "config_get", "argv": ["CONFIG", "GET", "maxmemory-policy"] },
     { "id": "client_getname", "argv": ["CLIENT", "GETNAME"] },
-    { "id": "dbsize_after", "argv": ["EXISTS", "w"] }
+    { "id": "dbsize_after", "argv": ["EXISTS", "w"] },
+    { "id": "error_long_split_pair", "argv": ["EVAL", "return redis.error_reply('ERR ' .. string.rep('x', 3995) .. '😀')", "0"] },
+    { "id": "error_long", "argv": ["EVAL", "return redis.error_reply('ERR ' .. string.rep('y', 5000))", "0"] }
   ]
 }

@@ -22,3 +22,7 @@
 {"id":"error_syntax","statements":[{"columns":[],"rows":[],"error":{"code":"server","server":{"code":"42000","message":"ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'SELEC 1' at line 1"}}}]}
 {"id":"error_dup","statements":[{"columns":[],"rows":[],"error":{"code":"server","server":{"code":"23000","message":"ERROR 1062 (23000): Duplicate entry '1' for key 't.PRIMARY'"}}}]}
 {"id":"warning","statements":[{"columns":[{"name":"CAST('12abc' AS SIGNED)","typeName":"bigint","kind":"bigint"}],"rows":[["12"]],"command":"SELECT","rowCount":1}]}
+{"id":"load_local_infile","statements":[{"columns":[],"rows":[],"error":{"code":"server","server":{"code":"42000","message":"ERROR 3948 (42000): Loading local data is disabled; this must be enabled on both the client and server sides"}}}]}
+{"id":"after_infile","statements":[{"columns":[{"name":"session still usable","typeName":"varchar","kind":"text"}],"rows":[["session still usable"]],"command":"SELECT","rowCount":1}]}
+{"id":"set_names_latin1","statements":[{"columns":[],"rows":[],"command":"SET","rowCount":0}]}
+{"id":"latin1_session","statements":[{"columns":[{"name":"éx","typeName":"varchar","kind":"text"},{"name":"v","typeName":"varchar","kind":"text"},{"name":"@@character_set_client","typeName":"varchar","kind":"text"}],"rows":[["E9","�","latin1"]],"command":"SELECT","rowCount":1}]}

@@ -23,3 +23,7 @@
 {"id":"error_dup","statements":[{"columns":[],"rows":[],"error":{"code":"server","server":{"code":"23000","message":"ERROR 1062 (23000): Duplicate entry '1' for key 'PRIMARY'"}}}]}
 {"id":"warning","statements":[{"columns":[{"name":"CAST('12abc' AS SIGNED)","typeName":"int","kind":"int"}],"rows":[["12"]],"command":"SELECT","rowCount":1}]}
 {"id":"mariadb_types","statements":[{"columns":[{"name":"id","typeName":"int","kind":"int"},{"name":"u","typeName":"uuid","kind":"uuid"},{"name":"i4","typeName":"inet4","kind":"text"},{"name":"i6","typeName":"inet6","kind":"text"},{"name":"js","typeName":"json","kind":"json"}],"rows":[["1","a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11","192.168.0.1","::ffff:1.2.3.4","{\"k\": 1}"]],"command":"SELECT","rowCount":1}]}
+{"id":"load_local_infile","statements":[{"columns":[],"rows":[],"error":{"code":"dbClosed"}}]}
+{"id":"after_infile","statements":[{"columns":[{"name":"session still usable","typeName":"varchar","kind":"text"}],"rows":[["session still usable"]],"command":"SELECT","rowCount":1}]}
+{"id":"set_names_latin1","statements":[{"columns":[],"rows":[],"command":"SET","rowCount":0}]}
+{"id":"latin1_session","statements":[{"columns":[{"name":"éx","typeName":"varchar","kind":"text"},{"name":"v","typeName":"varchar","kind":"text"},{"name":"@@character_set_client","typeName":"varchar","kind":"text"}],"rows":[["E9","�","latin1"]],"command":"SELECT","rowCount":1}]}

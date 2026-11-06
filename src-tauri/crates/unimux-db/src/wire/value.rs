@@ -73,6 +73,22 @@ pub fn utf16_head(s: &str, max: usize) -> Head {
     Head { text: s.to_owned(), dangling: None }
 }
 
+/// DB_LIMITS.serverText (src/shared/db.ts): server error texts, notices and warnings are cut to this many UTF-16 units.
+pub const SERVER_TEXT_CHARS: usize = 4000;
+
+/// `s.slice(0, DB_LIMITS.serverText)` of pgSession (`cap`, notices), mysqlSession (`mysqlServerError`, warnings) and
+/// redisSession (error replies). Like a cell, a cut inside a surrogate pair keeps the lone high surrogate (`write_head`).
+pub fn server_text(s: &str) -> Head {
+    utf16_head(s, SERVER_TEXT_CHARS)
+}
+
+/// `JSON.stringify` of a cut text.
+pub fn head_json(head: &Head) -> String {
+    let mut s = String::new();
+    write_head(&mut s, head);
+    s
+}
+
 /// `toValue` for a text the session already decoded.
 pub fn text_value(s: String, max: usize) -> DbValue {
     let chars = utf16_len(&s);
@@ -117,7 +133,9 @@ impl DbValue {
     }
 }
 
-fn write_head(out: &mut String, head: &Head) {
+/// A cut text as JSON.stringify writes it (a dangling high surrogate as `\udXXX`). Every DB port text that is cut in
+/// UTF-16 units (cells, and the DB_LIMITS.serverText cut of server errors and notices) must be written with it.
+pub fn write_head(out: &mut String, head: &Head) {
     write_string(out, &head.text);
     if let Some(u) = head.dangling {
         out.pop();

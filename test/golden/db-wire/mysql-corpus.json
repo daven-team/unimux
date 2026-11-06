@@ -38,6 +38,10 @@
     { "id": "error_syntax", "sql": "SELEC 1" },
     { "id": "error_dup", "sql": "INSERT INTO sp9.t (id) VALUES (1)" },
     { "id": "warning", "sql": "SELECT CAST('12abc' AS SIGNED)" },
-    { "id": "mariadb_types", "only": "mariadb", "sql": "SELECT id, u, i4, i6, js FROM sp9.m" }
+    { "id": "mariadb_types", "only": "mariadb", "sql": "SELECT id, u, i4, i6, js FROM sp9.m" },
+    { "id": "load_local_infile", "sql": "LOAD DATA LOCAL INFILE 'nofile.txt' INTO TABLE sp9.sink" },
+    { "id": "after_infile", "sql": "SELECT 'session still usable'" },
+    { "id": "set_names_latin1", "sql": "SET NAMES latin1" },
+    { "id": "latin1_session", "sql": "SELECT HEX('é') AS `éx`, 'é' AS v, @@character_set_client" }
   ]
 }

@@ -21,6 +21,7 @@ use mysql_common::packets::{
 use mysql_common::proto::MySerialize;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+use super::mycharset::{charset_of_name, decode, enc_of, encode, name_enc};
 use super::value::{DbValue, node_utf8, to_value};
 
 /// The flags mysql2 3.24 sends by default (ConnectionConfig.getDefaultFlags with multipleStatements off).
@@ -125,9 +126,23 @@ impl MyColumn {
 /// What a statement answered: an OK packet, or a result set (columns, raw rows), possibly followed by more results.
 #[derive(Debug, Clone)]
 pub enum MyResult {
-    Ok { affected_rows: u64, last_insert_id: Option<u64>, status: u16, warnings: u16, info: String },
-    Set { columns: Vec<MyColumn>, rows: Vec<Vec<Option<Vec<u8>>>>, status: u16, warnings: u16 },
+    Ok {
+        affected_rows: u64,
+        last_insert_id: Option<u64>,
+        status: u16,
+        warnings: u16,
+        info: String,
+    },
+    Set {
+        columns: Vec<MyColumn>,
+        rows: Vec<Vec<Option<Vec<u8>>>>,
+        status: u16,
+        warnings: u16,
+    },
     Error(MyServerError),
+    /// An error of the client, not of the server (mysql2 fails the statement with an Error that has no errno; 1.1.4 maps
+    /// that to `dbClosed`). Only LOAD DATA LOCAL INFILE gives one here, after the server's OK to the empty file.
+    ClientError(String),
 }
 
 impl MyResult {
@@ -192,6 +207,9 @@ pub struct MyConn<S> {
     pub server_version: String,
     pub connection_id: u32,
     pub login: LoginTrace,
+    /// mysql2's `config.charsetNumber`: 45 for `charset: 'utf8mb4'` (what 1.1.4 passes), then whatever
+    /// `character_set_client` the server's session tracking reports. COM_QUERY text is encoded in it.
+    pub client_charset: u16,
 }
 
 fn lenenc(b: &mut &[u8]) -> io::Result<Option<u64>> {
@@ -233,15 +251,16 @@ fn lenenc_text(b: &mut &[u8]) -> io::Result<String> {
     Ok(lenenc_bytes(b)?.map(node_utf8).unwrap_or_default())
 }
 
-/// ColumnDefinition41 (+ the MariaDB extended metadata block when that capability is on), like mysql2's ColumnDefinition.
-pub fn parse_column(mut b: &[u8], mariadb_extended: bool) -> io::Result<MyColumn> {
+/// ColumnDefinition41 (+ the MariaDB extended metadata block when that capability is on), like mysql2's ColumnDefinition:
+/// the names are decoded in the column's charset (the client encoding, `client_charset`, for a binary column).
+pub fn parse_column(mut b: &[u8], mariadb_extended: bool, client_charset: u16) -> io::Result<MyColumn> {
     let _catalog = lenenc_bytes(&mut b)?;
-    let schema = lenenc_text(&mut b)?;
-    let table = lenenc_text(&mut b)?;
-    let org_table = lenenc_text(&mut b)?;
-    let name = lenenc_text(&mut b)?;
-    let org_name = lenenc_text(&mut b)?;
-    let mut c = MyColumn { schema, table, org_table, name, org_name, ..Default::default() };
+    let schema = lenenc_bytes(&mut b)?.unwrap_or_default();
+    let table = lenenc_bytes(&mut b)?.unwrap_or_default();
+    let org_table = lenenc_bytes(&mut b)?.unwrap_or_default();
+    let name = lenenc_bytes(&mut b)?.unwrap_or_default();
+    let org_name = lenenc_bytes(&mut b)?.unwrap_or_default();
+    let mut c = MyColumn::default();
     if mariadb_extended {
         let block = lenenc_bytes(&mut b)?.unwrap_or_default();
         let mut e = block;
@@ -265,7 +284,39 @@ pub fn parse_column(mut b: &[u8], mariadb_extended: bool) -> io::Result<MyColumn
     c.column_type = f[6];
     c.flags = u16::from_le_bytes([f[7], f[8]]);
     c.decimals = f[9];
+    let enc = name_enc(c.character_set, client_charset);
+    c.schema = decode(schema, enc);
+    c.table = decode(table, enc);
+    c.org_table = decode(org_table, enc);
+    c.name = decode(name, enc);
+    c.org_name = decode(org_name, enc);
     Ok(c)
+}
+
+/// `character_set_client` from an OK packet's session-state block (CLIENT_SESSION_TRACK), as mysql2's ResultSetHeader
+/// reads it: entries of (type, lenenc data); type 0 (system variable) data is a lenenc name and a lenenc value.
+pub fn tracked_client_charset(state: &[u8]) -> Option<String> {
+    let mut b = state;
+    let mut found = None;
+    while !b.is_empty() {
+        let kind = b[0];
+        b = &b[1..];
+        let Ok(Some(mut data)) = lenenc_bytes(&mut b) else { break };
+        if kind == 0
+            && let (Ok(Some(k)), Ok(Some(v))) = (lenenc_bytes(&mut data), lenenc_bytes(&mut data))
+            && k == b"character_set_client"
+        {
+            found = Some(node_utf8(v));
+        }
+    }
+    found
+}
+
+/// The error mysql2 3.24 reports for LOAD DATA LOCAL INFILE without an `infileStreamFactory` (lib/commands/query.js).
+pub fn local_infile_message(file: &str) -> String {
+    format!(
+        "As a result of LOCAL INFILE command server wants to read {file} file, but as of v2.0 you must provide streamFactory option returning ReadStream."
+    )
 }
 
 /// A text-protocol row: one length-encoded string per column, 0xfb for NULL.
@@ -347,6 +398,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> MyConn<S> {
             server_version: String::new(),
             connection_id: 0,
             login: LoginTrace::default(),
+            client_charset: 45,
         };
         let hello = c.read_packet().await?;
         if hello.first() == Some(&0xff) {
@@ -438,22 +490,43 @@ impl<S: AsyncRead + AsyncWrite + Unpin> MyConn<S> {
         self.mariadb_ext.contains(MariadbCapabilities::MARIADB_CLIENT_EXTENDED_METADATA)
     }
 
-    /// COM_QUERY with text results; every result of the statement (CALL gives several).
+    /// COM_QUERY with text results; every result of the statement (CALL gives several). The text is encoded in the
+    /// session's client charset like mysql2 (`client_charset`).
     pub async fn query(&mut self, sql: &str) -> Result<Vec<MyResult>, MyWireError> {
+        let text = match encode(sql, enc_of(self.client_charset)) {
+            Ok(t) => t,
+            Err(name) => {
+                return Err(MyWireError::Protocol(format!(
+                    "the spike does not encode queries in {name} (D7: iconv-lite tables)"
+                )));
+            }
+        };
         self.seq = 0;
         let mut payload = vec![0x03];
         if (self.caps & self.server_caps).contains(CapabilityFlags::CLIENT_QUERY_ATTRIBUTES) {
             // parameter_count 0, parameter_set_count 1 (what mysql2 writes with no attributes)
             payload.extend_from_slice(&[0x00, 0x01]);
         }
-        payload.extend_from_slice(sql.as_bytes());
+        payload.extend_from_slice(&text);
         self.write_packet(&payload).await?;
         let mut results = Vec::new();
+        // LOAD DATA LOCAL INFILE: mysql2 without infileStreamFactory answers with an empty file and fails the statement
+        let mut infile: Option<String> = None;
         loop {
             let p = self.read_packet().await?;
             let status = match p.first() {
                 Some(0x00) => {
                     let ok: OkPacket = ParseBuf(&p).parse::<OkPacketDeserializer<CommonOkPacket>>(self.caps)?.into();
+                    if let Some(name) = ok.session_state_info_ref().and_then(tracked_client_charset)
+                        && let Some(n) = charset_of_name(&name)
+                    {
+                        self.client_charset = n;
+                    }
+                    if let Some(file) = infile.take() {
+                        // doneInsert: the error instead of the result
+                        results.push(MyResult::ClientError(local_infile_message(&file)));
+                        return Ok(results);
+                    }
                     let status = ok.status_flags().bits();
                     results.push(MyResult::Ok {
                         affected_rows: ok.affected_rows(),
@@ -472,7 +545,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> MyConn<S> {
                     return Ok(results);
                 }
                 Some(0xfb) => {
-                    // LOAD DATA LOCAL INFILE: refused with an empty file, then the server's answer follows
+                    // the server's OK / ERR to the empty file follows
+                    infile = Some(node_utf8(&p[1..]));
                     self.write_packet(&[]).await?;
                     continue;
                 }
@@ -482,7 +556,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> MyConn<S> {
                     let mut columns = Vec::with_capacity(n);
                     for _ in 0..n {
                         let d = self.read_packet().await?;
-                        columns.push(parse_column(&d, self.mariadb_extended())?);
+                        columns.push(parse_column(&d, self.mariadb_extended(), self.client_charset)?);
                     }
                     let eof = self.read_packet().await?;
                     if eof.first() != Some(&0xfe) {
@@ -546,7 +620,7 @@ mod tests {
         d.extend([1, 4]);
         d.extend(b"json");
         d.extend([0x0c, 45, 0, 144, 0, 0, 0, 0xfe, 0, 0, 0, 0, 0]);
-        let c = parse_column(&d, true).unwrap();
+        let c = parse_column(&d, true, 45).unwrap();
         assert_eq!((c.extended_type_name.as_deref(), c.extended_format.as_deref()), (Some("uuid"), Some("json")));
         assert_eq!((c.character_set, c.column_type, c.name.as_str()), (45, 0xfe, "id"));
         assert!(!c.binary());
@@ -567,5 +641,34 @@ mod tests {
     fn text_rows_with_nulls() {
         let row = parse_text_row(&[1, b'a', 0xfb, 0], 3).unwrap();
         assert_eq!(row, vec![Some(b"a".to_vec()), None, Some(Vec::new())]);
+    }
+
+    #[test]
+    fn session_tracking_gives_the_client_charset() {
+        // a schema entry (type 1), then character_set_client = latin1 (type 0)
+        let mut s = vec![1, 3, 2, b's', b'9'];
+        let var = [&[20u8][..], b"character_set_client", &[6], b"latin1"].concat();
+        s.push(0);
+        s.push(var.len() as u8);
+        s.extend(var);
+        assert_eq!(tracked_client_charset(&s).as_deref(), Some("latin1"));
+        assert_eq!(tracked_client_charset(&[1, 3, 2, b's', b'9']), None);
+    }
+
+    #[test]
+    fn column_names_follow_the_column_charset() {
+        let mut d = Vec::new();
+        for s in [&b"def"[..], b"", b"", b"", &[0xe9, b'x'], b""] {
+            d.push(s.len() as u8);
+            d.extend(s);
+        }
+        // latin1_swedish_ci (8)
+        d.extend([0x0c, 8, 0, 4, 0, 0, 0, 0xfd, 0, 0, 0, 0, 0]);
+        assert_eq!(parse_column(&d, false, 45).unwrap().name, "éx");
+        // binary (63): the client encoding
+        let n = d.len() - 12;
+        d[n] = 63;
+        assert_eq!(parse_column(&d, false, 45).unwrap().name, "\u{fffd}x");
+        assert_eq!(parse_column(&d, false, 5).unwrap().name, "éx");
     }
 }

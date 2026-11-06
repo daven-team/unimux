@@ -57,6 +57,8 @@
     { "id": "error_syntax", "sql": "SELEC 1" },
     { "id": "error_detail", "sql": "INSERT INTO sp9_t (id) VALUES (1)" },
     { "id": "notice", "sql": "DO $$ BEGIN RAISE NOTICE 'hello %', 'ąę'; RAISE WARNING 'careful'; END $$" },
+    { "id": "copy_in", "sql": "COPY sp9_sink (v) FROM STDIN" },
+    { "id": "error_long_split_pair", "sql": "DO $$ BEGIN RAISE EXCEPTION '%', repeat('x', 3999) || '😀' USING DETAIL = repeat('d', 3999) || '😀'; END $$" },
     { "id": "ascii_bytes", "db": "ascii", "sql": "SELECT convert_from('\\xff'::bytea, 'SQL_ASCII'), convert_from('\\xc0af'::bytea, 'SQL_ASCII'), convert_from('\\xeda080'::bytea, 'SQL_ASCII'), convert_from('\\xf4908080'::bytea, 'SQL_ASCII'), convert_from('\\xe282'::bytea, 'SQL_ASCII'), convert_from('\\x6f6be2826f6b'::bytea, 'SQL_ASCII'), convert_from('\\xf09f9880'::bytea, 'SQL_ASCII'), convert_from('\\xf09f98'::bytea, 'SQL_ASCII')" },
     { "id": "ascii_field_name", "db": "ascii", "sql": "SELECT * FROM sp9_ff" },
     { "id": "ascii_error", "db": "ascii", "sql": "SELECT * FROM sp9_ff WHERE ok::int = 1" }

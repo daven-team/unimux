@@ -25,12 +25,25 @@ const SERVERS = [
 
 const docker = (...a) => execFileSync('docker', a, { encoding: 'utf8' }).trim();
 const started = [];
+let cleaned = false;
 
 function cleanup() {
-  if (args.has('--keep')) return;
+  if (cleaned || args.has('--keep')) return;
+  cleaned = true;
   for (const s of started) {
     try { docker('rm', '-f', s.id); console.log(`removed ${s.label} ${s.id.slice(0, 12)}`); } catch (e) { console.error(`could not remove ${s.id}: ${e.message}`); }
   }
+}
+
+// Ctrl+C (or a closed console) during the waits or the test runs: remove our containers before leaving. Without --keep
+// the containers also run with --rm, and all of them carry the label unimux-sp9=<pid>, so
+// `docker ps -aq --filter label=unimux-sp9=<pid>` lists exactly their ids if a run was killed hard.
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.once(sig, () => {
+    console.error(`${sig}: removing the SP9 containers`);
+    cleanup();
+    process.exit(130);
+  });
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -57,7 +70,7 @@ async function waitReady(s) {
 
 try {
   for (const s of SERVERS) {
-    const id = docker('run', '-d', '--name', `unimux-sp9-${s.label}-${process.pid}`, '-p', `127.0.0.1::${s.port}`, ...s.env.flatMap((e) => ['-e', e]), s.image);
+    const id = docker('run', '-d', ...(args.has('--keep') ? [] : ['--rm']), '--label', `unimux-sp9=${process.pid}`, '--name', `unimux-sp9-${s.label}-${process.pid}`, '-p', `127.0.0.1::${s.port}`, ...s.env.flatMap((e) => ['-e', e]), s.image);
     started.push({ label: s.label, id });
     s.id = id;
     s.hostPort = Number(docker('port', id, `${s.port}/tcp`).split('\n')[0].split(':').pop());
@@ -71,7 +84,11 @@ try {
   });
   if (vitest.status !== 0) throw new Error('vitest (Node goldens) failed');
   const t0 = Date.now();
-  const cargo = spawnSync(process.execPath, [join(ROOT, 'scripts', 'msvc-run.mjs'), 'cargo', 'test', '-p', 'unimux-db', '--test', 'wire_servers', '--', '--nocapture', '--test-threads=1'], {
+  // the server tests are #[ignore]d in a plain cargo test; run them, but only those of the kinds started here (a server
+  // test without a server of its kind fails, it does not pass empty)
+  const kinds = new Set(SERVERS.map((s) => s.kind));
+  const filters = ['node_utf8', ...(kinds.has('postgres') ? ['pg_'] : []), ...(kinds.has('mysql') || kinds.has('mariadb') ? ['mysql_'] : []), ...(kinds.has('redis') ? ['redis_'] : [])];
+  const cargo = spawnSync(process.execPath, [join(ROOT, 'scripts', 'msvc-run.mjs'), 'cargo', 'test', '-p', 'unimux-db', '--test', 'wire_servers', '--', '--include-ignored', '--nocapture', '--test-threads=1', ...filters], {
     cwd: join(ROOT, 'src-tauri'), stdio: 'inherit', env: { ...process.env, MC_SP9_SERVERS: env },
   });
   console.log(`cargo wire_servers: ${Date.now() - t0} ms`);

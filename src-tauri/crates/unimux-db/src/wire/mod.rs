@@ -3,6 +3,7 @@
 //! goldens in test/golden/db-wire/. D4, D7 and D9 build the production clients from these findings
 //! (docs/tauri/spikes/SP9.md).
 
+pub mod mycharset;
 pub mod mysql;
 pub mod pg;
 pub mod redis;
