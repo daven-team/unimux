@@ -101,8 +101,8 @@ describe('accounts, auth and usage IPC sender check (0.9.3)', () => {
   });
 
   it('every accounts:, auth: and usage: channel of the preload is registered through registerAccountIpc', () => {
-    const preload = readFileSync(join(__dirname, '../src/preload/index.ts'), 'utf8');
-    const used = [...preload.matchAll(/ipcRenderer\.(?:invoke|send)\('((?:accounts|auth|usage):[^']+)'/g)].map((m) => m[1]);
+    const preload = readFileSync(join(__dirname, '../src/preload/mcApi.ts'), 'utf8'); // the preload's methods (shared with the Tauri bridge, 1.2.0)
+    const used = [...preload.matchAll(/\bt\.(?:invoke|send)\('((?:accounts|auth|usage):[^']+)'/g)].map((m) => m[1]);
     const known = [...Object.keys(GUARDED_ACCOUNT_CHANNELS), ...Object.keys(GUARDED_ACCOUNT_SENDS), ...Object.keys(OPEN_ACCOUNT_CHANNELS)];
     expect(used.length).toBeGreaterThan(5);
     expect(used.filter((c) => !known.includes(c))).toEqual([]);

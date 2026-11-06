@@ -1,0 +1,6156 @@
+{
+ "generatedBy": "scripts/gen-ipc-contract.mjs",
+ "sources": [
+  "src/preload/mcApi.ts",
+  "src/preload/api.d.ts",
+  "src/updatesplash/preload.ts"
+ ],
+ "summary": {
+  "methods": 248,
+  "invokeMethods": 207,
+  "sendMethods": 38,
+  "syncMembers": 3,
+  "channels": 215,
+  "invokeChannels": 177,
+  "sendChannels": 38,
+  "events": 44
+ },
+ "ports": [
+  "mc:pty-port",
+  "mc:sftp-port",
+  "mc:db-port"
+ ],
+ "channels": {
+  "accounts:acceptSwitch": {
+   "kind": "invoke",
+   "domain": "accounts",
+   "methods": [
+    "acceptSwitchOffer"
+   ]
+  },
+  "accounts:adoptCopy": {
+   "kind": "invoke",
+   "domain": "accounts",
+   "methods": [
+    "adoptAccountCopy"
+   ]
+  },
+  "accounts:clearSwapPending": {
+   "kind": "invoke",
+   "domain": "accounts",
+   "methods": [
+    "clearSwapPending"
+   ]
+  },
+  "accounts:dismissNotice": {
+   "kind": "invoke",
+   "domain": "accounts",
+   "methods": [
+    "dismissAccountNotice"
+   ]
+  },
+  "accounts:dismissSwitch": {
+   "kind": "invoke",
+   "domain": "accounts",
+   "methods": [
+    "dismissSwitchOffer"
+   ]
+  },
+  "accounts:makeMain": {
+   "kind": "invoke",
+   "domain": "accounts",
+   "methods": [
+    "makeMainAccount"
+   ]
+  },
+  "accounts:makeMainCodex": {
+   "kind": "invoke",
+   "domain": "accounts",
+   "methods": [
+    "makeMainCodexAccount"
+   ]
+  },
+  "accounts:remove": {
+   "kind": "invoke",
+   "domain": "accounts",
+   "methods": [
+    "removeAccount"
+   ]
+  },
+  "accounts:removeCodex": {
+   "kind": "invoke",
+   "domain": "accounts",
+   "methods": [
+    "removeCodexAccount"
+   ]
+  },
+  "accounts:swapPending": {
+   "kind": "invoke",
+   "domain": "accounts",
+   "methods": [
+    "swapPending"
+   ]
+  },
+  "accounts:switchBest": {
+   "kind": "invoke",
+   "domain": "accounts",
+   "methods": [
+    "switchToBest"
+   ]
+  },
+  "agents:prompt": {
+   "kind": "invoke",
+   "domain": "agents",
+   "methods": [
+    "agentPrompt"
+   ]
+  },
+  "agents:prompt:done": {
+   "kind": "send",
+   "domain": "agents",
+   "methods": [
+    "agentPromptDone"
+   ]
+  },
+  "alerts:testLimit": {
+   "kind": "send",
+   "domain": "os",
+   "methods": [
+    "testLimitAlert"
+   ]
+  },
+  "app:claimStart": {
+   "kind": "invoke",
+   "domain": "app",
+   "methods": [
+    "claimAppStart"
+   ]
+  },
+  "app:quitAnswer": {
+   "kind": "send",
+   "domain": "app",
+   "methods": [
+    "answerQuit"
+   ]
+  },
+  "app:quitGuard": {
+   "kind": "send",
+   "domain": "app",
+   "methods": [
+    "setQuitGuard"
+   ]
+  },
+  "app:reportError": {
+   "kind": "send",
+   "domain": "app",
+   "methods": [
+    "reportError"
+   ]
+  },
+  "app:startupMark": {
+   "kind": "send",
+   "domain": "app",
+   "methods": [
+    "startupMark"
+   ]
+  },
+  "attention:flash": {
+   "kind": "send",
+   "domain": "os",
+   "methods": [
+    "flashAttention"
+   ]
+  },
+  "auth:cancel": {
+   "kind": "send",
+   "domain": "accounts",
+   "methods": [
+    "cancelLogin"
+   ]
+  },
+  "auth:start": {
+   "kind": "invoke",
+   "domain": "accounts",
+   "methods": [
+    "startLogin"
+   ]
+  },
+  "automation:execute": {
+   "kind": "invoke",
+   "domain": "mcp",
+   "methods": [
+    "automation"
+   ]
+  },
+  "cell:alive": {
+   "kind": "invoke",
+   "domain": "pty",
+   "methods": [
+    "aliveCells"
+   ]
+  },
+  "cell:kill": {
+   "kind": "send",
+   "domain": "pty",
+   "methods": [
+    "killCell"
+   ]
+  },
+  "cell:killAndWait": {
+   "kind": "invoke",
+   "domain": "pty",
+   "methods": [
+    "killCellAndWait"
+   ]
+  },
+  "cell:runtime": {
+   "kind": "send",
+   "domain": "pty",
+   "methods": [
+    "reportCellStatus"
+   ]
+  },
+  "cell:spawn": {
+   "kind": "invoke",
+   "domain": "pty",
+   "methods": [
+    "spawnCell"
+   ]
+  },
+  "changelog:get": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "getChangelog"
+   ]
+  },
+  "cli:openDocs": {
+   "kind": "send",
+   "domain": "agents",
+   "methods": [
+    "cliOpenDocs"
+   ]
+  },
+  "cli:recheck": {
+   "kind": "invoke",
+   "domain": "agents",
+   "methods": [
+    "cliRecheck"
+   ]
+  },
+  "cli:status": {
+   "kind": "invoke",
+   "domain": "agents",
+   "methods": [
+    "cliStatus"
+   ]
+  },
+  "clipboard:read": {
+   "kind": "invoke",
+   "domain": "os",
+   "methods": [
+    "clipboardRead"
+   ]
+  },
+  "clipboard:write": {
+   "kind": "send",
+   "domain": "os",
+   "methods": [
+    "clipboardWrite"
+   ]
+  },
+  "clipboard:writeSecret": {
+   "kind": "invoke",
+   "domain": "os",
+   "methods": [
+    "clipboardWriteSecret"
+   ]
+  },
+  "codex:bind": {
+   "kind": "invoke",
+   "domain": "agents",
+   "methods": [
+    "bindCodexSession"
+   ]
+  },
+  "context:get": {
+   "kind": "invoke",
+   "domain": "agents",
+   "methods": [
+    "contextUsage"
+   ]
+  },
+  "conv:export": {
+   "kind": "invoke",
+   "domain": "agents",
+   "methods": [
+    "conversations.exportData"
+   ]
+  },
+  "conv:search": {
+   "kind": "invoke",
+   "domain": "agents",
+   "methods": [
+    "conversations.search"
+   ]
+  },
+  "conv:transcript": {
+   "kind": "invoke",
+   "domain": "agents",
+   "methods": [
+    "conversations.transcript"
+   ]
+  },
+  "db:connect": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.connect"
+   ]
+  },
+  "db:connections:delete": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.deleteConnection"
+   ]
+  },
+  "db:connections:duplicate": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.duplicateConnection"
+   ]
+  },
+  "db:connections:save": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.saveConnection"
+   ]
+  },
+  "db:connections:test": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.testConnection"
+   ]
+  },
+  "db:disconnect": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.disconnect"
+   ]
+  },
+  "db:export": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "dbExport"
+   ]
+  },
+  "db:history:clear": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.history.clear"
+   ]
+  },
+  "db:history:enabled": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.history.setEnabled"
+   ]
+  },
+  "db:history:list": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.history.list"
+   ]
+  },
+  "db:history:record": {
+   "kind": "send",
+   "domain": "db",
+   "methods": [
+    "db.history.record"
+   ]
+  },
+  "db:history:star": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.history.star"
+   ]
+  },
+  "db:pg": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.pg.databases",
+    "db.pg.schemas",
+    "db.pg.objects",
+    "db.pg.tableInfo",
+    "db.pg.ddl",
+    "db.pg.tablePage",
+    "db.pg.query",
+    "db.pg.fetchMore",
+    "db.pg.closeResult",
+    "db.pg.cancel",
+    "db.pg.transaction",
+    "db.pg.previewEdits",
+    "db.pg.applyEdits",
+    "db.pg.cellValue"
+   ]
+  },
+  "db:pickCaFile": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "dbPickCaFile"
+   ]
+  },
+  "db:pin": {
+   "kind": "send",
+   "domain": "db",
+   "methods": [
+    "db.pin"
+   ]
+  },
+  "db:prompt:answer": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.answer"
+   ]
+  },
+  "db:redis": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.redis.databases",
+    "db.redis.select",
+    "db.redis.scan",
+    "db.redis.keyInfo",
+    "db.redis.read",
+    "db.redis.readItem",
+    "db.redis.write",
+    "db.redis.countPattern",
+    "db.redis.deletePattern",
+    "db.redis.cancel",
+    "db.redis.command",
+    "db.redis.info",
+    "db.redis.slowlog",
+    "db.redis.clients",
+    "db.redis.subscribe",
+    "db.redis.unsubscribe",
+    "db.redis.pubsubState",
+    "db.redis.publish"
+   ]
+  },
+  "db:sessions": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.sessions"
+   ]
+  },
+  "db:sqlite:create": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.sqlite.create"
+   ]
+  },
+  "db:sqlite:pick": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.sqlite.pick"
+   ]
+  },
+  "db:vault:info": {
+   "kind": "invoke",
+   "domain": "db",
+   "methods": [
+    "db.vaultInfo"
+   ]
+  },
+  "detach:attach": {
+   "kind": "invoke",
+   "domain": "window",
+   "methods": [
+    "detach.attach"
+   ]
+  },
+  "detach:dismiss": {
+   "kind": "invoke",
+   "domain": "window",
+   "methods": [
+    "detach.dismiss"
+   ]
+  },
+  "detach:dropOutside": {
+   "kind": "invoke",
+   "domain": "window",
+   "methods": [
+    "detach.dropOutside"
+   ]
+  },
+  "detach:focus": {
+   "kind": "send",
+   "domain": "window",
+   "methods": [
+    "detach.focus"
+   ]
+  },
+  "detach:open": {
+   "kind": "invoke",
+   "domain": "window",
+   "methods": [
+    "detach.open"
+   ]
+  },
+  "detach:openInMain": {
+   "kind": "send",
+   "domain": "window",
+   "methods": [
+    "detach.openInMain"
+   ]
+  },
+  "detach:requestAttach": {
+   "kind": "send",
+   "domain": "window",
+   "methods": [
+    "detach.requestAttach"
+   ]
+  },
+  "detach:revealCell": {
+   "kind": "send",
+   "domain": "window",
+   "methods": [
+    "detach.revealCell"
+   ]
+  },
+  "detach:stay": {
+   "kind": "send",
+   "domain": "window",
+   "methods": [
+    "detach.stay"
+   ]
+  },
+  "detach:take": {
+   "kind": "invoke",
+   "domain": "window",
+   "methods": [
+    "detach.take"
+   ]
+  },
+  "detach:wait": {
+   "kind": "send",
+   "domain": "window",
+   "methods": [
+    "detach.wait"
+   ]
+  },
+  "detach:waitStep": {
+   "kind": "send",
+   "domain": "window",
+   "methods": [
+    "detach.waitStep"
+   ]
+  },
+  "detach:waits": {
+   "kind": "invoke",
+   "domain": "window",
+   "methods": [
+    "detach.waits"
+   ]
+  },
+  "detach:work": {
+   "kind": "send",
+   "domain": "window",
+   "methods": [
+    "detach.work"
+   ]
+  },
+  "detach:works": {
+   "kind": "invoke",
+   "domain": "window",
+   "methods": [
+    "detach.works"
+   ]
+  },
+  "dialog:pickFolder": {
+   "kind": "invoke",
+   "domain": "os",
+   "methods": [
+    "pickFolder"
+   ]
+  },
+  "fs:cancelOp": {
+   "kind": "send",
+   "domain": "files",
+   "methods": [
+    "cancelFileOp"
+   ]
+  },
+  "fs:createEntry": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "createProjectEntry"
+   ]
+  },
+  "fs:deleteEntries": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "deleteProjectEntries"
+   ]
+  },
+  "fs:exists": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "pathExists"
+   ]
+  },
+  "fs:listProjectDirectories": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "listProjectDirectories"
+   ]
+  },
+  "fs:listProjectDirectory": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "listProjectDirectory"
+   ]
+  },
+  "fs:listProjectDirectoryBatch": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "listProjectDirectoryBatch"
+   ]
+  },
+  "fs:pathKinds": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "pathKinds"
+   ]
+  },
+  "fs:readProjectFile": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "readProjectFile"
+   ]
+  },
+  "fs:renameEntry": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "renameProjectEntry"
+   ]
+  },
+  "fs:replaceInProject": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "replaceInProject"
+   ]
+  },
+  "fs:searchProject": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "searchProject"
+   ]
+  },
+  "fs:statProjectFile": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "statProjectFile"
+   ]
+  },
+  "fs:transfer": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "transferProjectEntries"
+   ]
+  },
+  "fs:writeProjectFile": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "writeProjectFile"
+   ]
+  },
+  "git:branches": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.branches"
+   ]
+  },
+  "git:checkout": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.checkout"
+   ]
+  },
+  "git:clone": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.clone"
+   ]
+  },
+  "git:commit": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.commit"
+   ]
+  },
+  "git:createWorktree": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "createWorktree"
+   ]
+  },
+  "git:diff": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.diff"
+   ]
+  },
+  "git:fetch": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.fetch"
+   ]
+  },
+  "git:init": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.init"
+   ]
+  },
+  "git:inspectWorktree": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "inspectWorktree"
+   ]
+  },
+  "git:installGit": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.installGit"
+   ]
+  },
+  "git:isRepo": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "isGitRepo"
+   ]
+  },
+  "git:log": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.log"
+   ]
+  },
+  "git:probe": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.probe"
+   ]
+  },
+  "git:pull": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.pull"
+   ]
+  },
+  "git:push": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.push"
+   ]
+  },
+  "git:removeWorktree": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "removeWorktree"
+   ]
+  },
+  "git:show": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.show"
+   ]
+  },
+  "git:stage": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.stage"
+   ]
+  },
+  "git:status": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.status"
+   ]
+  },
+  "git:trust": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.trust"
+   ]
+  },
+  "git:trustGrant": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.trustGrant"
+   ]
+  },
+  "git:trustRevoke": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.trustRevoke"
+   ]
+  },
+  "git:unstage": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.unstage"
+   ]
+  },
+  "git:worktrees": {
+   "kind": "invoke",
+   "domain": "git",
+   "methods": [
+    "git.worktrees"
+   ]
+  },
+  "github:deviceCancel": {
+   "kind": "invoke",
+   "domain": "github",
+   "methods": [
+    "github.deviceCancel"
+   ]
+  },
+  "github:deviceStart": {
+   "kind": "invoke",
+   "domain": "github",
+   "methods": [
+    "github.deviceStart"
+   ]
+  },
+  "github:deviceWait": {
+   "kind": "invoke",
+   "domain": "github",
+   "methods": [
+    "github.deviceWait"
+   ]
+  },
+  "github:publish": {
+   "kind": "invoke",
+   "domain": "github",
+   "methods": [
+    "github.publish"
+   ]
+  },
+  "github:signOut": {
+   "kind": "invoke",
+   "domain": "github",
+   "methods": [
+    "github.signOut"
+   ]
+  },
+  "github:status": {
+   "kind": "invoke",
+   "domain": "github",
+   "methods": [
+    "github.status"
+   ]
+  },
+  "install:cancel": {
+   "kind": "send",
+   "domain": "agents",
+   "methods": [
+    "cancelInstall"
+   ]
+  },
+  "install:current": {
+   "kind": "invoke",
+   "domain": "agents",
+   "methods": [
+    "installCurrent"
+   ]
+  },
+  "install:options": {
+   "kind": "invoke",
+   "domain": "agents",
+   "methods": [
+    "installOptions"
+   ]
+  },
+  "install:start": {
+   "kind": "invoke",
+   "domain": "agents",
+   "methods": [
+    "startInstall"
+   ]
+  },
+  "local:list": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "localFs.list"
+   ]
+  },
+  "local:mkdir": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "localFs.mkdir"
+   ]
+  },
+  "local:readFile": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "localFs.readFile"
+   ]
+  },
+  "local:rename": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "localFs.rename"
+   ]
+  },
+  "local:reveal": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "localFs.reveal"
+   ]
+  },
+  "local:roots": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "localFs.roots"
+   ]
+  },
+  "local:statFile": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "localFs.statFile"
+   ]
+  },
+  "local:trash": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "localFs.trash"
+   ]
+  },
+  "local:writeFile": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "localFs.writeFile"
+   ]
+  },
+  "mcp:info": {
+   "kind": "invoke",
+   "domain": "mcp",
+   "methods": [
+    "getMcpInfo"
+   ]
+  },
+  "mcp:retry": {
+   "kind": "invoke",
+   "domain": "mcp",
+   "methods": [
+    "retryMcp"
+   ]
+  },
+  "monitor:kill": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "monitorKill"
+   ]
+  },
+  "monitor:sample": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "monitorSample"
+   ]
+  },
+  "notes:export": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "notes.exportFile"
+   ]
+  },
+  "notes:image:read": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "notes.readImage"
+   ]
+  },
+  "notes:image:save": {
+   "kind": "invoke",
+   "domain": "files",
+   "methods": [
+    "notes.saveImage"
+   ]
+  },
+  "notify": {
+   "kind": "send",
+   "domain": "os",
+   "methods": [
+    "notify"
+   ]
+  },
+  "notify:show": {
+   "kind": "send",
+   "domain": "os",
+   "methods": [
+    "showCell"
+   ]
+  },
+  "sessions:list": {
+   "kind": "invoke",
+   "domain": "agents",
+   "methods": [
+    "listSessions"
+   ]
+  },
+  "sftp:answerConflict": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.answerConflict"
+   ]
+  },
+  "sftp:cancel": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.cancel"
+   ]
+  },
+  "sftp:cancelOp": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.cancelOp"
+   ]
+  },
+  "sftp:chmod": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.chmod"
+   ]
+  },
+  "sftp:chmodCount": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.chmodCount"
+   ]
+  },
+  "sftp:clearFinished": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.clearFinished"
+   ]
+  },
+  "sftp:connect": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.connect"
+   ]
+  },
+  "sftp:delete": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.delete"
+   ]
+  },
+  "sftp:deleteCount": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.deleteCount"
+   ]
+  },
+  "sftp:disconnect": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.disconnect"
+   ]
+  },
+  "sftp:enqueue": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.enqueue"
+   ]
+  },
+  "sftp:list": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.list"
+   ]
+  },
+  "sftp:mkdir": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.mkdir"
+   ]
+  },
+  "sftp:pinHosts": {
+   "kind": "send",
+   "domain": "sftp",
+   "methods": [
+    "sftp.pinHosts"
+   ]
+  },
+  "sftp:prompt:answer": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.answer"
+   ]
+  },
+  "sftp:readFile": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.readFile"
+   ]
+  },
+  "sftp:realpath": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.realpath"
+   ]
+  },
+  "sftp:rename": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.rename"
+   ]
+  },
+  "sftp:retry": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.retry"
+   ]
+  },
+  "sftp:sessions": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.sessions"
+   ]
+  },
+  "sftp:stat": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.stat"
+   ]
+  },
+  "sftp:statFile": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.statFile"
+   ]
+  },
+  "sftp:viewClosed": {
+   "kind": "send",
+   "domain": "sftp",
+   "methods": [
+    "sftp.viewClosed"
+   ]
+  },
+  "sftp:viewOpened": {
+   "kind": "send",
+   "domain": "sftp",
+   "methods": [
+    "sftp.viewOpened"
+   ]
+  },
+  "sftp:writeFile": {
+   "kind": "invoke",
+   "domain": "sftp",
+   "methods": [
+    "sftp.writeFile"
+   ]
+  },
+  "shell:openExternal": {
+   "kind": "send",
+   "domain": "os",
+   "methods": [
+    "openExternal"
+   ]
+  },
+  "shell:openInEditor": {
+   "kind": "send",
+   "domain": "os",
+   "methods": [
+    "openInEditor"
+   ]
+  },
+  "shell:openPath": {
+   "kind": "send",
+   "domain": "os",
+   "methods": [
+    "openPath"
+   ]
+  },
+  "shell:revealPath": {
+   "kind": "send",
+   "domain": "os",
+   "methods": [
+    "revealPath"
+   ]
+  },
+  "sound:beep": {
+   "kind": "send",
+   "domain": "os",
+   "methods": [
+    "systemBeep"
+   ]
+  },
+  "sound:load": {
+   "kind": "invoke",
+   "domain": "os",
+   "methods": [
+    "loadAlertSound"
+   ]
+  },
+  "sound:pick": {
+   "kind": "invoke",
+   "domain": "os",
+   "methods": [
+    "pickSoundFile"
+   ]
+  },
+  "ssh:connect": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.connect"
+   ]
+  },
+  "ssh:history:clear": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "sshHistory.clear"
+   ]
+  },
+  "ssh:history:list": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "sshHistory.list"
+   ]
+  },
+  "ssh:history:record": {
+   "kind": "send",
+   "domain": "ssh",
+   "methods": [
+    "sshHistory.record"
+   ]
+  },
+  "ssh:history:status": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "sshHistory.status"
+   ]
+  },
+  "ssh:identityPassword:clear": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.clearIdentityPassword"
+   ]
+  },
+  "ssh:identityPassword:set": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.setIdentityPassword"
+   ]
+  },
+  "ssh:key:commitDraft": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.commitDraft"
+   ]
+  },
+  "ssh:key:discardDraft": {
+   "kind": "send",
+   "domain": "ssh",
+   "methods": [
+    "ssh.discardDraft"
+   ]
+  },
+  "ssh:key:draftFromFile": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.draftFromFile"
+   ]
+  },
+  "ssh:key:draftFromText": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.draftFromText"
+   ]
+  },
+  "ssh:key:exportPrivate": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.exportPrivateKey"
+   ]
+  },
+  "ssh:key:generate": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.generateKey"
+   ]
+  },
+  "ssh:key:pickFile": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.pickKeyFile"
+   ]
+  },
+  "ssh:key:remove": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.removeKey"
+   ]
+  },
+  "ssh:key:replacePrivate": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.replacePrivateKey"
+   ]
+  },
+  "ssh:key:revealPrivate": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.revealPrivateKey"
+   ]
+  },
+  "ssh:key:unlockDraft": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.unlockDraft"
+   ]
+  },
+  "ssh:key:update": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.updateKey"
+   ]
+  },
+  "ssh:knownHosts:list": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.knownHosts"
+   ]
+  },
+  "ssh:knownHosts:remove": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.removeKnownHost"
+   ]
+  },
+  "ssh:passphrases:forget": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.forgetPassphrases"
+   ]
+  },
+  "ssh:password:clear": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.clearPassword"
+   ]
+  },
+  "ssh:password:set": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.setPassword"
+   ]
+  },
+  "ssh:prompt:answer": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.answer"
+   ]
+  },
+  "ssh:sessions": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.sessions"
+   ]
+  },
+  "ssh:storage:status": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.storageStatus"
+   ]
+  },
+  "ssh:vault:info": {
+   "kind": "invoke",
+   "domain": "ssh",
+   "methods": [
+    "ssh.vaultInfo"
+   ]
+  },
+  "state:edit": {
+   "kind": "invoke",
+   "domain": "state",
+   "methods": [
+    "applyStateEdit"
+   ]
+  },
+  "state:load": {
+   "kind": "invoke",
+   "domain": "state",
+   "methods": [
+    "loadState"
+   ]
+  },
+  "state:snapshot": {
+   "kind": "invoke",
+   "domain": "state",
+   "methods": [
+    "loadSnapshot"
+   ]
+  },
+  "update:busy": {
+   "kind": "invoke",
+   "domain": "update",
+   "methods": [
+    "updateBusy"
+   ]
+  },
+  "update:check": {
+   "kind": "invoke",
+   "domain": "update",
+   "methods": [
+    "checkUpdates"
+   ]
+  },
+  "update:get": {
+   "kind": "invoke",
+   "domain": "update",
+   "methods": [
+    "getUpdate"
+   ]
+  },
+  "update:install": {
+   "kind": "send",
+   "domain": "update",
+   "methods": [
+    "installUpdate"
+   ]
+  },
+  "update:open": {
+   "kind": "send",
+   "domain": "update",
+   "methods": [
+    "openReleases"
+   ]
+  },
+  "usage:get": {
+   "kind": "invoke",
+   "domain": "accounts",
+   "methods": [
+    "getUsage"
+   ]
+  },
+  "usage:refresh": {
+   "kind": "invoke",
+   "domain": "accounts",
+   "methods": [
+    "refreshUsage"
+   ]
+  }
+ },
+ "events": [
+  {
+   "name": "detach:closing",
+   "domain": "window",
+   "params": []
+  },
+  {
+   "name": "detach:returned",
+   "domain": "window",
+   "params": [
+    {
+     "name": "back",
+     "type": "{ id: string; target: DetachedTarget; docs: unknown[]; alive: string[] }",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "detach:status",
+   "domain": "window",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "status",
+     "type": "CellStatus",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "detach:work",
+   "domain": "window",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "work",
+     "type": "DetachedWork | null",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "detach:openInMain",
+   "domain": "window",
+   "params": [
+    {
+     "name": "request",
+     "type": "OpenInMain",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "detach:wait",
+   "domain": "window",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "mark",
+     "type": "WaitMark | null",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "waiting:step",
+   "domain": "window",
+   "params": [
+    {
+     "name": "dir",
+     "type": "1 | -1",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "auth:state",
+   "domain": "accounts",
+   "params": [
+    {
+     "name": "state",
+     "type": "LoginState",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "install:state",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "state",
+     "type": "InstallState",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "cli:changed",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "status",
+     "type": "CliStatusMap",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "window:shown",
+   "domain": "window",
+   "params": [
+    {
+     "name": "shown",
+     "type": "boolean",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "cell:restarted",
+   "domain": "pty",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "cell:hook",
+   "domain": "pty",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "event",
+     "type": "HookEvent",
+     "optional": false
+    },
+    {
+     "name": "info",
+     "type": "HookInfo",
+     "optional": true
+    }
+   ]
+  },
+  {
+   "name": "cell:session",
+   "domain": "pty",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "session",
+     "type": "CellSession",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "cell:context",
+   "domain": "pty",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "usage",
+     "type": "ContextUsage | null",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "cell:spawnError",
+   "domain": "pty",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "message",
+     "type": "string",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "app:notice",
+   "domain": "app",
+   "params": [
+    {
+     "name": "text",
+     "type": "string",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "focus-cell",
+   "domain": "pty",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "agents:prompt:run",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "requestId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "AgentPromptRequest",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "notify:answer",
+   "domain": "os",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "token",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "answer",
+     "type": "'allow' | 'deny'",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "ptyhost:crashed",
+   "domain": "pty",
+   "params": [
+    {
+     "name": "resumesConversation",
+     "type": "boolean",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "ptyhost:fatal",
+   "domain": "pty",
+   "params": []
+  },
+  {
+   "name": "ssh:session",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "state",
+     "type": "SshSessionState",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "ssh:prompt",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "prompt",
+     "type": "SshPrompt | null",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "ssh:vault:changed",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "info",
+     "type": "SshVaultInfo",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "sftp:session",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "state",
+     "type": "SftpSessionState",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "sftp:prompt",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "prompt",
+     "type": "SshPrompt | null",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "sftp:hostCrashed",
+   "domain": "sftp",
+   "params": []
+  },
+  {
+   "name": "db:session",
+   "domain": "db",
+   "params": [
+    {
+     "name": "state",
+     "type": "DbSessionState",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "db:prompt",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "prompt",
+     "type": "DbPrompt | null",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "db:hostCrashed",
+   "domain": "db",
+   "params": []
+  },
+  {
+   "name": "db:vault:changed",
+   "domain": "db",
+   "params": [
+    {
+     "name": "info",
+     "type": "DbVaultInfo",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "app:before-quit",
+   "domain": "app",
+   "params": []
+  },
+  {
+   "name": "app:confirm-quit",
+   "domain": "app",
+   "params": []
+  },
+  {
+   "name": "update:state",
+   "domain": "update",
+   "params": [
+    {
+     "name": "s",
+     "type": "UpdateState",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "usage:state",
+   "domain": "accounts",
+   "params": [
+    {
+     "name": "state",
+     "type": "UsageState",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "usage:open",
+   "domain": "accounts",
+   "params": []
+  },
+  {
+   "name": "accounts:swapPending",
+   "domain": "accounts",
+   "params": [
+    {
+     "name": "pending",
+     "type": "boolean",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "state:changed",
+   "domain": "state",
+   "params": [
+    {
+     "name": "change",
+     "type": "StateChange",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "fs:progress",
+   "domain": "files",
+   "params": [
+    {
+     "name": "progress",
+     "type": "FileOpProgress",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "automation:start-cells",
+   "domain": "mcp",
+   "params": [
+    {
+     "name": "cellIds",
+     "type": "string[]",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "mcp:info",
+   "domain": "mcp",
+   "params": [
+    {
+     "name": "info",
+     "type": "McpInfo",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "automation:statuses",
+   "domain": "mcp",
+   "params": [
+    {
+     "name": "statuses",
+     "type": "Record<string, AgentRuntimeStatus>",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "window:maximized",
+   "domain": "window",
+   "params": [
+    {
+     "name": "maximized",
+     "type": "boolean",
+     "optional": false
+    }
+   ],
+   "note": "new in 1.2.0 (caption buttons, W1)"
+  }
+ ],
+ "methods": [
+  {
+   "path": "platform",
+   "kind": "sync",
+   "params": [],
+   "returns": "AppPlatform"
+  },
+  {
+   "path": "loadState",
+   "kind": "invoke",
+   "channel": "state:load",
+   "domain": "state",
+   "params": [],
+   "returns": "Promise<AppState>",
+   "call": "t.invoke('state:load')"
+  },
+  {
+   "path": "loadSnapshot",
+   "kind": "invoke",
+   "channel": "state:snapshot",
+   "domain": "state",
+   "params": [],
+   "returns": "Promise<StateSnapshot>",
+   "call": "t.invoke('state:snapshot')"
+  },
+  {
+   "path": "applyStateEdit",
+   "kind": "invoke",
+   "channel": "state:edit",
+   "domain": "state",
+   "params": [
+    {
+     "name": "edit",
+     "type": "StateEdit",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<StateAck>",
+   "call": "t.invoke('state:edit', edit)"
+  },
+  {
+   "path": "getMcpInfo",
+   "kind": "invoke",
+   "channel": "mcp:info",
+   "domain": "mcp",
+   "params": [],
+   "returns": "Promise<McpInfo>",
+   "call": "t.invoke('mcp:info')"
+  },
+  {
+   "path": "retryMcp",
+   "kind": "invoke",
+   "channel": "mcp:retry",
+   "domain": "mcp",
+   "params": [],
+   "returns": "Promise<McpInfo>",
+   "call": "t.invoke('mcp:retry')"
+  },
+  {
+   "path": "automation",
+   "kind": "invoke",
+   "channel": "automation:execute",
+   "domain": "mcp",
+   "params": [
+    {
+     "name": "operation",
+     "type": "K",
+     "optional": false
+    },
+    {
+     "name": "input",
+     "type": "AutomationInput<K>",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<unknown>",
+   "call": "t.invoke('automation:execute', operation, input)"
+  },
+  {
+   "path": "spawnCell",
+   "kind": "invoke",
+   "channel": "cell:spawn",
+   "domain": "pty",
+   "params": [
+    {
+     "name": "req",
+     "type": "SpawnCellRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: true; startedWithPrompt?: boolean } | { ok: false; error: string; cliMissing?: CliId; cliStatus?: CliStatus }>",
+   "call": "t.invoke('cell:spawn', req)"
+  },
+  {
+   "path": "cliStatus",
+   "kind": "invoke",
+   "channel": "cli:status",
+   "domain": "agents",
+   "params": [],
+   "returns": "Promise<CliStatusMap>",
+   "call": "t.invoke('cli:status')"
+  },
+  {
+   "path": "cliRecheck",
+   "kind": "invoke",
+   "channel": "cli:recheck",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "id",
+     "type": "CliId",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<CliStatusMap>",
+   "call": "t.invoke('cli:recheck', id)"
+  },
+  {
+   "path": "cliOpenDocs",
+   "kind": "send",
+   "channel": "cli:openDocs",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "id",
+     "type": "CliId",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('cli:openDocs', id)"
+  },
+  {
+   "path": "installOptions",
+   "kind": "invoke",
+   "channel": "install:options",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "cli",
+     "type": "CliId",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<InstallOptions | null>",
+   "call": "t.invoke('install:options', cli)"
+  },
+  {
+   "path": "startInstall",
+   "kind": "invoke",
+   "channel": "install:start",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "request",
+     "type": "InstallRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<InstallStartResult>",
+   "call": "t.invoke('install:start', request)"
+  },
+  {
+   "path": "cancelInstall",
+   "kind": "send",
+   "channel": "install:cancel",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('install:cancel', id)"
+  },
+  {
+   "path": "installCurrent",
+   "kind": "invoke",
+   "channel": "install:current",
+   "domain": "agents",
+   "params": [],
+   "returns": "Promise<{ sessionId: string; ptyId: string; cli: CliId; method: InstallMethod; command: string } | null>",
+   "call": "t.invoke('install:current')"
+  },
+  {
+   "path": "killCell",
+   "kind": "send",
+   "channel": "cell:kill",
+   "domain": "pty",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('cell:kill', cellId)"
+  },
+  {
+   "path": "killCellAndWait",
+   "kind": "invoke",
+   "channel": "cell:killAndWait",
+   "domain": "pty",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<void>",
+   "call": "t.invoke('cell:killAndWait', cellId)"
+  },
+  {
+   "path": "bindCodexSession",
+   "kind": "invoke",
+   "channel": "codex:bind",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "cwd",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<string | null>",
+   "call": "t.invoke('codex:bind', cellId, cwd)"
+  },
+  {
+   "path": "contextUsage",
+   "kind": "invoke",
+   "channel": "context:get",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<ContextUsage | null>",
+   "call": "t.invoke('context:get', cellId)"
+  },
+  {
+   "path": "aliveCells",
+   "kind": "invoke",
+   "channel": "cell:alive",
+   "domain": "pty",
+   "params": [],
+   "returns": "Promise<string[]>",
+   "call": "t.invoke('cell:alive')"
+  },
+  {
+   "path": "monitorSample",
+   "kind": "invoke",
+   "channel": "monitor:sample",
+   "domain": "files",
+   "params": [],
+   "returns": "Promise<MonitorSample | null>",
+   "call": "t.invoke('monitor:sample')"
+  },
+  {
+   "path": "monitorKill",
+   "kind": "invoke",
+   "channel": "monitor:kill",
+   "domain": "files",
+   "params": [
+    {
+     "name": "pid",
+     "type": "number",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<boolean>",
+   "call": "t.invoke('monitor:kill', pid)"
+  },
+  {
+   "path": "claimAppStart",
+   "kind": "invoke",
+   "channel": "app:claimStart",
+   "domain": "app",
+   "params": [],
+   "returns": "Promise<boolean>",
+   "call": "t.invoke('app:claimStart')"
+  },
+  {
+   "path": "setQuitGuard",
+   "kind": "send",
+   "channel": "app:quitGuard",
+   "domain": "app",
+   "params": [
+    {
+     "name": "ask",
+     "type": "boolean",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('app:quitGuard', ask)"
+  },
+  {
+   "path": "answerQuit",
+   "kind": "send",
+   "channel": "app:quitAnswer",
+   "domain": "app",
+   "params": [
+    {
+     "name": "answer",
+     "type": "'asking' | 'quit' | 'cancel'",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('app:quitAnswer', answer)"
+  },
+  {
+   "path": "reportCellStatus",
+   "kind": "send",
+   "channel": "cell:runtime",
+   "domain": "pty",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "status",
+     "type": "CellStatus",
+     "optional": false
+    },
+    {
+     "name": "reason",
+     "type": "StatusReason",
+     "optional": true
+    },
+    {
+     "name": "hooked",
+     "type": "boolean",
+     "optional": true
+    },
+    {
+     "name": "cliEnded",
+     "type": "boolean",
+     "optional": true
+    },
+    {
+     "name": "exitCode",
+     "type": "number",
+     "optional": true
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('cell:runtime', cellId, status, reason, hooked, cliEnded, exitCode)"
+  },
+  {
+   "path": "pickFolder",
+   "kind": "invoke",
+   "channel": "dialog:pickFolder",
+   "domain": "os",
+   "params": [],
+   "returns": "Promise<string | null>",
+   "call": "t.invoke('dialog:pickFolder')"
+  },
+  {
+   "path": "pickSoundFile",
+   "kind": "invoke",
+   "channel": "sound:pick",
+   "domain": "os",
+   "params": [],
+   "returns": "Promise<string | null>",
+   "call": "t.invoke('sound:pick')"
+  },
+  {
+   "path": "loadAlertSound",
+   "kind": "invoke",
+   "channel": "sound:load",
+   "domain": "os",
+   "params": [
+    {
+     "name": "event",
+     "type": "AlertEventId",
+     "optional": false
+    },
+    {
+     "name": "knownKey",
+     "type": "string",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<{ ok: true; key: string; data: Uint8Array | null } | { ok: false }>",
+   "call": "t.invoke('sound:load', event, knownKey)"
+  },
+  {
+   "path": "systemBeep",
+   "kind": "send",
+   "channel": "sound:beep",
+   "domain": "os",
+   "params": [],
+   "returns": "void",
+   "call": "t.send('sound:beep')"
+  },
+  {
+   "path": "pathExists",
+   "kind": "invoke",
+   "channel": "fs:exists",
+   "domain": "files",
+   "params": [
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<boolean>",
+   "call": "t.invoke('fs:exists', path)"
+  },
+  {
+   "path": "pathKinds",
+   "kind": "invoke",
+   "channel": "fs:pathKinds",
+   "domain": "files",
+   "params": [
+    {
+     "name": "paths",
+     "type": "string[]",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<Array<'dir' | 'file' | null>>",
+   "call": "t.invoke('fs:pathKinds', paths)"
+  },
+  {
+   "path": "pathForFile",
+   "kind": "sync",
+   "params": [
+    {
+     "name": "file",
+     "type": "File",
+     "optional": false
+    }
+   ],
+   "returns": "string"
+  },
+  {
+   "path": "listProjectDirectory",
+   "kind": "invoke",
+   "channel": "fs:listProjectDirectory",
+   "domain": "files",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "relativePath",
+     "type": "string",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<ProjectDirectory>",
+   "call": "t.invoke('fs:listProjectDirectory', projectId, path)"
+  },
+  {
+   "path": "listProjectDirectoryBatch",
+   "kind": "invoke",
+   "channel": "fs:listProjectDirectoryBatch",
+   "domain": "files",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "relativePaths",
+     "type": "string[]",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<Record<string, ProjectDirectory>>",
+   "call": "t.invoke('fs:listProjectDirectoryBatch', projectId, paths)"
+  },
+  {
+   "path": "writeProjectFile",
+   "kind": "invoke",
+   "channel": "fs:writeProjectFile",
+   "domain": "files",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "relativePath",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "text",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "expectedText",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: true } | { ok: false; error: string; code?: 'conflict' }>",
+   "call": "t.invoke('fs:writeProjectFile', projectId, path, text, expectedText)"
+  },
+  {
+   "path": "readProjectFile",
+   "kind": "invoke",
+   "channel": "fs:readProjectFile",
+   "domain": "files",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "relativePath",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "large",
+     "type": "boolean",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<ProjectFilePreview>",
+   "call": "t.invoke('fs:readProjectFile', projectId, path, large)"
+  },
+  {
+   "path": "statProjectFile",
+   "kind": "invoke",
+   "channel": "fs:statProjectFile",
+   "domain": "files",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "relativePath",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ size: number; mtimeMs: number } | 'gone' | null>",
+   "call": "t.invoke('fs:statProjectFile', projectId, path)"
+  },
+  {
+   "path": "listProjectDirectories",
+   "kind": "invoke",
+   "channel": "fs:listProjectDirectories",
+   "domain": "files",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: true; paths: string[]; truncated: boolean } | { ok: false; error: string }>",
+   "call": "t.invoke('fs:listProjectDirectories', projectId)"
+  },
+  {
+   "path": "searchProject",
+   "kind": "invoke",
+   "channel": "fs:searchProject",
+   "domain": "files",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "options",
+     "type": "SearchOptions",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SearchResult>",
+   "call": "t.invoke('fs:searchProject', projectId, options)"
+  },
+  {
+   "path": "replaceInProject",
+   "kind": "invoke",
+   "channel": "fs:replaceInProject",
+   "domain": "files",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "request",
+     "type": "ReplaceRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<ReplaceResult>",
+   "call": "t.invoke('fs:replaceInProject', projectId, request)"
+  },
+  {
+   "path": "renameProjectEntry",
+   "kind": "invoke",
+   "channel": "fs:renameEntry",
+   "domain": "files",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "relativePath",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "newName",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<RenameResult>",
+   "call": "t.invoke('fs:renameEntry', projectId, path, newName)"
+  },
+  {
+   "path": "createProjectEntry",
+   "kind": "invoke",
+   "channel": "fs:createEntry",
+   "domain": "files",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "directory",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "name",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "kind",
+     "type": "'file' | 'directory'",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<CreateResult>",
+   "call": "t.invoke('fs:createEntry', projectId, directory, name, kind)"
+  },
+  {
+   "path": "deleteProjectEntries",
+   "kind": "invoke",
+   "channel": "fs:deleteEntries",
+   "domain": "files",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "relativePaths",
+     "type": "string[]",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DeleteResult>",
+   "call": "t.invoke('fs:deleteEntries', projectId, paths)"
+  },
+  {
+   "path": "transferProjectEntries",
+   "kind": "invoke",
+   "channel": "fs:transfer",
+   "domain": "files",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "request",
+     "type": "FileOpRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<FileOpResult>",
+   "call": "t.invoke('fs:transfer', projectId, request)"
+  },
+  {
+   "path": "cancelFileOp",
+   "kind": "send",
+   "channel": "fs:cancelOp",
+   "domain": "files",
+   "params": [
+    {
+     "name": "opId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('fs:cancelOp', opId)"
+  },
+  {
+   "path": "listSessions",
+   "kind": "invoke",
+   "channel": "sessions:list",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "projectPath",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SessionInfo[]>",
+   "call": "t.invoke('sessions:list', projectPath)"
+  },
+  {
+   "path": "conversations.search",
+   "kind": "invoke",
+   "channel": "conv:search",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "query",
+     "type": "ConvQuery",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<ConvSearchResult>",
+   "call": "t.invoke('conv:search', query)"
+  },
+  {
+   "path": "conversations.transcript",
+   "kind": "invoke",
+   "channel": "conv:transcript",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "file",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<ConvTranscript>",
+   "call": "t.invoke('conv:transcript', file)"
+  },
+  {
+   "path": "conversations.exportData",
+   "kind": "invoke",
+   "channel": "conv:export",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "source",
+     "type": "ConvExportSource",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<ConvExportData>",
+   "call": "t.invoke('conv:export', source)"
+  },
+  {
+   "path": "isGitRepo",
+   "kind": "invoke",
+   "channel": "git:isRepo",
+   "domain": "git",
+   "params": [
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<boolean>",
+   "call": "t.invoke('git:isRepo', path)"
+  },
+  {
+   "path": "createWorktree",
+   "kind": "invoke",
+   "channel": "git:createWorktree",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectPath",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "name",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<Worktree>",
+   "call": "t.invoke('git:createWorktree', projectPath, name)"
+  },
+  {
+   "path": "inspectWorktree",
+   "kind": "invoke",
+   "channel": "git:inspectWorktree",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectPath",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "wt",
+     "type": "Worktree",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<WorktreeInspectResult>",
+   "call": "t.invoke('git:inspectWorktree', projectPath, wt)"
+  },
+  {
+   "path": "removeWorktree",
+   "kind": "invoke",
+   "channel": "git:removeWorktree",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectPath",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "wt",
+     "type": "Worktree",
+     "optional": false
+    },
+    {
+     "name": "deleteBranch",
+     "type": "boolean",
+     "optional": false
+    },
+    {
+     "name": "confirmed",
+     "type": "WorktreeInspection",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<WorktreeRemoveResult>",
+   "call": "t.invoke('git:removeWorktree', projectPath, wt, deleteBranch, confirmed)"
+  },
+  {
+   "path": "git.probe",
+   "kind": "invoke",
+   "channel": "git:probe",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitProbe>",
+   "call": "t.invoke('git:probe', projectId)"
+  },
+  {
+   "path": "git.init",
+   "kind": "invoke",
+   "channel": "git:init",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<{ message: string }>>",
+   "call": "t.invoke('git:init', projectId)"
+  },
+  {
+   "path": "git.clone",
+   "kind": "invoke",
+   "channel": "git:clone",
+   "domain": "git",
+   "params": [
+    {
+     "name": "req",
+     "type": "GitCloneRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<{ message: string; path: string }>>",
+   "call": "t.invoke('git:clone', req)"
+  },
+  {
+   "path": "git.installGit",
+   "kind": "invoke",
+   "channel": "git:installGit",
+   "domain": "git",
+   "params": [],
+   "returns": "Promise<GitResult<{ message: string; restart: boolean }>>",
+   "call": "t.invoke('git:installGit')"
+  },
+  {
+   "path": "git.worktrees",
+   "kind": "invoke",
+   "channel": "git:worktrees",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "{ prefer?: string }",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<GitResult<GitWorktree[]>>",
+   "call": "t.invoke('git:worktrees', projectId, req)"
+  },
+  {
+   "path": "git.status",
+   "kind": "invoke",
+   "channel": "git:status",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitStatusRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitStatus>>",
+   "call": "t.invoke('git:status', projectId, req)"
+  },
+  {
+   "path": "git.log",
+   "kind": "invoke",
+   "channel": "git:log",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitLogRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitLogPage>>",
+   "call": "t.invoke('git:log', projectId, req)"
+  },
+  {
+   "path": "git.show",
+   "kind": "invoke",
+   "channel": "git:show",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitShowRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitCommitDetails>>",
+   "call": "t.invoke('git:show', projectId, req)"
+  },
+  {
+   "path": "git.diff",
+   "kind": "invoke",
+   "channel": "git:diff",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitDiffRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitDiffResult>>",
+   "call": "t.invoke('git:diff', projectId, req)"
+  },
+  {
+   "path": "git.branches",
+   "kind": "invoke",
+   "channel": "git:branches",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitBranchesRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitBranch[]>>",
+   "call": "t.invoke('git:branches', projectId, req)"
+  },
+  {
+   "path": "git.fetch",
+   "kind": "invoke",
+   "channel": "git:fetch",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitFetchRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitOpResult>>",
+   "call": "t.invoke('git:fetch', projectId, req)"
+  },
+  {
+   "path": "git.pull",
+   "kind": "invoke",
+   "channel": "git:pull",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitPullRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitOpResult>>",
+   "call": "t.invoke('git:pull', projectId, req)"
+  },
+  {
+   "path": "git.push",
+   "kind": "invoke",
+   "channel": "git:push",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitPushRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitOpResult>>",
+   "call": "t.invoke('git:push', projectId, req)"
+  },
+  {
+   "path": "git.stage",
+   "kind": "invoke",
+   "channel": "git:stage",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitPathsRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitOpResult>>",
+   "call": "t.invoke('git:stage', projectId, req)"
+  },
+  {
+   "path": "git.unstage",
+   "kind": "invoke",
+   "channel": "git:unstage",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitPathsRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitOpResult>>",
+   "call": "t.invoke('git:unstage', projectId, req)"
+  },
+  {
+   "path": "git.commit",
+   "kind": "invoke",
+   "channel": "git:commit",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitCommitRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitOpResult>>",
+   "call": "t.invoke('git:commit', projectId, req)"
+  },
+  {
+   "path": "git.checkout",
+   "kind": "invoke",
+   "channel": "git:checkout",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitCheckoutRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitOpResult>>",
+   "call": "t.invoke('git:checkout', projectId, req)"
+  },
+  {
+   "path": "git.trust",
+   "kind": "invoke",
+   "channel": "git:trust",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitTrustRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitTrustInfo>>",
+   "call": "t.invoke('git:trust', projectId, req)"
+  },
+  {
+   "path": "git.trustGrant",
+   "kind": "invoke",
+   "channel": "git:trustGrant",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitTrustGrantRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitTrustInfo>>",
+   "call": "t.invoke('git:trustGrant', projectId, req)"
+  },
+  {
+   "path": "git.trustRevoke",
+   "kind": "invoke",
+   "channel": "git:trustRevoke",
+   "domain": "git",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GitTrustGrantRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GitResult<GitTrustInfo>>",
+   "call": "t.invoke('git:trustRevoke', projectId, req)"
+  },
+  {
+   "path": "github.status",
+   "kind": "invoke",
+   "channel": "github:status",
+   "domain": "github",
+   "params": [
+    {
+     "name": "options",
+     "type": "{ local?: boolean }",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<GithubAuthStatus>",
+   "call": "t.invoke('github:status', options)"
+  },
+  {
+   "path": "github.deviceStart",
+   "kind": "invoke",
+   "channel": "github:deviceStart",
+   "domain": "github",
+   "params": [],
+   "returns": "Promise<GithubResult<GithubDeviceStart>>",
+   "call": "t.invoke('github:deviceStart')"
+  },
+  {
+   "path": "github.deviceWait",
+   "kind": "invoke",
+   "channel": "github:deviceWait",
+   "domain": "github",
+   "params": [
+    {
+     "name": "flowId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GithubResult<{ login: string | null }>>",
+   "call": "t.invoke('github:deviceWait', flowId)"
+  },
+  {
+   "path": "github.deviceCancel",
+   "kind": "invoke",
+   "channel": "github:deviceCancel",
+   "domain": "github",
+   "params": [
+    {
+     "name": "flowId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<void>",
+   "call": "t.invoke('github:deviceCancel', flowId)"
+  },
+  {
+   "path": "github.signOut",
+   "kind": "invoke",
+   "channel": "github:signOut",
+   "domain": "github",
+   "params": [],
+   "returns": "Promise<GithubAuthStatus>",
+   "call": "t.invoke('github:signOut')"
+  },
+  {
+   "path": "github.publish",
+   "kind": "invoke",
+   "channel": "github:publish",
+   "domain": "github",
+   "params": [
+    {
+     "name": "projectId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "GithubPublishRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<GithubResult<GithubPublishResult>>",
+   "call": "t.invoke('github:publish', projectId, req)"
+  },
+  {
+   "path": "ssh.vaultInfo",
+   "kind": "invoke",
+   "channel": "ssh:vault:info",
+   "domain": "ssh",
+   "params": [],
+   "returns": "Promise<SshVaultInfo>",
+   "call": "t.invoke('ssh:vault:info')"
+  },
+  {
+   "path": "ssh.generateKey",
+   "kind": "invoke",
+   "channel": "ssh:key:generate",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "req",
+     "type": "GenerateKeyRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<KeyResult>",
+   "call": "t.invoke('ssh:key:generate', req)"
+  },
+  {
+   "path": "ssh.pickKeyFile",
+   "kind": "invoke",
+   "channel": "ssh:key:pickFile",
+   "domain": "ssh",
+   "params": [],
+   "returns": "Promise<DraftResult | { ok: false; error: 'cancelled' }>",
+   "call": "t.invoke('ssh:key:pickFile')"
+  },
+  {
+   "path": "ssh.draftFromFile",
+   "kind": "invoke",
+   "channel": "ssh:key:draftFromFile",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DraftResult>",
+   "call": "t.invoke('ssh:key:draftFromFile', { path })"
+  },
+  {
+   "path": "ssh.draftFromText",
+   "kind": "invoke",
+   "channel": "ssh:key:draftFromText",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "req",
+     "type": "{ privateKey: string; publicKey?: string; certificate?: string }",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DraftResult>",
+   "call": "t.invoke('ssh:key:draftFromText', req)"
+  },
+  {
+   "path": "ssh.unlockDraft",
+   "kind": "invoke",
+   "channel": "ssh:key:unlockDraft",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "draftId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "passphrase",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DraftResult>",
+   "call": "t.invoke('ssh:key:unlockDraft', { draftId, passphrase })"
+  },
+  {
+   "path": "ssh.commitDraft",
+   "kind": "invoke",
+   "channel": "ssh:key:commitDraft",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "req",
+     "type": "{ draftId: string; label: string; savePassphrase: boolean }",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<KeyResult>",
+   "call": "t.invoke('ssh:key:commitDraft', req)"
+  },
+  {
+   "path": "ssh.discardDraft",
+   "kind": "send",
+   "channel": "ssh:key:discardDraft",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "draftId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('ssh:key:discardDraft', draftId)"
+  },
+  {
+   "path": "ssh.updateKey",
+   "kind": "invoke",
+   "channel": "ssh:key:update",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "req",
+     "type": "UpdateKeyRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<KeyResult>",
+   "call": "t.invoke('ssh:key:update', req)"
+  },
+  {
+   "path": "ssh.removeKey",
+   "kind": "invoke",
+   "channel": "ssh:key:remove",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('ssh:key:remove', { id })"
+  },
+  {
+   "path": "ssh.exportPrivateKey",
+   "kind": "invoke",
+   "channel": "ssh:key:exportPrivate",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: true } | { ok: false; error: 'cancelled' | 'locked' | 'notFound' | 'failed' }>",
+   "call": "t.invoke('ssh:key:exportPrivate', { id })"
+  },
+  {
+   "path": "ssh.revealPrivateKey",
+   "kind": "invoke",
+   "channel": "ssh:key:revealPrivate",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<RevealKeyResult>",
+   "call": "t.invoke('ssh:key:revealPrivate', { id })"
+  },
+  {
+   "path": "ssh.replacePrivateKey",
+   "kind": "invoke",
+   "channel": "ssh:key:replacePrivate",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "req",
+     "type": "ReplaceKeyRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<ReplaceKeyResult>",
+   "call": "t.invoke('ssh:key:replacePrivate', req)"
+  },
+  {
+   "path": "ssh.setPassword",
+   "kind": "invoke",
+   "channel": "ssh:password:set",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "hostId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "password",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: true; ephemeral: boolean } | { ok: false; error: 'notFound' | 'invalid' | 'readOnly' | 'failed' }>",
+   "call": "t.invoke('ssh:password:set', { hostId, password })"
+  },
+  {
+   "path": "ssh.clearPassword",
+   "kind": "invoke",
+   "channel": "ssh:password:clear",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "hostId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('ssh:password:clear', { hostId })"
+  },
+  {
+   "path": "ssh.setIdentityPassword",
+   "kind": "invoke",
+   "channel": "ssh:identityPassword:set",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "identityId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "password",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: true; ephemeral: boolean } | { ok: false; error: 'notFound' | 'invalid' | 'readOnly' | 'failed' }>",
+   "call": "t.invoke('ssh:identityPassword:set', { identityId, password })"
+  },
+  {
+   "path": "ssh.clearIdentityPassword",
+   "kind": "invoke",
+   "channel": "ssh:identityPassword:clear",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "identityId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('ssh:identityPassword:clear', { identityId })"
+  },
+  {
+   "path": "ssh.forgetPassphrases",
+   "kind": "invoke",
+   "channel": "ssh:passphrases:forget",
+   "domain": "ssh",
+   "params": [],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('ssh:passphrases:forget')"
+  },
+  {
+   "path": "ssh.storageStatus",
+   "kind": "invoke",
+   "channel": "ssh:storage:status",
+   "domain": "ssh",
+   "params": [],
+   "returns": "Promise<SshStorageStatus>",
+   "call": "t.invoke('ssh:storage:status')"
+  },
+  {
+   "path": "ssh.knownHosts",
+   "kind": "invoke",
+   "channel": "ssh:knownHosts:list",
+   "domain": "ssh",
+   "params": [],
+   "returns": "Promise<KnownHostInfo[]>",
+   "call": "t.invoke('ssh:knownHosts:list')"
+  },
+  {
+   "path": "ssh.removeKnownHost",
+   "kind": "invoke",
+   "channel": "ssh:knownHosts:remove",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('ssh:knownHosts:remove', { id })"
+  },
+  {
+   "path": "ssh.connect",
+   "kind": "invoke",
+   "channel": "ssh:connect",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "req",
+     "type": "SshConnectCellRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: true } | { ok: false; error: SshErrorCode }>",
+   "call": "t.invoke('ssh:connect', req)"
+  },
+  {
+   "path": "ssh.sessions",
+   "kind": "invoke",
+   "channel": "ssh:sessions",
+   "domain": "ssh",
+   "params": [],
+   "returns": "Promise<SshSessionsSnapshot>",
+   "call": "t.invoke('ssh:sessions')"
+  },
+  {
+   "path": "ssh.answer",
+   "kind": "invoke",
+   "channel": "ssh:prompt:answer",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "answer",
+     "type": "SshPromptAnswer",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('ssh:prompt:answer', answer)"
+  },
+  {
+   "path": "sftp.connect",
+   "kind": "invoke",
+   "channel": "sftp:connect",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "hostId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "initialPath",
+     "type": "string",
+     "optional": true
+    },
+    {
+     "name": "opts",
+     "type": "{ plain?: boolean }",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<{ ok: true; sessionId: string } | { ok: false; error: SshErrorCode }>",
+   "call": "t.invoke('sftp:connect', hostId, initialPath, opts)"
+  },
+  {
+   "path": "sftp.disconnect",
+   "kind": "invoke",
+   "channel": "sftp:disconnect",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('sftp:disconnect', sessionId)"
+  },
+  {
+   "path": "sftp.sessions",
+   "kind": "invoke",
+   "channel": "sftp:sessions",
+   "domain": "sftp",
+   "params": [],
+   "returns": "Promise<SftpSnapshot>",
+   "call": "t.invoke('sftp:sessions')"
+  },
+  {
+   "path": "sftp.answer",
+   "kind": "invoke",
+   "channel": "sftp:prompt:answer",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "answer",
+     "type": "SftpPromptAnswer",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('sftp:prompt:answer', answer)"
+  },
+  {
+   "path": "sftp.list",
+   "kind": "invoke",
+   "channel": "sftp:list",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SftpResult<{ path: string; entries: SftpEntry[]; truncated: boolean }>>",
+   "call": "t.invoke('sftp:list', sessionId, path)"
+  },
+  {
+   "path": "sftp.stat",
+   "kind": "invoke",
+   "channel": "sftp:stat",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SftpResult<SftpEntry>>",
+   "call": "t.invoke('sftp:stat', sessionId, path)"
+  },
+  {
+   "path": "sftp.realpath",
+   "kind": "invoke",
+   "channel": "sftp:realpath",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SftpResult<string>>",
+   "call": "t.invoke('sftp:realpath', sessionId, path)"
+  },
+  {
+   "path": "sftp.mkdir",
+   "kind": "invoke",
+   "channel": "sftp:mkdir",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SftpResult<null>>",
+   "call": "t.invoke('sftp:mkdir', sessionId, path)"
+  },
+  {
+   "path": "sftp.rename",
+   "kind": "invoke",
+   "channel": "sftp:rename",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "from",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "to",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SftpResult<null>>",
+   "call": "t.invoke('sftp:rename', sessionId, from, to)"
+  },
+  {
+   "path": "sftp.deleteCount",
+   "kind": "invoke",
+   "channel": "sftp:deleteCount",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "paths",
+     "type": "string[]",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SftpResult<DeleteCount>>",
+   "call": "t.invoke('sftp:deleteCount', sessionId, paths)"
+  },
+  {
+   "path": "sftp.delete",
+   "kind": "invoke",
+   "channel": "sftp:delete",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "paths",
+     "type": "string[]",
+     "optional": false
+    },
+    {
+     "name": "confirmed",
+     "type": "DeleteCount",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SftpResult<null>>",
+   "call": "t.invoke('sftp:delete', sessionId, paths, confirmed)"
+  },
+  {
+   "path": "sftp.enqueue",
+   "kind": "invoke",
+   "channel": "sftp:enqueue",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string | null",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "TransferRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SftpResult<{ batchId: string }>>",
+   "call": "t.invoke('sftp:enqueue', sessionId, req)"
+  },
+  {
+   "path": "sftp.cancel",
+   "kind": "invoke",
+   "channel": "sftp:cancel",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string | null",
+     "optional": false
+    },
+    {
+     "name": "target",
+     "type": "{ itemIds?: string[]; batchId?: string }",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('sftp:cancel', sessionId, target)"
+  },
+  {
+   "path": "sftp.answerConflict",
+   "kind": "invoke",
+   "channel": "sftp:answerConflict",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string | null",
+     "optional": false
+    },
+    {
+     "name": "itemId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "answer",
+     "type": "ConflictAnswer",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('sftp:answerConflict', sessionId, itemId, answer)"
+  },
+  {
+   "path": "sftp.retry",
+   "kind": "invoke",
+   "channel": "sftp:retry",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string | null",
+     "optional": false
+    },
+    {
+     "name": "itemIds",
+     "type": "string[]",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('sftp:retry', sessionId, itemIds)"
+  },
+  {
+   "path": "sftp.clearFinished",
+   "kind": "invoke",
+   "channel": "sftp:clearFinished",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string | null",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('sftp:clearFinished', sessionId)"
+  },
+  {
+   "path": "sftp.chmodCount",
+   "kind": "invoke",
+   "channel": "sftp:chmodCount",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "paths",
+     "type": "string[]",
+     "optional": false
+    },
+    {
+     "name": "recursive",
+     "type": "boolean",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SftpResult<ChmodCount>>",
+   "call": "t.invoke('sftp:chmodCount', sessionId, paths, recursive)"
+  },
+  {
+   "path": "sftp.chmod",
+   "kind": "invoke",
+   "channel": "sftp:chmod",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "ChmodRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SftpResult<ChmodResult>>",
+   "call": "t.invoke('sftp:chmod', sessionId, req)"
+  },
+  {
+   "path": "sftp.cancelOp",
+   "kind": "invoke",
+   "channel": "sftp:cancelOp",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "opId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('sftp:cancelOp', sessionId, opId)"
+  },
+  {
+   "path": "sftp.readFile",
+   "kind": "invoke",
+   "channel": "sftp:readFile",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SftpResult<EditorRead>>",
+   "call": "t.invoke('sftp:readFile', sessionId, path)"
+  },
+  {
+   "path": "sftp.statFile",
+   "kind": "invoke",
+   "channel": "sftp:statFile",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SftpResult<FileStamp>>",
+   "call": "t.invoke('sftp:statFile', sessionId, path)"
+  },
+  {
+   "path": "sftp.writeFile",
+   "kind": "invoke",
+   "channel": "sftp:writeFile",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "save",
+     "type": "EditorSave",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SftpResult<EditorWriteResult>>",
+   "call": "t.invoke('sftp:writeFile', sessionId, path, save)"
+  },
+  {
+   "path": "sftp.pinHosts",
+   "kind": "send",
+   "channel": "sftp:pinHosts",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "hostIds",
+     "type": "string[]",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('sftp:pinHosts', hostIds)"
+  },
+  {
+   "path": "sftp.viewOpened",
+   "kind": "send",
+   "channel": "sftp:viewOpened",
+   "domain": "sftp",
+   "params": [
+    {
+     "name": "shownSessionId",
+     "type": "string | null",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('sftp:viewOpened', shownSessionId)"
+  },
+  {
+   "path": "sftp.viewClosed",
+   "kind": "send",
+   "channel": "sftp:viewClosed",
+   "domain": "sftp",
+   "params": [],
+   "returns": "void",
+   "call": "t.send('sftp:viewClosed')"
+  },
+  {
+   "path": "dbPickCaFile",
+   "kind": "invoke",
+   "channel": "db:pickCaFile",
+   "domain": "db",
+   "params": [],
+   "returns": "Promise<string | null>",
+   "call": "t.invoke('db:pickCaFile')"
+  },
+  {
+   "path": "dbExport",
+   "kind": "invoke",
+   "channel": "db:export",
+   "domain": "db",
+   "params": [
+    {
+     "name": "name",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "text",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean; path?: string; cancelled?: boolean }>",
+   "call": "t.invoke('db:export', name, text)"
+  },
+  {
+   "path": "notes.saveImage",
+   "kind": "invoke",
+   "channel": "notes:image:save",
+   "domain": "files",
+   "params": [
+    {
+     "name": "bytes",
+     "type": "Uint8Array",
+     "optional": false
+    },
+    {
+     "name": "mime",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<string | null>",
+   "call": "t.invoke('notes:image:save', bytes, mime)"
+  },
+  {
+   "path": "notes.readImage",
+   "kind": "invoke",
+   "channel": "notes:image:read",
+   "domain": "files",
+   "params": [
+    {
+     "name": "name",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<string | null>",
+   "call": "t.invoke('notes:image:read', name)"
+  },
+  {
+   "path": "notes.exportFile",
+   "kind": "invoke",
+   "channel": "notes:export",
+   "domain": "files",
+   "params": [
+    {
+     "name": "name",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "text",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "kind",
+     "type": "'conversation'",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<{ ok: boolean; path?: string; cancelled?: boolean }>",
+   "call": "t.invoke('notes:export', name, text, kind)"
+  },
+  {
+   "path": "db.saveConnection",
+   "kind": "invoke",
+   "channel": "db:connections:save",
+   "domain": "db",
+   "params": [
+    {
+     "name": "input",
+     "type": "DbConnectionInput & { id?: string }",
+     "optional": false
+    },
+    {
+     "name": "password",
+     "type": "DbPasswordChange",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: true; connection: DbConnection } | { ok: false; error: 'invalid' | 'notFound' | 'readOnly' | 'failed' }>",
+   "call": "t.invoke('db:connections:save', input, password)"
+  },
+  {
+   "path": "db.deleteConnection",
+   "kind": "invoke",
+   "channel": "db:connections:delete",
+   "domain": "db",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('db:connections:delete', id)"
+  },
+  {
+   "path": "db.duplicateConnection",
+   "kind": "invoke",
+   "channel": "db:connections:duplicate",
+   "domain": "db",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: true; connection: DbConnection } | { ok: false }>",
+   "call": "t.invoke('db:connections:duplicate', id)"
+  },
+  {
+   "path": "db.testConnection",
+   "kind": "invoke",
+   "channel": "db:connections:test",
+   "domain": "db",
+   "params": [
+    {
+     "name": "input",
+     "type": "DbConnectionInput",
+     "optional": false
+    },
+    {
+     "name": "password",
+     "type": "{ set: string } | { saved: string } | null",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbTestResult>",
+   "call": "t.invoke('db:connections:test', input, password)"
+  },
+  {
+   "path": "db.vaultInfo",
+   "kind": "invoke",
+   "channel": "db:vault:info",
+   "domain": "db",
+   "params": [],
+   "returns": "Promise<DbVaultInfo>",
+   "call": "t.invoke('db:vault:info')"
+  },
+  {
+   "path": "db.connect",
+   "kind": "invoke",
+   "channel": "db:connect",
+   "domain": "db",
+   "params": [
+    {
+     "name": "connectionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "opts",
+     "type": "{ database?: string }",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<{ ok: true; sessionId: string } | { ok: false; error: DbErrorCode }>",
+   "call": "t.invoke('db:connect', connectionId, opts)"
+  },
+  {
+   "path": "db.disconnect",
+   "kind": "invoke",
+   "channel": "db:disconnect",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('db:disconnect', sessionId)"
+  },
+  {
+   "path": "db.sessions",
+   "kind": "invoke",
+   "channel": "db:sessions",
+   "domain": "db",
+   "params": [],
+   "returns": "Promise<DbSnapshot>",
+   "call": "t.invoke('db:sessions')"
+  },
+  {
+   "path": "db.answer",
+   "kind": "invoke",
+   "channel": "db:prompt:answer",
+   "domain": "db",
+   "params": [
+    {
+     "name": "answer",
+     "type": "DbPromptAnswer",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('db:prompt:answer', answer)"
+  },
+  {
+   "path": "db.pin",
+   "kind": "send",
+   "channel": "db:pin",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionIds",
+     "type": "string[]",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('db:pin', sessionIds)"
+  },
+  {
+   "path": "db.history.list",
+   "kind": "invoke",
+   "channel": "db:history:list",
+   "domain": "db",
+   "params": [
+    {
+     "name": "connectionId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbHistoryState>",
+   "call": "t.invoke('db:history:list', connectionId)"
+  },
+  {
+   "path": "db.history.record",
+   "kind": "send",
+   "channel": "db:history:record",
+   "domain": "db",
+   "params": [
+    {
+     "name": "connectionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "records",
+     "type": "DbHistoryRecord[]",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('db:history:record', connectionId, records)"
+  },
+  {
+   "path": "db.history.star",
+   "kind": "invoke",
+   "channel": "db:history:star",
+   "domain": "db",
+   "params": [
+    {
+     "name": "connectionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "star",
+     "type": "boolean",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('db:history:star', connectionId, id, star)"
+  },
+  {
+   "path": "db.history.clear",
+   "kind": "invoke",
+   "channel": "db:history:clear",
+   "domain": "db",
+   "params": [
+    {
+     "name": "connectionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "stars",
+     "type": "boolean",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('db:history:clear', connectionId, stars === true)"
+  },
+  {
+   "path": "db.history.setEnabled",
+   "kind": "invoke",
+   "channel": "db:history:enabled",
+   "domain": "db",
+   "params": [
+    {
+     "name": "enabled",
+     "type": "boolean",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('db:history:enabled', enabled)"
+  },
+  {
+   "path": "db.sqlite.pick",
+   "kind": "invoke",
+   "channel": "db:sqlite:pick",
+   "domain": "db",
+   "params": [],
+   "returns": "Promise<string | null>",
+   "call": "t.invoke('db:sqlite:pick')"
+  },
+  {
+   "path": "db.sqlite.create",
+   "kind": "invoke",
+   "channel": "db:sqlite:create",
+   "domain": "db",
+   "params": [
+    {
+     "name": "path",
+     "type": "string",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<DbSqliteCreateResult>",
+   "call": "t.invoke('db:sqlite:create', path ?? null)"
+  },
+  {
+   "path": "db.pg.databases",
+   "kind": "invoke",
+   "channel": "db:pg",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<DbDatabaseInfo[]>>",
+   "call": "t.invoke('db:pg', sessionId, { op: 'databases' })"
+  },
+  {
+   "path": "db.pg.schemas",
+   "kind": "invoke",
+   "channel": "db:pg",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<DbSchemaInfo[]>>",
+   "call": "t.invoke('db:pg', sessionId, { op: 'schemas' })"
+  },
+  {
+   "path": "db.pg.objects",
+   "kind": "invoke",
+   "channel": "db:pg",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "schema",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<DbObjectInfo[]>>",
+   "call": "t.invoke('db:pg', sessionId, { op: 'objects', schema })"
+  },
+  {
+   "path": "db.pg.tableInfo",
+   "kind": "invoke",
+   "channel": "db:pg",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "schema",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "name",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<DbTableInfo>>",
+   "call": "t.invoke('db:pg', sessionId, { op: 'tableInfo', schema, name })"
+  },
+  {
+   "path": "db.pg.ddl",
+   "kind": "invoke",
+   "channel": "db:pg",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "schema",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "name",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "kind",
+     "type": "DbObjectKind",
+     "optional": false
+    },
+    {
+     "name": "args",
+     "type": "string",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<DbResult<string>>",
+   "call": "t.invoke('db:pg', sessionId, { op: 'ddl', schema, name, kind, ...(args !== undefined ? { args } : {}) })"
+  },
+  {
+   "path": "db.pg.tablePage",
+   "kind": "invoke",
+   "channel": "db:pg",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "DbTablePageRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<true>>",
+   "call": "t.invoke('db:pg', sessionId, { op: 'tablePage', req })"
+  },
+  {
+   "path": "db.pg.query",
+   "kind": "invoke",
+   "channel": "db:pg",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "DbQueryRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<true>>",
+   "call": "t.invoke('db:pg', sessionId, { op: 'query', req })"
+  },
+  {
+   "path": "db.pg.fetchMore",
+   "kind": "invoke",
+   "channel": "db:pg",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "queryId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "count",
+     "type": "number",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<true>>",
+   "call": "t.invoke('db:pg', sessionId, { op: 'fetchMore', queryId, count })"
+  },
+  {
+   "path": "db.pg.closeResult",
+   "kind": "invoke",
+   "channel": "db:pg",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "queryId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<true>>",
+   "call": "t.invoke('db:pg', sessionId, { op: 'closeResult', queryId })"
+  },
+  {
+   "path": "db.pg.cancel",
+   "kind": "invoke",
+   "channel": "db:pg",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<boolean>>",
+   "call": "t.invoke('db:pg', sessionId, { op: 'cancel' })"
+  },
+  {
+   "path": "db.pg.transaction",
+   "kind": "invoke",
+   "channel": "db:pg",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "action",
+     "type": "'begin' | 'commit' | 'rollback'",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<DbTxStatus>>",
+   "call": "t.invoke('db:pg', sessionId, { op: 'transaction', action })"
+  },
+  {
+   "path": "db.pg.previewEdits",
+   "kind": "invoke",
+   "channel": "db:pg",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "DbEditRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<DbEditPreview>>",
+   "call": "t.invoke('db:pg', sessionId, { op: 'previewEdits', req })"
+  },
+  {
+   "path": "db.pg.applyEdits",
+   "kind": "invoke",
+   "channel": "db:pg",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "DbEditRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<{ affected: number }>>",
+   "call": "t.invoke('db:pg', sessionId, { op: 'applyEdits', req })"
+  },
+  {
+   "path": "db.pg.cellValue",
+   "kind": "invoke",
+   "channel": "db:pg",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "DbCellRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<string | null>>",
+   "call": "t.invoke('db:pg', sessionId, { op: 'cellValue', req })"
+  },
+  {
+   "path": "db.redis.databases",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<RedisDbList>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'databases' })"
+  },
+  {
+   "path": "db.redis.select",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "index",
+     "type": "number",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<number>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'select', index })"
+  },
+  {
+   "path": "db.redis.scan",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "RedisScanRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<RedisScanPage>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'scan', req })"
+  },
+  {
+   "path": "db.redis.keyInfo",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "keys",
+     "type": "RedisData[]",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<RedisKeyInfo[]>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'keyInfo', keys })"
+  },
+  {
+   "path": "db.redis.read",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "RedisReadRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<RedisReadResult>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'read', req })"
+  },
+  {
+   "path": "db.redis.readItem",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "RedisItemRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<RedisBlob>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'readItem', req })"
+  },
+  {
+   "path": "db.redis.write",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "write",
+     "type": "RedisWrite",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<RedisWriteResult>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'write', write })"
+  },
+  {
+   "path": "db.redis.countPattern",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "match",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "type",
+     "type": "string",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<DbResult<RedisPatternCount>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'countPattern', match, ...(type !== undefined ? { type } : {}) })"
+  },
+  {
+   "path": "db.redis.deletePattern",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "token",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<RedisPatternDelete>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'deletePattern', token })"
+  },
+  {
+   "path": "db.redis.cancel",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<boolean>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'cancel' })"
+  },
+  {
+   "path": "db.redis.command",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "req",
+     "type": "RedisCommandRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<RedisCommandResult>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'command', req })"
+  },
+  {
+   "path": "db.redis.info",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "section",
+     "type": "string",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<DbResult<RedisInfoSection[]>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'info', ...(section !== undefined ? { section } : {}) })"
+  },
+  {
+   "path": "db.redis.slowlog",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "count",
+     "type": "number",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<DbResult<RedisSlowlogEntry[]>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'slowlog', ...(count !== undefined ? { count } : {}) })"
+  },
+  {
+   "path": "db.redis.clients",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<RedisClientInfo[]>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'clients' })"
+  },
+  {
+   "path": "db.redis.subscribe",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "target",
+     "type": "{ channels?: RedisData[]; patterns?: RedisData[] }",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<RedisPubSubState>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'subscribe', ...target })"
+  },
+  {
+   "path": "db.redis.unsubscribe",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "target",
+     "type": "{ channels?: RedisData[]; patterns?: RedisData[]; all?: boolean }",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<RedisPubSubState>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'unsubscribe', ...target })"
+  },
+  {
+   "path": "db.redis.pubsubState",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<DbResult<RedisPubSubState>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'pubsubState' })"
+  },
+  {
+   "path": "db.redis.publish",
+   "kind": "invoke",
+   "channel": "db:redis",
+   "domain": "db",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "channel",
+     "type": "RedisData",
+     "optional": false
+    },
+    {
+     "name": "message",
+     "type": "RedisData",
+     "optional": false
+    },
+    {
+     "name": "readWrite",
+     "type": "boolean",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<DbResult<number>>",
+   "call": "t.invoke('db:redis', sessionId, { kind: 'publish', channel, message, ...(readWrite !== undefined ? { readWrite } : {}) })"
+  },
+  {
+   "path": "localFs.list",
+   "kind": "invoke",
+   "channel": "local:list",
+   "domain": "files",
+   "params": [
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<LocalResult<{ path: string; entries: LocalEntry[]; truncated: boolean }>>",
+   "call": "t.invoke('local:list', path)"
+  },
+  {
+   "path": "localFs.roots",
+   "kind": "invoke",
+   "channel": "local:roots",
+   "domain": "files",
+   "params": [],
+   "returns": "Promise<{ home: string; drives: string[] }>",
+   "call": "t.invoke('local:roots')"
+  },
+  {
+   "path": "localFs.mkdir",
+   "kind": "invoke",
+   "channel": "local:mkdir",
+   "domain": "files",
+   "params": [
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<LocalResult<null>>",
+   "call": "t.invoke('local:mkdir', path)"
+  },
+  {
+   "path": "localFs.rename",
+   "kind": "invoke",
+   "channel": "local:rename",
+   "domain": "files",
+   "params": [
+    {
+     "name": "from",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "to",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<LocalResult<null>>",
+   "call": "t.invoke('local:rename', from, to)"
+  },
+  {
+   "path": "localFs.trash",
+   "kind": "invoke",
+   "channel": "local:trash",
+   "domain": "files",
+   "params": [
+    {
+     "name": "paths",
+     "type": "string[]",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<LocalResult<null>>",
+   "call": "t.invoke('local:trash', paths)"
+  },
+  {
+   "path": "localFs.reveal",
+   "kind": "invoke",
+   "channel": "local:reveal",
+   "domain": "files",
+   "params": [
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<LocalResult<null>>",
+   "call": "t.invoke('local:reveal', path)"
+  },
+  {
+   "path": "localFs.readFile",
+   "kind": "invoke",
+   "channel": "local:readFile",
+   "domain": "files",
+   "params": [
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<ProjectFilePreview>",
+   "call": "t.invoke('local:readFile', path)"
+  },
+  {
+   "path": "localFs.statFile",
+   "kind": "invoke",
+   "channel": "local:statFile",
+   "domain": "files",
+   "params": [
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ size: number; mtimeMs: number } | 'gone' | null>",
+   "call": "t.invoke('local:statFile', path)"
+  },
+  {
+   "path": "localFs.writeFile",
+   "kind": "invoke",
+   "channel": "local:writeFile",
+   "domain": "files",
+   "params": [
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "text",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "expectedText",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: true } | { ok: false; error: string; code?: 'conflict' }>",
+   "call": "t.invoke('local:writeFile', path, text, expectedText)"
+  },
+  {
+   "path": "sshHistory.list",
+   "kind": "invoke",
+   "channel": "ssh:history:list",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "hostId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<CommandHistoryEntry[]>",
+   "call": "t.invoke('ssh:history:list', hostId)"
+  },
+  {
+   "path": "sshHistory.record",
+   "kind": "send",
+   "channel": "ssh:history:record",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "hostId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "command",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('ssh:history:record', hostId, command)"
+  },
+  {
+   "path": "sshHistory.clear",
+   "kind": "invoke",
+   "channel": "ssh:history:clear",
+   "domain": "ssh",
+   "params": [
+    {
+     "name": "hostId",
+     "type": "string | null",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean }>",
+   "call": "t.invoke('ssh:history:clear', hostId)"
+  },
+  {
+   "path": "sshHistory.status",
+   "kind": "invoke",
+   "channel": "ssh:history:status",
+   "domain": "ssh",
+   "params": [],
+   "returns": "Promise<SshHistoryStatus>",
+   "call": "t.invoke('ssh:history:status')"
+  },
+  {
+   "path": "notify",
+   "kind": "send",
+   "channel": "notify",
+   "domain": "os",
+   "params": [
+    {
+     "name": "n",
+     "type": "{ title: string; body: string; cellId: string; actions?: 'answer' | 'show'; token?: string }",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('notify', n)"
+  },
+  {
+   "path": "showCell",
+   "kind": "send",
+   "channel": "notify:show",
+   "domain": "os",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('notify:show', cellId)"
+  },
+  {
+   "path": "testLimitAlert",
+   "kind": "send",
+   "channel": "alerts:testLimit",
+   "domain": "os",
+   "params": [],
+   "returns": "void",
+   "call": "t.send('alerts:testLimit')"
+  },
+  {
+   "path": "flashAttention",
+   "kind": "send",
+   "channel": "attention:flash",
+   "domain": "os",
+   "params": [],
+   "returns": "void",
+   "call": "t.send('attention:flash')"
+  },
+  {
+   "path": "agentPrompt",
+   "kind": "invoke",
+   "channel": "agents:prompt",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "req",
+     "type": "AgentPromptRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<Record<string, AgentPromptOutcome>>",
+   "call": "t.invoke('agents:prompt', req)"
+  },
+  {
+   "path": "agentPromptDone",
+   "kind": "send",
+   "channel": "agents:prompt:done",
+   "domain": "agents",
+   "params": [
+    {
+     "name": "requestId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "answer",
+     "type": "Record<string, AgentPromptOutcome>",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('agents:prompt:done', requestId, answer)"
+  },
+  {
+   "path": "openExternal",
+   "kind": "send",
+   "channel": "shell:openExternal",
+   "domain": "os",
+   "params": [
+    {
+     "name": "url",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('shell:openExternal', url)"
+  },
+  {
+   "path": "openPath",
+   "kind": "send",
+   "channel": "shell:openPath",
+   "domain": "os",
+   "params": [
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('shell:openPath', path)"
+  },
+  {
+   "path": "revealPath",
+   "kind": "send",
+   "channel": "shell:revealPath",
+   "domain": "os",
+   "params": [
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('shell:revealPath', path)"
+  },
+  {
+   "path": "openInEditor",
+   "kind": "send",
+   "channel": "shell:openInEditor",
+   "domain": "os",
+   "params": [
+    {
+     "name": "path",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('shell:openInEditor', path)"
+  },
+  {
+   "path": "clipboardRead",
+   "kind": "invoke",
+   "channel": "clipboard:read",
+   "domain": "os",
+   "params": [],
+   "returns": "Promise<string>",
+   "call": "t.invoke('clipboard:read')"
+  },
+  {
+   "path": "clipboardWrite",
+   "kind": "send",
+   "channel": "clipboard:write",
+   "domain": "os",
+   "params": [
+    {
+     "name": "text",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('clipboard:write', text)"
+  },
+  {
+   "path": "clipboardWriteSecret",
+   "kind": "invoke",
+   "channel": "clipboard:writeSecret",
+   "domain": "os",
+   "params": [
+    {
+     "name": "text",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<boolean>",
+   "call": "t.invoke('clipboard:writeSecret', text)"
+  },
+  {
+   "path": "startupMark",
+   "kind": "send",
+   "channel": "app:startupMark",
+   "domain": "app",
+   "params": [
+    {
+     "name": "name",
+     "type": "'renderer-boot' | 'first-output'",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('app:startupMark', name)"
+  },
+  {
+   "path": "reportError",
+   "kind": "send",
+   "channel": "app:reportError",
+   "domain": "app",
+   "params": [
+    {
+     "name": "kind",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "message",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "stack",
+     "type": "string",
+     "optional": true
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('app:reportError', String(kind).slice(0, 24), String(message).slice(0, 4000), stack === undefined ? undefined : String(stack).slice(0, 8000))"
+  },
+  {
+   "path": "windowsBuild",
+   "kind": "sync",
+   "params": [],
+   "returns": "number"
+  },
+  {
+   "path": "getUpdate",
+   "kind": "invoke",
+   "channel": "update:get",
+   "domain": "update",
+   "params": [],
+   "returns": "Promise<UpdateState & { currentVersion: string }>",
+   "call": "t.invoke('update:get')"
+  },
+  {
+   "path": "checkUpdates",
+   "kind": "invoke",
+   "channel": "update:check",
+   "domain": "update",
+   "params": [],
+   "returns": "Promise<void>",
+   "call": "t.invoke('update:check')"
+  },
+  {
+   "path": "installUpdate",
+   "kind": "send",
+   "channel": "update:install",
+   "domain": "update",
+   "params": [],
+   "returns": "void",
+   "call": "t.send('update:install')"
+  },
+  {
+   "path": "updateBusy",
+   "kind": "invoke",
+   "channel": "update:busy",
+   "domain": "update",
+   "params": [],
+   "returns": "Promise<{ swap: boolean; login: boolean }>",
+   "call": "t.invoke('update:busy')"
+  },
+  {
+   "path": "openReleases",
+   "kind": "send",
+   "channel": "update:open",
+   "domain": "update",
+   "params": [],
+   "returns": "void",
+   "call": "t.send('update:open')"
+  },
+  {
+   "path": "getChangelog",
+   "kind": "invoke",
+   "channel": "changelog:get",
+   "domain": "files",
+   "params": [
+    {
+     "name": "force",
+     "type": "boolean",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<ChangelogResult>",
+   "call": "t.invoke('changelog:get', !!force)"
+  },
+  {
+   "path": "getUsage",
+   "kind": "invoke",
+   "channel": "usage:get",
+   "domain": "accounts",
+   "params": [],
+   "returns": "Promise<UsageState>",
+   "call": "t.invoke('usage:get')"
+  },
+  {
+   "path": "refreshUsage",
+   "kind": "invoke",
+   "channel": "usage:refresh",
+   "domain": "accounts",
+   "params": [],
+   "returns": "Promise<UsageState>",
+   "call": "t.invoke('usage:refresh')"
+  },
+  {
+   "path": "startLogin",
+   "kind": "invoke",
+   "channel": "auth:start",
+   "domain": "accounts",
+   "params": [
+    {
+     "name": "request",
+     "type": "LoginRequest",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: true; sessionId: string; ptyId: string } | { ok: false; error: string; email?: string }>",
+   "call": "t.invoke('auth:start', request)"
+  },
+  {
+   "path": "cancelLogin",
+   "kind": "send",
+   "channel": "auth:cancel",
+   "domain": "accounts",
+   "params": [
+    {
+     "name": "sessionId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('auth:cancel', id)"
+  },
+  {
+   "path": "removeAccount",
+   "kind": "invoke",
+   "channel": "accounts:remove",
+   "domain": "accounts",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean; error?: 'busy' | 'pending' | 'readOnly' | 'live' }>",
+   "call": "t.invoke('accounts:remove', id)"
+  },
+  {
+   "path": "makeMainAccount",
+   "kind": "invoke",
+   "channel": "accounts:makeMain",
+   "domain": "accounts",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SwapResult>",
+   "call": "t.invoke('accounts:makeMain', id)"
+  },
+  {
+   "path": "adoptAccountCopy",
+   "kind": "invoke",
+   "channel": "accounts:adoptCopy",
+   "domain": "accounts",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<AdoptCopyResult>",
+   "call": "t.invoke('accounts:adoptCopy', id)"
+  },
+  {
+   "path": "swapPending",
+   "kind": "invoke",
+   "channel": "accounts:swapPending",
+   "domain": "accounts",
+   "params": [],
+   "returns": "Promise<boolean>",
+   "call": "t.invoke('accounts:swapPending')"
+  },
+  {
+   "path": "clearSwapPending",
+   "kind": "invoke",
+   "channel": "accounts:clearSwapPending",
+   "domain": "accounts",
+   "params": [],
+   "returns": "Promise<{ ok: boolean; error?: 'locked' }>",
+   "call": "t.invoke('accounts:clearSwapPending')"
+  },
+  {
+   "path": "dismissAccountNotice",
+   "kind": "invoke",
+   "channel": "accounts:dismissNotice",
+   "domain": "accounts",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<void>",
+   "call": "t.invoke('accounts:dismissNotice', id)"
+  },
+  {
+   "path": "switchToBest",
+   "kind": "invoke",
+   "channel": "accounts:switchBest",
+   "domain": "accounts",
+   "params": [
+    {
+     "name": "provider",
+     "type": "'claude' | 'codex'",
+     "optional": false
+    },
+    {
+     "name": "to",
+     "type": "string",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<SwapResult>",
+   "call": "t.invoke('accounts:switchBest', { provider, ...(to ? { to } : {}) })"
+  },
+  {
+   "path": "acceptSwitchOffer",
+   "kind": "invoke",
+   "channel": "accounts:acceptSwitch",
+   "domain": "accounts",
+   "params": [],
+   "returns": "Promise<SwapResult>",
+   "call": "t.invoke('accounts:acceptSwitch')"
+  },
+  {
+   "path": "dismissSwitchOffer",
+   "kind": "invoke",
+   "channel": "accounts:dismissSwitch",
+   "domain": "accounts",
+   "params": [],
+   "returns": "Promise<void>",
+   "call": "t.invoke('accounts:dismissSwitch')"
+  },
+  {
+   "path": "makeMainCodexAccount",
+   "kind": "invoke",
+   "channel": "accounts:makeMainCodex",
+   "domain": "accounts",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<SwapResult>",
+   "call": "t.invoke('accounts:makeMainCodex', id)"
+  },
+  {
+   "path": "removeCodexAccount",
+   "kind": "invoke",
+   "channel": "accounts:removeCodex",
+   "domain": "accounts",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "Promise<{ ok: boolean; error?: 'busy' | 'readOnly' }>",
+   "call": "t.invoke('accounts:removeCodex', id)"
+  },
+  {
+   "path": "detach.open",
+   "kind": "invoke",
+   "channel": "detach:open",
+   "domain": "window",
+   "params": [
+    {
+     "name": "target",
+     "type": "DetachedTarget",
+     "optional": false
+    },
+    {
+     "name": "docs",
+     "type": "unknown[]",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<DetachResult>",
+   "call": "t.invoke('detach:open', target, docs)"
+  },
+  {
+   "path": "detach.dropOutside",
+   "kind": "invoke",
+   "channel": "detach:dropOutside",
+   "domain": "window",
+   "params": [
+    {
+     "name": "target",
+     "type": "DetachedTarget",
+     "optional": false
+    },
+    {
+     "name": "docs",
+     "type": "unknown[]",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<DetachResult>",
+   "call": "t.invoke('detach:dropOutside', target, docs)"
+  },
+  {
+   "path": "detach.take",
+   "kind": "invoke",
+   "channel": "detach:take",
+   "domain": "window",
+   "params": [],
+   "returns": "Promise<unknown[]>",
+   "call": "t.invoke('detach:take')"
+  },
+  {
+   "path": "detach.attach",
+   "kind": "invoke",
+   "channel": "detach:attach",
+   "domain": "window",
+   "params": [
+    {
+     "name": "docs",
+     "type": "unknown[]",
+     "optional": true
+    },
+    {
+     "name": "overMain",
+     "type": "boolean",
+     "optional": true
+    }
+   ],
+   "returns": "Promise<boolean>",
+   "call": "t.invoke('detach:attach', docs, overMain === true)"
+  },
+  {
+   "path": "detach.dismiss",
+   "kind": "invoke",
+   "channel": "detach:dismiss",
+   "domain": "window",
+   "params": [],
+   "returns": "Promise<boolean>",
+   "call": "t.invoke('detach:dismiss')"
+  },
+  {
+   "path": "detach.requestAttach",
+   "kind": "send",
+   "channel": "detach:requestAttach",
+   "domain": "window",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('detach:requestAttach', id)"
+  },
+  {
+   "path": "detach.focus",
+   "kind": "send",
+   "channel": "detach:focus",
+   "domain": "window",
+   "params": [
+    {
+     "name": "id",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('detach:focus', id)"
+  },
+  {
+   "path": "detach.work",
+   "kind": "send",
+   "channel": "detach:work",
+   "domain": "window",
+   "params": [
+    {
+     "name": "work",
+     "type": "DetachedWork | null",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('detach:work', work)"
+  },
+  {
+   "path": "detach.works",
+   "kind": "invoke",
+   "channel": "detach:works",
+   "domain": "window",
+   "params": [],
+   "returns": "Promise<Array<{ id: string; work: DetachedWork }>>",
+   "call": "t.invoke('detach:works')"
+  },
+  {
+   "path": "detach.openInMain",
+   "kind": "send",
+   "channel": "detach:openInMain",
+   "domain": "window",
+   "params": [
+    {
+     "name": "request",
+     "type": "OpenInMain",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('detach:openInMain', request)"
+  },
+  {
+   "path": "detach.stay",
+   "kind": "send",
+   "channel": "detach:stay",
+   "domain": "window",
+   "params": [],
+   "returns": "void",
+   "call": "t.send('detach:stay')"
+  },
+  {
+   "path": "detach.wait",
+   "kind": "send",
+   "channel": "detach:wait",
+   "domain": "window",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    },
+    {
+     "name": "mark",
+     "type": "WaitMark | null",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('detach:wait', cellId, mark)"
+  },
+  {
+   "path": "detach.waits",
+   "kind": "invoke",
+   "channel": "detach:waits",
+   "domain": "window",
+   "params": [],
+   "returns": "Promise<Array<{ cellId: string; mark: WaitMark }>>",
+   "call": "t.invoke('detach:waits')"
+  },
+  {
+   "path": "detach.waitStep",
+   "kind": "send",
+   "channel": "detach:waitStep",
+   "domain": "window",
+   "params": [
+    {
+     "name": "dir",
+     "type": "1 | -1",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('detach:waitStep', dir)"
+  },
+  {
+   "path": "detach.revealCell",
+   "kind": "send",
+   "channel": "detach:revealCell",
+   "domain": "window",
+   "params": [
+    {
+     "name": "cellId",
+     "type": "string",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('detach:revealCell', cellId)"
+  }
+ ],
+ "updateSplash": [
+  {
+   "channel": "update-splash:init",
+   "kind": "invoke"
+  },
+  {
+   "channel": "update-splash:state",
+   "kind": "event"
+  },
+  {
+   "channel": "update-splash:close",
+   "kind": "send"
+  },
+  {
+   "channel": "update-splash:open",
+   "kind": "send"
+  }
+ ]
+}

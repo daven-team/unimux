@@ -117,14 +117,15 @@ describe('IPC channel registry', () => {
   });
 
   it('every channel the main preload uses is registered somewhere in src/main', () => {
-    const preload = readFileSync(join(__dirname, '../src/preload/index.ts'), 'utf8');
-    const used = [...preload.matchAll(/ipcRenderer\.(?:invoke|send)\('([^']+)'/g)].map((m) => m[1]);
+    const preload = readFileSync(join(__dirname, '../src/preload/mcApi.ts'), 'utf8'); // the preload's methods (shared with the Tauri bridge, 1.2.0)
+    const used = [...preload.matchAll(/\bt\.(?:invoke|send)\('([^']+)'/g)].map((m) => m[1]);
     const all = sources.map((s) => s.text).join('\n');
     const registered = (channel: string) => {
       const [prefix, name] = channel.split(':');
       if (prefix === 'git' && (GIT_CHANNELS as readonly string[]).includes(name)) return true;
       return all.includes(`'${channel}'`);
     };
+    expect(used.length).toBeGreaterThan(200);
     expect(used.filter((channel) => !registered(channel))).toEqual([]);
   });
 });
