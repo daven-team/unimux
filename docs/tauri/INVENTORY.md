@@ -1,6 +1,6 @@
 # unimux 1.1.4 inventory for the Tauri migration
 
-Condensed from the per-unit analysis (2026-11-06). Line counts are TS source lines. "Moves in" names the release in which the unit becomes Rust (see PLAN.md). Full API lists live in the source: `src/preload/api.d.ts` (window.mc contract), `src/shared/ipc.ts`, `src/shared/dbHostIpc.ts`, `src/shared/sftpHostIpc.ts`.
+Condensed from the per-unit analysis (2026-11-06). Line counts are TS source lines. "Moves in" names the release of the superseded staged plan; since the user's ALL-AT-ONCE decision (2026-11-06) every unit moves to Rust in 1.2.0 (see PLAN.md for the packages). Full API lists live in the source: `src/preload/api.d.ts` (window.mc contract), `src/shared/ipc.ts`, `src/shared/dbHostIpc.ts`, `src/shared/sftpHostIpc.ts`.
 
 | Unit | LOC | Moves in | Port effort if fully Rust (days) |
 |---|---|---|---|

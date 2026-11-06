@@ -1,188 +1,236 @@
 # unimux Tauri migration: progress log
 
-The orchestrator updates this file after every step. Status values: `todo`, `in progress`, `done` (code merged), `verified` (acceptance tests from PLAN.md passed). Dates are filled in when a status changes.
+The orchestrator updates this file after every step. Status values: `todo`, `in progress`, `done` (code merged into `tauri-1.2.0`), `verified` (acceptance tests from PLAN.md passed). Dates are filled in when a status changes.
 
-Branch: `tauri-1.2.0`. Specs: ARCHITECTURE.md, PLAN.md, INVENTORY.md.
+Branch: `tauri-1.2.0`. Specs: ARCHITECTURE.md, PLAN.md, INVENTORY.md. Plan: ALL AT ONCE (one release, 1.2.0, fully Rust + Tauri v2, no Node sidecar).
+
+## Decision log
+
+| date | decision | by | effect |
+|---|---|---|---|
+| 2026-11-06 | **ALL AT ONCE.** 1.2.0 ships only when the WHOLE app is Rust + Tauri v2 with full parity. No Node sidecar in the shipped app; Node only as a build tool for the React UI and tests. | user | Staged plan (sidecar in 1.2.0, ports in 1.3.0 to 1.6.0) dropped; ARCHITECTURE.md = design 1 + grafts; PLAN.md rewritten into waves 0 to 7 (93 packages, 291.5 agent-days). |
+| 2026-11-06 | Installs done: Node 26 LTS, Docker Desktop (WSL2), VirtualBox (Windows VM image not downloaded yet), cargo on PATH. | user | Node 24 / SEA no longer needed. VM image needed for SP3 / U3 / B3 PAC check. |
+| 2026-11-06 | Updater signing key generated. GitHub secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` exist. Public key `D:\Projekty\_unimux-tauri-keys\unimux-updater.key.pub` (minisign key id 817A07BB564AC8D0) is embedded; agents never read, print or copy the private key or password. | user | Public key recorded in ARCHITECTURE section 8; used by F2 / U1 / U4. |
+| 2026-11-06 | **Keep the current look.** Windows caption buttons drawn to look exactly like today (Electron titleBarOverlay #0d0d0d / #8a8a8a, height 36). | user | Package W1 (reference images from 1.1.4, pixel diff at 4 scaling levels); release gate item 8. |
+| 2026-11-06 | **Keep the custom update window** (progress, stages, restart) for updates between Tauri versions too, not the stock installer UI. | user | Packages SP6, U2 (Windows), U5 (macOS); tauri-plugin-updater not used for install; NSIS `passive` mode dropped. |
+| 2026-11-06 | **Keep publishing latest.yml / latest-mac.yml** so Electron 1.1.x installs update into 1.2.0. | user | U3 transition, U4 asset list, every release from now on. |
+
+Still open (see the Polish section at the end): macOS identifier com.ajzakomator.app + one Keychain prompt, fallback bridge release 1.1.5 if SP3/SP4 fail, Mac access, 1.1.4 test data.
 
 ## Status
 
-### 1.2.0
-
-| id | title | wave | status | started | done | verified | notes |
-|---|---|---|---|---|---|---|---|
-| S1 | Tauri shell, WebView2 args, WS transport | 0 | todo | | | | |
-| S2 | Node 24 SEA sidecar | 0 | todo | | | | needs Node 24 |
-| S3 | Electron safeStorage both directions | 0 | todo | | | | needs a Mac for the Keychain half |
-| S4 | Windows 1.1.4 -> Tauri NSIS hand-over | 0 | todo | | | | needs a Windows VM |
-| S5 | macOS 1.1.4 engine accepts Tauri zip | 0 | todo | | | | needs a Mac |
-| S6 | Rust ConPTY + Channel throughput | 0 | todo | | | | |
-| A1 | Workspace scaffold | 1 | todo | | | | |
-| B1 | Golden corpus + PORTING.md + messages export | 1 | todo | | | | |
-| T0 | Contract and guard tests | 1 | todo | | | | |
-| A2 | Rust process start | 2 | todo | | | | |
-| A3 | Sidecar build and supervision | 2 | todo | | | | |
-| A6 | Renderer bridge window.mc | 2 | todo | | | | |
-| A8 | Main window and WebView settings | 2 | todo | | | | |
-| P1 | Rust pty core | 2 | todo | | | | |
-| N2 | unimux-blob:// protocol | 2 | todo | | | | |
-| A4 | Electron shim in the sidecar | 3 | todo | | | | |
-| P2 | Pty output engine + Channel data plane | 3 | todo | | | | |
-| A13 | unimux-oscrypt production | 3 | todo | | | | |
-| A12 | OS file drop, localStorage import, polyfills | 4 | todo | | | | |
-| A5 | Hosts without utilityProcess | 4 | todo | | | | |
-| A7 | Sidecar WS server and sender guard | 4 | todo | | | | |
-| A9 | Detached and gate windows | 4 | todo | | | | |
-| A11 | Notifications, badge, dialogs, clipboard | 4 | todo | | | | |
-| N1 | Rust http_fetch | 4 | todo | | | | |
-| P3 | Pty service wiring | 4 | todo | | | | |
-| P3b | `--host=ssh` for SSH shell cells | 5 | todo | | | | added by critic review |
-| A10 | Lifecycle: quit, session end, crash, hang | 5 | todo | | | | |
-| A17 | Real-app harness migration | 5 | todo | | | | |
-| A14 | Updater Tauri -> Tauri | 5 | todo | | | | |
-| A15 | Electron 1.1.4 -> 1.2.0 transition | 6 | todo | | | | needs VM + Mac |
-| A16 | CI and release pipeline | 6 | todo | | | | needs signing secrets |
-| A18 | 1.2.0 parity and performance sweep | 7 | todo | | | | |
-| A19 | macOS pass | 7 | todo | | | | needs a Mac |
-| A20 | 1.2.0 docs, i18n and release | 7 | todo | | | | user approves notes |
-
-### 1.3.0
+### Wave 0a: foundation
 
 | id | title | status | started | done | verified | notes |
 |---|---|---|---|---|---|---|
-| B2 | State mirror, mutation RPC, route flip | todo | | | | |
-| B3 | Dual host + unimux-hostd | todo | | | | |
-| C1 | Git runner, env scrub, caches, paths | todo | | | | |
-| C2 | Git parsers, validators, trust | todo | | | | |
-| C3 | Git reads, mutations, commands | todo | | | | |
-| C4 | Worktrees, clone, init, installGit | todo | | | | |
-| C5 | Project files: listing, preview, save | todo | | | | |
-| C6 | File operations with progress | todo | | | | |
-| C7 | Project search and replace | todo | | | | |
-| C8 | Notes, fs probes, monitor, changelog | todo | | | | |
-| D1 | Hook server in Rust | todo | | | | |
-| D2 | Claude settings, Codex hooks, fallback, cell files | todo | | | | |
-| D3 | CLI detector | todo | | | | |
-| D5 | Context tracker, sessions, codex bind | todo | | | | |
-| D6 | Conversation search | todo | | | | |
-| R1 | 1.3.0 release sweep | todo | | | | |
+| F1 | Cargo workspace, Vite and build scripts | todo | | | | first; everything waits for it |
+| F2 | tauri.conf, capabilities, CSP, sender guard | todo | | | | embeds the updater public key |
+| F3 | IPC contract generator, Rust router, not-yet stubs | todo | | | | |
+| F4 | Renderer window.mc adapter | todo | | | | |
+| F5 | Process start: data dir, dev overrides, crash log | todo | | | | |
+| F6 | Single instance, compatible with Electron 1.1.x | todo | | | | macOS half re-checked in R3 |
+| F7 | State store: load, save, controller | todo | | | | |
+| F8 | State normalize port | todo | | | | |
+| F9 | State edits, patches, broadcast, state commands | todo | | | | |
+| F10 | Golden corpus, PORTING.md, messages export | todo | | | | |
+| F11 | Main window, startup gate order, window state, WebView settings | todo | | | | |
+| F12 | CI skeleton | todo | | | | |
+| F13 | Real-app harness base | todo | | | | |
+| F14 | Exec helper and env | todo | | | | |
 
-### 1.4.0
+### Wave 0b: spikes
 
 | id | title | status | started | done | verified | notes |
 |---|---|---|---|---|---|---|
-| E1 | SSH stores in Rust | todo | | | | |
-| E2 | SSH key handling | todo | | | | |
-| E3 | russh login core and coordinator | todo | | | | |
-| E4 | SSH IPC and russh test server | todo | | | | Docker |
-| P4 | Shell integration, launch line, spawn in Rust | todo | | | | |
+| SP1 | WebView2 shell behaviour | todo | | | | |
+| SP2 | Electron safeStorage both directions | todo | | | | Mac half needs a Mac |
+| SP3 | Windows 1.1.4 -> Tauri NSIS hand-over | todo | | | | needs the VirtualBox Windows VM image |
+| SP4 | macOS 1.1.4 engine accepts the Tauri zip | todo | | | | needs a Mac |
+| SP5 | Rust ConPTY + Channel | todo | | | | |
+| SP6 | Custom update window process | todo | | | | |
+| SP7 | russh coverage | todo | | | | Docker |
+| SP8 | MCP wire with real CLIs | todo | | | | scratch home |
+| SP9 | DB wire fidelity | todo | | | | Docker |
+
+### Wave 1
+
+| id | title | status | started | done | verified | notes |
+|---|---|---|---|---|---|---|
+| P1 | Rust pty core | todo | | | | |
+| B1 | Dual host test harness (unimux-hostd) | todo | | | | |
+| B2 | unimux-oscrypt production | todo | | | | |
+| B3 | Rust http_fetch | todo | | | | PAC check in the VM |
+| W1 | Windows caption buttons that look like today | todo | | | | reference images from 1.1.4 first |
+| W2 | macOS window chrome, app menu, WebKit compatibility | todo | | | | |
+| W3 | OS file drop and localStorage import | todo | | | | |
+| W4 | Notifications, attention, badge, beep, dialogs, clipboard, shell, sound files | todo | | | | |
+| W5 | Detached windows and event routing | todo | | | | |
+| W6 | Lifecycle: quit, session end, renderer crash and hang | todo | | | | |
+| G1 | Git runner, env scrub, caches, canonical paths | todo | | | | |
+| G5 | Project files: listing, preview, save, local files | todo | | | | |
+| H1 | Hook server | todo | | | | |
+| H3 | CLI detector | todo | | | | |
+| H5 | Conversation search | todo | | | | |
+| D3 | SQL helper ports | todo | | | | |
+| A1 | Accounts stores and Claude Code locks | todo | | | | |
+| M1 | MCP HTTP server | todo | | | | |
+| S2 | SSH key handling | todo | | | | |
+| U2 | Custom update window (Windows) | todo | | | | |
+| X1 | Real-app script migration | todo | | | | |
+
+### Wave 2
+
+| id | title | status | started | done | verified | notes |
+|---|---|---|---|---|---|---|
+| P2 | Pty output engine and Channel data plane | todo | | | | |
+| G2 | Git parsers, validators, trust | todo | | | | |
+| G6 | File operations with progress | todo | | | | |
+| G7 | Project search and replace | todo | | | | |
+| G8 | Notes, fs probes, monitor, changelog | todo | | | | |
+| H2 | Claude settings, Codex hooks, fallback, cell files | todo | | | | |
+| H4 | Context tracker, sessions, codex bind | todo | | | | |
+| S1 | SSH stores | todo | | | | |
+| D1 | DB service, vault, history, sqlite files | todo | | | | |
+| A2 | Activation, swap journal, recovery | todo | | | | |
+| A6 | GitHub token store, device flow, status | todo | | | | |
+| M2 | MCP tools, validation, elicitation | todo | | | | |
+| U1 | Update coordinator and startup gate flow | todo | | | | |
+| U5 | macOS update engine in the update window | todo | | | | Mac check in R3 |
+| W7 | Core cell bookkeeping, startup gates, taskbar, misc commands | todo | | | | |
+
+### Wave 3
+
+| id | title | status | started | done | verified | notes |
+|---|---|---|---|---|---|---|
+| P3 | Pty service: spawn, routing, replay, supervision | todo | | | | |
+| G3 | Git reads, mutations, commands, publish | todo | | | | |
+| G4 | Worktrees, clone, init, installGit | todo | | | | |
+| S3 | russh login core and SshCoordinator | todo | | | | Docker |
+| A3 | Reconcile, resync, token refresh | todo | | | | |
+| D4 | Postgres client: connect, simple query, TLS | todo | | | | Docker |
+| D7 | MySQL/MariaDB client core | todo | | | | Docker |
+| D9 | Redis sessions and browsing | todo | | | | |
+| D11 | SQLite sessions | todo | | | | |
+| U3 | Electron 1.1.x -> 1.2.0 transition | todo | | | | needs VM + Mac |
+
+### Wave 4
+
+| id | title | status | started | done | verified | notes |
+|---|---|---|---|---|---|---|
+| P4 | Shell integration, launch line, cell spawn | todo | | | | |
 | P5 | SSH shell cells on russh | todo | | | | |
-| P6 | Install manager and login terminals | todo | | | | |
-| F1 | SFTP service and sessions | todo | | | | |
-| F2 | Remote and local sides | todo | | | | |
-| F3 | Transfer queue | todo | | | | |
-| F4 | SFTP manage ops and editor files | todo | | | | |
-| F5 | Sudo SFTP over exec | todo | | | | Docker |
-| R2 | 1.4.0 release sweep | todo | | | | |
+| H6 | Install manager, login terminals, agent delivery | todo | | | | |
+| S4 | SSH IPC and russh test server | todo | | | | Docker |
+| T1 | SFTP service and sessions | todo | | | | |
+| D2 | SSH tunnels for databases | todo | | | | |
+| D5 | Postgres cursors and read-only | todo | | | | |
+| D8 | MySQL session, meta, edits | todo | | | | |
+| D10 | Redis writes, console, pattern ops, pub/sub | todo | | | | |
+| A4 | Login managers | todo | | | | |
+| A5 | Usage, auto-switch, limit alerts | todo | | | | |
+| M3 | Automation operations | todo | | | | |
+| U4 | CI and release pipeline | todo | | | | uses the signing secrets in CI only |
 
-### 1.5.0
-
-| id | title | status | started | done | verified | notes |
-|---|---|---|---|---|---|---|
-| G1 | DB service, vault, history, sqlite files | todo | | | | |
-| G2 | Tunnels and TLS | todo | | | | |
-| G6 | SQL helper ports | todo | | | | |
-| G3 | Postgres wire client: connect, simple query | todo | | | | Docker |
-| G4 | Postgres cursors and read-only | todo | | | | |
-| G5 | Postgres metadata, pages, edits | todo | | | | |
-| G7 | MySQL/MariaDB client core | todo | | | | Docker |
-| G8 | MySQL session, meta, edits | todo | | | | |
-| G9 | Redis sessions and browsing | todo | | | | |
-| G10 | Redis writes, console, pattern ops, pub/sub | todo | | | | |
-| G11 | SQLite sessions | todo | | | | |
-| G12 | DB result routing and CI services | todo | | | | |
-| R3 | 1.5.0 release sweep | todo | | | | |
-
-### 1.6.0
+### Wave 5
 
 | id | title | status | started | done | verified | notes |
 |---|---|---|---|---|---|---|
-| H1 | Accounts stores and Claude locks | todo | | | | |
-| H2 | Activation, swap journal, recovery | todo | | | | |
-| H3 | Reconcile, resync, token refresh | todo | | | | |
-| H4 | Login managers | todo | | | | |
-| H5 | Usage, auto-switch, limit alerts | todo | | | | |
-| H6 | GitHub auth and publish | todo | | | | |
-| I1 | State model port 1: normalize | todo | | | | |
-| I2 | State model port 2: merge and diff | todo | | | | |
-| I3 | Rust becomes the state writer | todo | | | | |
-| I4 | MCP HTTP server | todo | | | | |
-| I5 | MCP tools, validation, elicitation | todo | | | | |
-| I6 | Automation operations | todo | | | | |
-| I7 | wait_for, delivery, team prompts | todo | | | | |
-| I8 | Remaining core in Rust | todo | | | | |
-| I9 | Update coordinator and gate in Rust | todo | | | | |
-| I10 | Remove the Node sidecar | todo | | | | |
-| R4 | 1.6.0 release sweep | todo | | | | |
+| D6 | Postgres metadata, pages, edits | todo | | | | |
+| T2 | SFTP remote and local sides | todo | | | | |
+| M4 | wait_for, delivery, team prompts | todo | | | | |
+
+### Wave 6
+
+| id | title | status | started | done | verified | notes |
+|---|---|---|---|---|---|---|
+| T3 | SFTP transfer queue | todo | | | | |
+| T4 | SFTP manage ops and editor files | todo | | | | |
+| T5 | Sudo SFTP over exec | todo | | | | Docker |
+| D12 | DB result routing and detached DB windows | todo | | | | |
+
+### Wave 7: release
+
+| id | title | status | started | done | verified | notes |
+|---|---|---|---|---|---|---|
+| R1 | Remove Electron | todo | | | | |
+| R2 | Parity and performance sweep | todo | | | | |
+| R3 | macOS pass | todo | | | | needs a Mac |
+| R4 | 1.2.0 docs, i18n, release | todo | | | | user approves the test build and notes |
+
+## Contract and porting counters
+
+Updated after every merge (`npm run ipc:report`, `node scripts/porting-count.mjs`; both exist after F3 / F10).
+
+| date | window.mc implemented | events implemented | PORTING.md ported | verify scripts green |
+|---|---|---|---|---|
+| 2026-11-06 | 0 / 245 | 0 / 45 | 0 / about 1,815 | 0 / 44 |
 
 ## 1.2.0 release gate checklist
 
 See PLAN.md "1.2.0 release gate". Tick here when verified.
 
-- [ ] 1. Spikes S1 to S6 green or fallback re-tested
+- [ ] 1. Spikes SP1 to SP9 green or fallback re-tested
 - [ ] 2. typecheck, npm test, cargo fmt/clippy/test green on Windows and macOS CI
-- [ ] 3. Golden corpus no diff, contract test 0 missing, guard scan, no 3.0.0-alpha
-- [ ] 4. verify-cli-contract, verify-team-start and all 44 verify scripts green
-- [ ] 5. Upgrade test on a 1.1.4 data copy + downgrade check
-- [ ] 6. Windows VM transition, macOS harness transition, Tauri -> Tauri update
-- [ ] 7. Isolation test (real profile untouched)
-- [ ] 8. No-console start and `-e` legacy call
-- [ ] 9. Performance vs 1.1.4
-- [ ] 10. macOS manual checklist
-- [ ] 11. User tested a test build and approved the release note
-- [ ] 12. Signing key + GitHub secrets + CI rehearsal assets
-- [ ] 13. Published via `npm run publish-release` (dry run first)
+- [ ] 3. No Node in the shipped app (installer and .app checked)
+- [ ] 4. Contract 245/245 and all events, PORTING.md 100 percent, goldens no diff, guard tests, no 3.0.0-alpha
+- [ ] 5. verify-cli-contract, verify-team-start and all other verify scripts green
+- [ ] 6. Upgrade test on a 1.1.4 data copy + downgrade check + no parallel 1.1.4/1.2.0 on one data dir
+- [ ] 7. Windows VM transition, macOS harness transition, Tauri -> Tauri update through the custom window
+- [ ] 8. Look kept: caption buttons match 1.1.4 references; update window as in 1.1.4
+- [ ] 9. Isolation test (real profile untouched)
+- [ ] 10. No-console start and `-e` legacy call
+- [ ] 11. Performance vs 1.1.4
+- [ ] 12. macOS manual checklist
+- [ ] 13. CI rehearsal assets incl. latest.yml, latest-mac.yml, latest.json + .sig, signatures verified
+- [ ] 14. User tested a test build and approved the release note
+- [ ] 15. Published via `npm run publish-release` (dry run first)
+
+## Install status (2026-11-06)
+
+| item | status |
+|---|---|
+| Visual Studio 2026 C++ tools (VC Tools x86/x64) | installed |
+| Windows 11 SDK | to confirm in the VS installer ("Desktop development with C++") |
+| Rust 1.99.1 MSVC, cargo on PATH | installed |
+| Node 26 LTS (npm) | installed (build tool only) |
+| WebView2 Runtime 156 | installed |
+| Docker Desktop with WSL2 | installed |
+| VirtualBox | installed |
+| Windows VM image for VirtualBox | **not downloaded yet**; needed for SP3 (wave 0 spike), B3 PAC check, U3 |
+| Tauri CLI | project dependency added in F1 (`@tauri-apps/cli ~2.12.4`), nothing global; NSIS downloads on the first `tauri build` |
+| Updater signing key + GitHub secrets | done; public key embedded |
+| Mac access | not available yet; needed for SP2 (Mac half), SP4, R3 |
 
 ## Log
 
 | date | step | result |
 |---|---|---|
-| 2026-11-06 | Inventory of 12 units, 3 designs, 3 judge reports | Winner by votes: design 3 (staged strangler), with grafts from designs 1 and 2 (Rust pty in 1.2.0, oscrypt read+write, Rust http_fetch, golden corpus, blob protocol, hostd, session-end flush on QUERYENDSESSION) |
-| 2026-11-06 | docs/tauri/ARCHITECTURE.md, PLAN.md, INVENTORY.md, PROGRESS.md written | 92 packages, 293 agent-days total; 1.2.0 = 33 packages, 93 agent-days. Waiting for the user decisions below before wave 0 starts. |
-| 2026-11-06 | Critic review of the four docs against the source | T0 routing fixed (all existing channels stay on the sidecar), P3b added, A4 +1 day, 4 acceptance cycles removed, CSP / build flavours / gate preload / worker assets / Job breakaway / cross-generation lock / minimize detection added. 1.2.0 = 34 packages, 98 agent-days; total 93 / 298. |
+| 2026-11-06 | Inventory of 12 units, 3 designs, 3 judge reports | Winner by votes: design 3 (staged strangler), with grafts from designs 1 and 2 |
+| 2026-11-06 | docs/tauri/ARCHITECTURE.md, PLAN.md, INVENTORY.md, PROGRESS.md written | 92 packages, 293 agent-days total; 1.2.0 = 33 packages, 93 agent-days. Waiting for user decisions. |
+| 2026-11-06 | Critic review of the four docs against the source | 1.2.0 = 34 packages, 98 agent-days; total 93 / 298. |
+| 2026-11-06 | User decisions recorded (decision log above) | ALL AT ONCE: PLAN.md rewritten into waves 0 to 7 (93 packages, 291.5 agent-days + 20-25 percent integration, about 11 to 13 calendar weeks with 6 agents); sidecar-only packages dropped (S2, A3, A4, A5, A7, P3b, N2, B2 mirror, I10, R1-R4 sweeps); 1.3-1.6 packages folded in; new packages: F1-F14 foundation, SP6 + U2 + U5 custom update window, W1 caption buttons, F6 Electron singleton compat, X1 script migration, R1 Electron removal. ARCHITECTURE.md rewritten for the single Rust process. |
 
 ## Do zainstalowania / do decyzji użytkownika
 
-### Decyzje (potrzebne przed startem prac)
+### Decyzje podjęte 2026-11-06
 
-1. **Zakres wersji 1.2.0.** Wygrał plan etapowy (2 z 3 sędziów): 1.2.0 = Tauri 2 + terminale (pty) w Rust + logika biznesowa jeszcze w Node (sidecar), a pełne przepisanie na Rust kończy się w 1.6.0 (kolejne wydania 1.3-1.6). Do 1.2.0 to około 93 dni pracy agentów (realnie 7-8 tygodni przy 5-6 agentach równolegle), łącznie około 293. Alternatywa zgodna z dosłowną prośbą "wszystko w Rust w 1.2.0": około 256 dni pracy agentów, 8-10+ tygodni bez żadnego wydania po drodze i większe ryzyko utraty danych. Potwierdź: etapowo czy wszystko naraz?
-2. **Wersja 1.2.0 nie wyjdzie "teraz".** Najwcześniej po zielonym przeglądzie zgodności (A18), testach przejścia 1.1.4 -> 1.2.0 i teście na Macu. Wydanie wcześniej grozi utratą zalogowań, haseł lub terminali.
-3. **Pasek tytułu na Windows.** Tauri nie ma natywnej nakładki przycisków okna; przyciski minimalizuj/maksymalizuj/zamknij będą rysowane przez aplikację (z zachowaniem układów przyciągania Windows 11). Wygląd lekko się zmieni. Akceptujesz?
-4. **macOS: identyfikator com.ajzakomator.app zostaje** (zachowuje uprawnienia systemowe i zgodność z aktualizatorem 1.1.x). Po aktualizacji macOS raz zapyta o dostęp do pęku kluczy ("Zawsze zezwalaj"). Akceptujesz?
-5. **Okno aktualizacji Tauri -> Tauri.** Proponowane: instalator NSIS w trybie "passive" (systemowe okno postępu) zamiast obecnego własnego okienka. Pytanie przy starcie ("Zainstaluj teraz / Później") zostaje. Akceptujesz, czy chcesz zachować własne okienko postępu (+2-3 dni pracy)?
-6. **Plan awaryjny.** Jeśli testy przejścia (S4/S5) nie wyjdą, potrzebne będzie wydanie pomostowe 1.1.5 na Electronie. Zgoda?
-7. **Pliki latest.yml i latest-mac.yml** będą publikowane przy każdym wydaniu na zawsze (dla użytkowników, którzy jeszcze są na Electronie). Zgoda?
+1. Wszystko naraz: 1.2.0 wychodzi dopiero, gdy cała aplikacja jest w Rust + Tauri v2 i działa jak 1.1.4. Bez sidecara Node.
+2. Wygląd zostaje: przyciski okna na Windows rysowane tak, żeby wyglądały jak dziś; własne okno aktualizacji (postęp, etapy, restart) także przy aktualizacjach między wersjami Tauri.
+3. latest.yml i latest-mac.yml publikowane przy każdym wydaniu (aktualizacja z Electron 1.1.x do 1.2.0).
+4. Klucz podpisywania aktualizacji wygenerowany, sekrety GitHub ustawione.
 
-### Do zainstalowania na Twoim komputerze (Windows 11 Home)
+Szacunek: około 290 dni pracy agentów + 20-25 procent na integrację, czyli realnie 11-13 tygodni przy 6 agentach równolegle. Wersja testowa do sprawdzenia przed wydaniem.
 
-1. **Visual Studio z narzędziami C++**: już zainstalowane (Visual Studio Community 2026 z komponentem VC Tools x86/x64, sprawdzone vswhere 2026-11-06). Do sprawdzenia tylko, czy jest Windows 11 SDK (w instalatorze VS: "Programowanie aplikacji klasycznych w C++").
-2. **Rust** jest już zainstalowany (1.99.1 MSVC). Dodaj na stałe `%USERPROFILE%\.cargo\bin` do zmiennej PATH.
-3. **Node.js 24 LTS** (masz 22.19; 24 jest potrzebny do zbudowania sidecara jako pojedynczego pliku SEA).
-4. **Tauri CLI** zainstaluję sam jako zależność projektu (`npm i -D @tauri-apps/cli@~2.12.4 @tauri-apps/api@~2.12.4`); nic globalnie. NSIS pobierze się sam przy pierwszym `tauri build`.
-5. **WebView2 Runtime** jest zainstalowany (156.0.4314.58, sprawdzone 2026-11-06); nic do robienia.
-6. **Docker Desktop** (z WSL2) do testów baz danych i SSH (Postgres, MySQL, MariaDB, Redis, OpenSSH, Dropbear). Agenci usuwają tylko własne kontenery po id.
-7. **Maszyna wirtualna Windows** (VirtualBox lub VMware; Windows 11 Home nie ma Windows Sandbox ani Hyper-V) do testu aktualizacji 1.1.4 -> 1.2.0. Nigdy na Twoim prawdziwym profilu.
+### Nadal otwarte
 
-### Do przygotowania / dostarczenia przez Ciebie
-
-1. **Klucz podpisywania aktualizacji Tauri:** `npx tauri signer generate -w %USERPROFILE%\.tauri\unimux.key` z hasłem, kopia zapasowa offline (utrata klucza = koniec aktualizacji dla wersji Tauri), sekrety GitHub `TAURI_SIGNING_PRIVATE_KEY` i `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Klucz publiczny wpiszę do tauri.conf.json.
-2. **Dostęp do Maca** (Apple Silicon, Xcode Command Line Tools, Rust) do testu pęku kluczy (odszyfrowanie zapisanych haseł), testu aktualizatora 1.1.4 -> 1.2.0 i ręcznej listy kontrolnej. CI na macOS tylko buduje.
+1. **macOS: identyfikator com.ajzakomator.app zostaje** (zachowuje uprawnienia systemowe i zgodność z aktualizatorem 1.1.x). Po aktualizacji macOS raz zapyta o dostęp do pęku kluczy ("Zawsze zezwalaj"). Akceptujesz?
+2. **Plan awaryjny.** Jeśli testy przejścia (SP3/SP4) nie wyjdą, potrzebne będzie wydanie pomostowe 1.1.5 na Electronie. Zgoda?
 3. **Kopia testowych danych 1.1.4** (KOPIA, nie oryginał `%APPDATA%\unimux`) albo zgoda, żebym utworzył syntetyczne dane w 1.1.4 pod `MC_DATA_DIR` z testowymi hasłami SSH/DB i tokenem GitHub.
-4. **Akceptacja wersji testowej** przed wydaniem i przeczytanie `docs/releases/1.2.0.md`.
 
-## Critic review (2026-11-06)
+### Do zrobienia po Twojej stronie (gdy będzie potrzebne)
 
-Changes made in this file:
-
-1. Added row P3b (`--host=ssh` for SSH shell cells, wave 5) and moved A12 to wave 4 (it now depends on A7), matching PLAN.md.
-2. "Do zainstalowania": Visual Studio C++ tools and WebView2 Runtime are already on this machine (VS Community 2026 with VC Tools, WebView2 156.0.4314.58), so those items became checks. Node is 22.19.0 (24 still needed). Rust 1.99.1 has only the x86_64-pc-windows-msvc target; no arm64 build is planned, so nothing else to add.
-3. Log entry added to the Log table. Full finding list: PLAN.md, ARCHITECTURE.md and INVENTORY.md "Critic review" sections.
+1. **Obraz Windows dla VirtualBox** (np. oficjalna maszyna deweloperska Windows 11 albo ISO z licencją) do testu aktualizacji 1.1.4 -> 1.2.0 (spike SP3, potem U3). Nigdy na Twoim prawdziwym profilu.
+2. **Dostęp do Maca** (Apple Silicon, Xcode Command Line Tools, Rust) do testu pęku kluczy, aktualizatora 1.1.4 -> 1.2.0, okna aktualizacji i ręcznej listy kontrolnej (SP2, SP4, R3).
+3. **Kopia zapasowa klucza podpisywania offline.** W folderze `D:\Projekty\_unimux-tauri-keys` leży też plik z hasłem; warto przenieść hasło do menedżera haseł i zrobić kopię klucza na nośniku offline (utrata klucza = koniec aktualizacji dla wersji Tauri). Agenci nie czytają tych plików.
+4. Sprawdzić w instalatorze Visual Studio, czy jest Windows 11 SDK ("Programowanie aplikacji klasycznych w C++").
+5. Akceptacja wersji testowej przed wydaniem i przeczytanie `docs/releases/1.2.0.md`.
