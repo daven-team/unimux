@@ -49,7 +49,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | SP5 | Rust ConPTY + Channel | todo | | | | |
 | SP6 | Custom update window process | todo | | | | |
 | SP7 | russh coverage | todo | | | | Docker |
-| SP8 | MCP wire with real CLIs | todo | | | | scratch home |
+| SP8 | MCP wire with real CLIs | verified (Windows) | 2026-11-06 | 2026-11-06 | 2026-11-06 | **Decision: custom dispatcher on hyper 1.12 / axum 0.8.9, no rmcp** (spikes/SP8.md). Prototype `crates/unimux-mcp/examples/sp8/custom.rs`: 42 / 42 HTTP-level cases identical to the 1.1.4 TS server (rmcp 3.9: 6 / 42); Claude Code 2.1.319 and codex-cli 0.162.1 on a scratch home with mock models: tools/list + tools/call + progress + elicitation round trip (Claude cancel and hook accept, Codex decline) + abort 1 ms after a killed CLI closes its connection; cargo `sp8_wire` 7 tests. Open: see "Open issues after SP8" |
 | SP9 | DB wire fidelity | todo | | | | Docker |
 
 ### Wave 1
@@ -277,6 +277,18 @@ All 14 confirmed findings of the wave 0 review are fixed; none was skipped.
 10. Detached windows, the gate and the update window are not created yet, so the guard's detached registration and the destroy cleanup (`forget_on_destroy`) are only unit-tested and wired on the main window.
 11. HTML5 drag and drop (tab reorder / detach, snippets, notes, tree, SFTP) is enabled again by `disable_drag_drop_handler()` but no script drags yet; W3 adds the real-app drag checks with the OS file drop.
 12. The macOS half of the startup race (Electron's SingletonLock / SingletonSocket) is still R3; the Windows half (startup mutex + lockfile) is done.
+
+### Open issues after SP8 (2026-11-06)
+
+Verification: `cargo fmt --all --check`, `cargo clippy -p unimux-mcp --all-targets -- -D warnings`, `cargo test -p unimux-mcp` (7 sp8_wire tests), `node scripts/spike-mcp-wire.mjs` (ts / custom / rmcp: 42 protocol cases + 8 CLI scenarios each; ts and custom all PASS, rmcp gaps reported). Run: see spikes/SP8.md "How to run".
+
+1. Codex `accept` of an elicitation is not exercised: `codex exec` always answers `decline`; the accept path needs the Codex TUI in a pty (M4 real-app checks). Accept is proven with Claude (Elicitation hook).
+2. Long waits through the Rust server (Claude 600 s, Codex 170 s, `MCP_CLI_WAIT`) not run; the 15 s SSE keepalive is in the prototype (M4, verify-mcp-cli).
+3. The 10 s header / 30 s body timeouts, the 120 / 60 per s bucket and the 256-session cap are in the prototype but no test drives them (M1 ports the mcp-protocol cases).
+4. No CLI declares or uses MCP tasks; the 2025-11-25 task wire is proven only at HTTP level against the TS server.
+5. macOS not run (hyper's drop-on-disconnect behaviour to be confirmed in CI / R3).
+6. The spike's `cap_result` uses `String::from_utf16_lossy`; 1.1.4 can emit a lone surrogate escape when the cut splits a pair (M2, with the F7 lone-surrogate handling).
+7. rmcp 3.9 stays a dev-dependency of the spike only (examples, tests); M1 removes it together with `examples/sp8/rmcp_impl.rs` when it moves the dispatcher into the crate.
 
 ### How to run
 

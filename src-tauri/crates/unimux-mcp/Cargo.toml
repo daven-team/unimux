@@ -10,3 +10,18 @@ license.workspace = true
 unimux-core.workspace = true
 unimux-ipc.workspace = true
 serde_json.workspace = true
+
+# SP8 spike (examples/sp8_server.rs, tests/sp8_wire.rs): both server candidates. M1 moves what it keeps into [dependencies].
+[dev-dependencies]
+tokio.workspace = true
+parking_lot.workspace = true
+uuid.workspace = true
+futures.workspace = true
+axum.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
+tokio-util.workspace = true
+getrandom.workspace = true
+rmcp.workspace = true
