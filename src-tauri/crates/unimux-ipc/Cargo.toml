@@ -1,0 +1,18 @@
+[package]
+name = "unimux-ipc"
+description = "window.mc contract, command router with not-yet stubs, sender guard, ordered sends, event routing, ports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
+tokio.workspace = true
+futures.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
