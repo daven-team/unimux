@@ -46,7 +46,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | SP2 | Electron safeStorage both directions | todo | | | | Mac half needs a Mac |
 | SP3 | Windows 1.1.4 -> Tauri NSIS hand-over | todo | | | | needs the VirtualBox Windows VM image |
 | SP4 | macOS 1.1.4 engine accepts the Tauri zip | todo | | | | needs a Mac |
-| SP5 | Rust ConPTY + Channel | todo | | | | |
+| SP5 | Rust ConPTY + Channel | done (partly verified) | 2026-11-06 | 2026-11-06 | | branch `tauri-pkg-SP5`, findings in spikes/SP5.md. Own windows-crate ConPTY wrapper in unimux-pty (bundled conpty.dll 1.23, flags 0 + Release like node-pty, Job Object, close off-thread while draining, writer thread, TimerResolution), frames + per-window batcher + byte-ack flow gate, check-only spike commands. Met: render parity (PowerShell, Claude Code, resize reflow, win32-input-mode, focus 1004), 50 close-under-flood rounds no deadlock, idle echo at or below 1.1.4 in all interleaved pairs. Partly: 20 x 1 MB/s at 60 fps (met with the 16 ms batcher for synthetic 20 MB/s and for most ConPTY runs; runs where ConPTY passed 13 to 20 MB/s dropped 45 to 72 frames over 50 ms, 1.1.4 drops more). See SP5 open issues |
 | SP6 | Custom update window process | todo | | | | |
 | SP7 | russh coverage | todo | | | | Docker |
 | SP8 | MCP wire with real CLIs | todo | | | | scratch home |
@@ -277,6 +277,18 @@ All 14 confirmed findings of the wave 0 review are fixed; none was skipped.
 10. Detached windows, the gate and the update window are not created yet, so the guard's detached registration and the destroy cleanup (`forget_on_destroy`) are only unit-tested and wired on the main window.
 11. HTML5 drag and drop (tab reorder / detach, snippets, notes, tree, SFTP) is enabled again by `disable_drag_drop_handler()` but no script drags yet; W3 adds the real-app drag checks with the OS file drop.
 12. The macOS half of the startup race (Electron's SingletonLock / SingletonSocket) is still R3; the Windows half (startup mutex + lockfile) is done.
+
+### SP5 open issues
+
+1. Echo under a 19-cell flood is slower than 1.1.4 in the median (13 to 28 ms vs 9 to 13 ms): the renderer main thread works through xterm's write queues of the other terminals (1 MiB unacked each). P2: smaller unacked window for unfocused terminals or pausing them while the focused one is typed into; re-measure with `scripts/sp5/run.mjs latency --load=19` vs `scripts/sp5/electron-grid.mjs 20 1000000 5 --latency=60`.
+2. "20 cells at 1 MB/s keep 60 fps" is not met when ConPTY passes 13 to 20 MB/s to xterm (the renderer saturates near 20 MB/s of parsing, in 1.1.4 as well); what ConPTY passes varies from 1 to 24 MB/s between runs (it drops lines that scroll past between its frames).
+3. OpenConsole 1.23 holds a new terminal's first output until DA1 is answered (3 s without a renderer): P2 answers it host-side.
+4. conpty.dll / OpenConsole.exe come from node-pty's third_party copy (node_modules) for tests and the check run (`UNIMUX_CONPTY_DIR`); P1 commits them under src-tauri/resources/conpty/x64 and wires the resource dir.
+5. One unreproduced flake in about 15 runs of the conpty suite: `job_object_kills_the_whole_tree` saw no exit 5 s after kill once under heavy machine load (the assertion now prints the process exit and close state).
+6. Renders compared by screenshot and scripted checks, not pixel-diffed; no pwsh on this machine (Windows PowerShell used, as 1.1.4's resolveShell would).
+7. Unix pty and the macOS run are P1.
+
+How to run SP5: `npm run build:check`, `cd src-tauri && node ../scripts/msvc-run.mjs cargo build --release -p unimux-pty --bins`, then `node scripts/sp5/run.mjs [render] [latency] [flood] [close]` (options in the file header); 1.1.4 references after `npm run build`: `node scripts/sp5/electron-ref.mjs`, `node scripts/sp5/electron-grid.mjs`, `node scripts/perf-latency.mjs 60 --json`; cargo: `node ../scripts/msvc-run.mjs cargo test -p unimux-pty`.
 
 ### How to run
 
