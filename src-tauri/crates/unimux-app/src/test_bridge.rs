@@ -89,7 +89,8 @@ pub async fn test_bridge(
             Ok(json!({ "runtimeExe": staged, "copyMs": started.elapsed().as_millis() as u64 }))
         }
         // SP6: the update window hand-over with a local installer (U1/U2 call it after the download and the wind-down), then
-        // the app exits like an update does. Args: {installer, updaterRoot, version?, language?}.
+        // the app exits like an update does. Args: {installer, updaterRoot, version?, fromVersion?, language?, timeoutMs?,
+        // env? (extra environment of the window), webviewDir?}.
         "update-handover" => {
             let path = |key: &str| args.get(key).and_then(Value::as_str).map(std::path::PathBuf::from);
             let installer = path("installer").ok_or_else(|| fail("update-handover needs installer"))?;
@@ -97,13 +98,17 @@ pub async fn test_bridge(
             let hand = unimux_update::window::HandOver {
                 installer,
                 version: args.get("version").and_then(Value::as_str).unwrap_or(unimux_core::VERSION).to_string(),
-                from_version: unimux_core::VERSION.to_string(),
+                from_version: args.get("fromVersion").and_then(Value::as_str).unwrap_or(unimux_core::VERSION).to_string(),
                 data_dir: ctx.data_dir.clone(),
                 updater_root,
                 app_exe: std::env::current_exe().map_err(|e| fail(&e.to_string()))?,
                 language: args.get("language").and_then(Value::as_str).unwrap_or("en").to_string(),
-                timeout_ms: unimux_update::window::INSTALL_TIMEOUT_MS,
-                env: None,
+                timeout_ms: args.get("timeoutMs").and_then(Value::as_u64).unwrap_or(unimux_update::window::INSTALL_TIMEOUT_MS),
+                env: args
+                    .get("env")
+                    .and_then(Value::as_object)
+                    .map(|env| env.iter().map(|(k, v)| (k.into(), v.as_str().unwrap_or_default().into())).collect()),
+                webview_dir: path("webviewDir"),
             };
             let result = tauri::async_runtime::spawn_blocking(move || unimux_update::window::hand_over(&hand))
                 .await
