@@ -75,6 +75,15 @@ tempfile = "3"
 windows = "0.62.2"
 libc = "0.2"
 webview2-com = "0.39.1"
+# SP7: ring backend (same provider as rustls), no aws-lc-sys build; "des" is not needed (3des-cbc is not in 1.1.4's offer).
+russh = { version = "=0.65.1", default-features = false, features = ["ring", "rsa", "flate2"] }
+# The ssh-key russh pins; "tdes" adds 3des-cbc OpenSSH key files (1.1.4 reads them). SP7.
+ssh-key = { version = "=0.7.0-rc.11", default-features = false, features = ["tdes"] }
+# Legacy encrypted PEM (Proc-Type: 4,ENCRYPTED) decryption, own code (SP7 prototype, S2): same versions russh pulls in.
+aes = "=0.9.4"
+cbc = "=0.2.1"
+des = "=0.9.0"
+md5 = "=0.8.1"
 
 [profile.release]
 lto = "thin"

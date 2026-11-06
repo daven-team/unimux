@@ -1,0 +1,23 @@
+{
+ "version": 1,
+ "entries": [
+  {
+   "id": "16763067-fb03-41a0-8456-ad415f9b4682",
+   "host": "127.0.0.1",
+   "port": 59530,
+   "keyType": "ecdsa-sha2-nistp256",
+   "key": "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBBj1e8a6WY7BD7Sn8t2fHzJizGJoyM8akfHBjCsmmmiIU7zKV4Af0iIpto5IFen02N8HXKScm6RPXp+USnbeBmw=",
+   "fingerprint": "SHA256:gmOd1PKyncyPl6pMoFPCXi9xYKDYRysQxOqQutSkEBo",
+   "addedAt": 1793977635429
+  },
+  {
+   "id": "db5393eb-b956-4dbf-bd1a-771e9d302c92",
+   "host": "127.0.0.1",
+   "port": 59530,
+   "keyType": "ssh-rsa",
+   "key": "AAAAB3NzaC1yc2EAAAADAQABAAABAQDIXvUNqocVSC5YK1RRBRinTI3TONT6MTPM7+ie8ng4hq8vwKC794bVd19rfJ4qJz4gA/Id0+QiNuOH0M2PZsj4+EmpiNc1ftpbFclhYaejAFvDiDCZusjJ6zs0WRWQEVcBhSatE5uz90sUTSHV7FxUIQxK9ntqMjZXyhcn4wLTFDvIOhunxdPdU3x50VCztnl9Q/tDdhjnkjFriZofxfUgH7JghHJnLmASNBHXZ8WBMg3rEaOr0eKrWIinQpwdf1y+dcwKGrfSFBkdAjCWXOU2nLD322I8TMRxYRO6JZOaUSslDRDfm5PhNSGS4N7+IlVgb7/vjJCRDz0nuXD9pcx3",
+   "fingerprint": "SHA256:LWI1juV9UlM7BqAHXjKkA02qXmXbj7WOeZBPM1fDeEo",
+   "addedAt": 1793977635509
+  }
+ ]
+}

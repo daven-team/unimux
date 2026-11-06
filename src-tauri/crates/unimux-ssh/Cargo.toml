@@ -10,3 +10,20 @@ license.workspace = true
 unimux-core.workspace = true
 unimux-ipc.workspace = true
 serde_json.workspace = true
+
+# SP7 (russh coverage spike): the key corpus test and the Docker matrix probe. S2/S3 move russh into [dependencies].
+[dev-dependencies]
+russh.workspace = true
+ssh-key.workspace = true
+aes.workspace = true
+cbc.workspace = true
+des.workspace = true
+md5.workspace = true
+tokio.workspace = true
+base64.workspace = true
+sha2.workspace = true
+serde_json.workspace = true
+
+[[example]]
+name = "sp7_probe"
+path = "examples/sp7_probe.rs"

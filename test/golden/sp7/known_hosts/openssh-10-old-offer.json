@@ -1,0 +1,14 @@
+{
+ "version": 1,
+ "entries": [
+  {
+   "id": "17992551-3c4e-4a94-b1a2-98569b5cc1fd",
+   "host": "127.0.0.1",
+   "port": 59569,
+   "keyType": "ssh-rsa",
+   "key": "AAAAB3NzaC1yc2EAAAADAQABAAABgQCr36xndilu88wiq8Brmk0jPy4jsYrwscBpwiXXVtoueRQQHN1mU0LhvfxqiLNnwXMUU2nIpHGS2axdvMSs8Qa+Xzs5Qa3MJ3JXU9lCVZ+n88JU9bJkm0oytQm2FpZzXkSGKOUg6fzK7zQpn5+hyWBRw4NpUh50dblO9PNV2ruhItMnWpsvVlbYtcfF8YjesHubjeb0QA/RIHaGGtYcdEBwijwPj4ThwYlt2+dReZeQy9yIjfASE4n6o44Z1MqktH8w+dhucOZJLccRpevZqPooZqagkqnvgaokpgESJ84im15TYKKPEpclFaGObcL8gRFMLWmhum19cn5Y4mbH5a64sHrlU2i91T/zsqNRd/V7FabwZooUoLryL3Mxa0CR07FUIcWmEJ54dhsIS0QANjsZPzHnxfSGf4UTmperTv0U7+7fp8/wnjqPCxFfzc39nWzrMsJnkszNO5ERAjJOAKdu4xb1sr3VSGCKEy6LbX+omhb1LioTTuzE8scgowOFZ+E=",
+   "fingerprint": "SHA256:vy7QSoUMj9UGXqxpzEnHt67ACTKB9meIE/cX7mYQSO8",
+   "addedAt": 1793977446150
+  }
+ ]
+}
