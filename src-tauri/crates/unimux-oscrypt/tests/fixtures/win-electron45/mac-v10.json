@@ -1,0 +1,30 @@
+{
+ "password": "VWvBfLN/L15mdTEy1nhZpQ==",
+ "key": "e1344bcf4efcde1805f38e6999e6f3dd",
+ "vectors": [
+  {
+   "text": "",
+   "blob": "djEwahjalfNebVVBINVdB0HPFw=="
+  },
+  {
+   "text": "a",
+   "blob": "djEw0y/CCpGe7MSVqM2xkP1pZw=="
+  },
+  {
+   "text": "0123456789abcdef",
+   "blob": "djEwnsTGyc4bzNDbfdkeGw8gqramk4HOrAvu3f+sSGnocFQ="
+  },
+  {
+   "text": "ssh-pass zażółć 🔑 \"quoted\" \\ end",
+   "blob": "djEwRReBqNuHKHSOZQ+dkoehQodMQgUJMWovO5WMKrA6rpy7ID/fIjLyMbur6qtgh3Rt"
+  },
+  {
+   "text": "db-pass Ünïcode 数据库",
+   "blob": "djEwmmlvqpef8RCehokMugkfvMxYjhFPDiaItRPipg4UQ6g="
+  },
+  {
+   "text": "gho_sp2SpikeThrowawayToken0123456789abcdef",
+   "blob": "djEw2P3QL+sj52cbxMwYQOLtOr80I4WNCjAYlJNujQEwpFcTVnDlN3t0j6p5B0wGijum"
+  }
+ ]
+}

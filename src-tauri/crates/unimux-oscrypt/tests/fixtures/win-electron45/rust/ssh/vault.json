@@ -1,0 +1,27 @@
+{
+ "version": 1,
+ "keys": [
+  {
+   "id": "1532c440-76c0-419c-b40c-01a95488537b",
+   "label": "sp2",
+   "type": "ssh-ed25519",
+   "bits": 256,
+   "fingerprint": "SHA256:z1F26ZD4+2FryOKUkYyQp01+fObjSX4ctndfZP2CtlA",
+   "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGUqco1pkwgyWJrMewttOz7PFlwuNX/loMTLKwKVshZE sp2-spike",
+   "comment": "sp2-spike",
+   "encrypted": true,
+   "passphraseSaved": true,
+   "source": "generated",
+   "createdAt": 1793974277187,
+   "certificate": null,
+   "secret": "djEwztnPoPM6aE/qWJXkqhaFbMgR5hTITfmY21BXdXgdLhwK1bxScUgzm0dd/OLXoH9sCDV3j2nk5k31BNwXk6K2FS3j8u/epcLqt7qcswwN43znkvYGX+Cu9JHi4DDl5JP57k2T5WjBKiI3lfTb3/hLPSbmsDf/NP4hSDETCFgXHNN4bnyy4pa5pN48V5eHYI4c+Lr1kTMBDqpTGhCSDW8hQvzh53A2Tb+XlQS6VnO9cnaeTD2SwDZ12hYt6qQ5CeENuQnvNj+EJXtGPxxddhAT+NPPjm4rGtu31iTUBBPWYK4Aj+i9gApWfQe4KzHj4CvgEUD5rawrulePJWvo7HhwLn9LYkku/FTj9rM3CsXKAmZTuk5Yq1UAgE3nE7xL9yEr4DYI7qcytdW2/OfWmXilCFX3SLbk1s74JJbOtOxSm3NCtV5DpbDzF6teSrebVADJiX3gHIDnHONiT3TDaXBNRLBCYi1QQl2xDkaoZndWNqaJrLnafRHydKGZtmFjZsMByPs4Hh+JxvhTkqnpwDm9PikrfQwPrsdsqwb5t9oFLecH2w+WIY58mbPitKjo6TcIBi8+/IK9HIqKx+1wknAiZQNf2whDSywEecYfVkLjlgmnTlK4rUJUntISaFYidna0XtHVH9IFhW0gN4zPzwLzDcPEhKQC5tDOKPs4PwZ+JJU2klpdpiBfoyAP97NOExk8HWY="
+  }
+ ],
+ "passwords": [
+  {
+   "hostId": "946a6ce4-2dbe-4184-99eb-c7c5dfbb9c5a",
+   "updatedAt": 1793974267397,
+   "secret": "djEwrn63cEFSbr4tjSfpfSDb4B4XDMivBUmWr9Ct/0mgjSzYt9zxdMdVWBG5kKQfyJc3/McZHNmdQhiUorzcWqoFqRiB+A=="
+  }
+ ]
+}

@@ -43,7 +43,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | id | title | status | started | done | verified | notes |
 |---|---|---|---|---|---|---|
 | SP1 | WebView2 shell behaviour | todo | | | | |
-| SP2 | Electron safeStorage both directions | todo | | | | Mac half needs a Mac |
+| SP2 | Electron safeStorage both directions | verified (Windows) | 2026-11-06 | 2026-11-06 | 2026-11-06 | spikes/SP2.md. Real 1.1.4 (Electron 45.2.2) on a scratch MC_DATA_DIR: SSH password, SSH key secret, DB password, GitHub token decrypt in Rust; Rust re-encryptions decrypt in 1.1.4 (nothing locked, files and key untouched); Rust-created `Local State` is kept by 1.1.4 byte for byte once wrapped like Chromium (description `Chromium`, CRYPTPROTECT_AUDIT, `audit_enabled`). v10 confirmed, no v20. Keychain names from source: `unimux Safe Storage` / `unimux Key` (+ legacy `unimux` migration). `scripts/spike-sp2-safestorage.mjs` 28/28, unimux-oscrypt 17 tests, fixtures committed. Open: Mac half (needs a Mac) |
 | SP3 | Windows 1.1.4 -> Tauri NSIS hand-over | todo | | | | needs the VirtualBox Windows VM image |
 | SP4 | macOS 1.1.4 engine accepts the Tauri zip | todo | | | | needs a Mac |
 | SP5 | Rust ConPTY + Channel | todo | | | | |
@@ -277,6 +277,12 @@ All 14 confirmed findings of the wave 0 review are fixed; none was skipped.
 10. Detached windows, the gate and the update window are not created yet, so the guard's detached registration and the destroy cleanup (`forget_on_destroy`) are only unit-tested and wired on the main window.
 11. HTML5 drag and drop (tab reorder / detach, snippets, notes, tree, SFTP) is enabled again by `disable_drag_drop_handler()` but no script drags yet; W3 adds the real-app drag checks with the OS file drop.
 12. The macOS half of the startup race (Electron's SingletonLock / SingletonSocket) is still R3; the Windows half (startup mutex + lockfile) is done.
+
+### SP2 open issues
+
+1. **Mac half not run** (no Mac): the Keychain round trip with 1.1.4 on macOS, the one "Always Allow" prompt for the re-signed binary, and the legacy-account migration. The macOS code is compiled and clippy clean for aarch64-apple-darwin and its crypto matches Node vectors byte for byte, nothing more. The spike script is Windows-only and needs a small launcher port for the Mac run.
+2. A `Local State` whose DPAPI key belongs to another Windows user stays unavailable in Rust (locked, nothing written); Electron's behaviour there was not measured (needs a second Windows account).
+3. B2: when to touch the Keychain first on macOS (`Cipher::open` is eager today), the callers and IPC, `MC_SSH_NO_SAFESTORAGE` through DevOverrides, `Origin` in startup.log.
 
 ### How to run
 
