@@ -3,7 +3,7 @@
 //! this into the OutputChannel / FlowGate / TailBuffer engine; the spike keeps only what the measurements need.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -65,16 +65,26 @@ pub struct Stats {
     pub pauses: AtomicU64,
 }
 
+#[derive(Default)]
+struct FlowState {
+    unacked: usize,
+    paused: bool,
+}
+
+/// Byte-ack flow control of one stream. The counter, the paused flag and the gate change together under one lock, so a
+/// pause and a resume racing each other always leave the gate as the flag says.
+#[derive(Default)]
 struct Flow {
-    unacked: AtomicUsize,
-    paused: AtomicBool,
+    state: Mutex<FlowState>,
     pauser: OnceLock<PauseHandle>,
 }
 
 impl Flow {
     fn add(&self, n: usize, stats: &Stats) {
-        let total = self.unacked.fetch_add(n, Ordering::SeqCst) + n;
-        if total > FLOW_HIGH && !self.paused.swap(true, Ordering::SeqCst) {
+        let mut st = self.state.lock();
+        st.unacked += n;
+        if st.unacked > FLOW_HIGH && !st.paused {
+            st.paused = true;
             stats.pauses.fetch_add(1, Ordering::Relaxed);
             if let Some(p) = self.pauser.get() {
                 p.set_paused(true);
@@ -82,22 +92,46 @@ impl Flow {
         }
     }
     fn ack(&self, n: usize) {
-        let mut prev = self.unacked.load(Ordering::SeqCst);
-        while let Err(now) = self.unacked.compare_exchange(prev, prev.saturating_sub(n), Ordering::SeqCst, Ordering::SeqCst) {
-            prev = now;
-        }
-        if prev.saturating_sub(n) < FLOW_LOW
-            && self.paused.swap(false, Ordering::SeqCst)
-            && let Some(p) = self.pauser.get()
-        {
-            p.set_paused(false);
+        let mut st = self.state.lock();
+        st.unacked = st.unacked.saturating_sub(n);
+        if st.unacked < FLOW_LOW && st.paused {
+            st.paused = false;
+            if let Some(p) = self.pauser.get() {
+                p.set_paused(false);
+            }
         }
     }
+    /// Synthetic streams: whether to hold back now (over FLOW_HIGH), counting each new pause.
+    fn held_back(&self, stats: &Stats) -> bool {
+        let mut st = self.state.lock();
+        if st.unacked > FLOW_HIGH {
+            if !st.paused {
+                st.paused = true;
+                stats.pauses.fetch_add(1, Ordering::Relaxed);
+            }
+            true
+        } else {
+            st.paused = false;
+            false
+        }
+    }
+    fn sent(&self, n: usize) {
+        self.state.lock().unacked += n;
+    }
+}
+
+/// Whether a pty's frames still belong to its id: false once a respawn under the same id replaced it, so the old
+/// process's last output and its exit never reach the new terminal. The reader holds the lock while it pushes a frame.
+struct Live {
+    current: Mutex<bool>,
+    /// on_exit ran (the entry may be inserted only after that; spawn then drops it at once).
+    exited: AtomicBool,
 }
 
 struct Term {
     pty: Pty,
     flow: Arc<Flow>,
+    live: Arc<Live>,
     generation: u64,
 }
 
@@ -228,32 +262,52 @@ impl Plane {
     }
 
     pub fn spawn(self: &Arc<Self>, id: &str, opts: &SpawnOptions) -> std::io::Result<u32> {
-        self.kill(id);
-        let flow = Arc::new(Flow { unacked: AtomicUsize::new(0), paused: AtomicBool::new(false), pauser: OnceLock::new() });
+        // A respawn: the old pty is muted, then killed; its remaining output and its exit are dropped.
+        if let Some(old) = self.terms.lock().get(id) {
+            *old.live.current.lock() = false;
+            old.pty.kill();
+        }
+        let flow = Arc::new(Flow::default());
+        let live = Arc::new(Live { current: Mutex::new(true), exited: AtomicBool::new(false) });
         let (batcher, sink, stats, batch_ms) =
             (self.batcher.clone(), self.sink.clone(), self.stats.clone(), self.config.batch_ms);
-        let (data_id, data_flow, use_flow) = (id.to_string(), flow.clone(), self.config.flow);
+        let (data_id, data_flow, data_live, use_flow) = (id.to_string(), flow.clone(), live.clone(), self.config.flow);
         let on_data = Box::new(move |bytes: &[u8]| {
+            let current = data_live.current.lock();
+            if !*current {
+                return;
+            }
             if use_flow {
                 data_flow.add(bytes.len(), &stats);
             }
             Self::push_to(&batcher, &sink, &stats, batch_ms, &data_id, KIND_DATA, bytes);
         });
         let me = Arc::downgrade(self);
-        let exit_id = id.to_string();
+        let (exit_id, exit_live) = (id.to_string(), live.clone());
         let generation = GENERATION.fetch_add(1, Ordering::Relaxed);
         let on_exit = Box::new(move |code: u32| {
-            if let Some(plane) = me.upgrade() {
+            let Some(plane) = me.upgrade() else { return };
+            if *exit_live.current.lock() {
                 plane.push(&exit_id, KIND_EXIT, &(code as i32).to_le_bytes());
-                plane.forget(&exit_id, generation);
             }
+            exit_live.exited.store(true, Ordering::SeqCst);
+            plane.forget(&exit_id, generation);
         });
         let pty = Pty::spawn(self.api, opts, on_data, on_exit)?;
         let _ = flow.pauser.set(pty.pause_handle());
         let pid = pty.pid();
         let mut terms = self.terms.lock();
-        terms.insert(id.to_string(), Term { pty, flow, generation });
-        if self.config.timer_1ms {
+        if let Some(old) = terms.insert(id.to_string(), Term { pty, flow, live: live.clone(), generation }) {
+            *old.live.current.lock() = false;
+        }
+        // A process that ended before the insert: its forget found nothing (or the old entry), so the entry goes here.
+        // on_exit sets `exited` before it takes the terms lock, so one of the two always removes it.
+        if live.exited.load(Ordering::SeqCst) {
+            terms.remove(id);
+        }
+        if terms.is_empty() {
+            self.timer.lock().take();
+        } else if self.config.timer_1ms {
             let mut timer = self.timer.lock();
             if timer.is_none() {
                 *timer = Some(TimerResolution::acquire());
@@ -314,7 +368,7 @@ impl Plane {
     /// repaints its viewport and drops lines that scroll past between two of its frames). Held back while more than
     /// FLOW_HIGH bytes are unacknowledged, like a paused pty.
     pub fn synthetic(self: &Arc<Self>, id: &str, rate: u64, seconds: u64) {
-        let flow = Arc::new(Flow { unacked: AtomicUsize::new(0), paused: AtomicBool::new(false), pauser: OnceLock::new() });
+        let flow = Arc::new(Flow::default());
         let stop = Arc::new(AtomicBool::new(false));
         if let Some((_, old)) = self.synthetic.lock().insert(id.to_string(), (flow.clone(), stop.clone())) {
             old.store(true, Ordering::SeqCst);
@@ -328,12 +382,7 @@ impl Plane {
             let mut chunk = Vec::new();
             while !stop.load(Ordering::SeqCst) && (seconds == 0 || started.elapsed() < Duration::from_secs(seconds)) {
                 let Some(plane) = me.upgrade() else { return };
-                if flow.unacked.load(Ordering::SeqCst) > FLOW_HIGH {
-                    if !flow.paused.swap(true, Ordering::SeqCst) {
-                        plane.stats.pauses.fetch_add(1, Ordering::Relaxed);
-                    }
-                } else {
-                    flow.paused.store(false, Ordering::SeqCst);
+                if !flow.held_back(&plane.stats) {
                     let target = (rate as f64 * started.elapsed().as_secs_f64()) as u64;
                     chunk.clear();
                     while sent + (chunk.len() as u64) < target {
@@ -348,7 +397,7 @@ impl Plane {
                     }
                     if !chunk.is_empty() {
                         sent += chunk.len() as u64;
-                        flow.unacked.fetch_add(chunk.len(), Ordering::SeqCst);
+                        flow.sent(chunk.len());
                         plane.push(&id, KIND_DATA, &chunk);
                     }
                 }

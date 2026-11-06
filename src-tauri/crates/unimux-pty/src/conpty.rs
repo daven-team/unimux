@@ -5,9 +5,15 @@
 //!   kernel32 API when the files are missing), created with flags 0 (node-pty's default, `conptyInheritCursor` false;
 //!   portable-pty always sets INHERIT_CURSOR | RESIZE_QUIRK | WIN32_INPUT_MODE, which changes what the shell sees);
 //! - `ConptyReleasePseudoConsole` right after the child started (node-pty does it with the dll): OpenConsole then exits by
-//!   itself when the last client is gone, so the output pipe ends after the shell's final output (output after exit);
-//! - the child is created suspended and put into a Job Object (kill-on-close) before it runs, so a kill ends the whole tree
-//!   (dev servers an agent started), not only the shell;
+//!   itself when the last client is gone, so the output pipe ends after the shell's final output (output after exit). The
+//!   exit is reported when the pipe ends, not when the shell ends: a background child still attached to the console (a
+//!   `start /b` job) keeps running and printing until it ends, like node-pty's dll path. Only the in-box API (no Release)
+//!   closes the pseudoconsole 1 s after the shell ended (node-pty's FLUSH_DATA_INTERVAL);
+//! - the child is created suspended and put into a Job Object before it runs, so a kill ends the whole tree (dev servers
+//!   an agent started), not only the shell. The job has no kill-on-close: programs started from a terminal whose shell
+//!   ended by itself survive, as in 1.1.4;
+//! - a kill goes like node-pty's: input closed, ClosePseudoConsole (attached programs get CTRL_CLOSE), then the shell is
+//!   terminated (exit code 1), then the job (the rest of the tree);
 //! - `ClosePseudoConsole` runs on its own thread while the reader keeps draining the output pipe, even when the flow gate has
 //!   paused it: OpenConsole flushes its last frame on close and blocks while nobody reads, which deadlocks a close done on
 //!   the reader thread or with a paused reader;
@@ -27,10 +33,7 @@ use std::time::{Duration, Instant};
 use parking_lot::{Condvar, Mutex};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HMODULE, WAIT_OBJECT_0};
 use windows::Win32::Media::{timeBeginPeriod, timeEndPeriod};
-use windows::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JobObjectExtendedLimitInformation, SetInformationJobObject, TerminateJobObject,
-};
+use windows::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW, TerminateJobObject};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LOAD_WITH_ALTERED_SEARCH_PATH, LoadLibraryExW};
 use windows::Win32::System::Pipes::CreatePipe;
 use windows::Win32::System::Threading::{
@@ -46,8 +49,9 @@ use crate::cmdline::args_to_command_line;
 /// Size of both pipes (node-pty's named pipes use 128 KiB) and of one read.
 const PIPE_SIZE: u32 = 128 * 1024;
 const READ_SIZE: usize = 64 * 1024;
-/// After the shell ended, how long the output may take to end by itself before the pseudoconsole is closed (node-pty's
-/// FLUSH_DATA_INTERVAL for the in-box API; with the dll and Release the pipe normally ends at once).
+/// In-box API only (no Release): after the shell ended, how long the output may take to end by itself before the
+/// pseudoconsole is closed (node-pty's FLUSH_DATA_INTERVAL). With the dll and Release the pipe ends when OpenConsole has
+/// no clients left, and nothing is closed on a timer.
 const EXIT_DRAIN: Duration = Duration::from_millis(1000);
 
 #[repr(C)]
@@ -173,7 +177,7 @@ pub struct SpawnOptions {
     pub rows: u16,
     /// CreatePseudoConsole flags; 0 like node-pty (1 = PSEUDOCONSOLE_INHERIT_CURSOR).
     pub flags: u32,
-    /// Put the child into its own kill-on-close Job Object (tree kill).
+    /// Put the child into its own Job Object (tree kill on [`Pty::kill`]; no kill-on-close).
     pub job: bool,
 }
 
@@ -198,28 +202,17 @@ unsafe impl Send for Job {}
 unsafe impl Sync for Job {}
 
 impl Job {
+    /// A job without limits: it only groups the tree for TerminateJobObject. No KILL_ON_JOB_CLOSE, so closing the handle
+    /// (the terminal is forgotten after its shell ended by itself) leaves detached programs running, as in 1.1.4.
     fn new() -> io::Result<Self> {
-        // SAFETY: plain Win32 calls; the handle is owned by the returned value.
-        unsafe {
-            let handle = CreateJobObjectW(None, PCWSTR::null()).map_err(io::Error::other)?;
-            let job = Job(handle);
-            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            SetInformationJobObject(
-                handle,
-                JobObjectExtendedLimitInformation,
-                &info as *const _ as *const c_void,
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            )
-            .map_err(io::Error::other)?;
-            Ok(job)
-        }
+        // SAFETY: plain Win32 call; the handle is owned by the returned value.
+        unsafe { CreateJobObjectW(None, PCWSTR::null()).map(Job).map_err(io::Error::other) }
     }
 }
 
 impl Drop for Job {
     fn drop(&mut self) {
-        // SAFETY: our own handle; KILL_ON_JOB_CLOSE ends whatever is left in the job.
+        // SAFETY: our own handle; without kill-on-close the processes in the job keep running.
         unsafe {
             let _ = CloseHandle(self.0);
         }
@@ -270,6 +263,15 @@ struct Shared {
     /// How long the last ClosePseudoConsole call took (measurements).
     close_took: Mutex<Option<Duration>>,
     close_done: Condvar,
+    /// A kill was asked (`kill`) and the close returned (`closed`); the terminate runs once both hold.
+    kill_state: Mutex<KillState>,
+}
+
+#[derive(Default)]
+struct KillState {
+    kill: bool,
+    closed: bool,
+    terminated: bool,
 }
 
 impl Shared {
@@ -279,20 +281,74 @@ impl Shared {
             return;
         }
         self.gate.set_closing();
-        let Some(hpc) = self.hpc.lock().take() else { return };
+        let Some(hpc) = self.hpc.lock().take() else {
+            self.closed(Duration::ZERO);
+            return;
+        };
         let me = self.clone();
         let close = self.api.close;
-        let _ = std::thread::Builder::new().name("conpty-close".into()).spawn(move || {
+        let run = move || {
             let started = Instant::now();
             // SAFETY: hpc came from create and is closed exactly once (taken out of the mutex).
             unsafe { close(hpc) };
-            *me.close_took.lock() = Some(started.elapsed());
-            me.close_done.notify_all();
-        });
+            me.closed(started.elapsed());
+        };
+        let slot = Arc::new(Mutex::new(Some(run)));
+        let spawned = {
+            let slot = slot.clone();
+            std::thread::Builder::new().name("conpty-close".into()).spawn(move || {
+                if let Some(run) = slot.lock().take() {
+                    run();
+                }
+            })
+        };
+        if spawned.is_err() {
+            // No thread to spare: close here (the reader drains meanwhile, the gate is open).
+            if let Some(run) = slot.lock().take() {
+                run();
+            }
+        }
+    }
+
+    /// The close returned: record it and run a kill that waited for it.
+    fn closed(&self, took: Duration) {
+        *self.close_took.lock() = Some(took);
+        self.close_done.notify_all();
+        let mut st = self.kill_state.lock();
+        st.closed = true;
+        if st.kill {
+            self.terminate(&mut st);
+        }
+    }
+
+    /// node-pty's TerminateProcess(hShell, 1) after the close, then the rest of the tree through the job. Once.
+    fn terminate(&self, st: &mut KillState) {
+        if st.terminated {
+            return;
+        }
+        st.terminated = true;
+        // SAFETY: valid handles owned by `self`.
+        unsafe {
+            let _ = TerminateProcess(HANDLE(self.process.as_raw_handle()), 1);
+            if let Some(job) = &self.job {
+                let _ = TerminateJobObject(job.0, 1);
+            }
+        }
     }
 
     fn exit_code(&self) -> Option<u32> {
         *self.exit.lock()
+    }
+}
+
+impl Drop for Shared {
+    fn drop(&mut self) {
+        // A pseudoconsole nobody closed (a spawn that failed after create): close it so OpenConsole does not leak. No
+        // reader is left, so its output pipe is broken and the close cannot block on it.
+        if let Some(hpc) = self.hpc.get_mut().take() {
+            // SAFETY: hpc came from create and was never closed (it is still in the slot).
+            unsafe { (self.api.close)(hpc) };
+        }
     }
 }
 
@@ -330,6 +386,8 @@ impl Pty {
         let size = Coord { x: opts.cols.max(2) as i16, y: opts.rows.max(1) as i16 };
         let (mut in_read, mut in_write, mut out_read, mut out_write) =
             (HANDLE::default(), HANDLE::default(), HANDLE::default(), HANDLE::default());
+        // Before the pseudoconsole: a failure here must not leave an OpenConsole behind.
+        let job = if opts.job { Some(Job::new()?) } else { None };
         // SAFETY: each handle is owned below (File / OwnedHandle) or closed on every path.
         unsafe {
             CreatePipe(&mut in_read, &mut in_write, None, PIPE_SIZE).map_err(io::Error::other)?;
@@ -392,7 +450,6 @@ impl Pty {
                 block
             });
             let cwd = opts.cwd.as_ref().map(|c| wide(c.as_os_str()));
-            let job = if opts.job { Some(Job::new()?) } else { None };
             let mut flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT;
             if job.is_some() {
                 flags |= CREATE_SUSPENDED;
@@ -424,7 +481,13 @@ impl Pty {
                     close_hpc(hpc);
                     return Err(io::Error::other(format!("AssignProcessToJobObject: {e}")));
                 }
-                ResumeThread(pi.hThread);
+                if ResumeThread(pi.hThread) == u32::MAX {
+                    let e = io::Error::last_os_error();
+                    let _ = TerminateProcess(pi.hProcess, 1);
+                    let _ = CloseHandle(pi.hThread);
+                    close_hpc(hpc);
+                    return Err(io::Error::other(format!("ResumeThread: {e}")));
+                }
             }
             let _ = CloseHandle(pi.hThread);
             if let Some(release) = api.release {
@@ -444,59 +507,82 @@ impl Pty {
                 close_started: AtomicBool::new(false),
                 close_took: Mutex::new(None),
                 close_done: Condvar::new(),
+                kill_state: Mutex::new(KillState::default()),
             });
-
-            // Waiter: the exit code; then the output gets EXIT_DRAIN to end by itself before the pseudoconsole is closed.
-            let waiter = shared.clone();
-            std::thread::Builder::new().name("conpty-wait".into()).spawn(move || {
-                WaitForSingleObject(HANDLE(waiter.process.as_raw_handle()), INFINITE);
-                let mut code = 0u32;
-                let _ = GetExitCodeProcess(HANDLE(waiter.process.as_raw_handle()), &mut code);
-                *waiter.exit.lock() = Some(code);
-                waiter.exit_cv.notify_all();
-                let deadline = Instant::now() + EXIT_DRAIN;
-                while !waiter.eof.load(Ordering::SeqCst) && Instant::now() < deadline {
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                if !waiter.eof.load(Ordering::SeqCst) {
-                    waiter.close_pseudoconsole();
-                }
-            })?;
-
-            // Reader: drains until the pipe ends, then reports the exit.
-            let reader = shared.clone();
-            let mut out_read = out_read;
-            std::thread::Builder::new().name("conpty-read".into()).spawn(move || {
-                let mut buf = vec![0u8; READ_SIZE];
-                loop {
-                    reader.gate.wait_open();
-                    match out_read.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => on_data(&buf[..n]),
-                    }
-                }
-                reader.eof.store(true, Ordering::SeqCst);
-                let mut exit = reader.exit.lock();
-                while exit.is_none() {
-                    reader.exit_cv.wait(&mut exit);
-                }
-                let code = exit.unwrap_or(1);
-                drop(exit);
-                // The pseudoconsole is closed in every case (a no-op when it already was).
-                reader.close_pseudoconsole();
-                on_exit(code);
-            })?;
+            // A thread that cannot start: end the process (the threads already running then end too) and fail; the last
+            // Arc<Shared> closes the pseudoconsole.
+            let fail = |shared: &Shared, e: io::Error| {
+                shared.terminate(&mut shared.kill_state.lock());
+                e
+            };
 
             // Writer: input never blocks the caller (the console may be stuck on a full output pipe).
             let (tx, rx) = mpsc::channel::<Vec<u8>>();
             let mut in_write = in_write;
-            std::thread::Builder::new().name("conpty-write".into()).spawn(move || {
-                while let Ok(data) = rx.recv() {
-                    if in_write.write_all(&data).is_err() {
-                        break;
+            std::thread::Builder::new()
+                .name("conpty-write".into())
+                .spawn(move || {
+                    while let Ok(data) = rx.recv() {
+                        if in_write.write_all(&data).is_err() {
+                            break;
+                        }
                     }
-                }
-            })?;
+                })
+                .map_err(|e| fail(&shared, e))?;
+
+            // Waiter: the exit code. With the dll + Release nothing else: the output pipe ends when OpenConsole has no
+            // clients left (a `start /b` child may keep it open and print after the shell ended, as in 1.1.4). The in-box
+            // API has no Release: the output gets EXIT_DRAIN to end by itself before the pseudoconsole is closed.
+            let waiter = shared.clone();
+            let drain_then_close = api.release.is_none();
+            std::thread::Builder::new()
+                .name("conpty-wait".into())
+                .spawn(move || {
+                    WaitForSingleObject(HANDLE(waiter.process.as_raw_handle()), INFINITE);
+                    let mut code = 0u32;
+                    let _ = GetExitCodeProcess(HANDLE(waiter.process.as_raw_handle()), &mut code);
+                    *waiter.exit.lock() = Some(code);
+                    waiter.exit_cv.notify_all();
+                    if !drain_then_close {
+                        return;
+                    }
+                    let deadline = Instant::now() + EXIT_DRAIN;
+                    while !waiter.eof.load(Ordering::SeqCst) && Instant::now() < deadline {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    if !waiter.eof.load(Ordering::SeqCst) {
+                        waiter.close_pseudoconsole();
+                    }
+                })
+                .map_err(|e| fail(&shared, e))?;
+
+            // Reader (started last, so on_exit never runs for a spawn that failed): drains until the pipe ends, then
+            // reports the exit.
+            let reader = shared.clone();
+            let mut out_read = out_read;
+            std::thread::Builder::new()
+                .name("conpty-read".into())
+                .spawn(move || {
+                    let mut buf = vec![0u8; READ_SIZE];
+                    loop {
+                        reader.gate.wait_open();
+                        match out_read.read(&mut buf) {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => on_data(&buf[..n]),
+                        }
+                    }
+                    reader.eof.store(true, Ordering::SeqCst);
+                    let mut exit = reader.exit.lock();
+                    while exit.is_none() {
+                        reader.exit_cv.wait(&mut exit);
+                    }
+                    let code = exit.unwrap_or(1);
+                    drop(exit);
+                    // The pseudoconsole is closed in every case (a no-op when it already was).
+                    reader.close_pseudoconsole();
+                    on_exit(code);
+                })
+                .map_err(|e| fail(&shared, e))?;
 
             Ok(Pty { shared, input: Mutex::new(Some(tx)) })
         }
@@ -540,21 +626,18 @@ impl Pty {
         self.shared.gate.set_paused(paused);
     }
 
-    /// Ends the process tree (the job, or the shell alone without one) and closes the pseudoconsole off-thread; the reader
-    /// drains the rest and reports the exit.
+    /// node-pty's dll kill order: the input is closed, the pseudoconsole is closed off-thread (attached programs get
+    /// CTRL_CLOSE), and once that returned the shell is terminated (exit code 1) and then the rest of the tree through the
+    /// job. Returns at once; the reader drains the rest and reports the exit.
     pub fn kill(&self) {
-        // SAFETY: valid handles owned by `shared`.
-        unsafe {
-            match &self.shared.job {
-                Some(job) => {
-                    let _ = TerminateJobObject(job.0, 1);
-                }
-                None => {
-                    let _ = TerminateProcess(HANDLE(self.shared.process.as_raw_handle()), 1);
-                }
+        self.input.lock().take();
+        {
+            let mut st = self.shared.kill_state.lock();
+            st.kill = true;
+            if st.closed {
+                self.shared.terminate(&mut st);
             }
         }
-        self.input.lock().take();
         self.shared.close_pseudoconsole();
     }
 
