@@ -50,7 +50,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | SP6 | Custom update window process | todo | | | | |
 | SP7 | russh coverage | todo | | | | Docker |
 | SP8 | MCP wire with real CLIs | todo | | | | scratch home |
-| SP9 | DB wire fidelity | todo | | | | Docker |
+| SP9 | DB wire fidelity | verified (branch tauri-pkg-SP9, not merged) | 2026-11-06 | | 2026-11-06 | docs/tauri/spikes/SP9.md. Value goldens byte-identical to 1.1.4 (written through the real 1.1.4 DB host): PG 13.23 + 18.6 37/37 statements on both protocol paths, MySQL 8.4.13 24/24, MariaDB 11.8.9 25/25, Redis 8 37/37, plus startup / connect bytes and logins. Custom paths: PG own frame layer (3.2 BackendKeyData, NegotiateProtocolVersion, lossy strings), MySQL own framing / COM_QUERY / column parser (MariaDB extended metadata), Redis own RESP2 client (redis crate dropped: non-UTF-8 status lines end its connection, 500 ms default timeout). Spike code in unimux-db `wire/`; `node scripts/spike-db-wire.mjs` (own Docker containers, removed by id) |
 
 ### Wave 1
 
@@ -277,6 +277,15 @@ All 14 confirmed findings of the wave 0 review are fixed; none was skipped.
 10. Detached windows, the gate and the update window are not created yet, so the guard's detached registration and the destroy cleanup (`forget_on_destroy`) are only unit-tested and wired on the main window.
 11. HTML5 drag and drop (tab reorder / detach, snippets, notes, tree, SFTP) is enabled again by `disable_drag_drop_handler()` but no script drags yet; W3 adds the real-app drag checks with the OS file drop.
 12. The macOS half of the startup race (Electron's SingletonLock / SingletonSocket) is still R3; the Windows half (startup mutex + lockfile) is done.
+
+### Open issues after SP9 (DB wire fidelity)
+
+1. TLS was not part of the spike for any of the three clients (rustls over the same generic streams): D4 / D7 / D9 cover it in their Docker matrices. MySQL 9 and Valkey are not in the SP9 matrix yet.
+2. D4 / D7 / D12 must send DB port messages through a JSON writer that can emit a lone `\udXXX` (a 64K cell cut inside a surrogate pair); `unimux_db::wire::value::DbValue::write_json` is the template, serde_json alone cannot.
+3. D7 decisions: MySQL connection attributes (`_client_name` is `Node-MySQL-2` in 1.1.4, `unimux` in the spike, visible only in performance_schema), keeping the `LOCAL_FILES` client flag that mysql2 advertises (the spike answers LOAD DATA LOCAL with an empty file), and whether to add MariaDB client_ed25519 (1.1.4 / mysql2 cannot log in with it; PLAN D7 lists it).
+4. D4 note: node-postgres takes `PGOPTIONS` (and other PG* variables) from the environment; the Rust client does not. Recommended to keep it that way and mention it in the 1.2.0 notes.
+5. The server checks need Docker: `cargo test` alone runs only the offline golden and unit tests (the server tests print "server checks skipped"); `node scripts/spike-db-wire.mjs` runs everything. CI does not start the containers yet.
+6. The redis crate stays a dev-dependency of unimux-db only to keep the measured gaps reproducible; D9 can drop it (and the workspace pin) once its own tests replace that comparison.
 
 ### How to run
 

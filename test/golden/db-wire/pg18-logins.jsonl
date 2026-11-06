@@ -1,0 +1,4 @@
+{"user":"sp9_md5","ok":false,"code":"28P01","message":"password authentication failed for user \"sp9_md5\""}
+{"user":"sp9_nfkc","ok":true}
+{"user":"sp9_nfkc_composed","ok":true}
+{"user":"wrong","ok":false,"code":"28P01","message":"password authentication failed for user \"postgres\""}

@@ -36,7 +36,7 @@ unimux.exe (Rust, tauri 2.12.5, windows_subsystem = "windows", panic = "unwind")
  |    hooks server (axum), MCP server (axum), automation
  |    git, files, search, monitor, notes, changelog
  |    cli detect/install, context tracker, sessions, conversation search
- |    ssh (russh), sftp, db (postgres-protocol, mysql_common, redis, rusqlite)
+ |    ssh (russh), sftp, db (postgres-protocol, mysql_common, own RESP2, rusqlite)
  |    accounts, logins, usage, auto-switch, limit alerts, github
  |    oscrypt, http_fetch, notifications, update coordinator
  |- WebView2 / WKWebView: "main", "detached-<uuid>", "update-gate"
@@ -106,7 +106,7 @@ Version pins (checked with cargo search/info on 2026-11-06; crates.io and npm al
 - windows 0.62.2, webview2-com 0.39.1, tauri-winrt-notification 0.8.1, objc2-* 0.3.2, security-framework 3.7.0
 - aes-gcm 0.11.1, aes 0.9.4, cbc 0.2.1, pbkdf2 0.13.0, zeroize 1.9.1
 - reqwest 0.13.5 (rustls, no gzip), junction 2.1.0, dunce 1.0.5, fs4 (instance lock), interprocess 2.x (second-instance socket), rusty-leveldb 4.0.2, process-wrap 10.0.1
-- russh 0.65.1, russh-sftp 3.0.1, postgres-protocol 0.6.12, mysql_common 0.38.2, redis 1.8.1, rusqlite 0.41.1 (bundled, column_metadata), rustls 0.23.46 + tokio-rustls 0.26.6 (ring provider), axum 0.8.9, hyper 1.12.0, rmcp 3.9.0 (decided in SP8), fancy-regex 0.20.0, icu_collator 2.4.0, encoding_rs 0.8.44, trash 5.3.0
+- russh 0.65.1, russh-sftp 3.0.1, postgres-protocol 0.6.12 (with an own frame layer for BackendKeyData 3.2, NegotiateProtocolVersion and lossy strings, SP9), mysql_common 0.38.2 (default features off, flate2 `rust_backend`; own framing, COM_QUERY and column parser, SP9), Redis through an own RESP2 client (the redis crate was measured in SP9 and dropped: non-UTF-8 status lines end its connection, 500 ms default timeout), rusqlite 0.41.1 (bundled, column_metadata), rustls 0.23.46 + tokio-rustls 0.26.6 (ring provider), axum 0.8.9, hyper 1.12.0, rmcp 3.9.0 (decided in SP8), fancy-regex 0.20.0, icu_collator 2.4.0, encoding_rs 0.8.44, trash 5.3.0
 - minisign-verify, tar + flate2 (macOS .app.tar.gz), memchr: versions pinned in F1 with cargo info
 
 Node: Node 26 LTS is installed and used only to build the renderer (Vite), run vitest, generators and the real-app scripts.

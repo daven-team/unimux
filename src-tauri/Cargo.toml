@@ -75,6 +75,14 @@ tempfile = "3"
 windows = "0.62.2"
 libc = "0.2"
 webview2-com = "0.39.1"
+postgres-protocol = "0.6.12"
+mysql_common = { version = "0.38.2", default-features = false }
+# dev-dependency of unimux-db only (SP9 measured its gaps; the app uses an own RESP2 client)
+redis = { version = "1.8.1", default-features = false, features = ["tokio-comp"] }
+bytes = "1.12.1"
+fallible-iterator = "0.2.0"
+# mysql_common needs one flate2 backend: the pure Rust one (no C zlib build).
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 
 [profile.release]
 lto = "thin"
