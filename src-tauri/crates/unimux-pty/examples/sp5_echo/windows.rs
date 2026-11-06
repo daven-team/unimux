@@ -95,7 +95,7 @@ fn wait(probe: &Mutex<Probe>, timeout: Duration, pred: impl Fn(&Probe) -> bool) 
     pred(&probe.lock())
 }
 
-fn main() {
+pub fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let keys: usize = a.first().and_then(|s| s.parse().ok()).unwrap_or(60);
     let mode = a.get(1).cloned().unwrap_or_else(|| "raw".into());

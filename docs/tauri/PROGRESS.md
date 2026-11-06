@@ -55,7 +55,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 
 | id | title | status | started | done | verified | notes |
 |---|---|---|---|---|---|---|
-| P1 | Rust pty core | todo | | | | |
+| P1 | Rust pty core | done (Windows + Linux verified; macOS compile-checked only) | 2026-11-06 | 2026-11-06 | | branch `tauri-pkg-P1`. unimux-pty: `conpty` (SP5 wrapper, bundled dll loaded from the resource dir set at startup, `kill_tree`, DA1 answer before the kill of a terminal without input), `unix` (openpty, setsid + TIOCSCTTY, signal defaults, PWD, reader with pause gate, 200 ms exit drain, SIGHUP to the shell and foreground groups then SIGKILL to the session after 1 s), `shell` (resolveShell port incl. JS-object env semantics, terminal env TERM / COLORTERM / TERM_PROGRAM / MC_CELL_ID), `manager` (PtyManager: spawn with early input / pause hand-over, command 150 ms after the first output, respawn mutes the old terminal, kill / kill_and_wait 3 s, kill_all with tree kill of what is left, parallel kills), `supervisor` + `actor` (more than 5 crashes in 60 s fatal, restart 500*2^(n-1) ms, 500-message restart queue, sink panics on reader threads count). conpty.dll + OpenConsole.exe 1.23.2510.08001 x64 committed under src-tauri/resources/conpty/x64 (README with sha256 + MIT text), bundled through `tauri.windows.conf.json`; tests load that folder (no node_modules). Verified: cargo fmt; clippy -D warnings for unimux-pty + unimux-app (also with dev-overrides,test-bridge) on Windows, for unimux-pty on Linux (Docker rust:1.99-slim) and `--target aarch64-apple-darwin`; cargo test -p unimux-pty on Windows 14 unit + 12 manager (incl. 2 pty-kill-tree and 2 pty-shell-path ports) + 13 conpty + 2 plane, on Linux 14 + 12 (3 runs in a row green); cargo test -p unimux-app 6/6; npm run typecheck. Measured (Windows at 100 percent CPU from other builds): kill_all 30 in 77-165 ms, 30 parallel kills 174-474 ms, dev-server kill 74-307 ms, kill right after spawn 33-323 ms (was 3.1 s before the DA1 fix); Linux: 50 MB flood 4.3 s, kill_all 30 145 ms. See "P1 open issues" |
 | B1 | Dual host test harness (unimux-hostd) | todo | | | | |
 | B2 | unimux-oscrypt production | todo | | | | |
 | B3 | Rust http_fetch | todo | | | | PAC check in the VM |
@@ -377,6 +377,14 @@ Verification: `cargo fmt --all --check`, `cargo clippy -p unimux-mcp --all-targe
 6. The redis crate stays a dev-dependency of unimux-db only to keep the measured gaps reproducible; D9 can drop it (and the workspace pin) once its own tests replace that comparison.
 7. D7: after `SET NAMES` / `SET CHARACTER SET` mysql2 encodes queries and decodes column names in the session charset; `wire::mycharset` does it for utf8, latin1 / binary, ascii, ucs2 / utf16-le and cesu8 and refuses queries in the iconv-lite-only encodings (cp1250, koi8r, sjis, big5 ...). D7 adds iconv-lite's tables for those.
 8. D9: the reconnect handshake (`auth`, `client setname unimux`, `select` of the previously selected DB) is taken from the ioredis source (`wire::redis::reconnect_sequence`); D9 adds a golden for it through RedisSession.
+
+### P1 open issues (2026-11-06)
+
+1. **macOS not run** (no Mac, CI never ran): the Unix backend passes the full suite on Linux in Docker and compiles + clippy-cleans for aarch64-apple-darwin (`proc_listallpids` session scan, zsh `-il`); the "same suite on macos-latest" item waits for the first CI run of tauri.yml.
+2. **Load-sensitive SP5 cases**: with the machine at 100 percent CPU (other agents' builds) `conpty::output_after_exit_is_delivered_before_the_exit` (3000 cmd echoes; the same loop took 70 s into a plain pipe outside any pty at that load) timed out at 30 s and again at the raised 120 s, and `job_object_kills_the_whole_tree` once missed its 5 s exit limit when run in parallel with it; both pass alone and passed in the first full run. The manager suite uses the flood helper instead of cmd loops. Rerun `cargo test -p unimux-pty` on an idle machine before the P1 verification.
+3. Windows 50 MB flood took 107.8 s at that load (Linux 4.3 s); throughput is a P2 / SP5 target, P1 only checks pause, resume and completeness.
+4. The DA1 answer on kill (a terminal that never got input) is an addition to 1.1.4, where such a kill waited out OpenConsole's 3 s DA1 hold; P2's host-side DA1 answer for terminals without a renderer will make it rare.
+5. The pty service (`pty:*` commands, sizes, P2 output engine between the manager and the renderer) is P2 / P3; P1 only sets the conpty resource dir in `unimux-app` main.rs. The SP5 wave 0b items "conpty files from node_modules" and "Unix pty is P1" are resolved by this package.
 
 ### How to run
 

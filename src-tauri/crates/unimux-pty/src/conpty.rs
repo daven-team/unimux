@@ -12,8 +12,9 @@
 //! - the child is created suspended and put into a Job Object before it runs, so a kill ends the whole tree (dev servers
 //!   an agent started), not only the shell. The job has no kill-on-close: programs started from a terminal whose shell
 //!   ended by itself survive, as in 1.1.4;
-//! - a kill goes like node-pty's: input closed, ClosePseudoConsole (attached programs get CTRL_CLOSE), then the shell is
-//!   terminated (exit code 1), then the job (the rest of the tree);
+//! - a kill goes like node-pty's: input closed (after the DA1 answer when the terminal never got input, see
+//!   [`DA1_REPLY`]), ClosePseudoConsole (attached programs get CTRL_CLOSE), then the shell is terminated (exit code 1),
+//!   then the job (the rest of the tree);
 //! - `ClosePseudoConsole` runs on its own thread while the reader keeps draining the output pipe, even when the flow gate has
 //!   paused it: OpenConsole flushes its last frame on close and blocks while nobody reads, which deadlocks a close done on
 //!   the reader thread or with a paused reader;
@@ -53,6 +54,10 @@ const READ_SIZE: usize = 64 * 1024;
 /// pseudoconsole is closed (node-pty's FLUSH_DATA_INTERVAL). With the dll and Release the pipe ends when OpenConsole has
 /// no clients left, and nothing is closed on a timer.
 const EXIT_DRAIN: Duration = Duration::from_millis(1000);
+/// xterm.js's answer to DA1 (`CSI c`). OpenConsole 1.23 asks right after the start and holds the new terminal (its output
+/// and a ClosePseudoConsole) up to about 3 s until the answer comes. A kill of a terminal that never got any input sends it
+/// first (see [`Pty::kill`]).
+pub const DA1_REPLY: &[u8] = b"[?1;2c";
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -135,15 +140,26 @@ impl ConptyApi {
         }
     }
 
-    /// Folders searched for the bundled files, in order: `UNIMUX_CONPTY_DIR`, `<exe>/conpty`, `<exe>/resources/conpty/x64`.
+    /// The app's folder with the bundled files (`<resource dir>/resources/conpty/x64`, see `bundle.resources` in
+    /// tauri.conf.json). Set once at startup, before the first terminal; false when it was set already.
+    pub fn set_resource_dir(dir: PathBuf) -> bool {
+        RESOURCE_DIR.set(dir).is_ok()
+    }
+
+    /// Folders searched for the bundled files, in order: `UNIMUX_CONPTY_DIR`, the folder the app set
+    /// ([`ConptyApi::set_resource_dir`]), `<exe>/resources/conpty/x64` (where the installer and `cargo build` put the
+    /// resources), `<exe>/conpty`.
     pub fn bundled_candidates() -> Vec<PathBuf> {
         let mut dirs = Vec::new();
         if let Some(dir) = std::env::var_os("UNIMUX_CONPTY_DIR") {
             dirs.push(PathBuf::from(dir));
         }
+        if let Some(dir) = RESOURCE_DIR.get() {
+            dirs.push(dir.clone());
+        }
         if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
-            dirs.push(exe_dir.join("conpty"));
             dirs.push(exe_dir.join("resources").join("conpty").join("x64"));
+            dirs.push(exe_dir.join("conpty"));
         }
         dirs
     }
@@ -163,6 +179,8 @@ impl ConptyApi {
         .map_err(|e| io::Error::other(e.clone()))
     }
 }
+
+static RESOURCE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// What to start in a new pseudoconsole.
 #[derive(Debug, Clone)]
@@ -356,13 +374,16 @@ impl Drop for Shared {
 pub struct Pty {
     shared: Arc<Shared>,
     input: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
+    /// Input was queued (by [`Pty::write`]; a [`PtyWriter`] clone counts too).
+    wrote: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
-pub struct PtyWriter(mpsc::Sender<Vec<u8>>);
+pub struct PtyWriter(mpsc::Sender<Vec<u8>>, Arc<AtomicBool>);
 
 impl PtyWriter {
     pub fn write(&self, data: &[u8]) {
+        self.1.store(true, Ordering::SeqCst);
         let _ = self.0.send(data.to_vec());
     }
 }
@@ -584,7 +605,7 @@ impl Pty {
                 })
                 .map_err(|e| fail(&shared, e))?;
 
-            Ok(Pty { shared, input: Mutex::new(Some(tx)) })
+            Ok(Pty { shared, input: Mutex::new(Some(tx)), wrote: Arc::new(AtomicBool::new(false)) })
         }
     }
 
@@ -603,13 +624,26 @@ impl Pty {
 
     /// A cloneable input handle (for answers sent from the output callback, e.g. the DA1 reply in tests).
     pub fn writer(&self) -> Option<PtyWriter> {
-        self.input.lock().clone().map(PtyWriter)
+        self.input.lock().clone().map(|tx| PtyWriter(tx, self.wrote.clone()))
     }
 
     /// Queues input for the console (never blocks).
     pub fn write(&self, data: &[u8]) {
         if let Some(tx) = self.input.lock().as_ref() {
+            self.wrote.store(true, Ordering::SeqCst);
             let _ = tx.send(data.to_vec());
+        }
+    }
+
+    /// Closes the input. A terminal that never got any input (killed right after its start, before a renderer answered
+    /// DA1) gets the DA1 answer first: OpenConsole would otherwise sit out its 3 s DA1 wait before it handles the close, and
+    /// the kill would miss its 3 s limit. A late answer to a console that already gave up waiting only reaches a shell that
+    /// is being ended.
+    fn close_input(&self) {
+        if let Some(tx) = self.input.lock().take()
+            && !self.wrote.load(Ordering::SeqCst)
+        {
+            let _ = tx.send(DA1_REPLY.to_vec());
         }
     }
 
@@ -630,13 +664,25 @@ impl Pty {
     /// CTRL_CLOSE), and once that returned the shell is terminated (exit code 1) and then the rest of the tree through the
     /// job. Returns at once; the reader drains the rest and reports the exit.
     pub fn kill(&self) {
-        self.input.lock().take();
+        self.close_input();
         {
             let mut st = self.shared.kill_state.lock();
             st.kill = true;
             if st.closed {
                 self.shared.terminate(&mut st);
             }
+        }
+        self.shared.close_pseudoconsole();
+    }
+
+    /// Ends the whole tree now, without waiting for ClosePseudoConsole to return (kill_all after its time limit: a close
+    /// that hangs must not keep a dev server alive). The shell and the job are terminated; the close still runs off-thread.
+    pub fn kill_tree(&self) {
+        self.close_input();
+        {
+            let mut st = self.shared.kill_state.lock();
+            st.kill = true;
+            self.shared.terminate(&mut st);
         }
         self.shared.close_pseudoconsole();
     }

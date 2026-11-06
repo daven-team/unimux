@@ -23,3 +23,9 @@ windows = { workspace = true, features = [
   "Win32_Media",
   "Win32_System_Diagnostics_ToolHelp",
 ] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
