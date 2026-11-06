@@ -1,0 +1,1476 @@
+//! SP8 spike, candidate B: a custom dispatcher on axum + hyper that reproduces the 1.1.4 wire (src/main/mcp.ts on top of
+//! @modelcontextprotocol/sdk 1.32.2 StreamableHTTPServerTransport) message for message:
+//!
+//! - the mcp.ts check order: Host/Origin 403, path 404, Bearer 401 (constant-time compare), DELETE session, 405 Allow: POST,
+//!   in-flight 8 per token / 256 stateless + bucket 120 / 60 per s -> 429 Retry-After 1, 256 KB -> 413 -32000, -32700,
+//!   unknown session 404 -32001;
+//! - then the SDK transport checks (406 Accept, 415 Content-Type, -32700 invalid JSON-RPC, already initialized, protocol
+//!   version header 400, which is what Claude Code's `server/discover` probe for 2026-07-28 gets);
+//! - stateless JSON by default, SSE for a stateless tools/call with a progressToken and an SSE Accept, a session (SSE for
+//!   every request, `: keepalive` every 15 s) for an `initialize` that declares form elicitation; 256 sessions, 4 per token;
+//! - elicitation/create on the calling tool call's stream, answered by a later POST of the same session (120 s; a timeout
+//!   or an abort sends `notifications/cancelled` for it on the same stream; an answer that fails ElicitResultSchema or the
+//!   requested schema counts as cancel); notifications/progress; notifications/cancelled (the cancelled request gets no
+//!   answer);
+//! - the SDK's strict JSONRPCMessageSchema; the body decoded as Node's `Buffer.toString('utf8')` (invalid bytes U+FFFD);
+//! - MCP tasks of protocol 2025-11-25 (tools/call `params.task`, tasks/get, tasks/result, tasks/list paged 10 at a time with
+//!   nextCursor, tasks/cancel), 16 per token, ttl clamped to 60 s..1 h and restarted when the task completes or is cancelled
+//!   (InMemoryTaskStore), a working task that expires is aborted, pollInterval 2000, private to the token and to the
+//!   creating session (InMemoryTaskStore.lookup);
+//! - cancellation by drop: the request's CancellationToken is cancelled when hyper drops the handler future (JSON mode) or
+//!   the response body (SSE mode), i.e. when the client goes away.
+
+use std::collections::HashMap;
+use std::convert::Infallible;
+use std::net::SocketAddr;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
+
+use axum::Router;
+use axum::body::Body;
+use axum::extract::{Request, State};
+use axum::http::{HeaderMap, Method, StatusCode, header};
+use axum::response::Response;
+use bytes::Bytes;
+use futures::Stream;
+use http_body_util::BodyExt;
+use parking_lot::Mutex;
+use serde_json::{Map, Value, json};
+use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::{CancellationToken, DropGuard};
+
+use super::fake::{CallCtx, CallError, Elicit, ElicitAnswer, Fake, Progress, cap_result, now_ms};
+
+const MAX_BODY: usize = 256 * 1024;
+const MAX_SESSIONS_PER_TOKEN: usize = 4;
+const MAX_SESSIONS: usize = 256;
+const MAX_RUNNING_TASKS: usize = 16;
+const TASK_TTL_MS: u64 = 60 * 60_000;
+const MIN_TASK_TTL_MS: u64 = 60_000;
+const TASK_POLL_MS: u64 = 2000;
+const ELICIT_TIMEOUT: Duration = Duration::from_secs(120);
+const KEEP_ALIVE: Duration = Duration::from_secs(15);
+const MAX_RESULT_CHARS: usize = 60_000;
+const LATEST: &str = "2025-11-25";
+const SUPPORTED: [&str; 5] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
+
+pub struct Config {
+    pub version: String,
+    pub progress_every: Duration,
+    /// burst, refill per second; None disables the bucket (benchmarks, the spike driver).
+    pub rate: Option<(f64, f64)>,
+    pub max_in_flight_per_token: usize,
+    pub max_in_flight: usize,
+    /// The lower clamp of a task's ttl (60 s; tests lower it to drive the expiry).
+    pub min_task_ttl: Duration,
+    /// How long an elicitation waits for its answer (120 s; tests lower it).
+    pub elicit_timeout: Duration,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            version: "1.2.0".into(),
+            progress_every: Duration::from_secs(10),
+            rate: Some((120.0, 60.0)),
+            max_in_flight_per_token: 8,
+            max_in_flight: 256,
+            min_task_ttl: Duration::from_millis(MIN_TASK_TTL_MS),
+            elicit_timeout: ELICIT_TIMEOUT,
+        }
+    }
+}
+
+struct Session {
+    id: String,
+    token: String,
+    cell: String,
+    /// Cancelled when the session closes (DELETE, trim, revoke).
+    cancel: CancellationToken,
+    /// Server-to-client requests waiting for their answer (elicitation/create), by JSON-RPC id.
+    pending: Mutex<HashMap<String, oneshot::Sender<Value>>>,
+    next_id: AtomicU64,
+    /// The running client requests of this session (notifications/cancelled ends one).
+    requests: Mutex<HashMap<String, Arc<RequestState>>>,
+    form_elicitation: bool,
+}
+
+/// One running client request.
+struct RequestState {
+    cancel: CancellationToken,
+    /// Set by the client's notifications/cancelled, to the abort reason as the SDK stringifies it. Such a request gets no
+    /// answer (SDK `_onrequest`: `if (abortController.signal.aborted) return;`).
+    client_reason: Mutex<Option<String>>,
+}
+
+impl RequestState {
+    fn new(cancel: CancellationToken) -> Arc<Self> {
+        Arc::new(Self { cancel, client_reason: Mutex::new(None) })
+    }
+    fn cancelled_by_client(&self) -> bool {
+        self.client_reason.lock().is_some()
+    }
+    /// `String(signal.reason)`: the client's reason, else the DOMException of a bare `abort()`.
+    fn abort_reason(&self) -> String {
+        self.client_reason.lock().clone().unwrap_or_else(|| ABORT_REASON.to_string())
+    }
+}
+
+/// `String(new DOMException('This operation was aborted', 'AbortError'))`, the reason of `controller.abort()`.
+const ABORT_REASON: &str = "AbortError: This operation was aborted";
+/// `String(McpError(RequestTimeout, 'Request timed out'))`, the reason of an SDK request timeout.
+const TIMEOUT_REASON: &str = "McpError: MCP error -32001: Request timed out";
+
+struct TaskEntry {
+    task: Value,
+    result: Option<Value>,
+    cancel: CancellationToken,
+    changed: Arc<tokio::sync::Notify>,
+    /// The session the task was created in (None: a stateless request); InMemoryTaskStore.lookup hides it from others.
+    session: Option<String>,
+    /// Bumped whenever the cleanup timer is (re)armed; an older timer that fires finds a newer value and does nothing.
+    expiry: u64,
+}
+
+/// InMemoryTaskStore.lookup: a task of a session is visible to that session and to callers without a session.
+fn visible(entry: &TaskEntry, session: Option<&str>) -> bool {
+    match (session, entry.session.as_deref()) {
+        (Some(caller), Some(owner)) => caller == owner,
+        _ => true,
+    }
+}
+
+#[derive(Default)]
+struct Inner {
+    tokens: HashMap<String, String>,
+    token_of: HashMap<String, String>,
+    /// Revoking a token cancels this; every request, session and task of the token is a child of it.
+    token_cancel: HashMap<String, CancellationToken>,
+    in_flight: HashMap<String, usize>,
+    stateless_in_flight: usize,
+    buckets: HashMap<String, (f64, Instant)>,
+    sessions: HashMap<String, Arc<Session>>,
+    /// Session ids in creation order (trim closes the oldest of a token).
+    session_order: Vec<String>,
+    /// Tasks per token in creation order.
+    tasks: HashMap<String, Vec<(String, TaskEntry)>>,
+}
+
+pub struct Shared {
+    pub fake: Arc<Fake>,
+    cfg: Config,
+    port: u16,
+    inner: Mutex<Inner>,
+}
+
+pub struct CustomServer {
+    pub shared: Arc<Shared>,
+    pub url: String,
+}
+
+impl CustomServer {
+    pub async fn start(fake: Arc<Fake>, cfg: Config) -> std::io::Result<Self> {
+        let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await?;
+        let port = listener.local_addr()?.port();
+        let shared = Arc::new(Shared { fake, cfg, port, inner: Mutex::new(Inner::default()) });
+        let app = Router::new().fallback(handle).with_state(shared.clone());
+        tokio::spawn(serve(listener, app));
+        Ok(Self { shared, url: format!("http://127.0.0.1:{port}/mcp") })
+    }
+
+    pub fn issue_token(&self, cell: &str) -> String {
+        self.revoke_cell(cell);
+        let mut bytes = [0u8; 32];
+        getrandom::fill(&mut bytes).expect("os random");
+        let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        let mut inner = self.shared.inner.lock();
+        inner.tokens.insert(token.clone(), cell.to_string());
+        inner.token_of.insert(cell.to_string(), token.clone());
+        inner.token_cancel.insert(token.clone(), CancellationToken::new());
+        token
+    }
+
+    pub fn revoke_cell(&self, cell: &str) {
+        let mut inner = self.shared.inner.lock();
+        let Some(token) = inner.token_of.remove(cell) else { return };
+        inner.tokens.remove(&token);
+        inner.buckets.remove(&token);
+        inner.in_flight.remove(&token);
+        if let Some(cancel) = inner.token_cancel.remove(&token) {
+            cancel.cancel();
+        }
+        let own: Vec<String> = inner.sessions.values().filter(|s| s.token == token).map(|s| s.id.clone()).collect();
+        for id in own {
+            close_session(&mut inner, &id);
+        }
+        inner.tasks.remove(&token);
+    }
+
+    pub fn session_count(&self) -> usize {
+        self.shared.inner.lock().sessions.len()
+    }
+}
+
+/// hyper-util directly (not axum::serve) for the Node timeouts: headers 10 s; the 30 s request timeout is applied while the
+/// body is read. Half-closed connections are not kept (hyper's default), so a client that goes away drops the request.
+async fn serve(listener: tokio::net::TcpListener, app: Router) {
+    loop {
+        let Ok((stream, _)) = listener.accept().await else { continue };
+        let _ = stream.set_nodelay(true);
+        let service = hyper_util::service::TowerToHyperService::new(app.clone());
+        tokio::spawn(async move {
+            let io = hyper_util::rt::TokioIo::new(stream);
+            let mut builder = hyper::server::conn::http1::Builder::new();
+            builder.timer(hyper_util::rt::TokioTimer::new()).header_read_timeout(Duration::from_secs(10)).keep_alive(true);
+            let _ = builder.serve_connection(io, service).await;
+        });
+    }
+}
+
+fn empty(status: StatusCode) -> Response {
+    Response::builder().status(status).body(Body::empty()).unwrap()
+}
+
+/// The SDK's createJsonErrorResponse / mcp.ts jsonError: `{"jsonrpc":"2.0","error":{"code","message"},"id":null}`.
+fn json_error(status: StatusCode, code: i64, message: &str) -> Response {
+    let body = json!({ "jsonrpc": "2.0", "error": { "code": code, "message": message }, "id": null }).to_string();
+    Response::builder().status(status).header(header::CONTENT_TYPE, "application/json").body(Body::from(body)).unwrap()
+}
+
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers.get(name).and_then(|v| v.to_str().ok())
+}
+
+/// `^Bearer\s+(\S+)$`, case-insensitive scheme.
+fn bearer(headers: &HeaderMap) -> Option<String> {
+    let value = header_str(headers, "authorization")?;
+    let (scheme, rest) = value.split_at_checked(6)?;
+    if !scheme.eq_ignore_ascii_case("bearer") || !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let token = rest.trim_start();
+    (!token.is_empty() && !token.contains(char::is_whitespace)).then(|| token.to_string())
+}
+
+fn messages_of(body: &Value) -> Vec<&Value> {
+    match body {
+        Value::Array(items) => items.iter().collect(),
+        other => vec![other],
+    }
+}
+
+fn is_request(m: &Value) -> bool {
+    m["method"].is_string() && (m["id"].is_string() || m["id"].is_number())
+}
+
+/// The key of a JSON-RPC id as a JS Map sees it: strings and numbers differ, `7.0` and `7` are the same number.
+fn id_key(id: &Value) -> String {
+    normalize_number(id).to_string()
+}
+
+/// A whole number written with a fraction or an exponent (`2.0`, `1e3`) as JSON.parse + JSON.stringify give it back.
+fn normalize_number(v: &Value) -> Value {
+    match v.as_f64() {
+        Some(f) if v.is_f64() && f.fract() == 0.0 && f.abs() <= MAX_SAFE_INTEGER => json!(f as i64),
+        _ => v.clone(),
+    }
+}
+
+const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+/// An `initialize` from a client that can answer form elicitations (`elicitation: {}` is the older spelling).
+fn wants_session(body: &Value) -> bool {
+    messages_of(body).iter().any(|m| m["method"] == "initialize" && form_elicitation(&m["params"]["capabilities"]))
+}
+
+fn form_elicitation(capabilities: &Value) -> bool {
+    match &capabilities["elicitation"] {
+        Value::Object(e) => e.contains_key("form") || e.is_empty(),
+        _ => false,
+    }
+}
+
+fn wants_progress(body: &Value, accept: Option<&str>) -> bool {
+    if !accept.is_some_and(|a| a.contains("text/event-stream")) {
+        return false;
+    }
+    messages_of(body).iter().any(|m| {
+        let token = &m["params"]["_meta"]["progressToken"];
+        m["method"] == "tools/call" && (token.is_string() || token.is_number())
+    })
+}
+
+/// zod 4 `z.number().int()`: a safe integer.
+fn is_int(v: &Value) -> bool {
+    v.as_f64().is_some_and(|f| f.fract() == 0.0 && f.abs() <= MAX_SAFE_INTEGER)
+}
+
+/// RequestIdSchema / ProgressTokenSchema: a string or an integer.
+fn is_id(v: &Value) -> bool {
+    v.is_string() || is_int(v)
+}
+
+/// RequestMetaSchema (loose): `progressToken` a string or an integer, `io.modelcontextprotocol/related-task` an object
+/// with a string `taskId`.
+fn meta_ok(meta: &Value) -> bool {
+    let Some(meta) = meta.as_object() else { return false };
+    meta.get("progressToken").is_none_or(is_id)
+        && meta.get("io.modelcontextprotocol/related-task").is_none_or(|t| t.is_object() && t["taskId"].is_string())
+}
+
+/// BaseRequestParamsSchema.loose() / NotificationsParamsSchema.loose(): an object whose `_meta` is RequestMetaSchema.
+fn params_ok(params: &Value) -> bool {
+    params.as_object().is_some_and(|p| p.get("_meta").is_none_or(meta_ok))
+}
+
+/// The SDK's JSONRPCMessageSchema: the union of the four `.strict()` schemas (request, notification, result response, error
+/// response), so extra top-level keys, a non-integer id or a params value that is not an object are refused.
+fn valid_message(m: &Value) -> bool {
+    let Some(obj) = m.as_object() else { return false };
+    if obj.get("jsonrpc") != Some(&json!("2.0")) {
+        return false;
+    }
+    let only = |keys: &[&str]| obj.keys().all(|k| keys.contains(&k.as_str()));
+    let request = only(&["jsonrpc", "id", "method", "params"])
+        && obj.get("id").is_some_and(is_id)
+        && obj.get("method").is_some_and(Value::is_string)
+        && obj.get("params").is_none_or(params_ok);
+    let notification = only(&["jsonrpc", "method", "params"])
+        && obj.get("method").is_some_and(Value::is_string)
+        && obj.get("params").is_none_or(params_ok);
+    let response = only(&["jsonrpc", "id", "result"])
+        && obj.get("id").is_some_and(is_id)
+        && obj.get("result").is_some_and(|r| r.is_object() && r.get("_meta").is_none_or(meta_ok));
+    let error = only(&["jsonrpc", "id", "error"])
+        && obj.get("id").is_none_or(is_id)
+        && obj.get("error").is_some_and(|e| e.is_object() && is_int(&e["code"]) && e["message"].is_string());
+    request || notification || response || error
+}
+
+/// Releases the request's in-flight slot and fires its abort when the response is done or dropped (Node's `res.on('close')`).
+struct Release {
+    shared: Arc<Shared>,
+    token: String,
+    stateless: bool,
+    abort: CancellationToken,
+}
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        self.abort.cancel();
+        let mut inner = self.shared.inner.lock();
+        if self.stateless {
+            inner.stateless_in_flight = inner.stateless_in_flight.saturating_sub(1);
+        }
+        if inner.tokens.contains_key(&self.token)
+            && let Some(n) = inner.in_flight.get_mut(&self.token)
+        {
+            *n = n.saturating_sub(1);
+        }
+    }
+}
+
+/// An SSE response body: frames from a channel, a `: keepalive` comment every 15 s, and the Release guard, so hyper
+/// dropping the body (client gone) aborts the request.
+struct SseBody {
+    rx: mpsc::UnboundedReceiver<Value>,
+    keep_alive: tokio::time::Interval,
+    _release: Release,
+}
+
+impl Stream for SseBody {
+    type Item = Result<Bytes, Infallible>;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.rx.poll_recv(cx) {
+            Poll::Ready(Some(msg)) => return Poll::Ready(Some(Ok(Bytes::from(format!("event: message\ndata: {msg}\n\n"))))),
+            Poll::Ready(None) => return Poll::Ready(None),
+            Poll::Pending => {}
+        }
+        if self.keep_alive.poll_tick(cx).is_ready() {
+            return Poll::Ready(Some(Ok(Bytes::from_static(b": keepalive\n\n"))));
+        }
+        Poll::Pending
+    }
+}
+
+fn sse_response(rx: mpsc::UnboundedReceiver<Value>, release: Release, session: Option<&str>) -> Response {
+    let start = tokio::time::Instant::now() + KEEP_ALIVE;
+    let body = SseBody { rx, keep_alive: tokio::time::interval_at(start, KEEP_ALIVE), _release: release };
+    let mut builder = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .header(header::CACHE_CONTROL, "no-cache, no-transform")
+        .header("x-accel-buffering", "no");
+    if let Some(id) = session {
+        builder = builder.header("mcp-session-id", id);
+    }
+    builder.body(Body::from_stream(body)).unwrap()
+}
+
+async fn handle(State(shared): State<Arc<Shared>>, req: Request) -> Response {
+    let started = Instant::now();
+    let port = shared.port;
+    let headers = req.headers().clone();
+    // DNS-rebinding hardening: only the literal local origins may talk to the server.
+    let host = header_str(&headers, "host").unwrap_or("");
+    if host != format!("127.0.0.1:{port}") && host != format!("localhost:{port}") {
+        return empty(StatusCode::FORBIDDEN);
+    }
+    if let Some(origin) = header_str(&headers, "origin")
+        && origin != format!("http://127.0.0.1:{port}")
+        && origin != format!("http://localhost:{port}")
+    {
+        return empty(StatusCode::FORBIDDEN);
+    }
+    if req.uri().path_and_query().map(|p| p.as_str()) != Some("/mcp") {
+        return empty(StatusCode::NOT_FOUND);
+    }
+    let Some(token) = bearer(&headers) else { return empty(StatusCode::UNAUTHORIZED) };
+    let found = {
+        let inner = shared.inner.lock();
+        // Constant-time over every issued token: no early exit on the first differing byte.
+        let mut found = None;
+        for (t, cell) in &inner.tokens {
+            if ct_eq(t.as_bytes(), token.as_bytes()) {
+                found = Some((cell.clone(), inner.token_cancel.get(t).cloned().unwrap_or_default()));
+            }
+        }
+        found
+    };
+    let Some((cell, token_cancel)) = found else { return empty(StatusCode::UNAUTHORIZED) };
+    let session_id = header_str(&headers, "mcp-session-id").map(str::to_string);
+    if req.method() == Method::DELETE
+        && let Some(id) = &session_id
+    {
+        let mut inner = shared.inner.lock();
+        if inner.sessions.get(id).is_none_or(|s| s.token != token) {
+            return empty(StatusCode::NOT_FOUND);
+        }
+        close_session(&mut inner, id);
+        shared.fake.events.push(json!({ "kind": "session-close", "by": "delete" }));
+        return empty(StatusCode::OK);
+    }
+    if req.method() != Method::POST {
+        return Response::builder()
+            .status(StatusCode::METHOD_NOT_ALLOWED)
+            .header(header::ALLOW, "POST")
+            .body(Body::empty())
+            .unwrap();
+    }
+    // Cheap concurrency checks first, so a rejected request does not also spend rate budget.
+    {
+        let mut inner = shared.inner.lock();
+        let in_flight = inner.in_flight.get(&token).copied().unwrap_or(0);
+        let busy = in_flight >= shared.cfg.max_in_flight_per_token || inner.stateless_in_flight >= shared.cfg.max_in_flight;
+        if busy || !allow(&mut inner, &shared.cfg, &token) {
+            return Response::builder()
+                .status(StatusCode::TOO_MANY_REQUESTS)
+                .header(header::RETRY_AFTER, "1")
+                .body(Body::empty())
+                .unwrap();
+        }
+        inner.in_flight.insert(token.clone(), in_flight + 1);
+    }
+    let abort = token_cancel.child_token();
+    let mut release = Release { shared: shared.clone(), token: token.clone(), stateless: false, abort: abort.clone() };
+    // Hyper drops this future when the client goes away before the answer: the guard aborts the running call. An SSE answer
+    // disarms it (the Release guard in the body takes over).
+    let guard = abort.clone().drop_guard();
+
+    let raw = match read_body(req.into_body(), started).await {
+        BodyRead::Ok(raw) => raw,
+        BodyRead::TooLarge => return json_error(StatusCode::PAYLOAD_TOO_LARGE, -32000, "Request body too large."),
+        BodyRead::Timeout => return empty(StatusCode::REQUEST_TIMEOUT),
+    };
+    // mcp.ts readBody: `Buffer.concat(chunks).toString('utf8')`, which replaces invalid bytes with U+FFFD (maximal subparts,
+    // as from_utf8_lossy), then JSON.parse.
+    let Ok(body) = serde_json::from_str::<Value>(&String::from_utf8_lossy(&raw)) else {
+        return json_error(StatusCode::BAD_REQUEST, -32700, "Parse error: invalid JSON.");
+    };
+
+    if let Some(id) = session_id {
+        let session = shared.inner.lock().sessions.get(&id).cloned();
+        let Some(session) = session.filter(|s| s.token == token) else {
+            return json_error(StatusCode::NOT_FOUND, -32001, "Session not found.");
+        };
+        return transport(&shared, &headers, body, Mode::Session(session), release, guard).await;
+    }
+    let session_slot = wants_session(&body) && shared.inner.lock().sessions.len() < MAX_SESSIONS;
+    if session_slot {
+        // Revoked while the body was read: the session must not outlive its token (mcp.ts answers 401 before the transport
+        // checks). transport() checks again under the lock that inserts the session.
+        if !token_live(&shared, &token, &cell, &token_cancel) {
+            return empty(StatusCode::UNAUTHORIZED);
+        }
+        return transport(&shared, &headers, body, Mode::NewSession { token, cell, token_cancel }, release, guard).await;
+    }
+    shared.inner.lock().stateless_in_flight += 1;
+    release.stateless = true;
+    let json_mode = !wants_progress(&body, header_str(&headers, "accept"));
+    transport(&shared, &headers, body, Mode::Stateless { token, cell, json: json_mode }, release, guard).await
+}
+
+/// The token still belongs to the cell and was not revoked (revoke_cell cancels `token_cancel`; issue_token revokes first).
+fn token_live(shared: &Shared, token: &str, cell: &str, token_cancel: &CancellationToken) -> bool {
+    token_live_in(&shared.inner.lock(), token, cell, token_cancel)
+}
+
+fn token_live_in(inner: &Inner, token: &str, cell: &str, token_cancel: &CancellationToken) -> bool {
+    !token_cancel.is_cancelled() && inner.tokens.get(token).is_some_and(|c| c == cell)
+}
+
+enum BodyRead {
+    Ok(Vec<u8>),
+    TooLarge,
+    Timeout,
+}
+
+/// The body as bytes; a larger one is still read to the end, so the 413 reaches the client (as 1.1.4).
+async fn read_body(body: Body, started: Instant) -> BodyRead {
+    let deadline = tokio::time::Instant::from_std(started + Duration::from_secs(30));
+    let mut body = body;
+    let mut out = Vec::new();
+    let mut size = 0usize;
+    loop {
+        let frame = match tokio::time::timeout_at(deadline, body.frame()).await {
+            Err(_) => return BodyRead::Timeout,
+            Ok(None) => break,
+            Ok(Some(Err(_))) => return BodyRead::Timeout,
+            Ok(Some(Ok(frame))) => frame,
+        };
+        if let Ok(data) = frame.into_data() {
+            size += data.len();
+            if size <= MAX_BODY {
+                out.extend_from_slice(&data);
+            }
+        }
+    }
+    if size > MAX_BODY { BodyRead::TooLarge } else { BodyRead::Ok(out) }
+}
+
+fn allow(inner: &mut Inner, cfg: &Config, token: &str) -> bool {
+    let Some((burst, per_second)) = cfg.rate else { return true };
+    let now = Instant::now();
+    let bucket = inner.buckets.entry(token.to_string()).or_insert((burst, now));
+    let elapsed = now.saturating_duration_since(bucket.1).as_secs_f64();
+    bucket.0 = (bucket.0 + elapsed * per_second).min(burst);
+    bucket.1 = now;
+    if bucket.0 < 1.0 {
+        return false;
+    }
+    bucket.0 -= 1.0;
+    true
+}
+
+enum Mode {
+    Stateless { token: String, cell: String, json: bool },
+    NewSession { token: String, cell: String, token_cancel: CancellationToken },
+    Session(Arc<Session>),
+}
+
+/// The StreamableHTTPServerTransport part: header checks, message validation, 202 / JSON / SSE.
+async fn transport(
+    shared: &Arc<Shared>,
+    headers: &HeaderMap,
+    body: Value,
+    mode: Mode,
+    release: Release,
+    guard: DropGuard,
+) -> Response {
+    let abort = release.abort.clone();
+    let accept = header_str(headers, "accept").unwrap_or("");
+    if !accept.contains("application/json") || !accept.contains("text/event-stream") {
+        return json_error(
+            StatusCode::NOT_ACCEPTABLE,
+            -32000,
+            "Not Acceptable: Client must accept both application/json and text/event-stream",
+        );
+    }
+    let content_type = header_str(headers, "content-type").unwrap_or("");
+    if content_type.split(';').next().map(|t| t.trim().to_ascii_lowercase()) != Some("application/json".into()) {
+        return json_error(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            -32000,
+            "Unsupported Media Type: Content-Type must be application/json",
+        );
+    }
+    if body.as_array().is_some_and(|a| a.len() > 100) {
+        return json_error(StatusCode::BAD_REQUEST, -32600, "Invalid Request: Batch must not exceed 100 messages");
+    }
+    let mut messages: Vec<Value> = messages_of(&body).into_iter().cloned().collect();
+    if !messages.iter().all(valid_message) {
+        return json_error(StatusCode::BAD_REQUEST, -32700, "Parse error: Invalid JSON-RPC message");
+    }
+    for m in &mut messages {
+        if let Some(id) = m.get_mut("id") {
+            *id = normalize_number(id);
+        }
+    }
+    let is_init = messages.iter().any(|m| m["method"] == "initialize" && is_request(m));
+    if is_init {
+        if matches!(mode, Mode::Session(_)) {
+            return json_error(StatusCode::BAD_REQUEST, -32600, "Invalid Request: Server already initialized");
+        }
+        if messages.len() > 1 {
+            return json_error(StatusCode::BAD_REQUEST, -32600, "Invalid Request: Only one initialization request is allowed");
+        }
+    } else if let Some(version) = header_str(headers, "mcp-protocol-version")
+        && !SUPPORTED.contains(&version)
+    {
+        let message =
+            format!("Bad Request: Unsupported protocol version: {version} (supported versions: {})", SUPPORTED.join(", "));
+        return json_error(StatusCode::BAD_REQUEST, -32000, &message);
+    }
+
+    let (session, token, cell, json_mode) = match mode {
+        Mode::Stateless { token, cell, json } => (None, token, cell, json),
+        Mode::Session(s) => {
+            let (t, c) = (s.token.clone(), s.cell.clone());
+            (Some(s), t, c, false)
+        }
+        Mode::NewSession { token, cell, token_cancel } => {
+            let session = Arc::new(Session {
+                id: uuid::Uuid::new_v4().to_string(),
+                token: token.clone(),
+                cell: cell.clone(),
+                cancel: token_cancel.child_token(),
+                pending: Mutex::default(),
+                next_id: AtomicU64::new(0),
+                requests: Mutex::default(),
+                form_elicitation: messages.iter().any(|m| form_elicitation(&m["params"]["capabilities"])),
+            });
+            let mut inner = shared.inner.lock();
+            // Checked under the lock revoke_cell takes, so a revoke either sees this session (and closes it) or wins here.
+            if !token_live_in(&inner, &token, &cell, &token_cancel) {
+                return empty(StatusCode::UNAUTHORIZED);
+            }
+            inner.sessions.insert(session.id.clone(), session.clone());
+            inner.session_order.push(session.id.clone());
+            trim_sessions(&mut inner, &token);
+            drop(inner);
+            shared.fake.events.push(json!({ "kind": "session-open", "cell": cell }));
+            (Some(session), token, cell, false)
+        }
+    };
+
+    if !messages.iter().any(is_request) {
+        for m in &messages {
+            accept_message(shared, session.as_deref(), m);
+        }
+        return empty(StatusCode::ACCEPTED);
+    }
+    let batch = body.is_array();
+    let ctx = Arc::new(ReqCtx { shared: shared.clone(), session: session.clone(), token, cell, abort: abort.clone() });
+    if json_mode {
+        let mut out = Vec::new();
+        let work = async {
+            for m in &messages {
+                if is_request(m) {
+                    out.push(dispatch(&ctx, m.clone(), None).await);
+                } else {
+                    accept_message(shared, session.as_deref(), m);
+                }
+            }
+        };
+        // Measured in SP8: with half-close off (hyper's default) hyper notices the client's FIN while this handler is
+        // pending and drops the handler future, so `guard` aborts the call (as 1.1.4's res 'close'); no socket watcher needed.
+        work.await;
+        drop(release);
+        let body = if batch { Value::Array(out) } else { out.pop().unwrap_or(Value::Null) };
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+    }
+    let (tx, rx) = mpsc::unbounded_channel::<Value>();
+    let session_header = session.as_ref().map(|s| s.id.clone());
+    for m in messages {
+        if !is_request(&m) {
+            accept_message(shared, session.as_deref(), &m);
+            continue;
+        }
+        let ctx = ctx.clone();
+        let tx = tx.clone();
+        let state = RequestState::new(abort.child_token());
+        if let Some(s) = &session {
+            s.requests.lock().insert(id_key(&m["id"]), state.clone());
+        }
+        // Every long operation observes the request's cancel, so the call ends (and logs) on its own when the client goes
+        // away. A request the client cancelled gets no answer; its stream ends once nothing else is pending on it.
+        tokio::spawn(async move {
+            let id = id_key(&m["id"]);
+            let answer = dispatch_with(&ctx, m, Some(tx.clone()), state.clone()).await;
+            if let Some(s) = &ctx.session {
+                let mut requests = s.requests.lock();
+                if requests.get(&id).is_some_and(|r| Arc::ptr_eq(r, &state)) {
+                    requests.remove(&id);
+                }
+            }
+            if !state.cancelled_by_client() {
+                let _ = tx.send(answer);
+            }
+        });
+    }
+    drop(tx);
+    guard.disarm();
+    sse_response(rx, release, session_header.as_deref())
+}
+
+/// Notifications and responses: elicitation answers reach their waiting call, notifications/cancelled ends a request.
+fn accept_message(shared: &Arc<Shared>, session: Option<&Session>, m: &Value) {
+    let Some(session) = session else { return };
+    if m.get("method").is_none() {
+        let sender = session.pending.lock().remove(&id_key(&m["id"]));
+        if let Some(sender) = sender {
+            let _ = sender.send(m.clone());
+        }
+        return;
+    }
+    // CancelledNotificationSchema: a reason that is not a string fails the parse and the notification is dropped.
+    let reason = &m["params"]["reason"];
+    if m["method"] == "notifications/cancelled" && (reason.is_null() || reason.is_string()) {
+        let request = session.requests.lock().get(&id_key(&m["params"]["requestId"])).cloned();
+        if let Some(state) = request {
+            shared.fake.events.push(json!({ "kind": "client-cancelled" }));
+            state.client_reason.lock().get_or_insert_with(|| reason.as_str().unwrap_or(ABORT_REASON).to_string());
+            state.cancel.cancel();
+        }
+    }
+}
+
+struct ReqCtx {
+    shared: Arc<Shared>,
+    session: Option<Arc<Session>>,
+    token: String,
+    cell: String,
+    abort: CancellationToken,
+}
+
+impl ReqCtx {
+    fn live(&self) -> bool {
+        self.shared.inner.lock().tokens.get(&self.token).is_some_and(|c| *c == self.cell)
+    }
+    /// The transport's session id, which the SDK passes to every task store call.
+    fn session_id(&self) -> Option<&str> {
+        self.session.as_deref().map(|s| s.id.as_str())
+    }
+}
+
+fn result(id: &Value, result: Value) -> Value {
+    // The SDK's key order: result, jsonrpc, id.
+    let mut m = Map::new();
+    m.insert("result".into(), result);
+    m.insert("jsonrpc".into(), json!("2.0"));
+    m.insert("id".into(), id.clone());
+    Value::Object(m)
+}
+
+fn error(id: &Value, code: i64, message: &str) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
+}
+
+/// An McpError as the SDK serializes it: the message carries the `MCP error <code>: ` prefix.
+fn mcp_error(id: &Value, code: i64, message: &str) -> Value {
+    error(id, code, &format!("MCP error {code}: {message}"))
+}
+
+async fn dispatch(ctx: &Arc<ReqCtx>, m: Value, out: Option<mpsc::UnboundedSender<Value>>) -> Value {
+    dispatch_with(ctx, m, out, RequestState::new(ctx.abort.clone())).await
+}
+
+/// zod 4's `received` name of a value (`undefined` for a missing key).
+fn received(v: Option<&Value>) -> &'static str {
+    match v {
+        None => "undefined",
+        Some(Value::Null) => "null",
+        Some(Value::Bool(_)) => "boolean",
+        Some(Value::Number(_)) => "number",
+        Some(Value::String(_)) => "string",
+        Some(Value::Array(_)) => "array",
+        Some(Value::Object(_)) => "object",
+    }
+}
+
+/// A zod 4 `invalid_type` issue, in zod's key order.
+fn type_issue(expected: &str, path: &[&str], got: Option<&Value>) -> Value {
+    json!({ "expected": expected, "code": "invalid_type", "path": path,
+        "message": format!("Invalid input: expected {expected}, received {}", received(got)) })
+}
+
+/// The request schema checks the SDK's setRequestHandler runs (parseWithCompat) for the methods whose params it reads:
+/// a failure throws a ZodError, which the SDK answers as -32603 with `error.message` (the issues, JSON with 2 spaces).
+fn schema_issues(method: &str, params: Option<&Value>) -> Vec<Value> {
+    let object = |p: Option<&Value>| p.is_some_and(Value::is_object);
+    let field = |name: &str| params.and_then(|p| p.get(name));
+    let mut issues = Vec::new();
+    match method {
+        "tools/call" | "tasks/get" | "tasks/result" | "tasks/cancel" if !object(params) => {
+            issues.push(type_issue("object", &["params"], params));
+        }
+        "tools/call" => {
+            let task = field("task");
+            if task.is_some() && !object(task) {
+                issues.push(type_issue("object", &["params", "task"], task));
+            } else if let Some(ttl) = task.and_then(|t| t.get("ttl"))
+                && !ttl.is_number()
+            {
+                issues.push(type_issue("number", &["params", "task", "ttl"], Some(ttl)));
+            }
+            if !field("name").is_some_and(Value::is_string) {
+                issues.push(type_issue("string", &["params", "name"], field("name")));
+            }
+            if let Some(arguments) = field("arguments")
+                && !arguments.is_object()
+            {
+                issues.push(type_issue("record", &["params", "arguments"], Some(arguments)));
+            }
+        }
+        "tasks/get" | "tasks/result" | "tasks/cancel" if !field("taskId").is_some_and(Value::is_string) => {
+            issues.push(type_issue("string", &["params", "taskId"], field("taskId")));
+        }
+        "tasks/list" => {
+            if let Some(cursor) = field("cursor")
+                && !cursor.is_string()
+            {
+                issues.push(type_issue("string", &["params", "cursor"], Some(cursor)));
+            }
+        }
+        _ => {}
+    }
+    issues
+}
+
+async fn dispatch_with(
+    ctx: &Arc<ReqCtx>,
+    m: Value,
+    out: Option<mpsc::UnboundedSender<Value>>,
+    state: Arc<RequestState>,
+) -> Value {
+    let id = m["id"].clone();
+    let params = &m["params"];
+    let fake = &ctx.shared.fake;
+    let method = m["method"].as_str().unwrap_or("");
+    let issues = schema_issues(method, m.get("params"));
+    if !issues.is_empty() {
+        let message = serde_json::to_string_pretty(&issues).unwrap_or_default();
+        return error(&id, -32603, &message);
+    }
+    let cancel = state.cancel.clone();
+    match method {
+        "initialize" => {
+            let asked = params["protocolVersion"].as_str().unwrap_or("");
+            let version = if SUPPORTED.contains(&asked) { asked } else { LATEST };
+            result(
+                &id,
+                json!({
+                    "protocolVersion": version,
+                    "capabilities": { "tools": {}, "tasks": { "list": {}, "cancel": {}, "requests": { "tools": { "call": {} } } } },
+                    "serverInfo": { "name": "unimux", "version": ctx.shared.cfg.version },
+                    "instructions": fake.instructions,
+                }),
+            )
+        }
+        "ping" => result(&id, json!({})),
+        "tools/list" => {
+            fake.events.push(json!({ "kind": "tools-list", "cell": ctx.cell }));
+            result(&id, json!({ "tools": fake.tools_for(&ctx.cell) }))
+        }
+        "tools/call" => tools_call(ctx, &id, params, out, state).await,
+        "tasks/get" => {
+            let inner = ctx.shared.inner.lock();
+            match find_task(&inner, &ctx.token, ctx.session_id(), params["taskId"].as_str().unwrap_or("")) {
+                Some(t) => result(&id, t.task.clone()),
+                None => mcp_error(&id, -32602, "Failed to retrieve task: Task not found"),
+            }
+        }
+        "tasks/result" => task_result(ctx, &id, params["taskId"].as_str().unwrap_or(""), cancel).await,
+        "tasks/list" => list_tasks(ctx, &id, params["cursor"].as_str()),
+        "tasks/cancel" => {
+            let task_id = params["taskId"].as_str().unwrap_or("");
+            let mut inner = ctx.shared.inner.lock();
+            let session = ctx.session_id();
+            let Some(entry) = inner
+                .tasks
+                .get_mut(&ctx.token)
+                .and_then(|v| v.iter_mut().find(|(i, t)| i == task_id && visible(t, session)))
+                .map(|(_, t)| t)
+            else {
+                return mcp_error(&id, -32602, &format!("Task not found: {task_id}"));
+            };
+            let status = entry.task["status"].as_str().unwrap_or("").to_string();
+            if ["completed", "failed", "cancelled"].contains(&status.as_str()) {
+                return mcp_error(&id, -32602, &format!("Cannot cancel task in terminal status: {status}"));
+            }
+            entry.task["status"] = json!("cancelled");
+            entry.task["statusMessage"] = json!("Client cancelled task execution.");
+            entry.task["lastUpdatedAt"] = json!(iso_now());
+            entry.cancel.cancel();
+            entry.changed.notify_waiters();
+            let mut answer = Map::new();
+            answer.insert("_meta".into(), json!({}));
+            for (k, v) in entry.task.as_object().cloned().unwrap_or_default() {
+                answer.insert(k, v);
+            }
+            // updateTaskStatus to a terminal status restarts the cleanup timer.
+            let ttl = ttl_of(entry);
+            drop(inner);
+            arm_expiry(&ctx.shared, &ctx.token, task_id, ttl);
+            result(&id, Value::Object(answer))
+        }
+        _ => error(&id, -32601, "Method not found"),
+    }
+}
+
+async fn tools_call(
+    ctx: &Arc<ReqCtx>,
+    id: &Value,
+    params: &Value,
+    out: Option<mpsc::UnboundedSender<Value>>,
+    state: Arc<RequestState>,
+) -> Value {
+    let cancel = state.cancel.clone();
+    let name = params["name"].as_str().unwrap_or("").to_string();
+    let args = params.get("arguments").cloned().unwrap_or(json!({}));
+    let fake = ctx.shared.fake.clone();
+    if params.get("task").is_some_and(Value::is_object) {
+        if !ctx.live() {
+            return mcp_error(id, -32600, "Agent connection has expired.");
+        }
+        if !Fake::supports_task(&name) {
+            return mcp_error(id, -32601, &format!("Tool {name} does not run as a task."));
+        }
+        return start_task(ctx, id, &name, args, params["task"]["ttl"].as_f64());
+    }
+    let progress: Option<Progress> = match (&out, &params["_meta"]["progressToken"]) {
+        (Some(tx), token) if token.is_string() || token.is_number() => {
+            let (tx, token, state) = (tx.clone(), token.clone(), state.clone());
+            Some(Arc::new(move |progress: f64, total: f64, message: String| {
+                // extra.sendNotification: nothing once the client cancelled the request.
+                if state.cancelled_by_client() {
+                    return;
+                }
+                let _ = tx.send(json!({ "method": "notifications/progress",
+                    "params": { "progressToken": token, "progress": js_number(progress), "total": js_number(total), "message": message },
+                    "jsonrpc": "2.0" }));
+            }))
+        }
+        _ => None,
+    };
+    let elicit: Option<Elicit> = match (&ctx.session, &out) {
+        (Some(session), Some(tx)) if session.form_elicitation => {
+            Some(elicit_on(session.clone(), tx.clone(), state.clone(), ctx.shared.cfg.elicit_timeout))
+        }
+        _ => None,
+    };
+    if !ctx.live() {
+        return result(id, error_content("Agent connection has expired."));
+    }
+    let call = CallCtx {
+        cell: ctx.cell.clone(),
+        cancel: cancel.clone(),
+        elicit,
+        progress,
+        progress_every: ctx.shared.cfg.progress_every,
+        task: false,
+    };
+    match fake.call(&name, &args, call).await {
+        Ok(_) if !ctx.live() => result(id, error_content("Agent connection has expired.")),
+        Ok(value) => {
+            result(id, json!({ "content": [{ "type": "text", "text": cap_result(&value.to_string(), MAX_RESULT_CHARS) }] }))
+        }
+        Err(CallError::Unknown) => mcp_error(id, -32602, &format!("Unknown tool: {name}")),
+        Err(CallError::Tool(text)) => result(id, error_content(&text)),
+        Err(CallError::Aborted) => result(id, error_content("This operation was aborted")),
+    }
+}
+
+fn error_content(text: &str) -> Value {
+    json!({ "isError": true, "content": [{ "type": "text", "text": text }] })
+}
+
+/// JS numbers: a whole f64 prints without `.0`.
+fn js_number(n: f64) -> Value {
+    if n.fract() == 0.0 && n.abs() < 9.0e15 { json!(n as i64) } else { json!(n) }
+}
+
+/// An elicitation/create waiting for its answer. Dropped while armed (the tool stopped waiting because its call was
+/// aborted), it does what the SDK's `cancel(reason)` does: forget the request and send `notifications/cancelled` for it on
+/// the call's stream, unless the session is closed (the SDK's transport is closed then and sends nothing).
+struct PendingElicit {
+    session: Arc<Session>,
+    tx: mpsc::UnboundedSender<Value>,
+    id: Value,
+    state: Arc<RequestState>,
+    armed: bool,
+}
+
+impl PendingElicit {
+    fn cancel(&mut self, reason: &str) {
+        self.armed = false;
+        self.session.pending.lock().remove(&id_key(&self.id));
+        if !self.session.cancel.is_cancelled() {
+            let _ = self.tx.send(json!({ "jsonrpc": "2.0", "method": "notifications/cancelled",
+                "params": { "requestId": self.id, "reason": reason } }));
+        }
+    }
+    fn answered(&mut self) {
+        self.armed = false;
+        self.session.pending.lock().remove(&id_key(&self.id));
+    }
+}
+
+impl Drop for PendingElicit {
+    fn drop(&mut self) {
+        if self.armed {
+            let reason = self.state.abort_reason();
+            self.cancel(&reason);
+        }
+    }
+}
+
+/// elicitation/create on the calling tool call's stream; the answer comes back as a POST of the same session. A timeout or
+/// an abort of the call sends `notifications/cancelled` for it (SDK Protocol.request), so the client closes its prompt.
+fn elicit_on(session: Arc<Session>, tx: mpsc::UnboundedSender<Value>, state: Arc<RequestState>, timeout: Duration) -> Elicit {
+    Arc::new(move |message: String, schema: Value| {
+        let (session, tx, state) = (session.clone(), tx.clone(), state.clone());
+        Box::pin(async move {
+            let cancelled = ElicitAnswer { action: "cancel".into(), content: None };
+            // `options.signal.throwIfAborted()` before anything is sent.
+            if state.cancel.is_cancelled() || session.cancel.is_cancelled() {
+                return cancelled;
+            }
+            let n = session.next_id.fetch_add(1, Ordering::Relaxed);
+            let id = json!(n);
+            let (answer_tx, answer_rx) = oneshot::channel();
+            session.pending.lock().insert(id_key(&id), answer_tx);
+            let request = json!({ "method": "elicitation/create", "params": { "mode": "form", "message": message, "requestedSchema": schema },
+                "jsonrpc": "2.0", "id": id });
+            if tx.send(request).is_err() {
+                session.pending.lock().remove(&id_key(&id));
+                return cancelled;
+            }
+            let mut pending = PendingElicit { session: session.clone(), tx, id, state: state.clone(), armed: true };
+            let answer = tokio::select! {
+                a = answer_rx => a.ok(),
+                () = tokio::time::sleep(timeout) => {
+                    pending.cancel(TIMEOUT_REASON);
+                    return cancelled;
+                }
+                () = state.cancel.cancelled() => {
+                    pending.cancel(&state.abort_reason());
+                    return cancelled;
+                }
+                () = session.cancel.cancelled() => {
+                    pending.cancel(ABORT_REASON);
+                    return cancelled;
+                }
+            };
+            pending.answered();
+            answer.and_then(|m| elicit_answer(&m, &schema)).unwrap_or(cancelled)
+        })
+    })
+}
+
+/// The SDK's elicitInput on an answer: ElicitResultSchema (action accept / decline / cancel, content null or a record of
+/// string, number, boolean or string array values), then for an accept with content the ajv check against the requested
+/// schema. Any failure (also an error response) is None, which mcp.ts elicitFor turns into `cancel`.
+fn elicit_answer(m: &Value, schema: &Value) -> Option<ElicitAnswer> {
+    let result = m.get("result")?.as_object()?;
+    if !result.get("_meta").is_none_or(meta_ok) {
+        return None;
+    }
+    let action = result.get("action")?.as_str()?;
+    if !["accept", "decline", "cancel"].contains(&action) {
+        return None;
+    }
+    let content = match result.get("content") {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(c)) => {
+            let primitive = |v: &Value| {
+                v.is_string()
+                    || v.is_number()
+                    || v.is_boolean()
+                    || v.as_array().is_some_and(|items| items.iter().all(Value::is_string))
+            };
+            if !c.values().all(primitive) {
+                return None;
+            }
+            Some(Value::Object(c.clone()))
+        }
+        Some(_) => return None,
+    };
+    if action == "accept"
+        && let Some(content) = &content
+        && !schema_ok(schema, content)
+    {
+        return None;
+    }
+    Some(ElicitAnswer { action: action.to_string(), content })
+}
+
+/// JSON values as ajv compares them for `const` / `enum` (numbers by value).
+fn json_eq(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x.as_f64() == y.as_f64(),
+        (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(p, q)| json_eq(p, q)),
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| json_eq(v, w)))
+        }
+        _ => a == b,
+    }
+}
+
+fn type_ok(name: &str, v: &Value) -> bool {
+    match name {
+        "string" => v.is_string(),
+        "number" => v.is_number(),
+        "integer" => v.as_f64().is_some_and(|f| f.fract() == 0.0),
+        "boolean" => v.is_boolean(),
+        "object" => v.is_object(),
+        "array" => v.is_array(),
+        "null" => v.is_null(),
+        _ => false,
+    }
+}
+
+/// The part of JSON Schema (ajv, strict off) that elicitation schemas use: type, enum, const, required, properties,
+/// additionalProperties, items, oneOf / anyOf / allOf / not, string length (code points), number and array bounds. Other
+/// keywords (title, description, default, format) do not constrain, as with ajv without ajv-formats.
+fn schema_ok(schema: &Value, v: &Value) -> bool {
+    let Some(s) = schema.as_object() else { return schema.as_bool() != Some(false) };
+    let num = |k: &str| s.get(k).and_then(Value::as_f64);
+    if let Some(t) = s.get("type") {
+        let ok = match t {
+            Value::String(name) => type_ok(name, v),
+            Value::Array(names) => names.iter().filter_map(Value::as_str).any(|n| type_ok(n, v)),
+            _ => true,
+        };
+        if !ok {
+            return false;
+        }
+    }
+    if let Some(Value::Array(options)) = s.get("enum")
+        && !options.iter().any(|o| json_eq(o, v))
+    {
+        return false;
+    }
+    if let Some(c) = s.get("const")
+        && !json_eq(c, v)
+    {
+        return false;
+    }
+    if let Some(obj) = v.as_object() {
+        if let Some(Value::Array(required)) = s.get("required")
+            && !required.iter().filter_map(Value::as_str).all(|k| obj.contains_key(k))
+        {
+            return false;
+        }
+        let props = s.get("properties").and_then(Value::as_object);
+        for (k, value) in obj {
+            match props.and_then(|p| p.get(k)) {
+                Some(sub) if !schema_ok(sub, value) => return false,
+                Some(_) => {}
+                None => {
+                    if let Some(extra) = s.get("additionalProperties")
+                        && !schema_ok(extra, value)
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    if let Some(items) = v.as_array() {
+        if let Some(sub) = s.get("items").filter(|i| i.is_object() || i.is_boolean())
+            && !items.iter().all(|i| schema_ok(sub, i))
+        {
+            return false;
+        }
+        let n = items.len() as f64;
+        if num("minItems").is_some_and(|m| n < m) || num("maxItems").is_some_and(|m| n > m) {
+            return false;
+        }
+    }
+    if let Some(text) = v.as_str() {
+        let n = text.chars().count() as f64;
+        if num("minLength").is_some_and(|m| n < m) || num("maxLength").is_some_and(|m| n > m) {
+            return false;
+        }
+    }
+    if let Some(x) = v.as_f64() {
+        let out = num("minimum").is_some_and(|m| x < m)
+            || num("maximum").is_some_and(|m| x > m)
+            || num("exclusiveMinimum").is_some_and(|m| x <= m)
+            || num("exclusiveMaximum").is_some_and(|m| x >= m);
+        if out {
+            return false;
+        }
+    }
+    let subs = |k: &str| s.get(k).and_then(Value::as_array).map(|a| a.iter().filter(|sub| schema_ok(sub, v)).count());
+    let all = s.get("allOf").and_then(Value::as_array).map(Vec::len);
+    if subs("oneOf").is_some_and(|n| n != 1) || subs("anyOf") == Some(0) || all.is_some_and(|n| subs("allOf") != Some(n)) {
+        return false;
+    }
+    !s.get("not").is_some_and(|sub| schema_ok(sub, v))
+}
+
+fn find_task<'a>(inner: &'a Inner, token: &str, session: Option<&str>, task_id: &str) -> Option<&'a TaskEntry> {
+    inner.tasks.get(token)?.iter().find(|(i, t)| i == task_id && visible(t, session)).map(|(_, t)| t)
+}
+
+/// InMemoryTaskStore.listTasks: the tasks the caller can look up, in creation order, 10 per page; `nextCursor` is the last
+/// id of the page when more remain, and a cursor that is not one of those ids is refused.
+fn list_tasks(ctx: &Arc<ReqCtx>, id: &Value, cursor: Option<&str>) -> Value {
+    const PAGE_SIZE: usize = 10;
+    let inner = ctx.shared.inner.lock();
+    let session = ctx.session_id();
+    let all: Vec<&(String, TaskEntry)> =
+        inner.tasks.get(&ctx.token).map(|v| v.iter().filter(|(_, t)| visible(t, session)).collect()).unwrap_or_default();
+    let start = match cursor.filter(|c| !c.is_empty()) {
+        None => 0,
+        Some(c) => match all.iter().position(|(i, _)| i == c) {
+            Some(index) => index + 1,
+            None => return mcp_error(id, -32602, &format!("Failed to list tasks: Invalid cursor: {c}")),
+        },
+    };
+    let page: Vec<&(String, TaskEntry)> = all.iter().skip(start).take(PAGE_SIZE).copied().collect();
+    let mut answer = Map::new();
+    answer.insert("tasks".into(), Value::Array(page.iter().map(|(_, t)| t.task.clone()).collect()));
+    if start + PAGE_SIZE < all.len()
+        && let Some((last, _)) = page.last()
+    {
+        answer.insert("nextCursor".into(), json!(last));
+    }
+    answer.insert("_meta".into(), json!({}));
+    result(id, Value::Object(answer))
+}
+
+fn ttl_of(entry: &TaskEntry) -> Duration {
+    Duration::from_secs_f64(entry.task["ttl"].as_f64().unwrap_or(0.0).max(0.0) / 1000.0)
+}
+
+/// (Re)arms the task's cleanup timer to `ttl` from now (InMemoryTaskStore createTask, storeTaskResult and a terminal
+/// updateTaskStatus). When it fires the task is deleted, and a task still working is aborted (mcp.ts startTask's 1 s watch
+/// aborts the call when the task is gone).
+fn arm_expiry(shared: &Arc<Shared>, token: &str, task_id: &str, ttl: Duration) {
+    let generation = {
+        let mut inner = shared.inner.lock();
+        let Some((_, entry)) = inner.tasks.get_mut(token).and_then(|v| v.iter_mut().find(|(i, _)| i == task_id)) else {
+            return;
+        };
+        entry.expiry += 1;
+        entry.expiry
+    };
+    let (shared, token, task_id) = (shared.clone(), token.to_string(), task_id.to_string());
+    tokio::spawn(async move {
+        tokio::time::sleep(ttl).await;
+        let mut inner = shared.inner.lock();
+        let Some(tasks) = inner.tasks.get_mut(&token) else { return };
+        let Some(index) = tasks.iter().position(|(i, t)| *i == task_id && t.expiry == generation) else { return };
+        let (_, entry) = tasks.remove(index);
+        entry.cancel.cancel();
+        entry.changed.notify_waiters();
+    });
+}
+
+/// `new Date().toISOString()`.
+fn iso_now() -> String {
+    let ms = now_ms() as i64;
+    let (secs, millis) = (ms.div_euclid(1000), ms.rem_euclid(1000));
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    // Civil from days (Howard Hinnant).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{millis:03}Z", rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
+fn start_task(ctx: &Arc<ReqCtx>, id: &Value, name: &str, args: Value, ttl: Option<f64>) -> Value {
+    let mut inner = ctx.shared.inner.lock();
+    // The running cap counts every task of the token (store.getAllTasks(), no session filter).
+    let running =
+        inner.tasks.get(&ctx.token).map(|v| v.iter().filter(|(_, t)| t.task["status"] == "working").count()).unwrap_or(0);
+    if running >= MAX_RUNNING_TASKS {
+        return mcp_error(id, -32600, &format!("At most {MAX_RUNNING_TASKS} tasks may run at once; wait for one to finish."));
+    }
+    let mut raw = [0u8; 16];
+    getrandom::fill(&mut raw).expect("os random");
+    let task_id: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+    // `Math.min(Math.max(ttl ?? TASK_TTL_MS, MIN_TASK_TTL_MS), TASK_TTL_MS)` in ms; any number (a fraction stays).
+    let min_ttl = ctx.shared.cfg.min_task_ttl.as_secs_f64() * 1000.0;
+    let ttl_ms = ttl.unwrap_or(TASK_TTL_MS as f64).max(min_ttl).min(TASK_TTL_MS as f64);
+    let ttl = Duration::from_secs_f64(ttl_ms / 1000.0);
+    let created = iso_now();
+    let task = json!({ "taskId": task_id, "status": "working", "ttl": js_number(ttl_ms), "createdAt": created, "lastUpdatedAt": created, "pollInterval": TASK_POLL_MS });
+    let Some(token_cancel) = inner.token_cancel.get(&ctx.token).cloned() else {
+        return mcp_error(id, -32600, "Agent connection has expired.");
+    };
+    let cancel = token_cancel.child_token();
+    let changed = Arc::new(tokio::sync::Notify::new());
+    inner.tasks.entry(ctx.token.clone()).or_default().push((
+        task_id.clone(),
+        TaskEntry {
+            task: task.clone(),
+            result: None,
+            cancel: cancel.clone(),
+            changed: changed.clone(),
+            session: ctx.session_id().map(str::to_string),
+            expiry: 0,
+        },
+    ));
+    drop(inner);
+    arm_expiry(&ctx.shared, &ctx.token, &task_id, ttl);
+    let (shared, token, cell, name) = (ctx.shared.clone(), ctx.token.clone(), ctx.cell.clone(), name.to_string());
+    let tid = task_id.clone();
+    tokio::spawn(async move {
+        let call = CallCtx {
+            cell: cell.clone(),
+            cancel: cancel.clone(),
+            elicit: None,
+            progress: None,
+            progress_every: shared.cfg.progress_every,
+            task: true,
+        };
+        let outcome = shared.fake.call(&name, &args, call).await;
+        let live = shared.inner.lock().tokens.get(&token).is_some_and(|c| *c == cell);
+        let content = match outcome {
+            Ok(_) if !live => error_content("Agent connection has expired."),
+            Ok(value) => json!({ "content": [{ "type": "text", "text": cap_result(&value.to_string(), MAX_RESULT_CHARS) }] }),
+            Err(CallError::Unknown) => error_content(&format!("Unknown tool: {name}")),
+            Err(CallError::Tool(text)) => error_content(&text),
+            Err(CallError::Aborted) => error_content("This operation was aborted"),
+        };
+        let mut inner = shared.inner.lock();
+        let mut stored = false;
+        if let Some((_, entry)) = inner.tasks.get_mut(&token).and_then(|v| v.iter_mut().find(|(i, _)| *i == tid))
+            && entry.task["status"] == "working"
+        {
+            entry.task["status"] = json!("completed");
+            entry.task["lastUpdatedAt"] = json!(iso_now());
+            entry.result = Some(content);
+            entry.changed.notify_waiters();
+            stored = true;
+        }
+        drop(inner);
+        // storeTaskResult restarts the cleanup timer: the result is kept for a full ttl after completion.
+        if stored {
+            arm_expiry(&shared, &token, &tid, ttl);
+        }
+    });
+    result(id, json!({ "task": task }))
+}
+
+/// tasks/result blocks until the task is terminal, then answers its result with the related-task meta.
+async fn task_result(ctx: &Arc<ReqCtx>, id: &Value, task_id: &str, cancel: CancellationToken) -> Value {
+    loop {
+        let changed = {
+            let inner = ctx.shared.inner.lock();
+            let Some(entry) = find_task(&inner, &ctx.token, ctx.session_id(), task_id) else {
+                return mcp_error(id, -32602, &format!("Task not found: {task_id}"));
+            };
+            let status = entry.task["status"].as_str().unwrap_or("");
+            if ["completed", "failed", "cancelled"].contains(&status) {
+                let Some(mut answer) = entry.result.clone() else {
+                    // getTaskResult throws a plain Error: no `MCP error` prefix.
+                    return error(id, -32603, &format!("Task {task_id} has no result stored"));
+                };
+                answer["_meta"] = json!({ "io.modelcontextprotocol/related-task": { "taskId": task_id } });
+                return result(id, answer);
+            }
+            entry.changed.clone()
+        };
+        tokio::select! {
+            () = changed.notified() => {}
+            () = tokio::time::sleep(Duration::from_millis(TASK_POLL_MS)) => {}
+            () = cancel.cancelled() => return mcp_error(id, -32603, "This operation was aborted"),
+        }
+    }
+}
+
+fn trim_sessions(inner: &mut Inner, token: &str) {
+    let own: Vec<String> =
+        inner.session_order.iter().filter(|id| inner.sessions.get(*id).is_some_and(|s| s.token == token)).cloned().collect();
+    let excess = own.len().saturating_sub(MAX_SESSIONS_PER_TOKEN);
+    for id in own.into_iter().take(excess) {
+        close_session(inner, &id);
+    }
+}
+
+fn close_session(inner: &mut Inner, id: &str) {
+    if let Some(session) = inner.sessions.remove(id) {
+        session.cancel.cancel();
+        for (_, state) in session.requests.lock().drain() {
+            state.cancel.cancel();
+        }
+    }
+    inner.session_order.retain(|s| s != id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strict_jsonrpc_messages() {
+        let ok = |v: Value| valid_message(&v);
+        assert!(ok(json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" })));
+        assert!(ok(json!({ "jsonrpc": "2.0", "id": "a", "method": "ping", "params": { "_meta": { "progressToken": 3 } } })));
+        assert!(ok(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })));
+        assert!(ok(json!({ "jsonrpc": "2.0", "id": 1, "result": {} })));
+        assert!(ok(json!({ "jsonrpc": "2.0", "error": { "code": -1, "message": "x", "data": [1] } })));
+        assert!(!ok(json!({ "jsonrpc": "2.0", "id": 1.5, "method": "ping" })));
+        assert!(!ok(json!({ "jsonrpc": "2.0", "id": 9_007_199_254_740_992u64, "method": "ping" })));
+        assert!(!ok(json!({ "jsonrpc": "2.0", "id": 1, "method": "ping", "params": [] })));
+        assert!(!ok(json!({ "jsonrpc": "2.0", "id": 1, "method": "ping", "foo": 1 })));
+        assert!(!ok(json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -1, "message": "x" } })));
+        assert!(!ok(json!({ "jsonrpc": "2.0", "id": 1, "result": [] })));
+        assert!(!ok(json!({ "jsonrpc": "2.0", "id": 1, "method": "ping",
+            "params": { "_meta": { "io.modelcontextprotocol/related-task": {} } } })));
+        assert_eq!(id_key(&json!(7.0)), id_key(&json!(7)));
+        assert_ne!(id_key(&json!("7")), id_key(&json!(7)));
+    }
+
+    #[test]
+    fn elicitation_answers_are_checked_like_elicit_input() {
+        let confirm = json!({ "type": "object", "required": ["confirm"],
+            "properties": { "confirm": { "type": "boolean", "default": false } } });
+        let answer = |result: Value| elicit_answer(&json!({ "jsonrpc": "2.0", "id": 0, "result": result }), &confirm);
+        let accepted = answer(json!({ "action": "accept", "content": { "confirm": true } })).unwrap();
+        assert_eq!((accepted.action.as_str(), accepted.content), ("accept", Some(json!({ "confirm": true }))));
+        assert!(answer(json!({ "action": "accept", "content": { "confirm": "yes" } })).is_none());
+        assert!(answer(json!({ "action": "accept", "content": {} })).is_none());
+        assert!(answer(json!({ "action": "yes" })).is_none());
+        assert!(answer(json!({ "action": "accept", "content": { "confirm": true, "x": { "a": 1 } } })).is_none());
+        assert!(answer(json!({ "action": "accept", "content": [true] })).is_none());
+        let declined = answer(json!({ "action": "decline", "content": null })).unwrap();
+        assert_eq!((declined.action.as_str(), declined.content), ("decline", None));
+        // A decline is not checked against the schema (only an accept with content is).
+        assert!(answer(json!({ "action": "decline", "content": { "confirm": "no" } })).is_some());
+        let refused = json!({ "jsonrpc": "2.0", "id": 0, "error": { "code": -1, "message": "x" } });
+        assert!(elicit_answer(&refused, &confirm).is_none());
+        // The agent picker (mcpTools resolveCell): a string out of oneOf consts.
+        let pick = json!({ "type": "object", "required": ["cellId"], "properties": { "cellId": { "type": "string",
+            "title": "Agent", "oneOf": [{ "const": "a", "title": "A" }, { "const": "b", "title": "B" }] } } });
+        let picked = |id: Value| schema_ok(&pick, &json!({ "cellId": id }));
+        assert!(picked(json!("a")) && picked(json!("b")));
+        assert!(!picked(json!("c")) && !picked(json!(1)));
+    }
+}

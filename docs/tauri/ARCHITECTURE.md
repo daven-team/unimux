@@ -33,7 +33,7 @@ unimux.exe (Rust, tauri 2.12.5, windows_subsystem = "windows", panic = "unwind")
  |- tokio runtime (one process, one actor per subsystem):
  |    state (StateController, saver), ipc router + event routing
  |    pty service (ConPTY / openpty, output engine, Channel data plane)
- |    hooks server (axum), MCP server (axum), automation
+ |    hooks server (axum), MCP server (custom hyper/axum dispatcher, SP8), automation
  |    git, files, search, monitor, notes, changelog
  |    cli detect/install, context tracker, sessions, conversation search
  |    ssh (russh), sftp, db (postgres-protocol, mysql_common, redis, rusqlite)
@@ -108,6 +108,8 @@ Version pins (checked with cargo search/info on 2026-11-06; crates.io and npm al
 - reqwest 0.13.5 (rustls, no gzip), junction 2.1.0, dunce 1.0.5, fs4 (instance lock), interprocess 2.x (second-instance socket), rusty-leveldb 4.0.2, process-wrap 10.0.1
 - russh 0.65.1 (SP7: `default-features = false, features = ["ring", "rsa", "flate2"]`, the same ring backend as rustls, no aws-lc-sys) with its pinned ssh-key =0.7.0-rc.11 plus feature `tdes`; legacy encrypted PEM through aes 0.9.4 / cbc 0.2.1 / ctr 0.10.1 / des 0.9.0 / blowfish 0.10.0 / md5 0.8.1 (own code, S2); the client offers exactly the 1.1.4 algorithm list (ssh2 1.17 defaults under Electron 45), see docs/tauri/spikes/SP7.md
 - russh-sftp 3.0.1, postgres-protocol 0.6.12, mysql_common 0.38.2, redis 1.8.1, rusqlite 0.41.1 (bundled, column_metadata), rustls 0.23.46 + tokio-rustls 0.26.6 (ring provider), axum 0.8.9, hyper 1.12.0, rmcp 3.9.0 (decided in SP8), fancy-regex 0.20.0, icu_collator 2.4.0, encoding_rs 0.8.44, trash 5.3.0
+
+- russh 0.65.1, russh-sftp 3.0.1, postgres-protocol 0.6.12, mysql_common 0.38.2, redis 1.8.1, rusqlite 0.41.1 (bundled, column_metadata), rustls 0.23.46 + tokio-rustls 0.26.6 (ring provider), axum 0.8.9, hyper 1.12.0 + hyper-util 0.1.21, http-body-util 0.1.5, tokio-util 0.7.20 (the MCP server is a custom dispatcher on hyper/axum, decided in SP8; rmcp is not used, see spikes/SP8.md), fancy-regex 0.20.0, icu_collator 2.4.0, encoding_rs 0.8.44, trash 5.3.0
 - minisign-verify, tar + flate2 (macOS .app.tar.gz), memchr: versions pinned in F1 with cargo info
 
 Node: Node 26 LTS is installed and used only to build the renderer (Vite), run vitest, generators and the real-app scripts.
@@ -309,3 +311,5 @@ Not used by 1.1.4 (verified by grep on 2026-11-06), so NOT added: tray icon, glo
 - 2026-11-06, SP5 (docs/tauri/spikes/SP5.md): own ConPTY wrapper instead of portable-pty; frames get a u32 payload length and are batched per window, because the Channel's per-message cost (not Rust, not decoding) limits the frame rate at 20 MB/s.
 - 2026-11-06, this version: rewritten for the user's ALL-AT-ONCE decision. Removed: sidecar, stdio bridge, loopback WebSocket transport and its CSP entries, Electron shim, `channelRoutes.ts` backend/rust routing, `unimux-blob://` protocol, state mirror, release table 1.3.0 to 1.6.0. Added: generated IPC contract with NotYet stubs, Rust-owned state from wave 0, full crate list, caption buttons matching the 1.1.4 overlay, custom update window process for Tauri -> Tauri, two-way Electron singleton compatibility, embedded updater public key.
 - 2026-11-06, SP6 (Windows half): the update window copy is `unimux-update.exe`, staged and warmed when the download is verified; the window starts before the wind-down; installer arguments `/S /UPDATE --updated /D=<installDir>`; cleanup through `--update-cleanup --wait=...`; the splash page CSP gains `connect-src ipc: http://ipc.localhost` (docs/tauri/spikes/SP6.md).
+
+- 2026-11-06, SP8: the MCP server is a custom dispatcher on hyper 1.12 / axum 0.8.9 that reproduces the 1.1.4 wire (52 / 52 HTTP-level cases after the review fixes, both CLIs green); rmcp 3.9 dropped (7 / 52: no 2025-11-25 MCP tasks, global session mode, no abort of vanished clients, sessions not bound to tokens). See spikes/SP8.md.

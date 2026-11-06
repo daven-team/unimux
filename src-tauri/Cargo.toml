@@ -93,6 +93,14 @@ des = "=0.9.0"
 md5 = "=0.8.1"
 ctr = "=0.10.1"
 blowfish = "=0.10.0"
+# SP8 (MCP wire): the custom dispatcher's HTTP stack; rmcp only for the spike comparison (examples, not shipped).
+axum = { version = "0.8.9", default-features = false, features = ["tokio", "http1"] }
+hyper = { version = "1.12.0", features = ["server", "http1"] }
+hyper-util = { version = "0.1.21", features = ["tokio", "service"] }
+http-body-util = "0.1.5"
+bytes = "1.12.1"
+tokio-util = "0.7.20"
+rmcp = { version = "3.9.0", default-features = false, features = ["server", "transport-streamable-http-server", "elicitation"] }
 
 [profile.release]
 lto = "thin"
