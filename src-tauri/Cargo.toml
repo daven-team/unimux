@@ -108,6 +108,8 @@ redis = { version = "1.8.1", default-features = false, features = ["tokio-comp"]
 fallible-iterator = "0.2.0"
 # mysql_common needs one flate2 backend: the pure Rust one (no C zlib build).
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# G1: the JS regexes of the git module (redactSecrets, SCRUBBED_ENV); JS semantics are spelled out in the patterns.
+regex = "1.13.1"
 
 [profile.release]
 lto = "thin"

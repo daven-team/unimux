@@ -13,6 +13,9 @@
 //   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
 //   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
 //                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
+//   test/golden/git-spelling.jsonl   {path} -> normalizeSpelling(path, win32 | darwin) of src/main/gitPaths.ts (PLAN G1; the
+//                                     file-system half is checked live by unimux-git/tests/canonical_paths.rs)
+//   test/golden/git-text.jsonl       {value, max} -> trimGitText(value, max) and redactSecrets(value) of src/shared/git.ts
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
 import { dirname, resolve } from 'node:path';
@@ -23,9 +26,12 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = resolve(root, 'test/golden');
 const load = async (file) => (await runnerImport(resolve(root, file), { configFile: false, logLevel: 'silent', root })).module;
 
-const [{ defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { translate }, { messages }, { normalizeEditedState }] = await Promise.all([
+const [
+  { defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { translate }, { messages }, { normalizeEditedState }, { normalizeSpelling },
+  { trimGitText, redactSecrets },
+] = await Promise.all([
   load('src/shared/state.ts'), load('src/shared/stateEdits.ts'), load('src/shared/statePatch.ts'), load('src/shared/i18n.ts'), load('src/shared/messages.ts'),
-  load('src/main/stateController.ts'),
+  load('src/main/stateController.ts'), load('src/main/gitPaths.ts'), load('src/shared/git.ts'),
 ]);
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
@@ -129,6 +135,51 @@ function translations() {
   return rows;
 }
 
+/** Folder spellings: both slashes, verbatim and device prefixes, repeated and trailing separators, drive roots, UNC, Unicode case. */
+function gitSpelling() {
+  const r = rng(1301);
+  const B = '\\';
+  const fixed = [
+    '', '/', '//', '///', '////a', B, `${B}${B}?${B}`, 'C:', `C:${B}`, 'C:/', `c:${B}${B}`, `C:${B}${B}${B}`, 'C:/a/', `C:${B}A${B}B${B}`,
+    `${B}${B}?${B}C:${B}A${B}B${B}`, `${B}${B}.${B}C:${B}x`, '//?/c:/x', '//./pipe/x', `${B}${B}?${B}UNC${B}server${B}share${B}dir`,
+    `${B}${B}server${B}share${B}`, '//server//share//x//', '/home/me//Repo/', `relative${B}Path${B}`, './x/', 'a', 'A/',
+    `C:${B}Users${B}RUNNER~1${B}AppData`, `D:${B}ZAŻÓŁĆ${B}Gęślą Jaźń`, `D:${B}İstanbul${B}ΣΊΣΥΦΟΣ`, `E:${B}STRAẞE${B}ǅ`, `F:${B}😀${B}x/`, `x:${B}${B}${B}y`,
+  ];
+  const parts = ['C:', 'c:', 'D:', B, '/', '//', `${B}${B}`, 'Users', 'RUNNER~1', 'Ąę', 'ẞ', 'İ', 'Σ', 'dir name', '.', '..', '?', '😀', 'ﬀ'];
+  const random = [];
+  for (let i = 0; i < 300; i++) {
+    let p = '';
+    for (let n = 1 + Math.floor(r() * 7); n > 0; n--) p += parts[Math.floor(r() * parts.length)];
+    random.push(p);
+  }
+  return [...fixed, ...random].map((path) => ({ path, win32: normalizeSpelling(path, 'win32'), darwin: normalizeSpelling(path, 'darwin') }));
+}
+
+/** git output with credentials, Authorization headers, tokens, ANSI, CRLF, hint lines, blank runs, JS white space and long tails. */
+function gitText() {
+  const r = rng(1302);
+  const E = '\u001b';
+  const fixed = [
+    '', '   ', 'hint: only hints\nHINT: here', 'error: x\r\nhint: y\n\n\n\nfatal: z\n', `${E}[31mred${E}[0m ${E}[?25lcursor`,
+    "fatal: unable to access 'https://user:s3cr3t-token@127.0.0.1:1/nope.git/': Failed to connect",
+    'remote: Authorization: Bearer abc.def\nauthorization:basic Zm9vOmJhcg== x', 'AUTHORIZATION: Token  t0k3n', 'Authorization:\u00a0bearer\u3000x',
+    'ghp_0123456789abcdefghijABCD ghs_0123456789abcdefghijABCD_x github_pat_0123456789abcdefghij_KLM glpat-0123456789abcdef-x',
+    'żghp_0123456789abcdefghijABCD aghp_0123456789abcdefghijABCD ghp_0123456789abcdefghijABCDé', 'ssh://git@host:22/x git+ssh://a:b@c/d ſsh://u@h',
+    '\u00a0\ufeff text \u0085\u2028', '\u0085 nel stays \u0085', 'line1\n\n\nline2\n\n\n\n\nline3', 'hint: a\nreal\nhint: b\n', 'hınt: dotless\nhint: x',
+  ];
+  const parts = ['error: ', 'fatal: ', 'hint: ', 'remote: ', 'https://u:p@h/x ', 'ghp_0123456789abcdefghijABCDEFG ', 'zażółć ', '😀', '\n', '\r\n',
+    '\n\n\n', `${E}[1;32m`, `${E}[0m`, '\t', ' ', '\u3000', '\u0085', 'Authorization: basic xyz ', 'warning: LF will be replaced ', 'x'.repeat(50)];
+  const rows = fixed.map((value) => ({ value, max: 600 }));
+  for (let i = 0; i < 300; i++) {
+    let value = '';
+    for (let n = 1 + Math.floor(r() * (i < 150 ? 12 : 80)); n > 0; n--) value += parts[Math.floor(r() * parts.length)];
+    rows.push({ value, max: [600, 600, 400, 50, 7][i % 5] });
+  }
+  // a cut right inside a surrogate pair: the tail starts with a lone half (JSON.stringify writes it as \udXXX)
+  rows.push({ value: `${'a'.repeat(10)}😀${'b'.repeat(9)}`, max: 10 });
+  return rows.map(({ value, max }) => ({ value, max, trimmed: trimGitText(value, max), redacted: redactSecrets(value) }));
+}
+
 function atomicWriteNames() {
   // tempPathFor: `${file}.${pid}.${Date.now().toString(36)}${(counter++).toString(36)}.tmp`
   return [[1234, 1762430400123, 0], [1, 0, 35], [99999, 1792067400000, 36]].map(([pid, ms, counter]) => ({ file: 'state.json', pid, ms, counter, out: `state.json.${pid}.${ms.toString(36)}${counter.toString(36)}.tmp` }));
@@ -177,6 +228,8 @@ const files = {
   'normalize-state.jsonl': jsonl(normalizeRows({ normalizeState, root })),
   'state-after-edit.jsonl': jsonl(afterEditRows({ normalizeState, normalizeEditedState })),
   'js-sort.jsonl': jsonl(jsSort()),
+  'git-spelling.jsonl': jsonl(gitSpelling()),
+  'git-text.jsonl': jsonl(gitText()),
 };
 
 const check = process.argv.includes('--check');
