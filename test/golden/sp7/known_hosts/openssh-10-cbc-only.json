@@ -1,0 +1,23 @@
+{
+ "version": 1,
+ "entries": [
+  {
+   "id": "37705b8b-a582-4c43-ad08-572258ac00a1",
+   "host": "127.0.0.1",
+   "port": 50449,
+   "keyType": "ssh-ed25519",
+   "key": "AAAAC3NzaC1lZDI1NTE5AAAAILjaClYd5nr6HnKkpto9tUFGpU6SUU/Cb2IXyej1arzi",
+   "fingerprint": "SHA256:Zkq6muXYn4E+9lDEVSQdToDxWBFwVFHd+pdphqLB7Qk",
+   "addedAt": 1793981818256
+  },
+  {
+   "id": "8cd614aa-39b3-44d7-9147-7cb02eae1b6c",
+   "host": "127.0.0.1",
+   "port": 50449,
+   "keyType": "ssh-rsa",
+   "key": "AAAAB3NzaC1yc2EAAAADAQABAAABgQCr36xndilu88wiq8Brmk0jPy4jsYrwscBpwiXXVtoueRQQHN1mU0LhvfxqiLNnwXMUU2nIpHGS2axdvMSs8Qa+Xzs5Qa3MJ3JXU9lCVZ+n88JU9bJkm0oytQm2FpZzXkSGKOUg6fzK7zQpn5+hyWBRw4NpUh50dblO9PNV2ruhItMnWpsvVlbYtcfF8YjesHubjeb0QA/RIHaGGtYcdEBwijwPj4ThwYlt2+dReZeQy9yIjfASE4n6o44Z1MqktH8w+dhucOZJLccRpevZqPooZqagkqnvgaokpgESJ84im15TYKKPEpclFaGObcL8gRFMLWmhum19cn5Y4mbH5a64sHrlU2i91T/zsqNRd/V7FabwZooUoLryL3Mxa0CR07FUIcWmEJ54dhsIS0QANjsZPzHnxfSGf4UTmperTv0U7+7fp8/wnjqPCxFfzc39nWzrMsJnkszNO5ERAjJOAKdu4xb1sr3VSGCKEy6LbX+omhb1LioTTuzE8scgowOFZ+E=",
+   "fingerprint": "SHA256:vy7QSoUMj9UGXqxpzEnHt67ACTKB9meIE/cX7mYQSO8",
+   "addedAt": 1793981818574
+  }
+ ]
+}

@@ -106,7 +106,8 @@ Version pins (checked with cargo search/info on 2026-11-06; crates.io and npm al
 - windows 0.62.2, webview2-com 0.39.1, tauri-winrt-notification 0.8.1, objc2-* 0.3.2, security-framework 3.7.0
 - aes-gcm 0.11.1, aes 0.9.4, cbc 0.2.1, pbkdf2 0.13.0, zeroize 1.9.1
 - reqwest 0.13.5 (rustls, no gzip), junction 2.1.0, dunce 1.0.5, fs4 (instance lock), interprocess 2.x (second-instance socket), rusty-leveldb 4.0.2, process-wrap 10.0.1
-- russh 0.65.1, russh-sftp 3.0.1, postgres-protocol 0.6.12, mysql_common 0.38.2, redis 1.8.1, rusqlite 0.41.1 (bundled, column_metadata), rustls 0.23.46 + tokio-rustls 0.26.6 (ring provider), axum 0.8.9, hyper 1.12.0, rmcp 3.9.0 (decided in SP8), fancy-regex 0.20.0, icu_collator 2.4.0, encoding_rs 0.8.44, trash 5.3.0
+- russh 0.65.1 (SP7: `default-features = false, features = ["ring", "rsa", "flate2"]`, the same ring backend as rustls, no aws-lc-sys) with its pinned ssh-key =0.7.0-rc.11 plus feature `tdes`; legacy encrypted PEM through aes 0.9.4 / cbc 0.2.1 / ctr 0.10.1 / des 0.9.0 / blowfish 0.10.0 / md5 0.8.1 (own code, S2); the client offers exactly the 1.1.4 algorithm list (ssh2 1.17 defaults under Electron 45), see docs/tauri/spikes/SP7.md
+- russh-sftp 3.0.1, postgres-protocol 0.6.12, mysql_common 0.38.2, redis 1.8.1, rusqlite 0.41.1 (bundled, column_metadata), rustls 0.23.46 + tokio-rustls 0.26.6 (ring provider), axum 0.8.9, hyper 1.12.0, rmcp 3.9.0 (decided in SP8), fancy-regex 0.20.0, icu_collator 2.4.0, encoding_rs 0.8.44, trash 5.3.0
 - minisign-verify, tar + flate2 (macOS .app.tar.gz), memchr: versions pinned in F1 with cargo info
 
 Node: Node 26 LTS is installed and used only to build the renderer (Vite), run vitest, generators and the real-app scripts.
