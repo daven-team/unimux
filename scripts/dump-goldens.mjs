@@ -9,7 +9,10 @@
 //   test/golden/atomic-write.jsonl   {file, pid, ms, counter} -> the temp name tempPathFor would give
 //   test/golden/state-load.jsonl     {text} (JSON.stringify output, lone surrogates included) -> what 1.2.0 reads: JSON.parse
 //                                     accepts it, a lone surrogate becomes U+FFFD (a Rust string cannot hold one)
+//   test/golden/normalize-state.jsonl   {platform, now, input} -> normalizeState (see scripts/goldens-normalize.mjs)
+//   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
@@ -18,8 +21,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = resolve(root, 'test/golden');
 const load = async (file) => (await runnerImport(resolve(root, file), { configFile: false, logLevel: 'silent', root })).module;
 
-const [{ defaultState }, { mergeStateEdit }, { diffState }, { translate }, { messages }] = await Promise.all([
+const [{ defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { translate }, { messages }, { normalizeEditedState }] = await Promise.all([
   load('src/shared/state.ts'), load('src/shared/stateEdits.ts'), load('src/shared/statePatch.ts'), load('src/shared/i18n.ts'), load('src/shared/messages.ts'),
+  load('src/main/stateController.ts'),
 ]);
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
@@ -153,6 +157,8 @@ const files = {
   'translate.jsonl': jsonl(translations()),
   'atomic-write.jsonl': jsonl(atomicWriteNames()),
   'state-load.jsonl': jsonl(stateLoad()),
+  'normalize-state.jsonl': jsonl(normalizeRows({ normalizeState, root })),
+  'state-after-edit.jsonl': jsonl(afterEditRows({ normalizeState, normalizeEditedState })),
 };
 
 const check = process.argv.includes('--check');

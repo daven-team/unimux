@@ -9,7 +9,7 @@
 //! - [`store`]: loadState rules, the debounced saver, `flush_until_saved`.
 //! - [`controller`]: the single writer with revisions, change hooks and a revision watch.
 //! - [`broadcast`]: `state:changed` with 16 ms batching of agent changes.
-//! - [`normalize`]: the normalization seam (F8 ports normalizeState behind it; wave 0 keeps valid states as they are).
+//! - [`normalize`]: normalizeState / defaultState / the edit normalization of 1.1.4 ([`StateNormalizer`]).
 
 pub mod broadcast;
 pub mod controller;
@@ -19,4 +19,4 @@ pub mod patch;
 pub mod store;
 
 pub use controller::{Snapshot, StateController};
-pub use normalize::{Normalizer, PassThrough, Platform};
+pub use normalize::{Normalizer, PassThrough, Platform, StateNormalizer};

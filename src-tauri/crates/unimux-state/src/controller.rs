@@ -194,6 +194,69 @@ mod tests {
         assert_eq!(c.revision(), 0);
     }
 
+    /// A grid of `n` cells in a default state (test/state-edits.test.ts `grid(n)`).
+    fn grid(n: usize) -> Value {
+        let mut s = crate::normalize::state::default_state(crate::Platform::Win32);
+        let cells: Vec<Value> = (0..n).map(|i| json!({"id": format!("c{i}"), "profileId": "claude"})).collect();
+        s["projects"] = json!([{"id": "p", "name": "P", "path": "/p", "tabs": [{"id": "t", "name": "T", "layout": crate::normalize::grid::layout_for_count(n as f64), "cells": cells}], "archive": [], "activeTabId": "t"}]);
+        s["activeProjectId"] = json!("p");
+        s
+    }
+
+    fn add_cell(s: &Value, id: &str) -> Value {
+        let mut next = s.clone();
+        let cells = next["projects"][0]["tabs"][0]["cells"].as_array_mut().unwrap();
+        cells.push(json!({"id": id, "profileId": "codex"}));
+        let n = cells.len();
+        next["projects"][0]["tabs"][0]["layout"] = crate::normalize::grid::layout_for_count(n as f64);
+        next
+    }
+
+    #[test]
+    fn repairs_the_layout_when_two_independent_additions_are_merged() {
+        let base = grid(1);
+        let c = StateController::new(base.clone(), Arc::new(crate::StateNormalizer));
+        c.change(|s| Ok(add_cell(s, "main")), None, false).unwrap();
+        c.apply_edit("ui", &base, &add_cell(&base, "ui")).unwrap();
+        let tab = &c.get()["projects"][0]["tabs"][0];
+        assert_eq!(tab["cells"].as_array().unwrap().len(), 3);
+        assert_eq!(tab["layout"]["areas"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn rejects_concurrent_additions_beyond_20_without_altering_the_canonical_state() {
+        let base = grid(19);
+        let c = StateController::new(base.clone(), Arc::new(crate::StateNormalizer));
+        c.change(|s| Ok(add_cell(s, "main")), None, false).unwrap();
+        let before = c.get();
+        let err = c.apply_edit("ui", &base, &add_cell(&base, "ui")).unwrap_err();
+        assert!(err.contains("cell limit"), "{err}");
+        assert_eq!(c.get(), before);
+        assert_eq!(c.revision(), 1);
+    }
+
+    #[test]
+    fn normalizes_the_sftp_places_and_the_scrollback_setting_of_a_renderer_edit() {
+        let base = grid(1);
+        let c = StateController::new(base.clone(), Arc::new(crate::StateNormalizer));
+        let mut next = base.clone();
+        next["sftp"] = unimux_core::js_json::parse(
+            r#"{"localPath":"relative/path","remotePaths":{"__proto__":"/x","h1":"/srv//www/","bad id":"/y","h2":"relative"}}"#,
+        )
+        .unwrap();
+        next["settings"]["scrollbackLines"] = json!(123);
+        c.apply_edit("ui", &base, &next).unwrap();
+        let state = c.get();
+        assert_eq!(state["sftp"], json!({"remotePaths": {"h1": "/srv/www"}}));
+        assert_eq!(state["settings"]["scrollbackLines"], 5000);
+        let mut kept = base.clone();
+        kept["sftp"] = json!({"remotePaths": {"h1": "/srv"}});
+        kept["settings"]["scrollbackLines"] = json!(10_000);
+        c.apply_edit("ui2", &state, &kept).unwrap();
+        assert_eq!(c.get()["sftp"], json!({"remotePaths": {"h1": "/srv"}}));
+        assert_eq!(c.get()["settings"]["scrollbackLines"], 10_000);
+    }
+
     #[tokio::test]
     async fn the_watch_wakes_on_changes() {
         let c = Arc::new(StateController::new(json!({}), Arc::new(PassThrough)));
