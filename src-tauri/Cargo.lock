@@ -5317,6 +5317,7 @@ dependencies = [
  "getrandom 0.4.3",
  "pbkdf2",
  "security-framework",
+ "serde",
  "serde_json",
  "sha1",
  "tempfile",

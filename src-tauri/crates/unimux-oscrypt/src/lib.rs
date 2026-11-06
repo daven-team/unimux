@@ -12,7 +12,8 @@
 //!   verified on a real Mac yet.
 //! - Anything else, or `force_unavailable` (MC_SSH_NO_SAFESTORAGE): unavailable, like 1.1.x.
 //!
-//! The SP2 spike version: B2 adds the IPC side, `MC_SSH_NO_SAFESTORAGE` through DevOverrides and the callers.
+//! [`SafeStorage`] (B2) is what the app uses: one per process, opened on first use (lazy Keychain access on macOS), behind
+//! the [`SafeCipher`] interface of 1.1.x's `Cipher`, with `MC_SSH_NO_SAFESTORAGE` and the `Origin` reported to startup.log.
 
 use std::path::Path;
 
@@ -23,8 +24,11 @@ pub mod dpapi;
 #[cfg(target_os = "macos")]
 pub mod keychain;
 pub mod local_state;
+pub mod node_base64;
+pub mod safe_storage;
 pub mod v10;
 
+pub use safe_storage::{SafeCipher, SafeStorage};
 pub use v10::BlobError;
 
 /// The label 1.1.x shows (`Cipher.storage` in src/main/ssh/vault.ts).
@@ -42,6 +46,12 @@ impl Storage {
             Storage::Keychain => "keychain",
             Storage::Unavailable => "unavailable",
         }
+    }
+}
+
+impl serde::Serialize for Storage {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -63,6 +73,29 @@ pub enum Origin {
     Failed(String),
     /// Built from a known key (tests and tools).
     Given,
+}
+
+impl Origin {
+    /// One word for the startup.log mark (`safe-storage-<label>`).
+    pub fn label(&self) -> &'static str {
+        match self {
+            Origin::Existing => "existing",
+            Origin::Created => "created",
+            Origin::Replaced(_) => "replaced",
+            Origin::Migrated => "migrated",
+            Origin::Off => "off",
+            Origin::Failed(_) => "failed",
+            Origin::Given => "given",
+        }
+    }
+
+    /// The reason of `Replaced` / `Failed` (no key material), for crash.log.
+    pub fn reason(&self) -> Option<&str> {
+        match self {
+            Origin::Replaced(reason) | Origin::Failed(reason) => Some(reason),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

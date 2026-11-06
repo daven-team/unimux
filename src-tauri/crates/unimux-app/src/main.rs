@@ -149,6 +149,14 @@ fn main() {
     }
     let _ = ctx.router.set(Arc::new(builder.build(ctx.guard.clone())));
     *second.lock() = Some(ctx.clone());
+    // Windows: Chromium's OSCrypt::Init runs at 1.1.4's start (an idle run already writes Local State); here off the main
+    // thread so the window never waits for DPAPI. macOS opens the Keychain on first use only (B2).
+    if cfg!(windows) {
+        let storage = ctx.safe_storage.clone();
+        let _ = std::thread::Builder::new().name("safe-storage".into()).spawn(move || {
+            storage.warm();
+        });
+    }
 
     let tauri_ctx = tauri_context();
     let setup_ctx = ctx.clone();

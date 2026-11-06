@@ -65,6 +65,48 @@ pub async fn test_bridge(
                 "allowed": ctx.guard_allows(&caller),
             }))
         }
+        // safeStorage (B2): `info` tells whether the key was opened before this call (null: nothing touched it yet), then
+        // opens it; `encrypt` / `decrypt` go through the same base64 helpers the vaults use. Check build only: the harness
+        // works on scratch data dirs with throwaway secrets.
+        "safeStorage" => {
+            use unimux_oscrypt::SafeCipher;
+            let storage = &ctx.safe_storage;
+            let strings = |key: &str| -> Vec<String> {
+                args.get(key)
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default()
+            };
+            match args.get("op").and_then(Value::as_str).unwrap_or("info") {
+                "info" => {
+                    let before = storage.opened().map(|o| o.label());
+                    Ok(json!({
+                        "openedBefore": before,
+                        "storage": storage.storage(),
+                        "available": storage.available(),
+                        "origin": storage.opened().map(|o| o.label()),
+                        "reason": storage.opened().and_then(|o| o.reason()),
+                    }))
+                }
+                "encrypt" => Ok(Value::Array(
+                    strings("texts")
+                        .iter()
+                        .map(|t| storage.encrypt_base64(t).map_or_else(|e| json!({ "error": e.to_string() }), Value::String))
+                        .collect(),
+                )),
+                "decrypt" => Ok(Value::Array(
+                    strings("secrets")
+                        .iter()
+                        .map(|s| {
+                            storage
+                                .decrypt_base64(s)
+                                .map_or_else(|e| json!({ "error": e.to_string() }), |t| json!({ "text": t.as_str() }))
+                        })
+                        .collect(),
+                )),
+                other => Err(fail(&format!("unknown safeStorage op {other}"))),
+            }
+        }
         // Ends the app the normal way (the Exit event saves the state).
         "quit" => {
             if let Some(app) = ctx.app() {

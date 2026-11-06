@@ -14,6 +14,7 @@ use unimux_core::crash_log::{ReportLimiter, RollingLog};
 use unimux_core::dev_overrides::DevOverrides;
 use unimux_core::startup_timing::{StartupLog, StartupTimer};
 use unimux_ipc::{Call, EventSink, Events, Ports, Router, Scope, SendQueue, WindowGuard};
+use unimux_oscrypt::{Origin, SafeStorage};
 use unimux_state::broadcast::StateBroadcaster;
 use unimux_state::store::Saver;
 use unimux_state::{Normalizer, Platform, StateController, StateNormalizer};
@@ -51,12 +52,39 @@ impl EventSink for TauriSink {
     }
 }
 
+/// The safeStorage of this data dir. When the key is opened (Windows: at start, see main.rs; macOS: first use, lazy Keychain
+/// access) startup.log gets a `safe-storage-<origin>` mark and crash.log a line for a replaced or unreadable key.
+fn safe_storage(
+    data_dir: &std::path::Path,
+    overrides: &DevOverrides,
+    crash: &Arc<RollingLog>,
+    timer: &Arc<StartupTimer>,
+    startup_log: &Arc<StartupLog>,
+) -> SafeStorage {
+    let (crash, timer, startup_log) = (crash.clone(), timer.clone(), startup_log.clone());
+    SafeStorage::new(data_dir, unimux_core::APP_NAME, overrides.ssh_no_safestorage).on_open(move |origin, took| {
+        timer.mark(&format!("safe-storage-{}", origin.label()));
+        startup_log.flush(&timer);
+        let ms = took.as_millis();
+        match origin {
+            Origin::Replaced(reason) => {
+                crash.warn(&format!("safeStorage: Local State had no usable key, a new one was stored ({reason}, {ms} ms)"))
+            }
+            Origin::Failed(reason) => crash.warn(&format!("safeStorage unavailable: {reason} ({ms} ms)")),
+            Origin::Created | Origin::Migrated => crash.info(&format!("safeStorage key {} ({ms} ms)", origin.label())),
+            Origin::Existing | Origin::Off | Origin::Given => {}
+        }
+    })
+}
+
 pub struct AppContext {
     pub data_dir: PathBuf,
     pub overrides: DevOverrides,
     pub platform: Platform,
     pub windows_build: u32,
     pub crash: Arc<RollingLog>,
+    /// Electron's safeStorage for the SSH vault, the DB vault and the GitHub token (B2): opened on first use.
+    pub safe_storage: Arc<SafeStorage>,
     pub timer: Arc<StartupTimer>,
     pub startup_log: Arc<StartupLog>,
     pub state: Arc<StateController>,
@@ -110,12 +138,14 @@ impl AppContext {
         // A waiting batched state change leaves before any other event (stateBroadcast.ts flush).
         let b = broadcaster.clone();
         events.before_emit(move || b.flush());
+        let safe_storage = Arc::new(safe_storage(&data_dir, &overrides, &crash, &timer, &startup_log));
         Arc::new(Self {
             data_dir,
             overrides,
             platform: Platform::current(),
             windows_build: unimux_platform::windows_build(),
             crash,
+            safe_storage,
             timer,
             startup_log,
             state: controller,

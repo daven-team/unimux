@@ -57,7 +57,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 |---|---|---|---|---|---|---|
 | P1 | Rust pty core | todo | | | | |
 | B1 | Dual host test harness (unimux-hostd) | todo | | | | |
-| B2 | unimux-oscrypt production | todo | | | | |
+| B2 | unimux-oscrypt production | done (Windows verified; macOS compile-checked only) | 2026-11-06 | 2026-11-06 | Windows 11 26200 | `SafeStorage` (one per process, `Arc` in `AppContext`, opened on first use; Windows opens it on a background thread at start like OSCrypt::Init) behind the `SafeCipher` trait (1.1.x `Cipher` + `encrypt_base64` / `decrypt_base64` with Node's forgiving `Buffer.from(s, 'base64')`, measured against Electron 45's Node: tests/fixtures/node-base64.json); `safe-storage-<origin>=<ms>` in startup.log, crash.log line for created / replaced / failed; `MC_SSH_NO_SAFESTORAGE` only for exactly `1`; `APP_NAME` for the Keychain item; check-build `test_bridge` op `safeStorage` (info / encrypt / decrypt). Verification: `node scripts/verify-safestorage.mjs --electron .` 39/39 with the real 1.1.4 (A-H: 1.1.4 data copy decrypts, 1.1.4 decrypts Rust blobs, fresh install, MC_SSH_NO_SAFESTORAGE, foreign key / non-JSON / unknown format); cargo fmt, clippy -D warnings (default, dev-overrides+test-bridge, --release; oscrypt for aarch64-apple-darwin), cargo test oscrypt 25+5+2, core 49, app 11; smoke:tauri 34/34. See "B2 open issues". |
 | B3 | Rust http_fetch | todo | | | | PAC check in the VM |
 | W1 | Windows caption buttons that look like today | todo | | | | reference images from 1.1.4 first |
 | W2 | macOS window chrome, app menu, WebKit compatibility | todo | | | | |
@@ -300,6 +300,14 @@ All 14 confirmed findings of the wave 0 review are fixed; none was skipped.
 1. **Mac half not run** (no Mac): the Keychain round trip with 1.1.4 on macOS, the one "Always Allow" prompt for the re-signed binary, and the legacy-account migration. The macOS code is compiled and clippy clean for aarch64-apple-darwin and its crypto matches Node vectors byte for byte, nothing more. The spike script is Windows-only and needs a small launcher port for the Mac run.
 2. Resolved (review 2026-11-06): the earlier expectation ("Electron stays unavailable, no new key") was wrong. Chromium's OSCryptImpl::Init generates and stores a new key on kKeyDoesNotExist and kDecryptionFailed, and real 1.1.4 does so on a DPAPI blob nobody can unwrap (spike check F) and on a non-JSON file (moved to `Local State.bad`, check H). Rust now does the same (`Origin::Replaced`, checks G/H; 1.1.4 keeps the key Rust stored). Not measured with a real second Windows account: the foreign key is simulated with a DPAPI blob that does not unwrap (CryptUnprotectData 0x8007000D), which is the same code path.
 3. B2: when to touch the Keychain first on macOS (`Cipher::open` is eager today), the callers and IPC, `MC_SSH_NO_SAFESTORAGE` through DevOverrides, `Origin` in startup.log.
+
+### B2 open issues
+
+1. **macOS not run** (no Mac, CI never run): the lazy Keychain open, the `safe-storage-*` mark on first use and the round trip with 1.1.4 on macOS are compile-checked only (`cargo clippy -p unimux-oscrypt --target aarch64-apple-darwin`). The acceptance item "cargo fixture round trip on macOS CI" stays open until CI runs; `verify-safestorage.mjs` is Windows-only.
+2. The callers themselves are S1 (SSH vault), D1 (DB vault) and A6 (GitHub token): they take `Arc<dyn SafeCipher>` from `AppContext::safe_storage` and must call it off the main thread (the first macOS call may wait for the Keychain prompt). There is no renderer IPC for safeStorage in 1.1.4 (only the stores' `vaultInfo` storage labels, which come with S1 / D1); the `safeStorage` op exists only in the check build's test bridge.
+3. `startup.log` gets a new `safe-storage-<origin>` mark that 1.1.4 did not write (PLAN B2 asks for the Origin there); on macOS it appears when a store first asks, so it can be far later than `renderer-boot`.
+4. 1.1.4's page sometimes stops answering CDP (`Runtime.enable`) when started with `--inspect` (about one start in three on this machine); `verify-safestorage.mjs` ends that start (only its own process tree) and tries again up to 3 times.
+5. Resolves SP2 open issue 3.
 
 ### SP5 open issues
 
