@@ -2,6 +2,9 @@
 //
 //   node scripts/spike-update-window.mjs [--build] [--keep] [--prestage] [--visible] [--case=main,guard,failed,headless]
 //
+// The headless case hands WebView2 a file as its data folder, which makes Edge show a 'cannot create data directory'
+// message box on the desktop. It runs only with UNIMUX_SPIKE_BROKEN_WEBVIEW=1 (CI or a machine nobody works on).
+//
 // 1. --build: builds a spike installer from the check flavour (dev-overrides + test-bridge, so every unimux.exe it starts
 //    honours MC_DATA_DIR) into src-tauri/target/sp6, with productName `unimux-sp6` and identifier `com.unimux.sp6`: its
 //    registry keys, shortcuts and app data names can never meet the user's real unimux. mainBinaryName stays `unimux`, so the
@@ -41,7 +44,12 @@ const visible = process.argv.includes('--visible');
 const prestage = process.argv.includes('--prestage');
 const caseArg = process.argv.find((a) => a.startsWith('--case='));
 const ALL = ['main', 'guard', 'failed', 'headless'];
-const selected = caseArg ? caseArg.slice('--case='.length).split(',').filter((c) => ALL.includes(c)) : ALL;
+const brokenWebviewAllowed = process.env.UNIMUX_SPIKE_BROKEN_WEBVIEW === '1';
+const selected = (caseArg ? caseArg.slice('--case='.length).split(',').filter((c) => ALL.includes(c)) : ALL).filter((c) => {
+  if (c !== 'headless' || brokenWebviewAllowed) return true;
+  console.log('[sp6] skipping the headless case: it shows an Edge dialog on the desktop; set UNIMUX_SPIKE_BROKEN_WEBVIEW=1 to run it');
+  return false;
+});
 const targetDir = join(root, 'src-tauri', 'target', 'sp6');
 const bundleDir = join(targetDir, 'release', 'bundle', 'nsis');
 const shots = join(root, 'artifacts', 'tauri-sp6');
