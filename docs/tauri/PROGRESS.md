@@ -48,7 +48,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | SP4 | macOS 1.1.4 engine accepts the Tauri zip | todo | | | | needs a Mac |
 | SP5 | Rust ConPTY + Channel | todo | | | | |
 | SP6 | Custom update window process | todo | | | | |
-| SP7 | russh coverage | todo | | | | Docker |
+| SP7 | russh coverage | verified (Windows) | 2026-11-06 | 2026-11-06 | 2026-11-06 | docs/tauri/spikes/SP7.md. Keys: 91-file corpus (ssh-keygen 10.0p2, OpenSSL 3.5.7, PuTTYgen 0.83, 1.1.4's generateKey) vs the real 1.1.4 parsePrivateKey: 62 accepted, russh 0.65.1 loads 53 identically, the `legacy_pem` prototype (AES-128/192/256-CBC, DES-EDE3-CBC PEM, RSA + EC) the other 9 -> 62/62; PPK v2 through ssh-key (no own parser); 26 keys russh loads that 1.1.4 refuses are listed for S2 refusal checks (cargo test sp7_keys asserts both lists). Servers (scripts/sp7/matrix.mjs, Docker, containers removed by id): OpenSSH 10 current / old offer / SHA-1 only / CBC only, OpenSSH 5.9, Dropbear 2025 x2, Dropbear 2016; real 1.1.4 SshLogin under Electron 45 vs the russh probe with the 1.1.4 offer: same outcome and algorithms in all 104 logins, 21/21 host keys byte-identical to the 1.1.4 known_hosts.json entries; russh DEFAULT fails on the OpenSSH 5.x/6.x offer (no common MAC), so S3 uses `ssh2_preferred()`; login p50 87 ms (ssh2) vs 100 ms (russh) |
 | SP8 | MCP wire with real CLIs | todo | | | | scratch home |
 | SP9 | DB wire fidelity | todo | | | | Docker |
 
@@ -277,6 +277,14 @@ All 14 confirmed findings of the wave 0 review are fixed; none was skipped.
 10. Detached windows, the gate and the update window are not created yet, so the guard's detached registration and the destroy cleanup (`forget_on_destroy`) are only unit-tested and wired on the main window.
 11. HTML5 drag and drop (tab reorder / detach, snippets, notes, tree, SFTP) is enabled again by `disable_drag_drop_handler()` but no script drags yet; W3 adds the real-app drag checks with the OS file drop.
 12. The macOS half of the startup race (Electron's SingletonLock / SingletonSocket) is still R3; the Windows half (startup mutex + lockfile) is done.
+
+### Open issues: SP7
+
+1. russh pins ssh-key `=0.7.0-rc.11` (a release candidate); a russh update moves it, rerun `cargo test -p unimux-ssh --test sp7_keys` and the matrix.
+2. S2 must add the refusal checks before russh (PKCS#8, explicit-curve EC, PPK v3, PPK v2 non-RSA, chacha20-poly1305 key files, camellia PEM); explicit-curve EC detection and the chacha20 refusal are described in SP7.md but not prototyped.
+3. The matrix compared the 1.1.4 modules (SshLogin, KnownHostsStore) under this tree's Electron 45 runtime, not an installed 1.1.4 app; macOS not run.
+4. OpenSSH 9.8+ `PerSourcePenalties` blocks repeated failing test logins; the SP7 configs turn it off and S4's CI matrix must too. CentOS 6 (OpenSSH 5.3) does not run on WSL2 (vsyscall), so the oldest real build is OpenSSH 5.9.
+5. The unimux-ssh dev-dependencies (russh, ssh-key, aes, cbc, des, md5) become normal dependencies in S2/S3; the prototype `legacy_pem` moves from tests/sp7_keys.rs into the crate.
 
 ### How to run
 
