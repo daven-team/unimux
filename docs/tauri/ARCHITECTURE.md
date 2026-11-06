@@ -36,7 +36,7 @@ unimux.exe (Rust, tauri 2.12.5, windows_subsystem = "windows", panic = "unwind")
  |    hooks server (axum), MCP server (custom hyper/axum dispatcher, SP8), automation
  |    git, files, search, monitor, notes, changelog
  |    cli detect/install, context tracker, sessions, conversation search
- |    ssh (russh), sftp, db (postgres-protocol, mysql_common, redis, rusqlite)
+ |    ssh (russh), sftp, db (postgres-protocol, mysql_common, own RESP2, rusqlite)
  |    accounts, logins, usage, auto-switch, limit alerts, github
  |    oscrypt, http_fetch, notifications, update coordinator
  |- WebView2 / WKWebView: "main", "detached-<uuid>", "update-gate"
@@ -110,6 +110,8 @@ Version pins (checked with cargo search/info on 2026-11-06; crates.io and npm al
 - russh-sftp 3.0.1, postgres-protocol 0.6.12, mysql_common 0.38.2, redis 1.8.1, rusqlite 0.41.1 (bundled, column_metadata), rustls 0.23.46 + tokio-rustls 0.26.6 (ring provider), axum 0.8.9, hyper 1.12.0, rmcp 3.9.0 (decided in SP8), fancy-regex 0.20.0, icu_collator 2.4.0, encoding_rs 0.8.44, trash 5.3.0
 
 - russh 0.65.1, russh-sftp 3.0.1, postgres-protocol 0.6.12, mysql_common 0.38.2, redis 1.8.1, rusqlite 0.41.1 (bundled, column_metadata), rustls 0.23.46 + tokio-rustls 0.26.6 (ring provider), axum 0.8.9, hyper 1.12.0 + hyper-util 0.1.21, http-body-util 0.1.5, tokio-util 0.7.20 (the MCP server is a custom dispatcher on hyper/axum, decided in SP8; rmcp is not used, see spikes/SP8.md), fancy-regex 0.20.0, icu_collator 2.4.0, encoding_rs 0.8.44, trash 5.3.0
+
+- russh 0.65.1, russh-sftp 3.0.1, postgres-protocol 0.6.12 (with an own frame layer for BackendKeyData 3.2, NegotiateProtocolVersion and lossy strings, SP9), mysql_common 0.38.2 (default features off, flate2 `rust_backend`; own framing, COM_QUERY and column parser, SP9), Redis through an own RESP2 client (the redis crate was measured in SP9 and dropped: non-UTF-8 status lines end its connection, 500 ms default timeout), rusqlite 0.41.1 (bundled, column_metadata), rustls 0.23.46 + tokio-rustls 0.26.6 (ring provider), axum 0.8.9, hyper 1.12.0, rmcp 3.9.0 (decided in SP8), fancy-regex 0.20.0, icu_collator 2.4.0, encoding_rs 0.8.44, trash 5.3.0
 - minisign-verify, tar + flate2 (macOS .app.tar.gz), memchr: versions pinned in F1 with cargo info
 
 Node: Node 26 LTS is installed and used only to build the renderer (Vite), run vitest, generators and the real-app scripts.
