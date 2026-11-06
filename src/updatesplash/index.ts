@@ -132,7 +132,7 @@ function run(): void {
       if (!timedOut) {
         timedOut = true; clearInterval(timer); currentStage = 'error'; dropHeartbeat();
         clearTimeout(hideTimer); hideTimer = undefined;
-        if (win && !win.isDestroyed()) win.show();
+        if (win && !win.isDestroyed()) { win.showInactive(); win.flashFrame(true); }
         push('error', percent, strings.slow, { detail: strings.slowHint });
       }
       return;
@@ -170,7 +170,10 @@ app.whenReady().then(() => {
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.once('ready-to-show', () => {
-    win?.show();
+    // Shown without taking the focus: a game or a full-screen app the user is in stays in front (and is not minimized);
+    // the window waits behind it, and the taskbar button flashes once so the update is not missed.
+    win?.showInactive();
+    win?.flashFrame(true);
     try { writeFileSync(config.shownFlag, String(Date.now())); } catch { /* the app only waits a few seconds for this */ }
     run();
   });
