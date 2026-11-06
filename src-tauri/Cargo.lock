@@ -5401,6 +5401,7 @@ dependencies = [
  "unimux-core",
  "unimux-exec",
  "unimux-ipc",
+ "unimux-platform",
 ]
 
 [[package]]

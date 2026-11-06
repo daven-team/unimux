@@ -13,8 +13,10 @@
 //   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
 //   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
 //                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
+//   test/golden/update-progress.jsonl, update-strings.json, update-config.json   the update window (see scripts/goldens-update.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
+import { updateConfigGolden, updateProgressRows, updateStringsGolden } from './goldens-update.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
@@ -23,9 +25,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = resolve(root, 'test/golden');
 const load = async (file) => (await runnerImport(resolve(root, file), { configFile: false, logLevel: 'silent', root })).module;
 
-const [{ defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { translate }, { messages }, { normalizeEditedState }] = await Promise.all([
+const [{ defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { translate }, { messages }, { normalizeEditedState }, { UpdateProgressModel, closeAction }] = await Promise.all([
   load('src/shared/state.ts'), load('src/shared/stateEdits.ts'), load('src/shared/statePatch.ts'), load('src/shared/i18n.ts'), load('src/shared/messages.ts'),
-  load('src/main/stateController.ts'),
+  load('src/main/stateController.ts'), load('src/shared/updateProgress.ts'),
 ]);
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
@@ -177,7 +179,11 @@ const files = {
   'normalize-state.jsonl': jsonl(normalizeRows({ normalizeState, root })),
   'state-after-edit.jsonl': jsonl(afterEditRows({ normalizeState, normalizeEditedState })),
   'js-sort.jsonl': jsonl(jsSort()),
+  'update-progress.jsonl': jsonl(updateProgressRows({ UpdateProgressModel, closeAction })),
 };
+const updateStrings = updateStringsGolden({ root, translate });
+files['update-strings.json'] = `${JSON.stringify(updateStrings, null, 1)}\n`;
+files['update-config.json'] = `${JSON.stringify(updateConfigGolden({ strings: updateStrings }), null, 1)}\n`;
 
 const check = process.argv.includes('--check');
 let stale = [];

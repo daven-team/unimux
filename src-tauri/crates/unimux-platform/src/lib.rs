@@ -2,8 +2,25 @@
 //! session end and file drop here (W3, W4, W6).
 
 pub mod instance;
+pub mod webview;
 #[cfg(windows)]
 mod win;
+
+/// `AllowSetForegroundWindow(pid)`: passes this process's right to set the foreground window (it has it right after the user
+/// clicked in it) on to `pid`. The update window gets it from the app the user just clicked "install" in, so the UAC prompt
+/// of a per-machine install can come to the front; the window itself never takes the focus. False when this process had no
+/// such right (or elsewhere than on Windows).
+pub fn allow_set_foreground(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        win::allow_set_foreground(pid)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        false
+    }
+}
 
 /// `SetCurrentProcessExplicitAppUserModelID`: `com.unimux.app` for the installed app, `com.unimux.app.dev` otherwise, so a
 /// run from the repository never shares the taskbar entry (and its icon) with the installed app.
