@@ -44,7 +44,7 @@ pub fn boot_script(ctx: &AppContext, label: &str) -> String {
 }
 
 /// Navigation stays inside the app; an http(s) link opens in the browser and the app stays where it is.
-fn allow_navigation(url: &tauri::Url) -> bool {
+pub(crate) fn allow_navigation(url: &tauri::Url) -> bool {
     let s = url.as_str();
     let origin = unimux_ipc::guard::origin_of(s);
     if app_origins().iter().any(|o| o.eq_ignore_ascii_case(origin)) || s.starts_with("about:blank") {
@@ -168,7 +168,7 @@ pub fn forget_on_destroy(window: &WebviewWindow, ctx: Arc<AppContext>) {
 }
 
 /// `window:shown` (false while minimized or hidden) and `window:maximized`, sent to that window on every change.
-fn watch_window_state(window: &WebviewWindow, ctx: Arc<AppContext>) {
+pub(crate) fn watch_window_state(window: &WebviewWindow, ctx: Arc<AppContext>) {
     let shown = Arc::new(AtomicBool::new(true));
     let maximized = Arc::new(AtomicBool::new(false));
     let w = window.clone();

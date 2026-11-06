@@ -13,8 +13,11 @@
 //   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
 //   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
 //                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
+//   test/golden/detached.jsonl       {fn, args, out} of src/shared/detached.ts (see scripts/goldens-detached.mjs)
+//   test/golden/route-message.jsonl  {channel, args, owners, out} -> routeMessage (shared with vitest)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
+import { detachedRows, routeMessageRows } from './goldens-detached.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
@@ -27,6 +30,7 @@ const [{ defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { tr
   load('src/shared/state.ts'), load('src/shared/stateEdits.ts'), load('src/shared/statePatch.ts'), load('src/shared/i18n.ts'), load('src/shared/messages.ts'),
   load('src/main/stateController.ts'),
 ]);
+const [detached, { normalizeWaitMark }] = await Promise.all([load('src/shared/detached.ts'), load('src/shared/waiting.ts')]);
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
 function rng(seed) {
@@ -177,6 +181,8 @@ const files = {
   'normalize-state.jsonl': jsonl(normalizeRows({ normalizeState, root })),
   'state-after-edit.jsonl': jsonl(afterEditRows({ normalizeState, normalizeEditedState })),
   'js-sort.jsonl': jsonl(jsSort()),
+  'detached.jsonl': jsonl(detachedRows({ ...detached, normalizeWaitMark })),
+  'route-message.jsonl': jsonl(routeMessageRows(detached)),
 };
 
 const check = process.argv.includes('--check');

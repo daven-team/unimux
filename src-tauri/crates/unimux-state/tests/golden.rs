@@ -196,3 +196,93 @@ fn the_retention_sort_orders_like_v8_even_for_nan_keys() {
     }
     assert!(bad.is_empty(), "{} of {} rows differ: {:?}", bad.len(), rows.len(), &bad[..bad.len().min(20)]);
 }
+
+/// test/golden/detached.jsonl (scripts/goldens-detached.mjs): the registry edits, cell owners, placement over display work
+/// areas, titles, hand-over parts, work reports, open-in-main requests and wait marks of src/shared/detached.ts.
+#[test]
+fn detached_matches_the_ts_reference() {
+    use serde_json::json;
+    use unimux_state::detached::*;
+    let rows = rows("detached.jsonl");
+    assert!(rows.len() >= 1500, "{} rows", rows.len());
+    let rect = |v: &Value| Rect::from_json(v);
+    let displays = |v: &Value| -> Vec<DisplayArea> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|d| DisplayArea { id: d["id"].as_f64().unwrap(), work_area: Rect::from_json(&d["workArea"]).unwrap() })
+            .collect()
+    };
+    let size = |v: &Value| Size { width: v["width"].as_f64().unwrap(), height: v["height"].as_f64().unwrap() };
+    let pairs = |v: &Value| -> Vec<(String, String)> {
+        v.as_array().unwrap().iter().map(|p| (p[0].as_str().unwrap().into(), p[1].as_str().unwrap().into())).collect()
+    };
+    let pairs_json = |list: Vec<(String, String)>| Value::Array(list.into_iter().map(|(a, b)| json!([a, b])).collect());
+    let list = |v: &Value| v.as_array().unwrap().clone();
+    let mut failures = Vec::new();
+    for (i, row) in rows.iter().enumerate() {
+        let a = row["args"].as_array().unwrap();
+        let ours: Value = match row["fn"].as_str().unwrap() {
+            "restoreBounds" => restore_bounds(rect(&a[0]).as_ref(), &displays(&a[1]), a[2].as_f64().unwrap()).to_json(),
+            "boundsAtPoint" => bounds_at_point(
+                a[0]["x"].as_f64().unwrap(),
+                a[0]["y"].as_f64().unwrap(),
+                size(&a[1]),
+                &displays(&a[2]),
+                a[3].as_f64().unwrap(),
+            )
+            .to_json(),
+            "boundsBeside" => {
+                bounds_beside(rect(&a[0]).as_ref(), size(&a[1]), &displays(&a[2]), a[3].as_f64().unwrap()).to_json()
+            }
+            "clampRect" => clamp_rect(&rect(&a[0]).unwrap(), &rect(&a[1]).unwrap()).to_json(),
+            "displayAt" => {
+                let ds = displays(&a[0]);
+                display_at(&ds, a[1]["x"].as_f64().unwrap(), a[1]["y"].as_f64().unwrap(), a[2].as_f64().unwrap())
+                    .map_or(Value::Null, |d| unimux_state::normalize::js::num(d.id))
+            }
+            "cellOwners" => pairs_json(cell_owners(&a[0])),
+            "routeChanges" => {
+                Value::Array(route_changes(&pairs(&a[0]), &pairs(&a[1])).into_iter().map(|(c, w)| json!([c, w])).collect())
+            }
+            "addDetached" => match add_detached(&a[0], a[1].clone()) {
+                Added::Limit => json!("limit"),
+                Added::Existing(w) => json!({ "existing": w }),
+                Added::Added(s) => json!({ "state": s }),
+            },
+            "removeDetached" => remove_detached(&a[0], a[1].as_str().unwrap()).unwrap_or(json!("same")),
+            "setDetachedPlace" => {
+                let place = &a[2];
+                set_detached_place(
+                    &a[0],
+                    a[1].as_str().unwrap(),
+                    place.get("bounds").and_then(Rect::from_json),
+                    place.get("displayId").and_then(Value::as_f64),
+                    place["maximized"] == true,
+                )
+                .unwrap_or(json!("same"))
+            }
+            "detachedTitle" => json!(detached_title(&a[0], &a[1])),
+            "splitHandoffs" => {
+                let (docs, handoffs) = split_handoffs(&list(&a[0]));
+                json!({ "docs": docs, "handoffs": handoffs })
+            }
+            "handoffSessions" => json!(handoff_sessions(&list(&a[0]))),
+            "cleanWork" => clean_work(Some(&a[0])).unwrap_or(Value::Null),
+            "sumWork" => sum_work(a[0].as_array().unwrap()),
+            "cleanOpenInMain" => clean_open_in_main(Some(&a[0])).unwrap_or(Value::Null),
+            "normalizeWaitMark" => normalize_wait_mark(Some(&a[0])).unwrap_or(Value::Null),
+            other => panic!("unknown fn {other}"),
+        };
+        if stringify(&ours) != stringify(&row["out"]) {
+            failures.push(format!("row {i} {}: {}", row["fn"], first_difference(&stringify(&ours), &stringify(&row["out"]))));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} rows differ:\n{}",
+        failures.len(),
+        rows.len(),
+        failures[..failures.len().min(10)].join("\n")
+    );
+}

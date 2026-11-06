@@ -75,6 +75,8 @@ pub struct AppContext {
     pub report_limiter: Mutex<ReportLimiter>,
     /// The main window was shown (first page load, renderer-boot or the 5 s fallback).
     pub main_shown: AtomicBool,
+    /// Detached windows (W5): the registry's windows, attach / detach, and the cell owners every routed event uses.
+    pub detached: Arc<crate::detached::DetachedService>,
     /// Check build only: every renderer startup mark with the window label and the time (test_bridge `marks`).
     #[cfg(feature = "test-bridge")]
     pub test_marks: Mutex<Vec<(String, String, f64)>>,
@@ -110,6 +112,20 @@ impl AppContext {
         // A waiting batched state change leaves before any other event (stateBroadcast.ts flush).
         let b = broadcaster.clone();
         events.before_emit(move || b.flush());
+        // After the saver and the broadcaster: its hook sees every change once they have it.
+        let crash_for_detached = crash.clone();
+        let detached = crate::detached::DetachedService::new(
+            controller.clone(),
+            events.clone(),
+            overrides.offscreen && !crate::detached::host::hidden_mode(),
+            Arc::new(move |m: &str| crash_for_detached.warn(m)),
+        );
+        let d = Arc::downgrade(&detached);
+        events.on_focus_cell(move |label| {
+            if let Some(d) = d.upgrade() {
+                d.focus_label(label);
+            }
+        });
         Arc::new(Self {
             data_dir,
             overrides,
@@ -131,6 +147,7 @@ impl AppContext {
             app_start_unclaimed: AtomicBool::new(true),
             report_limiter: Mutex::new(ReportLimiter::default()),
             main_shown: AtomicBool::new(false),
+            detached,
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
         })

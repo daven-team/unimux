@@ -36,7 +36,7 @@ fn is_id(v: Option<&Value>) -> bool {
     js::string(v).is_some_and(|s| (1..=128).contains(&js::len16(s)))
 }
 
-fn is_text(v: Option<&Value>) -> bool {
+pub(crate) fn is_text(v: Option<&Value>) -> bool {
     js::string(v).is_some_and(|s| (1..=4096).contains(&js::len16(s)))
 }
 
@@ -142,7 +142,7 @@ fn clean_reopen(raw: Option<&Value>) -> Option<Value> {
 }
 
 /// `cleanTarget`.
-fn clean_target(raw: Option<&Value>) -> Option<Value> {
+pub fn clean_target(raw: Option<&Value>) -> Option<Value> {
     let r = js::record(raw)?;
     let g = |k: &str| r.get(k);
     match js::string(g("kind")) {

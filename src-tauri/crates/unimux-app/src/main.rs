@@ -8,6 +8,7 @@
 mod channel_bench;
 mod commands;
 mod context;
+mod detached;
 mod ipc;
 #[cfg(feature = "test-bridge")]
 mod spike_pty;
@@ -184,7 +185,17 @@ fn main() {
             ));
             ctx.mark("app-ready");
             // The startup gate (U1) runs here and may hold the main window back; wave 0 always proceeds.
-            windows::create_main(app.handle(), &ctx)?;
+            let main_window = windows::create_main(app.handle(), &ctx)?;
+            // Tabs that were in their own window at the last quit open there again (W5). The main window closing closes
+            // them as they are (their registry stays for the next start).
+            ctx.detached.set_host(detached::host::TauriHost::new(app.handle().clone(), &ctx));
+            let closing = ctx.detached.clone();
+            main_window.on_window_event(move |event| {
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    closing.close_all();
+                }
+            });
+            ctx.detached.start();
             startup::mark_started();
             Ok(())
         })
@@ -196,6 +207,10 @@ fn main() {
 
     let run_ctx = ctx.clone();
     app.run(move |_app, event| {
+        // The app ends: detached windows close as they are, nothing is attached back (closeAllDetached of 1.1.4's quit).
+        if let RunEvent::ExitRequested { .. } = event {
+            run_ctx.detached.close_all();
+        }
         if let RunEvent::Exit = event {
             // The last save (W6 adds the full wind-down: quit confirmation, hosts, MCP, hooks).
             if !run_ctx.flush_state() {

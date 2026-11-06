@@ -2,6 +2,7 @@
 //! session end and file drop here (W3, W4, W6).
 
 pub mod instance;
+pub mod screen;
 #[cfg(windows)]
 mod win;
 
