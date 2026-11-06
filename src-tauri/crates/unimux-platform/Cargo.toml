@@ -1,0 +1,20 @@
+[package]
+name = "unimux-platform"
+description = "OS integration: single instance (Electron 1.1.x compatible), AUMID, Windows build, native error box; later notifications, badge, clipboard secret, session end"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+unimux-core.workspace = true
+parking_lot.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_LibraryLoader", "Win32_System_DataExchange", "Wdk_System_SystemServices", "Win32_System_SystemInformation", "Win32_Graphics_Gdi", "Win32_Globalization"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
