@@ -1,0 +1,12 @@
+[package]
+name = "unimux-db"
+description = "DB service, vault, history, PG / MySQL / Redis / SQLite sessions, tunnels, result routing (D1-D12)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+unimux-core.workspace = true
+unimux-ipc.workspace = true
+serde_json.workspace = true

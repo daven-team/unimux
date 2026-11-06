@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-splash-init"
+description = "Enables the update_splash_init command without any pre-configured scope."
+commands.allow = ["update_splash_init"]
+
+[[permission]]
+identifier = "deny-update-splash-init"
+description = "Denies the update_splash_init command without any pre-configured scope."
+commands.deny = ["update_splash_init"]

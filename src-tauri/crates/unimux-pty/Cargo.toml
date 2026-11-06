@@ -1,0 +1,12 @@
+[package]
+name = "unimux-pty"
+description = "ConPTY / Unix pty, output engine, Channel data plane, shell integration, launch line, cell spawn (P1-P5)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+unimux-core.workspace = true
+unimux-ipc.workspace = true
+serde_json.workspace = true

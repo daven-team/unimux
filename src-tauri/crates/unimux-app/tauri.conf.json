@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "unimux",
+  "mainBinaryName": "unimux",
+  "version": "1.2.0",
+  "identifier": "com.unimux.app",
+  "build": {
+    "frontendDist": "../../../out/tauri-renderer",
+    "devUrl": "http://localhost:5174",
+    "beforeDevCommand": { "script": "npm run dev:ui", "cwd": "../../..", "wait": false },
+    "beforeBuildCommand": { "script": "npm run build:ui", "cwd": "../../.." }
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
+      "devCsp": null,
+      "freezePrototype": false
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "ajzak, azozowsky",
+    "copyright": "MIT",
+    "category": "DeveloperTool",
+    "shortDescription": "Mission control for your AI coding agents",
+    "longDescription": "Run a wall of Claude Code and Codex terminals side by side, get pinged when one needs you, pick up any conversation after a restart, and commit, edit and review without leaving the grid.",
+    "homepage": "https://github.com/daven-team/unimux",
+    "icon": ["../../../resources/icon.ico", "../../../resources/icon.png"],
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "webviewInstallMode": { "type": "embedBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Polish", "English", "German", "Spanish", "French", "PortugueseBR"],
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

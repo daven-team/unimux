@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "gate",
+  "description": "The startup update check window: the window.updateSplash bridge only.",
+  "windows": ["update-gate"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "allow-update-splash"]
+}

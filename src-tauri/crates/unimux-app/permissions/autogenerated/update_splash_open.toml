@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-splash-open"
+description = "Enables the update_splash_open command without any pre-configured scope."
+commands.allow = ["update_splash_open"]
+
+[[permission]]
+identifier = "deny-update-splash-open"
+description = "Denies the update_splash_open command without any pre-configured scope."
+commands.deny = ["update_splash_open"]

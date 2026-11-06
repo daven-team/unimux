@@ -1,0 +1,91 @@
+# unimux 1.2.0: one Rust process (Tauri 2). Every subsystem is its own crate; the member list is complete from wave 0 on,
+# so later packages never edit it (see docs/tauri/ARCHITECTURE.md section 2 and PLAN.md F1).
+[workspace]
+resolver = "3"
+members = [
+  "crates/unimux-app",
+  "crates/unimux-core",
+  "crates/unimux-ipc",
+  "crates/unimux-state",
+  "crates/unimux-platform",
+  "crates/unimux-exec",
+  "crates/unimux-pty",
+  "crates/unimux-net",
+  "crates/unimux-oscrypt",
+  "crates/unimux-git",
+  "crates/unimux-files",
+  "crates/unimux-agents",
+  "crates/unimux-mcp",
+  "crates/unimux-ssh",
+  "crates/unimux-sftp",
+  "crates/unimux-db",
+  "crates/unimux-accounts",
+  "crates/unimux-update",
+  "crates/unimux-hostd",
+]
+
+[workspace.package]
+version = "1.2.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT"
+authors = ["ajzak", "azozowsky"]
+repository = "https://github.com/daven-team/unimux"
+
+# One line per dependency; a package adds its own line here (merge conflicts: take the target branch and rebuild).
+# Versions checked with `cargo info` on 2026-11-06. Never 3.0.0-alpha (CI greps Cargo.lock).
+[workspace.dependencies]
+unimux-core = { path = "crates/unimux-core" }
+unimux-ipc = { path = "crates/unimux-ipc" }
+unimux-state = { path = "crates/unimux-state" }
+unimux-platform = { path = "crates/unimux-platform" }
+unimux-exec = { path = "crates/unimux-exec" }
+unimux-pty = { path = "crates/unimux-pty" }
+unimux-net = { path = "crates/unimux-net" }
+unimux-oscrypt = { path = "crates/unimux-oscrypt" }
+unimux-git = { path = "crates/unimux-git" }
+unimux-files = { path = "crates/unimux-files" }
+unimux-agents = { path = "crates/unimux-agents" }
+unimux-mcp = { path = "crates/unimux-mcp" }
+unimux-ssh = { path = "crates/unimux-ssh" }
+unimux-sftp = { path = "crates/unimux-sftp" }
+unimux-db = { path = "crates/unimux-db" }
+unimux-accounts = { path = "crates/unimux-accounts" }
+unimux-update = { path = "crates/unimux-update" }
+
+tauri = { version = "=2.12.5", default-features = false, features = ["wry", "common-controls-v6", "compression"] }
+tauri-build = { version = "=2.7.4", default-features = false }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "process"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order", "float_roundtrip"] }
+thiserror = "2.0.21"
+parking_lot = "0.13.0"
+uuid = { version = "1.29.0", features = ["v4"] }
+dirs = "7.0.0"
+ryu-js = "1.0.3"
+fs4 = { version = "1.1.0", features = ["sync"] }
+interprocess = "2.4.7"
+process-wrap = { version = "10.0.1", default-features = false, features = ["std", "job-object", "process-group", "kill-on-drop"] }
+junction = "2.1.0"
+dunce = "1.0.5"
+sha2 = "0.11.1"
+base64 = "0.23.1"
+futures = "0.3"
+tempfile = "3"
+windows = "0.62.2"
+libc = "0.2"
+webview2-com = "0.39.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "unwind"
+opt-level = 3
+
+[profile.dev]
+# Keeps debug builds of the GUI responsive (xterm traffic, JSON) without slowing incremental builds much.
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2

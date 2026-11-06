@@ -1,0 +1,12 @@
+[package]
+name = "unimux-oscrypt"
+description = "Electron safeStorage (Chromium OSCrypt v10) read and write (SP2, B2)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+unimux-core.workspace = true
+unimux-ipc.workspace = true
+serde_json.workspace = true

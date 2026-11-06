@@ -1,0 +1,12 @@
+[package]
+name = "unimux-agents"
+description = "hook server, Claude/Codex settings, CLI detector, context, sessions, conversation search, delivery (H1-H6)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+unimux-core.workspace = true
+unimux-ipc.workspace = true
+serde_json.workspace = true

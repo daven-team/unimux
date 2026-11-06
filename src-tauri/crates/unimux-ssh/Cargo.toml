@@ -1,0 +1,12 @@
+[package]
+name = "unimux-ssh"
+description = "SSH vault, known hosts, keys, russh login core, coordinator, command history (S1-S4)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+unimux-core.workspace = true
+unimux-ipc.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-mc-port-post"
+description = "Enables the mc_port_post command without any pre-configured scope."
+commands.allow = ["mc_port_post"]
+
+[[permission]]
+identifier = "deny-mc-port-post"
+description = "Denies the mc_port_post command without any pre-configured scope."
+commands.deny = ["mc_port_post"]

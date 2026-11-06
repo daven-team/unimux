@@ -1,0 +1,54 @@
+[package]
+name = "unimux-app"
+description = "unimux: the Tauri application (process start, windows, IPC commands of every domain)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+default-run = "unimux"
+
+[[bin]]
+name = "unimux"
+path = "src/main.rs"
+
+[features]
+# Electron's `!app.isPackaged`: MC_* overrides, the CDP port, devtools. On in the dev and check flavours, off in release.
+dev-overrides = ["unimux-core/dev-overrides", "tauri/devtools"]
+# Debug-only commands for the real-app harness (state peek, emit, panic injection, capability probe). Never in release.
+test-bridge = []
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+unimux-core.workspace = true
+unimux-ipc.workspace = true
+unimux-state.workspace = true
+unimux-platform.workspace = true
+unimux-exec.workspace = true
+unimux-pty.workspace = true
+unimux-net.workspace = true
+unimux-oscrypt.workspace = true
+unimux-git.workspace = true
+unimux-files.workspace = true
+unimux-agents.workspace = true
+unimux-mcp.workspace = true
+unimux-ssh.workspace = true
+unimux-sftp.workspace = true
+unimux-db.workspace = true
+unimux-accounts.workspace = true
+unimux-update.workspace = true
+tauri.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+parking_lot.workspace = true
+uuid.workspace = true
+futures.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+webview2-com.workspace = true
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_Graphics_Gdi"] }
+
+[dev-dependencies]
+tempfile.workspace = true

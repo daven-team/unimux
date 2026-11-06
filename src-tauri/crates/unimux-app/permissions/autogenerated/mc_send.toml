@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-mc-send"
+description = "Enables the mc_send command without any pre-configured scope."
+commands.allow = ["mc_send"]
+
+[[permission]]
+identifier = "deny-mc-send"
+description = "Denies the mc_send command without any pre-configured scope."
+commands.deny = ["mc_send"]

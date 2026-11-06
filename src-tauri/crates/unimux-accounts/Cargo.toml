@@ -1,0 +1,12 @@
+[package]
+name = "unimux-accounts"
+description = "account stores, locks, activation/swap, reconcile/refresh, logins, usage, auto-switch, limit alerts, GitHub token (A1-A6)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+unimux-core.workspace = true
+unimux-ipc.workspace = true
+serde_json.workspace = true

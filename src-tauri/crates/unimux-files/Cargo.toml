@@ -1,0 +1,12 @@
+[package]
+name = "unimux-files"
+description = "project files, preview, save, file ops, search/replace, notes, fs probes, monitor, changelog (G5-G8)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+unimux-core.workspace = true
+unimux-ipc.workspace = true
+serde_json.workspace = true

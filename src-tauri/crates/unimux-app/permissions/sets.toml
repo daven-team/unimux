@@ -1,0 +1,6 @@
+# Permission sets of the app's own commands, referenced by capabilities/*.json.
+
+[[set]]
+identifier = "allow-update-splash"
+description = "The window.updateSplash bridge of the update windows."
+permissions = ["allow-update-splash-init", "allow-update-splash-close", "allow-update-splash-open"]

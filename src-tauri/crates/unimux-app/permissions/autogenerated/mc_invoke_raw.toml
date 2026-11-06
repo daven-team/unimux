@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-mc-invoke-raw"
+description = "Enables the mc_invoke_raw command without any pre-configured scope."
+commands.allow = ["mc_invoke_raw"]
+
+[[permission]]
+identifier = "deny-mc-invoke-raw"
+description = "Denies the mc_invoke_raw command without any pre-configured scope."
+commands.deny = ["mc_invoke_raw"]

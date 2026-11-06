@@ -1,0 +1,12 @@
+[package]
+name = "unimux-sftp"
+description = "SFTP service, sides, queue, manage ops, sudo over exec (T1-T5)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+unimux-core.workspace = true
+unimux-ipc.workspace = true
+serde_json.workspace = true

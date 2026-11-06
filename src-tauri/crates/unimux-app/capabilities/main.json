@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The app windows (main and detached tabs): the window.mc bridge and its events. Nothing else.",
+  "windows": ["main", "detached-*"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-mc-invoke",
+    "allow-mc-send",
+    "allow-mc-invoke-raw",
+    "allow-mc-port-attach",
+    "allow-mc-port-post",
+    "allow-test-bridge"
+  ]
+}

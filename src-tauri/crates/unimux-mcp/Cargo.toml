@@ -1,0 +1,12 @@
+[package]
+name = "unimux-mcp"
+description = "MCP HTTP server, tools, automation, wait_for, team prompts (M1-M4)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+unimux-core.workspace = true
+unimux-ipc.workspace = true
+serde_json.workspace = true

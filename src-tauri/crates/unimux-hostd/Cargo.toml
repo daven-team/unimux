@@ -1,0 +1,16 @@
+[package]
+name = "unimux-hostd"
+description = "Test binary: a stdio host so the Node .int suites and fake servers drive the Rust code (B1)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "unimux-hostd"
+path = "src/main.rs"
+
+[dependencies]
+unimux-core.workspace = true
+serde_json.workspace = true
