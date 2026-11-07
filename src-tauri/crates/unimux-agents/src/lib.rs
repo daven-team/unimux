@@ -5,6 +5,8 @@
 //!
 //! - [`hooks`] (H1): the local hook server and the meaning of hook payloads.
 //! - [`cli`] (H3): the Claude Code / Codex CLI detector.
+//! - [`conv`] (H5): conversation search and the Markdown export data.
 
 pub mod cli;
+pub mod conv;
 pub mod hooks;

@@ -114,6 +114,7 @@ Version pins (checked with cargo search/info on 2026-11-06; crates.io and npm al
 - russh 0.65.1, russh-sftp 3.0.1, postgres-protocol 0.6.12 (with an own frame layer for BackendKeyData 3.2, NegotiateProtocolVersion and lossy strings, SP9), mysql_common 0.38.2 (default features off, flate2 `rust_backend`; own framing, COM_QUERY and column parser, SP9), Redis through an own RESP2 client (the redis crate was measured in SP9 and dropped: non-UTF-8 status lines end its connection, 500 ms default timeout), rusqlite 0.41.1 (bundled, column_metadata), rustls 0.23.46 + tokio-rustls 0.26.6 (ring provider), axum 0.8.9, hyper 1.12.0, rmcp 3.9.0 (decided in SP8), fancy-regex 0.20.0, icu_collator 2.4.0, encoding_rs 0.8.44, trash 5.3.0
 - regex 1.13.1 (G1: the JS regexes of the git module; JS semantics such as the ECMAScript `\s` set, ASCII-only `/i` and ASCII `\b` are spelled out in the patterns)
 - minisign-verify, tar + flate2 (macOS .app.tar.gz), memchr: versions pinned in F1 with cargo info
+- conversation search (H5): memchr 2.8.3, indexmap 2.14.2, unicode-normalization 0.1.26 (NFD for the fold table), rayon-core 1.13.0 (the pass workers kept between passes)
 
 Node: Node 26 LTS is installed and used only to build the renderer (Vite), run vitest, generators and the real-app scripts.
 

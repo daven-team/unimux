@@ -1,0 +1,54 @@
+{"text":"2026-10-20T08:00:00.500Z","utc":1792483200500,"local":false}
+{"text":"2026-10-20T08:00:00Z","utc":1792483200000,"local":false}
+{"text":"2026-10-20T08:00Z","utc":1792483200000,"local":false}
+{"text":"2026-10-20","utc":1792454400000,"local":false}
+{"text":"2026-10","utc":1790812800000,"local":false}
+{"text":"2026","utc":1767225600000,"local":false}
+{"text":"+002026-10-20T08:00:00Z","utc":1792483200000,"local":false}
+{"text":"-000001-01-01T00:00:00Z","utc":-62198755200000,"local":false}
+{"text":"-000000-01-01T00:00:00Z","utc":null,"local":false}
+{"text":"2026-10-20T10:00:00+02:00","utc":1792483200000,"local":false}
+{"text":"2026-10-20T10:00:00-0230","utc":1792499400000,"local":false}
+{"text":"2026-10-20T10:00:00+24:00","utc":null,"local":false}
+{"text":"2026-10-20t08:00:00z","utc":1792483200000,"local":false}
+{"text":"2026-10-20T08:00:00.5Z","utc":1792483200500,"local":false}
+{"text":"2026-10-20T08:00:00.12Z","utc":1792483200120,"local":false}
+{"text":"2026-10-20T08:00:00.123456789Z","utc":1792483200123,"local":false}
+{"text":"2026-10-20T08:00:00.Z","utc":null,"local":false}
+{"text":"2026-02-30","utc":1772409600000,"local":false}
+{"text":"2026-02-31T00:00:00Z","utc":1772496000000,"local":false}
+{"text":"2026-04-31","utc":1777593600000,"local":false}
+{"text":"2026-13-01","utc":null,"local":false}
+{"text":"2026-00-10","utc":null,"local":false}
+{"text":"2026-10-32","utc":null,"local":false}
+{"text":"2026-10-20T24:00:00Z","utc":1792540800000,"local":false}
+{"text":"2026-10-20T24:00:01Z","utc":null,"local":false}
+{"text":"2026-10-20T23:60:00Z","utc":null,"local":false}
+{"text":"2026-10-20T23:59:60Z","utc":null,"local":false}
+{"text":"2026-10-20T08:00:00Zx","utc":null,"local":false}
+{"text":"2026-10-20T08:00:00 Z","utc":null,"local":false}
+{"text":"2026-10-20T08","utc":null,"local":false}
+{"text":"2026-10-20T8:00:00Z","utc":null,"local":false}
+{"text":"2026-10-20 08:00:00Z","utc":1792483200000,"local":false}
+{"text":"2026-10-20 08:00:00.250Z","utc":1792483200250,"local":false}
+{"text":"2026-10-20 08:00:00+01:00","utc":1792479600000,"local":false}
+{"text":"2026-10-20  08:00:00Z","utc":1792483200000,"local":false}
+{"text":"275760-09-13T00:00:00Z","utc":null,"local":false}
+{"text":"+275760-09-13T00:00:00Z","utc":8640000000000000,"local":false}
+{"text":"+275760-09-13T00:00:00.001Z","utc":null,"local":false}
+{"text":"-271821-04-20T00:00:00Z","utc":-8640000000000000,"local":false}
+{"text":"1970-01-01T00:00:00Z","utc":0,"local":false}
+{"text":"1969-12-31T23:59:59.999Z","utc":-1,"local":false}
+{"text":"2026-10-20T08:00:00","utc":1792483200000,"local":true}
+{"text":"2026-10-20T08:00","utc":1792483200000,"local":true}
+{"text":"2026-10-20 08:00:00","utc":1792483200000,"local":true}
+{"text":"2026-10-20 08:00","utc":1792483200000,"local":true}
+{"text":"2026-03-29T02:30:00","utc":1774751400000,"local":true}
+{"text":"","utc":null,"local":false}
+{"text":"yesterday","utc":null,"local":false}
+{"text":"null","utc":null,"local":false}
+{"text":"0","utc":946684800000,"local":true}
+{"text":"12","utc":1007164800000,"local":true}
+{"text":"2026/10/20","utc":1792454400000,"local":true}
+{"text":"20261020","utc":null,"local":false}
+{"text":"2026-1-2","utc":1767312000000,"local":true}

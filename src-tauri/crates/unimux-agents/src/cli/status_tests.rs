@@ -155,7 +155,8 @@ fn parses_reg_query_output() {
     assert_eq!(parse_reg_query_path("ERROR: The system was unable to find the specified registry key or value."), None);
     // A multi-byte character across the 4th byte or inside the type is no match (the TS regex gives null), never a panic,
     // and the parser moves on to the next line.
-    let out = "ab\u{20ac}\r\nPath  REG_\u{20ac}x  C:\\no\r\n  \u{0119}\u{0105}th  REG_SZ  C:\\no\r\n    Path    REG_SZ    C:\\x\r\n";
+    let out =
+        "ab\u{20ac}\r\nPath  REG_\u{20ac}x  C:\\no\r\n  \u{0119}\u{0105}th  REG_SZ  C:\\no\r\n    Path    REG_SZ    C:\\x\r\n";
     assert_eq!(parse_reg_query_path(out).as_deref(), Some("C:\\x"));
     assert_eq!(parse_reg_query_path("Path REG_EXP\u{20ac}"), None);
     assert_eq!(parse_reg_query_path("Pat\u{20ac} REG_SZ C:\\no"), None);

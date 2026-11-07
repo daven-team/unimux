@@ -247,3 +247,34 @@ Rows keep the exact case name (the counter matches them). Rust tests are named `
 | cli-ipc | validates the CLI id of a recheck | unimux-agents cli::ipc::tests::validates_the_cli_id_of_a_recheck | ported |
 | cli-ipc | shares a running recheck between repeated requests | unimux-agents cli::ipc::tests::shares_a_running_recheck_between_repeated_requests | ported |
 | cli-ipc | opens only allow-listed documentation, never an address from the renderer | unimux-agents cli::ipc::tests::opens_only_allow_listed_documentation_never_an_address_from_the_renderer | ported |
+| conv-search | folds case and Polish diacritics without changing the length | unimux-agents conv::text::tests::folds_like_the_ts_reference_test; unimux-agents/tests/conv_golden.rs::fold_of_every_code_unit_matches | ported |
+| conv-search | splits words and quoted phrases and drops terms another one contains | unimux-agents conv::search::tests::splits_words_and_quoted_phrases_and_drops_terms_another_one_contains; unimux-agents/tests/conv_golden.rs::query_terms_match | ported |
+| conv-search | finds the message of an offset | unimux-agents conv::search::tests::finds_the_message_of_an_offset | ported |
+| conv-search | needs every term somewhere in the conversation | unimux-agents conv::search::tests::needs_every_term_somewhere_in_the_conversation | ported |
+| conv-search | marks the terms in snippets with offsets of the snippet text | unimux-agents conv::search::tests::marks_the_terms_in_snippets_with_offsets_of_the_snippet_text; unimux-agents/tests/conv_golden.rs::search_results_match_with_utf16_offsets | ported |
+| conv-search | marks folded matches on the original text | unimux-agents conv::search::tests::marks_folded_matches_on_the_original_text | ported |
+| conv-search | filters by role | unimux-agents conv::search::tests::filters_by_role | ported |
+| conv-search | cuts long messages around the hit and collapses whitespace | unimux-agents conv::search::tests::cuts_long_messages_around_the_hit_and_collapses_whitespace | ported |
+| conv-search | matches a title term and lists newest first with filters | unimux-agents conv::search::tests::matches_a_title_term_and_lists_newest_first_with_filters | ported |
+| conv-search | skips tool output, thinking, injected and sidechain lines on Claude | unimux-agents conv::parse::tests::skips_tool_output_thinking_injected_and_sidechain_lines_on_claude | ported |
+| conv-search | prefilters lines on their bytes | unimux-agents conv::parse::tests::prefilters_lines_on_their_bytes | ported |
+| conv-search | reads lines across chunk borders, skips huge lines and keeps the offset of the last whole line | unimux-agents conv::parse::tests::reads_lines_across_chunk_borders_skips_huge_lines_and_keeps_the_offset_of_the_last_whole_line; unimux-agents/tests/conv_golden.rs::transcripts_read_into_the_same_documents_and_exports | ported |
+| conv-search | indexes both formats and searches across projects | unimux-agents/tests/conv_index.rs::indexes_both_formats_and_searches_across_projects | ported |
+| conv-search | reads only what a grown transcript gained, and a replaced one again | unimux-agents/tests/conv_index.rs::reads_only_what_a_grown_transcript_gained_and_a_replaced_one_again | ported |
+| conv-search | drops removed files, survives missing folders and keeps the index in its cache file | unimux-agents/tests/conv_index.rs::drops_removed_files_survives_missing_folders_and_keeps_the_index_in_its_cache_file | ported |
+| conv-search | reads the transcript preview of indexed files only, with message indexes that match the snippets | unimux-agents/tests/conv_index.rs::reads_the_transcript_preview_of_indexed_files_only_with_message_indexes_that_match_the_snippets | ported |
+| conv-search | caps the text of a huge conversation | unimux-agents/tests/conv_index.rs::caps_the_text_of_a_huge_conversation | ported |
+| conv-search | keeps only known query fields | unimux-agents/tests/conv_index.rs::keeps_only_known_query_fields; unimux-agents/tests/conv_golden.rs::ipc_sanitizers_match | ported |
+| conv-search | finds the project or worktree of a conversation folder | folderOwner stays in the renderer (src/renderer/src/conversationSearch.ts) | renderer-only |
+| conv-export | reads a Claude transcript: texts and tool calls, never tool output, thinking, injected or sidechain messages | unimux-agents/tests/conv_index.rs::reads_a_claude_transcript_texts_and_tool_calls_never_tool_output_thinking_injected_or_sidechain_messages | ported |
+| conv-export | reads a Codex rollout: shell commands without the shell wrapper, apply_patch as its files, no reasoning or output | unimux-agents/tests/conv_index.rs::reads_a_codex_rollout_shell_commands_without_the_shell_wrapper_apply_patch_as_its_files_no_reasoning_or_output | ported |
+| conv-export | stops at the limits and says so | unimux-agents/tests/conv_index.rs::stops_at_the_limits_and_says_so | ported |
+| conv-export | finds Claude and Codex sessions by id and refuses ids that could be paths | unimux-agents/tests/conv_index.rs::finds_claude_and_codex_sessions_by_id_and_refuses_ids_that_could_be_paths; unimux-agents/tests/conv_golden.rs::ipc_sanitizers_match | ported |
+| conv-export | renders the Claude fixture with a header, sections and no tool calls by default | renderConvMarkdown stays in the renderer (src/renderer/src/convExport.ts) | renderer-only |
+| conv-export | adds one quoted line per tool call when asked | renderConvMarkdown stays in the renderer | renderer-only |
+| conv-export | renders the Codex fixture under "## Codex" | renderConvMarkdown stays in the renderer | renderer-only |
+| conv-export | marks cut messages and a cut conversation, and names an untitled one | renderConvMarkdown stays in the renderer | renderer-only |
+| conv-export | summarises tool inputs in one line | unimux-agents conv::export::tests::summarises_tool_inputs_in_one_line; unimux-agents/tests/conv_golden.rs::tool_details_match | ported |
+| conv-export | keeps backticks inside inline code | inlineCode stays in the renderer | renderer-only |
+| conv-export | builds a file name from the title and the day | exportBaseName stays in the renderer | renderer-only |
+| conv-export | cuts a long text for a note at a line end with a note | capText stays in the renderer | renderer-only |

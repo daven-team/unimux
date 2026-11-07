@@ -14,23 +14,11 @@
 //   test/golden/hook-payloads.jsonl, hook-server.jsonl  the hook server (see scripts/goldens-hooks.mjs)
 //   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
 //                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
-//   test/golden/update-progress.jsonl, update-strings.json, update-config.json   the update window (see scripts/goldens-update.mjs)
-//   test/golden/detached.jsonl       {fn, args, out} of src/shared/detached.ts (see scripts/goldens-detached.mjs)
-//   test/golden/route-message.jsonl  {channel, args, owners, out} -> routeMessage (shared with vitest)
-//   test/golden/git-spelling.jsonl   {path} -> normalizeSpelling(path, win32 | darwin) of src/main/gitPaths.ts (PLAN G1; the
-//                                     file-system half is checked live by unimux-git/tests/canonical_paths.rs)
-//   test/golden/git-text.jsonl       {value, max} -> trimGitText(value, max) and redactSecrets(value) of src/shared/git.ts
-//   test/golden/git-resolve.jsonl    {args} -> path.win32.resolve / path.posix.resolve of Node with process.cwd() C:\work\cwd
-//                                     (win32) or /work/cwd (posix) and the drive cwds =C: C:\work\cwd, =D: D:\dcwd\x, =E:
-//                                     C:\not-e, =F: '' (the env of the run is replaced while the rows are made)
-//   test/golden/files-*.jsonl        project files: name order, path checks, previews, saves (see scripts/goldens-files.mjs)
+//   test/golden/conv-*.jsonl         the conversation search (fold, terms, searchDocs, Date.parse, transcript reading, export,
+//                                     toolDetail, IPC sanitizers; see scripts/goldens-convsearch.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
-import { updateConfigGolden, updateProgressRows, updateStringsGolden } from './goldens-update.mjs';
-import { detachedRows, routeMessageRows } from './goldens-detached.mjs';
-import { filesGoldens } from './goldens-files.mjs';
-import path, { dirname, resolve } from 'node:path';
-import { hookPayloadRows, hookServerRows } from './goldens-hooks.mjs';
+import { convGoldens } from './goldens-convsearch.mjs';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -281,19 +269,7 @@ const files = {
   'normalize-state.jsonl': jsonl(normalizeRows({ normalizeState, root })),
   'state-after-edit.jsonl': jsonl(afterEditRows({ normalizeState, normalizeEditedState })),
   'js-sort.jsonl': jsonl(jsSort()),
-  'update-progress.jsonl': jsonl(updateProgressRows({ UpdateProgressModel, closeAction })),
-  'detached.jsonl': jsonl(detachedRows({ ...detached, normalizeWaitMark })),
-  'route-message.jsonl': jsonl(routeMessageRows(detached)),
-  'git-spelling.jsonl': jsonl(gitSpelling()),
-  'git-text.jsonl': jsonl(gitText()),
-  'git-resolve.jsonl': jsonl(gitResolve()),
-  'files-collate.jsonl': jsonl(fileGoldens.collate),
-  'files-path.jsonl': jsonl(fileGoldens.paths),
-  'files-preview.jsonl': jsonl(fileGoldens.preview),
-  'files-save.jsonl': jsonl(fileGoldens.save),
-  'files-parquet.jsonl': jsonl(fileGoldens.parquet),
-  'hook-payloads.jsonl': jsonl(hookPayloadRows({ hooks, codexHooks })),
-  'hook-server.jsonl': jsonl(await hookServerRows(hooks)),
+  ...Object.fromEntries(Object.entries(await convGoldens(load)).map(([name, rows]) => [name, jsonl(rows)])),
 };
 const updateStrings = updateStringsGolden({ root, translate });
 files['update-strings.json'] = `${JSON.stringify(updateStrings, null, 1)}\n`;

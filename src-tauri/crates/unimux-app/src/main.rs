@@ -285,6 +285,8 @@ fn main() {
         RunEvent::Exit => {
             // A copied key that still waits is cleared before the process ends (W4, 1.1.4 will-quit).
             commands::os::on_exit(&run_ctx);
+            // The conversation index saves itself (1.1.4's will-quit convSearch.stop()).
+            commands::agents::on_exit();
             // The hook server stops at the latest here (the wind-down stops it in its own phase).
             hooks::stop(&run_ctx);
             // After the wind-down (or a forced exit): whatever came in after the last save, then a pending relaunch.
