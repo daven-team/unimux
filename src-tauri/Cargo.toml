@@ -74,6 +74,8 @@ sha2 = "0.11.1"
 base64 = "0.23.1"
 futures = "0.3"
 tempfile = "3"
+# M1 (MCP argument checks) and G1 (the JS regexes of the git module: redactSecrets, SCRUBBED_ENV; JS semantics are spelled out
+# in the patterns).
 regex = "1.13.1"
 windows = "0.62.2"
 libc = "0.2"
@@ -133,8 +135,6 @@ rfd = { version = "0.17.2", default-features = false, features = ["common-contro
 trash = "5.3.0"
 block2 = "0.6.2"
 objc2-user-notifications = "0.3.2"
-# G1: the JS regexes of the git module (redactSecrets, SCRUBBED_ENV); JS semantics are spelled out in the patterns.
-regex = "1.13.1"
 # G5: the file tree's name order (Intl.Collator('pl', {numeric, sensitivity: 'base'})) and TextDecoder's fatal decode.
 icu_collator = "2.4.0"
 icu_locale_core = "2.4.0"
