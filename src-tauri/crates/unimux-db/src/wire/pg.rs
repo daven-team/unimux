@@ -132,7 +132,7 @@ pub fn parse_tag(tag: &str) -> (Option<String>, Option<u64>) {
     (Some(tag[..letters].to_owned()), numbers.last().copied().flatten())
 }
 
-enum Frame {
+pub(crate) enum Frame {
     Key(BackendKey),
     /// `newest`: the newest version the server speaks for the requested major, as the full number (PostgreSQL 13 sends 0x0003_0000;
     /// the protocol docs call it the minor version).
@@ -205,7 +205,7 @@ fn row_description(mut body: &[u8]) -> io::Result<Vec<PgField>> {
 }
 
 /// The frame parser: the custom messages listed in the module docs, the rest through postgres-protocol.
-fn parse_frame(tag: u8, whole: &mut BytesMut) -> io::Result<Frame> {
+pub(crate) fn parse_frame(tag: u8, whole: &mut BytesMut) -> io::Result<Frame> {
     let body = &whole[5..];
     Ok(match tag {
         b'K' => {
@@ -510,12 +510,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PgConn<S> {
     }
 }
 
-fn data_row(row: &backend::DataRowBody) -> io::Result<Row> {
+pub(crate) fn data_row(row: &backend::DataRowBody) -> io::Result<Row> {
     let buf = row.buffer();
     row.ranges().map(|r| Ok(r.map(|r| buf[r].to_vec()))).collect()
 }
 
-fn tag_of(m: &backend::Message) -> &'static str {
+pub(crate) fn tag_of(m: &backend::Message) -> &'static str {
     match m {
         backend::Message::BindComplete => "BindComplete",
         backend::Message::CloseComplete => "CloseComplete",
