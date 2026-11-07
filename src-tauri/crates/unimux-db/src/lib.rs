@@ -9,6 +9,7 @@
 //! - D4: [`pg`] (the Postgres client: connect, TLS, logins, simple query, cancel).
 //! - D7: [`mysql`] (the MySQL / MariaDB client core).
 //! - D9: [`redis`] (Redis sessions and browsing on the own RESP2 client).
+//! - D11: [`sqlite`] (SQLite sessions: engine thread, catalog, port messages).
 
 pub mod files;
 pub mod history;
@@ -21,6 +22,7 @@ pub mod redis;
 pub mod redis_shared;
 pub mod service;
 pub mod sql;
+pub mod sqlite;
 pub mod sqlite_files;
 pub mod timers;
 pub mod vault;

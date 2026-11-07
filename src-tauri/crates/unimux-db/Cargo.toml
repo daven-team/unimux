@@ -33,8 +33,11 @@ rustls-platform-verifier.workspace = true
 # D7: the iconv-lite double-byte encodings of MySQL session charsets; TLS for MySQL (rustls, ring, like unimux-net).
 encoding_rs.workspace = true
 socket2.workspace = true
+rusqlite.workspace = true
 
 [dev-dependencies]
+# the tests add a slow SQL function that ignores sqlite3_interrupt (a statement stuck in one step)
+rusqlite = { workspace = true, features = ["functions"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "macros", "time", "test-util"] }
 sha2.workspace = true
