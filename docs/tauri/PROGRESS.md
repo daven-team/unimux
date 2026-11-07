@@ -1234,6 +1234,8 @@ Built and unit-tested only (cargo fmt, clippy -D warnings for unimux-pty and uni
 4. Tap output is the raw read of the terminal (before the output engine coalesces it), decoded as UTF-8 across reads; 1.1.4 tapped after node-pty's decoder. H6's marker parsing should not notice.
 5. The check build's test bridge `pty spawn` still spawns through the engine directly (synchronous pid for the scripts) and reports the spawn to the bookkeeping itself; `pty kill` counts as a user kill.
 6. `PtyHost` and the service are process-wide statics like P2's engine: in the unit tests every `register` points the host at the newest context.
+7. test/pty-host-client.test.ts imports the client dynamically, so porting-count does not see it as main-side and its cases have no PORTING rows; they are covered by unimux-pty tests/service.rs (restart queue, fatal, restart after fatal) and supervisor::tests (queue bound, stop). The stdio case is obsolete (no host process).
+8. One `cargo test -p unimux-pty -p unimux-app` run on the loaded machine: unimux-app 117/117, unimux-pty tests/service.rs 8/8, engine 7/7, manager 16/16, plane 2/2; two load-sensitive failures in code P3 did not change: `batch::tests::bulk_after_a_quiet_window_leaves_at_once_then_waits_for_the_window` (leading edge took 1.49 s, limit 100 ms) and tests/conpty.rs `output_after_exit_is_delivered_before_the_exit` (no exit seen in round 1). Not rerun (fast mode).
 
 ### P2: verification, measurements and open issues (2026-11-07)
 
