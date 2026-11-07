@@ -104,7 +104,8 @@ pub fn clean_comment(c: &str) -> String {
 }
 
 /// A JS-flavoured regex source made fit for the `regex` crate: `.` is any character but a JS LineTerminator, `\s` / `\S`
-/// are the JS whitespace set (with U+FEFF, without U+0085). Only used on the fixed ssh2 patterns of this crate.
+/// are the JS whitespace set (with U+FEFF, without U+0085), `\d` / `\D` are ASCII digits only (the regex crate's `\d`
+/// is every Unicode decimal digit). Only used on the fixed ssh2 patterns of this crate.
 pub fn js_regex(source: &str) -> regex::Regex {
     const SPACE: &str = r"\t\n\x0B\x0C\r \u{A0}\u{1680}\u{2000}-\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}";
     let mut out = String::new();
@@ -130,6 +131,10 @@ pub fn js_regex(source: &str) -> regex::Regex {
                     ('S', false) => out.push_str(&format!("[^{SPACE}]")),
                     ('s', true) => out.push_str(SPACE),
                     ('S', true) => panic!("\\S inside a class is not used by the ported patterns"),
+                    ('d', false) => out.push_str("[0-9]"),
+                    ('D', false) => out.push_str("[^0-9]"),
+                    ('d', true) => out.push_str("0-9"),
+                    ('D', true) => panic!("\\D inside a class is not used by the ported patterns"),
                     _ => {
                         out.push('\\');
                         out.push(next);
@@ -203,6 +208,20 @@ mod tests {
         assert!(!r.is_match("a-b\u{85}c,"));
         let any = js_regex(r"^x([\s\S]+)y$");
         assert_eq!(&any.captures("x\r\n\u{2028}y").unwrap()[1], "\r\n\u{2028}");
+    }
+
+    #[test]
+    fn js_regex_digits_are_ascii_only() {
+        let r = js_regex(r"^Lines: \d+$");
+        assert!(r.is_match("Lines: 06"));
+        // U+0666 (Arabic-Indic six) and U+FF16 (fullwidth six) are Unicode digits, not JS `\d`.
+        assert!(!r.is_match("Lines: \u{666}"));
+        assert!(!r.is_match("Lines: \u{ff16}"));
+        let not = js_regex(r"^\D[\d,]$");
+        assert!(not.is_match("\u{666}7"));
+        assert!(not.is_match("x,"));
+        assert!(!not.is_match("1,"));
+        assert!(!not.is_match("x\u{666}"));
     }
 
     #[test]

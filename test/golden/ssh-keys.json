@@ -3972,6 +3972,620 @@
     "ok": false,
     "error": "notAKey"
    }
+  },
+  {
+   "name": "pem dsa traditional",
+   "text": "-----BEGIN DSA PRIVATE KEY-----\r\nMIIBywIBAAKBgQCCgTpyObvnaeqKzXbmpndE6e/Xa3Zhf2+mC7gJFWYOB1Jz4vap\r\ndELli8nhBcfxS0MMO8z6HFg3zJF2gWd55prYJIm2U9YlL+g5PBZVYOZqclgB3+NK\r\nFZ557VzFRAriXVB174mvvYE96auE7p1sqJ7SmaqTD92hYJTuqbG6lMOxYQIdAOXx\r\nVgllP5FDiy2sxQhZkp2AlkZVubUebGWUMkkCgYBF+8Y/f3T1w4o1iS1LZ4Qklrl7\r\np7TBCD2LmJsHLepBsfZ6DWwwACcrGlb8DOQu7IxA49Vg0sweC/PrdccIe6gg14Ex\r\nK05LObBuQBsnEsCD4hteq12H0LesYcpzAA3yTiUNa/HsrIH6pFL3+utviV31ARim\r\nX3+urlJ2X9YREYotagKBgAbqqGg/YNDOoIbAEVrumW+S1qu6oj3g7BsHWPp0DJJi\r\nvrwUO3j8HKM4Io4dPPcpI4hf7+U3DI1Kv9YdGzCFms6zrpggfKFIIOTmHA7pU9N6\r\ntb4LLevzJT+wW0HVNqXWYx4LncOewhZ91PDOEWLK+X1Wj8d/36iLltnNdZtEhqNe\r\nAh0Av4JmkqHXB54bcva9dGtY7NhiCMhSnNMXGovQwg==\r\n-----END DSA PRIVATE KEY-----\r\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "unsupportedType"
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "unsupportedType"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "unsupportedType"
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "unsupportedType"
+   }
+  },
+  {
+   "name": "pem dsa traditional aes128",
+   "text": "-----BEGIN DSA PRIVATE KEY-----\r\nProc-Type: 4,ENCRYPTED\r\nDEK-Info: AES-128-CBC,C1120615DF05089273E80DE372481AFE\r\n\r\nflcVRCmK06hL+oc8bHueGXlWK1VcHnl7UOmt+UmvU8EEdUIiiU47Lxd1BZh/IJH+\r\n2Nmgk+d/J7LNyswPucWV9+vv9j9mlEobUlRyO4b8RwbCR1UXibGocpZ29aoCM0WH\r\n+Tz/OD7EI8LB1W6XSpPxEgVD8KFq3uxJnvI/OJrn/PKPZsYWgUsMcvdXCcgugiev\r\nCVXZwOsEdIZjwBxVQyP3Z4BLmO+J9RJ4fykE+noj5Lj6hXu5TZOgJ9Sp966qo43k\r\nSk1tmYaXzCsweGDINK7h3KrcmmH2PITKeKHzZ7QVJhl6Uac0nYNeLOuAA0JBsHr2\r\nip1+oQqJgKAeeSkQEJCg01segGgKVIUFIs1LDyaA5hNwakXjt3gVZM1KUewKwbho\r\nBxbd3TIzHtpetmdYWK8QJn2Td0IbhZGNAXrdXHt2j26TBxrHgUTzJv/EZtvpuAxs\r\nwez3p2ePlCWt38gAW3q1hxfB9fbgzvtocKPVGbee1i1pNp+yaQAvm0GRIq1vHdCh\r\nFcXJQHDnNXazHkgipWP170aidvLrFnsWehvzAnW1xvQb5N3Kn8PT5+kqEWqdJ10v\r\n8n5T0RoWlTj/pNJOdu27/v2SdZPuGm6X0UwsJBpMcHI=\r\n-----END DSA PRIVATE KEY-----\r\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "needsPassphrase",
+    "encrypted": true
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "unsupportedType"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "badPassphrase",
+    "encrypted": true
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "needsPassphrase",
+    "encrypted": true
+   }
+  },
+  {
+   "name": "pem dsa traditional des3",
+   "text": "-----BEGIN DSA PRIVATE KEY-----\r\nProc-Type: 4,ENCRYPTED\r\nDEK-Info: DES-EDE3-CBC,8C66CE83902ED4D7\r\n\r\nAQsAWa1geNA4VEMWW+xrBI08eyed7DmZ/Z9EFg0TQ0ft9pBPqaChdj+wmKBzqKm/\r\njuI11dCTJNnft9CSFb7b6MQ+rDGOPelD8KRoE9FuJvVG+9YXVPNoIEK9GTpduUhE\r\nbVzXC5jzg8bwOFIRZ31rmX2ELfWHgt6WJ1dkVMXgnlqID9h5bzIFog43NTln90/x\r\ndzF4M5jsIYYVXuYu9ayGbSlrFmwXcpiwGns1rtAu4Efosy8LL/nCTdpusSsepDOj\r\n1+VcGC7iNB9WpGoLcxyKvtIx4bWeTpDVFkOyOY/Yc4fdBGVAolgSds1bj2MjQEQ+\r\nwM3J2O/XlEqyPJ5Fyp1JQAT1hnbgfWbPc5AlzVcfUjMZeLW0B5BC+fwHiD7irHEK\r\n1oHIguwNGkchBD86wI8bYZGUQEGbeYyVgA59RaNHwD29VZLK8YPslJHAmCbMDdJH\r\n/68MniGUfAapSFuQmumxV6KMr2DwT1+0O73S7VRzPo+SvRC4GcuxkIlVUCn/+/PI\r\nOd3AWCw6u11s3lUuPIM5kh3oqbQu96i9TQC3CRYZS0kzKb3BnA4BbY0YOXA4uSCv\r\nohC9WTLvJcSen03+wV7qhp3ecteopNNWjtfgG6cgVos=\r\n-----END DSA PRIVATE KEY-----\r\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "needsPassphrase",
+    "encrypted": true
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "unsupportedType"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "badPassphrase",
+    "encrypted": true
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "needsPassphrase",
+    "encrypted": true
+   }
+  },
+  {
+   "name": "pem dsa traditional without y",
+   "text": "-----BEGIN DSA PRIVATE KEY-----\nMA0CAQACAn8BAgEDAgEE\n-----END DSA PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   }
+  },
+  {
+   "name": "pem dsa traditional, ints only",
+   "text": "-----BEGIN DSA PRIVATE KEY-----\nMA8CAQACAQECAQICAQMCAQQ=\n-----END DSA PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "unsupportedType"
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "unsupportedType"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "unsupportedType"
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "unsupportedType"
+   }
+  },
+  {
+   "name": "openssh key count 0",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAAAAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACDY2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyAAAAJAhLelGIS3p\nRgAAAAtzc2gtZWQyNTUxOQAAACDY2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyA\nAAAEBdW7lP6bWuWIFlFtKIghZKJ+nHDp7AscF22x/yAAxXjNjZDt8ZZlFWUH6oafGWpzYG\nH872UwO4CRpRSNmF/t/IAAAAC3NwNyBlZDI1NTE5AQI=\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   }
+  },
+  {
+   "name": "openssh key count 0 encrypted",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABCfhl0U5r\nUge/hZd1BUubMfAAAAGAAAAAAAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIJsW0t6f7604tis7\nkv6ootbbvYoX11TKFujL3MTOO2FxAAAAoJ7guTd6jxTOA6akEq0JKKWXb6+AZgFqT70F4L\ndISWoWo6iDIv4qb22hJzpowrB5l3JseV8XlXBe6a3gM+0hpoSuZaFVY+Tf6pkD8kShLRKC\nxFwGHQ2lnkW8AaWNy+qlsSZhuI3aPDoiH45mVguYX5/WirOAff0OU6r4hJlOogpEiLiN4i\n6RaApC11F7doEUlrLiTmVXqqkCpU/Q7lVy9cg=\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "needsPassphrase",
+    "encrypted": true
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "needsPassphrase",
+    "encrypted": true
+   }
+  },
+  {
+   "name": "openssh key count 2",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAACAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACDY2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyAAAADMAAAALc3No\nLWVkMjU1MTkAAAAg2NkO3xlmUVZQfqhp8ZanNgYfzvZTA7gJGlFI2YX+38gAAAEYIS3pRi\nEt6UYAAAALc3NoLWVkMjU1MTkAAAAg2NkO3xlmUVZQfqhp8ZanNgYfzvZTA7gJGlFI2YX+\n38gAAABAXVu5T+m1rliBZRbSiIIWSifpxw6ewLHBdtsf8gAMV4zY2Q7fGWZRVlB+qGnxlq\nc2Bh/O9lMDuAkaUUjZhf7fyAAAAAtzcDcgZWQyNTUxOQAAAAtzc2gtZWQyNTUxOQAAACDY\n2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyAAAAEBdW7lP6bWuWIFlFtKIghZKJ+\nnHDp7AscF22x/yAAxXjNjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/IAAAAC3Nw\nNyBlZDI1NTE5AQIDBA==\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   },
+   "passphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   },
+   "wrongPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   },
+   "emptyPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   }
+  },
+  {
+   "name": "openssh key count 2 encrypted",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABCfhl0U5r\nUge/hZd1BUubMfAAAAGAAAAAIAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIJsW0t6f7604tis7\nkv6ootbbvYoX11TKFujL3MTOO2FxAAAAMwAAAAtzc2gtZWQyNTUxOQAAACCbFtLen++tOL\nYrO5L+qKLW272KF9dUyhboy9zEzjthcQAAASCe4Lk3eo8UzgOmpBKtCSill2+vgGYBak+9\nBeC3SElqFqOogyL+Km9toSc6aMKweZdybHlfF5VwXumt4DPtIaaErmWhVWPk3+qZA/JEoS\n0SgsRcBh0NpZ5FvAGljcvqpbEmYbiN2jw6Ih+OZlYLmF+f1oqzgH39DlOq+ISZTqIKRIi4\njeIukWgKQtdRe3aBFJay4k9nVKXfd8pqvIBsS8338yMj22HlpLxCj0uK/2xGuuDG8uqznl\nFspO/VSV27Moh2oqHlsL+fsJwEO3Wh2e82Y0K9HF2lnCofApDiB6c9lHOE3EHmGqBVuZfn\nXn5z7GQPEyREVK4hAhE8d8F4eGEcIr09WinEJnTEBBp164g67hIxQna6cT5yWtKRC70W/H\nw=\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "needsPassphrase",
+    "encrypted": true
+   },
+   "passphrase": {
+    "ok": true,
+    "encrypted": true,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:3mH8+C1pPmLmRB1b4+aNSl2Qb+lN5uy0uf91uwFyJ3k",
+    "comment": "sp7 ed25519 enc",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJsW0t6f7604tis7kv6ootbbvYoX11TKFujL3MTOO2Fx sp7 ed25519 enc",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAIJsW0t6f7604tis7kv6ootbbvYoX11TKFujL3MTOO2Fx"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "badPassphrase",
+    "encrypted": true
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "needsPassphrase",
+    "encrypted": true
+   }
+  },
+  {
+   "name": "openssh key count 2, ecdsa then ed25519",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAACAAAAaAAAABNlY2RzYS\n1zaGEyLW5pc3RwMjU2AAAACG5pc3RwMjU2AAAAQQSrWXXwkgYmRgfLAfpFoQSdfbvx4D7b\n5YvaVKmIoIw+TD19DcpkbFOqMAexsR2CXRoyygRrgREo4CEJEvl9fKl8AAAAMwAAAAtzc2\ngtZWQyNTUxOQAAACDY2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyAAAATAhLelG\nIS3pRgAAABNlY2RzYS1zaGEyLW5pc3RwMjU2AAAACG5pc3RwMjU2AAAAQQSrWXXwkgYmRg\nfLAfpFoQSdfbvx4D7b5YvaVKmIoIw+TD19DcpkbFOqMAexsR2CXRoyygRrgREo4CEJEvl9\nfKl8AAAAIBczSfedI1GUFT42q/fq7H55kpDKwV1mcWtIQecXtxHGAAAADHNwNyBlY2RzYT\nI1NgAAAAtzc2gtZWQyNTUxOQAAACDY2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7f\nyAAAAEBdW7lP6bWuWIFlFtKIghZKJ+nHDp7AscF22x/yAAxXjNjZDt8ZZlFWUH6oafGWpz\nYGH872UwO4CRpRSNmF/t/IAAAAC3NwNyBlZDI1NTE5AQIDBAUG\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ecdsa-sha2-nistp256",
+    "bits": 256,
+    "fingerprint": "SHA256:QtwOyPOmvxDZOcY2COizqNDZMJGRM5EsCyiwJNaZqU4",
+    "comment": "sp7 ecdsa256",
+    "publicKey": "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKtZdfCSBiZGB8sB+kWhBJ19u/HgPtvli9pUqYigjD5MPX0NymRsU6owB7GxHYJdGjLKBGuBESjgIQkS+X18qXw= sp7 ecdsa256",
+    "blob": "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKtZdfCSBiZGB8sB+kWhBJ19u/HgPtvli9pUqYigjD5MPX0NymRsU6owB7GxHYJdGjLKBGuBESjgIQkS+X18qXw="
+   },
+   "passphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ecdsa-sha2-nistp256",
+    "bits": 256,
+    "fingerprint": "SHA256:QtwOyPOmvxDZOcY2COizqNDZMJGRM5EsCyiwJNaZqU4",
+    "comment": "sp7 ecdsa256",
+    "publicKey": "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKtZdfCSBiZGB8sB+kWhBJ19u/HgPtvli9pUqYigjD5MPX0NymRsU6owB7GxHYJdGjLKBGuBESjgIQkS+X18qXw= sp7 ecdsa256",
+    "blob": "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKtZdfCSBiZGB8sB+kWhBJ19u/HgPtvli9pUqYigjD5MPX0NymRsU6owB7GxHYJdGjLKBGuBESjgIQkS+X18qXw="
+   },
+   "wrongPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ecdsa-sha2-nistp256",
+    "bits": 256,
+    "fingerprint": "SHA256:QtwOyPOmvxDZOcY2COizqNDZMJGRM5EsCyiwJNaZqU4",
+    "comment": "sp7 ecdsa256",
+    "publicKey": "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKtZdfCSBiZGB8sB+kWhBJ19u/HgPtvli9pUqYigjD5MPX0NymRsU6owB7GxHYJdGjLKBGuBESjgIQkS+X18qXw= sp7 ecdsa256",
+    "blob": "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKtZdfCSBiZGB8sB+kWhBJ19u/HgPtvli9pUqYigjD5MPX0NymRsU6owB7GxHYJdGjLKBGuBESjgIQkS+X18qXw="
+   },
+   "emptyPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ecdsa-sha2-nistp256",
+    "bits": 256,
+    "fingerprint": "SHA256:QtwOyPOmvxDZOcY2COizqNDZMJGRM5EsCyiwJNaZqU4",
+    "comment": "sp7 ecdsa256",
+    "publicKey": "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKtZdfCSBiZGB8sB+kWhBJ19u/HgPtvli9pUqYigjD5MPX0NymRsU6owB7GxHYJdGjLKBGuBESjgIQkS+X18qXw= sp7 ecdsa256",
+    "blob": "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKtZdfCSBiZGB8sB+kWhBJ19u/HgPtvli9pUqYigjD5MPX0NymRsU6owB7GxHYJdGjLKBGuBESjgIQkS+X18qXw="
+   }
+  },
+  {
+   "name": "openssh key count 2, public parts of another key",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAACAAAAaAAAABNlY2RzYS\n1zaGEyLW5pc3RwMjU2AAAACG5pc3RwMjU2AAAAQQSrWXXwkgYmRgfLAfpFoQSdfbvx4D7b\n5YvaVKmIoIw+TD19DcpkbFOqMAexsR2CXRoyygRrgREo4CEJEvl9fKl8AAAAaAAAABNlY2\nRzYS1zaGEyLW5pc3RwMjU2AAAACG5pc3RwMjU2AAAAQQSrWXXwkgYmRgfLAfpFoQSdfbvx\n4D7b5YvaVKmIoIw+TD19DcpkbFOqMAexsR2CXRoyygRrgREo4CEJEvl9fKl8AAABGCEt6U\nYhLelGAAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF\n/t/IAAAAQF1buU/pta5YgWUW0oiCFkon6ccOnsCxwXbbH/IADFeM2NkO3xlmUVZQfqhp8Z\nanNgYfzvZTA7gJGlFI2YX+38gAAAALc3A3IGVkMjU1MTkAAAALc3NoLWVkMjU1MTkAAAAg\n2NkO3xlmUVZQfqhp8ZanNgYfzvZTA7gJGlFI2YX+38gAAABAXVu5T+m1rliBZRbSiIIWSi\nfpxw6ewLHBdtsf8gAMV4zY2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyAAAAAtz\ncDcgZWQyNTUxOQECAwQ=\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   },
+   "passphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   },
+   "wrongPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   },
+   "emptyPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   }
+  },
+  {
+   "name": "openssh key count 2, second a security key",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAACAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACDY2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyAAAAEoAAAAac2st\nc3NoLWVkMjU1MTlAb3BlbnNzaC5jb20AAAAg2NkO3xlmUVZQfqhp8ZanNgYfzvZTA7gJGl\nFI2YX+38gAAAAEc3NoOgAAAQAhLelGIS3pRgAAAAtzc2gtZWQyNTUxOQAAACDY2Q7fGWZR\nVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyAAAAEBdW7lP6bWuWIFlFtKIghZKJ+nHDp7Asc\nF22x/yAAxXjNjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/IAAAAC3NwNyBlZDI1\nNTE5AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAINjZDt8ZZlFWUH6oafGWpz\nYGH872UwO4CRpRSNmF/t/IAAAABHNzaDoBAAAAEAcHBwcHBwcHBwcHBwcHBwcAAAAAAAAA\nBnNwNyBzawECAwQF\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   }
+  },
+  {
+   "name": "openssh key count 2, bad padding",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAACAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACDY2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyAAAADMAAAALc3No\nLWVkMjU1MTkAAAAg2NkO3xlmUVZQfqhp8ZanNgYfzvZTA7gJGlFI2YX+38gAAAEXIS3pRi\nEt6UYAAAALc3NoLWVkMjU1MTkAAAAg2NkO3xlmUVZQfqhp8ZanNgYfzvZTA7gJGlFI2YX+\n38gAAABAXVu5T+m1rliBZRbSiIIWSifpxw6ewLHBdtsf8gAMV4zY2Q7fGWZRVlB+qGnxlq\nc2Bh/O9lMDuAkaUUjZhf7fyAAAAAtzcDcgZWQyNTUxOQAAAAtzc2gtZWQyNTUxOQAAACDY\n2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyAAAAEBdW7lP6bWuWIFlFtKIghZKJ+\nnHDp7AscF22x/yAAxXjNjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/IAAAAC3Nw\nNyBlZDI1NTE5AQIE\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   }
+  },
+  {
+   "name": "openssh key count 2, long padding",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAACAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACDY2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyAAAADMAAAALc3No\nLWVkMjU1MTkAAAAg2NkO3xlmUVZQfqhp8ZanNgYfzvZTA7gJGlFI2YX+38gAAAE8IS3pRi\nEt6UYAAAALc3NoLWVkMjU1MTkAAAAg2NkO3xlmUVZQfqhp8ZanNgYfzvZTA7gJGlFI2YX+\n38gAAABAXVu5T+m1rliBZRbSiIIWSifpxw6ewLHBdtsf8gAMV4zY2Q7fGWZRVlB+qGnxlq\nc2Bh/O9lMDuAkaUUjZhf7fyAAAAAtzcDcgZWQyNTUxOQAAAAtzc2gtZWQyNTUxOQAAACDY\n2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyAAAAEBdW7lP6bWuWIFlFtKIghZKJ+\nnHDp7AscF22x/yAAxXjNjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/IAAAAC3Nw\nNyBlZDI1NTE5AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKA==\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   },
+   "passphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   },
+   "wrongPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   },
+   "emptyPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   }
+  },
+  {
+   "name": "openssh key count 2, one public entry",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAACAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACDY2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyAAAARghLelGIS3p\nRgAAAAtzc2gtZWQyNTUxOQAAACDY2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyA\nAAAEBdW7lP6bWuWIFlFtKIghZKJ+nHDp7AscF22x/yAAxXjNjZDt8ZZlFWUH6oafGWpzYG\nH872UwO4CRpRSNmF/t/IAAAAC3NwNyBlZDI1NTE5AAAAC3NzaC1lZDI1NTE5AAAAINjZDt\n8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/IAAAAQF1buU/pta5YgWUW0oiCFkon6ccO\nnsCxwXbbH/IADFeM2NkO3xlmUVZQfqhp8ZanNgYfzvZTA7gJGlFI2YX+38gAAAALc3A3IG\nVkMjU1MTkBAgME\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   }
+  },
+  {
+   "name": "openssh sk-ssh-ed25519",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAASgAAABpzay1zc2\ngtZWQyNTUxOUBvcGVuc3NoLmNvbQAAACDY2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZ\nhf7fyAAAAARzc2g6AAAAeCEt6UYhLelGAAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY2\n9tAAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/IAAAABHNzaDoBAAAAEAcH\nBwcHBwcHBwcHBwcHBwcAAAAAAAAABnNwNyBzawECAw==\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   }
+  },
+  {
+   "name": "openssh sk-ssh-ed25519 encrypted",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABCfhl0U5r\nUge/hZd1BUubMfAAAAGAAAAAEAAABKAAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29t\nAAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/IAAAABHNzaDoAAACAnuC5N3\nqPFM4DpqQDrRFt+4FjsNA3AmZ6jDyAQy7+2vo/bZX3unz9kwmlNGpx5Xcmd/A/yXQgRQZ1\n+pcsI9e1hHoY18m6GoOBlKJ6ypdbZXy3w0YbmlCGqexPkfHKPcktN7RhFTKWBZQ0tfSooz\nqPNxs3hCRCNhq4ZSFGUH3KcU8=\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "needsPassphrase",
+    "encrypted": true
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "badPassphrase",
+    "encrypted": true
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "badPassphrase",
+    "encrypted": true
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "needsPassphrase",
+    "encrypted": true
+   }
+  },
+  {
+   "name": "openssh sk-ecdsa-sha2-nistp256",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAfwAAACJzay1lY2\nRzYS1zaGEyLW5pc3RwMjU2QG9wZW5zc2guY29tAAAACG5pc3RwMjU2AAAAQQSrWXXwkgYm\nRgfLAfpFoQSdfbvx4D7b5YvaVKmIoIw+TD19DcpkbFOqMAexsR2CXRoyygRrgREo4CEJEv\nl9fKl8AAAABHNzaDoAAACwIS3pRiEt6UYAAAAic2stZWNkc2Etc2hhMi1uaXN0cDI1NkBv\ncGVuc3NoLmNvbQAAAAhuaXN0cDI1NgAAAEEEq1l18JIGJkYHywH6RaEEnX278eA+2+WL2l\nSpiKCMPkw9fQ3KZGxTqjAHsbEdgl0aMsoEa4ERKOAhCRL5fXypfAAAAARzc2g6AQAAABAH\nBwcHBwcHBwcHBwcHBwcHAAAAAAAAAAZzcDcgc2sBAgMEBQY=\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   }
+  },
+  {
+   "name": "openssh rebuilt as-is (control)",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACDY2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyAAAAJAhLelGIS3p\nRgAAAAtzc2gtZWQyNTUxOQAAACDY2Q7fGWZRVlB+qGnxlqc2Bh/O9lMDuAkaUUjZhf7fyA\nAAAEBdW7lP6bWuWIFlFtKIghZKJ+nHDp7AscF22x/yAAxXjNjZDt8ZZlFWUH6oafGWpzYG\nH872UwO4CRpRSNmF/t/IAAAAC3NwNyBlZDI1NTE5AQI=\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   },
+   "passphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   },
+   "wrongPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   },
+   "emptyPassphrase": {
+    "ok": true,
+    "encrypted": false,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:42JQgmtU/EBWR48G+96jpE0FpZ8dA9dLnnWRdnMg+k4",
+    "comment": "sp7 ed25519",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I sp7 ed25519",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAINjZDt8ZZlFWUH6oafGWpzYGH872UwO4CRpRSNmF/t/I"
+   }
+  },
+  {
+   "name": "openssh encrypted rebuilt as-is (control)",
+   "text": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABCfhl0U5r\nUge/hZd1BUubMfAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIJsW0t6f7604tis7\nkv6ootbbvYoX11TKFujL3MTOO2FxAAAAoJ7guTd6jxTOA6akEq0JKKWXb6+AZgFqT70F4L\ndISWoWo6iDIv4qb22hJzpowrB5l3JseV8XlXBe6a3gM+0hpoSuZaFVY+Tf6pkD8kShLRKC\nxFwGHQ2lnkW8AaWNy+qlsSZhuI3aPDoiH45mVguYX5/WirOAff0OU6r4hJlOogpEiLiN4i\n6RaApC11F7doEUlrLiTmVXqqkCpU/Q7lVy9cg=\n-----END OPENSSH PRIVATE KEY-----\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "needsPassphrase",
+    "encrypted": true
+   },
+   "passphrase": {
+    "ok": true,
+    "encrypted": true,
+    "type": "ssh-ed25519",
+    "bits": 256,
+    "fingerprint": "SHA256:3mH8+C1pPmLmRB1b4+aNSl2Qb+lN5uy0uf91uwFyJ3k",
+    "comment": "sp7 ed25519 enc",
+    "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJsW0t6f7604tis7kv6ootbbvYoX11TKFujL3MTOO2Fx sp7 ed25519 enc",
+    "blob": "AAAAC3NzaC1lZDI1NTE5AAAAIJsW0t6f7604tis7kv6ootbbvYoX11TKFujL3MTOO2Fx"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "badPassphrase",
+    "encrypted": true
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "needsPassphrase",
+    "encrypted": true
+   }
+  },
+  {
+   "name": "ppk Public-Lines with an Arabic-Indic digit",
+   "text": "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: none\nComment: sp7 ppk rsa\nPublic-Lines: ٦\nAAAAB3NzaC1yc2EAAAADAQABAAABAQCviqPFHKUwJ4yBwiQrPQSJYpJMP0UxTu+r\nwq1lyf5IWY83K1dZBDYyTDitdwcN4Y0Esm/HMf0gcSQmQWNaDnJL/Ve4jLPZ8UmW\ng8xEA0oWYjlZe/A8Kg8KBux2IvDLr/IwOgYoizZsIydPPk/1E2iORmVdvItY1WXR\nac0sxele4/qzk0LSuUqxS7WXRPiU/klX/Icu15ibKS0mOAkOfEkip/+DlbGNyklD\nbBcbFzKKW6QnMmxGTZM6IlAL5C+us8AOkn4SYX8oG9cVLehd1WLAfvq7kt3tbwmW\nGFNQ39fSbG+/Cedt5T/GZyysYTFFHnvlt3SiNfPkRVjAra3jqjBT\nPrivate-Lines: 14\nAAABAA0nd3Q63EoKfKXwlWNEFEXzRAFAsH+saZtWYEYDZ/Gl/Gxm7Am4nhMQ0SJ2\ni+nHYBjdAjFMFqrKr6nKNpa2BGybVGp46LVJNnl38OOb135r595DwlHP2QaoVCna\nHm81BRIGFxYMsIxT6gsvITC9PpWCwu/ORCbo/tM9eWmEfyNkE/Jf49cZAM8oWTL3\n3r9T6JCrdtqAKVZkmUgI5FTUAYSqciqkeMNFEnQRUWMblw5/ZWFA1WFi1hQH6A7u\na0KpuZtbeHlqsxgJemFWpLYQJKmn7bw6haIcyR0UfuV/i3MIstRpsfa+F7rdwTtr\nGypeeP8JaFmgwqAMLfjT6W9Kq3kAAACBAPYREjZOxpIz8Ebkyccdz4KEMcz71Wjt\n2yXDgQrJUZLjP2Mr/0+5Pn0lR1POpwZY1hz7hpzD/DDu8zWx0wzdkRT7YxUjIOhK\nKPjXbLoGslAgfNYzuV8KkbwgM+XiTWR19Q7/s+AoPZytEW5feCmkjKS20eKk5hAL\nPwO6Vf46Tj2vAAAAgQC2oL2Biwux3G4gsoedTs0y6Q780gzG0aQpPFb0YWcO1H8I\n0M24iEqm5CMfivDQzwdH2n81TahPHhgcIfPUhD9gbGyQjsEphDTxzHrA8HPioC+h\nQ7R994mSzC8uGMx4wJikggGdHe4xkQwiOHVhNdSmQryGhP7ED0zO2OSgU0pknQAA\nAIEAsVfahiVKPouMWCSIb8V5BzkQp0zWFQkXPVTueqIpCx1ovDuvwKAJX1jxspcD\nX27+mwR/taq6/3Whf6UEfsAHIRoZYo4gJ7a7mBSDjJvxlauC4ghFPp27hUigxv0r\n0eAdy5ZWbkTjbxwhp/JKvBbYgku+pYUjOUsaKLQ2sRzPSvQ=\nPrivate-MAC: 8f9cabf84f3634fd0916fe31d8d455d40fd50491\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   }
+  },
+  {
+   "name": "ppk Private-Lines with a fullwidth digit",
+   "text": "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: none\nComment: sp7 ppk rsa\nPublic-Lines: 6\nAAAAB3NzaC1yc2EAAAADAQABAAABAQCviqPFHKUwJ4yBwiQrPQSJYpJMP0UxTu+r\nwq1lyf5IWY83K1dZBDYyTDitdwcN4Y0Esm/HMf0gcSQmQWNaDnJL/Ve4jLPZ8UmW\ng8xEA0oWYjlZe/A8Kg8KBux2IvDLr/IwOgYoizZsIydPPk/1E2iORmVdvItY1WXR\nac0sxele4/qzk0LSuUqxS7WXRPiU/klX/Icu15ibKS0mOAkOfEkip/+DlbGNyklD\nbBcbFzKKW6QnMmxGTZM6IlAL5C+us8AOkn4SYX8oG9cVLehd1WLAfvq7kt3tbwmW\nGFNQ39fSbG+/Cedt5T/GZyysYTFFHnvlt3SiNfPkRVjAra3jqjBT\nPrivate-Lines: １４\nAAABAA0nd3Q63EoKfKXwlWNEFEXzRAFAsH+saZtWYEYDZ/Gl/Gxm7Am4nhMQ0SJ2\ni+nHYBjdAjFMFqrKr6nKNpa2BGybVGp46LVJNnl38OOb135r595DwlHP2QaoVCna\nHm81BRIGFxYMsIxT6gsvITC9PpWCwu/ORCbo/tM9eWmEfyNkE/Jf49cZAM8oWTL3\n3r9T6JCrdtqAKVZkmUgI5FTUAYSqciqkeMNFEnQRUWMblw5/ZWFA1WFi1hQH6A7u\na0KpuZtbeHlqsxgJemFWpLYQJKmn7bw6haIcyR0UfuV/i3MIstRpsfa+F7rdwTtr\nGypeeP8JaFmgwqAMLfjT6W9Kq3kAAACBAPYREjZOxpIz8Ebkyccdz4KEMcz71Wjt\n2yXDgQrJUZLjP2Mr/0+5Pn0lR1POpwZY1hz7hpzD/DDu8zWx0wzdkRT7YxUjIOhK\nKPjXbLoGslAgfNYzuV8KkbwgM+XiTWR19Q7/s+AoPZytEW5feCmkjKS20eKk5hAL\nPwO6Vf46Tj2vAAAAgQC2oL2Biwux3G4gsoedTs0y6Q780gzG0aQpPFb0YWcO1H8I\n0M24iEqm5CMfivDQzwdH2n81TahPHhgcIfPUhD9gbGyQjsEphDTxzHrA8HPioC+h\nQ7R994mSzC8uGMx4wJikggGdHe4xkQwiOHVhNdSmQryGhP7ED0zO2OSgU0pknQAA\nAIEAsVfahiVKPouMWCSIb8V5BzkQp0zWFQkXPVTueqIpCx1ovDuvwKAJX1jxspcD\nX27+mwR/taq6/3Whf6UEfsAHIRoZYo4gJ7a7mBSDjJvxlauC4ghFPp27hUigxv0r\n0eAdy5ZWbkTjbxwhp/JKvBbYgku+pYUjOUsaKLQ2sRzPSvQ=\nPrivate-MAC: 8f9cabf84f3634fd0916fe31d8d455d40fd50491\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "notAKey"
+   }
+  },
+  {
+   "name": "ppk enc Public-Lines with an Arabic-Indic digit",
+   "text": "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: aes256-cbc\nComment: sp7 ppk rsa\nPublic-Lines: ٦\nAAAAB3NzaC1yc2EAAAADAQABAAABAQCviqPFHKUwJ4yBwiQrPQSJYpJMP0UxTu+r\nwq1lyf5IWY83K1dZBDYyTDitdwcN4Y0Esm/HMf0gcSQmQWNaDnJL/Ve4jLPZ8UmW\ng8xEA0oWYjlZe/A8Kg8KBux2IvDLr/IwOgYoizZsIydPPk/1E2iORmVdvItY1WXR\nac0sxele4/qzk0LSuUqxS7WXRPiU/klX/Icu15ibKS0mOAkOfEkip/+DlbGNyklD\nbBcbFzKKW6QnMmxGTZM6IlAL5C+us8AOkn4SYX8oG9cVLehd1WLAfvq7kt3tbwmW\nGFNQ39fSbG+/Cedt5T/GZyysYTFFHnvlt3SiNfPkRVjAra3jqjBT\nPrivate-Lines: 14\nmohBgxoqKbZhwGL0uml6WPVc0wKBdbbK/qSWdXS4RKo4dbHvS1nhxp2RhlieQyen\nngDJITDp/HQNs59TFjgMMaMS5AHnr/cBQPV4ET1ONlBveD24/eJYeDx6R9aO4dpU\nejojqjxU8cA7btPQkIPKqzTpkLc7xWwpckNq/ZACS2vBFkBZZnJC0ZSelHSSv6+E\nvtlVboQKp8BhqyOKjMHb4x9l1XCO2IepfI7N0lt26OEOVsyUYJ4p8tROwYbycrlO\n5DLARmYAulvCtbHCqMdidjpoFNsQJIeUVOF/wG7X4M7/zabUPo/9UU9G9G4U6DfP\n5rl5Y/6iW/lhbYWiEC30q6wnErWsNT6QhmKu+v0dgEZcn12OU9+9uOVzMZ4DKOuz\nJ1rYwAoM9ee7lUQP3OQcz7qtJppQ3NSZ1JSHjxDY1Iq0mJZK3gCCRpSgrfIrpeM+\n2i09sSkTpXJDVWCVV/RWLNX06rCew0oCBcrRoC/5Ndo5mMrtel4eakLSfAVjr1bL\nBKIWPRR/yp3T8LNMOPmsUASI4RAQfgt0ga1gwWE+RYgI3e158ahArsjEVMSRQhkO\n/Ga02iWLIidZ+cgHWsGW6fIRXFYACGhRp6wkl5KIVihegEg5oEgWQheMrswar3vt\nifkwgpbrXGkXb8Q336LYI8V8Ns3WrFnJfEbPj28LlHCYySRISJ1UE6rKCTUI13gc\nRWoI2aoDazL3Bd2Y+0QZ/W7BfH/WfeAklkJByQyD9xmX5N/l4bdvc7NxkvKoISFg\nbB3plZwBjNyvI5n83phWujCcf+ZYB21WgksPFuuhfqHzCebwqTyL/76VSoZYrVQf\nh1izcHWgKD0Sq0rKibuknGBh2KMK5QnqYru6MQ2jGI/BrSUna+NKDd2rTak26+/3\nPrivate-MAC: dc1f560e75b1ac3f09c7a6878ae7937de72b08f1\n",
+   "noPassphrase": {
+    "ok": false,
+    "error": "needsPassphrase",
+    "encrypted": true
+   },
+   "passphrase": {
+    "ok": false,
+    "error": "badPassphrase",
+    "encrypted": true
+   },
+   "wrongPassphrase": {
+    "ok": false,
+    "error": "badPassphrase",
+    "encrypted": true
+   },
+   "emptyPassphrase": {
+    "ok": false,
+    "error": "needsPassphrase",
+    "encrypted": true
+   }
   }
  ],
  "publicMatches": [

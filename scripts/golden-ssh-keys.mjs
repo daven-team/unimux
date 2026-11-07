@@ -2,8 +2,9 @@
 // test/golden/ssh-keys.json for the Rust port (src-tauri/crates/unimux-ssh/tests/keys.rs):
 //
 // - parse: parsePrivateKey on text variants of corpus keys (junk around the block, two blocks, CR / CRLF / U+2028 line ends,
-//   indented or re-wrapped base64, a BOM, odd PEM headers, PPK oddities, public key texts), each with no passphrase, the
-//   right one, a wrong one and an empty one;
+//   indented or re-wrapped base64, a BOM, odd PEM headers, PPK oddities, public key texts) and texts outside the corpus
+//   (traditional PEM DSA keys from test/golden/ssh-keys, OpenSSH files with a key count of 0 or 2, security key types,
+//   non-ASCII digits in PPK line counts), each with no passphrase, the right one, a wrong one and an empty one;
 // - publicMatches: publicKeyMatches(meta, text) for public lines, RFC 4716, certificates, private texts and junk;
 // - metaFromPublic: keyMetaFromPublic(line);
 // - certificate: certificateCheck(cert, meta);
@@ -16,6 +17,7 @@
 // Runs itself again under Electron 45 as Node (BoringSSL decides what ssh2 reads, like in the 1.1.4 app). Only throwaway
 // test keys of test/golden/sp7/keys are used; nothing random ends up in the file.
 import { spawnSync } from 'node:child_process';
+import { createCipheriv, createDecipheriv } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
@@ -117,6 +119,89 @@ const SPECIAL = {
   'only whitespace': ' \n\t ',
 };
 for (const [name, text] of Object.entries(SPECIAL)) parse.push({ name, text, ...answers(text) });
+
+// ---- texts outside the SP7 corpus: traditional PEM DSA keys (test/golden/ssh-keys, openssl dsa from
+// pem-dsa1024.key), OpenSSH containers with a key count other than 1, security key types, non-ASCII PPK digits --------
+const s2File = (name) => readFileSync(resolve(root, 'test/golden/ssh-keys', name), 'utf8');
+const bcryptPbkdf = createRequire(resolve(root, 'node_modules/ssh2/package.json'))('bcrypt-pbkdf').pbkdf;
+const u32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
+const PRIVATE_FIELDS = { 'ssh-ed25519': 2, 'ecdsa-sha2-nistp256': 3, 'ssh-rsa': 6, 'ssh-dss': 5 };
+/** An openssh-key-v1 file taken apart, its private section decrypted with PASS (aes256-ctr + bcrypt, the corpus). */
+function opensshParts(text) {
+  const data = Buffer.from(text.replace(/-----[^-]+-----/g, ''), 'base64');
+  let p = 15;
+  const str = (buf) => { const l = buf.readUInt32BE(p); const s = buf.subarray(p + 4, p + 4 + l); p += 4 + l; return s; };
+  const cipher = str(data).toString();
+  const kdf = str(data).toString();
+  const kdfOptions = str(data);
+  const count = data.readUInt32BE(p);
+  p += 4;
+  const pubs = Array.from({ length: count }, () => str(data));
+  let priv = str(data);
+  let key;
+  let iv;
+  if (cipher !== 'none') {
+    const saltLen = kdfOptions.readUInt32BE(0);
+    const salt = kdfOptions.subarray(4, 4 + saltLen);
+    const gen = Buffer.alloc(48);
+    bcryptPbkdf(Buffer.from(PASS), PASS.length, salt, salt.length, gen, gen.length, kdfOptions.readUInt32BE(4 + saltLen));
+    [key, iv] = [gen.subarray(0, 32), gen.subarray(32)];
+    const d = createDecipheriv('aes-256-ctr', key, iv);
+    priv = Buffer.concat([d.update(priv), d.final()]);
+  }
+  p = 8;
+  const entries = pubs.map(() => { const from = p; const type = str(priv).toString(); for (let i = 0; i <= PRIVATE_FIELDS[type]; i++) str(priv); return priv.subarray(from, p); });
+  return { cipher, kdf, kdfOptions, pubs, checkint: priv.subarray(0, 8), entries, key, iv };
+}
+/** The file again from (changed) parts: `count` overrides the key count, `padding` the padding bytes. */
+function opensshFile({ cipher, kdf, kdfOptions, count, pubs, checkint, entries, key, iv, padding }) {
+  const block = cipher === 'none' ? 8 : 16;
+  let priv = Buffer.concat([checkint, ...entries]);
+  const pad = padding ?? Buffer.from(Array.from({ length: (block - (priv.length % block)) % block }, (_, i) => i + 1));
+  priv = Buffer.concat([priv, pad]);
+  if (cipher !== 'none') { const c = createCipheriv('aes-256-ctr', key, iv); priv = Buffer.concat([c.update(priv), c.final()]); }
+  const body = Buffer.concat([Buffer.from('openssh-key-v1\0'), sshString(Buffer.from(cipher)), sshString(Buffer.from(kdf)), sshString(kdfOptions), u32(count ?? pubs.length), ...pubs.map(sshString), sshString(priv)]);
+  return `-----BEGIN OPENSSH PRIVATE KEY-----\n${body.toString('base64').match(/.{1,70}/g).join('\n')}\n-----END OPENSSH PRIVATE KEY-----\n`;
+}
+const ed = opensshParts(file('openssh-ed25519.key'));
+const edEnc = opensshParts(file('openssh-ed25519-enc.key'));
+const ec = opensshParts(file('openssh-ecdsa256.key'));
+// Security keys (PROTOCOL.u2f): the ed25519 / P-256 public parts of corpus keys, application "ssh:", flags, key handle.
+const edPk = ed.pubs[0].subarray(4 + 11 + 4);
+const ecQ = ec.pubs[0].subarray(4 + 19 + 4 + 8 + 4);
+const SK_ED = 'sk-ssh-ed25519@openssh.com';
+const SK_EC = 'sk-ecdsa-sha2-nistp256@openssh.com';
+const skTail = Buffer.concat([Buffer.from([1]), sshString(Buffer.alloc(16, 7)), sshString(Buffer.alloc(0)), sshString(Buffer.from('sp7 sk'))]);
+const skEd = { pub: Buffer.concat([sshString(Buffer.from(SK_ED)), sshString(edPk), sshString(Buffer.from('ssh:'))]), entry: Buffer.concat([sshString(Buffer.from(SK_ED)), sshString(edPk), sshString(Buffer.from('ssh:')), skTail]) };
+const skEc = { pub: Buffer.concat([sshString(Buffer.from(SK_EC)), sshString(Buffer.from('nistp256')), sshString(ecQ), sshString(Buffer.from('ssh:'))]),
+  entry: Buffer.concat([sshString(Buffer.from(SK_EC)), sshString(Buffer.from('nistp256')), sshString(ecQ), sshString(Buffer.from('ssh:')), skTail]) };
+const dsaDer = (ints) => { const body = Buffer.concat(ints.map((b) => Buffer.concat([Buffer.from([2, b.length]), b]))); return Buffer.concat([Buffer.from([0x30, body.length]), body]); };
+const EXTRA = {
+  'pem dsa traditional': s2File('pem-dsa1024-traditional.key'),
+  'pem dsa traditional aes128': s2File('pem-dsa1024-traditional-aes128.key'),
+  'pem dsa traditional des3': s2File('pem-dsa1024-traditional-des3.key'),
+  'pem dsa traditional without y': `-----BEGIN DSA PRIVATE KEY-----\n${dsaDer([Buffer.from([0]), Buffer.from([0x7f, 1]), Buffer.from([3]), Buffer.from([4])]).toString('base64')}\n-----END DSA PRIVATE KEY-----\n`,
+  'pem dsa traditional, ints only': `-----BEGIN DSA PRIVATE KEY-----\n${dsaDer([Buffer.from([0]), Buffer.from([1]), Buffer.from([2]), Buffer.from([3]), Buffer.from([4])]).toString('base64')}\n-----END DSA PRIVATE KEY-----\n`,
+  'openssh key count 0': opensshFile({ ...ed, count: 0 }),
+  'openssh key count 0 encrypted': opensshFile({ ...edEnc, count: 0 }),
+  'openssh key count 2': opensshFile({ ...ed, pubs: [ed.pubs[0], ed.pubs[0]], entries: [ed.entries[0], ed.entries[0]] }),
+  'openssh key count 2 encrypted': opensshFile({ ...edEnc, pubs: [edEnc.pubs[0], edEnc.pubs[0]], entries: [edEnc.entries[0], edEnc.entries[0]] }),
+  'openssh key count 2, ecdsa then ed25519': opensshFile({ ...ed, pubs: [ec.pubs[0], ed.pubs[0]], entries: [ec.entries[0], ed.entries[0]] }),
+  'openssh key count 2, public parts of another key': opensshFile({ ...ed, pubs: [ec.pubs[0], ec.pubs[0]], entries: [ed.entries[0], ed.entries[0]] }),
+  'openssh key count 2, second a security key': opensshFile({ ...ed, pubs: [ed.pubs[0], skEd.pub], entries: [ed.entries[0], skEd.entry] }),
+  'openssh key count 2, bad padding': opensshFile({ ...ed, pubs: [ed.pubs[0], ed.pubs[0]], entries: [ed.entries[0], ed.entries[0]], padding: Buffer.from([1, 2, 4]) }),
+  'openssh key count 2, long padding': opensshFile({ ...ed, pubs: [ed.pubs[0], ed.pubs[0]], entries: [ed.entries[0], ed.entries[0]], padding: Buffer.from(Array.from({ length: 40 }, (_, i) => i + 1)) }),
+  'openssh key count 2, one public entry': opensshFile({ ...ed, count: 2, pubs: [ed.pubs[0]], entries: [ed.entries[0], ed.entries[0]] }),
+  'openssh sk-ssh-ed25519': opensshFile({ ...ed, pubs: [skEd.pub], entries: [skEd.entry] }),
+  'openssh sk-ssh-ed25519 encrypted': opensshFile({ ...edEnc, pubs: [skEd.pub], entries: [skEd.entry] }),
+  'openssh sk-ecdsa-sha2-nistp256': opensshFile({ ...ed, pubs: [skEc.pub], entries: [skEc.entry] }),
+  'openssh rebuilt as-is (control)': opensshFile(ed),
+  'openssh encrypted rebuilt as-is (control)': opensshFile(edEnc),
+  'ppk Public-Lines with an Arabic-Indic digit': ppk.replace(/Public-Lines: \d+/, 'Public-Lines: ٦'),
+  'ppk Private-Lines with a fullwidth digit': ppk.replace(/Private-Lines: \d+/, 'Private-Lines: １４'),
+  'ppk enc Public-Lines with an Arabic-Indic digit': ppkEnc.replace(/Public-Lines: \d+/, 'Public-Lines: ٦'),
+};
+for (const [name, text] of Object.entries(EXTRA)) parse.push({ name, text, ...answers(text) });
 
 // ---- publicKeyMatches / keyMetaFromPublic / certificateCheck --------------------------------------------------------
 const MATCH_KEYS = ['openssh-ed25519.key', 'ssh2-ecdsa384.key', 'pem-rsa2048.key', 'ssh2-ecdsa521.key'];

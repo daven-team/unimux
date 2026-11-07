@@ -4,9 +4,13 @@
 //!
 //! - OpenSSH private keys: Node's lenient base64 of the captured body, then russh's `decode_openssh` (ssh-key, with
 //!   3des-cbc through the `tdes` feature); chacha20-poly1305 key files are refused (Electron's BoringSSL has no
-//!   chacha20, so ssh2 does not list the cipher);
+//!   chacha20, so ssh2 does not list the cipher), and so is every key type outside ssh2's private key switch (security
+//!   keys `sk-*@openssh.com`, ...). ssh-key reads only files with one key: a key count of 0 (ssh2 returns no key) or
+//!   more than 1 (ssh2 returns the first) goes through ssh2's own walk of the container, with ssh-key's KDF and
+//!   ciphers, and only the first private entry is handed to ssh-key;
 //! - traditional PEM: [`legacy_pem`](super::legacy_pem) for the DEK-Info part, then russh on the plain DER; EC keys with
-//!   explicit curve parameters are refused like ssh2 does;
+//!   explicit curve parameters are refused like ssh2 does; a DSA key is checked with ssh2's own ASN.1 reads (version,
+//!   p, q, g, y) and becomes an `ssh-dss` private key, which keys.ts refuses as unsupportedType;
 //! - PPK v2 (ssh-rsa / ssh-dss only, the regex): ssh-key's PPK reader on a canonical copy of the captured parts (Node's
 //!   base64, the line counts ssh2 ignores), after ssh2's own MAC rules: the MAC is compared as lower-case hex text and an
 //!   unencrypted file read with a passphrase fails (ssh2's MAC key includes it);
@@ -21,6 +25,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use regex::Regex;
 use russh::keys::PrivateKey;
+use ssh_key::encoding::Decode;
+use ssh_key::private::KeypairData;
 use zeroize::Zeroizing;
 
 use super::js::{self, js_regex, js_trim, node_base64, utf16_len};
@@ -36,14 +42,22 @@ pub enum Loaded {
         blob: Vec<u8>,
         comment: String,
     },
+    /// A private key ssh2 reads and 1.1.4 refuses in metaOf: a traditional PEM DSA key (`ssh-dss`).
+    OtherPrivate {
+        key_type: &'static str,
+    },
+    /// ssh2 returned `undefined` (an OpenSSH key file with a key count of 0): keys.ts answers notAKey.
+    Nothing,
 }
 
 impl Loaded {
-    /// ssh2's `getPublicSSH()`.
+    /// ssh2's `getPublicSSH()`. Empty for [`Loaded::OtherPrivate`] (its `ssh-dss` blob never equals the blob of a key
+    /// 1.1.4 accepts, the only use) and [`Loaded::Nothing`] (no key: keys.ts never gets that far).
     pub fn blob(&self) -> Vec<u8> {
         match self {
             Loaded::Private(k) => k.public_key().to_bytes().unwrap_or_default(),
             Loaded::Public { blob, .. } => blob.clone(),
+            Loaded::OtherPrivate { .. } | Loaded::Nothing => Vec::new(),
         }
     }
 
@@ -52,6 +66,8 @@ impl Loaded {
         match self {
             Loaded::Private(k) => k.algorithm().as_str().to_string(),
             Loaded::Public { key_type, .. } => key_type.clone(),
+            Loaded::OtherPrivate { key_type } => (*key_type).to_string(),
+            Loaded::Nothing => String::new(),
         }
     }
 
@@ -60,6 +76,7 @@ impl Loaded {
         match self {
             Loaded::Private(k) => String::from_utf8_lossy(k.comment().as_bytes()).into_owned(),
             Loaded::Public { comment, .. } => comment.clone(),
+            Loaded::OtherPrivate { .. } | Loaded::Nothing => String::new(),
         }
     }
 }
@@ -124,6 +141,10 @@ fn russh_secret(text: &str, pass: Option<&str>) -> Result<PrivateKey, Fail> {
     }
 }
 
+/// The key types of ssh2's `parseOpenSSHPrivKeys` switch; any other one is "Unsupported OpenSSH private key type".
+const SSH2_PRIVATE_TYPES: [&str; 6] =
+    ["ssh-rsa", "ssh-dss", "ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521"];
+
 fn openssh_private(body: &str, pass: Option<&str>) -> Result<Loaded, Fail> {
     let data = Zeroizing::new(node_base64(body));
     let magic = b"openssh-key-v1\0".len();
@@ -134,11 +155,148 @@ fn openssh_private(body: &str, pass: Option<&str>) -> Result<Loaded, Fail> {
     if read_string(&data, magic).is_some_and(|(name, _)| name == b"chacha20-poly1305@openssh.com") {
         return Err(Fail::Other("Unsupported cipher for OpenSSH key"));
     }
-    match std::panic::catch_unwind(|| russh::keys::decode_openssh(&data, pass)) {
-        Ok(Ok(k)) => Ok(Loaded::Private(Box::new(k))),
-        Ok(Err(russh::keys::Error::KeyIsEncrypted)) => Err(Fail::NoPassphrase),
-        _ => Err(Fail::Other("Malformed OpenSSH private key")),
+    // The key count after the cipher name, the KDF name and the KDF options. ssh-key reads only one-key files.
+    let count =
+        skip_fields(&data, magic, 3).and_then(|at| data.get(at..at + 4)).map(|n| u32::from_be_bytes([n[0], n[1], n[2], n[3]]));
+    if count.is_some_and(|n| n != 1) {
+        return std::panic::catch_unwind(|| openssh_container(&data, pass))
+            .unwrap_or(Err(Fail::Other("Malformed OpenSSH private key")));
     }
+    let key = match std::panic::catch_unwind(|| russh::keys::decode_openssh(&data, pass)) {
+        Ok(Ok(k)) => k,
+        Ok(Err(russh::keys::Error::KeyIsEncrypted)) => return Err(Fail::NoPassphrase),
+        _ => return Err(Fail::Other("Malformed OpenSSH private key")),
+    };
+    // ssh2 decrypts first and refuses the type while reading the private entry.
+    if !SSH2_PRIVATE_TYPES.contains(&key.algorithm().as_str()) {
+        return Err(Fail::Other("Unsupported OpenSSH private key type"));
+    }
+    Ok(Loaded::Private(Box::new(key)))
+}
+
+/// ssh2's `OpenSSH_Private.parse` and `parseOpenSSHPrivKeys` for a file whose key count is not 1, in ssh2's order: the
+/// cipher / KDF header rules, the bcrypt KDF and the cipher (ssh-key's), every public entry, every private entry walked
+/// by ssh2's per-type layout, the padding; then ssh2's `ret[0]`: no key for a count of 0, else the first private entry
+/// (read by ssh-key, its public key derived from it like ssh2 does).
+fn openssh_container(data: &[u8], pass: Option<&str>) -> Result<Loaded, Fail> {
+    const MALFORMED: Fail = Fail::Other("Malformed OpenSSH private key");
+    let (cipher_name, pos) = read_string(data, 15).ok_or(MALFORMED)?;
+    let cipher = match cipher_name {
+        b"none" => None,
+        name => Some(
+            std::str::from_utf8(name)
+                .ok()
+                .and_then(|n| ssh_key::Cipher::new(n).ok())
+                .ok_or(Fail::Other("Unsupported cipher for OpenSSH key"))?,
+        ),
+    };
+    let (kdf_name, pos) = read_string(data, pos).ok_or(MALFORMED)?;
+    if kdf_name != b"none" {
+        if cipher.is_none() {
+            return Err(MALFORMED);
+        }
+        if kdf_name != b"bcrypt" {
+            return Err(Fail::Other("Unsupported kdf name for OpenSSH key"));
+        }
+        if pass.is_none() {
+            return Err(Fail::NoPassphrase);
+        }
+    } else if cipher.is_some() {
+        return Err(MALFORMED);
+    }
+    let (kdf_options, mut pos) = read_string(data, pos).ok_or(MALFORMED)?;
+    let mut decrypt = None;
+    if !kdf_options.is_empty() {
+        if kdf_name == b"none" {
+            return Err(MALFORMED);
+        }
+        let (salt, at) = read_string(kdf_options, 0).ok_or(MALFORMED)?;
+        let rounds = kdf_options.get(at..at + 4).ok_or(MALFORMED)?;
+        let kdf = ssh_key::Kdf::Bcrypt {
+            salt: salt.to_vec(),
+            rounds: u32::from_be_bytes([rounds[0], rounds[1], rounds[2], rounds[3]]),
+        };
+        let cipher = cipher.ok_or(MALFORMED)?;
+        // bcrypt_pbkdf fails on an empty passphrase, salt or 0 rounds in both implementations.
+        let (key, iv) = kdf
+            .derive_key_and_iv(cipher, pass.unwrap_or_default())
+            .map_err(|_| Fail::Other("Failed to generate information to decrypt key"))?;
+        decrypt = Some((cipher, key, iv));
+    } else if kdf_name != b"none" {
+        return Err(MALFORMED);
+    }
+    if pos + 3 >= data.len() {
+        return Err(MALFORMED);
+    }
+    let count = u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+    pos += 4;
+    if count == 0 {
+        return Ok(Loaded::Nothing);
+    }
+    for _ in 0..count {
+        let (public, at) = read_string(data, pos).ok_or(MALFORMED)?;
+        read_string(public, 0).ok_or(MALFORMED)?;
+        pos = at;
+    }
+    let (blob, at) = read_string(data, pos).ok_or(MALFORMED)?;
+    pos = at;
+    let mut private = Zeroizing::new(blob.to_vec());
+    if let Some((cipher, key, iv)) = decrypt {
+        let block = cipher.block_size();
+        if private.len() < block || !private.len().is_multiple_of(block) {
+            return Err(MALFORMED);
+        }
+        let tag = if cipher.has_tag() {
+            let tag = data.get(pos..pos + 16).ok_or(MALFORMED)?;
+            pos += 16;
+            Some(ssh_key::cipher::Tag::try_from(tag).map_err(|_| MALFORMED)?)
+        } else {
+            None
+        };
+        cipher.decrypt(&key, &iv, &mut private, tag).map_err(|_| Fail::Other("bad decrypt"))?;
+    }
+    if pos != data.len() {
+        return Err(MALFORMED);
+    }
+    // parseOpenSSHPrivKeys.
+    let p = &private[..];
+    if p.len() < 8 {
+        return Err(MALFORMED);
+    }
+    if p[..4] != p[4..8] {
+        return Err(Fail::Other("OpenSSH key integrity check failed"));
+    }
+    let mut pos = 8;
+    let mut first = None;
+    for i in 0..count {
+        let start = pos;
+        let (key_type, at) = read_string(p, pos).ok_or(MALFORMED)?;
+        let fields_end = match key_type {
+            b"ssh-rsa" => skip_fields(p, at, 6),
+            b"ssh-dss" => skip_fields(p, at, 5),
+            b"ssh-ed25519" => read_string(p, at)
+                .filter(|(public, _)| public.len() == 32)
+                .and_then(|(_, at)| read_string(p, at))
+                .filter(|(private, _)| private.len() == 64)
+                .map(|(_, end)| end),
+            b"ecdsa-sha2-nistp256" | b"ecdsa-sha2-nistp384" | b"ecdsa-sha2-nistp521" => skip_fields(p, at, 3),
+            _ => return Err(Fail::Other("Unsupported OpenSSH private key type")),
+        }
+        .ok_or(MALFORMED)?;
+        let (comment, end) = read_string(p, fields_end).ok_or(MALFORMED)?;
+        if i == 0 {
+            first = Some((start..fields_end, comment));
+        }
+        pos = end;
+    }
+    // The padding 1, 2, 3, ... (counted modulo 255), any length.
+    if p[pos..].iter().zip(1u32..).any(|(&b, n)| u32::from(b) != n % 255) {
+        return Err(MALFORMED);
+    }
+    let (range, comment) = first.ok_or(MALFORMED)?;
+    let key_data = KeypairData::decode(&mut &p[range]).map_err(|_| MALFORMED)?;
+    let key = PrivateKey::new(key_data, comment.to_vec()).map_err(|_| MALFORMED)?;
+    Ok(Loaded::Private(Box::new(key)))
 }
 
 fn old_private(label: &str, headers: &str, body: &str, pass: Option<&str>) -> Result<Loaded, Fail> {
@@ -149,10 +307,115 @@ fn old_private(label: &str, headers: &str, body: &str, pass: Option<&str>) -> Re
     if pem.label == "EC" && legacy_pem::ec_explicit_curve(&pem.der) {
         return Err(Fail::Other("Unsupported private key EC OID"));
     }
+    // ssh2 reads a DSA key itself (no OpenSSL): it is an ssh-dss private key whenever its ASN.1 reads succeed.
+    if pem.label == "DSA" {
+        return if ssh2_dsa_reads(&pem.der) {
+            Ok(Loaded::OtherPrivate { key_type: "ssh-dss" })
+        } else {
+            Err(Fail::Other("Malformed OpenSSH private key. Bad passphrase?"))
+        };
+    }
     // The plain DER never needs a passphrase: russh must not try to decrypt it.
     russh_secret(&legacy_pem::armor(&pem), None)
         .map(|k| Loaded::Private(Box::new(k)))
         .map_err(|_| Fail::Other("Malformed OpenSSH private key"))
+}
+
+/// The reads of asn1 0.2.6's `Ber.Reader` that ssh2's OpenSSH_Old_Private makes on a DSA key: `readSequence()` (no tag
+/// check, its length not enforced), `readInt()` (the version; its value is unused, so a null only reads nothing), then
+/// `readString(Ber.Integer, true)` for p, q, g and y. True when none of them throws or returns null. Lengths are the
+/// reader's 32-bit JS integers; an index outside the data reads as 0 (`undefined & 0xff`).
+fn ssh2_dsa_reads(der: &[u8]) -> bool {
+    struct Ber<'a> {
+        buf: &'a [u8],
+        off: i64,
+        len: i64,
+    }
+    impl Ber<'_> {
+        fn size(&self) -> i64 {
+            self.buf.len() as i64
+        }
+        fn at(&self, i: i64) -> u8 {
+            usize::try_from(i).ok().and_then(|i| self.buf.get(i)).copied().unwrap_or(0)
+        }
+        fn peek(&self) -> Option<u8> {
+            (self.size() - self.off >= 1).then(|| self.at(self.off))
+        }
+        /// `readLength(offset)`: Ok(None) for null, Err for a throw.
+        fn read_length(&mut self, mut o: i64) -> Result<Option<i64>, ()> {
+            if o >= self.size() {
+                return Ok(None);
+            }
+            let first = self.at(o);
+            o += 1;
+            if first & 0x80 != 0 {
+                let n = first & 0x7f;
+                if n == 0 || n > 4 {
+                    return Err(());
+                }
+                if self.size() - o < i64::from(n) {
+                    return Ok(None);
+                }
+                let mut len: i32 = 0;
+                for _ in 0..n {
+                    len = len.wrapping_shl(8) | i32::from(self.at(o));
+                    o += 1;
+                }
+                self.len = i64::from(len);
+            } else {
+                self.len = i64::from(first);
+            }
+            Ok(Some(o))
+        }
+        fn read_sequence(&mut self) -> Result<(), ()> {
+            if self.peek().is_some()
+                && let Some(o) = self.read_length(self.off + 1)?
+            {
+                self.off = o;
+            }
+            Ok(())
+        }
+        fn read_int(&mut self) -> Result<(), ()> {
+            let Some(tag) = self.peek() else { return Ok(()) };
+            if tag != 0x02 {
+                return Err(());
+            }
+            let Some(o) = self.read_length(self.off + 1)? else { return Ok(()) };
+            if self.len > 4 {
+                return Err(());
+            }
+            if self.len > self.size() - o {
+                return Ok(());
+            }
+            self.off = o + self.len.max(0);
+            Ok(())
+        }
+        /// `readString(Ber.Integer, true)`: Ok(false) for null.
+        fn read_integer(&mut self) -> Result<bool, ()> {
+            let Some(tag) = self.peek() else { return Ok(false) };
+            if tag != 0x02 {
+                return Err(());
+            }
+            let Some(o) = self.read_length(self.off + 1)? else { return Ok(false) };
+            if self.len > self.size() - o {
+                return Ok(false);
+            }
+            self.off = o + self.len;
+            Ok(true)
+        }
+    }
+    let mut r = Ber { buf: der, off: 0, len: 0 };
+    let mut reads = || -> Result<bool, ()> {
+        r.read_sequence()?;
+        r.read_int()?;
+        for _ in 0..4 {
+            if !r.read_integer()? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    };
+    reads().unwrap_or(false)
 }
 
 fn ppk_private(m: &regex::Captures<'_>, pass: Option<&str>) -> Result<Loaded, Fail> {
@@ -293,7 +556,7 @@ mod tests {
     fn public(text: &str) -> (String, Vec<u8>, String) {
         match parse_key(text, None) {
             Ok(Loaded::Public { key_type, blob, comment }) => (key_type, blob, comment),
-            Ok(Loaded::Private(_)) => panic!("private"),
+            Ok(_) => panic!("not a public key"),
             Err(e) => panic!("{e:?}"),
         }
     }
@@ -324,6 +587,25 @@ mod tests {
         assert_eq!(parse_key(&long, None).err(), Some(Fail::Other("Unsupported key format")));
         let ed = format!("---- BEGIN SSH2 PUBLIC KEY ----\n{ED}\n---- END SSH2 PUBLIC KEY ----");
         assert_eq!(parse_key(&ed, None).err(), Some(Fail::Other("Malformed RFC4716 public key")));
+    }
+
+    #[test]
+    fn dsa_keys_are_checked_with_the_asn1_reads_of_ssh2() {
+        let ints = |n: u8| (0..n).flat_map(|i| [2, 1, i + 1]).collect::<Vec<u8>>();
+        let seq = |body: Vec<u8>, len: u8| [vec![0x30, len], body].concat();
+        // version, p, q, g, y.
+        assert!(ssh2_dsa_reads(&seq(ints(5), 15)));
+        // The SEQUENCE length is not enforced, and its tag is not checked.
+        assert!(ssh2_dsa_reads(&seq(ints(5), 3)));
+        assert!(ssh2_dsa_reads(&[vec![0x31, 15], ints(5)].concat()));
+        // y missing (null), a non-INTEGER tag (throws), an indefinite length (throws), a version longer than 4 bytes.
+        assert!(!ssh2_dsa_reads(&seq(ints(4), 12)));
+        assert!(!ssh2_dsa_reads(&[vec![0x30, 15], ints(4), vec![4, 1, 1]].concat()));
+        assert!(!ssh2_dsa_reads(&[vec![0x30, 0x80], ints(5)].concat()));
+        assert!(!ssh2_dsa_reads(&[vec![0x30, 20, 2, 5, 0, 0, 0, 0, 0], ints(4)].concat()));
+        // An empty version is read as nothing (readInt's value is unused).
+        assert!(ssh2_dsa_reads(&[vec![0x30, 14, 2, 0], ints(4)].concat()));
+        assert!(!ssh2_dsa_reads(&[]));
     }
 
     #[test]

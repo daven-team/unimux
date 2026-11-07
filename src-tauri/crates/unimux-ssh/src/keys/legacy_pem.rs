@@ -31,7 +31,7 @@ pub enum Error {
     BadPassphrase,
 }
 
-/// The plain DER (PKCS#1 RSA, SEC1 EC or DSA) with its PEM label.
+/// The plain DER (PKCS#1 RSA, SEC1 EC or DSA) with its PEM label. RSA and EC are cut after the outer SEQUENCE.
 pub struct Pem {
     pub label: &'static str,
     pub der: Zeroizing<Vec<u8>>,
@@ -172,7 +172,10 @@ pub fn read(label: &str, headers: &str, body: &str, pass: Option<&str>) -> Resul
         let value = value_of(header, sep);
         decrypt_one(&value, pass, &mut data)?;
     }
-    cut_after_sequence(&mut data);
+    // A DSA key is never handed to russh: ssh2's own ASN.1 reads see the data as it is.
+    if label != "DSA" {
+        cut_after_sequence(&mut data);
+    }
     Ok(Pem { label, der: data })
 }
 

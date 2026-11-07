@@ -8,6 +8,7 @@ use base64::engine::general_purpose::STANDARD;
 use regex::Regex;
 use russh::keys::PrivateKey;
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 use super::js::{clean_comment, js_lines, js_regex, js_trim, node_base64, word_end};
 use super::ssh2::{self, Fail, Loaded};
@@ -78,7 +79,8 @@ fn openssh_cipher_is_not_none(text: &str) -> bool {
     let Some(from) = text.find(BEGIN).map(|i| i + BEGIN.len()) else { return false };
     let Some(first) = text[from..].chars().next() else { return false };
     let Some(len) = text[from + first.len_utf8()..].find(END).map(|i| i + first.len_utf8()) else { return false };
-    let raw = node_base64(&text[from..from + len]);
+    // The whole body: an unencrypted key's private part is in it.
+    let raw = Zeroizing::new(node_base64(&text[from..from + len]));
     let magic = "openssh-key-v1\0".len();
     if raw.len() < magic + 4 {
         return false;
@@ -139,7 +141,9 @@ pub fn parse_private_key(text: &str, passphrase: Option<&str>) -> Result<Parsed,
             Err(ParseFailure::locked(if truthy { ParseError::BadPassphrase } else { ParseError::NeedsPassphrase }))
         }
         Err(Fail::Other(_)) => Err(ParseFailure::plain(ParseError::NotAKey)),
+        Ok(Loaded::Nothing) => Err(ParseFailure::plain(ParseError::NotAKey)),
         Ok(Loaded::Public { .. }) => Err(ParseFailure::plain(ParseError::PublicOnly)),
+        Ok(Loaded::OtherPrivate { .. }) => Err(ParseFailure::plain(ParseError::UnsupportedType)),
         Ok(Loaded::Private(key)) => match meta_of(&key) {
             Some(meta) => Ok(Parsed { meta, encrypted, key }),
             None => Err(ParseFailure::plain(ParseError::UnsupportedType)),
