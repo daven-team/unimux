@@ -1,5 +1,11 @@
 name: Publish release
 
+# Publishes the artifacts of a green CI run on a version tag (PLAN U4). Nothing is built or signed here: the CI run made the
+# signed Tauri installers and archives; prepare-release-assets.mjs checks them again (manifests, minisign signatures against
+# the embedded public key, the exact asset list) and writes latest.json, latest-mac.yml and SHA256SUMS.txt. Assets: latest.yml +
+# unimux-Setup-X.exe (+ .sig), latest-mac.yml + unimux-X-mac-<arch>.zip / .dmg, unimux-X-mac-<arch>.app.tar.gz (+ .sig),
+# latest.json, SHA256SUMS.txt. Published as the latest release, never as a prerelease.
+
 on:
   workflow_dispatch:
     inputs:
@@ -34,7 +40,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
       - name: Verify tag and successful build
         run: node scripts/verify-release-build.mjs
@@ -46,7 +52,7 @@ jobs:
           pattern: unimux-*
           path: release-assets
       - name: Verify installers and prepare update manifests
-        run: node scripts/prepare-release-assets.mjs release-assets "${RELEASE_TAG#v}"
+        run: node scripts/prepare-release-assets.mjs release-assets "${RELEASE_TAG#v}" --repository "$RELEASE_REPOSITORY"
       - name: Prepare release description with download guide
         run: |
           # The download guide names the files of this release: <version> becomes the real version number.

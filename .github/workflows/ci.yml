@@ -1,5 +1,10 @@
 name: CI
 
+# unimux 1.2.0+: the Tauri 2 + Rust app (docs/tauri/PLAN.md U4). The job names of the three platform builds are the ones of
+# 1.1.x (Windows x64, macOS Apple Silicon, macOS Intel): scripts/release.mjs waits for them and scripts/verify-release-build.mjs
+# checks them before "Publish release" uses this run's artifacts. A manual run (workflow_dispatch, any branch) is a full
+# rehearsal of a release: the three signed builds plus "Release assets", which assembles and verifies the exact asset list.
+
 on:
   push:
     branches: [main]
@@ -17,6 +22,14 @@ concurrency:
   group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.ref) || format('ci-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: '1.99.1'
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+  VITE_CONFIG_NATIVE_IGNORE_WARNING: 'true'
+  # npm ci runs before cargo test, so the A1 lock interop cases against the real proper-lockfile must run, never skip.
+  UNIMUX_REQUIRE_LOCK_INTEROP: '1'
+
 jobs:
   # The typecheck does not depend on the platform: it runs once, on the cheapest runner, next to the other jobs.
   typecheck:
@@ -26,33 +39,75 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
-      # No install scripts: tsc needs the packages' types only (no Electron binary, no native node-pty build on Linux).
+      # No install scripts: tsc needs the packages' types only.
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run typecheck
 
-  # Pushes to main only need the fast checks; the three platform packages are built for tags, pull requests
-  # and manual runs (a manual run is a full rehearsal of a release).
-  quick:
-    name: Checks
-    if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
-    runs-on: windows-latest
+  # Unit tests, generated-file drift, fmt / clippy / cargo test (debug and release rules) on both platforms, on every run:
+  # a tag is only released when they passed for its commit (verify-release-build accepts no failed job).
+  checks:
+    name: Checks (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Windows, os: windows-latest }
+          - { name: macOS, os: macos-15 }
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
-      - run: npm ci
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri
+          shared-key: checks
+      - run: npm ci --no-audit --no-fund
+      # Generated files must match their sources: the window.mc contract, the message table, the golden corpus.
+      - run: npm run gen:check
+      - run: node scripts/porting-count.mjs --check
+      - name: No 3.0.0-alpha in the lockfiles
+        shell: bash
+        run: |
+          if grep -n '3\.0\.0-alpha' src-tauri/Cargo.lock package-lock.json; then echo "::error::a 3.0.0-alpha package is in a lockfile"; exit 1; fi
+      # vitest on Windows (as in tauri.yml); the Rust suites below run on both platforms.
       - run: npm test
+        if: runner.os == 'Windows'
+      # The renderer bundle first: tauri::generate_context! embeds out/tauri-renderer.
+      - run: npm run build:ui
+      - run: cargo fmt --all --check
+        working-directory: src-tauri
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+        working-directory: src-tauri
+      - run: cargo clippy --workspace --all-targets --features unimux-app/dev-overrides,unimux-app/test-bridge -- -D warnings
+        working-directory: src-tauri
+      - run: cargo test --workspace
+        working-directory: src-tauri
+      # B1 dual host: the existing .int suites against the Rust code through unimux-hostd (docs/tauri/HOSTD.md).
+      - name: .int suites on the Rust host (unimux-hostd)
+        run: npm run test:hostd
+        env:
+          UNIMUX_HOST_TARGETS: rust
+      # The release rules (MC_* overrides, the DevTools port and the dev server origin compiled out) are only active in
+      # release builds, so they get their own clippy and tests.
+      - run: cargo clippy --workspace --all-targets --release -- -D warnings
+        working-directory: src-tauri
+      - run: cargo test --workspace --release
+        working-directory: src-tauri
+      - run: cargo test --workspace --features unimux-app/dev-overrides,unimux-app/test-bridge,unimux-core/dev-overrides
+        working-directory: src-tauri
 
-  # Tag runs can only read caches saved on main, and the package jobs never run on main: without this job every
-  # release started with cold Electron and electron-builder downloads. It fills the same cache entries as the package
-  # jobs (same paths and key) and does the work only when Electron or electron-builder changed, otherwise it ends after the
-  # cache lookup. A failed warm-up (a flaky dmg build) does not turn main red: the next push tries again.
+  # Tag runs can only read caches saved on main, and the build jobs never run on main: without this job every release would
+  # start with a cold Rust build. It fills the same cache entries as the build jobs (same shared key) with the release
+  # build of each target. A failed warm-up does not turn main red: the next push tries again.
   warm-cache:
     name: Warm cache (${{ matrix.name }})
     if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
@@ -62,55 +117,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Windows x64
-            os: windows-latest
-            command: npm run dist:win
-            download-cache: |
-              ~/AppData/Local/electron/Cache
-              ~/AppData/Local/electron-builder/Cache
-          - name: macOS Apple Silicon
-            os: macos-15
-            command: npm run dist:mac -- --arm64
-            download-cache: |
-              ~/Library/Caches/electron
-              ~/Library/Caches/electron-builder
-          - name: macOS Intel
-            os: macos-15-intel
-            command: npm run dist:mac -- --x64
-            download-cache: |
-              ~/Library/Caches/electron
-              ~/Library/Caches/electron-builder
+          - { name: Windows x64, os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { name: macOS Apple Silicon, os: macos-15, target: aarch64-apple-darwin }
+          - { name: macOS Intel, os: macos-15, target: x86_64-apple-darwin }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The key follows the Electron and electron-builder versions only: npm version rewrites package-lock.json on every
-      # release, so a lockfile hash never matched between main and the tag pushed with it.
-      - id: tools
-        name: Packaging tool versions
-        shell: bash
-        run: echo "versions=$(node -p "const l = require('./package-lock.json').packages; ['electron', 'electron-builder', 'app-builder-lib'].map((n) => l['node_modules/' + n].version).join('-')")" >> "$GITHUB_OUTPUT"
-      - id: downloads
-        name: Cache Electron and electron-builder downloads
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          path: ${{ matrix.download-cache }}
-          key: electron-downloads-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.versions }}
-      - if: steps.downloads.outputs.cache-hit != 'true'
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
+          node-version: 26
           cache: npm
-      - if: steps.downloads.outputs.cache-hit != 'true'
-        run: npm ci
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-      # Packaging is what downloads the Electron zip and electron-builder's tools; its output is thrown away.
-      - if: steps.downloads.outputs.cache-hit != 'true'
-        name: Package application (fills the download cache)
-        run: ${{ matrix.command }}
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri
+          shared-key: release-${{ matrix.target }}
+      - run: npm ci --no-audit --no-fund
+      # The binary only: compiling is what the cache keeps, the bundles are thrown away.
+      - name: Release build (fills the cache)
+        run: npx tauri build --ci --target ${{ matrix.target }} --no-bundle
 
-  # Fails in seconds when a tag does not match package.json or has no release notes.
+  # Fails in seconds when a tag does not match the version files (package.json, Cargo.toml, Cargo.lock, tauri.conf.json)
+  # or has no release notes.
   release-metadata:
     name: Release metadata
     if: startsWith(github.ref, 'refs/tags/v')
@@ -119,7 +149,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 26
       - run: node scripts/check-release-tag.mjs
 
   build:
@@ -130,79 +160,91 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Windows x64
-            os: windows-latest
-            command: npm run dist:win
-            artifact: windows-x64
-            # Where electron-builder 26 keeps the Electron zip (@electron/get, no env override) and its tools (NSIS, ...).
-            download-cache: |
-              ~/AppData/Local/electron/Cache
-              ~/AppData/Local/electron-builder/Cache
-            files: |
-              release/*.exe
-              release/*.exe.blockmap
-              release/latest.yml
-          - name: macOS Apple Silicon
-            os: macos-15
-            command: npm run dist:mac -- --arm64
-            artifact: macos-arm64
-            download-cache: |
-              ~/Library/Caches/electron
-              ~/Library/Caches/electron-builder
-            files: |
-              release/*-mac-arm64.dmg
-              release/*-mac-arm64.zip
-              release/latest-mac*.yml
-          - name: macOS Intel
-            os: macos-15-intel
-            command: npm run dist:mac -- --x64
-            artifact: macos-x64
-            download-cache: |
-              ~/Library/Caches/electron
-              ~/Library/Caches/electron-builder
-            files: |
-              release/*-mac-x64.dmg
-              release/*-mac-x64.zip
-              release/latest-mac*.yml
+          - { name: Windows x64, os: windows-latest, target: x86_64-pc-windows-msvc, binary: unimux.exe, artifact: windows-x64 }
+          - { name: macOS Apple Silicon, os: macos-15, target: aarch64-apple-darwin, binary: unimux, artifact: macos-arm64 }
+          - { name: macOS Intel, os: macos-15, target: x86_64-apple-darwin, binary: unimux, artifact: macos-x64 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
-      # The key follows the Electron and electron-builder versions only: npm version rewrites package-lock.json on every
-      # release, so a lockfile hash never matched between main and the tag pushed with it.
-      - id: tools
-        name: Packaging tool versions
-        shell: bash
-        run: echo "versions=$(node -p "const l = require('./package-lock.json').packages; ['electron', 'electron-builder', 'app-builder-lib'].map((n) => l['node_modules/' + n].version).join('-')")" >> "$GITHUB_OUTPUT"
-      # The Electron zip and electron-builder's tools, per OS and architecture; a new Electron or electron-builder starts a
-      # fresh entry, so old downloads do not pile up. Saved only after a green job.
-      - name: Cache Electron and electron-builder downloads
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          path: ${{ matrix.download-cache }}
-          key: electron-downloads-${{ runner.os }}-${{ runner.arch }}-${{ steps.tools.outputs.versions }}
-      - run: npm ci
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-      # Unit tests stay on every platform (a macOS-only failure caught a real platform difference in 0.9.3). They run
-      # before packaging, not next to it: timing-sensitive tests (git, pty) time out on a busy runner.
-      - run: npm test
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri
+          shared-key: release-${{ matrix.target }}
+      - run: npm ci --no-audit --no-fund
+      # beforeBuildCommand builds the renderer; the bundle targets come from tauri.conf.json (NSIS) and
+      # tauri.macos.conf.json (app + dmg, ad-hoc signature). The updater archive and the signatures are made below.
       - name: Package application
-        run: ${{ matrix.command }}
+        run: npx tauri build --ci --target ${{ matrix.target }}
+      - name: Release build has no dev overrides
+        shell: bash
+        run: |
+          bin="src-tauri/target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          test -f "$bin"
+          # MC_DATA_DIR (the dev-overrides env reads) and test_bridge (the harness command) are in every dev-overrides /
+          # test-bridge binary on every OS and absent from a release one.
+          for marker in MC_DATA_DIR MC_DEBUG_PORT test_bridge; do
+            if grep -a -q -- "$marker" "$bin"; then echo "::error::the release binary contains $marker"; exit 1; fi
+          done
+          # The DevTools switch is built only on Windows (browser_args is used inside cfg(windows)), so it is checked there.
+          if [ "${{ runner.os }}" = "Windows" ] && grep -a -q -- '--remote-debugging-port' "$bin"; then
+            echo "::error::the release binary contains --remote-debugging-port"; exit 1
+          fi
+      # Release names, the 1.1.x manifests (latest.yml / latest-mac.yml), the ditto zip, the .app.tar.gz and the minisign
+      # signatures (checked against the public key the app embeds). The key exists only as these two secrets; pull requests
+      # (forks get no secrets) build unsigned, tags and manual runs must sign.
+      - name: Release assets of this platform
+        shell: bash
+        run: node scripts/release-build-assets.mjs --target ${{ matrix.target }} --out release ${{ github.event_name == 'pull_request' && '--allow-unsigned' || '' }}
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      - name: Verify packaged terminal runtime
-        run: npm run test:packaged
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       # 0.9.3 and 0.9.4 crashed when started from a shortcut or the installer (no console, no standard handles), which no
-      # check started from a terminal could see.
-      - name: Start the packaged app without a console
+      # check started from a terminal could see. The release setup is installed silently into a scratch folder, the INSTALLED
+      # exe is started without a console, and the 1.1.x update window's `-e` call is checked on it.
+      - name: Install and start the app without a console
         if: runner.os == 'Windows'
         run: npm run test:start
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unimux-${{ matrix.artifact }}
-          path: ${{ matrix.files }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  # The publish step's checks on this run's artifacts, before anything is published: exact asset list, manifests against the
+  # files, every .sig against the embedded public key, latest.json. The result is kept as `release-preview` (not matched by
+  # the `unimux-*` pattern "Publish release" downloads).
+  release-assets:
+    name: Release assets
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: unimux-*
+          path: release-assets
+      - name: Verify and assemble the release assets
+        shell: bash
+        run: |
+          version="$(node -p "require('./src-tauri/crates/unimux-app/tauri.conf.json').version")"
+          node scripts/prepare-release-assets.mjs release-assets "$version" --repository "$GITHUB_REPOSITORY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-preview
+          path: release-assets/publish/*
           if-no-files-found: error
           retention-days: 14

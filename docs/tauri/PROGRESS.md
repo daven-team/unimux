@@ -128,7 +128,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | A4 | Login managers | todo | | | | |
 | A5 | Usage, auto-switch, limit alerts | todo | | | | |
 | M3 | Automation operations | todo | | | | |
-| U4 | CI and release pipeline | todo | | | | uses the signing secrets in CI only |
+| U4 | CI and release pipeline | built, fast mode, not verified | 2026-11-08 | 2026-11-08 | | branch `tauri-pkg-U4`. ci.yml switched to Tauri (job names Windows x64 / macOS Apple Silicon / macOS Intel kept; Checks (Windows / macOS) with tauri.yml's checks; warm cache = release build per target; new "Release assets" job on tags and manual runs = the rehearsal), `scripts/release-lib.mjs` (asset names, latest.yml / latest-mac.yml writer, latest.json, Node minisign verify, version files), `scripts/release-build-assets.mjs` (renames, mac-legacy-zip, .app.tar.gz, `tauri signer sign` with the secrets, .sig checked against the embedded key), prepare-release-assets (exact asset list, sha512 + .sig checks, latest.json, SHA256SUMS), check-release-tag / verify-release-build / release.mjs on package.json + Cargo.toml + Cargo.lock + tauri.conf.json, smoke-start `--install` (silent install, installed exe, `-e` call), `npm run test:start` switched. See "U4 open issues". |
 
 ### Wave 5
 
@@ -1570,6 +1570,21 @@ Not run (fast mode): real-app / CDP scripts (smoke-tauri, verify-tauri-lifecycle
 4. macOS: unimux-db now builds ring (rustls) and the bundled SQLite, so no aarch64-apple-darwin check of unimux-db / unimux-accounts / unimux-ssh is possible on this machine; only CI's macOS job can build them.
 5. `dump-goldens.mjs --check` still needs about 12 GB of heap ("Open after wave 2" 6); `npm run gen:check` as written does not finish here with the default heap.
 6. Worktrees: the ten wave 3 worktrees were removed (node_modules junctions unlinked first) and their branches deleted. Still kept: `.claude/worktrees/wf_3188d96a-67a-38` with `tauri-pkg-A2-fixes` (an uncommitted earlier draft of A2's Codex lock fix, see "Open after wave 2" 8).
+
+## Wave 4 packages: open issues
+
+### U4 open issues (2026-11-08, fast mode)
+
+Built, not verified: no workflow was pushed or run (never push), no Mac, no installer run on this machine (on purpose). Checked: `node --check` of every changed script, `npm run typecheck`, `test/release-assets.test.ts` 9/9 (minisign verify against the U1 fixtures incl. tampered file / comment / other key; latest.yml through electron-updater's own `parseUpdateInfo` / `resolveFiles` / `findFile`; latest-mac.yml through 1.1.4's `parseLatestMacYml` / `selectMacAsset`; latest.json keys and names against the macOS engine's `archive_name_ok`; the whole asset assembly on fake artifacts; version bumps), `test/real-app-harness.test.ts` and `test/macLegacyZip.test.ts`. No Rust changed.
+
+1. **Acceptance not run**: the CI rehearsal (a manual run of ci.yml on `tauri-1.2.0` -> `release-preview` artifact with the exact 14 assets), `npm run publish-release -- minor --dry-run` (needs main and the check build) and a verify-release-build run need a push and GitHub; the user starts them.
+2. **Signing**: `createUpdaterArtifacts` stays false; release-build-assets.mjs signs the renamed setup exe and the hand-made `.app.tar.gz` with `tauri signer sign --app-version <v>` (key and password only from the step's env, stdin closed so a wrong password fails instead of prompting) and checks each `.sig` against `UPDATER_PUBLIC_KEY` (read from unimux-update's lib.rs) at once; prepare-release-assets checks them again. Pull requests build unsigned (`--allow-unsigned`, forks get no secrets); "Release assets" runs only on tags and manual runs.
+3. **macOS archive**: made with `/usr/bin/tar --no-mac-metadata -czf` and `COPYFILE_DISABLE=1` (`unimux.app/` at the top, listed and checked), not by Tauri's bundler; U5's engine unpacks it with the tar crate. Never run (no Mac). macOS Intel is now cross-built on `macos-15` (arm64), like tauri.yml; 1.1.x used `macos-15-intel`.
+4. **Windows smoke**: `npm run test:start` = `smoke-start.mjs --install --ci`: installs `release/unimux-Setup-X.exe` with `/S /D=<scratch>` (refused outside GitHub Actions), checks unimux.exe + the conpty resources, runs the `-e` call twice (crafted script -> nothing removed; real script -> only `<data>/update/runtime` removed, exit 0, no startup.log), then the no-console start of the INSTALLED exe. A release exe takes the roaming folder from the OS, so on the runner the real profile is used (an older startup.log is moved aside). Never run. P3's pty mark in startup.log is still not waited for (X1 open issue 5).
+5. **latest.yml** is written by hand (no js-yaml needed where only the tag is checked) in electron-builder's layout, no blockmap: electron-updater's differential download fails over to the full download (read in its source, not run against a real 1.1.4 install; VM).
+6. **Version files**: release.mjs bumps package.json (+ lock) with npm and then `[workspace.package] version`, the top-level `version` of tauri.conf.json and the workspace crates' entries in Cargo.lock by text; check-release-tag and verify-release-build compare all of them with the tag. package.json is still 1.1.4 while the Tauri files say 1.2.0: the 1.2.0 release (`minor`) brings them together; until then release-build-assets only warns.
+7. **Not added**: the release gates (verify-cli-contract, verify-team-start) are not in the release workflow (they need real claude / codex CLIs on the runner); they stay in release.mjs. `stagingPercentage` not used. tauri.yml is kept as the unsigned branch check (it builds the same bundles; drop its build job if CI minutes matter). The Electron-only scripts (`dist:*`, `test:packaged`) are left for R1.
+8. `npm run gen:check` in the Checks job still needs about 12 GB of heap for dump-goldens ("Open after wave 3" 5); the hosted runners may not finish it.
 
 ## Do zainstalowania / do decyzji użytkownika
 

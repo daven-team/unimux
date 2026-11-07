@@ -14,4 +14,4 @@ On a Mac, open **Apple menu → About This Mac**: **Chip: Apple M…** means App
 
 The app is unsigned on Windows; macOS packages use an ad-hoc signature and are not notarized. Windows may show SmartScreen; macOS may require **System Settings → Privacy & Security → Open Anyway**.
 
-`latest.yml`, `latest-mac.yml` and `.blockmap` are update metadata, not installers. `SHA256SUMS.txt` contains download checksums.
+`latest.yml`, `latest-mac.yml`, `latest.json` and the `.sig` files are update metadata, not installers; `unimux-<version>-mac-<arch>.app.tar.gz` is the archive installed Mac builds update from. `SHA256SUMS.txt` contains download checksums.
