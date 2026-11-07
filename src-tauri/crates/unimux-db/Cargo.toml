@@ -25,8 +25,11 @@ flate2.workspace = true
 fallible-iterator.workspace = true
 base64.workspace = true
 ryu-js.workspace = true
+rusqlite.workspace = true
 
 [dev-dependencies]
+# the tests add a slow SQL function that ignores sqlite3_interrupt (a statement stuck in one step)
+rusqlite = { workspace = true, features = ["functions"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "macros", "time", "test-util"] }
 sha2.workspace = true

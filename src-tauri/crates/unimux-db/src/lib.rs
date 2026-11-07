@@ -6,6 +6,7 @@
 //!   [`history`] (db/query_history.json), [`sqlite_files`], [`ipc`] (the validation in front of every `db:*` channel with
 //!   the fixed answers of 1.1.4), [`host`] (the link to the sessions: op timeouts, Redis deadlines, pending requests).
 //! - D3: [`sql`], [`redis_shared`]; SP9: [`wire`].
+//! - D11: [`sqlite`] (SQLite sessions: engine thread, catalog, port messages).
 
 pub mod files;
 pub mod history;
@@ -15,6 +16,7 @@ pub mod model;
 pub mod redis_shared;
 pub mod service;
 pub mod sql;
+pub mod sqlite;
 pub mod sqlite_files;
 pub mod timers;
 pub mod vault;
