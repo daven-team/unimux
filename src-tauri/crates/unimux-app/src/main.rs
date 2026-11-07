@@ -12,6 +12,7 @@ mod detached;
 #[cfg(feature = "test-bridge")]
 mod eval_bridge;
 mod file_drop;
+mod hooks;
 mod ipc;
 mod lifecycle;
 mod mac_chrome;
@@ -243,6 +244,8 @@ fn main() {
                 }
             });
             ctx.detached.start();
+            // In parallel with the window (1.1.4: hooks.start next to the cell file prune and the MCP server).
+            hooks::start(&ctx);
             startup::mark_started();
             Ok(())
         })
@@ -270,6 +273,8 @@ fn main() {
         RunEvent::Exit => {
             // A copied key that still waits is cleared before the process ends (W4, 1.1.4 will-quit).
             commands::os::on_exit(&run_ctx);
+            // The hook server stops at the latest here (the wind-down stops it in its own phase).
+            hooks::stop(&run_ctx);
             // After the wind-down (or a forced exit): whatever came in after the last save, then a pending relaunch.
             lifecycle::after_exit(&run_ctx);
         }

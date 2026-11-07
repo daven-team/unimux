@@ -11,6 +11,7 @@
 //                                     accepts it, a lone surrogate becomes U+FFFD (a Rust string cannot hold one)
 //   test/golden/normalize-state.jsonl   {platform, now, input} -> normalizeState (see scripts/goldens-normalize.mjs)
 //   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
+//   test/golden/hook-payloads.jsonl, hook-server.jsonl  the hook server (see scripts/goldens-hooks.mjs)
 //   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
 //                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
 //   test/golden/update-progress.jsonl, update-strings.json, update-config.json   the update window (see scripts/goldens-update.mjs)
@@ -29,6 +30,7 @@ import { updateConfigGolden, updateProgressRows, updateStringsGolden } from './g
 import { detachedRows, routeMessageRows } from './goldens-detached.mjs';
 import { filesGoldens } from './goldens-files.mjs';
 import path, { dirname, resolve } from 'node:path';
+import { hookPayloadRows, hookServerRows } from './goldens-hooks.mjs';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -38,10 +40,11 @@ const load = async (file) => (await runnerImport(resolve(root, file), { configFi
 
 const [
   { defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { translate }, { messages }, { normalizeEditedState }, { UpdateProgressModel, closeAction },
-  { normalizeSpelling }, { trimGitText, redactSecrets },
+  { normalizeSpelling }, { trimGitText, redactSecrets }, hooks, codexHooks,
 ] = await Promise.all([
   load('src/shared/state.ts'), load('src/shared/stateEdits.ts'), load('src/shared/statePatch.ts'), load('src/shared/i18n.ts'), load('src/shared/messages.ts'),
   load('src/main/stateController.ts'), load('src/shared/updateProgress.ts'), load('src/main/gitPaths.ts'), load('src/shared/git.ts'),
+  load('src/main/hooks.ts'), load('src/shared/codexHooks.ts'),
 ]);
 const [detached, { normalizeWaitMark }] = await Promise.all([load('src/shared/detached.ts'), load('src/shared/waiting.ts')]);
 const fileGoldens = await filesGoldens(await load('src/main/files.ts'));
@@ -289,6 +292,8 @@ const files = {
   'files-preview.jsonl': jsonl(fileGoldens.preview),
   'files-save.jsonl': jsonl(fileGoldens.save),
   'files-parquet.jsonl': jsonl(fileGoldens.parquet),
+  'hook-payloads.jsonl': jsonl(hookPayloadRows({ hooks, codexHooks })),
+  'hook-server.jsonl': jsonl(await hookServerRows(hooks)),
 };
 const updateStrings = updateStringsGolden({ root, translate });
 files['update-strings.json'] = `${JSON.stringify(updateStrings, null, 1)}\n`;

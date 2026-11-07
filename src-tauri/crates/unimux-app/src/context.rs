@@ -111,6 +111,8 @@ pub struct AppContext {
     pub detached: Arc<crate::detached::DetachedService>,
     /// Quit question, wind-down registry, session end, renderer crash and hang (W6).
     pub lifecycle: Arc<crate::lifecycle::Lifecycle>,
+    /// The agent status hook server (H1) and the routing of its signals.
+    pub hooks: Arc<crate::hooks::Hooks>,
     /// Check build only: every renderer startup mark with the window label and the time (test_bridge `marks`).
     #[cfg(feature = "test-bridge")]
     pub test_marks: Mutex<Vec<(String, String, f64)>>,
@@ -211,6 +213,7 @@ impl AppContext {
             os: OnceLock::new(),
             detached,
             lifecycle,
+            hooks: Arc::new(crate::hooks::Hooks::default()),
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
             main_page_hooks: Mutex::new(Vec::new()),
