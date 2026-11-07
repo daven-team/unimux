@@ -73,6 +73,47 @@ describe.each(hostTargets())('PtyManager (real PTY, %s host)', (target) => {
     m.spawn({ id: 'h', cwd: process.cwd(), cols: 80, rows: 24, env, shell: alternateShell, command: process.platform === 'win32' ? 'echo replay-me' : 'printf "replay-%s\\n" me' });
     await waitFor(() => (out.get('h') ?? '').includes('replay-me'));
     expect((await m.histories()).find((h) => h.id === 'h')!.data).toContain('replay-me');
+    // The replay tail records the start size and every resize at the position the output had reached (TailBuffer.size).
+    await m.resize('h', 100, 30);
+    m.write('h', process.platform === 'win32' ? 'echo after-resize\r' : 'printf "after-%s\\n" resize\r');
+    await waitFor(() => (out.get('h') ?? '').includes('after-resize'));
+    const h = (await m.histories()).find((x) => x.id === 'h')!;
+    expect(h.sizes?.[0]).toEqual({ at: 0, cols: 80, rows: 24 });
+    const last = h.sizes![h.sizes!.length - 1];
+    expect(last).toMatchObject({ cols: 100, rows: 30 });
+    expect(last.at).toBeGreaterThan(h.data.indexOf('replay-me'));
+    expect(last.at).toBeLessThanOrEqual(h.data.lastIndexOf('after-resize'));
     await m.killAll();
+  });
+
+  // node-pty 1.1.0 (unixTerminal.js DESTROY_SOCKET_TIMEOUT_MS): the exit comes at most 200 ms after the shell ended, even
+  // when a background job still holds the terminal.
+  it.skipIf(process.platform === 'win32')('reports the exit of a shell whose background job keeps the terminal open', async () => {
+    const { exits, sink } = collect();
+    const m = await manager(sink);
+    m.spawn({ id: 'bg', cwd: process.cwd(), cols: 80, rows: 24, env, shell, command: 'sleep 30 & exit' });
+    const t0 = Date.now();
+    await waitFor(() => exits.has('bg'), 10000);
+    expect(Date.now() - t0).toBeLessThan(5000);
+    expect(await m.has('bg')).toBe(false);
+  });
+
+  // node-pty sets PWD to the cwd, so a shell started through a symlink keeps the logical path.
+  it.skipIf(process.platform === 'win32')('starts the shell with PWD set to the cwd as given (symlinks kept)', async () => {
+    const { mkdtempSync, symlinkSync, rmSync, realpathSync } = await import('fs');
+    const { join } = await import('path');
+    const { tmpdir } = await import('os');
+    const dir = mkdtempSync(join(tmpdir(), 'unimux-pwd-'));
+    const link = join(dir, 'link');
+    symlinkSync(realpathSync(process.cwd()), link);
+    try {
+      const { out, sink } = collect();
+      const m = await manager(sink);
+      m.spawn({ id: 'p', cwd: link, cols: 200, rows: 24, env, shell, command: 'printf "pwd=[%s]\\n" "$(pwd)"' });
+      await waitFor(() => (out.get('p') ?? '').includes(`pwd=[${link}]`));
+      await m.killAll();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

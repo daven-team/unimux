@@ -202,6 +202,19 @@ fn protocol_answers() {
     h.send_raw("{not json");
     let bad = h.wait("bad request answer", |s| s.answers.iter().find(|a| a["id"].is_null()).cloned());
     assert!(bad["error"].as_str().unwrap().starts_with("bad request:"), "{bad}");
+    // A bad request with an id is answered under that id (the Node side waits for it).
+    h.send_raw(r#"{"id":1005}"#);
+    h.send_raw(r#"{"id":1006,"op":7}"#);
+    h.send_raw(r#"{"id":1007,"op":"ping","args":{"x":"\q"}}"#);
+    for id in [1005, 1006, 1007] {
+        let a = h.wait(&format!("answer {id}"), |s| s.answers.iter().find(|a| a["id"] == json!(id)).cloned());
+        assert_eq!(a["ok"], json!(false), "{a}");
+        assert!(a["error"].as_str().unwrap().starts_with("bad request:"), "{a}");
+    }
+    // JSON.stringify writes a lone surrogate as `\ud800`: read like JSON.parse (U+FFFD), not refused.
+    h.send_raw(r#"{"id":1008,"op":"pty.write","args":{"id":"none","data":"\ud800"}}"#);
+    let a = h.wait("answer 1008", |s| s.answers.iter().find(|a| a["id"] == json!(1008)).cloned());
+    assert_eq!(a, json!({ "id": 1008, "ok": true, "result": null }));
     // ops on unknown terminals are no-ops, like PtyManager
     assert_eq!(h.ok("pty.write", json!({ "id": "none", "data": "x" })), Value::Null);
     assert_eq!(h.ok("pty.resize", json!({ "id": "none", "cols": 10, "rows": 5 })), Value::Null);
@@ -225,7 +238,12 @@ fn terminal_output_replay_and_exit() {
     let histories = h.ok("pty.histories", json!({}));
     assert_eq!(histories[0]["id"], json!("a"));
     assert!(histories[0]["data"].as_str().unwrap().contains(&want));
+    assert_eq!(histories[0]["sizes"], json!([{ "at": 0, "cols": 80, "rows": 24 }]));
     h.ok("pty.resize", json!({ "id": "a", "cols": 100, "rows": 30 }));
+    let histories = h.ok("pty.histories", json!({}));
+    let sizes = histories[0]["sizes"].as_array().unwrap();
+    assert_eq!(sizes[0], json!({ "at": 0, "cols": 80, "rows": 24 }));
+    assert_eq!((&sizes[sizes.len() - 1]["cols"], &sizes[sizes.len() - 1]["rows"]), (&json!(100), &json!(30)));
     h.ok("pty.write", json!({ "id": "a", "data": "exit\r" }));
     h.wait("exit of a", |s| s.exits.iter().any(|(id, _)| id == "a").then_some(()));
     // The entry is gone before the exit event (PtyManager deletes, then calls sink.exit).
@@ -313,4 +331,43 @@ fn utf8_output_arrives_whole() {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || tx.send(h.close()).unwrap());
     assert!(rx.recv_timeout(WAIT).unwrap().success());
+}
+
+/// node-pty 1.1.0 (unixTerminal.js DESTROY_SOCKET_TIMEOUT_MS): the exit comes at most 200 ms after the shell ended, even
+/// when a background job still holds the slave side of the terminal open.
+#[cfg(unix)]
+#[test]
+fn exit_is_reported_while_a_background_job_holds_the_terminal() {
+    let mut h = Host::start();
+    h.ok("pty.spawn", spawn_args("bg", "bg", Some("sleep 30 & exit")));
+    let t0 = Instant::now();
+    h.wait("exit of bg", |s| s.exits.iter().any(|(id, _)| id == "bg").then_some(()));
+    assert!(t0.elapsed() < Duration::from_secs(5), "exit took {:?}", t0.elapsed());
+    assert_eq!(h.ok("pty.has", json!({ "id": "bg" })), json!(false));
+    // A kill of the gone id answers at once.
+    let t1 = Instant::now();
+    h.ok("pty.kill", json!({ "id": "bg" }));
+    assert!(t1.elapsed() < Duration::from_secs(1));
+    assert!(h.close().success());
+}
+
+/// node-pty's UnixTerminal sets PWD to the cwd: a shell started through a symlink keeps the logical path.
+#[cfg(unix)]
+#[test]
+fn pwd_is_the_cwd_as_given() {
+    let dir = std::env::temp_dir().join(format!("unimux-hostd-pwd-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let real = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+    let link = dir.join("link");
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let mut h = Host::start();
+    let mut args = spawn_args("p", "p", Some("printf 'pwd=[%s]\\n' \"$(pwd)\""));
+    args["cwd"] = json!(link);
+    args["cols"] = json!(300);
+    h.ok("pty.spawn", args);
+    h.wait_output("p", &format!("pwd=[{}]", link.display()));
+    h.ok("pty.killAll", json!({}));
+    assert!(h.close().success());
+    std::fs::remove_dir_all(&dir).unwrap();
 }

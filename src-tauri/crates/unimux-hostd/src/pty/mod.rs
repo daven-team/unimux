@@ -4,8 +4,8 @@
 //! Windows runs on `unimux_pty::conpty` (SP5, the base of P1: bundled conpty.dll 1.23 + OpenConsole, Job Object, node-pty's
 //! kill order). Until P1 / P2 land their production manager, output engine and Unix backend, the bookkeeping here (entry
 //! per id with a generation, exit reported once the output ended, the 150 ms typed startup command, a 512 Ki character
-//! replay tail) and the Unix backend (`unix.rs`: openpty, setsid, TIOCSCTTY, killpg) are a stand-in with 1.1.4's rules;
-//! P1 / P2 switch this module to their manager and the same suite then checks their code.
+//! replay tail with the sizes it was written at) and the Unix backend (`unix.rs`: openpty, setsid, TIOCSCTTY, killpg) are
+//! a stand-in with 1.1.4's rules; P1 / P2 switch this module to their manager and the same suite then checks their code.
 //!
 //! Events: `pty.data {id, data}` (UTF-8 decoded like node-pty's onData) and `pty.exit {id, code}` (only for a terminal that
 //! ended by itself; a killed one is gone without an exit, as in PtyManager).
@@ -113,44 +113,109 @@ pub fn platform() -> &'static str {
     }
 }
 
-/// The newest REPLAY_UNITS UTF-16 code units of a stream (TailBuffer's result, without its chunking).
-#[derive(Default)]
+/// MAX_TAIL_SIZES (src/ptyhost/flow.ts): size changes a tail remembers at most.
+const MAX_TAIL_SIZES: usize = 512;
+
+/// A pty size from an absolute position (UTF-16 units ever pushed) on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SizeAt {
+    pos: usize,
+    cols: u16,
+    rows: u16,
+}
+
+/// The newest `limit` (REPLAY_UNITS) UTF-16 code units of a stream with the pty sizes they were written at (TailBuffer of
+/// src/ptyhost/flow.ts: same `replay()` result, without its chunking).
 struct Tail {
+    limit: usize,
     text: String,
+    /// UTF-16 units in `text`.
     units: usize,
+    /// UTF-16 units ever pushed: the absolute position of the tail's end.
+    total: usize,
+    sizes: Vec<SizeAt>,
 }
 
 impl Tail {
+    fn new(limit: usize) -> Self {
+        Self { limit, text: String::new(), units: 0, total: 0, sizes: Vec::new() }
+    }
+
     fn push(&mut self, data: &str) {
+        if data.is_empty() {
+            return;
+        }
+        let n = data.encode_utf16().count();
         self.text.push_str(data);
-        self.units += data.encode_utf16().count();
-        if self.units > REPLAY_UNITS * 2 {
+        self.units += n;
+        self.total += n;
+        if self.units > self.limit * 2 {
             self.trim();
+        }
+        if self.sizes.len() > 1 {
+            self.prune_sizes();
+        }
+    }
+
+    /// TailBuffer.size: the terminal has `cols` x `rows` from now on.
+    fn size(&mut self, cols: u16, rows: u16) {
+        if let Some(last) = self.sizes.last() {
+            if last.cols == cols && last.rows == rows {
+                return;
+            }
+            if last.pos == self.total {
+                self.sizes.pop();
+            }
+        }
+        if self.sizes.last().is_none_or(|b| b.cols != cols || b.rows != rows) {
+            self.sizes.push(SizeAt { pos: self.total, cols, rows });
+        }
+        self.prune_sizes();
+    }
+
+    fn prune_sizes(&mut self) {
+        // Only the newest size from before the kept characters still matters: it is the size they start at.
+        let start = self.total - self.units.min(self.limit);
+        let drop = self.sizes.iter().skip(1).take_while(|s| s.pos <= start).count();
+        self.sizes.drain(..drop);
+        if self.sizes.len() > MAX_TAIL_SIZES {
+            let excess = self.sizes.len() - MAX_TAIL_SIZES;
+            self.sizes.drain(..excess);
         }
     }
 
     fn trim(&mut self) {
-        let mut drop_units = self.units.saturating_sub(REPLAY_UNITS);
-        let mut cut = 0;
+        let mut drop_units = self.units.saturating_sub(self.limit);
+        let mut cut = self.text.len();
         for (i, c) in self.text.char_indices() {
-            if drop_units == 0 {
+            let n = c.len_utf16();
+            if drop_units < n {
+                // drop_units == 0, or 1 with a surrogate pair at the cut: JS slice(-limit) would keep its lone low
+                // surrogate, which a String cannot hold; the whole character is kept (limit + 1 units).
                 cut = i;
                 break;
             }
-            let n = c.len_utf16();
-            // JS slice(-limit) may cut a surrogate pair in half; keeping the whole character is the closest a String gets.
-            drop_units = drop_units.saturating_sub(n);
-            cut = i + c.len_utf8();
+            drop_units -= n;
         }
         self.text.drain(..cut);
         self.units = self.text.encode_utf16().count();
     }
 
-    fn replay(&mut self) -> String {
-        if self.units > REPLAY_UNITS {
+    /// TailBuffer.replay: the tail and its sizes as offsets into it (`at`, UTF-16 units; the first at 0 when one is known).
+    fn replay(&mut self) -> (String, Vec<Value>) {
+        if self.units > self.limit {
             self.trim();
         }
-        self.text.clone()
+        let start = self.total - self.units;
+        let mut sizes: Vec<(usize, u16, u16)> = Vec::new();
+        for s in &self.sizes {
+            let at = s.pos.saturating_sub(start);
+            if sizes.last().is_some_and(|l| l.0 == at) {
+                sizes.pop();
+            }
+            sizes.push((at, s.cols, s.rows));
+        }
+        (self.text.clone(), sizes.into_iter().map(|(at, cols, rows)| json!({ "at": at, "cols": cols, "rows": rows })).collect())
     }
 }
 
@@ -226,8 +291,12 @@ impl PtyHost {
             })),
             "resize" => reply.send(a.str("id").and_then(|id| {
                 let (cols, rows) = (a.num("cols")?, a.num("rows")?);
-                if let Some(term) = self.inner.lock().entries.get(id).and_then(Entry::term) {
-                    term.resize(clamp_size(cols, 2), clamp_size(rows, 1));
+                let (cols, rows) = (clamp_size(cols, 2), clamp_size(rows, 1));
+                let found = self.inner.lock().entries.get(id).and_then(|e| Some((e.term()?, e.tail.clone())));
+                if let Some((term, tail)) = found {
+                    term.resize(cols, rows);
+                    // PtyManager.resize: the replay tail records the size (out.resized).
+                    tail.lock().size(cols, rows);
                 }
                 Ok(Value::Null)
             })),
@@ -273,7 +342,9 @@ impl PtyHost {
         }
 
         let generation = self.next.fetch_add(1, Ordering::SeqCst);
-        let tail = Arc::new(Mutex::new(Tail::default()));
+        let tail = Arc::new(Mutex::new(Tail::new(REPLAY_UNITS)));
+        // PtyManager.spawn: out.resized(start size) before any output.
+        tail.lock().size(launch.cols, launch.rows);
         let exited = Arc::new(Exited::default());
         let term_slot: Slot = Arc::default();
         let da1 = Arc::new(Da1::default());
@@ -369,7 +440,14 @@ impl PtyHost {
         // Map order of PtyManager: oldest spawn first.
         let mut list: Vec<(&String, &Entry)> = inner.entries.iter().collect();
         list.sort_by_key(|(_, e)| e.generation);
-        Value::Array(list.into_iter().map(|(id, e)| json!({ "id": id, "data": e.tail.lock().replay() })).collect())
+        Value::Array(
+            list.into_iter()
+                .map(|(id, e)| {
+                    let (data, sizes) = e.tail.lock().replay();
+                    json!({ "id": id, "data": data, "sizes": sizes })
+                })
+                .collect(),
+        )
     }
 
     /// PtyManager.kill: the entry goes at once (no exit event), the answer comes once the process ended or after `timeout`.
@@ -521,18 +599,94 @@ mod tests {
 
     #[test]
     fn tail_keeps_the_newest_units() {
-        let mut t = Tail::default();
+        let mut t = Tail::new(REPLAY_UNITS);
         let chunk = "x".repeat(100_000);
         for _ in 0..20 {
             t.push(&chunk);
         }
         t.push("END");
-        let r = t.replay();
+        let r = t.replay().0;
         assert_eq!(r.encode_utf16().count(), REPLAY_UNITS);
         assert!(r.ends_with("xEND"));
-        let mut t = Tail::default();
+        let mut t = Tail::new(REPLAY_UNITS);
         t.push("short");
-        assert_eq!(t.replay(), "short");
+        assert_eq!(t.replay().0, "short");
+    }
+
+    fn replay_json(t: &mut Tail) -> Value {
+        let (data, sizes) = t.replay();
+        json!({ "data": data, "sizes": sizes })
+    }
+
+    /// Expected values printed by src/ptyhost/flow.ts TailBuffer for the same calls (limit 10).
+    #[test]
+    fn tail_sizes_match_the_ts_tail_buffer() {
+        let mut t = Tail::new(10);
+        t.size(80, 24);
+        t.push("abcdef");
+        t.size(100, 30);
+        t.push("ghij");
+        t.size(100, 30);
+        t.size(90, 20);
+        t.size(100, 30);
+        t.push("klm");
+        t.size(120, 40);
+        t.size(121, 40);
+        t.push("nop");
+        assert_eq!(
+            replay_json(&mut t),
+            json!({"data":"ghijklmnop","sizes":[{"at":0,"cols":100,"rows":30},{"at":7,"cols":121,"rows":40}]})
+        );
+
+        let mut u = Tail::new(10);
+        u.size(80, 24);
+        u.push("0123456789abcdefghij");
+        u.size(50, 10);
+        assert_eq!(
+            replay_json(&mut u),
+            json!({"data":"abcdefghij","sizes":[{"at":0,"cols":80,"rows":24},{"at":10,"cols":50,"rows":10}]})
+        );
+
+        let mut v = Tail::new(10);
+        v.size(80, 24);
+        v.push("0123456789");
+        v.size(81, 24);
+        v.push("abcdefghijk");
+        assert_eq!(replay_json(&mut v), json!({"data":"bcdefghijk","sizes":[{"at":0,"cols":81,"rows":24}]}));
+    }
+
+    #[test]
+    fn tail_keeps_at_most_max_sizes() {
+        let mut t = Tail::new(1_000_000);
+        for i in 0..(MAX_TAIL_SIZES as u16 + 10) {
+            t.push("x");
+            t.size(10 + (i % 2), 5);
+        }
+        let (_, sizes) = t.replay();
+        assert_eq!(sizes.len(), MAX_TAIL_SIZES);
+    }
+
+    /// A cut inside a surrogate pair: JS keeps `limit` units starting with a lone low surrogate (TS printed
+    /// `{units: 5, sizes: [{at: 0, 80x24}, {at: 1, 90x24}]}` for these calls); a String keeps the whole emoji instead, so
+    /// one unit more, and the size offsets still point at the same characters.
+    #[test]
+    fn tail_cut_inside_a_surrogate_pair_keeps_the_whole_character() {
+        let mut w = Tail::new(5);
+        w.size(80, 24);
+        w.push("a\u{1F600}");
+        w.size(90, 24);
+        w.push("bcde");
+        let (data, sizes) = w.replay();
+        assert_eq!(data, "\u{1F600}bcde");
+        assert_eq!(data.encode_utf16().count(), 6);
+        assert_eq!(sizes, vec![json!({"at":0,"cols":80,"rows":24}), json!({"at":2,"cols":90,"rows":24})]);
+        // No pair at the cut: exactly `limit` units.
+        let mut t = Tail::new(5);
+        t.push("ab\u{1F600}cde");
+        assert_eq!(t.replay().0, "\u{1F600}cde");
+        let mut t = Tail::new(5);
+        t.push("abc\u{1F600}de");
+        assert_eq!(t.replay().0, "c\u{1F600}de");
     }
 
     #[test]

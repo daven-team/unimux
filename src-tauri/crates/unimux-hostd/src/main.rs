@@ -63,7 +63,7 @@ fn main() {
         }
         match protocol::parse(&line) {
             Ok(req) => host.dispatch(&req.op, &req.args, Reply::new(req.id, out.clone())),
-            Err(error) => Reply::new(Value::Null, out.clone()).err(error),
+            Err(bad) => Reply::new(bad.id, out.clone()).err(bad.error),
         }
         if out.is_broken() {
             break;
