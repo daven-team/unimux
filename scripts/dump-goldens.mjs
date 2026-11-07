@@ -37,6 +37,8 @@
 //                                     scratch dirs) and the identity helpers (see scripts/goldens-accounts.mjs)
 //   test/golden/changelog.jsonl, monitor.jsonl   parseReleases / compareVersions and the Monitor panel's trees (see
 //                                     scripts/goldens-g8.mjs)
+//   test/golden/sessions-*.jsonl, context-*.jsonl   the session listing, claudeProjectDirName and the context meter (1.1.4's
+//                                     code, run on scratch homes; see scripts/goldens-sessions.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
 import { updateConfigGolden, updateProgressRows, updateStringsGolden } from './goldens-update.mjs';
@@ -52,6 +54,7 @@ import { DB_MODULES, dbGoldens } from './goldens-db.mjs';
 import { accountsStoreRows, codexStoreRows, identityRows } from './goldens-accounts.mjs';
 import { gitSharedRows, gitTrustRows } from './goldens-git.mjs';
 import { g8Goldens } from './goldens-g8.mjs';
+import { backwardRows, contextScanRows, sessionListRows, sessionPathRows } from './goldens-sessions.mjs';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -77,6 +80,9 @@ const db = dbGoldens(dbModules);
 const [{ AccountsStore }, { CodexAccountsStore }, accounts, codex, { parseCodexAuth }, { decodeJwtClaims }] = await Promise.all([
   load('src/main/accounts/store.ts'), load('src/main/accounts/codexStore.ts'), load('src/shared/accounts.ts'), load('src/shared/codexAccounts.ts'),
   load('src/main/accounts/codexActivate.ts'), load('src/main/usage/parse.ts'),
+]);
+const [sessions, contextMain, contextShared, { normalizeProjectPath }] = await Promise.all([
+  load('src/main/sessions.ts'), load('src/main/contextUsage.ts'), load('src/shared/contextUsage.ts'), load('src/shared/platform.ts'),
 ]);
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
@@ -336,6 +342,10 @@ const files = {
   'codex-accounts.jsonl': jsonl(codexStoreRows({ CodexAccountsStore })),
   'accounts-identity.jsonl': jsonl(identityRows({ accounts, codex, parseCodexAuth, decodeJwtClaims })),
   ...Object.fromEntries(Object.entries(await g8Goldens(load)).map(([name, rows]) => [name, jsonl(rows)])),
+  'sessions-paths.jsonl': jsonl(sessionPathRows({ ...sessions, normalizeProjectPath })),
+  'sessions-list.jsonl': jsonl(await sessionListRows({ sessions })),
+  'context-scan.jsonl': jsonl(contextScanRows(contextShared)),
+  'context-backward.jsonl': jsonl(await backwardRows(contextMain)),
 };
 const updateStrings = updateStringsGolden({ root, translate });
 files['update-strings.json'] = `${JSON.stringify(updateStrings, null, 1)}\n`;

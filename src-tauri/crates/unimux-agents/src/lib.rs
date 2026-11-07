@@ -8,8 +8,14 @@
 //! - [`cell_files`] (H2): the per-cell hook / MCP / prompt files and their cleanup.
 //! - [`cli`] (H3): the Claude Code / Codex CLI detector.
 //! - [`conv`] (H5): conversation search and the Markdown export data.
+//! - [`context`] (H4): the context meter of each agent cell (transcript usage, read incrementally).
+//! - [`sessions`] (H4): past conversations of a project and its worktrees (`sessions:list`), the Codex session guess of
+//!   `codex:bind`.
 
 pub mod cell_files;
 pub mod cli;
+pub mod context;
 pub mod conv;
+pub mod fsstat;
 pub mod hooks;
+pub mod sessions;

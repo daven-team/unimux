@@ -1,0 +1,888 @@
+{"fn":"dirName","path":"","out":""}
+{"fn":"normalize","path":"","out":""}
+{"fn":"dirName","path":"C:\\Users\\x\\a.b c","out":"C--Users-x-a-b-c"}
+{"fn":"normalize","path":"C:\\Users\\x\\a.b c","out":"c:/users/x/a.b c"}
+{"fn":"dirName","path":"D:\\Projekty\\bot\\.claude\\worktrees\\x_1","out":"D--Projekty-bot--claude-worktrees-x-1"}
+{"fn":"normalize","path":"D:\\Projekty\\bot\\.claude\\worktrees\\x_1","out":"d:/projekty/bot/.claude/worktrees/x_1"}
+{"fn":"dirName","path":"/Users/a/proj/.worktrees/feat","out":"-Users-a-proj--worktrees-feat"}
+{"fn":"normalize","path":"/Users/a/proj/.worktrees/feat","out":"/Users/a/proj/.worktrees/feat"}
+{"fn":"dirName","path":"D:\\Projekty\\żółw😀","out":"D--Projekty----w--"}
+{"fn":"normalize","path":"D:\\Projekty\\żółw😀","out":"d:/projekty/żółw😀"}
+{"fn":"dirName","path":"C:\\😀\\𐐀","out":"C-------"}
+{"fn":"normalize","path":"C:\\😀\\𐐀","out":"c:/😀/𐐨"}
+{"fn":"dirName","path":"D:\\Projekty\\Bot\\\\","out":"D--Projekty-Bot--"}
+{"fn":"normalize","path":"D:\\Projekty\\Bot\\\\","out":"d:/projekty/bot"}
+{"fn":"dirName","path":"\\\\Srv\\Share\\","out":"--Srv-Share-"}
+{"fn":"normalize","path":"\\\\Srv\\Share\\","out":"//srv/share"}
+{"fn":"dirName","path":"//Srv/Share","out":"--Srv-Share"}
+{"fn":"normalize","path":"//Srv/Share","out":"//srv/share"}
+{"fn":"dirName","path":"/Users/A/","out":"-Users-A-"}
+{"fn":"normalize","path":"/Users/A/","out":"/Users/A"}
+{"fn":"dirName","path":"C:\\İ","out":"C---"}
+{"fn":"normalize","path":"C:\\İ","out":"c:/i̇"}
+{"fn":"dirName","path":"C:","out":"C-"}
+{"fn":"normalize","path":"C:","out":"C:"}
+{"fn":"dirName","path":"C:/","out":"C--"}
+{"fn":"normalize","path":"C:/","out":"C:"}
+{"fn":"dirName","path":"c:\\","out":"c--"}
+{"fn":"normalize","path":"c:\\","out":"c:"}
+{"fn":"dirName","path":"C:x\\y","out":"C-x-y"}
+{"fn":"normalize","path":"C:x\\y","out":"C:x/y"}
+{"fn":"dirName","path":"D:\\ΣΟΦΟΣ\\ΣΑΣ","out":"D-----------"}
+{"fn":"normalize","path":"D:\\ΣΟΦΟΣ\\ΣΑΣ","out":"d:/σοφος/σας"}
+{"fn":"dirName","path":"D:\\é\\","out":"D--e--"}
+{"fn":"normalize","path":"D:\\é\\","out":"d:/é"}
+{"fn":"dirName","path":"/","out":"-"}
+{"fn":"normalize","path":"/","out":""}
+{"fn":"dirName","path":"\\","out":"-"}
+{"fn":"normalize","path":"\\","out":""}
+{"fn":"dirName","path":"///","out":"---"}
+{"fn":"normalize","path":"///","out":""}
+{"fn":"dirName","path":"a\\b/c\\\\","out":"a-b-c--"}
+{"fn":"normalize","path":"a\\b/c\\\\","out":"a/b/c"}
+{"fn":"dirName","path":"😀","out":"--"}
+{"fn":"normalize","path":"😀","out":"😀"}
+{"fn":"dirName","path":"􏿿x","out":"--x"}
+{"fn":"normalize","path":"􏿿x","out":"􏿿x"}
+{"fn":"dirName","path":"ß\\ẞ","out":"---"}
+{"fn":"normalize","path":"ß\\ẞ","out":"ß/ẞ"}
+{"fn":"dirName","path":"Projekty👍🏽..éé..APP","out":"Projekty------e-e---APP"}
+{"fn":"normalize","path":"Projekty👍🏽..éé..APP","out":"Projekty👍🏽..éé..APP"}
+{"fn":"dirName","path":"-wt-éD:/\\\\𐐀𐐨~\\","out":"-wt--D----------"}
+{"fn":"normalize","path":"-wt-éD:/\\\\𐐀𐐨~\\","out":"-wt-éD:///𐐀𐐨~"}
+{"fn":"dirName","path":"x_1\\\\srv","out":"x-1--srv"}
+{"fn":"normalize","path":"x_1\\\\srv","out":"x_1//srv"}
+{"fn":"dirName","path":"c:😀日本語","out":"c------"}
+{"fn":"normalize","path":"c:😀日本語","out":"c:😀日本語"}
+{"fn":"dirName","path":"a.b ca.b cc:Projekty..Łódź$HOME","out":"a-b-ca-b-cc-Projekty----d--HOME"}
+{"fn":"normalize","path":"a.b ca.b cc:Projekty..Łódź$HOME","out":"a.b ca.b cc:Projekty..Łódź$HOME"}
+{"fn":"dirName","path":"~ŁódźstraßeD:","out":"---d-stra-eD-"}
+{"fn":"normalize","path":"~ŁódźstraßeD:","out":"~ŁódźstraßeD:"}
+{"fn":"dirName","path":"𠀀APP","out":"--APP"}
+{"fn":"normalize","path":"𠀀APP","out":"𠀀APP"}
+{"fn":"dirName","path":"👍🏽 app D:\\","out":"-----app-D--"}
+{"fn":"normalize","path":"👍🏽 app D:\\","out":"👍🏽 app D:"}
+{"fn":"dirName","path":"$HOME","out":"-HOME"}
+{"fn":"normalize","path":"$HOME","out":"$HOME"}
+{"fn":"dirName","path":"-wt-","out":"-wt-"}
+{"fn":"normalize","path":"-wt-","out":"-wt-"}
+{"fn":"dirName","path":"İstanbulbot-discord D:żółw","out":"-stanbulbot-discord-D----w"}
+{"fn":"normalize","path":"İstanbulbot-discord D:żółw","out":"İstanbulbot-discord D:żółw"}
+{"fn":"dirName","path":"日本語//srvﬁC:ΣΟΦΟΣ","out":"-----srv-C------"}
+{"fn":"normalize","path":"日本語//srvﬁC:ΣΟΦΟΣ","out":"日本語//srvﬁC:ΣΟΦΟΣ"}
+{"fn":"dirName","path":"日本語$HOMEa.b cC:İstanbulé","out":"----HOMEa-b-cC--stanbule-"}
+{"fn":"normalize","path":"日本語$HOMEa.b cC:İstanbulé","out":"日本語$HOMEa.b cC:İstanbulé"}
+{"fn":"dirName","path":"\\\\srv///srv\\.","out":"--srv---srv--"}
+{"fn":"normalize","path":"\\\\srv///srv\\.","out":"//srv///srv/."}
+{"fn":"dirName","path":"~x_1👍🏽 ΣΟΦΟΣProjektyﬁx_1","out":"-x-1----------Projekty-x-1"}
+{"fn":"normalize","path":"~x_1👍🏽 ΣΟΦΟΣProjektyﬁx_1","out":"~x_1👍🏽 ΣΟΦΟΣProjektyﬁx_1"}
+{"fn":"dirName","path":"𐐀𐐨","out":"----"}
+{"fn":"normalize","path":"𐐀𐐨","out":"𐐀𐐨"}
+{"fn":"dirName","path":"ﬁ","out":"-"}
+{"fn":"normalize","path":"ﬁ","out":"ﬁ"}
+{"fn":"dirName","path":"\\APPİstanbul","out":"-APP-stanbul"}
+{"fn":"normalize","path":"\\APPİstanbul","out":"/APPİstanbul"}
+{"fn":"dirName","path":"straße👍🏽straße","out":"stra-e----stra-e"}
+{"fn":"normalize","path":"straße👍🏽straße","out":"straße👍🏽straße"}
+{"fn":"dirName","path":"ŁódźŁódź/.claude/","out":"--d---d---claude-"}
+{"fn":"normalize","path":"ŁódźŁódź/.claude/","out":"ŁódźŁódź/.claude"}
+{"fn":"dirName","path":"straße","out":"stra-e"}
+{"fn":"normalize","path":"straße","out":"straße"}
+{"fn":"dirName","path":"bot-discord\\\\APP\\","out":"bot-discord--APP-"}
+{"fn":"normalize","path":"bot-discord\\\\APP\\","out":"bot-discord//APP"}
+{"fn":"dirName","path":"/\\\\","out":"---"}
+{"fn":"normalize","path":"/\\\\","out":""}
+{"fn":"dirName","path":".Appa.b c-wt-𠀀","out":"-Appa-b-c-wt---"}
+{"fn":"normalize","path":".Appa.b c-wt-𠀀","out":".Appa.b c-wt-𠀀"}
+{"fn":"dirName","path":"$HOME😀APPC:","out":"-HOME--APPC-"}
+{"fn":"normalize","path":"$HOME😀APPC:","out":"$HOME😀APPC:"}
+{"fn":"dirName","path":"app👍🏽-wt-𠀀\\日本語","out":"app-----wt-------"}
+{"fn":"normalize","path":"app👍🏽-wt-𠀀\\日本語","out":"app👍🏽-wt-𠀀/日本語"}
+{"fn":"dirName","path":"Ⅻ","out":"-"}
+{"fn":"normalize","path":"Ⅻ","out":"Ⅻ"}
+{"fn":"dirName","path":"x_1ΣΟΦΟΣ","out":"x-1-----"}
+{"fn":"normalize","path":"x_1ΣΟΦΟΣ","out":"x_1ΣΟΦΟΣ"}
+{"fn":"dirName","path":"Ⅻ -wt-ΣΟΦΟΣ","out":"---wt------"}
+{"fn":"normalize","path":"Ⅻ -wt-ΣΟΦΟΣ","out":"Ⅻ -wt-ΣΟΦΟΣ"}
+{"fn":"dirName","path":"👍🏽ΣΟΦΟΣ😀","out":"-----------"}
+{"fn":"normalize","path":"👍🏽ΣΟΦΟΣ😀","out":"👍🏽ΣΟΦΟΣ😀"}
+{"fn":"dirName","path":"bot-discordC:straße/","out":"bot-discordC-stra-e-"}
+{"fn":"normalize","path":"bot-discordC:straße/","out":"bot-discordC:straße"}
+{"fn":"dirName","path":".C:\\\\srvx_1c:","out":"-C---srvx-1c-"}
+{"fn":"normalize","path":".C:\\\\srvx_1c:","out":".C://srvx_1c:"}
+{"fn":"dirName","path":"Projekty\\\\srvD:/İstanbul","out":"Projekty--srvD---stanbul"}
+{"fn":"normalize","path":"Projekty\\\\srvD:/İstanbul","out":"Projekty//srvD:/İstanbul"}
+{"fn":"dirName","path":"/APPAppstraßeapp/ﬁ","out":"-APPAppstra-eapp--"}
+{"fn":"normalize","path":"/APPAppstraßeapp/ﬁ","out":"/APPAppstraßeapp/ﬁ"}
+{"fn":"dirName","path":"\t𠀀C:~app-wt-1../C:","out":"---C--app-wt-1---C-"}
+{"fn":"normalize","path":"\t𠀀C:~app-wt-1../C:","out":"\t𠀀C:~app-wt-1../C:"}
+{"fn":"dirName","path":".claudeŁódźⅫ","out":"-claude--d--"}
+{"fn":"normalize","path":".claudeŁódźⅫ","out":".claudeŁódźⅫ"}
+{"fn":"dirName","path":"😀𠀀日本語","out":"-------"}
+{"fn":"normalize","path":"😀𠀀日本語","out":"😀𠀀日本語"}
+{"fn":"dirName","path":"éé😀","out":"e-e---"}
+{"fn":"normalize","path":"éé😀","out":"éé😀"}
+{"fn":"dirName","path":"é","out":"-"}
+{"fn":"normalize","path":"é","out":"é"}
+{"fn":"dirName","path":"żółw.claudeⅫΣΟΦΟΣappé","out":"---w-claude------appe-"}
+{"fn":"normalize","path":"żółw.claudeⅫΣΟΦΟΣappé","out":"żółw.claudeⅫΣΟΦΟΣappé"}
+{"fn":"dirName","path":"\\ /żółw日本語","out":"------w---"}
+{"fn":"normalize","path":"\\ /żółw日本語","out":"/ /żółw日本語"}
+{"fn":"dirName","path":" ..","out":"---"}
+{"fn":"normalize","path":" ..","out":" .."}
+{"fn":"dirName","path":"~//srv\\\\srv😀~ﬁ\\\\srv𐐀𐐨","out":"---srv--srv------srv----"}
+{"fn":"normalize","path":"~//srv\\\\srv😀~ﬁ\\\\srv𐐀𐐨","out":"~//srv//srv😀~ﬁ//srv𐐀𐐨"}
+{"fn":"dirName","path":"x_1bot-discord-wt-a.b c","out":"x-1bot-discord-wt-a-b-c"}
+{"fn":"normalize","path":"x_1bot-discord-wt-a.b c","out":"x_1bot-discord-wt-a.b c"}
+{"fn":"dirName","path":"APPApp...é","out":"APPApp----"}
+{"fn":"normalize","path":"APPApp...é","out":"APPApp...é"}
+{"fn":"dirName","path":"..straße","out":"--stra-e"}
+{"fn":"normalize","path":"..straße","out":"..straße"}
+{"fn":"dirName","path":".D:","out":"-D-"}
+{"fn":"normalize","path":".D:","out":".D:"}
+{"fn":"dirName","path":"$HOME日本語worktreesAPP","out":"-HOME---worktreesAPP"}
+{"fn":"normalize","path":"$HOME日本語worktreesAPP","out":"$HOME日本語worktreesAPP"}
+{"fn":"dirName","path":"\\\\ \\x_1","out":"----x-1"}
+{"fn":"normalize","path":"\\\\ \\x_1","out":"// /x_1"}
+{"fn":"dirName","path":"żółw. worktrees..日本語𠀀İstanbul","out":"---w--worktrees--------stanbul"}
+{"fn":"normalize","path":"żółw. worktrees..日本語𠀀İstanbul","out":"żółw. worktrees..日本語𠀀İstanbul"}
+{"fn":"dirName","path":"/","out":"-"}
+{"fn":"normalize","path":"/","out":""}
+{"fn":"dirName","path":"$HOME日本語","out":"-HOME---"}
+{"fn":"normalize","path":"$HOME日本語","out":"$HOME日本語"}
+{"fn":"dirName","path":"Ⅻ\\\\ﬁ","out":"----"}
+{"fn":"normalize","path":"Ⅻ\\\\ﬁ","out":"Ⅻ//ﬁ"}
+{"fn":"dirName","path":"worktrees\\app","out":"worktrees-app"}
+{"fn":"normalize","path":"worktrees\\app","out":"worktrees/app"}
+{"fn":"dirName","path":"D:APP//~App\\","out":"D-APP---App-"}
+{"fn":"normalize","path":"D:APP//~App\\","out":"D:APP//~App"}
+{"fn":"dirName","path":"appé~","out":"app--"}
+{"fn":"normalize","path":"appé~","out":"appé~"}
+{"fn":"dirName","path":"App👍🏽$HOMEc:\\\\-wt- é","out":"App-----HOMEc----wt--e-"}
+{"fn":"normalize","path":"App👍🏽$HOMEc:\\\\-wt- é","out":"App👍🏽$HOMEc://-wt- é"}
+{"fn":"dirName","path":"/App.claude~","out":"-App-claude-"}
+{"fn":"normalize","path":"/App.claude~","out":"/App.claude~"}
+{"fn":"dirName","path":"𠀀straße","out":"--stra-e"}
+{"fn":"normalize","path":"𠀀straße","out":"𠀀straße"}
+{"fn":"dirName","path":"😀APPżółwﬁworktreesx_1","out":"--APP---w-worktreesx-1"}
+{"fn":"normalize","path":"😀APPżółwﬁworktreesx_1","out":"😀APPżółwﬁworktreesx_1"}
+{"fn":"dirName","path":"ﬁ","out":"-"}
+{"fn":"normalize","path":"ﬁ","out":"ﬁ"}
+{"fn":"dirName","path":"𠀀\t","out":"---"}
+{"fn":"normalize","path":"𠀀\t","out":"𠀀\t"}
+{"fn":"dirName","path":"/a.b cİstanbulŁódź$HOMEstraße","out":"-a-b-c-stanbul--d--HOMEstra-e"}
+{"fn":"normalize","path":"/a.b cİstanbulŁódź$HOMEstraße","out":"/a.b cİstanbulŁódź$HOMEstraße"}
+{"fn":"dirName","path":".//srva.b cżółw ﬁ//","out":"---srva-b-c---w----"}
+{"fn":"normalize","path":".//srva.b cżółw ﬁ//","out":".//srva.b cżółw ﬁ"}
+{"fn":"dirName","path":"żółwAPP","out":"---wAPP"}
+{"fn":"normalize","path":"żółwAPP","out":"żółwAPP"}
+{"fn":"dirName","path":"ﬁ\\\\","out":"---"}
+{"fn":"normalize","path":"ﬁ\\\\","out":"ﬁ"}
+{"fn":"dirName","path":"~é\\\\srv..$HOME\\\\","out":"----srv---HOME--"}
+{"fn":"normalize","path":"~é\\\\srv..$HOME\\\\","out":"~é//srv..$HOME"}
+{"fn":"dirName","path":"..app-wt-1😀//srvΣΟΦΟΣ","out":"--app-wt-1----srv-----"}
+{"fn":"normalize","path":"..app-wt-1😀//srvΣΟΦΟΣ","out":"..app-wt-1😀//srvΣΟΦΟΣ"}
+{"fn":"dirName","path":"Ⅻé😀👍🏽","out":"--------"}
+{"fn":"normalize","path":"Ⅻé😀👍🏽","out":"Ⅻé😀👍🏽"}
+{"fn":"dirName","path":"app-wt-1ΣΟΦΟΣworktrees//srvΣΟΦΟΣappAPP","out":"app-wt-1-----worktrees--srv-----appAPP"}
+{"fn":"normalize","path":"app-wt-1ΣΟΦΟΣworktrees//srvΣΟΦΟΣappAPP","out":"app-wt-1ΣΟΦΟΣworktrees//srvΣΟΦΟΣappAPP"}
+{"fn":"dirName","path":"żółw","out":"---w"}
+{"fn":"normalize","path":"żółw","out":"żółw"}
+{"fn":"dirName","path":"/Ⅻé👍🏽","out":"--e-----"}
+{"fn":"normalize","path":"/Ⅻé👍🏽","out":"/Ⅻé👍🏽"}
+{"fn":"dirName","path":"..//AppProjekty\\\\\\","out":"----AppProjekty---"}
+{"fn":"normalize","path":"..//AppProjekty\\\\\\","out":"..//AppProjekty"}
+{"fn":"dirName","path":"😀a.b cD:/ ~😀","out":"--a-b-cD------"}
+{"fn":"normalize","path":"😀a.b cD:/ ~😀","out":"😀a.b cD:/ ~😀"}
+{"fn":"dirName","path":"C:App日本語worktrees$HOMEx_1C:","out":"C-App---worktrees-HOMEx-1C-"}
+{"fn":"normalize","path":"C:App日本語worktrees$HOMEx_1C:","out":"C:App日本語worktrees$HOMEx_1C:"}
+{"fn":"dirName","path":"ﬁ","out":"-"}
+{"fn":"normalize","path":"ﬁ","out":"ﬁ"}
+{"fn":"dirName","path":"straße𐐀𐐨\\app-wt-1App𐐀𐐨","out":"stra-e-----app-wt-1App----"}
+{"fn":"normalize","path":"straße𐐀𐐨\\app-wt-1App𐐀𐐨","out":"straße𐐀𐐨/app-wt-1App𐐀𐐨"}
+{"fn":"dirName","path":"日本語","out":"---"}
+{"fn":"normalize","path":"日本語","out":"日本語"}
+{"fn":"dirName","path":"a.b cApp","out":"a-b-cApp"}
+{"fn":"normalize","path":"a.b cApp","out":"a.b cApp"}
+{"fn":"dirName","path":"Projekty👍🏽.. Łódź😀..","out":"Projekty---------d-----"}
+{"fn":"normalize","path":"Projekty👍🏽.. Łódź😀..","out":"Projekty👍🏽.. Łódź😀.."}
+{"fn":"dirName","path":"-wt-x_1\\éworktrees","out":"-wt-x-1--worktrees"}
+{"fn":"normalize","path":"-wt-x_1\\éworktrees","out":"-wt-x_1/éworktrees"}
+{"fn":"dirName","path":"é\\\\","out":"---"}
+{"fn":"normalize","path":"é\\\\","out":"é"}
+{"fn":"dirName","path":"C:","out":"C-"}
+{"fn":"normalize","path":"C:","out":"C:"}
+{"fn":"dirName","path":"app-wt-1App","out":"app-wt-1App"}
+{"fn":"normalize","path":"app-wt-1App","out":"app-wt-1App"}
+{"fn":"dirName","path":"worktrees..é","out":"worktrees--e-"}
+{"fn":"normalize","path":"worktrees..é","out":"worktrees..é"}
+{"fn":"dirName","path":"Ⅻżółwc: 𐐀𐐨~👍🏽","out":"----wc-----------"}
+{"fn":"normalize","path":"Ⅻżółwc: 𐐀𐐨~👍🏽","out":"Ⅻżółwc: 𐐀𐐨~👍🏽"}
+{"fn":"dirName","path":"İstanbul-wt-日本語//srvΣΟΦΟΣ","out":"-stanbul-wt------srv-----"}
+{"fn":"normalize","path":"İstanbul-wt-日本語//srvΣΟΦΟΣ","out":"İstanbul-wt-日本語//srvΣΟΦΟΣ"}
+{"fn":"dirName","path":"//ΣΟΦΟΣ👍🏽\\","out":"------------"}
+{"fn":"normalize","path":"//ΣΟΦΟΣ👍🏽\\","out":"//σοφος👍🏽"}
+{"fn":"dirName","path":"~straßeİstanbulProjektya.b c..𐐀𐐨\\","out":"-stra-e-stanbulProjektya-b-c-------"}
+{"fn":"normalize","path":"~straßeİstanbulProjektya.b c..𐐀𐐨\\","out":"~straßeİstanbulProjektya.b c..𐐀𐐨"}
+{"fn":"dirName","path":"𠀀C:..","out":"--C---"}
+{"fn":"normalize","path":"𠀀C:..","out":"𠀀C:.."}
+{"fn":"dirName","path":"ﬁapp","out":"-app"}
+{"fn":"normalize","path":"ﬁapp","out":"ﬁapp"}
+{"fn":"dirName","path":"𐐀𐐨//srv\t","out":"------srv-"}
+{"fn":"normalize","path":"𐐀𐐨//srv\t","out":"𐐀𐐨//srv\t"}
+{"fn":"dirName","path":"bot-discordD:","out":"bot-discordD-"}
+{"fn":"normalize","path":"bot-discordD:","out":"bot-discordD:"}
+{"fn":"dirName","path":"Projekty","out":"Projekty"}
+{"fn":"normalize","path":"Projekty","out":"Projekty"}
+{"fn":"dirName","path":"𠀀-wt-Łódź\\\\","out":"---wt---d---"}
+{"fn":"normalize","path":"𠀀-wt-Łódź\\\\","out":"𠀀-wt-Łódź"}
+{"fn":"dirName","path":"$HOME𐐀𐐨Łódźworktreesbot-discord","out":"-HOME------d-worktreesbot-discord"}
+{"fn":"normalize","path":"$HOME𐐀𐐨Łódźworktreesbot-discord","out":"$HOME𐐀𐐨Łódźworktreesbot-discord"}
+{"fn":"dirName","path":".","out":"-"}
+{"fn":"normalize","path":".","out":"."}
+{"fn":"dirName","path":"Projektybot-discordİstanbulAPP","out":"Projektybot-discord-stanbulAPP"}
+{"fn":"normalize","path":"Projektybot-discordİstanbulAPP","out":"Projektybot-discordİstanbulAPP"}
+{"fn":"dirName","path":"APP/","out":"APP-"}
+{"fn":"normalize","path":"APP/","out":"APP"}
+{"fn":"dirName","path":"\\\\","out":"--"}
+{"fn":"normalize","path":"\\\\","out":""}
+{"fn":"dirName","path":"D:éD:straße👍🏽","out":"D--D-stra-e----"}
+{"fn":"normalize","path":"D:éD:straße👍🏽","out":"D:éD:straße👍🏽"}
+{"fn":"dirName","path":"app-wt-1/é","out":"app-wt-1--"}
+{"fn":"normalize","path":"app-wt-1/é","out":"app-wt-1/é"}
+{"fn":"dirName","path":"ΣΟΦΟΣ👍🏽a.b c日本語","out":"---------a-b-c---"}
+{"fn":"normalize","path":"ΣΟΦΟΣ👍🏽a.b c日本語","out":"ΣΟΦΟΣ👍🏽a.b c日本語"}
+{"fn":"dirName","path":"app-wt-1worktreesﬁ日本語$HOME👍🏽","out":"app-wt-1worktrees-----HOME----"}
+{"fn":"normalize","path":"app-wt-1worktreesﬁ日本語$HOME👍🏽","out":"app-wt-1worktreesﬁ日本語$HOME👍🏽"}
+{"fn":"dirName","path":" Projekty👍🏽\\\\","out":"-Projekty------"}
+{"fn":"normalize","path":" Projekty👍🏽\\\\","out":" Projekty👍🏽"}
+{"fn":"dirName","path":"//.claude\\\\𠀀 \\\\srv.Projekty","out":"---claude-------srv-Projekty"}
+{"fn":"normalize","path":"//.claude\\\\𠀀 \\\\srv.Projekty","out":"//.claude//𠀀 //srv.projekty"}
+{"fn":"dirName","path":"$HOMEappéstraßec://srvAPPbot-discord","out":"-HOMEapp-stra-ec---srvAPPbot-discord"}
+{"fn":"normalize","path":"$HOMEappéstraßec://srvAPPbot-discord","out":"$HOMEappéstraßec://srvAPPbot-discord"}
+{"fn":"dirName","path":" ~","out":"--"}
+{"fn":"normalize","path":" ~","out":" ~"}
+{"fn":"dirName","path":"c:é..é\tappżółwżółw","out":"c----e--app---w---w"}
+{"fn":"normalize","path":"c:é..é\tappżółwżółw","out":"c:é..é\tappżółwżółw"}
+{"fn":"dirName","path":"żółwx_1-wt-\\\\srv\\..","out":"---wx-1-wt---srv---"}
+{"fn":"normalize","path":"żółwx_1-wt-\\\\srv\\..","out":"żółwx_1-wt-//srv/.."}
+{"fn":"dirName","path":"//bot-discordΣΟΦΟΣ","out":"--bot-discord-----"}
+{"fn":"normalize","path":"//bot-discordΣΟΦΟΣ","out":"//bot-discordσοφος"}
+{"fn":"dirName","path":"\\\\srvŁódź.éstraße","out":"--srv--d---stra-e"}
+{"fn":"normalize","path":"\\\\srvŁódź.éstraße","out":"//srvłódź.éstraße"}
+{"fn":"dirName","path":"-wt-.D:\\\\/a.b c","out":"-wt--D----a-b-c"}
+{"fn":"normalize","path":"-wt-.D:\\\\/a.b c","out":"-wt-.D:///a.b c"}
+{"fn":"dirName","path":"éⅫapp-wt-1𐐀𐐨","out":"e--app-wt-1----"}
+{"fn":"normalize","path":"éⅫapp-wt-1𐐀𐐨","out":"éⅫapp-wt-1𐐀𐐨"}
+{"fn":"dirName","path":"Ⅻﬁ\\","out":"---"}
+{"fn":"normalize","path":"Ⅻﬁ\\","out":"Ⅻﬁ"}
+{"fn":"dirName","path":"\\.claude日本語é.","out":"--claude---e--"}
+{"fn":"normalize","path":"\\.claude日本語é.","out":"/.claude日本語é."}
+{"fn":"dirName","path":".claudeİstanbul","out":"-claude-stanbul"}
+{"fn":"normalize","path":".claudeİstanbul","out":".claudeİstanbul"}
+{"fn":"dirName","path":"\\\\\\.claudeApp.\\żółw","out":"----claudeApp-----w"}
+{"fn":"normalize","path":"\\\\\\.claudeApp.\\żółw","out":"///.claudeapp./żółw"}
+{"fn":"dirName","path":"𐐀𐐨\\\\srv𐐀𐐨","out":"------srv----"}
+{"fn":"normalize","path":"𐐀𐐨\\\\srv𐐀𐐨","out":"𐐀𐐨//srv𐐀𐐨"}
+{"fn":"dirName","path":"𠀀D:","out":"--D-"}
+{"fn":"normalize","path":"𠀀D:","out":"𠀀D:"}
+{"fn":"dirName","path":"👍🏽 ΣΟΦΟΣ","out":"----------"}
+{"fn":"normalize","path":"👍🏽 ΣΟΦΟΣ","out":"👍🏽 ΣΟΦΟΣ"}
+{"fn":"dirName","path":"straßeΣΟΦΟΣ","out":"stra-e-----"}
+{"fn":"normalize","path":"straßeΣΟΦΟΣ","out":"straßeΣΟΦΟΣ"}
+{"fn":"dirName","path":"𠀀","out":"--"}
+{"fn":"normalize","path":"𠀀","out":"𠀀"}
+{"fn":"dirName","path":"worktreesé","out":"worktreese-"}
+{"fn":"normalize","path":"worktreesé","out":"worktreesé"}
+{"fn":"dirName","path":"$HOME","out":"-HOME"}
+{"fn":"normalize","path":"$HOME","out":"$HOME"}
+{"fn":"dirName","path":"𠀀\\\\éC:𐐀𐐨é","out":"----e-C-----e-"}
+{"fn":"normalize","path":"𠀀\\\\éC:𐐀𐐨é","out":"𠀀//éC:𐐀𐐨é"}
+{"fn":"dirName","path":"app-wt-1İstanbulAPPa.b c~İstanbul𐐀𐐨$HOME","out":"app-wt-1-stanbulAPPa-b-c--stanbul-----HOME"}
+{"fn":"normalize","path":"app-wt-1İstanbulAPPa.b c~İstanbul𐐀𐐨$HOME","out":"app-wt-1İstanbulAPPa.b c~İstanbul𐐀𐐨$HOME"}
+{"fn":"dirName","path":"$HOMEżółw","out":"-HOME---w"}
+{"fn":"normalize","path":"$HOMEżółw","out":"$HOMEżółw"}
+{"fn":"dirName","path":"\\\\ﬁapp-wt-//","out":"---app-wt---"}
+{"fn":"normalize","path":"\\\\ﬁapp-wt-//","out":"//ﬁapp-wt-"}
+{"fn":"dirName","path":"\\ﬁapp~","out":"--app-"}
+{"fn":"normalize","path":"\\ﬁapp~","out":"/ﬁapp~"}
+{"fn":"dirName","path":"ΣΟΦΟΣbot-discord/","out":"-----bot-discord-"}
+{"fn":"normalize","path":"ΣΟΦΟΣbot-discord/","out":"ΣΟΦΟΣbot-discord"}
+{"fn":"dirName","path":"straßec://app-wt-1","out":"stra-ec---app-wt-1"}
+{"fn":"normalize","path":"straßec://app-wt-1","out":"straßec://app-wt-1"}
+{"fn":"dirName","path":"APP.Ⅻc:Ⅻ日本語","out":"APP--c-----"}
+{"fn":"normalize","path":"APP.Ⅻc:Ⅻ日本語","out":"APP.Ⅻc:Ⅻ日本語"}
+{"fn":"dirName","path":"app-wt-1😀𐐀𐐨","out":"app-wt-1------"}
+{"fn":"normalize","path":"app-wt-1😀𐐀𐐨","out":"app-wt-1😀𐐀𐐨"}
+{"fn":"dirName","path":"x_1.claude","out":"x-1-claude"}
+{"fn":"normalize","path":"x_1.claude","out":"x_1.claude"}
+{"fn":"dirName","path":"\t $HOMEapp😀APP𠀀D:","out":"---HOMEapp--APP--D-"}
+{"fn":"normalize","path":"\t $HOMEapp😀APP𠀀D:","out":"\t $HOMEapp😀APP𠀀D:"}
+{"fn":"dirName","path":"/app-wt-1\tAppéŁódźAPPİstanbul","out":"-app-wt-1-App---d-APP-stanbul"}
+{"fn":"normalize","path":"/app-wt-1\tAppéŁódźAPPİstanbul","out":"/app-wt-1\tAppéŁódźAPPİstanbul"}
+{"fn":"dirName","path":"\\//srvx_1.İstanbulApp𐐀𐐨//","out":"---srvx-1--stanbulApp------"}
+{"fn":"normalize","path":"\\//srvx_1.İstanbulApp𐐀𐐨//","out":"///srvx_1.i̇stanbulapp𐐨𐐨"}
+{"fn":"dirName","path":".ΣΟΦΟΣ👍🏽😀bot-discord. ","out":"------------bot-discord--"}
+{"fn":"normalize","path":".ΣΟΦΟΣ👍🏽😀bot-discord. ","out":".ΣΟΦΟΣ👍🏽😀bot-discord. "}
+{"fn":"dirName","path":"𠀀","out":"--"}
+{"fn":"normalize","path":"𠀀","out":"𠀀"}
+{"fn":"dirName","path":"👍🏽a.b c$HOME","out":"----a-b-c-HOME"}
+{"fn":"normalize","path":"👍🏽a.b c$HOME","out":"👍🏽a.b c$HOME"}
+{"fn":"dirName","path":"straßeapp//日本語","out":"stra-eapp-----"}
+{"fn":"normalize","path":"straßeapp//日本語","out":"straßeapp//日本語"}
+{"fn":"dirName","path":"𐐀𐐨éx_1bot-discordżółw..//srv𐐀𐐨","out":"----e-x-1bot-discord---w----srv----"}
+{"fn":"normalize","path":"𐐀𐐨éx_1bot-discordżółw..//srv𐐀𐐨","out":"𐐀𐐨éx_1bot-discordżółw..//srv𐐀𐐨"}
+{"fn":"dirName","path":"İstanbul\\\\srvD://srv$HOMEc:~","out":"-stanbul--srvD---srv-HOMEc--"}
+{"fn":"normalize","path":"İstanbul\\\\srvD://srv$HOMEc:~","out":"İstanbul//srvD://srv$HOMEc:~"}
+{"fn":"dirName","path":"~Łódź////srv/İstanbul","out":"---d-----srv--stanbul"}
+{"fn":"normalize","path":"~Łódź////srv/İstanbul","out":"~Łódź////srv/İstanbul"}
+{"fn":"dirName","path":"ŁódźD:$HOME","out":"--d-D--HOME"}
+{"fn":"normalize","path":"ŁódźD:$HOME","out":"ŁódźD:$HOME"}
+{"fn":"dirName","path":"c:\\\\App\\\\srv","out":"c---App--srv"}
+{"fn":"normalize","path":"c:\\\\App\\\\srv","out":"c://app//srv"}
+{"fn":"dirName","path":"app-wt-1..a.b cx_1bot-discord..","out":"app-wt-1--a-b-cx-1bot-discord--"}
+{"fn":"normalize","path":"app-wt-1..a.b cx_1bot-discord..","out":"app-wt-1..a.b cx_1bot-discord.."}
+{"fn":"dirName","path":"\\app-wt-1worktreesbot-discordc:a.b c/日本語","out":"-app-wt-1worktreesbot-discordc-a-b-c----"}
+{"fn":"normalize","path":"\\app-wt-1worktreesbot-discordc:a.b c/日本語","out":"/app-wt-1worktreesbot-discordc:a.b c/日本語"}
+{"fn":"dirName","path":".claude","out":"-claude"}
+{"fn":"normalize","path":".claude","out":".claude"}
+{"fn":"dirName","path":"bot-discord/x_1AppİstanbulD:é//","out":"bot-discord-x-1App-stanbulD-e---"}
+{"fn":"normalize","path":"bot-discord/x_1AppİstanbulD:é//","out":"bot-discord/x_1AppİstanbulD:é"}
+{"fn":"dirName","path":"ⅫżółwéApp","out":"----w-App"}
+{"fn":"normalize","path":"ⅫżółwéApp","out":"ⅫżółwéApp"}
+{"fn":"dirName","path":".claude//srv","out":"-claude--srv"}
+{"fn":"normalize","path":".claude//srv","out":".claude//srv"}
+{"fn":"dirName","path":"日本語\\\\$HOME","out":"------HOME"}
+{"fn":"normalize","path":"日本語\\\\$HOME","out":"日本語//$HOME"}
+{"fn":"dirName","path":"straßebot-discord","out":"stra-ebot-discord"}
+{"fn":"normalize","path":"straßebot-discord","out":"straßebot-discord"}
+{"fn":"dirName","path":"\\\\srvAppżółw.bot-discordx_1İstanbul","out":"--srvApp---w-bot-discordx-1-stanbul"}
+{"fn":"normalize","path":"\\\\srvAppżółw.bot-discordx_1İstanbul","out":"//srvappżółw.bot-discordx_1i̇stanbul"}
+{"fn":"dirName","path":"app$HOME.日本語Projekty日本語\tbot-discord","out":"app-HOME----Projekty----bot-discord"}
+{"fn":"normalize","path":"app$HOME.日本語Projekty日本語\tbot-discord","out":"app$HOME.日本語Projekty日本語\tbot-discord"}
+{"fn":"dirName","path":"Łódźbot-discord$HOME","out":"--d-bot-discord-HOME"}
+{"fn":"normalize","path":"Łódźbot-discord$HOME","out":"Łódźbot-discord$HOME"}
+{"fn":"dirName","path":"c: ~APP","out":"c---APP"}
+{"fn":"normalize","path":"c: ~APP","out":"c: ~APP"}
+{"fn":"dirName","path":"日本語","out":"---"}
+{"fn":"normalize","path":"日本語","out":"日本語"}
+{"fn":"dirName","path":"Ⅻ𠀀C:é//srvstraßex_1D:","out":"---C-e---srvstra-ex-1D-"}
+{"fn":"normalize","path":"Ⅻ𠀀C:é//srvstraßex_1D:","out":"Ⅻ𠀀C:é//srvstraßex_1D:"}
+{"fn":"dirName","path":".日本語","out":"----"}
+{"fn":"normalize","path":".日本語","out":".日本語"}
+{"fn":"dirName","path":"D:żółw\\.claudeD:D:.claude\\\\srv","out":"D----w--claudeD-D--claude--srv"}
+{"fn":"normalize","path":"D:żółw\\.claudeD:D:.claude\\\\srv","out":"D:żółw/.claudeD:D:.claude//srv"}
+{"fn":"dirName","path":"//srv\t","out":"--srv-"}
+{"fn":"normalize","path":"//srv\t","out":"//srv\t"}
+{"fn":"dirName","path":"App/APP\\\\//srvProjekty\\\\İstanbul","out":"App-APP----srvProjekty---stanbul"}
+{"fn":"normalize","path":"App/APP\\\\//srvProjekty\\\\İstanbul","out":"App/APP////srvProjekty//İstanbul"}
+{"fn":"dirName","path":"\tc:c:..\\\\srv","out":"-c-c-----srv"}
+{"fn":"normalize","path":"\tc:c:..\\\\srv","out":"\tc:c:..//srv"}
+{"fn":"dirName","path":"C:\t-wt-App","out":"C---wt-App"}
+{"fn":"normalize","path":"C:\t-wt-App","out":"C:\t-wt-App"}
+{"fn":"dirName","path":"x_1app\t/","out":"x-1app--"}
+{"fn":"normalize","path":"x_1app\t/","out":"x_1app\t"}
+{"fn":"dirName","path":"$HOME//srvAPP日本語ΣΟΦΟΣ","out":"-HOME--srvAPP--------"}
+{"fn":"normalize","path":"$HOME//srvAPP日本語ΣΟΦΟΣ","out":"$HOME//srvAPP日本語ΣΟΦΟΣ"}
+{"fn":"dirName","path":"~straßeapp","out":"-stra-eapp"}
+{"fn":"normalize","path":"~straßeapp","out":"~straßeapp"}
+{"fn":"dirName","path":"..straße","out":"--stra-e"}
+{"fn":"normalize","path":"..straße","out":"..straße"}
+{"fn":"dirName","path":"//srvŁódźD:a.b c","out":"--srv--d-D-a-b-c"}
+{"fn":"normalize","path":"//srvŁódźD:a.b c","out":"//srvłódźd:a.b c"}
+{"fn":"dirName","path":"~/Łódź日本語","out":"----d----"}
+{"fn":"normalize","path":"~/Łódź日本語","out":"~/Łódź日本語"}
+{"fn":"dirName","path":"..ΣΟΦΟΣ-wt-éc:..","out":"--------wt--c---"}
+{"fn":"normalize","path":"..ΣΟΦΟΣ-wt-éc:..","out":"..ΣΟΦΟΣ-wt-éc:.."}
+{"fn":"dirName","path":"éŁódźAPPApp////srvapp.claude","out":"---d-APPApp----srvapp-claude"}
+{"fn":"normalize","path":"éŁódźAPPApp////srvapp.claude","out":"éŁódźAPPApp////srvapp.claude"}
+{"fn":"dirName","path":".claude$HOME👍🏽D:c:😀","out":"-claude-HOME----D-c---"}
+{"fn":"normalize","path":".claude$HOME👍🏽D:c:😀","out":".claude$HOME👍🏽D:c:😀"}
+{"fn":"dirName","path":"👍🏽İstanbula.b c~","out":"-----stanbula-b-c-"}
+{"fn":"normalize","path":"👍🏽İstanbula.b c~","out":"👍🏽İstanbula.b c~"}
+{"fn":"dirName","path":"..😀","out":"----"}
+{"fn":"normalize","path":"..😀","out":"..😀"}
+{"fn":"dirName","path":"APP","out":"APP"}
+{"fn":"normalize","path":"APP","out":"APP"}
+{"fn":"dirName","path":"\\\\app-wt-1/İstanbul","out":"--app-wt-1--stanbul"}
+{"fn":"normalize","path":"\\\\app-wt-1/İstanbul","out":"//app-wt-1/i̇stanbul"}
+{"fn":"dirName","path":"日本語\\żółw.claude///srv\t","out":"-------w-claude---srv-"}
+{"fn":"normalize","path":"日本語\\żółw.claude///srv\t","out":"日本語/żółw.claude///srv\t"}
+{"fn":"dirName","path":"bot-discordİstanbulŁódźworktrees/app-wt-1","out":"bot-discord-stanbul--d-worktrees-app-wt-1"}
+{"fn":"normalize","path":"bot-discordİstanbulŁódźworktrees/app-wt-1","out":"bot-discordİstanbulŁódźworktrees/app-wt-1"}
+{"fn":"dirName","path":" \\\\app-wt-1 ","out":"---app-wt-1-"}
+{"fn":"normalize","path":" \\\\app-wt-1 ","out":" //app-wt-1 "}
+{"fn":"dirName","path":"𠀀app-wt-1 日本語-wt-Ⅻ","out":"--app-wt-1-----wt--"}
+{"fn":"normalize","path":"𠀀app-wt-1 日本語-wt-Ⅻ","out":"𠀀app-wt-1 日本語-wt-Ⅻ"}
+{"fn":"dirName","path":"//a.b c","out":"--a-b-c"}
+{"fn":"normalize","path":"//a.b c","out":"//a.b c"}
+{"fn":"dirName","path":"D:żółwbot-discord👍🏽/","out":"D----wbot-discord-----"}
+{"fn":"normalize","path":"D:żółwbot-discord👍🏽/","out":"D:żółwbot-discord👍🏽"}
+{"fn":"dirName","path":"C:Ⅻ\\ΣΟΦΟΣ/İstanbulİstanbulc:","out":"C----------stanbul-stanbulc-"}
+{"fn":"normalize","path":"C:Ⅻ\\ΣΟΦΟΣ/İstanbulİstanbulc:","out":"C:Ⅻ/ΣΟΦΟΣ/İstanbulİstanbulc:"}
+{"fn":"dirName","path":" a.b cApp//ﬁ","out":"-a-b-cApp---"}
+{"fn":"normalize","path":" a.b cApp//ﬁ","out":" a.b cApp//ﬁ"}
+{"fn":"dirName","path":"worktrees","out":"worktrees"}
+{"fn":"normalize","path":"worktrees","out":"worktrees"}
+{"fn":"dirName","path":"AppŁódź\t$HOMEC:","out":"App--d---HOMEC-"}
+{"fn":"normalize","path":"AppŁódź\t$HOMEC:","out":"AppŁódź\t$HOMEC:"}
+{"fn":"dirName","path":"//D:\\Projekty","out":"--D--Projekty"}
+{"fn":"normalize","path":"//D:\\Projekty","out":"//d:/projekty"}
+{"fn":"dirName","path":"app bot-discordéΣΟΦΟΣŁódźżółwé","out":"app-bot-discorde--------d----w-"}
+{"fn":"normalize","path":"app bot-discordéΣΟΦΟΣŁódźżółwé","out":"app bot-discordéΣΟΦΟΣŁódźżółwé"}
+{"fn":"dirName","path":"\tApp/ a.b cé","out":"-App--a-b-c-"}
+{"fn":"normalize","path":"\tApp/ a.b cé","out":"\tApp/ a.b cé"}
+{"fn":"dirName","path":"日本語bot-discordworktreesⅫ","out":"---bot-discordworktrees-"}
+{"fn":"normalize","path":"日本語bot-discordworktreesⅫ","out":"日本語bot-discordworktreesⅫ"}
+{"fn":"dirName","path":"\\\\日本語APP","out":"-----APP"}
+{"fn":"normalize","path":"\\\\日本語APP","out":"//日本語app"}
+{"fn":"dirName","path":"Ⅻ日本語ΣΟΦΟΣ\tbot-discord\\\\srvApp","out":"----------bot-discord--srvApp"}
+{"fn":"normalize","path":"Ⅻ日本語ΣΟΦΟΣ\tbot-discord\\\\srvApp","out":"Ⅻ日本語ΣΟΦΟΣ\tbot-discord//srvApp"}
+{"fn":"dirName","path":"é👍🏽D:$HOMEworktreesc:","out":"-----D--HOMEworktreesc-"}
+{"fn":"normalize","path":"é👍🏽D:$HOMEworktreesc:","out":"é👍🏽D:$HOMEworktreesc:"}
+{"fn":"dirName","path":"worktrees\\Projekty\\\\éa.b c ","out":"worktrees-Projekty---a-b-c-"}
+{"fn":"normalize","path":"worktrees\\Projekty\\\\éa.b c ","out":"worktrees/Projekty//éa.b c "}
+{"fn":"dirName","path":"D:c:日本語a.b c","out":"D-c----a-b-c"}
+{"fn":"normalize","path":"D:c:日本語a.b c","out":"D:c:日本語a.b c"}
+{"fn":"dirName","path":"żółw//srv","out":"---w--srv"}
+{"fn":"normalize","path":"żółw//srv","out":"żółw//srv"}
+{"fn":"dirName","path":"c:worktrees\\\\srvD:👍🏽 ﬁⅫ","out":"c-worktrees--srvD--------"}
+{"fn":"normalize","path":"c:worktrees\\\\srvD:👍🏽 ﬁⅫ","out":"c:worktrees//srvD:👍🏽 ﬁⅫ"}
+{"fn":"dirName","path":".👍🏽a.b cİstanbul-wt-żółwżółw","out":"-----a-b-c-stanbul-wt----w---w"}
+{"fn":"normalize","path":".👍🏽a.b cİstanbul-wt-żółwżółw","out":".👍🏽a.b cİstanbul-wt-żółwżółw"}
+{"fn":"dirName","path":"İstanbul😀app-wt-1日本語","out":"-stanbul--app-wt-1---"}
+{"fn":"normalize","path":"İstanbul😀app-wt-1日本語","out":"İstanbul😀app-wt-1日本語"}
+{"fn":"dirName","path":"App","out":"App"}
+{"fn":"normalize","path":"App","out":"App"}
+{"fn":"dirName","path":"App~worktrees","out":"App-worktrees"}
+{"fn":"normalize","path":"App~worktrees","out":"App~worktrees"}
+{"fn":"dirName","path":".. \\\\ⅫC:","out":"------C-"}
+{"fn":"normalize","path":".. \\\\ⅫC:","out":".. //ⅫC:"}
+{"fn":"dirName","path":"//srv","out":"--srv"}
+{"fn":"normalize","path":"//srv","out":"//srv"}
+{"fn":"dirName","path":"Appapp-wt-1.claude.\\\\-wt-","out":"Appapp-wt-1-claude----wt-"}
+{"fn":"normalize","path":"Appapp-wt-1.claude.\\\\-wt-","out":"Appapp-wt-1.claude.//-wt-"}
+{"fn":"dirName","path":"👍🏽𠀀//$HOME𠀀żółw","out":"---------HOME-----w"}
+{"fn":"normalize","path":"👍🏽𠀀//$HOME𠀀żółw","out":"👍🏽𠀀//$HOME𠀀żółw"}
+{"fn":"dirName","path":"😀","out":"--"}
+{"fn":"normalize","path":"😀","out":"😀"}
+{"fn":"dirName","path":"C:Łódźİstanbulé👍🏽é","out":"C---d--stanbul------"}
+{"fn":"normalize","path":"C:Łódźİstanbulé👍🏽é","out":"C:Łódźİstanbulé👍🏽é"}
+{"fn":"dirName","path":"~İstanbul日本語/\\\\srv","out":"--stanbul------srv"}
+{"fn":"normalize","path":"~İstanbul日本語/\\\\srv","out":"~İstanbul日本語///srv"}
+{"fn":"dirName","path":" -wt-ΣΟΦΟΣéD:Projekty","out":"--wt------e-D-Projekty"}
+{"fn":"normalize","path":" -wt-ΣΟΦΟΣéD:Projekty","out":" -wt-ΣΟΦΟΣéD:Projekty"}
+{"fn":"dirName","path":"..","out":"--"}
+{"fn":"normalize","path":"..","out":".."}
+{"fn":"dirName","path":"bot-discordŁódźapp-wt-1.claude/\t$HOME.claude","out":"bot-discord--d-app-wt-1-claude---HOME-claude"}
+{"fn":"normalize","path":"bot-discordŁódźapp-wt-1.claude/\t$HOME.claude","out":"bot-discordŁódźapp-wt-1.claude/\t$HOME.claude"}
+{"fn":"dirName","path":"AppΣΟΦΟΣAppİstanbulc:","out":"App-----App-stanbulc-"}
+{"fn":"normalize","path":"AppΣΟΦΟΣAppİstanbulc:","out":"AppΣΟΦΟΣAppİstanbulc:"}
+{"fn":"dirName","path":"é\tapp-wt-1x_1żółwC:","out":"--app-wt-1x-1---wC-"}
+{"fn":"normalize","path":"é\tapp-wt-1x_1żółwC:","out":"é\tapp-wt-1x_1żółwC:"}
+{"fn":"dirName","path":"a.b c//x_1\\\\..日本語Projekty","out":"a-b-c--x-1-------Projekty"}
+{"fn":"normalize","path":"a.b c//x_1\\\\..日本語Projekty","out":"a.b c//x_1//..日本語Projekty"}
+{"fn":"dirName","path":"C:日本語appc:𐐀𐐨\\日本語ΣΟΦΟΣ","out":"C----appc--------------"}
+{"fn":"normalize","path":"C:日本語appc:𐐀𐐨\\日本語ΣΟΦΟΣ","out":"C:日本語appc:𐐀𐐨/日本語ΣΟΦΟΣ"}
+{"fn":"dirName","path":" ","out":"-"}
+{"fn":"normalize","path":" ","out":" "}
+{"fn":"dirName","path":"żółw","out":"---w"}
+{"fn":"normalize","path":"żółw","out":"żółw"}
+{"fn":"dirName","path":"APP","out":"APP"}
+{"fn":"normalize","path":"APP","out":"APP"}
+{"fn":"dirName","path":"c:Projekty.claudeC:","out":"c-Projekty-claudeC-"}
+{"fn":"normalize","path":"c:Projekty.claudeC:","out":"c:Projekty.claudeC:"}
+{"fn":"dirName","path":"é","out":"-"}
+{"fn":"normalize","path":"é","out":"é"}
+{"fn":"dirName","path":"C:Projekty","out":"C-Projekty"}
+{"fn":"normalize","path":"C:Projekty","out":"C:Projekty"}
+{"fn":"dirName","path":"żółw/appﬁx_1//$HOME..","out":"---w-app-x-1---HOME--"}
+{"fn":"normalize","path":"żółw/appﬁx_1//$HOME..","out":"żółw/appﬁx_1//$HOME.."}
+{"fn":"dirName","path":".claudeΣΟΦΟΣŁódź 👍🏽","out":"-claude-------d------"}
+{"fn":"normalize","path":".claudeΣΟΦΟΣŁódź 👍🏽","out":".claudeΣΟΦΟΣŁódź 👍🏽"}
+{"fn":"dirName","path":"/\\\\srvŁódź//C:app-wt-1Łódź//","out":"---srv--d---C-app-wt-1--d---"}
+{"fn":"normalize","path":"/\\\\srvŁódź//C:app-wt-1Łódź//","out":"///srvłódź//c:app-wt-1łódź"}
+{"fn":"dirName","path":"Łódźapp-wt-1Łódź","out":"--d-app-wt-1--d-"}
+{"fn":"normalize","path":"Łódźapp-wt-1Łódź","out":"Łódźapp-wt-1Łódź"}
+{"fn":"dirName","path":"ΣΟΦΟΣstraße..İstanbulİstanbul.c:𠀀","out":"-----stra-e---stanbul-stanbul-c---"}
+{"fn":"normalize","path":"ΣΟΦΟΣstraße..İstanbulİstanbul.c:𠀀","out":"ΣΟΦΟΣstraße..İstanbulİstanbul.c:𠀀"}
+{"fn":"dirName","path":"éc:bot-discordİstanbul..","out":"-c-bot-discord-stanbul--"}
+{"fn":"normalize","path":"éc:bot-discordİstanbul..","out":"éc:bot-discordİstanbul.."}
+{"fn":"dirName","path":"日本語Projekty\\\\","out":"---Projekty--"}
+{"fn":"normalize","path":"日本語Projekty\\\\","out":"日本語Projekty"}
+{"fn":"dirName","path":"𠀀","out":"--"}
+{"fn":"normalize","path":"𠀀","out":"𠀀"}
+{"fn":"dirName","path":"𠀀𠀀\\\\srvİstanbul𐐀𐐨","out":"------srv-stanbul----"}
+{"fn":"normalize","path":"𠀀𠀀\\\\srvİstanbul𐐀𐐨","out":"𠀀𠀀//srvİstanbul𐐀𐐨"}
+{"fn":"dirName","path":"Projektyworktrees😀Łódź.claudeİstanbul","out":"Projektyworktrees----d--claude-stanbul"}
+{"fn":"normalize","path":"Projektyworktrees😀Łódź.claudeİstanbul","out":"Projektyworktrees😀Łódź.claudeİstanbul"}
+{"fn":"dirName","path":"\\\\-wt-//","out":"---wt---"}
+{"fn":"normalize","path":"\\\\-wt-//","out":"//-wt-"}
+{"fn":"dirName","path":"é\t\t\té","out":"e----e-"}
+{"fn":"normalize","path":"é\t\t\té","out":"é\t\t\té"}
+{"fn":"dirName","path":"$HOME.","out":"-HOME-"}
+{"fn":"normalize","path":"$HOME.","out":"$HOME."}
+{"fn":"dirName","path":"ΣΟΦΟΣ𐐀𐐨","out":"---------"}
+{"fn":"normalize","path":"ΣΟΦΟΣ𐐀𐐨","out":"ΣΟΦΟΣ𐐀𐐨"}
+{"fn":"dirName","path":"APP","out":"APP"}
+{"fn":"normalize","path":"APP","out":"APP"}
+{"fn":"dirName","path":"żółw👍🏽ﬁ\\ΣΟΦΟΣ.straße","out":"---w------------stra-e"}
+{"fn":"normalize","path":"żółw👍🏽ﬁ\\ΣΟΦΟΣ.straße","out":"żółw👍🏽ﬁ/ΣΟΦΟΣ.straße"}
+{"fn":"dirName","path":"App..","out":"App--"}
+{"fn":"normalize","path":"App..","out":"App.."}
+{"fn":"dirName","path":".\tx_1//~éc:\t","out":"--x-1----c--"}
+{"fn":"normalize","path":".\tx_1//~éc:\t","out":".\tx_1//~éc:\t"}
+{"fn":"dirName","path":"😀//app","out":"----app"}
+{"fn":"normalize","path":"😀//app","out":"😀//app"}
+{"fn":"dirName","path":"𠀀c:İstanbul","out":"--c--stanbul"}
+{"fn":"normalize","path":"𠀀c:İstanbul","out":"𠀀c:İstanbul"}
+{"fn":"dirName","path":".claudeİstanbulⅫ","out":"-claude-stanbul-"}
+{"fn":"normalize","path":".claudeİstanbulⅫ","out":".claudeİstanbulⅫ"}
+{"fn":"dirName","path":"İstanbulapp-wt-1.claude..","out":"-stanbulapp-wt-1-claude--"}
+{"fn":"normalize","path":"İstanbulapp-wt-1.claude..","out":"İstanbulapp-wt-1.claude.."}
+{"fn":"dirName","path":"//srvéİstanbul..c://srv\\-wt-","out":"--srv--stanbul--c---srv--wt-"}
+{"fn":"normalize","path":"//srvéİstanbul..c://srv\\-wt-","out":"//srvéi̇stanbul..c://srv/-wt-"}
+{"fn":"dirName","path":"é\\😀 bot-discord","out":"-----bot-discord"}
+{"fn":"normalize","path":"é\\😀 bot-discord","out":"é/😀 bot-discord"}
+{"fn":"dirName","path":"  ","out":"--"}
+{"fn":"normalize","path":"  ","out":"  "}
+{"fn":"dirName","path":"a.b c😀bot-discord","out":"a-b-c--bot-discord"}
+{"fn":"normalize","path":"a.b c😀bot-discord","out":"a.b c😀bot-discord"}
+{"fn":"dirName","path":"👍🏽c:D:c://srvApp","out":"----c-D-c---srvApp"}
+{"fn":"normalize","path":"👍🏽c:D:c://srvApp","out":"👍🏽c:D:c://srvApp"}
+{"fn":"dirName","path":"bot-discord\\\\srv𠀀~\t","out":"bot-discord--srv----"}
+{"fn":"normalize","path":"bot-discord\\\\srv𠀀~\t","out":"bot-discord//srv𠀀~\t"}
+{"fn":"dirName","path":"Projekty\\\\//srvAPP","out":"Projekty----srvAPP"}
+{"fn":"normalize","path":"Projekty\\\\//srvAPP","out":"Projekty////srvAPP"}
+{"fn":"dirName","path":"AppAPPé-wt-.claude👍🏽$HOMEc:","out":"AppAPP--wt--claude-----HOMEc-"}
+{"fn":"normalize","path":"AppAPPé-wt-.claude👍🏽$HOMEc:","out":"AppAPPé-wt-.claude👍🏽$HOMEc:"}
+{"fn":"dirName","path":"𠀀","out":"--"}
+{"fn":"normalize","path":"𠀀","out":"𠀀"}
+{"fn":"dirName","path":"Appworktreesbot-discord\\\\𐐀𐐨~","out":"Appworktreesbot-discord-------"}
+{"fn":"normalize","path":"Appworktreesbot-discord\\\\𐐀𐐨~","out":"Appworktreesbot-discord//𐐀𐐨~"}
+{"fn":"dirName","path":"APPApp日本語é","out":"APPApp----"}
+{"fn":"normalize","path":"APPApp日本語é","out":"APPApp日本語é"}
+{"fn":"dirName","path":"a.b cD:\\\\","out":"a-b-cD---"}
+{"fn":"normalize","path":"a.b cD:\\\\","out":"a.b cD:"}
+{"fn":"dirName","path":"İstanbulworktreesProjekty.","out":"-stanbulworktreesProjekty-"}
+{"fn":"normalize","path":"İstanbulworktreesProjekty.","out":"İstanbulworktreesProjekty."}
+{"fn":"dirName","path":"$HOMEworktrees","out":"-HOMEworktrees"}
+{"fn":"normalize","path":"$HOMEworktrees","out":"$HOMEworktrees"}
+{"fn":"dirName","path":"Łódźİstanbul👍🏽","out":"--d--stanbul----"}
+{"fn":"normalize","path":"Łódźİstanbul👍🏽","out":"Łódźİstanbul👍🏽"}
+{"fn":"dirName","path":"ΣΟΦΟΣApp😀D:Ⅻ","out":"-----App--D--"}
+{"fn":"normalize","path":"ΣΟΦΟΣApp😀D:Ⅻ","out":"ΣΟΦΟΣApp😀D:Ⅻ"}
+{"fn":"dirName","path":"ﬁ//srvstraßex_1ΣΟΦΟΣ-wt-..","out":"---srvstra-ex-1------wt---"}
+{"fn":"normalize","path":"ﬁ//srvstraßex_1ΣΟΦΟΣ-wt-..","out":"ﬁ//srvstraßex_1ΣΟΦΟΣ-wt-.."}
+{"fn":"dirName","path":"straße-wt-","out":"stra-e-wt-"}
+{"fn":"normalize","path":"straße-wt-","out":"straße-wt-"}
+{"fn":"dirName","path":"straße日本語\\\\\\\\srvéAPPworktrees-wt-","out":"stra-e-------srve-APPworktrees-wt-"}
+{"fn":"normalize","path":"straße日本語\\\\\\\\srvéAPPworktrees-wt-","out":"straße日本語////srvéAPPworktrees-wt-"}
+{"fn":"dirName","path":"C:","out":"C-"}
+{"fn":"normalize","path":"C:","out":"C:"}
+{"fn":"dirName","path":"//a.b cC:C:\t/","out":"--a-b-cC-C---"}
+{"fn":"normalize","path":"//a.b cC:C:\t/","out":"//a.b cc:c:\t"}
+{"fn":"dirName","path":"~APPﬁ ..\tProjekty","out":"-APP-----Projekty"}
+{"fn":"normalize","path":"~APPﬁ ..\tProjekty","out":"~APPﬁ ..\tProjekty"}
+{"fn":"dirName","path":"..","out":"--"}
+{"fn":"normalize","path":"..","out":".."}
+{"fn":"dirName","path":"-wt-\\//","out":"-wt----"}
+{"fn":"normalize","path":"-wt-\\//","out":"-wt-"}
+{"fn":"dirName","path":"D:\t","out":"D--"}
+{"fn":"normalize","path":"D:\t","out":"D:\t"}
+{"fn":"dirName","path":"éC:𐐀𐐨éD:é日本語","out":"e-C------D-e----"}
+{"fn":"normalize","path":"éC:𐐀𐐨éD:é日本語","out":"éC:𐐀𐐨éD:é日本語"}
+{"fn":"dirName","path":" -wt-/a.b c👍🏽","out":"--wt--a-b-c----"}
+{"fn":"normalize","path":" -wt-/a.b c👍🏽","out":" -wt-/a.b c👍🏽"}
+{"fn":"dirName","path":"//srvD:APP","out":"--srvD-APP"}
+{"fn":"normalize","path":"//srvD:APP","out":"//srvd:app"}
+{"fn":"dirName","path":"Łódźc://srvbot-discordx_1a.b c","out":"--d-c---srvbot-discordx-1a-b-c"}
+{"fn":"normalize","path":"Łódźc://srvbot-discordx_1a.b c","out":"Łódźc://srvbot-discordx_1a.b c"}
+{"fn":"dirName","path":"//srvapp/éc:👍🏽","out":"--srvapp-e-c-----"}
+{"fn":"normalize","path":"//srvapp/éc:👍🏽","out":"//srvapp/éc:👍🏽"}
+{"fn":"dirName","path":"Ⅻé\\\\srv$HOME","out":"----srv-HOME"}
+{"fn":"normalize","path":"Ⅻé\\\\srv$HOME","out":"Ⅻé//srv$HOME"}
+{"fn":"dirName","path":".claudeapp..","out":"-claudeapp--"}
+{"fn":"normalize","path":".claudeapp..","out":".claudeapp.."}
+{"fn":"dirName","path":"İstanbul-wt-.é..appé","out":"-stanbul-wt-----app-"}
+{"fn":"normalize","path":"İstanbul-wt-.é..appé","out":"İstanbul-wt-.é..appé"}
+{"fn":"dirName","path":"Ⅻİstanbul//srv é\\\\srv.claude","out":"--stanbul--srv-e---srv-claude"}
+{"fn":"normalize","path":"Ⅻİstanbul//srv é\\\\srv.claude","out":"Ⅻİstanbul//srv é//srv.claude"}
+{"fn":"dirName","path":"-wt-Ⅻ𐐀𐐨éAPPApp\\\\","out":"-wt-------APPApp--"}
+{"fn":"normalize","path":"-wt-Ⅻ𐐀𐐨éAPPApp\\\\","out":"-wt-Ⅻ𐐀𐐨éAPPApp"}
+{"fn":"dirName","path":"👍🏽ProjektyAPPé\\\\srva.b cé","out":"----ProjektyAPP---srva-b-c-"}
+{"fn":"normalize","path":"👍🏽ProjektyAPPé\\\\srva.b cé","out":"👍🏽ProjektyAPPé//srva.b cé"}
+{"fn":"dirName","path":".Łódź//srvProjekty.é","out":"---d---srvProjekty-e-"}
+{"fn":"normalize","path":".Łódź//srvProjekty.é","out":".Łódź//srvProjekty.é"}
+{"fn":"dirName","path":"worktreesAppAPP//srvc:/é","out":"worktreesAppAPP--srvc---"}
+{"fn":"normalize","path":"worktreesAppAPP//srvc:/é","out":"worktreesAppAPP//srvc:/é"}
+{"fn":"dirName","path":"App","out":"App"}
+{"fn":"normalize","path":"App","out":"App"}
+{"fn":"dirName","path":"Ⅻworktreesc:$HOME👍🏽","out":"-worktreesc--HOME----"}
+{"fn":"normalize","path":"Ⅻworktreesc:$HOME👍🏽","out":"Ⅻworktreesc:$HOME👍🏽"}
+{"fn":"dirName","path":"appapp-wt-1ⅫstraßestraßeéŁódź\t","out":"appapp-wt-1-stra-estra-ee---d--"}
+{"fn":"normalize","path":"appapp-wt-1ⅫstraßestraßeéŁódź\t","out":"appapp-wt-1ⅫstraßestraßeéŁódź\t"}
+{"fn":"dirName","path":"c: żółw$HOME","out":"c-----w-HOME"}
+{"fn":"normalize","path":"c: żółw$HOME","out":"c: żółw$HOME"}
+{"fn":"dirName","path":"ΣΟΦΟΣ app//","out":"------app--"}
+{"fn":"normalize","path":"ΣΟΦΟΣ app//","out":"ΣΟΦΟΣ app"}
+{"fn":"dirName","path":"..\\x_1é","out":"---x-1-"}
+{"fn":"normalize","path":"..\\x_1é","out":"../x_1é"}
+{"fn":"dirName","path":"ﬁﬁΣΟΦΟΣŁódź..İstanbul..Łódź","out":"---------d----stanbul----d-"}
+{"fn":"normalize","path":"ﬁﬁΣΟΦΟΣŁódź..İstanbul..Łódź","out":"ﬁﬁΣΟΦΟΣŁódź..İstanbul..Łódź"}
+{"fn":"dirName","path":"é.claudeéé$HOME~日本語","out":"--claude---HOME----"}
+{"fn":"normalize","path":"é.claudeéé$HOME~日本語","out":"é.claudeéé$HOME~日本語"}
+{"fn":"dirName","path":"żółwﬁ𐐀𐐨app-wt-1ﬁ","out":"---w-----app-wt-1-"}
+{"fn":"normalize","path":"żółwﬁ𐐀𐐨app-wt-1ﬁ","out":"żółwﬁ𐐀𐐨app-wt-1ﬁ"}
+{"fn":"dirName","path":"~D:\\","out":"-D--"}
+{"fn":"normalize","path":"~D:\\","out":"~D:"}
+{"fn":"dirName","path":"𐐀𐐨app-wt-1","out":"----app-wt-1"}
+{"fn":"normalize","path":"𐐀𐐨app-wt-1","out":"𐐀𐐨app-wt-1"}
+{"fn":"dirName","path":" 😀𐐀𐐨 Projektya.b c","out":"--------Projektya-b-c"}
+{"fn":"normalize","path":" 😀𐐀𐐨 Projektya.b c","out":" 😀𐐀𐐨 Projektya.b c"}
+{"fn":"dirName","path":"C:worktrees-wt-😀worktreesc:","out":"C-worktrees-wt---worktreesc-"}
+{"fn":"normalize","path":"C:worktrees-wt-😀worktreesc:","out":"C:worktrees-wt-😀worktreesc:"}
+{"fn":"dirName","path":"APPbot-discord","out":"APPbot-discord"}
+{"fn":"normalize","path":"APPbot-discord","out":"APPbot-discord"}
+{"fn":"dirName","path":"appﬁ𐐀𐐨😀","out":"app-------"}
+{"fn":"normalize","path":"appﬁ𐐀𐐨😀","out":"appﬁ𐐀𐐨😀"}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\appx-wt-1","branch":"b"}],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\Projekty\\app\\","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\app-wt-ż😀","branch":"b"}],"cwd":"D:\\Projekty\\app-wt-","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\app/sub","branch":"b"}],"cwd":"D:\\Projekty\\app-wt- ","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\Projekty\\app/sub","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\Projekty\\app\\","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\app/sub","branch":"b"}],"cwd":"D:\\Projekty\\app-wt-App","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\app/sub","branch":"b"}],"cwd":"D:\\Projekty\\app-wt-x/","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\appx-wt-1","branch":"b"}],"cwd":"D:\\Projekty\\app-wt-x\\y","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\app-wt-//srv","branch":"b"}],"cwd":"D:\\Projekty\\app","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\app","branch":"b"}],"cwd":"D:\\Projekty\\app-wt-ż😀","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\app\\","branch":"b"}],"cwd":"D:\\Projekty\\app-wt-x\\y","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\app/sub","branch":"b"}],"cwd":"D:\\Projekty\\app/sub","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\app\\","branch":"b"}],"cwd":"D:\\Projekty\\app","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\app-wt-é","branch":"b"}],"cwd":"D:\\Projekty\\appx-wt-1","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\app\\","branch":"b"}],"cwd":"D:\\PROJEKTY\\APP-WT-x","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\PROJEKTY\\APP-WT-x","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\Projekty\\appx-wt-1","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\app-wt-x\\y","branch":"b"}],"cwd":"D:\\Projekty\\app\\","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\Projekty\\app","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\Projekty\\app-wt-","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\Projekty\\app-wt-x\\y","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\Projekty\\app-wt-","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\Projekty\\app/sub","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[{"path":"D:\\Projekty\\app/sub","branch":"b"}],"cwd":"D:\\PROJEKTY\\APP-WT-x","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\Projekty\\app\\","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\Projekty\\app/sub","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\Projekty\\appx-wt-1","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app","known":[],"cwd":"D:\\Projekty\\app/sub","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\Projekty\\app/sub","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\Projekty\\app\\","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\Projekty\\app/sub","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\Projekty\\app-wt-x\\y","branch":"b"}],"cwd":"D:\\Projekty\\app-wt-\\\\","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\Projekty\\appx-wt-1","branch":"b"}],"cwd":"D:\\Projekty\\app-wt-x","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\Projekty\\app-wt-ż😀","branch":"b"}],"cwd":"D:\\Projekty\\app","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\Projekty\\app-wt-x\\y","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\Projekty\\app-wt-Łódź","branch":"b"}],"cwd":"D:\\Projekty\\appx-wt-1","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\Projekty\\appx-wt-1","branch":"b"}],"cwd":"D:\\PROJEKTY\\APP-WT-x","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\Other\\app-wt-1","branch":"b"}],"cwd":"D:\\Projekty\\app-wt-日本語","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\PROJEKTY\\APP-WT-x","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\Projekty\\app-wt-","branch":"b"}],"cwd":"D:\\Projekty\\app-wt-x/","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\Projekty\\app-wt-ż😀","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\Projekty\\app/sub","branch":"b"}],"cwd":"D:\\Projekty\\app-wt-worktrees","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\Projekty\\app-wt-x/","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\Projekty\\app-wt-x\\y","branch":"b"}],"cwd":"D:\\Projekty\\app","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\Projekty\\app-wt-x_1","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\Projekty\\app","branch":"b"}],"cwd":"D:\\Projekty\\app-wt-ż😀","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\PROJEKTY\\APP-WT-x","branch":"b"}],"cwd":"D:\\Projekty\\appx-wt-1","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\PROJEKTY\\APP-WT-x","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\Projekty\\app-wt-👍🏽","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\Projekty\\app-wt-","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\Projekty\\app-wt-x\\y","branch":"b"}],"cwd":"D:\\PROJEKTY\\APP-WT-x","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\Projekty\\app-wt-Ⅻ","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\Projekty\\app-wt-x","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\Projekty\\app-wt-ż😀","branch":"b"}],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\Projekty\\app-wt-x","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\Projekty\\app","branch":"b"}],"cwd":"D:\\Projekty\\app-wt-x","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[{"path":"D:\\Projekty\\app-wt-x/","branch":"b"}],"cwd":"D:\\Projekty\\app-wt-x","out":true}
+{"fn":"matcher","project":"D:\\Projekty\\app\\","known":[],"cwd":"D:\\Projekty\\app/sub","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/App","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[{"path":"d:/projekty/App-wt-x/","branch":"b"}],"cwd":"d:/projekty/App-wt-x\\y","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/Appx-wt-1","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/App-wt-ż😀","out":true}
+{"fn":"matcher","project":"d:/projekty/App","known":[{"path":"D:\\Other\\app-wt-1","branch":"b"}],"cwd":"d:/projekty/App-wt-","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[{"path":"d:/projekty/App/sub","branch":"b"}],"cwd":"d:/projekty/Appx-wt-1","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[{"path":"D:/PROJEKTY/APP-WT-x","branch":"b"}],"cwd":"D:/PROJEKTY/APP-WT-x","out":true}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/App-wt-x","out":true}
+{"fn":"matcher","project":"d:/projekty/App","known":[{"path":"d:/projekty/App/sub","branch":"b"}],"cwd":"D:/PROJEKTY/APP-WT-x","out":true}
+{"fn":"matcher","project":"d:/projekty/App","known":[{"path":"d:/projekty/Appx-wt-1","branch":"b"}],"cwd":"d:/projekty/App-wt-x","out":true}
+{"fn":"matcher","project":"d:/projekty/App","known":[{"path":"d:/projekty/App/sub","branch":"b"}],"cwd":"d:/projekty/App\\","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/App-wt-żółw","out":true}
+{"fn":"matcher","project":"d:/projekty/App","known":[{"path":"D:/PROJEKTY/APP-WT-x","branch":"b"}],"cwd":"d:/projekty/App-wt-x","out":true}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/App\\","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[{"path":"d:/projekty/App","branch":"b"}],"cwd":"d:/projekty/App-wt-x\\y","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/Appx-wt-1","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/App-wt-x/","out":true}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/App-wt-","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/App-wt-x/","out":true}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/App-wt-","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/App-wt-𐐀𐐨","out":true}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/App-wt-x/","out":true}
+{"fn":"matcher","project":"d:/projekty/App","known":[{"path":"d:/projekty/App-wt-\t","branch":"b"}],"cwd":"d:/projekty/App","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[{"path":"D:\\Other\\app-wt-1","branch":"b"}],"cwd":"d:/projekty/App-wt-","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/App","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[{"path":"d:/projekty/App-wt- ","branch":"b"}],"cwd":"d:/projekty/App-wt-x\\y","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/App/sub","out":false}
+{"fn":"matcher","project":"d:/projekty/App","known":[],"cwd":"d:/projekty/App-wt-日本語","out":true}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"/USERS/A/APP-WT-x","branch":"b"}],"cwd":"/Users/a/app-wt-x/","out":true}
+{"fn":"matcher","project":"/Users/a/app","known":[],"cwd":"/Users/a/app-wt-x","out":true}
+{"fn":"matcher","project":"/Users/a/app","known":[],"cwd":"/Users/a/app-wt-x\\y","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[],"cwd":"/Users/a/app-wt-Ⅻ","out":true}
+{"fn":"matcher","project":"/Users/a/app","known":[],"cwd":"/Users/a/app\\","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[],"cwd":"/Users/a/app\\","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[],"cwd":"/Users/a/app","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"/Users/a/app-wt-a.b c","branch":"b"}],"cwd":"/Users/a/app-wt-x","out":true}
+{"fn":"matcher","project":"/Users/a/app","known":[],"cwd":"/Users/a/app/sub","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"/Users/a/app-wt-App","branch":"b"}],"cwd":"/Users/a/app\\","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[],"cwd":"/Users/a/app-wt-x\\y","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[],"cwd":"/USERS/A/APP-WT-x","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"D:\\Other\\app-wt-1","branch":"b"}],"cwd":"/Users/a/app","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"/Users/a/app-wt-x","branch":"b"}],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"/Users/a/app-wt-x/","branch":"b"}],"cwd":"/USERS/A/APP-WT-x","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"/Users/a/app-wt-x","branch":"b"}],"cwd":"/Users/a/app-wt-x\\y","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"D:\\Other\\app-wt-1","branch":"b"}],"cwd":"/Users/a/app-wt-x","out":true}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"/Users/a/app/sub","branch":"b"}],"cwd":"/USERS/A/APP-WT-x","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"/USERS/A/APP-WT-x","branch":"b"}],"cwd":"/Users/a/app/sub","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"/Users/a/app-wt-","branch":"b"}],"cwd":"/Users/a/app-wt-x/","out":true}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"/Users/a/app-wt-x","branch":"b"}],"cwd":"/Users/a/appx-wt-1","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[],"cwd":"/Users/a/appx-wt-1","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"/Users/a/app-wt-x\\y","branch":"b"}],"cwd":"/Users/a/app-wt-x/","out":true}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"/Users/a/app\\","branch":"b"}],"cwd":"/Users/a/app\\","out":false}
+{"fn":"matcher","project":"/Users/a/app","known":[],"cwd":"/Users/a/app-wt-ż😀","out":true}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"/Users/a/app","branch":"b"}],"cwd":"/Users/a/app-wt-app","out":true}
+{"fn":"matcher","project":"/Users/a/app","known":[],"cwd":"/Users/a/app-wt-ż😀","out":true}
+{"fn":"matcher","project":"/Users/a/app","known":[{"path":"/Users/a/app-wt-x/","branch":"b"}],"cwd":"/Users/a/app-wt-x/","out":true}
+{"fn":"matcher","project":"/Users/a/app","known":[],"cwd":"/Users/a/app-wt-x\\y","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[{"path":"/Users/a/app-wt-Łódź","branch":"b"}],"cwd":"/USERS/A/APP-WT-x","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/Users/a/app-wt-","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/Users/a/app-wt-","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/Users/a/app-wt-x","out":true}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/Users/a/app-wt-","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[{"path":"/Users/a/app-wt-x/","branch":"b"}],"cwd":"/Users/a/app-wt-x/","out":true}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/Users/a/appx-wt-1","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/Users/a/appx-wt-1","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/USERS/A/APP-WT-x","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[{"path":"D:\\Other\\app-wt-1","branch":"b"}],"cwd":"/Users/a/app\\","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[{"path":"/Users/a/app-wt-","branch":"b"}],"cwd":"/Users/a/appx-wt-1","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/Users/a/app-wt-x\\y","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[{"path":"/Users/a/app-wt-","branch":"b"}],"cwd":"/Users/a/app\\","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[{"path":"/Users/a/app-wt-\\\\","branch":"b"}],"cwd":"/Users/a/app\\","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/Users/a/app\\","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[{"path":"/Users/a/app-wt-x\\y","branch":"b"}],"cwd":"/Users/a/app\\","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[{"path":"/Users/a/app/sub","branch":"b"}],"cwd":"/Users/a/app-wt-ż😀","out":true}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/Users/a/app-wt-😀","out":true}
+{"fn":"matcher","project":"/Users/a/app/","known":[{"path":"D:\\Other\\app-wt-1","branch":"b"}],"cwd":"/Users/a/app/sub","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/USERS/A/APP-WT-x","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[{"path":"/Users/a/app/sub","branch":"b"}],"cwd":"/USERS/A/APP-WT-x","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/Users/a/app\\","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/Users/a/app-wt-Łódź","out":true}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/Users/a/app\\","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[{"path":"/Users/a/app-wt-x\\y","branch":"b"}],"cwd":"/Users/a/app","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[{"path":"/Users/a/app/sub","branch":"b"}],"cwd":"/Users/a/app-wt-x\\y","out":false}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/Users/a/app-wt-a.b c","out":true}
+{"fn":"matcher","project":"/Users/a/app/","known":[],"cwd":"/Users/a/app","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"app\\","out":false}
+{"fn":"matcher","project":"app","known":[{"path":"D:\\Other\\app-wt-1","branch":"b"}],"cwd":"APP-WT-x","out":false}
+{"fn":"matcher","project":"app","known":[{"path":"APP-WT-x","branch":"b"}],"cwd":"app-wt-é","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"app\\","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"APP-WT-x","out":false}
+{"fn":"matcher","project":"app","known":[{"path":"app-wt-","branch":"b"}],"cwd":"app-wt-x/","out":false}
+{"fn":"matcher","project":"app","known":[{"path":"app/sub","branch":"b"}],"cwd":"appx-wt-1","out":false}
+{"fn":"matcher","project":"app","known":[{"path":"app\\","branch":"b"}],"cwd":"appx-wt-1","out":false}
+{"fn":"matcher","project":"app","known":[{"path":"APP-WT-x","branch":"b"}],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"app/sub","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"APP-WT-x","out":false}
+{"fn":"matcher","project":"app","known":[{"path":"app-wt-App","branch":"b"}],"cwd":"appx-wt-1","out":false}
+{"fn":"matcher","project":"app","known":[{"path":"app-wt-","branch":"b"}],"cwd":"app-wt-x/","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"app-wt-ż😀","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"app-wt-x","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"app","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"app-wt-.","out":false}
+{"fn":"matcher","project":"app","known":[{"path":"app\\","branch":"b"}],"cwd":"app-wt-ż😀","out":false}
+{"fn":"matcher","project":"app","known":[{"path":"app-wt-ż😀","branch":"b"}],"cwd":"app","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"APP-WT-x","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"appx-wt-1","out":false}
+{"fn":"matcher","project":"app","known":[{"path":"D:\\Other\\app-wt-1","branch":"b"}],"cwd":"APP-WT-x","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"app-wt-ż😀","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"app-wt-x","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"app-wt-ż😀","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"appx-wt-1","out":false}
+{"fn":"matcher","project":"app","known":[{"path":"app","branch":"b"}],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"APP-WT-x","out":false}
+{"fn":"matcher","project":"app","known":[{"path":"app-wt-x\\y","branch":"b"}],"cwd":"app/sub","out":false}
+{"fn":"matcher","project":"app","known":[],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[],"cwd":"C:\\😀\\proj😀-wt-worktrees","out":true}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[],"cwd":"C:\\😀\\proj😀-wt-ż😀","out":true}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[],"cwd":"C:\\😀\\proj😀-wt-ż😀","out":true}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\PROJ😀-WT-x","branch":"b"}],"cwd":"C:\\😀\\proj😀-wt-","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\proj😀","branch":"b"}],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\proj😀\\","branch":"b"}],"cwd":"C:\\😀\\proj😀\\","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[],"cwd":"C:\\😀\\proj😀/sub","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[],"cwd":"C:\\😀\\proj😀-wt-ż😀","out":true}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\proj😀-wt-x\\y","branch":"b"}],"cwd":"C:\\😀\\proj😀-wt-ż😀","out":true}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\proj😀/sub","branch":"b"}],"cwd":"C:\\😀\\proj😀-wt-","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[],"cwd":"C:\\😀\\proj😀-wt-x\\y","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\proj😀-wt-x\\y","branch":"b"}],"cwd":"C:\\😀\\proj😀-wt-ż😀","out":true}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\proj😀-wt-x/","branch":"b"}],"cwd":"C:\\😀\\proj😀/sub","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\proj😀-wt-x","branch":"b"}],"cwd":"C:\\😀\\proj😀","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[],"cwd":"C:\\😀\\proj😀-wt-","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[],"cwd":"C:\\😀\\proj😀-wt-x","out":true}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[],"cwd":"C:\\😀\\proj😀x-wt-1","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\proj😀-wt-x","branch":"b"}],"cwd":"C:\\😀\\proj😀-wt-x\\y","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\proj😀-wt-x","branch":"b"}],"cwd":"C:\\😀\\proj😀/sub","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\proj😀-wt-","branch":"b"}],"cwd":"C:\\😀\\proj😀\\","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[],"cwd":"C:\\😀\\proj😀-wt-ż😀","out":true}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"D:\\Other\\app-wt-1","branch":"b"}],"cwd":"C:\\😀\\PROJ😀-WT-x","out":true}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\proj😀-wt-ż😀","branch":"b"}],"cwd":"C:\\😀\\proj😀/sub","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\proj😀","branch":"b"}],"cwd":"C:\\😀\\proj😀-wt-x/","out":true}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\proj😀x-wt-1","branch":"b"}],"cwd":"C:\\😀\\proj😀-wt-","out":false}
+{"fn":"matcher","project":"C:\\😀\\proj😀","known":[{"path":"C:\\😀\\proj😀/sub","branch":"b"}],"cwd":"C:\\😀\\proj😀\\","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\app/sub","branch":"b"}],"cwd":"\\\\srv\\share\\app-wt-x","out":true}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\app/sub","branch":"b"}],"cwd":"\\\\srv\\share\\app","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[],"cwd":"\\\\srv\\share\\appx-wt-1","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[],"cwd":"\\\\srv\\share\\app-wt-ż😀","out":true}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\app-wt-x\\y","branch":"b"}],"cwd":"\\\\srv\\share\\app","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\app/sub","branch":"b"}],"cwd":"\\\\srv\\share\\app-wt-x","out":true}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[],"cwd":"\\\\srv\\share\\app","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[],"cwd":"\\\\SRV\\SHARE\\APP-WT-x","out":true}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[],"cwd":"\\\\SRV\\SHARE\\APP-WT-x","out":true}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\app-wt--wt-","branch":"b"}],"cwd":"\\\\srv\\share\\app\\","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\appx-wt-1","branch":"b"}],"cwd":"\\\\srv\\share\\appx-wt-1","out":true}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\app-wt-é","branch":"b"}],"cwd":"\\\\srv\\share\\app","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[],"cwd":"\\\\srv\\share\\app-wt-","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\app/sub","branch":"b"}],"cwd":"\\\\srv\\share\\app","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\app/sub","branch":"b"}],"cwd":"\\\\srv\\share\\app/sub","out":true}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\app\\","branch":"b"}],"cwd":"\\\\srv\\share\\app-wt-","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\app\\","branch":"b"}],"cwd":"\\\\srv\\share\\app-wt-x","out":true}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[],"cwd":"\\\\srv\\share\\app-wt-C:","out":true}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\app-wt-x","branch":"b"}],"cwd":"\\\\SRV\\SHARE\\APP-WT-x","out":true}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\SRV\\SHARE\\APP-WT-x","branch":"b"}],"cwd":"\\\\srv\\share\\app-wt-x/","out":true}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"D:\\Other\\app-wt-1","branch":"b"}],"cwd":"\\\\srv\\share\\app-wt-x","out":true}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\app-wt-","branch":"b"}],"cwd":"\\\\srv\\share\\app\\","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\appx-wt-1","branch":"b"}],"cwd":"\\\\srv\\share\\app-wt-x/","out":true}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"D:\\Other\\app-wt-1","branch":"b"}],"cwd":"\\\\srv\\share\\app-wt-ż😀","out":true}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\app","branch":"b"}],"cwd":"D:\\Other\\app-wt-1","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[],"cwd":"\\\\srv\\share\\app\\","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[{"path":"\\\\srv\\share\\app-wt-APP","branch":"b"}],"cwd":"\\\\srv\\share\\app\\","out":false}
+{"fn":"matcher","project":"\\\\srv\\share\\app","known":[],"cwd":"\\\\srv\\share\\app\\","out":false}
