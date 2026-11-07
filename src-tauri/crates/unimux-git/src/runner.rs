@@ -100,7 +100,7 @@ pub fn result_json<T: Serialize>(result: &GitResult<T>) -> serde_json::Value {
     }
 }
 
-/// `GitOptions` of git.ts (the runner part; trust file and GitHub auth come with G2 / G3).
+/// `GitOptions` of git.ts (GitHub auth comes with G3).
 #[derive(Debug, Clone)]
 pub struct GitOptions {
     /// The executable (default "git"); tests point it at a stand-in.
@@ -116,6 +116,8 @@ pub struct GitOptions {
     pub max_output_bytes: usize,
     /// Cap of the output kept from one write (the excess is discarded; the command is never stopped for it).
     pub write_output_bytes: usize,
+    /// Where the trusted repositories are remembered (git-trust.json; memory only when None).
+    pub trust_file: Option<PathBuf>,
 }
 
 impl Default for GitOptions {
@@ -129,6 +131,7 @@ impl Default for GitOptions {
             clone_timeout: CLONE_TIMEOUT,
             max_output_bytes: OUTPUT_CAP,
             write_output_bytes: WRITE_OUTPUT_CAP,
+            trust_file: None,
         }
     }
 }
