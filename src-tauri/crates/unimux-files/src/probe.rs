@@ -19,14 +19,17 @@ pub fn exists_arg(path: &Value) -> Option<String> {
 }
 
 /// `fs.promises.access(path)` (F_OK). Windows: libuv asks GetFileAttributesW, which does not follow a final link (a dangling
-/// link exists); Unix: access(2), which follows it.
+/// link exists); Unix: access(2), which follows it. Node hands libuv the `toNamespacedPath` form (`\\?\C:\...`), so a
+/// folder past MAX_PATH exists and a trailing dot or space is kept (`C:\Windows.` is missing), with no longPathAware
+/// manifest needed.
 pub fn path_exists_now(path: &str) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
         use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
         use windows::core::PCWSTR;
-        let wide: Vec<u16> = std::ffi::OsStr::new(path).encode_wide().chain(std::iter::once(0)).collect();
+        let namespaced = jspath::to_namespaced_path(Flavor::Win32, path);
+        let wide: Vec<u16> = std::ffi::OsStr::new(&namespaced).encode_wide().chain(std::iter::once(0)).collect();
         // SAFETY: a NUL-terminated UTF-16 path that lives across the call.
         unsafe { GetFileAttributesW(PCWSTR(wide.as_ptr())) != INVALID_FILE_ATTRIBUTES }
     }
@@ -48,13 +51,14 @@ pub fn path_kinds_arg(paths: &Value) -> Option<&Vec<Value>> {
 }
 
 /// One entry of `fs:pathKinds`: `'dir'`, `'file'` or None (not a string, not absolute in Node's sense, a NUL inside, gone,
-/// or neither a folder nor a regular file). `stat` follows links like Node's.
+/// or neither a folder nor a regular file). `stat` follows links like Node's, and gets the `toNamespacedPath` form like
+/// Node's, so `dir.` and `dir ` are gone instead of Win32 trimming them to `dir`.
 pub fn path_kind(path: &Value) -> Option<&'static str> {
     let p = path.as_str()?;
     if !jspath::is_absolute(Flavor::native(), p) || p.contains('\0') {
         return None;
     }
-    let meta = std::fs::metadata(p).ok()?;
+    let meta = std::fs::metadata(jspath::to_namespaced_path(Flavor::native(), p)).ok()?;
     if meta.is_dir() {
         Some("dir")
     } else if meta.is_file() {
@@ -113,6 +117,45 @@ mod tests {
         // GetFileAttributesW sees the junction itself; stat (pathKinds) follows it and finds nothing.
         assert!(path_exists_now(&link.to_string_lossy()));
         assert_eq!(path_kind(&json!(link.to_string_lossy())), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_folder_past_max_path_exists_like_node_access() {
+        // Node turns the path into \\?\C:\... before libuv calls GetFileAttributesW; the app has no longPathAware manifest.
+        let dir = tempfile::tempdir().unwrap();
+        let mut long = dir.path().to_path_buf();
+        while long.as_os_str().len() <= 300 {
+            long.push("a-folder-name-of-forty-characters-xxxxx");
+        }
+        std::fs::create_dir_all(&long).unwrap();
+        std::fs::write(long.join("f.txt"), "x").unwrap();
+        let l = long.to_string_lossy().into_owned();
+        assert!(l.len() > 300, "{}", l.len());
+        assert!(path_exists_now(&l));
+        assert!(path_exists_now(&format!("{l}\\f.txt")));
+        assert!(!path_exists_now(&format!("{l}\\gone")));
+        assert_eq!(path_kind(&json!(l)), Some("dir"));
+        assert_eq!(path_kind(&json!(format!("{l}\\f.txt"))), Some("file"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_trailing_dot_or_space_is_kept_like_node() {
+        // Win32 drops a trailing dot or space (`dir.` is `dir`); Node's \\?\ form keeps it, so 1.1.4 found nothing there.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("dir")).unwrap();
+        std::fs::write(dir.path().join("f.txt"), "x").unwrap();
+        let d = dir.path().join("dir").to_string_lossy().into_owned();
+        let f = dir.path().join("f.txt").to_string_lossy().into_owned();
+        assert!(path_exists_now(&d));
+        for p in [format!("{d}."), format!("{d} "), format!("{f}."), format!("{f} ")] {
+            assert!(!path_exists_now(&p), "{p:?}");
+            assert_eq!(path_kind(&json!(p)), None, "{p:?}");
+        }
+        // A relative path and forward slashes still resolve the way Node's do.
+        assert!(path_exists_now(&d.replace('\\', "/")));
+        assert_eq!(path_kind(&json!(d.replace('\\', "/"))), Some("dir"));
     }
 
     #[cfg(windows)]
