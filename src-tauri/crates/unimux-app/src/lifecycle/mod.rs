@@ -299,7 +299,7 @@ fn run_effects(ctx: &Arc<AppContext>, effects: Vec<Effect>) {
 fn ask_renderer(ctx: &Arc<AppContext>) {
     if let Some(window) = main_window(ctx) {
         if ctx.overrides.offscreen {
-            crate::windows::show_without_focus(&window);
+            crate::windows::show_offscreen(&window);
         } else {
             let _ = window.unminimize();
             let _ = window.show();

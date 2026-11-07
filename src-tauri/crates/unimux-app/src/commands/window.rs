@@ -148,12 +148,13 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         }
     });
 
+    // The page's button rects (a cross-check of the native layout in caption.rs) and the buttons' accessible names.
     let c = ctx.clone();
     r.send("window:captionArea", move |call| {
         let c = c.clone();
         async move {
             if let Some(w) = window_of(&c, &call.caller.label) {
-                caption::set_area_from_page(&w, call.arg(0));
+                caption::set_area_from_page(&w, &c, call.arg(0), call.args.get(1));
             }
         }
     });

@@ -1,11 +1,13 @@
 //! Check-build only (feature `test-bridge`): the probes of the W1 caption check (scripts/verify-caption.mjs).
 //!
-//! - `probe`: the hit-test child of a window (rect, area, visibility) and the window's Win32 state.
+//! - `probe`: the caption children of a window (rects, native layout, the page's area, visibility) and its Win32 state,
+//!   read on the window's UI thread.
 //! - `scale`: a fixed WebView2 rasterization scale (the page's devicePixelRatio), the way the 1.1.4 references were taken
-//!   with `--force-device-scale-factor`: 100, 125, 150 and 200 percent on any monitor.
-//! - `guard` / `log`: records the system commands and context menus the window gets and swallows the ones that would put
-//!   something on the user's desktop (a real maximize onto a monitor, the system menu, a move or size loop), so a check can
-//!   prove a double-click or a right click on the title bar without showing anything.
+//!   with `--force-device-scale-factor`: 100, 125, 150 and 200 percent on any monitor; the native layout follows it.
+//! - `guard` / `log`: records the system commands the window gets and swallows the ones that would put something on the
+//!   user's desktop (a real maximize onto a monitor, a move or size loop, the keyboard menu); the system menu of a right
+//!   click is recorded with its items' states instead of shown (caption.rs seam around TrackPopupMenu). So a check can prove
+//!   a double-click, a right click or a press on the top edge without showing anything.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,29 +29,43 @@ pub async fn caption_op(ctx: &Arc<AppContext>, args: &Value) -> Result<Value, Ip
     let app = ctx.app().ok_or_else(|| fail("no app yet"))?;
     let window = app.get_webview_window(label).ok_or_else(|| fail(&format!("no window {label}")))?;
     match action {
-        "probe" => Ok(probe(&window)),
+        "probe" => probe(&window).await,
         "scale" => {
             let scale = args.get("scale").and_then(Value::as_f64).ok_or_else(|| fail("scale needs {scale}"))?;
             set_scale(&window, scale).await?;
-            Ok(probe(&window))
+            crate::caption::set_scale_override(&window, Some(scale));
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            probe(&window).await
         }
         "guard" => {
             guard(&window)?;
+            crate::caption::seam::RECORD.store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(json!({ "guarded": true }))
         }
-        "log" => Ok(json!({ "log": win::take_log() })),
+        "log" => {
+            let mut log = win::take_log();
+            log.extend(std::mem::take(&mut *crate::caption::seam::LOG.lock()));
+            Ok(json!({ "log": log }))
+        }
         other => Err(fail(&format!("unknown caption action {other}"))),
     }
 }
 
-fn probe(window: &WebviewWindow) -> Value {
-    let mut out = crate::caption::probe(window.label());
+async fn probe(window: &WebviewWindow) -> Result<Value, IpcError> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    crate::caption::probe(window, move |v| {
+        let _ = tx.send(v);
+    });
+    let mut out = tokio::time::timeout(Duration::from_secs(5), rx)
+        .await
+        .map_err(|_| fail("caption probe timed out"))?
+        .map_err(|_| fail("caption probe: the window is gone"))?;
     if let Ok(hwnd) = window.hwnd() {
         out["hwnd"] = json!(hwnd.0 as isize);
     }
     out["maximized"] = json!(window.is_maximized().ok());
     out["decorated"] = json!(window.is_decorated().ok());
-    out
+    Ok(out)
 }
 
 async fn set_scale(window: &WebviewWindow, scale: f64) -> Result<(), IpcError> {
@@ -112,9 +128,10 @@ mod win {
     unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
         if msg == WM_SYSCOMMAND {
             let command = (wparam.0 & 0xFFF0) as u32;
-            LOG.lock().push(json!({ "msg": "syscommand", "command": command }));
-            // A real maximize goes onto a monitor, a move / size loop and the system menu show on the desktop (a restore of
-            // the off-screen window is harmless and lets a check bring a minimized window back).
+            LOG.lock().push(json!({ "msg": "syscommand", "command": command, "raw": wparam.0 }));
+            // A real maximize goes onto a monitor, a move / size loop and the keyboard menu show on the desktop (a restore of
+            // the off-screen window is harmless and lets a check bring a minimized window back; a minimize of it runs with
+            // the DWM transitions off, windows::show_offscreen).
             if [SC_MAXIMIZE, SC_MOVE, SC_SIZE, SC_KEYMENU, SC_MOUSEMENU].contains(&command) {
                 return LRESULT(0);
             }

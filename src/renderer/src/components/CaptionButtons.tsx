@@ -60,23 +60,37 @@ function CaptionLayer() {
     return () => observer.disconnect();
   }, []);
 
-  // Maximized (the restore glyph, the container at the very top) and the pointer from the native child.
+  // Maximized (the restore glyph, the container at the very top) and the pointer from the native child. A listener is
+  // registered asynchronously, so a maximize between the first query and the registration (a detached window shown
+  // maximized while this mounts) would be lost: the state is asked again whenever the size changes (every maximize and
+  // restore does) and whenever the window is shown again.
+  const alive = useRef(true);
+  const requery = () => {
+    void window.mc.windowControls.isMaximized().then((m) => { if (alive.current) setMaximized(!!m); }, () => undefined);
+  };
   useEffect(() => {
-    let alive = true;
-    void window.mc.windowControls.isMaximized().then((m) => { if (alive) setMaximized(m); }, () => undefined);
+    alive.current = true;
     const offMax = window.mc.on('window:maximized', (m) => setMaximized(!!m));
+    const offShown = window.mc.on('window:shown', () => requery());
     const offPointer = window.mc.on('window:caption', (state) => setPointer(readCaptionPointer(state)));
-    return () => { alive = false; offMax(); offPointer(); };
+    return () => { alive.current = false; offMax(); offShown(); offPointer(); };
   }, []);
+  useEffect(requery, [size]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const layout: CaptionLayout | null = size ? captionLayout({ scale: size.scale, clientWidth: size.clientWidth, maximized }) : null;
   const areaKey = layout ? JSON.stringify(captionHitRects(layout)) : '';
+  const titles: Record<CaptionButton, string> = {
+    min: tr('Minimalizuj'),
+    max: maximized ? tr('Przywróć') : tr('Maksymalizuj'),
+    close: tr('Zamknij'),
+  };
+  const labelKey = JSON.stringify(titles);
 
-  // The native child follows the buttons; none while this page shows none (unmount, reload).
+  // The native side's cross-check and the buttons' names (null on unmount: this page shows none).
   useEffect(() => {
     if (!layout) return;
-    window.mc.windowControls.setCaptionArea(captionHitRects(layout));
-  }, [areaKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    window.mc.windowControls.setCaptionArea(captionHitRects(layout), titles);
+  }, [areaKey, labelKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => window.mc.windowControls.setCaptionArea(null), []);
 
   // Paint: at once for a state or size change, then per frame while a hover fade runs.
@@ -124,22 +138,27 @@ function CaptionLayer() {
     if (next) tips.current[next]?.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
   }, [pointer]);
 
-  const titles: Record<CaptionButton, string> = {
-    min: tr('Minimalizuj'),
-    max: maximized ? tr('Przywróć') : tr('Maksymalizuj'),
-    close: tr('Zamknij'),
-  };
   const rects = layout ? captionHitRects(layout) : null;
+  const run: Record<CaptionButton, () => void> = {
+    min: () => window.mc.windowControls.minimize(),
+    max: () => window.mc.windowControls.toggleMaximize(),
+    close: () => window.mc.windowControls.close(),
+  };
   const scale = size?.scale ?? 1;
   return (
     <>
       <canvas ref={canvas} className="mc-caption" aria-hidden="true" />
+      {/* The tooltip anchors are the buttons for assistive technology too (Narrator's scan mode, UI Automation Invoke): the
+          pointer never reaches them (the native child is over them), an accessibility click does. */}
       {rects && BUTTONS.map((b) => (
         <div
           key={b}
           ref={(el) => { tips.current[b] = el; }}
           className="mc-caption-tip"
-          aria-hidden="true"
+          role="button"
+          tabIndex={-1}
+          aria-label={titles[b]}
+          onClick={run[b]}
           title={titles[b]}
           data-caption-button={b}
           style={{ left: rects[b].x / scale, top: rects[b].y / scale, width: rects[b].width / scale, height: rects[b].height / scale }}

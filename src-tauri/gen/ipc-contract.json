@@ -6010,10 +6010,15 @@
      "name": "area",
      "type": "CaptionArea | null",
      "optional": false
+    },
+    {
+     "name": "labels",
+     "type": "CaptionLabels",
+     "optional": true
     }
    ],
    "returns": "void",
-   "call": "t.send('window:captionArea', area)"
+   "call": "t.send('window:captionArea', area, labels ?? null)"
   },
   {
    "path": "detach.open",

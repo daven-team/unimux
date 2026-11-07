@@ -303,7 +303,7 @@ export function createMcApi(t: McTransport): McApi {
       toggleMaximize: () => t.send('window:toggleMaximize'),
       close: () => t.send('window:close'),
       isMaximized: () => t.invoke('window:isMaximized'),
-      setCaptionArea: (area) => t.send('window:captionArea', area),
+      setCaptionArea: (area, labels) => t.send('window:captionArea', area, labels ?? null),
     },
     detach: {
       open: (target, docs) => t.invoke('detach:open', target, docs),

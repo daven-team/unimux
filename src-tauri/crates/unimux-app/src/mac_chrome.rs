@@ -253,8 +253,8 @@ mod imp {
 pub use imp::{app_menu, apply, on_menu_event, prepare_process};
 
 /// A double click on the title bar's drag area (bridge/macDrag.ts, macOS only): what the user's "Double-click a window's title
-/// bar to" setting says, as Electron did for 1.1.4's `-webkit-app-region: drag` area. Elsewhere nothing (Windows: W1's
-/// WM_NCHITTEST caption).
+/// bar to" setting says, as Electron did for 1.1.4's `-webkit-app-region: drag` area. Elsewhere nothing (Windows: the
+/// drag region is WebView2's HTCAPTION non-client region, where Windows itself maximizes on a double click; caption.rs).
 #[tauri::command]
 pub fn mac_title_double_click(window: tauri::WebviewWindow) -> Result<(), String> {
     #[cfg(target_os = "macos")]

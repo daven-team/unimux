@@ -12,6 +12,13 @@ export interface CaptionArea {
   close: CaptionRect;
 }
 
+/** The buttons' accessible names (the native hit-test window's text for screen readers). */
+export interface CaptionLabels {
+  min: string;
+  max: string;
+  close: string;
+}
+
 /** The pointer over the buttons: the hovered one, and the one held down (shown pressed only while the pointer is over it). */
 export interface CaptionPointer {
   hover: CaptionButtonId | null;
