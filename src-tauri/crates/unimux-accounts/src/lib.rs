@@ -18,6 +18,7 @@
 //! The commands are registered in `unimux-app/src/commands/accounts.rs` by the later A packages.
 
 pub mod activate;
+pub mod claude;
 pub mod codex;
 pub mod codex_activate;
 pub mod codex_store;
@@ -26,9 +27,15 @@ pub mod github;
 pub mod identity;
 mod js;
 pub mod legacy_swap;
+pub mod live;
 pub mod locks;
+pub mod migrate;
+pub mod reconcile;
 pub mod refresh;
+pub mod refs;
 pub mod results;
+pub mod resync;
+pub mod retry_after;
 pub mod rules;
 pub mod slot;
 pub mod store;

@@ -37,13 +37,11 @@ impl Steps {
     }
 
     /// A2: `recoverActivation()` (an interrupted swap or "Set as main").
-    #[allow(dead_code, reason = "the activation recovery (A2) registers here")]
     pub fn set_account_recovery(&self, step: Step) {
         *self.recovery.lock() = Some(step);
     }
 
     /// A1 / A2: `migrateAccounts()` (0.9.0 -> 0.9.1 identities and duplicates, once).
-    #[allow(dead_code, reason = "the account migration (A1 / A2) registers here")]
     pub fn set_account_migration(&self, step: Step) {
         *self.migration.lock() = Some(step);
     }
