@@ -158,7 +158,8 @@ try {
   const lone = await page.evaluate(`window.__mc.useStore.getState().s.snippets.find((x) => x.id === 'snip-lone')?.name`);
   check('a state.json with a lone surrogate loads (not kept aside as corrupt)', lone === 'cut \ufffd' && !listDir(dataDir).some((n) => n.startsWith('state.json.bak-')), JSON.stringify(lone));
   const raw = await page.evaluate(`window.mc.notes.saveImage(new Uint8Array([1, 2, 3]), 'image/png').then(() => 'resolved', (e) => e.name + ':' + e.command)`);
-  check('a Uint8Array argument goes through mc_invoke_raw (granted, routed)', raw === 'McNotYetError:notes:image:save', raw);
+  // G8 implements notes:image:save, so the raw call now resolves (before G8 it answered MC_NOT_YET; either way it was routed).
+  check('a Uint8Array argument goes through mc_invoke_raw (granted, routed)', raw === 'resolved', raw);
   // A refused send (not yet) must not hold the next one for the 2 s gap timeout.
   const t0 = Date.now();
   await page.evaluate(`(window.mc.cliOpenDocs('claude'), window.mc.systemBeep(), window.mc.reportError('order', 'after two not-yet sends'), 1)`);
