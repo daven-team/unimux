@@ -195,6 +195,13 @@ function backwardRecipes() {
     { cli: 'codex', lines: [[turn('gpt-a'), 1], [count(5), 1], [turn('gpt-b'), 1], [count(6), 1]], tail: turn('gpt-c') },
     // Lines split inside a multi-byte character at a chunk start.
     { cli: 'claude', lines: [[usage(55), 1], [JSON.stringify({ type: 'user', message: { content: '${REPEAT:40000:ż😀}' } }), 4]] },
+    // The limits: an unfinished last line longer than MAX_CHUNK (16 MiB) stops the read with nothing found and offset 0; no
+    // new chunk starts past MAX_BACKWARD (64 MiB; the last one started before it ends near 80 MiB), so a usage line 90 MB
+    // back is never found while one 60 MB back is. (A complete line of 16 MiB or more made 1.1.4 read the same chunk
+    // forever, so it has no golden; the Rust read stops there, see tracker.rs.)
+    { cli: 'claude', lines: [[usage(61), 1]], tail: '${REPEAT:17000000:x}' },
+    { cli: 'claude', lines: [[usage(63), 1], [filler(1_000_000), 90]] },
+    { cli: 'claude', lines: [[usage(64), 1], [filler(1_000_000), 60]] },
   ];
 }
 
@@ -329,6 +336,15 @@ function scenarios() {
     { claude: '${ROOT}/proj😀z-wt-b', name: 'other.jsonl', mtime: m(), lines: [cu('${ROOT}/proj😀z-wt-b', 'ez', 'same encoding, other project')] },
     { claude: '${ROOT}/projXYZ', name: 'collide.jsonl', mtime: m(), lines: [cu('${ROOT}/projXYZ', 'collide', 'never matches')] },
     { codex: '2025/10/08', name: 'rollout-e.jsonl', mtime: m(), lines: [meta('cx-e', `${E}\\`), xu('codex z emoji')] },
+  ] });
+  // Empty session ids: `head.id ?? tail.id` then a falsy check, so an empty head id hides the session even with a real id
+  // in the tail, and without a head id an empty first id in the tail hides it too.
+  list.push({ name: 'empty-ids', project: P, files: [
+    { claude: P, name: 'emptyhead.jsonl', mtime: m(), lines: [cu(P, '', 'pusty identyfikator')] },
+    { claude: P, name: 'emptyhead-tailid.jsonl', mtime: m(), lines: [cu(P, '', 'pusty w glowie'), { fill: 300, width: 900 }, { type: 'x', sessionId: 'real-tail' }] },
+    { claude: P, name: 'emptytail.jsonl', mtime: m(), lines: [{ type: 'user', message: { content: 'bez id w glowie' }, cwd: P }, { fill: 300, width: 900 }, { type: 'x', sessionId: '' }, { type: 'x', sessionId: 'later-id' }] },
+    { claude: P, name: 'notail.jsonl', mtime: m(), lines: [{ type: 'user', message: { content: 'bez id w glowie' }, cwd: P }, { fill: 300, width: 900 }, { type: 'x', sessionId: 5 }, { type: 'x', sessionId: 'tail-ok' }] },
+    { claude: P, name: 'ok.jsonl', mtime: m(), lines: [cu(P, 'ok', 'zwykla sesja')] },
   ] });
   // More than 600 rollout files: the oldest are never listed.
   const many = [];

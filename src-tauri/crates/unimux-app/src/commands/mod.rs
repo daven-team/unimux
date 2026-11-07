@@ -24,6 +24,10 @@ pub mod state;
 pub mod update;
 pub mod window;
 
+/// Tests that register a domain run one at a time: `register` replaces process-wide handles (agents' conversation search).
+#[cfg(test)]
+pub(crate) static REGISTER_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 pub fn register_all(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     fallbacks::register(r, ctx);
     app::register(r, ctx);
@@ -56,6 +60,7 @@ mod tests {
 
     #[test]
     fn every_registration_matches_the_contract() {
+        let _one = REGISTER_LOCK.lock();
         let dir = tempfile::tempdir().unwrap();
         let ctx = AppContext::new(
             dir.path().to_path_buf(),

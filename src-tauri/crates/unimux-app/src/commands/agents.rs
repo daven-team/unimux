@@ -127,6 +127,8 @@ fn env_dir(var: &str, fallback: impl FnOnce() -> PathBuf) -> PathBuf {
 /// The context tracker's view of the app: the live state, the cell's window for `cell:context`, the CLI folders.
 struct TrackerDeps {
     ctx: Weak<AppContext>,
+    /// Claude's config folder and Codex's home when not the environment's (tests: scratch folders).
+    dirs: Option<(PathBuf, PathBuf)>,
 }
 
 impl ContextTrackerDeps for TrackerDeps {
@@ -142,21 +144,27 @@ impl ContextTrackerDeps for TrackerDeps {
         }
     }
     fn claude_dir(&self) -> PathBuf {
-        env_dir("CLAUDE_CONFIG_DIR", || home::home_dir().join(".claude"))
+        match &self.dirs {
+            Some((claude, _)) => claude.clone(),
+            None => env_dir("CLAUDE_CONFIG_DIR", || home::home_dir().join(".claude")),
+        }
     }
     fn codex_home(&self) -> PathBuf {
-        env_dir("CODEX_HOME", || home::home_dir().join(".codex"))
+        match &self.dirs {
+            Some((_, codex)) => codex.clone(),
+            None => env_dir("CODEX_HOME", || home::home_dir().join(".codex")),
+        }
     }
 }
 
-/// The context tracker of this run (index.ts `contextTracker`), created by [`register`] (the last registered one; the
-/// router's handlers keep their own).
-static TRACKER: Mutex<Option<Arc<ContextTracker>>> = Mutex::new(None);
+/// The context tracker of each app context (index.ts `contextTracker`), created by [`register`]. Kept per context, so a
+/// context (a test's) never sees the tracker another one registered.
+static TRACKERS: Mutex<Vec<(Weak<AppContext>, Arc<ContextTracker>)>> = Mutex::new(Vec::new());
 
-/// The tracker for P3 (`forget` when a cell leaves the state for good) and M4 (`current` for list_agents).
+/// The tracker of `ctx` for P3 (`forget` when a cell leaves the state for good) and M4 (`current` for list_agents).
 #[allow(dead_code, reason = "read by P3 (forgetCell) and M4 (list_agents) once they land")]
-pub fn context_tracker() -> Option<Arc<ContextTracker>> {
-    TRACKER.lock().clone()
+pub fn context_tracker(ctx: &AppContext) -> Option<Arc<ContextTracker>> {
+    TRACKERS.lock().iter().find(|(c, _)| std::ptr::eq(c.as_ptr(), ctx)).map(|(_, t)| t.clone())
 }
 
 /// Which hook signals ask the tracker for a refresh (the `contextTracker` lines of the index.ts hook handlers).
@@ -186,9 +194,19 @@ fn poke_for(tracker: &Arc<ContextTracker>, ctx: &AppContext, signal: &HookSignal
 }
 
 fn register_context(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
+    register_context_with(r, ctx, None);
+}
+
+/// [`register_context`] with the CLI folders given (`dirs`: Claude's config folder and Codex's home) or, for None, taken
+/// from the environment. Returns the tracker the handlers use.
+fn register_context_with(r: &mut RouterBuilder, ctx: &Arc<AppContext>, dirs: Option<(PathBuf, PathBuf)>) -> Arc<ContextTracker> {
     let rt = tauri::async_runtime::handle().inner().clone();
-    let tracker = ContextTracker::new(TrackerDeps { ctx: Arc::downgrade(ctx) }, rt);
-    *TRACKER.lock() = Some(tracker.clone());
+    let tracker = ContextTracker::new(TrackerDeps { ctx: Arc::downgrade(ctx), dirs }, rt);
+    {
+        let mut trackers = TRACKERS.lock();
+        trackers.retain(|(c, _)| c.strong_count() > 0 && !std::ptr::eq(c.as_ptr(), Arc::as_ptr(ctx)));
+        trackers.push((Arc::downgrade(ctx), tracker.clone()));
+    }
     let weak = Arc::downgrade(ctx);
     let t = tracker.clone();
     ctx.hooks.observe(move |signal| {
@@ -199,8 +217,9 @@ fn register_context(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
 
     // guardedHandle('context:get'): a known cell's usage, read now (null for anything else).
     let weak = Arc::downgrade(ctx);
+    let handler = tracker.clone();
     r.invoke("context:get", move |call| {
-        let (t, weak) = (tracker.clone(), weak.clone());
+        let (t, weak) = (handler.clone(), weak.clone());
         async move {
             let Some(ctx) = weak.upgrade() else { return Ok(Value::Null) };
             let Some(cell) = call.arg(0).as_str().map(str::to_string) else { return Ok(Value::Null) };
@@ -210,6 +229,7 @@ fn register_context(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
             Ok(t.get(&cell).await.map_or(Value::Null, |u| u.to_json()))
         }
     });
+    tracker
 }
 
 /// The session listing of this run (the sessions.ts module caches) and the Codex session ids handed to cells this run
@@ -375,12 +395,9 @@ mod tests {
         }
     }
 
-    /// `register` replaces the process-wide CONV / TRACKER handles: the tests that read them run one at a time.
-    static REGISTER: Mutex<()> = Mutex::new(());
-
     #[test]
     fn conv_channels_answer_bad_requests_like_main_without_starting_the_index() {
-        let _one = REGISTER.lock();
+        let _one = crate::commands::REGISTER_LOCK.lock();
         let dir = tempfile::tempdir().unwrap();
         let ctx = AppContext::new(
             dir.path().to_path_buf(),
@@ -419,11 +436,11 @@ mod tests {
         ctx.saver.stop();
     }
 
-    /// H4: context:get through a transcript a hook named (no CLI folder of the environment is read), the refusals of
-    /// sessions:list and codex:bind that never read a home folder.
+    /// H4: context:get through a transcript a hook named (the tracker's CLI folders are scratch ones, so no CLI folder of the
+    /// environment is read), the refusals of sessions:list and codex:bind that never read a home folder.
     #[test]
     fn context_sessions_and_codex_bind_channels_answer_like_main() {
-        let _one = REGISTER.lock();
+        let _one = crate::commands::REGISTER_LOCK.lock();
         let dir = tempfile::tempdir().unwrap();
         const SESSION: &str = "3f2b9c1e-7a4d-4e21-9b0a-5c6d7e8f9a01";
         let state = json!({
@@ -443,9 +460,12 @@ mod tests {
             state,
         );
         let mut builder = RouterBuilder::new(Contract::embedded());
-        register(&mut builder, &ctx);
+        let scratch = (dir.path().join("claude-config"), dir.path().join("codex-home"));
+        let tracker = register_context_with(&mut builder, &ctx, Some(scratch));
+        register_sessions(&mut builder, &ctx);
         assert!(builder.errors().is_empty(), "{:?}", builder.errors());
         let router = builder.build(Arc::new(Open));
+        assert!(context_tracker(&ctx).is_some_and(|t| Arc::ptr_eq(&t, &tracker)), "the context's own tracker");
         for channel in ["context:get", "sessions:list", "codex:bind"] {
             assert_eq!(router.status(channel), Status::Implemented, "{channel}");
         }
@@ -464,7 +484,6 @@ mod tests {
         std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
         let line = json!({ "type": "assistant", "message": { "model": "claude-sonnet-4-5", "usage": { "input_tokens": 4, "cache_read_input_tokens": 50_000, "output_tokens": 6 } } });
         std::fs::write(&transcript, format!("{line}\n")).unwrap();
-        let tracker = context_tracker().expect("registered");
         poke_for(
             &tracker,
             &ctx,

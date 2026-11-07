@@ -94,7 +94,7 @@ fn expand_repeat(text: &str) -> String {
 fn backward_reads_over_real_files_match() {
     let dir = tempfile::tempdir().unwrap();
     let rows = rows("context-backward.jsonl");
-    assert!(rows.len() >= 14);
+    assert!(rows.len() >= 17, "{}", rows.len());
     for (i, row) in rows.iter().enumerate() {
         let recipe = &row["recipe"];
         let mut text = String::new();

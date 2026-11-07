@@ -120,6 +120,12 @@ pub fn scan_backwards(f: &File, size: u64, cli: ContextCli) -> std::io::Result<B
         if found.is_some() && (model.is_some() || cli == ContextCli::Claude) {
             break;
         }
+        // A complete line of MAX_CHUNK or more: the chunk ends with its line end and holds no other, so the read cannot move
+        // back. 1.1.4 read that same chunk forever (a hang); here the read stops with what it found, as for an unfinished
+        // line that long. A shorter chunk doubles, as in 1.1.4.
+        if start + (from as u64) == end && want >= MAX_CHUNK {
+            break;
+        }
         end = start + from as u64;
         want = (want * 2).min(MAX_CHUNK);
     }
@@ -562,6 +568,65 @@ mod tests {
         let back = scan_backwards(&f, size, ContextCli::Claude).unwrap();
         assert_eq!(back.scan.tokens, Some(5000.0));
         assert_eq!(back.offset, size - "{\"partial\":".len() as u64);
+    }
+
+    /// A complete line of MAX_CHUNK or more: 1.1.4 read the same chunk forever; the read stops with nothing found and the
+    /// offset at the end of the file. A shorter long line is still read past.
+    #[test]
+    fn a_complete_line_longer_than_max_chunk_stops_the_backward_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let usage_line = jsonl(&[claude_assistant(usage(1, 0, 61, 0), None, false)]);
+        for (width, expected) in [(MAX_CHUNK + 10, None), (MAX_CHUNK - 1024, Some(62.0))] {
+            let file = dir.path().join(format!("long-{width}.jsonl"));
+            let text = format!("{usage_line}{}\n", "x".repeat(width));
+            fs::write(&file, &text).unwrap();
+            let f = File::open(&file).unwrap();
+            let back = scan_backwards(&f, text.len() as u64, ContextCli::Claude).unwrap();
+            assert_eq!(back.scan.tokens, expected, "line of {width}");
+            assert_eq!(back.offset, text.len() as u64);
+        }
+    }
+
+    /// A file that grew by up to MAX_FORWARD is read forwards from the last offset; one that grew by more is read backwards
+    /// from its end again. The usage line at the start is rewritten in place (same length, same file), which only a
+    /// backward read sees.
+    #[tokio::test]
+    async fn a_file_that_grew_by_more_than_max_forward_is_read_backwards_again() {
+        for (grown, expected) in [(MAX_FORWARD, 11.0), (MAX_FORWARD + 1, 23.0)] {
+            let dir = tempfile::tempdir().unwrap();
+            let cwd = "D:\\Projekty\\demo";
+            let (tracker, _) = setup(dir.path(), &[("c1", target(ContextCli::Claude, SESSION, cwd))]);
+            let folder = dir.path().join(".claude").join("projects").join(claude_project_dir_name(cwd));
+            fs::create_dir_all(&folder).unwrap();
+            let file = folder.join(format!("{SESSION}.jsonl"));
+            let first = jsonl(&[claude_assistant(usage(1, 0, 10, 0), None, false)]);
+            fs::write(&file, &first).unwrap();
+            assert_eq!(tokens(tracker.get("c1").await), Some(11.0));
+            let rewritten = jsonl(&[claude_assistant(usage(1, 0, 22, 0), None, false)]);
+            assert_eq!(rewritten.len(), first.len());
+            let mut f = fs::OpenOptions::new().write(true).open(&file).unwrap();
+            f.write_all(rewritten.as_bytes()).unwrap();
+            drop(f);
+            // `grown` bytes of whole lines without usage: 1 KiB lines, then one shorter line for the rest.
+            let line = format!("{}\n", "x".repeat(1023));
+            let mut filler = line.repeat((grown / 1024) as usize);
+            let rest = (grown % 1024) as usize;
+            if rest > 0 {
+                filler.push_str(&format!("{}\n", "x".repeat(rest - 1)));
+            }
+            assert_eq!(filler.len() as u64, grown);
+            fs::OpenOptions::new().append(true).open(&file).unwrap().write_all(filler.as_bytes()).unwrap();
+            assert_eq!(tokens(tracker.get("c1").await), Some(expected), "grown by {grown}");
+            assert_eq!(tracker.reads(), 2);
+            // Then forwards again from the new end.
+            fs::OpenOptions::new()
+                .append(true)
+                .open(&file)
+                .unwrap()
+                .write_all(jsonl(&[claude_assistant(usage(1, 0, 40, 0), None, false)]).as_bytes())
+                .unwrap();
+            assert_eq!(tokens(tracker.get("c1").await), Some(41.0));
+        }
     }
 
     #[tokio::test(start_paused = true)]

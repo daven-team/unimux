@@ -635,6 +635,7 @@ mod tests {
     /// The W4 channels of the contract are implemented (alerts:testLimit is A5's).
     #[test]
     fn w4_channels_are_implemented() {
+        let _one = crate::commands::REGISTER_LOCK.lock();
         use unimux_core::crash_log::RollingLog;
         use unimux_core::dev_overrides::DevOverrides;
         use unimux_core::startup_timing::{StartupLog, StartupTimer};

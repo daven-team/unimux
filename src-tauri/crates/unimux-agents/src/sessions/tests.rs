@@ -335,6 +335,55 @@ fn lists_conversations_of_known_and_removed_repo_wt_worktrees_labelled_and_never
 }
 
 #[test]
+fn asks_git_for_the_branches_of_loose_worktrees_all_at_once_and_once_per_folder() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let index = SessionIndex::new();
+    let home = tempfile::Builder::new().prefix("mc-home-wt-").tempdir().unwrap();
+    let parent = tempfile::Builder::new().prefix("mc-parent-").tempdir().unwrap();
+    let p = |name: &str| parent.path().join(name).to_string_lossy().into_owned();
+    let project = p("app");
+    fs::create_dir_all(&project).unwrap();
+    const LOOSE: usize = 5;
+    for i in 0..LOOSE {
+        let cwd = p(&format!("app-wt-{i}"));
+        fs::create_dir_all(&cwd).unwrap();
+        let dir = home.path().join(".claude").join("projects").join(claude_project_dir_name(&cwd));
+        fs::create_dir_all(&dir).unwrap();
+        // Two conversations in each folder: still one lookup for it.
+        for n in 0..2 {
+            let id = format!("s{i}-{n}");
+            fs::write(
+                dir.join(format!("{id}.jsonl")),
+                jsonl(&[json!({ "type": "user", "message": { "content": "x" }, "sessionId": id, "cwd": cwd })]),
+            )
+            .unwrap();
+        }
+    }
+    let (calls, active, most) = (AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0));
+    let branch_of = |path: &str| {
+        calls.fetch_add(1, Ordering::SeqCst);
+        let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+        most.fetch_max(now, Ordering::SeqCst);
+        // A slow git: the lookups overlap only when they run at the same time.
+        std::thread::sleep(Duration::from_millis(300));
+        active.fetch_sub(1, Ordering::SeqCst);
+        Some(format!("b/{}", split_path(path).1))
+    };
+    let started = Instant::now();
+    let list = index.list_sessions(home.path(), &project, &[], Some(&branch_of)).unwrap();
+    let took = started.elapsed();
+    assert_eq!(list.len(), 2 * LOOSE);
+    assert_eq!(calls.load(Ordering::SeqCst), LOOSE);
+    assert_eq!(most.load(Ordering::SeqCst), LOOSE, "every lookup ran at the same time");
+    assert!(took < Duration::from_millis(300 * LOOSE as u64), "{took:?}");
+    for info in &list {
+        let wt = info.worktree.as_ref().unwrap();
+        assert_eq!(wt.branch.as_deref(), Some(format!("b/{}", split_path(&wt.path).1).as_str()));
+        assert_eq!(Some(wt.label.as_str()), wt.branch.as_deref());
+    }
+}
+
+#[test]
 fn a_non_string_cwd_fails_the_listing_like_the_type_error_of_1_1_4() {
     let index = SessionIndex::new();
     let home = tempfile::tempdir().unwrap();

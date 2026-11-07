@@ -287,7 +287,9 @@ fn parse_claude_tail(text: &str, need_id: bool) -> ClaudeTail {
 }
 
 fn claude_info(head: &ClaudeHead, tail: &ClaudeTail, st: &FileStat) -> Option<SessionInfo> {
-    let id = head.id.clone().or_else(|| tail.id.clone())?;
+    // `head.id ?? tail.id` with a falsy check after it: an empty id (in the head or, without a head id, in the tail) hides
+    // the session, as in 1.1.4.
+    let id = head.id.clone().or_else(|| tail.id.clone()).filter(|id| !id.is_empty())?;
     // A title the user gave with /rename wins over the generated one; the latest entry of either kind counts.
     let title =
         tail.custom.as_ref().or(head.custom.as_ref()).or(tail.ai.as_ref()).or(head.ai.as_ref()).or(head.prompt.as_ref())?;
@@ -462,6 +464,32 @@ pub fn worktree_matcher(project_path: &str, known: &[WorktreeHint]) -> impl Fn(&
 /// The current branch of an existing worktree folder (for a resumed cell); None when git cannot tell.
 pub type BranchOf<'a> = &'a (dyn Fn(&str) -> Option<String> + Sync);
 
+/// At most this many branch lookups run at the same time.
+const BRANCH_LOOKUPS: usize = 16;
+
+/// Runs `f` over `items` on their own threads (up to [`BRANCH_LOOKUPS`] at a time), the results in the order of the items.
+/// Unlike [`pool`] it never runs a few items one after the other: each item may wait (a git process) rather than work.
+fn all_at_once<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    if items.len() <= 1 {
+        return items.iter().map(f).collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let out: Mutex<Vec<Option<R>>> = Mutex::new((0..items.len()).map(|_| None).collect());
+    std::thread::scope(|s| {
+        for _ in 0..items.len().min(BRANCH_LOOKUPS) {
+            s.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let Some(item) = items.get(i) else { break };
+                    let r = f(item);
+                    out.lock()[i] = Some(r);
+                }
+            });
+        }
+    });
+    out.into_inner().into_iter().flatten().collect()
+}
+
 /// The shared Codex index: the home it lists, when it was built, its entries.
 type SharedIndex = (PathBuf, Instant, Arc<Vec<Arc<CodexEntry>>>);
 
@@ -532,7 +560,10 @@ impl SessionIndex {
             _ => parse_claude_head(&read_slice(file, 0, HEAD_BYTES)?, st.size),
         };
         let tail = if st.size > HEAD_BYTES as u64 {
-            parse_claude_tail(&read_slice(file, st.size.saturating_sub(TAIL_BYTES as u64), TAIL_BYTES)?, head.id.is_none())
+            parse_claude_tail(
+                &read_slice(file, st.size.saturating_sub(TAIL_BYTES as u64), TAIL_BYTES)?,
+                head.id.as_deref().is_none_or(str::is_empty),
+            )
         } else {
             ClaudeTail::default()
         };
@@ -814,19 +845,44 @@ impl SessionIndex {
         for w in worktrees {
             known.insert(normalize_project_path(&w.path), w.branch.clone());
         }
-        let mut branches: HashMap<String, Option<String>> = HashMap::new();
+        let wt: Vec<(SessionInfo, String, String, bool)> = claude_wt
+            .into_iter()
+            .chain(codex_wt)
+            .map(|info| {
+                let cwd = info.cwd.as_str().unwrap_or_default().to_string();
+                let key = normalize_project_path(&cwd);
+                let exists = Path::new(&cwd).exists();
+                (info, cwd, key, exists)
+            })
+            .collect();
+        // The folders whose branch git must tell (one lookup per folder, with the first spelling of its path), asked all at
+        // once like 1.1.4's Promise.all: the listing waits for the slowest lookup, not for their sum.
+        let mut asked: Vec<(String, String)> = Vec::new();
+        if branch_of.is_some() {
+            let mut seen: HashSet<&str> = HashSet::new();
+            for (_, cwd, key, exists) in &wt {
+                if *exists && known.get(key).is_none_or(String::is_empty) && seen.insert(key) {
+                    asked.push((key.clone(), cwd.clone()));
+                }
+            }
+        }
+        let branches: HashMap<String, Option<String>> = match branch_of {
+            Some(branch_of) => all_at_once(&asked, |(_, cwd)| branch_of(cwd))
+                .into_iter()
+                .zip(&asked)
+                .map(|(branch, (key, _))| (key.clone(), branch))
+                .collect(),
+            None => HashMap::new(),
+        };
         let mut out = claude;
         out.extend(codex);
-        for mut info in claude_wt.into_iter().chain(codex_wt) {
-            let cwd = info.cwd.as_str().unwrap_or_default().to_string();
-            let key = normalize_project_path(&cwd);
-            let exists = Path::new(&cwd).exists();
+        for (mut info, cwd, key, exists) in wt {
             let mut branch = known.get(&key).cloned();
             if branch.as_deref().is_none_or(str::is_empty)
                 && exists
-                && let Some(branch_of) = branch_of
+                && let Some(found) = branches.get(&key)
             {
-                branch = branches.entry(key).or_insert_with(|| branch_of(&cwd)).clone();
+                branch = found.clone();
             }
             let label = branch.clone().unwrap_or_else(|| split_path(&cwd).1);
             info.worktree = Some(WorktreeLabel { path: cwd, label, exists, branch });
