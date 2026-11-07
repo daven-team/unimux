@@ -6,10 +6,14 @@
 //! identity}.ts, src/shared/{accounts,codexAccounts}.ts and the identity readers of src/main/usage/credentials.ts and
 //! src/main/accounts/codexActivate.ts. The files they write are byte-identical to 1.1.4's (test/golden/accounts-*.jsonl).
 //!
+//! A6: the GitHub sign-in of "Publish to GitHub" ([`github`]: token store, `gh` fallback, device flow, status cache, the git
+//! environment and refusal regexes), registered in `unimux-app/src/commands/github.rs`.
+//!
 //! The commands are registered in `unimux-app/src/commands/accounts.rs` by the later A packages.
 
 pub mod codex;
 pub mod codex_store;
+pub mod github;
 pub mod identity;
 mod js;
 pub mod locks;

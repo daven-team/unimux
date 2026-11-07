@@ -5677,18 +5677,31 @@ checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 name = "unimux-accounts"
 version = "1.2.0"
 dependencies = [
+ "base64 0.23.1",
+ "bytes",
  "dunce",
  "futures",
  "getrandom 0.4.3",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "parking_lot 0.13.0",
+ "regex",
  "serde",
  "serde_json",
  "sha2 0.11.1",
  "tempfile",
  "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
  "unimux-core",
+ "unimux-exec",
  "unimux-ipc",
+ "unimux-net",
+ "unimux-oscrypt",
+ "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
