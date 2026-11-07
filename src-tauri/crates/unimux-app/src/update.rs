@@ -296,6 +296,8 @@ impl UpdateService {
             timeout_ms: uw::INSTALL_TIMEOUT_MS,
             env: None,
             webview_dir: None,
+            // The macOS bundle swap (U5) is not wired into the coordinator yet: the Mac still only gets the download page.
+            swap: None,
         };
         let started = Instant::now();
         let lock = self.stage_lock.clone();
