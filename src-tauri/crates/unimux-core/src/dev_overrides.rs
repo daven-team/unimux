@@ -59,17 +59,19 @@ impl DevOverrides {
         // `process.env[name] || undefined`: an empty value counts as unset.
         let s = |n: &str| get(n).filter(|v| !v.is_empty());
         let flag = |n: &str| s(n).is_some_and(|v| v != "0");
+        // `process.env[name] === '1'`: these four are on for exactly "1" ("true", "yes" or "2" leave them off).
+        let one = |n: &str| get(n).is_some_and(|v| v == "1");
         Self {
             data_dir: s("MC_DATA_DIR").map(PathBuf::from),
             debug_port: s("MC_DEBUG_PORT").and_then(|v| v.trim().parse().ok()).filter(|p| *p != 0),
             offscreen: flag("MC_OFFSCREEN"),
-            hook_debug: flag("MC_HOOK_DEBUG"),
-            ssh_debug: flag("MC_SSH_DEBUG"),
-            ssh_no_safestorage: flag("MC_SSH_NO_SAFESTORAGE"),
+            hook_debug: one("MC_HOOK_DEBUG"),
+            ssh_debug: one("MC_SSH_DEBUG"),
+            ssh_no_safestorage: one("MC_SSH_NO_SAFESTORAGE"),
             trash_dir: s("MC_TRASH_DIR").map(PathBuf::from),
             db_export_dir: s("MC_DB_EXPORT_DIR").map(PathBuf::from),
             notes_export_dir: s("MC_NOTES_EXPORT_DIR").map(PathBuf::from),
-            cli_no_registry: flag("MC_CLI_NO_REGISTRY"),
+            cli_no_registry: one("MC_CLI_NO_REGISTRY"),
             cli_probe_profile: s("MC_CLI_PROBE_PROFILE"),
             install_command_override: s("MC_INSTALL_COMMAND_OVERRIDE"),
             usage_claude_url: s("MC_USAGE_CLAUDE_URL"),
@@ -112,6 +114,22 @@ mod tests {
         assert_eq!(o.debug_port, Some(9333));
         assert!(o.offscreen);
         assert_eq!(o.update_feed, None);
+    }
+
+    #[test]
+    fn the_exact_one_switches_ignore_other_values() {
+        for v in ["true", "yes", "2", "0", " 1", ""] {
+            let o = DevOverrides::from_lookup_enabled(
+                true,
+                env(&[("MC_HOOK_DEBUG", v), ("MC_SSH_DEBUG", v), ("MC_SSH_NO_SAFESTORAGE", v), ("MC_CLI_NO_REGISTRY", v)]),
+            );
+            assert!(!o.hook_debug && !o.ssh_debug && !o.ssh_no_safestorage && !o.cli_no_registry, "{v:?}");
+        }
+        let o = DevOverrides::from_lookup_enabled(
+            true,
+            env(&[("MC_HOOK_DEBUG", "1"), ("MC_SSH_DEBUG", "1"), ("MC_SSH_NO_SAFESTORAGE", "1"), ("MC_CLI_NO_REGISTRY", "1")]),
+        );
+        assert!(o.hook_debug && o.ssh_debug && o.ssh_no_safestorage && o.cli_no_registry);
     }
 
     #[test]

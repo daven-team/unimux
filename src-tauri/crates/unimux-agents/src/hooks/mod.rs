@@ -152,9 +152,12 @@ fn exit_code(s: &str) -> Option<i64> {
 }
 
 /// Appends a Stop / StopFailure / SessionStart diagnostics line to `<dir>/hook-debug.log` (restarted when it exceeds
-/// 256 KiB). Diagnostics are optional: every error is ignored.
+/// 256 KiB). Diagnostics are optional: every error is ignored. Writes are serialized (Node ran them on one thread): two
+/// handlers that both saw the old size must not truncate each other's line.
 pub fn log_stop_debug(dir: &Path, cell_id: &str, body: &str, kind: Option<DebugKind>) {
     use std::io::Write as _;
+    static WRITE: Mutex<()> = Mutex::new(());
+    let _one_at_a_time = WRITE.lock();
     let file = dir.join("hook-debug.log");
     let _ = std::fs::create_dir_all(dir);
     let size = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
@@ -260,7 +263,8 @@ impl HookServer {
         Ok(port)
     }
 
-    /// Stops accepting connections (`server.close()`: requests in flight finish).
+    /// `server.close()` of Node 22: no new connections, idle keep-alive connections close now, requests in flight finish and
+    /// their connection closes after the answer.
     pub fn stop(&self) {
         if let Some(tx) = self.stop.lock().take() {
             let _ = tx.send(true);
@@ -332,17 +336,24 @@ async fn accept_loop(listener: TcpListener, shared: Arc<Shared>, mut stop: watch
         };
         let _ = stream.set_nodelay(true);
         let shared = shared.clone();
+        let mut conn_stop = stop.clone();
         tokio::spawn(async move {
             let io = TokioIo::new(stream);
             let service = service_fn(move |req: Request<Incoming>| {
                 let shared = shared.clone();
                 async move { Ok::<_, Infallible>(handle(&shared, req).await) }
             });
-            let _ = http1::Builder::new()
-                .timer(TokioTimer::new())
-                .header_read_timeout(REQUEST_TIMEOUT)
-                .serve_connection(io, service)
-                .await;
+            let conn =
+                http1::Builder::new().timer(TokioTimer::new()).header_read_timeout(REQUEST_TIMEOUT).serve_connection(io, service);
+            tokio::pin!(conn);
+            tokio::select! {
+                _ = conn.as_mut() => {}
+                // Stopped (or the server is gone): an idle connection closes, a request in flight is answered first.
+                () = async { let _ = conn_stop.wait_for(|stopped| *stopped).await; } => {
+                    conn.as_mut().graceful_shutdown();
+                    let _ = conn.await;
+                }
+            }
         });
     }
 }
