@@ -3,9 +3,11 @@
 //! usual place is tried; anything else (signed out, too old, slow, too much output) is `Failed`.
 //!
 //! The bare name `gh` is looked up on the PATH of the environment it runs in, like Node's libuv does: on Windows each entry
-//! (quotes removed) with `.com` then `.exe` appended (a name with an extension is tried as it is first), elsewhere an
-//! executable file of that name. libuv also tries the current directory first on Windows; that is left out on purpose (the
-//! app's working directory is not a place a program should be picked up from).
+//! (sliced like libuv's `search_path`: an entry that starts with `"` or `'` runs to its closing quote, so a `;` inside belongs
+//! to the folder, and the outer quote characters are dropped) with `.com` then `.exe` appended (a name with an extension is
+//! tried as it is first), elsewhere an executable file of that name. libuv also tries the current directory first on Windows
+//! (and for an empty or quotes-only PATH entry); that is left out on purpose (the app's working directory is not a place a
+//! program should be picked up from).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -113,11 +115,46 @@ pub fn resolve_program(file: &str, env: &Env, windows: bool) -> Option<PathBuf> 
         return found(Path::new(file));
     }
     let path = env_value(env, "PATH")?;
-    let separator = if windows { ';' } else { ':' };
-    path.split(separator)
-        .map(|entry| if windows { entry.replace('"', "") } else { entry.to_string() })
-        .filter(|entry| !entry.is_empty())
-        .find_map(|dir| found(&Path::new(&dir).join(file)))
+    let dirs = if windows { windows_path_entries(path) } else { path.split(':').map(str::to_string).collect() };
+    dirs.into_iter().filter(|entry| !entry.is_empty()).find_map(|dir| found(&Path::new(&dir).join(file)))
+}
+
+fn is_quote(c: char) -> bool {
+    c == '"' || c == '\''
+}
+
+/// The folders of a Windows PATH the way libuv's `search_path` slices it: an entry that starts with `"` or `'` runs to the
+/// matching closing quote (a `;` inside is part of the folder) and from there to the next `;`; any other entry runs to the
+/// next `;`. One leading and one trailing quote character (`"` or `'`) are dropped; quotes elsewhere stay. Entries that end
+/// up empty are dropped (libuv would try them as the current directory, see the module doc).
+pub fn windows_path_entries(path: &str) -> Vec<String> {
+    let chars: Vec<char> = path.chars().collect();
+    let next = |from: usize, c: char| chars[from..].iter().position(|x| *x == c).map_or(chars.len(), |i| from + i);
+    let mut out = Vec::new();
+    let mut start = 0;
+    while start <= chars.len() {
+        let quote_end = match chars.get(start) {
+            Some(&q) if is_quote(q) => next(start + 1, q),
+            _ => start,
+        };
+        let end = next(quote_end, ';');
+        let mut slice = &chars[start..end];
+        if let [first, rest @ ..] = slice
+            && is_quote(*first)
+        {
+            slice = rest;
+        }
+        if let [rest @ .., last] = slice
+            && is_quote(*last)
+        {
+            slice = rest;
+        }
+        if !slice.is_empty() {
+            out.push(slice.iter().collect());
+        }
+        start = end + 1;
+    }
+    out
 }
 
 impl GhExec for SystemGhExec {
@@ -173,6 +210,35 @@ mod tests {
         assert_eq!(resolve_program("gh", &env(&dir.path().join("c").to_string_lossy()), true), None);
         // No PATH at all: not found.
         assert_eq!(resolve_program("gh", &vec![], true), None);
+        // A single-quoted entry, and a double-quoted folder whose name contains ';' (libuv finds gh in both).
+        let q = dir.path().join("q");
+        let semi = dir.path().join("a;b");
+        std::fs::create_dir_all(&q).unwrap();
+        std::fs::create_dir_all(&semi).unwrap();
+        std::fs::write(q.join("gh.exe"), b"").unwrap();
+        std::fs::write(semi.join("gh.exe"), b"").unwrap();
+        let single = format!("'{}';{}", q.display(), b.display());
+        assert_eq!(resolve_program("gh", &env(&single), true), Some(q.join("gh.exe")));
+        let quoted_semi = format!("\"{}\";{}", semi.display(), b.display());
+        assert_eq!(resolve_program("gh", &env(&quoted_semi), true), Some(semi.join("gh.exe")));
+    }
+
+    #[test]
+    fn windows_path_entries_like_libuv_search_path() {
+        let e = windows_path_entries;
+        assert_eq!(e(r"C:\a;C:\b"), vec![r"C:\a", r"C:\b"]);
+        assert_eq!(e(r#""C:\a;b";C:\c"#), vec![r"C:\a;b", r"C:\c"]);
+        assert_eq!(e(r"'C:\a;b';C:\c"), vec![r"C:\a;b", r"C:\c"]);
+        // Zero-length and quotes-only entries are dropped.
+        assert_eq!(e(r#";;C:\a;;"";''"#), vec![r"C:\a"]);
+        assert_eq!(e(""), Vec::<String>::new());
+        // An unclosed quote runs to the end of PATH.
+        assert_eq!(e(r#""C:\a;b"#), vec![r"C:\a;b"]);
+        // Text after the closing quote stays up to the next ';'; one trailing quote of either kind is dropped.
+        assert_eq!(e(r#""C:\a"x;C:\b'"#), vec![r#"C:\a"x"#, r"C:\b"]);
+        // Quotes inside an entry stay (only the outer ones go), and the two quote kinds do not close each other.
+        assert_eq!(e(r#"C:\a"b\c"#), vec![r#"C:\a"b\c"#]);
+        assert_eq!(e(r#""C:\a';b";C:\c"#), vec![r"C:\a';b", r"C:\c"]);
     }
 
     #[cfg(unix)]

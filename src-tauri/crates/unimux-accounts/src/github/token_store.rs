@@ -150,6 +150,11 @@ impl GithubTokenStore {
     /// The token, or None (none, or the system cannot decrypt it any more). Decrypted once per run.
     pub fn get(&self) -> Option<String> {
         let mut inner = self.inner.lock();
+        self.current(&mut inner)
+    }
+
+    /// `get()` under a lock the caller holds.
+    fn current(&self, inner: &mut Inner) -> Option<String> {
         if let Some(plain) = &inner.plain {
             return Some(plain.to_string());
         }
@@ -197,6 +202,22 @@ impl GithubTokenStore {
     /// Forgets the token (memory and disk).
     pub fn clear(&self) {
         let mut inner = self.inner.lock();
+        self.clear_locked(&mut inner);
+    }
+
+    /// Forgets the token only if it is still `token`, in one step (1.1.4's `if (store.get() === token) store.clear()` runs
+    /// on one JS thread; here a `set` from the device flow could land between the two calls and be wiped). True when it was
+    /// forgotten.
+    pub fn clear_if(&self, token: &str) -> bool {
+        let mut inner = self.inner.lock();
+        if self.current(&mut inner).as_deref() != Some(token) {
+            return false;
+        }
+        self.clear_locked(&mut inner);
+        true
+    }
+
+    fn clear_locked(&self, inner: &mut Inner) {
         inner.plain = None;
         inner.secret = None;
         inner.user = None;

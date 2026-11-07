@@ -2,9 +2,10 @@
 //! (device flow), the token of an installed and signed-in GitHub CLI (`gh auth token`, run without a shell; a missing gh is
 //! no error), else nothing. The token stays in Rust; the renderer only ever sees the source and the user name.
 //!
-//! JS runs these methods on one thread; here they can run on several, so the two places where 1.1.4 relies on that are made
-//! atomic: the device-flow start checks its ticket and installs its flow under the lock a cancel takes, and the shared check
-//! of the stored token is installed under the lock its task clears. Background work (the device-flow poll, the stored check)
+//! JS runs these methods on one thread; here they can run on several, so the places where 1.1.4 relies on that are made
+//! atomic: the device-flow start checks its ticket and installs its flow under the lock a cancel takes, the shared check
+//! of the stored token is installed under the lock its task clears, and forgetting a refused stored token compares and
+//! clears under the token store's one lock (`clear_if`), so a sign-in that finishes at the same moment is not wiped. Background work (the device-flow poll, the stored check)
 //! runs as its own task, as the JS promises run whether or not anyone awaits them.
 
 use std::sync::Arc;
@@ -259,9 +260,7 @@ impl GithubAuth {
 
     /// Forgets the stored token if it is still `token` (a sign-in that finished in the meantime stays).
     fn forget_stored(&self, token: &str) {
-        if self.deps.store.get().as_deref() == Some(token) {
-            self.deps.store.clear();
-        }
+        self.deps.store.clear_if(token);
         let mut known = self.known.lock();
         if known.as_ref().is_some_and(|k| k.token == token) {
             *known = None;

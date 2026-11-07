@@ -366,6 +366,68 @@ fn store_without_safe_storage_is_memory_only() {
     assert_eq!(store_at(dir.path(), no_cipher()).get(), None);
 }
 
+/// The fixture cipher with a decrypt that says it started and then waits until the test lets it go.
+struct GatedCipher {
+    inner: Arc<dyn SafeCipher>,
+    entered: std::sync::mpsc::SyncSender<()>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl SafeCipher for GatedCipher {
+    fn storage(&self) -> Storage {
+        self.inner.storage()
+    }
+    fn encrypt(&self, text: &str) -> Result<Vec<u8>, unimux_oscrypt::Error> {
+        self.inner.encrypt(text)
+    }
+    fn decrypt(&self, blob: &[u8]) -> Result<zeroize::Zeroizing<String>, unimux_oscrypt::Error> {
+        let _ = self.entered.send(());
+        let _ = self.release.lock().recv();
+        self.inner.decrypt(blob)
+    }
+}
+
+/// Forgetting a refused token compares and clears in one step: a `set` of a new token (the device flow finishing) that runs
+/// at the same time is never wiped, in memory or on disk; a token that is no longer the stored one is not forgotten.
+#[test]
+fn store_clear_if_keeps_a_token_set_meanwhile() {
+    const NEW: &str = "gho_newTokenFromTheDeviceFlow00000000000";
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("github").join("token.json");
+    store_at(dir.path(), fixture_cipher()).set(TOKEN, Some("old")).unwrap();
+    let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(4);
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let cipher: Arc<dyn SafeCipher> =
+        Arc::new(GatedCipher { inner: fixture_cipher(), entered: entered_tx, release: Mutex::new(release_rx) });
+    // Not cached yet: clear_if has to decrypt, and waits inside its comparison.
+    let store = Arc::new(store_at(dir.path(), cipher));
+    let forget = std::thread::spawn({
+        let store = store.clone();
+        move || store.clear_if(TOKEN)
+    });
+    entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let set = std::thread::spawn({
+        let store = store.clone();
+        move || store.set(NEW, Some("new"))
+    });
+    std::thread::sleep(Duration::from_millis(50));
+    release_tx.send(()).unwrap();
+    assert!(forget.join().unwrap(), "the old token was still the stored one");
+    assert_eq!(set.join().unwrap(), Ok(true));
+    assert_eq!(store.get().as_deref(), Some(NEW));
+    assert_eq!(store.login().as_deref(), Some("new"));
+    assert!(file.exists());
+    // The file holds the new token.
+    assert_eq!(store_at(dir.path(), fixture_cipher()).get().as_deref(), Some(NEW));
+    // A token that is not the stored one any more: nothing is forgotten.
+    assert!(!store.clear_if(TOKEN));
+    assert_eq!(store.get().as_deref(), Some(NEW));
+    assert!(file.exists());
+    assert!(store.clear_if(NEW));
+    assert_eq!(store.get(), None);
+    assert!(!file.exists());
+}
+
 /// "refuses text that cannot be a token".
 #[test]
 fn store_refuses_non_tokens() {
