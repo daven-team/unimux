@@ -183,9 +183,13 @@ impl Automation for Scripted {
         op: &str,
         args: Value,
         actor: &str,
-        _cancel: Option<CancellationToken>,
+        cancel: Option<CancellationToken>,
     ) -> BoxFuture<'static, Result<Value, OpError>> {
-        self.calls.lock().push(json!({ "op": op, "args": stringify(&compact_long(&args)), "actor": actor }));
+        // `signal`: whether the call gets the request's cancellation (1.1.4 passes ctx.signal only to wait_for, the long
+        // wait's slices and the legacy names).
+        self.calls
+            .lock()
+            .push(json!({ "op": op, "args": stringify(&compact_long(&args)), "actor": actor, "signal": cancel.is_some() }));
         let result = (|| {
             schemas::operation(op).unwrap().parse(&args).map_err(OpError::Invalid)?;
             let mut responses = self.responses.lock();
@@ -279,11 +283,7 @@ async fn call_tool_over_a_scripted_service_matches_1_1_4() {
             }
             got.insert("calls".into(), Value::Array(service.calls.lock().clone()));
             got.insert("elicits".into(), Value::Array(elicits.lock().clone()));
-            let mut want = step.clone();
-            for call in want["calls"].as_array_mut().unwrap() {
-                call.as_object_mut().unwrap().remove("signal");
-            }
-            let (got, want) = (stringify(&Value::Object(got)), stringify(&want));
+            let (got, want) = (stringify(&Value::Object(got)), stringify(step));
             if got != want && failures.len() < 20 {
                 failures.push(format!("{scenario} / {tool}\n  got  {got}\n  want {want}"));
             }

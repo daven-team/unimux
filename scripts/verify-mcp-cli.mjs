@@ -41,7 +41,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  */
 async function electronHarness() {
   const h = await startMcpHarness(undefined, { rateLimit: false });
-  const side = await h.service.execute('create_grid', { name: 'Side', cells: [{ profileId: 'codex', role: 'worker', name: 'Side worker', prompt: 'Work' }] }, h.coordinator.id);
+  const side = await h.service.execute('create_grid', { name: 'Side', cells: [{ profileId: 'codex', role: 'worker', name: 'Side worker', prompt: 'Work' }] }, h.coordinator.id)
+    .catch(async (error) => { await h.server.stop(); throw error; });
   return {
     url: h.url, coordinator: h.coordinator.id, worker: h.worker.id, reviewer: h.reviewer.id, sideGridId: side.gridId,
     issueToken: async (cell) => h.server.issueToken(cell), revokeCell: async (cell) => h.server.revokeCell(cell),
@@ -83,9 +84,22 @@ async function tauriHarness() {
   const env = { ...scrubAppEnv({ ...process.env }), MC_DATA_DIR: data, MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port), ...home.env,
     [pathKey]: `${agents}${win ? ';' : ':'}${process.env[pathKey] ?? ''}` };
   const child = spawnApp({ env });
-  const target = await waitForMainPage(port, { child, ms: 45000 });
-  const socket = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((r, j) => { socket.addEventListener('open', r, { once: true }); socket.addEventListener('error', j, { once: true }); });
+  let socket;
+  // A start that fails (no window, no CDP socket, no MCP server) must not leave the check build and its cells running.
+  try {
+    const target = await waitForMainPage(port, { child, ms: 45000 });
+    socket = new WebSocket(target.webSocketDebuggerUrl);
+    await new Promise((r, j) => { socket.addEventListener('open', r, { once: true }); socket.addEventListener('error', j, { once: true }); });
+    return await tauriSession(child, socket);
+  } catch (error) {
+    try { socket?.close(); } catch { /* closed */ }
+    await killAppTreeAndWait(child);
+    throw error;
+  }
+}
+
+/** The harness over the started check build's CDP socket; throws when its MCP server does not come up. */
+async function tauriSession(child, socket) {
   let id = 0;
   const pending = new Map();
   socket.addEventListener('message', (e) => { const m = JSON.parse(e.data); const p = pending.get(m.id); if (p) { pending.delete(m.id); if (m.error) p.reject(new Error(m.error.message)); else p.resolve(m.result); } });
@@ -169,10 +183,11 @@ const resultText = (r) => (Array.isArray(r?.content) ? r.content.map((c) => c.te
 const report = [];
 /** MCP_CLI_WAIT=<seconds> adds the long wait_for checks (Claude up to 600 s, Codex up to 170 s); off by default (they take minutes). */
 const waitSec = Number(process.env.MCP_CLI_WAIT) || 0;
-const h = isTauri ? await tauriHarness() : await electronHarness();
-report.push(`server: ${isTauri ? 'the Tauri check build' : 'the 1.1.4 TS reference'} at ${h.url}`);
+let h;
 const servers = [];
 try {
+  h = isTauri ? await tauriHarness() : await electronHarness();
+  report.push(`server: ${isTauri ? 'the Tauri check build' : 'the 1.1.4 TS reference'} at ${h.url}`);
   if (await installed('claude')) {
     const configDir = join(root, 'claude-config'), project = join(root, 'claude-project');
     mkdirSync(configDir); mkdirSync(project);
@@ -325,7 +340,7 @@ try {
   console.error(error);
   process.exitCode = 1;
 } finally {
-  await h.stop();
+  await h?.stop();
   for (const server of servers) server.close();
   removeScratch(root);
 }

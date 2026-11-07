@@ -379,7 +379,8 @@ export async function callRows({ callTool, describeError, automationSchemas, tra
         },
       };
       const ctx = {
-        service, actorId: scenario.actor, task: scenario.task === true,
+        // A live signal, as the MCP server gives every call: the recorded calls show which ones get it (signal: true).
+        service, actorId: scenario.actor, task: scenario.task === true, signal: new AbortController().signal,
         ...(scenario.language ? { tr: (key, params) => translate(scenario.language, key, params) } : {}),
         ...(answers ? { elicit: async (message, requestedSchema) => { elicits.push({ message, schema: requestedSchema }); return answers.shift() ?? { action: 'cancel' }; } } : {}),
       };

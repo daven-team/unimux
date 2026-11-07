@@ -6,15 +6,17 @@
 mod support;
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use support::http::{ACCEPT, Flow, Request, Res};
 use support::{call, init};
+use tokio_util::sync::CancellationToken;
 use unimux_mcp::catalog;
 use unimux_mcp::fake::FakeAutomation;
-use unimux_mcp::{Automation, Config, McpServer, McpTools};
+use unimux_mcp::tools::BoxFuture;
+use unimux_mcp::{Automation, Config, McpServer, McpTools, OpError};
 
 const LEAD: &str = "lead";
 const WORKER: &str = "backend";
@@ -34,9 +36,46 @@ fn harness_state() -> Value {
     })
 }
 
+/// The stand-in service as the tool layer sees it, recording how every wait_for of the service ended (its result).
+struct Watched {
+    inner: FakeAutomation,
+    waits_ended: Arc<Mutex<Vec<Value>>>,
+}
+
+impl Automation for Watched {
+    fn state(&self) -> Arc<Value> {
+        self.inner.state()
+    }
+    fn role_of(&self, cell: &str) -> Option<catalog::Role> {
+        self.inner.role_of(cell)
+    }
+    fn prompts_shown(&self, cell: &str) -> Arc<Mutex<std::collections::HashSet<String>>> {
+        self.inner.prompts_shown(cell)
+    }
+    fn execute(
+        &self,
+        op: &str,
+        args: Value,
+        actor: &str,
+        cancel: Option<CancellationToken>,
+    ) -> BoxFuture<'static, Result<Value, OpError>> {
+        let run = self.inner.execute(op, args, actor, cancel);
+        if op != "wait_for" {
+            return run;
+        }
+        let ended = self.waits_ended.clone();
+        Box::pin(async move {
+            let r = run.await;
+            ended.lock().push(r.as_ref().map_or_else(|e| json!({ "error": format!("{e:?}") }), Clone::clone));
+            r
+        })
+    }
+}
+
 struct H {
     server: Arc<McpServer>,
     service: FakeAutomation,
+    waits_ended: Arc<Mutex<Vec<Value>>>,
     addr: String,
 }
 
@@ -46,12 +85,25 @@ impl H {
     }
     async fn start_with(cfg: Config) -> Self {
         let service = FakeAutomation::with_state(harness_state());
-        let server = Arc::new(McpServer::new(McpTools::new(Arc::new(service.clone())), cfg));
+        let waits_ended: Arc<Mutex<Vec<Value>>> = Arc::default();
+        let watched = Watched { inner: service.clone(), waits_ended: waits_ended.clone() };
+        let server = Arc::new(McpServer::new(McpTools::new(Arc::new(watched)), cfg));
         server.start().await.unwrap();
         let weak = Arc::downgrade(&server);
         service.set_probe(Arc::new(move |cell| weak.upgrade().map_or("off", |s| s.connection(cell).as_str())));
         let addr = server.url().unwrap().trim_start_matches("http://").trim_end_matches("/mcp").to_string();
-        Self { server, service, addr }
+        Self { server, service, waits_ended, addr }
+    }
+    /// The result of the next service wait_for that ends within `limit` (None: none ended).
+    async fn wait_ended(&self, limit: Duration) -> Option<Value> {
+        let until = Instant::now() + limit;
+        while Instant::now() < until {
+            if let Some(v) = self.waits_ended.lock().first().cloned() {
+                return Some(v);
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        None
     }
     fn req(&self, token: &str) -> Request<'_> {
         Request::new(&self.addr, "POST", "/mcp")
@@ -357,6 +409,77 @@ async fn texts_over_32000_characters_and_bad_arguments_are_refused_with_the_zod_
     assert_eq!(text, "Task not found: nope. Task IDs come from read_inbox or get_tasks.");
     let r = h.post(&token, call(9, "no_such_tool", json!({}))).await.json();
     assert_eq!(r["error"], json!({ "code": -32602, "message": "MCP error -32602: Unknown tool: no_such_tool" }));
+}
+
+/// 1.1.4 passes ctx.signal to wait_for (and to the long wait's slices): a revoke, a closed session or tasks/cancel ends
+/// the service's wait at once, not when its timeout runs out.
+#[tokio::test]
+async fn a_revoke_ends_a_waiting_plain_wait_for_in_the_service_at_once() {
+    let h = H::start().await;
+    let token = h.server.issue_token(REVIEWER);
+    let started = Instant::now();
+    let revoke = async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        h.server.revoke_cell(REVIEWER);
+    };
+    let (r, ()) = tokio::join!(h.post(&token, call(1, "wait_for", json!({ "timeoutSec": 60 }))), revoke);
+    assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+    assert_eq!(r.json()["result"]["isError"], true, "{}", r.text);
+    assert_eq!(h.wait_ended(Duration::from_secs(1)).await, Some(json!({ "event": "cancelled" })));
+}
+
+#[tokio::test]
+async fn closing_the_session_ends_its_waiting_wait_for_in_the_service_at_once() {
+    let h = H::start().await;
+    let token = h.server.issue_token(REVIEWER);
+    let session = h.session(&token).await;
+    let started = Instant::now();
+    let close = async {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let r = Request::new(&h.addr, "DELETE", "/mcp")
+            .header("authorization", &format!("Bearer {token}"))
+            .header("mcp-session-id", &session)
+            .header("mcp-protocol-version", "2025-11-25")
+            .send()
+            .await;
+        assert_eq!(r.status, 200);
+    };
+    let waiting = h
+        .req(&token)
+        .header("mcp-session-id", &session)
+        .header("mcp-protocol-version", "2025-11-25")
+        .body(call(2, "wait_for", json!({ "timeoutSec": 60 })))
+        .send();
+    let (_, ()) = tokio::join!(waiting, close);
+    assert_eq!(h.wait_ended(Duration::from_secs(5)).await, Some(json!({ "event": "cancelled" })));
+    assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+}
+
+#[tokio::test]
+async fn tasks_cancel_and_a_revoke_end_a_task_mode_long_wait_in_the_service_at_once() {
+    for revoke in [false, true] {
+        let h = H::start().await;
+        // The worker runs Codex: a 600 s task wait loops over slices of at most 170 s, each with the task's signal.
+        let token = h.server.issue_token(WORKER);
+        let mut body = call(1, "wait_for", json!({ "timeoutSec": 600 }));
+        body["params"]["task"] = json!({ "ttl": 120000 });
+        let task = h.post(&token, body).await.json()["result"]["task"]["taskId"].clone();
+        assert!(task.is_string(), "{task}");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(h.waits_ended.lock().is_empty());
+        let started = Instant::now();
+        if revoke {
+            h.server.revoke_cell(WORKER);
+        } else {
+            let cancel = json!({ "jsonrpc": "2.0", "id": 2, "method": "tasks/cancel", "params": { "taskId": task } });
+            assert_eq!(h.post(&token, cancel).await.json()["result"]["status"], "cancelled");
+        }
+        assert_eq!(h.wait_ended(Duration::from_secs(5)).await, Some(json!({ "event": "cancelled" })), "revoke {revoke}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        // The long wait stops after the cancelled slice: no further slice starts and ends later.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(h.waits_ended.lock().len(), 1);
+    }
 }
 
 #[test]
