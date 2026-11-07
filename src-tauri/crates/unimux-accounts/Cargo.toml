@@ -29,6 +29,8 @@ regex.workspace = true
 url.workspace = true
 zeroize.workspace = true
 base64.workspace = true
+# A3: Retry-After as an HTTP date.
+httpdate.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

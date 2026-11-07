@@ -5814,6 +5814,7 @@ dependencies = [
  "futures",
  "getrandom 0.4.3",
  "http-body-util",
+ "httpdate",
  "hyper",
  "hyper-util",
  "parking_lot 0.13.0",

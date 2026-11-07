@@ -173,7 +173,6 @@ impl UpdateService {
         self.gate.lock().clone()
     }
 
-    #[allow(dead_code, reason = "A2 / A3 register the account swap and login probes")]
     pub fn add_busy_probe(&self, probe: BusyProbe) {
         self.busy.lock().push(probe);
     }

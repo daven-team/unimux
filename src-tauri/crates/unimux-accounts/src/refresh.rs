@@ -1,6 +1,6 @@
-//! The part of src/main/accounts/refresh.ts that "make main" needs (A2): the outcome type of a token renewal and the
-//! per-profile lock (`withProfileLock`) that keeps renewals and swap writes of one profile directory from interleaving.
-//! The renewal itself (`refreshClaudeProfile`, the network call) is A3's and takes the same lock.
+//! Token renewal of saved Claude profiles (port of src/main/accounts/refresh.ts; A2 the outcome type and the per-profile
+//! lock, A3 the renewal itself in [`renew`]): `withProfileLock` keeps renewals and swap writes of one profile directory from
+//! interleaving.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -133,6 +133,9 @@ impl ProfileLocks {
         self.gates.lock().len()
     }
 }
+
+pub mod limits;
+pub mod renew;
 
 #[cfg(test)]
 mod tests {

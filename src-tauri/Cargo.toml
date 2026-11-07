@@ -116,6 +116,8 @@ rand_core = "=0.10.1"
 # M1 (MCP server, decided in SP8): hyper http1 served directly; axum stays for the hooks server. rmcp dropped in M1.
 axum = { version = "0.8.9", default-features = false, features = ["tokio", "http1"] }
 hyper = { version = "1.12.0", features = ["server", "http1"] }
+# A3: Retry-After as an HTTP date (Date.parse of the IMF-fixdate, RFC 850 and asctime forms).
+httpdate = "1.0.3"
 hyper-util = { version = "0.1.21", features = ["tokio", "service"] }
 http-body-util = "0.1.5"
 bytes = "1.12.1"

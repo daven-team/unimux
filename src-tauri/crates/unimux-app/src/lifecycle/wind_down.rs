@@ -29,10 +29,8 @@ pub const SHUTDOWN_HARD_LIMIT: Duration = Duration::from_secs(20);
 /// The renderers' moment to push their final state after `app:before-quit`.
 pub const RENDERER_GRACE: Duration = Duration::from_millis(150);
 /// Longest time the wind-down waits for a running swap before it goes on anyway (quitWait.ts `QUIT_SWAP_WAIT_MS`).
-#[allow(dead_code, reason = "A2 registers the swap waits")]
 pub const QUIT_SWAP_WAIT: Duration = Duration::from_millis(5000);
 /// The second wait, after the cells were shut down (`QUIT_SWAP_AFTER_CELLS_MS`).
-#[allow(dead_code, reason = "A2 registers the swap waits")]
 pub const QUIT_SWAP_AFTER_CELLS: Duration = Duration::from_millis(3000);
 /// The last save retries a locked state.json this long (`flushUntilSaved(saver, 3000)`).
 pub const FINAL_SAVE: Duration = Duration::from_millis(3000);
