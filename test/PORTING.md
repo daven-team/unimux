@@ -758,3 +758,7 @@ Rows keep the exact case name (the counter matches them). Rust tests are named `
 | changelog | falls back to the saved copy offline and reports the error | unimux-files changelog::tests::falls_back_to_the_saved_copy_offline_and_reports_the_error | ported |
 | changelog | reports an empty result with the error when nothing is saved | unimux-files changelog::tests::reports_an_empty_result_with_the_error_when_nothing_is_saved | ported |
 | main-perf | answers without blocking and treats bad input as missing | unimux-files probe::tests::exists_answers_like_1_1_4; unimux-app commands::files::g8::tests::probes_answer_like_1_1_4 | ported |
+| host-router | sends every call to the backend that owns the id | unimux-pty engine (renderer messages reach the terminal the window owns); the SSH backend is P5 | partial |
+| host-router | keeps sizes that arrive before the terminal exists (bounded) and hands them out once | unimux-pty routes::tests::early_sizes_are_bounded_and_handed_out_once | ported |
+| host-router | fans flow control and killAll out to every backend; unknown ids resolve | unimux-pty/tests/service.rs::kill_all_ends_every_terminal_and_answers; the SSH backend is P5 | partial |
+| host-router | killAll waits for every backend even when one rejects | unimux-pty/tests/service.rs::kill_all_ends_every_terminal_and_answers (one backend until P5) | partial |

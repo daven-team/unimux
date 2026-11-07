@@ -351,6 +351,13 @@ fn reply_terminate(ctx: &AppContext, allow: bool) -> bool {
     }
 }
 
+/// "Quit" in one of the app's own questions (the pty service's fatal crash, P3): confirmed, so nothing asks again
+/// (`quitConfirm.confirm(); app.quit()`).
+pub fn quit_confirmed(ctx: &Arc<AppContext>) {
+    ctx.lifecycle.confirm.lock().confirm();
+    request_quit(ctx, QuitSource::Dialog);
+}
+
 /// 1.1.4's `before-quit`: asks first when agents work, else winds down and exits. Never blocks.
 pub fn request_quit(ctx: &Arc<AppContext>, source: QuitSource) {
     let lc = &ctx.lifecycle;

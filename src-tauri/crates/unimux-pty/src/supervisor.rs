@@ -178,6 +178,11 @@ impl<M: Send + 'static> Supervisor<M> {
         self.shared.state.lock().phase == Phase::Fatal
     }
 
+    /// The state runs (not restarting after a crash, not fatal, not stopped): PtyHostClient's `child !== null`.
+    pub fn is_running(&self) -> bool {
+        self.shared.state.lock().phase == Phase::Running
+    }
+
     /// The user chose "Restart terminals" after a fatal crash: the count starts again and a new state is built.
     pub fn restart_after_fatal(&self) {
         let mut st = self.shared.state.lock();

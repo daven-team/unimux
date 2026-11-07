@@ -12,6 +12,9 @@
 //! (PtyEngine: the Pty Host between PtyManager and the windows, host-side DA1, timeBeginPeriod while terminals exist).
 //! [`frame`] is the binary frame format; [`plane`] stays as the SP5 measurement plane of the check build's spike commands.
 //! Commands are registered in `unimux-app/src/commands/pty.rs`.
+//!
+//! P3 (the pty service): [`service`] (PtyService: the supervised control queue over the engine, spawned / spawnError /
+//! exit / tap / interrupt events, kill with an answer, kill all, the crash and fatal flow of the 1.1.4 Pty Host).
 
 pub mod actor;
 pub mod batch;
@@ -26,6 +29,7 @@ pub mod output;
 #[cfg(windows)]
 pub mod plane;
 pub mod routes;
+pub mod service;
 pub mod shell;
 pub mod supervisor;
 pub mod timers;

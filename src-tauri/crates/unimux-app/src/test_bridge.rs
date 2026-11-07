@@ -234,8 +234,9 @@ pub async fn test_bridge(
             "portPosts": ctx.port_posts.get().map(|q| q.lane_count()),
         })),
         "report" => Ok(serde_json::to_value(ctx.router().report()).unwrap_or(Value::Null)),
-        // P2: terminals of the check build without the cell commands (P3 / P4), see commands::pty::test_op.
-        "pty" => crate::commands::pty::test_op(&args).map_err(|e| fail(&e)),
+        // P2 / P3: terminals of the check build without the launch line (P4), the pty service's crash flow; see
+        // commands::pty::test_op.
+        "pty" => crate::commands::pty::test_op(&ctx, &args).map_err(|e| fail(&e)),
         // W4: the offscreen desktop recorder (toasts, dialogs, shell, beep, flash, clipboard), see commands::os::test_op.
         "os" => crate::commands::os::test_op(&ctx, &args).map_err(|e| fail(&e)),
         // W7 (X1 contract): `{stub: true}` starts recording the taskbar's OS calls (answers true); without it the calls since
