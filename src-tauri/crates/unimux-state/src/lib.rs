@@ -17,6 +17,7 @@ pub mod edits;
 pub mod normalize;
 pub mod patch;
 pub mod store;
+pub mod webview_import;
 
 pub use controller::{Snapshot, StateController};
 pub use normalize::{Normalizer, PassThrough, Platform, StateNormalizer};

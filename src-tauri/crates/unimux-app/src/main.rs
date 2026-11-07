@@ -10,6 +10,7 @@ mod commands;
 mod context;
 #[cfg(feature = "test-bridge")]
 mod eval_bridge;
+mod file_drop;
 mod ipc;
 mod mac_chrome;
 #[cfg(feature = "test-bridge")]
@@ -20,6 +21,7 @@ mod startup;
 #[cfg(feature = "test-bridge")]
 mod test_bridge;
 mod update_window;
+mod webview_import;
 mod windows;
 
 /// The Tauri context (config, embedded frontend, capabilities). Expanded once: the app and the update window mode share it,
@@ -210,6 +212,7 @@ fn main() {
             ));
             ctx.mark("app-ready");
             // The startup gate (U1) runs here and may hold the main window back; wave 0 always proceeds.
+            webview_import::prepare(app.handle(), &ctx);
             windows::create_main(app.handle(), &ctx)?;
             // The macOS stand-in for CDP (MC_EVAL_PORT, check build only).
             #[cfg(feature = "test-bridge")]
@@ -248,6 +251,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
             ipc::update_splash_close,
             ipc::update_splash_open,
             mac_chrome::mac_title_double_click,
+            file_drop::mc_dropped_paths,
+            webview_import::mc_webview_import_done,
             test_bridge::test_bridge,
             channel_bench::test_channel_bench,
             channel_bench::test_channel_pull,
@@ -266,7 +271,9 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
             ipc::update_splash_init,
             ipc::update_splash_close,
             ipc::update_splash_open,
-            mac_chrome::mac_title_double_click
+            mac_chrome::mac_title_double_click,
+            file_drop::mc_dropped_paths,
+            webview_import::mc_webview_import_done
         ]
     }
 }

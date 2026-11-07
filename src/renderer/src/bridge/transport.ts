@@ -35,6 +35,8 @@ export interface TauriDeps {
   storage: Pick<Storage, 'getItem' | 'setItem'> | null;
   /** A fresh id per page load. */
   newSession(): string;
+  /** The OS paths of dropped Files (filePaths.ts); without it every File answers ''. */
+  pathsForFiles?(files: File[]): Promise<string[]>;
 }
 
 /** Commands whose in-flight calls are journaled: an edit sent right before `location.reload()` is replayed by the next page. */
@@ -176,8 +178,8 @@ export function createTauriTransport(boot: BootInfo, deps: TauriDeps): TauriTran
   return {
     platform: boot.platform,
     windowsBuild: boot.windowsBuild,
-    // OS file drops get their paths through pathsForFiles (W3); the HTML5 File of WebView2 has none.
-    pathForFile: () => '',
+    // A File of WebView2 / WKWebView has no path: the host tells it on the side (filePaths.ts, src-tauri file_drop.rs).
+    pathsForFiles: (files) => (deps.pathsForFiles ? deps.pathsForFiles(Array.from(files)) : Promise.resolve(Array.from(files, () => ''))),
     notYetLogged,
     invoke(channel, ...args) {
       const key = JOURNALED.has(channel) ? `${channel}:${(args[0] as { id?: string } | undefined)?.id ?? ''}` : null;

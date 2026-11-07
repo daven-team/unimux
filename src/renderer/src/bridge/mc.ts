@@ -3,6 +3,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { createMcApi } from '../../../preload/mcApi';
+import { createDropRecordFilePaths, createWebView2FilePaths, type WebView2Host } from './filePaths';
 import { createPortPoster, createTauriTransport, McNotYetError, type BootInfo, type TauriTransport } from './transport';
 import { installCompat, type CompatReport } from './webkitCompat';
 import { installMacDrag, type DragGlobal } from './macDrag';
@@ -26,12 +27,21 @@ if (boot.platform === 'darwin') {
 }
 const newSession = () => (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
 
+/** OS paths of dropped Files: WebView2's ICoreWebView2File on Windows, the recorded drop on macOS (W3). */
+function filePaths(): ((files: File[]) => Promise<string[]>) | undefined {
+  const webview = (window as { chrome?: { webview?: WebView2Host } }).chrome?.webview;
+  if (webview?.postMessageWithAdditionalObjects) return createWebView2FilePaths(webview, newSession);
+  if (boot.platform === 'darwin') return createDropRecordFilePaths(() => invoke<string[]>('mc_dropped_paths'));
+  return undefined;
+}
+
 const transport = createTauriTransport(boot, {
   invoke: (command, args, options) => invoke(command, args, options),
   listen: (event, cb) => current.listen(event, (e) => cb(e.payload)),
   log: (message) => console.warn(`[mc] ${message}`),
   storage: (() => { try { return window.sessionStorage; } catch { return null; } })(),
   newSession,
+  pathsForFiles: filePaths(),
 });
 
 window.mc = createMcApi(transport);

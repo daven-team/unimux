@@ -19,6 +19,8 @@ fn main() {
         "update_splash_close",
         "update_splash_open",
         "mac_title_double_click",
+        "mc_dropped_paths",
+        "mc_webview_import_done",
         "test_bridge",
         "test_channel_bench",
         "test_channel_pull",

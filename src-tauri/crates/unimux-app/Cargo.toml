@@ -50,5 +50,11 @@ futures.workspace = true
 webview2-com.workspace = true
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_System_Threading", "Win32_System_Registry"] }
 
+# W3: the OS file paths of a drop on macOS (file_drop.rs wraps wry's performDragOperation:); the versions tauri/wry use.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.5"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSDragging", "NSPasteboard"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSString", "NSURL"] }
+
 [dev-dependencies]
 tempfile.workspace = true

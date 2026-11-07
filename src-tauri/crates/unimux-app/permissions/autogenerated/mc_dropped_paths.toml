@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-mc-dropped-paths"
+description = "Enables the mc_dropped_paths command without any pre-configured scope."
+commands.allow = ["mc_dropped_paths"]
+
+[[permission]]
+identifier = "deny-mc-dropped-paths"
+description = "Denies the mc_dropped_paths command without any pre-configured scope."
+commands.deny = ["mc_dropped_paths"]

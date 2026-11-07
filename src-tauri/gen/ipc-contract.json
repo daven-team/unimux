@@ -2513,16 +2513,16 @@
    "call": "t.invoke('fs:pathKinds', paths)"
   },
   {
-   "path": "pathForFile",
+   "path": "pathsForFiles",
    "kind": "sync",
    "params": [
     {
-     "name": "file",
-     "type": "File",
+     "name": "files",
+     "type": "File[]",
      "optional": false
     }
    ],
-   "returns": "string"
+   "returns": "Promise<string[]>"
   },
   {
    "path": "listProjectDirectory",

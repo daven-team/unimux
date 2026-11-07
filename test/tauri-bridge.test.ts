@@ -18,7 +18,7 @@ function recordingApi() {
     on: () => () => {},
     platform: 'win32',
     windowsBuild: 26200,
-    pathForFile: () => '',
+    pathsForFiles: async (files) => files.map(() => ''),
   };
   return { api: createMcApi(transport), calls };
 }
