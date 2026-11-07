@@ -18,6 +18,9 @@ futures.workspace = true
 parking_lot.workspace = true
 regex.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Storage_FileSystem", "Win32_System_Environment"] }
+
 [dev-dependencies]
 tempfile.workspace = true
 

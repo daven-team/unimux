@@ -5263,6 +5263,7 @@ dependencies = [
  "unimux-core",
  "unimux-exec",
  "unimux-ipc",
+ "windows",
 ]
 
 [[package]]

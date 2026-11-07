@@ -183,6 +183,34 @@ async fn finds_the_root_from_a_subfolder_and_tells_folders_without_a_repository(
     assert_eq!(git.root(&s(&deep)).await.unwrap_err().code, GitErrorCode::NotRepo);
 }
 
+/// A project folder that is a link whose target was deleted: 1.1.4's `fs.access` (GetFileAttributesW on the link itself on
+/// Windows) says it exists, git fails, and the answer is not-repo; access(2) follows the link elsewhere, so it is gone there.
+#[tokio::test]
+async fn a_dangling_link_answers_like_fs_access_did() {
+    let lab = Lab::new();
+    let target = lab.dir.join("link-target");
+    std::fs::create_dir_all(&target).unwrap();
+    let link = lab.dir.join("dangling");
+    #[cfg(windows)]
+    junction::create(&target, &link).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    std::fs::remove_dir_all(&target).unwrap();
+    assert!(std::fs::metadata(&link).is_err());
+    let git = lab.git();
+    let code = git.root(&s(&link)).await.unwrap_err().code;
+    if cfg!(windows) {
+        assert_eq!(code, GitErrorCode::NotRepo);
+    } else {
+        assert_eq!(code, GitErrorCode::Gone);
+    }
+    assert_eq!(git.probe(&s(&link)).await, GitProbe::NoRepo);
+    #[cfg(windows)]
+    junction::delete(&link).ok();
+    std::fs::remove_dir(&link).ok();
+    std::fs::remove_file(&link).ok();
+}
+
 #[tokio::test]
 async fn the_git_dirs_of_a_worktree_name_the_shared_common_dir() {
     let lab = Lab::new();

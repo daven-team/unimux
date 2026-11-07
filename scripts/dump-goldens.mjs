@@ -16,9 +16,12 @@
 //   test/golden/git-spelling.jsonl   {path} -> normalizeSpelling(path, win32 | darwin) of src/main/gitPaths.ts (PLAN G1; the
 //                                     file-system half is checked live by unimux-git/tests/canonical_paths.rs)
 //   test/golden/git-text.jsonl       {value, max} -> trimGitText(value, max) and redactSecrets(value) of src/shared/git.ts
+//   test/golden/git-resolve.jsonl    {args} -> path.win32.resolve / path.posix.resolve of Node with process.cwd() C:\work\cwd
+//                                     (win32) or /work/cwd (posix) and the drive cwds =C: C:\work\cwd, =D: D:\dcwd\x, =E:
+//                                     C:\not-e, =F: '' (the env of the run is replaced while the rows are made)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
-import { dirname, resolve } from 'node:path';
+import path, { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -155,6 +158,44 @@ function gitSpelling() {
   return [...fixed, ...random].map((path) => ({ path, win32: normalizeSpelling(path, 'win32'), darwin: normalizeSpelling(path, 'darwin') }));
 }
 
+/** Node's path.win32.resolve / path.posix.resolve (git.ts resolves the common git dir and the clone lock key with it), with a
+ *  fixed process.cwd() and drive cwds (process.env['=D:']) so the rows do not depend on the machine. */
+const RESOLVE_CWD = { win32: 'C:\\work\\cwd', posix: '/work/cwd' };
+const RESOLVE_DRIVE_CWDS = { '=C:': 'C:\\work\\cwd', '=D:': 'D:\\dcwd\\x', '=E:': 'C:\\not-e', '=F:': '' };
+function gitResolve() {
+  const B = '\\';
+  const bases = [
+    'C:/x/repo', `C:${B}x${B}repo${B}`, `c:${B}x`, `C:${B}`, 'C:', `C:rel${B}dir`, 'D:sub', 'd:', 'E:sub', 'F:sub', `${B}${B}server${B}share${B}dir`,
+    '//server/share', `${B}${B}server${B}share`, `${B}${B}?${B}C:${B}x`, `${B}${B}.${B}pipe${B}x`, '/abs/posix/', 'rel/dir', '', '.', `${B}rooted`, 'C:/a',
+  ];
+  const ps = [
+    '.git', '../a/b.', 'sub/ ', 'x/', 'x/./y/../z/', 'b.', 'b ', '..', '../../../../..', '/etc', 'C:/other/.git', `D:${B}y`, 'd:rel', 'E:', 'F:x',
+    `${B}${B}srv${B}sh${B}.git`, '', '.', `C:${B}x${B}repo${B}.git${B}worktrees${B}wt`, 'ZAŻÓŁĆ/..', '😀/x', `a//b${B}${B}c`, '...', '.../x', '..a/..b', 'con', 'nul.txt',
+  ];
+  const rows = [[]];
+  for (const p of [...bases, ...ps]) rows.push([p]);
+  for (const base of bases) for (const p of ps) rows.push([base, p]);
+  rows.push(['C:/a', 'D:b', 'c']);
+  rows.push(['C:/a', 'b', '//server/share/c', '..']);
+  const savedCwd = process.cwd;
+  const savedEnv = process.env;
+  try {
+    const env = {};
+    for (const [k, v] of Object.entries(RESOLVE_DRIVE_CWDS)) env[k] = env[k.toLowerCase()] = v;
+    process.env = env;
+    return rows.map((args) => {
+      process.cwd = () => RESOLVE_CWD.win32;
+      const win32 = path.win32.resolve(...args);
+      process.cwd = () => RESOLVE_CWD.posix;
+      const posix = path.posix.resolve(...args);
+      return { args, win32, posix };
+    });
+  } finally {
+    process.cwd = savedCwd;
+    process.env = savedEnv;
+  }
+}
+
 /** git output with credentials, Authorization headers, tokens, ANSI, CRLF, hint lines, blank runs, JS white space and long tails. */
 function gitText() {
   const r = rng(1302);
@@ -230,6 +271,7 @@ const files = {
   'js-sort.jsonl': jsonl(jsSort()),
   'git-spelling.jsonl': jsonl(gitSpelling()),
   'git-text.jsonl': jsonl(gitText()),
+  'git-resolve.jsonl': jsonl(gitResolve()),
 };
 
 const check = process.argv.includes('--check');

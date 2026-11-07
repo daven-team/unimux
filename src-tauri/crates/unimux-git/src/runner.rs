@@ -133,8 +133,9 @@ impl Default for GitOptions {
     }
 }
 
-/// `RunOptions` of git.ts.
-#[derive(Debug, Clone, Default)]
+/// `RunOptions` of git.ts. `timeoutMs` is required there; here the default is a local read with [`READ_TIMEOUT`], so a
+/// `..Default::default()` can never mean a zero timeout.
+#[derive(Debug, Clone)]
 pub struct RunOptions {
     pub timeout: Duration,
     /// The cap of a read (default [`GitOptions::max_output_bytes`]); writes always use the write cap.
@@ -152,14 +153,20 @@ pub struct RunOptions {
     pub env: Vec<(String, String)>,
 }
 
+impl Default for RunOptions {
+    fn default() -> Self {
+        Self::read(READ_TIMEOUT)
+    }
+}
+
 impl RunOptions {
     /// A local read with the given timeout.
     pub fn read(timeout: Duration) -> Self {
-        Self { timeout, read: true, ..Default::default() }
+        Self { timeout, max_bytes: None, input: None, read: true, allow_truncate: false, ok_codes: Vec::new(), env: Vec::new() }
     }
     /// A write with the given timeout.
     pub fn write(timeout: Duration) -> Self {
-        Self { timeout, ..Default::default() }
+        Self { read: false, ..Self::read(timeout) }
     }
 }
 
@@ -352,6 +359,16 @@ pub fn release_stale_lock(git_dir: &Path, started: SystemTime) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_run_options_are_a_read_with_the_read_timeout_never_zero() {
+        let d = RunOptions { input: Some("x".into()), ..Default::default() };
+        assert_eq!(d.timeout, READ_TIMEOUT);
+        assert!(d.read);
+        let w = RunOptions::write(NETWORK_TIMEOUT);
+        assert!(!w.read);
+        assert_eq!(w.timeout, NETWORK_TIMEOUT);
+    }
 
     #[test]
     fn scrubbed_names_match_the_reference_regex() {

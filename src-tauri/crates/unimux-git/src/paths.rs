@@ -221,48 +221,295 @@ pub fn dirname(path: &str) -> String {
     if cfg!(windows) { dirname_win32(path) } else { dirname_posix(path) }
 }
 
-/// Lexical `path.posix.normalize` of an absolute path (`.` and `..` resolved, no trailing slash).
-#[cfg(not(windows))]
-fn normalize_posix_absolute(path: &str) -> String {
-    let mut parts: Vec<&str> = Vec::new();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            p => parts.push(p),
+/// Node's `normalizeString` (path.js): resolves `.` and `..` and repeated separators of a path without its root, purely
+/// lexically (trailing dots and spaces stay, unlike GetFullPathNameW). The separators and dots are ASCII, so working on bytes
+/// cuts only at character boundaries.
+fn normalize_string(path: &str, allow_above_root: bool, separator: u8, is_sep: fn(u8) -> bool) -> String {
+    let b = path.as_bytes();
+    let sep = separator as char;
+    let mut res = String::new();
+    let mut last_segment_length: usize = 0;
+    let mut last_slash: isize = -1;
+    let mut dots: i32 = 0;
+    let mut code: u8 = 0;
+    let mut i: isize = 0;
+    while i <= b.len() as isize {
+        if (i as usize) < b.len() {
+            code = b[i as usize];
+        } else if is_sep(code) {
+            break;
+        } else {
+            code = b'/';
         }
+        if is_sep(code) {
+            if last_slash == i - 1 || dots == 1 {
+                // NOOP
+            } else if dots == 2 {
+                let rb = res.as_bytes();
+                if res.len() < 2 || last_segment_length != 2 || rb[rb.len() - 1] != b'.' || rb[rb.len() - 2] != b'.' {
+                    if res.len() > 2 {
+                        match res.rfind(sep) {
+                            None => {
+                                res.clear();
+                                last_segment_length = 0;
+                            }
+                            Some(at) => {
+                                res.truncate(at);
+                                last_segment_length = match res.rfind(sep) {
+                                    Some(prev) => res.len() - 1 - prev,
+                                    None => res.len(),
+                                };
+                            }
+                        }
+                        last_slash = i;
+                        dots = 0;
+                        i += 1;
+                        continue;
+                    } else if !res.is_empty() {
+                        res.clear();
+                        last_segment_length = 0;
+                        last_slash = i;
+                        dots = 0;
+                        i += 1;
+                        continue;
+                    }
+                }
+                if allow_above_root {
+                    if res.is_empty() {
+                        res.push_str("..");
+                    } else {
+                        res.push(sep);
+                        res.push_str("..");
+                    }
+                    last_segment_length = 2;
+                }
+            } else {
+                let segment = &path[(last_slash + 1) as usize..i as usize];
+                if !res.is_empty() {
+                    res.push(sep);
+                }
+                res.push_str(segment);
+                last_segment_length = (i - last_slash - 1) as usize;
+            }
+            last_slash = i;
+            dots = 0;
+        } else if code == b'.' && dots != -1 {
+            dots += 1;
+        } else {
+            dots = -1;
+        }
+        i += 1;
     }
-    format!("/{}", parts.join("/"))
+    res
+}
+
+fn is_sep_posix(c: u8) -> bool {
+    c == b'/'
+}
+
+/// The first `n` UTF-16 units of `s` (`s.slice(0, n)`).
+fn slice_utf16_to(s: &str, n: usize) -> String {
+    let units: Vec<u16> = s.encode_utf16().take(n).collect();
+    String::from_utf16_lossy(&units)
+}
+
+/// Node's `path.win32.resolve(...args)`, lexically. `cwd` is `process.cwd()`; `drive_cwd(device)` is
+/// `process.env['=C:']`, the current folder Windows keeps per drive (only asked for a drive-relative path like `C:x`).
+pub fn resolve_win32_with(args: &[&str], cwd: &str, drive_cwd: &dyn Fn(&str) -> Option<String>) -> String {
+    let mut resolved_device = String::new();
+    let mut resolved_tail = String::new();
+    let mut resolved_absolute = false;
+    let mut i = args.len() as isize - 1;
+    while i >= -1 {
+        let path: String = if i >= 0 {
+            let p = args[i as usize];
+            if p.is_empty() {
+                i -= 1;
+                continue;
+            }
+            p.to_string()
+        } else if resolved_device.is_empty() {
+            let path = cwd.to_string();
+            // fast path for the current directory
+            if args.is_empty()
+                || (args.len() == 1 && (args[0].is_empty() || args[0] == ".") && path.bytes().next().is_some_and(is_sep_win))
+            {
+                return path;
+            }
+            path
+        } else {
+            let path = drive_cwd(&resolved_device).filter(|p| !p.is_empty()).unwrap_or_else(|| cwd.to_string());
+            let other_drive = slice_utf16_to(&path, 2).to_lowercase() != resolved_device.to_lowercase()
+                && path.encode_utf16().nth(2) == Some(u16::from(b'\\'));
+            if other_drive { format!("{resolved_device}\\") } else { path }
+        };
+
+        let b = path.as_bytes();
+        let len = b.len();
+        let mut root_end = 0usize;
+        let mut device = String::new();
+        let mut is_absolute = false;
+        let code = b.first().copied().unwrap_or(0);
+        if path.encode_utf16().count() == 1 {
+            if is_sep_win(code) {
+                root_end = 1;
+                is_absolute = true;
+            }
+        } else if is_sep_win(code) {
+            is_absolute = true;
+            if is_sep_win(b[1]) {
+                let mut j = 2;
+                let mut last = j;
+                while j < len && !is_sep_win(b[j]) {
+                    j += 1;
+                }
+                if j < len && j != last {
+                    let first_part = &path[last..j];
+                    last = j;
+                    while j < len && is_sep_win(b[j]) {
+                        j += 1;
+                    }
+                    if j < len && j != last {
+                        last = j;
+                        while j < len && !is_sep_win(b[j]) {
+                            j += 1;
+                        }
+                        if j == len || j != last {
+                            if first_part != "." && first_part != "?" {
+                                device = format!("\\\\{first_part}\\{}", &path[last..j]);
+                                root_end = j;
+                            } else {
+                                device = format!("\\\\{first_part}");
+                                root_end = 4;
+                            }
+                        }
+                    }
+                }
+            } else {
+                root_end = 1;
+            }
+        } else if code.is_ascii_alphabetic() && b.get(1) == Some(&b':') {
+            device = path[..2].to_string();
+            root_end = 2;
+            if len > 2 && is_sep_win(b[2]) {
+                is_absolute = true;
+                root_end = 3;
+            }
+        }
+
+        if !device.is_empty() {
+            if !resolved_device.is_empty() {
+                if device.to_lowercase() != resolved_device.to_lowercase() {
+                    // another device: not applicable
+                    i -= 1;
+                    continue;
+                }
+            } else {
+                resolved_device = device;
+            }
+        }
+
+        if resolved_absolute {
+            if !resolved_device.is_empty() {
+                break;
+            }
+        } else {
+            resolved_tail = format!("{}\\{resolved_tail}", &path[root_end..]);
+            resolved_absolute = is_absolute;
+            if is_absolute && !resolved_device.is_empty() {
+                break;
+            }
+        }
+        i -= 1;
+    }
+    let tail = normalize_string(&resolved_tail, !resolved_absolute, b'\\', is_sep_win);
+    if resolved_absolute {
+        format!("{resolved_device}\\{tail}")
+    } else {
+        let out = format!("{resolved_device}{tail}");
+        if out.is_empty() { ".".into() } else { out }
+    }
+}
+
+/// Node's `path.posix.resolve(...args)`; `cwd` is `process.cwd()`.
+pub fn resolve_posix_with(args: &[&str], cwd: &str) -> String {
+    if (args.is_empty() || (args.len() == 1 && (args[0].is_empty() || args[0] == "."))) && cwd.starts_with('/') {
+        return cwd.to_string();
+    }
+    let mut resolved_path = String::new();
+    let mut resolved_absolute = false;
+    for p in args.iter().rev() {
+        if resolved_absolute {
+            break;
+        }
+        if p.is_empty() {
+            continue;
+        }
+        resolved_path = format!("{p}/{resolved_path}");
+        resolved_absolute = p.starts_with('/');
+    }
+    if !resolved_absolute {
+        resolved_path = format!("{cwd}/{resolved_path}");
+        resolved_absolute = cwd.starts_with('/');
+    }
+    let path = normalize_string(&resolved_path, !resolved_absolute, b'/', is_sep_posix);
+    if resolved_absolute {
+        format!("/{path}")
+    } else if path.is_empty() {
+        ".".into()
+    } else {
+        path
+    }
+}
+
+fn process_cwd() -> String {
+    std::env::current_dir().map(|c| c.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
+/// `process.env['=C:']`: the current folder of a drive that cmd.exe keeps in the environment (the Rust env iterator hides
+/// these names, so they are asked for directly).
+#[cfg(windows)]
+fn drive_cwd_env(device: &str) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::System::Environment::GetEnvironmentVariableW;
+    use windows::core::PCWSTR;
+    let name: Vec<u16> = std::ffi::OsStr::new(&format!("={device}")).encode_wide().chain(std::iter::once(0)).collect();
+    let mut buf = vec![0u16; 512];
+    loop {
+        // SAFETY: `name` is NUL-terminated and both buffers live across the call.
+        let n = unsafe { GetEnvironmentVariableW(PCWSTR(name.as_ptr()), Some(&mut buf)) } as usize;
+        if n == 0 {
+            return None;
+        }
+        if n < buf.len() {
+            return Some(String::from_utf16_lossy(&buf[..n]));
+        }
+        buf.resize(n + 1, 0);
+    }
 }
 
 /// `path.resolve(base, p)` of the host system (gitPaths.ts and git.ts use it for relative folders and the common dir).
 pub fn resolve(base: &str, p: &str) -> String {
     #[cfg(windows)]
     {
-        let joined = std::path::Path::new(base).join(p);
-        std::path::absolute(&joined).map(|a| a.to_string_lossy().into_owned()).unwrap_or_else(|_| joined.to_string_lossy().into())
+        resolve_win32_with(&[base, p], &process_cwd(), &drive_cwd_env)
     }
     #[cfg(not(windows))]
     {
-        if p.starts_with('/') {
-            return normalize_posix_absolute(p);
-        }
-        let base = if base.starts_with('/') {
-            base.to_string()
-        } else {
-            let cwd = std::env::current_dir().map(|c| c.to_string_lossy().into_owned()).unwrap_or_else(|_| "/".into());
-            format!("{cwd}/{base}")
-        };
-        normalize_posix_absolute(&format!("{base}/{p}"))
+        resolve_posix_with(&[base, p], &process_cwd())
     }
 }
 
 /// `path.resolve(p)`: against the current directory.
 fn resolve_cwd(p: &str) -> String {
-    let cwd = std::env::current_dir().map(|c| c.to_string_lossy().into_owned()).unwrap_or_default();
-    resolve(&cwd, p)
+    #[cfg(windows)]
+    {
+        resolve_win32_with(&[p], &process_cwd(), &drive_cwd_env)
+    }
+    #[cfg(not(windows))]
+    {
+        resolve_posix_with(&[p], &process_cwd())
+    }
 }
 
 /// TRAILING_ANY = /[\\/]+$/
@@ -484,6 +731,23 @@ mod tests {
             [("", "."), ("/", "/"), ("/a", "/"), ("//a", "//"), ("/a/b/", "/a"), ("a", "."), ("a/b", "a"), ("///a", "//")]
         {
             assert_eq!(dirname_posix(input), want, "posix {input:?}");
+        }
+    }
+
+    /// The host `resolve` is the lexical Node port (no GetFullPathNameW): trailing dots, spaces and separators as Node has them.
+    #[test]
+    fn host_resolve_is_node_path_resolve() {
+        if cfg!(windows) {
+            assert_eq!(resolve("C:/x/repo", "../a/b."), r"C:\x\a\b.");
+            assert_eq!(resolve("C:/x/repo", "sub/ "), r"C:\x\repo\sub\ ");
+            assert_eq!(resolve("C:/a", "x/./y/../z/"), r"C:\a\x\z");
+            assert_eq!(resolve(r"C:\proj\", ""), resolve(r"C:\proj", ""));
+            assert_eq!(resolve("C:/a", "con"), r"C:\a\con");
+            assert_eq!(resolve(r"\\server\share\dir", "../../.."), r"\\server\share\");
+        } else {
+            assert_eq!(resolve("/x/repo", "../a/b."), "/x/a/b.");
+            assert_eq!(resolve("/a/", "x/./y/../z/"), "/a/x/z");
+            assert_eq!(resolve("/a", "../../.."), "/");
         }
     }
 

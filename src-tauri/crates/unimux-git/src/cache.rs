@@ -98,8 +98,48 @@ impl Generation {
 
 type Entries = Arc<Mutex<HashMap<String, (u64, Box<dyn Any + Send + Sync>)>>>;
 
-/// Identical work that is still running is shared: the second caller with the same key gets the first one's answer. The entry
-/// goes when the work ends (only the entry that work put there: a newer one under the same key stays).
+/// The shared work panicked (a rejected promise in git.ts): every caller of that run gets this, the next call runs afresh.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkPanicked(pub String);
+
+impl std::fmt::Display for WorkPanicked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for WorkPanicked {}
+
+/// Removes the entry of one run when that run ends in any way (an answer, a panic, a cancelled task): only the entry that run
+/// put there, a newer one under the same key stays. The `.finally` of git.ts.
+struct Release {
+    entries: Entries,
+    key: String,
+    id: u64,
+}
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        let mut entries = self.entries.lock();
+        if entries.get(&self.key).is_some_and(|(owner, _)| *owner == self.id) {
+            entries.remove(&self.key);
+        }
+    }
+}
+
+fn panic_text(payload: &(dyn Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "the shared work panicked".to_string())
+}
+
+type Run<T> = Shared<BoxFuture<'static, Result<T, WorkPanicked>>>;
+
+/// Identical work that is still running is shared: the second caller with the same key gets the first one's answer. Like a
+/// promise of git.ts, the work starts at once as its own tokio task and always settles, whether or not anyone still waits for
+/// it; its entry goes when it ends, so a panic or callers that give up never leave a stale entry behind.
 #[derive(Default, Clone)]
 pub struct Inflight {
     entries: Entries,
@@ -107,33 +147,39 @@ pub struct Inflight {
 }
 
 impl Inflight {
-    /// `shared(key, work)` of git.ts. `work` is only polled when no identical work runs.
-    pub fn shared<T, F>(&self, key: &str, work: F) -> impl Future<Output = T> + Send + 'static
+    /// `shared(key, work)` of git.ts. `work` is spawned when no identical work runs (and dropped unpolled otherwise); a panic
+    /// of the work is [`WorkPanicked`] for every caller of that run. Must be called inside a tokio runtime.
+    pub fn shared<T, F>(&self, key: &str, work: F) -> impl Future<Output = Result<T, WorkPanicked>> + Send + 'static
     where
         T: Clone + Send + Sync + 'static,
         F: Future<Output = T> + Send + 'static,
     {
         let mut entries = self.entries.lock();
         if let Some((_, running)) = entries.get(key)
-            && let Some(running) = running.downcast_ref::<Shared<BoxFuture<'static, T>>>()
+            && let Some(running) = running.downcast_ref::<Run<T>>()
         {
             return running.clone();
         }
         let id = self.ids.fetch_add(1, Ordering::Relaxed);
-        let map = self.entries.clone();
-        let owned_key = key.to_string();
-        let future: BoxFuture<'static, T> = async move {
-            let out = work.await;
-            let mut entries = map.lock();
-            if entries.get(&owned_key).is_some_and(|(owner, _)| *owner == id) {
-                entries.remove(&owned_key);
-            }
-            out
+        let release = Release { entries: self.entries.clone(), key: key.to_string(), id };
+        // The entry is inserted below while the lock is held, so the task's release (it takes the lock) always comes after.
+        let task = tokio::spawn(async move {
+            let _release = release;
+            work.await
+        });
+        let run: Run<T> = async move {
+            task.await.map_err(|e| {
+                if e.is_panic() {
+                    WorkPanicked(panic_text(&*e.into_panic()))
+                } else {
+                    WorkPanicked("the shared work was cancelled".into())
+                }
+            })
         }
-        .boxed();
-        let shared = future.shared();
-        entries.insert(key.to_string(), (id, Box::new(shared.clone())));
-        shared
+        .boxed()
+        .shared();
+        entries.insert(key.to_string(), (id, Box::new(run.clone())));
+        run
     }
 
     /// How many keys are running (tests).
@@ -179,12 +225,58 @@ mod tests {
         let c = inflight.shared("status|2|dir", make(runs.clone()));
         assert_eq!(inflight.running(), 2);
         let (a, b, c) = tokio::join!(a, b, c);
-        assert_eq!((a, b, c), (42, 42, 42));
+        assert_eq!((a.unwrap(), b.unwrap(), c.unwrap()), (42, 42, 42));
         assert_eq!(runs.load(Ordering::SeqCst), 2);
         assert_eq!(inflight.running(), 0);
         // a later call runs again
-        assert_eq!(inflight.shared("status|1|dir", make(runs.clone())).await, 42);
+        assert_eq!(inflight.shared("status|1|dir", make(runs.clone())).await, Ok(42));
         assert_eq!(runs.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn a_panicking_run_settles_for_its_callers_and_the_next_call_runs_afresh() {
+        let inflight = Inflight::default();
+        let boom = async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            if inflight_never() {
+                return 1u32;
+            }
+            panic!("boom")
+        };
+        let a = inflight.shared("k", boom);
+        let b = inflight.shared("k", async { 2u32 });
+        let (a, b) = tokio::join!(a, b);
+        assert_eq!(a, Err(WorkPanicked("boom".into())));
+        assert_eq!(b, Err(WorkPanicked("boom".into())));
+        assert_eq!(inflight.running(), 0);
+        assert_eq!(inflight.shared("k", async { 3u32 }).await, Ok(3));
+        assert_eq!(inflight.running(), 0);
+    }
+
+    fn inflight_never() -> bool {
+        false
+    }
+
+    #[tokio::test]
+    async fn a_run_nobody_waits_for_still_ends_and_leaves_no_entry() {
+        let inflight = Inflight::default();
+        let slow = |v: &'static str| async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            v
+        };
+        // the caller gives up (a timeout wrapper), and one never polls at all
+        assert!(tokio::time::timeout(Duration::from_millis(5), inflight.shared("s", slow("old"))).await.is_err());
+        drop(inflight.shared("t", slow("never polled")));
+        assert_eq!(inflight.running(), 2);
+        for _ in 0..100 {
+            if inflight.running() == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(inflight.running(), 0);
+        assert_eq!(inflight.shared("s", async { "new" }).await, Ok("new"));
+        assert_eq!(inflight.shared("t", async { "new" }).await, Ok("new"));
     }
 
     #[test]

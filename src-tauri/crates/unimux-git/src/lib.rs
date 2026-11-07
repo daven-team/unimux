@@ -53,8 +53,26 @@ pub async fn path_exists(path: &str, timeout: Duration) -> bool {
         return false;
     }
     let owned = path.to_string();
-    let check = tokio::task::spawn_blocking(move || std::fs::metadata(owned).is_ok());
+    let check = tokio::task::spawn_blocking(move || access_exists(&owned));
     matches!(tokio::time::timeout(timeout, check).await, Ok(Ok(true)))
+}
+
+/// `fs.access(path)` (F_OK) of Node. On Windows libuv asks GetFileAttributesW, which looks at a junction or symbolic link
+/// itself, so a link whose target is gone still exists (git then says it is no repository, like 1.1.4).
+#[cfg(windows)]
+fn access_exists(path: &str) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
+    use windows::core::PCWSTR;
+    let wide: Vec<u16> = std::ffi::OsStr::new(path).encode_wide().chain(std::iter::once(0)).collect();
+    // SAFETY: `wide` is a NUL-terminated UTF-16 string that lives across the call.
+    unsafe { GetFileAttributesW(PCWSTR(wide.as_ptr())) != INVALID_FILE_ATTRIBUTES }
+}
+
+/// `fs.access(path)` (F_OK) of Node: access(2) follows links, like stat.
+#[cfg(not(windows))]
+fn access_exists(path: &str) -> bool {
+    std::fs::metadata(path).is_ok()
 }
 
 /// The core of the Git panel's engine (src/main/git.ts `class Git`, the parts below trust).
@@ -111,13 +129,15 @@ impl Git {
         self.generation.bump()
     }
 
-    /// `shared(key, work)`: one run for every caller asking for the same key while it still runs.
-    pub fn shared<T, F>(&self, key: &str, work: F) -> impl Future<Output = T> + Send + 'static
+    /// `shared(key, work)`: one run for every caller asking for the same key while it still runs. A panic of the work is a
+    /// `failed` answer for the callers of that run (a rejected promise in git.ts); the next call runs afresh.
+    pub fn shared<T, F>(&self, key: &str, work: F) -> impl Future<Output = GitResult<T>> + Send + 'static
     where
         T: Clone + Send + Sync + 'static,
-        F: Future<Output = T> + Send + 'static,
+        F: Future<Output = GitResult<T>> + Send + 'static,
     {
-        self.inflight.shared(key, work)
+        let run = self.inflight.shared(key, work);
+        async move { run.await.unwrap_or_else(|e| Err(GitFailure::new(GitErrorCode::Failed, e.0))) }
     }
 
     /// The repository root of a folder (git's spelling); cached for [`ROOT_TTL`]. Fails with gone / not-repo / no-git.
