@@ -5810,6 +5810,7 @@ version = "1.2.0"
 dependencies = [
  "base64 0.23.1",
  "encoding_rs",
+ "futures",
  "icu_collator",
  "icu_locale_core",
  "junction",
@@ -5819,6 +5820,7 @@ dependencies = [
  "ryu-js",
  "serde_json",
  "tempfile",
+ "tokio",
  "unimux-core",
  "unimux-ipc",
  "uuid",

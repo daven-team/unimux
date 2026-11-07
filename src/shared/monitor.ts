@@ -5,8 +5,12 @@
 /** One process of a system snapshot. `cpuMs`: CPU time used since it started; `start`: start time (ms, only compared). */
 export interface RawProc { pid: number; ppid: number; cpuMs: number; mem: number; start: number; name: string }
 
-/** The Electron processes (app.getAppMetrics) and the utility hosts by their service names. */
-export type AppProcKind = 'main' | 'renderer' | 'gpu' | 'ptyhost' | 'sftphost' | 'dbhost' | 'utility' | 'other';
+/**
+ * The Electron processes (app.getAppMetrics) and the utility hosts by their service names. 1.2.0 (Tauri): `webview` is the
+ * WebView2 browser process; its renderer, GPU and utility processes use the Electron kinds, and the hosts are gone (their
+ * services run in the main process).
+ */
+export type AppProcKind = 'main' | 'renderer' | 'gpu' | 'webview' | 'ptyhost' | 'sftphost' | 'dbhost' | 'utility' | 'other';
 export interface AppProcInfo { pid: number; kind: AppProcKind; name?: string }
 
 export interface MonitorRow { pid: number; name: string; cpu: number; mem: number; depth: number }

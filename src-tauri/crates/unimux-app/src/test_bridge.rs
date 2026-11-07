@@ -256,6 +256,24 @@ pub async fn test_bridge(
                 .map(|(label, name, at)| json!({ "label": label, "name": name, "at": at }))
                 .collect::<Vec<_>>()
         )),
+        // G8: the running cells the Monitor panel lists, until P3 tracks them: {cells: [{cellId, pid}]}.
+        "monitorCells" => {
+            let monitor = crate::commands::files::g8::monitor().ok_or_else(|| fail("no monitor"))?;
+            let cells: Vec<(String, u32)> = args
+                .get("cells")
+                .and_then(Value::as_array)
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|c| {
+                            Some((c.get("cellId")?.as_str()?.to_string(), u32::try_from(c.get("pid")?.as_u64()?).ok()?))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let count = cells.len();
+            monitor.set_cells(Arc::new(move || cells.clone()));
+            Ok(json!({ "cells": count, "mainPid": monitor.main_pid() }))
+        }
         // H1: the hook server as the harness needs it: port, token, a cell's URLs (a fresh nonce with `renew: true`) and,
         // until P3 tracks running processes, which cells count as alive (`alive: [ids]`).
         "hooks" => {

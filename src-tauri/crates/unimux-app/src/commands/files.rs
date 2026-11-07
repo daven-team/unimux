@@ -7,6 +7,8 @@
 //! `fs:listProjectDirectories`, `fs:statProjectFile`, `fs:readProjectFile`, `fs:writeProjectFile`) and the editor's local
 //! files of the SFTP view (`local:readFile`, `local:statFile`, `local:writeFile`). The file system work runs on the blocking
 //! pool (a slow network share never stalls the IPC threads).
+//!
+//! G8 (files/g8.rs): notes, the fs probes, the Monitor panel and the changelog.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -19,6 +21,8 @@ use unimux_files::save::{self, SaveResult};
 use unimux_ipc::{IpcError, Reply, RouterBuilder};
 
 use crate::context::AppContext;
+
+pub mod g8;
 
 const GONE: &str = "Projekt już nie istnieje.";
 
@@ -183,6 +187,8 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
             Ok(result.to_json())
         }
     });
+
+    g8::register(r, ctx);
 }
 
 #[cfg(test)]
