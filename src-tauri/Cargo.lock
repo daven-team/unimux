@@ -6007,7 +6007,9 @@ dependencies = [
  "ctr",
  "des",
  "getrandom 0.4.3",
+ "indexmap 2.14.2",
  "md5",
+ "parking_lot 0.13.0",
  "rand_core 0.10.1",
  "regex",
  "russh",
@@ -6019,6 +6021,7 @@ dependencies = [
  "tokio",
  "unimux-core",
  "unimux-ipc",
+ "unimux-oscrypt",
  "uuid",
  "zeroize",
 ]

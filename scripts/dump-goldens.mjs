@@ -39,6 +39,8 @@
 //                                     scripts/goldens-g8.mjs)
 //   test/golden/sessions-*.jsonl, context-*.jsonl   the session listing, claudeProjectDirName and the context meter (1.1.4's
 //                                     code, run on scratch homes; see scripts/goldens-sessions.mjs)
+//   test/golden/ssh-vault.jsonl, ssh-known-hosts.jsonl, ssh-command-history.jsonl, ssh-history-rules.jsonl   the SSH stores
+//                                     (1.1.4's code, run on scratch dirs) and the history rules (see scripts/goldens-ssh.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
 import { updateConfigGolden, updateProgressRows, updateStringsGolden } from './goldens-update.mjs';
@@ -55,6 +57,7 @@ import { accountsStoreRows, codexStoreRows, identityRows } from './goldens-accou
 import { gitSharedRows, gitTrustRows } from './goldens-git.mjs';
 import { g8Goldens } from './goldens-g8.mjs';
 import { backwardRows, contextScanRows, sessionListRows, sessionPathRows } from './goldens-sessions.mjs';
+import { historyRows, historyRuleRows, knownHostsRows, vaultRows } from './goldens-ssh.mjs';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -83,6 +86,9 @@ const [{ AccountsStore }, { CodexAccountsStore }, accounts, codex, { parseCodexA
 ]);
 const [sessions, contextMain, contextShared, { normalizeProjectPath }] = await Promise.all([
   load('src/main/sessions.ts'), load('src/main/contextUsage.ts'), load('src/shared/contextUsage.ts'), load('src/shared/platform.ts'),
+]);
+const [{ SshVault }, { KnownHostsStore }, { CommandHistoryStore }, historyRules] = await Promise.all([
+  load('src/main/ssh/vault.ts'), load('src/main/ssh/knownHosts.ts'), load('src/main/ssh/commandHistory.ts'), load('src/shared/commandHistory.ts'),
 ]);
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
@@ -346,6 +352,10 @@ const files = {
   'sessions-list.jsonl': jsonl(await sessionListRows({ sessions })),
   'context-scan.jsonl': jsonl(contextScanRows(contextShared)),
   'context-backward.jsonl': jsonl(await backwardRows(contextMain)),
+  'ssh-vault.jsonl': jsonl(vaultRows({ SshVault })),
+  'ssh-known-hosts.jsonl': jsonl(knownHostsRows({ KnownHostsStore })),
+  'ssh-command-history.jsonl': jsonl(historyRows({ CommandHistoryStore })),
+  'ssh-history-rules.jsonl': jsonl(historyRuleRows(historyRules)),
 };
 const updateStrings = updateStringsGolden({ root, translate });
 files['update-strings.json'] = `${JSON.stringify(updateStrings, null, 1)}\n`;

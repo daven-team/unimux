@@ -141,6 +141,53 @@ fn is_json_number(t: &[u8]) -> bool {
 /// The text with every number token outside strings that is beyond the f64 range (JSON.parse reads it as Infinity or
 /// -Infinity) replaced by `null`; None when there is none. Malformed tokens are left for serde_json to reject.
 pub fn replace_infinite_numbers(text: &str) -> Option<String> {
+    replace_infinite_numbers_with(text, |_| "null")
+}
+
+/// The string [`parse_keeping_infinity`] puts where JSON.parse would read Infinity (U+FDD0 is a noncharacter: no text the
+/// app writes holds it).
+pub const INFINITY_MARK: &str = "\u{fdd0}Infinity";
+/// The same for -Infinity.
+pub const NEG_INFINITY_MARK: &str = "\u{fdd0}-Infinity";
+
+/// The infinity a mark of [`parse_keeping_infinity`] stands for (None for every other value).
+pub fn infinity_of(value: &Value) -> Option<f64> {
+    match value.as_str()? {
+        INFINITY_MARK => Some(f64::INFINITY),
+        NEG_INFINITY_MARK => Some(f64::NEG_INFINITY),
+        _ => None,
+    }
+}
+
+/// [`parse`], but a number beyond the f64 range reads as the string [`INFINITY_MARK`] / [`NEG_INFINITY_MARK`] instead of
+/// null: for stores whose TS code tests `typeof x === 'number'` (true for Infinity) and writes the value back, where
+/// JSON.stringify turns it into `null` (a plain null would fail the test and be replaced by a default). Callers treat a
+/// mark as a number ([`infinity_of`]) and never as a string.
+pub fn parse_keeping_infinity(text: &str) -> serde_json::Result<Value> {
+    let mut value: Value = match parse_deep(text) {
+        Ok(v) => v,
+        Err(e) => {
+            let surrogates = replace_lone_surrogates(text);
+            let source = surrogates.as_deref().unwrap_or(text);
+            let numbers =
+                replace_infinite_numbers_with(
+                    source,
+                    |negative| {
+                        if negative { "\"\\ufdd0-Infinity\"" } else { "\"\\ufdd0Infinity\"" }
+                    },
+                );
+            match numbers.or(surrogates) {
+                Some(fixed) => parse_deep(&fixed)?,
+                None => return Err(e),
+            }
+        }
+    };
+    order_like_js(&mut value);
+    Ok(value)
+}
+
+/// [`replace_infinite_numbers`] with the replacement text chosen by the sign of the number.
+fn replace_infinite_numbers_with(text: &str, replacement: impl Fn(bool) -> &'static str) -> Option<String> {
     let b = text.as_bytes();
     let mut out: Option<String> = None;
     let mut copied = 0;
@@ -158,7 +205,7 @@ pub fn replace_infinite_numbers(text: &str) -> Option<String> {
                     // Number tokens are ASCII, so `copied` and `start` are character boundaries.
                     let o = out.get_or_insert_with(|| String::with_capacity(text.len()));
                     o.push_str(&text[copied..start]);
-                    o.push_str("null");
+                    o.push_str(replacement(token.starts_with('-')));
                     copied = i;
                 }
             }
@@ -550,5 +597,21 @@ mod tests {
         assert_eq!(index_key("-1"), None);
         let plain = r#"{"0":1,"7":2,"x":3}"#;
         assert_eq!(stringify(&parse(plain).unwrap()), plain);
+    }
+
+    #[test]
+    fn infinity_is_kept_as_a_mark_on_request() {
+        let text = r#"{"a":1e400,"b":-1e400,"c":"1e400","d":[2E+999],"e":1.5,"f":"x\ud800"}"#;
+        let v = parse_keeping_infinity(text).unwrap();
+        assert_eq!(infinity_of(&v["a"]), Some(f64::INFINITY));
+        assert_eq!(infinity_of(&v["b"]), Some(f64::NEG_INFINITY));
+        assert_eq!(v["c"], "1e400");
+        assert_eq!(infinity_of(&v["d"][0]), Some(f64::INFINITY));
+        assert_eq!(v["e"], 1.5);
+        assert_eq!(v["f"], "x\u{fffd}");
+        assert_eq!(infinity_of(&v["c"]), None);
+        // Plain parse still reads them as null.
+        assert_eq!(parse(text).unwrap()["a"], Value::Null);
+        assert!(parse_keeping_infinity("{ nope").is_err());
     }
 }

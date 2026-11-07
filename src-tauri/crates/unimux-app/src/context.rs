@@ -120,6 +120,8 @@ pub struct AppContext {
     pub cells: Arc<crate::cells::Cells>,
     /// W7: the startup steps the domains add behind the window (cell file prune, account recovery and migration).
     pub startup_steps: crate::cells::startup::Steps,
+    /// The SSH vault, known hosts and command history of `<data>/ssh` (S1); opened at start by `commands::ssh::app_started`.
+    pub ssh: Arc<unimux_ssh::stores::SshStores>,
     /// Check build only: every renderer startup mark with the window label and the time (test_bridge `marks`).
     #[cfg(feature = "test-bridge")]
     pub test_marks: Mutex<Vec<(String, String, f64)>>,
@@ -168,6 +170,19 @@ impl AppContext {
         let b = broadcaster.clone();
         events.before_emit(move || b.flush());
         let safe_storage = Arc::new(safe_storage(&data_dir, &overrides, &crash, &timer, &startup_log));
+        // 1.1.4 startSsh: the history keeps only hosts that are still saved (`state.sshHosts`).
+        let hosts_of = controller.clone();
+        let ssh = unimux_ssh::stores::SshStores::new(
+            &data_dir,
+            safe_storage.clone(),
+            Arc::new(move |id: &str| {
+                let state = hosts_of.get();
+                state
+                    .get("sshHosts")
+                    .and_then(Value::as_array)
+                    .is_some_and(|hosts| hosts.iter().any(|h| h.get("id").and_then(Value::as_str) == Some(id)))
+            }),
+        );
         // After the saver and the broadcaster: its hook sees every change once they have it.
         let crash_for_detached = crash.clone();
         let detached = crate::detached::DetachedService::new(
@@ -237,6 +252,7 @@ impl AppContext {
             hooks,
             cells,
             startup_steps: Default::default(),
+            ssh,
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
             main_page_hooks: Mutex::new(Vec::new()),
