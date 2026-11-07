@@ -137,3 +137,15 @@ Rows keep the exact case name (the counter matches them). Rust tests are named `
 | quit-wait | the bounds (5 s, then 3 s after the cells) stay well inside the hard shutdown limit | unimux-app lifecycle::wind_down::tests::the_bounds_stay_well_inside_the_hard_shutdown_limit | ported |
 | quit-wait | a release followed at once by a new claim keeps the quit waiting (within the bound) | unimux-app lifecycle::wind_down::tests::a_release_followed_at_once_by_a_new_claim_keeps_waiting_within_the_bound (the swap slot itself is A2) | partial |
 | safe-window | leaves the wind-down a bounded time | unimux-app lifecycle::wind_down::tests::the_bounds_stay_well_inside_the_hard_shutdown_limit | ported |
+| git-paths | treats the short and the long spelling, other letter case and slashes as one folder | unimux-git paths::tests::treats_the_short_and_the_long_spelling_other_letter_case_and_slashes_as_one_folder | ported |
+| git-paths | decides "inside the project" on canonical paths | unimux-git paths::tests::decides_inside_the_project_on_canonical_paths | ported |
+| git-paths | keeps the real case of the part below the parent | unimux-git paths::tests::keeps_the_real_case_of_the_part_below_the_parent | ported |
+| git-paths | is case sensitive and link aware off Windows, and falls back to the lexical path | unimux-git paths::tests::is_case_sensitive_and_link_aware_off_windows_and_falls_back_to_the_lexical_path | ported |
+| git-paths | resolves a link and the lexical fallback of a missing folder | unimux-git/tests/canonical_paths.rs::canonical_paths_of_real_folders_match_the_ts_reference (junction, 8.3 names, subst drive, missing children, all compared with gitPaths.ts live) | ported |
+| git-ops | reports a missing git with an install hint | unimux-git/tests/runner.rs::reports_a_missing_git_with_an_install_hint (root and probe; the status call is G3) | partial |
+| git-ops | stops a slow git at the timeout | unimux-git/tests/runner.rs::stops_a_slow_git_at_the_timeout_and_releases_the_lock_it_left (read and network timeouts at the runner; status / fetch are G3) | partial |
+| git-ops | never prints credentials of a remote URL | unimux-git/tests/runner.rs::never_prints_credentials_and_does_not_wait_for_a_prompt (git fetch through the runner; Git.fetch is G3) | partial |
+| git-ops | does not wait for a credential prompt | unimux-git/tests/runner.rs::never_prints_credentials_and_does_not_wait_for_a_prompt (git fetch through the runner; Git.fetch is G3) | partial |
+| git-ops | caps the number of listed changes | unimux-git/tests/runner.rs::caps_the_output_of_reads_and_writes (the read cap; the status parser and GIT_MAX_FILES are G2 / G3) | partial |
+| git-ops | marks binary files and caps huge diffs | unimux-git/tests/runner.rs::caps_the_output_of_reads_and_writes (the 1 MiB diff cap; diff and the binary mark are G3) | partial |
+| git-ops | works from a subfolder and from a non-repository | unimux-git/tests/runner.rs::finds_the_root_from_a_subfolder_and_tells_folders_without_a_repository (root and probe; the status call is G3) | partial |

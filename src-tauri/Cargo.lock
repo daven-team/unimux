@@ -5719,9 +5719,19 @@ dependencies = [
 name = "unimux-git"
 version = "1.2.0"
 dependencies = [
+ "futures",
+ "junction",
+ "parking_lot 0.13.0",
+ "regex",
+ "serde",
  "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
  "unimux-core",
+ "unimux-exec",
  "unimux-ipc",
+ "windows",
 ]
 
 [[package]]
