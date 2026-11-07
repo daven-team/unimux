@@ -185,6 +185,8 @@ fn main() {
             ctx.mark("app-ready");
             // The startup gate (U1) runs here and may hold the main window back; wave 0 always proceeds.
             windows::create_main(app.handle(), &ctx)?;
+            // H3: the CLI scan in the background and the registry refresh on focus.
+            commands::agents::app_started(&ctx);
             startup::mark_started();
             Ok(())
         })

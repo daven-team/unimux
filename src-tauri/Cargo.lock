@@ -5154,9 +5154,15 @@ dependencies = [
 name = "unimux-agents"
 version = "1.2.0"
 dependencies = [
+ "futures",
+ "parking_lot 0.13.0",
+ "serde",
  "serde_json",
+ "tokio",
  "unimux-core",
+ "unimux-exec",
  "unimux-ipc",
+ "windows",
 ]
 
 [[package]]

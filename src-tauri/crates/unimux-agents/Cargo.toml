@@ -9,4 +9,15 @@ license.workspace = true
 [dependencies]
 unimux-core.workspace = true
 unimux-ipc.workspace = true
+unimux-exec.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
+futures.workspace = true
+parking_lot.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Registry"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
