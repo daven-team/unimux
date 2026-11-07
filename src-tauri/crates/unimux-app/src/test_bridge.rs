@@ -25,6 +25,8 @@ pub async fn test_bridge(
         // The state as Rust holds it (revision, the state itself, whether a save is pending).
         "state" => Ok(json!({ "snapshot": ctx.state.snapshot().to_json(), "savePending": ctx.saver.has_pending() })),
         "flush" => Ok(json!({ "saved": ctx.flush_state() })),
+        // The page's answer to an eval-bridge request (eval_bridge.rs, the macOS stand-in for CDP).
+        "evalResult" => crate::eval_bridge::deliver(&args).map(|_| Value::Null).map_err(|e| fail(&e)),
         "paths" => Ok(json!({
             "dataDir": ctx.data_dir,
             "crashLog": ctx.crash.path(),
@@ -185,6 +187,38 @@ pub async fn test_bridge(
             }
             Ok(serde_json::to_value(result).unwrap_or(Value::Null))
         }
+        // W2: the app menu as installed (none on Windows) and, on macOS, the WebKit text defaults WebKit will read.
+        "macos" => {
+            let menu = ctx.app().and_then(|a| a.menu()).map(|m| menu_json(m.items().unwrap_or_default()));
+            #[cfg(target_os = "macos")]
+            let text_defaults: Value =
+                unimux_platform::mac::text_defaults().into_iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
+            #[cfg(not(target_os = "macos"))]
+            let text_defaults = Value::Null;
+            Ok(json!({ "menu": menu, "textDefaults": text_defaults }))
+        }
         _ => Err(fail(&format!("unknown op {op}"))),
     }
+}
+
+/// A menu as `[{text, items?}]` (separators as "-"), for the eval-bridge smoke.
+fn menu_json<R: tauri::Runtime>(items: Vec<tauri::menu::MenuItemKind<R>>) -> Value {
+    use tauri::menu::MenuItemKind;
+    Value::Array(
+        items
+            .into_iter()
+            .map(|item| match item {
+                MenuItemKind::Submenu(sub) => {
+                    json!({ "text": sub.text().unwrap_or_default(), "items": menu_json(sub.items().unwrap_or_default()) })
+                }
+                MenuItemKind::MenuItem(i) => json!({ "text": i.text().unwrap_or_default(), "id": i.id().as_ref() }),
+                MenuItemKind::Predefined(i) => {
+                    let text = i.text().unwrap_or_default();
+                    json!({ "text": if text.is_empty() { "-".to_string() } else { text } })
+                }
+                MenuItemKind::Check(i) => json!({ "text": i.text().unwrap_or_default() }),
+                MenuItemKind::Icon(i) => json!({ "text": i.text().unwrap_or_default() }),
+            })
+            .collect(),
+    )
 }

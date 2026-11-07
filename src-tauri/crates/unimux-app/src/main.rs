@@ -8,7 +8,10 @@
 mod channel_bench;
 mod commands;
 mod context;
+#[cfg(feature = "test-bridge")]
+mod eval_bridge;
 mod ipc;
+mod mac_chrome;
 #[cfg(feature = "test-bridge")]
 mod spike_pty;
 #[cfg(feature = "test-bridge")]
@@ -160,9 +163,17 @@ fn main() {
         });
     }
 
+    // WebKit reads its text defaults once per process: before the first webview (W2).
+    #[cfg(target_os = "macos")]
+    mac_chrome::prepare_process();
+
     let tauri_ctx = tauri_context();
     let setup_ctx = ctx.clone();
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // 1.1.4's macOS menu bar (app + Edit menu, no reload / close); Windows has none.
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(mac_chrome::app_menu).on_menu_event(|_app, event| mac_chrome::on_menu_event(event.id().as_ref()));
+    let app = builder
         .manage(ctx.clone())
         .invoke_handler(handlers())
         .setup(move |app| {
@@ -200,6 +211,9 @@ fn main() {
             ctx.mark("app-ready");
             // The startup gate (U1) runs here and may hold the main window back; wave 0 always proceeds.
             windows::create_main(app.handle(), &ctx)?;
+            // The macOS stand-in for CDP (MC_EVAL_PORT, check build only).
+            #[cfg(feature = "test-bridge")]
+            let _ = eval_bridge::start(ctx.clone());
             startup::mark_started();
             Ok(())
         })
@@ -233,6 +247,7 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
             ipc::update_splash_init,
             ipc::update_splash_close,
             ipc::update_splash_open,
+            mac_chrome::mac_title_double_click,
             test_bridge::test_bridge,
             channel_bench::test_channel_bench,
             channel_bench::test_channel_pull,
@@ -250,7 +265,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
             ipc::mc_port_post,
             ipc::update_splash_init,
             ipc::update_splash_close,
-            ipc::update_splash_open
+            ipc::update_splash_open,
+            mac_chrome::mac_title_double_click
         ]
     }
 }

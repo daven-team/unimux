@@ -1,8 +1,10 @@
 //! OS integration of unimux (wave 0 part: PLAN F5, F6, F11). Later packages add notifications, badge, clipboard secret,
-//! session end and file drop here (W3, W4, W6).
+//! session end and file drop here (W3, W4, W6). `mac`: App Nap, WebKit text defaults and edit actions (W2).
 
 pub mod instance;
 pub mod webview;
+#[cfg(target_os = "macos")]
+pub mod mac;
 #[cfg(windows)]
 mod win;
 
@@ -19,6 +21,31 @@ pub fn allow_set_foreground(pid: u32) -> bool {
     {
         let _ = pid;
         false
+    }
+}
+
+/// What a double click on the title bar does on macOS (System Settings > Desktop & Dock > "Double-click a window's title bar
+/// to"), as AppKit does it for a native title bar and Electron for a `-webkit-app-region: drag` area (1.1.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TitleDoubleClick {
+    /// "Zoom" (the default; also "Fill" on macOS 15+): toggles between the zoomed and the user size.
+    Zoom,
+    Minimize,
+    /// "Do Nothing".
+    Nothing,
+}
+
+impl TitleDoubleClick {
+    /// From the global defaults `AppleActionOnDoubleClick` ("Maximize" | "Minimize" | "None" | "Fill") and, when that is
+    /// absent, the older `AppleMiniaturizeOnDoubleClick` (true: minimize). Unknown values zoom, like AppKit.
+    pub fn from_defaults(action: Option<&str>, miniaturize: Option<bool>) -> Self {
+        match action {
+            Some("Minimize") => TitleDoubleClick::Minimize,
+            Some("None") => TitleDoubleClick::Nothing,
+            Some(_) => TitleDoubleClick::Zoom,
+            None if miniaturize == Some(true) => TitleDoubleClick::Minimize,
+            None => TitleDoubleClick::Zoom,
+        }
     }
 }
 
@@ -89,4 +116,20 @@ pub fn error_box(title: &str, text: &str) {
 #[cfg(target_os = "macos")]
 fn applescript_string(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::TitleDoubleClick;
+
+    #[test]
+    fn title_double_click_follows_the_system_setting() {
+        assert_eq!(TitleDoubleClick::from_defaults(None, None), TitleDoubleClick::Zoom);
+        assert_eq!(TitleDoubleClick::from_defaults(Some("Maximize"), None), TitleDoubleClick::Zoom);
+        assert_eq!(TitleDoubleClick::from_defaults(Some("Fill"), None), TitleDoubleClick::Zoom);
+        assert_eq!(TitleDoubleClick::from_defaults(Some("Minimize"), None), TitleDoubleClick::Minimize);
+        assert_eq!(TitleDoubleClick::from_defaults(Some("None"), Some(true)), TitleDoubleClick::Nothing);
+        assert_eq!(TitleDoubleClick::from_defaults(None, Some(true)), TitleDoubleClick::Minimize);
+        assert_eq!(TitleDoubleClick::from_defaults(None, Some(false)), TitleDoubleClick::Zoom);
+    }
 }

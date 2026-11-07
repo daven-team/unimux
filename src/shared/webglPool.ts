@@ -1,5 +1,6 @@
 // Which terminals keep a WebGL renderer. Pure, so the policy is tested without a browser.
 import { MAX_CELLS } from './layout';
+import type { WebviewEngine } from './terminalLimits';
 
 export interface WebglCandidate {
   id: string;
@@ -80,6 +81,16 @@ export function planWebgl(candidates: readonly WebglCandidate[], limit: number, 
  * that is shown next, so that prewarming never takes the contexts a shown grid needs and is never undone by the plan.
  */
 export const WEBGL_PREWARM_RESERVE = MAX_CELLS;
+
+/**
+ * The prewarm reserve of an engine and pool size. Chromium keeps WEBGL_PREWARM_RESERVE (1.1.4): a pool lowered to 16 or
+ * fewer by evictions prewarms nothing. WebKit's pool (MAX_WEBGL_CONTEXTS_WEBKIT, 12) is smaller than a full grid, so a fixed
+ * reserve of MAX_CELLS would turn prewarm off for good; there half of the pool stays free instead (6 of 12), so the parked
+ * cells of a small grid still get a context in idle time, and a bigger grid shown next takes them back through planWebgl.
+ */
+export function webglPrewarmReserve(engine: WebviewEngine, limit: number): number {
+  return engine === 'webkit' ? Math.ceil(limit / 2) : WEBGL_PREWARM_RESERVE;
+}
 /** Idle time an idle callback must still have to create a context (its shaders take about 10 ms). */
 export const WEBGL_PREWARM_IDLE_MS = 12;
 /**
@@ -93,13 +104,13 @@ export const WEBGL_PREWARM_GAP_MS = 250;
 /**
  * The parked terminal that gets a context next in idle time, or null: one that has none and is not backing off, the most
  * recently shown first (never shown ones in the order given, the order the cells were created), while fewer than
- * `limit - WEBGL_PREWARM_RESERVE` contexts exist. Showing its grid later then finds the context ready instead of drawing
- * through the DOM renderer while contexts are created a few per frame.
+ * `limit - reserve` contexts exist (`reserve` from webglPrewarmReserve). Showing its grid later then finds the context ready
+ * instead of drawing through the DOM renderer while contexts are created a few per frame.
  */
-export function pickPrewarm(candidates: readonly WebglCandidate[], limit: number, now: number): string | null {
+export function pickPrewarm(candidates: readonly WebglCandidate[], limit: number, now: number, reserve = WEBGL_PREWARM_RESERVE): string | null {
   let held = 0;
   for (const c of candidates) if (c.hasWebgl) held++;
-  if (held >= limit - WEBGL_PREWARM_RESERVE) return null;
+  if (held >= limit - reserve) return null;
   let best: WebglCandidate | null = null;
   for (const c of candidates) {
     if (c.attached || c.hasWebgl || (c.blockedUntil !== undefined && c.blockedUntil > now)) continue;

@@ -173,6 +173,7 @@ async fn set_controller_visible(window: &WebviewWindow, visible: bool) -> tauri:
 }
 
 async fn window_state(window: &WebviewWindow) -> Value {
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut state = json!({
         "label": window.label(),
         "visible": window.is_visible().ok(),
