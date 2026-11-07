@@ -5901,6 +5901,7 @@ dependencies = [
  "uuid",
  "webview2-com",
  "windows",
+ "zeroize",
 ]
 
 [[package]]

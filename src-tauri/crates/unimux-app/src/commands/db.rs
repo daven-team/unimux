@@ -8,7 +8,8 @@
 //! disconnect (`unimux_db::service`), the query history (`db/query_history.json`, written 1.5 s after a change and in the
 //! wind-down's save phase), the SQLite file and CA dialogs, the result export, and the `db:*` events. Every request passes
 //! the 1.1.4 validation first (`unimux_db::ipc`). The sessions themselves are D4 / D7 / D9 / D11 (routed by D12): until they
-//! land, the host link ends every session with `unsupported`, and tunnels wait for the SSH coordinator (S3).
+//! land, the host link ends every session with `unsupported`. Tunnels log in through the SSH coordinator (S3,
+//! `commands::ssh::DbTunnels`); their owner (D2) is not plugged in yet.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -19,7 +20,7 @@ use unimux_core::i18n::translate;
 use unimux_db::history::{DbHistoryStore, WRITE_DELAY_MS};
 use unimux_db::host::{DbHostLink, Spawn, UnavailableHost};
 use unimux_db::ipc;
-use unimux_db::service::{DbDeps, DbEvents, DbService, DbStateAccess, NoCoordinator, PROMPT_TIMEOUT_MS, ReadCa, TEST_TIMEOUT_MS};
+use unimux_db::service::{DbDeps, DbEvents, DbService, DbStateAccess, PROMPT_TIMEOUT_MS, ReadCa, TEST_TIMEOUT_MS};
 use unimux_db::sql::limits;
 use unimux_db::sqlite_files::create_sqlite_file;
 use unimux_db::timers::{Timers, TokioTimers};
@@ -142,7 +143,8 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     let service = DbService::new(DbDeps {
         state: Arc::new(AppState(ctx.clone())),
         host: host.clone() as Arc<dyn DbHostLink>,
-        coordinator: Arc::new(NoCoordinator),
+        // S3: tunnels log in through the SSH coordinator (their owner, D2, plugs into its `db` slot).
+        coordinator: Arc::new(crate::commands::ssh::DbTunnels(crate::commands::ssh::link::link(ctx))),
         vault: vault.clone(),
         read_ca: read_ca(),
         events: Arc::new(AppEvents { events: ctx.events.clone(), vault: vault.clone() }),
@@ -155,6 +157,8 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         test_timeout_ms: TEST_TIMEOUT_MS,
     });
     host.connect_weak(Arc::downgrade(&service), |s: &DbService, m| s.on_host_message(m));
+    // The coordinator's states and prompts of `db:` tunnels go to the service (1.1.4 startSsh `events`).
+    let _ = crate::commands::ssh::link::link(ctx).events.db.set(Arc::new(crate::commands::ssh::DbSink(Arc::downgrade(&service))));
 
     // After every state change: the passwords of deleted connections go (1.1.4 `db?.stateChanged()`).
     let svc = service.clone();

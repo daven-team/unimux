@@ -30,12 +30,12 @@ sha2.workspace = true
 getrandom = { workspace = true, features = ["sys_rng"] }
 rand_core.workspace = true
 regex.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["net"] }
 uuid.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util", "net"] }
 tempfile.workspace = true
 
 [[example]]

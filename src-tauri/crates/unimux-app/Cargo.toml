@@ -45,6 +45,7 @@ serde.workspace = true
 serde_json.workspace = true
 parking_lot.workspace = true
 uuid.workspace = true
+zeroize.workspace = true
 futures.workspace = true
 url.workspace = true
 

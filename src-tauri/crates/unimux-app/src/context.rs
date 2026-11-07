@@ -122,6 +122,8 @@ pub struct AppContext {
     pub startup_steps: crate::cells::startup::Steps,
     /// The SSH vault, known hosts and command history of `<data>/ssh` (S1); opened at start by `commands::ssh::app_started`.
     pub ssh: Arc<unimux_ssh::stores::SshStores>,
+    /// S3: the SSH coordinator, its owner slots (P5 / T1 / D2) and its event routes (set by commands::ssh::register).
+    pub ssh_link: OnceLock<Arc<crate::commands::ssh::SshLink>>,
     /// Check build only: every renderer startup mark with the window label and the time (test_bridge `marks`).
     #[cfg(feature = "test-bridge")]
     pub test_marks: Mutex<Vec<(String, String, f64)>>,
@@ -253,6 +255,7 @@ impl AppContext {
             cells,
             startup_steps: Default::default(),
             ssh,
+            ssh_link: OnceLock::new(),
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
             main_page_hooks: Mutex::new(Vec::new()),
