@@ -276,6 +276,7 @@ impl AppContext {
             q.forget(label);
         }
         self.ports.detach_window(label);
+        crate::pty_transport::window_destroyed(label);
         self.guard.forget_detached(label);
     }
 

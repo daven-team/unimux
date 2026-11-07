@@ -6,6 +6,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal, type ITheme } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { unpackHostMessage, type HostToRenderer, type HostToRendererPort, type RendererToHost } from '../../../shared/ipc';
+import { PtyFrameDecoder } from '../../../shared/ptyFrames';
 import type { BoundThread } from '../../../shared/codexHooks';
 import { screenWaitsForBackground } from '../../../shared/backgroundWait';
 import { AgentInference, keySequence, type InferredAgent, type ScreenLine, type ScreenState } from '../../../shared/agentInfer';
@@ -113,6 +114,17 @@ interface Entry {
 }
 
 /** What SSH terminals get on top (the command autocomplete, sshAutocomplete.ts): a look at every key first, and a dispose. */
+/**
+ * The pty port: a MessagePort in Electron 1.1.4; in the Tauri build (1.2.0) the bridge's port object (bridge/ptyPort.ts),
+ * which calls onmessage synchronously with binary frames (Uint8Array, decoded here by PtyFrameDecoder).
+ */
+export interface PtyPort {
+  postMessage(message: unknown): void;
+  onmessage: ((e: { data: unknown }) => void) | null;
+  start(): void;
+  close(): void;
+}
+
 export interface RemoteAddon {
   /** A key event before xterm handles it; false = the add-on consumed it. */
   key(ev: KeyboardEvent): boolean;
@@ -139,7 +151,9 @@ class TerminalManager {
   private entries = new Map<string, Entry>();
   /** Part of every permission answer token: a token of an earlier page (before a reload) never matches. */
   private readonly askNonce = Math.random().toString(36).slice(2, 10);
-  private port: MessagePort | null = null;
+  private port: PtyPort | null = null;
+  /** The Tauri host's frames (one streaming UTF-8 decoder per terminal); renewed with every port. */
+  private frames = new PtyFrameDecoder();
   /** The first terminal output of this window was reported for startup.log. */
   private firstOutput = false;
   private pending = new Map<string, Array<{ data: string; replay: boolean; sizes?: ReplaySize[] }>>();
@@ -180,8 +194,12 @@ class TerminalManager {
     this.parking.style.cssText = 'display:none;';
     document.body.appendChild(this.parking);
     window.addEventListener('message', (e) => {
-      if (e.data === 'mc:pty-port' && e.ports[0]) this.setPort(e.ports[0]);
+      if (e.data === 'mc:pty-port' && e.ports[0]) this.setPort(e.ports[0] as unknown as PtyPort);
     });
+    // The Tauri bridge's port (bridge/ptyPort.ts): an event, and the global for a manager created after it was attached.
+    window.addEventListener('mc:pty-port', (e) => { const port = (e as CustomEvent<PtyPort>).detail; if (port) this.setPort(port); });
+    const early = (window as { __MC_PTY_PORT__?: PtyPort }).__MC_PTY_PORT__;
+    if (early) queueMicrotask(() => { if (!this.port) this.setPort(early); });
     // Minimize / restore / hide / show / focus changes make agents redraw: that output is not work (see StatusTracker.environment).
     const environment = () => {
       const now = performance.now();
@@ -261,16 +279,21 @@ class TerminalManager {
     this.buildNumber = n;
   }
 
-  private setPort(port: MessagePort): void {
+  private setPort(port: PtyPort): void {
+    if (port === this.port) return;
     this.port?.close();
     this.port = port;
+    this.frames = new PtyFrameDecoder();
     // Acks owed to the previous host/port are meaningless for the new one, and so are its listings.
     this.acks.clear();
     for (const done of this.listings.values()) done({ ok: false, reason: 'gone' });
     this.listings.clear();
     if (this.ackTimer) clearTimeout(this.ackTimer);
     this.ackTimer = null;
-    port.onmessage = (e) => { for (const m of unpackHostMessage(e.data as HostToRendererPort)) this.onHostMessage(m); };
+    port.onmessage = (e) => {
+      const messages = e.data instanceof Uint8Array ? this.frames.messages(e.data) : unpackHostMessage(e.data as HostToRendererPort);
+      for (const m of messages) this.onHostMessage(m);
+    };
     port.start();
     // Tell the host about the sizes we already know (e.g. after a host restart).
     for (const e of this.entries.values()) this.post({ t: 'resize', id: e.id, cols: e.term.cols, rows: e.term.rows });
@@ -372,7 +395,8 @@ class TerminalManager {
   private ack(m: HostToRenderer): void {
     if (m.t !== 'data') return;
     // One message per cell per tick instead of one per output chunk.
-    this.acks.set(m.id, (this.acks.get(m.id) ?? 0) + m.data.length);
+    // Characters for the Electron host, bytes for the Tauri host (its frames say how many).
+    this.acks.set(m.id, (this.acks.get(m.id) ?? 0) + (m.bytes ?? m.data.length));
     this.ackTimer ??= setTimeout(() => {
       this.ackTimer = null;
       for (const [id, chars] of this.acks) this.post({ t: 'ack', id, chars });

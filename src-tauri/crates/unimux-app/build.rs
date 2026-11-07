@@ -15,6 +15,7 @@ fn main() {
         "mc_invoke_raw",
         "mc_port_attach",
         "mc_port_post",
+        "mc_port_pull",
         "update_splash_init",
         "update_splash_close",
         "update_splash_open",

@@ -81,7 +81,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 
 | id | title | status | started | done | verified | notes |
 |---|---|---|---|---|---|---|
-| P2 | Pty output engine and Channel data plane | todo | | | | |
+| P2 | Pty output engine and Channel data plane | done (Windows; acceptance partly met: the SP5 echo target under a 19-cell flood is not proven within 1.1x at p95 on this machine at 100 percent CPU; macOS compile-checked for unimux-pty / unimux-ipc only) | 2026-11-07 | 2026-11-07 | | branch `tauri-pkg-P2`. unimux-pty: `flow` (TailBuffer 512 KiB in bytes, cut forward to a UTF-8 character start, size history max 512 with the replay offsets in bytes; FlowGate 1 MiB / 256 KiB; EchoClock EWMA 0.25, 150..1000 ms; coalesce_delay 4 / 12 / 33 ms, aligned_delay), `output` (OutputChannel: 128 KiB flush now, echo flush at the end of the read within ECHO_FLUSHES 4, 3 s pause watchdog renewed by acks, 80 ms exit drain, rearm on focus / typing), `timers` (one timer thread for every channel, ManualScheduler fake clock), `batch` (WindowBatcher: one message per window, 16 ms bulk / 4 ms focus leading-edge windows, echo / exit / replay at once, 256 KiB at once, gated transports at most 2 messages posted and not released, 3 with an echo), `routes` (WindowRoutes, early sizes LRU 200), `engine` (PtyEngine between PtyManager and the windows: replay tails on attach / route, flow control on with the main window, accepts messages only from the owner window, host-side DA1 answer while the owner window has no page, timeBeginPeriod(1) while terminals exist, exit after the drained output), `frame` kinds replay (sizes header + bytes) and json. unimux-ipc PortSink: `post_frames(seq)`, `gated`, `transport`, `close`. unimux-app: commands/pty.rs registers the `pty` port owner (static engine), pty_transport.rs (WebView2 shared buffers with `{"mcPort":"pty","n":seq}` and the UI-thread wait / stall count, pull transport `mc_port_pull` long poll, Channel fallback; `MC_PTY_TRANSPORT` in dev / check builds), `mc_port_attach` answers `{transport}`, test bridge op `pty` (spawn / kill / killAll / write / route / replay / stats). Renderer: src/shared/ptyFrames.ts (frame decoder, streaming UTF-8 per terminal, replay byte offsets to character offsets, `bytes` on data messages), bridge/ptyPort.ts (port object handed to TerminalManager synchronously, release acks, shared-buffer copy + releaseBuffer, pull loop), mc.ts attachPtyPort, TerminalManager accepts the port object and Uint8Array frames and acks `bytes ?? data.length`. Verified: see "P2: verification, measurements and open issues". |
 | G2 | Git parsers, validators, trust | todo | | | | |
 | G6 | File operations with progress | todo | | | | |
 | G7 | Project search and replace | todo | | | | |
@@ -1052,6 +1052,55 @@ Tests: `AssocIsDangerous` flags `.exe` and not `.txt` / `.png`, and refuses type
 4. Open path: the macOS content / bundle / symlink tests and the Windows symlink test have not run (no Mac; no symlink privilege on this machine). macOS CI must run `cargo test -p unimux-platform`.
 5. Everything in "Not done after wave 1" except item 7 is unchanged.
 6. Branches and worktrees: worktree `.claude/worktrees/wf_99399b8b-ff8-1` (W1) removed (no junction in it) and `git worktree prune` run; `tauri-pkg-W1` and `tauri-fix-openpath` deleted with `git branch -d`.
+
+## P2: verification, measurements and open issues (2026-11-07)
+
+Branch `tauri-pkg-P2` (from `tauri-1.2.0` at fca544d). Machine: Windows 11 26200, WebView2 156, shared with about 14 other agents' builds (CPU at 100 percent for most of the runs).
+
+### Verified
+
+- cargo fmt --all --check; clippy -D warnings (all targets) for unimux-pty, unimux-ipc, unimux-app, default and `dev-overrides,test-bridge`; unimux-pty + unimux-ipc for `aarch64-apple-darwin` (unimux-app cannot be cross-checked here: objc2-exception-helper needs a C compiler for the target).
+- cargo test -p unimux-pty: lib 86 (the ports of test/flow.test.ts, output-channel.test.ts, pty-flow.test.ts, replay-sizes.test.ts and the early-size half of host-router.test.ts on the fake clock, plus batch, routes, timers, frame), tests/engine.rs 5 on real ConPTY (replay at recorded sizes incl. an early size, host-side DA1 at once without a window, FlowGate pause / resume through byte acks with the unacked bytes bounded and the exit frame after the output, routing to a detached window and refusing messages from the old owner, in-flight cap with a slow page, reload replaces the window and flow control follows the main window), P1 suites conpty 14, manager 14, plane 2. unimux-ipc 31, unimux-app 82 (with features).
+- vitest test/pty-frames.test.ts 13 (decoder against frame.rs's own test vectors, characters split across reads and messages, replay byte offsets to character offsets, exit flush, JSON frames, the bridge port: queue until TerminalManager listens, release acks, page-side in-flight count, shared-buffer copy and release, one pull in flight); npm run typecheck; test/real-app-harness lists verify-tauri-pty.mjs.
+- Real app (`node scripts/verify-tauri-pty.mjs`, check build, offscreen, scratch data; terminals started through the test bridge `pty` op because `cell:spawn` is P3 / P4):
+  - replay: a cmd cell at 75 cols, narrowed to 32 and widened to 81 (3 recorded sizes, at bytes 0 / 544 / 744); after `Page.reload` the replay draws the same 6 marker lines; transport `sharedBuffer`; the host sent the replay tails.
+  - grid (20 cmd cells, unimux-pty-flood 1 MB/s each, 15 s): every run met the P2 bounds: shared buffers posted and not released counted page side at most 1, host side at most 3 (cap 2, 3 with an echo), unacked bytes per terminal at most 1,051,199 (FlowGate 1 MiB + one flush; typical 75 to 430 KB).
+
+### Measurements (interleaved with 1.1.4 = the Electron build of this tree, `scripts/sp5/electron-grid.mjs`)
+
+Echo, keystroke -> drawn, median / p95 ms (perf-latency.mjs probe, cmd cell):
+
+| run | Tauri P2 spaced | Tauri P2 burst | 1.1.4 spaced | 1.1.4 burst |
+|---|---|---|---|---|
+| idle, pair 1 | 3.7 / 4.7 | 3.6 / 8.3 | 6.5 / 44.1 | 6.7 / 15.8 |
+| idle, pair 2 | 5.9 / 8.3 | 6.8 / 8.6 | 6.4 / 23.2 | 6.6 / 23.1 |
+| idle (later, single) | 2.5 / 4.6 | 2.0 / 7.3 | | |
+| 19 cells x 1 MB/s, pair 1 | 7.7 / 24.6 | 8.0 / 27.0 | 7.7 / 22.3 | 8.7 / 15.9 |
+| 19 cells x 1 MB/s, pair 2 | 6.1 / 16.5 | 7.2 / 20.2 | 7.3 / 46.9 | 6.9 / 17.2 |
+| 19 cells, after the echo slot, pair 3 | 11.9 / 36.2 | 7.5 / 24.0 | 7.1 / 66.5 | 20.6 / 309.5 |
+| 19 cells, pair 4 (machine saturated) | 14.7 / 117.9 | 122.7 / 623.1 | 10.6 / 167.5 | 36.9 / 146.3 |
+| 19 cells, single runs | 12.2 / 23.1, 12.9 / 22.2, 10.9 / 560.7 | 10.9 / 20.9, 8.0 / 17.6, 8.1 / 26.0 | (two 1.1.4 runs failed: no echo recognized in 10 rounds) | |
+
+20 cells x 1 MB/s through ConPTY (what reached xterm, fps, p95 / max frame ms, frames over 33 ms):
+
+| app / transport | MB/s into xterm | fps | p95 / max | > 33 ms |
+|---|---|---|---|---|
+| Tauri sharedBuffer | 20.3 / 20.6 / 20.0 / 20.0 | 98 / 42 / 145 / 184 | 29.2 / 116.8, 62.6 / 108.4, 16.6 / 29.3, 12.4 / 20.9 | 58 / 109 / 0 / 0 |
+| Tauri channel | 20.0 | 181 | 12.4 / 37.4 | 2 |
+| Tauri pull | 5.2 / 20.0 | 171 / 214 | 16.6 / 75.0, 8.3 / 20.9 | 8 / 0 |
+| 1.1.4 | 8.7 / 20.9 / 17.0 | 194 / 165 / 144 | 12.5 / 83.3, 16.6 / 108.4, 12.5 / 120.9 | 3 / 12 / 64 |
+
+Reading: idle echo is at or below 1.1.4 (median and p95) in every pair. Under the flood the medians are at 1.1.4's level when the machine is not saturated (pairs 1-2: 0.79x to 1.04x), far from the SP5 spike's 13 to 28 ms; the p95 under load is within noise of 1.1.4 but not provably within 1.1x (burst p95 1.17x and 1.7x worse in pairs 1-2, better in pairs 3-4). Frame times at about 20 MB/s into xterm: Tauri equal or better than 1.1.4 in the runs on a less loaded machine (145 to 214 fps, no frame over 33 ms with the shared buffer), worse in the first two runs at full load. Transport decision (SP5 rule "pull if the shared buffer does not beat it"): pull had the best single grid run (214 fps) but the worst echo under load (15.3 / 30.3 and 12.9 / 24.4 vs 12.9 / 22.2 and 8.0 / 17.6 with the shared buffer, same hour); the shared buffer stays the Windows default, pull is the macOS default and selectable with `MC_PTY_TRANSPORT=pull` for the Mac / rerun comparison.
+
+### Open issues
+
+1. **SP5 performance targets not proven within 1.1x under load** (see above): every comparison ran on a machine at 100 percent CPU from other agents' builds, where both apps swing by 5x between runs (two 1.1.4 runs did not even echo). Rerun `node scripts/verify-tauri-pty.mjs latency --load` / `grid` against `MC_APP_TARGET=electron node scripts/sp5/electron-grid.mjs 20 1000000 15 [--latency=60]` on an idle machine (or the Windows VM) before calling P2 verified.
+2. **Echo slot**: a keystroke's echo may use a third in-flight message (MAX_IN_FLIGHT_ECHO) so it does not wait for a release round trip behind two bulk messages; it did not measurably change the loaded echo (the wait is in the renderer's xterm write queues, as SP5 found). SP5's other idea (smaller unacked window for unfocused terminals) was not tried: 1.1.4 has the same 1 MiB per terminal and the medians are at parity now.
+3. **macOS**: the pull transport is the default there but has not run on WKWebView (no Mac); `mc_port_pull` returns raw bytes, which WKWebView's IPC supports in Tauri 2.12.5 according to SP1, unverified. unimux-app was not cross-compiled for aarch64-apple-darwin (needs a cc for the target).
+4. **Not in P2** (P3 / P4 / P5): `cell:*` commands, the routing table from the StateController (`route` is called by the test bridge only), tap / interrupt for `install:` / `auth:`, `ptyhost:crashed` / supervision around the engine (the engine's PtyManager is not wrapped in P1's supervised actor yet), a wind-down step that kills the terminals (1.1.4's killAll; process exit closes the pseudoconsoles), sshList / sshStats messages (P5, `post_json` is ready for their answers), exit notifications to main (`PtyEngine::on_exit` is ready).
+5. **Units changed by the plan**: replay tail and flow control count bytes (1.1.4: UTF-16 characters), so a replay of mostly non-ASCII output holds fewer characters than in 1.1.4 (512 KiB of UTF-8 instead of 512 Ki characters); the renderer's pending queue (PENDING_OUTPUT_CHARS) still counts characters.
+6. npm test: a first full run on the saturated machine had 17 load-sensitive failures outside P2 (PowerShell / cmd timeouts in cli-install-shared, launch-reset.int, ptyhost.int node host, git, mcp timing); the rerun on a quieter machine passed completely (267 files, 4,027 tests). test/real-app-harness needed verify-tauri-pty.mjs in scripts/real-app-run.mjs (added, Tauri and Windows only, skipped without the flood helper).
+7. `scripts/sp5/run.mjs` and the check-build `spike_pty*` commands still use the SP5 plane (`plane.rs`); they stay for the SP5 comparison and go with R1.
 
 ## Do zainstalowania / do decyzji użytkownika
 

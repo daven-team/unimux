@@ -211,6 +211,15 @@ impl PtyHandle {
             slot.write(data);
         }
     }
+
+    /// Flow control from the output engine (P2): stops or resumes reading the terminal's output.
+    pub fn set_paused(&self, id: &str, paused: bool) {
+        let Some(inner) = self.0.upgrade() else { return };
+        let slot = inner.entries.lock().get(id).cloned();
+        if let Some(slot) = slot {
+            slot.set_paused(paused);
+        }
+    }
 }
 
 pub struct PtyManager {
