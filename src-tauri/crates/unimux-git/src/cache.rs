@@ -149,7 +149,7 @@ pub struct Inflight {
 impl Inflight {
     /// `shared(key, work)` of git.ts. `work` is spawned when no identical work runs (and dropped unpolled otherwise); a panic
     /// of the work is [`WorkPanicked`] for every caller of that run. Must be called inside a tokio runtime.
-    pub fn shared<T, F>(&self, key: &str, work: F) -> impl Future<Output = Result<T, WorkPanicked>> + Send + 'static
+    pub fn shared<T, F>(&self, key: &str, work: F) -> impl Future<Output = Result<T, WorkPanicked>> + Send + 'static + use<T, F>
     where
         T: Clone + Send + Sync + 'static,
         F: Future<Output = T> + Send + 'static,

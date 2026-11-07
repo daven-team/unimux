@@ -17,6 +17,9 @@ tokio.workspace = true
 futures.workspace = true
 parking_lot.workspace = true
 regex.workspace = true
+sha2.workspace = true
+url.workspace = true
+indexmap.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Storage_FileSystem", "Win32_System_Environment"] }

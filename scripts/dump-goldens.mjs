@@ -26,6 +26,8 @@
 //   test/golden/git-resolve.jsonl    {args} -> path.win32.resolve / path.posix.resolve of Node with process.cwd() C:\work\cwd
 //                                     (win32) or /work/cwd (posix) and the drive cwds =C: C:\work\cwd, =D: D:\dcwd\x, =E:
 //                                     C:\not-e, =F: '' (the env of the run is replaced while the rows are made)
+//   test/golden/git-shared.jsonl, git-trust.jsonl   src/shared/git.ts, src/shared/gitTrust.ts, the scan fingerprint hash and
+//                                     GitTrustStore's file format (PLAN G2; see scripts/goldens-git.mjs)
 //   test/golden/files-*.jsonl        project files: name order, path checks, previews, saves (see scripts/goldens-files.mjs)
 //   test/golden/accounts-store.jsonl, codex-accounts.jsonl, accounts-identity.jsonl   the account stores (1.1.4's code, run on
 //                                     scratch dirs) and the identity helpers (see scripts/goldens-accounts.mjs)
@@ -39,6 +41,7 @@ import { hookPayloadRows, hookServerRows } from './goldens-hooks.mjs';
 import { convGoldens } from './goldens-convsearch.mjs';
 import { DB_MODULES, dbGoldens } from './goldens-db.mjs';
 import { accountsStoreRows, codexStoreRows, identityRows } from './goldens-accounts.mjs';
+import { gitSharedRows, gitTrustRows } from './goldens-git.mjs';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -48,13 +51,15 @@ const load = async (file) => (await runnerImport(resolve(root, file), { configFi
 
 const [
   { defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { translate }, { messages }, { normalizeEditedState }, { UpdateProgressModel, closeAction },
-  { normalizeSpelling }, { trimGitText, redactSecrets }, hooks, codexHooks,
+  { normalizeSpelling }, gitShared, hooks, codexHooks,
 ] = await Promise.all([
   load('src/shared/state.ts'), load('src/shared/stateEdits.ts'), load('src/shared/statePatch.ts'), load('src/shared/i18n.ts'), load('src/shared/messages.ts'),
   load('src/main/stateController.ts'), load('src/shared/updateProgress.ts'), load('src/main/gitPaths.ts'), load('src/shared/git.ts'),
   load('src/main/hooks.ts'), load('src/shared/codexHooks.ts'),
 ]);
+const { trimGitText, redactSecrets } = gitShared;
 const [detached, { normalizeWaitMark }] = await Promise.all([load('src/shared/detached.ts'), load('src/shared/waiting.ts')]);
+const [gitTrust, gitMain] = await Promise.all([load('src/shared/gitTrust.ts'), load('src/main/git.ts')]);
 const fileGoldens = await filesGoldens(await load('src/main/files.ts'));
 const dbModules = Object.fromEntries(await Promise.all(Object.entries(DB_MODULES).map(async ([name, file]) => [name, await load(file)])));
 const db = dbGoldens(dbModules);
@@ -301,6 +306,8 @@ const files = {
   'git-spelling.jsonl': jsonl(gitSpelling()),
   'git-text.jsonl': jsonl(gitText()),
   'git-resolve.jsonl': jsonl(gitResolve()),
+  'git-shared.jsonl': jsonl(gitSharedRows(gitShared)),
+  'git-trust.jsonl': jsonl(gitTrustRows(gitTrust, gitMain)),
   'files-collate.jsonl': jsonl(fileGoldens.collate),
   'files-path.jsonl': jsonl(fileGoldens.paths),
   'files-preview.jsonl': jsonl(fileGoldens.preview),

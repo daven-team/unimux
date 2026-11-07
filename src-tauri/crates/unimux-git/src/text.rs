@@ -8,7 +8,8 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 /// ECMAScript `\s` (WhiteSpace + LineTerminator) as a regex class body.
-const JS_SPACE: &str = r"\t\n\x0B\x0C\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}";
+pub(crate) const JS_SPACE: &str =
+    r"\t\n\x0B\x0C\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}";
 
 /// Is `c` in ECMAScript's `\s` (what String.prototype.trim removes)?
 pub fn is_js_space(c: char) -> bool {
