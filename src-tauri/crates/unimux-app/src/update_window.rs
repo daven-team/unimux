@@ -54,7 +54,7 @@ const LOCK_WAIT: Duration = Duration::from_secs(3);
 const EXIT_WATCHDOG: Duration = Duration::from_secs(3);
 
 /// `window.updateSplash` over Tauri (the Electron preload of src/updatesplash/preload.ts). Runs before the page's own script.
-const BRIDGE: &str = r#"(() => {
+pub(crate) const BRIDGE: &str = r#"(() => {
   const internals = window.__TAURI_INTERNALS__;
   const invoke = (cmd, args) => internals.invoke(cmd, args || {});
   const listeners = [];

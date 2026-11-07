@@ -113,6 +113,8 @@ hyper-util = { version = "0.1.21", features = ["tokio", "service"] }
 http-body-util = "0.1.5"
 bytes = "1.12.1"
 tokio-util = "0.7.20"
+# U1: the minisign check of a downloaded update (the same library tauri-plugin-updater uses).
+minisign-verify = "0.3.0"
 postgres-protocol = "0.6.12"
 mysql_common = { version = "0.38.2", default-features = false }
 # dev-dependency of unimux-db only (SP9 measured its gaps; the app uses an own RESP2 client)

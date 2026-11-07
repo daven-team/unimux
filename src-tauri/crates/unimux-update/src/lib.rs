@@ -6,8 +6,22 @@
 //! SP6 added [`progress`] (UpdateProgressModel port) and [`window`] (the update window hand-over and file protocol); the
 //! window process itself is `unimux-app/src/update_window.rs`.
 
+//!
+//! U1 added [`coordinator`] (UpdateCoordinator port), [`gate`] (the startup gate and install window flow, update-gate.json),
+//! [`feed`] (latest.json + minisign) and [`net`] (the backend over unimux-net).
+
+pub mod coordinator;
+pub mod feed;
+pub mod gate;
+pub mod net;
 pub mod progress;
+pub mod settled;
+pub mod state;
+pub mod version;
 pub mod window;
+
+/// Where a build that cannot install by itself sends the user (updater.ts RELEASES_URL).
+pub const RELEASES_URL: &str = "https://github.com/daven-team/unimux/releases/latest";
 
 /// The updater public key (minisign, key id 817A07BB564AC8D0) exactly as `tauri signer generate` wrote it to
 /// `unimux-updater.key.pub`: base64 of the two-line minisign public key file. Embedded at build time; the downloaded artifact of a
