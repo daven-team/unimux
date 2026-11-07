@@ -15,7 +15,6 @@ import { removeScratch } from './app-env.mjs';
 import { launchApp, scratchRoot, sleep, sshState, writeState } from './ssh-ui-lib.mjs';
 
 if (process.platform !== 'win32') throw new Error('Windows only (cmd fake CLI)');
-if (!existsSync('out/main/index.js')) throw new Error('Build first: npm run build');
 const shots = process.argv[2] ?? join(tmpdir(), 'unimux-first-login-shots');
 mkdirSync(shots, { recursive: true });
 const EMAIL = 'maksy@example.com';

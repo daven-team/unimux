@@ -1,14 +1,15 @@
-// Real-app check of 0.9.7 "everyday work with many agents" (npm run build first). No real Claude or Codex runs: the grids hold shell
-// cells whose profile is switched to "claude" in Settings after they started (the running shells stay shells), and the agent
-// status is faked by sending the 'cell:hook' event main sends for a real hook (prompt = working, stop = turn finished) from the
-// main process inspector. PATH is cut to the Windows folders, so even a restarted cell could not find a real CLI.
+// Real-app check of 0.9.7 "everyday work with many agents" (npm run build:check first; MC_APP_TARGET=electron: npm run build).
+// No real Claude or Codex runs: the grids hold shell cells whose profile is switched to "claude" in Settings after they started
+// (the running shells stay shells), and the agent status is faked by sending the 'cell:hook' event main sends for a real hook
+// (prompt = working, stop = turn finished) from the main side (scripts/real-app.mjs mainControl: the test bridge of the Tauri
+// check build, Electron's main inspector). PATH is cut to the Windows folders, so even a restarted cell could not find a real CLI.
 // Checks: closing a tab with a working agent asks and Cancel keeps it; "do not ask again" skips the question afterwards; the
 // notification text names the cell and a burst becomes one notification; the Files tree shows a file made during the turn
 // once the turn ends (no manual refresh); closing the window asks and Cancel keeps the app.
 import { randomUUID } from 'node:crypto';
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { launchApp, mainInspector, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
+import { launchApp, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
 
 const ids = { a: randomUUID(), b: randomUUID(), c: randomUUID(), d: randomUUID() };
 const tabs = { main: randomUUID(), other: randomUUID(), third: randomUUID() };
@@ -28,7 +29,6 @@ function state(project) {
 }
 
 const root = scratchRoot('agentclose');
-const inspectPort = 9300 + Math.floor(Math.random() * 500);
 let app;
 let main;
 const results = [];
@@ -36,8 +36,8 @@ const ok = (name) => { results.push(name); console.log(`OK ${name}`); };
 try {
   writeState(root, state(join(root, 'project')));
   const path = ['C:\\Windows\\System32', 'C:\\Windows', 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0'].join(';');
-  app = await launchApp(root, { PATH: path, Path: null }, [`--inspect=${inspectPort}`]);
-  main = await mainInspector(inspectPort);
+  app = await launchApp(root, { PATH: path, Path: null }, [], { main: true });
+  main = app.main;
   const tabEl = (name) => `[...document.querySelectorAll('.tab.grid-tab')].find((t) => t.querySelector('.label')?.textContent === ${JSON.stringify(name)})`;
   const selectTab = (name) => app.evaluate(`(${tabEl(name)}).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })), true`);
   const dialogText = () => app.evaluate(`document.querySelector('.overlay .modal')?.textContent ?? ''`);
@@ -129,37 +129,37 @@ try {
   await sleep(500);
   await main.hook(ids.d, 'prompt');
   await sleep(800);
-  await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].close(), true`);
+  await main.requestClose();
   await app.until(`!!document.querySelector('.overlay .modal')`, 'quit dialog');
   const quitText = await dialogText();
   if (!quitText.includes('Quit while agents are working?') || !quitText.includes('Tester')) throw new Error(`quit dialog: ${quitText}`);
   await clickDialog('Cancel');
   await sleep(1000);
-  if ((await main.evaluate(`__el.BrowserWindow.getAllWindows().length`)) !== 1) throw new Error('the window closed after Cancel');
+  if ((await main.windows()).length !== 1) throw new Error('the window closed after Cancel');
   ok('closing the window with a working agent asks; Cancel keeps the app');
 
   // 6b. A quit while the window is minimized brings the window up with the question; a second Close while it is open does not get
   // stuck (the question stays, the app neither quits nor ignores the answer); Cancel keeps the app.
-  await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].minimize(), true`);
+  await main.minimize();
   await sleep(800);
-  if (!(await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].isMinimized()`))) throw new Error('the window did not minimize');
-  await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].close(), true`);
+  if (!(await main.windows())[0].minimized) throw new Error('the window did not minimize');
+  await main.requestClose();
   await app.until(`!!document.querySelector('.overlay .modal')`, 'quit dialog (minimized)');
   await sleep(500);
-  const shown = await main.evaluate(`(() => { const w = __el.BrowserWindow.getAllWindows()[0]; return { minimized: w.isMinimized(), visible: w.isVisible() }; })()`);
+  const shown = (await main.windows())[0];
   if (shown.minimized || !shown.visible) throw new Error(`the question is not visible: ${JSON.stringify(shown)}`);
   ok('a quit while minimized brings the window up with the question');
   const firstDialog = await dialogText();
-  await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].close(), true`);
+  await main.requestClose();
   await sleep(4000); // past the 3 s acknowledgement fallback
-  if ((await main.evaluate(`__el.BrowserWindow.getAllWindows().length`)) !== 1) throw new Error('the second Close quit while the question was open');
+  if ((await main.windows()).length !== 1) throw new Error('the second Close quit while the question was open');
   if ((await app.evaluate(`document.querySelectorAll('.overlay .modal').length`)) !== 1 || (await dialogText()) !== firstDialog) throw new Error('the second Close changed the question');
   await clickDialog('Cancel');
   await sleep(1000);
-  if ((await main.evaluate(`__el.BrowserWindow.getAllWindows().length`)) !== 1) throw new Error('the window closed after Cancel (second Close)');
+  if ((await main.windows()).length !== 1) throw new Error('the window closed after Cancel (second Close)');
   if (await app.evaluate(`!!document.querySelector('.overlay .modal')`)) throw new Error('the question stayed open after Cancel');
   // Not stuck: the next Close asks again at once.
-  await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].close(), true`);
+  await main.requestClose();
   await app.until(`!!document.querySelector('.overlay .modal')`, 'quit dialog after Cancel');
   await clickDialog('Cancel');
   await sleep(800);
@@ -168,8 +168,15 @@ try {
   // 7. A waiting agent does not count: the window close goes through without a question.
   await main.hook(ids.d, 'stop');
   await sleep(800);
-  const exited = new Promise((resolve) => { const t = setInterval(async () => { try { await fetch(`http://127.0.0.1:${inspectPort}/json/list`); } catch { clearInterval(t); resolve(true); } }, 200); setTimeout(() => { clearInterval(t); resolve(false); }, 15000); });
-  await main.evaluate(`setTimeout(() => __el.BrowserWindow.getAllWindows()[0].close(), 50), true`).catch(() => undefined);
+  // Quit: the process ended or its DevTools endpoint is gone (the app is shutting down; 1.1.4 watched its inspector port).
+  const exited = (async () => {
+    for (const t0 = Date.now(); Date.now() - t0 < 15000; await sleep(200)) {
+      if (app.child.exitCode !== null || app.child.signalCode !== null) return true;
+      try { await fetch(`http://127.0.0.1:${app.debugPort}/json/list`); } catch { return true; }
+    }
+    return false;
+  })();
+  await main.requestClose().catch(() => undefined);
   if (!(await exited)) throw new Error('the app did not quit with only waiting agents');
   ok('with only waiting agents the app quits without asking');
   console.log(`ALL OK (${results.length})`);

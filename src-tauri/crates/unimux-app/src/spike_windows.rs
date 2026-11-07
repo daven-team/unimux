@@ -92,6 +92,10 @@ pub async fn window_op(ctx: &Arc<AppContext>, args: &Value) -> Result<Value, Ipc
         "hide" => window.hide(),
         "show" => show_quietly(ctx, &window),
         "close" => window.destroy(),
+        // A click on the caption's close button: CloseRequested first (the quit question of W6 may keep the window).
+        "requestClose" => window.close(),
+        // Electron's `setBounds` in DIP ({x, y, width, height}; a missing pair stays): the resize benchmarks of bench-jank.
+        "setBounds" => set_bounds(&window, args),
         "webviewHide" => set_controller_visible(&window, false).await,
         "webviewShow" => set_controller_visible(&window, true).await,
         "state" => Ok(()),
@@ -101,11 +105,26 @@ pub async fn window_op(ctx: &Arc<AppContext>, args: &Value) -> Result<Value, Ipc
     if action == "close" {
         return Ok(json!({ "label": label, "closed": true }));
     }
+    // The window may be gone by now (no W6 quit question yet): never touch it again.
+    if action == "requestClose" {
+        return Ok(json!({ "label": label, "requested": true }));
+    }
     // Window messages are posted to the event loop: give them a moment before reading the result back.
     if action != "state" {
         tokio::time::sleep(Duration::from_millis(150)).await;
     }
     Ok(window_state(&window).await)
+}
+
+fn set_bounds(window: &WebviewWindow, args: &Value) -> tauri::Result<()> {
+    let num = |key: &str| args.get(key).and_then(Value::as_f64);
+    if let (Some(x), Some(y)) = (num("x"), num("y")) {
+        window.set_position(tauri::LogicalPosition::new(x, y))?;
+    }
+    if let (Some(w), Some(h)) = (num("width"), num("height")) {
+        window.set_size(tauri::LogicalSize::new(w, h))?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]

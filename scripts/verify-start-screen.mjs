@@ -1,4 +1,4 @@
-// Real-app check (npm run build first) of the start card of agent cells (1.1.5, shared/startScreen.ts, CellStartCard.tsx):
+// Real-app check (npm run build:check first; MC_APP_TARGET=electron: npm run build) of the start card of agent cells (1.1.5, shared/startScreen.ts, CellStartCard.tsx):
 // - while an agent starts its cell shows the card (provider mark, "Uruchamianie Claude…"), never the long launch line;
 // - once the CLI drew its screen the card goes and neither the screen nor the scrollback holds the launch line;
 // - a CLI that exits 1 at its start with an error line turns the card into an error card (the code, the error, the output,
@@ -12,11 +12,11 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from '
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import electron from 'electron';
 import { removeScratch, scratchHome, scrubAppEnv } from './app-env.mjs';
+import { isMainPage, requireBuild, spawnApp } from './real-app.mjs';
 
 if (process.platform !== 'win32') { console.log('skip: Windows only'); process.exit(0); }
-if (!existsSync(join(process.cwd(), 'out/main/index.js'))) throw new Error('Build first: npm run build');
+requireBuild();
 const SHELL = process.env.START_SHELL ?? 'pwsh';
 const SHOTS = process.env.START_SHOTS ?? 'D:\\Projekty\\_shots';
 const tag = SHELL === 'pwsh' ? '' : `-${SHELL}`;
@@ -67,7 +67,7 @@ const sys = process.env.SystemRoot ?? 'C:\\Windows';
 const env = { ...scrubAppEnv({ ...process.env }), ...home.env, MC_DATA_DIR: data, MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port), MC_CLI_NO_REGISTRY: '1', FAKE_DELAY_MS: process.env.FAKE_DELAY_MS ?? '5000',
   PATH: [agents, join(sys, 'System32'), sys, join(sys, 'System32', 'WindowsPowerShell', 'v1.0')].join(delimiter) };
 delete env.Path;
-const child = spawn(electron, ['.'], { cwd: process.cwd(), env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+const child = spawnApp({ cwd: process.cwd(), env, stdio: ['ignore', 'pipe', 'pipe'] });
 let output = '';
 child.stdout.on('data', (d) => { output += d; });
 child.stderr.on('data', (d) => { output += d; });
@@ -105,7 +105,7 @@ const bufferText = (id, viewOnly) => `(() => { const x = window.__mc.terminals.x
 const LAUNCH = /Clear-Host|cls &|--session-id|finally \{|NonInteractive|tui\.notifications/;
 let main, win;
 try {
-  main = await connect((t) => !t.url.includes('detached='));
+  main = await connect((t) => isMainPage(t));
   await main.until('Boolean(window.__mc && document.querySelector(".cell"))', 'renderer boot');
 
   // ── 1. starting: every agent cell shows its card, the launch line is not to be seen ──

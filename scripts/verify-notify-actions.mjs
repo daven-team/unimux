@@ -1,4 +1,4 @@
-// Real-app check of 1.0.9 "actions in notifications" and "taskbar / Dock state" (npm run build first). No real Claude runs: a
+// Real-app check of 1.0.9 "actions in notifications" and "taskbar / Dock state" (npm run build:check first; MC_APP_TARGET=electron: npm run build). No real Claude runs: a
 // shell cell whose profile is switched to "claude" after it started runs a fake permission dialog (a node script that draws
 // Claude Code's dialog and records the keys it receives), and the PermissionRequest hook is faked from the main process
 // inspector. The OS notification is not shown: Notification.show is replaced there, so the test can see the buttons and press
@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { launchApp, mainInspector, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
+import { launchApp, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
 
 const cellId = randomUUID();
 const otherId = randomUUID();
@@ -38,7 +38,6 @@ process.stdin.on('data', (d) => { fs.appendFileSync(out, d.toString('hex') + '\\
 `;
 
 const root = scratchRoot('notifyactions');
-const inspectPort = 9300 + Math.floor(Math.random() * 500);
 let app;
 let main;
 const results = [];
@@ -49,32 +48,23 @@ try {
   const keysFile = join(root, 'keys.txt');
   writeFileSync(join(root, 'fake.js'), FAKE);
   writeFileSync(join(root, 'run.cmd'), `@"${process.execPath}" "${join(root, 'fake.js')}" "${keysFile}"\r\n`);
-  app = await launchApp(root, {}, [`--inspect=${inspectPort}`]);
-  main = await mainInspector(inspectPort);
-  await main.evaluate(`(() => {
-    globalThis.__shown = []; globalThis.__taskbar = []; globalThis.__flash = 0; globalThis.__focus = [];
-    __el.Notification.prototype.show = function () { __shown.push(this); };
-    const proto = __el.BrowserWindow.prototype;
-    const overlay = proto.setOverlayIcon;
-    proto.setOverlayIcon = function (image, description) {
-      __taskbar.push({ overlay: image ? { size: image.getSize(), scales: image.getScaleFactors(), empty: image.isEmpty(), png: image.getScaleFactors().map((f) => image.toPNG({ scaleFactor: f }).toString('base64')) } : null, description });
-      return overlay.call(this, image, description);
-    };
-    const progress = proto.setProgressBar;
-    proto.setProgressBar = function (value, options) { __taskbar.push({ progress: value, mode: options?.mode }); return progress.call(this, value, options); };
-    __el.ipcMain.on('attention:flash', () => { __flash++; });
-    __el.ipcMain.on('notify:show', (_e, id) => { __focus.push(id); });
-    return true;
-  })()`);
+  app = await launchApp(root, {}, [], { main: true });
+  main = app.main;
+  // OS notifications kept by the app (never shown), taskbar calls recorded, the attention flash recorded (not done),
+  // notify:show (a toast button that shows the cell) recorded and run.
+  await main.stubToasts();
+  await main.stubTaskbar();
+  await main.record(['attention:flash'], { swallow: true });
+  await main.record(['notify:show']);
   const tabEl = (name) => `[...document.querySelectorAll('.tab.grid-tab')].find((t) => t.querySelector('.label')?.textContent === ${JSON.stringify(name)})`;
   const selectTab = (name) => app.evaluate(`(${tabEl(name)}).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })), true`);
-  const hook = (event, info) => main.evaluate(`__el.BrowserWindow.getAllWindows()[0].webContents.send('cell:hook', ${JSON.stringify(cellId)}, ${JSON.stringify(event)}${info ? `, ${JSON.stringify(info)}` : ''}), true`);
-  const shown = () => main.evaluate(`__shown.map((n) => ({ title: n.title, body: n.body, actions: n.actions.map((a) => a.text) }))`);
-  const press = (index) => main.evaluate(`(() => { const n = __shown[__shown.length - 1]; n.emit('action', { actionIndex: ${index} }, ${index}); return true; })()`);
+  const hook = (event, info) => main.hook(cellId, event, info);
+  const shown = () => main.toasts();
+  const press = (index) => main.toastAction(-1, index);
   const cellDebug = `(() => { const e = window.__mc.terminals.entries.get(${JSON.stringify(cellId)}); const b = e.term.buffer.active; const rows = []; for (let y = 0; y < e.term.rows; y++) rows.push(b.getLine(b.baseY + y)?.translateToString(true) ?? ''); const t = e.tracker; return { agent: e.agent, remote: e.remote, codex: e.codex, win32: e.win32, status: t.status, reason: t.lastReason, detail: t.detail, hooked: t.isHooked, rows: rows.filter(Boolean) }; })()`;
   const keys = () => (existsSync(keysFile) ? readFileSync(keysFile, 'utf8').trim().split('\n').filter(Boolean) : []);
   // The taskbar calls so far; checks look at the last call of each kind (what the taskbar button shows now).
-  const taskbarLog = () => main.evaluate('__taskbar.slice()');
+  const taskbarLog = () => main.taskbar();
   const last = (log, key) => [...log].reverse().find((e) => key in e);
 
   await app.until(`document.querySelectorAll('.xterm').length >= 2`, 'terminals');
@@ -114,7 +104,7 @@ try {
   // 1.1.2: no taskbar overlay on Windows any more.
   if (log.some((e) => 'overlay' in e && e.overlay)) throw new Error(`taskbar overlay set: ${JSON.stringify(log)}`);
   ok('no taskbar overlay badge is set');
-  if ((await main.evaluate('__flash')) < 1) throw new Error('no attention flash asked');
+  if ((await main.recorded('attention:flash')).length < 1) throw new Error('no attention flash asked');
   ok('the attention flash is asked for an unfocused window');
 
   // 3. Allow types Enter into the dialog.
@@ -129,7 +119,7 @@ try {
   await sleep(1200);
   got = keys();
   if (got.length !== 1) throw new Error(`a stale Allow typed: ${JSON.stringify(got)}`);
-  if (JSON.stringify(await main.evaluate('__focus.splice(0)')) !== JSON.stringify([cellId])) throw new Error('a stale Allow did not show the cell');
+  if (JSON.stringify((await main.recorded('notify:show')).map((c) => c.args[0])) !== JSON.stringify([cellId])) throw new Error('a stale Allow did not show the cell');
   ok('a stale Allow types nothing and only shows the cell');
 
   // 5. A new permission request (after the tool ran), Deny types Esc.
@@ -158,7 +148,7 @@ try {
   ok('a question gets only Show, which types nothing');
 
   // 7. The muted cell never counts; with the cell answered the badge goes.
-  await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].webContents.send('cell:hook', ${JSON.stringify(otherId)}, 'notify', { need: 'permission', immediate: true, tool: 'Bash' }), true`);
+  await main.hook(otherId, 'notify', { need: 'permission', immediate: true, tool: 'Bash' });
   await hook('busy', { tool: 'AskUserQuestion', toolUseId: 'toolu_3', toolEnd: true });
   await sleep(1200);
   log = await taskbarLog();

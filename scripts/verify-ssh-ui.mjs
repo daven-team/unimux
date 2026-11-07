@@ -1,4 +1,4 @@
-// Real-app SSH checks: node scripts/verify-ssh-ui.mjs [part ...]   (npm run build first)
+// Real-app SSH checks: node scripts/verify-ssh-ui.mjs [part ...]   (npm run build:check first; MC_APP_TARGET=electron: npm run build)
 // With no argument every part runs. Screenshots: D:\Projekty\_shots\ssh-*.png
 // SSH_CHECK_LANGUAGE=en runs a part with the English UI (the `cell` part uses the TEXT table; screenshots get an -en suffix).
 // Only the local test server (scripts/ssh-test-server.mjs on 127.0.0.1) is used; scratch dirs are deleted afterwards.
@@ -8,7 +8,6 @@ import ssh2 from 'ssh2';
 import { join } from 'node:path';
 import { childPids, connected, connectWithPassword, killTree, LANGUAGE, launchApp, sleep, scratchRoot, sshState, startTestServer, testHost, writeKnownHost, writeState } from './ssh-ui-lib.mjs';
 
-if (!existsSync('out/main/index.js')) throw new Error('Build first: npm run build');
 /** Expression: the xterm buffer text of every cell of the active tab, in cell order (what the terminal really shows, not a screenshot). */
 const CELL_BUFFERS = `(() => { const s = window.__mc.useStore.getState().s; const p = s.projects.find((x) => x.id === s.activeProjectId); const t = p.tabs.find((x) => x.id === p.activeTabId);
   return t.cells.map((c) => { const b = window.__mc.terminals.entries.get(c.id)?.term.buffer.active; if (!b) return ''; let text = ''; for (let i = 0; i < b.length; i++) text += (b.getLine(i)?.translateToString(true) ?? '') + '\\n'; return text; }); })()`;

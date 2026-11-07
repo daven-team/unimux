@@ -1,4 +1,4 @@
-// Real-app check of the Git panel layout (npm run build first): a saved history height taller than the panel must not push
+// Real-app check of the Git panel layout (npm run build:check first; MC_APP_TARGET=electron: npm run build): a saved history height taller than the panel must not push
 // the history over the commit box, a long list of changes scrolls instead of pushing the history out, and in a tall panel the
 // history keeps its saved height. With Changes collapsed the history fills the panel down to its end (rows included) and
 // scrolls to the oldest commit; expanded again the saved split comes back. GIT_LAYOUT_SHOTS=1 saves screenshots.

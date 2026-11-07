@@ -1,4 +1,4 @@
-// Keystroke-to-echo latency of the built app (run `npm run build` first). Windows and macOS.
+// Keystroke-to-echo latency of the built app. Windows and macOS.
 // One tab with an SSH cell (the local test server, scripts/ssh-test-server.mjs, which echoes every character like a shell)
 // and a local shell cell, in a scratch data dir and home (never the real ones). Each cell gets the keyboard focus and is sent
 // single characters over CDP (Input.dispatchKeyEvent); the renderer times each one from its keydown to the frame xterm drew
@@ -8,8 +8,11 @@
 // Prints median / p95 per cell and pace; fails (exit code 1) when the SSH median exceeds MAX_SSH_MEDIAN_MS or the local
 // median by more than MAX_EXTRA_MS, or the SSH p95 exceeds MAX_SSH_P95_MS.
 // Usage: node scripts/perf-latency.mjs [keys per pace, default 60] [--json] [--app <dir of a built unimux checkout>]
+// Target: the Tauri check build (npm run build:check; --app <unimux.exe> for another build). MC_APP_TARGET=electron: out/ of
+// the checkout (npm run build; --app <dir>, for example a 1.1.4 checkout for the comparison of R2).
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { isTauri } from './real-app.mjs';
 import { launchApp, scratchRoot, sleep, sshState, startTestServer, testHost, writeKnownHost, writeState } from './ssh-ui-lib.mjs';
 
 const args = process.argv.slice(2);
@@ -23,7 +26,8 @@ const MAX_EXTRA_MS = 8;
 const MAX_SSH_MEDIAN_MS = 8;
 const MAX_SSH_P95_MS = 15;
 
-if (!existsSync(join(appDir, 'out/main/index.js'))) throw new Error(`Build first: npm run build (in ${appDir})`);
+if (isTauri && appArg >= 0) process.env.MC_APP_BINARY = appDir;
+if (!isTauri && !existsSync(join(appDir, 'out/main/index.js'))) throw new Error(`Build first: npm run build (in ${appDir})`);
 const here = process.cwd();
 const server = await startTestServer(['--no-auth']);
 const root = scratchRoot('latency');
@@ -40,8 +44,7 @@ try {
   writeState(root, state);
   writeKnownHost(root, server);
   // launchApp starts the app in the current directory: the checkout under test.
-  process.chdir(appDir);
-  try { app = await launchApp(root); } finally { process.chdir(here); }
+  app = await launchApp(root, {}, [], { cwd: isTauri ? here : appDir });
   const sshCell = tab.cells[0].id;
   await app.until(`!!document.querySelector('.ssh-card button')`, 'connect card');
   await app.click('.ssh-card button');

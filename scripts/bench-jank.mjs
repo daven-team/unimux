@@ -1,4 +1,4 @@
-// UI smoothness benchmark of the built app (Windows only; run `npm run build` first, MC_NOMINIFY=1 for readable culprits).
+// UI smoothness benchmark of the built app (Windows only; run `npm run build:check` first (MC_APP_TARGET=electron: `npm run build`), MC_NOMINIFY=1 for readable culprits).
 // Measures dropped frames and hitches, not CPU: a page-side requestAnimationFrame recorder (frame intervals), Long Animation
 // Frames (LoAF: the scripts of a slow frame, with their function and source position), long tasks and Event Timing (the
 // time from a real input event to the frame that shows its effect).
@@ -23,6 +23,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { removeScratch } from './app-env.mjs';
+import { isMainPage, isTauri } from './real-app.mjs';
 import { launchApp, sleep } from './ssh-ui-lib.mjs';
 
 const opt = (name, fallback) => { const a = process.argv.find((x) => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : fallback; };
@@ -192,22 +193,15 @@ const RECORDER = `(() => {
 })()`;
 
 // ---------------------------------------------------------------- app
-if (gpuCache) for (const d of GPU_CACHE_DIRS) if (existsSync(join(gpuCache, d))) cpSync(join(gpuCache, d), join(root, 'data', d), { recursive: true });
-const inspectPort = await new Promise((resolve) => { const s = createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
-const app = await launchApp(root, { MC_CLI_NO_REGISTRY: '1' }, [`--inspect=${inspectPort}`]);
+// Chromium's caches: Electron keeps them in the data dir, WebView2 (Tauri) in data\webview2\EBWebView.
+const gpuBase = isTauri ? join(root, 'data', 'webview2', 'EBWebView') : join(root, 'data');
+if (gpuCache) for (const d of GPU_CACHE_DIRS) if (existsSync(join(gpuCache, d))) cpSync(join(gpuCache, d), join(gpuBase, d), { recursive: true });
+const app = await launchApp(root, { MC_CLI_NO_REGISTRY: '1' }, [], { main: true });
 const result = { at: new Date().toISOString(), reps, scenarios: {} };
-let main;
+const main = app.main;
 try {
-  const target = await (async () => { for (let i = 0; i < 50; i++) { try { return (await (await fetch(`http://127.0.0.1:${inspectPort}/json/list`)).json())[0]; } catch { await sleep(200); } } return null; })();
-  main = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => { main.onopen = resolve; main.onerror = reject; });
-  let mid = 0; const mpending = new Map();
-  main.onmessage = (e) => { const m = JSON.parse(e.data); mpending.get(m.id)?.(m); mpending.delete(m.id); };
-  const mainEval = (expression) => new Promise((resolve, reject) => { const id = ++mid; mpending.set(id, (m) => (m.result?.exceptionDetails ? reject(new Error(JSON.stringify(m.result.exceptionDetails))) : resolve(m.result?.result?.value)));
-    main.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true, includeCommandLineAPI: true } })); });
-  await mainEval(`globalThis.__el = process.mainModule.require('electron'); globalThis.__win = __el.BrowserWindow.getAllWindows().find((w) => !w.webContents.getURL().includes('detached=')); true`);
   // A fixed size and place (off screen, as MC_OFFSCREEN put it): the same layout in every run.
-  await mainEval(`__win.setBounds({ x: -6000, y: 0, width: 1600, height: 1000 }), true`);
+  await main.setBounds({ x: -6000, y: 0, width: 1600, height: 1000 });
   const ev = app.evaluate;
   const cellsReady = (ids) => `(() => ${JSON.stringify(ids)}.every((id) => { const t = window.__mc.terminals.xterm(id); if (!t) return false; const b = t.buffer.active; for (let y = 0; y < b.length; y++) if (b.getLine(y)?.translateToString(true).trim()) return true; return false; }))()`;
   await app.until(cellsReady(T.a16.cells.map((c) => c.id)), 'grid ready', 60000);
@@ -254,7 +248,7 @@ try {
     // A trace goes through a connection of its own (its data comes as events).
     let tracer = null;
     if (traceOf.some((p) => name.startsWith(p))) {
-      const page = (await (await fetch(`http://127.0.0.1:${app.debugPort}/json/list`)).json()).find((t) => t.type === 'page' && t.url.includes('index.html') && !t.url.includes('detached='));
+      const page = (await (await fetch(`http://127.0.0.1:${app.debugPort}/json/list`)).json()).find(isMainPage);
       const ws = new WebSocket(page.webSocketDebuggerUrl);
       await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
       const events = [];
@@ -397,8 +391,8 @@ try {
   if (only.has('resize')) {
     await measure('resize window', async () => {
       for (let i = 0; i < reps; i++) {
-        for (let s = 1; s <= 20; s++) { await mainEval(`__win.setBounds({ x: -6000, y: 0, width: ${1600 - s * 15}, height: ${1000 - s * 10} }), true`); await sleep(16); }
-        for (let s = 19; s >= 0; s--) { await mainEval(`__win.setBounds({ x: -6000, y: 0, width: ${1600 - s * 15}, height: ${1000 - s * 10} }), true`); await sleep(16); }
+        for (let s = 1; s <= 20; s++) { await main.setBounds({ x: -6000, y: 0, width: 1600 - s * 15, height: 1000 - s * 10 }); await sleep(16); }
+        for (let s = 19; s >= 0; s--) { await main.setBounds({ x: -6000, y: 0, width: 1600 - s * 15, height: 1000 - s * 10 }); await sleep(16); }
         await sleep(400);
       }
     });
@@ -433,7 +427,7 @@ try {
 } finally {
   try { main?.close(); } catch { /* closed */ }
   await app.close();
-  if (gpuCache) for (const d of GPU_CACHE_DIRS) if (existsSync(join(root, 'data', d))) cpSync(join(root, 'data', d), join(gpuCache, d), { recursive: true, force: true });
+  if (gpuCache) for (const d of GPU_CACHE_DIRS) if (existsSync(join(gpuBase, d))) cpSync(join(gpuBase, d), join(gpuCache, d), { recursive: true, force: true });
   removeScratch(root);
 }
 const text = JSON.stringify(result, null, 1);

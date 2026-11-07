@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ssh2 from 'ssh2';
-import { launchApp, mainInspector, scratchRoot, sleep, startTestServer, testHost, writeState } from './ssh-ui-lib.mjs';
+import { launchApp, scratchRoot, sleep, startTestServer, testHost, writeState } from './ssh-ui-lib.mjs';
 
 const shot = (app, name) => app.screenshot(`098-sftp-${name}.png`);
 const shot99 = (name) => app.screenshot(`099-${name}.png`);
@@ -60,11 +60,10 @@ writeState(root, {
 
 let app;
 let main;
-const inspectPort = 9300 + Math.floor(Math.random() * 500);
 const remoteFiles = (dir = home) => readdirSync(dir);
 try {
-  app = await launchApp(root, { MC_TRASH_DIR: trash }, [`--inspect=${inspectPort}`]);
-  main = await mainInspector(inspectPort);
+  app = await launchApp(root, { MC_TRASH_DIR: trash }, [], { main: true });
+  main = app.main;
   await app.cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   const ev = app.evaluate;
   const sftp = `window.__mc.useSftpStore.getState()`;
@@ -573,7 +572,7 @@ try {
   await app.cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await upload(['big.bin']);
   await app.until(`${sftp}.transfers[0]?.state === 'running' && ${sftp}.transfers[0].bytesDone > 0`, 'running before the quit');
-  await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].close(), true`);
+  await main.requestClose();
   await app.until(`document.querySelector('.modal h3')?.textContent === 'Zamknąć aplikację w trakcie transferów?'`, 'quit question about the transfers');
   const quitBody = await ev(`document.querySelector('.modal .modal-body').textContent`);
   if (!quitBody.includes('Transfery w toku: 1.')) throw new Error(`quit question body: ${quitBody}`);
@@ -581,7 +580,7 @@ try {
   const before = await ev(`${sftp}.transfers[0].bytesDone`);
   await dialogChoose('Anuluj');
   await sleep(1500);
-  if ((await main.evaluate(`__el.BrowserWindow.getAllWindows().length`)) !== 1) throw new Error('the window closed after Cancel');
+  if ((await main.windows()).length !== 1) throw new Error('the window closed after Cancel');
   const after = await ev(`${sftp}.transfers[0]`);
   if (!['running', 'done'].includes(after.state) || (after.state === 'running' && after.bytesDone <= before)) throw new Error(`the transfer did not go on after Cancel: ${JSON.stringify({ state: after.state, before, after: after.bytesDone })}`);
   log(`after Cancel the transfer is ${after.state} (${before} -> ${after.bytesDone} bytes)`);

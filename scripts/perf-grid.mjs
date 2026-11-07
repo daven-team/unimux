@@ -1,4 +1,4 @@
-// Frame times, long tasks and CPU of the built app with a large grid of busy shells (Windows only; run `npm run build` first).
+// Frame times, long tasks and CPU of the built app with a large grid of busy shells (Windows only; run `npm run build:check` first, MC_APP_TARGET=electron: `npm run build`).
 // A 5x4 grid of cmd cells in a scratch data dir and home; every cell runs a Node writer that prints colored lines all the time.
 // Reports per run: how many cells draw through WebGL and how many through the DOM renderer, rAF frame intervals, long tasks
 // and the CPU seconds of the whole process tree over the measured window. Screenshot to D:\Projekty\_shots\094-grid-<label>.png.

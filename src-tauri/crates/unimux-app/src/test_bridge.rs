@@ -1,15 +1,32 @@
 //! Debug-only commands for the real-app harness (feature `test-bridge`, never in a release build; CI checks the release
-//! binary). They replace the Electron mainInspector: state peek, emitting an event, panic injection, a guard probe.
+//! binary). They replace the Electron mainInspector: state peek, emitting an event, panic injection, a guard probe, the
+//! not-yet and recorded calls of a run (test_record.rs), the app windows and a user-like close request.
 
 use std::sync::Arc;
 
 use serde_json::{Value, json};
 use tauri::ipc::Request;
-use tauri::{State, Webview};
+use tauri::{Manager, State, Webview};
 
 use unimux_ipc::{Caller, IpcError, Scope};
 
 use crate::context::AppContext;
+
+/// `unimux --launch-line <json>` (check build): the shell line a cell starts its CLI with, from `{profile, opts}` as
+/// `buildCliCommand(profile, opts)` of src/shared/profiles.ts takes them, printed as `{"line": ...}`. P4 ports the builder;
+/// until then the answer is `{"error": "MC_NOT_YET", ...}` with exit code 3, which verify-cli-contract.mjs reports as
+/// "blocked by P4". None when the flag is absent.
+pub fn launch_line_cli() -> Option<i32> {
+    let args: Vec<String> = std::env::args().collect();
+    let i = args.iter().position(|a| a == "--launch-line")?;
+    let input = args.get(i + 1).and_then(|a| serde_json::from_str::<Value>(a).ok());
+    let (out, code) = match input {
+        None => (json!({ "error": "MC_BAD_ARGS", "message": "--launch-line needs a JSON {profile, opts}" }), 2),
+        Some(_) => (json!({ "error": "MC_NOT_YET", "command": "launch-line", "owner": "P4" }), 3),
+    };
+    println!("{out}");
+    Some(code)
+}
 
 #[tauri::command]
 pub async fn test_bridge(
@@ -33,8 +50,51 @@ pub async fn test_bridge(
         "emit" => {
             let event = args.get("event").and_then(Value::as_str).ok_or_else(|| fail("emit needs {event, args}"))?;
             let list = args.get("args").and_then(Value::as_array).cloned().unwrap_or_default();
-            ctx.events.emit(Scope::Broadcast, event, list);
+            // `label`: one window (what Electron's `getAllWindows()[0].webContents.send` reached), else every app window.
+            let scope = match args.get("label").and_then(Value::as_str) {
+                Some(label) => Scope::Window(label.to_string()),
+                None => Scope::Broadcast,
+            };
+            ctx.events.emit(scope, event, list);
             Ok(Value::Null)
+        }
+        // The window.mc commands pages asked for that no package implements yet ({command: count}), X1 "blocked by".
+        "notYet" => Ok(ctx.test_record.not_yet()),
+        // Records the calls of {channels: [...]} from now on (added to earlier recordings); `swallow: true` answers them with
+        // null without running their handler (the mainInspector stubs of 1.1.4's verify scripts).
+        "record" => {
+            let channels: Vec<String> = args
+                .get("channels")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .ok_or_else(|| fail("record needs {channels: [...]}"))?;
+            ctx.test_record.start(channels, args.get("swallow").and_then(Value::as_bool).unwrap_or(false));
+            Ok(Value::Null)
+        }
+        // The recorded calls [{kind, channel, label, args, at}] of {channel?} (default: all); `take: false` leaves them.
+        "recorded" => Ok(ctx
+            .test_record
+            .recorded(args.get("channel").and_then(Value::as_str), args.get("take").and_then(Value::as_bool).unwrap_or(true))),
+        // Every app window (main first) with how it looks (label, visible, minimized, focused).
+        "windows" => {
+            let app = ctx.app().ok_or_else(|| fail("no app yet"))?;
+            let mut list: Vec<Value> = app
+                .webview_windows()
+                .into_values()
+                .filter(|w| w.label() == "main" || w.label().starts_with("detached-"))
+                .map(|w| {
+                    json!({
+                        "label": w.label(),
+                        "url": w.url().map(|u| u.to_string()).unwrap_or_default(),
+                        "visible": w.is_visible().ok(),
+                        "minimized": w.is_minimized().ok(),
+                        "maximized": w.is_maximized().ok(),
+                        "focused": w.is_focused().ok(),
+                    })
+                })
+                .collect();
+            list.sort_by_key(|w| w["label"] != "main");
+            Ok(Value::Array(list))
         }
         // A panic on a background thread: one crash.log line (and the error dialog, rate-limited).
         "panic" => {

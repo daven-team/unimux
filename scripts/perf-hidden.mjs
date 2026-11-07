@@ -1,4 +1,4 @@
-// Output throughput and timer cadence of the built app while its window is minimized (Windows only; run `npm run build` first).
+// Output throughput and timer cadence of the built app while its window is minimized (Windows only; run `npm run build:check` first, MC_APP_TARGET=electron: `npm run build`).
 // Two cmd cells in a scratch data dir and home; one runs a Node writer that prints 16 MB in 200-byte lines whenever a trigger
 // file appears and records how long its writes took (the pty holds the writer back while the renderer does not ack).
 // The window is minimized and restored with user32 ShowWindow on the window of the process this script started.

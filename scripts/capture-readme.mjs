@@ -1,5 +1,5 @@
-// Capture the README screenshots from the real built Electron renderer. Never uses an installed app's data or AI models.
-// Run: npm run build && node scripts/capture-readme.mjs [output dir] [--only name,name] [--hold] [--verify]
+// Capture the README screenshots from the real built app (the Tauri check build; MC_APP_TARGET=electron: Electron's out/). Never uses an installed app's data or AI models.
+// Run: npm run build:check && node scripts/capture-readme.mjs [output dir] [--only name,name] [--hold] [--verify]
 // Demo data (all in a temporary folder): an "Atlas storefront" project that is a scratch git repository, scripted stand-ins
 // for the claude and codex commands (they print a fixed demo session, post status hooks and never contact a model), demo
 // transcripts for the context meter, SSH hosts on the local test server scripts/ssh-test-server.mjs (status bar, SFTP and
@@ -7,7 +7,7 @@
 // Postgres (scripts/pg-test-server.mjs) and Redis (scripts/redis-test-server.mjs), notes and snippets.
 // --only captures the named images only (the rest of the run is skipped); --hold keeps the app running after the setup and
 // prints its debug port (for trying steps by hand), --verify runs scripts/verify-workspace-ui.mjs at the end.
-// Requires Node >=22, installed dependencies, and an Electron desktop environment.
+// Requires Node >=22, installed dependencies, and a desktop session (the window is placed off screen).
 import { spawn, execFileSync } from 'node:child_process';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -15,14 +15,13 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import electron from 'electron';
 import { Redis } from 'ioredis';
 import { verifyWorkspaceUI } from './verify-workspace-ui.mjs';
 import { scrubAppEnv } from './app-env.mjs';
 import { killTree, startTestServer, writeKnownHost } from './ssh-ui-lib.mjs';
 
 const checkout = process.cwd();
-if (!existsSync(join(checkout, 'out/main/index.js'))) throw new Error('Build first: npm run build');
+requireBuild(checkout);
 const argv = process.argv.slice(2);
 const flagValue = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
 const only = flagValue('--only')?.split(',').map((s) => s.trim()).filter(Boolean) ?? null;
@@ -238,6 +237,7 @@ const demoScreens = {
 writeFileSync(join(bin, 'demo-sessions.json'), JSON.stringify(demoScreens));
 writeFileSync(join(bin, 'demo-agent.mjs'), `// Scripted stand-in for "${'claude'}" / "codex" in README screenshots: prints a fixed demo session, never calls a model.
 import { readFileSync } from 'node:fs';
+import { isMainPage, quitApp, requireBuild, spawnApp } from './real-app.mjs';
 const [cli, ...args] = process.argv.slice(2);
 if (args.includes('--version')) { console.log(cli === 'claude' ? '2.1.120 (Claude Code)' : 'codex-cli 0.60.0'); process.exit(0); }
 const screens = JSON.parse(readFileSync(new URL('./demo-sessions.json', import.meta.url), 'utf8'));
@@ -441,7 +441,7 @@ const env = { ...process.env, MC_DATA_DIR: data, MC_OFFSCREEN: '1', MC_DEBUG_POR
 scrubAppEnv(env); // never the real login folders or tokens
 const pathKey = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
 env[pathKey] = `${bin}${delimiter}${env[pathKey] ?? ''}`;
-const child = spawn(electron, ['.'], { cwd: checkout, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+const child = spawnApp({ cwd: checkout, env, stdio: ['ignore', 'pipe', 'pipe'] });
 let log = '', exited = false, socket, requestId = 0;
 child.stdout.on('data', d => { log += d; }); child.stderr.on('data', d => { log += d; });
 child.on('error', e => { log += e.message; exited = true; }); child.on('exit', () => { exited = true; });
@@ -868,7 +868,7 @@ steps.sort((a, b) => ORDER.indexOf(a.name) - ORDER.indexOf(b.name));
 const runSteps = steps.filter(s => !only || only.includes(s.name));
 if (only && runSteps.length !== only.length) throw new Error(`Unknown step in --only: ${only.filter(n => !steps.some(s => s.name === n)).join(', ')} (steps: ${steps.map(s => s.name).join(', ')})`);
 try {
-  const target = await until(async () => { try { return (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(t => t.type === 'page' && !t.url.includes('detached=')); } catch { return null; } }, 'debugger');
+  const target = await until(async () => { try { return (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(isMainPage); } catch { return null; } }, 'debugger');
   socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((r, j) => { socket.addEventListener('open', r, { once: true }); socket.addEventListener('error', j, { once: true }); });
   socket.addEventListener('message', e => {
@@ -903,7 +903,8 @@ try {
   if (socket?.readyState === WebSocket.OPEN) await screenshot('failure').catch(() => undefined);
 } finally {
   stopServers();
-  if (socket?.readyState === WebSocket.OPEN) { await cdp('Browser.close').catch(() => {}); socket.close(); }
+  // A normal quit (Tauri: the test bridge; Electron: Browser.close), then our own tree kill.
+  if (socket?.readyState === WebSocket.OPEN) { await quitApp({ child, evaluate, cdp }).catch(() => {}); socket.close(); }
   for (let i = 0; i < 50 && !exited; i++) await sleep(100);
   if (!exited) killTree(child.pid);
 }

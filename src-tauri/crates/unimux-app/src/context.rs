@@ -78,6 +78,9 @@ pub struct AppContext {
     /// Check build only: every renderer startup mark with the window label and the time (test_bridge `marks`).
     #[cfg(feature = "test-bridge")]
     pub test_marks: Mutex<Vec<(String, String, f64)>>,
+    /// Check build only: not-yet calls and recorded calls for the real-app harness (test_bridge `notYet`, `record`).
+    #[cfg(feature = "test-bridge")]
+    pub test_record: crate::test_record::TestRecorder,
 }
 
 impl AppContext {
@@ -133,6 +136,8 @@ impl AppContext {
             main_shown: AtomicBool::new(false),
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
+            #[cfg(feature = "test-bridge")]
+            test_record: crate::test_record::TestRecorder::from_env(),
         })
     }
 

@@ -16,6 +16,8 @@ mod spike_windows;
 mod startup;
 #[cfg(feature = "test-bridge")]
 mod test_bridge;
+#[cfg(feature = "test-bridge")]
+mod test_record;
 mod update_window;
 mod windows;
 
@@ -86,6 +88,12 @@ fn main() {
     }
     if std::env::args().any(|a| a == "--ipc-routes") && !unimux_core::PACKAGED {
         std::process::exit(print_routes());
+    }
+    // Check build: `--launch-line <json>` prints the launch line of a cell for scripts/verify-cli-contract.mjs (P4), and never
+    // starts the app (an unknown flag would).
+    #[cfg(feature = "test-bridge")]
+    if let Some(code) = test_bridge::launch_line_cli() {
+        std::process::exit(code);
     }
 
     let timer = Arc::new(StartupTimer::new(started));

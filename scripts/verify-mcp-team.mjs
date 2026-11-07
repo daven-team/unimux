@@ -13,8 +13,8 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import electron from 'electron';
 import { removeScratch, scratchHome, scrubAppEnv } from './app-env.mjs';
+import { isMainPage, quitApp, spawnApp } from './real-app.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'unimux-mcp-team-'));
 const data = join(root, 'data'), agents = join(root, 'fake-agents'), project = join(root, 'project');
@@ -49,7 +49,7 @@ const ok = (line) => console.log(`ok   ${line}`);
 async function launch() {
   const port = await freePort();
   const env = { ...scrubAppEnv({ ...process.env }), MC_DATA_DIR: data, MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port), PATH: agents + delimiter + (process.env.PATH ?? process.env.Path ?? ''), ...home.env };
-  const child = spawn(electron, ['.'], { cwd: process.cwd(), env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawnApp({ cwd: process.cwd(), env, stdio: ['ignore', 'pipe', 'pipe'] });
   const app = { child, output: '', exited: false, clients: [] };
   child.stdout.on('data', (d) => { app.output += d; });
   child.stderr.on('data', (d) => { app.output += d; });
@@ -59,7 +59,7 @@ async function launch() {
     while (Date.now() < end) { const v = await fn(); if (v) return v; if (app.exited) throw new Error(`App exited during ${label}: ${app.output.slice(-3000)}`); await sleep(150); }
     throw new Error(`Timeout waiting for ${label}: ${app.output.slice(-3000)}`);
   };
-  const target = await app.until(async () => { try { return (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === 'page'); } catch { return null; } }, 'debugger');
+  const target = await app.until(async () => { try { return (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(isMainPage); } catch { return null; } }, 'debugger');
   const socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((r, j) => { socket.addEventListener('open', r, { once: true }); socket.addEventListener('error', j, { once: true }); });
   let id = 0; const pending = new Map();
@@ -73,7 +73,8 @@ async function launch() {
   app.close = async () => {
     const bounded = (promise) => Promise.race([promise.catch(() => undefined), sleep(3000)]);
     await bounded(Promise.all(app.clients.map((c) => c.close())));
-    await bounded(app.cdp('Browser.close'));
+    // A normal quit (Tauri: the test bridge; Electron: Browser.close), then our own tree kill.
+    await bounded(quitApp({ child, evaluate: app.evaluate, cdp: app.cdp, ms: 5000 }));
     socket.close();
     for (let i = 0; i < 50 && !app.exited; i++) await sleep(100);
     if (!app.exited) { if (win) execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); else child.kill('SIGTERM'); }

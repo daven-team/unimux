@@ -10,12 +10,12 @@ import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
-import electron from 'electron';
 import { removeScratch, scrubAppEnv } from './app-env.mjs';
 import { killTree, sleep } from './ssh-ui-lib.mjs';
+import { isMainPage, requireBuild, spawnApp } from './real-app.mjs';
 
 const checkout = process.cwd();
-if (!existsSync(join(checkout, 'out/main/index.js'))) throw new Error('Build first: npm run build');
+requireBuild(checkout);
 const port = Number(process.env.MC_DEBUG_PORT ?? 9419);
 const root = mkdtempSync(join(tmpdir(), 'unimux-agentprompt-'));
 const shots = resolve(process.argv[2] ?? join(root, 'shots'));
@@ -102,7 +102,7 @@ scrubAppEnv(env);
 env.CODEX_HOME = join(home, '.codex');
 const pathKey = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
 env[pathKey] = `${bin}${delimiter}${env[pathKey] ?? ''}`;
-const child = spawn(electron, ['.'], { cwd: checkout, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+const child = spawnApp({ cwd: checkout, env, stdio: ['ignore', 'pipe', 'pipe'] });
 let log = '';
 child.stdout.on('data', (d) => { log = (log + d).slice(-6000); });
 child.stderr.on('data', (d) => { log = (log + d).slice(-6000); });
@@ -155,7 +155,7 @@ const clickButton = (app, label) => app.evaluate(`(() => { const b = [...documen
 const PROMPT = 'Sprawdź testy w swoim folderze.\nNapisz krótko, co poprawiłeś.';
 let main, side;
 try {
-  main = await connect((url) => url.includes('index.html') && !url.includes('detached='));
+  main = await connect((url) => isMainPage({ type: 'page', url }));
   await main.cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 860, deviceScaleFactor: 1, mobile: false });
   await main.until(`!!window.__mc && document.querySelectorAll('.cell').length === 6`, 'the Agenci grid');
   await main.until(`(() => { const u = ${store}.ui; return u.statuses['${ids.done}'] === 'waiting' && u.statuses['${ids.busy}'] === 'working' && u.statusDetails['${ids.perm}']?.kind === 'permission'; })()`, 'scripted turns settled', 40000);
