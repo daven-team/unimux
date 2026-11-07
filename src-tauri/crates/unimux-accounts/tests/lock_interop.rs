@@ -1,8 +1,10 @@
 //! The Rust directory locks against the real npm proper-lockfile (4.1.2, what Claude Code and claude-swap use), both
 //! directions: each side waits for a live holder of the other (whose touches keep the lock fresh) and takes over a dead one.
 //!
-//! Needs `node` and the repo's node_modules (proper-lockfile is a dependency of the Electron app). Without them the cases are
-//! skipped with a note, unless `UNIMUX_REQUIRE_LOCK_INTEROP=1` (CI), where a missing tool fails.
+//! Needs `node` and the repo's node_modules: proper-lockfile 4.1.2 is pinned as a root devDependency for this test only (it
+//! must stay when R1 removes Electron and electron-builder, which used to bring it in). Without them the cases return early
+//! with a "skipped" note on stderr and are listed as passed (stable Rust cannot mark a test ignored at run time), unless
+//! `UNIMUX_REQUIRE_LOCK_INTEROP=1` (CI), where a missing tool fails.
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -41,6 +43,9 @@ fn proper_lockfile() -> Option<PathBuf> {
     let module = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../node_modules/proper-lockfile");
     let node = Command::new("node").arg("--version").stdout(Stdio::null()).status().is_ok_and(|s| s.success());
     if node && module.join("index.js").exists() {
+        // The version Claude Code and claude-swap use (package.json pins it).
+        let manifest = std::fs::read_to_string(module.join("package.json")).unwrap();
+        assert!(manifest.contains("\"version\": \"4.1.2\""), "node_modules/proper-lockfile is not 4.1.2");
         return Some(dunce::canonicalize(module).unwrap());
     }
     assert!(std::env::var("UNIMUX_REQUIRE_LOCK_INTEROP").as_deref() != Ok("1"), "node or node_modules/proper-lockfile missing");

@@ -87,6 +87,9 @@ function maker(seed) {
 
 // ── accounts/accounts.json ───────────────────────────────────────────────────
 
+// Text JSON.parse reads and serde_json alone does not: numbers beyond the f64 range (Infinity) and nesting deeper than 128.
+const DEEP = `${'[{"a":'.repeat(150)}1${'}]'.repeat(150)}`;
+
 const FIXED_FILES = [
   null, { dir: true }, '', 'not json', '{"claude": [', 'null', '[]', '"x"', '{}', '{"claude":{}}', '{"version":2}', '{"version":3,"claude":[]}',
   '{"version":"2","claude":[]}', '{"version":1.5,"claude":[]}', '{"version":0,"claude":[]}', '{"version":2.0,"claude":[]}', '{"version":1e0,"claude":[]}',
@@ -96,6 +99,10 @@ const FIXED_FILES = [
   '{"version":2,"claude":[{"id":"11111111-1111-4111-8111-111111111111","addedAt":12345678901234567890}]}',
   '{"version":2,"claude":[{"id":"11111111-1111-4111-8111-111111111111","addedAt":1,"email":"a\\ud800b"}]}',
   '{"claude":[{"id":"11111111-1111-4111-8111-111111111111","addedAt":1,"email":"a@x.pl"},{"id":"11111111-1111-4111-8111-111111111111","addedAt":2}]}',
+  '{"version":2,"claude":[{"id":"11111111-1111-4111-8111-111111111111","addedAt":1},{"id":"22222222-2222-4222-8222-222222222222","addedAt":1e400}]}',
+  '{"version":2,"claude":[{"id":"11111111-1111-4111-8111-111111111111","addedAt":-1e400},{"id":"22222222-2222-4222-8222-222222222222","addedAt":2,"x":1E+999,"appSwap":{"at":1e400}}],"notices":[{"id":"a","kind":"adopted","at":1e400},{"id":"b","kind":"adopted","at":3}]}',
+  '{"version":1e400,"claude":[]}',
+  `{"version":2,"claude":[{"id":"11111111-1111-4111-8111-111111111111","addedAt":1,"extra":${DEEP}}],"unknown":${DEEP}}`,
 ];
 
 function storeOp(m, i) {
@@ -218,7 +225,10 @@ function storeRow(AccountsStore, root, file, ops) {
 const CODEX_FIXED = [null, { dir: true }, '', 'nope', 'null', '[]', '7', '{}', '{"version":2,"accounts":[]}', '{"version":"1","accounts":[]}', '{"version":1.0,"accounts":[]}',
   '{"accounts":{}}', '{"version":1,"accounts":[{"id":"11111111-1111-4111-8111-111111111111","addedAt":-0}],"live":{"recordId":"11111111-1111-4111-8111-111111111111"}}',
   '{"version":1,"accounts":[{"id":"11111111-1111-4111-8111-111111111111","addedAt":1,"email":"a@x"},{"id":"11111111-1111-4111-8111-111111111111","addedAt":2}]}',
-  '﻿{"version":1,"accounts":[]}'];
+  '﻿{"version":1,"accounts":[]}',
+  '{"version":1,"accounts":[{"id":"11111111-1111-4111-8111-111111111111","addedAt":1e400,"email":"a@x"},{"id":"22222222-2222-4222-8222-222222222222","addedAt":-1e400}]}',
+  '{"version":1e400,"accounts":[]}',
+  `{"version":1,"accounts":[{"id":"11111111-1111-4111-8111-111111111111","addedAt":5,"x":${DEEP}}],"deep":${DEEP}}`];
 
 function codexMaker(seed) {
   const m = maker(seed);

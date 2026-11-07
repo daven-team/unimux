@@ -311,3 +311,52 @@ fn many_threads_never_hold_one_lock_at_once() {
     assert_eq!(overlaps.load(Ordering::SeqCst), 0);
     assert!(!h.primary().exists());
 }
+
+/// A parent dir the user may not create folders in: mkdir fails with access denied and no lock is in the way. That is a real
+/// error, thrown at once (1.1.4 rethrows EPERM, the callers report 'write' / 'manual'), never a 9 s wait reported as a held lock.
+#[cfg(windows)]
+#[test]
+fn a_real_permission_error_fails_at_once_instead_of_waiting_for_the_timeout() {
+    use std::process::{Command, Stdio};
+    let dir = tempfile::tempdir().unwrap();
+    let parent = dir.path().join("denied");
+    fs::create_dir(&parent).unwrap();
+    let out = Command::new("whoami").args(["/user", "/fo", "csv", "/nh"]).output().unwrap();
+    let line = String::from_utf8_lossy(&out.stdout).into_owned();
+    let sid = line.trim().rsplit(',').next().unwrap().trim_matches('"').to_string();
+    assert!(sid.starts_with("S-1-"), "whoami: {line}");
+    let icacls = |args: &[&str]| {
+        let status = Command::new("icacls").arg(&parent).args(args).stdout(Stdio::null()).status().unwrap();
+        assert!(status.success(), "icacls {args:?}");
+    };
+    // (AD): append data, which on a directory is "create subfolders".
+    icacls(&["/deny", &format!("*{sid}:(AD)")]);
+    struct Restore<'a>(&'a Path, String);
+    impl Drop for Restore<'_> {
+        fn drop(&mut self) {
+            let _ = std::process::Command::new("icacls")
+                .arg(self.0)
+                .args(["/remove:d", &format!("*{}", self.1)])
+                .stdout(std::process::Stdio::null())
+                .status();
+        }
+    }
+    let _restore = Restore(&parent, sid.clone());
+    assert_eq!(fs::create_dir(parent.join("probe")).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+    let options = LockOptions { timeout: Duration::from_secs(5), ..LockOptions::default() };
+    let start = Instant::now();
+    let result = acquire_dir_lock(&parent.join("x.lock"), CREDENTIALS_STALE, &options);
+    let took = start.elapsed();
+    match result {
+        Err(LockError::Io(e)) => assert_eq!(e.kind(), io::ErrorKind::PermissionDenied),
+        other => panic!("expected an io error, got {other:?} after {took:?}"),
+    }
+    assert!(took < Duration::from_secs(1), "took {took:?}");
+    // with_claude_locks reports the same error (not a held lock) and runs nothing.
+    let credentials = parent.join(".credentials.json");
+    let ran = std::cell::Cell::new(false);
+    let result = with_claude_locks(&credentials, &dir.path().join(".claude.json"), false, &options, || ran.set(true));
+    assert!(matches!(result, Err(LockError::Io(_))), "{result:?}");
+    assert!(!ran.get());
+    assert!(!dir.path().join(".claude.json.lock").exists());
+}

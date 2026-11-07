@@ -26,6 +26,8 @@ pub const LOCK_TIMEOUT: Duration = Duration::from_secs(9);
 /// Tries of the release: on Windows an antivirus or indexer may hold the empty lock dir for a moment (EPERM, EBUSY).
 pub const RELEASE_TRIES: u32 = 5;
 const RELEASE_GAP: Duration = Duration::from_millis(100);
+/// mkdir answers access denied while the lock path does not exist: after this many such answers it is a real permission error.
+const ABSENT_DENIALS: u32 = 3;
 
 type SleepFn = Arc<dyn Fn(Duration) + Send + Sync>;
 type RemoveFn = Arc<dyn Fn(&Path) -> io::Result<()> + Send + Sync>;
@@ -157,15 +159,30 @@ impl Drop for DirLock {
 /// Takes one directory lock (never creating its parent). A lock older than `stale` is a dead holder's: removed and retaken.
 pub fn acquire_dir_lock(path: &Path, stale: Duration, options: &LockOptions) -> Result<DirLock, LockError> {
     let start = Instant::now();
+    let mut absent_denials = 0;
     loop {
         // On Windows a lock directory another holder has just removed stays "delete pending" while a handle to it is open
         // (its toucher, an indexer): mkdir and stat then fail with ERROR_ACCESS_DENIED. That is a lock on its way out, not
-        // a real error, so it is waited for like a held lock (within the timeout).
+        // a real error, so it is waited for like a held lock (within the timeout). Access denied where nothing is in the
+        // way (a parent dir the user may not create folders in) is a real error and thrown at once, as 1.1.4 does.
         let mut pending = false;
         match fs::create_dir(path) {
             Ok(()) => break,
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(e) if cfg!(windows) && is_busy(&e) => pending = true,
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => absent_denials = 0,
+            Err(e) if cfg!(windows) && is_busy(&e) => match fs::symlink_metadata(path) {
+                // Gone between the two calls (the pending delete just finished) or never there: one more mkdir decides.
+                Err(m) if m.kind() == io::ErrorKind::NotFound => {
+                    absent_denials += 1;
+                    if absent_denials >= ABSENT_DENIALS {
+                        return Err(e.into());
+                    }
+                    continue;
+                }
+                _ => {
+                    absent_denials = 0;
+                    pending = true;
+                }
+            },
             Err(e) => return Err(e.into()),
         }
         if start.elapsed() > options.timeout {
