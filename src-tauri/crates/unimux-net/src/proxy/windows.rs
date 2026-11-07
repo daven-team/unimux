@@ -115,8 +115,8 @@ unsafe extern "system" fn on_proxy_result(_handle: Handle, context: usize, statu
     {
         return;
     }
-    // SAFETY: `context` is an `Arc<Completion>` pointer that `auto_ex` keeps alive until this callback has reported (or leaks
-    // it after a timeout).
+    // SAFETY: `context` is an `Arc<Completion>` pointer that `auto_ex` keeps alive until the sender has been taken out and the
+    // lock released (it frees it only after `recv` returned), or leaks after a timeout.
     let completion = unsafe { &*(context as *const Completion) };
     let result = if status == WINHTTP_CALLBACK_STATUS_REQUEST_ERROR {
         // SAFETY: for REQUEST_ERROR the status information is a WINHTTP_ASYNC_RESULT.
@@ -124,7 +124,13 @@ unsafe extern "system" fn on_proxy_result(_handle: Handle, context: usize, statu
     } else {
         Ok(())
     };
-    if let Some(tx) = completion.tx.lock().take() {
+    // Take the sender and release the lock BEFORE signalling: once `send` wakes `auto_ex`, it may free `Completion` (and the
+    // mutex inside it) at any moment, so this callback must not touch `completion` after the send.
+    let tx = {
+        let mut slot = completion.tx.lock();
+        slot.take()
+    };
+    if let Some(tx) = tx {
         let _ = tx.send(result);
     }
 }
@@ -155,8 +161,10 @@ impl WinResolver {
     /// WinHTTP's answer for `url` under automatic settings: WPAD (DHCP + DNS) when `auto_detect`, the script at `pac_url`.
     /// Err carries the Win32 error (no WPAD server, script not downloadable, script error, timeout).
     pub fn auto(&self, url: &Url, auto_detect: bool, pac_url: Option<&str>) -> Result<Vec<ProxyChoice>, u32> {
+        // The script sees the URL as Chromium hands it over (https without path and query).
+        let target = super::pac_target(url);
         let mut options =
-            AutoOptions { flags: 0, detect: 0, pac: None, target: url.as_str().encode_utf16().chain([0]).collect() };
+            AutoOptions { flags: 0, detect: 0, pac: None, target: target.as_str().encode_utf16().chain([0]).collect() };
         if auto_detect {
             options.flags |= WINHTTP_AUTOPROXY_AUTO_DETECT;
             options.detect = WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A;
@@ -237,7 +245,8 @@ impl WinResolver {
         };
         close(resolver);
         if outcome.is_ok() {
-            // SAFETY: the callback has reported, so it no longer touches the context.
+            // SAFETY: the callback took the sender out and released the lock before it sent, so it no longer touches the
+            // context.
             drop(unsafe { Arc::from_raw(context as *const Completion) });
         }
         // After a timeout the context stays allocated (a late callback may still read it): a few bytes, rarely.

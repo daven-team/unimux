@@ -269,11 +269,16 @@ impl HttpClient {
             let (response, conn) = self.send(&hop).await?;
             let status = response.status().as_u16();
             let location = response.headers().get(LOCATION).map(|v| latin1(v.as_bytes()));
+            // Chromium's IsRedirect: one of the five redirect statuses with a non-empty Location.
+            let is_redirect = matches!(status, 301 | 302 | 303 | 307 | 308) && location.as_deref().is_some_and(|l| !l.is_empty());
             match req.redirect {
-                Redirect::Error if (300..400).contains(&status) && status != 304 => {
+                Redirect::Error if is_redirect => {
                     return Err(FetchError::RedirectRefused { status, location });
                 }
-                Redirect::Follow { max } if matches!(status, 301 | 302 | 303 | 307 | 308) && location.is_some() => {
+                Redirect::ErrorAny3xx if (300..400).contains(&status) => {
+                    return Err(FetchError::RedirectRefused { status, location });
+                }
+                Redirect::Follow { max } if is_redirect => {
                     let location = location.unwrap_or_default();
                     let next = hop.url.join(&location).map_err(|_| FetchError::Network("bad redirect address".into()))?;
                     if hops >= max {
@@ -335,8 +340,9 @@ impl HttpClient {
         }
     }
 
-    /// Tries the choices in order while they cannot be reached (Chromium's proxy fallback); the first connection carries the
-    /// request.
+    /// Tries the choices in order while the proxy itself cannot be used (Chromium's proxy fallback); the first connection
+    /// carries the request. A proxy that answered with a refusal (403, 407, a SOCKS refusal) or a failed TLS handshake with
+    /// the server ends the attempt: the request is not retried around the proxy's decision.
     async fn send_via(
         &self,
         hop: &Hop<'_>,
@@ -349,8 +355,8 @@ impl HttpClient {
         for choice in choices {
             match connect(&hop.url, choice, tls.clone(), self.inner.tls.h1.clone(), agent).await {
                 Ok(connected) => return exchange(connected, hop).await,
-                Err(error) if error.is_connect_failure() => last = error,
-                Err(error) => return Err(error),
+                Err(failure) if failure.try_next => last = failure.error,
+                Err(failure) => return Err(failure.error),
             }
         }
         Err(last)

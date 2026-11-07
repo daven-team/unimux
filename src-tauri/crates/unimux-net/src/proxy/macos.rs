@@ -105,7 +105,9 @@ pub fn resolve(url: &Url) -> Vec<ProxyChoice> {
             return vec![ProxyChoice::Direct];
         }
         let settings = Owned(settings as CFTypeRef);
-        let Some(target) = cf_url(url.as_str()) else { return vec![ProxyChoice::Direct] };
+        // The URL CFNetwork and the PAC script see, as Chromium hands it over (https without path and query).
+        let target = super::pac_target(url);
+        let Some(target) = cf_url(target.as_str()) else { return vec![ProxyChoice::Direct] };
         let list = CFNetworkCopyProxiesForURL(target.0 as CFURLRef, settings.0 as CFDictionaryRef);
         if list.is_null() {
             return vec![ProxyChoice::Direct];

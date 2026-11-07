@@ -1,6 +1,7 @@
 //! Opening the byte stream to the server: TCP (happy eyeballs through hyper-util's connector), the proxy hop (HTTP CONNECT,
 //! TLS to an HTTPS proxy, SOCKS 4 / 5) and TLS to the server. Every failure here is a `FetchError::Connect`: nothing of the
-//! request has been sent yet.
+//! request has been sent yet. Each failure also says whether the next entry of the proxy list may be tried: only when the
+//! proxy itself could not be used (Chromium's proxy fallback), never after the proxy answered or the server's TLS failed.
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -41,6 +42,28 @@ const MAX_PROXY_REPLY: usize = 16 * 1024;
 
 fn connect_err(what: &str, error: impl std::fmt::Display) -> FetchError {
     FetchError::Connect(format!("{what}: {error}"))
+}
+
+/// A failed attempt along one proxy choice.
+#[derive(Debug)]
+pub(crate) struct ConnectFailure {
+    /// Always a `FetchError::Connect` (nothing was sent, so the token renewal's direct-then-system rule may still go on).
+    pub error: FetchError,
+    /// The proxy could not be reached or spoke no usable protocol (TCP or DNS of the proxy, TLS to an HTTPS proxy, a broken
+    /// CONNECT or SOCKS exchange): the next entry of the list may carry the request. False when the proxy answered with a
+    /// refusal (a non-2xx CONNECT reply such as 403 or 407, a SOCKS refusal code) and when TLS with the server itself failed
+    /// (a certificate error is final in Chromium too).
+    pub try_next: bool,
+}
+
+impl ConnectFailure {
+    fn next(error: FetchError) -> Self {
+        ConnectFailure { error, try_next: true }
+    }
+
+    fn last(error: FetchError) -> Self {
+        ConnectFailure { error, try_next: false }
+    }
 }
 
 /// The host as it goes into a URI authority or a CONNECT line (`[v6]` for IPv6).
@@ -84,18 +107,19 @@ pub(crate) async fn connect(
     tls_config: Arc<ClientConfig>,
     proxy_tls: Arc<ClientConfig>,
     user_agent: Option<&str>,
-) -> Result<Connected, FetchError> {
-    let host = url_host(url)?;
-    let port = url.port_or_known_default().ok_or_else(|| FetchError::InvalidRequest("no port".into()))?;
+) -> Result<Connected, ConnectFailure> {
+    let host = url_host(url).map_err(ConnectFailure::last)?;
+    let port = url.port_or_known_default().ok_or_else(|| ConnectFailure::last(FetchError::InvalidRequest("no port".into())))?;
     let secure = url.scheme() == "https";
     let (io, absolute_form): (BoxIo, bool) = match choice {
-        ProxyChoice::Direct => (Box::new(tcp(&host, port).await?), false),
+        // A DIRECT entry that cannot be reached still lets a later entry of a PAC answer try.
+        ProxyChoice::Direct => (Box::new(tcp(&host, port).await.map_err(ConnectFailure::next)?), false),
         ProxyChoice::Proxy(proxy) => {
-            let mut io: BoxIo = Box::new(tcp(&proxy.host, proxy.port).await?);
+            let mut io: BoxIo = Box::new(tcp(&proxy.host, proxy.port).await.map_err(ConnectFailure::next)?);
             match proxy.scheme {
                 ProxyScheme::Http | ProxyScheme::Https => {
                     if proxy.scheme == ProxyScheme::Https {
-                        io = tls(io, &proxy.host, proxy_tls).await?.0;
+                        io = tls(io, &proxy.host, proxy_tls).await.map_err(ConnectFailure::next)?.0;
                     }
                     if secure {
                         tunnel(&mut io, &host, port, user_agent).await?;
@@ -116,33 +140,36 @@ pub(crate) async fn connect(
         }
     };
     if secure {
-        let (io, h2) = tls(io, &host, tls_config).await?;
+        // TLS with the server itself: a certificate or handshake failure is final, no other proxy entry is tried.
+        let (io, h2) = tls(io, &host, tls_config).await.map_err(ConnectFailure::last)?;
         Ok(Connected { io, h2, absolute_form: false })
     } else {
         Ok(Connected { io, h2: false, absolute_form })
     }
 }
 
-/// `CONNECT host:port` through an HTTP proxy; only a 2xx opens the tunnel.
-async fn tunnel(io: &mut BoxIo, host: &str, port: u16, user_agent: Option<&str>) -> Result<(), FetchError> {
+/// `CONNECT host:port` through an HTTP proxy; only a 2xx opens the tunnel. A broken exchange lets the next proxy entry try,
+/// an HTTP reply the proxy chose (403, 407, 502, ...) does not (Chromium: ERR_TUNNEL_CONNECTION_FAILED or an auth challenge).
+async fn tunnel(io: &mut BoxIo, host: &str, port: u16, user_agent: Option<&str>) -> Result<(), ConnectFailure> {
     let target = format!("{}:{port}", authority_host(host));
     let mut head = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n");
     if let Some(agent) = user_agent.filter(|a| !a.contains(['\r', '\n'])) {
         head.push_str(&format!("User-Agent: {agent}\r\n"));
     }
     head.push_str("\r\n");
-    io.write_all(head.as_bytes()).await.map_err(|e| connect_err("proxy", e))?;
-    io.flush().await.map_err(|e| connect_err("proxy", e))?;
+    let broken = |e: std::io::Error| ConnectFailure::next(connect_err("proxy", e));
+    io.write_all(head.as_bytes()).await.map_err(broken)?;
+    io.flush().await.map_err(broken)?;
     // Byte by byte up to the empty line, so no byte of the TLS stream behind it is consumed.
     let mut reply = Vec::with_capacity(256);
     let mut byte = [0u8; 1];
     while !reply.ends_with(b"\r\n\r\n") {
         if reply.len() >= MAX_PROXY_REPLY {
-            return Err(FetchError::Connect("proxy: reply too long".into()));
+            return Err(ConnectFailure::next(FetchError::Connect("proxy: reply too long".into())));
         }
-        let n = io.read(&mut byte).await.map_err(|e| connect_err("proxy", e))?;
+        let n = io.read(&mut byte).await.map_err(broken)?;
         if n == 0 {
-            return Err(FetchError::Connect("proxy closed the connection".into()));
+            return Err(ConnectFailure::next(FetchError::Connect("proxy closed the connection".into())));
         }
         reply.push(byte[0]);
     }
@@ -151,20 +178,24 @@ async fn tunnel(io: &mut BoxIo, host: &str, port: u16, user_agent: Option<&str>)
     let status = line.split_whitespace().nth(1).and_then(|s| s.parse::<u16>().ok());
     match status {
         Some(code) if (200..300).contains(&code) && line.starts_with("HTTP/1.") => Ok(()),
-        Some(407) => Err(FetchError::Connect("proxy: authentication required (407)".into())),
-        Some(code) => Err(FetchError::Connect(format!("proxy refused the tunnel ({code})"))),
-        None => Err(FetchError::Connect("proxy: bad reply".into())),
+        Some(code) if line.starts_with("HTTP/1.") => Err(ConnectFailure::last(if code == 407 {
+            FetchError::Connect("proxy: authentication required (407)".into())
+        } else {
+            FetchError::Connect(format!("proxy refused the tunnel ({code})"))
+        })),
+        _ => Err(ConnectFailure::next(FetchError::Connect("proxy: bad reply".into()))),
     }
 }
 
-/// SOCKS v5, no authentication, the proxy resolves the name (Chromium's SOCKS5 client does the same).
-async fn socks5(io: &mut BoxIo, host: &str, port: u16) -> Result<(), FetchError> {
-    let err = |e: std::io::Error| connect_err("socks5", e);
+/// SOCKS v5, no authentication, the proxy resolves the name (Chromium's SOCKS5 client does the same). A refusal code from the
+/// proxy is final; a broken exchange lets the next proxy entry try.
+async fn socks5(io: &mut BoxIo, host: &str, port: u16) -> Result<(), ConnectFailure> {
+    let err = |e: std::io::Error| ConnectFailure::next(connect_err("socks5", e));
     io.write_all(&[5, 1, 0]).await.map_err(err)?;
     let mut answer = [0u8; 2];
     io.read_exact(&mut answer).await.map_err(err)?;
     if answer != [5, 0] {
-        return Err(FetchError::Connect("socks5: no acceptable authentication method".into()));
+        return Err(ConnectFailure::next(FetchError::Connect("socks5: no acceptable authentication method".into())));
     }
     let mut request = vec![5, 1, 0];
     match host.parse::<IpAddr>() {
@@ -178,7 +209,8 @@ async fn socks5(io: &mut BoxIo, host: &str, port: u16) -> Result<(), FetchError>
         }
         Err(_) => {
             let name = host.as_bytes();
-            let len = u8::try_from(name.len()).map_err(|_| FetchError::Connect("socks5: host name too long".into()))?;
+            let len = u8::try_from(name.len())
+                .map_err(|_| ConnectFailure::last(FetchError::Connect("socks5: host name too long".into())))?;
             request.push(3);
             request.push(len);
             request.extend_from_slice(name);
@@ -188,8 +220,11 @@ async fn socks5(io: &mut BoxIo, host: &str, port: u16) -> Result<(), FetchError>
     io.write_all(&request).await.map_err(err)?;
     let mut head = [0u8; 4];
     io.read_exact(&mut head).await.map_err(err)?;
-    if head[0] != 5 || head[1] != 0 {
-        return Err(FetchError::Connect(format!("socks5: connect refused ({})", head[1])));
+    if head[0] != 5 {
+        return Err(ConnectFailure::next(FetchError::Connect("socks5: bad reply".into())));
+    }
+    if head[1] != 0 {
+        return Err(ConnectFailure::last(FetchError::Connect(format!("socks5: connect refused ({})", head[1]))));
     }
     let skip = match head[3] {
         1 => 4,
@@ -199,24 +234,27 @@ async fn socks5(io: &mut BoxIo, host: &str, port: u16) -> Result<(), FetchError>
             io.read_exact(&mut len).await.map_err(err)?;
             usize::from(len[0])
         }
-        _ => return Err(FetchError::Connect("socks5: bad reply".into())),
+        _ => return Err(ConnectFailure::next(FetchError::Connect("socks5: bad reply".into()))),
     };
     let mut rest = vec![0u8; skip + 2];
     io.read_exact(&mut rest).await.map_err(err)?;
     Ok(())
 }
 
-/// SOCKS v4: IPv4 only, the client resolves the name.
-async fn socks4(io: &mut BoxIo, proxy: &ProxyServer, host: &str, port: u16) -> Result<(), FetchError> {
-    let err = |e: std::io::Error| connect_err("socks4", e);
+/// SOCKS v4: IPv4 only, the client resolves the name. A host without an IPv4 address and a refusal code are final; a broken
+/// exchange lets the next proxy entry try.
+async fn socks4(io: &mut BoxIo, proxy: &ProxyServer, host: &str, port: u16) -> Result<(), ConnectFailure> {
+    let err = |e: std::io::Error| ConnectFailure::next(connect_err("socks4", e));
     let ip = tokio::net::lookup_host((host, port))
         .await
-        .map_err(err)?
+        .map_err(|e| ConnectFailure::last(connect_err("socks4", e)))?
         .find_map(|addr: SocketAddr| match addr.ip() {
             IpAddr::V4(ip) => Some(ip),
             IpAddr::V6(_) => None,
         })
-        .ok_or_else(|| FetchError::Connect(format!("socks4 ({}): no IPv4 address for the host", proxy.host)))?;
+        .ok_or_else(|| {
+            ConnectFailure::last(FetchError::Connect(format!("socks4 ({}): no IPv4 address for the host", proxy.host)))
+        })?;
     let mut request = vec![4, 1];
     request.extend_from_slice(&port.to_be_bytes());
     request.extend_from_slice(&ip.octets());
@@ -225,7 +263,7 @@ async fn socks4(io: &mut BoxIo, proxy: &ProxyServer, host: &str, port: u16) -> R
     let mut answer = [0u8; 8];
     io.read_exact(&mut answer).await.map_err(err)?;
     if answer[1] != 0x5a {
-        return Err(FetchError::Connect(format!("socks4: connect refused ({})", answer[1])));
+        return Err(ConnectFailure::last(FetchError::Connect(format!("socks4: connect refused ({})", answer[1]))));
     }
     Ok(())
 }
@@ -262,17 +300,22 @@ mod tests {
             stream.write_all(&[0, 0x5b, 0, 0, 0, 0, 0, 0]).await.unwrap();
         });
         let mut io: BoxIo = Box::new(TcpStream::connect(addr).await.unwrap());
-        assert!(socks4(&mut io, &proxy, "127.0.0.1", 80).await.unwrap_err().is_connect_failure());
+        let failure = socks4(&mut io, &proxy, "127.0.0.1", 80).await.unwrap_err();
+        assert!(failure.error.is_connect_failure());
+        // The proxy answered: the next proxy entry is not tried.
+        assert!(!failure.try_next);
     }
 
     #[tokio::test]
     async fn connect_replies_other_than_2xx_close_the_tunnel() {
-        for (reply, ok) in [
-            (&b"HTTP/1.1 200 Connection established\r\n\r\n"[..], true),
-            (&b"HTTP/1.0 200 OK\r\nProxy-Agent: x\r\n\r\n"[..], true),
-            (&b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n"[..], false),
-            (&b"HTTP/1.1 502 Bad Gateway\r\n\r\n"[..], false),
-            (&b"SSH-2.0-x\r\n\r\n"[..], false),
+        // (reply, tunnel open, next proxy entry may be tried)
+        for (reply, ok, try_next) in [
+            (&b"HTTP/1.1 200 Connection established\r\n\r\n"[..], true, false),
+            (&b"HTTP/1.0 200 OK\r\nProxy-Agent: x\r\n\r\n"[..], true, false),
+            (&b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n"[..], false, false),
+            (&b"HTTP/1.1 403 Forbidden\r\n\r\n"[..], false, false),
+            (&b"HTTP/1.1 502 Bad Gateway\r\n\r\n"[..], false, false),
+            (&b"SSH-2.0-x\r\n\r\n"[..], false, true),
         ] {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let addr = listener.local_addr().unwrap();
@@ -291,8 +334,9 @@ mod tests {
             let mut io: BoxIo = Box::new(TcpStream::connect(addr).await.unwrap());
             let result = tunnel(&mut io, "::1", 443, Some("unimux/1.2.0")).await;
             assert_eq!(result.is_ok(), ok, "{result:?}");
-            if let Err(error) = result {
-                assert!(error.is_connect_failure());
+            if let Err(failure) = result {
+                assert!(failure.error.is_connect_failure());
+                assert_eq!(failure.try_next, try_next, "{failure:?}");
             }
             assert_eq!(
                 server.await.unwrap(),

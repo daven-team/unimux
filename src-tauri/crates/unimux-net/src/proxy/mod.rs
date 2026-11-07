@@ -117,6 +117,21 @@ pub fn implicitly_bypassed(url: &Url) -> bool {
     }
 }
 
+/// The URL a PAC / WPAD script sees (Chromium's SanitizeUrl, which 1.1.4's net.fetch went through): no user name, password or
+/// fragment, and for https (wss) no path and no query either, so only `https://host[:port]/` goes in. A script then routes
+/// https requests by host alone, and a script from the LAN never sees request paths.
+pub fn pac_target(url: &Url) -> Url {
+    let mut target = url.clone();
+    let _ = target.set_username("");
+    let _ = target.set_password(None);
+    target.set_fragment(None);
+    if matches!(url.scheme(), "https" | "wss") {
+        target.set_path("/");
+        target.set_query(None);
+    }
+    target
+}
+
 fn ipv4_local(ip: Ipv4Addr) -> bool {
     ip.is_loopback() || ip.is_link_local() || ip.is_unspecified()
 }
@@ -462,6 +477,16 @@ mod tests {
     }
     fn http(host: &str, port: u16) -> ProxyChoice {
         ProxyChoice::Proxy(ProxyServer { scheme: ProxyScheme::Http, host: host.into(), port })
+    }
+
+    #[test]
+    fn pac_scripts_see_the_url_like_chromium() {
+        let t = |s: &str| pac_target(&url(s)).to_string();
+        assert_eq!(t("https://u:p@api.github.com:8443/repos/x/y?per_page=1#f"), "https://api.github.com:8443/");
+        assert_eq!(t("https://github.com/daven-team/unimux/releases/latest/download/latest.json"), "https://github.com/");
+        assert_eq!(t("wss://h.test/socket?x=1"), "wss://h.test/");
+        assert_eq!(t("http://u:p@h.test/v1/x?q=1#frag"), "http://h.test/v1/x?q=1");
+        assert_eq!(t("http://h.test:8080/"), "http://h.test:8080/");
     }
 
     #[test]

@@ -19,7 +19,8 @@ pub enum FetchError {
     /// The request's cancellation token fired.
     #[error("aborted")]
     Aborted,
-    /// A 3xx answer to a request that refuses redirects (`Redirect::Error`), like `redirect: 'error'`.
+    /// A 3xx answer to a request that refuses redirects (`Redirect::Error` like fetch's `redirect: 'error'`, or
+    /// `Redirect::ErrorAny3xx` like 1.1.4's token transport).
     #[error("redirect refused")]
     RedirectRefused { status: u16, location: Option<String> },
     #[error("too many redirects")]

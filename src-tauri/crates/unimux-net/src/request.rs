@@ -15,8 +15,13 @@ pub type UrlCheck = Arc<dyn Fn(&Url) -> bool + Send + Sync>;
 /// What a 3xx answer does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Redirect {
-    /// Fail with `FetchError::RedirectRefused` on any 3xx except 304 (`redirect: 'error'`; a bearer token never follows one).
+    /// fetch()'s `redirect: 'error'` (Electron net.fetch, 1.1.4's usage reads): fail with `FetchError::RedirectRefused` on a
+    /// 301, 302, 303, 307 or 308 that carries a Location header (Chromium's redirect set); any other 3xx (300, 304, 305, 306,
+    /// a redirect status without Location) comes back as an ordinary answer. A bearer token never follows a redirect.
     Error,
+    /// 1.1.4's Node token transport (tokenTransport.ts directFetch): fail with `FetchError::RedirectRefused` on every status
+    /// from 300 to 399, 304 and a missing Location included.
+    ErrorAny3xx,
     /// Hand the 3xx back as the response.
     Manual,
     /// Follow up to `max` hops (fetch's 20 by default); each hop is checked with the request's address check, if any.

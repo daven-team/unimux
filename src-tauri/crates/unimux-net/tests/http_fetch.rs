@@ -88,6 +88,44 @@ async fn redirects_are_refused_when_asked_to() {
     assert!(matches!(error, FetchError::RedirectRefused { status: 302, .. }), "{error:?}");
     assert!(error.to_string().contains("redirect"));
     assert_eq!(server.seen().len(), 1);
+
+    // The token renewal (tokenTransport.ts directFetch) refuses every status from 300 to 399: 304, 300 and a 302 without
+    // Location included.
+    for (status, location) in [(304, None), (300, None), (302, None), (305, Some("http://127.0.0.1:1/p")), (399, None)] {
+        let server = http_server(answer(move |_| match location {
+            Some(l) => reply(status, &[("location", l)], b""),
+            None => reply(status, &[], b""),
+        }))
+        .await;
+        let error = client().fetch(calls::token_renewal(&server.url("/x"), "r", "unimux").unwrap()).await.unwrap_err();
+        assert!(matches!(error, FetchError::RedirectRefused { status: s, .. } if s == status), "{status}: {error:?}");
+        assert_eq!(error.kind(), "network");
+    }
+
+    // The usage reads (net.fetch with `redirect: 'error'`) refuse only Chromium's redirects: 301 / 302 / 303 / 307 / 308 with a
+    // Location header. 300, 304, 305, 306 and a redirect status without Location come back as answers the fetchers map.
+    for status in [301, 302, 303, 307, 308] {
+        let server = http_server(answer(move |_| reply(status, &[("location", "http://127.0.0.1:1/steal")], b""))).await;
+        let error = client().fetch(calls::claude_usage(&server.url("/u"), "t", "unimux").unwrap()).await.unwrap_err();
+        assert!(matches!(error, FetchError::RedirectRefused { status: s, .. } if s == status), "{status}: {error:?}");
+    }
+    for (status, location) in [
+        (300, Some("http://127.0.0.1:1/steal")),
+        (304, None),
+        (305, Some("http://127.0.0.1:1/steal")),
+        (306, None),
+        (302, None),
+        (307, None),
+    ] {
+        let server = http_server(answer(move |_| match location {
+            Some(l) => reply(status, &[("location", l)], b""),
+            None => reply(status, &[], b""),
+        }))
+        .await;
+        let response = client().fetch(calls::codex_usage(&server.url("/u"), "t", None).unwrap()).await.unwrap();
+        assert_eq!(response.status, status);
+        assert!(!response.redirected);
+    }
 }
 
 #[tokio::test]
@@ -480,6 +518,65 @@ async fn an_unreachable_proxy_falls_through_to_the_next_entry() {
     assert!(only_dead.fetch(Request::get("http://x.unimux-b3.test/").unwrap()).await.unwrap_err().is_connect_failure());
 }
 
+/// A proxy that answers CONNECT with `status` and records how often it was asked.
+async fn refusing_proxy(status: &'static str) -> (std::net::SocketAddr, Arc<parking_lot::Mutex<u32>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hits = Arc::new(parking_lot::Mutex::new(0u32));
+    let h = hits.clone();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            *h.lock() += 1;
+            tokio::spawn(async move {
+                let mut head = Vec::new();
+                let mut byte = [0u8; 1];
+                while !head.ends_with(b"\r\n\r\n") {
+                    if stream.read(&mut byte).await.unwrap_or(0) == 0 {
+                        return;
+                    }
+                    head.push(byte[0]);
+                }
+                let _ = stream.write_all(format!("HTTP/1.1 {status}\r\ncontent-length: 0\r\n\r\n").as_bytes()).await;
+            });
+        }
+    });
+    (addr, hits)
+}
+
+/// Chromium falls over to the next PAC entry only while the proxy cannot be used. A proxy that refuses the tunnel (403) or
+/// asks for credentials (407) has decided: neither the next proxy nor DIRECT is tried, so its policy is not bypassed. The
+/// token renewal's direct-then-system rule still sees a connect failure (nothing was sent).
+#[tokio::test]
+async fn a_proxy_that_answers_with_a_refusal_is_not_bypassed() {
+    for status in ["403 Forbidden", "407 Proxy Authentication Required", "502 Bad Gateway"] {
+        let (refusing, hits) = refusing_proxy(status).await;
+        let (second, second_hits) = refusing_proxy("200 Connection established").await;
+        let list = vec![http_proxy_at(refusing), http_proxy_at(second), ProxyChoice::Direct];
+        let error = via(list).fetch(Request::get("https://blocked.unimux-b3.test/").unwrap()).await.unwrap_err();
+        assert!(error.is_connect_failure(), "{status}: {error:?}");
+        assert_eq!(*hits.lock(), 1, "{status}");
+        assert_eq!(*second_hits.lock(), 0, "{status}: the next proxy entry was tried");
+    }
+}
+
+/// A certificate the client does not trust, met through a proxy tunnel, is final: the next proxy entry is not tried.
+#[tokio::test]
+async fn an_origin_certificate_error_through_a_proxy_is_final() {
+    let ca = test_ca(&["tls.unimux-b3.test"]);
+    let server = https_server(&ca, ok_json()).await;
+    let first = http_proxy(Some(server.addr), ok_json()).await;
+    let second = http_proxy(Some(server.addr), ok_json()).await;
+    // No extra root: the test CA is not trusted.
+    let c = via(vec![http_proxy_at(first.addr), http_proxy_at(second.addr)]);
+    let error = c.fetch(Request::get("https://tls.unimux-b3.test/").unwrap()).await.unwrap_err();
+    assert!(error.is_connect_failure(), "{error:?}");
+    assert!(error.to_string().contains("tls"), "{error}");
+    assert_eq!(first.seen().len(), 1);
+    assert!(second.seen().is_empty(), "the second proxy was tried after a certificate error");
+    assert!(server.seen().is_empty());
+}
+
 #[tokio::test]
 async fn https_through_a_connect_tunnel_with_the_system_verifier_and_an_extra_root() {
     let ca = test_ca(&["tls.unimux-b3.test", "localhost"]);
@@ -569,6 +666,8 @@ async fn a_pac_script_sends_the_request_through_the_proxy() {
     let proxy = http_proxy(None, answer(|_| json(200, r#"{"via":"pac-proxy"}"#))).await;
     let script = format!(
         "function FindProxyForURL(url, host) {{\n\
+           if (shExpMatch(url, '*secret*') || url.indexOf('#') >= 0 || url.indexOf('@') >= 0) return 'PROXY leak.test:9';\n\
+           if (host == 'path.unimux-b3.test') return 'PROXY seen.test:7 ; SOCKS ' + url.length + '.test:1';\n\
            if (shExpMatch(host, '*.pac.unimux-b3.test')) return 'PROXY 127.0.0.1:{}; DIRECT';\n\
            if (host == 'kinds.unimux-b3.test') return 'PROXY a.test:1; HTTPS b.test:2; SOCKS c.test:3; SOCKS5 d.test:4; DIRECT';\n\
            return 'DIRECT';\n\
@@ -585,6 +684,10 @@ async fn a_pac_script_sends_the_request_through_the_proxy() {
                 r.resolve(&u("http://api.pac.unimux-b3.test/v1/x")),
                 r.resolve(&u("https://direct.unimux-b3.test/")),
                 r.resolve(&u("https://kinds.unimux-b3.test/")),
+                // https: the script gets `https://path.unimux-b3.test/` (path, query, credentials and fragment removed).
+                r.resolve(&u("https://user:pw@path.unimux-b3.test/repos/secret/x?q=secret#secret")),
+                // http keeps path and query (Chromium strips them for https only), credentials and fragment go.
+                r.resolve(&u("http://u:p@path.unimux-b3.test/abc?d=1#e")),
             )
         }
     })
@@ -605,6 +708,11 @@ async fn a_pac_script_sends_the_request_through_the_proxy() {
             ProxyChoice::Direct,
         ]
     );
+
+    let pac_len =
+        |s: &str| ProxyChoice::Proxy(ProxyServer { scheme: ProxyScheme::Socks4, host: format!("{}.test", s.len()), port: 1 });
+    assert_eq!(list.3, vec![server(ProxyScheme::Http, "seen.test", 7), pac_len("https://path.unimux-b3.test/")]);
+    assert_eq!(list.4, vec![server(ProxyScheme::Http, "seen.test", 7), pac_len("http://path.unimux-b3.test/abc?d=1")]);
 
     let c = HttpClient::builder().proxy_resolver(Arc::new(resolver)).build().unwrap();
     let response = c.fetch(calls::changelog("http://api.pac.unimux-b3.test/v1/x").unwrap()).await.unwrap();

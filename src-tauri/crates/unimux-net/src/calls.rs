@@ -46,7 +46,7 @@ pub fn product_user_agent(version: &str) -> String {
 }
 
 /// Claude token renewal (refresh.ts + tokenTransport.ts directFetch / createTokenFetch): one JSON POST with exactly
-/// `Content-Type` and `User-Agent` (plus Host, Content-Length, `Connection: close`), HTTP/1.1, no redirects, 10 s, 1 MB cap,
+/// `Content-Type` and `User-Agent` (plus Host, Content-Length, `Connection: close`), HTTP/1.1, every 3xx refused, 10 s, 1 MB cap,
 /// direct first and the system proxy only when no connection could be made.
 pub fn token_renewal(url: &str, refresh_token: &str, user_agent: &str) -> Result<Request, FetchError> {
     let mut body = serde_json::Map::new();
@@ -59,7 +59,7 @@ pub fn token_renewal(url: &str, refresh_token: &str, user_agent: &str) -> Result
         .header("user-agent", user_agent)
         .body(body)
         .timeout(TOKEN_TIMEOUT)
-        .redirect(Redirect::Error)
+        .redirect(Redirect::ErrorAny3xx)
         .max_body(TOKEN_MAX_BODY)
         .connection_close()
         .http1_only()
@@ -198,7 +198,7 @@ mod tests {
             std::str::from_utf8(req.body.as_ref().unwrap()).unwrap(),
             "{\"grant_type\":\"refresh_token\",\"refresh_token\":\"r\\\"t\u{2028}\",\"client_id\":\"9d1c250a-e61b-44d9-88ed-5944d1962f5e\"}"
         );
-        assert_eq!(req.redirect, Redirect::Error);
+        assert_eq!(req.redirect, Redirect::ErrorAny3xx);
         assert_eq!(req.route, Route::DirectThenSystem);
         assert_eq!(req.max_body, Some(1_000_000));
         assert_eq!(req.timeout, Some(Duration::from_secs(10)));
