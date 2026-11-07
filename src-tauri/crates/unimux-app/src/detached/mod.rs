@@ -385,7 +385,7 @@ impl DetachedService {
     /// The detached window id of a caller's label (None: the main window or anything that is not an open detached window).
     pub fn window_of(&self, label: &str) -> Option<String> {
         let id = unimux_ipc::route::detached_id(label)?;
-        self.inner.lock().windows.contains_key(id).then(|| id.to_string())
+        self.inner.lock().windows.contains_key(&id).then_some(id)
     }
 
     /// `senderWindow(event)`: a detached window's id, else `main` (the DB and SFTP layers key per-window state by it).

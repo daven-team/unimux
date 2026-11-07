@@ -77,7 +77,7 @@ struct Sink {
 impl EventSink for Sink {
     fn app_windows(&self) -> Vec<String> {
         let mut out = vec!["main".to_string()];
-        out.extend(self.host.open.lock().iter().map(|id| format!("detached-{id}")));
+        out.extend(self.host.open.lock().iter().map(|id| unimux_ipc::route::detached_label(id)));
         out
     }
     fn emit_to(&self, label: &str, event: &str, payload: &Value) {
@@ -485,4 +485,28 @@ fn a_restart_reopens_every_window_at_its_saved_place() {
         false,
     );
     wait_for("the title", || r.host.calls().contains(&"title w1 Renamed - P - unimux".to_string()));
+}
+
+/// A registry id outside Tauri's label alphabet (a hand-edited or older state.json, which 1.1.4 opened): the window opens
+/// under its encoded label, the service knows that label, and both the window and the main window can bring the tab back.
+#[test]
+fn an_id_outside_the_label_alphabet_still_opens_and_comes_back() {
+    let mut s = base_state();
+    s["detachedWindows"] = json!([
+        { "id": "a.b", "target": grid("ta"), "bounds": { "x": 2100, "y": 100, "width": 1200, "height": 800 } },
+        { "id": "c d", "target": grid("tb"), "bounds": { "x": 2200, "y": 150, "width": 1200, "height": 800 } }
+    ]);
+    let r = rig_with(s, false);
+    wait_for("both windows", || r.host.open.lock().len() == 2);
+    let label = unimux_ipc::route::detached_label("a.b");
+    assert_eq!(label, "detached-:612e62");
+    assert_eq!(r.svc.window_of(&label).as_deref(), Some("a.b"));
+    assert_eq!(r.svc.cell_window("c1"), label);
+    // The window gives its tab back.
+    assert!(r.svc.cmd_attach(&label, None, &Value::Null));
+    assert_eq!(registry(&r).len(), 1);
+    // The main window asks for the other one: the window is asked to close.
+    let other = unimux_ipc::route::detached_label("c d");
+    r.svc.cmd_request_attach("main", &json!("c d"));
+    wait_for("the request", || events_of(&r).iter().any(|e| e.starts_with(&format!("{other} detach:closing"))));
 }

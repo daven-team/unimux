@@ -40,8 +40,12 @@ let input = addProject(defaultState('win32'), { name: 'P', path: projectDir });
 const projectId = input.projects[0].id;
 input = addTab(input, projectId, { name: 'Grid 1', layout: layoutForCount(2), cells: [{ profileId: 'shell' }, { profileId: 'shell' }] });
 input = addTab(input, projectId, { name: 'Grid 5', layout: layoutForCount(1), cells: [{ profileId: 'shell' }] });
+// "Grid 7" gets a registry entry with an id outside Tauri's label alphabet before the restart (a hand-edited or older
+// state.json, which 1.1.4 opened): it must open, know its id and come back.
+input = addTab(input, projectId, { name: 'Grid 7', layout: layoutForCount(1), cells: [{ profileId: 'shell' }] });
 input.activeProjectId = projectId;
-const [gridA, gridB] = input.projects[0].tabs;
+const [gridA, gridB, gridC] = input.projects[0].tabs;
+const ODD_ID = 'old.tab 1';
 const [mainCell1, mainCell2] = gridA.cells.map((c) => c.id);
 const detachedCell = gridB.cells[0].id;
 writeFileSync(join(dataDir, 'state.json'), JSON.stringify(input));
@@ -69,7 +73,8 @@ async function detachedPage(port, id, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json().catch(() => []);
-    const t = list.find((x) => x.type === 'page' && x.url.includes(`detached=${id}`));
+    const idOf = (url) => { try { return new URL(url).searchParams.get('detached'); } catch { return null; } };
+    const t = list.find((x) => x.type === 'page' && idOf(x.url) === id);
     if (t) {
       const page = await connectPage(port, { match: t.id, timeoutMs: 10000 });
       await waitFor(page, 'window.__mc?.useStore?.getState?.().ready === true', 30000, `detached ${id} ready`);
@@ -122,7 +127,17 @@ try {
   const fileWin = reg2.find((w) => w.target.kind === 'file');
   check('a file tab detaches into its own window and leaves the main window', fileOk === true && fileWin?.target.fileId === fileId && (await fileText(page)) === null, JSON.stringify(fileWin?.target));
 
-  const gridPage = await detachedPage(first.port, gridWin.id);
+  let gridPage = await detachedPage(first.port, gridWin.id);
+  // window:shown comes on every page load (1.1.4 sendShown on every did-finish-load): the hidden window is not shown, and
+  // a page reloaded while its window is not shown hears it again (the renderer starts with shown = true).
+  const shownFlag = `document.documentElement.dataset.windowShown === 'false'`;
+  const firstShown = await waitFor(gridPage, shownFlag, 10000, 'window:shown on the first load').then(() => true, () => false);
+  await gridPage.evaluate('setTimeout(() => location.reload(), 50), true');
+  gridPage.close?.();
+  await sleep(1500);
+  gridPage = await detachedPage(first.port, gridWin.id);
+  const reloadShown = await waitFor(gridPage, shownFlag, 10000, 'window:shown after a reload').then(() => true, () => false);
+  check('a detached page hears window:shown (false while hidden) on its first load and again after a reload', firstShown && reloadShown, `first ${firstShown}, after the reload ${reloadShown}`);
   const filePage = await detachedPage(first.port, fileWin.id);
   await waitFor(filePage, `(window.__mc.useFileStore.getState().documents.find((d) => d.id === ${JSON.stringify(fileId)}) ?? {}).text?.includes(${JSON.stringify(MARKER)})`, 15000, 'unsaved text in the file window');
   const svc1 = await service(page);
@@ -178,10 +193,24 @@ try {
   await quit(first);
   const saved = JSON.parse(readText(join(dataDir, 'state.json')));
   check('quitting keeps both windows in the registry', (saved.detachedWindows ?? []).length === 2, JSON.stringify(saved.detachedWindows?.map((w) => w.id)));
+  const [pwx, pwy] = screen.displays.find((d) => d.id === screen.primaryId).workArea;
+  saved.detachedWindows.push({ id: ODD_ID, target: { kind: 'grid', projectId, tabId: gridC.id }, bounds: { x: pwx + 150, y: pwy + 120, width: 800, height: 600 } });
+  writeFileSync(join(dataDir, 'state.json'), JSON.stringify(saved));
 
   // ── restart: same place, the unsaved text is still there ─────────────────────
   const second = await start();
-  await waitFor(second.page, `window.__TAURI_INTERNALS__.invoke('test_bridge', { op: 'detached', args: null }).then((d) => d.service.windows.length === 2)`, 20000, 'windows after the restart');
+  await waitFor(second.page, `window.__TAURI_INTERNALS__.invoke('test_bridge', { op: 'detached', args: null }).then((d) => d.service.windows.length === 3)`, 20000, 'windows after the restart');
+  const oddLabel = `detached-:${Buffer.from(ODD_ID, 'utf8').toString('hex')}`;
+  const oddPage = await detachedPage(second.port, ODD_ID);
+  const oddOwners = Object.fromEntries((await service(second.page)).owners);
+  check(`a registry id outside the label alphabet (${JSON.stringify(ODD_ID)}) opens as ${oddLabel} with the escaped query`,
+    (await bridge(second.page, 'detached')).appWindows.includes(oddLabel) && (await oddPage.evaluate('location.search')) === '?detached=old.tab%201'
+      && oddOwners[gridC.cells[0].id] === ODD_ID,
+    `${await oddPage.evaluate('location.href')} ${JSON.stringify(oddOwners)}`);
+  oddPage.close?.();
+  await bridge(second.page, 'detachedWindow', { id: ODD_ID, action: 'close' });
+  await waitFor(second.page, `window.__TAURI_INTERNALS__.invoke('test_bridge', { op: 'detached', args: null }).then((d) => d.service.windows.length === 2)`, 15000, 'the odd-id window closed');
+  check('closing it puts its grid back', !(await registry(second.page)).some((w) => w.id === ODD_ID));
   const gridAgain = await bridge(second.page, 'detachedWindow', { id: gridWin.id, action: 'state' });
   const fileAgain = await bridge(second.page, 'detachedWindow', { id: fileWin.id, action: 'state' });
   check('after a restart the grid window opens at the same physical place', near(gridAgain.physical, before.physical), `${before.physical} -> ${gridAgain.physical}`);

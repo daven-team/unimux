@@ -11,6 +11,14 @@
 //!
 //! Display ids: Electron's id was a hash of the monitor's device path; 1.2.0 uses a hash of the monitor name and its
 //! physical position (FNV-1a, 32 bit). Only `bounds` decide where a window reopens (restoreBounds); the id is kept as data.
+//!
+//! That layout is the Windows model: there tao reports monitors, the cursor and window rects in one physical space. macOS
+//! has no such space: tao scales each value by a different factor (a monitor's position and size by its own scale, the
+//! cursor by the primary monitor's, a window's outer position and size by the window's current scale, and
+//! `set_outer_position` divides by the window's scale again). Electron's DIPs on macOS are Cocoa points (top-left origin
+//! at the primary display), so the macOS host turns every tao value back into points ([`unscale_rect`],
+//! [`unscale_point`]), builds the screen with [`Screen::from_points`] and places windows in logical units: there the
+//! "physical" side of every conversion below is points and the conversions are the identity.
 
 /// A rectangle (physical pixels or DIPs, as the field it sits in says).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -82,6 +90,33 @@ pub struct Display {
 pub struct Screen {
     pub displays: Vec<Display>,
     pub primary: usize,
+    /// macOS: the host's space is already points (= DIPs), see the module docs.
+    points: bool,
+}
+
+impl Monitor {
+    /// macOS: a monitor from tao's values (position, size and work area all scaled by the monitor's own factor) in points.
+    pub fn from_scaled(name: String, bounds: Rect, work_area: Rect, scale: f64, primary: bool) -> Self {
+        Self {
+            name,
+            bounds: unscale_rect(&bounds, scale).rounded(),
+            work_area: unscale_rect(&work_area, scale).rounded(),
+            scale,
+            primary,
+        }
+    }
+}
+
+/// A tao value scaled by `scale` back in logical units (macOS: points).
+pub fn unscale_rect(r: &Rect, scale: f64) -> Rect {
+    let s = if scale > 0.0 && scale.is_finite() { scale } else { 1.0 };
+    Rect::new(r.x / s, r.y / s, r.width / s, r.height / s)
+}
+
+/// A tao point scaled by `scale` back in logical units (macOS cursor: the primary monitor's scale).
+pub fn unscale_point(x: f64, y: f64, scale: f64) -> (f64, f64) {
+    let s = if scale > 0.0 && scale.is_finite() { scale } else { 1.0 };
+    (x / s, y / s)
 }
 
 /// A stable display id: FNV-1a (32 bit) of `<name>@<x>,<y>` (physical position).
@@ -180,7 +215,26 @@ impl Screen {
                 }
             })
             .collect();
-        Self { displays, primary }
+        Self { displays, primary, points: false }
+    }
+
+    /// macOS: monitors whose bounds and work areas are already points (each tao value divided by the monitor's own
+    /// scale). Points are Electron's DIPs there, so a display's DIP bounds are its point bounds and every conversion is
+    /// the identity; `scale` stays the backing scale (Electron `display.scaleFactor`).
+    pub fn from_points(monitors: &[Monitor]) -> Self {
+        let primary = monitors.iter().position(|m| m.primary).unwrap_or(0);
+        let displays = monitors
+            .iter()
+            .map(|m| Display {
+                id: display_id(&m.name, m.bounds.x, m.bounds.y),
+                scale: if m.scale > 0.0 && m.scale.is_finite() { m.scale } else { 1.0 },
+                physical: m.bounds,
+                physical_work: m.work_area,
+                bounds: m.bounds.rounded(),
+                work_area: m.work_area.rounded(),
+            })
+            .collect();
+        Self { displays, primary: if monitors.is_empty() { 0 } else { primary }, points: true }
     }
 
     pub fn primary_id(&self) -> f64 {
@@ -234,6 +288,9 @@ impl Screen {
 
     /// A physical point in DIPs (`screen.getCursorScreenPoint()`).
     pub fn point_to_dip(&self, x: f64, y: f64) -> (f64, f64) {
+        if self.points {
+            return (x, y);
+        }
         match self.display_of_physical_point(x, y) {
             Some(d) => (d.bounds.x + (x - d.physical.x) / d.scale, d.bounds.y + (y - d.physical.y) / d.scale),
             None => (x, y),
@@ -242,6 +299,9 @@ impl Screen {
 
     /// A physical window rectangle in DIPs (`win.getBounds()`).
     pub fn rect_to_dip(&self, r: &Rect) -> Rect {
+        if self.points {
+            return *r;
+        }
         match self.display_of_physical_rect(r) {
             Some(d) => Rect::new(
                 d.bounds.x + (r.x - d.physical.x) / d.scale,
@@ -255,6 +315,9 @@ impl Screen {
 
     /// A DIP rectangle in physical pixels (`new BrowserWindow(bounds)`), rounded.
     pub fn rect_to_physical(&self, r: &Rect) -> Rect {
+        if self.points {
+            return r.rounded();
+        }
         match self.display_matching(r) {
             Some(d) => Rect::new(
                 d.physical.x + (r.x - d.bounds.x) * d.scale,
@@ -340,6 +403,55 @@ mod tests {
             let physical = s.rect_to_physical(&inside);
             assert_eq!(s.rect_to_dip(&physical).rounded(), inside, "display {}", d.id);
         }
+    }
+
+    /// macOS with mixed scales (a Retina MacBook 1440x900 pt at 2x, an external 1920x1080 pt at 1x on its right), fed with
+    /// what tao 0.37 reports there: monitor values scaled by their own factor, the cursor by the primary's, a window by its
+    /// current scale. The Windows ScreenWin layout gets these wrong (half-size windows on the wrong display); in points
+    /// they are Electron's DIPs.
+    #[test]
+    fn macos_mixed_scales_work_in_points() {
+        let retina = Monitor::from_scaled(
+            "Built-in".into(),
+            Rect::new(0.0, 0.0, 2880.0, 1800.0),
+            Rect::new(0.0, 50.0, 2880.0, 1750.0),
+            2.0,
+            true,
+        );
+        let external = Monitor::from_scaled(
+            "External".into(),
+            Rect::new(1440.0, 0.0, 1920.0, 1080.0),
+            Rect::new(1440.0, 25.0, 1920.0, 1055.0),
+            1.0,
+            false,
+        );
+        assert_eq!(retina.bounds, Rect::new(0.0, 0.0, 1440.0, 900.0));
+        assert_eq!(retina.work_area, Rect::new(0.0, 25.0, 1440.0, 875.0));
+        let s = Screen::from_points(&[retina.clone(), external.clone()]);
+        assert_eq!(s.displays[0].bounds, Rect::new(0.0, 0.0, 1440.0, 900.0));
+        assert_eq!(s.displays[0].scale, 2.0);
+        assert_eq!(s.displays[1].bounds, Rect::new(1440.0, 0.0, 1920.0, 1080.0));
+        assert_eq!(s.displays[1].work_area, Rect::new(1440.0, 25.0, 1920.0, 1055.0));
+        assert_eq!(s.primary_id(), s.displays[0].id);
+        // The cursor at (2000, 500) pt: tao reports it times the primary's scale.
+        let (cx, cy) = unscale_point(4000.0, 1000.0, 2.0);
+        assert_eq!(s.point_to_dip(cx, cy), (2000.0, 500.0));
+        // A window on the external display (scale 1) and one on the Retina display (scale 2).
+        let on_external = unscale_rect(&Rect::new(1600.0, 100.0, 800.0, 600.0), 1.0);
+        assert_eq!(s.rect_to_dip(&on_external), Rect::new(1600.0, 100.0, 800.0, 600.0));
+        assert_eq!(s.display_matching(&on_external).unwrap().id, s.displays[1].id);
+        let on_retina = unscale_rect(&Rect::new(200.0, 100.0, 1600.0, 1200.0), 2.0);
+        assert_eq!(s.rect_to_dip(&on_retina), Rect::new(100.0, 50.0, 800.0, 600.0));
+        assert_eq!(s.display_matching(&on_retina).unwrap().id, s.displays[0].id);
+        // Placement is in points too (the host sets it as LogicalPosition / LogicalSize).
+        assert_eq!(s.rect_to_physical(&Rect::new(1600.0, 100.0, 800.0, 600.0)), Rect::new(1600.0, 100.0, 800.0, 600.0));
+        // The ScreenWin layout of the same raw values is what went wrong.
+        let raw = Screen::new(&[
+            Monitor { bounds: Rect::new(0.0, 0.0, 2880.0, 1800.0), ..retina },
+            Monitor { bounds: Rect::new(1440.0, 0.0, 1920.0, 1080.0), ..external },
+        ]);
+        assert_ne!(raw.rect_to_dip(&Rect::new(1600.0, 100.0, 800.0, 600.0)), Rect::new(1600.0, 100.0, 800.0, 600.0));
+        assert!(Screen::from_points(&[]).displays.is_empty());
     }
 
     #[test]
