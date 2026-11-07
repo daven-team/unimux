@@ -645,9 +645,16 @@ impl UpdateWindow {
                 if !pending || elapsed > SUPERVISE_MAX_MS {
                     self.supervising.store(false, Ordering::SeqCst);
                     self.log.info(&format!("supervision ended after {elapsed:.0} ms"));
-                    // The previous bundle stays as the backup; the new app's markReady removes it once it comes up.
+                    // The previous bundle stays as the backup; the new app's markReady removes it once it comes up. Only a real
+                    // timeout says the new app did not report ready; a card closed (or Open clicked) before the old app exited
+                    // ends the window in the tick that starts the new app, which is a hand-off, not a failure.
                     if let Some(plan) = config.swap.as_ref().filter(|_| launched && failure.is_none() && !ready) {
-                        bundle_swap::ready_timed_out(plan, (elapsed / 1000.0) as u64, &|line| self.swap_note(plan, line));
+                        let note = |line: &str| self.swap_note(plan, line);
+                        if elapsed > SUPERVISE_MAX_MS {
+                            bundle_swap::ready_timed_out(plan, (elapsed / 1000.0) as u64, &note);
+                        } else {
+                            bundle_swap::handed_off(plan, &note);
+                        }
                     }
                     // Nobody can see or close a hidden or never shown window.
                     if self.lingering.load(Ordering::SeqCst) || !self.shown.load(Ordering::SeqCst) {
@@ -744,7 +751,7 @@ impl UpdateWindow {
         self.drop_heartbeat();
         if let Some(plan) = &self.config.swap {
             // macOS: `open` the bundle (whichever version is in place; a running app is only brought forward).
-            if let Err(e) = RealSwapOps.open(&plan.bundle) {
+            if let Err(e) = RealSwapOps.open(&plan.bundle, &plan.executable) {
                 self.log.error(&format!("could not open {}: {e}", plan.bundle.display()));
             }
         } else if let Some(pid) = self.launch_app() {

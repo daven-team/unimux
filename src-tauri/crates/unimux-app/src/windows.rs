@@ -194,21 +194,14 @@ pub fn show_main(ctx: &AppContext) {
     // signalUpdateReady (1.1.4 did it on ready-to-show): completes the update window's last step. U3 adds the heartbeat wait
     // and clearGateFailureIfUpdated.
     let data_dir = ctx.data_dir.clone();
+    #[cfg(target_os = "macos")]
+    let updates_active = crate::startup::updates_active(&ctx.overrides);
     std::thread::spawn(move || {
-        // macOS (U5): how the previous update ended (finishPrevious), then markReady: `updates/mac/ready` for the update
-        // window or a waiting 1.1.4 swap script, marker and backup cleanup. U1 turns a failure into the gate's failure
-        // cooldown and the status bar text (`mac::messages::ROLLED_BACK`).
+        // macOS (U5): markReady (1.1.4's signalMacUpdateReady on ready-to-show): `updates/mac/ready` for the update window or
+        // a waiting 1.1.4 swap script, marker and backup cleanup. Only when updates are active, like 1.1.4. How the previous
+        // update ended was settled at start, before the gate (startup::previous_mac_update).
         #[cfg(target_os = "macos")]
-        {
-            let outcome = unimux_update::mac::previous_update(
-                &data_dir,
-                unimux_core::VERSION,
-                unimux_core::PACKAGED,
-                crate::startup::log_info,
-            );
-            if outcome != unimux_update::mac::MacPreviousOutcome::None {
-                crate::startup::log_info(&format!("previous macOS update: {outcome:?}"));
-            }
+        if updates_active {
             unimux_update::mac::signal_ready(&data_dir, unimux_core::VERSION, unimux_core::PACKAGED);
         }
         unimux_update::window::signal_update_ready(&data_dir, unimux_core::VERSION)

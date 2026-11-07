@@ -466,8 +466,10 @@ impl MacUpdater {
         stop()?;
         let me = self.clone();
         let version = offer.version.clone();
-        let staged =
-            tokio::task::spawn_blocking(move || me.stage_archive(&version, &archive)).await.map_err(|e| e.to_string())??;
+        let token = cancel.clone();
+        let staged = tokio::task::spawn_blocking(move || me.stage_archive_until(&version, &archive, &|| token.is_cancelled()))
+            .await
+            .map_err(|e| e.to_string())??;
         if cancel.is_cancelled() {
             let _ = remove_all(Path::new(&staged.bundle));
             return Err(DOWNLOAD_CANCELLED.into());
@@ -590,6 +592,18 @@ impl MacUpdater {
     /// Unpacks a verified archive, checks the bundle and stages a copy next to the installed app (the part of `download` after
     /// the transfer). Blocking.
     pub fn stage_archive(&self, version: &str, archive: &Path) -> Result<MacStaged, String> {
+        self.stage_archive_until(version, archive, &|| false)
+    }
+
+    /// [`Self::stage_archive`] that ends with [`DOWNLOAD_CANCELLED`] once `cancelled` holds, checked where 1.1.4's `stop()`
+    /// was: after the unpack and before the install target check / the copy next to the installed app.
+    pub fn stage_archive_until(
+        &self,
+        version: &str,
+        archive: &Path,
+        cancelled: &(dyn Fn() -> bool + Sync),
+    ) -> Result<MacStaged, String> {
+        let stop = || if cancelled() { Err(DOWNLOAD_CANCELLED.to_string()) } else { Ok(()) };
         let extract_dir = self.dir().join(format!("extracted-{version}"));
         let _ = remove_all(&extract_dir);
         fs::create_dir_all(&extract_dir).map_err(|e| e.to_string())?;
@@ -606,6 +620,7 @@ impl MacUpdater {
                 return Err(messages::EXTRACT.into());
             }
         }
+        stop()?;
         let apps: Vec<String> = fs::read_dir(&extract_dir)
             .map(|e| e.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".app")).collect())
             .unwrap_or_default();
@@ -619,6 +634,7 @@ impl MacUpdater {
         // A quick look first, so nothing unverified is copied next to the installed app.
         self.verify_bundle(&unpacked, version, false)?;
 
+        stop()?;
         // The verified bundle waits next to the installed app (same directory and volume), so the swap is two renames.
         let bundle = match self.target() {
             TargetResult::Ok { bundle } => bundle,

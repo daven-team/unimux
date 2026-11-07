@@ -148,6 +148,7 @@ struct Env {
     current: String,
     trusted: Vec<String>,
     stall: Duration,
+    total: Duration,
 }
 
 impl Env {
@@ -164,6 +165,7 @@ impl Env {
             current: "1.2.0".into(),
             trusted: vec![],
             stall: MAC_DOWNLOAD_STALL,
+            total: MAC_DOWNLOAD_TOTAL,
         }
     }
     fn bundle(&self) -> PathBuf {
@@ -190,7 +192,7 @@ impl Env {
             trusted_origins: self.trusted.clone(),
             public_key: self.keys.public_b64(),
             stall: self.stall,
-            total: MAC_DOWNLOAD_TOTAL,
+            total: self.total,
         })
     }
     fn mac_dir(&self) -> PathBuf {
@@ -233,6 +235,12 @@ enum Answer {
     Stall {
         prefix: Vec<u8>,
         len: usize,
+    },
+    /// Headers announcing `len` bytes, then `piece` bytes every `every` (never silent for long, never done).
+    Trickle {
+        len: usize,
+        piece: usize,
+        every: Duration,
     },
     /// Headers announcing more than is sent, then the connection closes.
     Truncated {
@@ -282,6 +290,17 @@ async fn serve(answer: Answer) -> Server {
                         let _ = socket.write_all(&head(200, len)).await;
                         let _ = socket.write_all(&prefix).await;
                         tokio::time::sleep(Duration::from_secs(30)).await;
+                    }
+                    Answer::Trickle { len, piece, every } => {
+                        let _ = socket.write_all(&head(200, len)).await;
+                        let mut sent = 0;
+                        while sent + piece < len {
+                            if socket.write_all(&vec![0u8; piece]).await.is_err() {
+                                return;
+                            }
+                            sent += piece;
+                            tokio::time::sleep(every).await;
+                        }
                     }
                     Answer::Truncated { body, len } => {
                         let _ = socket.write_all(&head(200, len)).await;
@@ -493,6 +512,56 @@ async fn server_errors_truncation_stalls_and_cancels() {
     let ok = serve(Answer::Body(archive.clone())).await;
     assert_eq!(download(&env, &offer_for(&env, &ok, &archive)).await.0.unwrap_err(), messages::SERVER);
     assert_eq!(ok.hits.load(AtomicOrdering::SeqCst), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_total_download_time_is_capped_even_when_bytes_keep_coming() {
+    let mut env = Env::new();
+    let archive = tar_gz_of(&[("unimux.app", "1.2.1", "com.ajzakomator.app")]);
+    // A chunk every 100 ms keeps the stall limit (2 s) from ever firing; the total (500 ms) ends it.
+    let slow = serve(Answer::Trickle { len: 10 * 1024 * 1024, piece: 512, every: Duration::from_millis(100) }).await;
+    env.trusted = vec![slow.origin.clone()];
+    env.stall = Duration::from_secs(2);
+    env.total = Duration::from_millis(500);
+    let started = Instant::now();
+    assert_eq!(download(&env, &offer_for(&env, &slow, &archive)).await.0.unwrap_err(), messages::STALLED);
+    let took = started.elapsed();
+    assert!(took >= Duration::from_millis(450) && took < Duration::from_millis(1900), "{took:?}");
+    assert!(env.log().contains("the download stalled or took too long"));
+    // No partial file is left.
+    assert_eq!(env.names(&env.mac_dir()), ["update.log"]);
+}
+
+#[test]
+fn a_cancel_during_staging_stops_after_the_unpack_and_before_the_copy() {
+    let env = Env::new();
+    let archive = tar_gz_of(&[("unimux.app", "1.2.1", "com.ajzakomator.app")]);
+    fs::create_dir_all(env.mac_dir()).unwrap();
+    let path = PathBuf::from(posix(&env.mac_dir().join("unimux-1.2.1-mac-arm64.app.tar.gz")));
+    fs::write(&path, archive).unwrap();
+    // An older staged copy next to the app: a cancelled staging must not touch it.
+    make_app(&env.bundle().with_file_name("unimux.app.new-1.2.0"), "1.2.0", "com.ajzakomator.app", "staged");
+    let copies = |env: &Env| env.tools.calls.lock().unwrap().iter().filter(|c| c.starts_with("/usr/bin/ditto ")).count();
+
+    // Cancelled while unpacking: nothing after the unpack runs.
+    let err = env.updater().stage_archive_until("1.2.1", &path, &|| true).unwrap_err();
+    assert_eq!(err, DOWNLOAD_CANCELLED);
+    assert!(env.tools.calls.lock().unwrap().is_empty(), "{:?}", env.tools.calls.lock().unwrap());
+
+    // Cancelled during the quick bundle check: no install target check, no sibling removal, no copy, no deep codesign.
+    let checks = AtomicUsize::new(0);
+    let err =
+        env.updater().stage_archive_until("1.2.1", &path, &|| checks.fetch_add(1, AtomicOrdering::SeqCst) >= 1).unwrap_err();
+    assert_eq!(err, DOWNLOAD_CANCELLED);
+    assert_eq!(checks.load(AtomicOrdering::SeqCst), 2);
+    assert_eq!(copies(&env), 0);
+    assert!(!env.tools.calls.lock().unwrap().iter().any(|c| c.contains("--deep")));
+    assert_eq!(env.names(env.bundle().parent().unwrap()), ["unimux.app", "unimux.app.new-1.2.0"]);
+
+    // Not cancelled: the same archive stages as before.
+    env.updater().stage_archive_until("1.2.1", &path, &|| false).unwrap();
+    assert_eq!(copies(&env), 1);
+    assert_eq!(env.names(env.bundle().parent().unwrap()), ["unimux.app", "unimux.app.new-1.2.1"]);
 }
 
 fn stage_with(env: &Env, apps: &[(&str, &str, &str)]) -> Result<MacStaged, String> {
@@ -789,6 +858,37 @@ fn a_rollback_by_the_swap_is_a_failure_at_once_and_that_version_is_cleaned_up() 
 }
 
 #[test]
+fn the_start_step_touches_nothing_unless_updates_are_active_and_records_a_failure_for_the_gate() {
+    let env = Env::new();
+    let data = env.data();
+    let now = env.now.load(AtomicOrdering::SeqCst);
+    write_marker(&env, "1.2.1", now);
+    fs::write(
+        env.mac_dir().join("rolled-back"),
+        "1.2.1
+",
+    )
+    .unwrap();
+    // A dev build on the real profile (no packaged build, no dev feed): the installed app's evidence stays.
+    let outcome = crate::mac::previous_update_at_start(&data, "1.2.0", false, false, |_| {});
+    assert_eq!(outcome, MacPreviousOutcome::None);
+    assert!(env.mac_dir().join("rolled-back").exists() && env.mac_dir().join("pending.json").exists());
+    assert!(!data.join(crate::mac::GATE_FILE).exists());
+    assert_eq!(crate::mac::outcome_at_start(), MacPreviousOutcome::None);
+
+    // Updates active: the failure is consumed and recorded for the gate before it runs (1.1.4's recordUpdateFailure).
+    let before = unimux_core::time::now_ms();
+    let outcome = crate::mac::previous_update_at_start(&data, "1.2.0", false, true, |_| {});
+    assert_eq!(outcome, MacPreviousOutcome::Failed { version: "1.2.1".into() });
+    assert!(!env.mac_dir().join("rolled-back").exists() && !env.mac_dir().join("pending.json").exists());
+    let record: Value = serde_json::from_str(&fs::read_to_string(data.join(crate::mac::GATE_FILE)).unwrap()).unwrap();
+    assert_eq!(record.as_object().unwrap().keys().collect::<Vec<_>>(), ["version", "at"]);
+    assert_eq!(record["version"], "1.2.1");
+    assert!(record["at"].as_i64().unwrap() >= before);
+    assert_eq!(crate::mac::outcome_at_start(), outcome);
+}
+
+#[test]
 fn keeps_the_update_log_small() {
     let env = Env::new();
     fs::create_dir_all(env.mac_dir()).unwrap();
@@ -812,7 +912,7 @@ impl SwapOps for OpenRecorder {
         swap::RealSwapOps.remove_all(path)
     }
     fn clear_quarantine(&self, _bundle: &Path) {}
-    fn open(&self, bundle: &Path) -> io::Result<()> {
+    fn open(&self, bundle: &Path, _executable: &str) -> io::Result<()> {
         self.opened.lock().unwrap().push(bundle.to_path_buf());
         if self.fail { Err(io::Error::other("open failed")) } else { Ok(()) }
     }

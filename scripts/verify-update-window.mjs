@@ -58,6 +58,8 @@ const prestage = process.argv.includes('--prestage');
 const caseArg = process.argv.find((a) => a.startsWith('--case='));
 const ALL = ['main', 'guard', 'failed', 'webview', 'swap', 'rollback'];
 const SWAP_CASES = ['swap', 'rollback'];
+// U5: a non-executable file that `read_dir` lists before `unimux.exe` in Contents/MacOS of both scratch bundles.
+const DECOY = 'aaa-sidecar.exe';
 const selected = caseArg ? caseArg.slice('--case='.length).split(',').filter((c) => ALL.includes(c)) : ALL;
 const PAYLOAD_VERSION = '1.2.0-test.1';
 const OLD_VERSION = JSON.parse(readFileSync(join(root, 'src-tauri', 'crates', 'unimux-app', 'tauri.conf.json'), 'utf8')).version;
@@ -319,6 +321,8 @@ async function runCase(name) {
       const newExe = join(newBundle, 'Contents', 'MacOS', 'unimux.exe');
       if (c.brokenNew) writeFileSync(newExe, 'not an executable');
       else copyFileSync(swapPayloadExe, newExe);
+      // A file listed before the executable in both bundles (a sidecar, a log): only the plan's `executable` may be started.
+      for (const dir of [installDir, join(newBundle, 'Contents', 'MacOS')]) writeFileSync(join(dir, DECOY), 'not the app');
       writeFileSync(join(newBundle, 'Contents', 'Info.plist'), `<plist><dict><key>CFBundleShortVersionString</key><string>${PAYLOAD_VERSION}</string></dict></plist>`);
       download = join(dataDir, 'updates', 'mac', `unimux-${PAYLOAD_VERSION}-mac-x64.app.tar.gz.extract`);
       mkdirSync(download, { recursive: true });
@@ -563,6 +567,7 @@ async function runCase(name) {
       check('update window ran from the runtime copy (outside the bundle)', winInfo?.path?.toLowerCase() === runtimeExe.toLowerCase(), winInfo?.path);
       check('no installer ran', !/installer /.test(log));
       check(`bundle swapped: the executable in unimux.app is the ${PAYLOAD_VERSION} payload`, newHash === swapPayloadHash && newHash !== oldHash, `${oldSize} -> ${statSync(installedExe).size} bytes`);
+      check(`the plan's executable was started, not ${DECOY} listed before it (it stays in the bundle)`, existsSync(join(installDir, DECOY)) && !/could not be opened/.test(log) && !/did not report ready/.test(macLog), readdirSync(installDir).join(','));
       check('swap steps in updater.log and updates/mac/update.log (the 1.1.4 lines)', [/the app has exited, replacing /, /the new app is in place/, /started .*unimux\.app/, /update \S+ -> 1\.2\.0-test\.1 complete/].every((re) => re.test(log) && re.test(macLog)), macLines());
       check('the new app started from the bundle', !!newApp && lastSnapshot.some((p) => p.ProcessId === newApp[0]), newApp ? `pid ${newApp[0]}` : 'none');
       check(`ready written by the new version (${PAYLOAD_VERSION}); window closed on it (within 5 s)`, existsSync(flags.ready) && readFileSync(flags.ready, 'utf8') === PAYLOAD_VERSION && windowExitAt - flagAt.ready >= 0 && windowExitAt - flagAt.ready < 5000, `${windowExitAt - flagAt.ready} ms after ready`);

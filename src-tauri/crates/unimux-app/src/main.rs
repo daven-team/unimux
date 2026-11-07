@@ -241,6 +241,9 @@ fn main() {
                 }),
             ));
             ctx.mark("app-ready");
+            // macOS: how the previous update ended, recorded for the gate before it runs (U5).
+            #[cfg(target_os = "macos")]
+            startup::previous_mac_update(&ctx.data_dir, &ctx.overrides);
             // The startup gate (U1) runs here and may hold the main window back; wave 0 always proceeds.
             webview_import::prepare(app.handle(), &ctx);
             let main_window = windows::create_main(app.handle(), &ctx)?;

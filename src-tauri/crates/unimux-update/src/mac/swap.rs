@@ -66,8 +66,9 @@ pub trait SwapOps {
     }
     /// `xattr -cr <bundle>` (failures ignored).
     fn clear_quarantine(&self, bundle: &Path);
-    /// `open <bundle>`: Ok when the app was started.
-    fn open(&self, bundle: &Path) -> io::Result<()>;
+    /// `open <bundle>`: Ok when the app was started. `executable` (the plan's `CFBundleExecutable`) is what a non-macOS
+    /// build starts directly instead (`<bundle>/Contents/MacOS/<executable>`); `open` itself does not need it.
+    fn open(&self, bundle: &Path, executable: &str) -> io::Result<()>;
 }
 
 /// The real steps: renames and removals of std, `/usr/bin/xattr` and `/usr/bin/open` on macOS (elsewhere the executable is
@@ -111,7 +112,7 @@ impl SwapOps for RealSwapOps {
         }
     }
 
-    fn open(&self, bundle: &Path) -> io::Result<()> {
+    fn open(&self, bundle: &Path, executable: &str) -> io::Result<()> {
         if cfg!(target_os = "macos") {
             let status = std::process::Command::new("/usr/bin/open")
                 .arg(bundle)
@@ -124,13 +125,13 @@ impl SwapOps for RealSwapOps {
                 .status()?;
             return if status.success() { Ok(()) } else { Err(io::Error::other(format!("open exited with {status}"))) };
         }
-        // Not macOS: start the executable of the bundle directly (the swap is only ever used on macOS).
+        // Not macOS: start the bundle's executable directly (the swap is only ever used on macOS), the one the plan names,
+        // never whichever file `Contents/MacOS` lists first.
         let macos = bundle.join("Contents").join("MacOS");
-        let exe = std::fs::read_dir(&macos)?
-            .flatten()
-            .map(|e| e.path())
-            .find(|p| p.is_file())
-            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+        let exe = macos.join(executable);
+        if executable.is_empty() || !exe.is_file() {
+            return Err(io::Error::new(io::ErrorKind::NotFound, format!("{} is not a file", exe.display())));
+        }
         let program = unimux_exec::Program::Args { program: exe, args: vec![] };
         unimux_exec::spawn_detached(&program, None, Some(macos)).map(|_| ()).map_err(io::Error::other)
     }
@@ -159,7 +160,7 @@ impl Run<'_> {
     }
 
     fn launch_old(&self) {
-        if self.ops.open(&self.plan.bundle).is_err() {
+        if self.ops.open(&self.plan.bundle, &self.plan.executable).is_err() {
             (self.log)(&format!("could not start {}", self.plan.bundle.display()));
         }
     }
@@ -248,7 +249,7 @@ pub fn launch_new(
     for flag in ready_flags {
         let _ = std::fs::remove_file(flag);
     }
-    if ops.open(&plan.bundle).is_err() {
+    if ops.open(&plan.bundle, &plan.executable).is_err() {
         return Err(run.fail_and_restore("the new app could not be opened, restoring the previous version"));
     }
     log(&format!("started {}", plan.bundle.display()));
@@ -269,6 +270,15 @@ pub fn complete(plan: &BundleSwapPlan, ops: &dyn SwapOps, log: &dyn Fn(&str)) {
 pub fn ready_timed_out(plan: &BundleSwapPlan, seconds: u64, log: &dyn Fn(&str)) {
     log(&format!(
         "the new app did not report ready within {seconds} seconds; the previous version stays at {}",
+        plan.backup.display()
+    ));
+}
+
+/// The window ends right after starting the new app (the user closed the timeout card or opened the app from it before the
+/// old app exited), so nobody waits for its ready: the backup stays for the new app's markReady to remove.
+pub fn handed_off(plan: &BundleSwapPlan, log: &dyn Fn(&str)) {
+    log(&format!(
+        "the window ends after starting the new app; its markReady removes the previous version at {}",
         plan.backup.display()
     ));
 }
@@ -337,7 +347,7 @@ mod tests {
         fn clear_quarantine(&self, bundle: &Path) {
             self.calls.borrow_mut().push(format!("xattr -cr {}", name(bundle)));
         }
-        fn open(&self, bundle: &Path) -> io::Result<()> {
+        fn open(&self, bundle: &Path, _executable: &str) -> io::Result<()> {
             self.calls.borrow_mut().push(format!("open {}", name(bundle)));
             if self.fail_open {
                 return Err(io::Error::other("open failed"));
@@ -431,6 +441,9 @@ mod tests {
         assert_eq!(b.exe(&b.plan.bundle), "new");
         assert_eq!(b.exe(&b.plan.backup), "old");
         assert!(b.logged().contains("did not report ready"));
+        handed_off(&b.plan, &b.log());
+        assert_eq!(b.exe(&b.plan.backup), "old");
+        assert!(b.logged().contains("the window ends after starting the new app; its markReady removes the previous version"));
     }
 
     #[test]
@@ -547,6 +560,18 @@ mod tests {
         );
         let back: BundleSwapPlan = serde_json::from_value(value).unwrap();
         assert_eq!(back, b.plan);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn the_real_ops_start_the_executable_the_plan_names_not_the_first_file() {
+        let b = sandbox();
+        // A file listed before the executable: it must never be the one started.
+        fs::write(b.plan.bundle.join("Contents/MacOS/aaa-sidecar.log"), "log").unwrap();
+        let err = RealSwapOps.open(&b.plan.bundle, "missing").unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(err.to_string().contains("missing"), "{err}");
+        assert_eq!(RealSwapOps.open(&b.plan.bundle, "").unwrap_err().kind(), io::ErrorKind::NotFound);
     }
 
     #[test]
