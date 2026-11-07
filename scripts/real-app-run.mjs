@@ -32,6 +32,11 @@ export const SCRIPTS = [
     'sftp-ui', 'sidebar-anchor', 'ssh-bar', 'ssh-paths', 'ssh-ui', 'start-screen', 'status-ui', 'team-panel', 'team-stuck', 'tree-ui',
     'update-wait', 'waiting-ui'].map((name) => ({ file: `verify-${name}.mjs` })),
   { file: 'verify-tauri-normalize.mjs', only: 'tauri' },
+  // the acceptance checks of the wave 1 packages (Tauri only: most compare with 1.1.4 or the TS reference themselves)
+  ...['tauri-convsearch', 'tauri-detached', 'tauri-files', 'tauri-hooks', 'tauri-lifecycle', 'tauri-os', 'tauri-w3'].map((name) => ({ file: `verify-${name}.mjs`, only: 'tauri' })),
+  { file: 'verify-cli-detect.mjs', only: 'tauri', missing: () => (existsSync(join(ROOT, 'out', 'main', 'index.js')) ? null : 'the Electron build (npm run build) is its 1.1.4 reference') },
+  { file: 'verify-safestorage.mjs', only: 'tauri', windowsOnly: true },
+  { file: 'verify-update-window.mjs', only: 'tauri', windowsOnly: true, timeout: 20 },
   { file: 'verify-release-build.mjs', ci: 'release.yml checks the CI run of a tag (RELEASE_TAG, BUILD_RUN_ID)' },
   // the other real-app scripts
   { file: 'smoke-tauri.mjs', only: 'tauri' },

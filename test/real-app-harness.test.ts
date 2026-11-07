@@ -104,9 +104,10 @@ describe('migrated scripts', () => {
 
   it('no script reaches the Electron main inspector except through the harness (Electron target only)', () => {
     const users = scripts.filter((f) => f !== 'real-app.mjs' && /--inspect=|mainInspector\(/.test(read(f)));
-    // The Electron-internal profilers: reference tools that exit on the Tauri target.
-    expect(users.sort()).toEqual(['bench-perf.mjs', 'perf-check.mjs', 'perf-renders.mjs']);
-    for (const f of users) expect(read(f)).toContain('if (isTauri) {');
+    // The Electron-internal profilers: reference tools that exit on the Tauri target. verify-safestorage (B2) runs the real
+    // 1.1.4 next to the Tauri app on purpose (safeStorage both ways) and attaches its own inspector to that 1.1.4.
+    expect(users.sort()).toEqual(['bench-perf.mjs', 'perf-check.mjs', 'perf-renders.mjs', 'verify-safestorage.mjs']);
+    for (const f of users.filter((u) => u !== 'verify-safestorage.mjs')) expect(read(f)).toContain('if (isTauri) {');
   });
 
   it('runs every verify script (the workspace module through capture-readme --verify) and the X1 list', () => {

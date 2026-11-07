@@ -73,40 +73,6 @@ export async function startTestServer(args = []) {
 }
 
 /**
- * CDP of the main process (Node inspector): evaluates with the app's own electron module. Kept for verify-safestorage, which
- * attaches it while 1.1.4 is still loading (launchApp with `options.main` attaches only after the page answers).
- */
-export async function mainInspector(port) {
-  let target;
-  for (let i = 0; i < 50 && !target; i++) {
-    try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json())[0]; } catch { await sleep(200); }
-  }
-  if (!target) throw new Error('main inspector not reachable');
-  const ws = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
-  let next = 0;
-  const pending = new Map();
-  ws.onmessage = (e) => { const m = JSON.parse(e.data); pending.get(m.id)?.(m); pending.delete(m.id); };
-  // The process went away (killed, or a second instance that quit): fail what is pending instead of waiting forever.
-  let closed = false;
-  ws.onclose = () => { closed = true; for (const done of pending.values()) done({ error: { message: 'main inspector closed' } }); pending.clear(); };
-  const evaluate = (expression) => new Promise((resolve, reject) => {
-    if (closed) { reject(new Error('main inspector closed')); return; }
-    const id = ++next;
-    pending.set(id, (m) => (m.error || m.result.exceptionDetails ? reject(new Error(JSON.stringify(m.error ?? m.result.exceptionDetails))) : resolve(m.result.result.value)));
-    ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true } }));
-  });
-  await evaluate(`globalThis.__el = process.mainModule.require('electron'); globalThis.__notes = [];
-    __el.ipcMain.on('notify', (_e, n) => __notes.push(n)); true`);
-  return {
-    evaluate,
-    hook: (cellId, event) => evaluate(`__el.BrowserWindow.getAllWindows()[0].webContents.send('cell:hook', ${JSON.stringify(cellId)}, ${JSON.stringify(event)}), true`),
-    notes: () => evaluate('__notes.splice(0)'),
-    close: () => { try { ws.close(); } catch { /* closed */ } },
-  };
-}
-
-/**
  * Starts the app on the scratch root (data, home) and connects to its main page. `options.main`: also the main-side control
  * (real-app.mjs mainControl: hooks, windows, recorded calls, toasts) as `app.main`, recording the renderer's `notify` calls
  * from the start (`app.main.notes()`); `options.cwd`: the checkout of the Electron target; `options.onSpawn(child)` gets the
