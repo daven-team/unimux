@@ -37,6 +37,15 @@ describe('config scan (pure part of the trust model)', () => {
     expect(dangerousConfigKeys(quiet)).toEqual([]);
   });
 
+  it('flags a credential helper that is not a known helper name (git runs it through the shell)', () => {
+    for (const value of ['x; calc', 'evil', 'manager $(calc)', 'store --file=x;calc', 'cache `calc`', 'manager\ncalc', '../x', 'manager && calc']) {
+      expect(dangerousConfigKeys(entries(['credential.helper', value])), value).toEqual(['credential.helper']);
+    }
+    for (const value of ['', 'manager', 'manager-core', 'wincred', 'osxkeychain', 'libsecret', 'cache --timeout=3600', 'store --file=~/.git-credentials']) {
+      expect(dangerousConfigKeys(entries(['credential.helper', value])), value).toEqual([]);
+    }
+  });
+
   it('never reports a value, and removes credentials that sit inside a key', () => {
     const found = dangerousConfigKeys(entries(['url.https://user:s3cr3t@evil.example/.insteadOf', 'https://good/'], ['core.sshCommand', 'secret-command']));
     expect(JSON.stringify(found)).not.toContain('s3cr3t');
