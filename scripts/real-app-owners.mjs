@@ -63,7 +63,7 @@ const EXACT = {
 /** Prefix rules, longest first: the rest of a domain. */
 const PREFIXES = [
   ['git:', 'G3'], ['github:', 'A6'], ['sftp:', 'T1'], ['ssh:key:', 'S2'], ['ssh:', 'S4'], ['db:', 'D1'], ['local:', 'G6'],
-  ['detach:', 'W5'], ['accounts:', 'A2'],
+  ['detach:', 'W5'], ['window:', 'W1'], ['accounts:', 'A2'],
 ];
 
 /** Ports of the bridge (`port:<kind>`, mc_port_attach) and the events the check build cannot emit yet. */
@@ -105,6 +105,7 @@ export const formatBlocked = (groups) => groups.map((g) => `${g.owner} (${g.comm
 export const SCRIPT_PACKAGES = {
   'verify-accounts-ui.mjs': ['A1', 'A2', 'A5'],
   'verify-auto-switch-ui.mjs': ['A2', 'A5'],
+  'verify-caption.mjs': ['W1', 'W5'],
   'verify-limits-ui.mjs': ['A5'],
   'verify-dead-login-ui.mjs': ['A1', 'A2', 'A5'],
   'verify-first-login-ui.mjs': ['A2', 'A4'],
