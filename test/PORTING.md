@@ -81,3 +81,44 @@ Rows keep the exact case name (the counter matches them). Rust tests are named `
 | db-wire-sp9.int | caching_sha2_password: full authentication over plain TCP (RSA key request), then the fast path | unimux-db/tests/wire_servers.rs::mysql_logins_caching_sha2_full_and_fast | ported |
 | db-wire-sp9.int | console replies | unimux-db/tests/wire_servers.rs::redis_replies_match_ioredis (SP9 own RESP2 reader; D9 / D10 own the session) | ported |
 | db-wire-sp9.int | the connect sequence (default user; ACL user on DB 2) | unimux-db/tests/wire_servers.rs::redis_connect_sequence_matches_ioredis | ported |
+| claude-locks | uses the paths Claude Code uses | unimux-accounts locks::tests::uses_the_paths_claude_code_uses; unimux-accounts locks::tests::the_legacy_lock_follows_a_junction_to_the_real_config_dir | ported |
+| claude-locks | holds the credential locks and the config lock while fn runs, and releases them | unimux-accounts locks::tests::holds_the_credential_locks_and_the_config_lock_while_fn_runs_and_releases_them; unimux-accounts locks::tests::credentials_only_skips_the_config_lock | ported |
+| claude-locks | releases on throw | unimux-accounts locks::tests::releases_on_throw (a panic in f); unimux-accounts locks::tests::a_dropped_lock_is_released | ported |
+| claude-locks | waits for a holder that lets go | unimux-accounts locks::tests::waits_for_a_holder_that_lets_go; unimux-accounts/tests/lock_interop.rs (real npm proper-lockfile, both directions) | ported |
+| claude-locks | gives up on a live holder without running fn and releases what it took | unimux-accounts locks::tests::gives_up_on_a_live_holder_without_running_fn_and_releases_what_it_took | ported |
+| claude-locks | takes over a credential lock older than 60 s and a config lock older than 10 s | unimux-accounts locks::tests::takes_over_a_credential_lock_older_than_60_s_and_a_config_lock_older_than_10_s | ported |
+| claude-locks | does not take over a credential lock that is only 15 s old | unimux-accounts locks::tests::does_not_take_over_a_credential_lock_that_is_only_15_s_old | ported |
+| claude-locks | touches its locks while holding them | unimux-accounts locks::tests::touches_its_locks_while_holding_them | ported |
+| claude-locks | never creates, reads or removes Claude Code's owner record | unimux-accounts locks::tests::never_creates_reads_or_removes_claude_codes_owner_record | ported |
+| claude-locks | never creates Claude Code's directories | unimux-accounts locks::tests::never_creates_claude_codes_directories | ported |
+| claude-locks | retries the release while the lock dir is briefly busy (EPERM, EBUSY), so no lock is left behind | unimux-accounts locks::tests::retries_the_release_while_the_lock_dir_is_briefly_busy_so_no_lock_is_left_behind | ported |
+| claude-locks | gives up after a few tries and reports it | unimux-accounts locks::tests::gives_up_after_a_few_tries_and_reports_it | ported |
+| accounts-store | accepts uuids only | unimux-accounts store::tests::is_account_id_accepts_uuids_only | ported |
+| accounts-store | prepare creates the directory but does not list it | unimux-accounts store::tests::prepare_creates_the_directory_but_does_not_list_it | ported |
+| accounts-store | commit lists the account and persists across instances, in insertion order | unimux-accounts store::tests::commit_lists_the_account_and_persists_across_instances_in_insertion_order | ported |
+| accounts-store | commit of an existing id replaces it | unimux-accounts store::tests::commit_of_an_existing_id_replaces_it | ported |
+| accounts-store | drops over-long email and org on commit and update like list does | unimux-accounts store::tests::drops_over_long_email_and_org_on_commit_and_update_like_list_does | ported |
+| accounts-store | keeps a corrupt accounts.json as a timestamped backup and starts empty, never over an earlier backup | unimux-accounts store::tests::keeps_a_corrupt_accounts_json_as_a_timestamped_backup_and_starts_empty_never_over_an_earlier_backup | ported |
+| accounts-store | removes the temp file when the write cannot be completed | unimux-accounts store::tests::removes_the_temp_file_when_the_write_cannot_be_completed; unimux-accounts store::tests::removes_the_temp_file_when_the_rename_fails | ported |
+| accounts-store | tolerates missing and corrupt files | unimux-accounts store::tests::tolerates_missing_and_corrupt_files | ported |
+| accounts-store | drops entries with bad ids or shapes | unimux-accounts store::tests::drops_entries_with_bad_ids_or_shapes; unimux-accounts/tests/golden.rs::accounts_store_matches_1_1_4 | ported |
+| accounts-store | update changes email and org | unimux-accounts store::tests::update_changes_email_and_org | ported |
+| accounts-store | remove deletes the record and directory, also for an uncommitted id | unimux-accounts store::tests::remove_deletes_the_record_and_directory_also_for_an_uncommitted_id | ported |
+| accounts-store | rejects invalid ids and never touches anything outside the root | unimux-accounts store::tests::rejects_invalid_ids_and_never_touches_anything_outside_the_root | ported |
+| accounts-store | writes atomically and leaves no temp files | unimux-accounts store::tests::writes_atomically_and_leaves_no_temp_files | ported |
+| accounts-store | keeps the key order of the stored entry | unimux-accounts store::tests::update_keeps_the_key_order_of_the_stored_entry; unimux-accounts store::tests::writes_the_1_1_4_format_byte_for_byte | ported |
+| accounts-store | keeps identity, custody, family and duplicateOf and drops bad values | unimux-accounts store::tests::v2_keeps_identity_custody_family_and_duplicate_of_and_drops_bad_values | ported |
+| accounts-store | updateIdentity with replace takes exactly the given identity | unimux-accounts store::tests::v2_update_identity_with_replace_takes_exactly_the_given_identity | ported |
+| accounts-store | lists the records of a newer file without changing it | unimux-accounts store::tests::v2_lists_the_records_of_a_newer_file_without_changing_it; unimux-accounts store::tests::v2_opens_a_file_it_cannot_read_safely_read_only_and_never_writes_over_it | ported |
+| accounts-store | reports version 1 for a 0.9.0 file and 2 after the migration mark | unimux-accounts store::tests::v2_reports_version_1_for_a_0_9_0_file_and_2_after_the_migration_mark | ported |
+| accounts-store | keeps the live identity and the notices across record writes, at most 20 notices | unimux-accounts store::tests::v2_keeps_the_live_identity_and_the_notices_across_record_writes_at_most_20_notices | ported |
+| accounts-store | remove drops the notices and the live record id that point to the record | unimux-accounts store::tests::v2_remove_drops_the_notices_and_the_live_record_id_that_point_to_the_record | ported |
+| accounts-store | removing the record a copy was set aside for releases the copy (never the last saved copy behind a copy notice) | unimux-accounts store::tests::v2_removing_the_record_a_copy_was_set_aside_for_releases_the_copy | ported |
+| codex-accounts | compares by user and workspace, else by e-mail | unimux-accounts codex::tests::compares_by_user_and_workspace_else_by_e_mail; unimux-accounts/tests/golden.rs::identity_helpers_match_1_1_4 | ported |
+| codex-accounts | reads accounts.json safely (bad ids, duplicates and a dangling live record are dropped) | unimux-accounts codex::tests::reads_accounts_json_safely; unimux-accounts/tests/golden.rs::codex_store_matches_1_1_4 | ported |
+| codex-accounts | marks the twin of an account switched out by something else as outdated, never an independent copy | unimux-accounts codex::tests::marks_the_twin_of_an_account_switched_out_by_something_else_as_outdated_never_an_independent_copy | ported |
+| codex-accounts | refuses the live account, an outdated copy and a missing record; detects the keyring store | unimux-accounts codex::tests::refuses_the_live_account_an_outdated_copy_and_a_missing_record_detects_the_keyring_store | ported |
+| codex-accounts | reads who an auth.json belongs to without returning a token | unimux-accounts codex::tests::reads_who_an_auth_json_belongs_to_without_returning_a_token | ported |
+| accounts-identity | prefers .claude.json and skips the CLI | unimux-accounts identity::tests::prefers_claude_json_and_skips_the_cli | ported |
+| accounts-identity | falls back to the CLI with CLAUDE_CONFIG_DIR set to the profile | unimux-accounts identity::tests::falls_back_to_the_cli_with_claude_config_dir_set_to_the_profile | ported |
+| accounts-identity | gives {} for logged out, bad JSON, null and throwing exec | unimux-accounts identity::tests::gives_empty_for_logged_out_bad_json_null_and_throwing_exec | ported |

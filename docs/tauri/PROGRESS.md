@@ -71,7 +71,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | H3 | CLI detector | todo | | | | |
 | H5 | Conversation search | todo | | | | |
 | D3 | SQL helper ports | todo | | | | |
-| A1 | Accounts stores and Claude Code locks | todo | | | | |
+| A1 | Accounts stores and Claude Code locks | verified (Windows) | 2026-11-07 | 2026-11-07 | 2026-11-07 | branch `tauri-pkg-A1`. unimux-accounts: `store` (AccountsStore v2: custody, family, duplicateOf, heldTokens / deadTokens sha256 hex, appSwap, live identity, notices max 20, read-only rules, unparsable file to `accounts.json.bak-<ISO>`, 2-space JS key order, stat-stamp cache, single writer), `codex_store` (1-space, 0600, profiles/<uuid>), `codex` (normalize, outsideSwitch, refusal, keyring check, parseCodexAuth, decodeJwtClaims with Node's lenient base64url), `identity` (compare / key / fill, .claude.json readers, readManagedIdentity with an exec seam), `locks` (proper-lockfile dir locks: stale 60 / 10 s, touch 3 s, timeout 9 s, 250..500 ms jitter, RAII release with 5 busy retries, dunce realpath for the legacy lock). Golden corpus from 1.1.4's TS code (unchanged since v1.1.4), scripts/goldens-accounts.mjs: accounts-store 347 rows (random files + op sequences; 60 accounts dirs written by the 1.1.4 store, rewritten by a no-op: byte-identical), codex-accounts 215 rows (40 such dirs), accounts-identity 3,020 rows over 14 helpers: all equal (one documented difference, open issue 1). Lock interop with the real npm proper-lockfile 4.1.2 both ways (tests/lock_interop.rs: each waits for a live touched holder of the other, Rust times out on one, each takes over the other's dead lock). Fix found by the tests: on Windows mkdir / stat of a delete-pending lock dir fails with access denied; it is now waited for like a held lock (open issue 2). Verified: cargo test -p unimux-accounts 66 unit + 3 golden + 5 interop (4 runs), clippy -D warnings, fmt, cargo check --workspace --all-targets, cargo check -p unimux-accounts --target aarch64-apple-darwin, gen:check (goldens up to date), typecheck, porting:count (+41 rows, 110 / 2146). See "Open issues after A1" |
 | M1 | MCP HTTP server | todo | | | | |
 | S2 | SSH key handling | todo | | | | |
 | U2 | Custom update window (Windows) | todo | | | | |
@@ -377,6 +377,15 @@ Verification: `cargo fmt --all --check`, `cargo clippy -p unimux-mcp --all-targe
 6. The redis crate stays a dev-dependency of unimux-db only to keep the measured gaps reproducible; D9 can drop it (and the workspace pin) once its own tests replace that comparison.
 7. D7: after `SET NAMES` / `SET CHARACTER SET` mysql2 encodes queries and decodes column names in the session charset; `wire::mycharset` does it for utf8, latin1 / binary, ascii, ucs2 / utf16-le and cesu8 and refuses queries in the iconv-lite-only encodings (cp1250, koi8r, sjis, big5 ...). D7 adds iconv-lite's tables for those.
 8. D9: the reconnect handshake (`auth`, `client setname unimux`, `select` of the previously selected DB) is taken from the ioredis source (`wire::redis::reconnect_sequence`); D9 adds a golden for it through RedisSession.
+
+### Open issues after A1
+
+1. A lone UTF-16 surrogate in a string of accounts.json (only possible in a hand-edited file) is read as U+FFFD and written back as that character, where 1.1.4 writes the `\udXXX` escape again: the same rule as state.json (F7, `js_json::parse`). The golden test applies this rule to the one row with such a string; every other row is byte-identical.
+2. `acquire_dir_lock` treats ERROR_ACCESS_DENIED from mkdir or stat of the lock path (a lock dir another holder just removed, still delete-pending while a handle is open) as a held lock and waits within the timeout; 1.1.4 threw EPERM there. Found by `many_threads_never_hold_one_lock_at_once`; no file or lock path changes, so Claude Code and claude-swap are unaffected.
+3. The byte-identical no-op check uses accounts dirs written by 1.1.4's store code run under Node (src/main/accounts is unchanged since v1.1.4), not a dir from an installed 1.1.4 app: there is no 1.1.4 test data on this machine and the user's real data is off limits. Run it once on a copy of real 1.1.4 data when that exists.
+4. macOS: compile-checked only (`cargo check --target aarch64-apple-darwin`); the 0600 mode of the Codex file, the symlink realpath of the legacy lock and the interop test were not run on a Mac.
+5. No `accounts:*` commands are registered yet (A2 to A6 call into these stores). tests/lock_interop.rs needs node and node_modules: without them it skips with a note; CI sets `UNIMUX_REQUIRE_LOCK_INTEROP=1` so it fails instead.
+6. The store golden test takes 10 to 17 s (every write fsyncs, like 1.1.4).
 
 ### How to run
 

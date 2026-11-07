@@ -13,8 +13,11 @@
 //   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
 //   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
 //                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
+//   test/golden/accounts-store.jsonl, codex-accounts.jsonl, accounts-identity.jsonl   the account stores (1.1.4's code, run on
+//                                     scratch dirs) and the identity helpers (see scripts/goldens-accounts.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
+import { accountsStoreRows, codexStoreRows, identityRows } from './goldens-accounts.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
@@ -26,6 +29,10 @@ const load = async (file) => (await runnerImport(resolve(root, file), { configFi
 const [{ defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { translate }, { messages }, { normalizeEditedState }] = await Promise.all([
   load('src/shared/state.ts'), load('src/shared/stateEdits.ts'), load('src/shared/statePatch.ts'), load('src/shared/i18n.ts'), load('src/shared/messages.ts'),
   load('src/main/stateController.ts'),
+]);
+const [{ AccountsStore }, { CodexAccountsStore }, accounts, codex, { parseCodexAuth }, { decodeJwtClaims }] = await Promise.all([
+  load('src/main/accounts/store.ts'), load('src/main/accounts/codexStore.ts'), load('src/shared/accounts.ts'), load('src/shared/codexAccounts.ts'),
+  load('src/main/accounts/codexActivate.ts'), load('src/main/usage/parse.ts'),
 ]);
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
@@ -177,6 +184,9 @@ const files = {
   'normalize-state.jsonl': jsonl(normalizeRows({ normalizeState, root })),
   'state-after-edit.jsonl': jsonl(afterEditRows({ normalizeState, normalizeEditedState })),
   'js-sort.jsonl': jsonl(jsSort()),
+  'accounts-store.jsonl': jsonl(accountsStoreRows({ AccountsStore })),
+  'codex-accounts.jsonl': jsonl(codexStoreRows({ CodexAccountsStore })),
+  'accounts-identity.jsonl': jsonl(identityRows({ accounts, codex, parseCodexAuth, decodeJwtClaims })),
 };
 
 const check = process.argv.includes('--check');

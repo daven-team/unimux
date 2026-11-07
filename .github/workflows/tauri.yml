@@ -21,6 +21,8 @@ env:
   RUST_TOOLCHAIN: '1.99.1'
   ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
   VITE_CONFIG_NATIVE_IGNORE_WARNING: 'true'
+  # npm ci runs before cargo test, so the A1 lock interop cases against the real proper-lockfile must run, never skip.
+  UNIMUX_REQUIRE_LOCK_INTEROP: '1'
 
 jobs:
   checks:
