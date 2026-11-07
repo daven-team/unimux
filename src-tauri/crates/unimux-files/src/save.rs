@@ -64,6 +64,18 @@ pub fn write_file_with(
     text: Option<&str>,
     expected: Option<&str>,
 ) -> SaveResult {
+    write_text(resolve_target, text, false, expected)
+}
+
+/// `write_file_with` for a text the bridge marked as ill-formed (`ill_formed`: it held an unpaired surrogate, which a Rust
+/// string cannot, so it arrives with U+FFFD in its place). 1.1.4 refused such a text after the conflict check, so it is
+/// refused there too ('Nieprawidłowa treść pliku.').
+pub fn write_text(
+    resolve_target: &dyn Fn() -> Result<String, FsError>,
+    text: Option<&str>,
+    ill_formed: bool,
+    expected: Option<&str>,
+) -> SaveResult {
     let (Some(text), Some(expected)) = (text, expected) else { return SaveResult::Failed(INVALID_TEXT.into()) };
     let target = match resolve_target() {
         Ok(t) => t,
@@ -71,7 +83,7 @@ pub fn write_file_with(
     };
     let lock = lock_for(&target);
     let _held = lock.lock();
-    save_text(resolve_target, &target, text, expected)
+    save_text(resolve_target, &target, text, ill_formed, expected)
 }
 
 /// `/\r\n|\r|\n/g` matches, in order.
@@ -151,14 +163,14 @@ pub fn encode_like(bytes: &[u8], normalized: &str) -> Vec<u8> {
 /// Reads the first PREVIEW_BYTES + 1 bytes of `target` with its stat (1.1.4 reads once through one handle).
 fn read_for_save(target: &str) -> Result<(Vec<u8>, fsx::Stat), FsError> {
     let mut file = fsx::open_read(target)?;
-    let stat = fsx::fstat(&file, target)?;
+    let stat = fsx::fstat(&file)?;
     if !stat.is_file {
         return Err(FsError::plain("Wybierz plik, aby zapisać jego treść."));
     }
     if stat.size > PREVIEW_BYTES as u64 {
         return Err(FsError::plain(TOO_BIG));
     }
-    let bytes = fsx::read_start(&mut file, PREVIEW_BYTES + 1, target)?;
+    let bytes = fsx::read_start(&mut file, PREVIEW_BYTES + 1)?;
     if bytes.len() > PREVIEW_BYTES {
         return Err(FsError::plain(TOO_BIG));
     }
@@ -184,12 +196,18 @@ fn write_staged(path: &str, data: &[u8], stat: &fsx::Stat) -> Result<(), FsError
         }
     }
     let mut file = options.open(path).map_err(|e| FsError::io(&e, "open", path))?;
-    file.write_all(data).map_err(|e| FsError::io(&e, "write", path))?;
-    file.sync_all().map_err(|e| FsError::io(&e, "fsync", path))?;
+    file.write_all(data).map_err(|e| FsError::io_handle(&e, "write"))?;
+    file.sync_all().map_err(|e| FsError::io_handle(&e, "fsync"))?;
     Ok(())
 }
 
-fn save_text(resolve_target: &dyn Fn() -> Result<String, FsError>, target: &str, text: &str, expected: &str) -> SaveResult {
+fn save_text(
+    resolve_target: &dyn Fn() -> Result<String, FsError>,
+    target: &str,
+    text: &str,
+    ill_formed: bool,
+    expected: &str,
+) -> SaveResult {
     let mut temporary: Option<String> = None;
     let result = (|| -> Result<(), SaveError> {
         let (bytes, stat) = read_for_save(target)?;
@@ -201,8 +219,8 @@ fn save_text(resolve_target: &dyn Fn() -> Result<String, FsError>, target: &str,
         if baseline != expected {
             return Err(SaveError::Conflict);
         }
-        // A lone surrogate cannot reach Rust (the bridge refuses such a save, see transport.ts), so only the controls remain.
-        if has_binary_controls(text) {
+        // A lone surrogate cannot reach Rust: the bridge sends U+FFFD and marks the text (`ill_formed`, see transport.ts).
+        if has_binary_controls(text) || ill_formed {
             return Err(FsError::plain(INVALID_TEXT).into());
         }
         let normalized = keep_line_endings(text, &baseline);
@@ -242,11 +260,11 @@ fn save_text(resolve_target: &dyn Fn() -> Result<String, FsError>, target: &str,
 /// The bytes of `target` when it is a file of the same size class as an editable one, else `None`.
 fn read_for_compare(target: &str) -> Result<Option<Vec<u8>>, FsError> {
     let mut file = fsx::open_read(target)?;
-    let stat = fsx::fstat(&file, target)?;
+    let stat = fsx::fstat(&file)?;
     if !stat.is_file || stat.size > PREVIEW_BYTES as u64 {
         return Ok(None);
     }
-    Ok(Some(fsx::read_start(&mut file, PREVIEW_BYTES + 1, target)?))
+    Ok(Some(fsx::read_start(&mut file, PREVIEW_BYTES + 1)?))
 }
 
 #[cfg(test)]

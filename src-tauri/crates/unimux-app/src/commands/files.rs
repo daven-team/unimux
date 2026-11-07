@@ -132,10 +132,13 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         async move {
             let Some(root) = project_path(&c, call.arg(0)) else { return Ok(SaveResult::Failed(GONE.into()).to_json()) };
             let (path, text, expected) = (opt_string(call.arg(1)), opt_string(call.arg(2)), opt_string(call.arg(3)));
+            // The bridge's marker: the new text held an unpaired surrogate (transport.ts markIllFormedText).
+            let ill_formed = call.arg(4) == &Value::Bool(true);
             let result = blocking(&call.command, move || {
-                save::write_file_with(
+                save::write_text(
                     &|| project::project_file_path(&root, path.as_deref(), None),
                     text.as_deref(),
+                    ill_formed,
                     expected.as_deref(),
                 )
             })
@@ -173,8 +176,10 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         let l = l.clone();
         async move {
             let (path, text, expected) = (opt_string(call.arg(0)), opt_string(call.arg(1)), opt_string(call.arg(2)));
+            let ill_formed = call.arg(3) == &Value::Bool(true);
             let result =
-                blocking(&call.command, move || l.write_file(path.as_deref(), text.as_deref(), expected.as_deref())).await?;
+                blocking(&call.command, move || l.write_text(path.as_deref(), text.as_deref(), ill_formed, expected.as_deref()))
+                    .await?;
             Ok(result.to_json())
         }
     });
@@ -270,6 +275,19 @@ mod tests {
             json_of(call(&r, "fs:writeProjectFile", json!(["nope", "a.txt", "x", "y"]))),
             json!({ "ok": false, "error": GONE })
         );
+        // The bridge's ill-formed marker (a lone surrogate in the new text): checked where 1.1.4 checked it, after the
+        // project lookup and the conflict.
+        let invalid = json!({ "ok": false, "error": "Nieprawidłowa treść pliku." });
+        assert_eq!(
+            json_of(call(&r, "fs:writeProjectFile", json!(["nope", "a.txt", "x\u{fffd}", "y", true]))),
+            json!({ "ok": false, "error": GONE })
+        );
+        assert_eq!(
+            json_of(call(&r, "fs:writeProjectFile", json!(["p1", "a.txt", "x\u{fffd}", "stale", true])))["code"],
+            "conflict"
+        );
+        assert_eq!(json_of(call(&r, "fs:writeProjectFile", json!(["p1", "a.txt", "x\u{fffd}", "two\r\n", true]))), invalid);
+        assert_eq!(std::fs::read_to_string(project.path().join("a.txt")).unwrap(), "two\r\n");
         ctx.saver.stop();
     }
 
@@ -289,6 +307,17 @@ mod tests {
         assert_eq!(
             json_of(call(&r, "local:writeFile", json!([path, "c", "b"]))),
             json!({ "ok": false, "error": "Ten plik nie został otwarty w edytorze." })
+        );
+        // Not opened wins over the ill-formed marker (1.1.4 checked the opened set first), then the conflict does.
+        assert_eq!(
+            json_of(call(&r, "local:writeFile", json!([path, "c\u{fffd}", "b", true]))),
+            json!({ "ok": false, "error": "Ten plik nie został otwarty w edytorze." })
+        );
+        assert_eq!(json_of(call(&r, "local:readFile", json!([path])))["text"], "b");
+        assert_eq!(json_of(call(&r, "local:writeFile", json!([path, "c\u{fffd}", "x", true])))["code"], "conflict");
+        assert_eq!(
+            json_of(call(&r, "local:writeFile", json!([path, "c\u{fffd}", "b", true]))),
+            json!({ "ok": false, "error": "Nieprawidłowa treść pliku." })
         );
         // The data dir is never read for the editor.
         let state = data.path().join("state.json");

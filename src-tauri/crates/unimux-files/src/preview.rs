@@ -128,7 +128,7 @@ pub fn text_preview(data: &[u8], size: u64, truncated: bool) -> Preview {
 /// 1.1.4 `readFileAt(target, path, limit)`: `target` is the resolved file, `path` the name the extension is taken from.
 pub fn read_file_at(target: &str, path: &str, limit: usize) -> Result<Preview, FsError> {
     let mut file = fsx::open_read(target)?;
-    let stat = fsx::fstat(&file, target)?;
+    let stat = fsx::fstat(&file)?;
     if !stat.is_file {
         return Ok(Preview::error("Wybierz plik, aby zobaczyć jego treść."));
     }
@@ -139,7 +139,7 @@ pub fn read_file_at(target: &str, path: &str, limit: usize) -> Result<Preview, F
         }
         // `file.readFile()`: everything there is now (the size may have changed since the stat).
         let mut bytes = Vec::with_capacity(stat.size as usize);
-        std::io::Read::read_to_end(&mut file, &mut bytes).map_err(|e| FsError::io(&e, "read", target))?;
+        std::io::Read::read_to_end(&mut file, &mut bytes).map_err(|e| FsError::io_handle(&e, "read"))?;
         return Ok(Preview::Image { mime, bytes, size: stat.size });
     }
     if extension == "parquet" && limit > PREVIEW_BYTES {
@@ -148,7 +148,7 @@ pub fn read_file_at(target: &str, path: &str, limit: usize) -> Result<Preview, F
     }
     let cap = PREVIEW_BYTES.max(limit.min(LARGE_VIEW_BYTES));
     let want = (stat.size.min(cap as u64) as usize) + 1;
-    let mut data = fsx::read_start(&mut file, want, target)?;
+    let mut data = fsx::read_start(&mut file, want)?;
     let truncated = data.len() > cap;
     data.truncate(cap);
     Ok(text_preview(&data, stat.size, truncated))

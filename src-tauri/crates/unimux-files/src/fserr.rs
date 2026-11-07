@@ -1,5 +1,7 @@
 //! File system errors the way Node reports them (libuv's error names and texts), so the messages 1.1.4 showed for unusual
-//! failures ("EBUSY: resource busy or locked, open 'C:\\...'") stay the same and the code checks (`ENOENT` -> "gone") match.
+//! failures ("EBUSY: resource busy or locked, open 'C:\\...'"; a call on an open file handle without a path, "EISDIR:
+//! illegal operation on a directory, read"; a rename with both paths, "... rename '<from>' -> '<to>'") stay the same and
+//! the code checks (`ENOENT` -> "gone") match.
 
 use std::io;
 
@@ -20,6 +22,17 @@ impl FsError {
     pub fn io(error: &io::Error, syscall: &str, path: &str) -> Self {
         let code = uv_code(error);
         Self { code: Some(code), message: format!("{code}: {}, {syscall} '{path}'", uv_text(code)) }
+    }
+    /// A system error of a call on an open file handle (`filehandle.read`, `.stat`, `.writeFile`, `.sync`): Node words it
+    /// without a path (`<CODE>: <text>, <syscall>`).
+    pub fn io_handle(error: &io::Error, syscall: &str) -> Self {
+        let code = uv_code(error);
+        Self { code: Some(code), message: format!("{code}: {}, {syscall}", uv_text(code)) }
+    }
+    /// A system error of a call with two paths (`rename`): `<CODE>: <text>, <syscall> '<from>' -> '<to>'`.
+    pub fn io2(error: &io::Error, syscall: &str, from: &str, to: &str) -> Self {
+        let code = uv_code(error);
+        Self { code: Some(code), message: format!("{code}: {}, {syscall} '{from}' -> '{to}'", uv_text(code)) }
     }
     pub fn is(&self, code: &str) -> bool {
         self.code == Some(code)
@@ -145,6 +158,22 @@ mod tests {
     fn node_wording() {
         let e = io::Error::from(io::ErrorKind::NotFound);
         assert_eq!(FsError::io(&e, "open", "C:\\x").message, "ENOENT: no such file or directory, open 'C:\\x'");
+        // Node 26: fs.promises.rename('C:/nope-xyz/a', 'C:/nope-xyz/b'), and filehandle.read on an opened folder.
+        assert_eq!(
+            FsError::io2(&e, "rename", "C:\\nope-xyz\\a", "C:\\nope-xyz\\b").message,
+            "ENOENT: no such file or directory, rename 'C:\\nope-xyz\\a' -> 'C:\\nope-xyz\\b'"
+        );
+        let dir = io::Error::from(io::ErrorKind::IsADirectory);
+        assert_eq!(FsError::io_handle(&dir, "read").message, "EISDIR: illegal operation on a directory, read");
+        #[cfg(windows)]
+        {
+            // A save's final rename over a file another program holds open (ERROR_SHARING_VIOLATION).
+            let busy = io::Error::from_raw_os_error(32);
+            assert_eq!(
+                FsError::io2(&busy, "rename", "C:\\a.mc-save-1", "C:\\a").message,
+                "EBUSY: resource busy or locked, rename 'C:\\a.mc-save-1' -> 'C:\\a'"
+            );
+        }
         #[cfg(windows)]
         {
             assert_eq!(uv_code(&io::Error::from_raw_os_error(32)), "EBUSY");

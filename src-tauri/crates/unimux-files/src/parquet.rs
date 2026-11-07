@@ -16,8 +16,9 @@ pub fn read_parquet(_target: &str, _size: u64) -> Preview {
 
 #[cfg(feature = "parquet")]
 pub fn read_parquet(target: &str, size: u64) -> Preview {
-    // A malformed file can make the reader panic (an index out of range): that is a failed read, never a crash.
-    let result = std::panic::catch_unwind(|| imp::read(target, size));
+    // A malformed file can make the reader panic (an index out of range, a negative column chunk offset): that is a
+    // failed read, never a crash, so the app's panic hook stays quiet (no crash.log entry, no error dialog).
+    let result = unimux_core::panic_guard::catch_expected(|| imp::read(target, size));
     match result {
         Ok(Ok(table)) => Preview::Table(table),
         _ => Preview::error(PARQUET_FAILED),
@@ -36,8 +37,8 @@ pub enum Js {
     Str(String),
     /// A Date by its time value (NaN: Invalid Date).
     Date(f64),
-    /// A Uint8Array of this length.
-    Bytes(usize),
+    /// A Uint8Array.
+    Bytes(Vec<u8>),
     Arr(Vec<Js>),
     Obj(Vec<(String, Js)>),
 }
@@ -128,7 +129,7 @@ fn stringify(value: &Js, out: &mut String) -> bool {
                 unimux_core::js_json::write_string(out, &iso_string(*t));
             }
         }
-        Js::Bytes(n) => unimux_core::js_json::write_string(out, &format!("<{n} B>")),
+        Js::Bytes(b) => unimux_core::js_json::write_string(out, &format!("<{} B>", b.len())),
         Js::Arr(items) => {
             out.push('[');
             for (i, item) in items.iter().enumerate() {
@@ -169,7 +170,7 @@ pub fn cell_text(value: &Js) -> Option<String> {
         Js::Undefined | Js::Null => None,
         Js::Date(t) => Some(if t.is_nan() { "Invalid Date".into() } else { iso_string(*t) }),
         Js::Big(digits) => Some(digits.clone()),
-        Js::Bytes(n) => Some(format!("<{n} B>")),
+        Js::Bytes(b) => Some(format!("<{} B>", b.len())),
         Js::Arr(_) | Js::Obj(_) => {
             let mut out = String::new();
             stringify(value, &mut out);
@@ -178,6 +179,37 @@ pub fn cell_text(value: &Js) -> Option<String> {
         Js::Num(n) => Some(js_number(*n)),
         Js::Bool(b) => Some(b.to_string()),
         Js::Str(s) => Some(s.clone()),
+    }
+}
+
+/// `String(value)`: how a map key becomes an object key (hyparquet assembleMaps `obj[key] = ...`). A Date key stays its ISO
+/// text: V8's `Date.prototype.toString` is local time with ICU's localized zone name ("Thu Jan 01 1970 01:00:00 GMT+0100
+/// (czas środkowoeuropejski standardowy)"), an accepted deviation (PROGRESS.md, G5 open issues).
+pub fn js_string(value: &Js) -> String {
+    match value {
+        Js::Undefined => "undefined".into(),
+        Js::Null => "null".into(),
+        Js::Bool(b) => b.to_string(),
+        Js::Num(n) => js_number(*n),
+        Js::Big(digits) => digits.clone(),
+        Js::Str(s) => s.clone(),
+        Js::Date(t) => {
+            if t.is_nan() {
+                "Invalid Date".into()
+            } else {
+                iso_string(*t)
+            }
+        }
+        Js::Bytes(b) => b.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","),
+        Js::Arr(items) => items
+            .iter()
+            .map(|v| match v {
+                Js::Undefined | Js::Null => String::new(),
+                other => js_string(other),
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        Js::Obj(_) => "[object Object]".into(),
     }
 }
 
@@ -194,20 +226,270 @@ pub fn js_of_json(v: &serde_json::Value) -> Js {
     }
 }
 
+/// `new TextDecoder().decode(bytes)` (one call per value, as hyparquet's stringFromBytes / jsonFromBytes): malformed UTF-8
+/// becomes U+FFFD and one leading UTF-8 BOM is dropped.
+pub fn utf8_decode(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)).into_owned()
+}
+
+/// hyparquet `wkbToGeojson` (src/wkb.js) of a GEOMETRY / GEOGRAPHY value: ISO WKB (either byte order, Z / M / ZM by the
+/// thousands of the type) as a GeoJSON object. Reading past the end is an error (DataView's RangeError), like an
+/// unsupported geometry type: the whole preview fails, as in 1.1.4.
+pub fn wkb_to_geojson(bytes: &[u8]) -> Result<Js, String> {
+    struct Flags {
+        little: bool,
+        kind: u32,
+        dim: u32,
+        count: u32,
+    }
+    struct Reader<'a> {
+        b: &'a [u8],
+        at: usize,
+    }
+    impl Reader<'_> {
+        fn take<const N: usize>(&mut self) -> Result<[u8; N], String> {
+            let out = self.b.get(self.at..self.at + N).ok_or("Offset is outside the bounds of the DataView")?;
+            self.at += N;
+            Ok(out.try_into().unwrap())
+        }
+        fn u32(&mut self, little: bool) -> Result<u32, String> {
+            let b = self.take::<4>()?;
+            Ok(if little { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) })
+        }
+        fn flags(&mut self) -> Result<Flags, String> {
+            let little = self.take::<1>()?[0] == 1;
+            let raw = self.u32(little)?;
+            let (kind, flags) = (raw % 1000, raw / 1000);
+            let count = if kind > 1 && kind <= 7 { self.u32(little)? } else { 0 };
+            let dim = 2 + u32::from(flags != 0) + u32::from(flags == 3);
+            Ok(Flags { little, kind, dim, count })
+        }
+        fn position(&mut self, f: &Flags) -> Result<Js, String> {
+            let mut out = Vec::new();
+            for _ in 0..f.dim {
+                let b = self.take::<8>()?;
+                out.push(Js::Num(if f.little { f64::from_le_bytes(b) } else { f64::from_be_bytes(b) }));
+            }
+            Ok(Js::Arr(out))
+        }
+        fn line(&mut self, f: &Flags, count: u32) -> Result<Js, String> {
+            // Every position takes 16 bytes or more: a count beyond the data fails at the end of it.
+            (0..count).map(|_| self.position(f)).collect::<Result<_, _>>().map(Js::Arr)
+        }
+        fn polygon(&mut self, f: &Flags) -> Result<Js, String> {
+            let mut rings = Vec::new();
+            for _ in 0..f.count {
+                let n = self.u32(f.little)?;
+                rings.push(self.line(f, n)?);
+            }
+            Ok(Js::Arr(rings))
+        }
+        fn geometry(&mut self, depth: usize) -> Result<Js, String> {
+            if depth > 64 {
+                return Err("Maximum call stack size exceeded".into());
+            }
+            let f = self.flags()?;
+            let shape = |name: &str, coordinates: Js| {
+                Js::Obj(vec![("type".into(), Js::Str(name.into())), ("coordinates".into(), coordinates)])
+            };
+            Ok(match f.kind {
+                1 => shape("Point", self.position(&f)?),
+                2 => shape("LineString", self.line(&f, f.count)?),
+                3 => shape("Polygon", self.polygon(&f)?),
+                4..=6 => {
+                    let mut items = Vec::new();
+                    for _ in 0..f.count {
+                        let inner = self.flags()?;
+                        items.push(match f.kind {
+                            4 => self.position(&inner)?,
+                            5 => self.line(&inner, inner.count)?,
+                            _ => self.polygon(&inner)?,
+                        });
+                    }
+                    let name = ["MultiPoint", "MultiLineString", "MultiPolygon"][f.kind as usize - 4];
+                    shape(name, Js::Arr(items))
+                }
+                7 => {
+                    let geometries = (0..f.count).map(|_| self.geometry(depth + 1)).collect::<Result<_, _>>()?;
+                    Js::Obj(vec![
+                        ("type".into(), Js::Str("GeometryCollection".into())),
+                        ("geometries".into(), Js::Arr(geometries)),
+                    ])
+                }
+                other => return Err(format!("Unsupported geometry type: {other}")),
+            })
+        }
+    }
+    Reader { b: bytes, at: 0 }.geometry(0)
+}
+
 #[cfg(feature = "parquet")]
 mod imp {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::fs::File;
+    use std::io::{Read, Seek, SeekFrom};
+    use std::sync::Arc;
 
     use parquet::basic::{ConvertedType, LogicalType, Repetition, TimeUnit, Type as Physical};
     use parquet::column::reader::get_typed_column_reader;
     use parquet::data_type::{Int96, Int96Type};
+    use parquet::file::metadata::KeyValue;
     use parquet::file::reader::{FileReader, SerializedFileReader};
     use parquet::record::{Field, List, Map, Row};
     use parquet::schema::types::{Type, TypePtr};
     use serde_json::{Value, json};
 
-    use super::{Js, PARQUET_ROWS, cell_text, js_object, js_of_json, time_clip};
+    use super::{Js, PARQUET_ROWS, cell_text, js_object, js_of_json, js_string, time_clip, wkb_to_geojson};
+
+    /// The schema types whose element in the file has no converted type. The parquet crate fills one in from the logical
+    /// type (`DATE`, `DECIMAL`, `JSON` ...), but hyparquet converts by the converted type the file really has, so a column
+    /// written with a logical type only stays its raw value there (a day number, an unscaled integer, the JSON text).
+    /// Also the GeoParquet columns (hyparquet `markGeoColumns`): a BYTE_ARRAY leaf without a logical type that the file's
+    /// `geo` metadata lists with WKB encoding reads as GEOMETRY (GEOGRAPHY for spherical edges), the value true here.
+    struct Raw {
+        no_ctype: HashSet<*const Type>,
+        geo: HashMap<*const Type, bool>,
+    }
+
+    impl Raw {
+        fn read(target: &str, root: &TypePtr, key_values: Option<&Vec<KeyValue>>) -> Result<Raw, String> {
+            let mut no_ctype = HashSet::new();
+            let mut order = Vec::new();
+            depth_first(root, &mut order);
+            if let Some(raw) = footer_converted_types(target)
+                && order.len() == raw.len()
+            {
+                no_ctype.extend(order.iter().zip(raw).filter(|(_, c)| c.is_none()).map(|(t, _)| Arc::as_ptr(t)));
+            }
+            let geo = mark_geo_columns(&order, key_values)?;
+            Ok(Raw { no_ctype, geo })
+        }
+
+        /// hyparquet's `element.converted_type` (NONE when the file has none).
+        fn ctype(&self, ty: &Type) -> ConvertedType {
+            if self.no_ctype.contains(&(ty as *const Type)) { ConvertedType::NONE } else { ty.get_basic_info().converted_type() }
+        }
+
+        /// The geometry logical type hyparquet sees: the file's own, or the GeoParquet mark (true: GEOGRAPHY).
+        fn geo(&self, ty: &Type) -> Option<bool> {
+            match ty.get_basic_info().logical_type_ref() {
+                Some(LogicalType::Geometry(_)) => Some(false),
+                Some(LogicalType::Geography(_)) => Some(true),
+                _ => self.geo.get(&(ty as *const Type)).copied(),
+            }
+        }
+    }
+
+    /// `value[key]` for a JSON value as JS reads it (undefined: None); a string or an array by index.
+    fn js_prop<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+        match value {
+            Value::Object(map) => map.get(key),
+            Value::Array(items) => key.parse::<usize>().ok().and_then(|i| items.get(i)),
+            _ => None,
+        }
+    }
+
+    /// JS truthiness of a JSON value.
+    fn truthy(value: Option<&Value>) -> bool {
+        match value {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(b)) => *b,
+            Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0 && !f.is_nan()),
+            Some(Value::String(s)) => !s.is_empty(),
+            Some(_) => true,
+        }
+    }
+
+    /// `value?.[key]` (undefined and null both stop).
+    fn opt_prop<'a>(value: Option<&'a Value>, key: &str) -> Option<&'a Value> {
+        match value {
+            None | Some(Value::Null) => None,
+            Some(v) => js_prop(v, key),
+        }
+    }
+
+    /// hyparquet `markGeoColumns` (src/geoparquet.js) over the schema elements in the footer's order (`order`, root
+    /// first). What throws there (a `geo` value that is not JSON, a column entry that is null, a CRS id without a code)
+    /// fails the whole read here too.
+    fn mark_geo_columns(order: &[TypePtr], key_values: Option<&Vec<KeyValue>>) -> Result<HashMap<*const Type, bool>, String> {
+        let mut marks = HashMap::new();
+        let geo = key_values.and_then(|kv| kv.iter().find(|k| k.key == "geo")).and_then(|k| k.value.as_deref());
+        let Some(geo) = geo.filter(|g| !g.is_empty()) else { return Ok(marks) };
+        let parsed = unimux_core::js_json::parse(geo).map_err(|e| e.to_string())?;
+        let mut columns: HashMap<String, bool> = HashMap::new();
+        let entries: Vec<(String, &Value)> = match opt_prop(Some(&parsed), "columns") {
+            Some(Value::Object(map)) => map.iter().map(|(k, v)| (k.clone(), v)).collect(),
+            Some(Value::Array(items)) => items.iter().enumerate().map(|(i, v)| (i.to_string(), v)).collect(),
+            // Object.entries of a string: one entry per UTF-16 unit, none of which has an encoding.
+            _ => Vec::new(),
+        };
+        for (name, column) in entries {
+            if column.is_null() {
+                return Err("Cannot read properties of null (reading 'encoding')".into());
+            }
+            if js_prop(column, "encoding") != Some(&Value::String("WKB".into())) {
+                continue;
+            }
+            let spherical = js_prop(column, "edges") == Some(&Value::String("spherical".into()));
+            let crs = js_prop(column, "crs");
+            let id = match opt_prop(crs, "id") {
+                None | Some(Value::Null) => opt_prop(opt_prop(crs, "ids"), "0"),
+                some => some,
+            };
+            if truthy(id) && matches!(opt_prop(id, "code"), None | Some(Value::Null)) {
+                return Err("Cannot read properties of undefined (reading 'toString')".into());
+            }
+            columns.insert(name, spherical);
+        }
+        // Root-level BYTE_ARRAY leaves without a logical type; a group skips its direct children count only.
+        let mut i = 1;
+        while i < order.len() {
+            let ty = &order[i];
+            let children = if ty.is_primitive() { 0 } else { ty.get_fields().len() };
+            if children > 0 {
+                i += children + 1;
+                continue;
+            }
+            if ty.is_primitive()
+                && ty.get_physical_type() == Physical::BYTE_ARRAY
+                && ty.get_basic_info().logical_type_ref().is_none()
+                && let Some(spherical) = columns.get(ty.name())
+            {
+                marks.insert(Arc::as_ptr(ty), *spherical);
+            }
+            i += 1;
+        }
+        Ok(marks)
+    }
+
+    fn depth_first(ty: &TypePtr, out: &mut Vec<TypePtr>) {
+        out.push(ty.clone());
+        if !ty.is_primitive() {
+            for f in ty.get_fields() {
+                depth_first(f, out);
+            }
+        }
+    }
+
+    /// The converted types of the footer's schema elements (thrift.rs), in their depth-first order.
+    fn footer_converted_types(target: &str) -> Option<Vec<Option<i32>>> {
+        let mut file = File::open(target).ok()?;
+        let size = file.seek(SeekFrom::End(0)).ok()?;
+        if size < 12 {
+            return None;
+        }
+        let mut tail = [0u8; 8];
+        file.seek(SeekFrom::End(-8)).ok()?;
+        file.read_exact(&mut tail).ok()?;
+        let len = u32::from_le_bytes(tail[..4].try_into().ok()?) as u64;
+        if &tail[4..] != b"PAR1" || len + 8 > size {
+            return None;
+        }
+        let mut meta = vec![0u8; len as usize];
+        file.seek(SeekFrom::End(-8 - len as i64)).ok()?;
+        file.read_exact(&mut meta).ok()?;
+        crate::thrift::raw_converted_types(&meta)
+    }
 
     pub fn read(target: &str, size: u64) -> Result<Value, String> {
         let file = File::open(target).map_err(|e| e.to_string())?;
@@ -215,15 +497,16 @@ mod imp {
         let meta = reader.metadata().file_metadata();
         let total_rows = meta.num_rows();
         let root = meta.schema_descr().root_schema_ptr();
+        let raw = Raw::read(target, &root, meta.key_value_metadata())?;
         let fields = root.get_fields().to_vec();
         // hyparquet refuses these outright ("parquet bson / interval not supported").
         for leaf in meta.schema_descr().columns() {
-            if matches!(leaf.converted_type(), ConvertedType::BSON | ConvertedType::INTERVAL) {
+            if matches!(raw.ctype(leaf.self_type()), ConvertedType::BSON | ConvertedType::INTERVAL) {
                 return Err("unsupported type".into());
             }
         }
         let columns: Vec<String> = fields.iter().map(|f| f.name().to_string()).collect();
-        let types: Vec<String> = fields.iter().map(|f| type_name(f)).collect();
+        let types: Vec<String> = fields.iter().map(|f| type_name(&raw, f)).collect();
         let int96 = flat_int96(&reader, &fields)?;
         let mut rows = Vec::new();
         if total_rows > 0 {
@@ -236,7 +519,7 @@ mod imp {
                     .map(|(c, ((_, field), ty))| {
                         let value = match int96.get(&c) {
                             Some(raw) => raw.get(r).copied().flatten().map_or(Js::Undefined, int96_date),
-                            None => convert(field, ty)?,
+                            None => convert(&raw, field, ty)?,
                         };
                         Ok(cell_text(&value).map_or(Value::Null, Value::String))
                     })
@@ -307,10 +590,13 @@ mod imp {
     }
 
     /// `String(element.logical_type?.type ?? element.converted_type ?? element.type ?? '')`.
-    fn type_name(ty: &Type) -> String {
+    fn type_name(raw: &Raw, ty: &Type) -> String {
         let info = ty.get_basic_info();
         if let Some(logical) = info.logical_type_ref() {
             return logical_name(logical).to_string();
+        }
+        if let Some(spherical) = raw.geo(ty) {
+            return if spherical { "GEOGRAPHY" } else { "GEOMETRY" }.into();
         }
         if info.converted_type() != ConvertedType::NONE {
             return info.converted_type().to_string();
@@ -366,17 +652,17 @@ mod imp {
         if !repeated.is_primitive() && repeated.get_fields().len() == 1 { &repeated.get_fields()[0] } else { repeated }
     }
 
-    pub(super) fn convert(field: &Field, ty: &Type) -> Result<Js, String> {
+    fn convert(raw: &Raw, field: &Field, ty: &Type) -> Result<Js, String> {
         Ok(match field {
             Field::Null => Js::Undefined,
-            Field::ListInternal(list) => convert_list(list, ty)?,
-            Field::MapInternal(map) => convert_map(map, ty)?,
-            Field::Group(row) => convert_group(row, ty)?,
-            primitive => convert_primitive(primitive, ty)?,
+            Field::ListInternal(list) => convert_list(raw, list, ty)?,
+            Field::MapInternal(map) => convert_map(raw, map, ty)?,
+            Field::Group(row) => convert_group(raw, row, ty)?,
+            primitive => convert_primitive(raw, primitive, ty)?,
         })
     }
 
-    fn convert_list(list: &List, ty: &Type) -> Result<Js, String> {
+    fn convert_list(raw: &Raw, list: &List, ty: &Type) -> Result<Js, String> {
         let element = if is_list_like(ty) { list_element(ty) } else { ty };
         let mut elements = list.elements();
         // A legacy 2-level list (`repeated int32 item` right under the LIST group) comes from the record reader wrapped in
@@ -387,10 +673,10 @@ mod imp {
         {
             elements = inner.elements();
         }
-        Ok(Js::Arr(elements.iter().map(|f| convert(f, element)).collect::<Result<_, _>>()?))
+        Ok(Js::Arr(elements.iter().map(|f| convert(raw, f, element)).collect::<Result<_, _>>()?))
     }
 
-    fn convert_map(map: &Map, ty: &Type) -> Result<Js, String> {
+    fn convert_map(raw: &Raw, map: &Map, ty: &Type) -> Result<Js, String> {
         let (key_ty, value_ty) = if is_map_like(ty) {
             let kv = ty.get_fields()[0].get_fields();
             (kv[0].clone(), kv[1].clone())
@@ -399,8 +685,8 @@ mod imp {
         };
         let mut entries = Vec::new();
         for (k, v) in map.entries() {
-            let key = js_key(&convert(k, &key_ty)?);
-            let value = match convert(v, &value_ty)? {
+            let key = js_string(&convert(raw, k, &key_ty)?);
+            let value = match convert(raw, v, &value_ty)? {
                 Js::Undefined => Js::Null,
                 other => other,
             };
@@ -409,17 +695,7 @@ mod imp {
         Ok(Js::Obj(js_object(entries)))
     }
 
-    /// A map key as a JS object key (`String(key)`).
-    fn js_key(key: &Js) -> String {
-        match key {
-            Js::Undefined => "undefined".into(),
-            Js::Null => "null".into(),
-            Js::Date(t) if t.is_nan() => "Invalid Date".into(),
-            other => cell_text(other).unwrap_or_default(),
-        }
-    }
-
-    fn convert_group(row: &Row, ty: &Type) -> Result<Js, String> {
+    fn convert_group(raw: &Raw, row: &Row, ty: &Type) -> Result<Js, String> {
         if ty.is_primitive() {
             return Err("group for a primitive".into());
         }
@@ -429,10 +705,11 @@ mod imp {
             // hyparquet: a missing value of a present struct is null for a primitive field, absent for a nested one.
             .map(|((name, f), child)| match f {
                 Field::Null if child.is_primitive() => Ok((name.clone(), Js::Null)),
-                f => convert(f, child).map(|v| (name.clone(), v)),
+                f => convert(raw, f, child).map(|v| (name.clone(), v)),
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Js::Obj(entries))
+        // `obj[key] = ...` (hyparquet invertStruct): index keys first, ascending, like a map or a JSON object.
+        Ok(Js::Obj(js_object(entries)))
     }
 
     fn big_of_bytes(bytes: &[u8]) -> f64 {
@@ -499,10 +776,10 @@ mod imp {
     }
 
     /// hyparquet `convert()` for one value of a primitive column.
-    fn convert_primitive(field: &Field, ty: &Type) -> Result<Js, String> {
+    fn convert_primitive(raw: &Raw, field: &Field, ty: &Type) -> Result<Js, String> {
         let physical = ty.get_physical_type();
         let info = ty.get_basic_info();
-        let ctype = info.converted_type();
+        let ctype = raw.ctype(ty);
         let ltype = info.logical_type_ref();
         let scale = match ty {
             Type::PrimitiveType { scale, .. } => *scale,
@@ -538,6 +815,9 @@ mod imp {
             }
             _ => {}
         }
+        if raw.geo(ty).is_some() {
+            return wkb_to_geojson(&raw_bytes(field)?);
+        }
         if let Some(LogicalType::Uuid) = ltype {
             return Ok(Js::Str(uuid_text(&raw_bytes(field)?)));
         }
@@ -568,8 +848,13 @@ mod imp {
             Field::Float(f) => Js::Num(*f as f64),
             Field::Double(f) => Js::Num(*f),
             Field::Float16(f) => Js::Num(f.to_f64()),
-            Field::Bytes(b) => Js::Bytes(b.len()),
+            Field::Bytes(b) => Js::Bytes(b.data().to_vec()),
             Field::Str(s) => Js::Str(s.clone()),
+            // A decimal the file annotates with a logical type only (the parquet crate typed it as one): hyparquet keeps
+            // the raw INT32 / INT64 (BigInt) / fixed bytes.
+            Field::Decimal(parquet::data_type::Decimal::Int32 { value, .. }) => Js::Num(i32::from_be_bytes(*value) as f64),
+            Field::Decimal(parquet::data_type::Decimal::Int64 { value, .. }) => Js::Big(i64::from_be_bytes(*value).to_string()),
+            Field::Decimal(parquet::data_type::Decimal::Bytes { value, .. }) => Js::Bytes(value.data().to_vec()),
             other => {
                 let v = integer(other).ok_or("value")?;
                 match physical {
@@ -589,13 +874,15 @@ mod imp {
         match field {
             Field::Bytes(b) => Ok(b.data().to_vec()),
             Field::Str(s) => Ok(s.as_bytes().to_vec()),
+            Field::Decimal(parquet::data_type::Decimal::Bytes { value, .. }) => Ok(value.data().to_vec()),
             _ => Err("bytes value".into()),
         }
     }
 
-    /// `new TextDecoder().decode(bytes)` (replacement characters for malformed UTF-8).
+    /// `new TextDecoder().decode(bytes)`: replacement characters for malformed UTF-8, and one leading BOM dropped (the
+    /// decoder's ignoreBOM is false and every value is a separate decode call).
     fn bytes_text(field: &Field) -> Result<String, String> {
-        Ok(String::from_utf8_lossy(&raw_bytes(field)?).into_owned())
+        Ok(super::utf8_decode(&raw_bytes(field)?))
     }
 }
 
@@ -617,8 +904,14 @@ mod tests {
         let v = Js::Obj(vec![
             ("b".into(), Js::Big("12".into())),
             ("a".into(), Js::Undefined),
-            ("c".into(), Js::Arr(vec![Js::Undefined, Js::Bytes(3), Js::Date(0.0)])),
+            ("c".into(), Js::Arr(vec![Js::Undefined, Js::Bytes(vec![1, 2, 3]), Js::Date(0.0)])),
         ]);
         assert_eq!(cell_text(&v).unwrap(), r#"{"b":"12","c":[null,"<3 B>","1970-01-01T00:00:00.000Z"]}"#);
+        assert_eq!(js_string(&Js::Bytes(vec![1, 2, 3])), "1,2,3");
+        assert_eq!(js_string(&Js::Bytes(vec![])), "");
+        assert_eq!(js_string(&Js::Arr(vec![Js::Num(1.0), Js::Null, Js::Arr(vec![Js::Str("a".into())])])), "1,,a");
+        assert_eq!(js_string(&Js::Obj(vec![])), "[object Object]");
+        assert_eq!(js_string(&Js::Num(-0.0)), "0");
+        assert_eq!(js_string(&Js::Date(f64::NAN)), "Invalid Date");
     }
 }

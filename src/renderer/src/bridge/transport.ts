@@ -85,11 +85,26 @@ export function wellFormed(value: unknown): unknown {
 }
 
 /**
- * Saves 1.1.4 refused because the new text held an unpaired surrogate ('Nieprawidłowa treść pliku.'). Rust never sees one
- * (wellFormed would turn it into U+FFFD and the file would get a replacement character), so the bridge answers them itself.
+ * Saves whose new text may hold an unpaired surrogate: the index of that text and of the marker. 1.1.4 refused such a text
+ * ('Nieprawidłowa treść pliku.') only after its other checks (project, opened file, path, read errors, the conflict), so
+ * the bridge does not answer itself: wellFormed turns the text into U+FFFD and a `true` after the last argument tells Rust
+ * it was ill-formed; Rust refuses it at 1.1.4's place (unimux_files::save).
  */
-const REFUSE_ILL_FORMED_TEXT = new Map<string, number>([['fs:writeProjectFile', 2], ['local:writeFile', 1]]);
-const INVALID_TEXT = { ok: false, error: 'Nieprawidłowa treść pliku.' };
+const MARK_ILL_FORMED_TEXT = new Map<string, { text: number; flag: number }>([
+  ['fs:writeProjectFile', { text: 2, flag: 4 }],
+  ['local:writeFile', { text: 1, flag: 3 }],
+]);
+
+/** `args` of a save with the ill-formed marker in place (the same array when the text is fine). */
+function markIllFormedText(channel: string, args: unknown[]): unknown[] {
+  const at = MARK_ILL_FORMED_TEXT.get(channel);
+  const text = at === undefined ? undefined : args[at.text];
+  if (at === undefined || typeof text !== 'string' || isWellFormed(text)) return args;
+  const marked = args.slice(0, at.flag);
+  while (marked.length < at.flag) marked.push(undefined);
+  marked.push(true);
+  return marked;
+}
 
 /** JSON has no undefined: positional undefined arguments travel as null (Rust reads both as absent). */
 const wireArgs = (args: unknown[]): unknown[] => args.map((a) => (a === undefined ? null : wellFormed(a)));
@@ -158,9 +173,7 @@ export function createTauriTransport(boot: BootInfo, deps: TauriDeps): TauriTran
   };
 
   async function rawInvoke(channel: string, args: unknown[]): Promise<unknown> {
-    const textAt = REFUSE_ILL_FORMED_TEXT.get(channel);
-    const text = textAt === undefined ? undefined : args[textAt];
-    if (typeof text === 'string' && !isWellFormed(text)) return { ...INVALID_TEXT };
+    args = markIllFormedText(channel, args);
     try {
       const rawAt = args.findIndex(isBytes);
       let result: unknown;

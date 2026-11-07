@@ -153,17 +153,22 @@ describe('Tauri transport', () => {
     expect(invocations[0].command).toBe('mc_invoke');
   });
 
-  it('answers a save whose new text has a lone surrogate itself, like 1.1.4 refused it (Rust would get U+FFFD)', async () => {
+  it('sends a save whose new text has a lone surrogate to Rust with a marker, so 1.1.4 order of checks holds (conflict first)', async () => {
+    const conflict = { ok: false, code: 'conflict', error: 'x' };
     const { deps, invocations } = fakeDeps();
+    const record = deps.invoke;
+    deps.invoke = async (command, args, options) => { await record(command, args, options); return conflict; };
     const api = createMcApi(createTauriTransport(boot, deps));
-    const refused = { ok: false, error: 'Nieprawidłowa treść pliku.' };
-    expect(await api.writeProjectFile('p', 'a.txt', 'half \ud83d', 'old')).toEqual(refused);
-    expect(await api.localFs.writeFile('C:\\a.txt', '\ude00x', 'old')).toEqual(refused);
-    expect(invocations).toHaveLength(0);
-    // A whole emoji is fine, and a broken expected text still goes to Rust (it can only be a conflict there).
+    const r = String.fromCharCode(0xfffd);
+    // Rust decides (here: a conflict, which 1.1.4 also reported before looking at the text).
+    expect(await api.writeProjectFile('p', 'a.txt', 'half \ud83d', 'old')).toEqual(conflict);
+    expect(await api.localFs.writeFile('C:\\a.txt', '\ude00x', 'old')).toEqual(conflict);
+    expect((invocations[0].args as { args: unknown[] }).args).toEqual(['p', 'a.txt', `half ${r}`, 'old', true]);
+    expect((invocations[1].args as { args: unknown[] }).args).toEqual(['C:\\a.txt', `${r}x`, 'old', true]);
+    // A whole emoji is fine (no marker), and a broken expected text goes as it is (it can only be a conflict there).
     await api.writeProjectFile('p', 'a.txt', 'ok 😀', 'old \ud83d');
-    expect(invocations).toHaveLength(1);
-    expect((invocations[0].args as { cmd: string }).cmd).toBe('fs:writeProjectFile');
+    expect((invocations[2].args as { args: unknown[] }).args).toEqual(['p', 'a.txt', 'ok 😀', `old ${r}`]);
+    expect(invocations.map((i) => (i.args as { cmd: string }).cmd)).toEqual(['fs:writeProjectFile', 'local:writeFile', 'fs:writeProjectFile']);
   });
 
   it('turns the raw bytes of an image preview into the data: URL the page had in 1.1.4', async () => {

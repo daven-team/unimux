@@ -176,11 +176,16 @@ impl LocalFiles {
 
     /// `local:writeFile`.
     pub fn write_file(&self, path: Option<&str>, text: Option<&str>, expected: Option<&str>) -> SaveResult {
+        self.write_text(path, text, false, expected)
+    }
+
+    /// `local:writeFile` with the bridge's ill-formed marker (save::write_text): refused after the local checks.
+    pub fn write_text(&self, path: Option<&str>, text: Option<&str>, ill_formed: bool, expected: Option<&str>) -> SaveResult {
         match self.editable_path(path) {
             Editable::Gone => SaveResult::Failed(FILE_GONE.into()),
             Editable::Refused => SaveResult::Failed(EDIT_REFUSED.into()),
             Editable::Real(real) if !self.was_opened(&real) => SaveResult::Failed(NOT_OPENED.into()),
-            Editable::Real(real) => save::write_file_with(&|| local_file_path(Some(&real)), text, expected),
+            Editable::Real(real) => save::write_text(&|| local_file_path(Some(&real)), text, ill_formed, expected),
         }
     }
 

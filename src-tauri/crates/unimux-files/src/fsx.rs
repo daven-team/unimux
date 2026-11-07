@@ -146,8 +146,8 @@ fn mode_of(meta: &Metadata) -> u32 {
 }
 
 /// `filehandle.stat()`.
-pub fn fstat(file: &File, path: &str) -> Result<Stat, FsError> {
-    file.metadata().map(|m| Stat::of(&m)).map_err(|e| FsError::io(&e, "fstat", path))
+pub fn fstat(file: &File) -> Result<Stat, FsError> {
+    file.metadata().map(|m| Stat::of(&m)).map_err(|e| FsError::io_handle(&e, "fstat"))
 }
 
 /// `fs.promises.stat(path)` (follows links).
@@ -156,7 +156,7 @@ pub fn stat(path: &str) -> Result<Stat, FsError> {
 }
 
 /// `filehandle.read(buffer, 0, len, 0)` for a regular file: up to `len` bytes from the start (a short read only at the end).
-pub fn read_start(file: &mut File, len: usize, path: &str) -> Result<Vec<u8>, FsError> {
+pub fn read_start(file: &mut File, len: usize) -> Result<Vec<u8>, FsError> {
     let mut buf = vec![0u8; len];
     let mut filled = 0;
     while filled < len {
@@ -164,7 +164,7 @@ pub fn read_start(file: &mut File, len: usize, path: &str) -> Result<Vec<u8>, Fs
             Ok(0) => break,
             Ok(n) => filled += n,
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(FsError::io(&e, "read", path)),
+            Err(e) => return Err(FsError::io_handle(&e, "read")),
         }
     }
     buf.truncate(filled);
@@ -179,11 +179,11 @@ pub fn rename(from: &str, to: &str) -> Result<(), FsError> {
         use windows::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MoveFileExW};
         use windows::core::HSTRING;
         let result = unsafe { MoveFileExW(&HSTRING::from(from), &HSTRING::from(to), MOVEFILE_REPLACE_EXISTING) };
-        result.map_err(|e| FsError::io(&io::Error::from_raw_os_error(e.code().0 & 0xFFFF), "rename", from))
+        result.map_err(|e| FsError::io2(&io::Error::from_raw_os_error(e.code().0 & 0xFFFF), "rename", from, to))
     }
     #[cfg(not(windows))]
     {
-        std::fs::rename(from, to).map_err(|e| FsError::io(&e, "rename", from))
+        std::fs::rename(from, to).map_err(|e| FsError::io2(&e, "rename", from, to))
     }
 }
 

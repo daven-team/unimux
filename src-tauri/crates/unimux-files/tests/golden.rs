@@ -165,7 +165,7 @@ fn saves_match_the_ts_reference() {
 fn parquet_tables_match_the_ts_reference() {
     let dir = format!("{}/../../../test/golden/parquet", env!("CARGO_MANIFEST_DIR"));
     let rows = rows("files-parquet.jsonl");
-    assert!(rows.len() >= 13);
+    assert!(rows.len() >= 21);
     let mut failures = Vec::new();
     for row in &rows {
         let name = row["name"].as_str().unwrap();
