@@ -7,9 +7,10 @@
 //! their passwords (`db/vault.json` through the app's safeStorage), the sessions with their states, prompts, pins and idle
 //! disconnect (`unimux_db::service`), the query history (`db/query_history.json`, written 1.5 s after a change and in the
 //! wind-down's save phase), the SQLite file and CA dialogs, the result export, and the `db:*` events. Every request passes
-//! the 1.1.4 validation first (`unimux_db::ipc`). The sessions themselves are D4 / D7 / D9 / D11 (routed by D12): until they
-//! land, the host link ends every session with `unsupported`. Tunnels log in through the SSH coordinator (S3,
-//! `commands::ssh::DbTunnels`); their owner (D2) is not plugged in yet.
+//! the 1.1.4 validation first (`unimux_db::ipc`). The sessions themselves are D4 / D7 / D9 / D11 (routed by D12): D9's
+//! `RedisHost` opens Redis sessions and hands every other kind to D1's `UnavailableHost` (ends them with `unsupported`)
+//! until the other kinds land. Tunnels log in through the SSH coordinator (S3, `commands::ssh::DbTunnels`); their owner (D2)
+//! is not plugged in yet.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -20,6 +21,8 @@ use unimux_core::i18n::translate;
 use unimux_db::history::{DbHistoryStore, WRITE_DELAY_MS};
 use unimux_db::host::{DbHostLink, Spawn, UnavailableHost};
 use unimux_db::ipc;
+use unimux_db::redis::host::{DB_CONNECT_MS, RedisHost, RedisHostDeps};
+use unimux_db::redis::session::RedisLimits;
 use unimux_db::service::{DbDeps, DbEvents, DbService, DbStateAccess, PROMPT_TIMEOUT_MS, ReadCa, TEST_TIMEOUT_MS};
 use unimux_db::sql::limits;
 use unimux_db::sqlite_files::create_sqlite_file;
@@ -139,7 +142,15 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     // first cipher call opens the key.
     let warm = vault.clone();
     let _ = std::thread::Builder::new().name("unimux-db-vault".into()).spawn(move || warm.warm());
-    let host = UnavailableHost::new(spawn.clone());
+    let others = UnavailableHost::new(spawn.clone());
+    let host = RedisHost::new(RedisHostDeps {
+        next: others.clone(),
+        spawn: spawn.clone(),
+        tunnels: None,
+        connect_ms: DB_CONNECT_MS,
+        limits: RedisLimits::default(),
+        now: Arc::new(unimux_core::time::now_ms),
+    });
     let service = DbService::new(DbDeps {
         state: Arc::new(AppState(ctx.clone())),
         host: host.clone() as Arc<dyn DbHostLink>,
@@ -156,6 +167,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         prompt_timeout_ms: PROMPT_TIMEOUT_MS,
         test_timeout_ms: TEST_TIMEOUT_MS,
     });
+    others.connect_weak(Arc::downgrade(&service), |s: &DbService, m| s.on_host_message(m));
     host.connect_weak(Arc::downgrade(&service), |s: &DbService, m| s.on_host_message(m));
     // The coordinator's states and prompts of `db:` tunnels go to the service (1.1.4 startSsh `events`).
     let _ = crate::commands::ssh::link::link(ctx).events.db.set(Arc::new(crate::commands::ssh::DbSink(Arc::downgrade(&service))));

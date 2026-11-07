@@ -142,6 +142,8 @@ tower-service = "0.3.3"
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 rustls-platform-verifier = "0.7.1"
+# D9: TCP keep-alive of DB connections (Node's setKeepAlive)
+socket2 = "0.6.5"
 core-foundation = "0.10.1"
 core-foundation-sys = "0.8.7"
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }

@@ -278,15 +278,25 @@ impl RedisConn {
 
     /// Sends one command and waits for its reply (a server error reply is `Ok(Raw::Error)`).
     pub async fn call(&self, argv: &[&[u8]]) -> Result<Raw, CallError> {
-        if *self.ended.borrow() {
-            return Err(CallError::NotWritable);
+        self.enqueue(argv).await
+    }
+
+    /// Queues one command for writing now (like ioredis' `sendCommand`, before anything is awaited), so commands issued one
+    /// after the other go out in that order and pipeline; the future is the reply.
+    pub fn enqueue(&self, argv: &[&[u8]]) -> impl Future<Output = Result<Raw, CallError>> + Send + use<> {
+        let rx = if *self.ended.borrow() {
+            None
+        } else {
+            let (reply, rx) = oneshot::channel();
+            self.tx.send((encode_command(argv), reply)).ok().map(|()| rx)
+        };
+        async move {
+            match rx {
+                // a dropped sender without an answer: the driver ended before it took the command, so it was never written
+                Some(rx) => rx.await.unwrap_or(Err(CallError::NotWritable)),
+                None => Err(CallError::NotWritable),
+            }
         }
-        let (reply, rx) = oneshot::channel();
-        if self.tx.send((encode_command(argv), reply)).is_err() {
-            return Err(CallError::NotWritable);
-        }
-        // a dropped sender without an answer: the driver ended before it took the command, so it was never written
-        rx.await.unwrap_or(Err(CallError::NotWritable))
     }
 
     /// Becomes true when the stream ended (EOF, an error, or `close`).

@@ -8,6 +8,7 @@
 //! - D3: [`sql`], [`redis_shared`]; SP9: [`wire`].
 //! - D4: [`pg`] (the Postgres client: connect, TLS, logins, simple query, cancel).
 //! - D7: [`mysql`] (the MySQL / MariaDB client core).
+//! - D9: [`redis`] (Redis sessions and browsing on the own RESP2 client).
 
 pub mod files;
 pub mod history;
@@ -16,6 +17,7 @@ pub mod ipc;
 pub mod model;
 pub mod pg;
 pub mod mysql;
+pub mod redis;
 pub mod redis_shared;
 pub mod service;
 pub mod sql;
