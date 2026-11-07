@@ -5,8 +5,12 @@
 //!
 //! SP6 added [`progress`] (UpdateProgressModel port) and [`window`] (the update window hand-over and file protocol); the
 //! window process itself is `unimux-app/src/update_window.rs`.
+//!
+//! U5 added [`mac`] (the macOS engine and the bundle swap the update window runs) and [`version`] (compareVersions).
 
+pub mod mac;
 pub mod progress;
+pub mod version;
 pub mod window;
 
 /// The updater public key (minisign, key id 817A07BB564AC8D0) exactly as `tauri signer generate` wrote it to

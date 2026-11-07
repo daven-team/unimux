@@ -121,6 +121,10 @@ pub struct UpdateSplashConfig {
     /// earlier window can never remove the profile of a live one (default for a config without it: `<runtimeDir>/../webview2`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webview_dir: Option<PathBuf>,
+    /// macOS (U5): the bundle swap the window runs once the old app has exited, instead of an installer. `installDir` is then
+    /// the installed `.app` and `appExe` the executable inside it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swap: Option<crate::mac::BundleSwapPlan>,
 }
 
 impl UpdateSplashConfig {
@@ -177,6 +181,7 @@ pub fn needs_elevation(install_dir: &Path) -> bool {
 /// Paths of one hand-over.
 #[derive(Debug, Clone)]
 pub struct HandOver {
+    /// The installer (Windows); unused when [`HandOver::swap`] is set.
     pub installer: PathBuf,
     pub version: String,
     pub from_version: String,
@@ -192,6 +197,9 @@ pub struct HandOver {
     pub env: Option<Vec<(OsString, OsString)>>,
     /// The window's WebView2 folder (None: a new `webview2-<id>` inside `updater_root`).
     pub webview_dir: Option<PathBuf>,
+    /// macOS (U5): the verified bundle swap of `MacUpdater::install`; the window swaps the bundle instead of running an
+    /// installer.
+    pub swap: Option<crate::mac::BundleSwapPlan>,
 }
 
 /// What the hand-over measured (SP6 numbers).
@@ -362,7 +370,12 @@ pub fn update_dir(data_dir: &Path) -> PathBuf {
 pub fn build_config(h: &HandOver, runtime_dir: &Path) -> UpdateSplashConfig {
     let update = update_dir(&h.data_dir);
     let work = update.join("work");
-    let install_dir = h.app_exe.parent().map(Path::to_path_buf).unwrap_or_default();
+    // A bundle swap replaces the whole `.app` (its size is what the progress measures); an installer the exe's folder.
+    let install_dir = match &h.swap {
+        Some(plan) => plan.bundle.clone(),
+        None => h.app_exe.parent().map(Path::to_path_buf).unwrap_or_default(),
+    };
+    let installer = h.swap.is_none().then(|| h.installer.clone());
     UpdateSplashConfig {
         from_version: h.from_version.clone(),
         version: h.version.clone(),
@@ -377,8 +390,9 @@ pub fn build_config(h: &HandOver, runtime_dir: &Path) -> UpdateSplashConfig {
         work_dir: work,
         timeout_ms: h.timeout_ms,
         strings: UpdateStrings::translated(&h.language, &h.version),
-        installer: Some(h.installer.clone()),
-        installer_args: Some(installer_args(&install_dir)),
+        installer_args: installer.as_ref().map(|_| installer_args(&install_dir)),
+        installer,
+        swap: h.swap.clone(),
         webview_dir: Some(
             h.webview_dir.clone().unwrap_or_else(|| h.updater_root.join(format!("webview2-{}", unimux_core::time::now_ms()))),
         ),
@@ -544,7 +558,49 @@ mod tests {
             timeout_ms: INSTALL_TIMEOUT_MS,
             env: None,
             webview_dir: None,
+            swap: None,
         }
+    }
+
+    fn swap_plan(root: &Path) -> crate::mac::BundleSwapPlan {
+        let apps = root.join("Applications");
+        let mac = root.join("data").join("updates").join("mac");
+        crate::mac::BundleSwapPlan {
+            bundle: apps.join("unimux.app"),
+            new_bundle: apps.join("unimux.app.new-1.2.1"),
+            backup: apps.join("unimux.app.old-1.2.0"),
+            executable: "unimux".into(),
+            log: mac.join("update.log"),
+            ready_flag: mac.join("ready"),
+            failed_flag: mac.join("rolled-back"),
+            cleanup: vec![mac.join("unimux-1.2.1-mac-arm64.app.tar.gz")],
+            from_version: "1.2.0".into(),
+            to_version: "1.2.1".into(),
+        }
+    }
+
+    #[test]
+    fn a_swap_hand_over_carries_the_plan_and_no_installer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut h = sample(&tmp.path().join("data"), tmp.path());
+        let plan = swap_plan(tmp.path());
+        h.app_exe = plan.bundle.join("Contents").join("MacOS").join("unimux");
+        h.swap = Some(plan.clone());
+        let config = build_config(&h, &h.updater_root.join("runtime-1.2.1"));
+        assert_eq!(config.install_dir, plan.bundle);
+        assert_eq!(config.installer, None);
+        assert_eq!(config.installer_args, None);
+        let value = serde_json::to_value(&config).unwrap();
+        assert!(value.get("installer").is_none() && value.get("installerArgs").is_none());
+        assert_eq!(value["swap"]["newBundle"], serde_json::json!(plan.new_bundle));
+        assert_eq!(value["swap"]["toVersion"], "1.2.1");
+        // Through work/config.json and back.
+        let back: UpdateSplashConfig = serde_json::from_value(value).unwrap();
+        assert_eq!(back.swap, Some(plan));
+        // An installer hand-over has no `swap` key (the 1.1.x shape is unchanged).
+        h.swap = None;
+        let value = serde_json::to_value(build_config(&h, &h.updater_root.join("runtime-1.2.1"))).unwrap();
+        assert!(value.get("swap").is_none());
     }
 
     #[test]
@@ -630,7 +686,8 @@ mod tests {
 
     #[test]
     fn every_version_stages_in_its_own_folder_and_stale_ones_go() {
-        let root = Path::new("C:\\u\\unimux-updater");
+        // Built with join, so the path has the same components on every platform (macOS CI runs this too).
+        let root = Path::new("C:\\u").join("unimux-updater");
         // with_extension("partial") made runtime-1.2.1 and runtime-1.2.2 share runtime-1.2.partial.
         assert_eq!(partial_dir(&root.join("runtime-1.2.1"), 7), root.join("runtime-1.2.1.partial-7"));
         assert_ne!(partial_dir(&root.join("runtime-1.2.1"), 7), partial_dir(&root.join("runtime-1.2.2"), 7));

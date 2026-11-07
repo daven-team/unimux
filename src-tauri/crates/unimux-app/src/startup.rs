@@ -141,6 +141,14 @@ fn runtime_error_dialog(detail: &str) {
     std::thread::spawn(move || unimux_platform::error_box("unimux", &text));
 }
 
+/// A line in crash.log (once it is open); the macOS update bookkeeping logs through it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn log_info(line: &str) {
+    if let Some(log) = CRASH.get() {
+        log.info(line);
+    }
+}
+
 /// The start failed: say so (translated; the special text for a state.json another program holds) and end the process
 /// instead of keeping the instance lock with no window.
 pub fn startup_failed(detail: &str, unreadable_path: Option<&std::path::Path>) -> ! {

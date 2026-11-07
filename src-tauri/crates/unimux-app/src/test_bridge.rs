@@ -303,10 +303,13 @@ pub async fn test_bridge(
         }
         // SP6: the update window hand-over with a local installer (U1/U2 call it after the download and the wind-down), then
         // the app exits like an update does. Args: {installer, updaterRoot, version?, fromVersion?, language?, timeoutMs?,
-        // env? (extra environment of the window), webviewDir?, windDownMs?}.
+        // env? (extra environment of the window), webviewDir?, windDownMs?, swap? (U5: a bundle swap plan instead of the
+        // installer)}.
         "update-handover" => {
             let path = |key: &str| args.get(key).and_then(Value::as_str).map(std::path::PathBuf::from);
-            let installer = path("installer").ok_or_else(|| fail("update-handover needs installer"))?;
+            let installer = path("installer")
+                .or_else(|| args.get("swap").map(|_| std::path::PathBuf::new()))
+                .ok_or_else(|| fail("update-handover needs installer or swap"))?;
             let updater_root = path("updaterRoot").ok_or_else(|| fail("update-handover needs updaterRoot"))?;
             let hand = unimux_update::window::HandOver {
                 installer,
@@ -322,6 +325,12 @@ pub async fn test_bridge(
                     .and_then(Value::as_object)
                     .map(|env| env.iter().map(|(k, v)| (k.into(), v.as_str().unwrap_or_default().into())).collect()),
                 webview_dir: path("webviewDir"),
+                // U5: a bundle swap instead of the installer (a BundleSwapPlan; the harness runs it on a scratch bundle).
+                swap: args
+                    .get("swap")
+                    .map(|plan| serde_json::from_value(plan.clone()))
+                    .transpose()
+                    .map_err(|e| fail(&format!("update-handover swap: {e}")))?,
             };
             let result = tauri::async_runtime::spawn_blocking(move || unimux_update::window::hand_over(&hand))
                 .await
