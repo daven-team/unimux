@@ -30,6 +30,8 @@
 //                                     GitTrustStore's file format (PLAN G2; see scripts/goldens-git.mjs)
 //   test/golden/files-*.jsonl        project files: name order, path checks, previews, saves (see scripts/goldens-files.mjs) and
 //                                     the file operations and the local pane (files-ops.jsonl, see scripts/goldens-fileops.mjs)
+//   test/golden/search-*.jsonl       project search and replace: patterns, globs, project searches, replaces (see
+//                                     scripts/goldens-search.mjs)
 //   test/golden/accounts-store.jsonl, codex-accounts.jsonl, accounts-identity.jsonl   the account stores (1.1.4's code, run on
 //                                     scratch dirs) and the identity helpers (see scripts/goldens-accounts.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -38,6 +40,7 @@ import { updateConfigGolden, updateProgressRows, updateStringsGolden } from './g
 import { detachedRows, routeMessageRows } from './goldens-detached.mjs';
 import { filesGoldens } from './goldens-files.mjs';
 import { fileOpsGoldens } from './goldens-fileops.mjs';
+import { searchGoldens } from './goldens-search.mjs';
 import path, { dirname, resolve } from 'node:path';
 import { hookPayloadRows, hookServerRows } from './goldens-hooks.mjs';
 import { convGoldens } from './goldens-convsearch.mjs';
@@ -316,6 +319,7 @@ const files = {
   'files-save.jsonl': jsonl(fileGoldens.save),
   'files-parquet.jsonl': jsonl(fileGoldens.parquet),
   'files-ops.jsonl': jsonl(await fileOpsGoldens(load)),
+  ...Object.fromEntries(Object.entries(await searchGoldens(load)).map(([name, rows]) => [name, jsonl(rows)])),
   'hook-payloads.jsonl': jsonl(hookPayloadRows({ hooks, codexHooks })),
   'hook-server.jsonl': jsonl(await hookServerRows(hooks)),
   ...Object.fromEntries(Object.entries(await convGoldens(load)).map(([name, rows]) => [name, jsonl(rows)])),

@@ -11,11 +11,14 @@
 //! G6: the file operations of the tree (`fs:renameEntry`, `fs:createEntry`, `fs:deleteEntries`, `fs:transfer` with its
 //! `fs:progress` events at most every 120 ms, `fs:cancelOp`) and the SFTP view's local pane (`local:list`, `:roots`,
 //! `:mkdir`, `:rename`, `:trash`, `:reveal`). Deleted and replaced items go to the OS trash (MC_TRASH_DIR in dev builds).
+//!
+//! G7: project search and replace (`fs:searchProject`, `fs:replaceInProject`). A new search of a window cancels its running
+//! one (1.1.4 kept one AbortController per sender); the cancelled search answers the empty, truncated result nobody shows.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use parking_lot::Mutex;
 use serde_json::{Value, json};
@@ -28,6 +31,7 @@ use unimux_files::pane::{LocalPane, PaneDeps};
 use unimux_files::preview::Preview;
 use unimux_files::project::{self, DIRECTORIES_LIMIT};
 use unimux_files::save::{self, SaveResult};
+use unimux_files::search;
 use unimux_ipc::{IpcError, Reply, RouterBuilder};
 
 use crate::context::AppContext;
@@ -83,6 +87,42 @@ fn forbidden_roots(ctx: &AppContext) -> Vec<String> {
         }
     }
     roots.into_iter().map(|p| p.to_string_lossy().into_owned()).collect()
+}
+
+/// The running search of every window (by label): its id and cancel flag. A new search of a window (typing goes on) stops
+/// the previous one, whose answer nobody shows.
+#[derive(Default)]
+struct SearchRuns {
+    next: AtomicU64,
+    running: parking_lot::Mutex<HashMap<String, (u64, Arc<AtomicBool>)>>,
+    /// Held by tests so that searches wait before they walk the project until the test has started them all.
+    #[cfg(test)]
+    gate: parking_lot::RwLock<()>,
+}
+
+impl SearchRuns {
+    /// A new search of window `label`: its id and cancel flag; the search it replaces is told to stop.
+    fn start(&self, label: &str) -> (u64, Arc<AtomicBool>) {
+        let id = self.next.fetch_add(1, Ordering::SeqCst);
+        let flag = Arc::new(AtomicBool::new(false));
+        if let Some((_, previous)) = self.running.lock().insert(label.to_string(), (id, flag.clone())) {
+            previous.store(true, Ordering::SeqCst);
+        }
+        (id, flag)
+    }
+
+    /// The search `id` of window `label` ended: forgotten unless a newer one of the window replaced it.
+    fn finish(&self, label: &str, id: u64) {
+        let mut running = self.running.lock();
+        if running.get(label).is_some_and(|(current, _)| *current == id) {
+            running.remove(label);
+        }
+    }
+
+    #[cfg(test)]
+    fn current(&self, label: &str) -> Option<u64> {
+        self.running.lock().get(label).map(|(id, _)| *id)
+    }
 }
 
 pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
@@ -156,6 +196,18 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
             })
             .await?;
             Ok(result.to_json())
+        }
+    });
+
+    register_search(r, ctx, Arc::default());
+
+    let c = ctx.clone();
+    r.invoke("fs:replaceInProject", move |call| {
+        let c = c.clone();
+        async move {
+            let Some(root) = project_path(&c, call.arg(0)) else { return Ok(json!({ "ok": false, "error": GONE })) };
+            let request = call.arg(1).clone();
+            blocking(&call.command, move || search::replace_in_project(&root, &request)).await?.map_err(|e| call.fail(e.0))
         }
     });
 
@@ -358,6 +410,30 @@ fn register_local_pane(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     });
 }
 
+/// `fs:searchProject` with the running searches of the windows (`runs`).
+fn register_search(r: &mut RouterBuilder, ctx: &Arc<AppContext>, runs: Arc<SearchRuns>) {
+    let c = ctx.clone();
+    r.invoke("fs:searchProject", move |call| {
+        let (c, runs) = (c.clone(), runs.clone());
+        async move {
+            let Some(root) = project_path(&c, call.arg(0)) else { return Ok(json!({ "ok": false, "error": GONE })) };
+            let label = call.caller.label.clone();
+            let (id, flag) = runs.start(&label);
+            let options = call.arg(1).clone();
+            #[cfg(test)]
+            let walk = runs.clone();
+            let result = blocking(&call.command, move || {
+                #[cfg(test)]
+                let _gate = walk.gate.read();
+                search::search_project(&root, &options, &search::clock(), Some(&flag))
+            })
+            .await;
+            runs.finish(&label, id);
+            result?.map_err(|e| call.fail(e.0))
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,6 +631,114 @@ mod tests {
         let roots = json_of(call(&r, "local:roots", json!([])));
         assert_eq!(roots["home"], json!(unimux_core::home::home_dir().to_string_lossy()));
         assert_eq!(roots["drives"].as_array().unwrap().is_empty(), !cfg!(windows));
+        ctx.saver.stop();
+    }
+
+    #[test]
+    fn search_and_replace_answer_like_1_1_4() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("a.txt"), "żółw token\r\nŻÓŁW 😀 token\n").unwrap();
+        let ctx = context(data.path(), project.path());
+        let r = router(&ctx);
+        let found = json_of(call(&r, "fs:searchProject", json!(["p1", { "query": "żółw" }])));
+        assert_eq!(found["matches"], 2);
+        assert_eq!(found["files"][0]["matches"][1]["preview"], "ŻÓŁW 😀 token");
+        assert_eq!(
+            json_of(call(&r, "fs:searchProject", json!(["nope", { "query": "a" }]))),
+            json!({ "ok": false, "error": GONE })
+        );
+        // A malformed request rejects (1.1.4 threw a TypeError).
+        let caller =
+            Caller::new("main", "http://tauri.localhost/index.html").with_request_origin(Some("http://tauri.localhost".into()));
+        let thrown =
+            tauri::async_runtime::block_on(r.invoke(Call::new("fs:searchProject", caller, vec![json!("p1"), Value::Null])));
+        assert!(thrown.is_err());
+        let replaced = json_of(call(
+            &r,
+            "fs:replaceInProject",
+            json!(["p1", { "options": { "query": "token" }, "replacement": "😀", "scope": { "kind": "all" } }]),
+        ));
+        assert_eq!(replaced, json!({ "ok": true, "replaced": 2, "files": [{ "path": "a.txt", "replaced": 2 }] }));
+        assert_eq!(std::fs::read_to_string(project.path().join("a.txt")).unwrap(), "żółw 😀\r\nŻÓŁW 😀 😀\n");
+        assert_eq!(
+            json_of(call(&r, "fs:replaceInProject", json!(["nope", { "options": {}, "replacement": "", "scope": {} }]))),
+            json!({ "ok": false, "error": GONE })
+        );
+        ctx.saver.stop();
+    }
+
+    #[test]
+    fn search_runs_are_kept_per_window() {
+        let runs = SearchRuns::default();
+        let (a, first) = runs.start("main");
+        let (b, second) = runs.start("main");
+        assert!(first.load(Ordering::SeqCst), "a new search of the window stops the previous one");
+        assert!(!second.load(Ordering::SeqCst));
+        let (c, other) = runs.start("detached-abc");
+        assert!(!second.load(Ordering::SeqCst) && !other.load(Ordering::SeqCst), "another window's search runs on");
+        runs.finish("main", a);
+        assert_eq!(runs.current("main"), Some(b), "the stopped search does not forget the newer one");
+        runs.finish("main", b);
+        assert_eq!(runs.current("main"), None);
+        assert_eq!(runs.current("detached-abc"), Some(c));
+        runs.finish("detached-abc", c);
+        assert_eq!(runs.current("detached-abc"), None);
+    }
+
+    #[test]
+    fn a_new_search_of_a_window_cancels_only_its_previous_one() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("a.txt"), "token\n").unwrap();
+        let ctx = context(data.path(), project.path());
+        assert!(ctx.guard.register_detached("detached-abc"));
+        let runs = Arc::new(SearchRuns::default());
+        let mut builder = RouterBuilder::new(Contract::embedded());
+        register_search(&mut builder, &ctx, runs.clone());
+        assert!(builder.errors().is_empty(), "{:?}", builder.errors());
+        let r = Arc::new(builder.build(ctx.guard.clone()));
+        let search = |label: &str, project: &str| {
+            let caller = Caller::new(label, "http://tauri.localhost/index.html?detached=abc")
+                .with_request_origin(Some("http://tauri.localhost".into()));
+            let call = Call::new("fs:searchProject", caller, vec![json!(project), json!({ "query": "token" })]);
+            let r = r.clone();
+            tauri::async_runtime::spawn(async move { json_of(r.invoke(call).await.unwrap()) })
+        };
+        let wait_for = |label: &str, id: Option<u64>| {
+            let until = Instant::now() + std::time::Duration::from_secs(10);
+            while runs.current(label) != id {
+                assert!(Instant::now() < until, "{label} never had search {id:?}");
+                std::thread::yield_now();
+            }
+        };
+        let found = json!({
+            "ok": true, "files": [{ "path": "a.txt", "matches": [{
+                "line": 1, "column": 0, "text": "token", "preview": "token", "matchStart": 0, "matchLength": 5
+            }] }],
+            "matches": 1, "scanned": 1, "skipped": 0, "truncated": false
+        });
+        let cancelled = json!({ "ok": true, "files": [], "matches": 0, "scanned": 0, "skipped": 0, "truncated": true });
+
+        // Every search waits at the gate until all of them have started.
+        let gate = runs.gate.write();
+        let first = search("main", "p1");
+        wait_for("main", Some(0));
+        let other = search("detached-abc", "p1");
+        wait_for("detached-abc", Some(1));
+        // A project that is gone answers at once and leaves the running search alone.
+        let gone = tauri::async_runtime::block_on(search("main", "nope")).unwrap();
+        assert_eq!(gone, json!({ "ok": false, "error": GONE }));
+        assert_eq!(runs.current("main"), Some(0));
+        let second = search("main", "p1");
+        wait_for("main", Some(2));
+        drop(gate);
+
+        assert_eq!(tauri::async_runtime::block_on(first).unwrap(), cancelled);
+        assert_eq!(tauri::async_runtime::block_on(second).unwrap(), found);
+        assert_eq!(tauri::async_runtime::block_on(other).unwrap(), found);
+        wait_for("main", None);
+        wait_for("detached-abc", None);
         ctx.saver.stop();
     }
 

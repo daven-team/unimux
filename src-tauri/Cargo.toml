@@ -23,6 +23,8 @@ members = [
   "crates/unimux-update",
   "crates/unimux-hostd",
 ]
+# Patched third-party crates (see [patch.crates-io]); never workspace members (no fmt / clippy on upstream code).
+exclude = ["vendor"]
 
 [workspace.package]
 version = "1.2.0"
@@ -77,6 +79,11 @@ tempfile = "3"
 # M1 (MCP argument checks), G1 (the JS regexes of the git module: redactSecrets, SCRUBBED_ENV; JS semantics spelled out in the
 # patterns) and S2 (the ssh2 key-format regexes).
 regex = "1.13.1"
+# G7 (project search): the user's search patterns run on an ECMAScript engine over UTF-16 (V8's syntax, Annex B, `u`
+# folding, lookbehind, named groups, modifiers), so offsets and matches equal 1.1.4's RegExp; unicode-ident for V8's group
+# name rule in the Annex B syntax check.
+regress = { version = "0.12.0", features = ["utf16"] }
+unicode-ident = "1.0.27"
 windows = "0.62.2"
 libc = "0.2"
 webview2-com = "0.39.1"
@@ -152,6 +159,10 @@ indexmap = "2.14.2"
 unicode-normalization = "0.1.26"
 # H5: the index keeps its stat / read workers between passes (a thread start per pass and file was most of a rescan).
 rayon-core = "1.13.0"
+
+# G7: regress with V8's Annex B case-insensitive classes and other fixes (vendor/regress/Cargo.toml lists the patches).
+[patch.crates-io]
+regress = { path = "vendor/regress" }
 
 [profile.release]
 lto = "thin"
