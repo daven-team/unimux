@@ -6,7 +6,12 @@
 //! S1: the stores (`ctx.ssh`) and the channels that only read them or belong to the history store in 1.1.4
 //! (src/main/ssh/commandHistory.ts `registerCommandHistoryIpc`): `ssh:history:list` / `record` / `clear` / `status`, and
 //! the read-only `ssh:vault:info`, `ssh:storage:status`, `ssh:knownHosts:list` of src/main/ssh/ipc.ts. The other `ssh:*`
-//! channels (keys, passwords, connect, prompts) are S4's. Store work runs on the blocking pool.
+//! channels (keys, passwords) are S4's. Store work runs on the blocking pool.
+//!
+//! S3 ([`link`]): the SSH coordinator with its owner slots and event routes, and `ssh:connect`, `ssh:sessions`,
+//! `ssh:prompt:answer`.
+
+pub mod link;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,11 +22,14 @@ use unimux_ipc::{IpcError, RouterBuilder};
 use crate::context::AppContext;
 use crate::lifecycle::wind_down::phase;
 
+pub use link::{DbSink, DbTunnels, SshLink};
+
 async fn blocking<T: Send + 'static>(command: &str, f: impl FnOnce() -> T + Send + 'static) -> Result<T, IpcError> {
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| IpcError::failed(command, e.to_string()))
 }
 
 pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
+    link::register(r, ctx);
     let c = ctx.clone();
     r.invoke("ssh:vault:info", move |_call| {
         let c = c.clone();

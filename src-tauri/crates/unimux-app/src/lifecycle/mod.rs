@@ -169,6 +169,11 @@ impl Lifecycle {
         self.gating.load(Ordering::SeqCst)
     }
 
+    /// Another instance owns the data dir (S3: no SSH resume flags are written then).
+    pub fn is_superseded(&self) -> bool {
+        self.superseded.load(Ordering::SeqCst)
+    }
+
     /// The OS announced a session end less than a minute ago (`sessionEndingNow`).
     pub fn session_ending(&self) -> bool {
         session_ending_now(*self.session_ending_at.lock(), wall_ms(), SESSION_END_WINDOW_MS)
