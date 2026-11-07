@@ -5,10 +5,13 @@
 // dir and home from the script; nothing here ever reaches the real %APPDATA%\unimux, ~/.claude or ~/.codex.
 //
 // "Blocked by <package>": the check build records every window.mc command a page asked for that no package implements yet
-// (MC_NOT_YET_LOG, written by test_record.rs as it happens). When a script ends with a non-zero code and the run hit such
-// commands (or a test-bridge op a later package adds), it prints `BLOCKED by W4 (notify), P4 (cell:spawn)` and exits with 2
-// instead of 1: not a regression, a package that has not landed. MC_REAL_APP_REPORT=<file> also writes the result as JSON
-// (scripts/real-app-run.mjs runs them all and collects these).
+// (MC_NOT_YET_LOG, written by test_record.rs as it happens). The UI calls a set of them at every launch (cli:status,
+// usage:get, update:get ...: the startup baseline of real-app-baseline.mjs), so a failed script is blocked only by what it
+// exercised itself (real-app-owners.mjs classifyRun): a test-bridge op a later package adds, a not-yet command outside the
+// baseline, or a baseline command of a package the script tests (SCRIPT_PACKAGES). Then it prints
+// `BLOCKED by W4 (notify), P4 (cell:spawn)` and exits with 2 instead of 1: not a regression, a package that has not landed.
+// Any other failure stays a failure (exit 1), with the boot-time not-yet calls printed as info. MC_REAL_APP_REPORT=<file>
+// also writes the result as JSON (scripts/real-app-run.mjs runs them all and collects these).
 //
 // Exit codes: 0 pass, 1 fail, 2 blocked.
 import { execFileSync, spawn } from 'node:child_process';
@@ -17,7 +20,8 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BRIDGE_OP_OWNERS, blockedBy, formatBlocked } from './real-app-owners.mjs';
+import { cachedBaseline } from './real-app-baseline.mjs';
+import { BRIDGE_OP_OWNERS, SCRIPT_PACKAGES, blockedBy, classifyRun, formatBlocked } from './real-app-owners.mjs';
 import { appBinary, freePort, sleep } from './tauri-app.mjs';
 
 export { appBinary, freePort, sleep };
@@ -85,7 +89,7 @@ export class BlockedError extends Error {
   }
 }
 
-/** The packages this run waits for so far: [{owner, commands}]. */
+/** Every package whose not-yet command or test-bridge op this run hit so far: [{owner, commands}] (not only the cause). */
 export function blockers() {
   const groups = blockedBy(notYetCommands());
   for (const [owner, ops] of bridgeBlocks) {
@@ -103,21 +107,40 @@ let strict = false;
  */
 export function measurementNeedsCompleteApp() { strict = true; }
 
+/**
+ * The not-yet commands of a bare launch of the check build under test (real-app-baseline.mjs), null when they cannot be had.
+ * Synchronous (the exit handler needs it): the cache of the current binary, else one bare launch in a child process.
+ */
+export function startupBaselineSync() {
+  try {
+    const cached = cachedBaseline();
+    if (cached) return cached;
+    execFileSync(process.execPath, [join(ROOT, 'scripts', 'real-app-baseline.mjs')], { cwd: ROOT, stdio: 'ignore', windowsHide: true, timeout: 120000 });
+    return cachedBaseline();
+  } catch {
+    return null;
+  }
+}
+
 const script = basename(process.argv[1] ?? 'script');
 process.on('exit', (code) => {
   // Our own app processes only (a script that ended in an exception may have left one).
   for (const child of children) if (child.exitCode === null && child.signalCode === null) killAppTree(child.pid);
-  const groups = blockers();
-  const blocked = (code !== 0 || strict) && groups.length > 0;
-  if (blocked) {
-    console.log(`\nBLOCKED by ${formatBlocked(groups)}`);
+  const notYet = notYetCommands();
+  const bridge = [...bridgeBlocks].map(([owner, ops]) => ({ owner, commands: [...ops] }));
+  // Only a failure with not-yet calls needs the baseline; a pass never waits for a bare launch.
+  const baseline = isTauri && notYet.length && code !== 0 ? startupBaselineSync() : null;
+  const run = classifyRun({ code, strict, notYet, baseline, packages: SCRIPT_PACKAGES[script] ?? [], bridge });
+  if (run.result === 'blocked') {
+    console.log(`\nBLOCKED by ${formatBlocked(run.blocked)}`);
     process.exitCode = 2;
-  } else if (groups.length && isTauri) {
-    console.log(`\ninfo: not-yet commands during the run: ${formatBlocked(groups)}`);
+  } else if (run.seen.length && isTauri) {
+    const why = code === 0 ? '' : baseline ? ' (boot-time calls of the UI, not the cause)' : ' (no startup baseline: node scripts/real-app-baseline.mjs)';
+    console.log(`\ninfo: not-yet commands during the run${why}: ${formatBlocked(run.seen)}`);
   }
   if (process.env.MC_REAL_APP_REPORT) {
     try {
-      writeFileSync(process.env.MC_REAL_APP_REPORT, JSON.stringify({ script, target, code, result: blocked ? 'blocked' : code === 0 ? 'pass' : 'fail', blocked: groups }, null, 1));
+      writeFileSync(process.env.MC_REAL_APP_REPORT, JSON.stringify({ script, target, code, result: run.result, blocked: run.blocked, seen: run.seen }, null, 1));
     } catch { /* the runner reports a missing file */ }
   }
   if (reportDir && !runnerLogDir) try { rmSync(reportDir, { recursive: true, force: true }); } catch { /* a log still open */ }
@@ -205,11 +228,37 @@ export function waitForExit(child, ms) {
  * test bridge (`quit`), Electron closes the browser over CDP. `evaluate` / `cdp`: of the main page.
  */
 export async function quitApp({ child, evaluate, cdp, ms = 10000 }) {
+  const tree = treePids(child);
   if (isTauri) await bridgeCall(evaluate, 'quit').catch(() => undefined);
   else await Promise.race([cdp('Browser.close').catch(() => undefined), sleep(3000)]);
   const exited = await waitForExit(child, ms);
   if (!exited) killAppTree(child.pid);
+  await waitForPidsGone(tree, 5000);
   return exited;
+}
+
+const treePids = (child) => { try { return processTree(child.pid).map((p) => p.pid); } catch { return [child.pid]; } };
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+
+/**
+ * Waits until the processes of a tree we started (listed before it was told to end) are gone; whatever is left after `ms` (a
+ * WebView2 browser process that outlived its parent) is ended by pid. Afterwards nothing of ours holds the scratch folder.
+ */
+async function waitForPidsGone(pids, ms) {
+  const t0 = Date.now();
+  while (pids.some(alive) && Date.now() - t0 < ms) await sleep(100);
+  for (const pid of pids.filter(alive)) killAppTree(pid);
+  const t1 = Date.now();
+  while (pids.some(alive) && Date.now() - t1 < 3000) await sleep(100);
+}
+
+/** Ends the process tree of an app this script started and waits until all of it is gone (scratch folders can go then). */
+export async function killAppTreeAndWait(child, ms = 10000) {
+  if (!child?.pid) return;
+  const tree = treePids(child);
+  killAppTree(child.pid);
+  await waitForExit(child, ms);
+  await waitForPidsGone(tree, ms);
 }
 
 // ── the main-side control (replaces 1.1.4's mainInspector) ───────────────────────────────────────────────────────────────
@@ -255,7 +304,9 @@ const mainWin = `__el.BrowserWindow.getAllWindows().find((w) => !w.webContents.g
  *   minimize()                   a click on its minimize button; setBounds({x, y, width, height}) in DIP
  *   record(channels, {swallow})  record the renderer's calls of these channels (swallow: answer them without running)
  *   recorded(channel?)           the recorded calls [{channel, args}] since the last read
- *   stubToasts() / toasts() / toastClick(i) / toastAction(i, action)   the OS notifications the app shows (W4 adds them)
+ *   stubToasts() / toasts() / toastClick(i) / toastAction(i, action)   the OS notifications the app shows (W4 adds them);
+ *                                stubToasts keeps what was shown since the launch on both targets (every harness launch
+ *                                routes toasts to the list from the start), so a toast at startup is still seen
  *   stubTaskbar() / taskbar()    record the taskbar overlay / progress calls, read them (W7 adds them)
  * `page.evaluate`: of the main page; `inspectPort`: the Electron target's main inspector (spawnApp({inspectPort})).
  */

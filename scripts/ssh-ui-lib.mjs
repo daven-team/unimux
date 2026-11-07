@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { scrubAppEnv } from './app-env.mjs';
-import { bridgeCall, isMainPage, isTauri, killAppTree, mainControl, quitApp, requireBuild, spawnApp } from './real-app.mjs';
+import { bridgeCall, isMainPage, isTauri, killAppTreeAndWait, mainControl, quitApp, requireBuild, spawnApp } from './real-app.mjs';
 
 export const SHOTS = 'D:\\Projekty\\_shots';
 /** Scratch dirs live outside the repo, next to it: D:\Projekty\_tmp-ssh-<name>-<rand>. */
@@ -93,12 +93,23 @@ export async function launchApp(root, extraEnv = {}, extraArgs = [], options = {
   const child = spawnApp({ env, args: extraArgs, cwd: options.cwd ?? process.cwd(), stdio: ['ignore', 'ignore', 'pipe'], inspectPort });
   let stderr = '';
   child.stderr.on('data', (d) => { stderr = (stderr + d).slice(-4000); });
+  // Any step below that fails ends the app tree first and waits until it is gone, so the caller's scratch folder (which the
+  // app and its WebView2 processes hold open) can be removed in its finally.
+  try {
+    return await connectApp({ child, port, inspectPort, options, stderr: () => stderr });
+  } catch (error) {
+    await killAppTreeAndWait(child);
+    throw error;
+  }
+}
+
+async function connectApp({ child, port, inspectPort, options, stderr }) {
   let target;
   for (let i = 0; i < 150 && !target && child.exitCode === null; i++) {
     await sleep(200);
     try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(isMainPage); } catch { /* starting */ }
   }
-  if (!target) { killAppTree(child.pid); throw new Error(`the app window did not appear${child.exitCode !== null ? ` (exit ${child.exitCode})` : ''}\n${stderr}`); }
+  if (!target) throw new Error(`the app window did not appear${child.exitCode !== null ? ` (exit ${child.exitCode})` : ''}\n${stderr()}`);
   let ws;
   let next = 0;
   const pending = new Map();
@@ -149,14 +160,15 @@ export async function launchApp(root, extraEnv = {}, extraArgs = [], options = {
     writeFileSync(join(SHOTS, name), Buffer.from(data, 'base64'));
   };
   let main = null;
-  const close = async () => { main?.close(); try { ws.close(); } catch { /* closed */ } killAppTree(child.pid); await sleep(800); };
+  // Waits until the whole tree (WebView2 included) is gone, not a fixed time: the caller removes the scratch folder next.
+  const close = async () => { main?.close(); try { ws.close(); } catch { /* closed */ } await killAppTreeAndWait(child); };
   /** A normal quit (windows close, state saved), then our own tree kill for anything left. */
   const quit = async () => { const exited = await quitApp({ child, evaluate, cdp }); main?.close(); try { ws.close(); } catch { /* closed */ } return exited; };
   // A first connection to a page that is still starting sometimes never answers (seen on a loaded machine): a fresh
   // connection to the same target, up to 3 times, before giving up.
   for (let attempt = 1; ; attempt++) {
     try { await cdp('Runtime.enable', {}, 20000); break; } catch (error) {
-      if (attempt >= 3 || child.exitCode !== null) { killAppTree(child.pid); throw error; }
+      if (attempt >= 3 || child.exitCode !== null) throw error;
       try { ws.close(); } catch { /* closed */ }
       const again = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(isMainPage);
       await connect((again ?? target).webSocketDebuggerUrl);

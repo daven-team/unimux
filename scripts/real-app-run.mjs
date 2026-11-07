@@ -6,13 +6,14 @@
 //
 // --write-progress  replaces the "Real-app scripts" table of docs/tauri/PROGRESS.md (between the X1 markers) with this run.
 // Results: artifacts/real-app/<target>.json. Exit code 1 when a script failed (blocked ones do not fail the run: their
-// package has not landed; the list shrinks as packages land).
+// package has not landed; the list shrinks as packages land). A script is blocked only by what it exercised itself, not by
+// the boot-time not-yet calls of every launch (real-app.mjs, classifyRun): the runner takes that startup baseline once first.
 import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { APP_TARGET, ROOT, isTauri, requireBuild } from './real-app.mjs';
-import { blockedBy } from './real-app-owners.mjs';
+import { APP_TARGET, ROOT, isTauri, requireBuild, startupBaselineSync } from './real-app.mjs';
+import { SCRIPT_PACKAGES, classifyRun, formatBlocked } from './real-app-owners.mjs';
 
 const W = process.platform === 'win32';
 /**
@@ -73,23 +74,28 @@ function runOne(script) {
       clearTimeout(timer);
       let r = null;
       try { r = JSON.parse(readFileSync(report, 'utf8')); } catch { /* the script ended before writing it */ }
-      // Stopped at the timeout: its own exit report never came, its not-yet logs are still here.
+      // Stopped at the timeout: its own exit report never came, its not-yet logs are still here (sorted like the script would).
       if (!r && timedOut) {
         const seen = new Set();
         try { for (const f of readdirSync(logs)) for (const l of readFileSync(join(logs, f), 'utf8').split('\n')) if (l.trim()) seen.add(l.trim()); } catch { /* none */ }
-        if (seen.size) r = { result: 'blocked', blocked: blockedBy([...seen]) };
+        if (seen.size) r = classifyRun({ code: null, notYet: [...seen], baseline: startupBaselineSync(), packages: SCRIPT_PACKAGES[script.file] ?? [] });
       }
       try { rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* still held */ }
       const skipped = /^SKIP/m.test(out) || /\bskip(ped)?: Windows only/i.test(out);
       const result = code === 0 ? (skipped ? 'skip' : 'pass') : (code === 2 || timedOut) && r?.result === 'blocked' ? 'blocked' : 'fail';
       const tail = out.trim().split(/\r?\n/).filter((l) => l.trim()).slice(-6).join('\n');
-      resolve({ result, code, ms: Date.now() - started, blocked: r?.blocked ?? [], tail });
+      resolve({ result, code, ms: Date.now() - started, blocked: r?.blocked ?? [], seen: r?.seen ?? [], tail });
     });
   });
 }
 
 if (process.argv[1]?.endsWith('real-app-run.mjs')) {
   requireBuild();
+  // Once, before the first script: no script pays for the bare launch, and every one is judged against the same set.
+  if (isTauri) {
+    const baseline = startupBaselineSync();
+    console.log(baseline ? `startup baseline (not-yet calls of a bare launch): ${baseline.join(', ') || 'none'}` : 'startup baseline: not available (failures with not-yet calls stay failures)');
+  }
   const outDir = join(ROOT, 'artifacts', 'real-app');
   mkdirSync(outDir, { recursive: true });
   const results = [];
@@ -103,7 +109,10 @@ if (process.argv[1]?.endsWith('real-app-run.mjs')) {
     results.push({ file: script.file, gate: !!script.gate, ...r });
     const owners = r.blocked?.map((g) => g.owner).join(', ');
     console.log(`${r.result.toUpperCase().padEnd(8)} ${script.file.padEnd(28)} ${r.ms ? `${Math.round(r.ms / 1000)} s` : ''} ${r.result === 'blocked' ? `by ${owners}` : r.why ?? ''}`);
-    if (r.result === 'fail') console.log(r.tail.replace(/^/gm, '         | '));
+    if (r.result === 'fail') {
+      console.log(r.tail.replace(/^/gm, '         | '));
+      if (r.seen?.length) console.log(`         not-yet seen (not the cause): ${formatBlocked(r.seen)}`);
+    }
   }
   const at = new Date().toISOString();
   // --only / --skip re-runs part of the list: the other scripts keep their result of the last full run.
@@ -133,7 +142,7 @@ function writeProgress(results, at) {
   const end = `<!-- X1 real-app status (${APP_TARGET}) end -->`;
   const rows = results.map((r) => {
     const detail = r.result === 'blocked' ? r.blocked.map((g) => `${g.owner} (${g.commands.join(', ')})`).join('; ')
-      : r.result === 'fail' ? r.tail.split('\n').at(-1).replace(/\|/g, '/').slice(0, 160) : r.why ?? '';
+      : r.result === 'fail' ? `${r.tail.split('\n').filter((l) => !/^(info:|BLOCKED)/.test(l)).at(-1)?.replace(/\|/g, '/').slice(0, 160) ?? ''}${r.seen?.length ? ` (not-yet seen: ${r.seen.map((g) => g.owner).join(', ')})` : ''}` : r.why ?? '';
     return `| ${r.file}${r.gate ? ' (release gate)' : ''} | ${r.result} | ${r.result === 'blocked' ? r.blocked.map((g) => g.owner).join(', ') : ''} | ${detail} |`;
   });
   const table = [start, `Run: ${at.slice(0, 16).replace('T', ' ')} UTC, target ${APP_TARGET}${isTauri ? ' (check build)' : ''}, \`node scripts/real-app-run.mjs --write-progress${isTauri ? '' : ' --target=electron'}\`.`, '',

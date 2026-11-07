@@ -66,10 +66,18 @@ console.log(`Releasing ${tag} on ${repository}: "release: ${next} with ${title}"
 // app as it ships (the Tauri check build of this commit: npm run build:check). A blocked result (exit code 2: a package has
 // not landed) stops the release like a failure. Run in a dry run too, so a release never gets as far as the tag without them.
 const GATES = ['scripts/verify-cli-contract.mjs', 'scripts/verify-team-start.mjs'];
+// The check build is made from this working tree right here (only the release notes may differ from this commit), never
+// taken from whatever an earlier build left in src-tauri/target/check; the gates run on the Tauri target and that binary
+// only, whatever MC_APP_TARGET / MC_APP_BINARY the shell still has.
+step('Check build of this commit (npm run build:check)');
+try { run(NPM, ['run', 'build:check'], { inherit: true }); }
+catch { fail('npm run build:check failed. The release gates need the check build of this commit.'); }
+const gateEnv = { ...process.env, MC_APP_TARGET: 'tauri' };
+delete gateEnv.MC_APP_BINARY;
 step(`Release gates: ${GATES.map((g) => g.replace('scripts/', '')).join(', ')}`);
 for (const gate of GATES) {
-  try { execFileSync(process.execPath, [gate], { stdio: 'inherit' }); }
-  catch (error) { fail(`${gate} ${error.status === 2 ? 'is blocked (a package has not landed)' : 'failed'}. Fix it before releasing (build the check flavour first: npm run build:check).`); }
+  try { execFileSync(process.execPath, [gate], { stdio: 'inherit', env: gateEnv }); }
+  catch (error) { fail(`${gate} ${error.status === 2 ? 'is blocked (a package has not landed)' : 'failed'}. Fix it before releasing.`); }
 }
 
 if (dryRun) {

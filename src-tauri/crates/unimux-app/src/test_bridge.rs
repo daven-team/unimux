@@ -41,6 +41,8 @@ pub async fn test_bridge(
     match op.as_str() {
         // The state as Rust holds it (revision, the state itself, whether a save is pending).
         "state" => Ok(json!({ "snapshot": ctx.state.snapshot().to_json(), "savePending": ctx.saver.has_pending() })),
+        // The state as Rust loaded and normalized it at startup (revision 0), whatever the renderer edited since.
+        "loaded" => Ok(json!({ "snapshot": ctx.test_loaded })),
         "flush" => Ok(json!({ "saved": ctx.flush_state() })),
         "paths" => Ok(json!({
             "dataDir": ctx.data_dir,

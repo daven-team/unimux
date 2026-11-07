@@ -96,3 +96,65 @@ export function blockedBy(commands) {
 }
 
 export const formatBlocked = (groups) => groups.map((g) => `${g.owner} (${g.commands.join(', ')})`).join(', ');
+
+/**
+ * Packages a script tests although the UI already calls their commands at every launch (the startup baseline, see
+ * classifyRun): a not-yet answer of one of these blocks the script even when the call came from the boot of the UI. Every
+ * other boot-time call (cli:status, update:get, ... in a script that does not test them) is only shown as info.
+ */
+export const SCRIPT_PACKAGES = {
+  'verify-accounts-ui.mjs': ['A1', 'A2', 'A5'],
+  'verify-auto-switch-ui.mjs': ['A2', 'A5'],
+  'verify-limits-ui.mjs': ['A5'],
+  'verify-dead-login-ui.mjs': ['A1', 'A2', 'A5'],
+  'verify-first-login-ui.mjs': ['A2', 'A4'],
+  'verify-agent-close.mjs': ['W6'],
+  'verify-conv-export.mjs': ['H4', 'H5'],
+  'verify-conv-search.mjs': ['H4', 'H5'],
+  'verify-db-core.mjs': ['D1'],
+  'verify-db-mysql-ui.mjs': ['D1', 'D12'],
+  'verify-db-pg-ui.mjs': ['D1', 'D12'],
+  'verify-db-redis-ui.mjs': ['D1', 'D12'],
+  'verify-db-redis.mjs': ['D1', 'D12'],
+  'verify-db-sqlite-ui.mjs': ['D1', 'D12'],
+  'verify-detach-db.mjs': ['D1', 'D12', 'W5'],
+  'verify-git-layout.mjs': ['G3'],
+  'verify-sftp-edit.mjs': ['T1'],
+  'verify-sftp-path.mjs': ['T1'],
+  'verify-sftp-ui.mjs': ['T1'],
+  'verify-ssh-bar.mjs': ['S1', 'S3'],
+  'verify-ssh-paths.mjs': ['S1', 'S3'],
+  'verify-ssh-ui.mjs': ['S1', 'S3'],
+  'verify-update-wait.mjs': ['U1'],
+};
+
+/**
+ * The result of a run on the Tauri check build (PLAN X1).
+ *   code       the script's exit code (null: stopped at the runner's timeout)
+ *   strict     a measurement: any not-yet call makes its numbers meaningless, so it is blocked even when it passed
+ *   notYet     every not-yet command of the run; baseline: those a bare launch of the same build calls (null: unknown)
+ *   packages   SCRIPT_PACKAGES of the script; bridge: [{owner, commands}] of test-bridge ops a later package adds
+ * A failed run is "blocked" only by what it exercised itself: a test-bridge op that is missing, a not-yet command that is not
+ * in the startup baseline (the script's own steps called it), or a baseline command of a package the script tests. A failure
+ * with only other boot-time not-yet calls is a "fail" (a regression in a package that landed, or in the script): they are
+ * listed as `seen`, never as the cause. Without a baseline nothing can be told apart, so only missing test-bridge ops block.
+ */
+export function classifyRun({ code, strict = false, notYet, baseline, packages = [], bridge = [] }) {
+  const seen = blockedBy(notYet);
+  const withBridge = (groups) => {
+    for (const { owner, commands } of bridge) {
+      const group = groups.find((g) => g.owner === owner);
+      if (group) group.commands.push(...commands.filter((c) => !group.commands.includes(c)));
+      else groups.push({ owner, commands: [...commands] });
+    }
+    return groups.sort((a, b) => a.owner.localeCompare(b.owner, 'en', { numeric: true }));
+  };
+  if (code === 0) {
+    const blocked = strict ? withBridge(blockedBy(notYet)) : [];
+    return { result: blocked.length ? 'blocked' : 'pass', blocked, seen };
+  }
+  const base = baseline ? new Set(baseline) : null;
+  const own = base ? notYet.filter((c) => !base.has(c) || packages.includes(ownerOf(c))) : [];
+  const blocked = withBridge(blockedBy(own));
+  return { result: blocked.length ? 'blocked' : 'fail', blocked, seen };
+}
