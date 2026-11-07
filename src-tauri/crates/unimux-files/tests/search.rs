@@ -55,6 +55,39 @@ fn supports_regular_expressions_and_reports_invalid_ones() {
 }
 
 #[test]
+fn a_query_that_is_no_string_throws_only_in_literal_mode() {
+    // 1.1.4: escapeRegExp called `.replace` on it; a regex search gave it to `new RegExp`, which took String(value).
+    let thrown = SearchOptions::from_json(&json!({ "query": 5 })).unwrap_err();
+    assert_eq!(thrown.0, "text.replace is not a function");
+    assert_eq!(texts("x 5 15", json!({ "query": 5, "regex": true })), ["5", "5"]);
+    assert_eq!(texts("k,,2 k", json!({ "query": ["k", null, 2], "regex": true })), ["k,,2"]);
+    assert_eq!(texts("0.5", json!({ "query": 0.5, "regex": true })), ["0.5"]);
+    assert_eq!(regex_of(json!({ "query": [], "regex": true })).flags(), "giu");
+    assert!(SearchOptions::from_json(&json!({ "query": 0, "regex": true })).unwrap().query.is_empty());
+}
+
+#[test]
+fn negated_class_escapes_inside_a_class_fold_like_v8() {
+    // WordCharacters with `i` and `u` hold U+017F and U+212A, so [\W] leaves out k, s and both of them.
+    let sample = "k K s S \u{17f} \u{212a} - x";
+    assert_eq!(texts(sample, json!({ "query": "[\\W]", "regex": true })).join(""), "      - ");
+    assert_eq!(texts(sample, json!({ "query": "[^\\W]", "regex": true })).join(""), "kKsS\u{17f}\u{212a}x");
+    assert_eq!(texts(sample, json!({ "query": "[\\W]", "regex": true, "caseSensitive": true })).len(), 10);
+}
+
+#[test]
+fn deep_nesting_and_astral_group_names_compile_like_v8() {
+    let deep = format!("{}a{}", "(".repeat(3000), ")".repeat(3000));
+    assert_eq!(texts("xa", json!({ "query": deep, "regex": true })), ["a"]);
+    assert_eq!(texts("xa", json!({ "query": format!("{deep}{{"), "regex": true })), Vec::<String>::new());
+    let too_deep = format!("{}a{}", "(".repeat(10_001), ")".repeat(10_001));
+    assert!(JsRegex::new(&too_deep, true, true).unwrap_err().contains("too deeply nested"));
+    // `{` fails with `u`; without it the name's surrogate pair is one character, as in V8.
+    assert_eq!(regex_of(json!({ "query": "(?<\u{1d4d0}>a)\\k<\u{1d4d0}>{", "regex": true })).flags(), "gi");
+    assert_eq!(regex_of(json!({ "query": "(?<a\u{e0100}>a){", "regex": true })).flags(), "gi");
+}
+
+#[test]
 fn reports_line_and_column_of_every_match_and_a_shortened_preview() {
     let long = format!("{}needle{}", "x".repeat(200), "y".repeat(400));
     let (matches, _) =

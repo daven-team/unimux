@@ -1,8 +1,14 @@
-# regress 0.12.0 (crates.io, MIT OR Apache-2.0) with one unimux patch (G7, docs/tauri/PROGRESS.md "G7 open issues"):
-# without the `u` flag a case-insensitive character class (`[a-z]`, `\w`) is closed under the Annex B Canonicalize rule
+# regress 0.12.0 (crates.io, MIT OR Apache-2.0) with unimux patches (G7, docs/tauri/PROGRESS.md "G7 open issues"), each
+# marked `unimux patch` in the source.
+# 1. Without the `u` flag a case-insensitive character class (`[a-z]`, `\w`) is closed under the Annex B Canonicalize rule
 # (toUpperCase, never from non-ASCII to ASCII) like V8, instead of Unicode simple case folding (upstream used the folding for
 # both modes, so /[a-z]/i matched the Kelvin sign U+212A and /\w/i matched U+017F). The patch is in src/unicode.rs
-# (`add_icase_code_points_legacy`) and src/parse.rs (the two call sites). The upstream tests are not vendored.
+# (`add_icase_code_points_legacy`) and src/parse.rs (the two call sites).
+# 2. With `i` and `u`, a negated class escape inside a class (`[\W]`, `[^\W\d]`) is the complement of the folded positive set
+#    (src/parse.rs `add_class_atom`), so the closure at `]` does not bring back k, s, U+017F and U+212A, as in V8.
+# 3. Without `u`, a group name joins a literal surrogate pair into one character (src/parse.rs `next_group_name_code_point`).
+# 4. MAX_NESTING_DEPTH is 10,000 instead of 256 (src/types.rs); unimux-files compiles deep patterns on a large stack.
+# The upstream tests are not vendored.
 [package]
 edition = "2024"
 name = "regress"

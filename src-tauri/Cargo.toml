@@ -158,7 +158,7 @@ unicode-normalization = "0.1.26"
 # H5: the index keeps its stat / read workers between passes (a thread start per pass and file was most of a rescan).
 rayon-core = "1.13.0"
 
-# G7: regress with V8's Annex B case-insensitive classes (vendor/regress/Cargo.toml says what the patch changes).
+# G7: regress with V8's Annex B case-insensitive classes and other fixes (vendor/regress/Cargo.toml lists the patches).
 [patch.crates-io]
 regress = { path = "vendor/regress" }
 

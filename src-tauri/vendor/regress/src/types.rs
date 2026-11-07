@@ -20,7 +20,9 @@ pub type LoopID = u16;
 
 /// The maximum nesting depth of groups, lookarounds, and nested classes.
 /// This bounds parser recursion to prevent a stack overflow on adversarial input.
-pub const MAX_NESTING_DEPTH: u32 = 256;
+/// unimux patch: 10,000 instead of 256, since V8 compiles and runs 10,000 nested groups; unimux-files compiles a deeply
+/// nested pattern on a thread with a large stack (jsregex.rs `DEEP_STACK`).
+pub const MAX_NESTING_DEPTH: u32 = 10_000;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CharacterClassType {

@@ -6,6 +6,11 @@
 
 use regress::{Flags, Match, Regex};
 
+/// Above this many `(` and `[` a pattern is compiled on its own thread with [`DEEP_STACK`].
+const DEEP_SOURCE: usize = 200;
+/// The stack of that thread (reserved, committed as used): enough for regress's limit of 10,000 nested groups.
+const DEEP_STACK: usize = 512 << 20;
+
 /// A compiled pattern with the flags 1.1.4 gave it (`g` is the caller's loop).
 #[derive(Debug, Clone)]
 pub struct JsRegex {
@@ -17,6 +22,22 @@ pub struct JsRegex {
 impl JsRegex {
     /// `new RegExp(source, flags)` for the flags `i` and `u` (others are not used by the search).
     pub fn new(source: &str, icase: bool, unicode: bool) -> Result<Self, String> {
+        // The parsers (V8's grammar check and regress) recurse once per nested group or class; past a few hundred levels
+        // that needs more than a pool thread's stack. The compiled program is flat, so matching runs on any thread.
+        if source.bytes().filter(|&b| b == b'(' || b == b'[').count() > DEEP_SOURCE {
+            let source = source.to_string();
+            return std::thread::Builder::new()
+                .name("unimux-regex-compile".into())
+                .stack_size(DEEP_STACK)
+                .spawn(move || Self::compile(&source, icase, unicode))
+                .map_err(|e| e.to_string())?
+                .join()
+                .unwrap_or_else(|_| Err("Regular expression is too deeply nested".into()));
+        }
+        Self::compile(source, icase, unicode)
+    }
+
+    fn compile(source: &str, icase: bool, unicode: bool) -> Result<Self, String> {
         let flags = Flags { icase, unicode, ..Flags::default() };
         if !unicode && let Some(reason) = annex_b_error(source) {
             return Err(reason.to_string());

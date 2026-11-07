@@ -351,14 +351,23 @@ fn make_bracket_class(ct: CharacterClassType, positive: bool, icase: bool, unico
     ir::Node::Bracket(BracketContents { invert: false, cps })
 }
 
-fn add_class_atom(bc: &mut BracketContents, atom: ClassAtom) {
+/// unimux patch: `unicode_icase` (the `i` and `u` flags) adds a negated escape (`\W`, `\D`, `\S`) inside a class like
+/// `make_bracket_class` does: the complement of the case-insensitive closure of the positive set. The closure of the whole
+/// class at `]` then cannot bring back letters whose folding is a word character (upstream added the plain complement, so
+/// `/[\W]/iu` matched k, s, U+017F and U+212A, which V8 leaves out because WordCharacters holds U+017F and U+212A).
+fn add_class_atom(bc: &mut BracketContents, unicode_icase: bool, atom: ClassAtom) {
     match atom {
         ClassAtom::CodePoint(c) => bc.cps.add_one(c),
         ClassAtom::CharacterClass {
             class_type,
             positive,
         } => {
-            bc.cps.add_set(codepoints_from_class(class_type, positive));
+            if unicode_icase && !positive {
+                let folded = unicode::add_icase_code_points_for(codepoints_from_class_positive(class_type), true);
+                bc.cps.add_set(folded.inverted());
+            } else {
+                bc.cps.add_set(codepoints_from_class(class_type, positive));
+            }
         }
         ClassAtom::Range { iv, negate } => {
             if negate {
@@ -834,6 +843,7 @@ where
     fn consume_bracket(&mut self) -> Result<ir::Node, Error> {
         self.consume('[');
         let invert = self.try_consume('^');
+        let unicode_icase = self.flags.icase && self.flags.unicode;
         let mut result = BracketContents {
             invert,
             cps: CodePointSet::default(),
@@ -861,14 +871,14 @@ where
 
             // Check for a dash; we may have a range.
             if !self.try_consume('-') {
-                add_class_atom(&mut result, first);
+                add_class_atom(&mut result, unicode_icase, first);
                 continue;
             }
 
             let Some(second) = self.try_consume_bracket_class_atom()? else {
                 // No second atom. For example: [a-].
-                add_class_atom(&mut result, first);
-                add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')));
+                add_class_atom(&mut result, unicode_icase, first);
+                add_class_atom(&mut result, unicode_icase, ClassAtom::CodePoint(u32::from('-')));
                 continue;
             };
 
@@ -893,9 +903,9 @@ where
             }
 
             // If it does not match a range treat as any match single characters.
-            add_class_atom(&mut result, first);
-            add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')));
-            add_class_atom(&mut result, second);
+            add_class_atom(&mut result, unicode_icase, first);
+            add_class_atom(&mut result, unicode_icase, ClassAtom::CodePoint(u32::from('-')));
+            add_class_atom(&mut result, unicode_icase, second);
         }
     }
 
@@ -1839,6 +1849,19 @@ where
         }
     }
 
+    /// unimux patch: the next code point of a group name. Without the `u` flag the input is UTF-16 code units, so a
+    /// literal character past U+FFFF comes as a surrogate pair, which V8 joins in a group name (upstream refused it).
+    fn next_group_name_code_point(&mut self) -> Option<u32> {
+        let c = self.next()?;
+        if !self.flags.unicode && (0xD800..=0xDBFF).contains(&c) {
+            if let Some(trail) = self.peek().filter(|t| (0xDC00..=0xDFFF).contains(t)) {
+                self.next();
+                return Some(0x10000 + ((c - 0xD800) << 10) + (trail - 0xDC00));
+            }
+        }
+        Some(c)
+    }
+
     fn try_consume_named_capture_group_name(&mut self) -> Option<String> {
         if !self.try_consume('<') {
             return None;
@@ -1847,7 +1870,7 @@ where
         let orig_input = self.input.clone();
         let mut group_name = String::new();
 
-        if let Some(mut c) = self.next().and_then(char::from_u32) {
+        if let Some(mut c) = self.next_group_name_code_point().and_then(char::from_u32) {
             if c == '\\' && self.try_consume('u') {
                 if let Some(escaped) = self.try_escape_unicode_sequence().and_then(char::from_u32) {
                     c = escaped;
@@ -1869,7 +1892,7 @@ where
         }
 
         loop {
-            if let Some(mut c) = self.next().and_then(char::from_u32) {
+            if let Some(mut c) = self.next_group_name_code_point().and_then(char::from_u32) {
                 if c == '\\' && self.try_consume('u') {
                     if let Some(escaped) =
                         self.try_escape_unicode_sequence().and_then(char::from_u32)

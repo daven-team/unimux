@@ -48,6 +48,9 @@ pub fn truthy(v: &Value) -> bool {
 #[derive(Debug, Clone, Default)]
 pub struct SearchOptions {
     pub query: String,
+    /// The query was a truthy value that is no string (a regex search only): `String(value)` may be empty (`[]`), and
+    /// 1.1.4 still compiled it, since its empty check was `!options.query`.
+    pub query_object: bool,
     pub case_sensitive: bool,
     pub whole_word: bool,
     pub regex: bool,
@@ -66,9 +69,12 @@ impl SearchOptions {
             )));
         };
         let get = |k: &str| o.get(k).unwrap_or(&Value::Null);
-        let query = match get("query") {
-            Value::String(s) => s.clone(),
-            q if !truthy(q) => String::new(),
+        // Only escapeRegExp called `.replace` on the query; a regex search gave any value to `new RegExp`, which took
+        // `String(value)`.
+        let (query, query_object) = match get("query") {
+            Value::String(s) => (s.clone(), false),
+            q if !truthy(q) => (String::new(), false),
+            q if truthy(get("regex")) => (js_string(q), true),
             _ => return Err(Thrown("text.replace is not a function".into())),
         };
         let spec = |k: &str| match get(k) {
@@ -78,6 +84,7 @@ impl SearchOptions {
         };
         Ok(Self {
             query,
+            query_object,
             case_sensitive: truthy(get("caseSensitive")),
             whole_word: truthy(get("wholeWord")),
             regex: truthy(get("regex")),
@@ -85,6 +92,25 @@ impl SearchOptions {
             exclude: spec("exclude")?,
             include_ignored: truthy(get("includeIgnored")),
         })
+    }
+}
+
+/// `String(value)` of a JSON value: numbers as JS prints them, arrays joined with `,` (null as empty), objects as
+/// `[object Object]`.
+fn js_string(v: &Value) -> String {
+    match v {
+        Value::Null => "null".into(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => match n.as_f64() {
+            Some(0.0) => "0".into(), // -0 too
+            Some(f) => ryu_js::Buffer::new().format(f).to_string(),
+            None => n.to_string(),
+        },
+        Value::String(s) => s.clone(),
+        Value::Array(items) => {
+            items.iter().map(|x| if x.is_null() { String::new() } else { js_string(x) }).collect::<Vec<_>>().join(",")
+        }
+        Value::Object(_) => "[object Object]".into(),
     }
 }
 
@@ -102,7 +128,7 @@ pub fn escape_regexp(text: &str) -> String {
 
 /// `buildPattern`: the compiled search, `Err(None)` for an empty query, `Err(Some(message))` for an invalid expression.
 pub fn build_pattern(options: &SearchOptions) -> Result<JsRegex, Option<String>> {
-    if options.query.is_empty() {
+    if options.query.is_empty() && !options.query_object {
         return Err(None);
     }
     let body = if options.regex { options.query.clone() } else { escape_regexp(&options.query) };

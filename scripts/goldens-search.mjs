@@ -80,6 +80,11 @@ const REGEXES = [
   'a(?=b)', 'a(?!b)', '(?=a)', '(?:)', '()', '(|a)', 'a(?<x>b)?c', '(?<x>a)|b', '$1', '\\b', '\\B', '^$', '\\n', '\\r', '\\t', '\\v', '\\f', '[\\b]', '[\\B]',
   '\\d{2}', '\\d{1,2}(?!\\d)', '(\\d)(\\d)?', '(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)', 'é', 'e\\u0301', '\\p{M}', '[\\p{L}\\p{M}]+', '(?:x', '(?<x', '(?<x>', '(?<>x)',
   '\\-😀', '[😀]{', '😀{', '😀+{', '[^😀]{', '.{', '(?<😀>x)', '\\-[😀-😁]', '\\-ż.', 'ſ{', '[ſk]{', '\\w{', 'ı{', '[ı]{', '\\-ſ',
+  // Negated class escapes inside a class (the `i` closure must not bring back k, s, U+017F, U+212A), astral group names in
+  // the non-`u` fallback (`{` fails with `u`) and deep nesting.
+  '[\\W]', '[\\W\\d]', '[^\\W]', '[\\Ws]', '[\\W_]', '[^\\W\\d]', '[\\Wx]', '[\\D]', '[^\\D]', '[\\S]', '[^\\S]', '[\\W]{', '[^\\W]{',
+  '(?<𝓐>a){', '(?<𝓐>a)\\k<𝓐>{', '(?<a\u{E0100}>a){', '(?<\\u{1D4D0}>a){', '(?<\\uD835\\uDCD0>a){', '(?<𝓐>a)', '(?<a😀>a){',
+  `${'('.repeat(300)}a${')'.repeat(300)}`, `${'('.repeat(300)}a${')'.repeat(300)}{`, `${'(?:'.repeat(1000)}k${')'.repeat(1000)}`,
 ];
 
 /** Random patterns from regex pieces: what V8 accepts (with or without `u`), what it refuses and with which message. */
@@ -137,6 +142,9 @@ function patternOptions() {
   }
   for (const query of randomPatterns(400)) rows.push({ query, regex: true, caseSensitive: query.length % 2 === 0 });
   rows.push({ query: '' }, { query: '', regex: true }, { query: 'a', regex: 1, caseSensitive: 'yes', wholeWord: 0 });
+  // A query that is no string: a regex search gave it to `new RegExp` (String(value)); only escapeRegExp threw.
+  rows.push({ query: 5, regex: true }, { query: 1.5e21, regex: true, wholeWord: true }, { query: [], regex: true },
+    { query: ['k', null, 2], regex: true }, { query: true, regex: true }, { query: {}, regex: true });
   return rows;
 }
 
