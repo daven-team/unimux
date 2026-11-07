@@ -108,6 +108,18 @@ redis = { version = "1.8.1", default-features = false, features = ["tokio-comp"]
 fallible-iterator = "0.2.0"
 # mysql_common needs one flate2 backend: the pure Rust one (no C zlib build).
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# B3 (unimux-net): an own HTTP client on hyper's connection API, because reqwest 0.13 always adds `Accept: */*` and the token
+# renewal must put exactly the given headers on the wire. TLS: rustls with the ring provider and the OS trust store
+# (rustls-platform-verifier, like Chromium's system verifier). rcgen only in the tests (self-signed server certificates).
+http = "1.5.0"
+url = "2.5.8"
+tower-service = "0.3.3"
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+rustls-platform-verifier = "0.7.1"
+core-foundation = "0.10.1"
+core-foundation-sys = "0.8.7"
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
 
 [profile.release]
 lto = "thin"
