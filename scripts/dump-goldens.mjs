@@ -29,6 +29,8 @@
 //   test/golden/files-*.jsonl        project files: name order, path checks, previews, saves (see scripts/goldens-files.mjs)
 //   test/golden/accounts-store.jsonl, codex-accounts.jsonl, accounts-identity.jsonl   the account stores (1.1.4's code, run on
 //                                     scratch dirs) and the identity helpers (see scripts/goldens-accounts.mjs)
+//   test/golden/accounts-activate.jsonl  "make main", its version-2 recovery and the 0.9.0 recovery on scratch dirs (1.1.4's
+//                                     code; see scripts/goldens-activate.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
 import { updateConfigGolden, updateProgressRows, updateStringsGolden } from './goldens-update.mjs';
@@ -39,6 +41,7 @@ import { hookPayloadRows, hookServerRows } from './goldens-hooks.mjs';
 import { convGoldens } from './goldens-convsearch.mjs';
 import { DB_MODULES, dbGoldens } from './goldens-db.mjs';
 import { accountsStoreRows, codexStoreRows, identityRows } from './goldens-accounts.mjs';
+import { activateRows } from './goldens-activate.mjs';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -62,6 +65,8 @@ const [{ AccountsStore }, { CodexAccountsStore }, accounts, codex, { parseCodexA
   load('src/main/accounts/store.ts'), load('src/main/accounts/codexStore.ts'), load('src/shared/accounts.ts'), load('src/shared/codexAccounts.ts'),
   load('src/main/accounts/codexActivate.ts'), load('src/main/usage/parse.ts'),
 ]);
+// One module graph, so activate.ts and the swap slot flags it sets are the same instance.
+const activateModules = await load('scripts/goldens-activate.entry.ts');
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
 function rng(seed) {
@@ -314,6 +319,7 @@ const files = {
   'accounts-store.jsonl': jsonl(accountsStoreRows({ AccountsStore })),
   'codex-accounts.jsonl': jsonl(codexStoreRows({ CodexAccountsStore })),
   'accounts-identity.jsonl': jsonl(identityRows({ accounts, codex, parseCodexAuth, decodeJwtClaims })),
+  'accounts-activate.jsonl': jsonl(await activateRows(activateModules)),
 };
 const updateStrings = updateStringsGolden({ root, translate });
 files['update-strings.json'] = `${JSON.stringify(updateStrings, null, 1)}\n`;
