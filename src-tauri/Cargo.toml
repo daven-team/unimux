@@ -68,6 +68,8 @@ interprocess = "2.4.7"
 process-wrap = { version = "10.0.1", default-features = false, features = ["std", "job-object", "process-group", "kill-on-drop"] }
 junction = "2.1.0"
 dunce = "1.0.5"
+# W3: the one-time read of 1.1.x's localStorage (Chromium leveldb, snappy tables).
+rusty-leveldb = { version = "4.0.2", default-features = false, features = ["fs"] }
 sha2 = "0.11.1"
 base64 = "0.23.1"
 futures = "0.3"

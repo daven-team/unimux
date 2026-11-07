@@ -12,5 +12,5 @@
     "types": ["node"],
     "composite": true
   },
-  "include": ["electron.vite.config.ts", "electron.vite.messages.ts", "vite.config.tauri.ts", "vitest.config.mts", "src/main/**/*", "src/preload/**/*", "src/ptyhost/**/*", "src/sshcore/**/*", "src/sftphost/**/*", "src/dbhost/**/*", "src/convsearch/**/*", "src/exechost/**/*", "src/updatesplash/**/*", "src/shared/**/*", "src/renderer/src/bridge/transport.ts", "src/renderer/src/bridge/contract.gen.ts", "test/**/*"]
+  "include": ["electron.vite.config.ts", "electron.vite.messages.ts", "vite.config.tauri.ts", "vitest.config.mts", "src/main/**/*", "src/preload/**/*", "src/ptyhost/**/*", "src/sshcore/**/*", "src/sftphost/**/*", "src/dbhost/**/*", "src/convsearch/**/*", "src/exechost/**/*", "src/updatesplash/**/*", "src/shared/**/*", "src/renderer/src/bridge/transport.ts", "src/renderer/src/bridge/filePaths.ts", "src/renderer/src/bridge/contract.gen.ts", "test/**/*"]
 }

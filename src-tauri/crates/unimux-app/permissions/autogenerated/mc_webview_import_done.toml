@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-mc-webview-import-done"
+description = "Enables the mc_webview_import_done command without any pre-configured scope."
+commands.allow = ["mc_webview_import_done"]
+
+[[permission]]
+identifier = "deny-mc-webview-import-done"
+description = "Denies the mc_webview_import_done command without any pre-configured scope."
+commands.deny = ["mc_webview_import_done"]

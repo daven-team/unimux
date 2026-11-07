@@ -13,7 +13,7 @@ export interface McTransport {
   on(channel: string, cb: (...args: any[]) => void): () => void;
   platform: AppPlatform;
   windowsBuild: number;
-  pathForFile(file: File): string;
+  pathsForFiles(files: File[]): Promise<string[]>;
 }
 
 export function createMcApi(t: McTransport): McApi {
@@ -50,7 +50,7 @@ export function createMcApi(t: McTransport): McApi {
     systemBeep: () => t.send('sound:beep'),
     pathExists:(path) => t.invoke('fs:exists', path),
     pathKinds: (paths) => t.invoke('fs:pathKinds', paths),
-    pathForFile: (file) => t.pathForFile(file),
+    pathsForFiles: (files) => t.pathsForFiles(files),
     listProjectDirectory: (projectId, path = '') => t.invoke('fs:listProjectDirectory', projectId, path),
     listProjectDirectoryBatch: (projectId, paths) => t.invoke('fs:listProjectDirectoryBatch', projectId, paths),
     writeProjectFile: (projectId, path, text, expectedText) => t.invoke('fs:writeProjectFile', projectId, path, text, expectedText),

@@ -74,7 +74,7 @@ export async function addPathsToCell(cellId: string, items: PathItem[], rejected
 /** Files and folders dragged in from the system file manager: their own absolute paths go into the input, like a tree drop. */
 export async function addDroppedFilesToCell(cellId: string, files: File[]): Promise<void> {
   if (isSsh(cellId)) return void toast(tr('Ścieżki lokalne nie działają w sesji SSH'), 'error');
-  const all = files.map((file) => window.mc.pathForFile(file)).filter(Boolean);
+  const all = (await window.mc.pathsForFiles(files).catch(() => [] as string[])).filter(Boolean);
   if (!all.length) return void toast(tr('Nie udało się dodać ścieżki.'), 'error');
   const capped = capItems(all);
   if (capped.cut) toast(tr('Dodano pierwsze {count} ścieżek', { count: MAX_DROP_ITEMS }));

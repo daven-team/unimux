@@ -8,6 +8,7 @@
 mod channel_bench;
 mod commands;
 mod context;
+mod file_drop;
 mod ipc;
 #[cfg(feature = "test-bridge")]
 mod spike_pty;
@@ -17,6 +18,7 @@ mod startup;
 #[cfg(feature = "test-bridge")]
 mod test_bridge;
 mod update_window;
+mod webview_import;
 mod windows;
 
 /// The Tauri context (config, embedded frontend, capabilities). Expanded once: the app and the update window mode share it,
@@ -184,6 +186,7 @@ fn main() {
             ));
             ctx.mark("app-ready");
             // The startup gate (U1) runs here and may hold the main window back; wave 0 always proceeds.
+            webview_import::prepare(app.handle(), &ctx);
             windows::create_main(app.handle(), &ctx)?;
             startup::mark_started();
             Ok(())
@@ -218,6 +221,8 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
             ipc::update_splash_init,
             ipc::update_splash_close,
             ipc::update_splash_open,
+            file_drop::mc_dropped_paths,
+            webview_import::mc_webview_import_done,
             test_bridge::test_bridge,
             channel_bench::test_channel_bench,
             channel_bench::test_channel_pull,
@@ -235,7 +240,9 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
             ipc::mc_port_post,
             ipc::update_splash_init,
             ipc::update_splash_close,
-            ipc::update_splash_open
+            ipc::update_splash_open,
+            file_drop::mc_dropped_paths,
+            webview_import::mc_webview_import_done
         ]
     }
 }
