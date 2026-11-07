@@ -93,6 +93,10 @@ des = "=0.9.0"
 md5 = "=0.8.1"
 ctr = "=0.10.1"
 blowfish = "=0.10.0"
+# S2: keys generated from the OS RNG (getrandom's SysRng through rand_core 0.10, the version ssh-key uses) and the ssh2
+# key-format regexes ported as they are (leftmost-first matching gives the same groups as the JS engine).
+rand_core = "=0.10.1"
+regex = "1.13.1"
 # SP8 (MCP wire): the custom dispatcher's HTTP stack; rmcp only for the spike comparison (examples, not shipped).
 axum = { version = "0.8.9", default-features = false, features = ["tokio", "http1"] }
 hyper = { version = "1.12.0", features = ["server", "http1"] }

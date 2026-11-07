@@ -197,7 +197,8 @@ measured russh up to after the disconnect (`ms.total`) and so reported 87 vs 100
 - RC4 in DEK-Info makes ssh2 1.17 throw (RangeError) instead of answering; OpenSSL cannot write such a file. The port
   answers badPassphrase (needsPassphrase without one). Deliberate, 1.1.4 has no defined answer.
 - ssh2's PEM regex needs the whole (trimmed) text to be one PEM block; russh and `legacy_pem` find the block inside other
-  text. Not in the corpus; S2 copies the anchoring when it ports the readers.
+  text. Closed by S2: `unimux_ssh::keys::ssh2` uses ssh2's regexes as they are, checked against 1.1.4 on 137 text variants
+  (test/golden/ssh-keys.json).
 
 ## Appendix: full matrix of the last run (2026-11-06, after the review fixes)
 

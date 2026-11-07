@@ -5366,14 +5366,21 @@ dependencies = [
  "cbc",
  "ctr",
  "des",
+ "getrandom 0.4.3",
  "md5",
+ "rand_core",
+ "regex",
  "russh",
+ "serde",
  "serde_json",
  "sha2 0.11.1",
  "ssh-key",
+ "tempfile",
  "tokio",
  "unimux-core",
  "unimux-ipc",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

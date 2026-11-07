@@ -73,7 +73,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | D3 | SQL helper ports | todo | | | | |
 | A1 | Accounts stores and Claude Code locks | todo | | | | |
 | M1 | MCP HTTP server | todo | | | | |
-| S2 | SSH key handling | todo | | | | |
+| S2 | SSH key handling | verified (Windows) | 2026-11-07 | 2026-11-07 | 2026-11-07 | branch `tauri-pkg-S2`. `unimux_ssh::keys`: ssh2 1.17's parseKey as 1.1.4 runs it (`keys::ssh2`: ssh2's own regexes, anchored to the whole trimmed text; OpenSSH via russh `decode_openssh` on Node-lenient base64, chacha20 key files refused; traditional PEM via `legacy_pem` (moved from the SP7 prototype, header group of ssh2's regex, JS slices of `DEK-Info`, GCM / DES-EDE3 / BF-ECB / RC4 checked for IV and passphrase before failing like ssh2, the DER cut after its SEQUENCE); PPK v2 through ssh-key on a canonical copy after ssh2's MAC rules; OpenSSH public lines and RFC 4716 read field by field), keys.ts rules (`parse_private_key`, `is_encrypted`, metaOf comment rule, `key_meta_from_public`, `public_key_matches`, `certificate_check`, `check_passphrase`), fingerprint.ts, `generate_key` (ssh-key + OS RNG, ssh2's layout: 64-column lines, aes256-ctr + bcrypt 16, read back before returning, `spawn_blocking`), `KeyDrafts` (10 min, 20 max, DraftResult with 1.1.4's key order). Acceptance: test/golden/sp7/keys.json 348 / 348; new golden `test/golden/ssh-keys.json` (scripts/golden-ssh-keys.mjs under Electron 45: 137 text variants x 4 passphrase inputs, 48 publicKeyMatches, 11 keyMetaFromPublic, 48 certificateCheck, 10 KeyDrafts sessions) all equal; the 9 ssh-keys.test.ts cases ported (test/PORTING.md); 14 generated keys (7 type/size rows x plain / encrypted) pass `ssh-keygen -y` (Windows OpenSSH). IPC commands are S4 |
 | U2 | Custom update window (Windows) | todo | | | | |
 | X1 | Real-app script migration | todo | | | | |
 
@@ -352,6 +352,16 @@ All 8 confirmed findings of the SP7 review are fixed (the two timing findings we
 3. The matrix compared the 1.1.4 modules (SshLogin, KnownHostsStore) under this tree's Electron 45 runtime, not an installed 1.1.4 app; macOS not run.
 4. OpenSSH 9.8+ `PerSourcePenalties` blocks repeated failing test logins; the SP7 configs turn it off and S4's CI matrix must too. CentOS 6 (OpenSSH 5.3) does not run on WSL2 (vsyscall), so the oldest real build is OpenSSH 5.9.
 5. The unimux-ssh dev-dependencies (russh, ssh-key, aes, cbc, ctr, des, blowfish, md5) become normal dependencies in S2/S3; the prototype `legacy_pem` moves from tests/sp7_keys.rs into the crate.
+
+### Open issues: S2 (2026-11-07)
+
+Verification: `cargo fmt`, `cargo clippy -p unimux-ssh --all-targets -- -D warnings`, `cargo test -p unimux-ssh` (18 unit, 15 in tests/keys.rs, 3 in tests/sp7_keys.rs), `cargo check --workspace --all-targets`, `node scripts/golden-ssh-keys.mjs --check`, `node scripts/sp7/golden-keys.mjs --check`, `node scripts/porting-count.mjs --check`, `npm run typecheck`. SP7 open issue 2 (port, anchoring) and 5 (dependencies) are closed by S2: tests/sp7_keys.rs now checks the crate's `parse_private_key` and keeps only the russh-alone GAPS / EXTRA lists.
+
+1. `ssh-keygen -y` ran only with the Windows OpenSSH client (`C:\Windows\System32\OpenSSH\ssh-keygen.exe`); on a machine without ssh-keygen the test is skipped unless `UNIMUX_REQUIRE_SSH_KEYGEN=1` (CI should set it on the Linux / macOS runners). macOS not run (no Mac); the code is platform-neutral.
+2. scripts/golden-ssh-keys.mjs and scripts/sp7/golden-keys.mjs need Electron (BoringSSL decides what ssh2 reads) and are not part of `npm run gen:check`; they are run by hand with `--check`.
+3. Deliberate, invisible differences from ssh2's generator: the checkint of an unencrypted RSA key is ssh-key's (derived from the key, random for the other types and every encrypted key), and ECDSA private scalars are written as OpenSSH mpints (ssh2 1.17 prefixes a zero byte, the cause of its unreadable keys about 1 in 200 times); both files read back in 1.1.4's parser and in `ssh-keygen -y`.
+4. A JS-string case the port cannot hold: a lone UTF-16 surrogate in a pasted text (Rust strings are UTF-8; the IPC layer turns it into U+FFFD before S2 sees it, like `js_json::parse`). The only place 1.1.4 produces one, metaOf's 200-unit cut, is ported (U+FFFD).
+5. The IPC handlers (`ssh:keys:*` draftFromText / draftFromFile / unlockDraft / pickKeyFile, generate with the vault) are S4; they call `KeyDrafts`, `generate_key` and the vault (S1).
 
 ### Open issues after SP8 (2026-11-06)
 
