@@ -4,6 +4,7 @@ import { DetachedApp } from './components/DetachedApp';
 import { detachedId } from './windowRole';
 import { ErrorBoundary, WindowFallback } from './components/ErrorBoundary';
 import { TooltipHost } from './components/TooltipHost';
+import { CaptionButtons } from './components/CaptionButtons';
 import { installErrorReporting } from './errorReport';
 import './styles.css';
 import './components/statusStyles.css';
@@ -11,9 +12,10 @@ import './components/statusStyles.css';
 installErrorReporting();
 // The last resort: a render error no inner boundary caught leaves a "reload the window" card, not a blank window.
 // The tooltip host sits beside the app: titles get the styled bubble on the boot and language screens and the fallback too.
+// So do the caption buttons of the Tauri build on Windows (W1): every screen of every window has them, like 1.1.4's overlay.
 // A detached window (1.0.6, `?detached=<id>`) shows one tab with its own title bar instead of the whole app.
 const Root = detachedId !== null ? DetachedApp : App;
-createRoot(document.getElementById('root')!).render(<><ErrorBoundary name="window" fallback={() => <WindowFallback />}><Root /></ErrorBoundary><TooltipHost /></>);
+createRoot(document.getElementById('root')!).render(<><ErrorBoundary name="window" fallback={() => <WindowFallback />}><Root /></ErrorBoundary><TooltipHost /><CaptionButtons /></>);
 
 // Handle for automated smoke tests driven over the DevTools protocol.
 import * as actions from './actions';

@@ -76,11 +76,16 @@ fn to_state(r: &screen::Rect) -> Rect {
     Rect::new(r.x, r.y, r.width, r.height)
 }
 
-/// A window's outer rect in the host's space: physical pixels on Windows, points on macOS (tao scales a window's values
-/// by its current scale there, see unimux_platform::screen).
+/// A window's rect as 1.1.4 kept it in the host's space (physical pixels on Windows, points on macOS: tao scales a window's
+/// values by its current scale there, see unimux_platform::screen). 1.1.4 saved Electron's getBounds of a frameless window,
+/// which is the visible window. On Windows that is the client rect of the undecorated window (W1): tao keeps invisible
+/// resize borders left, right and below it, outside the visible frame, so the outer rect would be about 7 px larger on three
+/// sides. On macOS the outer rect (the hidden title bar is inside it).
 fn outer_rect(w: &WebviewWindow) -> Option<screen::Rect> {
-    let p = w.outer_position().ok()?;
-    let s = w.outer_size().ok()?;
+    #[cfg(windows)]
+    let (p, s) = (w.inner_position().ok()?, w.inner_size().ok()?);
+    #[cfg(not(windows))]
+    let (p, s) = (w.outer_position().ok()?, w.outer_size().ok()?);
     let r = screen::Rect::new(f64::from(p.x), f64::from(p.y), f64::from(s.width), f64::from(s.height));
     #[cfg(target_os = "macos")]
     {
@@ -92,18 +97,25 @@ fn outer_rect(w: &WebviewWindow) -> Option<screen::Rect> {
     }
 }
 
-/// The frame (outer minus inner size) where the window is now, in the host's space.
-fn frame_size(w: &WebviewWindow) -> (f64, f64) {
-    let (Ok(o), Ok(i)) = (w.outer_size(), w.inner_size()) else { return (0.0, 0.0) };
+/// What lies between the window's own rect and [`outer_rect`] where the window is now, in the host's space: on Windows the
+/// invisible borders (left, top: where the visible rect starts inside the outer one; width and height: the borders
+/// together), on macOS the frame (outer minus inner size) at the origin.
+fn frame_insets(w: &WebviewWindow) -> (f64, f64, f64, f64) {
+    let (Ok(o), Ok(i)) = (w.outer_size(), w.inner_size()) else { return (0.0, 0.0, 0.0, 0.0) };
     let (dx, dy) = (f64::from(o.width) - f64::from(i.width), f64::from(o.height) - f64::from(i.height));
+    #[cfg(windows)]
+    {
+        let (Ok(op), Ok(ip)) = (w.outer_position(), w.inner_position()) else { return (0.0, 0.0, dx, dy) };
+        (f64::from(ip.x - op.x), f64::from(ip.y - op.y), dx, dy)
+    }
     #[cfg(target_os = "macos")]
     {
         let s = w.scale_factor().unwrap_or(1.0);
-        if s > 0.0 { (dx / s, dy / s) } else { (dx, dy) }
+        if s > 0.0 { (0.0, 0.0, dx / s, dy / s) } else { (0.0, 0.0, dx, dy) }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
-        (dx, dy)
+        (0.0, 0.0, dx, dy)
     }
 }
 
@@ -170,17 +182,23 @@ impl TauriHost {
         self.app.get_webview_window(label)
     }
 
-    /// Puts a window at an outer rect of the host's space (physical pixels on Windows, points on macOS). The window moves
-    /// onto the target display first: a display with another scale factor changes the frame there (WM_DPICHANGED), so the
-    /// frame is measured after the move, then the inner size is set and the position again; repeated (at most 3 times)
-    /// until the outer rect is the target.
+    /// Puts a window at a rect of the host's space (physical pixels on Windows, points on macOS) as [`outer_rect`] reads it.
+    /// The window moves onto the target display first: a display with another scale factor changes the frame there
+    /// (WM_DPICHANGED), so the frame is measured after the move, then the inner size is set and the position again;
+    /// repeated (at most 3 times) until the rect is the target.
     fn place_native(w: &WebviewWindow, r: &screen::Rect) {
         let target = r.rounded();
         set_native_position(w, target.x, target.y);
         for _ in 0..3 {
-            let (dx, dy) = frame_size(w);
-            set_native_inner_size(w, target.width - dx, target.height - dy);
-            set_native_position(w, target.x, target.y);
+            let (left, top, dx, dy) = frame_insets(w);
+            if cfg!(windows) {
+                // The visible rect is the client rect: its size is the inner size, the outer rect starts at the borders.
+                set_native_inner_size(w, target.width, target.height);
+                set_native_position(w, target.x - left, target.y - top);
+            } else {
+                set_native_inner_size(w, target.width - dx, target.height - dy);
+                set_native_position(w, target.x, target.y);
+            }
             if outer_rect(w).is_none_or(|o| o.rounded() == target) {
                 break;
             }
@@ -230,7 +248,7 @@ impl TauriHost {
             let _ = w.maximize();
         }
         if self.offscreen {
-            windows::show_without_focus(w);
+            windows::show_offscreen(w);
         } else {
             let _ = w.show();
             let _ = w.set_focus();
@@ -361,11 +379,8 @@ impl Host for TauriHost {
                 .additional_browser_args(&windows::browser_args(ctx.overrides.debug_port))
                 .data_directory(windows::webview_dir(&ctx));
         }
-        // macOS: hidden title bar with 1.1.4's traffic lights for detached windows, no WebKit throttling (W2).
-        #[cfg(target_os = "macos")]
-        {
-            builder = crate::mac_chrome::apply(builder, crate::mac_chrome::WindowKind::Detached);
-        }
+        // No system title bar on Windows (W1), 1.1.4's traffic lights for detached windows on macOS (W2).
+        builder = windows::apply_chrome(builder, crate::mac_chrome::WindowKind::Detached);
         if self.offscreen {
             let i = index as f64;
             builder = builder.position(-6000.0 + i * 40.0, 40.0 + i * 40.0).skip_taskbar(true).focusable(false);
@@ -388,6 +403,8 @@ impl Host for TauriHost {
         // OS file drops (W3) and the renderer crash / hang handling (W6; detached windows always reload).
         crate::file_drop::install(&window, ctx.clone());
         crate::lifecycle::watch_renderer(&window, &ctx);
+        // The caption buttons and the top resize edge (W1).
+        crate::caption::install(&window, &ctx);
         if !self.offscreen {
             let physical = self.screen().rect_to_physical(&to_platform(&bounds));
             Self::place_native(&window, &physical);
@@ -444,7 +461,7 @@ impl Host for TauriHost {
             let _ = w.unminimize();
         }
         if offscreen {
-            windows::show_without_focus(&w);
+            windows::show_offscreen(&w);
         } else {
             let _ = w.show();
             let _ = w.set_focus();

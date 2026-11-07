@@ -192,9 +192,6 @@ export function buildContract() {
     if (prev && prev.kind !== m.kind) throw new Error(`gen-ipc-contract: ${m.channel} is used as ${prev.kind} and ${m.kind}`);
     channels[m.channel] = prev ? { ...prev, methods: [...prev.methods, m.path] } : { kind: m.kind, domain: m.domain, methods: [m.path] };
   }
-  // Events of the Tauri build that the Electron build did not need (the Windows caption buttons, W1).
-  const extraEvents = [{ name: 'window:maximized', domain: 'window', params: [{ name: 'maximized', type: 'boolean', optional: false }], note: 'new in 1.2.0 (caption buttons, W1)' }];
-  for (const e of extraEvents) if (!events.some((x) => x.name === e.name)) events.push(e);
   const sorted = Object.fromEntries(Object.entries(channels).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
   const count = (kind) => methods.filter((m) => m.kind === kind).length;
   return {

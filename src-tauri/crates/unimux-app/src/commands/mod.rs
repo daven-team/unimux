@@ -70,8 +70,21 @@ mod tests {
         assert!(builder.errors().is_empty(), "{:?}", builder.errors());
         let router = builder.build(ctx.guard.clone());
         let report = router.report();
-        assert_eq!(report.len(), 215);
-        for channel in ["state:load", "state:snapshot", "state:edit", "app:claimStart", "app:startupMark", "app:reportError"] {
+        assert_eq!(report.len(), 220);
+        for channel in [
+            "state:load",
+            "state:snapshot",
+            "state:edit",
+            "app:claimStart",
+            "app:startupMark",
+            "app:reportError",
+            // W1: the caption buttons the page draws.
+            "window:minimize",
+            "window:toggleMaximize",
+            "window:close",
+            "window:isMaximized",
+            "window:captionArea",
+        ] {
             assert_eq!(report[channel], Status::Implemented, "{channel}");
         }
         assert_eq!(report["cell:alive"], Status::Fallback);

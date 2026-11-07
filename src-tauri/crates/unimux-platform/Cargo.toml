@@ -30,5 +30,7 @@ objc2-user-notifications.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 
+# junction: tests. windows: the W1 caption test tool (examples/wincap.rs: window capture, posted messages, hit tests), not part of the app.
 [target.'cfg(windows)'.dev-dependencies]
 junction.workspace = true
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"] }

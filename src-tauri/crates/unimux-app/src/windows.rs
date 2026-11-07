@@ -2,7 +2,8 @@
 //! renderer booted (5 s fallback), with the WebView2 settings and browser arguments of 1.1.4, the boot values for window.mc,
 //! the navigation lock and the minimize/restore detection behind `window:shown`.
 //!
-//! Wave 0 keeps the native title bar (decorations on); W1 replaces it with the caption buttons drawn like 1.1.4's overlay.
+//! No system title bar (W1, [`apply_chrome`]): the page draws unimux's own title bar and the caption buttons like 1.1.4's
+//! overlay; caption.rs puts the native hit-test children over them.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -127,11 +128,8 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
     {
         builder = builder.additional_browser_args(&browser_args(ctx.overrides.debug_port)).data_directory(webview_dir(ctx));
     }
-    // macOS: hidden title bar with the traffic lights of 1.1.4, no WebKit throttling (W2).
-    #[cfg(target_os = "macos")]
-    {
-        builder = crate::mac_chrome::apply(builder, crate::mac_chrome::WindowKind::Main);
-    }
+    // No system title bar on Windows (W1), the traffic lights of 1.1.4 on macOS (W2).
+    builder = apply_chrome(builder, crate::mac_chrome::WindowKind::Main);
     if offscreen {
         builder = builder.position(-6000.0, 0.0).skip_taskbar(true).focused(false).focusable(false);
     } else {
@@ -145,6 +143,7 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
     forget_on_destroy(&window, ctx.clone());
     // Close and quit, session end, renderer crash and hang (W6).
     crate::lifecycle::attach_main(&window, ctx);
+    crate::caption::install(&window, ctx);
 
     // The page may never report (a renderer stuck in boot): show the window after 5 s anyway.
     let fallback = ctx.clone();
@@ -153,6 +152,32 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
         show_main(&fallback);
     });
     Ok(window)
+}
+
+/// The window chrome of every app window, applied by every builder of one (the main window, W5's detached windows, the
+/// check build's spike windows):
+/// - Windows (W1): no system title bar (1.1.4's `titleBarStyle: 'hidden'`), the frame shadow and Aero snap stay; unimux's
+///   title bar is the page's (drag region through WebView2's non-client regions), the caption buttons are drawn by the page
+///   over the native children of caption.rs ([`crate::caption::install`] after the build);
+/// - macOS (W2): the hidden title bar with 1.1.4's traffic lights and no WebKit throttling ([`crate::mac_chrome::apply`]).
+pub fn apply_chrome<'a, R: tauri::Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'a, R, M>,
+    kind: crate::mac_chrome::WindowKind,
+) -> WebviewWindowBuilder<'a, R, M> {
+    #[cfg(windows)]
+    {
+        let _ = kind;
+        builder.decorations(false).shadow(true)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        crate::mac_chrome::apply(builder, kind)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = kind;
+        builder
+    }
 }
 
 /// Shows the main window once (first page load, renderer-boot or the 5 s fallback). An offscreen run (MC_OFFSCREEN) never
@@ -171,13 +196,14 @@ pub fn show_main(ctx: &AppContext) {
     let data_dir = ctx.data_dir.clone();
     std::thread::spawn(move || unimux_update::window::signal_update_ready(&data_dir, unimux_core::VERSION));
     if ctx.overrides.offscreen {
-        show_without_focus(&window);
+        show_offscreen(&window);
     } else {
         let _ = window.show();
         let _ = window.set_focus();
     }
 }
 
+/// Shows a window without activating it (SW_SHOWNOACTIVATE), where it is.
 #[cfg(windows)]
 pub(crate) fn show_without_focus(window: &WebviewWindow) {
     use windows::Win32::UI::WindowsAndMessaging::{SW_SHOWNOACTIVATE, ShowWindow};
@@ -192,6 +218,43 @@ pub(crate) fn show_without_focus(window: &WebviewWindow) {
 #[cfg(not(windows))]
 pub(crate) fn show_without_focus(window: &WebviewWindow) {
     let _ = window.show();
+}
+
+/// Off-screen runs only (MC_OFFSCREEN): parks the window off every monitor, turns its DWM transitions off (a minimize or
+/// restore animation would otherwise draw on the user's monitor) and shows it without activating it. The builder's
+/// position(-6000, 0) does not survive the creation (tao puts the window at the cascade position), so the park happens
+/// here, before the window is ever shown.
+#[cfg(windows)]
+pub(crate) fn show_offscreen(window: &WebviewWindow) {
+    use windows::Win32::Graphics::Dwm::{DWMWA_TRANSITIONS_FORCEDISABLED, DwmSetWindowAttribute};
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos};
+    if let Ok(hwnd) = window.hwnd() {
+        let hwnd = windows::Win32::Foundation::HWND(hwnd.0);
+        // SAFETY: the window's own handle; a BOOL attribute of the right size.
+        unsafe {
+            let off = windows::core::BOOL(1);
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_TRANSITIONS_FORCEDISABLED,
+                (&raw const off).cast(),
+                size_of::<windows::core::BOOL>() as u32,
+            );
+            let mut r = windows::Win32::Foundation::RECT::default();
+            if GetWindowRect(hwnd, &mut r).is_err() || r.left > OFFSCREEN_X / 2 {
+                let _ = SetWindowPos(hwnd, None, OFFSCREEN_X, 0, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+        }
+    }
+    show_without_focus(window);
+}
+
+/// Where an off-screen run (MC_OFFSCREEN) keeps its windows: left of every monitor.
+#[cfg(windows)]
+const OFFSCREEN_X: i32 = -6000;
+
+#[cfg(not(windows))]
+pub(crate) fn show_offscreen(window: &WebviewWindow) {
+    show_without_focus(window);
 }
 
 /// A second start of unimux (or a 1.1.x started on the same data dir): bring the main window up.

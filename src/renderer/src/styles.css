@@ -103,6 +103,10 @@ html[data-platform="darwin"] .titlebar .brand.collapsed { width: 112px; }
 html[data-platform="darwin"] .first-run-titlebar { padding-left: 84px; }
 .brand-logo { width: 14px; height: 14px; border-radius: 4px; background: linear-gradient(135deg, #3b82f6, #a855f7); flex: none; }
 .titlebar .no-drag, .titlebar button, .titlebar .tab { -webkit-app-region: no-drag; }
+/* 1.2.0 (Tauri on Windows, W1): the caption buttons, drawn on a strip above everything like 1.1.4's native overlay; the
+   pointer goes to the native hit-test window over them, never to the page (CaptionButtons.tsx). */
+.mc-caption { position: fixed; left: 0; right: 0; top: 0; width: 100%; height: 40px; pointer-events: none; z-index: 2147483647; }
+.mc-caption-tip { position: fixed; pointer-events: none; z-index: 2147483646; }
 
 /* The border stays (transparent) so the variants that colour it (dashed "add" buttons, toggles) keep their size. Hover rules
    skip disabled buttons through :where(), which keeps their specificity as low as before for the per-panel overrides. */

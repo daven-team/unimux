@@ -4,6 +4,9 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod caption;
+#[cfg(all(windows, feature = "test-bridge"))]
+mod caption_test;
 #[cfg(feature = "test-bridge")]
 mod channel_bench;
 mod commands;

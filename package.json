@@ -48,6 +48,7 @@
     "ipc:report": "node scripts/ipc-report.mjs",
     "porting:count": "node scripts/porting-count.mjs",
     "smoke:tauri": "node scripts/smoke-tauri.mjs",
+    "verify:caption": "node scripts/verify-caption.mjs",
     "test:hostd": "node scripts/test-hostd.mjs",
     "smoke:eval-bridge": "node scripts/smoke-eval-bridge.mjs",
     "test:automation": "npm run build && node scripts/smoke-automation.mjs --target=electron",
