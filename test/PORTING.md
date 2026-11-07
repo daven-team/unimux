@@ -338,3 +338,12 @@ Rows keep the exact case name (the counter matches them). Rust tests are named `
 | mcp-protocol | rejects foreign Host and Origin headers, other paths and methods, and oversize bodies | unimux-mcp/tests/server.rs::rejects_foreign_host_and_origin_headers_other_paths_and_methods_and_oversize_bodies | ported |
 | mcp-protocol | never echoes the bearer token in responses | unimux-mcp/tests/server.rs::never_echoes_the_bearer_token_in_responses; an_internal_failure_answers_500_without_echoing_the_request | ported |
 | mcp-protocol | answers tools/list quickly and cheaply for repeated calls | unimux-mcp/tests/server.rs::answers_tools_list_quickly_and_cheaply_for_repeated_calls | ported |
+| ssh-keys | %s %s | unimux-ssh/tests/keys.rs::generate_key_every_type_and_size (all 7 type/size rows, with and without a passphrase); generated_keys_pass_ssh_keygen | ported |
+| ssh-keys | refuses sizes the generator does not offer | unimux-ssh/tests/keys.rs::generate_key_refuses_sizes_the_generator_does_not_offer | ported |
+| ssh-keys | accepts OpenSSH, PEM PKCS#1 RSA, PEM SEC1 EC and PPK v2 RSA | unimux-ssh/tests/keys.rs::parse_private_key_accepts_openssh_pem_and_ppk_v2; every_answer_of_the_sp7_key_corpus_matches_1_1_4 | ported |
+| ssh-keys | asks for the passphrase of an encrypted key and checks it | unimux-ssh/tests/keys.rs::parse_private_key_asks_for_and_checks_the_passphrase | ported |
+| ssh-keys | rejects what it cannot use with a clear code | unimux-ssh/tests/keys.rs::parse_private_key_rejects_with_clear_codes; text_variants_answer_like_1_1_4 | ported |
+| ssh-keys | compares pasted public keys and certificates with the private key | unimux-ssh/tests/keys.rs::pasted_public_keys_and_certificates_are_compared; public_key_checks_answer_like_1_1_4 | ported |
+| ssh-keys | keeps at most 20 drafts and evicts the oldest (D3) | unimux-ssh/tests/keys.rs::key_drafts_keep_at_most_20_and_evict_the_oldest | ported |
+| ssh-keys | creates, unlocks, flags duplicates and mismatches, and expires drafts | unimux-ssh/tests/keys.rs::key_drafts_create_unlock_flag_and_expire; draft_sessions_give_the_1_1_4_draft_results | ported |
+| ssh-keys | never returns private material in a draft result | unimux-ssh/tests/keys.rs::key_drafts_never_return_private_material | ported |

@@ -74,8 +74,8 @@ sha2 = "0.11.1"
 base64 = "0.23.1"
 futures = "0.3"
 tempfile = "3"
-# M1 (MCP argument checks) and G1 (the JS regexes of the git module: redactSecrets, SCRUBBED_ENV; JS semantics are spelled out
-# in the patterns).
+# M1 (MCP argument checks), G1 (the JS regexes of the git module: redactSecrets, SCRUBBED_ENV; JS semantics spelled out in the
+# patterns) and S2 (the ssh2 key-format regexes).
 regex = "1.13.1"
 windows = "0.62.2"
 libc = "0.2"
@@ -103,6 +103,9 @@ des = "=0.9.0"
 md5 = "=0.8.1"
 ctr = "=0.10.1"
 blowfish = "=0.10.0"
+# S2: keys generated from the OS RNG (getrandom's SysRng through rand_core 0.10, the version ssh-key uses); the ssh2
+# key-format regexes use the workspace regex (leftmost-first matching gives the same groups as the JS engine).
+rand_core = "=0.10.1"
 # M1 (MCP server, decided in SP8): hyper http1 served directly; axum stays for the hooks server. rmcp dropped in M1.
 axum = { version = "0.8.9", default-features = false, features = ["tokio", "http1"] }
 hyper = { version = "1.12.0", features = ["server", "http1"] }
