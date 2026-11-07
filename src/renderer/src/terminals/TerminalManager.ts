@@ -24,7 +24,7 @@ import { mayAnswer, permissionAsk, permissionKeys, type PermissionAnswer, type P
 import { tr } from '../i18n';
 import { confirmTerminalLink } from '../terminalLinks';
 import { applyScrollback, DEFAULT_SCROLLBACK_LINES, maxWebglContexts, PENDING_OUTPUT_CHARS } from '../../../shared/terminalLimits';
-import { nextLossCount, pickPrewarm, planWebgl, WEBGL_GRANT_BUDGET_MS, WEBGL_PREWARM_GAP_MS, WEBGL_PREWARM_IDLE_MS, WEBGL_PREWARM_QUIET_MS, webglBackoff, WebglLimit, type WebglCandidate } from '../../../shared/webglPool';
+import { nextLossCount, pickPrewarm, planWebgl, webglPrewarmReserve, WEBGL_GRANT_BUDGET_MS, WEBGL_PREWARM_GAP_MS, WEBGL_PREWARM_IDLE_MS, WEBGL_PREWARM_QUIET_MS, webglBackoff, WebglLimit, type WebglCandidate } from '../../../shared/webglPool';
 import { onWindowShown } from '../windowShown';
 import { webviewEngine } from '../platform';
 import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
@@ -162,6 +162,11 @@ class TerminalManager {
   private windowShown = true;
   /** WebGL contexts handed out at most (64 on Chromium, 12 on WebKit): lowered when the engine turns out to allow fewer (see `contextLost`). */
   private webglLimit = new WebglLimit(maxWebglContexts(webviewEngine()));
+  /** Parked terminals get a context in idle time while fewer than `limit - reserve` exist, the reserve of the engine (webglPool.ts webglPrewarmReserve). */
+  private prewarmPick(now: number): string | null {
+    const limit = this.webglLimit.limit;
+    return pickPrewarm(this.webglCandidates(), limit, now, webglPrewarmReserve(webviewEngine(), limit));
+  }
   /** When the last WebGL context was created. */
   private lastGrantAt = -Infinity;
   /** The 400 ms status tick runs only while there are terminals: an empty window (first run, no project) never wakes up for it. */
@@ -191,7 +196,7 @@ class TerminalManager {
     setInterval(() => {
       if (this.webglLimit.recover(performance.now())) console.warn(`WebGL contexts limit raised to ${this.webglLimit.limit}`);
       if (this.needsWebgl()) this.balanceWebgl();
-      else if (this.windowShown && pickPrewarm(this.webglCandidates(), this.webglLimit.limit, performance.now())) this.schedulePrewarm();
+      else if (this.windowShown && this.prewarmPick(performance.now())) this.schedulePrewarm();
     }, 1000);
     document.addEventListener('focusin', () => { if (this.needsWebgl()) this.balanceWebgl(); this.syncHostFocus(); });
     // During focusout the next element does not have the focus yet: look once the move is done.
@@ -845,7 +850,7 @@ class TerminalManager {
   private prewarmWebgl(deadline: IdleDeadline): void {
     if (!this.windowShown || this.planGrants.length) return;
     const now = performance.now();
-    const id = pickPrewarm(this.webglCandidates(), this.webglLimit.limit, now);
+    const id = this.prewarmPick(now);
     const e = id ? this.entries.get(id) : undefined;
     if (!e) return;
     if (deadline.timeRemaining() >= WEBGL_PREWARM_IDLE_MS || now - this.inputAt >= WEBGL_PREWARM_QUIET_MS) this.createWebgl(e, now);

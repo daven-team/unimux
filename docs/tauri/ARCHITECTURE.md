@@ -255,7 +255,7 @@ Fallback if SP3 or SP4 fail: Electron bridge release 1.1.5 whose splash and macO
 | Secrets | DPAPI Local State key | Keychain, one re-approval prompt |
 | Single instance | fs4 lock + local socket + own `Chrome_MessageWindow` (Electron 1.1.x compat) | fs4 lock + local socket + `SingletonLock`/`SingletonSocket` (Electron compat) |
 | Keys | no app menu | tauri::menu app + edit (no reload/close); Cmd+V no double paste; text substitutions off; requestIdleCallback, randomUUID, AudioContext resume polyfills |
-| Dev automation | CDP via `--remote-debugging-port` (dev-overrides) | no CDP: debug-only eval bridge (test-bridge, `MC_EVAL_PORT`): JSON lines `{id, expression}` -> `{id, ok, value|error}` on 127.0.0.1, Runtime.evaluate semantics (awaited, by value); client `scripts/eval-bridge.mjs`, smoke `scripts/smoke-eval-bridge.mjs` (also runs on Windows) |
+| Dev automation | CDP via `--remote-debugging-port` (dev-overrides) | no CDP: debug-only eval bridge (test-bridge, `MC_EVAL_PORT`): JSON lines `{id, expression}` -> `{id, ok, value|error}` on 127.0.0.1, Runtime.evaluate semantics (expressions awaited, statement scripts by completion value, SyntaxErrors at once, results by value); client `scripts/eval-bridge.mjs`, smoke `scripts/smoke-eval-bridge.mjs` (also runs on Windows) |
 | Updater | NSIS hooks (from Electron) + custom update window running NSIS `/S` (Tauri -> Tauri) | ditto zip for 1.1.x, custom update window bundle swap later |
 
 Fonts: terminal stack `"Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, Menlo, "SF Mono", "Courier New", monospace`.

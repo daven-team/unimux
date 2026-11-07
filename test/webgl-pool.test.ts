@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { CHROMIUM_WEBGL_CONTEXTS, MAX_WEBGL_CONTEXTS } from '../src/shared/terminalLimits';
+import { CHROMIUM_WEBGL_CONTEXTS, MAX_WEBGL_CONTEXTS, MAX_WEBGL_CONTEXTS_WEBKIT, maxWebglContexts } from '../src/shared/terminalLimits';
 import { MAX_CELLS } from '../src/shared/layout';
-import { nextLossCount, pickPrewarm, planWebgl, WEBGL_BUSY_MS, WEBGL_EVICT_MS, WEBGL_HEALTHY_MS, WEBGL_HOLD_MS, WEBGL_MIN_LIMIT, WEBGL_PREWARM_RESERVE, WEBGL_RECOVER_MS, webglBackoff, WebglLimit, type WebglCandidate } from '../src/shared/webglPool';
+import { nextLossCount, pickPrewarm, planWebgl, WEBGL_BUSY_MS, WEBGL_EVICT_MS, WEBGL_HEALTHY_MS, WEBGL_HOLD_MS, WEBGL_MIN_LIMIT, WEBGL_PREWARM_RESERVE, WEBGL_RECOVER_MS, webglBackoff, WebglLimit, webglPrewarmReserve, type WebglCandidate } from '../src/shared/webglPool';
 
 const NOW = 100_000;
 const c = (id: string, hasWebgl: boolean, attached: boolean, extra: Partial<WebglCandidate> = {}): WebglCandidate => ({ id, hasWebgl, attached, shownAt: 0, ...extra });
@@ -173,5 +173,30 @@ describe('WebGL context pool', () => {
     expect(pickPrewarm([...held(MAX_WEBGL_CONTEXTS - WEBGL_PREWARM_RESERVE - 1), c('p', false, false)], MAX_WEBGL_CONTEXTS, NOW)).toBe('p');
     expect(pickPrewarm([...held(MAX_WEBGL_CONTEXTS - WEBGL_PREWARM_RESERVE), c('p', false, false)], MAX_WEBGL_CONTEXTS, NOW)).toBeNull();
     expect(pickPrewarm([...held(4), c('p', false, false)], 16, NOW)).toBeNull();
+  });
+
+  it('Chromium keeps the 1.1.4 reserve; WebKit, whose pool is smaller than a full grid, keeps half of it free instead', () => {
+    const held = (n: number) => Array.from({ length: n }, (_, i) => c(`h${i}`, true, i < 2));
+    expect(webglPrewarmReserve('chromium', MAX_WEBGL_CONTEXTS)).toBe(WEBGL_PREWARM_RESERVE);
+    expect(webglPrewarmReserve('chromium', 16)).toBe(WEBGL_PREWARM_RESERVE);
+    const limit = maxWebglContexts('webkit');
+    expect(limit).toBe(MAX_WEBGL_CONTEXTS_WEBKIT);
+    const reserve = webglPrewarmReserve('webkit', limit);
+    expect(reserve).toBe(6);
+    // With the fixed reserve WebKit would never prewarm (12 - 20 < 0).
+    expect(pickPrewarm([c('p', false, false)], limit, NOW)).toBeNull();
+    expect(pickPrewarm([c('p', false, false)], limit, NOW, reserve)).toBe('p');
+    expect(pickPrewarm([...held(limit - reserve - 1), c('p', false, false)], limit, NOW, reserve)).toBe('p');
+    expect(pickPrewarm([...held(limit - reserve), c('p', false, false)], limit, NOW, reserve)).toBeNull();
+    // A pool lowered by evictions keeps prewarming, with half of it free.
+    expect(webglPrewarmReserve('webkit', 8)).toBe(4);
+    expect(pickPrewarm([...held(3), c('p', false, false)], 8, NOW, webglPrewarmReserve('webkit', 8))).toBe('p');
+    expect(pickPrewarm([...held(4), c('p', false, false)], 8, NOW, webglPrewarmReserve('webkit', 8))).toBeNull();
+  });
+
+  it('TerminalManager prewarms with the reserve of its engine', () => {
+    const source = readFileSync('src/renderer/src/terminals/TerminalManager.ts', 'utf8');
+    expect(source).toMatch(/pickPrewarm\(this\.webglCandidates\(\), limit, now, webglPrewarmReserve\(webviewEngine\(\), limit\)\)/);
+    expect(source.match(/pickPrewarm\(/g)).toHaveLength(1);
   });
 });

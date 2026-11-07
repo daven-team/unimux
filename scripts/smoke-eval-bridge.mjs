@@ -41,6 +41,18 @@ try {
   check('renderer boots', ready);
 
   check('expression errors come back as errors', await page.evaluate('(() => { throw new Error("boom"); })()').then(() => false, (e) => /boom/.test(e.message)));
+  // Statement scripts and syntax errors behave like Runtime.evaluate: completion value, thrown errors, SyntaxError at once.
+  check('statement scripts give their completion value', await page.evaluate('const a = 1; let b = a + 1; b * 2', { timeoutMs: 5000 }) === 4);
+  check('var statements reach the page like CDP', await page.evaluate('var __mcEvalVar = 5; __mcEvalVar;', { timeoutMs: 5000 }) === 5
+    && await page.evaluate('window.__mcEvalVar', { timeoutMs: 5000 }) === 5);
+  check('statements ending in undefined give null', await page.evaluate('var __mcEvalU = 1; void 0;', { timeoutMs: 5000 }) === null);
+  check('errors thrown by statements come back', await page.evaluate('const x = 1; throw new Error("stmt-boom");', { timeoutMs: 5000 })
+    .then(() => false, (e) => /stmt-boom/.test(e.message)));
+  {
+    const started = Date.now();
+    const error = await page.evaluate('1 +', { timeoutMs: 8000 }).then(() => null, (e) => e.message);
+    check('syntax errors come back at once', /SyntaxError/.test(error ?? '') && Date.now() - started < 3000, { error, ms: Date.now() - started });
+  }
   check('values come back by value', JSON.stringify(await page.evaluate('Promise.resolve({ a: [1, "ą"], u: undefined })')) === '{"a":[1,"ą"]}');
 
   const compat = await page.evaluate(`(() => {

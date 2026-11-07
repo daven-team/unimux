@@ -65,7 +65,10 @@ export const WEBKIT_WEBGL_CONTEXTS = 16;
 /**
  * WebGL renderers alive at the same time under WebKit: below WEBKIT_WEBGL_CONTEXTS for the same headroom as on Chromium (a
  * context given back stays counted until it is collected). A 5x4 grid then draws 12 cells through WebGL (focused and busy
- * ones first) and the others through xterm's DOM renderer; WebglLimit lowers it further if WebKit evicts earlier.
+ * ones first) and the others through xterm's DOM renderer; WebglLimit lowers it further if WebKit evicts earlier. Prewarm
+ * (parked cells get a context in idle time) keeps half of this pool free instead of a full grid, which would not fit
+ * (webglPool.ts webglPrewarmReserve): up to 6 contexts are prewarmed, so switching to a grid of more than 6 cells draws
+ * the rest through the DOM renderer at first, while contexts are created a few per frame.
  */
 export const MAX_WEBGL_CONTEXTS_WEBKIT = 12;
 

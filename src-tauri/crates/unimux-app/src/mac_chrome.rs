@@ -30,6 +30,16 @@ pub fn traffic_lights(kind: WindowKind) -> (f64, f64) {
     }
 }
 
+/// The copyright holder of 1.1.4's Info.plist: electron-builder's `companyName`, i.e. package.json `author`.
+pub const COPYRIGHT_HOLDER: &str = "ajzak, azozowsky";
+
+/// The copyright line of the About panel. 1.1.4's `about` role showed the standard AppKit panel with Info.plist's
+/// `NSHumanReadableCopyright`, which electron-builder writes as `Copyright © <build year> <companyName>` when package.json
+/// sets no `build.copyright` (app-builder-lib appInfo.copyright); the year here is the build's too (build.rs, UTC).
+pub fn about_copyright() -> String {
+    format!("Copyright \u{a9} {} {COPYRIGHT_HOLDER}", env!("UNIMUX_BUILD_YEAR"))
+}
+
 /// One entry of Electron's role menus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
@@ -173,6 +183,7 @@ mod imp {
                 let about = AboutMetadata {
                     name: Some(super::APP_NAME.into()),
                     version: Some(unimux_core::VERSION.into()),
+                    copyright: Some(super::about_copyright()),
                     ..Default::default()
                 };
                 Box::new(PredefinedMenuItem::about(app, text, Some(about))?)
@@ -277,6 +288,21 @@ mod tests {
                 Entry::Separator => {}
             }
         }
+    }
+
+    #[test]
+    fn about_panel_has_1_1_4s_copyright_line() {
+        let year: u32 = env!("UNIMUX_BUILD_YEAR").parse().unwrap();
+        assert!((2026..3000).contains(&year));
+        assert_eq!(about_copyright(), format!("Copyright \u{a9} {year} ajzak, azozowsky"));
+        // electron-builder's companyName is package.json `author`; 1.1.4 set no build.copyright.
+        let package = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../package.json")).unwrap();
+        let package: serde_json::Value = serde_json::from_str(&package).unwrap();
+        assert_eq!(package["author"], COPYRIGHT_HOLDER);
+        assert!(package["build"].get("copyright").is_none());
+        // The macOS menu code hands it to the About item.
+        let source = include_str!("mac_chrome.rs");
+        assert!(source.contains("copyright: Some(super::about_copyright()),"));
     }
 
     #[test]

@@ -1,7 +1,10 @@
 // Client of the eval bridge (PLAN W2, src-tauri/crates/unimux-app/src/eval_bridge.rs): the macOS stand-in for CDP's
 // Runtime.evaluate. The check build listens on 127.0.0.1:<MC_EVAL_PORT>; every request is one JSON line
 // `{id, expression, label?, timeoutMs?}`, every answer one JSON line `{id, ok, value | error}`. `connectEval` returns the same
-// `{evaluate, close}` shape as `connectPage` in tauri-app.mjs, so `waitFor` and the verify scripts work over either.
+// `{evaluate, close}` shape as `connectPage` in tauri-app.mjs, so `waitFor` and the verify scripts work over either. Like
+// Runtime.evaluate it takes expressions (promises awaited) and statement scripts (`var el = ...; el.dispatchEvent(...)`, the
+// completion value by value; a promise a statement script ends with is not awaited, `const` / `let` stay local); a
+// SyntaxError comes back at once.
 import { connect } from 'node:net';
 import { sleep } from './tauri-app.mjs';
 
