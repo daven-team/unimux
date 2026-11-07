@@ -294,13 +294,17 @@ fn the_terminal_environment_reaches_the_shell() {
     assert!(text.contains(&format!("PWD={}", dir.path().display())), "PWD: {text:?}");
 }
 
+/// 50 MB by default (the acceptance item); `UNIMUX_P1_FLOOD_MB` changes it. The wait is on progress, not on a fixed time:
+/// ConPTY's throughput depends on the machine's load (19 s idle, 45-250 KB/s at 100 percent CPU), so the test fails only
+/// when no output arrives for 60 s.
 #[test]
 fn flood_of_50_mb_pauses_and_resumes() {
+    let mb: u64 = std::env::var("UNIMUX_P1_FLOOD_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(50);
     let sink = Sink::new();
     let m = manager(&sink);
     let dir = scratch();
     let started = Instant::now();
-    let pid = m.spawn(flood("f", dir.path(), &["0", "0", "50000000"])).unwrap();
+    let pid = m.spawn(flood("f", dir.path(), &["0", "0", &(mb * 1_000_000).to_string()])).unwrap();
     assert!(sink.wait(Duration::from_secs(30), |s| s.out.get("f").is_some_and(|o| o.len() > 64 * 1024)), "no flood");
     m.set_paused("f", true);
     std::thread::sleep(Duration::from_millis(300));
@@ -311,13 +315,25 @@ fn flood_of_50_mb_pauses_and_resumes() {
     assert!(alive(pid), "the writer ended while the reader was paused (it should block)");
     assert!(sink.exit_of("f").is_none());
     m.set_paused("f", false);
-    let exit = sink.wait_exit("f", Duration::from_secs(180));
+    let (mut last_len, mut last_progress) = (after, Instant::now());
+    let exit = loop {
+        if let Some(exit) = sink.wait_exit("f", Duration::from_secs(1)) {
+            break Some(exit);
+        }
+        let len = sink.len("f");
+        if len != last_len {
+            (last_len, last_progress) = (len, Instant::now());
+        } else if last_progress.elapsed() > Duration::from_secs(60) {
+            break None;
+        }
+    };
     let secs = started.elapsed().as_secs_f64();
-    assert_eq!(exit.map(|e| e.0), Some(0));
+    assert_eq!(exit.map(|e| e.0), Some(0), "no output for 60 s after {} bytes", sink.len("f"));
     let text = sink.text("f");
-    assert!(text.contains("FLOOD-DONE 50000"), "last line missing: {:?}", &text[text.len().saturating_sub(300)..]);
+    let done = format!("FLOOD-DONE {}", mb * 1000);
+    assert!(text.contains(&done), "last line missing: {:?}", &text[text.len().saturating_sub(300)..]);
     println!(
-        "P1 50 MB flood: paused at {paused_at} bytes (held 1 s), {:.1} MB delivered in {secs:.1} s",
+        "P1 {mb} MB flood: paused at {paused_at} bytes (held 1 s), {:.1} MB delivered in {secs:.1} s",
         sink.len("f") as f64 / 1e6
     );
 }
@@ -535,6 +551,9 @@ fn a_kill_right_after_the_spawn_ends_in_time() {
     }
 }
 
+/// Windows: CreateProcess fails for a missing program or cwd, so spawn fails (node-pty throws there too) and nothing is
+/// left behind.
+#[cfg(windows)]
 #[test]
 fn a_spawn_error_leaves_nothing_behind() {
     let sink = Sink::new();
@@ -548,6 +567,77 @@ fn a_spawn_error_leaves_nothing_behind() {
     assert!(!m.has("bad") && !m.has("bad2"));
     assert_eq!(m.running(), 0);
     assert!(sink.exit_of("bad").is_none());
+}
+
+/// Unix: like node-pty (forkpty / spawn-helper), the chdir and the exec happen in the child, so a missing cwd or program is
+/// a terminal that exits with code 1 (Linux prints perror's text first), not a spawn error.
+#[cfg(unix)]
+#[test]
+fn a_missing_cwd_or_program_is_a_terminal_that_exits_with_1() {
+    let sink = Sink::new();
+    let m = manager(&sink);
+    let dir = scratch();
+    let mut r = req("bad", dir.path(), quick_shell());
+    r.launch = Some(Launch::new(dir.path().join("no-such-program").to_string_lossy(), &[]));
+    assert!(m.spawn(r).is_ok());
+    let missing_cwd: PathBuf = dir.path().join("missing");
+    assert!(m.spawn(req("bad2", &missing_cwd, quick_shell())).is_ok());
+    let mut by_name = req("bad3", dir.path(), quick_shell());
+    by_name.launch = Some(Launch::new("unimux-no-such-program-on-path", &[]));
+    assert!(m.spawn(by_name).is_ok());
+    for id in ["bad", "bad2", "bad3"] {
+        assert_eq!(sink.wait_exit(id, Duration::from_secs(10)).map(|e| e.0), Some(1), "{id}: {:?}", sink.text(id));
+    }
+    if cfg!(target_os = "linux") {
+        assert!(sink.text("bad").contains("execvp(3) failed.: No such file or directory"), "{:?}", sink.text("bad"));
+        assert!(sink.text("bad2").contains("chdir(2) failed.: No such file or directory"), "{:?}", sink.text("bad2"));
+        assert!(sink.text("bad3").contains("execvp(3) failed."), "{:?}", sink.text("bad3"));
+    }
+    assert!(!m.has("bad") && !m.has("bad2") && !m.has("bad3"));
+    assert_eq!(m.running(), 0);
+}
+
+/// The launch command is typed even when spawn is still busy (a loaded machine) 150 ms after the first output: it waits in
+/// the slot's early input until the pty is set.
+#[test]
+fn the_launch_command_is_typed_when_spawn_returns_late() {
+    let sink = Sink::new();
+    let m = manager(&sink);
+    m.set_spawn_hold(Some(Duration::from_millis(1500)));
+    let dir = scratch();
+    let mut r = req("late", dir.path(), quick_shell());
+    r.command = Some(if cfg!(windows) { "echo late-%COMPUTERNAME:~0,0%cmd-ok" } else { "echo late-$((1+1))-ok" }.into());
+    m.spawn(r).unwrap();
+    m.set_spawn_hold(None);
+    let want = if cfg!(windows) { "late-cmd-ok" } else { "late-2-ok" };
+    assert!(sink.wait_text("late", Duration::from_secs(30), want), "{:?}", sink.text("late"));
+    assert!(m.kill_and_wait("late", KILL_TIMEOUT));
+}
+
+/// An agent cell (launch command typed) killed while its DA1 was never answered (no renderer attached): the typed command
+/// is not the answer, so the kill still sends it and ends within the 3 s limit instead of sitting out OpenConsole's hold.
+#[test]
+fn an_agent_cell_without_a_da1_answer_is_killed_in_time() {
+    let sink = Sink::new();
+    let m = manager(&sink);
+    *sink.handle.lock() = None;
+    let dir = scratch();
+    for round in 0..3 {
+        let id = format!("agent{round}");
+        let mut r = req(&id, dir.path(), quick_shell());
+        r.command = Some("echo agent-launch".into());
+        let pid = m.spawn(r).unwrap();
+        assert!(sink.wait_output(&id, Duration::from_secs(30)), "{id}: no output");
+        // The command went in (150 ms after the first output).
+        std::thread::sleep(Duration::from_millis(400));
+        let started = Instant::now();
+        assert!(m.kill_and_wait(&id, KILL_TIMEOUT), "{id}: no exit in 3 s");
+        let took = started.elapsed();
+        println!("P1 agent cell kill without DA1 answer: {} ms", took.as_millis());
+        // OpenConsole's DA1 hold is about 2.8 s idle (3.1 s under load); a kill that sent the answer takes well under 1 s.
+        assert!(took < Duration::from_millis(2000), "{id}: the kill sat out the DA1 hold ({} ms)", took.as_millis());
+        assert!(!alive(pid));
+    }
 }
 
 #[test]

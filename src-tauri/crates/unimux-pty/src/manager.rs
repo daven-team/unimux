@@ -149,6 +149,8 @@ struct Inner {
     panic_hook: RwLock<Option<PanicHook>>,
     /// Observes the tree kills of kill_all (tests).
     tree_kill_probe: RwLock<Option<TreeKillProbe>>,
+    /// Holds spawn this long between the start of the pty and putting it into its slot (tests: a slow machine).
+    spawn_hold: RwLock<Option<Duration>>,
 }
 
 impl Inner {
@@ -225,6 +227,7 @@ impl PtyManager {
                 serial: AtomicU64::new(1),
                 panic_hook: RwLock::new(None),
                 tree_kill_probe: RwLock::new(None),
+                spawn_hold: RwLock::new(None),
             }),
         }
     }
@@ -241,6 +244,12 @@ impl PtyManager {
     /// Tests: sees the pid of every terminal kill_all tree-kills.
     pub fn set_tree_kill_probe(&self, probe: Option<TreeKillProbe>) {
         *self.inner.tree_kill_probe.write() = probe;
+    }
+
+    /// Tests: holds every spawn this long after its pty started and before the pty is in its slot (the first output and
+    /// the launch command then come before spawn returned, as on a loaded machine).
+    pub fn set_spawn_hold(&self, hold: Option<Duration>) {
+        *self.inner.spawn_hold.write() = hold;
     }
 
     pub fn handle(&self) -> PtyHandle {
@@ -302,12 +311,14 @@ impl PtyManager {
                 inner.guarded(|| inner.sink().data(&id, data));
                 if let Some(cmd) = pending_command.take() {
                     let (weak, id) = (weak.clone(), id.clone());
+                    // Through the slot: a pty that is not in it yet (spawn still running on a slow machine) gets the
+                    // command with the rest of the early input when it is set.
                     let typed = move || {
                         std::thread::sleep(COMMAND_DELAY);
                         if let Some(inner) = weak.upgrade()
-                            && let Some(pty) = inner.current(&id, serial).and_then(|s| s.pty.get().cloned())
+                            && let Some(slot) = inner.current(&id, serial)
                         {
-                            pty.write(format!("{cmd}\r").as_bytes());
+                            slot.write(format!("{cmd}\r").as_bytes());
                         }
                     };
                     let _ = std::thread::Builder::new().name("pty-command".into()).spawn(typed);
@@ -350,6 +361,10 @@ impl PtyManager {
             }
         };
         let pid = pty.pid();
+        let hold = *inner.spawn_hold.read();
+        if let Some(hold) = hold {
+            std::thread::sleep(hold);
+        }
         slot.set_pty(pty.clone());
         // A kill that came while the pty was being created.
         if slot.killed.load(Ordering::SeqCst) {

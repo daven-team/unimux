@@ -11,8 +11,10 @@
 //!   closes the pseudoconsole 1 s after the shell ended (node-pty's FLUSH_DATA_INTERVAL);
 //! - the child is created suspended and put into a Job Object before it runs, so a kill ends the whole tree (dev servers
 //!   an agent started), not only the shell. The job has no kill-on-close: programs started from a terminal whose shell
-//!   ended by itself survive, as in 1.1.4;
-//! - a kill goes like node-pty's: input closed (after the DA1 answer when the terminal never got input, see
+//!   ended by itself survive, as in 1.1.4. Difference to 1.1.4 (recorded in PROGRESS.md, P1 open issues): the kill ends
+//!   everything in the job, also GUI programs and new console windows started from the cell (`code .`, `start "" cmd`, a
+//!   browser that was not running yet); 1.1.4's kill ended only what was attached to the console;
+//! - a kill goes like node-pty's: input closed (after the DA1 answer when no DA1 answer was ever written, see
 //!   [`DA1_REPLY`]), ClosePseudoConsole (attached programs get CTRL_CLOSE), then the shell is terminated (exit code 1),
 //!   then the job (the rest of the tree);
 //! - `ClosePseudoConsole` runs on its own thread while the reader keeps draining the output pipe, even when the flow gate has
@@ -55,9 +57,9 @@ const READ_SIZE: usize = 64 * 1024;
 /// no clients left, and nothing is closed on a timer.
 const EXIT_DRAIN: Duration = Duration::from_millis(1000);
 /// xterm.js's answer to DA1 (`CSI c`). OpenConsole 1.23 asks right after the start and holds the new terminal (its output
-/// and a ClosePseudoConsole) up to about 3 s until the answer comes. A kill of a terminal that never got any input sends it
-/// first (see [`Pty::kill`]).
-pub const DA1_REPLY: &[u8] = b"[?1;2c";
+/// and a ClosePseudoConsole) up to about 3 s until the answer comes. A kill of a terminal whose input never carried a DA1
+/// answer sends it first (see [`Pty::kill`]).
+pub const DA1_REPLY: &[u8] = b"\x1b[?1;2c";
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -370,12 +372,27 @@ impl Drop for Shared {
     }
 }
 
+/// Whether `data` carries an answer to DA1 (`CSI ? Ps ; ... c`, what xterm.js and other terminals send).
+pub fn is_da1_answer(data: &[u8]) -> bool {
+    let mut rest = data;
+    while let Some(at) = rest.windows(3).position(|w| w == b"\x1b[?") {
+        let tail = &rest[at + 3..];
+        let params = tail.iter().take_while(|b| b.is_ascii_digit() || **b == b';').count();
+        if params > 0 && tail.get(params) == Some(&b'c') {
+            return true;
+        }
+        rest = tail;
+    }
+    false
+}
+
 /// One terminal: a pseudoconsole and the process tree running in it.
 pub struct Pty {
     shared: Arc<Shared>,
     input: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
-    /// Input was queued (by [`Pty::write`]; a [`PtyWriter`] clone counts too).
-    wrote: Arc<AtomicBool>,
+    /// A DA1 answer was queued (by [`Pty::write`] or a [`PtyWriter`] clone). Other input (the agent launch command, keys)
+    /// does not count: OpenConsole keeps holding the terminal until the answer itself comes.
+    da1_answered: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
@@ -383,7 +400,9 @@ pub struct PtyWriter(mpsc::Sender<Vec<u8>>, Arc<AtomicBool>);
 
 impl PtyWriter {
     pub fn write(&self, data: &[u8]) {
-        self.1.store(true, Ordering::SeqCst);
+        if is_da1_answer(data) {
+            self.1.store(true, Ordering::SeqCst);
+        }
         let _ = self.0.send(data.to_vec());
     }
 }
@@ -605,7 +624,7 @@ impl Pty {
                 })
                 .map_err(|e| fail(&shared, e))?;
 
-            Ok(Pty { shared, input: Mutex::new(Some(tx)), wrote: Arc::new(AtomicBool::new(false)) })
+            Ok(Pty { shared, input: Mutex::new(Some(tx)), da1_answered: Arc::new(AtomicBool::new(false)) })
         }
     }
 
@@ -624,24 +643,26 @@ impl Pty {
 
     /// A cloneable input handle (for answers sent from the output callback, e.g. the DA1 reply in tests).
     pub fn writer(&self) -> Option<PtyWriter> {
-        self.input.lock().clone().map(|tx| PtyWriter(tx, self.wrote.clone()))
+        self.input.lock().clone().map(|tx| PtyWriter(tx, self.da1_answered.clone()))
     }
 
     /// Queues input for the console (never blocks).
     pub fn write(&self, data: &[u8]) {
         if let Some(tx) = self.input.lock().as_ref() {
-            self.wrote.store(true, Ordering::SeqCst);
+            if is_da1_answer(data) {
+                self.da1_answered.store(true, Ordering::SeqCst);
+            }
             let _ = tx.send(data.to_vec());
         }
     }
 
-    /// Closes the input. A terminal that never got any input (killed right after its start, before a renderer answered
-    /// DA1) gets the DA1 answer first: OpenConsole would otherwise sit out its 3 s DA1 wait before it handles the close, and
-    /// the kill would miss its 3 s limit. A late answer to a console that already gave up waiting only reaches a shell that
-    /// is being ended.
+    /// Closes the input. A terminal whose DA1 was never answered (killed right after its start, before a renderer
+    /// answered; also an agent cell whose launch command was already typed, since that is not the answer) gets the DA1
+    /// answer first: OpenConsole would otherwise sit out its 3 s DA1 wait before it handles the close, and the kill would
+    /// miss its 3 s limit. A late answer to a console that already gave up waiting only reaches a shell that is being ended.
     fn close_input(&self) {
         if let Some(tx) = self.input.lock().take()
-            && !self.wrote.load(Ordering::SeqCst)
+            && !self.da1_answered.load(Ordering::SeqCst)
         {
             let _ = tx.send(DA1_REPLY.to_vec());
         }
@@ -776,5 +797,23 @@ impl Drop for TimerResolution {
                 timeEndPeriod(1);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn da1_answers_are_recognised() {
+        assert!(is_da1_answer(DA1_REPLY));
+        assert!(is_da1_answer(b"\x1b[?62;4;22c"));
+        assert!(is_da1_answer(b"typed\x1b[?1;2cmore"));
+        assert!(is_da1_answer(b"\x1b[?1\x1b[?6c"));
+        assert!(!is_da1_answer(b"claude --model x\r"));
+        assert!(!is_da1_answer(b"\x1b[?c"));
+        assert!(!is_da1_answer(b"\x1b[?1;2"));
+        assert!(!is_da1_answer(b"\x1b[c"));
+        assert!(!is_da1_answer(b"\x1b[?2004h"));
     }
 }

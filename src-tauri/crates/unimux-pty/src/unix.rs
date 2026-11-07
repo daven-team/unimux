@@ -1,9 +1,11 @@
 //! The Unix pty (macOS, and Linux for the tests): what node-pty 1.1.0's UnixTerminal does, with the same surface as
 //! [`crate::conpty::Pty`].
 //!
-//! - `openpty`, the child in its own session (`setsid`) with the slave as its controlling terminal (`TIOCSCTTY`) and as
-//!   stdin / stdout / stderr; signal dispositions and the signal mask reset to the defaults; the environment gets
-//!   `PWD = cwd` like node-pty's;
+//! - `openpty` with node-pty's termios ([`node_pty_termios`], IUTF8 included), the child in its own session (`setsid`)
+//!   with the slave as its controlling terminal (`TIOCSCTTY`) and as stdin / stdout / stderr; signal dispositions and the
+//!   signal mask reset to the defaults; the environment gets `PWD = cwd` like node-pty's;
+//! - chdir and execvp in the child like node-pty's: a missing cwd or a program that does not start is not a spawn error
+//!   but a terminal that exits with code 1 (on Linux after perror's "chdir(2) failed." / "execvp(3) failed.");
 //! - a reader thread with a pause gate (flow control) that drains the master until it ends; output that arrives after the
 //!   shell ended is delivered before the exit; the exit is reported when the master ends or 200 ms after the shell ended
 //!   (node-pty's DESTROY_SOCKET_TIMEOUT_MS: a background child may keep the slave open for ever);
@@ -13,9 +15,11 @@
 //! - the exit code is the shell's exit status, 0 when it ended by a signal (node-pty reports the signal separately and
 //!   PtyManager only passes the code on).
 
+use std::ffi::CString;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -182,6 +186,97 @@ fn winsize(cols: u16, rows: u16) -> libc::winsize {
     libc::winsize { ws_row: rows.max(1), ws_col: cols.max(2), ws_xpixel: 0, ws_ypixel: 0 }
 }
 
+/// The termios node-pty 1.1.0 gives every pty (pty.cc, `PtyFork`, with its default utf8 encoding, so IUTF8 is on: a
+/// backspace in canonical mode erases a whole multibyte character). The kernel's defaults lack IUTF8 and differ in details.
+pub fn node_pty_termios() -> libc::termios {
+    // SAFETY: termios is plain data; every field node-pty sets is set below, the rest stays zero like its `termios()`.
+    let mut t: libc::termios = unsafe { std::mem::zeroed() };
+    t.c_iflag = libc::ICRNL | libc::IXON | libc::IXANY | libc::IMAXBEL | libc::BRKINT | libc::IUTF8;
+    t.c_oflag = libc::OPOST | libc::ONLCR;
+    t.c_cflag = libc::CREAD | libc::CS8 | libc::HUPCL;
+    t.c_lflag = libc::ICANON | libc::ISIG | libc::IEXTEN | libc::ECHO | libc::ECHOE | libc::ECHOK | libc::ECHOKE | libc::ECHOCTL;
+    let cc = &mut t.c_cc;
+    cc[libc::VEOF] = 4;
+    // node-pty assigns -1 (a cc_t of 0xff).
+    cc[libc::VEOL] = 0xff;
+    cc[libc::VEOL2] = 0xff;
+    cc[libc::VERASE] = 0x7f;
+    cc[libc::VWERASE] = 23;
+    cc[libc::VKILL] = 21;
+    cc[libc::VREPRINT] = 18;
+    cc[libc::VINTR] = 3;
+    cc[libc::VQUIT] = 0x1c;
+    cc[libc::VSUSP] = 26;
+    cc[libc::VSTART] = 17;
+    cc[libc::VSTOP] = 19;
+    cc[libc::VLNEXT] = 22;
+    cc[libc::VDISCARD] = 15;
+    cc[libc::VMIN] = 1;
+    cc[libc::VTIME] = 0;
+    #[cfg(target_os = "macos")]
+    {
+        cc[libc::VDSUSP] = 25;
+        cc[libc::VSTATUS] = 20;
+    }
+    // SAFETY: valid termios pointer.
+    unsafe {
+        libc::cfsetispeed(&mut t, libc::B38400);
+        libc::cfsetospeed(&mut t, libc::B38400);
+    }
+    t
+}
+
+fn cstring(s: impl AsRef<std::ffi::OsStr>) -> io::Result<CString> {
+    CString::new(s.as_ref().as_bytes()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))
+}
+
+/// The text perror would print for each errno, built in the parent (strerror is not safe between fork and exec).
+#[cfg(target_os = "linux")]
+fn errno_texts() -> &'static [Vec<u8>] {
+    static TEXTS: std::sync::OnceLock<Vec<Vec<u8>>> = std::sync::OnceLock::new();
+    TEXTS.get_or_init(|| {
+        (0..200)
+            .map(|e| {
+                let text = io::Error::from_raw_os_error(e).to_string();
+                let suffix = format!(" (os error {e})");
+                text.strip_suffix(&suffix).unwrap_or(&text).as_bytes().to_vec()
+            })
+            .collect()
+    })
+}
+
+/// node-pty's `perror(what)` in the child (Linux only; the macOS spawn-helper exits silently). Async-signal-safe.
+#[cfg(target_os = "linux")]
+fn child_perror(what: &[u8], texts: &[Vec<u8>]) {
+    let errno = io::Error::last_os_error().raw_os_error().unwrap_or(0);
+    let text: &[u8] = texts.get(errno as usize).map_or(b"Unknown error", |t| t.as_slice());
+    for part in [what, b": ", text, b"\n"] {
+        // SAFETY: write(2) of a valid buffer to stderr (the pty slave).
+        unsafe {
+            libc::write(2, part.as_ptr().cast(), part.len());
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn set_environ(env: *const *const libc::c_char) {
+    // SAFETY: the child's own environment pointer; only the child is running after the fork.
+    unsafe {
+        *libc::_NSGetEnviron() = env as *mut *mut libc::c_char;
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_environ(env: *const *const libc::c_char) {
+    unsafe extern "C" {
+        static mut environ: *const *const libc::c_char;
+    }
+    // SAFETY: as above.
+    unsafe {
+        environ = env;
+    }
+}
+
 /// One terminal: a pty and the session running in it.
 pub struct Pty {
     shared: Arc<Shared>,
@@ -215,10 +310,11 @@ impl Pty {
     pub fn spawn(opts: &SpawnOptions, mut on_data: DataFn, on_exit: ExitFn) -> io::Result<Pty> {
         let (mut master, mut slave): (RawFd, RawFd) = (-1, -1);
         let mut size = winsize(opts.cols, opts.rows);
-        // SAFETY: openpty fills both descriptors, which are owned right after. The winsize pointer is `*const` in the Linux
-        // binding and `*mut` in the macOS one.
+        let mut term = node_pty_termios();
+        // SAFETY: openpty fills both descriptors, which are owned right after. The termios / winsize pointers are `*const`
+        // in the Linux binding and `*mut` in the macOS one.
         let (master, slave) = unsafe {
-            if libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null_mut(), (&raw mut size) as _) != 0 {
+            if libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), (&raw mut term) as _, (&raw mut size) as _) != 0 {
                 return Err(io::Error::last_os_error());
             }
             (OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave))
@@ -230,23 +326,46 @@ impl Pty {
             Some(c) => c.clone(),
             None => std::env::current_dir()?,
         };
+        // Everything the child needs is built here: between fork and exec only async-signal-safe calls run.
+        let mut env: Vec<(std::ffi::OsString, std::ffi::OsString)> = match &opts.env {
+            Some(env) => env.iter().filter(|(k, _)| k != "PWD").map(|(k, v)| (k.into(), v.into())).collect(),
+            None => std::env::vars_os().filter(|(k, _)| k != "PWD").collect(),
+        };
+        env.push(("PWD".into(), cwd.clone().into_os_string()));
+        let env_c: Vec<CString> = env
+            .iter()
+            .map(|(k, v)| {
+                let mut kv = k.clone();
+                kv.push("=");
+                kv.push(v);
+                cstring(kv)
+            })
+            .collect::<io::Result<_>>()?;
+        let mut envp: Vec<*const libc::c_char> = env_c.iter().map(|c| c.as_ptr()).collect();
+        envp.push(std::ptr::null());
+        let file_c = cstring(&opts.file)?;
+        let args_c: Vec<CString> =
+            std::iter::once(Ok(file_c.clone())).chain(opts.args.iter().map(cstring)).collect::<io::Result<_>>()?;
+        let mut argv: Vec<*const libc::c_char> = args_c.iter().map(|c| c.as_ptr()).collect();
+        argv.push(std::ptr::null());
+        let cwd_c = cstring(cwd.as_os_str())?;
+        #[cfg(target_os = "linux")]
+        let texts = errno_texts();
+        // Raw pointers are not Send; the closure only runs in the forked child, where they stay valid (the parent's
+        // memory is copied).
+        let ptrs = (envp.as_ptr() as usize, argv.as_ptr() as usize);
+
+        // std::process::Command forks, sets up stdio and reports a failure of the pre-exec steps. The exec itself is done
+        // here like node-pty's (chdir, `environ = env`, execvp, so PATH comes from the cell environment): a cwd that is
+        // gone or a program that does not start gives a terminal that exits with code 1 (Linux: with perror's text), not
+        // a spawn error, as in 1.1.4. `Command`'s own exec is never reached.
         let mut cmd = Command::new(&opts.file);
-        cmd.args(&opts.args).current_dir(&cwd);
-        if let Some(env) = &opts.env {
-            cmd.env_clear();
-            for (k, v) in env {
-                if k != "PWD" {
-                    cmd.env(k, v);
-                }
-            }
-        }
-        cmd.env("PWD", &cwd);
         cmd.stdin(Stdio::from(slave.try_clone()?))
             .stdout(Stdio::from(slave.try_clone()?))
             .stderr(Stdio::from(slave.try_clone()?));
         // SAFETY: only async-signal-safe calls between fork and exec.
         unsafe {
-            cmd.pre_exec(|| {
+            cmd.pre_exec(move || {
                 if libc::setsid() < 0 {
                     return Err(io::Error::last_os_error());
                 }
@@ -261,11 +380,24 @@ impl Pty {
                         libc::signal(sig, libc::SIG_DFL);
                     }
                 }
-                Ok(())
+                if libc::chdir(cwd_c.as_ptr()) == -1 {
+                    #[cfg(target_os = "linux")]
+                    child_perror(b"chdir(2) failed.", texts);
+                    libc::_exit(1);
+                }
+                set_environ(ptrs.0 as *const *const libc::c_char);
+                let argv = ptrs.1 as *const *const libc::c_char;
+                libc::execvp(*argv, argv);
+                #[cfg(target_os = "linux")]
+                child_perror(b"execvp(3) failed.", texts);
+                libc::_exit(1);
             });
         }
-        let mut child = cmd.spawn()?;
+        let spawned = cmd.spawn();
         drop(cmd);
+        // The child has its own copies now.
+        drop((envp, argv, env_c, args_c, file_c));
+        let mut child = spawned?;
         // Our slave copies must go, or the master never ends.
         drop(slave);
         let pid = child.id();
@@ -455,5 +587,48 @@ impl Drop for Pty {
         } else {
             self.input.lock().take();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The termios the shell sees is node-pty's (read back from the terminal, as the child's tcgetattr would see it).
+    #[test]
+    fn the_terminal_gets_node_ptys_termios() {
+        let (tx, rx) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        let pty = Pty::spawn(
+            &SpawnOptions::new("/bin/sh", &["-c", "sleep 5"]),
+            Box::new(|_| {}),
+            Box::new(move |code| {
+                let _ = tx.lock().send(code);
+            }),
+        )
+        .unwrap();
+        // SAFETY: tcgetattr into a zeroed termios on our own master (Linux and macOS return the terminal's settings).
+        let t = unsafe {
+            let mut t: libc::termios = std::mem::zeroed();
+            assert_eq!(libc::tcgetattr(pty.shared.master.as_raw_fd(), &mut t), 0, "{}", io::Error::last_os_error());
+            t
+        };
+        let want = node_pty_termios();
+        assert_ne!(t.c_iflag & libc::IUTF8, 0, "IUTF8 missing");
+        assert_eq!(t.c_iflag, want.c_iflag);
+        assert_eq!(t.c_oflag, want.c_oflag);
+        assert_eq!(t.c_lflag, want.c_lflag);
+        let cflag = libc::CREAD | libc::CS8 | libc::HUPCL;
+        assert_eq!(t.c_cflag & cflag, cflag);
+        for i in [libc::VEOF, libc::VERASE, libc::VWERASE, libc::VKILL, libc::VINTR, libc::VQUIT, libc::VSUSP, libc::VMIN] {
+            assert_eq!(t.c_cc[i], want.c_cc[i], "c_cc[{i}]");
+        }
+        assert_eq!(t.c_cc[libc::VERASE], 0x7f);
+        #[cfg(target_os = "macos")]
+        assert_eq!((t.c_cc[libc::VDSUSP], t.c_cc[libc::VSTATUS]), (25, 20));
+        // SAFETY: reading the speed of a valid termios.
+        assert_eq!(unsafe { libc::cfgetospeed(&t) }, libc::B38400);
+        pty.kill();
+        assert!(rx.recv_timeout(Duration::from_secs(5)).is_ok());
     }
 }
