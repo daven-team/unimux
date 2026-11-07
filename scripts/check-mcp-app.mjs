@@ -67,7 +67,7 @@ try {
   check('stateless initialize: JSON, no session, serverInfo unimux 1.2.0', init.status === 200 && init.type === 'application/json' && !init.session
     && initBody.result?.serverInfo?.name === 'unimux' && initBody.result?.serverInfo?.version === '1.2.0', init.text.slice(0, 200));
   const list = await post(url, token, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
-  check('tools/list answers (no tool layer before M2: empty list)', list.status === 200 && list.text === '{"result":{"tools":[]},"jsonrpc":"2.0","id":1}', list.text);
+  check('tools/list answers (a cell without a role in the state: empty list, as 1.1.4)', list.status === 200 && list.text === '{"result":{"tools":[]},"jsonrpc":"2.0","id":1}', list.text);
   const seen = await waitFor(page, `window.__mcpPushes.find((i) => i.connectedCellIds?.includes('cell-m1'))`, 3000, 'connected push').catch(() => null);
   check('the first tool list marks the cell connected (mcp:info push)', !!seen, JSON.stringify(seen));
   const session = await post(url, token, { jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: { elicitation: { form: {} } }, clientInfo: { name: 'm1', version: '1' } } });

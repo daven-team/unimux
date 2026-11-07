@@ -2,9 +2,15 @@
 //!
 //! M1: the MCP server of the app (unimux-mcp `McpServer`), `mcp:info` (incl. `starting` and the listen error) and
 //! `mcp:retry`, the `mcp:info` push (250 ms debounce, as 1.1.4's pushLater), the start with two background retries
-//! (main.rs setup calls [`start`]) and [`stop`] for the quit path. The tool layer is `NoTools` until M2 / M3 register
-//! theirs; P3 / M4 issue and revoke cell tokens through [`server`].
+//! (main.rs setup calls [`start`]) and [`stop`] for the quit path. P3 / M4 issue and revoke cell tokens through [`server`].
+//!
+//! M2: the tool layer is unimux-mcp's `McpTools` (the 1.1.4 tool lists, instructions, argument checks, elicitations)
+//! over [`AppAutomation`]: the app's state for roles, names and the delegation setting, the elicitation texts in the
+//! app language. Its operations are M3's automation service; until M3 registers it they answer "not yet". The check
+//! build (feature `test-bridge`) runs the tools over unimux-mcp's stand-in automation instead (`fake-automation`), so the
+//! real-app MCP checks (scripts/verify-mcp-cli.mjs) can drive them.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -12,7 +18,11 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use unimux_ipc::{RouterBuilder, Scope};
-use unimux_mcp::{Config, McpServer};
+use unimux_mcp::automation::CancellationToken;
+use unimux_mcp::host::Tr;
+use unimux_mcp::tools::BoxFuture;
+use unimux_mcp::{Automation, Config, McpServer, McpTools, OpError, Role, ToolHost};
+use unimux_state::StateController;
 
 use crate::context::AppContext;
 
@@ -25,32 +35,86 @@ pub struct McpService {
     error: Mutex<Option<String>>,
     /// An `mcp:info` push is scheduled (pushLater).
     push_pending: AtomicBool,
+    /// The check build's stand-in automation (test bridge `mcp-automation`).
+    #[cfg(feature = "test-bridge")]
+    pub fake: unimux_mcp::fake::FakeAutomation,
 }
 
 static SERVICE: OnceLock<Arc<McpService>> = OnceLock::new();
 
-/// The check build's tool layer (feature `test-bridge`, never in a release build): `NoTools` plus `test_bridge_panic`, a
-/// tool that panics, so scripts/check-mcp-app.mjs can prove the app's panic hook leaves MCP request panics to the server.
+/// The automation service as the tool layer sees it, until M3 registers the real one: roles, names and settings come
+/// from the app's state; every operation answers "not yet". (The check build runs the stand-in automation instead.)
+#[cfg_attr(feature = "test-bridge", allow(dead_code))]
+pub struct AppAutomation {
+    state: Arc<StateController>,
+    shown: Mutex<HashMap<String, Arc<Mutex<HashSet<String>>>>>,
+}
+
+#[cfg_attr(feature = "test-bridge", allow(dead_code))]
+impl AppAutomation {
+    pub fn new(state: Arc<StateController>) -> Self {
+        Self { state, shown: Mutex::default() }
+    }
+}
+
+impl Automation for AppAutomation {
+    fn state(&self) -> Arc<Value> {
+        self.state.get()
+    }
+    fn role_of(&self, cell: &str) -> Option<Role> {
+        unimux_mcp::automation::role_in_state(&self.state.get(), cell)
+    }
+    fn prompts_shown(&self, cell: &str) -> Arc<Mutex<HashSet<String>>> {
+        self.shown.lock().entry(cell.to_string()).or_default().clone()
+    }
+    fn execute(
+        &self,
+        op: &str,
+        args: Value,
+        _actor: &str,
+        _cancel: Option<CancellationToken>,
+    ) -> BoxFuture<'static, Result<Value, OpError>> {
+        // AutomationService.execute parses first: a malformed call gets the zod text even now.
+        let result = match unimux_mcp::schemas::operation(op).map(|s| s.parse(&args)) {
+            Some(Err(issues)) => Err(OpError::Invalid(issues)),
+            _ => Err(OpError::message(format!("Not available in this build yet: the automation operation {op} (M3)."))),
+        };
+        Box::pin(async move { result })
+    }
+}
+
+/// The elicitation texts in the app language (index.ts `tr`: the saved language, else the OS language).
+fn translator(state: Arc<StateController>) -> Tr {
+    Arc::new(move |key: &str, params: &[(&str, String)]| {
+        let language = crate::commands::os::language(&state.get());
+        let p: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        unimux_core::i18n::translate(&language, key, &p)
+    })
+}
+
+/// The check build's tool layer (feature `test-bridge`, never in a release build): the real tools over the stand-in
+/// automation, plus `test_bridge_panic`, a tool that panics, so scripts/check-mcp-app.mjs can prove the app's panic hook
+/// leaves MCP request panics to the server.
 #[cfg(feature = "test-bridge")]
 mod test_tools {
     use std::sync::Arc;
 
-    use futures::future::BoxFuture;
     use serde_json::Value;
-    use unimux_mcp::tools::NoTools;
-    use unimux_mcp::{CallCtx, CallError, ToolHost};
+    use unimux_mcp::fake::FakeAutomation;
+    use unimux_mcp::tools::BoxFuture;
+    use unimux_mcp::{CallCtx, CallError, McpTools, ToolHost};
 
-    pub struct BridgeTools;
+    pub struct BridgeTools(pub Arc<McpTools<FakeAutomation>>);
 
     impl ToolHost for BridgeTools {
         fn instructions(&self, cell: &str) -> String {
-            NoTools.instructions(cell)
+            self.0.instructions(cell)
         }
         fn tools(&self, cell: &str) -> Vec<Value> {
-            NoTools.tools(cell)
+            self.0.tools(cell)
         }
         fn supports_task(&self, name: &str) -> bool {
-            NoTools.supports_task(name)
+            self.0.supports_task(name)
         }
         fn call(
             self: Arc<Self>,
@@ -62,7 +126,7 @@ mod test_tools {
                 let text = args.as_ref().and_then(|a| a["message"].as_str()).unwrap_or("test-bridge MCP panic").to_string();
                 return Box::pin(async move { panic!("{text}") });
             }
-            Arc::new(NoTools).call(name, args, ctx)
+            self.0.clone().call(name, args, ctx)
         }
     }
 }
@@ -72,20 +136,39 @@ pub fn server() -> Option<Arc<McpServer>> {
     SERVICE.get().map(|s| s.server.clone())
 }
 
+/// The check build's stand-in automation (None before `register`).
+#[cfg(feature = "test-bridge")]
+pub fn fake_automation() -> Option<unimux_mcp::fake::FakeAutomation> {
+    SERVICE.get().map(|s| s.fake.clone())
+}
+
 impl McpService {
     fn new(ctx: &Arc<AppContext>) -> Arc<Self> {
         let crash = ctx.crash.clone();
         let cfg =
             Config { version: env!("CARGO_PKG_VERSION").to_string(), log: Arc::new(move |m| crash.warn(m)), ..Config::default() };
+        let tr = translator(ctx.state.clone());
         #[cfg(feature = "test-bridge")]
-        let host = Arc::new(test_tools::BridgeTools);
+        let (host, fake): (Arc<dyn ToolHost>, _) = {
+            let state = ctx.state.clone();
+            let fake = unimux_mcp::fake::FakeAutomation::new(Arc::new(move || state.get()));
+            (Arc::new(test_tools::BridgeTools(McpTools::with_tr(Arc::new(fake.clone()), tr))), fake)
+        };
         #[cfg(not(feature = "test-bridge"))]
-        let host = Arc::new(unimux_mcp::tools::NoTools);
+        let host: Arc<dyn ToolHost> = McpTools::with_tr(Arc::new(AppAutomation::new(ctx.state.clone())), tr);
+        let server = Arc::new(McpServer::new(host, cfg));
+        #[cfg(feature = "test-bridge")]
+        {
+            let weak = Arc::downgrade(&server);
+            fake.set_probe(Arc::new(move |cell| weak.upgrade().map_or("off", |s| s.connection(cell).as_str())));
+        }
         Arc::new(Self {
-            server: Arc::new(McpServer::new(host, cfg)),
+            server,
             starting: AtomicBool::new(true),
             error: Mutex::new(None),
             push_pending: AtomicBool::new(false),
+            #[cfg(feature = "test-bridge")]
+            fake,
         })
     }
 
@@ -243,5 +326,48 @@ mod tests {
         assert!(
             std::fs::read_to_string(dir.path().join("crash.log")).unwrap().contains("MCP server did not start: listen EACCES")
         );
+    }
+
+    #[test]
+    fn the_tools_follow_the_app_state_and_the_operations_wait_for_m3() {
+        let state = Arc::new(StateController::new(
+            json!({ "version": 1,
+                "projects": [{ "id": "p", "name": "Proj", "tabs": [{ "id": "g", "name": "Team", "cells": [
+                    { "id": "lead", "name": "Lead", "profileId": "claude", "role": "coordinator" },
+                    { "id": "plain", "profileId": "claude" }] }] }],
+                "profiles": [{ "id": "claude", "name": "Claude", "cli": "claude" }],
+                "settings": { "language": "de", "delegation": { "mode": "ask", "maxAgents": 3 } } }),
+            Arc::new(unimux_state::PassThrough),
+        ));
+        let tools = McpTools::with_tr(Arc::new(AppAutomation::new(state.clone())), translator(state.clone()));
+        assert!(tools.instructions("lead").starts_with("Unimux: you are cell lead \"Lead\" (coordinator) in project Proj."));
+        assert!(tools.instructions("lead").contains("Create agents only when the user asked to delegate"));
+        assert_eq!(tools.instructions("plain"), "Unimux MCP is disabled for this cell.");
+        assert_eq!(tools.tools("lead").len(), unimux_mcp::catalog::tools_for_role(Some(Role::Coordinator)).len());
+        assert!(tools.tools("plain").is_empty());
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let call = |name: &str, args: Value| {
+            rt.block_on(tools.clone().call(name.into(), Some(args), unimux_mcp::host::plain_ctx("lead", false)))
+        };
+        assert_eq!(
+            call("get_context", json!({})),
+            Err(unimux_mcp::CallError::Tool(
+                "Not available in this build yet: the automation operation get_context (M3).".into()
+            ))
+        );
+        assert_eq!(
+            call("send_message", json!({ "toCellId": "lead", "text": "  " })),
+            Err(unimux_mcp::CallError::Tool(
+                "Invalid arguments - text: Too small: expected string to have >=1 characters".into()
+            ))
+        );
+        assert_eq!(call("help", json!({ "topic": "tasks" })).unwrap()["topic"], "tasks");
+        // The elicitation texts follow the app language (the saved one, German here).
+        let tr = translator(state);
+        assert_eq!(
+            tr("Kilku agentów nazywa się „{name}”. Którego wybrać?", &[("name", "X".into())]),
+            "Mehrere Agenten heißen „X“. Welcher ist gemeint?"
+        );
+        assert_eq!(tr("Zamknij grid i anuluj zadania", &[]), "Raster schließen und Aufgaben abbrechen");
     }
 }

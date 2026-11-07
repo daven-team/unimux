@@ -27,6 +27,8 @@
 //                                     (win32) or /work/cwd (posix) and the drive cwds =C: C:\work\cwd, =D: D:\dcwd\x, =E:
 //                                     C:\not-e, =F: '' (the env of the run is replaced while the rows are made)
 //   test/golden/files-*.jsonl        project files: name order, path checks, previews, saves (see scripts/goldens-files.mjs)
+//   test/golden/mcp-tools.json, mcp-zod.jsonl, mcp-calls.jsonl   the MCP tool layer: tools/list per role, instructions, the
+//                                     zod checks and callTool over a scripted service (see scripts/goldens-mcp.mjs)
 //   test/golden/accounts-store.jsonl, codex-accounts.jsonl, accounts-identity.jsonl   the account stores (1.1.4's code, run on
 //                                     scratch dirs) and the identity helpers (see scripts/goldens-accounts.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -39,6 +41,7 @@ import { hookPayloadRows, hookServerRows } from './goldens-hooks.mjs';
 import { convGoldens } from './goldens-convsearch.mjs';
 import { DB_MODULES, dbGoldens } from './goldens-db.mjs';
 import { accountsStoreRows, codexStoreRows, identityRows } from './goldens-accounts.mjs';
+import { mcpGoldens } from './goldens-mcp.mjs';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -315,6 +318,11 @@ const files = {
   'codex-accounts.jsonl': jsonl(codexStoreRows({ CodexAccountsStore })),
   'accounts-identity.jsonl': jsonl(identityRows({ accounts, codex, parseCodexAuth, decodeJwtClaims })),
 };
+const mcp = await mcpGoldens(load);
+files['mcp-tools.json'] = `${JSON.stringify(mcp.tools, null, 1)}
+`;
+files['mcp-zod.jsonl'] = jsonl(mcp.zod);
+files['mcp-calls.jsonl'] = jsonl(mcp.calls);
 const updateStrings = updateStringsGolden({ root, translate });
 files['update-strings.json'] = `${JSON.stringify(updateStrings, null, 1)}\n`;
 files['update-config.json'] = `${JSON.stringify(updateConfigGolden({ strings: updateStrings }), null, 1)}\n`;

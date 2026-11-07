@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 unimux-core.workspace = true
 unimux-ipc.workspace = true
+unimux-state.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["net", "rt"] }
 parking_lot.workspace = true
@@ -21,6 +22,11 @@ bytes.workspace = true
 tokio-util.workspace = true
 getrandom.workspace = true
 
+[features]
+# The stand-in automation service of src/fake.rs (the crate's tests and the app's test-bridge check build only).
+fake-automation = []
+
 [dev-dependencies]
+unimux-mcp = { path = ".", features = ["fake-automation"] }
 regex.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "macros"] }
