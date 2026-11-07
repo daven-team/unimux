@@ -34,8 +34,11 @@ One JSON object per line in both directions (UTF-8, `\n`), src/protocol.rs:
 
 - request: `{"id": 7, "op": "pty.spawn", "args": {...}}`
 - answer: `{"id": 7, "ok": true, "result": ...}` or `{"id": 7, "ok": false, "error": "text"}`; exactly one per request, in
-  any order (an op that waits, such as `pty.killAll`, answers from its own thread). A line that is not a request gets
-  `{"id": null, "ok": false, "error": "bad request: ..."}`.
+  any order (an op that waits, such as `pty.killAll`, answers from its own thread). A bad request is answered under its
+  own id (`{"id": 7, "ok": false, "error": "bad request: ..."}`; for a line that is not JSON the id is read from its
+  `{"id":7,` start). Only a line with no readable id gets `id: null`, and HostdClient then fails every pending request so
+  none hangs. JSON is read like JSON.parse: an escaped lone surrogate (`"\ud800"`, which JSON.stringify writes) becomes
+  U+FFFD, as Node's UTF-8 write of that string would send it.
 - event: `{"event": "pty.data", "args": {...}}` (never an `id`).
 
 Requests are handled in arrival order, so a `pty.write` sent after a `pty.spawn` always finds the terminal even when the
@@ -59,7 +62,7 @@ The PtyManager surface (src/ptyhost/manager.ts) that test/ptyhost.int.test.ts dr
 | `pty.write` | `{id, data}` | null (unknown id: no-op) |
 | `pty.resize` | `{id, cols, rows}` | null |
 | `pty.has` | `{id}` | boolean |
-| `pty.histories` | | `[{id, data}]`, oldest spawn first, 512 Ki UTF-16 unit tail |
+| `pty.histories` | | `[{id, data, sizes}]`, oldest spawn first, 512 Ki UTF-16 unit tail; `sizes` as TailBuffer.replay() (`[{at, cols, rows}]`: the start size and every resize, at most 512) |
 | `pty.kill` | `{id, timeoutMs?}` | null once the process ended or after the timeout (default 3000) |
 | `pty.killAll` | `{timeoutMs?}` | null; terminals still running at the deadline get their tree killed |
 | `pty.resolveShell` | `{shell, env, platform?}` | `{file, args}` (resolveShell port) |
@@ -74,7 +77,10 @@ mutes its output and exit, `has` is false before the exit event.
 
 Backends: Windows on `unimux_pty::conpty` (SP5: bundled conpty.dll + OpenConsole, flags 0, Job Object, node-pty's kill
 order). Unix on a stand-in in `pty/unix.rs` (openpty, setsid + TIOCSCTTY, SIGHUP to the group on kill, SIGKILL for the
-tree). OpenConsole 1.23 asks a new terminal for its device attributes (`ESC [ c`) and holds the output up to about 3 s;
+tree, PWD set to the cwd like node-pty, the exit reported at most 200 ms after the shell ended even while a background job
+holds the slave side: node-pty's DESTROY_SOCKET_TIMEOUT_MS). `pty.killAll` force-kills the tree of every terminal still
+running at its deadline (Windows: `Pty::kill_tree`, TerminateProcess + TerminateJobObject without waiting for the close;
+1.1.4: `taskkill /T /F`). OpenConsole 1.23 asks a new terminal for its device attributes (`ESC [ c`) and holds the output up to about 3 s;
 with no xterm.js attached hostd answers `ESC [ ? 1 ; 2 c` once, like xterm.js (P2 must do the same while no renderer is
 attached).
 

@@ -38,6 +38,7 @@ rl.on('line', (line) => {
   else if (op === 'slow') setTimeout(() => send({ id, ok: true, result: 'slow' }), 50);
   else if (op === 'fast') send({ id, ok: true, result: 'fast' });
   else if (op === 'hang') {}
+  else if (op === 'unreadable') send({ id: null, ok: false, error: 'bad request: no op' });
   else send({ id, ok: false, error: 'unknown op ' + op });
 });
 rl.on('close', () => process.exit(0));
@@ -72,6 +73,33 @@ describe('HostdClient', () => {
     await h.close();
     await expect(hanging).rejects.toThrow(/fake exited/);
     await expect(h.request('ping')).rejects.toThrow(/fake exited/);
+  });
+
+  it('refuses requests once close() started instead of writing after the end of stdin', async () => {
+    const errors: unknown[] = [];
+    const onUncaught = (e: unknown) => errors.push(e);
+    process.on('uncaughtException', onUncaught);
+    try {
+      const h = fake();
+      expect(await h.request('ping')).toBe('pong');
+      const closing = h.close();
+      await expect(h.request('ping')).rejects.toThrow(/fake ping: the host is closing/);
+      await closing;
+      await expect(h.request('ping')).rejects.toThrow(/fake exited/);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(errors).toEqual([]);
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
+  });
+
+  it('fails the pending requests on an answer without an id, so none hangs', async () => {
+    const h = fake();
+    const hanging = h.request('hang');
+    await expect(h.request('unreadable')).rejects.toThrow('fake: bad request: no op');
+    await expect(hanging).rejects.toThrow('fake: bad request: no op');
+    expect(await h.request('ping')).toBe('pong');
+    await h.close();
   });
 
   it('says how to build the binary when it is missing', () => {

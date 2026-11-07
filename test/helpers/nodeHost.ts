@@ -10,6 +10,10 @@ import { join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { createInterface } from 'readline';
 import type { SpawnRequest } from '../../src/shared/ipc';
+import type { ReplaySize } from '../../src/shared/replay';
+
+/** PtyManager.histories() (src/ptyhost/router.ts TerminalHistory). */
+export interface TerminalHistory { id: string; data: string; sizes?: ReplaySize[] }
 
 export type HostTarget = 'node' | 'rust';
 
@@ -53,6 +57,8 @@ export class HostdClient {
   private listeners = new Map<string, Set<(args: any) => void>>();
   private stderr = '';
   private ended: Error | null = null;
+  /** close() ended stdin: later requests are refused (a write after end would be an uncaught stream error). */
+  private closing = false;
   /** Resolves with the exit code once the process is gone. */
   readonly exited: Promise<number | null>;
 
@@ -68,6 +74,8 @@ export class HostdClient {
         resolveExit(code);
       });
     });
+    // A write to a host that is gone (EPIPE) or after close() fails the requests instead of crashing the test worker.
+    proc.stdin.on('error', (error) => this.fail(new Error(`${label} stdin: ${error.message}`)));
     // stdin closing (close(), or this process ending) ends the host and its terminals.
     proc.unref();
   }
@@ -93,6 +101,7 @@ export class HostdClient {
 
   request<T = unknown>(op: string, args: Record<string, unknown> = {}): Promise<T> {
     if (this.ended) return Promise.reject(this.ended);
+    if (this.closing) return Promise.reject(new Error(`${this.label} ${op}: the host is closing`));
     const id = this.nextId++;
     return new Promise<T>((resolveRequest, reject) => {
       this.pending.set(id, { resolve: resolveRequest as (v: unknown) => void, reject, op });
@@ -110,6 +119,7 @@ export class HostdClient {
 
   /** Closes stdin (the host kills what it started and exits); kills the process after `timeoutMs`. */
   async close(timeoutMs = 8000): Promise<void> {
+    this.closing = true;
     if (this.proc.exitCode === null && this.proc.signalCode === null) {
       this.proc.stdin.end();
       const timer = setTimeout(() => this.proc.kill(), timeoutMs);
@@ -129,6 +139,14 @@ export class HostdClient {
     }
     if (typeof msg.event === 'string') {
       for (const cb of [...(this.listeners.get(msg.event) ?? [])]) cb(msg.args);
+      return;
+    }
+    if (msg.id === null && msg.ok === false) {
+      // A line the host could not read an id from: one of the pending requests will never get its answer, so none is
+      // left waiting (the suite fails with the host's error instead of hanging).
+      const error = new Error(`${this.label}: ${msg.error}`);
+      for (const p of this.pending.values()) p.reject(error);
+      this.pending.clear();
       return;
     }
     const p = this.pending.get(msg.id);
@@ -161,7 +179,7 @@ export interface PtyHost {
   write(id: string, data: string): void | Promise<void>;
   resize(id: string, cols: number, rows: number): void | Promise<void>;
   has(id: string): boolean | Promise<boolean>;
-  histories(): { id: string; data: string }[] | Promise<{ id: string; data: string }[]>;
+  histories(): TerminalHistory[] | Promise<TerminalHistory[]>;
   kill(id: string, timeoutMs?: number): Promise<void>;
   killAll(timeoutMs?: number): Promise<void>;
   /** Ends the host (rust: the hostd process with every terminal it still has; node: nothing). */
@@ -182,7 +200,7 @@ class RustPtyHost implements PtyHost {
   async write(id: string, data: string): Promise<void> { await this.host.request('pty.write', { id, data }); }
   async resize(id: string, cols: number, rows: number): Promise<void> { await this.host.request('pty.resize', { id, cols, rows }); }
   has(id: string): Promise<boolean> { return this.host.request<boolean>('pty.has', { id }); }
-  histories(): Promise<{ id: string; data: string }[]> { return this.host.request('pty.histories'); }
+  histories(): Promise<TerminalHistory[]> { return this.host.request('pty.histories'); }
   async kill(id: string, timeoutMs?: number): Promise<void> { await this.host.request('pty.kill', { id, timeoutMs }); }
   async killAll(timeoutMs?: number): Promise<void> { await this.host.request('pty.killAll', { timeoutMs }); }
   close(): Promise<void> { return this.host.close(); }

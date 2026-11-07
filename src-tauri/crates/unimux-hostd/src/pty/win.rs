@@ -28,8 +28,9 @@ impl Term for WinTerm {
     }
 
     fn kill_tree(&self) {
-        // Pty::kill ends the shell and then the Job Object, i.e. the whole tree; a second call finishes what is left.
-        self.0.kill();
+        // 1.1.4's taskkill /T /F at the killAll deadline: the shell and the job end now, without waiting for the close
+        // (Pty::kill terminates only once ClosePseudoConsole returned, so calling it again would do nothing).
+        self.0.kill_tree();
     }
 
     fn source(&self) -> String {

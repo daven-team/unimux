@@ -104,17 +104,53 @@ pub struct Request {
     pub args: Value,
 }
 
-/// Parses one line; `Err` carries the answer text for a line that is not a request (answered with `id: null`).
-pub fn parse(line: &str) -> Result<Request, String> {
-    let value: Value = serde_json::from_str(line).map_err(|e| format!("bad request: {e}"))?;
-    let Value::Object(mut obj) = value else { return Err("bad request: not an object".into()) };
+/// A line that is not a valid request: the answer goes to `id` (the request's own id when it could be read, else null).
+#[derive(Debug, PartialEq)]
+pub struct BadRequest {
+    pub id: Value,
+    pub error: String,
+}
+
+/// Parses one line. Every line with an id gets its answer under that id, a bad one included (the Node side waits for it).
+/// JSON is read like JSON.parse reads what JSON.stringify wrote: an escaped lone surrogate (`"\ud800"`, half an emoji in a
+/// `pty.write`) becomes U+FFFD, as Node's UTF-8 write of that string would send it.
+pub fn parse(line: &str) -> Result<Request, BadRequest> {
+    let value =
+        unimux_core::js_json::parse(line).map_err(|e| BadRequest { id: leading_id(line), error: format!("bad request: {e}") })?;
+    let Value::Object(mut obj) = value else {
+        return Err(BadRequest { id: Value::Null, error: "bad request: not an object".into() });
+    };
     let id = obj.remove("id").unwrap_or(Value::Null);
     let op = match obj.remove("op") {
         Some(Value::String(op)) => op,
-        _ => return Err("bad request: no op".into()),
+        _ => return Err(BadRequest { id, error: "bad request: no op".into() }),
     };
     let args = obj.remove("args").unwrap_or(Value::Object(Map::new()));
     Ok(Request { id, op, args })
+}
+
+/// The id of a line that is not valid JSON, when it starts the way the Node side writes requests (`{"id":7,...` or
+/// `{"id":"x",...`); else null.
+fn leading_id(line: &str) -> Value {
+    let rest = line.trim_start();
+    let Some(rest) = rest.strip_prefix('{') else { return Value::Null };
+    let Some(rest) = rest.trim_start().strip_prefix("\"id\"") else { return Value::Null };
+    let Some(rest) = rest.trim_start().strip_prefix(':') else { return Value::Null };
+    let rest = rest.trim_start();
+    let end = if let Some(text) = rest.strip_prefix('"') {
+        // A plain string id (no escapes inside).
+        match text.find(['"', '\\']) {
+            Some(i) if text.as_bytes()[i] == b'"' => i + 2,
+            _ => return Value::Null,
+        }
+    } else {
+        rest.find(|c: char| !(c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | 'e' | 'E'))).unwrap_or(rest.len())
+    };
+    let after = rest[end..].trim_start();
+    if end == 0 || !(after.starts_with(',') || after.starts_with('}')) {
+        return Value::Null;
+    }
+    serde_json::from_str(&rest[..end]).unwrap_or(Value::Null)
 }
 
 /// Typed access to the `args` object of a request; errors name the field like the TS side's zod messages would.
@@ -177,9 +213,32 @@ mod tests {
 
     #[test]
     fn parse_refuses_non_requests() {
-        assert!(parse("nope").unwrap_err().starts_with("bad request:"));
-        assert_eq!(parse("[1]").unwrap_err(), "bad request: not an object");
-        assert_eq!(parse(r#"{"id": 1}"#).unwrap_err(), "bad request: no op");
+        let e = parse("nope").unwrap_err();
+        assert!(e.error.starts_with("bad request:"));
+        assert_eq!(e.id, Value::Null);
+        assert_eq!(parse("[1]").unwrap_err(), BadRequest { id: Value::Null, error: "bad request: not an object".into() });
+    }
+
+    #[test]
+    fn a_bad_request_is_answered_under_its_own_id() {
+        assert_eq!(parse(r#"{"id": 1}"#).unwrap_err(), BadRequest { id: json!(1), error: "bad request: no op".into() });
+        assert_eq!(parse(r#"{"id":6,"op":7}"#).unwrap_err().id, json!(6));
+        assert_eq!(parse(r#"{"id":"x","op":null}"#).unwrap_err().id, json!("x"));
+        // Not JSON at all, but the id leads the line as the Node side writes it.
+        let e = parse(r#"{"id":12,"op":"pty.write","args":{"id":"a","data":"\x"}}"#).unwrap_err();
+        assert_eq!(e.id, json!(12));
+        assert!(e.error.starts_with("bad request:"), "{}", e.error);
+        assert_eq!(parse(r#"{ "id" : "r-1" , "op": oops}"#).unwrap_err().id, json!("r-1"));
+        assert_eq!(parse(r#"{"op":"ping","id":3,"#).unwrap_err().id, Value::Null);
+        assert_eq!(parse(r#"{"id":12x,"op"}"#).unwrap_err().id, Value::Null);
+    }
+
+    #[test]
+    fn a_lone_surrogate_from_json_stringify_reads_as_a_replacement_character() {
+        // JSON.stringify('\ud800') is "\ud800" (RFC 8259 allows it); serde_json alone refuses it.
+        let r = parse(r#"{"id":9,"op":"pty.write","args":{"id":"a","data":"x\ud800y😀"}}"#).unwrap();
+        assert_eq!(r.id, json!(9));
+        assert_eq!(r.args["data"], json!("x\u{FFFD}y\u{1F600}"));
     }
 
     #[test]

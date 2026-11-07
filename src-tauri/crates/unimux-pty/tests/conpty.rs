@@ -260,6 +260,32 @@ fn close_under_flood_inbox_api_for_comparison() {
 }
 
 #[test]
+fn kill_tree_ends_the_tree_at_once_and_after_a_kill() {
+    // `first_kill`: kill() first, then kill_tree() (PtyManager.killAll's deadline); a second kill() would do nothing.
+    for first_kill in [false, true] {
+        let out = Collector::default();
+        let pty = out.spawn(bundled(), &cmd(&[]));
+        assert!(out.wait_text(Duration::from_secs(10), ">"));
+        pty.write(b"start /b ping -n 120 127.0.0.1 >nul\r");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut descendants = Vec::new();
+        while Instant::now() < deadline && descendants.is_empty() {
+            descendants = tree(pty.pid()).into_iter().skip(1).collect();
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!descendants.is_empty(), "no grandchild started");
+        if first_kill {
+            pty.kill();
+        }
+        pty.kill_tree();
+        assert!(out.wait_exit(Duration::from_secs(5)).is_some(), "first_kill={first_kill}: no exit 5 s after kill_tree");
+        std::thread::sleep(Duration::from_millis(300));
+        let alive: Vec<u32> = descendants.iter().copied().filter(|p| Pty::process_alive(*p)).collect();
+        assert!(alive.is_empty(), "first_kill={first_kill}: descendants still alive {alive:?}");
+    }
+}
+
+#[test]
 fn job_object_kills_the_whole_tree() {
     for job in [true, false] {
         let out = Collector::default();

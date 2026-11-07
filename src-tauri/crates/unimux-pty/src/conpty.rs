@@ -641,6 +641,26 @@ impl Pty {
         self.shared.close_pseudoconsole();
     }
 
+    /// A forced tree kill that does not wait for the close (1.1.4's `taskkill /pid N /T /F` for terminals still running at
+    /// PtyManager.killAll's deadline): the shell and the job are terminated at once, even while a ClosePseudoConsole call
+    /// hangs; the close is started too (if it was not already) so OpenConsole goes. Returns at once.
+    pub fn kill_tree(&self) {
+        self.input.lock().take();
+        {
+            let mut st = self.shared.kill_state.lock();
+            st.kill = true;
+            // SAFETY: valid handles owned by `shared`; terminating an ended process or an empty job is harmless.
+            unsafe {
+                let _ = TerminateProcess(HANDLE(self.shared.process.as_raw_handle()), 1);
+                if let Some(job) = &self.shared.job {
+                    let _ = TerminateJobObject(job.0, 1);
+                }
+            }
+            st.terminated = true;
+        }
+        self.shared.close_pseudoconsole();
+    }
+
     /// Closes the pseudoconsole only (OpenConsole ends, the attached programs get CTRL_CLOSE), like node-pty's kill
     /// without the TerminateProcess. Returns at once; see [`Pty::wait_closed`].
     pub fn close(&self) {
