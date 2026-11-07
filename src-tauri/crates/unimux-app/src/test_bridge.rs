@@ -280,6 +280,34 @@ pub async fn test_bridge(
             });
             Ok(json!({ "port": server.port(), "token": server.token(), "cell": urls }))
         }
+        // H2 until P4's cell:spawn calls it: the hook settings of a Claude spawn, {cell, version?, env?: [[k, v]], cwd?}
+        // -> {path, text, token, nonce}; `status` {cell, status, hooked} feeds the http hook watch like cell:runtime,
+        // `ended` {cell} like a process exit.
+        "claudeSpawn" => {
+            let cell = args.get("cell").and_then(Value::as_str).ok_or_else(|| fail("claudeSpawn needs cell"))?;
+            let version = args.get("version").and_then(Value::as_str);
+            let env: Vec<(String, String)> = args
+                .get("env")
+                .and_then(Value::as_array)
+                .map(|l| {
+                    l.iter().filter_map(|p| Some((p.get(0)?.as_str()?.to_string(), p.get(1)?.as_str()?.to_string()))).collect()
+                })
+                .unwrap_or_default();
+            let cwd = args.get("cwd").and_then(Value::as_str).unwrap_or("");
+            let path = ctx.hooks.claude_spawn(cell, version, &env, cwd).map_err(|e| fail(&e.to_string()))?;
+            let text = std::fs::read_to_string(&path).map_err(|e| fail(&e.to_string()))?;
+            Ok(json!({ "path": path, "text": text, "token": ctx.hooks.server.token(), "nonce": ctx.hooks.server.nonce(cell) }))
+        }
+        "hookWatch" => {
+            let cell = args.get("cell").and_then(Value::as_str).ok_or_else(|| fail("hookWatch needs cell"))?;
+            if let Some(status) = args.get("status").and_then(Value::as_str) {
+                ctx.hooks.cell_status(cell, status, args.get("hooked").and_then(Value::as_bool) == Some(true));
+            }
+            if args.get("ended").and_then(Value::as_bool) == Some(true) {
+                ctx.hooks.process_ended(cell);
+            }
+            Ok(Value::Null)
+        }
         // A second app window (SP1: same browser arguments on two windows; `browserArgs: "different"` shows the 0x8007139F
         // failure a mismatch causes). W5 builds the real detached windows.
         "openWindow" => crate::spike_windows::open_window(&ctx, &args).await,

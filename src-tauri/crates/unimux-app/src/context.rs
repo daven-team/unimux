@@ -197,6 +197,8 @@ impl AppContext {
                 det.close_all();
             },
         );
+        // H1 / H2: the hook server, the Claude settings files and the cell file folders of this data dir.
+        let hooks = Arc::new(crate::hooks::Hooks::new(&data_dir));
         Arc::new(Self {
             data_dir,
             overrides,
@@ -222,7 +224,7 @@ impl AppContext {
             os: OnceLock::new(),
             detached,
             lifecycle,
-            hooks: Arc::new(crate::hooks::Hooks::default()),
+            hooks,
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
             main_page_hooks: Mutex::new(Vec::new()),

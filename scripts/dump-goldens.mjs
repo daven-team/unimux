@@ -12,6 +12,7 @@
 //   test/golden/normalize-state.jsonl   {platform, now, input} -> normalizeState (see scripts/goldens-normalize.mjs)
 //   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
 //   test/golden/hook-payloads.jsonl, hook-server.jsonl  the hook server (see scripts/goldens-hooks.mjs)
+//   test/golden/hook-settings.jsonl  Claude settings, Codex notify, hook fallback, cell files (see scripts/goldens-hooksettings.mjs)
 //   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
 //                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
 //   test/golden/db-sql.jsonl, db-redis.jsonl  {fn, args} -> the DB helpers of src/shared (see scripts/goldens-db.mjs)
@@ -36,6 +37,7 @@ import { detachedRows, routeMessageRows } from './goldens-detached.mjs';
 import { filesGoldens } from './goldens-files.mjs';
 import path, { dirname, resolve } from 'node:path';
 import { hookPayloadRows, hookServerRows } from './goldens-hooks.mjs';
+import { hookSettingsRows } from './goldens-hooksettings.mjs';
 import { convGoldens } from './goldens-convsearch.mjs';
 import { DB_MODULES, dbGoldens } from './goldens-db.mjs';
 import { accountsStoreRows, codexStoreRows, identityRows } from './goldens-accounts.mjs';
@@ -55,6 +57,7 @@ const [
   load('src/main/hooks.ts'), load('src/shared/codexHooks.ts'),
 ]);
 const [detached, { normalizeWaitMark }] = await Promise.all([load('src/shared/detached.ts'), load('src/shared/waiting.ts')]);
+const [hookFallback, cellFiles] = await Promise.all([load('src/main/hookFallback.ts'), load('src/main/cellFiles.ts')]);
 const fileGoldens = await filesGoldens(await load('src/main/files.ts'));
 const dbModules = Object.fromEntries(await Promise.all(Object.entries(DB_MODULES).map(async ([name, file]) => [name, await load(file)])));
 const db = dbGoldens(dbModules);
@@ -308,6 +311,7 @@ const files = {
   'files-parquet.jsonl': jsonl(fileGoldens.parquet),
   'hook-payloads.jsonl': jsonl(hookPayloadRows({ hooks, codexHooks })),
   'hook-server.jsonl': jsonl(await hookServerRows(hooks)),
+  'hook-settings.jsonl': jsonl(hookSettingsRows({ hooks, codexHooks, hookFallback, cellFiles })),
   ...Object.fromEntries(Object.entries(await convGoldens(load)).map(([name, rows]) => [name, jsonl(rows)])),
   'db-sql.jsonl': jsonl(db['db-sql.jsonl']),
   'db-redis.jsonl': jsonl(db['db-redis.jsonl']),
