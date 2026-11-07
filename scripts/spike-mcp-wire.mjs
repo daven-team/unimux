@@ -1,12 +1,15 @@
-// SP8 spike: the MCP wire of the 1.1.4 server (TypeScript reference) next to the two Rust candidates (a custom axum
-// dispatcher and rmcp 3.9 StreamableHttpService), driven by the real, installed `claude` and `codex` CLIs on a scratch home
-// with a local mock model (no sign-in, no model usage; the same mocks as scripts/verify-mcp-cli.mjs).
+// SP8 spike, kept by M1: the MCP wire of the 1.1.4 server (TypeScript reference) next to the Rust server of unimux-mcp
+// (`custom`, the crate's McpServer with the fake tool layer of tests/support/fake.rs; rmcp was dropped in M1), driven by the
+// real, installed `claude` and `codex` CLIs on a scratch home with a local mock model (no sign-in, no model usage; the same
+// mocks as scripts/verify-mcp-cli.mjs).
 //
 // Every server sits behind a tap proxy that records the wire (requests, response headers, SSE frames with timestamps) into
 // artifacts/sp8/wire-<server>.jsonl, so the CLIs' real traffic can be compared server by server.
 //
-// Usage: node scripts/spike-mcp-wire.mjs [ts|custom|rmcp ...]   (default: all three; build the Rust ones first with
-//        `cd src-tauri && node ../scripts/msvc-run.mjs cargo build -p unimux-mcp --examples --release`)
+// Usage: node scripts/spike-mcp-wire.mjs [ts|custom ...] [--protocol|--cli] [--bench] [--golden]   (default: both; build
+//        the Rust one first with `cd src-tauri && node ../scripts/msvc-run.mjs cargo build -p unimux-mcp --examples --release`)
+//        --golden writes the TS outcomes and the tool fixture to src-tauri/crates/unimux-mcp/tests/fixtures (the reference
+//        of the cargo test tests/protocol.rs).
 // Env:   SP8_CARGO_PROFILE=debug|release (default release), MOCK_DEBUG=1 (mock model traces)
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
@@ -20,13 +23,13 @@ import { build } from 'esbuild';
 import { bench, cases as protocolCases } from './spike-mcp-protocol.mjs';
 
 const which = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-const servers = which.length ? which : ['ts', 'custom', 'rmcp'];
+const servers = which.length ? which : ['ts', 'custom'];
 const root = mkdtempSync(join(tmpdir(), 'unimux-sp8-'));
 const artifacts = resolve('artifacts/sp8');
 mkdirSync(artifacts, { recursive: true });
 const debug = (...args) => { if (process.env.MOCK_DEBUG) console.error(...args); };
 const profile = process.env.SP8_CARGO_PROFILE ?? 'release';
-const exe = resolve(`src-tauri/target/${profile}/examples/${process.platform === 'win32' ? 'sp8_server.exe' : 'sp8_server'}`);
+const exe = resolve(`src-tauri/target/${profile}/examples/${process.platform === 'win32' ? 'mcp_wire_server.exe' : 'mcp_wire_server'}`);
 
 // ---------- the TS reference: harness + the real tool list and instructions (also the Rust servers' fixture) ----------
 const bundle = join(root, 'harness.mjs');
@@ -74,7 +77,7 @@ async function startTs() {
 /** A Rust example server, driven over stdin/stdout JSON lines (issue, revoke, events). */
 async function startRust(kind) {
   assert.ok(existsSync(exe), `build the spike first: ${exe}`);
-  const child = spawn(exe, ['--impl', kind, '--tools', fixture, '--progress-ms', '2000'], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true });
+  const child = spawn(exe, ['--tools', fixture, '--progress-ms', '2000'], { stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true });
   const lines = createInterface({ input: child.stdout });
   const waiting = [];
   lines.on('line', (line) => { const w = waiting.shift(); if (w) w(JSON.parse(line)); });
@@ -404,6 +407,14 @@ for (const name of servers) {
         try { protocol[name][id] = await fn(); } catch (error) { protocol[name][id] = { error: String(error?.message ?? error) }; }
       }
       writeFileSync(join(artifacts, `protocol-${name}.json`), JSON.stringify(protocol[name], null, 2));
+      if (name === 'ts' && process.argv.includes('--golden')) {
+        const dir = resolve('src-tauri/crates/unimux-mcp/tests/fixtures');
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'protocol-ts.json'), `${JSON.stringify(protocol.ts, null, 2)}
+`);
+        writeFileSync(join(dir, 'mcp-tools.json'), `${JSON.stringify(JSON.parse(readFileSync(fixture, 'utf8')), null, 2)}
+`);
+      }
       if (process.argv.includes('--bench')) benches[name] = await bench(srv);
     }
     if (!onlyProtocol) await scenarios(name, srv, results);
@@ -426,9 +437,8 @@ if (protocol.ts) {
   if (protocol.custom && ids.some((id) => JSON.stringify(protocol.custom[id]) !== JSON.stringify(protocol.ts[id]))) process.exitCode = 1;
 }
 for (const [name, b] of Object.entries(benches)) console.log(`bench ${name}: stateless tools/list ms ${JSON.stringify(b.statelessToolsList)}, session ping ms ${JSON.stringify(b.sessionPing)}`);
-const lines = results.map((r) => `${r.ok ? 'PASS' : r.server === 'rmcp' ? 'GAP ' : 'FAIL'} ${r.server.padEnd(6)} ${r.id} (${r.ms} ms)${r.note ? `: ${r.note}` : ''}`);
+const lines = results.map((r) => `${r.ok ? 'PASS' : 'FAIL'} ${r.server.padEnd(6)} ${r.id} (${r.ms} ms)${r.note ? `: ${r.note}` : ''}`);
 console.log(lines.join('\n'));
 writeFileSync(join(artifacts, 'results.json'), JSON.stringify(results, null, 2));
 rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-// rmcp failures are findings of the comparison (docs/tauri/spikes/SP8.md), not failures of the spike.
-if (results.some((r) => !r.ok && r.server !== 'rmcp')) process.exitCode = 1;
+if (results.some((r) => !r.ok)) process.exitCode = 1;

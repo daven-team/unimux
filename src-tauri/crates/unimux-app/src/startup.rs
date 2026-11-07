@@ -89,6 +89,14 @@ pub fn install_crash_handling(log: Arc<RollingLog>) {
         if unimux_core::panic_guard::panic_expected() {
             return;
         }
+        // A panic inside an MCP request is caught by the MCP server, which logs the one cut `MCP request failed` line of
+        // 1.1.4 (handle().catch, no dialog); the whole panic text could hold tool arguments.
+        if unimux_mcp::in_request() {
+            if cfg!(debug_assertions) {
+                previous(info);
+            }
+            return;
+        }
         let message = info
             .payload()
             .downcast_ref::<&str>()

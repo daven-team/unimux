@@ -1,56 +1,23 @@
-//! SP8 spike: a fake tool layer shared by both server candidates. It serves the real 1.1.4 tool list and instructions
-//! (dumped from `toolsForRole` / `mcpInstructions` by scripts/spike-mcp-wire.mjs) and implements just enough behaviour for
-//! the wire checks: get_context, list_agents, update_task (always an error), close_grid (asks the user through an
-//! elicitation when the grid has an open task), wait_for (progress, tasks, cancellation). M2 ports the real tools.
+//! A fake tool layer for the server tests and the wire driver (examples/mcp_wire_server.rs). It serves the real 1.1.4 tool
+//! lists and instructions (dumped from `toolsForRole` / `mcpInstructions` into tests/fixtures/mcp-tools.json) and
+//! implements just enough behaviour for the wire checks: get_context, list_agents, update_task (always an error),
+//! close_grid (asks the user through an elicitation when the grid has an open task), wait_for (progress, tasks,
+//! cancellation). M2 ports the real tools.
 
 use std::collections::HashSet;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 use serde_json::{Value, json};
-use tokio_util::sync::CancellationToken;
-
-pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
-/// The answer of an elicitation; a failure or a timeout counts as `cancel` (as in 1.1.4).
-#[derive(Debug, Clone)]
-pub struct ElicitAnswer {
-    pub action: String,
-    pub content: Option<Value>,
-}
-
-/// Asks the user through the client on the stream of the calling tool call.
-pub type Elicit = Arc<dyn Fn(String, Value) -> BoxFuture<'static, ElicitAnswer> + Send + Sync>;
-/// Sends a `notifications/progress` for the call (progress, total, message).
-pub type Progress = Arc<dyn Fn(f64, f64, String) + Send + Sync>;
-
-pub struct CallCtx {
-    pub cell: String,
-    pub cancel: CancellationToken,
-    pub elicit: Option<Elicit>,
-    pub progress: Option<Progress>,
-    pub progress_every: Duration,
-    pub task: bool,
-}
-
-#[derive(Debug)]
-pub enum CallError {
-    /// `Unknown tool: <name>` (the 1.1.4 server answers -32602).
-    Unknown,
-    /// A tool error: becomes `{isError: true, content: [{type: text, text}]}`.
-    Tool(String),
-    /// The call was cancelled (client went away, task cancelled, token revoked).
-    Aborted,
-}
+use unimux_mcp::tools::BoxFuture;
+use unimux_mcp::{CallCtx, CallError, ToolHost};
 
 pub fn now_ms() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)
 }
 
-/// What the servers saw, for the driver script (ms since the Unix epoch, comparable with Date.now()).
+/// What the server asked the tool layer, for the tests and the driver script (ms since the Unix epoch).
 #[derive(Default)]
 pub struct EventLog {
     events: Mutex<Vec<Value>>,
@@ -68,19 +35,19 @@ impl EventLog {
     }
 }
 
-struct EndGuard<'a> {
-    log: &'a EventLog,
-    tool: &'a str,
+struct EndGuard {
+    fake: Arc<Fake>,
+    tool: String,
     outcome: Option<&'static str>,
 }
 
-impl Drop for EndGuard<'_> {
+impl Drop for EndGuard {
     fn drop(&mut self) {
         let (outcome, how) = match self.outcome {
             Some(o) => (o, "returned"),
             None => ("aborted", "dropped"),
         };
-        self.log.push(json!({ "kind": "call-end", "tool": self.tool, "outcome": outcome, "how": how }));
+        self.fake.events.push(json!({ "kind": "call-end", "tool": self.tool, "outcome": outcome, "how": how }));
     }
 }
 
@@ -90,43 +57,29 @@ pub struct Fake {
     pub instructions: String,
     pub events: EventLog,
     open_grids: Mutex<HashSet<String>>,
+    /// Cells whose MCP role was taken away (toolsForRole(undefined) is empty).
+    pub no_role: Mutex<HashSet<String>>,
 }
 
 impl Fake {
-    pub fn new(fixture: &Value) -> Self {
+    pub fn new(fixture: &Value) -> Arc<Self> {
         let tools = fixture["tools"].as_array().cloned().unwrap_or_default();
         let worker_tools = fixture["workerTools"].as_array().cloned().unwrap_or_default();
         let instructions = fixture["instructions"].as_str().unwrap_or_default().to_string();
         let open_grids =
             Mutex::new(["grid-side", "grid-side2", "grid-side3", "grid-side4"].map(String::from).into_iter().collect());
-        Self { tools, worker_tools, instructions, events: EventLog::default(), open_grids }
+        Arc::new(Self { tools, worker_tools, instructions, events: EventLog::default(), open_grids, no_role: Mutex::default() })
+    }
+
+    /// The fixture of the protocol tests and the wire driver: the real 1.1.4 lists.
+    pub fn from_fixture_file() -> Arc<Self> {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/mcp-tools.json");
+        let text = std::fs::read_to_string(path).expect("tests/fixtures/mcp-tools.json");
+        Self::new(&serde_json::from_str(&text).expect("fixture json"))
     }
 
     pub fn role_of(cell: &str) -> &'static str {
         if cell == "cell-lead" { "coordinator" } else { "worker" }
-    }
-
-    /// The verbatim 1.1.4 tool list of the cell's role.
-    pub fn tools_for(&self, cell: &str) -> Vec<Value> {
-        if Self::role_of(cell) == "coordinator" { self.tools.clone() } else { self.worker_tools.clone() }
-    }
-
-    pub fn supports_task(name: &str) -> bool {
-        name == "wait_for"
-    }
-
-    pub async fn call(&self, name: &str, args: &Value, ctx: CallCtx) -> Result<Value, CallError> {
-        self.events.push(json!({ "kind": "call-start", "tool": name, "cell": ctx.cell, "task": ctx.task }));
-        // A call whose future is dropped (its request went away) counts as aborted, and says how: "dropped".
-        let mut end = EndGuard { log: &self.events, tool: name, outcome: None };
-        let result = self.run(name, args, &ctx).await;
-        end.outcome = Some(match &result {
-            Ok(_) => "ok",
-            Err(CallError::Aborted) => "aborted",
-            Err(CallError::Tool(_)) => "error",
-            Err(CallError::Unknown) => "unknown",
-        });
-        result
     }
 
     async fn run(&self, name: &str, args: &Value, ctx: &CallCtx) -> Result<Value, CallError> {
@@ -141,6 +94,7 @@ impl Fake {
             "update_task" => Err(CallError::Tool(format!("Unknown task: {}", args["taskId"].as_str().unwrap_or("")))),
             "close_grid" => self.close_grid(args, ctx).await,
             "wait_for" => self.wait_for(args, ctx).await,
+            "panic" => panic!("tool exploded"),
             _ => Err(CallError::Unknown),
         }
     }
@@ -173,6 +127,8 @@ impl Fake {
         Ok(json!({ "archived": grid, "stopped": 1 }))
     }
 
+    /// Ends with `{event: timeout}`, or (like 1.1.4's wait_for) with `{event: cancelled}` when its call is cancelled, so the
+    /// server decides what the client sees (an expired token, no answer for a client cancel).
     async fn wait_for(&self, args: &Value, ctx: &CallCtx) -> Result<Value, CallError> {
         let total = args["timeoutSec"].as_f64().unwrap_or(60.0);
         let started = tokio::time::Instant::now();
@@ -181,7 +137,7 @@ impl Fake {
         loop {
             tokio::select! {
                 () = tokio::time::sleep_until(deadline) => return Ok(json!({ "event": "timeout" })),
-                () = ctx.cancel.cancelled() => return Err(CallError::Aborted),
+                () = ctx.cancel.cancelled() => return Ok(json!({ "event": "cancelled" })),
                 _ = tick.tick() => {
                     if let Some(progress) = &ctx.progress {
                         progress(started.elapsed().as_secs_f64().round(), total, "waiting".into());
@@ -192,21 +148,44 @@ impl Fake {
     }
 }
 
-/// 1.1.4 capResult: a result over the cap stays valid JSON (the start travels as a string with a hint). UTF-16 units.
-pub fn cap_result(text: &str, max: usize) -> String {
-    let units: Vec<u16> = text.encode_utf16().collect();
-    if units.len() <= max {
-        return text.to_string();
+impl ToolHost for Fake {
+    fn instructions(&self, _cell: &str) -> String {
+        self.instructions.clone()
     }
-    let hint = "narrow the request (filters, limit/offset paging, verbose:false)";
-    let mut room = max.saturating_sub(200);
-    while room > 0 {
-        let partial = String::from_utf16_lossy(&units[..room]);
-        let out = json!({ "truncated": true, "hint": hint, "partial": partial }).to_string();
-        if out.encode_utf16().count() <= max {
-            return out;
+
+    fn tools(&self, cell: &str) -> Vec<Value> {
+        if self.no_role.lock().contains(cell) {
+            Vec::new()
+        } else if Self::role_of(cell) == "coordinator" {
+            self.tools.clone()
+        } else {
+            self.worker_tools.clone()
         }
-        room = (room as f64 * 0.8).floor() as usize;
     }
-    json!({ "truncated": true, "hint": hint }).to_string()
+
+    fn supports_task(&self, name: &str) -> bool {
+        name == "wait_for"
+    }
+
+    fn call(self: Arc<Self>, name: String, args: Option<Value>, ctx: CallCtx) -> BoxFuture<'static, Result<Value, CallError>> {
+        Box::pin(async move {
+            self.events.push(json!({ "kind": "call-start", "tool": name, "cell": ctx.cell, "task": ctx.task }));
+            if self.no_role.lock().contains(&ctx.cell) {
+                return Err(CallError::Tool("MCP is off for this agent.".into()));
+            }
+            // A call whose future is dropped (its request went away) counts as aborted, and says how: "dropped".
+            let mut end = EndGuard { fake: self.clone(), tool: name.clone(), outcome: None };
+            let args = args.unwrap_or_else(|| json!({}));
+            let result = self.run(&name, &args, &ctx).await;
+            // As the TS driver records it: a call whose signal fired is "aborted".
+            end.outcome = Some(match &result {
+                _ if ctx.cancel.is_cancelled() => "aborted",
+                Ok(_) => "ok",
+                Err(CallError::Aborted) => "aborted",
+                Err(CallError::Tool(_)) => "error",
+                Err(CallError::Unknown) => "unknown",
+            });
+            result
+        })
+    }
 }

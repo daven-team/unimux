@@ -74,6 +74,7 @@ sha2 = "0.11.1"
 base64 = "0.23.1"
 futures = "0.3"
 tempfile = "3"
+regex = "1.13.1"
 windows = "0.62.2"
 libc = "0.2"
 webview2-com = "0.39.1"
@@ -100,14 +101,13 @@ des = "=0.9.0"
 md5 = "=0.8.1"
 ctr = "=0.10.1"
 blowfish = "=0.10.0"
-# SP8 (MCP wire): the custom dispatcher's HTTP stack; rmcp only for the spike comparison (examples, not shipped).
+# M1 (MCP server, decided in SP8): hyper http1 served directly; axum stays for the hooks server. rmcp dropped in M1.
 axum = { version = "0.8.9", default-features = false, features = ["tokio", "http1"] }
 hyper = { version = "1.12.0", features = ["server", "http1"] }
 hyper-util = { version = "0.1.21", features = ["tokio", "service"] }
 http-body-util = "0.1.5"
 bytes = "1.12.1"
 tokio-util = "0.7.20"
-rmcp = { version = "3.9.0", default-features = false, features = ["server", "transport-streamable-http-server", "elicitation"] }
 postgres-protocol = "0.6.12"
 mysql_common = { version = "0.38.2", default-features = false }
 # dev-dependency of unimux-db only (SP9 measured its gaps; the app uses an own RESP2 client)

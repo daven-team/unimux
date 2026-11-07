@@ -258,6 +258,12 @@ fn main() {
                     stopping.server.stop();
                 },
             );
+            // M1: the MCP server listens after the window (index.ts startMcp), retried twice in the background; the wind-down
+            // stops it in its own phase, before the hook server.
+            commands::mcp::start(&ctx);
+            ctx.lifecycle.wind_down.register(lifecycle::wind_down::phase::MCP, "mcp stop", Duration::from_secs(1), || async {
+                commands::mcp::stop();
+            });
             startup::mark_started();
             Ok(())
         })
@@ -287,7 +293,8 @@ fn main() {
             commands::os::on_exit(&run_ctx);
             // The conversation index saves itself (1.1.4's will-quit convSearch.stop()).
             commands::agents::on_exit();
-            // The hook server stops at the latest here (the wind-down stops it in its own phase).
+            // The MCP and hook servers stop at the latest here (the wind-down stops them in their own phases).
+            commands::mcp::stop();
             hooks::stop(&run_ctx);
             // After the wind-down (or a forced exit): whatever came in after the last save, then a pending relaunch.
             lifecycle::after_exit(&run_ctx);

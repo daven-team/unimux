@@ -10,7 +10,7 @@ use unimux_ipc::RouterBuilder;
 use crate::context::AppContext;
 
 pub fn register(r: &mut RouterBuilder, _ctx: &Arc<AppContext>) {
-    // App.tsx / DetachedApp.tsx bootSteps: Promise.all([loadSnapshot, aliveCells, getMcpInfo, cliStatus.catch]).
+    // App.tsx / DetachedApp.tsx bootSteps: Promise.all([loadSnapshot, aliveCells, getMcpInfo, cliStatus.catch]); mcp:info is
+    // real since M1.
     r.fallback("cell:alive", json!([])); // P3: no terminal runs before the pty service exists
-    r.fallback("mcp:info", json!({ "running": false })); // M1: the MCP server is not started yet
 }
