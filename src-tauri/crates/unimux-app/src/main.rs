@@ -197,6 +197,8 @@ fn main() {
     let run_ctx = ctx.clone();
     app.run(move |_app, event| {
         if let RunEvent::Exit = event {
+            // The conversation index saves itself (1.1.4's will-quit convSearch.stop()).
+            commands::agents::on_exit();
             // The last save (W6 adds the full wind-down: quit confirmation, hosts, MCP, hooks).
             if !run_ctx.flush_state() {
                 run_ctx.crash.error("state could not be saved before exit");

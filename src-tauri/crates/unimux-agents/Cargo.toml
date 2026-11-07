@@ -9,4 +9,23 @@ license.workspace = true
 [dependencies]
 unimux-core.workspace = true
 unimux-ipc.workspace = true
+unimux-state.workspace = true
 serde_json.workspace = true
+parking_lot.workspace = true
+memchr.workspace = true
+indexmap.workspace = true
+unicode-normalization.workspace = true
+rayon-core.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Time", "Win32_Storage_FileSystem"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+base64.workspace = true
+
+[[example]]
+name = "conv_bench"

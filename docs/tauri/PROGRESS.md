@@ -69,7 +69,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | G5 | Project files: listing, preview, save, local files | todo | | | | |
 | H1 | Hook server | todo | | | | |
 | H3 | CLI detector | todo | | | | |
-| H5 | Conversation search | todo | | | | |
+| H5 | Conversation search | done (Windows verified, macOS compile-checked) | 2026-11-07 | 2026-11-07 | 2026-11-07 (Windows) | branch `tauri-pkg-H5`. unimux-agents `conv/`: UTF-16 text with JS `toLowerCase` and the same-length per-code-unit `fold()` (NFD table), memchr `indexOf`, parseTerms / matchDoc / searchDocs with UTF-16 snippet and title offsets, V8 `Date.parse` for transcript times, byte prefilters + Claude / Codex line readers (readLines chunking, huge-line skip, resume offset), the indexer (stat 24 / read 6 in flight, newest first, append reads keyed on size / ino / birthtime, index and transcript limits, dedupe by session id), the export data + locateSession, and the service that replaces the eval'd worker (index started on the first request, 60 s / 120 s timeouts with 1.1.4's error texts, idle stop after 10 min that saves first, IPC sanitizers). Index saved to `conversation-index-v2.bin` (own binary format v3; 1.1.4's v8 `conversation-index.bin` never read or written). conv:search / conv:transcript / conv:export registered in commands/agents.rs (blocking work off the async runtime, main's fallback answers), index saved on exit (`commands::agents::on_exit` in the RunEvent::Exit hook). Goldens from the TS code (scripts/goldens-convsearch.mjs via dump-goldens): fold of all 65,536 code units, 322 mixed-string lower / fold / folder rows, 215 term rows, 160 searchDocs rows, 54 Date.parse rows, 220 transcript read + export rows, 200 toolDetail rows, 20 sanitizer rows, all byte-identical. 31 TS cases in PORTING.md (23 ported, 8 renderer-only). Bench `node scripts/bench-convsearch.mjs` (Rust vs the 1.1.4 TS indexer in Node on the same folders): faster on every measure of the 4-file fixture set and of a generated 600-file / 160 MB set, same hits (numbers below). Real app: `node scripts/verify-tauri-convsearch.mjs` 27/27 (searches, transcripts, exports equal to 1.1.4 on a scratch home, bad requests, v2 file saved on quit, old file untouched, real profile untouched); smoke-tauri 34/34. See "H5 open issues" |
 | D3 | SQL helper ports | todo | | | | |
 | A1 | Accounts stores and Claude Code locks | todo | | | | |
 | M1 | MCP HTTP server | todo | | | | |
@@ -377,6 +377,28 @@ Verification: `cargo fmt --all --check`, `cargo clippy -p unimux-mcp --all-targe
 6. The redis crate stays a dev-dependency of unimux-db only to keep the measured gaps reproducible; D9 can drop it (and the workspace pin) once its own tests replace that comparison.
 7. D7: after `SET NAMES` / `SET CHARACTER SET` mysql2 encodes queries and decodes column names in the session charset; `wire::mycharset` does it for utf8, latin1 / binary, ascii, ucs2 / utf16-le and cesu8 and refuses queries in the iconv-lite-only encodings (cp1250, koi8r, sjis, big5 ...). D7 adds iconv-lite's tables for those.
 8. D9: the reconnect handshake (`auth`, `client setname unimux`, `select` of the previously selected DB) is taken from the ioredis source (`wire::redis::reconnect_sequence`); D9 adds a golden for it through RedisSession.
+
+### H5: bench and open issues (2026-11-07)
+
+`node scripts/bench-convsearch.mjs --rounds 5` (medians in ms, 1.1.4 TS indexer in Node 26 vs Rust release; the machine was shared with other agents' builds, so absolute numbers moved up to 5x between runs; the ratio held in every run after the fixes below):
+
+| measure | fixture TS | fixture Rust | 600 files TS | 600 files Rust |
+|---|---|---|---|---|
+| cold pass (no cache) | 3.25 | 1.82 | 6,284 | 1,378 |
+| rescan, nothing changed | 1.28 | 1.01 | 310 | 75 |
+| cache load + pass | 2.59 | 1.35 | 1,136 | 348 |
+| transcript preview (largest file) | 1.56 | 0.59 | 34.6 | 10.3 |
+| search (7 queries) | 0.01 to 0.05 | 0.01 to 0.02 | 11.7 to 132 | 5.0 to 16.0 |
+
+What made the first Rust version slower than 1.1.4 on passes (fixed in this package): a thread start per pool call (this machine took up to 45 ms per 100 thread starts under load) - now one process-wide pool of 4 to 8 workers (rayon-core) kept between passes, fewer than 8 items run inline; `fs::metadata` opens a handle per file - now GetFileAttributesExW by path (links, folders, long paths and errors still go through `fs::metadata`); the inode was read through a second open - now from the handle the file is read through; the Codex walk was sequential - now 8 folders at a time in the same order; big indexes (1M+ folded code units) are matched on the workers (same results, tested both ways).
+
+Open:
+
+1. The pass workers stay alive (sleeping) after the 10-minute idle stop; 1.1.4 ended its worker thread. The index memory is freed as before; only the 4 to 8 idle threads remain.
+2. `conversation-index-v2.bin` is about the size of the indexed text in UTF-16 (54 MB for the 160 MB bench set, units below 256 stored as one byte). A first 1.2.0 start reads every transcript once (the v8 file cannot be read); with a large ~/.claude this first pass takes seconds, as a first 1.0.9 run did.
+3. The bench numbers come from a machine shared with parallel builds; the 4-file fixture timings are 1 to 3 ms, and a busy moment can flip one of them (the script then fails; run it again). A quiet-machine run before the release is worth recording.
+4. macOS: `cargo clippy -p unimux-agents --target aarch64-apple-darwin` is clean (stat through `fs::metadata`, inode from the open file); not run on a Mac.
+5. A request that arrives while the idle stop saves waits for the save (at most 20 s) and then starts a fresh index that loads the saved file; in 1.1.4 such a request went to the old worker until it was terminated.
 
 ### How to run
 

@@ -13,8 +13,11 @@
 //   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
 //   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
 //                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
+//   test/golden/conv-*.jsonl         the conversation search (fold, terms, searchDocs, Date.parse, transcript reading, export,
+//                                     toolDetail, IPC sanitizers; see scripts/goldens-convsearch.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
+import { convGoldens } from './goldens-convsearch.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
@@ -177,6 +180,7 @@ const files = {
   'normalize-state.jsonl': jsonl(normalizeRows({ normalizeState, root })),
   'state-after-edit.jsonl': jsonl(afterEditRows({ normalizeState, normalizeEditedState })),
   'js-sort.jsonl': jsonl(jsSort()),
+  ...Object.fromEntries(Object.entries(await convGoldens(load)).map(([name, rows]) => [name, jsonl(rows)])),
 };
 
 const check = process.argv.includes('--check');
