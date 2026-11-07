@@ -17,6 +17,12 @@ export function parseConfigList(stdout: string): ConfigEntry[] {
 
 const ABSOLUTE_PROGRAM = /^(!|\/|[A-Za-z]:[\\/]|\\\\)/;
 const OFF = /^(false|no|off|0)?$/i;
+/**
+ * A credential helper named without a path runs as the shell command `git credential-<value>`, so anything after the name (`x; calc`,
+ * `x $(calc)`) runs too. Only the well-known helpers, with plain `--option[=value]` arguments, are left alone; an empty value only
+ * resets the list.
+ */
+const SAFE_CREDENTIAL_HELPER = /^((manager|manager-core|wincred|osxkeychain|libsecret|gnome-keyring|cache|store)(\s+--[A-Za-z][\w-]*(=[\w.:/@~+-]*)?)*)?$/;
 const EXEC_KEYS = new Set([
   'diff.external', 'core.hookspath', 'core.sshcommand', 'core.pager', 'core.editor', 'core.askpass', 'core.gitproxy', 'core.worktree',
   'sequence.editor', 'gpg.program', 'gpg.openpgp.program', 'gpg.x509.program', 'gpg.ssh.program', 'uploadpack.packobjectshook',
@@ -42,7 +48,7 @@ export function dangerousConfigKeys(entries: readonly ConfigEntry[]): string[] {
     let hit = EXEC_KEYS.has(k) || EXEC_PATTERNS.some((pattern) => pattern.test(k));
     if (k === 'core.fsmonitor') hit = !OFF.test(value.trim());
     else if (k === 'protocol.allow') hit = true;
-    else if (/^credential(\..+)?\.helper$/.test(k)) hit = ABSOLUTE_PROGRAM.test(value.trim());
+    else if (/^credential(\..+)?\.helper$/.test(k)) hit = ABSOLUTE_PROGRAM.test(value.trim()) || !SAFE_CREDENTIAL_HELPER.test(value.trim());
     else if (/^submodule\..+\.update$/.test(k)) hit = value.trim().startsWith('!');
     if (hit) found.add(redactSecrets(key));
   }
