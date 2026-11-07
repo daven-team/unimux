@@ -9,15 +9,21 @@ license.workspace = true
 [dependencies]
 unimux-core.workspace = true
 unimux-ipc.workspace = true
+unimux-exec.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 parking_lot.workspace = true
 getrandom.workspace = true
+futures.workspace = true
 # H1: the hook server (the same HTTP stack as the MCP server, SP8).
 tokio = { workspace = true, features = ["net"] }
 hyper.workspace = true
 hyper-util.workspace = true
 http-body-util.workspace = true
 bytes.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Registry"] }
 
 [dev-dependencies]
 tempfile.workspace = true

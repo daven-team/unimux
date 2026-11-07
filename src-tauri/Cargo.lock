@@ -5822,16 +5822,20 @@ name = "unimux-agents"
 version = "1.2.0"
 dependencies = [
  "bytes",
+ "futures",
  "getrandom 0.4.3",
  "http-body-util",
  "hyper",
  "hyper-util",
  "parking_lot 0.13.0",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "unimux-core",
+ "unimux-exec",
  "unimux-ipc",
+ "windows",
 ]
 
 [[package]]

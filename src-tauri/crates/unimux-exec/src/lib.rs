@@ -250,7 +250,7 @@ fn read_capped(mut r: impl Read + Send + 'static, cap: usize, over: Arc<AtomicBo
                     out.extend_from_slice(&buf[..n.min(room)]);
                     if n > room {
                         over.store(true, Ordering::Relaxed);
-                        // Keep draining so the child never blocks on a full pipe; the tree is killed by the waiter.
+                        // Keep draining so the child never blocks on a full pipe; with stop_at_cap the waiter ends the tree.
                     }
                 }
             }
@@ -259,7 +259,7 @@ fn read_capped(mut r: impl Read + Send + 'static, cap: usize, over: Arc<AtomicBo
     })
 }
 
-/// Runs a program to its end (or its timeout / output cap, which kill the whole tree). Blocking.
+/// Runs a program to its end (or its timeout, or its output cap with `stop_at_cap`, which kill the whole tree). Blocking.
 pub fn run(program: &Program, options: &ExecOptions) -> Result<ExecOutput, ExecError> {
     let mut tree = spawn_tree(program, options)?;
     if let Some(input) = &options.stdin

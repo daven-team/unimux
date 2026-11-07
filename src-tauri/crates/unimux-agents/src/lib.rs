@@ -4,5 +4,7 @@
 //! `unimux-app/src/commands/agents.rs`, which calls into this crate.
 //!
 //! - [`hooks`] (H1): the local hook server and the meaning of hook payloads.
+//! - [`cli`] (H3): the Claude Code / Codex CLI detector.
 
+pub mod cli;
 pub mod hooks;
