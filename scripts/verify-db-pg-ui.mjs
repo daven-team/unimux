@@ -41,7 +41,7 @@ const exportDir = join(root, 'export');
 mkdirSync(exportDir, { recursive: true });
 const pg = await startServer('scripts/pg-test-server.mjs', ['--sql', SEED]);
 // The fake server's helper uses TypeScript parameter properties: Node needs the transform, not just type stripping.
-const fake = await startServer('scripts/pg-fake-server.mjs', [], ['--experimental-transform-types', '--no-warnings']);
+const fake = await startServer('scripts/pg-fake-server.mjs', [], [...(process.allowedNodeEnvironmentFlags.has('--experimental-transform-types') ? ['--experimental-transform-types'] : []), '--no-warnings']);
 const ssh = await startTestServer();
 let app;
 const VK = { Enter: 13, Escape: 27, Tab: 9, Home: 36, End: 35, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Delete: 46, a: 65, c: 67 };

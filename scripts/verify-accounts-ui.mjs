@@ -7,7 +7,6 @@ import { join } from 'node:path';
 import { removeScratch } from './app-env.mjs';
 import { launchApp, SCRATCH, scratchRoot, sshState, writeState } from './ssh-ui-lib.mjs';
 
-if (!existsSync('out/main/index.js')) throw new Error('Build first: npm run build');
 const root = scratchRoot('accounts');
 const home = join(root, 'home');
 const seen = [];

@@ -1,4 +1,4 @@
-// Real-app check of small layout fixes (npm run build first), in English on a scratch data dir with a 2x2 grid of shell cells:
+// Real-app check of small layout fixes (npm run build:check first; MC_APP_TARGET=electron: npm run build), in English on a scratch data dir with a 2x2 grid of shell cells:
 // - the snippet drop overlay is a translated element ("Drop to paste") that starts right below the cell header, like the path
 //   drop overlay;
 // - the AI team panel has a splitter: keys and a mouse drag resize it, the height is saved, it is clamped so the grid keeps
@@ -12,8 +12,8 @@
 //   injected, because a real sign-in would start a CLI).
 // VERIFY_TAG=before only takes screenshots and prints the measurements (for a build of the old code).
 import { randomUUID } from 'node:crypto';
-import { existsSync, rmSync } from 'node:fs';
 import { launchApp, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const TAG = process.env.VERIFY_TAG ?? 'after';
 const STRICT = TAG !== 'before';
@@ -244,7 +244,7 @@ try {
   expect(authTall === 300, 'the sign-in terminal is not 300px in a tall window', authTall);
 } finally {
   if (app) await app.close();
-  if (existsSync(root)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  removeScratch(root);
 }
 if (problems.length) {
   console.log(`${STRICT ? 'FAIL' : 'differences (before)'}:\n- ${problems.join('\n- ')}`);

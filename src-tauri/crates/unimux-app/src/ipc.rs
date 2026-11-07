@@ -38,7 +38,14 @@ pub async fn mc_invoke(
     args: Vec<Value>,
 ) -> Result<Response, IpcError> {
     let call = Call::new(&cmd, caller(&webview, &request), args);
-    ctx.router().invoke(call).await.map(response)
+    #[cfg(feature = "test-bridge")]
+    if ctx.test_record.capture("invoke", &call.command, &call.caller.label, &call.args) {
+        return Ok(Response::new(InvokeResponseBody::Json("null".into())));
+    }
+    let result = ctx.router().invoke(call).await;
+    #[cfg(feature = "test-bridge")]
+    ctx.test_record.observe(&result);
+    result.map(response)
 }
 
 #[tauri::command]
@@ -54,8 +61,16 @@ pub async fn mc_send(
     let caller = caller(&webview, &request);
     let label = caller.label.clone();
     let Some(queue) = ctx.sends.get() else { return Ok(()) };
+    // Check build: a recorded send the harness wants answered here (a stub of 1.1.4's mainInspector) still uses its number.
+    #[cfg(feature = "test-bridge")]
+    if ctx.test_record.capture("send", &cmd, &label, &args) {
+        queue.skip(&label, &session, seq);
+        return Ok(());
+    }
     // A refused send (not yet, unknown, guard) still used its number: fill the slot so the next send is not held back.
     if let Err(e) = ctx.router().admit_send(&cmd, &caller) {
+        #[cfg(feature = "test-bridge")]
+        ctx.test_record.not_yet_hit_of(&e);
         queue.skip(&label, &session, seq);
         return Err(e);
     }
@@ -84,7 +99,10 @@ pub async fn mc_invoke_raw(
     };
     let mut call = Call::new(&cmd, caller(&webview, &request), args);
     call.body = body;
-    ctx.router().invoke(call).await.map(response)
+    let result = ctx.router().invoke(call).await;
+    #[cfg(feature = "test-bridge")]
+    ctx.test_record.observe(&result);
+    result.map(response)
 }
 
 struct ChannelSink(Channel<InvokeResponseBody>);
@@ -111,7 +129,10 @@ pub async fn mc_port_attach(
     if !ctx.guard_allows(&caller) {
         return Err(IpcError::Refused { command: format!("port:{kind}") });
     }
-    ctx.ports.attach(&kind, &caller.label, Arc::new(ChannelSink(channel)))
+    let result = ctx.ports.attach(&kind, &caller.label, Arc::new(ChannelSink(channel)));
+    #[cfg(feature = "test-bridge")]
+    ctx.test_record.observe(&result);
+    result
 }
 
 /// Renderer -> host messages of the pty port (write, resize, ack, focus...), batched per microtask by the bridge and

@@ -1,4 +1,5 @@
-// Exercise the built Electron app using isolated data and fake agents (no model calls).
+// Exercise the built app (the Tauri check build; MC_APP_TARGET=electron: Electron's out/) using isolated data and fake agents
+// (no model calls).
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -7,8 +8,8 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import electron from 'electron';
 import { removeScratch, scratchHome, scrubAppEnv } from './app-env.mjs';
+import { APP_TARGET, isMainPage, quitApp, spawnApp } from './real-app.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'unimux-automation-'));
 /** Screenshots are kept; the scratch root (data, home, fake agents) is deleted at the end. */
@@ -41,7 +42,7 @@ const port = await new Promise((resolvePort, reject) => {
 const home = scratchHome(root); // never the real home: the app reads ~/.claude and ~/.codex, Electron its appData
 const env = { ...scrubAppEnv({ ...process.env }), MC_DATA_DIR: data, MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port), UNIMUX_SMOKE_TOKENS: tokens,
   PATH: agents + delimiter + (process.env.PATH ?? process.env.Path ?? ''), ...home.env };
-const child = spawn(electron, ['.'], { cwd: process.cwd(), env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+const child = spawnApp({ cwd: process.cwd(), env, stdio: ['ignore', 'pipe', 'pipe'] });
 let appOutput = '', exited = false;
 child.on('error', (error) => { appOutput += error.message; exited = true; });
 child.stdout.on('data', (data) => { appOutput += data; });
@@ -104,8 +105,8 @@ async function screenshot(name) {
 }
 try {
   const target = await until(async () => {
-    try { return (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((tab) => tab.type === 'page'); } catch { return null; }
-  }, 'Electron debugger');
+    try { return (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(isMainPage); } catch { return null; }
+  }, 'app debugger');
   socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolveSocket, reject) => { socket.addEventListener('open', resolveSocket, { once: true }); socket.addEventListener('error', reject, { once: true }); });
   socket.addEventListener('message', (event) => {
@@ -240,14 +241,15 @@ try {
   await screenshot('shell-dropdown');
   await evaluate('document.querySelector(".select-popup").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))');
   assert.deepEqual(exceptions, []);
-  console.log(`Automation Electron smoke passed. Screenshots: ${shots}`);
+  console.log(`Automation smoke passed (${APP_TARGET}). Screenshots: ${shots}`);
 } catch (error) {
   process.exitCode = 1;
   console.error(error);
   console.error(appOutput.slice(-4000));
 } finally {
   await Promise.all(clients.map((client) => client.close().catch(() => {})));
-  if (socket?.readyState === WebSocket.OPEN) { await cdp('Browser.close').catch(() => {}); socket.close(); }
+  // A normal quit (Tauri: the test bridge; Electron: Browser.close), then our own tree kill.
+  if (socket?.readyState === WebSocket.OPEN) { await quitApp({ child, evaluate, cdp }).catch(() => {}); socket.close(); }
   for (let i = 0; i < 50 && !exited; i++) await sleep(100);
   if (!exited) {
     if (process.platform === 'win32') execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });

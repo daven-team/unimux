@@ -1,4 +1,4 @@
-// Real-app check of 1.1.1: the Markdown export of a conversation and Ctrl+Tab between recently used tabs (npm run build first).
+// Real-app check of 1.1.1: the Markdown export of a conversation and Ctrl+Tab between recently used tabs (npm run build:check first; MC_APP_TARGET=electron: npm run build).
 // The app runs with a scratch home whose ~/.claude and ~/.codex hold generated transcripts (never the real ones); PATH is cut
 // down so no real Claude or Codex starts. Exports go to a scratch folder (MC_NOTES_EXPORT_DIR) instead of the save dialog.
 // Export: the cell menu opens the dialog, tool calls are off by default and one line each when on, save to a file, copy, save as

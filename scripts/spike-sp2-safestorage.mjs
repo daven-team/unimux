@@ -1,6 +1,6 @@
 // SP2 spike: Electron 1.1.4 safeStorage blobs <-> unimux-oscrypt (Rust), both directions, on a scratch data dir.
 //
-//   node scripts/spike-sp2-safestorage.mjs --electron <checkout of main (1.1.4) with `npm run build` done> [--fixtures <dir>] [--keep]
+//   MC_APP_TARGET=electron node scripts/spike-sp2-safestorage.mjs --electron <checkout of main (1.1.4) with `npm run build` done> [--fixtures <dir>] [--keep]
 //
 // A. 1.1.4 (unpackaged, MC_DATA_DIR scratch, scratch home) stores an SSH password, an SSH key with a saved passphrase and a
 //    DB password through its own IPC, and a GitHub token through its own safeStorage (1.1.4 ships without an OAuth client id,
@@ -19,7 +19,11 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFi
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { removeScratch } from './app-env.mjs';
-import { launchApp, mainInspector, sleep, sshState, testHost, writeState } from './ssh-ui-lib.mjs';
+import { isTauri } from './real-app.mjs';
+import { launchApp, sleep, sshState, testHost, writeState } from './ssh-ui-lib.mjs';
+
+// 1.1.4 is the reference here: the Electron target of the harness only.
+if (isTauri) throw new Error('run with MC_APP_TARGET=electron (this spike drives the Electron 1.1.4 build)');
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : undefined; };
@@ -57,14 +61,8 @@ const host = testHost(2222);
 
 /** Starts 1.1.4 on `base` (cwd = the Electron checkout) with the Node inspector on its main process. */
 async function start(base) {
-  const inspectPort = 9400 + Math.floor(Math.random() * 400);
-  const here = process.cwd();
-  process.chdir(electronCheckout);
-  try {
-    const app = await launchApp(base, {}, [`--inspect=${inspectPort}`]);
-    const main = await mainInspector(inspectPort);
-    return { app, main };
-  } finally { process.chdir(here); }
+  const app = await launchApp(base, {}, [], { main: true, cwd: electronCheckout });
+  return { app, main: { evaluate: app.main.evaluateMain, close: app.main.close } };
 }
 
 /** Quits through app.quit() (Chromium writes Local State on the way out) and waits for the process to end. */

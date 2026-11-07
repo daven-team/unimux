@@ -13,6 +13,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchApp, sleep } from './ssh-ui-lib.mjs';
 import { removeScratch } from './app-env.mjs';
+import { isTauri } from './real-app.mjs';
+// Electron's main process is measured here (getAppMetrics, ipcMain timing): a 1.1.4 reference tool, not ported to the Tauri
+// build (X1 ports perf-grid, perf-hidden, perf-latency, perf-profile and bench-jank; R2 compares those with 1.1.4).
+if (isTauri) { console.log('SKIP: Electron reference tool (MC_APP_TARGET=electron); the Tauri build is measured by perf-grid, perf-hidden, perf-latency, perf-profile and bench-jank'); process.exit(0); }
+
 
 if (process.platform !== 'win32') throw new Error('perf-renders is Windows only');
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
@@ -166,7 +171,7 @@ try {
   await app.until(`!!window.__perf && document.querySelectorAll('.cell .xterm').length >= ${count}`, `${count} terminals`, 40000);
   await sleep(5000);
   if (noDot) await app.evaluate(`(() => { const s = document.createElement('style'); s.textContent = '.dot.working::after { animation: none !important; }'; document.head.appendChild(s); return true; })()`);
-  const page = (await (await fetch(`http://127.0.0.1:${app.debugPort}/json/list`)).json()).find((t) => t.type === 'page' && t.url.includes('index.html') && !t.url.includes('detached='));
+  const page = (await (await fetch(`http://127.0.0.1:${app.debugPort}/json/list`)).json()).find(isMainPage);
   const rc = await connectEvents(page.webSocketDebuggerUrl);
   /** Frames drawn by the renderer's compositor per second (CDP trace). */
   const frames = async (secs) => {

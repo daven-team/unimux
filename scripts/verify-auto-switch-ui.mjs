@@ -1,6 +1,6 @@
 // Real-app check (1.1.2) of the automatic account switch, several Codex accounts and the resizable limits panel. Fake home,
 // fake tokens, a local fake usage endpoint for Claude and Codex and a fake `codex` stand-in for `codex login`; never the real
-// ~/.claude, ~/.codex, cswap data or the app data folder. OS notifications are not shown (Notification.show is replaced).
+// ~/.claude, ~/.codex, cswap data or the app data folder. OS notifications are not shown (Notification.show is replaced; the Tauri check build keeps them in the test bridge).
 // Checks: the main Claude account at 96 % (threshold 95 %) is switched at once to the saved account with room, with one
 // notification naming both; the panel shows the switch state and the Switcher card (a popover: contents, keys, Esc, outside click, narrow panel, zoom); the panel's top edge resizes it
 // (remembered, double-click resets); "Dodaj konto Codex" signs in a second Codex account into its own profile; "make main"
@@ -14,9 +14,8 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { removeScratch } from './app-env.mjs';
-import { launchApp, mainInspector, scratchRoot, sleep, sshState, writeState } from './ssh-ui-lib.mjs';
+import { launchApp, scratchRoot, sleep, sshState, writeState } from './ssh-ui-lib.mjs';
 
-if (!existsSync('out/main/index.js')) throw new Error('Build first: npm run build');
 const shots = process.argv[2] ?? join(tmpdir(), 'unimux-auto-switch-shots');
 mkdirSync(shots, { recursive: true });
 const shoot = async (app, name, selector = '.usage-panel') => {
@@ -115,11 +114,10 @@ setTimeout(() => { fs.writeFileSync(path.join(process.env.CODEX_HOME, 'auth.json
     PATH: `${bin}${delimiter}${process.env.PATH}`,
   };
   const card = (name) => `[...document.querySelectorAll('.usage-card')].find((c) => c.textContent.includes('${name}@example.com'))`;
-  const inspectPort = 9300 + Math.floor(Math.random() * 500);
-  const app = await launchApp(root, env, [`--inspect=${inspectPort}`]);
-  const main = await mainInspector(inspectPort);
-  await main.evaluate(`(() => { globalThis.__shown = []; __el.Notification.prototype.show = function () { __shown.push(this); }; return true; })()`);
-  const shown = () => main.evaluate(`__shown.map((n) => ({ title: n.title, body: n.body }))`);
+  const app = await launchApp(root, env, [], { main: true });
+  const main = app.main;
+  await main.stubToasts();
+  const shown = async () => (await main.toasts()).map((n) => ({ title: n.title, body: n.body }));
   try {
     // 1. The automatic switch: daniel at 96 % -> support.
     await app.until(`!!${card('support')} && !!${card('daniel')}`, 'cards', 30_000);
@@ -290,7 +288,8 @@ setTimeout(() => { fs.writeFileSync(path.join(process.env.CODEX_HOME, 'auth.json
     await app.until(`[...document.querySelectorAll('.menu button')].some((b) => b.textContent.includes('Dodaj konto Codex'))`, 'add codex entry');
     await app.evaluate(`[...document.querySelectorAll('.menu button')].find((b) => b.textContent.includes('Dodaj konto Codex')).click(), true`);
     await app.until(`document.querySelector('.modal.auth h3')?.textContent === 'Dodaj konto Codex'`, 'auth modal');
-    await app.until(`document.querySelector('.auth-status')?.textContent.includes('Zalogowano jako carol@example.com')`, 'codex login success', 40_000);
+    await app.until(`document.querySelector('.auth-status')?.textContent.includes('Zalogowano jako carol@example.com')`, 'codex login success', 40_000)
+      .catch(async (error) => { throw new Error(`${error.message}: ${await app.evaluate(`document.querySelector('.modal.auth')?.innerText ?? 'no dialog'`)}`); });
     await shoot(app, '4-codex-login.png', '.modal.auth');
     ok('"Dodaj konto Codex": the fake codex wrote the login into the new profile, the dialog says "Zalogowano jako carol@example.com"');
     await app.until(`!!${card('carol')}`, 'carol card', 30_000);

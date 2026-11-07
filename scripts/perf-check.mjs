@@ -21,6 +21,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchApp, sleep } from './ssh-ui-lib.mjs';
 import { removeScratch } from './app-env.mjs';
+import { isTauri } from './real-app.mjs';
+// Electron's main process is measured here (getAppMetrics, ipcMain timing): a 1.1.4 reference tool, not ported to the Tauri
+// build (X1 ports perf-grid, perf-hidden, perf-latency, perf-profile and bench-jank; R2 compares those with 1.1.4).
+if (isTauri) { console.log('SKIP: Electron reference tool (MC_APP_TARGET=electron); the Tauri build is measured by perf-grid, perf-hidden, perf-latency, perf-profile and bench-jank'); process.exit(0); }
+
 
 if (process.platform !== 'win32') throw new Error('perf-check is Windows only');
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));

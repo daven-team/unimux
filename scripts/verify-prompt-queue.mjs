@@ -1,4 +1,4 @@
-// Real-app check of the 1.0.9 prompt queue (npm run build first). A scratch data dir and home, MC_OFFSCREEN=1 and
+// Real-app check of the 1.0.9 prompt queue (npm run build:check first; MC_APP_TARGET=electron: npm run build). A scratch data dir and home, MC_OFFSCREEN=1 and
 // MC_DEBUG_PORT (default 9407). One Claude cell (the installed CLI, talking to a local mock of the Messages API, never the
 // network) starts with four queued prompts saved in its state: the queue must come up paused after the launch, send its
 // prompts one per finished turn (a multi-line one intact), pause on a permission dialog, take a prompt added, edited and
@@ -9,9 +9,9 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import electron from 'electron';
 import { removeScratch, scrubAppEnv } from './app-env.mjs';
 import { killTree, sleep } from './ssh-ui-lib.mjs';
+import { isMainPage, spawnApp } from './real-app.mjs';
 
 const port = Number(process.env.MC_DEBUG_PORT ?? 9407);
 const shots = process.env.SHOTS ?? join(tmpdir(), 'unimux-queue-shots');
@@ -98,7 +98,7 @@ const env = {
   CLAUDE_CONFIG_DIR: configDir, ANTHROPIC_BASE_URL: `http://127.0.0.1:${api.address().port}`, ANTHROPIC_API_KEY: apiKey,
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_AUTOUPDATER: '1',
 };
-const child = spawn(electron, ['.'], { cwd: process.cwd(), env, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+const child = spawnApp({ cwd: process.cwd(), env, stdio: ['ignore', 'ignore', 'pipe'] });
 let stderr = '';
 child.stderr.on('data', (d) => { stderr = (stderr + d).slice(-4000); });
 
@@ -112,7 +112,7 @@ try {
   let target;
   for (let i = 0; i < 150 && !target; i++) {
     await sleep(200);
-    try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === 'page' && t.url.includes('index.html')); } catch { /* starting */ }
+    try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(isMainPage); } catch { /* starting */ }
   }
   if (!target) throw new Error(`the app window did not appear\n${stderr}`);
   ws = new WebSocket(target.webSocketDebuggerUrl);

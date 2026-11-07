@@ -75,7 +75,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | M1 | MCP HTTP server | verified (Windows; macOS compile-checked) | 2026-11-06 | 2026-11-07 | 2026-11-07 | branch `tauri-pkg-M1`. The SP8 custom dispatcher moved into unimux-mcp on hyper 1.12 http1: `server/` (mcp.ts check order Host/Origin 403, path 404, Bearer 401 with a constant-time compare over every token, DELETE session, 405 `Allow: POST`, in-flight 8 per token / 256 stateless and the 120 / 60 per s monotonic bucket -> 429 `Retry-After: 1`, 256 KB -> 413 -32000, -32700, session 404 -32001, Node 10 s head / 30 s request timeouts answered 408 like Node, 500 `{"error":"MCP request failed."}` without echo), 32-byte tokens per cell with revoke (liveness re-checked under the session-insert lock, so a token revoked mid-body gets 401 and no session), stateless JSON vs SSE, elicitation sessions (256 total, 4 per token), `: keepalive` every 15 s, the SDK 1.32.2 transport checks (406 / 415 / batch over 100 / strict JSONRPCMessageSchema / already initialized / protocol-version header refusing the 2026-07-28 `server/discover` probe), body decoded with U+FFFD like Node, zod-like param checks (-32603 issue list), MCP tasks 2025-11-25 (`server/tasks.rs`: InMemoryTaskStore semantics, 16 per token, paged tasks/list 10 + nextCursor, ttl restart on completion / cancel, expiry aborts a working task), cancellation by handler-future / body drop, client `notifications/cancelled` suppresses the answer, elicitation timeout / abort sends `notifications/cancelled`, elicitInput answer checks (`elicit.rs`), `cap_result` with the JSON.stringify lone-surrogate cut (`tools.rs`); tools behind the `ToolHost` seam for M2 / M3. App: `commands/mcp.rs` starts the server after the main window (index.ts startMcp, 2 background retries), `mcp:info` (incl. starting / listen error) and `mcp:retry` implemented with the `mcp:info` push, stops on quit; `mcp:info` fallback removed. rmcp and `examples/sp8` removed; the wire example is `examples/mcp_wire_server.rs`. Verification: cargo test -p unimux-mcp (8 unit + 44 server tests incl. ttl expiry, elicitation timeout, mid-body revoke, 408s, keepalive, session caps + tests/protocol.rs: the 52 SP8 protocol cases byte-compared with the TS golden `tests/fixtures/protocol-ts.json`, regenerate with `node scripts/spike-mcp-wire.mjs ts --protocol --golden`), cargo fmt --check, cargo clippy --workspace --all-targets -D warnings, cargo test --workspace (unrelated load-sensitive tests flaked, see M1 open issues), cargo check -p unimux-mcp --all-targets --target aarch64-apple-darwin, `node scripts/spike-mcp-wire.mjs` (ts + custom: 52 / 52 identical, 8 real claude / codex CLI scenarios + wire each, all PASS), `npm run build:check && node scripts/check-mcp-app.mjs` 18/18 (offscreen, scratch profile), smoke:tauri 34/34, typecheck, gen:check. PORTING.md +18 mcp / mcp-protocol rows (4 partial: role parts are M2 / M3). Open: M1 open issues below. Review fixes (3 major, 5 minor) on branch `tauri-pkg-M1-fixes`, re-verified 2026-11-07 (protocol 57 / 57, check-mcp-app 22/22, CLI 30 / 30), see "M1 review fixes" below |
 | S2 | SSH key handling | verified (Windows), review fixed | 2026-11-07 | 2026-11-07 | 2026-11-07 | branch `tauri-pkg-S2` (review fixes: "Review fixes: S2" below). `unimux_ssh::keys`: ssh2 1.17's parseKey as 1.1.4 runs it (`keys::ssh2`: ssh2's own regexes, anchored to the whole trimmed text, `\d` ASCII only; OpenSSH via russh `decode_openssh` on Node-lenient base64, chacha20 key files and key types outside ssh2's switch (security keys) refused, key counts other than 1 through ssh2's own container walk; traditional PEM via `legacy_pem` (moved from the SP7 prototype, header group of ssh2's regex, JS slices of `DEK-Info`, GCM / DES-EDE3 / BF-ECB / RC4 checked for IV and passphrase before failing like ssh2, the RSA / EC DER cut after its SEQUENCE; DSA checked with ssh2's asn1 reads, unsupportedType); PPK v2 through ssh-key on a canonical copy after ssh2's MAC rules; OpenSSH public lines and RFC 4716 read field by field), keys.ts rules (`parse_private_key`, `is_encrypted`, metaOf comment rule, `key_meta_from_public`, `public_key_matches`, `certificate_check`, `check_passphrase`), fingerprint.ts, `generate_key` (ssh-key + OS RNG, ssh2's layout: 64-column lines, aes256-ctr + bcrypt 16, read back before returning, `spawn_blocking`), `KeyDrafts` (10 min, 20 max, DraftResult with 1.1.4's key order). Acceptance: test/golden/sp7/keys.json 348 / 348; new golden `test/golden/ssh-keys.json` (scripts/golden-ssh-keys.mjs under Electron 45: 160 text variants x 4 passphrase inputs, 48 publicKeyMatches, 11 keyMetaFromPublic, 48 certificateCheck, 10 KeyDrafts sessions) all equal; the 9 ssh-keys.test.ts cases ported (test/PORTING.md); 14 generated keys (7 type/size rows x plain / encrypted) pass `ssh-keygen -y` (Windows OpenSSH). IPC commands are S4 |
 | U2 | Custom update window (Windows) | done (Windows; VM-only items open) | 2026-11-06 | 2026-11-06 | 2026-11-06 | branch `tauri-pkg-U2`. SP6 code finished: `UpdateProgressModel` + `closeAction` gated by TS goldens (`test/golden/update-progress.jsonl`, 160 random runs >= 10,000 steps, `update-strings.json` 6 languages, `update-config.json` = a 1.1.4 work/config.json read and written back unchanged; `scripts/goldens-update.mjs`, cargo `unimux-update/tests/golden.rs`); WebView2 data folder pre-check `unimux_platform::webview` (window: `%TEMP%\unimux-updater\webview2-<ms>` fallback, no window when nothing is usable; main app: `%TEMP%\unimux-webview2\<hash>` fallback, own startup error otherwise), so Edge's "cannot create data directory" box never appears; `unimux_update::window::prestage` (stage + warm) for U1; the hand-over passes the foreground right to the window (`AllowSetForegroundWindow(pid)`), the window passes it on (ASFW_ANY) to the ShellExecuteExW installer; stale `webview2-<ms>` folders older than a day swept by the next staging; every stage change in updater.log; check builds can carry `UNIMUX_VERSION_OVERRIDE` (release ignores it). Real-app acceptance `node scripts/verify-update-window.mjs [--build]` (successor of the SP6 spike; 1.2.0 check build copied into a scratch install dir, payload 1.2.0-test.1 built from Tauri's NSIS template with its registry writes commented out, all windows off screen): **95/95 in two consecutive full runs** (main, guard, failed, webview) and `--prestage --case=main` 35/35: all five stages in order, page forward-only with the drawn chevron and brighter target, Escape hides while installing / exits on error, install dir replaced by the payload, new app relaunched and writes `ready`, window closes 1.4-1.7 s after `ready`, never foreground, never WS_EX_TOPMOST, no console, no dialog (ours or msedgewebview2), no orphans, nothing registered, real profile and real `%LOCALAPPDATA%\unimux-updater` untouched. cargo fmt / clippy -D warnings (default, features, release) clean; cargo test --workspace (features) 257 passed + 3 load-flaky failures in untouched crates (exec / pty / state, item 7 of "Not done after wave 0b"), green on rerun; npm run gen:check, typecheck, npm test 3,952 passed. Open: see "U2 open issues" |
-| X1 | Real-app script migration | todo | | | | |
+| X1 | Real-app script migration | verified (Windows) | 2026-11-07 | 2026-11-07 | 2026-11-07 | branch `tauri-pkg-X1`. scripts/real-app.mjs (target = check build, `MC_APP_TARGET=electron` / `--target=electron` = Electron's out/ until R1), real-app-owners.mjs, real-app-run.mjs (`--write-progress`), electron-test-toasts.cjs (Electron: no OS notification of a check reaches the desktop), Rust test_record.rs (not-yet log, test-bridge `notYet` / `record` / `recorded` / `windows`, window `requestClose` / `setBounds`). Tauri check build: 5 pass, 48 blocked (each names its packages), 0 fail, 1 skip (CI only); release gates verify-cli-contract (blocked by P4) and verify-team-start wired in release.mjs. Electron reference: 46 pass, 4 fail that fail the same way with the pre-X1 script bodies, 4 skip. cargo fmt / clippy -D warnings / test -p unimux-app, typecheck, vitest real-app-harness 7/7 and the two pgFakeServer suites 29/29. Review fixes 2026-11-07 (4 major, 4 minor findings, all fixed): a failed script is blocked only by what it exercised itself (real-app-owners.mjs `classifyRun`: a missing test-bridge op, a not-yet command outside the startup baseline of a bare launch, scripts/real-app-baseline.mjs, cached per binary, or a baseline command of a package the script tests, `SCRIPT_PACKAGES`); any other failure is a `fail` with the boot-time calls as "not-yet seen" (a launch + throw repro now exits 1, not 2); verify-tauri-normalize compares the revision-0 snapshot (new test-bridge op `loaded`) exactly on first load and restart, no allowance, and the restart gets an SSH resume mark to drop; release.mjs runs `npm run build:check` before the gates and passes them `MC_APP_TARGET=tauri` without `MC_APP_BINARY`; ssh-ui-lib launchApp ends and waits for its app tree when a step after the spawn fails, close() / quitApp wait until the whole tree (WebView2 included) is gone; the W4 contract now says `toasts {stub: true}` keeps the toasts since launch (both targets the same). After the fixes: Tauri sweep 5 pass, 48 blocked (each by its own packages, e.g. verify-accounts-ui by A2, A5; verify-tree-ui by G5), 0 fail, 1 skip; Electron sample (agent-close, layout-ui, limits-ui, notify-actions, ssh-ui) 5/5 pass; verify-tauri-normalize 13/13 x3; cargo fmt, clippy -D warnings (with and without test-bridge), cargo test -p unimux-app 14/14, typecheck, vitest 3,965 passed (real-app-harness 13/13). Open: X1 open issues below |
 
 ### Wave 2
 
@@ -570,6 +570,153 @@ Review fixes (2026-11-07): `mysql_timeout_sql` (MariaDB) now prints `(ms / 1000)
 6. The store golden test takes 10 to 17 s (every write fsyncs, like 1.1.4); 64 s with a full workspace build running next to it.
 7. `js_json::parse` reads nesting up to 1,000 levels; JSON.parse has no fixed limit. A Value is cloned, compared and dropped by serde_json's recursive derived code (5,000 levels overflow a 1 MB stack on clone), so a hand-edited accounts.json deeper than 1,000 levels is still treated as unparsable (Claude store: `.bak` and an empty store; Codex store: read-only), where 1.1.4 drops or keeps the records.
 8. Without node or node_modules/proper-lockfile the interop cases return early and cargo lists them as passed (a note goes to stderr); CI sets `UNIMUX_REQUIRE_LOCK_INTEROP=1`, so there they fail instead.
+
+### X1: real-app scripts (2026-11-07)
+
+Harness: `scripts/real-app.mjs` (target = the Tauri check build; `MC_APP_TARGET=electron` or `--target=electron` = Electron's out/, the 1.1.4 reference, until R1), `scripts/real-app-owners.mjs` (channel -> package), `scripts/real-app-run.mjs` (runs them all; `--write-progress` rewrites the table below). A failed script prints `BLOCKED by <package> (<commands>)` and exits with 2 only for what it exercised itself (`classifyRun` in real-app-owners.mjs): a test-bridge op a later package adds, a not-yet command outside the startup baseline (the not-yet calls of a bare launch, scripts/real-app-baseline.mjs, cached per binary in artifacts/real-app/baseline-tauri.json; the runner takes it once before the sweep), or a baseline command of a package the script tests (`SCRIPT_PACKAGES`). Any other failure is a `fail` (exit 1) and lists the boot-time calls as "not-yet seen", so a regression in a landed package is never hidden as blocked. Measurements (perf-*, bench-*, measure-startup) that pass are still blocked by every not-yet call (their numbers mean nothing until the app is complete). Re-run after a package lands: `npm run build:check && node scripts/real-app-run.mjs --write-progress`.
+
+<!-- X1 real-app status (tauri) start -->
+Run: 2026-11-07 09:52 UTC, target tauri (check build), `node scripts/real-app-run.mjs --write-progress`.
+
+| script | result | blocked by | detail |
+|---|---|---|---|
+| verify-cli-contract.mjs (release gate) | blocked | P4 | P4 (launch-line) |
+| verify-team-start.mjs (release gate) | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
+| verify-accounts-ui.mjs | blocked | A2, A5 | A2 (accounts:swapPending); A5 (usage:get) |
+| verify-agent-close.mjs | blocked | G5, P3, P4, W4, W5, W6 | G5 (fs:listProjectDirectoryBatch); P3 (cell:runtime); P4 (cell:spawn); W4 (notify); W5 (detach:wait); W6 (app:quitGuard) |
+| verify-agent-prompt.mjs | blocked | H4, P4, W5 | H4 (context:get); P4 (cell:spawn); W5 (detach:open) |
+| verify-auto-switch-ui.mjs | blocked | A2, A5, W4 | A2 (accounts:swapPending); A5 (usage:get); W4 (test-bridge toasts) |
+| verify-conv-export.mjs | blocked | H4, H5, P4 | H4 (context:get, sessions:list); H5 (conv:export); P4 (cell:spawn) |
+| verify-conv-search.mjs | blocked | H4, H5, P4 | H4 (sessions:list); H5 (conv:search); P4 (cell:spawn) |
+| verify-db-core.mjs | blocked | D1 | D1 (db:connections:save, db:vault:info, db:sessions) |
+| verify-db-mysql-ui.mjs | blocked | D1, D12 | D1 (db:vault:info, db:sessions, db:connections:test); D12 (port:db) |
+| verify-db-pg-ui.mjs | blocked | D1, D12 | D1 (db:vault:info, db:sessions, db:connections:test); D12 (port:db) |
+| verify-db-redis-ui.mjs | blocked | D1, D12 | D1 (db:vault:info, db:sessions, db:connections:save); D12 (port:db) |
+| verify-db-redis.mjs | blocked | D1, D12 | D1 (db:vault:info, db:sessions, db:connections:save); D12 (port:db) |
+| verify-db-sqlite-ui.mjs | blocked | D1, D12 | D1 (db:vault:info, db:sessions, db:connections:test); D12 (port:db) |
+| verify-dead-login-ui.mjs | blocked | A2, A5 | A2 (accounts:swapPending); A5 (usage:get) |
+| verify-detach-db.mjs | blocked | D1, D12, W5 | D1 (db:vault:info, db:sessions, db:connect); D12 (port:db); W5 (detach:works, detach:waits) |
+| verify-first-login-ui.mjs | blocked | A2, A4 | A2 (accounts:swapPending); A4 (auth:start) |
+| verify-git-layout.mjs | blocked | A6, G2, G3, G4 | A6 (github:status); G2 (git:trust); G3 (git:probe); G4 (git:worktrees) |
+| verify-grid-tabs.mjs | blocked | G5, P4 | G5 (fs:listProjectDirectoryBatch); P4 (cell:spawn) |
+| verify-grid-templates.mjs | blocked | H4, P4, S3 | H4 (context:get); P4 (cell:spawn); S3 (ssh:connect) |
+| verify-layout-ui.mjs | pass |  |  |
+| verify-limits-ui.mjs | blocked | A5, W4 | A5 (usage:get); W4 (test-bridge toasts) |
+| verify-mcp-app.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
+| verify-mcp-cli.mjs | blocked | M2 | M2 (the MCP server of the check build) |
+| verify-mcp-team.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
+| verify-notify-actions.mjs | blocked | P4, W4 | P4 (cell:spawn); W4 (test-bridge toasts) |
+| verify-prompt-queue.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
+| verify-safety-ui.mjs | blocked | G4, P4 | G4 (git:inspectWorktree); P4 (cell:spawn) |
+| verify-sftp-edit.mjs | blocked | G6, T1 | G6 (local:roots); T1 (port:sftp, sftp:sessions, sftp:viewOpened, sftp:connect) |
+| verify-sftp-path.mjs | blocked | G6, T1 | G6 (local:roots); T1 (port:sftp, sftp:sessions, sftp:viewOpened) |
+| verify-sftp-ui.mjs | blocked | G6, T1 | G6 (local:roots); T1 (port:sftp, sftp:sessions, sftp:viewOpened) |
+| verify-sidebar-anchor.mjs | pass |  |  |
+| verify-ssh-bar.mjs | blocked | S1, S3 | S1 (ssh:vault:info); S3 (ssh:sessions, ssh:connect) |
+| verify-ssh-paths.mjs | blocked | S1, S3 | S1 (ssh:vault:info, ssh:history:status, ssh:storage:status, ssh:knownHosts:list); S3 (ssh:sessions, ssh:connect) |
+| verify-ssh-ui.mjs | blocked | S1, S3 | S1 (ssh:vault:info); S3 (ssh:sessions, ssh:connect) |
+| verify-start-screen.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
+| verify-status-ui.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
+| verify-team-panel.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
+| verify-team-stuck.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
+| verify-tree-ui.mjs | blocked | G5 | G5 (fs:listProjectDirectoryBatch) |
+| verify-update-wait.mjs | blocked | P4, U1 | P4 (cell:spawn); U1 (update:get) |
+| verify-waiting-ui.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
+| verify-tauri-normalize.mjs | pass |  |  |
+| verify-release-build.mjs | skip |  | CI only: release.yml checks the CI run of a tag (RELEASE_TAG, BUILD_RUN_ID) |
+| smoke-tauri.mjs | pass |  |  |
+| smoke-start.mjs | pass |  |  |
+| smoke-automation.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
+| capture-readme.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
+| measure-startup.mjs | blocked | P4 | P4 (cell:spawn) |
+| perf-latency.mjs | blocked | P4, S3 | P4 (cell:spawn); S3 (ssh:connect) |
+| bench-jank.mjs | blocked | P4 | P4 (cell:spawn) |
+| perf-grid.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| perf-hidden.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| perf-profile.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+<!-- X1 real-app status (tauri) end -->
+
+#### X1 open issues
+
+1. A "blocked by" list names only what the script exercised beyond the startup baseline plus the baseline packages listed for it in `SCRIPT_PACKAGES`. A boot-time not-yet call can still make a script fail without being its cause (e.g. a script whose UI waits on cli:status but does not list H3): such a run is reported as `fail (not-yet seen: ...)`; add the package to `SCRIPT_PACKAGES` when that is the real reason. A not-yet call the UI makes later than 5 s after a bare launch counts as exercised.
+2. Harness contracts later packages must fill (written into their PLAN rows): W4 test-bridge `toasts` / `toastAction` and honouring `MC_TEST_TOASTS=1` (every harness launch sets it: no toast may reach the desktop during a check; `toasts {stub: true}` keeps the toasts since launch, like the Electron target); W7 `taskbar`; P4 `unimux --launch-line` (verify-cli-contract, a release gate, is blocked by P4 until then); M2 the Tauri half of verify-mcp-cli (blocked by M2: it runs the TS reference server in-process today).
+3. W6: test-bridge `quit` is `app.exit(0)` (no wind-down); `quitApp` / `app.quit()` of the scripts use it for "a normal quit". W6 decides whether it goes through the wind-down like a user's quit. `requestClose` is `Window::close()` (CloseRequested first), the user's close button.
+4. Not ported (Electron-internal, exit with SKIP on the Tauri target, R1 removes or ports them): perf-check.mjs (getAppMetrics budgets per process type), perf-renders.mjs and bench-perf.mjs (main-process IPC hooks), smoke-ssh.mjs (ssh2 under Electron's Node). R2 measures with perf-grid, perf-hidden, perf-latency, perf-profile (process tree of our own pid: unimux.exe + msedgewebview2.exe) and bench-jank. A Tauri version of perf-check's budgets would sit on `processTree()` or G8's monitor:sample.
+5. smoke-start on Tauri waits for `app-ready` + `page-loaded`; P3 should add a pty mark to startup.log and smoke-start should wait for it (1.1.4 waited for `pty-host-started`). It refuses a non-check exe without `--ci` (a release exe ignores MC_DATA_DIR); `npm run test:start` stays on the Electron package until U4.
+6. bench-jank `--gpu-cache` copies WebView2's caches from `data\webview2\EBWebView` (an assumption, not measured yet).
+7. verify-release-build.mjs only runs in release.yml (it reads a CI run of a tag); the runner reports it as skip.
+8. The real-app sweep is not in CI (it needs a desktop session; the Windows runner could run it offscreen): U4 / R2.
+9. scripts/release.mjs on this branch builds the check flavour (`npm run build:check`) and then runs the two release gates against that binary (also in `--dry-run`); they are blocked until P4 and the boot-time packages land, so a 1.2.0 release cannot pass before that (intended). main's release.mjs (1.1.x) is unchanged.
+
+10. Electron target, OS notifications: `scripts/electron-test-toasts.cjs` is loaded into Electron's main process with `NODE_OPTIONS=--require` (put back to the script's value before the app starts anything) and swaps `Notification.prototype.show` for a list the first time the app requires `electron`, so no toast of a check reaches the desktop, also one shown before the main inspector is attached (1.1.4's mainInspector stubbed it only after the launch). Before this fix, the first Electron sweep of this session ran verify-auto-switch-ui with the late stub and its account-switch toast may have reached the desktop once.
+11. Electron reference failures that are not caused by the migration (the pre-X1 script bodies from b30f0c2 fail the same way on the same build): smoke-automation ("one terminal setting per row"), capture-readme `--verify` (verify-workspace-ui "return from settings to file"), verify-ssh-bar (the uptime tooltip "Czas działania serwera: 14 dni 6 h"), verify-db-redis-ui ("SSH password prompt in the tab"). They need a look before R1 removes the reference; the Tauri versions are blocked by their packages anyway.
+12. Load: with other agents' cargo builds at 100 percent CPU, Electron's first `Runtime.enable` sometimes never answered. ssh-ui-lib's launchApp now reconnects to the page up to 3 times (20 s each) and its CDP timeout is 45 s (`MC_CDP_TIMEOUT_MS`); the scratch folder removal at the end of 15 verify scripts goes through `removeScratch` (logs, never fails a passed check). Timing checks failed once under that load and passed on the rerun: verify-team-start (crashed worker restart), verify-agent-prompt (queue), verify-auto-switch-ui (slider saved mid-drag). smoke-automation and capture-readme have their own CDP clients and keep a 10 / 15 s timeout.
+13. verify-tauri-normalize (F8) had a race: the renderer edits the state (the `shell` of started terminals, the strip order) before the peek, so revision > 0. Fixed for good in the review: the check build keeps the revision-0 snapshot (test-bridge `loaded`) and both the first-load and the restart checks compare it exactly; 3 runs passed.
+14. smoke-start on the Electron target needs the packaged app of `npm run dist:win`; the runner reports it as skip without it.
+15. About 50 `_tmp-ssh-*` scratch folders from earlier runs (X1 runs of 2026-11-07 included) are still in D:\Projekty; launchApp no longer leaves new ones on a failed launch. They were not removed here (other agents may be using some); delete them when no check runs.
+
+Electron reference runs of the migrated scripts (`--target=electron`, proves the migration kept each check working on 1.1.4):
+
+<!-- X1 real-app status (electron) start -->
+Run: 2026-11-07 08:26 UTC, target electron, `node scripts/real-app-run.mjs --write-progress --target=electron`.
+
+| script | result | blocked by | detail |
+|---|---|---|---|
+| verify-cli-contract.mjs (release gate) | pass |  |  |
+| verify-team-start.mjs (release gate) | pass |  |  |
+| verify-accounts-ui.mjs | pass |  |  |
+| verify-agent-close.mjs | pass |  |  |
+| verify-agent-prompt.mjs | pass |  |  |
+| verify-auto-switch-ui.mjs | pass |  |  |
+| verify-conv-export.mjs | pass |  |  |
+| verify-conv-search.mjs | pass |  |  |
+| verify-db-core.mjs | pass |  |  |
+| verify-db-mysql-ui.mjs | pass |  |  |
+| verify-db-pg-ui.mjs | pass |  |  |
+| verify-db-redis-ui.mjs | fail |  | Node.js v26.13.0 |
+| verify-db-redis.mjs | pass |  |  |
+| verify-db-sqlite-ui.mjs | pass |  |  |
+| verify-dead-login-ui.mjs | pass |  |  |
+| verify-detach-db.mjs | pass |  |  |
+| verify-first-login-ui.mjs | pass |  |  |
+| verify-git-layout.mjs | pass |  |  |
+| verify-grid-tabs.mjs | pass |  |  |
+| verify-grid-templates.mjs | pass |  |  |
+| verify-layout-ui.mjs | pass |  |  |
+| verify-limits-ui.mjs | pass |  |  |
+| verify-mcp-app.mjs | pass |  |  |
+| verify-mcp-cli.mjs | pass |  |  |
+| verify-mcp-team.mjs | pass |  |  |
+| verify-notify-actions.mjs | pass |  |  |
+| verify-prompt-queue.mjs | pass |  |  |
+| verify-safety-ui.mjs | pass |  |  |
+| verify-sftp-edit.mjs | pass |  |  |
+| verify-sftp-path.mjs | pass |  |  |
+| verify-sftp-ui.mjs | pass |  |  |
+| verify-sidebar-anchor.mjs | pass |  |  |
+| verify-ssh-bar.mjs | fail |  | 1 FAILED |
+| verify-ssh-paths.mjs | pass |  |  |
+| verify-ssh-ui.mjs | pass |  |  |
+| verify-start-screen.mjs | pass |  |  |
+| verify-status-ui.mjs | pass |  |  |
+| verify-team-panel.mjs | pass |  |  |
+| verify-team-stuck.mjs | pass |  |  |
+| verify-tree-ui.mjs | pass |  |  |
+| verify-update-wait.mjs | pass |  |  |
+| verify-waiting-ui.mjs | pass |  |  |
+| verify-tauri-normalize.mjs | skip |  | tauri target only |
+| verify-release-build.mjs | skip |  | CI only: release.yml checks the CI run of a tag (RELEASE_TAG, BUILD_RUN_ID) |
+| smoke-tauri.mjs | skip |  | tauri target only |
+| smoke-start.mjs | skip |  | no packaged Electron app (npm run dist:win) |
+| smoke-automation.mjs | fail |  | DevTools listening on ws://127.0.0.1:56387/devtools/browser/98f3e8cf-e140-429e-87a5-a8eefb9c5c37 |
+| capture-readme.mjs | fail |  | Captured failure.png |
+| measure-startup.mjs | pass |  |  |
+| perf-latency.mjs | pass |  |  |
+| bench-jank.mjs | pass |  |  |
+| perf-grid.mjs | pass |  |  |
+| perf-hidden.mjs | pass |  |  |
+| perf-profile.mjs | pass |  |  |
+<!-- X1 real-app status (electron) end -->
 
 ### How to run
 

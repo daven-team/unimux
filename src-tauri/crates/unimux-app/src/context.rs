@@ -119,6 +119,13 @@ pub struct AppContext {
     /// What runs when the main window's page starts loading (a reload; 1.1.4 `did-start-loading`): the domains drop what
     /// belonged to the old page (G5: the local files it opened).
     pub main_page_hooks: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
+    /// Check build only: not-yet calls and recorded calls for the real-app harness (test_bridge `notYet`, `record`).
+    #[cfg(feature = "test-bridge")]
+    pub test_record: crate::test_record::TestRecorder,
+    /// Check build only: the state as loaded and normalized at startup (revision 0), before any renderer edit (test_bridge
+    /// `loaded`, verify-tauri-normalize).
+    #[cfg(feature = "test-bridge")]
+    pub test_loaded: Value,
 }
 
 impl AppContext {
@@ -132,6 +139,8 @@ impl AppContext {
     ) -> Arc<Self> {
         let normalizer: Arc<dyn Normalizer> = Arc::new(StateNormalizer);
         let controller = Arc::new(StateController::new(state, normalizer.clone()));
+        #[cfg(feature = "test-bridge")]
+        let test_loaded = controller.snapshot().to_json();
         let crash_for_saver = crash.clone();
         let saver = Saver::new(data_dir.clone(), Arc::new(move |m: &str| crash_for_saver.warn(m)));
         let sink = Arc::new(TauriSink::default());
@@ -217,6 +226,10 @@ impl AppContext {
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
             main_page_hooks: Mutex::new(Vec::new()),
+            #[cfg(feature = "test-bridge")]
+            test_record: crate::test_record::TestRecorder::from_env(),
+            #[cfg(feature = "test-bridge")]
+            test_loaded,
         })
     }
 

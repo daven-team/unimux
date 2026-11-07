@@ -1,6 +1,6 @@
 // Real-app check (1.1.1) of the AI limits panel after a restart and of the limit warnings. Fake home, fake tokens, a local
 // fake usage/token endpoint (slow on purpose, so the state before the first read can be seen); never the real ~/.claude,
-// cswap data or the app data folder. The OS notification is not shown: Notification.show is replaced in the main process.
+// cswap data or the app data folder. The OS notification is not shown: Notification.show is replaced in the main process (the Tauri check build keeps them in the test bridge).
 // Checks: a restart with a 1.1.0 usage cache shows the expired and switched-out cards as "Sign-in expired" at once (never
 // their old numbers) and reads every account right away although the last reads were a minute ago; the refresh button reads
 // at once and spins until the reads are back; crossing the 5-hour threshold gives exactly one notification (not again on the
@@ -11,7 +11,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { removeScratch } from './app-env.mjs';
-import { launchApp, mainInspector, scratchRoot, sleep, sshState, writeState } from './ssh-ui-lib.mjs';
+import { launchApp, scratchRoot, sleep, sshState, writeState } from './ssh-ui-lib.mjs';
 
 const shots = process.argv[2] ?? join(tmpdir(), 'unimux-limits-shots');
 mkdirSync(shots, { recursive: true });
@@ -98,14 +98,13 @@ try {
   };
   const card = (name) => `[...document.querySelectorAll('.usage-card')].find((c) => c.textContent.includes('${name}@example.com'))`;
   const usageReads = () => seen.filter((r) => r.path === '/usage' && r.auth.includes('support')).length;
-  const stubNotifications = (main) => main.evaluate(`(() => { globalThis.__shown = []; __el.Notification.prototype.show = function () { __shown.push(this); }; return true; })()`);
-  const shown = (main) => main.evaluate(`__shown.map((n) => ({ title: n.title, body: n.body }))`);
+  const stubNotifications = (main) => main.stubToasts();
+  const shown = async (main) => (await main.toasts()).map((n) => ({ title: n.title, body: n.body }));
 
   // 1. Restart with the cache: the expired cards say so before any read is back; every account is read at once.
-  const inspectPort = 9300 + Math.floor(Math.random() * 500);
-  const started = Date.now();
-  let app = await launchApp(root, env, [`--inspect=${inspectPort}`]);
-  let main = await mainInspector(inspectPort);
+    const started = Date.now();
+  let app = await launchApp(root, env, [], { main: true });
+  let main = app.main;
   await stubNotifications(main);
   try {
     await app.until(`!!${card('daniel')} && !!${card('app')} && !!${card('support')}`, 'cards from the cache');
@@ -162,7 +161,7 @@ try {
     // 4. A click on the notification brings the limits panel (the side panel was folded away, the limits collapsed).
     await app.evaluate(`document.querySelector('.rail-tile.on')?.click(), true`);
     await app.until(`!!document.querySelector('.sidebar.collapsed')`, 'sidebar folded');
-    await main.evaluate(`(() => { __shown[0].emit('click'); return true; })()`);
+    await main.toastClick(0);
     await app.until(`!document.querySelector('.sidebar.collapsed') && !!document.querySelector('.side-panel .usage-panel .usage-card')`, 'limits panel opened by the click');
     ok('a click on the notification unfolds the side panel with the limits');
 
@@ -188,8 +187,8 @@ try {
   delayMs = 3000;
   // Past the 30 s start guard, so the restart really reads the account again (still at 92 %).
   await sleep(Math.max(0, lastRead + 31_000 - Date.now()));
-  app = await launchApp(root, env, [`--inspect=${inspectPort + 1}`]);
-  main = await mainInspector(inspectPort + 1);
+  app = await launchApp(root, env, [], { main: true });
+  main = app.main;
   await stubNotifications(main);
   try {
     await app.until(`!!${card('daniel')} && ${card('daniel')}.textContent.includes('Logowanie wygasło') && ${card('app')}.textContent.includes('Logowanie wygasło')`, 'expired after the second restart', 5000);
