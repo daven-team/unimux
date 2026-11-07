@@ -9,9 +9,10 @@
 // checks real servers on 127.0.0.1 too (throwaway Linux containers): the bar fills in from their /proc, the cards, the cadence.
 // Scratch data dir and home only (ssh-ui-lib.mjs); screenshots go to D:\Projekty\_shots\ssh-bar-*.png.
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { connected, connectWithPassword, launchApp, scratchRoot, SHOTS, sleep, sshState, startTestServer, testHost, writeKnownHost, writeState } from './ssh-ui-lib.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const failures = [];
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what); };
@@ -102,7 +103,7 @@ async function run(name, serverArgs, body, real = null) {
   } finally {
     await app?.close();
     server.stop();
-    try { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch (e) { console.log(`     scratch dir left: ${root} (${e.code})`); }
+    try { removeScratch(root); } catch (e) { console.log(`     scratch dir left: ${root} (${e.code})`); }
   }
 }
 

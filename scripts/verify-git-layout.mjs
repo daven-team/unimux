@@ -4,9 +4,10 @@
 // scrolls to the oldest commit; expanded again the saved split comes back. GIT_LAYOUT_SHOTS=1 saves screenshots.
 // Runs on a scratch git repository and a scratch data dir.
 import { execFileSync } from 'node:child_process';
-import { existsSync, rmSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { launchApp, scratchRoot, sleep, sshState, writeState } from './ssh-ui-lib.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const SAVED_HISTORY = 520;
 const CASES = [
@@ -93,7 +94,7 @@ async function check({ name, height, files, keepsHeight }) {
     console.log(`OK ${name}`);
   } finally {
     if (app) await app.close();
-    if (existsSync(root)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+    removeScratch(root);
   }
 }
 

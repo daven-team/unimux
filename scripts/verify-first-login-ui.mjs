@@ -7,7 +7,7 @@
 //    ~/.local/bin) succeeds and the login starts by itself.
 // Fake home, fake tokens, a local fake usage endpoint, cmd as the shell, PATH without the real CLI, MC_CLI_NO_REGISTRY=1.
 // Run: npm run build && node scripts/verify-first-login-ui.mjs [shots dir]   (default: <tmp>/unimux-first-login-shots)
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

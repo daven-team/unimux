@@ -19,6 +19,7 @@ import { Redis } from 'ioredis';
 import { verifyWorkspaceUI } from './verify-workspace-ui.mjs';
 import { scrubAppEnv } from './app-env.mjs';
 import { killTree, startTestServer, writeKnownHost } from './ssh-ui-lib.mjs';
+import { isMainPage, quitApp, requireBuild, spawnApp } from './real-app.mjs';
 
 const checkout = process.cwd();
 requireBuild(checkout);
@@ -237,7 +238,6 @@ const demoScreens = {
 writeFileSync(join(bin, 'demo-sessions.json'), JSON.stringify(demoScreens));
 writeFileSync(join(bin, 'demo-agent.mjs'), `// Scripted stand-in for "${'claude'}" / "codex" in README screenshots: prints a fixed demo session, never calls a model.
 import { readFileSync } from 'node:fs';
-import { isMainPage, quitApp, requireBuild, spawnApp } from './real-app.mjs';
 const [cli, ...args] = process.argv.slice(2);
 if (args.includes('--version')) { console.log(cli === 'claude' ? '2.1.120 (Claude Code)' : 'codex-cli 0.60.0'); process.exit(0); }
 const screens = JSON.parse(readFileSync(new URL('./demo-sessions.json', import.meta.url), 'utf8'));

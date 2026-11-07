@@ -8,10 +8,11 @@
 // back to the root with a note; the grid dialog lists the template with the folder column filled in when loaded.
 // Screenshots: <tmp>\unimux-grid-templates-shots\*.png (or GRID_TEMPLATE_SHOTS).
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchApp, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const SHOTS = process.env.GRID_TEMPLATE_SHOTS ?? join(tmpdir(), 'unimux-grid-templates-shots');
 const P = { alpha: randomUUID(), beta: randomUUID() };
@@ -154,5 +155,5 @@ try {
   console.log(`ALL OK (${results.length}) - screenshots in ${SHOTS}`);
 } finally {
   if (app) await app.close();
-  if (existsSync(root)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  removeScratch(root);
 }

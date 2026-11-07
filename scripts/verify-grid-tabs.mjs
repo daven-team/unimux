@@ -10,9 +10,10 @@
 // the file tab, not the grid with the working agent behind it; "All tabs" groups by project.
 // Screenshots: D:\Projekty\_shots\100-tabs-*.png
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { launchApp, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const P = { alpha: randomUUID(), beta: randomUUID() };
 const T = { alphaMain: randomUUID(), alphaNotes: randomUUID(), betaBuild: randomUUID(), betaMain: randomUUID() };
@@ -272,5 +273,5 @@ try {
 } finally {
   main?.close();
   if (app) await app.close();
-  if (existsSync(root)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  removeScratch(root);
 }

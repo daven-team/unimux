@@ -75,7 +75,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | M1 | MCP HTTP server | todo | | | | |
 | S2 | SSH key handling | todo | | | | |
 | U2 | Custom update window (Windows) | todo | | | | |
-| X1 | Real-app script migration | todo | | | | |
+| X1 | Real-app script migration | verified (Windows) | 2026-11-07 | 2026-11-07 | 2026-11-07 | branch `tauri-pkg-X1`. scripts/real-app.mjs (target = check build, `MC_APP_TARGET=electron` / `--target=electron` = Electron's out/ until R1), real-app-owners.mjs, real-app-run.mjs (`--write-progress`), electron-test-toasts.cjs (Electron: no OS notification of a check reaches the desktop), Rust test_record.rs (not-yet log, test-bridge `notYet` / `record` / `recorded` / `windows`, window `requestClose` / `setBounds`). Tauri check build: 5 pass, 48 blocked (each names its packages), 0 fail, 1 skip (CI only); release gates verify-cli-contract (blocked by P4) and verify-team-start wired in release.mjs. Electron reference: 46 pass, 4 fail that fail the same way with the pre-X1 script bodies, 4 skip. cargo fmt / clippy -D warnings / test -p unimux-app, typecheck, vitest real-app-harness 7/7 and the two pgFakeServer suites 29/29. Open: X1 open issues below |
 
 ### Wave 2
 
@@ -377,6 +377,152 @@ Verification: `cargo fmt --all --check`, `cargo clippy -p unimux-mcp --all-targe
 6. The redis crate stays a dev-dependency of unimux-db only to keep the measured gaps reproducible; D9 can drop it (and the workspace pin) once its own tests replace that comparison.
 7. D7: after `SET NAMES` / `SET CHARACTER SET` mysql2 encodes queries and decodes column names in the session charset; `wire::mycharset` does it for utf8, latin1 / binary, ascii, ucs2 / utf16-le and cesu8 and refuses queries in the iconv-lite-only encodings (cp1250, koi8r, sjis, big5 ...). D7 adds iconv-lite's tables for those.
 8. D9: the reconnect handshake (`auth`, `client setname unimux`, `select` of the previously selected DB) is taken from the ioredis source (`wire::redis::reconnect_sequence`); D9 adds a golden for it through RedisSession.
+
+### X1: real-app scripts (2026-11-07)
+
+Harness: `scripts/real-app.mjs` (target = the Tauri check build; `MC_APP_TARGET=electron` or `--target=electron` = Electron's out/, the 1.1.4 reference, until R1), `scripts/real-app-owners.mjs` (channel -> package), `scripts/real-app-run.mjs` (runs them all; `--write-progress` rewrites the table below). A script that fails after the check build answered `MC_NOT_YET` (or a test-bridge op a later package adds) prints `BLOCKED by <package> (<commands>)` and exits with 2. The "blocked by" list is every package whose command the run called and got `MC_NOT_YET` for (boot-time calls included), so a script is unblocked only when all of them landed. Re-run after a package lands: `npm run build:check && node scripts/real-app-run.mjs --write-progress`.
+
+<!-- X1 real-app status (tauri) start -->
+Run: 2026-11-07 08:57 UTC, target tauri (check build), `node scripts/real-app-run.mjs --write-progress`.
+
+| script | result | blocked by | detail |
+|---|---|---|---|
+| verify-cli-contract.mjs (release gate) | blocked | P4 | P4 (launch-line) |
+| verify-team-start.mjs (release gate) | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (context:get, sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-accounts-ui.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-agent-close.mjs | blocked | A2, A5, D1, D12, G3, G5, G8, H3, H4, P2, P3, P4, S1, S3, T1, U1, W4, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G5 (fs:listProjectDirectoryBatch); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P3 (cell:runtime); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W4 (notify); W5 (detach:works, detach:waits, detach:wait); W6 (app:quitGuard) |
+| verify-agent-prompt.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (context:get, sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits, detach:open); W6 (app:quitGuard) |
+| verify-auto-switch-ui.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W4, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W4 (test-bridge toasts); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-conv-export.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, H5, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (context:get, sessions:list); H5 (conv:export); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-conv-search.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, H5, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); H5 (conv:search); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-db-core.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions, db:connections:save); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-db-mysql-ui.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions, db:connections:test); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-db-pg-ui.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions, db:connections:test); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-db-redis-ui.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:connections:save, db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-db-redis.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:connections:save, db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-db-sqlite-ui.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions, db:connections:test); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-dead-login-ui.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-detach-db.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions, db:connect); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-first-login-ui.mjs | blocked | A2, A4, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A4 (auth:start); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-git-layout.mjs | blocked | A2, A5, A6, D1, D12, G2, G3, G4, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); A6 (github:status); D1 (db:vault:info, db:sessions); D12 (port:db); G2 (git:trust); G3 (git:probe); G4 (git:worktrees); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-grid-tabs.mjs | blocked | A2, A5, D1, D12, G3, G5, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G5 (fs:listProjectDirectoryBatch); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-grid-templates.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (context:get, sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions, ssh:connect); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-layout-ui.mjs | pass |  |  |
+| verify-limits-ui.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W4, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W4 (test-bridge toasts); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-mcp-app.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (context:get, sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-mcp-cli.mjs | blocked | M2 | M2 (the MCP server of the check build) |
+| verify-mcp-team.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (context:get, sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-notify-actions.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W4, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W4 (test-bridge toasts); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-prompt-queue.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (context:get, sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-safety-ui.mjs | blocked | A2, A5, D1, D12, G3, G4, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G4 (git:inspectWorktree); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-sftp-edit.mjs | blocked | A2, A5, D1, D12, G3, G6, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G6 (local:roots); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions, sftp:viewOpened, sftp:connect); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-sftp-path.mjs | blocked | A2, A5, D1, D12, G3, G6, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G6 (local:roots); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions, sftp:viewOpened); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-sftp-ui.mjs | blocked | A2, A5, D1, D12, G3, G6, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G6 (local:roots); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions, sftp:viewOpened); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-sidebar-anchor.mjs | pass |  |  |
+| verify-ssh-bar.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions, ssh:connect); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-ssh-paths.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info, ssh:history:status, ssh:storage:status, ssh:knownHosts:list); S3 (ssh:sessions, ssh:connect); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-ssh-ui.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions, ssh:connect); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-start-screen.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (context:get, sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-status-ui.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (context:get, sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-team-panel.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (context:get, sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-team-stuck.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (context:get, sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-tree-ui.mjs | blocked | A2, A5, D1, D12, G3, G5, G8, H3, H4, P2, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G5 (fs:listProjectDirectoryBatch); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-update-wait.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-waiting-ui.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (context:get, sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| verify-tauri-normalize.mjs | pass |  |  |
+| verify-release-build.mjs | skip |  | CI only: release.yml checks the CI run of a tag (RELEASE_TAG, BUILD_RUN_ID) |
+| smoke-tauri.mjs | pass |  |  |
+| smoke-start.mjs | pass |  |  |
+| smoke-automation.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (context:get); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get) |
+| capture-readme.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (context:get, sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| measure-startup.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| perf-latency.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions, ssh:connect); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| bench-jank.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| perf-grid.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| perf-hidden.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| perf-profile.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+<!-- X1 real-app status (tauri) end -->
+
+#### X1 open issues
+
+1. A "blocked by" list names every package whose command the run called and got `MC_NOT_YET` for, the boot-time calls of the UI included (cli:status, usage:get, update:get, sessions:list ...), so the lists are long and the package a script really tests is not singled out. A script turns green only when all of them landed.
+2. Harness contracts later packages must fill (written into their PLAN rows): W4 test-bridge `toasts` / `toastAction` and honouring `MC_TEST_TOASTS=1` (every harness launch sets it: no toast may reach the desktop during a check); W7 `taskbar`; P4 `unimux --launch-line` (verify-cli-contract, a release gate, is blocked by P4 until then); M2 the Tauri half of verify-mcp-cli (blocked by M2: it runs the TS reference server in-process today).
+3. W6: test-bridge `quit` is `app.exit(0)` (no wind-down); `quitApp` / `app.quit()` of the scripts use it for "a normal quit". W6 decides whether it goes through the wind-down like a user's quit. `requestClose` is `Window::close()` (CloseRequested first), the user's close button.
+4. Not ported (Electron-internal, exit with SKIP on the Tauri target, R1 removes or ports them): perf-check.mjs (getAppMetrics budgets per process type), perf-renders.mjs and bench-perf.mjs (main-process IPC hooks), smoke-ssh.mjs (ssh2 under Electron's Node). R2 measures with perf-grid, perf-hidden, perf-latency, perf-profile (process tree of our own pid: unimux.exe + msedgewebview2.exe) and bench-jank. A Tauri version of perf-check's budgets would sit on `processTree()` or G8's monitor:sample.
+5. smoke-start on Tauri waits for `app-ready` + `page-loaded`; P3 should add a pty mark to startup.log and smoke-start should wait for it (1.1.4 waited for `pty-host-started`). It refuses a non-check exe without `--ci` (a release exe ignores MC_DATA_DIR); `npm run test:start` stays on the Electron package until U4.
+6. bench-jank `--gpu-cache` copies WebView2's caches from `data\webview2\EBWebView` (an assumption, not measured yet).
+7. verify-release-build.mjs only runs in release.yml (it reads a CI run of a tag); the runner reports it as skip.
+8. The real-app sweep is not in CI (it needs a desktop session; the Windows runner could run it offscreen): U4 / R2.
+9. scripts/release.mjs on this branch runs the two release gates against the check build (also in `--dry-run`); they are blocked until P4 and the boot-time packages land, so a 1.2.0 release cannot pass before that (intended). main's release.mjs (1.1.x) is unchanged.
+
+10. Electron target, OS notifications: `scripts/electron-test-toasts.cjs` is loaded into Electron's main process with `NODE_OPTIONS=--require` (put back to the script's value before the app starts anything) and swaps `Notification.prototype.show` for a list the first time the app requires `electron`, so no toast of a check reaches the desktop, also one shown before the main inspector is attached (1.1.4's mainInspector stubbed it only after the launch). Before this fix, the first Electron sweep of this session ran verify-auto-switch-ui with the late stub and its account-switch toast may have reached the desktop once.
+11. Electron reference failures that are not caused by the migration (the pre-X1 script bodies from b30f0c2 fail the same way on the same build): smoke-automation ("one terminal setting per row"), capture-readme `--verify` (verify-workspace-ui "return from settings to file"), verify-ssh-bar (the uptime tooltip "Czas działania serwera: 14 dni 6 h"), verify-db-redis-ui ("SSH password prompt in the tab"). They need a look before R1 removes the reference; the Tauri versions are blocked by their packages anyway.
+12. Load: with other agents' cargo builds at 100 percent CPU, Electron's first `Runtime.enable` sometimes never answered. ssh-ui-lib's launchApp now reconnects to the page up to 3 times (20 s each) and its CDP timeout is 45 s (`MC_CDP_TIMEOUT_MS`); the scratch folder removal at the end of 15 verify scripts goes through `removeScratch` (logs, never fails a passed check). Timing checks failed once under that load and passed on the rerun: verify-team-start (crashed worker restart), verify-agent-prompt (queue), verify-auto-switch-ui (slider saved mid-drag). smoke-automation and capture-readme have their own CDP clients and keep a 10 / 15 s timeout.
+13. verify-tauri-normalize (F8) had a race: the renderer edits the state (the `shell` of started terminals, the strip order) before the peek, so revision > 0. Both the first-load and the restart checks now accept exactly those session additions when the revision is not 0 (a `shell` only where the expected state has none); 3 + 2 runs passed.
+14. smoke-start on the Electron target needs the packaged app of `npm run dist:win`; the runner reports it as skip without it.
+
+Electron reference runs of the migrated scripts (`--target=electron`, proves the migration kept each check working on 1.1.4):
+
+<!-- X1 real-app status (electron) start -->
+Run: 2026-11-07 08:26 UTC, target electron, `node scripts/real-app-run.mjs --write-progress --target=electron`.
+
+| script | result | blocked by | detail |
+|---|---|---|---|
+| verify-cli-contract.mjs (release gate) | pass |  |  |
+| verify-team-start.mjs (release gate) | pass |  |  |
+| verify-accounts-ui.mjs | pass |  |  |
+| verify-agent-close.mjs | pass |  |  |
+| verify-agent-prompt.mjs | pass |  |  |
+| verify-auto-switch-ui.mjs | pass |  |  |
+| verify-conv-export.mjs | pass |  |  |
+| verify-conv-search.mjs | pass |  |  |
+| verify-db-core.mjs | pass |  |  |
+| verify-db-mysql-ui.mjs | pass |  |  |
+| verify-db-pg-ui.mjs | pass |  |  |
+| verify-db-redis-ui.mjs | fail |  | Node.js v26.13.0 |
+| verify-db-redis.mjs | pass |  |  |
+| verify-db-sqlite-ui.mjs | pass |  |  |
+| verify-dead-login-ui.mjs | pass |  |  |
+| verify-detach-db.mjs | pass |  |  |
+| verify-first-login-ui.mjs | pass |  |  |
+| verify-git-layout.mjs | pass |  |  |
+| verify-grid-tabs.mjs | pass |  |  |
+| verify-grid-templates.mjs | pass |  |  |
+| verify-layout-ui.mjs | pass |  |  |
+| verify-limits-ui.mjs | pass |  |  |
+| verify-mcp-app.mjs | pass |  |  |
+| verify-mcp-cli.mjs | pass |  |  |
+| verify-mcp-team.mjs | pass |  |  |
+| verify-notify-actions.mjs | pass |  |  |
+| verify-prompt-queue.mjs | pass |  |  |
+| verify-safety-ui.mjs | pass |  |  |
+| verify-sftp-edit.mjs | pass |  |  |
+| verify-sftp-path.mjs | pass |  |  |
+| verify-sftp-ui.mjs | pass |  |  |
+| verify-sidebar-anchor.mjs | pass |  |  |
+| verify-ssh-bar.mjs | fail |  | 1 FAILED |
+| verify-ssh-paths.mjs | pass |  |  |
+| verify-ssh-ui.mjs | pass |  |  |
+| verify-start-screen.mjs | pass |  |  |
+| verify-status-ui.mjs | pass |  |  |
+| verify-team-panel.mjs | pass |  |  |
+| verify-team-stuck.mjs | pass |  |  |
+| verify-tree-ui.mjs | pass |  |  |
+| verify-update-wait.mjs | pass |  |  |
+| verify-waiting-ui.mjs | pass |  |  |
+| verify-tauri-normalize.mjs | skip |  | tauri target only |
+| verify-release-build.mjs | skip |  | CI only: release.yml checks the CI run of a tag (RELEASE_TAG, BUILD_RUN_ID) |
+| smoke-tauri.mjs | skip |  | tauri target only |
+| smoke-start.mjs | skip |  | no packaged Electron app (npm run dist:win) |
+| smoke-automation.mjs | fail |  | DevTools listening on ws://127.0.0.1:56387/devtools/browser/98f3e8cf-e140-429e-87a5-a8eefb9c5c37 |
+| capture-readme.mjs | fail |  | Captured failure.png |
+| measure-startup.mjs | pass |  |  |
+| perf-latency.mjs | pass |  |  |
+| bench-jank.mjs | pass |  |  |
+| perf-grid.mjs | pass |  |  |
+| perf-hidden.mjs | pass |  |  |
+| perf-profile.mjs | pass |  |  |
+<!-- X1 real-app status (electron) end -->
 
 ### How to run
 

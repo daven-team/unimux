@@ -23,7 +23,10 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { removeScratch } from './app-env.mjs';
-import { isMainPage, isTauri } from './real-app.mjs';
+import { isMainPage, isTauri, measurementNeedsCompleteApp } from './real-app.mjs';
+
+// Numbers from an app that still answers MC_NOT_YET mean nothing: blocked until every package it calls landed.
+measurementNeedsCompleteApp();
 import { launchApp, sleep } from './ssh-ui-lib.mjs';
 
 const opt = (name, fallback) => { const a = process.argv.find((x) => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : fallback; };

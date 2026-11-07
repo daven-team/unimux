@@ -12,7 +12,10 @@
 // the checkout (npm run build; --app <dir>, for example a 1.1.4 checkout for the comparison of R2).
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { isTauri } from './real-app.mjs';
+import { isTauri, measurementNeedsCompleteApp } from './real-app.mjs';
+
+// Numbers from an app that still answers MC_NOT_YET mean nothing: blocked until every package it calls landed.
+measurementNeedsCompleteApp();
 import { launchApp, scratchRoot, sleep, sshState, startTestServer, testHost, writeKnownHost, writeState } from './ssh-ui-lib.mjs';
 
 const args = process.argv.slice(2);

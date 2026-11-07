@@ -7,9 +7,10 @@
 // notification text names the cell and a burst becomes one notification; the Files tree shows a file made during the turn
 // once the turn ends (no manual refresh); closing the window asks and Cancel keeps the app.
 import { randomUUID } from 'node:crypto';
-import { existsSync, rmSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { launchApp, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const ids = { a: randomUUID(), b: randomUUID(), c: randomUUID(), d: randomUUID() };
 const tabs = { main: randomUUID(), other: randomUUID(), third: randomUUID() };
@@ -183,5 +184,5 @@ try {
 } finally {
   main?.close();
   if (app) await app.close();
-  if (existsSync(root)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  removeScratch(root);
 }

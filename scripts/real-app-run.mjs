@@ -8,7 +8,7 @@
 // Results: artifacts/real-app/<target>.json. Exit code 1 when a script failed (blocked ones do not fail the run: their
 // package has not landed; the list shrinks as packages land).
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { APP_TARGET, ROOT, isTauri, requireBuild } from './real-app.mjs';
@@ -17,7 +17,8 @@ import { blockedBy } from './real-app-owners.mjs';
 const W = process.platform === 'win32';
 /**
  * Every script X1 moved to the harness. `args`: what a quick full run uses (scratch outputs, short benchmarks); `only`: the
- * target it applies to; `ci`: runs only in a CI release step; `timeout` in minutes (default 10).
+ * target it applies to; `ci`: runs only in a CI release step; `missing()`: why it cannot run here (skip); `timeout` in minutes
+ * (default 10).
  */
 export const SCRIPTS = [
   // the release gates (scripts/release.mjs runs these two)
@@ -33,7 +34,8 @@ export const SCRIPTS = [
   { file: 'verify-release-build.mjs', ci: 'release.yml checks the CI run of a tag (RELEASE_TAG, BUILD_RUN_ID)' },
   // the other real-app scripts
   { file: 'smoke-tauri.mjs', only: 'tauri' },
-  { file: 'smoke-start.mjs', windowsOnly: true },
+  // Electron: the packaged app of `npm run dist:win` (a local check build only, never published); skipped without it.
+  { file: 'smoke-start.mjs', windowsOnly: true, missing: () => (!isTauri && !existsSync(join(ROOT, 'release', 'win-unpacked', 'unimux.exe')) ? 'no packaged Electron app (npm run dist:win)' : null) },
   { file: 'smoke-automation.mjs' },
   { file: 'capture-readme.mjs', args: (scratch) => [join(scratch, 'shots'), '--verify'], timeout: 15 },
   { file: 'measure-startup.mjs', args: () => ['1'] },
@@ -59,7 +61,7 @@ function runOne(script) {
     const scratch = mkdtempSync(join(tmpdir(), 'unimux-x1-run-'));
     const report = join(scratch, 'report.json');
     const logs = join(scratch, 'not-yet');
-    const args = [join('scripts', script.file), ...(script.args?.(scratch) ?? []), `--target=${APP_TARGET}`];
+    const args = [join('scripts', script.file), ...(script.args?.(scratch) ?? [])];
     const started = Date.now();
     const child = spawn(process.execPath, args, { cwd: ROOT, env: { ...process.env, MC_APP_TARGET: APP_TARGET, MC_REAL_APP_REPORT: report, MC_REAL_APP_LOG_DIR: logs }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: !W });
     let out = '';
@@ -96,6 +98,7 @@ if (process.argv[1]?.endsWith('real-app-run.mjs')) {
     if (script.only && script.only !== APP_TARGET) r = { result: 'skip', why: `${script.only} target only` };
     else if (script.ci && !process.env.RELEASE_TAG) r = { result: 'skip', why: `CI only: ${script.ci}` };
     else if (script.windowsOnly && !W) r = { result: 'skip', why: 'Windows only' };
+    else if (script.missing?.()) r = { result: 'skip', why: script.missing() };
     else r = await runOne(script);
     results.push({ file: script.file, gate: !!script.gate, ...r });
     const owners = r.blocked?.map((g) => g.owner).join(', ');
@@ -103,6 +106,14 @@ if (process.argv[1]?.endsWith('real-app-run.mjs')) {
     if (r.result === 'fail') console.log(r.tail.replace(/^/gm, '         | '));
   }
   const at = new Date().toISOString();
+  // --only / --skip re-runs part of the list: the other scripts keep their result of the last full run.
+  if (only || skip.length) {
+    let previous = [];
+    try { previous = JSON.parse(readFileSync(join(outDir, `${APP_TARGET}.json`), 'utf8')).results; } catch { /* no earlier run */ }
+    const fresh = new Map(results.map((r) => [r.file, r]));
+    const merged = SCRIPTS.map((s) => fresh.get(s.file) ?? previous.find((p) => p.file === s.file)).filter(Boolean);
+    results.splice(0, results.length, ...merged);
+  }
   writeFileSync(join(outDir, `${APP_TARGET}.json`), JSON.stringify({ at, target: APP_TARGET, results }, null, 1));
   const count = (k) => results.filter((r) => r.result === k).length;
   console.log(`\n${APP_TARGET}: ${count('pass')} pass, ${count('blocked')} blocked, ${count('fail')} fail, ${count('skip')} skip`);

@@ -7,9 +7,10 @@
 // types nothing and only shows the cell; Deny types Esc; no buttons once the setting is off; no taskbar overlay badge (1.1.2) (was: with all
 // scale factors) follows the statuses (no progress since 1.1.0); a muted cell does not count; the attention flash is asked.
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { launchApp, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const cellId = randomUUID();
 const otherId = randomUUID();
@@ -174,5 +175,5 @@ try {
 } finally {
   main?.close();
   if (app) await app.close();
-  if (existsSync(root)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  removeScratch(root);
 }

@@ -8,6 +8,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import { launchApp, sleep } from './ssh-ui-lib.mjs';
 import { removeScratch } from './app-env.mjs';
+import { measurementNeedsCompleteApp } from './real-app.mjs';
+
+// Numbers from an app that still answers MC_NOT_YET mean nothing: blocked until every package it calls landed.
+measurementNeedsCompleteApp();
 
 if (process.platform !== 'win32') throw new Error('perf-hidden is Windows only');
 const label = process.argv[2] ?? 'run';

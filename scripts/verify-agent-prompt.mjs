@@ -7,7 +7,7 @@
 // Ctrl+Enter reaches exactly the idle agents (the detached one too) as one paste plus Enter, the toast summary, then a second
 // send with "add to the queue" lands in the busy cells' prompt queues, and the grid tab's menu entry. Screenshots go to argv[2].
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { removeScratch, scrubAppEnv } from './app-env.mjs';

@@ -12,13 +12,14 @@
 //        MCP_CLI_WAIT=600 node scripts/verify-mcp-cli.mjs   also runs a long wait_for in each CLI (the per-CLI wait caps).
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { BlockedError, isTauri } from './real-app.mjs';
+import { removeScratch } from './app-env.mjs';
 
 // The server under test: with MC_APP_TARGET=electron the TS reference in-process (test/helpers/mcpHarness.ts). The Tauri
 // build serves MCP from the app itself (M1 server, M2 tools and the fake automation the checks below expect): until M2 lands
@@ -247,5 +248,5 @@ try {
 } finally {
   await h.server.stop();
   for (const server of servers) server.close();
-  rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  removeScratch(root);
 }

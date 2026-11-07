@@ -81,7 +81,10 @@ try {
   const loaded = peek.snapshot.state;
   const atLoad = peek.snapshot.revision === 0;
   const diff = changedPaths(expected, loaded);
-  check(`Rust loads the state like normalizeState + unlessRestoring of 1.1.4 (revision ${peek.snapshot.revision})`, atLoad ? diff.length === 0 : diff.every((p) => p.startsWith('.workspaceOrder')), diff.join(', '));
+  // Edited by the renderer before the peek (revision > 0): only what the UI itself adds may differ, the strip order and the
+  // `shell` a started terminal records on a cell that had none.
+  const sessionAdd = (p) => p.startsWith('.workspaceOrder') || (/^\.projects\.\d+\.tabs\.\d+\.cells\.\d+\.shell$/.test(p) && p.split('.').slice(1).reduce((o, k) => o?.[k], expected) === undefined);
+  check(`Rust loads the state like normalizeState + unlessRestoring of 1.1.4 (revision ${peek.snapshot.revision})`, atLoad ? diff.length === 0 : diff.every(sessionAdd), diff.join(', '));
   check('retired profiles folded, legacy alert keys gone, bad SSH host dropped', !loaded.profiles.some((p) => p.id === 'claude-opus') && loaded.projects[0].tabs[0].cells[1].profileId === 'claude'
     && !('notifications' in loaded.settings) && loaded.settings.alerts.events.done.sound.kind === 'system' && loaded.settings.updateMode === 'ask' && loaded.sshHosts.length === 2);
   check('SSH resume mark dropped (session restore off)', loaded.projects[0].tabs[0].cells[2].ssh.resume === undefined);
@@ -125,8 +128,11 @@ try {
   const second = await start();
   const again = (await bridge(second.page, 'state')).snapshot;
   const restartDiff = changedPaths(restartWant, again.state);
-  check(`a restart loads the saved state like 1.1.4 (revision ${again.revision})`, again.revision === 0 && restartDiff.length === 0, restartDiff.join(', '));
   const session = changedPaths(JSON.parse(savedText), restartWant);
+  // Like the first load: when the renderer edited before the peek (revision > 0) it may only have put back what the running
+  // session adds (the `shell` of a terminal it started), never anything else.
+  const restartOk = again.revision === 0 ? restartDiff.length === 0 : restartDiff.every((p) => session.includes(p));
+  check(`a restart loads the saved state like 1.1.4 (revision ${again.revision})`, restartOk, restartDiff.join(', '));
   console.log(`info: fields a restart drops or repairs: ${session.join(', ') || 'none'}`);
   await quit(second);
 } catch (error) {

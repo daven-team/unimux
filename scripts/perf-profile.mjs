@@ -7,7 +7,10 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { removeScratch, scratchHome, scrubAppEnv } from './app-env.mjs';
-import { isMainPage, processTree, spawnApp } from './real-app.mjs';
+import { isMainPage, measurementNeedsCompleteApp, processTree, spawnApp } from './real-app.mjs';
+
+// Numbers from an app that still answers MC_NOT_YET mean nothing: blocked until every package it calls landed.
+measurementNeedsCompleteApp();
 
 const repo = process.cwd();
 const label = process.argv[2] ?? 'run';

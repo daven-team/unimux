@@ -8,10 +8,11 @@
 // wait; "Update now" hands over at once; with nothing in progress the click hands over without a question.
 // Screenshots go to a temporary folder (printed at the end).
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchApp, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const ids = { a: randomUUID(), b: randomUUID(), c: randomUUID() };
 const tabs = { main: randomUUID(), away: randomUUID() };
@@ -169,5 +170,5 @@ try {
 } finally {
   main?.close();
   if (app) await app.close();
-  if (existsSync(root)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  removeScratch(root);
 }

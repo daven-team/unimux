@@ -6,7 +6,7 @@
 // reaching the main window's list, a click on a finished turn (it is read and leaves the list), the next / previous
 // shortcut (also into the detached window), the palette and "Ukryj wyciszone". Screenshots go to argv[2] (default: a temp dir).
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { removeScratch, scrubAppEnv } from './app-env.mjs';

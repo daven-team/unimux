@@ -288,7 +288,8 @@ setTimeout(() => { fs.writeFileSync(path.join(process.env.CODEX_HOME, 'auth.json
     await app.until(`[...document.querySelectorAll('.menu button')].some((b) => b.textContent.includes('Dodaj konto Codex'))`, 'add codex entry');
     await app.evaluate(`[...document.querySelectorAll('.menu button')].find((b) => b.textContent.includes('Dodaj konto Codex')).click(), true`);
     await app.until(`document.querySelector('.modal.auth h3')?.textContent === 'Dodaj konto Codex'`, 'auth modal');
-    await app.until(`document.querySelector('.auth-status')?.textContent.includes('Zalogowano jako carol@example.com')`, 'codex login success', 40_000);
+    await app.until(`document.querySelector('.auth-status')?.textContent.includes('Zalogowano jako carol@example.com')`, 'codex login success', 40_000)
+      .catch(async (error) => { throw new Error(`${error.message}: ${await app.evaluate(`document.querySelector('.modal.auth')?.innerText ?? 'no dialog'`)}`); });
     await shoot(app, '4-codex-login.png', '.modal.auth');
     ok('"Dodaj konto Codex": the fake codex wrote the login into the new profile, the dialog says "Zalogowano jako carol@example.com"');
     await app.until(`!!${card('carol')}`, 'carol card', 30_000);

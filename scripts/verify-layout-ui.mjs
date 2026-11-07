@@ -12,8 +12,8 @@
 //   injected, because a real sign-in would start a CLI).
 // VERIFY_TAG=before only takes screenshots and prints the measurements (for a build of the old code).
 import { randomUUID } from 'node:crypto';
-import { existsSync, rmSync } from 'node:fs';
 import { launchApp, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const TAG = process.env.VERIFY_TAG ?? 'after';
 const STRICT = TAG !== 'before';
@@ -244,7 +244,7 @@ try {
   expect(authTall === 300, 'the sign-in terminal is not 300px in a tall window', authTall);
 } finally {
   if (app) await app.close();
-  if (existsSync(root)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  removeScratch(root);
 }
 if (problems.length) {
   console.log(`${STRICT ? 'FAIL' : 'differences (before)'}:\n- ${problems.join('\n- ')}`);

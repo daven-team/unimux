@@ -11,6 +11,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { launchApp, scratchRoot, sleep, startTestServer, testHost, writeKnownHost, writeState } from './ssh-ui-lib.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const shot = (app, name) => app.screenshot(`099-edit-${name}.png`);
 const log = (m) => process.stdout.write(`  ${m}\n`);
@@ -292,5 +293,5 @@ try {
   await app?.close();
   server.stop();
   await sleep(500);
-  rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
+  removeScratch(root);
 }

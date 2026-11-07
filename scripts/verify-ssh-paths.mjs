@@ -3,9 +3,10 @@
 // shell over a scratch folder): `cd /sr` Tab, `vim TEST` Tab Tab Tab Shift+Tab, no popup inside vim, then a clean quit and a
 // restart with "Przywracaj sesje SSH po ponownym uruchomieniu" on: the cell connects by itself into the same folder.
 // Scratch data dir and home only (ssh-ui-lib.mjs); screenshots go to D:\Projekty\_shots\ssh-paths-*.png.
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { connected, connectWithPassword, killTree, launchApp, scratchRoot, sleep, sshState, startTestServer, testHost, writeKnownHost, writeState } from './ssh-ui-lib.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const BUFFER = `(() => { const s = window.__mc.useStore.getState().s; const p = s.projects.find((x) => x.id === s.activeProjectId); const t = p.tabs.find((x) => x.id === p.activeTabId);
   const b = window.__mc.terminals.entries.get(t.cells[0].id)?.term.buffer.active; if (!b) return ''; let text = ''; for (let i = 0; i < b.length; i++) text += (b.getLine(i)?.translateToString(true) ?? '') + '\\n'; return text; })()`;
@@ -154,7 +155,7 @@ try {
 } finally {
   server.stop();
   await sleep(500);
-  try { rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { console.log(`scratch left: ${root}`); }
+  try { removeScratch(root); } catch { console.log(`scratch left: ${root}`); }
 }
 console.log(failures.length ? `\n${failures.length} FAILED:\n${failures.join('\n')}` : '\nall checks passed');
 process.exit(failures.length ? 1 : 0);

@@ -24,7 +24,10 @@ export { appBinary, freePort, sleep };
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // `--target=electron` on the command line wins over MC_APP_TARGET (npm scripts cannot set env vars on every OS).
-const targetArg = process.argv.find((a) => a.startsWith('--target='))?.slice('--target='.length);
+const targetIndex = process.argv.findIndex((a, i) => i > 1 && a.startsWith('--target='));
+const targetArg = targetIndex > 1 ? process.argv[targetIndex].slice('--target='.length) : undefined;
+// Taken out again, so a script's own positional arguments (a screenshot folder, the parts to run) never see it.
+if (targetIndex > 1) process.argv.splice(targetIndex, 1);
 const target = (targetArg ?? process.env.MC_APP_TARGET ?? 'tauri').toLowerCase();
 if (target !== 'tauri' && target !== 'electron') throw new Error(`MC_APP_TARGET must be tauri or electron, not ${target}`);
 /** 'tauri' (the check build) or 'electron' (out/, the 1.1.4 reference). */
@@ -93,12 +96,19 @@ export function blockers() {
   return groups.sort((a, b) => a.owner.localeCompare(b.owner, 'en', { numeric: true }));
 }
 
+let strict = false;
+/**
+ * For measurements (perf-*, bench-*, measure-startup): numbers taken while the app answered MC_NOT_YET mean nothing, so any
+ * not-yet call makes the run "blocked" even when the script itself ended with 0.
+ */
+export function measurementNeedsCompleteApp() { strict = true; }
+
 const script = basename(process.argv[1] ?? 'script');
 process.on('exit', (code) => {
   // Our own app processes only (a script that ended in an exception may have left one).
   for (const child of children) if (child.exitCode === null && child.signalCode === null) killAppTree(child.pid);
   const groups = blockers();
-  const blocked = code !== 0 && groups.length > 0;
+  const blocked = (code !== 0 || strict) && groups.length > 0;
   if (blocked) {
     console.log(`\nBLOCKED by ${formatBlocked(groups)}`);
     process.exitCode = 2;
@@ -107,7 +117,7 @@ process.on('exit', (code) => {
   }
   if (process.env.MC_REAL_APP_REPORT) {
     try {
-      writeFileSync(process.env.MC_REAL_APP_REPORT, JSON.stringify({ script, target, code, result: code === 0 ? 'pass' : blocked ? 'blocked' : 'fail', blocked: groups }, null, 1));
+      writeFileSync(process.env.MC_REAL_APP_REPORT, JSON.stringify({ script, target, code, result: blocked ? 'blocked' : code === 0 ? 'pass' : 'fail', blocked: groups }, null, 1));
     } catch { /* the runner reports a missing file */ }
   }
   if (reportDir && !runnerLogDir) try { rmSync(reportDir, { recursive: true, force: true }); } catch { /* a log still open */ }
@@ -134,6 +144,10 @@ export function spawnApp({ env, args = [], cwd = ROOT, stdio = 'ignore', inspect
   } else {
     // Resolved only for this target: the Tauri scripts never load the electron package.
     const electron = createRequire(join(ROOT, 'package.json'))('electron');
+    // No OS notification of a check may reach the desktop: they go to the main process's __shown (see the file).
+    const toastStub = join(ROOT, 'scripts', 'electron-test-toasts.cjs');
+    e.MC_TEST_TOASTS_NODE_OPTIONS = e.NODE_OPTIONS ?? '';
+    e.NODE_OPTIONS = `${e.NODE_OPTIONS ? `${e.NODE_OPTIONS} ` : ''}--require "${toastStub.replace(/\\/g, '/')}"`;
     child = spawn(electron, [...(inspectPort ? [`--inspect=${inspectPort}`] : []), ...args, '.'], { cwd, env: e, windowsHide: true, stdio });
   }
   children.push(child);
@@ -285,8 +299,9 @@ export async function mainControl({ evaluate, inspectPort }) {
       ${swallow ? `__el.ipcMain.removeAllListeners(ch); __el.ipcMain.removeHandler(ch); __el.ipcMain.handle(ch, (_e, ...args) => { __rec.push({ channel: ch, args }); return null; }); __recCh.delete(ch);` : ''}
       if (!__recCh.has(ch)) { __recCh.add(ch); __el.ipcMain.on(ch, (_e, ...args) => __rec.push({ channel: ch, args })); } } return true; })()`),
     recorded: (channel) => ev(`(() => { const want = (c) => ${channel ? `c.channel === ${JSON.stringify(channel)}` : 'true'}; const out = __rec.filter(want); globalThis.__rec = __rec.filter((c) => !want(c)); return out; })()`),
-    stubToasts: () => ev(`(() => { globalThis.__shown = []; __el.Notification.prototype.show = function () { __shown.push(this); }; return true; })()`),
-    toasts: () => ev(`__shown.map((n) => ({ title: n.title, body: n.body, actions: (n.actions ?? []).map((a) => a.text) }))`),
+    // Already stubbed from the start by electron-test-toasts.cjs (spawnApp): keeps what was shown before the inspector came.
+    stubToasts: () => ev(`(() => { globalThis.__shown ??= []; if (!globalThis.__testToasts) __el.Notification.prototype.show = function () { __shown.push(this); }; return true; })()`),
+    toasts: () => ev(`(globalThis.__shown ?? []).map((n) => ({ title: n.title, body: n.body, actions: (n.actions ?? []).map((a) => a.text) }))`),
     toastClick: (index) => ev(`(() => { __shown.at(${index}).emit('click'); return true; })()`),
     toastAction: (index, actionIndex) => ev(`(() => { __shown.at(${index}).emit('action', { actionIndex: ${actionIndex} }, ${actionIndex}); return true; })()`),
     stubTaskbar: () => ev(`(() => { if (globalThis.__taskbar) return true; globalThis.__taskbar = []; const proto = __el.BrowserWindow.prototype;

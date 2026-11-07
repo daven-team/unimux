@@ -7,12 +7,13 @@
 // MC_APP_TARGET=electron the TS reference (src/shared/profiles.ts). A release gate (scripts/release.mjs).
 // Usage: node scripts/verify-cli-contract.mjs   (a CLI that is not installed is skipped with a note)
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { APP_TARGET, BlockedError, appBinary, isTauri } from './real-app.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'unimux-cli-contract-'));
 const run = (file, args, env) => new Promise((done) => {
@@ -115,7 +116,7 @@ try {
 } catch (error) {
   failures.push(String(error?.stack ?? error));
 } finally {
-  rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  removeScratch(root);
 }
 console.log(report.join('\n'));
 for (const warning of warnings) console.warn(`WARNING: ${warning}`);

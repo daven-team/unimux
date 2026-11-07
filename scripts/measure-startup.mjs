@@ -8,7 +8,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import { removeScratch, scratchHome, scrubAppEnv } from './app-env.mjs';
 import { killTree, sleep } from './ssh-ui-lib.mjs';
-import { spawnApp } from './real-app.mjs';
+import { measurementNeedsCompleteApp, spawnApp } from './real-app.mjs';
+
+// Numbers from an app that still answers MC_NOT_YET mean nothing: blocked until every package it calls landed.
+measurementNeedsCompleteApp();
 
 const runs = Number(process.argv[2]) || 5;
 // Electron and Tauri marks (startup.log of either build); a mark one of them does not write is left out.

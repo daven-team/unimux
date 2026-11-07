@@ -99,14 +99,19 @@ export async function launchApp(root, extraEnv = {}, extraArgs = [], options = {
     try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(isMainPage); } catch { /* starting */ }
   }
   if (!target) { killAppTree(child.pid); throw new Error(`the app window did not appear${child.exitCode !== null ? ` (exit ${child.exitCode})` : ''}\n${stderr}`); }
-  const ws = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
+  let ws;
   let next = 0;
   const pending = new Map();
-  ws.onmessage = (e) => { const m = JSON.parse(e.data); pending.get(m.id)?.(m); pending.delete(m.id); };
-  const cdp = (method, params = {}) => new Promise((resolve, reject) => {
+  const connect = async (url) => {
+    ws = new WebSocket(url);
+    await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
+    ws.onmessage = (e) => { const m = JSON.parse(e.data); pending.get(m.id)?.(m); pending.delete(m.id); };
+  };
+  await connect(target.webSocketDebuggerUrl);
+  const cdp = (method, params = {}, ms = Number(process.env.MC_CDP_TIMEOUT_MS) || 45000) => new Promise((resolve, reject) => {
     const id = ++next;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, 15000);
+    // 45 s (MC_CDP_TIMEOUT_MS): a renderer starting on a busy machine can take more than 15 s to answer.
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, ms);
     pending.set(id, (m) => { clearTimeout(timer); if (m.error) reject(new Error(m.error.message)); else resolve(m.result); });
     ws.send(JSON.stringify({ id, method, params }));
   });
@@ -147,7 +152,16 @@ export async function launchApp(root, extraEnv = {}, extraArgs = [], options = {
   const close = async () => { main?.close(); try { ws.close(); } catch { /* closed */ } killAppTree(child.pid); await sleep(800); };
   /** A normal quit (windows close, state saved), then our own tree kill for anything left. */
   const quit = async () => { const exited = await quitApp({ child, evaluate, cdp }); main?.close(); try { ws.close(); } catch { /* closed */ } return exited; };
-  await cdp('Runtime.enable');
+  // A first connection to a page that is still starting sometimes never answers (seen on a loaded machine): a fresh
+  // connection to the same target, up to 3 times, before giving up.
+  for (let attempt = 1; ; attempt++) {
+    try { await cdp('Runtime.enable', {}, 20000); break; } catch (error) {
+      if (attempt >= 3 || child.exitCode !== null) { killAppTree(child.pid); throw error; }
+      try { ws.close(); } catch { /* closed */ }
+      const again = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(isMainPage);
+      await connect((again ?? target).webSocketDebuggerUrl);
+    }
+  }
   await cdp('Page.enable');
   if (options.main) {
     // Before the UI is up: the renderer's first `notify` calls are recorded too (1.1.4's mainInspector listened from the start).

@@ -8,7 +8,7 @@
 // stay running, or (profile args --fail-now) print an error and exit 1. Screenshots: D:\Projekty\_shots\115-start-*.png.
 // Usage: npm run build && node scripts/verify-start-screen.mjs   (START_SHELL=cmd for cmd.exe)
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
