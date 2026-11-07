@@ -91,14 +91,26 @@ fn a_config_written_by_1_1_4_reads_unchanged() {
     // Without the Tauri fields the error card falls back to `slow`, the WebView2 folder sits next to the runtime dir.
     assert_eq!(config.strings.failed_text(), "Aktualizacja trwa dłużej niż zwykle");
     assert!(config.webview_dir().ends_with("update\\webview2") || config.webview_dir().ends_with("update/webview2"));
-    // Written back, every 1.1.x key keeps its name, order and value (the Tauri-only keys are left out when absent).
+    // Written back, every 1.1.x key keeps its name, order and value (the Tauri-only keys are left out when absent). Value
+    // equality ignores the key order, so the order is compared on its own, at every level.
     let back = serde_json::to_value(&config).unwrap();
     let original: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(back, original);
-    let keys = |v: &Value| v.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
-    let mut sorted_back = keys(&back);
-    let mut sorted_original = keys(&original);
-    sorted_back.sort();
-    sorted_original.sort();
-    assert_eq!(sorted_back, sorted_original);
+    fn key_paths(v: &Value, prefix: &str, out: &mut Vec<String>) {
+        if let Some(map) = v.as_object() {
+            for (key, value) in map {
+                let path = format!("{prefix}/{key}");
+                out.push(path.clone());
+                key_paths(value, &path, out);
+            }
+        }
+    }
+    let order = |v: &Value| {
+        let mut out = Vec::new();
+        key_paths(v, "", &mut out);
+        out
+    };
+    assert_eq!(order(&back), order(&original));
+    // Byte for byte as 1.1.4 writes work/config.json (updateRuntime.ts: compact JSON.stringify of the object above).
+    assert_eq!(serde_json::to_string(&config).unwrap(), serde_json::to_string(&original).unwrap());
 }

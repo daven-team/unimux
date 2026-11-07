@@ -802,9 +802,9 @@ fn create_window(app: &AppHandle, win: &Arc<UpdateWindow>) -> tauri::Result<()> 
 /// The pre-check of PLAN.md U2 / SP6: the configured folder when WebView2 can create and write it, else a fresh
 /// `%TEMP%\unimux-updater\webview2-<ms>` (removed by the cleanup like the configured one), else None (no window at all). A
 /// folder WebView2 cannot create makes Edge show a modal "cannot create data directory" box on the desktop.
+#[cfg(windows)]
 fn choose_webview_dir(config: &UpdateSplashConfig, log: &RollingLog) -> Option<PathBuf> {
-    let fallback =
-        std::env::temp_dir().join(unimux_update::window::UPDATER_DIR).join(format!("webview2-{}", unimux_core::time::now_ms()));
+    let fallback = unimux_update::window::temp_webview_root().join(format!("webview2-{}", unimux_core::time::now_ms()));
     let (chosen, refused) = unimux_platform::webview::choose_folder(&config.webview_dir(), &[fallback]);
     for e in &refused {
         log.warn(&format!("WebView2 data folder not usable: {e}"));
@@ -870,6 +870,8 @@ pub fn run(config_path: &Path, context: tauri::Context<tauri::Wry>) -> i32 {
         browser_pid: AtomicU32::new(0),
         webview_dir: OnceLock::new(),
     });
+    // Windows only: WKWebView (macOS, U5) keeps its default store, so no folder is created or checked there.
+    #[cfg(windows)]
     if let Some(dir) = choose_webview_dir(&win.config, &win.log) {
         let _ = win.webview_dir.set(dir);
     }
@@ -895,7 +897,7 @@ pub fn run(config_path: &Path, context: tauri::Context<tauri::Wry>) -> i32 {
         ])
         .setup(move |app| {
             let _ = setup.app.set(app.handle().clone());
-            if setup.webview_dir.get().is_none() {
+            if cfg!(windows) && setup.webview_dir.get().is_none() {
                 setup.log.error("no usable WebView2 data folder: no window; the update goes on without it");
             } else if let Err(e) = create_window(app.handle(), &setup) {
                 setup.log.error(&format!("update window could not be created ({e}); the update goes on without it"));

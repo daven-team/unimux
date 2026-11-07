@@ -127,7 +127,9 @@ fn main() {
     };
     timer.mark("instance-lock");
     unimux_platform::set_app_user_model_id(AUMID);
-    // Before any webview: a WebView2 data folder that cannot be created would make Edge show its own dialog.
+    // Before any webview: a WebView2 data folder that cannot be created would make Edge show its own dialog. Windows only:
+    // WKWebView keeps its default store and 1.1.4 never had <data>/webview2 on macOS.
+    #[cfg(windows)]
     windows::init_webview_dir(&data_dir, &crash);
 
     let startup_log = Arc::new(StartupLog::new(
