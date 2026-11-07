@@ -454,7 +454,8 @@ pub fn parse_reg_query_path(output: &str) -> Option<String> {
     for line in output.split('\n') {
         let line = line.strip_suffix('\r').unwrap_or(line);
         let l = line.trim_start();
-        if l.len() < 4 || !l[..4].eq_ignore_ascii_case("path") {
+        // `get` instead of slicing: a multi-byte character across the boundary is no match (the TS regex gives null).
+        if !l.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("path")) {
             continue;
         }
         let after = &l[4..];
@@ -463,7 +464,7 @@ pub fn parse_reg_query_path(output: &str) -> Option<String> {
             continue;
         }
         let ty =
-            ["REG_EXPAND_SZ", "REG_SZ"].into_iter().find(|t| typed.len() >= t.len() && typed[..t.len()].eq_ignore_ascii_case(t));
+            ["REG_EXPAND_SZ", "REG_SZ"].into_iter().find(|t| typed.get(..t.len()).is_some_and(|p| p.eq_ignore_ascii_case(t)));
         let Some(ty) = ty else { continue };
         let value_part = &typed[ty.len()..];
         let value = value_part.trim_start();

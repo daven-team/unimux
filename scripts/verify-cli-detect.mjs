@@ -6,6 +6,8 @@
 // 1. machine: the TS CliDetector (src/main/cliDetect.ts + cliSystem.ts, run here under Node) and the Rust one
 //    (crates/unimux-agents/examples/cli_detect.rs) with the real home and PATH: read-only lookups plus `<cli> --version`, with a
 //    scratch CLAUDE_CONFIG_DIR / CODEX_HOME and an empty PowerShell probe profile (the user's profile is never run).
+//    On Windows also a noisy probe profile (over 256 KB on stderr before it puts the Claude Code directory on PATH) with a
+//    scratch home, a system-only PATH and no registry: both detectors must find Claude Code through the shell probe.
 // 2. apps: the Electron build of this tree (1.1.4 code) and the Tauri check build, each offscreen on a scratch data dir and a
 //    scratch home with the same environment; the startup scan, `cli:status` and a timed `cli:recheck` are compared.
 //    No window is shown (MC_OFFSCREEN), only processes this script started are ended.
@@ -77,6 +79,36 @@ try {
     check(`machine: ${cli} detected like 1.1.4 (state, path, version, source, reason)`, a && same(a, b));
     check(`machine: ${cli} found with a version`, b?.state === 'found' && !!b.version);
     check(`machine: ${cli} the same in every round`, rust.every((r) => same(r.map[cli], b)) && ts.every((r) => same(r.map[cli], a)));
+  }
+  // A noisy probe profile (H3 review): more than the 256 KB output limit on stderr before the profile puts the Claude Code
+  // directory on PATH. 1.1.4 ignored the probe's stderr and found the CLI through the shell; the port must not end the probe.
+  // Scratch home, a system-only PATH and no registry, so the shell probe is the only way to the CLI. Windows (probe profile).
+  const claudeDir = ts.at(-1).map.claude?.path ? dirname(ts.at(-1).map.claude.path) : null;
+  if (process.platform === 'win32' && claudeDir) {
+    const noisyHome = join(scratch, 'noisy-home');
+    const noisyEnv = { USERPROFILE: noisyHome, HOME: noisyHome, APPDATA: join(noisyHome, 'AppData', 'Roaming'), LOCALAPPDATA: join(noisyHome, 'AppData', 'Local') };
+    for (const dir of Object.values(noisyEnv)) mkdirSync(dir, { recursive: true });
+    const sysRoot = process.env.SystemRoot ?? 'C:\\Windows';
+    noisyEnv.Path = [join(sysRoot, 'system32'), sysRoot, join(sysRoot, 'System32', 'WindowsPowerShell', 'v1.0')].join(';');
+    noisyEnv.MC_CLI_NO_REGISTRY = '1';
+    const noisyProfile = join(scratch, 'noisy-profile.ps1');
+    writeFileSync(noisyProfile, `[Console]::Error.Write(('x' * 300000))\n$env:Path = "${claudeDir};" + $env:Path\n`);
+    const pathKeys = Object.keys(process.env).filter((k) => k.toUpperCase() === 'PATH');
+    for (const k of pathKeys) delete process.env[k];
+    Object.assign(process.env, loginEnv, noisyEnv);
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    delete process.env.ANTHROPIC_API_KEY;
+    const tsNoisy = (await new CliDetector(systemCliDeps({ shell: () => shellKind, probeProfile: noisyProfile, disableRegistry: true })).refreshAll());
+    for (const key of Object.keys(process.env)) if (!(key in savedEnv)) delete process.env[key];
+    Object.assign(process.env, savedEnv);
+    const rustEnv = { ...machineEnv, ...noisyEnv, MC_CLI_PROBE_PROFILE: noisyProfile };
+    for (const k of Object.keys(rustEnv)) if (k.toUpperCase() === 'PATH' && k !== 'Path') delete rustEnv[k];
+    const rustNoisy = JSON.parse(execFileSync(example, [shellKind], { env: rustEnv, encoding: 'utf8', windowsHide: true })).map;
+    for (const cli of CLIS) {
+      console.log(`  noisy profile ${cli}: 1.1.4 ${show(tsNoisy[cli])} | 1.2.0 ${show(rustNoisy[cli])}`);
+      check(`machine: noisy probe profile, ${cli} detected like 1.1.4`, same(tsNoisy[cli], rustNoisy[cli]));
+    }
+    check('machine: noisy probe profile, claude found through the shell', rustNoisy.claude?.state === 'found' && rustNoisy.claude.source === 'shell', show(rustNoisy.claude));
   }
   const tsMs = median(ts.map((r) => r.ms));
   const rustMs = median(rust.map((r) => r.ms));

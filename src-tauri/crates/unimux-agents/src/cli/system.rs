@@ -57,6 +57,9 @@ pub async fn run_program(request: ExecRequest) -> ExecResult {
         cwd: None,
         timeout: Duration::from_millis(request.timeout_ms),
         max_output: OUTPUT_LIMIT,
+        // runProgram ignored the child's stderr and only stopped appending stdout at OUTPUT_LIMIT: a noisy shell profile or
+        // rc file must never end the probe before it prints its markers.
+        stop_at_cap: false,
         stdin: None,
     };
     match unimux_exec::run_async(program, options).await {
@@ -179,5 +182,47 @@ mod win {
             // ERROR_MORE_DATA: the value grew in between; ask again.
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn script(windows: String, unix: String) -> ExecRequest {
+        let (file, args) = if cfg!(windows) {
+            ("powershell.exe", vec!["-NoProfile".into(), "-NonInteractive".into(), "-Command".into(), windows])
+        } else {
+            ("/bin/sh", vec!["-c".into(), unix])
+        };
+        ExecRequest { file: file.into(), args, timeout_ms: 60_000, env: process_env(), verbatim: false }
+    }
+
+    /// A probe whose profile writes far more than OUTPUT_LIMIT to stderr still runs to its end and prints its markers
+    /// (runProgram ignored stderr; 1.1.4 found the CLI in this setup).
+    #[tokio::test]
+    async fn stderr_over_the_limit_never_ends_the_probe() {
+        let n = OUTPUT_LIMIT + 64 * 1024;
+        let out = run_program(script(
+            format!("[Console]::Error.Write(('x' * {n})); [Console]::Error.Flush(); [Console]::Out.Write('__AJZ_PATH__ok')"),
+            format!("head -c {n} /dev/zero | tr '\\0' x >&2; printf '__AJZ_PATH__ok'"),
+        ))
+        .await;
+        assert!(out.ok && !out.timed_out, "ok={} timed_out={}", out.ok, out.timed_out);
+        assert_eq!(out.stdout, "__AJZ_PATH__ok");
+    }
+
+    /// Stdout over OUTPUT_LIMIT is cut at the limit and the program is not stopped (cliSystem.ts only stopped appending).
+    #[tokio::test]
+    async fn stdout_over_the_limit_is_cut_without_stopping() {
+        let n = OUTPUT_LIMIT + 64 * 1024;
+        let out = run_program(script(
+            format!("[Console]::Out.Write(('y' * {n})); exit 0"),
+            format!("head -c {n} /dev/zero | tr '\\0' y; exit 0"),
+        ))
+        .await;
+        assert!(out.ok && !out.timed_out, "ok={} timed_out={}", out.ok, out.timed_out);
+        assert_eq!(out.stdout.len(), OUTPUT_LIMIT);
+        assert!(out.stdout.bytes().all(|b| b == b'y'));
     }
 }
