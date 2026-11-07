@@ -9,6 +9,7 @@ mod channel_bench;
 mod commands;
 mod context;
 mod ipc;
+mod lifecycle;
 #[cfg(feature = "test-bridge")]
 mod spike_pty;
 #[cfg(feature = "test-bridge")]
@@ -112,11 +113,12 @@ fn main() {
         if let Some(ctx) = second_ctx.lock().clone() {
             let c = ctx.clone();
             if let Some(app) = ctx.app() {
-                let _ = app.run_on_main_thread(move || windows::focus_main(&c));
+                // Focus, or (while winding down) start again after the exit.
+                let _ = app.run_on_main_thread(move || lifecycle::second_instance(&c));
             }
         }
     });
-    let _instance = match acquire(&data_dir, on_second) {
+    let instance = match acquire(&data_dir, on_second) {
         Ok(Acquire::Primary(guard)) => guard,
         Ok(Acquire::Forwarded) => std::process::exit(0),
         Ok(Acquire::Busy) => {
@@ -143,6 +145,8 @@ fn main() {
     timer.mark("state-loaded");
 
     let ctx = AppContext::new(data_dir.clone(), overrides, crash.clone(), timer.clone(), startup_log, state);
+    // Held for the whole run; released before a relaunch (W6).
+    ctx.lifecycle.keep_instance(instance);
     let builder = build_router(&ctx);
     for error in builder.errors() {
         crash.error(&format!("ipc registration: {error}"));
@@ -152,7 +156,16 @@ fn main() {
 
     let tauri_ctx = tauri_context();
     let setup_ctx = ctx.clone();
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // The web content process of a WKWebView ended (WebView2 reports it through ProcessFailed, lifecycle/webview.rs).
+    #[cfg(target_os = "macos")]
+    let builder = {
+        let c = ctx.clone();
+        builder.on_web_content_process_terminate(move |webview| {
+            lifecycle::renderer_gone(&c, webview.label(), "crashed", 0);
+        })
+    };
+    let app = builder
         .manage(ctx.clone())
         .invoke_handler(handlers())
         .setup(move |app| {
@@ -195,14 +208,28 @@ fn main() {
     };
 
     let run_ctx = ctx.clone();
-    app.run(move |_app, event| {
-        if let RunEvent::Exit = event {
-            // The last save (W6 adds the full wind-down: quit confirmation, hosts, MCP, hooks).
+    app.run(move |_app, event| match event {
+        // Tauri never ends the app by itself: the last window closing (code None) or app.exit (Some) goes through the quit
+        // (question, wind-down), which allows the exit it asks for at the end. While the startup gate decides, a closed gate
+        // window does not end the app (1.1.4 window-all-closed with `gating`).
+        RunEvent::ExitRequested { code, api, .. } => {
+            if lifecycle::exit_allowed(&run_ctx) {
+                return;
+            }
+            api.prevent_exit();
+            if code.is_none() && run_ctx.lifecycle.is_gating() {
+                return;
+            }
+            lifecycle::request_quit(&run_ctx, lifecycle::QuitSource::Request);
+        }
+        RunEvent::Exit => {
+            // After the wind-down (or a forced exit): whatever came in after the last save.
             if !run_ctx.flush_state() {
                 run_ctx.crash.error("state could not be saved before exit");
             }
             run_ctx.saver.stop();
         }
+        _ => {}
     });
 }
 

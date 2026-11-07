@@ -75,6 +75,8 @@ pub struct AppContext {
     pub report_limiter: Mutex<ReportLimiter>,
     /// The main window was shown (first page load, renderer-boot or the 5 s fallback).
     pub main_shown: AtomicBool,
+    /// Quit question, wind-down registry, session end, renderer crash and hang (W6).
+    pub lifecycle: Arc<crate::lifecycle::Lifecycle>,
     /// Check build only: every renderer startup mark with the window label and the time (test_bridge `marks`).
     #[cfg(feature = "test-bridge")]
     pub test_marks: Mutex<Vec<(String, String, f64)>>,
@@ -110,6 +112,8 @@ impl AppContext {
         // A waiting batched state change leaves before any other event (stateBroadcast.ts flush).
         let b = broadcaster.clone();
         events.before_emit(move || b.flush());
+        let lifecycle = Arc::new(crate::lifecycle::Lifecycle::new());
+        crate::lifecycle::register_own_steps(&lifecycle, events.clone(), broadcaster.clone(), saver.clone(), crash.clone());
         Arc::new(Self {
             data_dir,
             overrides,
@@ -131,6 +135,7 @@ impl AppContext {
             app_start_unclaimed: AtomicBool::new(true),
             report_limiter: Mutex::new(ReportLimiter::default()),
             main_shown: AtomicBool::new(false),
+            lifecycle,
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
         })

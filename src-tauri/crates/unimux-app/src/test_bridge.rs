@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 use tauri::ipc::Request;
-use tauri::{State, Webview};
+use tauri::{Manager, State, Webview};
 
 use unimux_ipc::{Caller, IpcError, Scope};
 
@@ -65,12 +65,47 @@ pub async fn test_bridge(
                 "allowed": ctx.guard_allows(&caller),
             }))
         }
-        // Ends the app the normal way (the Exit event saves the state).
+        // Ends the app the normal way: app.exit goes through the quit (question, wind-down, last save), W6.
         "quit" => {
             if let Some(app) = ctx.app() {
                 app.exit(0);
             }
             Ok(Value::Null)
+        }
+        // W6: the main window's close request (the close button, Alt+F4, the taskbar's "Close window").
+        "close" => {
+            let window =
+                ctx.app().and_then(|a| a.get_webview_window(crate::windows::MAIN)).ok_or_else(|| fail("no main window"))?;
+            window.close().map_err(|e| fail(&e.to_string()))?;
+            Ok(Value::Null)
+        }
+        // W6: quit question, session end, renderer state, the wind-down plan and the dialogs an unattended run recorded.
+        "lifecycle" => Ok(crate::lifecycle::report(&ctx)),
+        // W6: answers a recorded dialog, {id, response} (the index of the button).
+        "dialogAnswer" => {
+            let id = args.get("id").and_then(Value::as_u64).ok_or_else(|| fail("dialogAnswer needs {id, response}"))?;
+            let response = args.get("response").and_then(Value::as_u64).unwrap_or(0) as usize;
+            Ok(json!({ "answered": crate::lifecycle::answer_dialog(&ctx, id, response) }))
+        }
+        // W6: a slow service (a wind-down step that takes {ms}), so a start during the wind-down can be tested; also the pid.
+        "windDownDelay" => {
+            let ms = args.get("ms").and_then(Value::as_u64).unwrap_or(3000).min(15_000);
+            ctx.lifecycle.wind_down.register(
+                crate::lifecycle::wind_down::phase::STOP_SERVICES,
+                "test delay",
+                std::time::Duration::from_millis(ms + 1000),
+                move || async move { tokio::time::sleep(std::time::Duration::from_millis(ms)).await },
+            );
+            Ok(json!({ "pid": std::process::id() }))
+        }
+        // W6: the pid of the main page's renderer process (the harness ends it to test the crash path).
+        "rendererPid" => {
+            let label = args.get("label").and_then(Value::as_str).unwrap_or(crate::windows::MAIN);
+            let window = ctx.app().and_then(|a| a.get_webview_window(label)).ok_or_else(|| fail("no such window"))?;
+            let pid = tauri::async_runtime::spawn_blocking(move || crate::lifecycle::webview::renderer_pid(&window))
+                .await
+                .map_err(|e| fail(&e.to_string()))?;
+            Ok(json!({ "pid": pid }))
         }
         // Live send / port lanes (a destroyed window must leave none behind).
         "lanes" => Ok(json!({

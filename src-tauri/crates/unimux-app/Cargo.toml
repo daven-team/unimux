@@ -52,3 +52,5 @@ windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsA
 
 [dev-dependencies]
 tempfile.workspace = true
+# W6: the wind-down and quit-wait tests run on tokio's paused clock.
+tokio = { workspace = true, features = ["test-util"] }

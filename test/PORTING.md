@@ -81,3 +81,18 @@ Rows keep the exact case name (the counter matches them). Rust tests are named `
 | db-wire-sp9.int | caching_sha2_password: full authentication over plain TCP (RSA key request), then the fast path | unimux-db/tests/wire_servers.rs::mysql_logins_caching_sha2_full_and_fast | ported |
 | db-wire-sp9.int | console replies | unimux-db/tests/wire_servers.rs::redis_replies_match_ioredis (SP9 own RESP2 reader; D9 / D10 own the session) | ported |
 | db-wire-sp9.int | the connect sequence (default user; ACL user on DB 2) | unimux-db/tests/wire_servers.rs::redis_connect_sequence_matches_ioredis | ported |
+| agent-work | does not hold a quit when no agent works | unimux-app lifecycle::quit_confirm::tests::does_not_hold_a_quit_when_no_agent_works | ported |
+| agent-work | quits or stays as the user chose | unimux-app lifecycle::quit_confirm::tests::quits_or_stays_as_the_user_chose (real app: scripts/verify-tauri-lifecycle.mjs A) | ported |
+| agent-work | a second Close while asking asks again and quits when the renderer stays silent | unimux-app lifecycle::quit_confirm::tests::a_second_close_while_asking_asks_again_and_quits_when_the_renderer_stays_silent | ported |
+| agent-work | a repeated Close that is acknowledged keeps waiting for the answer | unimux-app lifecycle::quit_confirm::tests::a_repeated_close_that_is_acknowledged_keeps_waiting_for_the_answer | ported |
+| agent-work | an acknowledged question holds the quit at most two minutes | unimux-app lifecycle::quit_confirm::tests::an_acknowledged_question_holds_the_quit_at_most_two_minutes | ported |
+| agent-work | a session end releases a held quit at once | unimux-app lifecycle::quit_confirm::tests::a_session_end_releases_a_held_quit_at_once (real app: verify-tauri-lifecycle.mjs B) | ported |
+| agent-work | treats a session end as exempt for about a minute only | unimux-app lifecycle::quit_confirm::tests::treats_a_session_end_as_exempt_for_about_a_minute_only | ported |
+| agent-work | never holds a session end or update and does not wait for a silent renderer | unimux-app lifecycle::quit_confirm::tests::never_holds_a_session_end_or_update_and_does_not_wait_for_a_silent_renderer | ported |
+| quit-wait | never waits (and sets no timer) when nothing runs | unimux-app lifecycle::wind_down::tests::never_waits_and_sets_no_timer_when_nothing_runs | ported |
+| quit-wait | resolves true as soon as the work ends, and clears its timer | unimux-app lifecycle::wind_down::tests::resolves_true_as_soon_as_the_work_ends | ported |
+| quit-wait | resolves false once the bound runs out while the work still runs | unimux-app lifecycle::wind_down::tests::resolves_false_once_the_bound_runs_out_while_the_work_still_runs | ported |
+| quit-wait | the bounds (5 s, then 3 s after the cells) stay well inside the hard shutdown limit | unimux-app lifecycle::wind_down::tests::the_bounds_stay_well_inside_the_hard_shutdown_limit | ported |
+| quit-wait | a release followed at once by a new claim keeps the quit waiting (within the bound) | unimux-app lifecycle::wind_down::tests::a_release_followed_at_once_by_a_new_claim_keeps_waiting_within_the_bound (the swap slot itself is A2) | partial |
+| stability | reloads a crashed renderer 3 times a minute, then leaves it to the user | unimux-app lifecycle::renderer::tests::reloads_a_crashed_renderer_3_times_a_minute_then_leaves_it_to_the_user (real app: verify-tauri-lifecycle.mjs C) | ported |
+| safe-window | leaves the wind-down a bounded time | unimux-app lifecycle::wind_down::tests::the_bounds_stay_well_inside_the_hard_shutdown_limit | ported |

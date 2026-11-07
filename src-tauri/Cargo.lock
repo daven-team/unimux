@@ -5329,7 +5329,11 @@ dependencies = [
 name = "unimux-platform"
 version = "1.2.0"
 dependencies = [
+ "block2",
  "libc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "parking_lot 0.13.0",
  "tempfile",
  "unimux-core",

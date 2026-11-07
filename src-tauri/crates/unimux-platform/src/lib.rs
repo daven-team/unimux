@@ -1,9 +1,14 @@
-//! OS integration of unimux (wave 0 part: PLAN F5, F6, F11). Later packages add notifications, badge, clipboard secret,
-//! session end and file drop here (W3, W4, W6).
+//! OS integration of unimux (wave 0 part: PLAN F5, F6, F11). Later packages add notifications, badge, clipboard secret
+//! and file drop here (W3, W4). W6: session end, the macOS quit request and the app's message box (lifecycle.rs).
 
 pub mod instance;
+pub mod lifecycle;
+#[cfg(target_os = "macos")]
+mod mac_lifecycle;
 #[cfg(windows)]
 mod win;
+#[cfg(windows)]
+mod win_lifecycle;
 
 /// `SetCurrentProcessExplicitAppUserModelID`: `com.unimux.app` for the installed app, `com.unimux.app.dev` otherwise, so a
 /// run from the repository never shares the taskbar entry (and its icon) with the installed app.
