@@ -204,9 +204,85 @@
 {"fn":"parseConfigList","args":["x\u0000xcore.noValuecore.noValuecore.noValueline1\nline2user.name"],"out":[{"key":"x","value":""},{"key":"xcore.noValuecore.noValuecore.noValueline1","value":"line2user.name"}]}
 {"fn":"parseConfigList","args":["A B\u0000line1\nline2="],"out":[{"key":"A B","value":""},{"key":"line1","value":"line2="}]}
 {"fn":"parseConfigList","args":["\nline1\nline2core.barecore.noValue"],"out":[{"key":"","value":"line1\nline2core.barecore.noValue"}]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"filter.lfs.clean","value":"x"},{"key":"filter.a.smudge","value":"x"},{"key":"filter.a.process","value":"x"},{"key":"filter..clean","value":"x"},{"key":"filter.a.b.clean","value":"x"},{"key":"Filter.X.Clean","value":"x"},{"key":"filter.\n.clean","value":"x"},{"key":"filter. .clean","value":"x"},{"key":"diff.a.textconv","value":"x"},{"key":"diff.a.command","value":"x"},{"key":"diff.external","value":"x"},{"key":"diff.a.binary","value":"x"},{"key":"merge.a.driver","value":"x"},{"key":"merge.a.recursivedriver","value":"x"},{"key":"core.fsmonitor","value":"x"},{"key":"core.hooksPath","value":"x"},{"key":"core.sshCommand","value":"x"},{"key":"core.pager","value":"x"},{"key":"core.editor","value":"x"},{"key":"core.askPass","value":"x"},{"key":"core.gitProxy","value":"x"},{"key":"core.worktree","value":"x"},{"key":"core.autocrlf","value":"x"},{"key":"core.bare","value":"x"},{"key":"remote.origin.uploadpack","value":"x"},{"key":"remote.origin.receivepack","value":"x"},{"key":"remote.origin.uploadarchive","value":"x"},{"key":"remote.origin.proxy","value":"x"},{"key":"remote.origin.vcs","value":"x"},{"key":"remote.origin.url","value":"x"},{"key":"remote.origin.fetch","value":"x"},{"key":"credential.helper","value":"x"},{"key":"credential.https://h.helper","value":"x"},{"key":"credential.useHttpPath","value":"x"},{"key":"url.https://evil/.insteadOf","value":"x"},{"key":"url.https://evil/.pushInsteadOf","value":"x"},{"key":"url.https://user:s3cr3t@evil.example/.insteadOf","value":"x"},{"key":"protocol.file.allow","value":"x"},{"key":"protocol.allow","value":"x"},{"key":"include.path","value":"x"},{"key":"includeIf.gitdir:/x/.path","value":"x"},{"key":"includeif..path","value":"x"},{"key":"gpg.program","value":"x"},{"key":"gpg.ssh.program","value":"x"},{"key":"gpg.x509.program","value":"x"},{"key":"gpg.openpgp.program","value":"x"},{"key":"gpg.foo.program","value":"x"},{"key":"pager.log","value":"x"},{"key":"pager.","value":"x"},{"key":"uploadpack.packObjectsHook","value":"x"},{"key":"sequence.editor","value":"x"},{"key":"interactive.diffFilter","value":"x"},{"key":"submodule.s.update","value":"x"},{"key":"alias.x","value":"x"},{"key":"user.name","value":"x"},{"key":"branch.main.remote","value":"x"},{"key":"FİLTER.x.clean","value":"x"},{"key":"K.x","value":"x"},{"key":"core.ſshcommand","value":"x"},{"key":"CORE.SSHCOMMAND","value":"x"},{"key":"credential.\n.helper","value":"x"},{"key":"submodule..update","value":"x"},{"key":"url.ghp_0123456789abcdefghijABCD.insteadOf","value":"x"}]],"out":["CORE.SSHCOMMAND","Filter.X.Clean","core.askPass","core.editor","core.fsmonitor","core.gitProxy","core.hooksPath","core.pager","core.sshCommand","core.worktree","diff.a.command","diff.a.textconv","diff.external","filter.a.b.clean","filter.a.process","filter.a.smudge","filter.lfs.clean","gpg.foo.program","gpg.openpgp.program","gpg.program","gpg.ssh.program","gpg.x509.program","include.path","includeIf.gitdir:/x/.path","interactive.diffFilter","merge.a.driver","merge.a.recursivedriver","pager.log","protocol.allow","protocol.file.allow","remote.origin.proxy","remote.origin.receivepack","remote.origin.uploadarchive","remote.origin.uploadpack","remote.origin.vcs","sequence.editor","uploadpack.packObjectsHook","url.***.insteadOf","url.https://***@evil.example/.insteadOf","url.https://evil/.insteadOf","url.https://evil/.pushInsteadOf"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"filter.lfs.clean","value":"x"},{"key":"filter.a.smudge","value":"x"},{"key":"filter.a.process","value":"x"},{"key":"filter..clean","value":"x"},{"key":"filter.a.b.clean","value":"x"},{"key":"Filter.X.Clean","value":"x"},{"key":"filter.\n.clean","value":"x"},{"key":"filter. .clean","value":"x"},{"key":"diff.a.textconv","value":"x"},{"key":"diff.a.command","value":"x"},{"key":"diff.external","value":"x"},{"key":"diff.a.binary","value":"x"},{"key":"merge.a.driver","value":"x"},{"key":"merge.a.recursivedriver","value":"x"},{"key":"core.fsmonitor","value":"x"},{"key":"core.hooksPath","value":"x"},{"key":"core.sshCommand","value":"x"},{"key":"core.pager","value":"x"},{"key":"core.editor","value":"x"},{"key":"core.askPass","value":"x"},{"key":"core.gitProxy","value":"x"},{"key":"core.worktree","value":"x"},{"key":"core.autocrlf","value":"x"},{"key":"core.bare","value":"x"},{"key":"remote.origin.uploadpack","value":"x"},{"key":"remote.origin.receivepack","value":"x"},{"key":"remote.origin.uploadarchive","value":"x"},{"key":"remote.origin.proxy","value":"x"},{"key":"remote.origin.vcs","value":"x"},{"key":"remote.origin.url","value":"x"},{"key":"remote.origin.fetch","value":"x"},{"key":"credential.helper","value":"x"},{"key":"credential.https://h.helper","value":"x"},{"key":"credential.useHttpPath","value":"x"},{"key":"url.https://evil/.insteadOf","value":"x"},{"key":"url.https://evil/.pushInsteadOf","value":"x"},{"key":"url.https://user:s3cr3t@evil.example/.insteadOf","value":"x"},{"key":"protocol.file.allow","value":"x"},{"key":"protocol.allow","value":"x"},{"key":"include.path","value":"x"},{"key":"includeIf.gitdir:/x/.path","value":"x"},{"key":"includeif..path","value":"x"},{"key":"gpg.program","value":"x"},{"key":"gpg.ssh.program","value":"x"},{"key":"gpg.x509.program","value":"x"},{"key":"gpg.openpgp.program","value":"x"},{"key":"gpg.foo.program","value":"x"},{"key":"pager.log","value":"x"},{"key":"pager.","value":"x"},{"key":"uploadpack.packObjectsHook","value":"x"},{"key":"sequence.editor","value":"x"},{"key":"interactive.diffFilter","value":"x"},{"key":"submodule.s.update","value":"x"},{"key":"alias.x","value":"x"},{"key":"user.name","value":"x"},{"key":"branch.main.remote","value":"x"},{"key":"FİLTER.x.clean","value":"x"},{"key":"K.x","value":"x"},{"key":"core.ſshcommand","value":"x"},{"key":"CORE.SSHCOMMAND","value":"x"},{"key":"credential.\n.helper","value":"x"},{"key":"submodule..update","value":"x"},{"key":"url.ghp_0123456789abcdefghijABCD.insteadOf","value":"x"}]],"out":["CORE.SSHCOMMAND","Filter.X.Clean","core.askPass","core.editor","core.fsmonitor","core.gitProxy","core.hooksPath","core.pager","core.sshCommand","core.worktree","credential.helper","credential.https://h.helper","diff.a.command","diff.a.textconv","diff.external","filter.a.b.clean","filter.a.process","filter.a.smudge","filter.lfs.clean","gpg.foo.program","gpg.openpgp.program","gpg.program","gpg.ssh.program","gpg.x509.program","include.path","includeIf.gitdir:/x/.path","interactive.diffFilter","merge.a.driver","merge.a.recursivedriver","pager.log","protocol.allow","protocol.file.allow","remote.origin.proxy","remote.origin.receivepack","remote.origin.uploadarchive","remote.origin.uploadpack","remote.origin.vcs","sequence.editor","uploadpack.packObjectsHook","url.***.insteadOf","url.https://***@evil.example/.insteadOf","url.https://evil/.insteadOf","url.https://evil/.pushInsteadOf"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.fsmonitor","value":"/bin/x"},{"key":"core.fsmonitor","value":"false"}]],"out":["core.fsmonitor"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"url.https://user:s3cr3t@evil.example/.insteadOf","value":"https://good/"},{"key":"core.sshCommand","value":"secret-command"}]],"out":["core.sshCommand","url.https://***@evil.example/.insteadOf"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"x; calc"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"x; calc"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"evil"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"evil"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"manager $(calc)"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"manager $(calc)"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"store --file=x;calc"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"store --file=x;calc"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache `calc`"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache `calc`"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"manager\ncalc"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"manager\ncalc"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"../x"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"../x"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"manager && calc"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"manager && calc"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":""}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":""}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"manager"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"manager"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"manager-core"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"manager-core"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"wincred"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"wincred"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"osxkeychain"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"osxkeychain"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"libsecret"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"libsecret"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"gnome-keyring"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"gnome-keyring"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"store"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"store"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache --timeout=3600"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache --timeout=3600"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"store --file=~/.git-credentials"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"store --file=~/.git-credentials"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"true"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"true"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":" manager "}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":" manager "}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache --timeout=1"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache --timeout=1"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache　--x"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache　--x"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache--x"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache--x"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache --timé"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache --timé"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache --x=é"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache --x=é"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache --"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache --"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache --9"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache --9"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache -x"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache -x"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache --a_b-c=x.y:z/@~+-"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache --a_b-c=x.y:z/@~+-"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache --a=b c"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache --a=b c"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"MANAGER"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"MANAGER"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"manager-cor"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"manager-cor"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"managerx"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"managerx"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache\t--a\n--b=1"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache\t--a\n--b=1"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"store --file=x\\y"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"store --file=x\\y"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache --x=1 --y"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache --x=1 --y"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"﻿store﻿"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"﻿store﻿"}]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter.lfs.clean","value":"　false　"}]],"out":["filter.lfs.clean"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"K.x","value":"Off"}]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"interactive.diffFilter","value":"/bin/x"},{"key":"filter.a.b.clean","value":"Off"},{"key":"filter.\n.clean","value":"c:/x"},{"key":"diff.a.textconv","value":" "}]],"out":["diff.a.textconv","filter.a.b.clean","interactive.diffFilter"]}
@@ -225,12 +301,12 @@
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"diff.a.textconv","value":"ſalse"}]],"out":["diff.a.textconv"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter..clean","value":"true"},{"key":"url.https://evil/.insteadOf","value":"x"},{"key":"merge.a.driver","value":"checkout"}]],"out":["merge.a.driver","url.https://evil/.insteadOf"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.receivepack","value":"ſalse"},{"key":"branch.main.remote","value":"checkout"},{"key":"filter. .clean","value":"x"},{"key":"credential.helper","value":"true"}]],"out":["remote.origin.receivepack"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.receivepack","value":"ſalse"},{"key":"branch.main.remote","value":"checkout"},{"key":"filter. .clean","value":"x"},{"key":"credential.helper","value":"true"}]],"out":["credential.helper","remote.origin.receivepack"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"K.x","value":"Off"},{"key":"credential.https://h.helper","value":" "},{"key":"sequence.editor","value":"C:\\x\\y.exe"},{"key":"core.hooksPath","value":"　false　"}]],"out":["core.hooksPath","sequence.editor"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"gpg.openpgp.program","value":"c:/x"},{"key":"core.editor","value":"manager"},{"key":"core.editor","value":""},{"key":"core.editor","value":"/bin/x"},{"key":"protocol.file.allow","value":" "}]],"out":["core.editor","gpg.openpgp.program","protocol.file.allow"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter.a.smudge","value":"\\\\srv\\x"},{"key":"K.x","value":"Off"},{"key":"gpg.openpgp.program","value":"D:x"}]],"out":["filter.a.smudge","gpg.openpgp.program"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.receivepack","value":"　false　"},{"key":"remote.origin.vcs","value":"ſalse"}]],"out":["remote.origin.receivepack","remote.origin.vcs"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"false"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"false"}]],"out":["credential.helper"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.editor","value":" "},{"key":"credential.\n.helper","value":"false"},{"key":"core.autocrlf","value":"x"},{"key":"remote.origin.fetch","value":"x"},{"key":"includeif..path","value":"　false　"}]],"out":["core.editor"]}
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"includeif..path","value":"no"}]],"out":[]}
@@ -319,7 +395,7 @@
 {"fn":"dangerousConfigKeys","args":[[{"key":"user.name","value":"false"}]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"FİLTER.x.clean","value":"D:x"}]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.vcs","value":"0"}]],"out":["remote.origin.vcs"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"0"},{"key":"gpg.foo.program","value":"false"},{"key":"pager.log","value":"c:/x"},{"key":"core.fsmonitor","value":"0"},{"key":"include.path","value":"\\\\srv\\x"}]],"out":["gpg.foo.program","include.path","pager.log"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"0"},{"key":"gpg.foo.program","value":"false"},{"key":"pager.log","value":"c:/x"},{"key":"core.fsmonitor","value":"0"},{"key":"include.path","value":"\\\\srv\\x"}]],"out":["credential.helper","gpg.foo.program","include.path","pager.log"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.pager","value":"Off"}]],"out":["core.pager"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter. .clean","value":" !x "},{"key":"credential.https://h.helper","value":"!x"},{"key":"CORE.SSHCOMMAND","value":"false"},{"key":"remote.origin.proxy","value":"checkout"}]],"out":["CORE.SSHCOMMAND","credential.https://h.helper","remote.origin.proxy"]}
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
@@ -370,13 +446,13 @@
 {"fn":"dangerousConfigKeys","args":[[{"key":"gpg.ssh.program","value":"/bin/x"},{"key":"user.name","value":"　false　"},{"key":"filter.a.process","value":"x"},{"key":"CORE.SSHCOMMAND","value":"0"}]],"out":["CORE.SSHCOMMAND","filter.a.process","gpg.ssh.program"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"diff.a.binary","value":"　false　"},{"key":"core.editor","value":"\\\\srv\\x"},{"key":"url.https://evil/.pushInsteadOf","value":"no"}]],"out":["core.editor","url.https://evil/.pushInsteadOf"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"diff.a.textconv","value":"manager"},{"key":"core.pager","value":"no"},{"key":"filter.\n.clean","value":"\\\\srv\\x"},{"key":"diff.a.command","value":"false"},{"key":"credential.helper","value":"c:/x"}]],"out":["core.pager","credential.helper","diff.a.command","diff.a.textconv"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.fetch","value":"FALSE"},{"key":"diff.a.command","value":"　false　"},{"key":"credential.https://h.helper","value":"D:x"}]],"out":["diff.a.command"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.fetch","value":"FALSE"},{"key":"diff.a.command","value":"　false　"},{"key":"credential.https://h.helper","value":"D:x"}]],"out":["credential.https://h.helper","diff.a.command"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.url","value":"C:\\x\\y.exe"},{"key":"core.editor","value":"no"},{"key":"core.gitProxy","value":"checkout"}]],"out":["core.editor","core.gitProxy"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.autocrlf","value":"x"}]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.autocrlf","value":"/bin/x"},{"key":"filter.a.b.clean","value":"!x"}]],"out":["filter.a.b.clean"]}
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"gpg.x509.program","value":"!x"},{"key":"credential.\n.helper","value":"manager"}]],"out":["gpg.x509.program"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.fetch","value":"\\\\srv\\x"},{"key":"credential.https://h.helper","value":"0"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.fetch","value":"\\\\srv\\x"},{"key":"credential.https://h.helper","value":"0"}]],"out":["credential.https://h.helper"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter.lfs.clean","value":""},{"key":"core.ſshcommand","value":"c:/x"},{"key":"protocol.allow","value":"true"},{"key":"pager.log","value":"C:\\x\\y.exe"}]],"out":["filter.lfs.clean","pager.log","protocol.allow"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.gitProxy","value":"c:/x"},{"key":"pager.","value":"false"},{"key":"user.name","value":"no"},{"key":"alias.x","value":"checkout"}]],"out":["core.gitProxy"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter. .clean","value":"　false　"}]],"out":[]}
@@ -389,7 +465,7 @@
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.fsmonitor","value":"secret-command"},{"key":"url.https://user:s3cr3t@evil.example/.insteadOf","value":"\\\\srv\\x"}]],"out":["core.fsmonitor","url.https://***@evil.example/.insteadOf"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"FİLTER.x.clean","value":"\\\\srv\\x"},{"key":"core.askPass","value":"\\\\srv\\x"},{"key":"url.https://user:s3cr3t@evil.example/.insteadOf","value":"Off"},{"key":"gpg.ssh.program","value":"0"}]],"out":["core.askPass","gpg.ssh.program","url.https://***@evil.example/.insteadOf"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"includeif..path","value":"no"},{"key":"merge.a.driver","value":"D:x"},{"key":"credential.https://h.helper","value":"checkout"}]],"out":["merge.a.driver"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"includeif..path","value":"no"},{"key":"merge.a.driver","value":"D:x"},{"key":"credential.https://h.helper","value":"checkout"}]],"out":["credential.https://h.helper","merge.a.driver"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.proxy","value":" !x "}]],"out":["remote.origin.proxy"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"merge.a.recursivedriver","value":"c:/x"},{"key":"pager.","value":"x"},{"key":"gpg.program","value":"0"}]],"out":["gpg.program","merge.a.recursivedriver"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":" !x "},{"key":"Filter.X.Clean","value":"00"},{"key":"core.gitProxy","value":"0"},{"key":"K.x","value":"false"}]],"out":["Filter.X.Clean","core.gitProxy","credential.https://h.helper"]}
@@ -399,7 +475,7 @@
 {"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.fetch","value":"checkout"},{"key":"includeif..path","value":"ſalse"},{"key":"user.name","value":" !x "},{"key":"core.editor","value":"c:/x"},{"key":"gpg.x509.program","value":"no"}]],"out":["core.editor","gpg.x509.program"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.uploadpack","value":""},{"key":"remote.origin.proxy","value":"false"},{"key":"FİLTER.x.clean","value":""},{"key":"gpg.openpgp.program","value":"/bin/x"},{"key":"gpg.foo.program","value":"false"}]],"out":["gpg.foo.program","gpg.openpgp.program","remote.origin.proxy","remote.origin.uploadpack"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"url.https://evil/.insteadOf","value":"ſalse"},{"key":"pager.log","value":"no"},{"key":"core.ſshcommand","value":"!x"},{"key":"core.askPass","value":"　false　"},{"key":"gpg.ssh.program","value":"no"}]],"out":["core.askPass","gpg.ssh.program","pager.log","url.https://evil/.insteadOf"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"gpg.x509.program","value":"Off"},{"key":"core.askPass","value":"c:/x"},{"key":"diff.a.command","value":"c:/x"},{"key":"credential.https://h.helper","value":"false"},{"key":"core.gitProxy","value":"　false　"}]],"out":["core.askPass","core.gitProxy","diff.a.command","gpg.x509.program"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"gpg.x509.program","value":"Off"},{"key":"core.askPass","value":"c:/x"},{"key":"diff.a.command","value":"c:/x"},{"key":"credential.https://h.helper","value":"false"},{"key":"core.gitProxy","value":"　false　"}]],"out":["core.askPass","core.gitProxy","credential.https://h.helper","diff.a.command","gpg.x509.program"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter.a.smudge","value":"false"},{"key":"protocol.file.allow","value":"/bin/x"},{"key":"pager.","value":"\\\\srv\\x"},{"key":"protocol.allow","value":"ſalse"},{"key":"includeIf.gitdir:/x/.path","value":"0"}]],"out":["filter.a.smudge","includeIf.gitdir:/x/.path","protocol.allow","protocol.file.allow"]}
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"url.https://evil/.pushInsteadOf","value":"false"},{"key":"url.https://evil/.pushInsteadOf","value":"false"},{"key":"remote.origin.proxy","value":"D:x"}]],"out":["remote.origin.proxy","url.https://evil/.pushInsteadOf"]}
@@ -450,7 +526,7 @@
 {"fn":"dangerousConfigKeys","args":[[{"key":"diff.external","value":"manager"},{"key":"FİLTER.x.clean","value":"!x"},{"key":"K.x","value":"0"},{"key":"filter. .clean","value":"true"},{"key":"credential.\n.helper","value":"c:/x"}]],"out":["diff.external"]}
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"url.https://user:s3cr3t@evil.example/.insteadOf","value":"　false　"}]],"out":["url.https://***@evil.example/.insteadOf"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.fetch","value":"C:\\x\\y.exe"},{"key":"alias.x","value":"secret-command"},{"key":"gpg.foo.program","value":"/bin/x"},{"key":"credential.helper","value":"D:x"}]],"out":["gpg.foo.program"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.fetch","value":"C:\\x\\y.exe"},{"key":"alias.x","value":"secret-command"},{"key":"gpg.foo.program","value":"/bin/x"},{"key":"credential.helper","value":"D:x"}]],"out":["credential.helper","gpg.foo.program"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"CORE.SSHCOMMAND","value":"　false　"}]],"out":["CORE.SSHCOMMAND"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"protocol.allow","value":"false"},{"key":"core.askPass","value":"secret-command"},{"key":"core.editor","value":"C:\\x\\y.exe"},{"key":"Filter.X.Clean","value":"D:x"}]],"out":["Filter.X.Clean","core.askPass","core.editor","protocol.allow"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"diff.a.binary","value":" "},{"key":"diff.a.binary","value":"00"},{"key":"remote.origin.url","value":"\\\\srv\\x"}]],"out":[]}
@@ -468,11 +544,11 @@
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.hooksPath","value":"no"},{"key":"filter.\n.clean","value":"!x"},{"key":"remote.origin.vcs","value":"Off"}]],"out":["core.hooksPath","remote.origin.vcs"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.receivepack","value":"\\\\srv\\x"},{"key":"alias.x","value":"0"},{"key":"credential.\n.helper","value":"checkout"},{"key":"protocol.file.allow","value":"C:\\x\\y.exe"},{"key":"Filter.X.Clean","value":"　false　"}]],"out":["Filter.X.Clean","protocol.file.allow","remote.origin.receivepack"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.fetch","value":"/bin/x"},{"key":"filter.lfs.clean","value":"FALSE"},{"key":"core.hooksPath","value":"/bin/x"}]],"out":["core.hooksPath","filter.lfs.clean"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"secret-command"},{"key":"credential.helper","value":"secret-command"},{"key":"gpg.ssh.program","value":"x"},{"key":"alias.x","value":"c:/x"}]],"out":["gpg.ssh.program"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"secret-command"},{"key":"credential.helper","value":"secret-command"},{"key":"gpg.ssh.program","value":"x"},{"key":"alias.x","value":"c:/x"}]],"out":["credential.helper","gpg.ssh.program"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"gpg.foo.program","value":"D:x"},{"key":"submodule..update","value":" !x "},{"key":"url.https://user:s3cr3t@evil.example/.insteadOf","value":"manager"},{"key":"core.gitProxy","value":"00"}]],"out":["core.gitProxy","gpg.foo.program","url.https://***@evil.example/.insteadOf"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"gpg.x509.program","value":""},{"key":"gpg.ssh.program","value":"no"},{"key":"core.fsmonitor","value":"Off"}]],"out":["gpg.ssh.program","gpg.x509.program"]}
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"submodule.s.update","value":"C:\\x\\y.exe"},{"key":"credential.helper","value":"FALSE"},{"key":"core.fsmonitor","value":"ſalse"},{"key":"user.name","value":"false"},{"key":"filter.\n.clean","value":"ſalse"}]],"out":["core.fsmonitor"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"submodule.s.update","value":"C:\\x\\y.exe"},{"key":"credential.helper","value":"FALSE"},{"key":"core.fsmonitor","value":"ſalse"},{"key":"user.name","value":"false"},{"key":"filter.\n.clean","value":"ſalse"}]],"out":["core.fsmonitor","credential.helper"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter.lfs.clean","value":"FALSE"}]],"out":["filter.lfs.clean"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.askPass","value":"00"}]],"out":["core.askPass"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"gpg.ssh.program","value":"\\\\srv\\x"},{"key":"core.gitProxy","value":" !x "},{"key":"core.gitProxy","value":"!x"}]],"out":["core.gitProxy","gpg.ssh.program"]}
@@ -489,9 +565,9 @@
 {"fn":"dangerousConfigKeys","args":[[{"key":"K.x","value":"false"},{"key":"remote.origin.fetch","value":"00"}]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"interactive.diffFilter","value":"manager"}]],"out":["interactive.diffFilter"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter.a.smudge","value":"　false　"},{"key":"gpg.foo.program","value":"false"},{"key":"filter.\n.clean","value":"manager"}]],"out":["filter.a.smudge","gpg.foo.program"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.url","value":"checkout"},{"key":"gpg.program","value":"false"},{"key":"credential.helper","value":"ſalse"},{"key":"includeif..path","value":"secret-command"}]],"out":["gpg.program"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.url","value":"checkout"},{"key":"gpg.program","value":"false"},{"key":"credential.helper","value":"ſalse"},{"key":"includeif..path","value":"secret-command"}]],"out":["credential.helper","gpg.program"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"protocol.file.allow","value":"0"},{"key":"gpg.x509.program","value":"c:/x"},{"key":"remote.origin.receivepack","value":"C:\\x\\y.exe"},{"key":"remote.origin.url","value":"!x"}]],"out":["gpg.x509.program","protocol.file.allow","remote.origin.receivepack"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"true"},{"key":"filter.lfs.clean","value":"C:\\x\\y.exe"}]],"out":["filter.lfs.clean"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"true"},{"key":"filter.lfs.clean","value":"C:\\x\\y.exe"}]],"out":["credential.helper","filter.lfs.clean"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.url","value":"false"},{"key":"filter.a.smudge","value":"manager"},{"key":"K.x","value":"false"}]],"out":["filter.a.smudge"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"gpg.ssh.program","value":"　false　"},{"key":"sequence.editor","value":"c:/x"},{"key":"diff.a.command","value":"0"},{"key":"diff.a.textconv","value":"/bin/x"}]],"out":["diff.a.command","diff.a.textconv","gpg.ssh.program","sequence.editor"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.url","value":"c:/x"},{"key":"pager.log","value":"manager"},{"key":"core.worktree","value":"false"},{"key":"diff.a.binary","value":" "}]],"out":["core.worktree","pager.log"]}
@@ -505,7 +581,7 @@
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.ſshcommand","value":"c:/x"},{"key":"submodule.s.update","value":"Off"},{"key":"gpg.foo.program","value":"/bin/x"},{"key":"url.https://user:s3cr3t@evil.example/.insteadOf","value":" "}]],"out":["gpg.foo.program","url.https://***@evil.example/.insteadOf"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"sequence.editor","value":"00"},{"key":"core.autocrlf","value":"x"}]],"out":["sequence.editor"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter.lfs.clean","value":"manager"},{"key":"remote.origin.uploadarchive","value":"00"},{"key":"K.x","value":" "},{"key":"core.sshCommand","value":"00"}]],"out":["core.sshCommand","filter.lfs.clean","remote.origin.uploadarchive"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"filter.a.b.clean","value":" "},{"key":"url.https://evil/.pushInsteadOf","value":"　false　"},{"key":"filter.a.process","value":"true"},{"key":"credential.helper","value":"Off"},{"key":"diff.external","value":"\\\\srv\\x"}]],"out":["diff.external","filter.a.b.clean","filter.a.process","url.https://evil/.pushInsteadOf"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"filter.a.b.clean","value":" "},{"key":"url.https://evil/.pushInsteadOf","value":"　false　"},{"key":"filter.a.process","value":"true"},{"key":"credential.helper","value":"Off"},{"key":"diff.external","value":"\\\\srv\\x"}]],"out":["credential.helper","diff.external","filter.a.b.clean","filter.a.process","url.https://evil/.pushInsteadOf"]}
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"remote.origin.uploadpack","value":"ſalse"},{"key":"credential.\n.helper","value":"C:\\x\\y.exe"},{"key":"pager.log","value":" "}]],"out":["pager.log","remote.origin.uploadpack"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter. .clean","value":" !x "}]],"out":[]}
@@ -525,7 +601,7 @@
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter.\n.clean","value":"FALSE"},{"key":"pager.","value":" !x "}]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.autocrlf","value":" "},{"key":"core.pager","value":"!x"},{"key":"alias.x","value":"\\\\srv\\x"}]],"out":["core.pager"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"alias.x","value":" !x "}]],"out":[]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"core.bare","value":"c:/x"},{"key":"user.name","value":"\\\\srv\\x"},{"key":"credential.https://h.helper","value":"00"},{"key":"uploadpack.packObjectsHook","value":"false"}]],"out":["uploadpack.packObjectsHook"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"core.bare","value":"c:/x"},{"key":"user.name","value":"\\\\srv\\x"},{"key":"credential.https://h.helper","value":"00"},{"key":"uploadpack.packObjectsHook","value":"false"}]],"out":["credential.https://h.helper","uploadpack.packObjectsHook"]}
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter.a.process","value":" "},{"key":"protocol.allow","value":"c:/x"},{"key":"gpg.ssh.program","value":" !x "},{"key":"merge.a.recursivedriver","value":"false"},{"key":"pager.","value":"00"}]],"out":["filter.a.process","gpg.ssh.program","merge.a.recursivedriver","protocol.allow"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter.\n.clean","value":"false"},{"key":"core.bare","value":"true"}]],"out":[]}
@@ -536,7 +612,7 @@
 {"fn":"dangerousConfigKeys","args":[[{"key":"includeIf.gitdir:/x/.path","value":"false"},{"key":"core.autocrlf","value":"false"},{"key":"diff.external","value":"x"},{"key":"submodule..update","value":"false"},{"key":"gpg.x509.program","value":"D:x"}]],"out":["diff.external","gpg.x509.program","includeIf.gitdir:/x/.path"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"diff.a.command","value":" "},{"key":"core.autocrlf","value":" "}]],"out":["diff.a.command"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":""},{"key":"Filter.X.Clean","value":"x"},{"key":"filter..clean","value":"C:\\x\\y.exe"},{"key":"remote.origin.receivepack","value":"checkout"}]],"out":["Filter.X.Clean","remote.origin.receivepack"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"includeIf.gitdir:/x/.path","value":" !x "},{"key":"core.gitProxy","value":"/bin/x"},{"key":"credential.helper","value":"　false　"}]],"out":["core.gitProxy","includeIf.gitdir:/x/.path"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"includeIf.gitdir:/x/.path","value":" !x "},{"key":"core.gitProxy","value":"/bin/x"},{"key":"credential.helper","value":"　false　"}]],"out":["core.gitProxy","credential.helper","includeIf.gitdir:/x/.path"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.hooksPath","value":"!x"},{"key":"url.https://evil/.pushInsteadOf","value":"C:\\x\\y.exe"},{"key":"protocol.allow","value":"x"}]],"out":["core.hooksPath","protocol.allow","url.https://evil/.pushInsteadOf"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.useHttpPath","value":"false"},{"key":"remote.origin.vcs","value":"Off"},{"key":"diff.a.textconv","value":"true"},{"key":"FİLTER.x.clean","value":"manager"}]],"out":["diff.a.textconv","remote.origin.vcs"]}
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
@@ -560,23 +636,23 @@
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.pager","value":"manager"}]],"out":["core.pager"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"K.x","value":""},{"key":"sequence.editor","value":"manager"},{"key":"includeif..path","value":"manager"},{"key":"credential.https://h.helper","value":"0"}]],"out":["sequence.editor"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"K.x","value":""},{"key":"sequence.editor","value":"manager"},{"key":"includeif..path","value":"manager"},{"key":"credential.https://h.helper","value":"0"}]],"out":["credential.https://h.helper","sequence.editor"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"user.name","value":""},{"key":"diff.a.binary","value":"0"},{"key":"Filter.X.Clean","value":"C:\\x\\y.exe"},{"key":"core.hooksPath","value":"secret-command"},{"key":"interactive.diffFilter","value":""}]],"out":["Filter.X.Clean","core.hooksPath","interactive.diffFilter"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.sshCommand","value":"false"}]],"out":["core.sshCommand"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"filter.\n.clean","value":"checkout"},{"key":"gpg.program","value":"secret-command"}]],"out":["gpg.program"]}
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"submodule..update","value":" "},{"key":"protocol.allow","value":"false"},{"key":"sequence.editor","value":"\\\\srv\\x"},{"key":"filter.a.process","value":"FALSE"}]],"out":["filter.a.process","protocol.allow","sequence.editor"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"no"},{"key":"sequence.editor","value":"Off"},{"key":"filter.a.smudge","value":"　false　"}]],"out":["filter.a.smudge","sequence.editor"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"no"},{"key":"sequence.editor","value":"Off"},{"key":"filter.a.smudge","value":"　false　"}]],"out":["credential.helper","filter.a.smudge","sequence.editor"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"includeIf.gitdir:/x/.path","value":"0"}]],"out":["includeIf.gitdir:/x/.path"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"diff.a.command","value":"x"},{"key":"credential.https://h.helper","value":"checkout"}]],"out":["diff.a.command"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"diff.a.command","value":"x"},{"key":"credential.https://h.helper","value":"checkout"}]],"out":["credential.https://h.helper","diff.a.command"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"sequence.editor","value":"\\\\srv\\x"},{"key":"core.autocrlf","value":"C:\\x\\y.exe"}]],"out":["sequence.editor"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"gpg.foo.program","value":"ſalse"},{"key":"filter..clean","value":"\\\\srv\\x"},{"key":"filter. .clean","value":""}]],"out":["gpg.foo.program"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.askPass","value":"x"}]],"out":["core.askPass"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"core.gitProxy","value":"x"},{"key":"alias.x","value":"D:x"},{"key":"filter.\n.clean","value":"00"},{"key":"filter.a.smudge","value":"C:\\x\\y.exe"},{"key":"remote.origin.proxy","value":"Off"}]],"out":["core.gitProxy","filter.a.smudge","remote.origin.proxy"]}
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"alias.x","value":"0"},{"key":"remote.origin.url","value":"Off"},{"key":"credential.helper","value":"ſalse"},{"key":"gpg.program","value":"ſalse"}]],"out":["gpg.program"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"alias.x","value":"0"},{"key":"remote.origin.url","value":"Off"},{"key":"credential.helper","value":"ſalse"},{"key":"gpg.program","value":"ſalse"}]],"out":["credential.helper","gpg.program"]}
 {"fn":"dangerousConfigKeys","args":[[]],"out":[]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"Off"},{"key":"CORE.SSHCOMMAND","value":"FALSE"}]],"out":["CORE.SSHCOMMAND"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"Off"},{"key":"CORE.SSHCOMMAND","value":"FALSE"}]],"out":["CORE.SSHCOMMAND","credential.helper"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"url.https://evil/.pushInsteadOf","value":"D:x"},{"key":"core.fsmonitor","value":"D:x"},{"key":"url.ghp_0123456789abcdefghijABCD.insteadOf","value":"checkout"},{"key":"branch.main.remote","value":"false"},{"key":"remote.origin.fetch","value":"C:\\x\\y.exe"}]],"out":["core.fsmonitor","url.***.insteadOf","url.https://evil/.pushInsteadOf"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"alias.x","value":"D:x"},{"key":"gpg.x509.program","value":"manager"},{"key":"include.path","value":"/bin/x"},{"key":"core.worktree","value":"!x"},{"key":"core.ſshcommand","value":"\\\\srv\\x"}]],"out":["core.worktree","gpg.x509.program","include.path"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.\n.helper","value":"ſalse"},{"key":"core.gitProxy","value":" "},{"key":"filter. .clean","value":"Off"},{"key":"core.bare","value":"Off"}]],"out":["core.gitProxy"]}

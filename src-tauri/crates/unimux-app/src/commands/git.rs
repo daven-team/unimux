@@ -8,7 +8,7 @@
 //! renderer names a project (never a path) and optionally one of its worktrees. One engine serves the domain, with the trust
 //! file `<data dir>/git-trust.json` of 1.1.4; G3 / G4 register their channels on the same engine (`engine`).
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use serde_json::Value;
 use unimux_git::{Git, GitOptions, result_json};
@@ -17,9 +17,16 @@ use unimux_state::Platform;
 
 use crate::context::AppContext;
 
-/// The Git engine of the app (src/main/index.ts `gitEngine`).
+static ENGINE: OnceLock<Arc<Git>> = OnceLock::new();
+
+/// The one Git engine of the app (src/main/index.ts `gitEngine`), created on first use: every caller gets the same instance,
+/// so all packages share one trust store (git-trust.json), generation, scan cache and request-id set.
 pub fn engine(ctx: &AppContext) -> Arc<Git> {
-    Arc::new(Git::new(GitOptions { trust_file: Some(ctx.data_dir.join("git-trust.json")), ..Default::default() }))
+    ENGINE
+        .get_or_init(|| {
+            Arc::new(Git::new(GitOptions { trust_file: Some(ctx.data_dir.join("git-trust.json")), ..Default::default() }))
+        })
+        .clone()
 }
 
 /// `state.projects.find((p) => p.id === projectId)?.path` (a project id is a string).

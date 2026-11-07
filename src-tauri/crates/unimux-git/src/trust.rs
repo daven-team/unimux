@@ -82,6 +82,15 @@ static CREDENTIAL_HELPER: LazyLock<Regex> =
 static SUBMODULE_UPDATE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!(r"^submodule\.{}\.update$", any_plus())).expect("submodule regex"));
 static ABSOLUTE_PROGRAM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(!|/|[A-Za-z]:[\\/]|\\\\)").expect("absolute regex"));
+/// `SAFE_CREDENTIAL_HELPER`: a credential helper named without a path runs as the shell command `git credential-<value>`, so
+/// only the well-known helpers with plain `--option[=value]` arguments (or an empty value, which resets the list) pass. JS `\s`
+/// is [`JS_SPACE`] and JS `\w` is ASCII only.
+static SAFE_CREDENTIAL_HELPER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"^((manager|manager-core|wincred|osxkeychain|libsecret|gnome-keyring|cache|store)([{JS_SPACE}]+--[A-Za-z][A-Za-z0-9_\-]*(=[A-Za-z0-9_.:/@~+\-]*)?)*)?$"
+    ))
+    .expect("credential helper regex")
+});
 static OFF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i-u)^(false|no|off|0)?$").expect("off regex"));
 
 /// `dangerousConfigKeys`: the configuration keys (never the values) that can start a program or redirect git to another one,
@@ -97,7 +106,8 @@ pub fn dangerous_config_keys(entries: &[ConfigEntry]) -> Vec<String> {
         } else if k == "protocol.allow" {
             hit = true;
         } else if CREDENTIAL_HELPER.is_match(&k) {
-            hit = ABSOLUTE_PROGRAM.is_match(js_trim(value));
+            let v = js_trim(value);
+            hit = ABSOLUTE_PROGRAM.is_match(v) || !SAFE_CREDENTIAL_HELPER.is_match(v);
         } else if SUBMODULE_UPDATE.is_match(&k) {
             hit = js_trim(value).starts_with('!');
         }
@@ -317,26 +327,22 @@ impl TrustStore {
         self.map.lock().get(&Self::key(root)).cloned()
     }
 
+    /// Like 1.1.4 (the map update and the synchronous write are one step on the JS thread), the file is written while the map
+    /// lock is held, so concurrent grants and revokes reach the disk in the order they changed the map and the file matches it.
     pub fn set(&self, root: &str, hash: &str) {
         let key = Self::key(root);
-        let text = {
-            let mut map = self.map.lock();
-            map.insert(key, hash.to_string());
-            store_text(&map)
-        };
-        self.save(&text);
+        let mut map = self.map.lock();
+        map.insert(key, hash.to_string());
+        self.save(&store_text(&map));
     }
 
     pub fn delete(&self, root: &str) {
         let key = Self::key(root);
-        let text = {
-            let mut map = self.map.lock();
-            if map.shift_remove(&key).is_none() {
-                return;
-            }
-            store_text(&map)
-        };
-        self.save(&text);
+        let mut map = self.map.lock();
+        if map.shift_remove(&key).is_none() {
+            return;
+        }
+        self.save(&store_text(&map));
     }
 
     /// The remembered entries in their order.
@@ -405,6 +411,36 @@ mod tests {
         map.insert("7".to_string(), "y".to_string());
         assert_eq!(store_text(&map), "{\n  \"7\": \"y\",\n  \"d:/a\": \"x\"\n}");
         assert_eq!(store_text(&IndexMap::new()), "{}");
+    }
+
+    #[test]
+    fn concurrent_grants_and_revokes_leave_the_file_equal_to_the_map() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        for round in 0..60 {
+            let file = dir.path().join(format!("git-trust-{round}.json"));
+            let store = std::sync::Arc::new(TrustStore::new(Some(file.clone())));
+            store.set("D:/keep", "k");
+            let threads: Vec<_> = (0..6)
+                .map(|i| {
+                    let s = store.clone();
+                    std::thread::spawn(move || {
+                        s.set(&format!("D:/repo{i}"), "h");
+                        if i % 2 == 0 {
+                            s.delete(&format!("D:/repo{i}"));
+                        }
+                        if i == 5 {
+                            s.delete("D:/keep");
+                        }
+                    })
+                })
+                .collect();
+            for t in threads {
+                t.join().expect("thread");
+            }
+            let reloaded = TrustStore::new(Some(file));
+            assert_eq!(reloaded.entries(), store.entries(), "round {round}");
+            assert_eq!(store.entries().len(), 3, "round {round}");
+        }
     }
 
     #[test]

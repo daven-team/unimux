@@ -317,6 +317,12 @@ export function gitTrustRows(gitTrust, { GitTrustStore }) {
     keys.map((key) => ({ key, value: 'x' })),
     [{ key: 'core.fsmonitor', value: '/bin/x' }, { key: 'core.fsmonitor', value: 'false' }],
     [{ key: 'url.https://user:s3cr3t@evil.example/.insteadOf', value: 'https://good/' }, { key: 'core.sshCommand', value: 'secret-command' }],
+    // A credential helper named without a path runs through the shell as `git credential-<value>` (SAFE_CREDENTIAL_HELPER).
+    ...['x; calc', 'evil', 'manager $(calc)', 'store --file=x;calc', 'cache `calc`', 'manager\ncalc', '../x', 'manager && calc', '', 'manager', 'manager-core',
+      'wincred', 'osxkeychain', 'libsecret', 'gnome-keyring', 'cache', 'store', 'cache --timeout=3600', 'store --file=~/.git-credentials', 'true', ' manager ',
+      'cache --timeout=1', 'cache　--x', 'cache\u0085--x', 'cache --timé', 'cache --x=é', 'cache --', 'cache --9', 'cache -x', 'cache --a_b-c=x.y:z/@~+-',
+      'cache --a=b c', 'MANAGER', 'manager-cor', 'managerx', 'cache\t--a\n--b=1', 'store --file=x\\y', 'cache --x=1 --y', '﻿store﻿']
+      .flatMap((value) => [[{ key: 'credential.helper', value }], [{ key: 'credential.https://h.helper', value }]]),
   ];
   for (const entries of [...fixedEntries, ...Array.from({ length: 400 }, () => Array.from({ length: Math.floor(r() * 6) }, () => ({ key: pick(keys), value: pick(vals) })))]) {
     row('dangerousConfigKeys', [entries], gitTrust.dangerousConfigKeys(entries));

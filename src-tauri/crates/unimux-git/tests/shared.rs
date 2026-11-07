@@ -664,6 +664,32 @@ fn leaves_ordinary_configuration_alone() {
 }
 
 #[test]
+fn flags_a_credential_helper_that_is_not_a_known_helper_name() {
+    // git runs `git credential-<value>` through the shell (test/git-trust-shared.test.ts, b39025b).
+    for value in
+        ["x; calc", "evil", "manager $(calc)", "store --file=x;calc", "cache `calc`", "manager\ncalc", "../x", "manager && calc"]
+    {
+        assert_eq!(dangerous_config_keys(&entries(&[("credential.helper", value)])), ["credential.helper"], "{value:?}");
+    }
+    for value in [
+        "",
+        "manager",
+        "manager-core",
+        "wincred",
+        "osxkeychain",
+        "libsecret",
+        "cache --timeout=3600",
+        "store --file=~/.git-credentials",
+    ] {
+        assert!(dangerous_config_keys(&entries(&[("credential.helper", value)])).is_empty(), "{value:?}");
+    }
+    // JS `\w` is ASCII only; JS `\s` includes U+00A0 and U+FEFF.
+    assert_eq!(dangerous_config_keys(&entries(&[("credential.helper", "cache --tim\u{e9}")])), ["credential.helper"]);
+    assert!(dangerous_config_keys(&entries(&[("credential.helper", "cache\u{a0}--timeout=1")])).is_empty());
+    assert!(dangerous_config_keys(&entries(&[("credential.https://h.helper", "  store  ")])).is_empty());
+}
+
+#[test]
 fn never_reports_a_value_and_removes_credentials_that_sit_inside_a_key() {
     let found = dangerous_config_keys(&entries(&[
         ("url.https://user:s3cr3t@evil.example/.insteadOf", "https://good/"),

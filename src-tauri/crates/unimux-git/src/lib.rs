@@ -102,7 +102,7 @@ pub struct Git {
     dirs: Mutex<Lru<String, GitDirs>>,
     scans: Mutex<Lru<String, (RepoScan, Instant)>>,
     seen: Mutex<HashMap<String, Instant>>,
-    trust: TrustStore,
+    trust: Arc<TrustStore>,
     generation: Generation,
     inflight: Inflight,
 }
@@ -115,7 +115,7 @@ impl Default for Git {
 
 impl Git {
     pub fn new(options: GitOptions) -> Self {
-        let trust = TrustStore::new(options.trust_file.clone());
+        let trust = Arc::new(TrustStore::new(options.trust_file.clone()));
         Self {
             runner: Runner::new(options),
             roots: Mutex::new(Lru::default()),
@@ -351,7 +351,10 @@ impl Git {
         let root = self.root(dir).await?;
         let (_, scan) = self.state_of(&root, true).await?;
         if !scan.keys.is_empty() {
-            self.trust.set(&root, &scan.hash);
+            // The atomic write (fsync, rename retries) runs off the async workers; the call is awaited, so the grant is on
+            // disk before the answer, like the synchronous write of 1.1.4.
+            let (store, r, hash) = (self.trust.clone(), root.clone(), scan.hash.clone());
+            let _ = tokio::task::spawn_blocking(move || store.set(&r, &hash)).await;
         }
         self.bump_generation();
         self.read_trust(dir, scope, true).await
@@ -361,7 +364,8 @@ impl Git {
     pub async fn revoke_trust(&self, dir: &str, request_id: &str, scope: Option<&str>) -> GitResult<GitTrustInfo> {
         self.consume(request_id)?;
         let root = self.root(dir).await?;
-        self.trust.delete(&root);
+        let (store, r) = (self.trust.clone(), root.clone());
+        let _ = tokio::task::spawn_blocking(move || store.delete(&r)).await;
         self.bump_generation();
         self.read_trust(dir, scope, true).await
     }
