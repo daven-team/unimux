@@ -100,7 +100,21 @@ pub fn result_json<T: Serialize>(result: &GitResult<T>) -> serde_json::Value {
     }
 }
 
-/// `GitOptions` of git.ts (GitHub auth comes with G3).
+/// The GitHub sign-in of unimux as seen by git's network operations (`remoteAuth` / `remoteAuthRefused` of `GitOptions` in
+/// git.ts, plus the two refusal checks of src/main/github/gitEnv.ts, which live with the sign-in in unimux-accounts).
+pub trait RemoteAuth: Send + Sync + std::fmt::Debug {
+    /// The environment additions of fetch, pull and push (an `https://github.com/` header), None when there is no sign-in.
+    /// Never on the command line.
+    fn env(&self) -> Option<Vec<(String, String)>>;
+    /// `githubAuthRefused(message)`: GitHub refused the credentials of a network operation.
+    fn auth_refused(&self, message: &str) -> bool;
+    /// `githubTokenRefused(message)`: GitHub no longer accepts the token at all (401).
+    fn token_refused(&self, message: &str) -> bool;
+    /// `remoteAuthRefused()`: GitHub refused the sign-in as a whole; its owner checks it and forgets it when it is dead.
+    fn refused(&self);
+}
+
+/// `GitOptions` of git.ts.
 #[derive(Debug, Clone)]
 pub struct GitOptions {
     /// The executable (default "git"); tests point it at a stand-in.
@@ -118,6 +132,8 @@ pub struct GitOptions {
     pub write_output_bytes: usize,
     /// Where the trusted repositories are remembered (git-trust.json; memory only when None).
     pub trust_file: Option<PathBuf>,
+    /// The GitHub sign-in fetch, pull and push use (G3); None: git's own credentials only.
+    pub remote_auth: Option<std::sync::Arc<dyn RemoteAuth>>,
 }
 
 impl Default for GitOptions {
@@ -132,6 +148,7 @@ impl Default for GitOptions {
             max_output_bytes: OUTPUT_CAP,
             write_output_bytes: WRITE_OUTPUT_CAP,
             trust_file: None,
+            remote_auth: None,
         }
     }
 }
