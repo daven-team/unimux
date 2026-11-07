@@ -133,7 +133,7 @@ fallible-iterator = "0.2.0"
 rusqlite = { version = "0.41.1", default-features = false, features = ["bundled", "column_metadata"] }
 # mysql_common needs one flate2 backend: the pure Rust one (no C zlib build).
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
-# D7: TCP keep-alive on direct MySQL connections (mysql2 enableKeepAlive); the version tokio already pulls in.
+# D7 / D9: TCP keep-alive of DB connections (mysql2 enableKeepAlive, Node's setKeepAlive); the version tokio already pulls in.
 socket2 = "0.6.5"
 # B3 (unimux-net): an own HTTP client on hyper's connection API, because reqwest 0.13 always adds `Accept: */*` and the token
 # renewal must put exactly the given headers on the wire. TLS: rustls with the ring provider and the OS trust store
@@ -144,8 +144,6 @@ tower-service = "0.3.3"
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 rustls-platform-verifier = "0.7.1"
-# D9: TCP keep-alive of DB connections (Node's setKeepAlive)
-socket2 = "0.6.5"
 core-foundation = "0.10.1"
 core-foundation-sys = "0.8.7"
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }

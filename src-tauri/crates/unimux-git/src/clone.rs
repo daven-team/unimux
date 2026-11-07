@@ -12,11 +12,11 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 
+pub use crate::ops::op_message;
 pub use crate::runner::RemoteAuth;
 use crate::runner::{GitErrorCode, GitFailure, GitResult, RunOptions, RunOutput};
-use crate::shared::{INVALID_CLONE_URL, is_clone_url_str};
-pub use crate::ops::op_message;
 pub use crate::shared::GitOpResult;
+use crate::shared::{INVALID_CLONE_URL, is_clone_url_str};
 use crate::{Git, paths};
 
 /// `'Inna operacja git w tym repozytorium jeszcze trwa.'`
