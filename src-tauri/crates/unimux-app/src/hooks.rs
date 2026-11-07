@@ -65,6 +65,22 @@ impl Hooks {
         self.codex_hooked.lock().contains(cell)
     }
 
+    /// A Codex spawn of the cell (index.ts: `hooks.prepareCodex(cellId)` then `codexHooked.delete(cellId)`): a fresh nonce
+    /// and the notify URL; the cell counts as hooked again only once the new process reports.
+    #[allow(dead_code, reason = "called by the Codex spawn (P3)")]
+    pub fn prepare_codex(&self, cell: &str) -> String {
+        let url = self.server.prepare_codex(cell);
+        self.codex_hooked.lock().remove(cell);
+        url
+    }
+
+    /// The cell is gone for good (index.ts `forgetCell`: `codexHooked.delete(id)`, the hook nonce is dropped).
+    #[allow(dead_code, reason = "called by the cell removal path (P3)")]
+    pub fn forget(&self, cell: &str) {
+        self.codex_hooked.lock().remove(cell);
+        self.server.forget(cell);
+    }
+
     fn route(&self, ctx: &AppContext, signal: HookSignal) {
         let observers: Vec<Observer> = self.observers.read().clone();
         for o in observers {
@@ -146,6 +162,17 @@ mod tests {
         assert!(ctx.hooks.codex_hooked("c1"));
         ctx.hooks.route(&ctx, HookSignal::CliExit { cell: "c1".into(), code: Some(1) });
         assert_eq!(seen.load(Ordering::SeqCst), 3);
+        // A respawn starts unhooked: codex:bind may guess again until the new process reports.
+        let old_nonce = ctx.hooks.server.nonce("c1");
+        let url = ctx.hooks.prepare_codex("c1");
+        assert!(url.ends_with(&format!("/codex/{}", ctx.hooks.server.nonce("c1").unwrap())));
+        assert_ne!(ctx.hooks.server.nonce("c1"), old_nonce);
+        assert!(!ctx.hooks.codex_hooked("c1"));
+        ctx.hooks.route(&ctx, codex());
+        assert!(ctx.hooks.codex_hooked("c1"));
+        ctx.hooks.forget("c1");
+        assert!(!ctx.hooks.codex_hooked("c1"));
+        assert_eq!(ctx.hooks.server.nonce("c1"), None);
         ctx.saver.stop();
     }
 }

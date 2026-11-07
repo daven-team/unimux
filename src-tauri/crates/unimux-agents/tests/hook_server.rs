@@ -358,6 +358,76 @@ async fn stop_closes_the_listener() {
     assert!(TcpStream::connect(("127.0.0.1", f.port)).await.is_err());
 }
 
+/// One keep-alive request on an open stream: the status, or None when the server closed the connection instead.
+async fn keep_alive_post(stream: &mut TcpStream, port: u16, path: &str) -> Option<u16> {
+    let head = format!("POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: 0\r\n\r\n");
+    if stream.write_all(head.as_bytes()).await.is_err() {
+        return None;
+    }
+    let mut answer = Vec::new();
+    let mut buf = [0u8; 512];
+    while !answer.windows(4).any(|w| w == b"\r\n\r\n") {
+        match tokio::time::timeout(Duration::from_secs(3), stream.read(&mut buf)).await {
+            Ok(Ok(n)) if n > 0 => answer.extend_from_slice(&buf[..n]),
+            _ => return None,
+        }
+    }
+    String::from_utf8_lossy(&answer).split(' ').nth(1).and_then(|c| c.parse().ok())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stop_closes_idle_keep_alive_connections_and_emits_nothing_more() {
+    let f = Fixture::new().await;
+    let url = f.server.url("c1", "prompt");
+    let mut stream = TcpStream::connect(("127.0.0.1", f.port)).await.unwrap();
+    assert_eq!(keep_alive_post(&mut stream, f.port, &path_of(&url)).await, Some(204));
+    assert_eq!(f.hooks(), ["c1:prompt"]);
+    f.server.stop();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(keep_alive_post(&mut stream, f.port, &path_of(&url)).await, None, "the idle connection was closed at stop");
+    assert_eq!(f.hooks(), ["c1:prompt"], "nothing emitted after stop");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stop_lets_a_request_in_flight_finish() {
+    let f = Fixture::new().await;
+    let path = path_of(&f.server.url("c1", "stop"));
+    let mut stream = TcpStream::connect(("127.0.0.1", f.port)).await.unwrap();
+    let body = b"{}";
+    let head = format!("POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: {}\r\n\r\n", f.port, body.len());
+    stream.write_all(head.as_bytes()).await.unwrap();
+    stream.write_all(&body[..1]).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    f.server.stop();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    stream.write_all(&body[1..]).await.unwrap();
+    assert_eq!(status_of(&mut stream).await, 204, "answered, then the connection closes");
+    assert_eq!(f.hooks(), ["c1:stop"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn parallel_debug_writes_past_256_kib_keep_every_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = Fixture::new().await;
+    f.server.set_debug_dir(Some(dir.path().to_path_buf()));
+    let file = dir.path().join("hook-debug.log");
+    for round in 0..20 {
+        std::fs::write(&file, vec![b'x'; 300 * 1024]).unwrap();
+        let mut tasks = Vec::new();
+        for i in 0..16 {
+            let url = f.server.url(&format!("cell-{i}"), "stop");
+            let port = f.port;
+            tasks.push(tokio::spawn(async move { post(port, &url, "{}").await }));
+        }
+        for t in tasks {
+            assert_eq!(t.await.unwrap(), 204);
+        }
+        let log = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(log.lines().filter(|l| l.contains(" keys=")).count(), 16, "round {round}");
+        assert!(!log.contains('x'), "round {round}: the old log was restarted once");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mc_hook_debug_logs_payload_shapes_to_hook_debug_log() {
     let dir = tempfile::tempdir().unwrap();
