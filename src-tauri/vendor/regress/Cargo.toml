@@ -1,0 +1,40 @@
+# regress 0.12.0 (crates.io, MIT OR Apache-2.0) with one unimux patch (G7, docs/tauri/PROGRESS.md "G7 open issues"):
+# without the `u` flag a case-insensitive character class (`[a-z]`, `\w`) is closed under the Annex B Canonicalize rule
+# (toUpperCase, never from non-ASCII to ASCII) like V8, instead of Unicode simple case folding (upstream used the folding for
+# both modes, so /[a-z]/i matched the Kelvin sign U+212A and /\w/i matched U+017F). The patch is in src/unicode.rs
+# (`add_icase_code_points_legacy`) and src/parse.rs (the two call sites). The upstream tests are not vendored.
+[package]
+edition = "2024"
+name = "regress"
+version = "0.12.0"
+authors = ["ridiculousfish <corydoras@ridiculousfish.com>"]
+description = "A regular expression engine targeting EcmaScript syntax"
+readme = "README.md"
+keywords = ["regex", "regexp"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ridiculousfish/regress"
+autotests = false
+autobenches = false
+autoexamples = false
+
+[features]
+alloc = ["dep:hashbrown", "memchr/alloc"]
+backend-pikevm = []
+default = ["backend-pikevm", "std"]
+index-positions = []
+pattern = []
+prohibit-unsafe = []
+std = ["memchr/std"]
+utf16 = []
+
+[lib]
+name = "regress"
+path = "src/lib.rs"
+
+[dependencies.hashbrown]
+version = ">=0.16, <0.18"
+optional = true
+
+[dependencies.memchr]
+version = "2.4.0"
+default-features = false

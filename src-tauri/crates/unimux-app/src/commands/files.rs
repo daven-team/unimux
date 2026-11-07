@@ -7,15 +7,21 @@
 //! `fs:listProjectDirectories`, `fs:statProjectFile`, `fs:readProjectFile`, `fs:writeProjectFile`) and the editor's local
 //! files of the SFTP view (`local:readFile`, `local:statFile`, `local:writeFile`). The file system work runs on the blocking
 //! pool (a slow network share never stalls the IPC threads).
+//!
+//! G7: project search and replace (`fs:searchProject`, `fs:replaceInProject`). A new search of a window cancels its running
+//! one (1.1.4 kept one AbortController per sender); the cancelled search answers the empty, truncated result nobody shows.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use serde_json::{Value, json};
 use unimux_files::local::{LocalFiles, LocalPlatform};
 use unimux_files::preview::Preview;
 use unimux_files::project::{self, DIRECTORIES_LIMIT};
 use unimux_files::save::{self, SaveResult};
+use unimux_files::search;
 use unimux_ipc::{IpcError, Reply, RouterBuilder};
 
 use crate::context::AppContext;
@@ -72,6 +78,9 @@ fn forbidden_roots(ctx: &AppContext) -> Vec<String> {
     }
     roots.into_iter().map(|p| p.to_string_lossy().into_owned()).collect()
 }
+
+/// The running search of every window (by label): its id and cancel flag.
+type RunningSearches = HashMap<String, (u64, Arc<AtomicBool>)>;
 
 pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     let c = ctx.clone();
@@ -144,6 +153,44 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
             })
             .await?;
             Ok(result.to_json())
+        }
+    });
+
+    // The running search per window: a new one (typing goes on) stops the previous, whose answer nobody shows.
+    let searches: Arc<parking_lot::Mutex<RunningSearches>> = Arc::default();
+    let next_search = Arc::new(AtomicU64::new(0));
+    let c = ctx.clone();
+    r.invoke("fs:searchProject", move |call| {
+        let (c, searches, next_search) = (c.clone(), searches.clone(), next_search.clone());
+        async move {
+            let Some(root) = project_path(&c, call.arg(0)) else { return Ok(json!({ "ok": false, "error": GONE })) };
+            let id = next_search.fetch_add(1, Ordering::SeqCst);
+            let flag = Arc::new(AtomicBool::new(false));
+            let label = call.caller.label.clone();
+            if let Some((_, previous)) = searches.lock().insert(label.clone(), (id, flag.clone())) {
+                previous.store(true, Ordering::SeqCst);
+            }
+            let options = call.arg(1).clone();
+            let running = flag.clone();
+            let result =
+                blocking(&call.command, move || search::search_project(&root, &options, &search::clock(), Some(&running))).await;
+            {
+                let mut map = searches.lock();
+                if map.get(&label).is_some_and(|(current, _)| *current == id) {
+                    map.remove(&label);
+                }
+            }
+            result?.map_err(|e| call.fail(e.0))
+        }
+    });
+
+    let c = ctx.clone();
+    r.invoke("fs:replaceInProject", move |call| {
+        let c = c.clone();
+        async move {
+            let Some(root) = project_path(&c, call.arg(0)) else { return Ok(json!({ "ok": false, "error": GONE })) };
+            let request = call.arg(1).clone();
+            blocking(&call.command, move || search::replace_in_project(&root, &request)).await?.map_err(|e| call.fail(e.0))
         }
     });
 
@@ -288,6 +335,40 @@ mod tests {
         );
         assert_eq!(json_of(call(&r, "fs:writeProjectFile", json!(["p1", "a.txt", "x\u{fffd}", "two\r\n", true]))), invalid);
         assert_eq!(std::fs::read_to_string(project.path().join("a.txt")).unwrap(), "two\r\n");
+        ctx.saver.stop();
+    }
+
+    #[test]
+    fn search_and_replace_answer_like_1_1_4() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("a.txt"), "żółw token\r\nŻÓŁW 😀 token\n").unwrap();
+        let ctx = context(data.path(), project.path());
+        let r = router(&ctx);
+        let found = json_of(call(&r, "fs:searchProject", json!(["p1", { "query": "żółw" }])));
+        assert_eq!(found["matches"], 2);
+        assert_eq!(found["files"][0]["matches"][1]["preview"], "ŻÓŁW 😀 token");
+        assert_eq!(
+            json_of(call(&r, "fs:searchProject", json!(["nope", { "query": "a" }]))),
+            json!({ "ok": false, "error": GONE })
+        );
+        // A malformed request rejects (1.1.4 threw a TypeError).
+        let caller =
+            Caller::new("main", "http://tauri.localhost/index.html").with_request_origin(Some("http://tauri.localhost".into()));
+        let thrown =
+            tauri::async_runtime::block_on(r.invoke(Call::new("fs:searchProject", caller, vec![json!("p1"), Value::Null])));
+        assert!(thrown.is_err());
+        let replaced = json_of(call(
+            &r,
+            "fs:replaceInProject",
+            json!(["p1", { "options": { "query": "token" }, "replacement": "😀", "scope": { "kind": "all" } }]),
+        ));
+        assert_eq!(replaced, json!({ "ok": true, "replaced": 2, "files": [{ "path": "a.txt", "replaced": 2 }] }));
+        assert_eq!(std::fs::read_to_string(project.path().join("a.txt")).unwrap(), "żółw 😀\r\nŻÓŁW 😀 😀\n");
+        assert_eq!(
+            json_of(call(&r, "fs:replaceInProject", json!(["nope", { "options": {}, "replacement": "", "scope": {} }]))),
+            json!({ "ok": false, "error": GONE })
+        );
         ctx.saver.stop();
     }
 
