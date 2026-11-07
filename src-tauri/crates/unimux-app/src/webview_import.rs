@@ -2,9 +2,11 @@
 //!
 //! At start, before the main window exists, the old entries are read (from a copy of Electron's folder). The main window then
 //! gets one more initialization script, which runs before the bridge and the app in the first page: it stores every entry the
-//! new origin does not have yet (never overwriting), remembers the import id in sessionStorage (a reload of the same window
-//! skips it) and reports with `mc_webview_import_done`, which writes the marker `webview-import.json`. A start whose page never
-//! reported (the app ended first) offers the entries again; keys stored by then are kept as they are.
+//! new origin does not have yet (never overwriting), then the sentinel key with the import id, remembers the id in
+//! sessionStorage (a reload of the same window skips it) and reports with `mc_webview_import_done`, which writes an
+//! unconfirmed marker `webview-import.json`. WebView2 writes localStorage to disk seconds later, so only a later start whose
+//! page finds the sentinel confirms the marker (and then removes the sentinel). A start whose page never reported, or whose
+//! sentinel did not reach the disk (the app was killed first), offers the entries again; keys stored by then are kept.
 
 use std::sync::Arc;
 
@@ -58,32 +60,45 @@ pub fn script(import: &Import) -> String {
     }
     entries.push(']');
     let id = serde_json::to_string(&import.id).unwrap_or_else(|_| "\"\"".into());
+    let confirm = serde_json::to_string(&import.confirm).unwrap_or_else(|_| "null".into());
+    let sentinel = serde_json::to_string(import::SENTINEL_KEY).unwrap_or_default();
     format!(
         r#"(function () {{
-  var id = {id}, entries = {entries}, imported = 0, kept = 0, error = null, again = false;
+  var id = {id}, confirm = {confirm}, sentinel = {sentinel}, entries = {entries};
+  var imported = 0, kept = 0, error = null, again = false, confirmed = false;
   try {{
-    again = window.sessionStorage.getItem('mc:webview-import') === id;
+    again = window.sessionStorage.getItem(sentinel) === id;
     if (!again) {{
-      for (var i = 0; i < entries.length; i++) {{
-        if (window.localStorage.getItem(entries[i][0]) === null) {{ window.localStorage.setItem(entries[i][0], entries[i][1]); imported++; }}
-        else kept++;
+      window.sessionStorage.setItem(sentinel, id);
+      if (confirm !== null && window.localStorage.getItem(sentinel) === confirm) confirmed = true;
+      else {{
+        try {{
+          for (var i = 0; i < entries.length; i++) {{
+            if (window.localStorage.getItem(entries[i][0]) === null) {{ window.localStorage.setItem(entries[i][0], entries[i][1]); imported++; }}
+            else kept++;
+          }}
+        }} finally {{
+          // Also after an error (quota): the import is then final with the error, like any other reported one.
+          window.localStorage.setItem(sentinel, id);
+        }}
       }}
-      window.sessionStorage.setItem('mc:webview-import', id);
     }}
   }} catch (e) {{ error = String((e && e.message) || e); }}
   entries = null;
   if (again) return;
   var report = function () {{
-    var p = window.__TAURI_INTERNALS__.invoke('mc_webview_import_done', {{ id: id, imported: imported, kept: kept, error: error }});
-    if (p && p.catch) p.catch(function () {{}});
+    var p = window.__TAURI_INTERNALS__.invoke('mc_webview_import_done', {{ id: id, imported: imported, kept: kept, error: error, confirmed: confirmed }});
+    // The sentinel goes only once the marker is confirmed on disk, so a kill in between never brings the import back.
+    if (p && p.then) p.then(function () {{ if (confirmed) try {{ window.localStorage.removeItem(sentinel); }} catch (e) {{}} }}, function () {{}});
   }};
   try {{ report(); }} catch (e) {{ window.addEventListener('DOMContentLoaded', function () {{ try {{ report(); }} catch (e2) {{}} }}); }}
 }})();"#
     )
 }
 
-/// The page stored the entries: write the marker so the next start does not offer them again.
+/// The page stored the entries (unconfirmed marker), or found the sentinel of the earlier import (confirmed marker).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn mc_webview_import_done(
     webview: Webview,
     ctx: State<'_, Arc<AppContext>>,
@@ -92,6 +107,7 @@ pub async fn mc_webview_import_done(
     imported: usize,
     kept: usize,
     error: Option<String>,
+    confirmed: Option<bool>,
 ) -> Result<(), String> {
     if webview.label() != crate::windows::MAIN {
         return Err("refused".into());
@@ -107,8 +123,14 @@ pub async fn mc_webview_import_done(
     if let Some(e) = &error {
         ctx.crash.warn(&format!("localStorage of 1.1.x: {imported} of {} entries stored, then: {e}", done.entries.len()));
     }
-    ctx.mark("webview-import-done");
-    import::write_marker(&ctx.data_dir, &Marker::new(done.entries.len(), imported, kept, error, true)).map_err(|e| {
+    let written = if confirmed == Some(true) {
+        ctx.mark("webview-import-confirmed");
+        import::confirm_marker(&ctx.data_dir)
+    } else {
+        ctx.mark("webview-import-done");
+        import::write_marker(&ctx.data_dir, &Marker::unconfirmed(id, done.entries.len(), imported, kept, error))
+    };
+    written.map_err(|e| {
         ctx.crash.warn(&format!("webview-import.json: {e}"));
         e.to_string()
     })
@@ -125,10 +147,16 @@ mod tests {
         let import = Import {
             id: "abc".into(),
             entries: vec![Entry { key: u("k\"1"), value: u("v\n1") }, Entry { key: u("draft"), value: vec![0xd800] }],
+            confirm: None,
         };
         let s = script(&import);
-        assert!(s.contains(r#"var id = "abc", entries = [["k\"1","v\n1"],["draft","\ud800"]]"#), "{s}");
+        assert!(
+            s.contains(r#"var id = "abc", confirm = null, sentinel = "mc:webview-import", entries = [["k\"1","v\n1"],["draft","\ud800"]]"#),
+            "{s}"
+        );
         assert!(s.contains("mc_webview_import_done"));
         assert!(!s.contains('\u{2014}'));
+        let again = script(&Import { confirm: Some("old".into()), ..import });
+        assert!(again.contains(r#"confirm = "old""#), "{again}");
     }
 }

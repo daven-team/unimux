@@ -6,8 +6,9 @@
 //    folds, a 300 KB value, a lone surrogate, a non-Latin-1 key); the second run overwrites one key and deletes another, so
 //    the database has a compacted table, a log and a tombstone.
 // 2. The Tauri check build starts on a copy: every entry is there with the same UTF-16 units, the draft is back in the file
-//    store, the marker is written, Electron's files are byte-identical. A change made in 1.2.0 survives the second start
-//    (no second import).
+//    store, the marker is written (unconfirmed, with the sentinel key), Electron's files are byte-identical. A change made in
+//    1.2.0 survives the second start, which confirms the marker (no second import). Before that, a copy whose app is
+//    hard-killed (taskkill /T /F) 300 ms after the page reported still has every entry on the next start.
 // 3. OS drops (CDP Input.dispatchDragEvent with real paths): a file and a folder onto a cell, onto the SSH key editor and a
 //    page-level probe get their exact paths through window.mc.pathsForFiles.
 // 4. Internal drags (CDP Input.setInterceptDrags: the page's own dragstart data is dropped back): grid tab reorder, tab dropped
@@ -177,9 +178,9 @@ async function clickEl(page, selector) {
   return true;
 }
 const bridge = (page, op, args) => page.evaluate(`window.__TAURI_INTERNALS__.invoke('test_bridge', ${JSON.stringify({ op, args: args ?? null })})`);
-async function startTauri() {
+async function startTauri(dir = dataDir) {
   const port = await freePort();
-  const child = launchApp({ dataDir, scratch, port });
+  const child = launchApp({ dataDir: dir, scratch, port });
   children.push(child);
   const page = await connectPage(port, { timeoutMs: 60000 });
   await waitFor(page, 'window.__mc?.useStore?.getState?.().ready === true', 60000, 'Tauri renderer ready');
@@ -193,8 +194,43 @@ async function quitTauri({ child, page }) {
   page.close();
 }
 const markerFile = join(dataDir, 'webview-import.json');
+const SENTINEL = 'mc:webview-import';
+const readMarker = (file) => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null);
+const sameEntries = (got) => [...expected].filter(([k, v]) => JSON.stringify(got.get(k)) !== JSON.stringify(v)).map(([k]) => k);
 
 try {
+  // ── 2a. Hard kill right after the import (WebView2 has not written localStorage to disk yet) ──
+  {
+    const killDir = join(scratch, 'tauri-kill');
+    cpSync(electronDir, killDir, { recursive: true });
+    const killMarker = join(killDir, 'webview-import.json');
+    let app = await startTauri(killDir);
+    const deadline = Date.now() + 20000;
+    while (!existsSync(killMarker) && Date.now() < deadline) await sleep(50);
+    await sleep(300);
+    const first = readMarker(killMarker);
+    check('kill case: the page reported, the marker waits for confirmation', first && first.confirmed === false && typeof first.id === 'string' && first.imported === expected.size, JSON.stringify(first));
+    killTree(app.child);
+    await waitExit(app.child, 10000);
+    app.page.close();
+    await sleep(1000);
+
+    app = await startTauri(killDir);
+    const missing = sameEntries(asMap(await app.page.evaluate(DUMP)));
+    check('kill case, second start: every 1.1.4 entry is there', missing.length === 0, missing.length ? `missing or different: ${missing.length} of ${expected.size}` : `${expected.size} entries`);
+    const second = readMarker(killMarker);
+    // Either WebView2 got the writes out before the kill (confirmed now) or it did not (imported again, still unconfirmed).
+    check('kill case, second start: the marker is confirmed or the import ran again', second && ((second.confirmed === true && second.id === first?.id) || (second.confirmed === false && second.id !== first?.id)), JSON.stringify(second));
+    await quitTauri(app);
+
+    app = await startTauri(killDir);
+    const third = asMap(await app.page.evaluate(DUMP));
+    const thirdMissing = sameEntries(third);
+    const thirdMarker = readMarker(killMarker);
+    check('kill case, after a normal quit: entries kept, marker confirmed, sentinel removed', thirdMissing.length === 0 && thirdMarker?.confirmed === true && !third.has(SENTINEL), JSON.stringify({ missing: thirdMissing.length, marker: thirdMarker }));
+    await quitTauri(app);
+  }
+
   let app = await startTauri();
   const got = asMap(await app.page.evaluate(DUMP));
   const missing = [...expected].filter(([k, v]) => JSON.stringify(got.get(k)) !== JSON.stringify(v)).map(([k]) => k);
@@ -205,8 +241,9 @@ try {
   check('the unsaved file draft is back in the file store', drafts.length === 1 && drafts[0].text === DRAFT.text && drafts[0].saved === DRAFT.savedText, JSON.stringify(drafts));
   const dbOpen = await app.page.evaluate('window.__mc.dbClient?.useDbStore?.getState?.().open ?? null');
   check('the DB tree state is back (read at module load)', JSON.stringify(dbOpen) === FIRST['mc-db-tree-v1'], JSON.stringify(dbOpen));
-  const marker = existsSync(markerFile) ? JSON.parse(readFileSync(markerFile, 'utf8')) : null;
-  check('webview-import.json written after the page stored them', marker && marker.version === 1 && marker.entries === expected.size && marker.imported === expected.size && marker.kept === 0 && marker.error === null && marker.origin === 'file://', JSON.stringify(marker));
+  const marker = readMarker(markerFile);
+  check('webview-import.json written (unconfirmed) after the page stored them', marker && marker.version === 1 && marker.entries === expected.size && marker.imported === expected.size && marker.kept === 0 && marker.error === null && marker.origin === 'file://' && marker.confirmed === false && typeof marker.id === 'string', JSON.stringify(marker));
+  check('... and the sentinel holds the import id', JSON.stringify(got.get(SENTINEL)) === JSON.stringify([...marker?.id ?? ''].map((c) => c.charCodeAt(0))));
   check('Electron\'s localStorage files are byte-identical', hashDb() === dbBefore);
   const scratchCopies = readdirSync(tmpdir()).filter((f) => f.startsWith(`unimux-ls-import-${app.child.pid}-`));
   check('the scratch copy of the database was removed', scratchCopies.length === 0, scratchCopies.join(' '));
@@ -224,7 +261,10 @@ try {
   app = await startTauri();
   const second = await app.page.evaluate(`[localStorage.getItem('mc-split-ratio-v1'), localStorage.getItem('mc-w3-klucz-ł'), localStorage.getItem('mc-w3-run2')]`);
   check('second start: not imported again (changed and removed keys stay as 1.2.0 left them)', second[0] === '0.4' && second[1] === null && second[2] === 'second run', JSON.stringify(second));
-  check('... and the marker is unchanged', readFileSync(markerFile, 'utf8') === markerText);
+  for (const until = Date.now() + 10000; readMarker(markerFile)?.confirmed !== true && Date.now() < until;) await sleep(100);
+  const confirmedMarker = readMarker(markerFile);
+  const firstMarker = JSON.parse(markerText);
+  check('... the marker is confirmed (same import, same counts) and the sentinel is gone', confirmedMarker?.confirmed === true && JSON.stringify({ ...confirmedMarker, confirmed: false }) === JSON.stringify(firstMarker) && (await app.page.evaluate(`localStorage.getItem(${JSON.stringify(SENTINEL)})`)) === null, JSON.stringify(confirmedMarker));
   check('Electron\'s localStorage files are still byte-identical', hashDb() === dbBefore);
 
   // ── 3. OS drops ────────────────────────────────────────────────────────────

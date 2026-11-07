@@ -6,7 +6,7 @@
 // dragstart on the selected source rows (the pane's own handler fills the DataTransfer and remembers the drag), then
 // dragenter/dragover/drop on the target with the same DataTransfer, then dragend. A forged payload without a dragstart behind
 // it (what another app could put under the custom type) is checked to do nothing.
-// The OS drop goes through CDP Input.dispatchDragEvent with real file paths, so the pane reads them with window.mc.pathForFile
+// The OS drop goes through CDP Input.dispatchDragEvent with real file paths, so the pane reads them with window.mc.pathsForFiles
 // (webUtils.getPathForFile in the preload), exactly like a drop from Explorer.
 // 0.9.9 (steps 9b-9e and 12b, screenshots D:\Projekty\_shots\099-*.png): the turning refresh icon, moves by a drag inside each
 // pane (onto a folder row, a path segment and ".."), Cut / Paste, a folder into itself refused, permissions with digits, with the
@@ -302,7 +302,7 @@ try {
   if (existsSync(join(home, 'site')) || existsSync(join(home, 'docs'))) throw new Error('delete left files on the server');
   log('delete OK');
 
-  // 9. A drop from the OS (real file paths through CDP; the pane reads them with window.mc.pathForFile).
+  // 9. A drop from the OS (real file paths through CDP; the pane reads them with window.mc.pathsForFiles).
   const box = await ev(`(() => { const r = document.querySelector('.sftp-pane-remote .sftp-list').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.bottom - 20 }; })()`);
   const data = { items: [], files: [join(local, 'os-drop.txt')], dragOperationsMask: 1 };
   for (const type of ['dragEnter', 'dragOver', 'drop']) await app.cdp('Input.dispatchDragEvent', { type, x: box.x, y: box.y, data });

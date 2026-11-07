@@ -147,10 +147,20 @@ pub mod last_drop {
     }
 
     pub fn recent() -> Vec<String> {
+        recent_at(Instant::now())
+    }
+
+    /// The paths of the last drop as seen at `now`: empty once the record is older than `MAX_AGE`.
+    pub fn recent_at(now: Instant) -> Vec<String> {
         match &*LAST.lock() {
-            Some((at, paths)) if at.elapsed() <= MAX_AGE => paths.clone(),
+            Some((at, paths)) if fresh(*at, now) => paths.clone(),
             _ => Vec::new(),
         }
+    }
+
+    /// Whether a drop recorded at `at` still counts at `now`.
+    pub fn fresh(at: Instant, now: Instant) -> bool {
+        now.saturating_duration_since(at) <= MAX_AGE
     }
 }
 
@@ -260,7 +270,20 @@ mod tests {
 
     #[test]
     fn the_last_drop_expires() {
+        use std::time::{Duration, Instant};
+        let at = Instant::now();
+        assert!(last_drop::fresh(at, at));
+        assert!(last_drop::fresh(at, at + last_drop::MAX_AGE));
+        assert!(!last_drop::fresh(at, at + last_drop::MAX_AGE + Duration::from_millis(1)));
+        // A clock read before the record (another thread) still counts as fresh.
+        assert!(last_drop::fresh(at + Duration::from_secs(1), at));
+
+        let before = Instant::now();
         last_drop::record(vec!["/tmp/a".into()]);
+        let after = Instant::now();
         assert_eq!(last_drop::recent(), ["/tmp/a"]);
+        // `before` <= the record's time <= `after`, so these ages are just inside and well past MAX_AGE.
+        assert_eq!(last_drop::recent_at(before + last_drop::MAX_AGE), ["/tmp/a"]);
+        assert!(last_drop::recent_at(after + last_drop::MAX_AGE + Duration::from_millis(1)).is_empty());
     }
 }

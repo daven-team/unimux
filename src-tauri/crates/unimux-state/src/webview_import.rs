@@ -7,6 +7,13 @@
 //! first page through the boot script (unimux-app `webview_import`); the marker `DATA_DIR/webview-import.json` stops a
 //! second import.
 //!
+//! WebView2 writes localStorage to disk a few seconds after a change, so the page's report does not prove the entries are
+//! stored for good: an app killed in that gap would lose them. The page therefore also stores a sentinel key
+//! (`SENTINEL_KEY` = the import id) after the entries, and the report writes an unconfirmed marker. The next start reads the
+//! old entries again and its page looks for the sentinel: present means everything written before it reached the disk
+//! (Chromium writes the changes of an origin to leveldb in order), so the marker becomes confirmed and the sentinel is
+//! removed; missing means the earlier run ended too early, and the import runs again (still never overwriting a key).
+//!
 //! Chromium's format (components/services/storage/dom_storage/local_storage_impl.cc): a key is
 //! `_` + origin + `\x00` + the script key, a value is the script value; both encoded as a prefix byte `0x00` (UTF-16LE) or
 //! `0x01` (Latin-1) and the units. Other rows (`VERSION`, `META:<origin>`, `METAACCESS:<origin>`) are skipped.
@@ -22,6 +29,8 @@ use serde::{Deserialize, Serialize};
 
 /// The marker of a finished (or abandoned) import, next to state.json.
 pub const MARKER_FILE: &str = "webview-import.json";
+/// The localStorage (and sessionStorage) key of the import id, see the module comment.
+pub const SENTINEL_KEY: &str = "mc:webview-import";
 /// The origin of 1.1.x's renderer (`BrowserWindow.loadFile`).
 pub const ELECTRON_ORIGIN: &str = "file://";
 
@@ -55,7 +64,7 @@ pub enum Prepared {
     Done,
     /// No 1.1.x localStorage (a fresh install, or 1.1.x never stored anything): the marker was written, nothing to inject.
     Nothing,
-    /// Entries to inject on the first page load; the marker is written once the page confirms.
+    /// Entries to inject on the first page load; the marker is written once the page reports, and confirmed by a later start.
     Pending(Import),
     /// The old database could not be read: the marker records the error, so the start does not try again every time.
     Failed(String),
@@ -66,6 +75,8 @@ pub struct Import {
     /// Names this import in the page's sessionStorage, so a reload of the same window does not apply it twice.
     pub id: String,
     pub entries: Vec<Entry>,
+    /// The id of an earlier, unconfirmed import: when the page finds it as the sentinel, it confirms instead of importing.
+    pub confirm: Option<String>,
 }
 
 /// `webview-import.json`. Written by 1.2.0 only; 1.1.x never reads it.
@@ -84,9 +95,20 @@ pub struct Marker {
     /// Entries the page already had (never overwritten).
     pub kept: usize,
     pub error: Option<String>,
+    /// The import whose sentinel a later start looks for (null when nothing was handed to a page).
+    #[serde(default)]
+    pub id: Option<String>,
+    /// False until a later start has seen the sentinel on disk; an unconfirmed marker does not stop the import.
+    #[serde(default = "confirmed_by_default")]
+    pub confirmed: bool,
+}
+
+fn confirmed_by_default() -> bool {
+    true
 }
 
 impl Marker {
+    /// A final marker (nothing to import, or the import was given up).
     pub fn new(entries: usize, imported: usize, kept: usize, error: Option<String>, had_source: bool) -> Self {
         Self {
             version: 1,
@@ -97,12 +119,31 @@ impl Marker {
             imported,
             kept,
             error,
+            id: None,
+            confirmed: true,
         }
+    }
+
+    /// The marker of an import the page reported but WebView2 may not have written to disk yet.
+    pub fn unconfirmed(id: String, entries: usize, imported: usize, kept: usize, error: Option<String>) -> Self {
+        Self { id: Some(id), confirmed: false, ..Self::new(entries, imported, kept, error, true) }
     }
 }
 
 pub fn marker_path(data_dir: &Path) -> PathBuf {
     data_dir.join(MARKER_FILE)
+}
+
+/// The marker on disk, if it exists and parses.
+pub fn read_marker(data_dir: &Path) -> Option<Marker> {
+    serde_json::from_str(&fs::read_to_string(marker_path(data_dir)).ok()?).ok()
+}
+
+/// A later start saw the sentinel: the earlier import is on disk for good.
+pub fn confirm_marker(data_dir: &Path) -> io::Result<()> {
+    let mut marker = read_marker(data_dir).ok_or_else(|| io::Error::other("no unconfirmed marker"))?;
+    marker.confirmed = true;
+    write_marker(data_dir, &marker)
 }
 
 pub fn write_marker(data_dir: &Path, marker: &Marker) -> io::Result<()> {
@@ -111,26 +152,44 @@ pub fn write_marker(data_dir: &Path, marker: &Marker) -> io::Result<()> {
     unimux_core::atomic_write::atomic_write(&marker_path(data_dir), text.as_bytes(), &Default::default())
 }
 
-/// Decides at start: done, nothing, entries to inject, or failed (the last two never touch Electron's files; `Nothing` and
-/// `Failed` write the marker right away).
+/// Decides at start: done, nothing, entries to inject, or failed (none of them touch Electron's files; `Nothing` and
+/// `Failed` write a final marker right away). An unconfirmed marker (see the module comment) hands the entries out again
+/// with the id to confirm.
 pub fn prepare(data_dir: &Path, scratch_root: &Path) -> Prepared {
+    let mut earlier = None;
     if marker_path(data_dir).exists() {
-        return Prepared::Done;
+        match read_marker(data_dir) {
+            Some(marker) if !marker.confirmed => earlier = Some(marker),
+            // Confirmed, or unreadable: importing again could bring back keys deleted since, so it stays done.
+            _ => return Prepared::Done,
+        }
     }
+    // An earlier import whose old database is gone or broken now cannot be offered again: its marker becomes final.
+    let finish = |error: Option<String>, fresh: Marker| {
+        let marker = match &earlier {
+            Some(m) => Marker { confirmed: true, error: error.or_else(|| m.error.clone()), ..m.clone() },
+            None => fresh,
+        };
+        let _ = write_marker(data_dir, &marker);
+    };
     let source = leveldb_dir(data_dir);
     if !source.join("CURRENT").is_file() {
-        let _ = write_marker(data_dir, &Marker::new(0, 0, 0, None, false));
+        finish(None, Marker::new(0, 0, 0, None, false));
         return Prepared::Nothing;
     }
     match read_local_storage(&source, scratch_root, ELECTRON_ORIGIN) {
         Ok(entries) if entries.is_empty() => {
-            let _ = write_marker(data_dir, &Marker::new(0, 0, 0, None, true));
+            finish(None, Marker::new(0, 0, 0, None, true));
             Prepared::Nothing
         }
-        Ok(entries) => Prepared::Pending(Import { id: uuid::Uuid::new_v4().to_string(), entries }),
+        Ok(entries) => Prepared::Pending(Import {
+            id: uuid::Uuid::new_v4().to_string(),
+            entries,
+            confirm: earlier.as_ref().and_then(|m| m.id.clone()),
+        }),
         Err(e) => {
             let error = e.to_string();
-            let _ = write_marker(data_dir, &Marker::new(0, 0, 0, Some(error.clone()), true));
+            finish(Some(error.clone()), Marker::new(0, 0, 0, Some(error.clone()), true));
             Prepared::Failed(error)
         }
     }
@@ -346,9 +405,61 @@ mod tests {
         make_db(&leveldb_dir(&data), &[(script_key("file://", &units("k")), encode_string(&units("v")))]);
         let Prepared::Pending(import) = prepare(&data, tmp.path()) else { panic!("expected entries") };
         assert_eq!(import.entries, vec![Entry { key: units("k"), value: units("v") }]);
+        assert_eq!(import.confirm, None);
         assert!(!marker_path(&data).exists(), "the marker waits for the page");
-        // Not confirmed (the app ended before the page loaded): the next start offers them again.
+        // Not reported (the app ended before the page loaded): the next start offers them again.
         assert!(matches!(prepare(&data, tmp.path()), Prepared::Pending(_)));
+    }
+
+    #[test]
+    fn a_reported_import_is_offered_again_until_a_later_start_confirms_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("data");
+        make_db(&leveldb_dir(&data), &[(script_key("file://", &units("k")), encode_string(&units("v")))]);
+        let Prepared::Pending(first) = prepare(&data, tmp.path()) else { panic!("expected entries") };
+        // The page reported: WebView2 may still hold the writes in memory.
+        write_marker(&data, &Marker::unconfirmed(first.id.clone(), 1, 1, 0, None)).unwrap();
+        let text = fs::read_to_string(marker_path(&data)).unwrap();
+        assert!(text.contains("\"confirmed\": false") && text.contains(&first.id), "{text}");
+        // The app was killed before the write: the next start hands the entries out again, with the id to look for.
+        let Prepared::Pending(second) = prepare(&data, tmp.path()) else { panic!("expected entries again") };
+        assert_eq!(second.entries, first.entries);
+        assert_eq!(second.confirm.as_deref(), Some(first.id.as_str()));
+        assert_ne!(second.id, first.id);
+        // That page found the sentinel: confirmed, and later starts are done.
+        confirm_marker(&data).unwrap();
+        let marker = read_marker(&data).unwrap();
+        assert!(marker.confirmed);
+        assert_eq!((marker.entries, marker.imported, marker.id), (1, 1, Some(first.id)));
+        assert!(matches!(prepare(&data, tmp.path()), Prepared::Done));
+    }
+
+    #[test]
+    fn an_unconfirmed_import_whose_database_is_gone_becomes_final() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("data");
+        fs::create_dir_all(&data).unwrap();
+        write_marker(&data, &Marker::unconfirmed("old".into(), 3, 2, 1, None)).unwrap();
+        assert!(matches!(prepare(&data, tmp.path()), Prepared::Nothing));
+        let marker = read_marker(&data).unwrap();
+        assert!(marker.confirmed);
+        assert_eq!((marker.entries, marker.imported, marker.kept, marker.id.as_deref()), (3, 2, 1, Some("old")));
+        assert!(matches!(prepare(&data, tmp.path()), Prepared::Done));
+    }
+
+    #[test]
+    fn markers_without_the_new_fields_and_unreadable_ones_count_as_done() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("data");
+        make_db(&leveldb_dir(&data), &[(script_key("file://", &units("k")), encode_string(&units("v")))]);
+        fs::write(
+            marker_path(&data),
+            r#"{"version":1,"importedAt":"x","source":null,"origin":"file://","entries":0,"imported":0,"kept":0,"error":null}"#,
+        )
+        .unwrap();
+        assert!(matches!(prepare(&data, tmp.path()), Prepared::Done));
+        fs::write(marker_path(&data), "not json").unwrap();
+        assert!(matches!(prepare(&data, tmp.path()), Prepared::Done));
     }
 
     #[test]
