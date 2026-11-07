@@ -23,9 +23,10 @@ import { encodeWin32Key } from '../../../shared/win32input';
 import { mayAnswer, permissionAsk, permissionKeys, type PermissionAnswer, type PermissionCellState } from '../../../shared/permissionAction';
 import { tr } from '../i18n';
 import { confirmTerminalLink } from '../terminalLinks';
-import { applyScrollback, DEFAULT_SCROLLBACK_LINES, MAX_WEBGL_CONTEXTS, PENDING_OUTPUT_CHARS } from '../../../shared/terminalLimits';
+import { applyScrollback, DEFAULT_SCROLLBACK_LINES, maxWebglContexts, PENDING_OUTPUT_CHARS } from '../../../shared/terminalLimits';
 import { nextLossCount, pickPrewarm, planWebgl, WEBGL_GRANT_BUDGET_MS, WEBGL_PREWARM_GAP_MS, WEBGL_PREWARM_IDLE_MS, WEBGL_PREWARM_QUIET_MS, webglBackoff, WebglLimit, type WebglCandidate } from '../../../shared/webglPool';
 import { onWindowShown } from '../windowShown';
+import { webviewEngine } from '../platform';
 import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
 import { cursorOffset, reflowedCursor, type WrapBuffer } from '../../../shared/cursorReflow';
 import { coalesceViewportSync } from '../../../shared/viewportSync';
@@ -159,8 +160,8 @@ class TerminalManager {
   private ackTimer: ReturnType<typeof setTimeout> | null = null;
   /** False while the window is minimized or hidden: no terminal is drawn and no WebGL context is kept (output still buffers). */
   private windowShown = true;
-  /** WebGL contexts handed out at most: lowered when Chromium turns out to allow fewer (see `contextLost`). */
-  private webglLimit = new WebglLimit(MAX_WEBGL_CONTEXTS);
+  /** WebGL contexts handed out at most (64 on Chromium, 12 on WebKit): lowered when the engine turns out to allow fewer (see `contextLost`). */
+  private webglLimit = new WebglLimit(maxWebglContexts(webviewEngine()));
   /** When the last WebGL context was created. */
   private lastGrantAt = -Infinity;
   /** The 400 ms status tick runs only while there are terminals: an empty window (first run, no project) never wakes up for it. */

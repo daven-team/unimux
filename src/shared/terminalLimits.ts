@@ -52,3 +52,22 @@ export const CHROMIUM_WEBGL_CONTEXTS = 96;
  * terminals keep theirs while slots are free; the least recently shown one is released first.
  */
 export const MAX_WEBGL_CONTEXTS = 64;
+
+/** The browser engine of the window: Chromium (Electron 1.1.4, WebView2) or WebKit (WKWebView, the Tauri app on macOS). */
+export type WebviewEngine = 'chromium' | 'webkit';
+
+/**
+ * Active WebGL contexts WebKit allows a page (WebGLRenderingContextBase `maxActiveContexts`). There is no switch to raise it;
+ * the context created beyond it makes WebKit lose the oldest one, like Chromium beyond its switch.
+ */
+export const WEBKIT_WEBGL_CONTEXTS = 16;
+
+/**
+ * WebGL renderers alive at the same time under WebKit: below WEBKIT_WEBGL_CONTEXTS for the same headroom as on Chromium (a
+ * context given back stays counted until it is collected). A 5x4 grid then draws 12 cells through WebGL (focused and busy
+ * ones first) and the others through xterm's DOM renderer; WebglLimit lowers it further if WebKit evicts earlier.
+ */
+export const MAX_WEBGL_CONTEXTS_WEBKIT = 12;
+
+/** The WebGL pool size of an engine (TerminalManager's WebglLimit starts here). */
+export const maxWebglContexts = (engine: WebviewEngine): number => (engine === 'webkit' ? MAX_WEBGL_CONTEXTS_WEBKIT : MAX_WEBGL_CONTEXTS);

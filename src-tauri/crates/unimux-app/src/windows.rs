@@ -21,6 +21,7 @@ const BACKGROUND: tauri::window::Color = tauri::window::Color(0x0d, 0x0d, 0x0d, 
 
 /// The browser arguments of every app webview (they share one WebView2 data folder, so they must be identical: a mismatch
 /// fails with 0x8007139F). WebGL contexts for a 5x4 grid, no background throttling, autoplay for alert sounds.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn browser_args(debug_port: Option<u16>) -> String {
     let args = String::from(
         "--max-active-webgl-contexts=96 --disable-background-timer-throttling --disable-renderer-backgrounding \
@@ -85,6 +86,11 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
         builder = builder
             .additional_browser_args(&browser_args(ctx.overrides.debug_port))
             .data_directory(ctx.data_dir.join("webview2"));
+    }
+    // macOS: hidden title bar with the traffic lights of 1.1.4, no WebKit throttling (W2).
+    #[cfg(target_os = "macos")]
+    {
+        builder = crate::mac_chrome::apply(builder, crate::mac_chrome::WindowKind::Main);
     }
     if offscreen {
         builder = builder.position(-6000.0, 0.0).skip_taskbar(true).focused(false).focusable(false);

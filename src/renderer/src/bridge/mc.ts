@@ -4,17 +4,26 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { createMcApi } from '../../../preload/mcApi';
 import { createPortPoster, createTauriTransport, McNotYetError, type BootInfo, type TauriTransport } from './transport';
+import { installCompat, type CompatReport } from './webkitCompat';
+import { installMacDrag, type DragGlobal } from './macDrag';
 
 declare global {
   interface Window {
     __MC_BOOT__?: BootInfo;
     __MC_TAURI__?: { McNotYetError: typeof McNotYetError; transport: TauriTransport };
+    __MC_COMPAT__?: CompatReport;
   }
 }
 
 const fallbackBoot = (): BootInfo => ({ platform: /Mac/.test(navigator.platform) ? 'darwin' : 'win32', windowsBuild: 0, label: 'main' });
 const boot: BootInfo = window.__MC_BOOT__ ?? fallbackBoot();
+// First, before anything reads requestIdleCallback / crypto.randomUUID / AudioContext (WebKit on macOS, PLAN W2).
+window.__MC_COMPAT__ = Object.freeze(installCompat(window as unknown as Parameters<typeof installCompat>[0], boot.platform));
 const current = getCurrentWebviewWindow();
+// macOS: the title bar's drag area (WKWebView ignores -webkit-app-region; PLAN W2).
+if (boot.platform === 'darwin') {
+  installMacDrag(window as unknown as DragGlobal, { startDragging: () => current.startDragging(), doubleClick: () => invoke('mac_title_double_click') });
+}
 const newSession = () => (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
 
 const transport = createTauriTransport(boot, {

@@ -16,6 +16,7 @@ fn main() {
         "update_splash_init",
         "update_splash_close",
         "update_splash_open",
+        "mac_title_double_click",
         "test_bridge",
         "test_channel_bench",
         "test_channel_pull",

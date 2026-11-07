@@ -81,6 +81,10 @@ sha1 = "0.11.0"
 zeroize = "1.9.1"
 getrandom = "0.4.3"
 security-framework = "3.7.0"
+# macOS window chrome / App Nap / WebKit text substitutions / editing actions (W2): the versions tao and wry already use.
+objc2 = "=0.6.5"
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSDictionary", "NSValue", "NSProcessInfo", "NSUserDefaults", "NSObject"] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSApplication", "NSResponder"] }
 # SP7: ring backend (same provider as rustls), no aws-lc-sys build; "des" is not needed (3des-cbc is not in 1.1.4's offer).
 russh = { version = "=0.65.1", default-features = false, features = ["ring", "rsa", "flate2"] }
 # The ssh-key russh pins; "tdes" adds 3des-cbc OpenSSH key files (1.1.4 reads them). SP7.

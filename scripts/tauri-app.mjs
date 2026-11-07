@@ -61,7 +61,11 @@ export function killTree(child) {
   try {
     if (process.platform === 'win32') execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
     else process.kill(-child.pid, 'SIGKILL');
-  } catch { /* already gone */ }
+  } catch {
+    // macOS: launchApp does not start a process group, so the group kill fails; the app itself (WebKit's helpers are XPC
+    // services that end with it) is enough.
+    try { child.kill('SIGKILL'); } catch { /* already gone */ }
+  }
 }
 
 /** A minimal DevTools protocol client for the app page (`match`: a target id, for pages that are not the Tauri app). */

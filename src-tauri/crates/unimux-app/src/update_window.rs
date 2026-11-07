@@ -422,7 +422,11 @@ impl UpdateWindow {
         let program = self.config.installer.clone().ok_or_else(|| "no installer".to_string())?;
         let args = self.config.installer_args.clone().unwrap_or_default();
         let elevate = needs_elevation(&self.config.install_dir);
+        #[cfg(windows)]
         let owner = self.window().and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize);
+        // macOS has no owner window for the installer (U5 swaps the bundle instead).
+        #[cfg(not(windows))]
+        let owner: Option<isize> = None;
         // Outside the install dir and outside the copy, like the cleanup.
         match installer::start(&program, &args, &std::env::temp_dir(), owner, elevate) {
             Ok(run) => {
