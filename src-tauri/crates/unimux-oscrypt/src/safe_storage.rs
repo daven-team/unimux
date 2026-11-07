@@ -11,7 +11,12 @@
 //!   run it off the main thread.
 //! - On Windows Chromium's OSCrypt::Init runs at browser start and an idle 1.1.4 run already writes `Local State` (SP2 check
 //!   E); the app calls [`SafeStorage::warm`] on a background thread at start for the same effect.
-//! - `MC_SSH_NO_SAFESTORAGE === '1'` in an unpackaged 1.1.x: unavailable (DevOverrides, compiled out of release builds).
+//! - `MC_SSH_NO_SAFESTORAGE === '1'` in an unpackaged 1.1.x (DevOverrides, compiled out of release builds): `electronCipher`
+//!   reports `storage` `unavailable` and `available()` false without asking safeStorage (so on macOS the flag alone never
+//!   reads the Keychain), but `encrypt` / `decrypt` still call the real `encryptString` / `decryptString`, and Chromium's
+//!   OSCrypt::Init still runs at start on Windows. [`SafeStorage`] does the same: the flag gates only `storage()` /
+//!   `available()`; the key is opened as usual (Windows: `Local State` read or created at start), so a secret saved
+//!   without the flag still decrypts and nothing new is saved (the stores check `available()` first).
 //! - Only Windows and macOS count as available (D8); elsewhere the storage is `unavailable`.
 //! - `Buffer.from(secret, 'base64')` and `.toString('base64')` around the blobs: [`SafeCipher::decrypt_base64`] and
 //!   [`SafeCipher::encrypt_base64`].
@@ -69,11 +74,15 @@ impl SafeCipher for Cipher {
 /// Called once when the key has been opened: how it was found and how long it took (for startup.log / crash.log).
 pub type OpenedHook = Box<dyn Fn(&Origin, Duration) + Send + Sync>;
 
+/// Opens the key (the real one: [`Cipher::open`]; tests inject their own).
+type Opener = Box<dyn Fn() -> Cipher + Send + Sync>;
+
 /// The lazily opened safeStorage of one data dir.
 pub struct SafeStorage {
-    data_dir: PathBuf,
-    app_name: String,
+    /// For Debug only: the data dir and the Keychain app name, or what the injected opener is.
+    source: String,
     force_unavailable: bool,
+    opener: Opener,
     cipher: OnceLock<Cipher>,
     on_open: Option<OpenedHook>,
 }
@@ -81,8 +90,7 @@ pub struct SafeStorage {
 impl std::fmt::Debug for SafeStorage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SafeStorage")
-            .field("data_dir", &self.data_dir)
-            .field("app_name", &self.app_name)
+            .field("source", &self.source)
             .field("force_unavailable", &self.force_unavailable)
             .field("cipher", &self.cipher.get())
             .finish()
@@ -91,9 +99,22 @@ impl std::fmt::Debug for SafeStorage {
 
 impl SafeStorage {
     /// `app_name` names the macOS Keychain item (`<app> Safe Storage` / `<app> Key`); `force_unavailable` is
-    /// `MC_SSH_NO_SAFESTORAGE`. Nothing is read or written here.
+    /// `MC_SSH_NO_SAFESTORAGE` (only `storage()` / `available()` report unavailable, see the module docs). Nothing is read
+    /// or written here.
     pub fn new(data_dir: impl Into<PathBuf>, app_name: impl Into<String>, force_unavailable: bool) -> Self {
-        Self { data_dir: data_dir.into(), app_name: app_name.into(), force_unavailable, cipher: OnceLock::new(), on_open: None }
+        let (data_dir, app_name): (PathBuf, String) = (data_dir.into(), app_name.into());
+        let source = format!("{} ({app_name})", data_dir.display());
+        Self::with_opener(source, force_unavailable, move || Cipher::open(&data_dir, &app_name, false))
+    }
+
+    /// A safeStorage whose key comes from `opener` (called at most once, on first use): tests prove the laziness with it
+    /// without reading a real Keychain or `Local State`.
+    pub fn with_opener(
+        source: impl Into<String>,
+        force_unavailable: bool,
+        opener: impl Fn() -> Cipher + Send + Sync + 'static,
+    ) -> Self {
+        Self { source: source.into(), force_unavailable, opener: Box::new(opener), cipher: OnceLock::new(), on_open: None }
     }
 
     /// Calls `hook` once, right after the key has been opened (on the thread that opened it).
@@ -106,7 +127,7 @@ impl SafeStorage {
     pub fn cipher(&self) -> &Cipher {
         self.cipher.get_or_init(|| {
             let started = Instant::now();
-            let cipher = Cipher::open(&self.data_dir, &self.app_name, self.force_unavailable);
+            let cipher = (self.opener)();
             if let Some(hook) = &self.on_open {
                 hook(cipher.origin(), started.elapsed());
             }
@@ -126,12 +147,19 @@ impl SafeStorage {
 }
 
 impl SafeCipher for SafeStorage {
+    /// `electronCipher.storage`: with `MC_SSH_NO_SAFESTORAGE` `unavailable` without opening the key (1.1.x tests the flag
+    /// before `isEncryptionAvailable()`).
     fn storage(&self) -> Storage {
+        if self.force_unavailable {
+            return Storage::Unavailable;
+        }
         self.cipher().storage()
     }
+    /// `safeStorage.encryptString`, which 1.1.x calls whatever the flag says (the stores check `available()` first).
     fn encrypt(&self, text: &str) -> Result<Vec<u8>, Error> {
         self.cipher().encrypt(text)
     }
+    /// `safeStorage.decryptString`, also with the flag: secrets saved without it stay usable, as in 1.1.x.
     fn decrypt(&self, blob: &[u8]) -> Result<Zeroizing<String>, Error> {
         self.cipher().decrypt(blob)
     }
@@ -144,34 +172,66 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn nothing_is_read_before_the_first_use() {
-        let dir = tempfile::tempdir().unwrap();
-        let calls = Arc::new(AtomicUsize::new(0));
-        let seen = calls.clone();
-        let store = SafeStorage::new(dir.path(), "unimux", false).on_open(move |_, _| {
-            seen.fetch_add(1, Ordering::SeqCst);
+    /// A store whose opener counts its calls and hands out a known key: no real Keychain or `Local State` on any platform
+    /// (a test must never open the user's `unimux Safe Storage` Keychain item).
+    fn counting(force_unavailable: bool) -> (SafeStorage, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+        let (opens, hooks) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let (o, h) = (opens.clone(), hooks.clone());
+        let store = SafeStorage::with_opener("test", force_unavailable, move || {
+            o.fetch_add(1, Ordering::SeqCst);
+            Cipher::with_gcm_key([7u8; 32])
+        })
+        .on_open(move |_, _| {
+            h.fetch_add(1, Ordering::SeqCst);
         });
-        assert_eq!(store.opened(), None);
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none(), "no Local State before the first use");
-        let _ = store.storage();
-        let _ = store.available();
-        let _ = store.encrypt("x");
-        assert!(store.opened().is_some());
-        assert_eq!(calls.load(Ordering::SeqCst), 1, "opened once");
+        (store, opens, hooks)
     }
 
     #[test]
-    fn forced_off_is_unavailable_and_writes_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = SafeStorage::new(dir.path(), "unimux", true);
+    fn nothing_is_read_before_the_first_use() {
+        let (store, opens, hooks) = counting(false);
+        assert_eq!(store.opened(), None);
+        assert_eq!(opens.load(Ordering::SeqCst), 0, "creating the store opens nothing (lazy Keychain access)");
+        assert_eq!(store.storage(), Storage::Dpapi);
+        assert_eq!(opens.load(Ordering::SeqCst), 1, "the first use opens the key");
+        assert!(store.available());
+        let secret = store.encrypt_base64("x").unwrap();
+        assert_eq!(store.decrypt_base64(&secret).unwrap().as_str(), "x");
+        assert_eq!(store.opened(), Some(&Origin::Given));
+        assert_eq!((opens.load(Ordering::SeqCst), hooks.load(Ordering::SeqCst)), (1, 1), "opened once");
+    }
+
+    #[test]
+    fn concurrent_first_uses_open_once() {
+        let (store, opens, hooks) = counting(false);
+        let store = Arc::new(store);
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let s = store.clone();
+                std::thread::spawn(move || s.encrypt_base64("pw").unwrap())
+            })
+            .collect();
+        for t in threads {
+            assert_eq!(store.decrypt_base64(&t.join().unwrap()).unwrap().as_str(), "pw");
+        }
+        assert_eq!((opens.load(Ordering::SeqCst), hooks.load(Ordering::SeqCst)), (1, 1));
+    }
+
+    /// 1.1.x `electronCipher` with MC_SSH_NO_SAFESTORAGE=1: `storage` / `available()` say unavailable without asking
+    /// safeStorage (no Keychain read on macOS), `encryptString` / `decryptString` still use the real key.
+    #[test]
+    fn forced_off_reports_unavailable_but_keeps_the_real_key() {
+        let (store, opens, _) = counting(true);
         assert_eq!(store.storage(), Storage::Unavailable);
         assert!(!store.available());
-        assert_eq!(store.encrypt_base64("pw"), Err(Error::Unavailable));
-        assert_eq!(store.decrypt_base64("djEw"), Err(Error::Unavailable));
-        assert_eq!(store.opened(), Some(&Origin::Off));
-        assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
+        assert_eq!(opens.load(Ordering::SeqCst), 0, "the flag alone never opens the key");
+        let saved_before = Cipher::with_gcm_key([7u8; 32]).encrypt_base64("saved without the flag").unwrap();
+        assert_eq!(store.decrypt_base64(&saved_before).unwrap().as_str(), "saved without the flag");
+        assert_eq!(opens.load(Ordering::SeqCst), 1);
+        let blob = store.encrypt_base64("pw").unwrap();
+        assert_eq!(store.decrypt_base64(&blob).unwrap().as_str(), "pw");
+        assert_eq!(store.storage(), Storage::Unavailable, "still reported off once the key is open");
+        assert_eq!(store.opened(), Some(&Origin::Given));
     }
 
     #[test]
@@ -214,8 +274,24 @@ mod tests {
         assert_eq!(first.storage(), Storage::Dpapi);
         let later = SafeStorage::new(dir.path(), "unimux", false);
         assert_eq!(later.warm(), &Origin::Existing);
-        for s in secrets {
-            assert_eq!(later.decrypt_base64(&s).unwrap().as_str(), "pw");
+        for s in &secrets {
+            assert_eq!(later.decrypt_base64(s).unwrap().as_str(), "pw");
         }
+        // MC_SSH_NO_SAFESTORAGE=1 on the same data dir: reported unavailable, the saved secrets still decrypt.
+        let flagged = SafeStorage::new(dir.path(), "unimux", true);
+        assert_eq!(flagged.storage(), Storage::Unavailable);
+        assert_eq!(flagged.decrypt_base64(&secrets[0]).unwrap().as_str(), "pw");
+        assert_eq!(flagged.opened(), Some(&Origin::Existing));
+    }
+
+    /// Windows, MC_SSH_NO_SAFESTORAGE=1 on a fresh data dir: `Local State` is created at start as 1.1.4's OSCrypt::Init does.
+    #[cfg(windows)]
+    #[test]
+    fn windows_forced_off_still_creates_local_state_at_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SafeStorage::new(dir.path(), "unimux", true);
+        assert_eq!(store.warm(), &Origin::Created);
+        assert!(crate::local_state::path(dir.path()).exists());
+        assert!(!store.available());
     }
 }

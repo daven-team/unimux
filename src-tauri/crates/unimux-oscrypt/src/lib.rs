@@ -10,7 +10,8 @@
 //!   OSCryptImpl::Init does it on 1.1.4's start (see local_state.rs). Opening is single-flight per process.
 //! - macOS: AES-128-CBC, key = PBKDF2-HMAC-SHA1(Keychain password of `<app> Safe Storage` / `<app> Key`). Mac half not
 //!   verified on a real Mac yet.
-//! - Anything else, or `force_unavailable` (MC_SSH_NO_SAFESTORAGE): unavailable, like 1.1.x.
+//! - Anything else, or `Cipher::open(.., force_unavailable = true)`: unavailable. The app does not use that flag for
+//!   MC_SSH_NO_SAFESTORAGE: [`SafeStorage`] keeps the real key and only reports `unavailable`, like 1.1.x.
 //!
 //! [`SafeStorage`] (B2) is what the app uses: one per process, opened on first use (lazy Keychain access on macOS), behind
 //! the [`SafeCipher`] interface of 1.1.x's `Cipher`, with `MC_SSH_NO_SAFESTORAGE` and the `Origin` reported to startup.log.
@@ -67,7 +68,7 @@ pub enum Origin {
     Replaced(String),
     /// macOS: the password was found under the legacy account `<app>` and moved to `<app> Key`.
     Migrated,
-    /// Forced off (MC_SSH_NO_SAFESTORAGE) or a platform without safeStorage support in unimux.
+    /// Forced off (`Cipher::open` with `force_unavailable`) or a platform without safeStorage support in unimux.
     Off,
     /// The key could not be read; nothing was written. The text is for the log.
     Failed(String),

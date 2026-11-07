@@ -11,7 +11,8 @@
 // C. 1.1.4 again: nothing locked, its safeStorage decrypts every blob the Tauri app wrote, files and key untouched.
 // D. Fresh install: the Tauri app creates Local State at start; a restart finds it; 1.1.4 decrypts the Tauri blobs and keeps
 //    the key.
-// E. MC_SSH_NO_SAFESTORAGE: exactly "1" turns safeStorage off (nothing written), "true" does not (1.1.x `=== '1'`).
+// E. MC_SSH_NO_SAFESTORAGE: exactly "1" makes storage report unavailable, "true" does not (1.1.x `=== '1'`); as in 1.1.4 the
+//    key is still opened (Local State written at start) and existing blobs still decrypt.
 // F/G/H. A Local State without a usable key: a foreign DPAPI key (new key stored, other prefs kept, Origin Replaced in
 //    startup.log and crash.log; 1.1.4 keeps that key), a non-JSON file (`Local State.bad`, created anew), a key in an unknown
 //    format (unavailable, file left alone).
@@ -64,6 +65,8 @@ const makeRoot = (name, local) => {
 
 // ---------- the Tauri check build ----------
 const children = [];
+// Last resort (a crash between start and quit): end every process this script started, never anything else.
+process.on('exit', () => { for (const child of children) killTree(child); });
 async function startTauri(base, extraEnv = {}) {
   const port = await freePort();
   const child = launchApp({ dataDir: join(base, 'data'), scratch: base, port, extraEnv });
@@ -88,7 +91,7 @@ async function electronLib() {
   lib ??= await import('./ssh-ui-lib.mjs');
   return lib;
 }
-async function startElectron(base, hosts = []) {
+async function startElectron(base, hosts = [], extraEnv = {}) {
   const { launchApp: launchElectron, mainInspector, sshState, writeState } = await electronLib();
   // Only a data dir without a state yet: later runs keep the state (the DB connection) 1.1.4 and the Tauri app saved.
   if (!existsSync(join(base, 'data', 'state.json'))) writeState(base, sshState({ projectPath: join(base, 'project'), hosts }));
@@ -98,21 +101,25 @@ async function startElectron(base, hosts = []) {
     // The main inspector is attached while the window loads: with --inspect and nobody attached, 1.1.4's page stopped
     // answering CDP on this machine (Electron 45.2.2, Node 24.22.2). Even so the page's Runtime.enable hangs now and then
     // (about one start in three), so a start that does not come up is ended (only that process tree) and tried again.
+    // Every 1.1.4 process is in `children` from the moment it is spawned, so `finally` ends it whatever fails later.
     for (let attempt = 1; ; attempt++) {
-      const inspectPort = 9400 + Math.floor(Math.random() * 400);
-      const launching = launchElectron(base, {}, [`--inspect=${inspectPort}`]);
+      const inspectPort = await freePort();
+      let spawned = null;
+      const launching = launchElectron(base, extraEnv, [`--inspect=${inspectPort}`], { onSpawn: (child) => { spawned = child; children.push(child); } });
+      launching.catch(() => {});
       let main = null;
       try {
         main = await mainInspector(inspectPort);
         const app = await launching;
         return { app, main };
       } catch (error) {
-        const pid = await main?.evaluate('process.pid').catch(() => null);
         main?.close();
-        launching.catch(() => {});
-        if (pid) killTree({ pid, exitCode: null });
+        // Wait until it is gone: a 1.1.4 that still holds the single-instance lock would make the next start quit at once.
+        if (spawned) { killTree(spawned); await waitExit(spawned, 10000); }
+        // Not spawned yet (launchApp was still picking its port): end it as soon as it comes up.
+        else launching.then((app) => app.close(), () => {});
         await sleep(1500);
-        if (attempt >= 3) throw error;
+        if (attempt >= 5) throw error;
         console.log(`1.1.4 did not come up (${error.message}), attempt ${attempt + 1}`);
       }
     }
@@ -249,16 +256,31 @@ try {
   }
 
   // ---------- E: MC_SSH_NO_SAFESTORAGE ----------
+  // 1.1.x `electronCipher`: the flag only makes `storage` / `available()` say unavailable; decryptString still uses the real
+  // key and OSCrypt::Init still writes Local State at start.
   const rootE = makeRoot('e');
+  const dataE = join(rootE, 'data');
   const e1 = await startTauri(rootE, { MC_SSH_NO_SAFESTORAGE: '1' });
   const infoE = await e1.bridge('safeStorage', { op: 'info' });
-  const encE = await e1.bridge('safeStorage', { op: 'encrypt', texts: ['x'] });
-  check('E: MC_SSH_NO_SAFESTORAGE=1: unavailable, origin off', infoE.storage === 'unavailable' && !infoE.available && infoE.origin === 'off', infoE);
-  check('E: MC_SSH_NO_SAFESTORAGE=1: encrypt refused', typeof encE[0] === 'object' && /not available/.test(encE[0].error), encE);
+  check('E: MC_SSH_NO_SAFESTORAGE=1: storage unavailable, the key still opened at start', infoE.storage === 'unavailable' && !infoE.available && infoE.openedBefore === 'created', infoE);
   await sleep(300);
-  check('E: startup.log has the safe-storage-off mark', /\bsafe-storage-off=\d+/.test(lastStartupLine(join(rootE, 'data'))), lastStartupLine(join(rootE, 'data')));
+  check('E: MC_SSH_NO_SAFESTORAGE=1: startup.log has the safe-storage-created mark', /\bsafe-storage-created=\d+/.test(lastStartupLine(dataE)), lastStartupLine(dataE));
   await quitTauri(e1);
-  check('E: MC_SSH_NO_SAFESTORAGE=1: no Local State written', !existsSync(localState(join(rootE, 'data'))));
+  check('E: MC_SSH_NO_SAFESTORAGE=1: Local State written as in 1.1.4', !!(existsSync(localState(dataE)) && localJson(dataE).os_crypt?.encrypted_key));
+  const localD1 = sha(localState(dataD)); // after 1.1.4 ran on it (Chromium rewrites its prefs)
+  const e1b = await startTauri(rootD, { MC_SSH_NO_SAFESTORAGE: '1' });
+  const infoE1b = await e1b.bridge('safeStorage', { op: 'info' });
+  const decE1b = await e1b.bridge('safeStorage', { op: 'decrypt', secrets: dBlobs });
+  check('E: MC_SSH_NO_SAFESTORAGE=1: existing blobs still decrypt while storage says unavailable', infoE1b.storage === 'unavailable' && decE1b.every((r, k) => r.text === dTexts[k]), { infoE1b, decE1b: decE1b.map((r) => r.error ?? 'ok') });
+  await quitTauri(e1b);
+  check('E: MC_SSH_NO_SAFESTORAGE=1: Local State of an existing data dir not rewritten', sha(localState(dataD)) === localD1);
+  if (electronCheckout) {
+    const rootE3 = makeRoot('e3');
+    const e3 = await startElectron(rootE3, [], { MC_SSH_NO_SAFESTORAGE: '1' });
+    const vaultE3 = await e3.app.evaluate('window.mc.ssh.vaultInfo()');
+    await quitElectron(e3);
+    check('E: 1.1.4 with MC_SSH_NO_SAFESTORAGE=1 also reports unavailable and writes Local State', vaultE3.storage === 'unavailable' && !!localJson(join(rootE3, 'data')).os_crypt?.encrypted_key, vaultE3.storage);
+  }
   const rootE2 = makeRoot('e2');
   const e2 = await startTauri(rootE2, { MC_SSH_NO_SAFESTORAGE: 'true' });
   const infoE2 = await e2.bridge('safeStorage', { op: 'info' });

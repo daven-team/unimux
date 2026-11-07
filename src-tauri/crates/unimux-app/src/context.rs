@@ -62,7 +62,9 @@ fn safe_storage(
     startup_log: &Arc<StartupLog>,
 ) -> SafeStorage {
     let (crash, timer, startup_log) = (crash.clone(), timer.clone(), startup_log.clone());
-    SafeStorage::new(data_dir, unimux_core::APP_NAME, overrides.ssh_no_safestorage).on_open(move |origin, took| {
+    // MC_SAFE_STORAGE_NAME (dev overrides only): a scratch Keychain item, so a harness run on a Mac never opens the real key.
+    let app_name = overrides.safe_storage_name.as_deref().unwrap_or(unimux_core::APP_NAME);
+    SafeStorage::new(data_dir, app_name, overrides.ssh_no_safestorage).on_open(move |origin, took| {
         timer.mark(&format!("safe-storage-{}", origin.label()));
         startup_log.flush(&timer);
         let ms = took.as_millis();

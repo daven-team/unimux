@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-/// Every override the app reads, in one place (INVENTORY: the 16 MC_* switches).
+/// Every override the app reads, in one place (INVENTORY: the 16 MC_* switches of 1.1.x, plus MC_SAFE_STORAGE_NAME of 1.2.0).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DevOverrides {
     pub data_dir: Option<PathBuf>,
@@ -13,6 +13,9 @@ pub struct DevOverrides {
     pub hook_debug: bool,
     pub ssh_debug: bool,
     pub ssh_no_safestorage: bool,
+    /// 1.2.0 only (not in 1.1.x): the app name of the macOS Keychain item (`<name> Safe Storage`) instead of `unimux`, so
+    /// harness runs on a Mac never open the real 1.1.x key. Ignored on Windows (the key lives in the data dir).
+    pub safe_storage_name: Option<String>,
     pub trash_dir: Option<PathBuf>,
     pub db_export_dir: Option<PathBuf>,
     pub notes_export_dir: Option<PathBuf>,
@@ -26,13 +29,14 @@ pub struct DevOverrides {
 }
 
 /// The names, for docs and the release check (a release binary must not read them).
-pub const OVERRIDE_NAMES: [&str; 16] = [
+pub const OVERRIDE_NAMES: [&str; 17] = [
     "MC_DATA_DIR",
     "MC_DEBUG_PORT",
     "MC_OFFSCREEN",
     "MC_HOOK_DEBUG",
     "MC_SSH_DEBUG",
     "MC_SSH_NO_SAFESTORAGE",
+    "MC_SAFE_STORAGE_NAME",
     "MC_TRASH_DIR",
     "MC_DB_EXPORT_DIR",
     "MC_NOTES_EXPORT_DIR",
@@ -67,6 +71,7 @@ impl DevOverrides {
             ssh_debug: flag("MC_SSH_DEBUG"),
             // `process.env.MC_SSH_NO_SAFESTORAGE === '1'` (src/main/index.ts), not the truthy test of the other switches.
             ssh_no_safestorage: s("MC_SSH_NO_SAFESTORAGE").as_deref() == Some("1"),
+            safe_storage_name: s("MC_SAFE_STORAGE_NAME"),
             trash_dir: s("MC_TRASH_DIR").map(PathBuf::from),
             db_export_dir: s("MC_DB_EXPORT_DIR").map(PathBuf::from),
             notes_export_dir: s("MC_NOTES_EXPORT_DIR").map(PathBuf::from),
@@ -122,6 +127,14 @@ mod tests {
             let o = DevOverrides::from_lookup_enabled(true, env(&[("MC_SSH_NO_SAFESTORAGE", value)]));
             assert_eq!(o.ssh_no_safestorage, off, "{value:?}");
         }
+    }
+
+    #[test]
+    fn safe_storage_name_is_read_as_given() {
+        let o = DevOverrides::from_lookup_enabled(true, env(&[("MC_SAFE_STORAGE_NAME", "unimux-check")]));
+        assert_eq!(o.safe_storage_name.as_deref(), Some("unimux-check"));
+        let o = DevOverrides::from_lookup_enabled(true, env(&[("MC_SAFE_STORAGE_NAME", "")]));
+        assert_eq!(o.safe_storage_name, None);
     }
 
     #[test]
