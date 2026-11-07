@@ -3,6 +3,7 @@
 //! Node's `res.on('close')` does in 1.1.4.
 
 use std::convert::Infallible;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -74,10 +75,13 @@ impl Drop for Release {
 }
 
 /// An SSE response body: `event: message` frames from a channel and a `: keepalive` comment every 15 s (SDK 1.32.2
-/// DEFAULT_SSE_KEEP_ALIVE_MS). It ends when every sender is gone (all answers of the POST were written).
+/// DEFAULT_SSE_KEEP_ALIVE_MS). It ends when every sender is gone (all answers of the POST were written), or, for a session
+/// stream, when the session closes (DELETE, trim, revoke: the SDK's transport.close() closes every stream of the session).
+/// What was queued before the close is still written; the senders stop queueing once the session is closed.
 pub struct SseBody {
     rx: mpsc::UnboundedReceiver<Value>,
     keep_alive: tokio::time::Interval,
+    closed: Option<Pin<Box<tokio_util::sync::WaitForCancellationFutureOwned>>>,
     _release: Release,
 }
 
@@ -85,11 +89,16 @@ impl SseBody {
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Option<Bytes>> {
         match self.rx.poll_recv(cx) {
             Poll::Ready(Some(msg)) => {
-                let data = unimux_core::js_json::stringify(&msg);
+                let data = crate::surrogate_ids::expose(unimux_core::js_json::stringify(&msg));
                 return Poll::Ready(Some(Bytes::from(format!("event: message\ndata: {data}\n\n"))));
             }
             Poll::Ready(None) => return Poll::Ready(None),
             Poll::Pending => {}
+        }
+        if let Some(closed) = &mut self.closed
+            && closed.as_mut().poll(cx).is_ready()
+        {
+            return Poll::Ready(None);
         }
         if self.keep_alive.poll_tick(cx).is_ready() {
             return Poll::Ready(Some(Bytes::from_static(b": keepalive\n\n")));
@@ -126,7 +135,8 @@ pub fn request_timeout() -> Resp {
 }
 
 pub fn json_body(status: StatusCode, value: &Value) -> Resp {
-    let mut r = Response::new(McpBody::Full(Some(Bytes::from(unimux_core::js_json::stringify(value)))));
+    let text = crate::surrogate_ids::expose(unimux_core::js_json::stringify(value));
+    let mut r = Response::new(McpBody::Full(Some(Bytes::from(text))));
     *r.status_mut() = status;
     r.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
     r
@@ -142,9 +152,20 @@ pub fn internal_error() -> Resp {
     json_body(StatusCode::INTERNAL_SERVER_ERROR, &json!({ "error": "MCP request failed." }))
 }
 
-pub fn sse(rx: mpsc::UnboundedReceiver<Value>, release: Release, session: Option<&str>, keep_alive: Duration) -> Resp {
+pub fn sse(
+    rx: mpsc::UnboundedReceiver<Value>,
+    release: Release,
+    session: Option<&str>,
+    keep_alive: Duration,
+    session_closed: Option<CancellationToken>,
+) -> Resp {
     let start = tokio::time::Instant::now() + keep_alive;
-    let body = SseBody { rx, keep_alive: tokio::time::interval_at(start, keep_alive), _release: release };
+    let body = SseBody {
+        rx,
+        keep_alive: tokio::time::interval_at(start, keep_alive),
+        closed: session_closed.map(|c| Box::pin(c.cancelled_owned())),
+        _release: release,
+    };
     let mut r = Response::new(McpBody::Sse(Box::new(body)));
     let h = r.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));

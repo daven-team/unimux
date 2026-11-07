@@ -2072,5 +2072,335 @@
         "message": "MCP error -32602: Task not found: <hex32>"
       }
     }
+  },
+  "initialize failing InitializeRequestSchema: no session, no version skip, -32603 zod issues": {
+    "elicitationWithoutClientInfo": {
+      "status": 400,
+      "type": "application/json",
+      "headers": {
+        "mcp-session-id": null
+      },
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32000,
+            "message": "Bad Request: Server not initialized"
+          },
+          "id": null
+        }
+      ]
+    },
+    "withoutClientInfoBogusHeader": {
+      "status": 400,
+      "type": "application/json",
+      "headers": {
+        "mcp-session-id": null
+      },
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32000,
+            "message": "Bad Request: Unsupported protocol version: bogus (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)"
+          },
+          "id": null
+        }
+      ]
+    },
+    "protocolVersionNumber": {
+      "status": 200,
+      "type": "application/json",
+      "headers": {
+        "mcp-session-id": null
+      },
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 0,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"protocolVersion\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "noParams": {
+      "status": 200,
+      "type": "application/json",
+      "headers": {
+        "mcp-session-id": null
+      },
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 0,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\"\n    ],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "nestedCapabilities": {
+      "status": 200,
+      "type": "application/json",
+      "headers": {
+        "mcp-session-id": null
+      },
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 0,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"params\",\n      \"capabilities\",\n      \"experimental\",\n      \"a\"\n    ],\n    \"message\": \"Invalid input\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"params\",\n      \"capabilities\",\n      \"sampling\",\n      \"context\"\n    ],\n    \"message\": \"Invalid input\"\n  },\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"capabilities\",\n      \"elicitation\"\n    ],\n    \"message\": \"Invalid input: expected object, received string\"\n  },\n  {\n    \"expected\": \"record\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"capabilities\",\n      \"elicitation\"\n    ],\n    \"message\": \"Invalid input: expected record, received string\"\n  },\n  {\n    \"expected\": \"boolean\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"capabilities\",\n      \"roots\",\n      \"listChanged\"\n    ],\n    \"message\": \"Invalid input: expected boolean, received string\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"params\",\n      \"capabilities\",\n      \"tasks\",\n      \"list\"\n    ],\n    \"message\": \"Invalid input\"\n  },\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"capabilities\",\n      \"tasks\",\n      \"requests\",\n      \"sampling\"\n    ],\n    \"message\": \"Invalid input: expected object, received array\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"params\",\n      \"capabilities\",\n      \"tasks\",\n      \"requests\",\n      \"elicitation\",\n      \"create\"\n    ],\n    \"message\": \"Invalid input\"\n  },\n  {\n    \"expected\": \"record\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"capabilities\",\n      \"extensions\"\n    ],\n    \"message\": \"Invalid input: expected record, received array\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "formElicitationNull": {
+      "status": 400,
+      "type": "application/json",
+      "headers": {
+        "mcp-session-id": null
+      },
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32000,
+            "message": "Bad Request: Server not initialized"
+          },
+          "id": null
+        }
+      ]
+    },
+    "formApplyDefaults": {
+      "status": 400,
+      "type": "application/json",
+      "headers": {
+        "mcp-session-id": null
+      },
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32000,
+            "message": "Bad Request: Server not initialized"
+          },
+          "id": null
+        }
+      ]
+    },
+    "clientInfoFields": {
+      "status": 200,
+      "type": "application/json",
+      "headers": {
+        "mcp-session-id": null
+      },
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 0,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"clientInfo\",\n      \"name\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"clientInfo\",\n      \"title\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"clientInfo\",\n      \"icons\",\n      0,\n      \"src\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"clientInfo\",\n      \"icons\",\n      0,\n      \"mimeType\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"clientInfo\",\n      \"icons\",\n      0,\n      \"sizes\",\n      0\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"light\",\n      \"dark\"\n    ],\n    \"path\": [\n      \"params\",\n      \"clientInfo\",\n      \"icons\",\n      0,\n      \"theme\"\n    ],\n    \"message\": \"Invalid option: expected one of \\\"light\\\"|\\\"dark\\\"\"\n  },\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"clientInfo\",\n      \"icons\",\n      1\n    ],\n    \"message\": \"Invalid input: expected object, received number\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"clientInfo\",\n      \"version\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"clientInfo\",\n      \"websiteUrl\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"clientInfo\",\n      \"description\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "clientInfoMissing": {
+      "status": 200,
+      "type": "application/json",
+      "headers": {
+        "mcp-session-id": null
+      },
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 0,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"protocolVersion\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  },\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"capabilities\"\n    ],\n    \"message\": \"Invalid input: expected object, received array\"\n  },\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"clientInfo\"\n    ],\n    \"message\": \"Invalid input: expected object, received null\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "validWithBogusHeader": {
+      "status": 200,
+      "type": "application/json",
+      "headers": {
+        "mcp-session-id": null
+      },
+      "messages": [
+        {
+          "result": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {
+              "tools": {},
+              "tasks": {
+                "list": {},
+                "cancel": {},
+                "requests": {
+                  "tools": {
+                    "call": {}
+                  }
+                }
+              }
+            },
+            "serverInfo": {
+              "name": "unimux",
+              "version": "1.2.0"
+            },
+            "instructions": "<masked>"
+          },
+          "jsonrpc": "2.0",
+          "id": 0
+        }
+      ]
+    },
+    "invalidInSession": {
+      "status": 200,
+      "type": "text/event-stream",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 3,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"clientInfo\"\n    ],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "validNotificationInSession": {
+      "status": 400,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32600,
+            "message": "Invalid Request: Server already initialized"
+          },
+          "id": null
+        }
+      ]
+    }
+  },
+  "tools/list params failing the schema -> -32603 zod issues": {
+    "cursorNumber": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"cursor\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "cursorNull": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"cursor\"\n    ],\n    \"message\": \"Invalid input: expected string, received null\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "cursorString": {
+      "status": 200,
+      "tools": 15
+    },
+    "sessionBatch": {
+      "status": 200,
+      "type": "text/event-stream",
+      "messages": [
+        {
+          "result": {},
+          "jsonrpc": "2.0",
+          "id": 1
+        },
+        {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"cursor\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+          }
+        }
+      ]
+    }
+  },
+  "a closed session ends its open call streams without an answer (DELETE, trim, revoke)": {
+    "delete": {
+      "status": 200,
+      "closed": 200,
+      "messages": [],
+      "ended": "with the close"
+    },
+    "trim": {
+      "status": 200,
+      "closed": "trimmed",
+      "messages": [],
+      "ended": "with the close"
+    },
+    "revoke": {
+      "status": 200,
+      "closed": "revoked",
+      "messages": [],
+      "ended": "with the close"
+    }
+  },
+  "notifications/cancelled failing its schema (reason null) is dropped": {
+    "status": 200,
+    "nullReason": 202,
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "<masked>"
+            }
+          ]
+        },
+        "jsonrpc": "2.0",
+        "id": 7
+      }
+    ],
+    "answered": "after the wait"
+  },
+  "a request id with a lone surrogate is echoed unchanged": {
+    "stateless": {
+      "status": 200,
+      "type": "application/json",
+      "text": "{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":\"\\ud800\"}"
+    },
+    "upperCaseAndEscapes": {
+      "status": 200,
+      "type": "application/json",
+      "text": "{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":\"a\\udc00\\nA/\"}"
+    },
+    "batch": {
+      "status": 200,
+      "type": "application/json",
+      "text": "[{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":\"\\ud800\"},{\"jsonrpc\":\"2.0\",\"id\":\"\\udbff\",\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}]"
+    },
+    "session": {
+      "status": 200,
+      "type": "text/event-stream",
+      "text": "event: message\ndata: {\"result\":{},\"jsonrpc\":\"2.0\",\"id\":\"\\ud83d\"}\n\n"
+    }
   }
 }

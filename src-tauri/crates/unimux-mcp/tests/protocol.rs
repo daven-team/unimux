@@ -1,4 +1,4 @@
-//! The 52 HTTP-level protocol cases of SP8 (scripts/spike-mcp-protocol.mjs), ported to cargo and compared with the
+//! The 57 HTTP-level protocol cases of SP8 and the M1 review (scripts/spike-mcp-protocol.mjs), ported to cargo and compared with the
 //! outcomes of the 1.1.4 TypeScript server (mcp.ts + SDK 1.32.2) recorded in tests/fixtures/protocol-ts.json by
 //! `node scripts/spike-mcp-wire.mjs ts --protocol --golden`. Each case runs the same requests in the same order against
 //! the Rust server with the fake tool layer, normalizes the answers the same way (ids, tokens, ports, times masked;
@@ -635,16 +635,183 @@ async fn run_case(srv: &Srv, id: &str) -> Value {
             srv.post(&t, rpc(12, "tasks/cancel", json!({ "taskId": stateless }))).await;
             out
         }
+        // ----- added with the M1 review fixes -----
+        "initialize failing InitializeRequestSchema: no session, no version skip, -32603 zod issues" => {
+            let t = srv.lead();
+            let sid = srv.session(&t).await;
+            let base = init(json!({}))["params"].clone();
+            let send = async |params: Option<Value>, version: Option<&str>| {
+                let mut body = json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize" });
+                if let Some(p) = params {
+                    body["params"] = p;
+                }
+                let mut req = srv.post_req(&t, body);
+                if let Some(v) = version {
+                    req = req.header("mcp-protocol-version", v);
+                }
+                outcome_with(&req.send().await, instr, &["mcp-session-id"], None)
+            };
+            let with = |key: &str, value: Value| {
+                let mut p = base.clone();
+                p[key] = value;
+                Some(p)
+            };
+            json!({
+                "elicitationWithoutClientInfo":
+                    send(Some(json!({ "protocolVersion": "2025-06-18", "capabilities": { "elicitation": {} } })), None).await,
+                "withoutClientInfoBogusHeader":
+                    send(Some(json!({ "protocolVersion": "2025-06-18", "capabilities": {} })), Some("bogus")).await,
+                "protocolVersionNumber": send(with("protocolVersion", json!(5)), None).await,
+                "noParams": send(None, None).await,
+                "nestedCapabilities": send(with("capabilities", json!({
+                    "roots": { "listChanged": "y" }, "sampling": { "context": 1, "tools": [] }, "elicitation": "x",
+                    "tasks": { "list": 1, "requests": { "elicitation": { "create": "s" }, "sampling": [] } },
+                    "experimental": { "a": null, "b": {} }, "extensions": [] })), None).await,
+                "formElicitationNull": send(with("capabilities", json!({ "elicitation": { "form": null, "url": "s" } })), None).await,
+                "formApplyDefaults":
+                    send(with("capabilities", json!({ "elicitation": { "url": {}, "form": { "applyDefaults": 1 } } })), None).await,
+                "clientInfoFields": send(with("clientInfo", json!({ "name": 1, "title": 2,
+                    "icons": [{ "src": 1, "mimeType": 2, "sizes": [3, "x"], "theme": "blue" }, 5], "websiteUrl": 3, "description": 4 })), None).await,
+                "clientInfoMissing": send(Some(json!({ "protocolVersion": 1, "capabilities": [], "clientInfo": null })), None).await,
+                "validWithBogusHeader": send(Some(base.clone()), Some("bogus")).await,
+                "invalidInSession": outcome(&srv.in_session(&t, &sid, json!({ "jsonrpc": "2.0", "id": 3, "method": "initialize",
+                    "params": { "protocolVersion": "2025-11-25", "capabilities": {} } })).await),
+                "validNotificationInSession":
+                    outcome(&srv.in_session(&t, &sid, json!({ "jsonrpc": "2.0", "method": "initialize", "params": base })).await),
+            })
+        }
+        "tools/list params failing the schema -> -32603 zod issues" => {
+            let t = srv.lead();
+            let sid = srv.session(&t).await;
+            let list = srv.post(&t, rpc(3, "tools/list", json!({ "cursor": "x" }))).await;
+            let batch = srv
+                .in_session(
+                    &t,
+                    &sid,
+                    json!([{ "jsonrpc": "2.0", "id": 1, "method": "ping" }, rpc(2, "tools/list", json!({ "cursor": 3 }))]),
+                )
+                .await;
+            let mut by_id = outcome(&batch);
+            let mut seen = batch.messages();
+            seen.sort_by_key(|m| m["id"].as_i64());
+            by_id["messages"] = Value::Array(seen);
+            json!({
+                "cursorNumber": outcome(&srv.post(&t, rpc(1, "tools/list", json!({ "cursor": 5 }))).await),
+                "cursorNull": outcome(&srv.post(&t, rpc(2, "tools/list", json!({ "cursor": null }))).await),
+                "cursorString": { "status": list.status, "tools": first(&list)["result"]["tools"].as_array().map(Vec::len) },
+                "sessionBatch": by_id,
+            })
+        }
+        "a closed session ends its open call streams without an answer (DELETE, trim, revoke)" => {
+            let mut out = Map::new();
+            for kind in ["delete", "trim", "revoke"] {
+                let t = srv.lead();
+                let s = srv.session(&t).await;
+                srv.in_session(&t, &s, json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).await;
+                let at = Instant::now();
+                let mut body = support::wait_for(7, 3.0);
+                body["params"]["_meta"] = json!({ "progressToken": "p" });
+                let (addr, tk, sid) = (srv.addr.clone(), t.clone(), s.clone());
+                let streaming = tokio::spawn(async move {
+                    let seen = Arc::new(Mutex::new(Vec::new()));
+                    let sn = seen.clone();
+                    let res = support::http::Request::new(&addr, "POST", "/mcp")
+                        .header("content-type", "application/json")
+                        .header("accept", ACCEPT)
+                        .header("authorization", &bearer(&tk))
+                        .header("mcp-session-id", &sid)
+                        .header("mcp-protocol-version", "2025-11-25")
+                        .body(body)
+                        .stream(Duration::from_millis(4500), move |m| {
+                            sn.lock().push(m.clone());
+                            Flow::Continue
+                        })
+                        .await;
+                    let seen = seen.lock().clone();
+                    (res.status, seen)
+                });
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                let closed = match kind {
+                    "delete" => json!(
+                        srv.req("DELETE", "/mcp")
+                            .header("authorization", &bearer(&t))
+                            .header("mcp-session-id", &s)
+                            .header("mcp-protocol-version", "2025-11-25")
+                            .send()
+                            .await
+                            .status
+                    ),
+                    "trim" => {
+                        for _ in 0..4 {
+                            srv.session(&t).await;
+                        }
+                        json!("trimmed")
+                    }
+                    _ => {
+                        srv.server.revoke_cell(support::LEAD);
+                        json!("revoked")
+                    }
+                };
+                let (status, seen) = streaming.await.unwrap();
+                let ended = if at.elapsed() < Duration::from_millis(2500) { "with the close" } else { "later" };
+                out.insert(
+                    kind.into(),
+                    json!({ "status": status, "closed": closed, "messages": mask(&Value::Array(seen), &["text", "message"]), "ended": ended }),
+                );
+            }
+            Value::Object(out)
+        }
+        "notifications/cancelled failing its schema (reason null) is dropped" => {
+            let t = srv.lead();
+            let s = srv.session(&t).await;
+            srv.in_session(&t, &s, json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).await;
+            let at = Instant::now();
+            let (addr, tk, sid) = (srv.addr.clone(), t.clone(), s.clone());
+            let streaming = tokio::spawn(async move {
+                let res = support::http::Request::new(&addr, "POST", "/mcp")
+                    .header("content-type", "application/json")
+                    .header("accept", ACCEPT)
+                    .header("authorization", &bearer(&tk))
+                    .header("mcp-session-id", &sid)
+                    .header("mcp-protocol-version", "2025-11-25")
+                    .body(support::wait_for(7, 2.0))
+                    .stream(Duration::from_millis(4000), |_| Flow::Continue)
+                    .await;
+                (res.status, res.messages())
+            });
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let null_reason = srv
+                .in_session(&t, &s, json!({ "jsonrpc": "2.0", "method": "notifications/cancelled", "params": { "requestId": 7, "reason": null } }))
+                .await
+                .status;
+            let (status, seen) = streaming.await.unwrap();
+            let answered = if at.elapsed() > Duration::from_millis(1500) { "after the wait" } else { "early" };
+            json!({ "status": status, "nullReason": null_reason, "messages": mask(&Value::Array(seen), &["text"]), "answered": answered })
+        }
+        "a request id with a lone surrogate is echoed unchanged" => {
+            let t = srv.lead();
+            let sid = srv.session(&t).await;
+            let raw = |r: &Res| {
+                let kind = r.content_type().unwrap_or("").split(';').next().unwrap_or("").to_string();
+                json!({ "status": r.status, "type": kind, "text": r.text })
+            };
+            json!({
+                "stateless": raw(&srv.post(&t, r#"{"jsonrpc":"2.0","id":"\ud800","method":"ping"}"#).await),
+                "upperCaseAndEscapes": raw(&srv.post(&t, r#"{"jsonrpc":"2.0","id":"a\uDC00\nA\/","method":"ping"}"#).await),
+                "batch": raw(&srv.post(&t, r#"[{"jsonrpc":"2.0","id":"\ud800","method":"ping"},{"jsonrpc":"2.0","id":"\udbff","method":"nope/nope"}]"#).await),
+                "session": raw(&srv.in_session(&t, &sid, r#"{"jsonrpc":"2.0","id":"\ud83d","method":"ping"}"#).await),
+            })
+        }
         other => json!({ "error": format!("case not ported: {other}") }),
     }
 }
 
-/// All 52 cases in the recorded order on one server, as the JS driver runs them (later cases see the earlier ones' grids).
+/// All 57 cases in the recorded order on one server, as the JS driver runs them (later cases see the earlier ones' grids).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_52_protocol_cases_match_1_1_4() {
+async fn the_57_protocol_cases_match_1_1_4() {
     let golden: Value = serde_json::from_str(GOLDEN).unwrap();
     let golden = golden.as_object().unwrap();
-    assert_eq!(golden.len(), 52, "the TS reference has 52 cases");
+    assert_eq!(golden.len(), 57, "the TS reference has 57 cases");
     let srv = Srv::start(Srv::wire_config()).await;
     let started = Instant::now();
     let mut diffs = Vec::new();
@@ -655,6 +822,6 @@ async fn the_52_protocol_cases_match_1_1_4() {
             diffs.push(format!("{id}\n  rust: {got_text}\n  1.1.4: {expected_text}"));
         }
     }
-    assert!(diffs.is_empty(), "{} / 52 cases differ from 1.1.4:\n{}", diffs.len(), diffs.join("\n"));
-    eprintln!("52 / 52 cases identical to 1.1.4 in {:?}", started.elapsed());
+    assert!(diffs.is_empty(), "{} / 57 cases differ from 1.1.4:\n{}", diffs.len(), diffs.join("\n"));
+    eprintln!("57 / 57 cases identical to 1.1.4 in {:?}", started.elapsed());
 }

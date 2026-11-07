@@ -12,7 +12,6 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use unimux_ipc::{RouterBuilder, Scope};
-use unimux_mcp::tools::NoTools;
 use unimux_mcp::{Config, McpServer};
 
 use crate::context::AppContext;
@@ -30,6 +29,44 @@ pub struct McpService {
 
 static SERVICE: OnceLock<Arc<McpService>> = OnceLock::new();
 
+/// The check build's tool layer (feature `test-bridge`, never in a release build): `NoTools` plus `test_bridge_panic`, a
+/// tool that panics, so scripts/check-mcp-app.mjs can prove the app's panic hook leaves MCP request panics to the server.
+#[cfg(feature = "test-bridge")]
+mod test_tools {
+    use std::sync::Arc;
+
+    use futures::future::BoxFuture;
+    use serde_json::Value;
+    use unimux_mcp::tools::NoTools;
+    use unimux_mcp::{CallCtx, CallError, ToolHost};
+
+    pub struct BridgeTools;
+
+    impl ToolHost for BridgeTools {
+        fn instructions(&self, cell: &str) -> String {
+            NoTools.instructions(cell)
+        }
+        fn tools(&self, cell: &str) -> Vec<Value> {
+            NoTools.tools(cell)
+        }
+        fn supports_task(&self, name: &str) -> bool {
+            NoTools.supports_task(name)
+        }
+        fn call(
+            self: Arc<Self>,
+            name: String,
+            args: Option<Value>,
+            ctx: CallCtx,
+        ) -> BoxFuture<'static, Result<Value, CallError>> {
+            if name == "test_bridge_panic" {
+                let text = args.as_ref().and_then(|a| a["message"].as_str()).unwrap_or("test-bridge MCP panic").to_string();
+                return Box::pin(async move { panic!("{text}") });
+            }
+            Arc::new(NoTools).call(name, args, ctx)
+        }
+    }
+}
+
 /// The app's MCP server (None before `register`).
 pub fn server() -> Option<Arc<McpServer>> {
     SERVICE.get().map(|s| s.server.clone())
@@ -40,8 +77,12 @@ impl McpService {
         let crash = ctx.crash.clone();
         let cfg =
             Config { version: env!("CARGO_PKG_VERSION").to_string(), log: Arc::new(move |m| crash.warn(m)), ..Config::default() };
+        #[cfg(feature = "test-bridge")]
+        let host = Arc::new(test_tools::BridgeTools);
+        #[cfg(not(feature = "test-bridge"))]
+        let host = Arc::new(unimux_mcp::tools::NoTools);
         Arc::new(Self {
-            server: Arc::new(McpServer::new(Arc::new(NoTools), cfg)),
+            server: Arc::new(McpServer::new(host, cfg)),
             starting: AtomicBool::new(true),
             error: Mutex::new(None),
             push_pending: AtomicBool::new(false),

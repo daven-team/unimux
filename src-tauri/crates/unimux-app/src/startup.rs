@@ -77,6 +77,14 @@ pub fn install_crash_handling(log: Arc<RollingLog>) {
     let _ = CRASH.set(log);
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        // A panic inside an MCP request is caught by the MCP server, which logs the one cut `MCP request failed` line of
+        // 1.1.4 (handle().catch, no dialog); the whole panic text could hold tool arguments.
+        if unimux_mcp::in_request() {
+            if cfg!(debug_assertions) {
+                previous(info);
+            }
+            return;
+        }
         let message = info
             .payload()
             .downcast_ref::<&str>()

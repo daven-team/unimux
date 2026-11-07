@@ -182,7 +182,9 @@ pub fn start(ctx: &Arc<ReqCtx>, id: &Value, name: &str, args: Option<Value>, ttl
             progress_every: shared.cfg.progress_every,
             task: true,
         };
-        let outcome = shared.host.clone().call(name.clone(), args, call).await;
+        // A panic in the tool is logged like a request's (one cut line, no dialog); the task then stays working until its
+        // ttl ends, as a task whose handler never settles.
+        let Some(outcome) = super::guarded(&shared, shared.host.clone().call(name.clone(), args, call)).await else { return };
         let content = match call_outcome(&shared, &token, &cell, &name, outcome, false) {
             Ok(content) => content,
             // A task has no protocol error: the unknown tool is a tool error (`throw new Error('Unknown tool: x')`).

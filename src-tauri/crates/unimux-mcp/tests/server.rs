@@ -1,4 +1,4 @@
-//! HTTP-level behaviour of the MCP server that the 52 protocol cases (tests/protocol.rs) do not drive: the 1.1.4 vitest
+//! HTTP-level behaviour of the MCP server that the 57 protocol cases (tests/protocol.rs) do not drive: the 1.1.4 vitest
 //! cases of mcp.test.ts, mcp-protocol.test.ts ('server hardening', revoke, disconnect), mcp-lazy.test.ts and the session /
 //! task cases of mcp-tasks-elicit.test.ts (rows in test/PORTING.md), plus the SP8 checks with a shortened config (ttl
 //! expiry, elicitation timeout, mid-body revoke) and the timeouts, limits and keepalive SP8 left untested.
@@ -871,4 +871,91 @@ async fn stop_ends_running_calls_and_closes_the_port() {
     assert_ne!(r.status, 200, "the connection was closed: {r:?}");
     assert!(srv.wait_event(from, |e| e["kind"] == "call-end", Duration::from_secs(2)).await.is_some());
     assert!(TcpStream::connect(&srv.addr).await.is_err() || srv.post(&token, ping(1)).await.status == 0);
+}
+
+// ----- M1 review fixes -----
+
+#[test]
+fn concurrent_issue_token_calls_for_a_cell_leave_one_live_token() {
+    let server = Arc::new(McpServer::new(Arc::new(unimux_mcp::tools::NoTools), quick()));
+    for _ in 0..500 {
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let threads: Vec<_> = (0..3)
+            .map(|n| {
+                let (server, barrier) = (server.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    // Two restarts and an exit of the same cell at once.
+                    if n == 2 {
+                        server.revoke_cell("cell-1");
+                    } else {
+                        server.issue_token("cell-1");
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let [tokens, cells, ..] = server.table_sizes();
+        assert!(tokens == cells && tokens <= 1, "tables after concurrent issue/revoke: {:?}", server.table_sizes());
+        assert_eq!(server.info()["configuredCellIds"].as_array().unwrap().len(), tokens);
+        server.revoke_cell("cell-1");
+        assert_eq!(server.table_sizes()[..2], [0, 0]);
+        assert_eq!(server.connection("cell-1"), Connection::Off);
+    }
+}
+
+#[tokio::test]
+async fn a_call_of_a_replaced_token_does_not_mark_the_new_agent_connected() {
+    let srv = Srv::start(quick()).await;
+    let old = srv.issue(LEAD);
+    let from = srv.fake.events.all().len();
+    let (r, ()) = tokio::join!(srv.post(&old, wait_for(1, 30.0)), async {
+        srv.wait_event(from, |e| e["kind"] == "call-start", Duration::from_secs(2)).await;
+        // The cell restarts: a new token while the old agent's call runs.
+        srv.issue(LEAD);
+    });
+    assert!(r.text.contains("Agent connection has expired."), "{}", r.text);
+    assert_eq!(srv.server.connection(LEAD), Connection::Waiting);
+    assert_eq!(srv.server.info()["connectedCellIds"], json!([]));
+}
+
+#[tokio::test]
+async fn a_session_call_cancelled_by_its_lone_surrogate_id_gets_no_answer() {
+    let srv = Srv::start(quick()).await;
+    let token = srv.lead();
+    let session = srv.session(&token).await;
+    let (addr, tk, sid) = (srv.addr.clone(), token.clone(), session.clone());
+    let started = Instant::now();
+    let call = tokio::spawn(async move {
+        support::http::Request::new(&addr, "POST", "/mcp")
+            .header("content-type", "application/json")
+            .header("accept", ACCEPT)
+            .header("authorization", &format!("Bearer {tk}"))
+            .header("mcp-session-id", &sid)
+            .header("mcp-protocol-version", "2025-11-25")
+            .body(r#"{"jsonrpc":"2.0","id":"c\ud800","method":"tools/call","params":{"name":"wait_for","arguments":{"timeoutSec":5}}}"#)
+            .send()
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let note = r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"c\uD800","reason":"user"}}"#;
+    assert_eq!(srv.in_session(&token, &session, note).await.status, 202);
+    let r = call.await.unwrap();
+    assert!(started.elapsed() < Duration::from_secs(3), "the cancel found the request");
+    assert_eq!((r.status, r.messages()), (200, Vec::<Value>::new()), "{}", r.text);
+}
+
+#[tokio::test]
+async fn answers_of_an_open_session_are_still_written() {
+    let srv = Srv::start(quick()).await;
+    let token = srv.lead();
+    let session = srv.session(&token).await;
+    let batch = json!([ping(1), { "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": { "name": "wait_for", "arguments": { "timeoutSec": 0.3 } } }]);
+    let r = srv.in_session(&token, &session, batch).await;
+    let mut ids: Vec<i64> = r.messages().iter().filter_map(|m| m["id"].as_i64()).collect();
+    ids.sort();
+    assert_eq!(ids, [1, 2], "{}", r.text);
 }

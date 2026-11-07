@@ -49,9 +49,10 @@ use tasks::TaskEntry;
 
 use crate::elicit::{ElicitAnswer, elicit_answer};
 use crate::jsonrpc::{
-    error, form_elicitation, id_key, is_request, issues_message, js_number, mcp_error, messages_of, normalize_number, result,
-    schema_issues, valid_message, wants_progress, wants_session,
+    cancelled_params_ok, error, form_elicitation, id_key, is_initialize, is_request, issues_message, js_number, mcp_error,
+    messages_of, normalize_number, result, schema_issues, valid_message, wants_progress, wants_session,
 };
+use crate::surrogate_ids;
 use crate::tools::{CallCtx, CallError, EXPIRED, Elicit, MAX_RESULT_CHARS, Progress, ToolHost, cap_result, error_content};
 
 pub const MAX_BODY: usize = 256 * 1024;
@@ -237,11 +238,16 @@ impl Shared {
         }
     }
 
-    /// A successful tools/list or tools/call: the agent's MCP client really works.
-    fn seen(&self, cell: &str) {
+    /// A successful tools/list or tools/call: the agent's MCP client really works. Only while the request's token is still
+    /// the cell's token, checked under the lock that records it: a revoke or a new token (a cell restart) in between must
+    /// not mark the new agent as connected.
+    fn seen_if_live(&self, token: &str, cell: &str) {
         let now = (self.cfg.now)();
         let first = {
             let mut inner = self.inner.lock();
+            if !inner.live(token, cell) {
+                return;
+            }
             match inner.last_seen.iter_mut().find(|(c, _)| c == cell) {
                 Some((_, at)) => {
                     let first = now - *at >= CONNECTED_WINDOW_MS;
@@ -334,15 +340,22 @@ impl McpServer {
         }
     }
 
-    /// A new 256-bit token for the cell; its previous token is revoked first.
+    /// A new 256-bit token for the cell; its previous token is revoked first. The revoke and the new token happen under one
+    /// lock, so concurrent calls for a cell (a restart racing with an exit) never leave two live tokens.
     pub fn issue_token(&self, cell: &str) -> String {
-        self.revoke_cell(cell);
         let token = random_hex::<32>();
-        {
+        let revoked = {
             let mut inner = self.shared.inner.lock();
+            let revoked = revoke_locked(&mut inner, cell);
             inner.tokens.insert(token.clone(), cell.to_string());
             inner.token_of.push((cell.to_string(), token.clone()));
             inner.token_cancel.insert(token.clone(), CancellationToken::new());
+            revoked
+        };
+        // mcp.ts issueToken: revokeCell's change (when there was a token), then its own.
+        if let Some(revoked) = revoked {
+            self.shared.changed();
+            revoked.end();
         }
         self.shared.changed();
         token
@@ -350,26 +363,10 @@ impl McpServer {
 
     /// Revokes the cell's token: its requests, sessions and tasks end at once (a waiting wait_for returns).
     pub fn revoke_cell(&self, cell: &str) {
-        let (cancel, sessions) = {
-            let mut inner = self.shared.inner.lock();
-            inner.last_seen.retain(|(c, _)| c != cell);
-            let Some(index) = inner.token_of.iter().position(|(c, _)| c == cell) else { return };
-            let (_, token) = inner.token_of.remove(index);
-            inner.tokens.remove(&token);
-            inner.buckets.remove(&token);
-            inner.in_flight.remove(&token);
-            inner.tasks.remove(&token);
-            let cancel = inner.token_cancel.remove(&token);
-            let own: Vec<String> = inner.sessions.values().filter(|s| s.token == token).map(|s| s.id.clone()).collect();
-            let sessions: Vec<Arc<Session>> = own.iter().filter_map(|id| remove_session(&mut inner, id)).collect();
-            (cancel, sessions)
-        };
-        self.shared.changed();
-        if let Some(cancel) = cancel {
-            cancel.cancel();
-        }
-        for session in sessions {
-            end_session(&session);
+        let revoked = revoke_locked(&mut self.shared.inner.lock(), cell);
+        if let Some(revoked) = revoked {
+            self.shared.changed();
+            revoked.end();
         }
     }
 
@@ -514,9 +511,53 @@ async fn connection(shared: Arc<Shared>, stream: tokio::net::TcpStream, port: u1
     }
 }
 
+thread_local! {
+    static IN_REQUEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// True while this thread runs (polls) an MCP request, a session call or an MCP task. The app's panic hook asks it: such a
+/// panic is caught here and logged as the one cut `MCP request failed` line of 1.1.4 (handle().catch), so the hook must
+/// not add its own line (with the whole panic text) or the error dialog.
+pub fn in_request() -> bool {
+    IN_REQUEST.with(|f| f.get())
+}
+
+/// Marks every poll of the inner future (see [`in_request`]); the flag is restored on return and on unwind.
+struct Marked<F>(std::pin::Pin<Box<F>>);
+
+fn marked<F: std::future::Future>(fut: F) -> Marked<F> {
+    Marked(Box::pin(fut))
+}
+
+impl<F: std::future::Future> std::future::Future for Marked<F> {
+    type Output = F::Output;
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<F::Output> {
+        struct Restore(bool);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                IN_REQUEST.with(|f| f.set(self.0));
+            }
+        }
+        let _restore = Restore(IN_REQUEST.with(|f| f.replace(true)));
+        self.0.as_mut().poll(cx)
+    }
+}
+
+/// A request future with the panic handling of mcp.ts: marked for the app's hook, a panic caught and reported as one cut
+/// log line.
+pub(crate) async fn guarded<T>(shared: &Shared, fut: impl std::future::Future<Output = T>) -> Option<T> {
+    match AssertUnwindSafe(marked(fut)).catch_unwind().await {
+        Ok(value) => Some(value),
+        Err(panic) => {
+            shared.log(&format!("MCP request failed: {}", panic_text(&panic)));
+            None
+        }
+    }
+}
+
 /// One request; a panic anywhere below answers 500 without echoing anything of the request (mcp.ts handle().catch).
 async fn respond(shared: Arc<Shared>, port: u16, req: Request<Incoming>) -> Resp {
-    match AssertUnwindSafe(handle(shared.clone(), port, req)).catch_unwind().await {
+    match AssertUnwindSafe(marked(handle(shared.clone(), port, req))).catch_unwind().await {
         Ok(response) => response,
         Err(panic) => {
             shared.log(&format!("MCP request failed: {}", panic_text(&panic)));
@@ -647,9 +688,18 @@ async fn handle(shared: Arc<Shared>, port: u16, req: Request<Incoming>) -> Resp 
         BodyRead::Timeout => return body::request_timeout(),
     };
     // mcp.ts readBody: `Buffer.concat(chunks).toString('utf8')` (invalid bytes become U+FFFD), then JSON.parse.
-    let Ok(body) = unimux_core::js_json::parse(&String::from_utf8_lossy(&raw)) else {
+    // Ids with an escaped lone surrogate are kept as JSON.parse keeps them (see surrogate_ids); other strings read as U+FFFD.
+    let text = String::from_utf8_lossy(&raw);
+    let protected = surrogate_ids::protect(&text);
+    let Ok(mut body) = unimux_core::js_json::parse(protected.as_deref().unwrap_or(&text)) else {
         return json_error(StatusCode::BAD_REQUEST, -32700, "Parse error: invalid JSON.");
     };
+    if protected.is_some() {
+        match &mut body {
+            Value::Array(items) => items.iter_mut().for_each(surrogate_ids::restore_message),
+            other => surrogate_ids::restore_message(other),
+        }
+    }
 
     if let Some(id) = session_id {
         let session = shared.inner.lock().sessions.get(&id).cloned();
@@ -748,7 +798,14 @@ async fn transport(
             *id = normalize_number(id);
         }
     }
-    let is_init = messages.iter().any(|m| m["method"] == "initialize" && is_request(m));
+    // Closed while the body was read (SDK: `if (this._closed)`, before the initialization checks).
+    if let Mode::Session(s) = &mode
+        && s.cancel.is_cancelled()
+    {
+        return json_error(StatusCode::NOT_FOUND, -32001, "Session not found");
+    }
+    // The SDK's isInitializeRequest: the whole InitializeRequestSchema must pass, not just the method name.
+    let is_init = messages.iter().any(is_initialize);
     if is_init {
         if matches!(mode, Mode::Session(_)) {
             return json_error(StatusCode::BAD_REQUEST, -32600, "Invalid Request: Server already initialized");
@@ -756,23 +813,25 @@ async fn transport(
         if messages.len() > 1 {
             return json_error(StatusCode::BAD_REQUEST, -32600, "Invalid Request: Only one initialization request is allowed");
         }
-    } else if let Some(version) = header_str(headers, "mcp-protocol-version")
-        && !SUPPORTED_PROTOCOL_VERSIONS.contains(&version)
-    {
-        let message = format!(
-            "Bad Request: Unsupported protocol version: {version} (supported versions: {})",
-            SUPPORTED_PROTOCOL_VERSIONS.join(", ")
-        );
-        return json_error(StatusCode::BAD_REQUEST, -32000, &message);
+    } else {
+        // validateSession of a new session transport: nothing initialized it, so no session is created.
+        if matches!(mode, Mode::NewSession { .. }) {
+            return json_error(StatusCode::BAD_REQUEST, -32000, "Bad Request: Server not initialized");
+        }
+        if let Some(version) = header_str(headers, "mcp-protocol-version")
+            && !SUPPORTED_PROTOCOL_VERSIONS.contains(&version)
+        {
+            let message = format!(
+                "Bad Request: Unsupported protocol version: {version} (supported versions: {})",
+                SUPPORTED_PROTOCOL_VERSIONS.join(", ")
+            );
+            return json_error(StatusCode::BAD_REQUEST, -32000, &message);
+        }
     }
 
     let (session, token, cell, json_mode) = match mode {
         Mode::Stateless { token, cell, json } => (None, token, cell, json),
         Mode::Session(s) => {
-            if s.cancel.is_cancelled() {
-                // Closed while the body was read (SDK: `if (this._closed)`).
-                return json_error(StatusCode::NOT_FOUND, -32001, "Session not found");
-            }
             let (t, c) = (s.token.clone(), s.cell.clone());
             (Some(s), t, c, false)
         }
@@ -848,25 +907,26 @@ async fn transport(
         // request the client cancelled gets no answer; its stream ends once nothing else is pending on it.
         tokio::spawn(async move {
             let id = id_key(&m["id"]);
-            let run = AssertUnwindSafe(dispatch(&ctx, m, Some(tx.clone()), state.clone())).catch_unwind().await;
+            let run = guarded(&ctx.shared, dispatch(&ctx, m, Some(tx.clone()), state.clone())).await;
             if let Some(s) = &ctx.session {
                 let mut requests = s.requests.lock();
                 if requests.get(&id).is_some_and(|r| Arc::ptr_eq(r, &state)) {
                     requests.remove(&id);
                 }
             }
-            match run {
-                Ok(answer) if !state.cancelled_by_client() => {
-                    let _ = tx.send(answer);
-                }
-                Ok(_) => {}
-                Err(panic) => ctx.shared.log(&format!("MCP request failed: {}", panic_text(&panic))),
+            // A closed session (DELETE, trim, revoke) closed its streams in 1.1.4 (transport.close()): nothing more is sent.
+            if let Some(answer) = run
+                && !state.cancelled_by_client()
+                && !ctx.session_closed()
+            {
+                let _ = tx.send(answer);
             }
         });
     }
     drop(tx);
     guard.disarm();
-    body::sse(rx, release, session_header.as_deref(), shared.cfg.keep_alive)
+    let closed = session.as_ref().map(|s| s.cancel.clone());
+    body::sse(rx, release, session_header.as_deref(), shared.cfg.keep_alive, closed)
 }
 
 /// Notifications and responses: elicitation answers reach their waiting call, notifications/cancelled ends a request.
@@ -879,9 +939,10 @@ fn accept_message(session: Option<&Session>, m: &Value) {
         }
         return;
     }
-    // CancelledNotificationSchema: a reason that is not a string fails the parse and the notification is dropped.
+    // CancelledNotificationSchema: params required, `requestId` a RequestId and `reason` a string when present; a
+    // notification failing it (also `"reason": null`) is dropped.
     let reason = &m["params"]["reason"];
-    if m["method"] == "notifications/cancelled" && (reason.is_null() || reason.is_string()) {
+    if m["method"] == "notifications/cancelled" && m.get("params").is_some_and(|p| p.is_object() && cancelled_params_ok(p)) {
         let request = session.requests.lock().get(&id_key(&m["params"]["requestId"])).cloned();
         if let Some(state) = request {
             state.client_reason.lock().get_or_insert_with(|| reason.as_str().unwrap_or(ABORT_REASON).to_string());
@@ -900,6 +961,10 @@ pub(crate) struct ReqCtx {
 impl ReqCtx {
     fn live(&self) -> bool {
         self.shared.inner.lock().live(&self.token, &self.cell)
+    }
+    /// The request's session was closed (its streams are closed; nothing may be sent on them any more).
+    fn session_closed(&self) -> bool {
+        self.session.as_ref().is_some_and(|s| s.cancel.is_cancelled())
     }
     /// The transport's session id, which the SDK passes to every task store call.
     fn session_id(&self) -> Option<&str> {
@@ -936,9 +1001,7 @@ async fn dispatch(ctx: &Arc<ReqCtx>, m: Value, out: Option<mpsc::UnboundedSender
         "ping" => result(&id, json!({})),
         "tools/list" => {
             let tools = host.tools(&ctx.cell);
-            if ctx.live() {
-                ctx.shared.seen(&ctx.cell);
-            }
+            ctx.shared.seen_if_live(&ctx.token, &ctx.cell);
             result(&id, json!({ "tools": tools }))
         }
         "tools/call" => tools_call(ctx, &id, params, out, state).await,
@@ -966,14 +1029,14 @@ pub(crate) fn call_outcome(
         // Revoked while the call was running (a waiting wait_for is aborted by revokeCell): do not hand out the result.
         Ok(_) | Err(CallError::Unknown) if !live => Ok(error_content(EXPIRED)),
         Ok(value) => {
-            shared.seen(cell);
+            shared.seen_if_live(token, cell);
             let text = cap_result(&unimux_core::js_json::stringify(&value), MAX_RESULT_CHARS);
             Ok(json!({ "content": [{ "type": "text", "text": text }] }))
         }
         Err(CallError::Unknown) => Err(format!("Unknown tool: {name}")),
         Err(e) => {
             if live && seen_on_error {
-                shared.seen(cell);
+                shared.seen_if_live(token, cell);
             }
             Ok(error_content(&e.text(name)))
         }
@@ -1002,9 +1065,10 @@ async fn tools_call(
     let progress: Option<Progress> = match (&out, &params["_meta"]["progressToken"]) {
         (Some(tx), token) if token.is_string() || token.is_number() => {
             let (tx, token, state) = (tx.clone(), token.clone(), state.clone());
+            let closed = ctx.session.as_ref().map(|s| s.cancel.clone());
             Some(Arc::new(move |progress: f64, total: f64, message: String| {
-                // extra.sendNotification: nothing once the client cancelled the request.
-                if state.cancelled_by_client() {
+                // extra.sendNotification: nothing once the client cancelled the request or the session closed.
+                if state.cancelled_by_client() || closed.as_ref().is_some_and(CancellationToken::is_cancelled) {
                     return;
                 }
                 let _ = tx.send(json!({ "method": "notifications/progress",
@@ -1115,6 +1179,45 @@ fn elicit_on(session: Arc<Session>, tx: mpsc::UnboundedSender<Value>, state: Arc
     })
 }
 
+/// What a revoke has to end once the server lock is released.
+struct Revoked {
+    cancels: Vec<CancellationToken>,
+    sessions: Vec<Arc<Session>>,
+}
+
+impl Revoked {
+    fn end(self) {
+        for cancel in self.cancels {
+            cancel.cancel();
+        }
+        for session in self.sessions {
+            end_session(&session);
+        }
+    }
+}
+
+/// mcp.ts revokeCell under the caller's lock: forgets the cell's token (every one, should there ever be more) with its
+/// buckets, counters, tasks and sessions. None when the cell had no token.
+fn revoke_locked(inner: &mut Inner, cell: &str) -> Option<Revoked> {
+    inner.last_seen.retain(|(c, _)| c != cell);
+    let tokens: Vec<String> = inner.token_of.iter().filter(|(c, _)| c == cell).map(|(_, t)| t.clone()).collect();
+    if tokens.is_empty() {
+        return None;
+    }
+    inner.token_of.retain(|(c, _)| c != cell);
+    let mut revoked = Revoked { cancels: Vec::new(), sessions: Vec::new() };
+    for token in tokens {
+        inner.tokens.remove(&token);
+        inner.buckets.remove(&token);
+        inner.in_flight.remove(&token);
+        inner.tasks.remove(&token);
+        revoked.cancels.extend(inner.token_cancel.remove(&token));
+        let own: Vec<String> = inner.sessions.values().filter(|s| s.token == token).map(|s| s.id.clone()).collect();
+        revoked.sessions.extend(own.iter().filter_map(|id| remove_session(inner, id)));
+    }
+    Some(revoked)
+}
+
 /// Closes the token's oldest sessions above MAX_SESSIONS_PER_TOKEN (a client that reconnects keeps opening new ones).
 fn trim_sessions(inner: &mut Inner, token: &str) -> Vec<Arc<Session>> {
     let own: Vec<String> =
@@ -1156,6 +1259,22 @@ mod tests {
         assert_eq!(h("Bearer "), None);
         assert_eq!(h("Basic abc"), None);
         assert_eq!(h("Bearer abc "), None);
+    }
+
+    /// The window between a request's liveness check and its `seen` record: a token replaced (cell restart) or revoked in
+    /// between must not mark the cell connected.
+    #[test]
+    fn seen_is_recorded_only_for_the_cells_current_token() {
+        let server = McpServer::new(Arc::new(crate::tools::NoTools), Config::default());
+        let old = server.issue_token("c");
+        let new = server.issue_token("c");
+        server.shared.seen_if_live(&old, "c");
+        assert_eq!(server.connection("c"), Connection::Waiting);
+        server.shared.seen_if_live(&new, "c");
+        assert_eq!(server.connection("c"), Connection::Connected);
+        server.revoke_cell("c");
+        server.shared.seen_if_live(&new, "c");
+        assert_eq!(server.info()["connectedCellIds"], json!([]));
     }
 
     #[test]

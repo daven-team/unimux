@@ -397,6 +397,75 @@ export function cases(srv) {
       await post(srv.url, t, { jsonrpc: '2.0', id: 12, method: 'tasks/cancel', params: { taskId: stateless } });
       return out;
     },
+    // ----- added with the M1 review fixes -----
+    'initialize failing InitializeRequestSchema: no session, no version skip, -32603 zod issues': async () => {
+      const t = await lead();
+      const sid = await session(t);
+      const base = init().params;
+      const send = async (params, headers = {}) => outcome(await post(srv.url, t, { jsonrpc: '2.0', id: 0, method: 'initialize', ...(params === undefined ? {} : { params }) }, headers), { drop: instr, keepHeaders: ['mcp-session-id'] });
+      return {
+        elicitationWithoutClientInfo: await send({ protocolVersion: '2025-06-18', capabilities: { elicitation: {} } }),
+        withoutClientInfoBogusHeader: await send({ protocolVersion: '2025-06-18', capabilities: {} }, { 'mcp-protocol-version': 'bogus' }),
+        protocolVersionNumber: await send({ ...base, protocolVersion: 5 }),
+        noParams: await send(undefined),
+        nestedCapabilities: await send({ ...base, capabilities: { roots: { listChanged: 'y' }, sampling: { context: 1, tools: [] }, elicitation: 'x', tasks: { list: 1, requests: { elicitation: { create: 's' }, sampling: [] } }, experimental: { a: null, b: {} }, extensions: [] } }),
+        formElicitationNull: await send({ ...base, capabilities: { elicitation: { form: null, url: 's' } } }),
+        formApplyDefaults: await send({ ...base, capabilities: { elicitation: { url: {}, form: { applyDefaults: 1 } } } }),
+        clientInfoFields: await send({ ...base, clientInfo: { name: 1, title: 2, icons: [{ src: 1, mimeType: 2, sizes: [3, 'x'], theme: 'blue' }, 5], websiteUrl: 3, description: 4 } }),
+        clientInfoMissing: await send({ protocolVersion: 1, capabilities: [], clientInfo: null }),
+        validWithBogusHeader: await send(base, { 'mcp-protocol-version': 'bogus' }),
+        invalidInSession: outcome(await inSession(t, sid, { jsonrpc: '2.0', id: 3, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {} } })),
+        validNotificationInSession: outcome(await inSession(t, sid, { jsonrpc: '2.0', method: 'initialize', params: base })),
+      };
+    },
+    'tools/list params failing the schema -> -32603 zod issues': async () => {
+      const t = await lead(); const sid = await session(t);
+      const byId = (r) => ({ ...outcome(r), messages: messages(r).sort((a, b) => a.id - b.id) });
+      const list = await post(srv.url, t, { jsonrpc: '2.0', id: 3, method: 'tools/list', params: { cursor: 'x' } });
+      return {
+        cursorNumber: outcome(await post(srv.url, t, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: { cursor: 5 } })),
+        cursorNull: outcome(await post(srv.url, t, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: { cursor: null } })),
+        cursorString: { status: list.status, tools: messages(list)[0]?.result?.tools?.length },
+        sessionBatch: byId(await inSession(t, sid, [{ jsonrpc: '2.0', id: 1, method: 'ping' }, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: { cursor: 3 } }])),
+      };
+    },
+    'a closed session ends its open call streams without an answer (DELETE, trim, revoke)': async () => {
+      const run = async (close) => {
+        const t = await lead(); const id = await session(t);
+        await inSession(t, id, { jsonrpc: '2.0', method: 'notifications/initialized' });
+        const at = Date.now();
+        const s = stream(srv.url, t, { 'mcp-session-id': id, 'mcp-protocol-version': '2025-11-25' }, { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'wait_for', arguments: { timeoutSec: 3 }, _meta: { progressToken: 'p' } } }, { ms: 4500 });
+        await new Promise((r) => setTimeout(r, 500));
+        const closed = await close(t, id);
+        const { status, messages: seen } = await s;
+        return { status, closed, messages: mask(seen, ['text', 'message']), ended: Date.now() - at < 2500 ? 'with the close' : 'later' };
+      };
+      return {
+        delete: await run(async (t, id) => (await http(srv.url, { method: 'DELETE', headers: { ...auth(t), 'mcp-session-id': id, 'mcp-protocol-version': '2025-11-25' } })).status),
+        trim: await run(async (t) => { for (let i = 0; i < 4; i++) await session(t); return 'trimmed'; }),
+        revoke: await run(async () => { await srv.revoke(srv.lead); return 'revoked'; }),
+      };
+    },
+    'notifications/cancelled failing its schema (reason null) is dropped': async () => {
+      const t = await lead(); const id = await session(t);
+      await inSession(t, id, { jsonrpc: '2.0', method: 'notifications/initialized' });
+      const at = Date.now();
+      const s = stream(srv.url, t, { 'mcp-session-id': id, 'mcp-protocol-version': '2025-11-25' }, { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'wait_for', arguments: { timeoutSec: 2 } } }, { ms: 4000 });
+      await new Promise((r) => setTimeout(r, 500));
+      const nullReason = (await inSession(t, id, { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 7, reason: null } })).status;
+      const { status, messages: seen } = await s;
+      return { status, nullReason, messages: mask(seen, ['text']), answered: Date.now() - at > 1500 ? 'after the wait' : 'early' };
+    },
+    'a request id with a lone surrogate is echoed unchanged': async () => {
+      const t = await lead(); const sid = await session(t);
+      const raw = (r) => ({ status: r.status, type: String(r.headers['content-type'] ?? '').split(';')[0], text: r.text });
+      return {
+        stateless: raw(await post(srv.url, t, '{"jsonrpc":"2.0","id":"\\ud800","method":"ping"}')),
+        upperCaseAndEscapes: raw(await post(srv.url, t, '{"jsonrpc":"2.0","id":"a\\uDC00\\n\\u0041\\/","method":"ping"}')),
+        batch: raw(await post(srv.url, t, '[{"jsonrpc":"2.0","id":"\\ud800","method":"ping"},{"jsonrpc":"2.0","id":"\\udbff","method":"nope/nope"}]')),
+        session: raw(await inSession(t, sid, '{"jsonrpc":"2.0","id":"\\ud83d","method":"ping"}')),
+      };
+    },
   };
 }
 

@@ -137,8 +137,219 @@ fn received(v: Option<&Value>) -> &'static str {
 
 /// A zod 4 `invalid_type` issue, in zod's key order.
 fn type_issue(expected: &str, path: &[&str], got: Option<&Value>) -> Value {
+    let path: Vec<Value> = path.iter().map(|p| json!(p)).collect();
+    type_issue_at(expected, &path, got)
+}
+
+fn type_issue_at(expected: &str, path: &[Value], got: Option<&Value>) -> Value {
     json!({ "expected": expected, "code": "invalid_type", "path": path,
         "message": format!("Invalid input: expected {expected}, received {}", received(got)) })
+}
+
+/// The zod issues of InitializeRequestSchema's params (SDK 1.32.2): protocolVersion, ClientCapabilitiesSchema and
+/// ImplementationSchema, in the schemas' key order. Unknown keys are allowed everywhere (z.object strips, loose keeps).
+mod init_schema {
+    use serde_json::{Value, json};
+
+    use super::type_issue_at;
+
+    type Path = Vec<Value>;
+
+    fn at(path: &Path, key: impl Into<Value>) -> Path {
+        let mut p = path.clone();
+        p.push(key.into());
+        p
+    }
+
+    /// z.object / z.looseObject: a plain object (not null, not an array).
+    fn object<'a>(v: &'a Value, path: &Path, out: &mut Vec<Value>) -> Option<&'a serde_json::Map<String, Value>> {
+        let o = v.as_object();
+        if o.is_none() {
+            out.push(type_issue_at("object", path, Some(v)));
+        }
+        o
+    }
+
+    /// The SDK's AssertObjectSchema: `v !== null && typeof v === 'object'` (arrays pass).
+    fn assert_object(o: &serde_json::Map<String, Value>, key: &str, path: &Path, out: &mut Vec<Value>) {
+        if let Some(v) = o.get(key)
+            && !(v.is_object() || v.is_array())
+        {
+            out.push(json!({ "code": "custom", "path": at(path, key), "message": "Invalid input" }));
+        }
+    }
+
+    fn optional_string(o: &serde_json::Map<String, Value>, key: &str, path: &Path, out: &mut Vec<Value>) {
+        if let Some(v) = o.get(key)
+            && !v.is_string()
+        {
+            out.push(type_issue_at("string", &at(path, key), Some(v)));
+        }
+    }
+
+    fn required_string(o: &serde_json::Map<String, Value>, key: &str, path: &Path, out: &mut Vec<Value>) {
+        if !o.get(key).is_some_and(Value::is_string) {
+            out.push(type_issue_at("string", &at(path, key), o.get(key)));
+        }
+    }
+
+    /// z.record(z.string(), AssertObjectSchema).
+    fn record_of_objects(o: &serde_json::Map<String, Value>, key: &str, path: &Path, out: &mut Vec<Value>) {
+        let Some(v) = o.get(key) else { return };
+        let path = at(path, key);
+        match v.as_object() {
+            None => out.push(type_issue_at("record", &path, Some(v))),
+            Some(r) => {
+                for k in r.keys() {
+                    assert_object(r, k, &path, out);
+                }
+            }
+        }
+    }
+
+    /// z.intersection(z.object({...}), z.record(...)) on a value that is not a plain object: both sides fail.
+    fn intersection_type(v: &Value, path: &Path, out: &mut Vec<Value>) -> bool {
+        if v.is_object() {
+            return true;
+        }
+        out.push(type_issue_at("object", path, Some(v)));
+        out.push(type_issue_at("record", path, Some(v)));
+        false
+    }
+
+    fn capabilities(v: &Value, path: &Path, out: &mut Vec<Value>) {
+        let Some(c) = object(v, path, out) else { return };
+        record_of_objects(c, "experimental", path, out);
+        if let Some(s) = c.get("sampling")
+            && let Some(s) = object(s, &at(path, "sampling"), out)
+        {
+            let p = at(path, "sampling");
+            assert_object(s, "context", &p, out);
+            assert_object(s, "tools", &p, out);
+        }
+        if let Some(e) = c.get("elicitation") {
+            let p = at(path, "elicitation");
+            // The preprocess turns `{}` into `{ form: {} }`, which passes.
+            if intersection_type(e, &p, out) {
+                let e = e.as_object().expect("checked");
+                if let Some(form) = e.get("form") {
+                    let fp = at(&p, "form");
+                    if intersection_type(form, &fp, out)
+                        && let Some(d) = form.get("applyDefaults")
+                        && !d.is_boolean()
+                    {
+                        out.push(type_issue_at("boolean", &at(&fp, "applyDefaults"), Some(d)));
+                    }
+                }
+                assert_object(e, "url", &p, out);
+            }
+        }
+        if let Some(r) = c.get("roots")
+            && let Some(r) = object(r, &at(path, "roots"), out)
+            && let Some(l) = r.get("listChanged")
+            && !l.is_boolean()
+        {
+            out.push(type_issue_at("boolean", &at(&at(path, "roots"), "listChanged"), Some(l)));
+        }
+        if let Some(t) = c.get("tasks") {
+            let p = at(path, "tasks");
+            if let Some(t) = object(t, &p, out) {
+                assert_object(t, "list", &p, out);
+                assert_object(t, "cancel", &p, out);
+                if let Some(r) = t.get("requests") {
+                    let rp = at(&p, "requests");
+                    if let Some(r) = object(r, &rp, out) {
+                        for (kind, method) in [("sampling", "createMessage"), ("elicitation", "create")] {
+                            if let Some(k) = r.get(kind)
+                                && let Some(k) = object(k, &at(&rp, kind), out)
+                            {
+                                assert_object(k, method, &at(&rp, kind), out);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        record_of_objects(c, "extensions", path, out);
+    }
+
+    fn icon(v: &Value, path: &Path, out: &mut Vec<Value>) {
+        let Some(i) = object(v, path, out) else { return };
+        required_string(i, "src", path, out);
+        optional_string(i, "mimeType", path, out);
+        if let Some(sizes) = i.get("sizes") {
+            let p = at(path, "sizes");
+            match sizes.as_array() {
+                None => out.push(type_issue_at("array", &p, Some(sizes))),
+                Some(items) => {
+                    for (n, s) in items.iter().enumerate() {
+                        if !s.is_string() {
+                            out.push(type_issue_at("string", &at(&p, n), Some(s)));
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(theme) = i.get("theme")
+            && theme != "light"
+            && theme != "dark"
+        {
+            out.push(json!({ "code": "invalid_value", "values": ["light", "dark"], "path": at(path, "theme"),
+                "message": "Invalid option: expected one of \"light\"|\"dark\"" }));
+        }
+    }
+
+    fn implementation(v: &Value, path: &Path, out: &mut Vec<Value>) {
+        let Some(o) = object(v, path, out) else { return };
+        required_string(o, "name", path, out);
+        optional_string(o, "title", path, out);
+        if let Some(icons) = o.get("icons") {
+            let p = at(path, "icons");
+            match icons.as_array() {
+                None => out.push(type_issue_at("array", &p, Some(icons))),
+                Some(items) => {
+                    for (n, item) in items.iter().enumerate() {
+                        icon(item, &at(&p, n), out);
+                    }
+                }
+            }
+        }
+        required_string(o, "version", path, out);
+        optional_string(o, "websiteUrl", path, out);
+        optional_string(o, "description", path, out);
+    }
+
+    /// The issues of `params` (None: the key is missing).
+    pub fn issues(params: Option<&Value>) -> Vec<Value> {
+        let mut out = Vec::new();
+        let root: Path = vec![json!("params")];
+        let Some(p) = params.and_then(Value::as_object) else {
+            out.push(type_issue_at("object", &root, params));
+            return out;
+        };
+        required_string(p, "protocolVersion", &root, &mut out);
+        match p.get("capabilities") {
+            Some(c) => capabilities(c, &at(&root, "capabilities"), &mut out),
+            None => out.push(type_issue_at("object", &at(&root, "capabilities"), None)),
+        }
+        match p.get("clientInfo") {
+            Some(c) => implementation(c, &at(&root, "clientInfo"), &mut out),
+            None => out.push(type_issue_at("object", &at(&root, "clientInfo"), None)),
+        }
+        out
+    }
+}
+
+/// The SDK's `isInitializeRequest` (InitializeRequestSchema.safeParse, which does not look at `id`): an `initialize`
+/// whose params pass the schema. Only such a message initializes a transport.
+pub fn is_initialize(m: &Value) -> bool {
+    m["method"] == "initialize" && init_schema::issues(m.get("params")).is_empty()
+}
+
+/// CancelledNotificationSchema's params: `requestId` a RequestId and `reason` a string, each optional. A notification
+/// failing it is dropped by the SDK (an explicit `"reason": null` too).
+pub fn cancelled_params_ok(params: &Value) -> bool {
+    params.get("requestId").is_none_or(is_id) && params.get("reason").is_none_or(Value::is_string)
 }
 
 /// The request schema checks the SDK's setRequestHandler runs (parseWithCompat) for the methods whose params it reads:
@@ -172,7 +383,9 @@ pub fn schema_issues(method: &str, params: Option<&Value>) -> Vec<Value> {
         "tasks/get" | "tasks/result" | "tasks/cancel" if !field("taskId").is_some_and(Value::is_string) => {
             issues.push(type_issue("string", &["params", "taskId"], field("taskId")));
         }
-        "tasks/list" => {
+        "initialize" => issues = init_schema::issues(params),
+        // ListToolsRequestSchema / ListTasksRequestSchema: PaginatedRequestParamsSchema, `cursor` an optional string.
+        "tools/list" | "tasks/list" => {
             if let Some(cursor) = field("cursor")
                 && !cursor.is_string()
             {
@@ -226,6 +439,18 @@ mod tests {
             "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"name\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
         );
         assert!(schema_issues("ping", None).is_empty());
+        assert_eq!(schema_issues("tools/list", Some(&json!({ "cursor": 5 }))).len(), 1);
+        assert!(schema_issues("tools/list", None).is_empty());
+        let init = |params: Value| json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": params });
+        let ok = json!({ "protocolVersion": "x", "capabilities": { "elicitation": {}, "foo": 1 },
+            "clientInfo": { "name": "a", "version": "1", "extra": true } });
+        assert!(is_initialize(&init(ok.clone())));
+        assert!(is_initialize(&json!({ "jsonrpc": "2.0", "method": "initialize", "params": ok })));
+        assert!(!is_initialize(&init(json!({ "protocolVersion": "x", "capabilities": { "elicitation": {} } }))));
+        assert!(!is_initialize(&json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize" })));
+        assert!(cancelled_params_ok(&json!({ "requestId": 7 })) && cancelled_params_ok(&json!({ "reason": "x" })));
+        assert!(!cancelled_params_ok(&json!({ "requestId": 7, "reason": null })));
+        assert!(!cancelled_params_ok(&json!({ "requestId": 1.5 })));
         assert_eq!(schema_issues("tasks/get", Some(&json!({}))).len(), 1);
     }
 }

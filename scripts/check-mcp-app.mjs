@@ -79,6 +79,22 @@ try {
   check('unknown token -> 401', (await post(url, 'f'.repeat(64), { jsonrpc: '2.0', id: 1, method: 'ping' })).status === 401);
   check('GET -> 405', (await fetch(url, { headers: { authorization: `Bearer ${token}` } })).status === 405);
 
+  // A panic inside an MCP request (the check build's test_bridge_panic tool): 500 without echo, one 300-char
+  // `MCP request failed` line, and nothing from the app's panic hook (no `panic:` line, so no error dialog either).
+  const panicText = `m1-review-panic ${'p'.repeat(1000)}`;
+  const boom = await post(url, token, { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'test_bridge_panic', arguments: { message: panicText } } });
+  check('a panicking MCP request answers 500 without echo', boom.status === 500 && boom.text === '{"error":"MCP request failed."}', `${boom.status} ${boom.text}`);
+  const inSession = await post(url, token, { jsonrpc: '2.0', id: 10, method: 'tools/call', params: { name: 'test_bridge_panic', arguments: { message: panicText } } },
+    { 'mcp-session-id': session.session, 'mcp-protocol-version': '2025-11-25' });
+  check('a panicking session call ends its stream without an answer', inSession.status === 200 && !inSession.text.includes('"id":10'), `${inSession.status} ${inSession.text.slice(0, 120)}`);
+  await sleep(500);
+  const crashNow = existsSync(join(dataDir, 'crash.log')) ? readText(join(dataDir, 'crash.log')) : '';
+  const failed = crashNow.split('\n').filter((l) => l.includes('MCP request failed: '));
+  check('each MCP panic is one cut crash.log line (300 chars from "MCP request failed")', failed.length === 2
+    && failed.every((l) => l.slice(l.indexOf('MCP request failed: ')).length === 300 && l.includes('m1-review-panic')), failed.map((l) => l.length).join(', '));
+  check('the app panic hook stays quiet for MCP panics (no panic: line, no dialog)', !/panic: m1-review-panic/.test(crashNow),
+    crashNow.split('\n').filter((l) => l.includes('panic:')).map((l) => l.slice(0, 120)).join(' | '));
+
   const retried = await page.evaluate('window.mc.retryMcp()');
   check('mcp:retry on a running server keeps the same server', retried.running === true && retried.url === url, JSON.stringify(retried));
 
@@ -95,7 +111,8 @@ try {
   const startup = existsSync(join(dataDir, 'startup.log')) ? readText(join(dataDir, 'startup.log')).trim().split('\n').at(-1) : '';
   check('startup.log has the mcp-started mark', startup.includes('mcp-started'), startup);
   const crash = existsSync(join(dataDir, 'crash.log')) ? readText(join(dataDir, 'crash.log')) : '';
-  check('no MCP line in crash.log', !/MCP/.test(crash), crash.split('\n').filter((l) => /MCP/.test(l)).join(' | '));
+  const other = crash.split('\n').filter((l) => /MCP/.test(l) && !l.includes('MCP request failed: Error: m1-review-panic'));
+  check('no other MCP line in crash.log', other.length === 0, other.join(' | '));
 } catch (error) {
   check('run', false, String(error?.stack ?? error));
 } finally {

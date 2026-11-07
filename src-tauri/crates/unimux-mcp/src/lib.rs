@@ -7,7 +7,8 @@
 pub mod elicit;
 pub mod jsonrpc;
 pub mod server;
+mod surrogate_ids;
 pub mod tools;
 
-pub use server::{Config, Connection, McpServer};
+pub use server::{Config, Connection, McpServer, in_request};
 pub use tools::{CallCtx, CallError, ToolHost};
