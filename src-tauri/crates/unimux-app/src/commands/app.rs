@@ -110,13 +110,17 @@ mod tests {
         send(&router, "app:startupMark", vec![json!("window-created")]);
         send(&router, "app:startupMark", vec![json!(1)]);
         send(&router, "app:startupMark", vec![json!("first-output")]);
+        // The stores that open safeStorage in the background (S1 / D1 / A6) add their own `safe-storage-*` mark at any
+        // moment, so only the other marks are compared.
+        let ours = |line: &str| line.split(' ').filter(|m| !m.starts_with("safe-storage-")).collect::<Vec<_>>().join(" ");
         let first = ctx.timer.line();
         std::thread::sleep(std::time::Duration::from_millis(20));
         send(&router, "app:startupMark", vec![json!("first-output")]);
-        assert_eq!(ctx.timer.line(), first);
+        assert_eq!(ours(&ctx.timer.line()), ours(&first));
         assert!(first.contains("first-output=") && !first.contains("window-created"), "{first}");
         let log = std::fs::read_to_string(ctx.startup_log.path()).unwrap();
-        assert_eq!(log, format!("header {first}\n"), "one line for this launch, written for the new mark");
+        assert_eq!(log.lines().count(), 1, "one line for this launch: {log}");
+        assert_eq!(ours(log.trim_end()), format!("header {}", ours(&first)), "written for the new mark");
         ctx.saver.stop();
     }
 }

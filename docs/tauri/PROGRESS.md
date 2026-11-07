@@ -1222,11 +1222,13 @@ Tests: `AssocIsDangerous` flags `.exe` and not `.txt` / `.png`, and refuses type
 5. Everything in "Not done after wave 1" except item 7 is unchanged.
 6. Branches and worktrees: worktree `.claude/worktrees/wf_99399b8b-ff8-1` (W1) removed (no junction in it) and `git worktree prune` run; `tauri-pkg-W1` and `tauri-fix-openpath` deleted with `git branch -d`.
 
-## P2: verification, measurements and open issues (2026-11-07)
+## Wave 2 packages: open issues
+
+### P2: verification, measurements and open issues (2026-11-07)
 
 Branch `tauri-pkg-P2` (from `tauri-1.2.0` at fca544d). Machine: Windows 11 26200, WebView2 156, shared with about 14 other agents' builds (CPU at 100 percent for most of the runs).
 
-### Verified
+#### Verified
 
 - cargo fmt --all --check; clippy -D warnings (all targets) for unimux-pty, unimux-ipc, unimux-app, default and `dev-overrides,test-bridge`; unimux-pty + unimux-ipc for `aarch64-apple-darwin` (unimux-app cannot be cross-checked here: objc2-exception-helper needs a C compiler for the target).
 - cargo test -p unimux-pty: lib 86 (the ports of test/flow.test.ts, output-channel.test.ts, pty-flow.test.ts, replay-sizes.test.ts and the early-size half of host-router.test.ts on the fake clock, plus batch, routes, timers, frame), tests/engine.rs 5 on real ConPTY (replay at recorded sizes incl. an early size, host-side DA1 at once without a window, FlowGate pause / resume through byte acks with the unacked bytes bounded and the exit frame after the output, routing to a detached window and refusing messages from the old owner, in-flight cap with a slow page, reload replaces the window and flow control follows the main window), P1 suites conpty 14, manager 14, plane 2. unimux-ipc 31, unimux-app 82 (with features).
@@ -1235,7 +1237,7 @@ Branch `tauri-pkg-P2` (from `tauri-1.2.0` at fca544d). Machine: Windows 11 26200
   - replay: a cmd cell at 75 cols, narrowed to 32 and widened to 81 (3 recorded sizes, at bytes 0 / 544 / 744); after `Page.reload` the replay draws the same 6 marker lines; transport `sharedBuffer`; the host sent the replay tails.
   - grid (20 cmd cells, unimux-pty-flood 1 MB/s each, 15 s): every run met the P2 bounds: shared buffers posted and not released counted page side at most 1, host side at most 3 (cap 2, 3 with an echo), unacked bytes per terminal at most 1,051,199 (FlowGate 1 MiB + one flush; typical 75 to 430 KB).
 
-### Measurements (interleaved with 1.1.4 = the Electron build of this tree, `scripts/sp5/electron-grid.mjs`)
+#### Measurements (interleaved with 1.1.4 = the Electron build of this tree, `scripts/sp5/electron-grid.mjs`)
 
 Echo, keystroke -> drawn, median / p95 ms (perf-latency.mjs probe, cmd cell):
 
@@ -1261,7 +1263,7 @@ Echo, keystroke -> drawn, median / p95 ms (perf-latency.mjs probe, cmd cell):
 
 Reading: idle echo is at or below 1.1.4 (median and p95) in every pair. Under the flood the medians are at 1.1.4's level when the machine is not saturated (pairs 1-2: 0.79x to 1.04x), far from the SP5 spike's 13 to 28 ms; the p95 under load is within noise of 1.1.4 but not provably within 1.1x (burst p95 1.17x and 1.7x worse in pairs 1-2, better in pairs 3-4). Frame times at about 20 MB/s into xterm: Tauri equal or better than 1.1.4 in the runs on a less loaded machine (145 to 214 fps, no frame over 33 ms with the shared buffer), worse in the first two runs at full load. Transport decision (SP5 rule "pull if the shared buffer does not beat it"): pull had the best single grid run (214 fps) but the worst echo under load (15.3 / 30.3 and 12.9 / 24.4 vs 12.9 / 22.2 and 8.0 / 17.6 with the shared buffer, same hour); the shared buffer stays the Windows default, pull is the macOS default and selectable with `MC_PTY_TRANSPORT=pull` for the Mac / rerun comparison.
 
-### Open issues
+#### Open issues
 
 1. **SP5 performance targets not proven within 1.1x under load** (see above): every comparison ran on a machine at 100 percent CPU from other agents' builds, where both apps swing by 5x between runs (two 1.1.4 runs did not even echo). Rerun `node scripts/verify-tauri-pty.mjs latency --load` / `grid` against `MC_APP_TARGET=electron node scripts/sp5/electron-grid.mjs 20 1000000 15 [--latency=60]` on an idle machine (or the Windows VM) before calling P2 verified.
 2. **Echo slot**: a keystroke's echo may use a third in-flight message (MAX_IN_FLIGHT_ECHO) so it does not wait for a release round trip behind two bulk messages; it did not measurably change the loaded echo (the wait is in the renderer's xterm write queues, as SP5 found). SP5's other idea (smaller unacked window for unfocused terminals) was not tried: 1.1.4 has the same 1 MiB per terminal and the medians are at parity now.
@@ -1271,7 +1273,7 @@ Reading: idle echo is at or below 1.1.4 (median and p95) in every pair. Under th
 6. npm test: a first full run on the saturated machine had 17 load-sensitive failures outside P2 (PowerShell / cmd timeouts in cli-install-shared, launch-reset.int, ptyhost.int node host, git, mcp timing); the rerun on a quieter machine passed completely (267 files, 4,027 tests). test/real-app-harness needed verify-tauri-pty.mjs in scripts/real-app-run.mjs (added, Tauri and Windows only, skipped without the flood helper).
 7. `scripts/sp5/run.mjs` and the check-build `spike_pty*` commands still use the SP5 plane (`plane.rs`); they stay for the SP5 comparison and go with R1.
 
-### Review fixes (2026-11-07)
+#### Review fixes (2026-11-07)
 
 All 9 confirmed findings fixed (2 critical, 2 major, 5 minor; the branch `tauri-pkg-P2` was checked out in the builder's worktree, so the fixes are on `tauri-pkg-P2-fixes` = `tauri-pkg-P2` + one commit).
 
@@ -1309,8 +1311,6 @@ Verification: cargo fmt --check clean; clippy -D warnings for unimux-update + un
 7. Portable detection keeps 1.1.4's `PORTABLE_EXECUTABLE_DIR / _FILE`; 1.2.0 ships no portable build, so it is always false today.
 8. The prestage (runtime copy + warm start when the download is verified) and the hand-over share the staging folder of this process (`runtime-<ver>.partial-<pid>`): they are serialized by a lock in `UpdateService` (a race made one harness run fail before the fix).
 9. U2's own harness (`verify-update-window.mjs`) was not rerun (it needs its own payload build); the U1 gate case runs the same window process end to end (installer, relaunch, ready).
-
-## Wave 2 packages: open issues
 
 ### S1 open issues (2026-11-07)
 
