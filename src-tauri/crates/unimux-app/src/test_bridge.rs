@@ -78,6 +78,16 @@ pub async fn test_bridge(
             "portPosts": ctx.port_posts.get().map(|q| q.lane_count()),
         })),
         "report" => Ok(serde_json::to_value(ctx.router().report()).unwrap_or(Value::Null)),
+        // M1: a token of the app's MCP server for a cell ({cell}; `revoke: true` revokes it instead), as P3 issues them.
+        "mcp-token" => {
+            let server = crate::commands::mcp::server().ok_or_else(|| fail("no MCP server"))?;
+            let cell = args.get("cell").and_then(Value::as_str).ok_or_else(|| fail("mcp-token needs {cell}"))?;
+            if args.get("revoke") == Some(&Value::Bool(true)) {
+                server.revoke_cell(cell);
+                return Ok(Value::Null);
+            }
+            Ok(json!({ "token": server.issue_token(cell), "url": server.url() }))
+        }
         // Rust's wall clock (ms since the Unix epoch) for the page's clock offset (Channel latency, SP1).
         "clock" => Ok(json!({ "now": crate::channel_bench::epoch_ms() })),
         // Renderer startup marks with the window that sent them (a hidden window reaches renderer-boot, SP1).

@@ -74,8 +74,9 @@ mod tests {
         for channel in ["state:load", "state:snapshot", "state:edit", "app:claimStart", "app:startupMark", "app:reportError"] {
             assert_eq!(report[channel], Status::Implemented, "{channel}");
         }
-        for channel in ["cell:alive", "mcp:info"] {
-            assert_eq!(report[channel], Status::Fallback, "{channel}");
+        assert_eq!(report["cell:alive"], Status::Fallback);
+        for channel in ["mcp:info", "mcp:retry"] {
+            assert_eq!(report[channel], Status::Implemented, "{channel}");
         }
         ctx.saver.stop();
     }

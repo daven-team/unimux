@@ -185,6 +185,8 @@ fn main() {
             ctx.mark("app-ready");
             // The startup gate (U1) runs here and may hold the main window back; wave 0 always proceeds.
             windows::create_main(app.handle(), &ctx)?;
+            // M1: the MCP server listens after the window (index.ts startMcp), retried twice in the background.
+            commands::mcp::start(&ctx);
             startup::mark_started();
             Ok(())
         })
@@ -202,6 +204,7 @@ fn main() {
                 run_ctx.crash.error("state could not be saved before exit");
             }
             run_ctx.saver.stop();
+            commands::mcp::stop();
         }
     });
 }

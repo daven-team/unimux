@@ -1,0 +1,2076 @@
+{
+  "Host other than 127.0.0.1/localhost -> 403": {
+    "status": 403,
+    "type": null,
+    "messages": []
+  },
+  "foreign Origin -> 403": {
+    "status": 403,
+    "type": null,
+    "messages": []
+  },
+  "other path -> 404": {
+    "status": 404,
+    "type": null,
+    "messages": []
+  },
+  "query string on /mcp -> 404": {
+    "status": 404,
+    "type": null,
+    "messages": []
+  },
+  "no bearer -> 401": {
+    "status": 401,
+    "type": null,
+    "messages": []
+  },
+  "unknown bearer -> 401": {
+    "status": 401,
+    "type": null,
+    "messages": []
+  },
+  "GET -> 405 Allow: POST": {
+    "status": 405,
+    "type": null,
+    "headers": {
+      "allow": "POST"
+    },
+    "messages": []
+  },
+  "GET in a session -> 405": {
+    "status": 405,
+    "type": null,
+    "headers": {
+      "allow": "POST"
+    },
+    "messages": []
+  },
+  "DELETE unknown session -> 404": {
+    "status": 404,
+    "type": null,
+    "messages": []
+  },
+  "PUT -> 405": {
+    "status": 405,
+    "type": null,
+    "headers": {
+      "allow": "POST"
+    },
+    "messages": []
+  },
+  "body over 256 KB -> 413 -32000": {
+    "status": 413,
+    "type": "application/json",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "error": {
+          "code": -32000,
+          "message": "Request body too large."
+        },
+        "id": null
+      }
+    ]
+  },
+  "invalid JSON -> 400 -32700": {
+    "status": 400,
+    "type": "application/json",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "error": {
+          "code": -32700,
+          "message": "Parse error: invalid JSON."
+        },
+        "id": null
+      }
+    ]
+  },
+  "Accept without SSE -> 406": {
+    "status": 406,
+    "type": "application/json",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "error": {
+          "code": -32000,
+          "message": "Not Acceptable: Client must accept both application/json and text/event-stream"
+        },
+        "id": null
+      }
+    ]
+  },
+  "Content-Type text/plain -> 415": {
+    "status": 415,
+    "type": "application/json",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "error": {
+          "code": -32000,
+          "message": "Unsupported Media Type: Content-Type must be application/json"
+        },
+        "id": null
+      }
+    ]
+  },
+  "not JSON-RPC -> 400 -32700": {
+    "status": 400,
+    "type": "application/json",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "error": {
+          "code": -32700,
+          "message": "Parse error: Invalid JSON-RPC message"
+        },
+        "id": null
+      }
+    ]
+  },
+  "stateless initialize -> JSON, no session": {
+    "status": 200,
+    "type": "application/json",
+    "headers": {
+      "mcp-session-id": null
+    },
+    "messages": [
+      {
+        "result": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {
+            "tools": {},
+            "tasks": {
+              "list": {},
+              "cancel": {},
+              "requests": {
+                "tools": {
+                  "call": {}
+                }
+              }
+            }
+          },
+          "serverInfo": {
+            "name": "unimux",
+            "version": "1.2.0"
+          },
+          "instructions": "<masked>"
+        },
+        "jsonrpc": "2.0",
+        "id": 0
+      }
+    ]
+  },
+  "initialize with an unknown version -> 2025-11-25": {
+    "status": 200,
+    "type": "application/json",
+    "messages": [
+      {
+        "result": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {
+            "tools": {},
+            "tasks": {
+              "list": {},
+              "cancel": {},
+              "requests": {
+                "tools": {
+                  "call": {}
+                }
+              }
+            }
+          },
+          "serverInfo": {
+            "name": "unimux",
+            "version": "1.2.0"
+          },
+          "instructions": "<masked>"
+        },
+        "jsonrpc": "2.0",
+        "id": 0
+      }
+    ]
+  },
+  "initialize 2025-06-18 echoes it": {
+    "status": 200,
+    "type": "application/json",
+    "messages": [
+      {
+        "result": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {
+            "tools": {},
+            "tasks": {
+              "list": {},
+              "cancel": {},
+              "requests": {
+                "tools": {
+                  "call": {}
+                }
+              }
+            }
+          },
+          "serverInfo": {
+            "name": "unimux",
+            "version": "1.2.0"
+          },
+          "instructions": "<masked>"
+        },
+        "jsonrpc": "2.0",
+        "id": 0
+      }
+    ]
+  },
+  "server/discover (2026-07-28 probe) -> 400 -32000": {
+    "status": 400,
+    "type": "application/json",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "error": {
+          "code": -32000,
+          "message": "Bad Request: Unsupported protocol version: 2026-07-28 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)"
+        },
+        "id": null
+      }
+    ]
+  },
+  "stateless tools/list -> JSON, verbatim tools": {
+    "status": 200,
+    "type": "application/json",
+    "messages": [
+      {
+        "result": {
+          "tools": [
+            {
+              "name": "get_context",
+              "description": "Your cell ID, role, project, grid, cwd, paused flag and inbox counts (open tasks, unread messages). profiles:true adds profile IDs for create_grid/update_agent.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "profiles": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "list_agents",
+              "description": "Agents in your project: cell ID, name, role, status, since (seconds in that status), mcp (connected|waiting|off), open task count, plus grids. verbose adds profile/model/cwd/open task titles/lastExitCode.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "verbose": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "read_inbox",
+              "description": "Your open tasks and unread messages in one call. A task prompt already shown to you is left out (seen:true; full:true repeats it). acknowledge:true marks the returned messages read. Use at task start/end; to idle use wait_for, not polling.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "acknowledge": {
+                    "type": "boolean",
+                    "description": "mark returned messages read (clipped ones stay unread)"
+                  },
+                  "closed": {
+                    "type": "boolean",
+                    "description": "include completed/cancelled tasks"
+                  },
+                  "full": {
+                    "type": "boolean",
+                    "description": "no truncation, repeat prompts already shown"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "default 20"
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "wait_for",
+              "description": "Block instead of polling. Without taskIds: returns when you get an unread message or a startable task. With taskIds (open tasks): returns when any (all:true: every) is completed/blocked/cancelled, or with event \"exited\"/\"stalled\" naming agents of watched tasks that stopped or never got going (each told once). \"timeout\": nothing happened.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "taskIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "open task IDs to watch"
+                  },
+                  "all": {
+                    "type": "boolean"
+                  },
+                  "timeoutSec": {
+                    "type": "integer",
+                    "description": "default 60; max 600 s for Claude, 170 s for Codex"
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "openWorldHint": false
+              },
+              "execution": {
+                "taskSupport": "optional"
+              }
+            },
+            {
+              "name": "update_task",
+              "description": "Report on or manage a task: in_progress, blocked (blockedReason), completed (result.summary required) or cancelled; cellId instead moves a queued task to another agent (a cancelled one becomes a new task there). Closed tasks cannot be reopened.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "in_progress",
+                      "blocked",
+                      "completed",
+                      "cancelled"
+                    ]
+                  },
+                  "cellId": {
+                    "type": "string",
+                    "description": "reassign to this agent"
+                  },
+                  "blockedReason": {
+                    "type": "string"
+                  },
+                  "result": {
+                    "type": "object",
+                    "properties": {
+                      "summary": {
+                        "type": "string",
+                        "description": "what was done"
+                      },
+                      "files": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "changed files"
+                      },
+                      "tests": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "tests run and outcome"
+                      },
+                      "branch": {
+                        "type": "string"
+                      },
+                      "commit": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "summary"
+                    ]
+                  }
+                },
+                "required": [
+                  "taskId"
+                ]
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": true,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "send_message",
+              "description": "Send text to another agent in your project (its inbox; it is told with a short notice when it sits idle).",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "toCellId": {
+                    "type": "string",
+                    "description": "cell ID (an exact agent name also works)"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "toCellId",
+                  "text"
+                ]
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "openWorldHint": true
+              }
+            },
+            {
+              "name": "create_task",
+              "description": "Coordinator: assign a tracked task to a cell. dependsOn (task IDs) keeps it blocked until they complete. Delivery is not completion; wait_for the result.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "cellId": {
+                    "type": "string",
+                    "description": "cell ID (an exact agent name also works)"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "description": "full instructions"
+                  },
+                  "dependsOn": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "prerequisite task IDs"
+                  }
+                },
+                "required": [
+                  "cellId",
+                  "title",
+                  "prompt"
+                ]
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "openWorldHint": true
+              }
+            },
+            {
+              "name": "get_tasks",
+              "description": "Coordinator: project tasks as compact rows (id, cell, title, status, blockedBy, result summary). Filters cellId/status/readyOnly/ids; verbose adds prompts and full results; next = offset of the next page.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "cellId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "queued",
+                      "in_progress",
+                      "blocked",
+                      "completed",
+                      "cancelled"
+                    ]
+                  },
+                  "readyOnly": {
+                    "type": "boolean",
+                    "description": "startable queued only"
+                  },
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "verbose": {
+                    "type": "boolean"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "default 25"
+                  },
+                  "offset": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "snippets",
+              "description": "Prompt library. action list (default): snippet IDs/names and team presets; get: text of snippetId; save: create/update {name,text,snippetId?,autoSend?}; apply: assign snippetId to cellId as a task.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "list",
+                      "get",
+                      "save",
+                      "apply"
+                    ]
+                  },
+                  "snippetId": {
+                    "type": "string"
+                  },
+                  "cellId": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "autoSend": {
+                    "type": "boolean",
+                    "description": "paste and submit"
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "openWorldHint": true
+              }
+            },
+            {
+              "name": "update_agent",
+              "description": "Change name, color, profileId or model of an agent (default: yourself; others: coordinator). Empty string clears color/model. Launch changes apply at next start (needsRestart); restart:true requests a safe restart.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "cellId": {
+                    "type": "string",
+                    "description": "default: yourself"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "color": {
+                    "type": "string",
+                    "description": "#rrggbb"
+                  },
+                  "profileId": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "CLI model id"
+                  },
+                  "restart": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "openWorldHint": true
+              }
+            },
+            {
+              "name": "create_grid",
+              "description": "Coordinator: start a whole team in ONE call; follow your delegation rules (spends usage). name + cells (or presetId); gridId appends. profileId: claude|codex. role makes prompt a tracked task; count repeats; after chains tasks. Returns cellIds, tasks {cellId:taskId} for wait_for. Max 20 cells. help grids.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "new grid name"
+                  },
+                  "gridId": {
+                    "type": "string",
+                    "description": "append to this grid instead"
+                  },
+                  "presetId": {
+                    "type": "string"
+                  },
+                  "rows": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "description": "cells per row, e.g. [2,2]"
+                  },
+                  "cells": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "profileId": {
+                          "type": "string",
+                          "description": "claude | codex | other id"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "coordinator",
+                            "worker"
+                          ]
+                        },
+                        "color": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "prompt": {
+                          "type": "string",
+                          "description": "startup task"
+                        },
+                        "worktree": {
+                          "type": "boolean",
+                          "description": "isolated git worktree"
+                        },
+                        "count": {
+                          "type": "integer",
+                          "description": "repeat this cell N times (names get \" 1\", \" 2\", ...)"
+                        },
+                        "after": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer"
+                          },
+                          "description": "positions (0-based, after count expansion) of earlier cells whose tasks must complete first"
+                        }
+                      },
+                      "required": [
+                        "profileId"
+                      ]
+                    }
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "openWorldHint": true
+              }
+            },
+            {
+              "name": "close_grid",
+              "description": "Coordinator: stop a finished grid's agents and archive it (not your own grid). cancelTasks:true if tasks are unfinished.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "gridId": {
+                    "type": "string"
+                  },
+                  "cancelTasks": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "gridId"
+                ]
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": true,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "update_grid",
+              "description": "Coordinator: rename a grid.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "gridId": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "gridId",
+                  "name"
+                ]
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "save_preset",
+              "description": "Coordinator: save a reusable team preset; cells are the same objects as in create_grid.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "cells": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {}
+                    },
+                    "description": "as create_grid cells"
+                  },
+                  "rows": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "required": [
+                  "name",
+                  "cells"
+                ]
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "help",
+              "description": "Longer guidance on demand. topic: workflow, tasks, grids, snippets, limits (default workflow).",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "topic": {
+                    "type": "string",
+                    "enum": [
+                      "workflow",
+                      "tasks",
+                      "grids",
+                      "snippets",
+                      "limits"
+                    ]
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "openWorldHint": false
+              }
+            }
+          ]
+        },
+        "jsonrpc": "2.0",
+        "id": 1
+      }
+    ]
+  },
+  "worker tools/list": {
+    "status": 200,
+    "type": "application/json",
+    "messages": [
+      {
+        "result": {
+          "tools": [
+            {
+              "name": "get_context",
+              "description": "Your cell ID, role, project, grid, cwd, paused flag and inbox counts (open tasks, unread messages). profiles:true adds profile IDs for create_grid/update_agent.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "profiles": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "list_agents",
+              "description": "Agents in your project: cell ID, name, role, status, since (seconds in that status), mcp (connected|waiting|off), open task count, plus grids. verbose adds profile/model/cwd/open task titles/lastExitCode.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "verbose": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "read_inbox",
+              "description": "Your open tasks and unread messages in one call. A task prompt already shown to you is left out (seen:true; full:true repeats it). acknowledge:true marks the returned messages read. Use at task start/end; to idle use wait_for, not polling.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "acknowledge": {
+                    "type": "boolean",
+                    "description": "mark returned messages read (clipped ones stay unread)"
+                  },
+                  "closed": {
+                    "type": "boolean",
+                    "description": "include completed/cancelled tasks"
+                  },
+                  "full": {
+                    "type": "boolean",
+                    "description": "no truncation, repeat prompts already shown"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "default 20"
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "wait_for",
+              "description": "Block instead of polling. Without taskIds: returns when you get an unread message or a startable task. With taskIds (open tasks): returns when any (all:true: every) is completed/blocked/cancelled, or with event \"exited\"/\"stalled\" naming agents of watched tasks that stopped or never got going (each told once). \"timeout\": nothing happened.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "taskIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "open task IDs to watch"
+                  },
+                  "all": {
+                    "type": "boolean"
+                  },
+                  "timeoutSec": {
+                    "type": "integer",
+                    "description": "default 60; max 600 s for Claude, 170 s for Codex"
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "openWorldHint": false
+              },
+              "execution": {
+                "taskSupport": "optional"
+              }
+            },
+            {
+              "name": "update_task",
+              "description": "Report on your task: in_progress (claim, needs finished prerequisites), blocked (blockedReason) or completed (result.summary required; files, tests, branch, commit). Closed tasks cannot be reopened.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "in_progress",
+                      "blocked",
+                      "completed"
+                    ]
+                  },
+                  "blockedReason": {
+                    "type": "string"
+                  },
+                  "result": {
+                    "type": "object",
+                    "properties": {
+                      "summary": {
+                        "type": "string",
+                        "description": "what was done"
+                      },
+                      "files": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "changed files"
+                      },
+                      "tests": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "tests run and outcome"
+                      },
+                      "branch": {
+                        "type": "string"
+                      },
+                      "commit": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "summary"
+                    ]
+                  }
+                },
+                "required": [
+                  "taskId",
+                  "status"
+                ]
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "send_message",
+              "description": "Send text to another agent in your project (its inbox; it is told with a short notice when it sits idle).",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "toCellId": {
+                    "type": "string",
+                    "description": "cell ID (an exact agent name also works)"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "toCellId",
+                  "text"
+                ]
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "openWorldHint": true
+              }
+            },
+            {
+              "name": "update_agent",
+              "description": "Change your own name or color (empty string clears the color). Profile, model and restarts are coordinator-only.",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "color": {
+                    "type": "string",
+                    "description": "#rrggbb"
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "openWorldHint": true
+              }
+            },
+            {
+              "name": "help",
+              "description": "Longer guidance on demand. topic: workflow, tasks, grids, snippets, limits (default workflow).",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "topic": {
+                    "type": "string",
+                    "enum": [
+                      "workflow",
+                      "tasks",
+                      "grids",
+                      "snippets",
+                      "limits"
+                    ]
+                  }
+                }
+              },
+              "annotations": {
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "openWorldHint": false
+              }
+            }
+          ]
+        },
+        "jsonrpc": "2.0",
+        "id": 1
+      }
+    ]
+  },
+  "stateless ping": {
+    "status": 200,
+    "type": "application/json",
+    "messages": [
+      {
+        "result": {},
+        "jsonrpc": "2.0",
+        "id": 7
+      }
+    ]
+  },
+  "unknown method -> -32601": {
+    "status": 200,
+    "type": "application/json",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "error": {
+          "code": -32601,
+          "message": "Method not found"
+        }
+      }
+    ]
+  },
+  "unknown tool -> -32602": {
+    "status": 200,
+    "type": "application/json",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "error": {
+          "code": -32602,
+          "message": "MCP error -32602: Unknown tool: no_such_tool"
+        }
+      }
+    ]
+  },
+  "notification only -> 202": {
+    "status": 202,
+    "type": null,
+    "messages": []
+  },
+  "stateless tools/call -> JSON": {
+    "status": 200,
+    "type": "application/json",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "<masked>"
+            }
+          ]
+        },
+        "jsonrpc": "2.0",
+        "id": 4
+      }
+    ]
+  },
+  "stateless tools/call with progressToken -> SSE + progress": {
+    "status": 200,
+    "type": "text/event-stream",
+    "messages": [
+      {
+        "method": "notifications/progress",
+        "params": {
+          "progressToken": "p1",
+          "progress": 2,
+          "total": 3,
+          "message": "waiting"
+        },
+        "jsonrpc": "2.0"
+      },
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "<masked>"
+            }
+          ]
+        },
+        "jsonrpc": "2.0",
+        "id": 5
+      }
+    ]
+  },
+  "batch of two requests -> JSON array": {
+    "status": 200,
+    "type": "application/json",
+    "messages": [
+      [
+        {
+          "result": {},
+          "jsonrpc": "2.0",
+          "id": 1
+        },
+        {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "error": {
+            "code": -32601,
+            "message": "Method not found"
+          }
+        }
+      ]
+    ]
+  },
+  "elicitation initialize -> SSE session; tools/list in it; DELETE; then 404 -32001": {
+    "initialize": {
+      "status": 200,
+      "type": "text/event-stream",
+      "headers": {
+        "mcp-session-id": "<uuid>"
+      },
+      "messages": [
+        {
+          "result": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {
+              "tools": {},
+              "tasks": {
+                "list": {},
+                "cancel": {},
+                "requests": {
+                  "tools": {
+                    "call": {}
+                  }
+                }
+              }
+            },
+            "serverInfo": {
+              "name": "unimux",
+              "version": "1.2.0"
+            },
+            "instructions": "<masked>"
+          },
+          "jsonrpc": "2.0",
+          "id": 0
+        }
+      ]
+    },
+    "initialized": {
+      "status": 202,
+      "type": null,
+      "messages": []
+    },
+    "list": {
+      "status": 200,
+      "type": "text/event-stream",
+      "tools": 15
+    },
+    "delete": {
+      "status": 200,
+      "type": null,
+      "messages": []
+    },
+    "after": {
+      "status": 404,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32001,
+            "message": "Session not found."
+          },
+          "id": null
+        }
+      ]
+    }
+  },
+  "elicitation: {} (old spelling) also gets a session": {
+    "status": 200,
+    "type": "text/event-stream",
+    "session": true
+  },
+  "url-only elicitation stays stateless": {
+    "status": 200,
+    "type": "application/json",
+    "session": false
+  },
+  "re-initialize inside a session -> 400 -32600": {
+    "status": 400,
+    "type": "application/json",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "error": {
+          "code": -32600,
+          "message": "Invalid Request: Server already initialized"
+        },
+        "id": null
+      }
+    ]
+  },
+  "session of another token -> 404 -32001": {
+    "status": 404,
+    "type": "application/json",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "error": {
+          "code": -32001,
+          "message": "Session not found."
+        },
+        "id": null
+      }
+    ]
+  },
+  "revoked token: its session answers 401": {
+    "status": 401,
+    "type": null,
+    "messages": []
+  },
+  "fifth session of a token closes the first": {
+    "oldest": {
+      "status": 404,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32001,
+            "message": "Session not found."
+          },
+          "id": null
+        }
+      ]
+    },
+    "newest": {
+      "status": 200,
+      "type": "text/event-stream",
+      "messages": [
+        {
+          "result": {},
+          "jsonrpc": "2.0",
+          "id": 1
+        }
+      ]
+    }
+  },
+  "elicitation round trip inside a session (accept)": {
+    "status": 200,
+    "type": "text/event-stream",
+    "messages": [
+      {
+        "method": "elicitation/create",
+        "params": {
+          "mode": "form",
+          "message": "<masked>",
+          "requestedSchema": {
+            "type": "object",
+            "required": [
+              "confirm"
+            ],
+            "properties": {
+              "confirm": {
+                "type": "boolean",
+                "title": "<masked>",
+                "default": false
+              }
+            }
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 0
+      },
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "<masked>"
+            }
+          ]
+        },
+        "jsonrpc": "2.0",
+        "id": 9
+      }
+    ],
+    "extra": {
+      "replyStatus": 202
+    }
+  },
+  "MCP task: create, get, list, result, get after": {
+    "created": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "result": {
+            "task": {
+              "taskId": "<hex32>",
+              "status": "working",
+              "ttl": 60000,
+              "createdAt": "<iso>",
+              "lastUpdatedAt": "<iso>",
+              "pollInterval": 2000
+            }
+          },
+          "jsonrpc": "2.0",
+          "id": 1
+        }
+      ]
+    },
+    "get": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "result": {
+            "taskId": "<hex32>",
+            "status": "working",
+            "ttl": 60000,
+            "createdAt": "<iso>",
+            "lastUpdatedAt": "<iso>",
+            "pollInterval": 2000
+          },
+          "jsonrpc": "2.0",
+          "id": 2
+        }
+      ]
+    },
+    "list": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "result": {
+            "tasks": [
+              {
+                "taskId": "<hex32>",
+                "status": "working",
+                "ttl": 60000,
+                "createdAt": "<iso>",
+                "lastUpdatedAt": "<iso>",
+                "pollInterval": 2000
+              }
+            ],
+            "_meta": {}
+          },
+          "jsonrpc": "2.0",
+          "id": 3
+        }
+      ]
+    },
+    "result": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "<masked>"
+              }
+            ],
+            "_meta": {
+              "io.modelcontextprotocol/related-task": {
+                "taskId": "<hex32>"
+              }
+            }
+          },
+          "jsonrpc": "2.0",
+          "id": 4
+        }
+      ],
+      "ms": "blocked until done"
+    },
+    "after": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "result": {
+            "taskId": "<hex32>",
+            "status": "completed",
+            "ttl": 60000,
+            "createdAt": "<iso>",
+            "lastUpdatedAt": "<iso>",
+            "pollInterval": 2000
+          },
+          "jsonrpc": "2.0",
+          "id": 5
+        }
+      ]
+    },
+    "otherToken": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 6,
+          "error": {
+            "code": -32602,
+            "message": "MCP error -32602: Failed to retrieve task: Task not found"
+          }
+        }
+      ]
+    }
+  },
+  "MCP task for a tool without task support -> error": {
+    "status": 200,
+    "type": "application/json",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "error": {
+          "code": -32601,
+          "message": "MCP error -32601: Tool get_context does not run as a task."
+        }
+      }
+    ]
+  },
+  "MCP task cancel, then cancel again": {
+    "created": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "result": {
+            "task": {
+              "taskId": "<hex32>",
+              "status": "working",
+              "ttl": 3600000,
+              "createdAt": "<iso>",
+              "lastUpdatedAt": "<iso>",
+              "pollInterval": 2000
+            }
+          },
+          "jsonrpc": "2.0",
+          "id": 1
+        }
+      ]
+    },
+    "cancel": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "result": {
+            "_meta": {},
+            "taskId": "<hex32>",
+            "status": "cancelled",
+            "ttl": 3600000,
+            "createdAt": "<iso>",
+            "lastUpdatedAt": "<iso>",
+            "pollInterval": 2000,
+            "statusMessage": "Client cancelled task execution."
+          },
+          "jsonrpc": "2.0",
+          "id": 2
+        }
+      ]
+    },
+    "again": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 3,
+          "error": {
+            "code": -32602,
+            "message": "MCP error -32602: Cannot cancel task in terminal status: cancelled"
+          }
+        }
+      ]
+    }
+  },
+  "in-flight cap: the 9th parallel call of a token -> 429 Retry-After 1": {
+    "statuses": [
+      200,
+      200,
+      200,
+      200,
+      200,
+      200,
+      200,
+      200,
+      429
+    ],
+    "retryAfter": "1"
+  },
+  "client goes away during a stateless JSON call": {
+    "outcome": "aborted",
+    "within": "under 1 s"
+  },
+  "client goes away during a session SSE call": {
+    "outcome": "aborted",
+    "within": "under 1 s"
+  },
+  "tasks/list pages 10 at a time (nextCursor), unknown cursor -> -32602": {
+    "first": {
+      "keys": [
+        "tasks",
+        "nextCursor",
+        "_meta"
+      ],
+      "count": 10,
+      "order": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ]
+    },
+    "cursorIsTenth": true,
+    "second": {
+      "keys": [
+        "tasks",
+        "_meta"
+      ],
+      "count": 2,
+      "order": [
+        10,
+        11
+      ]
+    },
+    "bad": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 22,
+          "error": {
+            "code": -32602,
+            "message": "MCP error -32602: Failed to list tasks: Invalid cursor: nope"
+          }
+        }
+      ]
+    },
+    "badType": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 23,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"cursor\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+          }
+        }
+      ]
+    }
+  },
+  "strict JSON-RPC messages (ids, params, extra keys, error responses)": {
+    "fractionId": {
+      "status": 400,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32700,
+            "message": "Parse error: Invalid JSON-RPC message"
+          },
+          "id": null
+        }
+      ]
+    },
+    "wholeFloatId": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "result": {},
+          "jsonrpc": "2.0",
+          "id": 2
+        }
+      ]
+    },
+    "unsafeId": {
+      "status": 400,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32700,
+            "message": "Parse error: Invalid JSON-RPC message"
+          },
+          "id": null
+        }
+      ]
+    },
+    "paramsArray": {
+      "status": 400,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32700,
+            "message": "Parse error: Invalid JSON-RPC message"
+          },
+          "id": null
+        }
+      ]
+    },
+    "paramsNull": {
+      "status": 400,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32700,
+            "message": "Parse error: Invalid JSON-RPC message"
+          },
+          "id": null
+        }
+      ]
+    },
+    "extraKey": {
+      "status": 400,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32700,
+            "message": "Parse error: Invalid JSON-RPC message"
+          },
+          "id": null
+        }
+      ]
+    },
+    "badProgressToken": {
+      "status": 400,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32700,
+            "message": "Parse error: Invalid JSON-RPC message"
+          },
+          "id": null
+        }
+      ]
+    },
+    "notificationWithParamsString": {
+      "status": 400,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32700,
+            "message": "Parse error: Invalid JSON-RPC message"
+          },
+          "id": null
+        }
+      ]
+    },
+    "errorWithoutId": {
+      "status": 202,
+      "type": null,
+      "messages": []
+    },
+    "errorWithNullId": {
+      "status": 400,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32700,
+            "message": "Parse error: Invalid JSON-RPC message"
+          },
+          "id": null
+        }
+      ]
+    },
+    "errorFractionCode": {
+      "status": 400,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32700,
+            "message": "Parse error: Invalid JSON-RPC message"
+          },
+          "id": null
+        }
+      ]
+    },
+    "resultArray": {
+      "status": 400,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "error": {
+            "code": -32700,
+            "message": "Parse error: Invalid JSON-RPC message"
+          },
+          "id": null
+        }
+      ]
+    },
+    "resultObject": {
+      "status": 202,
+      "type": null,
+      "messages": []
+    }
+  },
+  "invalid UTF-8 in the body becomes U+FFFD (not -32700)": {
+    "status": 200,
+    "type": "application/json",
+    "messages": [
+      {
+        "result": {},
+        "jsonrpc": "2.0",
+        "id": 1
+      }
+    ]
+  },
+  "tasks/result after tasks/cancel -> -32603 without prefix": {
+    "status": 200,
+    "type": "application/json",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "error": {
+          "code": -32603,
+          "message": "Task <hex32> has no result stored"
+        }
+      }
+    ]
+  },
+  "request params failing the method schema -> -32603 zod issues": {
+    "callNoName": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"name\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "callNameNumber": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"name\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "callNoParams": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\"\n    ],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "callArgumentsArray": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"record\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"arguments\"\n    ],\n    \"message\": \"Invalid input: expected record, received array\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "callTaskString": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"task\"\n    ],\n    \"message\": \"Invalid input: expected object, received string\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "callTtlString": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"task\",\n      \"ttl\"\n    ],\n    \"message\": \"Invalid input: expected number, received string\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "getNoTaskId": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"taskId\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "resultNoParams": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\"\n    ],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+          }
+        }
+      ]
+    },
+    "cancelTaskIdNumber": {
+      "status": 200,
+      "type": "application/json",
+      "messages": [
+        {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "error": {
+            "code": -32603,
+            "message": "[\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"params\",\n      \"taskId\"\n    ],\n    \"message\": \"Invalid input: expected string, received number\"\n  }\n]"
+          }
+        }
+      ]
+    }
+  },
+  "MCP task ttl with a fraction is kept": {
+    "status": 200,
+    "type": "application/json",
+    "messages": [
+      {
+        "result": {
+          "task": {
+            "taskId": "<hex32>",
+            "status": "working",
+            "ttl": 70000.5,
+            "createdAt": "<iso>",
+            "lastUpdatedAt": "<iso>",
+            "pollInterval": 2000
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 1
+      }
+    ]
+  },
+  "session tools/call cancelled by notifications/cancelled gets no answer": {
+    "status": 200,
+    "cancelStatus": 202,
+    "messages": []
+  },
+  "elicitation aborted by notifications/cancelled (with and without reason)": {
+    "withReason": {
+      "status": 200,
+      "messages": [
+        {
+          "method": "elicitation/create",
+          "params": {
+            "mode": "form",
+            "message": "<masked>",
+            "requestedSchema": {
+              "type": "object",
+              "required": [
+                "confirm"
+              ],
+              "properties": {
+                "confirm": {
+                  "type": "boolean",
+                  "title": "<masked>",
+                  "default": false
+                }
+              }
+            }
+          },
+          "jsonrpc": "2.0",
+          "id": 0
+        },
+        {
+          "jsonrpc": "2.0",
+          "method": "notifications/cancelled",
+          "params": {
+            "requestId": 0,
+            "reason": "user closed"
+          }
+        }
+      ]
+    },
+    "withoutReason": {
+      "status": 200,
+      "messages": [
+        {
+          "method": "elicitation/create",
+          "params": {
+            "mode": "form",
+            "message": "<masked>",
+            "requestedSchema": {
+              "type": "object",
+              "required": [
+                "confirm"
+              ],
+              "properties": {
+                "confirm": {
+                  "type": "boolean",
+                  "title": "<masked>",
+                  "default": false
+                }
+              }
+            }
+          },
+          "jsonrpc": "2.0",
+          "id": 0
+        },
+        {
+          "jsonrpc": "2.0",
+          "method": "notifications/cancelled",
+          "params": {
+            "requestId": 0,
+            "reason": "AbortError: This operation was aborted"
+          }
+        }
+      ]
+    }
+  },
+  "elicitation answers failing ElicitResultSchema or the requested schema count as cancel": {
+    "contentNotMatchingSchema": {
+      "status": 200,
+      "isError": true,
+      "text": "The user did not confirm closing the gri"
+    },
+    "missingRequired": {
+      "status": 200,
+      "isError": true,
+      "text": "The user did not confirm closing the gri"
+    },
+    "unknownAction": {
+      "status": 200,
+      "isError": true,
+      "text": "The user did not confirm closing the gri"
+    },
+    "nestedContent": {
+      "status": 200,
+      "isError": true,
+      "text": "The user did not confirm closing the gri"
+    },
+    "errorAnswer": {
+      "status": 200,
+      "isError": true,
+      "text": "The user did not confirm closing the gri"
+    },
+    "declineWithNullContent": {
+      "status": 200,
+      "isError": true,
+      "text": "The user did not confirm closing the gri"
+    },
+    "confirmPlusNestedValue": {
+      "status": 200,
+      "isError": true,
+      "text": "The user did not confirm closing the gri"
+    },
+    "confirmPlusNumberArray": {
+      "status": 200,
+      "isError": true,
+      "text": "The user did not confirm closing the gri"
+    }
+  },
+  "a task created in a session is hidden from other sessions of the token, not from stateless calls": {
+    "getFromB": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "error": {
+        "code": -32602,
+        "message": "MCP error -32602: Failed to retrieve task: Task not found"
+      }
+    },
+    "getFromA": "working",
+    "getStateless": "working",
+    "listA": 2,
+    "listB": 1,
+    "listStateless": 2,
+    "cancelFromB": {
+      "jsonrpc": "2.0",
+      "id": 9,
+      "error": {
+        "code": -32602,
+        "message": "MCP error -32602: Task not found: <hex32>"
+      }
+    },
+    "resultFromB": {
+      "jsonrpc": "2.0",
+      "id": 10,
+      "error": {
+        "code": -32602,
+        "message": "MCP error -32602: Task not found: <hex32>"
+      }
+    }
+  }
+}
