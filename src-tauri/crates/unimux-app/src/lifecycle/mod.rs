@@ -8,11 +8,13 @@
 //!   never closes the main window or exits by itself.
 //! - [`request_quit`] is 1.1.4's `before-quit`: the quit question may hold it ([`quit_confirm`]); otherwise the wind-down runs
 //!   ([`wind_down`]: every service registered its steps) within the 20 s hard limit, and [`exit_now`] ends the process (with a
-//!   relaunch when another start arrived meanwhile).
+//!   relaunch when another start arrived meanwhile: started from [`after_exit`], after the last save, and the new process
+//!   waits for this one to end before it takes the data dir, like Electron's relauncher).
 //! - Windows session end: WM_QUERYENDSESSION marks the session as ending (no quit is held for a minute, an open question lets
 //!   the quit go on), tells the renderers to push their last edits and starts the save at once; WM_ENDSESSION waits for that
 //!   save (3 s at most) before Windows ends the process. macOS: NSWorkspaceWillPowerOff does the same, the quit follows through
-//!   `applicationShouldTerminate:`.
+//!   `applicationShouldTerminate:`, answered NSTerminateLater (never Cancel, which would abort the log-out) and replied to
+//!   when the app exits (YES) or the user keeps it at the quit question (NO).
 //! - Renderer: WebView2's ProcessFailed (macOS: the web content process terminated) reloads the page, 3 times a minute, then
 //!   asks Reload / Quit; a renderer that stops running scripts (heartbeat, [`renderer`]) is asked about after the grace period
 //!   (Wait / Reload; Reload ends the hung renderer process and the crash path reloads it). Detached windows always reload.
@@ -113,6 +115,8 @@ pub struct Lifecycle {
     exit_allowed: AtomicBool,
     exiting: AtomicBool,
     relaunch_requested: AtomicBool,
+    relaunched: AtomicBool,
+    after_exit_done: AtomicBool,
     session_ending_at: Mutex<Option<u64>>,
     confirm: Mutex<QuitConfirm>,
     /// The wind-down steps; every service registers its own (see [`wind_down::phase`]).
@@ -142,6 +146,8 @@ impl Lifecycle {
             exit_allowed: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
             relaunch_requested: AtomicBool::new(false),
+            relaunched: AtomicBool::new(false),
+            after_exit_done: AtomicBool::new(false),
             session_ending_at: Mutex::new(None),
             confirm: Mutex::new(QuitConfirm::default()),
             wind_down: WindDown::new(),
@@ -310,8 +316,39 @@ pub fn set_quit_guard(ctx: &AppContext, ask: bool) {
 
 /// `app:quitAnswer`: 'asking' at once, then 'quit' or 'cancel'.
 pub fn quit_answer(ctx: &Arc<AppContext>, answer: QuitAnswer) {
-    let effects = ctx.lifecycle.confirm.lock().answer(answer);
+    let (kept, effects) = {
+        let mut confirm = ctx.lifecycle.confirm.lock();
+        let was_pending = confirm.is_pending();
+        let effects = confirm.answer(answer);
+        (was_pending && answer == QuitAnswer::Cancel, effects)
+    };
+    if kept {
+        // The user keeps the app: a Cmd+Q / Dock Quit that is still waiting for its answer is cancelled now.
+        reply_terminate(ctx, false);
+    }
     run_effects(ctx, effects);
+}
+
+/// macOS: answers an `applicationShouldTerminate:` that got NSTerminateLater (`allow` true: AppKit terminates now, which ends
+/// the event loop with RunEvent::Exit; false: the app stays). Returns whether a reply was sent. No-op elsewhere.
+fn reply_terminate(ctx: &AppContext, allow: bool) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // A NO while the app already winds down would only drop the reply: the exit answers YES itself.
+        if !unimux_platform::lifecycle::terminate_reply_owed() || (!allow && ctx.lifecycle.is_quitting()) {
+            return false;
+        }
+        let Some(app) = ctx.app() else { return false };
+        app.run_on_main_thread(move || {
+            unimux_platform::lifecycle::reply_to_terminate(allow);
+        })
+        .is_ok()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (ctx, allow);
+        false
+    }
 }
 
 /// 1.1.4's `before-quit`: asks first when agents work, else winds down and exits. Never blocks.
@@ -372,19 +409,51 @@ pub fn exit_now(ctx: &Arc<AppContext>) {
     for hook in hooks {
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(hook));
     }
-    if should_relaunch_after_quit(lc.relaunch_requested.load(Ordering::SeqCst), lc.handoff_started.load(Ordering::SeqCst)) {
-        relaunch(ctx);
-    }
+    // The relaunch is not started here: the last save runs in RunEvent::Exit ([`after_exit`]), and the new process must
+    // only read state.json after it. A stuck event loop still gets its relaunch from the backstop.
+    let c = ctx.clone();
     std::thread::Builder::new()
         .name("exit-backstop".into())
-        .spawn(|| {
+        .spawn(move || {
             std::thread::sleep(EXIT_BACKSTOP);
+            relaunch_if_requested(&c);
             std::process::exit(0);
         })
         .ok();
+    // macOS: a Cmd+Q / Dock Quit / log-out answered NSTerminateLater ends through AppKit's own terminate (the system's
+    // log-out waits for exactly this reply).
+    if reply_terminate(ctx, true) {
+        return;
+    }
     match ctx.app() {
         Some(app) => app.exit(0),
-        None => std::process::exit(0),
+        None => {
+            after_exit(ctx);
+            std::process::exit(0)
+        }
+    }
+}
+
+/// RunEvent::Exit (the event loop ended, also through AppKit's terminate): the last save of whatever came in after the
+/// wind-down's, the saver stops, and only then a start that arrived during the wind-down is repeated. Runs once.
+pub fn after_exit(ctx: &Arc<AppContext>) {
+    if ctx.lifecycle.after_exit_done.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    if !ctx.flush_state() {
+        ctx.crash.error("state could not be saved before exit");
+    }
+    ctx.saver.stop();
+    relaunch_if_requested(ctx);
+}
+
+fn relaunch_if_requested(ctx: &AppContext) {
+    let lc = &ctx.lifecycle;
+    if lc.exiting.load(Ordering::SeqCst)
+        && should_relaunch_after_quit(lc.relaunch_requested.load(Ordering::SeqCst), lc.handoff_started.load(Ordering::SeqCst))
+        && !lc.relaunched.swap(true, Ordering::SeqCst)
+    {
+        relaunch(ctx);
     }
 }
 
@@ -398,14 +467,56 @@ pub fn should_relaunch_after_quit(launch_requested: bool, update_started: bool) 
     launch_requested && !update_started
 }
 
-/// Starts this exe again (Electron's `app.relaunch()` at exit) once the single-instance guard is gone.
+/// The environment variable that tells a relaunched process which process it waits for (Electron's relauncher waits for
+/// the parent to end before it starts the app again).
+pub const RELAUNCH_AFTER_PID: &str = "UNIMUX_RELAUNCH_AFTER_PID";
+/// The longest a relaunched process waits for the old one (its own backstops end it within seconds).
+const RELAUNCH_WAIT: Duration = Duration::from_secs(30);
+
+/// What a relaunched process waited for (the test bridge reports it).
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(not(feature = "test-bridge"), allow(dead_code, reason = "read by the test bridge only"))]
+pub struct RelaunchWait {
+    pub pid: u32,
+    /// The old process had ended when this one went on.
+    pub gone: bool,
+    /// Wall clock (ms) when this one went on to take the data dir.
+    pub at: i64,
+}
+
+static RELAUNCH_WAITED: std::sync::OnceLock<RelaunchWait> = std::sync::OnceLock::new();
+
+/// Called first thing in a new process, before the data dir is taken: a relaunch waits until the process that started it
+/// has ended, so it never reads state.json before the old one's last save. The variable is not passed on.
+pub fn wait_for_relaunching_process() {
+    let Some(value) = std::env::var_os(RELAUNCH_AFTER_PID) else { return };
+    // SAFETY: called at the start of main, before this process starts any other thread.
+    unsafe { std::env::remove_var(RELAUNCH_AFTER_PID) };
+    let Some(pid) = value.to_str().and_then(|v| v.parse::<u32>().ok()) else { return };
+    let deadline = Instant::now() + RELAUNCH_WAIT;
+    let mut gone = !unimux_exec::process_alive(pid);
+    while !gone && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(25));
+        gone = !unimux_exec::process_alive(pid);
+    }
+    let _ = RELAUNCH_WAITED.set(RelaunchWait { pid, gone, at: now_ms() });
+}
+
+#[cfg_attr(not(feature = "test-bridge"), allow(dead_code, reason = "read by the test bridge only"))]
+pub fn relaunch_waited() -> Option<RelaunchWait> {
+    RELAUNCH_WAITED.get().copied()
+}
+
+/// Starts this exe again (Electron's `app.relaunch()` at exit) once the single-instance guard is gone. The new process waits
+/// for this one to end ([`wait_for_relaunching_process`]).
 fn relaunch(ctx: &AppContext) {
     drop(ctx.lifecycle.instance.lock().take());
     unimux_platform::instance::wait_released(&ctx.data_dir, Duration::from_secs(2));
     let Ok(exe) = std::env::current_exe() else { return };
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
     let program = unimux_exec::Program::Args { program: exe, args };
-    let env = std::env::vars_os().collect();
+    let mut env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> = std::env::vars_os().collect();
+    env.insert(RELAUNCH_AFTER_PID.into(), std::process::id().to_string().into());
     if let Err(e) = unimux_exec::spawn_detached(&program, Some(env), std::env::current_dir().ok()) {
         ctx.crash.warn(&format!("relaunch failed: {e}"));
     }
@@ -566,7 +677,16 @@ pub fn page_load(ctx: &Arc<AppContext>, label: &str, finished: bool) {
 
 fn page_gone(ctx: &Arc<AppContext>, label: &str) {
     if label == MAIN {
-        ctx.lifecycle.confirm.lock().renderer_gone();
+        let was_pending = {
+            let mut confirm = ctx.lifecycle.confirm.lock();
+            let pending = confirm.is_pending();
+            confirm.renderer_gone();
+            pending
+        };
+        // The question is gone with the page: the app stays (1.1.4 dropped the held quit), so a waiting Cmd+Q is cancelled.
+        if was_pending {
+            reply_terminate(ctx, false);
+        }
         let mut st = ctx.lifecycle.renderer.lock();
         st.heartbeat.reset();
         st.hung_timer = None;
@@ -829,6 +949,7 @@ pub fn report(ctx: &AppContext) -> Value {
         "pending": confirm.is_pending(),
         "sessionEnding": lc.session_ending(),
         "relaunchRequested": lc.relaunch_requested.load(Ordering::SeqCst),
+        "relaunchedAfter": relaunch_waited().map(|w| json!({ "pid": w.pid, "gone": w.gone, "at": w.at })),
         "rendererDead": renderer.dead,
         "unresponsive": renderer.heartbeat.is_unresponsive(),
         "hungTimer": renderer.hung_timer.is_some(),

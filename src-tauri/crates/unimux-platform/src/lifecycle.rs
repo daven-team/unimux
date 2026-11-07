@@ -4,7 +4,8 @@
 //! - Windows: a window subclass on the main window answers WM_QUERYENDSESSION (the flush starts at once) and WM_ENDSESSION
 //!   (waits a bounded time for it). Electron's `query-session-end` / `session-end`.
 //! - macOS: `NSWorkspaceWillPowerOffNotification` (Electron's powerMonitor `shutdown`) and `applicationShouldTerminate:`
-//!   (Cmd+Q, Dock Quit, log-out), answered "cancel" so the app winds down first and exits by itself.
+//!   (Cmd+Q, Dock Quit, log-out), answered NSTerminateLater: the app winds down first and then replies YES (or NO when the
+//!   user kept the app at the quit question). Never NSTerminateCancel, which would abort a log-out or shut-down.
 
 use std::sync::Arc;
 
@@ -30,11 +31,24 @@ pub fn watch_power_off(on_power_off: Arc<dyn Fn() + Send + Sync>) {
 }
 
 /// Answers `applicationShouldTerminate:` (Cmd+Q, Dock Quit, the menu, log-out). `decide` returns true when the app may end
-/// now (its own exit); otherwise the request is cancelled and `decide` is expected to start the quit itself. Call on the main
-/// thread once the application delegate exists.
+/// now (its own exit); otherwise the request is answered NSTerminateLater, `decide` is expected to start the quit itself and
+/// the app must later call [`reply_to_terminate`]. Call on the main thread once the application delegate exists.
 #[cfg(target_os = "macos")]
 pub fn intercept_terminate(decide: Arc<dyn Fn() -> bool + Send + Sync>) -> bool {
     crate::mac_lifecycle::intercept_terminate(decide)
+}
+
+/// Whether a terminate request answered NSTerminateLater still waits for [`reply_to_terminate`].
+#[cfg(target_os = "macos")]
+pub fn terminate_reply_owed() -> bool {
+    crate::mac_lifecycle::terminate_reply_owed()
+}
+
+/// `replyToApplicationShouldTerminate:` for a request answered NSTerminateLater (`true`: terminate now, `false`: the app
+/// stays). Returns false when no reply was owed. Main thread only.
+#[cfg(target_os = "macos")]
+pub fn reply_to_terminate(allow: bool) -> bool {
+    crate::mac_lifecycle::reply_to_terminate(allow)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

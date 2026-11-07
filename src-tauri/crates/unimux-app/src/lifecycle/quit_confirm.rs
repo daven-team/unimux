@@ -186,7 +186,7 @@ impl QuitConfirm {
         self.stop_all();
     }
 
-    #[cfg(feature = "test-bridge")]
+    /// The question is open (a quit is held).
     pub fn is_pending(&self) -> bool {
         self.pending
     }

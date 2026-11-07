@@ -89,6 +89,9 @@ fn main() {
         std::process::exit(print_routes());
     }
 
+    // A relaunch (a start during the last wind-down) waits for the old process to end before it touches the data dir.
+    lifecycle::wait_for_relaunching_process();
+
     let timer = Arc::new(StartupTimer::new(started));
     timer.mark("process-start");
     let overrides = DevOverrides::from_env();
@@ -223,11 +226,8 @@ fn main() {
             lifecycle::request_quit(&run_ctx, lifecycle::QuitSource::Request);
         }
         RunEvent::Exit => {
-            // After the wind-down (or a forced exit): whatever came in after the last save.
-            if !run_ctx.flush_state() {
-                run_ctx.crash.error("state could not be saved before exit");
-            }
-            run_ctx.saver.stop();
+            // After the wind-down (or a forced exit): whatever came in after the last save, then a pending relaunch.
+            lifecycle::after_exit(&run_ctx);
         }
         _ => {}
     });

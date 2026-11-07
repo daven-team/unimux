@@ -5,7 +5,8 @@
 //      (WM_ENDSESSION FALSE) keeps the app running and the next minute's quits unheld;
 //   C. killing the page's msedgewebview2 renderer reloads it 3 times, the 4th time asks Reload / Quit (translated), Reload
 //      reloads, Quit winds down and exits 0 with the state saved;
-//   E. a second start while the app winds down is forwarded, and the app starts again after its exit (relaunch);
+//   E. a second start while the app winds down is forwarded, and the app starts again after its exit (relaunch): the new
+//      process waited for the old pid to end and took the data dir only after the old one's last state.json write;
 //   D. (--hang) a page stuck in a loop is asked about after the heartbeat + grace (about 25 s), Reload ends the hung renderer
 //      and the page comes back.
 // No dialog ever reaches the desktop: in an offscreen run the app records its native dialogs and the test bridge answers them.
@@ -13,7 +14,7 @@
 //
 //   npm run build:check && node scripts/verify-tauri-lifecycle.mjs [--hang] [--keep]
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { removeScratch } from './app-env.mjs';
@@ -211,17 +212,23 @@ try {
     check('a start during the wind-down is forwarded to the quitting app', secondCode === 0, `exit ${secondCode}`);
     const firstCode = await waitExit(child, 25000);
     check('the quitting app still exits 0', firstCode === 0, `exit ${firstCode}`);
+    // The old process's last write (its RunEvent::Exit save); the relaunched one has not saved yet when this is read.
+    const lastOldWrite = statSync(stateFile).mtimeMs;
     let relaunched = null;
+    let waited = null;
     try {
       const again = await connectPage(port, { timeoutMs: 30000 });
       await waitFor(again, 'window.__mc?.useStore?.getState?.().ready === true', 45000, 'relaunched renderer ready');
       relaunched = (await bridge(again, 'windDownDelay', { ms: 0 })).pid;
       relaunchedPids.push(relaunched);
+      waited = (await bridge(again, 'lifecycle')).relaunchedAfter;
       await bridge(again, 'quit').catch(() => undefined);
     } catch (error) {
       console.error(error);
     }
     check('the app started again after the exit (relaunch while quitting)', Number.isInteger(relaunched) && relaunched !== firstPid, `first ${firstPid}, relaunched ${relaunched}`);
+    check('the relaunched process waited for the old pid to end', waited?.pid === firstPid && waited?.gone === true, JSON.stringify(waited));
+    check('the old process wrote state.json only before the relaunched one went on', waited && lastOldWrite <= waited.at, `last old write ${Math.round(lastOldWrite)}, relaunch went on at ${waited?.at}`);
     // The relaunched app ends by itself (quit); its debug port goes away.
     let closed = false;
     for (let i = 0; i < 100 && !closed; i++) {

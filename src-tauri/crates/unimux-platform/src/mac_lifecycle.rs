@@ -1,6 +1,7 @@
 //! macOS half of [`crate::lifecycle`] (compile-checked on Windows with `--target aarch64-apple-darwin`; the run is R3).
 
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use block2::RcBlock;
@@ -23,11 +24,36 @@ pub fn watch_power_off(on_power_off: Arc<dyn Fn() + Send + Sync>) {
 }
 
 static DECIDE: OnceLock<Arc<dyn Fn() -> bool + Send + Sync>> = OnceLock::new();
+/// `applicationShouldTerminate:` was answered NSTerminateLater: AppKit waits for `replyToApplicationShouldTerminate:`.
+static REPLY_OWED: AtomicBool = AtomicBool::new(false);
 
-/// NSTerminateCancel = 0, NSTerminateNow = 1.
+/// NSTerminateNow = 1, NSTerminateLater = 2. Never NSTerminateCancel: during a log-out, restart or shut-down a cancel is a
+/// refusal and the system aborts it (1.1.4's Electron never cancelled either, it quit asynchronously). The quit goes on in
+/// the app, which answers through [`reply_to_terminate`].
 extern "C-unwind" fn should_terminate(_this: *mut AnyObject, _sel: Sel, _sender: *mut AnyObject) -> usize {
     let now = std::panic::catch_unwind(|| DECIDE.get().is_none_or(|decide| decide())).unwrap_or(true);
-    usize::from(now)
+    if now {
+        1
+    } else {
+        REPLY_OWED.store(true, Ordering::SeqCst);
+        2
+    }
+}
+
+/// Whether AppKit still waits for the answer to a terminate request.
+pub fn terminate_reply_owed() -> bool {
+    REPLY_OWED.load(Ordering::SeqCst)
+}
+
+/// Answers a terminate request that got NSTerminateLater: `true` lets AppKit terminate now (applicationWillTerminate, then
+/// the process ends), `false` cancels it (the user kept the app). Returns false when no answer was owed. Main thread only.
+pub fn reply_to_terminate(allow: bool) -> bool {
+    let Some(mtm) = MainThreadMarker::new() else { return false };
+    if !REPLY_OWED.swap(false, Ordering::SeqCst) {
+        return false;
+    }
+    NSApplication::sharedApplication(mtm).replyToApplicationShouldTerminate(allow);
+    true
 }
 
 pub fn intercept_terminate(decide: Arc<dyn Fn() -> bool + Send + Sync>) -> bool {
