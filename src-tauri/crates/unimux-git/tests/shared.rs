@@ -666,9 +666,22 @@ fn leaves_ordinary_configuration_alone() {
 #[test]
 fn flags_a_credential_helper_that_is_not_a_known_helper_name() {
     // git runs `git credential-<value>` through the shell (test/git-trust-shared.test.ts, b39025b).
-    for value in
-        ["x; calc", "evil", "manager $(calc)", "store --file=x;calc", "cache `calc`", "manager\ncalc", "../x", "manager && calc"]
-    {
+    // Only an ASCII space or tab separates arguments (second security review: a newline starts a new shell command).
+    for value in [
+        "x; calc",
+        "evil",
+        "manager $(calc)",
+        "store --file=x;calc",
+        "cache `calc`",
+        "manager\ncalc",
+        "../x",
+        "manager && calc",
+        "cache\n--timeout=1",
+        "cache\r--x",
+        "cache\u{a0}--x",
+        "cache\u{2028}--x",
+        "cache\u{b}--x",
+    ] {
         assert_eq!(dangerous_config_keys(&entries(&[("credential.helper", value)])), ["credential.helper"], "{value:?}");
     }
     for value in [
@@ -683,9 +696,9 @@ fn flags_a_credential_helper_that_is_not_a_known_helper_name() {
     ] {
         assert!(dangerous_config_keys(&entries(&[("credential.helper", value)])).is_empty(), "{value:?}");
     }
-    // JS `\w` is ASCII only; JS `\s` includes U+00A0 and U+FEFF.
+    // JS `\w` is ASCII only; a tab separates arguments like a space.
     assert_eq!(dangerous_config_keys(&entries(&[("credential.helper", "cache --tim\u{e9}")])), ["credential.helper"]);
-    assert!(dangerous_config_keys(&entries(&[("credential.helper", "cache\u{a0}--timeout=1")])).is_empty());
+    assert!(dangerous_config_keys(&entries(&[("credential.helper", "cache\t--timeout=1")])).is_empty());
     assert!(dangerous_config_keys(&entries(&[("credential.https://h.helper", "  store  ")])).is_empty());
 }
 

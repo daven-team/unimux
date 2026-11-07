@@ -83,12 +83,12 @@ static SUBMODULE_UPDATE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!(r"^submodule\.{}\.update$", any_plus())).expect("submodule regex"));
 static ABSOLUTE_PROGRAM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(!|/|[A-Za-z]:[\\/]|\\\\)").expect("absolute regex"));
 /// `SAFE_CREDENTIAL_HELPER`: a credential helper named without a path runs as the shell command `git credential-<value>`, so
-/// only the well-known helpers with plain `--option[=value]` arguments (or an empty value, which resets the list) pass. JS `\s`
-/// is [`JS_SPACE`] and JS `\w` is ASCII only.
+/// only the well-known helpers with plain `--option[=value]` arguments (or an empty value, which resets the list) pass. Only an
+/// ASCII space or tab separates arguments (a newline would start a new shell command); JS `\w` is ASCII only.
 static SAFE_CREDENTIAL_HELPER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(&format!(
-        r"^((manager|manager-core|wincred|osxkeychain|libsecret|gnome-keyring|cache|store)([{JS_SPACE}]+--[A-Za-z][A-Za-z0-9_\-]*(=[A-Za-z0-9_.:/@~+\-]*)?)*)?$"
-    ))
+    Regex::new(
+        r"^((manager|manager-core|wincred|osxkeychain|libsecret|gnome-keyring|cache|store)([ \t]+--[A-Za-z][A-Za-z0-9_\-]*(=[A-Za-z0-9_.:/@~+\-]*)?)*)?$",
+    )
     .expect("credential helper regex")
 });
 static OFF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i-u)^(false|no|off|0)?$").expect("off regex"));

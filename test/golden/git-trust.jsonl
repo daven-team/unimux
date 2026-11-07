@@ -249,10 +249,10 @@
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"true"}]],"out":["credential.https://h.helper"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":" manager "}]],"out":[]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":" manager "}]],"out":[]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache --timeout=1"}]],"out":[]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache --timeout=1"}]],"out":[]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache　--x"}]],"out":[]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache　--x"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache --timeout=1"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache --timeout=1"}]],"out":["credential.https://h.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache　--x"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache　--x"}]],"out":["credential.https://h.helper"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache--x"}]],"out":["credential.helper"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache--x"}]],"out":["credential.https://h.helper"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache --timé"}]],"out":["credential.helper"]}
@@ -275,8 +275,8 @@
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"manager-cor"}]],"out":["credential.https://h.helper"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"managerx"}]],"out":["credential.helper"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"managerx"}]],"out":["credential.https://h.helper"]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache\t--a\n--b=1"}]],"out":[]}
-{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache\t--a\n--b=1"}]],"out":[]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache\t--a\n--b=1"}]],"out":["credential.helper"]}
+{"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"cache\t--a\n--b=1"}]],"out":["credential.https://h.helper"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"store --file=x\\y"}]],"out":["credential.helper"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.https://h.helper","value":"store --file=x\\y"}]],"out":["credential.https://h.helper"]}
 {"fn":"dangerousConfigKeys","args":[[{"key":"credential.helper","value":"cache --x=1 --y"}]],"out":[]}
