@@ -78,9 +78,12 @@ export function NewKeyEditor({ initialMode }: { initialMode?: Mode }) {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files[0];
-    const path = file ? window.mc.pathForFile(file) : '';
-    if (path) void fromFile(window.mc.ssh.draftFromFile(path));
-    else setError(tr('Nie udało się odczytać pliku'));
+    const failed = () => setError(tr('Nie udało się odczytać pliku'));
+    if (!file) return failed();
+    void window.mc.pathsForFiles([file]).then(([path]) => {
+      if (path) void fromFile(window.mc.ssh.draftFromFile(path));
+      else failed();
+    }, failed);
   };
   const unlock = async () => {
     if (!draft || !passphrase) return;

@@ -349,8 +349,12 @@ export function FilePane(p: PaneProps) {
     const payload = resolveDrop(active, raw, p.side);
     if (payload) { p.onDropEntries(payload, target); return; }
     if (active) return;
-    const paths = Array.from(e.dataTransfer.files).map((f) => window.mc.pathForFile(f)).filter(Boolean);
-    if (paths.length) p.onDropFiles(paths, target);
+    const files = Array.from(e.dataTransfer.files);
+    if (!files.length) return;
+    void window.mc.pathsForFiles(files).then((all) => {
+      const paths = all.filter(Boolean);
+      if (paths.length) p.onDropFiles(paths, target);
+    }, () => undefined);
   };
 
   const columns = COLUMNS.filter((c) => !c.remote || p.extraColumns);

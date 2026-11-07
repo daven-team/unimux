@@ -1,39 +1,75 @@
-//! unimux-hostd: a stdio test host (PLAN B1). One JSON request per line on stdin, one JSON answer per line on stdout:
-//! `{"id": 1, "op": "ping"}` -> `{"id": 1, "ok": true, "result": "pong"}`. Package B1 adds the ported primitives (pty,
-//! ssh, sftp, db) so test/helpers/nodeHost.ts can run the existing `.int` suites against Rust. Never shipped.
+//! unimux-hostd: a stdio test host (PLAN B1), never shipped. The Node side is test/helpers/nodeHost.ts: it starts this
+//! binary, sends one JSON request per line and gets answers and events back (wire in `protocol.rs`), so the existing `.int`
+//! suites and the Node fake servers (pgFakeServer, mysqlFakeServer, respServer, sshServer, pglite-socket) drive the Rust
+//! code instead of the TS one.
+//!
+//! Ops are `<domain>.<name>`. Built-in: `ping`, `version`, `info`. Domains: `pty.*` (`pty/`). A package that ports a
+//! host adds its domain module and one arm in [`Host::dispatch`] (ssh, sftp, db, ...); see docs/tauri/HOSTD.md.
+//!
+//! Lifetime: the host ends when stdin closes (the test process ended or called `close()`); every terminal it started is
+//! killed with its process tree first, so nothing outlives a test run.
 
-use std::io::{self, BufRead, Write};
+mod protocol;
+mod pty;
+mod utf8;
+
+use std::io::{self, BufRead};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
-fn handle(op: &str, _args: &Value) -> Result<Value, String> {
-    match op {
-        "ping" => Ok(json!("pong")),
-        "version" => Ok(json!(unimux_core::VERSION)),
-        other => Err(format!("unknown op {other}")),
+use protocol::{Out, Reply};
+
+struct Host {
+    pty: pty::PtyHost,
+}
+
+impl Host {
+    fn new(out: Out) -> Self {
+        Self { pty: pty::PtyHost::new(out) }
+    }
+
+    fn dispatch(&self, op: &str, args: &Value, reply: Reply) {
+        match op.split_once('.') {
+            Some(("pty", name)) => self.pty.handle(name, args, reply),
+            None => match op {
+                "ping" => reply.ok(json!("pong")),
+                "version" => reply.ok(json!(unimux_core::VERSION)),
+                "info" => reply.ok(json!({
+                    "version": unimux_core::VERSION,
+                    "platform": pty::platform(),
+                    "pid": std::process::id(),
+                    "domains": ["pty"],
+                })),
+                other => reply.err(format!("unknown op {other}")),
+            },
+            Some(_) => reply.err(format!("unknown op {op}")),
+        }
+    }
+
+    fn shutdown(&self) {
+        self.pty.shutdown(Duration::from_secs(3));
     }
 }
 
 fn main() {
+    let out = Out::stdout();
+    let host = Host::new(out.clone());
     let stdin = io::stdin();
-    let mut out = io::stdout().lock();
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
         if line.trim().is_empty() {
             continue;
         }
-        let answer = match serde_json::from_str::<Value>(&line) {
-            Ok(req) => {
-                let id = req.get("id").cloned().unwrap_or(Value::Null);
-                match handle(req.get("op").and_then(Value::as_str).unwrap_or(""), req.get("args").unwrap_or(&Value::Null)) {
-                    Ok(result) => json!({ "id": id, "ok": true, "result": result }),
-                    Err(error) => json!({ "id": id, "ok": false, "error": error }),
-                }
-            }
-            Err(e) => json!({ "id": null, "ok": false, "error": format!("bad request: {e}") }),
-        };
-        if writeln!(out, "{answer}").and_then(|_| out.flush()).is_err() {
+        match protocol::parse(&line) {
+            Ok(req) => host.dispatch(&req.op, &req.args, Reply::new(req.id, out.clone())),
+            Err(bad) => Reply::new(bad.id, out.clone()).err(bad.error),
+        }
+        if out.is_broken() {
             break;
         }
     }
+    host.shutdown();
+    // Reader / waiter threads of killed terminals may still be draining; the process ends regardless.
+    std::process::exit(0);
 }

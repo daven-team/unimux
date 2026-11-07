@@ -1,14 +1,14 @@
-// Real-app SSH checks: node scripts/verify-ssh-ui.mjs [part ...]   (npm run build first)
+// Real-app SSH checks: node scripts/verify-ssh-ui.mjs [part ...]   (npm run build:check first; MC_APP_TARGET=electron: npm run build)
 // With no argument every part runs. Screenshots: D:\Projekty\_shots\ssh-*.png
 // SSH_CHECK_LANGUAGE=en runs a part with the English UI (the `cell` part uses the TEXT table; screenshots get an -en suffix).
 // Only the local test server (scripts/ssh-test-server.mjs on 127.0.0.1) is used; scratch dirs are deleted afterwards.
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import ssh2 from 'ssh2';
 import { join } from 'node:path';
 import { childPids, connected, connectWithPassword, killTree, LANGUAGE, launchApp, sleep, scratchRoot, sshState, startTestServer, testHost, writeKnownHost, writeState } from './ssh-ui-lib.mjs';
+import { removeScratch } from './app-env.mjs';
 
-if (!existsSync('out/main/index.js')) throw new Error('Build first: npm run build');
 /** Expression: the xterm buffer text of every cell of the active tab, in cell order (what the terminal really shows, not a screenshot). */
 const CELL_BUFFERS = `(() => { const s = window.__mc.useStore.getState().s; const p = s.projects.find((x) => x.id === s.activeProjectId); const t = p.tabs.find((x) => x.id === p.activeTabId);
   return t.cells.map((c) => { const b = window.__mc.terminals.entries.get(c.id)?.term.buffer.active; if (!b) return ''; let text = ''; for (let i = 0; i < b.length; i++) text += (b.getLine(i)?.translateToString(true) ?? '') + '\\n'; return text; }); })()`;
@@ -87,7 +87,7 @@ const PARTS = {
         if (existsSync(path) && readFileSync(path, 'utf8').includes(server.password)) throw new Error(`${file} contains the test password`);
       }
       if (!existsSync(join(root, 'data', 'ssh', 'known_hosts.json'))) throw new Error('host key was not saved');
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
+    } finally { server.stop(); removeScratch(root); }
   },
   /** Task 9, W3: new host from the palette in the SSH view's details pane, save and connect; generate a key and copy its public key; import by drop and by paste. */
   async editors() {
@@ -183,7 +183,7 @@ const PARTS = {
       if (vault.includes('PRIVATE KEY') || vault.includes(server.password)) throw new Error('vault.json contains plain secrets');
       const state = readFileSync(join(root, 'data', 'state.json'), 'utf8');
       if (!state.includes('"local test"') || state.includes('PRIVATE KEY') || state.includes(server.password)) throw new Error('state.json: host missing or a secret leaked');
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
+    } finally { server.stop(); removeScratch(root); }
   },
   /** Task 9 fix: with no project at all, the palette still opens the SSH view and a host can be saved. */
   async editorsNoProject() {
@@ -209,7 +209,7 @@ const PARTS = {
         await sleep(2500); // state.json is written debounced
       } finally { await app.close(); }
       if (!readFileSync(join(root, 'data', 'state.json'), 'utf8').includes('"example.invalid"')) throw new Error('host not stored');
-    } finally { rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
+    } finally { removeScratch(root); }
   },
   /** Task 10, W3: the SSH tile opens the SSH view, hosts are tiles by group and searchable, folding, details and multi-select work, a group opens as a 3-cell grid.
    *  0.9.2 polish: no "Bez grupy" tile and no local shells, the details pane only while a host is chosen, search narrows the selection. */
@@ -312,7 +312,7 @@ const PARTS = {
         await app.until(`document.querySelector('.workspace-tabs .grid-tab.active .label')?.textContent === 'lab' && !!document.querySelector('.ssh-workspace') && !document.querySelector('.workspace-tabs .ssh-tab')`, 'tab named after the group, SSH view kept in the background');
         await app.screenshot('ssh-group-grid.png');
       } finally { await app.close(); }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
+    } finally { server.stop(); removeScratch(root); }
   },
   /** 0.9.2 SSH mode: the side panel shows Hosty, Klucze, Znane hosty and SFTP (enabled in 0.9.8) while the SSH view is in front; Projects brings the normal panel back. */
   async sshMode() {
@@ -417,7 +417,7 @@ const PARTS = {
         await app.click('.menu .menu-item', 'Pokaż w panelu plików');
         await app.until(`!document.querySelector('.side-panel .ssh-nav') && !!document.querySelector('#sidebar-files .file-entry[data-path="notes.txt"]') && ${sshHidden}`, 'file revealed, SSH mode ended');
       } finally { await app.close(); }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
+    } finally { server.stop(); removeScratch(root); }
   },
   /** 0.9.2 polish: the details pane only while something is chosen, the calmer Hosty, "Pokaż klucz prywatny" and "Zastąp klucz prywatny". */
   async polish() {
@@ -591,7 +591,7 @@ const PARTS = {
         const text = readFileSync(join(root, 'data', file), 'utf8');
         if (text.includes('PRIVATE KEY') || text.includes(replacement.private.split('\n')[1])) throw new Error(`${file} contains private key text`);
       }
-    } finally { rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
+    } finally { removeScratch(root); }
   },
   /** Task 11: a saved preset with three SSH cells opens from the palette and connects; the grid dialog lists hosts. */
   async grid() {
@@ -639,7 +639,7 @@ const PARTS = {
         if (!named.length || named.some((n) => n !== null)) throw new Error(`grid-dialog SSH cells: ${JSON.stringify(named)}`);
         await app.screenshot('ssh-grid-dialog-opened.png');
       } finally { await app.close(); }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
+    } finally { server.stop(); removeScratch(root); }
   },
   /** W3: a normal grid adds SSH cells from "Dodaj" and from a cell's menu, like choosing a profile. */
   async gridAdd() {
@@ -670,7 +670,7 @@ const PARTS = {
         await app.until(`document.querySelectorAll('.cell').length === 3 && document.querySelectorAll('.cell .cell-head .ssh-host').length === 2`, 'a second SSH cell');
         await app.screenshot('091-grid-add-cells.png');
       } finally { await app.close(); }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
+    } finally { server.stop(); removeScratch(root); }
   },
   /** Task 12: a 3-cell grid opened from the 'lab' group, one command broadcast to all three (read from each terminal buffer), then one disconnected cell is disabled and skipped. */
   async broadcast() {
@@ -732,7 +732,7 @@ const PARTS = {
         if (await app.evaluate(hasLine(0, 'again'))) throw new Error('the disconnected cell received the command');
         await app.press('Escape');
       } finally { await app.close(); }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
+    } finally { server.stop(); removeScratch(root); }
   },
   /** Task 13: Settings > SSH shows the storage and the known host, and removes it. */
   async settings() {
@@ -755,7 +755,7 @@ const PARTS = {
         await app.click('.ssh-known button', 'Usuń');
         await app.until(`document.querySelector('.settings-content').textContent.includes('Brak znanych hostów')`, 'known host removed');
       } finally { await app.close(); }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
+    } finally { server.stop(); removeScratch(root); }
   },
   /** Task 13 (a)-(c): a vault and a known hosts file of a newer format open read-only; Settings says so, shows both paths, and neither file is touched. */
   async settingsReadOnly() {
@@ -783,7 +783,7 @@ const PARTS = {
       } finally { await app.close(); }
       if (readFileSync(vaultFile, 'utf8') !== '{"version":99,"keys":[],"passwords":[]}') throw new Error('the vault file was modified');
       if (readFileSync(hostsFile, 'utf8') !== damaged) throw new Error('the known hosts file was modified');
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
+    } finally { server.stop(); removeScratch(root); }
   },
   /** Spec 14: after a restart of the app the cell shows "Połącz" (D5); a new host key on the same port gives the red card (incl. the changed host key, L13). */
   async restart() {
@@ -831,7 +831,7 @@ const PARTS = {
         const text = readFileSync(file, 'utf8');
         for (const secret of [...passwords, 'PRIVATE KEY']) if (text.includes(secret)) throw new Error(`${file} contains a secret`);
       }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
+    } finally { server.stop(); removeScratch(root); }
   },
   /**
    * 0.9.6 F3: "Łącz ponownie po uruchomieniu aplikacji" set in the host form reconnects the host's cell when the app starts
@@ -919,7 +919,7 @@ const PARTS = {
         if (!(await app.evaluate(cellIs(manualCell, 'card')))) throw new Error('the cell of the host without the option did not stay idle');
         await app.screenshot('ssh-reconnect-at-start.png');
       } finally { await app.close(); }
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
+    } finally { server.stop(); removeScratch(root); }
   },
   /** D8: with MC_SSH_NO_SAFESTORAGE=1 the banner shows, a saved password works for the session, nothing secret is written. */
   async noSafeStorage() {
@@ -951,7 +951,7 @@ const PARTS = {
       } finally { await app.close(); }
       if (existsSync(join(root, 'data', 'ssh', 'vault.json'))) throw new Error('vault.json written although safeStorage was unavailable');
       if (readFileSync(join(root, 'data', 'state.json'), 'utf8').includes(server.password)) throw new Error('state.json contains the password');
-    } finally { server.stop(); rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 }); }
+    } finally { server.stop(); removeScratch(root); }
   },
 };
 

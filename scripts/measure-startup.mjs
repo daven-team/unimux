@@ -1,17 +1,21 @@
-// Startup timing of the built app (0.9.4): launches `out/` several times with a scratch data dir and home (2 projects, a 2x2
+// Startup timing of the built app (0.9.4): launches the Tauri check build (MC_APP_TARGET=electron: `out/`) several times with a scratch data dir and home (2 projects, a 2x2
 // grid of plain shells) and prints the marks of startup.log (ms since process start) with their medians.
-// Usage: npm run build && node scripts/measure-startup.mjs [runs=5]
+// Usage: npm run build:check && node scripts/measure-startup.mjs [runs=5]
 // Never touches the user's data dir or home; kills only the PIDs it started; deletes its scratch dirs.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import electron from 'electron';
 import { removeScratch, scratchHome, scrubAppEnv } from './app-env.mjs';
 import { killTree, sleep } from './ssh-ui-lib.mjs';
+import { measurementNeedsCompleteApp, spawnApp } from './real-app.mjs';
+
+// Numbers from an app that still answers MC_NOT_YET mean nothing: blocked until every package it calls landed.
+measurementNeedsCompleteApp();
 
 const runs = Number(process.argv[2]) || 5;
-const SHOWN = ['modules-loaded', 'app-ready', 'window-created', 'ready-to-show', 'renderer-boot', 'first-spawn', 'first-output'];
+// Electron and Tauri marks (startup.log of either build); a mark one of them does not write is left out.
+const SHOWN = ['modules-loaded', 'instance-lock', 'state-loaded', 'app-ready', 'window-created', 'ready-to-show', 'renderer-boot', 'first-spawn', 'first-output'];
 
 function writeScratchState(root) {
   const projects = [0, 1].map((n) => {
@@ -31,7 +35,7 @@ async function launchOnce() {
   writeScratchState(root);
   const { env: homeEnv } = scratchHome(root);
   const env = { ...scrubAppEnv({ ...process.env }), ...homeEnv, MC_DATA_DIR: join(root, 'data'), MC_OFFSCREEN: '1', MC_DEBUG_PORT: '0' };
-  const child = spawn(electron, ['.'], { cwd: process.cwd(), env, windowsHide: true, stdio: 'ignore' });
+  const child = spawnApp({ cwd: process.cwd(), env, stdio: 'ignore' });
   const log = join(root, 'data', 'startup.log');
   let line = '';
   try {

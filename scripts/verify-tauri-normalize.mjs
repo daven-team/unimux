@@ -76,12 +76,12 @@ try {
   const expected = unlessRestoring(normalizeState(JSON.parse(JSON.stringify(input)), 'win32'));
   const first = await start();
   const { page } = first;
-  // The loaded state, before the renderer could change anything: state:load answers what main holds at revision 0 or later.
-  const peek = await bridge(page, 'state');
+  // The state exactly as Rust loaded and normalized it (test-bridge `loaded`: the revision-0 snapshot main keeps), whatever
+  // the renderer edited since (the strip order, the `shell` of a started terminal): every field must match, no allowance.
+  const peek = await bridge(page, 'loaded');
   const loaded = peek.snapshot.state;
-  const atLoad = peek.snapshot.revision === 0;
   const diff = changedPaths(expected, loaded);
-  check(`Rust loads the state like normalizeState + unlessRestoring of 1.1.4 (revision ${peek.snapshot.revision})`, atLoad ? diff.length === 0 : diff.every((p) => p.startsWith('.workspaceOrder')), diff.join(', '));
+  check('Rust loads the state like normalizeState + unlessRestoring of 1.1.4', peek.snapshot.revision === 0 && diff.length === 0, diff.join(', '));
   check('retired profiles folded, legacy alert keys gone, bad SSH host dropped', !loaded.profiles.some((p) => p.id === 'claude-opus') && loaded.projects[0].tabs[0].cells[1].profileId === 'claude'
     && !('notifications' in loaded.settings) && loaded.settings.alerts.events.done.sound.kind === 'system' && loaded.settings.updateMode === 'ask' && loaded.sshHosts.length === 2);
   check('SSH resume mark dropped (session restore off)', loaded.projects[0].tabs[0].cells[2].ssh.resume === undefined);
@@ -119,14 +119,22 @@ try {
   check('state.json is JSON.stringify of the state in main', savedText === JSON.stringify(final));
   await quit(first);
 
-  // Restart: the written state (with what the running session added, like the `shell` of a started terminal) loads like
-  // 1.1.4 loads it.
-  const restartWant = unlessRestoring(normalizeState(JSON.parse(savedText), 'win32'));
+  // Restart: the file as the first run left it (re-read: a debounced save may have come after the flush), with the SSH
+  // resume mark a connected SSH cell writes while the app runs, loads like 1.1.4 loads it (the mark is dropped again).
+  const left = JSON.parse(readText(stateFile));
+  const sshCell = left.projects.flatMap((p) => p.tabs.flatMap((t) => t.cells)).find((c) => c.ssh);
+  if (sshCell) sshCell.ssh.resume = true;
+  const reloadText = JSON.stringify(left);
+  writeFileSync(stateFile, reloadText);
+  const restartWant = unlessRestoring(normalizeState(JSON.parse(reloadText), 'win32'));
   const second = await start();
-  const again = (await bridge(second.page, 'state')).snapshot;
+  // Again the revision-0 snapshot: a field the restart failed to repair differs from restartWant here, whatever the
+  // renderer of the second run did afterwards.
+  const again = (await bridge(second.page, 'loaded')).snapshot;
   const restartDiff = changedPaths(restartWant, again.state);
-  check(`a restart loads the saved state like 1.1.4 (revision ${again.revision})`, again.revision === 0 && restartDiff.length === 0, restartDiff.join(', '));
-  const session = changedPaths(JSON.parse(savedText), restartWant);
+  const session = changedPaths(JSON.parse(reloadText), restartWant);
+  check('a restart loads the saved state like 1.1.4', again.revision === 0 && restartDiff.length === 0, restartDiff.join(', '));
+  check('a restart drops the SSH resume mark again', !!sshCell && session.some((p) => p.endsWith('.ssh.resume')), session.join(', '));
   console.log(`info: fields a restart drops or repairs: ${session.join(', ') || 'none'}`);
   await quit(second);
 } catch (error) {

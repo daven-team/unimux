@@ -14,11 +14,11 @@ import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import electron from 'electron';
 import { removeScratch, scratchHome, scrubAppEnv } from './app-env.mjs';
+import { isMainPage, requireBuild, spawnApp } from './real-app.mjs';
 
 if (process.platform !== 'win32') { console.log('skip: Windows only (PowerShell and the claude.cmd stand-in)'); process.exit(0); }
-if (!existsSync(join(process.cwd(), 'out/main/index.js'))) throw new Error('Build first: npm run build');
+requireBuild();
 const root = mkdtempSync(join(tmpdir(), 'unimux-team-stuck-'));
 const shots = resolve(process.argv[2] ?? join(root, 'shots'));
 const data = join(root, 'data'), agents = join(root, 'fake-agents'), project = join(root, 'project'), starts = join(root, 'starts');
@@ -71,7 +71,7 @@ const sys = process.env.SystemRoot ?? 'C:\\Windows';
 const env = { ...scrubAppEnv({ ...process.env }), ...home.env, MC_DATA_DIR: data, MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port), MC_CLI_NO_REGISTRY: '1',
   PATH: [agents, join(sys, 'System32'), sys, join(sys, 'System32', 'WindowsPowerShell', 'v1.0')].join(delimiter) };
 delete env.Path;
-const child = spawn(electron, ['.'], { cwd: process.cwd(), env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+const child = spawnApp({ cwd: process.cwd(), env, stdio: ['ignore', 'pipe', 'pipe'] });
 let output = '', exited = false;
 child.stdout.on('data', (d) => { output += d; });
 child.stderr.on('data', (d) => { output += d; });
@@ -85,7 +85,7 @@ const startsOf = (cellId) => readdirSync(starts).map((f) => JSON.parse(readFileS
 const clients = [];
 let socket;
 try {
-  const target = await until(async () => { try { return (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === 'page'); } catch { return null; } }, 'debugger');
+  const target = await until(async () => { try { return (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(isMainPage); } catch { return null; } }, 'debugger');
   socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((r, j) => { socket.addEventListener('open', r, { once: true }); socket.addEventListener('error', j, { once: true }); });
   let n = 0; const pending = new Map();

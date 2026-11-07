@@ -1,12 +1,34 @@
 [package]
 name = "unimux-net"
-description = "http_fetch over reqwest with system proxy incl. PAC/WPAD (B3)"
+description = "http_fetch: an HTTP client with exact headers, per-call redirect policy, timeout and body cap, and the system proxy per URL incl. PAC/WPAD (B3)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-unimux-core.workspace = true
-unimux-ipc.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
 serde_json.workspace = true
+bytes.workspace = true
+http.workspace = true
+url.workspace = true
+tokio = { workspace = true, features = ["net"] }
+tokio-util.workspace = true
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
+hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "tokio"] }
+http-body-util.workspace = true
+tower-service.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+rustls-platform-verifier.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Networking_WinHttp"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation.workspace = true
+core-foundation-sys.workspace = true
+
+[dev-dependencies]
+rcgen.workspace = true

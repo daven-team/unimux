@@ -116,6 +116,10 @@ fn parse_cleanup(args: impl Iterator<Item = String>) -> Option<Cleanup> {
 /// window's own; the runtime copy may already serve a newer window of the same version, so it is removed only while
 /// `work/window.lock` is free (taken for each attempt, so a window starting meanwhile waits a moment, never fails).
 pub fn run_cleanup(cleanup: &Cleanup) -> i32 {
+    // Without folders it is the warm-up start of a freshly staged copy (unimux_update::window::prestage): nothing to do.
+    if cleanup.dirs.is_empty() {
+        return 0;
+    }
     let deadline = Instant::now() + Duration::from_secs(30);
     if cleanup.wait.is_empty() {
         std::thread::sleep(CLEANUP_DELAY);
@@ -274,6 +278,9 @@ pub struct UpdateWindow {
     born: Instant,
     /// The window's WebView2 browser process (the cleanup waits for it before removing the WebView2 folder).
     browser_pid: AtomicU32,
+    /// The WebView2 data folder that passed the pre-check (config.webview_dir() or a fresh one under %TEMP%); unset: none was
+    /// usable and no window is created (WebView2 would show its "cannot create data directory" box).
+    webview_dir: OnceLock<PathBuf>,
 }
 
 impl UpdateWindow {
@@ -370,7 +377,7 @@ impl UpdateWindow {
         }
         self.drop_heartbeat();
         let mut dirs = vec![self.config.runtime_dir.clone()];
-        dirs.push(self.config.webview_dir());
+        dirs.extend(self.webview_dir.get().cloned());
         let mut args: Vec<std::ffi::OsString> = vec!["--update-cleanup".into()];
         let mut wait = vec![std::process::id()];
         let browser = self.browser_pid.load(Ordering::SeqCst);
@@ -422,7 +429,11 @@ impl UpdateWindow {
         let program = self.config.installer.clone().ok_or_else(|| "no installer".to_string())?;
         let args = self.config.installer_args.clone().unwrap_or_default();
         let elevate = needs_elevation(&self.config.install_dir);
+        #[cfg(windows)]
         let owner = self.window().and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize);
+        // macOS has no owner window for the installer (U5 swaps the bundle instead).
+        #[cfg(not(windows))]
+        let owner: Option<isize> = None;
         // Outside the install dir and outside the copy, like the cleanup.
         match installer::start(&program, &args, &std::env::temp_dir(), owner, elevate) {
             Ok(run) => {
@@ -456,6 +467,8 @@ impl UpdateWindow {
         let mut error_at: Option<f64> = None;
         let mut launched = false;
         let mut logged = (false, false, false);
+        // Every stage change goes to updater.log (the window may be hidden or never shown).
+        let mut last_stage = UpdateStage::Error;
         self.log.info(&format!(
             "update window {} -> {} (old pid {}, install dir {}, baseline {} bytes)",
             config.from_version,
@@ -537,6 +550,10 @@ impl UpdateWindow {
                 ready,
                 dir_bytes: dir_bytes.filter(|_| closed),
             });
+            if progress.stage != last_stage {
+                last_stage = progress.stage;
+                self.log.info(&format!("stage {} after {elapsed:.0} ms ({}%)", progress.stage.as_str(), progress.percent));
+            }
             if error_at.is_none() {
                 let mut ui = self.ui.lock();
                 ui.stage = progress.stage;
@@ -741,8 +758,8 @@ fn create_window(app: &AppHandle, win: &Arc<UpdateWindow>) -> tauri::Result<()> 
         .zoom_hotkeys_enabled(false)
         .browser_extensions_enabled(false);
     #[cfg(windows)]
-    {
-        builder = builder.additional_browser_args(&browser_args()).data_directory(win.config.webview_dir());
+    if let Some(dir) = win.webview_dir.get() {
+        builder = builder.additional_browser_args(&browser_args()).data_directory(dir.clone());
     }
     #[cfg(not(windows))]
     let _ = browser_args();
@@ -784,6 +801,24 @@ fn create_window(app: &AppHandle, win: &Arc<UpdateWindow>) -> tauri::Result<()> 
         _ => {}
     });
     Ok(())
+}
+
+/// The pre-check of PLAN.md U2 / SP6: the configured folder when WebView2 can create and write it, else a fresh
+/// `%TEMP%\unimux-updater\webview2-<ms>` (removed by the cleanup like the configured one), else None (no window at all). A
+/// folder WebView2 cannot create makes Edge show a modal "cannot create data directory" box on the desktop.
+#[cfg(windows)]
+fn choose_webview_dir(config: &UpdateSplashConfig, log: &RollingLog) -> Option<PathBuf> {
+    let fallback = unimux_update::window::temp_webview_root().join(format!("webview2-{}", unimux_core::time::now_ms()));
+    let (chosen, refused) = unimux_platform::webview::choose_folder(&config.webview_dir(), &[fallback]);
+    for e in &refused {
+        log.warn(&format!("WebView2 data folder not usable: {e}"));
+    }
+    if let Some(dir) = &chosen
+        && !refused.is_empty()
+    {
+        log.info(&format!("WebView2 data folder: using {}", dir.display()));
+    }
+    chosen
 }
 
 fn take_lock(path: &Path) -> Option<File> {
@@ -837,7 +872,13 @@ pub fn run(config_path: &Path, context: tauri::Context<tauri::Wry>) -> i32 {
         offscreen: offscreen(),
         born,
         browser_pid: AtomicU32::new(0),
+        webview_dir: OnceLock::new(),
     });
+    // Windows only: WKWebView (macOS, U5) keeps its default store, so no folder is created or checked there.
+    #[cfg(windows)]
+    if let Some(dir) = choose_webview_dir(&win.config, &win.log) {
+        let _ = win.webview_dir.set(dir);
+    }
     // The supervision first: the update must not depend on WebView2 starting or the page loading.
     let supervisor = {
         let me = win.clone();
@@ -860,7 +901,9 @@ pub fn run(config_path: &Path, context: tauri::Context<tauri::Wry>) -> i32 {
         ])
         .setup(move |app| {
             let _ = setup.app.set(app.handle().clone());
-            if let Err(e) = create_window(app.handle(), &setup) {
+            if cfg!(windows) && setup.webview_dir.get().is_none() {
+                setup.log.error("no usable WebView2 data folder: no window; the update goes on without it");
+            } else if let Err(e) = create_window(app.handle(), &setup) {
                 setup.log.error(&format!("update window could not be created ({e}); the update goes on without it"));
             }
             Ok(())

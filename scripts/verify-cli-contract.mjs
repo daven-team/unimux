@@ -3,13 +3,17 @@
 // arity: a flag that became variadic swallows the prompt after it (1.1.3: `--mcp-config <configs...>` took the task for a
 // config file). Then it asks Codex how it understands the very -c overrides a Codex cell gets (`codex mcp get unimux --json`).
 // Scratch CLAUDE_CONFIG_DIR and CODEX_HOME: nothing reads or writes the user's ~/.claude or ~/.codex, no model is called.
+// The line comes from the app under test: the Tauri check build (`unimux --launch-line`, P4; npm run build:check), or with
+// MC_APP_TARGET=electron the TS reference (src/shared/profiles.ts). A release gate (scripts/release.mjs).
 // Usage: node scripts/verify-cli-contract.mjs   (a CLI that is not installed is skipped with a note)
-import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
+import { APP_TARGET, BlockedError, appBinary, isTauri } from './real-app.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'unimux-cli-contract-'));
 const run = (file, args, env) => new Promise((done) => {
@@ -40,6 +44,27 @@ function expectFlags(cli, help, expected) {
     else if (got !== want) failures.push(`${cli}: ${flag} takes ${got} value(s) now, unimux expects ${want}`);
     else report.push(`${cli} ${flag}: ${got}`);
   }
+}
+
+/**
+ * The launch line of a cell as the app under test builds it: the Tauri check build answers `--launch-line` (P4 ports the
+ * builder; until then it says MC_NOT_YET and this check is blocked by P4), the Electron target uses the TS reference.
+ */
+function launchLine(profile, opts, reference) {
+  if (!isTauri) return reference(profile, opts);
+  let out;
+  try {
+    out = execFileSync(appBinary(), ['--launch-line', JSON.stringify({ profile, opts })], { encoding: 'utf8', windowsHide: true, timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (error) { out = String(error.stdout ?? ''); }
+  let answer;
+  try { answer = JSON.parse(out.trim().split(/\r?\n/).at(-1)); } catch { failures.push(`--launch-line did not answer JSON: ${out.slice(0, 300)}`); return null; }
+  if (answer.error === 'MC_NOT_YET') {
+    new BlockedError(answer.owner ?? 'P4', 'launch-line');
+    failures.push(`codex: the launch line of the ${APP_TARGET} build is not available yet (${answer.owner ?? 'P4'})`);
+    return null;
+  }
+  if (typeof answer.line !== 'string') { failures.push(`--launch-line: ${out.slice(0, 300)}`); return null; }
+  return answer.line;
 }
 
 try {
@@ -73,13 +98,13 @@ try {
 
     // The overrides exactly as a Codex cell gets them (bash quoting, split back into arguments).
     const url = 'http://127.0.0.1:65000/mcp';
-    const line = buildCliCommand({ id: 'codex', name: 'Codex', cli: 'codex', args: '' }, { mode: 'new', shell: 'bash', mcp: { url, tokenEnv: 'UNIMUX_MCP_TOKEN' } });
-    const words = [...line.matchAll(/'((?:[^']|'"'"')*)'|(\S+)/g)].map((m) => (m[1] !== undefined ? m[1].replace(/'"'"'/g, "'") : m[2])).slice(1);
+    const line = launchLine({ id: 'codex', name: 'Codex', cli: 'codex', args: '' }, { mode: 'new', shell: 'bash', mcp: { url, tokenEnv: 'UNIMUX_MCP_TOKEN' } }, buildCliCommand);
+    const words = line === null ? [] : [...line.matchAll(/'((?:[^']|'"'"')*)'|(\S+)/g)].map((m) => (m[1] !== undefined ? m[1].replace(/'"'"'/g, "'") : m[2])).slice(1);
     const overrides = [];
     for (let i = 0; i < words.length; i++) if (words[i] === '-c' && words[i + 1]?.startsWith('mcp_servers.')) overrides.push('-c', words[++i]);
-    const get = await run('codex', [...overrides, 'mcp', 'get', 'unimux', '--json'], codexEnv);
+    const get = line === null ? null : await run('codex', [...overrides, 'mcp', 'get', 'unimux', '--json'], codexEnv);
     let server;
-    try { server = JSON.parse(get.stdout.slice(get.stdout.indexOf('{'))); } catch { failures.push(`codex mcp get unimux --json did not answer JSON: ${(get.stdout + get.stderr).trim().slice(0, 300)}`); }
+    if (get) try { server = JSON.parse(get.stdout.slice(get.stdout.indexOf('{'))); } catch { failures.push(`codex mcp get unimux --json did not answer JSON: ${(get.stdout + get.stderr).trim().slice(0, 300)}`); }
     if (server) {
       const text = JSON.stringify(server);
       if (!text.includes(url)) failures.push(`codex mcp get: url not taken from -c (${text.slice(0, 300)})`);
@@ -91,7 +116,7 @@ try {
 } catch (error) {
   failures.push(String(error?.stack ?? error));
 } finally {
-  rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  removeScratch(root);
 }
 console.log(report.join('\n'));
 for (const warning of warnings) console.warn(`WARNING: ${warning}`);

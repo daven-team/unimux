@@ -1,4 +1,4 @@
-// Real-app check (npm run build first): workers a coordinator creates with create_grid start in the background with their
+// Real-app check (npm run build:check first; MC_APP_TARGET=electron: npm run build): workers a coordinator creates with create_grid start in the background with their
 // task, exactly once, and showing their grid later does not start them again without it. Scratch data dir and home, a
 // stand-in `claude` that records every start (its arguments, with the prompt when one came along) and stays running.
 // Shell: Windows PowerShell (the `pwsh` kind without PowerShell 7 installed), so the prompt goes through Get-Content.
@@ -10,11 +10,11 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import electron from 'electron';
 import { removeScratch, scratchHome, scrubAppEnv } from './app-env.mjs';
+import { isMainPage, requireBuild, spawnApp } from './real-app.mjs';
 
 if (process.platform !== 'win32') { console.log('skip: Windows only'); process.exit(0); }
-if (!existsSync(join(process.cwd(), 'out/main/index.js'))) throw new Error('Build first: npm run build');
+requireBuild();
 const root = mkdtempSync(join(tmpdir(), 'unimux-team-start-'));
 const data = join(root, 'data'), agents = join(root, 'fake-agents'), project = join(root, 'project');
 for (const dir of [data, agents, project]) mkdirSync(dir, { recursive: true });
@@ -59,7 +59,7 @@ const sys = process.env.SystemRoot ?? 'C:\\Windows';
 const env = { ...scrubAppEnv({ ...process.env }), ...home.env, MC_DATA_DIR: data, MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port), MC_CLI_NO_REGISTRY: '1',
   PATH: [agents, join(sys, 'System32'), sys, join(sys, 'System32', 'WindowsPowerShell', 'v1.0')].join(delimiter) };
 delete env.Path;
-const child = spawn(electron, ['.'], { cwd: process.cwd(), env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+const child = spawnApp({ cwd: process.cwd(), env, stdio: ['ignore', 'pipe', 'pipe'] });
 let output = '';
 child.stdout.on('data', (d) => { output += d; });
 child.stderr.on('data', (d) => { output += d; });
@@ -73,7 +73,7 @@ const startLines = () => readdirSync(starts).map((f) => ({ f, t: statSync(join(s
 let socket, client, failed = false;
 const check = (ok, line) => { console.log(`${ok ? 'OK  ' : 'FAIL'} ${line}`); if (!ok) failed = true; };
 try {
-  const target = await until(async () => { try { return (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === 'page'); } catch { return null; } }, 'debugger');
+  const target = await until(async () => { try { return (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(isMainPage); } catch { return null; } }, 'debugger');
   socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((r) => socket.addEventListener('open', r, { once: true }));
   let n = 0; const pending = new Map();

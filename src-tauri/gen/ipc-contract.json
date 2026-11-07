@@ -2558,16 +2558,16 @@
    "call": "t.invoke('fs:pathKinds', paths)"
   },
   {
-   "path": "pathForFile",
+   "path": "pathsForFiles",
    "kind": "sync",
    "params": [
     {
-     "name": "file",
-     "type": "File",
+     "name": "files",
+     "type": "File[]",
      "optional": false
     }
    ],
-   "returns": "string"
+   "returns": "Promise<string[]>"
   },
   {
    "path": "listProjectDirectory",
@@ -2662,7 +2662,7 @@
     }
    ],
    "returns": "Promise<ProjectFilePreview>",
-   "call": "t.invoke('fs:readProjectFile', projectId, path, large)"
+   "call": "withImageDataUrl(t.invoke('fs:readProjectFile', projectId, path, large))"
   },
   {
    "path": "statProjectFile",
@@ -5381,7 +5381,7 @@
     }
    ],
    "returns": "Promise<ProjectFilePreview>",
-   "call": "t.invoke('local:readFile', path)"
+   "call": "withImageDataUrl(t.invoke('local:readFile', path))"
   },
   {
    "path": "localFs.statFile",

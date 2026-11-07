@@ -57,7 +57,7 @@ tauri = { version = "=2.12.5", default-features = false, features = ["wry", "com
 tauri-build = { version = "=2.7.4", default-features = false }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "process"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = { version = "1.0.154", features = ["preserve_order", "float_roundtrip"] }
+serde_json = { version = "1.0.154", features = ["preserve_order", "float_roundtrip", "unbounded_depth"] }
 thiserror = "2.0.21"
 parking_lot = "0.13.0"
 uuid = { version = "1.29.0", features = ["v4"] }
@@ -68,10 +68,15 @@ interprocess = "2.4.7"
 process-wrap = { version = "10.0.1", default-features = false, features = ["std", "job-object", "process-group", "kill-on-drop"] }
 junction = "2.1.0"
 dunce = "1.0.5"
+# W3: the one-time read of 1.1.x's localStorage (Chromium leveldb, snappy tables).
+rusty-leveldb = { version = "4.0.2", default-features = false, features = ["fs"] }
 sha2 = "0.11.1"
 base64 = "0.23.1"
 futures = "0.3"
 tempfile = "3"
+# M1 (MCP argument checks), G1 (the JS regexes of the git module: redactSecrets, SCRUBBED_ENV; JS semantics spelled out in the
+# patterns) and S2 (the ssh2 key-format regexes).
+regex = "1.13.1"
 windows = "0.62.2"
 libc = "0.2"
 webview2-com = "0.39.1"
@@ -81,6 +86,11 @@ sha1 = "0.11.0"
 zeroize = "1.9.1"
 getrandom = "0.4.3"
 security-framework = "3.7.0"
+# macOS window chrome / App Nap / WebKit text substitutions / editing actions (W2): the versions tao and wry already use.
+# W6 (macOS lifecycle: power-off notification, applicationShouldTerminate) adds its features in unimux-platform.
+objc2 = "=0.6.5"
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSDictionary", "NSValue", "NSProcessInfo", "NSUserDefaults", "NSObject"] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSPasteboard", "NSGraphics"] }
 # SP7: ring backend (same provider as rustls), no aws-lc-sys build; "des" is not needed (3des-cbc is not in 1.1.4's offer).
 russh = { version = "=0.65.1", default-features = false, features = ["ring", "rsa", "flate2"] }
 # The ssh-key russh pins; "tdes" adds 3des-cbc OpenSSH key files (1.1.4 reads them). SP7.
@@ -93,14 +103,16 @@ des = "=0.9.0"
 md5 = "=0.8.1"
 ctr = "=0.10.1"
 blowfish = "=0.10.0"
-# SP8 (MCP wire): the custom dispatcher's HTTP stack; rmcp only for the spike comparison (examples, not shipped).
+# S2: keys generated from the OS RNG (getrandom's SysRng through rand_core 0.10, the version ssh-key uses); the ssh2
+# key-format regexes use the workspace regex (leftmost-first matching gives the same groups as the JS engine).
+rand_core = "=0.10.1"
+# M1 (MCP server, decided in SP8): hyper http1 served directly; axum stays for the hooks server. rmcp dropped in M1.
 axum = { version = "0.8.9", default-features = false, features = ["tokio", "http1"] }
 hyper = { version = "1.12.0", features = ["server", "http1"] }
 hyper-util = { version = "0.1.21", features = ["tokio", "service"] }
 http-body-util = "0.1.5"
 bytes = "1.12.1"
 tokio-util = "0.7.20"
-rmcp = { version = "3.9.0", default-features = false, features = ["server", "transport-streamable-http-server", "elicitation"] }
 postgres-protocol = "0.6.12"
 mysql_common = { version = "0.38.2", default-features = false }
 # dev-dependency of unimux-db only (SP9 measured its gaps; the app uses an own RESP2 client)
@@ -108,6 +120,36 @@ redis = { version = "1.8.1", default-features = false, features = ["tokio-comp"]
 fallible-iterator = "0.2.0"
 # mysql_common needs one flate2 backend: the pure Rust one (no C zlib build).
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# B3 (unimux-net): an own HTTP client on hyper's connection API, because reqwest 0.13 always adds `Accept: */*` and the token
+# renewal must put exactly the given headers on the wire. TLS: rustls with the ring provider and the OS trust store
+# (rustls-platform-verifier, like Chromium's system verifier). rcgen only in the tests (self-signed server certificates).
+http = "1.5.0"
+url = "2.5.8"
+tower-service = "0.3.3"
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+rustls-platform-verifier = "0.7.1"
+core-foundation = "0.10.1"
+core-foundation-sys = "0.8.7"
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+# W4 (notifications, dialogs, clipboard, shell): rfd is what tauri-plugin-dialog wraps (no plugin: the renderer never opens
+# dialogs itself), trash is Electron's shell.trashItem, url the WHATWG parser of openExternal, objc2-* the macOS APIs.
+rfd = { version = "0.17.2", default-features = false, features = ["common-controls-v6"] }
+trash = "5.3.0"
+block2 = "0.6.2"
+objc2-user-notifications = "0.3.2"
+# G5: the file tree's name order (Intl.Collator('pl', {numeric, sensitivity: 'base'})) and TextDecoder's fatal decode.
+icu_collator = "2.4.0"
+icu_locale_core = "2.4.0"
+encoding_rs = "0.8.44"
+# G5: the Parquet table preview (1.1.4 hyparquet + hyparquet-compressors: snappy, gzip, brotli, zstd, lz4, lz4_raw); no arrow.
+parquet = { version = "60.1.0", default-features = false, features = ["snap", "brotli", "flate2-rust_backend", "lz4", "zstd"] }
+# H5 (conversation search): byte prefilters and UTF-16 substring search, the insertion-ordered index, NFD for fold().
+memchr = "2.8.3"
+indexmap = "2.14.2"
+unicode-normalization = "0.1.26"
+# H5: the index keeps its stat / read workers between passes (a thread start per pass and file was most of a rescan).
+rayon-core = "1.13.0"
 
 [profile.release]
 lto = "thin"

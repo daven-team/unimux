@@ -9,4 +9,15 @@ license.workspace = true
 [dependencies]
 unimux-core.workspace = true
 unimux-ipc.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+getrandom.workspace = true
+dunce.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+futures.workspace = true

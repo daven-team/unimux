@@ -101,8 +101,12 @@ export interface McApi {
   pathExists(path: string): Promise<boolean>;
   /** Folder, file or gone, for absolute paths (files dropped from the system file manager). */
   pathKinds(paths: string[]): Promise<Array<'dir' | 'file' | null>>;
-  /** The absolute path of a File from a drop ('' when it has none). */
-  pathForFile(file: File): string;
+  /**
+   * The absolute paths of Files from a drop, in their order ('' for one without a path). Asynchronous since 1.2.0: the Tauri
+   * webviews give a File no path, the host answers on the side (src-tauri file_drop.rs). Read the Files out of the
+   * DataTransfer before awaiting: it is emptied once the drop event returns.
+   */
+  pathsForFiles(files: File[]): Promise<string[]>;
   listProjectDirectory(projectId: string, relativePath?: string): Promise<ProjectDirectory>;
   /** Listings of many folders at once (empty when the project is gone). */
   listProjectDirectoryBatch(projectId: string, relativePaths: string[]): Promise<Record<string, ProjectDirectory>>;

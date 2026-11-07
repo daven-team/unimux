@@ -1,0 +1,109 @@
+{"name":"plain.txt","prefix":"","padA":0,"bytes":"Q3plxZvEhywgxZt3aWVjaWUhCg==","large":false,"out":{"kind":"text","text":"Cześć, świecie!\n","size":19,"truncated":false}}
+{"name":"bom.txt","prefix":"","padA":0,"bytes":"77u/eiBCT00NCg==","large":false,"out":{"kind":"text","text":"z BOM\r\n","size":10,"truncated":false}}
+{"name":"bom-only.txt","prefix":"","padA":0,"bytes":"77u/","large":false,"out":{"kind":"text","text":"","size":3,"truncated":false}}
+{"name":"double-bom.txt","prefix":"","padA":0,"bytes":"77u/77u/eA==","large":false,"out":{"kind":"text","text":"﻿x","size":7,"truncated":false}}
+{"name":"empty.txt","prefix":"","padA":0,"bytes":"","large":false,"out":{"kind":"text","text":"","size":0,"truncated":false}}
+{"name":"u16le.txt","prefix":"","padA":0,"bytes":"//5QAG8AbABzAGsAaQBlACAAegBuAGEAawBpADoAIAAFARkBBwEgAD3YAN4KAA==","large":false,"out":{"kind":"text","text":"Polskie znaki: ąęć 😀\n","size":46,"truncated":false}}
+{"name":"u16be.txt","prefix":"","padA":0,"bytes":"/v8AQgBpAGcAIABlAG4AZABpAGEAbgAgAXwACg==","large":false,"out":{"kind":"text","text":"Big endian ż\n","size":28,"truncated":false}}
+{"name":"u16-bom-only.txt","prefix":"","padA":0,"bytes":"//4=","large":false,"out":{"kind":"text","text":"","size":2,"truncated":false}}
+{"name":"u16-odd.txt","prefix":"","padA":0,"bytes":"//5hAGI=","large":false,"out":{"kind":"binary","size":5}}
+{"name":"u16-lone-high.txt","prefix":"","padA":0,"bytes":"//5hAD3YYgA=","large":false,"out":{"kind":"binary","size":8}}
+{"name":"u16-lone-low.txt","prefix":"","padA":0,"bytes":"//4A3mIA","large":false,"out":{"kind":"binary","size":6}}
+{"name":"u16-high-at-end.txt","prefix":"","padA":0,"bytes":"//5hAD3Y","large":false,"out":{"kind":"binary","size":6}}
+{"name":"u16-control.txt","prefix":"","padA":0,"bytes":"//5hAAEAYgA=","large":false,"out":{"kind":"binary","size":8}}
+{"name":"u16-nul.txt","prefix":"","padA":0,"bytes":"//5hAAAAYgA=","large":false,"out":{"kind":"binary","size":8}}
+{"name":"nul.bin","prefix":"","padA":0,"bytes":"YQBi","large":false,"out":{"kind":"binary","size":3}}
+{"name":"overlong.txt","prefix":"","padA":0,"bytes":"YcCA","large":false,"out":{"kind":"binary","size":3}}
+{"name":"surrogate-utf8.txt","prefix":"","padA":0,"bytes":"Ye2ggA==","large":false,"out":{"kind":"binary","size":4}}
+{"name":"above-max.txt","prefix":"","padA":0,"bytes":"9JCAgA==","large":false,"out":{"kind":"binary","size":4}}
+{"name":"f8.txt","prefix":"","padA":0,"bytes":"+IiAgIA=","large":false,"out":{"kind":"binary","size":5}}
+{"name":"cut-in-middle.txt","prefix":"","padA":0,"bytes":"YcRi","large":false,"out":{"kind":"binary","size":3}}
+{"name":"cut-at-end.txt","prefix":"","padA":0,"bytes":"YcQ=","large":false,"out":{"kind":"binary","size":2}}
+{"name":"latin1.txt","prefix":"","padA":0,"bytes":"erNvdHk=","large":false,"out":{"kind":"binary","size":5}}
+{"name":"ctl-1.txt","prefix":"","padA":0,"bytes":"YQFi","large":false,"out":{"kind":"binary","size":3}}
+{"name":"ctl-7.txt","prefix":"","padA":0,"bytes":"YQdi","large":false,"out":{"kind":"binary","size":3}}
+{"name":"ctl-8.txt","prefix":"","padA":0,"bytes":"YQhi","large":false,"out":{"kind":"binary","size":3}}
+{"name":"ctl-9.txt","prefix":"","padA":0,"bytes":"YQli","large":false,"out":{"kind":"text","text":"a\tb","size":3,"truncated":false}}
+{"name":"ctl-a.txt","prefix":"","padA":0,"bytes":"YQpi","large":false,"out":{"kind":"text","text":"a\nb","size":3,"truncated":false}}
+{"name":"ctl-b.txt","prefix":"","padA":0,"bytes":"YQti","large":false,"out":{"kind":"text","text":"a\u000bb","size":3,"truncated":false}}
+{"name":"ctl-c.txt","prefix":"","padA":0,"bytes":"YQxi","large":false,"out":{"kind":"text","text":"a\fb","size":3,"truncated":false}}
+{"name":"ctl-d.txt","prefix":"","padA":0,"bytes":"YQ1i","large":false,"out":{"kind":"text","text":"a\rb","size":3,"truncated":false}}
+{"name":"ctl-e.txt","prefix":"","padA":0,"bytes":"YQ5i","large":false,"out":{"kind":"binary","size":3}}
+{"name":"ctl-1b.txt","prefix":"","padA":0,"bytes":"YRti","large":false,"out":{"kind":"binary","size":3}}
+{"name":"ctl-1f.txt","prefix":"","padA":0,"bytes":"YR9i","large":false,"out":{"kind":"binary","size":3}}
+{"name":"ctl-7f.txt","prefix":"","padA":0,"bytes":"YX9i","large":false,"out":{"kind":"text","text":"ab","size":3,"truncated":false}}
+{"name":"c1.txt","prefix":"","padA":0,"bytes":"YcKFYsKbYw==","large":false,"out":{"kind":"text","text":"abc","size":7,"truncated":false}}
+{"name":"ok-controls.txt","prefix":"","padA":0,"bytes":"dGFiCXZ0C2ZmDGNyDQo=","large":false,"out":{"kind":"text","text":"tab\tvt\u000bff\fcr\r\n","size":14,"truncated":false}}
+{"name":"pic.png","prefix":"","padA":0,"bytes":"iVBORw0KGgoAAQ==","large":false,"out":{"kind":"binary","size":10}}
+{"name":"PIC.JPEG","prefix":"","padA":0,"bytes":"/9j/4AA=","large":false,"out":{"kind":"binary","size":5}}
+{"name":"x.jpg","prefix":"","padA":0,"bytes":"bm90IHJlYWxseSBhbiBpbWFnZQ==","large":false,"out":{"kind":"text","text":"not really an image","size":19,"truncated":false}}
+{"name":"x.gif","prefix":"","padA":0,"bytes":"bm90IHJlYWxseSBhbiBpbWFnZQ==","large":false,"out":{"kind":"text","text":"not really an image","size":19,"truncated":false}}
+{"name":"x.webp","prefix":"","padA":0,"bytes":"bm90IHJlYWxseSBhbiBpbWFnZQ==","large":false,"out":{"kind":"text","text":"not really an image","size":19,"truncated":false}}
+{"name":"x.bmp","prefix":"","padA":0,"bytes":"bm90IHJlYWxseSBhbiBpbWFnZQ==","large":false,"out":{"kind":"text","text":"not really an image","size":19,"truncated":false}}
+{"name":"x.ico","prefix":"","padA":0,"bytes":"bm90IHJlYWxseSBhbiBpbWFnZQ==","large":false,"out":{"kind":"text","text":"not really an image","size":19,"truncated":false}}
+{"name":"x.avif","prefix":"","padA":0,"bytes":"bm90IHJlYWxseSBhbiBpbWFnZQ==","large":false,"out":{"kind":"text","text":"not really an image","size":19,"truncated":false}}
+{"name":"x.svg","prefix":"","padA":0,"bytes":"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=","large":false,"out":{"kind":"text","text":"<svg xmlns=\"http://www.w3.org/2000/svg\"/>","size":41,"truncated":false}}
+{"name":"Makefile","prefix":"","padA":0,"bytes":"YWxsOgoJZWNobyBvawo=","large":false,"out":{"kind":"text","text":"all:\n\techo ok\n","size":14,"truncated":false}}
+{"name":"cut-2byte.txt","prefix":"","padA":262143,"bytes":"xIV0YWls","large":false,"out":{"kind":"text","size":262149,"truncated":true,"textAfterPad":""}}
+{"name":"cut-3byte.txt","prefix":"","padA":262142,"bytes":"4oKsdGFpbA==","large":false,"out":{"kind":"text","size":262149,"truncated":true,"textAfterPad":""}}
+{"name":"cut-3byte-b.txt","prefix":"","padA":262143,"bytes":"4oKsdGFpbA==","large":false,"out":{"kind":"text","size":262150,"truncated":true,"textAfterPad":""}}
+{"name":"cut-4byte.txt","prefix":"","padA":262141,"bytes":"8J+YgHRhaWw=","large":false,"out":{"kind":"text","size":262149,"truncated":true,"textAfterPad":""}}
+{"name":"cut-4byte-b.txt","prefix":"","padA":262143,"bytes":"8J+YgHRhaWw=","large":false,"out":{"kind":"text","size":262151,"truncated":true,"textAfterPad":""}}
+{"name":"fits.txt","prefix":"","padA":262142,"bytes":"xIU=","large":false,"out":{"kind":"text","size":262144,"truncated":false,"textAfterPad":"ą"}}
+{"name":"exact.txt","prefix":"","padA":262143,"bytes":"Yg==","large":false,"out":{"kind":"text","size":262144,"truncated":false,"textAfterPad":"b"}}
+{"name":"one-more.txt","prefix":"","padA":262143,"bytes":"YmM=","large":false,"out":{"kind":"text","size":262145,"truncated":true,"textAfterPad":"b"}}
+{"name":"bad-before-cut.txt","prefix":"","padA":262139,"bytes":"wyhhYQ==","large":false,"out":{"kind":"binary","size":262143}}
+{"name":"nul-after-cut.txt","prefix":"","padA":262143,"bytes":"YQA=","large":false,"out":{"kind":"text","size":262145,"truncated":true,"textAfterPad":"a"}}
+{"name":"ctl-after-cut.txt","prefix":"","padA":262143,"bytes":"YQE=","large":false,"out":{"kind":"text","size":262145,"truncated":true,"textAfterPad":"a"}}
+{"name":"img-small-view.png","prefix":"","padA":10,"bytes":"iVBORw==","large":false,"out":{"kind":"binary","size":14}}
+{"name":"big-small.txt","prefix":"","padA":263144,"bytes":"ZW5k","large":false,"out":{"kind":"text","size":263147,"truncated":true,"textAfterPad":""}}
+{"name":"plain.txt","prefix":"","padA":0,"bytes":"Q3plxZvEhywgxZt3aWVjaWUhCg==","large":true,"out":{"kind":"text","text":"Cześć, świecie!\n","size":19,"truncated":false}}
+{"name":"bom.txt","prefix":"","padA":0,"bytes":"77u/eiBCT00NCg==","large":true,"out":{"kind":"text","text":"z BOM\r\n","size":10,"truncated":false}}
+{"name":"bom-only.txt","prefix":"","padA":0,"bytes":"77u/","large":true,"out":{"kind":"text","text":"","size":3,"truncated":false}}
+{"name":"double-bom.txt","prefix":"","padA":0,"bytes":"77u/77u/eA==","large":true,"out":{"kind":"text","text":"﻿x","size":7,"truncated":false}}
+{"name":"empty.txt","prefix":"","padA":0,"bytes":"","large":true,"out":{"kind":"text","text":"","size":0,"truncated":false}}
+{"name":"u16le.txt","prefix":"","padA":0,"bytes":"//5QAG8AbABzAGsAaQBlACAAegBuAGEAawBpADoAIAAFARkBBwEgAD3YAN4KAA==","large":true,"out":{"kind":"text","text":"Polskie znaki: ąęć 😀\n","size":46,"truncated":false}}
+{"name":"u16be.txt","prefix":"","padA":0,"bytes":"/v8AQgBpAGcAIABlAG4AZABpAGEAbgAgAXwACg==","large":true,"out":{"kind":"text","text":"Big endian ż\n","size":28,"truncated":false}}
+{"name":"u16-bom-only.txt","prefix":"","padA":0,"bytes":"//4=","large":true,"out":{"kind":"text","text":"","size":2,"truncated":false}}
+{"name":"u16-odd.txt","prefix":"","padA":0,"bytes":"//5hAGI=","large":true,"out":{"kind":"binary","size":5}}
+{"name":"u16-lone-high.txt","prefix":"","padA":0,"bytes":"//5hAD3YYgA=","large":true,"out":{"kind":"binary","size":8}}
+{"name":"u16-lone-low.txt","prefix":"","padA":0,"bytes":"//4A3mIA","large":true,"out":{"kind":"binary","size":6}}
+{"name":"u16-high-at-end.txt","prefix":"","padA":0,"bytes":"//5hAD3Y","large":true,"out":{"kind":"binary","size":6}}
+{"name":"u16-control.txt","prefix":"","padA":0,"bytes":"//5hAAEAYgA=","large":true,"out":{"kind":"binary","size":8}}
+{"name":"u16-nul.txt","prefix":"","padA":0,"bytes":"//5hAAAAYgA=","large":true,"out":{"kind":"binary","size":8}}
+{"name":"nul.bin","prefix":"","padA":0,"bytes":"YQBi","large":true,"out":{"kind":"binary","size":3}}
+{"name":"overlong.txt","prefix":"","padA":0,"bytes":"YcCA","large":true,"out":{"kind":"binary","size":3}}
+{"name":"surrogate-utf8.txt","prefix":"","padA":0,"bytes":"Ye2ggA==","large":true,"out":{"kind":"binary","size":4}}
+{"name":"above-max.txt","prefix":"","padA":0,"bytes":"9JCAgA==","large":true,"out":{"kind":"binary","size":4}}
+{"name":"f8.txt","prefix":"","padA":0,"bytes":"+IiAgIA=","large":true,"out":{"kind":"binary","size":5}}
+{"name":"cut-in-middle.txt","prefix":"","padA":0,"bytes":"YcRi","large":true,"out":{"kind":"binary","size":3}}
+{"name":"cut-at-end.txt","prefix":"","padA":0,"bytes":"YcQ=","large":true,"out":{"kind":"binary","size":2}}
+{"name":"latin1.txt","prefix":"","padA":0,"bytes":"erNvdHk=","large":true,"out":{"kind":"binary","size":5}}
+{"name":"ctl-1.txt","prefix":"","padA":0,"bytes":"YQFi","large":true,"out":{"kind":"binary","size":3}}
+{"name":"ctl-7.txt","prefix":"","padA":0,"bytes":"YQdi","large":true,"out":{"kind":"binary","size":3}}
+{"name":"ctl-8.txt","prefix":"","padA":0,"bytes":"YQhi","large":true,"out":{"kind":"binary","size":3}}
+{"name":"ctl-9.txt","prefix":"","padA":0,"bytes":"YQli","large":true,"out":{"kind":"text","text":"a\tb","size":3,"truncated":false}}
+{"name":"ctl-a.txt","prefix":"","padA":0,"bytes":"YQpi","large":true,"out":{"kind":"text","text":"a\nb","size":3,"truncated":false}}
+{"name":"ctl-b.txt","prefix":"","padA":0,"bytes":"YQti","large":true,"out":{"kind":"text","text":"a\u000bb","size":3,"truncated":false}}
+{"name":"ctl-c.txt","prefix":"","padA":0,"bytes":"YQxi","large":true,"out":{"kind":"text","text":"a\fb","size":3,"truncated":false}}
+{"name":"ctl-d.txt","prefix":"","padA":0,"bytes":"YQ1i","large":true,"out":{"kind":"text","text":"a\rb","size":3,"truncated":false}}
+{"name":"ctl-e.txt","prefix":"","padA":0,"bytes":"YQ5i","large":true,"out":{"kind":"binary","size":3}}
+{"name":"ctl-1b.txt","prefix":"","padA":0,"bytes":"YRti","large":true,"out":{"kind":"binary","size":3}}
+{"name":"ctl-1f.txt","prefix":"","padA":0,"bytes":"YR9i","large":true,"out":{"kind":"binary","size":3}}
+{"name":"ctl-7f.txt","prefix":"","padA":0,"bytes":"YX9i","large":true,"out":{"kind":"text","text":"ab","size":3,"truncated":false}}
+{"name":"c1.txt","prefix":"","padA":0,"bytes":"YcKFYsKbYw==","large":true,"out":{"kind":"text","text":"abc","size":7,"truncated":false}}
+{"name":"ok-controls.txt","prefix":"","padA":0,"bytes":"dGFiCXZ0C2ZmDGNyDQo=","large":true,"out":{"kind":"text","text":"tab\tvt\u000bff\fcr\r\n","size":14,"truncated":false}}
+{"name":"pic.png","prefix":"","padA":0,"bytes":"iVBORw0KGgoAAQ==","large":true,"out":{"kind":"image","mime":"image/png","dataUrl":"data:image/png;base64,iVBORw0KGgoAAQ==","size":10}}
+{"name":"PIC.JPEG","prefix":"","padA":0,"bytes":"/9j/4AA=","large":true,"out":{"kind":"image","mime":"image/jpeg","dataUrl":"data:image/jpeg;base64,/9j/4AA=","size":5}}
+{"name":"x.jpg","prefix":"","padA":0,"bytes":"bm90IHJlYWxseSBhbiBpbWFnZQ==","large":true,"out":{"kind":"image","mime":"image/jpeg","dataUrl":"data:image/jpeg;base64,bm90IHJlYWxseSBhbiBpbWFnZQ==","size":19}}
+{"name":"x.gif","prefix":"","padA":0,"bytes":"bm90IHJlYWxseSBhbiBpbWFnZQ==","large":true,"out":{"kind":"image","mime":"image/gif","dataUrl":"data:image/gif;base64,bm90IHJlYWxseSBhbiBpbWFnZQ==","size":19}}
+{"name":"x.webp","prefix":"","padA":0,"bytes":"bm90IHJlYWxseSBhbiBpbWFnZQ==","large":true,"out":{"kind":"image","mime":"image/webp","dataUrl":"data:image/webp;base64,bm90IHJlYWxseSBhbiBpbWFnZQ==","size":19}}
+{"name":"x.bmp","prefix":"","padA":0,"bytes":"bm90IHJlYWxseSBhbiBpbWFnZQ==","large":true,"out":{"kind":"image","mime":"image/bmp","dataUrl":"data:image/bmp;base64,bm90IHJlYWxseSBhbiBpbWFnZQ==","size":19}}
+{"name":"x.ico","prefix":"","padA":0,"bytes":"bm90IHJlYWxseSBhbiBpbWFnZQ==","large":true,"out":{"kind":"image","mime":"image/x-icon","dataUrl":"data:image/x-icon;base64,bm90IHJlYWxseSBhbiBpbWFnZQ==","size":19}}
+{"name":"x.avif","prefix":"","padA":0,"bytes":"bm90IHJlYWxseSBhbiBpbWFnZQ==","large":true,"out":{"kind":"image","mime":"image/avif","dataUrl":"data:image/avif;base64,bm90IHJlYWxseSBhbiBpbWFnZQ==","size":19}}
+{"name":"x.svg","prefix":"","padA":0,"bytes":"PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=","large":true,"out":{"kind":"text","text":"<svg xmlns=\"http://www.w3.org/2000/svg\"/>","size":41,"truncated":false}}
+{"name":"Makefile","prefix":"","padA":0,"bytes":"YWxsOgoJZWNobyBvawo=","large":true,"out":{"kind":"text","text":"all:\n\techo ok\n","size":14,"truncated":false}}
+{"name":"big-large.txt","prefix":"","padA":263144,"bytes":"ZW5k","large":true,"out":{"kind":"text","size":263147,"truncated":false,"textAfterPad":"end"}}
+{"name":"cut-large.txt","prefix":"","padA":8388607,"bytes":"xIV0YWls","large":true,"out":{"kind":"text","size":8388613,"truncated":true,"textAfterPad":""}}
+{"name":"u16-cut-unit.txt","prefix":"//4=","padA":262141,"bytes":"YgBjAA==","large":false,"out":{"kind":"text","size":262147,"truncated":true,"textLength":131071,"textTail":"慡慡慡扡"}}
+{"name":"u16-cut-pair.txt","prefix":"//4=","padA":262141,"bytes":"AD3YAN4=","large":false,"out":{"kind":"text","size":262148,"truncated":true,"textLength":131071,"textTail":"慡慡慡a"}}

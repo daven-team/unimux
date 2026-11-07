@@ -1,4 +1,4 @@
-// node --experimental-transform-types scripts/pg-fake-server.mjs
+// node --no-warnings scripts/pg-fake-server.mjs   (Node 22/24: add --experimental-transform-types)
 // The small fake Postgres of the tests (test/helpers/pgFakeServer.ts) for real-app checks: trust auth, several backends and a
 // pg_sleep that pg_cancel_backend really stops (PGlite cannot cancel). 127.0.0.1 only. Prints one JSON line {"port","pid"}.
 const { startFakePg } = await import('../test/helpers/pgFakeServer.ts');

@@ -9,4 +9,35 @@ license.workspace = true
 [dependencies]
 unimux-core.workspace = true
 unimux-ipc.workspace = true
+unimux-exec.workspace = true
+serde.workspace = true
+unimux-state.workspace = true
 serde_json.workspace = true
+parking_lot.workspace = true
+getrandom.workspace = true
+futures.workspace = true
+# H1: the hook server (the same HTTP stack as the MCP server, SP8).
+tokio = { workspace = true, features = ["net"] }
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
+# H5: the conversation search.
+memchr.workspace = true
+indexmap.workspace = true
+unicode-normalization.workspace = true
+rayon-core.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_Time", "Win32_Storage_FileSystem"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+base64.workspace = true
+tokio = { workspace = true, features = ["net", "test-util"] }
+
+[[example]]
+name = "conv_bench"

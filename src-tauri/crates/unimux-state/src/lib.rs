@@ -9,14 +9,17 @@
 //! - [`store`]: loadState rules, the debounced saver, `flush_until_saved`.
 //! - [`controller`]: the single writer with revisions, change hooks and a revision watch.
 //! - [`broadcast`]: `state:changed` with 16 ms batching of agent changes.
+//! - [`detached`]: the detached-window registry, cell owners and window placement of shared/detached.ts (W5).
 //! - [`normalize`]: normalizeState / defaultState / the edit normalization of 1.1.4 ([`StateNormalizer`]).
 
 pub mod broadcast;
 pub mod controller;
+pub mod detached;
 pub mod edits;
 pub mod normalize;
 pub mod patch;
 pub mod store;
+pub mod webview_import;
 
 pub use controller::{Snapshot, StateController};
 pub use normalize::{Normalizer, PassThrough, Platform, StateNormalizer};

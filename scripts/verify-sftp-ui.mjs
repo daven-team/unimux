@@ -6,16 +6,17 @@
 // dragstart on the selected source rows (the pane's own handler fills the DataTransfer and remembers the drag), then
 // dragenter/dragover/drop on the target with the same DataTransfer, then dragend. A forged payload without a dragstart behind
 // it (what another app could put under the custom type) is checked to do nothing.
-// The OS drop goes through CDP Input.dispatchDragEvent with real file paths, so the pane reads them with window.mc.pathForFile
+// The OS drop goes through CDP Input.dispatchDragEvent with real file paths, so the pane reads them with window.mc.pathsForFiles
 // (webUtils.getPathForFile in the preload), exactly like a drop from Explorer.
 // 0.9.9 (steps 9b-9e and 12b, screenshots D:\Projekty\_shots\099-*.png): the turning refresh icon, moves by a drag inside each
 // pane (onto a folder row, a path segment and ".."), Cut / Paste, a folder into itself refused, permissions with digits, with the
 // checkboxes and recursively with two values, and SFTP through sudo (NOPASSWD, a sudo password with a wrong first try, three
 // wrong passwords ending in a clear error) against two more local test servers over the same folder.
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ssh2 from 'ssh2';
-import { launchApp, mainInspector, scratchRoot, sleep, startTestServer, testHost, writeState } from './ssh-ui-lib.mjs';
+import { launchApp, scratchRoot, sleep, startTestServer, testHost, writeState } from './ssh-ui-lib.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const shot = (app, name) => app.screenshot(`098-sftp-${name}.png`);
 const shot99 = (name) => app.screenshot(`099-${name}.png`);
@@ -60,11 +61,10 @@ writeState(root, {
 
 let app;
 let main;
-const inspectPort = 9300 + Math.floor(Math.random() * 500);
 const remoteFiles = (dir = home) => readdirSync(dir);
 try {
-  app = await launchApp(root, { MC_TRASH_DIR: trash }, [`--inspect=${inspectPort}`]);
-  main = await mainInspector(inspectPort);
+  app = await launchApp(root, { MC_TRASH_DIR: trash }, [], { main: true });
+  main = app.main;
   await app.cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   const ev = app.evaluate;
   const sftp = `window.__mc.useSftpStore.getState()`;
@@ -302,7 +302,7 @@ try {
   if (existsSync(join(home, 'site')) || existsSync(join(home, 'docs'))) throw new Error('delete left files on the server');
   log('delete OK');
 
-  // 9. A drop from the OS (real file paths through CDP; the pane reads them with window.mc.pathForFile).
+  // 9. A drop from the OS (real file paths through CDP; the pane reads them with window.mc.pathsForFiles).
   const box = await ev(`(() => { const r = document.querySelector('.sftp-pane-remote .sftp-list').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.bottom - 20 }; })()`);
   const data = { items: [], files: [join(local, 'os-drop.txt')], dragOperationsMask: 1 };
   for (const type of ['dragEnter', 'dragOver', 'drop']) await app.cdp('Input.dispatchDragEvent', { type, x: box.x, y: box.y, data });
@@ -573,7 +573,7 @@ try {
   await app.cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await upload(['big.bin']);
   await app.until(`${sftp}.transfers[0]?.state === 'running' && ${sftp}.transfers[0].bytesDone > 0`, 'running before the quit');
-  await main.evaluate(`__el.BrowserWindow.getAllWindows()[0].close(), true`);
+  await main.requestClose();
   await app.until(`document.querySelector('.modal h3')?.textContent === 'Zamknąć aplikację w trakcie transferów?'`, 'quit question about the transfers');
   const quitBody = await ev(`document.querySelector('.modal .modal-body').textContent`);
   if (!quitBody.includes('Transfery w toku: 1.')) throw new Error(`quit question body: ${quitBody}`);
@@ -581,7 +581,7 @@ try {
   const before = await ev(`${sftp}.transfers[0].bytesDone`);
   await dialogChoose('Anuluj');
   await sleep(1500);
-  if ((await main.evaluate(`__el.BrowserWindow.getAllWindows().length`)) !== 1) throw new Error('the window closed after Cancel');
+  if ((await main.windows()).length !== 1) throw new Error('the window closed after Cancel');
   const after = await ev(`${sftp}.transfers[0]`);
   if (!['running', 'done'].includes(after.state) || (after.state === 'running' && after.bytesDone <= before)) throw new Error(`the transfer did not go on after Cancel: ${JSON.stringify({ state: after.state, before, after: after.bytesDone })}`);
   log(`after Cancel the transfer is ${after.state} (${before} -> ${after.bytesDone} bytes)`);
@@ -601,5 +601,5 @@ try {
   sudoServer.stop();
   sudoPwServer.stop();
   await sleep(500);
-  rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
+  removeScratch(root);
 }

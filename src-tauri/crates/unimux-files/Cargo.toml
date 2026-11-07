@@ -6,7 +6,35 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+default = ["parquet"]
+# The Parquet table preview (1.1.4: hyparquet, first 1000 rows). Without it a .parquet file answers 1.1.4's
+# "Nie udało się odczytać pliku Parquet." (the editor's large view only; the small preview never read tables).
+parquet = ["dep:parquet"]
+
 [dependencies]
 unimux-core.workspace = true
 unimux-ipc.workspace = true
 serde_json.workspace = true
+parking_lot.workspace = true
+uuid.workspace = true
+icu_collator.workspace = true
+icu_locale_core.workspace = true
+encoding_rs.workspace = true
+ryu-js.workspace = true
+parquet = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+junction.workspace = true
+base64.workspace = true
+
+[[example]]
+name = "parquet_fixtures"
+required-features = ["parquet"]

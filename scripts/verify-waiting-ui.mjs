@@ -6,15 +6,15 @@
 // reaching the main window's list, a click on a finished turn (it is read and leaves the list), the next / previous
 // shortcut (also into the detached window), the palette and "Ukryj wyciszone". Screenshots go to argv[2] (default: a temp dir).
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
-import electron from 'electron';
 import { removeScratch, scrubAppEnv } from './app-env.mjs';
 import { killTree, sleep } from './ssh-ui-lib.mjs';
+import { isMainPage, requireBuild, spawnApp } from './real-app.mjs';
 
 const checkout = process.cwd();
-if (!existsSync(join(checkout, 'out/main/index.js'))) throw new Error('Build first: npm run build');
+requireBuild(checkout);
 const port = Number(process.env.MC_DEBUG_PORT ?? 9418);
 const root = mkdtempSync(join(tmpdir(), 'unimux-waiting-'));
 const shots = resolve(process.argv[2] ?? join(root, 'shots'));
@@ -80,7 +80,7 @@ const env = { ...process.env, MC_DATA_DIR: data, MC_OFFSCREEN: '1', MC_DEBUG_POR
 scrubAppEnv(env);
 const pathKey = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
 env[pathKey] = `${bin}${delimiter}${env[pathKey] ?? ''}`;
-const child = spawn(electron, ['.'], { cwd: checkout, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+const child = spawnApp({ cwd: checkout, env, stdio: ['ignore', 'pipe', 'pipe'] });
 let log = '';
 child.stdout.on('data', (d) => { log = (log + d).slice(-6000); });
 child.stderr.on('data', (d) => { log = (log + d).slice(-6000); });
@@ -134,7 +134,7 @@ const pressStep = (app, dir) => (async () => {
 
 let main, side;
 try {
-  main = await connect((url) => url.includes('index.html') && !url.includes('detached='));
+  main = await connect((url) => isMainPage({ type: 'page', url }));
   await main.cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 860, deviceScaleFactor: 1, mobile: false });
   await main.until(`!!window.__mc && document.querySelectorAll('.cell').length === 4`, 'the Agenci grid');
   await main.until(`(() => { const w = ${store}.ui.waits; return ['${ids.perm}', '${ids.ask}', '${ids.done}', '${ids.fail}', '${ids.quiet}'].every((id) => w[id]); })()`, 'all five cells wait', 40000);

@@ -1,4 +1,4 @@
-// Real-app check of worktree removal safety and editor tabs whose file changed on disk (npm run build first), on a scratch
+// Real-app check of worktree removal safety and editor tabs whose file changed on disk (npm run build:check first; MC_APP_TARGET=electron: npm run build), on a scratch
 // git repository and a scratch data dir:
 // - closing a worktree cell whose worktree has an uncommitted file and an unmerged commit shows both counts and asks twice;
 //   "Remove anyway" then removes the folder and the branch;

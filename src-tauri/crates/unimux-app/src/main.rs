@@ -11,7 +11,14 @@ mod caption_test;
 mod channel_bench;
 mod commands;
 mod context;
+mod detached;
+#[cfg(feature = "test-bridge")]
+mod eval_bridge;
+mod file_drop;
+mod hooks;
 mod ipc;
+mod lifecycle;
+mod mac_chrome;
 #[cfg(feature = "test-bridge")]
 mod spike_pty;
 #[cfg(feature = "test-bridge")]
@@ -19,7 +26,10 @@ mod spike_windows;
 mod startup;
 #[cfg(feature = "test-bridge")]
 mod test_bridge;
+#[cfg(feature = "test-bridge")]
+mod test_record;
 mod update_window;
+mod webview_import;
 mod windows;
 
 /// The Tauri context (config, embedded frontend, capabilities). Expanded once: the app and the update window mode share it,
@@ -90,6 +100,15 @@ fn main() {
     if std::env::args().any(|a| a == "--ipc-routes") && !unimux_core::PACKAGED {
         std::process::exit(print_routes());
     }
+    // Check build: `--launch-line <json>` prints the launch line of a cell for scripts/verify-cli-contract.mjs (P4), and never
+    // starts the app (an unknown flag would).
+    #[cfg(feature = "test-bridge")]
+    if let Some(code) = test_bridge::launch_line_cli() {
+        std::process::exit(code);
+    }
+
+    // A relaunch (a start during the last wind-down) waits for the old process to end before it touches the data dir.
+    lifecycle::wait_for_relaunching_process();
 
     let timer = Arc::new(StartupTimer::new(started));
     timer.mark("process-start");
@@ -115,11 +134,12 @@ fn main() {
         if let Some(ctx) = second_ctx.lock().clone() {
             let c = ctx.clone();
             if let Some(app) = ctx.app() {
-                let _ = app.run_on_main_thread(move || windows::focus_main(&c));
+                // Focus, or (while winding down) start again after the exit.
+                let _ = app.run_on_main_thread(move || lifecycle::second_instance(&c));
             }
         }
     });
-    let _instance = match acquire(&data_dir, on_second) {
+    let instance = match acquire(&data_dir, on_second) {
         Ok(Acquire::Primary(guard)) => guard,
         Ok(Acquire::Forwarded) => std::process::exit(0),
         Ok(Acquire::Busy) => {
@@ -130,6 +150,10 @@ fn main() {
     };
     timer.mark("instance-lock");
     unimux_platform::set_app_user_model_id(AUMID);
+    // Before any webview: a WebView2 data folder that cannot be created would make Edge show its own dialog. Windows only:
+    // WKWebView keeps its default store and 1.1.4 never had <data>/webview2 on macOS.
+    #[cfg(windows)]
+    windows::init_webview_dir(&data_dir, &crash);
 
     let startup_log = Arc::new(StartupLog::new(
         data_dir.join("startup.log"),
@@ -146,21 +170,52 @@ fn main() {
     timer.mark("state-loaded");
 
     let ctx = AppContext::new(data_dir.clone(), overrides, crash.clone(), timer.clone(), startup_log, state);
+    // Held for the whole run; released before a relaunch (W6).
+    ctx.lifecycle.keep_instance(instance);
     let builder = build_router(&ctx);
     for error in builder.errors() {
         crash.error(&format!("ipc registration: {error}"));
     }
     let _ = ctx.router.set(Arc::new(builder.build(ctx.guard.clone())));
     *second.lock() = Some(ctx.clone());
+    // Windows: Chromium's OSCrypt::Init runs at 1.1.4's start (an idle run already writes Local State); here off the main
+    // thread so the window never waits for DPAPI. macOS opens the Keychain on first use only (B2).
+    if cfg!(windows) {
+        let storage = ctx.safe_storage.clone();
+        let _ = std::thread::Builder::new().name("safe-storage".into()).spawn(move || {
+            storage.warm();
+        });
+    }
+
+    // WebKit reads its text defaults once per process: before the first webview (W2).
+    #[cfg(target_os = "macos")]
+    mac_chrome::prepare_process();
 
     let tauri_ctx = tauri_context();
     let setup_ctx = ctx.clone();
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // 1.1.4's macOS menu bar (app + Edit menu, no reload / close); Windows has none.
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(mac_chrome::app_menu).on_menu_event(|_app, event| mac_chrome::on_menu_event(event.id().as_ref()));
+    // The web content process of a WKWebView ended (WebView2 reports it through ProcessFailed, lifecycle/webview.rs).
+    #[cfg(target_os = "macos")]
+    let builder = {
+        let c = ctx.clone();
+        builder.on_web_content_process_terminate(move |webview| {
+            lifecycle::renderer_gone(&c, webview.label(), "crashed", 0);
+        })
+    };
+    let app = builder
         .manage(ctx.clone())
         .invoke_handler(handlers())
         .setup(move |app| {
             let ctx = setup_ctx.clone();
             let _ = ctx.sink.app.set(app.handle().clone());
+            // The bundled conpty.dll + OpenConsole.exe (tauri.windows.conf.json `bundle.resources`), before any terminal.
+            #[cfg(windows)]
+            if let Ok(dir) = tauri::Manager::path(&*app).resource_dir() {
+                unimux_pty::conpty::ConptyApi::set_resource_dir(dir.join("resources").join("conpty").join("x64"));
+            }
             // Sends run in order per window on the async runtime (ipcRenderer.send ordering).
             let router = ctx.router().clone();
             let _ = ctx.sends.set(SendQueue::new(
@@ -187,7 +242,41 @@ fn main() {
             ));
             ctx.mark("app-ready");
             // The startup gate (U1) runs here and may hold the main window back; wave 0 always proceeds.
-            windows::create_main(app.handle(), &ctx)?;
+            webview_import::prepare(app.handle(), &ctx);
+            let main_window = windows::create_main(app.handle(), &ctx)?;
+            // The macOS stand-in for CDP (MC_EVAL_PORT, check build only).
+            #[cfg(feature = "test-bridge")]
+            let _ = eval_bridge::start(ctx.clone());
+            // Tabs that were in their own window at the last quit open there again (W5). The main window closing closes
+            // them as they are (their registry stays for the next start).
+            ctx.detached.set_host(detached::host::TauriHost::new(app.handle().clone(), &ctx));
+            let closing = ctx.detached.clone();
+            main_window.on_window_event(move |event| {
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    closing.close_all();
+                }
+            });
+            ctx.detached.start();
+            // In parallel with the window (1.1.4: hooks.start next to the cell file prune and the MCP server).
+            hooks::start(&ctx);
+            // H3: the CLI scan in the background and the registry refresh on focus.
+            commands::agents::app_started(&ctx);
+            // The wind-down stops the hook server in its own phase (1.1.4 before-quit: hooks.stop after the MCP server).
+            let stopping = ctx.hooks.clone();
+            ctx.lifecycle.wind_down.register(
+                lifecycle::wind_down::phase::HOOKS,
+                "hooks stop",
+                Duration::from_secs(1),
+                move || async move {
+                    stopping.server.stop();
+                },
+            );
+            // M1: the MCP server listens after the window (index.ts startMcp), retried twice in the background; the wind-down
+            // stops it in its own phase, before the hook server.
+            commands::mcp::start(&ctx);
+            ctx.lifecycle.wind_down.register(lifecycle::wind_down::phase::MCP, "mcp stop", Duration::from_secs(1), || async {
+                commands::mcp::stop();
+            });
             startup::mark_started();
             Ok(())
         })
@@ -198,14 +287,32 @@ fn main() {
     };
 
     let run_ctx = ctx.clone();
-    app.run(move |_app, event| {
-        if let RunEvent::Exit = event {
-            // The last save (W6 adds the full wind-down: quit confirmation, hosts, MCP, hooks).
-            if !run_ctx.flush_state() {
-                run_ctx.crash.error("state could not be saved before exit");
+    app.run(move |_app, event| match event {
+        // Tauri never ends the app by itself: the last window closing (code None) or app.exit (Some) goes through the quit
+        // (question, wind-down), which allows the exit it asks for at the end. While the startup gate decides, a closed gate
+        // window does not end the app (1.1.4 window-all-closed with `gating`).
+        RunEvent::ExitRequested { code, api, .. } => {
+            if lifecycle::exit_allowed(&run_ctx) {
+                return;
             }
-            run_ctx.saver.stop();
+            api.prevent_exit();
+            if code.is_none() && run_ctx.lifecycle.is_gating() {
+                return;
+            }
+            lifecycle::request_quit(&run_ctx, lifecycle::QuitSource::Request);
         }
+        RunEvent::Exit => {
+            // A copied key that still waits is cleared before the process ends (W4, 1.1.4 will-quit).
+            commands::os::on_exit(&run_ctx);
+            // The conversation index saves itself (1.1.4's will-quit convSearch.stop()).
+            commands::agents::on_exit();
+            // The MCP and hook servers stop at the latest here (the wind-down stops them in their own phases).
+            commands::mcp::stop();
+            hooks::stop(&run_ctx);
+            // After the wind-down (or a forced exit): whatever came in after the last save, then a pending relaunch.
+            lifecycle::after_exit(&run_ctx);
+        }
+        _ => {}
     });
 }
 
@@ -221,6 +328,9 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
             ipc::update_splash_init,
             ipc::update_splash_close,
             ipc::update_splash_open,
+            mac_chrome::mac_title_double_click,
+            file_drop::mc_dropped_paths,
+            webview_import::mc_webview_import_done,
             test_bridge::test_bridge,
             channel_bench::test_channel_bench,
             channel_bench::test_channel_pull,
@@ -238,7 +348,10 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
             ipc::mc_port_post,
             ipc::update_splash_init,
             ipc::update_splash_close,
-            ipc::update_splash_open
+            ipc::update_splash_open,
+            mac_chrome::mac_title_double_click,
+            file_drop::mc_dropped_paths,
+            webview_import::mc_webview_import_done
         ]
     }
 }

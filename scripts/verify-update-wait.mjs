@@ -1,17 +1,18 @@
-// Real-app check of 1.1.2 "update while agents work" (npm run build first). No real Claude or Codex and no real update: the grids
+// Real-app check of 1.1.2 "update while agents work" (npm run build:check first; MC_APP_TARGET=electron: npm run build). No real Claude or Codex and no real update: the grids
 // hold shell cells whose profile is switched to "claude" in Settings after they started, the agent status is faked with the
 // 'cell:hook' event main sends for a real hook (prompt = working, stop = turn finished), and the update is faked from the main
-// process inspector: the status bar is told an update is ready, and 'update:install' (the hand-over to the update window) is
+// side (real-app.mjs mainControl): the status bar is told an update is ready, and 'update:install' (the hand-over to the update window) is
 // replaced by a recorder. One grid lives in a detached window.
 // Checks: a click on the update button while agents work shows the dialog (listing both agents, the detached one too) and does not
 // hand over; "Update when they finish" shows the waiting state and hands over only after both turns ended; the X cancels the
 // wait; "Update now" hands over at once; with nothing in progress the click hands over without a question.
 // Screenshots go to a temporary folder (printed at the end).
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { launchApp, mainInspector, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
+import { launchApp, scratchRoot, sleep, writeState } from './ssh-ui-lib.mjs';
+import { removeScratch } from './app-env.mjs';
 
 const ids = { a: randomUUID(), b: randomUUID(), c: randomUUID() };
 const tabs = { main: randomUUID(), away: randomUUID() };
@@ -33,7 +34,6 @@ function state(project) {
 
 const root = scratchRoot('updatewait');
 const shots = mkdtempSync(join(tmpdir(), 'unimux-update-wait-'));
-const inspectPort = 9300 + Math.floor(Math.random() * 500);
 let app;
 let main;
 const results = [];
@@ -42,21 +42,23 @@ try {
   mkdirSync(join(root, 'project'), { recursive: true });
   writeState(root, state(join(root, 'project')));
   const path = ['C:\\Windows\\System32', 'C:\\Windows', 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0'].join(';');
-  app = await launchApp(root, { PATH: path, Path: null }, [`--inspect=${inspectPort}`]);
-  main = await mainInspector(inspectPort);
+  app = await launchApp(root, { PATH: path, Path: null }, [], { main: true });
+  main = app.main;
   const shot = async (name) => {
     const { data } = await app.cdp('Page.captureScreenshot', { format: 'png' });
     writeFileSync(join(shots, name), Buffer.from(data, 'base64'));
   };
   // The hook goes to every window: the one that holds the cell's terminal takes it.
-  const hook = (cellId, event) => main.evaluate(`__el.BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('cell:hook', ${JSON.stringify(cellId)}, ${JSON.stringify(event)})), true`);
+  const hook = (cellId, event) => main.hookAll(cellId, event);
   const dialogText = () => app.evaluate(`document.querySelector('.overlay .modal')?.textContent ?? ''`);
   const clickDialog = (text) => app.click('.overlay .modal .modal-foot .btn', text);
-  const installs = () => main.evaluate('__installs.length');
+  // The hand-overs so far (the recorded update:install calls, counted up).
+  let installCount = 0;
+  const installs = async () => (installCount += (await main.recorded('update:install')).length);
   const updateButton = `[...document.querySelectorAll('.statusbar .sb-action')].find((b) => b.textContent.includes('9.9.9'))`;
 
   await app.until(`document.querySelectorAll('.xterm').length >= 2`, 'terminals');
-  const windows = await main.evaluate('__el.BrowserWindow.getAllWindows().length');
+  const windows = (await main.windows()).length;
   if (windows < 2) throw new Error(`the detached window did not open (${windows} windows)`);
   // The profile becomes an agent profile (the running shells are not restarted).
   await app.click('.tb-btn[aria-label="Settings"]');
@@ -70,9 +72,8 @@ try {
   await sleep(800);
 
   // The fake update: ready to install, and the hand-over only recorded.
-  await main.evaluate(`globalThis.__installs = []; __el.ipcMain.removeAllListeners('update:install');
-    __el.ipcMain.on('update:install', () => __installs.push(Date.now()));
-    __el.BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('update:state', { status: 'ready', version: '9.9.9' })); true`);
+  await main.record(['update:install'], { swallow: true });
+  await main.emit('update:state', [{ status: 'ready', version: '9.9.9' }]);
   await app.until(`!!(${updateButton})`, 'update button');
 
   // 1. Agents working (one here, one in the detached window): the click asks and does not hand over.
@@ -122,7 +123,6 @@ try {
   await hook(ids.c, 'stop');
   await hook(ids.b, 'stop');
   const endedAt = Date.now();
-  await main.evaluate('true');
   const t0 = Date.now();
   while (!(await installs()) && Date.now() - t0 < 15000) await sleep(200);
   const waited = Date.now() - endedAt;
@@ -170,5 +170,5 @@ try {
 } finally {
   main?.close();
   if (app) await app.close();
-  if (existsSync(root)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  removeScratch(root);
 }

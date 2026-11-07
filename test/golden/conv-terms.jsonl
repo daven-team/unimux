@@ -1,0 +1,215 @@
+{"query":"Atomic  \"write file\"  atom","terms":["atomic","write file"]}
+{"query":"\"unterminated phrase","terms":["unterminated phrase"]}
+{"query":"   ","terms":[]}
+{"query":"a b c d e f g h i j","terms":["a","b","c","d","e","f","g","h"]}
+{"query":"\"\"","terms":[]}
+{"query":"\"\" x","terms":["x"]}
+{"query":"ab\"cd ef\"","terms":["ab\"cd","ef\""]}
+{"query":"\"a  b\"  \"A B\"","terms":["a b"]}
+{"query":"Zażółć zazolc","terms":["zazolc"]}
+{"query":"ΣΟΦΟΣ σοφος","terms":["σοφος"]}
+{"query":"İ i","terms":["i"]}
+{"query":"x　y","terms":["x","y"]}
+{"query":"a\u0000b","terms":["a\u0000b"]}
+{"query":"\"  spaced   phrase  \"","terms":["spaced phrase"]}
+{"query":"redis redis Redis REDIS","terms":["redis"]}
+{"query":"\"NEEDLE\nǈ\" stanu  ῼ　ῼ","terms":["needle ǉ","stanu","ῳ"]}
+{"query":"\"ϴ  ﬀ\" Tiếng /usr/bin","terms":["θ ﬀ","tieng","/usr/bin"]}
+{"query":"Việt","terms":["viet"]}
+{"query":"ﬀ","terms":["ﬀ"]}
+{"query":"emoji😀\nﬁle\tǅ\tC:\\work\\a 𞤀 Ǆemal","terms":["emoji😀","ﬁle","c:\\work\\a","𞤢","ǆemal"]}
+{"query":"ῼ Å\n\nRedis σοφός","terms":["ῳ","a","redis","σοφος"]}
+{"query":"\"quoted\" \"quoted\"","terms":["quoted"]}
+{"query":"\"ǰ\nȺ\" σοφός  Ǆemal \r\n ab \r\n Ꭰ ꞵ\n\nđường","terms":["j ⱥ","σοφος","ǆemal","ab","ꭰ","ꞵ","duong"]}
+{"query":"\"Test-run　İ\" ǈ","terms":["test-run i","ǉ"]}
+{"query":"a","terms":["a"]}
+{"query":"Redis","terms":["redis"]}
+{"query":"a \r\n Å  redis\nđường","terms":["a","redis","duong"]}
+{"query":"\"ŉ\tẞ\" C:\\work\\a \"","terms":["ŉ s","c:\\work\\a"]}
+{"query":"\"ŉ naïve\" 한국어\tNEEDLE\tZażółć  Zażółć\natomicWrite \"","terms":["ŉ naive","한국어","needle","zazolc","atomicwrite"]}
+{"query":"\"ꭰ\n\nσοφός\" stanu\nTest-run Tiếng ᾈ\nᾈ straße","terms":["ꭰ σοφος","stanu","test-run","tieng","ᾀ","strase"]}
+{"query":"naïve\tstanu\tΟΔΟΣ atomicWrite\tΟΔΟΣ\tΣΟΦΙΑΣ","terms":["naive","stanu","οδος","atomicwrite","σοφιας"]}
+{"query":"ŀ\tzapis","terms":["ŀ","zapis"]}
+{"query":"\"ǅ Redis\" ΌΣΟΣ\tŀ\n\nᾈ test Ꭰ","terms":["ǆ redis","οσος","ŀ","ᾀ","test","ꭰ"]}
+{"query":"Œuvre Test-run","terms":["ouvre","test-run"]}
+{"query":"NEEDLE","terms":["needle"]}
+{"query":"\"ĳ Ḁḃ\" ẞ đường\n\nΣΟΦΙΑΣ \r\n ǈ","terms":["ĳ ab","s","duong","σοφιας","ǉ"]}
+{"query":"stanu Łódź \"","terms":["stanu","lodz"]}
+{"query":"Napraw","terms":["napraw"]}
+{"query":"\"👍🏽 ǈ\" ﬀ emoji😀 ΌΣΟΣ","terms":["👍🏽 ǉ","ﬀ","emoji😀","οσος"]}
+{"query":"Ω　ΣΟΦΙΑΣ","terms":["ω","σοφιας"]}
+{"query":"x\t👍🏽　Ḁḃ\n\nab\t日本語 GĘŚLĄ","terms":["x","👍🏽","ab","日本語","gesla"]}
+{"query":"ﬀ TEST\tZażółć emoji😀","terms":["ﬀ","test","zazolc","emoji😀"]}
+{"query":"zapis \r\n ΟΔΟΣ\n\nTest-run","terms":["zapis","οδος","test-run"]}
+{"query":"TEST  emoji😀","terms":["test","emoji😀"]}
+{"query":"\"한국어　𞤀\" ǅ C:\\work\\a","terms":["한국어 𞤢","ǆ","c:\\work\\a"]}
+{"query":"\"ĳ\n\nϴ\" a  ŀ Ⱥ　ẞ","terms":["ĳ θ","a","ŀ","ⱥ","s"]}
+{"query":"Ærø \"quoted\" Łódź\nrésumé","terms":["aro","quoted","lodz","resume"]}
+{"query":"\"naïve K\" ꞵ Ǆemal\n\nstate.json Ⅻ","terms":["naive k","ꞵ","ǆemal","state.json","ⅻ"]}
+{"query":"\"日本語\n\nredis\" 日本語 Å","terms":["日本語 redis","a"]}
+{"query":"𐐀𐐨 Napraw \r\n ꞵ  straße　đường","terms":["𐐨𐐨","napraw","ꞵ","strase","duong"]}
+{"query":"Œuvre\nȺ","terms":["ouvre","ⱥ"]}
+{"query":"ȿ\nGĘŚLĄ  TEST ı\tŁódź","terms":["ȿ","gesla","test","i","lodz"]}
+{"query":"ꭰ ǅ\nẞ\n\nꞵ\nΌΣΟΣ","terms":["ꭰ","ǆ","s","ꞵ","οσος"]}
+{"query":"Œuvre ǅ  Ⅻ ΟΔΟΣ\n\nŁódź","terms":["ouvre","ǆ","ⅻ","οδος","lodz"]}
+{"query":"\"jaźń naïve\" pool\n\nḀḃ\nẞ \r\n 𐐀𐐨 ǈ\nﬁle","terms":["jazn naive","pool","ab","s","𐐨𐐨","ǉ","ﬁle"]}
+{"query":"\"Test-run\tΟΔΟΣ\" ẞ \r\n 日本語\tnaïve İ ΣΟΦΙΑΣ Łódź","terms":["test-run οδος","日本語","naive","σοφιας","lodz"]}
+{"query":"ᾈ Ǆemal","terms":["ᾀ","ǆemal"]}
+{"query":"\"ĳ  Test-run\" NEEDLE \r\n Ǆemal\n\nredis jaźń","terms":["ĳ test-run","needle","ǆemal","redis","jazn"]}
+{"query":"Ærø C:\\work\\a\tǰ","terms":["aro","c:\\work\\a","j"]}
+{"query":"\"ẞ <tag>\" ΟΔΟΣ\tŉ ab \"","terms":["s <tag>","οδος","ŉ","ab"]}
+{"query":"İstanbul　Test-run\tꞵ \r\n zapis\n\nḀḃ 한국어","terms":["istanbul","test-run","ꞵ","zapis","ab","한국어"]}
+{"query":"ŀ\n\nÅ 𐐀𐐨","terms":["ŀ","a","𐐨𐐨"]}
+{"query":"\"a TEST\" 𞤀 \"quoted\" Ω 👍🏽","terms":["a test","𞤢","quoted","ω","👍🏽"]}
+{"query":"𐐀𐐨 <tag> İstanbul　TEST İ K","terms":["𐐨𐐨","<tag>","istanbul","test","k"]}
+{"query":"Ḁḃ \r\n ǈ\nnaïve Ⅻ","terms":["ab","ǉ","naive","ⅻ"]}
+{"query":"Ⱥ","terms":["ⱥ"]}
+{"query":"ǰ ǈ Œuvre\nΟΔΟΣ　a ab","terms":["j","ǉ","ouvre","οδος","ab"]}
+{"query":"\"jaźń　ꞵ\" ẞ ı \r\n Test-run résumé NEEDLE\tNEEDLE","terms":["jazn ꞵ","i","test-run","resume","needle"]}
+{"query":"Ⱥ\n한국어 Ω","terms":["ⱥ","한국어","ω"]}
+{"query":"Ⓐ\tﬁle \r\n ẞ\n𞤀 \r\n TEST\n𐐀𐐨 \"","terms":["ⓐ","ﬁle","𞤢","test","𐐨𐐨"]}
+{"query":"\"TEST \r\n ꞵ\" Łódź ꞵ Việt","terms":["test ꞵ","lodz","viet"]}
+{"query":"redis ꭰ /usr/bin\nꭰ","terms":["redis","ꭰ","/usr/bin"]}
+{"query":"ǰ","terms":["j"]}
+{"query":"ﬁle\n\nȿ　ﬀ ǈ　ĳ","terms":["ﬁle","ȿ","ﬀ","ǉ","ĳ"]}
+{"query":"đường résumé 日本語　naïve Ω　ĳ","terms":["duong","resume","日本語","naive","ω","ĳ"]}
+{"query":"ẞ redis","terms":["redis"]}
+{"query":"\"ǅ ΣΟΦΙΑΣ\" ǈ\t\"quoted\"  x Ḁḃ  ϴ \r\n /usr/bin","terms":["ǆ σοφιας","ǉ","quoted","x","ab","θ","/usr/bin"]}
+{"query":"\"Ꭰ\n𞤀\" Việt Ꭰ","terms":["ꭰ 𞤢","viet"]}
+{"query":"ŉ ﬁle\tZażółć","terms":["ŉ","ﬁle","zazolc"]}
+{"query":"𐐀𐐨 Ꭰ","terms":["𐐨𐐨","ꭰ"]}
+{"query":"\"Å 日本語\" ǈ","terms":["a 日本語","ǉ"]}
+{"query":"naïve　Redis  zakładki \r\n Zażółć","terms":["naive","redis","zakladki","zazolc"]}
+{"query":"ǰ a\n\nViệt","terms":["j","a","viet"]}
+{"query":"Zażółć\tTiếng \r\n x\tzapis ΟΔΟΣ","terms":["zazolc","tieng","x","zapis","οδος"]}
+{"query":"σοφός Ⱥ　ab Å","terms":["σοφος","ⱥ","ab"]}
+{"query":"𐐀𐐨 résumé\tnaïve","terms":["𐐨𐐨","resume","naive"]}
+{"query":"\"ᾈ ab\" ϴ GĘŚLĄ Redis","terms":["ᾀ ab","θ","gesla","redis"]}
+{"query":"\"redis 👍🏽\" zapis　Łódź\n𞤀 İstanbul\tΌΣΟΣ","terms":["redis 👍🏽","zapis","lodz","𞤢","istanbul","οσος"]}
+{"query":"\"TEST  a\" Việt  ϴ\n\nTest-run Ꭰ\n\nᾈ \r\n Việt","terms":["test a","viet","θ","test-run","ꭰ","ᾀ"]}
+{"query":"\"한국어\tǄemal\" ẞ Ærø\n\nﬁle","terms":["한국어 ǆemal","s","aro","ﬁle"]}
+{"query":"résumé\n\na\tx naïve\npool","terms":["resume","x","naive","pool"]}
+{"query":"\"naïve ΟΔΟΣ\" ꭰ ᾈ","terms":["naive οδος","ꭰ","ᾀ"]}
+{"query":"emoji😀","terms":["emoji😀"]}
+{"query":"Ⅻ\tẞ\tViệt zapis\t👍🏽 \"","terms":["ⅻ","viet","zapis","👍🏽"]}
+{"query":"jaźń","terms":["jazn"]}
+{"query":"𞤀 Ḁḃ","terms":["𞤢","ab"]}
+{"query":"K\tjaźń Ⱥ","terms":["k","jazn","ⱥ"]}
+{"query":"\"ǰ Ḁḃ\" 日本語 \r\n 𐐀𐐨","terms":["j ab","日本語","𐐨𐐨"]}
+{"query":"ŀ","terms":["ŀ"]}
+{"query":"\"ǰ\tjaźń\" jaźń \r\n stanu Ⓐ jaźń \"","terms":["j jazn","stanu","ⓐ"]}
+{"query":"\"ﬀ\tZażółć\" Łódź Ærø\n\n\"quoted\" ŉ","terms":["ﬀ zazolc","lodz","aro","quoted","ŉ"]}
+{"query":"Test-run　ŀ","terms":["test-run","ŀ"]}
+{"query":"Napraw","terms":["napraw"]}
+{"query":"Œuvre ῼ ǅ\ta","terms":["ouvre","ῳ","ǆ","a"]}
+{"query":"日本語 Test-run","terms":["日本語","test-run"]}
+{"query":"atomicWrite a\t👍🏽 Ꭰ","terms":["atomicwrite","👍🏽","ꭰ"]}
+{"query":"x","terms":["x"]}
+{"query":"ǅ","terms":["ǆ"]}
+{"query":"\"ǅ\n\nŀ\" /usr/bin ǰ  ǈ\tꞵ\n日本語\n\nGĘŚLĄ","terms":["ǆ ŀ","/usr/bin","j","ǉ","ꞵ","日本語","gesla"]}
+{"query":"Việt \r\n Å Tiếng","terms":["viet","a","tieng"]}
+{"query":"Ꭰ Ꭰ","terms":["ꭰ"]}
+{"query":"ΟΔΟΣ atomicWrite x\n\nstate.json","terms":["οδος","atomicwrite","x","state.json"]}
+{"query":"zapis　𞤀\n\nΌΣΟΣ \r\n ΌΣΟΣ Ω","terms":["zapis","𞤢","οσος","ω"]}
+{"query":"ﬀ  zapis test　straße","terms":["ﬀ","zapis","test","strase"]}
+{"query":"Ḁḃ","terms":["ab"]}
+{"query":"ȿ","terms":["ȿ"]}
+{"query":"ȿ Test-run Ⅻ\n<tag>　Tiếng \r\n ŀ","terms":["ȿ","test-run","ⅻ","<tag>","tieng","ŀ"]}
+{"query":"/usr/bin","terms":["/usr/bin"]}
+{"query":"Œuvre  σοφός \r\n ĳ GĘŚLĄ straße","terms":["ouvre","σοφος","ĳ","gesla","strase"]}
+{"query":"ĳ \r\n Łódź\n<tag>　straße  zakładki Å","terms":["ĳ","lodz","<tag>","strase","zakladki"]}
+{"query":"Việt ab\tﬁle \r\n emoji😀\n\nemoji😀","terms":["viet","ab","ﬁle","emoji😀"]}
+{"query":"Redis","terms":["redis"]}
+{"query":"<tag>  Ǆemal\nab test \"quoted\"　test","terms":["<tag>","ǆemal","ab","test","quoted"]}
+{"query":"K\n\nx đường Å\tTEST\tı","terms":["k","x","duong","a","test","i"]}
+{"query":"ΌΣΟΣ Ꭰ test Napraw　zakładki  Å","terms":["οσος","ꭰ","test","napraw","zakladki"]}
+{"query":"Zażółć  đường","terms":["zazolc","duong"]}
+{"query":"σοφός  /usr/bin ı ﬀ","terms":["σοφος","/usr/bin","ﬀ"]}
+{"query":"K\tzakładki","terms":["zakladki"]}
+{"query":"Ǆemal a  zakładki  ΌΣΟΣ\tȿ\n\nZażółć \"","terms":["ǆemal","zakladki","οσος","ȿ","zazolc"]}
+{"query":"\"日本語\n\nΩ\" NEEDLE a\n\nŀ","terms":["日本語 ω","needle","a","ŀ"]}
+{"query":"Ǆemal","terms":["ǆemal"]}
+{"query":"Ꭰ\n\nꭰ\n\nϴ","terms":["ꭰ","θ"]}
+{"query":"\"atomicWrite  zapis\" zakładki\tÆrø　ΌΣΟΣ ǅ ǰ","terms":["atomicwrite zapis","zakladki","aro","οσος","ǆ","j"]}
+{"query":"\"Zażółć  ǰ\" \"quoted\"  redis\nÆrø Œuvre\n<tag>","terms":["zazolc j","quoted","redis","aro","ouvre","<tag>"]}
+{"query":"\"Zażółć đường\" Napraw <tag>\nÅ σοφός \"","terms":["zazolc duong","napraw","<tag>","σοφος"]}
+{"query":"ﬀ \r\n İ a state.json C:\\work\\a","terms":["ﬀ","i","state.json","c:\\work\\a"]}
+{"query":"Zażółć","terms":["zazolc"]}
+{"query":"İstanbul résumé pool σοφός","terms":["istanbul","resume","pool","σοφος"]}
+{"query":"ΟΔΟΣ Test-run\n\nΟΔΟΣ stanu\n\nredis","terms":["οδος","test-run","stanu","redis"]}
+{"query":"<tag> \r\n ﬀ\n\nTEST　Łódź zakładki","terms":["<tag>","ﬀ","test","lodz","zakladki"]}
+{"query":"\"Å <tag>\" ǅ","terms":["a <tag>","ǆ"]}
+{"query":"ĳ\n𐐀𐐨\n\ntest \r\n Ærø Ⱥ","terms":["ĳ","𐐨𐐨","test","aro","ⱥ"]}
+{"query":"\"ꞵ straße\" state.json\tȺ  İ\nσοφός","terms":["ꞵ strase","state.json","ⱥ","i","σοφος"]}
+{"query":"ǰ\n\nÅ\tđường\t𐐀𐐨","terms":["j","a","duong","𐐨𐐨"]}
+{"query":"\"ŉ Łódź\" <tag> Ω","terms":["ŉ lodz","<tag>","ω"]}
+{"query":"Łódź\n\nzakładki","terms":["lodz","zakladki"]}
+{"query":"stanu\tNEEDLE  ﬁle\nΣΟΦΙΑΣ Ǆemal　Ⓐ","terms":["stanu","needle","ﬁle","σοφιας","ǆemal","ⓐ"]}
+{"query":"K ŀ TEST \r\n σοφός\tstanu ĳ \"","terms":["k","ŀ","test","σοφος","stanu","ĳ"]}
+{"query":"Łódź　👍🏽 ı\nTest-run\n\nȺ","terms":["lodz","👍🏽","i","test-run","ⱥ"]}
+{"query":"ᾈ 日本語\tŁódź 𞤀","terms":["ᾀ","日本語","lodz","𞤢"]}
+{"query":"ı","terms":["i"]}
+{"query":"\"Łódź 👍🏽\" 日本語 ȿ\nŁódź İ","terms":["lodz 👍🏽","日本語","ȿ","i"]}
+{"query":"Łódź ı stanu\tꞵ \"","terms":["lodz","i","stanu","ꞵ"]}
+{"query":"\"ﬁle\nŉ\" 한국어 ꭰ  emoji😀 /usr/bin","terms":["ﬁle ŉ","한국어","ꭰ","emoji😀","/usr/bin"]}
+{"query":"ﬀ \r\n ẞ ı \"","terms":["ﬀ","s","i"]}
+{"query":"atomicWrite","terms":["atomicwrite"]}
+{"query":"Ⓐ\n\nꭰ  Ω\n\n𞤀","terms":["ⓐ","ꭰ","ω","𞤢"]}
+{"query":"\"jaźń 👍🏽\" ŀ Việt\n\nǰ\nŉ\nῼ","terms":["jazn 👍🏽","ŀ","viet","ŉ","ῳ"]}
+{"query":"\"straße\nǅ\" ϴ　ǰ　jaźń","terms":["strase ǆ","θ","jazn"]}
+{"query":"𐐀𐐨 jaźń","terms":["𐐨𐐨","jazn"]}
+{"query":"redis ŉ İstanbul　σοφός x C:\\work\\a","terms":["redis","ŉ","istanbul","σοφος","x","c:\\work\\a"]}
+{"query":"ab  pool ı \r\n Ⅻ Ærø\n\nﬁle \"","terms":["ab","pool","i","ⅻ","aro","ﬁle"]}
+{"query":"\"Ⅻ \r\n ᾈ\" ﬀ đường　Ω Tiếng","terms":["ⅻ ᾀ","ﬀ","duong","ω","tieng"]}
+{"query":"👍🏽 ꞵ\nK","terms":["👍🏽","ꞵ","k"]}
+{"query":"\"ΟΔΟΣ stanu\" 한국어 ꭰ \r\n TEST Å\nŁódź　Napraw","terms":["οδος stanu","한국어","ꭰ","test","lodz","napraw"]}
+{"query":"C:\\work\\a ΟΔΟΣ straße\n\nﬁle Å đường \"","terms":["c:\\work\\a","οδος","strase","ﬁle","duong"]}
+{"query":"redis \r\n Ærø \r\n 日本語","terms":["redis","aro","日本語"]}
+{"query":"Łódź","terms":["lodz"]}
+{"query":"\"ı　/usr/bin\" ꭰ　x","terms":["i /usr/bin","ꭰ","x"]}
+{"query":"\"C:\\work\\a  Ærø\" GĘŚLĄ\nŁódź  jaźń\t👍🏽 \r\n ĳ","terms":["c:\\work\\a aro","gesla","lodz","jazn","👍🏽","ĳ"]}
+{"query":"Ⅻ\n\nﬀ 𐐀𐐨  redis","terms":["ⅻ","ﬀ","𐐨𐐨","redis"]}
+{"query":"đường\n\nŉ\tx 한국어\n\nÅ","terms":["duong","ŉ","x","한국어","a"]}
+{"query":"\"ﬁle\nİstanbul\" ᾈ zakładki　x","terms":["ﬁle istanbul","ᾀ","zakladki","x"]}
+{"query":"ŀ　<tag> \r\n Ⱥ\tViệt","terms":["ŀ","<tag>","ⱥ","viet"]}
+{"query":"\"ﬁle\tı\" Ⓐ　Ǆemal TEST  ǅ　ŉ","terms":["ﬁle i","ⓐ","ǆemal","test","ŉ"]}
+{"query":"ﬀ","terms":["ﬀ"]}
+{"query":"ẞ\n\nΌΣΟΣ","terms":["s","οσος"]}
+{"query":"Ærø σοφός  emoji😀\n\nZażółć ŀ\n\njaźń \"","terms":["aro","σοφος","emoji😀","zazolc","ŀ","jazn"]}
+{"query":"ᾈ  ĳ Việt \r\n ΣΟΦΙΑΣ Zażółć\n\"quoted\"","terms":["ᾀ","ĳ","viet","σοφιας","zazolc","quoted"]}
+{"query":"ΌΣΟΣ stanu　NEEDLE ǅ ẞ state.json","terms":["οσος","stanu","needle","ǆ","state.json"]}
+{"query":"x　zapis Łódź đường","terms":["x","zapis","lodz","duong"]}
+{"query":"Å\t𞤀\nC:\\work\\a\nǰ \r\n Ǆemal \"","terms":["𞤢","c:\\work\\a","j","ǆemal"]}
+{"query":"Ꭰ　ΌΣΟΣ","terms":["ꭰ","οσος"]}
+{"query":"\"NEEDLE İstanbul\" naïve \"","terms":["needle istanbul","naive"]}
+{"query":"Việt Redis Napraw\t𐐀𐐨 redis","terms":["viet","redis","napraw","𐐨𐐨"]}
+{"query":"\"👍🏽 ab\" σοφός İstanbul ΌΣΟΣ jaźń \r\n pool","terms":["👍🏽 ab","σοφος","istanbul","οσος","jazn","pool"]}
+{"query":"𐐀𐐨 \r\n ĳ\n\nŀ \"","terms":["𐐨𐐨","ĳ","ŀ"]}
+{"query":"zapis ϴ","terms":["zapis","θ"]}
+{"query":"straße","terms":["strase"]}
+{"query":"pool","terms":["pool"]}
+{"query":"ΌΣΟΣ emoji😀","terms":["οσος","emoji😀"]}
+{"query":"\"quoted\"　<tag> \r\n ǈ Ⓐ\n\nı  𐐀𐐨","terms":["quoted","<tag>","ǉ","ⓐ","i","𐐨𐐨"]}
+{"query":"👍🏽 ŀ","terms":["👍🏽","ŀ"]}
+{"query":"\"jaźń\n\nŉ\" ΟΔΟΣ ᾈ  İ　pool\n\nǰ\nZażółć","terms":["jazn ŉ","οδος","ᾀ","i","pool","zazolc"]}
+{"query":"naïve  đường　ΣΟΦΙΑΣ jaźń","terms":["naive","duong","σοφιας","jazn"]}
+{"query":"σοφός\npool \"quoted\"　ǰ","terms":["σοφος","pool","quoted","j"]}
+{"query":"Œuvre 𞤀\tđường ĳ","terms":["ouvre","𞤢","duong","ĳ"]}
+{"query":"straße","terms":["strase"]}
+{"query":"Napraw \r\n ﬁle\n\n/usr/bin","terms":["napraw","ﬁle","/usr/bin"]}
+{"query":"résumé　atomicWrite ΌΣΟΣ","terms":["resume","atomicwrite","οσος"]}
+{"query":"Ꭰ \r\n 👍🏽 \"","terms":["ꭰ","👍🏽"]}
+{"query":"\"Œuvre\nZażółć\" İstanbul","terms":["ouvre zazolc","istanbul"]}
+{"query":"\"Ḁḃ \r\n Redis\" 𞤀\n\nTest-run　👍🏽 ŀ\n\nRedis \r\n TEST \"","terms":["ab redis","𞤢","test-run","👍🏽","ŀ"]}
+{"query":"\"state.json \r\n zapis\" Ḁḃ　naïve\tC:\\work\\a　Ḁḃ　state.json İ","terms":["state.json zapis","ab","naive","c:\\work\\a"]}
+{"query":"\"C:\\work\\a résumé\" jaźń <tag>","terms":["c:\\work\\a resume","jazn","<tag>"]}
+{"query":"K","terms":["k"]}
+{"query":"K","terms":["k"]}
+{"query":"ẞ","terms":["s"]}
+{"query":"x　Ærø　GĘŚLĄ 𐐀𐐨\tǰ ȿ","terms":["x","aro","gesla","𐐨𐐨","j","ȿ"]}
+{"query":"ΌΣΟΣ Napraw \r\n zakładki","terms":["οσος","napraw","zakladki"]}
+{"query":"\"ĳ\t<tag>\" NEEDLE\tῼ\tatomicWrite straße\nŒuvre\n\nı","terms":["ĳ <tag>","needle","ῳ","atomicwrite","strase","ouvre"]}
+{"query":"\"ﬁle ŉ\" résumé","terms":["ﬁle ŉ","resume"]}
+{"query":"ǈ  Tiếng\n\nİ\tĳ \"","terms":["ǉ","tieng","ĳ"]}
+{"query":"ĳ \r\n ẞ ĳ  ϴ\nⒶ ΌΣΟΣ","terms":["ĳ","s","θ","ⓐ","οσος"]}
+{"query":"\"test \r\n GĘŚLĄ\" redis ᾈ 𞤀 \r\n ǅ　Å \"","terms":["test gesla","redis","ᾀ","𞤢","ǆ"]}

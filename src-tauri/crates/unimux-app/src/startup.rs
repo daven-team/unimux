@@ -25,6 +25,14 @@ static QUIET: AtomicBool = AtomicBool::new(false);
 pub fn set_quiet() {
     QUIET.store(true, Ordering::SeqCst);
 }
+
+/// The app winds down (W6): an error is only logged from now on. A blocking dialog would keep the process alive while an
+/// installer waits for it (safeWindow.ts `decideUncaught`, phase 'quiet').
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+
+pub fn set_shutting_down() {
+    SHUTTING_DOWN.store(true, Ordering::SeqCst);
+}
 static LAST_DIALOG: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 
 /// What `main()` does before anything else for calls of the 1.1.x update machinery. U3 fills in the full set
@@ -77,6 +85,18 @@ pub fn install_crash_handling(log: Arc<RollingLog>) {
     let _ = CRASH.set(log);
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        // A panic its caller catches and reports as a plain failure (a damaged Parquet file): not a crash.
+        if unimux_core::panic_guard::panic_expected() {
+            return;
+        }
+        // A panic inside an MCP request is caught by the MCP server, which logs the one cut `MCP request failed` line of
+        // 1.1.4 (handle().catch, no dialog); the whole panic text could hold tool arguments.
+        if unimux_mcp::in_request() {
+            if cfg!(debug_assertions) {
+                previous(info);
+            }
+            return;
+        }
         let message = info
             .payload()
             .downcast_ref::<&str>()
@@ -105,7 +125,7 @@ pub fn mark_started() {
 
 /// At most 3 dialogs, 10 s apart (createDialogLimiter of 1.1.4); shown off the panicking thread.
 fn runtime_error_dialog(detail: &str) {
-    if QUIET.load(Ordering::SeqCst) {
+    if QUIET.load(Ordering::SeqCst) || SHUTTING_DOWN.load(Ordering::SeqCst) {
         return;
     }
     let now = std::time::Instant::now();

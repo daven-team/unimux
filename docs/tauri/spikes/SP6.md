@@ -93,3 +93,7 @@ Results: 88/88 in three consecutive full runs (offscreen); `--visible --case=mai
 - The `UpdateProgressModel` port has unit tests, not the TS goldens (U2).
 - The real Tauri 1.2.0 -> 1.2.x installer (productName `unimux`) was not run on this machine on purpose: it would register a second `unimux` entry in Apps & features and the user runs the real app. U2/U4 run it in the VM.
 - Observation for W6: after `quit`, the main app's WebView2 processes took 3-30 s to end (machine under load).
+
+## Successor (U2, 2026-11-06)
+
+`scripts/spike-update-window.mjs` became `scripts/verify-update-window.mjs` (U2 acceptance). It no longer installs a spike product: the old app is the 1.2.0 check build copied into a scratch install dir, the payload is a 1.2.0-test.1 installer built from Tauri's NSIS template with its registry writes commented out (nothing in Apps & features), every window stays off screen, and the broken-WebView2 case runs by default because the new pre-check (`unimux_platform::webview`) never hands WebView2 the broken folder. See PROGRESS.md (U2 row).

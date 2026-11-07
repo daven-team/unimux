@@ -3,19 +3,37 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { createMcApi } from '../../../preload/mcApi';
+import { createDropRecordFilePaths, createWebView2FilePaths, type WebView2Host } from './filePaths';
 import { createPortPoster, createTauriTransport, McNotYetError, type BootInfo, type TauriTransport } from './transport';
+import { installCompat, type CompatReport } from './webkitCompat';
+import { installMacDrag, type DragGlobal } from './macDrag';
 
 declare global {
   interface Window {
     __MC_BOOT__?: BootInfo;
     __MC_TAURI__?: { McNotYetError: typeof McNotYetError; transport: TauriTransport };
+    __MC_COMPAT__?: CompatReport;
   }
 }
 
 const fallbackBoot = (): BootInfo => ({ platform: /Mac/.test(navigator.platform) ? 'darwin' : 'win32', windowsBuild: 0, label: 'main' });
 const boot: BootInfo = window.__MC_BOOT__ ?? fallbackBoot();
+// First, before anything reads requestIdleCallback / crypto.randomUUID / AudioContext (WebKit on macOS, PLAN W2).
+window.__MC_COMPAT__ = Object.freeze(installCompat(window as unknown as Parameters<typeof installCompat>[0], boot.platform));
 const current = getCurrentWebviewWindow();
+// macOS: the title bar's drag area (WKWebView ignores -webkit-app-region; PLAN W2).
+if (boot.platform === 'darwin') {
+  installMacDrag(window as unknown as DragGlobal, { startDragging: () => current.startDragging(), doubleClick: () => invoke('mac_title_double_click') });
+}
 const newSession = () => (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
+
+/** OS paths of dropped Files: WebView2's ICoreWebView2File on Windows, the recorded drop on macOS (W3). */
+function filePaths(): ((files: File[]) => Promise<string[]>) | undefined {
+  const webview = (window as { chrome?: { webview?: WebView2Host } }).chrome?.webview;
+  if (webview?.postMessageWithAdditionalObjects) return createWebView2FilePaths(webview, newSession);
+  if (boot.platform === 'darwin') return createDropRecordFilePaths(() => invoke<string[]>('mc_dropped_paths'));
+  return undefined;
+}
 
 const transport = createTauriTransport(boot, {
   invoke: (command, args, options) => invoke(command, args, options),
@@ -23,6 +41,7 @@ const transport = createTauriTransport(boot, {
   log: (message) => console.warn(`[mc] ${message}`),
   storage: (() => { try { return window.sessionStorage; } catch { return null; } })(),
   newSession,
+  pathsForFiles: filePaths(),
 });
 
 window.mc = createMcApi(transport);

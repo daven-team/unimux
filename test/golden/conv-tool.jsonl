@@ -1,0 +1,200 @@
+{"name":"Bash","input":{"command":"npm test\n  --run","description":"x"},"out":"npm test --run"}
+{"name":"apply_patch","input":{"command":"npm test\n  --run","description":"x"},"out":"npm test --run"}
+{"name":"shell","input":{"command":"npm test\n  --run","description":"x"},"out":"npm test --run"}
+{"name":"Bash","input":{"file_path":"src/a.ts"},"out":"src/a.ts"}
+{"name":"apply_patch","input":{"file_path":"src/a.ts"},"out":"src/a.ts"}
+{"name":"shell","input":{"file_path":"src/a.ts"},"out":"src/a.ts"}
+{"name":"Bash","input":{"pattern":"TODO","path":"src"},"out":"TODO"}
+{"name":"apply_patch","input":{"pattern":"TODO","path":"src"},"out":"TODO"}
+{"name":"shell","input":{"pattern":"TODO","path":"src"},"out":"TODO"}
+{"name":"Bash","input":{"url":"https://x.dev","prompt":"p"},"out":"https://x.dev"}
+{"name":"apply_patch","input":{"url":"https://x.dev","prompt":"p"},"out":"https://x.dev"}
+{"name":"shell","input":{"url":"https://x.dev","prompt":"p"},"out":"https://x.dev"}
+{"name":"Bash","input":{"todos":[]},"out":""}
+{"name":"apply_patch","input":{"todos":[]},"out":""}
+{"name":"shell","input":{"todos":[]},"out":""}
+{"name":"Bash","input":"{\"command\":[\"pwsh\",\"-Command\",\"Get-ChildItem\"]}","out":"Get-ChildItem"}
+{"name":"apply_patch","input":"{\"command\":[\"pwsh\",\"-Command\",\"Get-ChildItem\"]}","out":"Get-ChildItem"}
+{"name":"shell","input":"{\"command\":[\"pwsh\",\"-Command\",\"Get-ChildItem\"]}","out":"Get-ChildItem"}
+{"name":"Bash","input":{"command":["rg","-n","x"]},"out":"rg -n x"}
+{"name":"apply_patch","input":{"command":["rg","-n","x"]},"out":"rg -n x"}
+{"name":"shell","input":{"command":["rg","-n","x"]},"out":"rg -n x"}
+{"name":"Bash","input":{"type":"search","query":"vitest docs"},"out":"vitest docs"}
+{"name":"apply_patch","input":{"type":"search","query":"vitest docs"},"out":"vitest docs"}
+{"name":"shell","input":{"type":"search","query":"vitest docs"},"out":"vitest docs"}
+{"name":"Bash","input":{"command":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"out":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"}
+{"name":"apply_patch","input":{"command":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"out":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"}
+{"name":"shell","input":{"command":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},"out":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"}
+{"name":"Bash","input":{"command":null,"cmd":"ls -la"},"out":"ls -la"}
+{"name":"apply_patch","input":{"command":null,"cmd":"ls -la"},"out":"ls -la"}
+{"name":"shell","input":{"command":null,"cmd":"ls -la"},"out":"ls -la"}
+{"name":"Bash","input":{"command":5,"cmd":"ls"},"out":"ls"}
+{"name":"apply_patch","input":{"command":5,"cmd":"ls"},"out":"ls"}
+{"name":"shell","input":{"command":5,"cmd":"ls"},"out":"ls"}
+{"name":"Bash","input":{"command":["bash","-lc"]},"out":"bash -lc"}
+{"name":"apply_patch","input":{"command":["bash","-lc"]},"out":"bash -lc"}
+{"name":"shell","input":{"command":["bash","-lc"]},"out":"bash -lc"}
+{"name":"Bash","input":{"command":["BASH","-LC","a","b"]},"out":"a b"}
+{"name":"apply_patch","input":{"command":["BASH","-LC","a","b"]},"out":"a b"}
+{"name":"shell","input":{"command":["BASH","-LC","a","b"]},"out":"a b"}
+{"name":"Bash","input":{"command":["C:\\Git\\bin\\bash.exe","-c","x"]},"out":"x"}
+{"name":"apply_patch","input":{"command":["C:\\Git\\bin\\bash.exe","-c","x"]},"out":"x"}
+{"name":"shell","input":{"command":["C:\\Git\\bin\\bash.exe","-c","x"]},"out":"x"}
+{"name":"Bash","input":{"command":["cmd.exe","/C","dir"]},"out":"dir"}
+{"name":"apply_patch","input":{"command":["cmd.exe","/C","dir"]},"out":"dir"}
+{"name":"shell","input":{"command":["cmd.exe","/C","dir"]},"out":"dir"}
+{"name":"Bash","input":{"command":["powershell.EXE","-command","gci"]},"out":"gci"}
+{"name":"apply_patch","input":{"command":["powershell.EXE","-command","gci"]},"out":"gci"}
+{"name":"shell","input":{"command":["powershell.EXE","-command","gci"]},"out":"gci"}
+{"name":"Bash","input":{"command":["sh","-x","y"]},"out":"sh -x y"}
+{"name":"apply_patch","input":{"command":["sh","-x","y"]},"out":"sh -x y"}
+{"name":"shell","input":{"command":["sh","-x","y"]},"out":"sh -x y"}
+{"name":"Bash","input":{"command":["zsh","-c","z"]},"out":"z"}
+{"name":"apply_patch","input":{"command":["zsh","-c","z"]},"out":"z"}
+{"name":"shell","input":{"command":["zsh","-c","z"]},"out":"z"}
+{"name":"Bash","input":{"command":["ſh","-c","z"]},"out":"ſh -c z"}
+{"name":"apply_patch","input":{"command":["ſh","-c","z"]},"out":"ſh -c z"}
+{"name":"shell","input":{"command":["ſh","-c","z"]},"out":"ſh -c z"}
+{"name":"Bash","input":{"command":[1,2]},"out":""}
+{"name":"apply_patch","input":{"command":[1,2]},"out":""}
+{"name":"shell","input":{"command":[1,2]},"out":""}
+{"name":"Bash","input":{"command":[]},"out":""}
+{"name":"apply_patch","input":{"command":[]},"out":""}
+{"name":"shell","input":{"command":[]},"out":""}
+{"name":"Bash","input":{"input":"*** Update File: a.ts\n*** Add File: b.ts\r\n*** Delete File:  c.ts \n*** Move File: d.ts"},"out":""}
+{"name":"apply_patch","input":{"input":"*** Update File: a.ts\n*** Add File: b.ts\r\n*** Delete File:  c.ts \n*** Move File: d.ts"},"out":"a.ts, b.ts, c.ts"}
+{"name":"shell","input":{"input":"*** Update File: a.ts\n*** Add File: b.ts\r\n*** Delete File:  c.ts \n*** Move File: d.ts"},"out":""}
+{"name":"Bash","input":"*** Add File: x.ts\n","out":"*** Add File: x.ts"}
+{"name":"apply_patch","input":"*** Add File: x.ts\n","out":"x.ts"}
+{"name":"shell","input":"*** Add File: x.ts\n","out":"*** Add File: x.ts"}
+{"name":"Bash","input":"plain text","out":"plain text"}
+{"name":"apply_patch","input":"plain text","out":"plain text"}
+{"name":"shell","input":"plain text","out":"plain text"}
+{"name":"Bash","input":"  [1, 2]","out":""}
+{"name":"apply_patch","input":"  [1, 2]","out":""}
+{"name":"shell","input":"  [1, 2]","out":""}
+{"name":"Bash","input":" {bad json","out":"{bad json"}
+{"name":"apply_patch","input":" {bad json","out":"{bad json"}
+{"name":"shell","input":" {bad json","out":"{bad json"}
+{"name":"Bash","input":"[]","out":""}
+{"name":"apply_patch","input":"[]","out":""}
+{"name":"shell","input":"[]","out":""}
+{"name":"Bash","input":"{}","out":""}
+{"name":"apply_patch","input":"{}","out":""}
+{"name":"shell","input":"{}","out":""}
+{"name":"Bash","input":5,"out":""}
+{"name":"apply_patch","input":5,"out":""}
+{"name":"shell","input":5,"out":""}
+{"name":"Bash","input":true,"out":""}
+{"name":"apply_patch","input":true,"out":""}
+{"name":"shell","input":true,"out":""}
+{"name":"Bash","input":null,"out":""}
+{"name":"apply_patch","input":null,"out":""}
+{"name":"shell","input":null,"out":""}
+{"name":"Bash","out":""}
+{"name":"apply_patch","out":""}
+{"name":"shell","out":""}
+{"name":"Bash","input":[],"out":""}
+{"name":"apply_patch","input":[],"out":""}
+{"name":"shell","input":[],"out":""}
+{"name":"Bash","input":["a"],"out":""}
+{"name":"apply_patch","input":["a"],"out":""}
+{"name":"shell","input":["a"],"out":""}
+{"name":"Bash","input":{"query":7,"path":"   ","name":"n"},"out":"n"}
+{"name":"apply_patch","input":{"query":7,"path":"   ","name":"n"},"out":"n"}
+{"name":"shell","input":{"query":7,"path":"   ","name":"n"},"out":"n"}
+{"name":"Bash","input":{"description":"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"},"out":"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\ud83d…"}
+{"name":"apply_patch","input":{"description":"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"},"out":"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\ud83d…"}
+{"name":"shell","input":{"description":"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"},"out":"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\ud83d…"}
+{"name":"Bash","input":{"skill":"pdf"},"out":"pdf"}
+{"name":"apply_patch","input":{"skill":"pdf"},"out":"pdf"}
+{"name":"shell","input":{"skill":"pdf"},"out":"pdf"}
+{"name":"Bash","input":{"notebook_path":"n.ipynb","file_path":""},"out":"n.ipynb"}
+{"name":"apply_patch","input":{"notebook_path":"n.ipynb","file_path":""},"out":"n.ipynb"}
+{"name":"shell","input":{"notebook_path":"n.ipynb","file_path":""},"out":"n.ipynb"}
+{"name":"Bash","input":{"prompt":"a b\tc"},"out":"a b c"}
+{"name":"apply_patch","input":{"prompt":"a b\tc"},"out":"a b c"}
+{"name":"shell","input":{"prompt":"a b\tc"},"out":"a b c"}
+{"name":"Bash","input":{"cmd":["git","status"]},"out":"git status"}
+{"name":"apply_patch","input":{"cmd":["git","status"]},"out":"git status"}
+{"name":"shell","input":{"cmd":["git","status"]},"out":"git status"}
+{"name":"Bash","input":"state.json\nemoji😀 a \r\n ꭰ　Ⱥ","out":"state.json emoji😀 a ꭰ Ⱥ"}
+{"name":"shell","input":"Ḁḃ \r\n ǰ\n\nⅫ ǅ \r\n 👍🏽","out":"Ḁḃ ǰ Ⅻ ǅ 👍🏽"}
+{"name":"Read","input":"zapis \r\n ŉ　Ⅻ  ϴ state.json","out":"zapis ŉ Ⅻ ϴ state.json"}
+{"name":"Bash","input":"C:\\work\\a\tŉ\nΩ <tag>\tı","out":"C:\\work\\a ŉ Ω <tag> ı"}
+{"name":"Bash","input":"{\"command\":[\"bash\",\"-lc\",\"ΟΔΟΣ\\tnaïve\"]}","out":"ΟΔΟΣ naïve"}
+{"name":"Read","input":"ǅ　ȿ　İ a Ⓐ","out":"ǅ ȿ İ a Ⓐ"}
+{"name":"shell","input":"{\"command\":[\"bash\",\"-Command\",\"Việt ΟΔΟΣ\"]}","out":"Việt ΟΔΟΣ"}
+{"name":"shell","input":"redis emoji😀 Ǆemal ǰ Việt","out":"redis emoji😀 Ǆemal ǰ Việt"}
+{"name":"apply_patch","input":{"prompt":"ı　ﬁle　ﬀ ΌΣΟΣ  σοφός\nNEEDLE x 𞤀 Zażółć ab\n\nⅫ\n\nTiếng\tjaźń  ϴ\nŉ Ꭰ\n/usr/bin\tNapraw  𐐀𐐨  ab\t𐐀𐐨　K　C:\\work\\a \r\n Ⅻ\tstate.json 𞤀 đường\tﬁle ᾈ\tatomicWrite"},"out":"ı ﬁle ﬀ ΌΣΟΣ σοφός NEEDLE x 𞤀 Zażółć ab Ⅻ Tiếng jaźń ϴ ŉ Ꭰ /usr/bin Napraw 𐐀𐐨 ab 𐐀𐐨 K C:\\work\\a Ⅻ state.json 𞤀 đường ﬁle ᾈ atomicWrite"}
+{"name":"shell","input":"{\"command\":[\"sh\",\"-Command\",\"İstanbul　straße\"]}","out":"İstanbul straße"}
+{"name":"shell","input":{"name":"ĳ atomicWrite  Ꭰ\tΩ\nẞ\nŒuvre　ᾈ　atomicWrite ΟΔΟΣ test \r\n ᾈ  ꞵ　👍🏽　Ǆemal \r\n đường\n\nđường\n\nTiếng\n\nÆrø\nstate.json\t<tag>\n\nǰ\tⅫ　İstanbul  K\n\nῼ  Redis　emoji😀 İ emoji😀 stanu  /usr/bin Ⓐ\tzakładki\tstanu  Tiếng\nȺ\tstraße  straße　Ærø\n\n𞤀 jaźń \r\n test\n<tag>"},"out":"ĳ atomicWrite Ꭰ Ω ẞ Œuvre ᾈ atomicWrite ΟΔΟΣ test ᾈ ꞵ 👍🏽 Ǆemal đường đường Tiếng Ærø state.json <tag> ǰ Ⅻ İstanbul K ῼ Redis emoji😀 İ emoji😀 stanu /usr/bin…"}
+{"name":"apply_patch","input":{"command":"日本語　ŀ\nZażółć"},"out":"日本語 ŀ Zażółć"}
+{"name":"shell","input":"atomicWrite ı\nİ\n\na  ẞ","out":"atomicWrite ı İ a ẞ"}
+{"name":"apply_patch","input":"{\"command\":[\"pwsh\",\"-lc\",\"𞤀\\n\\nⅫ\"]}","out":"𞤀 Ⅻ"}
+{"name":"Read","input":"ab\nŒuvre state.json\n\nGĘŚLĄ  👍🏽","out":"ab Œuvre state.json GĘŚLĄ 👍🏽"}
+{"name":"Bash","input":{"url":"<tag> ꞵ\t日本語\tᾈ\tNEEDLE \r\n İ\nǰ\tstate.json\n\nḀḃ\n\nrésumé \r\n ǰ \r\n zakładki\tGĘŚLĄ\tNEEDLE 𐐀𐐨 \r\n straße\n\nﬀ İ\nȿ Redis GĘŚLĄ\nȿ  ab ϴ \r\n Redis\nstanu  Redis\tῼ \r\n GĘŚLĄ Łódź /usr/bin ϴ 𐐀𐐨"},"out":"<tag> ꞵ 日本語 ᾈ NEEDLE İ ǰ state.json Ḁḃ résumé ǰ zakładki GĘŚLĄ NEEDLE 𐐀𐐨 straße ﬀ İ ȿ Redis GĘŚLĄ ȿ ab ϴ Redis stanu Redis ῼ GĘŚLĄ Łódź /usr/bin ϴ 𐐀𐐨"}
+{"name":"shell","input":{"path":"atomicWrite ΣΟΦΙΑΣ ꭰ  ꭰ\n𐐀𐐨\t<tag>  ﬁle\n한국어 𐐀𐐨 C:\\work\\a \"quoted\" C:\\work\\a İ 𞤀 Napraw Ǆemal\tx σοφός　Test-run \r\n redis  Œuvre\tΟΔΟΣ Ⱥ  Tiếng  \"quoted\"\tΩ ĳ test\tstanu \r\n Ǆemal　/usr/bin  Ⅻ　GĘŚLĄ GĘŚLĄ \r\n jaźń 한국어 𞤀  日本語  ῼ Tiếng　Ω stanu ẞ　Œuvre Zażółć\tredis"},"out":"atomicWrite ΣΟΦΙΑΣ ꭰ ꭰ 𐐀𐐨 <tag> ﬁle 한국어 𐐀𐐨 C:\\work\\a \"quoted\" C:\\work\\a İ 𞤀 Napraw Ǆemal x σοφός Test-run redis Œuvre ΟΔΟΣ Ⱥ Tiếng \"quoted\" Ω ĳ test stanu…"}
+{"name":"Bash","input":{"command":"ΟΔΟΣ\n\n日本語 Ꭰ"},"out":"ΟΔΟΣ 日本語 Ꭰ"}
+{"name":"apply_patch","input":{"path":"Redis 𞤀 \r\n naïve \r\n ȿ  zakładki 한국어\n\nGĘŚLĄ\n<tag>\tredis \r\n Ærø\tŀ　Zażółć\n\nı ǰ　ǰ résumé\t/usr/bin x\n\nrésumé NEEDLE \r\n ı pool \r\n atomicWrite ΟΔΟΣ\tRedis \r\n ﬁle\nrésumé  ﬁle Tiếng emoji😀　ǈ  Redis　\"quoted\"\n\"quoted\""},"out":"Redis 𞤀 naïve ȿ zakładki 한국어 GĘŚLĄ <tag> redis Ærø ŀ Zażółć ı ǰ ǰ résumé /usr/bin x résumé NEEDLE ı pool atomicWrite ΟΔΟΣ Redis ﬁle résumé ﬁle Tiếng emoji😀 ǈ…"}
+{"name":"Read","input":"emoji😀 zapis Ǆemal pool ǰ","out":"emoji😀 zapis Ǆemal pool ǰ"}
+{"name":"shell","input":"{\"command\":[\"pwsh\",\"-lc\",\"Œuvre ϴ\"]}","out":"Œuvre ϴ"}
+{"name":"shell","input":"{\"command\":[\"pwsh\",\"-c\",\"zapis \\r\\n İstanbul\"]}","out":"zapis İstanbul"}
+{"name":"Bash","input":"zapis Ǆemal  ﬁle\nİstanbul \r\n σοφός","out":"zapis Ǆemal ﬁle İstanbul σοφός"}
+{"name":"Bash","input":{"command":"한국어\tRedis state.json"},"out":"한국어 Redis state.json"}
+{"name":"apply_patch","input":{"prompt":"Napraw ǰ  Việt Œuvre  ῼ\nǈ ΟΔΟΣ  한국어　ῼ　C:\\work\\a\n日本語 Test-run \r\n NEEDLE ŀ Ⱥ \r\n naïve \r\n ǅ Ærø\n\nﬀ zapis K ﬀ\nΟΔΟΣ <tag>\t日本語 ǅ\n\nŉ σοφός zapis 日本語  đường x"},"out":"Napraw ǰ Việt Œuvre ῼ ǈ ΟΔΟΣ 한국어 ῼ C:\\work\\a 日本語 Test-run NEEDLE ŀ Ⱥ naïve ǅ Ærø ﬀ zapis K ﬀ ΟΔΟΣ <tag> 日本語 ǅ ŉ σοφός zapis 日本語 đường x"}
+{"name":"apply_patch","input":"Ⱥ\n\nꞵ ı\nȿ\n\nﬁle","out":"Ⱥ ꞵ ı ȿ ﬁle"}
+{"name":"shell","input":"{\"command\":[\"pwsh\",\"-Command\",\"Napraw\\tstraße\"]}","out":"Napraw straße"}
+{"name":"Read","input":"𞤀 ꞵ\n\na\n\nŁódź\n\nRedis","out":"𞤀 ꞵ a Łódź Redis"}
+{"name":"apply_patch","input":"{\"command\":[\"sh\",\"-c\",\"ı Å\"]}","out":"ı Å"}
+{"name":"Read","input":"{\"command\":[\"bash\",\"-c\",\"Zażółć ĳ\"]}","out":"Zażółć ĳ"}
+{"name":"Bash","input":"Ⓐ \r\n ᾈ　ꞵ 日本語　ΌΣΟΣ","out":"Ⓐ ᾈ ꞵ 日本語 ΌΣΟΣ"}
+{"name":"Read","input":"{\"command\":[\"sh\",\"-lc\",\"straße ǅ\"]}","out":"straße ǅ"}
+{"name":"apply_patch","input":"ǰ İstanbul  ꭰ \r\n résumé ǅ","out":"ǰ İstanbul ꭰ résumé ǅ"}
+{"name":"Bash","input":{"name":"ŉ đường Ǆemal  đường\n👍🏽　Redis ῼ ȿ\nⒶ Redis Å Test-run\nǄemal emoji😀 𐐀𐐨 \r\n ΌΣΟΣ\n\nŉ\nŁódź\tⒶ ŉ\n\nǈ　stanu σοφός \r\n Zażółć Å ab ǅ"},"out":"ŉ đường Ǆemal đường 👍🏽 Redis ῼ ȿ Ⓐ Redis Å Test-run Ǆemal emoji😀 𐐀𐐨 ΌΣΟΣ ŉ Łódź Ⓐ ŉ ǈ stanu σοφός Zażółć Å ab ǅ"}
+{"name":"Read","input":{"name":"Zażółć ǈ　GĘŚLĄ redis ῼ　straße x  GĘŚLĄ <tag> Ḁḃ 𐐀𐐨 Ǆemal  ab Œuvre  K\n日本語\n\nǰ\t\"quoted\"\tĳ  İ  ĳ　ﬁle TEST ı \r\n test Œuvre  <tag>　ΣΟΦΙΑΣ 日本語 日本語 𐐀𐐨\n\nstate.json 日本語 \r\n ab\n\nx"},"out":"Zażółć ǈ GĘŚLĄ redis ῼ straße x GĘŚLĄ <tag> Ḁḃ 𐐀𐐨 Ǆemal ab Œuvre K 日本語 ǰ \"quoted\" ĳ İ ĳ ﬁle TEST ı test Œuvre <tag> ΣΟΦΙΑΣ 日本語 日本語 𐐀𐐨 state.json 日本語 ab x"}
+{"name":"Bash","input":"ŀ\tTEST　ǅ　ı \"quoted\"","out":"ŀ TEST ǅ ı \"quoted\""}
+{"name":"apply_patch","input":{"cmd":"emoji😀  ꭰ  İ\n\nİstanbul  jaźń  state.json Łódź　ǰ 𞤀 Napraw NEEDLE\nemoji😀\n日本語　ΣΟΦΙΑΣ  σοφός\tǰ ﬁle"},"out":"emoji😀 ꭰ İ İstanbul jaźń state.json Łódź ǰ 𞤀 Napraw NEEDLE emoji😀 日本語 ΣΟΦΙΑΣ σοφός ǰ ﬁle"}
+{"name":"Bash","input":"{\"command\":[\"pwsh\",\"-lc\",\"ȿ ΌΣΟΣ\"]}","out":"ȿ ΌΣΟΣ"}
+{"name":"Read","input":"zapis zakładki Ꭰ Ⱥ\n\nx","out":"zapis zakładki Ꭰ Ⱥ x"}
+{"name":"Bash","input":{"path":"Test-run\n\n日本語\n\nab <tag>\n\na \r\n jaźń　ΌΣΟΣ　ϴ ΟΔΟΣ  ǰ Å \r\n résumé  ϴ Napraw　Zażółć\nredis Ꭰ  x"},"out":"Test-run 日本語 ab <tag> a jaźń ΌΣΟΣ ϴ ΟΔΟΣ ǰ Å résumé ϴ Napraw Zażółć redis Ꭰ x"}
+{"name":"apply_patch","input":"ı\n\nᎠ　C:\\work\\a \r\n ΟΔΟΣ  NEEDLE","out":"ı Ꭰ C:\\work\\a ΟΔΟΣ NEEDLE"}
+{"name":"Bash","input":"{\"command\":[\"sh\",\"-lc\",\"atomicWrite \\r\\n résumé\"]}","out":"atomicWrite résumé"}
+{"name":"Read","input":{"query":"résumé \r\n Ærø σοφός ꞵ NEEDLE \r\n emoji😀　x ǅ  atomicWrite\tῼ redis ĳ \r\n ΌΣΟΣ\nῼ ǅ\tstate.json"},"out":"résumé Ærø σοφός ꞵ NEEDLE emoji😀 x ǅ atomicWrite ῼ redis ĳ ΌΣΟΣ ῼ ǅ state.json"}
+{"name":"Bash","input":{"command":"state.json\nǄemal\nŁódź"},"out":"state.json Ǆemal Łódź"}
+{"name":"Bash","input":"{\"command\":[\"bash\",\"-lc\",\"ab ǅ\"]}","out":"ab ǅ"}
+{"name":"apply_patch","input":"Ⅻ　Ꭰ ȿ\n\nx İ","out":"Ⅻ Ꭰ ȿ x İ"}
+{"name":"Read","input":"{\"command\":[\"bash\",\"-lc\",\"Zażółć\\npool\"]}","out":"Zażółć pool"}
+{"name":"shell","input":"{\"command\":[\"bash\",\"-c\",\"đường\\tΩ\"]}","out":"đường Ω"}
+{"name":"Read","input":{"prompt":"ᾈ ΌΣΟΣ\ntest \r\n stanu\n\nK NEEDLE 𞤀\nΩ  redis ǰ ǰ\n\nȺ \r\n Test-run /usr/bin\n\nσοφός ĳ 日本語　ϴ\nꭰ Ⓐ\nRedis Redis\n\n<tag> C:\\work\\a　𐐀𐐨\n\nϴ  ΟΔΟΣ Napraw Ⱥ  Å 𐐀𐐨 \r\n state.json \r\n zakładki ǰ"},"out":"ᾈ ΌΣΟΣ test stanu K NEEDLE 𞤀 Ω redis ǰ ǰ Ⱥ Test-run /usr/bin σοφός ĳ 日本語 ϴ ꭰ Ⓐ Redis Redis <tag> C:\\work\\a 𐐀𐐨 ϴ ΟΔΟΣ Napraw Ⱥ Å 𐐀𐐨 state.json zakładki ǰ"}
+{"name":"Read","input":"{\"command\":[\"pwsh\",\"-lc\",\"ǰ \\r\\n 日本語\"]}","out":"ǰ 日本語"}
+{"name":"apply_patch","input":{"path":"atomicWrite\tGĘŚLĄ \r\n test\nstanu \r\n TEST 👍🏽 NEEDLE　ȿ \r\n stanu ﬁle ΌΣΟΣ\temoji😀 NEEDLE\nŒuvre \r\n C:\\work\\a\tx　/usr/bin　ǈ　<tag> C:\\work\\a  Tiếng\n\nNapraw İstanbul ΣΟΦΙΑΣ ᾈ \r\n K Ⅻ\n\nﬀ\nZażółć İ résumé\n\nḀḃ\n\nViệt\nzakładki \r\n Ḁḃ　Å\nⒶ\tŉ ΣΟΦΙΑΣ\n\nemoji😀 \r\n ﬁle"},"out":"atomicWrite GĘŚLĄ test stanu TEST 👍🏽 NEEDLE ȿ stanu ﬁle ΌΣΟΣ emoji😀 NEEDLE Œuvre C:\\work\\a x /usr/bin ǈ <tag> C:\\work\\a Tiếng Napraw İstanbul ΣΟΦΙΑΣ ᾈ K Ⅻ ﬀ…"}
+{"name":"Bash","input":"{\"command\":[\"sh\",\"-Command\",\"ǅ σοφός\"]}","out":"ǅ σοφός"}
+{"name":"Bash","input":{"cmd":"naïve \r\n 日本語  Napraw　Ⅻ　Ǆemal  ᾈ\n\nRedis  Å  ab\nTEST Ꭰ　TEST Redis \r\n Zażółć\nȺ\n\nẞ C:\\work\\a\nab  GĘŚLĄ\tTiếng state.json \"quoted\" \r\n GĘŚLĄ\n\nđường　Ⓐ \r\n straße \r\n Việt Å ΣΟΦΙΑΣ emoji😀 ﬁle ﬁle σοφός \r\n naïve \r\n ŀ \r\n résumé　redis　ϴ  K  İ İ\nstate.json Napraw Ærø  日本語"},"out":"naïve 日本語 Napraw Ⅻ Ǆemal ᾈ Redis Å ab TEST Ꭰ TEST Redis Zażółć Ⱥ ẞ C:\\work\\a ab GĘŚLĄ Tiếng state.json \"quoted\" GĘŚLĄ đường Ⓐ straße Việt Å ΣΟΦΙΑΣ emoji😀 ﬁle …"}
+{"name":"shell","input":"test naïve Ǆemal ꭰ ab","out":"test naïve Ǆemal ꭰ ab"}
+{"name":"apply_patch","input":{"command":"Ⅻ  ŀ résumé"},"out":"Ⅻ ŀ résumé"}
+{"name":"Bash","input":"đường  stanu\tnaïve zapis zakładki","out":"đường stanu naïve zapis zakładki"}
+{"name":"apply_patch","input":{"prompt":"Œuvre <tag>\nstate.json atomicWrite\tǈ Redis \r\n ẞ Napraw GĘŚLĄ naïve TEST \r\n 𞤀 TEST ᾈ atomicWrite Łódź <tag>\nⅫ\t한국어  İ\tῼ\n\nzapis ꞵ Việt　ĳ　test ϴ zakładki  naïve K Tiếng　ᾈ\n\nstanu K ﬀ\tzakładki ab　TEST　stanu  ȿ　pool\tΩ Napraw Łódź\tȺ\nnaïve ῼ\n\nⒶ\n\n/usr/bin\n\nǰ \r\n Ærø\n\n/usr/bin \r\n ΌΣΟΣ\n<tag>　redis Ꭰ Tiếng　pool　<tag>"},"out":"Œuvre <tag> state.json atomicWrite ǈ Redis ẞ Napraw GĘŚLĄ naïve TEST 𞤀 TEST ᾈ atomicWrite Łódź <tag> Ⅻ 한국어 İ ῼ zapis ꞵ Việt ĳ test ϴ zakładki naïve K Tiếng ᾈ …"}
+{"name":"Read","input":{"name":"ǰ  zakładki　TEST ῼ Łódź\nRedis　ΌΣΟΣ  İ \r\n Ⱥ ῼ 𐐀𐐨 \r\n stanu\n\nŉ\n\nϴ　TEST　Test-run\nꞵ Ⅻ　ı zapis  résumé Œuvre　ῼ Ω \r\n Test-run \r\n test\n\nzakładki \r\n \"quoted\" \r\n test test Ⅻ　x ﬁle"},"out":"ǰ zakładki TEST ῼ Łódź Redis ΌΣΟΣ İ Ⱥ ῼ 𐐀𐐨 stanu ŉ ϴ TEST Test-run ꞵ Ⅻ ı zapis résumé Œuvre ῼ Ω Test-run test zakładki \"quoted\" test test Ⅻ x ﬁle"}
+{"name":"Read","input":{"prompt":"zapis a\n\n日本語\tŒuvre \r\n ϴ Łódź\n\n한국어 \"quoted\" jaźń Ⱥ  ǰ \r\n ȿ Å\nǈ GĘŚLĄ ΌΣΟΣ\nǈ\n\nİstanbul zapis Œuvre\ta\n\nΣΟΦΙΑΣ\n\na\n\nNEEDLE  ﬀ\nŒuvre\n\n/usr/bin naïve Ⓐ  Łódź \r\n 👍🏽\n\n👍🏽 ẞ"},"out":"zapis a 日本語 Œuvre ϴ Łódź 한국어 \"quoted\" jaźń Ⱥ ǰ ȿ Å ǈ GĘŚLĄ ΌΣΟΣ ǈ İstanbul zapis Œuvre a ΣΟΦΙΑΣ a NEEDLE ﬀ Œuvre /usr/bin naïve Ⓐ Łódź 👍🏽 👍🏽 ẞ"}
+{"name":"Read","input":"{\"command\":[\"sh\",\"-c\",\"ǈ \\r\\n TEST\"]}","out":"ǈ TEST"}
+{"name":"Bash","input":"{\"command\":[\"sh\",\"-lc\",\"naïve \\r\\n GĘŚLĄ\"]}","out":"naïve GĘŚLĄ"}
+{"name":"apply_patch","input":{"command":"한국어 İstanbul 𐐀𐐨"},"out":"한국어 İstanbul 𐐀𐐨"}
+{"name":"apply_patch","input":"İstanbul\n\nab\nemoji😀 /usr/bin ῼ","out":"İstanbul ab emoji😀 /usr/bin ῼ"}
+{"name":"shell","input":{"name":"\"quoted\"\n\nΟΔΟΣ ꭰ Ⓐ\n한국어 ꭰ résumé atomicWrite  atomicWrite\nzakładki Łódź zakładki \r\n zakładki Œuvre\n\nᾈ Œuvre naïve\t𞤀\n\nİ  Ⅻ ı Ⓐ\n\nemoji😀\tC:\\work\\a　redis\n日本語 redis ǰ  <tag> NEEDLE ϴ naïve zakładki  ǈ　naïve Ḁḃ ΟΔΟΣ\tŒuvre\n\nstanu\ntest\n\nTEST ab"},"out":"\"quoted\" ΟΔΟΣ ꭰ Ⓐ 한국어 ꭰ résumé atomicWrite atomicWrite zakładki Łódź zakładki zakładki Œuvre ᾈ Œuvre naïve 𞤀 İ Ⅻ ı Ⓐ emoji😀 C:\\work\\a redis 日本語 redis ǰ <tag>…"}
+{"name":"Bash","input":{"name":"Redis \r\n ꞵ Zażółć\tΟΔΟΣ \r\n ab \r\n Ꭰ emoji😀 ab ᾈ\tϴ\tx Ærø İstanbul \r\n đường ŀ Zażółć\nK\tđường\tpool\n\nK ϴ \r\n GĘŚLĄ Ḁḃ　ꭰ　K ῼ GĘŚLĄ\nÅ"},"out":"Redis ꞵ Zażółć ΟΔΟΣ ab Ꭰ emoji😀 ab ᾈ ϴ x Ærø İstanbul đường ŀ Zażółć K đường pool K ϴ GĘŚLĄ Ḁḃ ꭰ K ῼ GĘŚLĄ Å"}
+{"name":"shell","input":"ᾈ <tag>  Ω Ꭰ σοφός","out":"ᾈ <tag> Ω Ꭰ σοφός"}
+{"name":"Read","input":"Ω zakładki \r\n İstanbul \r\n zapis　Ω","out":"Ω zakładki İstanbul zapis Ω"}
+{"name":"Read","input":{"url":"Napraw\nẞ test test\tpool\n\nđường\nrésumé atomicWrite\nḀḃ 𐐀𐐨\nǰ 日本語 ı \r\n ꭰ ΣΟΦΙΑΣ  ǈ zakładki\n\n日本語 \r\n \"quoted\" 日本語 ĳ"},"out":"Napraw ẞ test test pool đường résumé atomicWrite Ḁḃ 𐐀𐐨 ǰ 日本語 ı ꭰ ΣΟΦΙΑΣ ǈ zakładki 日本語 \"quoted\" 日本語 ĳ"}
+{"name":"Read","input":"{\"command\":[\"bash\",\"-c\",\"Napraw ΟΔΟΣ\"]}","out":"Napraw ΟΔΟΣ"}
+{"name":"apply_patch","input":"{\"command\":[\"sh\",\"-c\",\"Napraw \\r\\n 한국어\"]}","out":"Napraw 한국어"}
+{"name":"Read","input":"{\"command\":[\"bash\",\"-c\",\"ŀ\\n\\na\"]}","out":"ŀ a"}
+{"name":"Bash","input":{"prompt":"İ\n\nNEEDLE \r\n 한국어\nstanu　Ꭰ C:\\work\\a\n\nC:\\work\\a ᾈ　👍🏽 state.json Ḁḃ ΣΟΦΙΑΣ　ΣΟΦΙΑΣ \r\n ϴ <tag>\n\n日本語"},"out":"İ NEEDLE 한국어 stanu Ꭰ C:\\work\\a C:\\work\\a ᾈ 👍🏽 state.json Ḁḃ ΣΟΦΙΑΣ ΣΟΦΙΑΣ ϴ <tag> 日本語"}
+{"name":"Read","input":"İstanbul Test-run\nK Œuvre\tῼ","out":"İstanbul Test-run K Œuvre ῼ"}
+{"name":"shell","input":{"url":"ΌΣΟΣ İ Zażółć \r\n <tag>  Ꭰ Łódź  Ⅻ\nnaïve　zapis Łódź \r\n Ꭰ \r\n 한국어\tÅ\n\nĳ İstanbul jaźń\t\"quoted\"　ΌΣΟΣ  ŀ Ærø Ǆemal\nstate.json ǅ redis\nZażółć emoji😀\n\nŉ\n\nΣΟΦΙΑΣ\n<tag>\n\nNapraw\n<tag> ϴ\tjaźń  Ꭰ C:\\work\\a　👍🏽\nⅫ straße\t𞤀  test ᾈ jaźń ﬀ \r\n 𐐀𐐨　ΟΔΟΣ\tϴ \r\n ΌΣΟΣ  ǅ\n\nȿ"},"out":"ΌΣΟΣ İ Zażółć <tag> Ꭰ Łódź Ⅻ naïve zapis Łódź Ꭰ 한국어 Å ĳ İstanbul jaźń \"quoted\" ΌΣΟΣ ŀ Ærø Ǆemal state.json ǅ redis Zażółć emoji😀 ŉ ΣΟΦΙΑΣ <tag> Napraw <tag> ϴ…"}
+{"name":"Bash","input":"stanu TEST　Ⓐ İstanbul \r\n ǈ","out":"stanu TEST Ⓐ İstanbul ǈ"}
+{"name":"Read","input":{"command":"C:\\work\\a 日本語 ꭰ"},"out":"C:\\work\\a 日本語 ꭰ"}
+{"name":"apply_patch","input":{"prompt":"zapis /usr/bin\nȿ zapis ŉ\nΣΟΦΙΑΣ  Ǆemal ȿ  ΣΟΦΙΑΣ \"quoted\"\tῼ \r\n pool Napraw ŀ\n\nÅ Å ȿ \r\n x  ǅ\n\nđường ΣΟΦΙΑΣ\n\n👍🏽 state.json  ẞ Việt \r\n Łódź ﬁle"},"out":"zapis /usr/bin ȿ zapis ŉ ΣΟΦΙΑΣ Ǆemal ȿ ΣΟΦΙΑΣ \"quoted\" ῼ pool Napraw ŀ Å Å ȿ x ǅ đường ΣΟΦΙΑΣ 👍🏽 state.json ẞ Việt Łódź ﬁle"}
+{"name":"Bash","input":{"url":"𞤀 test\tnaïve  stanu \r\n Ḁḃ　straße TEST ꭰ\t日本語 Å\tⅫ\tΣΟΦΙΑΣ ΌΣΟΣ Ꭰ　résumé　straße  đường \r\n ǈ  ı \r\n Test-run\tŉ Redis\n\n日本語 ꭰ 👍🏽"},"out":"𞤀 test naïve stanu Ḁḃ straße TEST ꭰ 日本語 Å Ⅻ ΣΟΦΙΑΣ ΌΣΟΣ Ꭰ résumé straße đường ǈ ı Test-run ŉ Redis 日本語 ꭰ 👍🏽"}
+{"name":"shell","input":"{\"command\":[\"bash\",\"-lc\",\"a Œuvre\"]}","out":"a Œuvre"}
+{"name":"apply_patch","input":"naïve Ω ῼ \r\n ẞ　ῼ","out":"naïve Ω ῼ ẞ ῼ"}

@@ -84,12 +84,22 @@ pub struct ExecOptions {
     pub cwd: Option<PathBuf>,
     pub timeout: Duration,
     pub max_output: usize,
+    /// End the tree when a stream goes over `max_output` (execFile's maxBuffer). False: the excess is drained and dropped and
+    /// the program runs to its end (a git write must never be stopped half way, PLAN G1).
+    pub stop_at_cap: bool,
     pub stdin: Option<Vec<u8>>,
 }
 
 impl Default for ExecOptions {
     fn default() -> Self {
-        Self { env: None, cwd: None, timeout: Duration::from_secs(10), max_output: DEFAULT_MAX_OUTPUT, stdin: None }
+        Self {
+            env: None,
+            cwd: None,
+            timeout: Duration::from_secs(10),
+            max_output: DEFAULT_MAX_OUTPUT,
+            stop_at_cap: true,
+            stdin: None,
+        }
     }
 }
 
@@ -240,7 +250,7 @@ fn read_capped(mut r: impl Read + Send + 'static, cap: usize, over: Arc<AtomicBo
                     out.extend_from_slice(&buf[..n.min(room)]);
                     if n > room {
                         over.store(true, Ordering::Relaxed);
-                        // Keep draining so the child never blocks on a full pipe; the tree is killed by the waiter.
+                        // Keep draining so the child never blocks on a full pipe; with stop_at_cap the waiter ends the tree.
                     }
                 }
             }
@@ -249,7 +259,7 @@ fn read_capped(mut r: impl Read + Send + 'static, cap: usize, over: Arc<AtomicBo
     })
 }
 
-/// Runs a program to its end (or its timeout / output cap, which kill the whole tree). Blocking.
+/// Runs a program to its end (or its timeout, or its output cap with `stop_at_cap`, which kill the whole tree). Blocking.
 pub fn run(program: &Program, options: &ExecOptions) -> Result<ExecOutput, ExecError> {
     let mut tree = spawn_tree(program, options)?;
     if let Some(input) = &options.stdin
@@ -269,7 +279,7 @@ pub fn run(program: &Program, options: &ExecOptions) -> Result<ExecOutput, ExecE
         if let Some(status) = tree.child.try_wait()? {
             break Some(status);
         }
-        if over.load(Ordering::Relaxed) {
+        if options.stop_at_cap && over.load(Ordering::Relaxed) {
             tree.kill();
             break tree.child.wait().ok();
         }
@@ -458,6 +468,24 @@ mod tests {
         assert!(out.truncated);
         assert_eq!(out.stdout.len(), 256 * 1024);
         assert!(!out.ok());
+    }
+
+    #[test]
+    fn output_over_the_cap_is_dropped_without_stopping_when_asked() {
+        let script = if cfg!(windows) {
+            "(for /L %i in (1,1,200) do @echo 0123456789012345678901234567890123456789) & exit 7"
+        } else {
+            "i=0; while [ $i -lt 200 ]; do echo 0123456789012345678901234567890123456789; i=$((i+1)); done; exit 7"
+        };
+        let out = run(
+            &shell(script),
+            &ExecOptions { timeout: Duration::from_secs(30), max_output: 1024, stop_at_cap: false, ..Default::default() },
+        )
+        .unwrap();
+        assert!(out.truncated);
+        assert_eq!(out.stdout.len(), 1024);
+        // ran to its end: the exit code is the program's own
+        assert_eq!(out.code, Some(7));
     }
 
     #[test]

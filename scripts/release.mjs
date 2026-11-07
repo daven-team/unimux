@@ -1,7 +1,8 @@
 // npm run publish-release -- [patch|minor|major|x.y.z] --title "short summary" [--current] [--dry-run]
 //
 // Releases through the GitHub workflows, never from this machine:
-//   1. checks the working tree, branch and release notes, runs typecheck and tests
+//   1. checks the working tree, branch and release notes, runs the release gates (verify-cli-contract, verify-team-start
+//      on the check build), typecheck and tests
 //   2. bumps the version, commits "release: X.Y.Z with <title>" and tags vX.Y.Z
 //   3. pushes main and the tag together (no force)
 //   4. waits for the CI run on the tag (Windows + both Mac builds)
@@ -60,8 +61,27 @@ const unexpected = dirty.filter((file) => !releaseFiles.includes(file));
 if (unexpected.length) fail(`Commit or stash these files first:\n  ${unexpected.join('\n  ')}`);
 console.log(`Releasing ${tag} on ${repository}: "release: ${next} with ${title}"`);
 
+// ── release gates (PLAN X1) ────────────────────────────────────────────────
+// The command-line contract of the installed claude / codex CLIs and the background start of team workers, both against the
+// app as it ships (the Tauri check build of this commit: npm run build:check). A blocked result (exit code 2: a package has
+// not landed) stops the release like a failure. Run in a dry run too, so a release never gets as far as the tag without them.
+const GATES = ['scripts/verify-cli-contract.mjs', 'scripts/verify-team-start.mjs'];
+// The check build is made from this working tree right here (only the release notes may differ from this commit), never
+// taken from whatever an earlier build left in src-tauri/target/check; the gates run on the Tauri target and that binary
+// only, whatever MC_APP_TARGET / MC_APP_BINARY the shell still has.
+step('Check build of this commit (npm run build:check)');
+try { run(NPM, ['run', 'build:check'], { inherit: true }); }
+catch { fail('npm run build:check failed. The release gates need the check build of this commit.'); }
+const gateEnv = { ...process.env, MC_APP_TARGET: 'tauri' };
+delete gateEnv.MC_APP_BINARY;
+step(`Release gates: ${GATES.map((g) => g.replace('scripts/', '')).join(', ')}`);
+for (const gate of GATES) {
+  try { execFileSync(process.execPath, [gate], { stdio: 'inherit', env: gateEnv }); }
+  catch (error) { fail(`${gate} ${error.status === 2 ? 'is blocked (a package has not landed)' : 'failed'}. Fix it before releasing.`); }
+}
+
 if (dryRun) {
-  console.log('\nDry run: checks passed; would run typecheck and tests, commit, tag, push, wait for CI and publish.');
+  console.log('\nDry run: checks and release gates passed; would run typecheck and tests, commit, tag, push, wait for CI and publish.');
   process.exit(0);
 }
 

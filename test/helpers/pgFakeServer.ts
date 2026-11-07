@@ -42,7 +42,7 @@ export interface FakePg {
 
 interface Backend { pid: number; secret: number; settings: Map<string, string>; tx: 'I' | 'T' | 'E'; sleeping: ((reason: 'cancel') => void) | null }
 
-class SqlError extends Error { constructor(readonly code: string, message: string) { super(message); } }
+class SqlError extends Error { readonly code: string; constructor(code: string, message: string) { super(message); this.code = code; } }
 
 const int32 = (n: number) => { const b = Buffer.alloc(4); b.writeInt32BE(n); return b; };
 const int16 = (n: number) => { const b = Buffer.alloc(2); b.writeInt16BE(n); return b; };

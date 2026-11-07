@@ -1,4 +1,4 @@
-// Output throughput and timer cadence of the built app while its window is minimized (Windows only; run `npm run build` first).
+// Output throughput and timer cadence of the built app while its window is minimized (Windows only; run `npm run build:check` first, MC_APP_TARGET=electron: `npm run build`).
 // Two cmd cells in a scratch data dir and home; one runs a Node writer that prints 16 MB in 200-byte lines whenever a trigger
 // file appears and records how long its writes took (the pty holds the writer back while the renderer does not ack).
 // The window is minimized and restored with user32 ShowWindow on the window of the process this script started.
@@ -8,6 +8,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import { launchApp, sleep } from './ssh-ui-lib.mjs';
 import { removeScratch } from './app-env.mjs';
+import { measurementNeedsCompleteApp } from './real-app.mjs';
+
+// Numbers from an app that still answers MC_NOT_YET mean nothing: blocked until every package it calls landed.
+measurementNeedsCompleteApp();
 
 if (process.platform !== 'win32') throw new Error('perf-hidden is Windows only');
 const label = process.argv[2] ?? 'run';

@@ -1,1 +1,5 @@
 * text=auto eol=lf
+
+# Bundled binaries (src-tauri/resources/conpty/x64)
+*.dll binary
+*.exe binary

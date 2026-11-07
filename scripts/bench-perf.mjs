@@ -18,9 +18,13 @@ import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
-import electron from 'electron';
 import { removeScratch, scratchHome, scrubAppEnv } from './app-env.mjs';
 import { killTree, launchApp, sleep } from './ssh-ui-lib.mjs';
+import { isMainPage, isTauri, spawnApp } from './real-app.mjs';
+// Electron's main process is measured here (getAppMetrics, ipcMain timing): a 1.1.4 reference tool, not ported to the Tauri
+// build (X1 ports perf-grid, perf-hidden, perf-latency, perf-profile and bench-jank; R2 compares those with 1.1.4).
+if (isTauri) { console.log('SKIP: Electron reference tool (MC_APP_TARGET=electron); the Tauri build is measured by perf-grid, perf-hidden, perf-latency, perf-profile and bench-jank'); process.exit(0); }
+
 
 const opt = (name, fallback) => { const a = process.argv.find((x) => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : fallback; };
 
@@ -100,12 +104,12 @@ async function startupOnce(n) {
   const port = await freePort();
   const env = { ...scrubAppEnv({ ...process.env }), ...homeEnv, ...BASE_ENV, MC_DATA_DIR: join(root, 'data'), MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port) };
   const t0 = performance.now();
-  const child = spawn(electron, ['.'], { cwd: process.cwd(), env, windowsHide: true, stdio: 'ignore' });
+  const child = spawnApp({ cwd: process.cwd(), env, stdio: 'ignore' });
   const out = {};
   try {
     let target;
     while (!target && performance.now() - t0 < 30000) {
-      try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === 'page' && t.url.includes('index.html')); } catch { /* starting */ }
+      try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(isMainPage); } catch { /* starting */ }
       if (!target) await sleep(25);
     }
     if (!target) throw new Error('no window');

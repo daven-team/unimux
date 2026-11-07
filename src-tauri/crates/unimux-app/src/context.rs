@@ -14,6 +14,7 @@ use unimux_core::crash_log::{ReportLimiter, RollingLog};
 use unimux_core::dev_overrides::DevOverrides;
 use unimux_core::startup_timing::{StartupLog, StartupTimer};
 use unimux_ipc::{Call, EventSink, Events, Ports, Router, Scope, SendQueue, WindowGuard};
+use unimux_oscrypt::{Origin, SafeStorage};
 use unimux_state::broadcast::StateBroadcaster;
 use unimux_state::store::Saver;
 use unimux_state::{Normalizer, Platform, StateController, StateNormalizer};
@@ -51,12 +52,41 @@ impl EventSink for TauriSink {
     }
 }
 
+/// The safeStorage of this data dir. When the key is opened (Windows: at start, see main.rs; macOS: first use, lazy Keychain
+/// access) startup.log gets a `safe-storage-<origin>` mark and crash.log a line for a replaced or unreadable key.
+fn safe_storage(
+    data_dir: &std::path::Path,
+    overrides: &DevOverrides,
+    crash: &Arc<RollingLog>,
+    timer: &Arc<StartupTimer>,
+    startup_log: &Arc<StartupLog>,
+) -> SafeStorage {
+    let (crash, timer, startup_log) = (crash.clone(), timer.clone(), startup_log.clone());
+    // MC_SAFE_STORAGE_NAME (dev overrides only): a scratch Keychain item, so a harness run on a Mac never opens the real key.
+    let app_name = overrides.safe_storage_name.as_deref().unwrap_or(unimux_core::APP_NAME);
+    SafeStorage::new(data_dir, app_name, overrides.ssh_no_safestorage).on_open(move |origin, took| {
+        timer.mark(&format!("safe-storage-{}", origin.label()));
+        startup_log.flush(&timer);
+        let ms = took.as_millis();
+        match origin {
+            Origin::Replaced(reason) => {
+                crash.warn(&format!("safeStorage: Local State had no usable key, a new one was stored ({reason}, {ms} ms)"))
+            }
+            Origin::Failed(reason) => crash.warn(&format!("safeStorage unavailable: {reason} ({ms} ms)")),
+            Origin::Created | Origin::Migrated => crash.info(&format!("safeStorage key {} ({ms} ms)", origin.label())),
+            Origin::Existing | Origin::Off | Origin::Given => {}
+        }
+    })
+}
+
 pub struct AppContext {
     pub data_dir: PathBuf,
     pub overrides: DevOverrides,
     pub platform: Platform,
     pub windows_build: u32,
     pub crash: Arc<RollingLog>,
+    /// Electron's safeStorage for the SSH vault, the DB vault and the GitHub token (B2): opened on first use.
+    pub safe_storage: Arc<SafeStorage>,
     pub timer: Arc<StartupTimer>,
     pub startup_log: Arc<StartupLog>,
     pub state: Arc<StateController>,
@@ -75,9 +105,27 @@ pub struct AppContext {
     pub report_limiter: Mutex<ReportLimiter>,
     /// The main window was shown (first page load, renderer-boot or the 5 s fallback).
     pub main_shown: AtomicBool,
+    /// W4: notifications, the copied secret, shell, dialogs, Dock badge (set by commands::os::register).
+    pub os: OnceLock<Arc<crate::commands::os::OsService>>,
+    /// Detached windows (W5): the registry's windows, attach / detach, and the cell owners every routed event uses.
+    pub detached: Arc<crate::detached::DetachedService>,
+    /// Quit question, wind-down registry, session end, renderer crash and hang (W6).
+    pub lifecycle: Arc<crate::lifecycle::Lifecycle>,
+    /// The agent status hook server (H1) and the routing of its signals.
+    pub hooks: Arc<crate::hooks::Hooks>,
     /// Check build only: every renderer startup mark with the window label and the time (test_bridge `marks`).
     #[cfg(feature = "test-bridge")]
     pub test_marks: Mutex<Vec<(String, String, f64)>>,
+    /// What runs when the main window's page starts loading (a reload; 1.1.4 `did-start-loading`): the domains drop what
+    /// belonged to the old page (G5: the local files it opened).
+    pub main_page_hooks: Mutex<Vec<Arc<dyn Fn() + Send + Sync>>>,
+    /// Check build only: not-yet calls and recorded calls for the real-app harness (test_bridge `notYet`, `record`).
+    #[cfg(feature = "test-bridge")]
+    pub test_record: crate::test_record::TestRecorder,
+    /// Check build only: the state as loaded and normalized at startup (revision 0), before any renderer edit (test_bridge
+    /// `loaded`, verify-tauri-normalize).
+    #[cfg(feature = "test-bridge")]
+    pub test_loaded: Value,
 }
 
 impl AppContext {
@@ -91,6 +139,8 @@ impl AppContext {
     ) -> Arc<Self> {
         let normalizer: Arc<dyn Normalizer> = Arc::new(StateNormalizer);
         let controller = Arc::new(StateController::new(state, normalizer.clone()));
+        #[cfg(feature = "test-bridge")]
+        let test_loaded = controller.snapshot().to_json();
         let crash_for_saver = crash.clone();
         let saver = Saver::new(data_dir.clone(), Arc::new(move |m: &str| crash_for_saver.warn(m)));
         let sink = Arc::new(TauriSink::default());
@@ -110,12 +160,50 @@ impl AppContext {
         // A waiting batched state change leaves before any other event (stateBroadcast.ts flush).
         let b = broadcaster.clone();
         events.before_emit(move || b.flush());
+        let safe_storage = Arc::new(safe_storage(&data_dir, &overrides, &crash, &timer, &startup_log));
+        // After the saver and the broadcaster: its hook sees every change once they have it.
+        let crash_for_detached = crash.clone();
+        let detached = crate::detached::DetachedService::new(
+            controller.clone(),
+            events.clone(),
+            overrides.offscreen && !crate::detached::host::hidden_mode(),
+            Arc::new(move |m: &str| crash_for_detached.warn(m)),
+        );
+        let d = Arc::downgrade(&detached);
+        events.on_focus_cell(move |label| {
+            if let Some(d) = d.upgrade() {
+                d.focus_label(label);
+            }
+        });
+        let lifecycle = Arc::new(crate::lifecycle::Lifecycle::new());
+        crate::lifecycle::register_own_steps(&lifecycle, events.clone(), broadcaster.clone(), saver.clone(), crash.clone());
+        // Detached windows (W5) in the wind-down: from the start of the quit a closing window no longer gives its tab back, and
+        // in their own phase they close as they are (1.1.4 `quitting = true` in before-quit, then closeAllDetached).
+        let det = detached.clone();
+        lifecycle.wind_down.register(
+            crate::lifecycle::wind_down::phase::STOP_SERVICES,
+            "detached: quitting",
+            Duration::from_secs(1),
+            move || async move {
+                det.set_quitting(true);
+            },
+        );
+        let det = detached.clone();
+        lifecycle.wind_down.register(
+            crate::lifecycle::wind_down::phase::CLOSE_DETACHED,
+            "close detached windows",
+            Duration::from_secs(1),
+            move || async move {
+                det.close_all();
+            },
+        );
         Arc::new(Self {
             data_dir,
             overrides,
             platform: Platform::current(),
             windows_build: unimux_platform::windows_build(),
             crash,
+            safe_storage,
             timer,
             startup_log,
             state: controller,
@@ -131,9 +219,31 @@ impl AppContext {
             app_start_unclaimed: AtomicBool::new(true),
             report_limiter: Mutex::new(ReportLimiter::default()),
             main_shown: AtomicBool::new(false),
+            os: OnceLock::new(),
+            detached,
+            lifecycle,
+            hooks: Arc::new(crate::hooks::Hooks::default()),
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
+            main_page_hooks: Mutex::new(Vec::new()),
+            #[cfg(feature = "test-bridge")]
+            test_record: crate::test_record::TestRecorder::from_env(),
+            #[cfg(feature = "test-bridge")]
+            test_loaded,
         })
+    }
+
+    /// Registers `hook` for every start of a page load in the main window (reloads included).
+    pub fn on_main_page_started(&self, hook: impl Fn() + Send + Sync + 'static) {
+        self.main_page_hooks.lock().push(Arc::new(hook));
+    }
+
+    /// The main window's page started loading (windows.rs, PageLoadEvent::Started).
+    pub fn main_page_started(&self) {
+        let hooks: Vec<_> = self.main_page_hooks.lock().clone();
+        for hook in hooks {
+            hook();
+        }
     }
 
     pub fn app(&self) -> Option<&AppHandle> {

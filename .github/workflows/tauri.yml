@@ -21,6 +21,8 @@ env:
   RUST_TOOLCHAIN: '1.99.1'
   ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
   VITE_CONFIG_NATIVE_IGNORE_WARNING: 'true'
+  # npm ci runs before cargo test, so the A1 lock interop cases against the real proper-lockfile must run, never skip.
+  UNIMUX_REQUIRE_LOCK_INTEROP: '1'
 
 jobs:
   checks:
@@ -69,6 +71,12 @@ jobs:
         working-directory: src-tauri
       - run: cargo test --workspace
         working-directory: src-tauri
+      # B1 dual host: the existing .int suites against the Rust code through unimux-hostd (docs/tauri/HOSTD.md). The node
+      # host of the same suites runs in `npm test` above.
+      - name: .int suites on the Rust host (unimux-hostd)
+        run: npm run test:hostd
+        env:
+          UNIMUX_HOST_TARGETS: rust
       # The release rules (MC_* overrides, the DevTools port and the dev server origin compiled out: `cfg(not(dev_overrides))`
       # in unimux-app, PACKAGED in unimux-core) are only active in release builds, so they get their own clippy and tests.
       - run: cargo clippy --workspace --all-targets --release -- -D warnings
@@ -128,3 +136,28 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
           if-no-files-found: error
+
+  # PLAN W2 acceptance: the check build (dev-overrides + test-bridge) boots on macOS and the WebKit shims, the app menu and
+  # the text-substitution defaults are in place, checked over the eval bridge (WKWebView has no CDP). The manual items
+  # (traffic lights, Cmd+V, IME, WebGL settling, App Nap) are R3's checklist.
+  mac-smoke:
+    name: macOS eval-bridge smoke
+    needs: checks
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri -> target/check
+          key: check
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:check
+      - run: node scripts/smoke-eval-bridge.mjs
+        timeout-minutes: 5

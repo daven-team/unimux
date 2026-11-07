@@ -21,7 +21,7 @@ const api = createMcApi({
   platform: appPlatform(process.platform),
   // The window is sandboxed (no `os` module): the sandbox's process object still reports the OS version ("10.0.26200").
   windowsBuild: windowsBuildFromRelease(process.platform, process.getSystemVersion?.() ?? ''),
-  pathForFile: (file) => { try { return webUtils.getPathForFile(file); } catch { return ''; } },
+  pathsForFiles: async (files) => Array.from(files, (file) => { try { return webUtils.getPathForFile(file); } catch { return ''; } }),
 });
 
 contextBridge.exposeInMainWorld('mc', api);

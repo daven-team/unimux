@@ -21,6 +21,7 @@ const BACKGROUND: tauri::window::Color = tauri::window::Color(0x0d, 0x0d, 0x0d, 
 
 /// The browser arguments of every app webview (they share one WebView2 data folder, so they must be identical: a mismatch
 /// fails with 0x8007139F). WebGL contexts for a 5x4 grid, no background throttling, autoplay for alert sounds.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn browser_args(debug_port: Option<u16>) -> String {
     let args = String::from(
         "--max-active-webgl-contexts=96 --disable-background-timer-throttling --disable-renderer-backgrounding \
@@ -37,6 +38,39 @@ pub fn browser_args(debug_port: Option<u16>) -> String {
     args
 }
 
+#[cfg(windows)]
+static WEBVIEW_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Chooses the WebView2 user data folder of every app window once, before any webview exists: `<data>/webview2` when it is a
+/// directory this user can write, else `%TEMP%\unimux-webview2\<hash of the data dir>` (PLAN.md U2 / SP6: WebView2 handed a
+/// folder it cannot create shows Edge's own "cannot create data directory" box, which a user must never see). When neither is
+/// usable the start fails with the app's own message (the same as an unreadable state.json) instead of that box. Windows only
+/// (WKWebView uses its default store).
+#[cfg(windows)]
+pub fn init_webview_dir(data_dir: &std::path::Path, crash: &unimux_core::crash_log::RollingLog) {
+    let preferred = data_dir.join("webview2");
+    let fallback = unimux_platform::webview::temp_fallback_for(data_dir);
+    let (chosen, refused) = unimux_platform::webview::choose_folder(&preferred, std::slice::from_ref(&fallback));
+    for e in &refused {
+        crash.warn(&format!("WebView2 data folder not usable: {e}"));
+    }
+    match chosen {
+        Some(dir) => {
+            if dir != preferred {
+                crash.warn(&format!("WebView2 data folder: using {}", dir.display()));
+            }
+            let _ = WEBVIEW_DIR.set(dir);
+        }
+        None => crate::startup::startup_failed("no usable WebView2 data folder", Some(&preferred)),
+    }
+}
+
+/// The folder chosen by [`init_webview_dir`] (`<data>/webview2` before it ran).
+#[cfg(windows)]
+pub fn webview_dir(ctx: &AppContext) -> std::path::PathBuf {
+    WEBVIEW_DIR.get().cloned().unwrap_or_else(|| ctx.data_dir.join("webview2"))
+}
+
 /// `window.__MC_BOOT__`: the synchronous values of window.mc (platform, windowsBuild, label).
 pub fn boot_script(ctx: &AppContext, label: &str) -> String {
     let boot = json!({ "platform": ctx.platform.as_str(), "windowsBuild": ctx.windows_build, "label": label });
@@ -44,7 +78,7 @@ pub fn boot_script(ctx: &AppContext, label: &str) -> String {
 }
 
 /// Navigation stays inside the app; an http(s) link opens in the browser and the app stays where it is.
-fn allow_navigation(url: &tauri::Url) -> bool {
+pub(crate) fn allow_navigation(url: &tauri::Url) -> bool {
     let s = url.as_str();
     let origin = unimux_ipc::guard::origin_of(s);
     if app_origins().iter().any(|o| o.eq_ignore_ascii_case(origin)) || s.starts_with("about:blank") {
@@ -69,7 +103,12 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
         .initialization_script(boot_script(ctx, MAIN))
         .on_navigation(allow_navigation)
         .on_page_load(move |_window, payload| {
-            if payload.event() == PageLoadEvent::Finished {
+            let finished = payload.event() == PageLoadEvent::Finished;
+            crate::lifecycle::page_load(&page_ctx, MAIN, finished);
+            if !finished {
+                page_ctx.main_page_started();
+            }
+            if finished {
                 page_ctx.mark("page-loaded");
                 show_main(&page_ctx);
             }
@@ -78,13 +117,20 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
         .zoom_hotkeys_enabled(false)
         .browser_extensions_enabled(false)
         // HTML5 drag and drop (tab reorder and detach, snippets, notes, the explorer, SFTP) needs WebView2's own drop
-        // target; Tauri's handler would replace it. OS file drops get their paths through W3 (pathsForFiles).
+        // target; Tauri's handler would replace it. OS file drops get their paths on the side (file_drop.rs, pathsForFiles).
         .disable_drag_drop_handler();
+    // First start after 1.1.x: its localStorage, stored by an extra script before the bridge and the app run (W3).
+    if let Some(script) = crate::webview_import::script_for_main(app) {
+        builder = builder.initialization_script(script);
+    }
     #[cfg(windows)]
     {
-        builder = builder
-            .additional_browser_args(&browser_args(ctx.overrides.debug_port))
-            .data_directory(ctx.data_dir.join("webview2"));
+        builder = builder.additional_browser_args(&browser_args(ctx.overrides.debug_port)).data_directory(webview_dir(ctx));
+    }
+    // macOS: hidden title bar with the traffic lights of 1.1.4, no WebKit throttling (W2).
+    #[cfg(target_os = "macos")]
+    {
+        builder = crate::mac_chrome::apply(builder, crate::mac_chrome::WindowKind::Main);
     }
     builder = without_title_bar(builder);
     if offscreen {
@@ -95,8 +141,11 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
     let window = builder.build()?;
     ctx.mark("window-created");
     apply_webview_settings(&window);
+    crate::file_drop::install(&window, ctx.clone());
     watch_window_state(&window, ctx.clone());
     forget_on_destroy(&window, ctx.clone());
+    // Close and quit, session end, renderer crash and hang (W6).
+    crate::lifecycle::attach_main(&window, ctx);
     crate::caption::install(&window, ctx);
 
     // The page may never report (a renderer stuck in boot): show the window after 5 s anyway.

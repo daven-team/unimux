@@ -1,0 +1,332 @@
+{"path":"","win32":"","darwin":""}
+{"path":"/","win32":"/","darwin":"/"}
+{"path":"//","win32":"","darwin":""}
+{"path":"///","win32":"","darwin":""}
+{"path":"////a","win32":"//a","darwin":"//a"}
+{"path":"\\","win32":"/","darwin":"/"}
+{"path":"\\\\?\\","win32":"","darwin":""}
+{"path":"C:","win32":"c:","darwin":"C:"}
+{"path":"C:\\","win32":"c:/","darwin":"C:/"}
+{"path":"C:/","win32":"c:/","darwin":"C:/"}
+{"path":"c:\\\\","win32":"c:/","darwin":"c:/"}
+{"path":"C:\\\\\\","win32":"c:/","darwin":"C:/"}
+{"path":"C:/a/","win32":"c:/a","darwin":"C:/a"}
+{"path":"C:\\A\\B\\","win32":"c:/a/b","darwin":"C:/A/B"}
+{"path":"\\\\?\\C:\\A\\B\\","win32":"c:/a/b","darwin":"C:/A/B"}
+{"path":"\\\\.\\C:\\x","win32":"c:/x","darwin":"C:/x"}
+{"path":"//?/c:/x","win32":"c:/x","darwin":"c:/x"}
+{"path":"//./pipe/x","win32":"pipe/x","darwin":"pipe/x"}
+{"path":"\\\\?\\UNC\\server\\share\\dir","win32":"unc/server/share/dir","darwin":"UNC/server/share/dir"}
+{"path":"\\\\server\\share\\","win32":"//server/share","darwin":"//server/share"}
+{"path":"//server//share//x//","win32":"//server/share/x","darwin":"//server/share/x"}
+{"path":"/home/me//Repo/","win32":"/home/me/repo","darwin":"/home/me/Repo"}
+{"path":"relative\\Path\\","win32":"relative/path","darwin":"relative/Path"}
+{"path":"./x/","win32":"./x","darwin":"./x"}
+{"path":"a","win32":"a","darwin":"a"}
+{"path":"A/","win32":"a","darwin":"A"}
+{"path":"C:\\Users\\RUNNER~1\\AppData","win32":"c:/users/runner~1/appdata","darwin":"C:/Users/RUNNER~1/AppData"}
+{"path":"D:\\ZAŻÓŁĆ\\Gęślą Jaźń","win32":"d:/zażółć/gęślą jaźń","darwin":"D:/ZAŻÓŁĆ/Gęślą Jaźń"}
+{"path":"D:\\İstanbul\\ΣΊΣΥΦΟΣ","win32":"d:/i̇stanbul/σίσυφος","darwin":"D:/İstanbul/ΣΊΣΥΦΟΣ"}
+{"path":"E:\\STRAẞE\\ǅ","win32":"e:/straße/ǆ","darwin":"E:/STRAẞE/ǅ"}
+{"path":"F:\\😀\\x/","win32":"f:/😀/x","darwin":"F:/😀/x"}
+{"path":"x:\\\\\\y","win32":"x:/y","darwin":"x:/y"}
+{"path":"Ąęİdir nameUsers/Ąę","win32":"ąęi̇dir nameusers/ąę","darwin":"Ąęİdir nameUsers/Ąę"}
+{"path":"?C:\\\\//İ\\?","win32":"?c:/i̇/?","darwin":"?C:/İ/?"}
+{"path":"İ\\D:ﬀ\\\\/","win32":"i̇/d:ﬀ","darwin":"İ/D:ﬀ"}
+{"path":".ﬀ..Users😀İ","win32":".ﬀ..users😀i̇","darwin":".ﬀ..Users😀İ"}
+{"path":"Σ","win32":"σ","darwin":"Σ"}
+{"path":"İ\\ﬀRUNNER~1","win32":"i̇/ﬀrunner~1","darwin":"İ/ﬀRUNNER~1"}
+{"path":"/\\Σﬀẞc:","win32":"//σﬀßc:","darwin":"//Σﬀẞc:"}
+{"path":"C:\\\\c:ẞ\\C:","win32":"c:/c:ß/c:","darwin":"C:/c:ẞ/C:"}
+{"path":"dir name\\","win32":"dir name","darwin":"dir name"}
+{"path":"Users..","win32":"users..","darwin":"Users.."}
+{"path":"\\","win32":"/","darwin":"/"}
+{"path":"UsersC:Σ","win32":"usersc:ς","darwin":"UsersC:Σ"}
+{"path":"Usersc:?😀","win32":"usersc:?😀","darwin":"Usersc:?😀"}
+{"path":"?Users","win32":"?users","darwin":"?Users"}
+{"path":"D:?ﬀ","win32":"d:?ﬀ","darwin":"D:?ﬀ"}
+{"path":"RUNNER~1/","win32":"runner~1","darwin":"RUNNER~1"}
+{"path":"ﬀ.","win32":"ﬀ.","darwin":"ﬀ."}
+{"path":"Users////","win32":"users","darwin":"Users"}
+{"path":"...","win32":"...","darwin":"..."}
+{"path":"dir nameĄę.\\","win32":"dir nameąę.","darwin":"dir nameĄę."}
+{"path":"ẞẞdir nameC:","win32":"ßßdir namec:","darwin":"ẞẞdir nameC:"}
+{"path":"\\😀\\\\dir nameﬀUsers","win32":"/😀/dir nameﬀusers","darwin":"/😀/dir nameﬀUsers"}
+{"path":"ﬀΣ\\\\\\\\","win32":"ﬀς","darwin":"ﬀΣ"}
+{"path":".Usersﬀ\\\\ﬀRUNNER~1C:","win32":".usersﬀ/ﬀrunner~1c:","darwin":".Usersﬀ/ﬀRUNNER~1C:"}
+{"path":"c:","win32":"c:","darwin":"c:"}
+{"path":".Σ\\?RUNNER~1","win32":".σ/?runner~1","darwin":".Σ/?RUNNER~1"}
+{"path":"ΣĄęΣ?RUNNER~1RUNNER~1","win32":"σąęς?runner~1runner~1","darwin":"ΣĄęΣ?RUNNER~1RUNNER~1"}
+{"path":"C:D:/.","win32":"c:d:/.","darwin":"C:D:/."}
+{"path":"c:İD:İ","win32":"c:i̇d:i̇","darwin":"c:İD:İ"}
+{"path":"//İΣC:Ąę","win32":"//i̇σc:ąę","darwin":"//İΣC:Ąę"}
+{"path":"//ﬀİİc:","win32":"//ﬀi̇i̇c:","darwin":"//ﬀİİc:"}
+{"path":"😀dir name\\\\😀Ąę\\\\C:","win32":"😀dir name/😀ąę/c:","darwin":"😀dir name/😀Ąę/C:"}
+{"path":"c:😀","win32":"c:😀","darwin":"c:😀"}
+{"path":"C:\\\\ẞRUNNER~1İdir name","win32":"c:/ßrunner~1i̇dir name","darwin":"C:/ẞRUNNER~1İdir name"}
+{"path":"\\UsersΣRUNNER~1Ąę\\\\","win32":"/usersσrunner~1ąę","darwin":"/UsersΣRUNNER~1Ąę"}
+{"path":"?..ﬀ//?😀","win32":"?..ﬀ/?😀","darwin":"?..ﬀ/?😀"}
+{"path":"İΣΣΣĄę","win32":"i̇σσσąę","darwin":"İΣΣΣĄę"}
+{"path":"?ﬀRUNNER~1ΣD:","win32":"?ﬀrunner~1σd:","darwin":"?ﬀRUNNER~1ΣD:"}
+{"path":"ẞﬀ\\\\?\\\\","win32":"ßﬀ/?","darwin":"ẞﬀ/?"}
+{"path":"ﬀRUNNER~1..Ąęﬀ","win32":"ﬀrunner~1..ąęﬀ","darwin":"ﬀRUNNER~1..Ąęﬀ"}
+{"path":"?..UsersC:\\","win32":"?..usersc:","darwin":"?..UsersC:"}
+{"path":"ẞ?\\\\","win32":"ß?","darwin":"ẞ?"}
+{"path":"/.Σﬀ😀C:😀","win32":"/.σﬀ😀c:😀","darwin":"/.Σﬀ😀C:😀"}
+{"path":"Σ//RUNNER~1ẞ","win32":"σ/runner~1ß","darwin":"Σ/RUNNER~1ẞ"}
+{"path":"..ΣC:","win32":"..σc:","darwin":"..ΣC:"}
+{"path":"İẞİ\\Ąę..","win32":"i̇ßi̇/ąę..","darwin":"İẞİ/Ąę.."}
+{"path":"dir name..😀\\ﬀD:","win32":"dir name..😀/ﬀd:","darwin":"dir name..😀/ﬀD:"}
+{"path":"😀C:\\..\\","win32":"😀c:/..","darwin":"😀C:/.."}
+{"path":"..Σ","win32":"..σ","darwin":"..Σ"}
+{"path":"Ąę\\\\","win32":"ąę","darwin":"Ąę"}
+{"path":"../D:İD:ﬀ","win32":"../d:i̇d:ﬀ","darwin":"../D:İD:ﬀ"}
+{"path":"/?ﬀdir name/","win32":"/?ﬀdir name","darwin":"/?ﬀdir name"}
+{"path":"İdir name..Ąę....","win32":"i̇dir name..ąę....","darwin":"İdir name..Ąę...."}
+{"path":"C:\\\\","win32":"c:/","darwin":"C:/"}
+{"path":"😀UsersĄęRUNNER~1C:","win32":"😀usersąęrunner~1c:","darwin":"😀UsersĄęRUNNER~1C:"}
+{"path":"dir name","win32":"dir name","darwin":"dir name"}
+{"path":"c:","win32":"c:","darwin":"c:"}
+{"path":"dir nameΣ","win32":"dir nameς","darwin":"dir nameΣ"}
+{"path":"C:..Ąę","win32":"c:..ąę","darwin":"C:..Ąę"}
+{"path":"😀ﬀ😀Σ","win32":"😀ﬀ😀σ","darwin":"😀ﬀ😀Σ"}
+{"path":"//😀😀İ\\\\\\","win32":"//😀😀i̇","darwin":"//😀😀İ"}
+{"path":"\\\\Ąę\\Users\\\\\\c:","win32":"//ąę/users/c:","darwin":"//Ąę/Users/c:"}
+{"path":"?😀ĄęΣ","win32":"?😀ąęς","darwin":"?😀ĄęΣ"}
+{"path":"ﬀ?RUNNER~1c:ẞ","win32":"ﬀ?runner~1c:ß","darwin":"ﬀ?RUNNER~1c:ẞ"}
+{"path":"İ","win32":"i̇","darwin":"İ"}
+{"path":"/D:ĄęĄęc:C:","win32":"/d:ąęąęc:c:","darwin":"/D:ĄęĄęc:C:"}
+{"path":"UsersRUNNER~1c://\\\\Users","win32":"usersrunner~1c:/users","darwin":"UsersRUNNER~1c:/Users"}
+{"path":"\\\\Σ","win32":"//σ","darwin":"//Σ"}
+{"path":"ﬀﬀ\\ĄęRUNNER~1ΣC:","win32":"ﬀﬀ/ąęrunner~1σc:","darwin":"ﬀﬀ/ĄęRUNNER~1ΣC:"}
+{"path":"C:dir nameĄę😀Users","win32":"c:dir nameąę😀users","darwin":"C:dir nameĄę😀Users"}
+{"path":"dir name😀C://","win32":"dir name😀c:","darwin":"dir name😀C:"}
+{"path":"C:","win32":"c:","darwin":"C:"}
+{"path":"C:.dir nameD:?\\😀","win32":"c:.dir named:?/😀","darwin":"C:.dir nameD:?/😀"}
+{"path":"/","win32":"/","darwin":"/"}
+{"path":"Users\\\\RUNNER~1..","win32":"users/runner~1..","darwin":"Users/RUNNER~1.."}
+{"path":"/\\\\","win32":"","darwin":""}
+{"path":"/ﬀﬀ\\","win32":"/ﬀﬀ","darwin":"/ﬀﬀ"}
+{"path":"C://D:","win32":"c:/d:","darwin":"C:/D:"}
+{"path":"Σ😀\\\\😀\\\\","win32":"σ😀/😀","darwin":"Σ😀/😀"}
+{"path":"D:Ąę","win32":"d:ąę","darwin":"D:Ąę"}
+{"path":"RUNNER~1..😀😀UsersC:","win32":"runner~1..😀😀usersc:","darwin":"RUNNER~1..😀😀UsersC:"}
+{"path":"..","win32":"..","darwin":".."}
+{"path":"RUNNER~1\\\\..D:İ😀ﬀ","win32":"runner~1/..d:i̇😀ﬀ","darwin":"RUNNER~1/..D:İ😀ﬀ"}
+{"path":"ĄęΣ","win32":"ąęς","darwin":"ĄęΣ"}
+{"path":"ẞ/?","win32":"ß/?","darwin":"ẞ/?"}
+{"path":"RUNNER~1..","win32":"runner~1..","darwin":"RUNNER~1.."}
+{"path":"dir namedir nameẞ..\\İ.","win32":"dir namedir nameß../i̇.","darwin":"dir namedir nameẞ../İ."}
+{"path":"ẞ//\\?","win32":"ß/?","darwin":"ẞ/?"}
+{"path":"/😀Ąęc:ΣC:","win32":"/😀ąęc:σc:","darwin":"/😀Ąęc:ΣC:"}
+{"path":"\\","win32":"/","darwin":"/"}
+{"path":"c:?ẞ\\c://","win32":"c:?ß/c:","darwin":"c:?ẞ/c:"}
+{"path":"//..\\\\D:","win32":"//../d:","darwin":"//../D:"}
+{"path":"Users\\\\İ//ﬀ","win32":"users/i̇/ﬀ","darwin":"Users/İ/ﬀ"}
+{"path":"ẞdir name?D:c:","win32":"ßdir name?d:c:","darwin":"ẞdir name?D:c:"}
+{"path":"D:İC:😀RUNNER~1\\","win32":"d:i̇c:😀runner~1","darwin":"D:İC:😀RUNNER~1"}
+{"path":"C:UsersẞC:İ","win32":"c:usersßc:i̇","darwin":"C:UsersẞC:İ"}
+{"path":"ﬀﬀ😀","win32":"ﬀﬀ😀","darwin":"ﬀﬀ😀"}
+{"path":"ẞD:😀..İ","win32":"ßd:😀..i̇","darwin":"ẞD:😀..İ"}
+{"path":"..RUNNER~1","win32":"..runner~1","darwin":"..RUNNER~1"}
+{"path":"C:\\?Ąędir nameΣﬀ","win32":"c:/?ąędir nameσﬀ","darwin":"C:/?Ąędir nameΣﬀ"}
+{"path":"ẞ\\","win32":"ß","darwin":"ẞ"}
+{"path":"/.😀?","win32":"/.😀?","darwin":"/.😀?"}
+{"path":"dir name","win32":"dir name","darwin":"dir name"}
+{"path":"ẞ.ﬀ..UsersC:RUNNER~1","win32":"ß.ﬀ..usersc:runner~1","darwin":"ẞ.ﬀ..UsersC:RUNNER~1"}
+{"path":"dir name/C:ﬀ?","win32":"dir name/c:ﬀ?","darwin":"dir name/C:ﬀ?"}
+{"path":"/D:?//😀\\","win32":"/d:?/😀","darwin":"/D:?/😀"}
+{"path":"RUNNER~1ẞ..","win32":"runner~1ß..","darwin":"RUNNER~1ẞ.."}
+{"path":"..","win32":"..","darwin":".."}
+{"path":"/C:D:Σ/Users\\\\","win32":"/c:d:ς/users","darwin":"/C:D:Σ/Users"}
+{"path":"\\\\ẞ?\\\\Users\\ẞ","win32":"//ß?/users/ß","darwin":"//ẞ?/Users/ẞ"}
+{"path":"ẞC://ĄęİUsers","win32":"ßc:/ąęi̇users","darwin":"ẞC:/ĄęİUsers"}
+{"path":"?c:ﬀİ","win32":"?c:ﬀi̇","darwin":"?c:ﬀİ"}
+{"path":"c:","win32":"c:","darwin":"c:"}
+{"path":"İ?Ąę","win32":"i̇?ąę","darwin":"İ?Ąę"}
+{"path":"ΣD:😀","win32":"σd:😀","darwin":"ΣD:😀"}
+{"path":"Ąę\\","win32":"ąę","darwin":"Ąę"}
+{"path":"\\Usersﬀc:D:.","win32":"/usersﬀc:d:.","darwin":"/Usersﬀc:D:."}
+{"path":"\\ﬀ/dir name","win32":"/ﬀ/dir name","darwin":"/ﬀ/dir name"}
+{"path":"ẞ\\\\c:\\","win32":"ß/c:","darwin":"ẞ/c:"}
+{"path":"////D:C:","win32":"//d:c:","darwin":"//D:C:"}
+{"path":"RUNNER~1","win32":"runner~1","darwin":"RUNNER~1"}
+{"path":"UsersRUNNER~1/Users","win32":"usersrunner~1/users","darwin":"UsersRUNNER~1/Users"}
+{"path":"ẞUsersc:..","win32":"ßusersc:..","darwin":"ẞUsersc:.."}
+{"path":"D:RUNNER~1Users","win32":"d:runner~1users","darwin":"D:RUNNER~1Users"}
+{"path":"\\\\😀\\\\..Users😀","win32":"//😀/..users😀","darwin":"//😀/..Users😀"}
+{"path":"Σ.\\//dir namec:","win32":"σ./dir namec:","darwin":"Σ./dir namec:"}
+{"path":"D://?\\","win32":"d:/?","darwin":"D:/?"}
+{"path":"//RUNNER~1UsersC:İ","win32":"//runner~1usersc:i̇","darwin":"//RUNNER~1UsersC:İ"}
+{"path":"\\\\?D:D:\\","win32":"//?d:d:","darwin":"//?D:D:"}
+{"path":"c:D:C:\\\\RUNNER~1\\\\RUNNER~1","win32":"c:d:c:/runner~1/runner~1","darwin":"c:D:C:/RUNNER~1/RUNNER~1"}
+{"path":"?İUsersĄę","win32":"?i̇usersąę","darwin":"?İUsersĄę"}
+{"path":"D:D:Users\\D:Users/","win32":"d:d:users/d:users","darwin":"D:D:Users/D:Users"}
+{"path":"İẞ\\\\Usersc:","win32":"i̇ß/usersc:","darwin":"İẞ/Usersc:"}
+{"path":"Ąę/?\\Σ","win32":"ąę/?/σ","darwin":"Ąę/?/Σ"}
+{"path":"..ĄęRUNNER~1?İ//","win32":"..ąęrunner~1?i̇","darwin":"..ĄęRUNNER~1?İ"}
+{"path":"😀","win32":"😀","darwin":"😀"}
+{"path":"/","win32":"/","darwin":"/"}
+{"path":"İΣ","win32":"i̇ς","darwin":"İΣ"}
+{"path":"??","win32":"??","darwin":"??"}
+{"path":"..D://","win32":"..d:","darwin":"..D:"}
+{"path":"Σ/.dir name?","win32":"σ/.dir name?","darwin":"Σ/.dir name?"}
+{"path":"\\\\\\D:?\\\\/","win32":"//d:?","darwin":"//D:?"}
+{"path":"Usersẞ?\\\\","win32":"usersß?","darwin":"Usersẞ?"}
+{"path":"/ﬀ?..\\\\/","win32":"/ﬀ?..","darwin":"/ﬀ?.."}
+{"path":"/C:..","win32":"/c:..","darwin":"/C:.."}
+{"path":"ﬀ😀c:c:","win32":"ﬀ😀c:c:","darwin":"ﬀ😀c:c:"}
+{"path":"ẞ\\\\\\\\\\Σ","win32":"ß/σ","darwin":"ẞ/Σ"}
+{"path":"C://C:dir namedir name","win32":"c:/c:dir namedir name","darwin":"C:/C:dir namedir name"}
+{"path":"dir nameĄę\\\\..","win32":"dir nameąę/..","darwin":"dir nameĄę/.."}
+{"path":"Ąę.D:C:?","win32":"ąę.d:c:?","darwin":"Ąę.D:C:?"}
+{"path":"..ΣΣẞ","win32":"..σσß","darwin":"..ΣΣẞ"}
+{"path":"??\\\\c:Ąę\\","win32":"??/c:ąę","darwin":"??/c:Ąę"}
+{"path":".UsersC:","win32":".usersc:","darwin":".UsersC:"}
+{"path":"ﬀİC:/Users.Users","win32":"ﬀi̇c:/users.users","darwin":"ﬀİC:/Users.Users"}
+{"path":"Ąę\\/RUNNER~1dir namec:.","win32":"ąę/runner~1dir namec:.","darwin":"Ąę/RUNNER~1dir namec:."}
+{"path":"\\c:ﬀ","win32":"/c:ﬀ","darwin":"/c:ﬀ"}
+{"path":"/","win32":"/","darwin":"/"}
+{"path":"ﬀΣC:RUNNER~1C:","win32":"ﬀσc:runner~1c:","darwin":"ﬀΣC:RUNNER~1C:"}
+{"path":"\\\\\\ﬀ?c:ﬀ","win32":"//ﬀ?c:ﬀ","darwin":"//ﬀ?c:ﬀ"}
+{"path":"//..Ąę.İ","win32":"//..ąę.i̇","darwin":"//..Ąę.İ"}
+{"path":"😀D:dir nameD:","win32":"😀d:dir named:","darwin":"😀D:dir nameD:"}
+{"path":"c:\\?.RUNNER~1?","win32":"c:/?.runner~1?","darwin":"c:/?.RUNNER~1?"}
+{"path":"İdir nameİ/😀İ//","win32":"i̇dir namei̇/😀i̇","darwin":"İdir nameİ/😀İ"}
+{"path":"D:Σ?Ąędir name","win32":"d:ς?ąędir name","darwin":"D:Σ?Ąędir name"}
+{"path":"ﬀ\\D:😀?.","win32":"ﬀ/d:😀?.","darwin":"ﬀ/D:😀?."}
+{"path":"İ","win32":"i̇","darwin":"İ"}
+{"path":"//Ąędir nameẞUsersC:","win32":"//ąędir nameßusersc:","darwin":"//Ąędir nameẞUsersC:"}
+{"path":"\\\\\\/İ/","win32":"//i̇","darwin":"//İ"}
+{"path":"RUNNER~1\\Usersc:","win32":"runner~1/usersc:","darwin":"RUNNER~1/Usersc:"}
+{"path":"?D:ﬀ","win32":"?d:ﬀ","darwin":"?D:ﬀ"}
+{"path":"ĄęRUNNER~1C:","win32":"ąęrunner~1c:","darwin":"ĄęRUNNER~1C:"}
+{"path":"\\\\😀RUNNER~1😀😀?C:","win32":"//😀runner~1😀😀?c:","darwin":"//😀RUNNER~1😀😀?C:"}
+{"path":"ĄęRUNNER~1Ąę","win32":"ąęrunner~1ąę","darwin":"ĄęRUNNER~1Ąę"}
+{"path":"C:C:İ","win32":"c:c:i̇","darwin":"C:C:İ"}
+{"path":"//","win32":"","darwin":""}
+{"path":"//.","win32":"//.","darwin":"//."}
+{"path":"//Users\\","win32":"//users","darwin":"//Users"}
+{"path":"dir name.\\\\/?ẞ/","win32":"dir name./?ß","darwin":"dir name./?ẞ"}
+{"path":"\\.İ..","win32":"/.i̇..","darwin":"/.İ.."}
+{"path":"RUNNER~1","win32":"runner~1","darwin":"RUNNER~1"}
+{"path":".ﬀ","win32":".ﬀ","darwin":".ﬀ"}
+{"path":"ẞĄę..c:\\","win32":"ßąę..c:","darwin":"ẞĄę..c:"}
+{"path":"c:😀//Usersẞ","win32":"c:😀/usersß","darwin":"c:😀/Usersẞ"}
+{"path":"😀//\\\\c:c:\\\\","win32":"😀/c:c:","darwin":"😀/c:c:"}
+{"path":"D:dir name","win32":"d:dir name","darwin":"D:dir name"}
+{"path":"..?c://","win32":"..?c:","darwin":"..?c:"}
+{"path":"Users//?D:","win32":"users/?d:","darwin":"Users/?D:"}
+{"path":"?\\","win32":"?","darwin":"?"}
+{"path":"/😀c://c:","win32":"/😀c:/c:","darwin":"/😀c:/c:"}
+{"path":"D:..","win32":"d:..","darwin":"D:.."}
+{"path":"/c:..Users\\","win32":"/c:..users","darwin":"/c:..Users"}
+{"path":"\\\\","win32":"","darwin":""}
+{"path":"ẞ//İ","win32":"ß/i̇","darwin":"ẞ/İ"}
+{"path":"C:RUNNER~1\\\\","win32":"c:runner~1","darwin":"C:RUNNER~1"}
+{"path":"😀","win32":"😀","darwin":"😀"}
+{"path":"İ/D:.ﬀİ..","win32":"i̇/d:.ﬀi̇..","darwin":"İ/D:.ﬀİ.."}
+{"path":"C:..c:ẞc:dir name😀","win32":"c:..c:ßc:dir name😀","darwin":"C:..c:ẞc:dir name😀"}
+{"path":"\\\\Users?..c:\\\\c:","win32":"//users?..c:/c:","darwin":"//Users?..c:/c:"}
+{"path":"D:","win32":"d:","darwin":"D:"}
+{"path":"..c:ĄęRUNNER~1....Users","win32":"..c:ąęrunner~1....users","darwin":"..c:ĄęRUNNER~1....Users"}
+{"path":"ẞ?ΣĄędir namedir nameĄę","win32":"ß?σąędir namedir nameąę","darwin":"ẞ?ΣĄędir namedir nameĄę"}
+{"path":"ẞ","win32":"ß","darwin":"ẞ"}
+{"path":"\\\\","win32":"","darwin":""}
+{"path":"\\\\Users","win32":"//users","darwin":"//Users"}
+{"path":"Σİẞ","win32":"σi̇ß","darwin":"Σİẞ"}
+{"path":"\\\\","win32":"","darwin":""}
+{"path":"😀?..RUNNER~1İΣ","win32":"😀?..runner~1i̇ς","darwin":"😀?..RUNNER~1İΣ"}
+{"path":"c:Ąę","win32":"c:ąę","darwin":"c:Ąę"}
+{"path":"Users.D://","win32":"users.d:","darwin":"Users.D:"}
+{"path":".\\\\","win32":".","darwin":"."}
+{"path":"ẞ\\/RUNNER~1/","win32":"ß/runner~1","darwin":"ẞ/RUNNER~1"}
+{"path":"dir name/\\\\ẞﬀİĄę","win32":"dir name/ßﬀi̇ąę","darwin":"dir name/ẞﬀİĄę"}
+{"path":"\\\\\\\\RUNNER~1ﬀ.C:","win32":"//runner~1ﬀ.c:","darwin":"//RUNNER~1ﬀ.C:"}
+{"path":"RUNNER~1ﬀ\\\\D:C:.","win32":"runner~1ﬀ/d:c:.","darwin":"RUNNER~1ﬀ/D:C:."}
+{"path":"ẞ..ﬀ😀/C:","win32":"ß..ﬀ😀/c:","darwin":"ẞ..ﬀ😀/C:"}
+{"path":"Usersẞ..\\Ąę","win32":"usersß../ąę","darwin":"Usersẞ../Ąę"}
+{"path":"İ?İ//\\\\c:","win32":"i̇?i̇/c:","darwin":"İ?İ/c:"}
+{"path":"😀dir name\\\\RUNNER~1.","win32":"😀dir name/runner~1.","darwin":"😀dir name/RUNNER~1."}
+{"path":"Ąę😀","win32":"ąę😀","darwin":"Ąę😀"}
+{"path":"RUNNER~1UsersRUNNER~1//","win32":"runner~1usersrunner~1","darwin":"RUNNER~1UsersRUNNER~1"}
+{"path":"😀D:ﬀ","win32":"😀d:ﬀ","darwin":"😀D:ﬀ"}
+{"path":"ẞ.ﬀΣ?Ąę","win32":"ß.ﬀς?ąę","darwin":"ẞ.ﬀΣ?Ąę"}
+{"path":"\\\\\\..C:","win32":"//..c:","darwin":"//..C:"}
+{"path":"D:","win32":"d:","darwin":"D:"}
+{"path":"UsersĄę\\\\ﬀc:","win32":"usersąę/ﬀc:","darwin":"UsersĄę/ﬀc:"}
+{"path":"/\\\\D:C:RUNNER~1İ","win32":"//d:c:runner~1i̇","darwin":"//D:C:RUNNER~1İ"}
+{"path":"/İİc:?Users","win32":"/i̇i̇c:?users","darwin":"/İİc:?Users"}
+{"path":"Users","win32":"users","darwin":"Users"}
+{"path":"dir name.\\Σẞ","win32":"dir name./σß","darwin":"dir name./Σẞ"}
+{"path":".//","win32":".","darwin":"."}
+{"path":"ĄęUsers\\\\","win32":"ąęusers","darwin":"ĄęUsers"}
+{"path":"??..dir name","win32":"??..dir name","darwin":"??..dir name"}
+{"path":"Ąęﬀc:İc:Ąę..","win32":"ąęﬀc:i̇c:ąę..","darwin":"Ąęﬀc:İc:Ąę.."}
+{"path":"D:/Users😀ẞc:c:","win32":"d:/users😀ßc:c:","darwin":"D:/Users😀ẞc:c:"}
+{"path":"Usersdir namedir nameUsers\\\\Ąę","win32":"usersdir namedir nameusers/ąę","darwin":"Usersdir namedir nameUsers/Ąę"}
+{"path":"?/Σ","win32":"?/σ","darwin":"?/Σ"}
+{"path":"İ\\\\dir namedir name😀c:","win32":"i̇/dir namedir name😀c:","darwin":"İ/dir namedir name😀c:"}
+{"path":"UsersΣc:İİ?D:","win32":"usersσc:i̇i̇?d:","darwin":"UsersΣc:İİ?D:"}
+{"path":"ĄęRUNNER~1Users..İ","win32":"ąęrunner~1users..i̇","darwin":"ĄęRUNNER~1Users..İ"}
+{"path":"😀RUNNER~1İD:ẞ\\\\","win32":"😀runner~1i̇d:ß","darwin":"😀RUNNER~1İD:ẞ"}
+{"path":"😀\\dir nameD:..ﬀ\\","win32":"😀/dir named:..ﬀ","darwin":"😀/dir nameD:..ﬀ"}
+{"path":"dir name?..","win32":"dir name?..","darwin":"dir name?.."}
+{"path":"D:😀dir nameUsersẞUsersC:","win32":"d:😀dir nameusersßusersc:","darwin":"D:😀dir nameUsersẞUsersC:"}
+{"path":"/","win32":"/","darwin":"/"}
+{"path":"?/\\\\\\\\","win32":"?","darwin":"?"}
+{"path":"UsersĄę","win32":"usersąę","darwin":"UsersĄę"}
+{"path":"😀?D:Σ","win32":"😀?d:ς","darwin":"😀?D:Σ"}
+{"path":"İ..D:İẞﬀ","win32":"i̇..d:i̇ßﬀ","darwin":"İ..D:İẞﬀ"}
+{"path":"D:ﬀİ","win32":"d:ﬀi̇","darwin":"D:ﬀİ"}
+{"path":"?D:İ","win32":"?d:i̇","darwin":"?D:İ"}
+{"path":"..C:İ","win32":"..c:i̇","darwin":"..C:İ"}
+{"path":"😀\\??","win32":"😀/??","darwin":"😀/??"}
+{"path":"ﬀC:dir name","win32":"ﬀc:dir name","darwin":"ﬀC:dir name"}
+{"path":"dir nameD:/","win32":"dir named:","darwin":"dir nameD:"}
+{"path":"RUNNER~1c:Σ..\\//","win32":"runner~1c:ς..","darwin":"RUNNER~1c:Σ.."}
+{"path":"//Σ😀","win32":"//σ😀","darwin":"//Σ😀"}
+{"path":"\\D:","win32":"/d:","darwin":"/D:"}
+{"path":"\\\\.\\\\😀UsersC:?","win32":"/😀usersc:?","darwin":"/😀UsersC:?"}
+{"path":"😀","win32":"😀","darwin":"😀"}
+{"path":"Σ","win32":"σ","darwin":"Σ"}
+{"path":"\\?Ąę..\\\\C://","win32":"/?ąę../c:","darwin":"/?Ąę../C:"}
+{"path":"D:/","win32":"d:/","darwin":"D:/"}
+{"path":"ΣRUNNER~1\\\\dir nameẞ","win32":"σrunner~1/dir nameß","darwin":"ΣRUNNER~1/dir nameẞ"}
+{"path":"//ẞ//İİ😀","win32":"//ß/i̇i̇😀","darwin":"//ẞ/İİ😀"}
+{"path":".//D:","win32":"./d:","darwin":"./D:"}
+{"path":"dir name...Users😀","win32":"dir name...users😀","darwin":"dir name...Users😀"}
+{"path":"/ẞ\\/ΣĄę","win32":"/ß/σąę","darwin":"/ẞ/ΣĄę"}
+{"path":"D:RUNNER~1ĄęΣc:RUNNER~1Users","win32":"d:runner~1ąęσc:runner~1users","darwin":"D:RUNNER~1ĄęΣc:RUNNER~1Users"}
+{"path":"?.","win32":"?.","darwin":"?."}
+{"path":"ẞ/..","win32":"ß/..","darwin":"ẞ/.."}
+{"path":"Users😀","win32":"users😀","darwin":"Users😀"}
+{"path":"Σ","win32":"σ","darwin":"Σ"}
+{"path":"RUNNER~1RUNNER~1ﬀ","win32":"runner~1runner~1ﬀ","darwin":"RUNNER~1RUNNER~1ﬀ"}
+{"path":"\\","win32":"/","darwin":"/"}
+{"path":"RUNNER~1c:Ąę..Σİ","win32":"runner~1c:ąę..σi̇","darwin":"RUNNER~1c:Ąę..Σİ"}
+{"path":"?///","win32":"?","darwin":"?"}
+{"path":"UsersİĄęΣ","win32":"usersi̇ąęς","darwin":"UsersİĄęΣ"}
+{"path":"Ąę","win32":"ąę","darwin":"Ąę"}
+{"path":"ﬀİ..ﬀ//","win32":"ﬀi̇..ﬀ","darwin":"ﬀİ..ﬀ"}
+{"path":"\\\\.\\\\\\\\RUNNER~1//","win32":"//runner~1","darwin":"//RUNNER~1"}
+{"path":"?ẞ../","win32":"?ß..","darwin":"?ẞ.."}
+{"path":"D:RUNNER~1c:RUNNER~1","win32":"d:runner~1c:runner~1","darwin":"D:RUNNER~1c:RUNNER~1"}
+{"path":"İ/D:C:","win32":"i̇/d:c:","darwin":"İ/D:C:"}
+{"path":"Ąęẞ..dir name?\\\\","win32":"ąęß..dir name?","darwin":"Ąęẞ..dir name?"}
+{"path":"C:?","win32":"c:?","darwin":"C:?"}
+{"path":"/C:../\\\\RUNNER~1","win32":"/c:../runner~1","darwin":"/C:../RUNNER~1"}
+{"path":"?/","win32":"?","darwin":"?"}
+{"path":"RUNNER~1//UsersĄę😀","win32":"runner~1/usersąę😀","darwin":"RUNNER~1/UsersĄę😀"}
+{"path":"D:","win32":"d:","darwin":"D:"}
+{"path":"c:Ąę..","win32":"c:ąę..","darwin":"c:Ąę.."}
+{"path":"C:\\\\/c:ẞ","win32":"c:/c:ß","darwin":"C:/c:ẞ"}
+{"path":"c:😀İdir nameD:ẞ","win32":"c:😀i̇dir named:ß","darwin":"c:😀İdir nameD:ẞ"}
+{"path":".C:/?.😀","win32":".c:/?.😀","darwin":".C:/?.😀"}
+{"path":"Σ😀RUNNER~1UsersﬀΣ😀","win32":"σ😀runner~1usersﬀς😀","darwin":"Σ😀RUNNER~1UsersﬀΣ😀"}
+{"path":"Ąę\\\\.","win32":"ąę/.","darwin":"Ąę/."}
+{"path":"D:dir nameRUNNER~1ẞRUNNER~1\\c:","win32":"d:dir namerunner~1ßrunner~1/c:","darwin":"D:dir nameRUNNER~1ẞRUNNER~1/c:"}
+{"path":"//?Usersﬀ\\\\Ąę","win32":"//?usersﬀ/ąę","darwin":"//?Usersﬀ/Ąę"}
+{"path":"Σc:C:.C:ẞUsers","win32":"σc:c:.c:ßusers","darwin":"Σc:C:.C:ẞUsers"}
+{"path":"İ\\","win32":"i̇","darwin":"İ"}
+{"path":"D:c:ﬀRUNNER~1c:","win32":"d:c:ﬀrunner~1c:","darwin":"D:c:ﬀRUNNER~1c:"}

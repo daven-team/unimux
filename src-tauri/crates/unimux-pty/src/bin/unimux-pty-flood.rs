@@ -1,8 +1,9 @@
 //! Test helper of SP5 / P1 (never bundled): prints colored terminal lines, like an agent streaming a diff.
 //!
-//!   unimux-pty-flood [bytes per second, 0 = as fast as possible] [seconds, 0 = forever]
+//!   unimux-pty-flood [bytes per second, 0 = as fast as possible] [seconds, 0 = forever] [total bytes, 0 = no limit]
 //!
-//! Lines are about 100 bytes: a counter, SGR colors and text, CRLF. Paced in 10 ms steps.
+//! Lines are about 100 bytes: a counter, SGR colors and text, CRLF. Paced in 10 ms steps. With a total, the last line is
+//! `FLOOD-DONE <bytes written>` once that many bytes were written.
 
 use std::io::Write;
 use std::time::{Duration, Instant};
@@ -11,6 +12,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let rate: u64 = args.next().and_then(|a| a.parse().ok()).unwrap_or(0);
     let seconds: u64 = args.next().and_then(|a| a.parse().ok()).unwrap_or(0);
+    let total: u64 = args.next().and_then(|a| a.parse().ok()).unwrap_or(0);
     let colors = [31, 32, 33, 34, 35, 36, 90];
     let started = Instant::now();
     let mut stdout = std::io::stdout().lock();
@@ -22,7 +24,15 @@ fn main() {
         if seconds > 0 && elapsed >= Duration::from_secs(seconds) {
             break;
         }
-        let target = if rate == 0 { sent + 32 * 1024 } else { (rate as f64 * elapsed.as_secs_f64()) as u64 };
+        if total > 0 && sent >= total {
+            let _ = write!(stdout, "\r\nFLOOD-DONE {sent}\r\n");
+            let _ = stdout.flush();
+            break;
+        }
+        let mut target = if rate == 0 { sent + 32 * 1024 } else { (rate as f64 * elapsed.as_secs_f64()) as u64 };
+        if total > 0 {
+            target = target.min(total);
+        }
         chunk.clear();
         while sent + (chunk.len() as u64) < target {
             let _ = write!(

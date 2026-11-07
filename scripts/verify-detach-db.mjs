@@ -301,7 +301,7 @@ try {
   await ev(`${mc}.detach.detachKey('file:' + ${JSON.stringify(redisKeys)}, 'menu')`);
   await sleep(1500);
   // A normal quit (the windows close, their storage is written), then the leftovers go.
-  await app.cdp('Browser.close').catch(() => undefined);
+  await app.quit();
   await sleep(4000);
   await app.close();
   app = await launchApp(root);

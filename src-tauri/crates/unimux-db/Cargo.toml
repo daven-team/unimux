@@ -17,6 +17,7 @@ mysql_common.workspace = true
 flate2.workspace = true
 fallible-iterator.workspace = true
 base64.workspace = true
+ryu-js.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "macros", "time", "test-util"] }
