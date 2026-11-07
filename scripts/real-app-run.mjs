@@ -36,6 +36,7 @@ export const SCRIPTS = [
   ...['tauri-convsearch', 'tauri-detached', 'tauri-files', 'tauri-hooks', 'tauri-lifecycle', 'tauri-os', 'tauri-w3'].map((name) => ({ file: `verify-${name}.mjs`, only: 'tauri' })),
   { file: 'verify-cli-detect.mjs', only: 'tauri', missing: () => (existsSync(join(ROOT, 'out', 'main', 'index.js')) ? null : 'the Electron build (npm run build) is its 1.1.4 reference') },
   { file: 'verify-safestorage.mjs', only: 'tauri', windowsOnly: true },
+  { file: 'verify-tauri-monitor.mjs', only: 'tauri', windowsOnly: true },
   // W1: the caption buttons against 1.1.4's references (OS capture and hit tests through the wincap example).
   { file: 'verify-caption.mjs', only: 'tauri', windowsOnly: true, timeout: 20, missing: () => (existsSync(join(ROOT, 'src-tauri', 'target', 'release', 'examples', 'wincap.exe')) ? null : 'the wincap tool (cd src-tauri && node ../scripts/msvc-run.mjs cargo build -p unimux-platform --example wincap --release)') },
   { file: 'verify-update-window.mjs', only: 'tauri', windowsOnly: true, timeout: 20 },
