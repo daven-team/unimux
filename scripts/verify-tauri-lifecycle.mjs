@@ -122,7 +122,8 @@ try {
     const { child, page } = await start();
     await settle();
     const plan = (await bridge(page, 'lifecycle')).windDown.map((s) => s.name);
-    check('wind-down plan has the W6 steps in 1.1.4 order', JSON.stringify(plan) === JSON.stringify(['app:before-quit', 'renderer grace', 'state save', 'last state save']), plan.join(' > '));
+    // W6's steps plus W5's detached windows and the M1 / H1 server stops (wave 1), in 1.1.4's before-quit order.
+    check('wind-down plan has the wave 1 steps in 1.1.4 order', JSON.stringify(plan) === JSON.stringify(['detached: quitting', 'app:before-quit', 'renderer grace', 'close detached windows', 'state save', 'last state save', 'mcp stop', 'hooks stop']), plan.join(' > '));
     await setBusy(page, true);
     const guard = await waitFor(page, `window.__TAURI_INTERNALS__.invoke('test_bridge', { op: 'lifecycle', args: null }).then((l) => l.guard)`, 10000, 'quit guard').catch(() => false);
     check('a working agent sets the quit guard (app:quitGuard)', guard === true);
