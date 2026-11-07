@@ -384,7 +384,9 @@ fn normalize_sqlite(r: &Map<String, Value>) -> Option<Value> {
     Some(Value::Object(c))
 }
 
-fn normalize_db_connection(raw: &Value) -> Option<Value> {
+/// `normalizeDbConnection` (src/shared/db.ts): a connection read from disk or sent by the renderer, or None. Also used by the
+/// DB service (D1) for `strictConnection`.
+pub fn normalize_db_connection(raw: &Value) -> Option<Value> {
     let r = raw.as_object()?;
     let kind = js::string(r.get("kind")).filter(|k| ["postgres", "mysql", "redis", "sqlite"].contains(k))?;
     if !js::is_uuid(r.get("id")) {

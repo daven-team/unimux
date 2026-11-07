@@ -16,6 +16,8 @@
 //   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
 //                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
 //   test/golden/db-sql.jsonl, db-redis.jsonl  {fn, args} -> the DB helpers of src/shared (see scripts/goldens-db.mjs)
+//   test/golden/db-ipc.jsonl         {fn, args} -> the db:* request schemas, strictConnection, the query history helpers
+//                                     (see scripts/goldens-db-ipc.mjs)
 //   test/golden/conv-*.jsonl         the conversation search (fold, terms, searchDocs, Date.parse, transcript reading, export,
 //                                     toolDetail, IPC sanitizers; see scripts/goldens-convsearch.mjs)
 //   test/golden/update-progress.jsonl, update-strings.json, update-config.json   the update window (see scripts/goldens-update.mjs)
@@ -53,6 +55,7 @@ import { hookPayloadRows, hookServerRows } from './goldens-hooks.mjs';
 import { hookSettingsRows } from './goldens-hooksettings.mjs';
 import { convGoldens } from './goldens-convsearch.mjs';
 import { DB_MODULES, dbGoldens } from './goldens-db.mjs';
+import { DB_IPC_MODULES, dbIpcGoldens } from './goldens-db-ipc.mjs';
 import { accountsStoreRows, codexStoreRows, identityRows } from './goldens-accounts.mjs';
 import { gitSharedRows, gitTrustRows } from './goldens-git.mjs';
 import { g8Goldens } from './goldens-g8.mjs';
@@ -80,6 +83,7 @@ const [hookFallback, cellFiles] = await Promise.all([load('src/main/hookFallback
 const fileGoldens = await filesGoldens(await load('src/main/files.ts'));
 const dbModules = Object.fromEntries(await Promise.all(Object.entries(DB_MODULES).map(async ([name, file]) => [name, await load(file)])));
 const db = dbGoldens(dbModules);
+const dbIpc = dbIpcGoldens(Object.fromEntries(await Promise.all(Object.entries(DB_IPC_MODULES).map(async ([name, file]) => [name, await load(file)]))));
 const [{ AccountsStore }, { CodexAccountsStore }, accounts, codex, { parseCodexAuth }, { decodeJwtClaims }] = await Promise.all([
   load('src/main/accounts/store.ts'), load('src/main/accounts/codexStore.ts'), load('src/shared/accounts.ts'), load('src/shared/codexAccounts.ts'),
   load('src/main/accounts/codexActivate.ts'), load('src/main/usage/parse.ts'),
@@ -344,6 +348,7 @@ const files = {
   ...Object.fromEntries(Object.entries(await convGoldens(load)).map(([name, rows]) => [name, jsonl(rows)])),
   'db-sql.jsonl': jsonl(db['db-sql.jsonl']),
   'db-redis.jsonl': jsonl(db['db-redis.jsonl']),
+  'db-ipc.jsonl': jsonl(dbIpc),
   'accounts-store.jsonl': jsonl(accountsStoreRows({ AccountsStore })),
   'codex-accounts.jsonl': jsonl(codexStoreRows({ CodexAccountsStore })),
   'accounts-identity.jsonl': jsonl(identityRows({ accounts, codex, parseCodexAuth, decodeJwtClaims })),

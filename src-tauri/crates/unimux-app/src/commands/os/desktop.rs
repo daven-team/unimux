@@ -19,13 +19,23 @@ use unimux_exec::Program;
 use unimux_platform::clipboard::{ClipboardIo, OsClipboard};
 use unimux_platform::notify::{Native, ToastCallback, ToastEvent, ToastSpec};
 
-/// An open dialog: `dialog:pickFolder` or `sound:pick`.
+/// An open dialog: `dialog:pickFolder`, `sound:pick`, `db:sqlite:pick`, `db:pickCaFile`.
 #[derive(Debug, Clone)]
 pub struct PickRequest {
     pub folder: bool,
     pub title: String,
-    /// `(name, extensions)` of the one filter.
+    /// `(name, extensions)` of the first filter.
     pub filter: Option<(String, Vec<String>)>,
+    /// Further filters after it (the DB dialogs add `{ name: '*', extensions: ['*'] }`).
+    pub more_filters: Vec<(String, Vec<String>)>,
+}
+
+/// A save dialog (`db:sqlite:create` without a path, `db:export`): the title, the suggested file name and the filters.
+#[derive(Debug, Clone)]
+pub struct SaveRequest {
+    pub title: String,
+    pub default_path: String,
+    pub filters: Vec<(String, Vec<String>)>,
 }
 
 pub trait Desktop: Send + Sync {
@@ -42,10 +52,19 @@ pub trait Desktop: Send + Sync {
     fn clipboard(&self) -> Arc<dyn ClipboardIo>;
     /// A native open dialog over `parent` (free-standing without one); the chosen path or None.
     fn pick(&self, parent: Option<WebviewWindow>, request: PickRequest) -> BoxFuture<'static, Option<String>>;
+    /// A native save dialog over `parent`; the chosen path or None.
+    fn save(&self, parent: Option<WebviewWindow>, request: SaveRequest) -> BoxFuture<'static, Option<String>>;
     /// `flashFrame(true)` / `(false)` on the window.
     fn flash(&self, window: &WebviewWindow, on: bool);
     /// macOS Dock badge ('' = none).
     fn dock_badge(&self, window: Option<WebviewWindow>, text: &str);
+}
+
+/// The filters a native dialog gets. Electron's macOS dialog stops filtering when any filter has the extension "*" (every
+/// file can be picked); rfd's macOS panel would put the literal "*" into its allowed types instead, so on macOS such a
+/// filter list becomes no filters at all. Windows (rfd turns "*" into `*.*`) keeps them.
+pub fn dialog_filters(filters: Vec<(String, Vec<String>)>, macos: bool) -> Vec<(String, Vec<String>)> {
+    if macos && filters.iter().any(|(_, ext)| ext.iter().any(|e| e == "*")) { Vec::new() } else { filters }
 }
 
 /// The desktop of a normal run.
@@ -109,14 +128,28 @@ impl Desktop for RealDesktop {
     fn pick(&self, parent: Option<WebviewWindow>, request: PickRequest) -> BoxFuture<'static, Option<String>> {
         Box::pin(async move {
             let mut dialog = rfd::AsyncFileDialog::new().set_title(&request.title);
-            if let Some((name, extensions)) = &request.filter {
-                dialog = dialog.add_filter(name, extensions);
+            let filters: Vec<_> = request.filter.iter().chain(&request.more_filters).cloned().collect();
+            for (name, extensions) in dialog_filters(filters, cfg!(target_os = "macos")) {
+                dialog = dialog.add_filter(name, &extensions);
             }
             if let Some(parent) = &parent {
                 dialog = dialog.set_parent(parent);
             }
             let picked = if request.folder { dialog.pick_folder().await } else { dialog.pick_file().await };
             picked.map(|f| f.path().to_string_lossy().into_owned())
+        })
+    }
+
+    fn save(&self, parent: Option<WebviewWindow>, request: SaveRequest) -> BoxFuture<'static, Option<String>> {
+        Box::pin(async move {
+            let mut dialog = rfd::AsyncFileDialog::new().set_title(&request.title).set_file_name(&request.default_path);
+            for (name, extensions) in dialog_filters(request.filters, cfg!(target_os = "macos")) {
+                dialog = dialog.add_filter(name, &extensions);
+            }
+            if let Some(parent) = &parent {
+                dialog = dialog.set_parent(parent);
+            }
+            dialog.save_file().await.map(|f| f.path().to_string_lossy().into_owned())
         })
     }
 
@@ -251,6 +284,20 @@ impl Desktop for Recorder {
             "folder": request.folder,
             "title": request.title,
             "filter": request.filter.as_ref().map(|(name, ext)| json!({ "name": name, "extensions": ext })),
+            "moreFilters": request.more_filters.iter().map(|(name, ext)| json!({ "name": name, "extensions": ext })).collect::<Vec<_>>(),
+            "parent": parent.as_ref().map(|w| w.label().to_string()),
+            "answer": answer,
+        }));
+        Box::pin(async move { answer })
+    }
+
+    fn save(&self, parent: Option<WebviewWindow>, request: SaveRequest) -> BoxFuture<'static, Option<String>> {
+        let answer = self.answers.lock().pop_front().flatten();
+        self.record(json!({
+            "op": "save",
+            "title": request.title,
+            "defaultPath": request.default_path,
+            "filters": request.filters.iter().map(|(name, ext)| json!({ "name": name, "extensions": ext })).collect::<Vec<_>>(),
             "parent": parent.as_ref().map(|w| w.label().to_string()),
             "answer": answer,
         }));
@@ -280,5 +327,24 @@ impl ClipboardIo for FileClipboard {
     fn write(&self, text: &str, secret: bool) -> Result<(), String> {
         let body = json!({ "text": text, "secret": secret }).to_string();
         std::fs::write(&self.path, body).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dialog_filters;
+
+    fn f(name: &str, ext: &[&str]) -> (String, Vec<String>) {
+        (name.to_string(), ext.iter().map(|e| e.to_string()).collect())
+    }
+
+    #[test]
+    fn a_catch_all_filter_means_no_filtering_on_macos_only() {
+        let db = vec![f("SQLite", &["db", "sqlite", "sqlite3", "db3"]), f("*", &["*"])];
+        assert_eq!(dialog_filters(db.clone(), true), Vec::<(String, Vec<String>)>::new());
+        assert_eq!(dialog_filters(db.clone(), false), db);
+        let csv = vec![f("CSV", &["csv"])];
+        assert_eq!(dialog_filters(csv.clone(), true), csv);
+        assert_eq!(dialog_filters(csv.clone(), false), csv);
     }
 }
