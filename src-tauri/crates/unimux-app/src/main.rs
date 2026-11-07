@@ -246,6 +246,16 @@ fn main() {
             ctx.detached.start();
             // In parallel with the window (1.1.4: hooks.start next to the cell file prune and the MCP server).
             hooks::start(&ctx);
+            // The wind-down stops the hook server in its own phase (1.1.4 before-quit: hooks.stop after the MCP server).
+            let stopping = ctx.hooks.clone();
+            ctx.lifecycle.wind_down.register(
+                lifecycle::wind_down::phase::HOOKS,
+                "hooks stop",
+                Duration::from_secs(1),
+                move || async move {
+                    stopping.server.stop();
+                },
+            );
             startup::mark_started();
             Ok(())
         })
