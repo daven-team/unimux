@@ -22,9 +22,23 @@ impl std::fmt::Display for Unusable {
     }
 }
 
+/// Creates and removes a probe file in `dir`.
+fn probe_write(dir: &Path) -> io::Result<()> {
+    let probe = dir.join(format!(".unimux-webview-probe-{}", std::process::id()));
+    let written = (|| -> io::Result<()> {
+        use std::io::Write as _;
+        let mut file = fs::File::options().write(true).create_new(true).open(&probe)?;
+        file.write_all(b"x")?;
+        Ok(())
+    })();
+    let _ = fs::remove_file(&probe);
+    written
+}
+
 /// Checks that `dir` can serve as a WebView2 user data folder: it is a directory (created when missing), this user can create
-/// a file in it, and its `EBWebView` child (where WebView2 keeps the profile) is a directory or absent. Leaves nothing behind
-/// but the folder itself.
+/// a file in it, and its `EBWebView` child (where WebView2 keeps the profile, and the folder Edge's "can't read and write to
+/// its data directory" box is about) is a directory this user can create (when absent) and write. Leaves nothing behind but
+/// the folder itself (an `EBWebView` created for the check is removed again).
 pub fn check_folder(dir: &Path) -> Result<(), Unusable> {
     let fail = |reason: String| Unusable { path: dir.to_path_buf(), reason };
     // A link to a folder counts as the folder.
@@ -39,15 +53,17 @@ pub fn check_folder(dir: &Path) -> Result<(), Unusable> {
     if fs::symlink_metadata(&profile).is_ok() && !profile.is_dir() {
         return Err(fail("EBWebView is not a directory".into()));
     }
-    let probe = dir.join(format!(".unimux-webview-probe-{}", std::process::id()));
-    let written = (|| -> io::Result<()> {
-        use std::io::Write as _;
-        let mut file = fs::File::options().write(true).create_new(true).open(&probe)?;
-        file.write_all(b"x")?;
-        Ok(())
-    })();
-    let _ = fs::remove_file(&probe);
-    written.map_err(|e| fail(format!("not writable ({e})")))
+    probe_write(dir).map_err(|e| fail(format!("not writable ({e})")))?;
+    let created = match fs::create_dir(&profile) {
+        Ok(()) => true,
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists && profile.is_dir() => false,
+        Err(e) => return Err(fail(format!("EBWebView cannot be created ({e})"))),
+    };
+    let written = probe_write(&profile);
+    if created {
+        let _ = fs::remove_dir(&profile);
+    }
+    written.map_err(|e| fail(format!("EBWebView not writable ({e})")))
 }
 
 /// The folder to hand to WebView2: `preferred` when [`check_folder`] accepts it, else the first usable of `fallbacks`; None
@@ -127,6 +143,40 @@ mod tests {
         let err = result.unwrap_err();
         assert!(err.reason.contains("not writable"), "{err}");
         check_folder(&dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_ebwebview_folder_this_user_cannot_write_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("webview2");
+        let profile = dir.join("EBWebView");
+        fs::create_dir_all(&profile).unwrap();
+        let icacls = |args: &[&str]| std::process::Command::new("icacls").arg(&profile).args(args).output().unwrap().status;
+        assert!(icacls(&["/deny", "*S-1-1-0:(W)"]).success());
+        let result = check_folder(&dir);
+        assert!(icacls(&["/remove:d", "*S-1-1-0"]).success());
+        let err = result.unwrap_err();
+        assert!(err.reason.contains("EBWebView not writable"), "{err}");
+        check_folder(&dir).unwrap();
+        assert_eq!(fs::read_dir(&profile).unwrap().count(), 0, "the probe file is removed");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_folder_that_allows_files_but_no_subfolders_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("webview2");
+        fs::create_dir_all(&dir).unwrap();
+        let icacls = |args: &[&str]| std::process::Command::new("icacls").arg(&dir).args(args).output().unwrap().status;
+        // AD: append data, on a folder the right to create subfolders.
+        assert!(icacls(&["/deny", "*S-1-1-0:(AD)"]).success());
+        let result = check_folder(&dir);
+        assert!(icacls(&["/remove:d", "*S-1-1-0"]).success());
+        let err = result.unwrap_err();
+        assert!(err.reason.contains("EBWebView cannot be created"), "{err}");
+        check_folder(&dir).unwrap();
+        assert!(!dir.join("EBWebView").exists(), "an EBWebView made for the check is removed");
     }
 
     #[test]

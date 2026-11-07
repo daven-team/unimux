@@ -38,12 +38,15 @@ pub fn browser_args(debug_port: Option<u16>) -> String {
     args
 }
 
+#[cfg(windows)]
 static WEBVIEW_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
 /// Chooses the WebView2 user data folder of every app window once, before any webview exists: `<data>/webview2` when it is a
 /// directory this user can write, else `%TEMP%\unimux-webview2\<hash of the data dir>` (PLAN.md U2 / SP6: WebView2 handed a
 /// folder it cannot create shows Edge's own "cannot create data directory" box, which a user must never see). When neither is
-/// usable the start fails with the app's own message (the same as an unreadable state.json) instead of that box.
+/// usable the start fails with the app's own message (the same as an unreadable state.json) instead of that box. Windows only
+/// (WKWebView uses its default store).
+#[cfg(windows)]
 pub fn init_webview_dir(data_dir: &std::path::Path, crash: &unimux_core::crash_log::RollingLog) {
     let preferred = data_dir.join("webview2");
     let fallback = unimux_platform::webview::temp_fallback_for(data_dir);
@@ -63,6 +66,7 @@ pub fn init_webview_dir(data_dir: &std::path::Path, crash: &unimux_core::crash_l
 }
 
 /// The folder chosen by [`init_webview_dir`] (`<data>/webview2` before it ran).
+#[cfg(windows)]
 pub fn webview_dir(ctx: &AppContext) -> std::path::PathBuf {
     WEBVIEW_DIR.get().cloned().unwrap_or_else(|| ctx.data_dir.join("webview2"))
 }

@@ -96,8 +96,9 @@ impl UpdateStrings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSplashConfig {
-    pub from_version: String,
+    // The key order of 1.1.4's showUpdateWindow (src/main/updateSplash.ts): `version` first.
     pub version: String,
+    pub from_version: String,
     pub old_pid: u32,
     pub install_dir: PathBuf,
     pub app_exe: PathBuf,
@@ -251,7 +252,7 @@ pub fn stage_runtime(exe: &Path, runtime_dir: &Path) -> io::Result<PathBuf> {
     if let Some(parent) = runtime_dir.parent() {
         fs::create_dir_all(parent)?;
         remove_stale_partials(parent);
-        remove_stale_webviews(parent, unimux_core::time::now_ms());
+        sweep_stale_webviews(parent, &temp_webview_root(), unimux_core::time::now_ms());
     }
     let partial = partial_dir(runtime_dir, std::process::id());
     let _ = fs::remove_dir_all(&partial);
@@ -283,6 +284,21 @@ pub fn updater_root() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
         .join(UPDATER_DIR)
+}
+
+/// `%TEMP%\unimux-updater`: where an update window puts its WebView2 folder (`webview2-<ms>`) when the configured one fails
+/// the pre-check. Swept like the updater root by [`stage_runtime`] and [`prestage`].
+pub fn temp_webview_root() -> PathBuf {
+    std::env::temp_dir().join(UPDATER_DIR)
+}
+
+/// Sweeps stale `webview2-<ms>` folders of killed windows from the updater `root` and from `temp_root` (the callers pass
+/// [`temp_webview_root`]; once when they are the same folder).
+fn sweep_stale_webviews(root: &Path, temp_root: &Path, now_ms: i64) {
+    remove_stale_webviews(root, now_ms);
+    if temp_root != root {
+        remove_stale_webviews(temp_root, now_ms);
+    }
 }
 
 /// The folder name the cleanup insists on ([`cleanup_allowed`]).
@@ -324,7 +340,7 @@ pub fn prestage(app_exe: &Path, root: &Path, version: &str) -> io::Result<Presta
     let runtime_dir = root.join(format!("runtime-{version}"));
     let runtime_exe = stage_runtime(app_exe, &runtime_dir)?;
     let copy_ms = started.elapsed().as_millis() as u64;
-    remove_stale_webviews(root, unimux_core::time::now_ms());
+    sweep_stale_webviews(root, &temp_webview_root(), unimux_core::time::now_ms());
     let warm = Instant::now();
     let program = unimux_exec::Program::Args { program: runtime_exe.clone(), args: vec!["--update-cleanup".into()] };
     // Outside the copy (a working directory inside it would hold the folder), detached like the real start.
@@ -541,8 +557,8 @@ mod tests {
         assert_eq!(
             keys,
             [
-                "fromVersion",
                 "version",
+                "fromVersion",
                 "oldPid",
                 "installDir",
                 "appExe",
@@ -659,6 +675,28 @@ mod tests {
         remove_stale_webviews(&root, now as i64);
         assert!(!stale.exists());
         assert!(fresh.exists() && shared.exists() && odd.exists() && file.exists());
+    }
+
+    #[test]
+    fn the_temp_fallback_folders_of_killed_windows_are_swept_too() {
+        // The update window's fallback lives under %TEMP%\unimux-updater, not under the updater root.
+        assert_eq!(temp_webview_root(), std::env::temp_dir().join(UPDATER_DIR));
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("local").join(UPDATER_DIR);
+        let temp = tmp.path().join("temp").join(UPDATER_DIR);
+        let now = 1_762_444_800_000i64;
+        let day = STALE_WEBVIEW_AGE.as_millis() as i64;
+        let stale = [root.join(format!("webview2-{}", now - 2 * day)), temp.join(format!("webview2-{}", now - 2 * day))];
+        let fresh = [root.join(format!("webview2-{}", now - 1000)), temp.join(format!("webview2-{}", now - 1000))];
+        for dir in stale.iter().chain(&fresh) {
+            fs::create_dir_all(dir.join("EBWebView")).unwrap();
+        }
+        sweep_stale_webviews(&root, &temp, now);
+        assert!(stale.iter().all(|d| !d.exists()));
+        assert!(fresh.iter().all(|d| d.exists()));
+        // The same folder twice is swept once, without harm.
+        sweep_stale_webviews(&root, &root, now);
+        assert!(fresh[0].exists());
     }
 
     #[test]
