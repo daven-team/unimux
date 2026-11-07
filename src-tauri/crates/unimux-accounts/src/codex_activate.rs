@@ -63,7 +63,12 @@ pub fn read_live_codex_identity(deps: &CodexActivateDeps) -> Option<CodexIdentit
 
 /// `reconcileCodexLive`: before every poll (never during a Codex swap) records who is in the live auth.json and marks the
 /// copy of an account that left it without the app as possibly outdated. Returns the live identity.
+///
+/// Commands and polls run on separate threads here, so the read of auth.json, the look at the store and the writes all happen
+/// under the Codex files lock a "make main" holds for its whole run; while a swap holds it (or has taken the Codex flag and
+/// waits for it) the reconcile only reads, like 1.1.4's `isCodexSwapRunning()` check.
 pub fn reconcile_codex_live(deps: &CodexActivateDeps) -> Option<CodexIdentity> {
+    let Some(_files) = deps.slot.try_lock_codex_files() else { return read_live_codex_identity(deps) };
     let live = read_live_codex_identity(deps);
     if deps.slot.is_codex_running() || deps.store.read_only() {
         return live;
@@ -89,11 +94,16 @@ fn named(record: Option<&CodexAccount>, error: SwapError) -> SwapResult {
 /// `checkCodexTarget`: why a saved Codex account cannot be made main now, or `None`; the same checks
 /// [`activate_codex_account`] makes first.
 pub fn check_codex_target(deps: &CodexActivateDeps, id: &str) -> Option<SwapResult> {
+    if deps.slot.is_codex_running() || deps.store.read_only() {
+        return Some(named(deps.store.get(id).as_ref(), SwapError::Busy));
+    }
+    check_target_files(deps, id)
+}
+
+/// The checks of [`check_codex_target`] after the busy one (a "make main" makes them again under the Codex files lock).
+fn check_target_files(deps: &CodexActivateDeps, id: &str) -> Option<SwapResult> {
     let record = deps.store.get(id);
     let record = record.as_ref();
-    if deps.slot.is_codex_running() || deps.store.read_only() {
-        return Some(named(record, SwapError::Busy));
-    }
     // A config that keeps the login in the system keyring would ignore the auth.json the swap writes.
     if codex_stores_in_keyring(deps.read(&(deps.live_home)().join("config.toml")).as_deref()) {
         return Some(named(record, SwapError::Unsupported));
@@ -128,6 +138,12 @@ pub fn activate_codex_account(deps: &CodexActivateDeps, id: &str) -> SwapResult 
         return refusal;
     }
     let Some(_running) = deps.slot.claim_codex() else { return named(deps.store.get(id).as_ref(), SwapError::Busy) };
+    // A reconcile that took the lock before the flag was set finishes first; the checks are made again after it, so they
+    // see what it wrote.
+    let _files = deps.slot.lock_codex_files();
+    if let Some(refusal) = check_target_files(deps, id) {
+        return refusal;
+    }
     let run = || -> Result<SwapResult, ()> {
         let record = deps.store.get(id).ok_or(())?;
         let dir = deps.store.dir_of(id).map_err(drop)?;

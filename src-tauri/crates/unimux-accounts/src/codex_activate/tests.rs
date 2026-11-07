@@ -144,3 +144,51 @@ fn a_failed_write_answers_write_and_an_unusable_target_invalid() {
         r#"{"OPENAI_API_KEY":"sk-fake"}"#
     );
 }
+
+#[test]
+fn a_reconcile_never_interleaves_with_a_make_main_on_another_thread() {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let c = setup();
+    fs::write(c.live.join("auth.json"), auth("alice")).unwrap();
+    let bob = c.add_saved("bob");
+    reconcile_codex_live(&c.deps());
+    // The reconcile reads the live auth.json (alice); right then a whole "make main" of bob runs on another thread. Without
+    // the Codex files lock it finished in that gap, and the reconcile then took bob (now live, live_family) for the account
+    // that left outside the app: bob outdated, live back to alice.
+    let swap_deps = c.deps();
+    let swap_bob = bob.clone();
+    let started = Arc::new(AtomicBool::new(false));
+    let handle: Arc<Mutex<Option<std::thread::JoinHandle<SwapResult>>>> = Arc::new(Mutex::new(None));
+    let mut deps = c.deps();
+    let (started_seam, handle_seam) = (started.clone(), handle.clone());
+    deps.read_text = Some(Arc::new(move |path: &Path| {
+        let text = crate::js::read_text(path).ok();
+        if path.file_name().is_some_and(|n| n == "auth.json") && !started_seam.swap(true, Ordering::SeqCst) {
+            let (done_tx, done_rx) = mpsc::channel();
+            let (d, id) = (swap_deps.clone(), swap_bob.clone());
+            *handle_seam.lock().unwrap() = Some(std::thread::spawn(move || {
+                let result = activate_codex_account(&d, &id);
+                let _ = done_tx.send(());
+                result
+            }));
+            // Give the swap every chance to run in the gap (it waits for the reconcile now).
+            let _ = done_rx.recv_timeout(Duration::from_millis(500));
+        }
+        text
+    }));
+    reconcile_codex_live(&deps);
+    let swap = handle.lock().unwrap().take().expect("the seam started the swap").join().unwrap();
+    assert_eq!(swap, SwapResult::ok(Some("bob@example.com".into())));
+    assert_eq!(c.live_user().as_deref(), Some("user-bob"));
+    let record = c.store.get(&bob).unwrap();
+    assert!(!record.outdated && record.live_family, "the new main account was marked outdated");
+    assert_eq!(c.store.live().and_then(|l| l.record_id).as_deref(), Some(bob.as_str()));
+    // The next poll finds nothing changed.
+    reconcile_codex_live(&c.deps());
+    assert!(!c.store.get(&bob).unwrap().outdated);
+    assert_eq!(c.store.live().and_then(|l| l.record_id).as_deref(), Some(bob.as_str()));
+}

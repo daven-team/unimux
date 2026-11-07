@@ -20,6 +20,9 @@ pub struct SwapSlot {
     recovery_pending: AtomicBool,
     /// A Codex "make main" moves files (`isCodexSwapRunning`).
     codex_running: AtomicBool,
+    /// Held while a Codex "make main" or the reconcile of the live Codex login reads and writes the live auth.json and the
+    /// Codex store, so the two never interleave (in 1.1.4 both were synchronous on Node's one thread).
+    codex_files: Mutex<()>,
 }
 
 impl std::fmt::Debug for SwapSlot {
@@ -124,6 +127,16 @@ impl SwapSlot {
     /// Takes the Codex flag (false while a Codex "make main" runs); cleared when the guard is dropped.
     pub(crate) fn claim_codex(&self) -> Option<CodexGuard<'_>> {
         (!self.codex_running.swap(true, Ordering::SeqCst)).then_some(CodexGuard { slot: self })
+    }
+
+    /// The Codex files lock for a "make main" that holds the Codex flag (waits for a reconcile in progress).
+    pub(crate) fn lock_codex_files(&self) -> parking_lot::MutexGuard<'_, ()> {
+        self.codex_files.lock()
+    }
+
+    /// The Codex files lock for the reconcile, or `None` while a "make main" holds it.
+    pub(crate) fn try_lock_codex_files(&self) -> Option<parking_lot::MutexGuard<'_, ()>> {
+        self.codex_files.try_lock()
     }
 }
 

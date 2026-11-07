@@ -299,8 +299,28 @@ fn check_outcome(p: &Paths, with_outgoing_record: bool, before: &[(PathBuf, Opti
     }
 }
 
-/// Every file under `root` whose name ends in `.tmp`.
+/// The swap's own temp files left anywhere under `root`. The AccountsStore's temp file of accounts.json
+/// (`accounts.json.<pid>.<base36>.tmp`, unimux_core::atomic_write::temp_path_for) is not one of them: a kill during a store
+/// write leaves it behind and nothing sweeps it, exactly like 1.1.4's atomicWriteFileSync (its tempPathFor names the file the
+/// same way and src/main has no sweep). accounts.json itself is still whole then (the write renames over it or not at all).
 fn temps(root: &Path) -> Vec<PathBuf> {
+    temps_all(root).into_iter().filter(|p| !is_store_temp(p)).collect()
+}
+
+/// `accounts.json.<pid>.<base36>.tmp` in the accounts dir.
+fn is_store_temp(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else { return false };
+    let Some(rest) = name.strip_prefix("accounts.json.").and_then(|r| r.strip_suffix(".tmp")) else { return false };
+    let Some((pid, stamp)) = rest.split_once('.') else { return false };
+    path.parent().and_then(Path::file_name).is_some_and(|d| d == "accounts")
+        && !pid.is_empty()
+        && pid.bytes().all(|b| b.is_ascii_digit())
+        && !stamp.is_empty()
+        && stamp.bytes().all(|b| b.is_ascii_digit() || b.is_ascii_lowercase())
+}
+
+/// Every file under `root` whose name ends in `.tmp`.
+fn temps_all(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -389,6 +409,11 @@ fn kill_and_restart(with_outgoing_record: bool, stop_at: Option<usize>, after: O
     assert_eq!(recover_interrupted_activation(&d), Recovery::Legacy, "{label}");
     assert_eq!(recover_interrupted_swap(&d), Recovery::None, "{label}");
     assert_eq!(temps(&p.root), Vec::<PathBuf>::new(), "{label}");
+    // A store temp file the kill left (as in 1.1.4) never stands in for accounts.json: the store still reads it whole.
+    if temps_all(&p.root).iter().any(|t| is_store_temp(t)) {
+        let text = fs::read_to_string(p.accounts().join("accounts.json")).unwrap();
+        assert!(js_json::parse(&text).is_ok(), "{label}: accounts.json is not whole next to a store temp file");
+    }
     stopped_at
 }
 
@@ -429,4 +454,20 @@ fn killed_at_a_random_moment_the_next_start_restores_or_finishes_it() {
         let after = Duration::from_millis(20 + seed % 600);
         kill_and_restart(i % 2 == 0, None, Some(after), &format!("killed after {after:?}"));
     }
+}
+
+#[test]
+fn only_the_stores_own_temp_name_is_left_out_of_the_temp_check() {
+    let accounts = Path::new("x").join("accounts");
+    assert!(is_store_temp(&accounts.join("accounts.json.12692.mw6n9tsy6.tmp")));
+    for other in [
+        "accounts.json.abc.mw6n9tsy6.tmp",
+        "accounts.json.12692.tmp",
+        "accounts.json.12692.MW6.tmp",
+        ".credentials.json.12692.mw6.tmp",
+        "accounts.json.6e1b0b8c-7a3e-4a8e-9a55-0f6d2b4f9c11.tmp",
+    ] {
+        assert!(!is_store_temp(&accounts.join(other)), "{other}");
+    }
+    assert!(!is_store_temp(&Path::new("x").join("swap-backup").join("accounts.json.12692.mw6n9tsy6.tmp")));
 }
