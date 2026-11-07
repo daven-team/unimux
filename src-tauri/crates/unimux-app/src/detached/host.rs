@@ -1,6 +1,7 @@
 //! The Tauri side of the detached windows: `detached-<uuid>` webview windows loading `index.html?detached=<uuid>` with the
-//! main window's WebView2 settings and browser arguments, placed in physical pixels from the DIP bounds of state.json
-//! (unimux_platform::screen), a normal-bounds tracker (Tauri has no getNormalBounds), and the screen API (monitors, work
+//! main window's WebView2 settings and browser arguments (the label and query encode ids outside the label alphabet, see
+//! unimux_ipc::route), placed from the DIP bounds of state.json (unimux_platform::screen; the host's space is physical
+//! pixels on Windows and points on macOS), a normal-bounds tracker (Tauri has no getNormalBounds), and the screen API (monitors, work
 //! areas, cursor) in DIPs.
 //!
 //! Window events go to the [`DetachedService`]: Moved / Resized (place saved 400 ms later), CloseRequested (held: the tab
@@ -17,7 +18,7 @@ use std::sync::{Arc, Weak};
 use parking_lot::Mutex;
 use serde_json::Value;
 use tauri::webview::PageLoadEvent;
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 use unimux_ipc::Scope;
 use unimux_ipc::route::detached_label;
@@ -46,7 +47,7 @@ pub fn hidden_mode() -> bool {
 struct HostWin {
     /// The window should be maximized (shown maximized; in the hidden mode only remembered).
     maximized: bool,
-    /// The last outer rect (physical) while neither maximized nor minimized.
+    /// The last outer rect (host space) while neither maximized nor minimized.
     normal: Option<screen::Rect>,
     /// The rect and maximized state the window was created with: events that still show them are the creation's own,
     /// not a move by the user (1.1.4 saved nothing before the first move).
@@ -68,14 +69,57 @@ fn to_platform(r: &Rect) -> screen::Rect {
     screen::Rect::new(r.x, r.y, r.width, r.height)
 }
 
+/// When `window:shown` is sent again after a page load (ms after the load, then after the previous send).
+const SHOWN_RESEND_MS: [u64; 2] = [300, 1200];
+
 fn to_state(r: &screen::Rect) -> Rect {
     Rect::new(r.x, r.y, r.width, r.height)
 }
 
+/// A window's outer rect in the host's space: physical pixels on Windows, points on macOS (tao scales a window's values
+/// by its current scale there, see unimux_platform::screen).
 fn outer_rect(w: &WebviewWindow) -> Option<screen::Rect> {
     let p = w.outer_position().ok()?;
     let s = w.outer_size().ok()?;
-    Some(screen::Rect::new(f64::from(p.x), f64::from(p.y), f64::from(s.width), f64::from(s.height)))
+    let r = screen::Rect::new(f64::from(p.x), f64::from(p.y), f64::from(s.width), f64::from(s.height));
+    #[cfg(target_os = "macos")]
+    {
+        Some(screen::unscale_rect(&r, w.scale_factor().ok()?))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Some(r)
+    }
+}
+
+/// The frame (outer minus inner size) where the window is now, in the host's space.
+fn frame_size(w: &WebviewWindow) -> (f64, f64) {
+    let (Ok(o), Ok(i)) = (w.outer_size(), w.inner_size()) else { return (0.0, 0.0) };
+    let (dx, dy) = (f64::from(o.width) - f64::from(i.width), f64::from(o.height) - f64::from(i.height));
+    #[cfg(target_os = "macos")]
+    {
+        let s = w.scale_factor().unwrap_or(1.0);
+        if s > 0.0 { (dx / s, dy / s) } else { (dx, dy) }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        (dx, dy)
+    }
+}
+
+fn set_native_position(w: &WebviewWindow, x: f64, y: f64) {
+    #[cfg(target_os = "macos")]
+    let _ = w.set_position(tauri::LogicalPosition::new(x, y));
+    #[cfg(not(target_os = "macos"))]
+    let _ = w.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+}
+
+fn set_native_inner_size(w: &WebviewWindow, width: f64, height: f64) {
+    let (width, height) = (width.max(1.0), height.max(1.0));
+    #[cfg(target_os = "macos")]
+    let _ = w.set_size(tauri::LogicalSize::new(width, height));
+    #[cfg(not(target_os = "macos"))]
+    let _ = w.set_size(tauri::PhysicalSize::new(width as u32, height as u32));
 }
 
 impl TauriHost {
@@ -92,7 +136,8 @@ impl TauriHost {
         })
     }
 
-    /// The display list now (monitors can change between two placements).
+    /// The display list now (monitors can change between two placements). Windows: physical pixels laid out as Chromium's
+    /// ScreenWin; macOS: every monitor value back in points (tao scales each by the monitor's own factor).
     pub fn screen(&self) -> Screen {
         let primary = self.app.primary_monitor().ok().flatten();
         let monitors: Vec<Monitor> = self
@@ -103,67 +148,92 @@ impl TauriHost {
             .map(|m| {
                 let (p, s, wa) = (m.position(), m.size(), m.work_area());
                 let is_primary = primary.as_ref().is_some_and(|q| q.name() == m.name() && q.position() == p);
-                Monitor {
-                    name: m.name().cloned().unwrap_or_default(),
-                    bounds: screen::Rect::new(f64::from(p.x), f64::from(p.y), f64::from(s.width), f64::from(s.height)),
-                    work_area: screen::Rect::new(
-                        f64::from(wa.position.x),
-                        f64::from(wa.position.y),
-                        f64::from(wa.size.width),
-                        f64::from(wa.size.height),
-                    ),
-                    scale: m.scale_factor(),
-                    primary: is_primary,
+                let bounds = screen::Rect::new(f64::from(p.x), f64::from(p.y), f64::from(s.width), f64::from(s.height));
+                let work_area = screen::Rect::new(
+                    f64::from(wa.position.x),
+                    f64::from(wa.position.y),
+                    f64::from(wa.size.width),
+                    f64::from(wa.size.height),
+                );
+                let name = m.name().cloned().unwrap_or_default();
+                if cfg!(target_os = "macos") {
+                    Monitor::from_scaled(name, bounds, work_area, m.scale_factor(), is_primary)
+                } else {
+                    Monitor { name, bounds, work_area, scale: m.scale_factor(), primary: is_primary }
                 }
             })
             .collect();
-        Screen::new(&monitors)
+        if cfg!(target_os = "macos") { Screen::from_points(&monitors) } else { Screen::new(&monitors) }
     }
 
     fn window(&self, label: &str) -> Option<WebviewWindow> {
         self.app.get_webview_window(label)
     }
 
-    /// Puts a window at a physical outer rect (position, size, position again: a move to a display with another scale
-    /// factor resizes the window on the way).
-    fn place_physical(w: &WebviewWindow, r: &screen::Rect) {
-        let (dx, dy) = match (w.outer_size(), w.inner_size()) {
-            (Ok(o), Ok(i)) => (f64::from(o.width) - f64::from(i.width), f64::from(o.height) - f64::from(i.height)),
-            _ => (0.0, 0.0),
-        };
-        let pos = PhysicalPosition::new(r.x as i32, r.y as i32);
-        let _ = w.set_position(pos);
-        let _ = w.set_size(PhysicalSize::new((r.width - dx).max(1.0) as u32, (r.height - dy).max(1.0) as u32));
-        let _ = w.set_position(pos);
-    }
-
-    /// The first page load shows the window (maximized again when it was); an offscreen run never takes the focus, the
-    /// hidden mode never shows it.
-    fn first_show(&self, id: &str) {
-        let label = detached_label(id);
-        let Some(w) = self.window(&label) else { return };
-        let maximized = {
-            let mut windows = self.windows.lock();
-            let Some(entry) = windows.get_mut(id) else { return };
-            if std::mem::replace(&mut entry.shown, true) {
-                return;
-            }
-            entry.maximized
-        };
-        if !self.hidden {
-            if maximized && !self.offscreen {
-                let _ = w.maximize();
-            }
-            if self.offscreen {
-                windows::show_without_focus(&w);
-            } else {
-                let _ = w.show();
-                let _ = w.set_focus();
+    /// Puts a window at an outer rect of the host's space (physical pixels on Windows, points on macOS). The window moves
+    /// onto the target display first: a display with another scale factor changes the frame there (WM_DPICHANGED), so the
+    /// frame is measured after the move, then the inner size is set and the position again; repeated (at most 3 times)
+    /// until the outer rect is the target.
+    fn place_native(w: &WebviewWindow, r: &screen::Rect) {
+        let target = r.rounded();
+        set_native_position(w, target.x, target.y);
+        for _ in 0..3 {
+            let (dx, dy) = frame_size(w);
+            set_native_inner_size(w, target.width - dx, target.height - dy);
+            set_native_position(w, target.x, target.y);
+            if outer_rect(w).is_none_or(|o| o.rounded() == target) {
+                break;
             }
         }
-        if let Some(ctx) = self.ctx.upgrade() {
-            let shown = w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false);
-            ctx.events.emit(Scope::Window(label), "window:shown", vec![Value::Bool(shown)]);
+    }
+
+    /// Every page load: the first one shows the window (maximized again when it was; an offscreen run never takes the
+    /// focus, the hidden mode never shows it), and every one tells the page whether its window is shown (1.1.4 sendShown
+    /// on every did-finish-load: a page reloaded while its window is minimized must know).
+    fn page_finished(&self, id: &str) {
+        let label = detached_label(id);
+        let Some(w) = self.window(&label) else { return };
+        let first = {
+            let mut windows = self.windows.lock();
+            let Some(entry) = windows.get_mut(id) else { return };
+            (!std::mem::replace(&mut entry.shown, true)).then_some(entry.maximized)
+        };
+        if let Some(maximized) = first {
+            self.first_show(&w, maximized);
+        }
+        Self::send_shown(&self.ctx, &w);
+        // Electron's ipcRenderer.on is synchronous, but a Tauri listener is registered by an IPC call that may still be on
+        // its way when the load finishes (seen on a window's first, cold load), and an event before it is lost. The state
+        // is sent again a little later; the renderer ignores a repeated value (windowShown.ts).
+        let (ctx, w) = (self.ctx.clone(), w.clone());
+        tauri::async_runtime::spawn(async move {
+            for delay in SHOWN_RESEND_MS {
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                Self::send_shown(&ctx, &w);
+            }
+        });
+    }
+
+    /// `window:shown` to a detached window: visible and not minimized.
+    fn send_shown(ctx: &Weak<AppContext>, w: &WebviewWindow) {
+        let Some(ctx) = ctx.upgrade() else { return };
+        let Ok(visible) = w.is_visible() else { return };
+        let shown = visible && !w.is_minimized().unwrap_or(false);
+        ctx.events.emit(Scope::Window(w.label().to_string()), "window:shown", vec![Value::Bool(shown)]);
+    }
+
+    fn first_show(&self, w: &WebviewWindow, maximized: bool) {
+        if self.hidden {
+            return;
+        }
+        if maximized && !self.offscreen {
+            let _ = w.maximize();
+        }
+        if self.offscreen {
+            windows::show_without_focus(w);
+        } else {
+            let _ = w.show();
+            let _ = w.set_focus();
         }
     }
 
@@ -220,9 +290,9 @@ pub async fn test_window_op(ctx: &Arc<AppContext>, args: &Value) -> Result<Value
     match action {
         "move" => {
             let (Some(x), Some(y), Some(width), Some(height)) = (n("x"), n("y"), n("width"), n("height")) else {
-                return Err(fail("move needs x, y, width, height (physical)"));
+                return Err(fail("move needs x, y, width, height (physical; points on macOS)"));
             };
-            TauriHost::place_physical(&w, &screen::Rect::new(x, y, width, height));
+            TauriHost::place_native(&w, &screen::Rect::new(x, y, width, height));
         }
         // What the close button does: CloseRequested first (the tab goes back), unlike destroy().
         "close" => {
@@ -256,7 +326,7 @@ impl Host for TauriHost {
         let registered = ctx.guard.register_detached(&label);
         // Known before the page can load (the first load shows the window).
         self.windows.lock().insert(id.to_string(), HostWin { maximized, ..HostWin::default() });
-        let url = WebviewUrl::App(format!("index.html?detached={id}").into());
+        let url = WebviewUrl::App(format!("index.html?detached={}", unimux_ipc::route::query_escape(id)).into());
         let page_id = id.to_string();
         let page_service = self.service.clone();
         let page_host = self.me.clone();
@@ -276,7 +346,7 @@ impl Host for TauriHost {
                     PageLoadEvent::Finished => {
                         svc.page_loaded(&page_id);
                         if let Some(host) = page_host.upgrade() {
-                            host.first_show(&page_id);
+                            host.page_finished(&page_id);
                         }
                     }
                 }
@@ -312,7 +382,7 @@ impl Host for TauriHost {
         windows::forget_on_destroy(&window, ctx.clone());
         if !self.offscreen {
             let physical = self.screen().rect_to_physical(&to_platform(&bounds));
-            Self::place_physical(&window, &physical);
+            Self::place_native(&window, &physical);
             let placed = outer_rect(&window).unwrap_or(physical);
             if let Some(entry) = self.windows.lock().get_mut(id) {
                 entry.normal = Some(placed);
@@ -381,6 +451,13 @@ impl Host for TauriHost {
 
     fn cursor(&self) -> Option<(f64, f64)> {
         let p = self.app.cursor_position().ok()?;
+        // macOS: tao scales the cursor by the primary monitor's factor.
+        #[cfg(target_os = "macos")]
+        let p = {
+            let scale = self.app.primary_monitor().ok().flatten().map_or(1.0, |m| m.scale_factor());
+            let (x, y) = screen::unscale_point(p.x, p.y, scale);
+            tauri::PhysicalPosition::new(x, y)
+        };
         Some(self.screen().point_to_dip(p.x, p.y))
     }
 

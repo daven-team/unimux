@@ -94,14 +94,53 @@ pub fn route_message(channel: &str, args: &[Value], owners: &HashMap<String, Str
     vec![(RouteTarget::Main, args.to_vec())]
 }
 
-/// The label of a detached window's webview.
-pub fn detached_label(id: &str) -> String {
-    format!("detached-{id}")
+/// An id that can stand in a window label as it is (a uuid, what 1.1.4 writes).
+fn plain_id(id: &str) -> bool {
+    !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-/// The detached window id of a label (None for `main` and anything else).
-pub fn detached_id(label: &str) -> Option<&str> {
-    label.strip_prefix("detached-")
+/// The label of a detached window's webview. Tauri takes only alphanumerics, '-', '/', ':' and '_' in a label, while a
+/// registry id may be any 1..128-char string (1.1.4 opened a hand-edited `a.b` too): a plain id gives `detached-<id>`,
+/// any other id `detached-:<hex of its UTF-8>` (':' is never in a plain id, so no two ids share a label; both match the
+/// `detached-*` capability).
+pub fn detached_label(id: &str) -> String {
+    if plain_id(id) {
+        return format!("detached-{id}");
+    }
+    let mut out = String::with_capacity(10 + id.len() * 2);
+    out.push_str("detached-:");
+    for b in id.bytes() {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
+}
+
+/// The detached window id of a label (None for `main` and anything [`detached_label`] does not give).
+pub fn detached_id(label: &str) -> Option<String> {
+    let rest = label.strip_prefix("detached-")?;
+    if let Some(hex) = rest.strip_prefix(':') {
+        if hex.is_empty() || hex.len() % 2 != 0 || !hex.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            return None;
+        }
+        let bytes: Option<Vec<u8>> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok()).collect();
+        let id = String::from_utf8(bytes?).ok()?;
+        return (!plain_id(&id)).then_some(id);
+    }
+    plain_id(rest).then(|| rest.to_string())
+}
+
+/// `encodeURIComponent` / Node's `querystring.escape` of a query value (1.1.4 loaded the page with
+/// `loadFile(..., { query: { detached: id } })`, which escapes the id the same way).
+pub fn query_escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for b in value.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) {
+            out.push(char::from(b));
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -163,8 +202,34 @@ mod tests {
     #[test]
     fn labels() {
         assert_eq!(detached_label("abc"), "detached-abc");
-        assert_eq!(detached_id("detached-abc"), Some("abc"));
+        assert_eq!(detached_id("detached-abc").as_deref(), Some("abc"));
         assert_eq!(detached_id("main"), None);
+        let uuid = "0f8b2c1e-6a4d-4c3b-9e2f-1a2b3c4d5e6f";
+        assert_eq!(detached_label(uuid), format!("detached-{uuid}"));
+        assert_eq!(detached_id(&detached_label(uuid)).as_deref(), Some(uuid));
+    }
+
+    /// Tauri's label rule (tauri-runtime `is_label_valid`): every registry id gets a valid label that maps back to it, and
+    /// no two ids share a label.
+    #[test]
+    fn ids_outside_the_label_alphabet_are_hex_encoded() {
+        let valid = |l: &str| l.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '/' || c == ':' || c == '_');
+        let ids = ["a.b", "a b", "x", "61", "a:b", "a/b", "\u{17c}\u{f3}\u{142}w", "1.1.4 tab", "%", "detached-:61"];
+        let mut labels = std::collections::HashSet::new();
+        for id in ids {
+            let label = detached_label(id);
+            assert!(valid(&label), "{id} -> {label}");
+            assert!(label.starts_with("detached-"), "{label}");
+            assert_eq!(detached_id(&label).as_deref(), Some(id), "{label}");
+            assert!(labels.insert(label), "{id}");
+        }
+        assert_eq!(detached_label("a.b"), "detached-:612e62");
+        // Not canonical: a plain id in hex, odd or upper-case hex, an empty id, a raw non-label id.
+        for label in ["detached-:61", "detached-:612", "detached-:612E62", "detached-:", "detached-", "detached-a.b"] {
+            assert_eq!(detached_id(label), None, "{label}");
+        }
+        assert_eq!(query_escape("a.b c/\u{17c}"), "a.b%20c%2F%C5%BC");
+        assert_eq!(query_escape("0f8b-AZ_az~*'()!"), "0f8b-AZ_az~*'()!");
     }
 
     /// Every row of the shared fixture file (written by the TS routeMessage) gives the same receivers and arguments here.
