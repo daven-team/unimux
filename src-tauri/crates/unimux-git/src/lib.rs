@@ -10,15 +10,21 @@
 //! revoke, the one-use request ids), the worktree list with `resolveDir`, and the request pipeline of src/main/gitHandler.ts
 //! ([`handler`]). Reads and mutations (G3) and worktree creation / removal (G4) build on it; the commands are registered in
 //! `unimux-app/src/commands/git.rs`.
+//!
+//! G4: worktrees for cells ([`worktree`]: create, inspect, safe removal, current branch, is-repo; also the automation's API),
+//! clone with the shared network run and the busy set ([`clone`]), `git init` and the Git install plan ([`setup`]).
 
 pub mod cache;
+pub mod clone;
 pub mod handler;
 pub mod js;
 pub mod paths;
 pub mod runner;
+pub mod setup;
 pub mod shared;
 pub mod text;
 pub mod trust;
+pub mod worktree;
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -30,9 +36,11 @@ use parking_lot::Mutex;
 use serde::Serialize;
 
 pub use cache::{CACHE_LIMIT, Generation, Inflight, Lru};
+pub use clone::{BusySet, GitOpResult, RemoteAuth};
 pub use runner::{GitErrorCode, GitFailure, GitOptions, GitResult, RunOptions, RunOutput, Runner, result_json};
 pub use shared::{GitTrustInfo, GitWorktree, TrustState};
 pub use trust::{RepoScan, TrustStore};
+pub use worktree::{Worktree, WorktreeInspection, WorktreeRemoveResult};
 
 /// How long a request id is remembered as used (`consume` of git.ts).
 pub const REQUEST_ID_TTL: Duration = Duration::from_secs(10 * 60);
@@ -105,6 +113,7 @@ pub struct Git {
     trust: Arc<TrustStore>,
     generation: Generation,
     inflight: Inflight,
+    busy: clone::BusySet,
 }
 
 impl Default for Git {
@@ -125,6 +134,7 @@ impl Git {
             trust,
             generation: Generation::default(),
             inflight: Inflight::default(),
+            busy: clone::BusySet::default(),
         }
     }
 
@@ -134,6 +144,11 @@ impl Git {
 
     pub fn runner(&self) -> &Runner {
         &self.runner
+    }
+
+    /// The operations holding a repository or a clone target right now (`busy` of git.ts; G3's mutations share it).
+    pub fn busy(&self) -> &BusySet {
+        &self.busy
     }
 
     /// Runs git in `cwd` (see [`Runner::run`]); a killed write releases the stale `index.lock` of `cwd`'s known git directory.
