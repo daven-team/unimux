@@ -160,13 +160,14 @@ fn service(ctx: &Arc<AppContext>) -> Arc<McpService> {
         .clone()
 }
 
-/// Starts the server after the window (index.ts: `startMcp().then(() => mark('mcp-started'))`).
-pub fn start(ctx: &Arc<AppContext>) {
+/// The server's start after the window (index.ts: `startMcp().then(() => mark('mcp-started'))`); W7's startup runs it next
+/// to the hook server and opens the cell services gate after both.
+pub fn start(ctx: &Arc<AppContext>) -> futures::future::BoxFuture<'static, ()> {
     let (ctx, service) = (ctx.clone(), service(ctx));
-    tauri::async_runtime::spawn(async move {
+    Box::pin(async move {
         McpService::start(ctx.clone(), service, 2).await;
         ctx.mark("mcp-started");
-    });
+    })
 }
 
 /// The quit path: every token, session, task and connection ends.
@@ -178,6 +179,9 @@ pub fn stop() {
 
 pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     let s = service(ctx);
+    // W7: a team cell that left the grids (closed or archived) loses its MCP token; waits and sessions of it end.
+    let server = s.server.clone();
+    ctx.cells.on_revoke("mcp", move |cell| server.revoke_cell(cell));
     r.invoke("mcp:info", move |_| {
         let s = s.clone();
         async move { Ok(s.info()) }

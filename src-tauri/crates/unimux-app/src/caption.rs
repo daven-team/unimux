@@ -326,11 +326,11 @@ mod win {
     use windows::Win32::UI::Shell::{DefSubclassProc, GetWindowSubclass, RemoveWindowSubclass, SetWindowSubclass};
     use windows::Win32::UI::WindowsAndMessaging::{
         CS_DBLCLKS, CreateWindowExW, DefWindowProcW, DestroyWindow, EnableMenuItem, GWL_STYLE, GWLP_USERDATA, GetClientRect,
-        GetSystemMenu, GetWindowLongPtrW, HTCAPTION, HTTRANSPARENT, HWND_TOP, IDC_ARROW, IsIconic, IsWindow, IsZoomed,
+        GetSystemMenu, GetWindowLongPtrW, HTCAPTION, HTTRANSPARENT, HWND_TOP, IDC_ARROW, IsIconic, IsWindow, IsZoomed, LWA_ALPHA,
         LoadCursorW, MF_BYCOMMAND, MF_ENABLED, MF_GRAYED, PostMessageW, RegisterClassExW, SIZE_MINIMIZED, SM_CXPADDEDBORDER,
-        SM_CXSIZEFRAME, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetMenuDefaultItem,
-        SetWindowLongPtrW, SetWindowPos, SetWindowTextW, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_APP,
-        WM_CAPTURECHANGED, WM_DPICHANGED, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK,
+        SM_CXSIZEFRAME, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetLayeredWindowAttributes,
+        SetMenuDefaultItem, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
+        WM_APP, WM_CAPTURECHANGED, WM_DPICHANGED, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK,
         WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_NCRBUTTONDOWN, WM_NCRBUTTONUP, WM_SHOWWINDOW,
         WM_SIZE, WM_SYSCOMMAND, WNDCLASS_STYLES, WNDCLASSEXW, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_LAYERED,
         WS_EX_NOREDIRECTIONBITMAP, WS_THICKFRAME,
@@ -739,6 +739,15 @@ mod win {
                     Some(instance.into()),
                     None,
                 ) {
+                    // A layered window that never got its attributes is neither drawn nor hit-tested (clicks fall through
+                    // to the page). Terminal gives its drag bar full opacity; without a redirection bitmap nothing is
+                    // drawn anyway. If Windows refuses, the plain child is used instead.
+                    if ex.contains(WS_EX_LAYERED)
+                        && SetLayeredWindowAttributes(child, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA).is_err()
+                    {
+                        let _ = DestroyWindow(child);
+                        continue;
+                    }
                     SetWindowLongPtrW(child, GWLP_USERDATA, caption as isize);
                     return Some(child);
                 }

@@ -7,6 +7,7 @@
 mod caption;
 #[cfg(all(windows, feature = "test-bridge"))]
 mod caption_test;
+mod cells;
 #[cfg(feature = "test-bridge")]
 mod channel_bench;
 mod commands;
@@ -321,8 +322,9 @@ fn start_main_app(app: &tauri::AppHandle, ctx: &Arc<AppContext>) -> tauri::Resul
         }
     });
     ctx.detached.start();
-    // In parallel with the window (1.1.4: hooks.start next to the cell file prune and the MCP server).
-    hooks::start(ctx);
+    // In parallel with the window (1.1.4: hooks.start next to the cell file prune and the MCP server, the MCP server retried
+    // twice in the background), then the cell services gate; the account work and its gates beside them (W7).
+    cells::startup::start(ctx, hooks::start(ctx), commands::mcp::start(ctx));
     // H3: the CLI scan in the background and the registry refresh on focus.
     commands::agents::app_started(ctx);
     // The wind-down stops the hook server in its own phase (1.1.4 before-quit: hooks.stop after the MCP server).
@@ -335,9 +337,7 @@ fn start_main_app(app: &tauri::AppHandle, ctx: &Arc<AppContext>) -> tauri::Resul
             stopping.server.stop();
         },
     );
-    // M1: the MCP server listens after the window (index.ts startMcp), retried twice in the background; the wind-down stops
-    // it in its own phase, before the hook server.
-    commands::mcp::start(ctx);
+    // M1: the wind-down stops the MCP server in its own phase, before the hook server.
     ctx.lifecycle.wind_down.register(lifecycle::wind_down::phase::MCP, "mcp stop", Duration::from_secs(1), || async {
         commands::mcp::stop();
     });

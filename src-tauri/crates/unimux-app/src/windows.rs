@@ -204,6 +204,14 @@ pub fn show_main(ctx: &AppContext) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+    reapply_taskbar(ctx);
+}
+
+/// `win.on('show')` -> `taskbar.reapply()`: the Dock tile shows the current view again (W7; nothing on Windows).
+fn reapply_taskbar(ctx: &AppContext) {
+    if let Some(os) = ctx.os.get() {
+        os.taskbar.reapply();
+    }
 }
 
 /// Shows a window without activating it (SW_SHOWNOACTIVATE), where it is.
@@ -294,6 +302,9 @@ pub(crate) fn watch_window_state(window: &WebviewWindow, ctx: Arc<AppContext>) {
         let now_shown = w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false);
         if shown.swap(now_shown, Ordering::SeqCst) != now_shown {
             ctx.events.emit(Scope::Window(w.label().to_string()), "window:shown", vec![Value::Bool(now_shown)]);
+            if now_shown && w.label() == MAIN {
+                reapply_taskbar(&ctx);
+            }
         }
         let now_max = w.is_maximized().unwrap_or(false);
         if maximized.swap(now_max, Ordering::SeqCst) != now_max {

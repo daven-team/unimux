@@ -40,12 +40,8 @@ impl Default for Hooks {
 }
 
 impl Hooks {
-    /// Which cells run a process now (P3's `alive` set). Until it is set no cell counts as alive, so session switches and
-    /// Codex turn ends are dropped like late hooks of an old process (no terminal can run before P3 anyway).
-    #[cfg_attr(
-        not(feature = "test-bridge"),
-        allow(dead_code, reason = "set by P3; only the check build's test bridge sets it now")
-    )]
+    /// Which cells run a process now: W7 points it at `AppContext::cells` (the pty service's `alive` set, P3). Until a cell
+    /// counts as alive its session switches and Codex turn ends are dropped like late hooks of an old process.
     pub fn set_alive(&self, alive: impl Fn(&str) -> bool + Send + Sync + 'static) {
         *self.alive.write() = Some(Arc::new(alive));
     }
@@ -74,11 +70,17 @@ impl Hooks {
         url
     }
 
-    /// The cell is gone for good (index.ts `forgetCell`: `codexHooked.delete(id)`, the hook nonce is dropped).
-    #[allow(dead_code, reason = "called by the cell removal path (P3)")]
+    /// The cell is gone for good (index.ts `forgetCell`: `codexHooked.delete(id)`, the hook nonce is dropped). W7's
+    /// forgetCell calls the two halves itself: the nonce stays while a process of the cell still runs.
+    #[cfg(test)]
     pub fn forget(&self, cell: &str) {
-        self.codex_hooked.lock().remove(cell);
+        self.forget_codex_hooked(cell);
         self.server.forget(cell);
+    }
+
+    /// `codexHooked.delete(id)` alone (forgetCell drops it even while the process runs).
+    pub fn forget_codex_hooked(&self, cell: &str) {
+        self.codex_hooked.lock().remove(cell);
     }
 
     fn route(&self, ctx: &AppContext, signal: HookSignal) {
@@ -97,9 +99,9 @@ impl Hooks {
     }
 }
 
-/// Starts the server on the async runtime: a failed listen is logged and the app runs on (hooks fall back to the terminal
-/// heuristics, as in 1.1.4).
-pub fn start(ctx: &Arc<AppContext>) {
+/// The server's start (W7's startup runs it next to the cell file prune and the MCP server, then opens the cell services
+/// gate): a failed listen is logged and the app runs on (hooks fall back to the terminal heuristics, as in 1.1.4).
+pub fn start(ctx: &Arc<AppContext>) -> futures::future::BoxFuture<'static, ()> {
     let weak: Weak<AppContext> = Arc::downgrade(ctx);
     ctx.hooks.server.set_handler(Arc::new(move |signal| {
         if let Some(ctx) = weak.upgrade() {
@@ -110,12 +112,12 @@ pub fn start(ctx: &Arc<AppContext>) {
         ctx.hooks.server.set_debug_dir(Some(ctx.data_dir.clone()));
     }
     let ctx = ctx.clone();
-    tauri::async_runtime::spawn(async move {
+    Box::pin(async move {
         if let Err(e) = ctx.hooks.server.start().await {
             ctx.crash.error(&format!("hook server did not start: {e}"));
         }
         ctx.mark("hooks-started");
-    });
+    })
 }
 
 /// The wind-down (W6 adds it to the full quit sequence): no new connections.

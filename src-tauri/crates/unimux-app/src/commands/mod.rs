@@ -10,6 +10,7 @@ use crate::context::AppContext;
 pub mod accounts;
 pub mod agents;
 pub mod app;
+pub mod cells;
 pub mod db;
 pub mod fallbacks;
 pub mod files;
@@ -27,6 +28,7 @@ pub mod window;
 pub fn register_all(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     fallbacks::register(r, ctx);
     app::register(r, ctx);
+    cells::register(r, ctx);
     state::register(r, ctx);
     window::register(r, ctx);
     os::register(r, ctx);
@@ -88,6 +90,8 @@ mod tests {
             assert_eq!(report[channel], Status::Implemented, "{channel}");
         }
         assert_eq!(report["cell:alive"], Status::Fallback);
+        // W7: the status reports of the windows (relay, taskbar, observers).
+        assert_eq!(report["cell:runtime"], Status::Implemented);
         for channel in ["mcp:info", "mcp:retry"] {
             assert_eq!(report[channel], Status::Implemented, "{channel}");
         }

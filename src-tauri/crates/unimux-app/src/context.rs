@@ -115,6 +115,11 @@ pub struct AppContext {
     pub lifecycle: Arc<crate::lifecycle::Lifecycle>,
     /// The agent status hook server (H1) and the routing of its signals.
     pub hooks: Arc<crate::hooks::Hooks>,
+    /// W7: the cell bookkeeping (alive cells, forgetCell / revokeCell / cancelOrphans hooks, cell:runtime observers) and the
+    /// startup gates.
+    pub cells: Arc<crate::cells::Cells>,
+    /// W7: the startup steps the domains add behind the window (cell file prune, account recovery and migration).
+    pub startup_steps: crate::cells::startup::Steps,
     /// Check build only: every renderer startup mark with the window label and the time (test_bridge `marks`).
     #[cfg(feature = "test-bridge")]
     pub test_marks: Mutex<Vec<(String, String, f64)>>,
@@ -199,6 +204,9 @@ impl AppContext {
                 det.close_all();
             },
         );
+        let hooks = Arc::new(crate::hooks::Hooks::default());
+        let cells = Arc::new(crate::cells::Cells::default());
+        wire_cells(&controller, &cells, &hooks, &detached);
         Arc::new(Self {
             data_dir,
             overrides,
@@ -225,7 +233,9 @@ impl AppContext {
             update: OnceLock::new(),
             detached,
             lifecycle,
-            hooks: Arc::new(crate::hooks::Hooks::default()),
+            hooks,
+            cells,
+            startup_steps: Default::default(),
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
             main_page_hooks: Mutex::new(Vec::new()),
@@ -286,4 +296,43 @@ impl AppContext {
     pub fn claim_app_start(&self) -> bool {
         self.app_start_unclaimed.swap(false, Ordering::SeqCst)
     }
+
+    /// `send('app:notice', text)`: a one-line notice the main window shows as a toast (H2's hook fallback and later notices).
+    #[cfg_attr(not(feature = "test-bridge"), allow(dead_code, reason = "the HTTP hook fallback notice (H2) sends through it"))]
+    pub fn app_notice(&self, text: &str) {
+        self.events.emit(Scope::Main, "app:notice", vec![Value::String(text.to_string())]);
+    }
+}
+
+/// W7: the controller's change hook of the cell bookkeeping (after the saver, the broadcaster and the detached windows), and
+/// the alive cells as the hook routing and the detached windows see them. forgetCell drops the cell's codexHooked mark
+/// always and its hook nonce only while no process of it runs (index.ts `forgetCell`).
+fn wire_cells(
+    controller: &Arc<StateController>,
+    cells: &Arc<crate::cells::Cells>,
+    hooks: &Arc<crate::hooks::Hooks>,
+    detached: &Arc<crate::detached::DetachedService>,
+) {
+    let c = Arc::downgrade(cells);
+    controller.on_change(move |change| {
+        if let Some(cells) = c.upgrade() {
+            cells.state_changed(change.previous, &change.snapshot.state);
+        }
+    });
+    let c = Arc::downgrade(cells);
+    hooks.set_alive(move |cell| c.upgrade().is_some_and(|c| c.is_alive(cell)));
+    let c = Arc::downgrade(cells);
+    detached.hooks().is_alive = Some(Arc::new(move |cell: &str| c.upgrade().is_some_and(|c| c.is_alive(cell))));
+    let h = Arc::downgrade(hooks);
+    cells.on_forget("codexHooked", move |cell| {
+        if let Some(h) = h.upgrade() {
+            h.forget_codex_hooked(cell);
+        }
+    });
+    let h = Arc::downgrade(hooks);
+    cells.on_forget_unless_alive("hooks", move |cell| {
+        if let Some(h) = h.upgrade() {
+            h.server.forget(cell);
+        }
+    });
 }

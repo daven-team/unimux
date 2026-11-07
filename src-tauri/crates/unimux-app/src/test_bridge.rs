@@ -238,6 +238,51 @@ pub async fn test_bridge(
         "pty" => crate::commands::pty::test_op(&args).map_err(|e| fail(&e)),
         // W4: the offscreen desktop recorder (toasts, dialogs, shell, beep, flash, clipboard), see commands::os::test_op.
         "os" => crate::commands::os::test_op(&ctx, &args).map_err(|e| fail(&e)),
+        // W7 (X1 contract): `{stub: true}` starts recording the taskbar's OS calls (answers true); without it the calls since
+        // then, `[{overlay: {size, scales, empty, png} | null, description} | {progress, mode} | {dock}]` like 1.1.4's
+        // setOverlayIcon / setProgressBar stubs. 1.2.0 never sets an overlay or a progress (dropped in 1.1.2 / 1.1.0), so
+        // only the macOS Dock badge (`{dock: text}`) can appear; `view: true` answers the current view instead of the calls,
+        // `{dock, attention, working}` (the counts behind it, which Windows computes too but never shows).
+        "taskbar" => {
+            let os = ctx.os.get().ok_or_else(|| fail("no os service"))?;
+            if args.get("stub").and_then(Value::as_bool) == Some(true) {
+                os.taskbar_calls.lock().get_or_insert_with(Vec::new);
+                return Ok(Value::Bool(true));
+            }
+            os.taskbar.flush();
+            if args.get("view").and_then(Value::as_bool) == Some(true) {
+                let counts = os.taskbar.counts();
+                return Ok(json!({ "dock": os.taskbar.view(), "attention": counts.attention, "working": counts.working }));
+            }
+            Ok(Value::Array(os.taskbar_calls.lock().clone().unwrap_or_default()))
+        }
+        // W7: an `app:notice` toast in the main window, `{text}` (the path H2's hook fallback notice takes).
+        "appNotice" => {
+            let text = args.get("text").and_then(Value::as_str).ok_or_else(|| fail("appNotice needs {text}"))?;
+            ctx.app_notice(text);
+            Ok(Value::Null)
+        }
+        // W7: the cell bookkeeping (alive cells, gates, registered hooks); `{alive: [ids]}` first sets the cells whose
+        // terminal runs (P3 stands-in), `{runtime: [args]}` runs one cell:runtime report as the main window.
+        "cells" => {
+            if let Some(list) = args.get("alive").and_then(Value::as_array) {
+                ctx.cells.replace_alive(list.iter().filter_map(Value::as_str).map(str::to_string));
+            }
+            if let Some(list) = args.get("runtime").and_then(Value::as_array) {
+                crate::commands::cells::runtime(&ctx, webview.label(), list);
+            }
+            let mut report = ctx.cells.report();
+            // `nonces: [ids]`: each cell's hook nonce (null: none, e.g. after forgetCell), read without creating one.
+            if let Some(list) = args.get("nonces").and_then(Value::as_array) {
+                report["nonces"] = list
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|c| (c.to_string(), json!(ctx.hooks.server.nonce(c))))
+                    .collect::<serde_json::Map<_, _>>()
+                    .into();
+            }
+            Ok(report)
+        }
         // M1: a token of the app's MCP server for a cell ({cell}; `revoke: true` revokes it instead), as P3 issues them.
         "mcp-token" => {
             let server = crate::commands::mcp::server().ok_or_else(|| fail("no MCP server"))?;
@@ -259,11 +304,10 @@ pub async fn test_bridge(
                 .collect::<Vec<_>>()
         )),
         // H1: the hook server as the harness needs it: port, token, a cell's URLs (a fresh nonce with `renew: true`) and,
-        // until P3 tracks running processes, which cells count as alive (`alive: [ids]`).
+        // until P3 tracks running processes, which cells count as alive (`alive: [ids]`, W7's alive set).
         "hooks" => {
             if let Some(list) = args.get("alive").and_then(Value::as_array) {
-                let ids: std::collections::HashSet<String> = list.iter().filter_map(Value::as_str).map(str::to_string).collect();
-                ctx.hooks.set_alive(move |cell| ids.contains(cell));
+                ctx.cells.replace_alive(list.iter().filter_map(Value::as_str).map(str::to_string));
             }
             let server = &ctx.hooks.server;
             let cell = args.get("cell").and_then(Value::as_str);
