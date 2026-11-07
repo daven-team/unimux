@@ -195,23 +195,46 @@ pub fn mysql_timeout_sql(flavor: Flavor, ms: Option<f64>) -> String {
     // Math.max(0, Math.floor(ms)); NaN stays NaN.
     let v = if ms.is_nan() { f64::NAN } else { ms.floor().max(0.0) };
     match flavor {
-        Flavor::Mariadb => format!("SET SESSION max_statement_time = {}", to_fixed_3(v / 1000.0, v)),
+        Flavor::Mariadb => format!("SET SESSION max_statement_time = {}", to_fixed_3(v / 1000.0)),
         Flavor::Mysql => format!("SET SESSION max_execution_time = {}", js_number(v)),
     }
 }
 
-/// `(ms / 1000).toFixed(3)` for a whole, non-negative `ms` (the digits of ms itself: the double nearest ms / 1000 is always
-/// closer to it than to its neighbours at 3 decimals).
-fn to_fixed_3(x: f64, ms: f64) -> String {
+/// JS `x.toFixed(3)`: the integer n closest to x * 1000 (the larger one on a tie), worked out on the exact value of the
+/// double, so it matches V8 for every input (huge timeouts included, where the double is far from ms / 1000).
+pub(crate) fn to_fixed_3(x: f64) -> String {
     if x.is_nan() {
         return "NaN".into();
     }
-    if x >= 1e21 || ms > 9_007_199_254_740_991.0 {
-        // Far beyond any timeout DB_LIMITS allows; JS would print exponent / rounded forms here.
-        return if x >= 1e21 { js_number(x) } else { format!("{x:.3}") };
+    if x.abs() >= 1e21 {
+        return js_number(x);
     }
-    let m = ms as u64;
-    format!("{}.{:03}", m / 1000, m % 1000)
+    // Like JS: -0 prints as "0.000", a small negative number as "-0.000".
+    let sign = if x < 0.0 { "-" } else { "" };
+    // Every double below 1e21 has a finite decimal expansion of at most 1074 fractional digits, so this prints it exactly.
+    let exact = format!("{:.1100}", x.abs());
+    let (int_part, frac) = exact.split_once('.').unwrap_or((exact.as_str(), ""));
+    let mut digits: Vec<u8> = int_part.bytes().chain(frac.bytes().take(3)).collect();
+    // The rest is at least half a unit of the 3rd decimal exactly when its first digit is 5 or more; a tie rounds up.
+    if frac.as_bytes().get(3).is_some_and(|d| *d >= b'5') {
+        let mut i = digits.len();
+        loop {
+            if i == 0 {
+                digits.insert(0, b'1');
+                break;
+            }
+            i -= 1;
+            if digits[i] == b'9' {
+                digits[i] = b'0';
+            } else {
+                digits[i] += 1;
+                break;
+            }
+        }
+    }
+    let k = digits.len() - 3;
+    let text = String::from_utf8(digits).unwrap_or_default();
+    format!("{sign}{}.{}", &text[..k], &text[k..])
 }
 
 /// `mysqlFlavorOf`: MariaDB when its version or version comment says so.
@@ -779,6 +802,26 @@ mod tests {
         assert_eq!(mysql_display_literal(Some("it's a \\ test")), "'it''s a \\\\ test'");
         assert_eq!(mysql_timeout_sql(Flavor::Mariadb, Some(1500.0)), "SET SESSION max_statement_time = 1.500");
         assert_eq!(mysql_timeout_sql(Flavor::Mysql, Some(-3.5)), "SET SESSION max_execution_time = 0");
+        // Huge timeouts: V8 rounds the exact double (node: (ms / 1000).toFixed(3)).
+        for (ms, want) in [
+            (9_007_199_254_740_991.0, "9007199254740.990"),
+            (8_900_000_000_000_001.0, "8900000000000.002"),
+            (8_800_000_000_000_003.0, "8800000000000.004"),
+            (9_007_199_255_605_812.0, "9007199255605.813"),
+            (86_400_000.0, "86400.000"),
+            (1.0, "0.001"),
+            (0.0, "0.000"),
+        ] {
+            assert_eq!(mysql_timeout_sql(Flavor::Mariadb, Some(ms)), format!("SET SESSION max_statement_time = {want}"));
+        }
+        assert_eq!(to_fixed_3(0.0005), "0.001");
+        assert_eq!(to_fixed_3(1.0005), "1.000");
+        assert_eq!(to_fixed_3(0.9995), "1.000");
+        assert_eq!(to_fixed_3(-0.0001), "-0.000");
+        assert_eq!(to_fixed_3(-0.0), "0.000");
+        assert_eq!(to_fixed_3(-1.25), "-1.250");
+        assert_eq!(to_fixed_3(f64::INFINITY), "Infinity");
+        assert_eq!(to_fixed_3(1e21), "1e+21");
         assert_eq!(mysql_server_label("5.5.5-10.6.12-MariaDB-1:10.6.12+maria~ubu2004", ""), "MariaDB 10.6.12");
         assert_eq!(mysql_server_label("8.0.36-log", ""), "MySQL 8.0.36");
         assert_eq!(mysql_server_label("weird", ""), "MySQL weird");

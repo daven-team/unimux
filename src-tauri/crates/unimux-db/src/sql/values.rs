@@ -45,7 +45,8 @@ pub fn format_db_value(v: &Value, kind: ValueKind, pretty: bool) -> Option<Strin
     Some(text)
 }
 
-/// Nesting deeper than this is shown and exported as its text (V8 would hit its stack limit somewhere in the thousands).
+/// Nesting deeper than this is shown and exported as its text. An accepted deviation (PROGRESS.md, D3 open issues): V8
+/// goes on to a stack-dependent limit (about 2500 levels in node) and then rowsToJson throws RangeError.
 const PRETTY_DEPTH: usize = 1000;
 
 /// What `parseDbInput` answers: the text the server reads (None: NULL), or the message key of the error.
@@ -655,5 +656,27 @@ mod tests {
         );
         assert_eq!(rows_to_tsv(&[vec![json!("a\tb"), Value::Null, json!("c\r\nd")]]), "a b\t\tc d");
         assert_eq!(format_db_value(&json!("{\"a\":1}"), ValueKind::Json, true).as_deref(), Some("{\n  \"a\": 1\n}"));
+    }
+
+    /// The accepted cut-off (PROGRESS.md, D3 open issues): JSON nested up to PRETTY_DEPTH levels is pretty-printed and
+    /// exported as a value like 1.1.4; deeper documents stay their text (V8 goes on to a stack-dependent limit of about
+    /// 2500 levels in node and then throws RangeError from rowsToJson).
+    #[test]
+    fn json_nesting_cut_off() {
+        let doc = |d: usize| format!("{}{}", "[".repeat(d), "]".repeat(d));
+        let at = doc(PRETTY_DEPTH);
+        let pretty = format_db_value(&json!(at), ValueKind::Json, true).unwrap_or_default();
+        assert_eq!(pretty.matches('\n').count(), 2 * PRETTY_DEPTH - 2);
+        assert!(pretty.starts_with("[\n  [\n    ["));
+        let exported = rows_to_json(&[("doc".into(), ValueKind::Json)], &[vec![json!(at)]]);
+        assert!(exported.contains("\"doc\": [\n"), "{}", &exported[..40]);
+
+        let over = doc(PRETTY_DEPTH + 1);
+        assert_eq!(format_db_value(&json!(over), ValueKind::Json, true).as_deref(), Some(over.as_str()));
+        assert_eq!(json_value(&json!(over), ValueKind::Json), Value::String(over.clone()));
+        let exported = rows_to_json(&[("doc".into(), ValueKind::Json)], &[vec![json!(over)]]);
+        assert!(exported.contains("\"doc\": \"[[[["), "{}", &exported[..40]);
+        let far = doc(100_000);
+        assert_eq!(format_db_value(&json!(far), ValueKind::Json, true).as_deref(), Some(far.as_str()));
     }
 }

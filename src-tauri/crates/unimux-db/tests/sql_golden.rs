@@ -646,3 +646,34 @@ fn a_script_at_the_size_limit_is_handled_in_linear_time() {
     }
     assert!(started.elapsed().as_secs_f64() < 10.0, "{:?}", started.elapsed());
 }
+
+/// Statements made of thousands of block comments or opening parentheses (up to the 8 MiB limit) find their first keyword
+/// in linear time (1.1.4's regex backtracks on them; the first port did too, in quadratic time and memory). About 0.1 s per
+/// first_keyword call and 13 s for the whole test in the test profile; a quadratic scan would take hours.
+#[test]
+fn comment_and_parenthesis_heavy_statements_are_checked_in_linear_time() {
+    let limit = sql::limits::SQL;
+    let comments = format!("({}1", "/**/".repeat((limit - 2) / 4));
+    let comments_select = format!("({}select 1", "/**/".repeat((limit - 10) / 4));
+    let nested = format!("/*{}*/ select 1", "/* */".repeat((limit - 16) / 5));
+    let parens = format!("{}1", "(".repeat(limit - 1));
+    let parens_select = format!("{}select 1", "(".repeat(limit - 9));
+    let dashes = format!("{}select", "--\n".repeat((limit - 6) / 3));
+    let started = std::time::Instant::now();
+    for (text, kw) in [
+        (&comments, ""),
+        (&comments_select, "SELECT"),
+        (&nested, "SELECT"),
+        (&parens, ""),
+        (&parens_select, "SELECT"),
+        (&dashes, "SELECT"),
+    ] {
+        assert_eq!(sql::first_keyword(text), kw);
+        sql::read_only_allows(text);
+        sql::is_read_statement(text);
+        sql::returns_rows(text);
+        sq::sqlite_read_only_allows(text);
+        my::mysql_read_only_allows(text);
+    }
+    assert!(started.elapsed().as_secs_f64() < 60.0, "{:?}", started.elapsed());
+}

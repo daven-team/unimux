@@ -21,86 +21,50 @@ pub fn first_keyword(sql: &str) -> String {
 }
 
 pub(crate) fn first_keyword_units(u: &[u16]) -> Option<(usize, usize)> {
-    // solve(p): the first match in V8's backtracking order of `(?:alternatives)*([A-Za-z]+)` from p. It only depends on p,
-    // so it is memoized; the stack replaces recursion (a statement may start with thousands of parentheses).
+    // solve(p): the start of the letters the regex captures when its star loop is at p, in V8's backtracking order. It only
+    // depends on positions after p, so one pass from the end works it out for every p (linear time, 4 bytes per unit):
+    // - a letter: no alternative fits, so the letters from p;
+    // - \s+: every shorter run reaches the end of the run anyway, so solve(p + 1); `(`: solve(p + 1) too;
+    // - --...: the position after the next newline (none: the end, which never solves);
+    // - /*...*/ (lazy): the first `*/` from p + 2 whose following position solves (`reach`, kept for 3 positions);
+    // - anything else: no match.
+    const NONE: u32 = u32::MAX;
     let n = u.len();
-    let mut memo: HashMap<usize, Option<(usize, usize)>> = HashMap::new();
-    let letters = |p: usize| -> Option<(usize, usize)> {
-        let mut e = p;
-        while e < n && is_ascii_letter(u[e]) {
-            e += 1;
+    let mut solve: Vec<u32> = vec![NONE; n + 1];
+    // reach[k] for i = p + 1 + k: the answer behind the first `*/` at or after i that leads to one.
+    let mut reach = [NONE; 3];
+    let mut next_newline: Option<usize> = None;
+    let (slash, star, dash, open, newline) =
+        (u16::from(b'/'), u16::from(b'*'), u16::from(b'-'), u16::from(b'('), u16::from(b'\n'));
+    for p in (0..n).rev() {
+        let c = u[p];
+        if c == newline {
+            next_newline = Some(p);
         }
-        (e > p).then_some((p, e))
-    };
-    // A frame: its position, the continuation being tried (waiting for its answer) and whether the first one was taken;
-    // for a block comment, where to look for the next `*/`.
-    struct Frame {
-        p: usize,
-        pending: Option<usize>,
-        tried: bool,
-        search: usize,
-    }
-    let star_slash = units("*/");
-    let mut stack = vec![Frame { p: 0, pending: None, tried: false, search: 2 }];
-    while let Some(top) = stack.last_mut() {
-        let p = top.p;
-        if let Some(q) = top.pending.take() {
-            if let Some(Some(found)) = memo.get(&q) {
-                let found = *found;
-                memo.insert(p, Some(found));
-                stack.pop();
-            }
-            continue;
-        }
-        // The next continuation of this frame, in V8's order.
-        let candidate: Option<usize> = if p >= n {
-            None
-        } else if is_space(u[p]) {
-            // \s+ (greedy): every shorter run reaches the end of the run anyway, so only the end counts.
-            if top.tried {
-                None
-            } else {
-                let mut e = p;
-                while e < n && is_space(u[e]) {
-                    e += 1;
-                }
-                Some(e)
-            }
-        } else if u[p] == u16::from(b'-') && u.get(p + 1) == Some(&u16::from(b'-')) {
-            if top.tried { None } else { Some(newline_from(u, p + 2).map_or(n, |nl| nl + 1)) }
-        } else if u[p] == u16::from(b'/') && u.get(p + 1) == Some(&u16::from(b'*')) {
-            let from = if top.tried { top.search } else { p + 2 };
-            scan::index_of(u, &star_slash, from).map(|c| {
-                top.search = c + 1;
-                c + 2
-            })
-        } else if u[p] == u16::from(b'(') {
-            if top.tried { None } else { Some(p + 1) }
+        let answer = if is_ascii_letter(c) {
+            u32::try_from(p).unwrap_or(NONE)
+        } else if is_space(c) || c == open {
+            solve[p + 1]
+        } else if c == dash && u.get(p + 1) == Some(&dash) {
+            next_newline.map_or(NONE, |nl| solve[nl + 1])
+        } else if c == slash && u.get(p + 1) == Some(&star) {
+            reach[1]
         } else {
-            None
+            NONE
         };
-        top.tried = true;
-        match candidate {
-            Some(q) => match memo.get(&q) {
-                Some(Some(found)) => {
-                    let found = *found;
-                    memo.insert(p, Some(found));
-                    stack.pop();
-                }
-                Some(None) => {}
-                None => {
-                    top.pending = Some(q);
-                    stack.push(Frame { p: q, pending: None, tried: false, search: q + 2 });
-                }
-            },
-            None => {
-                let r = letters(p);
-                memo.insert(p, r);
-                stack.pop();
-            }
-        }
+        solve[p] = answer;
+        let here = if c == star && u.get(p + 1) == Some(&slash) && solve[p + 2] != NONE { solve[p + 2] } else { reach[0] };
+        reach = [here, reach[0], reach[1]];
     }
-    memo.get(&0).copied().flatten()
+    if solve[0] == NONE {
+        return None;
+    }
+    let s = usize::try_from(solve[0]).ok()?;
+    let mut e = s;
+    while e < n && is_ascii_letter(u[e]) {
+        e += 1;
+    }
+    Some((s, e))
 }
 
 /// `codeOnly`: the text with quotes, comments and dollar-quoted bodies each replaced by one blank (for keyword checks).

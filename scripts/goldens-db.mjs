@@ -356,6 +356,20 @@ function sqlRows(m) {
     for (const ct of [d, `${d}(10) unsigned`, `${d} UNSIGNED zerofill`, `${d}_unsigned`]) add('mysqlColumnKind', d, ct);
   }
   for (const f of ['mysql', 'mariadb']) for (const ms of [null, 0, 1500, 1500.7, -5, 1, 999, 86400000, 1e21, 123456]) add('mysqlTimeoutSql', f, ms);
+  // Huge timeouts, where the double ms / 1000 is far from the decimal value (toFixed rounds the exact double); own PRNG so
+  // the rows above and below stay as they were.
+  const rt = rng(0xd3f1);
+  for (const ms of [2 ** 53 - 1, 8900000000000001, 8800000000000003, 9007199255605812, 2 ** 43 * 1000 + 1, 1e20 + 12345, 999999999999999999999]) add('mysqlTimeoutSql', 'mariadb', ms);
+  for (let i = 0; i < 1500; i++) {
+    const ms = i < 500 ? 2 ** 53 + Math.floor(rt() * 2e6) : Math.floor(rt() * 2 ** Math.floor(rt() * 70));
+    add('mysqlTimeoutSql', 'mariadb', ms);
+  }
+  // firstKeyword backtracking: comments that only lead somewhere when they end at a later */, parentheses, line comments.
+  const FK = ['/*', '*/', '/**/', ' ', '(', '--', '\n', 'x', '1', 'select ', '*', '/', ')'];
+  for (let i = 0; i < 3000; i++) {
+    const len = 1 + Math.floor(rt() * 14);
+    add('firstKeyword', Array.from({ length: len }, () => FK[Math.floor(rt() * FK.length)]).join(''));
+  }
   for (const [e, s, msg] of [[1146, '42S02', "Table 'x.y' doesn't exist"], [undefined, undefined, 'plain'], [0, 'HY000', 'zero'], [1064, '', 'empty state'], [2013, undefined, 'lost'], [1.5, 'X', 'frac']]) {
     add('mysqlErrorText', e, s, msg);
   }
