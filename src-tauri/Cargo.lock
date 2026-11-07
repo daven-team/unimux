@@ -5841,9 +5841,18 @@ checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 name = "unimux-accounts"
 version = "1.2.0"
 dependencies = [
+ "dunce",
+ "futures",
+ "getrandom 0.4.3",
+ "parking_lot 0.13.0",
+ "serde",
  "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
  "unimux-core",
  "unimux-ipc",
+ "uuid",
 ]
 
 [[package]]

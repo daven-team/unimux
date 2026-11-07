@@ -57,7 +57,7 @@ tauri = { version = "=2.12.5", default-features = false, features = ["wry", "com
 tauri-build = { version = "=2.7.4", default-features = false }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "process"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = { version = "1.0.154", features = ["preserve_order", "float_roundtrip"] }
+serde_json = { version = "1.0.154", features = ["preserve_order", "float_roundtrip", "unbounded_depth"] }
 thiserror = "2.0.21"
 parking_lot = "0.13.0"
 uuid = { version = "1.29.0", features = ["v4"] }

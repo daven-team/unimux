@@ -7,23 +7,167 @@
 //!
 //! [`parse`] accepts what `JSON.parse` accepts in text JSON.stringify wrote: since ES2019 JSON.stringify writes an unpaired
 //! UTF-16 surrogate (half an emoji cut by `.slice()`, text pasted from a broken source) as `\udXXX`, which JSON.parse reads back
-//! and serde_json rejects. A Rust string cannot hold a lone surrogate, so it becomes U+FFFD.
+//! and serde_json rejects. A Rust string cannot hold a lone surrogate, so it becomes U+FFFD. It also reads a number beyond the
+//! f64 range (JSON.parse's Infinity) as null and nesting deeper than serde_json's limit of 128 (see [`parse`]).
 
 use serde_json::{Number, Value};
 use std::fmt::Write as _;
 
-/// `JSON.parse(text)`: like `serde_json::from_str`, but an escaped unpaired surrogate (in a value or a key) reads as U+FFFD
-/// instead of failing the whole text. Valid pairs stay as they are.
+/// The deepest nesting [`parse`] reads. JSON.parse has no fixed limit (V8 reads and writes it iteratively), serde_json stops
+/// at 128. A Value is cloned, compared, serialized and dropped recursively (serde_json's derived code, which cannot grow the
+/// stack), and 5,000 levels already overflow a 1 MB stack on clone, so deeper text is still rejected.
+pub const MAX_DEPTH: usize = 1_000;
+
+/// `JSON.parse(text)`: like `serde_json::from_str`, but closer to what JSON.parse accepts:
+/// - an escaped unpaired surrogate (in a value or a key) reads as U+FFFD instead of failing the whole text (valid pairs stay);
+/// - a number beyond the f64 range (`1e400`, JavaScript's Infinity, which JSON.stringify writes as null) reads as null, so
+///   `typeof x === 'number' && Number.isFinite(x)` style checks reject that one value and the rest of the text is kept;
+/// - nesting deeper than serde_json's 128 levels, up to [`MAX_DEPTH`].
 pub fn parse(text: &str) -> serde_json::Result<Value> {
-    let mut value: Value = match serde_json::from_str(text) {
+    let mut value: Value = match parse_deep(text) {
         Ok(v) => v,
-        Err(e) => match replace_lone_surrogates(text) {
-            Some(fixed) => serde_json::from_str(&fixed)?,
-            None => return Err(e),
-        },
+        Err(e) => {
+            let surrogates = replace_lone_surrogates(text);
+            let numbers = replace_infinite_numbers(surrogates.as_deref().unwrap_or(text));
+            match numbers.or(surrogates) {
+                Some(fixed) => parse_deep(&fixed)?,
+                None => return Err(e),
+            }
+        }
     };
     order_like_js(&mut value);
     Ok(value)
+}
+
+/// serde_json's own limit: text up to this deep is parsed on the caller's stack.
+const SERDE_DEPTH: usize = 128;
+/// The stack of the thread that parses deeper text: serde_json's recursive descent takes a few kilobytes per level in an
+/// unoptimized build. Only reserved address space; the pages actually touched are committed.
+const DEEP_STACK: usize = 64 * 1024 * 1024;
+
+fn parse_deep(text: &str) -> serde_json::Result<Value> {
+    use serde::Deserialize as _;
+    let depth = nesting(text);
+    if depth > MAX_DEPTH {
+        return Err(<serde_json::Error as serde::de::Error>::custom(format_args!("nesting deeper than {MAX_DEPTH}")));
+    }
+    let run = || {
+        let mut de = serde_json::Deserializer::from_str(text);
+        de.disable_recursion_limit();
+        let value = Value::deserialize(&mut de)?;
+        de.end()?;
+        Ok(value)
+    };
+    if depth <= SERDE_DEPTH {
+        return run();
+    }
+    // Rare (only a hand-edited file nests this deep): one scoped thread with a large stack.
+    std::thread::scope(|scope| match std::thread::Builder::new().stack_size(DEEP_STACK).spawn_scoped(scope, run) {
+        Ok(handle) => handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+        Err(e) => Err(<serde_json::Error as serde::de::Error>::custom(format_args!("no thread to parse deep JSON: {e}"))),
+    })
+}
+
+/// The end of the JSON string that starts with the quote at `start` (the index after its closing quote).
+fn skip_string(b: &[u8], start: usize) -> usize {
+    let mut i = start + 1;
+    while i < b.len() {
+        match b[i] {
+            b'\\' => i += 2,
+            b'"' => return i + 1,
+            _ => i += 1,
+        }
+    }
+    b.len()
+}
+
+/// The deepest `[` / `{` nesting outside strings.
+fn nesting(text: &str) -> usize {
+    let b = text.as_bytes();
+    let (mut depth, mut max, mut i) = (0usize, 0usize, 0);
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                i = skip_string(b, i);
+                continue;
+            }
+            b'[' | b'{' => {
+                depth += 1;
+                max = max.max(depth);
+            }
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        i += 1;
+    }
+    max
+}
+
+/// The JSON number grammar: `-? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE] [+-]? [0-9]+)?`.
+fn is_json_number(t: &[u8]) -> bool {
+    let digits = |i: &mut usize| {
+        let s = *i;
+        while t.get(*i).is_some_and(u8::is_ascii_digit) {
+            *i += 1;
+        }
+        *i > s
+    };
+    let mut i = usize::from(t.first() == Some(&b'-'));
+    match t.get(i) {
+        Some(b'0') => i += 1,
+        Some(b'1'..=b'9') => {
+            digits(&mut i);
+        }
+        _ => return false,
+    }
+    if t.get(i) == Some(&b'.') {
+        i += 1;
+        if !digits(&mut i) {
+            return false;
+        }
+    }
+    if matches!(t.get(i), Some(b'e' | b'E')) {
+        i += 1;
+        if matches!(t.get(i), Some(b'+' | b'-')) {
+            i += 1;
+        }
+        if !digits(&mut i) {
+            return false;
+        }
+    }
+    i == t.len()
+}
+
+/// The text with every number token outside strings that is beyond the f64 range (JSON.parse reads it as Infinity or
+/// -Infinity) replaced by `null`; None when there is none. Malformed tokens are left for serde_json to reject.
+pub fn replace_infinite_numbers(text: &str) -> Option<String> {
+    let b = text.as_bytes();
+    let mut out: Option<String> = None;
+    let mut copied = 0;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'"' => i = skip_string(b, i),
+            b'-' | b'0'..=b'9' => {
+                let start = i;
+                while i < b.len() && matches!(b[i], b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E') {
+                    i += 1;
+                }
+                let token = &text[start..i];
+                if is_json_number(token.as_bytes()) && token.parse::<f64>().is_ok_and(f64::is_infinite) {
+                    // Number tokens are ASCII, so `copied` and `start` are character boundaries.
+                    let o = out.get_or_insert_with(|| String::with_capacity(text.len()));
+                    o.push_str(&text[copied..start]);
+                    o.push_str("null");
+                    copied = i;
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    let mut o = out?;
+    o.push_str(&text[copied..]);
+    Some(o)
 }
 
 /// An array index as a property key ("0", "17", at most 2^32 - 2, no leading zero): JavaScript objects list these first, in
@@ -308,6 +452,70 @@ mod tests {
         assert_eq!(replace_lone_surrogates(r#"{"a":"\ud83d\ude00 \\udc00"}"#), None);
         assert!(parse("{not json").is_err());
         assert!(parse(r#"{"a":"\ud83d"#).is_err());
+    }
+
+    #[test]
+    fn numbers_beyond_the_f64_range_read_as_null_like_json_parse_infinity() {
+        let text = r#"{"a":1e400,"b":-1e400,"c":[1E+999,2],"d":"1e400","e":1e-400,"f":1e308,"g":-0}"#;
+        assert!(serde_json::from_str::<Value>(text).is_err());
+        let v = parse(text).unwrap();
+        // JSON.stringify(JSON.parse(text)): Infinity and -Infinity are written as null, 1e-400 is 0.
+        assert_eq!(stringify(&v), r#"{"a":null,"b":null,"c":[null,2],"d":"1e400","e":0,"f":1e+308,"g":0}"#);
+        let long = format!("[{}]", "9".repeat(400));
+        assert_eq!(stringify(&parse(&long).unwrap()), "[null]");
+        // Together with a lone surrogate.
+        assert_eq!(stringify(&parse(r#"["\ud800",1e400]"#).unwrap()), "[\"\u{fffd}\",null]");
+        // Only valid number tokens are replaced: what JSON.parse rejects stays rejected.
+        for bad in ["[01e400]", "[1e400.5]", "[--1e400]", "[1e400", "[+1e400]", "[1.e400]", "[1e400 1]"] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+        assert_eq!(replace_infinite_numbers(r#"{"k":"\"1e400","n":[1e999]}"#).unwrap(), r#"{"k":"\"1e400","n":[null]}"#);
+        assert_eq!(replace_infinite_numbers("[1e308,-2.5e-7]"), None);
+    }
+
+    fn nested(depth: usize, open: &str, inner: &str, close: &str) -> String {
+        format!("{}{inner}{}", open.repeat(depth), close.repeat(depth))
+    }
+
+    #[test]
+    fn nesting_deeper_than_serde_jsons_128_levels_is_read_like_json_parse() {
+        let arrays = nested(1_000, "[", "1", "]");
+        assert!(serde_json::from_str::<Value>(&arrays).is_err());
+        assert_eq!(stringify(&parse(&arrays).unwrap()), arrays);
+        let objects = format!(r#"{{"keep":1,"deep":{}}}"#, nested(MAX_DEPTH - 2, r#"{"x":"#, "[]", "}"));
+        let v = parse(&objects).unwrap();
+        assert_eq!(v["keep"], 1);
+        assert_eq!(stringify(&v), objects);
+        // Brackets inside strings do not count.
+        let quoted = format!(r#"{{"s":"{}","n":{}}}"#, "[".repeat(5_000), nested(10, "[", "", "]"));
+        assert_eq!(stringify(&parse(&quoted).unwrap()), quoted);
+        assert!(parse(&nested(MAX_DEPTH + 1, "[", "", "]")).is_err());
+    }
+
+    /// A Value of MAX_DEPTH levels can be parsed, ordered, written, compared, cloned, serialized and dropped on the stack Windows
+    /// gives the main thread (1 MB); tokio workers have 2 MB.
+    #[test]
+    fn the_deepest_value_fits_a_small_stack() {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                for text in [
+                    nested(MAX_DEPTH, "[", "1", "]"),
+                    format!("{}{}", r#"{"10":0,"k":"#.repeat(MAX_DEPTH), "1".to_string() + &"}".repeat(MAX_DEPTH)),
+                ] {
+                    let v = parse(&text).unwrap();
+                    let w = v.clone();
+                    assert!(js_equal(&v, &w));
+                    assert!(v == w);
+                    assert!(stringify_pretty(&v, 2).len() > text.len());
+                    assert_eq!(serde_json::to_string(&v).unwrap(), stringify(&v));
+                    drop(v);
+                    drop(w);
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]

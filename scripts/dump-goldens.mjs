@@ -27,6 +27,8 @@
 //                                     (win32) or /work/cwd (posix) and the drive cwds =C: C:\work\cwd, =D: D:\dcwd\x, =E:
 //                                     C:\not-e, =F: '' (the env of the run is replaced while the rows are made)
 //   test/golden/files-*.jsonl        project files: name order, path checks, previews, saves (see scripts/goldens-files.mjs)
+//   test/golden/accounts-store.jsonl, codex-accounts.jsonl, accounts-identity.jsonl   the account stores (1.1.4's code, run on
+//                                     scratch dirs) and the identity helpers (see scripts/goldens-accounts.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
 import { updateConfigGolden, updateProgressRows, updateStringsGolden } from './goldens-update.mjs';
@@ -36,6 +38,7 @@ import path, { dirname, resolve } from 'node:path';
 import { hookPayloadRows, hookServerRows } from './goldens-hooks.mjs';
 import { convGoldens } from './goldens-convsearch.mjs';
 import { DB_MODULES, dbGoldens } from './goldens-db.mjs';
+import { accountsStoreRows, codexStoreRows, identityRows } from './goldens-accounts.mjs';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -55,6 +58,10 @@ const [detached, { normalizeWaitMark }] = await Promise.all([load('src/shared/de
 const fileGoldens = await filesGoldens(await load('src/main/files.ts'));
 const dbModules = Object.fromEntries(await Promise.all(Object.entries(DB_MODULES).map(async ([name, file]) => [name, await load(file)])));
 const db = dbGoldens(dbModules);
+const [{ AccountsStore }, { CodexAccountsStore }, accounts, codex, { parseCodexAuth }, { decodeJwtClaims }] = await Promise.all([
+  load('src/main/accounts/store.ts'), load('src/main/accounts/codexStore.ts'), load('src/shared/accounts.ts'), load('src/shared/codexAccounts.ts'),
+  load('src/main/accounts/codexActivate.ts'), load('src/main/usage/parse.ts'),
+]);
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
 function rng(seed) {
@@ -304,6 +311,9 @@ const files = {
   ...Object.fromEntries(Object.entries(await convGoldens(load)).map(([name, rows]) => [name, jsonl(rows)])),
   'db-sql.jsonl': jsonl(db['db-sql.jsonl']),
   'db-redis.jsonl': jsonl(db['db-redis.jsonl']),
+  'accounts-store.jsonl': jsonl(accountsStoreRows({ AccountsStore })),
+  'codex-accounts.jsonl': jsonl(codexStoreRows({ CodexAccountsStore })),
+  'accounts-identity.jsonl': jsonl(identityRows({ accounts, codex, parseCodexAuth, decodeJwtClaims })),
 };
 const updateStrings = updateStringsGolden({ root, translate });
 files['update-strings.json'] = `${JSON.stringify(updateStrings, null, 1)}\n`;
