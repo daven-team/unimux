@@ -8,12 +8,15 @@
 //! renderer keeps a streaming decoder per terminal), `exit` payloads are the exit code as i32 LE. P2 adds `replay` (a
 //! terminal's tail with the sizes it was written at: `[u32 LE headerLen][header JSON {"sizes":[{"at","cols","rows"}]},
 //! byte offsets][tail bytes]`) and `json` (any other host -> renderer message of the pty port as UTF-8 JSON, id empty), so
-//! everything a window gets from the pty host travels in one ordered stream (src/shared/ptyFrames.ts decodes it).
+//! everything a window gets from the pty host travels in one ordered stream (src/shared/ptyFrames.ts decodes it). `reset`
+//! (empty payload) starts a new terminal under an id: the renderer drops that id's UTF-8 decoder state (bytes of a
+//! character the killed terminal was cut in the middle of), as node-pty decoded per process in 1.1.4.
 
 pub const KIND_DATA: u8 = 1;
 pub const KIND_EXIT: u8 = 2;
 pub const KIND_REPLAY: u8 = 3;
 pub const KIND_JSON: u8 = 4;
+pub const KIND_RESET: u8 = 5;
 
 /// The payload of a `replay` frame.
 pub fn replay_payload(data: &[u8], sizes: &[crate::flow::ReplaySize]) -> Vec<u8> {

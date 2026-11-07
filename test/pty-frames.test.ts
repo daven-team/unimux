@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { decodeFrames, encodeFrames, FRAME_DATA, FRAME_EXIT, FRAME_JSON, FRAME_REPLAY, PtyFrameDecoder } from '../src/shared/ptyFrames';
+import { decodeFrames, encodeFrames, FRAME_DATA, FRAME_EXIT, FRAME_JSON, FRAME_REPLAY, FRAME_RESET, PtyFrameDecoder } from '../src/shared/ptyFrames';
 import { replaySegments } from '../src/shared/replay';
 import { createPtyPort, listenSharedBuffers, runPull, type SharedBufferEvent } from '../src/renderer/src/bridge/ptyPort';
 
@@ -56,6 +56,32 @@ describe('pty frames', () => {
       { kind: FRAME_EXIT, id: 't', payload: exitPayload(-1) },
     ]));
     expect(out).toEqual([{ t: 'data', id: 't', data: 'a', bytes: 2 }, { t: 'data', id: 't', data: '�', bytes: 0 }, { t: 'exit', id: 't', code: -1 }]);
+  });
+
+  it('start a new terminal of the same id clean after a reset frame (a killed one cut inside a character)', () => {
+    const d = new PtyFrameDecoder();
+    const box = enc.encode('\u2500'); // e2 94 80
+    const a = d.messages(encodeFrames([{ kind: FRAME_DATA, id: 'c1', payload: new Uint8Array([0x61, 0x62, box[0]]) }]));
+    const b = d.messages(encodeFrames([
+      { kind: FRAME_RESET, id: 'c1', payload: new Uint8Array() },
+      { kind: FRAME_DATA, id: 'c1', payload: enc.encode('PS C:\\>') },
+    ]));
+    expect([...a, ...b]).toEqual([
+      { t: 'data', id: 'c1', data: 'ab', bytes: 3 },
+      { t: 'data', id: 'c1', data: 'PS C:\\>', bytes: 7 },
+    ]);
+    // forget(id) (TerminalManager.dispose) does the same.
+    d.messages(encodeFrames([{ kind: FRAME_DATA, id: 'c2', payload: box.subarray(0, 2) }]));
+    d.forget('c2');
+    expect(d.messages(encodeFrames([{ kind: FRAME_DATA, id: 'c2', payload: enc.encode('x') }]))).toEqual([{ t: 'data', id: 'c2', data: 'x', bytes: 1 }]);
+  });
+
+  it('keep a leading BOM of the output and of a replay as U+FEFF (node-pty did)', () => {
+    const d = new PtyFrameDecoder();
+    const bom = new Uint8Array([0xef, 0xbb, 0xbf, 0x41]);
+    expect(d.messages(encodeFrames([{ kind: FRAME_DATA, id: 't', payload: bom }]))).toEqual([{ t: 'data', id: 't', data: '\ufeffA', bytes: 4 }]);
+    const r = d.messages(encodeFrames([{ kind: FRAME_REPLAY, id: 'r', payload: replayPayload(bom, [{ at: 0, cols: 80, rows: 24 }]) }]));
+    expect(r).toEqual([{ t: 'replay', id: 'r', data: '\ufeffA', sizes: [{ at: 0, cols: 80, rows: 24 }] }]);
   });
 
   it('turn replay byte offsets into the character offsets of shared/replay', () => {
@@ -127,6 +153,16 @@ describe('the bridge pty port', () => {
     expect(port.stats.maxInFlight).toBe(2);
   });
 
+  it('releases by the host number, so a message it never saw cannot put it ahead of the host', () => {
+    const posted: unknown[] = [];
+    const port = createPtyPort({ post: (m) => posted.push(m) }, 'sharedBuffer');
+    port.onmessage = () => undefined;
+    port.deliver(new Uint8Array([1]), 1);
+    port.deliver(new Uint8Array([1]), 3); // message 2 was lost on the way
+    port.deliver(new Uint8Array([1]), 4);
+    expect(posted).toEqual([{ t: 'released', upto: 1 }, { t: 'released', upto: 3 }, { t: 'released', upto: 4 }]);
+  });
+
   it('a throwing handler still releases', () => {
     const posted: unknown[] = [];
     const port = createPtyPort({ post: (m) => posted.push(m) }, 'channel');
@@ -148,6 +184,25 @@ describe('the bridge pty port', () => {
     expect(released).toEqual([buf]);
     expect(seen).toEqual([new Uint8Array([7, 8, 9])]);
     expect(seen[0].buffer).not.toBe(buf);
+  });
+
+  it('drops (and gives back) the shared buffers of another attach: the old page still posting during a reload', () => {
+    const released: ArrayBuffer[] = [];
+    let listener: ((e: SharedBufferEvent) => void) | null = null;
+    const posted: unknown[] = [];
+    const port = createPtyPort({ post: (m) => posted.push(m) }, 'sharedBuffer');
+    const seen: Uint8Array[] = [];
+    port.onmessage = (e) => seen.push(e.data as Uint8Array);
+    listenSharedBuffers({ addEventListener: (_t, cb) => { listener = cb; }, releaseBuffer: (b) => released.push(b) }, port, 'new');
+    const old = new Uint8Array([1]).buffer;
+    const fresh = new Uint8Array([2]).buffer;
+    listener!({ additionalData: { mcPort: 'pty', a: 'old', n: 229 }, getBuffer: () => old });
+    listener!({ additionalData: { mcPort: 'pty', a: 'new', n: 1 }, getBuffer: () => fresh });
+    expect(released).toEqual([old, fresh]);
+    expect(seen).toEqual([new Uint8Array([2])]);
+    expect(posted).toEqual([{ t: 'released', upto: 1 }]);
+    expect(port.stats.stale).toBe(1);
+    expect(port.stats.received).toBe(1);
   });
 
   it('pulls one message at a time and stops when the port is replaced', async () => {
@@ -177,5 +232,6 @@ describe('TerminalManager on the Tauri host', () => {
     expect(src).toContain('e.data instanceof Uint8Array ? this.frames.messages(e.data)');
     expect(src).toContain('(m.bytes ?? m.data.length)');
     expect(src).toContain("window.addEventListener('mc:pty-port'");
+    expect(src).toContain('this.frames.forget(cellId)');
   });
 });

@@ -50,11 +50,17 @@ impl Focus {
 struct State {
     buf: Vec<u8>,
     timer: Option<TimerId>,
+    /// Bumped by every arm of the flush timer. Its task compares it under the state lock, which `arm` holds until the id
+    /// is stored: a timer that fires before `after` returned (the arming thread preempted) still finds itself current,
+    /// and a cancelled or replaced one never does.
+    timer_gen: u64,
     /// When the pending flush timer fires.
     due: f64,
     tail: TailBuffer,
     gate: FlowGate,
     watchdog: Option<TimerId>,
+    /// The same for the pause watchdog.
+    watchdog_gen: u64,
     last_write: f64,
     echo: EchoClock,
     /// Flushes the latest keystroke may still send without a timer (ECHO_FLUSHES).
@@ -103,10 +109,12 @@ impl OutputChannel {
             state: Mutex::new(State {
                 buf: Vec::new(),
                 timer: None,
+                timer_gen: 0,
                 due: f64::INFINITY,
                 tail: TailBuffer::new(tail),
                 gate: FlowGate::default(),
                 watchdog: None,
+                watchdog_gen: 0,
                 last_write: f64::NEG_INFINITY,
                 echo: EchoClock::new(),
                 echo_flushes: 0,
@@ -170,23 +178,21 @@ impl OutputChannel {
             self.sched.cancel(t);
         }
         st.due = now + delay;
+        st.timer_gen += 1;
+        let armed = st.timer_gen;
         let me = self.me.clone();
-        let slot: Arc<Mutex<Option<TimerId>>> = Arc::new(Mutex::new(None));
-        let mine = slot.clone();
         let id = self.sched.after(
             delay,
             Box::new(move || {
                 let Some(me) = me.upgrade() else { return };
-                let Some(id) = *mine.lock() else { return };
                 let mut st = me.state.lock();
-                // A timer that was cancelled while it was already starting.
-                if st.timer != Some(id) {
+                // A timer that was cancelled or replaced while it was already starting.
+                if st.timer.is_none() || st.timer_gen != armed {
                     return;
                 }
                 me.flush_locked(&mut st, false);
             }),
         );
-        *slot.lock() = Some(id);
         st.timer = Some(id);
     }
 
@@ -246,22 +252,20 @@ impl OutputChannel {
         if let Some(w) = st.watchdog.take() {
             self.sched.cancel(w);
         }
+        st.watchdog_gen += 1;
+        let armed = st.watchdog_gen;
         let me = self.me.clone();
-        let slot: Arc<Mutex<Option<TimerId>>> = Arc::new(Mutex::new(None));
-        let mine = slot.clone();
         let id = self.sched.after(
             PAUSE_WATCHDOG_MS,
             Box::new(move || {
                 let Some(me) = me.upgrade() else { return };
-                let Some(id) = *mine.lock() else { return };
                 let mut st = me.state.lock();
-                if st.watchdog != Some(id) {
+                if st.watchdog.is_none() || st.watchdog_gen != armed {
                     return;
                 }
                 me.resume(&mut st, true);
             }),
         );
-        *slot.lock() = Some(id);
         st.watchdog = Some(id);
     }
 
@@ -311,6 +315,15 @@ impl OutputChannel {
     /// The replay tail with the sizes its output was written at (byte offsets).
     pub fn replay(&self) -> (Vec<u8>, Vec<ReplaySize>) {
         self.state.lock().tail.replay()
+    }
+
+    /// The replay tail handed to `send` while the channel's state is locked: a flush on another thread (reader, timer)
+    /// comes either before the snapshot (its bytes are in it) or after `send` queued it, never between the two.
+    pub fn replay_with(&self, send: impl FnOnce(Vec<u8>, Vec<ReplaySize>)) {
+        let st = self.state.lock();
+        let (data, sizes) = st.tail.replay();
+        send(data, sizes);
+        drop(st);
     }
 
     pub fn paused_or_watched(&self) -> bool {
@@ -770,6 +783,64 @@ mod tests {
         s.out.dispose();
         s.advance(5000.0);
         assert_eq!(s.resumes(), 0);
+    }
+
+    /// A real timer thread whose `after` returns late: the task is already due and running while the arming thread is
+    /// still inside `after` (a preempted caller on a loaded machine).
+    struct Preempted(Arc<crate::timers::ThreadScheduler>);
+    impl Scheduler for Preempted {
+        fn now(&self) -> f64 {
+            self.0.now()
+        }
+        fn after(&self, _delay_ms: f64, task: crate::timers::Task) -> TimerId {
+            let id = self.0.after(0.0, task);
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            id
+        }
+        fn cancel(&self, id: TimerId) {
+            self.0.cancel(id);
+        }
+    }
+
+    fn eventually(f: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !f() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn a_timer_that_fires_before_its_arm_returned_still_flushes() {
+        let sink = Arc::new(Sink::default());
+        let out = OutputChannel::new(
+            "a",
+            sink.clone(),
+            Arc::new(Control::default()),
+            Arc::new(|| true),
+            Arc::new(Focus::default()),
+            Arc::new(Preempted(crate::timers::ThreadScheduler::new("pty-timers-preempted"))),
+        );
+        out.push(b"hello");
+        eventually(|| !sink.sent.lock().is_empty());
+        out.push(b" world");
+        eventually(|| sink.sent.lock().len() >= 2);
+        let sent: Vec<String> = sink.sent.lock().iter().map(|s| s.0.clone()).collect();
+        assert_eq!(sent, vec!["hello", " world"]);
+        // The watchdog has the same guard: the pause is still lifted.
+        let control = Arc::new(Control::default());
+        let paused = OutputChannel::new(
+            "b",
+            Arc::new(Sink::default()),
+            control.clone(),
+            Arc::new(|| true),
+            Arc::new(Focus::default()),
+            Arc::new(Preempted(crate::timers::ThreadScheduler::new("pty-timers-preempted-2"))),
+        );
+        paused.push(&vec![b'x'; HIGH_WATER]);
+        eventually(|| control.resumes.load(Ordering::SeqCst) > 0);
+        assert_eq!(control.pauses.load(Ordering::SeqCst), 1);
+        assert_eq!(control.resumes.load(Ordering::SeqCst), 1);
+        assert!(!paused.paused_or_watched());
     }
 
     #[test]

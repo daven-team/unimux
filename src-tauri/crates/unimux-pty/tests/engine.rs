@@ -15,7 +15,7 @@ use serde_json::json;
 use unimux_pty::batch::{MAX_IN_FLIGHT, Transport};
 use unimux_pty::engine::PtyEngine;
 use unimux_pty::flow::{FLUSH_NOW_BYTES, HIGH_WATER};
-use unimux_pty::frame::{self, KIND_DATA, KIND_EXIT, KIND_REPLAY};
+use unimux_pty::frame::{self, KIND_DATA, KIND_EXIT, KIND_REPLAY, KIND_RESET};
 use unimux_pty::manager::SpawnRequest;
 use unimux_pty::shell::{Launch, ShellKind};
 
@@ -34,6 +34,7 @@ enum Got {
     Data(String, Vec<u8>),
     Exit(String, i32),
     Replay(String, Vec<u8>, serde_json::Value),
+    Reset(String),
 }
 
 #[derive(Default)]
@@ -108,6 +109,7 @@ impl Transport for Page {
                         let header: serde_json::Value = serde_json::from_slice(&f.payload[4..4 + n]).unwrap();
                         Got::Replay(f.id.to_string(), f.payload[4 + n..].to_vec(), header)
                     }
+                    KIND_RESET => Got::Reset(f.id.to_string()),
                     k => panic!("unexpected frame kind {k}"),
                 });
             }
@@ -322,5 +324,73 @@ fn a_reload_replaces_the_window_and_flow_control_follows_the_main_window() {
     assert!(second.wait(Duration::from_secs(5), |l| !bytes_in(l, "z").is_empty()));
     engine.detach("main");
     assert_eq!(engine.stats_json()["flowControl"], false);
+    engine.kill_all(Duration::from_secs(5));
+}
+
+/// A resize posted while the spawn is still running (PtyManager's slot exists, its pty not yet; a loaded machine) reaches
+/// the pty, and the replay records the size the pty has.
+#[test]
+fn a_resize_during_the_spawn_reaches_the_pty() {
+    init();
+    let dir = tempfile::tempdir().unwrap();
+    let engine = PtyEngine::new();
+    engine.manager().set_spawn_hold(Some(Duration::from_millis(800)));
+    let mut req = SpawnRequest::new("rs", dir.path(), if cfg!(windows) { ShellKind::Cmd } else { ShellKind::Bash });
+    req.env = std::env::vars().collect();
+    let spawner = {
+        let engine = engine.clone();
+        std::thread::spawn(move || engine.spawn(req))
+    };
+    std::thread::sleep(Duration::from_millis(300));
+    engine.post("main", &json!({ "t": "resize", "id": "rs", "cols": 100, "rows": 40 }));
+    spawner.join().unwrap().unwrap();
+    engine.manager().set_spawn_hold(None);
+    let text = |engine: &PtyEngine| String::from_utf8_lossy(&engine.replay("rs").unwrap().0).replace(' ', "");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while text(&engine).is_empty() {
+        assert!(Instant::now() < deadline, "no prompt");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    engine.write("rs", if cfg!(windows) { b"mode con\r" } else { b"stty size\r" });
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let t = text(&engine);
+        let ok = if cfg!(windows) { t.contains("Lines:40") && t.contains("Columns:100") } else { t.contains("40100") };
+        if ok {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the pty did not get 100 x 40: {t:?}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let (_, sizes) = engine.replay("rs").unwrap();
+    assert_eq!(sizes.last().map(|s| (s.cols, s.rows)), Some((100, 40)));
+    assert!(engine.kill_and_wait("rs", Duration::from_secs(5)));
+}
+
+/// A spawn under an id the window shows starts with a reset frame (the renderer's UTF-8 decoder of the id starts clean),
+/// queued before any output of the new terminal.
+#[test]
+fn a_respawn_starts_with_a_reset_frame() {
+    init();
+    let dir = tempfile::tempdir().unwrap();
+    let engine = PtyEngine::new();
+    let page = Page::new(false).releasing(&engine, "main", Duration::ZERO);
+    engine.attach("main", page.clone());
+    engine.spawn(flood_req("k", dir.path(), &["20000", "0"])).unwrap();
+    assert!(page.wait(Duration::from_secs(20), |l| bytes_in(l, "k").len() > 500));
+    engine.spawn(flood_req("k", dir.path(), &["20000", "0"])).unwrap();
+    assert!(page.wait(Duration::from_secs(20), |l| {
+        let second = l.got.iter().rposition(|g| matches!(g, Got::Reset(id) if id == "k"));
+        second.is_some_and(|at| l.got[at + 1..].iter().any(|g| matches!(g, Got::Data(id, _) if id == "k")))
+    }));
+    let log = page.log.lock();
+    let resets: Vec<usize> =
+        log.got.iter().enumerate().filter(|(_, g)| matches!(g, Got::Reset(id) if id == "k")).map(|(i, _)| i).collect();
+    assert_eq!(resets.len(), 2, "{resets:?}");
+    // The first terminal's reset comes before any of its output.
+    let first_data = log.got.iter().position(|g| matches!(g, Got::Data(id, _) if id == "k")).unwrap();
+    assert!(resets[0] < first_data);
+    drop(log);
     engine.kill_all(Duration::from_secs(5));
 }

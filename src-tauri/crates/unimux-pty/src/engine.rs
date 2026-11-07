@@ -23,7 +23,7 @@ use parking_lot::{Mutex, RwLock};
 use serde_json::{Value, json};
 
 use crate::batch::{Transport, Urgency, WindowBatcher};
-use crate::frame::{self, KIND_DATA, KIND_EXIT, KIND_JSON, KIND_REPLAY};
+use crate::frame::{self, KIND_DATA, KIND_EXIT, KIND_JSON, KIND_REPLAY, KIND_RESET};
 use crate::manager::{KillWait, PtyHandle, PtyManager, PtySink, SpawnRequest};
 use crate::output::{Focus, OutputChannel, OutputControl, OutputSink};
 use crate::routes::{EarlySizes, MAIN_WINDOW, WindowRoutes};
@@ -40,6 +40,14 @@ struct Term {
     out: Arc<OutputChannel>,
     /// The first output bytes, searched for the DA1 query (cleared once it was seen or the scan limit passed).
     da1: Mutex<Da1>,
+    /// Sizes that came while PtyManager::spawn was still running (its slot may not exist yet): applied when it returned.
+    spawning: Mutex<Spawning>,
+}
+
+#[derive(Default)]
+struct Spawning {
+    done: bool,
+    size: Option<(u16, u16)>,
 }
 
 #[derive(Default)]
@@ -217,10 +225,13 @@ impl Inner {
         }
     }
 
+    /// Queues the replay tail in the same critical section as its snapshot, so output flushed after the snapshot always
+    /// follows the replay frame (the renderer resets the terminal on a replay).
     fn replay_to(&self, link: &Link, id: &str, term: &Term) {
-        let (data, sizes) = term.out.replay();
         self.counters.replays.fetch_add(1, Ordering::Relaxed);
-        link.batcher.push(KIND_REPLAY, id, &frame::replay_payload(&data, &sizes), Urgency::Now);
+        term.out.replay_with(|data, sizes| {
+            link.batcher.push(KIND_REPLAY, id, &frame::replay_payload(&data, &sizes), Urgency::Now);
+        });
     }
 
     fn set_flow_control(&self, on: bool) {
@@ -298,7 +309,11 @@ impl PtyEngine {
             inner.sched.clone(),
         );
         out.resized(req.cols, req.rows);
-        let term = Arc::new(Term { out, da1: Mutex::new(Da1::default()) });
+        let term = Arc::new(Term { out, da1: Mutex::new(Da1::default()), spawning: Mutex::new(Spawning::default()) });
+        // The window starts this id's output afresh (the old terminal of the id was killed above: nothing of it follows).
+        if let Some(link) = inner.link_of(&req.id) {
+            link.batcher.push(KIND_RESET, &req.id, &[], Urgency::Now);
+        }
         // In the table before the pty starts: its first output can come before spawn returns.
         inner.terms.lock().insert(req.id.clone(), term.clone());
         #[cfg(windows)]
@@ -310,7 +325,14 @@ impl PtyEngine {
         }
         let id = req.id.clone();
         match inner.manager.spawn(req) {
-            Ok(pid) => Ok(pid),
+            Ok(pid) => {
+                let mut spawning = term.spawning.lock();
+                spawning.done = true;
+                if let Some((cols, rows)) = spawning.size.take() {
+                    inner.manager.resize(&id, cols, rows);
+                }
+                Ok(pid)
+            }
             Err(e) => {
                 term.out.dispose();
                 inner.forget(&id, &term);
@@ -362,11 +384,17 @@ impl PtyEngine {
     pub fn resize(&self, id: &str, cols: u16, rows: u16) {
         let (cols, rows) = (cols.max(2), rows.max(1));
         match self.inner.term(id) {
-            Some(t) if self.inner.manager.has(id) => {
-                self.inner.manager.resize(id, cols, rows);
+            Some(t) => {
+                // A resize during the spawn goes to the pty when spawn returned (it starts at the request's size).
+                let mut spawning = t.spawning.lock();
+                if spawning.done {
+                    self.inner.manager.resize(id, cols, rows);
+                } else {
+                    spawning.size = Some((cols, rows));
+                }
                 t.out.resized(cols, rows);
             }
-            _ => self.inner.early.lock().set(id, cols, rows),
+            None => self.inner.early.lock().set(id, cols, rows),
         }
     }
 
@@ -511,11 +539,12 @@ impl PtyEngine {
         let inner = &self.inner;
         let links: serde_json::Map<String, Value> =
             inner.links.read().iter().map(|(l, link)| (l.clone(), link.batcher.stats_json())).collect();
-        let terms: serde_json::Map<String, Value> = inner
-            .terms
-            .lock()
-            .iter()
-            .map(|(id, t)| (id.clone(), json!({ "unacked": t.out.unacked(), "paused": t.out.paused_or_watched() })))
+        // The table's lock is not held while a channel's state is read (a flush holds that one and takes `routes`, and
+        // attach holds `routes` while it takes `terms`).
+        let list: Vec<(String, Arc<Term>)> = inner.terms.lock().iter().map(|(id, t)| (id.clone(), t.clone())).collect();
+        let terms: serde_json::Map<String, Value> = list
+            .into_iter()
+            .map(|(id, t)| (id, json!({ "unacked": t.out.unacked(), "paused": t.out.paused_or_watched() })))
             .collect();
         json!({
             "windows": links,

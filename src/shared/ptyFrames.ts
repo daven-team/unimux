@@ -3,7 +3,8 @@
 //   1 data    the terminal's output bytes as read (UTF-8 may be cut anywhere: a streaming decoder per terminal),
 //   2 exit    the exit code (i32 LE),
 //   3 replay  [u32 LE headerLen][header JSON {sizes: [{at, cols, rows}]} with byte offsets][tail bytes],
-//   4 json    any other HostToRenderer message (sshListResult ...), UTF-8 JSON.
+//   4 json    any other HostToRenderer message (sshListResult ...), UTF-8 JSON,
+//   5 reset   empty: a new terminal starts under the id (its decoder starts clean, like node-pty's per process).
 // PtyFrameDecoder turns them into the HostToRenderer messages TerminalManager handles. A data message carries `bytes`, the
 // size of its payload: flow control counts bytes on this host (the Electron host counts characters), so the ack is in bytes.
 import type { HostToRenderer } from './ipc';
@@ -13,10 +14,13 @@ export const FRAME_DATA = 1;
 export const FRAME_EXIT = 2;
 export const FRAME_REPLAY = 3;
 export const FRAME_JSON = 4;
+export const FRAME_RESET = 5;
 
 export interface Frame { kind: number; id: string; payload: Uint8Array }
 
 const utf8 = new TextDecoder('utf-8');
+/** A terminal's output decoder: a leading BOM is kept as U+FEFF, as node-pty's StringDecoder did. */
+const outputDecoder = () => new TextDecoder('utf-8', { ignoreBOM: true });
 
 /** The frames of one message; null when it is malformed. */
 export function decodeFrames(buf: Uint8Array): Frame[] | null {
@@ -65,7 +69,7 @@ export class PtyFrameDecoder {
 
   private decoder(id: string): TextDecoder {
     let d = this.decoders.get(id);
-    if (!d) { d = new TextDecoder('utf-8'); this.decoders.set(id, d); }
+    if (!d) { d = outputDecoder(); this.decoders.set(id, d); }
     return d;
   }
 
@@ -87,6 +91,8 @@ export class PtyFrameDecoder {
       } else if (f.kind === FRAME_REPLAY) {
         const replay = this.replay(f.id, f.payload);
         if (replay) out.push(replay);
+      } else if (f.kind === FRAME_RESET) {
+        this.decoders.delete(f.id);
       } else if (f.kind === FRAME_JSON) {
         try { out.push(JSON.parse(utf8.decode(f.payload)) as HostToRenderer); } catch { /* not ours */ }
       }
@@ -105,7 +111,7 @@ export class PtyFrameDecoder {
     let header: { sizes?: Array<{ at: number; cols: number; rows: number }> };
     try { header = JSON.parse(utf8.decode(payload.subarray(4, 4 + headerLen))); } catch { return null; }
     const bytes = payload.subarray(4 + headerLen);
-    const decoder = new TextDecoder('utf-8');
+    const decoder = outputDecoder();
     this.decoders.set(id, decoder);
     const raw = (header.sizes ?? []).filter((s) => Number.isFinite(s.at)).map((s) => ({ ...s, at: Math.max(0, Math.min(bytes.length, Math.floor(s.at))) }));
     raw.sort((a, b) => a.at - b.at);

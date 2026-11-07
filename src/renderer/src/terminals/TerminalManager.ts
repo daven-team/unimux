@@ -1345,6 +1345,8 @@ class TerminalManager {
     this.entries.delete(cellId);
     this.remoteCwds.delete(cellId);
     this.pending.delete(cellId);
+    // Bytes of a character the terminal was cut in the middle of never belong to a later terminal of the cell.
+    this.frames.forget(cellId);
     if (handedOver) this.disposed.delete(cellId); else this.disposed.add(cellId);
     if (!this.entries.size && this.statusTimer) { clearInterval(this.statusTimer); this.statusTimer = null; }
   }

@@ -11,6 +11,8 @@
 //! took it. Renderer back-pressure: a gated transport (the page answers every message with a release ack, `released`)
 //! may have at most [`MAX_IN_FLIGHT`] messages posted and not yet released; while the cap is reached the batch keeps
 //! growing (one bigger message instead of many). The terminals themselves are held back by their FlowGate byte acks.
+//! The page releases by the host's message number (`upto` = the `n` it was posted with). A cap that sees no release for
+//! [`CAP_TIMEOUT`] is lifted (a release that never comes, like the pty pause watchdog), so a window never freezes for good.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -30,6 +32,8 @@ pub const MAX_IN_FLIGHT: u64 = 2;
 /// A keystroke's echo may use one more: it does not wait for a release of the bulk output before it (the page still
 /// handles the messages in order, but the release round trip is saved).
 pub const MAX_IN_FLIGHT_ECHO: u64 = MAX_IN_FLIGHT + 1;
+/// A reached cap without any release for this long is lifted (the page lost a message or its acks).
+pub const CAP_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// How soon a frame has to leave.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +67,8 @@ struct Pending {
     deadline: Option<Instant>,
     posted: u64,
     released: u64,
+    /// The last post or release (the start of a CAP_TIMEOUT wait).
+    progress: Option<Instant>,
     /// An echo is queued: the batch may use the echo slot.
     echo: bool,
     stop: bool,
@@ -78,6 +84,8 @@ pub struct BatchStats {
     pub max_in_flight: AtomicU64,
     /// Posts that waited for the in-flight cap.
     pub gated_waits: AtomicU64,
+    /// Caps lifted after CAP_TIMEOUT without a release.
+    pub cap_timeouts: AtomicU64,
 }
 
 struct Inner {
@@ -150,6 +158,7 @@ impl WindowBatcher {
         let mut p = self.inner.pending.lock();
         if upto > p.released && upto <= p.posted {
             p.released = upto;
+            p.progress = Some(Instant::now());
         }
         drop(p);
         self.inner.cv.notify_one();
@@ -186,6 +195,7 @@ impl WindowBatcher {
             "lost": s.lost.load(Ordering::Relaxed),
             "maxInFlight": s.max_in_flight.load(Ordering::Relaxed),
             "gatedWaits": s.gated_waits.load(Ordering::Relaxed),
+            "capTimeouts": s.cap_timeouts.load(Ordering::Relaxed),
             "inFlight": p.posted - p.released,
             "queued": p.buf.len(),
         })
@@ -215,13 +225,25 @@ fn send_loop(inner: &Inner) {
                 if ready && !capped {
                     break;
                 }
-                if ready && capped && !waited {
-                    waited = true;
-                    inner.stats.gated_waits.fetch_add(1, Ordering::Relaxed);
+                let lift = p.progress.map(|t| t + CAP_TIMEOUT);
+                if ready && capped {
+                    if lift.is_some_and(|t| t <= now) {
+                        // Nothing was released for CAP_TIMEOUT: a release was lost; the page is not held for ever.
+                        p.released = p.posted;
+                        inner.stats.cap_timeouts.fetch_add(1, Ordering::Relaxed);
+                        continue;
+                    }
+                    if !waited {
+                        waited = true;
+                        inner.stats.gated_waits.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
-                match p.deadline {
-                    Some(d) if !capped && d > now => {
+                match (p.deadline, lift) {
+                    (Some(d), _) if !capped && d > now => {
                         let _ = inner.cv.wait_until(&mut p, d);
+                    }
+                    (Some(_), Some(t)) if capped => {
+                        let _ = inner.cv.wait_until(&mut p, t);
                     }
                     _ => inner.cv.wait(&mut p),
                 }
@@ -231,6 +253,7 @@ fn send_loop(inner: &Inner) {
             p.deadline = None;
             p.echo = false;
             p.posted += 1;
+            p.progress = Some(Instant::now());
             (bytes, frames, p.posted, p.posted - p.released)
         };
         *inner.last_send.lock() = Instant::now();
@@ -242,9 +265,12 @@ fn send_loop(inner: &Inner) {
         if !inner.transport.post(seq, bytes) {
             s.lost.fetch_add(1, Ordering::Relaxed);
             inner.dead.store(true, Ordering::SeqCst);
-            // A page that never got it never releases it.
+            // A page that never got it never releases it: released at its own number (the page releases by number, so a
+            // later release covers what came before).
             let mut p = inner.pending.lock();
-            p.released = (p.released + 1).min(p.posted);
+            p.released = p.released.max(seq);
+            drop(p);
+            inner.cv.notify_one();
         }
     }
 }
@@ -315,23 +341,30 @@ mod tests {
         let (b, rx) = batcher(false);
         b.push(KIND_DATA, "a", b"out", Urgency::Bulk);
         b.push(KIND_EXIT, "a", &3i32.to_le_bytes(), Urgency::Now);
+        // Until the exit arrived (not "until a quiet gap": a loaded machine can pause the sender longer than any gap).
         let mut all = Vec::new();
-        while let Ok((_, m)) = rx.recv_timeout(Duration::from_millis(200)) {
+        while !all.contains(&KIND_EXIT) {
+            let (_, m) = rx.recv_timeout(Duration::from_secs(5)).expect("the exit frame");
             all.extend(decode(&m).unwrap().into_iter().map(|f| f.kind).collect::<Vec<_>>());
         }
+        assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
         assert_eq!(all, vec![KIND_DATA, KIND_EXIT]);
     }
 
     #[test]
     fn a_gated_transport_has_at_most_max_in_flight_unreleased_and_batches_grow() {
         let (b, rx) = batcher(true);
-        for i in 0..200 {
+        // The first MAX_IN_FLIGHT messages are posted one by one (each waited for, so no thread scheduling decides how
+        // they are batched), then the cap holds everything else back.
+        let mut first = Vec::new();
+        for i in 0..MAX_IN_FLIGHT {
             b.push(KIND_DATA, "a", format!("{i};").as_bytes(), Urgency::Now);
-            std::thread::sleep(Duration::from_micros(200));
+            first.push(rx.recv_timeout(Duration::from_secs(5)).unwrap());
         }
-        std::thread::sleep(Duration::from_millis(50));
-        let first: Vec<_> = rx.try_iter().collect();
-        assert_eq!(first.len() as u64, MAX_IN_FLIGHT);
+        for i in MAX_IN_FLIGHT..200 {
+            b.push(KIND_DATA, "a", format!("{i};").as_bytes(), Urgency::Now);
+        }
+        assert!(rx.recv_timeout(Duration::from_millis(100)).is_err(), "posted beyond the cap");
         assert_eq!(b.in_flight(), MAX_IN_FLIGHT);
         b.released(MAX_IN_FLIGHT);
         let (_, rest) = rx.recv_timeout(Duration::from_secs(2)).unwrap();
@@ -371,6 +404,52 @@ mod tests {
         b.push(KIND_DATA, "a", b"1", Urgency::Now);
         rx.recv_timeout(Duration::from_secs(2)).unwrap();
         assert_eq!(b.in_flight(), 1);
+    }
+
+    #[test]
+    fn a_cap_without_any_release_is_lifted_after_the_timeout() {
+        let (b, rx) = batcher(true);
+        for i in 0..MAX_IN_FLIGHT {
+            b.push(KIND_DATA, "a", i.to_string().as_bytes(), Urgency::Now);
+            rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+        let capped_at = Instant::now();
+        b.push(KIND_DATA, "a", b"held", Urgency::Now);
+        assert!(rx.recv_timeout(Duration::from_millis(300)).is_err());
+        // The page lost a release (or its acks): the window is not frozen for good.
+        let (at, m) = rx.recv_timeout(CAP_TIMEOUT + Duration::from_secs(5)).unwrap();
+        assert_eq!(ids(&m), vec!["a:held"]);
+        assert!(at - capped_at >= CAP_TIMEOUT - Duration::from_millis(50), "{:?}", at - capped_at);
+        assert_eq!(b.stats_json()["capTimeouts"], 1);
+        assert_eq!(b.in_flight(), 1);
+    }
+
+    struct Refusing;
+    impl Transport for Refusing {
+        fn post(&self, _seq: u64, _bytes: Vec<u8>) -> bool {
+            false
+        }
+        fn gated(&self) -> bool {
+            true
+        }
+        fn name(&self) -> &'static str {
+            "test"
+        }
+    }
+
+    #[test]
+    fn a_lost_post_does_not_take_an_in_flight_slot() {
+        let b = WindowBatcher::new("t", Arc::new(Refusing));
+        for i in 0..5 {
+            b.push(KIND_DATA, "a", i.to_string().as_bytes(), Urgency::Now);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while (b.stats_json()["lost"].as_u64() != Some(i + 1) || b.in_flight() != 0) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert_eq!(b.stats_json()["lost"], i + 1);
+            assert_eq!(b.in_flight(), 0);
+        }
+        assert_eq!(b.stats_json()["capTimeouts"], 0);
     }
 
     #[test]

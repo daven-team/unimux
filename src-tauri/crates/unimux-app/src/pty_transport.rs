@@ -1,8 +1,9 @@
 //! Transports of the pty data plane (P2, SP1 / SP5 decisions): how one window's frames messages reach its page.
 //!
 //! - `sharedBuffer` (Windows, default): `ICoreWebView2Environment12::CreateSharedBuffer` + `ICoreWebView2_17::
-//!   PostSharedBufferToScript` (read only; the additional data `{"mcPort":"pty","n":<seq>}` names the port and the
-//!   message number). A post waits until the UI thread made it (at most one post queued on the UI thread, a slower UI
+//!   PostSharedBufferToScript` (read only; the additional data `{"mcPort":"pty","a":<attach id>,"n":<seq>}` names the
+//!   port, the page's attach and the message number: buffers an earlier attach posted while the page reloaded are dropped
+//!   by the new page, which releases by `n`). A post waits until the UI thread made it (at most one post queued on the UI thread, a slower UI
 //!   thread is waited for and counted every 2 s, never answered with a second post); the page answers each message with a
 //!   release ack, so the batcher caps the messages in flight per window.
 //! - `pull` (macOS default: WKWebView has no shared buffer): the page long-polls `mc_port_pull`, one request in flight; a
@@ -62,7 +63,12 @@ impl PortSink for ChannelSink {
 
 /// The sink of a port attach: the Channel for sftp / db, the preferred data plane for pty. Returns the transport name the
 /// page has to serve.
-pub async fn sink_for(kind: &str, webview: &Webview, channel: Channel<InvokeResponseBody>) -> (Arc<dyn PortSink>, &'static str) {
+pub async fn sink_for(
+    kind: &str,
+    webview: &Webview,
+    channel: Channel<InvokeResponseBody>,
+    attach: Option<&str>,
+) -> (Arc<dyn PortSink>, &'static str) {
     if kind != "pty" {
         return (Arc::new(ChannelSink(channel)), "channel");
     }
@@ -75,7 +81,8 @@ pub async fn sink_for(kind: &str, webview: &Webview, channel: Channel<InvokeResp
             (sink, "pull")
         }
         "sharedBuffer" if shared_buffer_supported(webview).await => {
-            (Arc::new(SharedBufferSink { webview: webview.clone(), channel }), "sharedBuffer")
+            let attach = attach.filter(|a| valid_attach_id(a)).map(str::to_string);
+            (Arc::new(SharedBufferSink { webview: webview.clone(), channel, attach }), "sharedBuffer")
         }
         _ => (Arc::new(ChannelSink(channel)), "channel"),
     }
@@ -106,10 +113,25 @@ async fn shared_buffer_supported(_webview: &Webview) -> bool {
     false
 }
 
+/// The page's attach id goes into JSON text as is: only short ids of plain characters (a UUID) are used.
+fn valid_attach_id(a: &str) -> bool {
+    !a.is_empty() && a.len() <= 64 && a.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
+}
+
+/// The additional data of a shared buffer.
+fn additional_data(attach: Option<&str>, seq: u64) -> String {
+    match attach {
+        Some(a) => format!("{{\"mcPort\":\"pty\",\"a\":\"{a}\",\"n\":{seq}}}"),
+        None => format!("{{\"mcPort\":\"pty\",\"n\":{seq}}}"),
+    }
+}
+
 pub struct SharedBufferSink {
     webview: Webview,
     /// JSON messages (none for pty since P2) and the fallback.
     channel: Channel<InvokeResponseBody>,
+    /// The page's attach id (see `additional_data`).
+    attach: Option<String>,
 }
 
 impl PortSink for SharedBufferSink {
@@ -120,7 +142,7 @@ impl PortSink for SharedBufferSink {
         self.post_frames(0, bytes.to_vec())
     }
     fn post_frames(&self, seq: u64, bytes: Vec<u8>) -> bool {
-        post_shared_buffer(&self.webview, seq, bytes)
+        post_shared_buffer(&self.webview, additional_data(self.attach.as_deref(), seq), bytes)
     }
     fn gated(&self) -> bool {
         true
@@ -132,7 +154,7 @@ impl PortSink for SharedBufferSink {
 
 /// Posts one message as a shared buffer and waits until the UI thread called `PostSharedBufferToScript`.
 #[cfg(windows)]
-fn post_shared_buffer(webview: &Webview, seq: u64, bytes: Vec<u8>) -> bool {
+fn post_shared_buffer(webview: &Webview, extra: String, bytes: Vec<u8>) -> bool {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_SHARED_BUFFER_ACCESS_READ_ONLY, ICoreWebView2_17, ICoreWebView2Environment12,
     };
@@ -143,7 +165,7 @@ fn post_shared_buffer(webview: &Webview, seq: u64, bytes: Vec<u8>) -> bool {
     let (tx, rx) = std::sync::mpsc::channel::<bool>();
     let queued = webview
         .with_webview(move |platform| {
-            let extra = HSTRING::from(format!("{{\"mcPort\":\"pty\",\"n\":{seq}}}"));
+            let extra = HSTRING::from(extra);
             // SAFETY: COM calls on the live environment and webview, on the UI thread Tauri runs this closure on; the copy
             // stays inside the buffer's own size.
             let posted = unsafe {
@@ -178,7 +200,7 @@ fn post_shared_buffer(webview: &Webview, seq: u64, bytes: Vec<u8>) -> bool {
 }
 
 #[cfg(not(windows))]
-fn post_shared_buffer(_webview: &Webview, _seq: u64, _bytes: Vec<u8>) -> bool {
+fn post_shared_buffer(_webview: &Webview, _extra: String, _bytes: Vec<u8>) -> bool {
     false
 }
 
@@ -289,5 +311,22 @@ pub async fn mc_port_pull(
     match sink.pull().await {
         Some(bytes) => Ok(Response::new(InvokeResponseBody::Raw(bytes))),
         None => Err(IpcError::Refused { command: "port:pty".into() }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_buffers_name_the_attach_and_the_message_number() {
+        assert!(valid_attach_id("1b4e28ba-2fa1-11d2-883f-0016d3cca427"));
+        assert!(!valid_attach_id("x\",\"n\":1"));
+        assert!(!valid_attach_id(""));
+        assert!(!valid_attach_id(&"a".repeat(65)));
+        let v: Value = serde_json::from_str(&additional_data(Some("abc-1"), 7)).unwrap();
+        assert_eq!(v, serde_json::json!({ "mcPort": "pty", "a": "abc-1", "n": 7 }));
+        let v: Value = serde_json::from_str(&additional_data(None, 3)).unwrap();
+        assert_eq!(v, serde_json::json!({ "mcPort": "pty", "n": 3 }));
     }
 }

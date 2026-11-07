@@ -60,6 +60,9 @@ impl SpawnOptions {
 struct GateState {
     paused: bool,
     stop: bool,
+    /// The child ended: the reader drains the master to its end (or the exit drain's deadline) and is never paused again,
+    /// so the last output of a terminal paused by flow control is not lost.
+    draining: bool,
 }
 
 #[derive(Default)]
@@ -70,7 +73,16 @@ struct Gate {
 
 impl Gate {
     fn set_paused(&self, paused: bool) {
-        self.state.lock().paused = paused;
+        let mut s = self.state.lock();
+        s.paused = paused && !s.draining;
+        drop(s);
+        self.cv.notify_all();
+    }
+    fn drain(&self) {
+        let mut s = self.state.lock();
+        s.draining = true;
+        s.paused = false;
+        drop(s);
         self.cv.notify_all();
     }
     fn stop(&self) {
@@ -441,6 +453,8 @@ impl Pty {
                 };
                 *waiter.exit.lock() = Some(code);
                 waiter.exit_cv.notify_all();
+                // A reader paused by flow control reads again: the output left in the pty arrives before the exit.
+                waiter.gate.drain();
                 let deadline = Instant::now() + EXIT_DRAIN;
                 while !waiter.eof.load(Ordering::SeqCst) && Instant::now() < deadline {
                     std::thread::sleep(Duration::from_millis(5));

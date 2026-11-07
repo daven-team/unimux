@@ -110,7 +110,8 @@ pub(crate) fn caller_of(webview: &Webview, request: &Request<'_>) -> Caller {
 }
 
 /// The page asks for one of its ports (`pty`, `sftp`, `db`) on every load. Answers `{transport}`: how the page receives
-/// the port's binary messages (`channel`, `sharedBuffer`, `pull`; see pty_transport.rs).
+/// the port's binary messages (`channel`, `sharedBuffer`, `pull`; see pty_transport.rs). `attach`: the page's id of this
+/// attach (pty), sent back with every shared buffer so the page can drop buffers of an earlier attach (a reload).
 #[tauri::command]
 pub async fn mc_port_attach(
     webview: Webview,
@@ -118,12 +119,14 @@ pub async fn mc_port_attach(
     request: Request<'_>,
     kind: String,
     channel: Channel<InvokeResponseBody>,
+    attach: Option<String>,
 ) -> Result<Value, IpcError> {
     let caller = caller(&webview, &request);
     if !ctx.guard_allows(&caller) {
         return Err(IpcError::Refused { command: format!("port:{kind}") });
     }
-    let (sink, transport): (Arc<dyn PortSink>, &str) = crate::pty_transport::sink_for(&kind, &webview, channel).await;
+    let (sink, transport): (Arc<dyn PortSink>, &str) =
+        crate::pty_transport::sink_for(&kind, &webview, channel, attach.as_deref()).await;
     let result = ctx.ports.attach(&kind, &caller.label, sink);
     #[cfg(feature = "test-bridge")]
     ctx.test_record.observe(&result);

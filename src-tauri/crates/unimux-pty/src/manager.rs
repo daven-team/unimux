@@ -76,7 +76,7 @@ struct Slot {
     serial: u64,
     pty: OnceLock<Arc<sys::Pty>>,
     /// What came for the terminal before its pty was in the slot: the first output reaches the sink before spawn returned,
-    /// and an answer to it (DA1) or a flow-control pause must not be lost. Applied when the pty is set; the lock orders
+    /// and an answer to it (DA1), a flow-control pause or a resize must not be lost. Applied when the pty is set; the lock orders
     /// that hand-over.
     early: Mutex<Early>,
     killed: AtomicBool,
@@ -88,6 +88,7 @@ struct Slot {
 struct Early {
     input: Vec<u8>,
     paused: Option<bool>,
+    size: Option<(u16, u16)>,
 }
 
 impl Slot {
@@ -107,8 +108,22 @@ impl Slot {
         }
     }
 
+    fn resize(&self, cols: u16, rows: u16) {
+        let mut early = self.early.lock();
+        match self.pty.get() {
+            // Errors of a terminal that is ending are ignored.
+            Some(pty) => {
+                let _ = pty.resize(cols, rows);
+            }
+            None => early.size = Some((cols, rows)),
+        }
+    }
+
     fn set_pty(&self, pty: Arc<sys::Pty>) {
         let mut early = self.early.lock();
+        if let Some((cols, rows)) = early.size.take() {
+            let _ = pty.resize(cols, rows);
+        }
         if let Some(paused) = early.paused.take() {
             pty.set_paused(paused);
         }
@@ -338,16 +353,15 @@ impl PtyManager {
             let slot = slot.clone();
             move |code: i64| {
                 if let Some(inner) = weak.upgrade() {
-                    let current = {
+                    let current = inner.current(&id, serial).is_some();
+                    if current {
+                        // Still in `entries` while the sink handles the exit: its flow control can still resume the
+                        // terminal (PtyHandle::set_paused) for the last output.
+                        inner.guarded(|| inner.sink().exit(&id, code));
                         let mut entries = inner.entries.lock();
-                        let current = entries.get(&id).is_some_and(|s| s.serial == serial);
-                        if current {
+                        if entries.get(&id).is_some_and(|s| s.serial == serial) {
                             entries.remove(&id);
                         }
-                        current
-                    };
-                    if current {
-                        inner.guarded(|| inner.sink().exit(&id, code));
                     }
                     inner.running.lock().remove(&serial);
                 }
@@ -382,10 +396,6 @@ impl PtyManager {
         Ok(pid)
     }
 
-    fn pty(&self, id: &str) -> Option<Arc<sys::Pty>> {
-        self.inner.entries.lock().get(id).and_then(|s| s.pty.get().cloned())
-    }
-
     fn slot(&self, id: &str) -> Option<Arc<Slot>> {
         self.inner.entries.lock().get(id).cloned()
     }
@@ -397,10 +407,11 @@ impl PtyManager {
         }
     }
 
-    /// Resizes a live terminal (at least 2 x 1); errors of a terminal that is ending are ignored.
+    /// Resizes a live terminal (at least 2 x 1); errors of a terminal that is ending are ignored. A terminal whose spawn
+    /// is still running gets the size when its pty is set.
     pub fn resize(&self, id: &str, cols: u16, rows: u16) {
-        if let Some(pty) = self.pty(id) {
-            let _ = pty.resize(cols.max(2), rows.max(1));
+        if let Some(slot) = self.slot(id) {
+            slot.resize(cols.max(2), rows.max(1));
         }
     }
 

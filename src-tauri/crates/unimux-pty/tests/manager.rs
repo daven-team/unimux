@@ -614,6 +614,66 @@ fn the_launch_command_is_typed_when_spawn_returns_late() {
     assert!(m.kill_and_wait("late", KILL_TIMEOUT));
 }
 
+/// A terminal paused by flow control whose program ends: the reader opens at the child's exit (P2 review), so the last
+/// output arrives before the exit, which comes without anyone resuming the terminal (1.1.4 resumed it for its exit drain;
+/// before the fix the Unix reader was stopped 200 ms after the exit with that output unread, and a Windows terminal
+/// stayed paused with no exit at all).
+#[test]
+fn a_paused_terminal_that_ends_delivers_its_last_output_before_the_exit() {
+    let sink = Sink::new();
+    let m = manager(&sink);
+    let dir = scratch();
+    for round in 0..3 {
+        let id = format!("p{round}");
+        // About 600 bytes over 0.6 s, then FLOOD-DONE and the end: paused right after the spawn, everything is printed
+        // while the reader is paused.
+        m.spawn(flood(&id, dir.path(), &["1000", "0", "600"])).unwrap();
+        m.set_paused(&id, true);
+        let Some((code, at_exit)) = sink.wait_exit(&id, Duration::from_secs(20)) else {
+            panic!("round {round}: no exit while paused, {} bytes: {:?}", sink.len(&id), sink.text(&id));
+        };
+        assert_eq!(code, 0, "round {round}");
+        let text = sink.text(&id);
+        assert!(text.contains("FLOOD-DONE"), "round {round}: last output lost: {text:?}");
+        assert_eq!(at_exit, sink.len(&id), "round {round}: output after the exit report");
+    }
+}
+
+/// A resize while the spawn is still running (its slot has no pty yet) reaches the pty when it is set.
+#[test]
+fn a_resize_during_the_spawn_reaches_the_pty() {
+    let sink = Sink::new();
+    let m = Arc::new(manager(&sink));
+    let dir = scratch();
+    m.set_spawn_hold(Some(Duration::from_millis(2000)));
+    let mut r = req("rs", dir.path(), quick_shell());
+    r.cols = 80;
+    r.rows = 24;
+    let spawner = {
+        let m = m.clone();
+        std::thread::spawn(move || m.spawn(r))
+    };
+    // The slot is in the table, its pty not yet (spawn is held).
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !m.has("rs") {
+        assert!(Instant::now() < deadline, "no slot");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(m.pid("rs").is_none(), "the spawn was not held");
+    m.resize("rs", 100, 40);
+    spawner.join().unwrap().unwrap();
+    m.set_spawn_hold(None);
+    assert!(sink.wait_output("rs", Duration::from_secs(30)));
+    std::thread::sleep(Duration::from_millis(300));
+    m.write("rs", if cfg!(windows) { b"mode con\r" } else { b"stty size\r" });
+    let ok = sink.wait(Duration::from_secs(20), |s| {
+        let t = String::from_utf8_lossy(s.out.get("rs").map_or(&[][..], |v| v.as_slice())).replace(' ', "");
+        if cfg!(windows) { t.contains("Lines:40") && t.contains("Columns:100") } else { t.contains("40100") }
+    });
+    assert!(ok, "the pty did not get 100 x 40: {:?}", sink.text("rs"));
+    assert!(m.kill_and_wait("rs", KILL_TIMEOUT));
+}
+
 /// An agent cell (launch command typed) killed while its DA1 was never answered (no renderer attached): the typed command
 /// is not the answer, so the kill still sends it and ends within the 3 s limit instead of sitting out OpenConsole's hold.
 #[test]

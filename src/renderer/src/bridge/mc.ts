@@ -86,11 +86,11 @@ async function attachPtyPort(): Promise<void> {
   const channel = new Channel<unknown>();
   channel.onmessage = (message) => port.deliver(message instanceof ArrayBuffer ? new Uint8Array(message) : message);
   const webview = (window as { chrome?: { webview?: Partial<SharedBufferHost> } }).chrome?.webview;
-  // Listening before the attach: the host posts the replay tails right after it.
-  if (webview?.addEventListener && webview.releaseBuffer) listenSharedBuffers(webview as SharedBufferHost, port);
+  // Listening before the attach: the host posts the replay tails right after it. Buffers are matched to this attach.
+  if (webview?.addEventListener && webview.releaseBuffer) listenSharedBuffers(webview as SharedBufferHost, port, session);
   let result: { transport?: string } | null;
   try {
-    result = await invoke<{ transport?: string } | null>('mc_port_attach', { kind: 'pty', channel });
+    result = await invoke<{ transport?: string } | null>('mc_port_attach', { kind: 'pty', channel, attach: session });
   } catch (error) {
     if ((error as { code?: string })?.code !== 'MC_NOT_YET') console.warn(`[mc] pty port: ${String((error as Error)?.message ?? JSON.stringify(error))}`);
     return;

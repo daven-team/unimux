@@ -4,8 +4,8 @@
 // FlowGate, the per-window batcher, the transport (shared buffers by default), the bridge's pty port, TerminalManager.
 //
 //   npm run build:check && (cd src-tauri && node ../scripts/msvc-run.mjs cargo build --release -p unimux-pty --bins)
-//   node scripts/verify-tauri-pty.mjs [replay] [latency] [grid] [--cells=20] [--rate=1000000] [--seconds=15] [--keys=60]
-//        [--load] [--transport=sharedBuffer|pull|channel] [--keep]
+//   node scripts/verify-tauri-pty.mjs [replay] [latency] [grid] [reload] [--cells=20] [--rate=1000000] [--seconds=15]
+//        [--keys=60] [--load] [--reloads=8] [--reload-rate=2000000] [--transport=sharedBuffer|pull|channel] [--keep]
 //
 // replay   a cmd cell is narrowed and widened (recorded sizes), the page reloads, the replay draws the same screen;
 //          the transport is the expected one and the frames path is in use.
@@ -13,6 +13,8 @@
 //          of a 5x4 grid run unimux-pty-flood at --rate (scripts/sp5/electron-grid.mjs --latency is the 1.1.4 run).
 // grid     20 cells x --rate for --seconds: fps / frame times like scripts/sp5/electron-grid.mjs, plus the P2 bounds:
 //          shared buffers posted and not released per window (host and page side) and unacked bytes per terminal.
+// reload   4 cells x --reload-rate, --reloads page reloads: after each the host keeps posting, its queue stays bounded
+//          and no in-flight cap needed the timeout (buffers of the old attach are dropped by the new page).
 // Results: artifacts/p2/results-<time>.json. Scratch data dir and home only (ssh-ui-lib launchApp), offscreen window.
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -28,7 +30,7 @@ mkdirSync(outDir, { recursive: true });
 const argv = process.argv.slice(2);
 const opt = (name, def) => { const a = argv.find((x) => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : def; };
 const wanted = argv.filter((a) => !a.startsWith('--'));
-const runs = wanted.length ? wanted : ['replay', 'latency', 'grid'];
+const runs = wanted.length ? wanted : ['replay', 'latency', 'grid', 'reload'];
 const cellCount = Number(opt('cells', 20));
 const rate = Number(opt('rate', 1_000_000));
 const seconds = Number(opt('seconds', 15));
@@ -192,6 +194,43 @@ if (runs.includes('grid')) {
     if (g.page?.transport !== 'pull') check(maxHostInFlight <= 3, `messages in flight per window, host side: at most ${maxHostInFlight} (cap 2, 3 with an echo)`);
     // FlowGate: 1 MiB, plus the flush that crossed it (at most 128 KiB) and one read in progress.
     check(maxUnacked <= 1024 * 1024 + 128 * 1024 + 64 * 1024, `unacked bytes per terminal stay within the FlowGate limit (max ${maxUnacked})`);
+  });
+}
+
+if (runs.includes('reload')) {
+  // Page reloads while 4 cells flood (P2 review): buffers the old page's batcher still posts must not put the new page's
+  // release count ahead of the host (window frozen at the in-flight cap, host queue growing). After every reload the host
+  // keeps posting and its queue stays bounded.
+  const cells = 4;
+  const reloads = Number(opt('reloads', 8));
+  const reloadRate = Number(opt('reload-rate', 2_000_000));
+  await withApp(cells, async (app) => {
+    for (let i = 0; i < cells; i++) {
+      await typeLine(app, `c${i}`, `"${flood}" ${reloadRate} 0`);
+      await sleep(150);
+    }
+    await sleep(2000);
+    const rounds = [];
+    let stale = 0;
+    for (let round = 1; round <= reloads; round++) {
+      await app.cdp('Page.reload');
+      await sleep(1000);
+      await app.until(`!!document.querySelector('.app .workspace-tabs') && window.__mc?.terminals?.entries?.size >= ${cells} && !!window.__MC_PTY_PORT__`, 'reloaded', 60000);
+      await sleep(3000);
+      const a = (await app.bridge('pty', { action: 'stats' })).windows.main;
+      await sleep(3000);
+      const b = (await app.bridge('pty', { action: 'stats' })).windows.main;
+      const page = await app.evaluate(portStats);
+      stale += page?.stale ?? 0;
+      const r = { round, posts: [a.posts, b.posts], inFlight: [a.inFlight, b.inFlight], queued: [a.queued, b.queued], capTimeouts: b.capTimeouts, page };
+      rounds.push(r);
+      console.log(JSON.stringify(r));
+      check(b.posts > a.posts, `reload ${round}: the host keeps posting (${a.posts} -> ${b.posts})`);
+      check(b.queued <= 1024 * 1024, `reload ${round}: the host queue stays bounded (${a.queued} -> ${b.queued} bytes)`);
+      check(b.capTimeouts === 0, `reload ${round}: no in-flight cap had to be lifted by the timeout (${b.capTimeouts})`);
+    }
+    results.reload = { cells, rate: reloadRate, rounds, staleBuffersDropped: stale };
+    console.log(`stale shared buffers dropped by the new pages: ${stale}`);
   });
 }
 
