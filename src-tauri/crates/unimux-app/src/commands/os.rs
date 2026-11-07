@@ -273,6 +273,8 @@ impl OsService {
 
     /// `shell:openPath`: the default program, except that a program, script, installer or shortcut is revealed in Explorer
     /// / Finder instead of being run (PLAN.md, W4 open path; 1.1.4 opened it). The openInEditor fallback goes through here.
+    /// Every check (type list, PATHEXT, AssocIsDangerous, link targets, macOS execute bit / header / bundle) lives in
+    /// `launches_program`, which `unimux_platform::shell::open_path` runs again right before ShellExecute / `open`.
     fn open_path(&self, path: &str) {
         if unimux_platform::shell::launches_program(path) {
             self.desktop.reveal(path);
