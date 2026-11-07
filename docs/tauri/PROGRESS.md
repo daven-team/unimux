@@ -399,6 +399,7 @@ Open:
 3. The bench numbers come from a machine shared with parallel builds; the 4-file fixture timings are 1 to 3 ms, and a busy moment can flip one of them (the script then fails; run it again). A quiet-machine run before the release is worth recording.
 4. macOS: `cargo clippy -p unimux-agents --target aarch64-apple-darwin` is clean (stat through `fs::metadata`, inode from the open file); not run on a Mac.
 5. A request that arrives while the idle stop saves waits for the save (at most 20 s) and then starts a fresh index that loads the saved file; in 1.1.4 such a request went to the old worker until it was terminated.
+6. Shared checks on 2026-11-07: cargo fmt / clippy -D warnings (unimux-agents, unimux-app incl. test-bridge, unimux-agents for aarch64-apple-darwin), cargo test unimux-agents 20 + 8 golden + 13 index, unimux-app 12, typecheck, gen:check, porting --check, vitest conv-search + conv-export 31/31. The full `npm test` gave 3,949 passed / 3 failed in timing tests H5 does not touch (background-stop passes alone; launch-reset.int with real powershell.exe failed in different cases on each run while the machine ran other agents' builds); no TS source changed in H5.
 
 ### How to run
 
