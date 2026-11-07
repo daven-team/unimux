@@ -8,7 +8,9 @@
 // Checks: the startup steps open all three gates and write 1.1.4's marks to startup.log; every W7 hook is wired (MCP revoke,
 // forgetCell parts, taskbar); closing a cell drops its hook nonce only when no process of it runs; a team cell that leaves the
 // grids loses its MCP token; cell:runtime counts for the taskbar and never sets an overlay or a progress (1.1.2 / 1.1.0); a
-// renderer error reaches crash.log, rate-limited; the renderer marks are kept once; app:notice shows a toast.
+// renderer error reaches crash.log, rate-limited; the renderer marks are kept once and a mark that is not a renderer mark is
+// dropped; app:notice shows a toast. The taskbar check reads the counts behind the view too, so the Windows run (where the
+// view is always empty) still proves that cell:runtime and the alive cells reach the taskbar.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -68,9 +70,10 @@ try {
   check('the startup steps open every gate', JSON.stringify(report.gates) === JSON.stringify({ cellServices: true, accountsRecovered: true, accountsReady: true }), JSON.stringify(report.gates));
   const { startupLog, crashLog } = await bridge('paths');
   const line = readFileSync(startupLog, 'utf8').trim().split('\n').at(-1);
-  const order = ['hooks-started', 'mcp-started', 'cell-services-ready', 'accounts-migrated', 'renderer-boot'].map((m) => [m, line.match(new RegExp(`\\b${m}=(\\d+)`))?.[1]]);
+  const order = ['hooks-started', 'mcp-started', 'cell-services-ready', 'accounts-recovered', 'accounts-migrated', 'renderer-boot'].map((m) => [m, line.match(new RegExp(`\\b${m}=(\\d+)`))?.[1]]);
   check('startup.log has the marks of the startup steps', order.every(([, ms]) => ms !== undefined), line);
   const ms = Object.fromEntries(order.map(([m, v]) => [m, Number(v)]));
+  check('accounts-recovered comes before accounts-migrated (1.1.4 marks it also with nothing to recover)', ms['accounts-recovered'] <= ms['accounts-migrated'], JSON.stringify(ms));
   check('cell-services-ready comes after the hook and MCP servers', ms['cell-services-ready'] >= ms['hooks-started'] && ms['cell-services-ready'] >= ms['mcp-started'], JSON.stringify(ms));
   const want = { revoke: ['mcp'], forget: ['codexHooked'], forgetUnlessAlive: ['hooks', 'taskbar'], stateChanged: ['taskbar'] };
   check('the domains are wired into the cell bookkeeping', Object.entries(want).every(([k, v]) => v.every((n) => report.hooks[k]?.includes(n))), JSON.stringify(report.hooks));
@@ -79,10 +82,15 @@ try {
   await mc(`window.mc.startupMark('first-output'), true`);
   await sleep(300);
   const once = readFileSync(startupLog, 'utf8').trim().split('\n').at(-1);
-  await mc(`(window.mc.startupMark('first-output'), window.mc.startupMark('renderer-boot'), window.mc.startupMark('window-created'), true)`);
+  await mc(`(window.mc.startupMark('first-output'), window.mc.startupMark('renderer-boot'), true)`);
   await sleep(300);
   const twice = readFileSync(startupLog, 'utf8').trim().split('\n').at(-1);
-  check('a renderer mark is kept once and only the fixed ones count', once.includes('first-output=') && twice === once && !/window-created=.*window-created=/.test(twice), twice);
+  check('a renderer mark is kept once', once.includes('first-output=') && twice === once, twice);
+  // Names the main process never marks: only the renderer's fixed marks are taken from it.
+  await mc(`(window.mc.startupMark('w7-bogus'), window.mc.startupMark('app-ready-x'), true)`);
+  await sleep(300);
+  const bogus = readFileSync(startupLog, 'utf8');
+  check('a mark that is not a renderer mark is dropped', !bogus.includes('w7-bogus') && !bogus.includes('app-ready-x'), bogus.trim().split('\n').at(-1));
 
   // ── forgetCell and revokeCell ──────────────────────────────────────────
   const hooks = await bridge('hooks', { cell: ids.run });
@@ -110,8 +118,15 @@ try {
   await sleep(400);
   const calls = await bridge('taskbar');
   check('a working or waiting agent sets no taskbar progress or overlay', Array.isArray(calls) && !calls.some((e) => 'progress' in e || ('overlay' in e && e.overlay)), JSON.stringify(calls));
-  const view = await bridge('taskbar', { view: true });
+  let view = await bridge('taskbar', { view: true });
+  check('cell:runtime reaches the taskbar: the waiting agent counts', view.attention === 1 && view.working === 0, JSON.stringify(view));
   check(process.platform === 'darwin' ? 'the Dock shows the waiting agent' : 'Windows shows no taskbar badge (1.1.2)', view.dock === (process.platform === 'darwin' ? '1' : ''), JSON.stringify(view));
+  // The alive set is wired: an agent whose terminal does not run never counts; the running one now works.
+  await setState(`(s) => ({ ...s, projects: s.projects.map((p) => ({ ...p, tabs: p.tabs.map((t) => ({ ...t, cells: [...t.cells, { id: 'w7-dead', profileId: ${JSON.stringify(claude.id)} }] })) })) })`);
+  await mc(`(window.mc.reportCellStatus('w7-dead', 'waiting', 'attention', true), window.mc.reportCellStatus('w7-agent', 'working', undefined, true), true)`);
+  await sleep(400);
+  view = await bridge('taskbar', { view: true });
+  check('only agents whose terminal runs count (the alive set)', view.attention === 0 && view.working === 1, JSON.stringify(view));
   check('cell:runtime is answered (no not-yet call)', !Object.keys(await bridge('notYet')).includes('cell:runtime'));
 
   // ── reportError and app:notice ─────────────────────────────────────────

@@ -388,7 +388,7 @@ fn each_cell(state: &Value) -> impl Iterator<Item = &Value> {
 }
 
 /// The cells of every grid for the Dock badge: `agent` = the profile's CLI is not the shell (`getProfile` fallbacks).
-fn taskbar_cells(state: &Value) -> Vec<TaskbarCell> {
+pub(crate) fn taskbar_cells(state: &Value) -> Vec<TaskbarCell> {
     let profiles = state.get("profiles").and_then(Value::as_array).cloned().unwrap_or_default();
     let cli_of = |id: Option<&str>| -> Option<String> {
         let found = profiles

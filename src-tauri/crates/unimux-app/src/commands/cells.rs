@@ -154,7 +154,8 @@ mod tests {
     }
 
     /// A darwin taskbar wired to the app: runtime reports count for running agent cells, a reload of the main page forgets
-    /// what it reported, an unknown reason is no attention, a mute recomputes the badge, a forgotten cell no longer counts.
+    /// what it reported, an unknown reason is no attention, a mute recomputes the badge, a forgotten cell no longer counts,
+    /// and a change of `settings.alerts` or of the profiles recomputes it too (index.ts:806).
     #[test]
     fn the_taskbar_follows_reports_reloads_removals_and_mutes() {
         let cells = json!([
@@ -168,20 +169,8 @@ mod tests {
         let (c, s1, s2, a) = (calls.clone(), ctx.clone(), ctx.clone(), ctx.clone());
         let taskbar = Taskbar::new(TaskbarDeps {
             platform: "darwin".into(),
-            cells: Box::new(move || {
-                let state = s1.state.get();
-                crate::cells::cell_ids_of(&state, true, |_| true)
-                    .into_iter()
-                    .map(|id| {
-                        let cell = find_cell(&state, &id).unwrap();
-                        unimux_platform::taskbar::TaskbarCell {
-                            agent: cell["profileId"] == "cl",
-                            muted: cell["muted"] == true,
-                            id,
-                        }
-                    })
-                    .collect()
-            }),
+            // The app's own reading of the grids: a cell is an agent unless its profile's CLI is the shell.
+            cells: Box::new(move || crate::commands::os::taskbar_cells(&s1.state.get())),
             alive: Box::new(move || a.cells.alive_set()),
             taskbar_badge: Box::new(move || s2.state.get()["settings"]["alerts"]["taskbarBadge"] == true),
             set_dock_badge: Box::new(move |t| c.lock().push(t.to_string())),
@@ -219,8 +208,45 @@ mod tests {
         set_cells(&ctx, json!([{ "id": "w7-b", "profileId": "cl", "muted": true }]), json!([]));
         sched.fire();
         assert_eq!(taskbar.view(), "");
-        // Turning the setting off recomputes too (nothing to show either way here).
         assert_eq!(*calls.lock(), vec!["2", "", "1", "", "1", ""]);
+        // One agent waits again.
+        ctx.cells.set_alive("w7-a", true);
+        set_cells(
+            &ctx,
+            json!([{ "id": "w7-a", "profileId": "cl" }, { "id": "w7-b", "profileId": "cl", "muted": true }]),
+            json!([]),
+        );
+        report(&ctx, Some(&taskbar), "main", &attention("w7-a"));
+        sched.fire();
+        assert_eq!(taskbar.view(), "1");
+        // Turning the setting off recomputes the view (only `settings.alerts` changes), turning it on shows the badge again.
+        let set_state = |edit: &dyn Fn(&mut Value)| {
+            ctx.state
+                .change(
+                    |s| {
+                        let mut next = s.clone();
+                        edit(&mut next);
+                        Ok(next)
+                    },
+                    None,
+                    false,
+                )
+                .unwrap();
+        };
+        set_state(&|s| s["settings"]["alerts"]["taskbarBadge"] = json!(false));
+        sched.fire();
+        assert_eq!(taskbar.view(), "", "the badge setting is off");
+        set_state(&|s| s["settings"]["alerts"]["taskbarBadge"] = json!(true));
+        sched.fire();
+        assert_eq!(taskbar.view(), "1");
+        // A profile change alone (its CLI becomes the shell) recomputes it: the cell is no agent any more.
+        set_state(&|s| s["profiles"][0]["cli"] = json!("shell"));
+        sched.fire();
+        assert_eq!(taskbar.view(), "", "a shell cell never counts");
+        set_state(&|s| s["profiles"][0]["cli"] = json!("claude"));
+        sched.fire();
+        assert_eq!(taskbar.view(), "1");
+        assert_eq!(*calls.lock(), vec!["2", "", "1", "", "1", "", "1", "", "1", "", "1"]);
         ctx.saver.stop();
     }
 

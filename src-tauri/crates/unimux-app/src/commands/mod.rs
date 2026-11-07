@@ -92,8 +92,6 @@ mod tests {
         assert_eq!(report["cell:alive"], Status::Fallback);
         // W7: the status reports of the windows (relay, taskbar, observers).
         assert_eq!(report["cell:runtime"], Status::Implemented);
-        // W7: the status reports of the windows (relay, taskbar, observers).
-        assert_eq!(report["cell:runtime"], Status::Implemented);
         for channel in ["mcp:info", "mcp:retry"] {
             assert_eq!(report[channel], Status::Implemented, "{channel}");
         }

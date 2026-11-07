@@ -239,7 +239,8 @@ pub async fn test_bridge(
         // W7 (X1 contract): `{stub: true}` starts recording the taskbar's OS calls (answers true); without it the calls since
         // then, `[{overlay: {size, scales, empty, png} | null, description} | {progress, mode} | {dock}]` like 1.1.4's
         // setOverlayIcon / setProgressBar stubs. 1.2.0 never sets an overlay or a progress (dropped in 1.1.2 / 1.1.0), so
-        // only the macOS Dock badge (`{dock: text}`) can appear; `view: true` adds the current view instead of the calls.
+        // only the macOS Dock badge (`{dock: text}`) can appear; `view: true` answers the current view instead of the calls,
+        // `{dock, attention, working}` (the counts behind it, which Windows computes too but never shows).
         "taskbar" => {
             let os = ctx.os.get().ok_or_else(|| fail("no os service"))?;
             if args.get("stub").and_then(Value::as_bool) == Some(true) {
@@ -248,7 +249,8 @@ pub async fn test_bridge(
             }
             os.taskbar.flush();
             if args.get("view").and_then(Value::as_bool) == Some(true) {
-                return Ok(json!({ "dock": os.taskbar.view() }));
+                let counts = os.taskbar.counts();
+                return Ok(json!({ "dock": os.taskbar.view(), "attention": counts.attention, "working": counts.working }));
             }
             Ok(Value::Array(os.taskbar_calls.lock().clone().unwrap_or_default()))
         }

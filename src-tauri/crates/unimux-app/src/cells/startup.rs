@@ -2,7 +2,8 @@
 //!
 //! - in parallel: the cell file prune (H2 registers it, mark `cell-files-pruned`), the hook server (`hooks-started`) and the
 //!   MCP server (`mcp-started`); when all three ended: mark `cell-services-ready`, open `cell_services`;
-//! - the account work (`recoverAccounts`): the recovery of an interrupted swap (A2) -> open `accounts_recovered`; the account
+//! - the account work (`recoverAccounts`): the recovery of an interrupted swap (A2) -> mark `accounts-recovered` (always, as
+//!   1.1.4's recoverActivation, also without a recovery step) and open `accounts_recovered`; the account
 //!   migration (A1 / A2) -> mark `accounts-migrated`; then open `accounts_ready` and run what waits for it (usage.start and
 //!   the swap-pending push, A5 / A2).
 //!
@@ -104,6 +105,7 @@ pub fn accounts(ctx: &Arc<AppContext>) -> BoxFuture<'static, ()> {
     async move {
         let recovery = ctx.startup_steps.recovery.lock().clone();
         run_step(&ctx, "account recovery", recovery).await;
+        ctx.mark("accounts-recovered");
         ctx.cells.gates.accounts_recovered.open();
         let migration = ctx.startup_steps.migration.lock().clone();
         run_step(&ctx, "account migration", migration).await;
@@ -201,11 +203,14 @@ mod tests {
         task.await.unwrap();
         assert!(ctx.cells.gates.accounts_ready.is_open());
         assert_eq!(*order.lock(), vec!["recovery", "usage.start"]);
-        assert!(marks(&ctx).contains("accounts-migrated="));
+        let line = marks(&ctx);
+        let (recovered, migrated) = (line.find("accounts-recovered="), line.find("accounts-migrated="));
+        assert!(recovered.is_some() && recovered < migrated, "{line}");
 
         let (_dir2, ctx2, _router2) = test_ctx(serde_json::json!({ "version": 1, "projects": [] }));
         accounts(&ctx2).await;
         assert!(ctx2.cells.gates.accounts_recovered.is_open() && ctx2.cells.gates.accounts_ready.is_open());
+        assert!(marks(&ctx2).contains("accounts-recovered="), "1.1.4 marks it also when there is nothing to recover");
         ctx.saver.stop();
         ctx2.saver.stop();
     }

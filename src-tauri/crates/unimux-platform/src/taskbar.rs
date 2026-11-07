@@ -96,6 +96,10 @@ struct Inner {
 pub struct Taskbar {
     deps: TaskbarDeps,
     inner: Mutex<Inner>,
+    /// Held by a pass from its snapshot of the statuses to the OS call, so overlapping passes (the timer thread and a
+    /// reapply) finish in the order they read: a pass that read older statuses never overwrites a newer view. Status
+    /// reports and forgets never take it (the app forgets cells from inside its state controller's change).
+    pass: Mutex<()>,
     me: Weak<Taskbar>,
 }
 
@@ -110,6 +114,7 @@ impl Taskbar {
                 timer: None,
                 disposed: false,
             }),
+            pass: Mutex::new(()),
             me: me.clone(),
         })
     }
@@ -121,8 +126,10 @@ impl Taskbar {
 
     /// Applies `next` when it differs (or always with `force`). The deps (the app's state, the alive cells) are read and the
     /// OS is called outside the lock: the app forgets cells from inside its state controller's change, which must never wait
-    /// for a pass that waits for the controller.
+    /// for a pass that waits for the controller. Passes run one at a time (`pass`), each reading the statuses only once the
+    /// previous one is done, so the last pass to finish is always the one that read the newest statuses.
     fn apply(&self, force: bool) {
+        let _pass = self.pass.lock();
         let runtime = self.inner.lock().runtime.clone();
         let next = self.compute(&runtime);
         {
@@ -224,6 +231,13 @@ impl Taskbar {
         let Some(t) = timer else { return };
         self.deps.scheduler.cancel(t);
         self.run();
+    }
+
+    /// What the next pass would count, from the current statuses (the test bridge reads it: on Windows the view is always
+    /// empty, the counts still show that the reports and the alive cells reach the taskbar).
+    pub fn counts(&self) -> TaskbarCounts {
+        let runtime = self.inner.lock().runtime.clone();
+        taskbar_counts(&(self.deps.cells)(), &runtime, &(self.deps.alive)())
     }
 
     pub fn view(&self) -> String {
@@ -436,5 +450,38 @@ mod tests {
         drop(held);
         pass.join().unwrap();
         assert_eq!(taskbar.view(), "1");
+    }
+
+    /// A slow pass (the timer thread) that read the statuses before a new report must not finish after a reapply that read
+    /// the new one: the Dock would keep a stale badge until the next pass (W7 review).
+    #[test]
+    fn overlapping_passes_finish_in_the_order_they_read() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::Duration;
+        let calls = Arc::new(Mutex::new(Vec::<String>::new()));
+        let first = Arc::new(AtomicBool::new(true));
+        let c = calls.clone();
+        let taskbar = Taskbar::new(TaskbarDeps {
+            platform: "darwin".into(),
+            cells: Box::new(move || {
+                if first.swap(false, Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                vec![cell("a", true, false)]
+            }),
+            alive: Box::new(|| set(&["a"])),
+            taskbar_badge: Box::new(|| true),
+            set_dock_badge: Box::new(move |t| c.lock().push(t.to_string())),
+            scheduler: Arc::new(ManualScheduler::default()),
+        });
+        taskbar.invalidate();
+        let t = taskbar.clone();
+        let slow = std::thread::spawn(move || t.flush());
+        std::thread::sleep(Duration::from_millis(50));
+        taskbar.status("a", CellRuntime::new("waiting", Some("attention")), None);
+        taskbar.reapply();
+        slow.join().unwrap();
+        assert_eq!(taskbar.view(), "1");
+        assert_eq!(calls.lock().last().map(String::as_str), Some("1"), "calls: {:?}", calls.lock());
     }
 }
