@@ -158,6 +158,8 @@ async function runScale(wc, percent) {
     // The native layout exists without the page's help (laid out from the client rect and the DPI at creation).
     const first = await caption(page, { action: 'probe' });
     check(`${tag} the native layout is there on its own`, first.area && first.visible && first.child, JSON.stringify({ rect: first.rect, layered: first.layered }));
+    // W7: the embedded manifest declares Windows 10 / 11, so Windows lets the hit-test child be layered (Terminal's styles).
+    check(`${tag} the hit-test child is layered (Windows 10 / 11 manifest)`, first.layered === true, `exStyle 0x${(first.exStyle >>> 0).toString(16)}`);
     await caption(page, { action: 'scale', scale });
     await sizeLikeReference(wc, win.hwnd, percent);
     await waitFor(page, `window.devicePixelRatio === ${scale}`, 10000, `devicePixelRatio ${scale}`);

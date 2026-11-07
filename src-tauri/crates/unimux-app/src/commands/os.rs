@@ -49,8 +49,11 @@ pub struct OsService {
     editor: tokio::sync::Mutex<Option<(Instant, Option<String>)>>,
     /// Windows whose focus already stops a flash.
     flash_watch: Mutex<HashSet<String>>,
-    /// The Dock badge (macOS); W7 feeds it the `cell:runtime` statuses.
+    /// The Dock badge (macOS); W7 feeds it the `cell:runtime` statuses (commands::cells).
     pub taskbar: Arc<Taskbar>,
+    /// The taskbar's OS calls since the harness asked for them (test bridge `taskbar {stub: true}`), None until then.
+    #[cfg_attr(not(feature = "test-bridge"), allow(dead_code))]
+    pub taskbar_calls: Arc<Mutex<Option<Vec<Value>>>>,
 }
 
 /// What a notification's button does besides showing the window.
@@ -67,19 +70,24 @@ impl OsService {
         let scheduler = Arc::new(ThreadScheduler::default());
         let secret = SecretClipboard::new(desktop.clipboard(), scheduler.clone());
         let weak = Arc::downgrade(ctx);
-        let (cells_ctx, badge_ctx, settings_ctx) = (weak.clone(), weak.clone(), weak.clone());
+        let (cells_ctx, badge_ctx, settings_ctx, alive_ctx) = (weak.clone(), weak.clone(), weak.clone(), weak.clone());
         let badge_desktop = desktop.clone();
+        let taskbar_calls: Arc<Mutex<Option<Vec<Value>>>> = Arc::default();
+        let calls = taskbar_calls.clone();
         let taskbar = Taskbar::new(TaskbarDeps {
             platform: ctx.platform.as_str().to_string(),
             cells: Box::new(move || cells_ctx.upgrade().map(|c| taskbar_cells(&c.state.get())).unwrap_or_default()),
-            // The live terminals come with P3 (`cell:alive`); until then no cell counts.
-            alive: Box::new(HashSet::new),
+            // The cells whose terminal runs (W7's `AppContext::cells`, filled by the pty service, P3).
+            alive: Box::new(move || alive_ctx.upgrade().map(|c| c.cells.alive_set()).unwrap_or_default()),
             taskbar_badge: Box::new(move || {
                 settings_ctx
                     .upgrade()
                     .is_some_and(|c| alerts(&c.state.get()).get("taskbarBadge").and_then(Value::as_bool) == Some(true))
             }),
             set_dock_badge: Box::new(move |text| {
+                if let Some(log) = calls.lock().as_mut() {
+                    log.push(json!({ "dock": text }));
+                }
                 let main = badge_ctx.upgrade().and_then(|c| c.app().and_then(|a| a.get_webview_window(crate::windows::MAIN)));
                 badge_desktop.dock_badge(main, text);
             }),
@@ -94,6 +102,7 @@ impl OsService {
             editor: tokio::sync::Mutex::new(None),
             flash_watch: Mutex::new(HashSet::new()),
             taskbar,
+            taskbar_calls,
         })
     }
 
@@ -407,6 +416,8 @@ fn external_url(address: &Value) -> Option<String> {
 pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     let os = OsService::new(ctx);
     let _ = ctx.os.set(os.clone());
+    // W7: forgetCell, state changes, page reloads and detached pages going away reach the taskbar view.
+    crate::commands::cells::wire_taskbar(ctx, &os.taskbar);
 
     let s = os.clone();
     r.send("notify", move |call| {

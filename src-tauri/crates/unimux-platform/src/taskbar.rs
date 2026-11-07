@@ -119,21 +119,20 @@ impl Taskbar {
         taskbar_view(counts, (self.deps.taskbar_badge)(), &self.deps.platform)
     }
 
-    /// Applies `next` when it differs (or always with `force`); the OS call happens outside the lock.
+    /// Applies `next` when it differs (or always with `force`). The deps (the app's state, the alive cells) are read and the
+    /// OS is called outside the lock: the app forgets cells from inside its state controller's change, which must never wait
+    /// for a pass that waits for the controller.
     fn apply(&self, force: bool) {
-        let call = {
+        let runtime = self.inner.lock().runtime.clone();
+        let next = self.compute(&runtime);
+        {
             let mut inner = self.inner.lock();
-            let next = self.compute(&inner.runtime);
             if !force && next == inner.applied {
                 return;
             }
-            let changed = force || next != inner.applied;
             inner.applied = next.clone();
-            changed.then_some(next)
-        };
-        if let Some(text) = call {
-            (self.deps.set_dock_badge)(&text);
         }
+        (self.deps.set_dock_badge)(&next);
     }
 
     fn run(&self) {
@@ -400,5 +399,42 @@ mod tests {
         h.taskbar.flush();
         assert_eq!(*h.calls.lock(), vec!["dock:1"]);
         assert_eq!(h.sched.pending(), 0);
+    }
+
+    /// The app forgets cells from inside its state controller's change while a pass reads the state: the pass must not hold
+    /// the taskbar's lock while it reads the deps (W7: that was a lock-order deadlock).
+    #[test]
+    fn a_pass_reads_its_deps_without_holding_the_lock() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let state = Arc::new(Mutex::new(()));
+        let s = state.clone();
+        let taskbar = Taskbar::new(TaskbarDeps {
+            platform: "darwin".into(),
+            cells: Box::new(move || {
+                let _state = s.lock();
+                vec![cell("a", true, false)]
+            }),
+            alive: Box::new(|| set(&["a"])),
+            taskbar_badge: Box::new(|| true),
+            set_dock_badge: Box::new(|_| {}),
+            scheduler: Arc::new(ManualScheduler::default()),
+        });
+        taskbar.status("a", CellRuntime::new("waiting", Some("attention")), None);
+        // The "controller" holds the state while its change hook forgets a cell; meanwhile a pass starts.
+        let held = state.lock();
+        let t = taskbar.clone();
+        let pass = std::thread::spawn(move || t.flush());
+        std::thread::sleep(Duration::from_millis(50));
+        let (tx, rx) = mpsc::channel();
+        let t = taskbar.clone();
+        std::thread::spawn(move || {
+            t.forget("b");
+            let _ = tx.send(());
+        });
+        assert!(rx.recv_timeout(Duration::from_secs(2)).is_ok(), "forget waited for the pass");
+        drop(held);
+        pass.join().unwrap();
+        assert_eq!(taskbar.view(), "1");
     }
 }

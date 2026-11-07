@@ -91,9 +91,9 @@ pub fn renderer_report(
         Some(s) if !s.is_empty() => format!("{message}\n{s}"),
         _ => message.to_string(),
     };
-    // JS slices UTF-16 units; for the log a char cut is close enough and never splits a character.
-    let text: String = text.chars().take(4000).collect();
-    Some(format!("renderer {kind}: {text}"))
+    // `text.slice(0, 4000)`: 4000 UTF-16 units like JavaScript; half a surrogate pair at the cut is written as U+FFFD, as
+    // Node writes a lone surrogate to the file.
+    Some(format!("renderer {kind}: {}", crate::utf16::slice(&text, 0, 4000)))
 }
 
 /// Reports from the renderer: at most `max` per window (a render loop that throws must not fill the disk).
@@ -159,6 +159,28 @@ mod tests {
         assert_eq!(renderer_report(&json!("Boot"), &json!("x"), None), None);
         assert_eq!(renderer_report(&json!("boot"), &json!(1), None), None);
         assert_eq!(renderer_report(&json!("a-very-long-kind-name-over-24"), &json!("x"), None), None);
+        // test/stability.test.ts: a long report is cut below 4100 characters.
+        let long = renderer_report(&json!("boot"), &json!("x".repeat(10_000)), None).unwrap();
+        assert_eq!(long.len(), "renderer boot: ".len() + 4000);
+        // An empty stack adds nothing; a stack that is not a string neither; 24 characters of kind are fine.
+        assert_eq!(renderer_report(&json!("boot"), &json!("m"), Some(&json!(""))).as_deref(), Some("renderer boot: m"));
+        assert_eq!(renderer_report(&json!("boot"), &json!("m"), Some(&json!(["at"]))).as_deref(), Some("renderer boot: m"));
+        assert!(renderer_report(&json!("a".repeat(24)), &json!("m"), None).is_some());
+        assert_eq!(renderer_report(&json!(""), &json!("m"), None), None);
+        assert_eq!(renderer_report(&json!("boot\n"), &json!("m"), None), None);
+    }
+
+    /// `slice(0, 4000)` counts UTF-16 units like JavaScript: an astral character is two, and a pair cut in half leaves U+FFFD.
+    #[test]
+    fn renderer_reports_cut_in_utf16_units() {
+        let emoji = "\u{1F600}".repeat(2500); // 5000 units
+        let line = renderer_report(&json!("boot"), &json!(emoji), None).unwrap();
+        assert_eq!(line.trim_start_matches("renderer boot: ").chars().count(), 2000);
+        let odd = format!("a{}", "\u{1F600}".repeat(2500)); // the cut falls inside a pair
+        let line = renderer_report(&json!("boot"), &json!(odd), None).unwrap();
+        let text = line.trim_start_matches("renderer boot: ");
+        assert_eq!(text.encode_utf16().count(), 4000);
+        assert!(text.ends_with('\u{FFFD}'));
     }
 
     #[test]

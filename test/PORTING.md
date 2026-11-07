@@ -38,7 +38,7 @@ Rows keep the exact case name (the counter matches them). Rust tests are named `
 | startup-timing | keeps the last launches only | unimux-core startup_timing::tests::keeps_twenty_lines_and_replaces_own_line | ported |
 | startup-timing | rewrites the line of this launch on every flush and never throws | unimux-core startup_timing::tests::keeps_twenty_lines_and_replaces_own_line | ported |
 | stability | limits the reports per minute | unimux-core crash_log::tests::limiter | ported |
-| stability | accepts only well-formed reports and cuts them | unimux-core crash_log::tests::renderer_reports | ported |
+| stability | accepts only well-formed reports and cuts them | unimux-core crash_log::tests::renderer_reports (+ renderer_reports_cut_in_utf16_units; through the handler: unimux-app commands::app::tests::renderer_reports_reach_crash_log_well_formed_and_at_most_twenty_a_minute) | ported |
 | stability | describes anything thrown | unimux-core crash_log::tests::describe_cuts (panics: the panic hook in unimux-app startup.rs, checked by scripts/smoke-tauri.mjs) | partial |
 | store | roundtrips state and makes a .bak on load | unimux-state store::tests::a_good_file_loads_unchanged_and_refreshes_the_bak | ported |
 | store | falls back to .bak when state.json is corrupted | unimux-state store::tests::a_corrupt_file_is_kept_and_the_bak_is_used | ported |
@@ -90,6 +90,9 @@ Rows keep the exact case name (the counter matches them). Rust tests are named `
 | taskbar | forgets the statuses of a reloaded window, follows mutes and settings, and reapplies on demand | unimux-platform taskbar::tests::forgets_the_statuses_of_a_reloaded_window_follows_mutes_and_settings_and_reapplies_on_demand | ported |
 | taskbar | Windows: never touches the OS | unimux-platform taskbar::tests::windows_never_touches_the_os | ported |
 | taskbar | stops after dispose | unimux-platform taskbar::tests::stops_after_dispose | ported |
+| startup-gates | a Claude cell waits for the hook/MCP servers and for the account recovery | unimux-app cells::gates::tests::a_claude_cell_waits_for_the_hook_mcp_servers_and_for_the_account_recovery | ported |
+| startup-gates | a Codex cell waits for the servers only, never for the account recovery | unimux-app cells::gates::tests::a_codex_cell_waits_for_the_servers_only_never_for_the_account_recovery | ported |
+| startup-gates | a plain shell (also an SSH cell) waits for nothing, unless it gets a startup prompt | unimux-app cells::gates::tests::a_plain_shell_also_an_ssh_cell_waits_for_nothing_unless_it_gets_a_startup_prompt | ported |
 | alert-sound-file | reads a small whitelisted file and skips bytes for a known key | unimux-platform sound::tests::reads_a_small_whitelisted_file_and_skips_bytes_for_a_known_key | ported |
 | alert-sound-file | refuses missing, empty, oversized, wrong-extension files and directories without throwing | unimux-platform sound::tests::refuses_missing_empty_oversized_wrong_extension_files_and_directories_without_throwing | ported |
 | alert-sound-file | reads the saved file of the asked event only | unimux-platform sound::tests::reads_the_saved_file_of_the_asked_event_only | ported |

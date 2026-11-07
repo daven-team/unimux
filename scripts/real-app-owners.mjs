@@ -30,7 +30,7 @@ const EXACT = {
   // MCP and automation
   'mcp:info': 'M1', 'mcp:retry': 'M1', 'automation:execute': 'M3',
   // terminals
-  'cell:spawn': 'P4', 'cell:kill': 'P3', 'cell:killAndWait': 'P3', 'cell:alive': 'P3', 'cell:runtime': 'P3',
+  'cell:spawn': 'P4', 'cell:kill': 'P3', 'cell:killAndWait': 'P3', 'cell:alive': 'P3', 'cell:runtime': 'W7',
   // files
   'fs:listProjectDirectory': 'G5', 'fs:listProjectDirectories': 'G5', 'fs:listProjectDirectoryBatch': 'G5',
   'fs:readProjectFile': 'G5', 'fs:statProjectFile': 'G5', 'fs:writeProjectFile': 'G5',

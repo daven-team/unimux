@@ -33,8 +33,13 @@ fn main() {
     println!("cargo::rerun-if-changed=capabilities");
     println!("cargo::rerun-if-changed=capabilities-check");
     let pattern = if test_bridge { "./capabilities*/*.json" } else { "./capabilities/*.json" };
+    // The Windows application manifest: tauri-build's Common Controls entry plus the Windows 10 / 11 supportedOS (W7).
+    println!("cargo::rerun-if-changed=windows-app-manifest.xml");
+    let windows =
+        tauri_build::WindowsAttributes::new_without_app_manifest().app_manifest(include_str!("windows-app-manifest.xml"));
     let attributes = tauri_build::Attributes::new()
         .capabilities_path_pattern(pattern)
+        .windows_attributes(windows)
         .app_manifest(tauri_build::AppManifest::new().commands(commands));
     tauri_build::try_build(attributes).expect("tauri-build");
 }
