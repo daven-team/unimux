@@ -3975,7 +3975,7 @@
   },
   {
    "name": "pem dsa traditional",
-   "text": "-----BEGIN DSA PRIVATE KEY-----\r\nMIIBywIBAAKBgQCCgTpyObvnaeqKzXbmpndE6e/Xa3Zhf2+mC7gJFWYOB1Jz4vap\r\ndELli8nhBcfxS0MMO8z6HFg3zJF2gWd55prYJIm2U9YlL+g5PBZVYOZqclgB3+NK\r\nFZ557VzFRAriXVB174mvvYE96auE7p1sqJ7SmaqTD92hYJTuqbG6lMOxYQIdAOXx\r\nVgllP5FDiy2sxQhZkp2AlkZVubUebGWUMkkCgYBF+8Y/f3T1w4o1iS1LZ4Qklrl7\r\np7TBCD2LmJsHLepBsfZ6DWwwACcrGlb8DOQu7IxA49Vg0sweC/PrdccIe6gg14Ex\r\nK05LObBuQBsnEsCD4hteq12H0LesYcpzAA3yTiUNa/HsrIH6pFL3+utviV31ARim\r\nX3+urlJ2X9YREYotagKBgAbqqGg/YNDOoIbAEVrumW+S1qu6oj3g7BsHWPp0DJJi\r\nvrwUO3j8HKM4Io4dPPcpI4hf7+U3DI1Kv9YdGzCFms6zrpggfKFIIOTmHA7pU9N6\r\ntb4LLevzJT+wW0HVNqXWYx4LncOewhZ91PDOEWLK+X1Wj8d/36iLltnNdZtEhqNe\r\nAh0Av4JmkqHXB54bcva9dGtY7NhiCMhSnNMXGovQwg==\r\n-----END DSA PRIVATE KEY-----\r\n",
+   "text": "-----BEGIN DSA PRIVATE KEY-----\nMIIBywIBAAKBgQCCgTpyObvnaeqKzXbmpndE6e/Xa3Zhf2+mC7gJFWYOB1Jz4vap\ndELli8nhBcfxS0MMO8z6HFg3zJF2gWd55prYJIm2U9YlL+g5PBZVYOZqclgB3+NK\nFZ557VzFRAriXVB174mvvYE96auE7p1sqJ7SmaqTD92hYJTuqbG6lMOxYQIdAOXx\nVgllP5FDiy2sxQhZkp2AlkZVubUebGWUMkkCgYBF+8Y/f3T1w4o1iS1LZ4Qklrl7\np7TBCD2LmJsHLepBsfZ6DWwwACcrGlb8DOQu7IxA49Vg0sweC/PrdccIe6gg14Ex\nK05LObBuQBsnEsCD4hteq12H0LesYcpzAA3yTiUNa/HsrIH6pFL3+utviV31ARim\nX3+urlJ2X9YREYotagKBgAbqqGg/YNDOoIbAEVrumW+S1qu6oj3g7BsHWPp0DJJi\nvrwUO3j8HKM4Io4dPPcpI4hf7+U3DI1Kv9YdGzCFms6zrpggfKFIIOTmHA7pU9N6\ntb4LLevzJT+wW0HVNqXWYx4LncOewhZ91PDOEWLK+X1Wj8d/36iLltnNdZtEhqNe\nAh0Av4JmkqHXB54bcva9dGtY7NhiCMhSnNMXGovQwg==\n-----END DSA PRIVATE KEY-----\n",
    "noPassphrase": {
     "ok": false,
     "error": "unsupportedType"
@@ -3995,7 +3995,7 @@
   },
   {
    "name": "pem dsa traditional aes128",
-   "text": "-----BEGIN DSA PRIVATE KEY-----\r\nProc-Type: 4,ENCRYPTED\r\nDEK-Info: AES-128-CBC,C1120615DF05089273E80DE372481AFE\r\n\r\nflcVRCmK06hL+oc8bHueGXlWK1VcHnl7UOmt+UmvU8EEdUIiiU47Lxd1BZh/IJH+\r\n2Nmgk+d/J7LNyswPucWV9+vv9j9mlEobUlRyO4b8RwbCR1UXibGocpZ29aoCM0WH\r\n+Tz/OD7EI8LB1W6XSpPxEgVD8KFq3uxJnvI/OJrn/PKPZsYWgUsMcvdXCcgugiev\r\nCVXZwOsEdIZjwBxVQyP3Z4BLmO+J9RJ4fykE+noj5Lj6hXu5TZOgJ9Sp966qo43k\r\nSk1tmYaXzCsweGDINK7h3KrcmmH2PITKeKHzZ7QVJhl6Uac0nYNeLOuAA0JBsHr2\r\nip1+oQqJgKAeeSkQEJCg01segGgKVIUFIs1LDyaA5hNwakXjt3gVZM1KUewKwbho\r\nBxbd3TIzHtpetmdYWK8QJn2Td0IbhZGNAXrdXHt2j26TBxrHgUTzJv/EZtvpuAxs\r\nwez3p2ePlCWt38gAW3q1hxfB9fbgzvtocKPVGbee1i1pNp+yaQAvm0GRIq1vHdCh\r\nFcXJQHDnNXazHkgipWP170aidvLrFnsWehvzAnW1xvQb5N3Kn8PT5+kqEWqdJ10v\r\n8n5T0RoWlTj/pNJOdu27/v2SdZPuGm6X0UwsJBpMcHI=\r\n-----END DSA PRIVATE KEY-----\r\n",
+   "text": "-----BEGIN DSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,C1120615DF05089273E80DE372481AFE\n\nflcVRCmK06hL+oc8bHueGXlWK1VcHnl7UOmt+UmvU8EEdUIiiU47Lxd1BZh/IJH+\n2Nmgk+d/J7LNyswPucWV9+vv9j9mlEobUlRyO4b8RwbCR1UXibGocpZ29aoCM0WH\n+Tz/OD7EI8LB1W6XSpPxEgVD8KFq3uxJnvI/OJrn/PKPZsYWgUsMcvdXCcgugiev\nCVXZwOsEdIZjwBxVQyP3Z4BLmO+J9RJ4fykE+noj5Lj6hXu5TZOgJ9Sp966qo43k\nSk1tmYaXzCsweGDINK7h3KrcmmH2PITKeKHzZ7QVJhl6Uac0nYNeLOuAA0JBsHr2\nip1+oQqJgKAeeSkQEJCg01segGgKVIUFIs1LDyaA5hNwakXjt3gVZM1KUewKwbho\nBxbd3TIzHtpetmdYWK8QJn2Td0IbhZGNAXrdXHt2j26TBxrHgUTzJv/EZtvpuAxs\nwez3p2ePlCWt38gAW3q1hxfB9fbgzvtocKPVGbee1i1pNp+yaQAvm0GRIq1vHdCh\nFcXJQHDnNXazHkgipWP170aidvLrFnsWehvzAnW1xvQb5N3Kn8PT5+kqEWqdJ10v\n8n5T0RoWlTj/pNJOdu27/v2SdZPuGm6X0UwsJBpMcHI=\n-----END DSA PRIVATE KEY-----\n",
    "noPassphrase": {
     "ok": false,
     "error": "needsPassphrase",
@@ -4018,7 +4018,7 @@
   },
   {
    "name": "pem dsa traditional des3",
-   "text": "-----BEGIN DSA PRIVATE KEY-----\r\nProc-Type: 4,ENCRYPTED\r\nDEK-Info: DES-EDE3-CBC,8C66CE83902ED4D7\r\n\r\nAQsAWa1geNA4VEMWW+xrBI08eyed7DmZ/Z9EFg0TQ0ft9pBPqaChdj+wmKBzqKm/\r\njuI11dCTJNnft9CSFb7b6MQ+rDGOPelD8KRoE9FuJvVG+9YXVPNoIEK9GTpduUhE\r\nbVzXC5jzg8bwOFIRZ31rmX2ELfWHgt6WJ1dkVMXgnlqID9h5bzIFog43NTln90/x\r\ndzF4M5jsIYYVXuYu9ayGbSlrFmwXcpiwGns1rtAu4Efosy8LL/nCTdpusSsepDOj\r\n1+VcGC7iNB9WpGoLcxyKvtIx4bWeTpDVFkOyOY/Yc4fdBGVAolgSds1bj2MjQEQ+\r\nwM3J2O/XlEqyPJ5Fyp1JQAT1hnbgfWbPc5AlzVcfUjMZeLW0B5BC+fwHiD7irHEK\r\n1oHIguwNGkchBD86wI8bYZGUQEGbeYyVgA59RaNHwD29VZLK8YPslJHAmCbMDdJH\r\n/68MniGUfAapSFuQmumxV6KMr2DwT1+0O73S7VRzPo+SvRC4GcuxkIlVUCn/+/PI\r\nOd3AWCw6u11s3lUuPIM5kh3oqbQu96i9TQC3CRYZS0kzKb3BnA4BbY0YOXA4uSCv\r\nohC9WTLvJcSen03+wV7qhp3ecteopNNWjtfgG6cgVos=\r\n-----END DSA PRIVATE KEY-----\r\n",
+   "text": "-----BEGIN DSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: DES-EDE3-CBC,8C66CE83902ED4D7\n\nAQsAWa1geNA4VEMWW+xrBI08eyed7DmZ/Z9EFg0TQ0ft9pBPqaChdj+wmKBzqKm/\njuI11dCTJNnft9CSFb7b6MQ+rDGOPelD8KRoE9FuJvVG+9YXVPNoIEK9GTpduUhE\nbVzXC5jzg8bwOFIRZ31rmX2ELfWHgt6WJ1dkVMXgnlqID9h5bzIFog43NTln90/x\ndzF4M5jsIYYVXuYu9ayGbSlrFmwXcpiwGns1rtAu4Efosy8LL/nCTdpusSsepDOj\n1+VcGC7iNB9WpGoLcxyKvtIx4bWeTpDVFkOyOY/Yc4fdBGVAolgSds1bj2MjQEQ+\nwM3J2O/XlEqyPJ5Fyp1JQAT1hnbgfWbPc5AlzVcfUjMZeLW0B5BC+fwHiD7irHEK\n1oHIguwNGkchBD86wI8bYZGUQEGbeYyVgA59RaNHwD29VZLK8YPslJHAmCbMDdJH\n/68MniGUfAapSFuQmumxV6KMr2DwT1+0O73S7VRzPo+SvRC4GcuxkIlVUCn/+/PI\nOd3AWCw6u11s3lUuPIM5kh3oqbQu96i9TQC3CRYZS0kzKb3BnA4BbY0YOXA4uSCv\nohC9WTLvJcSen03+wV7qhp3ecteopNNWjtfgG6cgVos=\n-----END DSA PRIVATE KEY-----\n",
    "noPassphrase": {
     "ok": false,
     "error": "needsPassphrase",
