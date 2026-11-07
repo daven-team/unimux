@@ -211,7 +211,6 @@ impl DetachedService {
     }
 
     /// The app is winding down (W6): windows close without attaching their tab.
-    #[allow(dead_code, reason = "the quit sequence (W6) sets it")]
     pub fn set_quitting(&self, quitting: bool) {
         self.quitting.store(quitting, Ordering::SeqCst);
     }

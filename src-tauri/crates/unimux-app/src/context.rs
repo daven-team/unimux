@@ -163,6 +163,26 @@ impl AppContext {
         });
         let lifecycle = Arc::new(crate::lifecycle::Lifecycle::new());
         crate::lifecycle::register_own_steps(&lifecycle, events.clone(), broadcaster.clone(), saver.clone(), crash.clone());
+        // Detached windows (W5) in the wind-down: from the start of the quit a closing window no longer gives its tab back, and
+        // in their own phase they close as they are (1.1.4 `quitting = true` in before-quit, then closeAllDetached).
+        let det = detached.clone();
+        lifecycle.wind_down.register(
+            crate::lifecycle::wind_down::phase::STOP_SERVICES,
+            "detached: quitting",
+            Duration::from_secs(1),
+            move || async move {
+                det.set_quitting(true);
+            },
+        );
+        let det = detached.clone();
+        lifecycle.wind_down.register(
+            crate::lifecycle::wind_down::phase::CLOSE_DETACHED,
+            "close detached windows",
+            Duration::from_secs(1),
+            move || async move {
+                det.close_all();
+            },
+        );
         Arc::new(Self {
             data_dir,
             overrides,

@@ -18,7 +18,6 @@
 pub enum WindowKind {
     Main,
     /// A detached window.
-    #[allow(dead_code, reason = "W5 builds the detached windows with it")]
     Detached,
 }
 

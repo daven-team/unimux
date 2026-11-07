@@ -4,20 +4,20 @@
 
 pub mod clipboard;
 pub mod instance;
+pub mod lifecycle;
 #[cfg(target_os = "macos")]
 pub mod mac;
 #[cfg(target_os = "macos")]
-mod mac_notify;
-pub mod lifecycle;
-#[cfg(target_os = "macos")]
 mod mac_lifecycle;
+#[cfg(target_os = "macos")]
+mod mac_notify;
 pub mod notify;
+pub mod screen;
 pub mod shell;
 pub mod sound;
 pub mod taskbar;
 pub mod timers;
 pub mod webview;
-pub mod screen;
 #[cfg(windows)]
 mod win;
 #[cfg(windows)]

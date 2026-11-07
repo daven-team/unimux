@@ -8,10 +8,10 @@
 mod channel_bench;
 mod commands;
 mod context;
+mod detached;
 #[cfg(feature = "test-bridge")]
 mod eval_bridge;
 mod file_drop;
-mod detached;
 mod ipc;
 mod lifecycle;
 mod mac_chrome;

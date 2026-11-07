@@ -289,7 +289,12 @@ impl Host for TauriHost {
         {
             builder = builder
                 .additional_browser_args(&windows::browser_args(ctx.overrides.debug_port))
-                .data_directory(ctx.data_dir.join("webview2"));
+                .data_directory(windows::webview_dir(&ctx));
+        }
+        // macOS: hidden title bar with 1.1.4's traffic lights for detached windows, no WebKit throttling (W2).
+        #[cfg(target_os = "macos")]
+        {
+            builder = crate::mac_chrome::apply(builder, crate::mac_chrome::WindowKind::Detached);
         }
         if self.offscreen {
             let i = index as f64;
@@ -310,6 +315,9 @@ impl Host for TauriHost {
         windows::apply_webview_settings(&window);
         windows::watch_window_state(&window, ctx.clone());
         windows::forget_on_destroy(&window, ctx.clone());
+        // OS file drops (W3) and the renderer crash / hang handling (W6; detached windows always reload).
+        crate::file_drop::install(&window, ctx.clone());
+        crate::lifecycle::watch_renderer(&window, &ctx);
         if !self.offscreen {
             let physical = self.screen().rect_to_physical(&to_platform(&bounds));
             Self::place_physical(&window, &physical);
