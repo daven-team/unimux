@@ -53,6 +53,9 @@ pub struct UpdateService {
     committed: AtomicBool,
     gate: Mutex<Option<Arc<GateWindow>>>,
     staged: Mutex<Option<String>>,
+    /// One staging of the runtime copy at a time: the pre-stage and a hand-over of this process share the staging folder
+    /// (`runtime-<ver>.partial-<pid>`), and the hand-over must not remove the copy the warm-up start still runs from.
+    stage_lock: Arc<Mutex<()>>,
     started: AtomicBool,
     busy: Mutex<Vec<BusyProbe>>,
 }
@@ -115,6 +118,7 @@ impl UpdateService {
                 committed: AtomicBool::new(false),
                 gate: Mutex::new(None),
                 staged: Mutex::new(None),
+                stage_lock: Arc::new(Mutex::new(())),
                 started: AtomicBool::new(false),
                 busy: Mutex::new(Vec::new()),
             }
@@ -140,8 +144,10 @@ impl UpdateService {
             *staged = Some(version.clone());
         }
         let crash = self.ctx().map(|c| c.crash.clone());
+        let lock = self.stage_lock.clone();
         tauri::async_runtime::spawn_blocking(move || {
             let Ok(exe) = std::env::current_exe() else { return };
+            let _staging = lock.lock();
             match uw::prestage(&exe, &uw::updater_root(), &version) {
                 Ok(p) => {
                     if let Some(c) = &crash {
@@ -284,7 +290,12 @@ impl UpdateService {
             webview_dir: None,
         };
         let started = Instant::now();
-        let result = tauri::async_runtime::spawn_blocking(move || uw::hand_over(&hand)).await;
+        let lock = self.stage_lock.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            let _staging = lock.lock();
+            uw::hand_over(&hand)
+        })
+        .await;
         let handed = match result {
             Ok(Ok(handed)) => handed,
             Ok(Err(e)) => {
@@ -400,6 +411,19 @@ fn gate_options(skip_version: Option<String>) -> GateOptions {
     GateOptions { skip_version, timings }
 }
 
+/// The hidden gate window goes once the main window's page is up (see [`GateWindow::hide`]); at most 30 s later anyway.
+fn dispose_after_main(ctx: &Arc<AppContext>, window: Arc<GateWindow>) {
+    let ctx = ctx.clone();
+    tauri::async_runtime::spawn(async move {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !ctx.main_shown.load(Ordering::SeqCst) && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        window.dispose();
+    });
+}
+
 /// `runUpdateGate`: decides whether the startup check runs before the main window. False: start the app now (nothing was
 /// started). True: the gate runs and calls `start_app` when the current version is to start (it never does when the
 /// installer took over).
@@ -448,7 +472,8 @@ pub fn startup_gate(ctx: &Arc<AppContext>, app: &AppHandle, start_app: Arc<dyn F
         let window = GateWindow::new(&ctx, app.clone(), texts, handle.clone());
         *svc.gate.lock() = Some(window.clone());
         let handed = Arc::new(Mutex::new(None));
-        let deps = Arc::new(AppGateDeps { svc: svc.clone(), window, remember_failure: true, handed: handed.clone() });
+        let deps =
+            Arc::new(AppGateDeps { svc: svc.clone(), window: window.clone(), remember_failure: true, handed: handed.clone() });
         let result = gate::run_startup_gate(deps, handle, gate_options(skip)).await;
         *svc.gate.lock() = None;
         ctx.mark("update-gate-done");
@@ -456,6 +481,7 @@ pub fn startup_gate(ctx: &Arc<AppContext>, app: &AppHandle, start_app: Arc<dyn F
             ctx.lifecycle.set_gating(false);
             svc.ui.release(UpdateUiOwner::StartupGate);
             start_app();
+            dispose_after_main(&ctx, window);
             return;
         }
         // After a hand-over the app is quitting for the installer. If it has not quit this long after, it starts normally
@@ -476,6 +502,7 @@ pub fn startup_gate(ctx: &Arc<AppContext>, app: &AppHandle, start_app: Arc<dyn F
         ctx.lifecycle.set_gating(false);
         svc.ui.release(UpdateUiOwner::StartupGate);
         start_app();
+        dispose_after_main(&ctx, window);
     });
     true
 }
@@ -500,7 +527,7 @@ pub fn open_install_window(ctx: &Arc<AppContext>) {
         *svc.gate.lock() = Some(window.clone());
         let deps = Arc::new(AppGateDeps {
             svc: svc.clone(),
-            window,
+            window: window.clone(),
             // The failure is shown by the status bar (with a retry); nothing is remembered for the next start.
             remember_failure: false,
             handed: Arc::new(Mutex::new(None)),
@@ -508,6 +535,8 @@ pub fn open_install_window(ctx: &Arc<AppContext>) {
         let result = gate::run_install_window(deps, handle, gate_options(None), version).await;
         *svc.gate.lock() = None;
         if result != GateResult::Installing {
+            // The main window keeps the WebView2 browser process: the window can go at once.
+            window.dispose();
             svc.ui.release(UpdateUiOwner::InstallWindow);
         }
     });

@@ -106,6 +106,8 @@ pub struct GateWindow {
     created: AtomicBool,
     /// True while `hide()` destroys the window itself, so its Destroyed event is not mistaken for a crash.
     closing: AtomicBool,
+    /// Hidden by the flow, kept until [`GateWindow::dispose`].
+    hidden: AtomicBool,
     me: std::sync::Weak<GateWindow>,
 }
 
@@ -121,6 +123,7 @@ impl GateWindow {
             loaded: AtomicBool::new(false),
             created: AtomicBool::new(false),
             closing: AtomicBool::new(false),
+            hidden: AtomicBool::new(false),
             me: me.clone(),
         })
     }
@@ -146,6 +149,12 @@ impl GateWindow {
         *self.latest.lock() = Some(gate_state(view, &self.texts, &self.current));
         if self.created.swap(true, Ordering::SeqCst) {
             self.push();
+            if self.hidden.swap(false, Ordering::SeqCst)
+                && self.loaded.load(Ordering::SeqCst)
+                && let Some(window) = self.window()
+            {
+                reveal(self, &window);
+            }
             return;
         }
         if let Some(me) = self.me.upgrade()
@@ -158,7 +167,18 @@ impl GateWindow {
         }
     }
 
+    /// Takes the window off the screen. It is destroyed only by [`GateWindow::dispose`], once the main window exists: closing
+    /// the last webview of the process lets the WebView2 browser process shut down, and a main window created while it does
+    /// never got its page (seen in the U1 harness). Electron kept its browser process; this keeps it too.
     pub fn hide(&self) {
+        self.hidden.store(true, Ordering::SeqCst);
+        if let Some(window) = self.window() {
+            hide_window(&window);
+        }
+    }
+
+    /// Destroys the window (after the main window was created, or when the process ends anyway).
+    pub fn dispose(&self) {
         self.closing.store(true, Ordering::SeqCst);
         if let Some(window) = self.window() {
             let _ = window.destroy();
@@ -192,6 +212,24 @@ impl GateWindow {
             self.handle.install();
         }
     }
+}
+
+/// tao does not know about a window shown with SW_SHOWNOACTIVATE (its visible flag stays false), so its own hide() could do
+/// nothing; hide through the handle.
+#[cfg(windows)]
+fn hide_window(window: &WebviewWindow) {
+    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
+    if let Ok(hwnd) = window.hwnd() {
+        // SAFETY: the window's own handle.
+        unsafe {
+            let _ = ShowWindow(windows::Win32::Foundation::HWND(hwnd.0), SW_HIDE);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn hide_window(window: &WebviewWindow) {
+    let _ = window.hide();
 }
 
 /// Whether a full-screen app (a game, a presentation) is in front: the window then appears without taking the focus.
@@ -247,7 +285,7 @@ fn create(gate: &Arc<GateWindow>) -> tauri::Result<()> {
             if payload.event() == PageLoadEvent::Finished {
                 page.loaded.store(true, Ordering::SeqCst);
                 page.push();
-                if window.is_visible().ok() != Some(true) {
+                if !page.hidden.load(Ordering::SeqCst) && window.is_visible().ok() != Some(true) {
                     reveal(&page, &window);
                 }
             }

@@ -104,9 +104,11 @@ console.log(`scratch: ${scratch}`);
 
 /** Every process whose exe or command line is inside `dir` (the apps, the update window, the installer, WebView2 children). */
 function processesInside(dir) {
-  const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | Select-Object ProcessId,Name,ExecutablePath,CommandLine | ConvertTo-Json -Compress'], { encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
-  const needle = dir.toLowerCase();
-  return JSON.parse(out).filter((p) => `${p.ExecutablePath ?? ''} ${p.CommandLine ?? ''}`.toLowerCase().includes(needle));
+  // Matched inside PowerShell: some command lines of other processes hold control characters that break a JSON dump.
+  const needle = dir.toLowerCase().replaceAll("'", "''");
+  const script = `Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and ("$($_.ExecutablePath) $($_.CommandLine)").ToLower().Contains('${needle}') } | ForEach-Object { "$($_.ProcessId)\t$($_.Name)" }`;
+  const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+  return out.split(/\r?\n/).filter(Boolean).map((l) => { const [pid, name] = l.split('\t'); return { ProcessId: Number(pid), Name: name }; }).filter((p) => p.ProcessId && p.ProcessId !== process.pid);
 }
 function killInside(dir) {
   for (const p of processesInside(dir)) { try { execFileSync('taskkill', ['/PID', String(p.ProcessId), '/T', '/F'], { stdio: 'ignore' }); } catch { /* gone */ } }
@@ -162,8 +164,26 @@ async function devtoolsTargets(port) {
   try { return await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); } catch { return []; }
 }
 
-/** A DevTools client for the page whose URL matches. */
+/**
+ * A DevTools client for the page whose URL matches that survives a reload of the page (the first start loads the main page
+ * twice: W3's localStorage import): an evaluation on a closed connection attaches again and retries.
+ */
 async function attach(port, match, timeoutMs) {
+  let conn = await attachOnce(port, match, timeoutMs);
+  const evaluate = async (expression) => {
+    for (let attempt = 0; ; attempt++) {
+      try { return await conn.evaluate(expression); } catch (error) {
+        if (attempt >= 20 || !/closed|context|destroyed/i.test(error.message)) throw error;
+        await sleep(500);
+        try { conn.close(); } catch { /* already closed */ }
+        conn = await attachOnce(port, match, 10000).catch(() => conn);
+      }
+    }
+  };
+  return { evaluate, close: () => conn.close() };
+}
+
+async function attachOnce(port, match, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const target = (await devtoolsTargets(port)).find((t) => t.type === 'page' && match.test(t.url));
@@ -217,6 +237,10 @@ async function launch({ dir, installDir, dataDir }) {
 }
 
 const exited = (child) => child.exitCode !== null;
+/** The end of crash.log of a failed case. */
+function dumpLog(p) {
+  try { console.log(readFileSync(join(p.dataDir, 'crash.log'), 'utf8').split('\n').slice(-15).join('\n')); } catch { /* no log */ }
+}
 
 async function runGate() {
   currentCase = 'gate';
@@ -240,6 +264,7 @@ async function runGate() {
     const ready = await until(() => existsSync(join(p.dataDir, 'update', 'ready')) && readFileSync(join(p.dataDir, 'update', 'ready'), 'utf8'), 180000, 'update/ready from the new app');
     check('the new version starts and writes update/ready', ready.trim() === PAYLOAD_VERSION, ready);
     const main = await attach(port, MAIN_PAGE, 60000);
+    await until(() => main.evaluate('!!window.mc?.getUpdate'), 30000, 'window.mc');
     const running = await until(() => main.evaluate('window.mc.getUpdate()'), 30000, 'update:get of the new app');
     check('the running app is the new version', running.currentVersion === PAYLOAD_VERSION, running.currentVersion);
     await until(() => !existsSync(join(p.dataDir, 'update-gate.json')), 15000, 'update-gate.json cleared').catch(() => {});
@@ -248,6 +273,7 @@ async function runGate() {
     main.close();
   } catch (error) {
     check('gate flow', false, error.message);
+    dumpLog(p);
   } finally {
     killInside(p.dir);
   }
@@ -259,6 +285,7 @@ async function runRunning() {
   const { child, port } = await launch(p);
   try {
     const main = await attach(port, MAIN_PAGE, 60000);
+    await until(() => main.evaluate('!!window.mc?.getUpdate'), 30000, 'window.mc');
     check('manual mode: the main window starts without a gate', !(await devtoolsTargets(port)).some((t) => GATE_PAGE.test(t.url)));
     await main.evaluate('window.mc.checkUpdates()');
     const ready = await until(async () => { const s = await main.evaluate('window.mc.getUpdate()'); return s.status === 'ready' ? s : (s.status === 'error' ? Promise.reject(new Error(s.message)) : null); }, 90000, 'status ready');
@@ -266,7 +293,7 @@ async function runRunning() {
     // A state change right before the install: the wind-down must save it.
     const snap = await main.evaluate('window.mc.loadSnapshot()');
     const next = JSON.parse(JSON.stringify(snap.state));
-    next.settings.scrollbackLines = 4321;
+    next.settings.scrollbackLines = 25000;
     await main.evaluate(`window.mc.applyStateEdit(${JSON.stringify({ id: 'u1-edit', base: snap.state, next })})`);
     await main.evaluate('window.mc.installUpdate()');
     const gate = await attach(port, GATE_PAGE, 30000);
@@ -274,14 +301,15 @@ async function runRunning() {
     check('the status bar install opens the update window', !!shown.stage, JSON.stringify(shown));
     await until(() => exited(child), 60000, 'the old app to exit');
     const saved = json(join(p.dataDir, 'state.json'));
-    check('state saved before install', saved?.settings?.scrollbackLines === 4321, String(saved?.settings?.scrollbackLines));
+    check('state saved before install', saved?.settings?.scrollbackLines === 25000, String(saved?.settings?.scrollbackLines));
     const ready2 = await until(() => existsSync(join(p.dataDir, 'update', 'ready')) && readFileSync(join(p.dataDir, 'update', 'ready'), 'utf8'), 180000, 'update/ready');
     check('the new version starts after the install', ready2.trim() === PAYLOAD_VERSION, ready2);
     const after = json(join(p.dataDir, 'state.json'));
-    check('the new version keeps the saved state', after?.settings?.scrollbackLines === 4321);
+    check('the new version keeps the saved state', after?.settings?.scrollbackLines === 25000);
     main.close();
   } catch (error) {
     check('running flow', false, error.message);
+    dumpLog(p);
   } finally {
     killInside(p.dir);
   }
@@ -294,6 +322,7 @@ async function runCorrupt() {
   const { child, port, updaterRoot } = await launch(p);
   try {
     const main = await attach(port, MAIN_PAGE, 60000);
+    await until(() => main.evaluate('!!window.mc?.getUpdate'), 30000, 'window.mc');
     await main.evaluate('window.mc.checkUpdates()');
     const state = await until(async () => { const s = await main.evaluate('window.mc.getUpdate()'); return s.status === 'error' || s.status === 'ready' ? s : null; }, 90000, 'the download to end');
     check('a corrupt .sig shows the error state', state.status === 'error' && /weryfikacji/.test(state.message ?? '') && state.version === PAYLOAD_VERSION, JSON.stringify(state));
@@ -306,6 +335,7 @@ async function runCorrupt() {
     main.close();
   } catch (error) {
     check('corrupt flow', false, error.message);
+    dumpLog(p);
   } finally {
     killInside(p.dir);
     feedSig = goodSig;
@@ -324,12 +354,14 @@ async function runGateFail() {
     const failed = await until(async () => { const s = await stageOf(gate); return s?.stage === 'failed' ? s : null; }, 60000, 'the failure notice').catch(() => null);
     check('the gate shows the failure', !!failed, JSON.stringify(failed));
     const main = await attach(port, MAIN_PAGE, 30000);
+    await until(() => main.evaluate('!!window.mc?.getUpdate'), 30000, 'window.mc');
     check('the current version starts after the failure', (await main.evaluate('window.mc.getUpdate()')).currentVersion === OLD_VERSION && !exited(child));
     const record = json(join(p.dataDir, 'update-gate.json'));
     check('update-gate.json remembers the failed version', record?.version === PAYLOAD_VERSION, JSON.stringify(record));
     main.close();
   } catch (error) {
     check('gate failure flow', false, error.message);
+    dumpLog(p);
   } finally {
     killInside(p.dir);
     feedSig = goodSig;
@@ -344,7 +376,10 @@ currentCase = 'all';
 check('the real profile is untouched', JSON.stringify(realProfileMarkers()) === JSON.stringify(markersBefore));
 const realUpdaterAfter = existsSync(realUpdater) ? readdirSync(realUpdater).sort().join(',') : '(none)';
 check('the real %LOCALAPPDATA%\\unimux-updater is untouched', realUpdaterAfter === realUpdaterBefore, `${realUpdaterBefore} -> ${realUpdaterAfter}`);
-check('no process left in the scratch folder', processesInside(scratch).length === 0);
+// WebView2 children end a moment after their app.
+let left = processesInside(scratch);
+for (let i = 0; i < 20 && left.length; i++) { killInside(scratch); await sleep(500); left = processesInside(scratch); }
+check('no process left in the scratch folder', left.length === 0, left.map((p) => `${p.ProcessId} ${p.Name}`).join(', '));
 if (!keep) removeScratch(scratch);
 const failedCount = results.filter((r) => !r.ok).length;
 console.log(`\n${results.length - failedCount}/${results.length} passed${keep ? `; scratch kept: ${scratch}` : ''}`);
