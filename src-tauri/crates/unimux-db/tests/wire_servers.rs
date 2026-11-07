@@ -13,13 +13,14 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::net::{TcpListener, TcpStream};
 use unimux_core::js_json::write_string;
-use unimux_db::wire::mysql::{MyColumn, MyConfig, MyConn, MyResult};
+use unimux_db::mysql::{MyColumn, MyConn, MyError, MyLogin, MyResult};
 use unimux_db::wire::pg::{PgConfig, PgConn, PgStatement, PgWireError, Protocol, parse_tag, send_cancel};
 use unimux_db::wire::redis::{
     CallError, REPLY_NODES, Raw, ReconnectEvent, RedisConn, connect_sequence, reconnect, reconnect_sequence, reply,
 };
 use unimux_db::wire::tap::tap;
 use unimux_db::wire::value::{DbValue, head_json, node_utf8, row_json, server_text, text_value, to_value, utf16_len};
+use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, Deserialize)]
 struct Server {
@@ -439,15 +440,12 @@ async fn pg_cancel_with_3_0_and_3_2_keys() {
 
 // ── MySQL / MariaDB ──
 
-async fn my(
-    s: &Server,
-    user: &str,
-    password: &str,
-    database: Option<&str>,
-) -> Result<MyConn<TcpStream>, unimux_db::wire::mysql::MyWireError> {
-    let stream = TcpStream::connect((s.host.as_str(), s.port)).await?;
-    stream.set_nodelay(true)?;
-    MyConn::connect(stream, &MyConfig { user: user.into(), password: password.into(), database: database.map(Into::into) }).await
+async fn my(s: &Server, user: &str, password: &str, database: Option<&str>) -> Result<MyConn<TcpStream>, MyError> {
+    // D7: the production client (unimux_db::mysql) replaced the SP9 spike connection here
+    let stream = unimux_db::mysql::connect_tcp(&s.host, s.port).await?;
+    let login =
+        MyLogin { user: user.into(), password: Zeroizing::new(password.into()), database: database.unwrap_or_default().into() };
+    MyConn::connect(stream, &login, None).await
 }
 
 /// `firstKeyword` (src/shared/dbSql.ts) for the corpus statements (no leading comments there).
@@ -615,7 +613,7 @@ async fn mysql_values_match_mysql2() {
                 continue;
             }
             let sql = q["sql"].as_str().unwrap();
-            let results = c.query(sql).await.unwrap();
+            let results = c.query_all(sql).await.unwrap();
             lines.push(
                 J::Obj(vec![("id", J::s(q["id"].as_str().unwrap())), ("statements", J::Arr(my_statements(sql, &results)))])
                     .text(),
@@ -634,14 +632,14 @@ async fn mysql_logins_caching_sha2_full_and_fast() {
         println!("{} admin login: {:?}", s.label, admin.login);
         if s.kind == "mysql" {
             admin
-                .query("CREATE USER IF NOT EXISTS 'sp9_rust'@'%' IDENTIFIED WITH caching_sha2_password BY 'sha2-pw'")
+                .query_all("CREATE USER IF NOT EXISTS 'sp9_rust'@'%' IDENTIFIED WITH caching_sha2_password BY 'sha2-pw'")
                 .await
                 .unwrap();
-            admin.query("FLUSH PRIVILEGES").await.unwrap();
+            admin.query_all("FLUSH PRIVILEGES").await.unwrap();
             let t = Instant::now();
             let mut first = my(&s, "sp9_rust", "sha2-pw", None).await.unwrap();
             let full_ms = t.elapsed().as_millis();
-            let who = first.query("SELECT CURRENT_USER()").await.unwrap();
+            let who = first.query_all("SELECT CURRENT_USER()").await.unwrap();
             let t = Instant::now();
             let second = my(&s, "sp9_rust", "sha2-pw", None).await.unwrap();
             let fast_ms = t.elapsed().as_millis();
@@ -651,12 +649,12 @@ async fn mysql_logins_caching_sha2_full_and_fast() {
             assert_eq!(second.login.cache_state, Some(3));
             assert_eq!(who[0].values(), vec![vec![DbValue::Text("sp9_rust@%".into())]]);
         } else {
-            admin.query("CREATE USER IF NOT EXISTS 'sp9_native'@'%' IDENTIFIED BY 'native-pw'").await.unwrap();
+            admin.query_all("CREATE USER IF NOT EXISTS 'sp9_native'@'%' IDENTIFIED BY 'native-pw'").await.unwrap();
             let c = my(&s, "sp9_native", "native-pw", None).await.unwrap();
             println!("{}: native {:?}", s.label, c.login);
         }
         match my(&s, &s.user, "wrong", None).await {
-            Err(unimux_db::wire::mysql::MyWireError::Server(e)) => {
+            Err(MyError::Server(e)) => {
                 println!("{}: wrong password -> {} ({}) {}", s.label, e.code, e.state, e.message);
                 assert_eq!(e.code, 1045);
             }

@@ -1,27 +1,15 @@
-//! SP9 spike: a minimal MySQL / MariaDB wire client over any `AsyncRead + AsyncWrite` stream, built on mysql_common 0.38.2,
-//! to measure value fidelity and the login paths against mysql2 3.24 (what 1.1.4 runs with typeCast off). D7 builds the
-//! real client; the findings are in docs/tauri/spikes/SP9.md.
-//!
-//! From mysql_common: the initial handshake parse, HandshakeResponse41 (collation 45 utf8mb4_general_ci, the same number
-//! mysql2 sends for `charset: 'utf8mb4'`), the auth plugins as a state machine (`AuthProc`: mysql_native_password,
-//! caching_sha2_password fast and full with the RSA public key request, sha256_password), AuthSwitchRequest, OK / EOF / ERR.
-//! Own code: packet framing (3-byte length + sequence id, 16 MiB continuation), COM_QUERY (with the empty query-attribute
-//! prefix when CLIENT_QUERY_ATTRIBUTES is on, like mysql2), and the column definition parser, because mysql_common's
-//! `Column` does not read MariaDB's extended metadata block (uuid / inet4 / inet6 / json names that 1.1.4 uses).
+//! The MySQL / MariaDB wire pieces SP9 measured against mysql2 3.24 (what 1.1.4 runs with typeCast off), shared with the
+//! production client in [`crate::mysql`] (D7, which replaced the spike's own connection): mysql2's client flags, the
+//! column definition parser (mysql_common's `Column` does not read MariaDB's extended metadata block: uuid / inet4 /
+//! inet6 / json names that 1.1.4 uses; names decoded in the column charset), the session-state charset tracking, the
+//! LOAD DATA LOCAL message, and the result form the SP9 goldens are written from. The findings are in
+//! docs/tauri/spikes/SP9.md.
 
 use std::io;
 
-use mysql_common::auth::plugins::{AuthProc, ChallengeResponsePlugin, Context, Response};
-use mysql_common::constants::{CapabilityFlags, MariadbCapabilities, StatusFlags};
-use mysql_common::io::ParseBuf;
-use mysql_common::packets::{
-    AuthPlugin, AuthSwitchRequest, CommonOkPacket, ErrPacket, HandshakePacket, HandshakeResponse, OkPacket, OkPacketDeserializer,
-    OldEofPacket,
-};
-use mysql_common::proto::MySerialize;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use mysql_common::constants::CapabilityFlags;
 
-use super::mycharset::{charset_of_name, decode, enc_of, encode, name_enc};
+use super::mycharset::{decode, name_enc};
 use super::value::{DbValue, node_utf8, to_value};
 
 /// The flags mysql2 3.24 sends by default (ConnectionConfig.getDefaultFlags with multipleStatements off).
@@ -46,46 +34,13 @@ pub fn mysql2_default_flags() -> CapabilityFlags {
         | CapabilityFlags::CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA
 }
 
-#[derive(Debug, Clone)]
-pub struct MyConfig {
-    pub user: String,
-    pub password: String,
-    pub database: Option<String>,
-}
-
+/// The server's ERR packet: error number, SQLSTATE ('' when the packet has none) and message (decoded like Node).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MyServerError {
     pub code: u16,
     pub state: String,
     pub message: String,
 }
-
-#[derive(Debug)]
-pub enum MyWireError {
-    Io(io::Error),
-    Server(MyServerError),
-    Auth(String),
-    Protocol(String),
-}
-
-impl From<io::Error> for MyWireError {
-    fn from(e: io::Error) -> Self {
-        MyWireError::Io(e)
-    }
-}
-
-impl std::fmt::Display for MyWireError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MyWireError::Io(e) => write!(f, "io: {e}"),
-            MyWireError::Server(e) => write!(f, "server {} ({}): {}", e.code, e.state, e.message),
-            MyWireError::Auth(s) => write!(f, "auth: {s}"),
-            MyWireError::Protocol(s) => write!(f, "protocol: {s}"),
-        }
-    }
-}
-
-impl std::error::Error for MyWireError {}
 
 /// A column definition (ColumnDefinition41) with MariaDB's extended metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -163,31 +118,7 @@ impl MyResult {
     }
 }
 
-struct Ctx<'a> {
-    pass: &'a [u8],
-    scramble: &'a [u8],
-    tls: bool,
-}
-
-impl Context for &Ctx<'_> {
-    fn pass(&self) -> &[u8] {
-        self.pass
-    }
-    fn is_ipc_transport(&self) -> bool {
-        false
-    }
-    fn is_tls_transport(&self) -> bool {
-        self.tls
-    }
-    fn scramble(&self) -> &[u8] {
-        self.scramble
-    }
-    fn server_key_pem(&self) -> Option<&[u8]> {
-        None
-    }
-}
-
-/// How the login went (for the SP9 measurements).
+/// How the login went (the SP9 measurements and the client's tests).
 #[derive(Debug, Clone, Default)]
 pub struct LoginTrace {
     pub first_plugin: String,
@@ -195,21 +126,6 @@ pub struct LoginTrace {
     /// caching_sha2_password: 3 = fast path (cached), 4 = full authentication.
     pub cache_state: Option<u8>,
     pub requested_public_key: bool,
-}
-
-pub struct MyConn<S> {
-    stream: S,
-    buf: Vec<u8>,
-    seq: u8,
-    pub caps: CapabilityFlags,
-    pub server_caps: CapabilityFlags,
-    pub mariadb_ext: MariadbCapabilities,
-    pub server_version: String,
-    pub connection_id: u32,
-    pub login: LoginTrace,
-    /// mysql2's `config.charsetNumber`: 45 for `charset: 'utf8mb4'` (what 1.1.4 passes), then whatever
-    /// `character_set_client` the server's session tracking reports. COM_QUERY text is encoded in it.
-    pub client_charset: u16,
 }
 
 fn lenenc(b: &mut &[u8]) -> io::Result<Option<u64>> {
@@ -327,276 +243,6 @@ pub fn parse_text_row(mut b: &[u8], columns: usize) -> io::Result<Vec<Option<Vec
     }
     Ok(row)
 }
-
-impl<S: AsyncRead + AsyncWrite + Unpin> MyConn<S> {
-    async fn read_packet(&mut self) -> io::Result<Vec<u8>> {
-        let mut payload = Vec::new();
-        loop {
-            while self.buf.len() < 4 {
-                self.fill().await?;
-            }
-            let len = usize::from(self.buf[0]) | usize::from(self.buf[1]) << 8 | usize::from(self.buf[2]) << 16;
-            while self.buf.len() < 4 + len {
-                self.fill().await?;
-            }
-            self.seq = self.buf[3].wrapping_add(1);
-            payload.extend_from_slice(&self.buf[4..4 + len]);
-            self.buf.drain(..4 + len);
-            if len < 0xff_ffff {
-                return Ok(payload);
-            }
-        }
-    }
-
-    async fn fill(&mut self) -> io::Result<()> {
-        let mut chunk = [0u8; 16 * 1024];
-        let n = self.stream.read(&mut chunk).await?;
-        if n == 0 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed"));
-        }
-        self.buf.extend_from_slice(&chunk[..n]);
-        Ok(())
-    }
-
-    async fn write_packet(&mut self, payload: &[u8]) -> io::Result<()> {
-        let mut out = Vec::with_capacity(payload.len() + 8);
-        let mut rest = payload;
-        loop {
-            let n = rest.len().min(0xff_ffff);
-            out.extend_from_slice(&[(n & 0xff) as u8, (n >> 8 & 0xff) as u8, (n >> 16) as u8, self.seq]);
-            self.seq = self.seq.wrapping_add(1);
-            out.extend_from_slice(&rest[..n]);
-            rest = &rest[n..];
-            if n < 0xff_ffff {
-                break;
-            }
-        }
-        self.stream.write_all(&out).await?;
-        self.stream.flush().await
-    }
-
-    fn server_error(&self, p: &[u8]) -> MyWireError {
-        match ParseBuf(p).parse::<ErrPacket>(self.caps) {
-            Ok(ErrPacket::Error(e)) => MyWireError::Server(MyServerError {
-                code: e.error_code(),
-                state: e.sql_state_ref().map(|s| s.as_str().into_owned()).unwrap_or_default(),
-                message: node_utf8(e.message_ref()),
-            }),
-            Ok(ErrPacket::Progress(_)) => MyWireError::Protocol("progress report".into()),
-            Err(e) => MyWireError::Io(e),
-        }
-    }
-
-    pub async fn connect(stream: S, cfg: &MyConfig) -> Result<Self, MyWireError> {
-        let mut c = MyConn {
-            stream,
-            buf: Vec::new(),
-            seq: 0,
-            caps: CapabilityFlags::empty(),
-            server_caps: CapabilityFlags::empty(),
-            mariadb_ext: MariadbCapabilities::empty(),
-            server_version: String::new(),
-            connection_id: 0,
-            login: LoginTrace::default(),
-            client_charset: 45,
-        };
-        let hello = c.read_packet().await?;
-        if hello.first() == Some(&0xff) {
-            return Err(c.server_error(&hello));
-        }
-        let hs: HandshakePacket = ParseBuf(&hello).parse(())?;
-        c.server_caps = hs.capabilities();
-        c.server_version = node_utf8(hs.server_version_ref());
-        c.connection_id = hs.connection_id();
-        let mut caps = mysql2_default_flags();
-        caps |= c.server_caps & CapabilityFlags::MULTI_FACTOR_AUTHENTICATION;
-        let mut ext = MariadbCapabilities::empty();
-        // mysql2: a MariaDB server offering extended metadata gets it asked for, which needs CLIENT_MYSQL (LONG_PASSWORD) off
-        if hs.mariadb_ext_capabilities().contains(MariadbCapabilities::MARIADB_CLIENT_EXTENDED_METADATA) {
-            caps.remove(CapabilityFlags::CLIENT_LONG_PASSWORD);
-            ext |= MariadbCapabilities::MARIADB_CLIENT_EXTENDED_METADATA;
-        }
-        let nonce = hs.nonce();
-        let plugin = hs.auth_plugin().map(|p| p.into_owned()).unwrap_or(AuthPlugin::MysqlNativePassword);
-        c.login.first_plugin = String::from_utf8_lossy(plugin.as_bytes()).into_owned();
-        let mut proc = AuthProc::init(&plugin).map_err(|e| MyWireError::Auth(e.to_string()))?;
-        let mut scramble = nonce.clone();
-        let first = {
-            let ctx = Ctx { pass: cfg.password.as_bytes(), scramble: &scramble, tls: false };
-            proc.run(&ctx, &nonce).map_err(|e| MyWireError::Auth(e.to_string()))?
-        };
-        let attrs = [
-            ("_client_name".to_owned(), "unimux".to_owned()),
-            ("_client_version".to_owned(), env!("CARGO_PKG_VERSION").to_owned()),
-        ];
-        let resp = HandshakeResponse::new(
-            first.data().map(<[u8]>::to_vec),
-            hs.server_version_parsed().unwrap_or((8, 0, 0)),
-            Some(cfg.user.as_bytes().to_vec()),
-            cfg.database.as_ref().map(|d| d.as_bytes().to_vec()),
-            Some(plugin.clone()),
-            caps,
-            Some(attrs.into_iter().collect()),
-            16 * 1024 * 1024,
-        )
-        .with_mariadb_ext_capabilities(ext);
-        c.caps = resp.capabilities();
-        c.mariadb_ext = ext;
-        let mut payload = Vec::new();
-        resp.serialize(&mut payload);
-        c.write_packet(&payload).await?;
-        loop {
-            let p = c.read_packet().await?;
-            match p.first() {
-                Some(0x00) => return Ok(c),
-                Some(0xff) => return Err(c.server_error(&p)),
-                Some(0xfe) => {
-                    let sw: AuthSwitchRequest = ParseBuf(&p).parse(())?;
-                    let plugin = sw.auth_plugin().into_owned();
-                    let data = sw.plugin_data();
-                    let data = data.strip_suffix(&[0]).unwrap_or(data).to_vec();
-                    c.login.switched_to = Some(String::from_utf8_lossy(plugin.as_bytes()).into_owned());
-                    scramble = data.clone();
-                    proc = AuthProc::init(&plugin).map_err(|e| MyWireError::Auth(e.to_string()))?;
-                    let ctx = Ctx { pass: cfg.password.as_bytes(), scramble: &scramble, tls: false };
-                    let r = proc.run(&ctx, &data).map_err(|e| MyWireError::Auth(e.to_string()))?;
-                    c.send_auth(r).await?;
-                }
-                Some(0x01) => {
-                    let data = p[1..].to_vec();
-                    if data.len() == 1 {
-                        c.login.cache_state = Some(data[0]);
-                    }
-                    let ctx = Ctx { pass: cfg.password.as_bytes(), scramble: &scramble, tls: false };
-                    let r = proc.run(&ctx, &data).map_err(|e| MyWireError::Auth(e.to_string()))?;
-                    if r.data() == Some(&[0x02][..]) {
-                        c.login.requested_public_key = true;
-                    }
-                    c.send_auth(r).await?;
-                }
-                _ => return Err(MyWireError::Protocol(format!("unexpected login packet {:?}", p.first()))),
-            }
-        }
-    }
-
-    async fn send_auth(&mut self, r: Response) -> io::Result<()> {
-        match r.data() {
-            Some(d) => self.write_packet(d).await,
-            None => Ok(()),
-        }
-    }
-
-    fn mariadb_extended(&self) -> bool {
-        self.mariadb_ext.contains(MariadbCapabilities::MARIADB_CLIENT_EXTENDED_METADATA)
-    }
-
-    /// COM_QUERY with text results; every result of the statement (CALL gives several). The text is encoded in the
-    /// session's client charset like mysql2 (`client_charset`).
-    pub async fn query(&mut self, sql: &str) -> Result<Vec<MyResult>, MyWireError> {
-        let text = match encode(sql, enc_of(self.client_charset)) {
-            Ok(t) => t,
-            Err(name) => {
-                return Err(MyWireError::Protocol(format!(
-                    "the spike does not encode queries in {name} (D7: iconv-lite tables)"
-                )));
-            }
-        };
-        self.seq = 0;
-        let mut payload = vec![0x03];
-        if (self.caps & self.server_caps).contains(CapabilityFlags::CLIENT_QUERY_ATTRIBUTES) {
-            // parameter_count 0, parameter_set_count 1 (what mysql2 writes with no attributes)
-            payload.extend_from_slice(&[0x00, 0x01]);
-        }
-        payload.extend_from_slice(&text);
-        self.write_packet(&payload).await?;
-        let mut results = Vec::new();
-        // LOAD DATA LOCAL INFILE: mysql2 without infileStreamFactory answers with an empty file and fails the statement
-        let mut infile: Option<String> = None;
-        loop {
-            let p = self.read_packet().await?;
-            let status = match p.first() {
-                Some(0x00) => {
-                    let ok: OkPacket = ParseBuf(&p).parse::<OkPacketDeserializer<CommonOkPacket>>(self.caps)?.into();
-                    if let Some(name) = ok.session_state_info_ref().and_then(tracked_client_charset)
-                        && let Some(n) = charset_of_name(&name)
-                    {
-                        self.client_charset = n;
-                    }
-                    if let Some(file) = infile.take() {
-                        // doneInsert: the error instead of the result
-                        results.push(MyResult::ClientError(local_infile_message(&file)));
-                        return Ok(results);
-                    }
-                    let status = ok.status_flags().bits();
-                    results.push(MyResult::Ok {
-                        affected_rows: ok.affected_rows(),
-                        last_insert_id: ok.last_insert_id(),
-                        status,
-                        warnings: ok.warnings(),
-                        info: ok.info_ref().map(node_utf8).unwrap_or_default(),
-                    });
-                    status
-                }
-                Some(0xff) => {
-                    match self.server_error(&p) {
-                        MyWireError::Server(e) => results.push(MyResult::Error(e)),
-                        other => return Err(other),
-                    }
-                    return Ok(results);
-                }
-                Some(0xfb) => {
-                    // the server's OK / ERR to the empty file follows
-                    infile = Some(node_utf8(&p[1..]));
-                    self.write_packet(&[]).await?;
-                    continue;
-                }
-                _ => {
-                    let mut b = &p[..];
-                    let n = lenenc(&mut b)?.unwrap_or(0) as usize;
-                    let mut columns = Vec::with_capacity(n);
-                    for _ in 0..n {
-                        let d = self.read_packet().await?;
-                        columns.push(parse_column(&d, self.mariadb_extended(), self.client_charset)?);
-                    }
-                    let eof = self.read_packet().await?;
-                    if eof.first() != Some(&0xfe) {
-                        return Err(MyWireError::Protocol("no EOF after the column definitions".into()));
-                    }
-                    let mut rows = Vec::new();
-                    let (status, warnings) = loop {
-                        let r = self.read_packet().await?;
-                        match r.first() {
-                            Some(0xfe) if r.len() < 9 => {
-                                let ok: OkPacket = ParseBuf(&r).parse::<OkPacketDeserializer<OldEofPacket>>(self.caps)?.into();
-                                break (ok.status_flags().bits(), ok.warnings());
-                            }
-                            Some(0xff) => {
-                                match self.server_error(&r) {
-                                    MyWireError::Server(e) => results.push(MyResult::Error(e)),
-                                    other => return Err(other),
-                                }
-                                return Ok(results);
-                            }
-                            _ => rows.push(parse_text_row(&r, n)?),
-                        }
-                    };
-                    results.push(MyResult::Set { columns, rows, status, warnings });
-                    status
-                }
-            };
-            if !StatusFlags::from_bits_retain(status).contains(StatusFlags::SERVER_MORE_RESULTS_EXISTS) {
-                return Ok(results);
-            }
-        }
-    }
-
-    pub async fn quit(mut self) -> io::Result<()> {
-        self.seq = 0;
-        self.write_packet(&[0x01]).await?;
-        self.stream.shutdown().await
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

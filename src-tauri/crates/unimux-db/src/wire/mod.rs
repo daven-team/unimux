@@ -7,5 +7,6 @@ pub mod mycharset;
 pub mod mysql;
 pub mod pg;
 pub mod redis;
+pub mod sbcs_tables;
 pub mod tap;
 pub mod value;

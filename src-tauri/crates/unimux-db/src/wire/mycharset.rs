@@ -6,10 +6,15 @@
 //! them as UTF-8 whatever the session says.
 //!
 //! Done here like Node: utf8, latin1 / binary (one byte per UTF-16 unit, the low byte), ascii (Node writes the low byte and
-//! reads `byte & 0x7f`), ucs2 / utf16-le, and cesu8 (iconv-lite: every UTF-16 unit as its own 1-3 byte sequence). The other
-//! encodings mysql2 hands to iconv-lite (big5, cp1250, koi8r, sjis ...) are `Other`: the spike refuses to send a query in
-//! them and decodes such names as UTF-8 (D7 adds iconv-lite's tables; encoding_rs differs from iconv-lite at unmapped
-//! bytes).
+//! reads `byte & 0x7f`), ucs2 / utf16-le, and cesu8 (iconv-lite: every UTF-16 unit as its own 1-3 byte sequence). D7 adds
+//! the encodings mysql2 hands to iconv-lite 0.7.3: the single-byte codepages exactly (tables generated from iconv-lite by
+//! scripts/gen-mysql-sbcs.mjs, `sbcs_tables.rs`), utf16 / utf32 with iconv-lite's endianness detection, and the double-byte
+//! ones (big5, eucjp, sjis / cp932, euckr, gb2312 / gbk, gb18030) through encoding_rs: the same characters, but invalid
+//! byte sequences may give a different number of U+FFFD than iconv-lite's DBCS decoder (open, PROGRESS.md D7). Names
+//! iconv-lite does not know (dec8, hp8, swe7, keybcs2, geostd8, eucjpms) are `Unknown`: a query in them is refused with
+//! iconv-lite's error text and such column names are read as UTF-8.
+
+use super::sbcs_tables::SBCS;
 
 /// (first, last, encoding) runs of mysql2's charset_encodings.js (generated from mysql2 3.24).
 #[rustfmt::skip]
@@ -116,8 +121,16 @@ pub enum Enc {
     /// ucs2, utf16-le (Node `ucs2`).
     Ucs2,
     Cesu8,
-    /// An iconv-lite encoding the spike does not convert (the mysql2 name).
-    Other(&'static str),
+    /// An iconv-lite single-byte codepage (the mysql2 name and its decode table).
+    Sbcs(&'static str, &'static [u16; 256]),
+    /// iconv-lite `utf16`: encodes BOM + UTF-16LE, decodes with BOM / ASCII-position detection (default LE).
+    Utf16,
+    /// iconv-lite `utf32`: encodes BOM + UTF-32LE, decodes with BOM / validity detection (default LE).
+    Utf32,
+    /// An iconv-lite double-byte encoding, converted through encoding_rs (the mysql2 name and the encoding).
+    Dbcs(&'static str, &'static encoding_rs::Encoding),
+    /// A name iconv-lite does not know (the mysql2 name).
+    Unknown(&'static str),
 }
 
 /// mysql2's encoding name for a charset number (`undefined` for an unknown number: Node then writes UTF-8).
@@ -125,15 +138,45 @@ pub fn encoding_name(charset: u16) -> Option<&'static str> {
     RUNS.iter().find(|(a, b, _)| (*a..=*b).contains(&charset)).map(|r| r.2)
 }
 
+fn sbcs_table(name: &str) -> Option<(&'static str, &'static [u16; 256])> {
+    SBCS.iter().find(|(n, _)| *n == name).map(|(n, t)| (*n, t))
+}
+
+/// The encoding behind a mysql2 encoding name (as iconv-lite resolves it).
+pub fn enc_of_name(name: &'static str) -> Enc {
+    match name {
+        "utf8" => Enc::Utf8,
+        "latin1" | "binary" => Enc::Latin1,
+        "ascii" => Enc::Ascii,
+        "ucs2" | "utf16-le" => Enc::Ucs2,
+        "cesu8" => Enc::Cesu8,
+        "utf16" => Enc::Utf16,
+        "utf32" => Enc::Utf32,
+        // iconv-lite: big5 is big5hkscs, euckr cp949, gb2312 cp936, sjis and cp932 shiftjis
+        "big5" => Enc::Dbcs(name, encoding_rs::BIG5),
+        "eucjp" => Enc::Dbcs(name, encoding_rs::EUC_JP),
+        "sjis" | "cp932" => Enc::Dbcs(name, encoding_rs::SHIFT_JIS),
+        "euckr" => Enc::Dbcs(name, encoding_rs::EUC_KR),
+        "gb2312" | "gbk" => Enc::Dbcs(name, encoding_rs::GBK),
+        "gb18030" => Enc::Dbcs(name, encoding_rs::GB18030),
+        other => match sbcs_table(other) {
+            Some((n, t)) => Enc::Sbcs(n, t),
+            None => Enc::Unknown(other),
+        },
+    }
+}
+
 pub fn enc_of(charset: u16) -> Enc {
     match encoding_name(charset) {
-        None | Some("utf8") => Enc::Utf8,
-        Some("latin1" | "binary") => Enc::Latin1,
-        Some("ascii") => Enc::Ascii,
-        Some("ucs2" | "utf16-le") => Enc::Ucs2,
-        Some("cesu8") => Enc::Cesu8,
-        Some(other) => Enc::Other(other),
+        None => Enc::Utf8,
+        Some(name) => enc_of_name(name),
     }
+}
+
+/// iconv-lite's error for a name it does not know (`getCodec`).
+pub fn unknown_encoding_message(name: &str) -> String {
+    let searched: String = name.to_lowercase().chars().filter(char::is_ascii_alphanumeric).collect();
+    format!("Encoding not recognized: '{name}' (searched as: '{searched}')")
 }
 
 /// The encoding a column name is decoded with (column_definition.js: the client encoding for a `binary` column).
@@ -141,12 +184,21 @@ pub fn name_enc(column_charset: u16, client_charset: u16) -> Enc {
     if encoding_name(column_charset) == Some("binary") { enc_of(client_charset) } else { enc_of(column_charset) }
 }
 
-/// `Buffer.from(s, enc)` / iconv-lite `encode`. `Err(name)` for an encoding the spike does not convert.
+/// `Buffer.from(s, enc)` / iconv-lite `encode`. `Err(name)` for an encoding iconv-lite does not know.
 pub fn encode(s: &str, enc: Enc) -> Result<Vec<u8>, &'static str> {
     Ok(match enc {
         Enc::Utf8 => s.as_bytes().to_vec(),
         Enc::Latin1 | Enc::Ascii => s.encode_utf16().map(|u| (u & 0xff) as u8).collect(),
         Enc::Ucs2 => s.encode_utf16().flat_map(u16::to_le_bytes).collect(),
+        // iconv-lite's utf16 / utf32 encoders (getEncoder(name, {})) write a little-endian BOM first
+        Enc::Utf16 => [0xff, 0xfe].into_iter().chain(s.encode_utf16().flat_map(u16::to_le_bytes)).collect(),
+        Enc::Utf32 => [0xff, 0xfe, 0, 0].into_iter().chain(s.chars().flat_map(|c| u32::from(c).to_le_bytes())).collect(),
+        Enc::Sbcs(_, table) => {
+            // SBCSCodec: a 64K table filled with '?', then every byte written at its unit (the last byte wins)
+            s.encode_utf16().map(|u| table.iter().rposition(|&t| t == u).map_or(b'?', |b| b as u8)).collect()
+        }
+        Enc::Dbcs(_, encoding) => encode_dbcs(s, encoding),
+        Enc::Unknown(name) => return Err(name),
         Enc::Cesu8 => {
             let mut out = Vec::with_capacity(s.len());
             for u in s.encode_utf16() {
@@ -161,22 +213,114 @@ pub fn encode(s: &str, enc: Enc) -> Result<Vec<u8>, &'static str> {
             }
             out
         }
-        Enc::Other(name) => return Err(name),
     })
 }
 
-/// `buffer.toString(enc)` / iconv-lite `decode` (lone surrogates of ucs2 become U+FFFD, `Other` is read as UTF-8).
+/// A double-byte encoding: unmappable characters become '?' (iconv-lite's defaultCharSingleByte), not the HTML numeric
+/// reference encoding_rs writes.
+fn encode_dbcs(s: &str, encoding: &'static encoding_rs::Encoding) -> Vec<u8> {
+    let mut encoder = encoding.new_encoder();
+    let mut out = Vec::with_capacity(s.len() * 2);
+    let mut rest = s;
+    let mut buf = [0u8; 1024];
+    loop {
+        let (result, read, written) = encoder.encode_from_utf8_without_replacement(rest, &mut buf, true);
+        out.extend_from_slice(&buf[..written]);
+        rest = &rest[read..];
+        match result {
+            encoding_rs::EncoderResult::InputEmpty => return out,
+            encoding_rs::EncoderResult::OutputFull => {}
+            // iconv-lite's DBCS encoder writes one '?' per character, also outside the BMP
+            encoding_rs::EncoderResult::Unmappable(_) => out.push(b'?'),
+        }
+    }
+}
+
+/// `buffer.toString(enc)` / iconv-lite `decode` (lone surrogates become U+FFFD, `Unknown` is read as UTF-8).
 pub fn decode(b: &[u8], enc: Enc) -> String {
     match enc {
-        Enc::Utf8 | Enc::Other(_) => String::from_utf8_lossy(b).into_owned(),
+        Enc::Utf8 | Enc::Unknown(_) => String::from_utf8_lossy(b).into_owned(),
         Enc::Latin1 => b.iter().map(|&x| char::from(x)).collect(),
         Enc::Ascii => b.iter().map(|&x| char::from(x & 0x7f)).collect(),
-        Enc::Ucs2 => {
-            let units: Vec<u16> = b.as_chunks::<2>().0.iter().map(|p| u16::from_le_bytes(*p)).collect();
+        Enc::Ucs2 => utf16_units(b, false),
+        Enc::Cesu8 => decode_cesu8(b),
+        Enc::Sbcs(_, table) => {
+            let units: Vec<u16> = b.iter().map(|&x| table[usize::from(x)]).collect();
             String::from_utf16_lossy(&units)
         }
-        Enc::Cesu8 => decode_cesu8(b),
+        Enc::Utf16 => strip_bom(utf16_units(b, utf16_is_be(b))),
+        Enc::Utf32 => {
+            let be = utf32_is_be(b);
+            let s = b
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|q| char::from_u32(if be { u32::from_be_bytes(*q) } else { u32::from_le_bytes(*q) }).unwrap_or('\u{fffd}'))
+                .collect();
+            strip_bom(s)
+        }
+        Enc::Dbcs(_, encoding) => strip_bom(encoding.decode_without_bom_handling(b).0.into_owned()),
     }
+}
+
+/// iconv-lite strips a leading BOM when it decodes (stripBOM defaults to on).
+fn strip_bom(s: String) -> String {
+    match s.strip_prefix('\u{feff}') {
+        Some(rest) => rest.to_owned(),
+        None => s,
+    }
+}
+
+fn utf16_units(b: &[u8], be: bool) -> String {
+    let units: Vec<u16> =
+        b.as_chunks::<2>().0.iter().map(|p| if be { u16::from_be_bytes(*p) } else { u16::from_le_bytes(*p) }).collect();
+    String::from_utf16_lossy(&units)
+}
+
+/// iconv-lite utf16.js `detectEncoding`: a BOM, else the side the ASCII bytes are on (first 100 units), default LE.
+fn utf16_is_be(b: &[u8]) -> bool {
+    let pairs = b.as_chunks::<2>().0;
+    match pairs.first() {
+        Some([0xff, 0xfe]) => return false,
+        Some([0xfe, 0xff]) => return true,
+        _ => {}
+    }
+    let (mut le, mut be) = (0, 0);
+    for p in pairs.iter().take(100) {
+        if p[0] == 0 && p[1] != 0 {
+            be += 1;
+        }
+        if p[0] != 0 && p[1] == 0 {
+            le += 1;
+        }
+    }
+    be > le
+}
+
+/// iconv-lite utf32.js `detectEncoding`: a BOM, else BMP characters minus invalid ones per side, default LE.
+fn utf32_is_be(b: &[u8]) -> bool {
+    let quads = b.as_chunks::<4>().0;
+    match quads.first() {
+        Some([0xff, 0xfe, 0, 0]) => return false,
+        Some([0, 0, 0xfe, 0xff]) => return true,
+        _ => {}
+    }
+    let (mut invalid_le, mut invalid_be, mut bmp_le, mut bmp_be) = (0i32, 0i32, 0i32, 0i32);
+    for q in quads.iter().take(100) {
+        if q[0] != 0 || q[1] > 0x10 {
+            invalid_be += 1;
+        }
+        if q[3] != 0 || q[2] > 0x10 {
+            invalid_le += 1;
+        }
+        if q[0] == 0 && q[1] == 0 && (q[2] != 0 || q[3] != 0) {
+            bmp_be += 1;
+        }
+        if (q[0] != 0 || q[1] != 0) && q[2] == 0 && q[3] == 0 {
+            bmp_le += 1;
+        }
+    }
+    bmp_be - invalid_be > bmp_le - invalid_le
 }
 
 /// CESU-8: UTF-8 whose supplementary characters come as two 3-byte surrogate sequences.
@@ -222,7 +366,9 @@ mod tests {
         assert_eq!(enc_of(5), Enc::Latin1);
         assert_eq!(enc_of(63), Enc::Latin1);
         assert_eq!(enc_of(33), Enc::Cesu8);
-        assert_eq!(enc_of(26), Enc::Other("cp1250"));
+        assert!(matches!(enc_of(26), Enc::Sbcs("cp1250", _)));
+        assert_eq!(enc_of(3), Enc::Unknown("dec8"));
+        assert_eq!(enc_of(28), Enc::Dbcs("gbk", encoding_rs::GBK));
         assert_eq!(enc_of(5000), Enc::Utf8);
         assert_eq!(charset_of_name("latin1"), Some(5));
         assert_eq!(charset_of_name("utf8mb3"), Some(192));
@@ -242,6 +388,34 @@ mod tests {
         let c = encode("a😀", Enc::Cesu8).unwrap();
         assert_eq!(c, [0x61, 0xed, 0xa0, 0xbd, 0xed, 0xb8, 0x80]);
         assert_eq!(decode(&c, Enc::Cesu8), "a😀");
-        assert_eq!(encode("x", Enc::Other("cp1250")), Err("cp1250"));
+        assert_eq!(encode("x", Enc::Unknown("dec8")), Err("dec8"));
+        assert_eq!(unknown_encoding_message("dec8"), "Encoding not recognized: 'dec8' (searched as: 'dec8')");
+    }
+
+    #[test]
+    fn iconv_lite_codepages() {
+        // node -e "require('iconv-lite').encode('a€😀ł','cp1250')" -> 61 80 3f 3f b3
+        assert_eq!(encode("a€😀ł", enc_of(26)).unwrap(), [0x61, 0x80, 0x3f, 0x3f, 0xb3]);
+        // iconv-lite decode([0x81, 0x80], 'cp1250') -> "�€"
+        assert_eq!(decode(&[0x81, 0x80], enc_of(26)), "\u{fffd}€");
+        assert_eq!(decode(&[0xc1], enc_of(7)), "а");
+        assert_eq!(encode("б", enc_of(7)).unwrap(), [0xc2]);
+        // gbk / big5 through encoding_rs; one '?' per unmappable character (iconv-lite getEncoder)
+        assert_eq!(encode("中x😀", enc_of(28)).unwrap(), [0xd6, 0xd0, b'x', b'?']);
+        assert_eq!(encode("中x😀", enc_of(1)).unwrap(), [0xa4, 0xa4, b'x', b'?']);
+        assert_eq!(encode("😀", enc_of(248)).unwrap(), [0x94, 0x39, 0xfc, 0x36]);
+        assert_eq!(decode(&[0xd6, 0xd0], enc_of(28)), "中");
+    }
+
+    #[test]
+    fn utf16_and_utf32_detection() {
+        // MySQL's utf16 is big-endian: iconv-lite sees the ASCII bytes on the BE side
+        assert_eq!(decode(&[0, b'i', 0, b'd'], enc_of(54)), "id");
+        assert_eq!(decode(&[b'i', 0, b'd', 0], enc_of(54)), "id");
+        assert_eq!(decode(&[0xfe, 0xff, 0, b'a'], enc_of(54)), "a");
+        assert_eq!(encode("a", enc_of(54)).unwrap(), [0xff, 0xfe, b'a', 0]);
+        assert_eq!(decode(&[0, 0, 0, b'a'], enc_of(60)), "a");
+        assert_eq!(decode(&[b'a', 0, 0, 0], enc_of(60)), "a");
+        assert_eq!(encode("a", enc_of(60)).unwrap(), [0xff, 0xfe, 0, 0, b'a', 0, 0, 0]);
     }
 }

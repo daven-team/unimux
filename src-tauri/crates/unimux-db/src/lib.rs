@@ -7,6 +7,7 @@
 //!   the fixed answers of 1.1.4), [`host`] (the link to the sessions: op timeouts, Redis deadlines, pending requests).
 //! - D3: [`sql`], [`redis_shared`]; SP9: [`wire`].
 //! - D4: [`pg`] (the Postgres client: connect, TLS, logins, simple query, cancel).
+//! - D7: [`mysql`] (the MySQL / MariaDB client core).
 
 pub mod files;
 pub mod history;
@@ -14,6 +15,7 @@ pub mod host;
 pub mod ipc;
 pub mod model;
 pub mod pg;
+pub mod mysql;
 pub mod redis_shared;
 pub mod service;
 pub mod sql;
