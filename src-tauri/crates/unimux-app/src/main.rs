@@ -29,6 +29,8 @@ mod startup;
 mod test_bridge;
 #[cfg(feature = "test-bridge")]
 mod test_record;
+mod update;
+mod update_gate;
 mod update_window;
 mod webview_import;
 mod windows;
@@ -242,43 +244,28 @@ fn main() {
                 }),
             ));
             ctx.mark("app-ready");
-            // The startup gate (U1) runs here and may hold the main window back; wave 0 always proceeds.
-            webview_import::prepare(app.handle(), &ctx);
-            let main_window = windows::create_main(app.handle(), &ctx)?;
-            // The macOS stand-in for CDP (MC_EVAL_PORT, check build only).
-            #[cfg(feature = "test-bridge")]
-            let _ = eval_bridge::start(ctx.clone());
-            // Tabs that were in their own window at the last quit open there again (W5). The main window closing closes
-            // them as they are (their registry stays for the next start).
-            ctx.detached.set_host(detached::host::TauriHost::new(app.handle().clone(), &ctx));
-            let closing = ctx.detached.clone();
-            main_window.on_window_event(move |event| {
-                if matches!(event, tauri::WindowEvent::Destroyed) {
-                    closing.close_all();
-                }
+            // U1: the background update checks (8 s after the start, then every 30 min).
+            if let Some(updates) = ctx.update.get() {
+                updates.start();
+            }
+            // The startup gate (U1) may hold the main window back: it then starts the app itself once the current version is
+            // to run (never when the installer took over).
+            let (gate_app, gate_ctx) = (app.handle().clone(), ctx.clone());
+            let start_later: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+                let (app, ctx) = (gate_app.clone(), gate_ctx.clone());
+                let on_main = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    if let Err(e) = start_main_app(&on_main, &ctx) {
+                        startup::startup_failed(&format!("{e}"), None);
+                    }
+                    startup::mark_started();
+                });
             });
-            ctx.detached.start();
-            // In parallel with the window (1.1.4: hooks.start next to the cell file prune and the MCP server).
-            hooks::start(&ctx);
-            // H3: the CLI scan in the background and the registry refresh on focus.
-            commands::agents::app_started(&ctx);
-            // The wind-down stops the hook server in its own phase (1.1.4 before-quit: hooks.stop after the MCP server).
-            let stopping = ctx.hooks.clone();
-            ctx.lifecycle.wind_down.register(
-                lifecycle::wind_down::phase::HOOKS,
-                "hooks stop",
-                Duration::from_secs(1),
-                move || async move {
-                    stopping.server.stop();
-                },
-            );
-            // M1: the MCP server listens after the window (index.ts startMcp), retried twice in the background; the wind-down
-            // stops it in its own phase, before the hook server.
-            commands::mcp::start(&ctx);
-            ctx.lifecycle.wind_down.register(lifecycle::wind_down::phase::MCP, "mcp stop", Duration::from_secs(1), || async {
-                commands::mcp::stop();
-            });
-            startup::mark_started();
+            if !update::startup_gate(&ctx, app.handle(), start_later) {
+                ctx.mark("update-gate-done");
+                start_main_app(app.handle(), &ctx)?;
+                startup::mark_started();
+            }
             Ok(())
         })
         .build(tauri_ctx);
@@ -315,6 +302,46 @@ fn main() {
         }
         _ => {}
     });
+}
+
+/// `startMainApp`: the window first, then the rest in parallel behind it. Runs after the startup gate (U1), on the main thread.
+fn start_main_app(app: &tauri::AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<()> {
+    webview_import::prepare(app, ctx);
+    let main_window = windows::create_main(app, ctx)?;
+    // The macOS stand-in for CDP (MC_EVAL_PORT, check build only).
+    #[cfg(feature = "test-bridge")]
+    let _ = eval_bridge::start(ctx.clone());
+    // Tabs that were in their own window at the last quit open there again (W5). The main window closing closes them as they
+    // are (their registry stays for the next start).
+    ctx.detached.set_host(detached::host::TauriHost::new(app.clone(), ctx));
+    let closing = ctx.detached.clone();
+    main_window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            closing.close_all();
+        }
+    });
+    ctx.detached.start();
+    // In parallel with the window (1.1.4: hooks.start next to the cell file prune and the MCP server).
+    hooks::start(ctx);
+    // H3: the CLI scan in the background and the registry refresh on focus.
+    commands::agents::app_started(ctx);
+    // The wind-down stops the hook server in its own phase (1.1.4 before-quit: hooks.stop after the MCP server).
+    let stopping = ctx.hooks.clone();
+    ctx.lifecycle.wind_down.register(
+        lifecycle::wind_down::phase::HOOKS,
+        "hooks stop",
+        Duration::from_secs(1),
+        move || async move {
+            stopping.server.stop();
+        },
+    );
+    // M1: the MCP server listens after the window (index.ts startMcp), retried twice in the background; the wind-down stops
+    // it in its own phase, before the hook server.
+    commands::mcp::start(ctx);
+    ctx.lifecycle.wind_down.register(lifecycle::wind_down::phase::MCP, "mcp stop", Duration::from_secs(1), || async {
+        commands::mcp::stop();
+    });
+    Ok(())
 }
 
 fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {

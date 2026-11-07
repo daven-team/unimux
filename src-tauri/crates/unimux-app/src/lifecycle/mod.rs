@@ -256,7 +256,7 @@ fn main_window(ctx: &AppContext) -> Option<WebviewWindow> {
 }
 
 /// The language of the app's own dialogs: the user's setting, else the OS language (index.ts `tr`).
-fn language(ctx: &AppContext) -> String {
+pub(crate) fn language(ctx: &AppContext) -> String {
     let state = ctx.state.get();
     match state.pointer("/settings/language").and_then(Value::as_str) {
         Some(l) if is_language(l) => l.to_string(),

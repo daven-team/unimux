@@ -107,6 +107,8 @@ pub struct AppContext {
     pub main_shown: AtomicBool,
     /// W4: notifications, the copied secret, shell, dialogs, Dock badge (set by commands::os::register).
     pub os: OnceLock<Arc<crate::commands::os::OsService>>,
+    /// U1: the update coordinator, the startup gate and its window (set by commands::update::register).
+    pub update: OnceLock<Arc<crate::update::UpdateService>>,
     /// Detached windows (W5): the registry's windows, attach / detach, and the cell owners every routed event uses.
     pub detached: Arc<crate::detached::DetachedService>,
     /// Quit question, wind-down registry, session end, renderer crash and hang (W6).
@@ -220,6 +222,7 @@ impl AppContext {
             report_limiter: Mutex::new(ReportLimiter::default()),
             main_shown: AtomicBool::new(false),
             os: OnceLock::new(),
+            update: OnceLock::new(),
             detached,
             lifecycle,
             hooks: Arc::new(crate::hooks::Hooks::default()),

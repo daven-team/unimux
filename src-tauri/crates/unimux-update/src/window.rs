@@ -466,6 +466,59 @@ pub fn signal_update_ready(data_dir: &Path, running_version: &str) -> bool {
     fs::create_dir_all(&dir).is_ok() && fs::write(dir.join("ready"), running_version).is_ok()
 }
 
+/// HEARTBEAT_FRESH_MS of updateRuntime.ts: a heartbeat this young means the update window still supervises.
+pub const HEARTBEAT_FRESH_MS: f64 = 15.0 * 1000.0;
+/// HEARTBEAT_MAX_AGE_MS: past this age even a beating update window is no longer trusted.
+pub const HEARTBEAT_MAX_AGE_MS: f64 = 15.0 * 60.0 * 1000.0;
+/// START_BLOCK_MS of updateSplash.ts: a normal install takes well under this.
+pub const START_BLOCK_MS: f64 = 90.0 * 1000.0;
+
+fn modified_ms(path: &Path) -> Option<f64> {
+    let modified = fs::metadata(path).and_then(|m| m.modified()).ok()?;
+    let since = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(since.as_secs_f64() * 1000.0)
+}
+
+fn heartbeat_fresh(file: &Path, now: f64) -> bool {
+    modified_ms(file).is_some_and(|m| {
+        let age = now - m;
+        (-HEARTBEAT_FRESH_MS..=HEARTBEAT_FRESH_MS).contains(&age)
+    })
+}
+
+/// `updateWindowAlive`: the update window of an update writes its heartbeat every second while it supervises.
+pub fn update_window_alive(data_dir: &Path, now: f64) -> bool {
+    heartbeat_fresh(&update_dir(data_dir).join("work").join("heartbeat"), now)
+}
+
+/// `installInProgress`: an installer started by an update window may still be replacing the app files (the attempt targets
+/// another version, is younger than `max_age_ms` and has signalled neither completion nor abort; a slow installer is still
+/// trusted while the window's heartbeat is fresh, up to 15 minutes).
+pub fn install_in_progress(data_dir: &Path, current_version: &str, max_age_ms: f64, now: f64) -> bool {
+    let update = update_dir(data_dir);
+    let config = update.join("work").join("config.json");
+    let Some(version) = attempt_version(data_dir) else { return false };
+    if version == current_version {
+        return false;
+    }
+    if ["installer-done", "ready"].iter().any(|n| update.join(n).exists()) || update.join("work").join("abort").exists() {
+        return false;
+    }
+    let Some(started) = modified_ms(&config) else { return false };
+    let age = now - started;
+    if age <= max_age_ms {
+        return true;
+    }
+    age <= HEARTBEAT_MAX_AGE_MS && heartbeat_fresh(&update.join("work").join("heartbeat"), now)
+}
+
+/// `abortUpdateWindow`: the hand-over failed and the app keeps running; the window closes on this signal.
+pub fn abort_update_window(data_dir: &Path) {
+    let work = update_dir(data_dir).join("work");
+    let _ = fs::create_dir_all(&work);
+    let _ = fs::write(work.join("abort"), unimux_core::time::now_ms().to_string());
+}
+
 /// `directoryBytes`: the size of a tree; unreadable entries are skipped (the installer is rewriting it). Only metadata is read,
 /// never a file handle kept: the installer must be able to replace every file while this runs.
 pub fn directory_bytes(root: &Path) -> u64 {

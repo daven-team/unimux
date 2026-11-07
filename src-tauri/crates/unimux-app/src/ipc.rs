@@ -164,25 +164,46 @@ pub struct PortPost {
     pub messages: Vec<Value>,
 }
 
+/// The startup gate / install window of the app process (U1), when `webview` is it. Its commands answer only that window
+/// (1.1.4's `isFromWindow(win, event)` guard of gateWindow.ts; the capability grants them to `update-gate` only).
+fn gate_window(app: &AppHandle, webview: &Webview) -> Option<Arc<crate::update_gate::GateWindow>> {
+    if webview.label() != crate::update_gate::LABEL {
+        return None;
+    }
+    let ctx = app.try_state::<Arc<AppContext>>()?;
+    ctx.update.get()?.gate_window()
+}
+
 /// window.updateSplash of the update windows: the update window process (`--update-window`, SP6) answers through its
-/// [`UpdateWindow`] state; the startup gate window of the app process comes with U1.
+/// [`UpdateWindow`] state, the startup gate window of the app process (U1) through its [`crate::update_gate::GateWindow`].
 #[tauri::command]
-pub async fn update_splash_init(app: AppHandle) -> Result<Value, IpcError> {
+pub async fn update_splash_init(app: AppHandle, webview: Webview) -> Result<Value, IpcError> {
+    if let Some(gate) = gate_window(&app, &webview) {
+        return Ok(gate.init_info());
+    }
     match app.try_state::<Arc<UpdateWindow>>() {
         Some(win) => Ok(win.init_info()),
-        None => Err(IpcError::NotYet { command: "update-splash:init".into() }),
+        None => Ok(Value::Null),
     }
 }
 
 #[tauri::command]
-pub async fn update_splash_close(app: AppHandle) {
+pub async fn update_splash_close(app: AppHandle, webview: Webview) {
+    if let Some(gate) = gate_window(&app, &webview) {
+        gate.request_close();
+        return;
+    }
     if let Some(win) = app.try_state::<Arc<UpdateWindow>>() {
         win.inner().request_close();
     }
 }
 
 #[tauri::command]
-pub async fn update_splash_open(app: AppHandle) {
+pub async fn update_splash_open(app: AppHandle, webview: Webview) {
+    if let Some(gate) = gate_window(&app, &webview) {
+        gate.request_install();
+        return;
+    }
     if let Some(win) = app.try_state::<Arc<UpdateWindow>>() {
         win.open_app();
     }

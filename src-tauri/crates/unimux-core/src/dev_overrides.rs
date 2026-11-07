@@ -26,10 +26,13 @@ pub struct DevOverrides {
     pub usage_codex_url: Option<String>,
     pub usage_claude_token_url: Option<String>,
     pub update_feed: Option<String>,
+    /// 1.2.0 only (U1): the updater public key (base64 of a minisign key file, as `tauri signer generate` writes it) that
+    /// replaces the embedded release key, so a harness run can sign a local feed with a scratch key. Never in a release build.
+    pub update_pubkey: Option<String>,
 }
 
 /// The names, for docs and the release check (a release binary must not read them).
-pub const OVERRIDE_NAMES: [&str; 17] = [
+pub const OVERRIDE_NAMES: [&str; 18] = [
     "MC_DATA_DIR",
     "MC_DEBUG_PORT",
     "MC_OFFSCREEN",
@@ -47,6 +50,7 @@ pub const OVERRIDE_NAMES: [&str; 17] = [
     "MC_USAGE_CODEX_URL",
     "MC_USAGE_CLAUDE_TOKEN_URL",
     "MC_UPDATE_FEED",
+    "MC_UPDATE_PUBKEY",
 ];
 
 impl DevOverrides {
@@ -83,6 +87,7 @@ impl DevOverrides {
             usage_codex_url: s("MC_USAGE_CODEX_URL"),
             usage_claude_token_url: s("MC_USAGE_CLAUDE_TOKEN_URL"),
             update_feed: s("MC_UPDATE_FEED"),
+            update_pubkey: s("MC_UPDATE_PUBKEY"),
         }
     }
 
