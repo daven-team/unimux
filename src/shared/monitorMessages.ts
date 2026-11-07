@@ -9,6 +9,8 @@ export const monitorMessages = {
   'Grafika (GPU)': ['Graphics (GPU)', 'Grafik (GPU)', 'Gráficos (GPU)', 'Graphismes (GPU)', 'Gráficos (GPU)'],
   'Terminale (Pty Host)': ['Terminals (Pty Host)', 'Terminals (Pty Host)', 'Terminales (Pty Host)', 'Terminaux (Pty Host)', 'Terminais (Pty Host)'],
   'SFTP (SFTP Host)': ['SFTP (SFTP Host)', 'SFTP (SFTP Host)', 'SFTP (SFTP Host)', 'SFTP (SFTP Host)', 'SFTP (SFTP Host)'],
+  // 1.2.0: the WebView2 browser process that runs the app's windows (its renderers stay 'Okno aplikacji').
+  'Przeglądarka (WebView2)': ['Browser (WebView2)', 'Browser (WebView2)', 'Navegador (WebView2)', 'Navigateur (WebView2)', 'Navegador (WebView2)'],
   'Bazy danych (DB Host)': ['Databases (DB Host)', 'Datenbanken (DB Host)', 'Bases de datos (DB Host)', 'Bases de données (DB Host)', 'Bases de dados (DB Host)'],
   'Usługa: {name}': ['Service: {name}', 'Dienst: {name}', 'Servicio: {name}', 'Service : {name}', 'Serviço: {name}'],
   'Proces pomocniczy: {name}': ['Helper process: {name}', 'Hilfsprozess: {name}', 'Proceso auxiliar: {name}', 'Processus auxiliaire : {name}', 'Processo auxiliar: {name}'],

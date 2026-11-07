@@ -590,9 +590,45 @@ pub fn join_name(flavor: Flavor, dir: &str, name: &str) -> String {
     if dir.ends_with(|c: char| flavor.is_sep(c)) { format!("{dir}{name}") } else { format!("{dir}{}{name}", flavor.sep()) }
 }
 
+/// `path.toNamespacedPath(p)` (Node's C++ `ToNamespacedPath`, which `fs` applies before libuv sees a path): on Windows a
+/// path that resolves to a drive path gets the `\\?\` prefix and a UNC path `\\?\UNC\`, so long paths work without a
+/// longPathAware manifest and Win32 does not drop trailing dots and spaces. Anything else, and every posix path, stays as
+/// given.
+pub fn to_namespaced_path(flavor: Flavor, path: &str) -> String {
+    if flavor == Flavor::Posix || path.is_empty() {
+        return path.to_string();
+    }
+    let resolved = resolve(Flavor::Win32, &[path]);
+    let r: Vec<char> = resolved.chars().collect();
+    if r.len() <= 2 {
+        return path.to_string();
+    }
+    if r[0] == '\\' {
+        if r[1] == '\\' && r[2] != '?' && r[2] != '.' {
+            return format!(r"\\?\UNC\{}", r[2..].iter().collect::<String>());
+        }
+    } else if is_device_root(r[0]) && r[1] == ':' && r[2] == '\\' {
+        return format!(r"\\?\{resolved}");
+    }
+    path.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn to_namespaced_path_like_node() {
+        let w = Flavor::Win32;
+        assert_eq!(to_namespaced_path(w, r"C:\proj\a/../b."), r"\\?\C:\proj\b.");
+        assert_eq!(to_namespaced_path(w, r"C:\proj\b "), r"\\?\C:\proj\b ");
+        assert_eq!(to_namespaced_path(w, r"\\srv\share\x"), r"\\?\UNC\srv\share\x");
+        assert_eq!(to_namespaced_path(w, "//srv/share/x"), r"\\?\UNC\srv\share\x");
+        assert_eq!(to_namespaced_path(w, r"\\?\C:\x"), r"\\?\C:\x");
+        assert_eq!(to_namespaced_path(w, r"\\.\pipe\p"), r"\\.\pipe\p");
+        assert_eq!(to_namespaced_path(w, ""), "");
+        assert_eq!(to_namespaced_path(Flavor::Posix, "/a/../b."), "/a/../b.");
+    }
 
     #[test]
     fn resolve_like_node() {

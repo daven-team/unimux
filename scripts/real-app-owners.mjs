@@ -71,9 +71,9 @@ const PORTS = { 'port:pty': 'P2', 'port:sftp': 'T1', 'port:db': 'D12' };
 
 /**
  * Test-bridge ops of the harness that a later package adds (an older check build answers "unknown op"): the fake toast sink
- * of the notifications (W4), the taskbar view (W7).
+ * of the notifications (W4), the taskbar view (W7), the running cells of the Monitor panel (G8).
  */
-export const BRIDGE_OP_OWNERS = { toasts: 'W4', toastAction: 'W4', taskbar: 'W7' };
+export const BRIDGE_OP_OWNERS = { toasts: 'W4', toastAction: 'W4', taskbar: 'W7', monitorCells: 'G8' };
 
 /** The package that implements `command` (a channel, `port:<kind>`, `update-splash:*`), or null when nothing claims it. */
 export function ownerOf(command) {

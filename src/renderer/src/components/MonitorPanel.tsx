@@ -64,6 +64,7 @@ export function MonitorPanel() {
       case 'main': return tr('Proces główny');
       case 'renderer': return tr('Okno aplikacji');
       case 'gpu': return tr('Grafika (GPU)');
+      case 'webview': return tr('Przeglądarka (WebView2)');
       case 'ptyhost': return tr('Terminale (Pty Host)');
       case 'sftphost': return tr('SFTP (SFTP Host)');
       case 'dbhost': return tr('Bazy danych (DB Host)');

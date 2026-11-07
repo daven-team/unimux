@@ -34,6 +34,8 @@
 //                                     scripts/goldens-search.mjs)
 //   test/golden/accounts-store.jsonl, codex-accounts.jsonl, accounts-identity.jsonl   the account stores (1.1.4's code, run on
 //                                     scratch dirs) and the identity helpers (see scripts/goldens-accounts.mjs)
+//   test/golden/changelog.jsonl, monitor.jsonl   parseReleases / compareVersions and the Monitor panel's trees (see
+//                                     scripts/goldens-g8.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
 import { updateConfigGolden, updateProgressRows, updateStringsGolden } from './goldens-update.mjs';
@@ -47,6 +49,7 @@ import { convGoldens } from './goldens-convsearch.mjs';
 import { DB_MODULES, dbGoldens } from './goldens-db.mjs';
 import { accountsStoreRows, codexStoreRows, identityRows } from './goldens-accounts.mjs';
 import { gitSharedRows, gitTrustRows } from './goldens-git.mjs';
+import { g8Goldens } from './goldens-g8.mjs';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -328,6 +331,7 @@ const files = {
   'accounts-store.jsonl': jsonl(accountsStoreRows({ AccountsStore })),
   'codex-accounts.jsonl': jsonl(codexStoreRows({ CodexAccountsStore })),
   'accounts-identity.jsonl': jsonl(identityRows({ accounts, codex, parseCodexAuth, decodeJwtClaims })),
+  ...Object.fromEntries(Object.entries(await g8Goldens(load)).map(([name, rows]) => [name, jsonl(rows)])),
 };
 const updateStrings = updateStringsGolden({ root, translate });
 files['update-strings.json'] = `${JSON.stringify(updateStrings, null, 1)}\n`;

@@ -38,6 +38,7 @@ export const SCRIPTS = [
   { file: 'verify-safestorage.mjs', only: 'tauri', windowsOnly: true },
   // P2: the pty data plane (replay at recorded sizes, echo, 20-cell flood bounds) with the flood helper.
   { file: 'verify-tauri-pty.mjs', only: 'tauri', windowsOnly: true, timeout: 15, missing: () => (existsSync(join(ROOT, 'src-tauri', 'target', 'release', 'unimux-pty-flood.exe')) ? null : 'the flood helper (cd src-tauri && node ../scripts/msvc-run.mjs cargo build --release -p unimux-pty --bins)') },
+  { file: 'verify-tauri-monitor.mjs', only: 'tauri', windowsOnly: true },
   // W1: the caption buttons against 1.1.4's references (OS capture and hit tests through the wincap example).
   { file: 'verify-caption.mjs', only: 'tauri', windowsOnly: true, timeout: 20, missing: () => (existsSync(join(ROOT, 'src-tauri', 'target', 'release', 'examples', 'wincap.exe')) ? null : 'the wincap tool (cd src-tauri && node ../scripts/msvc-run.mjs cargo build -p unimux-platform --example wincap --release)') },
   { file: 'verify-update-window.mjs', only: 'tauri', windowsOnly: true, timeout: 20 },

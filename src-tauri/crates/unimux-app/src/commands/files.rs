@@ -14,6 +14,8 @@
 //!
 //! G7: project search and replace (`fs:searchProject`, `fs:replaceInProject`). A new search of a window cancels its running
 //! one (1.1.4 kept one AbortController per sender); the cancelled search answers the empty, truncated result nobody shows.
+//!
+//! G8 (files/g8.rs): notes, the fs probes, the Monitor panel and the changelog.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -35,6 +37,8 @@ use unimux_files::search;
 use unimux_ipc::{IpcError, Reply, RouterBuilder};
 
 use crate::context::AppContext;
+
+pub mod g8;
 
 const GONE: &str = "Projekt już nie istnieje.";
 
@@ -250,6 +254,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
 
     register_file_ops(r, ctx);
     register_local_pane(r, ctx);
+    g8::register(r, ctx);
 }
 
 /// The OS trash (Electron's shell.trashItem: the Recycle Bin through IFileOperation, NSFileManager on macOS). With

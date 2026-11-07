@@ -24,10 +24,12 @@ encoding_rs.workspace = true
 ryu-js.workspace = true
 regress.workspace = true
 unicode-ident.workspace = true
+base64.workspace = true
+futures.workspace = true
 parquet = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_SystemInformation", "Win32_System_Threading", "Wdk_System_SystemInformation", "Wdk_System_Threading"] }
 # G6: a folder link is copied as a junction (Node's fs.symlink(target, path, 'junction')).
 junction.workspace = true
 
@@ -36,7 +38,7 @@ libc.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-base64.workspace = true
+tokio.workspace = true
 
 [[example]]
 name = "parquet_fixtures"
