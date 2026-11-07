@@ -7,12 +7,14 @@ import { createDropRecordFilePaths, createWebView2FilePaths, type WebView2Host }
 import { createPortPoster, createTauriTransport, McNotYetError, type BootInfo, type TauriTransport } from './transport';
 import { installCompat, type CompatReport } from './webkitCompat';
 import { installMacDrag, type DragGlobal } from './macDrag';
+import { createPtyPort, listenSharedBuffers, runPull, type BridgePtyPort, type SharedBufferHost } from './ptyPort';
 
 declare global {
   interface Window {
     __MC_BOOT__?: BootInfo;
     __MC_TAURI__?: { McNotYetError: typeof McNotYetError; transport: TauriTransport };
     __MC_COMPAT__?: CompatReport;
+    __MC_PTY_PORT__?: BridgePtyPort;
   }
 }
 
@@ -53,11 +55,11 @@ void transport.replayJournal();
 window.addEventListener('pagehide', (e) => { if (!e.persisted) transport.dispose(); });
 
 /**
- * The MessagePorts of 1.1.4 (`mc:pty-port`, `mc:sftp-port`, `mc:db-port`): a real MessageChannel whose far end is wired to a
- * Tauri channel. The page gets port1 exactly as before (TerminalManager, sftp.ts, dbClient.ts unchanged). Attached by this
+ * The MessagePorts of 1.1.4 (`mc:sftp-port`, `mc:db-port`; the pty port is attachPtyPort below): a real MessageChannel
+ * whose far end is wired to a Tauri channel. The page gets port1 exactly as before (sftp.ts, dbClient.ts unchanged). Attached by this
  * page on every load (never pushed by Rust); a port whose service has not been ported yet is simply not posted.
  */
-async function attachPort(kind: 'pty' | 'sftp' | 'db'): Promise<void> {
+async function attachPort(kind: 'sftp' | 'db'): Promise<void> {
   const pair = new MessageChannel();
   const channel = new Channel<unknown>();
   channel.onmessage = (message) => pair.port2.postMessage(message instanceof ArrayBuffer ? new Uint8Array(message) : message);
@@ -67,13 +69,40 @@ async function attachPort(kind: 'pty' | 'sftp' | 'db'): Promise<void> {
     if ((error as { code?: string })?.code !== 'MC_NOT_YET') console.warn(`[mc] ${kind} port: ${String((error as Error)?.message ?? JSON.stringify(error))}`);
     return;
   }
-  if (kind === 'pty') {
-    // In order, like the MessagePort of 1.1.4: batched per task and numbered (Rust delivers by number).
-    const post = createPortPoster(kind, newSession(), (args) => invoke('mc_port_post', args));
-    pair.port2.onmessage = (e) => post(e.data);
-  }
   pair.port2.start();
   window.postMessage(`mc:${kind}-port`, '*', [pair.port1]);
 }
 
-for (const kind of ['pty', 'sftp', 'db'] as const) void attachPort(kind);
+/**
+ * The pty port (P2): binary frames on the transport Rust picked (bridge/ptyPort.ts), handed to TerminalManager through a
+ * port object (an event and window.__MC_PTY_PORT__) instead of a MessagePort, so every message is handled before it is
+ * released.
+ */
+async function attachPtyPort(): Promise<void> {
+  const session = newSession();
+  const post = createPortPoster('pty', session, (args) => invoke('mc_port_post', args));
+  let transport = 'channel';
+  const port = createPtyPort({ post }, transport);
+  const channel = new Channel<unknown>();
+  channel.onmessage = (message) => port.deliver(message instanceof ArrayBuffer ? new Uint8Array(message) : message);
+  const webview = (window as { chrome?: { webview?: Partial<SharedBufferHost> } }).chrome?.webview;
+  // Listening before the attach: the host posts the replay tails right after it. Buffers are matched to this attach.
+  if (webview?.addEventListener && webview.releaseBuffer) listenSharedBuffers(webview as SharedBufferHost, port, session);
+  let result: { transport?: string } | null;
+  try {
+    result = await invoke<{ transport?: string } | null>('mc_port_attach', { kind: 'pty', channel, attach: session });
+  } catch (error) {
+    if ((error as { code?: string })?.code !== 'MC_NOT_YET') console.warn(`[mc] pty port: ${String((error as Error)?.message ?? JSON.stringify(error))}`);
+    return;
+  }
+  transport = result?.transport ?? 'channel';
+  port.stats.transport = transport;
+  let stopped = false;
+  window.addEventListener('pagehide', (e) => { if (!e.persisted) stopped = true; });
+  if (transport === 'pull') void runPull(() => invoke<ArrayBuffer>('mc_port_pull', { kind: 'pty' }), port, () => stopped);
+  window.__MC_PTY_PORT__ = port;
+  window.dispatchEvent(new CustomEvent('mc:pty-port', { detail: port }));
+}
+
+void attachPtyPort();
+for (const kind of ['sftp', 'db'] as const) void attachPort(kind);

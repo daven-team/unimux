@@ -19,6 +19,7 @@ mod hooks;
 mod ipc;
 mod lifecycle;
 mod mac_chrome;
+mod pty_transport;
 #[cfg(feature = "test-bridge")]
 mod spike_pty;
 #[cfg(feature = "test-bridge")]
@@ -325,6 +326,7 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
             ipc::mc_invoke_raw,
             ipc::mc_port_attach,
             ipc::mc_port_post,
+            pty_transport::mc_port_pull,
             ipc::update_splash_init,
             ipc::update_splash_close,
             ipc::update_splash_open,
@@ -346,6 +348,7 @@ fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
             ipc::mc_invoke_raw,
             ipc::mc_port_attach,
             ipc::mc_port_post,
+            pty_transport::mc_port_pull,
             ipc::update_splash_init,
             ipc::update_splash_close,
             ipc::update_splash_open,

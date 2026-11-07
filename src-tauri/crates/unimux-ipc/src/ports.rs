@@ -15,6 +15,23 @@ use crate::error::IpcError;
 pub trait PortSink: Send + Sync {
     fn post_json(&self, message: &Value) -> bool;
     fn post_bytes(&self, bytes: &[u8]) -> bool;
+    /// One message of binary frames, number `seq` of this attach (the pty data plane, P2). Blocks until the transport took
+    /// it (a WebView2 shared buffer posted by the UI thread, a pull answered). Default: [`PortSink::post_bytes`].
+    fn post_frames(&self, seq: u64, bytes: Vec<u8>) -> bool {
+        let _ = seq;
+        self.post_bytes(&bytes)
+    }
+    /// The page answers every frames message with a release ack (`{t:'released', upto}`), so the sender may cap what is
+    /// in flight. A pull transport gates itself (one request in flight).
+    fn gated(&self) -> bool {
+        false
+    }
+    /// "channel", "sharedBuffer", "pull".
+    fn transport(&self) -> &'static str {
+        "channel"
+    }
+    /// The page went away or attached again: a blocked [`PortSink::post_frames`] returns.
+    fn close(&self) {}
 }
 
 /// The service behind a port.

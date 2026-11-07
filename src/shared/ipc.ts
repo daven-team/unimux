@@ -84,7 +84,8 @@ export type RendererToHost =
   | { t: 'sshStats'; id: string; reqId: number; first: boolean };
 
 export type HostToRenderer =
-  | { t: 'data'; id: string; data: string }
+  /** `bytes`: the payload's size on the Tauri host (frames, src/shared/ptyFrames.ts), which counts flow control in bytes. */
+  | { t: 'data'; id: string; data: string; bytes?: number }
   /** `sizes`: the pty sizes the output was written at, as offsets into `data` (see shared/replay). */
   | { t: 'replay'; id: string; data: string; sizes?: ReplaySize[] }
   | { t: 'exit'; id: string; code: number }

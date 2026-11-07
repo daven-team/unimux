@@ -583,6 +583,9 @@ impl Pty {
                     let _ = GetExitCodeProcess(HANDLE(waiter.process.as_raw_handle()), &mut code);
                     *waiter.exit.lock() = Some(code);
                     waiter.exit_cv.notify_all();
+                    // A reader paused by flow control reads again (and is never paused again): the output the console
+                    // still holds arrives before the exit, which is reported at the end of the pipe.
+                    waiter.gate.set_closing();
                     if !drain_then_close {
                         return;
                     }

@@ -11,6 +11,7 @@
     "allow-mc-invoke-raw",
     "allow-mc-port-attach",
     "allow-mc-port-post",
+    "allow-mc-port-pull",
     "allow-mc-dropped-paths",
     "allow-mc-webview-import-done"
   ]

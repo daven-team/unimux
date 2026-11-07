@@ -105,18 +105,13 @@ pub async fn mc_invoke_raw(
     result.map(response)
 }
 
-struct ChannelSink(Channel<InvokeResponseBody>);
-
-impl PortSink for ChannelSink {
-    fn post_json(&self, message: &Value) -> bool {
-        serde_json::to_string(message).ok().is_some_and(|s| self.0.send(InvokeResponseBody::Json(s)).is_ok())
-    }
-    fn post_bytes(&self, bytes: &[u8]) -> bool {
-        self.0.send(InvokeResponseBody::Raw(bytes.to_vec())).is_ok()
-    }
+pub(crate) fn caller_of(webview: &Webview, request: &Request<'_>) -> Caller {
+    caller(webview, request)
 }
 
-/// The page asks for one of its ports (`pty`, `sftp`, `db`) on every load.
+/// The page asks for one of its ports (`pty`, `sftp`, `db`) on every load. Answers `{transport}`: how the page receives
+/// the port's binary messages (`channel`, `sharedBuffer`, `pull`; see pty_transport.rs). `attach`: the page's id of this
+/// attach (pty), sent back with every shared buffer so the page can drop buffers of an earlier attach (a reload).
 #[tauri::command]
 pub async fn mc_port_attach(
     webview: Webview,
@@ -124,15 +119,18 @@ pub async fn mc_port_attach(
     request: Request<'_>,
     kind: String,
     channel: Channel<InvokeResponseBody>,
-) -> Result<(), IpcError> {
+    attach: Option<String>,
+) -> Result<Value, IpcError> {
     let caller = caller(&webview, &request);
     if !ctx.guard_allows(&caller) {
         return Err(IpcError::Refused { command: format!("port:{kind}") });
     }
-    let result = ctx.ports.attach(&kind, &caller.label, Arc::new(ChannelSink(channel)));
+    let (sink, transport): (Arc<dyn PortSink>, &str) =
+        crate::pty_transport::sink_for(&kind, &webview, channel, attach.as_deref()).await;
+    let result = ctx.ports.attach(&kind, &caller.label, sink);
     #[cfg(feature = "test-bridge")]
     ctx.test_record.observe(&result);
-    result
+    result.map(|()| serde_json::json!({ "transport": transport }))
 }
 
 /// Renderer -> host messages of the pty port (write, resize, ack, focus...), batched per microtask by the bridge and
