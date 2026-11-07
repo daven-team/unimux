@@ -38,10 +38,13 @@ pub async fn open_window(ctx: &Arc<AppContext>, args: &Value) -> Result<Value, I
         .title("unimux")
         .inner_size(1100.0, 700.0)
         .background_color(tauri::window::Color(0x0d, 0x0d, 0x0d, 0xff))
-        .visible(visible)
+        // An off-screen run shows it only after parking it off every monitor (show_without_focus below).
+        .visible(visible && !ctx.overrides.offscreen)
         .initialization_script(crate::windows::boot_script(ctx, &label))
         .devtools(cfg!(dev_overrides))
         .disable_drag_drop_handler();
+    // The chrome of a detached window (W1: no system title bar, the caption buttons); W5 builds the real ones the same way.
+    builder = crate::windows::without_title_bar(builder);
     #[cfg(windows)]
     {
         let mut browser_args = crate::windows::browser_args(ctx.overrides.debug_port);
@@ -59,6 +62,11 @@ pub async fn open_window(ctx: &Arc<AppContext>, args: &Value) -> Result<Value, I
     match builder.build() {
         Ok(window) => {
             crate::windows::apply_webview_settings(&window);
+            crate::windows::watch_window_state(&window, ctx.clone());
+            crate::caption::install(&window, ctx);
+            if visible && ctx.overrides.offscreen {
+                crate::windows::show_without_focus(&window);
+            }
             crate::windows::forget_on_destroy(&window, ctx.clone());
             Ok(json!({ "ok": true, "label": label, "url": url, "buildMs": started.elapsed().as_secs_f64() * 1000.0 }))
         }

@@ -238,7 +238,7 @@ describe('Tauri transport', () => {
 describe('generated IPC contract', () => {
   it('has the size of the 1.1.4 api.d.ts and matches the committed files (drift check)', () => {
     const contract = buildContract();
-    expect(contract.summary).toMatchObject({ methods: 248, invokeMethods: 207, sendMethods: 38, syncMembers: 3, channels: 215, invokeChannels: 177, sendChannels: 38, events: 44 });
+    expect(contract.summary).toMatchObject({ methods: 253, invokeMethods: 208, sendMethods: 42, syncMembers: 3, channels: 220, invokeChannels: 178, sendChannels: 42, events: 45 });
     expect(readFileSync('src-tauri/gen/ipc-contract.json', 'utf8')).toBe(contractText(contract));
     expect(readFileSync('src/renderer/src/bridge/contract.gen.ts', 'utf8')).toBe(contractTs(contract));
   });

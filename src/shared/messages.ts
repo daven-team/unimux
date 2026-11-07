@@ -214,6 +214,7 @@ export const messages = {
   'Uruchom ponownie i wznów rozmowę': ['Restart and resume conversation', 'Neu starten und Gespräch fortsetzen', 'Reiniciar y reanudar conversación', 'Redémarrer et reprendre la conversation', 'Reiniciar e retomar a conversa'],
   'Nowa rozmowa': ['New conversation', 'Neues Gespräch', 'Nueva conversación', 'Nouvelle conversation', 'Nova conversa'],
   'Przywróć siatkę': ['Restore grid', 'Raster wiederherstellen', 'Restaurar cuadrícula', 'Rétablir la grille', 'Restaurar grelha'],
+  'Minimalizuj': ['Minimize', 'Minimieren', 'Minimizar', 'Réduire', 'Minimizar'],
   'Maksymalizuj': ['Maximize', 'Maximieren', 'Maximizar', 'Agrandir', 'Maximizar'],
   'Zamknij komórkę': ['Close cell', 'Zelle schließen', 'Cerrar celda', 'Fermer la cellule', 'Fechar célula'],
   'Maksymalizuj / przywróć komórkę': ['Maximize / restore cell', 'Zelle maximieren / wiederherstellen', 'Maximizar / restaurar celda', 'Agrandir / rétablir la cellule', 'Maximizar / restaurar célula'],

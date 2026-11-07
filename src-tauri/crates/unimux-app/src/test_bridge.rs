@@ -93,6 +93,9 @@ pub async fn test_bridge(
         "openWindow" => crate::spike_windows::open_window(&ctx, &args).await,
         // Minimize / hide / WebView2 IsVisible of a window and how it looks afterwards (SP1 background timers).
         "window" => crate::spike_windows::window_op(&ctx, &args).await,
+        // W1: the caption probes (hit-test child, fixed rasterization scale, system command guard).
+        #[cfg(windows)]
+        "caption" => crate::caption_test::caption_op(&ctx, &args).await,
         // SP6: stage the runtime copy ahead of the hand-over (1.1.4 staged it when the update was found), {updaterRoot, version?}.
         "update-stage" => {
             let root = args.get("updaterRoot").and_then(Value::as_str).ok_or_else(|| fail("update-stage needs updaterRoot"))?;

@@ -278,6 +278,13 @@ export function createMcApi(t: McTransport): McApi {
     dismissSwitchOffer: () => t.invoke('accounts:dismissSwitch'),
     makeMainCodexAccount: (id) => t.invoke('accounts:makeMainCodex', id),
     removeCodexAccount: (id) => t.invoke('accounts:removeCodex', id),
+    windowControls: {
+      minimize: () => t.send('window:minimize'),
+      toggleMaximize: () => t.send('window:toggleMaximize'),
+      close: () => t.send('window:close'),
+      isMaximized: () => t.invoke('window:isMaximized'),
+      setCaptionArea: (area) => t.send('window:captionArea', area),
+    },
     detach: {
       open: (target, docs) => t.invoke('detach:open', target, docs),
       dropOutside: (target, docs) => t.invoke('detach:dropOutside', target, docs),

@@ -2,7 +2,7 @@
 //! renderer booted (5 s fallback), with the WebView2 settings and browser arguments of 1.1.4, the boot values for window.mc,
 //! the navigation lock and the minimize/restore detection behind `window:shown`.
 //!
-//! Wave 0 keeps the native title bar (decorations on); W1 replaces it with the caption buttons drawn like 1.1.4's overlay.
+//! No system title bar (W1): the page draws unimux's own title bar and the caption buttons like 1.1.4's overlay (caption.rs).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -86,6 +86,7 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
             .additional_browser_args(&browser_args(ctx.overrides.debug_port))
             .data_directory(ctx.data_dir.join("webview2"));
     }
+    builder = without_title_bar(builder);
     if offscreen {
         builder = builder.position(-6000.0, 0.0).skip_taskbar(true).focused(false).focusable(false);
     } else {
@@ -96,6 +97,7 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
     apply_webview_settings(&window);
     watch_window_state(&window, ctx.clone());
     forget_on_destroy(&window, ctx.clone());
+    crate::caption::install(&window, ctx);
 
     // The page may never report (a renderer stuck in boot): show the window after 5 s anyway.
     let fallback = ctx.clone();
@@ -104,6 +106,23 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
         show_main(&fallback);
     });
     Ok(window)
+}
+
+/// The window chrome of every app window (main, detached; W1): on Windows no system title bar (1.1.4's `titleBarStyle:
+/// 'hidden'`), the frame shadow and Aero snap stay; unimux's title bar is the page's (drag region through WebView2's
+/// non-client regions) and the caption buttons are drawn by the page over the hit-test child of caption.rs. macOS keeps
+/// its decorations until W2 (traffic lights).
+pub fn without_title_bar<'a, R: tauri::Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'a, R, M>,
+) -> WebviewWindowBuilder<'a, R, M> {
+    #[cfg(windows)]
+    {
+        builder.decorations(false).shadow(true)
+    }
+    #[cfg(not(windows))]
+    {
+        builder
+    }
 }
 
 /// Shows the main window once (first page load, renderer-boot or the 5 s fallback). An offscreen run (MC_OFFSCREEN) never
@@ -131,14 +150,27 @@ pub fn show_main(ctx: &AppContext) {
 
 #[cfg(windows)]
 pub(crate) fn show_without_focus(window: &WebviewWindow) {
-    use windows::Win32::UI::WindowsAndMessaging::{SW_SHOWNOACTIVATE, ShowWindow};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowRect, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos, ShowWindow,
+    };
     if let Ok(hwnd) = window.hwnd() {
+        let hwnd = windows::Win32::Foundation::HWND(hwnd.0);
         // SAFETY: the window's own handle; SW_SHOWNOACTIVATE never activates it.
         unsafe {
-            let _ = ShowWindow(windows::Win32::Foundation::HWND(hwnd.0), SW_SHOWNOACTIVATE);
+            // Off-screen runs only (MC_OFFSCREEN): the builder's position(-6000, 0) does not survive the creation (tao puts
+            // the window at the cascade position), so it is parked off every monitor here, before it is ever shown.
+            let mut r = windows::Win32::Foundation::RECT::default();
+            if GetWindowRect(hwnd, &mut r).is_err() || r.left > OFFSCREEN_X / 2 {
+                let _ = SetWindowPos(hwnd, None, OFFSCREEN_X, 0, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         }
     }
 }
+
+/// Where an off-screen run (MC_OFFSCREEN) keeps its windows: left of every monitor.
+#[cfg(windows)]
+const OFFSCREEN_X: i32 = -6000;
 
 #[cfg(not(windows))]
 pub(crate) fn show_without_focus(window: &WebviewWindow) {
@@ -163,12 +195,13 @@ pub fn forget_on_destroy(window: &WebviewWindow, ctx: Arc<AppContext>) {
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::Destroyed) {
             ctx.window_destroyed(&label);
+            crate::caption::forget(&label);
         }
     });
 }
 
 /// `window:shown` (false while minimized or hidden) and `window:maximized`, sent to that window on every change.
-fn watch_window_state(window: &WebviewWindow, ctx: Arc<AppContext>) {
+pub(crate) fn watch_window_state(window: &WebviewWindow, ctx: Arc<AppContext>) {
     let shown = Arc::new(AtomicBool::new(true));
     let maximized = Arc::new(AtomicBool::new(false));
     let w = window.clone();

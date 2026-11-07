@@ -739,6 +739,14 @@ const quitConfirm = createQuitConfirm({
 });
 guardedOn('app:quitGuard', (_e, ask: unknown) => { quitConfirm.setGuard(ask === true); });
 guardedOn('app:quitAnswer', (_e, answer: unknown) => { if (isQuitAnswer(answer)) quitConfirm.answer(answer); });
+// windowControls (1.2.0, W1): the Tauri build's page-drawn caption buttons. The Electron build keeps the native overlay and
+// never calls these; they act on the sender's own window so the shared API behaves the same in both builds.
+const ownWindow = (e: { sender: unknown }) => BrowserWindow.fromWebContents(e.sender as WebContents);
+guardedOn('window:minimize', (e) => { ownWindow(e)?.minimize(); });
+guardedOn('window:toggleMaximize', (e) => { const w = ownWindow(e); if (w) { if (w.isMaximized()) w.unmaximize(); else w.maximize(); } });
+guardedOn('window:close', (e) => { ownWindow(e)?.close(); });
+guardedHandle('window:isMaximized', (e) => ownWindow(e)?.isMaximized() ?? false, () => false);
+guardedOn('window:captionArea', () => undefined);
 cliDetector.onChange((map) => send('cli:changed', map));
 /** Guided install of the agent CLIs in a visible terminal (`install:` ptys are not cells). */
 const install = new InstallManager({

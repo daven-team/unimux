@@ -6,14 +6,14 @@
   "src/updatesplash/preload.ts"
  ],
  "summary": {
-  "methods": 248,
-  "invokeMethods": 207,
-  "sendMethods": 38,
+  "methods": 253,
+  "invokeMethods": 208,
+  "sendMethods": 42,
   "syncMembers": 3,
-  "channels": 215,
-  "invokeChannels": 177,
-  "sendChannels": 38,
-  "events": 44
+  "channels": 220,
+  "invokeChannels": 178,
+  "sendChannels": 42,
+  "events": 45
  },
  "ports": [
   "mc:pty-port",
@@ -1555,6 +1555,41 @@
    "methods": [
     "refreshUsage"
    ]
+  },
+  "window:captionArea": {
+   "kind": "send",
+   "domain": "window",
+   "methods": [
+    "windowControls.setCaptionArea"
+   ]
+  },
+  "window:close": {
+   "kind": "send",
+   "domain": "window",
+   "methods": [
+    "windowControls.close"
+   ]
+  },
+  "window:isMaximized": {
+   "kind": "invoke",
+   "domain": "window",
+   "methods": [
+    "windowControls.isMaximized"
+   ]
+  },
+  "window:minimize": {
+   "kind": "send",
+   "domain": "window",
+   "methods": [
+    "windowControls.minimize"
+   ]
+  },
+  "window:toggleMaximize": {
+   "kind": "send",
+   "domain": "window",
+   "methods": [
+    "windowControls.toggleMaximize"
+   ]
   }
  },
  "events": [
@@ -1684,6 +1719,28 @@
     {
      "name": "shown",
      "type": "boolean",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "window:maximized",
+   "domain": "window",
+   "params": [
+    {
+     "name": "maximized",
+     "type": "boolean",
+     "optional": false
+    }
+   ]
+  },
+  {
+   "name": "window:caption",
+   "domain": "window",
+   "params": [
+    {
+     "name": "state",
+     "type": "CaptionPointer",
      "optional": false
     }
    ]
@@ -2058,18 +2115,6 @@
      "optional": false
     }
    ]
-  },
-  {
-   "name": "window:maximized",
-   "domain": "window",
-   "params": [
-    {
-     "name": "maximized",
-     "type": "boolean",
-     "optional": false
-    }
-   ],
-   "note": "new in 1.2.0 (caption buttons, W1)"
   }
  ],
  "methods": [
@@ -5918,6 +5963,57 @@
    ],
    "returns": "Promise<{ ok: boolean; error?: 'busy' | 'readOnly' }>",
    "call": "t.invoke('accounts:removeCodex', id)"
+  },
+  {
+   "path": "windowControls.minimize",
+   "kind": "send",
+   "channel": "window:minimize",
+   "domain": "window",
+   "params": [],
+   "returns": "void",
+   "call": "t.send('window:minimize')"
+  },
+  {
+   "path": "windowControls.toggleMaximize",
+   "kind": "send",
+   "channel": "window:toggleMaximize",
+   "domain": "window",
+   "params": [],
+   "returns": "void",
+   "call": "t.send('window:toggleMaximize')"
+  },
+  {
+   "path": "windowControls.close",
+   "kind": "send",
+   "channel": "window:close",
+   "domain": "window",
+   "params": [],
+   "returns": "void",
+   "call": "t.send('window:close')"
+  },
+  {
+   "path": "windowControls.isMaximized",
+   "kind": "invoke",
+   "channel": "window:isMaximized",
+   "domain": "window",
+   "params": [],
+   "returns": "Promise<boolean>",
+   "call": "t.invoke('window:isMaximized')"
+  },
+  {
+   "path": "windowControls.setCaptionArea",
+   "kind": "send",
+   "channel": "window:captionArea",
+   "domain": "window",
+   "params": [
+    {
+     "name": "area",
+     "type": "CaptionArea | null",
+     "optional": false
+    }
+   ],
+   "returns": "void",
+   "call": "t.send('window:captionArea', area)"
   },
   {
    "path": "detach.open",

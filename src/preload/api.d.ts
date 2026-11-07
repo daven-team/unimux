@@ -24,6 +24,7 @@ import type { DbApi, DbPrompt, DbSessionState, DbVaultInfo } from '../shared/db'
 import type { SshHistoryApi } from '../shared/commandHistory';
 import type { DetachedTarget, DetachedWork, OpenInMain } from '../shared/detached';
 import type { WaitMark } from '../shared/waiting';
+import type { CaptionArea, CaptionPointer } from '../shared/caption';
 import type { AgentPromptOutcome, AgentPromptRequest } from '../shared/agentPrompt';
 
 export type DetachResult = { ok: true; id: string } | { ok: false; error: string };
@@ -218,6 +219,18 @@ export interface McApi {
   /** 1.1.2: saved Codex accounts (id without the `codex:` prefix). */
   makeMainCodexAccount(id: string): Promise<SwapResult>;
   removeCodexAccount(id: string): Promise<{ ok: boolean; error?: 'busy' | 'readOnly' }>;
+  /**
+   * 1.2.0 (Tauri on Windows, W1): the caption buttons the page draws in a window without a system title bar (1.1.4 had
+   * Electron's native overlay, which the Electron build keeps; it never calls these).
+   */
+  windowControls: {
+    minimize(): void;
+    toggleMaximize(): void;
+    close(): void;
+    isMaximized(): Promise<boolean>;
+    /** Where the buttons are, in client pixels (null: none), so the native hit-test window over them follows the page. */
+    setCaptionArea(area: CaptionArea | null): void;
+  };
   /** 1.0.6: tabs in their own window (main/detachedWindows.ts). Documents are FileDocument objects of the renderer. */
   detach: {
     /** From the main window: the tab goes to a new window (on another display when there is one). */
@@ -269,6 +282,10 @@ export interface McApi {
   on(channel: 'cli:changed', cb: (status: CliStatusMap) => void): () => void;
   /** False while the main window is minimized or hidden (the page itself always counts as visible: no background throttling). */
   on(channel: 'window:shown', cb: (shown: boolean) => void): () => void;
+  /** 1.2.0 (W1): this window was maximized or restored. */
+  on(channel: 'window:maximized', cb: (maximized: boolean) => void): () => void;
+  /** 1.2.0 (W1, Windows): the pointer over the caption buttons (hovered / held button), from the native hit-test window. */
+  on(channel: 'window:caption', cb: (state: CaptionPointer) => void): () => void;
   on(channel: 'cell:restarted', cb: (cellId: string) => void): () => void;
   on(channel: 'cell:hook', cb: (cellId: string, event: HookEvent, info?: HookInfo) => void): () => void;
   on(channel: 'cell:session', cb: (cellId: string, session: CellSession) => void): () => void;

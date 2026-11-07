@@ -214,7 +214,12 @@ export const CHANNEL_KINDS: Readonly<Record<string, 'invoke' | 'send'>> = {
   "update:install": "send",
   "update:open": "send",
   "usage:get": "invoke",
-  "usage:refresh": "invoke"
+  "usage:refresh": "invoke",
+  "window:captionArea": "send",
+  "window:close": "send",
+  "window:isMaximized": "invoke",
+  "window:minimize": "send",
+  "window:toggleMaximize": "send"
 };
 /** Positions of the arguments an event callback declares optional: a null from Rust becomes undefined there. */
 export const EVENT_OPTIONAL_ARGS: Readonly<Record<string, readonly number[]>> = {
@@ -234,6 +239,8 @@ export const EVENTS: readonly string[] = [
   "install:state",
   "cli:changed",
   "window:shown",
+  "window:maximized",
+  "window:caption",
   "cell:restarted",
   "cell:hook",
   "cell:session",
@@ -265,6 +272,5 @@ export const EVENTS: readonly string[] = [
   "fs:progress",
   "automation:start-cells",
   "mcp:info",
-  "automation:statuses",
-  "window:maximized"
+  "automation:statuses"
 ];
