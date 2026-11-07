@@ -19,13 +19,23 @@ use unimux_exec::Program;
 use unimux_platform::clipboard::{ClipboardIo, OsClipboard};
 use unimux_platform::notify::{Native, ToastCallback, ToastEvent, ToastSpec};
 
-/// An open dialog: `dialog:pickFolder` or `sound:pick`.
+/// An open dialog: `dialog:pickFolder`, `sound:pick`, `db:sqlite:pick`, `db:pickCaFile`.
 #[derive(Debug, Clone)]
 pub struct PickRequest {
     pub folder: bool,
     pub title: String,
-    /// `(name, extensions)` of the one filter.
+    /// `(name, extensions)` of the first filter.
     pub filter: Option<(String, Vec<String>)>,
+    /// Further filters after it (the DB dialogs add `{ name: '*', extensions: ['*'] }`).
+    pub more_filters: Vec<(String, Vec<String>)>,
+}
+
+/// A save dialog (`db:sqlite:create` without a path, `db:export`): the title, the suggested file name and the filters.
+#[derive(Debug, Clone)]
+pub struct SaveRequest {
+    pub title: String,
+    pub default_path: String,
+    pub filters: Vec<(String, Vec<String>)>,
 }
 
 pub trait Desktop: Send + Sync {
@@ -42,6 +52,8 @@ pub trait Desktop: Send + Sync {
     fn clipboard(&self) -> Arc<dyn ClipboardIo>;
     /// A native open dialog over `parent` (free-standing without one); the chosen path or None.
     fn pick(&self, parent: Option<WebviewWindow>, request: PickRequest) -> BoxFuture<'static, Option<String>>;
+    /// A native save dialog over `parent`; the chosen path or None.
+    fn save(&self, parent: Option<WebviewWindow>, request: SaveRequest) -> BoxFuture<'static, Option<String>>;
     /// `flashFrame(true)` / `(false)` on the window.
     fn flash(&self, window: &WebviewWindow, on: bool);
     /// macOS Dock badge ('' = none).
@@ -109,7 +121,7 @@ impl Desktop for RealDesktop {
     fn pick(&self, parent: Option<WebviewWindow>, request: PickRequest) -> BoxFuture<'static, Option<String>> {
         Box::pin(async move {
             let mut dialog = rfd::AsyncFileDialog::new().set_title(&request.title);
-            if let Some((name, extensions)) = &request.filter {
+            for (name, extensions) in request.filter.iter().chain(&request.more_filters) {
                 dialog = dialog.add_filter(name, extensions);
             }
             if let Some(parent) = &parent {
@@ -117,6 +129,19 @@ impl Desktop for RealDesktop {
             }
             let picked = if request.folder { dialog.pick_folder().await } else { dialog.pick_file().await };
             picked.map(|f| f.path().to_string_lossy().into_owned())
+        })
+    }
+
+    fn save(&self, parent: Option<WebviewWindow>, request: SaveRequest) -> BoxFuture<'static, Option<String>> {
+        Box::pin(async move {
+            let mut dialog = rfd::AsyncFileDialog::new().set_title(&request.title).set_file_name(&request.default_path);
+            for (name, extensions) in &request.filters {
+                dialog = dialog.add_filter(name, extensions);
+            }
+            if let Some(parent) = &parent {
+                dialog = dialog.set_parent(parent);
+            }
+            dialog.save_file().await.map(|f| f.path().to_string_lossy().into_owned())
         })
     }
 
@@ -251,6 +276,20 @@ impl Desktop for Recorder {
             "folder": request.folder,
             "title": request.title,
             "filter": request.filter.as_ref().map(|(name, ext)| json!({ "name": name, "extensions": ext })),
+            "moreFilters": request.more_filters.iter().map(|(name, ext)| json!({ "name": name, "extensions": ext })).collect::<Vec<_>>(),
+            "parent": parent.as_ref().map(|w| w.label().to_string()),
+            "answer": answer,
+        }));
+        Box::pin(async move { answer })
+    }
+
+    fn save(&self, parent: Option<WebviewWindow>, request: SaveRequest) -> BoxFuture<'static, Option<String>> {
+        let answer = self.answers.lock().pop_front().flatten();
+        self.record(json!({
+            "op": "save",
+            "title": request.title,
+            "defaultPath": request.default_path,
+            "filters": request.filters.iter().map(|(name, ext)| json!({ "name": name, "extensions": ext })).collect::<Vec<_>>(),
             "parent": parent.as_ref().map(|w| w.label().to_string()),
             "answer": answer,
         }));

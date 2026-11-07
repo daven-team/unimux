@@ -187,6 +187,10 @@ const redisOp = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('publish'), channel: rName, message: rValue, readWrite: z.boolean().optional() }).strict(),
 ]);
 
+/** The options of `db:connect` (an empty database: MySQL without a default database). */
+const connectOptions = z.object({ database: z.string().max(DB_LIMITS.database).refine((d) => !d.includes(' ')).optional() }).strict().optional().nullable();
+const pins = z.array(sessionId).max(1000);
+
 const INVALID: DbResult<never> = { ok: false, error: 'invalid' };
 
 export function createDbHandlers(service: DbService) {
@@ -206,7 +210,7 @@ export function createDbHandlers(service: DbService) {
     vaultInfo: () => service.vaultInfo(),
     connect: (connectionId: unknown, opts: unknown) => {
       // An empty database: MySQL without a default database (the service ignores it for other kinds).
-      const o = z.object({ database: z.string().max(DB_LIMITS.database).refine((d) => !d.includes(' ')).optional() }).strict().optional().nullable().safeParse(opts);
+      const o = connectOptions.safeParse(opts);
       if (!uuid.safeParse(connectionId).success || !o.success) return { ok: false as const, error: 'invalid' as const };
       return service.connect(connectionId as string, o.data?.database !== undefined ? { database: o.data.database } : {});
     },
@@ -227,7 +231,7 @@ export function createDbHandlers(service: DbService) {
       if (totalBytes(o.data) > REDIS_LIMITS.writeBytes) return INVALID;
       return service.op(s.data, { op: 'redis', req: o.data as RedisOp }, window);
     },
-    pin: (ids: unknown, window?: string) => { const p = z.array(sessionId).max(1000).safeParse(ids); if (p.success) service.pin(p.data, window); },
+    pin: (ids: unknown, window?: string) => { const p = pins.safeParse(ids); if (p.success) service.pin(p.data, window); },
   };
 }
 
@@ -249,3 +253,7 @@ export function registerDbIpc(guard: IpcGuard, h: DbHandlers, windowOf: (e: IpcS
   guard.guardedHandle('db:redis', (e, id: unknown, o: unknown) => h.redis(id, o, windowOf(e)), () => INVALID);
   guard.guardedOn('db:pin', (e, ids: unknown) => h.pin(ids, windowOf(e)));
 }
+
+/** The schemas above, for the 1.2.0 vectors (scripts/goldens-db-ipc.mjs: the Rust port answers the same rows). */
+export const DB_IPC_SCHEMAS = { connectionInput, passwordChange, testPassword, answer, connectOptions, op, redisOp, pins, uuid, sessionId } as const;
+export const dbIpcTotalBytes = totalBytes;

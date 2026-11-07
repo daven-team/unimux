@@ -32,7 +32,7 @@ use unimux_platform::taskbar::{Taskbar, TaskbarCell, TaskbarDeps};
 use unimux_platform::timers::ThreadScheduler;
 
 use crate::context::AppContext;
-pub use desktop::{Desktop, PickRequest, RealDesktop, Recorder};
+pub use desktop::{Desktop, PickRequest, RealDesktop, Recorder, SaveRequest};
 
 /// The editor lookup (`where cursor`, `where code`) is repeated at most every 5 minutes.
 const EDITOR_LOOKUP: Duration = Duration::from_secs(5 * 60);
@@ -239,6 +239,17 @@ impl OsService {
         }
     }
 
+    /// An open dialog of another domain (D1: `db:sqlite:pick`, `db:pickCaFile`) over `parent`'s window (else main); in an
+    /// offscreen check run the recorder answers it.
+    pub async fn pick_file(&self, parent: &str, request: PickRequest) -> Option<String> {
+        self.desktop.pick(self.dialog_parent(parent), request).await
+    }
+
+    /// A save dialog of another domain (D1: `db:sqlite:create`, `db:export`), like [`OsService::pick_file`].
+    pub async fn save_file(&self, parent: &str, request: SaveRequest) -> Option<String> {
+        self.desktop.save(self.dialog_parent(parent), request).await
+    }
+
     /// The window a dialog belongs to: the caller's, else main.
     fn dialog_parent(&self, label: &str) -> Option<WebviewWindow> {
         let app = self.ctx()?.app()?.clone();
@@ -438,7 +449,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         async move {
             let Some(ctx) = s.ctx() else { return Ok(Value::Null) };
             let title = translate(&language(&ctx.state.get()), "Wybierz folder projektu", &[]);
-            let request = PickRequest { folder: true, title, filter: None };
+            let request = PickRequest { folder: true, title, filter: None, more_filters: Vec::new() };
             Ok(s.desktop.pick(s.dialog_parent(&call.caller.label), request).await.map(Value::String).unwrap_or(Value::Null))
         }
     });
@@ -456,6 +467,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
                     translate(&language, "Pliki dźwiękowe", &[]),
                     SOUND_EXTENSIONS.iter().map(|e| e.to_string()).collect(),
                 )),
+                more_filters: Vec::new(),
             };
             let picked = s.desktop.pick(s.dialog_parent(&call.caller.label), request).await;
             Ok(picked.filter(|p| is_sound_file(p)).map(Value::String).unwrap_or(Value::Null))

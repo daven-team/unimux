@@ -9,8 +9,15 @@ license.workspace = true
 [dependencies]
 unimux-core.workspace = true
 unimux-ipc.workspace = true
+unimux-state.workspace = true
+unimux-oscrypt.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["net"] }
+tokio = { workspace = true, features = ["net", "rt", "sync", "time", "fs"] }
+parking_lot.workspace = true
+uuid.workspace = true
+futures.workspace = true
+getrandom.workspace = true
+zeroize.workspace = true
 bytes.workspace = true
 postgres-protocol.workspace = true
 mysql_common.workspace = true
@@ -20,6 +27,7 @@ base64.workspace = true
 ryu-js.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "macros", "time", "test-util"] }
 sha2.workspace = true
 serde.workspace = true
