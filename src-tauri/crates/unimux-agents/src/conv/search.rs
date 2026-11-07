@@ -394,11 +394,11 @@ pub fn search_docs_with<'a>(docs: impl IntoIterator<Item = &'a ConvDoc>, query: 
         }
         candidates.push(doc);
     }
-    // The documents are matched on the pass workers when there is much text (a big index), in place otherwise; the
+    // The documents are matched on the search workers when there is much text (a big index), in place otherwise; the
     // matches keep the order of the documents either way.
     let units: usize = candidates.iter().map(|d| d.folded.len()).sum();
     let found: Vec<Option<DocMatch>> = if units >= parallel_units && candidates.len() > 1 {
-        super::indexer::pool(super::indexer::workers(), &candidates, 8, |d| match_doc(d, &terms, role))
+        super::indexer::pool(super::indexer::search_workers(), &candidates, 8, |d| match_doc(d, &terms, role))
     } else {
         candidates.iter().map(|d| match_doc(d, &terms, role)).collect()
     };

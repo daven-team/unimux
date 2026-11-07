@@ -29,11 +29,14 @@ pub struct IndexerOptions {
     /// A pass started within this long after the last one is not repeated (a search per keystroke must not stat every file).
     pub fresh_ms: f64,
     pub now: fn() -> f64,
+    /// Threads of the pass workers: None shares the workers of the process (`workers()`); Some(n) gives this index its own
+    /// n threads (the tests force a small machine with it).
+    pub pass_threads: Option<usize>,
 }
 
 impl IndexerOptions {
     pub fn new(roots: Roots, cache_file: Option<PathBuf>) -> Self {
-        Self { roots, cache_file, fresh_ms: 4000.0, now: now_ms }
+        Self { roots, cache_file, fresh_ms: 4000.0, now: now_ms, pass_threads: None }
     }
 }
 
@@ -202,16 +205,31 @@ pub fn pool<T: Sync, R: Send>(workers: Option<&ThreadPool>, items: &[T], n: usiz
     out.into_inner().into_iter().flatten().collect()
 }
 
-/// The pass workers of the process (also the searches of a big index): started with the first use and kept (idle, they sleep), because starting threads for
+fn pool_threads() -> usize {
+    std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(4, 8)
+}
+
+/// The pass workers of the process: started with the first use and kept (idle, they sleep), because starting threads for
 /// every pass cost more than the stats of an unchanged index. Their number caps the parallelism only; the 24 / 6 limits
 /// of 1.1.4 stay the limits of what is in flight (1.1.4 ran them on libuv's 4 threads). None: they could not be started, and
-/// every pass starts its own threads.
+/// every pass starts its own threads. Pass jobs take the entries lock, so nothing may wait on these workers while it
+/// holds that lock (searches match on `search_workers()`).
 pub(crate) fn workers() -> Option<&'static ThreadPool> {
     static WORKERS: std::sync::OnceLock<Option<ThreadPool>> = std::sync::OnceLock::new();
     WORKERS
         .get_or_init(|| {
-            let n = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(4, 8);
-            ThreadPoolBuilder::new().num_threads(n).thread_name(|i| format!("conv-pass-{i}")).build().ok()
+            ThreadPoolBuilder::new().num_threads(pool_threads()).thread_name(|i| format!("conv-pass-{i}")).build().ok()
+        })
+        .as_ref()
+}
+
+/// The workers that match the documents of a big index. Kept apart from the pass workers: a pass job runs until no
+/// file is left, so a search queued behind the pass jobs would wait for the whole pass.
+pub(crate) fn search_workers() -> Option<&'static ThreadPool> {
+    static WORKERS: std::sync::OnceLock<Option<ThreadPool>> = std::sync::OnceLock::new();
+    WORKERS
+        .get_or_init(|| {
+            ThreadPoolBuilder::new().num_threads(pool_threads()).thread_name(|i| format!("conv-search-{i}")).build().ok()
         })
         .as_ref()
 }
@@ -345,6 +363,8 @@ pub struct Indexer {
     stats: Mutex<Stats>,
     /// Set when the service stops: a running pass ends after the files in flight.
     cancelled: AtomicBool,
+    /// The own pass workers (IndexerOptions::pass_threads).
+    own_workers: Option<ThreadPool>,
 }
 
 struct Listed {
@@ -400,7 +420,11 @@ fn list_codex(workers: Option<&ThreadPool>, root: &str) -> Vec<Listed> {
 
 impl Indexer {
     pub fn new(opts: IndexerOptions) -> Self {
+        let own_workers = opts.pass_threads.and_then(|n| {
+            ThreadPoolBuilder::new().num_threads(n.max(1)).thread_name(|i| format!("conv-pass-own-{i}")).build().ok()
+        });
         Self {
+            own_workers,
             opts,
             entries: RwLock::new(IndexMap::new()),
             loaded: Mutex::new(false),
@@ -543,7 +567,7 @@ impl Indexer {
 
     fn pass(&self) {
         self.load();
-        let workers = workers();
+        let workers = if self.opts.pass_threads.is_some() { self.own_workers.as_ref() } else { workers() };
         let started = self.now();
         self.stats.lock().passes += 1;
         let mut listed: IndexMap<String, ConvCli> = IndexMap::new();
@@ -636,11 +660,13 @@ impl Indexer {
         Ok(())
     }
 
-    /// The indexed conversations (a conversation copied to a second file counts once: the newest file).
-    fn docs(entries: &IndexMap<String, Entry>) -> Vec<&ConvDoc> {
-        let mut by_id: IndexMap<(ConvCli, &str), &DocState> = IndexMap::new();
+    /// The indexed conversations (a conversation copied to a second file counts once: the newest file), taken under a
+    /// short read lock: the search runs on this snapshot, so a pass can go on storing what it reads meanwhile.
+    fn docs(&self) -> Vec<Arc<DocState>> {
+        let entries = self.entries.read();
+        let mut by_id: IndexMap<(ConvCli, &str), &Arc<DocState>> = IndexMap::new();
         for e in entries.values() {
-            let d = &*e.doc;
+            let d = &e.doc;
             if !d.visible {
                 continue;
             }
@@ -653,14 +679,14 @@ impl Indexer {
                 }
             }
         }
-        by_id.into_values().map(|d| &d.doc).collect()
+        by_id.into_values().cloned().collect()
     }
 
     pub fn search(&self, query: &ConvQuery) -> Value {
         let started = self.now();
         let out = {
-            let entries = self.entries.read();
-            search_docs(Self::docs(&entries), query)
+            let docs = self.docs();
+            search_docs(docs.iter().map(|d| &d.doc), query)
         };
         let mut m = out.into_map();
         m.insert("indexing".into(), self.indexing_json());
