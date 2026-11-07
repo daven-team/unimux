@@ -262,6 +262,13 @@ pub fn validate(spec: &ToastSpec) -> Result<(), String> {
     win::build(spec).map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// The activation arguments a built toast carries, read back from the WinRT document of the `ToastNotification` (nothing
+/// is shown): the body's `launch` first, then each button's `arguments` in order. [`parse_activation`] maps them back.
+#[cfg(windows)]
+pub fn built_activations(spec: &ToastSpec) -> Result<Vec<String>, String> {
+    win::activations(spec).map_err(|e| e.to_string())
+}
+
 /// Development runs use their own AUMID (`com.unimux.app.dev`), which no Start menu shortcut carries; Windows shows toasts
 /// of such an id only when it is registered under `HKCU\Software\Classes\AppUserModelId\<id>` (display name, icon).
 /// Written once when the first notification of a development run is shown; the installed app's id comes from its shortcut.
@@ -274,7 +281,7 @@ pub fn register_app_id(app_id: &str, display_name: &str, icon: Option<&std::path
 mod win {
     use std::path::Path;
 
-    use windows::Data::Xml::Dom::XmlDocument;
+    use windows::Data::Xml::Dom::{XmlDocument, XmlElement};
     use windows::Foundation::TypedEventHandler;
     use windows::UI::Notifications::{
         ToastActivatedEventArgs, ToastDismissedEventArgs, ToastFailedEventArgs, ToastNotification, ToastNotificationManager,
@@ -291,6 +298,17 @@ mod win {
         let doc = XmlDocument::new()?;
         doc.LoadXml(&HSTRING::from(toast_xml(spec)))?;
         ToastNotification::CreateToastNotification(&doc)
+    }
+
+    pub fn activations(spec: &ToastSpec) -> Result<Vec<String>> {
+        let doc = build(spec)?.Content()?;
+        let mut out = vec![doc.DocumentElement()?.GetAttribute(&HSTRING::from("launch"))?.to_string_lossy()];
+        let actions = doc.GetElementsByTagName(&HSTRING::from("action"))?;
+        for i in 0..actions.Length()? {
+            let action: XmlElement = actions.Item(i)?.cast()?;
+            out.push(action.GetAttribute(&HSTRING::from("arguments"))?.to_string_lossy());
+        }
+        Ok(out)
     }
 
     pub fn show(app_id: &str, spec: &ToastSpec, on_event: ToastCallback) -> Result<ToastNotification> {

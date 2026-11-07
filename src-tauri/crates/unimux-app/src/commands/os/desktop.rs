@@ -168,17 +168,20 @@ impl Recorder {
     }
 
     /// Everything recorded so far (and cleared with `take`).
+    #[cfg_attr(not(feature = "test-bridge"), allow(dead_code))]
     pub fn log(&self, take: bool) -> Vec<Value> {
         let mut log = self.log.lock();
         if take { std::mem::take(&mut *log) } else { log.clone() }
     }
 
     /// The answer of the next dialog (None = cancelled).
+    #[cfg_attr(not(feature = "test-bridge"), allow(dead_code))]
     pub fn queue_answer(&self, answer: Option<String>) {
         self.answers.lock().push_back(answer);
     }
 
     /// Acts on recorded toast `index` like the user would: `click`, `button` (with `button`), `closed` or `failed`.
+    #[cfg_attr(not(feature = "test-bridge"), allow(dead_code))]
     pub fn activate(&self, index: usize, event: ToastEvent) -> bool {
         let callback = self.toasts.lock().get(index).map(|(_, cb)| cb.clone());
         match callback {

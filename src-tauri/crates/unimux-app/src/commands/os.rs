@@ -41,7 +41,8 @@ const EDITOR_LOOKUP: Duration = Duration::from_secs(5 * 60);
 pub struct OsService {
     ctx: Weak<AppContext>,
     pub desktop: Arc<dyn Desktop>,
-    /// Set when the desktop is the offscreen recorder (check builds with MC_OFFSCREEN).
+    /// Set when the desktop is the offscreen recorder (check builds with MC_OFFSCREEN); read by the test bridge.
+    #[cfg_attr(not(feature = "test-bridge"), allow(dead_code))]
     pub recorder: Option<Arc<Recorder>>,
     notices: Registry<Native>,
     pub secret: Arc<SecretClipboard>,
@@ -61,9 +62,7 @@ impl OsService {
             let r = Arc::new(Recorder::new(&ctx.data_dir));
             (r.clone(), Some(r))
         } else {
-            let packaged = unimux_core::PACKAGED;
-            let app_id = if packaged { "com.unimux.app" } else { "com.unimux.app.dev" };
-            (Arc::new(RealDesktop::new(app_id, !packaged)), None)
+            (Arc::new(RealDesktop::new(crate::AUMID, !unimux_core::PACKAGED)), None)
         };
         let scheduler = Arc::new(ThreadScheduler::default());
         let secret = SecretClipboard::new(desktop.clipboard(), scheduler.clone());

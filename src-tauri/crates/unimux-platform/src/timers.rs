@@ -119,15 +119,20 @@ mod tests {
                 h.fetch_add(1, Ordering::SeqCst);
             }),
         );
+        // A long delay for the cancelled one, so a loaded test machine cannot fire it before `cancel` runs.
         let h = hits.clone();
         let cancelled = s.after(
-            10,
+            300,
             Box::new(move || {
                 h.fetch_add(100, Ordering::SeqCst);
             }),
         );
         s.cancel(cancelled);
-        std::thread::sleep(Duration::from_millis(150));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while hits.load(Ordering::SeqCst) == 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        std::thread::sleep(Duration::from_millis(500));
         assert_eq!(hits.load(Ordering::SeqCst), 1);
     }
 }

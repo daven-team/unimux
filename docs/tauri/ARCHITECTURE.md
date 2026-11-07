@@ -101,9 +101,9 @@ vite.config.ts                  plain Vite for the renderer (replaces electron.v
 Version pins (checked with cargo search/info on 2026-11-06; crates.io and npm already list 3.0.0-alpha, never use it, CI greps Cargo.lock and package-lock.json for `3.0.0-alpha`):
 
 - tauri 2.12.5, tauri-build 2.7.4, @tauri-apps/api and @tauri-apps/cli ~2.12.4
-- plugins: dialog 2.8.4, clipboard-manager 2.5.0, opener 2.7.2, process 2.4.0, notification 2.8.0 (permission prompt only), os 2.4.0. tauri-plugin-updater is not used for installing (section 8); single-instance, window-state, deep-link, global-shortcut, autostart are not used.
+- plugins: process 2.4.0, os 2.4.0. tauri-plugin-updater is not used for installing (section 8); single-instance, window-state, deep-link, global-shortcut, autostart are not used. W4 (2026-11-06) dropped dialog, clipboard-manager, opener and notification: the renderer never calls them itself, every OS call goes through a main-side command, so unimux-platform calls the APIs directly (rfd 0.17.2, the library tauri-plugin-dialog wraps, for the open dialogs; the Win32 clipboard with the history / cloud exclusion formats and NSPasteboard with ConcealedType; ShellExecuteExW / SHOpenFolderAndSelectItems and `open` for the shell; trash 5.3.0 for trashItem; WinRT toasts and UNUserNotificationCenter).
 - tokio 1.54.1, serde 1.0.229, serde_json 1.0.154 (preserve_order, float_roundtrip), thiserror 2.0.21, parking_lot 0.13.0, uuid 1.29.0, sha2 0.11.1, base64 0.23.1
-- windows 0.62.2, webview2-com 0.39.1, tauri-winrt-notification 0.8.1, objc2-* 0.3.2, security-framework 3.7.0
+- windows 0.62.2 (incl. the WinRT `UI_Notifications` / `Data_Xml_Dom` toasts; tauri-winrt-notification is not used: the windows crate is a dependency anyway, and the app keeps each `ToastNotification` object in its 50-entry registry with Activated / Dismissed / Failed on one callback), webview2-com 0.39.1, objc2 0.6.5, objc2-* 0.3.2, block2 0.6.2, security-framework 3.7.0
 - aes-gcm 0.11.1, aes 0.9.4, cbc 0.2.1, pbkdf2 0.13.0, zeroize 1.9.1
 - reqwest 0.13.5 (rustls, no gzip), junction 2.1.0, dunce 1.0.5, fs4 (instance lock), interprocess 2.x (second-instance socket), rusty-leveldb 4.0.2, process-wrap 10.0.1
 - russh 0.65.1 (SP7: `default-features = false, features = ["ring", "rsa", "flate2"]`, the same ring backend as rustls, no aws-lc-sys) with its pinned ssh-key =0.7.0-rc.11 plus feature `tdes`; legacy encrypted PEM through aes 0.9.4 / cbc 0.2.1 / ctr 0.10.1 / des 0.9.0 / blowfish 0.10.0 / md5 0.8.1 (own code, S2); the client offers exactly the 1.1.4 algorithm list (ssh2 1.17 defaults under Electron 45), see docs/tauri/spikes/SP7.md
@@ -248,8 +248,8 @@ Fallback if SP3 or SP4 fail: Electron bridge release 1.1.5 whose splash and macO
 | WebGL | 96 contexts via browser args, renderer pool 64 | WebKit caps about 16 per page: `MAX_WEBGL_CONTEXTS` about 12, WebglLimit learning, DOM renderer fallback |
 | Background | throttling flags; SP1: wry never sets IsVisible(false) on minimize or window hide, the 400 ms tick stays exact minimized (WS_VISIBLE + iconic, 390 s), hidden and never shown (8 min); no Rust tick needed | `backgroundThrottling: 'disabled'` (macOS 14+), App Nap off via NSProcessInfo activity |
 | OS file drop | dragDropEnabled(false) + `chrome.webview.postMessageWithAdditionalObjects` -> ICoreWebView2File.Path (HTML5 DnD keeps working) | native DragDropEvent routed by `elementFromPoint` |
-| Notifications with buttons | tauri-winrt-notification, AUMID com.unimux.app | UNUserNotificationCenter categories (objc2); verify with ad-hoc signing |
-| Badge / attention | request_user_attention | NSDockTile badge |
+| Notifications with buttons | WinRT ToastNotification (windows crate), launch / button arguments `unimux:click` / `unimux:button:<i>`, AUMID com.unimux.app (dev: com.unimux.app.dev registered under HKCU\Software\Classes\AppUserModelId) | UNUserNotificationCenter categories per button set (objc2); needs an app bundle; verify with ad-hoc signing |
+| Badge / attention | no taskbar badge (1.1.2); flash = FlashWindowEx(FLASHW_ALL, 4) like Chromium's flashFrame, stopped on focus | NSDockTile badge (200 ms debounce), request_user_attention(Informational) = one bounce |
 | Session end | HWND subclass WM_QUERYENDSESSION / WM_ENDSESSION | NSWorkspaceWillPowerOffNotification, applicationShouldTerminate |
 | Renderer crash | ProcessFailed + heartbeat | webContentProcessDidTerminate + heartbeat |
 | Secrets | DPAPI Local State key | Keychain, one re-approval prompt |

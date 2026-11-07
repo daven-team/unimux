@@ -4,7 +4,9 @@
 // toast, dialog, browser, Explorer window, beep or flash ever reaches the user's screen; the script reads what was asked,
 // answers the dialogs and presses the toast buttons through the test bridge. Scratch data dir and home only.
 //
-//   npm run build:check && node scripts/verify-tauri-os.mjs
+//   npm run build:check && node scripts/verify-tauri-os.mjs [--quick]
+//
+// --quick skips the two waits on the app's real 60 s clipboard timer (about 2 minutes).
 //
 // The parts of scripts/verify-notify-actions.mjs that need a running agent terminal (Enter / Esc typed into a fake
 // permission dialog, the stale-answer check of the renderer against the screen) wait for P3 / P4 / H1.
@@ -205,6 +207,20 @@ try {
   await settle();
   await os({ action: 'clipboardFire' });
   check('the clear leaves what the user copied meanwhile', (await mc(`window.mc.clipboardRead()`)) === 'copied by the user later');
+  if (!process.argv.includes('--quick')) {
+    // The real 60 s timer of the app (not the clipboardFire shortcut): cleared after a minute, not before, and only while
+    // the clipboard still holds the key.
+    await mc(`window.mc.clipboardWriteSecret('key-timer')`);
+    await sleep(57000);
+    const early = clip().text;
+    await sleep(5000);
+    check('the real timer clears the key after 60 s, not before', early === 'key-timer' && clip().text === '' && (await os({ action: 'secretPending' })) === false, `${early} -> ${clip().text}`);
+    await mc(`window.mc.clipboardWriteSecret('key-timer-2')`);
+    await sleep(1000);
+    await mc(`window.mc.clipboardWrite('the user copied this')`);
+    await sleep(61000);
+    check('the real timer leaves what the user copied meanwhile', clip().text === 'the user copied this' && (await os({ action: 'secretPending' })) === false, clip().text);
+  }
 
   // ── shell ──────────────────────────────────────────────────────────────
   await mc(`window.mc.openExternal('https://example.com/a b')`);
