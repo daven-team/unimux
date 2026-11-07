@@ -5926,6 +5926,8 @@ dependencies = [
  "tokio-util",
  "unimux-core",
  "unimux-ipc",
+ "unimux-mcp",
+ "unimux-state",
  "uuid",
 ]
 

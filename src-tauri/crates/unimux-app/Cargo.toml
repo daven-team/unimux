@@ -15,7 +15,7 @@ path = "src/main.rs"
 # Electron's `!app.isPackaged`: MC_* overrides, the CDP port, devtools. On in the dev and check flavours, off in release.
 dev-overrides = ["unimux-core/dev-overrides", "tauri/devtools"]
 # Debug-only commands for the real-app harness (state peek, emit, panic injection, capability probe). Never in release.
-test-bridge = []
+test-bridge = ["unimux-mcp/fake-automation"]
 
 [build-dependencies]
 tauri-build.workspace = true

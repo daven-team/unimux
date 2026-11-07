@@ -35,6 +35,8 @@
 //                                     the file operations and the local pane (files-ops.jsonl, see scripts/goldens-fileops.mjs)
 //   test/golden/search-*.jsonl       project search and replace: patterns, globs, project searches, replaces (see
 //                                     scripts/goldens-search.mjs)
+//   test/golden/mcp-tools.json, mcp-zod.jsonl, mcp-calls.jsonl   the MCP tool layer: tools/list per role, instructions, the
+//                                     zod checks and callTool over a scripted service (see scripts/goldens-mcp.mjs)
 //   test/golden/accounts-store.jsonl, codex-accounts.jsonl, accounts-identity.jsonl   the account stores (1.1.4's code, run on
 //                                     scratch dirs) and the identity helpers (see scripts/goldens-accounts.mjs)
 //   test/golden/changelog.jsonl, monitor.jsonl   parseReleases / compareVersions and the Monitor panel's trees (see
@@ -64,6 +66,7 @@ import { g8Goldens } from './goldens-g8.mjs';
 import { backwardRows, contextScanRows, sessionListRows, sessionPathRows } from './goldens-sessions.mjs';
 import { historyRows, historyRuleRows, knownHostsRows, vaultRows } from './goldens-ssh.mjs';
 import { activateRows } from './goldens-activate.mjs';
+import { mcpGoldens } from './goldens-mcp.mjs';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -368,6 +371,11 @@ const files = {
   'ssh-history-rules.jsonl': jsonl(historyRuleRows(historyRules)),
   'accounts-activate.jsonl': jsonl(await activateRows(activateModules)),
 };
+const mcp = await mcpGoldens(load);
+files['mcp-tools.json'] = `${JSON.stringify(mcp.tools, null, 1)}
+`;
+files['mcp-zod.jsonl'] = jsonl(mcp.zod);
+files['mcp-calls.jsonl'] = jsonl(mcp.calls);
 const updateStrings = updateStringsGolden({ root, translate });
 files['update-strings.json'] = `${JSON.stringify(updateStrings, null, 1)}\n`;
 files['update-config.json'] = `${JSON.stringify(updateConfigGolden({ strings: updateStrings }), null, 1)}\n`;

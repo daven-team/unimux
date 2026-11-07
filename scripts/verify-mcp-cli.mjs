@@ -1,5 +1,10 @@
-// End-to-end check of the unimux MCP server with the real, installed agent CLIs and no sign-in or model usage: the server
-// runs in-process (fake automation, test/helpers/mcpHarness.ts) and the model is a local mock.
+// End-to-end check of the unimux MCP server with the real, installed agent CLIs and no sign-in or model usage. The model is a
+// local mock. The server under test:
+//   - Tauri (default): the check build's own MCP server (M1 server, M2 tools) on a seeded scratch state, with the stand-in
+//     automation of the check build (unimux-mcp fake-automation); tokens come from the test bridge (`mcp-token`), the
+//     state the automation answers from from `mcp-automation`. Offscreen, scratch MC_DATA_DIR and home.
+//   - MC_APP_TARGET=electron / --target=electron: the 1.1.4 TS reference in-process (fake automation dependencies,
+//     test/helpers/mcpHarness.ts).
 // Claude Code (skipped when not installed):
 //   1. `claude mcp list` (scratch CLAUDE_CONFIG_DIR) health-checks the server with a cell's bearer token; a revoked token fails;
 //   2. `claude -p --mcp-config <the per-cell file unimux writes>` against a mock Anthropic Messages API: the "model" loads the
@@ -8,26 +13,18 @@
 // Codex (skipped when not installed):
 //   3. `codex exec` with the same -c overrides a Codex cell gets (url, bearer_token_env_var) against a mock Responses API: the
 //      "model" calls get_context through the mcp__unimux namespace.
-// Usage: node scripts/verify-mcp-cli.mjs   (nothing reaches the real ~/.claude, ~/.codex or any API).
+// Usage: node scripts/verify-mcp-cli.mjs   (npm run build:check first; nothing reaches the real ~/.claude, ~/.codex or any API).
 //        MCP_CLI_WAIT=600 node scripts/verify-mcp-cli.mjs   also runs a long wait_for in each CLI (the per-CLI wait caps).
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
-import { BlockedError, isTauri } from './real-app.mjs';
-import { removeScratch } from './app-env.mjs';
-
-// The server under test: with MC_APP_TARGET=electron the TS reference in-process (test/helpers/mcpHarness.ts). The Tauri
-// build serves MCP from the app itself (M1 server, M2 tools and the fake automation the checks below expect): until M2 lands
-// this check is blocked; M2 points it at the check build's server (mcp:info, a seeded state like verify-mcp-app.mjs).
-if (isTauri) {
-  console.error(new BlockedError('M2', 'the MCP server of the check build').message);
-  process.exit(1);
-}
+import { bridgeCall, freePort, isTauri, killAppTreeAndWait, quitApp, requireBuild, spawnApp, waitForMainPage } from './real-app.mjs';
+import { removeScratch, scratchHome, scrubAppEnv } from './app-env.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'unimux-mcp-cli-'));
 const out = join(root, 'harness.mjs');
@@ -36,6 +33,102 @@ await build({ stdin: { contents: "export { startMcpHarness } from './test/helper
   external: ['electron', 'node-pty'], logLevel: 'silent', banner: { js: "import{createRequire as __cr}from'module';const require=__cr(import.meta.url);" } });
 const { startMcpHarness, writeClaudeMcpConfig } = await import(pathToFileURL(out).href);
 const debug = (...args) => { if (process.env.MOCK_DEBUG) console.error(...args); };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * The server under test behind one interface: url, the three team cells and the side grid with an open task (close_grid
+ * needs the user's confirmation for it), tokens, the server info, the tabs the automation sees, and stop.
+ */
+async function electronHarness() {
+  const h = await startMcpHarness(undefined, { rateLimit: false });
+  const side = await h.service.execute('create_grid', { name: 'Side', cells: [{ profileId: 'codex', role: 'worker', name: 'Side worker', prompt: 'Work' }] }, h.coordinator.id)
+    .catch(async (error) => { await h.server.stop(); throw error; });
+  return {
+    url: h.url, coordinator: h.coordinator.id, worker: h.worker.id, reviewer: h.reviewer.id, sideGridId: side.gridId,
+    issueToken: async (cell) => h.server.issueToken(cell), revokeCell: async (cell) => h.server.revokeCell(cell),
+    info: async () => h.server.getInfo(), sessions: async () => h.server.sessionCount, tabs: async () => h.controller.get().projects[0].tabs,
+    stop: () => h.server.stop(),
+  };
+}
+
+const LEAD = 'cli-lead', WORKER = 'cli-backend', REVIEWER = 'cli-review', SIDE = 'cli-side', SIDE_WORKER = 'cli-side-worker';
+async function tauriHarness() {
+  requireBuild();
+  const data = join(root, 'app-data'), project = join(root, 'app-project'), agents = join(root, 'fake-agents');
+  for (const dir of [data, project, agents]) mkdirSync(dir, { recursive: true });
+  // The cells' agents must not start real CLIs: a stand-in claude / codex that only waits (the app may start the cells).
+  const win = process.platform === 'win32';
+  for (const cli of ['claude', 'codex']) {
+    const file = join(agents, win ? `${cli}.cmd` : cli);
+    writeFileSync(file, win ? '@echo off\r\nif "%~1"=="--version" (echo 0.0.0& exit /b 0)\r\nping -n 100000 127.0.0.1 >nul\r\n' : '#!/bin/sh\n[ "$1" = "--version" ] && echo 0.0.0 && exit 0\nsleep 100000\n');
+    if (!win) chmodSync(file, 0o755);
+  }
+  const layout = (n) => ({ cols: n, rows: 1, areas: Array.from({ length: n }, (_, i) => ({ col: i, row: 0, colSpan: 1, rowSpan: 1 })) });
+  writeFileSync(join(data, 'state.json'), JSON.stringify({
+    version: 1, activeProjectId: 'p', projects: [{ id: 'p', name: 'Project', path: project, color: '#3b82f6', archive: [], activeTabId: 'g', tabs: [
+      { id: 'g', name: 'Team', layout: layout(3), cells: [
+        { id: LEAD, name: 'Lead', profileId: 'claude', role: 'coordinator' }, { id: WORKER, name: 'Backend', profileId: 'codex', role: 'worker' },
+        { id: REVIEWER, name: 'Review', profileId: 'claude', role: 'worker' }] },
+      { id: SIDE, name: 'Side', layout: layout(1), cells: [{ id: SIDE_WORKER, name: 'Side worker', profileId: 'codex', role: 'worker' }] },
+    ] }],
+    profiles: [{ id: 'claude', name: 'Claude', cli: 'claude', args: '', color: '#d97757' }, { id: 'codex', name: 'Codex', cli: 'codex', args: '', color: '#10a37f' },
+      { id: 'shell', name: 'Terminal', cli: 'shell', args: '', color: '#7a7a7a' }],
+    snippets: [], presets: [], settings: { language: 'en', fontSize: 13, notifications: false, lastProfileId: 'claude' },
+    automation: { paused: false, events: [], messages: [], tasks: [{ id: 'cli-task', projectId: 'p', cellId: SIDE_WORKER, fromCellId: LEAD, title: 'Work', prompt: 'Work',
+      status: 'queued', delivery: 'pending', createdAt: 1, updatedAt: 1 }] },
+    sidebarCollapsed: false, snippetsOpen: false, sidebarWidth: 228, snippetsWidth: 210,
+  }));
+  const port = await freePort();
+  const home = scratchHome(root);
+  const pathKey = Object.keys(process.env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+  const env = { ...scrubAppEnv({ ...process.env }), MC_DATA_DIR: data, MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port), ...home.env,
+    [pathKey]: `${agents}${win ? ';' : ':'}${process.env[pathKey] ?? ''}` };
+  const child = spawnApp({ env });
+  let socket;
+  // A start that fails (no window, no CDP socket, no MCP server) must not leave the check build and its cells running.
+  try {
+    const target = await waitForMainPage(port, { child, ms: 45000 });
+    socket = new WebSocket(target.webSocketDebuggerUrl);
+    await new Promise((r, j) => { socket.addEventListener('open', r, { once: true }); socket.addEventListener('error', j, { once: true }); });
+    return await tauriSession(child, socket);
+  } catch (error) {
+    try { socket?.close(); } catch { /* closed */ }
+    await killAppTreeAndWait(child);
+    throw error;
+  }
+}
+
+/** The harness over the started check build's CDP socket; throws when its MCP server does not come up. */
+async function tauriSession(child, socket) {
+  let id = 0;
+  const pending = new Map();
+  socket.addEventListener('message', (e) => { const m = JSON.parse(e.data); const p = pending.get(m.id); if (p) { pending.delete(m.id); if (m.error) p.reject(new Error(m.error.message)); else p.resolve(m.result); } });
+  const cdp = (method, params = {}) => new Promise((res, rej) => { const n = ++id; pending.set(n, { resolve: res, reject: rej }); socket.send(JSON.stringify({ id: n, method, params })); });
+  const evaluate = async (expression) => {
+    const r = await cdp('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
+    return r.result.value;
+  };
+  let info;
+  for (let i = 0; i < 150 && !info?.running; i++) {
+    info = await evaluate('window.mc?.getMcpInfo ? window.mc.getMcpInfo() : null').catch(() => null);
+    if (!info?.running) await sleep(200);
+  }
+  if (!info?.running) throw new Error(`the check build's MCP server did not start: ${JSON.stringify(info)}`);
+  return {
+    url: info.url, coordinator: LEAD, worker: WORKER, reviewer: REVIEWER, sideGridId: SIDE,
+    issueToken: async (cell) => (await bridgeCall(evaluate, 'mcp-token', { cell })).token,
+    revokeCell: (cell) => bridgeCall(evaluate, 'mcp-token', { cell, revoke: true }),
+    info: () => evaluate('window.mc.getMcpInfo()'),
+    sessions: async () => 'n/a',
+    tabs: async () => (await bridgeCall(evaluate, 'mcp-automation')).state.projects[0].tabs,
+    stop: async () => {
+      await quitApp({ child, evaluate, cdp, ms: 10000 }).catch(() => undefined);
+      try { socket.close(); } catch { /* closed */ }
+      await killAppTreeAndWait(child);
+    },
+  };
+}
 
 const listen = async (server) => { await new Promise((r) => server.listen(0, '127.0.0.1', r)); return `http://127.0.0.1:${server.address().port}`; };
 const run = (file, args, options) => new Promise((resolveRun) => {
@@ -90,18 +183,19 @@ const resultText = (r) => (Array.isArray(r?.content) ? r.content.map((c) => c.te
 const report = [];
 /** MCP_CLI_WAIT=<seconds> adds the long wait_for checks (Claude up to 600 s, Codex up to 170 s); off by default (they take minutes). */
 const waitSec = Number(process.env.MCP_CLI_WAIT) || 0;
-const h = await startMcpHarness(undefined, { rateLimit: false });
+let h;
 const servers = [];
 try {
+  h = isTauri ? await tauriHarness() : await electronHarness();
+  report.push(`server: ${isTauri ? 'the Tauri check build' : 'the 1.1.4 TS reference'} at ${h.url}`);
   if (await installed('claude')) {
     const configDir = join(root, 'claude-config'), project = join(root, 'claude-project');
     mkdirSync(configDir); mkdirSync(project);
-    const side = await h.service.execute('create_grid', { name: 'Side', cells: [{ profileId: 'codex', role: 'worker', name: 'Side worker', prompt: 'Work' }] }, h.coordinator.id);
     const mock = claudeMock([
       [{ id: 'toolu_search', name: 'ToolSearch', input: { query: 'select:mcp__unimux__get_context,mcp__unimux__list_agents,mcp__unimux__update_task,mcp__unimux__close_grid', max_results: 5 } }],
       [{ id: 'toolu_ctx', name: 'mcp__unimux__get_context', input: { profiles: true } }, { id: 'toolu_agents', name: 'mcp__unimux__list_agents', input: {} },
         { id: 'toolu_bad', name: 'mcp__unimux__update_task', input: { taskId: 'nope', status: 'completed' } }],
-      [{ id: 'toolu_close', name: 'mcp__unimux__close_grid', input: { gridId: side.gridId } }],
+      [{ id: 'toolu_close', name: 'mcp__unimux__close_grid', input: { gridId: h.sideGridId } }],
     ]);
     servers.push(mock.server);
     const env = {
@@ -112,24 +206,24 @@ try {
     const claude = (args) => run('claude', args, { cwd: project, env });
     report.push(`claude ${(await claude(['--version'])).stdout.trim()}`);
 
-    const token = h.server.issueToken(h.coordinator.id);
+    const token = await h.issueToken(h.coordinator);
     assert.equal((await claude(['mcp', 'add-json', '-s', 'user', 'unimux', JSON.stringify({ type: 'http', url: h.url, headers: { Authorization: `Bearer ${token}` } })])).code, 0);
     const list = await claude(['mcp', 'list']);
     const line = list.stdout.split(/\r?\n/).find((l) => l.includes('unimux'))?.trim();
     report.push(`claude mcp list: ${line}`);
     assert.match(line ?? '', /Connected/i, list.stdout + list.stderr);
-    assert.ok(h.server.getInfo().connectedCellIds.includes(h.coordinator.id), 'the health check listed the tools');
+    assert.ok((await h.info()).connectedCellIds.includes(h.coordinator), 'the health check listed the tools');
     await claude(['mcp', 'remove', '-s', 'user', 'unimux']);
 
-    const stale = h.server.issueToken(h.reviewer.id);
-    h.server.revokeCell(h.reviewer.id);
+    const stale = await h.issueToken(h.reviewer);
+    await h.revokeCell(h.reviewer);
     await claude(['mcp', 'add-json', '-s', 'user', 'stale', JSON.stringify({ type: 'http', url: h.url, headers: { Authorization: `Bearer ${stale}` } })]);
     const staleLine = (await claude(['mcp', 'list'])).stdout.split(/\r?\n/).find((l) => l.includes('stale'))?.trim();
     report.push(`claude mcp list, revoked token: ${staleLine}`);
     assert.match(staleLine ?? '', /401|Failed/i);
     await claude(['mcp', 'remove', '-s', 'user', 'stale']);
 
-    const cellConfig = writeClaudeMcpConfig(join(root, 'mcp'), h.coordinator.id, h.url, h.server.issueToken(h.coordinator.id));
+    const cellConfig = writeClaudeMcpConfig(join(root, 'mcp'), h.coordinator, h.url, await h.issueToken(h.coordinator));
     const result = await claude(['-p', 'Use the unimux tools.', '--mcp-config', cellConfig, '--strict-mcp-config', '--output-format', 'json',
       '--allowedTools', 'mcp__unimux__get_context,mcp__unimux__list_agents,mcp__unimux__update_task,mcp__unimux__close_grid', '--model', 'claude-sonnet-4-5']);
     assert.equal(result.code, 0, result.stdout + result.stderr);
@@ -137,14 +231,14 @@ try {
     report.push(`claude -p: ${JSON.parse(result.stdout).result}; unimux tools announced to the model: ${mock.seen.offered.length}`);
     assert.ok(mock.seen.offered.includes('mcp__unimux__create_grid'), 'the coordinator sees create_grid');
     const ctx = JSON.parse(resultText(byId.toolu_ctx));
-    assert.equal(ctx.cellId, h.coordinator.id);
+    assert.equal(ctx.cellId, h.coordinator);
     assert.equal(ctx.role, 'coordinator');
     assert.equal(JSON.parse(resultText(byId.toolu_agents)).agents.length, 4);
     assert.equal(byId.toolu_bad.is_error, true);
     report.push(`claude invalid update_task: ${resultText(byId.toolu_bad).split('\n')[0]}`);
     assert.equal(byId.toolu_close.is_error, true);
     assert.match(resultText(byId.toolu_close), /did not confirm/);
-    assert.ok(h.controller.get().projects[0].tabs.some((t) => t.id === side.gridId), 'an unconfirmed close_grid closes nothing');
+    assert.ok((await h.tabs()).some((t) => t.id === h.sideGridId), 'an unconfirmed close_grid closes nothing');
     report.push(`claude close_grid elicitation (-p answers cancel): ${resultText(byId.toolu_close).split('\n')[0].slice(0, 90)}`);
 
     // MCP_CLI_WAIT=<seconds>: a wait_for that long, as a Claude cell runs it (the per-cell config with its `timeout`): it must
@@ -157,7 +251,7 @@ try {
       servers.push(waitMock.server);
       const waitEnv = { ...env, ANTHROPIC_BASE_URL: await listen(waitMock.server) };
       const started = Date.now();
-      const waited = await run('claude', ['-p', 'Wait.', '--mcp-config', writeClaudeMcpConfig(join(root, 'mcp'), h.coordinator.id, h.url, h.server.issueToken(h.coordinator.id)), '--strict-mcp-config',
+      const waited = await run('claude', ['-p', 'Wait.', '--mcp-config', writeClaudeMcpConfig(join(root, 'mcp'), h.coordinator, h.url, await h.issueToken(h.coordinator)), '--strict-mcp-config',
         '--output-format', 'json', '--allowedTools', 'mcp__unimux__wait_for', '--model', 'claude-sonnet-4-5'], { cwd: project, env: waitEnv, timeout: (waitSec + 120) * 1000 });
       const answer = waitMock.seen.results.find((r) => r.tool_use_id === 'toolu_wait');
       report.push(`claude wait_for ${Math.min(waitSec, 600)} s: ${resultText(answer).slice(0, 80)} after ${Math.round((Date.now() - started) / 1000)} s`);
@@ -195,15 +289,15 @@ try {
     const base = await listen(mock);
     const version = (await run('codex', ['--version'], { env: process.env })).stdout.trim();
     report.push(version);
-    const token = h.server.issueToken(h.worker.id);
+    const token = await h.issueToken(h.worker);
     // The same overrides buildCliCommand gives a Codex cell (src/shared/profiles.ts).
     const args = ['exec', '--skip-git-repo-check', '-c', 'model_provider="mock"', '-c', `model_providers.mock={name="mock",base_url="${base}/v1",wire_api="responses",env_key="MOCK_KEY"}`,
       '-c', `mcp_servers.unimux.url="${h.url}"`, '-c', 'mcp_servers.unimux.bearer_token_env_var="UNIMUX_MCP_TOKEN"', '-c', 'mcp_servers.unimux.tool_timeout_sec=180', '-m', 'gpt-5', 'Use unimux get_context.'];
     const result = await run('codex', args, { cwd: project, env: { ...process.env, CODEX_HOME: home, MOCK_KEY: 'mock', UNIMUX_MCP_TOKEN: token, NO_PROXY: '127.0.0.1' } });
     assert.match(result.stdout, /DONE/, result.stdout + result.stderr);
     const text = typeof output === 'string' ? output : JSON.stringify(output);
-    assert.ok(text.includes(h.worker.id), `codex got get_context: ${text}`);
-    report.push(`codex exec: get_context answered for the worker cell; sessions open: ${h.server.sessionCount}`);
+    assert.ok(text.includes(h.worker), `codex got get_context: ${text}`);
+    report.push(`codex exec: get_context answered for the worker cell; sessions open: ${await h.sessions()}`);
 
     // MCP_CLI_WAIT: the longest wait_for of a Codex caller (170 s) within its tool_timeout_sec of 180.
     if (waitSec) {
@@ -231,7 +325,7 @@ try {
       const waitBase = await listen(waitMock);
       const waitArgs = args.map((arg) => arg.replace(base, waitBase)).slice(0, -1).concat('Wait with unimux wait_for.');
       const started = Date.now();
-      const waited = await run('codex', waitArgs, { cwd: project, timeout: (waitSec + 120) * 1000, env: { ...process.env, CODEX_HOME: home, MOCK_KEY: 'mock', UNIMUX_MCP_TOKEN: h.server.issueToken(h.worker.id), NO_PROXY: '127.0.0.1' } });
+      const waited = await run('codex', waitArgs, { cwd: project, timeout: (waitSec + 120) * 1000, env: { ...process.env, CODEX_HOME: home, MOCK_KEY: 'mock', UNIMUX_MCP_TOKEN: await h.issueToken(h.worker), NO_PROXY: '127.0.0.1' } });
       const text = typeof waitOutput === 'string' ? waitOutput : JSON.stringify(waitOutput);
       report.push(`codex wait_for ${Math.min(waitSec, 170)} s: ${String(text).slice(0, 80)} after ${Math.round((Date.now() - started) / 1000)} s`);
       assert.match(waited.stdout, /DONE/, waited.stdout + waited.stderr);
@@ -246,7 +340,7 @@ try {
   console.error(error);
   process.exitCode = 1;
 } finally {
-  await h.server.stop();
+  await h?.stop();
   for (const server of servers) server.close();
   removeScratch(root);
 }

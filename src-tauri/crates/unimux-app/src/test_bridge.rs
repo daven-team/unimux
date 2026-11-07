@@ -293,6 +293,11 @@ pub async fn test_bridge(
             }
             Ok(json!({ "token": server.issue_token(cell), "url": server.url() }))
         }
+        // M2: the state the check build's stand-in automation answers from (its own copy once an operation edited it).
+        "mcp-automation" => {
+            let fake = crate::commands::mcp::fake_automation().ok_or_else(|| fail("no MCP server"))?;
+            Ok(json!({ "state": &*unimux_mcp::Automation::state(&fake) }))
+        }
         // Rust's wall clock (ms since the Unix epoch) for the page's clock offset (Channel latency, SP1).
         "clock" => Ok(json!({ "now": crate::channel_bench::epoch_ms() })),
         // Renderer startup marks with the window that sent them (a hidden window reaches renderer-boot, SP1).
