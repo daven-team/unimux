@@ -28,7 +28,8 @@
 //                                     C:\not-e, =F: '' (the env of the run is replaced while the rows are made)
 //   test/golden/git-shared.jsonl, git-trust.jsonl   src/shared/git.ts, src/shared/gitTrust.ts, the scan fingerprint hash and
 //                                     GitTrustStore's file format (PLAN G2; see scripts/goldens-git.mjs)
-//   test/golden/files-*.jsonl        project files: name order, path checks, previews, saves (see scripts/goldens-files.mjs)
+//   test/golden/files-*.jsonl        project files: name order, path checks, previews, saves (see scripts/goldens-files.mjs) and
+//                                     the file operations and the local pane (files-ops.jsonl, see scripts/goldens-fileops.mjs)
 //   test/golden/accounts-store.jsonl, codex-accounts.jsonl, accounts-identity.jsonl   the account stores (1.1.4's code, run on
 //                                     scratch dirs) and the identity helpers (see scripts/goldens-accounts.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -36,6 +37,7 @@ import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
 import { updateConfigGolden, updateProgressRows, updateStringsGolden } from './goldens-update.mjs';
 import { detachedRows, routeMessageRows } from './goldens-detached.mjs';
 import { filesGoldens } from './goldens-files.mjs';
+import { fileOpsGoldens } from './goldens-fileops.mjs';
 import path, { dirname, resolve } from 'node:path';
 import { hookPayloadRows, hookServerRows } from './goldens-hooks.mjs';
 import { convGoldens } from './goldens-convsearch.mjs';
@@ -313,6 +315,7 @@ const files = {
   'files-preview.jsonl': jsonl(fileGoldens.preview),
   'files-save.jsonl': jsonl(fileGoldens.save),
   'files-parquet.jsonl': jsonl(fileGoldens.parquet),
+  'files-ops.jsonl': jsonl(await fileOpsGoldens(load)),
   'hook-payloads.jsonl': jsonl(hookPayloadRows({ hooks, codexHooks })),
   'hook-server.jsonl': jsonl(await hookServerRows(hooks)),
   ...Object.fromEntries(Object.entries(await convGoldens(load)).map(([name, rows]) => [name, jsonl(rows)])),
