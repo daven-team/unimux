@@ -5219,6 +5219,7 @@ dependencies = [
  "mysql_common",
  "postgres-protocol",
  "redis",
+ "ryu-js",
  "serde",
  "serde_json",
  "sha2 0.11.1",

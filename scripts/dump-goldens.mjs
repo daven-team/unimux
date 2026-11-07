@@ -11,10 +11,12 @@
 //                                     accepts it, a lone surrogate becomes U+FFFD (a Rust string cannot hold one)
 //   test/golden/normalize-state.jsonl   {platform, now, input} -> normalizeState (see scripts/goldens-normalize.mjs)
 //   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
+//   test/golden/db-sql.jsonl, db-redis.jsonl  {fn, args} -> the DB helpers of src/shared (see scripts/goldens-db.mjs)
 //   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
 //                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
+import { DB_MODULES, dbGoldens } from './goldens-db.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
@@ -27,6 +29,8 @@ const [{ defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { tr
   load('src/shared/state.ts'), load('src/shared/stateEdits.ts'), load('src/shared/statePatch.ts'), load('src/shared/i18n.ts'), load('src/shared/messages.ts'),
   load('src/main/stateController.ts'),
 ]);
+const dbModules = Object.fromEntries(await Promise.all(Object.entries(DB_MODULES).map(async ([name, file]) => [name, await load(file)])));
+const db = dbGoldens(dbModules);
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
 function rng(seed) {
@@ -177,6 +181,8 @@ const files = {
   'normalize-state.jsonl': jsonl(normalizeRows({ normalizeState, root })),
   'state-after-edit.jsonl': jsonl(afterEditRows({ normalizeState, normalizeEditedState })),
   'js-sort.jsonl': jsonl(jsSort()),
+  'db-sql.jsonl': jsonl(db['db-sql.jsonl']),
+  'db-redis.jsonl': jsonl(db['db-redis.jsonl']),
 };
 
 const check = process.argv.includes('--check');
@@ -194,4 +200,4 @@ if (check && stale.length) {
   console.error(`golden corpus out of date: ${stale.join(', ')} (run \`npm run gen:goldens\`)`);
   process.exit(1);
 }
-console.log(check ? 'golden corpus up to date' : `wrote ${Object.keys(files).length} golden files to test/golden`);
+console.log(check ? 'golden corpus up to date' : `wrote ${Object.keys(files).length} golden files to test/golden (DB vectors: ${db.skipped} rows with unpaired surrogates left out)`);

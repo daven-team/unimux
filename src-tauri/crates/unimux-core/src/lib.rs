@@ -11,6 +11,7 @@ pub mod js_json;
 pub mod json_file;
 pub mod startup_timing;
 pub mod time;
+pub mod utf16;
 
 /// The product version (Cargo.toml, kept equal to package.json and tauri.conf.json by the release script).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
