@@ -35,6 +35,7 @@ pub const DA1_REPLY: &[u8] = b"\x1b[?1;2c";
 const DA1_SCAN: usize = 4096;
 
 type ExitHook = Arc<dyn Fn(&str, i64) + Send + Sync>;
+type TapHook = Arc<dyn Fn(&str, &[u8]) + Send + Sync>;
 
 struct Term {
     out: Arc<OutputChannel>,
@@ -42,6 +43,8 @@ struct Term {
     da1: Mutex<Da1>,
     /// Sizes that came while PtyManager::spawn was still running (its slot may not exist yet): applied when it returned.
     spawning: Mutex<Spawning>,
+    /// The output also goes to the tap hook (P3: the install window and the login terminals, `tap` of 1.1.4).
+    tap: bool,
 }
 
 #[derive(Default)]
@@ -78,6 +81,7 @@ struct Inner {
     routes: Mutex<WindowRoutes>,
     early: Mutex<EarlySizes>,
     on_exit: RwLock<Option<ExitHook>>,
+    on_tap: RwLock<Option<TapHook>>,
     #[cfg(windows)]
     timer: Mutex<Option<crate::conpty::TimerResolution>>,
     counters: Counters,
@@ -146,6 +150,12 @@ impl Inner {
     fn data(&self, id: &str, data: &[u8]) {
         let Some(term) = self.term(id) else { return };
         self.scan_da1(id, &term, data);
+        if term.tap {
+            let hook = self.on_tap.read().clone();
+            if let Some(hook) = hook {
+                hook(id, data);
+            }
+        }
         term.out.push(data);
     }
 
@@ -265,6 +275,7 @@ impl PtyEngine {
                 routes: Mutex::new(WindowRoutes::default()),
                 early: Mutex::new(EarlySizes::default()),
                 on_exit: RwLock::new(None),
+                on_tap: RwLock::new(None),
                 #[cfg(windows)]
                 timer: Mutex::new(None),
                 counters: Counters::default(),
@@ -282,12 +293,52 @@ impl PtyEngine {
         *self.inner.on_exit.write() = Some(Arc::new(hook));
     }
 
+    /// The raw output of tapped terminals (see [`PtyEngine::spawn_tapped`]), on their reader threads, before it is coalesced.
+    pub fn on_tap(&self, hook: impl Fn(&str, &[u8]) + Send + Sync + 'static) {
+        *self.inner.on_tap.write() = Some(Arc::new(hook));
+    }
+
     pub fn has(&self, id: &str) -> bool {
         self.inner.terms.lock().contains_key(id)
     }
 
+    /// The live terminal `id` was spawned with a tap.
+    pub fn is_tapped(&self, id: &str) -> bool {
+        self.inner.term(id).is_some_and(|t| t.tap)
+    }
+
+    /// The ids of the live terminals, sorted.
+    pub fn ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.inner.terms.lock().keys().cloned().collect();
+        ids.sort();
+        ids
+    }
+
+    /// The shell's pid of a live terminal.
+    pub fn pid(&self, id: &str) -> Option<u32> {
+        self.inner.manager.pid(id)
+    }
+
+    /// Kills and forgets every terminal without waiting (the pty service crashed: no exit reports, like the terminals of a
+    /// Pty Host process that died).
+    pub fn forget_all(&self) {
+        let ids: Vec<String> = self.inner.terms.lock().keys().cloned().collect();
+        for id in ids {
+            let _ = self.kill(&id);
+        }
+        // Terminals whose spawn had not put them into the table yet, or that ended without an output channel.
+        for id in self.inner.manager.ids() {
+            let _ = self.inner.manager.kill(&id);
+        }
+    }
+
     /// Starts a terminal (one of the same id is killed first); a size the renderer reported before takes the request's.
-    pub fn spawn(&self, mut req: SpawnRequest) -> io::Result<u32> {
+    pub fn spawn(&self, req: SpawnRequest) -> io::Result<u32> {
+        self.spawn_tapped(req, false)
+    }
+
+    /// [`PtyEngine::spawn`], with the raw output also going to the tap hook when `tap` is set.
+    pub fn spawn_tapped(&self, mut req: SpawnRequest, tap: bool) -> io::Result<u32> {
         let inner = &self.inner;
         if self.has(&req.id) {
             let _ = self.kill(&req.id);
@@ -309,7 +360,7 @@ impl PtyEngine {
             inner.sched.clone(),
         );
         out.resized(req.cols, req.rows);
-        let term = Arc::new(Term { out, da1: Mutex::new(Da1::default()), spawning: Mutex::new(Spawning::default()) });
+        let term = Arc::new(Term { out, da1: Mutex::new(Da1::default()), spawning: Mutex::new(Spawning::default()), tap });
         // The window starts this id's output afresh (the old terminal of the id was killed above: nothing of it follows).
         if let Some(link) = inner.link_of(&req.id) {
             link.batcher.push(KIND_RESET, &req.id, &[], Urgency::Now);

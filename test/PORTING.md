@@ -758,3 +758,12 @@ Rows keep the exact case name (the counter matches them). Rust tests are named `
 | changelog | falls back to the saved copy offline and reports the error | unimux-files changelog::tests::falls_back_to_the_saved_copy_offline_and_reports_the_error | ported |
 | changelog | reports an empty result with the error when nothing is saved | unimux-files changelog::tests::reports_an_empty_result_with_the_error_when_nothing_is_saved | ported |
 | main-perf | answers without blocking and treats bad input as missing | unimux-files probe::tests::exists_answers_like_1_1_4; unimux-app commands::files::g8::tests::probes_answer_like_1_1_4 | ported |
+| pty-host-client | gives the host its own pipes instead of the parent stdout handle | the terminals run in the app process (unimux-pty service), there is no host process with stdio | obsolete |
+| pty-host-client | queues spawns sent between a crash and the restart and delivers them after the renderer port | unimux-pty/tests/service.rs::a_crash_forgets_every_terminal_and_the_restarted_service_runs_what_was_sent_meanwhile (the window links stay in the engine over a crash) | ported |
+| pty-host-client | keeps at most RESTART_QUEUE_LIMIT messages | unimux-pty supervisor::tests::the_restart_queue_is_bounded | ported |
+| pty-host-client | queues nothing once fatal and starts again only when asked, with a fresh crash count | unimux-pty/tests/service.rs::more_than_five_crashes_are_fatal_until_the_user_restarts | ported |
+| pty-host-client | drops queued messages on shutdown | unimux-pty supervisor::tests::an_injected_crash_counts_and_stop_ends_the_thread (stop clears the queue) | ported |
+| host-router | sends every call to the backend that owns the id | unimux-pty engine (renderer messages reach the terminal the window owns); the SSH backend is P5 | partial |
+| host-router | keeps sizes that arrive before the terminal exists (bounded) and hands them out once | unimux-pty routes::tests::early_sizes_are_bounded_and_handed_out_once | ported |
+| host-router | fans flow control and killAll out to every backend; unknown ids resolve | unimux-pty/tests/service.rs::kill_all_ends_every_terminal_and_answers; the SSH backend is P5 | partial |
+| host-router | killAll waits for every backend even when one rejects | unimux-pty/tests/service.rs::kill_all_ends_every_terminal_and_answers (one backend until P5) | partial |

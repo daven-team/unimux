@@ -94,7 +94,10 @@ mod tests {
         ] {
             assert_eq!(report[channel], Status::Implemented, "{channel}");
         }
-        assert_eq!(report["cell:alive"], Status::Fallback);
+        // P3: the pty service answers which cells run.
+        for channel in ["cell:alive", "cell:kill", "cell:killAndWait"] {
+            assert_eq!(report[channel], Status::Implemented, "{channel}");
+        }
         // W7: the status reports of the windows (relay, taskbar, observers).
         assert_eq!(report["cell:runtime"], Status::Implemented);
         for channel in ["mcp:info", "mcp:retry"] {

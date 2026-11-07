@@ -101,7 +101,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 
 | id | title | status | started | done | verified | notes |
 |---|---|---|---|---|---|---|
-| P3 | Pty service: spawn, routing, replay, supervision | todo | | | | |
+| P3 | Pty service: spawn, routing, replay, supervision | built, fast mode, not verified | 2026-11-07 | 2026-11-07 | | branch `tauri-pkg-P3`. unimux-pty `service` (PtyService: supervised control queue over the P2 engine, spawned / spawnError / exit / tap / interrupt events, kill with an answer, kill all, crash -> forget terminals, restart queue, fatal), engine tap / ids / pid / forget_all; unimux-app `commands/pty.rs` (PtyHost: cell bookkeeping on spawned / exit / spawnError, `install:` / `auth:` prefixes, interceptors for P5, 20/min log limiter, `ptyhost:crashed` / `ptyhost:fatal` + dialog, `cell:kill` / `cell:killAndWait` / `cell:alive`, routes from W5's owner table, Monitor cells, wind-down step `terminals shutdown`, test bridge `pty` panic / readerPanic / status). See "P3 open issues". |
 | G3 | Git reads, mutations, commands, publish | todo | | | | |
 | G4 | Worktrees, clone, init, installGit | todo | | | | |
 | S3 | russh login core and SshCoordinator | todo | | | | Docker |
@@ -1223,6 +1223,17 @@ Tests: `AssocIsDangerous` flags `.exe` and not `.txt` / `.png`, and refuses type
 6. Branches and worktrees: worktree `.claude/worktrees/wf_99399b8b-ff8-1` (W1) removed (no junction in it) and `git worktree prune` run; `tauri-pkg-W1` and `tauri-fix-openpath` deleted with `git branch -d`.
 
 ## Wave 2 packages: open issues
+
+### P3 open issues (2026-11-07, fast mode)
+
+Built and unit-tested only (cargo fmt, clippy -D warnings for unimux-pty and unimux-app with and without the check features, cargo test of both crates; tests/service.rs runs on real ConPTY terminals). Not run: the real-app checks of the acceptance list (a pwsh cell types and resizes, renderer reload with replay, a detached cell keeps its output, the injected panic flow in the real app), verify-tauri-lifecycle (its expected wind-down plan now has `terminals shutdown` in the hosts phase), macOS (compile-check only through CI).
+
+1. `cell:spawn` stays MC_NOT_YET until P4; P4 builds the SpawnRequest and calls `commands::pty::service().spawn(req, false)` after `ctx.cells.set_alive` / `hooks.queue_prompt`, compares `host().kill_count(id)` before and after its awaits, checks `service().is_fatal()` and sets `host().set_verified_codex`.
+2. Hooks for later packages (registered on `commands::pty::host()`): `on_prefix("install:")` (H6: tap, interrupt, exit of the install window), `on_prefix("auth:")` (A4), `intercept` + `on_killed` (P5 SSH sessions), `on_cell` (M3 automation statuses and noteExit), `on_crashed` (A4 login.failActive, H6 install.failActive, P5 ssh.hostCrashed, the SSH app-start claim). Until they register, `install:` / `auth:` terminals are just kept out of the cells.
+3. A crash is a panic on the service's actor thread or in the output path on a reader thread (ARCHITECTURE section 3). A panic while a renderer message of the pty port is handled is logged (rate-limited) and the terminals keep running, like an uncaught exception in the 1.1.4 host. The crash.log line reads `pty host exited (panic)` plus the panic text (1.1.4: the exit code and the stderr tail).
+4. Tap output is the raw read of the terminal (before the output engine coalesces it), decoded as UTF-8 across reads; 1.1.4 tapped after node-pty's decoder. H6's marker parsing should not notice.
+5. The check build's test bridge `pty spawn` still spawns through the engine directly (synchronous pid for the scripts) and reports the spawn to the bookkeeping itself; `pty kill` counts as a user kill.
+6. `PtyHost` and the service are process-wide statics like P2's engine: in the unit tests every `register` points the host at the newest context.
 
 ### P2: verification, measurements and open issues (2026-11-07)
 
