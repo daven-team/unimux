@@ -160,6 +160,11 @@ fn main() {
         .setup(move |app| {
             let ctx = setup_ctx.clone();
             let _ = ctx.sink.app.set(app.handle().clone());
+            // The bundled conpty.dll + OpenConsole.exe (tauri.windows.conf.json `bundle.resources`), before any terminal.
+            #[cfg(windows)]
+            if let Ok(dir) = tauri::Manager::path(&*app).resource_dir() {
+                unimux_pty::conpty::ConptyApi::set_resource_dir(dir.join("resources").join("conpty").join("x64"));
+            }
             // Sends run in order per window on the async runtime (ipcRenderer.send ordering).
             let router = ctx.router().clone();
             let _ = ctx.sends.set(SendQueue::new(

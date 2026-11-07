@@ -1,6 +1,6 @@
 #![allow(dead_code)]
-//! Shared helpers of the ConPTY tests: the bundled conpty.dll (node-pty's copy in node_modules until P1 commits the files
-//! under src-tauri/resources/conpty), output collection, process trees.
+//! Shared helpers of the ConPTY tests: the bundled conpty.dll (committed under src-tauri/resources/conpty/x64), output
+//! collection, process trees.
 
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -13,15 +13,13 @@ use unimux_pty::conpty::{ConptyApi, ConptySource, Pty, PtyWriter, SpawnOptions};
 /// answers like the renderer does.
 pub const DA1_REPLY: &[u8] = b"\x1b[?1;2c";
 
-/// The folder with conpty.dll + OpenConsole.exe 1.23 x64: UNIMUX_CONPTY_DIR, else node-pty's third_party copy.
+/// The folder with conpty.dll + OpenConsole.exe 1.23 x64: UNIMUX_CONPTY_DIR, else the committed src-tauri/resources/conpty/x64.
 pub fn bundled_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("UNIMUX_CONPTY_DIR") {
         return Some(PathBuf::from(dir));
     }
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../node_modules/node-pty/third_party/conpty");
-    let mut versions: Vec<PathBuf> = std::fs::read_dir(&root).ok()?.filter_map(|e| e.ok().map(|e| e.path())).collect();
-    versions.sort();
-    versions.into_iter().rev().map(|v| v.join("win10-x64")).find(|d| d.join("conpty.dll").is_file())
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../resources/conpty/x64");
+    dir.join("conpty.dll").is_file().then_some(dir)
 }
 
 /// The bundled API (the tests are about it); panics when the files are missing so CI cannot silently test kernel32 only.

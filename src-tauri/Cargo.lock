@@ -5340,8 +5340,10 @@ dependencies = [
 name = "unimux-pty"
 version = "1.2.0"
 dependencies = [
+ "libc",
  "parking_lot 0.13.0",
  "serde_json",
+ "tempfile",
  "unimux-core",
  "unimux-ipc",
  "windows",

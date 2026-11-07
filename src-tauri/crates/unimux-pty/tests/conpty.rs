@@ -68,8 +68,9 @@ fn output_after_exit_is_delivered_before_the_exit() {
     for round in 0..10 {
         let out = Collector::default();
         let _pty = out.spawn(bundled(), &cmd(&["/d", "/c", "for /L %i in (1,1,3000) do @echo line %i"]));
-        let code = out.wait_exit(Duration::from_secs(30));
-        assert_eq!(code, Some(0), "round {round}");
+        // The limit is generous: 3000 cmd echoes took over 30 s on a fully loaded machine (the test is about completeness).
+        let code = out.wait_exit(Duration::from_secs(120));
+        assert_eq!(code, Some(0), "round {round}: {} bytes", out.len());
         let text = out.text();
         assert!(
             text.contains("line 3000"),
