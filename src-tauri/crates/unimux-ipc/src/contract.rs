@@ -62,12 +62,13 @@ mod tests {
     #[test]
     fn embedded_contract_has_the_known_size() {
         let c = Contract::embedded();
-        // api.d.ts of 1.1.4: 245 methods on 215 channels (177 invoke + 38 send), 43 events + window:maximized.
-        assert_eq!(c.channels.len(), 215);
-        assert_eq!(c.channels.values().filter(|x| x.kind == ChannelKind::Invoke).count(), 177);
-        assert_eq!(c.channels.values().filter(|x| x.kind == ChannelKind::Send).count(), 38);
-        assert_eq!(c.method_count(), 245);
-        assert_eq!(c.events.len(), 44);
+        // api.d.ts of 1.1.4: 245 methods on 215 channels (177 invoke + 38 send), 43 events + window:maximized; W1 adds the
+        // window:* caption members (250 methods + 3 sync members on 220 channels: 178 invoke + 42 send, 45 events).
+        assert_eq!(c.channels.len(), 220);
+        assert_eq!(c.channels.values().filter(|x| x.kind == ChannelKind::Invoke).count(), 178);
+        assert_eq!(c.channels.values().filter(|x| x.kind == ChannelKind::Send).count(), 42);
+        assert_eq!(c.method_count(), 250);
+        assert_eq!(c.events.len(), 45);
         assert!(c.has_event("state:changed"));
         assert_eq!(c.channel("db:pg").unwrap().methods.len(), 14);
         assert_eq!(c.channel("db:redis").unwrap().methods.len(), 18);
