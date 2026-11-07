@@ -288,6 +288,19 @@ export function dbIpcGoldens(m) {
   }
   connectionRows(m, add, r);
   historyRows(add, r);
+  // Ids of exactly 39 (session) and 36 (guid) UTF-8 bytes with a multi-byte character near the start: the schemas refuse
+  // them (a byte slice at 3 inside a character must not panic in the Rust port).
+  const oddSid = `dbż${'a'.repeat(35)}`;
+  const oddGuid = `0000000ż${'0'.repeat(27)}`;
+  for (const sid of [oddSid, `ż:${U}`, `dż${U}`]) {
+    add('schema', 'sessionId', sid);
+    add('schema', 'pins', [sid]);
+    add('schema', 'answer', { sessionId: sid, promptId: U, cancel: true });
+  }
+  for (const id of [oddGuid, `${U.slice(0, 34)}ż`]) {
+    add('schema', 'uuid', id);
+    add('schema', 'answer', { sessionId: SID, promptId: id, cancel: true });
+  }
   return rows;
 }
 

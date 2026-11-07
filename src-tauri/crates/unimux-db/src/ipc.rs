@@ -820,6 +820,14 @@ pub fn export_request<'a>(name: &'a Value, text: &'a Value) -> Option<(&'a str, 
     (ok_name && utf16::len(text) <= 512 * 1024 * 1024).then_some((name, text))
 }
 
+/// `basename(name)` of the export into MC_DB_EXPORT_DIR, for a name `export_request` accepted (no separators): on
+/// Windows Node's path.win32.basename drops a leading drive (`C:evil.csv` is `evil.csv`), which Path::join would otherwise
+/// take as a new root and write outside the folder.
+pub fn export_file_name(name: &str, windows: bool) -> &str {
+    let b = name.as_bytes();
+    if windows && b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' { &name[2..] } else { name }
+}
+
 /// The extension filter of the export dialog: `name.split('.').pop()`, upper-cased as its name.
 pub fn export_extension(name: &str) -> String {
     name.rsplit('.').next().unwrap_or_default().to_string()
@@ -828,6 +836,20 @@ pub fn export_extension(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_file_names_are_node_basenames() {
+        assert_eq!(export_file_name("C:evil.csv", true), "evil.csv");
+        assert_eq!(export_file_name("z:a.json", true), "a.json");
+        assert_eq!(export_file_name("C:", true), "");
+        assert_eq!(export_file_name("C:evil.csv", false), "C:evil.csv");
+        assert_eq!(export_file_name("1:a.csv", true), "1:a.csv");
+        assert_eq!(export_file_name("wynik ż.csv", true), "wynik ż.csv");
+        assert_eq!(export_file_name("ż", true), "ż");
+        let dir = std::path::Path::new(if cfg!(windows) { r"D:\exports" } else { "/exports" });
+        let joined = dir.join(export_file_name("C:evil.csv", cfg!(windows)));
+        assert!(joined.starts_with(dir), "{joined:?}");
+    }
 
     #[test]
     fn hand_written_patterns() {

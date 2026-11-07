@@ -1021,12 +1021,19 @@ impl DbService {
         }
         let me = self.me.clone();
         let sid = id.to_string();
-        let timer = self.deps.timers.after(
+        let timer = self.deps.timers.after_with_id(
             self.deps.idle_ms,
-            Box::new(move || {
+            Box::new(move |own_id| {
                 let Some(svc) = me.upgrade() else { return };
                 let mut l = svc.lock();
-                let idle = l.inner.sessions.iter().find(|e| e.id == sid).is_some_and(|e| !Self::kept(&l.inner, e));
+                // A newer schedule_idle may have replaced this timer while it waited for the lock (cancel cannot stop a
+                // callback that already started): only the session's current idle timer disconnects it.
+                let idle = l
+                    .inner
+                    .sessions
+                    .iter()
+                    .find(|e| e.id == sid)
+                    .is_some_and(|e| e.idle == Some(own_id) && !Self::kept(&l.inner, e));
                 if idle {
                     svc.disconnect_in(&mut l, &sid);
                 }

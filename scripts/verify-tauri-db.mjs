@@ -181,6 +181,11 @@ try {
   check('E: export writes into MC_DB_EXPORT_DIR', exported.ok && readText(join(exportDir, 'result.csv')) === 'a,b\n1,2', exported);
   const badExport = await mc(app.page, `window.mc.dbExport('../x.csv', 'a')`);
   check('E: export refuses a name with a folder', badExport.ok === false && !badExport.cancelled, badExport);
+  if (process.platform === 'win32') {
+    // basename() like 1.1.4: a drive prefix does not move the file out of the export folder.
+    const driveExport = await mc(app.page, `window.mc.dbExport('C:drive.csv', 'd')`);
+    check('E: export of a drive-prefixed name stays in MC_DB_EXPORT_DIR', driveExport.ok && readText(join(exportDir, 'drive.csv')) === 'd', driveExport);
+  }
 
   // ── F. restart, quit, wind-down ───────────────────────────────────────────
   const report = await bridge(app.page, 'report');

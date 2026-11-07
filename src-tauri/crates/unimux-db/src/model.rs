@@ -16,14 +16,19 @@ pub fn db_session_id(uuid: &str) -> String {
 }
 
 fn is_uuid_text(s: &str) -> bool {
-    let b = s.as_bytes();
+    is_uuid_bytes(s.as_bytes())
+}
+
+fn is_uuid_bytes(b: &[u8]) -> bool {
     b.len() == 36
         && b.iter().enumerate().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { *c == b'-' } else { c.is_ascii_hexdigit() })
 }
 
-/// `isDbSessionId`: `/^db:<uuid>$/i` (the flag makes the prefix case-insensitive too).
+/// `isDbSessionId`: `/^db:<uuid>$/i` (the flag makes the prefix case-insensitive too). Compared as bytes: a 39-byte id
+/// with a multi-byte character near the start must give false, not panic on a str slice.
 pub fn is_db_session_id(id: &str) -> bool {
-    id.len() == 39 && id[..3].eq_ignore_ascii_case(DB_SESSION_PREFIX) && is_uuid_text(&id[3..])
+    let b = id.as_bytes();
+    b.len() == 39 && b[..3].eq_ignore_ascii_case(DB_SESSION_PREFIX.as_bytes()) && is_uuid_bytes(&b[3..])
 }
 
 /// `z.guid()` of zod 4: 8-4-4-4-12 hex digits, any case.
@@ -231,6 +236,13 @@ mod tests {
         assert!(!is_db_session_id(&format!("sftp:{ID}")));
         assert!(!is_db_session_id("db:x"));
         assert!(is_guid(ID) && !is_guid("x"));
+        // Exactly 39 (and 36) bytes with a multi-byte character across byte 3: false, no panic on a char boundary.
+        let odd = format!("db\u{17c}{}", "a".repeat(35));
+        assert_eq!(odd.len(), 39);
+        assert!(!is_db_session_id(&odd));
+        let odd_guid = format!("0000000\u{17c}{}", "0".repeat(27));
+        assert_eq!(odd_guid.len(), 36);
+        assert!(!is_guid(&odd_guid));
     }
 
     #[test]

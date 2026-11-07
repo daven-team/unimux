@@ -390,11 +390,15 @@ impl DbHistoryStore {
         inner.dirty = true;
         if inner.timer.is_none() {
             let me = self.me.clone();
-            inner.timer = Some(self.timers.after(
+            inner.timer = Some(self.timers.after_with_id(
                 self.write_delay_ms,
-                Box::new(move || {
+                Box::new(move |own_id| {
                     if let Some(store) = me.upgrade() {
                         let mut inner = store.inner.lock();
+                        // Replaced: a flush cancelled this timer while it waited for the lock and a change set a new one.
+                        if inner.timer != Some(own_id) {
+                            return;
+                        }
                         inner.timer = None;
                         store.flush_in(&mut inner);
                     }

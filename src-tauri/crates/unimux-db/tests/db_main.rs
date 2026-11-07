@@ -251,6 +251,26 @@ async fn disconnects_an_idle_session_unless_a_tab_pins_it_or_it_is_busy() {
 }
 
 #[tokio::test]
+async fn an_idle_timer_replaced_while_it_was_already_firing_does_not_disconnect() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = setup(dir.path(), Options::default());
+    let c = t.save(json!({}), PasswordChange::Keep);
+    let sid = session_id(t.service.connect(c["id"].as_str().unwrap(), None));
+    flush().await;
+    t.service.on_host_message(json!({ "t": "dbStatus", "id": sid, "phase": "connected" }));
+    // The old timer has started (cancel cannot stop it) when an operation reschedules the idle timer.
+    let ran = t.timers.fire_late(5 * 60_000, || {
+        t.service.pin(std::slice::from_ref(&sid), "main");
+        t.service.pin(&[], "main");
+    });
+    assert_eq!(ran, 1);
+    assert_eq!(t.last(&sid)["state"], "connected");
+    // The new timer still disconnects once it fires.
+    assert_eq!(t.timers.fire(5 * 60_000), 1);
+    assert_eq!(t.last(&sid)["state"], "closed");
+}
+
+#[tokio::test]
 async fn a_db_host_restart_ends_every_session_and_tells_the_coordinator() {
     let dir = tempfile::tempdir().unwrap();
     let t = setup(dir.path(), Options::default());

@@ -60,6 +60,13 @@ pub trait Desktop: Send + Sync {
     fn dock_badge(&self, window: Option<WebviewWindow>, text: &str);
 }
 
+/// The filters a native dialog gets. Electron's macOS dialog stops filtering when any filter has the extension "*" (every
+/// file can be picked); rfd's macOS panel would put the literal "*" into its allowed types instead, so on macOS such a
+/// filter list becomes no filters at all. Windows (rfd turns "*" into `*.*`) keeps them.
+pub fn dialog_filters(filters: Vec<(String, Vec<String>)>, macos: bool) -> Vec<(String, Vec<String>)> {
+    if macos && filters.iter().any(|(_, ext)| ext.iter().any(|e| e == "*")) { Vec::new() } else { filters }
+}
+
 /// The desktop of a normal run.
 pub struct RealDesktop {
     pub app_id: String,
@@ -121,8 +128,9 @@ impl Desktop for RealDesktop {
     fn pick(&self, parent: Option<WebviewWindow>, request: PickRequest) -> BoxFuture<'static, Option<String>> {
         Box::pin(async move {
             let mut dialog = rfd::AsyncFileDialog::new().set_title(&request.title);
-            for (name, extensions) in request.filter.iter().chain(&request.more_filters) {
-                dialog = dialog.add_filter(name, extensions);
+            let filters: Vec<_> = request.filter.iter().chain(&request.more_filters).cloned().collect();
+            for (name, extensions) in dialog_filters(filters, cfg!(target_os = "macos")) {
+                dialog = dialog.add_filter(name, &extensions);
             }
             if let Some(parent) = &parent {
                 dialog = dialog.set_parent(parent);
@@ -135,8 +143,8 @@ impl Desktop for RealDesktop {
     fn save(&self, parent: Option<WebviewWindow>, request: SaveRequest) -> BoxFuture<'static, Option<String>> {
         Box::pin(async move {
             let mut dialog = rfd::AsyncFileDialog::new().set_title(&request.title).set_file_name(&request.default_path);
-            for (name, extensions) in &request.filters {
-                dialog = dialog.add_filter(name, extensions);
+            for (name, extensions) in dialog_filters(request.filters, cfg!(target_os = "macos")) {
+                dialog = dialog.add_filter(name, &extensions);
             }
             if let Some(parent) = &parent {
                 dialog = dialog.set_parent(parent);
@@ -319,5 +327,24 @@ impl ClipboardIo for FileClipboard {
     fn write(&self, text: &str, secret: bool) -> Result<(), String> {
         let body = json!({ "text": text, "secret": secret }).to_string();
         std::fs::write(&self.path, body).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dialog_filters;
+
+    fn f(name: &str, ext: &[&str]) -> (String, Vec<String>) {
+        (name.to_string(), ext.iter().map(|e| e.to_string()).collect())
+    }
+
+    #[test]
+    fn a_catch_all_filter_means_no_filtering_on_macos_only() {
+        let db = vec![f("SQLite", &["db", "sqlite", "sqlite3", "db3"]), f("*", &["*"])];
+        assert_eq!(dialog_filters(db.clone(), true), Vec::<(String, Vec<String>)>::new());
+        assert_eq!(dialog_filters(db.clone(), false), db);
+        let csv = vec![f("CSV", &["csv"])];
+        assert_eq!(dialog_filters(csv.clone(), true), csv);
+        assert_eq!(dialog_filters(csv.clone(), false), csv);
     }
 }

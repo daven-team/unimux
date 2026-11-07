@@ -11,11 +11,20 @@ use parking_lot::Mutex;
 
 pub type TimerId = u64;
 pub type TimerFn = Box<dyn FnOnce() + Send + 'static>;
+/// A timer callback that gets its own id. `cancel` cannot stop a callback that already started (it waits for a lock the
+/// canceller holds), so such a callback checks that its owner still holds this id before acting (clearTimeout in
+/// single-threaded JS never had this race).
+pub type TimerIdFn = Box<dyn FnOnce(TimerId) + Send + 'static>;
 
 pub trait Timers: Send + Sync {
-    /// Runs `f` once after `ms` unless cancelled first.
-    fn after(&self, ms: u64, f: TimerFn) -> TimerId;
+    /// Runs `f` once after `ms` unless cancelled first, with the id this call returns.
+    fn after_with_id(&self, ms: u64, f: TimerIdFn) -> TimerId;
     fn cancel(&self, id: TimerId);
+
+    /// Runs `f` once after `ms` unless cancelled first.
+    fn after(&self, ms: u64, f: TimerFn) -> TimerId {
+        self.after_with_id(ms, Box::new(move |_| f()))
+    }
 }
 
 /// The real timers: one tokio task per timer (aborted when cancelled), on the runtime given at construction.
@@ -32,7 +41,7 @@ impl TokioTimers {
 }
 
 impl Timers for TokioTimers {
-    fn after(&self, ms: u64, f: TimerFn) -> TimerId {
+    fn after_with_id(&self, ms: u64, f: TimerIdFn) -> TimerId {
         let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         let live = self.live.clone();
         // Registered before the task can run, so a 0 ms timer still finds (and removes) its own entry.
@@ -40,7 +49,7 @@ impl Timers for TokioTimers {
         let task = self.runtime.spawn(async move {
             tokio::time::sleep(Duration::from_millis(ms)).await;
             if live.lock().remove(&id).is_some() {
-                f();
+                f(id);
             }
         });
         guard.insert(id, task.abort_handle());
@@ -64,19 +73,36 @@ pub struct ManualTimers {
 struct ManualTimer {
     id: TimerId,
     ms: u64,
-    f: Option<TimerFn>,
+    f: Option<TimerIdFn>,
 }
 
 impl ManualTimers {
     /// Fires every live timer of `ms` (in the order they were set), outside the lock; returns how many ran.
     pub fn fire(&self, ms: u64) -> usize {
-        let due: Vec<TimerFn> = {
+        let due: Vec<(TimerId, TimerIdFn)> = {
             let mut timers = self.timers.lock();
-            timers.iter_mut().filter(|t| t.ms == ms).filter_map(|t| t.f.take()).collect()
+            timers.iter_mut().filter(|t| t.ms == ms).filter_map(|t| t.f.take().map(|f| (t.id, f))).collect()
         };
         let n = due.len();
-        for f in due {
-            f();
+        for (id, f) in due {
+            f(id);
+        }
+        n
+    }
+
+    /// Fires every live timer of `ms` the way a real timer can race: the callbacks start (so `cancel` no longer finds
+    /// them), `between` runs (a reschedule that cancels them), then they run. Returns how many ran.
+    pub fn fire_late(&self, ms: u64, between: impl FnOnce()) -> usize {
+        let due: Vec<(TimerId, TimerIdFn)> = {
+            let mut timers = self.timers.lock();
+            let due = timers.iter_mut().filter(|t| t.ms == ms).filter_map(|t| t.f.take().map(|f| (t.id, f))).collect();
+            timers.retain(|t| t.f.is_some());
+            due
+        };
+        between();
+        let n = due.len();
+        for (id, f) in due {
+            f(id);
         }
         n
     }
@@ -88,7 +114,7 @@ impl ManualTimers {
 }
 
 impl Timers for ManualTimers {
-    fn after(&self, ms: u64, f: TimerFn) -> TimerId {
+    fn after_with_id(&self, ms: u64, f: TimerIdFn) -> TimerId {
         let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         self.timers.lock().push(ManualTimer { id, ms, f: Some(f) });
         id

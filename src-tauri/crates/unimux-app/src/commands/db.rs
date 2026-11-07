@@ -377,7 +377,8 @@ fn register_files(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
             let Some((name, text)) = ipc::export_request(call.arg(0), call.arg(1)) else { return Ok(json!({ "ok": false })) };
             let (name, text) = (name.to_string(), text.to_string());
             let path: Option<PathBuf> = match &c.overrides.db_export_dir {
-                Some(dir) => Some(dir.join(&name)),
+                // basename(name) like 1.1.4: a drive prefix (`C:x.csv`) must not replace the folder.
+                Some(dir) => Some(dir.join(ipc::export_file_name(&name, cfg!(windows)))),
                 None => {
                     let Some(os) = c.os.get().cloned() else { return Ok(json!({ "ok": false })) };
                     let ext = ipc::export_extension(&name);
