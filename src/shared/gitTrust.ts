@@ -22,7 +22,7 @@ const OFF = /^(false|no|off|0)?$/i;
  * `x $(calc)`) runs too. Only the well-known helpers, with plain `--option[=value]` arguments, are left alone; an empty value only
  * resets the list.
  */
-const SAFE_CREDENTIAL_HELPER = /^((manager|manager-core|wincred|osxkeychain|libsecret|gnome-keyring|cache|store)(\s+--[A-Za-z][\w-]*(=[\w.:/@~+-]*)?)*)?$/;
+const SAFE_CREDENTIAL_HELPER = /^((manager|manager-core|wincred|osxkeychain|libsecret|gnome-keyring|cache|store)([ \t]+--[A-Za-z][\w-]*(=[\w.:/@~+-]*)?)*)?$/;
 const EXEC_KEYS = new Set([
   'diff.external', 'core.hookspath', 'core.sshcommand', 'core.pager', 'core.editor', 'core.askpass', 'core.gitproxy', 'core.worktree',
   'sequence.editor', 'gpg.program', 'gpg.openpgp.program', 'gpg.x509.program', 'gpg.ssh.program', 'uploadpack.packobjectshook',

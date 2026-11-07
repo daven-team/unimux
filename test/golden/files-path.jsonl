@@ -22,7 +22,6 @@
 {"flavor":"win32","root":"C:\\proj","rel":"a\\..\\..\\proj\\b","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\b","relAbsolute":false,"relative":"b","inside":true}
 {"flavor":"win32","root":"C:\\proj","rel":"...","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\...","relAbsolute":false,"relative":"...","inside":true}
 {"flavor":"win32","root":"C:\\proj","rel":". ./x","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\. .\\x","relAbsolute":false,"relative":". .\\x","inside":true}
-{"flavor":"win32","root":"C:\\proj","rel":"a:b","resolvedRoot":"C:\\proj","resolved":"a:\\b","relAbsolute":false,"relative":"a:\\b","inside":false}
 {"flavor":"win32","root":"C:\\proj","rel":"\\\\other\\share","resolvedRoot":"C:\\proj","resolved":"\\\\other\\share\\","relAbsolute":true,"relative":"\\\\other\\share\\","inside":false}
 {"flavor":"win32","root":"C:\\proj","rel":"//?/C:/x","resolvedRoot":"C:\\proj","resolved":"\\\\?\\C:\\x","relAbsolute":true,"relative":"\\\\?\\C:\\x","inside":false}
 {"flavor":"win32","root":"C:\\proj","rel":"PROJ","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
@@ -52,7 +51,6 @@
 {"flavor":"win32","root":"C:\\proj\\","rel":"a\\..\\..\\proj\\b","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\b","relAbsolute":false,"relative":"b","inside":true}
 {"flavor":"win32","root":"C:\\proj\\","rel":"...","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\...","relAbsolute":false,"relative":"...","inside":true}
 {"flavor":"win32","root":"C:\\proj\\","rel":". ./x","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\. .\\x","relAbsolute":false,"relative":". .\\x","inside":true}
-{"flavor":"win32","root":"C:\\proj\\","rel":"a:b","resolvedRoot":"C:\\proj","resolved":"a:\\b","relAbsolute":false,"relative":"a:\\b","inside":false}
 {"flavor":"win32","root":"C:\\proj\\","rel":"\\\\other\\share","resolvedRoot":"C:\\proj","resolved":"\\\\other\\share\\","relAbsolute":true,"relative":"\\\\other\\share\\","inside":false}
 {"flavor":"win32","root":"C:\\proj\\","rel":"//?/C:/x","resolvedRoot":"C:\\proj","resolved":"\\\\?\\C:\\x","relAbsolute":true,"relative":"\\\\?\\C:\\x","inside":false}
 {"flavor":"win32","root":"C:\\proj\\","rel":"PROJ","resolvedRoot":"C:\\proj","resolved":"C:\\proj\\PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
@@ -82,7 +80,6 @@
 {"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"a\\..\\..\\proj\\b","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\proj\\b","relAbsolute":false,"relative":"..\\proj\\b","inside":false}
 {"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"...","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł\\...","relAbsolute":false,"relative":"...","inside":true}
 {"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":". ./x","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł\\. .\\x","relAbsolute":false,"relative":". .\\x","inside":true}
-{"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"a:b","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"a:\\b","relAbsolute":false,"relative":"a:\\b","inside":false}
 {"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"\\\\other\\share","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"\\\\other\\share\\","relAbsolute":true,"relative":"\\\\other\\share\\","inside":false}
 {"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"//?/C:/x","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"\\\\?\\C:\\x","relAbsolute":true,"relative":"\\\\?\\C:\\x","inside":false}
 {"flavor":"win32","root":"c:\\Users\\Ania\\Projekt Ł","rel":"PROJ","resolvedRoot":"c:\\Users\\Ania\\Projekt Ł","resolved":"c:\\Users\\Ania\\Projekt Ł\\PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
@@ -99,7 +96,6 @@
 {"flavor":"win32","root":"D:/work/app","rel":"..foo","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\..foo","relAbsolute":false,"relative":"..foo","inside":true}
 {"flavor":"win32","root":"D:/work/app","rel":"a/../../x","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\x","relAbsolute":false,"relative":"..\\x","inside":false}
 {"flavor":"win32","root":"D:/work/app","rel":"C:\\proj\\a","resolvedRoot":"D:\\work\\app","resolved":"C:\\proj\\a","relAbsolute":true,"relative":"C:\\proj\\a","inside":false}
-{"flavor":"win32","root":"D:/work/app","rel":"C:x","resolvedRoot":"D:\\work\\app","resolved":"C:\\x","relAbsolute":false,"relative":"C:\\x","inside":false}
 {"flavor":"win32","root":"D:/work/app","rel":"/x","resolvedRoot":"D:\\work\\app","resolved":"D:\\x","relAbsolute":true,"relative":"..\\..\\x","inside":false}
 {"flavor":"win32","root":"D:/work/app","rel":"\\x","resolvedRoot":"D:\\work\\app","resolved":"D:\\x","relAbsolute":true,"relative":"..\\..\\x","inside":false}
 {"flavor":"win32","root":"D:/work/app","rel":"D:\\proj","resolvedRoot":"D:\\work\\app","resolved":"D:\\proj","relAbsolute":true,"relative":"..\\..\\proj","inside":false}
@@ -112,7 +108,6 @@
 {"flavor":"win32","root":"D:/work/app","rel":"a\\..\\..\\proj\\b","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\proj\\b","relAbsolute":false,"relative":"..\\proj\\b","inside":false}
 {"flavor":"win32","root":"D:/work/app","rel":"...","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\...","relAbsolute":false,"relative":"...","inside":true}
 {"flavor":"win32","root":"D:/work/app","rel":". ./x","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\. .\\x","relAbsolute":false,"relative":". .\\x","inside":true}
-{"flavor":"win32","root":"D:/work/app","rel":"a:b","resolvedRoot":"D:\\work\\app","resolved":"a:\\b","relAbsolute":false,"relative":"a:\\b","inside":false}
 {"flavor":"win32","root":"D:/work/app","rel":"\\\\other\\share","resolvedRoot":"D:\\work\\app","resolved":"\\\\other\\share\\","relAbsolute":true,"relative":"\\\\other\\share\\","inside":false}
 {"flavor":"win32","root":"D:/work/app","rel":"//?/C:/x","resolvedRoot":"D:\\work\\app","resolved":"\\\\?\\C:\\x","relAbsolute":true,"relative":"\\\\?\\C:\\x","inside":false}
 {"flavor":"win32","root":"D:/work/app","rel":"PROJ","resolvedRoot":"D:\\work\\app","resolved":"D:\\work\\app\\PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
@@ -129,7 +124,6 @@
 {"flavor":"win32","root":"\\\\server\\share\\repo","rel":"..foo","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\..foo","relAbsolute":false,"relative":"..foo","inside":true}
 {"flavor":"win32","root":"\\\\server\\share\\repo","rel":"a/../../x","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\x","relAbsolute":false,"relative":"..\\x","inside":false}
 {"flavor":"win32","root":"\\\\server\\share\\repo","rel":"C:\\proj\\a","resolvedRoot":"\\\\server\\share\\repo","resolved":"C:\\proj\\a","relAbsolute":true,"relative":"C:\\proj\\a","inside":false}
-{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"C:x","resolvedRoot":"\\\\server\\share\\repo","resolved":"C:\\x","relAbsolute":false,"relative":"C:\\x","inside":false}
 {"flavor":"win32","root":"\\\\server\\share\\repo","rel":"/x","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\x","relAbsolute":true,"relative":"..\\x","inside":false}
 {"flavor":"win32","root":"\\\\server\\share\\repo","rel":"\\x","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\x","relAbsolute":true,"relative":"..\\x","inside":false}
 {"flavor":"win32","root":"\\\\server\\share\\repo","rel":"D:\\proj","resolvedRoot":"\\\\server\\share\\repo","resolved":"D:\\proj","relAbsolute":true,"relative":"D:\\proj","inside":false}
@@ -142,7 +136,6 @@
 {"flavor":"win32","root":"\\\\server\\share\\repo","rel":"a\\..\\..\\proj\\b","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\proj\\b","relAbsolute":false,"relative":"..\\proj\\b","inside":false}
 {"flavor":"win32","root":"\\\\server\\share\\repo","rel":"...","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\...","relAbsolute":false,"relative":"...","inside":true}
 {"flavor":"win32","root":"\\\\server\\share\\repo","rel":". ./x","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\. .\\x","relAbsolute":false,"relative":". .\\x","inside":true}
-{"flavor":"win32","root":"\\\\server\\share\\repo","rel":"a:b","resolvedRoot":"\\\\server\\share\\repo","resolved":"a:\\b","relAbsolute":false,"relative":"a:\\b","inside":false}
 {"flavor":"win32","root":"\\\\server\\share\\repo","rel":"\\\\other\\share","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\other\\share\\","relAbsolute":true,"relative":"\\\\other\\share\\","inside":false}
 {"flavor":"win32","root":"\\\\server\\share\\repo","rel":"//?/C:/x","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\?\\C:\\x","relAbsolute":true,"relative":"\\\\?\\C:\\x","inside":false}
 {"flavor":"win32","root":"\\\\server\\share\\repo","rel":"PROJ","resolvedRoot":"\\\\server\\share\\repo","resolved":"\\\\server\\share\\repo\\PROJ","relAbsolute":false,"relative":"PROJ","inside":true}
@@ -172,7 +165,6 @@
 {"flavor":"win32","root":"C:\\","rel":"a\\..\\..\\proj\\b","resolvedRoot":"C:\\","resolved":"C:\\proj\\b","relAbsolute":false,"relative":"proj\\b","inside":true}
 {"flavor":"win32","root":"C:\\","rel":"...","resolvedRoot":"C:\\","resolved":"C:\\...","relAbsolute":false,"relative":"...","inside":true}
 {"flavor":"win32","root":"C:\\","rel":". ./x","resolvedRoot":"C:\\","resolved":"C:\\. .\\x","relAbsolute":false,"relative":". .\\x","inside":true}
-{"flavor":"win32","root":"C:\\","rel":"a:b","resolvedRoot":"C:\\","resolved":"a:\\b","relAbsolute":false,"relative":"a:\\b","inside":false}
 {"flavor":"win32","root":"C:\\","rel":"\\\\other\\share","resolvedRoot":"C:\\","resolved":"\\\\other\\share\\","relAbsolute":true,"relative":"\\\\other\\share\\","inside":false}
 {"flavor":"win32","root":"C:\\","rel":"//?/C:/x","resolvedRoot":"C:\\","resolved":"\\\\?\\C:\\x","relAbsolute":true,"relative":"\\\\?\\C:\\x","inside":false}
 {"flavor":"win32","root":"C:\\","rel":"PROJ","resolvedRoot":"C:\\","resolved":"C:\\PROJ","relAbsolute":false,"relative":"PROJ","inside":true}

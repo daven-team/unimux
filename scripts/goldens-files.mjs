@@ -72,6 +72,9 @@ function paths() {
     const p = path[flavor];
     for (const root of roots) {
       for (const rel of rels) {
+        // A drive-relative path to another drive ('C:x' under D:) resolves against that drive's own current folder on Windows
+        // (process.env['=C:']) and against nothing elsewhere: no fixed answer, so not a golden.
+        if (flavor === 'win32' && /^[A-Za-z]:(?![\\/])/.test(rel) && !root.toLowerCase().startsWith(rel.slice(0, 2).toLowerCase())) continue;
         const resolvedRoot = p.resolve(root);
         const resolved = p.resolve(resolvedRoot, rel);
         rows.push({ flavor, root, rel, resolvedRoot, resolved, relAbsolute: p.isAbsolute(rel), relative: p.relative(resolvedRoot, resolved), inside: inside(p, resolvedRoot, resolved) });

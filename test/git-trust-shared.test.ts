@@ -38,7 +38,7 @@ describe('config scan (pure part of the trust model)', () => {
   });
 
   it('flags a credential helper that is not a known helper name (git runs it through the shell)', () => {
-    for (const value of ['x; calc', 'evil', 'manager $(calc)', 'store --file=x;calc', 'cache `calc`', 'manager\ncalc', '../x', 'manager && calc']) {
+    for (const value of ['x; calc', 'evil', 'manager $(calc)', 'store --file=x;calc', 'cache `calc`', 'manager\ncalc', '../x', 'manager && calc', 'cache\n--timeout=1', 'cache\r--x', 'cache --x', 'cache --x', 'cache\v--x']) {
       expect(dangerousConfigKeys(entries(['credential.helper', value])), value).toEqual(['credential.helper']);
     }
     for (const value of ['', 'manager', 'manager-core', 'wincred', 'osxkeychain', 'libsecret', 'cache --timeout=3600', 'store --file=~/.git-credentials']) {
