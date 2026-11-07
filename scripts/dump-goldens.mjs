@@ -43,6 +43,8 @@
 //                                     code, run on scratch homes; see scripts/goldens-sessions.mjs)
 //   test/golden/ssh-vault.jsonl, ssh-known-hosts.jsonl, ssh-command-history.jsonl, ssh-history-rules.jsonl   the SSH stores
 //                                     (1.1.4's code, run on scratch dirs) and the history rules (see scripts/goldens-ssh.mjs)
+//   test/golden/accounts-activate.jsonl  "make main", its version-2 recovery and the 0.9.0 recovery on scratch dirs (1.1.4's
+//                                     code; see scripts/goldens-activate.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
 import { updateConfigGolden, updateProgressRows, updateStringsGolden } from './goldens-update.mjs';
@@ -61,6 +63,7 @@ import { gitSharedRows, gitTrustRows } from './goldens-git.mjs';
 import { g8Goldens } from './goldens-g8.mjs';
 import { backwardRows, contextScanRows, sessionListRows, sessionPathRows } from './goldens-sessions.mjs';
 import { historyRows, historyRuleRows, knownHostsRows, vaultRows } from './goldens-ssh.mjs';
+import { activateRows } from './goldens-activate.mjs';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -94,6 +97,8 @@ const [sessions, contextMain, contextShared, { normalizeProjectPath }] = await P
 const [{ SshVault }, { KnownHostsStore }, { CommandHistoryStore }, historyRules] = await Promise.all([
   load('src/main/ssh/vault.ts'), load('src/main/ssh/knownHosts.ts'), load('src/main/ssh/commandHistory.ts'), load('src/shared/commandHistory.ts'),
 ]);
+// One module graph, so activate.ts and the swap slot flags it sets are the same instance.
+const activateModules = await load('scripts/goldens-activate.entry.ts');
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
 function rng(seed) {
@@ -361,6 +366,7 @@ const files = {
   'ssh-known-hosts.jsonl': jsonl(knownHostsRows({ KnownHostsStore })),
   'ssh-command-history.jsonl': jsonl(historyRows({ CommandHistoryStore })),
   'ssh-history-rules.jsonl': jsonl(historyRuleRows(historyRules)),
+  'accounts-activate.jsonl': jsonl(await activateRows(activateModules)),
 };
 const updateStrings = updateStringsGolden({ root, translate });
 files['update-strings.json'] = `${JSON.stringify(updateStrings, null, 1)}\n`;
