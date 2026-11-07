@@ -171,14 +171,40 @@ pub fn read_start(file: &mut File, len: usize) -> Result<Vec<u8>, FsError> {
     Ok(buf)
 }
 
+/// A path for a raw Win32 call that also works past MAX_PATH (see [`long_path`]).
+#[cfg(windows)]
+fn win32_path(path: &str) -> windows::core::HSTRING {
+    windows::core::HSTRING::from(long_path(path))
+}
+
+/// From 248 UTF-16 units on, the resolved path with the extended-length prefix (`C:\a` -> `\\?\C:\a`, `\\srv\share\a` ->
+/// `\\?\UNC\srv\share\a`), as Rust std does for its own calls and Node's `toNamespacedPath` did for libuv in 1.1.4. A
+/// shorter path, or one that already has a `\\?\` or `\\.\` prefix, stays as it is.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn long_path(path: &str) -> String {
+    const LEGACY_MAX_PATH: usize = 248;
+    if path.encode_utf16().count() < LEGACY_MAX_PATH || path.starts_with(r"\\?\") || path.starts_with(r"\\.\") {
+        return path.to_string();
+    }
+    let resolved = crate::jspath::resolve(crate::jspath::Flavor::Win32, &[path]);
+    let bytes = resolved.as_bytes();
+    if let Some(rest) = resolved.strip_prefix(r"\\") {
+        if !rest.starts_with('?') && !rest.starts_with('.') {
+            return format!(r"\\?\UNC\{rest}");
+        }
+    } else if bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\' {
+        return format!(r"\\?\{resolved}");
+    }
+    resolved
+}
+
 /// `fs.promises.rename(from, to)`: replaces an existing file like libuv (MoveFileExW with MOVEFILE_REPLACE_EXISTING on
 /// Windows, so a read-only target refuses as in 1.1.4).
 pub fn rename(from: &str, to: &str) -> Result<(), FsError> {
     #[cfg(windows)]
     {
         use windows::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MoveFileExW};
-        use windows::core::HSTRING;
-        let result = unsafe { MoveFileExW(&HSTRING::from(from), &HSTRING::from(to), MOVEFILE_REPLACE_EXISTING) };
+        let result = unsafe { MoveFileExW(&win32_path(from), &win32_path(to), MOVEFILE_REPLACE_EXISTING) };
         result.map_err(|e| FsError::io2(&io::Error::from_raw_os_error(e.code().0 & 0xFFFF), "rename", from, to))
     }
     #[cfg(not(windows))]
@@ -325,7 +351,15 @@ pub fn symlink(target: &str, path: &str, kind: LinkType) -> Result<(), FsError> 
             LinkType::Junction => {
                 let flavor = crate::jspath::Flavor::Win32;
                 let absolute = crate::jspath::resolve(flavor, &[path, "..", target]);
-                junction::create(&absolute, path).map_err(fail)
+                let existed = std::fs::symlink_metadata(path).is_ok();
+                junction::create(&absolute, path).map_err(|e| {
+                    // The crate makes the folder before it sets the reparse point; libuv's fs__create_junction removes
+                    // the folder it made when that fails (a FAT or exFAT volume), so no empty folder is left.
+                    if !existed {
+                        remove_leftover_dir(path);
+                    }
+                    fail(e)
+                })
             }
             LinkType::File => std::os::windows::fs::symlink_file(target.replace('/', "\\"), path).map_err(fail),
         }
@@ -334,6 +368,13 @@ pub fn symlink(target: &str, path: &str, kind: LinkType) -> Result<(), FsError> 
     {
         let _ = kind;
         std::os::unix::fs::symlink(target, path).map_err(fail)
+    }
+}
+
+/// Removes `path` when it is a plain (not a link) empty folder: what a failed junction creation leaves behind.
+pub fn remove_leftover_dir(path: &str) {
+    if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_dir() && !m.file_type().is_symlink()) {
+        let _ = std::fs::remove_dir(path);
     }
 }
 
@@ -357,16 +398,30 @@ pub fn create_new_file(path: &str) -> Result<(), FsError> {
 }
 
 /// `fs.promises.copyFile(src, dest, COPYFILE_EXCL)`: fails when `dest` exists (CopyFileW with bFailIfExists on Windows, which
-/// keeps the attributes; the mode of the source elsewhere, like libuv).
+/// keeps the attributes; copyfile(COPYFILE_ALL | COPYFILE_EXCL) on macOS, which keeps the extended attributes and the ACL;
+/// the data and the mode of the source on other Unix systems, like libuv).
 pub fn copy_file_excl(src: &str, dest: &str) -> Result<(), FsError> {
     #[cfg(windows)]
     {
         use windows::Win32::Storage::FileSystem::CopyFileW;
-        use windows::core::HSTRING;
-        let result = unsafe { CopyFileW(&HSTRING::from(src), &HSTRING::from(dest), true) };
+        let result = unsafe { CopyFileW(&win32_path(src), &win32_path(dest), true) };
         result.map_err(|e| FsError::io2(&io::Error::from_raw_os_error(e.code().0 & 0xFFFF), "copyfile", src, dest))
     }
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
+    {
+        // libuv on macOS: copyfile(src, dest, NULL, COPYFILE_ALL | COPYFILE_EXCL), which also keeps the extended
+        // attributes (com.apple.quarantine, Finder tags, resource forks), the ACL and the BSD flags.
+        use std::ffi::CString;
+        const COPYFILE_ALL: libc::copyfile_flags_t =
+            libc::COPYFILE_ACL | libc::COPYFILE_STAT | libc::COPYFILE_XATTR | libc::COPYFILE_DATA;
+        let fail = |e: io::Error| FsError::io2(&e, "copyfile", src, dest);
+        let nul = || io::Error::from_raw_os_error(libc::EINVAL);
+        let from = CString::new(src).map_err(|_| fail(nul()))?;
+        let to = CString::new(dest).map_err(|_| fail(nul()))?;
+        let rc = unsafe { libc::copyfile(from.as_ptr(), to.as_ptr(), std::ptr::null_mut(), COPYFILE_ALL | libc::COPYFILE_EXCL) };
+        if rc == 0 { Ok(()) } else { Err(fail(io::Error::last_os_error())) }
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
         use std::os::unix::fs::OpenOptionsExt;
         let fail = |e: io::Error| FsError::io2(&e, "copyfile", src, dest);
@@ -464,5 +519,16 @@ mod tests {
         assert_eq!(strip_verbatim("\\\\?\\C:\\a"), "C:\\a");
         assert_eq!(strip_verbatim("\\\\?\\UNC\\srv\\share\\a"), "\\\\srv\\share\\a");
         assert_eq!(strip_verbatim("/home/a"), "/home/a");
+    }
+
+    #[test]
+    fn long_paths_get_the_extended_length_prefix() {
+        let tail = "d".repeat(260);
+        assert_eq!(long_path(r"C:\short\a.txt"), r"C:\short\a.txt");
+        assert_eq!(long_path(&format!(r"C:\x/{tail}\..\y\b.txt")), r"\\?\C:\x\y\b.txt");
+        assert_eq!(long_path(&format!(r"C:\x\{tail}")), format!(r"\\?\C:\x\{tail}"));
+        assert_eq!(long_path(&format!(r"\\srv\share\{tail}")), format!(r"\\?\UNC\srv\share\{tail}"));
+        assert_eq!(long_path(&format!(r"\\?\C:\{tail}")), format!(r"\\?\C:\{tail}"));
+        assert_eq!(long_path(&format!(r"C:/x/{tail}/")), format!(r"\\?\C:\x\{tail}"));
     }
 }

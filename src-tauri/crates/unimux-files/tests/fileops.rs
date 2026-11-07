@@ -728,3 +728,100 @@ fn a_transfer_answers_every_field_in_1_1_4_order() {
         json!({ "ok": true, "done": [{ "from": "a.txt", "to": "src/a.txt" }], "skipped": [], "failed": [], "notes": [], "cancelled": false, "replaced": [] })
     );
 }
+
+/// A folder link that cannot be made (a junction on a FAT or exFAT volume: the folder is made, the reparse point is not)
+/// leaves no empty folder in the copy, only the note, as libuv's fs__create_junction cleans up in 1.1.4.
+#[test]
+fn a_failed_folder_link_leaves_no_empty_folder_in_the_copy() {
+    let fx = fixture();
+    let external = fx.fixture.join("external");
+    fs::create_dir(&external).unwrap();
+    fs::create_dir(fx.p("tree")).unwrap();
+    fs::write(fx.p("tree/ok.txt"), "ok").unwrap();
+    if !fx.link_dir(&external, &fx.p("tree/link")) {
+        return;
+    }
+    let mut options = fx.options();
+    options.hooks.symlink = Some(Box::new(|_: &str, path: &str, _: LinkType| {
+        fs::create_dir(path).unwrap();
+        Err(FsError::plain("EPERM"))
+    }));
+    let result = fx.transfer("copy", &["tree"], "docs", "ask", options);
+    assert_matches(
+        &result,
+        json!({ "ok": true, "done": [{ "from": "tree", "to": "docs/tree" }], "failed": [], "notes": ["link"] }),
+    );
+    assert_eq!(fx.names("docs/tree"), ["ok.txt"]);
+}
+
+/// Paths past MAX_PATH (a deep node_modules): copy, move, a cross-device move and rename work as in 1.1.4 (Node passed
+/// `\\?\` paths to libuv; the raw Win32 calls get the same prefix).
+#[test]
+fn paths_longer_than_260_characters_copy_move_and_rename() {
+    let fx = fixture();
+    let deep: Vec<String> = (0..5).map(|i| format!("{i}{}", "d".repeat(49))).collect();
+    let rel = deep.join("/");
+    fs::create_dir_all(fx.p(&rel)).unwrap();
+    let file = format!("{rel}/file.txt");
+    fs::write(fx.p(&file), "long").unwrap();
+    assert!(s(&fx.p(&file)).len() > 260, "{}", s(&fx.p(&file)).len());
+
+    // A file copied into its own folder ("file copy.txt") and a whole tree copied.
+    let copied = fx.cp(&[&file], &rel, "keepBoth");
+    assert_matches(
+        &copied,
+        json!({ "ok": true, "done": [{ "from": file, "to": format!("{rel}/file copy.txt") }], "failed": [] }),
+    );
+    assert_eq!(fx.read(&format!("{rel}/file copy.txt")), "long");
+    let tree = fx.cp(&[&deep[0]], "docs", "ask");
+    assert_matches(&tree, json!({ "ok": true, "done": [{ "from": deep[0] }], "failed": [] }));
+    assert_eq!(fx.read(&format!("docs/{rel}/file.txt")), "long");
+
+    // Rename in place.
+    let renamed = fx.rename(&format!("{rel}/file copy.txt"), "renamed.txt");
+    assert_eq!(renamed, json!({ "ok": true, "from": format!("{rel}/file copy.txt"), "to": format!("{rel}/renamed.txt") }));
+    assert_eq!(fx.read(&format!("{rel}/renamed.txt")), "long");
+
+    // A move into another long folder, then a cross-device move (copy and remove).
+    let target = deep[..4].join("/");
+    let moved = fx.mv(&[&format!("{rel}/renamed.txt")], &target, "ask");
+    assert_matches(&moved, json!({ "ok": true, "done": [{ "to": format!("{target}/renamed.txt") }], "failed": [] }));
+    assert_eq!(fx.read(&format!("{target}/renamed.txt")), "long");
+    let mut options = fx.options();
+    options.hooks.rename = Some(Box::new(exdev));
+    let across = fx.transfer("move", &[&deep[0]], "src", "ask", options);
+    assert_matches(&across, json!({ "ok": true, "done": [{ "from": deep[0], "to": format!("src/{}", deep[0]) }], "failed": [] }));
+    assert_eq!(fx.read(&format!("src/{rel}/file.txt")), "long");
+    assert!(!fx.names("").contains(&deep[0]));
+}
+
+/// macOS: a copy keeps the extended attributes (the quarantine flag, Finder tags), as libuv's copyfile(COPYFILE_ALL) did,
+/// and so does a cross-device move, which deletes the source after the copy.
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_copies_and_moves_keep_extended_attributes() {
+    use std::ffi::CString;
+    let fx = fixture();
+    let name = CString::new("com.apple.quarantine").unwrap();
+    let value = b"0081;00000000;Safari;";
+    let set = |path: &Path| {
+        let c = CString::new(s(path)).unwrap();
+        let rc = unsafe { libc::setxattr(c.as_ptr(), name.as_ptr(), value.as_ptr().cast(), value.len(), 0, 0) };
+        assert_eq!(rc, 0, "setxattr {}", std::io::Error::last_os_error());
+    };
+    let get = |path: &Path| -> Option<Vec<u8>> {
+        let c = CString::new(s(path)).unwrap();
+        let mut buf = [0u8; 256];
+        let n = unsafe { libc::getxattr(c.as_ptr(), name.as_ptr(), buf.as_mut_ptr().cast(), buf.len(), 0, 0) };
+        (n >= 0).then(|| buf[..n as usize].to_vec())
+    };
+    set(&fx.p("a.txt"));
+    set(&fx.p("src/b.txt"));
+    assert_matches(&fx.cp(&["a.txt"], "src", "ask"), json!({ "ok": true, "failed": [] }));
+    assert_eq!(get(&fx.p("src/a.txt")).as_deref(), Some(&value[..]));
+    let mut options = fx.options();
+    options.hooks.rename = Some(Box::new(exdev));
+    assert_matches(&fx.transfer("move", &["src"], "docs", "ask", options), json!({ "ok": true, "failed": [] }));
+    assert_eq!(get(&fx.p("docs/src/b.txt")).as_deref(), Some(&value[..]));
+    assert_eq!(get(&fx.p("docs/src/a.txt")).as_deref(), Some(&value[..]));
+}

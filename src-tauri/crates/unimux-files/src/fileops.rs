@@ -580,6 +580,7 @@ fn copy_tree(source: &str, target: &str, counter: &mut Counter) -> Result<(), Fs
         let info = fsx::lstat(&source)?;
         counter.entries += 1;
         if info.is_link {
+            let existed = fsx::lstat_or_none(&target).is_some();
             let linked = (|| -> Result<(), FsError> {
                 let destination = fsx::readlink(&source)?;
                 let kind =
@@ -590,6 +591,10 @@ fn copy_tree(source: &str, target: &str, counter: &mut Counter) -> Result<(), Fs
                 }
             })();
             if linked.is_err() {
+                // A junction that could not be set leaves no empty folder where the link should be (libuv removes it).
+                if !existed {
+                    fsx::remove_leftover_dir(&target);
+                }
                 counter.notes.push(jspath::basename(F, &source));
             }
             continue;
