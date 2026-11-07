@@ -51,7 +51,6 @@ impl Hooks {
     }
 
     /// Sees every signal before it is routed (it does its own checks, as the 1.1.4 handlers do).
-    #[allow(dead_code, reason = "the extension point of H2 (hookWatch), H4 (context tracker), M3 / P3 (statuses, exit codes)")]
     pub fn observe(&self, observer: impl Fn(&HookSignal) + Send + Sync + 'static) {
         self.observers.write().push(Arc::new(observer));
     }
@@ -60,7 +59,6 @@ impl Hooks {
         self.alive.read().as_ref().is_some_and(|f| f(cell))
     }
 
-    #[allow(dead_code, reason = "read by codex:bind (H4)")]
     pub fn codex_hooked(&self, cell: &str) -> bool {
         self.codex_hooked.lock().contains(cell)
     }
