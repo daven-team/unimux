@@ -207,6 +207,13 @@ fn register_context_with(r: &mut RouterBuilder, ctx: &Arc<AppContext>, dirs: Opt
         trackers.retain(|(c, _)| c.strong_count() > 0 && !std::ptr::eq(c.as_ptr(), Arc::as_ptr(ctx)));
         trackers.push((Arc::downgrade(ctx), tracker.clone()));
     }
+    // index.ts forgetCell: `contextTracker.forget(id)` once the cell left the state and no process of it runs (W7).
+    let t = Arc::downgrade(&tracker);
+    ctx.cells.on_forget_unless_alive("contextTracker", move |cell| {
+        if let Some(t) = t.upgrade() {
+            t.forget(cell);
+        }
+    });
     let weak = Arc::downgrade(ctx);
     let t = tracker.clone();
     ctx.hooks.observe(move |signal| {

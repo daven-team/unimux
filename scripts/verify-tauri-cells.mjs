@@ -75,7 +75,7 @@ try {
   const ms = Object.fromEntries(order.map(([m, v]) => [m, Number(v)]));
   check('accounts-recovered comes before accounts-migrated (1.1.4 marks it also with nothing to recover)', ms['accounts-recovered'] <= ms['accounts-migrated'], JSON.stringify(ms));
   check('cell-services-ready comes after the hook and MCP servers', ms['cell-services-ready'] >= ms['hooks-started'] && ms['cell-services-ready'] >= ms['mcp-started'], JSON.stringify(ms));
-  const want = { revoke: ['mcp'], forget: ['codexHooked'], forgetUnlessAlive: ['hooks', 'taskbar'], stateChanged: ['taskbar'] };
+  const want = { revoke: ['mcp'], forget: ['codexHooked'], forgetUnlessAlive: ['contextTracker', 'hooks', 'taskbar'], stateChanged: ['taskbar'] };
   check('the domains are wired into the cell bookkeeping', Object.entries(want).every(([k, v]) => v.every((n) => report.hooks[k]?.includes(n))), JSON.stringify(report.hooks));
 
   // ── renderer marks: first one wins ─────────────────────────────────────
