@@ -10,10 +10,13 @@
 //! [`feed`] (latest.json + minisign) and [`net`] (the backend over unimux-net).
 //!
 //! U5 added [`mac`] (the macOS engine and the bundle swap the update window runs) and [`version`] (compareVersions).
+//!
+//! U3 added [`legacy`] (the Electron 1.1.x hand-over: the `-e` cleanup call, the `update/` cleanup, electron-updater leftovers).
 
 pub mod coordinator;
 pub mod feed;
 pub mod gate;
+pub mod legacy;
 pub mod mac;
 pub mod net;
 pub mod progress;

@@ -192,7 +192,7 @@ pub fn show_main(ctx: &AppContext) {
     };
     ctx.mark("window-shown");
     // signalUpdateReady (1.1.4 did it on ready-to-show): completes the update window's last step; clearGateFailureIfUpdated
-    // (U1): the record of an attempt ends once the version it targeted runs. U3 adds the heartbeat wait.
+    // (U1): the record of an attempt ends once the version it targeted runs. The heartbeat wait runs before the gate (U3).
     let data_dir = ctx.data_dir.clone();
     #[cfg(target_os = "macos")]
     let updates_active = crate::startup::updates_active(&ctx.overrides);

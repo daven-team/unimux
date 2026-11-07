@@ -124,7 +124,7 @@ if (process.argv.includes('--build')) {
   };
   run(['--target-dir=check', 'tauri', 'build', '--no-bundle', '--features', 'dev-overrides,test-bridge'], { UNIMUX_VERSION_OVERRIDE: '' });
   const conf = join(tmpdir(), `unimux-u2-tauri-${process.pid}.json`);
-  writeFileSync(conf, JSON.stringify({ productName: PRODUCT, identifier: 'com.unimux.u2', mainBinaryName: 'unimux', version: PAYLOAD_VERSION, bundle: { windows: { nsis: { template: patchedTemplate() } } } }));
+  writeFileSync(conf, JSON.stringify({ productName: PRODUCT, identifier: 'com.unimux.u2', mainBinaryName: 'unimux', version: PAYLOAD_VERSION, bundle: { windows: { nsis: { template: patchedTemplate(), installerHooks: null } } } }));
   try { run(['--target-dir=u2', 'tauri', 'build', '--features', 'dev-overrides,test-bridge', '--bundles', 'nsis', '--config', conf], { UNIMUX_VERSION_OVERRIDE: PAYLOAD_VERSION }); } finally { rmSync(conf, { force: true }); }
   // A config file, not inline JSON: msvc-run passes the arguments through a shell, which drops the quotes.
   const swapConf = join(tmpdir(), `unimux-u5-tauri-${process.pid}.json`);

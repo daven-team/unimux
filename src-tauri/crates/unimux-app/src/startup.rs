@@ -13,6 +13,7 @@ use unimux_core::data_dir::{DATA_DIR_NAME, MigrationOptions, copy_multicoding_st
 use unimux_core::dev_overrides::DevOverrides;
 use unimux_core::home::app_data_dir;
 use unimux_core::i18n::{detect_language, translate};
+use unimux_update::legacy;
 
 /// The crash log of this process, once the data dir is known (one writer: everything logs through here).
 static CRASH: OnceLock<Arc<RollingLog>> = OnceLock::new();
@@ -35,13 +36,30 @@ pub fn set_shutting_down() {
 }
 static LAST_DIALOG: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 
-/// What `main()` does before anything else for calls of the 1.1.x update machinery. U3 fills in the full set
-/// (installInProgress, signalUpdateReady, ...); wave 0 handles the call that must never open a window: the 1.1.x update
-/// splash runs `unimux.exe -e <script>` with ELECTRON_RUN_AS_NODE=1 for its cleanup.
+/// What `main()` does before anything else for calls of the 1.1.x update machinery (U3): the 1.1.x update window ends with
+/// `<appExe> -e <script>` and ELECTRON_RUN_AS_NODE=1 (a node one-liner removing its private runtime 3 s later). After the
+/// update `appExe` is this exe: the call removes that folder (only a known `<data>/update/runtime`) and exits 0, with no
+/// window, no instance lock, no crash.log and no single-instance forwarding.
 pub fn legacy_entry() -> Option<i32> {
-    let as_node = std::env::var("ELECTRON_RUN_AS_NODE").is_ok_and(|v| !v.is_empty() && v != "0");
-    let has_eval = std::env::args().skip(1).any(|a| a == "-e" || a == "--eval");
-    (as_node && has_eval).then_some(0)
+    let args: Vec<String> = std::env::args_os().map(|a| a.to_string_lossy().into_owned()).collect();
+    let run_as_node = std::env::var_os("ELECTRON_RUN_AS_NODE").map(|v| v.to_string_lossy().into_owned());
+    let script = legacy::eval_call(run_as_node.as_deref(), &args)?;
+    let dev_data_dir = DevOverrides::from_env().data_dir;
+    let candidates = legacy::runtime_dir_candidates(&app_data_dir(), dev_data_dir.as_deref());
+    Some(legacy::run_eval_cleanup(&script, &candidates, legacy::EVAL_CLEANUP_DELAY))
+}
+
+/// `updateInstalling(START_BLOCK_MS)` at start (1.1.4 index.ts, right after the single-instance lock): the installer an
+/// update window started is replacing this build's files right now, so the installed Windows app does not start.
+pub fn install_in_progress_at_start(data_dir: &std::path::Path) -> bool {
+    cfg!(windows)
+        && PACKAGED
+        && unimux_update::window::install_in_progress(
+            data_dir,
+            unimux_core::VERSION,
+            unimux_update::window::START_BLOCK_MS,
+            unimux_core::time::now_ms() as f64,
+        )
 }
 
 /// The OS language for texts shown before the state is read.
@@ -150,7 +168,6 @@ pub fn log_info(line: &str) {
 }
 
 /// 1.1.4's `updatesActive()`: a packaged build, or a development feed (MC_UPDATE_FEED, dev-overrides builds only).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn updates_active(overrides: &DevOverrides) -> bool {
     unimux_core::PACKAGED || overrides.update_feed.is_some()
 }

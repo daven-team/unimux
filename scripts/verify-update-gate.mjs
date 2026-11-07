@@ -80,7 +80,7 @@ if (process.argv.includes('--build')) {
   // The payload first, in the check target dir (only the workspace crates rebuild for another version), then the check build
   // of the current version over it.
   const conf = join(tmpdir(), `unimux-u1-tauri-${process.pid}.json`);
-  writeFileSync(conf, JSON.stringify({ productName: PRODUCT, identifier: 'com.unimux.u1', mainBinaryName: 'unimux', version: PAYLOAD_VERSION, bundle: { windows: { nsis: { template: patchedTemplate() } } } }));
+  writeFileSync(conf, JSON.stringify({ productName: PRODUCT, identifier: 'com.unimux.u1', mainBinaryName: 'unimux', version: PAYLOAD_VERSION, bundle: { windows: { nsis: { template: patchedTemplate(), installerHooks: null } } } }));
   try { run(['--target-dir=check', 'tauri', 'build', '--features', 'dev-overrides,test-bridge', '--bundles', 'nsis', '--config', conf], { UNIMUX_VERSION_OVERRIDE: PAYLOAD_VERSION }); } finally { rmSync(conf, { force: true }); }
   const bundleDir = join(root, 'src-tauri', 'target', 'check', 'release', 'bundle', 'nsis');
   copyFileSync(join(bundleDir, `${PRODUCT}_${PAYLOAD_VERSION}_x64-setup.exe`), payloadSetup);
