@@ -12,6 +12,9 @@
 //! account guards ([`rules`]). Ports of src/main/accounts/{activate,swap,codexActivate,makeMain,guards,dead,cswap}.ts and the
 //! parts of refs.ts, refresh.ts and resync.ts they use.
 //!
+//! A6: the GitHub sign-in of "Publish to GitHub" ([`github`]: token store, `gh` fallback, device flow, status cache, the git
+//! environment and refusal regexes), registered in `unimux-app/src/commands/github.rs`.
+//!
 //! The commands are registered in `unimux-app/src/commands/accounts.rs` by the later A packages.
 
 pub mod activate;
@@ -19,6 +22,7 @@ pub mod codex;
 pub mod codex_activate;
 pub mod codex_store;
 pub mod cswap;
+pub mod github;
 pub mod identity;
 mod js;
 pub mod legacy_swap;
