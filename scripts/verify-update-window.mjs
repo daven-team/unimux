@@ -1,7 +1,7 @@
 // U2 acceptance (docs/tauri/PLAN.md U2, grown from the SP6 spike): the custom update window process end to end on Windows, on
 // scratch folders only, with a real NSIS update installer 1.2.0 -> 1.2.0-test.1.
 //
-//   node scripts/verify-update-window.mjs [--build] [--keep] [--prestage] [--case=main,guard,failed,webview]
+//   node scripts/verify-update-window.mjs [--build] [--keep] [--prestage] [--case=main,guard,failed,webview,swap,rollback]
 //
 // Rules of this machine (PROGRESS.md): no test shows a dialog, message box or window on the user's desktop, and no installer
 // registers in Apps & features. So:
@@ -31,6 +31,14 @@
 //   webview  the WebView2 data folders of the window AND of the app are files (WebView2 would show Edge's "cannot create data
 //            directory" box): the pre-check takes fresh folders under %TEMP% instead, no dialog appears anywhere, the update
 //            completes and the fallback folder of the window is removed.
+//   swap     U5 (the macOS bundle swap, run here on a scratch "bundle" `<case>\Applications\unimux.app\Contents\MacOS\unimux.exe`):
+//            the hand-over carries a swap plan instead of an installer; once the old app exited the window renames the bundle
+//            to `unimux.app.old-<from>`, the staged `unimux.app.new-1.2.0-test.1` into place, starts the new app, which writes
+//            update/ready, then removes the backup and the downloaded files; updates/mac/update.log has the steps.
+//   rollback U5: the staged bundle's executable cannot be started: the window puts the old bundle back, starts it again,
+//            writes updates/mac/rolled-back = 1.2.0-test.1 and shows "Could not install the update."; Escape ends it.
+//
+// --build also makes the swap payload: src-tauri/target/u5/release/unimux.exe (version 1.2.0-test.1, no bundle).
 //
 // Never runs the real installer of unimux, never touches %APPDATA%\unimux or %LOCALAPPDATA%\unimux-updater, ends only processes
 // it started (by pid, all of them inside the scratch folder).
@@ -48,7 +56,10 @@ const visible = process.argv.includes('--visible') && process.env.UNIMUX_HARNESS
 if (process.argv.includes('--visible') && !visible) console.log('[u2] --visible ignored: it puts a window on the desktop; set UNIMUX_HARNESS_VISIBLE=1 to allow it');
 const prestage = process.argv.includes('--prestage');
 const caseArg = process.argv.find((a) => a.startsWith('--case='));
-const ALL = ['main', 'guard', 'failed', 'webview'];
+const ALL = ['main', 'guard', 'failed', 'webview', 'swap', 'rollback'];
+const SWAP_CASES = ['swap', 'rollback'];
+// U5: a non-executable file that `read_dir` lists before `unimux.exe` in Contents/MacOS of both scratch bundles.
+const DECOY = 'aaa-sidecar.exe';
 const selected = caseArg ? caseArg.slice('--case='.length).split(',').filter((c) => ALL.includes(c)) : ALL;
 const PAYLOAD_VERSION = '1.2.0-test.1';
 const OLD_VERSION = JSON.parse(readFileSync(join(root, 'src-tauri', 'crates', 'unimux-app', 'tauri.conf.json'), 'utf8')).version;
@@ -58,6 +69,7 @@ const oldExeBuilt = join(root, 'src-tauri', 'target', 'check', 'release', 'unimu
 const u2Dir = join(root, 'src-tauri', 'target', 'u2');
 const bundleDir = join(u2Dir, 'release', 'bundle', 'nsis');
 const payloadExe = join(u2Dir, 'release', 'unimux.exe');
+const swapPayloadExe = join(root, 'src-tauri', 'target', 'u5', 'release', 'unimux.exe');
 const shots = join(root, 'artifacts', 'tauri-u2');
 mkdirSync(shots, { recursive: true });
 
@@ -114,10 +126,19 @@ if (process.argv.includes('--build')) {
   const conf = join(tmpdir(), `unimux-u2-tauri-${process.pid}.json`);
   writeFileSync(conf, JSON.stringify({ productName: PRODUCT, identifier: 'com.unimux.u2', mainBinaryName: 'unimux', version: PAYLOAD_VERSION, bundle: { windows: { nsis: { template: patchedTemplate() } } } }));
   try { run(['--target-dir=u2', 'tauri', 'build', '--features', 'dev-overrides,test-bridge', '--bundles', 'nsis', '--config', conf], { UNIMUX_VERSION_OVERRIDE: PAYLOAD_VERSION }); } finally { rmSync(conf, { force: true }); }
+  // A config file, not inline JSON: msvc-run passes the arguments through a shell, which drops the quotes.
+  const swapConf = join(tmpdir(), `unimux-u5-tauri-${process.pid}.json`);
+  writeFileSync(swapConf, JSON.stringify({ version: PAYLOAD_VERSION }));
+  try { run(['--target-dir=u5', 'tauri', 'build', '--no-bundle', '--features', 'dev-overrides,test-bridge', '--config', swapConf], { UNIMUX_VERSION_OVERRIDE: PAYLOAD_VERSION }); } finally { rmSync(swapConf, { force: true }); }
 }
 const setupName = existsSync(bundleDir) ? readdirSync(bundleDir).find((n) => n === `${PRODUCT}_${PAYLOAD_VERSION}_x64-setup.exe`) : undefined;
-if (!setupName || !existsSync(oldExeBuilt)) { console.error(`missing ${setupName ? oldExeBuilt : `the payload installer in ${bundleDir}`}: run with --build`); process.exit(1); }
-const payloadHash = payloadHashOf(readFileSync(payloadExe));
+// The swap cases need no installer, only the payload exe.
+const needSetup = selected.some((c) => !SWAP_CASES.includes(c));
+const needSwap = selected.some((c) => SWAP_CASES.includes(c));
+const missing = [needSetup && !setupName && `the payload installer in ${bundleDir}`, !existsSync(oldExeBuilt) && oldExeBuilt, needSwap && !existsSync(swapPayloadExe) && swapPayloadExe].filter(Boolean);
+if (missing.length) { console.error(`missing ${missing.join(', ')}: run with --build`); process.exit(1); }
+const payloadHash = needSetup ? payloadHashOf(readFileSync(payloadExe)) : undefined;
+const swapPayloadHash = needSwap ? payloadHashOf(readFileSync(swapPayloadExe)) : undefined;
 
 const markersBefore = realProfileMarkers();
 const realUpdater = join(process.env.LOCALAPPDATA, 'unimux-updater');
@@ -125,7 +146,7 @@ const realUpdaterBefore = existsSync(realUpdater) ? readdirSync(realUpdater).sor
 
 const scratch = mkdtempSync(join(tmpdir(), 'unimux-u2-'));
 const setup = join(scratch, 'unimux-u2-setup.exe');
-copyFileSync(join(bundleDir, setupName), setup);
+if (setupName) copyFileSync(join(bundleDir, setupName), setup);
 console.log(`scratch: ${scratch}`);
 
 // ── nothing registered, no shortcut ─────────────────────────────────────────
@@ -267,10 +288,16 @@ async function runCase(name) {
     guard: { version: '1.2.1', timeoutMs: 500, escape: 'error' },
     failed: { missingInstaller: true, escape: 'error' },
     webview: { brokenWebview: true },
+    swap: { swap: true, windDownMs: 1500 },
+    rollback: { swap: true, brokenNew: true, escape: 'error' },
   }[name];
   const version = c.version ?? PAYLOAD_VERSION;
   const caseDir = join(scratch, name);
-  const installDir = join(caseDir, 'Install Dir');
+  // U5: the "bundle" of the swap cases (the macOS layout; the executable keeps its .exe name here).
+  const bundle = c.swap ? join(caseDir, 'Applications', 'unimux.app') : undefined;
+  const newBundle = c.swap ? `${bundle}.new-${PAYLOAD_VERSION}` : undefined;
+  const backup = c.swap ? `${bundle}.old-${OLD_VERSION}` : undefined;
+  const installDir = c.swap ? join(bundle, 'Contents', 'MacOS') : join(caseDir, 'Install Dir');
   const dataDir = join(caseDir, 'data');
   const updaterRoot = join(caseDir, 'unimux-updater');
   const tempDir = join(caseDir, 'temp');
@@ -287,6 +314,20 @@ async function runCase(name) {
     copyFileSync(oldExeBuilt, installedExe);
     const oldHash = payloadHashOf(readFileSync(installedExe));
     const oldSize = statSync(installedExe).size;
+    let download;
+    if (c.swap) {
+      // The verified new bundle staged next to the installed one, and what the engine downloaded (removed after the swap).
+      mkdirSync(join(newBundle, 'Contents', 'MacOS'), { recursive: true });
+      const newExe = join(newBundle, 'Contents', 'MacOS', 'unimux.exe');
+      if (c.brokenNew) writeFileSync(newExe, 'not an executable');
+      else copyFileSync(swapPayloadExe, newExe);
+      // A file listed before the executable in both bundles (a sidecar, a log): only the plan's `executable` may be started.
+      for (const dir of [installDir, join(newBundle, 'Contents', 'MacOS')]) writeFileSync(join(dir, DECOY), 'not the app');
+      writeFileSync(join(newBundle, 'Contents', 'Info.plist'), `<plist><dict><key>CFBundleShortVersionString</key><string>${PAYLOAD_VERSION}</string></dict></plist>`);
+      download = join(dataDir, 'updates', 'mac', `unimux-${PAYLOAD_VERSION}-mac-x64.app.tar.gz.extract`);
+      mkdirSync(download, { recursive: true });
+      writeFileSync(join(download, 'archive'), 'downloaded');
+    }
     if (name === 'main') {
       check('payload installer and both exes are GUI-subsystem (no console)', subsystem(setup) === 2 && subsystem(payloadExe) === 2 && subsystem(installedExe) === 2, `setup ${subsystem(setup)}, payload ${subsystem(payloadExe)}, old ${subsystem(installedExe)}`);
       check('old app and payload differ', oldHash !== payloadHash, `${oldSize} vs ${statSync(payloadExe).size} bytes`);
@@ -303,7 +344,9 @@ async function runCase(name) {
     const windowPort = await freePort();
     const { env: homeEnv } = scratchHome(caseDir);
     const env = scrubAppEnv({ ...process.env, ...homeEnv, TEMP: tempDir, TMP: tempDir, MC_DATA_DIR: dataDir, MC_DEBUG_PORT: String(appPort), MC_OFFSCREEN: '1', MC_UPDATE_DEBUG_PORT: String(windowPort) });
-    const old = spawn(installedExe, [], { env, stdio: 'ignore', windowsHide: true, cwd: installDir });
+    // A swap renames the bundle: the old app (and its WebView2 processes) must not have it as the working directory (macOS
+    // renames open folders, Windows does not).
+    const old = spawn(installedExe, [], { env, stdio: 'ignore', windowsHide: true, cwd: c.swap ? caseDir : installDir });
     children.push(old);
     const oldExit = new Promise((res) => old.once('exit', (code) => res({ code, at: at() })));
     const page = await connectPage(appPort, { timeoutMs: 45000 });
@@ -320,6 +363,9 @@ async function runCase(name) {
     // The app exits this long after the hand-over answered (W6's wind-down); a second, so the answer reaches the harness on a
     // loaded machine.
     const args = { installer, updaterRoot, version, windDownMs: c.windDownMs ?? 1000 };
+    const macDir = join(dataDir, 'updates', 'mac');
+    const plan = c.swap ? { bundle, newBundle, backup, executable: 'unimux.exe', log: join(macDir, 'update.log'), readyFlag: join(macDir, 'ready'), failedFlag: join(macDir, 'rolled-back'), cleanup: [download], fromVersion: OLD_VERSION, toVersion: PAYLOAD_VERSION } : undefined;
+    if (c.swap) { delete args.installer; args.swap = plan; }
     if (c.timeoutMs) args.timeoutMs = c.timeoutMs;
     if (c.visible) args.env = { MC_UPDATE_VISIBLE: '1' };
     let brokenWebview;
@@ -345,7 +391,8 @@ async function runCase(name) {
     // shows; a late show is reported (PROGRESS.md U2 open issues).
     const shownLate = !(typeof hand.shownMs === 'number' && hand.shownMs < 4000);
     timings.shownLate = shownLate;
-    check('config: 1.1.x keys plus installer, installerArgs and a webview2 folder of its own', config.oldPid === old.pid && config.fromVersion === OLD_VERSION && config.installerArgs === `/S /UPDATE --updated /D=${installDir}` && (c.brokenWebview ? webviewDir === brokenWebview : /[\\/]webview2-\d+$/.test(webviewDir) && dirname(webviewDir).toLowerCase() === updaterRoot.toLowerCase()), `${config.fromVersion} -> ${config.version}; ${config.installerArgs}; ${webviewDir}`);
+    if (c.swap) check('config: a swap plan instead of the installer, installDir = the bundle', config.oldPid === old.pid && config.installer === undefined && config.installerArgs === undefined && config.installDir === bundle && JSON.stringify(config.swap) === JSON.stringify(plan), `${config.fromVersion} -> ${config.version}; swap ${config.swap?.bundle} <- ${config.swap?.newBundle}`);
+    else check('config: 1.1.x keys plus installer, installerArgs and a webview2 folder of its own', config.oldPid === old.pid && config.fromVersion === OLD_VERSION && config.installerArgs === `/S /UPDATE --updated /D=${installDir}` && (c.brokenWebview ? webviewDir === brokenWebview : /[\\/]webview2-\d+$/.test(webviewDir) && dirname(webviewDir).toLowerCase() === updaterRoot.toLowerCase()), `${config.fromVersion} -> ${config.version}; ${config.installerArgs}; ${webviewDir}`);
 
     // ── watch ────────────────────────────────────────────────────────────
     let win;
@@ -428,6 +475,8 @@ async function runCase(name) {
         webview: flagAt.ready !== undefined,
         guard: !!newAppOf(),
         failed: escapeAt !== undefined,
+        swap: flagAt.ready !== undefined,
+        rollback: escapeAt !== undefined,
       }[name];
       if (doneWhen && windowGoneAt !== undefined && !windowAlive && !leftovers) { timings.cleanedAt = at(); break; }
       await sleep(100);
@@ -494,7 +543,10 @@ async function runCase(name) {
       check('update window ran from the runtime copy', winInfo?.path?.toLowerCase() === runtimeExe.toLowerCase(), winInfo?.path);
       check('installer ran /S /UPDATE --updated /D=... through ShellExecuteExW, owned by the window, and exited 0', /installer exited with Some\(0\)/.test(log) && /installer \S.* \/S \/UPDATE --updated \/D=.* started \(pid \d+, as this user, owner window yes\)/.test(log), (log.match(/installer [^\n]*started[^\n]*/) ?? [''])[0]);
       check(`install dir fully replaced: unimux.exe is the ${PAYLOAD_VERSION} payload`, newHash === payloadHash && newHash !== oldHash, `${oldSize} -> ${statSync(installedExe).size} bytes`);
-      check('install dir holds exactly the payload files', readdirSync(installDir).sort().join(',') === 'unimux.exe,uninstall.exe', readdirSync(installDir).join(', '));
+      // `resources` once the Windows config bundles files (P1: ConPTY's conpty.dll and OpenConsole.exe).
+      const bundled = Object.keys(JSON.parse(readFileSync(join(root, 'src-tauri', 'crates', 'unimux-app', 'tauri.windows.conf.json'), 'utf8')).bundle?.resources ?? {}).length > 0;
+      const expectedFiles = [...(bundled ? ['resources'] : []), 'unimux.exe', 'uninstall.exe'].join(',');
+      check('install dir holds exactly the payload files', readdirSync(installDir).sort().join(',') === expectedFiles, readdirSync(installDir).join(', '));
       check('window stayed until the new app wrote update/ready', flagAt.ready !== undefined && windowExitAt !== undefined && windowExitAt >= flagAt.ready, `ready at ${flagAt.ready} ms, window exit ${windowExitAt} ms`);
       check(`ready written by the new version (${PAYLOAD_VERSION})`, existsSync(flags.ready) && readFileSync(flags.ready, 'utf8') === PAYLOAD_VERSION, existsSync(flags.ready) ? readFileSync(flags.ready, 'utf8') : 'none');
       check('window closed on ready (within 5 s)', windowExitAt !== undefined && flagAt.ready !== undefined && windowExitAt - flagAt.ready >= 0 && windowExitAt - flagAt.ready < 5000, `${windowExitAt - flagAt.ready} ms after ready`);
@@ -502,6 +554,37 @@ async function runCase(name) {
       check('new app started from the install dir', !!newApp && lastSnapshot.some((p) => p.ProcessId === newApp[0]), newApp ? `pid ${newApp[0]}` : 'none');
       const fallbackGone = !c.brokenWebview || (!!usedWebview && !existsSync(usedWebview));
       check(`cleanup ran from the installed exe and removed the copy and the WebView2 folder${c.brokenWebview ? ' (the %TEMP% fallback)' : ''}`, !!cleanup && !existsSync(runtimeDir) && (c.brokenWebview ? fallbackGone : !existsSync(webviewDir)), cleanup ? `${cleanup.first}..${cleanup.last} ms${c.brokenWebview ? `, fallback ${usedWebview ?? 'not seen'}` : ''}` : 'no cleanup process');
+    }
+    const macLog = existsSync(plan?.log ?? '') ? readFileSync(plan.log, 'utf8') : '';
+    if (c.swap) console.log(`updates/mac/update.log:\n${macLog}`);
+    const macLines = () => (macLog.match(/^\S+ (.*)$/gm) ?? []).map((l) => l.replace(/^\S+ /, '')).join(' | ');
+    const siblings = () => (c.swap ? readdirSync(dirname(bundle)).sort().join(',') : '');
+    if (name === 'swap') {
+      const order = ['preparing', 'closing', 'installing', 'launching', 'done'];
+      const logStages = [...log.matchAll(/stage (\w+) after (\d+) ms/g)].map((m) => m[1]);
+      check('stages reached done (updater.log), forward only', logStages.at(-1) === 'done' && logStages.every((v, i) => i === 0 || order.indexOf(v) > order.indexOf(logStages[i - 1])), logStages.join(' > '));
+      check('old app exited after the hand-over (exit code 0)', oldEnd?.code === 0, `at ${oldEnd?.at} ms`);
+      check('update window ran from the runtime copy (outside the bundle)', winInfo?.path?.toLowerCase() === runtimeExe.toLowerCase(), winInfo?.path);
+      check('no installer ran', !/installer /.test(log));
+      check(`bundle swapped: the executable in unimux.app is the ${PAYLOAD_VERSION} payload`, newHash === swapPayloadHash && newHash !== oldHash, `${oldSize} -> ${statSync(installedExe).size} bytes`);
+      check(`the plan's executable was started, not ${DECOY} listed before it (it stays in the bundle)`, existsSync(join(installDir, DECOY)) && !/could not be opened/.test(log) && !/did not report ready/.test(macLog), readdirSync(installDir).join(','));
+      check('swap steps in updater.log and updates/mac/update.log (the 1.1.4 lines)', [/the app has exited, replacing /, /the new app is in place/, /started .*unimux\.app/, /update \S+ -> 1\.2\.0-test\.1 complete/].every((re) => re.test(log) && re.test(macLog)), macLines());
+      check('the new app started from the bundle', !!newApp && lastSnapshot.some((p) => p.ProcessId === newApp[0]), newApp ? `pid ${newApp[0]}` : 'none');
+      check(`ready written by the new version (${PAYLOAD_VERSION}); window closed on it (within 5 s)`, existsSync(flags.ready) && readFileSync(flags.ready, 'utf8') === PAYLOAD_VERSION && windowExitAt - flagAt.ready >= 0 && windowExitAt - flagAt.ready < 5000, `${windowExitAt - flagAt.ready} ms after ready`);
+      check('backup, staged sibling and downloaded files removed: only unimux.app is left', siblings() === 'unimux.app' && !existsSync(download), siblings());
+      check('no rolled-back flag', !existsSync(plan.failedFlag));
+      check('cleanup removed the copy and the WebView2 folder', !!cleanup && !existsSync(runtimeDir) && !existsSync(webviewDir));
+    }
+    if (name === 'rollback') {
+      const card = pageLog.find((s) => s.stage === 'error' && s.actions);
+      check('failed card: "Could not install the update." with the hint', card?.status === 'Could not install the update.' && card?.hint === 'You can start unimux manually.' && card?.actions, card ? `"${card.status}" / "${card.hint}"` : stages.map((s) => s.stage).join(' > '));
+      check('the log names the step: the new app could not be opened, the previous version restored', /the new app could not be opened, restoring the previous version/.test(log) && /the previous version was restored/.test(macLog), macLines());
+      check('the old bundle is back in place, unchanged', newHash === oldHash && existsSync(installedExe));
+      check(`updates/mac/rolled-back names ${PAYLOAD_VERSION} (the next start reports the failed update)`, existsSync(plan.failedFlag) && readFileSync(plan.failedFlag, 'utf8').trim() === PAYLOAD_VERSION);
+      check('the old app was started again from the bundle', !!newApp && newApp[1].first > (oldEnd?.at ?? 0), newApp ? `pid ${newApp[0]} at ${newApp[1].first} ms` : 'none');
+      check('no backup left (it went back into place); the downloaded files stay for the next start', !siblings().includes('.old-') && existsSync(download), siblings());
+      check('no ready flag (the old version never reports one for the target)', !existsSync(flags.ready));
+      check('Escape on the failed card ends the window, cleanup removed the copy', escapeAt !== undefined && windowExitAt !== undefined && windowExitAt - escapeAt < 8000 && !!cleanup && !existsSync(runtimeDir), `${escapeHow} at ${escapeAt} ms, exit at ${windowExitAt} ms`);
     }
     if (name === 'guard') {
       const card = pageLog.find((s) => s.stage === 'error' && s.actions);

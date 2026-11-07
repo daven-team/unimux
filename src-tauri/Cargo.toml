@@ -159,6 +159,10 @@ indexmap = "2.14.2"
 unicode-normalization = "0.1.26"
 # H5: the index keeps its stat / read workers between passes (a thread start per pass and file was most of a rescan).
 rayon-core = "1.13.0"
+# U5 (macOS update engine): the Tauri updater archive `.app.tar.gz` (unpacked in Rust; flate2 above) and its minisign signature
+# (checked with minisign-verify above, the format tauri-plugin-updater checks); minisign itself only signs test archives in the tests.
+tar = { version = "0.4.46", default-features = false }
+minisign = "0.10.0"
 
 # G7: regress with V8's Annex B case-insensitive classes and other fixes (vendor/regress/Cargo.toml lists the patches).
 [patch.crates-io]

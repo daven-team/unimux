@@ -245,6 +245,9 @@ fn main() {
                 }),
             ));
             ctx.mark("app-ready");
+            // macOS: how the previous update ended, recorded for the gate before it runs (U5).
+            #[cfg(target_os = "macos")]
+            startup::previous_mac_update(&ctx.data_dir, &ctx.overrides);
             // U1: the background update checks (8 s after the start, then every 30 min).
             if let Some(updates) = ctx.update.get() {
                 updates.start();

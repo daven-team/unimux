@@ -1,22 +1,24 @@
 //! `compareVersions` of src/main/updateCoordinator.ts: numeric comparison of dotted versions, prerelease and build suffixes
-//! ignored (`1.2.0-test.1` equals `1.2.0`, like 1.1.4).
+//! ignored (`1.2.0-test.1` equals `1.2.0`). Every part is read like JS `Number.parseInt(part, 10) || 0`.
 
 use std::cmp::Ordering;
 
-/// `Number.parseInt(part, 10) || 0`: the leading digits of the part (after whitespace and an optional sign), else 0.
+/// One dotted part as `Number.parseInt(part, 10) || 0`: leading whitespace, an optional sign, then the leading digits; no
+/// digits gives 0 (NaN || 0). Large values keep their order (compared as f64, like JS numbers).
 fn part(value: &str) -> f64 {
-    let s = value.trim_start();
-    let (sign, rest) = match s.as_bytes().first() {
-        Some(b'-') => (-1.0, &s[1..]),
-        Some(b'+') => (1.0, &s[1..]),
-        _ => (1.0, s),
+    let text = value.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    let (negative, rest) = match text.as_bytes().first() {
+        Some(b'-') => (true, &text[1..]),
+        Some(b'+') => (false, &text[1..]),
+        _ => (false, text),
     };
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let digits: &str = &rest[..rest.bytes().take_while(u8::is_ascii_digit).count()];
     if digits.is_empty() {
         return 0.0;
     }
     let n: f64 = digits.parse().unwrap_or(0.0);
-    if n == 0.0 { 0.0 } else { sign * n }
+    // `-0 || 0` is 0.
+    if negative && n != 0.0 { -n } else { n }
 }
 
 fn parts(value: &str) -> Vec<f64> {
@@ -24,13 +26,16 @@ fn parts(value: &str) -> Vec<f64> {
     core.split('.').map(part).collect()
 }
 
-/// Negative when `a` is older than `b`, 0 when equal, positive when newer.
+/// Negative (Less) when `a` is older than `b`.
 pub fn compare_versions(a: &str, b: &str) -> Ordering {
-    let (left, right) = (parts(a), parts(b));
+    let left = parts(a);
+    let right = parts(b);
     for i in 0..left.len().max(right.len()) {
-        let diff = left.get(i).copied().unwrap_or(0.0) - right.get(i).copied().unwrap_or(0.0);
-        if diff != 0.0 {
-            return if diff < 0.0 { Ordering::Less } else { Ordering::Greater };
+        let l = left.get(i).copied().unwrap_or(0.0);
+        let r = right.get(i).copied().unwrap_or(0.0);
+        match l.partial_cmp(&r) {
+            Some(Ordering::Equal) | None => {}
+            Some(order) => return order,
         }
     }
     Ordering::Equal
@@ -44,6 +49,18 @@ pub fn is_newer(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compares_like_the_ts_reference() {
+        assert_eq!(compare_versions("1.2.0", "1.1.4"), Ordering::Greater);
+        assert_eq!(compare_versions("1.2.0-test.1", "1.2.0"), Ordering::Equal);
+        assert_eq!(compare_versions("1.10.0", "1.9.9"), Ordering::Greater);
+        assert_eq!(compare_versions("1.2", "1.2.0"), Ordering::Equal);
+        assert_eq!(compare_versions("1.2.0.1", "1.2.0"), Ordering::Greater);
+        assert_eq!(compare_versions("x.2", "0.2"), Ordering::Equal);
+        assert_eq!(compare_versions("1a.0", "1.0"), Ordering::Equal);
+        assert_eq!(compare_versions("", "0"), Ordering::Equal);
+    }
 
     /// update-coordinator.test.ts "compares versions numerically" and startup-gate.test.ts "compares dotted versions
     /// numerically".

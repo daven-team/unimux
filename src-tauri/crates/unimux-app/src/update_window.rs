@@ -32,6 +32,8 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, UserAttentionType, WebviewUrl
 
 use unimux_core::crash_log::RollingLog;
 use unimux_exec::Program;
+use unimux_update::mac::BundleSwapPlan;
+use unimux_update::mac::swap::{self as bundle_swap, RealSwapOps, SwapOps};
 use unimux_update::progress::{CloseAction, UpdateNote, UpdateProgressModel, UpdateSnapshot, UpdateStage, close_action};
 use unimux_update::window::{
     UpdateSplashConfig, directory_bytes, is_runtime_dir, needs_elevation, remove_with_retries, remove_with_retries_guarded,
@@ -425,6 +427,12 @@ impl UpdateWindow {
         }
     }
 
+    /// macOS (U5): a swap step in updater.log and in `updates/mac/update.log` (where the engine, and 1.1.4's script, log it).
+    fn swap_note(&self, plan: &BundleSwapPlan, line: &str) {
+        self.log.info(line);
+        unimux_update::mac::append_update_log(&plan.log, unimux_core::time::now_ms(), line);
+    }
+
     fn start_installer(&self) -> Result<installer::Running, String> {
         let program = self.config.installer.clone().ok_or_else(|| "no installer".to_string())?;
         let args = self.config.installer_args.clone().unwrap_or_default();
@@ -466,6 +474,9 @@ impl UpdateWindow {
         let mut failure_shown = false;
         let mut error_at: Option<f64> = None;
         let mut launched = false;
+        // Something to install: the installer (Windows) or the bundle swap (macOS, U5).
+        let has_work = config.installer.is_some() || config.swap.is_some();
+        let mut swapped = false;
         let mut logged = (false, false, false);
         // Every stage change goes to updater.log (the window may be hidden or never shown).
         let mut last_stage = UpdateStage::Error;
@@ -511,6 +522,21 @@ impl UpdateWindow {
                     Err(reason) => failure = Some(reason),
                 }
             }
+            // macOS: the bundle swap, once the old app (which runs from the bundle) is gone. Two renames, so it runs here; a
+            // failure has already put the old app back and started it (and written `rolled-back`).
+            if closed
+                && !swapped
+                && failure.is_none()
+                && let Some(plan) = &config.swap
+            {
+                swapped = true;
+                match bundle_swap::swap(plan, &RealSwapOps, &|line| self.swap_note(plan, line)) {
+                    Ok(()) => {
+                        let _ = std::fs::write(&config.installed_flag, &config.version);
+                    }
+                    Err(f) => failure = Some(f.reason),
+                }
+            }
             if let Some(run) = installer.as_mut()
                 && let Some(code) = run.try_wait()
             {
@@ -531,14 +557,25 @@ impl UpdateWindow {
                 self.log.info(&format!("files in place after {elapsed:.0} ms"));
             }
             // The new app, once; an app the user already started from the error card counts while it runs.
-            if installed && !launched && config.installer.is_some() && failure.is_none() {
+            if installed && !launched && has_work && failure.is_none() {
                 launched = true;
-                let opened = self.opened_pid.load(Ordering::SeqCst);
-                if (opened == 0 || !unimux_exec::process_alive(opened)) && self.launch_app().is_none() {
-                    failure = Some("new app did not start".into());
+                if let Some(plan) = &config.swap {
+                    // `open` of the swapped bundle; a start that fails puts the old app back.
+                    let flags = [config.ready_flag.as_path()];
+                    if let Err(f) = bundle_swap::launch_new(plan, &flags, &RealSwapOps, &|line| self.swap_note(plan, line)) {
+                        failure = Some(f.reason);
+                    }
+                } else {
+                    let opened = self.opened_pid.load(Ordering::SeqCst);
+                    if (opened == 0 || !unimux_exec::process_alive(opened)) && self.launch_app().is_none() {
+                        failure = Some("new app did not start".into());
+                    }
                 }
             }
-            let ready = config.ready_flag.exists();
+            // A swapped app reports through `update/ready` (signalUpdateReady) and `updates/mac/ready` (markReady, which a
+            // 1.1.4 script also waited for); the latter only counts once this window started it.
+            let ready = config.ready_flag.exists()
+                || (launched && failure.is_none() && config.swap.as_ref().is_some_and(|p| p.ready_flag.exists()));
             if ready && !logged.2 {
                 logged.2 = true;
                 self.log.info(&format!("new app ready after {elapsed:.0} ms"));
@@ -561,6 +598,10 @@ impl UpdateWindow {
             }
             if progress.stage == UpdateStage::Done || (error_at.is_some() && ready && failure.is_none()) {
                 self.finished.store(true, Ordering::SeqCst);
+                // The new app runs: the previous bundle and the downloaded files go.
+                if let Some(plan) = config.swap.as_ref().filter(|_| launched) {
+                    bundle_swap::complete(plan, &RealSwapOps, &|line| self.swap_note(plan, line));
+                }
                 self.ui.lock().stage = UpdateStage::Done;
                 self.push(UpdateStage::Done, 100.0, &strings.done, &[]);
                 std::thread::sleep(FINISH_DELAY);
@@ -600,10 +641,21 @@ impl UpdateWindow {
                 // Left behind the timeout card: the old app's exit, the installer and the new app's start (then its `ready`
                 // turns the visible card into done). Nothing after a failure.
                 let lingering = self.lingering.load(Ordering::SeqCst);
-                let pending = failure.is_none() && config.installer.is_some() && (!launched || !lingering);
+                let pending = failure.is_none() && has_work && (!launched || !lingering);
                 if !pending || elapsed > SUPERVISE_MAX_MS {
                     self.supervising.store(false, Ordering::SeqCst);
                     self.log.info(&format!("supervision ended after {elapsed:.0} ms"));
+                    // The previous bundle stays as the backup; the new app's markReady removes it once it comes up. Only a real
+                    // timeout says the new app did not report ready; a card closed (or Open clicked) before the old app exited
+                    // ends the window in the tick that starts the new app, which is a hand-off, not a failure.
+                    if let Some(plan) = config.swap.as_ref().filter(|_| launched && failure.is_none() && !ready) {
+                        let note = |line: &str| self.swap_note(plan, line);
+                        if elapsed > SUPERVISE_MAX_MS {
+                            bundle_swap::ready_timed_out(plan, (elapsed / 1000.0) as u64, &note);
+                        } else {
+                            bundle_swap::handed_off(plan, &note);
+                        }
+                    }
                     // Nobody can see or close a hidden or never shown window.
                     if self.lingering.load(Ordering::SeqCst) || !self.shown.load(Ordering::SeqCst) {
                         self.cleanup_and_exit();
@@ -697,7 +749,12 @@ impl UpdateWindow {
     /// run, hide and let the loop finish).
     pub fn open_app(&self) {
         self.drop_heartbeat();
-        if let Some(pid) = self.launch_app() {
+        if let Some(plan) = &self.config.swap {
+            // macOS: `open` the bundle (whichever version is in place; a running app is only brought forward).
+            if let Err(e) = RealSwapOps.open(&plan.bundle, &plan.executable) {
+                self.log.error(&format!("could not open {}: {e}", plan.bundle.display()));
+            }
+        } else if let Some(pid) = self.launch_app() {
             self.opened_pid.store(pid, Ordering::SeqCst);
         }
         if self.finished.load(Ordering::SeqCst) {

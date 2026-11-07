@@ -141,6 +141,37 @@ fn runtime_error_dialog(detail: &str) {
     std::thread::spawn(move || unimux_platform::error_box("unimux", &text));
 }
 
+/// A line in crash.log (once it is open); the macOS update bookkeeping logs through it.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn log_info(line: &str) {
+    if let Some(log) = CRASH.get() {
+        log.info(line);
+    }
+}
+
+/// 1.1.4's `updatesActive()`: a packaged build, or a development feed (MC_UPDATE_FEED, dev-overrides builds only).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn updates_active(overrides: &DevOverrides) -> bool {
+    unimux_core::PACKAGED || overrides.update_feed.is_some()
+}
+
+/// macOS, at start before the update gate (1.1.4: `previousMacUpdate()` then `recordUpdateFailure` ahead of `runUpdateGate`):
+/// how the previous update ended. A failure goes into `update-gate.json` right away, so the gate's cooldown applies to this
+/// start; U1 reads `mac::outcome_at_start()` for the status bar text. Nothing happens unless updates are active.
+#[cfg(target_os = "macos")]
+pub fn previous_mac_update(data_dir: &std::path::Path, overrides: &DevOverrides) {
+    let outcome = unimux_update::mac::previous_update_at_start(
+        data_dir,
+        unimux_core::VERSION,
+        unimux_core::PACKAGED,
+        updates_active(overrides),
+        log_info,
+    );
+    if outcome != unimux_update::mac::MacPreviousOutcome::None {
+        log_info(&format!("previous macOS update: {outcome:?}"));
+    }
+}
+
 /// The start failed: say so (translated; the special text for a state.json another program holds) and end the process
 /// instead of keeping the instance lock with no window.
 pub fn startup_failed(detail: &str, unreadable_path: Option<&std::path::Path>) -> ! {

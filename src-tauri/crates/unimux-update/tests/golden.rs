@@ -90,7 +90,16 @@ fn a_config_written_by_1_1_4_reads_unchanged() {
     assert_eq!(config.strings.failed, None);
     // Without the Tauri fields the error card falls back to `slow`, the WebView2 folder sits next to the runtime dir.
     assert_eq!(config.strings.failed_text(), "Aktualizacja trwa dłużej niż zwykle");
-    assert!(config.webview_dir().ends_with("update\\webview2") || config.webview_dir().ends_with("update/webview2"));
+    // The golden holds Windows paths, which only split into folders on Windows (macOS CI runs this too).
+    if cfg!(windows) {
+        assert!(config.webview_dir().ends_with("update\\webview2"));
+    }
+    // The macOS window gets the same `<runtimeDir>/../webview2` default.
+    let mut unix = config.clone();
+    unix.runtime_dir = "/Users/u/Library/Application Support/unimux/update/runtime".into();
+    assert_eq!(unix.webview_dir(), std::path::Path::new("/Users/u/Library/Application Support/unimux/update/webview2"));
+    // No bundle swap in a 1.1.x config.
+    assert_eq!(config.swap, None);
     // Written back, every 1.1.x key keeps its name, order and value (the Tauri-only keys are left out when absent). Value
     // equality ignores the key order, so the order is compared on its own, at every level.
     let back = serde_json::to_value(&config).unwrap();

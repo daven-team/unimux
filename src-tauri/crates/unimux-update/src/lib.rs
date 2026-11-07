@@ -5,14 +5,16 @@
 //!
 //! SP6 added [`progress`] (UpdateProgressModel port) and [`window`] (the update window hand-over and file protocol); the
 //! window process itself is `unimux-app/src/update_window.rs`.
-
 //!
 //! U1 added [`coordinator`] (UpdateCoordinator port), [`gate`] (the startup gate and install window flow, update-gate.json),
 //! [`feed`] (latest.json + minisign) and [`net`] (the backend over unimux-net).
+//!
+//! U5 added [`mac`] (the macOS engine and the bundle swap the update window runs) and [`version`] (compareVersions).
 
 pub mod coordinator;
 pub mod feed;
 pub mod gate;
+pub mod mac;
 pub mod net;
 pub mod progress;
 pub mod settled;
