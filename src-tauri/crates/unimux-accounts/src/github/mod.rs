@@ -9,13 +9,14 @@
 //! - [`git_env`]: the environment that gives git the token as an `https://github.com/` header, and the refusal regexes.
 //! - [`gh`]: running `gh` without a shell (PATH lookup like Node's libuv, no console window, 8 s, 64 KiB).
 //!
-//! Publishing itself (`github:publish`, createPublisher) is G3; it uses [`auth::GithubAuth::token`] / `rejected`,
-//! [`api::create_repo`] and [`git_env::github_git_env`] from here.
+//! - [`publish`] (G3): `github:publish` (createPublisher): checks the repository, creates it on GitHub and pushes the branch
+//!   with the token in git's environment only.
 
 pub mod api;
 pub mod auth;
 pub mod gh;
 pub mod git_env;
+pub mod publish;
 pub mod service;
 pub mod token_store;
 

@@ -5827,6 +5827,7 @@ dependencies = [
  "tokio-util",
  "unimux-core",
  "unimux-exec",
+ "unimux-git",
  "unimux-ipc",
  "unimux-net",
  "unimux-oscrypt",

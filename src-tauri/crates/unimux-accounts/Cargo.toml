@@ -29,6 +29,8 @@ regex.workspace = true
 url.workspace = true
 zeroize.workspace = true
 base64.workspace = true
+# G3: "Publish to GitHub" (createPublisher) runs the git half on the one Git engine.
+unimux-git.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

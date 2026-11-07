@@ -79,11 +79,10 @@ pub struct GitPushTarget {
     pub url_id: String,
 }
 
-/// `GitStatus` (built by G3's status from [`ParsedStatus`]).
+/// `GitStatus` (built by G3's status from [`ParsedStatus`]; the keys in the order 1.1.4 sends them).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitStatus {
-    pub root: String,
     pub branch: Option<String>,
     pub detached: bool,
     pub head: String,
@@ -93,6 +92,7 @@ pub struct GitStatus {
     pub behind: JsNum,
     pub files: Vec<GitFileChange>,
     pub truncated: bool,
+    pub root: String,
     pub push: Option<GitPushTarget>,
     pub parent: bool,
     pub project_relation: Option<GitProjectRelation>,

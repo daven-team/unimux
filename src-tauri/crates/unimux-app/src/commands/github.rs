@@ -5,8 +5,11 @@
 //!
 //! A6 (sign-in): `github:status`, `github:deviceStart`, `github:deviceWait`, `github:deviceCancel`, `github:signOut`. Every
 //! one is guarded (app windows only, 1.1.4 `guardedHandle`): the status runs `gh` and asks GitHub. The renderer gets the
-//! source and the user name, never a token. G3 adds `github:publish` and reaches the token, `rejected`, the git header
-//! ([`unimux_accounts::github::service::GithubService::remote_auth`]) and `remote_auth_refused` through [`github_service`].
+//! source and the user name, never a token.
+//!
+//! G3: `github:publish` (guarded): the renderer names a project (never a path); the folder is resolved like every Git panel
+//! request and published by [`Publisher`] on the one Git engine of `commands::git`. The git engine reaches the stored sign-in
+//! for fetch, pull and push through [`service_if_started`].
 
 use std::sync::{Arc, OnceLock};
 
@@ -14,12 +17,18 @@ use futures::FutureExt;
 use serde_json::Value;
 use unimux_accounts::github::api::GithubFetch;
 use unimux_accounts::github::auth::EnvSource;
+use unimux_accounts::github::publish::Publisher;
 use unimux_accounts::github::service::GithubService;
 use unimux_ipc::RouterBuilder;
 
 use crate::context::AppContext;
 
 static SERVICE: OnceLock<Arc<GithubService>> = OnceLock::new();
+
+/// The GitHub service once [`github_service`] created it (the git engine's sign-in lookup; None before).
+pub fn service_if_started() -> Option<Arc<GithubService>> {
+    SERVICE.get().cloned()
+}
 
 /// The client every GitHub request goes through (http_fetch, B3: system proxy, OS certificate verifier). A client that cannot
 /// be built (TLS setup) fails each request, which 1.1.4's code reads as offline.
@@ -89,9 +98,20 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         }
     });
 
-    let s = service;
+    let s = service.clone();
     r.invoke("github:signOut", move |_| {
         let s = s.clone();
         async move { Ok(s.sign_out().await) }
+    });
+
+    let publisher = Arc::new(Publisher::new(crate::commands::git::engine(ctx), service.auth.clone()));
+    let c = ctx.clone();
+    r.invoke("github:publish", move |call| {
+        let (c, publisher) = (c.clone(), publisher.clone());
+        async move {
+            let path = crate::commands::git::project_path(&c, call.arg(0));
+            let extra = crate::commands::git::worktree_paths(&c, call.arg(0));
+            Ok(publisher.handle(path.as_deref(), call.arg(1), &extra).await)
+        }
     });
 }

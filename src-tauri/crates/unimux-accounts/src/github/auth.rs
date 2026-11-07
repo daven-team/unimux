@@ -189,6 +189,16 @@ impl GithubAuth {
         &self.deps.store
     }
 
+    /// The client GitHub requests go through (publishing creates the repository with it, G3).
+    pub fn fetcher(&self) -> &Arc<dyn GithubFetch> {
+        &self.deps.fetch
+    }
+
+    /// Where the requests go (GitHub, or a mock server in the tests).
+    pub fn endpoints(&self) -> &Endpoints {
+        &self.deps.endpoints
+    }
+
     fn now(&self) -> f64 {
         (self.deps.now)()
     }

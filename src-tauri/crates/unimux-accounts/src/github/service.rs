@@ -1,6 +1,6 @@
 //! "Publish to GitHub" put together (port of src/main/github/service.ts and the sign-in half of ipc.ts): the token store,
 //! the sign-in and the environment that lets later fetch, pull and push to https://github.com use the stored sign-in. The
-//! IPC handlers answer what 1.1.4's `createGithubHandlers` answers; `github:publish` is G3's.
+//! IPC handlers answer what 1.1.4's `createGithubHandlers` answers; `github:publish` is G3's ([`super::publish::Publisher`]).
 
 use std::path::Path;
 use std::sync::Arc;

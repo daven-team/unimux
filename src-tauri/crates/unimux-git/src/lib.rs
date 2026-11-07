@@ -10,17 +10,23 @@
 //! revoke, the one-use request ids), the worktree list with `resolveDir`, and the request pipeline of src/main/gitHandler.ts
 //! ([`handler`]). Reads and mutations (G3) and worktree creation / removal (G4) build on it; the commands are registered in
 //! `unimux-app/src/commands/git.rs`.
+//!
+//! G3: the reads (status with the push target and remote caches, log, show, diff with the untracked-file confinement,
+//! branches), the mutations (one per repository at a time, one use per request id, never in a repository larger than the
+//! project, only when trusted: fetch, pull, push to the confirmed target, stage, unstage, commit, checkout), the network
+//! runs with the GitHub sign-in and the retry without it, and the git half of "Publish to GitHub" ([`ops`]).
 
 pub mod cache;
 pub mod handler;
 pub mod js;
+pub mod ops;
 pub mod paths;
 pub mod runner;
 pub mod shared;
 pub mod text;
 pub mod trust;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -30,7 +36,8 @@ use parking_lot::Mutex;
 use serde::Serialize;
 
 pub use cache::{CACHE_LIMIT, Generation, Inflight, Lru};
-pub use runner::{GitErrorCode, GitFailure, GitOptions, GitResult, RunOptions, RunOutput, Runner, result_json};
+pub use ops::{PublishInfo, PublishPushed};
+pub use runner::{GitErrorCode, GitFailure, GitOptions, GitResult, RemoteAuth, RunOptions, RunOutput, Runner, result_json};
 pub use shared::{GitTrustInfo, GitWorktree, TrustState};
 pub use trust::{RepoScan, TrustStore};
 
@@ -105,7 +112,16 @@ pub struct Git {
     trust: Arc<TrustStore>,
     generation: Generation,
     inflight: Inflight,
+    /// The repositories (canonical common git directory) and clone targets a write runs in right now.
+    busy: Mutex<HashSet<String>>,
+    /// Where a push of a branch goes, per `root\0branch`, with when it was read and the local configuration stamp (status only).
+    push_targets: Mutex<Lru<String, Stamped<Option<shared::GitPushTarget>>>>,
+    /// The remote names per root, with when they were read and the local configuration stamp (status only).
+    remote_lists: Mutex<Lru<String, Stamped<Vec<String>>>>,
 }
+
+/// A cached answer, when it was read and the stamp of the local configuration file it was read under.
+type Stamped<T> = (T, Instant, String);
 
 impl Default for Git {
     fn default() -> Self {
@@ -125,6 +141,9 @@ impl Git {
             trust,
             generation: Generation::default(),
             inflight: Inflight::default(),
+            busy: Mutex::new(HashSet::new()),
+            push_targets: Mutex::new(Lru::default()),
+            remote_lists: Mutex::new(Lru::default()),
         }
     }
 

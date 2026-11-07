@@ -1,6 +1,5 @@
 //! Port of src/main/gitHandler.ts (G2): one Git request end to end: the channel allow-list, validation, the folder
-//! resolution (project folder or one of its worktrees) and the call. G2 runs the trust channels; G3 adds the reads and
-//! mutations to [`run`].
+//! resolution (project folder or one of its worktrees) and the call. G2 added the trust channels, G3 the reads and mutations.
 
 use std::sync::Arc;
 
@@ -18,9 +17,9 @@ pub const INVALID: &str = crate::shared::INVALID_REQUEST;
 pub const GIT_READ_CHANNELS: [GitChannel; 6] =
     [GitChannel::Status, GitChannel::Log, GitChannel::Show, GitChannel::Diff, GitChannel::Branches, GitChannel::Trust];
 
-/// The channels this build runs (the rest come with G3).
+/// The channels this build runs (every one since G3).
 pub fn implemented(channel: GitChannel) -> bool {
-    matches!(channel, GitChannel::Trust | GitChannel::TrustGrant | GitChannel::TrustRevoke)
+    GitChannel::ALL.contains(&channel)
 }
 
 /// `handleGit(git, projectPath, channel, input, windows, extraWorktrees)`: validates, resolves the folder, runs. `scope` (the
@@ -42,11 +41,27 @@ pub async fn handle_git(
 }
 
 async fn run(git: &Arc<Git>, channel: GitChannel, dir: &str, request: &GitRequest, scope: &str) -> GitResult<Value> {
-    let json = |info| serde_json::to_value(info).map_err(|e| GitFailure::new(GitErrorCode::Failed, e.to_string()));
+    fn json<T: serde::Serialize>(value: T) -> GitResult<Value> {
+        serde_json::to_value(value).map_err(|e| GitFailure::new(GitErrorCode::Failed, e.to_string()))
+    }
+    let scope = Some(scope);
     match (channel, request) {
-        (GitChannel::Trust, GitRequest::Trust(req)) => json(git.trust_info(dir, Some(scope), req.cached).await?),
-        (GitChannel::TrustGrant, GitRequest::Mutation(req)) => json(git.grant_trust(dir, &req.request_id, Some(scope)).await?),
-        (GitChannel::TrustRevoke, GitRequest::Mutation(req)) => json(git.revoke_trust(dir, &req.request_id, Some(scope)).await?),
-        _ => Err(GitFailure::new(GitErrorCode::Failed, format!("git:{} is not available yet in this build", channel.as_str()))),
+        (GitChannel::Status, GitRequest::Base(_)) => json(git.status(dir, scope).await?),
+        (GitChannel::Log, GitRequest::Log(req)) => json(git.log(dir, req).await?),
+        (GitChannel::Show, GitRequest::Show(req)) => json(git.show(dir, &req.hash).await?),
+        (GitChannel::Diff, GitRequest::Diff(req)) => json(git.diff(dir, req).await?),
+        (GitChannel::Branches, GitRequest::Base(_)) => json(git.branches(dir).await?),
+        (GitChannel::Fetch, GitRequest::Mutation(req)) => json(git.fetch(dir, &req.request_id, scope).await?),
+        (GitChannel::Pull, GitRequest::Mutation(req)) => json(git.pull(dir, &req.request_id, scope).await?),
+        (GitChannel::Push, GitRequest::Push(req)) => json(git.push(dir, req, scope).await?),
+        (GitChannel::Stage, GitRequest::Paths(req)) => json(git.stage(dir, req, scope).await?),
+        (GitChannel::Unstage, GitRequest::Paths(req)) => json(git.unstage(dir, req, scope).await?),
+        (GitChannel::Commit, GitRequest::Commit(req)) => json(git.commit(dir, req, scope).await?),
+        (GitChannel::Checkout, GitRequest::Checkout(req)) => json(git.checkout(dir, req, scope).await?),
+        (GitChannel::Trust, GitRequest::Trust(req)) => json(git.trust_info(dir, scope, req.cached).await?),
+        (GitChannel::TrustGrant, GitRequest::Mutation(req)) => json(git.grant_trust(dir, &req.request_id, scope).await?),
+        (GitChannel::TrustRevoke, GitRequest::Mutation(req)) => json(git.revoke_trust(dir, &req.request_id, scope).await?),
+        // validate_git_request answers the request shape of its channel; anything else is a bug, answered as invalid.
+        _ => Err(GitFailure::new(GitErrorCode::Invalid, INVALID)),
     }
 }

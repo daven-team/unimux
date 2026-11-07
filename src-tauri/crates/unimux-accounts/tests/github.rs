@@ -1129,3 +1129,143 @@ fn every_message_key_is_translated() {
     assert_eq!(unimux_accounts::github::GITHUB_DEVICE_SCOPE, "repo");
     assert_eq!(unimux_accounts::github::GITHUB_OAUTH_CLIENT_ID, "", "1.1.4 has no OAuth App: the device flow stays hidden");
 }
+
+// ---------- publishing (G3) ----------
+
+/// A lab for publishing with real git: the https address of the created repository leads to a local bare repository
+/// (`insteadOf` in the lab's global configuration), so github.com is never contacted.
+struct PublishLab {
+    _tmp: tempfile::TempDir,
+    dir: PathBuf,
+    env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
+}
+
+const DEMO_URL: &str = "https://github.com/ajzak/demo.git";
+
+impl PublishLab {
+    fn new() -> Self {
+        let tmp = tempfile::Builder::new().prefix("mc-ghpub-rs-").tempdir().unwrap();
+        let dir = PathBuf::from(unimux_git::paths::realpath_native(&tmp.path().to_string_lossy()).unwrap());
+        let bare = dir.join("demo.git").to_string_lossy().replace('\\', "/");
+        let global = dir.join("global.gitconfig");
+        std::fs::write(
+            &global,
+            format!(
+                "[user]\n\tname = Tester\n\temail = tester@example.com\n[init]\n\tdefaultBranch = main\n[url \"{bare}\"]\n\tinsteadOf = {DEMO_URL}\n"
+            ),
+        )
+        .unwrap();
+        let mut env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> = std::env::vars_os().collect();
+        for (k, v) in [("GIT_CONFIG_GLOBAL", global.into_os_string()), ("GIT_CONFIG_NOSYSTEM", "1".into())] {
+            env.retain(|key, _| !key.to_string_lossy().eq_ignore_ascii_case(k));
+            env.insert(k.into(), v);
+        }
+        let lab = PublishLab { _tmp: tmp, dir, env };
+        lab.sh(&lab.dir, &["init", "-q", "--bare", "-b", "main", &bare]);
+        lab
+    }
+
+    fn sh(&self, cwd: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .env_clear()
+            .envs(&self.env)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    fn repo(&self, name: &str, commits: usize) -> String {
+        let dir = self.dir.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        self.sh(&dir, &["init", "-q", "-b", "main", "."]);
+        for i in 1..=commits {
+            std::fs::write(dir.join("file.txt"), format!("line {i}\n")).unwrap();
+            self.sh(&dir, &["add", "."]);
+            self.sh(&dir, &["commit", "-q", "-m", &format!("commit {i}")]);
+        }
+        dir.to_string_lossy().into_owned()
+    }
+
+    fn git(&self) -> Arc<unimux_git::Git> {
+        Arc::new(unimux_git::Git::new(unimux_git::GitOptions { env: Some(self.env.clone()), ..Default::default() }))
+    }
+}
+
+fn created() -> Answer {
+    ok(201, json!({"full_name": "ajzak/demo", "html_url": "https://github.com/ajzak/demo", "clone_url": DEMO_URL}))
+}
+
+/// test/github-publish.test.ts "publishing": creates the repository, adds it as origin and pushes the branch; refuses before
+/// creating anything when the repository is not ready; says why GitHub refused (with test/github-git.test.ts's real git).
+#[tokio::test]
+async fn publishing_creates_the_repository_adds_origin_and_pushes() {
+    use unimux_accounts::github::publish::{PublishRequest, Publisher, publish_err};
+    let lab = PublishLab::new();
+    let req = |name: &str| PublishRequest {
+        request_id: format!("req-{name}-000001"),
+        name: name.into(),
+        private: true,
+        worktree: None,
+    };
+
+    let s = setup(Gh::Token(GH_TOKEN), "", vec![created()]);
+    let publisher = Publisher::new(lab.git(), s.auth.clone());
+    let work = lab.repo("work", 2);
+    let answer = publisher.publish(&work, &work, &req("demo")).await;
+    assert_eq!(
+        answer,
+        json!({"ok": true, "data": {"fullName": "ajzak/demo", "htmlUrl": "https://github.com/ajzak/demo", "branch": "main"}})
+    );
+    let calls = s.fetch.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].method, "POST");
+    assert!(calls[0].url.ends_with("/user/repos"));
+    assert_eq!(calls[0].header("authorization"), Some(format!("Bearer {GH_TOKEN}").as_str()));
+    assert_eq!(lab.sh(Path::new(&work), &["config", "--get", "remote.origin.url"]).trim(), DEMO_URL);
+    assert_eq!(
+        lab.sh(&lab.dir.join("demo.git"), &["rev-parse", "refs/heads/main"]).trim(),
+        lab.sh(Path::new(&work), &["rev-parse", "HEAD"]).trim()
+    );
+    // it has a remote now: refused before GitHub is asked
+    let again = publisher.publish(&work, &work, &req("demo2")).await;
+    assert_eq!(again["code"], "remote-exists");
+    assert_eq!(s.fetch.calls().len(), 1);
+
+    // not ready: no commit yet, or a detached HEAD
+    let empty = lab.repo("empty", 0);
+    let answer = publisher.publish(&empty, &empty, &req("x-empty")).await;
+    assert_eq!(answer, json!({"ok": false, "code": "no-commits", "error": publish_err::NO_COMMITS}));
+    let detached = lab.repo("detached", 2);
+    lab.sh(Path::new(&detached), &["checkout", "-q", "--detach", "HEAD~1"]);
+    assert_eq!(publisher.publish(&detached, &detached, &req("x-detached")).await["code"], "detached");
+    assert_eq!(s.fetch.calls().len(), 1);
+
+    // a repository above the project folder answers like a refused write
+    let inner = Path::new(&work).join("sub");
+    std::fs::create_dir(&inner).unwrap();
+    let inner = inner.to_string_lossy().into_owned();
+    assert_eq!(publisher.publish(&inner, &inner, &req("x-inner")).await["code"], "parent");
+
+    // GitHub refuses the sign-in: its answer, and nothing is added
+    let refused = setup(Gh::Token(GH_TOKEN), "", vec![ok(401, json!({"message": "Bad credentials"}))]);
+    let publisher = Publisher::new(lab.git(), refused.auth.clone());
+    let fresh = lab.repo("fresh", 1);
+    assert_eq!(publisher.publish(&fresh, &fresh, &req("fresh")).await["code"], "auth");
+    assert_eq!(lab.sh(Path::new(&fresh), &["remote"]).trim(), "");
+
+    // no sign-in at all
+    let none = setup(Gh::SignedOut, "", vec![]);
+    let publisher = Publisher::new(lab.git(), none.auth.clone());
+    assert_eq!(
+        publisher.publish(&fresh, &fresh, &req("fresh2")).await,
+        json!({"ok": false, "code": "auth", "error": publish_err::SIGN_IN})
+    );
+
+    // the IPC half: a missing project and an invalid request
+    assert_eq!(publisher.handle(None, &json!({}), &[]).await["code"], "gone");
+    assert_eq!(publisher.handle(Some(&fresh), &json!({"name": "x"}), &[]).await["code"], "invalid");
+}
