@@ -152,6 +152,12 @@ fn main() {
         }
         Err(e) => startup::startup_failed(&format!("single instance: {e}"), None),
     };
+    // The installer an update window started is replacing this build's files right now: starting would crash (1.1.4).
+    if startup::install_in_progress_at_start(&data_dir) {
+        crash.warn("an update is being installed; not starting");
+        drop(instance);
+        std::process::exit(0);
+    }
     timer.mark("instance-lock");
     unimux_platform::set_app_user_model_id(AUMID);
     // Before any webview: a WebView2 data folder that cannot be created would make Edge show its own dialog. Windows only:
@@ -252,23 +258,21 @@ fn main() {
             if let Some(updates) = ctx.update.get() {
                 updates.start();
             }
-            // The startup gate (U1) may hold the main window back: it then starts the app itself once the current version is
-            // to run (never when the installer took over).
-            let (gate_app, gate_ctx) = (app.handle().clone(), ctx.clone());
-            let start_later: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
-                let (app, ctx) = (gate_app.clone(), gate_ctx.clone());
-                let on_main = app.clone();
-                let _ = app.run_on_main_thread(move || {
-                    if let Err(e) = start_main_app(&on_main, &ctx) {
-                        startup::startup_failed(&format!("{e}"), None);
-                    }
-                    startup::mark_started();
+            // The update window of the update that just finished may say "done" now (U3, 1.1.4 signalUpdateReady); while it
+            // still supervises, the gate and the main window wait for it (at most 4 s) off the main thread.
+            if update::signal_ready_before_gate(&ctx) {
+                let (app, ctx) = (app.handle().clone(), ctx.clone());
+                let _ = std::thread::Builder::new().name("update-window-wait".into()).spawn(move || {
+                    update::wait_update_window_gone(&ctx.data_dir);
+                    let on_main = app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        if let Err(e) = gate_or_start(&on_main, &ctx) {
+                            startup::startup_failed(&format!("{e}"), None);
+                        }
+                    });
                 });
-            });
-            if !update::startup_gate(&ctx, app.handle(), start_later) {
-                ctx.mark("update-gate-done");
-                start_main_app(app.handle(), &ctx)?;
-                startup::mark_started();
+            } else {
+                gate_or_start(app.handle(), &ctx)?;
             }
             Ok(())
         })
@@ -308,6 +312,28 @@ fn main() {
     });
 }
 
+/// `runUpdateGate` then `startMainApp`: the startup gate (U1) may hold the main window back; it then starts the app itself
+/// once the current version is to run (never when the installer took over). On the main thread.
+fn gate_or_start(app: &tauri::AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<()> {
+    let (gate_app, gate_ctx) = (app.clone(), ctx.clone());
+    let start_later: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+        let (app, ctx) = (gate_app.clone(), gate_ctx.clone());
+        let on_main = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Err(e) = start_main_app(&on_main, &ctx) {
+                startup::startup_failed(&format!("{e}"), None);
+            }
+            startup::mark_started();
+        });
+    });
+    if !update::startup_gate(ctx, app, start_later) {
+        ctx.mark("update-gate-done");
+        start_main_app(app, ctx)?;
+        startup::mark_started();
+    }
+    Ok(())
+}
+
 /// `startMainApp`: the window first, then the rest in parallel behind it. Runs after the startup gate (U1), on the main thread.
 fn start_main_app(app: &tauri::AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<()> {
     webview_import::prepare(app, ctx);
@@ -328,6 +354,8 @@ fn start_main_app(app: &tauri::AppHandle, ctx: &Arc<AppContext>) -> tauri::Resul
     // In parallel with the window (1.1.4: hooks.start next to the cell file prune and the MCP server, the MCP server retried
     // twice in the background), then the cell services gate; the account work and its gates beside them (W7).
     cells::startup::start(ctx, hooks::start(ctx), commands::mcp::start(ctx));
+    // 1.1.4 scheduleUpdateCleanup: `update/` of a finished update 30 s after the start, plus the 1.1.x updater's cache (U3).
+    update::schedule_update_cleanup(ctx);
     // H3: the CLI scan in the background and the registry refresh on focus.
     commands::agents::app_started(ctx);
     // S1: the SSH vault and known hosts open off the main thread; the command history is written at quit.

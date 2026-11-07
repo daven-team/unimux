@@ -24,6 +24,7 @@ use unimux_update::gate::{
     self, GateDeps, GateEnv, GateHandle, GateOptions, GateResult, GateTimings, GateView, HideFn, UpdateMode, UpdateUiGuard,
     UpdateUiOwner,
 };
+use unimux_update::legacy;
 use unimux_update::net::{NetBackend, NetBackendOptions};
 use unimux_update::state::{Status, UpdateState};
 use unimux_update::window as uw;
@@ -439,6 +440,60 @@ fn dispose_after_main(ctx: &Arc<AppContext>, svc: &Arc<UpdateService>, window: A
     });
 }
 
+/// The step 1.1.4 ran before the startup gate (`signalUpdateReady` then `waitForUpdateWindowGone(4000)`, index.ts whenReady):
+/// the update window of the update that just finished (1.1.x Electron or 1.2.x) may say "done" now. True when that window
+/// still supervises: the caller then waits for it ([`wait_update_window_gone`], at most 4 s) off the main thread before the
+/// gate or the main window, so the prompt of a still newer release never appears next to it. Windows, updates active only.
+pub fn signal_ready_before_gate(ctx: &AppContext) -> bool {
+    if !cfg!(windows) || !crate::startup::updates_active(&ctx.overrides) {
+        return false;
+    }
+    uw::signal_update_ready(&ctx.data_dir, VERSION);
+    uw::update_window_alive(&ctx.data_dir, now_ms() as f64)
+}
+
+/// `waitForUpdateWindowGone(4000)`: polls the window's heartbeat every 100 ms.
+pub fn wait_update_window_gone(data_dir: &std::path::Path) {
+    let deadline = Instant::now() + UPDATE_WINDOW_GONE_WAIT;
+    while Instant::now() < deadline && uw::update_window_alive(data_dir, now_ms() as f64) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// `scheduleUpdateCleanup` (1.1.4 startMainApp): 30 s after the start `<data>/update` goes (the signals of a finished
+/// update and the private Electron runtime of a 1.1.x update window), unless this process hands over or an installer may
+/// still run. The installed Windows app also removes what electron-updater of 1.1.x left in `%LOCALAPPDATA%\unimux-updater`
+/// (U3; never the Tauri updater's own files there).
+pub fn schedule_update_cleanup(ctx: &Arc<AppContext>) {
+    let has_update_dir = uw::update_dir(&ctx.data_dir).exists();
+    let electron_leftovers = cfg!(windows) && unimux_core::PACKAGED;
+    if !has_update_dir && !electron_leftovers {
+        return;
+    }
+    let ctx = ctx.clone();
+    let _ = std::thread::Builder::new().name("update-cleanup".into()).spawn(move || {
+        std::thread::sleep(legacy::UPDATE_CLEANUP_DELAY);
+        if has_update_dir {
+            let svc = ctx.update.get().cloned();
+            // The hand-over writes `update/work` under the staging lock: the check and the removal never interleave with it.
+            let lock = svc.as_ref().map(|s| s.stage_lock.clone());
+            let _staging = lock.as_ref().map(|l| l.lock());
+            let busy_here = svc.as_ref().is_some_and(|s| s.handover_committed());
+            if legacy::update_dir_cleanup_allowed(&ctx.data_dir, VERSION, busy_here, now_ms() as f64)
+                && !legacy::remove_update_dir(&ctx.data_dir)
+            {
+                ctx.crash.warn("update folder not removed (retried on the next start)");
+            }
+        }
+        if electron_leftovers {
+            let removed = legacy::remove_electron_updater_leftovers(&uw::updater_root(), VERSION);
+            if removed > 0 {
+                ctx.crash.info(&format!("removed {removed} files left by the 1.1.x updater"));
+            }
+        }
+    });
+}
+
 /// `runUpdateGate`: decides whether the startup check runs before the main window. False: start the app now (nothing was
 /// started). True: the gate runs and calls `start_app` when the current version is to start (it never does when the
 /// installer took over).
@@ -469,19 +524,8 @@ pub fn startup_gate(ctx: &Arc<AppContext>, app: &AppHandle, start_app: Arc<dyn F
     let skip = gate::gate_skip_version(failure.as_ref(), VERSION, now);
     let (ctx, app) = (ctx.clone(), app.clone());
     tauri::async_runtime::spawn(async move {
-        // The update window of the update that just finished may say "done" now, and nothing of this start may appear next
-        // to it (the prompt of a still newer release comes after it has gone).
-        if cfg!(windows) {
-            let dir = ctx.data_dir.clone();
-            let _ = tauri::async_runtime::spawn_blocking(move || {
-                uw::signal_update_ready(&dir, VERSION);
-                let deadline = Instant::now() + UPDATE_WINDOW_GONE_WAIT;
-                while Instant::now() < deadline && uw::update_window_alive(&dir, now_ms() as f64) {
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-            })
-            .await;
-        }
+        // The update window of the update that just finished was told and waited for before the gate (U3,
+        // `signal_ready_before_gate`), so nothing of this start appears next to it.
         let texts = GateTexts::new(&language(&ctx), "Aktualizacja nie powiodła się - uruchamiam obecną wersję");
         let handle = GateHandle::new();
         let window = GateWindow::new(&ctx, app.clone(), texts, handle.clone());

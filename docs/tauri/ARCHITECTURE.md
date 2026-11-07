@@ -201,14 +201,14 @@ No re-encryption. `unimux-oscrypt` implements Chromium OSCrypt 'v10' read and wr
 1.1.4's electron-updater reads `latest.yml` and runs `unimux-Setup-1.2.0.exe --updated /S --force-run` from its own detached splash. That file is the Tauri NSIS installer (`installMode currentUser`, `mainBinaryName unimux`, identifier `com.unimux.app`, languages pl/en/de/es/fr/pt) with `installer-hooks.nsh`:
 
 - NSIS_HOOK_PREINSTALL:
-  1. Read `HKCU\Software\214279c4-b798-5d4e-848f-0b9245114cd1` `InstallLocation`; if present and the Tauri key `HKCU\Software\unimux\unimux` is absent, set `$INSTDIR` to it (default `%LOCALAPPDATA%\Programs\unimux` or the user's custom dir). Keeps pins, exe path and the 1.1.x splash `appExe`.
+  1. Read `HKCU\Software\214279c4-b798-5d4e-848f-0b9245114cd1` `InstallLocation`; if present (and the folder still holds the Electron app) and the Tauri key `HKCU\${MANUPRODUCTKEY}` (`Software\ajzak, azozowsky\unimux`: the template derives it from the publisher) is absent and `$INSTDIR` is still the template default (so `/D=` wins), set `$INSTDIR` to it (default `%LOCALAPPDATA%\Programs\unimux` or the user's custom dir). Keeps pins, exe path and the 1.1.x splash `appExe`.
   2. Wait up to 30 s for old `unimux.exe` processes to exit BEFORE Tauri's CheckIfAppIsRunning, so the Electron wind-down saves state.
   3. `SetOutPath $TEMP`, copy `Uninstall unimux.exe` to `$PLUGINSDIR\old-uninstaller.exe`, run `/S /KEEP_APP_DATA /currentuser --keep-shortcuts --updated _?=<oldDir>`. Fallback: delete the `Uninstall\214279c4-...` and `Software\214279c4-...` keys and the Electron files by hand. Then `SetOutPath $INSTDIR`.
 - NSIS_HOOK_POSTINSTALL:
   1. When `--updated`, write `installer-done` (content `${VERSION}`) to `$APPDATA\ajzakomator\update` if it exists, else `$APPDATA\unimux\update` (port of `resources/installer.nsh`).
   2. Re-stamp AUMID `com.unimux.app` on Start menu, desktop and `User Pinned\TaskBar\unimux.lnk`.
   3. If `--force-run` is in `$CMDLINE`, launch via `RunAsUser "$INSTDIR\unimux.exe"`.
-- A forked NSIS template only if hooks cannot redirect `$INSTDIR` early enough (decided in SP3).
+- A forked NSIS template only if hooks cannot redirect `$INSTDIR` early enough (decided in SP3). U3 (2026-11-07) does it in the hooks: `src-tauri/resources/installer-hooks.nsh` (PREINSTALL runs right after the template's `SetOutPath $INSTDIR`, removes the empty default folder again; `--updated` also sets the template's `$UpdateMode` so no shortcut is re-created; the hooks act only for productName `unimux`), compile check `node scripts/check-installer-hooks.mjs`.
 - New app `main()`, before anything else:
   - `ELECTRON_RUN_AS_NODE=1` + `-e <script>`: the 1.1.x splash's cleanup call. Sleep 3 s, remove `<data>/update/runtime`, exit 0 without a window and without single-instance forwarding.
   - `installInProgress` / START_BLOCK_MS refusal.
