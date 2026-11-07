@@ -30,7 +30,7 @@ use crate::text::{is_js_space, js_trim, redact_secrets, trim_git_text};
 use crate::{Git, GitErrorCode, GitFailure, GitResult, PUSH_TARGET_TTL, RunOptions, RunOutput, paths, trust};
 
 pub const PARENT: &str = "To repozytorium nadrzędne wobec projektu: zapisy są wyłączone.";
-pub const BUSY: &str = "Inna operacja git w tym repozytorium jeszcze trwa.";
+pub use crate::clone::BUSY;
 pub const NO_SUCH_COMMIT: &str = "Nie ma takiego commita.";
 pub const COMMIT_UNREADABLE: &str = "Nie udało się odczytać commita.";
 pub const NOT_UNTRACKED: &str = "To nie jest nieśledzony plik tego repozytorium.";
@@ -112,7 +112,7 @@ struct WriteGuard<'a> {
 
 impl Drop for WriteGuard<'_> {
     fn drop(&mut self) {
-        self.git.busy.lock().remove(&self.key);
+        self.git.busy.release(&self.key);
         self.git.forget_root(&self.dir);
         self.git.forget_scan(&self.root);
         self.git.remote_lists.lock().remove(&self.root);
@@ -122,22 +122,10 @@ impl Drop for WriteGuard<'_> {
     }
 }
 
-/// Frees a busy key on drop (the clone target of G4 uses the same set).
-pub struct BusyGuard<'a> {
-    git: &'a Git,
-    key: String,
-}
-
-impl Drop for BusyGuard<'_> {
-    fn drop(&mut self) {
-        self.git.busy.lock().remove(&self.key);
-    }
-}
-
 impl Git {
     /// Takes `key` in the set of running writes; None (busy) when another write holds it.
-    pub fn try_busy(&self, key: &str) -> Option<BusyGuard<'_>> {
-        self.busy.lock().insert(key.to_string()).then(|| BusyGuard { git: self, key: key.to_string() })
+    pub fn try_busy(&self, key: &str) -> Option<crate::clone::BusyGuard<'_>> {
+        self.busy.take(key)
     }
 
     fn read_truncatable(&self) -> RunOptions {
@@ -521,7 +509,7 @@ impl Git {
         self.require_trust(&root, true).await?;
         let key = paths::canonical_path(&self.git_dirs(&root).await?.common_dir);
         self.consume(request_id)?;
-        if !self.busy.lock().insert(key.clone()) {
+        if !self.busy.insert(&key) {
             return fail(GitErrorCode::Busy, BUSY);
         }
         // Reads that started before (or during) a write never answer a request made after it.
@@ -541,19 +529,7 @@ impl Git {
         with_auth: bool,
     ) -> GitResult<RunOutput> {
         let auth = if with_auth { self.options().remote_auth.clone() } else { None };
-        let env = auth.as_ref().and_then(|a| a.env());
-        let (Some(auth), Some(env)) = (auth, env) else {
-            return self.run(cwd, args, &self.write_options(timeout)).await;
-        };
-        match self.run(cwd, args, &RunOptions { env, ..self.write_options(timeout) }).await {
-            Err(e) if e.code == GitErrorCode::Failed && auth.auth_refused(&e.message) => {
-                if auth.token_refused(&e.message) {
-                    auth.refused();
-                }
-                self.run(cwd, args, &self.write_options(timeout)).await
-            }
-            other => other,
-        }
+        self.network_with(cwd, args, timeout, auth.as_deref()).await
     }
 
     /// `fetch(dir, requestId, scope)`.
@@ -676,8 +652,8 @@ impl Git {
 
     // ---------- publishing (src/main/github/publish.ts) ----------
 
-    /// The checked out branch (None: detached HEAD); reads HEAD only, starts nothing.
-    pub async fn current_branch(&self, root: &str) -> Option<String> {
+    /// The checked out branch for publishing (None: detached HEAD; an unborn branch has its name); reads HEAD only.
+    pub async fn head_branch(&self, root: &str) -> Option<String> {
         let out = self.run(root, &["symbolic-ref", "--quiet", "--short", "HEAD"], &self.read_options()).await.ok()?;
         let branch = js_trim(&out.stdout);
         (!branch.is_empty()).then(|| branch.to_string())
@@ -695,7 +671,7 @@ impl Git {
         self.require_trust(&root, true).await?;
         let initial =
             self.run(&root, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], &self.read_options()).await.is_err();
-        let branch = self.current_branch(&root).await;
+        let branch = self.head_branch(&root).await;
         let remotes = self.remote_names(&root).await?;
         Ok(PublishInfo { branch, initial, remotes })
     }
@@ -721,7 +697,7 @@ impl Git {
             if !self.remote_names(&root).await?.is_empty() {
                 return fail(GitErrorCode::Invalid, REMOTE_EXISTS);
             }
-            if self.current_branch(&root).await.as_deref() != Some(branch) {
+            if self.head_branch(&root).await.as_deref() != Some(branch) {
                 return fail(GitErrorCode::Invalid, PUSH_TARGET_CHANGED);
             }
             self.run(&root, &["remote", "add", "--", "origin", url], &self.write_options(read_timeout)).await?;

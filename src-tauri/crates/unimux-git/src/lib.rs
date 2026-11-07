@@ -15,18 +15,24 @@
 //! branches), the mutations (one per repository at a time, one use per request id, never in a repository larger than the
 //! project, only when trusted: fetch, pull, push to the confirmed target, stage, unstage, commit, checkout), the network
 //! runs with the GitHub sign-in and the retry without it, and the git half of "Publish to GitHub" ([`ops`]).
+//!
+//! G4: worktrees for cells ([`worktree`]: create, inspect, safe removal, current branch, is-repo; also the automation's API),
+//! clone with the shared network run and the busy set ([`clone`]), `git init` and the Git install plan ([`setup`]).
 
 pub mod cache;
+pub mod clone;
 pub mod handler;
 pub mod js;
 pub mod ops;
 pub mod paths;
 pub mod runner;
+pub mod setup;
 pub mod shared;
 pub mod text;
 pub mod trust;
+pub mod worktree;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -36,10 +42,12 @@ use parking_lot::Mutex;
 use serde::Serialize;
 
 pub use cache::{CACHE_LIMIT, Generation, Inflight, Lru};
+pub use clone::{BusySet, GitOpResult};
 pub use ops::{PublishInfo, PublishPushed};
 pub use runner::{GitErrorCode, GitFailure, GitOptions, GitResult, RemoteAuth, RunOptions, RunOutput, Runner, result_json};
 pub use shared::{GitTrustInfo, GitWorktree, TrustState};
 pub use trust::{RepoScan, TrustStore};
+pub use worktree::{Worktree, WorktreeInspection, WorktreeRemoveResult};
 
 /// How long a request id is remembered as used (`consume` of git.ts).
 pub const REQUEST_ID_TTL: Duration = Duration::from_secs(10 * 60);
@@ -113,7 +121,7 @@ pub struct Git {
     generation: Generation,
     inflight: Inflight,
     /// The repositories (canonical common git directory) and clone targets a write runs in right now.
-    busy: Mutex<HashSet<String>>,
+    busy: clone::BusySet,
     /// Where a push of a branch goes, per `root\0branch`, with when it was read and the local configuration stamp (status only).
     push_targets: Mutex<Lru<String, Stamped<Option<shared::GitPushTarget>>>>,
     /// The remote names per root, with when they were read and the local configuration stamp (status only).
@@ -141,7 +149,7 @@ impl Git {
             trust,
             generation: Generation::default(),
             inflight: Inflight::default(),
-            busy: Mutex::new(HashSet::new()),
+            busy: clone::BusySet::default(),
             push_targets: Mutex::new(Lru::default()),
             remote_lists: Mutex::new(Lru::default()),
         }
@@ -153,6 +161,11 @@ impl Git {
 
     pub fn runner(&self) -> &Runner {
         &self.runner
+    }
+
+    /// The operations holding a repository or a clone target right now (`busy` of git.ts; G3's mutations share it).
+    pub fn busy(&self) -> &BusySet {
+        &self.busy
     }
 
     /// Runs git in `cwd` (see [`Runner::run`]); a killed write releases the stale `index.lock` of `cwd`'s known git directory.
