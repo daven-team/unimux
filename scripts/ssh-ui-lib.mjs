@@ -83,7 +83,11 @@ export async function mainInspector(port) {
   let next = 0;
   const pending = new Map();
   ws.onmessage = (e) => { const m = JSON.parse(e.data); pending.get(m.id)?.(m); pending.delete(m.id); };
+  // The process went away (killed, or a second instance that quit): fail what is pending instead of waiting forever.
+  let closed = false;
+  ws.onclose = () => { closed = true; for (const done of pending.values()) done({ error: { message: 'main inspector closed' } }); pending.clear(); };
   const evaluate = (expression) => new Promise((resolve, reject) => {
+    if (closed) { reject(new Error('main inspector closed')); return; }
     const id = ++next;
     pending.set(id, (m) => (m.error || m.result.exceptionDetails ? reject(new Error(JSON.stringify(m.error ?? m.result.exceptionDetails))) : resolve(m.result.result.value)));
     ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true } }));
@@ -98,7 +102,8 @@ export async function mainInspector(port) {
   };
 }
 
-export async function launchApp(root, extraEnv = {}, extraArgs = []) {
+/** `onSpawn(child)` gets the process right after it is spawned, so a caller can end it even when this never resolves. */
+export async function launchApp(root, extraEnv = {}, extraArgs = [], { onSpawn } = {}) {
   const port = await freePort();
   const home = join(root, 'home');
   // Login variables of the real user are dropped first; extraEnv may still point them at a fake home.
@@ -113,6 +118,7 @@ export async function launchApp(root, extraEnv = {}, extraArgs = []) {
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.ELECTRON_RENDERER_URL;
   const child = spawn(electron, [...extraArgs, '.'], { cwd: process.cwd(), env, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  onSpawn?.(child);
   let stderr = '';
   child.stderr.on('data', (d) => { stderr = (stderr + d).slice(-4000); });
   let target;

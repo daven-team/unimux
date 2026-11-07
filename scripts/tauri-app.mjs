@@ -40,7 +40,10 @@ export function freePort() {
 /** Starts the app; `dataDir` and `scratch` (a root for the scratch home) must exist. */
 export function launchApp({ dataDir, scratch, port, offscreen = true, extraEnv = {} }) {
   const { env: homeEnv } = scratchHome(scratch);
-  const env = scrubAppEnv({ ...process.env, ...homeEnv, MC_DATA_DIR: dataDir, ...(port ? { MC_DEBUG_PORT: String(port) } : {}), ...(offscreen ? { MC_OFFSCREEN: '1' } : {}), ...extraEnv });
+  // macOS: the safeStorage key is a login Keychain item named after the app, not a file in the data dir; a scratch name
+  // keeps harness runs away from the real `unimux Safe Storage` item (MC_SAFE_STORAGE_NAME, check build only).
+  const keychain = process.platform === 'darwin' ? { MC_SAFE_STORAGE_NAME: 'unimux-check' } : {};
+  const env = scrubAppEnv({ ...process.env, ...homeEnv, MC_DATA_DIR: dataDir, ...(port ? { MC_DEBUG_PORT: String(port) } : {}), ...(offscreen ? { MC_OFFSCREEN: '1' } : {}), ...keychain, ...extraEnv });
   // Never inherit and pipe at once: everything is ignored (the app logs to crash.log).
   const child = spawn(appBinary(), [], { env, stdio: 'ignore', windowsHide: true });
   return child;

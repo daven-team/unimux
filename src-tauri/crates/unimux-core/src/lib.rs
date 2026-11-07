@@ -20,6 +20,10 @@ pub const VERSION: &str = match option_env!("UNIMUX_VERSION_OVERRIDE") {
     _ => env!("CARGO_PKG_VERSION"),
 };
 
+/// Electron's `app.getName()` of 1.1.x (the productName): it names the macOS Keychain item of safeStorage
+/// (`unimux Safe Storage` / `unimux Key`), which 1.2.0 must keep reading.
+pub const APP_NAME: &str = "unimux";
+
 /// Electron's `app.isPackaged`: false for debug builds (`npm run tauri dev`) and for release builds with the `dev-overrides`
 /// feature (the check flavour); true for the release flavour, which compiles the MC_* overrides out.
 pub const PACKAGED: bool = !cfg!(any(feature = "dev-overrides", debug_assertions));
