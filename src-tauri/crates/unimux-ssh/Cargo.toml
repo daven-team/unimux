@@ -9,6 +9,10 @@ license.workspace = true
 [dependencies]
 unimux-core.workspace = true
 unimux-ipc.workspace = true
+# S1: the stores seal secrets with the app's safeStorage (B2) and share the IndexMap order of the history hosts.
+unimux-oscrypt.workspace = true
+indexmap.workspace = true
+parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # S2: key reading (russh / ssh-key; ssh-key's `tdes` feature for 3des-cbc key files), the own traditional PEM reader

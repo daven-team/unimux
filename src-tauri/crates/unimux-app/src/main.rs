@@ -261,6 +261,8 @@ fn main() {
             hooks::start(&ctx);
             // H3: the CLI scan in the background and the registry refresh on focus.
             commands::agents::app_started(&ctx);
+            // S1: the SSH vault and known hosts open off the main thread; the command history is written at quit.
+            commands::ssh::app_started(&ctx);
             // The wind-down stops the hook server in its own phase (1.1.4 before-quit: hooks.stop after the MCP server).
             let stopping = ctx.hooks.clone();
             ctx.lifecycle.wind_down.register(
