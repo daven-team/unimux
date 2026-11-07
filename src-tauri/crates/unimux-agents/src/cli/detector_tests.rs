@@ -677,3 +677,44 @@ async fn version_for_asks_the_binary_a_cell_path_really_runs() {
     assert_eq!(t.calls().len(), 2);
     assert_eq!(t.calls()[1].env.iter().find(|(k, _)| k == "PATH").unwrap().1.split(':').next(), Some("/old/bin"));
 }
+
+// hook-fallback "the claude version a cell really runs" (H2: the version picks the cell's hook form)
+#[tokio::test]
+async fn takes_the_first_path_entry_the_cell_shell_would_run_not_the_newer_install_the_detection_prefers() {
+    use crate::hooks::claude::{ClaudeHookForm, claude_hook_form};
+    let t = detector(
+        World { files: set(&["/Users/a/.local/bin/claude", "/opt/old/bin/claude"]), ..world() },
+        sync_exec(|r| match r.file.as_str() {
+            "/Users/a/.local/bin/claude" => res(true, "2.1.310 (Claude Code)\n", false),
+            "/opt/old/bin/claude" => res(true, "2.1.50 (Claude Code)\n", false),
+            _ => res(false, "", false),
+        }),
+    );
+    assert_eq!(t.get(Claude).await.version.as_deref(), Some("2.1.310"));
+    let old_runs = |t: &T| t.calls().iter().filter(|c| c.file == "/opt/old/bin/claude").count();
+    let cell = env(&[("PATH", "/opt/old/bin:/Users/a/.local/bin:/usr/bin")]);
+    let v = t.d.version_for(Claude, &cell, 2000).await;
+    assert_eq!(v.as_deref(), Some("2.1.50"));
+    assert_eq!(claude_hook_form(v.as_deref()), ClaudeHookForm::Shell);
+    assert_eq!(t.d.version_for(Claude, &cell, 2000).await.as_deref(), Some("2.1.50"));
+    assert_eq!(old_runs(&t), 1, "cached per path");
+    // The detected binary first on the PATH: no extra process.
+    let v = t.d.version_for(Claude, &env(&[("PATH", "/Users/a/.local/bin:/opt/old/bin")]), 2000).await;
+    assert_eq!(v.as_deref(), Some("2.1.310"));
+    // Not on the PATH at all (an alias, a login-shell PATH): the detection stands.
+    assert_eq!(t.d.version_for(Claude, &env(&[("PATH", "/usr/bin")]), 2000).await.as_deref(), Some("2.1.310"));
+    assert_eq!(old_runs(&t), 1);
+}
+
+#[tokio::test]
+async fn gives_up_after_wait_ms_an_unknown_version_means_command_hooks() {
+    use crate::hooks::claude::{ClaudeHookForm, claude_hook_form};
+    let exec: ExecFn = Arc::new(|r: &ExecRequest| {
+        if r.file == "/opt/old/bin/claude" { futures::future::pending().boxed() } else { async { version_ok() }.boxed() }
+    });
+    let t = detector(World { files: set(&["/Users/a/.local/bin/claude", "/opt/old/bin/claude"]), ..world() }, exec);
+    t.get(Claude).await;
+    let found = t.d.version_for(Claude, &env(&[("PATH", "/opt/old/bin:/Users/a/.local/bin")]), 20).await;
+    assert_eq!(found, None);
+    assert_eq!(claude_hook_form(found.as_deref()), ClaudeHookForm::Shell);
+}

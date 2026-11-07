@@ -1,6 +1,6 @@
 //! The local endpoint for agent status hooks (port of src/main/hooks.ts `HookServer`, 1.1.4).
 //!
-//! Claude gets a per-cell settings file (H2) whose hooks post here: Claude Code 2.1.63+ posts itself (`type: "http"` hooks,
+//! Claude gets a per-cell settings file ([`claude`], H2) whose hooks post here: Claude Code 2.1.63+ posts itself (`type: "http"` hooks,
 //! the token in a header), older versions run `curl` through their hook shell; Codex posts its notify payload; the launch
 //! line of a role cell posts the CLI's exit code.
 //!
@@ -16,6 +16,9 @@
 //! (or old-format URLs without one) are answered and dropped.
 
 pub mod body;
+pub mod claude;
+pub mod codex;
+pub mod fallback;
 mod jsontext;
 pub mod payload;
 pub mod route;

@@ -204,7 +204,8 @@ impl AppContext {
                 det.close_all();
             },
         );
-        let hooks = Arc::new(crate::hooks::Hooks::default());
+        // H1 / H2: the hook server, the Claude settings files and the cell file folders of this data dir.
+        let hooks = Arc::new(crate::hooks::Hooks::new(&data_dir));
         let cells = Arc::new(crate::cells::Cells::default());
         wire_cells(&controller, &cells, &hooks, &detached);
         Arc::new(Self {
@@ -306,7 +307,7 @@ impl AppContext {
 
 /// W7: the controller's change hook of the cell bookkeeping (after the saver, the broadcaster and the detached windows), and
 /// the alive cells as the hook routing and the detached windows see them. forgetCell drops the cell's codexHooked mark
-/// always and its hook nonce only while no process of it runs (index.ts `forgetCell`).
+/// always and its hook nonce and cell files (H2) only while no process of it runs (index.ts `forgetCell`).
 fn wire_cells(
     controller: &Arc<StateController>,
     cells: &Arc<crate::cells::Cells>,
@@ -332,7 +333,7 @@ fn wire_cells(
     let h = Arc::downgrade(hooks);
     cells.on_forget_unless_alive("hooks", move |cell| {
         if let Some(h) = h.upgrade() {
-            h.server.forget(cell);
+            h.forget_files(cell);
         }
     });
 }

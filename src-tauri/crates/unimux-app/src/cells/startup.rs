@@ -32,7 +32,6 @@ pub struct Steps {
 
 impl Steps {
     /// H2: `pruneCellFiles(dirs, cellIdsOf(state, false))`, before any cell can start.
-    #[allow(dead_code, reason = "the cell file prune (H2) registers here")]
     pub fn set_cell_file_prune(&self, step: Step) {
         *self.prune.lock() = Some(step);
     }

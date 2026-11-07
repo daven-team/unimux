@@ -33,7 +33,7 @@ export const SCRIPTS = [
     'update-wait', 'waiting-ui'].map((name) => ({ file: `verify-${name}.mjs` })),
   { file: 'verify-tauri-normalize.mjs', only: 'tauri' },
   // the acceptance checks of the wave 1 packages (Tauri only: most compare with 1.1.4 or the TS reference themselves)
-  ...['tauri-cells', 'tauri-convsearch', 'tauri-detached', 'tauri-files', 'tauri-fileops', 'tauri-hooks', 'tauri-lifecycle', 'tauri-os', 'tauri-search', 'tauri-w3'].map((name) => ({ file: `verify-${name}.mjs`, only: 'tauri' })),
+  ...['tauri-cells', 'tauri-claude-settings', 'tauri-convsearch', 'tauri-detached', 'tauri-files', 'tauri-fileops', 'tauri-hooks', 'tauri-lifecycle', 'tauri-os', 'tauri-search', 'tauri-w3'].map((name) => ({ file: `verify-${name}.mjs`, only: 'tauri' })),
   { file: 'verify-cli-detect.mjs', only: 'tauri', missing: () => (existsSync(join(ROOT, 'out', 'main', 'index.js')) ? null : 'the Electron build (npm run build) is its 1.1.4 reference') },
   { file: 'verify-safestorage.mjs', only: 'tauri', windowsOnly: true },
   // P2: the pty data plane (replay at recorded sizes, echo, 20-cell flood bounds) with the flood helper.
