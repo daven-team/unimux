@@ -47,10 +47,8 @@ pub fn hex_text(bytes: &[u8]) -> String {
     s
 }
 
-/// JS `s.length`.
-pub fn utf16_len(s: &str) -> usize {
-    s.chars().map(char::len_utf16).sum()
-}
+/// JS `s.length` (unimux-core's utf16 helpers).
+pub use unimux_core::utf16::len as utf16_len;
 
 /// JS `s.slice(0, max)` (max in UTF-16 code units).
 pub fn utf16_head(s: &str, max: usize) -> Head {

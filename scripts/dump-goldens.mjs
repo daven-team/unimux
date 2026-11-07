@@ -12,6 +12,7 @@
 //   test/golden/normalize-state.jsonl   {platform, now, input} -> normalizeState (see scripts/goldens-normalize.mjs)
 //   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
 //   test/golden/hook-payloads.jsonl, hook-server.jsonl  the hook server (see scripts/goldens-hooks.mjs)
+//   test/golden/db-sql.jsonl, db-redis.jsonl  {fn, args} -> the DB helpers of src/shared (see scripts/goldens-db.mjs)
 //   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
 //                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
 //   test/golden/conv-*.jsonl         the conversation search (fold, terms, searchDocs, Date.parse, transcript reading, export,
@@ -19,6 +20,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
 import { convGoldens } from './goldens-convsearch.mjs';
+import { DB_MODULES, dbGoldens } from './goldens-db.mjs';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -36,6 +38,8 @@ const [
 ]);
 const [detached, { normalizeWaitMark }] = await Promise.all([load('src/shared/detached.ts'), load('src/shared/waiting.ts')]);
 const fileGoldens = await filesGoldens(await load('src/main/files.ts'));
+const dbModules = Object.fromEntries(await Promise.all(Object.entries(DB_MODULES).map(async ([name, file]) => [name, await load(file)])));
+const db = dbGoldens(dbModules);
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
 function rng(seed) {
@@ -270,6 +274,8 @@ const files = {
   'state-after-edit.jsonl': jsonl(afterEditRows({ normalizeState, normalizeEditedState })),
   'js-sort.jsonl': jsonl(jsSort()),
   ...Object.fromEntries(Object.entries(await convGoldens(load)).map(([name, rows]) => [name, jsonl(rows)])),
+  'db-sql.jsonl': jsonl(db['db-sql.jsonl']),
+  'db-redis.jsonl': jsonl(db['db-redis.jsonl']),
 };
 const updateStrings = updateStringsGolden({ root, translate });
 files['update-strings.json'] = `${JSON.stringify(updateStrings, null, 1)}\n`;
@@ -290,4 +296,4 @@ if (check && stale.length) {
   console.error(`golden corpus out of date: ${stale.join(', ')} (run \`npm run gen:goldens\`)`);
   process.exit(1);
 }
-console.log(check ? 'golden corpus up to date' : `wrote ${Object.keys(files).length} golden files to test/golden`);
+console.log(check ? 'golden corpus up to date' : `wrote ${Object.keys(files).length} golden files to test/golden (DB vectors: ${db.skipped} rows with unpaired surrogates left out)`);

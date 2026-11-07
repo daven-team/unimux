@@ -12,6 +12,7 @@ pub mod json_file;
 pub mod panic_guard;
 pub mod startup_timing;
 pub mod time;
+pub mod utf16;
 
 /// The product version (Cargo.toml, kept equal to package.json and tauri.conf.json by the release script). A build with the
 /// `dev-overrides` feature (the check flavour) takes `UNIMUX_VERSION_OVERRIDE` from the build environment instead, so the
