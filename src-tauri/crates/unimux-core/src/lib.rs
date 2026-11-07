@@ -9,6 +9,7 @@ pub mod home;
 pub mod i18n;
 pub mod js_json;
 pub mod json_file;
+pub mod panic_guard;
 pub mod startup_timing;
 pub mod time;
 

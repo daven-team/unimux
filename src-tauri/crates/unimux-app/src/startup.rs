@@ -85,6 +85,10 @@ pub fn install_crash_handling(log: Arc<RollingLog>) {
     let _ = CRASH.set(log);
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        // A panic its caller catches and reports as a plain failure (a damaged Parquet file): not a crash.
+        if unimux_core::panic_guard::panic_expected() {
+            return;
+        }
         let message = info
             .payload()
             .downcast_ref::<&str>()

@@ -16,6 +16,26 @@ export interface McTransport {
   pathsForFiles(files: File[]): Promise<string[]>;
 }
 
+/** Base64 of bytes (Uint8Array.prototype.toBase64 where the engine has it, else btoa in chunks). */
+function base64Of(bytes: Uint8Array): string {
+  const native = (bytes as Uint8Array & { toBase64?: () => string }).toBase64;
+  if (native) return native.call(bytes);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+/**
+ * An image preview of 1.2.0 carries the raw bytes (no base64 inside the IPC answer); the page gets the `data:` URL of 1.1.4.
+ * The Electron preload answers the string already, so this is a no-op there.
+ */
+export async function withImageDataUrl<T>(answer: Promise<T>): Promise<T> {
+  const preview = await answer;
+  const p = preview as { kind?: unknown; mime?: unknown; dataUrl?: unknown } | null;
+  if (p?.kind === 'image' && p.dataUrl instanceof Uint8Array) return { ...p, dataUrl: `data:${String(p.mime)};base64,${base64Of(p.dataUrl)}` } as T;
+  return preview;
+}
+
 export function createMcApi(t: McTransport): McApi {
   return {
     platform: t.platform,
@@ -54,7 +74,7 @@ export function createMcApi(t: McTransport): McApi {
     listProjectDirectory: (projectId, path = '') => t.invoke('fs:listProjectDirectory', projectId, path),
     listProjectDirectoryBatch: (projectId, paths) => t.invoke('fs:listProjectDirectoryBatch', projectId, paths),
     writeProjectFile: (projectId, path, text, expectedText) => t.invoke('fs:writeProjectFile', projectId, path, text, expectedText),
-    readProjectFile: (projectId, path, large) => t.invoke('fs:readProjectFile', projectId, path, large),
+    readProjectFile: (projectId, path, large) => withImageDataUrl(t.invoke('fs:readProjectFile', projectId, path, large)),
     statProjectFile: (projectId, path) => t.invoke('fs:statProjectFile', projectId, path),
     listProjectDirectories: (projectId) => t.invoke('fs:listProjectDirectories', projectId),
     searchProject: (projectId, options) => t.invoke('fs:searchProject', projectId, options),
@@ -230,7 +250,7 @@ export function createMcApi(t: McTransport): McApi {
       rename: (from, to) => t.invoke('local:rename', from, to),
       trash: (paths) => t.invoke('local:trash', paths),
       reveal: (path) => t.invoke('local:reveal', path),
-      readFile: (path) => t.invoke('local:readFile', path),
+      readFile: (path) => withImageDataUrl(t.invoke('local:readFile', path)),
       statFile: (path) => t.invoke('local:statFile', path),
       writeFile: (path, text, expectedText) => t.invoke('local:writeFile', path, text, expectedText),
     },

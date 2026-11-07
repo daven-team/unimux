@@ -22,10 +22,12 @@
 //   test/golden/git-resolve.jsonl    {args} -> path.win32.resolve / path.posix.resolve of Node with process.cwd() C:\work\cwd
 //                                     (win32) or /work/cwd (posix) and the drive cwds =C: C:\work\cwd, =D: D:\dcwd\x, =E:
 //                                     C:\not-e, =F: '' (the env of the run is replaced while the rows are made)
+//   test/golden/files-*.jsonl        project files: name order, path checks, previews, saves (see scripts/goldens-files.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
 import { updateConfigGolden, updateProgressRows, updateStringsGolden } from './goldens-update.mjs';
 import { detachedRows, routeMessageRows } from './goldens-detached.mjs';
+import { filesGoldens } from './goldens-files.mjs';
 import path, { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
@@ -42,6 +44,7 @@ const [
   load('src/main/stateController.ts'), load('src/shared/updateProgress.ts'), load('src/main/gitPaths.ts'), load('src/shared/git.ts'),
 ]);
 const [detached, { normalizeWaitMark }] = await Promise.all([load('src/shared/detached.ts'), load('src/shared/waiting.ts')]);
+const fileGoldens = await filesGoldens(await load('src/main/files.ts'));
 
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
 function rng(seed) {
@@ -281,6 +284,11 @@ const files = {
   'git-spelling.jsonl': jsonl(gitSpelling()),
   'git-text.jsonl': jsonl(gitText()),
   'git-resolve.jsonl': jsonl(gitResolve()),
+  'files-collate.jsonl': jsonl(fileGoldens.collate),
+  'files-path.jsonl': jsonl(fileGoldens.paths),
+  'files-preview.jsonl': jsonl(fileGoldens.preview),
+  'files-save.jsonl': jsonl(fileGoldens.save),
+  'files-parquet.jsonl': jsonl(fileGoldens.parquet),
 };
 const updateStrings = updateStringsGolden({ root, translate });
 files['update-strings.json'] = `${JSON.stringify(updateStrings, null, 1)}\n`;

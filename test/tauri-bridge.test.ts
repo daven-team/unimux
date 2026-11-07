@@ -153,6 +153,46 @@ describe('Tauri transport', () => {
     expect(invocations[0].command).toBe('mc_invoke');
   });
 
+  it('sends a save whose new text has a lone surrogate to Rust with a marker, so 1.1.4 order of checks holds (conflict first)', async () => {
+    const conflict = { ok: false, code: 'conflict', error: 'x' };
+    const { deps, invocations } = fakeDeps();
+    const record = deps.invoke;
+    deps.invoke = async (command, args, options) => { await record(command, args, options); return conflict; };
+    const api = createMcApi(createTauriTransport(boot, deps));
+    const r = String.fromCharCode(0xfffd);
+    // Rust decides (here: a conflict, which 1.1.4 also reported before looking at the text).
+    expect(await api.writeProjectFile('p', 'a.txt', 'half \ud83d', 'old')).toEqual(conflict);
+    expect(await api.localFs.writeFile('C:\\a.txt', '\ude00x', 'old')).toEqual(conflict);
+    expect((invocations[0].args as { args: unknown[] }).args).toEqual(['p', 'a.txt', `half ${r}`, 'old', true]);
+    expect((invocations[1].args as { args: unknown[] }).args).toEqual(['C:\\a.txt', `${r}x`, 'old', true]);
+    // A whole emoji is fine (no marker), and a broken expected text goes as it is (it can only be a conflict there).
+    await api.writeProjectFile('p', 'a.txt', 'ok 😀', 'old \ud83d');
+    expect((invocations[2].args as { args: unknown[] }).args).toEqual(['p', 'a.txt', 'ok 😀', `old ${r}`]);
+    expect(invocations.map((i) => (i.args as { cmd: string }).cmd)).toEqual(['fs:writeProjectFile', 'local:writeFile', 'fs:writeProjectFile']);
+  });
+
+  it('turns the raw bytes of an image preview into the data: URL the page had in 1.1.4', async () => {
+    const header = new TextEncoder().encode(JSON.stringify({ value: { kind: 'image', mime: 'image/png', dataUrl: { $mcBytes: 0 }, size: 4 }, parts: [4] }));
+    const frame = new Uint8Array(8 + header.length + 4);
+    frame.set([0x4d, 0x43, 0x42, 0x31]);
+    new DataView(frame.buffer).setUint32(4, header.length, true);
+    frame.set(header, 8);
+    frame.set([0x89, 0x50, 0x4e, 0x47], 8 + header.length);
+    const { deps } = fakeDeps({ invoke: async () => frame.buffer });
+    const api = createMcApi(createTauriTransport(boot, deps));
+    const expected = { kind: 'image', mime: 'image/png', dataUrl: 'data:image/png;base64,iVBORw==', size: 4 };
+    expect(await api.readProjectFile('p', 'pic.png', true)).toEqual(expected);
+    expect(await api.localFs.readFile('C:\\pic.png')).toEqual(expected);
+    // Text previews and the Electron preload's string data URLs pass unchanged.
+    const text = { kind: 'text', text: 'x', size: 1, truncated: false };
+    expect(await createMcApi({ ...createTauriTransport(boot, fakeDeps().deps), invoke: async () => text }).readProjectFile('p', 'a.txt')).toBe(text);
+    // Bigger than one btoa chunk.
+    const { withImageDataUrl } = await import('../src/preload/mcApi');
+    const big = new Uint8Array(100_000).map((_, i) => i % 251);
+    const out = await withImageDataUrl(Promise.resolve({ kind: 'image', mime: 'image/gif', dataUrl: big, size: big.length }));
+    expect(out.dataUrl).toBe(`data:image/gif;base64,${Buffer.from(big).toString('base64')}`);
+  });
+
   it('sends a Uint8Array argument as the raw body of mc_invoke_raw with the other arguments in ASCII headers', async () => {
     const calls: Array<{ command: string; args: unknown; options?: { headers: Record<string, string> } }> = [];
     const { deps } = fakeDeps({ invoke: async (command, args, options) => { calls.push({ command, args, options }); return null; } });

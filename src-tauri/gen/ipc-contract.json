@@ -2617,7 +2617,7 @@
     }
    ],
    "returns": "Promise<ProjectFilePreview>",
-   "call": "t.invoke('fs:readProjectFile', projectId, path, large)"
+   "call": "withImageDataUrl(t.invoke('fs:readProjectFile', projectId, path, large))"
   },
   {
    "path": "statProjectFile",
@@ -5336,7 +5336,7 @@
     }
    ],
    "returns": "Promise<ProjectFilePreview>",
-   "call": "t.invoke('local:readFile', path)"
+   "call": "withImageDataUrl(t.invoke('local:readFile', path))"
   },
   {
    "path": "localFs.statFile",

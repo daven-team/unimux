@@ -101,6 +101,9 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
         .on_page_load(move |_window, payload| {
             let finished = payload.event() == PageLoadEvent::Finished;
             crate::lifecycle::page_load(&page_ctx, MAIN, finished);
+            if !finished {
+                page_ctx.main_page_started();
+            }
             if finished {
                 page_ctx.mark("page-loaded");
                 show_main(&page_ctx);
