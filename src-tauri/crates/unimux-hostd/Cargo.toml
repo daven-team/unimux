@@ -14,3 +14,10 @@ path = "src/main.rs"
 [dependencies]
 unimux-core.workspace = true
 serde_json.workspace = true
+parking_lot.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+unimux-pty.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true

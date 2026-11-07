@@ -48,6 +48,7 @@
     "ipc:report": "node scripts/ipc-report.mjs",
     "porting:count": "node scripts/porting-count.mjs",
     "smoke:tauri": "node scripts/smoke-tauri.mjs",
+    "test:hostd": "node scripts/test-hostd.mjs",
     "test:automation": "npm run build && node scripts/smoke-automation.mjs",
     "test:mcp": "vitest run test/mcp test/hook-fallback && node scripts/verify-mcp-cli.mjs",
     "test:mcp-app": "npm run build && node scripts/verify-mcp-app.mjs",
