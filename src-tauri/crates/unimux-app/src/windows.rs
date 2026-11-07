@@ -37,6 +37,35 @@ pub fn browser_args(debug_port: Option<u16>) -> String {
     args
 }
 
+static WEBVIEW_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Chooses the WebView2 user data folder of every app window once, before any webview exists: `<data>/webview2` when it is a
+/// directory this user can write, else `%TEMP%\unimux-webview2\<hash of the data dir>` (PLAN.md U2 / SP6: WebView2 handed a
+/// folder it cannot create shows Edge's own "cannot create data directory" box, which a user must never see). When neither is
+/// usable the start fails with the app's own message (the same as an unreadable state.json) instead of that box.
+pub fn init_webview_dir(data_dir: &std::path::Path, crash: &unimux_core::crash_log::RollingLog) {
+    let preferred = data_dir.join("webview2");
+    let fallback = unimux_platform::webview::temp_fallback_for(data_dir);
+    let (chosen, refused) = unimux_platform::webview::choose_folder(&preferred, std::slice::from_ref(&fallback));
+    for e in &refused {
+        crash.warn(&format!("WebView2 data folder not usable: {e}"));
+    }
+    match chosen {
+        Some(dir) => {
+            if dir != preferred {
+                crash.warn(&format!("WebView2 data folder: using {}", dir.display()));
+            }
+            let _ = WEBVIEW_DIR.set(dir);
+        }
+        None => crate::startup::startup_failed("no usable WebView2 data folder", Some(&preferred)),
+    }
+}
+
+/// The folder chosen by [`init_webview_dir`] (`<data>/webview2` before it ran).
+pub fn webview_dir(ctx: &AppContext) -> std::path::PathBuf {
+    WEBVIEW_DIR.get().cloned().unwrap_or_else(|| ctx.data_dir.join("webview2"))
+}
+
 /// `window.__MC_BOOT__`: the synchronous values of window.mc (platform, windowsBuild, label).
 pub fn boot_script(ctx: &AppContext, label: &str) -> String {
     let boot = json!({ "platform": ctx.platform.as_str(), "windowsBuild": ctx.windows_build, "label": label });
@@ -82,9 +111,7 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
         .disable_drag_drop_handler();
     #[cfg(windows)]
     {
-        builder = builder
-            .additional_browser_args(&browser_args(ctx.overrides.debug_port))
-            .data_directory(ctx.data_dir.join("webview2"));
+        builder = builder.additional_browser_args(&browser_args(ctx.overrides.debug_port)).data_directory(webview_dir(ctx));
     }
     if offscreen {
         builder = builder.position(-6000.0, 0.0).skip_taskbar(true).focused(false).focusable(false);

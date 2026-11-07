@@ -1,0 +1,34 @@
+{
+ "version": "1.2.1",
+ "fromVersion": "1.1.4",
+ "oldPid": 4242,
+ "installDir": "C:\\Users\\u\\AppData\\Local\\Programs\\unimux",
+ "appExe": "C:\\Users\\u\\AppData\\Local\\Programs\\unimux\\unimux.exe",
+ "installedFlag": "C:\\Users\\u\\AppData\\Roaming\\unimux\\update\\installer-done",
+ "readyFlag": "C:\\Users\\u\\AppData\\Roaming\\unimux\\update\\ready",
+ "shownFlag": "C:\\Users\\u\\AppData\\Roaming\\unimux\\update\\work\\shown",
+ "abortFlag": "C:\\Users\\u\\AppData\\Roaming\\unimux\\update\\work\\abort",
+ "heartbeatFlag": "C:\\Users\\u\\AppData\\Roaming\\unimux\\update\\work\\heartbeat",
+ "runtimeDir": "C:\\Users\\u\\AppData\\Roaming\\unimux\\update\\runtime",
+ "workDir": "C:\\Users\\u\\AppData\\Roaming\\unimux\\update\\work",
+ "timeoutMs": 300000,
+ "strings": {
+  "title": "Aktualizacja do wersji 1.2.1",
+  "hint": "Nie wyłączaj komputera. unimux uruchomi się automatycznie.",
+  "stages": {
+   "preparing": "Przygotowanie aktualizacji…",
+   "closing": "Zamykanie unimux…",
+   "installing": "Instalowanie nowej wersji…",
+   "launching": "Uruchamianie unimux…"
+  },
+  "done": "Gotowe - uruchamiam nową wersję",
+  "slow": "Aktualizacja trwa dłużej niż zwykle",
+  "slowHint": "Możesz uruchomić unimux ręcznie.",
+  "open": "Uruchom unimux",
+  "close": "Zamknij",
+  "waitingClose": "Czekam na zamknięcie unimux…",
+  "waitingInstaller": "Czekam na instalator. Jeśli Windows poprosi o zgodę, potwierdź ją.",
+  "installingLong": "Instalacja trwa dłużej niż zwykle - to może jeszcze chwilę potrwać…",
+  "background": "Aktualizacja trwa dalej w tle"
+ }
+}

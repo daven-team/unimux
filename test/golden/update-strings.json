@@ -1,0 +1,125 @@
+{
+ "version": "1.2.1",
+ "strings": {
+  "pl": {
+   "title": "Aktualizacja do wersji 1.2.1",
+   "hint": "Nie wyłączaj komputera. unimux uruchomi się automatycznie.",
+   "stages": {
+    "preparing": "Przygotowanie aktualizacji…",
+    "closing": "Zamykanie unimux…",
+    "installing": "Instalowanie nowej wersji…",
+    "launching": "Uruchamianie unimux…"
+   },
+   "done": "Gotowe - uruchamiam nową wersję",
+   "slow": "Aktualizacja trwa dłużej niż zwykle",
+   "slowHint": "Możesz uruchomić unimux ręcznie.",
+   "open": "Uruchom unimux",
+   "close": "Zamknij",
+   "waitingClose": "Czekam na zamknięcie unimux…",
+   "waitingInstaller": "Czekam na instalator. Jeśli Windows poprosi o zgodę, potwierdź ją.",
+   "installingLong": "Instalacja trwa dłużej niż zwykle - to może jeszcze chwilę potrwać…",
+   "background": "Aktualizacja trwa dalej w tle",
+   "failed": "Nie udało się zainstalować aktualizacji."
+  },
+  "en": {
+   "title": "Updating to version 1.2.1",
+   "hint": "Keep your computer on. unimux will start automatically.",
+   "stages": {
+    "preparing": "Preparing the update…",
+    "closing": "Closing unimux…",
+    "installing": "Installing the new version…",
+    "launching": "Starting unimux…"
+   },
+   "done": "Done - launching the new version",
+   "slow": "The update is taking longer than usual",
+   "slowHint": "You can start unimux manually.",
+   "open": "Start unimux",
+   "close": "Close",
+   "waitingClose": "Waiting for unimux to close…",
+   "waitingInstaller": "Waiting for the installer. If Windows asks for permission, confirm it.",
+   "installingLong": "Installing is taking longer than usual - this may take a little longer…",
+   "background": "The update continues in the background",
+   "failed": "Could not install the update."
+  },
+  "de": {
+   "title": "Update auf Version 1.2.1",
+   "hint": "Lass den Computer eingeschaltet. unimux startet automatisch.",
+   "stages": {
+    "preparing": "Update wird vorbereitet…",
+    "closing": "unimux wird geschlossen…",
+    "installing": "Neue Version wird installiert…",
+    "launching": "unimux wird gestartet…"
+   },
+   "done": "Fertig - neue Version wird gestartet",
+   "slow": "Das Update dauert länger als üblich",
+   "slowHint": "Du kannst unimux manuell starten.",
+   "open": "unimux starten",
+   "close": "Schließen",
+   "waitingClose": "Warten, bis unimux geschlossen ist…",
+   "waitingInstaller": "Warten auf das Installationsprogramm. Falls Windows um Erlaubnis fragt, bestätige sie.",
+   "installingLong": "Die Installation dauert länger als üblich - das kann noch etwas dauern…",
+   "background": "Das Update läuft im Hintergrund weiter",
+   "failed": "Das Update konnte nicht installiert werden."
+  },
+  "es": {
+   "title": "Actualizando a la versión 1.2.1",
+   "hint": "No apagues el equipo. unimux se iniciará automáticamente.",
+   "stages": {
+    "preparing": "Preparando la actualización…",
+    "closing": "Cerrando unimux…",
+    "installing": "Instalando la nueva versión…",
+    "launching": "Iniciando unimux…"
+   },
+   "done": "Listo - iniciando la nueva versión",
+   "slow": "La actualización tarda más de lo habitual",
+   "slowHint": "Puedes iniciar unimux manualmente.",
+   "open": "Iniciar unimux",
+   "close": "Cerrar",
+   "waitingClose": "Esperando a que unimux se cierre…",
+   "waitingInstaller": "Esperando al instalador. Si Windows pide permiso, confírmalo.",
+   "installingLong": "La instalación tarda más de lo habitual - puede tardar un poco más…",
+   "background": "La actualización continúa en segundo plano",
+   "failed": "No se pudo instalar la actualización."
+  },
+  "fr": {
+   "title": "Mise à jour vers la version 1.2.1",
+   "hint": "N’éteignez pas l’ordinateur. unimux démarrera automatiquement.",
+   "stages": {
+    "preparing": "Préparation de la mise à jour…",
+    "closing": "Fermeture d’unimux…",
+    "installing": "Installation de la nouvelle version…",
+    "launching": "Démarrage d’unimux…"
+   },
+   "done": "Terminé - lancement de la nouvelle version",
+   "slow": "La mise à jour prend plus de temps que d’habitude",
+   "slowHint": "Vous pouvez lancer unimux manuellement.",
+   "open": "Lancer unimux",
+   "close": "Fermer",
+   "waitingClose": "En attente de la fermeture d’unimux…",
+   "waitingInstaller": "En attente du programme d’installation. Si Windows demande l’autorisation, confirmez-la.",
+   "installingLong": "L’installation prend plus de temps que d’habitude - cela peut encore durer un peu…",
+   "background": "La mise à jour se poursuit en arrière-plan",
+   "failed": "Impossible d’installer la mise à jour."
+  },
+  "pt": {
+   "title": "A atualizar para a versão 1.2.1",
+   "hint": "Não desligue o computador. O unimux iniciará automaticamente.",
+   "stages": {
+    "preparing": "A preparar a atualização…",
+    "closing": "A fechar o unimux…",
+    "installing": "A instalar a nova versão…",
+    "launching": "A iniciar o unimux…"
+   },
+   "done": "Concluído - a iniciar a nova versão",
+   "slow": "A atualização está a demorar mais do que o habitual",
+   "slowHint": "Pode iniciar o unimux manualmente.",
+   "open": "Iniciar o unimux",
+   "close": "Fechar",
+   "waitingClose": "A aguardar que o unimux feche…",
+   "waitingInstaller": "A aguardar o instalador. Se o Windows pedir autorização, confirme-a.",
+   "installingLong": "A instalação está a demorar mais do que o habitual - pode demorar mais um pouco…",
+   "background": "A atualização continua em segundo plano",
+   "failed": "Não foi possível instalar a atualização."
+  }
+ }
+}

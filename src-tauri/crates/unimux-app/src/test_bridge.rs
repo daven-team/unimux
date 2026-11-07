@@ -93,19 +93,22 @@ pub async fn test_bridge(
         "openWindow" => crate::spike_windows::open_window(&ctx, &args).await,
         // Minimize / hide / WebView2 IsVisible of a window and how it looks afterwards (SP1 background timers).
         "window" => crate::spike_windows::window_op(&ctx, &args).await,
-        // SP6: stage the runtime copy ahead of the hand-over (1.1.4 staged it when the update was found), {updaterRoot, version?}.
+        // U2: stage and warm the runtime copy ahead of the hand-over, as U1 does once the download is verified (1.1.4 staged it
+        // when the update was found), {updaterRoot, version?}.
         "update-stage" => {
             let root = args.get("updaterRoot").and_then(Value::as_str).ok_or_else(|| fail("update-stage needs updaterRoot"))?;
-            let version = args.get("version").and_then(Value::as_str).unwrap_or(unimux_core::VERSION);
-            let runtime = std::path::Path::new(root).join(format!("runtime-{version}"));
+            let root = std::path::PathBuf::from(root);
+            let version = args.get("version").and_then(Value::as_str).unwrap_or(unimux_core::VERSION).to_string();
             let exe = std::env::current_exe().map_err(|e| fail(&e.to_string()))?;
-            let started = std::time::Instant::now();
-            let staged = unimux_update::window::stage_runtime(&exe, &runtime).map_err(|e| fail(&e.to_string()))?;
-            Ok(json!({ "runtimeExe": staged, "copyMs": started.elapsed().as_millis() as u64 }))
+            let staged = tauri::async_runtime::spawn_blocking(move || unimux_update::window::prestage(&exe, &root, &version))
+                .await
+                .map_err(|e| fail(&e.to_string()))?
+                .map_err(|e| fail(&e.to_string()))?;
+            Ok(serde_json::to_value(staged).unwrap_or(Value::Null))
         }
         // SP6: the update window hand-over with a local installer (U1/U2 call it after the download and the wind-down), then
         // the app exits like an update does. Args: {installer, updaterRoot, version?, fromVersion?, language?, timeoutMs?,
-        // env? (extra environment of the window), webviewDir?}.
+        // env? (extra environment of the window), webviewDir?, windDownMs?}.
         "update-handover" => {
             let path = |key: &str| args.get(key).and_then(Value::as_str).map(std::path::PathBuf::from);
             let installer = path("installer").ok_or_else(|| fail("update-handover needs installer"))?;
@@ -129,9 +132,12 @@ pub async fn test_bridge(
                 .await
                 .map_err(|e| fail(&e.to_string()))?
                 .map_err(|e| fail(&e.to_string()))?;
+            // `windDownMs`: how long the app takes to exit after the window is shown (W6's wind-down; default 300 ms), so a run
+            // can show the window's "closing" stage.
+            let wind_down = args.get("windDownMs").and_then(Value::as_u64).unwrap_or(300);
             if let Some(app) = ctx.app().cloned() {
                 std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    std::thread::sleep(std::time::Duration::from_millis(wind_down));
                     app.exit(0);
                 });
             }

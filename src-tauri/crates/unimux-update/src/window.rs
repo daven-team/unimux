@@ -251,6 +251,7 @@ pub fn stage_runtime(exe: &Path, runtime_dir: &Path) -> io::Result<PathBuf> {
     if let Some(parent) = runtime_dir.parent() {
         fs::create_dir_all(parent)?;
         remove_stale_partials(parent);
+        remove_stale_webviews(parent, unimux_core::time::now_ms());
     }
     let partial = partial_dir(runtime_dir, std::process::id());
     let _ = fs::remove_dir_all(&partial);
@@ -271,6 +272,70 @@ pub fn stage_runtime(exe: &Path, runtime_dir: &Path) -> io::Result<PathBuf> {
         return if same_copy(&target, &source) { Ok(target) } else { Err(e) };
     }
     Ok(target)
+}
+
+/// `%LOCALAPPDATA%\unimux-updater`: where the runtime copies and the update windows' WebView2 folders live (the same folder
+/// 1.1.4 staged its Electron runtime in; ARCHITECTURE section 8). Elsewhere (macOS, U5) a folder of the same name in the temp
+/// dir.
+pub fn updater_root() -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join(UPDATER_DIR)
+}
+
+/// The folder name the cleanup insists on ([`cleanup_allowed`]).
+pub const UPDATER_DIR: &str = "unimux-updater";
+
+/// A WebView2 folder of an update window older than this is left over by a window that was killed (no cleanup ran); the
+/// next staging removes it. A window supervises for 15 min at most.
+pub const STALE_WEBVIEW_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Removes `webview2-<ms>` folders whose id (the hand-over time) is older than [`STALE_WEBVIEW_AGE`] from the updater root.
+fn remove_stale_webviews(root: &Path, now_ms: i64) {
+    let now_ms = u64::try_from(now_ms).unwrap_or(0);
+    let Ok(entries) = fs::read_dir(root) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(id) = name.strip_prefix("webview2-").and_then(|id| id.parse::<u64>().ok()) else { continue };
+        if now_ms.saturating_sub(id) > STALE_WEBVIEW_AGE.as_millis() as u64 && entry.path().is_dir() {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+/// What [`prestage`] measured.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Prestaged {
+    pub runtime_exe: PathBuf,
+    pub copy_ms: u64,
+    /// The warm-up start (`--update-cleanup` without folders, a no-op) until it exited; None when it did not start.
+    pub warm_ms: Option<u64>,
+}
+
+/// Run as soon as the downloaded installer is verified (1.1.4's `stageSplashRuntime` when the update was found): copies the
+/// running exe to `<root>/runtime-<version>/unimux-update.exe` and starts the copy once with `--update-cleanup` (a no-op that
+/// exits at once), so the antivirus scan of a never-seen file happens now and not while the user waits for the window
+/// (SP6: CreateProcess 904 ms cold, 212 ms staged and warmed). Also sweeps WebView2 folders left by killed windows.
+pub fn prestage(app_exe: &Path, root: &Path, version: &str) -> io::Result<Prestaged> {
+    let started = Instant::now();
+    let runtime_dir = root.join(format!("runtime-{version}"));
+    let runtime_exe = stage_runtime(app_exe, &runtime_dir)?;
+    let copy_ms = started.elapsed().as_millis() as u64;
+    remove_stale_webviews(root, unimux_core::time::now_ms());
+    let warm = Instant::now();
+    let program = unimux_exec::Program::Args { program: runtime_exe.clone(), args: vec!["--update-cleanup".into()] };
+    // Outside the copy (a working directory inside it would hold the folder), detached like the real start.
+    let warm_ms = unimux_exec::spawn_detached(&program, None, Some(std::env::temp_dir())).ok().map(|pid| {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while unimux_exec::process_alive(pid) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        warm.elapsed().as_millis() as u64
+    });
+    Ok(Prestaged { runtime_exe, copy_ms, warm_ms })
 }
 
 pub fn update_dir(data_dir: &Path) -> PathBuf {
@@ -348,6 +413,10 @@ pub fn hand_over(h: &HandOver) -> io::Result<HandOverResult> {
         Err(e) => return Err(io::Error::other(e)),
     };
     let spawn_ms = spawn_at.elapsed().as_millis() as u64;
+    // The user just clicked "install" in this app, so it may set the foreground window; the right goes on to the window
+    // process, which passes it to the installer (ASFW_ANY) so a UAC prompt can come to the front. The window itself never
+    // takes the focus.
+    unimux_platform::allow_set_foreground(pid);
     let shown_ms = wait_for_file(&config.shown_flag, SHOWN_WAIT).then(|| spawn_at.elapsed().as_millis() as u64);
     Ok(HandOverResult { pid, config: config_path, runtime_exe: exe, copy_ms, spawn_ms, shown_ms })
 }
@@ -405,7 +474,7 @@ pub fn directory_bytes(root: &Path) -> u64 {
 pub fn cleanup_allowed(dir: &Path) -> bool {
     let name = dir.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     let parent = dir.parent().and_then(Path::file_name).map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    parent == "unimux-updater" && (name.starts_with("runtime-") || name == "webview2" || name.starts_with("webview2-"))
+    parent == UPDATER_DIR && (name.starts_with("runtime-") || name == "webview2" || name.starts_with("webview2-"))
 }
 
 /// Whether `dir` is a runtime copy folder (`runtime-*`): the one folder a newer update window may share with an older one (same
@@ -570,6 +639,39 @@ mod tests {
             assert!(root.join(format!("runtime-{v}")).join(RUNTIME_EXE).exists());
             assert!(!partial_dir(&root.join(format!("runtime-{v}")), std::process::id()).exists());
         }
+    }
+
+    #[test]
+    fn webview_folders_of_killed_windows_go_after_a_day_and_nothing_else() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join(UPDATER_DIR);
+        let now = 1_762_444_800_000u64;
+        let day = STALE_WEBVIEW_AGE.as_millis() as u64;
+        let stale = root.join(format!("webview2-{}", now - day - 1));
+        let fresh = root.join(format!("webview2-{}", now - 60_000));
+        let shared = root.join("webview2");
+        let odd = root.join("webview2-x");
+        let file = root.join(format!("webview2-{}", now - 2 * day));
+        for dir in [&stale, &fresh, &shared, &odd] {
+            fs::create_dir_all(dir.join("EBWebView")).unwrap();
+        }
+        fs::write(&file, b"x").unwrap();
+        remove_stale_webviews(&root, now as i64);
+        assert!(!stale.exists());
+        assert!(fresh.exists() && shared.exists() && odd.exists() && file.exists());
+    }
+
+    #[test]
+    fn prestage_copies_the_runtime_and_reports_a_warm_start_only_when_it_ran() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = tmp.path().join("unimux.exe");
+        fs::write(&exe, b"MZ not a real program").unwrap();
+        let root = tmp.path().join(UPDATER_DIR);
+        let p = prestage(&exe, &root, "1.2.1").unwrap();
+        assert_eq!(p.runtime_exe, root.join("runtime-1.2.1").join(RUNTIME_EXE));
+        assert_eq!(fs::read(&p.runtime_exe).unwrap(), b"MZ not a real program");
+        assert_eq!(p.warm_ms, None, "a file that is no program does not start");
+        assert!(updater_root().ends_with(UPDATER_DIR));
     }
 
     #[test]

@@ -38,6 +38,12 @@ pub fn user_locale() -> Option<String> {
     (n > 1).then(|| String::from_utf16_lossy(&buf[..(n as usize - 1)]))
 }
 
+pub fn allow_set_foreground(pid: u32) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
+    // SAFETY: a plain Win32 call; it only passes on a right this process has.
+    unsafe { AllowSetForegroundWindow(pid).is_ok() }
+}
+
 pub fn error_box(title: &str, text: &str) {
     let title = HSTRING::from(title);
     let text = HSTRING::from(text);

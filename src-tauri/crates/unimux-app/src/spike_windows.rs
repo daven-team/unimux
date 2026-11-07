@@ -48,7 +48,7 @@ pub async fn open_window(ctx: &Arc<AppContext>, args: &Value) -> Result<Value, I
         if different {
             browser_args.push_str(" --disable-gpu-vsync");
         }
-        builder = builder.additional_browser_args(&browser_args).data_directory(ctx.data_dir.join("webview2"));
+        builder = builder.additional_browser_args(&browser_args).data_directory(crate::windows::webview_dir(ctx));
     }
     #[cfg(not(windows))]
     let _ = different;
