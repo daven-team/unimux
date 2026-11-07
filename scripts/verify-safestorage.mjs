@@ -88,6 +88,8 @@ const crashLog = (data) => (existsSync(join(data, 'crash.log')) ? readFileSync(j
 // ---------- 1.1.4 (only with --electron) ----------
 let lib = null;
 async function electronLib() {
+  // ssh-ui-lib drives the target real-app.mjs picks when it is first imported (X1): here always 1.1.4 (Electron).
+  process.env.MC_APP_TARGET = 'electron';
   lib ??= await import('./ssh-ui-lib.mjs');
   return lib;
 }
