@@ -1,8 +1,9 @@
 //! The Tauri feed backend against a local HTTP server (a development feed, MC_UPDATE_FEED): latest.json is read with the
 //! updater's headers, the artifact is downloaded with progress, verified with the key and kept; a corrupt signature is refused
-//! and the file removed; through the coordinator a corrupt .sig ends in the error state.
+//! and the file removed; through the coordinator a corrupt .sig ends in the error state; a download whose body stalls ends with
+//! an error and the retry downloads again.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,6 +24,8 @@ struct Server {
     base: String,
     files: Arc<Mutex<HashMap<String, Vec<u8>>>>,
     requests: Arc<Mutex<Vec<String>>>,
+    /// Paths whose next request gets its headers and part of the body, then nothing more (the socket stays open).
+    stall_once: Arc<Mutex<HashSet<String>>>,
 }
 
 async fn serve() -> Server {
@@ -30,11 +33,12 @@ async fn serve() -> Server {
     let base = format!("http://{}", listener.local_addr().unwrap());
     let files: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::default();
     let requests: Arc<Mutex<Vec<String>>> = Arc::default();
-    let (f, r) = (files.clone(), requests.clone());
+    let stall_once: Arc<Mutex<HashSet<String>>> = Arc::default();
+    let (f, r, st) = (files.clone(), requests.clone(), stall_once.clone());
     tokio::spawn(async move {
         loop {
             let Ok((mut socket, _)) = listener.accept().await else { return };
-            let (f, r) = (f.clone(), r.clone());
+            let (f, r, st) = (f.clone(), r.clone(), st.clone());
             tokio::spawn(async move {
                 let mut buf = vec![0u8; 8192];
                 let mut head = Vec::new();
@@ -49,6 +53,23 @@ async fn serve() -> Server {
                 r.lock().push(text.clone());
                 let path = text.split_whitespace().nth(1).unwrap_or("/").to_string();
                 let body = f.lock().get(&path).cloned();
+                if let Some(body) = &body
+                    && st.lock().remove(&path)
+                {
+                    let mut out = format!(
+                        "HTTP/1.1 200 OK
+Content-Length: {}
+
+",
+                        body.len()
+                    )
+                    .into_bytes();
+                    out.extend_from_slice(&body[..body.len().min(10)]);
+                    let _ = socket.write_all(&out).await;
+                    // Silent until the client gives up and closes the connection.
+                    let _ = socket.read(&mut buf).await;
+                    return;
+                }
                 let response = match body {
                     Some(body) => {
                         let mut out = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len())
@@ -63,7 +84,7 @@ async fn serve() -> Server {
             });
         }
     });
-    Server { base, files, requests }
+    Server { base, files, requests, stall_once }
 }
 
 fn feed(base: &str, version: &str, signature: &str) -> Vec<u8> {
@@ -87,6 +108,7 @@ fn backend(server: &Server, dir: &std::path::Path) -> Arc<NetBackend> {
         download_dir: dir.join("pending"),
         manual: None,
         log: Arc::new(|_| {}),
+        download_stall: unimux_update::net::DOWNLOAD_STALL,
     })
 }
 
@@ -134,6 +156,7 @@ async fn reads_the_feed_downloads_verifies_and_reuses_the_artifact() {
             download_dir: dir.path().join("pending"),
             manual: None,
             log: Arc::new(|_| {}),
+            download_stall: unimux_update::net::DOWNLOAD_STALL,
         }
     });
     assert!(current.lookup().await.unwrap().update.is_none());
@@ -180,6 +203,52 @@ async fn a_corrupt_sig_through_the_coordinator_shows_the_error_state() {
     );
     assert!(!c.lock_handover(Some("1.2.1")));
     assert!(!states.lock().contains(&Status::Ready));
+}
+
+#[tokio::test]
+async fn a_stalled_download_ends_with_an_error_and_the_retry_downloads_again() {
+    let server = serve().await;
+    server.files.lock().insert("/latest.json".into(), feed(&server.base, "1.2.1", SIG));
+    server.files.lock().insert("/unimux-Setup-1.2.1.exe".into(), PAYLOAD.to_vec());
+    server.stall_once.lock().insert("/unimux-Setup-1.2.1.exe".into());
+    let dir = tempfile::tempdir().unwrap();
+    let b = NetBackend::new(NetBackendOptions {
+        download_stall: Duration::from_millis(500),
+        ..NetBackendOptions {
+            client: None,
+            dev_feed: Some(server.base.clone()),
+            public_key: TEST_KEY.to_string(),
+            current_version: "1.2.0".into(),
+            download_dir: dir.path().join("pending"),
+            manual: None,
+            log: Arc::new(|_| {}),
+            download_stall: unimux_update::net::DOWNLOAD_STALL,
+        }
+    });
+    let c = UpdateCoordinator::new(CoordinatorOptions::new(b.clone(), Arc::new(|_| {}), unimux_update::RELEASES_URL));
+    let artifact_requests = || server.requests.lock().iter().filter(|h| h.starts_with("GET /unimux-Setup-1.2.1.exe ")).count();
+
+    // The coordinator's own watchdog (2 min) is far away: the backend's inactivity deadline ends the download.
+    assert_eq!(c.check(CheckReason::Background).await, Ok(Some("1.2.1".into())));
+    let first = tokio::time::timeout(Duration::from_secs(10), c.download()).await.expect("the stalled download ends");
+    assert!(first.is_err());
+    let state = c.get_state();
+    assert_eq!(
+        (state.status, state.version.as_deref(), state.message.as_deref()),
+        (Status::Error, Some("1.2.1"), Some(unimux_update::coordinator::NO_RESPONSE))
+    );
+    assert_eq!(artifact_requests(), 1);
+    assert!(b.artifact("1.2.1").is_none());
+    // The partial file is gone.
+    assert_eq!(std::fs::read_dir(dir.path().join("pending")).unwrap().count(), 0);
+
+    // The retry (a check, then the install) starts a fresh download instead of joining the hung one.
+    c.check(CheckReason::Manual).await.unwrap();
+    let again = tokio::time::timeout(Duration::from_secs(10), c.download()).await.expect("the retry ends");
+    assert!(again.is_ok(), "{again:?}");
+    assert_eq!(artifact_requests(), 2);
+    assert_eq!(c.get_state().status, Status::Ready);
+    assert_eq!(std::fs::read(b.artifact("1.2.1").unwrap()).unwrap(), PAYLOAD);
 }
 
 #[tokio::test]

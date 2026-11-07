@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use serde_json::{Value, json};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager as _};
 use tokio_util::sync::CancellationToken;
 
 use unimux_core::VERSION;
@@ -52,6 +52,10 @@ pub struct UpdateService {
     /// True once the update window was started for the installer: the hand-over can no longer be abandoned.
     committed: AtomicBool,
     gate: Mutex<Option<Arc<GateWindow>>>,
+    /// The startup gate's hidden window until [`dispose_after_main`] destroys it. Every gate window has the label
+    /// `update-gate`: the install window takes this one down first, so its own can be created and the late disposal never
+    /// destroys it.
+    lingering: Mutex<Option<Arc<GateWindow>>>,
     staged: Mutex<Option<String>>,
     /// One staging of the runtime copy at a time: the pre-stage and a hand-over of this process share the staging folder
     /// (`runtime-<ver>.partial-<pid>`), and the hand-over must not remove the copy the warm-up start still runs from.
@@ -85,6 +89,7 @@ impl UpdateService {
             // U5: no macOS engine yet, so a Mac gets the download page (with no reason line, like a portable build).
             manual: cfg!(target_os = "macos").then(Manual::default),
             log: log.clone(),
+            download_stall: unimux_update::net::DOWNLOAD_STALL,
         });
         Arc::new_cyclic(|me: &Weak<UpdateService>| {
             let weak_ctx = Arc::downgrade(ctx);
@@ -117,6 +122,7 @@ impl UpdateService {
                 ui: UpdateUiGuard::default(),
                 committed: AtomicBool::new(false),
                 gate: Mutex::new(None),
+                lingering: Mutex::new(None),
                 staged: Mutex::new(None),
                 stage_lock: Arc::new(Mutex::new(())),
                 started: AtomicBool::new(false),
@@ -218,6 +224,8 @@ impl UpdateService {
                 svc.check_for_updates(CheckReason::Background).await;
             }
             let mut every = tokio::time::interval(CHECK_EVERY);
+            // 1.1.4's setInterval fired once after a sleep or hibernation; Burst would run one check per missed half hour.
+            every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             every.tick().await;
             loop {
                 every.tick().await;
@@ -412,15 +420,20 @@ fn gate_options(skip_version: Option<String>) -> GateOptions {
 }
 
 /// The hidden gate window goes once the main window's page is up (see [`GateWindow::hide`]); at most 30 s later anyway.
-fn dispose_after_main(ctx: &Arc<AppContext>, window: Arc<GateWindow>) {
-    let ctx = ctx.clone();
+fn dispose_after_main(ctx: &Arc<AppContext>, svc: &Arc<UpdateService>, window: Arc<GateWindow>) {
+    *svc.lingering.lock() = Some(window);
+    let (ctx, svc) = (ctx.clone(), svc.clone());
     tauri::async_runtime::spawn(async move {
         let deadline = Instant::now() + Duration::from_secs(30);
         while !ctx.main_shown.load(Ordering::SeqCst) && Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
-        window.dispose();
+        // None: the install window already took it down (and the label now belongs to its own window).
+        let lingering = svc.lingering.lock().take();
+        if let Some(window) = lingering {
+            window.dispose();
+        }
     });
 }
 
@@ -481,7 +494,7 @@ pub fn startup_gate(ctx: &Arc<AppContext>, app: &AppHandle, start_app: Arc<dyn F
             ctx.lifecycle.set_gating(false);
             svc.ui.release(UpdateUiOwner::StartupGate);
             start_app();
-            dispose_after_main(&ctx, window);
+            dispose_after_main(&ctx, &svc, window);
             return;
         }
         // After a hand-over the app is quitting for the installer. If it has not quit this long after, it starts normally
@@ -502,7 +515,7 @@ pub fn startup_gate(ctx: &Arc<AppContext>, app: &AppHandle, start_app: Arc<dyn F
         ctx.lifecycle.set_gating(false);
         svc.ui.release(UpdateUiOwner::StartupGate);
         start_app();
-        dispose_after_main(&ctx, window);
+        dispose_after_main(&ctx, &svc, window);
     });
     true
 }
@@ -521,6 +534,17 @@ pub fn open_install_window(ctx: &Arc<AppContext>) {
     };
     let ctx = ctx.clone();
     tauri::async_runtime::spawn(async move {
+        // The startup gate's hidden window still holds the label (the button can be clicked within a second of the main
+        // window showing): it goes first, the main window keeps the WebView2 browser process.
+        let lingering = svc.lingering.lock().take();
+        if let Some(old) = lingering {
+            old.dispose();
+            // The label is free once the event loop has handled the destruction.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while app.get_webview_window(crate::update_gate::LABEL).is_some() && Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
         let texts = GateTexts::new(&language(&ctx), "Aktualizacja nie powiodła się");
         let handle = GateHandle::new();
         let window = GateWindow::new(&ctx, app, texts, handle.clone());

@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use tokio::io::AsyncWriteExt as _;
@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use unimux_net::{HttpClient, Url, calls};
 
-use crate::coordinator::{Backend, BoxFut, CHECK_FAILED, FoundUpdate, LookupResult, Manual, Progress, ProgressFn};
+use crate::coordinator::{Backend, BoxFut, CHECK_FAILED, FoundUpdate, LookupResult, Manual, NO_RESPONSE, Progress, ProgressFn};
 use crate::feed::{self, FeedAsset};
 
 /// macUpdate MAC_MESSAGES (translated in the renderer): the same texts for the same failures.
@@ -23,6 +23,10 @@ pub const VERIFY_FAILED: &str = "Pobrana aktualizacja nie przeszła weryfikacji 
 pub const DOWNLOAD_CANCELLED: &str = "download cancelled";
 /// How often a running download reports (electron-updater reports about every second; the status bar and the gate want more).
 const REPORT_EVERY_MS: u128 = 250;
+/// How long a download may wait for the response headers or for the next piece of its body: electron-updater's HttpExecutor
+/// put a 60 s socket inactivity timeout on every request (builder-util-runtime `addErrorAndTimeoutHandlers`), so a stalled
+/// download failed, was forgotten, and a retry downloaded again.
+pub const DOWNLOAD_STALL: Duration = Duration::from_secs(60);
 
 pub struct NetBackendOptions {
     /// None: made on first use with the system settings (B3).
@@ -38,6 +42,8 @@ pub struct NetBackendOptions {
     /// this reason.
     pub manual: Option<Manual>,
     pub log: Arc<dyn Fn(&str) + Send + Sync>,
+    /// [`DOWNLOAD_STALL`]; tests use a shorter one.
+    pub download_stall: Duration,
 }
 
 pub struct NetBackend {
@@ -206,7 +212,15 @@ impl NetBackend {
         cancel: &CancellationToken,
     ) -> Result<(), String> {
         let req = calls::update_request(url, self.extra_origins(), None).map_err(|e| e.to_string())?.cancel(cancel.clone());
-        let mut response = self.client()?.fetch_stream(req).await.map_err(|e| {
+        let stall = self.o.download_stall;
+        let stalled = |what: &str| {
+            (self.o.log)(&format!("update download: no data for {} s ({what})", stall.as_secs_f64()));
+            NO_RESPONSE.to_string()
+        };
+        let mut response = tokio::time::timeout(stall, self.client()?.fetch_stream(req))
+            .await
+            .map_err(|_| stalled("headers"))?
+            .map_err(|e| {
             (self.o.log)(&format!("update download: {e}"));
             e.to_string()
         })?;
@@ -233,7 +247,9 @@ impl NetBackend {
             });
         };
         report(0.0);
-        while let Some(chunk) = response.body.chunk().await.map_err(|e| e.to_string())? {
+        while let Some(chunk) =
+            tokio::time::timeout(stall, response.body.chunk()).await.map_err(|_| stalled("body"))?.map_err(|e| e.to_string())?
+        {
             file.write_all(&chunk).await.map_err(|e| e.to_string())?;
             transferred += chunk.len() as f64;
             if last_report.elapsed().as_millis() >= REPORT_EVERY_MS {
