@@ -338,9 +338,21 @@ pub fn show_item_in_folder(path: &str) {
     }
 }
 
-/// `shell.trashItem(path)`: moves a file or folder to the Recycle Bin / Trash.
+/// `shell.trashItem(path)`: moves a file or folder to the Recycle Bin / Trash. On macOS through NSFileManager
+/// `trashItemAtURL` like Electron (G6): the trash crate's default asks Finder over AppleScript, which needs the
+/// Automation permission and shows its prompt.
 pub fn trash_item(path: &Path) -> Result<(), String> {
-    trash::delete(path).map_err(|e| e.to_string())
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        let mut context = trash::TrashContext::default();
+        context.set_delete_method(DeleteMethod::NsFileManager);
+        context.delete(path).map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        trash::delete(path).map_err(|e| e.to_string())
+    }
 }
 
 /// `shell.beep()`: the system's default sound.

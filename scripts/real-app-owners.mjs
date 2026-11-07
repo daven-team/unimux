@@ -127,6 +127,7 @@ export const SCRIPT_PACKAGES = {
   'verify-ssh-paths.mjs': ['S1', 'S3'],
   'verify-ssh-ui.mjs': ['S1', 'S3'],
   'verify-update-wait.mjs': ['U1'],
+  'verify-tauri-fileops.mjs': ['G5', 'G6'],
 };
 
 /**

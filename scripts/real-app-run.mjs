@@ -33,7 +33,7 @@ export const SCRIPTS = [
     'update-wait', 'waiting-ui'].map((name) => ({ file: `verify-${name}.mjs` })),
   { file: 'verify-tauri-normalize.mjs', only: 'tauri' },
   // the acceptance checks of the wave 1 packages (Tauri only: most compare with 1.1.4 or the TS reference themselves)
-  ...['tauri-convsearch', 'tauri-detached', 'tauri-files', 'tauri-hooks', 'tauri-lifecycle', 'tauri-os', 'tauri-w3'].map((name) => ({ file: `verify-${name}.mjs`, only: 'tauri' })),
+  ...['tauri-convsearch', 'tauri-detached', 'tauri-files', 'tauri-fileops', 'tauri-hooks', 'tauri-lifecycle', 'tauri-os', 'tauri-w3'].map((name) => ({ file: `verify-${name}.mjs`, only: 'tauri' })),
   { file: 'verify-cli-detect.mjs', only: 'tauri', missing: () => (existsSync(join(ROOT, 'out', 'main', 'index.js')) ? null : 'the Electron build (npm run build) is its 1.1.4 reference') },
   { file: 'verify-safestorage.mjs', only: 'tauri', windowsOnly: true },
   // W1: the caption buttons against 1.1.4's references (OS capture and hit tests through the wincap example).

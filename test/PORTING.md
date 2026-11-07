@@ -171,6 +171,47 @@ Rows keep the exact case name (the counter matches them). Rust tests are named `
 | editor-source | writes only a file this window read first; a reload forgets them (a restored draft reads again) | unimux-files/tests/files.rs::local_writes_only_a_file_read_first_and_a_reload_forgets; unimux-files/tests/files.rs::local_opened_set_keeps_the_last_500; unimux-app commands::files::tests::local_files_are_forgotten_when_the_main_page_reloads | ported |
 | editor-source | never reads or writes the app data dir or the install dir, nor UNC and device paths | unimux-files/tests/files.rs::local_never_touches_the_app_folders_nor_unc_and_device_paths; unimux-app commands::files::tests::forbidden_roots_cover_the_app_folders | ported |
 | editor-source | a local file that is gone has its own text, not "cannot be edited here" | unimux-files/tests/files.rs::local_a_file_that_is_gone_has_its_own_text | ported |
+| file-ops | renames a file and a folder | unimux-files/tests/fileops.rs::renames_a_file_and_a_folder; unimux-files/tests/fileops_golden.rs::operations_match_the_ts_reference | ported |
+| file-ops | refuses to overwrite and keeps both files | unimux-files/tests/fileops.rs::refuses_to_overwrite_and_keeps_both_files | ported |
+| file-ops | rejects invalid, reserved and path-like names | unimux-files/tests/fileops.rs::rejects_invalid_reserved_and_path_like_names; unimux-files/tests/fileops_golden.rs::helpers_match_the_ts_reference | ported |
+| file-ops | refuses the project root, traversal and absolute paths | unimux-files/tests/fileops.rs::refuses_the_project_root_traversal_and_absolute_paths | ported |
+| file-ops | refuses entries reached through a junction that leaves the project | unimux-files/tests/fileops.rs::refuses_entries_reached_through_a_junction_that_leaves_the_project | ported |
+| file-ops | can rename the link itself (the link is inside the project) | unimux-files/tests/fileops.rs::can_rename_the_link_itself | ported |
+| file-ops | renames case-only, also when the filesystem is case-insensitive | unimux-files/tests/fileops.rs::renames_case_only_also_when_the_filesystem_is_case_insensitive | ported |
+| file-ops | renaming to the same name is a no-op | unimux-files/tests/fileops.rs::renaming_to_the_same_name_is_a_no_op | ported |
+| file-ops | creates files and folders without overwriting | unimux-files/tests/fileops.rs::creates_files_and_folders_without_overwriting | ported |
+| file-ops | moves a file and a folder with content into another folder | unimux-files/tests/fileops.rs::moves_a_file_and_a_folder_with_content_into_another_folder | ported |
+| file-ops | moves to the project root | unimux-files/tests/fileops.rs::moves_to_the_project_root | ported |
+| file-ops | reports conflicts first and changes nothing | unimux-files/tests/fileops.rs::reports_conflicts_first_and_changes_nothing | ported |
+| file-ops | replace sends the old item to the trash, never deleting it | unimux-files/tests/fileops.rs::replace_sends_the_old_item_to_the_trash_never_deleting_it | ported |
+| file-ops | keep both numbers the moved item | unimux-files/tests/fileops.rs::keep_both_numbers_the_moved_item | ported |
+| file-ops | skip leaves the conflicting item where it was | unimux-files/tests/fileops.rs::skip_leaves_the_conflicting_item_where_it_was | ported |
+| file-ops | refuses to move a folder into itself or a descendant | unimux-files/tests/fileops.rs::refuses_to_move_a_folder_into_itself_or_a_descendant | ported |
+| file-ops | refuses a replace that would trash the source itself | unimux-files/tests/fileops.rs::refuses_a_replace_that_would_trash_the_source_itself | ported |
+| file-ops | moving into the folder it is already in is a no-op | unimux-files/tests/fileops.rs::moving_into_the_folder_it_is_already_in_is_a_no_op | ported |
+| file-ops | refuses a destination that is not a folder or does not exist | unimux-files/tests/fileops.rs::refuses_a_destination_that_is_not_a_folder_or_does_not_exist | ported |
+| file-ops | drops entries that are inside another selected folder | unimux-files/tests/fileops.rs::drops_entries_that_are_inside_another_selected_folder | ported |
+| file-ops | refuses a missing source | unimux-files/tests/fileops.rs::refuses_a_missing_source | ported |
+| file-ops | copies a file and a whole tree and keeps modification times | unimux-files/tests/fileops.rs::copies_a_file_and_a_whole_tree_and_keeps_modification_times | ported |
+| file-ops | pasting into the same folder duplicates as "copy", "copy 2" | unimux-files/tests/fileops.rs::pasting_into_the_same_folder_duplicates_as_copy_copy_2 | ported |
+| file-ops | asks about conflicts, then replaces (old item to the trash) or keeps both | unimux-files/tests/fileops.rs::asks_about_conflicts_then_replaces_or_keeps_both | ported |
+| file-ops | does not follow symlinks: they are copied as links or skipped | unimux-files/tests/fileops.rs::does_not_follow_symlinks_they_are_copied_as_links_or_skipped | ported |
+| file-ops | asks for confirmation above the size/entry limits and goes on once forced | unimux-files/tests/fileops.rs::asks_for_confirmation_above_the_size_entry_limits_and_goes_on_once_forced | ported |
+| file-ops | can be cancelled and leaves no partial copy | unimux-files/tests/fileops.rs::can_be_cancelled_and_leaves_no_partial_copy; unimux-files/tests/fileops.rs::a_cancel_in_the_middle_removes_the_partial_copy | ported |
+| file-ops | reports progress | unimux-files/tests/fileops.rs::reports_progress | ported |
+| file-ops | sends files and folders to the trash and never removes them itself | unimux-files/tests/fileops.rs::sends_files_and_folders_to_the_trash_and_never_removes_them_itself | ported |
+| file-ops | collapses nested selections and reports failures per item | unimux-files/tests/fileops.rs::collapses_nested_selections_and_reports_failures_per_item | ported |
+| file-ops | refuses the project root, outside paths and empty selections | unimux-files/tests/fileops.rs::refuses_the_project_root_outside_paths_and_empty_selections | ported |
+| file-ops | two sources with the same name: Replace gives the second a free name and trashes nothing | unimux-files/tests/fileops.rs::two_sources_with_the_same_name_replace_gives_the_second_a_free_name | ported |
+| file-ops | an existing target is still replaced once (and reported), the duplicate keeps both | unimux-files/tests/fileops.rs::an_existing_target_is_still_replaced_once_the_duplicate_keeps_both | ported |
+| file-ops | Skip skips the duplicate and copies behave the same | unimux-files/tests/fileops.rs::skip_skips_the_duplicate_and_copies_behave_the_same | ported |
+| file-ops | rejects unknown conflict policies instead of replacing | unimux-files/tests/fileops.rs::rejects_unknown_conflict_policies_instead_of_replacing | ported |
+| file-ops | rejects non-string, oversized and too many paths | unimux-files/tests/fileops.rs::rejects_non_string_oversized_and_too_many_paths | ported |
+| file-ops | handles a large selection quickly (linear de-duplication) | unimux-files/tests/fileops.rs::handles_a_large_selection_quickly | ported |
+| file-ops | copies and then removes the source when everything could be copied | unimux-files/tests/fileops.rs::exdev_copies_and_then_removes_the_source | ported |
+| file-ops | keeps the source and leaves no partial copy when a link could not be copied | unimux-files/tests/fileops.rs::exdev_keeps_the_source_when_a_link_could_not_be_copied | ported |
+| sftp-main | lists any folder with size, time and kind; makes, renames (never over a file) and trashes | unimux-files/tests/pane.rs::lists_any_folder_with_size_time_and_kind_makes_renames_and_trashes; unimux-files/tests/fileops_golden.rs::local_pane_matches_the_ts_reference; unimux-app commands::files::tests::the_local_pane_channels_answer_like_1_1_4 | ported |
+| sftp-main | reveals a macOS bundle (Foo.app) selected in Finder instead of opening it, and opens plain folders | unimux-files/tests/pane.rs::reveals_a_macos_bundle_selected_in_finder_and_opens_plain_folders | ported |
 | main-misc | emits hook events for valid token and rejects others | unimux-agents/tests/hook_server.rs::emits_hook_events_for_a_valid_token_and_rejects_others | ported |
 | main-misc | reports idle_prompt as its own (quiet) idle event, permission prompts as notify | unimux-agents/tests/hook_server.rs::reports_idle_prompt_as_its_own_event_and_permission_prompts_as_notify | ported |
 | main-misc | rejects malformed ids and oversized bodies without crashing, and sends bodies only for notify | unimux-agents/tests/hook_server.rs::rejects_malformed_ids_and_oversized_bodies_without_crashing (the settings half, --data-binary only for notify, is H2) | partial |

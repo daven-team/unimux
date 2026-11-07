@@ -455,9 +455,139 @@ pub fn is_inside(flavor: Flavor, root: &str, target: &str) -> bool {
     rel != ".." && !rel.starts_with(up) && !is_absolute(flavor, &rel)
 }
 
-/// `path.dirname(p)` of an already resolved absolute path (enough for the rename and trash checks of the local pane).
+/// The separator of a flavour (`path.sep`).
 pub fn sep_of(flavor: Flavor) -> char {
     flavor.sep()
+}
+
+/// `path.dirname(p)` (Node's win32 and posix implementations, char for char).
+pub fn dirname(flavor: Flavor, path: &str) -> String {
+    let p: Vec<char> = path.chars().collect();
+    let len = p.len();
+    if len == 0 {
+        return ".".into();
+    }
+    match flavor {
+        Flavor::Posix => {
+            let has_root = p[0] == '/';
+            let mut end: Option<usize> = None;
+            let mut matched_slash = true;
+            for i in (1..len).rev() {
+                if p[i] == '/' {
+                    if !matched_slash {
+                        end = Some(i);
+                        break;
+                    }
+                } else {
+                    matched_slash = false;
+                }
+            }
+            match end {
+                None => (if has_root { "/" } else { "." }).into(),
+                Some(1) if has_root => "//".into(),
+                Some(e) => p[..e].iter().collect(),
+            }
+        }
+        Flavor::Win32 => {
+            let is_sep = |c: char| flavor.is_sep(c);
+            let mut root_end: Option<usize> = None;
+            let mut offset = 0;
+            if len == 1 {
+                return if is_sep(p[0]) { path.to_string() } else { ".".into() };
+            }
+            if is_sep(p[0]) {
+                root_end = Some(1);
+                offset = 1;
+                if is_sep(p[1]) {
+                    // A UNC root (\\server\share\).
+                    let mut j = 2;
+                    let mut last = j;
+                    while j < len && !is_sep(p[j]) {
+                        j += 1;
+                    }
+                    if j < len && j != last {
+                        last = j;
+                        while j < len && is_sep(p[j]) {
+                            j += 1;
+                        }
+                        if j < len && j != last {
+                            last = j;
+                            while j < len && !is_sep(p[j]) {
+                                j += 1;
+                            }
+                            if j == len {
+                                return path.to_string();
+                            }
+                            if j != last {
+                                root_end = Some(j + 1);
+                                offset = j + 1;
+                            }
+                        }
+                    }
+                }
+            } else if is_device_root(p[0]) && p[1] == ':' {
+                let end = if len > 2 && is_sep(p[2]) { 3 } else { 2 };
+                root_end = Some(end);
+                offset = end;
+            }
+            let mut end: Option<usize> = None;
+            let mut matched_slash = true;
+            for i in (offset..len).rev() {
+                if is_sep(p[i]) {
+                    if !matched_slash {
+                        end = Some(i);
+                        break;
+                    }
+                } else {
+                    matched_slash = false;
+                }
+            }
+            match end.or(root_end) {
+                None => ".".into(),
+                Some(e) => p[..e].iter().collect(),
+            }
+        }
+    }
+}
+
+/// `path.basename(p)` (without the suffix argument).
+pub fn basename(flavor: Flavor, path: &str) -> String {
+    let p: Vec<char> = path.chars().collect();
+    let mut start = 0;
+    if flavor == Flavor::Win32 && p.len() >= 2 && is_device_root(p[0]) && p[1] == ':' {
+        start = 2;
+    }
+    let mut end: Option<usize> = None;
+    let mut matched_slash = true;
+    let mut i = p.len();
+    while i > start {
+        i -= 1;
+        if flavor.is_sep(p[i]) {
+            if !matched_slash {
+                start = i + 1;
+                break;
+            }
+        } else if end.is_none() {
+            matched_slash = false;
+            end = Some(i + 1);
+        }
+    }
+    match end {
+        None => String::new(),
+        Some(e) => p[start..e].iter().collect(),
+    }
+}
+
+/// `path.join(dir, name)` for a resolved absolute folder and one entry name without separators (what 1.1.4 joins there: a
+/// real path and a name read from the folder or checked to hold no separator).
+pub fn join_name(flavor: Flavor, dir: &str, name: &str) -> String {
+    if dir.is_empty() {
+        return name.to_string();
+    }
+    if name.is_empty() {
+        return dir.to_string();
+    }
+    if dir.ends_with(|c: char| flavor.is_sep(c)) { format!("{dir}{name}") } else { format!("{dir}{}{name}", flavor.sep()) }
 }
 
 #[cfg(test)]

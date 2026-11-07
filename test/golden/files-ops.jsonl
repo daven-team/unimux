@@ -1,0 +1,549 @@
+{"fn":"toPosix","args":[""],"out":""}
+{"fn":"toPosix","args":["/"],"out":""}
+{"fn":"toPosix","args":["//"],"out":""}
+{"fn":"toPosix","args":["a"],"out":"a"}
+{"fn":"toPosix","args":["/a/"],"out":"a"}
+{"fn":"toPosix","args":["\\a\\\\b\\"],"out":"a/b"}
+{"fn":"toPosix","args":["a//b///c"],"out":"a/b/c"}
+{"fn":"toPosix","args":["x\\y/z"],"out":"x/y/z"}
+{"fn":"toPosix","args":["ł/ż\\ź"],"out":"ł/ż/ź"}
+{"fn":"toPosix","args":["///a///"],"out":"a"}
+{"fn":"topLevelPaths","args":[["a/b","a","c","c"]],"out":["a","c"]}
+{"fn":"topLevelPaths","args":[["a-b","a","a/c","a-b/d","z/y","z"]],"out":["a-b","a","z"]}
+{"fn":"topLevelPaths","args":[["","a","b/c"]],"out":[""]}
+{"fn":"topLevelPaths","args":[["a/b/c","a/b","a"]],"out":["a"]}
+{"fn":"topLevelPaths","args":[["x","x/","x//y"]],"out":["x"]}
+{"fn":"topLevelPaths","args":[["src/deep/c.txt","src"]],"out":["src"]}
+{"fn":"topLevelPaths","args":[["/a","a"]],"out":["/a","a"]}
+{"fn":"topLevelPaths","args":[["ą/ę","ą"]],"out":["ą"]}
+{"fn":"validPathList","args":[["a"]],"out":true}
+{"fn":"validPathList","args":[[]],"out":false}
+{"fn":"validPathList","args":["a"],"out":false}
+{"fn":"validPathList","args":[[1]],"out":false}
+{"fn":"validPathList","args":[["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]],"out":true}
+{"fn":"validPathList","args":[["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]],"out":false}
+{"fn":"validPathList","args":[["łłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłłł"]],"out":true}
+{"fn":"validPathList","args":[{"repeat":"a","count":5000}],"out":true}
+{"fn":"validPathList","args":[{"repeat":"a","count":5001}],"out":false}
+{"fn":"validPathList","args":[[null]],"out":false}
+{"fn":"validPathList","args":[[{}]],"out":false}
+{"fn":"validateEntryName","args":["ok.txt","win32"],"out":null}
+{"fn":"validateEntryName","args":["ok.txt","darwin"],"out":null}
+{"fn":"validateEntryName","args":["ok.txt","linux"],"out":null}
+{"fn":"validateEntryName","args":["","win32"],"out":"Nazwa nie może być pusta."}
+{"fn":"validateEntryName","args":["","darwin"],"out":"Nazwa nie może być pusta."}
+{"fn":"validateEntryName","args":["","linux"],"out":"Nazwa nie może być pusta."}
+{"fn":"validateEntryName","args":["  ","win32"],"out":"Nazwa nie może być pusta."}
+{"fn":"validateEntryName","args":["  ","darwin"],"out":"Nazwa nie może być pusta."}
+{"fn":"validateEntryName","args":["  ","linux"],"out":"Nazwa nie może być pusta."}
+{"fn":"validateEntryName","args":[" ","win32"],"out":"Nazwa nie może być pusta."}
+{"fn":"validateEntryName","args":[" ","darwin"],"out":"Nazwa nie może być pusta."}
+{"fn":"validateEntryName","args":[" ","linux"],"out":"Nazwa nie może być pusta."}
+{"fn":"validateEntryName","args":["　x","win32"],"out":null}
+{"fn":"validateEntryName","args":["　x","darwin"],"out":null}
+{"fn":"validateEntryName","args":["　x","linux"],"out":null}
+{"fn":"validateEntryName","args":["","win32"],"out":null}
+{"fn":"validateEntryName","args":["","darwin"],"out":null}
+{"fn":"validateEntryName","args":["","linux"],"out":null}
+{"fn":"validateEntryName","args":["﻿","win32"],"out":"Nazwa nie może być pusta."}
+{"fn":"validateEntryName","args":["﻿","darwin"],"out":"Nazwa nie może być pusta."}
+{"fn":"validateEntryName","args":["﻿","linux"],"out":"Nazwa nie może być pusta."}
+{"fn":"validateEntryName","args":["᠎","win32"],"out":null}
+{"fn":"validateEntryName","args":["᠎","darwin"],"out":null}
+{"fn":"validateEntryName","args":["᠎","linux"],"out":null}
+{"fn":"validateEntryName","args":[".","win32"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":[".","darwin"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":[".","linux"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["..","win32"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["..","darwin"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["..","linux"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["...","win32"],"out":"Nazwa nie może kończyć się kropką ani spacją."}
+{"fn":"validateEntryName","args":["...","darwin"],"out":null}
+{"fn":"validateEntryName","args":["...","linux"],"out":null}
+{"fn":"validateEntryName","args":["a/b","win32"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["a/b","darwin"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["a/b","linux"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["a\\b","win32"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["a\\b","darwin"],"out":null}
+{"fn":"validateEntryName","args":["a\\b","linux"],"out":null}
+{"fn":"validateEntryName","args":["a\u0000b","win32"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["a\u0000b","darwin"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["a\u0000b","linux"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["x.","win32"],"out":"Nazwa nie może kończyć się kropką ani spacją."}
+{"fn":"validateEntryName","args":["x.","darwin"],"out":null}
+{"fn":"validateEntryName","args":["x.","linux"],"out":null}
+{"fn":"validateEntryName","args":["x ","win32"],"out":"Nazwa nie może kończyć się kropką ani spacją."}
+{"fn":"validateEntryName","args":["x ","darwin"],"out":null}
+{"fn":"validateEntryName","args":["x ","linux"],"out":null}
+{"fn":"validateEntryName","args":[" x","win32"],"out":null}
+{"fn":"validateEntryName","args":[" x","darwin"],"out":null}
+{"fn":"validateEntryName","args":[" x","linux"],"out":null}
+{"fn":"validateEntryName","args":["con","win32"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["con","darwin"],"out":null}
+{"fn":"validateEntryName","args":["con","linux"],"out":null}
+{"fn":"validateEntryName","args":["CON","win32"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["CON","darwin"],"out":null}
+{"fn":"validateEntryName","args":["CON","linux"],"out":null}
+{"fn":"validateEntryName","args":["Con.txt","win32"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["Con.txt","darwin"],"out":null}
+{"fn":"validateEntryName","args":["Con.txt","linux"],"out":null}
+{"fn":"validateEntryName","args":["console.txt","win32"],"out":null}
+{"fn":"validateEntryName","args":["console.txt","darwin"],"out":null}
+{"fn":"validateEntryName","args":["console.txt","linux"],"out":null}
+{"fn":"validateEntryName","args":["nul.tar.gz","win32"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["nul.tar.gz","darwin"],"out":null}
+{"fn":"validateEntryName","args":["nul.tar.gz","linux"],"out":null}
+{"fn":"validateEntryName","args":["aux.","win32"],"out":"Nazwa nie może kończyć się kropką ani spacją."}
+{"fn":"validateEntryName","args":["aux.","darwin"],"out":null}
+{"fn":"validateEntryName","args":["aux.","linux"],"out":null}
+{"fn":"validateEntryName","args":["prn ","win32"],"out":"Nazwa nie może kończyć się kropką ani spacją."}
+{"fn":"validateEntryName","args":["prn ","darwin"],"out":null}
+{"fn":"validateEntryName","args":["prn ","linux"],"out":null}
+{"fn":"validateEntryName","args":["conin$","win32"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["conin$","darwin"],"out":null}
+{"fn":"validateEntryName","args":["conin$","linux"],"out":null}
+{"fn":"validateEntryName","args":["CONOUT$.log","win32"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["CONOUT$.log","darwin"],"out":null}
+{"fn":"validateEntryName","args":["CONOUT$.log","linux"],"out":null}
+{"fn":"validateEntryName","args":["clock$","win32"],"out":null}
+{"fn":"validateEntryName","args":["clock$","darwin"],"out":null}
+{"fn":"validateEntryName","args":["clock$","linux"],"out":null}
+{"fn":"validateEntryName","args":["com0","win32"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["com0","darwin"],"out":null}
+{"fn":"validateEntryName","args":["com0","linux"],"out":null}
+{"fn":"validateEntryName","args":["COM1","win32"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["COM1","darwin"],"out":null}
+{"fn":"validateEntryName","args":["COM1","linux"],"out":null}
+{"fn":"validateEntryName","args":["com¹","win32"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["com¹","darwin"],"out":null}
+{"fn":"validateEntryName","args":["com¹","linux"],"out":null}
+{"fn":"validateEntryName","args":["LPT².x","win32"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["LPT².x","darwin"],"out":null}
+{"fn":"validateEntryName","args":["LPT².x","linux"],"out":null}
+{"fn":"validateEntryName","args":["lpt³","win32"],"out":"Ta nazwa jest zarezerwowana."}
+{"fn":"validateEntryName","args":["lpt³","darwin"],"out":null}
+{"fn":"validateEntryName","args":["lpt³","linux"],"out":null}
+{"fn":"validateEntryName","args":["com10","win32"],"out":null}
+{"fn":"validateEntryName","args":["com10","darwin"],"out":null}
+{"fn":"validateEntryName","args":["com10","linux"],"out":null}
+{"fn":"validateEntryName","args":["lpt","win32"],"out":null}
+{"fn":"validateEntryName","args":["lpt","darwin"],"out":null}
+{"fn":"validateEntryName","args":["lpt","linux"],"out":null}
+{"fn":"validateEntryName","args":["con. ","win32"],"out":null}
+{"fn":"validateEntryName","args":["con. ","darwin"],"out":null}
+{"fn":"validateEntryName","args":["con. ","linux"],"out":null}
+{"fn":"validateEntryName","args":["con.\n","win32"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["con.\n","darwin"],"out":null}
+{"fn":"validateEntryName","args":["con.\n","linux"],"out":null}
+{"fn":"validateEntryName","args":["con.x ","win32"],"out":null}
+{"fn":"validateEntryName","args":["con.x ","darwin"],"out":null}
+{"fn":"validateEntryName","args":["con.x ","linux"],"out":null}
+{"fn":"validateEntryName","args":["a:b","win32"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["a:b","darwin"],"out":null}
+{"fn":"validateEntryName","args":["a:b","linux"],"out":null}
+{"fn":"validateEntryName","args":["a?b","win32"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["a?b","darwin"],"out":null}
+{"fn":"validateEntryName","args":["a?b","linux"],"out":null}
+{"fn":"validateEntryName","args":["a*b","win32"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["a*b","darwin"],"out":null}
+{"fn":"validateEntryName","args":["a*b","linux"],"out":null}
+{"fn":"validateEntryName","args":["a\"b","win32"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["a\"b","darwin"],"out":null}
+{"fn":"validateEntryName","args":["a\"b","linux"],"out":null}
+{"fn":"validateEntryName","args":["a<b>","win32"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["a<b>","darwin"],"out":null}
+{"fn":"validateEntryName","args":["a<b>","linux"],"out":null}
+{"fn":"validateEntryName","args":["a|b","win32"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["a|b","darwin"],"out":null}
+{"fn":"validateEntryName","args":["a|b","linux"],"out":null}
+{"fn":"validateEntryName","args":["tab\tx","win32"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["tab\tx","darwin"],"out":null}
+{"fn":"validateEntryName","args":["tab\tx","linux"],"out":null}
+{"fn":"validateEntryName","args":["\u001f","win32"],"out":"Nazwa zawiera niedozwolone znaki."}
+{"fn":"validateEntryName","args":["\u001f","darwin"],"out":null}
+{"fn":"validateEntryName","args":["\u001f","linux"],"out":null}
+{"fn":"validateEntryName","args":["","win32"],"out":null}
+{"fn":"validateEntryName","args":["","darwin"],"out":null}
+{"fn":"validateEntryName","args":["","linux"],"out":null}
+{"fn":"validateEntryName","args":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","win32"],"out":null}
+{"fn":"validateEntryName","args":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","darwin"],"out":null}
+{"fn":"validateEntryName","args":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","linux"],"out":null}
+{"fn":"validateEntryName","args":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","win32"],"out":"Nazwa jest zbyt długa."}
+{"fn":"validateEntryName","args":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","darwin"],"out":"Nazwa jest zbyt długa."}
+{"fn":"validateEntryName","args":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","linux"],"out":"Nazwa jest zbyt długa."}
+{"fn":"validateEntryName","args":["żżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżż","win32"],"out":null}
+{"fn":"validateEntryName","args":["żżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżż","darwin"],"out":null}
+{"fn":"validateEntryName","args":["żżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżż","linux"],"out":null}
+{"fn":"validateEntryName","args":["😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀","win32"],"out":null}
+{"fn":"validateEntryName","args":["😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀","darwin"],"out":null}
+{"fn":"validateEntryName","args":["😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀","linux"],"out":null}
+{"fn":"validateEntryName","args":["😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀","win32"],"out":"Nazwa jest zbyt długa."}
+{"fn":"validateEntryName","args":["😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀","darwin"],"out":"Nazwa jest zbyt długa."}
+{"fn":"validateEntryName","args":["😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀","linux"],"out":"Nazwa jest zbyt długa."}
+{"fn":"validateEntryName","args":["ſon","win32"],"out":null}
+{"fn":"validateEntryName","args":["ſon","darwin"],"out":null}
+{"fn":"validateEntryName","args":["ſon","linux"],"out":null}
+{"fn":"validateEntryName","args":["ᴄon","win32"],"out":null}
+{"fn":"validateEntryName","args":["ᴄon","darwin"],"out":null}
+{"fn":"validateEntryName","args":["ᴄon","linux"],"out":null}
+{"fn":"validateEntryName","args":["ﬁle","win32"],"out":null}
+{"fn":"validateEntryName","args":["ﬁle","darwin"],"out":null}
+{"fn":"validateEntryName","args":["ﬁle","linux"],"out":null}
+{"fn":"validateEntryName","args":["Ꮯon","win32"],"out":null}
+{"fn":"validateEntryName","args":["Ꮯon","darwin"],"out":null}
+{"fn":"validateEntryName","args":["Ꮯon","linux"],"out":null}
+{"fn":"safeEntryName","args":["ok.txt",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["ok.txt",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["",{"windows":false}],"out":false}
+{"fn":"safeEntryName","args":["  ",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["  ",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":[" ",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":[" ",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["　x",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["　x",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["﻿",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["﻿",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["᠎",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["᠎",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":[".",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":[".",{"windows":false}],"out":false}
+{"fn":"safeEntryName","args":["..",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["..",{"windows":false}],"out":false}
+{"fn":"safeEntryName","args":["...",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["...",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["a/b",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["a/b",{"windows":false}],"out":false}
+{"fn":"safeEntryName","args":["a\\b",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["a\\b",{"windows":false}],"out":false}
+{"fn":"safeEntryName","args":["a\u0000b",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["a\u0000b",{"windows":false}],"out":false}
+{"fn":"safeEntryName","args":["x.",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["x.",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["x ",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["x ",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":[" x",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":[" x",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["con",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["con",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["CON",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["CON",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["Con.txt",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["Con.txt",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["console.txt",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["console.txt",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["nul.tar.gz",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["nul.tar.gz",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["aux.",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["aux.",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["prn ",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["prn ",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["conin$",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["conin$",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["CONOUT$.log",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["CONOUT$.log",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["clock$",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["clock$",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["com0",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["com0",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["COM1",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["COM1",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["com¹",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["com¹",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["LPT².x",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["LPT².x",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["lpt³",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["lpt³",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["com10",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["com10",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["lpt",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["lpt",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["con. ",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["con. ",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["con.\n",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["con.\n",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["con.x ",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["con.x ",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["a:b",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["a:b",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["a?b",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["a?b",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["a*b",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["a*b",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["a\"b",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["a\"b",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["a<b>",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["a<b>",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["a|b",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["a|b",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["tab\tx",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["tab\tx",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["\u001f",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["\u001f",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",{"windows":false}],"out":false}
+{"fn":"safeEntryName","args":["żżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżż",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["żżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżżż",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",{"windows":true}],"out":false}
+{"fn":"safeEntryName","args":["😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",{"windows":false}],"out":false}
+{"fn":"safeEntryName","args":["ſon",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["ſon",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["ᴄon",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["ᴄon",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["ﬁle",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["ﬁle",{"windows":false}],"out":true}
+{"fn":"safeEntryName","args":["Ꮯon",{"windows":true}],"out":true}
+{"fn":"safeEntryName","args":["Ꮯon",{"windows":false}],"out":true}
+{"fn":"copyName","args":["a.txt",1,false],"out":"a copy.txt"}
+{"fn":"copyName","args":["a.txt",2,false],"out":"a copy 2.txt"}
+{"fn":"copyName","args":["a copy.txt",1,false],"out":"a copy.txt"}
+{"fn":"copyName","args":["a copy 2.txt",3,false],"out":"a copy 3.txt"}
+{"fn":"copyName","args":[".env",1,false],"out":".env copy"}
+{"fn":"copyName","args":["v1.2",1,true],"out":"v1.2 copy"}
+{"fn":"copyName","args":["archive.tar.gz",1,false],"out":"archive.tar copy.gz"}
+{"fn":"copyName","args":["a copy copy",1,false],"out":"a copy copy"}
+{"fn":"copyName","args":["a copy x.txt",2,false],"out":"a copy x copy 2.txt"}
+{"fn":"copyName","args":["a copy  2",1,false],"out":"a copy  2 copy"}
+{"fn":"copyName","args":["a copy 12",4,false],"out":"a copy 4"}
+{"fn":"copyName","args":[".",1,false],"out":". copy"}
+{"fn":"copyName","args":["a.",1,false],"out":"a copy."}
+{"fn":"copyName","args":["noext",9999,false],"out":"noext copy 9999"}
+{"fn":"copyName","args":["folder.d",1,true],"out":"folder.d copy"}
+{"fn":"copyName","args":["łódź.md",2,false],"out":"łódź copy 2.md"}
+{"fn":"copyName","args":["x copy ٣.txt",1,false],"out":"x copy ٣ copy.txt"}
+{"fn":"copyName","args":["😀.txt",1,false],"out":"😀 copy.txt"}
+{"fn":"permissionString","args":[16877],"out":"drwxr-xr-x"}
+{"fn":"permissionString","args":[33188],"out":"-rw-r--r--"}
+{"fn":"permissionString","args":[35309],"out":"-rwsr-xr-x"}
+{"fn":"permissionString","args":[34285],"out":"-rwxr-sr-x"}
+{"fn":"permissionString","args":[17407],"out":"drwxrwxrwt"}
+{"fn":"permissionString","args":[17406],"out":"drwxrwxrwT"}
+{"fn":"permissionString","args":[41471],"out":"lrwxrwxrwx"}
+{"fn":"permissionString","args":[49645],"out":"srwxr-xr-x"}
+{"fn":"permissionString","args":[25008],"out":"brw-rw----"}
+{"fn":"permissionString","args":[8592],"out":"crw--w----"}
+{"fn":"permissionString","args":[4516],"out":"prw-r--r--"}
+{"fn":"permissionString","args":[4095],"out":"-rwsrwsrwt"}
+{"fn":"permissionString","args":[0],"out":"----------"}
+{"fn":"permissionString","args":[35236],"out":"-rwSr--r--"}
+{"fn":"permissionString","args":[34212],"out":"-rw-r-Sr--"}
+{"fn":"permissionString","args":[33700],"out":"-rw-r--r-T"}
+{"fn":"isBundleName","args":["Foo.app"],"out":true}
+{"fn":"isBundleName","args":[".config.d"],"out":true}
+{"fn":"isBundleName","args":[".app"],"out":false}
+{"fn":"isBundleName","args":["Plain"],"out":false}
+{"fn":"isBundleName","args":["a."],"out":false}
+{"fn":"isBundleName","args":["a.b-c"],"out":false}
+{"fn":"isBundleName","args":["x.PKG"],"out":true}
+{"fn":"isBundleName","args":["a.b.c"],"out":true}
+{"fn":"isBundleName","args":[".a.b"],"out":true}
+{"fn":"isBundleName","args":["ł.app"],"out":true}
+{"fn":"isBundleName","args":["a.ą"],"out":false}
+{"fn":"win32.dirname","args":[""],"out":"."}
+{"fn":"win32.basename","args":[""],"out":""}
+{"fn":"win32.dirname","args":["C:"],"out":"C:"}
+{"fn":"win32.basename","args":["C:"],"out":""}
+{"fn":"win32.dirname","args":["C:\\"],"out":"C:\\"}
+{"fn":"win32.basename","args":["C:\\"],"out":""}
+{"fn":"win32.dirname","args":["C:\\a"],"out":"C:\\"}
+{"fn":"win32.basename","args":["C:\\a"],"out":"a"}
+{"fn":"win32.dirname","args":["C:\\a\\"],"out":"C:\\"}
+{"fn":"win32.basename","args":["C:\\a\\"],"out":"a"}
+{"fn":"win32.dirname","args":["C:\\a\\b"],"out":"C:\\a"}
+{"fn":"win32.basename","args":["C:\\a\\b"],"out":"b"}
+{"fn":"win32.dirname","args":["C:a"],"out":"C:"}
+{"fn":"win32.basename","args":["C:a"],"out":"a"}
+{"fn":"win32.dirname","args":["c:/x/y"],"out":"c:/x"}
+{"fn":"win32.basename","args":["c:/x/y"],"out":"y"}
+{"fn":"win32.dirname","args":["\\"],"out":"\\"}
+{"fn":"win32.basename","args":["\\"],"out":""}
+{"fn":"win32.dirname","args":["\\\\"],"out":"\\"}
+{"fn":"win32.basename","args":["\\\\"],"out":""}
+{"fn":"win32.dirname","args":["\\\\server"],"out":"\\"}
+{"fn":"win32.basename","args":["\\\\server"],"out":"server"}
+{"fn":"win32.dirname","args":["\\\\server\\share"],"out":"\\\\server\\share"}
+{"fn":"win32.basename","args":["\\\\server\\share"],"out":"share"}
+{"fn":"win32.dirname","args":["\\\\server\\share\\"],"out":"\\\\server\\share\\"}
+{"fn":"win32.basename","args":["\\\\server\\share\\"],"out":"share"}
+{"fn":"win32.dirname","args":["\\\\server\\share\\a"],"out":"\\\\server\\share\\"}
+{"fn":"win32.basename","args":["\\\\server\\share\\a"],"out":"a"}
+{"fn":"win32.dirname","args":["\\\\?\\C:\\a"],"out":"\\\\?\\C:\\"}
+{"fn":"win32.basename","args":["\\\\?\\C:\\a"],"out":"a"}
+{"fn":"win32.dirname","args":["/a/b"],"out":"/a"}
+{"fn":"win32.basename","args":["/a/b"],"out":"b"}
+{"fn":"win32.dirname","args":["a"],"out":"."}
+{"fn":"win32.basename","args":["a"],"out":"a"}
+{"fn":"win32.dirname","args":["a\\b"],"out":"a"}
+{"fn":"win32.basename","args":["a\\b"],"out":"b"}
+{"fn":"win32.dirname","args":["D:\\Projekt Ł\\plik.txt"],"out":"D:\\Projekt Ł"}
+{"fn":"win32.basename","args":["D:\\Projekt Ł\\plik.txt"],"out":"plik.txt"}
+{"fn":"win32.dirname","args":["C:\\a\\\\b\\\\"],"out":"C:\\a\\"}
+{"fn":"win32.basename","args":["C:\\a\\\\b\\\\"],"out":"b"}
+{"fn":"win32.dirname","args":["x:"],"out":"x:"}
+{"fn":"win32.basename","args":["x:"],"out":""}
+{"fn":"posix.dirname","args":[""],"out":"."}
+{"fn":"posix.basename","args":[""],"out":""}
+{"fn":"posix.dirname","args":["/"],"out":"/"}
+{"fn":"posix.basename","args":["/"],"out":""}
+{"fn":"posix.dirname","args":["//"],"out":"/"}
+{"fn":"posix.basename","args":["//"],"out":""}
+{"fn":"posix.dirname","args":["///a"],"out":"//"}
+{"fn":"posix.basename","args":["///a"],"out":"a"}
+{"fn":"posix.dirname","args":["/a"],"out":"/"}
+{"fn":"posix.basename","args":["/a"],"out":"a"}
+{"fn":"posix.dirname","args":["/a/"],"out":"/"}
+{"fn":"posix.basename","args":["/a/"],"out":"a"}
+{"fn":"posix.dirname","args":["/a/b"],"out":"/a"}
+{"fn":"posix.basename","args":["/a/b"],"out":"b"}
+{"fn":"posix.dirname","args":["a"],"out":"."}
+{"fn":"posix.basename","args":["a"],"out":"a"}
+{"fn":"posix.dirname","args":["a/b"],"out":"a"}
+{"fn":"posix.basename","args":["a/b"],"out":"b"}
+{"fn":"posix.dirname","args":["/a//b//"],"out":"/a/"}
+{"fn":"posix.basename","args":["/a//b//"],"out":"b"}
+{"fn":"posix.dirname","args":["/Users/Ł/x.app"],"out":"/Users/Ł"}
+{"fn":"posix.basename","args":["/Users/Ł/x.app"],"out":"x.app"}
+{"fn":"posix.dirname","args":["//x"],"out":"//"}
+{"fn":"posix.basename","args":["//x"],"out":"x"}
+{"op":"rename","args":["a.txt","z.txt"],"out":{"ok":true,"from":"a.txt","to":"z.txt"},"tree":{"docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C","z.txt":"A"},"trash":[]}
+{"op":"rename","args":["src/deep","inner"],"out":{"ok":true,"from":"src/deep","to":"src/inner"},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/inner":null,"src/inner/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["a.txt","docs"],"out":{"ok":false,"error":"Element o takiej nazwie już istnieje."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["a.txt","a.txt"],"out":{"ok":true,"from":"a.txt","to":"a.txt"},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["a.txt","A.txt"],"out":{"ok":true,"from":"a.txt","to":"A.txt"},"tree":{"A.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[],"caseFold":true}
+{"op":"rename","args":["docs","DOCS"],"out":{"ok":true,"from":"docs","to":"DOCS"},"tree":{"DOCS":null,"DOCS/a.txt":"other A","a.txt":"A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[],"caseFold":true}
+{"op":"rename","args":["a.txt","src"],"out":{"ok":false,"error":"Element o takiej nazwie już istnieje."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["","x"],"out":{"ok":false,"error":"Nie można zmieniać katalogu głównego projektu."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["../outside.txt","x"],"out":{"ok":false,"error":"Ścieżka jest poza projektem."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["src/../../outside.txt","x"],"out":{"ok":false,"error":"Ścieżka jest poza projektem."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["./a.txt","x"],"out":{"ok":false,"error":"Ścieżka jest poza projektem."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["C:a.txt","x"],"out":{"ok":false,"error":"Ścieżka jest poza projektem."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["\\a.txt","x"],"out":{"ok":false,"error":"Ścieżka jest poza projektem."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["src\\b.txt","B2.txt"],"out":{"ok":true,"from":"src/b.txt","to":"src/B2.txt"},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/B2.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["src//deep/","d2"],"out":{"ok":true,"from":"src/deep","to":"src/d2"},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/d2":null,"src/d2/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["ghost","x"],"out":{"ok":false,"error":"Plik lub folder już nie istnieje. Odśwież listę."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["ghost/x","y"],"out":{"ok":false,"error":"Plik lub folder już nie istnieje. Odśwież listę."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["a.txt",""],"out":{"ok":false,"error":"Nazwa nie może być pusta."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["a.txt","  "],"out":{"ok":false,"error":"Nazwa nie może być pusta."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["a.txt","CON"],"out":{"ok":false,"error":"Ta nazwa jest zarezerwowana."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["a.txt","nul.txt"],"out":{"ok":false,"error":"Ta nazwa jest zarezerwowana."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["a.txt","a."],"out":{"ok":false,"error":"Nazwa nie może kończyć się kropką ani spacją."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["a.txt","a:b"],"out":{"ok":false,"error":"Nazwa zawiera niedozwolone znaki."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["a.txt","x/y"],"out":{"ok":false,"error":"Nazwa zawiera niedozwolone znaki."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["a.txt",".."],"out":{"ok":false,"error":"Ta nazwa jest zarezerwowana."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["a.txt",5],"out":{"ok":false,"error":"Nazwa nie może być pusta."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":[5,"x"],"out":{"ok":false,"error":"Ścieżka jest poza projektem."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["a.txt","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"out":{"ok":false,"error":"Nazwa jest zbyt długa."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["a.txt","żółć.txt"],"out":{"ok":true,"from":"a.txt","to":"żółć.txt"},"tree":{"docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C","żółć.txt":"A"},"trash":[]}
+{"op":"rename","args":["a.txt","clock$"],"out":{"ok":true,"from":"a.txt","to":"clock$"},"tree":{"clock$":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"rename","args":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","x"],"out":{"ok":false,"error":"Ścieżka jest poza projektem."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"create","args":["src","new.txt","file"],"out":{"ok":true,"path":"src/new.txt"},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C","src/new.txt":""},"trash":[]}
+{"op":"create","args":["","dir","directory"],"out":{"ok":true,"path":"dir"},"tree":{"a.txt":"A","dir":null,"docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"create","args":["src","b.txt","file"],"out":{"ok":false,"error":"Element o takiej nazwie już istnieje."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"create","args":["src","deep","directory"],"out":{"ok":false,"error":"Element o takiej nazwie już istnieje."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"create","args":["..","x.txt","file"],"out":{"ok":false,"error":"Ścieżka jest poza projektem."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"create","args":["a.txt","x.txt","file"],"out":{"ok":false,"error":"Miejsce docelowe nie jest folderem."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"create","args":["nope","x.txt","file"],"out":{"ok":false,"error":"Plik lub folder już nie istnieje. Odśwież listę."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"create","args":["src",5,"file"],"out":{"ok":false,"error":"Nazwa nie może być pusta."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"create","args":["src","A.TXT","file"],"out":{"ok":true,"path":"src/A.TXT"},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/A.TXT":"","src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"create","args":[5,"x","file"],"out":{"ok":false,"error":"Ścieżka jest poza projektem."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"create","args":["docs","A.txt","file"],"out":{"ok":false,"error":"Element o takiej nazwie już istnieje."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[],"caseFold":true}
+{"op":"create","args":["src/deep","x?","file"],"out":{"ok":false,"error":"Nazwa zawiera niedozwolone znaki."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"create","args":["src","x","weird"],"out":{"ok":true,"path":"src/x"},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C","src/x":""},"trash":[]}
+{"op":"delete","args":[["a.txt","src"]],"out":{"ok":true,"trashed":["a.txt","src"],"failed":[]},"tree":{"docs":null,"docs/a.txt":"other A"},"trash":["a.txt","src"]}
+{"op":"delete","args":[["src","src/b.txt"]],"out":{"ok":true,"trashed":["src"],"failed":[]},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A"},"trash":["src"]}
+{"op":"delete","args":[[""]],"out":{"ok":false,"error":"Nie można zmieniać katalogu głównego projektu."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"delete","args":[[]],"out":{"ok":false,"error":"Nie wybrano żadnych elementów."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"delete","args":[["../outside.txt"]],"out":{"ok":false,"error":"Ścieżka jest poza projektem."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"delete","args":["a.txt"],"out":{"ok":false,"error":"Nie wybrano żadnych elementów."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"delete","args":[[5]],"out":{"ok":false,"error":"Zbyt wiele elementów lub zbyt długa ścieżka."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"delete","args":[["ghost","a.txt"]],"out":{"ok":true,"trashed":["a.txt"],"failed":[{"path":"ghost","error":"Plik lub folder już nie istnieje. Odśwież listę."}]},"tree":{"docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":["a.txt"]}
+{"op":"delete","args":[["ghost/x"]],"out":{"ok":false,"error":"Plik lub folder już nie istnieje. Odśwież listę."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"delete","args":[["a.txt","a.txt","docs/a.txt"]],"out":{"ok":true,"trashed":["a.txt","docs/a.txt"],"failed":[]},"tree":{"docs":null,"src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":["a.txt","a.txt"]}
+{"op":"delete","args":[["","a.txt"]],"out":{"ok":false,"error":"Nie można zmieniać katalogu głównego projektu."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["a.txt"],"destination":"docs","conflict":"ask"}],"out":{"ok":false,"code":"conflict","error":"Element o takiej nazwie już istnieje.","conflicts":[{"path":"docs/a.txt","name":"a.txt","directory":false}]},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["a.txt"],"destination":"docs","conflict":"replace"}],"out":{"ok":true,"done":[{"from":"a.txt","to":"docs/a.txt"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":["docs/a.txt"]},"tree":{"docs":null,"docs/a.txt":"A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":["a.txt"]}
+{"op":"transfer","args":[{"kind":"move","paths":["a.txt"],"destination":"docs","conflict":"keepBoth"}],"out":{"ok":true,"done":[{"from":"a.txt","to":"docs/a copy.txt"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"docs":null,"docs/a copy.txt":"A","docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["a.txt","src/b.txt"],"destination":"docs","conflict":"skip"}],"out":{"ok":true,"done":[{"from":"src/b.txt","to":"docs/b.txt"}],"skipped":["a.txt"],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","docs/b.txt":"B","src":null,"src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["a.txt","src"],"destination":"docs","conflict":"replace"}],"out":{"ok":true,"done":[{"from":"a.txt","to":"docs/a.txt"},{"from":"src","to":"docs/src"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":["docs/a.txt"]},"tree":{"docs":null,"docs/a.txt":"A","docs/src":null,"docs/src/b.txt":"B","docs/src/deep":null,"docs/src/deep/c.txt":"C"},"trash":["a.txt"]}
+{"op":"transfer","args":[{"kind":"move","paths":["src/deep"],"destination":"","conflict":"ask"}],"out":{"ok":true,"done":[{"from":"src/deep","to":"deep"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a.txt":"A","deep":null,"deep/c.txt":"C","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["src/deep"],"conflict":"ask"}],"out":{"ok":true,"done":[{"from":"src/deep","to":"deep"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a.txt":"A","deep":null,"deep/c.txt":"C","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["src"],"destination":"src","conflict":"ask"}],"out":{"ok":false,"error":"Nie można przenieść folderu do niego samego ani do jego podfolderu."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["src"],"destination":"src/deep","conflict":"ask"}],"out":{"ok":false,"error":"Nie można przenieść folderu do niego samego ani do jego podfolderu."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":["src"],"destination":"src/deep","conflict":"ask"}],"out":{"ok":false,"error":"Nie można przenieść folderu do niego samego ani do jego podfolderu."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["src/b.txt"],"destination":"src","conflict":"ask"}],"out":{"ok":true,"done":[],"skipped":["src/b.txt"],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["a.txt"],"destination":"src/b.txt","conflict":"ask"}],"out":{"ok":false,"error":"Miejsce docelowe nie jest folderem."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["a.txt"],"destination":"nope","conflict":"ask"}],"out":{"ok":false,"error":"Plik lub folder już nie istnieje. Odśwież listę."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["src","src/deep/c.txt"],"destination":"docs","conflict":"ask"}],"out":{"ok":true,"done":[{"from":"src","to":"docs/src"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","docs/src":null,"docs/src/b.txt":"B","docs/src/deep":null,"docs/src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["ghost.txt"],"destination":"docs","conflict":"ask"}],"out":{"ok":false,"error":"Plik lub folder już nie istnieje. Odśwież listę."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":["src"],"destination":"docs","conflict":"ask"}],"out":{"ok":true,"done":[{"from":"src","to":"docs/src"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","docs/src":null,"docs/src/b.txt":"B","docs/src/deep":null,"docs/src/deep/c.txt":"C","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":["a.txt"],"destination":"","conflict":"ask"}],"out":{"ok":true,"done":[{"from":"a.txt","to":"a copy.txt"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a copy.txt":"A","a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":["src"],"destination":"","conflict":"ask"}],"out":{"ok":true,"done":[{"from":"src","to":"src copy"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C","src copy":null,"src copy/b.txt":"B","src copy/deep":null,"src copy/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":["a.txt","docs/a.txt"],"destination":"src","conflict":"ask"}],"out":{"ok":false,"code":"conflict","error":"Element o takiej nazwie już istnieje.","conflicts":[{"path":"src/a.txt","name":"a.txt","directory":false,"internal":true}]},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":["a.txt","docs/a.txt"],"destination":"src","conflict":"replace"}],"out":{"ok":true,"done":[{"from":"a.txt","to":"src/a.txt"},{"from":"docs/a.txt","to":"src/a copy.txt"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/a copy.txt":"other A","src/a.txt":"A","src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":["a.txt","docs/a.txt"],"destination":"src","conflict":"skip"}],"out":{"ok":true,"done":[{"from":"a.txt","to":"src/a.txt"}],"skipped":["docs/a.txt"],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/a.txt":"A","src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":["a.txt","docs/a.txt"],"destination":"","conflict":"replace"}],"out":{"ok":true,"done":[{"from":"a.txt","to":"a copy.txt"},{"from":"docs/a.txt","to":"a.txt"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":["a.txt"]},"tree":{"a copy.txt":"A","a.txt":"other A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":["a.txt"]}
+{"op":"transfer","args":[{"kind":"copy","paths":["docs/a.txt"],"destination":"","conflict":"replace"}],"out":{"ok":true,"done":[{"from":"docs/a.txt","to":"a.txt"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":["a.txt"]},"tree":{"a.txt":"other A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":["a.txt"]}
+{"op":"transfer","args":[{"kind":"copy","paths":["docs"],"destination":"","conflict":null}],"out":{"ok":true,"done":[{"from":"docs","to":"docs copy"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","docs copy":null,"docs copy/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":["a.txt"],"destination":"docs","conflict":"keepBoth","force":1}],"out":{"ok":true,"done":[{"from":"a.txt","to":"docs/a copy.txt"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a.txt":"A","docs":null,"docs/a copy.txt":"A","docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["a.txt"],"destination":"docs","conflict":"bogus"}],"out":{"ok":false,"error":"Nieznana operacja."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["a.txt"],"destination":"docs","conflict":"REPLACE"}],"out":{"ok":false,"error":"Nieznana operacja."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["a.txt"],"destination":"docs","conflict":1}],"out":{"ok":false,"error":"Nieznana operacja."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"cut","paths":["a.txt"],"destination":"docs","conflict":"ask"}],"out":{"ok":false,"error":"Nieznana operacja."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"paths":["a.txt"],"destination":"docs"}],"out":{"ok":false,"error":"Nieznana operacja."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":"a.txt","destination":"docs","conflict":"ask"}],"out":{"ok":false,"error":"Nie wybrano żadnych elementów."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":[],"destination":"docs","conflict":"ask"}],"out":{"ok":false,"error":"Nie wybrano żadnych elementów."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":[42],"destination":"docs","conflict":"ask"}],"out":{"ok":false,"error":"Zbyt wiele elementów lub zbyt długa ścieżka."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":["a.txt"],"destination":5,"conflict":"ask"}],"out":{"ok":false,"error":"Ścieżka jest poza projektem."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":["a.txt"],"destination":"../","conflict":"ask"}],"out":{"ok":false,"error":"Ścieżka jest poza projektem."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":[""],"destination":"docs","conflict":"ask"}],"out":{"ok":false,"error":"Nie można zmieniać katalogu głównego projektu."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[null],"out":{"ok":false,"error":"Nie wybrano żadnych elementów."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[[1]],"out":{"ok":false,"error":"Nie wybrano żadnych elementów."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":["x"],"out":{"ok":false,"error":"Nie wybrano żadnych elementów."},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["docs/a.txt","a.txt"],"destination":"src","conflict":"ask"}],"out":{"ok":false,"code":"conflict","error":"Element o takiej nazwie już istnieje.","conflicts":[{"path":"src/a.txt","name":"a.txt","directory":false,"internal":true}]},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["docs/a.txt","a.txt"],"destination":"src","conflict":"replace"}],"out":{"ok":true,"done":[{"from":"docs/a.txt","to":"src/a.txt"},{"from":"a.txt","to":"src/a copy.txt"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"docs":null,"src":null,"src/a copy.txt":"A","src/a.txt":"other A","src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["docs/a.txt","a.txt"],"destination":"src","conflict":"skip"}],"out":{"ok":true,"done":[{"from":"docs/a.txt","to":"src/a.txt"}],"skipped":["a.txt"],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a.txt":"A","docs":null,"src":null,"src/a.txt":"other A","src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["docs/a.txt","a.txt"],"destination":"src","conflict":"keepBoth"}],"out":{"ok":true,"done":[{"from":"docs/a.txt","to":"src/a.txt"},{"from":"a.txt","to":"src/a copy.txt"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"docs":null,"src":null,"src/a copy.txt":"A","src/a.txt":"other A","src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["src/deep/c.txt"],"destination":"","conflict":"ask"}],"out":{"ok":true,"done":[{"from":"src/deep/c.txt","to":"c.txt"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a.txt":"A","c.txt":"C","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null},"trash":[]}
+{"op":"transfer","args":[{"kind":"move","paths":["docs"],"destination":"src","conflict":"ask"}],"out":{"ok":true,"done":[{"from":"docs","to":"src/docs"}],"skipped":[],"failed":[],"notes":[],"cancelled":false,"replaced":[]},"tree":{"a.txt":"A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C","src/docs":null,"src/docs/a.txt":"other A"},"trash":[]}
+{"op":"transfer","args":[{"kind":"copy","paths":["a.txt"],"destination":"DOCS","conflict":"ask"}],"out":{"ok":false,"code":"conflict","error":"Element o takiej nazwie już istnieje.","conflicts":[{"path":"DOCS/a.txt","name":"a.txt","directory":false}]},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[],"caseFold":true}
+{"op":"transfer","args":[{"kind":"move","paths":["A.TXT"],"destination":"docs","conflict":"ask"}],"out":{"ok":false,"code":"conflict","error":"Element o takiej nazwie już istnieje.","conflicts":[{"path":"docs/A.TXT","name":"A.TXT","directory":false}]},"tree":{"a.txt":"A","docs":null,"docs/a.txt":"other A","src":null,"src/b.txt":"B","src/deep":null,"src/deep/c.txt":"C"},"trash":[],"caseFold":true}
+{"pane":"list","args":["<dir>"],"out":{"ok":true,"value":{"path":"<dir>","entries":[{"name":".hidden","path":"<dir>\\.hidden","kind":"file","size":0,"mtime":"<mtime>","permissions":"","hidden":true},{"name":"a.txt","path":"<dir>\\a.txt","kind":"file","size":3,"mtime":"<mtime>","permissions":"","hidden":false},{"name":"sub","path":"<dir>\\sub","kind":"dir","size":0,"mtime":"<mtime>","permissions":"","hidden":false}],"truncated":false}},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"list","args":["relative"],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"list","args":["<dir>/a.txt"],"out":{"ok":false,"error":"notADirectory"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"list","args":["<dir>/gone"],"out":{"ok":false,"error":"notFound"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"list","args":[5],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"list","args":[""],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"mkdir","args":["<dir>/new"],"out":{"ok":true,"value":null},"calls":[],"tree":{".hidden":"","a.txt":"abc","new":null,"sub":null,"sub/x.txt":"x"}}
+{"pane":"mkdir","args":["<dir>/sub"],"out":{"ok":false,"error":"exists"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"mkdir","args":["<dir>/x?y"],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"mkdir","args":["<dir>/NUL"],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"mkdir","args":["<dir>/gone/deeper"],"out":{"ok":false,"error":"notFound"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"mkdir","args":["rel"],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"mkdir","args":["<dir>/dot."],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"rename","args":["<dir>/a.txt","<dir>/sub"],"out":{"ok":false,"error":"exists"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"rename","args":["<dir>/a.txt","<dir>/sub/moved.txt"],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"rename","args":["<dir>/a.txt","<dir>/b.txt"],"out":{"ok":true,"value":null},"calls":[],"tree":{".hidden":"","b.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"rename","args":["<dir>/a.txt","<dir>/A.TXT"],"out":{"ok":true,"value":null},"calls":[],"tree":{".hidden":"","A.TXT":"abc","sub":null,"sub/x.txt":"x"},"caseFold":true}
+{"pane":"rename","args":["<dir>/gone","<dir>/x"],"out":{"ok":false,"error":"notFound"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"rename","args":["<dir>/a.txt","<dir>/con"],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"rename","args":["<dir>/a.txt","rel"],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"rename","args":["<dir>/sub","<dir>/Sub2"],"out":{"ok":true,"value":null},"calls":[],"tree":{".hidden":"","Sub2":null,"Sub2/x.txt":"x","a.txt":"abc"}}
+{"pane":"trash","args":[["<dir>/a.txt"]],"out":{"ok":true,"value":null},"calls":["trash <dir>\\a.txt"],"tree":{".hidden":"","sub":null,"sub/x.txt":"x"}}
+{"pane":"trash","args":[["<dir>"]],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"trash","args":[[]],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"trash","args":["x"],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"trash","args":[["<dir>/a.txt","<dir>/gone","<dir>/sub"]],"out":{"ok":false,"error":"notFound"},"calls":["trash <dir>\\a.txt","trash <dir>\\gone"],"tree":{".hidden":"","sub":null,"sub/x.txt":"x"}}
+{"pane":"trash","args":[["C:\\"]],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"trash","args":[["rel"]],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"reveal","args":["<dir>/sub"],"out":{"ok":true,"value":null},"calls":["open <dir>\\sub"],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"reveal","args":["<dir>/a.txt"],"out":{"ok":true,"value":null},"calls":["show <dir>\\a.txt"],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"reveal","args":["<dir>/gone"],"out":{"ok":false,"error":"notFound"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}
+{"pane":"reveal","args":["rel"],"out":{"ok":false,"error":"invalid"},"calls":[],"tree":{".hidden":"","a.txt":"abc","sub":null,"sub/x.txt":"x"}}

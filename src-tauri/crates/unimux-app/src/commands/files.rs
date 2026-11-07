@@ -7,12 +7,24 @@
 //! `fs:listProjectDirectories`, `fs:statProjectFile`, `fs:readProjectFile`, `fs:writeProjectFile`) and the editor's local
 //! files of the SFTP view (`local:readFile`, `local:statFile`, `local:writeFile`). The file system work runs on the blocking
 //! pool (a slow network share never stalls the IPC threads).
+//!
+//! G6: the file operations of the tree (`fs:renameEntry`, `fs:createEntry`, `fs:deleteEntries`, `fs:transfer` with its
+//! `fs:progress` events at most every 120 ms, `fs:cancelOp`) and the SFTP view's local pane (`local:list`, `:roots`,
+//! `:mkdir`, `:rename`, `:trash`, `:reveal`). Deleted and replaced items go to the OS trash (MC_TRASH_DIR in dev builds).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use parking_lot::Mutex;
 use serde_json::{Value, json};
+use unimux_files::fileops::{self, OpOptions, TrashFn};
+use unimux_files::fserr::FsError;
+use unimux_files::fsx;
+use unimux_files::jspath::{self, Flavor};
 use unimux_files::local::{LocalFiles, LocalPlatform};
+use unimux_files::pane::{LocalPane, PaneDeps};
 use unimux_files::preview::Preview;
 use unimux_files::project::{self, DIRECTORIES_LIMIT};
 use unimux_files::save::{self, SaveResult};
@@ -183,6 +195,167 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
             Ok(result.to_json())
         }
     });
+
+    register_file_ops(r, ctx);
+    register_local_pane(r, ctx);
+}
+
+/// The OS trash (Electron's shell.trashItem: the Recycle Bin through IFileOperation, NSFileManager on macOS). With
+/// dev-overrides MC_TRASH_DIR redirects it into a folder (`<8 hex>-<name>`), so UI checks never touch the real bin.
+pub fn trash_fn(ctx: &AppContext) -> Arc<TrashFn> {
+    match ctx.overrides.trash_dir.clone() {
+        Some(dir) => Arc::new(move |path: &str| {
+            let folder = dir.to_string_lossy().into_owned();
+            std::fs::create_dir_all(&dir).map_err(|e| FsError::io(&e, "mkdir", &folder))?;
+            let id = uuid::Uuid::new_v4().to_string();
+            let name = format!("{}-{}", &id[..8], jspath::basename(Flavor::native(), path));
+            fsx::rename(path, &jspath::join_name(Flavor::native(), &folder, &name))
+        }),
+        None => Arc::new(|path: &str| unimux_platform::shell::trash_item(Path::new(path)).map_err(FsError::plain)),
+    }
+}
+
+/// G6: rename, create, delete to the trash, copy / move with progress (`fs:progress`) and cancel (`fs:cancelOp`).
+fn register_file_ops(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
+    let trash = trash_fn(ctx);
+    let platform = LocalPlatform::native();
+    // opId -> its cancel flag while the transfer runs (1.1.4's `running` map of AbortControllers).
+    let running: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>> = Arc::default();
+
+    let c = ctx.clone();
+    r.invoke("fs:renameEntry", move |call| {
+        let c = c.clone();
+        async move {
+            let Some(root) = project_path(&c, call.arg(0)) else { return Ok(json!({ "ok": false, "error": GONE })) };
+            let (path, name) = (call.arg(1).clone(), call.arg(2).clone());
+            blocking(&call.command, move || fileops::rename_project_entry(&root, &path, &name, platform)).await
+        }
+    });
+
+    let c = ctx.clone();
+    r.invoke("fs:createEntry", move |call| {
+        let c = c.clone();
+        async move {
+            let Some(root) = project_path(&c, call.arg(0)) else { return Ok(json!({ "ok": false, "error": GONE })) };
+            let (dir, name) = (call.arg(1).clone(), call.arg(2).clone());
+            let folder = call.arg(3) == &json!("directory");
+            blocking(&call.command, move || fileops::create_project_entry(&root, &dir, &name, folder, platform)).await
+        }
+    });
+
+    let (c, t) = (ctx.clone(), trash.clone());
+    r.invoke("fs:deleteEntries", move |call| {
+        let (c, t) = (c.clone(), t.clone());
+        async move {
+            let Some(root) = project_path(&c, call.arg(0)) else { return Ok(json!({ "ok": false, "error": GONE })) };
+            let paths = call.arg(1).clone();
+            blocking(&call.command, move || fileops::delete_project_entries(&root, &paths, &*t)).await
+        }
+    });
+
+    let (c, t, run) = (ctx.clone(), trash, running.clone());
+    r.invoke("fs:transfer", move |call| {
+        let (c, t, run) = (c.clone(), t.clone(), run.clone());
+        async move {
+            let Some(root) = project_path(&c, call.arg(0)) else { return Ok(json!({ "ok": false, "error": GONE })) };
+            let request = call.arg(1).clone();
+            let op_id =
+                request.get("opId").and_then(Value::as_str).filter(|id| id.encode_utf16().count() <= 100).map(str::to_string);
+            let cancel = Arc::new(AtomicBool::new(false));
+            let mut options = OpOptions::new(t);
+            options.platform = platform;
+            options.cancel = Some(cancel.clone());
+            if let Some(id) = &op_id {
+                run.lock().insert(id.clone(), cancel);
+                let (events, id) = (c.events.clone(), id.clone());
+                options.on_progress = Some(Box::new(move |entries, bytes| {
+                    events.send("fs:progress", vec![json!({ "opId": id, "entries": entries, "bytes": bytes })]);
+                }));
+            }
+            let result = blocking(&call.command, move || fileops::transfer_project_entries(&root, &request, &options)).await;
+            if let Some(id) = &op_id {
+                run.lock().remove(id);
+            }
+            result
+        }
+    });
+
+    r.send("fs:cancelOp", move |call| {
+        let flag = call.arg(0).as_str().and_then(|id| running.lock().get(id).cloned());
+        async move {
+            if let Some(flag) = flag {
+                flag.store(true, Ordering::SeqCst);
+            }
+        }
+    });
+}
+
+/// G6: the SFTP view's local pane (`local:list`, `:roots`, `:mkdir`, `:rename`, `:trash`, `:reveal`). Explorer and Finder
+/// go through the os service's desktop, so an offscreen check run records them instead of opening a window.
+fn register_local_pane(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
+    let (open_ctx, show_ctx) = (Arc::downgrade(ctx), Arc::downgrade(ctx));
+    let pane = Arc::new(LocalPane::new(PaneDeps {
+        platform: LocalPlatform::native(),
+        trash: trash_fn(ctx),
+        open_folder: Box::new(move |path: &str| {
+            if let Some(os) = open_ctx.upgrade().and_then(|c| c.os.get().cloned()) {
+                os.desktop.open_path(path);
+            }
+            Ok(())
+        }),
+        show_file: Box::new(move |path: &str| {
+            if let Some(os) = show_ctx.upgrade().and_then(|c| c.os.get().cloned()) {
+                os.desktop.reveal(path);
+            }
+        }),
+        home: Box::new(|| unimux_core::home::home_dir().to_string_lossy().into_owned()),
+    }));
+
+    let p = pane.clone();
+    r.invoke("local:list", move |call| {
+        let p = p.clone();
+        async move {
+            let path = call.arg(0).clone();
+            blocking(&call.command, move || p.list(&path)).await
+        }
+    });
+    let p = pane.clone();
+    r.invoke("local:roots", move |call| {
+        let p = p.clone();
+        async move { blocking(&call.command, move || p.roots()).await }
+    });
+    let p = pane.clone();
+    r.invoke("local:mkdir", move |call| {
+        let p = p.clone();
+        async move {
+            let path = call.arg(0).clone();
+            blocking(&call.command, move || p.mkdir(&path)).await
+        }
+    });
+    let p = pane.clone();
+    r.invoke("local:rename", move |call| {
+        let p = p.clone();
+        async move {
+            let (from, to) = (call.arg(0).clone(), call.arg(1).clone());
+            blocking(&call.command, move || p.rename(&from, &to)).await
+        }
+    });
+    let p = pane.clone();
+    r.invoke("local:trash", move |call| {
+        let p = p.clone();
+        async move {
+            let paths = call.arg(0).clone();
+            blocking(&call.command, move || p.trash(&paths)).await
+        }
+    });
+    let p = pane;
+    r.invoke("local:reveal", move |call| {
+        let p = p.clone();
+        async move {
+            let path = call.arg(0).clone();
+            blocking(&call.command, move || p.reveal(&path)).await
+        }
+    });
 }
 
 #[cfg(test)]
@@ -288,6 +461,100 @@ mod tests {
         );
         assert_eq!(json_of(call(&r, "fs:writeProjectFile", json!(["p1", "a.txt", "x\u{fffd}", "two\r\n", true]))), invalid);
         assert_eq!(std::fs::read_to_string(project.path().join("a.txt")).unwrap(), "two\r\n");
+        ctx.saver.stop();
+    }
+
+    fn context_with_trash(data: &Path, project: &Path, trash: &Path) -> Arc<AppContext> {
+        let overrides = DevOverrides { trash_dir: Some(trash.to_path_buf()), ..DevOverrides::default() };
+        AppContext::new(
+            data.to_path_buf(),
+            overrides,
+            Arc::new(RollingLog::crash_log(data)),
+            Arc::new(StartupTimer::new(Instant::now())),
+            Arc::new(StartupLog::new(data.join("startup.log"), "")),
+            json!({ "version": 1, "projects": [{ "id": "p1", "path": project.to_string_lossy() }] }),
+        )
+    }
+
+    #[test]
+    fn the_file_op_channels_answer_like_1_1_4() {
+        let data = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let trash = tempfile::tempdir().unwrap();
+        let bin = trash.path().join("bin");
+        std::fs::create_dir(project.path().join("docs")).unwrap();
+        std::fs::write(project.path().join("a.txt"), "A").unwrap();
+        std::fs::write(project.path().join("docs").join("a.txt"), "old").unwrap();
+        let ctx = context_with_trash(data.path(), project.path(), &bin);
+        let r = router(&ctx);
+        let gone = json!({ "ok": false, "error": GONE });
+        assert_eq!(json_of(call(&r, "fs:renameEntry", json!(["nope", "a.txt", "b.txt"]))), gone);
+        assert_eq!(json_of(call(&r, "fs:createEntry", json!(["nope", "", "x", "file"]))), gone);
+        assert_eq!(json_of(call(&r, "fs:deleteEntries", json!(["nope", ["a.txt"]]))), gone);
+        assert_eq!(json_of(call(&r, "fs:transfer", json!(["nope", { "kind": "copy" }]))), gone);
+        assert_eq!(
+            json_of(call(&r, "fs:createEntry", json!(["p1", "", "new", "directory"]))),
+            json!({ "ok": true, "path": "new" })
+        );
+        assert!(project.path().join("new").is_dir());
+        // Any other kind makes a file (1.1.4: kind === 'directory' ? 'directory' : 'file').
+        assert_eq!(
+            json_of(call(&r, "fs:createEntry", json!(["p1", "new", "f", "folder"]))),
+            json!({ "ok": true, "path": "new/f" })
+        );
+        assert!(project.path().join("new").join("f").is_file());
+        assert_eq!(
+            json_of(call(&r, "fs:renameEntry", json!(["p1", "new/f", "g.txt"]))),
+            json!({ "ok": true, "from": "new/f", "to": "new/g.txt" })
+        );
+        // Replace: the old docs/a.txt goes to MC_TRASH_DIR as `<8 hex>-a.txt`, never deleted.
+        let moved = json_of(call(
+            &r,
+            "fs:transfer",
+            json!(["p1", { "kind": "move", "paths": ["a.txt"], "destination": "docs", "conflict": "replace", "opId": "op-1" }]),
+        ));
+        assert_eq!(moved["done"], json!([{ "from": "a.txt", "to": "docs/a.txt" }]));
+        assert_eq!(moved["replaced"], json!(["docs/a.txt"]));
+        let binned: Vec<String> =
+            std::fs::read_dir(&bin).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(binned.len(), 1);
+        assert!(binned[0].len() == 8 + "-a.txt".len() && binned[0].ends_with("-a.txt"), "{binned:?}");
+        assert_eq!(std::fs::read_to_string(bin.join(&binned[0])).unwrap(), "old");
+        let deleted = json_of(call(&r, "fs:deleteEntries", json!(["p1", ["new"]])));
+        assert_eq!(deleted, json!({ "ok": true, "trashed": ["new"], "failed": [] }));
+        assert_eq!(std::fs::read_dir(&bin).unwrap().count(), 2);
+        // A cancel of an unknown or finished operation is ignored.
+        let caller =
+            Caller::new("main", "http://tauri.localhost/index.html").with_request_origin(Some("http://tauri.localhost".into()));
+        r.admit_send("fs:cancelOp", &caller).unwrap();
+        tauri::async_runtime::block_on(r.run_send(Call::new("fs:cancelOp", caller, vec![json!("op-1")])));
+        ctx.saver.stop();
+    }
+
+    #[test]
+    fn the_local_pane_channels_answer_like_1_1_4() {
+        let data = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let trash = tempfile::tempdir().unwrap();
+        let ctx = context_with_trash(data.path(), outside.path(), &trash.path().join("bin"));
+        let r = router(&ctx);
+        let dir = outside.path().to_string_lossy().into_owned();
+        let at = |n: &str| outside.path().join(n).to_string_lossy().into_owned();
+        assert_eq!(json_of(call(&r, "local:mkdir", json!([at("sub")]))), json!({ "ok": true, "value": null }));
+        std::fs::write(outside.path().join("a.txt"), "abc").unwrap();
+        let listing = json_of(call(&r, "local:list", json!([dir])));
+        assert_eq!(listing["ok"], true);
+        assert_eq!(listing["value"]["entries"].as_array().unwrap().len(), 2);
+        assert_eq!(json_of(call(&r, "local:rename", json!([at("a.txt"), at("b.txt")]))), json!({ "ok": true, "value": null }));
+        assert_eq!(json_of(call(&r, "local:trash", json!([[at("b.txt")]]))), json!({ "ok": true, "value": null }));
+        assert!(!outside.path().join("b.txt").exists());
+        assert_eq!(std::fs::read_dir(trash.path().join("bin")).unwrap().count(), 1);
+        // No os service in this test: reveal answers ok and shows nothing.
+        assert_eq!(json_of(call(&r, "local:reveal", json!([at("sub")]))), json!({ "ok": true, "value": null }));
+        assert_eq!(json_of(call(&r, "local:reveal", json!(["relative"]))), json!({ "ok": false, "error": "invalid" }));
+        let roots = json_of(call(&r, "local:roots", json!([])));
+        assert_eq!(roots["home"], json!(unimux_core::home::home_dir().to_string_lossy()));
+        assert_eq!(roots["drives"].as_array().unwrap().is_empty(), !cfg!(windows));
         ctx.saver.stop();
     }
 
