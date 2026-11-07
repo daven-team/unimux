@@ -229,6 +229,8 @@ fn main() {
     let run_ctx = ctx.clone();
     app.run(move |_app, event| {
         if let RunEvent::Exit = event {
+            // A copied key that still waits is cleared before the process ends (W4, 1.1.4 will-quit).
+            commands::os::on_exit(&run_ctx);
             // The last save (W6 adds the full wind-down: quit confirmation, hosts, MCP, hooks).
             if !run_ctx.flush_state() {
                 run_ctx.crash.error("state could not be saved before exit");

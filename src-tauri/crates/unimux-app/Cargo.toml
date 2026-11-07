@@ -45,6 +45,10 @@ serde_json.workspace = true
 parking_lot.workspace = true
 uuid.workspace = true
 futures.workspace = true
+url.workspace = true
+
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+rfd.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 webview2-com.workspace = true

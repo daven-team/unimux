@@ -86,7 +86,7 @@ security-framework = "3.7.0"
 # macOS window chrome / App Nap / WebKit text substitutions / editing actions (W2): the versions tao and wry already use.
 objc2 = "=0.6.5"
 objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSDictionary", "NSValue", "NSProcessInfo", "NSUserDefaults", "NSObject"] }
-objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSApplication", "NSResponder"] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSPasteboard", "NSGraphics"] }
 # SP7: ring backend (same provider as rustls), no aws-lc-sys build; "des" is not needed (3des-cbc is not in 1.1.4's offer).
 russh = { version = "=0.65.1", default-features = false, features = ["ring", "rsa", "flate2"] }
 # The ssh-key russh pins; "tdes" adds 3des-cbc OpenSSH key files (1.1.4 reads them). SP7.
@@ -126,6 +126,12 @@ rustls-platform-verifier = "0.7.1"
 core-foundation = "0.10.1"
 core-foundation-sys = "0.8.7"
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+# W4 (notifications, dialogs, clipboard, shell): rfd is what tauri-plugin-dialog wraps (no plugin: the renderer never opens
+# dialogs itself), trash is Electron's shell.trashItem, url the WHATWG parser of openExternal, objc2-* the macOS APIs.
+rfd = { version = "0.17.2", default-features = false, features = ["common-controls-v6"] }
+trash = "5.3.0"
+block2 = "0.6.2"
+objc2-user-notifications = "0.3.2"
 
 [profile.release]
 lto = "thin"

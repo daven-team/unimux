@@ -81,3 +81,29 @@ Rows keep the exact case name (the counter matches them). Rust tests are named `
 | db-wire-sp9.int | caching_sha2_password: full authentication over plain TCP (RSA key request), then the fast path | unimux-db/tests/wire_servers.rs::mysql_logins_caching_sha2_full_and_fast | ported |
 | db-wire-sp9.int | console replies | unimux-db/tests/wire_servers.rs::redis_replies_match_ioredis (SP9 own RESP2 reader; D9 / D10 own the session) | ported |
 | db-wire-sp9.int | the connect sequence (default user; ACL user on DB 2) | unimux-db/tests/wire_servers.rs::redis_connect_sequence_matches_ioredis | ported |
+| stability | keeps only the newest ones | unimux-platform notify::tests::keeps_only_the_newest_ones (+ the_registry_keeps_fifty_and_forgets_once) | ported |
+| taskbar | counts running agent cells: attention without muted ones, working with them; shells and dead cells never | unimux-platform taskbar::tests::counts_running_agent_cells_attention_without_muted_ones_working_with_them_shells_and_dead_cells_never | ported |
+| taskbar | a finished turn or an error is not "waiting for you" | unimux-platform taskbar::tests::a_finished_turn_or_an_error_is_not_waiting_for_you | ported |
+| taskbar | only the macOS Dock gets a badge (1.1.2: no Windows overlay) | unimux-platform taskbar::tests::only_the_macos_dock_gets_a_badge | ported |
+| taskbar | validates reported statuses | unimux-platform taskbar::tests::validates_reported_statuses | ported |
+| taskbar | debounces a burst of statuses into one update and calls the OS only for what changed | unimux-platform taskbar::tests::debounces_a_burst_of_statuses_into_one_update_and_calls_the_os_only_for_what_changed | ported |
+| taskbar | forgets the statuses of a reloaded window, follows mutes and settings, and reapplies on demand | unimux-platform taskbar::tests::forgets_the_statuses_of_a_reloaded_window_follows_mutes_and_settings_and_reapplies_on_demand | ported |
+| taskbar | Windows: never touches the OS | unimux-platform taskbar::tests::windows_never_touches_the_os | ported |
+| taskbar | stops after dispose | unimux-platform taskbar::tests::stops_after_dispose | ported |
+| alert-sound-file | reads a small whitelisted file and skips bytes for a known key | unimux-platform sound::tests::reads_a_small_whitelisted_file_and_skips_bytes_for_a_known_key | ported |
+| alert-sound-file | refuses missing, empty, oversized, wrong-extension files and directories without throwing | unimux-platform sound::tests::refuses_missing_empty_oversized_wrong_extension_files_and_directories_without_throwing | ported |
+| alert-sound-file | reads the saved file of the asked event only | unimux-platform sound::tests::reads_the_saved_file_of_the_asked_event_only | ported |
+| alert-sound-file | keeps every file check per event: wrong extension, missing, empty, oversized, directory | unimux-platform sound::tests::keeps_every_file_check_per_event | ported |
+| alert-sound-file | never accepts a path or an unknown event from the caller | unimux-platform sound::tests::never_accepts_a_path_or_an_unknown_event_from_the_caller | ported |
+| alert-sound-file | refuses preset, system and off choices | unimux-platform sound::tests::refuses_preset_system_and_off_choices | ported |
+| alert-sound-file | refuses relative, UNC and device paths even when the extension is fine | unimux-platform sound::tests::refuses_relative_unc_and_device_paths_even_when_the_extension_is_fine | ported |
+| alert-sound-file | refuses a symbolic link to a sound file | unimux-platform sound::tests::refuses_a_symbolic_link_to_a_sound_file | ported |
+| permission-action | labels the buttons on Windows and macOS only, in the order the action index maps | unimux-platform notify::tests::labels_the_buttons_on_windows_and_macos_only_in_the_order_the_action_index_maps | ported |
+| permission-action | validates what comes over IPC | unimux-platform notify::tests::validates_what_comes_over_ipc | ported |
+| permission-action | answers a hooked Claude permission with a known tool and a Codex approval | permissionAsk stays in the renderer (src/shared/permissionAction.ts) | renderer-only |
+| permission-action | refuses everything else: other states, questions, unknown tool, plan approval, shells, unhooked Claude | permissionAsk stays in the renderer | renderer-only |
+| permission-action | finds the dialog with the plain Yes highlighted | dialogReady stays in the renderer | renderer-only |
+| permission-action | refuses a moved highlight, a broader first option, a missing No and a dialog that scrolled away | dialogReady stays in the renderer | renderer-only |
+| permission-action | needs the same token, the same state and the dialog on screen | mayAnswer stays in the renderer | renderer-only |
+| permission-action | is Enter / Esc, as win32-input-mode key events in a ConPTY cell | permissionKeys stays in the renderer | renderer-only |
+| permission-action | only a single cell needing you gets buttons; Allow / Deny only with a token | noticeActions stays in the renderer | renderer-only |

@@ -105,6 +105,8 @@ pub struct AppContext {
     pub report_limiter: Mutex<ReportLimiter>,
     /// The main window was shown (first page load, renderer-boot or the 5 s fallback).
     pub main_shown: AtomicBool,
+    /// W4: notifications, the copied secret, shell, dialogs, Dock badge (set by commands::os::register).
+    pub os: OnceLock<Arc<crate::commands::os::OsService>>,
     /// Check build only: every renderer startup mark with the window label and the time (test_bridge `marks`).
     #[cfg(feature = "test-bridge")]
     pub test_marks: Mutex<Vec<(String, String, f64)>>,
@@ -163,6 +165,7 @@ impl AppContext {
             app_start_unclaimed: AtomicBool::new(true),
             report_limiter: Mutex::new(ReportLimiter::default()),
             main_shown: AtomicBool::new(false),
+            os: OnceLock::new(),
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
         })

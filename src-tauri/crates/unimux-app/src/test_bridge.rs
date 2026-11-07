@@ -122,6 +122,8 @@ pub async fn test_bridge(
             "portPosts": ctx.port_posts.get().map(|q| q.lane_count()),
         })),
         "report" => Ok(serde_json::to_value(ctx.router().report()).unwrap_or(Value::Null)),
+        // W4: the offscreen desktop recorder (toasts, dialogs, shell, beep, flash, clipboard), see commands::os::test_op.
+        "os" => crate::commands::os::test_op(&ctx, &args).map_err(|e| fail(&e)),
         // Rust's wall clock (ms since the Unix epoch) for the page's clock offset (Channel latency, SP1).
         "clock" => Ok(json!({ "now": crate::channel_bench::epoch_ms() })),
         // Renderer startup marks with the window that sent them (a hidden window reaches renderer-boot, SP1).

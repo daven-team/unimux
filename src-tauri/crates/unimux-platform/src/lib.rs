@@ -1,10 +1,19 @@
-//! OS integration of unimux (wave 0 part: PLAN F5, F6, F11). Later packages add notifications, badge, clipboard secret,
-//! session end and file drop here (W3, W4, W6). `mac`: App Nap, WebKit text defaults and edit actions (W2).
+//! OS integration of unimux (wave 0 part: PLAN F5, F6, F11; W4: notifications, Dock badge, clipboard incl. the copied
+//! secret, shell, beep, alert sound files). Later packages add session end and file drop here (W3, W6). `mac`: App Nap,
+//! WebKit text defaults and edit actions (W2).
 
+pub mod clipboard;
 pub mod instance;
-pub mod webview;
 #[cfg(target_os = "macos")]
 pub mod mac;
+#[cfg(target_os = "macos")]
+mod mac_notify;
+pub mod notify;
+pub mod shell;
+pub mod sound;
+pub mod taskbar;
+pub mod timers;
+pub mod webview;
 #[cfg(windows)]
 mod win;
 
