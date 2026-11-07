@@ -14,6 +14,7 @@ pub mod sound;
 pub mod taskbar;
 pub mod timers;
 pub mod webview;
+pub mod screen;
 #[cfg(windows)]
 mod win;
 

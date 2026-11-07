@@ -38,6 +38,21 @@ pub async fn test_bridge(
             ctx.events.emit(Scope::Broadcast, event, list);
             Ok(Value::Null)
         }
+        // A main-to-renderer message through the 1.1.4 routing (routeMessage): `{channel, args}`.
+        "send" => {
+            let channel = args.get("channel").and_then(Value::as_str).ok_or_else(|| fail("send needs {channel, args}"))?;
+            let list = args.get("args").and_then(Value::as_array).cloned().unwrap_or_default();
+            ctx.events.send(channel, list);
+            Ok(Value::Null)
+        }
+        // W5: what the detached-window service holds, the open app windows and the screen in DIPs.
+        "detached" => Ok(json!({
+            "service": ctx.detached.debug_view(),
+            "appWindows": ctx.events.app_windows(),
+        })),
+        // W5: a detached window as the OS sees it (physical outer rect, visible, maximized), or a move / resize / close of
+        // it like a user's: {id, action: "state" | "move" | "close", x?, y?, width?, height?}.
+        "detachedWindow" => crate::detached::host::test_window_op(&ctx, &args).await,
         // A panic on a background thread: one crash.log line (and the error dialog, rate-limited).
         "panic" => {
             let message = args.get("message").and_then(Value::as_str).unwrap_or("test-bridge panic").to_string();

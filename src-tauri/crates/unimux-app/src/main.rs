@@ -11,6 +11,7 @@ mod context;
 #[cfg(feature = "test-bridge")]
 mod eval_bridge;
 mod file_drop;
+mod detached;
 mod ipc;
 mod mac_chrome;
 #[cfg(feature = "test-bridge")]
@@ -213,10 +214,20 @@ fn main() {
             ctx.mark("app-ready");
             // The startup gate (U1) runs here and may hold the main window back; wave 0 always proceeds.
             webview_import::prepare(app.handle(), &ctx);
-            windows::create_main(app.handle(), &ctx)?;
+            let main_window = windows::create_main(app.handle(), &ctx)?;
             // The macOS stand-in for CDP (MC_EVAL_PORT, check build only).
             #[cfg(feature = "test-bridge")]
             let _ = eval_bridge::start(ctx.clone());
+            // Tabs that were in their own window at the last quit open there again (W5). The main window closing closes
+            // them as they are (their registry stays for the next start).
+            ctx.detached.set_host(detached::host::TauriHost::new(app.handle().clone(), &ctx));
+            let closing = ctx.detached.clone();
+            main_window.on_window_event(move |event| {
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    closing.close_all();
+                }
+            });
+            ctx.detached.start();
             startup::mark_started();
             Ok(())
         })
@@ -228,6 +239,10 @@ fn main() {
 
     let run_ctx = ctx.clone();
     app.run(move |_app, event| {
+        // The app ends: detached windows close as they are, nothing is attached back (closeAllDetached of 1.1.4's quit).
+        if let RunEvent::ExitRequested { .. } = event {
+            run_ctx.detached.close_all();
+        }
         if let RunEvent::Exit = event {
             // A copied key that still waits is cleared before the process ends (W4, 1.1.4 will-quit).
             commands::os::on_exit(&run_ctx);

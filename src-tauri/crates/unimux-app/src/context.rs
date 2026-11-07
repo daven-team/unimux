@@ -107,6 +107,8 @@ pub struct AppContext {
     pub main_shown: AtomicBool,
     /// W4: notifications, the copied secret, shell, dialogs, Dock badge (set by commands::os::register).
     pub os: OnceLock<Arc<crate::commands::os::OsService>>,
+    /// Detached windows (W5): the registry's windows, attach / detach, and the cell owners every routed event uses.
+    pub detached: Arc<crate::detached::DetachedService>,
     /// Check build only: every renderer startup mark with the window label and the time (test_bridge `marks`).
     #[cfg(feature = "test-bridge")]
     pub test_marks: Mutex<Vec<(String, String, f64)>>,
@@ -143,6 +145,20 @@ impl AppContext {
         let b = broadcaster.clone();
         events.before_emit(move || b.flush());
         let safe_storage = Arc::new(safe_storage(&data_dir, &overrides, &crash, &timer, &startup_log));
+        // After the saver and the broadcaster: its hook sees every change once they have it.
+        let crash_for_detached = crash.clone();
+        let detached = crate::detached::DetachedService::new(
+            controller.clone(),
+            events.clone(),
+            overrides.offscreen && !crate::detached::host::hidden_mode(),
+            Arc::new(move |m: &str| crash_for_detached.warn(m)),
+        );
+        let d = Arc::downgrade(&detached);
+        events.on_focus_cell(move |label| {
+            if let Some(d) = d.upgrade() {
+                d.focus_label(label);
+            }
+        });
         Arc::new(Self {
             data_dir,
             overrides,
@@ -166,6 +182,7 @@ impl AppContext {
             report_limiter: Mutex::new(ReportLimiter::default()),
             main_shown: AtomicBool::new(false),
             os: OnceLock::new(),
+            detached,
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
         })
