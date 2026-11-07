@@ -14,9 +14,11 @@ pub fn open_external(url: &str) {
     crate::open_url(url);
 }
 
-/// Windows types that run code or launch something when opened with the default verb (security review 2026-11-06,
-/// PLAN.md "W4 (open path)"): executables, scripts, installers, shortcuts and shell command files. PATHEXT is added at run
-/// time. Lower case, with the dot.
+/// Windows types that run code or launch something when opened with the default verb (security reviews 2026-11-06 and
+/// 2026-11-07, PLAN.md "W4 (open path)"): executables, scripts, installers, shortcuts, shell command files, Access databases
+/// (macros, VBA), provisioning and sandbox configs, and disk images and cabinets (mounted, attached or expanded). PATHEXT and
+/// `AssocIsDangerous` are consulted at run time on top of it; this list is the floor a misconfigured registry cannot lower.
+/// Lower case, with the dot.
 pub const WINDOWS_PROGRAM_TYPES: &[&str] = &[
     ".exe",
     ".com",
@@ -95,10 +97,35 @@ pub const WINDOWS_PROGRAM_TYPES: &[&str] = &[
     ".pl",
     ".rb",
     ".hlp",
+    ".msu",
+    ".ppkg",
+    ".wsb",
+    ".jnlp",
+    ".mdb",
+    ".mde",
+    ".accdb",
+    ".accde",
+    ".accdr",
+    ".accda",
+    ".accdu",
+    ".ade",
+    ".adp",
+    ".mda",
+    ".mam",
+    ".maf",
+    ".maq",
+    ".mar",
+    ".mat",
+    ".maw",
+    ".iso",
+    ".img",
+    ".vhd",
+    ".vhdx",
+    ".cab",
 ];
 
-/// macOS types that `open` would run or install: applications and other bundles, Terminal commands, installers, scripts
-/// and location files.
+/// macOS types that `open` would run, install or mount: applications and other bundles, Terminal commands, installers,
+/// scripts, location files and disk images. An extra check on top of the content checks ([`unix_content_launches`]).
 pub const MAC_PROGRAM_TYPES: &[&str] = &[
     ".app",
     ".command",
@@ -127,6 +154,17 @@ pub const MAC_PROGRAM_TYPES: &[&str] = &[
     ".kext",
     ".plugin",
     ".bundle",
+    ".xpc",
+    ".appex",
+    ".framework",
+    ".service",
+    ".systemextension",
+    ".mdimporter",
+    ".wdgt",
+    ".dext",
+    ".osax",
+    ".component",
+    ".dmg",
     ".py",
     ".pl",
     ".rb",
@@ -161,29 +199,101 @@ pub fn is_program_name(name: &str, windows: bool, pathext: &str) -> bool {
     }
 }
 
-/// Whether `shell:openPath` must reveal this path instead of opening it: a program, script, installer or shortcut by its
-/// type (macOS: an `.app` bundle too, which is a folder). A folder on Windows still opens in Explorer, as in 1.1.4.
+/// Whether `shell:openPath` must reveal this path instead of opening it (PLAN.md, W4 open path, both security reviews). The
+/// path the renderer sent and the target it resolves to (a symlink `notes.txt` -> `evil.exe` or `Calculator.app`) are both
+/// judged, and either one being a program is enough.
+/// - Windows: the type list, PATHEXT and `AssocIsDangerous`. A folder still opens in Explorer, as in 1.1.4.
+/// - macOS: the type list, and the content of the target: a regular file with an execute bit, a `#!` or Mach-O / fat
+///   header, a bundle folder (`Contents/Info.plist`), or anything that is neither a regular file nor a folder.
+///
+/// Every caller (the `shell:openPath` decision, the re-check in [`open_path`] right before ShellExecute / `open`, the
+/// openInEditor fallback) goes through here, so they all share every check.
 pub fn launches_program(path: &str) -> bool {
+    let target = std::fs::canonicalize(path).ok();
     #[cfg(windows)]
     {
         if Path::new(path).is_dir() {
             return false;
         }
-        let name = path.rsplit(['\\', '/']).next().unwrap_or(path);
-        // The drive of a bare `C:x` path is not a stream.
-        let name = if name.len() >= 2 && name.as_bytes()[1] == b':' && name.as_bytes()[0].is_ascii_alphabetic() {
-            &name[2..]
-        } else {
-            name
-        };
-        is_program_name(name, true, &std::env::var("PATHEXT").unwrap_or_default())
+        windows_name_launches(path) || target.is_some_and(|t| windows_name_launches(&t.to_string_lossy()))
     }
     #[cfg(not(windows))]
     {
-        let trimmed = path.trim_end_matches('/');
-        let name = trimmed.rsplit('/').next().unwrap_or(trimmed);
-        is_program_name(name, false, "")
+        unix_name_launches(path)
+            || unix_content_launches(Path::new(path))
+            || target.is_some_and(|t| unix_name_launches(&t.to_string_lossy()) || unix_content_launches(&t))
     }
+}
+
+/// The last component of a Windows path, without the drive of a bare `C:x` path (which is not a stream).
+#[cfg(windows)]
+fn windows_file_name(path: &str) -> &str {
+    let name = path.rsplit(['\\', '/']).next().unwrap_or(path);
+    if name.len() >= 2 && name.as_bytes()[1] == b':' && name.as_bytes()[0].is_ascii_alphabetic() { &name[2..] } else { name }
+}
+
+/// Windows: the fixed list, PATHEXT, or the OS's own verdict on the type.
+#[cfg(windows)]
+fn windows_name_launches(path: &str) -> bool {
+    let name = windows_file_name(path);
+    if is_program_name(name, true, &std::env::var("PATHEXT").unwrap_or_default()) {
+        return true;
+    }
+    let ty = file_type(name, true);
+    !ty.is_empty() && win::assoc_is_dangerous(&ty)
+}
+
+#[cfg(not(windows))]
+fn unix_name_launches(path: &str) -> bool {
+    let trimmed = path.trim_end_matches('/');
+    let name = trimmed.rsplit('/').next().unwrap_or(trimmed);
+    is_program_name(name, false, "")
+}
+
+/// Mach-O (32 and 64 bit, both byte orders) and fat / universal headers (CAFEBABE is also a Java class file, refused too).
+const MACH_O_MAGICS: &[[u8; 4]] = &[
+    [0xFE, 0xED, 0xFA, 0xCE],
+    [0xFE, 0xED, 0xFA, 0xCF],
+    [0xCE, 0xFA, 0xED, 0xFE],
+    [0xCF, 0xFA, 0xED, 0xFE],
+    [0xCA, 0xFE, 0xBA, 0xBE],
+    [0xBE, 0xBA, 0xFE, 0xCA],
+    [0xCA, 0xFE, 0xBA, 0xBF],
+    [0xBF, 0xBA, 0xFE, 0xCA],
+];
+
+/// Whether the first bytes of a file are a `#!` line or a Mach-O / fat header. Pure, for the tests.
+pub fn has_program_magic(head: &[u8]) -> bool {
+    head.starts_with(b"#!") || (head.len() >= 4 && MACH_O_MAGICS.iter().any(|m| head[..4] == m[..]))
+}
+
+/// macOS content checks on a path (`fs::metadata` follows links): a regular file with any execute bit or a program header
+/// ([`has_program_magic`]), a bundle folder (`Contents/Info.plist`), or a special file (a FIFO is never read, it would
+/// block). A path that cannot be read is left to the name check (`open` fails on it anyway). Built on Windows too, where
+/// only the tests use it.
+#[cfg_attr(windows, allow(dead_code))]
+fn unix_content_launches(path: &Path) -> bool {
+    use std::io::Read;
+    let Ok(meta) = std::fs::metadata(path) else { return false };
+    if meta.is_dir() {
+        return path.join("Contents").join("Info.plist").exists();
+    }
+    if !meta.is_file() {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode() & 0o111 != 0 {
+            return true;
+        }
+    }
+    let Ok(file) = std::fs::File::open(path) else { return false };
+    let mut head = Vec::with_capacity(4);
+    if file.take(4).read_to_end(&mut head).is_err() {
+        return false;
+    }
+    has_program_magic(&head)
 }
 
 /// `shell.openPath(path)`: the default program of a file, Explorer / Finder for a folder. A program, script, installer or
@@ -289,8 +399,8 @@ mod win {
     use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize};
     use windows::Win32::UI::Shell::Common::ITEMIDLIST;
     use windows::Win32::UI::Shell::{
-        ILFree, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, SHOpenFolderAndSelectItems, SHParseDisplayName,
-        ShellExecuteExW,
+        AssocIsDangerous, ILFree, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, SHOpenFolderAndSelectItems,
+        SHParseDisplayName, ShellExecuteExW,
     };
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     use windows::core::{HSTRING, PCWSTR};
@@ -330,6 +440,14 @@ mod win {
         };
         // SAFETY: the struct and its strings live for the call.
         unsafe { ShellExecuteExW(&mut info) }.map_err(|e| e.message())
+    }
+
+    /// `AssocIsDangerous` (shlwapi): whether the OS treats this type (with the dot) as unsafe to open, which also covers
+    /// types an installed handler marks `FTA_AlwaysUnsafe`.
+    pub fn assoc_is_dangerous(ty: &str) -> bool {
+        let ty = HSTRING::from(ty);
+        // SAFETY: a NUL-terminated string living for the call; only reads the registry.
+        unsafe { AssocIsDangerous(PCWSTR(ty.as_ptr())) }.as_bool()
     }
 
     pub fn open_path(path: &str) -> Result<(), String> {
@@ -427,6 +545,39 @@ mod tests {
             "x.chm",
             "x.inf",
             "x.application",
+            "x.msu",
+            "x.ppkg",
+            "x.wsb",
+            "x.jnlp",
+            "x.mdb",
+            "x.mde",
+            "x.accdb",
+            "x.accde",
+            "x.accdr",
+            "x.accda",
+            "x.accdu",
+            "x.ade",
+            "x.adp",
+            "x.mda",
+            "x.mam",
+            "x.maf",
+            "x.maq",
+            "x.mar",
+            "x.mat",
+            "x.maw",
+            "disk.ISO",
+            "disk.img",
+            "disk.vhd",
+            "disk.vhdx",
+            "x.cab",
+            "x.appx",
+            "x.appxbundle",
+            "x.msix",
+            "x.msixbundle",
+            "x.appinstaller",
+            "x.library-ms",
+            "x.search-ms",
+            "x.searchconnector-ms",
             "custom.foo",
             "run.bat.",
             "run.bat . .",
@@ -442,7 +593,23 @@ mod tests {
         // PATHEXT is read at run time: without it the fixed list still holds.
         assert!(is_program_name("x.exe", true, ""));
         assert!(!is_program_name("x.foo", true, ""));
-        for name in ["Calc.app", "run.command", "x.terminal", "setup.pkg", "s.sh", "a.scpt", "l.webloc", "p.mobileconfig"] {
+        for name in [
+            "Calc.app",
+            "run.command",
+            "x.terminal",
+            "setup.pkg",
+            "s.sh",
+            "a.scpt",
+            "l.webloc",
+            "p.mobileconfig",
+            "x.xpc",
+            "x.appex",
+            "x.framework",
+            "x.service",
+            "x.systemextension",
+            "x.mdimporter",
+            "x.dmg",
+        ] {
             assert!(is_program_name(name, false, ""), "{name} must not be opened on macOS");
         }
         for name in ["notes.txt", "alert.aiff", "photo.png", "doc.pdf", "folder", "x.exe:y"] {
@@ -466,6 +633,112 @@ mod tests {
         // Not opened for real here (that would show an Explorer window); the decision above is what open_path checks first.
         assert!(open_path(&dir.path().join("missing.exe").to_string_lossy()).is_err());
         assert!(!marker.exists());
+    }
+
+    /// PLAN.md "W4 (open path, second security review 2026-11-07)": the OS's own verdict is consulted on top of the list.
+    #[cfg(windows)]
+    #[test]
+    fn assoc_is_dangerous_is_consulted() {
+        assert!(win::assoc_is_dangerous(".exe"));
+        assert!(win::assoc_is_dangerous(".EXE"));
+        assert!(!win::assoc_is_dangerous(".txt"));
+        assert!(!win::assoc_is_dangerous(".png"));
+        // Every type the OS calls dangerous is refused, whether or not the fixed list has it.
+        let dir = tempfile::tempdir().unwrap();
+        for ty in [".exe", ".bat", ".lnk", ".url", ".hta", ".scr", ".msi", ".ps1", ".reg", ".cpl", ".appref-ms", ".ws"] {
+            if win::assoc_is_dangerous(ty) {
+                assert!(launches_program(&dir.path().join(format!("x{ty}")).to_string_lossy()), "{ty} is dangerous to the OS");
+            }
+        }
+        // No PATHEXT entry, not in the fixed list: only AssocIsDangerous can refuse it.
+        let probe = [".partial", ".xnk", ".grp", ".mcf", ".glk", ".ops", ".prg", ".ksh", ".csh", ".fxp", ".mdz", ".mdt", ".mdw"];
+        for ty in probe.into_iter().filter(|ty| win::assoc_is_dangerous(ty)) {
+            assert!(!is_program_name(&format!("a{ty}"), true, ""), "{ty} is not in the fixed list");
+            assert!(launches_program(&dir.path().join(format!("a{ty}")).to_string_lossy()), "{ty}: AssocIsDangerous refuses it");
+        }
+    }
+
+    /// A link with a document name is judged by its target too (needs the symlink privilege or Developer Mode; skipped
+    /// otherwise).
+    #[cfg(windows)]
+    #[test]
+    fn open_path_judges_the_target_of_a_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("run.bat");
+        std::fs::write(&script, b"rem x\r\n").unwrap();
+        let link = dir.path().join("notes.txt");
+        if std::os::windows::fs::symlink_file(&script, &link).is_err() {
+            return;
+        }
+        assert!(launches_program(&link.to_string_lossy()));
+    }
+
+    #[test]
+    fn program_headers_are_recognised() {
+        assert!(has_program_magic(b"#!/bin/sh\n"));
+        assert!(has_program_magic(b"#!"));
+        for magic in MACH_O_MAGICS {
+            assert!(has_program_magic(&[magic[0], magic[1], magic[2], magic[3], 0, 0]));
+        }
+        for head in [&b""[..], b"#", b"hello", b"\x7fELF", b"\xcf\xfa\xed", b" #!/bin/sh"] {
+            assert!(!has_program_magic(head), "{head:?}");
+        }
+    }
+
+    /// The macOS content checks (built everywhere, so they also run on the Windows CI): a `#!` file named x.txt, a fake
+    /// Mach-O, and a folder holding Contents/Info.plist are programs; plain files and folders are not.
+    #[test]
+    fn content_checks_find_scripts_binaries_and_bundles() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        std::fs::write(d.join("x.txt"), b"#!/bin/sh\ntouch ran\n").unwrap();
+        std::fs::write(d.join("tool"), [0xCF, 0xFA, 0xED, 0xFE, 7, 0, 0, 1]).unwrap();
+        std::fs::write(d.join("fat"), [0xCA, 0xFE, 0xBA, 0xBE, 0, 0, 0, 2]).unwrap();
+        std::fs::create_dir_all(d.join("Foo").join("Contents")).unwrap();
+        std::fs::write(d.join("Foo").join("Contents").join("Info.plist"), b"<plist/>").unwrap();
+        std::fs::write(d.join("notes.txt"), b"hello").unwrap();
+        std::fs::write(d.join("empty.txt"), b"").unwrap();
+        std::fs::create_dir(d.join("plain")).unwrap();
+        for name in ["x.txt", "tool", "fat", "Foo"] {
+            assert!(unix_content_launches(&d.join(name)), "{name} is a program");
+        }
+        for name in ["notes.txt", "empty.txt", "plain", "missing"] {
+            assert!(!unix_content_launches(&d.join(name)), "{name} opens");
+        }
+    }
+
+    /// macOS / unix: each of these makes launches_program true, so openPath reveals it; nothing is opened here.
+    #[cfg(unix)]
+    #[test]
+    fn launches_program_checks_content_and_link_targets() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let build = d.join("build");
+        std::fs::write(&build, b"echo hi\n").unwrap();
+        std::fs::set_permissions(&build, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(d.join("x.txt"), b"#!/bin/sh\n").unwrap();
+        std::fs::write(d.join("renamed.pdf"), [0xFE, 0xED, 0xFA, 0xCF, 0, 0, 0, 0]).unwrap();
+        std::fs::create_dir_all(d.join("Foo").join("Contents")).unwrap();
+        std::fs::write(d.join("Foo").join("Contents").join("Info.plist"), b"<plist/>").unwrap();
+        std::fs::create_dir(d.join("Calc.app")).unwrap();
+        std::fs::write(d.join("run.sh"), b"echo hi\n").unwrap();
+        std::fs::set_permissions(d.join("run.sh"), std::fs::Permissions::from_mode(0o644)).unwrap();
+        symlink(&build, d.join("notes.txt")).unwrap();
+        symlink(d.join("Foo"), d.join("readme.md")).unwrap();
+        symlink(d.join("Calc.app"), d.join("doc.txt")).unwrap();
+        symlink(d.join("run.sh"), d.join("song.mp3")).unwrap();
+        for name in ["build", "x.txt", "renamed.pdf", "Foo", "Foo/", "Calc.app", "notes.txt", "readme.md", "doc.txt", "song.mp3"]
+        {
+            assert!(launches_program(&d.join(name).to_string_lossy()), "{name} must be revealed");
+        }
+        let plain = d.join("plain.txt");
+        std::fs::write(&plain, b"hello").unwrap();
+        std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::create_dir(d.join("folder")).unwrap();
+        for name in ["plain.txt", "folder"] {
+            assert!(!launches_program(&d.join(name).to_string_lossy()), "{name} opens");
+        }
     }
 
     #[test]
