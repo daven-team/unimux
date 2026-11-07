@@ -102,7 +102,8 @@ impl OsService {
     }
 
     /// Shows a notification. A click shows the main window (and `cell`); a button runs `on_button(index)` when given, else
-    /// it acts like a click. Closed and failed ones are forgotten; only the newest 50 keep their handlers.
+    /// it acts like a click. Closed and failed ones are forgotten; a timed-out one stays (it is parked in the Action Center
+    /// and still clickable); only the newest 50 keep their handlers.
     pub fn notice(
         self: &Arc<Self>,
         title: &str,
@@ -123,6 +124,8 @@ impl OsService {
                 ToastEvent::Closed | ToastEvent::Failed => {
                     me.notices.forget(id);
                 }
+                // Parked in the Action Center: still clickable, so it stays (bounded by the limit of 50).
+                ToastEvent::TimedOut => {}
                 ToastEvent::Click => {
                     if me.notices.forget(id) {
                         me.show_cell(cell.as_deref());
@@ -268,22 +271,37 @@ impl OsService {
         found
     }
 
+    /// `shell:openPath`: the default program, except that a program, script, installer or shortcut is revealed in Explorer
+    /// / Finder instead of being run (PLAN.md, W4 open path; 1.1.4 opened it). The openInEditor fallback goes through here.
+    fn open_path(&self, path: &str) {
+        if unimux_platform::shell::launches_program(path) {
+            self.desktop.reveal(path);
+        } else {
+            self.desktop.open_path(path);
+        }
+    }
+
     /// `shell:openInEditor`: Cursor or VS Code through their launchers (a shell on Windows, with the cleaned environment),
     /// `open -a` on macOS when only the app is installed, else the default program (openPath).
     async fn open_in_editor(&self, path: String) {
         let editor = self.find_editor().await;
-        let env = Some(unimux_exec::clean_process_env());
+        #[cfg_attr(not(windows), allow(unused_mut))]
+        let mut env = unimux_exec::clean_process_env();
         let result = match editor {
             #[cfg(windows)]
-            Some(editor) => {
-                // Node's spawn(editor, [`"${p}"`], { shell: true }): `<ComSpec> /d /s /c "<editor> "<p>""`.
-                let comspec = std::env::var_os("ComSpec").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("cmd.exe"));
-                let raw = format!("/d /s /c \"{editor} \"{path}\"\"");
-                self.desktop.spawn_detached(Program::Raw { program: comspec, raw }, env)
-            }
+            Some(editor) => match editor_command_line(&editor, &path) {
+                Some((raw, via_env)) => {
+                    if via_env {
+                        env.insert(OsString::from(EDITOR_PATH_VAR), OsString::from(&path));
+                    }
+                    let comspec = std::env::var_os("ComSpec").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("cmd.exe"));
+                    self.desktop.spawn_detached(Program::Raw { program: comspec, raw }, Some(env))
+                }
+                None => Err("the path cannot be passed to the editor safely".to_string()),
+            },
             #[cfg(not(windows))]
             Some(editor) => {
-                self.desktop.spawn_detached(Program::Args { program: editor.into(), args: vec![path.clone().into()] }, env)
+                self.desktop.spawn_detached(Program::Args { program: editor.into(), args: vec![path.clone().into()] }, Some(env))
             }
             None => {
                 #[cfg(target_os = "macos")]
@@ -300,7 +318,7 @@ impl OsService {
                         return;
                     }
                 }
-                self.desktop.open_path(&path);
+                self.open_path(&path);
                 Ok(())
             }
         };
@@ -310,6 +328,26 @@ impl OsService {
             ctx.crash.warn(&format!("open in editor failed: {e}"));
         }
     }
+}
+
+/// The variable that carries a path with `%` to the editor's command line (cmd expands it once, never its value).
+#[cfg_attr(not(windows), allow(dead_code))]
+const EDITOR_PATH_VAR: &str = "UNIMUX_OPEN_IN_EDITOR_PATH";
+
+/// The cmd.exe arguments that start the editor's launcher (`code.cmd`, `cursor.cmd`) on one path, like Node's
+/// spawn(editor, [`"${p}"`], { shell: true }) of 1.1.4: `/d /s /c "<editor> "<p>""`, plus `/v:off` so `!` is never expanded.
+/// Inside the quotes `& | < > ^ !` are plain characters; only `"` could end them (no Windows file name has one, so such a
+/// path is refused, as are control characters), and `%` would be expanded before the quotes are read (`%CMDCMDLINE%`
+/// holds quotes): a path with `%` is passed as `%UNIMUX_OPEN_IN_EDITOR_PATH%`, whose value cmd does not expand again.
+/// Returns the arguments and whether the path must be put in that variable; None when the path is refused.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn editor_command_line(editor: &str, path: &str) -> Option<(String, bool)> {
+    if path.is_empty() || path.chars().any(|c| c == '"' || c.is_control()) {
+        return None;
+    }
+    let via_env = path.contains('%');
+    let arg = if via_env { format!("%{EDITOR_PATH_VAR}%") } else { path.to_string() };
+    Some((format!("/d /v:off /s /c \"{editor} \"{arg}\"\""), via_env))
 }
 
 /// `state.settings.alerts` (normalized; Null when missing).
@@ -500,7 +538,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         let s = s.clone();
         async move {
             if let Some(p) = call.arg(0).as_str().filter(|p| is_path_arg(p)) {
-                s.desktop.open_path(p);
+                s.open_path(p);
             }
         }
     });
@@ -543,7 +581,7 @@ pub fn on_exit(ctx: &AppContext) {
 }
 
 /// Test bridge (check builds): `{action: "log", take?}`, `{action: "answer", path|null}` (the next dialog's answer),
-/// `{action: "toast", index, event: "click" | "button" | "closed" | "failed", button?}`, `{action: "clipboardFire"}` (the 60 s
+/// `{action: "toast", index, event: "click" | "button" | "closed" | "timedOut" | "failed", button?}`, `{action: "clipboardFire"}` (the 60 s
 /// clear runs now), `{action: "live"}` (the live notification ids), `{action: "taskbar", ...}` (a status for the badge).
 #[cfg(feature = "test-bridge")]
 pub fn test_op(ctx: &AppContext, args: &Value) -> Result<Value, String> {
@@ -560,6 +598,7 @@ pub fn test_op(ctx: &AppContext, args: &Value) -> Result<Value, String> {
             let event = match args.get("event").and_then(Value::as_str) {
                 Some("click") => ToastEvent::Click,
                 Some("closed") => ToastEvent::Closed,
+                Some("timedOut") => ToastEvent::TimedOut,
                 Some("failed") => ToastEvent::Failed,
                 Some("button") => {
                     ToastEvent::Button(args.get("button").and_then(Value::as_u64).ok_or("button needs button")? as usize)
@@ -642,6 +681,48 @@ mod tests {
         assert_eq!(external_url(&json!("javascript:alert(1)")), None);
         assert_eq!(external_url(&json!("not a url")), None);
         assert_eq!(external_url(&json!(5)), None);
+    }
+
+    #[test]
+    fn editor_command_line_quotes_the_path_and_refuses_what_could_end_the_quotes() {
+        assert_eq!(editor_command_line("code", "C:\\p\\a.ts"), Some(("/d /v:off /s /c \"code \"C:\\p\\a.ts\"\"".into(), false)));
+        assert_eq!(
+            editor_command_line("code", "C:\\100%\\x"),
+            Some(("/d /v:off /s /c \"code \"%UNIMUX_OPEN_IN_EDITOR_PATH%\"\"".into(), true))
+        );
+        assert_eq!(editor_command_line("code", "x\" & calc & \""), None);
+        assert_eq!(editor_command_line("code", "C:\\a\nb"), None);
+        assert_eq!(editor_command_line("code", ""), None);
+    }
+
+    /// The real cmd.exe gets the editor's command line with `echo` as the editor: whatever the path holds (`&`, `|`, `>`,
+    /// `^`, `!`, `%VAR%`, `%CMDCMDLINE%`), the one command prints exactly the quoted path, so nothing else ran and nothing
+    /// was expanded.
+    #[cfg(windows)]
+    #[test]
+    fn hostile_paths_reach_the_editor_as_one_argument_through_cmd() {
+        use std::os::windows::process::CommandExt;
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("injected.txt");
+        let hostile = [
+            "C:\\R&D\\a^b!c!\\x.txt".to_string(),
+            format!("C:\\a & echo x > {} & \\b", marker.display()),
+            "C:\\a | b > c\\x".to_string(),
+            "C:\\100%\\%CMDCMDLINE%\\%PATH%\\%COMSPEC:~0,1%\\x".to_string(),
+        ];
+        let comspec = std::env::var_os("ComSpec").unwrap_or_else(|| "cmd.exe".into());
+        for path in hostile {
+            let (raw, via_env) = editor_command_line("echo", &path).unwrap();
+            let mut cmd = std::process::Command::new(&comspec);
+            cmd.raw_arg(&raw);
+            if via_env {
+                cmd.env(EDITOR_PATH_VAR, &path);
+            }
+            let out = cmd.output().unwrap();
+            let printed = String::from_utf8_lossy(&out.stdout).trim_end_matches(['\r', '\n']).to_string();
+            assert_eq!(printed, format!("\"{path}\""), "{raw}");
+        }
+        assert!(!marker.exists(), "a second command ran");
     }
 
     #[test]

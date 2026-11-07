@@ -14,11 +14,191 @@ pub fn open_external(url: &str) {
     crate::open_url(url);
 }
 
-/// `shell.openPath(path)`: the default program of a file, Explorer / Finder for a folder. An error text like Electron's
-/// (1.1.4 ignored it).
+/// Windows types that run code or launch something when opened with the default verb (security review 2026-11-06,
+/// PLAN.md "W4 (open path)"): executables, scripts, installers, shortcuts and shell command files. PATHEXT is added at run
+/// time. Lower case, with the dot.
+pub const WINDOWS_PROGRAM_TYPES: &[&str] = &[
+    ".exe",
+    ".com",
+    ".bat",
+    ".cmd",
+    ".pif",
+    ".scr",
+    ".cpl",
+    ".msc",
+    ".msi",
+    ".msp",
+    ".mst",
+    ".msix",
+    ".msixbundle",
+    ".appx",
+    ".appxbundle",
+    ".appinstaller",
+    ".application",
+    ".appref-ms",
+    ".lnk",
+    ".url",
+    ".website",
+    ".scf",
+    ".hta",
+    ".chm",
+    ".vb",
+    ".vbs",
+    ".vbe",
+    ".js",
+    ".jse",
+    ".ws",
+    ".wsf",
+    ".wsc",
+    ".wsh",
+    ".sct",
+    ".ps1",
+    ".ps1xml",
+    ".ps2",
+    ".ps2xml",
+    ".psc1",
+    ".psc2",
+    ".psd1",
+    ".psm1",
+    ".pssc",
+    ".msh",
+    ".msh1",
+    ".msh2",
+    ".mshxml",
+    ".msh1xml",
+    ".msh2xml",
+    ".reg",
+    ".inf",
+    ".ins",
+    ".isp",
+    ".jar",
+    ".gadget",
+    ".shb",
+    ".shs",
+    ".xbap",
+    ".xll",
+    ".diagcab",
+    ".settingcontent-ms",
+    ".library-ms",
+    ".search-ms",
+    ".searchconnector-ms",
+    ".theme",
+    ".themepack",
+    ".desktopthemepackfile",
+    ".mof",
+    ".job",
+    ".rdp",
+    ".py",
+    ".pyw",
+    ".pyz",
+    ".pyzw",
+    ".pl",
+    ".rb",
+    ".hlp",
+];
+
+/// macOS types that `open` would run or install: applications and other bundles, Terminal commands, installers, scripts
+/// and location files.
+pub const MAC_PROGRAM_TYPES: &[&str] = &[
+    ".app",
+    ".command",
+    ".terminal",
+    ".tool",
+    ".pkg",
+    ".mpkg",
+    ".workflow",
+    ".action",
+    ".scpt",
+    ".scptd",
+    ".applescript",
+    ".sh",
+    ".zsh",
+    ".bash",
+    ".csh",
+    ".ksh",
+    ".jar",
+    ".webloc",
+    ".inetloc",
+    ".fileloc",
+    ".prefpane",
+    ".saver",
+    ".qlgenerator",
+    ".mobileconfig",
+    ".kext",
+    ".plugin",
+    ".bundle",
+    ".py",
+    ".pl",
+    ".rb",
+];
+
+/// The type of a file name as the OS sees it, lower case with the dot (`""` when it has none). Windows drops trailing dots
+/// and spaces of a name (`run.bat.` opens `run.bat`), so they are dropped here too.
+fn file_type(name: &str, windows: bool) -> String {
+    let name = if windows { name.trim_end_matches(['.', ' ']) } else { name };
+    match name.rfind('.') {
+        Some(at) => name[at..].to_ascii_lowercase(),
+        None => String::new(),
+    }
+}
+
+/// Whether opening a file of this name would launch a program. Windows: the list above plus every PATHEXT entry, case
+/// insensitive; a name with a stream (`x.txt:y`) counts too. macOS: the list above. Pure, for the tests.
+pub fn is_program_name(name: &str, windows: bool, pathext: &str) -> bool {
+    if windows {
+        if name.contains(':') {
+            return true;
+        }
+        let ty = file_type(name, true);
+        if ty.is_empty() {
+            return false;
+        }
+        WINDOWS_PROGRAM_TYPES.contains(&ty.as_str())
+            || pathext.split(';').map(|e| e.trim().to_ascii_lowercase()).any(|e| !e.is_empty() && e == ty)
+    } else {
+        let ty = file_type(name, false);
+        !ty.is_empty() && MAC_PROGRAM_TYPES.contains(&ty.as_str())
+    }
+}
+
+/// Whether `shell:openPath` must reveal this path instead of opening it: a program, script, installer or shortcut by its
+/// type (macOS: an `.app` bundle too, which is a folder). A folder on Windows still opens in Explorer, as in 1.1.4.
+pub fn launches_program(path: &str) -> bool {
+    #[cfg(windows)]
+    {
+        if Path::new(path).is_dir() {
+            return false;
+        }
+        let name = path.rsplit(['\\', '/']).next().unwrap_or(path);
+        // The drive of a bare `C:x` path is not a stream.
+        let name = if name.len() >= 2 && name.as_bytes()[1] == b':' && name.as_bytes()[0].is_ascii_alphabetic() {
+            &name[2..]
+        } else {
+            name
+        };
+        is_program_name(name, true, &std::env::var("PATHEXT").unwrap_or_default())
+    }
+    #[cfg(not(windows))]
+    {
+        let trimmed = path.trim_end_matches('/');
+        let name = trimmed.rsplit('/').next().unwrap_or(trimmed);
+        is_program_name(name, false, "")
+    }
+}
+
+/// `shell.openPath(path)`: the default program of a file, Explorer / Finder for a folder. A program, script, installer or
+/// shortcut ([`launches_program`]) is never run: it is revealed in Explorer / Finder instead (PLAN.md, W4 open path; 1.1.4
+/// had that gap). An error text like Electron's (1.1.4 ignored it).
 pub fn open_path(path: &str) -> Result<(), String> {
     if !is_path_arg(path) {
         return Err("Invalid path".into());
+    }
+    if launches_program(path) {
+        if !Path::new(path).exists() {
+            return Err("Failed to open path".into());
+        }
+        show_item_in_folder(path);
+        return Ok(());
     }
     #[cfg(windows)]
     {
@@ -213,6 +393,79 @@ mod tests {
         assert!(is_path_arg("C:\\x"));
         assert!(!is_path_arg(""));
         assert!(!is_path_arg("C:\\x\0y"));
+    }
+
+    /// PLAN.md "W4 (open path, security review 2026-11-06)": programs, scripts, installers and shortcuts are revealed, never
+    /// opened; documents and media still open.
+    #[test]
+    fn open_path_refusal_list() {
+        let pathext = ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.CPL;.FOO";
+        for name in [
+            "evil.exe",
+            "EVIL.EXE",
+            "run.bat",
+            "run.Cmd",
+            "x.com",
+            "link.lnk",
+            "site.url",
+            "app.hta",
+            "e.scf",
+            "s.scr",
+            "c.cpl",
+            "setup.msi",
+            "p.ps1",
+            "v.vbs",
+            "j.js",
+            "j.jse",
+            "w.wsf",
+            "r.reg",
+            "x.pif",
+            "x.msc",
+            "x.jar",
+            "x.appref-ms",
+            "x.settingcontent-ms",
+            "x.chm",
+            "x.inf",
+            "x.application",
+            "custom.foo",
+            "run.bat.",
+            "run.bat . .",
+            "a.txt:b",
+            "a.txt:evil.exe",
+            ".exe",
+        ] {
+            assert!(is_program_name(name, true, pathext), "{name} must not be opened on Windows");
+        }
+        for name in ["notes.txt", "alert.wav", "photo.PNG", "doc.pdf", "README", "archive.zip", "page.html", "a.foo.txt"] {
+            assert!(!is_program_name(name, true, pathext), "{name} opens on Windows");
+        }
+        // PATHEXT is read at run time: without it the fixed list still holds.
+        assert!(is_program_name("x.exe", true, ""));
+        assert!(!is_program_name("x.foo", true, ""));
+        for name in ["Calc.app", "run.command", "x.terminal", "setup.pkg", "s.sh", "a.scpt", "l.webloc", "p.mobileconfig"] {
+            assert!(is_program_name(name, false, ""), "{name} must not be opened on macOS");
+        }
+        for name in ["notes.txt", "alert.aiff", "photo.png", "doc.pdf", "folder", "x.exe:y"] {
+            assert!(!is_program_name(name, false, ""), "{name} opens on macOS");
+        }
+    }
+
+    /// An existing script is revealed (Explorer opens on its folder), never run: openPath returns Ok without launching it.
+    /// The script would write a marker file if it ran.
+    #[cfg(windows)]
+    #[test]
+    fn open_path_reveals_a_script_instead_of_running_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("ran.txt");
+        let script = dir.path().join("run.bat");
+        std::fs::write(&script, format!("echo x > \"{}\"\r\n", marker.display())).unwrap();
+        assert!(launches_program(&script.to_string_lossy()));
+        assert!(!launches_program(&dir.path().to_string_lossy()), "a folder opens in Explorer");
+        assert!(!launches_program(&dir.path().join("a.txt").to_string_lossy()));
+        assert!(launches_program("C:run.bat"));
+        // Not opened for real here (that would show an Explorer window); the decision above is what open_path checks first.
+        assert!(open_path(&dir.path().join("missing.exe").to_string_lossy()).is_err());
+        assert!(!marker.exists());
     }
 
     #[test]

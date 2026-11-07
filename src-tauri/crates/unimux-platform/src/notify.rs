@@ -80,9 +80,22 @@ pub enum ToastEvent {
     Click,
     /// Button `i` (index into [`ToastSpec::buttons`]).
     Button(usize),
-    /// Dismissed, timed out into the Action Center as closed, or removed.
+    /// Dismissed by the user or removed by the app: gone, its handlers can be dropped.
     Closed,
+    /// The banner timed out and the toast is parked in the Action Center (Windows `ToastDismissalReason::TimedOut`): it is
+    /// still there and clickable, so its handlers stay (1.1.4: "Toasts parked in the Action Center never close by
+    /// themselves").
+    TimedOut,
     Failed,
+}
+
+/// `ToastDismissalReason` of a WinRT Dismissed event to what it means here: UserCanceled (0) and ApplicationHidden (1)
+/// close the toast; TimedOut (2), and any reason a later Windows adds, leave it in the Action Center.
+pub fn dismissal_event(reason: i32) -> ToastEvent {
+    match reason {
+        0 | 1 => ToastEvent::Closed,
+        _ => ToastEvent::TimedOut,
+    }
 }
 
 pub type ToastCallback = Arc<dyn Fn(ToastEvent) + Send + Sync>;
@@ -327,8 +340,10 @@ mod win {
             Ok(())
         }))?;
         let cb = on_event.clone();
-        toast.Dismissed(&TypedEventHandler::<ToastNotification, ToastDismissedEventArgs>::new(move |_, _| {
-            cb(ToastEvent::Closed);
+        toast.Dismissed(&TypedEventHandler::<ToastNotification, ToastDismissedEventArgs>::new(move |_, args| {
+            // Without readable args the toast is treated as parked: a later click must still work.
+            let reason = args.as_ref().and_then(|a| a.Reason().ok()).map_or(2, |r| r.0);
+            cb(super::dismissal_event(reason));
             Ok(())
         }))?;
         let cb = on_event;
@@ -478,6 +493,24 @@ mod tests {
         assert_eq!(parse_activation("unimux:button:x"), None);
         assert_eq!(parse_activation("other"), None);
         assert!(!toast_xml(&ToastSpec::new("t", "", vec![])).contains("<actions>"));
+    }
+
+    #[test]
+    fn only_a_user_or_app_dismissal_closes_a_toast_a_timed_out_one_stays_clickable() {
+        assert_eq!(dismissal_event(0), ToastEvent::Closed, "UserCanceled");
+        assert_eq!(dismissal_event(1), ToastEvent::Closed, "ApplicationHidden");
+        assert_eq!(dismissal_event(2), ToastEvent::TimedOut, "TimedOut: parked in the Action Center");
+        assert_eq!(dismissal_event(7), ToastEvent::TimedOut);
+    }
+
+    /// The numbers above are the WinRT enum's.
+    #[cfg(windows)]
+    #[test]
+    fn dismissal_reasons_match_winrt() {
+        use windows::UI::Notifications::ToastDismissalReason;
+        assert_eq!(dismissal_event(ToastDismissalReason::UserCanceled.0), ToastEvent::Closed);
+        assert_eq!(dismissal_event(ToastDismissalReason::ApplicationHidden.0), ToastEvent::Closed);
+        assert_eq!(dismissal_event(ToastDismissalReason::TimedOut.0), ToastEvent::TimedOut);
     }
 
     /// The XML is accepted by the WinRT parser and a ToastNotification is built from it (nothing is shown).

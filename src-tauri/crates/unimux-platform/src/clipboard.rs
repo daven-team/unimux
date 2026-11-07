@@ -56,6 +56,9 @@ pub struct SecretClipboard {
     scheduler: Arc<dyn Scheduler>,
     clear_ms: u64,
     inner: Mutex<Inner>,
+    /// Held across a copy's write and its bookkeeping, so the digest that waits is always the one of the text written
+    /// last (two copies on two threads cannot record their digests in the other order).
+    copying: Mutex<()>,
     me: Weak<SecretClipboard>,
 }
 
@@ -65,7 +68,14 @@ impl SecretClipboard {
     }
 
     pub fn with_clear_ms(io: Arc<dyn ClipboardIo>, scheduler: Arc<dyn Scheduler>, clear_ms: u64) -> Arc<Self> {
-        Arc::new_cyclic(|me| Self { io, scheduler, clear_ms, inner: Mutex::new(Inner::default()), me: me.clone() })
+        Arc::new_cyclic(|me| Self {
+            io,
+            scheduler,
+            clear_ms,
+            inner: Mutex::new(Inner::default()),
+            copying: Mutex::new(()),
+            me: me.clone(),
+        })
     }
 
     /// Clears when the clipboard still holds the text with this digest (never on a read error).
@@ -82,6 +92,7 @@ impl SecretClipboard {
     /// (the window shows it), and then no wait starts.
     pub fn copy(&self, text: &str) -> Result<(), String> {
         let digest = sha256_hex(text);
+        let _copying = self.copying.lock();
         self.io.write(text, true)?;
         let mut inner = self.inner.lock();
         // A newer copy restarts the wait; the older text is no longer in the clipboard anyway.
@@ -419,6 +430,43 @@ mod tests {
         assert_eq!(*io.content.lock(), "");
         // A timer that fires after the flush finds nothing to do.
         sched.fire();
+        assert!(!clip.pending());
+    }
+
+    /// Two copies on two threads (two `clipboard:writeSecret` calls): the first one's write is slow, so the second one
+    /// would write and record its digest in between. The text left in the clipboard is still the one that gets cleared.
+    #[test]
+    fn concurrent_copies_clear_the_text_written_last() {
+        struct Slow(Mutex<String>);
+        impl ClipboardIo for Slow {
+            fn read(&self) -> Result<String, String> {
+                Ok(self.0.lock().clone())
+            }
+            fn write(&self, text: &str, _secret: bool) -> Result<(), String> {
+                *self.0.lock() = text.to_string();
+                if text == "A" {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+                Ok(())
+            }
+        }
+        let io = Arc::new(Slow(Mutex::new(String::new())));
+        let sched = Arc::new(ManualScheduler::default());
+        let clip = SecretClipboard::new(io.clone(), sched.clone());
+        let a = {
+            let clip = clip.clone();
+            std::thread::spawn(move || clip.copy("A").unwrap())
+        };
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let b = {
+            let clip = clip.clone();
+            std::thread::spawn(move || clip.copy("B").unwrap())
+        };
+        a.join().unwrap();
+        b.join().unwrap();
+        assert_eq!(*io.0.lock(), "B");
+        sched.fire();
+        assert_eq!(*io.0.lock(), "", "the key left in the clipboard is cleared");
         assert!(!clip.pending());
     }
 

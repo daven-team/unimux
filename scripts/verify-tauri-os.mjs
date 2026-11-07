@@ -95,10 +95,12 @@ try {
   await mc(`window.mc.notify({ title: 'unimux', body: 'again', cellId: ${JSON.stringify(cellId)}, actions: 'answer', token: 'tok.2' })`);
   await settle();
   shown = toasts(await log());
+  // The user was away: the banner timed out into the Action Center first, the button is pressed there.
+  await os({ action: 'toast', index: shown[0].index, event: 'timedOut' });
   await os({ action: 'toast', index: shown[0].index, event: 'button', button: 1 });
   await settle();
   ev = await events();
-  check('Deny sends notify:answer deny', JSON.stringify(ev[0]) === JSON.stringify(['notify:answer', cellId, 'tok.2', 'deny']), JSON.stringify(ev));
+  check('Deny in the Action Center after the banner timed out sends notify:answer deny', JSON.stringify(ev[0]) === JSON.stringify(['notify:answer', cellId, 'tok.2', 'deny']), JSON.stringify(ev));
 
   await mc(`window.mc.notify({ title: 'unimux', body: 'a question', cellId: ${JSON.stringify(cellId)}, actions: 'show' })`);
   await settle();
@@ -144,6 +146,14 @@ try {
   await settle();
   ev = await events();
   check('a trimmed notification does nothing; a closed one is forgotten; the newest still works', ev.length === 1 && (await os({ action: 'live' })).length === 48, JSON.stringify(ev));
+  // Windows: a banner that times out is parked in the Action Center (Dismissed, reason TimedOut). It stays clickable, as
+  // in 1.1.4: the click and the buttons still act afterwards.
+  await os({ action: 'toast', index: many[52].index, event: 'timedOut' });
+  const liveAfterTimeout = (await os({ action: 'live' })).length;
+  await os({ action: 'toast', index: many[52].index, event: 'click' });
+  await settle();
+  ev = await events();
+  check('a timed-out notification stays in the Action Center and its click still shows the cell', liveAfterTimeout === 48 && JSON.stringify(ev) === JSON.stringify([['focus-cell', cellId]]) && (await os({ action: 'live' })).length === 47, `${liveAfterTimeout} live, ${JSON.stringify(ev)}`);
 
   await mc(`window.mc.showCell('no-such-cell')`);
   await mc(`window.mc.showCell(${JSON.stringify(cellId)})`);
@@ -237,11 +247,30 @@ try {
   check('openExternal only for http(s) (the href), openPath / revealPath only for real path strings', JSON.stringify(shellOps) === JSON.stringify([
     { op: 'openExternal', url: 'https://example.com/a%20b' }, { op: 'openPath', path: soundFile }, { op: 'revealPath', path: soundFile },
   ]), JSON.stringify(shellOps));
+  // PLAN.md "W4 (open path, security review 2026-11-06)": programs, scripts and shortcuts are revealed, never run.
+  const programs = ['run.bat', 'RUN.CMD', 'link.lnk', 'site.url', 'p.ps1', 'v.vbs', 'setup.msi', 'run.bat.'].map((n) => join(scratch, n));
+  for (const p of programs) writeFileSync(p.replace(/\.+$/, ''), 'x');
+  for (const p of [exeFile, ...programs]) await mc(`window.mc.openPath(${JSON.stringify(p)})`);
+  await mc(`window.mc.openPath(${JSON.stringify(scratch)})`);
+  await settle();
+  const revealed = (await log()).filter((e) => ['openPath', 'revealPath'].includes(e.op));
+  check('openPath reveals programs, scripts, installers and shortcuts instead of running them; a folder still opens', JSON.stringify(revealed) === JSON.stringify([
+    ...[exeFile, ...programs].map((path) => ({ op: 'revealPath', path })), { op: 'openPath', path: scratch },
+  ]), JSON.stringify(revealed));
   await mc(`window.mc.openInEditor(${JSON.stringify(scratch)})`);
   await waitFor({ evaluate: async () => (await os({ action: 'log' })).some((e) => e.op === 'spawnDetached' || e.op === 'openPath') }, 'true', 15000, 'editor launch');
   entries = await log();
   const editor = entries.find((e) => e.op === 'spawnDetached' || e.op === 'openPath');
-  check('openInEditor: Cursor / VS Code through cmd (detached), else the default program', editor?.op === 'openPath' ? editor.path === scratch : /cmd\.exe$/i.test(editor?.program ?? '') && editor.args === `/d /s /c "${editor.args.match(/^\/d \/s \/c "(\S+)/)?.[1]} "${scratch}""`, JSON.stringify(editor));
+  check('openInEditor: Cursor / VS Code through cmd (detached), else the default program', editor?.op === 'openPath' ? editor.path === scratch : /cmd\.exe$/i.test(editor?.program ?? '') && editor.args === `/d /v:off /s /c "${editor.args.match(/^\/d \/v:off \/s \/c "(\S+)/)?.[1]} "${scratch}""`, JSON.stringify(editor));
+  // A path that would end the quotes of the cmd line never reaches cmd; the no-editor fallback reveals a script.
+  await mc(`window.mc.openInEditor('x" & calc & "')`);
+  await mc(`window.mc.openInEditor(${JSON.stringify(programs[0])})`);
+  await sleep(1500);
+  entries = (await log()).filter((e) => ['spawnDetached', 'openPath', 'revealPath'].includes(e.op));
+  const hostileOk = editor?.op === 'openPath'
+    ? JSON.stringify(entries) === JSON.stringify([{ op: 'openPath', path: 'x" & calc & "' }, { op: 'revealPath', path: programs[0] }])
+    : entries.length === 1 && entries[0].op === 'spawnDetached' && !String(entries[0].args).includes('calc');
+  check('openInEditor refuses a path with a quote; the fallback reveals a script', hostileOk, JSON.stringify(entries));
 
   // ── quit clears a waiting secret ───────────────────────────────────────
   await mc(`window.mc.clipboardWriteSecret('key-at-quit')`);
