@@ -1,5 +1,5 @@
-//! Commands of the `app` domain implemented in wave 0: the start claim, startup marks and renderer error reports.
-//! The quit guard and its answer (`app:quitGuard`, `app:quitAnswer`) belong to W6.
+//! Commands of the `app` domain: the start claim, startup marks and renderer error reports (wave 0), the quit guard and its
+//! answer (`app:quitGuard`, `app:quitAnswer`, W6).
 
 use std::sync::Arc;
 
@@ -33,6 +33,24 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
             // The renderer booted: show the main window if the page-load event did not already.
             if name == "renderer-boot" && call.caller.is_main() {
                 crate::windows::show_main(&c);
+            }
+        }
+    });
+
+    // Whether quitting must ask first (some agent works, transfers run, unsaved database work); only `true` holds a quit.
+    let c = ctx.clone();
+    r.send("app:quitGuard", move |call| {
+        let c = c.clone();
+        async move { crate::lifecycle::set_quit_guard(&c, call.arg(0) == &Value::Bool(true)) }
+    });
+
+    // The answer to `app:confirm-quit`: 'asking' at once, then 'quit' or 'cancel'; anything else is ignored.
+    let c = ctx.clone();
+    r.send("app:quitAnswer", move |call| {
+        let c = c.clone();
+        async move {
+            if let Some(answer) = crate::lifecycle::quit_confirm::QuitAnswer::parse(call.arg(0)) {
+                crate::lifecycle::quit_answer(&c, answer);
             }
         }
     });

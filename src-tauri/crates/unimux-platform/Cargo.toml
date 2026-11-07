@@ -1,6 +1,6 @@
 [package]
 name = "unimux-platform"
-description = "OS integration: single instance (Electron 1.1.x compatible), AUMID, Windows build, native error box, notifications, Dock badge, clipboard secret, shell, alert sound files; later session end"
+description = "OS integration: single instance (Electron 1.1.x compatible), AUMID, Windows build, native error box, notifications, Dock badge, clipboard secret, shell, alert sound files, session end and quit (W6)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,7 +15,7 @@ ryu-js.workspace = true
 trash.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_System_LibraryLoader", "Win32_System_DataExchange", "Wdk_System_SystemServices", "Win32_System_SystemInformation", "Win32_Graphics_Gdi", "Win32_Globalization", "Win32_System_Threading", "Win32_Security", "Win32_System_Registry", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Com", "Win32_System_Diagnostics_Debug", "Foundation", "Data_Xml_Dom", "UI_Notifications"] }
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_System_LibraryLoader", "Win32_System_DataExchange", "Wdk_System_SystemServices", "Win32_System_SystemInformation", "Win32_Graphics_Gdi", "Win32_Globalization", "Win32_System_Threading", "Win32_Security", "Win32_System_Registry", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Com", "Win32_System_Diagnostics_Debug", "Foundation", "Data_Xml_Dom", "UI_Notifications", "Win32_UI_Controls"] }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
@@ -23,8 +23,8 @@ libc.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
 block2.workspace = true
-objc2-foundation.workspace = true
-objc2-app-kit.workspace = true
+objc2-foundation = { workspace = true, features = ["std", "block2", "NSNotification", "NSOperation", "NSString", "NSObject"] }
+objc2-app-kit = { workspace = true, features = ["std", "block2", "NSWorkspace", "NSApplication", "NSResponder", "NSRunningApplication"] }
 objc2-user-notifications.workspace = true
 
 [dev-dependencies]

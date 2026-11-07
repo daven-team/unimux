@@ -84,6 +84,7 @@ zeroize = "1.9.1"
 getrandom = "0.4.3"
 security-framework = "3.7.0"
 # macOS window chrome / App Nap / WebKit text substitutions / editing actions (W2): the versions tao and wry already use.
+# W6 (macOS lifecycle: power-off notification, applicationShouldTerminate) adds its features in unimux-platform.
 objc2 = "=0.6.5"
 objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSDictionary", "NSValue", "NSProcessInfo", "NSUserDefaults", "NSObject"] }
 objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSPasteboard", "NSGraphics"] }

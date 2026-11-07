@@ -1,6 +1,6 @@
 //! OS integration of unimux (wave 0 part: PLAN F5, F6, F11; W4: notifications, Dock badge, clipboard incl. the copied
-//! secret, shell, beep, alert sound files). Later packages add session end and file drop here (W3, W6). `mac`: App Nap,
-//! WebKit text defaults and edit actions (W2).
+//! secret, shell, beep, alert sound files; W6: session end, the macOS quit request and the app's message box (lifecycle.rs)).
+//! `mac`: App Nap, WebKit text defaults and edit actions (W2). `screen`: displays for detached windows (W5).
 
 pub mod clipboard;
 pub mod instance;
@@ -8,6 +8,9 @@ pub mod instance;
 pub mod mac;
 #[cfg(target_os = "macos")]
 mod mac_notify;
+pub mod lifecycle;
+#[cfg(target_os = "macos")]
+mod mac_lifecycle;
 pub mod notify;
 pub mod shell;
 pub mod sound;
@@ -17,6 +20,8 @@ pub mod webview;
 pub mod screen;
 #[cfg(windows)]
 mod win;
+#[cfg(windows)]
+mod win_lifecycle;
 
 /// `AllowSetForegroundWindow(pid)`: passes this process's right to set the foreground window (it has it right after the user
 /// clicked in it) on to `pid`. The update window gets it from the app the user just clicked "install" in, so the UAC prompt

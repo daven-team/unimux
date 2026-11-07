@@ -62,3 +62,5 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 
 [dev-dependencies]
 tempfile.workspace = true
+# W6: the wind-down and quit-wait tests run on tokio's paused clock.
+tokio = { workspace = true, features = ["test-util"] }

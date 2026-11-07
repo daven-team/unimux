@@ -99,7 +99,9 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
         .initialization_script(boot_script(ctx, MAIN))
         .on_navigation(allow_navigation)
         .on_page_load(move |_window, payload| {
-            if payload.event() == PageLoadEvent::Finished {
+            let finished = payload.event() == PageLoadEvent::Finished;
+            crate::lifecycle::page_load(&page_ctx, MAIN, finished);
+            if finished {
                 page_ctx.mark("page-loaded");
                 show_main(&page_ctx);
             }
@@ -134,6 +136,8 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
     crate::file_drop::install(&window, ctx.clone());
     watch_window_state(&window, ctx.clone());
     forget_on_destroy(&window, ctx.clone());
+    // Close and quit, session end, renderer crash and hang (W6).
+    crate::lifecycle::attach_main(&window, ctx);
 
     // The page may never report (a renderer stuck in boot): show the window after 5 s anyway.
     let fallback = ctx.clone();

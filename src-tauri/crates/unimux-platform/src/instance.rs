@@ -167,6 +167,26 @@ pub fn acquire(data_dir: &Path, on_second: OnSecond) -> io::Result<Acquire> {
     }
 }
 
+/// Waits (at most `timeout`) until no instance holds the data dir any more: the lock is free and, on Windows, the message
+/// window is gone (it is closed by its own thread after the guard was dropped). A relaunch (W6) starts the new process only
+/// then, so it does not hand over to the exiting one. True when released in time.
+pub fn wait_released(data_dir: &Path, timeout: Duration) -> bool {
+    let start = Instant::now();
+    loop {
+        #[cfg(windows)]
+        let window_gone = win::find(&data_dir.display().to_string()).is_none();
+        #[cfg(not(windows))]
+        let window_gone = true;
+        if window_gone && matches!(try_lock(data_dir), Ok(Some(_))) {
+            return true;
+        }
+        if start.elapsed() >= timeout {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 #[cfg(unix)]
 mod unix {
     use super::*;
@@ -472,7 +492,14 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(heard.lock().len(), 1);
+        // W6 relaunch: the new process waits until the exiting one released the dir, then takes it instead of handing over.
+        // (Part of this test: the WM_COPYDATA callback is set once per process, so no other test may acquire first.)
+        assert!(!wait_released(a.path(), Duration::from_millis(100)));
         drop(first);
+        assert!(wait_released(a.path(), Duration::from_secs(5)));
+        let next = acquire(a.path(), Arc::new(|_| {})).unwrap();
+        assert!(matches!(next, Acquire::Primary(_)));
+        drop(next);
         drop(other_dir);
     }
 }

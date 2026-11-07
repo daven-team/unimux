@@ -109,6 +109,8 @@ pub struct AppContext {
     pub os: OnceLock<Arc<crate::commands::os::OsService>>,
     /// Detached windows (W5): the registry's windows, attach / detach, and the cell owners every routed event uses.
     pub detached: Arc<crate::detached::DetachedService>,
+    /// Quit question, wind-down registry, session end, renderer crash and hang (W6).
+    pub lifecycle: Arc<crate::lifecycle::Lifecycle>,
     /// Check build only: every renderer startup mark with the window label and the time (test_bridge `marks`).
     #[cfg(feature = "test-bridge")]
     pub test_marks: Mutex<Vec<(String, String, f64)>>,
@@ -159,6 +161,8 @@ impl AppContext {
                 d.focus_label(label);
             }
         });
+        let lifecycle = Arc::new(crate::lifecycle::Lifecycle::new());
+        crate::lifecycle::register_own_steps(&lifecycle, events.clone(), broadcaster.clone(), saver.clone(), crash.clone());
         Arc::new(Self {
             data_dir,
             overrides,
@@ -183,6 +187,7 @@ impl AppContext {
             main_shown: AtomicBool::new(false),
             os: OnceLock::new(),
             detached,
+            lifecycle,
             #[cfg(feature = "test-bridge")]
             test_marks: Mutex::new(Vec::new()),
         })

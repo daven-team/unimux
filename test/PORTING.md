@@ -123,3 +123,17 @@ Rows keep the exact case name (the counter matches them). Rust tests are named `
 | detached-tabs | repairs and sums the work reports of detached windows | unimux-state detached::tests::repairs_and_sums_the_work_reports_of_detached_windows | ported |
 | detached-tabs | accepts only well-formed tabs to open in the main window | unimux-state detached::tests::accepts_only_well_formed_tabs_to_open_in_the_main_window | ported |
 | detached-tabs | sends session and prompt events of databases and SFTP to every window | unimux-ipc route::tests::sends_session_and_prompt_events_of_databases_and_sftp_to_every_window | ported |
+| agent-work | does not hold a quit when no agent works | unimux-app lifecycle::quit_confirm::tests::does_not_hold_a_quit_when_no_agent_works | ported |
+| agent-work | quits or stays as the user chose | unimux-app lifecycle::quit_confirm::tests::quits_or_stays_as_the_user_chose (real app: scripts/verify-tauri-lifecycle.mjs A) | ported |
+| agent-work | a second Close while asking asks again and quits when the renderer stays silent | unimux-app lifecycle::quit_confirm::tests::a_second_close_while_asking_asks_again_and_quits_when_the_renderer_stays_silent | ported |
+| agent-work | a repeated Close that is acknowledged keeps waiting for the answer | unimux-app lifecycle::quit_confirm::tests::a_repeated_close_that_is_acknowledged_keeps_waiting_for_the_answer | ported |
+| agent-work | an acknowledged question holds the quit at most two minutes | unimux-app lifecycle::quit_confirm::tests::an_acknowledged_question_holds_the_quit_at_most_two_minutes | ported |
+| agent-work | a session end releases a held quit at once | unimux-app lifecycle::quit_confirm::tests::a_session_end_releases_a_held_quit_at_once (real app: verify-tauri-lifecycle.mjs B) | ported |
+| agent-work | treats a session end as exempt for about a minute only | unimux-app lifecycle::quit_confirm::tests::treats_a_session_end_as_exempt_for_about_a_minute_only | ported |
+| agent-work | never holds a session end or update and does not wait for a silent renderer | unimux-app lifecycle::quit_confirm::tests::never_holds_a_session_end_or_update_and_does_not_wait_for_a_silent_renderer | ported |
+| quit-wait | never waits (and sets no timer) when nothing runs | unimux-app lifecycle::wind_down::tests::never_waits_and_sets_no_timer_when_nothing_runs | ported |
+| quit-wait | resolves true as soon as the work ends, and clears its timer | unimux-app lifecycle::wind_down::tests::resolves_true_as_soon_as_the_work_ends | ported |
+| quit-wait | resolves false once the bound runs out while the work still runs | unimux-app lifecycle::wind_down::tests::resolves_false_once_the_bound_runs_out_while_the_work_still_runs | ported |
+| quit-wait | the bounds (5 s, then 3 s after the cells) stay well inside the hard shutdown limit | unimux-app lifecycle::wind_down::tests::the_bounds_stay_well_inside_the_hard_shutdown_limit | ported |
+| quit-wait | a release followed at once by a new claim keeps the quit waiting (within the bound) | unimux-app lifecycle::wind_down::tests::a_release_followed_at_once_by_a_new_claim_keeps_waiting_within_the_bound (the swap slot itself is A2) | partial |
+| safe-window | leaves the wind-down a bounded time | unimux-app lifecycle::wind_down::tests::the_bounds_stay_well_inside_the_hard_shutdown_limit | ported |
