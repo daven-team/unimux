@@ -92,7 +92,7 @@ async fn pick_save_path(ctx: &Arc<AppContext>, request: &notes::ExportRequest) -
     let main = ctx.app().and_then(|app| tauri::Manager::get_webview_window(app, crate::windows::MAIN));
     if let Some(recorder) = ctx.os.get().and_then(|os| os.recorder.clone()) {
         use crate::commands::os::{Desktop, PickRequest};
-        let pick = PickRequest { folder: false, title, filter: Some((filter_name, vec![ext])) };
+        let pick = PickRequest { folder: false, title, filter: Some((filter_name, vec![ext])), more_filters: Vec::new() };
         return recorder.pick(main, pick).await.map(PathBuf::from);
     }
     if ctx.overrides.offscreen {
