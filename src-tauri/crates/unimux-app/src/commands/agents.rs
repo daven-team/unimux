@@ -10,6 +10,13 @@
 //! H4 (context meter, sessions, codex bind): `context:get`, the `cell:context` events of the context tracker (poked by the
 //! hook server's signals), `sessions:list` and `codex:bind`. P3 (cell removal) and M4 (list_agents) reach the tracker through
 //! [`context_tracker`].
+//!
+//! H6 (install, login terminals, delivery): [`install`] (`install:*`, the `install:` terminal, the `auth:` login terminals A4
+//! spawns through `install::spawn_login_terminal`) and [`prompt`] (`agents:prompt`, `agents:prompt:done`, the native Codex
+//! delivery M4 calls through `prompt::deliver_native`).
+
+pub mod install;
+pub mod prompt;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -109,6 +116,8 @@ static CONV: Mutex<Option<Arc<ConvSearchService>>> = Mutex::new(None);
 
 pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     register_cli(r, ctx);
+    install::register(r, ctx);
+    prompt::register(r, ctx);
     register_conv(r, ctx);
     register_context(r, ctx);
     register_sessions(r, ctx);

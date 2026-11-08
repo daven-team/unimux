@@ -13,12 +13,18 @@
 //!   `codex:bind`.
 //! - [`launch`] (P4): the launch line of an agent cell (buildCliCommand / buildLaunchCommand, the reset tail), the team
 //!   startup / resume prompts and the per-cell MCP config.
+//! - [`install`] (H6): the guided install of the CLIs in an `install:` terminal.
+//! - [`delivery`] (H6): `codex queue` delivery to a running Codex session.
+//! - [`prompt`] (H6): the request / answer repairs of `agents:prompt`.
 
 pub mod cell_files;
 pub mod cli;
 pub mod context;
 pub mod conv;
+pub mod delivery;
 pub mod fsstat;
 pub mod hooks;
+pub mod install;
 pub mod launch;
+pub mod prompt;
 pub mod sessions;

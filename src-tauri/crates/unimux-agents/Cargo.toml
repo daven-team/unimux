@@ -27,6 +27,8 @@ memchr.workspace = true
 indexmap.workspace = true
 unicode-normalization.workspace = true
 rayon-core.workspace = true
+# H6: the install failure classes.
+regex.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_Time", "Win32_Storage_FileSystem"] }
