@@ -310,7 +310,9 @@ try {
   await app.until(`!!document.querySelector('.db-sql-tab [data-field=tx]') && document.querySelector('.db-sql-tab [data-field=txmode]').checked`, 'transaction open again', 20000);
   await typeCm('COMMIT');
   await key('Enter', CTRL);
-  await app.until(`!document.querySelector('.db-sql-tab [data-field=tx]') && !document.querySelector('.db-sql-tab [data-field=txmode]').checked`, 'toggle off after a typed COMMIT', 20000);
+  // The session's transaction state (dbTx) and the run's end (queryEnd on the DB port) travel on different lanes: the
+  // toggle can turn off while the run still counts as running (toggle disabled), so wait for the run to end too.
+  await app.until(`!document.querySelector('.db-sql-tab [data-field=tx]') && !document.querySelector('.db-sql-tab [data-field=txmode]').checked && document.querySelector('.db-sql-tab [data-action=cancel]').disabled`, 'toggle off after a typed COMMIT', 20000);
   check(true, 'a COMMIT typed in the script turns the transaction toggle off');
   // "Rozłącz" with an open transaction in a SQL tab asks first.
   await ev(`document.querySelector('.db-sql-tab [data-field=txmode]').click()`);
