@@ -19,8 +19,9 @@ use crate::error::SftpErrorCode;
 use crate::host::HostChannels;
 use crate::limits::{PROGRESS_INTERVAL_MS, posix_contains, posix_normalize, valid_remote_name, valid_remote_path};
 use crate::op::{ChmodRequest, DeleteCount};
+use crate::proto::Attrs;
 use crate::remote::RemoteSide;
-use crate::sides::{DirEntry, EntryKind, FileSide, SideError};
+use crate::sides::{DirEntry, EntryKind, FileSide, S_IFDIR, S_IFMT, SideError};
 
 /// Entries one walk may visit before it gives up with `tooMany`.
 pub const WALK_ENTRIES: u64 = 1_000_000;
@@ -120,24 +121,56 @@ fn shared_writable(mode: Option<u32>) -> bool {
     mode.is_none_or(|m| m & SHARED_WRITE != 0)
 }
 
+/// The sticky bit: in such a folder only the entry's owner, the folder's owner and root may rename or unlink an entry.
+const STICKY: u32 = 0o1000;
+
+/// Under sudo: may root trust that `entry` (lstat attributes of one name inside `dir`) stays what it is? Only when nobody
+/// but root can rename or replace it: `dir` is a real folder (not a link) that only its owner can write to, or a sticky
+/// folder owned by root that others can write to while root owns the entry too (`/tmp/x` of root). Unknown modes or
+/// owners count as unsafe.
+pub(crate) fn ancestor_keeps_entry(dir: &Attrs, entry: &Attrs) -> bool {
+    let Some(mode) = dir.mode else { return false };
+    if mode & S_IFMT != S_IFDIR {
+        return false;
+    }
+    if !shared_writable(Some(mode)) {
+        return true;
+    }
+    mode & STICKY != 0 && dir.uid == Some(0) && entry.uid == Some(0)
+}
+
 /// Under sudo: emptying the folder at `path` (with `mode`) is unsafe when others can write to it, or (`root`, the folder the
-/// user selected) to the folder it is in, where it could be swapped for a link as a whole.
+/// user selected) when any folder above it, up to `/`, lets someone other than root swap the path's next part for a link
+/// (see [`ancestor_keeps_entry`]): root would then follow it and empty another folder.
 async fn unsafe_for_root(side: &RemoteSide, path: &str, mode: Option<u32>, root: bool) -> Result<bool, SftpErrorCode> {
     if shared_writable(mode) {
         return Ok(true);
     }
-    if root && path != "/" {
-        let parent = side.lstat(&side.dirname(path)).await.map_err(code)?;
-        return Ok(parent.is_none_or(|m| shared_writable(m.mode)));
+    if !root {
+        return Ok(false);
     }
-    Ok(false)
+    let client = side.client();
+    let mut child = path.to_string();
+    let mut child_attrs = client.lstat(&child).await.map_err(|e| e.code())?;
+    loop {
+        let parent = side.dirname(&child);
+        if parent == child {
+            return Ok(false);
+        }
+        let parent_attrs = client.lstat(&parent).await.map_err(|e| e.code())?;
+        if !ancestor_keeps_entry(&parent_attrs, &child_attrs) {
+            return Ok(true);
+        }
+        child = parent;
+        child_attrs = parent_attrs;
+    }
 }
 
 /// `remove`: a file or link is unlinked, a folder emptied (its files 8 at a time, then its folders one by one) and removed.
 /// After a folder was read it is looked at again (T5): one that is no longer a folder (a link swapped in meanwhile) stops
 /// the delete with `changed` before anything listed in it is unlinked. `sudo`: the session runs as root, so a recursive
-/// delete in a folder other users can write to (the selected folder's parent or any folder inside) is refused with
-/// `unsafeDelete`.
+/// delete is refused with `unsafeDelete` when a folder other users can write to could swap a part of it for a link: any folder
+/// inside, or any folder above the selected one up to `/` (a root-owned sticky folder only for a root-owned entry).
 pub async fn remove(side: &RemoteSide, path: &str, sudo: bool) -> Result<(), SftpErrorCode> {
     let mut stack = vec![RemoveStep::Enter(path.to_string())];
     while let Some(step) = stack.pop() {
