@@ -119,7 +119,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | P4 | Shell integration, launch line, cell spawn | todo | | | | |
 | P5 | SSH shell cells on russh | todo | | | | |
 | H6 | Install manager, login terminals, agent delivery | todo | | | | |
-| S4 | SSH IPC and russh test server | todo | | | | Docker |
+| S4 | SSH IPC and russh test server | built, fast mode, not verified | 2026-11-08 | 2026-11-08 | | branch `tauri-pkg-S4`. unimux-ssh `ipc` (`SshIpc`: the 17 key / password / known-host channels of src/main/ssh/ipc.ts `createSshHandlers` with 1.1.4's zod schemas (strict objects, code-point lengths like zod 4.6, `z.guid()`, trimmed labels), fixed error codes, a failed vault / file write answers `failed`, results never carry key text or secrets except the confirmed `revealPrivate`; `readKeyFileFromDisk` (absolute regular file, 64 KiB), `safeFileName`, `clearSshKeyRefs`; vault and key parsing on the blocking pool; `ssh:key:discardDraft` as a send), `test_server` (feature `test-server`: in-process russh server on 127.0.0.1 with password, publickey, keyboard-interactive incl. an empty first info request, banner, exec, echo shell, SFTP v3 over a folder, direct-tcpip to loopback only, an attempt log; 8 login / exec / SFTP / tunnel cases against S3's login core), `LoginEvents::auth_method` (the methods sent, `-> false` at the end, as matrix.mjs compares them). App: `commands/ssh/keys.rs` registers the channels (dialogs over the main window through `OsService`, the import dialog opens in ~/.ssh via the new `PickRequest::directory`), `unimux_platform::hostname()` (os.hostname). CI: job `ssh-matrix` in tauri.yml (`examples/ssh_matrix.rs` runs the real `login::login`; `scripts/ssh-matrix.mjs` builds the SP7 images, starts its own containers, compares outcome / SshErrorCode / methods with 1.1.4's test/golden/sp7/matrix.json, removes the containers by id). Unsupported legacy algorithms (SHA-1-only kex, CBC-only ciphers) end with `protocol` like 1.1.4, documented in docs/tauri/spikes/SP7.md. See "S4 open issues". |
 | T1 | SFTP service and sessions | todo | | | | |
 | D2 | SSH tunnels for databases | todo | | | | |
 | D5 | Postgres cursors and read-only | todo | | | | |
@@ -1414,6 +1414,18 @@ Verification run: `cargo fmt`, `cargo clippy -p unimux-ssh -p unimux-app --all-t
 5. **Debug lines** (MC_SSH_DEBUG=1): only one handshake line (kex, host key, cipher, MAC) is reported; ssh2 printed its own packet log up to USERAUTH. Nothing consumes `LoginEvents::debug` yet (the owners decide).
 6. Not ported (PORTING.md `partial` rows): a saved passphrase checked again after the key changed, the debug-on connect, the not-remembered half of the 3-cell D7 case, a failing trust write, a failing password write / prune, the identity password save and its prune. `ssh:passphrases:forget` and the other key / password channels stay S4's.
 7. macOS: platform-neutral code, not cross-checked (unimux-ssh pulls ring, like wave 2 noted).
+
+### S4 open issues (2026-11-08, fast mode, not verified)
+
+Run here: `cargo fmt`, `cargo clippy -p unimux-ssh -p unimux-platform -p unimux-app --all-targets -- -D warnings`, `cargo test -p unimux-ssh -p unimux-platform -p unimux-app` (one run). Not run (fast mode): the Docker matrix (`node scripts/ssh-matrix.mjs --build`, CI job `ssh-matrix`), real-app checks (verify-ssh-ui), macOS.
+
+1. **The CI matrix job has never run.** `ssh-matrix` (ubuntu-latest, Docker) is new; the first green run is the acceptance for S3's open issue 1 (same outcome, SshErrorCode and methods as 1.1.4 on the SP7 servers). Expected risk: S3 open issue 3 (a close without an error reads `unknown` where 1.1.4's owners said `reset`) does not show in these cases; the Dropbear 2016 image needs `debian:stretch-slim` from the archive and may break when Docker Hub drops it.
+2. **Host keys in the matrix** are only checked to be shown on every server that completes a key exchange; the byte equality with 1.1.4's known_hosts.json entries needs both sides on the same container (host keys change per image build), so it stays with scripts/sp7/matrix.mjs (Electron, until R1) and the in-process test `every_host_key_type_is_shown_as_its_blob`.
+3. **Import dialog**: 1.1.4 passed `showHiddenFiles`; rfd has no such option (Windows follows the Explorer setting, macOS shows hidden files only with Cmd+Shift+.). The ~/.ssh start folder is kept.
+4. **`os.hostname()`**: Windows uses `GetComputerNameExW(ComputerNameDnsHostname)` where libuv calls `GetHostNameW`; both give the DNS host name on a normal setup, not compared on a renamed / domain machine.
+5. **Not ported from 1.1.4's ipc.test.ts as goldens**: the handlers are unit tested (schemas, file names, key refs, the app router test `key_and_password_channels_answer_like_1_1_4`); no golden corpus against the TS handlers was made, so differences in rare inputs (e.g. a comment of exactly 200 code points with control characters, `bits` above u32) were checked by reading only.
+6. The test server is test-only (feature `test-server`, loopback only, paths kept inside the given folder); P5 / T1 / D2 can use it from their own tests with `unimux-ssh = { features = ["test-server"] }` in dev-dependencies.
+7. macOS: platform-neutral code plus `libc::gethostname`; not compiled here (unimux-ssh pulls ring, see wave 3 integration 4).
 
 ### D11 open issues (2026-11-07, fast mode, not verified)
 

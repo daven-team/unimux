@@ -344,6 +344,7 @@ fn register_files(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
                 title: tr(&c, "Otwórz plik bazy SQLite"),
                 filter: Some(("SQLite".to_string(), ["db", "sqlite", "sqlite3", "db3"].map(String::from).to_vec())),
                 more_filters: db_filters(),
+                directory: None,
             };
             Ok(os.pick_file(crate::windows::MAIN, request).await.map(Value::String).unwrap_or(Value::Null))
         }
@@ -380,6 +381,7 @@ fn register_files(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
                 title: tr(&c, "Wybierz plik certyfikatu CA"),
                 filter: Some(("PEM".to_string(), ["pem", "crt", "cer"].map(String::from).to_vec())),
                 more_filters: db_filters(),
+                directory: None,
             };
             Ok(os.pick_file(crate::windows::MAIN, request).await.map(Value::String).unwrap_or(Value::Null))
         }

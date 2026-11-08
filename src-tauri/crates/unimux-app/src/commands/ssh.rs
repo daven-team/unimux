@@ -10,7 +10,11 @@
 //!
 //! S3 ([`link`]): the SSH coordinator with its owner slots and event routes, and `ssh:connect`, `ssh:sessions`,
 //! `ssh:prompt:answer`.
+//!
+//! S4 ([`keys`]): the key, password and known-host channels (`ssh:key:*`, `ssh:password:*`, `ssh:identityPassword:*`,
+//! `ssh:passphrases:forget`, `ssh:knownHosts:remove`) over `unimux_ssh::ipc::SshIpc`.
 
+pub mod keys;
 pub mod link;
 
 use std::sync::Arc;
@@ -30,6 +34,7 @@ async fn blocking<T: Send + 'static>(command: &str, f: impl FnOnce() -> T + Send
 
 pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     link::register(r, ctx);
+    keys::register(r, ctx);
     let c = ctx.clone();
     r.invoke("ssh:vault:info", move |_call| {
         let c = c.clone();
@@ -186,6 +191,62 @@ mod tests {
         assert_eq!(ask("ssh:knownHosts:list", vec![]).await, json!([]));
         ctx.ssh.history().flush();
         assert!(dir.path().join("ssh").join("command_history.json").exists());
+        ctx.saver.stop();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn key_and_password_channels_answer_like_1_1_4() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = context(dir.path());
+        let mut builder = RouterBuilder::new(Contract::embedded());
+        register(&mut builder, &ctx);
+        assert!(builder.errors().is_empty(), "{:?}", builder.errors());
+        let router = builder.build(ctx.guard.clone());
+        for channel in unimux_ssh::ipc::KEY_CHANNELS.into_iter().chain(["ssh:key:discardDraft"]) {
+            assert_eq!(router.status(channel), Status::Implemented, "{channel}");
+        }
+        let ask = |command: &str, arg: Value| {
+            let router = &router;
+            let c = Call::new(command, Caller::new("main", "http://tauri.localhost/"), vec![arg]);
+            async move {
+                match router.invoke(c).await {
+                    Ok(Reply::Json(v)) => v,
+                    other => panic!("no JSON answer: {other:?}"),
+                }
+            }
+        };
+        let invalid = json!({ "ok": false, "error": "invalid" });
+        assert_eq!(ask("ssh:key:draftFromText", json!({ "privateKey": "" })).await, invalid);
+        assert_eq!(ask("ssh:key:generate", json!({ "label": "x", "type": "dsa", "savePassphrase": false })).await, invalid);
+        assert_eq!(ask("ssh:password:set", json!({ "hostId": HOST })).await, invalid);
+        // A host the state does not know: notFound, nothing stored.
+        let other = "00000000-0000-4000-8000-0000000000ff";
+        assert_eq!(
+            ask("ssh:password:set", json!({ "hostId": other, "password": "pw" })).await,
+            json!({ "ok": false, "error": "notFound" })
+        );
+        // No safeStorage in the test: the password is kept for this run only.
+        assert_eq!(
+            ask("ssh:password:set", json!({ "hostId": HOST, "password": "pw" })).await,
+            json!({ "ok": true, "ephemeral": true })
+        );
+        assert_eq!(ask("ssh:password:clear", json!({ "hostId": HOST })).await, json!({ "ok": true }));
+        assert_eq!(ask("ssh:password:clear", json!({ "hostId": "x" })).await, json!({ "ok": false }));
+        // A generated key: the result carries the metadata only, never the private text.
+        let r =
+            ask("ssh:key:generate", json!({ "label": " k ", "type": "ed25519", "comment": "c", "savePassphrase": false })).await;
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(r["key"]["label"], "k");
+        assert_eq!(r["key"]["comment"], "c");
+        assert!(!r.to_string().contains("PRIVATE KEY"));
+        let id = r["key"]["id"].as_str().unwrap().to_string();
+        let revealed = ask("ssh:key:revealPrivate", json!({ "id": id })).await;
+        assert!(revealed["privateKey"].as_str().unwrap().contains("BEGIN OPENSSH PRIVATE KEY"));
+        assert_eq!(ask("ssh:key:remove", json!({ "id": id })).await, json!({ "ok": true }));
+        assert_eq!(ask("ssh:key:remove", json!({ "id": id })).await, json!({ "ok": false }));
+        assert_eq!(ask("ssh:key:revealPrivate", json!({ "id": id })).await, json!({ "ok": false, "error": "notFound" }));
+        assert_eq!(ask("ssh:knownHosts:remove", json!({ "id": id })).await, json!({ "ok": false }));
+        assert_eq!(ask("ssh:passphrases:forget", Value::Null).await, json!({ "ok": true }));
         ctx.saver.stop();
     }
 }

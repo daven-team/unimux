@@ -137,6 +137,30 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
           if-no-files-found: error
 
+  # S4 acceptance: the russh login core against real SSH servers in Docker (OpenSSH 10 with four configs, OpenSSH 5.9,
+  # Dropbear 2025 and 2016; the SP7 images), compared with 1.1.4's recorded results (test/golden/sp7/matrix.json). Linux
+  # only (Docker on the hosted runner); the containers are removed by id inside the script.
+  ssh-matrix:
+    name: SSH server matrix (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri
+          key: ssh-matrix
+      # Only unimux-ssh and its own dependencies are built (no Tauri, no WebKitGTK).
+      - run: cargo build -p unimux-ssh --example ssh_matrix
+        working-directory: src-tauri
+      - run: node scripts/ssh-matrix.mjs --build
+
   # PLAN W2 acceptance: the check build (dev-overrides + test-bridge) boots on macOS and the WebKit shims, the app menu and
   # the text-substitution defaults are in place, checked over the eval bridge (WKWebView has no CDP). The manual items
   # (traffic lights, Cmd+V, IME, WebGL settling, App Nap) are R3's checklist.
