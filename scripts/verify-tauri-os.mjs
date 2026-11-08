@@ -90,7 +90,9 @@ try {
   await os({ action: 'toast', index: shown[0].index, event: 'button', button: 0 });
   await settle();
   ev = await events();
-  check('a notification answers once (it is forgotten after the first press)', ev.length === 0, JSON.stringify(ev));
+  // 1.1.4 forgot the toast on its first press but kept its handlers (verify-notify-actions: "a stale Allow types nothing
+  // and only shows the cell"): the second press still reaches the renderer, whose token check finds the dialog gone.
+  check('a second press of the same toast is a stale answer: the renderer only shows the cell', JSON.stringify(ev[0]) === JSON.stringify(['notify:answer', cellId, 'tok.1', 'allow']) && ev.some((e) => e[0] === 'focus-cell' && e[1] === cellId), JSON.stringify(ev));
 
   await mc(`window.mc.notify({ title: 'unimux', body: 'again', cellId: ${JSON.stringify(cellId)}, actions: 'answer', token: 'tok.2' })`);
   await settle();
