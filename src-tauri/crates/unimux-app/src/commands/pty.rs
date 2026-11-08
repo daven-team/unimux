@@ -140,7 +140,6 @@ impl PtyHost {
     }
 
     /// What happens to the cells' processes (automation statuses, M3).
-    #[allow(dead_code, reason = "the automation statuses (M3) register here")]
     pub fn on_cell(&self, name: &'static str, observer: impl Fn(&CellEvent) + Send + Sync + 'static) {
         self.hooks.write().cells.push((name, Arc::new(observer)));
     }

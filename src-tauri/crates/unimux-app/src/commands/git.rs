@@ -115,13 +115,11 @@ fn truthy(v: &Value) -> bool {
 }
 
 /// `createWorktree(projectPath, name)` for the automation (M3): the error is the text the renderer would show.
-#[allow(dead_code)] // called by the automation (M3)
 pub async fn create_worktree(ctx: &AppContext, project_path: &str, name: &str) -> Result<Worktree, String> {
     engine(ctx).create_worktree(project_path, name).await
 }
 
 /// The automation's rollback (`removeWorktree(path, wt, true)` of index.ts): unforced, the branch goes when unimux made it.
-#[allow(dead_code)] // called by the automation (M3)
 pub async fn remove_worktree(ctx: &AppContext, project_path: &str, wt: &Worktree) -> Result<(), String> {
     match engine(ctx).remove_worktree(project_path, wt, true, None).await {
         WorktreeRemoveResult::Ok => Ok(()),

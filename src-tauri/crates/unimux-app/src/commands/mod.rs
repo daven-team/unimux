@@ -10,6 +10,7 @@ use crate::context::AppContext;
 pub mod accounts;
 pub mod agents;
 pub mod app;
+pub mod automation;
 pub mod cells;
 pub mod db;
 pub mod fallbacks;
