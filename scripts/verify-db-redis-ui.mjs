@@ -422,15 +422,15 @@ try {
   check(sessionsOfA === 3, `keys, Pub/Sub and server views of one DB share one session (sessions of the connection: ${sessionsOfA}, expected 3 = shared + console + probe)`);
 
   // ── read-only connection through the SSH tunnel ──
-  // Through the connections panel this time: a click on a Redis connection opens its key browser.
+  // Through the connections panel this time: the connection menu opens its key browser (a click on a Redis connection
+  // unfolds its DBs in the panel and asks for the SSH password there, since 1.0.x).
   await click('#db-view');
   const vpsRow = "[...document.querySelectorAll('.db-row')].find((r) => r.querySelector('.db-name')?.textContent === 'vps redis')";
   await until(`!!${vpsRow}`, 'Redis connection in the panel');
   await evaluate(`(() => { const r = ${vpsRow}; const b = r.getBoundingClientRect(); r.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: b.left + 20, clientY: b.top + 8 })); return true; })()`);
   await until(`[...document.querySelectorAll('[role=menuitem]')].some((b) => b.textContent.includes('Konsola'))`, 'Redis entries in the connection menu');
   check(true, 'the connections panel offers the Redis views in the connection menu');
-  await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true`);
-  await evaluate(`${vpsRow}.click(), true`);
+  await evaluate(`[...document.querySelectorAll('[role=menuitem]')].find((b) => b.textContent.includes('Otwórz przeglądarkę kluczy')).click(), true`);
   await until(`!!document.querySelector('.redis-card input[type=password]')`, 'SSH password prompt in the tab', 30000);
   await shot('login');
   await setValue('.redis-card input[type=password]', ssh.password);
