@@ -6180,9 +6180,19 @@ dependencies = [
 name = "unimux-sftp"
 version = "1.2.0"
 dependencies = [
+ "futures",
+ "indexmap 2.14.2",
+ "parking_lot 0.13.0",
+ "russh",
  "serde_json",
+ "tokio",
+ "tokio-util",
  "unimux-core",
+ "unimux-files",
  "unimux-ipc",
+ "unimux-ssh",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]
