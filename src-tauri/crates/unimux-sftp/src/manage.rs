@@ -124,24 +124,46 @@ fn shared_writable(mode: Option<u32>) -> bool {
 /// The sticky bit: in such a folder only the entry's owner, the folder's owner and root may rename or unlink an entry.
 const STICKY: u32 = 0o1000;
 
-/// Under sudo: may root trust that `entry` (lstat attributes of one name inside `dir`) stays what it is? Only when nobody
-/// but root can rename or replace it: `dir` is a real folder (not a link) that only its owner can write to, or a sticky
-/// folder owned by root that others can write to while root owns the entry too (`/tmp/x` of root). Unknown modes or
-/// owners count as unsafe.
-pub(crate) fn ancestor_keeps_entry(dir: &Attrs, entry: &Attrs) -> bool {
+/// May `principal` (the uid doing the work; root under sudo) trust that `entry` (lstat attributes of one name inside `dir`)
+/// stays what it is? Only when nobody but root or the principal can rename or replace it: `dir` is a real folder (not a
+/// link) that only its owner can write to and that owner is root or the principal, or a sticky folder owned by root that
+/// others can write to while root or the principal owns the entry (`/tmp/x`). Unknown modes or owners count as unsafe:
+/// a folder owned by another user lets that user swap the name for a link, which the principal would then follow.
+pub(crate) fn ancestor_keeps_entry(dir: &Attrs, entry: &Attrs, principal: u32) -> bool {
     let Some(mode) = dir.mode else { return false };
     if mode & S_IFMT != S_IFDIR {
         return false;
     }
+    let trusted = |uid: Option<u32>| uid.is_some_and(|u| u == 0 || u == principal);
     if !shared_writable(Some(mode)) {
-        return true;
+        return trusted(dir.uid);
     }
-    mode & STICKY != 0 && dir.uid == Some(0) && entry.uid == Some(0)
+    mode & STICKY != 0 && dir.uid == Some(0) && trusted(entry.uid)
+}
+
+/// Every folder above `path`, up to `/`, keeps the next part of the path what it is for `principal` (see
+/// [`ancestor_keeps_entry`]). `Ok(false)` as soon as one does not, or a part is gone.
+pub(crate) async fn path_kept_for(side: &RemoteSide, path: &str, principal: u32) -> Result<bool, SftpErrorCode> {
+    let client = side.client();
+    let mut child = path.to_string();
+    let mut child_attrs = client.lstat(&child).await.map_err(|e| e.code())?;
+    loop {
+        let parent = side.dirname(&child);
+        if parent == child {
+            return Ok(true);
+        }
+        let parent_attrs = client.lstat(&parent).await.map_err(|e| e.code())?;
+        if !ancestor_keeps_entry(&parent_attrs, &child_attrs, principal) {
+            return Ok(false);
+        }
+        child = parent;
+        child_attrs = parent_attrs;
+    }
 }
 
 /// Under sudo: emptying the folder at `path` (with `mode`) is unsafe when others can write to it, or (`root`, the folder the
 /// user selected) when any folder above it, up to `/`, lets someone other than root swap the path's next part for a link
-/// (see [`ancestor_keeps_entry`]): root would then follow it and empty another folder.
+/// (see [`ancestor_keeps_entry`] with root as the principal): root would then follow it and empty another folder.
 async fn unsafe_for_root(side: &RemoteSide, path: &str, mode: Option<u32>, root: bool) -> Result<bool, SftpErrorCode> {
     if shared_writable(mode) {
         return Ok(true);
@@ -149,21 +171,7 @@ async fn unsafe_for_root(side: &RemoteSide, path: &str, mode: Option<u32>, root:
     if !root {
         return Ok(false);
     }
-    let client = side.client();
-    let mut child = path.to_string();
-    let mut child_attrs = client.lstat(&child).await.map_err(|e| e.code())?;
-    loop {
-        let parent = side.dirname(&child);
-        if parent == child {
-            return Ok(false);
-        }
-        let parent_attrs = client.lstat(&parent).await.map_err(|e| e.code())?;
-        if !ancestor_keeps_entry(&parent_attrs, &child_attrs) {
-            return Ok(true);
-        }
-        child = parent;
-        child_attrs = parent_attrs;
-    }
+    Ok(!path_kept_for(side, path, 0).await?)
 }
 
 /// `remove`: a file or link is unlinked, a folder emptied (its files 8 at a time, then its folders one by one) and removed.
