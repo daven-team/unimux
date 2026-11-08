@@ -8,9 +8,10 @@
 //! disconnect (`unimux_db::service`), the query history (`db/query_history.json`, written 1.5 s after a change and in the
 //! wind-down's save phase), the SQLite file and CA dialogs, the result export, and the `db:*` events. Every request passes
 //! the 1.1.4 validation first (`unimux_db::ipc`). The sessions themselves are D4 / D7 / D9 / D11 (routed by D12): D9's
-//! `RedisHost` opens Redis sessions and hands every other kind to D1's `UnavailableHost` (ends them with `unsupported`)
-//! until the other kinds land. Tunnels log in through the SSH coordinator (S3, `commands::ssh::DbTunnels`); their owner (D2,
-//! `unimux_db::tunnel::DbTunnelHost`) fills the coordinator's `db` slot and gives the sessions their forwarded channels.
+//! `RedisHost` opens Redis sessions, D8's `MysqlHost` behind it MySQL / MariaDB sessions, and every other kind goes on to
+//! D1's `UnavailableHost` (ends them with `unsupported`) until the other kinds land. Tunnels log in through the SSH
+//! coordinator (S3, `commands::ssh::DbTunnels`); their owner (D2, `unimux_db::tunnel::DbTunnelHost`) fills the
+//! coordinator's `db` slot and gives the sessions their forwarded channels.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,6 +22,7 @@ use unimux_core::i18n::translate;
 use unimux_db::history::{DbHistoryStore, WRITE_DELAY_MS};
 use unimux_db::host::{DbHostLink, Spawn, UnavailableHost, queued_report};
 use unimux_db::ipc;
+use unimux_db::mysql::{MysqlHost, MysqlHostDeps};
 use unimux_db::redis::host::{DB_CONNECT_MS, DbTunnels, RedisHost, RedisHostDeps};
 use unimux_db::redis::session::RedisLimits;
 use unimux_db::service::{DbDeps, DbEvents, DbService, DbStateAccess, PROMPT_TIMEOUT_MS, ReadCa, TEST_TIMEOUT_MS};
@@ -149,8 +151,10 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     // D2: the SSH tunnels of the sessions; the coordinator's `db:` messages (sshConnect, host key / auth answers) go to them.
     let tunnels = DbTunnelHost::new(spawn.clone(), TUNNEL_TIMERS);
     crate::commands::ssh::link::link(ctx).owners.set(Some(SessionHostKind::Db), tunnels.clone() as Arc<dyn SshHostLink>);
+    // D8: MySQL / MariaDB sessions (the port routing comes with D12, like Redis').
+    let mysql = MysqlHost::new(MysqlHostDeps::new(others.clone(), spawn.clone(), Some(tunnels.clone() as Arc<dyn DbTunnels>)));
     let host = RedisHost::new(RedisHostDeps {
-        next: others.clone(),
+        next: mysql.clone(),
         spawn: spawn.clone(),
         tunnels: Some(tunnels.clone() as Arc<dyn DbTunnels>),
         connect_ms: DB_CONNECT_MS,
@@ -184,6 +188,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         }),
     );
     others.connect(report.clone());
+    mysql.connect(report.clone());
     host.connect(report.clone());
     tunnels.connect(report);
     // The quit: the sessions' tunnels say goodbye (1.1.4 DbHost.shutdown ends every tunnel after the sessions).

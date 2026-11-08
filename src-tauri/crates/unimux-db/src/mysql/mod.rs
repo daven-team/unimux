@@ -13,21 +13,37 @@
 //! - [`error`]: the client's errors, `mapMysqlConnectError`, `mysqlConnectMessage`, `mysqlServerError`.
 //! - [`packet`]: framing and raw rows.
 //!
-//! The session on top (KILL QUERY side connection, the open result, CALL sets, SHOW WARNINGS, USE, timeouts, metadata,
-//! edits) is D8; the column parser, the charset tables and the LOAD DATA LOCAL answer are shared with the SP9 code in
-//! [`crate::wire`].
+//! D8 adds the session on top (1.1.4 src/dbhost/mysqlSession.ts, mysqlMeta.ts and the MySQL half of host.ts):
+//!
+//! - [`session`]: [`session::MysqlSession`] (operations one at a time on a task that owns the connection, KILL QUERY on a
+//!   side connection, the open "load more" result with its idle timer, CALL result sets with caps, SHOW WARNINGS notices,
+//!   USE tracking, the read-only override and statement timeouts restored afterwards, table pages, staged edits, whole
+//!   cells, the idle close watch).
+//! - [`meta`]: the catalog reads (databases, objects, table info, DDL).
+//! - [`port`]: the DB port messages, written like `JSON.stringify`.
+//! - [`host`]: [`host::MysqlHost`], the [`crate::host::DbHostLink`] that opens MySQL sessions (password prompts, TLS
+//!   modes, tunnels, the session settings) and hands every other kind to the next link.
+//!
+//! The column parser, the charset tables and the LOAD DATA LOCAL answer are shared with the SP9 code in [`crate::wire`].
 
 pub mod conn;
 pub mod error;
+pub mod host;
+pub mod meta;
 pub mod open;
 pub mod packet;
+pub mod port;
+pub mod session;
 pub mod stream;
 pub mod tls;
 
 pub use crate::wire::mysql::{MyColumn, MyResult};
 pub use conn::{MyConn, MyEvent, MyExec, MyLogin, MyOk};
 pub use error::{DbServerError, MyError, MyServerError, connect_message, map_connect_error, server_error};
+pub use host::{MysqlHost, MysqlHostDeps};
 pub use open::{MyOpenParams, MyTlsMode, connect_tcp, open, open_once};
 pub use packet::RawRow;
+pub use port::MyPortMessage;
+pub use session::{MysqlOptions, MysqlOut, MysqlSession};
 pub use stream::MyStream;
 pub use tls::{MyTlsParams, MyTlsVerify};
