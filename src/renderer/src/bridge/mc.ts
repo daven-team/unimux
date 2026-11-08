@@ -76,7 +76,11 @@ async function attachPort(kind: 'sftp' | 'db'): Promise<void> {
     return;
   }
   pair.port2.start();
-  window.postMessage(`mc:${kind}-port`, '*', [pair.port1]);
+  // Posted once the page has loaded, as 1.1.4 sent it at did-finish-load: this bridge runs before the app bundle (a deferred
+  // module), and an attach answered before sftp.ts / dbClient.ts added their 'message' listeners would lose the port.
+  const post = () => window.postMessage(`mc:${kind}-port`, '*', [pair.port1]);
+  if (document.readyState === 'complete') post();
+  else window.addEventListener('load', post, { once: true });
 }
 
 /**
