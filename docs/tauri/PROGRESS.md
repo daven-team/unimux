@@ -144,7 +144,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 |---|---|---|---|---|---|---|
 | T3 | SFTP transfer queue | todo | | | | |
 | T4 | SFTP manage ops and editor files | todo | | | | |
-| T5 | Sudo SFTP over exec | todo | | | | Docker |
+| T5 | Sudo SFTP over exec | built, fast mode, not verified | 2026-11-08 | 2026-11-08 | | branch `tauri-pkg-T5`. unimux-sftp `sudo` (port of sftphost/sudo.ts, execSftp.ts and `startSudo` / `execSftp` of host.ts): sudoCommands (own command or `sudo -n` for the 3 default sftp-server places), passwordCommand (`sudo -S -p '[unimux-sudo-password]' ...`), validSudoPassword, markerCount, classifySudo with the 1.1.4 English and Polish patterns (regex crate) and the `sudo -n` exit 1 rule, sudoError; the exec channel (LC_ALL=C / LANG=C env requests, exec with reply) split into a pump: stdout into the SFTP stream (duplex 256 KB), the stream into stdin, stderr / exit status / close as events; `exec_sftp_on`: INIT at once without a password, otherwise the password line only after the first marker and the INIT right behind it, a marker after the INIT = other, a second marker = wrongPassword, 3 s prompt grace, 20 ms settle after the end, SFTP timer 20 s; `run_sudo` (next place only on notFound, 3 password tries, cancel, invalid password). `SidesBackend::start_sudo` uses it; the exec channel closes with the session (`SftpSession::with_on_kill`). Checked: cargo fmt, clippy -D warnings and cargo test for unimux-sftp (59, 14 new). See "T5 open issues". |
 | D12 | DB result routing and detached DB windows | todo | | | | |
 
 ### Wave 7: release
@@ -1773,6 +1773,14 @@ Checked once: `cargo fmt`; clippy -D warnings for unimux-mcp, unimux-agents, uni
 4. A failed native delivery is logged to the crash log ("codex queue delivery to <cell> failed", no message text); 1.1.4 swallowed it silently.
 5. PORTING: wait-for's HTTP cases (progress notifications per client kind, revoked token ends the wait, the task prompt once per run, tells the coordinator on exit over HTTP) and its "checks a burst of changes once" are not ported; team-start (17 cases, TS of src/shared mostly, partly covered by P4's launch goldens) and prompt-queue (shared TS only, not main-side) got no new rows. "times out ... with one timer" is `partial` (the timer count is not observable); the two mcp-cell-config rows about removal / endCellMcp are `partial` (no Rust test of revoke + file removal together).
 6. The team flow between the renderer and Rust (start card, `automation:start-cells`, startupPrompt clearing on the renderer side) is unchanged TS and untested against the Rust side.
+
+### T5 open issues (2026-11-08, fast mode, not verified)
+
+1. Not verified against a real server: the Docker matrix of the plan (NOPASSWD, password, requiretty, pl locale) was not run; only unit tests with a fake channel and the in-memory SFTP server (engine) and a scripted runner (start loop). The russh adapter (`open_exec`: env requests, exec with want-reply, the stdout / stderr pump, `ExitSignal` as exit -1, channel close on kill) has no test of its own.
+2. The stderr tail keeps the last 4096 characters (Unicode scalar values; 1.1.4 counted UTF-16 units) and joins UTF-8 sequences cut at a chunk end (1.1.4 decoded each chunk on its own).
+3. 1.1.4 passed the server's ident to ssh2's SFTP class (`remoteIdent`); T2's own client has no server quirks keyed on it, so it is not passed.
+4. While the stdout pipe is full the pump stops reading the channel, so stderr and the exit status wait behind it (russh flow control); the same holds for the subsystem channel of T2.
+5. The password line goes through the in-memory pipe and russh's buffers, which are not zeroized (the line buffer itself is).
 
 ## Wave 5 integration (2026-11-08, fast mode)
 

@@ -13,6 +13,10 @@
 //! status mapping) and [`local::LocalSide`] (Windows names, `sameLocalFile` via the file index), the
 //! [`targets::TargetRegistry`], and [`backend::SidesBackend`] (attach, list capped at 20,000, stat, realpath, mkdir,
 //! rename).
+//!
+//! T5 (port of src/sftphost/sudo.ts, src/sftphost/execSftp.ts and `startSudo` / `execSftp` of src/sftphost/host.ts):
+//! [`sudo`] (the server commands and their password form, classifySudo incl. Polish, the exec channel pump that keeps
+//! stdout and stderr apart, the marker-gated password write, 3 password tries).
 
 pub mod backend;
 pub mod client;
@@ -26,6 +30,7 @@ pub mod proto;
 pub mod remote;
 pub mod service;
 pub mod sides;
+pub mod sudo;
 pub mod targets;
 pub mod throttle;
 pub mod timers;

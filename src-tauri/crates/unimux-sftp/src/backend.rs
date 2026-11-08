@@ -200,9 +200,9 @@ impl SftpBackend for SidesBackend {
         Box::pin(async move { attach_stream(stream, timers).await.map(|s| s as Arc<dyn RemoteSession>) })
     }
 
-    fn start_sudo(&self, _start: SudoStart) -> BoxFuture<'static, Result<Arc<dyn RemoteSession>, SshErrorCode>> {
-        // T5.
-        Box::pin(async { Err(SshErrorCode::SudoFailed) })
+    fn start_sudo(&self, start: SudoStart) -> BoxFuture<'static, Result<Arc<dyn RemoteSession>, SshErrorCode>> {
+        // T5: the SFTP server through sudo on exec channels (crate::sudo).
+        Box::pin(crate::sudo::start_sudo(start))
     }
 
     fn op(&self, _id: &str, remote: Option<Arc<dyn RemoteSession>>, _sudo: bool, op: SftpOp) -> BoxFuture<'static, SftpResult> {
