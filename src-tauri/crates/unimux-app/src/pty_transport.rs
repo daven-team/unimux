@@ -11,8 +11,13 @@
 //! - `channel` (fallback when `ICoreWebView2_17` is missing): the attach Channel, raw bytes, with release acks.
 //!
 //! `MC_PTY_TRANSPORT=sharedBuffer|pull|channel` picks one in dev / check builds (measurements, SP5 comparison).
+//!
+//! The DB port (D12) carries JSON messages only. On Windows they go as shared buffers too ([`DbBufferSink`]: one writer
+//! thread per attach batches the queued messages, `[u32 LE len][UTF-8 JSON]...` with `{"mcPort":"db","a":<attach id>}`),
+//! so a large row chunk costs no Channel eval + fetch; elsewhere (and with `MC_DB_TRANSPORT=channel` in dev / check
+//! builds) the attach Channel with the JSON text as the sessions wrote it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -56,19 +61,39 @@ impl PortSink for ChannelSink {
     fn post_bytes(&self, bytes: &[u8]) -> bool {
         self.0.send(InvokeResponseBody::Raw(bytes.to_vec())).is_ok()
     }
+    fn post_json_text(&self, text: String) -> bool {
+        self.0.send(InvokeResponseBody::Json(text)).is_ok()
+    }
     fn gated(&self) -> bool {
         true
     }
 }
 
-/// The sink of a port attach: the Channel for sftp / db, the preferred data plane for pty. Returns the transport name the
-/// page has to serve.
+/// The transport the build prefers for the DB port.
+fn db_preferred() -> &'static str {
+    #[cfg(dev_overrides)]
+    if let Ok(v) = std::env::var("MC_DB_TRANSPORT") {
+        match v.as_str() {
+            "sharedBuffer" => return "sharedBuffer",
+            "channel" => return "channel",
+            _ => {}
+        }
+    }
+    if cfg!(windows) { "sharedBuffer" } else { "channel" }
+}
+
+/// The sink of a port attach: the Channel for sftp, shared buffers on Windows for db, the preferred data plane for pty.
+/// Returns the transport name the page has to serve.
 pub async fn sink_for(
     kind: &str,
     webview: &Webview,
     channel: Channel<InvokeResponseBody>,
     attach: Option<&str>,
 ) -> (Arc<dyn PortSink>, &'static str) {
+    if kind == "db" && db_preferred() == "sharedBuffer" && shared_buffer_supported(webview).await {
+        let attach = attach.filter(|a| valid_attach_id(a)).map(str::to_string);
+        return (DbBufferSink::start(webview.clone(), channel, attach), "sharedBuffer");
+    }
     if kind != "pty" {
         return (Arc::new(ChannelSink(channel)), "channel");
     }
@@ -149,6 +174,109 @@ impl PortSink for SharedBufferSink {
     }
     fn transport(&self) -> &'static str {
         "sharedBuffer"
+    }
+}
+
+/// A DB port batch is cut at this size (a single larger message still goes alone).
+const DB_BATCH_BYTES: usize = 4 << 20;
+
+#[derive(Default)]
+struct DbQueue {
+    items: VecDeque<String>,
+    closed: bool,
+}
+
+/// The DB port as shared buffers (see the module text). Messages keep their order: a batch that could not be posted goes
+/// over the Channel as a whole, before anything later.
+pub struct DbBufferSink {
+    queue: Arc<(Mutex<DbQueue>, Condvar)>,
+}
+
+impl DbBufferSink {
+    fn start(webview: Webview, channel: Channel<InvokeResponseBody>, attach: Option<String>) -> Arc<dyn PortSink> {
+        let queue: Arc<(Mutex<DbQueue>, Condvar)> = Arc::default();
+        let q = queue.clone();
+        let extra = match &attach {
+            Some(a) => format!("{{\"mcPort\":\"db\",\"a\":\"{a}\"}}"),
+            None => "{\"mcPort\":\"db\"}".to_string(),
+        };
+        let spawned = std::thread::Builder::new().name("unimux-db-port".into()).spawn(move || {
+            loop {
+                let batch = {
+                    let (lock, cv) = &*q;
+                    let mut st = lock.lock();
+                    while st.items.is_empty() && !st.closed {
+                        cv.wait(&mut st);
+                    }
+                    if st.closed {
+                        return;
+                    }
+                    take_batch(&mut st.items, DB_BATCH_BYTES)
+                };
+                if !post_shared_buffer(&webview, extra.clone(), frame_batch(&batch)) {
+                    for text in batch {
+                        let _ = channel.send(InvokeResponseBody::Json(text));
+                    }
+                }
+            }
+        });
+        if spawned.is_err() {
+            queue.0.lock().closed = true;
+        }
+        Arc::new(DbBufferSink { queue })
+    }
+}
+
+/// The oldest queued messages up to `max` bytes (at least one).
+fn take_batch(items: &mut VecDeque<String>, max: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut size = 0;
+    while let Some(next) = items.front() {
+        if !out.is_empty() && size + 4 + next.len() > max {
+            break;
+        }
+        size += 4 + next.len();
+        out.extend(items.pop_front());
+    }
+    out
+}
+
+/// `[u32 LE len][UTF-8 JSON]...`
+fn frame_batch(batch: &[String]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(batch.iter().map(|t| t.len() + 4).sum());
+    for text in batch {
+        bytes.extend_from_slice(&(text.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(text.as_bytes());
+    }
+    bytes
+}
+
+impl PortSink for DbBufferSink {
+    fn post_json(&self, message: &Value) -> bool {
+        serde_json::to_string(message).ok().is_some_and(|s| self.post_json_text(s))
+    }
+    fn post_bytes(&self, _bytes: &[u8]) -> bool {
+        false
+    }
+    fn post_json_text(&self, text: String) -> bool {
+        let (lock, cv) = &*self.queue;
+        let mut st = lock.lock();
+        if st.closed {
+            return false;
+        }
+        st.items.push_back(text);
+        cv.notify_one();
+        true
+    }
+    fn transport(&self) -> &'static str {
+        "sharedBuffer"
+    }
+    fn close(&self) {
+        let (lock, cv) = &*self.queue;
+        let mut st = lock.lock();
+        st.closed = true;
+        st.items.clear();
+        cv.notify_all();
     }
 }
 
@@ -317,6 +445,18 @@ pub async fn mc_port_pull(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn db_batches_keep_the_order_and_frame_each_message() {
+        let mut q: VecDeque<String> = ["ab", "cde", "f"].map(String::from).into();
+        assert_eq!(take_batch(&mut q, 13), vec!["ab".to_string(), "cde".to_string()]);
+        assert_eq!(take_batch(&mut q, 1), vec!["f".to_string()], "one message always goes");
+        assert!(q.is_empty());
+        let bytes = frame_batch(&["{}".to_string(), "\"\\udc00\"".to_string()]);
+        assert_eq!(&bytes[..6], &[2, 0, 0, 0, b'{', b'}']);
+        assert_eq!(&bytes[6..10], &[8, 0, 0, 0]);
+        assert_eq!(&bytes[10..], b"\"\\udc00\"");
+    }
 
     #[test]
     fn shared_buffers_name_the_attach_and_the_message_number() {

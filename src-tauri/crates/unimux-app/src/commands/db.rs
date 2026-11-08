@@ -7,26 +7,35 @@
 //! their passwords (`db/vault.json` through the app's safeStorage), the sessions with their states, prompts, pins and idle
 //! disconnect (`unimux_db::service`), the query history (`db/query_history.json`, written 1.5 s after a change and in the
 //! wind-down's save phase), the SQLite file and CA dialogs, the result export, and the `db:*` events. Every request passes
-//! the 1.1.4 validation first (`unimux_db::ipc`). The sessions themselves are D4 / D7 / D9 / D11 (routed by D12): D9's
-//! `RedisHost` opens Redis sessions, D8's `MysqlHost` behind it MySQL / MariaDB sessions, and every other kind goes on to
-//! D1's `UnavailableHost` (ends them with `unsupported`) until the other kinds land. Tunnels log in through the SSH
-//! coordinator (S3, `commands::ssh::DbTunnels`); their owner (D2, `unimux_db::tunnel::DbTunnelHost`) fills the
-//! coordinator's `db` slot and gives the sessions their forwarded channels.
+//! the 1.1.4 validation first (`unimux_db::ipc`).
+//!
+//! D12: the sessions run behind one DB Host (`unimux_db::router::DbRouter`) over a chain of session hosts: D9's `RedisHost`,
+//! D8's `MysqlHost`, the Postgres host (`unimux_db::pg::host`, D4-D6 sessions) and the SQLite host
+//! (`unimux_db::sqlite::host`, D11), then D1's `UnavailableHost` for unknown kinds. Their tasks are supervised (a panic is a
+//! crash of the DB Host: the sessions end, `db:hostCrashed`, more than 5 in a minute is fatal). Result rows and Pub/Sub
+//! messages go to the window that asked over its DB port (`unimux_db::route::DbPorts`, the `db` port owner; a moved tab's
+//! sessions follow it). Tunnels log in through the SSH coordinator (S3, `commands::ssh::DbTunnels`); their owner (D2,
+//! `unimux_db::tunnel::DbTunnelHost`) fills the coordinator's `db` slot and gives the sessions their forwarded channels.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
+use unimux_core::crash_log::ReportLimiter;
 use unimux_core::i18n::translate;
 use unimux_db::history::{DbHistoryStore, WRITE_DELAY_MS};
 use unimux_db::host::{DbHostLink, Spawn, UnavailableHost, queued_report};
 use unimux_db::ipc;
 use unimux_db::mysql::{MysqlHost, MysqlHostDeps};
+use unimux_db::pg::host::{PgHost, PgHostDeps, PgTunnels};
 use unimux_db::redis::host::{DB_CONNECT_MS, DbTunnels, RedisHost, RedisHostDeps};
 use unimux_db::redis::session::RedisLimits;
+use unimux_db::route::DbPorts;
+use unimux_db::router::{CrashSignal, DB_SHUTDOWN_WAIT_MS, DbRouter, DbRouterDeps, supervised};
 use unimux_db::service::{DbDeps, DbEvents, DbService, DbStateAccess, PROMPT_TIMEOUT_MS, ReadCa, TEST_TIMEOUT_MS};
 use unimux_db::sql::limits;
+use unimux_db::sqlite::host::SqliteHost;
 use unimux_db::sqlite_files::create_sqlite_file;
 use unimux_db::timers::{Timers, TokioTimers};
 use unimux_db::tunnel::{DbTunnelHost, TUNNEL_TIMERS};
@@ -147,18 +156,75 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     // first cipher call opens the key.
     let warm = vault.clone();
     let _ = std::thread::Builder::new().name("unimux-db-vault".into()).spawn(move || warm.warm());
-    let others = UnavailableHost::new(spawn.clone());
+    // D12: the session hosts' tasks are supervised: a panic is a crash of the DB Host (every session ends, `db:hostCrashed`).
+    let signal = CrashSignal::new();
+    let host_spawn = supervised(spawn.clone(), signal.clone());
+    let others = UnavailableHost::new(host_spawn.clone());
     // D2: the SSH tunnels of the sessions; the coordinator's `db:` messages (sshConnect, host key / auth answers) go to them.
-    let tunnels = DbTunnelHost::new(spawn.clone(), TUNNEL_TIMERS);
+    let tunnels = DbTunnelHost::new(host_spawn.clone(), TUNNEL_TIMERS);
     crate::commands::ssh::link::link(ctx).owners.set(Some(SessionHostKind::Db), tunnels.clone() as Arc<dyn SshHostLink>);
-    // D8: MySQL / MariaDB sessions (the port routing comes with D12, like Redis').
-    let mysql = MysqlHost::new(MysqlHostDeps::new(others.clone(), spawn.clone(), Some(tunnels.clone() as Arc<dyn DbTunnels>)));
-    let host = RedisHost::new(RedisHostDeps {
+    // The chain of session hosts: Redis -> MySQL / MariaDB -> Postgres -> SQLite -> unsupported kinds.
+    let sqlite = SqliteHost::new(others.clone(), host_spawn.clone());
+    let pg = PgHost::new(PgHostDeps::new(sqlite.clone(), host_spawn.clone(), Some(tunnels.clone() as Arc<dyn PgTunnels>)));
+    let mysql = MysqlHost::new(MysqlHostDeps::new(pg.clone(), host_spawn.clone(), Some(tunnels.clone() as Arc<dyn DbTunnels>)));
+    let redis = RedisHost::new(RedisHostDeps {
         next: mysql.clone(),
-        spawn: spawn.clone(),
+        spawn: host_spawn.clone(),
         tunnels: Some(tunnels.clone() as Arc<dyn DbTunnels>),
         connect_ms: DB_CONNECT_MS,
         limits: RedisLimits::default(),
+        now: Arc::new(unimux_core::time::now_ms),
+    });
+    // The DB port of every window (`mc:db-port`): results go to the window that asked (D12).
+    let ports = DbPorts::new();
+    ctx.ports.register("db", ports.clone());
+    let p = ports.clone();
+    redis.connect_port(Arc::new(move |m: Value| p.post_value(&m)));
+    let p = ports.clone();
+    mysql.connect_port(Arc::new(move |m| p.post_query(m.query_id(), m.to_json())));
+    let p = ports.clone();
+    pg.connect_port(Arc::new(move |m| p.post_query(m.query_id(), m.to_json())));
+    let p = ports.clone();
+    sqlite.connect_port(Arc::new(move |m| p.post_query(m.query_id(), m.to_json())));
+    let (log_ctx, limit) = (Arc::downgrade(ctx), Arc::new(parking_lot::Mutex::new(ReportLimiter::default())));
+    sqlite.connect_log(Arc::new(move |level: &str, message: &str| {
+        // Errors the sessions report, at most 20 a minute (1.1.4 `allowHostLog`).
+        if let Some(c) = log_ctx.upgrade()
+            && limit.lock().allow(unimux_core::time::now_ms())
+        {
+            if level == "warn" { c.crash.warn(message) } else { c.crash.error(message) }
+        }
+    }));
+    // The service is made below; the router reaches it through this slot (a crash ends its sessions).
+    let crashed_service: Arc<std::sync::OnceLock<std::sync::Weak<DbService>>> = Arc::new(std::sync::OnceLock::new());
+    let (slot, crash_ctx) = (crashed_service.clone(), Arc::downgrade(ctx));
+    let close_all: Vec<Arc<dyn Fn() + Send + Sync>> = {
+        let (r, m, p, q, t) = (redis.clone(), mysql.clone(), pg.clone(), sqlite.clone(), tunnels.clone());
+        vec![
+            Arc::new(move || r.shutdown()),
+            Arc::new(move || m.shutdown()),
+            Arc::new(move || p.shutdown()),
+            Arc::new(move || q.shutdown()),
+            // 1.1.4 DbHost.shutdown ends every tunnel after the sessions.
+            Arc::new(move || t.shutdown()),
+        ]
+    };
+    let host = DbRouter::new(DbRouterDeps {
+        next: redis.clone(),
+        ports: ports.clone(),
+        spawn: spawn.clone(),
+        signal,
+        close_all,
+        crashed: Arc::new(move || {
+            if let Some(s) = slot.get().and_then(std::sync::Weak::upgrade) {
+                s.host_crashed();
+            }
+        }),
+        log: Arc::new(move |line: &str| {
+            if let Some(c) = crash_ctx.upgrade() {
+                c.crash.error(line);
+            }
+        }),
         now: Arc::new(unimux_core::time::now_ms),
     });
     let service = DbService::new(DbDeps {
@@ -177,6 +243,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         prompt_timeout_ms: PROMPT_TIMEOUT_MS,
         test_timeout_ms: TEST_TIMEOUT_MS,
     });
+    let _ = crashed_service.set(Arc::downgrade(&service));
     // Ordered and off the caller's stack: the hosts report while the service may hold its lock (dbOpen / dbClose).
     let weak = Arc::downgrade(&service);
     let report = queued_report(
@@ -188,15 +255,30 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         }),
     );
     others.connect(report.clone());
+    sqlite.connect(report.clone());
+    pg.connect(report.clone());
     mysql.connect(report.clone());
-    host.connect(report.clone());
+    redis.connect(report.clone());
     tunnels.connect(report);
-    // The quit: the sessions' tunnels say goodbye (1.1.4 DbHost.shutdown ends every tunnel after the sessions).
-    let t = tunnels.clone();
-    ctx.lifecycle.wind_down.register(phase::HOSTS, "db tunnels", Duration::from_millis(300), move || async move {
-        t.shutdown();
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    });
+    // The quit (1.1.4 `dbHost.shutdown()`, waited for 3 s): every session closes, then the tunnels say goodbye; the hard
+    // limit cuts them.
+    let h = host.clone();
+    ctx.lifecycle.wind_down.register(
+        phase::HOSTS,
+        "db shutdown",
+        Duration::from_millis(DB_SHUTDOWN_WAIT_MS),
+        move || async move {
+            h.shutdown().await;
+        },
+    );
+    let h = host.clone();
+    ctx.lifecycle.wind_down.on_force_exit(move || h.force_kill());
+    // A tab moved to another window (or back): its sessions' Pub/Sub messages follow it.
+    let h = host.clone();
+    ctx.detached
+        .hooks()
+        .on_route_db_sessions
+        .push(Arc::new(move |sessions: &[String], window: Option<&str>| h.route(sessions, window)));
     // The coordinator's states and prompts of `db:` tunnels go to the service (1.1.4 startSsh `events`).
     let _ = crate::commands::ssh::link::link(ctx).events.db.set(Arc::new(crate::commands::ssh::DbSink(Arc::downgrade(&service))));
 

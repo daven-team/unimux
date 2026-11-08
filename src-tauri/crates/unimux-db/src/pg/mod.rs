@@ -15,11 +15,14 @@
 //!
 //! - [`meta`] (D6): catalog reads (databases, schemas, objects, tableInfo, DDL); the session adds table pages, edits and
 //!   cellValue.
+//!
+//! - [`host`] (D12): the Postgres sessions behind the DB service (open, tunnel, password questions, close).
 
 pub mod cancel;
 pub mod client;
 pub mod connect;
 pub mod error;
+pub mod host;
 pub mod messages;
 pub mod meta;
 pub mod port;

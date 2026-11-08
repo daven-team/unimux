@@ -12,6 +12,9 @@
 //! - D11: [`sqlite`] (SQLite sessions: engine thread, catalog, port messages).
 //! - D2: [`tunnel`] (the shared SSH tunnels of the sessions: owner / riders / hand-over, direct-tcpip channels, no local
 //!   port).
+//! - D12: [`route`] (which window's DB port gets a message, the `db` port owner), [`router`] (the DB Host in front of the
+//!   session hosts: routing, crashes of session tasks, shutdown), [`pg::host`] and [`sqlite::host`] (the Postgres and
+//!   SQLite sessions behind the service).
 
 pub mod files;
 pub mod history;
@@ -22,6 +25,8 @@ pub mod mysql;
 pub mod pg;
 pub mod redis;
 pub mod redis_shared;
+pub mod route;
+pub mod router;
 pub mod service;
 pub mod sql;
 pub mod sqlite;
