@@ -1,7 +1,8 @@
 name: Tauri
 
-# The 1.2.0 migration (docs/tauri/PLAN.md F12). Runs on the tauri-* branches only; ci.yml and release.yml stay as they are
-# until U4 switches them. Job names are the ones U4 keeps (Windows x64, macOS Apple Silicon, macOS Intel).
+# The 1.2.0 migration (docs/tauri/PLAN.md F12). Runs on the tauri-* branches only. Since U4, ci.yml builds and signs the
+# release (and a manual run of ci.yml on any branch is the release rehearsal); this workflow stays the quick branch check with
+# unsigned bundles.
 on:
   push:
     branches: ['tauri-*', 'tauri/*']
@@ -112,7 +113,7 @@ jobs:
           workspaces: src-tauri
           key: ${{ matrix.target }}
       - run: npm ci --no-audit --no-fund
-      # Unsigned: the updater artifacts and their signatures come with U4 (TAURI_SIGNING_PRIVATE_KEY lives in CI only).
+      # Unsigned: the signed updater artifacts are made by ci.yml (scripts/release-build-assets.mjs).
       - run: npx tauri build --target ${{ matrix.target }}
       - name: Release build has no dev overrides
         shell: bash

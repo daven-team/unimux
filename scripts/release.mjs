@@ -3,7 +3,7 @@
 // Releases through the GitHub workflows, never from this machine:
 //   1. checks the working tree, branch and release notes, runs the release gates (verify-cli-contract, verify-team-start
 //      on the check build), typecheck and tests
-//   2. bumps the version, commits "release: X.Y.Z with <title>" and tags vX.Y.Z
+//   2. bumps the version in package.json (+ lock), src-tauri/Cargo.toml (+ Cargo.lock) and tauri.conf.json, commits "release: X.Y.Z with <title>" and tags vX.Y.Z
 //   3. pushes main and the tag together (no force)
 //   4. waits for the CI run on the tag (Windows + both Mac builds)
 //   5. dispatches "Publish release" with that run and waits for it
@@ -11,7 +11,11 @@
 // --current  the version in package.json is already the one to release (skips the bump)
 // --dry-run  validates everything and prints the plan without changing anything
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  CARGO_LOCK, CARGO_TOML, TAURI_CONF, readVersions, setCargoLockVersions, setCargoWorkspaceVersion, setTauriConfVersion, versionMismatches,
+  workspaceCrateNames,
+} from './release-lib.mjs';
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(name);
@@ -51,7 +55,8 @@ const next = (() => {
 })();
 const tag = `v${next}`;
 const notes = `docs/releases/${next}.md`;
-const releaseFiles = ['package.json', 'package-lock.json', notes];
+// Every file that carries the version (scripts/check-release-tag.mjs checks the same list on the tag).
+const releaseFiles = ['package.json', 'package-lock.json', CARGO_TOML, CARGO_LOCK, TAURI_CONF, notes];
 
 if (!existsSync(notes)) fail(`Write the release notes first: ${notes}`);
 if (out('git', ['tag', '--list', tag])) fail(`Tag ${tag} already exists. Never reuse or move a published tag; release the next version.`);
@@ -80,7 +85,9 @@ for (const gate of GATES) {
   catch (error) { fail(`${gate} ${error.status === 2 ? 'is blocked (a package has not landed)' : 'failed'}. Fix it before releasing.`); }
 }
 
+const versionChanges = versionMismatches(readVersions(), next);
 if (dryRun) {
+  console.log(versionChanges.length ? `\nVersion files to bump to ${next}:\n  ${versionChanges.join('\n  ')}` : `\nAll version files are already ${next}.`);
   console.log('\nDry run: checks and release gates passed; would run typecheck and tests, commit, tag, push, wait for CI and publish.');
   process.exit(0);
 }
@@ -95,6 +102,17 @@ if (!current) {
   step(`Bumping the version to ${next}`);
   run(NPM, ['version', next, '--no-git-tag-version'], { inherit: true });
 }
+// The Tauri app's version (the binary, the installer, the bundle's CFBundleShortVersionString) follows package.json.
+const rewrite = (file, change) => {
+  const before = readFileSync(file, 'utf8');
+  const after = change(before);
+  if (after !== before) writeFileSync(file, after);
+};
+rewrite(CARGO_TOML, (text) => setCargoWorkspaceVersion(text, next));
+rewrite(TAURI_CONF, (text) => setTauriConfVersion(text, next));
+rewrite(CARGO_LOCK, (text) => setCargoLockVersions(text, workspaceCrateNames(), next));
+const left = versionMismatches(readVersions(), next);
+if (left.length) fail(`Version files still differ from ${next}:\n  ${left.join('\n  ')}`);
 run('git', ['add', ...releaseFiles.filter((file) => existsSync(file))]);
 if (out('git', ['diff', '--cached', '--name-only'])) run('git', ['commit', '-m', `release: ${next} with ${title}`], { inherit: true });
 const sha = out('git', ['rev-parse', 'HEAD']);
