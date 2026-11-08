@@ -3,10 +3,13 @@
 //! of the view on the [`RemoteSide`]: `list` (at most `SFTP_LIMITS.listEntries`, link targets looked up 16 at a time),
 //! `stat`, `realpath`, `mkdir`, `rename` (1.1.4 `SftpHost.op` / `list` / `entryAt` / `linkTarget`).
 //!
-//! What T3-T5 add plugs in here: the queues (enqueue / cancel / answerConflict / retry / clearFinished, `end_queue`,
-//! `items`, `reset`), the manage ops and editor files (deleteCount / delete / chmodCount / chmod / cancelOp / readFile /
-//! statFile / writeFile) and SFTP through sudo (`start_sudo`, which can reuse [`attach_stream`] on the exec channel). Until
-//! then they answer like `UnportedBackend`.
+//! T3: the transfer queues (enqueue / cancel / answerConflict / retry / clearFinished, `end_queue`, `items`, `reset`): one
+//! [`TransferQueue`] per session, made on its first queue operation and dropped when the session ends, plus the local
+//! copy queue ([`LOCAL_QUEUE_ID`]), which lives until the host crashes.
+//!
+//! What T4-T5 add plugs in here: the manage ops and editor files (deleteCount / delete / chmodCount / chmod / cancelOp /
+//! readFile / statFile / writeFile) and SFTP through sudo (`start_sudo`, which can reuse [`attach_stream`] on the exec
+//! channel). Until then they answer like `UnportedBackend`.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -14,6 +17,7 @@ use std::time::Duration;
 
 use futures::future::BoxFuture;
 use futures::stream::{self, StreamExt};
+use indexmap::IndexMap;
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 use unimux_ssh::session::SshErrorCode;
@@ -21,11 +25,13 @@ use unimux_ssh::session::SshErrorCode;
 use crate::client::SftpClient;
 use crate::error::{SftpErrorCode, SftpResult};
 use crate::host::{HostChannels, RemoteSession, SftpBackend, SftpStream, SudoStart};
-use crate::limits::{LIST_ENTRIES, SftpTimers, posix_normalize, valid_remote_path};
+use crate::limits::{LIST_ENTRIES, LOCAL_QUEUE_ID, SftpTimers, TransferDirection, posix_normalize, valid_remote_path};
 use crate::local::LocalSide;
 use crate::op::SftpOp;
+use crate::queue::{QueueEvents, TransferQueue};
 use crate::remote::{RemoteSide, remote_entry};
 use crate::sides::{EntryKind, FileSide, SideError};
+use crate::throttle::Now;
 
 /// Link targets looked up at the same time in one listing.
 const LINK_LOOKUPS: usize = 16;
@@ -175,22 +181,125 @@ pub async fn remote_op(side: &RemoteSide, op: &SftpOp) -> Option<SftpResult> {
     })
 }
 
-/// The backend with T2's parts (the SFTP client, the local side, the view's remote operations).
+/// A queue's reports go to the host (the item throttle, the removed message, the service's queue activity).
+struct ChannelEvents {
+    id: String,
+    channels: HostChannels,
+}
+
+impl QueueEvents for ChannelEvents {
+    fn changed(&self, item: Value, force: bool) {
+        self.channels.item_changed(item, force);
+    }
+    fn removed(&self, ids: Vec<String>) {
+        self.channels.items_removed(ids);
+    }
+    fn active_changed(&self, active: bool) {
+        self.channels.queue_active(&self.id, active);
+    }
+}
+
+/// The source and target side of a session's transfer (1.1.4's `sides(direction)`; None: not connected).
+fn session_sides(
+    local: &Arc<LocalSide>,
+    remote: Option<&Arc<dyn RemoteSession>>,
+    direction: TransferDirection,
+) -> Option<(Arc<dyn FileSide>, Arc<dyn FileSide>)> {
+    let remote: Arc<dyn FileSide> = remote_side(remote?)?;
+    let local: Arc<dyn FileSide> = local.clone();
+    match direction {
+        TransferDirection::Upload => Some((local, remote)),
+        TransferDirection::Download => Some((remote, local)),
+        TransferDirection::Move => Some((remote.clone(), remote)),
+        TransferDirection::LocalCopy | TransferDirection::LocalMove => None,
+    }
+}
+
+/// The backend: the SFTP client, the local side, the view's remote operations (T2) and the transfer queues (T3).
 pub struct SidesBackend {
     local: Arc<LocalSide>,
     timers: SftpTimers,
-    #[allow(dead_code)]
     channels: HostChannels,
+    now: Now,
+    /// Files moving at once per queue (None: `SFTP_LIMITS.concurrentFiles`).
+    max_concurrent: Option<usize>,
+    /// The local queue first, then the sessions' in the order they were made (1.1.4's snapshot order).
+    queues: Mutex<IndexMap<String, Arc<TransferQueue>>>,
 }
 
 impl SidesBackend {
     pub fn new(channels: HostChannels, timers: SftpTimers) -> Arc<SidesBackend> {
-        Arc::new(SidesBackend { local: Arc::new(LocalSide::default()), timers, channels })
+        Self::with_options(channels, timers, Arc::new(unimux_core::time::now_ms), None)
+    }
+
+    pub fn with_options(
+        channels: HostChannels,
+        timers: SftpTimers,
+        now: Now,
+        max_concurrent: Option<usize>,
+    ) -> Arc<SidesBackend> {
+        Arc::new(SidesBackend {
+            local: Arc::new(LocalSide::default()),
+            timers,
+            channels,
+            now,
+            max_concurrent,
+            queues: Mutex::new(IndexMap::new()),
+        })
     }
 
     /// The local disk (one for every queue).
     pub fn local(&self) -> &Arc<LocalSide> {
         &self.local
+    }
+
+    /// The queue of `id`, made on first use (on the current runtime).
+    pub fn queue(&self, id: &str) -> Arc<TransferQueue> {
+        let mut queues = self.queues.lock();
+        if let Some(q) = queues.get(id) {
+            return q.clone();
+        }
+        let events = Arc::new(ChannelEvents { id: id.to_string(), channels: self.channels.clone() });
+        let q = TransferQueue::new(id, events, self.max_concurrent, self.now.clone());
+        if id == LOCAL_QUEUE_ID {
+            queues.shift_insert(0, id.to_string(), q.clone());
+        } else {
+            queues.insert(id.to_string(), q.clone());
+        }
+        q
+    }
+
+    /// The queue operations (also for the local queue and a session that is not connected yet).
+    fn queue_op(&self, id: &str, remote: Option<Arc<dyn RemoteSession>>, op: SftpOp) -> BoxFuture<'static, SftpResult> {
+        let q = self.queue(id);
+        match op {
+            SftpOp::Enqueue { req } => {
+                let sides = if id == LOCAL_QUEUE_ID {
+                    let local: Arc<dyn FileSide> = self.local.clone();
+                    req.direction.is_local().then(|| (local.clone(), local))
+                } else {
+                    session_sides(&self.local, remote.as_ref(), req.direction)
+                };
+                Box::pin(async move { q.enqueue(req, sides).await.map(|batch_id| json!({ "batchId": batch_id })) })
+            }
+            SftpOp::Cancel { item_ids, batch_id } => {
+                let r = q.cancel(item_ids.as_deref(), batch_id.as_deref());
+                Box::pin(async move { Ok(json!(r)) })
+            }
+            SftpOp::AnswerConflict { item_id, answer } => {
+                let r = q.answer_conflict(&item_id, answer);
+                Box::pin(async move { Ok(json!(r)) })
+            }
+            SftpOp::Retry { item_ids } => {
+                let r = q.retry(&item_ids);
+                Box::pin(async move { Ok(json!(r)) })
+            }
+            SftpOp::ClearFinished => {
+                let n = q.clear_finished().len();
+                Box::pin(async move { Ok(json!(n)) })
+            }
+            _ => Box::pin(async { Err(SftpErrorCode::Invalid) }),
+        }
     }
 }
 
@@ -205,16 +314,14 @@ impl SftpBackend for SidesBackend {
         Box::pin(async { Err(SshErrorCode::SudoFailed) })
     }
 
-    fn op(&self, _id: &str, remote: Option<Arc<dyn RemoteSession>>, _sudo: bool, op: SftpOp) -> BoxFuture<'static, SftpResult> {
+    fn op(&self, id: &str, remote: Option<Arc<dyn RemoteSession>>, _sudo: bool, op: SftpOp) -> BoxFuture<'static, SftpResult> {
+        if op.is_queue_op() {
+            return self.queue_op(id, remote, op);
+        }
         Box::pin(async move {
-            match &op {
-                // T3 (queues) and T4 (cancelOp).
-                SftpOp::Cancel { .. } | SftpOp::AnswerConflict { .. } | SftpOp::Retry { .. } | SftpOp::CancelOp { .. } => {
-                    return Ok(json!(false));
-                }
-                SftpOp::ClearFinished => return Ok(json!(0)),
-                SftpOp::Enqueue { .. } => return Err(SftpErrorCode::Unsupported),
-                _ => {}
+            if let SftpOp::CancelOp { .. } = &op {
+                // T4.
+                return Ok(json!(false));
             }
             let remote = remote.ok_or(SftpErrorCode::NotConnected)?;
             let side = remote_side(&remote).ok_or(SftpErrorCode::Unsupported)?;
@@ -226,13 +333,28 @@ impl SftpBackend for SidesBackend {
         })
     }
 
-    fn end_queue(&self, _id: &str, _reason: SftpErrorCode, _idle: Duration) -> BoxFuture<'static, ()> {
-        Box::pin(async {})
+    /// The session's queue is disposed at once and forgotten (a new session under the id gets a new one); the local queue
+    /// stays disposed (a later local enqueue answers `noSession`, like 1.1.4 after shutdown).
+    fn end_queue(&self, id: &str, reason: SftpErrorCode, idle: Duration) -> BoxFuture<'static, ()> {
+        let q = {
+            let mut queues = self.queues.lock();
+            if id == LOCAL_QUEUE_ID { queues.get(id).cloned() } else { queues.shift_remove(id) }
+        };
+        let Some(q) = q else { return Box::pin(async {}) };
+        q.dispose(reason);
+        Box::pin(async move { q.when_idle(idle).await })
     }
 
     fn items(&self) -> Vec<Value> {
-        Vec::new()
+        let queues: Vec<Arc<TransferQueue>> = self.queues.lock().values().cloned().collect();
+        queues.iter().flat_map(|q| q.items()).collect()
     }
 
-    fn reset(&self) {}
+    /// The host crashed: every queue stops without another report and is forgotten.
+    fn reset(&self) {
+        let queues: Vec<Arc<TransferQueue>> = self.queues.lock().drain(..).map(|(_, q)| q).collect();
+        for q in queues {
+            q.kill();
+        }
+    }
 }

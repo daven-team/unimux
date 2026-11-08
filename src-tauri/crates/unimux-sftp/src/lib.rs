@@ -13,6 +13,10 @@
 //! status mapping) and [`local::LocalSide`] (Windows names, `sameLocalFile` via the file index), the
 //! [`targets::TargetRegistry`], and [`backend::SidesBackend`] (attach, list capped at 20,000, stat, realpath, mkdir,
 //! rename).
+//!
+//! T3 (port of src/sftphost/queue.ts and the queue half of src/sftphost/host.ts): [`queue::TransferQueue`] (expansion
+//! with its caps, 3 files at once, `.unimux-part` files, conflicts and keep-both names, the target registry, moves with
+//! the aside rename and the cross-volume copy, cancel / retry / clear) and the queues of [`backend::SidesBackend`].
 
 pub mod backend;
 pub mod client;
@@ -23,6 +27,7 @@ pub mod limits;
 pub mod local;
 pub mod op;
 pub mod proto;
+pub mod queue;
 pub mod remote;
 pub mod service;
 pub mod sides;
@@ -32,5 +37,7 @@ pub mod timers;
 
 #[cfg(test)]
 mod fake_server;
+#[cfg(test)]
+mod queue_tests;
 #[cfg(test)]
 mod sides_tests;
