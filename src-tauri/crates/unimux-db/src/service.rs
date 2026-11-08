@@ -213,11 +213,72 @@ pub struct DbService {
     deps: DbDeps,
     inner: Mutex<Inner>,
     me: Weak<DbService>,
+    turns: Turns,
+}
+
+/// The starts of the sessions take their turns in the order the sessions opened, like 1.1.4's starts deferred with
+/// `setImmediate` (first in, first run): the first session of a connection owns the SSH tunnel login and its `dbOpen`
+/// reaches the host before the riders' ones, whichever task the runtime happens to run first.
+#[derive(Default)]
+struct Turns {
+    st: Mutex<TurnState>,
+    changed: tokio::sync::Notify,
+}
+
+#[derive(Default)]
+struct TurnState {
+    issued: u64,
+    serving: u64,
+    /// Tickets that finished before their turn came (a session closed before its start ran).
+    done: std::collections::BTreeSet<u64>,
+}
+
+impl Turns {
+    fn ticket(&self) -> u64 {
+        let mut st = self.st.lock();
+        st.issued += 1;
+        st.issued - 1
+    }
+
+    async fn wait(&self, ticket: u64) {
+        loop {
+            let mut changed = std::pin::pin!(self.changed.notified());
+            changed.as_mut().enable();
+            if self.st.lock().serving >= ticket {
+                return;
+            }
+            changed.await;
+        }
+    }
+
+    fn finish(&self, ticket: u64) {
+        {
+            let mut st = self.st.lock();
+            st.done.insert(ticket);
+            loop {
+                let serving = st.serving;
+                if !st.done.remove(&serving) {
+                    break;
+                }
+                st.serving += 1;
+            }
+        }
+        self.changed.notify_waiters();
+    }
+}
+
+/// Ends a start's turn however the start ends.
+struct Turn<'a>(&'a Turns, u64);
+
+impl Drop for Turn<'_> {
+    fn drop(&mut self) {
+        self.0.finish(self.1);
+    }
 }
 
 impl DbService {
     pub fn new(deps: DbDeps) -> Arc<Self> {
-        Arc::new_cyclic(|me| Self { deps, inner: Mutex::new(Inner::default()), me: me.clone() })
+        Arc::new_cyclic(|me| Self { deps, inner: Mutex::new(Inner::default()), me: me.clone(), turns: Turns::default() })
     }
 
     fn now(&self) -> i64 {
@@ -453,12 +514,14 @@ impl DbService {
         });
         let snapshot = Value::Object(l.inner.entry(&id).expect("just added").state.clone());
         self.deps.events.session(&snapshot);
-        // The id goes back first, so every 'db:session' and 'db:prompt' event names an id the renderer already has.
+        // The id goes back first, so every 'db:session' and 'db:prompt' event names an id the renderer already has. The
+        // ticket is taken under the session lock: the starts take their turns in the order the sessions opened.
+        let ticket = self.turns.ticket();
         let me = self.me.clone();
         let sid = id.clone();
         (self.deps.spawn)(Box::pin(async move {
             if let Some(svc) = me.upgrade() {
-                svc.start(sid, password).await;
+                svc.start(sid, password, ticket).await;
             }
         }));
         drop(l);
@@ -474,7 +537,8 @@ impl DbService {
         self.disconnect_in(&mut l, id);
     }
 
-    async fn start(&self, id: String, password: OpenPassword) {
+    async fn start(&self, id: String, password: OpenPassword, ticket: u64) {
+        let turn = Turn(&self.turns, ticket);
         let Some(c) = self.inner.lock().entry(&id).map(|e| e.connection.clone()) else { return };
         let mut ca = None;
         if str_field(&c, "tls") == "verify-full" {
@@ -502,6 +566,7 @@ impl DbService {
             },
             OpenPassword::Given(p) => p,
         };
+        self.turns.wait(ticket).await;
         let login = {
             let mut l = self.lock();
             // A session closed before its start ran opens nothing (and takes no tunnel reference).
@@ -559,6 +624,8 @@ impl DbService {
             }
             ssh.is_some() && owner
         };
+        // The next session's start may go on: this one's dbOpen is with the host.
+        drop(turn);
         if login {
             self.login_tunnel(&id).await;
         }
