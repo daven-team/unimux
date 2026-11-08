@@ -206,12 +206,68 @@ pub fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 }
 
 /// A kill in progress; [`KillWait::wait`] blocks until the terminal ended or the time is up.
-pub struct KillWait(Option<Arc<Slot>>);
+pub struct KillWait(Wait);
+
+enum Wait {
+    Slot(Option<Arc<Slot>>),
+    Flag(Arc<DoneFlag>),
+}
 
 impl KillWait {
+    /// Nothing to wait for (no terminal of that id).
+    pub fn none() -> KillWait {
+        KillWait(Wait::Slot(None))
+    }
+
+    /// The end of a terminal that is not a pty (P5: an SSH session): done once `flag` is set.
+    pub fn flag(flag: Arc<DoneFlag>) -> KillWait {
+        KillWait(Wait::Flag(flag))
+    }
+
     /// True when the terminal's exit was reported (or there was nothing to kill).
     pub fn wait(&self, timeout: Duration) -> bool {
-        self.0.as_ref().is_none_or(|s| s.wait(Instant::now() + timeout))
+        self.wait_until(Instant::now() + timeout)
+    }
+
+    /// [`KillWait::wait`] with a deadline.
+    pub fn wait_until(&self, deadline: Instant) -> bool {
+        match &self.0 {
+            Wait::Slot(slot) => slot.as_ref().is_none_or(|s| s.wait(deadline)),
+            Wait::Flag(flag) => flag.wait_until(deadline),
+        }
+    }
+}
+
+/// A one-way "it ended" flag a thread can wait on (the end of an SSH session's connection).
+#[derive(Debug, Default)]
+pub struct DoneFlag {
+    done: Mutex<bool>,
+    cv: Condvar,
+}
+
+impl DoneFlag {
+    pub fn new() -> Arc<DoneFlag> {
+        Arc::new(DoneFlag::default())
+    }
+
+    pub fn set(&self) {
+        *self.done.lock() = true;
+        self.cv.notify_all();
+    }
+
+    pub fn is_set(&self) -> bool {
+        *self.done.lock()
+    }
+
+    /// True once set; false when `deadline` passed first.
+    pub fn wait_until(&self, deadline: Instant) -> bool {
+        let mut done = self.done.lock();
+        while !*done {
+            if self.cv.wait_until(&mut done, deadline).timed_out() {
+                return *done;
+            }
+        }
+        true
     }
 }
 
@@ -437,7 +493,7 @@ impl PtyManager {
         if let Some(slot) = &slot {
             self.inner.kill_slot(slot);
         }
-        KillWait(slot)
+        KillWait(Wait::Slot(slot))
     }
 
     /// Kills a terminal and waits until its processes are gone or `timeout` passed; true when it ended in time.

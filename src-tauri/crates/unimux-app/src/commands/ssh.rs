@@ -10,7 +10,10 @@
 //!
 //! S3 ([`link`]): the SSH coordinator with its owner slots and event routes, and `ssh:connect`, `ssh:sessions`,
 //! `ssh:prompt:answer`.
+//!
+//! P5 ([`cells`]): the SSH shell cells over the pty engine, in the coordinator's cell slot.
 
+pub mod cells;
 pub mod link;
 
 use std::sync::Arc;
@@ -30,6 +33,8 @@ async fn blocking<T: Send + 'static>(command: &str, f: impl FnOnce() -> T + Send
 
 pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     link::register(r, ctx);
+    // P5: the SSH cells run over the pty engine (pty::register ran first).
+    cells::register(&link::link(ctx));
     let c = ctx.clone();
     r.invoke("ssh:vault:info", move |_call| {
         let c = c.clone();

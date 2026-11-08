@@ -12,12 +12,17 @@
 //! - timeBeginPeriod(1) is held while terminals exist (Windows), so the coalescing timers and the batch windows fire on time.
 //!
 //! The pty service of P3 (spawn requests from the cells, kill routing, tap, crash handling) sits on top of this.
+//!
+//! P5: terminals that are not ptys ([`ExternalTerm`], the SSH shell cells) live in the same table: their output goes
+//! through the same OutputChannel / batcher / replay path ([`ExternalHandle`]), the window's `write` / `resize` / `ack` and
+//! the kills reach them through the trait, and the port's `sshList` / `sshStats` messages go to the hook set with
+//! [`PtyEngine::on_message`]; the answers go back with [`PtyEngine::post_json_to`] to the page that asked.
 
 use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::{Mutex, RwLock};
 use serde_json::{Value, json};
@@ -36,6 +41,23 @@ const DA1_SCAN: usize = 4096;
 
 type ExitHook = Arc<dyn Fn(&str, i64) + Send + Sync>;
 type TapHook = Arc<dyn Fn(&str, &[u8]) + Send + Sync>;
+/// `(window label, page id, message)` of a port message the engine does not handle itself (P5: `sshList`, `sshStats`).
+type MessageHook = Arc<dyn Fn(&str, u64, &Value) + Send + Sync>;
+
+/// A terminal whose output does not come from a pty (P5: an SSH session's shell channel). The engine owns its output
+/// path; these are the calls that reach the source. Called on any thread; none of them may block.
+pub trait ExternalTerm: Send + Sync {
+    /// Input for the terminal (typed, a terminal reply, or the host's own).
+    fn write(&self, data: &[u8]);
+    /// The terminal has this size from now on (already clamped to 2 x 1).
+    fn resize(&self, cols: u16, rows: u16);
+    /// Flow control: stop reading the source until [`ExternalTerm::resume`].
+    fn pause(&self);
+    fn resume(&self);
+    /// The engine forgot the terminal (a kill, kill all, a crash of the service): end it without reporting anything;
+    /// the wait ends once it is gone.
+    fn kill(&self) -> KillWait;
+}
 
 struct Term {
     out: Arc<OutputChannel>,
@@ -45,6 +67,8 @@ struct Term {
     spawning: Mutex<Spawning>,
     /// The output also goes to the tap hook (P3: the install window and the login terminals, `tap` of 1.1.4).
     tap: bool,
+    /// Not a pty (P5): input, sizes and the kill go here instead of to the PtyManager.
+    external: Option<Arc<dyn ExternalTerm>>,
 }
 
 #[derive(Default)]
@@ -61,6 +85,8 @@ struct Da1 {
 
 struct Link {
     batcher: WindowBatcher,
+    /// Which page load attached it (a reloaded page never gets the answer to its predecessor's question).
+    page: u64,
 }
 
 #[derive(Default)]
@@ -82,6 +108,8 @@ struct Inner {
     early: Mutex<EarlySizes>,
     on_exit: RwLock<Option<ExitHook>>,
     on_tap: RwLock<Option<TapHook>>,
+    on_message: RwLock<Option<MessageHook>>,
+    pages: AtomicU64,
     #[cfg(windows)]
     timer: Mutex<Option<crate::conpty::TimerResolution>>,
     counters: Counters,
@@ -128,6 +156,22 @@ impl OutputControl for Pause {
     }
 }
 
+/// Flow control of an external terminal (weak: the source owns its handle, which owns the channel).
+struct ExternalPause(Weak<dyn ExternalTerm>);
+
+impl OutputControl for ExternalPause {
+    fn pause(&self) {
+        if let Some(t) = self.0.upgrade() {
+            t.pause();
+        }
+    }
+    fn resume(&self) {
+        if let Some(t) = self.0.upgrade() {
+            t.resume();
+        }
+    }
+}
+
 fn num(v: &Value, key: &str) -> Option<f64> {
     v.get(key).and_then(Value::as_f64).filter(|n| n.is_finite())
 }
@@ -139,6 +183,14 @@ fn size_of(v: &Value, key: &str, min: u16) -> Option<u16> {
 impl Inner {
     fn term(&self, id: &str) -> Option<Arc<Term>> {
         self.terms.lock().get(id).cloned()
+    }
+
+    /// Input for the terminal: its pty, or the source of an external terminal.
+    fn input(&self, id: &str, term: &Term, data: &[u8]) {
+        match &term.external {
+            Some(ext) => ext.write(data),
+            None => self.manager.write(id, data),
+        }
     }
 
     fn link_of(&self, id: &str) -> Option<Arc<Link>> {
@@ -200,6 +252,12 @@ impl Inner {
 
     fn exit(&self, id: &str, code: i64) {
         let Some(term) = self.term(id) else { return };
+        self.exit_term(id, term, code, None);
+    }
+
+    /// The end of `term`: drained, then (only while it is still the terminal of `id`) flushed, forgotten, `before` run, the
+    /// exit frame queued and the exit hook called.
+    fn exit_term(&self, id: &str, term: Arc<Term>, code: i64, before: Option<Box<dyn FnOnce() + Send>>) {
         let me = self.me.clone();
         let id = id.to_string();
         let out = term.out.clone();
@@ -213,6 +271,9 @@ impl Inner {
             term.out.flush(false);
             term.out.dispose();
             inner.forget(&id, &term);
+            if let Some(before) = before {
+                before();
+            }
             if let Some(link) = inner.link_of(&id) {
                 // Output of a terminal always arrives before its exit: same queue, queued after it.
                 link.batcher.push(KIND_EXIT, &id, &(code as i32).to_le_bytes(), Urgency::Now);
@@ -276,6 +337,8 @@ impl PtyEngine {
                 early: Mutex::new(EarlySizes::default()),
                 on_exit: RwLock::new(None),
                 on_tap: RwLock::new(None),
+                on_message: RwLock::new(None),
+                pages: AtomicU64::new(0),
                 #[cfg(windows)]
                 timer: Mutex::new(None),
                 counters: Counters::default(),
@@ -360,7 +423,13 @@ impl PtyEngine {
             inner.sched.clone(),
         );
         out.resized(req.cols, req.rows);
-        let term = Arc::new(Term { out, da1: Mutex::new(Da1::default()), spawning: Mutex::new(Spawning::default()), tap });
+        let term = Arc::new(Term {
+            out,
+            da1: Mutex::new(Da1::default()),
+            spawning: Mutex::new(Spawning::default()),
+            tap,
+            external: None,
+        });
         // The window starts this id's output afresh (the old terminal of the id was killed above: nothing of it follows).
         if let Some(link) = inner.link_of(&req.id) {
             link.batcher.push(KIND_RESET, &req.id, &[], Urgency::Now);
@@ -398,6 +467,9 @@ impl PtyEngine {
         if let Some(term) = &term {
             term.out.dispose();
             self.inner.forget(id, term);
+            if let Some(ext) = &term.external {
+                return ext.kill();
+            }
         }
         self.inner.manager.kill(id)
     }
@@ -408,25 +480,36 @@ impl PtyEngine {
 
     /// Kills every terminal (bounded wait, tree kill of the rest; see PtyManager::kill_all).
     pub fn kill_all(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
         let terms: Vec<(String, Arc<Term>)> = self.inner.terms.lock().drain().collect();
+        let mut waits = Vec::new();
         for (_, t) in &terms {
             t.out.dispose();
+            if let Some(ext) = &t.external {
+                waits.push(ext.kill());
+            }
         }
         #[cfg(windows)]
         self.inner.timer.lock().take();
-        self.inner.manager.kill_all(timeout)
+        let ptys = self.inner.manager.kill_all(timeout);
+        // The external terminals ended in parallel with the ptys; whatever time is left is theirs.
+        let externals = waits.iter().all(|w| w.wait_until(deadline));
+        ptys && externals
     }
 
     /// Input from the host itself (the launch command of P3, tests); not counted as typing.
     pub fn write(&self, id: &str, data: &[u8]) {
-        self.inner.manager.write(id, data);
+        match self.inner.term(id).and_then(|t| t.external.clone()) {
+            Some(ext) => ext.write(data),
+            None => self.inner.manager.write(id, data),
+        }
     }
 
     /// Typing from the renderer: its echo is flushed fast.
     pub fn typed(&self, id: &str, data: &[u8]) {
         if let Some(t) = self.inner.term(id) {
             t.out.wrote();
-            self.inner.manager.write(id, data);
+            self.inner.input(id, &t, data);
         }
     }
 
@@ -435,6 +518,12 @@ impl PtyEngine {
     pub fn resize(&self, id: &str, cols: u16, rows: u16) {
         let (cols, rows) = (cols.max(2), rows.max(1));
         match self.inner.term(id) {
+            Some(t) if t.external.is_some() => {
+                t.out.resized(cols, rows);
+                if let Some(ext) = &t.external {
+                    ext.resize(cols, rows);
+                }
+            }
             Some(t) => {
                 // A resize during the spawn goes to the pty when spawn returned (it starts at the request's size).
                 let mut spawning = t.spawning.lock();
@@ -452,7 +541,8 @@ impl PtyEngine {
     /// A window's page attached its pty port (load or reload): it gets the replay tail of each of its terminals.
     pub fn attach(&self, label: &str, transport: Arc<dyn Transport>) {
         let inner = &self.inner;
-        let link = Arc::new(Link { batcher: WindowBatcher::new(label, transport) });
+        let page = inner.pages.fetch_add(1, Ordering::Relaxed) + 1;
+        let link = Arc::new(Link { batcher: WindowBatcher::new(label, transport), page });
         // Queued output of the old page is part of the replay tails the new one gets below.
         if let Some(old) = inner.links.write().insert(label.to_string(), link.clone()) {
             old.batcher.stop();
@@ -530,7 +620,7 @@ impl PtyEngine {
                     if !reply {
                         term.out.wrote();
                     }
-                    inner.manager.write(id, data.as_bytes());
+                    inner.input(id, &term, data.as_bytes());
                 }
             }
             "resize" => {
@@ -545,8 +635,15 @@ impl PtyEngine {
                     term.out.ack(n.min(usize::MAX as f64) as usize);
                 }
             }
-            // sshList / sshStats: the SSH backend (P5).
-            _ => {}
+            "" => {}
+            // sshList / sshStats: the SSH sessions (P5), answered on the page that asked.
+            _ => {
+                let hook = inner.on_message.read().clone();
+                let page = inner.links.read().get(label).map(|l| l.page);
+                if let (Some(hook), Some(page)) = (hook, page) {
+                    hook(label, page, m);
+                }
+            }
         }
     }
 
@@ -580,6 +677,62 @@ impl PtyEngine {
         true
     }
 
+    /// [`PtyEngine::post_json`] only while the page that asked (`page` of the [`PtyEngine::on_message`] hook) is still the
+    /// window's page (1.1.4: the answer goes back on the port that asked, a reloaded renderer never gets an old one).
+    pub fn post_json_to(&self, label: &str, page: u64, message: &Value) -> bool {
+        let link = self.inner.links.read().get(label).cloned();
+        let Some(link) = link.filter(|l| l.page == page) else { return false };
+        link.batcher.push(KIND_JSON, "", message.to_string().as_bytes(), Urgency::Now);
+        true
+    }
+
+    /// Port messages of types the engine does not handle (`sshList`, `sshStats`), from the window that owns the terminal
+    /// they name: `(label, page, message)`. Called on the IPC thread; must not block.
+    pub fn on_message(&self, hook: impl Fn(&str, u64, &Value) + Send + Sync + 'static) {
+        *self.inner.on_message.write() = Some(Arc::new(hook));
+    }
+
+    /// Puts a terminal that is not a pty into the table (P5: an SSH session); one of the same id is killed first. Its size
+    /// is a size the renderer reported before, else `cols` x `rows` (at least 2 x 1); [`ExternalHandle::size`] tells it.
+    pub fn open_external(&self, id: &str, cols: u16, rows: u16, term: Arc<dyn ExternalTerm>) -> ExternalHandle {
+        let inner = &self.inner;
+        if self.has(id) {
+            let _ = self.kill(id);
+        }
+        let (cols, rows) = inner.early.lock().take(id).unwrap_or((cols, rows));
+        let (cols, rows) = (cols.max(2), rows.max(1));
+        let sink = Arc::new(EngineSink(inner.me.clone()));
+        let flow = inner.flow_on.clone();
+        let out = OutputChannel::new(
+            id.to_string(),
+            sink,
+            Arc::new(ExternalPause(Arc::downgrade(&term))),
+            Arc::new(move || flow.load(Ordering::SeqCst)),
+            inner.focus.clone(),
+            inner.sched.clone(),
+        );
+        out.resized(cols, rows);
+        let entry = Arc::new(Term {
+            out,
+            da1: Mutex::new(Da1 { seen: Vec::new(), done: true }),
+            spawning: Mutex::new(Spawning { done: true, size: None }),
+            tap: false,
+            external: Some(term),
+        });
+        if let Some(link) = inner.link_of(id) {
+            link.batcher.push(KIND_RESET, id, &[], Urgency::Now);
+        }
+        inner.terms.lock().insert(id.to_string(), entry.clone());
+        #[cfg(windows)]
+        {
+            let mut timer = inner.timer.lock();
+            if timer.is_none() {
+                *timer = Some(crate::conpty::TimerResolution::acquire());
+            }
+        }
+        ExternalHandle { inner: inner.me.clone(), id: id.to_string(), term: entry, size: (cols, rows) }
+    }
+
     /// The replay tail of a live terminal and the sizes it was written at.
     pub fn replay(&self, id: &str) -> Option<(Vec<u8>, Vec<crate::flow::ReplaySize>)> {
         self.inner.term(id).map(|t| t.out.replay())
@@ -606,6 +759,55 @@ impl PtyEngine {
             "replays": inner.counters.replays.load(Ordering::Relaxed),
             "earlySizes": inner.early.lock().len(),
         })
+    }
+}
+
+/// The engine side of one external terminal (P5), held by its source.
+pub struct ExternalHandle {
+    inner: Weak<Inner>,
+    id: String,
+    term: Arc<Term>,
+    size: (u16, u16),
+}
+
+impl std::fmt::Debug for ExternalHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExternalHandle").field("id", &self.id).field("size", &self.size).finish_non_exhaustive()
+    }
+}
+
+impl ExternalHandle {
+    /// The size the terminal started at (the renderer's early size, else the requested one).
+    pub fn size(&self) -> (u16, u16) {
+        self.size
+    }
+
+    /// Still the terminal of its id in the engine (not killed, not replaced, not ended).
+    pub fn is_current(&self) -> bool {
+        self.inner.upgrade().is_some_and(|i| i.terms.lock().get(&self.id).is_some_and(|t| Arc::ptr_eq(t, &self.term)))
+    }
+
+    /// Output of the source (whole UTF-8 text; nothing after a kill or the end).
+    pub fn push(&self, data: &[u8]) {
+        self.term.out.push(data);
+    }
+
+    /// A first estimate of the source's keystroke round trip in ms (`seedEcho`).
+    pub fn seed_echo(&self, ms: f64) {
+        self.term.out.seed_echo(ms);
+    }
+
+    /// Input the host typed itself counts as typing (the startup command: its echo is flushed fast).
+    pub fn wrote(&self) {
+        self.term.out.wrote();
+    }
+
+    /// The source ended by itself with `code`: its last output is drained, then, if it is still the terminal of its id,
+    /// `before` runs and its exit is reported (frame + the exit hook) like a pty's.
+    pub fn exit(&self, code: i64, before: impl FnOnce() + Send + 'static) {
+        if let Some(inner) = self.inner.upgrade() {
+            inner.exit_term(&self.id, self.term.clone(), code, Some(Box::new(before)));
+        }
     }
 }
 

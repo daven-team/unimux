@@ -14,6 +14,8 @@ pub mod keys;
 pub mod known_hosts;
 pub mod login;
 pub mod protocol;
+pub mod remote;
 pub mod session;
+pub mod shell;
 pub mod stores;
 pub mod vault;
