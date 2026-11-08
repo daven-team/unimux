@@ -170,6 +170,75 @@ fn script(sql: &str, param: Option<&str>, c: &mut Conn) -> Script {
         let tag = format!("SELECT {}", rows.len());
         return Script::Rows { fields, rows, tag, notice: None };
     }
+    // D6: the catalog of one table public.t (id integer primary key, name text) and its pages, edits and cells
+    let text_rows = |names: &[&str], rows: Vec<Vec<Option<&str>>>| Script::Rows {
+        fields: names.iter().map(|n| field(n, 25)).collect(),
+        tag: format!("SELECT {}", rows.len()),
+        rows: rows.into_iter().map(|r| r.into_iter().map(|v| v.map(str::to_owned)).collect()).collect(),
+        notice: None,
+    };
+    if sql.starts_with("SELECT c.oid, c.relkind") {
+        return text_rows(
+            &["oid", "relkind", "reltuples", "c", "p", "pers"],
+            vec![vec![Some("16400"), Some("r"), Some("5"), None, Some("f"), Some("p")]],
+        );
+    }
+    if sql.starts_with("SELECT a.attname") {
+        let col = |name, num, ty, oid, cat, nullable| {
+            vec![
+                Some(name),
+                Some(num),
+                Some(ty),
+                Some(oid),
+                Some(oid),
+                Some(cat),
+                Some(nullable),
+                None,
+                Some(""),
+                Some(""),
+                None,
+                None,
+            ]
+        };
+        return text_rows(&["a"; 12], vec![col("id", "1", "integer", "23", "N", "f"), col("name", "2", "text", "25", "S", "t")]);
+    }
+    if sql.starts_with("SELECT conname") {
+        return text_rows(&["a"; 4], vec![vec![Some("t_pkey"), Some("p"), Some("PRIMARY KEY (id)"), Some("{1}")]]);
+    }
+    if sql.starts_with("SELECT i.relname") {
+        return text_rows(
+            &["a"; 6],
+            vec![vec![
+                Some("t_pkey"),
+                Some("CREATE UNIQUE INDEX t_pkey ON public.t USING btree (id)"),
+                Some("t"),
+                Some("t"),
+                Some("1"),
+                Some("t"),
+            ]],
+        );
+    }
+    if sql.starts_with("SELECT * FROM \"public\".\"t\"") {
+        return Script::Rows {
+            fields: vec![field("id", 23), field("name", 25)],
+            rows: (1..=5).map(|i| vec![Some(i.to_string()), Some(format!("n{i}"))]).collect(),
+            tag: "SELECT 5".into(),
+            notice: None,
+        };
+    }
+    if sql.starts_with("UPDATE \"public\".\"t\" SET") {
+        return Script::Command(if param == Some("none") { "UPDATE 0" } else { "UPDATE 1" }.into());
+    }
+    if sql.starts_with("DELETE FROM \"public\".\"t\" WHERE") {
+        return Script::Command("DELETE 1".into());
+    }
+    if sql.starts_with("SELECT left(\"name\"::text") {
+        return text_rows(&["left"], vec![vec![Some("the whole value")]]);
+    }
+    if sql == "BEGIN READ ONLY" {
+        c.tx = b'T';
+        return Script::Command("BEGIN".into());
+    }
     if sql.starts_with("SET default_transaction_read_only = on") {
         c.read_only = true;
         return Script::Command("SET".into());
@@ -830,7 +899,7 @@ async fn transactions_notices_activity_and_the_end_of_the_connection() {
     );
     let activity = s.out.activity.lock().clone();
     assert!(activity.len() >= 2 && activity[0] && !activity[activity.len() - 1]);
-    assert_eq!(s.session.handle(&json!({ "op": "tableInfo", "schema": "public", "name": "t" })).await["error"], "unsupported");
+    assert_eq!(s.session.handle(&json!({ "op": "tableInfo", "schema": "public", "name": "t" })).await["ok"], true);
     // the server closes the connection after this one
     s.query("q3", "SELECT quit", json!({})).await;
     for _ in 0..300 {
@@ -843,4 +912,75 @@ async fn transactions_notices_activity_and_the_end_of_the_connection() {
     assert_eq!(*s.out.fatal.lock(), 0);
     s.session.end();
     assert_eq!(s.session.handle(&json!({ "op": "cancel" })).await["error"], "noSession");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn catalog_pages_edits_and_cells() {
+    let s = setup(false, 0.0, None).await;
+    let info = s.session.handle(&json!({ "op": "tableInfo", "schema": "public", "name": "t" })).await;
+    assert_eq!(info["ok"], true, "{info}");
+    assert_eq!(info["value"]["editKey"], json!(["id"]));
+    assert_eq!(info["value"]["primaryKey"], json!(["id"]));
+    assert_eq!(info["value"]["rowEstimate"], 5);
+    assert_eq!(info["value"]["columns"][0]["kind"], "int");
+
+    // a page of 3 rows: one more is read ahead, inside a READ ONLY transaction
+    let page = json!({ "op": "tablePage", "req": { "queryId": "p1", "schema": "public", "table": "t", "limit": 3 } });
+    assert_eq!(s.session.handle(&page).await, json!({ "ok": true, "value": true }));
+    let end = s.wait("p1", "queryEnd", 1).await.remove(0);
+    assert_eq!((end["ok"].clone(), end["tx"].clone()), (json!(true), json!("idle")));
+    let st = s.of("p1", "statementEnd").remove(0);
+    assert_eq!((st["rows"].clone(), st["hasMore"].clone(), st["rowCount"].clone()), (json!(3), json!(true), json!(3)));
+    assert_eq!(s.rows("p1").len(), 3);
+    let log = s.log();
+    let begin = log.iter().position(|l| l == "BEGIN READ ONLY").unwrap();
+    assert!(log[begin + 1].starts_with("SELECT * FROM \"public\".\"t\"\nORDER BY \"id\" ASC NULLS FIRST\nLIMIT 4"), "{log:?}");
+    assert!(log[begin + 2..].iter().any(|l| l == "COMMIT"));
+
+    // an invalid page (a limit of 0) is refused before anything runs
+    let bad = json!({ "op": "tablePage", "req": { "queryId": "p2", "schema": "public", "table": "t", "limit": 0 } });
+    s.session.handle(&bad).await;
+    s.wait("p2", "queryEnd", 1).await;
+    assert_eq!(s.of("p2", "statementError")[0]["error"], "invalid");
+
+    let edits =
+        json!({ "schema": "public", "table": "t", "edits": [{ "op": "update", "key": { "id": "1" }, "set": { "name": "x" } }] });
+    let preview = s.session.handle(&json!({ "op": "previewEdits", "req": edits })).await;
+    assert_eq!(
+        preview,
+        json!({ "ok": true, "value": { "sql": "BEGIN;\nUPDATE \"public\".\"t\" SET \"name\" = 'x' WHERE \"id\" = '1';\nCOMMIT;", "statements": 1 } })
+    );
+    let applied = s.session.handle(&json!({ "op": "applyEdits", "req": edits })).await;
+    assert_eq!(applied, json!({ "ok": true, "value": { "affected": 1 } }));
+    let log = s.log();
+    assert_eq!(log[log.len() - 1], "COMMIT");
+    assert_eq!(log[log.len() - 3], "BEGIN");
+
+    // an UPDATE that hits no row rolls everything back
+    let none = json!({ "schema": "public", "table": "t", "edits": [
+        { "op": "delete", "key": { "id": "2" } },
+        { "op": "update", "key": { "id": "1" }, "set": { "name": "none" } },
+    ] });
+    let r = s.session.handle(&json!({ "op": "applyEdits", "req": none })).await;
+    assert_eq!(r, json!({ "ok": false, "error": "conflict", "index": 1 }));
+    assert_eq!(s.log().last().unwrap(), "ROLLBACK");
+    let unknown =
+        json!({ "schema": "public", "table": "t", "edits": [{ "op": "update", "key": { "id": "1" }, "set": { "nope": "x" } }] });
+    let r = s.session.handle(&json!({ "op": "applyEdits", "req": unknown })).await;
+    assert_eq!(r, json!({ "ok": false, "error": "invalid" }));
+
+    let cell = json!({ "op": "cellValue", "req": { "schema": "public", "table": "t", "key": { "id": "1" }, "column": "name" } });
+    assert_eq!(s.session.handle(&cell).await, json!({ "ok": true, "value": "the whole value" }));
+    let cell = json!({ "op": "cellValue", "req": { "schema": "public", "table": "t", "key": {}, "column": "name" } });
+    assert_eq!(s.session.handle(&cell).await, json!({ "ok": false, "error": "invalid" }));
+    assert_eq!(*s.out.fatal.lock(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn read_only_sessions_refuse_edits() {
+    let s = setup(true, 0.0, None).await;
+    let edits = json!({ "schema": "public", "table": "t", "edits": [{ "op": "delete", "key": { "id": "1" } }] });
+    let r = s.session.handle(&json!({ "op": "applyEdits", "req": edits })).await;
+    assert_eq!(r, json!({ "ok": false, "error": "readOnly" }));
+    assert!(!s.log().iter().any(|l| l.starts_with("DELETE")));
 }

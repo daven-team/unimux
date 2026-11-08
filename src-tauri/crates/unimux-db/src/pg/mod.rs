@@ -13,13 +13,15 @@
 //!   closeResult, read-only enforcement with the readWrite override, statement timeouts, cancel, transaction ops.
 //! - [`messages`] (D5): the DB port messages of a session.
 //!
-//! Metadata, pages and edits (D6) build on [`session`].
+//! - [`meta`] (D6): catalog reads (databases, schemas, objects, tableInfo, DDL); the session adds table pages, edits and
+//!   cellValue.
 
 pub mod cancel;
 pub mod client;
 pub mod connect;
 pub mod error;
 pub mod messages;
+pub mod meta;
 pub mod port;
 pub mod session;
 pub mod tls;
