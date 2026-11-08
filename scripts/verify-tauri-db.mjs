@@ -4,8 +4,8 @@
 //   B. connections through window.mc.db: save with a password (state.json has the connection, never the password; vault.json
 //      has a sealed blob; db:vault:changed), duplicate (with the password), delete (password gone), refusals of the 1.1.4
 //      validation;
-//   C. sessions: connect answers at once with a db: id, then db:session events (until the session packages land the host
-//      ends every session with `unsupported`), test connection, sessions(), pins;
+//   C. sessions: connect answers at once with a db: id, then db:session events (an unresolvable host ends the session with
+//      a real connect error), test connection, sessions(), pins;
 //   D. the query history: record (masked), star, clear, the switch, query_history.json written after 1.5 s and on quit;
 //   E. SQLite files and dialogs: create at a typed path, the open / save / CA dialogs answered by the test bridge (no dialog on
 //      the desktop), the export into MC_DB_EXPORT_DIR;
@@ -129,11 +129,14 @@ try {
   check('C: connect answers at once with a db: session id', c.ok && /^db:[0-9a-f-]{36}$/.test(c.sessionId), c);
   await waitFor(app.page, `window.__d1.sessions.some((s) => s.id === ${JSON.stringify(c.sessionId)} && s.state === 'error')`, 5000, 'session end');
   const states = await app.page.evaluate(`window.__d1.sessions.filter((s) => s.id === ${JSON.stringify(c.sessionId)})`);
-  check('C: db:session goes connecting -> error (unsupported until the session packages land)', states[0].state === 'connecting' && states[0].database === 'shop' && states.at(-1).error === 'unsupported', states);
+  // The session packages have landed: db.example.com does not resolve, so the session ends with the connect error of 1.1.4
+  // (dbDns; any real connect error counts, never the `unsupported` of the D1 stand-in host).
+  const realError = (e) => typeof e === 'string' && e !== '' && e !== 'unsupported';
+  check('C: db:session goes connecting -> error (a real connect error, no stand-in host)', states[0].state === 'connecting' && states[0].database === 'shop' && realError(states.at(-1).error), states);
   const snap = await mc(app.page, 'window.mc.db.sessions()');
   check('C: sessions() is empty again', snap.sessions.length === 0 && snap.prompts.length === 0, snap);
   const tests = await mc(app.page, `Promise.all([window.mc.db.testConnection({ ...${JSON.stringify(pg)}, port: -1 }, null), window.mc.db.testConnection(${JSON.stringify(pg)}, { saved: ${JSON.stringify(savedId)} })])`);
-  check('C: testConnection validates and resolves with the session result', tests[0].error === 'invalid' && tests[1].ok === false && tests[1].error === 'unsupported', tests);
+  check('C: testConnection validates and resolves with the session result', tests[0].error === 'invalid' && tests[1].ok === false && realError(tests[1].error), tests);
   await mc(app.page, `(window.mc.db.pin([${JSON.stringify(c.sessionId)}, 'bad']), true)`);
   const disc = await mc(app.page, `window.mc.db.disconnect(${JSON.stringify(c.sessionId)})`);
   check('C: pin is accepted, disconnect of an ended session answers ok:false', disc.ok === false, disc);
