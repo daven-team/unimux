@@ -538,6 +538,172 @@ mod tests {
         );
     }
 
+    /// A live card with both windows (test/limit-alerts.test.ts `card`).
+    fn card(account: &str, email: &str, five: f64, seven: f64, five_reset: f64, seven_reset: f64) -> ProviderUsage {
+        let mut u = ProviderUsage::new(account, Provider::Claude, Status::Ok, NOW, Source::Live);
+        u.email = Some(email.into());
+        u.windows.push(UsageWindow { id: WindowId::FiveHour, used_percent: five, resets_at: five_reset });
+        u.windows.push(UsageWindow { id: WindowId::SevenDay, used_percent: seven, resets_at: seven_reset });
+        u
+    }
+
+    const S: f64 = NOW / 1000.0;
+
+    fn kinds(notices: &[LimitNotice]) -> Vec<String> {
+        notices
+            .iter()
+            .map(|n| match n.percent {
+                Some(p) => format!("{}:{}:{p}", if n.reset { "reset" } else { "threshold" }, n.window.as_str()),
+                None => format!("{}:{}", if n.reset { "reset" } else { "threshold" }, n.window.as_str()),
+            })
+            .collect()
+    }
+
+    // limit-alerts "defaults: on, 5 h at 80 %, 7 days at 90 %, no reset notices", "falls back field by field on damaged
+    // values", "keeps any whole threshold from 1 to 100 (1.1.2: a slider instead of fixed steps)"
+    #[test]
+    fn settings_default_fall_back_field_by_field_and_keep_whole_thresholds() {
+        let d = LimitAlertSettings::default();
+        assert_eq!(
+            (d.enabled, d.five_hour, d.seven_day, d.resets),
+            (true, WindowAlert { enabled: true, percent: 80 }, WindowAlert { enabled: true, percent: 90 }, false)
+        );
+        assert_eq!(AlertSettings::from_value(Some(&json!({}))).limits, d);
+        let damaged = json!({ "enabled": "yes", "fiveHour": { "enabled": false, "percent": 150 }, "sevenDay": { "percent": 70.5 }, "resets": true });
+        assert_eq!(
+            LimitAlertSettings::from_value(Some(&damaged)),
+            LimitAlertSettings { five_hour: WindowAlert { enabled: false, percent: 80 }, resets: true, ..d }
+        );
+        for percent in [1, 37, 50, 99, 100] {
+            let s = LimitAlertSettings::from_value(Some(&json!({ "fiveHour": { "enabled": true, "percent": percent } })));
+            assert_eq!(s.five_hour.percent, percent);
+        }
+        for percent in [json!(0), json!(101), json!(50.5), json!("50"), Value::Null] {
+            let s = LimitAlertSettings::from_value(Some(&json!({ "sevenDay": { "enabled": true, "percent": percent } })));
+            assert_eq!(s.seven_day.percent, 90);
+        }
+    }
+
+    // limit-alerts "tells each account on its own", "never warns about an expired sign-in, remembered numbers or a window that
+    // already reset", "looks at nothing for a disabled group or window", "tells once per account, window and reset period when
+    // the threshold is crossed" (the 7-day window)
+    #[test]
+    fn each_account_and_window_on_its_own_and_nothing_for_stale_or_disabled_ones() {
+        let s = LimitAlertSettings::default();
+        let (five, seven) = (S + 3.0 * 3600.0, S + 3.0 * 86_400.0);
+        let a = card("claude:a", "support@example.com", 90.0, 10.0, five, seven);
+        let b = card("claude:b", "daniel@example.com", 90.0, 10.0, five, seven);
+        let (m, n) = evaluate_limits(&Vec::new(), &[a.clone(), b.clone()], &s, NOW);
+        assert_eq!(n.iter().map(|n| n.email.clone().unwrap()).collect::<Vec<_>>(), ["support@example.com", "daniel@example.com"]);
+        let mut keys: Vec<String> = m.iter().map(|(k, _)| k.clone()).collect();
+        keys.sort();
+        assert_eq!(keys, [limit_key(&b, WindowId::FiveHour), limit_key(&a, WindowId::FiveHour)]);
+        let (_, n) = evaluate_limits(&m, &[card("claude:a", "support@example.com", 95.0, 91.0, five, seven)], &s, NOW + 60_000.0);
+        assert_eq!(kinds(&n), ["threshold:7d:91"]);
+
+        let mut expired = card("claude:a", "a@example.com", 99.0, 99.0, five, seven);
+        (expired.status, expired.source) = (Status::Expired, Source::Cache);
+        let mut elsewhere = card("claude:x", "x@example.com", 99.0, 99.0, five, seven);
+        (elsewhere.status, elsewhere.held_by) = (Status::Elsewhere, Some(crate::usage::types::HeldBy::SwitchedOut));
+        let mut cached = card("claude:y", "y@example.com", 99.0, 99.0, five, seven);
+        cached.source = Source::Cache;
+        let reset = card("claude:z", "z@example.com", 99.0, 10.0, S - 60.0, seven);
+        assert!(evaluate_limits(&Vec::new(), &[expired, elsewhere, cached, reset], &s, NOW).1.is_empty());
+
+        let hot = card("claude:a", "a@example.com", 99.0, 99.0, five, seven);
+        let (m, n) = evaluate_limits(&Vec::new(), std::slice::from_ref(&hot), &LimitAlertSettings { enabled: false, ..s }, NOW);
+        assert!(m.is_empty() && n.is_empty());
+        let no_five = LimitAlertSettings { five_hour: WindowAlert { enabled: false, percent: 80 }, ..s };
+        assert_eq!(kinds(&evaluate_limits(&Vec::new(), std::slice::from_ref(&hot), &no_five, NOW).1), ["threshold:7d:99"]);
+        let low = LimitAlertSettings { five_hour: WindowAlert { enabled: true, percent: 65 }, ..s };
+        let warm = card("claude:a", "a@example.com", 66.0, 10.0, five, seven);
+        assert_eq!(kinds(&evaluate_limits(&Vec::new(), &[warm], &low, NOW).1), ["threshold:5h:66"]);
+    }
+
+    /// The local wall time `h:00` of NOW's day, as quiet hours text.
+    fn hour_of_now(offset: u32) -> String {
+        format!("{:02}:00", (local_fields(NOW).hour + offset) % 24)
+    }
+
+    fn alerter(
+        file: &std::path::Path,
+        alerts: AlertSettings,
+        providers: Vec<ProviderUsage>,
+        now: Fn0<f64>,
+    ) -> (Arc<LimitAlerter>, Arc<Mutex<Vec<LimitNotice>>>) {
+        let shown: Arc<Mutex<Vec<LimitNotice>>> = Arc::default();
+        let sink = shown.clone();
+        let a = LimitAlerter::new(LimitAlerterOptions {
+            file: file.to_path_buf(),
+            alerts: Arc::new(move || alerts.clone()),
+            show: Arc::new(move |n| sink.lock().push(n.clone())),
+            providers: Arc::new(move || providers.clone()),
+            now,
+            rt: tokio::runtime::Handle::current(),
+        });
+        (a, shown)
+    }
+
+    fn defaults() -> AlertSettings {
+        AlertSettings::from_value(None)
+    }
+
+    // limit-alerts "shows a crossing exactly once, also across a restart", "stays silent with the alerts master switch off or
+    // in quiet hours (the window still counts as told)"
+    #[tokio::test]
+    async fn shows_a_crossing_once_across_a_restart_and_stays_silent_when_switched_off_or_quiet() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("limit-alerts.json");
+        let (five, seven) = (S + 3.0 * 3600.0, S + 3.0 * 86_400.0);
+        let at = |p: f64| card("claude:a", "support@example.com", p, 10.0, five, seven);
+        let (a, shown) = alerter(&file, defaults(), Vec::new(), Arc::new(|| NOW));
+        a.on_state(&[at(82.0)]);
+        a.on_state(&[at(84.0)]);
+        assert_eq!(shown.lock().len(), 1);
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(saved["version"], 1);
+        a.dispose();
+        let (again, shown) = alerter(&file, defaults(), Vec::new(), Arc::new(|| NOW));
+        again.on_state(&[at(86.0)]);
+        assert!(shown.lock().is_empty());
+        again.dispose();
+
+        std::fs::remove_file(&file).unwrap();
+        let off = AlertSettings { enabled: false, ..defaults() };
+        let (a, shown) = alerter(&file, off, Vec::new(), Arc::new(|| NOW));
+        a.on_state(&[at(90.0)]);
+        assert!(shown.lock().is_empty());
+        a.dispose();
+        std::fs::remove_file(&file).unwrap();
+        let quiet =
+            AlertSettings { quiet_hours: QuietHours { enabled: true, start: hour_of_now(0), end: hour_of_now(1) }, ..defaults() };
+        let (a, shown) = alerter(&file, quiet, Vec::new(), Arc::new(|| NOW));
+        a.on_state(&[at(90.0)]);
+        assert!(shown.lock().is_empty());
+        assert!(a.snapshot()[0].1.notified);
+        a.dispose();
+    }
+
+    // limit-alerts "tells "available again" at the reset time without waiting for a poll"
+    #[tokio::test(start_paused = true)]
+    async fn tells_available_again_at_the_reset_time_without_a_poll() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("limit-alerts.json");
+        let mut alerts = defaults();
+        alerts.limits.resets = true;
+        let hot = card("claude:a", "support@example.com", 85.0, 10.0, S + 3.0 * 3600.0, S + 3.0 * 86_400.0);
+        let start = tokio::time::Instant::now();
+        let now: Fn0<f64> = Arc::new(move || NOW + start.elapsed().as_millis() as f64);
+        let (a, shown) = alerter(&file, alerts, vec![hot.clone()], now);
+        a.on_state(&[hot]);
+        assert_eq!(shown.lock().len(), 1);
+        tokio::time::sleep(Duration::from_millis(3 * 3_600_000 + 2_000)).await;
+        let shown = shown.lock().clone();
+        assert_eq!(shown.len(), 2);
+        assert!(shown[1].reset && shown[1].window == WindowId::FiveHour);
+        a.dispose();
+    }
+
     #[test]
     fn quiet_hours_wrap_midnight() {
         let at = |h: u32, m: u32| {

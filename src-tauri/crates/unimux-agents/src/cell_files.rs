@@ -260,6 +260,27 @@ mod tests {
         assert_eq!(prune_cell_files(&d, &HashSet::new()), 0);
     }
 
+    // mcp-cell-config "removing the cell deletes its MCP config", "ending the cell MCP access (exit, kill, failed spawn, spawn
+    // without MCP) revokes the token and deletes the file" (the file half: end_cell_mcp removes Kind::Mcp of the cell)
+    #[test]
+    fn removing_a_cell_or_ending_its_mcp_deletes_only_its_mcp_config() {
+        use crate::launch::mcp_config::write_claude_mcp_config;
+        let (_root, d) = dirs();
+        let url = "http://127.0.0.1:1/mcp";
+        let file = write_claude_mcp_config(&d.mcp, "c1", url, "token-1").unwrap();
+        write_claude_mcp_config(&d.mcp, "c2", url, "other").unwrap();
+        remove_cell_files(&d, "c1", &Kind::ALL);
+        assert!(!file.exists());
+        assert_eq!(names(&d.mcp), ["c2.json"]);
+        write_claude_mcp_config(&d.mcp, "c1", url, "token-2").unwrap();
+        remove_cell_files(&d, "c1", &[Kind::Mcp]);
+        assert_eq!(names(&d.mcp), ["c2.json"]);
+        // A cell that never had a file (a Codex or shell cell) and a missing folder are fine.
+        remove_cell_files(&d, "c3", &[Kind::Mcp]);
+        std::fs::remove_dir_all(&d.mcp).unwrap();
+        remove_cell_files(&d, "c1", &[Kind::Mcp]);
+    }
+
     #[test]
     fn prune_skips_folders_and_never_follows_a_bad_cell_id() {
         let (_root, d) = dirs();

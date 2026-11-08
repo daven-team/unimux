@@ -199,3 +199,35 @@ async fn joining_callers_share_one_run_and_a_forced_one_follows() {
     let g = s.inner.lock();
     assert!(g.pending.is_none() && g.follow_up.is_none());
 }
+
+// limit-alerts "${pollHidden ? 'goes on' : 'stops'} when pollHidden is ${pollHidden}"
+#[tokio::test(start_paused = true)]
+async fn polling_goes_on_while_hidden_only_with_poll_hidden() {
+    for poll_hidden in [true, false] {
+        let f = Fx::new();
+        let (refs, answer, calls) = (f.refs.clone(), f.answer.clone(), f.calls.clone());
+        let mut o = UsageOptions::new(
+            Arc::new(move || refs.lock().clone()),
+            Arc::new(move |r: AccountRef| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                let mut a = answer.lock().clone();
+                a.usage.account_id = r.id.clone();
+                async move { a }.boxed()
+            }),
+            f.cache.clone(),
+            Arc::new(|| true),
+            Arc::new(|| 300_000.0),
+            tokio::runtime::Handle::current(),
+        );
+        let start = tokio::time::Instant::now();
+        o.now = Arc::new(move || T0 + start.elapsed().as_millis() as f64);
+        o.poll_hidden = Some(Arc::new(move || poll_hidden));
+        let s = UsageService::new(o);
+        s.start();
+        tokio::time::sleep(Duration::ZERO).await;
+        s.set_active(false);
+        tokio::time::sleep(Duration::from_millis(601_000)).await;
+        assert_eq!(f.calls(), if poll_hidden { 3 } else { 1 }, "pollHidden {poll_hidden}");
+        s.stop();
+    }
+}

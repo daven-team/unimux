@@ -935,6 +935,430 @@ async fn grid_shutdown_without_a_runtime_says_so() {
     );
 }
 
+// ── R1 group 4: the rest of test/automation.test.ts, automation-team.test.ts and mcp-protocol.test.ts ────────────
+
+/// Runs `op` on its own task while the gated worktree creation waits, does `meanwhile`, then lets the worktree finish.
+async fn gated(op: &str, input: Value, meanwhile: impl FnOnce(&Fixture)) -> (Fixture, Result<Value, String>) {
+    let mut deps = FakeDeps::new();
+    let gate = Arc::new(Notify::new());
+    deps.gate = Some(gate.clone());
+    let f = fixture_with(deps, initial());
+    let s = f.service.clone();
+    let op = op.to_string();
+    let call = tokio::spawn(async move { s.execute_op(&op, input, Some(COORDINATOR), None).await });
+    for _ in 0..5 {
+        tokio::task::yield_now().await;
+    }
+    meanwhile(&f);
+    gate.notify_one();
+    let result = call.await.unwrap().map_err(|e| e.describe());
+    (f, result)
+}
+
+// automation "rechecks pause and project permissions after asynchronous worktree creation", "rolls back worktrees if
+// existing grid changes while additions are prepared"
+#[tokio::test]
+async fn rechecks_pause_and_the_grid_after_the_worktrees_and_rolls_them_back() {
+    let (f, r) = gated("create_grid", json!({ "name": "Paused", "cells": [{ "profileId": "codex", "worktree": true }] }), |f| {
+        f.state
+            .change(
+                |s| {
+                    let mut s = s.clone();
+                    s["automation"]["paused"] = json!(true);
+                    Ok(s)
+                },
+                None,
+                false,
+            )
+            .unwrap();
+    })
+    .await;
+    assert!(r.unwrap_err().contains("paused"));
+    assert_eq!(f.deps.calls.lock().removed.len(), 1);
+    assert!(f.deps.calls.lock().started.is_empty());
+    assert_eq!(list(&f.get()["projects"][0], "tabs").len(), 1);
+
+    let input = json!({ "gridId": TEAM, "cells": [{ "profileId": "codex", "worktree": true }] });
+    let (f, r) = gated("add_agents", input, |f| {
+        f.state
+            .change(
+                |s| {
+                    let mut s = s.clone();
+                    s["projects"][0]["tabs"] = json!([]);
+                    Ok(s)
+                },
+                None,
+                false,
+            )
+            .unwrap();
+    })
+    .await;
+    assert!(r.is_err());
+    assert_eq!(f.deps.calls.lock().removed.len(), 1);
+    assert!(f.deps.calls.lock().started.is_empty());
+}
+
+// automation "applies role changes immediately and blocks workers from reading other task inboxes", mcp-protocol "lets
+// workers wait only on their own tasks and denies cross-cell actions" (the get_tasks half)
+#[tokio::test]
+async fn role_changes_apply_at_once_and_workers_read_only_their_own_tasks() {
+    let f = fixture();
+    f.ok("create_task", json!({ "cellId": COORDINATOR, "title": "Own", "prompt": "Work" }), Some(COORDINATOR)).await;
+    assert_eq!(f.ok("get_tasks", json!({ "cellId": COORDINATOR }), Some(WORKER)).await, json!([]));
+    f.state
+        .change(
+            |s| {
+                let mut s = s.clone();
+                model::update_cell(&mut s, COORDINATOR, &[("role", Some(json!("worker")))]);
+                Ok(s)
+            },
+            None,
+            false,
+        )
+        .unwrap();
+    let e = f.err("create_grid", json!({ "name": "Forbidden", "cells": [{ "profileId": "codex" }] }), Some(COORDINATOR)).await;
+    assert!(e.contains("coordinator"), "{e}");
+}
+
+// automation "defaults team accents distinctly and honors explicit colors/models", "restricts peer identities and grid
+// updates to coordinators, honors pause", "rejects unsafe models and invalid profiles before mutating cells"
+#[tokio::test]
+async fn colors_models_peer_identities_grid_updates_and_pause() {
+    let f = fixture();
+    let created = f
+        .ok(
+            "create_grid",
+            json!({ "name": "Team", "color": "#123456", "cells": [
+            { "profileId": "codex", "color": "#abcdef", "model": "gpt-5.4" }, { "profileId": "claude" }] }),
+            Some(COORDINATOR),
+        )
+        .await;
+    let grid = f.tab(created["gridId"].as_str().unwrap());
+    assert_eq!(grid["color"], "#123456");
+    assert_eq!((grid["cells"][0]["color"].clone(), grid["cells"][0]["model"].clone()), (json!("#abcdef"), json!("gpt-5.4")));
+    assert_eq!(grid["cells"][1]["color"], "#a78bfa");
+
+    let worker_before = f.tab(TEAM)["cells"][1].clone();
+    assert!(!f.err("update_agent", json!({ "cellId": WORKER, "model": "x; echo bad" }), Some(COORDINATOR)).await.is_empty());
+    assert_eq!(f.tab(TEAM)["cells"][1], worker_before);
+
+    assert!(
+        f.err("update_agent", json!({ "cellId": COORDINATOR, "name": "Hijack" }), Some(WORKER)).await.contains("coordinator")
+    );
+    assert!(f.err("update_grid", json!({ "gridId": TEAM, "name": "Hijack" }), Some(WORKER)).await.contains("coordinator"));
+    f.ok("update_agent", json!({ "cellId": WORKER, "name": "Own", "color": "#123456" }), Some(WORKER)).await;
+    f.ok("update_grid", json!({ "gridId": TEAM, "name": "Renamed", "color": "#abcdef" }), Some(COORDINATOR)).await;
+    let team = f.tab(TEAM);
+    assert_eq!((team["name"].clone(), team["color"].clone()), (json!("Renamed"), json!("#abcdef")));
+    f.ok("set_paused", json!({ "paused": true }), None).await;
+    assert!(f.err("update_agent", json!({ "cellId": WORKER, "model": "new" }), Some(WORKER)).await.contains("paused"));
+    assert_eq!(f.deps.calls.lock().restarts, 0);
+}
+
+// automation "reports unavailable or failing runtime restart without typing into the agent shell", automation-team "starts
+// an exited team agent again and always says whether it restarted" (the refused start)
+#[tokio::test]
+async fn a_restart_reports_an_unavailable_or_failing_runtime_without_typing() {
+    let f = fixture();
+    *f.deps.restart.lock() = None;
+    let r = f.ok("update_agent", json!({ "cellId": WORKER, "model": "new", "restart": true }), Some(COORDINATOR)).await;
+    assert_eq!(
+        (r["needsRestart"].clone(), r["restarted"].clone(), r["restartReason"].clone()),
+        (json!(true), json!(false), json!("Safe runtime restart is unavailable."))
+    );
+    *f.deps.restart.lock() = Some(Err("Runtime rejected restart".into()));
+    let r = f.ok("update_agent", json!({ "cellId": WORKER, "restart": true }), Some(COORDINATOR)).await;
+    assert_eq!(
+        (r["needsRestart"].clone(), r["restarted"].clone(), r["restartReason"].clone()),
+        (json!(true), json!(false), json!("Runtime rejected restart"))
+    );
+    f.service.statuses.set(WORKER, "exited");
+    *f.deps.running.lock() = false;
+    *f.deps.start.lock() = Some(Ok(Restart { done: false, reason: Some("Project folder does not exist; ask the user.".into()) }));
+    let r = f.ok("update_agent", json!({ "cellId": WORKER, "restart": true }), Some(COORDINATOR)).await;
+    assert_eq!(
+        (r["restarted"].clone(), r["restartReason"].clone()),
+        (json!(false), json!("Project folder does not exist; ask the user."))
+    );
+    assert!(f.deps.calls.lock().delivered.is_empty());
+}
+
+// automation "defers dependent delivery and claims until prerequisites complete and exposes readiness", "rejects missing or
+// foreign prerequisites and does not consider cancelled work completed"
+#[tokio::test]
+async fn readiness_foreign_prerequisites_and_cancelled_work() {
+    let f = fixture();
+    let foreign = f.ok("create_task", json!({ "cellId": OUTSIDER, "title": "Other", "prompt": "Other" }), Some(OUTSIDER)).await;
+    let e = f
+        .err(
+            "create_task",
+            json!({ "cellId": WORKER, "title": "Bad", "prompt": "Bad", "dependsOn": [foreign["id"]] }),
+            Some(COORDINATOR),
+        )
+        .await;
+    assert!(e.contains("this project"), "{e}");
+    let pre = f.ok("create_task", json!({ "cellId": COORDINATOR, "title": "API", "prompt": "p" }), Some(COORDINATOR)).await;
+    let dep = f
+        .ok("create_task", json!({ "cellId": WORKER, "title": "UI", "prompt": "p", "dependsOn": [pre["id"]] }), Some(COORDINATOR))
+        .await;
+    let rows = f.ok("get_tasks", json!({}), Some(WORKER)).await;
+    assert_eq!((rows[0]["blockedBy"].clone(), rows[0]["ready"].clone()), (json!([pre["id"]]), json!(false)));
+    f.ok("update_task", json!({ "taskId": pre["id"], "status": "completed", "result": { "summary": "API" } }), Some(COORDINATOR))
+        .await;
+    let ready = f.ok("get_tasks", json!({ "readyOnly": true }), Some(WORKER)).await;
+    assert_eq!((ready[0]["id"].clone(), ready[0]["ready"].clone()), (dep["id"].clone(), json!(true)));
+    f.ok("update_task", json!({ "taskId": dep["id"], "status": "in_progress" }), Some(WORKER)).await;
+
+    let first = f.ok("create_task", json!({ "cellId": WORKER, "title": "First", "prompt": "p" }), Some(COORDINATOR)).await;
+    let second = f
+        .ok(
+            "create_task",
+            json!({ "cellId": WORKER, "title": "Second", "prompt": "p", "dependsOn": [first["id"]] }),
+            Some(COORDINATOR),
+        )
+        .await;
+    f.ok("update_task", json!({ "taskId": first["id"], "status": "cancelled" }), Some(WORKER)).await;
+    let e = f.err("update_task", json!({ "taskId": second["id"], "status": "in_progress" }), Some(WORKER)).await;
+    assert!(e.contains("dependencies"), "{e}");
+}
+
+// automation "batches own tasks/messages and optionally acknowledges only the returned page, including paused"
+#[tokio::test]
+async fn read_inbox_batches_own_items_and_acknowledges_the_page_while_paused() {
+    let f = fixture();
+    f.ok("create_task", json!({ "cellId": WORKER, "title": "Work", "prompt": "Work" }), Some(COORDINATOR)).await;
+    f.ok("create_task", json!({ "cellId": COORDINATOR, "title": "Private", "prompt": "Private" }), Some(COORDINATOR)).await;
+    let first = f.ok("send_message", json!({ "toCellId": WORKER, "text": "First" }), Some(COORDINATOR)).await;
+    f.ok("send_message", json!({ "toCellId": WORKER, "text": "Second" }), Some(COORDINATOR)).await;
+    f.ok("send_message", json!({ "toCellId": COORDINATOR, "text": "Private" }), Some(WORKER)).await;
+    let inbox = f.ok("read_inbox", json!({ "limit": 1 }), Some(WORKER)).await;
+    assert_eq!(list(&inbox, "tasks").len(), 1);
+    assert_eq!(inbox["tasks"][0]["cellId"], WORKER);
+    assert_eq!(list(&inbox, "messages").iter().map(|m| m["id"].clone()).collect::<Vec<_>>(), vec![first["id"].clone()]);
+    assert_eq!((inbox["acknowledgedMessageIds"].clone(), inbox["hasMoreMessages"].clone()), (json!([]), json!(true)));
+    f.ok("set_paused", json!({ "paused": true }), None).await;
+    let acked = f.ok("read_inbox", json!({ "limit": 1, "acknowledge": true }), Some(WORKER)).await;
+    assert_eq!(acked["acknowledgedMessageIds"], json!([first["id"]]));
+    let left = f.ok("get_messages", json!({}), Some(WORKER)).await;
+    assert_eq!(left.as_array().unwrap().iter().map(|m| m["text"].clone()).collect::<Vec<_>>(), vec![json!("Second")]);
+    assert_eq!(f.ok("get_messages", json!({}), Some(COORDINATOR)).await[0]["text"], "Private");
+}
+
+// automation "keeps folders, muted flags and sizes for the user and refuses folders from agents"
+#[tokio::test]
+async fn template_folders_muted_flags_and_sizes_stay_for_the_user_only() {
+    let f = fixture();
+    let mut layout = model::layout_for_count(2);
+    layout["colSizes"] = json!([3, 1]);
+    let created = f
+        .ok(
+            "create_grid",
+            json!({ "projectId": PROJECT, "name": "From template", "layout": layout, "cells": [
+            { "profileId": "claude", "dir": "D:/own/web", "muted": true }, { "profileId": "codex", "dir": "relative" }] }),
+            None,
+        )
+        .await;
+    let tab = f.tab(created["gridId"].as_str().unwrap());
+    assert_eq!(tab["layout"]["colSizes"], json!([3, 1]));
+    assert_eq!((tab["cells"][0]["dir"].clone(), tab["cells"][0]["muted"].clone()), (json!("D:/own/web"), json!(true)));
+    assert!(tab["cells"][1].get("dir").is_none());
+    let e = f
+        .err(
+            "create_grid",
+            json!({ "name": "Agent", "cells": [{ "profileId": "codex", "dir": "D:/elsewhere" }] }),
+            Some(COORDINATOR),
+        )
+        .await;
+    assert!(e.contains("not available to agents"), "{e}");
+}
+
+// automation-team "reports an agent that waits for the user longer than the threshold, and its exit code in list_agents",
+// "a coordinator updating a dead worker's task leaves "exited"; the worker's own report sets its status"
+#[tokio::test]
+async fn an_agent_waiting_for_the_user_is_stalled_and_a_coordinator_never_hides_exited() {
+    let f = fixture();
+    f.service.set_probe(Arc::new(|_| "connected"));
+    let task = f.ok("create_task", json!({ "cellId": WORKER, "title": "T", "prompt": "p" }), Some(COORDINATOR)).await;
+    f.service.runtime_started(WORKER);
+    f.service.statuses.set(WORKER, "needs_attention");
+    f.advance(STALL_ATTENTION_MS + 1000);
+    let r = f.ok("wait_for", json!({ "taskIds": [task["id"]], "timeoutSec": 1 }), Some(COORDINATOR)).await;
+    assert_eq!((r["event"].clone(), r["stalled"][0]["cellId"].clone()), (json!("stalled"), json!(WORKER)));
+    assert!(r["stalled"][0]["reason"].as_str().unwrap().contains("waits for the user"));
+
+    f.service.statuses.set(WORKER, "exited");
+    f.ok("update_task", json!({ "taskId": task["id"], "status": "blocked", "blockedReason": "worker died" }), Some(COORDINATOR))
+        .await;
+    assert_eq!(f.service.statuses.get(WORKER).as_deref(), Some("exited"));
+    f.service.statuses.set(WORKER, "ready");
+    f.ok("update_task", json!({ "taskId": task["id"], "status": "in_progress" }), Some(COORDINATOR)).await;
+    assert_eq!(f.service.statuses.get(WORKER).as_deref(), Some("ready"));
+}
+
+// automation-team "tells the agent with a short notice, not the task text, and redelivers pending items when it starts"
+#[tokio::test]
+async fn a_pending_task_reaches_its_agent_as_a_short_notice_when_it_starts() {
+    let f = fixture();
+    *f.deps.deliver_error.lock() = Some("Agent is not running.".into());
+    let task = f
+        .ok(
+            "create_task",
+            json!({ "cellId": WORKER, "title": "Fix login", "prompt": "A very long prompt ".repeat(50) }),
+            Some(COORDINATOR),
+        )
+        .await;
+    assert_eq!(task["delivery"], "pending");
+    *f.deps.deliver_error.lock() = None;
+    f.service.runtime_started(WORKER);
+    f.service.statuses.set(WORKER, "starting");
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    let last = f.deps.calls.lock().delivered.last().cloned().unwrap();
+    assert_eq!(
+        last,
+        (WORKER.to_string(), format!("unimux: new task {} \"Fix login\" from {COORDINATOR}: read_inbox", str_of(&task["id"])))
+    );
+    assert_eq!(f.task(task["id"].as_str().unwrap())["delivery"], "native");
+}
+
+// automation-team "cancels open tasks of archived or removed cells when the service starts, and keeps the others"
+#[tokio::test]
+async fn orphans_of_an_archived_grid_are_cancelled_at_start() {
+    let mut s = initial();
+    s["projects"][0]["archive"] = json!([{ "id": "g-old", "name": "Old", "color": "#3b82f6", "layout": model::layout_for_count(1),
+        "cells": [{ "id": "c-gone", "profileId": "claude", "role": "worker" }] }]);
+    let task = |id: &str, cell: &str, status: &str| {
+        json!({ "id": id, "projectId": PROJECT, "cellId": cell, "title": id, "prompt": "p",
+        "status": status, "delivery": "pending", "createdAt": 1, "updatedAt": 1 })
+    };
+    s["automation"]["tasks"] = json!([task("archived", "c-gone", "queued"), task("alive", WORKER, "queued")]);
+    let f = fixture_with(FakeDeps::new(), s);
+    assert_eq!(
+        (f.task("archived")["status"].clone(), f.task("archived")["cancelReason"].clone()),
+        (json!("cancelled"), json!("agent closed"))
+    );
+    assert_eq!(model::tasks(&f.get()).iter().filter(|t| !model::is_closed(t)).count(), 1);
+}
+
+// mcp-protocol "does not hot-loop: wait_for ignores items already shown by read_inbox and reports new ones"
+#[tokio::test]
+async fn wait_for_ignores_what_read_inbox_showed_and_a_blocked_task_is_news_once_ready() {
+    let f = fixture();
+    f.ok("send_message", json!({ "toCellId": WORKER, "text": "first" }), Some(COORDINATOR)).await;
+    f.ok("create_task", json!({ "cellId": WORKER, "title": "T1", "prompt": "p" }), Some(COORDINATOR)).await;
+    assert_eq!(list(&f.ok("read_inbox", json!({}), Some(WORKER)).await, "messages").len(), 1);
+    assert_eq!(f.ok("wait_for", json!({ "timeoutSec": 1 }), Some(WORKER)).await, json!({ "event": "timeout" }));
+    f.ok("send_message", json!({ "toCellId": WORKER, "text": "second" }), Some(COORDINATOR)).await;
+    assert_eq!(
+        f.ok("wait_for", json!({ "timeoutSec": 1 }), Some(WORKER)).await,
+        json!({ "event": "inbox", "unreadMessages": 1, "queuedTasks": 0 })
+    );
+    // A wait_for result counts as shown too.
+    assert_eq!(f.ok("wait_for", json!({ "timeoutSec": 1 }), Some(WORKER)).await, json!({ "event": "timeout" }));
+    let pre = f.ok("create_task", json!({ "cellId": COORDINATOR, "title": "Pre", "prompt": "p" }), Some(COORDINATOR)).await;
+    f.ok("create_task", json!({ "cellId": WORKER, "title": "Dep", "prompt": "p", "dependsOn": [pre["id"]] }), Some(COORDINATOR))
+        .await;
+    f.ok("read_inbox", json!({}), Some(WORKER)).await;
+    f.ok("update_task", json!({ "taskId": pre["id"], "status": "completed", "result": { "summary": "ok" } }), Some(COORDINATOR))
+        .await;
+    assert_eq!(
+        f.ok("wait_for", json!({ "timeoutSec": 1 }), Some(WORKER)).await,
+        json!({ "event": "inbox", "unreadMessages": 0, "queuedTasks": 1 })
+    );
+}
+
+// automation-retention "answers a repeated identical call with the first result instead of a second team", "never replays
+// a call whose answer was received: add_agents again adds agents, create_grid after close_grid makes a new grid", "a failed
+// call is not remembered"
+#[tokio::test]
+async fn a_call_whose_caller_left_is_answered_again_a_received_or_failed_one_never() {
+    let mut deps = FakeDeps::new();
+    let gate = Arc::new(Notify::new());
+    deps.gate = Some(gate.clone());
+    let f = fixture_with(deps, initial());
+    let args =
+        json!({ "name": "Team B", "cells": [{ "profileId": "codex", "role": "worker", "prompt": "Work", "worktree": true }] });
+    let first = CancellationToken::new();
+    let (s1, s2, a1, a2, t1) = (f.service.clone(), f.service.clone(), args.clone(), args.clone(), first.clone());
+    let running = tokio::spawn(async move { s1.execute_op("create_grid", a1, Some(COORDINATOR), Some(t1)).await });
+    for _ in 0..5 {
+        tokio::task::yield_now().await;
+    }
+    // The client timed out and retried: the retry joins the running call, so leaving the first does not cancel it.
+    let retry =
+        tokio::spawn(async move { s2.execute_op("create_grid", a2, Some(COORDINATOR), Some(CancellationToken::new())).await });
+    for _ in 0..5 {
+        tokio::task::yield_now().await;
+    }
+    first.cancel();
+    gate.notify_one();
+    let _ = running.await.unwrap();
+    let b = retry.await.unwrap().unwrap();
+    let named = |name: &str| list(&f.get()["projects"][0], "tabs").iter().filter(|t| t["name"] == name).count();
+    assert_eq!(named("Team B"), 1);
+    // Later the same call still answers with the first result; another call is a new grid.
+    assert_eq!(f.ok("create_grid", args.clone(), Some(COORDINATOR)).await["gridId"], b["gridId"]);
+    gate.notify_one();
+    let mut other = args.clone();
+    other["name"] = json!("Team C");
+    assert_ne!(f.ok("create_grid", other, Some(COORDINATOR)).await["gridId"], b["gridId"]);
+    assert_eq!(f.deps.calls.lock().worktrees.len(), 2);
+
+    // An answer that was received is never replayed.
+    let f = fixture();
+    let plain = json!({ "name": "Again", "cells": [{ "profileId": "codex" }] });
+    let grid = f.ok("create_grid", plain.clone(), Some(COORDINATOR)).await;
+    let more = json!({ "gridId": grid["gridId"], "cells": [{ "profileId": "claude" }] });
+    f.ok("add_agents", more.clone(), Some(COORDINATOR)).await;
+    f.ok("add_agents", more, Some(COORDINATOR)).await;
+    assert_eq!(list(&f.tab(grid["gridId"].as_str().unwrap()), "cells").len(), 3);
+    f.ok("close_grid", json!({ "gridId": grid["gridId"] }), Some(COORDINATOR)).await;
+    let second = f.ok("create_grid", plain, Some(COORDINATOR)).await;
+    assert_ne!(second["gridId"], grid["gridId"]);
+    assert_eq!(list(&f.get()["projects"][0], "tabs").iter().filter(|t| t["name"] == "Again").count(), 1);
+
+    // A failed call is not remembered.
+    let deps = FakeDeps::new();
+    *deps.worktree_errors.lock() = vec![Some("git failed".into())];
+    let f = fixture_with(deps, initial());
+    let retry_me = json!({ "name": "Retry me", "cells": [{ "profileId": "codex", "worktree": true }] });
+    assert_eq!(f.err("create_grid", retry_me.clone(), Some(COORDINATOR)).await, "git failed");
+    assert_eq!(list(&f.ok("create_grid", retry_me, Some(COORDINATOR)).await, "cellIds").len(), 1);
+}
+
+// wait-for "sends a task prompt once per run of the agent; full:true and a restart send it again" (the tool layer over the
+// real service)
+#[tokio::test]
+async fn read_inbox_sends_a_task_prompt_once_per_run_of_the_agent() {
+    use crate::tools::ToolHost as _;
+    let f = fixture();
+    let tools = crate::host::McpTools::new(f.service.clone());
+    let prompt = "Export every report of the quarter as CSV. ".repeat(40);
+    let task = f.ok("create_task", json!({ "cellId": WORKER, "title": "Export", "prompt": prompt }), Some(COORDINATOR)).await;
+    let read = |args: Value| {
+        let t = tools.clone();
+        async move {
+            match t.call("read_inbox".into(), Some(args), crate::host::plain_ctx(WORKER, false)).await {
+                Ok(v) => v,
+                Err(_) => panic!("read_inbox failed"),
+            }
+        }
+    };
+    let first = read(json!({})).await;
+    assert_eq!(
+        (first["tasks"][0]["id"].clone(), first["tasks"][0]["prompt"].clone()),
+        (task["id"].clone(), json!(prompt.trim()))
+    );
+    let second = read(json!({})).await;
+    assert_eq!(
+        second["tasks"][0],
+        json!({ "id": task["id"], "title": "Export", "status": "queued", "from": COORDINATOR, "seen": true })
+    );
+    assert!(second.to_string().len() < first.to_string().len() / 10);
+    assert_eq!(read(json!({ "full": true })).await["tasks"][0]["prompt"], json!(prompt.trim()));
+    f.service.runtime_started(WORKER);
+    assert_eq!(read(json!({})).await["tasks"][0]["prompt"], json!(prompt.trim()));
+}
+
 // ── M4: ports of test/wait-for.test.ts ("wait_for in the service") ────────────
 
 /// A wait of `actor` running on its own task.

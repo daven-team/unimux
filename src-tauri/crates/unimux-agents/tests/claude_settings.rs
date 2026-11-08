@@ -152,6 +152,25 @@ async fn writes_a_claude_settings_file_with_the_status_hooks() {
     f.server.stop();
 }
 
+// status-reliability "writes a StopFailure hook that posts its payload", background-stop "writes a Stop hook that posts its
+// payload", session-hook "writes a SessionStart hook that posts its payload"
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_stop_stop_failure_and_session_start_hooks_post_their_payloads() {
+    let f = Fixture::new().await;
+    let json = f.write("c3", None, None);
+    let token = f.server.token();
+    let fail = text(hook(&json, "StopFailure"), "command");
+    assert!(fail.contains("--data-binary @-"), "{fail}");
+    assert!(fail.contains(&format!("/h/{token}/c3/fail/")), "{fail}");
+    let stop = text(hook(&json, "Stop"), "command");
+    assert!(stop.contains("--data-binary @-") && stop.contains("/c3/stop"), "{stop}");
+    assert!(!text(hook(&json, "UserPromptSubmit"), "command").contains("--data-binary"));
+    let session = text(hook(&json, "SessionStart"), "command");
+    assert!(session.contains("--data-binary @-") && session.contains("-m 2"), "{session}");
+    assert!(session.contains(&format!("/h/{token}/c3/session")), "{session}");
+    f.server.stop();
+}
+
 // main-misc "rejects malformed ids and oversized bodies without crashing, and sends bodies only for notify" (settings half)
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sends_bodies_only_for_the_hooks_whose_payload_counts() {

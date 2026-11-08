@@ -635,4 +635,24 @@ mod tests {
         assert!(delegation_refusal(&s, "lead", 0, Some("w2")).unwrap().starts_with("Team limit: at most 1 agents"));
         assert!(delegation_refusal(&s, "lead", 0, Some("lead")).is_none());
     }
+
+    // team-start "teamLimit and delegationRefusal count the agents with open tasks from the coordinator", "stays exited while
+    // the shell idles, until the agent works again"
+    #[test]
+    fn the_team_limit_counts_open_tasks_of_the_coordinator_and_exited_stays_until_work() {
+        let t = |id: &str, cell: &str, status: &str, from: &str| json!({ "id": id, "cellId": cell, "fromCellId": from, "status": status });
+        let mut s = json!({ "settings": { "delegation": { "mode": "auto", "maxAgents": 2 } }, "automation": { "tasks": [
+            t("a", "w1", "in_progress", "lead"), t("b", "w1", "queued", "lead"), t("c", "w9", "completed", "lead"),
+            t("d", "w5", "queued", "other")] } });
+        assert!(delegation_refusal(&s, "lead", 0, Some("w1")).is_none());
+        assert!(delegation_refusal(&s, "lead", 0, Some("w2")).is_none());
+        assert!(delegation_refusal(&s, "lead", 1, None).is_none());
+        assert!(delegation_refusal(&s, "lead", 2, None).unwrap().contains("at most 2 agents"));
+        s["automation"]["tasks"].as_array_mut().unwrap().push(t("e", "w2", "queued", "lead"));
+        assert!(delegation_refusal(&s, "lead", 0, Some("w3")).unwrap().starts_with("Team limit"));
+
+        assert_eq!(automation_status_for("idle", None, false, Some("exited")), None);
+        assert_eq!(automation_status_for("waiting", Some("done"), false, Some("exited")), None);
+        assert_eq!(automation_status_for("working", None, true, Some("exited")), Some("working"));
+    }
 }
