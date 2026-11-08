@@ -1000,64 +1000,85 @@ Verification: cargo fmt; clippy -D warnings `-p unimux-app -p unimux-update --al
 Harness: `scripts/real-app.mjs` (target = the Tauri check build; `MC_APP_TARGET=electron` or `--target=electron` = Electron's out/, the 1.1.4 reference, until R1), `scripts/real-app-owners.mjs` (channel -> package), `scripts/real-app-run.mjs` (runs them all; `--write-progress` rewrites the table below). A failed script prints `BLOCKED by <package> (<commands>)` and exits with 2 only for what it exercised itself (`classifyRun` in real-app-owners.mjs): a test-bridge op a later package adds, a not-yet command outside the startup baseline (the not-yet calls of a bare launch, scripts/real-app-baseline.mjs, cached per binary in artifacts/real-app/baseline-tauri.json; the runner takes it once before the sweep), or a baseline command of a package the script tests (`SCRIPT_PACKAGES`). Any other failure is a `fail` (exit 1) and lists the boot-time calls as "not-yet seen", so a regression in a landed package is never hidden as blocked. Measurements (perf-*, bench-*, measure-startup) that pass are still blocked by every not-yet call (their numbers mean nothing until the app is complete). Re-run after a package lands: `npm run build:check && node scripts/real-app-run.mjs --write-progress`.
 
 <!-- X1 real-app status (tauri) start -->
-Run: 2026-11-07 09:52 UTC, target tauri (check build), `node scripts/real-app-run.mjs --write-progress`.
+Run: 2026-11-08 07:56 UTC, target tauri (check build), `node scripts/real-app-run.mjs --write-progress`.
 
 | script | result | blocked by | detail |
 |---|---|---|---|
-| verify-cli-contract.mjs (release gate) | blocked | P4 | P4 (launch-line) |
-| verify-team-start.mjs (release gate) | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
-| verify-accounts-ui.mjs | blocked | A2, A5 | A2 (accounts:swapPending); A5 (usage:get) |
-| verify-agent-close.mjs | blocked | G5, P3, P4, W4, W5, W6 | G5 (fs:listProjectDirectoryBatch); P3 (cell:runtime); P4 (cell:spawn); W4 (notify); W5 (detach:wait); W6 (app:quitGuard) |
-| verify-agent-prompt.mjs | blocked | H4, P4, W5 | H4 (context:get); P4 (cell:spawn); W5 (detach:open) |
-| verify-auto-switch-ui.mjs | blocked | A2, A5, W4 | A2 (accounts:swapPending); A5 (usage:get); W4 (test-bridge toasts) |
-| verify-conv-export.mjs | blocked | H4, H5, P4 | H4 (context:get, sessions:list); H5 (conv:export); P4 (cell:spawn) |
-| verify-conv-search.mjs | blocked | H4, H5, P4 | H4 (sessions:list); H5 (conv:search); P4 (cell:spawn) |
-| verify-db-core.mjs | blocked | D1 | D1 (db:connections:save, db:vault:info, db:sessions) |
-| verify-db-mysql-ui.mjs | blocked | D1, D12 | D1 (db:vault:info, db:sessions, db:connections:test); D12 (port:db) |
-| verify-db-pg-ui.mjs | blocked | D1, D12 | D1 (db:vault:info, db:sessions, db:connections:test); D12 (port:db) |
-| verify-db-redis-ui.mjs | blocked | D1, D12 | D1 (db:vault:info, db:sessions, db:connections:save); D12 (port:db) |
-| verify-db-redis.mjs | blocked | D1, D12 | D1 (db:vault:info, db:sessions, db:connections:save); D12 (port:db) |
-| verify-db-sqlite-ui.mjs | blocked | D1, D12 | D1 (db:vault:info, db:sessions, db:connections:test); D12 (port:db) |
-| verify-dead-login-ui.mjs | blocked | A2, A5 | A2 (accounts:swapPending); A5 (usage:get) |
-| verify-detach-db.mjs | blocked | D1, D12, W5 | D1 (db:vault:info, db:sessions, db:connect); D12 (port:db); W5 (detach:works, detach:waits) |
-| verify-first-login-ui.mjs | blocked | A2, A4 | A2 (accounts:swapPending); A4 (auth:start) |
-| verify-git-layout.mjs | blocked | A6, G2, G3, G4 | A6 (github:status); G2 (git:trust); G3 (git:probe); G4 (git:worktrees) |
-| verify-grid-tabs.mjs | blocked | G5, P4 | G5 (fs:listProjectDirectoryBatch); P4 (cell:spawn) |
-| verify-grid-templates.mjs | blocked | H4, P4, S3 | H4 (context:get); P4 (cell:spawn); S3 (ssh:connect) |
+| verify-cli-contract.mjs (release gate) | pass |  |  |
+| verify-team-start.mjs (release gate) | pass |  |  |
+| verify-accounts-ui.mjs | pass |  |  |
+| verify-agent-close.mjs | pass |  |  |
+| verify-agent-prompt.mjs | pass |  |  |
+| verify-auto-switch-ui.mjs | pass |  |  |
+| verify-conv-export.mjs | pass |  |  |
+| verify-conv-search.mjs | pass |  |  |
+| verify-db-core.mjs | pass |  |  |
+| verify-db-mysql-ui.mjs | pass |  |  |
+| verify-db-pg-ui.mjs | pass |  |  |
+| verify-db-redis-ui.mjs | pass |  |  |
+| verify-db-redis.mjs | pass |  |  |
+| verify-db-sqlite-ui.mjs | pass |  |  |
+| verify-dead-login-ui.mjs | pass |  |  |
+| verify-detach-db.mjs | pass |  |  |
+| verify-first-login-ui.mjs | pass |  |  |
+| verify-git-layout.mjs | pass |  |  |
+| verify-grid-tabs.mjs | pass |  |  |
+| verify-grid-templates.mjs | pass |  |  |
 | verify-layout-ui.mjs | pass |  |  |
-| verify-limits-ui.mjs | blocked | A5, W4 | A5 (usage:get); W4 (test-bridge toasts) |
-| verify-mcp-app.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
-| verify-mcp-cli.mjs | pass (M2, 2026-11-07: the check build's server with the stand-in automation; the real service is M3 / M4) | | |
-| verify-mcp-team.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
-| verify-notify-actions.mjs | blocked | P4, W4 | P4 (cell:spawn); W4 (test-bridge toasts) |
-| verify-prompt-queue.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
-| verify-safety-ui.mjs | blocked | G4, P4 | G4 (git:inspectWorktree); P4 (cell:spawn) |
-| verify-sftp-edit.mjs | blocked | G6, T1 | G6 (local:roots); T1 (port:sftp, sftp:sessions, sftp:viewOpened, sftp:connect) |
-| verify-sftp-path.mjs | blocked | G6, T1 | G6 (local:roots); T1 (port:sftp, sftp:sessions, sftp:viewOpened) |
-| verify-sftp-ui.mjs | blocked | G6, T1 | G6 (local:roots); T1 (port:sftp, sftp:sessions, sftp:viewOpened) |
+| verify-limits-ui.mjs | pass |  |  |
+| verify-mcp-app.mjs | pass |  |  |
+| verify-mcp-cli.mjs | pass |  |  |
+| verify-mcp-team.mjs | pass |  |  |
+| verify-notify-actions.mjs | pass |  |  |
+| verify-prompt-queue.mjs | pass |  |  |
+| verify-safety-ui.mjs | pass |  |  |
+| verify-sftp-edit.mjs | pass |  |  |
+| verify-sftp-path.mjs | pass |  |  |
+| verify-sftp-ui.mjs | pass |  |  |
 | verify-sidebar-anchor.mjs | pass |  |  |
-| verify-ssh-bar.mjs | blocked | S1, S3 | S1 (ssh:vault:info); S3 (ssh:sessions, ssh:connect) |
-| verify-ssh-paths.mjs | blocked | S1, S3 | S1 (ssh:vault:info, ssh:history:status, ssh:storage:status, ssh:knownHosts:list); S3 (ssh:sessions, ssh:connect) |
-| verify-ssh-ui.mjs | blocked | S1, S3 | S1 (ssh:vault:info); S3 (ssh:sessions, ssh:connect) |
-| verify-start-screen.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
-| verify-status-ui.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
-| verify-team-panel.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
-| verify-team-stuck.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
-| verify-tree-ui.mjs | blocked | G5 | G5 (fs:listProjectDirectoryBatch) |
-| verify-update-wait.mjs | blocked | P3, P4 | P3 (cell:runtime); P4 (cell:spawn) (U1's update:get answers since U1) |
-| verify-waiting-ui.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
+| verify-ssh-bar.mjs | pass |  |  |
+| verify-ssh-paths.mjs | pass |  |  |
+| verify-ssh-ui.mjs | pass |  |  |
+| verify-start-screen.mjs | pass |  |  |
+| verify-status-ui.mjs | pass |  |  |
+| verify-team-panel.mjs | pass |  |  |
+| verify-team-stuck.mjs | pass |  |  |
+| verify-tree-ui.mjs | pass |  |  |
+| verify-update-wait.mjs | pass |  |  |
+| verify-waiting-ui.mjs | pass |  |  |
 | verify-tauri-normalize.mjs | pass |  |  |
+| verify-tauri-cells.mjs | pass |  |  |
+| verify-tauri-claude-settings.mjs | pass |  |  |
+| verify-tauri-convsearch.mjs | pass |  |  |
+| verify-tauri-db.mjs | pass |  |  |
+| verify-tauri-detached.mjs | pass |  |  |
+| verify-tauri-fileops.mjs | pass |  |  |
+| verify-tauri-files.mjs | pass |  |  |
+| verify-tauri-hooks.mjs | pass |  |  |
+| verify-tauri-lifecycle.mjs | pass |  |  |
+| verify-tauri-os.mjs | fail |  | verify-tauri-os: FAILED |
+| verify-tauri-search.mjs | pass |  |  |
+| verify-tauri-sessions.mjs | pass |  |  |
+| verify-tauri-w3.mjs | pass |  |  |
+| verify-cli-detect.mjs | pass |  |  |
+| verify-safestorage.mjs | pass |  |  |
+| verify-tauri-pty.mjs | pass |  |  |
+| verify-tauri-monitor.mjs | pass |  |  |
+| verify-caption.mjs | pass |  |  |
+| verify-update-window.mjs | fail |  | missing the payload installer in D:\Projekty\ajzakomator\src-tauri\target\u2\release\bundle\nsis, D:\Projekty\ajzakomator\src-tauri\target\u5\release\unimux.exe |
+| verify-update-gate.mjs | skip |  | the payload installer (node scripts/verify-update-gate.mjs --build) |
+| verify-tauri-github.mjs | pass |  |  |
 | verify-release-build.mjs | skip |  | CI only: release.yml checks the CI run of a tag (RELEASE_TAG, BUILD_RUN_ID) |
 | smoke-tauri.mjs | pass |  |  |
 | smoke-start.mjs | pass |  |  |
-| smoke-automation.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
-| capture-readme.mjs | blocked | H4, P4 | H4 (context:get); P4 (cell:spawn) |
-| measure-startup.mjs | blocked | P4 | P4 (cell:spawn) |
-| perf-latency.mjs | blocked | P4, S3 | P4 (cell:spawn); S3 (ssh:connect) |
-| bench-jank.mjs | blocked | P4 | P4 (cell:spawn) |
-| perf-grid.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
-| perf-hidden.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
-| perf-profile.mjs | blocked | A2, A5, D1, D12, G3, G8, H3, H4, P2, P4, S1, S3, T1, U1, W5, W6 | A2 (accounts:swapPending); A5 (usage:get); D1 (db:vault:info, db:sessions); D12 (port:db); G3 (git:probe); G8 (fs:exists); H3 (cli:status); H4 (sessions:list); P2 (port:pty); P4 (cell:spawn); S1 (ssh:vault:info); S3 (ssh:sessions); T1 (port:sftp, sftp:sessions); U1 (update:get); W5 (detach:works, detach:waits); W6 (app:quitGuard) |
+| smoke-automation.mjs | pass |  |  |
+| capture-readme.mjs | pass |  |  |
+| measure-startup.mjs | pass |  |  |
+| perf-latency.mjs | pass |  |  |
+| bench-jank.mjs | pass |  |  |
+| perf-grid.mjs | pass |  |  |
+| perf-hidden.mjs | pass |  |  |
+| perf-profile.mjs | pass |  |  |
 <!-- X1 real-app status (tauri) end -->
 
 #### X1 open issues
