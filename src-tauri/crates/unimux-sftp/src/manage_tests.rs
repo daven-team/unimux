@@ -306,21 +306,34 @@ async fn editor_saves_through_an_exclusive_private_part_file_and_keep_the_encodi
     fake.put("/e.txt", Node::File(b"one\r\ntwo\r\n".to_vec(), 7));
     fake.modes.lock().insert("/e.txt".into(), 0o640);
     let read = read_for_editor(&side, "/e.txt").await.unwrap();
-    assert_eq!((read["text"].as_str(), read["encoding"].as_str(), read["size"].as_u64()), (Some("one\r\ntwo\r\n"), Some("utf-8"), Some(10)));
+    assert_eq!(
+        (read["text"].as_str(), read["encoding"].as_str(), read["size"].as_u64()),
+        (Some("one\r\ntwo\r\n"), Some("utf-8"), Some(10))
+    );
     let hash = read["stamp"]["hash"].as_str().unwrap();
     assert!(hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()));
-    let saved = write_from_editor(&side, "/e.txt", &save("one\nTWO\nthree\n", "one\r\ntwo\r\n", Some(stamp_of(&read["stamp"]))), "editor:s")
-        .await
-        .unwrap();
+    let saved = write_from_editor(
+        &side,
+        "/e.txt",
+        &save("one\nTWO\nthree\n", "one\r\ntwo\r\n", Some(stamp_of(&read["stamp"]))),
+        "editor:s",
+    )
+    .await
+    .unwrap();
     assert_eq!(saved["kind"], "saved");
     assert_eq!(file_text(&fake, "/e.txt"), b"one\r\nTWO\r\nthree\r\n");
     assert_eq!(fake.fs.lock().keys().cloned().collect::<Vec<_>>(), ["/", "/e.txt"]);
     assert_eq!(mode_of(&fake, "/e.txt"), Some(0o640));
     assert_eq!(*fake.opens.lock(), [("/e.txt.unimux-part".to_string(), true, Some(0o600))]);
     assert_eq!(saved["stamp"]["size"], 17);
-    let again = write_from_editor(&side, "/e.txt", &save("again\n", "one\r\nTWO\r\nthree\r\n", Some(stamp_of(&saved["stamp"]))), "editor:s")
-        .await
-        .unwrap();
+    let again = write_from_editor(
+        &side,
+        "/e.txt",
+        &save("again\n", "one\r\nTWO\r\nthree\r\n", Some(stamp_of(&saved["stamp"]))),
+        "editor:s",
+    )
+    .await
+    .unwrap();
     assert_eq!(again["kind"], "saved");
     assert_eq!(file_text(&fake, "/e.txt"), b"again\r\n");
 
@@ -339,7 +352,8 @@ async fn editor_saves_through_an_exclusive_private_part_file_and_keep_the_encodi
     fake.opens.lock().clear();
     fake.put("/e.txt.unimux-part", Node::File(b"leftover".to_vec(), 1));
     let read = read_for_editor(&side, "/e.txt").await.unwrap();
-    let r = write_from_editor(&side, "/e.txt", &save("mine", "AGAIN\r\n", Some(stamp_of(&read["stamp"]))), "editor:s").await.unwrap();
+    let r =
+        write_from_editor(&side, "/e.txt", &save("mine", "AGAIN\r\n", Some(stamp_of(&read["stamp"]))), "editor:s").await.unwrap();
     assert_eq!(r["kind"], "saved");
     let opens = fake.opens.lock().clone();
     assert_eq!(opens.len(), 2);
@@ -384,7 +398,10 @@ async fn a_file_of_another_owner_is_not_replaced_without_consent() {
     s.allow_owner_change = true;
     let done = write_from_editor(&side, "/e.txt", &s, "editor:s").await.unwrap();
     assert_eq!(done["kind"], "saved");
-    assert_eq!(done["warnings"], json!([{ "kind": "owner", "from": { "uid": 1001, "gid": 1001 }, "to": { "uid": 1000, "gid": 1000 } }]));
+    assert_eq!(
+        done["warnings"],
+        json!([{ "kind": "owner", "from": { "uid": 1001, "gid": 1001 }, "to": { "uid": 1000, "gid": 1000 } }])
+    );
     assert_eq!(file_text(&fake, "/e.txt"), b"mine");
 }
 
@@ -406,4 +423,129 @@ async fn a_save_whose_rename_fails_leaves_the_old_file_and_no_part_file() {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     assert_eq!(fake.fs.lock().keys().cloned().collect::<Vec<_>>(), ["/", "/e.txt"]);
+}
+
+/// Links on the server: a save through a link writes the file it points to and keeps the link; a delete of a folder with a
+/// link back to itself counts the link as one entry and removes the link without following it.
+#[tokio::test]
+async fn links_are_saved_through_and_deleted_without_being_followed() {
+    let (fake, side) = connect(Config { posix_rename: true, ..Config::default() }).await;
+    fake.put("/real.txt", Node::File(b"real".to_vec(), 5));
+    fake.put("/link.txt", Node::Link("/real.txt".into()));
+    let read = read_for_editor(&side, "/link.txt").await.unwrap();
+    assert_eq!(read["text"], "real");
+    let saved = write_from_editor(&side, "/link.txt", &save("changed", "real", Some(stamp_of(&read["stamp"]))), "editor:s")
+        .await
+        .unwrap();
+    assert_eq!(saved["kind"], "saved");
+    assert!(matches!(fake.get("/link.txt"), Some(Node::Link(to)) if to == "/real.txt"), "the link stays");
+    assert_eq!(file_text(&fake, "/real.txt"), b"changed");
+    assert_eq!(stat_for_editor(&side, "/link.txt").await.unwrap()["size"], 7);
+
+    fake.put("/loop", Node::Dir);
+    fake.put("/loop/f.txt", Node::File(b"f".to_vec(), 1));
+    fake.put("/loop/again", Node::Link("/loop".into()));
+    let count = op(&side, SftpOp::DeleteCount { paths: vec!["/loop".into()] }).await.unwrap();
+    assert_eq!(count, json!({ "files": 2, "dirs": 1 }));
+    let confirmed = DeleteCount { files: 2, dirs: 1 };
+    assert_eq!(op(&side, SftpOp::Delete { paths: vec!["/loop".into()], confirmed }).await, Ok(Value::Null));
+    assert!(fake.fs.lock().keys().all(|k| !k.starts_with("/loop")));
+}
+
+fn chmod(paths: &[&str], set: Option<(u32, u32)>, recursive: Option<(u32, u32)>, op_id: Option<&str>) -> SftpOp {
+    let req = ChmodRequest {
+        paths: paths.iter().map(|p| p.to_string()).collect(),
+        set,
+        recursive,
+        op_id: op_id.map(str::to_string),
+        total: None,
+    };
+    SftpOp::Chmod { req }
+}
+
+fn setstats(fake: &Fake) -> Vec<String> {
+    fake.log.lock().iter().filter_map(|l| l.strip_prefix("SETSTAT ").map(str::to_string)).collect()
+}
+
+/// 1.1.4's sftp-manage.int permission changes: digits on one entry, the common bits of a mixed selection, an error per path
+/// that is gone, links counted and skipped in a tree, the order of a tree change (contents first when the folder value
+/// takes the owner's r+x away), and a cancel while counting or while changing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn permission_changes_like_1_1_4() {
+    let (fake, side) = connect(Config::default()).await;
+    fake.put("/a.txt", Node::File(b"a".to_vec(), 1));
+    fake.put("/b.txt", Node::File(b"b".to_vec(), 1));
+    let one = op(&side, chmod(&["/a.txt"], Some((0o644, 0o7777)), None, None)).await.unwrap();
+    assert_eq!(one, json!({ "changed": 1, "errors": [] }));
+    op(&side, chmod(&["/b.txt"], Some((0o664, 0o7777)), None, None)).await.unwrap();
+    // Owner execute on, the differing group-write left out of the mask.
+    let r = op(&side, chmod(&["/a.txt", "/b.txt"], Some((0o744, 0o7777 & !0o020)), None, None)).await.unwrap();
+    assert_eq!(r["changed"], 2);
+    assert_eq!((mode_of(&fake, "/a.txt"), mode_of(&fake, "/b.txt")), (Some(0o744), Some(0o764)));
+    let listed = crate::backend::remote_op(&side, &SftpOp::List { path: "/".into() }).await.unwrap().unwrap();
+    let b = listed["entries"].as_array().unwrap().iter().find(|e| e["name"] == "b.txt").unwrap().clone();
+    assert_eq!(b["permissions"], "-rwxrw-r--");
+    let r = op(&side, chmod(&["/gone", "/a.txt"], Some((0o600, 0o7777)), None, None)).await.unwrap();
+    assert_eq!(r, json!({ "changed": 1, "errors": [{ "path": "/gone", "error": "notFound" }] }));
+
+    // A tree: counted first, one value for folders and one for files, the link counted and never followed.
+    fake.put("/site", Node::Dir);
+    fake.put("/site/img", Node::Dir);
+    fake.put("/site/index.html", Node::File(b"x".to_vec(), 1));
+    fake.put("/site/img/logo.png", Node::File(b"x".to_vec(), 1));
+    fake.put("/outside.txt", Node::File(b"x".to_vec(), 1));
+    fake.put("/site/link.txt", Node::Link("/outside.txt".into()));
+    let count = op(&side, SftpOp::ChmodCount { paths: vec!["/site".into()], recursive: true }).await.unwrap();
+    assert_eq!(count, json!({ "files": 2, "dirs": 2, "links": 1, "noFollow": false }));
+    let flat = op(&side, SftpOp::ChmodCount { paths: vec!["/site".into()], recursive: false }).await.unwrap();
+    assert_eq!(flat, json!({ "files": 0, "dirs": 1, "links": 0, "noFollow": false }));
+    fake.log.lock().clear();
+    let r = op(&side, chmod(&["/site"], None, Some((0o750, 0o640)), Some("op-1"))).await.unwrap();
+    assert_eq!(r, json!({ "changed": 4, "errors": [] }));
+    for (p, m) in [("/site", 0o750), ("/site/img", 0o750), ("/site/index.html", 0o640), ("/site/img/logo.png", 0o640)] {
+        assert_eq!(mode_of(&fake, p), Some(m), "{p}");
+    }
+    assert!(!setstats(&fake).iter().any(|p| p.ends_with("outside.txt") || p.ends_with("link.txt")));
+    assert_eq!(mode_of(&fake, "/outside.txt"), None, "the link target outside the folder was never touched");
+    // Without the owner's r+x on the folders the contents go first, otherwise the folder first.
+    fake.fs.lock().remove("/site/link.txt");
+    fake.log.lock().clear();
+    op(&side, chmod(&["/site"], None, Some((0o600, 0o600)), None)).await.unwrap();
+    assert_eq!(setstats(&fake), ["/site/img/logo.png", "/site/img", "/site/index.html", "/site"]);
+    fake.log.lock().clear();
+    op(&side, chmod(&["/site"], None, Some((0o755, 0o644)), None)).await.unwrap();
+    assert_eq!(setstats(&fake).first().map(String::as_str), Some("/site"));
+    assert_eq!(setstats(&fake).len(), 4);
+
+    // A cancel while the tree is still counted changes nothing; one after the first changes stops the rest.
+    fake.put("/many", Node::Dir);
+    for i in 0..300 {
+        fake.put(&format!("/many/d{i}"), Node::Dir);
+        fake.put(&format!("/many/d{i}/f.txt"), Node::File(b"x".to_vec(), 1));
+    }
+    let side = Arc::new(side);
+    let ops = Arc::new(RunningOps::default());
+    let run = |op_id: &'static str| {
+        let (side, ops) = (side.clone(), ops.clone());
+        tokio::spawn(async move {
+            let o = chmod(&["/many"], None, Some((0o700, 0o600)), Some(op_id));
+            manage_op(&side, "sftp:s", false, &o, &ops, &HostChannels::unattached()).await.unwrap()
+        })
+    };
+    fake.log.lock().clear();
+    let counting = run("op-count");
+    while !ops.cancel("op-count") {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(counting.await.unwrap(), Ok(json!({ "changed": 0, "errors": [], "cancelled": true })));
+    assert!(setstats(&fake).is_empty());
+    let changing = run("op-change");
+    while setstats(&fake).is_empty() {
+        tokio::task::yield_now().await;
+    }
+    assert!(ops.cancel("op-change"));
+    let r = changing.await.unwrap().unwrap();
+    assert_eq!(r["cancelled"], true);
+    assert!(r["changed"].as_u64().unwrap() < 601);
+    assert!(!ops.cancel("op-change"), "a finished operation is no longer running");
 }

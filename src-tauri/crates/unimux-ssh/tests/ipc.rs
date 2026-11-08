@@ -224,8 +224,7 @@ async fn reads_key_files_only_from_absolute_paths_to_small_regular_files() {
 async fn imports_generates_exports_and_removes_keys_without_returning_private_material() {
     let f = setup().await;
     let draft = f.ready_draft(encrypted_pair()).await;
-    let committed =
-        f.ask("ssh:key:commitDraft", json!({ "draftId": draft, "label": "imported", "savePassphrase": false })).await;
+    let committed = f.ask("ssh:key:commitDraft", json!({ "draftId": draft, "label": "imported", "savePassphrase": false })).await;
     assert_eq!(
         (committed["ok"].as_bool(), committed["key"]["label"].as_str(), committed["key"]["encrypted"].as_bool()),
         (Some(true), Some("imported"), Some(true))
@@ -243,10 +242,7 @@ async fn imports_generates_exports_and_removes_keys_without_returning_private_ma
     assert!(!key.to_string().contains("PRIVATE KEY"));
     assert_eq!(f.ask("ssh:key:exportPrivate", json!({ "id": key["id"] })).await, json!({ "ok": true }));
     assert!(f.host.written.lock()[0].1.contains("BEGIN OPENSSH PRIVATE KEY"));
-    assert_eq!(
-        f.ask("ssh:key:exportPrivate", json!({ "id": KEY_GONE })).await,
-        json!({ "ok": false, "error": "notFound" })
-    );
+    assert_eq!(f.ask("ssh:key:exportPrivate", json!({ "id": KEY_GONE })).await, json!({ "ok": false, "error": "notFound" }));
     // Export failures answer a fixed code, never the raw error text.
     f.host.write_fails.store(true, Ordering::SeqCst);
     let failed_write = f.ask("ssh:key:exportPrivate", json!({ "id": key["id"] })).await;
@@ -316,10 +312,7 @@ async fn generate_failures_and_passphrase_saves_answer_fixed_codes() {
 
     // A generated encrypted key and an imported one: a passphrase is saved only when it opens the key.
     let r = f
-        .ask(
-            "ssh:key:generate",
-            json!({ "label": "gen", "type": "ed25519", "passphrase": PASSPHRASE, "savePassphrase": false }),
-        )
+        .ask("ssh:key:generate", json!({ "label": "gen", "type": "ed25519", "passphrase": PASSPHRASE, "savePassphrase": false }))
         .await;
     assert_eq!(r["ok"], true, "{r}");
     let draft = f.ready_draft(encrypted_pair()).await;
@@ -327,7 +320,7 @@ async fn generate_failures_and_passphrase_saves_answer_fixed_codes() {
     for id in [&r["key"]["id"], &imported["key"]["id"]] {
         let save = |pp: &str| json!({ "id": id, "passphrase": { "save": pp } });
         assert_eq!(f.ask("ssh:key:update", save("not-the-passphrase")).await, json!({ "ok": false, "error": "badPassphrase" }));
-        assert_eq!(f.stores.vault().await.lock().key(id.as_str().unwrap()).unwrap().meta.passphrase_saved, false);
+        assert!(!f.stores.vault().await.lock().key(id.as_str().unwrap()).unwrap().meta.passphrase_saved);
         let saved = f.ask("ssh:key:update", save(PASSPHRASE)).await;
         assert_eq!((saved["ok"].as_bool(), saved["key"]["passphraseSaved"].as_bool()), (Some(true), Some(true)));
         assert!(leaks(&saved).is_empty());
@@ -445,7 +438,8 @@ async fn reveals_the_stored_text_only_for_a_valid_id_and_never_decrypts_it() {
     let id = key["id"].as_str().unwrap();
     assert_eq!(shown, f.stores.vault().await.lock().key_secret(id).unwrap().private_key.as_str());
     let not_found = json!({ "ok": false, "error": "notFound" });
-    for bad in [json!({ "id": KEY_GONE }), json!({ "id": "not-a-uuid" }), json!({ "id": key["id"], "extra": true }), Value::Null] {
+    for bad in [json!({ "id": KEY_GONE }), json!({ "id": "not-a-uuid" }), json!({ "id": key["id"], "extra": true }), Value::Null]
+    {
         assert_eq!(f.ask("ssh:key:revealPrivate", bad).await, not_found);
     }
     // A passphrase-protected key is shown as stored: the encrypted text, never decrypted with the saved passphrase.
@@ -488,7 +482,10 @@ async fn replaces_key_material_under_the_same_id_with_the_1_1_4_codes() {
         (r["key"]["id"].clone(), r["key"]["label"].clone(), r["key"]["type"].clone(), r["key"]["bits"].clone()),
         (key["id"].clone(), json!("deploy"), json!("ecdsa-sha2-nistp256"), json!(256))
     );
-    assert_eq!((&r["key"]["comment"], &r["key"]["encrypted"], &r["key"]["createdAt"]), (&json!("next@check"), &json!(false), &key["createdAt"]));
+    assert_eq!(
+        (&r["key"]["comment"], &r["key"]["encrypted"], &r["key"]["createdAt"]),
+        (&json!("next@check"), &json!(false), &key["createdAt"])
+    );
     assert_ne!(r["key"]["fingerprint"], key["fingerprint"]);
     assert!(r["key"]["publicKey"].as_str().unwrap().ends_with(" next@check"));
     assert!(!r.to_string().contains("PRIVATE KEY"));

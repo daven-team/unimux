@@ -347,6 +347,9 @@ mod tests {
         assert_eq!(side.inflight().key(if cfg!(windows) { "C:\\A\\B.txt" } else { "/A/B.txt" }), {
             if cfg!(windows) { "c:\\a\\b.txt" } else { "/a/b.txt" }
         });
+        // The in-flight registry folds case on a case-insensitive side only.
+        let exact = LocalSide::new(false, false);
+        assert_ne!(exact.inflight().key("/x/A.txt"), exact.inflight().key("/x/a.txt"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

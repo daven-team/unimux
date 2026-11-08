@@ -584,6 +584,117 @@ async fn signs_in_with_the_identity_and_offers_its_password_to_sudo() {
     .await;
 }
 
+/// SFTP through sudo (1.1.4's sftp-manage "the coordinator"): the sudo option and the host's own command go with the
+/// login of a sudo session only; the sudo question offers the saved login password only when there is one, uses it only
+/// on the explicit choice, and never saves what is typed.
+#[tokio::test(flavor = "multi_thread")]
+async fn sudo_sessions_send_the_option_and_never_save_a_typed_sudo_password() {
+    let f = setup(Opts::default()).await;
+    {
+        let mut st = f.state.0.lock();
+        let mut s = (**st).clone();
+        s["sshHosts"][0]["sftpSudo"] = json!(true);
+        s["sshHosts"][0]["sftpCommand"] = json!("sudo -n /opt/sftp-server");
+        *st = Arc::new(s);
+    }
+    let sid = "sftp:00000000-0000-4000-8000-0000000000d2";
+    f.coord.connect_session(sid, HOST, true).await.unwrap();
+    let sudo_of = |id: &str| {
+        f.rec.sent.lock().iter().rev().find_map(|m| match m {
+            HostCommand::Connect(r) if r.id == id => Some(r.sftp_sudo.as_ref().map(|s| s.command.clone())),
+            _ => None,
+        })
+    };
+    assert_eq!(sudo_of(sid), Some(Some(Some("sudo -n /opt/sftp-server".to_string()))));
+    let ask = |prompt_id: &str, retry: bool| HostMessage::AuthPrompt {
+        id: sid.into(),
+        prompt_id: prompt_id.into(),
+        prompt: AuthPromptInfo { kind: AuthPromptKind::Sudo, name: None, instructions: None, fields: vec![], retry },
+    };
+    f.coord.on_host_message(ask("p1", false));
+    until(|| f.open(sid).is_some()).await;
+    let p = f.open(sid).unwrap();
+    assert_eq!(
+        (p["kind"].as_str(), p["user"].as_str(), p["endpoint"].as_str(), p["canUseSaved"].as_bool(), p["retry"].as_bool()),
+        (Some("sudo"), Some("deploy"), Some("web.example:2222"), Some(false), Some(false))
+    );
+    // The SFTP prompts are the session's own: the cell snapshot does not list them.
+    assert_eq!(f.coord.sessions()["prompts"], json!([]));
+    let own = f.coord.session_snapshot(unimux_ssh::session::SessionHostKind::Sftp);
+    assert_eq!(own["prompts"].as_array().unwrap().iter().map(|p| p["cellId"].clone()).collect::<Vec<_>>(), [json!(sid)]);
+    let pid = p["id"].as_str().unwrap().to_string();
+    let saved = |prompt_id: &str| PromptAnswer::Values {
+        cell_id: sid.into(),
+        prompt_id: prompt_id.into(),
+        values: vec![Zeroizing::new(String::new())],
+        remember: false,
+        use_saved: true,
+    };
+    assert!(!f.coord.answer(saved(&pid)), "no saved password to use");
+    assert!(f.coord.answer(PromptAnswer::Values {
+        cell_id: sid.into(),
+        prompt_id: pid,
+        values: vec![Zeroizing::new("s3cret".into())],
+        remember: true,
+        use_saved: false,
+    }));
+    until(|| {
+        f.rec.sent.lock().iter().any(|m| {
+            matches!(m, HostCommand::AuthAnswer { prompt_id, values: Some(v), .. } if prompt_id == "p1" && v[0].as_str() == "s3cret")
+        })
+    })
+    .await;
+    f.coord.on_host_message(HostMessage::Status {
+        id: sid.into(),
+        phase: SshPhase::Connected,
+        error: None,
+        exit_code: None,
+        banner: None,
+    });
+    tick().await;
+    let vault = f.stores.vault().await;
+    assert!(vault.lock().password(HOST).is_err(), "never saved, whatever remember said");
+    // A restart of the Pty Host is not this session's process; one of the SFTP host ends only SFTP sessions.
+    f.coord.host_crashed();
+    assert_eq!(f.coord.session_state(sid).unwrap().phase, SshPhase::Connected);
+    f.coord.session_host_crashed(unimux_ssh::session::SessionHostKind::Db);
+    assert_eq!(f.coord.session_state(sid).unwrap().phase, SshPhase::Connected);
+    f.coord.session_host_crashed(unimux_ssh::session::SessionHostKind::Sftp);
+    let s = f.coord.session_state(sid).unwrap();
+    assert_eq!((s.phase, s.error), (SshPhase::Error, Some(SshErrorCode::SftpHostCrashed)));
+
+    // A session without the sudo flag (an editor tab) of a sudo host never runs through sudo.
+    let plain = "sftp:00000000-0000-4000-8000-0000000000d3";
+    f.coord.connect_session(plain, HOST, false).await.unwrap();
+    assert_eq!(sudo_of(plain), Some(None));
+
+    // With a saved login password the question offers it, and uses it only on the explicit choice.
+    vault.lock().set_password(HOST, "login-pw").unwrap();
+    let other = "sftp:00000000-0000-4000-8000-0000000000d4";
+    f.coord.connect_session(other, HOST, true).await.unwrap();
+    f.coord.on_host_message(HostMessage::AuthPrompt {
+        id: other.into(),
+        prompt_id: "p2".into(),
+        prompt: AuthPromptInfo { kind: AuthPromptKind::Sudo, name: None, instructions: None, fields: vec![], retry: true },
+    });
+    until(|| f.open(other).is_some()).await;
+    let p = f.open(other).unwrap();
+    assert_eq!((p["canUseSaved"].as_bool(), p["retry"].as_bool()), (Some(true), Some(true)));
+    assert!(f.coord.answer(PromptAnswer::Values {
+        cell_id: other.into(),
+        prompt_id: p["id"].as_str().unwrap().into(),
+        values: vec![Zeroizing::new(String::new())],
+        remember: false,
+        use_saved: true,
+    }));
+    until(|| {
+        f.rec.sent.lock().iter().any(|m| {
+            matches!(m, HostCommand::AuthAnswer { prompt_id, values: Some(v), .. } if prompt_id == "p2" && v[0].as_str() == "login-pw")
+        })
+    })
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn keyboard_prompts_are_sanitized_and_need_one_value_per_field() {
     let f = setup(Opts::default()).await;
@@ -707,7 +818,9 @@ async fn checks_a_saved_passphrase_again_after_the_key_changed_and_asks_when_it_
     assert_eq!((p["kind"].as_str(), p["retry"].as_bool()), (Some("passphrase"), Some(false)));
     assert!(f.values(0, &p, &["right"], false));
     assert_eq!(pending.await.unwrap(), Ok(()));
-    assert!(matches!(&f.rec.sent.lock()[0], HostCommand::Connect(r) if r.passphrase.as_deref().map(String::as_str) == Some("right")));
+    assert!(
+        matches!(&f.rec.sent.lock()[0], HostCommand::Connect(r) if r.passphrase.as_deref().map(String::as_str) == Some("right"))
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -761,10 +874,15 @@ async fn a_failed_trust_write_rejects_every_cell_of_the_group_with_a_fixed_code(
         choice: HostKeyChoice::Save
     }));
     let answers = || {
-        f.rec.sent.lock().iter().filter_map(|m| match m {
-            HostCommand::HostKeyAnswer { prompt_id, accept, error, .. } => Some((prompt_id.clone(), *accept, *error)),
-            _ => None,
-        }).collect::<Vec<_>>()
+        f.rec
+            .sent
+            .lock()
+            .iter()
+            .filter_map(|m| match m {
+                HostCommand::HostKeyAnswer { prompt_id, accept, error, .. } => Some((prompt_id.clone(), *accept, *error)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
     };
     until(|| answers().len() == 3).await;
     assert!(answers().iter().all(|(_, accept, error)| !accept && *error == Some(SshErrorCode::Unknown)), "{:?}", answers());
@@ -786,7 +904,8 @@ async fn keeps_going_when_the_vault_cannot_write_a_password_or_prune() {
     until(|| f.open(CELLS[3]).is_some()).await;
     let p = f.open(CELLS[3]).unwrap();
     assert!(f.values(3, &p, &["typed-secret"], true));
-    until(|| f.rec.sent.lock().iter().any(|m| matches!(m, HostCommand::AuthAnswer { prompt_id, .. } if prompt_id == "auth1"))).await;
+    until(|| f.rec.sent.lock().iter().any(|m| matches!(m, HostCommand::AuthAnswer { prompt_id, .. } if prompt_id == "auth1")))
+        .await;
     f.coord.on_host_message(HostMessage::Status {
         id: CELLS[3].into(),
         phase: SshPhase::Connected,
@@ -820,7 +939,8 @@ async fn saves_a_remembered_password_to_the_identity_and_uses_the_host_fields_on
     let p = f.open(CELLS[0]).unwrap();
     assert_eq!((p["user"].as_str(), p["endpoint"].as_str()), (Some("ops"), Some("web.example:2222")));
     assert!(f.values(0, &p, &["typed-identity-pw"], true));
-    until(|| f.rec.sent.lock().iter().any(|m| matches!(m, HostCommand::AuthAnswer { prompt_id, .. } if prompt_id == "auth1"))).await;
+    until(|| f.rec.sent.lock().iter().any(|m| matches!(m, HostCommand::AuthAnswer { prompt_id, .. } if prompt_id == "auth1")))
+        .await;
     f.coord.on_host_message(HostMessage::Status {
         id: CELLS[0].into(),
         phase: SshPhase::Connected,

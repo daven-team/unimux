@@ -410,7 +410,8 @@ async fn names_from_the_source_side_are_never_joined_onto_a_path() {
     // The local side with Windows name rules on every platform (":" and device names).
     let dst: Arc<dyn FileSide> = Arc::new(LocalSide::new(true, true));
     let (q, _) = queue(None);
-    let batch = q.enqueue(req(TransferDirection::Download, &["/srv"], &s(&target), None), sides(&src, dst.clone())).await.unwrap();
+    let batch =
+        q.enqueue(req(TransferDirection::Download, &["/srv"], &s(&target), None), sides(&src, dst.clone())).await.unwrap();
     let items = by_name(&settle(&q, &batch).await);
     for bad in ["srv/../evil", "srv/a/b", "srv/a\\b", "srv/c:d", "srv/NUL", "srv/..", "srv/sub/../../evil2"] {
         let i = items.get(bad).unwrap_or_else(|| panic!("{bad}: {items:?}"));
@@ -419,7 +420,8 @@ async fn names_from_the_source_side_are_never_joined_onto_a_path() {
     assert_eq!(state(&items["srv/ok.txt"]), "done");
     assert_eq!(state(&items["srv/sub/deep.txt"]), "done");
     assert_eq!(std::fs::read(target.join("srv").join("ok.txt")).unwrap(), b"fine");
-    let top: Vec<String> = std::fs::read_dir(&root).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    let top: Vec<String> =
+        std::fs::read_dir(&root).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
     assert_eq!(top, ["target"]);
     let mut inner: Vec<String> =
         std::fs::read_dir(target.join("srv")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
@@ -513,10 +515,14 @@ async fn one_writer_per_target_also_across_case_and_a_50000_file_batch() {
     settle(&q, &a).await;
     settle(&q, &b).await;
     assert_eq!(dst.max_same_key.load(Ordering::SeqCst), 1);
-    let names: Vec<String> = dst.files().into_iter().map(|(p, d)| {
-        assert_eq!(d.len(), 2000);
-        p
-    }).collect();
+    let names: Vec<String> = dst
+        .files()
+        .into_iter()
+        .map(|(p, d)| {
+            assert_eq!(d.len(), 2000);
+            p
+        })
+        .collect();
     assert_eq!(names, ["/t/f (1).bin", "/t/f.bin"]);
 
     // "A.txt" and "a.txt" to a case-insensitive side are one target: serialized, then keep both.
@@ -641,7 +647,8 @@ async fn running_copies_use_part_files_three_at_a_time_and_clean_up_when_cancell
     let end = root.join("end");
     std::fs::create_dir_all(&end).unwrap();
     let (q, _) = queue(None);
-    let batch = q.enqueue(req(TransferDirection::LocalCopy, &[&s(&many)], &s(&end), None), Some((local(), local()))).await.unwrap();
+    let batch =
+        q.enqueue(req(TransferDirection::LocalCopy, &[&s(&many)], &s(&end), None), Some((local(), local()))).await.unwrap();
     let parts = || -> usize {
         std::fs::read_dir(end.join("many"))
             .map(|d| d.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".unimux-part")).count())
@@ -664,7 +671,10 @@ async fn running_copies_use_part_files_three_at_a_time_and_clean_up_when_cancell
     fake.put("/home", crate::fake_server::Node::Dir);
     std::fs::write(src.join("full.bin"), vec![3u8; 500_000]).unwrap();
     let (q, _) = queue(None);
-    let batch = q.enqueue(req(TransferDirection::Upload, &[&s(&src.join("full.bin"))], "/home", None), Some((local(), server))).await.unwrap();
+    let batch = q
+        .enqueue(req(TransferDirection::Upload, &[&s(&src.join("full.bin"))], "/home", None), Some((local(), server)))
+        .await
+        .unwrap();
     let items = settle(&q, &batch).await;
     assert_eq!((state(&items[0]), items[0]["error"].as_str()), ("failed", Some("failed")));
     for _ in 0..400 {
@@ -696,39 +706,314 @@ async fn local_links_out_of_the_folder_and_link_loops_are_failed_items() {
     if linked {
         let dst = root.join("dst");
         std::fs::create_dir_all(&dst).unwrap();
-        let batch = q.enqueue(req(TransferDirection::LocalCopy, &[&s(&pick)], &s(&dst), None), Some((local(), local()))).await.unwrap();
+        let batch =
+            q.enqueue(req(TransferDirection::LocalCopy, &[&s(&pick)], &s(&dst), None), Some((local(), local()))).await.unwrap();
         let items = by_name(&settle(&q, &batch).await);
         assert_eq!((state(&items["pick/link.txt"]), items["pick/link.txt"]["error"].as_str()), ("failed", Some("linkOutside")));
-        let names: Vec<String> =
-            std::fs::read_dir(dst.join("pick")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        let names: Vec<String> = std::fs::read_dir(dst.join("pick"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
         assert_eq!(names, ["ok.txt"]);
     }
     // A folder link back to its own folder.
     let lp = root.join("loop");
     std::fs::create_dir_all(&lp).unwrap();
     std::fs::write(lp.join("f.txt"), b"f").unwrap();
-    #[cfg(windows)]
-    let looped = {
-        use std::os::windows::process::CommandExt;
-        std::process::Command::new("cmd")
-            .args(["/c", "mklink", "/J"])
-            .arg(lp.join("again"))
-            .arg(&lp)
-            .creation_flags(0x0800_0000)
-            .output()
-            .is_ok_and(|o| o.status.success())
-    };
-    #[cfg(unix)]
-    let looped = std::os::unix::fs::symlink(&lp, lp.join("again")).is_ok();
-    if looped {
+    if dir_link(&lp.join("again"), &lp) {
         let dl = root.join("dl");
         std::fs::create_dir_all(&dl).unwrap();
-        let batch = q.enqueue(req(TransferDirection::LocalCopy, &[&s(&lp)], &s(&dl), None), Some((local(), local()))).await.unwrap();
+        let batch =
+            q.enqueue(req(TransferDirection::LocalCopy, &[&s(&lp)], &s(&dl), None), Some((local(), local()))).await.unwrap();
         let items = by_name(&settle(&q, &batch).await);
         assert_eq!(state(&items["loop/f.txt"]), "done");
         assert_eq!((state(&items["loop/again"]), items["loop/again"]["error"].as_str()), ("failed", Some("linkFolder")));
         #[cfg(windows)]
         let _ = std::fs::remove_dir(lp.join("again"));
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A folder link: a junction on Windows (no developer mode needed, no console window), a symlink elsewhere.
+fn dir_link(link: &Path, target: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("cmd")
+            .args(["/c", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .creation_flags(0x0800_0000)
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link).is_ok()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_moves_rename_once_ask_on_existing_names_and_keep_a_source_the_server_will_not_move() {
+    use crate::fake_server::Node;
+    let (fake, server) = remote(Config { posix_rename: true, ..Config::default() }).await;
+    for (p, n) in [
+        ("/h", Node::Dir),
+        ("/h/site", Node::Dir),
+        ("/h/site/img", Node::Dir),
+        ("/h/site/img/logo.txt", Node::File(b"logo".to_vec(), 1)),
+        ("/h/a.txt", Node::File(b"a".to_vec(), 1)),
+        ("/h/archive", Node::Dir),
+    ] {
+        fake.put(p, n);
+    }
+    let (q, _) = queue(None);
+    let both = || Some((server.clone(), server.clone()));
+    let batch = q.enqueue(req(TransferDirection::Move, &["/h/a.txt", "/h/site"], "/h/archive", None), both()).await.unwrap();
+    let items = settle(&q, &batch).await;
+    let got: Vec<(&str, &str, &str)> =
+        items.iter().map(|i| (i["name"].as_str().unwrap(), state(i), i["direction"].as_str().unwrap())).collect();
+    assert_eq!(got, [("a.txt", "done", "move"), ("site", "done", "move")]);
+    assert!(fake.get("/h/archive/a.txt").is_some() && fake.get("/h/archive/site/img/logo.txt").is_some());
+    assert!(fake.get("/h/a.txt").is_none() && fake.get("/h/site").is_none());
+    assert_eq!(fake.writes.load(Ordering::SeqCst), 0, "a move is a rename, nothing is copied");
+    // A folder into itself or its child is refused as a whole, also through a server link.
+    for (src, to) in [("/h/archive", "/h/archive/site"), ("/h/archive/site", "/h/archive/site")] {
+        assert_eq!(q.enqueue(req(TransferDirection::Move, &[src], to, None), both()).await, Err(SftpErrorCode::IntoItself));
+    }
+    fake.put("/h/alias", Node::Link("/h/archive".into()));
+    assert_eq!(
+        q.enqueue(req(TransferDirection::Move, &["/h/archive"], "/h/alias/site", None), both()).await,
+        Err(SftpErrorCode::IntoItself)
+    );
+    // Entries already in the target folder have nothing to do.
+    let none = q.enqueue(req(TransferDirection::Move, &["/h/archive/a.txt"], "/h/archive", None), both()).await.unwrap();
+    assert!(q.items().iter().all(|i| i["batchId"] != none.as_str()));
+
+    // A name that exists: keep both, skip, overwrite for files; a folder is never overwritten.
+    fake.put("/h/t", Node::Dir);
+    for n in ["x.txt", "y.txt", "z.txt"] {
+        fake.put(&format!("/h/{n}"), Node::File(format!("new {n}").into_bytes(), 1));
+        fake.put(&format!("/h/t/{n}"), Node::File(format!("old {n}").into_bytes(), 1));
+    }
+    fake.put("/h/d", Node::Dir);
+    fake.put("/h/d/in.txt", Node::File(b"in".to_vec(), 1));
+    fake.put("/h/t/d", Node::Dir);
+    let batch = q
+        .enqueue(req(TransferDirection::Move, &["/h/x.txt", "/h/y.txt", "/h/z.txt", "/h/d"], "/h/t", None), both())
+        .await
+        .unwrap();
+    let of = |name: &str| q.items().into_iter().find(|i| i["batchId"] == batch.as_str() && i["name"] == name).unwrap();
+    for _ in 0..2000 {
+        if q.items().iter().filter(|i| i["batchId"] == batch.as_str() && state(i) == "conflict").count() == 4 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert_eq!(
+        (of("d")["conflict"]["existing"]["kind"].as_str(), of("d")["conflict"]["incoming"]["kind"].as_str()),
+        (Some("dir"), Some("dir"))
+    );
+    assert_eq!(of("x.txt")["conflict"]["existing"]["kind"], "file");
+    let answer = |name: &str, choice: ConflictChoice| {
+        let id = of(name)["id"].as_str().unwrap().to_string();
+        assert!(q.answer_conflict(&id, crate::op::ConflictAnswer { choice, apply_to_rest: false }));
+    };
+    answer("x.txt", ConflictChoice::KeepBoth);
+    answer("y.txt", ConflictChoice::Skip);
+    answer("z.txt", ConflictChoice::Overwrite);
+    answer("d", ConflictChoice::Overwrite);
+    settle(&q, &batch).await;
+    let text = |p: &str| match fake.get(p) {
+        Some(Node::File(d, _)) => String::from_utf8(d).unwrap(),
+        other => panic!("{p}: {other:?}"),
+    };
+    assert_eq!(text("/h/t/x (1).txt"), "new x.txt");
+    assert_eq!(text("/h/t/x.txt"), "old x.txt");
+    assert_eq!((state(&of("y.txt")), of("y.txt")["skipped"].as_bool()), ("done", Some(true)));
+    assert_eq!(text("/h/y.txt"), "new y.txt");
+    assert_eq!(text("/h/t/z.txt"), "new z.txt");
+    assert!(fake.get("/h/z.txt").is_none());
+    assert_eq!((state(&of("d")), of("d")["error"].as_str()), ("failed", Some("isADirectory")));
+    assert_eq!(text("/h/d/in.txt"), "in");
+    let again = q.enqueue(req(TransferDirection::Move, &["/h/d"], "/h/t", Some(ConflictChoice::KeepBoth)), both()).await.unwrap();
+    settle(&q, &again).await;
+    assert_eq!(text("/h/t/d (1)/in.txt"), "in");
+
+    // A rename the server refuses (another file system) fails clearly and keeps the source.
+    let (fake, server) = remote(Config { refuse_rename_as_failure: true, ..Config::default() }).await;
+    fake.put("/h", Node::Dir);
+    fake.put("/h/mnt", Node::Dir);
+    fake.put("/h/big.iso", Node::File(b"iso".to_vec(), 1));
+    fake.cfg.fail_rename_to.lock().push("/h/big.iso>/h/mnt/big.iso".into());
+    let batch =
+        q.enqueue(req(TransferDirection::Move, &["/h/big.iso"], "/h/mnt", None), Some((server.clone(), server))).await.unwrap();
+    let items = settle(&q, &batch).await;
+    assert_eq!((state(&items[0]), items[0]["error"].as_str()), ("failed", Some("crossDevice")));
+    assert!(fake.get("/h/big.iso").is_some() && fake.get("/h/mnt/big.iso").is_none());
+}
+
+/// Called after a copy was renamed into place (to change its source meanwhile).
+type AfterPlace = Box<dyn Fn(&str) + Send + Sync>;
+
+/// The local disk with renames of real entries crossing a volume (EXDEV); part files rename in their own folder.
+struct OtherVolume {
+    inner: LocalSide,
+    fail_write: Option<&'static str>,
+    after_place: Option<AfterPlace>,
+}
+
+impl FileSide for OtherVolume {
+    fn remote(&self) -> bool {
+        false
+    }
+    fn case_insensitive(&self) -> bool {
+        self.inner.case_insensitive()
+    }
+    fn inflight(&self) -> &TargetRegistry {
+        self.inner.inflight()
+    }
+    fn realpath<'a>(&'a self, path: &'a str) -> BoxFuture<'a, SideResult<Option<String>>> {
+        self.inner.realpath(path)
+    }
+    fn join(&self, dir: &str, name: &str) -> String {
+        self.inner.join(dir, name)
+    }
+    fn valid_name(&self, name: &str) -> bool {
+        self.inner.valid_name(name)
+    }
+    fn contains(&self, parent: &str, child: &str) -> bool {
+        self.inner.contains(parent, child)
+    }
+    fn basename(&self, path: &str) -> String {
+        self.inner.basename(path)
+    }
+    fn dirname(&self, path: &str) -> String {
+        self.inner.dirname(path)
+    }
+    fn stat<'a>(&'a self, path: &'a str) -> BoxFuture<'a, SideResult<Option<Meta>>> {
+        self.inner.stat(path)
+    }
+    fn lstat<'a>(&'a self, path: &'a str) -> BoxFuture<'a, SideResult<Option<Meta>>> {
+        self.inner.lstat(path)
+    }
+    fn readdir<'a>(&'a self, path: &'a str) -> BoxFuture<'a, SideResult<Vec<DirEntry>>> {
+        self.inner.readdir(path)
+    }
+    fn mkdir<'a>(&'a self, path: &'a str) -> BoxFuture<'a, SideResult<()>> {
+        self.inner.mkdir(path)
+    }
+    fn unlink<'a>(&'a self, path: &'a str) -> BoxFuture<'a, SideResult<()>> {
+        self.inner.unlink(path)
+    }
+    fn rmdir<'a>(&'a self, path: &'a str) -> BoxFuture<'a, SideResult<()>> {
+        self.inner.rmdir(path)
+    }
+    fn rename<'a>(&'a self, from: &'a str, to: &'a str, overwrite: bool) -> BoxFuture<'a, SideResult<()>> {
+        Box::pin(async move {
+            if !from.ends_with(".unimux-part") {
+                return Err(SftpErrorCode::CrossDevice.into());
+            }
+            self.inner.rename(from, to, overwrite).await?;
+            if let Some(f) = &self.after_place {
+                f(to);
+            }
+            Ok(())
+        })
+    }
+    fn set_mtime<'a>(&'a self, path: &'a str, mtime: i64) -> BoxFuture<'a, SideResult<()>> {
+        self.inner.set_mtime(path, mtime)
+    }
+    fn open_read<'a>(&'a self, path: &'a str) -> BoxFuture<'a, SideResult<Box<dyn FileReader>>> {
+        self.inner.open_read(path)
+    }
+    fn open_write<'a>(&'a self, path: &'a str) -> BoxFuture<'a, SideResult<Box<dyn FileWriter>>> {
+        Box::pin(async move {
+            if self.fail_write.is_some_and(|f| path.contains(f)) {
+                return Err(SftpErrorCode::NoSpace.into());
+            }
+            self.inner.open_write(path).await
+        })
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn local_moves_across_volumes_copy_first_and_never_lose_or_delete_a_changed_source() {
+    let root = scratch("volume");
+    let run = |side: OtherVolume, sources: Vec<String>, dst: String| async move {
+        let side: Arc<dyn FileSide> = Arc::new(side);
+        let (q, _) = queue(None);
+        let refs: Vec<&str> = sources.iter().map(String::as_str).collect();
+        let batch = q.enqueue(req(TransferDirection::LocalMove, &refs, &dst, None), Some((side.clone(), side))).await.unwrap();
+        settle(&q, &batch).await
+    };
+    let side = |fail_write, after_place| OtherVolume { inner: LocalSide::default(), fail_write, after_place };
+
+    // Copies through part files and deletes the source only after every copy.
+    let (src, dst) = (root.join("a").join("src"), root.join("a").join("dst"));
+    std::fs::create_dir_all(src.join("sub")).unwrap();
+    std::fs::create_dir_all(src.join("empty")).unwrap();
+    std::fs::create_dir_all(&dst).unwrap();
+    std::fs::write(src.join("a.txt"), "A".repeat(1000)).unwrap();
+    std::fs::write(src.join("sub").join("b.txt"), "B").unwrap();
+    std::fs::write(root.join("a").join("one.txt"), "one").unwrap();
+    let items = run(side(None, None), vec![s(&src), s(&root.join("a").join("one.txt"))], s(&dst)).await;
+    assert_eq!(items.iter().map(state).collect::<Vec<_>>(), ["done", "done"]);
+    assert_eq!(items[0]["bytesTotal"], 1001);
+    assert_eq!(std::fs::read_to_string(dst.join("src").join("a.txt")).unwrap(), "A".repeat(1000));
+    assert_eq!(std::fs::read_to_string(dst.join("src").join("sub").join("b.txt")).unwrap(), "B");
+    assert!(dst.join("src").join("empty").is_dir());
+    assert_eq!(std::fs::read_to_string(dst.join("one.txt")).unwrap(), "one");
+    assert!(!src.exists() && !root.join("a").join("one.txt").exists());
+    assert!(
+        !std::fs::read_dir(dst.join("src")).unwrap().flatten().any(|e| e.file_name().to_string_lossy().ends_with(".unimux-part"))
+    );
+
+    // A failed copy never loses the source; what the job made in the target is gone again.
+    let (src, dst) = (root.join("b").join("src"), root.join("b").join("dst"));
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::create_dir_all(&dst).unwrap();
+    std::fs::write(src.join("a.txt"), "A").unwrap();
+    std::fs::write(src.join("b.txt"), "B").unwrap();
+    let items = run(side(Some("b.txt"), None), vec![s(&src)], s(&dst)).await;
+    assert_eq!((state(&items[0]), items[0]["error"].as_str()), ("failed", Some("noSpace")));
+    assert_eq!(std::fs::read_to_string(src.join("a.txt")).unwrap(), "A");
+    assert_eq!(std::fs::read_to_string(src.join("b.txt")).unwrap(), "B");
+    assert_eq!(std::fs::read_dir(&dst).unwrap().count(), 0);
+
+    // A source changed after its copy is never deleted: both stay.
+    let (src, dst) = (root.join("c").join("src"), root.join("c").join("dst"));
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::create_dir_all(&dst).unwrap();
+    std::fs::write(src.join("a.txt"), "A").unwrap();
+    let changed = src.join("a.txt");
+    let hook: AfterPlace = Box::new(move |to: &str| {
+        if to.ends_with("a.txt") {
+            std::fs::write(&changed, "A, but newer and longer").unwrap();
+        }
+    });
+    let items = run(side(None, Some(hook)), vec![s(&src)], s(&dst)).await;
+    assert_eq!((state(&items[0]), items[0]["error"].as_str()), ("failed", Some("changed")));
+    assert_eq!(std::fs::read_to_string(src.join("a.txt")).unwrap(), "A, but newer and longer");
+    assert_eq!(std::fs::read_to_string(dst.join("src").join("a.txt")).unwrap(), "A");
+
+    // A folder reached through a junction is still "into itself".
+    let bx = root.join("box");
+    std::fs::create_dir_all(bx.join("inner")).unwrap();
+    if dir_link(&root.join("alias"), &bx) {
+        let local: Arc<dyn FileSide> = Arc::new(LocalSide::default());
+        let (q, _) = queue(None);
+        let r = q
+            .enqueue(
+                req(TransferDirection::LocalMove, &[&s(&bx)], &s(&root.join("alias").join("inner")), None),
+                Some((local.clone(), local)),
+            )
+            .await;
+        assert_eq!(r, Err(SftpErrorCode::IntoItself));
+        assert!(bx.join("inner").is_dir());
+        #[cfg(windows)]
+        let _ = std::fs::remove_dir(root.join("alias"));
     }
     let _ = std::fs::remove_dir_all(&root);
 }

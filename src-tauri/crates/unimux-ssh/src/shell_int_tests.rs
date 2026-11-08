@@ -64,6 +64,9 @@ impl Transport for Frames {
     fn close(&self) {}
 }
 
+/// One `sshStatus`: phase, error, exit code, banner.
+type StatusOf = (SshPhase, Option<SshErrorCode>, Option<i64>, Option<String>);
+
 struct Rig {
     engine: PtyEngine,
     shells: Arc<SshShells>,
@@ -134,7 +137,7 @@ impl Rig {
     fn out(&self, id: &str) -> String {
         String::from_utf8_lossy(&self.chunks(id).concat()).into_owned()
     }
-    fn statuses(&self, id: &str) -> Vec<(SshPhase, Option<SshErrorCode>, Option<i64>, Option<String>)> {
+    fn statuses(&self, id: &str) -> Vec<StatusOf> {
         self.rec
             .messages
             .lock()

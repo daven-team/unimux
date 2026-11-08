@@ -209,6 +209,21 @@ fn status(id: &str, phase: SshPhase, error: Option<SshErrorCode>) -> HostMessage
     HostMessage::Status { id: id.to_string(), phase, error, exit_code: None, banner: None }
 }
 
+/// The `sftp` subsystem on the login's connection: a session channel the server refuses, or a refused subsystem, is
+/// `sftpDenied` (1.1.4: a server without the subsystem ends the session with that code).
+pub(crate) async fn open_sftp_subsystem(handle: &LoginHandle) -> Result<russh::Channel<russh::client::Msg>, SshErrorCode> {
+    let mut channel = handle.channel_open_session().await.map_err(|_| SshErrorCode::SftpDenied)?;
+    channel.request_subsystem(true, "sftp").await.map_err(|_| SshErrorCode::SftpDenied)?;
+    loop {
+        match channel.wait().await {
+            Some(russh::ChannelMsg::Success) => break,
+            Some(russh::ChannelMsg::Failure) | None => return Err(SshErrorCode::SftpDenied),
+            Some(_) => {}
+        }
+    }
+    Ok(channel)
+}
+
 impl SftpHost {
     /// `backend`: made with the host's [`HostChannels`] (T2-T5 report through them).
     pub fn new(deps: HostDeps, backend: impl FnOnce(HostChannels) -> Arc<dyn SftpBackend>) -> Arc<SftpHost> {
@@ -442,19 +457,7 @@ impl SftpHost {
             };
             return self.backend().start_sudo(start).await;
         }
-        let open = async {
-            let mut channel = handle.channel_open_session().await.map_err(|_| SshErrorCode::SftpDenied)?;
-            channel.request_subsystem(true, "sftp").await.map_err(|_| SshErrorCode::SftpDenied)?;
-            loop {
-                match channel.wait().await {
-                    Some(russh::ChannelMsg::Success) => break,
-                    Some(russh::ChannelMsg::Failure) | None => return Err(SshErrorCode::SftpDenied),
-                    Some(_) => {}
-                }
-            }
-            Ok(channel)
-        };
-        let channel = match tokio::time::timeout(self.deps.sftp_timers.sftp, open).await {
+        let channel = match tokio::time::timeout(self.deps.sftp_timers.sftp, open_sftp_subsystem(handle)).await {
             Ok(r) => r?,
             Err(_) => return Err(SshErrorCode::Timeout),
         };
@@ -955,5 +958,61 @@ mod tests {
                 json!({ "t": "opProgress", "opId": "op", "done": 3, "total": 3 }),
             ]
         );
+    }
+
+    /// Accepts the host key; nothing else is asked (the saved password signs in).
+    struct Trust(Arc<unimux_ssh::login::LoginControl>);
+
+    impl unimux_ssh::login::LoginEvents for Trust {
+        fn phase(&self, _: SshPhase) {}
+        fn banner(&self, _: &str) {}
+        fn host_key(&self, prompt_id: &str, _: &str) {
+            self.0.answer_host_key(prompt_id, true, None);
+        }
+        fn auth_prompt(&self, _: &str, _: &AuthPromptInfo) {}
+    }
+
+    async fn login(port: u16) -> LoginHandle {
+        let control = unimux_ssh::login::LoginControl::new();
+        let req = unimux_ssh::login::LoginRequest {
+            host: "127.0.0.1".into(),
+            port,
+            username: "alice".into(),
+            private_key: None,
+            passphrase: None,
+            password: Some(Zeroizing::new("pw".into())),
+            allow_password_prompt: false,
+            debug: false,
+        };
+        unimux_ssh::login::login(req, LOGIN_TIMERS, Arc::new(Trust(control.clone())), control).await.unwrap()
+    }
+
+    /// Over a real login: the subsystem starts in the login folder and lists it; a server without the subsystem is
+    /// `sftpDenied`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_sftp_subsystem_starts_in_the_login_folder_and_a_server_without_it_is_sftp_denied() {
+        use unimux_ssh::test_server::{TestServer, TestServerConfig, TestUser};
+        let root = std::env::temp_dir().join(format!("unimux-t1-subsystem-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.txt"), b"hello").unwrap();
+        let users = || vec![TestUser::new("alice").password("pw")];
+        let server =
+            TestServer::start(TestServerConfig { users: users(), sftp_root: Some(root.clone()), ..TestServerConfig::default() })
+                .await
+                .unwrap();
+        let handle = login(server.port()).await;
+        let channel = open_sftp_subsystem(&handle).await.unwrap();
+        let client = crate::client::SftpClient::start(Box::new(channel.into_stream())).await.unwrap();
+        let side = crate::remote::RemoteSide::new(client);
+        let home = side.resolve_path(".").await.unwrap();
+        assert_eq!(home, "/");
+        let names: Vec<String> =
+            crate::sides::FileSide::readdir(&side, &home).await.unwrap().into_iter().map(|e| e.name).collect();
+        assert_eq!(names, ["a.txt"]);
+
+        let bare = TestServer::start(TestServerConfig { users: users(), ..TestServerConfig::default() }).await.unwrap();
+        let handle = login(bare.port()).await;
+        assert_eq!(open_sftp_subsystem(&handle).await.err(), Some(SshErrorCode::SftpDenied));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
