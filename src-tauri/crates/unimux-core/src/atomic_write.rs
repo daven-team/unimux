@@ -76,6 +76,18 @@ pub fn atomic_write_with(
     sleep: &mut dyn FnMut(u64),
     rename: &mut dyn FnMut(&Path, &Path) -> io::Result<()>,
 ) -> io::Result<()> {
+    write_with(file, data, options, sleep, &mut |f| f.sync_all(), rename)
+}
+
+/// [`atomic_write_with`] with a seam for the flush of the temp file too.
+fn write_with(
+    file: &Path,
+    data: &[u8],
+    options: &AtomicWriteOptions,
+    sleep: &mut dyn FnMut(u64),
+    sync: &mut dyn FnMut(&fs::File) -> io::Result<()>,
+    rename: &mut dyn FnMut(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
     let temp = temp_path_for(file);
     let result = (|| {
         let mut open = OpenOptions::new();
@@ -91,7 +103,7 @@ pub fn atomic_write_with(
             let mut f = open.open(&temp)?;
             f.write_all(data)?;
             if options.fsync {
-                f.sync_all()?;
+                sync(&f)?;
             }
         }
         let mut attempt = 0u32;
@@ -170,6 +182,48 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         assert_eq!(waits, 5);
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn flushes_the_temp_file_before_the_rename_unless_told_not_to() {
+        let dir = tempfile::tempdir().unwrap();
+        for (fsync, expected) in [(true, vec!["sync 1", "rename"]), (false, vec!["rename"])] {
+            let order = std::cell::RefCell::new(Vec::new());
+            let options = AtomicWriteOptions { fsync, ..AtomicWriteOptions::default() };
+            write_with(
+                &dir.path().join("a.json"),
+                b"x",
+                &options,
+                &mut |_| {},
+                &mut |f| {
+                    // The data is in the temp file when it is flushed.
+                    order.borrow_mut().push(format!("sync {}", f.metadata()?.len()));
+                    f.sync_all()
+                },
+                &mut |from, to| {
+                    order.borrow_mut().push("rename".into());
+                    fs::rename(from, to)
+                },
+            )
+            .unwrap();
+            assert_eq!(order.into_inner(), expected, "fsync {fsync}");
+        }
+        assert_eq!(fs::read(dir.path().join("a.json")).unwrap(), b"x");
+    }
+
+    #[test]
+    fn knows_which_error_codes_are_transient() {
+        for kind in [io::ErrorKind::PermissionDenied, io::ErrorKind::ResourceBusy] {
+            assert!(is_transient(&io::Error::from(kind)), "{kind:?}");
+        }
+        // The raw codes libuv maps to EPERM / EBUSY / EACCES.
+        let raw: &[i32] = if cfg!(windows) { &[5, 32, 33] } else { &[1, 13, 16] };
+        for code in raw {
+            assert!(is_transient(&io::Error::from_raw_os_error(*code)), "{code}");
+        }
+        assert!(!is_transient(&io::Error::from(io::ErrorKind::NotFound)));
+        assert!(!is_transient(&io::Error::from_raw_os_error(2)));
+        assert!(!is_transient(&io::Error::other("no code")));
     }
 
     #[test]

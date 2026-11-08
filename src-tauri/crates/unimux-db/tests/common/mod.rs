@@ -65,6 +65,8 @@ pub struct FakeHost {
     pub down: bool,
     pub sent: Mutex<Vec<Value>>,
     pub requests: Mutex<Vec<(String, Value)>>,
+    /// The asking window of every request, in order.
+    pub windows: Mutex<Vec<Option<String>>>,
 }
 
 impl DbHostLink for FakeHost {
@@ -75,8 +77,9 @@ impl DbHostLink for FakeHost {
         self.sent.lock().push(m.to_json());
         !self.down
     }
-    fn request(&self, id: &str, op: Value, _window: Option<String>) -> BoxFuture<'static, Value> {
+    fn request(&self, id: &str, op: Value, window: Option<String>) -> BoxFuture<'static, Value> {
         self.requests.lock().push((id.to_string(), op));
+        self.windows.lock().push(window);
         Box::pin(async { json!({ "ok": true, "value": "answer" }) })
     }
 }

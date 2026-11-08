@@ -2,8 +2,9 @@
 //! translated "could not start" dialog.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 
@@ -19,7 +20,6 @@ use unimux_update::legacy;
 static CRASH: OnceLock<Arc<RollingLog>> = OnceLock::new();
 /// False until the app runs: a panic before that is a failed start (dialog, exit 1).
 static STARTED: AtomicBool = AtomicBool::new(false);
-static DIALOGS: AtomicU32 = AtomicU32::new(0);
 /// An unattended run (MC_OFFSCREEN, the real-app harness): errors are logged, no dialog waits for a click.
 static QUIET: AtomicBool = AtomicBool::new(false);
 
@@ -34,7 +34,46 @@ static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 pub fn set_shutting_down() {
     SHUTTING_DOWN.store(true, Ordering::SeqCst);
 }
-static LAST_DIALOG: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+/// The error dialogs of one run: at most [`DIALOGS_MAX`], [`DIALOG_GAP`] apart (createDialogLimiter of 1.1.4).
+struct DialogLimiter {
+    shown: u32,
+    last: Option<Instant>,
+}
+
+const DIALOGS_MAX: u32 = 3;
+const DIALOG_GAP: Duration = Duration::from_secs(10);
+
+impl DialogLimiter {
+    const fn new() -> Self {
+        Self { shown: 0, last: None }
+    }
+
+    fn allow(&mut self, now: Instant) -> bool {
+        if self.shown >= DIALOGS_MAX || self.last.is_some_and(|last| now.saturating_duration_since(last) < DIALOG_GAP) {
+            return false;
+        }
+        self.last = Some(now);
+        self.shown += 1;
+        true
+    }
+}
+
+static DIALOG_LIMIT: Mutex<DialogLimiter> = Mutex::new(DialogLimiter::new());
+
+/// `decideUncaught`: an error opens a dialog only while the app runs normally; unattended or winding down it is only logged.
+fn shows_dialog(quiet: bool, shutting_down: bool) -> bool {
+    !quiet && !shutting_down
+}
+
+/// The text of a panic payload (`describeError` of anything thrown): the message of `panic!`, else "panic".
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "panic".into())
+}
 
 /// What `main()` does before anything else for calls of the 1.1.x update machinery (U3): the 1.1.x update window ends with
 /// `<appExe> -e <script>` and ELECTRON_RUN_AS_NODE=1 (a node one-liner removing its private runtime 3 s later). After the
@@ -115,12 +154,7 @@ pub fn install_crash_handling(log: Arc<RollingLog>) {
             }
             return;
         }
-        let message = info
-            .payload()
-            .downcast_ref::<&str>()
-            .map(|s| s.to_string())
-            .or_else(|| info.payload().downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "panic".into());
+        let message = panic_text(info.payload());
         let location = info.location().map(|l| format!(" at {}:{}", l.file(), l.line())).unwrap_or_default();
         let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
         let detail = describe_error(&format!("{message}{location} (thread {thread})"), 4000);
@@ -143,17 +177,10 @@ pub fn mark_started() {
 
 /// At most 3 dialogs, 10 s apart (createDialogLimiter of 1.1.4); shown off the panicking thread.
 fn runtime_error_dialog(detail: &str) {
-    if QUIET.load(Ordering::SeqCst) || SHUTTING_DOWN.load(Ordering::SeqCst) {
-        return;
-    }
-    let now = std::time::Instant::now();
+    if !shows_dialog(QUIET.load(Ordering::SeqCst), SHUTTING_DOWN.load(Ordering::SeqCst))
+        || !DIALOG_LIMIT.lock().allow(Instant::now())
     {
-        let mut last = LAST_DIALOG.lock();
-        if DIALOGS.load(Ordering::SeqCst) >= 3 || last.is_some_and(|l| now.duration_since(l).as_secs() < 10) {
-            return;
-        }
-        *last = Some(now);
-        DIALOGS.fetch_add(1, Ordering::SeqCst);
+        return;
     }
     let text = format!("{}\n\n{detail}", translate(&os_language(), "Wystąpił nieoczekiwany błąd w głównym procesie", &[]));
     std::thread::spawn(move || unimux_platform::error_box("unimux", &text));
@@ -208,4 +235,38 @@ pub fn startup_failed(detail: &str, unreadable_path: Option<&std::path::Path>) -
         unimux_platform::error_box("unimux", &format!("{text}\n\n{detail}"));
     }
     std::process::exit(1);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// test/safe-window.test.ts "allows a few dialogs, spaced apart, then none".
+    #[test]
+    fn allows_a_few_dialogs_spaced_apart_then_none() {
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        let mut limiter = DialogLimiter::new();
+        let answers: Vec<bool> = [0, 5_000, 10_000, 20_000, 40_000].into_iter().map(|ms| limiter.allow(at(ms))).collect();
+        assert_eq!(answers, [true, false, true, true, false]);
+    }
+
+    /// test/safe-window.test.ts "keeps showing real errors in normal operation but never opens a dialog while shutting down".
+    #[test]
+    fn shows_errors_while_running_but_never_a_dialog_while_shutting_down_or_unattended() {
+        assert!(shows_dialog(false, false));
+        assert!(!shows_dialog(false, true));
+        assert!(!shows_dialog(true, false));
+    }
+
+    /// test/stability.test.ts "describes anything thrown": a panic with a text, a formatted one, any other payload.
+    #[test]
+    fn describes_any_panic_payload() {
+        // (The default test hook prints these panics.)
+        let text = |f: fn()| panic_text(&*unimux_core::panic_guard::catch_expected(f).unwrap_err());
+        assert_eq!(text(|| panic!("boom")), "boom");
+        assert_eq!(text(|| panic!("{} {}", "plain", 1)), "plain 1");
+        assert_eq!(text(|| std::panic::panic_any(42)), "panic");
+        assert_eq!(describe_error(&"y".repeat(50), 10), format!("{}\u{2026}", "y".repeat(10)));
+    }
 }

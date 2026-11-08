@@ -175,6 +175,50 @@ mod tests {
         assert!(slot.try_claim().is_some());
     }
 
+    /// test/quit-wait.test.ts: the quit's wait (`timeout(QUIT_SWAP_WAIT, slot.idle())` in unimux-app commands/accounts.rs).
+    #[test]
+    fn a_release_followed_at_once_by_a_new_claim_keeps_the_quit_waiting_within_the_bound() {
+        let slot = SwapSlot::new();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            let short = Duration::from_millis(60);
+            let guard = slot.try_claim().unwrap();
+            let mut idle = std::pin::pin!(slot.idle());
+            assert!(tokio::time::timeout(short, idle.as_mut()).await.is_err());
+            // The startup recovery between two attempts: the slot is free for a moment only.
+            drop(guard);
+            let guard = slot.try_claim().unwrap();
+            assert!(tokio::time::timeout(short, idle.as_mut()).await.is_err());
+            drop(guard);
+            tokio::time::timeout(Duration::from_secs(5), idle).await.unwrap();
+
+            // A holder that never lets go for good: the bound still ends the wait.
+            let mut guard = Some(slot.try_claim().unwrap());
+            let started = Instant::now();
+            let bound = Duration::from_millis(300);
+            let waiting = tokio::time::timeout(bound, slot.idle());
+            let churn = async {
+                for _ in 0..4 {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    drop(guard.take());
+                    guard = slot.try_claim();
+                }
+            };
+            let (waited, ()) = tokio::join!(waiting, churn);
+            assert!(waited.is_err());
+            assert!(started.elapsed() >= bound);
+            drop(guard);
+            // With the swap ending inside the bound, the wait ends with it.
+            let guard = slot.try_claim().unwrap();
+            let ending = async {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                drop(guard);
+            };
+            let (waited, ()) = tokio::join!(tokio::time::timeout(Duration::from_secs(5), slot.idle()), ending);
+            assert!(waited.is_ok());
+        });
+    }
+
     #[test]
     fn the_async_idle_wait_resolves_on_release() {
         let slot = Arc::new(SwapSlot::new());

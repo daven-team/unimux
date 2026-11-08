@@ -78,6 +78,24 @@ fn commit_lists_the_account_and_persists_across_instances_in_insertion_order() {
     assert_eq!(again[1].to_value(), json!({"id": a, "addedAt": 1, "email": "a@x.com", "org": "Org"}));
 }
 
+/// test/main-perf.test.ts: the cached accounts.json.
+#[test]
+fn reads_the_file_again_only_when_it_changed_and_own_writes_are_seen_at_once() {
+    let f = fixture();
+    let store = AccountsStore::new(&f.root);
+    assert!(store.list().is_empty());
+    store.commit_value(&json!({"id": ID, "addedAt": 1, "email": "a@b.c"})).unwrap();
+    assert_eq!(listed(&store), json!([{"id": ID, "addedAt": 1, "email": "a@b.c"}]));
+    // A copy: changing what a caller got never changes the store.
+    let mut copy = store.list();
+    copy[0].identity.email = Some("changed@x.y".into());
+    assert_eq!(store.get(ID).unwrap().identity.email.as_deref(), Some("a@b.c"));
+    // A change made outside (another size) is read.
+    let outside = json!({"version": 2, "claude": [{"id": ID, "addedAt": 1, "email": "other@example.com"}]});
+    fs::write(f.root.join("accounts.json"), outside.to_string()).unwrap();
+    assert_eq!(store.get(ID).unwrap().identity.email.as_deref(), Some("other@example.com"));
+}
+
 #[test]
 fn commit_of_an_existing_id_replaces_it() {
     let f = fixture();
