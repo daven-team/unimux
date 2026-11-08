@@ -1,9 +1,10 @@
 //! D11: SQLite sessions (1.1.4 src/dbhost/sqliteSession.ts, sqliteWorker.ts, sqliteMeta.ts and the SQLite part of
 //! host.ts). The bundled SQLite (rusqlite, column metadata) runs in one thread per session ([`engine`]); [`session`] keeps
 //! the session's rules (runs, cursors, read-only guard, edits, cancel); [`meta`] reads the catalog; [`port`] writes the DB
-//! port messages. D12 routes the port messages to the windows and plugs [`SqliteSession`] into the DB host.
+//! port messages. D12's [`host`] plugs [`SqliteSession`] into the DB host; its port messages are routed per window.
 
 pub mod engine;
+pub mod host;
 pub mod meta;
 pub mod port;
 pub mod session;

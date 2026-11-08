@@ -8,6 +8,7 @@ import { createPortPoster, createTauriTransport, McNotYetError, type BootInfo, t
 import { installCompat, type CompatReport } from './webkitCompat';
 import { installMacDrag, type DragGlobal } from './macDrag';
 import { createPtyPort, listenSharedBuffers, runPull, type BridgePtyPort, type SharedBufferHost } from './ptyPort';
+import { listenDbBuffers } from './dbPort';
 
 declare global {
   interface Window {
@@ -57,14 +58,19 @@ window.addEventListener('pagehide', (e) => { if (!e.persisted) transport.dispose
 /**
  * The MessagePorts of 1.1.4 (`mc:sftp-port`, `mc:db-port`; the pty port is attachPtyPort below): a real MessageChannel
  * whose far end is wired to a Tauri channel. The page gets port1 exactly as before (sftp.ts, dbClient.ts unchanged). Attached by this
- * page on every load (never pushed by Rust); a port whose service has not been ported yet is simply not posted.
+ * page on every load (never pushed by Rust); a port whose service has not been ported yet is simply not posted. The DB port
+ * on Windows (D12) brings its messages as WebView2 shared buffers of this attach (bridge/dbPort.ts) instead of the channel.
  */
 async function attachPort(kind: 'sftp' | 'db'): Promise<void> {
   const pair = new MessageChannel();
   const channel = new Channel<unknown>();
   channel.onmessage = (message) => pair.port2.postMessage(message instanceof ArrayBuffer ? new Uint8Array(message) : message);
+  const attach = newSession();
+  const webview = (window as { chrome?: { webview?: Partial<SharedBufferHost> } }).chrome?.webview;
+  // Listening before the attach: the host may post as soon as the port exists.
+  if (kind === 'db' && webview?.addEventListener && webview.releaseBuffer) listenDbBuffers(webview as SharedBufferHost, attach, (m) => pair.port2.postMessage(m));
   try {
-    await invoke('mc_port_attach', { kind, channel });
+    await invoke('mc_port_attach', { kind, channel, attach });
   } catch (error) {
     if ((error as { code?: string })?.code !== 'MC_NOT_YET') console.warn(`[mc] ${kind} port: ${String((error as Error)?.message ?? JSON.stringify(error))}`);
     return;

@@ -145,7 +145,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | T3 | SFTP transfer queue | todo | | | | |
 | T4 | SFTP manage ops and editor files | todo | | | | |
 | T5 | Sudo SFTP over exec | todo | | | | Docker |
-| D12 | DB result routing and detached DB windows | todo | | | | |
+| D12 | DB result routing and detached DB windows | built, fast mode, not verified | 2026-11-08 | | | branch `tauri-pkg-D12`. unimux-db `route` (DbPortRoutes port of dbPortRoutes.ts: query routes by window, LRU 4096 in Map order, Pub/Sub session routes, moved tabs, forget on close, pickPort fallback to main; `DbPorts` = the `db` PortOwner, one sink per window, messages posted as the sessions' own JSON text so lone `\udXXX` survive), `router` (DbRouter = the DB Host in front of the chain Redis -> MySQL -> Postgres -> SQLite -> UnavailableHost: notes every op's window, its own pending requests, a `supervised` spawn for every host and tunnel task: a panic = a DB Host crash (service.host_crashed -> `db:hostCrashed`, every session and tunnel closed, waiting requests `dbHostCrashed`, CrashCounter > 5 / 60 s fatal, else the next use works), shutdown = HOSTS step `db shutdown` (3 s: sessions, then tunnels, 200 ms goodbye) + force kill), `pg::host` (PgHost: dbOpen kind postgres, tunnel joined in the open call, `connect::open` with password prompts, PgSession::start, connected {serverVersion, database, tls}, closed / fatal mapping, SideCancel, a closed session drops its connect), `sqlite::host` (SqliteHost: SqliteSession::open, connected_status, notices to crash.log `[db xxxxxxxx]` rate-limited 20/min, fatal). unimux-ipc `PortSink::post_json_text`. unimux-app: commands/db.rs wires the chain, ports, detached `on_route_db_sessions`, wind-down; pty_transport `DbBufferSink` (Windows: one writer thread per attach batches JSON messages into shared buffers `[u32 len][json]...` with `{"mcPort":"db","a":...}`, order kept, Channel fallback per batch; `MC_DB_TRANSPORT=channel` in dev builds). Renderer: bridge/dbPort.ts (decode + listener by attach id), mc.ts passes an attach id for db. CI: tauri.yml job `db-servers` (spike-db-wire.mjs, Docker PG 13/18, MySQL 8.4, MariaDB 11, Redis 8). Tests: route/router unit tests, pg_session.rs `host::*` (fake server), tests/sqlite_host.rs, pty_transport batch test, test/db-port-frames.test.ts. Checked: cargo fmt; clippy -D warnings (unimux-db, unimux-ipc, unimux-app all targets, also with dev-overrides + test-bridge); cargo test unimux-db (lib 140 + every suite passed, 8 Docker tests ignored), unimux-ipc 31, unimux-app 132; npm run typecheck; vitest db-port-frames + tauri-bridge. See "D12 open issues". |
 
 ### Wave 7: release
 
@@ -1805,6 +1805,17 @@ Not run (fast mode): real-app / CDP scripts, npm test, release builds, benchmark
 2. Wiring still open: D12 (PgSession start, so D6 is not reachable in the app yet); T3-T5 on `SidesBackend` and the hostd sftp domain with the sftp-host.int suite (B1); R2 should close the codex.ps1 argument-passing note (M4 2).
 3. Scripts that expect the stand-in MCP automation in the check build must now set `MC_MCP_FAKE_AUTOMATION=1` (verify-mcp-cli does).
 4. Worktrees: the 3 wave 5 worktrees were removed (node_modules junctions unlinked first) and their branches deleted. Still kept: `.claude/worktrees/wf_3188d96a-67a-38` with `tauri-pkg-A2-fixes` (it has uncommitted changes in unimux-accounts `codex_activate.rs` and `slot.rs`; see "Open after wave 3" 6).
+
+## Wave 6 packages: open issues
+
+### D12 open issues (2026-11-08, fast mode, not verified)
+
+1. **Acceptance not run**: no verify-detach-db, no verify-db-*-ui, no 100k-row load comparison with 1.1.4, no Docker run (the new CI job `db-servers` was not run either). The shared-buffer DB transport has never run in a real WebView2; if it misbehaves, `MC_DB_TRANSPORT=channel` (dev / check builds) falls back to the Channel.
+2. **Crash scope decision**: a panic in any supervised DB task counts as a crash of the whole DB Host (all sessions end), as the 1.1.4 process exit did, because the renderer drops every load on `db:hostCrashed`. ARCHITECTURE's "ends only that session" would need a renderer change. Panics inside tasks the sessions spawn themselves with `tokio::spawn` / `rt.spawn` (PgSession queue loop, MySQL worker, Redis connection drivers, SQLite job loop) are not supervised; those sessions report them as `fatal` / closed where they detect it.
+3. The DB shared-buffer sink has no page release ack (unlike pty): a stalled page lets the writer queue grow without bound (bounded in practice by fetchMore pages).
+4. The hostd `db` domain (db-fake.int, db-mysql-fake.int, db-tunnel.int on the Rust host) is still not written.
+5. TLS code is still duplicated across pg / mysql / redis (not merged here).
+6. No macOS check of the new code (unimux-db is pure Rust; `cargo check --target aarch64-apple-darwin` not run).
 
 ## Do zainstalowania / do decyzji użytkownika
 

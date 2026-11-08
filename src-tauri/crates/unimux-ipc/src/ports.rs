@@ -15,6 +15,11 @@ use crate::error::IpcError;
 pub trait PortSink: Send + Sync {
     fn post_json(&self, message: &Value) -> bool;
     fn post_bytes(&self, bytes: &[u8]) -> bool;
+    /// One JSON message already written as text (the DB port, D12: rows are written like `JSON.stringify`, which may hold
+    /// a lone `\udXXX` escape that a `serde_json::Value` cannot carry). The default parses it (a lone surrogate fails).
+    fn post_json_text(&self, text: String) -> bool {
+        serde_json::from_str::<Value>(&text).ok().is_some_and(|v| self.post_json(&v))
+    }
     /// One message of binary frames, number `seq` of this attach (the pty data plane, P2). Blocks until the transport took
     /// it (a WebView2 shared buffer posted by the UI thread, a pull answered). Default: [`PortSink::post_bytes`].
     fn post_frames(&self, seq: u64, bytes: Vec<u8>) -> bool {

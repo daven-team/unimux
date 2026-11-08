@@ -270,6 +270,7 @@ fn script(sql: &str, param: Option<&str>, c: &mut Conn) -> Script {
             notice: None,
         },
         "SELECT 1" | "SELECT quit" => rows1("?column?", 23, "1"),
+        "SHOW server_version" => rows1("server_version", 25, "16.4"),
         "SELECT usertype" => rows1("u", 70_000, "x"),
         "SELECT notice" => Script::Rows {
             fields: vec![field("n", 25)],
@@ -983,4 +984,116 @@ async fn read_only_sessions_refuse_edits() {
     let r = s.session.handle(&json!({ "op": "applyEdits", "req": edits })).await;
     assert_eq!(r, json!({ "ok": false, "error": "readOnly" }));
     assert!(!s.log().iter().any(|l| l.starts_with("DELETE")));
+}
+
+// ── D12: the Postgres host behind the DB service ─────────────────────────────
+
+mod host {
+    use super::*;
+    use unimux_db::host::{DbHostLink, Spawn, ToHost, UnavailableHost};
+    use unimux_db::pg::host::{PgHost, PgHostDeps};
+
+    struct Host {
+        host: Arc<PgHost>,
+        reports: Arc<Mutex<Vec<Value>>>,
+        port: Arc<Mutex<Vec<(String, Value)>>>,
+    }
+
+    fn host() -> Host {
+        let spawn: Spawn = Arc::new(|f| {
+            tokio::spawn(f);
+        });
+        let mut deps = PgHostDeps::new(UnavailableHost::new(spawn.clone()), spawn, None);
+        deps.connect_ms = 5000;
+        let host = PgHost::new(deps);
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let r = reports.clone();
+        host.connect(Arc::new(move |m| r.lock().push(m)));
+        let port = Arc::new(Mutex::new(Vec::new()));
+        let p = port.clone();
+        host.connect_port(Arc::new(move |m: PgPortMessage| {
+            p.lock().push((m.query_id().to_owned(), serde_json::from_str(&m.to_json()).unwrap()));
+        }));
+        Host { host, reports, port }
+    }
+
+    impl Host {
+        fn phases(&self, id: &str) -> Vec<Value> {
+            self.reports.lock().iter().filter(|m| m["t"] == "dbStatus" && m["id"] == id).cloned().collect()
+        }
+
+        async fn wait_phase(&self, id: &str, phase: &str) -> Value {
+            for _ in 0..500 {
+                if let Some(m) = self.phases(id).into_iter().find(|m| m["phase"] == phase) {
+                    return m;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            panic!("no {phase} for {id}: {:?}", self.reports.lock());
+        }
+    }
+
+    fn config(port: u16, extra: Value) -> Value {
+        let mut c = json!({
+            "kind": "postgres", "host": "127.0.0.1", "port": port, "user": "u", "database": "d", "tls": "disable",
+            "readOnly": false, "ssh": null
+        });
+        for (k, v) in extra.as_object().unwrap() {
+            c[k] = v.clone();
+        }
+        c
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sessions_connect_run_and_close() {
+        let fake = start_fake().await;
+        let h = host();
+        assert!(h.host.send(ToHost::Open { id: "db:a".into(), config: config(fake.port, json!({})) }));
+        let connected = h.wait_phase("db:a", "connected").await;
+        assert_eq!(
+            connected,
+            json!({ "t": "dbStatus", "id": "db:a", "phase": "connected", "serverVersion": "16.4", "database": "d", "tls": false })
+        );
+        let phases: Vec<Value> = h.phases("db:a").iter().map(|m| m["phase"].clone()).collect();
+        assert_eq!(phases, [json!("connecting"), json!("database"), json!("connected")]);
+        let r = h.host.request("db:a", json!({ "op": "query", "req": { "queryId": "q1", "sql": "SELECT 1" } }), Some("w".into()));
+        assert_eq!(r.await, json!({ "ok": true, "value": true }));
+        for _ in 0..500 {
+            if h.port.lock().iter().any(|(q, m)| q == "q1" && m["t"] == "queryEnd") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(h.port.lock().iter().any(|(q, m)| q == "q1" && m["t"] == "rows"));
+        let redis = json!({ "op": "redis", "req": { "kind": "scan" } });
+        assert_eq!(h.host.request("db:a", redis, None).await, json!({ "ok": false, "error": "invalid" }));
+        // not a Postgres session: the next link answers
+        assert_eq!(
+            h.host.request("db:nope", json!({ "op": "schemas" }), None).await,
+            json!({ "ok": false, "error": "noSession" })
+        );
+        assert!(h.host.send(ToHost::Close { id: "db:a".into() }));
+        assert_eq!(h.wait_phase("db:a", "closed").await["phase"], "closed");
+        assert_eq!(h.host.session_count(), 0);
+        assert_eq!(h.host.request("db:a", json!({ "op": "schemas" }), None).await["error"], "noSession");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn failures_end_the_session_with_their_code() {
+        let h = host();
+        // through SSH without tunnels
+        let ssh = json!({ "ssh": { "dbHost": "10.0.0.1", "dbPort": 5432, "tunnelKey": "k", "owner": true } });
+        h.host.send(ToHost::Open { id: "db:t".into(), config: config(1, ssh) });
+        let e = h.wait_phase("db:t", "error").await;
+        assert_eq!(e["error"], "unsupported");
+        // nothing listens
+        let closed = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = closed.local_addr().unwrap().port();
+        drop(closed);
+        h.host.send(ToHost::Open { id: "db:r".into(), config: config(port, json!({})) });
+        assert_eq!(h.wait_phase("db:r", "error").await["error"], "dbRefused");
+        // another kind goes on to the next link (here: unsupported)
+        h.host.send(ToHost::Open { id: "db:m".into(), config: json!({ "kind": "oracle" }) });
+        assert_eq!(h.host.session_count(), 0);
+    }
 }
