@@ -8,8 +8,8 @@
 //! disconnect (`unimux_db::service`), the query history (`db/query_history.json`, written 1.5 s after a change and in the
 //! wind-down's save phase), the SQLite file and CA dialogs, the result export, and the `db:*` events. Every request passes
 //! the 1.1.4 validation first (`unimux_db::ipc`). The sessions themselves are D4 / D7 / D9 / D11 (routed by D12): D9's
-//! `RedisHost` opens Redis sessions and hands every other kind to D1's `UnavailableHost` (ends them with `unsupported`)
-//! until the other kinds land. Tunnels log in through the SSH coordinator (S3, `commands::ssh::DbTunnels`); their owner (D2)
+//! `RedisHost` opens Redis sessions, D8's `MysqlHost` behind it MySQL / MariaDB sessions, and every other kind goes on to
+//! D1's `UnavailableHost` (ends them with `unsupported`) until the other kinds land. Tunnels log in through the SSH coordinator (S3, `commands::ssh::DbTunnels`); their owner (D2)
 //! is not plugged in yet.
 
 use std::path::{Path, PathBuf};
@@ -21,6 +21,7 @@ use unimux_core::i18n::translate;
 use unimux_db::history::{DbHistoryStore, WRITE_DELAY_MS};
 use unimux_db::host::{DbHostLink, Spawn, UnavailableHost};
 use unimux_db::ipc;
+use unimux_db::mysql::{MysqlHost, MysqlHostDeps};
 use unimux_db::redis::host::{DB_CONNECT_MS, RedisHost, RedisHostDeps};
 use unimux_db::redis::session::RedisLimits;
 use unimux_db::service::{DbDeps, DbEvents, DbService, DbStateAccess, PROMPT_TIMEOUT_MS, ReadCa, TEST_TIMEOUT_MS};
@@ -143,8 +144,10 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     let warm = vault.clone();
     let _ = std::thread::Builder::new().name("unimux-db-vault".into()).spawn(move || warm.warm());
     let others = UnavailableHost::new(spawn.clone());
+    // D8: MySQL / MariaDB sessions (their tunnels and the port routing come with D2 / D12, like Redis').
+    let mysql = MysqlHost::new(MysqlHostDeps::new(others.clone(), spawn.clone(), None));
     let host = RedisHost::new(RedisHostDeps {
-        next: others.clone(),
+        next: mysql.clone(),
         spawn: spawn.clone(),
         tunnels: None,
         connect_ms: DB_CONNECT_MS,
@@ -168,6 +171,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         test_timeout_ms: TEST_TIMEOUT_MS,
     });
     others.connect_weak(Arc::downgrade(&service), |s: &DbService, m| s.on_host_message(m));
+    mysql.connect_weak(Arc::downgrade(&service), |s: &DbService, m| s.on_host_message(m));
     host.connect_weak(Arc::downgrade(&service), |s: &DbService, m| s.on_host_message(m));
     // The coordinator's states and prompts of `db:` tunnels go to the service (1.1.4 startSsh `events`).
     let _ = crate::commands::ssh::link::link(ctx).events.db.set(Arc::new(crate::commands::ssh::DbSink(Arc::downgrade(&service))));

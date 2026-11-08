@@ -123,7 +123,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | T1 | SFTP service and sessions | todo | | | | |
 | D2 | SSH tunnels for databases | todo | | | | |
 | D5 | Postgres cursors and read-only | todo | | | | |
-| D8 | MySQL session, meta, edits | todo | | | | |
+| D8 | MySQL session, meta, edits | built, fast mode, not verified | 2026-11-08 | 2026-11-08 | | branch `tauri-pkg-D8`. unimux-db `mysql/`: `session` (port of mysqlSession.ts: one task owns the connection and runs the operations in order, activity / runs / 4-pending meta rule, KILL QUERY on a side connection (cancel, stopping an earlier read, closing the open result), the one open "load more" result with its idle timer, `fetchMore` / `closeResult`, CALL read to its end with every result set as a result (50 sets, rowCap per set, 4 x rowCap / 64 MiB overall, the set notice, a failure after sets as one more result), SHOW WARNINGS notices, USE -> `dbDatabase`, transaction state from OK packets and `DO 0`, the read-only guard and the one-run readWrite override, per-run statement timeouts by flavour, both restored by `settle`, table pages in START TRANSACTION READ ONLY, preview / apply edits (exact one row, rollback), cellValue, the idle-connection close watch -> `dbClosed` / `tunnel`, `fatal` -> `dbFailed`), `meta` (mysqlMeta.ts: databases, schemas, objects, tableInfo with keys / indexes / FKs / generated columns, DDL), `port` (the DbPortMessage subset written like JSON.stringify), `host` (`MysqlHost`, a `DbHostLink` in front of the next link: startMysql with TLS modes and prefer fallback, empty password first, up to 3 prompts with `retry`, VERSION() / comment / DATABASE(), read-only + timeout settings, `connected` label, tunnels through `DbTunnels`, close / shutdown, ops through `PendingRequests`). unimux-app `commands/db.rs`: RedisHost -> MysqlHost -> UnavailableHost. Tests: `tests/mysql_session.rs` (5 cases against an in-process fake server) + meta / port unit tests. Done: cargo fmt; clippy -D warnings (unimux-db, unimux-app, all targets); cargo test -p unimux-db (all passed, one run). Not done (fast mode): db-mysql-fake.int / db-mysql-real.int, Docker, verify-db-mysql-ui, macOS. See "D8 open issues". |
 | D10 | Redis writes, console, pattern ops, pub/sub | todo | | | | |
 | A4 | Login managers | todo | | | | |
 | A5 | Usage, auto-switch, limit alerts | todo | | | | |
@@ -824,6 +824,15 @@ Review fixes (2026-11-07): `mysql_timeout_sql` (MariaDB) now prints `(ms / 1000)
 7. **Password copies:** the session keeps the password in `Zeroizing`; the encoded AUTH command sits in the connection's write queue as a plain `Vec<u8>` until written (not wiped).
 8. **macOS:** unimux-db now depends on rustls / ring, so `cargo check -p unimux-db --target aarch64-apple-darwin` no longer builds here (ring's build script needs a C cross compiler, as for unimux-net); not checked.
 9. **Leftovers:** the redis crate stays a dev-dependency for tests/wire_servers.rs (SP9 open issue 6); server error texts are cut at 4000 UTF-16 units without a lone high surrogate (serde_json values cannot hold one, the port JSON writer is D12's); a server `INFO` / `CLIENT LIST` with odd shapes is answered like the parsers do, but a malformed reply shape (not an array where one is expected) answers `dbClosed` where 1.1.4 threw a TypeError that ended the same way.
+
+### D8 open issues (2026-11-08, fast mode)
+
+1. **Acceptance not run.** No hostd `db` domain (db-mysql-fake.int / db-mysql-real.int), no Docker MySQL 8.4 / 9 or MariaDB 11, no real-app verify-db-mysql-ui. Only `tests/mysql_session.rs` (run with a read and a write, read-only refusal, CALL sets, open result + fetchMore, transaction op) against an in-process fake; KILL QUERY, statement timeouts, SHOW WARNINGS, USE, table pages, edits, cellValue, password prompts and the host's TLS / prefer paths are not exercised by a test.
+2. **Not wired to a window yet (D12).** `MysqlHost::connect_port` is not called in `commands/db.rs` (same as Redis' `PortSink`), so in the app a MySQL run's rows go nowhere until D12 routes port messages; `MysqlHost::shutdown` is not in the wind-down; a panic in a session task is not `db:hostCrashed`.
+3. **Tunnels (D2):** `tunnels: None`, so a MySQL session through SSH ends with `unsupported`.
+4. **Back-pressure model:** rows are read when pulled; the session does not call `MyStream::read_ahead`, so an open result leaves its unread rows in the socket (mysql2 buffered up to 2,000 rows / 8 MiB). Same results; a server's net_write_timeout could end a long-idle open result earlier than in 1.1.4 (the 2 min idle close normally comes first).
+5. **Ending mid-run:** `MysqlSession::end` drops the running job at its next await, so an ended session sends no `queryEnd` for that run (1.1.4 let the run finish with errors); the host reports the session's end anyway.
+6. **macOS:** not checked (unimux-db builds ring, see D7 issue 8).
 
 ### Open issues after A1
 
