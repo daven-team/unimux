@@ -177,6 +177,11 @@ async function connectApp({ child, port, inspectPort, options, stderr }) {
     }
   }
   await cdp('Page.enable');
+  // Tauri: WebView2 lists the page target with the app URL while the initial empty document (origin "://") is still in
+  // place, and that document is replaced a few ms later. An evaluate in that gap found no `__TAURI_INTERNALS__` ("Cannot
+  // read properties of undefined (reading 'invoke')") or lost its context ("Execution context was destroyed"), so the
+  // first test-bridge call below failed on a loaded machine. Electron's main control is its own inspector, not the page.
+  if (isTauri) await until(`typeof window.__TAURI_INTERNALS__?.invoke === 'function'`, 'Tauri IPC in the app document', 30000);
   if (options.main) {
     // Before the UI is up: the renderer's first `notify` calls are recorded too (1.1.4's mainInspector listened from the start).
     main = await mainControl({ evaluate, inspectPort });
