@@ -978,3 +978,6 @@ fn the_journal_names_no_secret_and_has_the_1_1_4_shape() {
     let phases: Vec<String> = seen.iter().map(|j| js_json::parse(j).unwrap()["phase"].as_str().unwrap().to_string()).collect();
     assert_eq!(phases, ["backed-up", "outgoing-saved", "live-creds-written", "live-json-written", "verified"]);
 }
+
+mod dead_login;
+mod ts_ports;

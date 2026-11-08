@@ -278,6 +278,47 @@ mod tests {
         assert_eq!(cswap_roster_path(home, Some("/x"), Os::Linux), PathBuf::from("/x").join("claude-swap").join("sequence.json"));
     }
 
+    /// accounts-refs "finds the roster where cswap keeps it", "reads identities only and treats an unreadable roster as
+    /// holding everything", "holds everything for a roster it cannot trust and reads only usable entries"
+    #[test]
+    fn ts_the_roster_path_and_what_a_roster_holds() {
+        let h = Path::new("/h");
+        assert_eq!(cswap_roster_path(h, None, Os::Windows), h.join(".claude-swap-backup").join("sequence.json"));
+        assert_eq!(cswap_roster_path(h, Some("/x"), Os::Linux), Path::new("/x").join("claude-swap").join("sequence.json"));
+        assert_eq!(
+            cswap_roster_path(h, Some("rel"), Os::Linux),
+            h.join(".local").join("share").join("claude-swap").join("sequence.json")
+        );
+        assert_eq!(cswap_roster_path(h, Some("~/data"), Os::Linux), h.join("data").join("claude-swap").join("sequence.json"));
+        assert_eq!(cswap_roster_path(h, Some("~"), Os::Linux), h.join("claude-swap").join("sequence.json"));
+
+        let home = tempfile::tempdir().unwrap();
+        let path = cswap_roster_path(home.path(), None, Os::Windows);
+        assert_eq!(read_cswap_roster(&path), CswapRoster::Absent);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, r#"{"activeAccountNumber":1,"accounts":{"1":{"email":"a@x.com","uuid":"ua","organizationUuid":"","organizationName":"","added":"x"}}}"#).unwrap();
+        let roster = read_cswap_roster(&path);
+        assert_eq!(roster, CswapRoster::Present(Some(vec![id(Some("a@x.com"), Some("ua"))])));
+        assert!(cswap_holds(&roster, &id(Some("a@x.com"), Some("ua"))));
+        assert!(!cswap_holds(&roster, &id(Some("b@x.com"), Some("ub"))));
+        fs::write(&path, "{ torn").unwrap();
+        assert_eq!(read_cswap_roster(&path), CswapRoster::UNREADABLE);
+        fs::write(&path, r#"{"accounts":[{"email":"a@x.com","uuid":"ua"}]}"#).unwrap();
+        assert_eq!(read_cswap_roster(&path), CswapRoster::UNREADABLE);
+        fs::write(
+            &path,
+            r#"{"accounts":{"1":"x","2":null,"3":[1],"4":{"email":"tok@x.com","uuid":"","organizationUuid":"","organizationName":"","kind":"api_key"}}}"#,
+        )
+        .unwrap();
+        let roster = read_cswap_roster(&path);
+        assert_eq!(roster, CswapRoster::Present(Some(vec![id(Some("tok@x.com"), None)])));
+        // A token-added entry has no uuid: the e-mail decides.
+        assert!(cswap_holds(&roster, &id(Some("TOK@x.com"), Some("ut"))));
+        assert!(!cswap_holds(&roster, &id(Some("other@x.com"), Some("uo"))));
+        fs::write(&path, format!(r#"{{"accounts":{{}},"pad":"{}"}}"#, "x".repeat(CSWAP_ROSTER_MAX_BYTES as usize))).unwrap();
+        assert_eq!(read_cswap_roster(&path), CswapRoster::UNREADABLE);
+    }
+
     #[test]
     fn holds_unless_proven_different() {
         let roster = CswapRoster::Present(Some(vec![id(Some("x@x.com"), None)]));

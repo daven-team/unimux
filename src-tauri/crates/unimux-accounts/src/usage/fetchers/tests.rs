@@ -250,6 +250,8 @@ async fn dead_copies_and_cleared_logins_are_expired_without_a_request() {
     assert_eq!(fetch_claude(&empty.deps, &live()).await.usage.status, Status::SignedOut);
 }
 
+mod ts_ports;
+
 fn jwt(claims: Value) -> String {
     use base64::Engine;
     format!("h.{}.s", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(claims.to_string()))

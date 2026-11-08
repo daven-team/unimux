@@ -43,11 +43,49 @@ struct Fake {
     restores: AtomicUsize,
     snapshots: AtomicUsize,
     identity_calls: AtomicUsize,
+    /// Answers of the next identity reads (front first) before `identity`.
+    identity_seq: Mutex<Vec<AccountIdentity>>,
+    spawn_fails: AtomicBool,
+    snapshot_fails: AtomicBool,
+    /// When set, a fingerprint read waits for a permit.
+    fp_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+    fp_dirs: Mutex<Vec<Option<PathBuf>>>,
+    /// When set, a restore waits for a permit.
+    restore_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+    /// When set, a restore takes this long and then fails (Claude Code holds the locks).
+    restore_slow_fail: Mutex<Option<Duration>>,
+    /// When non-zero, the identity counts as rewritten from this call on.
+    rewritten_from: AtomicUsize,
+    rewritten_calls: AtomicUsize,
+    /// What ran, in order (`backup`, `spawn`, `snapshot`, `restore`).
+    order: Mutex<Vec<&'static str>>,
+    resets: AtomicUsize,
+    cli_missing: AtomicBool,
+    /// `hasMainLogin`: `None` = not asked.
+    has_main: Mutex<Option<bool>>,
+    /// When set, starting the terminal waits for a permit.
+    spawn_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+    swap_running: AtomicBool,
 }
 
 impl Fake {
     fn new(root: &Path) -> Arc<Self> {
         Arc::new(Self {
+            identity_seq: Mutex::new(Vec::new()),
+            spawn_fails: AtomicBool::new(false),
+            snapshot_fails: AtomicBool::new(false),
+            fp_gate: Mutex::new(None),
+            fp_dirs: Mutex::new(Vec::new()),
+            restore_gate: Mutex::new(None),
+            restore_slow_fail: Mutex::new(None),
+            rewritten_from: AtomicUsize::new(0),
+            rewritten_calls: AtomicUsize::new(0),
+            order: Mutex::new(Vec::new()),
+            resets: AtomicUsize::new(0),
+            cli_missing: AtomicBool::new(false),
+            has_main: Mutex::new(None),
+            spawn_gate: Mutex::new(None),
+            swap_running: AtomicBool::new(false),
             store: AccountsStore::new(root.join("accounts")),
             fp: Mutex::new(None),
             identity: Mutex::new(AccountIdentity {
@@ -95,19 +133,51 @@ impl LoginDeps for Fake {
         &self.store
     }
     fn spawn_pty(&self, spec: PtySpec) -> Fut<Result<(), ()>> {
+        self.order.lock().push("spawn");
         self.spawned.lock().push(spec);
-        async { Ok(()) }.boxed()
+        let fails = self.spawn_fails.load(Ordering::SeqCst);
+        let gate = self.spawn_gate.lock().clone();
+        async move {
+            if let Some(g) = gate {
+                g.acquire().await.unwrap().forget();
+            }
+            if fails { Err(()) } else { Ok(()) }
+        }
+        .boxed()
+    }
+    fn cli_missing(&self, _provider: Provider) -> Fut<bool> {
+        let missing = self.cli_missing.load(Ordering::SeqCst);
+        async move { missing }.boxed()
+    }
+    fn swap_running(&self) -> bool {
+        self.swap_running.load(Ordering::SeqCst)
+    }
+    fn has_main_login(&self) -> Option<Fut<Result<bool, ()>>> {
+        let has = (*self.has_main.lock())?;
+        Some(async move { Ok(has) }.boxed())
     }
     fn kill_pty(&self, id: &str) {
         self.killed.lock().push(id.to_string());
     }
-    fn fingerprint(&self, _provider: Provider, _config_dir: Option<PathBuf>) -> Fut<Result<Option<String>, ()>> {
+    fn fingerprint(&self, _provider: Provider, config_dir: Option<PathBuf>) -> Fut<Result<Option<String>, ()>> {
+        self.fp_dirs.lock().push(config_dir);
+        let gate = self.fp_gate.lock().clone();
         let fp = self.fp.lock().clone();
-        async move { Ok(fp) }.boxed()
+        async move {
+            if let Some(g) = gate {
+                g.acquire().await.unwrap().forget();
+            }
+            Ok(fp)
+        }
+        .boxed()
+    }
+    fn reset_credential_cache(&self) {
+        self.resets.fetch_add(1, Ordering::SeqCst);
     }
     fn identity(&self, _provider: Provider, _config_dir: Option<PathBuf>) -> Fut<Result<AccountIdentity, ()>> {
         self.identity_calls.fetch_add(1, Ordering::SeqCst);
-        let id = self.identity.lock().clone();
+        let mut seq = self.identity_seq.lock();
+        let id = if seq.is_empty() { self.identity.lock().clone() } else { seq.remove(0) };
         async move { Ok(id) }.boxed()
     }
     fn known_identities(&self) -> Fut<Result<Vec<KnownIdentity>, ()>> {
@@ -115,19 +185,43 @@ impl LoginDeps for Fake {
         async move { Ok(known) }.boxed()
     }
     fn snapshot_profile(&self, _dir: PathBuf) -> Fut<Result<ProfileSnapshot, ()>> {
+        self.order.lock().push("snapshot");
         self.snapshots.fetch_add(1, Ordering::SeqCst);
-        async { Ok(ProfileSnapshot { credentials: Some("fake-old-creds".into()), claude_json: None }) }.boxed()
+        let fails = self.snapshot_fails.load(Ordering::SeqCst);
+        async move {
+            if fails {
+                return Err(());
+            }
+            Ok(ProfileSnapshot { credentials: Some("fake-old-creds".into()), claude_json: None })
+        }
+        .boxed()
     }
     fn restore_profile(&self, _dir: PathBuf, _snapshot: Arc<ProfileSnapshot>) -> Fut<Result<(), ()>> {
+        self.order.lock().push("restore");
         self.restores.fetch_add(1, Ordering::SeqCst);
         let fails = self.restore_fails.load(Ordering::SeqCst);
-        async move { if fails { Err(()) } else { Ok(()) } }.boxed()
+        let gate = self.restore_gate.lock().clone();
+        let slow = *self.restore_slow_fail.lock();
+        async move {
+            if let Some(g) = gate {
+                g.acquire().await.unwrap().forget();
+            }
+            if let Some(d) = slow {
+                tokio::time::sleep(d).await;
+                return Err(());
+            }
+            if fails { Err(()) } else { Ok(()) }
+        }
+        .boxed()
     }
     fn identity_rewritten(&self, _dir: PathBuf, _snapshot: Arc<ProfileSnapshot>) -> Fut<Result<bool, ()>> {
-        let r = self.rewritten.load(Ordering::SeqCst);
+        let n = self.rewritten_calls.fetch_add(1, Ordering::SeqCst) + 1;
+        let from = self.rewritten_from.load(Ordering::SeqCst);
+        let r = if from > 0 { n >= from } else { self.rewritten.load(Ordering::SeqCst) };
         async move { Ok(r) }.boxed()
     }
     fn before_main_login(&self) -> Fut<Result<(), BeforeMainError>> {
+        self.order.lock().push("backup");
         let b = self.backup.lock().clone();
         async move { b.map_or(Ok(()), Err) }.boxed()
     }
@@ -433,6 +527,8 @@ async fn an_identity_never_confirmed_as_rewritten_restores_and_fails_with_identi
     assert_eq!(state["expected"], "a@x.com");
     assert_eq!(fake.restores.load(Ordering::SeqCst), 1);
 }
+
+mod ts_ports;
 
 #[test]
 fn state_and_result_shapes() {

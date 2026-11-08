@@ -86,4 +86,56 @@ mod tests {
                 .is_none()
         );
     }
+
+    /// usage-shared "requires a non-empty account id of at most 80 characters", "keeps org (max 120) and managed (boolean
+    /// only) and drops unknown fields", "keeps the new fields through sanitizing and drops bad ones"
+    #[test]
+    fn ts_account_id_org_managed_and_the_new_fields() {
+        let valid = || json!({ "accountId": "claude:main", "provider": "claude", "status": "ok", "fetchedAt": 1, "source": "live", "windows": [] });
+        let with = |k: &str, v: Value| {
+            let mut x = valid();
+            x[k] = v;
+            sanitize_usage(&x)
+        };
+        assert_eq!(sanitize_usage(&valid()).unwrap().account_id, "claude:main");
+        let mut none = valid();
+        none.as_object_mut().unwrap().remove("accountId");
+        assert!(sanitize_usage(&none).is_none());
+        assert!(with("accountId", json!("")).is_none());
+        assert!(with("accountId", json!(5)).is_none());
+        assert!(with("accountId", json!("a".repeat(81))).is_none());
+        assert!(with("accountId", json!("a".repeat(80))).is_some());
+
+        let mut x = valid();
+        x["org"] = json!("o".repeat(200));
+        x["managed"] = json!(true);
+        x["token"] = json!("SECRET");
+        let u = sanitize_usage(&x).unwrap();
+        assert_eq!((u.org.as_deref().map(str::len), u.managed), (Some(120), Some(true)));
+        assert!(!u.to_value().to_string().contains("SECRET"));
+        let mut x = valid();
+        x["managed"] = json!("yes");
+        x["org"] = json!(5);
+        let u = sanitize_usage(&x).unwrap();
+        assert_eq!((u.managed, u.org), (None, None));
+        assert_eq!(with("managed", json!(false)).unwrap().managed, Some(false));
+
+        let mut x = valid();
+        x["status"] = json!("error");
+        x["attemptAt"] = json!(5);
+        x["retryAt"] = json!(10);
+        x["active"] = json!(true);
+        x["heldBy"] = json!("live");
+        let u = sanitize_usage(&x).unwrap();
+        assert_eq!((u.attempt_at, u.retry_at, u.active, u.held_by), (Some(5.0), Some(10.0), true, Some(HeldBy::Live)));
+        x["attemptAt"] = json!("x");
+        x["retryAt"] = json!(-1);
+        x["active"] = json!("yes");
+        x["heldBy"] = json!("nobody");
+        x["shared"] = json!(true);
+        let u = sanitize_usage(&x).unwrap();
+        assert_eq!((u.attempt_at, u.retry_at, u.active, u.held_by), (None, None, false, None));
+        assert!(!u.to_value().to_string().contains("shared"));
+        assert_eq!(with("status", json!("elsewhere")).unwrap().status, Status::Elsewhere);
+    }
 }

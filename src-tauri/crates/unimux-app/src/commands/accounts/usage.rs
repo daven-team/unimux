@@ -721,14 +721,35 @@ pub fn main_shown(shown: bool) {
     }
 }
 
-/// `refusalFor(channel)`: the answer once the app quits.
-fn refusal(channel: &str, hub: &Hub) -> Value {
+/// `refusalFor(channel)`: the answer once the app quits (`usage:refresh` answers the current state, read by `state`).
+fn refusal(channel: &str, state: impl FnOnce() -> Value) -> Value {
     match channel {
-        "usage:refresh" => hub.usage.state().to_value(),
+        "usage:refresh" => state(),
         "accounts:remove" | "accounts:clearSwapPending" | "accounts:removeCodex" => json!({ "ok": false }),
         "accounts:dismissNotice" | "accounts:dismissSwitch" => Value::Null,
         _ => json!({ "ok": false, "error": "invalid" }),
     }
+}
+
+/// The gate of a channel that changes accounts: nothing runs before `ready` (the startup recovery and migration), and once
+/// the app quits (before or during the wait) the channel answers `refused()` instead of starting new work.
+pub(super) async fn after_recovery<Fut>(
+    quitting: impl Fn() -> bool,
+    ready: impl std::future::Future<Output = ()>,
+    refused: impl FnOnce() -> Value,
+    run: impl FnOnce() -> Fut,
+) -> Result<Value, IpcError>
+where
+    Fut: std::future::Future<Output = Result<Value, IpcError>>,
+{
+    if quitting() {
+        return Ok(refused());
+    }
+    ready.await;
+    if quitting() {
+        return Ok(refused());
+    }
+    run().await
 }
 
 /// Registers one gated channel: waits for `accounts_ready`, then answers the refusal once the app quits.
@@ -745,14 +766,8 @@ where
         let arg = call.arg(0).clone();
         async move {
             let h = hub(&c);
-            if h.claude.quitting() {
-                return Ok(refusal(channel, &h));
-            }
-            c.cells.gates.accounts_ready.wait().await;
-            if h.claude.quitting() {
-                return Ok(refusal(channel, &h));
-            }
-            f(h, arg).await
+            let refused = || refusal(channel, || h.usage.state().to_value());
+            after_recovery(|| h.claude.quitting(), c.cells.gates.accounts_ready.wait(), refused, || f(h.clone(), arg)).await
         }
     });
 }
@@ -868,6 +883,66 @@ mod tests {
         assert_eq!(record_of_card("claude:abc"), "abc");
         assert_eq!(record_of_card("codex:x1"), "x1");
         assert_eq!(record_of_card("other"), "other");
+    }
+
+    /// accounts-ipc "gives the expected refusal shapes for a representative set" (the answers of 1.1.4's `refusalFor`)
+    #[test]
+    fn refusals_keep_the_shapes_of_1_1_4() {
+        let state = || json!({ "providers": [] });
+        assert_eq!(refusal("accounts:remove", state), json!({ "ok": false }));
+        assert_eq!(refusal("accounts:removeCodex", state), json!({ "ok": false }));
+        assert_eq!(refusal("accounts:clearSwapPending", state), json!({ "ok": false }));
+        assert_eq!(refusal("accounts:makeMain", state), json!({ "ok": false, "error": "invalid" }));
+        assert_eq!(refusal("accounts:adoptCopy", state), json!({ "ok": false, "error": "invalid" }));
+        assert_eq!(refusal("accounts:switchBest", state), json!({ "ok": false, "error": "invalid" }));
+        assert_eq!(refusal("accounts:dismissNotice", state), Value::Null);
+        assert_eq!(refusal("accounts:dismissSwitch", state), Value::Null);
+        assert_eq!(refusal("usage:refresh", state), json!({ "providers": [] }));
+    }
+
+    /// accounts-ipc "serves nothing that can start a swap, a login or a removal before the startup recovery finished
+    /// (0.9.4)", "starts no new account work once the app quits, also for a call still waiting for the recovery (0.9.6)", "a
+    /// failed recovery still lets the handlers run (they apply their own guards)" (the gate opens whatever the recovery
+    /// answered: cells::startup::tests::the_account_gates_open_in_order)
+    #[tokio::test]
+    async fn account_work_waits_for_the_recovery_and_never_starts_once_the_app_quits() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let gate = Arc::new(crate::cells::gates::StartupGate::default());
+        let quitting = Arc::new(AtomicBool::new(false));
+        let ran = Arc::new(AtomicUsize::new(0));
+        let call = |gate: &Arc<crate::cells::gates::StartupGate>| {
+            let (q, r) = (quitting.clone(), ran.clone());
+            let ready = gate.wait();
+            tokio::spawn(async move {
+                after_recovery(
+                    move || q.load(Ordering::SeqCst),
+                    ready,
+                    || json!({ "ok": false, "error": "invalid" }),
+                    move || async move {
+                        r.fetch_add(1, Ordering::SeqCst);
+                        Ok(json!({ "ok": true }))
+                    },
+                )
+                .await
+                .unwrap()
+            })
+        };
+        let waiting = call(&gate);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(ran.load(Ordering::SeqCst), 0, "nothing runs before the recovery finished");
+        gate.open();
+        assert_eq!(waiting.await.unwrap(), json!({ "ok": true }));
+        assert_eq!(ran.load(Ordering::SeqCst), 1);
+
+        // A call still waiting when the app quits, and every call after it: the refusal, nothing runs.
+        let gate = Arc::new(crate::cells::gates::StartupGate::default());
+        let waiting = call(&gate);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        quitting.store(true, Ordering::SeqCst);
+        gate.open();
+        assert_eq!(waiting.await.unwrap(), json!({ "ok": false, "error": "invalid" }));
+        assert_eq!(call(&gate).await.unwrap(), json!({ "ok": false, "error": "invalid" }));
+        assert_eq!(ran.load(Ordering::SeqCst), 1);
     }
 
     #[test]

@@ -616,17 +616,19 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     r.invoke("auth:start", move |call| {
         let c = c.clone();
         async move {
-            let refusal = || json!({"ok": false, "error": "invalid request"});
-            if c.lifecycle.is_quitting() {
-                return Ok(refusal());
-            }
-            c.cells.gates.accounts_ready.wait().await;
-            if c.lifecycle.is_quitting() {
-                return Ok(refusal());
-            }
-            let accounts = super::claude_accounts(&c);
-            let request = call.arg(0).clone();
-            Ok(logins(&c).start(&accounts, &request).await.to_value())
+            let refused = || json!({"ok": false, "error": "invalid request"});
+            let ready = c.cells.gates.accounts_ready.wait();
+            super::usage::after_recovery(
+                || c.lifecycle.is_quitting(),
+                ready,
+                refused,
+                || async {
+                    let accounts = super::claude_accounts(&c);
+                    let request = call.arg(0).clone();
+                    Ok(logins(&c).start(&accounts, &request).await.to_value())
+                },
+            )
+            .await
         }
     });
 
