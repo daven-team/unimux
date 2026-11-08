@@ -237,15 +237,13 @@ pub fn evaluate_limits(
                 }
                 let key = limit_key(usage, window.id);
                 let mark = get(&next, &key).cloned();
-                let same_period = mark.as_ref().is_some_and(|m| {
-                    m.resets_at * 1000.0 > now_ms && (window.resets_at - m.resets_at).abs() <= SAME_PERIOD_S
-                });
+                let same_period = mark
+                    .as_ref()
+                    .is_some_and(|m| m.resets_at * 1000.0 > now_ms && (window.resets_at - m.resets_at).abs() <= SAME_PERIOD_S);
                 let mut current = match (&mark, same_period) {
-                    (Some(m), true) => LimitMark {
-                        resets_at: window.resets_at,
-                        email: usage.email.clone().or(m.email.clone()),
-                        ..m.clone()
-                    },
+                    (Some(m), true) => {
+                        LimitMark { resets_at: window.resets_at, email: usage.email.clone().or(m.email.clone()), ..m.clone() }
+                    }
                     _ => LimitMark {
                         provider: usage.provider,
                         email: usage.email.clone(),
@@ -444,7 +442,11 @@ impl LimitAlerter {
     fn load(file: &std::path::Path) -> LimitMemory {
         let Ok(text) = js::read_text(file) else { return Vec::new() };
         let Ok(raw) = unimux_core::js_json::parse(&text) else { return Vec::new() };
-        if raw.get("version").and_then(Value::as_f64) == Some(1.0) { normalize_limit_memory(raw.get("marks")) } else { Vec::new() }
+        if raw.get("version").and_then(Value::as_f64) == Some(1.0) {
+            normalize_limit_memory(raw.get("marks"))
+        } else {
+            Vec::new()
+        }
     }
 
     fn save(&self) {

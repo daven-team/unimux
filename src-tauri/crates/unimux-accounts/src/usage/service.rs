@@ -127,6 +127,9 @@ type Fn0<T> = Arc<dyn Fn() -> T + Send + Sync>;
 pub type FetchAccount = Arc<dyn Fn(AccountRef) -> BoxFuture<'static, FetchResult> + Send + Sync>;
 pub type Listener = Arc<dyn Fn(&UsageState) + Send + Sync>;
 
+/// Change marker of an account's credentials file (see [`UsageOptions::credentials_stamp`]).
+pub type CredentialsStamp = Arc<dyn Fn(&AccountRef) -> Option<String> + Send + Sync>;
+
 /// `UsageServiceOptions`.
 #[derive(Clone)]
 pub struct UsageOptions {
@@ -140,7 +143,7 @@ pub struct UsageOptions {
     pub interval_ms: Fn0<f64>,
     pub now: Fn0<f64>,
     /// Change marker of an account's credentials file (`None` when unknown). Blocking but cheap (a stat).
-    pub credentials_stamp: Option<Arc<dyn Fn(&AccountRef) -> Option<String> + Send + Sync>>,
+    pub credentials_stamp: Option<CredentialsStamp>,
     pub watch: Duration,
     /// Runs before every poll (reconciles the live Claude login with the saved accounts).
     pub before_run: Option<Fn0<BoxFuture<'static, ()>>>,
@@ -463,9 +466,7 @@ impl UsageService {
         let subject_keys: HashSet<String> = accounts
             .iter()
             .filter(|r| {
-                subjects.contains(&r.id)
-                    || subjects.contains(&key_of(r))
-                    || (subjects.contains(LIVE_CARD) && is_live_claude(r))
+                subjects.contains(&r.id) || subjects.contains(&key_of(r)) || (subjects.contains(LIVE_CARD) && is_live_claude(r))
             })
             .map(key_of)
             .collect();
@@ -808,9 +809,7 @@ impl UsageService {
             raw.get("providers")
                 .and_then(Value::as_array)
                 .map(|a| {
-                    a.iter()
-                        .map(|u| (u.get("accountId").and_then(Value::as_str).unwrap_or("").to_string(), u.clone()))
-                        .collect()
+                    a.iter().map(|u| (u.get("accountId").and_then(Value::as_str).unwrap_or("").to_string(), u.clone())).collect()
                 })
                 .unwrap_or_default()
         };

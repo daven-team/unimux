@@ -18,7 +18,10 @@ fn js_number_of(text: &str) -> f64 {
         if digits.is_empty() {
             return f64::NAN;
         }
-        digits.chars().try_fold(0f64, |acc, c| c.to_digit(radix).map(|d| acc * f64::from(radix) + f64::from(d))).unwrap_or(f64::NAN)
+        digits
+            .chars()
+            .try_fold(0f64, |acc, c| c.to_digit(radix).map(|d| acc * f64::from(radix) + f64::from(d)))
+            .unwrap_or(f64::NAN)
     };
     let lower = t.to_ascii_lowercase();
     if let Some(rest) = lower.strip_prefix("0x") {
@@ -177,8 +180,7 @@ pub fn parse_codex_rate_limits(body: &Value, now_ms: f64) -> Option<Vec<UsageWin
             .then_some(c)
     }
     let flat = ["primary_window", "primary", "secondary_window", "secondary"].iter().any(|k| js::record(body.get(*k)).is_some());
-    let source =
-        has_windows(body.get("rate_limit")).or_else(|| has_windows(body.get("rate_limits"))).or(flat.then_some(body))?;
+    let source = has_windows(body.get("rate_limit")).or_else(|| has_windows(body.get("rate_limits"))).or(flat.then_some(body))?;
     // `a ?? b`: a present non-null value wins even when it is not an object.
     let pick = |a: &str, b: &str| -> Option<&Value> {
         match source.get(a) {

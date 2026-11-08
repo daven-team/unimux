@@ -94,7 +94,8 @@ pub fn limit_notice_text(notice: &LimitNotice, language: &str, now_ms: f64) -> (
     let at = notice.resets_at * 1000.0;
     let time = locale_time(at, language);
     let percent = number(notice.percent.unwrap_or(0.0));
-    let mut params = vec![("account", account.as_str()), ("window", window.as_str()), ("percent", percent.as_str()), ("time", time.as_str())];
+    let mut params =
+        vec![("account", account.as_str()), ("window", window.as_str()), ("percent", percent.as_str()), ("time", time.as_str())];
     if same_local_day(at, now_ms) {
         return (title, tr("Konto {account}: limit {window} wykorzystany w {percent}%, reset o {time}", &params));
     }
@@ -169,12 +170,108 @@ mod tests {
         // Node 26 (ICU 78): `new Date(2026, 10, d + 1, 9, 5).toLocaleDateString(l, { weekday: 'short', day: 'numeric',
         // month: 'numeric' })` for d = 1..7, four times of 2026-01-03 and 2026-12-25.
         let expected: [(&str, [&str; 12]); 6] = [
-            ("pl", ["pon., 2.11", "wt., 3.11", "śr., 4.11", "czw., 5.11", "pt., 6.11", "sob., 7.11", "niedz., 8.11", "00:07", "09:07", "12:07", "21:30", "pt., 25.12"]),
-            ("en", ["Mon, 11/2", "Tue, 11/3", "Wed, 11/4", "Thu, 11/5", "Fri, 11/6", "Sat, 11/7", "Sun, 11/8", "12:07 AM", "09:07 AM", "12:07 PM", "09:30 PM", "Fri, 12/25"]),
-            ("de", ["Mo., 2.11.", "Di., 3.11.", "Mi., 4.11.", "Do., 5.11.", "Fr., 6.11.", "Sa., 7.11.", "So., 8.11.", "00:07", "09:07", "12:07", "21:30", "Fr., 25.12."]),
-            ("es", ["lun, 2/11", "mar, 3/11", "mié, 4/11", "jue, 5/11", "vie, 6/11", "sáb, 7/11", "dom, 8/11", "00:07", "09:07", "12:07", "21:30", "vie, 25/12"]),
-            ("fr", ["lun. 02/11", "mar. 03/11", "mer. 04/11", "jeu. 05/11", "ven. 06/11", "sam. 07/11", "dim. 08/11", "00:07", "09:07", "12:07", "21:30", "ven. 25/12"]),
-            ("pt", ["seg., 02/11", "ter., 03/11", "qua., 04/11", "qui., 05/11", "sex., 06/11", "sáb., 07/11", "dom., 08/11", "00:07", "09:07", "12:07", "21:30", "sex., 25/12"]),
+            (
+                "pl",
+                [
+                    "pon., 2.11",
+                    "wt., 3.11",
+                    "śr., 4.11",
+                    "czw., 5.11",
+                    "pt., 6.11",
+                    "sob., 7.11",
+                    "niedz., 8.11",
+                    "00:07",
+                    "09:07",
+                    "12:07",
+                    "21:30",
+                    "pt., 25.12",
+                ],
+            ),
+            (
+                "en",
+                [
+                    "Mon, 11/2",
+                    "Tue, 11/3",
+                    "Wed, 11/4",
+                    "Thu, 11/5",
+                    "Fri, 11/6",
+                    "Sat, 11/7",
+                    "Sun, 11/8",
+                    "12:07 AM",
+                    "09:07 AM",
+                    "12:07 PM",
+                    "09:30 PM",
+                    "Fri, 12/25",
+                ],
+            ),
+            (
+                "de",
+                [
+                    "Mo., 2.11.",
+                    "Di., 3.11.",
+                    "Mi., 4.11.",
+                    "Do., 5.11.",
+                    "Fr., 6.11.",
+                    "Sa., 7.11.",
+                    "So., 8.11.",
+                    "00:07",
+                    "09:07",
+                    "12:07",
+                    "21:30",
+                    "Fr., 25.12.",
+                ],
+            ),
+            (
+                "es",
+                [
+                    "lun, 2/11",
+                    "mar, 3/11",
+                    "mié, 4/11",
+                    "jue, 5/11",
+                    "vie, 6/11",
+                    "sáb, 7/11",
+                    "dom, 8/11",
+                    "00:07",
+                    "09:07",
+                    "12:07",
+                    "21:30",
+                    "vie, 25/12",
+                ],
+            ),
+            (
+                "fr",
+                [
+                    "lun. 02/11",
+                    "mar. 03/11",
+                    "mer. 04/11",
+                    "jeu. 05/11",
+                    "ven. 06/11",
+                    "sam. 07/11",
+                    "dim. 08/11",
+                    "00:07",
+                    "09:07",
+                    "12:07",
+                    "21:30",
+                    "ven. 25/12",
+                ],
+            ),
+            (
+                "pt",
+                [
+                    "seg., 02/11",
+                    "ter., 03/11",
+                    "qua., 04/11",
+                    "qui., 05/11",
+                    "sex., 06/11",
+                    "sáb., 07/11",
+                    "dom., 08/11",
+                    "00:07",
+                    "09:07",
+                    "12:07",
+                    "21:30",
+                    "sex., 25/12",
+                ],
+            ),
         ];
         for (lang, want) in expected {
             let mut got: Vec<String> = (1..=7).map(|d| locale_short_date(local(2026, 11, d + 1, 9, 5), lang)).collect();
@@ -204,7 +301,10 @@ mod tests {
             ("Konta i limity".into(), "Konto support@example.com: limit 5 h wykorzystany w 82%, reset o 21:00".into())
         );
         let later = LimitNotice { resets_at: next_day, window: WindowId::SevenDay, email: None, ..n.clone() };
-        assert_eq!(limit_notice_text(&later, "pl", now).1, "Konto Claude: limit 7 dni wykorzystany w 82%, reset sob., 7.11 o 21:00");
+        assert_eq!(
+            limit_notice_text(&later, "pl", now).1,
+            "Konto Claude: limit 7 dni wykorzystany w 82%, reset sob., 7.11 o 21:00"
+        );
         let reset = LimitNotice { reset: true, ..n };
         assert_eq!(limit_notice_text(&reset, "pl", now).1, "Konto support@example.com: limit 5 h znowu dostępny");
 

@@ -32,7 +32,13 @@ fn err(id: &str, error: &str, retry: Option<f64>) -> FetchResult {
 }
 
 fn live_ref() -> AccountRef {
-    AccountRef { id: "claude:main".into(), provider: "claude".into(), key: Some("a@x.io".into()), active: Some(true), ..Default::default() }
+    AccountRef {
+        id: "claude:main".into(),
+        provider: "claude".into(),
+        key: Some("a@x.io".into()),
+        active: Some(true),
+        ..Default::default()
+    }
 }
 
 impl Fx {
@@ -102,7 +108,8 @@ async fn spacing_per_account_and_the_refresh_button_guard() {
     let cache: Value = serde_json::from_str(&std::fs::read_to_string(&f.cache).unwrap()).unwrap();
     assert_eq!(cache["version"], 2);
     assert_eq!(cache["entries"][0]["key"], "a@x.io");
-    assert_eq!(cache["reads"]["a@x.io"], json!(T0 + 71_000.0));
+    // Written like JSON.stringify: a whole number without ".0".
+    assert_eq!(cache["reads"]["a@x.io"].as_f64(), Some(T0 + 71_000.0));
 }
 
 #[tokio::test]

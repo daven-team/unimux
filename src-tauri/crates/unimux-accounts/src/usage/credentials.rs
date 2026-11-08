@@ -121,7 +121,13 @@ impl CredentialSource {
         for (k, v) in set {
             env.insert((*k).into(), (*v).into());
         }
-        Self { env: Arc::new(env), home: self.home.clone(), darwin, read_file: self.read_file.clone(), keychain: self.keychain.clone() }
+        Self {
+            env: Arc::new(env),
+            home: self.home.clone(),
+            darwin,
+            read_file: self.read_file.clone(),
+            keychain: self.keychain.clone(),
+        }
     }
 
     /// `profileSource`: an isolated Claude profile: its own config dir, no env token, never the Keychain.
@@ -238,7 +244,13 @@ fn claude_oauth(raw: &str) -> Option<serde_json::Map<String, Value>> {
 /// `readClaudeCredentials`.
 pub async fn read_claude_credentials(source: &CredentialSource) -> Option<ClaudeCredentials> {
     if let Some(token) = source.env_trimmed("CLAUDE_CODE_OAUTH_TOKEN") {
-        return Some(ClaudeCredentials { access_token: token, expires_at: None, plan: None, has_refresh: false, refresh_hash: None });
+        return Some(ClaudeCredentials {
+            access_token: token,
+            expires_at: None,
+            plan: None,
+            has_refresh: false,
+            refresh_hash: None,
+        });
     }
     let raw = source.claude_login_text().await?;
     let oauth = claude_oauth(&raw)?;
@@ -365,7 +377,8 @@ mod tests {
 
     #[tokio::test]
     async fn claude_credentials_cleared_logins_and_profiles() {
-        let creds = json!({ "claudeAiOauth": { "accessToken": "at", "refreshToken": "rt", "expiresAt": 5, "subscriptionType": "pro" } });
+        let creds =
+            json!({ "claudeAiOauth": { "accessToken": "at", "refreshToken": "rt", "expiresAt": 5, "subscriptionType": "pro" } });
         let s = source(vec![("/home/u/.claude/.credentials.json", creds.to_string())]);
         let c = read_claude_credentials(&s).await.unwrap();
         assert_eq!((c.access_token.as_str(), c.expires_at, c.has_refresh), ("at", Some(5.0), true));

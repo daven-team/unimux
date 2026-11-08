@@ -54,6 +54,6 @@ pub mod rules;
 pub mod slot;
 pub mod store;
 pub mod swapfs;
-pub mod usage;
 #[cfg(test)]
 mod test_support;
+pub mod usage;

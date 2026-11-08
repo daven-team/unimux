@@ -81,6 +81,9 @@ mod tests {
         assert_eq!((u.held_by, u.managed), (Some(HeldBy::Cswap), Some(false)));
         assert!(!u.to_value().to_string().contains("secret"));
         assert!(sanitize_usage(&json!({ "accountId": "", "provider": "claude" })).is_none());
-        assert!(sanitize_usage(&json!({ "accountId": "a", "provider": "x", "status": "ok", "source": "live", "fetchedAt": 1 })).is_none());
+        assert!(
+            sanitize_usage(&json!({ "accountId": "a", "provider": "x", "status": "ok", "source": "live", "fetchedAt": 1 }))
+                .is_none()
+        );
     }
 }

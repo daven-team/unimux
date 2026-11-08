@@ -15,7 +15,9 @@ use serde_json::{Map, Value};
 use crate::js;
 use crate::limit_alerts::{WindowAlert, threshold_percent};
 use crate::results::{SwapError, SwapResult};
-use crate::usage::types::{CardState, Provider, ProviderUsage, Source, Status, WindowId, card_state, effective_percent, js_round};
+use crate::usage::types::{
+    CardState, Provider, ProviderUsage, Source, Status, WindowId, card_state, effective_percent, js_round,
+};
 
 /// `AutoSwitchMode`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -400,7 +402,12 @@ pub enum Plan {
         candidates: Vec<ProviderUsage>,
     },
     /// No account has room: told once per limit period of the main account.
-    Exhausted { from: ProviderUsage, trigger: Trigger, next: Option<(Option<String>, f64)>, target: Option<String> },
+    Exhausted {
+        from: ProviderUsage,
+        trigger: Trigger,
+        next: Option<(Option<String>, f64)>,
+        target: Option<String>,
+    },
 }
 
 fn told(memory: &AutoSwitchMemory, provider: Provider, key: &str, window: WindowId, resets_at: f64) -> bool {
@@ -442,13 +449,20 @@ pub fn plan_auto_switch(
         && !cooling
     {
         let home = candidates.iter().find(|u| account_key(u) == *primary);
-        let offered_back = memory.offered.iter().any(|m| {
-            m.provider == provider && m.key == offer_key("return", primary) && m.resets_at * 1000.0 > now_ms
-        });
+        let offered_back = memory
+            .offered
+            .iter()
+            .any(|m| m.provider == provider && m.key == offer_key("return", primary) && m.resets_at * 1000.0 > now_ms);
         if let Some(home) = home
             && !(!switch && offered_back)
         {
-            return Plan::Act { switch, reason: Reason::Return, from: from.clone(), trigger: None, candidates: vec![home.clone()] };
+            return Plan::Act {
+                switch,
+                reason: Reason::Return,
+                from: from.clone(),
+                trigger: None,
+                candidates: vec![home.clone()],
+            };
         }
     }
     let Some(trigger) = switch_trigger(from, settings, now_ms) else { return Plan::None(Skip::Below) };
@@ -671,7 +685,16 @@ pub struct SwitchNotice {
 
 impl SwitchNotice {
     pub fn new(kind: NoticeKind, provider: Provider) -> Self {
-        Self { kind, provider, from_email: None, to_email: None, window: None, percent: None, resets_at: None, target_only: false }
+        Self {
+            kind,
+            provider,
+            from_email: None,
+            to_email: None,
+            window: None,
+            percent: None,
+            resets_at: None,
+            target_only: false,
+        }
     }
 }
 
@@ -874,8 +897,7 @@ impl AutoSwitcher {
                 if self.current_offer().is_some_and(|o| o.provider == provider) {
                     self.set_offer(None);
                 }
-                let mut n =
-                    SwitchNotice::new(if returning { NoticeKind::Returned } else { NoticeKind::Switched }, provider);
+                let mut n = SwitchNotice::new(if returning { NoticeKind::Returned } else { NoticeKind::Switched }, provider);
                 n.from_email = from.email.clone();
                 n.to_email = result.email.clone().or(candidate.email.clone());
                 if !returning {
@@ -981,7 +1003,8 @@ impl AutoSwitcher {
         let Some(offer) = self.current_offer() else { return };
         let main = main_card(providers, offer.provider);
         let settings = (self.o.settings)();
-        let same_main = main.is_some_and(|m| offer.from_email.as_ref().is_none_or(|f| f.is_empty() || account_key(m) == f.to_lowercase()));
+        let same_main =
+            main.is_some_and(|m| offer.from_email.as_ref().is_none_or(|f| f.is_empty() || account_key(m) == f.to_lowercase()));
         let reason = offer.reason == Reason::Return || main.is_some_and(|m| switch_trigger(m, &settings, self.now()).is_some());
         let target = providers.iter().any(|u| u.account_id == offer.to);
         if !settings.enabled || !same_main || !reason || !target {

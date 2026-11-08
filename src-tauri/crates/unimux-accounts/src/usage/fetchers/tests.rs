@@ -120,7 +120,8 @@ fn saved(renew: RenewRule) -> AccountRef {
     }
 }
 
-const OK_BODY: &str = r#"{"five_hour":{"utilization":42,"resets_at":"2026-10-11T15:00:00Z"},"seven_day":{"utilization":10,"resets_at":null}}"#;
+const OK_BODY: &str =
+    r#"{"five_hour":{"utilization":42,"resets_at":"2026-10-11T15:00:00Z"},"seven_day":{"utilization":10,"resets_at":null}}"#;
 
 #[tokio::test]
 async fn reads_the_live_login_with_the_product_headers() {
@@ -194,20 +195,32 @@ async fn a_saved_profile_is_renewed_on_401_and_on_expiry_only_when_allowed() {
         Ok(if n == 0 && auth == "Bearer old" { response(401, "{}", &[]) } else { response(200, OK_BODY, &[]) })
     });
     f.renew_with(RefreshOutcome::Ok, Some("new"));
-    f.put("/p/r1/.credentials.json", json!({ "claudeAiOauth": { "accessToken": "old", "refreshToken": "r", "expiresAt": NOW + 3_600_000.0 } }));
+    f.put(
+        "/p/r1/.credentials.json",
+        json!({ "claudeAiOauth": { "accessToken": "old", "refreshToken": "r", "expiresAt": NOW + 3_600_000.0 } }),
+    );
     let r = fetch_claude(&f.deps, &saved(RenewRule::Allowed)).await;
     assert_eq!(r.usage.status, Status::Ok);
     assert_eq!(r.usage.managed, Some(true));
     assert_eq!(f.renewals.load(Ordering::SeqCst), 1);
     // Held by the live login: never renewed; an expired one is "elsewhere".
-    f.put("/p/r1/.credentials.json", json!({ "claudeAiOauth": { "accessToken": "old", "refreshToken": "r", "expiresAt": NOW - 1.0 } }));
+    f.put(
+        "/p/r1/.credentials.json",
+        json!({ "claudeAiOauth": { "accessToken": "old", "refreshToken": "r", "expiresAt": NOW - 1.0 } }),
+    );
     let r = fetch_claude(&f.deps, &saved(RenewRule::HeldByLive)).await;
     assert_eq!((r.usage.status, r.usage.held_by), (Status::Elsewhere, Some(HeldBy::Live)));
     assert_eq!(f.renewals.load(Ordering::SeqCst), 1);
     // A transient renewal failure keeps its Retry-After.
-    f.renew_with(RefreshOutcome::Transient(Some(TransientDetail { reason: "http-429".into(), retry_after_ms: Some(5000) })), None);
+    f.renew_with(
+        RefreshOutcome::Transient(Some(TransientDetail { reason: "http-429".into(), retry_after_ms: Some(5000) })),
+        None,
+    );
     let r = fetch_claude(&f.deps, &saved(RenewRule::Allowed)).await;
-    assert_eq!((r.usage.status, r.usage.error.as_deref(), r.retry_after_ms), (Status::Error, Some("refresh-http-429"), Some(5000.0)));
+    assert_eq!(
+        (r.usage.status, r.usage.error.as_deref(), r.retry_after_ms),
+        (Status::Error, Some("refresh-http-429"), Some(5000.0))
+    );
     f.renew_with(RefreshOutcome::Dead, None);
     assert_eq!(fetch_claude(&f.deps, &saved(RenewRule::Allowed)).await.usage.error.as_deref(), Some("refresh-dead"));
 }
@@ -215,14 +228,23 @@ async fn a_saved_profile_is_renewed_on_401_and_on_expiry_only_when_allowed() {
 #[tokio::test]
 async fn dead_copies_and_cleared_logins_are_expired_without_a_request() {
     let f = fx(|_, _| Ok(response(200, OK_BODY, &[])));
-    f.put("/p/r1/.credentials.json", json!({ "claudeAiOauth": { "accessToken": "a", "refreshToken": "dead", "expiresAt": NOW + 3_600_000.0 } }));
+    f.put(
+        "/p/r1/.credentials.json",
+        json!({ "claudeAiOauth": { "accessToken": "a", "refreshToken": "dead", "expiresAt": NOW + 3_600_000.0 } }),
+    );
     let mut r = saved(RenewRule::Allowed);
     r.dead_tokens = Some(crate::js::sha256_hex("dead"));
     let got = fetch_claude(&f.deps, &r).await;
     assert_eq!((got.usage.status, got.usage.error.as_deref()), (Status::Expired, Some("login-dead")));
-    f.put("/home/u/.claude/.credentials.json", json!({ "claudeAiOauth": { "accessToken": "", "refreshToken": "", "subscriptionType": "pro" } }));
+    f.put(
+        "/home/u/.claude/.credentials.json",
+        json!({ "claudeAiOauth": { "accessToken": "", "refreshToken": "", "subscriptionType": "pro" } }),
+    );
     let got = fetch_claude(&f.deps, &live()).await;
-    assert_eq!((got.usage.status, got.usage.error.as_deref(), got.usage.plan.as_deref()), (Status::Expired, Some("login-dead"), Some("Pro")));
+    assert_eq!(
+        (got.usage.status, got.usage.error.as_deref(), got.usage.plan.as_deref()),
+        (Status::Expired, Some("login-dead"), Some("Pro"))
+    );
     assert_eq!(f.fake.calls.load(Ordering::SeqCst), 0);
     let empty = fx(|_, _| Ok(response(200, OK_BODY, &[])));
     assert_eq!(fetch_claude(&empty.deps, &live()).await.usage.status, Status::SignedOut);
@@ -235,9 +257,18 @@ fn jwt(claims: Value) -> String {
 
 #[tokio::test]
 async fn codex_reads_with_the_account_header_and_falls_back_to_the_session_log() {
-    let f = fx(|_, _| Ok(response(200, r#"{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":3,"limit_window_seconds":18000}}}"#, &[])));
+    let f = fx(|_, _| {
+        Ok(response(
+            200,
+            r#"{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":3,"limit_window_seconds":18000}}}"#,
+            &[],
+        ))
+    });
     let access = jwt(json!({ "exp": (NOW / 1000.0) + 3600.0 }));
-    f.put("/home/u/.codex/auth.json", json!({ "tokens": { "access_token": access, "account_id": "acc", "id_token": jwt(json!({ "email": "c@x.io" })) } }));
+    f.put(
+        "/home/u/.codex/auth.json",
+        json!({ "tokens": { "access_token": access, "account_id": "acc", "id_token": jwt(json!({ "email": "c@x.io" })) } }),
+    );
     let codex = AccountRef { id: "codex:main".into(), provider: "codex".into(), ..Default::default() };
     let r = fetch_codex(&f.deps, &codex).await;
     assert_eq!((r.usage.status, r.usage.plan.as_deref(), r.usage.email.as_deref()), (Status::Ok, Some("pro"), Some("c@x.io")));
@@ -247,7 +278,11 @@ async fn codex_reads_with_the_account_header_and_falls_back_to_the_session_log()
     let tmp = tempfile::tempdir().unwrap();
     let day = tmp.path().join("sessions").join("2026");
     std::fs::create_dir_all(&day).unwrap();
-    std::fs::write(day.join("a.jsonl"), r#"{"timestamp":"2026-10-11T11:00:00Z","payload":{"rate_limits":{"primary":{"used_percent":9}}}}"#).unwrap();
+    std::fs::write(
+        day.join("a.jsonl"),
+        r#"{"timestamp":"2026-10-11T11:00:00Z","payload":{"rate_limits":{"primary":{"used_percent":9}}}}"#,
+    )
+    .unwrap();
     let mut f = fx(|_, _| Ok(response(500, "{}", &[("retry-after", "60")])));
     let home = tmp.path().to_path_buf();
     f.deps.codex_home = Arc::new(move || home.clone());

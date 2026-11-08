@@ -78,7 +78,10 @@ enum Failure {
     Kind(&'static str),
 }
 
-async fn get(deps: &FetcherDeps, req: Result<unimux_net::Request, unimux_net::FetchError>) -> Result<unimux_net::Response, Failure> {
+async fn get(
+    deps: &FetcherDeps,
+    req: Result<unimux_net::Request, unimux_net::FetchError>,
+) -> Result<unimux_net::Response, Failure> {
     let req = req.map_err(|_| Failure::Kind("network"))?;
     deps.fetch.fetch(req).await.map_err(|e| Failure::Kind(e.kind()))
 }
@@ -195,9 +198,8 @@ pub async fn fetch_claude(deps: &FetcherDeps, r: &AccountRef) -> FetchResult {
             }
         }
     }
-    let request = |c: &ClaudeCredentials| {
-        get(deps, unimux_net::calls::claude_usage(&deps.claude_url, &c.access_token, &deps.user_agent))
-    };
+    let request =
+        |c: &ClaudeCredentials| get(deps, unimux_net::calls::claude_usage(&deps.claude_url, &c.access_token, &deps.user_agent));
     let result: Result<FetchResult, Failure> = async {
         let mut response = request(&credentials).await?;
         if let Some(refresh) = &refresh

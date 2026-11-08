@@ -29,7 +29,13 @@ struct P {
 
 fn card(email: &str, five: f64, seven: f64, p: P) -> ProviderUsage {
     let id = p.account_id.clone().unwrap_or_else(|| if p.active { "claude:main".into() } else { format!("claude:{email}") });
-    let mut u = ProviderUsage::new(&id, Provider::Claude, p.status.unwrap_or(Status::Ok), p.fetched_at.unwrap_or(NOW - 60_000.0), p.source.unwrap_or(Source::Live));
+    let mut u = ProviderUsage::new(
+        &id,
+        Provider::Claude,
+        p.status.unwrap_or(Status::Ok),
+        p.fetched_at.unwrap_or(NOW - 60_000.0),
+        p.source.unwrap_or(Source::Live),
+    );
     u.email = Some(email.into());
     if !p.no_windows {
         u.windows = vec![
@@ -63,10 +69,14 @@ fn keys(v: &[ProviderUsage]) -> Vec<String> {
 fn settings_defaults_and_damaged_values() {
     let d = AutoSwitchSettings::from_value(Some(&json!({ "mode": "x", "cooldownMinutes": 7, "fiveHour": { "percent": 0 } })));
     assert_eq!(d, AutoSwitchSettings::default());
-    let s = AutoSwitchSettings::from_value(Some(&json!({ "enabled": true, "cooldownMinutes": 30, "target": { "claude": "B@X.com" }, "sevenDay": { "enabled": false, "percent": 42 } })));
+    let s = AutoSwitchSettings::from_value(Some(
+        &json!({ "enabled": true, "cooldownMinutes": 30, "target": { "claude": "B@X.com" }, "sevenDay": { "enabled": false, "percent": 42 } }),
+    ));
     assert_eq!((s.cooldown_minutes, s.target.get(&Provider::Claude).map(String::as_str)), (30, Some("b@x.com")));
     assert_eq!(s.seven_day, WindowAlert { enabled: false, percent: 42 });
-    let m = normalize_auto_switch_memory(Some(&json!({ "last": { "claude": 5, "codex": -1 }, "left": [{ "provider": "claude", "key": "a", "window": "5h", "resetsAt": 9 }, { "provider": "claude", "key": "", "window": "5h", "resetsAt": 9 }], "away": { "codex": "X@y" } })));
+    let m = normalize_auto_switch_memory(Some(
+        &json!({ "last": { "claude": 5, "codex": -1 }, "left": [{ "provider": "claude", "key": "a", "window": "5h", "resetsAt": 9 }, { "provider": "claude", "key": "", "window": "5h", "resetsAt": 9 }], "away": { "codex": "X@y" } }),
+    ));
     assert_eq!(m.last.get(&Provider::Claude), Some(&5.0));
     assert_eq!(m.last.len(), 1);
     assert_eq!(m.left.len(), 1);
@@ -76,7 +86,10 @@ fn settings_defaults_and_damaged_values() {
 #[test]
 fn triggers_only_with_current_numbers() {
     let main = main_card_of("a@x.com", 95.0, 10.0);
-    assert_eq!(switch_trigger(&main, &on(), NOW), Some(Trigger { window: WindowId::FiveHour, percent: 95.0, resets_at: S + 2.0 * H }));
+    assert_eq!(
+        switch_trigger(&main, &on(), NOW),
+        Some(Trigger { window: WindowId::FiveHour, percent: 95.0, resets_at: S + 2.0 * H })
+    );
     assert!(switch_trigger(&main_card_of("a@x.com", 94.0, 97.0), &on(), NOW).is_none());
     assert_eq!(switch_trigger(&main_card_of("a@x.com", 10.0, 98.0), &on(), NOW).map(|t| t.window), Some(WindowId::SevenDay));
     let mut cached = main.clone();
@@ -107,7 +120,12 @@ fn never_offers_unusable_accounts_but_keeps_a_cswap_copy() {
     let providers = vec![
         main_card_of("a@x.com", 96.0, 10.0),
         card("expired@x.com", 0.0, 0.0, P { status: Some(Status::Expired), ..P::default() }),
-        card("elsewhere@x.com", 0.0, 0.0, P { status: Some(Status::Elsewhere), held_by: Some(HeldBy::SwitchedOut), ..P::default() }),
+        card(
+            "elsewhere@x.com",
+            0.0,
+            0.0,
+            P { status: Some(Status::Elsewhere), held_by: Some(HeldBy::SwitchedOut), ..P::default() },
+        ),
         card("held@x.com", 0.0, 0.0, P { held_by: Some(HeldBy::Live), ..P::default() }),
         card("cached@x.com", 0.0, 0.0, P { source: Some(Source::Cache), ..P::default() }),
         card("old@x.com", 0.0, 0.0, P { fetched_at: Some(NOW - 3_600_000.0), ..P::default() }),
@@ -127,7 +145,12 @@ fn offers_in_ask_mode_once_per_period_and_waits_for_the_cooldown() {
     let providers = vec![main_card_of("a@x.com", 96.0, 10.0), card("b@x.com", 10.0, 10.0, P::default())];
     assert!(matches!(plan(&providers, &ask, &AutoSwitchMemory::default(), NOW), Plan::Act { switch: false, .. }));
     let told = AutoSwitchMemory {
-        offered: vec![Mark { provider: Provider::Claude, key: "a@x.com".into(), window: WindowId::FiveHour, resets_at: S + 2.0 * H + 60.0 }],
+        offered: vec![Mark {
+            provider: Provider::Claude,
+            key: "a@x.com".into(),
+            window: WindowId::FiveHour,
+            resets_at: S + 2.0 * H + 60.0,
+        }],
         ..AutoSwitchMemory::default()
     };
     assert_eq!(plan(&providers, &ask, &told, NOW), Plan::None(Skip::Offered));
@@ -146,7 +169,12 @@ fn returns_home_after_the_reset_a_b_a() {
     assert_eq!(memory.away.get(&Provider::Claude).map(String::as_str), Some("a@x.com"));
     let t2 = NOW + 2.0 * H * 1000.0 + 5.0 * 60_000.0;
     let b = card("b@x.com", 60.0, 10.0, P { active: true, fetched_at: Some(t2), ..P::default() });
-    let a_back = card("a@x.com", 1.0, 10.0, P { account_id: Some("claude:a".into()), fetched_at: Some(t2), five: Some(7.0 * H), ..P::default() });
+    let a_back = card(
+        "a@x.com",
+        1.0,
+        10.0,
+        P { account_id: Some("claude:a".into()), fetched_at: Some(t2), five: Some(7.0 * H), ..P::default() },
+    );
     let p = plan(&[b.clone(), a_back.clone()], &settings, &memory, t2);
     assert!(matches!(p, Plan::Act { switch: true, reason: Reason::Return, .. }), "{p:?}");
     let back = remember_switch(&memory, Provider::Claude, &b, None, t2, Some("a@x.com"), Some("a@x.com"));
@@ -197,7 +225,8 @@ struct Setup {
 fn setup(settings: AutoSwitchSettings, providers: Vec<ProviderUsage>, refuse: &[&str], busy: bool) -> Setup {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("auto-switch.json");
-    let (swaps, notices): (Arc<Mutex<Vec<String>>>, Arc<Mutex<Vec<String>>>) = Default::default();
+    type Log = Arc<Mutex<Vec<String>>>;
+    let (swaps, notices): (Log, Log) = Default::default();
     let busy = Arc::new(AtomicBool::new(busy));
     let refuse: Vec<String> = refuse.iter().map(|s| s.to_string()).collect();
     let (sw, no, b) = (swaps.clone(), notices.clone(), busy.clone());
@@ -225,7 +254,11 @@ fn setup(settings: AutoSwitchSettings, providers: Vec<ProviderUsage>, refuse: &[
 
 #[tokio::test]
 async fn switches_at_once_skipping_a_refused_candidate_then_cools_down() {
-    let providers = vec![main_card_of("a@x.com", 96.0, 10.0), card("b@x.com", 5.0, 5.0, P::default()), card("c@x.com", 20.0, 20.0, P::default())];
+    let providers = vec![
+        main_card_of("a@x.com", 96.0, 10.0),
+        card("b@x.com", 5.0, 5.0, P::default()),
+        card("c@x.com", 20.0, 20.0, P::default()),
+    ];
     let t = setup(on(), providers.clone(), &["claude:b@x.com"], false);
     t.switcher.on_state(providers.clone()).await;
     assert_eq!(*t.swaps.lock(), ["claude:c@x.com"]);
@@ -273,7 +306,11 @@ async fn tells_exhausted_once_and_switch_now_refuses_over_threshold() {
     assert!(t.swaps.lock().is_empty());
     assert_eq!(*t.notices.lock(), ["Exhausted:b@x.com"]);
 
-    let providers = vec![main_card_of("a@x.com", 50.0, 10.0), card("b@x.com", 5.0, 5.0, P::default()), card("c@x.com", 99.0, 5.0, P::default())];
+    let providers = vec![
+        main_card_of("a@x.com", 50.0, 10.0),
+        card("b@x.com", 5.0, 5.0, P::default()),
+        card("c@x.com", 99.0, 5.0, P::default()),
+    ];
     let t = setup(AutoSwitchSettings { enabled: false, ..on() }, providers, &[], false);
     assert_eq!(t.switcher.switch_now(Provider::Claude, Some("c@x.com")).await, SwapResult::fail(SwapError::NoTarget));
     assert_eq!(t.switcher.switch_now(Provider::Claude, None).await, SwapResult::ok(Some("b@x.com".into())));
