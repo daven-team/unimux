@@ -123,6 +123,10 @@ try {
   check(process.platform === 'darwin' ? 'the Dock shows the waiting agent' : 'Windows shows no taskbar badge (1.1.2)', view.dock === (process.platform === 'darwin' ? '1' : ''), JSON.stringify(view));
   // The alive set is wired: an agent whose terminal does not run never counts; the running one now works.
   await setState(`(s) => ({ ...s, projects: s.projects.map((p) => ({ ...p, tabs: p.tabs.map((t) => ({ ...t, cells: [...t.cells, { id: 'w7-dead', profileId: ${JSON.stringify(claude.id)} }] })) })) })`);
+  // Since P3 the grid starts a real terminal for the new cell (pty:spawn marks it alive): wait for that, then make it the
+  // cell whose terminal is gone again, as the test bridge did before P3.
+  await sleep(1500);
+  await cells({ alive: [ids.run, 'w7-agent'] });
   await mc(`(window.mc.reportCellStatus('w7-dead', 'waiting', 'attention', true), window.mc.reportCellStatus('w7-agent', 'working', undefined, true), true)`);
   await sleep(400);
   view = await bridge('taskbar', { view: true });
