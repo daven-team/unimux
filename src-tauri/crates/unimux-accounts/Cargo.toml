@@ -34,6 +34,13 @@ unimux-git.workspace = true
 # A3: Retry-After as an HTTP date.
 httpdate.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+# A5: the local time of the OS zone (quiet hours, "today" in notices, local ISO dates).
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Time"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "test-util"] }
