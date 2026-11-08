@@ -49,8 +49,8 @@ pub mod timers;
 #[cfg(test)]
 mod fake_server;
 #[cfg(test)]
-mod queue_tests;
-#[cfg(test)]
 mod manage_tests;
+#[cfg(test)]
+mod queue_tests;
 #[cfg(test)]
 mod sides_tests;
