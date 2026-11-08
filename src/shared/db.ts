@@ -730,6 +730,18 @@ export function dbTlsModeLabel(mode: DbTlsMode): { label: Localized; detail: Loc
   }
 }
 
+/** The MySQL password warning next to a TLS mode that does not verify the server. */
+export const DB_MYSQL_UNVERIFIED_TLS_WARNING = 'MySQL może wysłać hasło przez to połączenie TLS (logowanie caching_sha2_password lub sha256_password), a bez weryfikacji certyfikatu ktoś pośrodku może je odczytać. Wybierz TLS z weryfikacją certyfikatu, jeśli możesz.';
+
+/**
+ * D7 (security review 2026-11-07, kept as parity with 1.1.4): with TLS on but the certificate not verified, MySQL's
+ * caching_sha2_password full authentication and sha256_password send the password over a link whose server is not
+ * authenticated (as mysql2 with rejectUnauthorized false and libmysqlclient's ssl-mode=REQUIRED do). The form warns about it.
+ */
+export function dbTlsWarning(kind: DbKind, tls: DbTlsMode): Localized | null {
+  return kind === 'mysql' && (tls === 'prefer' || tls === 'require') ? { key: DB_MYSQL_UNVERIFIED_TLS_WARNING } : null;
+}
+
 /** The phase text of a connecting session. */
 export function dbPhaseLabel(phase: DbPhase): Localized | null {
   switch (phase) {
