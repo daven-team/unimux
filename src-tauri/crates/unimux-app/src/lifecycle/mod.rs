@@ -600,6 +600,22 @@ pub fn session_end(ctx: &Arc<AppContext>, ending: bool) {
     }
 }
 
+/// A close from outside (WM_CLOSE to tao's event loop window, Process.CloseMainWindow, taskkill without /F) quits like the main
+/// window's close: question, wind-down, exit. On the main thread; the quit itself starts off the window procedure.
+#[cfg(windows)]
+pub fn guard_event_loop_window(ctx: &Arc<AppContext>) {
+    let c = ctx.clone();
+    let hook = Arc::new(unimux_platform::lifecycle::OutsideClose(Box::new(move || {
+        let c = c.clone();
+        tauri::async_runtime::spawn(async move { request_quit(&c, QuitSource::WindowClose) });
+    })));
+    match unimux_platform::lifecycle::guard_event_loop_window(hook) {
+        Ok(0) => ctx.crash.warn("event loop window not found: an outside close would not be guarded"),
+        Ok(_) => {}
+        Err(err) => ctx.crash.warn(&format!("event loop window guard: {err}")),
+    }
+}
+
 /// Everything the lifecycle watches on the main window: the close, the renderer process, the heartbeat, the session end.
 pub fn attach_main(window: &WebviewWindow, ctx: &Arc<AppContext>) {
     let c = ctx.clone();

@@ -24,6 +24,21 @@ pub fn watch_session_end(hwnd: isize, hooks: Arc<SessionEndHooks>) -> std::io::R
     crate::win_lifecycle::watch_session_end(hwnd, hooks)
 }
 
+/// What an outside close of the event loop's helper window does (see [`guard_event_loop_window`]). Called on the window's
+/// thread from inside its window procedure, so it must not block or touch the event loop directly.
+#[cfg(windows)]
+pub struct OutsideClose(pub Box<dyn Fn() + Send + Sync>);
+
+/// Keeps tao's event loop window ("Tao Thread Event Target") alive when something outside asks the process' windows to close
+/// (WM_CLOSE from Process.CloseMainWindow or taskkill without /F): default handling would destroy it and every later webview
+/// call fails. The close runs `hook` instead, and the window gets a hidden owner, so it no longer counts as a main window of
+/// the process (it has to stay WS_VISIBLE: tao's event delivery during a resize needs its WM_PAINT). Must run on the event
+/// loop's thread; returns how many helper windows were guarded (0: tao has changed its window class).
+#[cfg(windows)]
+pub fn guard_event_loop_window(hook: Arc<OutsideClose>) -> std::io::Result<usize> {
+    crate::win_lifecycle::guard_event_loop_window(hook)
+}
+
 /// Electron's powerMonitor `shutdown`: the Mac shuts down or the user logs out.
 #[cfg(target_os = "macos")]
 pub fn watch_power_off(on_power_off: Arc<dyn Fn() + Send + Sync>) {

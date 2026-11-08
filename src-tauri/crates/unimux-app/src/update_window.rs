@@ -958,6 +958,13 @@ pub fn run(config_path: &Path, context: tauri::Context<tauri::Wry>) -> i32 {
         ])
         .setup(move |app| {
             let _ = setup.app.set(app.handle().clone());
+            // WM_CLOSE from outside must not destroy tao's event loop window while the update runs; nothing else happens.
+            #[cfg(windows)]
+            if let Err(e) = unimux_platform::lifecycle::guard_event_loop_window(std::sync::Arc::new(
+                unimux_platform::lifecycle::OutsideClose(Box::new(|| {})),
+            )) {
+                setup.log.error(&format!("event loop window guard: {e}"));
+            }
             if cfg!(windows) && setup.webview_dir.get().is_none() {
                 setup.log.error("no usable WebView2 data folder: no window; the update goes on without it");
             } else if let Err(e) = create_window(app.handle(), &setup) {
