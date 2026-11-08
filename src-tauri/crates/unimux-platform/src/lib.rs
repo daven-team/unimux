@@ -23,6 +23,37 @@ mod win;
 #[cfg(windows)]
 mod win_lifecycle;
 
+/// Node's `os.hostname()`: the DNS host name of this machine (S4: the default comment of a generated SSH key is
+/// `unimux@<hostname>`). Empty when the OS does not answer.
+pub fn hostname() -> String {
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::SystemInformation::{ComputerNameDnsHostname, GetComputerNameExW};
+        let mut size = 0u32;
+        // The first call only reports the size (it fails with ERROR_MORE_DATA).
+        let _ = unsafe { GetComputerNameExW(ComputerNameDnsHostname, None, &mut size) };
+        if size == 0 {
+            return String::new();
+        }
+        let mut buf = vec![0u16; size as usize];
+        let ok = unsafe { GetComputerNameExW(ComputerNameDnsHostname, Some(windows::core::PWSTR(buf.as_mut_ptr())), &mut size) };
+        if ok.is_err() {
+            return String::new();
+        }
+        String::from_utf16_lossy(&buf[..(size as usize).min(buf.len())])
+    }
+    #[cfg(unix)]
+    {
+        let mut buf = [0u8; 256];
+        let r = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
+        if r != 0 {
+            return String::new();
+        }
+        let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+        String::from_utf8_lossy(&buf[..end]).into_owned()
+    }
+}
+
 /// `AllowSetForegroundWindow(pid)`: passes this process's right to set the foreground window (it has it right after the user
 /// clicked in it) on to `pid`. The update window gets it from the app the user just clicked "install" in, so the UAC prompt
 /// of a per-machine install can come to the front; the window itself never takes the focus. False when this process had no

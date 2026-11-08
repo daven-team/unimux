@@ -460,7 +460,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         async move {
             let Some(ctx) = s.ctx() else { return Ok(Value::Null) };
             let title = translate(&language(&ctx.state.get()), "Wybierz folder projektu", &[]);
-            let request = PickRequest { folder: true, title, filter: None, more_filters: Vec::new() };
+            let request = PickRequest { folder: true, title, filter: None, more_filters: Vec::new(), directory: None };
             Ok(s.desktop.pick(s.dialog_parent(&call.caller.label), request).await.map(Value::String).unwrap_or(Value::Null))
         }
     });
@@ -479,6 +479,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
                     SOUND_EXTENSIONS.iter().map(|e| e.to_string()).collect(),
                 )),
                 more_filters: Vec::new(),
+                directory: None,
             };
             let picked = s.desktop.pick(s.dialog_parent(&call.caller.label), request).await;
             Ok(picked.filter(|p| is_sound_file(p)).map(Value::String).unwrap_or(Value::Null))

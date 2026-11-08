@@ -6,6 +6,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# S4: the in-process russh test server (`test_server`) for other crates' tests; this crate's own tests always have it.
+test-server = []
+
 [dependencies]
 unimux-core.workspace = true
 unimux-ipc.workspace = true

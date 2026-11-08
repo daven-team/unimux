@@ -28,6 +28,8 @@ pub struct PickRequest {
     pub filter: Option<(String, Vec<String>)>,
     /// Further filters after it (the DB dialogs add `{ name: '*', extensions: ['*'] }`).
     pub more_filters: Vec<(String, Vec<String>)>,
+    /// The folder the dialog opens in (S4's key import opens in ~/.ssh when it exists, 1.1.4 `defaultPath`).
+    pub directory: Option<std::path::PathBuf>,
 }
 
 /// A save dialog (`db:sqlite:create` without a path, `db:export`): the title, the suggested file name and the filters.
@@ -131,6 +133,9 @@ impl Desktop for RealDesktop {
             let filters: Vec<_> = request.filter.iter().chain(&request.more_filters).cloned().collect();
             for (name, extensions) in dialog_filters(filters, cfg!(target_os = "macos")) {
                 dialog = dialog.add_filter(name, &extensions);
+            }
+            if let Some(directory) = &request.directory {
+                dialog = dialog.set_directory(directory);
             }
             if let Some(parent) = &parent {
                 dialog = dialog.set_parent(parent);
@@ -285,6 +290,7 @@ impl Desktop for Recorder {
             "title": request.title,
             "filter": request.filter.as_ref().map(|(name, ext)| json!({ "name": name, "extensions": ext })),
             "moreFilters": request.more_filters.iter().map(|(name, ext)| json!({ "name": name, "extensions": ext })).collect::<Vec<_>>(),
+            "directory": request.directory.as_ref().map(|d| d.to_string_lossy().into_owned()),
             "parent": parent.as_ref().map(|w| w.label().to_string()),
             "answer": answer,
         }));

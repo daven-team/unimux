@@ -9,6 +9,7 @@ pub mod coordinator;
 pub mod errors;
 pub mod history_rules;
 pub mod host;
+pub mod ipc;
 pub mod js_value;
 pub mod keys;
 pub mod known_hosts;
@@ -18,4 +19,6 @@ pub mod remote;
 pub mod session;
 pub mod shell;
 pub mod stores;
+#[cfg(any(test, feature = "test-server"))]
+pub mod test_server;
 pub mod vault;

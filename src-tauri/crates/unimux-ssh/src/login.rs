@@ -105,6 +105,9 @@ pub trait LoginEvents: Send + Sync {
     fn auth_prompt(&self, prompt_id: &str, prompt: &AuthPromptInfo);
     /// Dev builds with MC_SSH_DEBUG=1 only; never a line from user authentication on.
     fn debug(&self, _line: &str) {}
+    /// The method about to be sent (`none`, `publickey`, `password`, `keyboard-interactive`) or `false` when the login
+    /// gives up, as ssh2's auth handler chose them (`-> <method>` in scripts/sp7/matrix.mjs). Never a credential.
+    fn auth_method(&self, _method: &str) {}
 }
 
 type HostKeyReply = (bool, Option<SshErrorCode>);
@@ -425,6 +428,18 @@ enum Choice {
     Keyboard,
 }
 
+impl Choice {
+    /// The SSH method name the choice sends.
+    fn method(self) -> &'static str {
+        match self {
+            Choice::None => "none",
+            Choice::PublicKey => "publickey",
+            Choice::SavedPassword | Choice::PromptPassword => "password",
+            Choice::Keyboard => "keyboard-interactive",
+        }
+    }
+}
+
 /// The method sequence of 1.1.4's SshLogin.nextAuth: the queued steps (publickey, then the saved password) while the server
 /// allows them, then `none` before the server has named its methods, then the password prompt and keyboard-interactive, 3
 /// tries each, then give up. `methods` is None until the server answered a request.
@@ -542,8 +557,12 @@ async fn drive(req: LoginRequest, timers: LoginTimers, sh: Arc<Shared>) -> Resul
         }
         let Some(choice) = order.next(methods.as_deref(), req.allow_password_prompt) else {
             // next(false): ssh2 then fails with "All configured authentication methods failed".
+            sh.events.auth_method("false");
             return Err(control.override_code().unwrap_or(SshErrorCode::Auth));
         };
+        if choice != Choice::PublicKey {
+            sh.events.auth_method(choice.method());
+        }
         let result = match choice {
             Choice::None => {
                 sh.timer.arm(timers.auth_step);
@@ -554,6 +573,7 @@ async fn drive(req: LoginRequest, timers: LoginTimers, sh: Arc<Shared>) -> Resul
                 // 1.1.4 never gets here with a key it cannot read (main checked it when it was stored); such a key is
                 // skipped like ssh2 skips a key that cannot sign.
                 let Ok(parsed) = parse_private_key(text, req.passphrase.as_deref().map(String::as_str)) else { continue };
+                sh.events.auth_method(choice.method());
                 let hash = if parsed.key.algorithm().is_rsa() {
                     handle.best_supported_rsa_hash().await.ok().flatten().flatten()
                 } else {
