@@ -42,6 +42,16 @@ describe('frame budgets of terminal work', () => {
     }
   });
 
+  it('a window nobody sees skips xterm selection redraws that change nothing and pauses every animation', () => {
+    const start = manager.indexOf('  private skipHiddenSelectionRedraws(term: Terminal)');
+    const body = manager.slice(start, manager.indexOf('\n  }\n', start));
+    expect(body).toMatch(/if \(!this\.windowShown && empty && drawnEmpty\) return;/);
+    expect(body).toMatch(/refresh\.call\(selection, linux\);/);
+    expect(manager).toMatch(/term\.open\(host\);[\s\S]{0,200}this\.skipHiddenSelectionRedraws\(term\);/);
+    const css = readFileSync('src/renderer/src/styles.css', 'utf8');
+    expect(css).toContain('html[data-window-shown="false"] *, html[data-window-shown="false"] *::before, html[data-window-shown="false"] *::after { animation-play-state: paused !important; }');
+  });
+
   it('the panel widths are not custom properties of .app (that restyled the whole grid at every move of an edge)', () => {
     expect(app).not.toMatch(/className="app" style=/);
     expect(app).toMatch(/className="app-width-scope" style=\{sidebarWidthVar\}/);

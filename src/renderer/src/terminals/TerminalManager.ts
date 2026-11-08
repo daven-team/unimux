@@ -491,6 +491,7 @@ class TerminalManager {
     term.open(host);
     // Measured and opened: from now on it waits out of the layout until a cell shows it.
     this.parking.appendChild(host);
+    this.skipHiddenSelectionRedraws(term);
 
     const entry: Entry = {
       id: cellId, term, fit, webgl: null, shownAt: 0, outputAt: undefined, webglChangedAt: undefined, webglBlockedUntil: undefined, webglGl: null, webglGrantedAt: -Infinity, webglLosses: 0, host, tracker: new StatusTracker(), win32: false, agent: opts.agent,
@@ -944,6 +945,29 @@ class TerminalManager {
 
   private sliceFrame = 0;
   private lastSlice = -1;
+
+  /**
+   * xterm redraws the selection after every scroll of the buffer (`onScroll` -> SelectionService.refresh -> a frame later
+   * `handleSelectionChanged`), and the DOM renderer answers that by drawing all its rows, paused or not. A window nobody sees
+   * draws its terminals with the DOM renderer (the contexts were given back, setWindowShown), and WebView2 keeps running
+   * animation frames for a minimized window (Electron stopped them): 8 busy cells in a minimized window cost the renderer about
+   * 18 percent of a core in row building and glyph width measuring for output nobody sees. While the window is not shown, a
+   * redraw of a selection that was empty and still is gets skipped; showing the window refreshes every row anyway (xterm's
+   * paused refresh).
+   */
+  private skipHiddenSelectionRedraws(term: Terminal): void {
+    const selection = (term as unknown as { _core?: { _selectionService?: { refresh?: (linux?: boolean) => void; hasSelection?: boolean } } })._core?._selectionService;
+    const refresh = selection?.refresh;
+    if (!selection || typeof refresh !== 'function') return;
+    // Only a redraw that changes nothing is skipped: the last one that went through drew no selection either.
+    let drawnEmpty = false;
+    selection.refresh = (linux?: boolean) => {
+      const empty = !selection.hasSelection;
+      if (!this.windowShown && empty && drawnEmpty) return;
+      drawnEmpty = empty;
+      refresh.call(selection, linux);
+    };
+  }
 
   /**
    * Gives a terminal's context back. A disposed WebglAddon leaves its context to the garbage collector, and until then

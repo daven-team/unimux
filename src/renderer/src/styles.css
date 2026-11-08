@@ -948,6 +948,9 @@ body.cell-dragging, body.cell-dragging * { cursor: grabbing !important; user-sel
 .busy-ring { display: inline-block; }
 .statusbar .refresh-icon svg { width: 12px; height: 12px; }
 @media (prefers-reduced-motion: reduce) { .refresh-icon.spinning svg, .busy-ring { animation: none; } }
+/* While nobody can see the window (minimized or hidden, see windowShown.ts) nothing turns: WebView2 keeps a minimized window
+   presenting frames (no occlusion as in Electron), so a busy cell's mark kept the GPU process at about 28 percent of a core. */
+html[data-window-shown="false"] *, html[data-window-shown="false"] *::before, html[data-window-shown="false"] *::after { animation-play-state: paused !important; }
 
 /* ── find and replace ──────────────────────────────────────────────────── */
 .modal.find-replace { width: 900px; height: min(80vh, 760px); }
