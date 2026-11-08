@@ -1,16 +1,21 @@
 //! One connected Redis session (src/dbhost/redisSession.ts `RedisSession`). Three connections at most: the main one for
-//! browsing (SCAN, value pages, server views), opened at connect, whose drops are reported and retried 3 times (300 / 1000
-//! / 2000 ms, nothing sent again); a lazily opened console connection (console commands and pattern counts / deletes, so a
-//! slow command never blocks the key browser; D10 runs those operations on it); and the Pub/Sub subscriber (D10). Operations
-//! of a connection run one at a time ([`Lane`]); each carries main's deadline and is skipped when it would start after it,
-//! and a browsing operation that runs longer than `opTimeoutMs` (60 s) drops and reconnects the main connection (the
-//! watchdog).
+//! browsing (SCAN, value pages, writes, server views), opened at connect, whose drops are reported and retried 3 times (300
+//! / 1000 / 2000 ms, nothing sent again); a lazily opened console connection (console commands and pattern counts /
+//! deletes, so a slow command never blocks the key browser; reset when a command times out); and a lazily opened
+//! subscriber for Pub/Sub ([`pubsub`]) whose messages go to the renderer over the DB port in batches with a capped buffer.
+//! Operations of a connection run one at a time ([`Lane`]); each carries main's deadline and is skipped when it would
+//! start after it (a write main reported as failed never runs later), and a browsing operation that runs longer than
+//! `opTimeoutMs` (60 s) drops and reconnects the main connection (the watchdog).
 //!
-//! D9 runs `databases`, `select`, `scan`, `keyInfo`, `read`, `readItem`, plus `info`, `slowlog`, `clients` and `cancel`.
-//! `write`, `command`, `countPattern`, `deletePattern`, `subscribe`, `unsubscribe`, `pubsubState` and `publish` are D10's
-//! and answer `unsupported` until it lands.
+//! D9: `databases`, `select`, `scan`, `keyInfo`, `read`, `readItem`, `info`, `slowlog`, `clients`, `cancel`. D10: `write`
+//! and `publish` ([`writes`]), `command`, `countPattern` and `deletePattern` ([`console`]), `subscribe`, `unsubscribe` and
+//! `pubsubState` ([`pubsub`]).
 
-use std::collections::HashSet;
+mod console;
+mod pubsub;
+mod writes;
+
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
@@ -42,6 +47,23 @@ pub struct RedisLimits {
     pub op_timeout_ms: u64,
     pub slowlog_max: f64,
     pub reconnect_attempts: u32,
+    pub reply_nodes: i64,
+    pub reply_bulk_bytes: usize,
+    pub console_timeout_ms: f64,
+    pub console_timeout_max_ms: f64,
+    pub count_keys: usize,
+    pub delete_batch: usize,
+    pub token_ttl_ms: i64,
+    pub delete_slack_min: f64,
+    pub delete_slack: f64,
+    pub console_items_confirm: f64,
+    pub console_bytes_confirm: f64,
+    pub pubsub_buffer: usize,
+    pub pubsub_buffer_bytes: usize,
+    pub pubsub_payload_bytes: usize,
+    pub pubsub_batch: usize,
+    pub pubsub_flush_ms: u64,
+    pub pubsub_channels: usize,
 }
 
 impl Default for RedisLimits {
@@ -61,13 +83,30 @@ impl Default for RedisLimits {
             op_timeout_ms: L::OP_TIMEOUT_MS,
             slowlog_max: L::SLOWLOG_MAX as f64,
             reconnect_attempts: L::RECONNECT_ATTEMPTS,
+            reply_nodes: L::REPLY_NODES as i64,
+            reply_bulk_bytes: L::REPLY_BULK_BYTES,
+            console_timeout_ms: L::CONSOLE_TIMEOUT_MS as f64,
+            console_timeout_max_ms: L::CONSOLE_TIMEOUT_MAX_MS as f64,
+            count_keys: L::COUNT_KEYS,
+            delete_batch: L::DELETE_BATCH,
+            token_ttl_ms: L::TOKEN_TTL_MS as i64,
+            delete_slack_min: L::DELETE_SLACK_MIN as f64,
+            delete_slack: L::DELETE_SLACK,
+            console_items_confirm: L::CONSOLE_ITEMS_CONFIRM as f64,
+            console_bytes_confirm: L::CONSOLE_BYTES_CONFIRM as f64,
+            pubsub_buffer: L::PUBSUB_BUFFER,
+            pubsub_buffer_bytes: L::PUBSUB_BUFFER_BYTES,
+            pubsub_payload_bytes: L::PUBSUB_PAYLOAD_BYTES,
+            pubsub_batch: L::PUBSUB_BATCH,
+            pubsub_flush_ms: L::PUBSUB_FLUSH_MS,
+            pubsub_channels: L::PUBSUB_CHANNELS,
         }
     }
 }
 
 /// Where a session reports to (`RedisSessionOut`).
 pub trait RedisSessionOut: Send + Sync {
-    /// A DB port message (Pub/Sub, D10).
+    /// A DB port message (Pub/Sub: `redisPubSub`, `redisPubSubState`).
     fn port(&self, m: Value);
     fn activity(&self, busy: bool);
     /// The connection dropped; attempt n of the reconnect is under way.
@@ -181,9 +220,28 @@ fn length_command(t: &str) -> Option<&'static [u8]> {
 
 /// Console and pattern operations run on the console connection; everything else on the main one.
 const CONSOLE_KINDS: [&str; 3] = ["command", "countPattern", "deletePattern"];
-/// The operations D10 adds.
-const LATER_KINDS: [&str; 8] =
-    ["write", "command", "countPattern", "deletePattern", "subscribe", "unsubscribe", "pubsubState", "publish"];
+/// Pub/Sub has its own connection.
+const PUBSUB_KINDS: [&str; 3] = ["subscribe", "unsubscribe", "pubsubState"];
+
+/// A command's entry in the server's command table (`COMMAND INFO`).
+#[derive(Debug, Clone)]
+struct CommandInfo {
+    flags: Vec<String>,
+    categories: Vec<String>,
+    /// A container command whose subcommand has an entry of its own.
+    sub_found: bool,
+}
+
+/// The last pattern count: a delete must name its token (used once, valid for `tokenTtlMs`).
+#[derive(Debug, Clone)]
+struct PatternToken {
+    token: String,
+    pattern: String,
+    ty: Option<String>,
+    db: u32,
+    count: usize,
+    at: i64,
+}
 
 struct State {
     ended: bool,
@@ -191,6 +249,12 @@ struct State {
     reconnect_attempt: u32,
     memory_usage: bool,
     scan_type: bool,
+    unlink: bool,
+    keep_ttl: bool,
+    command_info: bool,
+    /// COMMAND INFO answers by `name` or `name|sub` (None: the server does not know the command).
+    infos: HashMap<String, Option<CommandInfo>>,
+    pattern_token: Option<PatternToken>,
     /// A cancel stops every console operation enqueued before it (each op remembers the generation it was enqueued in).
     cancel_gen: u64,
     was_busy: bool,
@@ -206,6 +270,7 @@ pub struct RedisSession {
     main: Lane,
     console: Lane,
     console_opening: tokio::sync::Mutex<()>,
+    pubsub: Arc<pubsub::PubSub>,
 }
 
 /// Decrements a lane's pending count when the operation ends, also when its future is dropped.
@@ -240,6 +305,10 @@ fn f64_of(v: &Value, k: &str) -> Option<f64> {
     v.get(k).and_then(Value::as_f64)
 }
 
+fn bool_of(v: &Value, k: &str) -> bool {
+    v.get(k).and_then(Value::as_bool).unwrap_or(false)
+}
+
 impl RedisSession {
     /// The session over a connected main client: its retries are on from now (`control.enabled = true`).
     pub fn new(client: RedisClient, opts: RedisSessionOptions, out: Arc<dyn RedisSessionOut>) -> Arc<RedisSession> {
@@ -251,10 +320,16 @@ impl RedisSession {
                 reconnect_attempt: 0,
                 memory_usage: true,
                 scan_type: true,
+                unlink: true,
+                keep_ttl: true,
+                command_info: true,
+                infos: HashMap::new(),
+                pattern_token: None,
                 cancel_gen: 0,
                 was_busy: false,
                 console: None,
             }),
+            pubsub: pubsub::PubSub::new(&opts, out.clone()),
             client,
             opts,
             out,
@@ -340,6 +415,7 @@ impl RedisSession {
         if let Some((c, _)) = console {
             c.disconnect(false);
         }
+        self.pubsub.end();
     }
 
     fn changed(&self) {
@@ -377,8 +453,13 @@ impl RedisSession {
         }
     }
 
-    /// The console connection (D10), opened on first use and kept on the session's DB.
+    /// The console connection, opened on first use and kept on the session's DB (a failure as the session's answer).
     pub async fn console_client(&self) -> Result<RedisClient, Value> {
+        self.console_cmd().await.map_err(|e| self.to_failure(e))
+    }
+
+    /// The console connection, opened on first use and kept on the session's DB.
+    async fn console_cmd(&self) -> OpResult<RedisClient> {
         let existing = self.state.lock().console.as_ref().map(|(c, _)| c.clone());
         let client = match existing {
             Some(c) => c,
@@ -389,10 +470,10 @@ impl RedisSession {
                     Some(c) => c,
                     None => {
                         let db = self.current_db();
-                        let c = (self.opts.open_connection)(db).await.map_err(|e| connect_failure(&e))?;
+                        let c = (self.opts.open_connection)(db).await.map_err(|e| connect_op_error(&e))?;
                         if self.is_ended() {
                             c.disconnect(false);
-                            return Err(fail("noSession", None));
+                            return Err(OpError::Code("noSession", None));
                         }
                         let weak = self.me.clone();
                         let mine = c.id();
@@ -417,9 +498,7 @@ impl RedisSession {
             (st.db, st.console.as_ref().map(|(_, d)| *d))
         };
         if on != Some(want) {
-            if let Err(e) = client.call(&[b"select", want.to_string().as_bytes()]).await {
-                return Err(self.to_failure(e.into()));
-            }
+            client.call(&[b"select", want.to_string().as_bytes()]).await?;
             if let Some((_, d)) = self.state.lock().console.as_mut() {
                 *d = want;
             }
@@ -461,19 +540,26 @@ impl RedisSession {
             self.state.lock().cancel_gen += 1;
             return ok(Value::Bool(was));
         }
+        if PUBSUB_KINDS.contains(&kind) {
+            return match self.pubsub.handle(kind, op).await {
+                Ok(v) => ok(v),
+                Err(e) => self.to_failure(e),
+            };
+        }
+        let generation = self.state.lock().cancel_gen;
         let expired = || deadline.is_some_and(|d| (self.now() as f64) >= d);
-        if LATER_KINDS.contains(&kind) {
-            if CONSOLE_KINDS.contains(&kind) {
-                return self
-                    .on_lane(&self.console, async {
-                        if expired() {
-                            return fail("dbTimeout", None);
-                        }
-                        fail("unsupported", None)
-                    })
-                    .await;
-            }
-            return fail("unsupported", None);
+        if CONSOLE_KINDS.contains(&kind) {
+            return self
+                .on_lane(&self.console, async {
+                    if expired() {
+                        return fail("dbTimeout", None);
+                    }
+                    match self.run_console(kind, op, generation, deadline).await {
+                        Ok(v) => ok(v),
+                        Err(e) => self.to_failure(e),
+                    }
+                })
+                .await;
         }
         self.on_lane(&self.main, async {
             if expired() {
@@ -520,8 +606,24 @@ impl RedisSession {
                 let r = self.cmd(&[b"client", b"list"]).await?;
                 Ok(Value::Array(parse_client_list(&text(&r)).into_iter().map(Value::Object).collect()))
             }
+            "write" => {
+                self.writable()?;
+                self.write(op.get("write").unwrap_or(&Value::Null)).await
+            }
+            "publish" => {
+                if self.opts.read_only && !bool_of(op, "readWrite") {
+                    return Err(OpError::Code("readOnly", None));
+                }
+                let channel = from_data(op.get("channel").unwrap_or(&Value::Null));
+                let message = from_data(op.get("message").unwrap_or(&Value::Null));
+                Ok(num(int(&self.cmd(&[b"publish", &channel, &message]).await?)))
+            }
             _ => Err(OpError::Code("invalid", None)),
         }
+    }
+
+    fn writable(&self) -> OpResult<()> {
+        if self.opts.read_only { Err(OpError::Code("readOnly", None)) } else { Ok(()) }
     }
 
     // ── databases ──────────────────────────────────────────────────────────────
@@ -1057,6 +1159,11 @@ fn info_json(sections: &[crate::redis_shared::InfoSection]) -> Value {
 /// A connect error of a side connection as a session answer.
 pub fn connect_failure(e: &ConnectError) -> Value {
     fail(e.code, e.server_message.as_deref().map(|m| ServerError { message: m.to_owned(), code: None }).as_ref())
+}
+
+/// A connect error of a side connection as an operation's error (`new OpError(e.code, {message: e.serverMessage})`).
+fn connect_op_error(e: &ConnectError) -> OpError {
+    OpError::Code(e.code, e.server_message.as_deref().map(|m| ServerError { message: m.to_owned(), code: None }))
 }
 
 /// `redisServerError` of a reply text (D10's console uses it).

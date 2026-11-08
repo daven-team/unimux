@@ -37,6 +37,8 @@ rustls-platform-verifier.workspace = true
 encoding_rs.workspace = true
 socket2.workspace = true
 rusqlite.workspace = true
+# D10: pattern counts deduplicate keys on 64 bits of SHA-1 (as 1.1.4)
+sha1.workspace = true
 
 [dev-dependencies]
 # the tests add a slow SQL function that ignores sqlite3_interrupt (a statement stuck in one step)

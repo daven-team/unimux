@@ -467,8 +467,8 @@ async fn browses_keys_and_values_in_pages() {
     assert_eq!(clients[0]["name"], "unimux");
     let info = h.ok(ID, json!({ "kind": "info", "section": "server" })).await;
     assert_eq!(info, json!([{ "name": "Server", "entries": [["redis_version", "7.2.9"]] }]));
-    // D10's operations are not here yet
-    assert_eq!(h.op(ID, json!({ "kind": "write", "write": {} })).await["error"], "unsupported");
+    // an unknown write is refused
+    assert_eq!(h.op(ID, json!({ "kind": "write", "write": {} })).await["error"], "invalid");
     assert_eq!(h.ok(ID, json!({ "kind": "cancel" })).await, json!(false));
     // activity went busy and idle again
     let act: Vec<Value> = h.main.lock().iter().filter(|m| m["t"] == "dbActivity").map(|m| m["busy"].clone()).collect();
