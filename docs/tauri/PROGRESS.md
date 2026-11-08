@@ -1000,7 +1000,7 @@ Verification: cargo fmt; clippy -D warnings `-p unimux-app -p unimux-update --al
 Harness: `scripts/real-app.mjs` (target = the Tauri check build; `MC_APP_TARGET=electron` or `--target=electron` = Electron's out/, the 1.1.4 reference, until R1), `scripts/real-app-owners.mjs` (channel -> package), `scripts/real-app-run.mjs` (runs them all; `--write-progress` rewrites the table below). A failed script prints `BLOCKED by <package> (<commands>)` and exits with 2 only for what it exercised itself (`classifyRun` in real-app-owners.mjs): a test-bridge op a later package adds, a not-yet command outside the startup baseline (the not-yet calls of a bare launch, scripts/real-app-baseline.mjs, cached per binary in artifacts/real-app/baseline-tauri.json; the runner takes it once before the sweep), or a baseline command of a package the script tests (`SCRIPT_PACKAGES`). Any other failure is a `fail` (exit 1) and lists the boot-time calls as "not-yet seen", so a regression in a landed package is never hidden as blocked. Measurements (perf-*, bench-*, measure-startup) that pass are still blocked by every not-yet call (their numbers mean nothing until the app is complete). Re-run after a package lands: `npm run build:check && node scripts/real-app-run.mjs --write-progress`.
 
 <!-- X1 real-app status (tauri) start -->
-Run: 2026-11-08 07:56 UTC, target tauri (check build), `node scripts/real-app-run.mjs --write-progress`.
+Run: 2026-11-08 10:10 UTC, target tauri (check build), `node scripts/real-app-run.mjs --write-progress`.
 
 | script | result | blocked by | detail |
 |---|---|---|---|
@@ -1056,7 +1056,7 @@ Run: 2026-11-08 07:56 UTC, target tauri (check build), `node scripts/real-app-ru
 | verify-tauri-files.mjs | pass |  |  |
 | verify-tauri-hooks.mjs | pass |  |  |
 | verify-tauri-lifecycle.mjs | pass |  |  |
-| verify-tauri-os.mjs | fail |  | verify-tauri-os: FAILED |
+| verify-tauri-os.mjs | pass |  |  |
 | verify-tauri-search.mjs | pass |  |  |
 | verify-tauri-sessions.mjs | pass |  |  |
 | verify-tauri-w3.mjs | pass |  |  |
@@ -1065,8 +1065,8 @@ Run: 2026-11-08 07:56 UTC, target tauri (check build), `node scripts/real-app-ru
 | verify-tauri-pty.mjs | pass |  |  |
 | verify-tauri-monitor.mjs | pass |  |  |
 | verify-caption.mjs | pass |  |  |
-| verify-update-window.mjs | fail |  | missing the payload installer in D:\Projekty\ajzakomator\src-tauri\target\u2\release\bundle\nsis, D:\Projekty\ajzakomator\src-tauri\target\u5\release\unimux.exe |
-| verify-update-gate.mjs | skip |  | the payload installer (node scripts/verify-update-gate.mjs --build) |
+| verify-update-window.mjs | pass |  |  |
+| verify-update-gate.mjs | pass |  |  |
 | verify-tauri-github.mjs | pass |  |  |
 | verify-release-build.mjs | skip |  | CI only: release.yml checks the CI run of a tag (RELEASE_TAG, BUILD_RUN_ID) |
 | smoke-tauri.mjs | pass |  |  |
