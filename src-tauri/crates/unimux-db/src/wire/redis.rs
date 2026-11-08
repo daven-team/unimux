@@ -17,6 +17,7 @@ use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::future::Future;
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine as _;
@@ -235,22 +236,43 @@ impl CallError {
 
 type Pending = oneshot::Sender<Result<Raw, CallError>>;
 
+/// Where a subscriber connection's messages go (`message` / `pmessage` arrays; D10's Pub/Sub). Called on the driver task.
+pub type PushFn = Arc<dyn Fn(Raw) + Send + Sync>;
+type PushSlot = Arc<parking_lot::Mutex<Option<PushFn>>>;
+
+/// A Pub/Sub message pushed by the server (RESP2: `message channel payload`, `pmessage pattern channel payload`), never the
+/// reply of a command.
+fn is_push(v: &Raw) -> bool {
+    match v {
+        Raw::Array(items) => match items.first() {
+            Some(Raw::Bytes(kind)) => {
+                (kind.eq_ignore_ascii_case(b"message") && items.len() == 3)
+                    || (kind.eq_ignore_ascii_case(b"pmessage") && items.len() == 4)
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
 /// An own RESP2 connection: one driver task owns the stream, writes commands in the order `call` gives them and hands the
 /// replies to the callers in the same order. The driver reads all the time, so a drop is seen without a command in flight
 /// (`ended`). On EOF, a read or write error or a protocol error every pending command fails with `Dropped`, nothing is
 /// sent again, and later calls fail at once with `NotWritable`.
 pub struct RedisConn {
-    tx: mpsc::UnboundedSender<(Vec<u8>, Pending)>,
+    tx: mpsc::UnboundedSender<(Vec<u8>, Pending, usize)>,
     ended: watch::Receiver<bool>,
     task: tokio::task::JoinHandle<()>,
+    push: PushSlot,
 }
 
 impl RedisConn {
     pub fn start<S: AsyncRead + AsyncWrite + Send + Unpin + 'static>(stream: S) -> RedisConn {
         let (tx, rx) = mpsc::unbounded_channel();
         let (ended_tx, ended) = watch::channel(false);
-        let task = tokio::spawn(drive(stream, rx, ended_tx));
-        RedisConn { tx, ended, task }
+        let push: PushSlot = Arc::default();
+        let task = tokio::spawn(drive(stream, rx, ended_tx, push.clone()));
+        RedisConn { tx, ended, task, push }
     }
 
     /// Starts the connection and runs the 1.1.4 connect sequence; returns the `info server` text.
@@ -284,11 +306,18 @@ impl RedisConn {
     /// Queues one command for writing now (like ioredis' `sendCommand`, before anything is awaited), so commands issued one
     /// after the other go out in that order and pipeline; the future is the reply.
     pub fn enqueue(&self, argv: &[&[u8]]) -> impl Future<Output = Result<Raw, CallError>> + Send + use<> {
+        self.enqueue_n(argv, 1)
+    }
+
+    /// Like [`RedisConn::enqueue`] for a command the server answers with `replies` replies (SUBSCRIBE / PSUBSCRIBE /
+    /// UNSUBSCRIBE / PUNSUBSCRIBE: one confirmation per name, as ioredis counts them); the future is the last one, or the
+    /// first error reply.
+    pub fn enqueue_n(&self, argv: &[&[u8]], replies: usize) -> impl Future<Output = Result<Raw, CallError>> + Send + use<> {
         let rx = if *self.ended.borrow() {
             None
         } else {
             let (reply, rx) = oneshot::channel();
-            self.tx.send((encode_command(argv), reply)).ok().map(|()| rx)
+            self.tx.send((encode_command(argv), reply, replies.max(1))).ok().map(|()| rx)
         };
         async move {
             match rx {
@@ -297,6 +326,12 @@ impl RedisConn {
                 None => Err(CallError::NotWritable),
             }
         }
+    }
+
+    /// Sends the server's Pub/Sub messages to `f` instead of treating them as replies (None: they end the connection like
+    /// any reply nobody waits for).
+    pub fn set_push(&self, f: Option<PushFn>) {
+        *self.push.lock() = f;
     }
 
     /// Becomes true when the stream ended (EOF, an error, or `close`).
@@ -322,13 +357,14 @@ impl Drop for RedisConn {
 
 /// Fails pending replies and marks the end even when the task is aborted.
 struct EndGuard {
-    pending: VecDeque<Pending>,
+    /// Each waiting command with the number of replies it still needs.
+    pending: VecDeque<(Pending, usize)>,
     ended: watch::Sender<bool>,
 }
 
 impl Drop for EndGuard {
     fn drop(&mut self) {
-        for p in self.pending.drain(..) {
+        for (p, _) in self.pending.drain(..) {
             let _ = p.send(Err(CallError::Dropped));
         }
         let _ = self.ended.send(true);
@@ -337,8 +373,9 @@ impl Drop for EndGuard {
 
 async fn drive<S: AsyncRead + AsyncWrite + Unpin>(
     stream: S,
-    mut rx: mpsc::UnboundedReceiver<(Vec<u8>, Pending)>,
+    mut rx: mpsc::UnboundedReceiver<(Vec<u8>, Pending, usize)>,
     ended: watch::Sender<bool>,
+    push: PushSlot,
 ) {
     let (mut rd, mut wr) = tokio::io::split(stream);
     let mut guard = EndGuard { pending: VecDeque::new(), ended };
@@ -347,8 +384,8 @@ async fn drive<S: AsyncRead + AsyncWrite + Unpin>(
     loop {
         tokio::select! {
             req = rx.recv() => {
-                let Some((bytes, reply)) = req else { return };
-                guard.pending.push_back(reply);
+                let Some((bytes, reply, replies)) = req else { return };
+                guard.pending.push_back((reply, replies));
                 // Redis reads a whole command before it answers, so writing before reading on cannot deadlock
                 if wr.write_all(&bytes).await.is_err() || wr.flush().await.is_err() {
                     return;
@@ -363,8 +400,20 @@ async fn drive<S: AsyncRead + AsyncWrite + Unpin>(
                 loop {
                     match reader.next_reply() {
                         Ok(Some(v)) => {
+                            if is_push(&v) {
+                                let f = push.lock().clone();
+                                if let Some(f) = f {
+                                    f(v);
+                                    continue;
+                                }
+                            }
                             // a reply nobody waits for is a protocol error: end the connection like a drop
-                            let Some(p) = guard.pending.pop_front() else { return };
+                            let Some((_, left)) = guard.pending.front_mut() else { return };
+                            if *left > 1 && !matches!(v, Raw::Error(_)) {
+                                *left -= 1;
+                                continue;
+                            }
+                            let Some((p, _)) = guard.pending.pop_front() else { return };
                             let _ = p.send(Ok(v));
                         }
                         Ok(None) => break,

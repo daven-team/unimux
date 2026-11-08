@@ -28,7 +28,7 @@ use zeroize::Zeroizing;
 use super::data::text;
 use super::tls::{TlsSetup, client_config};
 use crate::redis_shared::parse_info;
-use crate::wire::redis::{CallError, Raw, RedisConn};
+use crate::wire::redis::{CallError, PushFn, Raw, RedisConn};
 
 /// Any connected byte stream (TCP, TLS, the SSH tunnel's channel).
 pub trait RedisStream: AsyncRead + AsyncWrite + Send + Unpin + 'static {}
@@ -332,6 +332,8 @@ struct State {
     listeners: Vec<EventFn>,
     last_error: Option<ConnectError>,
     reconnect: Option<JoinHandle<()>>,
+    /// The Pub/Sub messages' receiver, put on every connection this client installs.
+    push: Option<PushFn>,
 }
 
 struct Inner {
@@ -370,6 +372,7 @@ impl RedisClient {
                 listeners: Vec::new(),
                 last_error: None,
                 reconnect: None,
+                push: None,
             }),
         });
         Inner::install(&inner, conn);
@@ -378,6 +381,12 @@ impl RedisClient {
 
     /// Sends a command now (in call order, pipelined) and gives its reply; a server error is `Err(Reply)`.
     pub fn call(&self, args: &[&[u8]]) -> impl Future<Output = Result<Raw, CmdError>> + Send + use<> {
+        self.call_n(args, 1)
+    }
+
+    /// Like [`RedisClient::call`] for a command answered with `replies` replies (the Pub/Sub (un)subscribe commands: one
+    /// confirmation per name); the reply is the last one.
+    pub fn call_n(&self, args: &[&[u8]], replies: usize) -> impl Future<Output = Result<Raw, CmdError>> + Send + use<> {
         // ioredis takes the DB of a `select` as the one to select again after a reconnect as soon as it sends it, also when
         // the server refuses it (a reconnect then selected a DB the session never was on, while it kept browsing its own).
         // Here only a select the server accepted on the current connection counts.
@@ -390,7 +399,7 @@ impl RedisClient {
             let st = self.inner.state.lock();
             (st.conn.clone(), st.epoch)
         };
-        let f = conn.map(|c| c.enqueue(args));
+        let f = conn.map(|c| c.enqueue_n(args, replies));
         let inner = Arc::downgrade(&self.inner);
         async move {
             match f {
@@ -415,6 +424,18 @@ impl RedisClient {
     /// Like [`RedisClient::call`] with owned arguments.
     pub fn call_vec(&self, args: &[Vec<u8>]) -> impl Future<Output = Result<Raw, CmdError>> + Send + use<> {
         self.call(&argv(args))
+    }
+
+    /// Where the server's Pub/Sub messages go (this connection and every reconnect).
+    pub fn set_push(&self, f: Option<PushFn>) {
+        let conn = {
+            let mut st = self.inner.state.lock();
+            st.push = f.clone();
+            st.conn.clone()
+        };
+        if let Some(c) = conn {
+            c.set_push(f);
+        }
     }
 
     /// Turns the retry on (with the owner's decision) or off.
@@ -477,6 +498,7 @@ impl Inner {
         let mut ended = conn.ended();
         let epoch = {
             let mut st = me.state.lock();
+            conn.set_push(st.push.clone());
             st.epoch += 1;
             st.conn = Some(conn);
             st.epoch
