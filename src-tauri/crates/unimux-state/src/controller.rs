@@ -3,11 +3,15 @@
 //! the broadcaster, later the domains' hooks: revokeCell, forgetCell, cancelOrphans, ...). Subscribers that wait for a
 //! change (MCP wait_for) use the revision watch and never hold the lock across an await.
 //!
-//! A mutex serializes the writers (an actor without the channel): every change is short CPU work. The hooks run after the
-//! state lock is released, under a second (re-entrant) lock taken before the state lock is let go, so `state:changed`
-//! messages still leave in revision order while a hook (or a thread a hook waits for) may read the state: the hooks reach
-//! far (cells, SSH, DB, detached windows) and a read of the state from any of them used to deadlock the whole app. A hook
-//! that changes the state again runs that change's hooks at once (nested, like 1.1.4's synchronous emit).
+//! Two locks with one fixed order, `emit` before `inner`. A change first takes its emit turn (a re-entrant lock), then the
+//! state lock only for the short CPU work of computing the next state and taking the next revision, and runs the hooks
+//! after the state lock is released while it still holds its turn. So `state:changed` messages leave in revision order,
+//! and a hook (or a thread a hook waits for) may read the state: the hooks reach far (cells, SSH, DB, detached windows).
+//! No thread ever waits for `emit` while it holds `inner` (that inversion deadlocked the app when a hook read the state
+//! while another thread's change held `inner` and waited for `emit`). A hook that changes the state again re-enters its
+//! own turn and runs that change's hooks at once (nested, like 1.1.4's synchronous emit); revisions and hooks stay
+//! strictly ordered because no other thread can take a revision while a turn is held. A hook must not wait for another
+//! thread's change (that thread waits for the turn the hook holds).
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -59,7 +63,8 @@ const RECENT_EDITS: usize = 256;
 
 pub struct StateController {
     inner: Mutex<Inner>,
-    /// Held while a change's hooks run (taken before `inner` is released): hooks see the changes in revision order.
+    /// A change's turn: taken before `inner` and held while the change's hooks run, so hooks see the changes in revision
+    /// order. Lock order: `emit`, then `inner`; never the other way round.
     emit: ReentrantMutex<()>,
     hooks: RwLock<Vec<Hook>>,
     revision_tx: watch::Sender<u64>,
@@ -108,6 +113,8 @@ impl StateController {
         edit_id: Option<&str>,
         batch: bool,
     ) -> Result<Snapshot, String> {
+        // The turn first: waiting for it while holding `inner` would deadlock against a hook that reads the state.
+        let emit = self.emit.lock();
         let mut inner = self.inner.lock();
         let next = f(&inner.state)?;
         let previous = std::mem::replace(&mut inner.state, Arc::new(next));
@@ -120,8 +127,7 @@ impl StateController {
                 inner.recent_edits.pop_front();
             }
         }
-        // The next change cannot run its hooks before these: the emit lock is ours before the state lock goes.
-        let emit = self.emit.lock();
+        // Readers (hooks included) may take the state lock now; the next change waits for this turn to end.
         drop(inner);
         let hooks: Vec<Hook> = self.hooks.read().clone();
         let change = Change { previous: &previous, snapshot: &snapshot, batch };
@@ -224,6 +230,54 @@ mod tests {
         });
         c.change(|_| Ok(json!({"n": 1})), None, false).unwrap();
         assert_eq!(c.get()["n"], 1);
+    }
+
+    /// Two threads change the state while a hook reads it and writes it again (a nested change). The old order (wait for
+    /// `emit` while holding `inner`) deadlocked here; each round runs on a helper thread with a timeout so a deadlock
+    /// fails the test instead of hanging it.
+    #[test]
+    fn two_writers_and_a_hook_that_reads_and_writes_do_not_deadlock() {
+        for round in 0..200 {
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let c = Arc::new(StateController::new(json!({"n": 0, "h": 0}), Arc::new(PassThrough)));
+                let seen = Arc::new(Mutex::new(Vec::new()));
+                let (weak, s) = (Arc::downgrade(&c), seen.clone());
+                c.on_change(move |ch| {
+                    let c = weak.upgrade().unwrap();
+                    s.lock().push(ch.snapshot.revision);
+                    // A read from the hook while the other thread is changing the state.
+                    let now = c.get();
+                    assert!(now["n"].as_u64().unwrap() >= ch.snapshot.state["n"].as_u64().unwrap());
+                    // A writer's change gets a follow-up from the hook (the follow-up itself gets none).
+                    if ch.snapshot.state["n"] != ch.previous["n"] {
+                        c.change(|s| Ok(json!({"n": s["n"], "h": s["h"].as_u64().unwrap() + 1})), None, false).unwrap();
+                    }
+                });
+                let writers: Vec<_> = (0..2)
+                    .map(|_| {
+                        let c = c.clone();
+                        std::thread::spawn(move || {
+                            for _ in 0..20 {
+                                c.change(|s| Ok(json!({"n": s["n"].as_u64().unwrap() + 1, "h": s["h"]})), None, false).unwrap();
+                                let _ = c.snapshot();
+                            }
+                        })
+                    })
+                    .collect();
+                for w in writers {
+                    w.join().unwrap();
+                }
+                let _ = done_tx.send((c.get(), c.revision(), seen.lock().clone()));
+            });
+            let (state, revision, seen) = done_rx
+                .recv_timeout(std::time::Duration::from_secs(20))
+                .unwrap_or_else(|_| panic!("round {round}: the state controller deadlocked"));
+            assert_eq!(*state, json!({"n": 40, "h": 40}));
+            assert_eq!(revision, 80);
+            // Every revision's hooks ran once, in revision order (nested follow-ups included).
+            assert_eq!(seen, (1..=80).collect::<Vec<u64>>());
+        }
     }
 
     #[test]
