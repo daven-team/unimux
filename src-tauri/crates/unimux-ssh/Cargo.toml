@@ -9,6 +9,8 @@ license.workspace = true
 [dependencies]
 unimux-core.workspace = true
 unimux-ipc.workspace = true
+# P5: SSH shell cells are terminals of the pty output engine.
+unimux-pty.workspace = true
 # S1: the stores seal secrets with the app's safeStorage (B2) and share the IndexMap order of the history hosts.
 unimux-oscrypt.workspace = true
 indexmap.workspace = true
@@ -30,7 +32,7 @@ sha2.workspace = true
 getrandom = { workspace = true, features = ["sys_rng"] }
 rand_core.workspace = true
 regex.workspace = true
-tokio = { workspace = true, features = ["net"] }
+tokio = { workspace = true, features = ["net", "rt", "time", "sync", "macros"] }
 uuid.workspace = true
 zeroize.workspace = true
 

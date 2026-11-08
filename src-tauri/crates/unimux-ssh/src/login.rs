@@ -15,6 +15,9 @@
 //!
 //! Secrets live in [`LoginRequest`] (zeroized when dropped) and are never logged; the login takes the request by value, so
 //! they are gone once it returns (1.1.4's dropSecrets).
+//!
+//! P5: a logged-in connection comes with its [`ConnectionEnd`]: the transport reports there how the connection ended (the
+//! error event of ssh2's client), so an owner can tell a reset or a keepalive timeout from a clean close.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -254,6 +257,7 @@ struct Shared {
     debug: Option<Mutex<DebugFilter>>,
     /// The host key accepted for this connection: a later key exchange must present the same one.
     accepted: Mutex<Option<Vec<u8>>>,
+    end: ConnectionEnd,
 }
 
 impl Shared {
@@ -263,6 +267,51 @@ impl Shared {
         {
             self.events.debug(line);
         }
+    }
+}
+
+/// How the connection of a login ended, set once by the transport (russh's `disconnected`). Cheap to clone.
+#[derive(Clone)]
+pub struct ConnectionEnd(Arc<watch::Sender<Option<Option<SshErrorCode>>>>);
+
+impl std::fmt::Debug for ConnectionEnd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ConnectionEnd").field(&*self.0.borrow()).finish()
+    }
+}
+
+impl Default for ConnectionEnd {
+    fn default() -> Self {
+        ConnectionEnd(Arc::new(watch::Sender::new(None)))
+    }
+}
+
+impl ConnectionEnd {
+    /// The first report wins.
+    pub fn set(&self, code: Option<SshErrorCode>) {
+        self.0.send_if_modified(|v| {
+            if v.is_some() {
+                return false;
+            }
+            *v = Some(code);
+            true
+        });
+    }
+
+    /// The transport reported the end.
+    pub fn ended(&self) -> bool {
+        self.0.borrow().is_some()
+    }
+
+    /// The error the connection ended with (None while it runs, or when it ended without one: a plain end of the stream).
+    pub fn code(&self) -> Option<SshErrorCode> {
+        self.0.borrow().flatten()
+    }
+
+    /// Resolves once the transport reported the end.
+    pub async fn wait(&self) {
+        let mut rx = self.0.subscribe();
+        let _ = rx.wait_for(Option::is_some).await;
     }
 }
 
@@ -324,10 +373,48 @@ impl client::Handler for LoginHandler {
         }
         Ok(())
     }
+
+    async fn disconnected(&mut self, reason: client::DisconnectReason<Self::Error>) -> Result<(), Self::Error> {
+        match reason {
+            // ssh2 reports the server's DISCONNECT as an error event (S3's table: unknown).
+            client::DisconnectReason::ReceivedDisconnect(_) => {
+                self.shared.end.set(Some(SshErrorCode::Unknown));
+                Ok(())
+            }
+            client::DisconnectReason::Error(e) => {
+                // The socket simply ended: ssh2 emits 'close' without an error (the owner then reads `reset`).
+                let code = match &e {
+                    russh::Error::IO(io) if io.kind() == std::io::ErrorKind::UnexpectedEof => None,
+                    _ => Some(map_error(&e, self.shared.control.override_code())),
+                };
+                self.shared.end.set(code);
+                Err(e)
+            }
+        }
+    }
 }
 
-/// A logged-in connection: channels are opened on `handle`.
-pub type LoginHandle = client::Handle<LoginHandler>;
+/// The russh connection of a login.
+pub type SshHandle = client::Handle<LoginHandler>;
+
+/// A logged-in connection: channels are opened on `handle` (also through `Deref`); `end` tells how it ended.
+pub struct LoginHandle {
+    pub handle: SshHandle,
+    pub end: ConnectionEnd,
+}
+
+impl std::fmt::Debug for LoginHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoginHandle").field("closed", &self.handle.is_closed()).field("end", &self.end).finish()
+    }
+}
+
+impl std::ops::Deref for LoginHandle {
+    type Target = SshHandle;
+    fn deref(&self) -> &SshHandle {
+        &self.handle
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Choice {
@@ -403,6 +490,7 @@ pub async fn login(
         auth_step: timers.auth_step,
         debug: req.debug.then(|| Mutex::new(DebugFilter::default())),
         accepted: Mutex::new(None),
+        end: ConnectionEnd::default(),
     });
     let r = tokio::select! {
         biased;
@@ -417,7 +505,7 @@ pub async fn login(
         p.auth = None;
     }
     timer.disarm();
-    r
+    r.map(|handle| LoginHandle { handle, end: shared.end.clone() })
 }
 
 async fn connect_tcp(host: &str, port: u16) -> Result<tokio::net::TcpStream, SshErrorCode> {
@@ -435,7 +523,7 @@ async fn connect_tcp(host: &str, port: u16) -> Result<tokio::net::TcpStream, Ssh
     Err(last.map(|e| io_code(&e)).unwrap_or(SshErrorCode::Dns))
 }
 
-async fn drive(req: LoginRequest, timers: LoginTimers, sh: Arc<Shared>) -> Result<LoginHandle, SshErrorCode> {
+async fn drive(req: LoginRequest, timers: LoginTimers, sh: Arc<Shared>) -> Result<SshHandle, SshErrorCode> {
     let control = sh.control.clone();
     let code = |e: &russh::Error| map_error(e, control.override_code());
     let stream = connect_tcp(&req.host, req.port).await?;
@@ -527,7 +615,7 @@ async fn ask(sh: &Shared, info: &AuthPromptInfo) -> AuthReply {
 /// One keyboard-interactive exchange (the `prompt` callback of SshLogin): every info request with prompts goes to the
 /// user (name 200, instructions 2048, at most 10 fields of 200 UTF-16 units), an empty one is answered with an empty list.
 async fn keyboard(
-    handle: &mut LoginHandle,
+    handle: &mut SshHandle,
     user: &str,
     sh: &Shared,
     retry: bool,

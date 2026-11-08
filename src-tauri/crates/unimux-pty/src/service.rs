@@ -115,6 +115,11 @@ impl Utf8Stream {
         }
         out
     }
+
+    /// The stream ended (StringDecoder.end): an incomplete character left over becomes one U+FFFD.
+    pub fn end(&mut self) -> String {
+        if std::mem::take(&mut self.pending).is_empty() { String::new() } else { "\u{FFFD}".to_string() }
+    }
 }
 
 struct Shared {

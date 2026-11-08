@@ -6210,6 +6210,7 @@ dependencies = [
  "unimux-core",
  "unimux-ipc",
  "unimux-oscrypt",
+ "unimux-pty",
  "uuid",
  "zeroize",
 ]

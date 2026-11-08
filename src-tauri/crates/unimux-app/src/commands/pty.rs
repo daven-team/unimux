@@ -133,7 +133,6 @@ impl PtyHost {
     }
 
     /// A handler that sees every terminal event first and takes it by answering true (`ssh.onHostMessage`, P5).
-    #[allow(dead_code, reason = "the SSH sessions (P5) register here")]
     pub fn intercept(&self, name: &'static str, handler: impl Fn(&HostEvent) -> bool + Send + Sync + 'static) {
         self.hooks.write().intercept.push((name, Arc::new(handler)));
     }
@@ -146,13 +145,11 @@ impl PtyHost {
 
     /// The pty service crashed: every terminal is gone (logins A4, the install window H6, SSH sessions P5, the app-start
     /// SSH reconnect claim).
-    #[allow(dead_code, reason = "A4, H6, P5 and the SSH app-start claim register here")]
     pub fn on_crashed(&self, name: &'static str, hook: impl Fn() + Send + Sync + 'static) {
         self.hooks.write().crashed.push((name, Arc::new(hook)));
     }
 
     /// A cell is killed by the user or the team (`ssh.killed(id)`, P5).
-    #[allow(dead_code, reason = "the SSH sessions (P5) register here")]
     pub fn on_killed(&self, name: &'static str, hook: impl Fn(&str) + Send + Sync + 'static) {
         self.hooks.write().killed.push((name, Arc::new(hook)));
     }
