@@ -152,6 +152,9 @@ impl Fake {
                 let flags = rd.u32().unwrap();
                 let exists = self.get(&path);
                 if flags & proto::open_flags::WRITE != 0 {
+                    if flags & proto::open_flags::EXCL != 0 && exists.is_some() {
+                        return st(status::FAILURE);
+                    }
                     if matches!(exists, Some(Node::Dir)) {
                         return st(status::FAILURE);
                     }

@@ -21,6 +21,9 @@ tokio = { workspace = true, features = ["rt", "time", "sync", "io-util", "fs"] }
 tokio-util.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
+# T4: the editor stamp hash and image data URLs.
+sha2.workspace = true
+base64.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }

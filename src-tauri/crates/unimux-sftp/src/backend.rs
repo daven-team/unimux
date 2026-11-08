@@ -7,9 +7,11 @@
 //! [`TransferQueue`] per session, made on its first queue operation and dropped when the session ends, plus the local
 //! copy queue ([`LOCAL_QUEUE_ID`]), which lives until the host crashes.
 //!
-//! What T4-T5 add plugs in here: the manage ops and editor files (deleteCount / delete / chmodCount / chmod / cancelOp /
-//! readFile / statFile / writeFile) and SFTP through sudo (`start_sudo`, which can reuse [`attach_stream`] on the exec
-//! channel). Until then they answer like `UnportedBackend`.
+//! T4's manage ops and editor files (deleteCount / delete / chmodCount / chmod / cancelOp / readFile / statFile /
+//! writeFile) go through [`manage_op`] ([`crate::manage`], [`crate::edit_file`]).
+//!
+//! What T5 adds plugs in here: SFTP through sudo (`start_sudo`, which can reuse [`attach_stream`] on the exec channel).
+//! Until then it answers like `UnportedBackend`.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -23,11 +25,13 @@ use serde_json::{Map, Value, json};
 use unimux_ssh::session::SshErrorCode;
 
 use crate::client::SftpClient;
+use crate::edit_file;
 use crate::error::{SftpErrorCode, SftpResult};
 use crate::host::{HostChannels, RemoteSession, SftpBackend, SftpStream, SudoStart};
 use crate::limits::{LIST_ENTRIES, LOCAL_QUEUE_ID, SftpTimers, TransferDirection, posix_normalize, valid_remote_path};
 use crate::local::LocalSide;
-use crate::op::SftpOp;
+use crate::manage::{self, RunningOps, delete_roots};
+use crate::op::{DeleteCount, SftpOp};
 use crate::queue::{QueueEvents, TransferQueue};
 use crate::remote::{RemoteSide, remote_entry};
 use crate::sides::{EntryKind, FileSide, SideError};
@@ -181,6 +185,48 @@ pub async fn remote_op(side: &RemoteSide, op: &SftpOp) -> Option<SftpResult> {
     })
 }
 
+/// The manage operations and editor files of a connected session (T4: deleteCount, delete, chmodCount, chmod, readFile,
+/// statFile, writeFile; None: not one of them). `id`: the session (the editor's hold on a target is `editor:<id>`).
+pub async fn manage_op(
+    side: &RemoteSide,
+    id: &str,
+    sudo: bool,
+    op: &SftpOp,
+    ops: &RunningOps,
+    channels: &HostChannels,
+) -> Option<SftpResult> {
+    Some(match op {
+        SftpOp::DeleteCount { paths } => manage::delete_count(side, &delete_roots(paths)).await.map(DeleteCount::to_json),
+        SftpOp::Delete { paths, confirmed } => {
+            let roots = delete_roots(paths);
+            match manage::delete_count(side, &roots).await {
+                Err(e) => Err(e),
+                Ok(now) if now != *confirmed => Err(SftpErrorCode::Changed),
+                Ok(_) => {
+                    let mut result = Ok(Value::Null);
+                    for p in &roots {
+                        if let Err(e) = manage::remove(side, p).await {
+                            result = Err(e);
+                            break;
+                        }
+                    }
+                    result
+                }
+            }
+        }
+        SftpOp::ChmodCount { paths, recursive } => {
+            manage::chmod_count(side, delete_roots(paths), *recursive, None).await.map(manage::ChmodCount::to_json)
+        }
+        SftpOp::Chmod { req } => manage::chmod(side, req, sudo, ops, channels).await,
+        SftpOp::ReadFile { path } => edit_file::read_for_editor(side, &posix_normalize(path)).await,
+        SftpOp::StatFile { path } => edit_file::stat_for_editor(side, &posix_normalize(path)).await,
+        SftpOp::WriteFile { path, save } => {
+            edit_file::write_from_editor(side, &posix_normalize(path), save, &format!("editor:{id}")).await
+        }
+        _ => return None,
+    })
+}
+
 /// A queue's reports go to the host (the item throttle, the removed message, the service's queue activity).
 struct ChannelEvents {
     id: String,
@@ -215,7 +261,8 @@ fn session_sides(
     }
 }
 
-/// The backend: the SFTP client, the local side, the view's remote operations (T2) and the transfer queues (T3).
+/// The backend: the SFTP client, the local side, the view's remote operations (T2), the transfer queues (T3) and the
+/// manage ops (T4).
 pub struct SidesBackend {
     local: Arc<LocalSide>,
     timers: SftpTimers,
@@ -225,6 +272,8 @@ pub struct SidesBackend {
     max_concurrent: Option<usize>,
     /// The local queue first, then the sessions' in the order they were made (1.1.4's snapshot order).
     queues: Mutex<IndexMap<String, Arc<TransferQueue>>>,
+    /// T4: the running permission changes (`cancelOp`).
+    ops: Arc<RunningOps>,
 }
 
 impl SidesBackend {
@@ -245,6 +294,7 @@ impl SidesBackend {
             now,
             max_concurrent,
             queues: Mutex::new(IndexMap::new()),
+            ops: Arc::new(RunningOps::default()),
         })
     }
 
@@ -314,20 +364,22 @@ impl SftpBackend for SidesBackend {
         Box::pin(async { Err(SshErrorCode::SudoFailed) })
     }
 
-    fn op(&self, id: &str, remote: Option<Arc<dyn RemoteSession>>, _sudo: bool, op: SftpOp) -> BoxFuture<'static, SftpResult> {
+    fn op(&self, id: &str, remote: Option<Arc<dyn RemoteSession>>, sudo: bool, op: SftpOp) -> BoxFuture<'static, SftpResult> {
         if op.is_queue_op() {
             return self.queue_op(id, remote, op);
         }
+        let (id, ops, channels) = (id.to_string(), self.ops.clone(), self.channels.clone());
         Box::pin(async move {
-            if let SftpOp::CancelOp { .. } = &op {
-                // T4.
-                return Ok(json!(false));
+            if let SftpOp::CancelOp { op_id } = &op {
+                return Ok(json!(ops.cancel(op_id)));
             }
             let remote = remote.ok_or(SftpErrorCode::NotConnected)?;
             let side = remote_side(&remote).ok_or(SftpErrorCode::Unsupported)?;
-            match remote_op(&side, &op).await {
+            if let Some(r) = remote_op(&side, &op).await {
+                return r;
+            }
+            match manage_op(&side, &id, sudo, &op, &ops, &channels).await {
                 Some(r) => r,
-                // T4: deleteCount, delete, chmodCount, chmod, readFile, statFile, writeFile.
                 None => Err(SftpErrorCode::Unsupported),
             }
         })

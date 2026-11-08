@@ -17,14 +17,20 @@
 //! T3 (port of src/sftphost/queue.ts and the queue half of src/sftphost/host.ts): [`queue::TransferQueue`] (expansion
 //! with its caps, 3 files at once, `.unimux-part` files, conflicts and keep-both names, the target registry, moves with
 //! the aside rename and the cross-volume copy, cancel / retry / clear) and the queues of [`backend::SidesBackend`].
+//!
+//! T4 (port of the manage ops of src/sftphost/host.ts and src/sftphost/editFile.ts): [`manage`] (delete with the confirmed
+//! count, chmodCount / chmod through lsetstat with progress and `cancelOp`) and [`edit_file`] (readFile / statFile /
+//! writeFile with stamps, the exclusive 0600 part file, the owner check and stranded results).
 
 pub mod backend;
 pub mod client;
+pub mod edit_file;
 pub mod error;
 pub mod host;
 pub mod ipc;
 pub mod limits;
 pub mod local;
+pub mod manage;
 pub mod op;
 pub mod proto;
 pub mod queue;
@@ -39,5 +45,7 @@ pub mod timers;
 mod fake_server;
 #[cfg(test)]
 mod queue_tests;
+#[cfg(test)]
+mod manage_tests;
 #[cfg(test)]
 mod sides_tests;
