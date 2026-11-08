@@ -82,6 +82,7 @@ impl Default for LoginHooks {
 static LOGIN: RwLock<Option<LoginHooks>> = RwLock::new(None);
 
 /// A4: the login managers' hooks.
+#[allow(dead_code, reason = "A4 calls it when its login managers land")]
 pub fn set_login_hooks(hooks: LoginHooks) {
     *LOGIN.write() = Some(hooks);
 }
@@ -100,7 +101,6 @@ pub struct Hub {
     pub auto: Arc<AutoSwitcher>,
     pub alerts: Arc<LimitAlerter>,
     credentials: CredentialSource,
-    darwin: bool,
 }
 
 static HUB: OnceLock<Arc<Hub>> = OnceLock::new();
@@ -309,7 +309,6 @@ impl Hub {
                 auto,
                 alerts,
                 credentials,
-                darwin,
             }
         });
         *hub.codex_live.lock() = read_live_codex_identity(&hub.codex_deps());
