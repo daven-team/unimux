@@ -101,6 +101,10 @@ pub struct HostChannels {
 }
 
 impl HostChannels {
+    /// Channels of no host: every report goes nowhere (tests of the manage ops).
+    pub fn unattached() -> HostChannels {
+        HostChannels { host: Weak::new() }
+    }
     /// A changed transfer item (the full object); `force`: a state change (sent on the next turn).
     pub fn item_changed(&self, item: Value, force: bool) {
         if let Some(h) = self.host.upgrade() {

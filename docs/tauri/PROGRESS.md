@@ -143,7 +143,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | id | title | status | started | done | verified | notes |
 |---|---|---|---|---|---|---|
 | T3 | SFTP transfer queue | todo | | | | |
-| T4 | SFTP manage ops and editor files | todo | | | | |
+| T4 | SFTP manage ops and editor files | built, fast mode, not verified | 2026-11-08 | 2026-11-08 | | branch `tauri-pkg-T4`. unimux-sftp: `manage` (port of host.ts `deleteRoots` / `count` / `remove` / `walkModes` / `chmodCount` / `chmod` / the `cancelOp` registry: delete only when the fresh count equals the confirmed one (`changed`), files 8 at a time then folders, names that are not one segment refused (`invalidName`), 1,000,000 entries / depth 64 (`tooMany`), symlinks never followed or changed (`linkSkipped`), the folder looked at again after its listing (`changed`), chmod through lsetstat, `unsafeChmod` for a recursive change under sudo without lsetstat, post-order when the folder value lacks the owner's r+x, progress `opProgress` at most every 100 ms plus once at the end, at most 200 errors listed, `cancelled: true`), `edit_file` (port of editFile.ts and the pure parts of editorSource.ts: readFile text / image data URL / binary / tooLarge with the sha256 stamp, statFile, writeFile with the stamp / hash / baseline checks, the target hold `editor:<id>`, the exclusive 0600 `.unimux-part` (a leftover is unlinked and the create tried once more, `partDenied`), fchown back and `ownerChange` / owner warning, the file's mode on the part and after the rename (mode warning), the last look before the rename, `stranded` with the newest `.unimux-old*` aside; decodeText / encodeText / restoreLineEndings / needsHashCheck / remoteOpenPlan), `backend::manage_op` wired into `SidesBackend::op` (cancelOp answers from the registry). `HostChannels::unattached()` for tests; the fake server honours `EXCL`. Checked once: cargo fmt, clippy -D warnings (unimux-sftp, unimux-app, all targets), cargo test -p unimux-sftp 56 passed (11 new). See "T4 open issues". |
 | T5 | Sudo SFTP over exec | todo | | | | Docker |
 | D12 | DB result routing and detached DB windows | todo | | | | |
 
@@ -1773,6 +1773,15 @@ Checked once: `cargo fmt`; clippy -D warnings for unimux-mcp, unimux-agents, uni
 4. A failed native delivery is logged to the crash log ("codex queue delivery to <cell> failed", no message text); 1.1.4 swallowed it silently.
 5. PORTING: wait-for's HTTP cases (progress notifications per client kind, revoked token ends the wait, the task prompt once per run, tells the coordinator on exit over HTTP) and its "checks a burst of changes once" are not ported; team-start (17 cases, TS of src/shared mostly, partly covered by P4's launch goldens) and prompt-queue (shared TS only, not main-side) got no new rows. "times out ... with one timer" is `partial` (the timer count is not observable); the two mcp-cell-config rows about removal / endCellMcp are `partial` (no Rust test of revoke + file removal together).
 6. The team flow between the renderer and Rust (start card, `automation:start-cells`, startupPrompt clearing on the renderer side) is unchanged TS and untested against the Rust side.
+
+### T4 open issues (2026-11-08, fast mode, not verified)
+Run here: `cargo fmt`, `cargo clippy -p unimux-sftp -p unimux-app --all-targets -- -D warnings`, `cargo test -p unimux-sftp` (one run, 56 passed). Not run (fast mode): `sftp-manage.int` through hostd (no hostd sftp domain yet, T2 open issue 1), verify-sftp-edit, Docker OpenSSH, macOS.
+1. **Only the in-memory fake server was used.** It has no symlinks, no uid / gid and ignores modes, so link skipping, the post-order walk, fchown / `ownerChange` / owner warnings, mode warnings and `partDenied` are ported but untested; a real OpenSSH run (sftp-manage.int cases) is needed in wave 7.
+2. The walks (delete count, delete, permission walk) run on an explicit stack instead of recursion (a deep tree from a server must not grow the native stack); the order of visits, the limits and the errors are those of 1.1.4.
+3. A delete stops at the first failed unlink of a folder's files and drops the others still in flight (1.1.4's `Promise.all` rejected at once too, but its other unlinks went on in the background); requests already sent still complete on the server.
+4. writeFile cancelled by its 300 s op timeout: the guard closes the part's handle and removes the part file without waiting (1.1.4 had no cancellation of a running save).
+5. The R2 readdir security note (T1/T2) also applies here: the delete and permission walks read whole folders (`readdir` without a limit); only the 1,000,000-entry walk limit bounds them.
+6. PORTING.md rows for sftp-manage / editor-source cases not added.
 
 ## Wave 5 integration (2026-11-08, fast mode)
 

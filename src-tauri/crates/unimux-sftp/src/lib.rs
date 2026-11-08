@@ -13,14 +13,20 @@
 //! status mapping) and [`local::LocalSide`] (Windows names, `sameLocalFile` via the file index), the
 //! [`targets::TargetRegistry`], and [`backend::SidesBackend`] (attach, list capped at 20,000, stat, realpath, mkdir,
 //! rename).
+//!
+//! T4 (port of the manage ops of src/sftphost/host.ts and src/sftphost/editFile.ts): [`manage`] (delete with the confirmed
+//! count, chmodCount / chmod through lsetstat with progress and `cancelOp`) and [`edit_file`] (readFile / statFile /
+//! writeFile with stamps, the exclusive 0600 part file, the owner check and stranded results).
 
 pub mod backend;
 pub mod client;
+pub mod edit_file;
 pub mod error;
 pub mod host;
 pub mod ipc;
 pub mod limits;
 pub mod local;
+pub mod manage;
 pub mod op;
 pub mod proto;
 pub mod remote;
@@ -32,5 +38,7 @@ pub mod timers;
 
 #[cfg(test)]
 mod fake_server;
+#[cfg(test)]
+mod manage_tests;
 #[cfg(test)]
 mod sides_tests;
