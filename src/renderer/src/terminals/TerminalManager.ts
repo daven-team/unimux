@@ -956,6 +956,18 @@ class TerminalManager {
     e.webglGl = null;
     loseGl(webglGl);
     try { webgl.dispose(); } catch { /* the canvas is gone with the context */ }
+    this.refitForRenderer(e);
+  }
+
+  /**
+   * The WebGL renderer rounds the cell width to device pixels (7.61 px with the DOM renderer is 7 px with WebGL at 100 percent),
+   * so a terminal fitted while the DOM renderer drew it (the first frames of a start, before its context came) kept the DOM
+   * renderer's narrower column count while its box stayed the same size: no ResizeObserver report, no new fit. Each renderer
+   * change fits the shown terminal again (only a changed size reaches the pty).
+   */
+  private refitForRenderer(e: Entry): void {
+    if (!e.attachedTo || !this.windowShown) return;
+    if (this.fitHolds > 0) this.heldFits.add(e); else this.queueFit(e);
   }
 
   /** The GL context the addon draws with: from xterm internals, else the new canvas in the terminal that has no 2D context. */
@@ -981,6 +993,7 @@ class TerminalManager {
       e.webglGl = this.glOf(webgl, before, e.host);
       e.webglGrantedAt = now;
       e.webglChangedAt = now;
+      this.refitForRenderer(e);
     } catch {
       // No WebGL on this machine (or right now): the DOM renderer draws; ask again much later.
       e.webgl = null;
@@ -998,6 +1011,7 @@ class TerminalManager {
     e.webglChangedAt = now;
     e.webglLosses = nextLossCount(e.webglLosses, e.webglGrantedAt, now);
     e.webglBlockedUntil = now + webglBackoff(e.webglLosses);
+    this.refitForRenderer(e);
   }
 
   /**

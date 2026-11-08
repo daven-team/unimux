@@ -31,6 +31,17 @@ describe('frame budgets of terminal work', () => {
     expect(manager).toMatch(/fitted > 0 && performance\.now\(\) - started >= FIT_BUDGET_MS/);
   });
 
+  it('a renderer change (WebGL granted, given back or lost) fits the shown terminal again through the queue', () => {
+    const refit = manager.slice(manager.indexOf('  private refitForRenderer(e: Entry)'), manager.indexOf('  private refitForRenderer(e: Entry)') + 250);
+    expect(refit).toMatch(/if \(!e\.attachedTo \|\| !this\.windowShown\) return;/);
+    expect(refit).toMatch(/if \(this\.fitHolds > 0\) this\.heldFits\.add\(e\); else this\.queueFit\(e\);/);
+    for (const fn of ['private createWebgl(e: Entry', 'private releaseWebgl(e: Entry', 'private webglGone(e: Entry']) {
+      const start = manager.indexOf(`  ${fn}`);
+      const body = manager.slice(start, manager.indexOf('\n  }\n', start));
+      expect(body, fn).toMatch(/this\.refitForRenderer\(e\);/);
+    }
+  });
+
   it('the panel widths are not custom properties of .app (that restyled the whole grid at every move of an edge)', () => {
     expect(app).not.toMatch(/className="app" style=/);
     expect(app).toMatch(/className="app-width-scope" style=\{sidebarWidthVar\}/);
