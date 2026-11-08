@@ -24,11 +24,7 @@ use crate::store::{AccountsStore, ManagedAccount};
 const SECRET: &str = "fp-secret-123";
 
 fn ident(email: Option<&str>, uuid: Option<&str>) -> AccountIdentity {
-    AccountIdentity {
-        email: email.map(str::to_string),
-        account_uuid: uuid.map(str::to_string),
-        ..AccountIdentity::default()
-    }
+    AccountIdentity { email: email.map(str::to_string), account_uuid: uuid.map(str::to_string), ..AccountIdentity::default() }
 }
 
 struct Fake {
@@ -254,7 +250,10 @@ async fn rejects_invalid_and_unsupported_requests_without_spawning() {
     let m = manager(&fake);
     for (request, error) in [
         (json!({"provider": "claude", "target": {"type": "new"}}), "unsupported"),
-        (json!({"provider": "claude", "target": {"type": "account", "id": "123e4567-e89b-42d3-a456-426614174000"}}), "unsupported"),
+        (
+            json!({"provider": "claude", "target": {"type": "account", "id": "123e4567-e89b-42d3-a456-426614174000"}}),
+            "unsupported",
+        ),
         (json!({"provider": "codex", "target": {"type": "new"}}), "invalid request"),
         (json!({"provider": "x", "target": {"type": "main"}}), "invalid request"),
         (json!({"provider": "claude"}), "invalid request"),
@@ -280,7 +279,10 @@ async fn a_relogin_with_another_account_restores_the_card_and_reports_mismatch()
     run_success(&fake, &m, json!({"provider": "claude", "target": {"type": "account", "id": id}})).await;
     assert_eq!(fake.statuses(), vec![LoginStatus::Waiting, LoginStatus::Mismatch]);
     let state = fake.states.lock()[1].to_value();
-    assert_eq!(state, json!({"sessionId": state["sessionId"], "status": "mismatch", "email": "other@example.com", "expected": "old@example.com"}));
+    assert_eq!(
+        state,
+        json!({"sessionId": state["sessionId"], "status": "mismatch", "email": "other@example.com", "expected": "old@example.com"})
+    );
     assert_eq!(fake.restores.load(Ordering::SeqCst), 1);
     let record = fake.store.get(&id).unwrap();
     assert_eq!((record.custody, record.family), (Some(Custody::Foreign), Some(TokenFamily::Live)));
@@ -462,9 +464,9 @@ impl CodexLoginDeps for CodexFake {
     fn store(&self) -> &CodexAccountsStore {
         &self.store
     }
-    fn spawn_pty(&self, spec: PtySpec) -> Result<(), ()> {
+    fn spawn_pty(&self, spec: PtySpec) -> bool {
         self.spawned.lock().push(spec);
-        Ok(())
+        true
     }
     fn kill_pty(&self, _id: &str) {}
     fn fingerprint(&self, _dir: PathBuf) -> Fut<Result<Option<String>, ()>> {

@@ -125,7 +125,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | D5 | Postgres cursors and read-only | todo | | | | |
 | D8 | MySQL session, meta, edits | todo | | | | |
 | D10 | Redis writes, console, pattern ops, pub/sub | todo | | | | |
-| A4 | Login managers | todo | | | | |
+| A4 | Login managers | built, fast mode, not verified | 2026-11-08 | 2026-11-08 | | branch `tauri-pkg-A4`. unimux-accounts `login/`: `claude::LoginManager` (port of auth/login.ts: main / new / saved-card Claude logins and the main `codex login`, 1.5 s fingerprint polls, 1.5 s settle, 10 min timeout, 5 identity reads 1 s apart gated by `identityRewritten`, duplicate / mismatch / restore verdicts, 3 restore tries 2 s apart, parked restores with set-aside custody, `retryParkedRestores(wait)`, `holdsProfile`, undo of a cancelled re-login), `codex::CodexLoginManager` (codexLogin.ts: `codex login` in a saved card's CODEX_HOME, previous auth.json kept in memory and put back), `snapshot` (profileSnapshot.ts, under the profile lock and Claude Code's locks, zeroized), `creds` (Claude / Codex fingerprints, Codex identity, the macOS Keychain read with its 30 min failure cache). unimux-app `commands/accounts/login.rs`: the real deps (pty service spawn in `auth:<uuid>`, CLI detector env and `cliMissing`, `execText` for `claude auth status --json`, knownIdentities, beforeMainLogin through A3), `auth:start` (codex / claude dispatch, `loginBlock`, waits for `accounts_ready`, refused while quitting), `auth:cancel`, `auth:state` events, the login probes (`LoginProbes.codex_active` added for update:busy), the pty crash hook (`failActive`), the quit's dispose, `codex_accounts(ctx)` store, `set_usage_refresh` slot for A5. See "A4 open issues". |
 | A5 | Usage, auto-switch, limit alerts | todo | | | | |
 | M3 | Automation operations | todo | | | | |
 | U4 | CI and release pipeline | todo | | | | uses the signing secrets in CI only |
@@ -857,6 +857,14 @@ Review fixes (2026-11-07): `mysql_timeout_sql` (MariaDB) now prints `(ms / 1000)
 5. A reconcile that finds a `readLiveIdentity` error, a resync error or a read-only store behaves as 1.1.4; a store write error other than read-only (disk full) ends the reconcile with an error the poll ignores, as the TS throw did.
 6. PORTING partial: "skips the outgoing resync while a swap holds the slot ..." (the held slot is covered through `reconcile_when_idle` only) and the held case of "marks nothing for a cleared login of another identity ...". Not ported: "sets a second live record of the live account aside without a switchedOut notice", "resolves at once when the backup is already current", the `gateFamilyRefresh` case, the dead-login cases that go through the swap / usage paths (A2 / A5), the token-transport cases of B3's transport.
 7. macOS: not compile-checked for unimux-accounts (it depends on unimux-net, whose `ring` needs a C compiler for the Apple target here); `darwin` paths (no resync, refs without profiles) are unit-tested only through flags.
+
+### A4 (2026-11-08): login managers, open issues (fast mode)
+
+1. Built and unit-tested only (cargo fmt, clippy -D warnings and cargo test for unimux-accounts and unimux-app, one run). Not run: the real-app checks (verify-first-login-ui, verify-accounts-ui with a scratch home and fake CLI stubs), no review round, no run against a real `claude auth login` / `codex login`.
+2. A5 must: call `commands::accounts::login::logins(ctx).retry_parked_restores(Some(PARKED_RESTORE_WAIT))` before `ClaudeAccounts::before_poll`, pass `parked_ids()` to `panel_info`, call `set_usage_refresh` (until then a finished login refreshes nothing), reuse `codex_accounts(ctx)` for make main / remove Codex, and call `logins(ctx).codex.cancel_for(id)` / `claude.cancel_for(id)` in `accounts:removeCodex` / `accounts:remove` (A2 handlers).
+3. Deliberate differences: a spawn the pty service drops (stopped after too many crashes) answers `spawn` at once (1.1.4's ptyHost.spawn never failed synchronously and the login then timed out); the Codex card login is not failed by a pty crash (as 1.1.4: it runs until its timeout). A foreign window gets the router's MC_REFUSED instead of `{ok:false,error:'invalid request'}`.
+4. 1.1.4 ran on one JS thread; here the timers are tokio tasks and IPC calls come from any thread. Every step JS ran without an await in between runs under the session lock; races between a cancel and a finishing settle task are covered by the `ended` checks only (no stress test).
+5. macOS: not compile-checked (unimux-accounts depends on unimux-net / ring, see A3 item 7); the Keychain read (`/usr/bin/security`) and `profiles_supported = false` are untested.
 
 ### A6 (2026-11-07): GitHub sign-in, open issues
 

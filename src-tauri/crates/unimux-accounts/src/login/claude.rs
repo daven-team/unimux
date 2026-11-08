@@ -23,8 +23,7 @@ use super::{
     LoginTimings, Provider, PtySpec, dir_text, login_command, new_session_ids, same_dir,
 };
 use crate::identity::{
-    AccountIdentity, Custody, IdentityMatch, TokenFamily, compare_identity, custody_of, family_of, identity_fields,
-    is_account_id,
+    AccountIdentity, Custody, IdentityMatch, TokenFamily, compare_identity, custody_of, family_of, identity_fields, is_account_id,
 };
 use crate::reconcile::LiveBackupFailed;
 use crate::store::{AccountsStore, ManagedAccount, StoreError};
@@ -287,18 +286,19 @@ impl LoginManager {
                     return LoginStartResult::refused("spawn");
                 }
             }
-        } else if provider == Provider::Claude && target == LoginTarget::Main {
-            if let Err(error) = self.deps.before_main_login().await {
-                // No backup: the live login would be lost, so nothing starts. The card of the outgoing account is named.
-                self.end(&session);
-                return match error {
-                    BeforeMainError::Backup(e) if e.reason != "busy" => LoginStartResult::Refused {
-                        error: "backup",
-                        email: self.deps.store().live().and_then(|l| l.identity.email).filter(|e| !e.is_empty()),
-                    },
-                    _ => LoginStartResult::refused("busy"),
-                };
-            }
+        } else if provider == Provider::Claude
+            && target == LoginTarget::Main
+            && let Err(error) = self.deps.before_main_login().await
+        {
+            // No backup: the live login would be lost, so nothing starts. The card of the outgoing account is named.
+            self.end(&session);
+            return match error {
+                BeforeMainError::Backup(e) if e.reason != "busy" => LoginStartResult::Refused {
+                    error: "backup",
+                    email: self.deps.store().live().and_then(|l| l.identity.email).filter(|e| !e.is_empty()),
+                },
+                _ => LoginStartResult::refused("busy"),
+            };
         }
         if session.ended() {
             return LoginStartResult::refused("cancelled");
@@ -610,7 +610,10 @@ impl LoginManager {
         // The live login has no record id: it is compared too (a re-login of a card skips only that card itself).
         let same_account: Vec<&KnownIdentity> = known
             .iter()
-            .filter(|k| (own.is_none() || k.record_id.as_deref() != own) && compare_identity(&k.identity, &identity) == IdentityMatch::Same)
+            .filter(|k| {
+                (own.is_none() || k.record_id.as_deref() != own)
+                    && compare_identity(&k.identity, &identity) == IdentityMatch::Same
+            })
             .collect();
         // Only a login the app really holds is a duplicate: the signed-in live login or a saved card with a login in it.
         let holder = same_account.iter().find(|k| k.live && !k.empty).or_else(|| same_account.iter().find(|k| !k.empty));

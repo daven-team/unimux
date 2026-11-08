@@ -20,7 +20,8 @@ use crate::identity::IdentityMatch;
 /// The seams of the Codex login manager (`CodexLoginDeps`).
 pub trait CodexLoginDeps: Send + Sync + 'static {
     fn store(&self) -> &CodexAccountsStore;
-    fn spawn_pty(&self, spec: PtySpec) -> Result<(), ()>;
+    /// Starts the login terminal; false when it could not be started.
+    fn spawn_pty(&self, spec: PtySpec) -> bool;
     fn kill_pty(&self, id: &str);
     /// Fingerprint (never the token) of the profile's auth.json login, `None` when there is none.
     fn fingerprint(&self, dir: PathBuf) -> Fut<Result<Option<String>, ()>>;
@@ -177,7 +178,7 @@ impl CodexLoginManager {
             ("OPENAI_API_KEY".to_string(), String::new()),
             ("CODEX_API_KEY".to_string(), String::new()),
         ];
-        if self.deps.spawn_pty(PtySpec { id: pty_id.clone(), env, command: CODEX_PROFILE_LOGIN.to_string() }).is_err() {
+        if !self.deps.spawn_pty(PtySpec { id: pty_id.clone(), env, command: CODEX_PROFILE_LOGIN.to_string() }) {
             self.end(&session);
             self.discard(&session);
             return LoginStartResult::refused("spawn");
@@ -251,18 +252,14 @@ impl CodexLoginManager {
         }
         // Codex writes the file once; a short pause lets the write settle before it is read.
         let s = session.clone();
-        self.later(
-            session,
-            self.t.settle,
-            move |me| {
-                async move {
-                    if me.finalize(&s).await.is_err() {
-                        me.fail(&s, LoginError::Identity).await;
-                    }
+        self.later(session, self.t.settle, move |me| {
+            async move {
+                if me.finalize(&s).await.is_err() {
+                    me.fail(&s, LoginError::Identity).await;
                 }
-                .boxed()
-            },
-        );
+            }
+            .boxed()
+        });
         true
     }
 
@@ -315,8 +312,7 @@ impl CodexLoginManager {
             }
             Target::Account(id) => {
                 let record = store.get(id);
-                let Some(record) =
-                    record.filter(|r| compare_codex_identity(&identity, &r.identity) != IdentityMatch::Different)
+                let Some(record) = record.filter(|r| compare_codex_identity(&identity, &r.identity) != IdentityMatch::Different)
                 else {
                     let mut state = LoginState::new(&session.id, LoginStatus::Mismatch);
                     state.email = email;
@@ -376,12 +372,7 @@ impl CodexLoginManager {
     }
 
     /// A timer of the session; it forgets its own handle when it fires, so ending the session never aborts it half way.
-    fn later(
-        &self,
-        session: &Arc<Session>,
-        after: std::time::Duration,
-        run: impl FnOnce(Arc<Self>) -> Fut<()> + Send + 'static,
-    ) {
+    fn later(&self, session: &Arc<Session>, after: std::time::Duration, run: impl FnOnce(Arc<Self>) -> Fut<()> + Send + 'static) {
         let key = self.seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let me = self.me();
         let s = session.clone();
