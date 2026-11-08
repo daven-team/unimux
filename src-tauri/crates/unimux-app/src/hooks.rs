@@ -214,7 +214,6 @@ impl Hooks {
     }
 
     /// The renderer's status of a live cell (`cell:runtime`: `hookWatch.status`); the caller checks the cell exists and runs.
-    #[allow(dead_code, reason = "called by cell:runtime (P3 / W7)")]
     pub fn cell_status(&self, cell: &str, status: &str, hooked: bool) {
         self.watch.status(cell, status, hooked);
     }
@@ -307,6 +306,14 @@ fn watch_hooks(ctx: &Arc<AppContext>) {
         };
         if find_cell(&ctx.state.get(), cell).is_some() {
             ctx.hooks.watch.hook(cell, event);
+        }
+    });
+    // index.ts cell:runtime: `hookWatch.status(cellId, status, hooked === true)` for a cell of a grid whose terminal runs
+    // (commands::cells checks both before the observers hear the report).
+    let weak: Weak<AppContext> = Arc::downgrade(ctx);
+    ctx.cells.on_runtime("hookWatch", move |report| {
+        if let Some(ctx) = weak.upgrade() {
+            ctx.hooks.cell_status(&report.cell, &report.status, report.hooked);
         }
     });
     let weak: Weak<AppContext> = Arc::downgrade(ctx);
@@ -482,6 +489,8 @@ mod tests {
         std::fs::write(dir.path().join(FALLBACK_FILE), r#"{"claudeVersion":"2.1.300"}"#).unwrap();
         let ctx = context(dir.path(), one_claude_cell());
         watch_hooks(&ctx);
+        // cell:runtime feeds the watch (index.ts `hookWatch.status`).
+        assert!(ctx.cells.report()["hooks"]["runtime"].as_array().unwrap().contains(&serde_json::json!("hookWatch")));
         let cwd = dir.path().display().to_string();
         assert_eq!(stop_type(&ctx.hooks.claude_spawn("c1", Some("2.1.300"), &[], &cwd).unwrap()), "command");
         assert_eq!(stop_type(&ctx.hooks.claude_spawn("c1", Some("2.1.301"), &[], &cwd).unwrap()), "http");
