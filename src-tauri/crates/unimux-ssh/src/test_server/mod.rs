@@ -148,7 +148,16 @@ pub struct TestServer {
     host_keys: Vec<String>,
     attempts: AttemptLog,
     exec_log: Arc<Mutex<Vec<String>>>,
+    shared: Arc<Shared>,
     task: JoinHandle<()>,
+}
+
+/// One `direct-tcpip` request as the server saw it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Forward {
+    pub host: String,
+    pub port: u32,
+    pub accepted: bool,
 }
 
 impl TestServer {
@@ -175,22 +184,53 @@ impl TestServer {
         });
         let attempts: AttemptLog = Arc::new(Mutex::new(Vec::new()));
         let exec_log = Arc::new(Mutex::new(Vec::new()));
-        let shared = Arc::new(Shared { config, attempts: attempts.clone(), exec_log: exec_log.clone() });
+        let shared = Arc::new(Shared {
+            config,
+            attempts: attempts.clone(),
+            exec_log: exec_log.clone(),
+            forwards: Mutex::new(Vec::new()),
+            conns: Mutex::new(Vec::new()),
+            killers: Mutex::new(Vec::new()),
+        });
+        let server_shared = shared.clone();
         let task = tokio::spawn(async move {
             while let Ok((socket, peer)) = listener.accept().await {
                 if !peer.ip().is_loopback() {
                     continue;
                 }
+                // A second handle of the socket lets a test cut the connection like a destroyed socket.
+                let Ok(socket) = socket.into_std() else { continue };
+                let Ok(killer) = socket.try_clone() else { continue };
+                let Ok(socket) = tokio::net::TcpStream::from_std(socket) else { continue };
+                shared.killers.lock().push(killer);
                 let handler = Conn { shared: shared.clone(), channels: HashMap::new(), keyboard_round: 0 };
                 let cfg = russh_config.clone();
-                tokio::spawn(async move {
+                let conn = tokio::spawn(async move {
                     if let Ok(session) = russh::server::run_stream(cfg, socket, handler).await {
                         let _ = session.await;
                     }
                 });
+                shared.conns.lock().push(conn);
             }
         });
-        Ok(TestServer { addr, host_keys, attempts, exec_log, task })
+        Ok(TestServer { addr, host_keys, attempts, exec_log, shared: server_shared, task })
+    }
+
+    /// Every `direct-tcpip` request so far: the target and whether it was accepted.
+    pub fn forwards(&self) -> Vec<Forward> {
+        self.shared.forwards.lock().clone()
+    }
+
+    /// The SSH connections that are still open.
+    pub fn connections(&self) -> usize {
+        self.shared.conns.lock().iter().filter(|c| !c.is_finished()).count()
+    }
+
+    /// Cuts every open connection like a destroyed socket (no SSH goodbye); the server goes on accepting new ones.
+    pub fn drop_connections(&self) {
+        for socket in self.shared.killers.lock().drain(..) {
+            let _ = socket.shutdown(std::net::Shutdown::Both);
+        }
     }
 
     pub fn port(&self) -> u16 {
@@ -220,6 +260,7 @@ impl TestServer {
 impl Drop for TestServer {
     fn drop(&mut self) {
         self.task.abort();
+        self.drop_connections();
     }
 }
 
@@ -227,6 +268,9 @@ struct Shared {
     config: TestServerConfig,
     attempts: AttemptLog,
     exec_log: Arc<Mutex<Vec<String>>>,
+    forwards: Mutex<Vec<Forward>>,
+    conns: Mutex<Vec<JoinHandle<()>>>,
+    killers: Mutex<Vec<std::net::TcpStream>>,
 }
 
 impl Shared {
@@ -361,11 +405,23 @@ impl Handler for Conn {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let loopback = matches!(host_to_connect, "127.0.0.1" | "localhost" | "::1");
-        let Ok(port) = u16::try_from(port_to_connect) else { return Ok(()) };
+        let log = |accepted: bool| {
+            let forward = Forward { host: host_to_connect.to_string(), port: port_to_connect, accepted };
+            self.shared.forwards.lock().push(forward);
+        };
+        let Ok(port) = u16::try_from(port_to_connect) else {
+            log(false);
+            return Ok(());
+        };
         if !self.shared.config.forwarding || !loopback {
+            log(false);
             return Ok(());
         }
-        let Ok(mut target) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await else { return Ok(()) };
+        let Ok(mut target) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await else {
+            log(false);
+            return Ok(());
+        };
+        log(true);
         reply.accept().await;
         tokio::spawn(async move {
             let mut stream = channel.into_stream();

@@ -30,3 +30,5 @@ libc.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# tests/launch_reset.rs runs the launch line unimux-agents builds in real shells
+unimux-agents.workspace = true

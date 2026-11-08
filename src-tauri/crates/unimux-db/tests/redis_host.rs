@@ -347,6 +347,8 @@ async fn connects_with_the_1_1_4_sequence_and_reconnects_with_the_ioredis_handsh
     let r = h.op(ID, json!({ "kind": "select", "index": 99 })).await;
     assert_eq!(r["error"], "dbNoDatabase");
     assert_eq!(r["server"], json!({ "message": "ERR DB index is out of range", "code": "ERR" }));
+    // A Postgres operation on a Redis session is refused.
+    assert_eq!(h.host.request(ID, json!({ "op": "schemas" }), None).await, json!({ "ok": false, "error": "invalid" }));
 
     // a drop: reported as reconnecting, then connected again on the DB the session had selected
     s.clear_log();

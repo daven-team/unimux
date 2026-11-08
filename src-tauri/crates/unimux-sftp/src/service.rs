@@ -495,10 +495,13 @@ mod tests {
     use std::collections::HashMap;
 
     const HOST: &str = "00000000-0000-4000-8000-000000000001";
+    const OTHER: &str = "00000000-0000-4000-8000-000000000002";
 
     #[derive(Default)]
     struct Log {
         connects: Vec<String>,
+        /// Every login the coordinator was asked for: session id, host id and the explicit sudo flag.
+        logins: Vec<(String, String, bool)>,
         ended: Vec<String>,
         forwarded: Vec<String>,
         disconnects: Vec<String>,
@@ -515,8 +518,9 @@ mod tests {
     }
 
     impl SftpCoordinator for Fake {
-        fn connect_session(&self, id: &str, host: &str, _sudo: bool) -> BoxFuture<'static, Result<(), SshErrorCode>> {
+        fn connect_session(&self, id: &str, host: &str, sudo: bool) -> BoxFuture<'static, Result<(), SshErrorCode>> {
             self.log.lock().connects.push(id.to_string());
+            self.log.lock().logins.push((id.to_string(), host.to_string(), sudo));
             if let Some(code) = self.refuse {
                 return Box::pin(async move { Err(code) });
             }
@@ -607,6 +611,11 @@ mod tests {
     }
 
     fn setup_with(refuse: Option<SshErrorCode>) -> Setup {
+        setup_full(refuse, &[])
+    }
+
+    fn setup_full(refuse: Option<SshErrorCode>, sudo_hosts: &[&'static str]) -> Setup {
+        let sudo_hosts: Vec<String> = sudo_hosts.iter().map(|h| h.to_string()).collect();
         let log = Arc::new(Mutex::new(Log::default()));
         let timers = Arc::new(ManualTimers::default());
         let deferred: Deferred = Arc::new(Mutex::new(Vec::new()));
@@ -617,8 +626,8 @@ mod tests {
         let service = SftpService::new(SftpDeps {
             coordinator: coordinator.clone(),
             host: Arc::new(Host { log: log.clone(), realpaths }),
-            host_exists: Arc::new(|id| id == HOST),
-            host_sudo: Arc::new(|_| false),
+            host_exists: Arc::new(|id| id == HOST || id == OTHER),
+            host_sudo: Arc::new(move |id| sudo_hosts.iter().any(|h| h == id)),
             events: Arc::new(Events(log.clone())),
             timers: timers.clone(),
             now: Arc::new(|| 5),
@@ -791,5 +800,129 @@ mod tests {
         flush().await;
         let keys: Vec<String> = f.last_state().as_object().unwrap().keys().cloned().collect();
         assert_eq!(keys, ["id", "hostId", "state", "phase", "since", "plain", "path"]);
+    }
+
+    // ---------- the remote editor tabs (test/editor-source.test.ts, "SFTP sessions of remote editor tabs") ----------
+
+    impl Setup {
+        /// Connects a session of `host` and reports it connected (the `connect` helper of the TS test).
+        async fn connect_to(&self, host: &str, plain: bool) -> String {
+            let id = session_id(&self.service.connect(host, None, plain));
+            self.run_deferred().await;
+            self.service.on_coordinator_session(&json!({ "cellId": id, "hostId": host, "phase": "connected", "since": 2 }));
+            flush().await;
+            id
+        }
+    }
+
+    #[tokio::test]
+    async fn a_host_with_unsaved_remote_tabs_keeps_its_session_while_the_view_is_closed() {
+        let f = setup_with(None);
+        f.service.view_opened(None);
+        let a = f.connect_to(HOST, false).await;
+        let b = f.connect_to(OTHER, false).await;
+        f.service.pin_hosts(vec![HOST.into()], "main");
+        f.service.view_closed();
+        assert_eq!(f.timers.live(), vec![120_000]);
+        f.timers.fire(120_000);
+        assert_eq!(f.log.lock().disconnects, vec![b]);
+        assert_eq!(f.service.ids(), vec![a.clone()]);
+        // Saved (no unsaved tab left): the idle disconnect comes back.
+        f.service.pin_hosts(vec![], "main");
+        assert_eq!(f.timers.live(), vec![120_000]);
+        f.timers.fire(120_000);
+        assert!(f.service.ids().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_reloaded_renderer_reports_its_unsaved_tabs_again() {
+        let f = setup_with(None);
+        let a = f.connect_to(HOST, false).await;
+        f.service.pin_hosts(vec![HOST.into()], "main");
+        assert!(f.timers.live().is_empty());
+        f.service.renderer_gone("main");
+        assert_eq!(f.timers.live().len(), 1, "the pins are dropped until the new page reports them");
+        f.service.pin_hosts(vec![HOST.into()], "main");
+        assert!(f.timers.live().is_empty());
+        assert_eq!(f.service.ids(), vec![a]);
+    }
+
+    #[tokio::test]
+    async fn a_sudo_session_is_never_kept_by_a_pin() {
+        let f = setup_full(None, &[HOST]);
+        let root = f.connect_to(HOST, false).await;
+        let plain = f.connect_to(HOST, true).await;
+        f.service.pin_hosts(vec![HOST.into()], "main");
+        assert_eq!(f.timers.live(), vec![120_000]);
+        f.timers.fire(120_000);
+        assert_eq!(f.log.lock().disconnects, vec![root]);
+        assert_eq!(f.service.ids(), vec![plain]);
+    }
+
+    #[tokio::test]
+    async fn while_the_view_is_open_only_the_session_it_shows_is_exempt_from_the_idle_disconnect() {
+        let f = setup_with(None);
+        let a = f.connect_to(HOST, false).await;
+        let b = f.connect_to(OTHER, false).await;
+        f.service.view_opened(Some(b.clone()));
+        assert_eq!(f.timers.live(), vec![120_000]);
+        f.timers.fire(120_000);
+        assert_eq!(f.service.ids(), vec![b.clone()]);
+        // The view switches to another session: the old one starts counting down.
+        let c = f.connect_to(HOST, false).await;
+        f.service.view_opened(Some(c.clone()));
+        assert_eq!(f.timers.live(), vec![120_000]);
+        f.timers.fire(120_000);
+        assert_eq!(f.service.ids(), vec![c.clone()]);
+        assert_ne!(a, c);
+    }
+
+    #[tokio::test]
+    async fn sudo_is_decided_once_and_editor_sessions_are_marked_plain() {
+        let f = setup_full(None, &[HOST]);
+        let root = f.connect_to(HOST, false).await;
+        let plain = f.connect_to(HOST, true).await;
+        let other = f.connect_to(OTHER, false).await;
+        assert_eq!(
+            f.log.lock().logins,
+            vec![
+                (root.clone(), HOST.to_string(), true),
+                (plain.clone(), HOST.to_string(), false),
+                (other, OTHER.to_string(), false)
+            ]
+        );
+        let last = |id: &str| f.log.lock().states.iter().rev().find(|s| s["id"] == json!(id)).cloned().unwrap();
+        let r = last(&root);
+        assert_eq!((r["state"].as_str(), r["sudo"].as_bool(), r.get("plain")), (Some("connected"), Some(true), None));
+        let p = last(&plain);
+        assert_eq!((p["state"].as_str(), p["plain"].as_bool(), p.get("sudo")), (Some("connected"), Some(true), None));
+        let snapshot = f.service.snapshot();
+        let in_snapshot = snapshot["sessions"].as_array().unwrap().iter().find(|s| s["id"] == json!(plain)).cloned().unwrap();
+        assert_eq!(in_snapshot["plain"], json!(true));
+    }
+
+    #[tokio::test]
+    async fn the_editor_channels_take_absolute_remote_paths_well_formed_saves_and_host_ids_only() {
+        let f = setup_with(None);
+        let id = f.connect_to(HOST, false).await;
+        let sid = json!(id);
+        let invalid = json!({ "ok": false, "error": "invalid" });
+        let save = json!({ "text": "a", "baseline": "b", "encoding": "utf-8", "expected": { "size": 1, "mtimeMs": 2 } });
+        assert_eq!(crate::ipc::read_file(&f.service, &sid, &json!("etc/x")).await, invalid);
+        assert_eq!(crate::ipc::read_file(&f.service, &json!("nope"), &json!("/etc/x")).await, invalid);
+        assert_eq!(crate::ipc::read_file(&f.service, &sid, &json!("/etc/x")).await["ok"], json!(true));
+        let mut cp1250 = save.clone();
+        cp1250["encoding"] = json!("cp1250");
+        assert_eq!(crate::ipc::write_file(&f.service, &sid, &json!("/etc/x"), &cp1250).await, invalid);
+        assert_eq!(crate::ipc::write_file(&f.service, &sid, &json!("C:\\x"), &save).await, invalid);
+        let mut extra = save.clone();
+        extra["extra"] = json!("dropped");
+        assert_eq!(crate::ipc::write_file(&f.service, &sid, &json!("/etc/x"), &extra).await["ok"], json!(true));
+        assert_eq!(f.log.lock().requests.last().cloned(), Some((id, "writeFile".to_string())));
+        assert_eq!(crate::ipc::editor_save(&extra), crate::ipc::editor_save(&save), "unknown keys are dropped");
+        // A pin list that is not host ids is ignored.
+        crate::ipc::pin_hosts(&f.service, &json!(["not-a-uuid"]), "main");
+        f.service.view_closed();
+        assert_eq!(f.timers.live().len(), 1);
     }
 }

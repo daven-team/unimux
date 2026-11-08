@@ -650,4 +650,46 @@ mod tests {
         assert!(is_part_name("a.unimux-part") && !is_part_name(".unimux-part"));
         assert!(!valid_editor_text("a\u{1}") && valid_editor_text("a\tb\u{c}"));
     }
+
+    /// The vectors of test/editor-source.test.ts ("opens text up to the editor limit ...", "tells text from binary ...",
+    /// "compares stamps exactly ...").
+    #[test]
+    fn the_editor_source_vectors_of_1_1_4() {
+        assert_eq!(remote_open_plan("a.txt", EDITOR_TEXT_BYTES), OpenPlan::Text);
+        assert_eq!(remote_open_plan("a.txt", EDITOR_TEXT_BYTES + 1), OpenPlan::TooLarge);
+        assert_eq!(remote_open_plan("Makefile", 10), OpenPlan::Text);
+        assert_eq!(remote_open_plan("photo.JPG", EDITOR_IMAGE_BYTES), OpenPlan::Image("image/jpeg"));
+        assert_eq!(remote_open_plan("photo.png", EDITOR_IMAGE_BYTES + 1), OpenPlan::TooLarge);
+        assert_eq!(remote_open_plan("disk.iso", 4 * 1024 * 1024 * 1024), OpenPlan::TooLarge);
+
+        assert_eq!(decode_text(&[0x61, 0, 0x62]), None);
+        assert_eq!(decode_text(&[0xc3, 0x28]), None, "invalid UTF-8");
+        assert_eq!(decode_text("a\u{1}b".as_bytes()), None);
+        assert_eq!(decode_text("zażółć\r\n".as_bytes()), Some(("zażółć\r\n".into(), "utf-8")));
+        assert_eq!(decode_text(b"\xef\xbb\xbfx"), Some(("x".into(), "utf-8-bom")));
+        assert_eq!(encode_text("y", "x", "utf-8-bom"), [0xef, 0xbb, 0xbf, 0x79]);
+        let le = encode_text("hi\n", "a\r\n", "utf-16le");
+        assert_eq!(le, [0xff, 0xfe, 0x68, 0, 0x69, 0, 0x0d, 0, 0x0a, 0]);
+        assert_eq!(decode_text(&le), Some(("hi\r\n".into(), "utf-16le")));
+        assert_eq!(decode_text(&encode_text("ą", "", "utf-16be")), Some(("ą".into(), "utf-16be")));
+        assert_eq!(restore_line_endings("a\nb\nc\n", "x\r\ny\nz"), "a\r\nb\nc\r\n");
+        assert_eq!(restore_line_endings("a\nb", ""), "a\nb");
+        assert!(valid_editor_text("ok\ttext\n"));
+        assert!(!valid_editor_text("bad\u{0}"));
+
+        assert!(same_stamp((1.0, 2.0), (1.0, 2.0)));
+        assert!(!same_stamp((1.0, 2.0), (1.0, 3.0)));
+        assert!(!same_stamp((2.0, 2.0), (1.0, 2.0)));
+        let hash = Some("a".repeat(64));
+        let stamp = |size: f64, read_at: f64, hash: Option<String>| RemoteStamp {
+            size,
+            mtime_ms: 10_000.0,
+            hash,
+            read_at: Some(read_at),
+        };
+        assert!(needs_hash_check(&stamp(10_000_000.0, 11_500.0, hash.clone())));
+        assert!(!needs_hash_check(&stamp(10_000_000.0, 60_000.0, hash.clone())));
+        assert!(needs_hash_check(&stamp(100.0, 60_000.0, hash)));
+        assert!(!needs_hash_check(&stamp(100.0, 10_000.0, None)));
+    }
 }
