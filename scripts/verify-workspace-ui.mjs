@@ -2,10 +2,13 @@
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { appVersion } from './real-app.mjs';
+// Every `.file-tab` below is a code file's tab: the DB, Redis and note tabs share that class, and capture-readme opens a DB
+// table and its connection before this check runs.
 export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, project, screenshot }) {
   // The rail tile of the open panel collapses it, so only click when Files is not the shown panel yet.
   const openFilesPanel = async () => { if (!(await evaluate("document.querySelector('#files-view')?.getAttribute('aria-selected') === 'true'"))) await click('#files-view'); };
-  const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+  const version = appVersion();
   await until(() => evaluate('Array.from(document.querySelectorAll(".brand-mark img")).length > 0 && Array.from(document.querySelectorAll(".brand-mark img")).every(img => img.complete && img.naturalWidth === 64 && img.naturalHeight === 64)'), 'bundled brand icon loads at its intended resolution');
   assert.equal(await evaluate('document.querySelectorAll(".titlebar .tab").length'), 0);
   assert.equal(await evaluate('document.querySelectorAll(".workspace-tabs .tab").length >= 2'), true);
@@ -67,7 +70,7 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
   await until(() => evaluate('!!document.querySelector(".file-entry[title=" + JSON.stringify("src/catalog.mjs") + "]")'), 'expanded source tree');
   await click('.file-entry[title="src/catalog.mjs"]');
   await until(() => evaluate('!!document.querySelector(".file-editor .cm-content")'), 'editor');
-  assert.equal(await evaluate('!!document.querySelector(".grid-tab .tab-type-icon svg") && !!document.querySelector(".file-tab .tab-type-icon svg")'), true);
+  assert.equal(await evaluate('!!document.querySelector(".grid-tab .tab-type-icon svg") && !!document.querySelector(".file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab) .tab-type-icon svg")'), true);
   assert.ok(await evaluate('[...document.querySelectorAll(".cm-lineNumbers .cm-gutterElement")].some(el => el.textContent === "1")'), 'line numbers');
   assert.ok(await evaluate('new Set([...document.querySelectorAll(".cm-line span")].map(el => getComputedStyle(el).color)).size >= 3'), 'syntax colors');
   assert.ok(await evaluate('(() => { const toolbar = document.querySelector(".file-editor-toolbar"); const centers = [...toolbar.children].map(el => { const r = el.getBoundingClientRect(); return r.y+r.height/2; }); return Math.max(...centers)-Math.min(...centers) < 1; })()'), 'aligned editor toolbar');
@@ -133,8 +136,8 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
     }
     if (label === 'Agents') await screenshot('settings-profiles');
   }
-  await click('.file-tab');
-  await until(() => evaluate('!!document.querySelector(".file-tab.active") && !!document.querySelector(".file-editor .cm-content") && !document.querySelector(".settings-page")?.getClientRects().length'), 'return from settings to file');
+  await click('.file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab)');
+  await until(() => evaluate('!!document.querySelector(".file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab).active") && !!document.querySelector(".file-editor .cm-content") && !document.querySelector(".settings-page")?.getClientRects().length'), 'return from settings to file');
   await openSettings();
   assert.equal(await evaluate('document.querySelector(".settings-content h2").textContent'), sectionLabels.at(-1), 'settings remembers its section after returning from file');
   await evaluate('document.querySelector(".grid-tab").dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }))');
@@ -145,12 +148,12 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
   await click('.settings-tab .x');
   await until(() => evaluate('!document.querySelector(".settings-tab") && !!document.querySelector(".grid-tab.active")'), 'closing settings restores grid');
   assert.deepEqual(await visualCards(), movedCards.filter(id => id !== 'settings'), 'closing settings preserves the other card positions');
-  await click('.file-tab');
+  await click('.file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab)');
   await until(() => evaluate('!!document.querySelector(".file-editor .cm-content")'), 'return to editor after settings checks');
   const gridTabsBeforeClose = await evaluate('document.querySelectorAll(".grid-tab").length');
   await openSettings();
   await key('W', 'KeyW', { ctrlKey: process.platform !== 'darwin', metaKey: process.platform === 'darwin', shiftKey: true });
-  await until(() => evaluate('!document.querySelector(".settings-tab") && !!document.querySelector(".file-tab.active") && !!document.querySelector(".file-editor .cm-content")'), 'settings close shortcut restores file');
+  await until(() => evaluate('!document.querySelector(".settings-tab") && !!document.querySelector(".file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab).active") && !!document.querySelector(".file-editor .cm-content")'), 'settings close shortcut restores file');
   assert.equal(await evaluate('document.querySelectorAll(".grid-tab").length'), gridTabsBeforeClose, 'closing settings does not close a background grid');
   const path = join(project, 'src', 'catalog.mjs');
   const original = readFileSync(path, 'utf8');
@@ -162,15 +165,15 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
     await cdp('Input.insertText', { text });
   };
   await setText(original + '\n// Saved from workspace smoke\n');
-  await until(() => evaluate('!!document.querySelector(".file-dirty")'), 'dirty marker');
+  await until(() => evaluate('!!document.querySelector(".file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab) .file-dirty")'), 'dirty marker');
   await key('s', 'KeyS', { ctrlKey: process.platform !== 'darwin', metaKey: process.platform === 'darwin' });
   await until(() => readFileSync(path, 'utf8').includes('Saved from workspace smoke'), 'editor persisted save');
-  await until(() => evaluate('!document.querySelector(".file-dirty")'), 'saved marker');
+  await until(() => evaluate('!document.querySelector(".file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab) .file-dirty")'), 'saved marker');
   await setText(original + '\n// Undo probe\n');
   await key('z', 'KeyZ', { ctrlKey: process.platform !== 'darwin', metaKey: process.platform === 'darwin' });
   await until(() => evaluate('!document.querySelector(".cm-content").textContent.includes("Undo probe")'), 'editor undo');
   await setText(original + '\n// Unsaved protected draft\n');
-  await click('.file-tab .x');
+  await click('.file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab) .x');
   await until(() => evaluate('!!document.querySelector(".overlay")'), 'styled dirty close dialog');
   await click('.modal-foot button', 'Cancel');
   assert.equal(await evaluate('!!document.querySelector(".file-editor .cm-content")'), true);
@@ -181,17 +184,20 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
   await evaluate('window.__workspaceReloadProbe = true');
   await cdp('Page.reload');
   await until(async () => {
-    try { return await evaluate('!window.__workspaceReloadProbe && !!window.mc && !!document.querySelector(".file-tab .file-dirty")'); }
+    try { return await evaluate('!window.__workspaceReloadProbe && !!window.mc && !!document.querySelector(".file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab) .file-dirty")'); }
     catch { return false; } // The old JavaScript context disappears during reload.
   }, 'restored draft after reload');
-  assert.deepEqual(await visualCards(), movedCards.filter(id => id !== 'settings'), 'mixed card order survives reload');
-  await click('.file-tab');
+  // A reload brings back the grids and the drafts only (files.ts restoreDrafts): a Redis tab (capture-readme opens one)
+  // keeps no draft, so it does not come back.
+  assert.deepEqual(await visualCards(), movedCards.filter(id => id !== 'settings' && !id.startsWith('file:["redis"')), 'mixed card order survives reload');
+  await click('.file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab)');
   await until(() => evaluate('document.querySelector(".cm-content")?.textContent.includes("Unsaved protected draft")'), 'draft text restored');
-  await click('.file-tab .x');
+  await click('.file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab) .x');
   await until(() => evaluate('!!document.querySelector(".overlay")'), 'discard dialog');
   await click('.modal-foot button', 'Discard');
-  await until(() => evaluate('!document.querySelector(".file-tab")'), 'file close returns to grid');
-  assert.equal(await evaluate('document.querySelector(".terminal-workspace").style.display'), 'flex');
+  await until(() => evaluate('!document.querySelector(".file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab)")'), 'file close returns to grid');
+  // Back to the grid, unless a DB tab (capture-readme opens some) is the neighbour that takes over.
+  if (!(await evaluate('!!document.querySelector(".file-tab.active")'))) assert.equal(await evaluate('document.querySelector(".terminal-workspace").style.display'), 'flex');
   await openFilesPanel();
   await until(() => evaluate(`!!document.querySelector('.file-entry[title="README.md"]')`), 'Markdown file in project explorer');
   await click('.file-entry[title="README.md"]');
@@ -205,7 +211,7 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
   assert.ok(await evaluate('(() => { const viewport = document.querySelector(".markdown-preview-scroll").getBoundingClientRect(); const target = document.querySelector("#markdown-project-checks").getBoundingClientRect(); return target.top >= viewport.top && target.top < viewport.bottom && document.querySelector(".file-editor").getAttribute("aria-label") === "README.md"; })()'), 'Markdown fragment navigates inside preview');
   await click('.markdown-preview a[href="src/catalog.mjs"]');
   await until(() => evaluate('document.querySelector(".file-editor")?.getAttribute("aria-label") === "src/catalog.mjs" && !!document.querySelector(".cm-content")'), 'relative Markdown link opens project source');
-  await click('.file-tab[title^="README.md"]');
+  await click('.file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab)[title^="README.md"]');
   await until(() => evaluate('!!document.querySelector(".markdown-preview")'), 'return to Markdown preview');
   await click('.markdown-view-toggle button', 'Edit source');
   await until(() => evaluate('!!document.querySelector(".file-editor .cm-content")'), 'Markdown source toggle');
@@ -213,18 +219,18 @@ export async function verifyWorkspaceUI({ cdp, evaluate, click, key, until, proj
   const readmePath = join(project, 'README.md');
   const readmeOriginal = readFileSync(readmePath, 'utf8');
   await setText(readmeOriginal + '\n## Unsaved preview update\n\nThis draft is visible before saving.\n');
-  await until(() => evaluate(`!!document.querySelector('.file-tab[title^="README.md"] .file-dirty')`), 'Markdown source creates protected draft');
+  await until(() => evaluate(`!!document.querySelector('.file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab)[title^="README.md"] .file-dirty')`), 'Markdown source creates protected draft');
   await click('.markdown-view-toggle button', 'Preview');
   await until(() => evaluate('document.querySelector("#markdown-unsaved-preview-update")?.textContent === "Unsaved preview update"'), 'Markdown preview reflects unsaved source');
   assert.equal(readFileSync(readmePath, 'utf8'), readmeOriginal, 'preview leaves draft unsaved on disk');
-  await click('.file-tab[title^="README.md"] .x');
+  await click('.file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab)[title^="README.md"] .x');
   await until(() => evaluate('!!document.querySelector(".overlay")'), 'Markdown preview protects draft on close');
   await click('.modal-foot button', 'Cancel');
   await until(() => evaluate('!document.querySelector(".overlay") && !!document.querySelector("#markdown-unsaved-preview-update")'), 'cancel preserves Markdown preview draft');
-  await click('.file-tab[title^="README.md"] .x');
+  await click('.file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab)[title^="README.md"] .x');
   await until(() => evaluate('!!document.querySelector(".overlay")'), 'Markdown discard confirmation');
   await click('.modal-foot button', 'Discard');
-  await until(() => evaluate(`!document.querySelector('.file-tab[title^="README.md"]')`), 'Markdown draft discarded');
+  await until(() => evaluate(`!document.querySelector('.file-tab:not(.db-tab-strip):not(.redis-strip-tab):not(.note-strip-tab)[title^="README.md"]')`), 'Markdown draft discarded');
   assert.equal(readFileSync(readmePath, 'utf8'), readmeOriginal, 'discard keeps original Markdown file');
   console.log('Workspace UI verified: settings tab/sections/grid/file navigation, aligned snippet empty state, project names and add placement, footer version, distinct grid/file tabs, aligned toolbar, line numbers, syntax colors, undo, project dragging, update menu, neutral resize cleanup, editor save/conflict/close and draft recovery, safe Markdown rendering, fragment/project links, source/preview toggles and draft protection.');
 }

@@ -193,7 +193,10 @@ watcher.stdout.on('data', (chunk) => {
     for (const p of list) {
       names.set(p.ProcessId, p.Name);
       if (ours.has(p.ProcessId)) {
-        const s = seen.get(p.ProcessId) ?? { name: p.Name, parent: p.ParentProcessId, first: now };
+        // Windows reuses pids quickly: a record of another image (an earlier case's WebView2 process) is a different process.
+        const prev = seen.get(p.ProcessId);
+        const same = prev && prev.name === p.Name && (!prev.path || !p.ExecutablePath || prev.path === p.ExecutablePath);
+        const s = same ? prev : { name: p.Name, parent: p.ParentProcessId, first: now };
         s.path ||= p.ExecutablePath;
         s.cmd ||= p.CommandLine;
         s.last = now;
