@@ -3,7 +3,7 @@
 // the SSH tunnel through a saved host, read-only and the statement timeout. "Testuj połączenie" connects with the typed values (login questions appear here) and says how it went.
 // A SQLite connection (1.0.6) is a file: its path (typed, picked in the open dialog, or a new empty file), and read-only.
 import { useMemo, useState } from 'react';
-import { DB_DEFAULT_PORT, DB_TLS_MODES, dbConnectionToDraft, fileBaseName, dbKindLabel, isSqlKind, dbTlsModeLabel, validateDbDraft, type DbConnectionDraft, type DbDraftField, type DbKind, type DbPasswordChange, type DbTestResult, type DbTlsMode } from '../../../../shared/db';
+import { DB_DEFAULT_PORT, DB_TLS_MODES, dbConnectionToDraft, fileBaseName, dbKindLabel, isSqlKind, dbTlsModeLabel, dbTlsWarning, validateDbDraft, type DbConnectionDraft, type DbDraftField, type DbKind, type DbPasswordChange, type DbTestResult, type DbTlsMode } from '../../../../shared/db';
 import type { MessageKey } from '../../../../shared/i18n';
 import { dbErrorMessage, useDbStore } from '../../db/dbClient';
 import { useI18n } from '../../i18n';
@@ -47,6 +47,7 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
   });
   const field = (name: DbDraftField) => errors[name] && <div className="ssh-error" role="alert">{tr(errors[name]!)}</div>;
   const typedPassword = (changePassword || !saved) && password ? password : null;
+  const tlsWarning = dbTlsWarning(draft.kind, draft.tls);
 
   const validate = () => {
     const r = validateDbDraft(draft);
@@ -212,6 +213,7 @@ export function DbConnectionEditor({ connectionId, kind: initialKind }: { connec
             </Select>
           </div>
           <span /><span className="ssh-card-hint" data-field="tlsDetail">{tr(dbTlsModeLabel(draft.tls).detail.key)}</span>
+          {tlsWarning && <><span /><span className="ssh-banner-warn" data-field="tlsWarning" role="note">{tr(tlsWarning.key)}</span></>}
           {draft.tls === 'verify-full' && (<>
             <span className="db-label">{tr('Certyfikat CA')}</span>
             <div className="db-line">

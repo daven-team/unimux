@@ -380,8 +380,10 @@ async fn find_aside(side: &RemoteSide, target: &str) -> Option<String> {
     found.into_iter().next().map(|(_, n)| posix_join(&[&parent, &n]))
 }
 
-/// Writes `data` to an open handle (16 writes of 32 KB in flight) and closes it.
-async fn write_handle(side: &RemoteSide, handle: &[u8], data: &[u8]) -> Result<(), SftpErrorCode> {
+/// Writes `data` to an open handle (16 writes of 32 KB in flight), gives it `mode` through FSETSTAT on that same handle
+/// (T4: a path-based SETSTAT could follow a link someone swapped in under the part's name) and closes it. The answer tells
+/// whether the mode was set (no `mode`: nothing to set).
+async fn write_handle(side: &RemoteSide, handle: &[u8], data: &[u8], mode: Option<u32>) -> Result<bool, SftpErrorCode> {
     let client = side.client();
     // Boxed futures made up front (a closure that borrows the client would not be Send for every lifetime).
     let writes: Vec<BoxFuture<'_, Result<(), ClientError>>> = data
@@ -391,11 +393,31 @@ async fn write_handle(side: &RemoteSide, handle: &[u8], data: &[u8]) -> Result<(
         .collect();
     let result = stream::iter(writes).buffer_unordered(DEPTH).try_collect::<Vec<()>>().await.map(|_| ());
     match result {
-        Ok(()) => client.close(handle).await.map_err(client_code),
+        Ok(()) => {
+            let mode_set = match mode {
+                Some(mode) => client.fsetstat(handle, &Attrs::mode(mode)).await.is_ok(),
+                None => true,
+            };
+            client.close(handle).await.map_err(client_code)?;
+            Ok(mode_set)
+        }
         Err(e) => {
             let _ = client.close(handle).await;
             Err(e.code())
         }
+    }
+}
+
+/// Puts `mode` on the saved file after the rename without ever following a link (T4): lsetstat when the server has it,
+/// else SETSTAT only while an lstat still shows a regular file of the size just written.
+pub(crate) async fn set_mode_no_follow(side: &RemoteSide, path: &str, mode: u32, size: u64) -> bool {
+    let client = side.client();
+    if side.lsetstat() {
+        return client.lsetstat(path, &Attrs::mode(mode)).await.is_ok();
+    }
+    match side.lstat(path).await {
+        Ok(Some(m)) if m.kind == EntryKind::File && m.size == size => client.setstat(path, &Attrs::mode(mode)).await.is_ok(),
+        _ => false,
     }
 }
 
@@ -533,12 +555,12 @@ async fn save_part(
         }
     }
     guard.handle = None;
-    write_handle(side, &handle, output).await?;
-    // The part file stayed private while it was written; now it gets the permissions of the file it replaces.
+    // The part file stayed private while it was written; before it is closed it gets the permissions of the file it
+    // replaces, on its own handle.
     let mode = attrs.mode.map(|m| m & 0o7777);
+    let mode_set = write_handle(side, &handle, output, mode.filter(|m| *m != 0o600)).await?;
     if let Some(mode) = mode
-        && mode != 0o600
-        && client.setstat(part, &Attrs::mode(mode)).await.is_err()
+        && !mode_set
     {
         warnings.push(json!({ "kind": "mode", "mode": mode }));
     }
@@ -563,7 +585,7 @@ async fn save_part(
         && !warnings.iter().any(|w| w["kind"] == "mode")
     {
         let mut current = a.clone();
-        if client.setstat(target, &Attrs::mode(mode)).await.is_ok()
+        if set_mode_no_follow(side, target, mode, output.len() as u64).await
             && let Some(again) = attrs_at(side, target).await.ok().flatten()
         {
             current = again;

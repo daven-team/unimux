@@ -138,11 +138,7 @@ pub async fn entry_at(side: &RemoteSide, path: &str, kind: EntryKind) -> Result<
         let parent = if cut == 0 { "/".to_string() } else { path[..cut].to_string() };
         (parent, path[cut + 1..].to_string())
     };
-    let raw = if name == "/" {
-        None
-    } else {
-        side.readdir_raw(&parent, None).await.unwrap_or_default().into_iter().find(|e| e.filename == name)
-    };
+    let raw = if name == "/" { None } else { side.readdir_find(&parent, &name).await.ok().flatten() };
     let lst = side.lstat(path).await.map_err(code)?;
     let mut entry = match raw {
         Some(raw) => remote_entry(&parent, &raw),
@@ -195,16 +191,16 @@ pub async fn manage_op(
     channels: &HostChannels,
 ) -> Option<SftpResult> {
     Some(match op {
-        SftpOp::DeleteCount { paths } => manage::delete_count(side, &delete_roots(paths)).await.map(DeleteCount::to_json),
+        SftpOp::DeleteCount { paths } => manage::delete_count(side, &delete_roots(paths), sudo).await.map(DeleteCount::to_json),
         SftpOp::Delete { paths, confirmed } => {
             let roots = delete_roots(paths);
-            match manage::delete_count(side, &roots).await {
+            match manage::delete_count(side, &roots, sudo).await {
                 Err(e) => Err(e),
                 Ok(now) if now != *confirmed => Err(SftpErrorCode::Changed),
                 Ok(_) => {
                     let mut result = Ok(Value::Null);
                     for p in &roots {
-                        if let Err(e) = manage::remove(side, p).await {
+                        if let Err(e) = manage::remove(side, p, sudo).await {
                             result = Err(e);
                             break;
                         }

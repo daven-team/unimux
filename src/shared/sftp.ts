@@ -94,7 +94,9 @@ export type SftpErrorCode =
   /** A recursive permission change as root on a server without lsetstat@openssh.com (not safe against swapped-in links). */
   | 'unsafeChmod'
   /** 0.9.9 editor saves: the folder of the file does not let the SSH user create the temporary part file. */
-  | 'partDenied';
+  | 'partDenied'
+  /** 1.2.0: a recursive delete through sudo in a folder other users can write to (entries could be swapped for links). */
+  | 'unsafeDelete';
 
 export type SftpResult<T> = { ok: true; value: T } | { ok: false; error: SftpErrorCode };
 
@@ -122,6 +124,7 @@ export function sftpErrorText(code: SftpErrorCode): Localized {
     case 'intoItself': return { key: 'Nie można przenieść folderu do niego samego' };
     case 'crossDevice': return { key: 'Serwer nie mógł przenieść tego elementu (na przykład do innego systemu plików) - skopiuj go i usuń oryginał' };
     case 'unsafeChmod': return { key: 'Ten serwer nie obsługuje zmiany uprawnień bez podążania za dowiązaniami (lsetstat) - przez sudo zmiana rekurencyjna jest wyłączona' };
+    case 'unsafeDelete': return { key: 'Przez sudo foldery, do których mogą pisać inni użytkownicy, nie są usuwane rekurencyjnie - usuń ich zawartość osobno lub zmień uprawnienia' };
     case 'linkSkipped': return { key: 'Dowiązania są pomijane' };
     case 'partDenied': return { key: 'W tym folderze nie można utworzyć pliku tymczasowego (brak uprawnień do folderu) - zapis nie jest możliwy' };
     default: return { key: 'Operacja nie powiodła się' };

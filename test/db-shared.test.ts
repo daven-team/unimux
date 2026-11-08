@@ -1,7 +1,7 @@
 // The database contract (1.0.0): session ids, the connection normalizer, the connection form checks, state helpers and texts.
 import { describe, expect, it } from 'vitest';
 import {
-  dbConnectionToDraft, dbEndpoint, dbErrorText, dbTlsModeLabel, dbSessionId, duplicateDbConnection, isDbSessionId, normalizeDbConnection, normalizeDbConnections,
+  dbConnectionToDraft, dbEndpoint, dbErrorText, dbTlsModeLabel, dbTlsWarning, dbSessionId, duplicateDbConnection, isDbSessionId, normalizeDbConnection, normalizeDbConnections,
   removeDbConnection, upsertDbConnection, validateDbDraft, type DbConnection, type DbErrorCode,
 } from '../src/shared/db';
 import { messages } from '../src/shared/messages';
@@ -116,5 +116,17 @@ describe('texts', () => {
       expect(Object.hasOwn(messages, label.key) && Object.hasOwn(messages, detail.key), mode).toBe(true);
     }
     expect(dbTlsModeLabel('require').detail.key).toBe('Bez weryfikacji certyfikatu');
+  });
+
+  it('warns about the MySQL password over TLS without certificate verification (D7)', () => {
+    for (const tls of ['prefer', 'require'] as const) {
+      const warning = dbTlsWarning('mysql', tls);
+      expect(warning, tls).not.toBeNull();
+      expect(Object.hasOwn(messages, warning!.key)).toBe(true);
+      expect((messages as Record<string, readonly string[]>)[warning!.key]).toHaveLength(5);
+    }
+    expect(dbTlsWarning('mysql', 'verify-full')).toBeNull();
+    expect(dbTlsWarning('mysql', 'disable')).toBeNull();
+    for (const kind of ['postgres', 'redis', 'sqlite'] as const) expect(dbTlsWarning(kind, 'require'), kind).toBeNull();
   });
 });

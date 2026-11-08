@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::backend::manage_op;
 use crate::client::SftpClient;
-use crate::edit_file::{read_for_editor, stat_for_editor, write_from_editor};
+use crate::edit_file::{read_for_editor, set_mode_no_follow, stat_for_editor, write_from_editor};
 use crate::error::SftpErrorCode;
 use crate::fake_server::{Config, Fake, Node};
 use crate::host::HostChannels;
@@ -171,4 +171,121 @@ async fn a_failed_rename_without_posix_rename_strands_both_copies() {
         other => panic!("{other:?}"),
     }
     assert!(fake.get("/f.unimux-old").is_some());
+}
+
+async fn op_sudo(side: &RemoteSide, op: SftpOp) -> Result<Value, SftpErrorCode> {
+    manage_op(side, "sftp:s", true, &op, &RunningOps::default(), &HostChannels::unattached()).await.expect("a T4 op")
+}
+
+fn mode_of(fake: &Fake, path: &str) -> Option<u32> {
+    fake.modes.lock().get(path).copied()
+}
+
+fn readdirs(fake: &Fake) -> usize {
+    fake.readdirs.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// T4: the saved file's mode goes on the part file's own handle before it is closed; no path-based SETSTAT is sent.
+#[tokio::test]
+async fn editor_save_sets_the_mode_on_the_open_part_handle() {
+    let (fake, side) = connect(Config { posix_rename: true, ..Config::default() }).await;
+    fake.put("/f.sh", Node::File(b"old".to_vec(), 7));
+    fake.modes.lock().insert("/f.sh".into(), 0o750);
+    let read = read_for_editor(&side, "/f.sh").await.unwrap();
+    let saved = write_from_editor(&side, "/f.sh", &save("new", "old", Some(stamp_of(&read["stamp"]))), "editor:s").await.unwrap();
+    assert_eq!(saved["kind"], "saved");
+    assert_eq!(saved["warnings"], json!([]));
+    assert_eq!(fake.log.lock().clone(), vec!["FSETSTAT /f.sh.unimux-part".to_string()]);
+    assert_eq!(mode_of(&fake, "/f.sh"), Some(0o750));
+}
+
+/// T4: the fix-up after the rename never follows a link: lsetstat when offered, else SETSTAT only on a regular file of the
+/// size just written.
+#[tokio::test]
+async fn the_mode_fix_up_after_the_rename_never_follows_a_link() {
+    let (fake, side) = connect(Config::default()).await;
+    fake.put("/f", Node::File(b"abc".to_vec(), 1));
+    fake.put("/d", Node::Dir);
+    assert!(!set_mode_no_follow(&side, "/d", 0o600, 3).await, "not a regular file");
+    assert!(!set_mode_no_follow(&side, "/f", 0o600, 4).await, "another file than the one written");
+    assert!(!set_mode_no_follow(&side, "/gone", 0o600, 3).await);
+    assert!(fake.log.lock().is_empty());
+    assert!(set_mode_no_follow(&side, "/f", 0o640, 3).await);
+    assert_eq!(fake.log.lock().clone(), vec!["SETSTAT /f".to_string()]);
+    let (fake, side) = connect(Config { lsetstat: true, ..Config::default() }).await;
+    fake.put("/f", Node::File(b"abc".to_vec(), 1));
+    assert!(set_mode_no_follow(&side, "/f", 0o640, 99).await);
+    assert_eq!(fake.log.lock().clone(), vec!["LSETSTAT /f".to_string()]);
+    assert_eq!(mode_of(&fake, "/f"), Some(0o640));
+}
+
+/// T5: a folder swapped for something else between its listing and the unlinks stops the delete; nothing listed in it is
+/// removed.
+#[tokio::test]
+async fn a_recursive_delete_stops_when_a_folder_changes_after_its_listing() {
+    let (fake, side) = connect(Config::default()).await;
+    tree(&fake);
+    // The swap comes after the confirmed count (which reads the folders too).
+    *fake.swap_on_opendir.lock() = Some(("/d/b".into(), Node::File(b"link".to_vec(), 1)));
+    assert_eq!(crate::manage::remove(&side, "/d", false).await, Err(SftpErrorCode::Changed));
+    assert!(fake.get("/d/b/c").is_some(), "nothing listed in the swapped folder is unlinked");
+}
+
+/// T5: through sudo (root) a recursive delete is refused in folders other users can write to: the selected folder's parent
+/// or any folder inside. The count refuses it already, before anything is confirmed or removed.
+#[tokio::test]
+async fn under_sudo_recursive_deletes_in_shared_writable_folders_are_refused() {
+    let (fake, side) = connect(Config::default()).await;
+    tree(&fake);
+    let paths = vec!["/d".to_string()];
+    let count = DeleteCount { files: 2, dirs: 2 };
+    for (path, mode) in [("/d/b", 0o775), ("/d", 0o757), ("/", 0o1777)] {
+        fake.modes.lock().clear();
+        fake.modes.lock().insert(path.into(), mode);
+        let counted = op_sudo(&side, SftpOp::DeleteCount { paths: paths.clone() }).await;
+        assert_eq!(counted, Err(SftpErrorCode::UnsafeDelete), "{path}");
+        let r = op_sudo(&side, SftpOp::Delete { paths: paths.clone(), confirmed: count }).await;
+        assert_eq!(r, Err(SftpErrorCode::UnsafeDelete), "{path}");
+        assert!(fake.get("/d/a").is_some() && fake.get("/d/b/c").is_some(), "{path}: nothing removed");
+        // Without sudo the same folders are counted (1.1.4).
+        assert_eq!(op(&side, SftpOp::DeleteCount { paths: paths.clone() }).await, Ok(json!({ "files": 2, "dirs": 2 })));
+    }
+    // A single file in a shared folder is one unlink (which never follows a link): allowed.
+    let one = DeleteCount { files: 1, dirs: 0 };
+    assert_eq!(op_sudo(&side, SftpOp::Delete { paths: vec!["/e".into()], confirmed: one }).await, Ok(Value::Null));
+    fake.modes.lock().clear();
+    assert_eq!(op_sudo(&side, SftpOp::Delete { paths, confirmed: count }).await, Ok(Value::Null));
+    assert!(fake.get("/d").is_none());
+}
+
+/// T1/T2/T3: one entry is looked up without reading the rest of its folder, a folder read stops at the total limits even
+/// without a cap of its own, and a walk's read refuses a folder past its budget after reading only budget + 1 entries.
+#[tokio::test]
+async fn folder_reads_stop_at_the_match_and_at_the_total_limits() {
+    use crate::client::READDIR_TOTAL_ENTRIES;
+    let (fake, side) = connect(Config::default()).await;
+    fake.put("/big", Node::Dir);
+    for i in 0..1000 {
+        fake.put(&format!("/big/f{i:04}"), Node::File(vec![], 1));
+    }
+    let entry = crate::backend::remote_op(&side, &SftpOp::Stat { path: "/big/f0005".into() }).await.unwrap().unwrap();
+    assert_eq!(entry["name"], "f0005");
+    assert_eq!(entry["permissions"], "-rw-r--r--");
+    assert_eq!(readdirs(&fake), 1, "stopped at the first batch");
+    assert_eq!(side.readdir_find("/big", "nope").await.unwrap(), None);
+    // A listing with its own cap stops after cap + 1.
+    assert_eq!(side.readdir_raw("/big", Some(150)).await.unwrap().len(), 151);
+    let before = readdirs(&fake);
+    assert_eq!(side.readdir_max("/big", 120).await.map(|v| v.len()), Err(SftpErrorCode::TooMany.into()));
+    assert_eq!(readdirs(&fake) - before, 2);
+    assert_eq!(side.readdir_max("/big", 1000).await.unwrap().len(), 1000);
+    // Past the total limit: tooMany, whatever the caller asked for.
+    fake.put("/huge", Node::Dir);
+    for i in 0..=READDIR_TOTAL_ENTRIES {
+        fake.put(&format!("/huge/{i}"), Node::File(vec![], 1));
+    }
+    assert_eq!(side.readdir_raw("/huge", None).await.map(|v| v.len()), Err(SftpErrorCode::TooMany.into()));
+    assert_eq!(side.readdir("/huge").await.map(|v| v.len()), Err(SftpErrorCode::TooMany.into()));
+    assert_eq!(side.readdir_find("/huge", "missing").await, Err(SftpErrorCode::TooMany.into()));
+    assert_eq!(side.readdir_raw("/huge", Some(10)).await.unwrap().len(), 11);
 }

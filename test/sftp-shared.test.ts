@@ -107,7 +107,8 @@ describe('transfer items on the renderer side', () => {
   });
 
   it('has a translated text for every error code', () => {
-    const codes: SftpErrorCode[] = ['notFound', 'exists', 'permission', 'notEmpty', 'notADirectory', 'isADirectory', 'noSpace', 'invalid', 'noSession', 'notConnected', 'changed', 'cancelled', 'connectionLost', 'sftpHostCrashed', 'unsupported', 'tooMany', 'invalidName', 'linkOutside', 'linkFolder', 'failed'];
+    const codes: SftpErrorCode[] = ['notFound', 'exists', 'permission', 'notEmpty', 'notADirectory', 'isADirectory', 'noSpace', 'invalid', 'noSession', 'notConnected', 'changed', 'cancelled', 'connectionLost', 'sftpHostCrashed', 'unsupported', 'tooMany', 'invalidName', 'linkOutside', 'linkFolder', 'failed', 'unsafeChmod', 'partDenied', 'unsafeDelete'];
+    expect(sftpErrorText('unsafeDelete').key).not.toBe(sftpErrorText('failed').key);
     for (const c of codes) expect(Object.hasOwn(messages, sftpErrorText(c).key), c).toBe(true);
   });
 });

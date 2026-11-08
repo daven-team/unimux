@@ -57,6 +57,13 @@ export const dbMessages = {
   'Wymagaj TLS': ['Require TLS', 'TLS erzwingen', 'Exigir TLS', 'Exiger TLS', 'Exigir TLS'],
   'Bez weryfikacji certyfikatu': ['The certificate is not verified', 'Das Zertifikat wird nicht geprüft', 'No se verifica el certificado', 'Le certificat n\'est pas vérifié', 'O certificado não é verificado'],
   'TLS z weryfikacją certyfikatu': ['TLS with certificate verification', 'TLS mit Zertifikatsprüfung', 'TLS con verificación del certificado', 'TLS avec vérification du certificat', 'TLS com verificação do certificado'],
+  'MySQL może wysłać hasło przez to połączenie TLS (logowanie caching_sha2_password lub sha256_password), a bez weryfikacji certyfikatu ktoś pośrodku może je odczytać. Wybierz TLS z weryfikacją certyfikatu, jeśli możesz.': [
+    'MySQL may send the password over this TLS connection (caching_sha2_password or sha256_password login), and without certificate verification someone in the middle can read it. Choose TLS with certificate verification if you can.',
+    'MySQL kann das Passwort über diese TLS-Verbindung senden (Anmeldung mit caching_sha2_password oder sha256_password), und ohne Zertifikatsprüfung kann es jemand dazwischen mitlesen. Wähle nach Möglichkeit TLS mit Zertifikatsprüfung.',
+    'MySQL puede enviar la contraseña por esta conexión TLS (inicio de sesión con caching_sha2_password o sha256_password) y, sin verificación del certificado, alguien en medio puede leerla. Elige TLS con verificación del certificado si puedes.',
+    'MySQL peut envoyer le mot de passe sur cette connexion TLS (connexion caching_sha2_password ou sha256_password) et, sans vérification du certificat, quelqu\'un au milieu peut le lire. Choisissez TLS avec vérification du certificat si possible.',
+    'O MySQL pode enviar a palavra-passe por esta ligação TLS (início de sessão caching_sha2_password ou sha256_password) e, sem verificação do certificado, alguém no meio pode lê-la. Escolha TLS com verificação do certificado, se puder.',
+  ],
   'Certyfikat sprawdzany wobec pliku CA i nazwy hosta': ['The certificate is checked against the CA file and the host name', 'Das Zertifikat wird gegen die CA-Datei und den Hostnamen geprüft', 'El certificado se comprueba con el archivo de la CA y el nombre del host', 'Le certificat est vérifié par rapport au fichier de l\'AC et au nom d\'hôte', 'O certificado é verificado com o ficheiro da CA e o nome do anfitrião'],
   // SQLite (1.0.6): the file of a connection, its form checks and dialogs.
   'Nie znaleziono pliku bazy': ['The database file was not found', 'Die Datenbankdatei wurde nicht gefunden', 'No se encontró el archivo de la base de datos', 'Le fichier de la base de données est introuvable', 'O ficheiro da base de dados não foi encontrado'],

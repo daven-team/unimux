@@ -32,6 +32,16 @@ pub struct Fake {
     pub max_inflight_reads: AtomicUsize,
     pub writes: AtomicUsize,
     pub open_handles: Mutex<HashMap<Vec<u8>, Handle>>,
+    /// Permission bits per path (default 0644 for files, 0755 for folders); SETSTAT, FSETSTAT and lsetstat change them and
+    /// a rename carries them.
+    pub modes: Mutex<HashMap<String, u32>>,
+    /// The attribute changes in order: "SETSTAT <path>", "FSETSTAT <path of the handle>", "LSETSTAT <path>".
+    pub log: Mutex<Vec<String>>,
+    /// READDIR requests answered.
+    pub readdirs: AtomicUsize,
+    /// When a folder at this path is opened for reading (after its listing was taken), this node takes its place: another
+    /// user swapping the folder between the listing and what comes next.
+    pub swap_on_opendir: Mutex<Option<(String, Node)>>,
 }
 
 #[derive(Debug, Clone)]
@@ -50,7 +60,33 @@ impl Fake {
             max_inflight_reads: AtomicUsize::new(0),
             writes: AtomicUsize::new(0),
             open_handles: Mutex::new(HashMap::new()),
+            modes: Mutex::new(HashMap::new()),
+            log: Mutex::new(Vec::new()),
+            readdirs: AtomicUsize::new(0),
+            swap_on_opendir: Mutex::new(None),
         })
+    }
+
+    /// The node's attributes with the permission bits of [`Fake::modes`].
+    fn attrs_at(&self, path: &str, node: &Node) -> Attrs {
+        let mut a = Self::attrs(node);
+        if let (Some(bits), Some(m)) = (self.modes.lock().get(path), a.mode) {
+            a.mode = Some((m & !0o7777) | (bits & 0o7777));
+        }
+        a
+    }
+
+    /// SETSTAT and friends: the mode (when sent) and the mtime of a file.
+    fn set_attrs(&self, path: &str, a: &Attrs) -> u32 {
+        let mut fs = self.fs.lock();
+        let Some(node) = fs.get_mut(path) else { return status::NO_SUCH_FILE };
+        if let (Node::File(_, m), Some(t)) = (node, a.mtime) {
+            *m = t;
+        }
+        if let Some(mode) = a.mode {
+            self.modes.lock().insert(path.to_string(), mode & 0o7777);
+        }
+        status::OK
     }
 
     pub fn put(&self, path: &str, node: Node) {
@@ -173,6 +209,10 @@ impl Fake {
                 }
                 let mut names = vec![".".to_string(), "..".to_string()];
                 names.extend(self.children(&path).into_iter().map(|n| format!("{path}\0{n}")));
+                let swap = self.swap_on_opendir.lock().take_if(|(p, _)| *p == path);
+                if let Some((p, node)) = swap {
+                    self.put(&p, node);
+                }
                 new_handle(Handle::Dir(names))
             }
             proto::CLOSE => {
@@ -213,6 +253,7 @@ impl Fake {
                 st(status::OK)
             }
             proto::READDIR => {
+                self.readdirs.fetch_add(1, Ordering::SeqCst);
                 let h = rd.bytes().unwrap().to_vec();
                 let mut handles = self.open_handles.lock();
                 let Some(Handle::Dir(names)) = handles.get_mut(&h) else { return st(status::FAILURE) };
@@ -234,14 +275,14 @@ impl Fake {
                     put_str(&mut b, &name);
                     let long = if matches!(node, Node::Dir) { "drwxr-xr-x" } else { "-rw-r--r--" };
                     put_str(&mut b, &format!("{long}    1 user     group    0 Jan  1 00:00 {name}"));
-                    Self::attrs(&node).encode(&mut b);
+                    self.attrs_at(&full, &node).encode(&mut b);
                 }
                 (proto::NAME, b)
             }
             proto::STAT | proto::LSTAT => {
                 let path = rd.string().unwrap();
                 match self.get(&path) {
-                    Some(n) => attrs_reply(Self::attrs(&n)),
+                    Some(n) => attrs_reply(self.attrs_at(&path, &n)),
                     None => st(status::NO_SUCH_FILE),
                 }
             }
@@ -249,24 +290,22 @@ impl Fake {
                 let h = rd.bytes().unwrap().to_vec();
                 let Some(Handle::File(path)) = self.open_handles.lock().get(&h).cloned() else { return st(status::FAILURE) };
                 match self.get(&path) {
-                    Some(n) => attrs_reply(Self::attrs(&n)),
+                    Some(n) => attrs_reply(self.attrs_at(&path, &n)),
                     None => st(status::NO_SUCH_FILE),
                 }
             }
             proto::SETSTAT => {
                 let path = rd.string().unwrap();
                 let a = Attrs::decode(rd).unwrap();
-                let mut fs = self.fs.lock();
-                match fs.get_mut(&path) {
-                    Some(Node::File(_, m)) => {
-                        if let Some(t) = a.mtime {
-                            *m = t;
-                        }
-                        st(status::OK)
-                    }
-                    Some(Node::Dir) => st(status::OK),
-                    None => st(status::NO_SUCH_FILE),
-                }
+                self.log.lock().push(format!("SETSTAT {path}"));
+                st(self.set_attrs(&path, &a))
+            }
+            proto::FSETSTAT => {
+                let h = rd.bytes().unwrap().to_vec();
+                let a = Attrs::decode(rd).unwrap();
+                let Some(Handle::File(path)) = self.open_handles.lock().get(&h).cloned() else { return st(status::FAILURE) };
+                self.log.lock().push(format!("FSETSTAT {path}"));
+                st(self.set_attrs(&path, &a))
             }
             proto::REMOVE => {
                 let path = rd.string().unwrap();
@@ -329,7 +368,12 @@ impl Fake {
                         let to = rd.string().unwrap();
                         self.rename(&from, &to, true)
                     }
-                    "lsetstat@openssh.com" if self.cfg.lsetstat => st(status::OK),
+                    "lsetstat@openssh.com" if self.cfg.lsetstat => {
+                        let path = rd.string().unwrap();
+                        let a = Attrs::decode(rd).unwrap();
+                        self.log.lock().push(format!("LSETSTAT {path}"));
+                        st(self.set_attrs(&path, &a))
+                    }
                     _ => st(status::OP_UNSUPPORTED),
                 }
             }
@@ -349,6 +393,11 @@ impl Fake {
         }
         let Some(node) = fs.remove(from) else { return st(status::NO_SUCH_FILE) };
         fs.insert(to.to_string(), node);
+        let mut modes = self.modes.lock();
+        match modes.remove(from) {
+            Some(m) => modes.insert(to.to_string(), m),
+            None => modes.remove(to),
+        };
         st(status::OK)
     }
 }
