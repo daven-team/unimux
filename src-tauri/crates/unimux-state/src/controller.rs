@@ -382,6 +382,27 @@ mod tests {
         assert_eq!(alerts["volume"], json!(1));
     }
 
+    #[test]
+    fn the_edit_path_repairs_the_strip_order_like_at_load_and_keeps_a_clean_order_as_it_is() {
+        let base = grid(1);
+        let c = StateController::new(base.clone(), Arc::new(crate::StateNormalizer));
+        let mut dirty = base.clone();
+        dirty["workspaceOrder"] =
+            json!(["settings", "settings", "grid:missing", "bogus", 42, "x".repeat(5000), "file:{\"a\":1}", "grid:t"]);
+        c.apply_edit("e1", &base, &dirty).unwrap();
+        assert_eq!(c.get()["workspaceOrder"], json!(["settings", "file:{\"a\":1}", "grid:t"]));
+        let before = (*c.get()).clone();
+        let mut clean = before.clone();
+        clean["workspaceOrder"] = json!(["file:b", "settings"]);
+        c.apply_edit("e2", &before, &clean).unwrap();
+        assert_eq!(c.get()["workspaceOrder"], json!(["file:b", "settings"]));
+        let now = (*c.get()).clone();
+        let mut many = now.clone();
+        many["workspaceOrder"] = Value::Array((0..1500).map(|i| json!(format!("file:{i}"))).collect());
+        c.apply_edit("e3", &now, &many).unwrap();
+        assert_eq!(c.get()["workspaceOrder"].as_array().unwrap().len(), 1000);
+    }
+
     #[tokio::test]
     async fn the_watch_wakes_on_changes() {
         let c = Arc::new(StateController::new(json!({}), Arc::new(PassThrough)));

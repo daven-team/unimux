@@ -270,6 +270,36 @@ mod tests {
         round_trip(json!({"a": 1}), json!([1]));
     }
 
+    fn items(n: usize) -> Value {
+        Value::Array((0..n).map(|i| json!({"id": format!("id-{i}"), "n": 0, "text": format!("entry {i}")})).collect())
+    }
+
+    #[test]
+    fn a_patch_is_a_small_part_of_the_state_and_no_change_yields_no_patch() {
+        let before = json!({"projects": items(40), "settings": {"fontSize": 13}, "events": items(200)});
+        assert_eq!(diff_state(&before, &before), None);
+        assert_eq!(diff_state(&before, &before.clone()), None);
+        let mut after = before.clone();
+        after["projects"][17]["color"] = json!("#abcdef");
+        let patch = diff_state(&before, &after).unwrap();
+        assert!(stringify(&patch).len() < stringify(&after).len() / 8, "{}", stringify(&patch));
+        assert_eq!(apply_patch(&before, &patch).unwrap(), after);
+    }
+
+    #[test]
+    fn refuses_an_in_place_patch_whose_entry_is_not_where_the_patch_says() {
+        let before = json!({"items": items(5)});
+        let mut after = before.clone();
+        after["items"][2]["n"] = json!(1);
+        let patch = diff_state(&before, &after).unwrap();
+        let mut shifted = vec![json!({"id": "x", "n": 0})];
+        shifted.extend(before["items"].as_array().unwrap().iter().cloned());
+        let e = apply_patch(&json!({"items": shifted}), &patch).unwrap_err();
+        assert!(e.0.contains("missing entry"), "{e}");
+        let e = apply_patch(&json!({"items": []}), &json!({"o": {"items": {"s": {"drop": 3}}}})).unwrap_err();
+        assert!(e.0.contains("drops more"), "{e}");
+    }
+
     #[test]
     fn change_message_shape() {
         let c = state_change(&json!({"a": 1}), &json!({"a": 2}), 5, 4, Some("e1"));

@@ -196,7 +196,8 @@ struct SaverState {
     pending: Option<Arc<Value>>,
     deadline: Option<Instant>,
     failures: u32,
-    last_bak: Instant,
+    /// A successful save refreshes .bak from this time on (an hour after the last refresh, or after the start).
+    bak_due: Instant,
     stopped: bool,
 }
 
@@ -240,7 +241,7 @@ impl Saver {
                 pending: None,
                 deadline: None,
                 failures: 0,
-                last_bak: Instant::now(),
+                bak_due: Instant::now() + BAK_REFRESH,
                 stopped: false,
             }),
             wake: Condvar::new(),
@@ -307,8 +308,8 @@ impl Saver {
                     (self.log)(&format!("state saved again after {} failed attempt(s)", st.failures));
                 }
                 st.failures = 0;
-                if st.last_bak.elapsed() >= BAK_REFRESH {
-                    st.last_bak = Instant::now();
+                if Instant::now() >= st.bak_due {
+                    st.bak_due = Instant::now() + BAK_REFRESH;
                     drop(st);
                     let _ = (self.write_bak)(&self.dir, &s);
                 }
@@ -345,6 +346,12 @@ impl Saver {
             self.flush();
         }
         !self.has_pending()
+    }
+
+    /// Tests: an hour has passed since the last .bak refresh.
+    #[cfg(test)]
+    fn bak_due_now(&self) {
+        self.state.lock().bak_due = Instant::now();
     }
 
     /// Stops the timer thread (after the final flush).
@@ -393,6 +400,21 @@ mod tests {
         let s = load(dir.path());
         assert_eq!(serialize_state(&s), text);
         assert_eq!(fs::read_to_string(dir.path().join("state.json.bak")).unwrap(), text);
+    }
+
+    #[test]
+    fn a_bak_that_cannot_be_refreshed_does_not_stop_the_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = r#"{"version":1,"projects":[],"name":"main"}"#;
+        fs::write(dir.path().join(FILE), text).unwrap();
+        // A .bak that cannot be replaced (here: a directory with content in its place).
+        fs::create_dir_all(dir.path().join("state.json.bak").join("x")).unwrap();
+        let lines = Mutex::new(Vec::<String>::new());
+        let log = |line: &str| lines.lock().push(line.to_string());
+        let s = load_state(dir.path(), Platform::Win32, &PassThrough, &LoadOptions { log: &log, seams: None }).unwrap();
+        assert_eq!(s["name"], "main");
+        assert!(lines.lock().iter().any(|l| l.contains("not refreshed")), "{:?}", lines.lock());
+        assert_eq!(fs::read_to_string(dir.path().join(FILE)).unwrap(), text);
     }
 
     #[test]
@@ -559,6 +581,49 @@ mod tests {
         saver.save(Arc::new(serde_json::json!({ "a": 1 })));
         assert!(saver.flush_until_saved(Duration::from_secs(3), Duration::from_millis(20)));
         assert_eq!(*written.lock(), vec![r#"{"a":1}"#.to_string()]);
+        saver.stop();
+    }
+
+    #[test]
+    fn a_newer_state_saved_while_a_failed_one_waits_wins_and_flush_reports_instead_of_panicking() {
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let fail = Arc::new(AtomicU32::new(u32::MAX));
+        let saver = saver_with(fail.clone(), written.clone());
+        saver.save(Arc::new(serde_json::json!({ "name": "old" })));
+        assert!(!saver.flush());
+        assert!(saver.has_pending());
+        saver.save(Arc::new(serde_json::json!({ "name": "new" })));
+        assert!(!saver.flush());
+        fail.store(0, Ordering::SeqCst);
+        assert!(saver.flush());
+        assert_eq!(*written.lock(), vec![r#"{"name":"new"}"#.to_string()]);
+        assert!(!saver.has_pending());
+        saver.stop();
+    }
+
+    #[test]
+    fn refreshes_the_bak_with_a_save_at_most_once_an_hour() {
+        let baks = Arc::new(Mutex::new(Vec::new()));
+        let b = baks.clone();
+        let saver = Saver::with(
+            PathBuf::from("."),
+            Duration::from_secs(60),
+            Arc::new(|_: &Path, _: &Value| Ok(())),
+            Arc::new(move |_: &Path, s: &Value| {
+                b.lock().push(s["name"].as_str().unwrap_or_default().to_string());
+                Ok(())
+            }),
+            Arc::new(|_| {}),
+        );
+        saver.save(Arc::new(serde_json::json!({ "name": "first" })));
+        assert!(saver.flush());
+        assert!(baks.lock().is_empty());
+        saver.bak_due_now();
+        saver.save(Arc::new(serde_json::json!({ "name": "second" })));
+        assert!(saver.flush());
+        saver.save(Arc::new(serde_json::json!({ "name": "third" })));
+        assert!(saver.flush());
+        assert_eq!(*baks.lock(), vec!["second".to_string()]);
         saver.stop();
     }
 

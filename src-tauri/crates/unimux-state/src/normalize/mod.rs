@@ -388,6 +388,65 @@ mod tests {
     }
 
     #[test]
+    fn uses_zsh_on_macos_and_keeps_only_the_shells_of_the_current_platform() {
+        assert_eq!(state::default_state(Platform::Darwin)["settings"]["shell"], "zsh");
+        assert_eq!(state::default_state(Platform::Win32)["settings"]["shell"], "pwsh");
+        let shell_of = |saved: &str, from: Platform, on: Platform| {
+            let mut s = state::default_state(from);
+            s["settings"]["shell"] = json!(saved);
+            StateNormalizer.normalize(s, on).unwrap()["settings"]["shell"].clone()
+        };
+        // A state of the other platform gets this platform's default shell; a choice the platform has is kept.
+        for (saved, from, on, out) in [
+            ("pwsh", Platform::Win32, Platform::Darwin, "zsh"),
+            ("cmd", Platform::Win32, Platform::Darwin, "zsh"),
+            ("zsh", Platform::Darwin, Platform::Win32, "pwsh"),
+            ("bash", Platform::Darwin, Platform::Win32, "pwsh"),
+            ("bash", Platform::Darwin, Platform::Darwin, "bash"),
+            ("zsh", Platform::Darwin, Platform::Darwin, "zsh"),
+            ("powershell", Platform::Win32, Platform::Win32, "powershell"),
+            ("cmd", Platform::Win32, Platform::Win32, "cmd"),
+            ("pwsh", Platform::Win32, Platform::Win32, "pwsh"),
+        ] {
+            assert_eq!(shell_of(saved, from, on), out, "{saved} from {from:?} on {on:?}");
+        }
+    }
+
+    #[test]
+    fn normalizes_a_current_state_once_and_then_round_trips_identically() {
+        let area = |col: u32| json!({"col": col, "row": 0, "colSpan": 1, "rowSpan": 1});
+        let layout = json!({"cols": 2, "rows": 1, "areas": [area(0), area(1)]});
+        let profile = |id: &str, name: &str, color: &str| json!({"id": id, "name": name, "cli": id, "args": "", "color": color});
+        let state = json!({
+            "version": 1, "activeProjectId": "p",
+            "projects": [{"id": "p", "name": "Atlas", "path": "C:/work/atlas", "color": "#3b82f6", "archive": [], "activeTabId": "g",
+                "tabs": [{"id": "g", "name": "Team", "layout": layout, "cells": [
+                    {"id": "lead", "name": "Lead", "profileId": "claude", "role": "coordinator", "color": "#f59e0b"},
+                    {"id": "worker", "name": "Worker", "profileId": "codex", "role": "worker"},
+                ]}]}],
+            "profiles": [profile("claude", "Claude", "#d97757"), profile("codex", "Codex", "#10a37f"), profile("shell", "Terminal", "#7a7a7a")],
+            "snippets": [{"id": "s1", "name": "Review", "icon": "R", "color": "#60a5fa", "text": "Review the branch", "autoSend": false}],
+            "presets": [{"id": "team", "name": "Team", "layout": layout, "cells": [
+                {"name": "Lead", "profileId": "claude", "role": "coordinator", "worktree": false, "prompt": "Plan."},
+                {"name": "Dev", "profileId": "codex", "role": "worker", "worktree": false},
+            ]}],
+            "settings": {"language": "en", "fontSize": 13, "notifications": false, "shell": "cmd", "lastProfileId": "claude"},
+            "sidebarCollapsed": false, "snippetsOpen": false, "sidebarWidth": 228, "snippetsWidth": 210,
+        });
+        let first = StateNormalizer.normalize(state, Platform::Win32).unwrap();
+        let saved = unimux_core::js_json::stringify(&first);
+        let again = StateNormalizer.normalize(unimux_core::js_json::parse(&saved).unwrap(), Platform::Win32).unwrap();
+        assert_eq!(unimux_core::js_json::stringify(&again), saved);
+        let cells: Vec<(Value, Value)> = first["projects"][0]["tabs"][0]["cells"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| (c["id"].clone(), c["role"].clone()))
+            .collect();
+        assert_eq!(cells, vec![(json!("lead"), json!("coordinator")), (json!("worker"), json!("worker"))]);
+    }
+
+    #[test]
     fn detached_windows_stay_mains() {
         let prev = json!({"detachedWindows": [{"id": "w"}], "a": 1});
         let merged = json!({"a": 2, "detachedWindows": []});

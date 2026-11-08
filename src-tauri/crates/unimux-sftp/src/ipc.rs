@@ -453,6 +453,35 @@ mod tests {
         std::env::temp_dir().to_string_lossy().into_owned()
     }
 
+    /// test/zod-schemas.test.ts: `z.guid()` keeps zod 3's loose uuid rule (IDs saved by older versions keep working).
+    #[test]
+    fn guids_accept_any_8_4_4_4_12_hex_id_and_refuse_everything_else() {
+        let random = uuid::Uuid::new_v4().to_string();
+        for v in [
+            random.clone(),
+            random.to_uppercase(),
+            "00000000-0000-0000-0000-000000000000".into(),
+            "12345678-1234-1234-1234-123456789012".into(),
+            "ffffffff-ffff-ffff-ffff-ffffffffffff".into(),
+        ] {
+            assert!(is_guid(&json!(v)), "{v}");
+        }
+        for v in [
+            json!(""),
+            json!("x"),
+            json!("123"),
+            json!("12345678-1234-1234-1234-12345678901"),
+            json!("12345678-1234-1234-1234-1234567890123"),
+            json!("{12345678-1234-1234-1234-123456789012}"),
+            json!("12345678_1234-1234-1234-123456789012"),
+            json!("1234567g-1234-1234-1234-123456789012"),
+            json!(1),
+            Value::Null,
+        ] {
+            assert!(!is_guid(&v), "{v}");
+        }
+    }
+
     #[test]
     fn transfers_check_the_side_of_every_path() {
         let local = local_dir();

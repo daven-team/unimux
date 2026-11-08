@@ -697,3 +697,83 @@ fn snapshot_restore_and_identity_rewritten_on_files() {
     assert!(!profile.join(".oauth_refresh.lock").exists());
     assert!(!profile.join(".claude.json.lock").exists());
 }
+
+#[test]
+fn snapshots_a_missing_profile_as_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("none");
+    let locks = ProfileLocks::new();
+    let snap = snapshot_profile(&locks, &missing).unwrap();
+    assert_eq!(snap, ProfileSnapshot::default());
+    std::fs::create_dir_all(&missing).unwrap();
+    restore_profile(&locks, &missing, &snap).unwrap();
+    assert!(!missing.join(".credentials.json").exists());
+    assert!(!missing.join(".claude.json").exists());
+}
+
+#[test]
+fn the_restore_waits_for_a_held_claude_code_lock_and_releases_its_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("profile");
+    std::fs::create_dir_all(&profile).unwrap();
+    let old = r#"{"oauthAccount":{"emailAddress":"old@x.com"}}"#;
+    std::fs::write(profile.join(".claude.json"), old).unwrap();
+    let locks = ProfileLocks::new();
+    let snap = snapshot_profile(&locks, &profile).unwrap();
+    std::fs::write(profile.join(".claude.json"), r#"{"oauthAccount":{"emailAddress":"other@x.com"}}"#).unwrap();
+    // A Claude Code process of this profile holds its credential lock: the restore waits for it.
+    std::fs::create_dir(profile.join(".oauth_refresh.lock")).unwrap();
+    std::thread::scope(|scope| {
+        let restoring = scope.spawn(|| restore_profile(&locks, &profile, &snap));
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(std::fs::read_to_string(profile.join(".claude.json")).unwrap().contains("other@x.com"));
+        std::fs::remove_dir(profile.join(".oauth_refresh.lock")).unwrap();
+        restoring.join().unwrap().unwrap();
+    });
+    assert_eq!(std::fs::read_to_string(profile.join(".claude.json")).unwrap(), old);
+    assert!(!profile.join(".oauth_refresh.lock").exists());
+    let mut legacy = profile.clone().into_os_string();
+    legacy.push(".lock");
+    assert!(!Path::new(&legacy).exists());
+}
+
+#[test]
+fn takes_the_snapshot_after_a_renewal_of_the_profile_that_is_still_in_flight() {
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().to_path_buf();
+    let renewed = r#"{"claudeAiOauth":{"accessToken":"fake-renewed"}}"#;
+    std::fs::write(profile.join(".credentials.json"), r#"{"claudeAiOauth":{"accessToken":"fake-before"}}"#).unwrap();
+    let locks = ProfileLocks::new();
+    let renewal = locks.lock(&profile);
+    std::thread::scope(|scope| {
+        let snapping = scope.spawn(|| snapshot_profile(&locks, &profile).unwrap());
+        std::thread::sleep(Duration::from_millis(50));
+        std::fs::write(profile.join(".credentials.json"), renewed).unwrap();
+        drop(renewal);
+        assert_eq!(snapping.join().unwrap().credentials.as_deref(), Some(renewed));
+    });
+}
+
+#[test]
+fn tells_when_the_profile_identity_was_rewritten_after_the_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().to_path_buf();
+    let file = profile.join(".claude.json");
+    let account =
+        |email: &str, at: u32| json!({ "numStartups": at, "oauthAccount": { "emailAddress": email, "profileFetchedAt": at } });
+    std::fs::write(&file, account("old@x.com", 1).to_string()).unwrap();
+    let locks = ProfileLocks::new();
+    let snap = snapshot_profile(&locks, &profile).unwrap();
+    assert!(!identity_rewritten(&profile, &snap).unwrap());
+    // Other keys of .claude.json change all the time; only oauthAccount counts.
+    let mut other_keys = account("old@x.com", 1);
+    other_keys["numStartups"] = json!(9);
+    std::fs::write(&file, other_keys.to_string()).unwrap();
+    assert!(!identity_rewritten(&profile, &snap).unwrap());
+    std::fs::write(&file, json!({ "numStartups": 9 }).to_string()).unwrap();
+    assert!(!identity_rewritten(&profile, &snap).unwrap());
+    // A re-login of the same account still writes a fresh profileFetchedAt.
+    std::fs::write(&file, account("old@x.com", 2).to_string()).unwrap();
+    assert!(identity_rewritten(&profile, &snap).unwrap());
+    assert!(identity_rewritten(&profile, &ProfileSnapshot::default()).unwrap());
+}

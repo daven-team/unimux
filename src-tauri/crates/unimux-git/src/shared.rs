@@ -1491,6 +1491,15 @@ mod tests {
         );
     }
 
+    /// test/platform.test.ts: Windows paths compare without case and separator style, Unix paths keep their case.
+    #[test]
+    fn keeps_unix_path_case_while_comparing_windows_paths_without_case() {
+        assert_eq!(normalize_project_path("D:\\Projects\\App\\"), normalize_project_path("d:/projects/app"));
+        assert_eq!(normalize_project_path("\\\\Server\\Share\\X"), normalize_project_path("//server/share/x/"));
+        assert_ne!(normalize_project_path("/Users/ala/App"), normalize_project_path("/Users/ala/app"));
+        assert_eq!(normalize_project_path("/Users/ala/App/"), "/Users/ala/App");
+    }
+
     #[test]
     fn worktree_allowed_without_a_slash() {
         assert!(worktree_allowed("app", "ap/app-wt-x", &[]));

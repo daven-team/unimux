@@ -329,6 +329,34 @@ mod tests {
         assert_eq!(r.invoke(Call::new("db:connect", gate.clone(), vec![])).await.unwrap_err().code(), "MC_REFUSED");
     }
 
+    /// test/ipc-guard.test.ts: a foreign send never reaches its handler; the app window's one does.
+    #[tokio::test]
+    async fn ignores_a_foreign_send_and_delivers_the_app_windows_one() {
+        let got = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let mut b = RouterBuilder::new(Contract::embedded());
+        let g = got.clone();
+        b.send("cell:kill", move |call| {
+            let g = g.clone();
+            async move { g.lock().push(call.arg(0).clone()) }
+        });
+        let r = b.build(guard());
+        // What the bridge does with a send: admit it, and run it only when admitted.
+        let deliver = |caller: Caller, id: &str| {
+            let call = Call::new("cell:kill", caller.clone(), vec![json!(id)]);
+            let admitted = r.admit_send("cell:kill", &caller).is_ok();
+            let r = &r;
+            async move {
+                if admitted {
+                    r.run_send(call).await;
+                }
+            }
+        };
+        deliver(Caller::new("main", "https://example.com/"), "cell-1").await;
+        assert!(got.lock().is_empty());
+        deliver(main(), "cell-2").await;
+        assert_eq!(*got.lock(), vec![json!("cell-2")]);
+    }
+
     #[test]
     fn registrations_are_checked_against_the_contract() {
         let mut b = RouterBuilder::new(Contract::embedded());

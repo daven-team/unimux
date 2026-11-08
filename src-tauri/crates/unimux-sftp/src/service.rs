@@ -749,8 +749,13 @@ mod tests {
         assert_eq!(f.timers.live(), vec![120_000]);
         f.service.pin_hosts(vec![HOST.into()], "detached-1");
         assert!(f.timers.live().is_empty());
+        // The main window's own (empty) list does not drop the detached window's pin.
+        f.service.pin_hosts(Vec::new(), "main");
+        assert!(f.timers.live().is_empty());
         f.service.renderer_gone("detached-1");
         assert_eq!(f.timers.live(), vec![120_000]);
+        f.timers.fire(120_000);
+        assert_eq!(f.log.lock().disconnects, vec![id]);
     }
 
     #[tokio::test]

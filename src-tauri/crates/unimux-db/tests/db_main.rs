@@ -250,6 +250,47 @@ async fn disconnects_an_idle_session_unless_a_tab_pins_it_or_it_is_busy() {
     assert_eq!(t.sent().last().unwrap(), &json!({ "t": "dbClose", "id": sid }));
 }
 
+/// test/detached-tabs.test.ts: the pins of every window count; a window that goes away drops only its own.
+#[tokio::test]
+async fn keeps_a_session_while_any_window_pins_it_a_window_that_goes_away_drops_only_its_own_pins() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = setup(dir.path(), Options::default());
+    let c = t.save(json!({}), PasswordChange::Keep);
+    let sid = session_id(t.service.connect(c["id"].as_str().unwrap(), None));
+    flush().await;
+    t.service.on_host_message(json!({ "t": "dbStatus", "id": sid, "phase": "connected" }));
+    let w1 = "f2b8a1c4-0000-4000-8000-000000000001";
+    unimux_db::ipc::pin(&t.service, &json!([sid]), w1);
+    unimux_db::ipc::pin(&t.service, &json!([]), "main");
+    t.timers.fire(5 * 60_000);
+    assert_eq!(t.last(&sid)["state"], "connected");
+    // The main window reloads: the detached window's pin still holds.
+    t.service.renderer_gone("main");
+    t.timers.fire(5 * 60_000);
+    assert_eq!(t.last(&sid)["state"], "connected");
+    t.service.renderer_gone(w1);
+    t.timers.fire(5 * 60_000);
+    assert_eq!(t.last(&sid)["state"], "closed");
+}
+
+/// test/detached-tabs.test.ts: every operation carries the asking window (its results go to that window's port).
+#[tokio::test]
+async fn passes_the_asking_window_with_every_operation() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = setup(dir.path(), Options::default());
+    let c = t.save(json!({}), PasswordChange::Keep);
+    let sid = session_id(t.service.connect(c["id"].as_str().unwrap(), None));
+    flush().await;
+    t.service.on_host_message(json!({ "t": "dbStatus", "id": sid, "phase": "connected" }));
+    let (w1, w2) = ("f2b8a1c4-0000-4000-8000-000000000001", "f2b8a1c4-0000-4000-8000-000000000002");
+    let query = json!({ "op": "query", "req": { "queryId": "00000000-0000-4000-8000-0000000000d1", "sql": "select 1" } });
+    let id = json!(sid);
+    unimux_db::ipc::pg(&t.service, &id, &query, Some(w1.into())).await;
+    unimux_db::ipc::redis(&t.service, &id, &json!({ "kind": "pubsubState" }), Some(w2.into())).await;
+    unimux_db::ipc::pg(&t.service, &id, &json!({ "op": "schemas" }), None).await;
+    assert_eq!(*t.host.windows.lock(), vec![Some(w1.to_string()), Some(w2.to_string()), None]);
+}
+
 #[tokio::test]
 async fn an_idle_timer_replaced_while_it_was_already_firing_does_not_disconnect() {
     let dir = tempfile::tempdir().unwrap();

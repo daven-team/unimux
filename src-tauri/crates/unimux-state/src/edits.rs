@@ -153,6 +153,22 @@ mod tests {
     }
 
     #[test]
+    fn keeps_an_mcp_created_grid_and_snippet_during_a_stale_renderer_settings_save() {
+        let tab = |id: &str| json!({"id": id, "name": id, "cells": [{"id": format!("{id}-c"), "profileId": "codex"}]});
+        let base = json!({"projects": [{"id": "p", "tabs": [tab("t1")]}], "snippets": [], "settings": {"fontSize": 13}});
+        // MCP added a grid and a snippet after the renderer took its copy.
+        let mut latest = base.clone();
+        latest["projects"][0]["tabs"].as_array_mut().unwrap().push(tab("mcp"));
+        latest["snippets"] = json!([{"id": "mcp-snippet", "name": "Review", "text": "Review code", "autoSend": false}]);
+        let mut next = base.clone();
+        next["settings"]["fontSize"] = json!(17);
+        let merged = merge_state_edit(&latest, &base, &next);
+        assert_eq!(merged["projects"][0]["tabs"].as_array().unwrap().len(), 2);
+        assert_eq!(merged["snippets"][0]["id"], "mcp-snippet");
+        assert_eq!(merged["settings"]["fontSize"], 17);
+    }
+
+    #[test]
     fn does_not_resurrect_a_deleted_entity() {
         let current = json!({"projects": [{"id": "b", "n": 1}]});
         let base = json!({"projects": [{"id": "a", "n": 1}, {"id": "b", "n": 1}]});
