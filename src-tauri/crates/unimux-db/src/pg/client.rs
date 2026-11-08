@@ -143,7 +143,13 @@ pub struct PgClient {
     /// Notices of the startup (kept for the caller).
     startup_notices: Vec<PgServerError>,
     broken: bool,
+    /// Portal names of [`PgCursor`]s (`C_<n>` like pg-cursor).
+    portal_seq: u64,
 }
+
+// D5: portals read in batches (pg-cursor) and the reads between statements.
+mod cursor;
+pub use cursor::{CursorRows, CursorState, IdleEvent, PgCursor};
 
 impl std::fmt::Debug for PgClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -192,6 +198,7 @@ impl PgClient {
             heard: false,
             startup_notices: Vec::new(),
             broken: false,
+            portal_seq: 0,
         };
         let cfg =
             PgConfig { user: login.user.clone(), database: login.database.clone(), password: None, protocol: Protocol::V3_0 };

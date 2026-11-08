@@ -9,11 +9,17 @@
 //! - [`port`]: server errors and notices as DB port JSON (lone-surrogate safe) and the statement error codes.
 //! - [`error`]: connect errors and their fixed codes (`mapConnectError`).
 //!
-//! Cursors, read-only enforcement and runs (D5), metadata, pages and edits (D6) build on [`client::PgClient`].
+//! - [`session`] (D5): PgSession: runs, cursors (portals read in adaptive batches, one open result), fetchMore /
+//!   closeResult, read-only enforcement with the readWrite override, statement timeouts, cancel, transaction ops.
+//! - [`messages`] (D5): the DB port messages of a session.
+//!
+//! Metadata, pages and edits (D6) build on [`session`].
 
 pub mod cancel;
 pub mod client;
 pub mod connect;
 pub mod error;
+pub mod messages;
 pub mod port;
+pub mod session;
 pub mod tls;
