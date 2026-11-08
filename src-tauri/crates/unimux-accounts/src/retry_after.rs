@@ -71,4 +71,16 @@ mod tests {
         assert_eq!(parse_retry_after(Some("Fri, 16 Oct 2026 12:01:30 GMT"), NOW), Some(90_000.0));
         assert_eq!(parse_retry_after(Some("Fri, 16 Oct 2026 11:00:00 GMT"), NOW), None);
     }
+
+    /// usage-fixes "never returns 0 or a sub-second pause"
+    #[test]
+    fn ts_never_zero_or_a_sub_second_pause() {
+        assert_eq!(parse_retry_after(Some("0.4"), NOW), Some(1000.0));
+        assert_eq!(parse_retry_after(Some("0.0001"), NOW), Some(1000.0));
+        assert_eq!(parse_retry_after(Some("0"), NOW), None);
+        // `new Date(NOW + 200).toUTCString()`: the date has whole seconds, so it is now: no usable pause.
+        assert_eq!(parse_retry_after(Some("Fri, 16 Oct 2026 12:00:00 GMT"), NOW), None);
+        assert_eq!(parse_retry_after(Some("2"), NOW), Some(2000.0));
+        assert_eq!(parse_retry_after(Some("abc"), NOW), None);
+    }
 }

@@ -708,18 +708,16 @@ impl LoginManager {
     async fn restore(&self, session: &Arc<Session>) -> bool {
         let snapshot = session.st.lock().snapshot.take();
         let (Some(snapshot), Some(dir)) = (snapshot, session.config_dir.clone()) else { return true };
-        let restored = self.put_back(&dir, snapshot.clone()).await;
-        if !restored && let Some(id) = session.account_id() {
-            self.park(id, &dir, snapshot);
-        }
-        restored
+        self.put_back(&dir, snapshot, session.account_id()).await
     }
 
-    /// Runs the restore tries for one dir, registered in `restoring` at once.
-    fn put_back(&self, dir: &Path, snapshot: Arc<ProfileSnapshot>) -> SharedBool {
+    /// Runs the restore tries for one dir, registered in `restoring` at once. When they all fail and `park_as` names the
+    /// card, it is parked before the dir leaves `restoring`, so the profile is held (never renewed) all the way through.
+    fn put_back(&self, dir: &Path, snapshot: Arc<ProfileSnapshot>, park_as: Option<&str>) -> SharedBool {
         let deps = self.deps.clone();
         let gap = self.t.restore_gap;
         let me = self.me.clone();
+        let park_as = park_as.map(str::to_string);
         let mut inner = self.inner.lock();
         let seq = inner.next();
         let owned = dir.to_path_buf();
@@ -735,6 +733,9 @@ impl LoginManager {
                 }
             }
             if let Some(me) = me.upgrade() {
+                if !restored && let Some(id) = &park_as {
+                    me.park(id, &owned, snapshot);
+                }
                 me.inner.lock().restoring.retain(|(d, s, _)| !(d == &owned && *s == seq));
             }
             restored
@@ -775,7 +776,7 @@ impl LoginManager {
         if !same(self) {
             return;
         }
-        if !self.put_back(&entry.dir, entry.snapshot.clone()).await {
+        if !self.put_back(&entry.dir, entry.snapshot.clone(), None).await {
             return;
         }
         if !same(self) {
@@ -802,11 +803,12 @@ impl LoginManager {
     /// another login). The dir counts as restoring meanwhile.
     fn undo(&self, session: &Arc<Session>, written: bool) {
         if written {
-            let me = self.me();
-            let s = session.clone();
-            self.rt.spawn(async move {
-                me.restore(&s).await;
-            });
+            let snapshot = session.st.lock().snapshot.take();
+            if let (Some(snapshot), Some(dir)) = (snapshot, session.config_dir.clone()) {
+                // Registered as restoring before this returns (like 1.1.4's synchronous start of the restore): the card is
+                // never renewable between the end of its login and the restore.
+                let _restoring = self.put_back(&dir, snapshot, session.account_id());
+            }
             return;
         }
         let (snapshot, initial) = {
@@ -825,15 +827,7 @@ impl LoginManager {
         let task = self.rt.spawn(async move {
             me.deps.reset_credential_cache();
             let now = me.deps.fingerprint(provider, Some(owned.clone())).await.ok();
-            let restored = if now.as_ref() == Some(&initial) {
-                true
-            } else {
-                let restored = me.put_back(&owned, snapshot.clone()).await;
-                if !restored {
-                    me.park(&id, &owned, snapshot);
-                }
-                restored
-            };
+            let restored = if now.as_ref() == Some(&initial) { true } else { me.put_back(&owned, snapshot, Some(&id)).await };
             me.inner.lock().restoring.retain(|(d, s, _)| !(d == &owned && *s == seq));
             restored
         });

@@ -351,4 +351,47 @@ mod tests {
         assert_eq!(clamp_percent(f64::NAN), 0.0);
         assert_eq!(clamp_percent(130.0), 100.0);
     }
+
+    /// accounts-dead-login "keeps the other states apart: current, stale, unavailable"
+    #[test]
+    fn ts_card_states_stay_apart() {
+        let mut base = ProviderUsage::new("claude:x", Provider::Claude, Status::Ok, 1.0, Source::Live);
+        base.windows.push(UsageWindow { id: WindowId::SevenDay, used_percent: 96.0, resets_at: 2.0 });
+        let with = |f: &dyn Fn(&mut ProviderUsage)| {
+            let mut u = base.clone();
+            f(&mut u);
+            card_state(&u)
+        };
+        assert_eq!(card_state(&base), CardState::Ok);
+        assert_eq!(with(&|u| u.source = Source::Cache), CardState::Stale);
+        assert_eq!(with(&|u| (u.status, u.source) = (Status::Dormant, Source::Cache)), CardState::Stale);
+        assert_eq!(with(&|u| (u.status, u.error) = (Status::Error, Some("http-429".into()))), CardState::Stale);
+        assert_eq!(
+            with(&|u| (u.status, u.held_by, u.source) = (Status::Elsewhere, Some(HeldBy::Live), Source::Cache)),
+            CardState::Stale
+        );
+        assert_eq!(with(&|u| (u.status, u.windows) = (Status::Error, vec![])), CardState::Unavailable);
+        assert_eq!(with(&|u| (u.status, u.windows) = (Status::Forbidden, vec![])), CardState::Unavailable);
+        assert_eq!(with(&|u| (u.provider, u.status, u.windows) = (Provider::Codex, Status::ApiKey, vec![])), CardState::ApiKey);
+    }
+
+    /// usage-shared "clamps percentages and rejects non-numbers", "treats a window that already reset as unused", "names who
+    /// holds a saved account whose tokens are not renewed"
+    #[test]
+    fn ts_clamp_effective_percent_and_held_by() {
+        assert_eq!([142.0, -3.0, f64::NAN, 41.5].map(clamp_percent), [100.0, 0.0, 0.0, 41.5]);
+        let now = 1_791_720_000_000.0;
+        let past = (now / 1000.0f64).floor() - 1.0;
+        let w = |id, used_percent, resets_at| UsageWindow { id, used_percent, resets_at };
+        assert_eq!(effective_percent(&w(WindowId::FiveHour, 80.0, past), now), 0.0);
+        assert_eq!(effective_percent(&w(WindowId::FiveHour, 80.0, past + 3600.0), now), 80.0);
+        assert_eq!(effective_percent(&w(WindowId::FiveHour, 12.0, 0.0), now), 12.0);
+        assert_eq!(effective_percent(&w(WindowId::SevenDay, 250.0, past + 60.0), now), 100.0);
+        assert_eq!(held_by_of(None), None);
+        assert_eq!(held_by_of(Some(RenewRule::Allowed)), None);
+        assert_eq!(held_by_of(Some(RenewRule::HeldByLive)), Some(HeldBy::Live));
+        assert_eq!(held_by_of(Some(RenewRule::HeldByCswap)), Some(HeldBy::Cswap));
+        assert_eq!(held_by_of(Some(RenewRule::SwitchedOut)), Some(HeldBy::SwitchedOut));
+        assert_eq!(HeldBy::SwitchedOut.as_str(), "switched-out");
+    }
 }

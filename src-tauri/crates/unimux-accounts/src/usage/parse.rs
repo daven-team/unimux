@@ -278,4 +278,103 @@ mod tests {
         assert_eq!(parse_iso_date("2026-11-06T13:30:00+01:00"), 1_793_968_200_000.0);
         assert!(parse_iso_date("soon").is_nan());
     }
+
+    fn ids(w: &[UsageWindow]) -> Vec<(WindowId, f64, f64)> {
+        w.iter().map(|w| (w.id, w.used_percent, w.resets_at)).collect()
+    }
+
+    const NOW: f64 = 1_791_720_000_000.0; // 2026-10-11T12:00:00Z
+
+    /// usage-parse "reads both windows with their reset times", "keeps percentages inside 0 to 100 and accepts numeric
+    /// strings", "reads an exhausted account: 100 percent, null resets, null windows and unrelated extra fields", "reports no
+    /// reset time when no window is active", "uses the windows that are present and rejects bodies without any"
+    #[test]
+    fn ts_claude_usage_bodies() {
+        let at = |iso: &str| (parse_iso_date(iso) / 1000.0).floor();
+        let body = json!({ "five_hour": { "utilization": 42.4, "resets_at": "2026-10-11T15:00:00.123456+00:00" },
+            "seven_day": { "utilization": 7, "resets_at": "2026-10-17T04:00:00Z" }, "extra_usage": { "is_enabled": false } });
+        assert_eq!(
+            ids(&parse_claude_usage(&body).unwrap()),
+            [(WindowId::FiveHour, 42.4, at("2026-10-11T15:00:00Z")), (WindowId::SevenDay, 7.0, at("2026-10-17T04:00:00Z"))]
+        );
+        let w = parse_claude_usage(&json!({ "five_hour": { "utilization": 142, "resets_at": null }, "seven_day": { "utilization": "55", "resets_at": "2026-10-17T04:00:00Z" } })).unwrap();
+        assert_eq!(w.iter().map(|w| w.used_percent).collect::<Vec<_>>(), [100.0, 55.0]);
+        assert_eq!(
+            parse_claude_usage(&json!({ "five_hour": { "utilization": -4, "resets_at": null } })).unwrap()[0].used_percent,
+            0.0
+        );
+        let exhausted = json!({ "five_hour": { "utilization": 0.0, "resets_at": null },
+            "seven_day": { "utilization": 100.0, "resets_at": "2026-10-15T21:59:59.943648+00:00" }, "seven_day_oauth_apps": null,
+            "seven_day_opus": null, "seven_day_sonnet": { "utilization": 12, "resets_at": null }, "iguana_necktie": null,
+            "extra_usage": { "is_enabled": false, "monthly_limit": null, "used_credits": null, "utilization": null } });
+        assert_eq!(
+            ids(&parse_claude_usage(&exhausted).unwrap()),
+            [(WindowId::FiveHour, 0.0, 0.0), (WindowId::SevenDay, 100.0, at("2026-10-15T21:59:59Z"))]
+        );
+        assert_eq!(
+            ids(&parse_claude_usage(&json!({ "five_hour": null, "seven_day": { "utilization": 137, "resets_at": null } }))
+                .unwrap()),
+            [(WindowId::SevenDay, 100.0, 0.0)]
+        );
+        assert_eq!(parse_claude_usage(&json!({ "five_hour": null, "seven_day": null })).unwrap(), vec![]);
+        let w = parse_claude_usage(&json!({ "five_hour": { "utilization": 0, "resets_at": null }, "seven_day": { "utilization": 3, "resets_at": "garbage" } })).unwrap();
+        assert_eq!(w.iter().map(|w| w.resets_at).collect::<Vec<_>>(), [0.0, 0.0]);
+        assert_eq!(parse_claude_usage(&json!({ "seven_day": { "utilization": 3, "resets_at": null } })).unwrap().len(), 1);
+        assert_eq!(parse_claude_usage(&json!({ "five_hour": {}, "seven_day": { "utilization": "n/a" } })).unwrap(), vec![]);
+        for bad in [json!({ "unrelated": 1 }), json!({}), json!(null), json!([]), json!("error")] {
+            assert!(parse_claude_usage(&bad).is_none(), "{bad}");
+        }
+    }
+
+    /// usage-parse "reads the session log shape (minutes, epoch seconds)", "reads the live shape (seconds, relative or
+    /// absolute reset)", "accepts windows at the top level and epoch milliseconds", "classifies windows by length and never
+    /// gives two windows the same id", "returns null when there are no usable windows"
+    #[test]
+    fn ts_codex_rate_limit_shapes() {
+        let event = json!({ "type": "token_count", "rate_limits": {
+            "primary": { "used_percent": 8, "window_minutes": 300, "resets_at": 1781010642 },
+            "secondary": { "used_percent": 3, "window_minutes": 10080, "resets_at": 1781558816 }, "plan_type": "plus" } });
+        assert_eq!(
+            ids(&parse_codex_rate_limits(&event, NOW).unwrap()),
+            [(WindowId::FiveHour, 8.0, 1_781_010_642.0), (WindowId::SevenDay, 3.0, 1_781_558_816.0)]
+        );
+        assert_eq!(parse_codex_plan(&event).as_deref(), Some("plus"));
+        let live = json!({ "plan_type": "pro", "rate_limit": {
+            "primary_window": { "used_percent": 12.5, "limit_window_seconds": 18000, "reset_at": 1781010642 },
+            "secondary_window": { "used_percent": 30, "limit_window_seconds": 604800, "reset_after_seconds": 1000 } } });
+        assert_eq!(
+            ids(&parse_codex_rate_limits(&live, NOW).unwrap()),
+            [(WindowId::FiveHour, 12.5, 1_781_010_642.0), (WindowId::SevenDay, 30.0, (NOW / 1000.0).floor() + 1000.0)]
+        );
+        assert_eq!(parse_codex_plan(&live).as_deref(), Some("pro"));
+        let top = json!({ "primary": { "used_percent": 1, "resets_at": 1781010642000u64 } });
+        assert_eq!(ids(&parse_codex_rate_limits(&top, NOW).unwrap()), [(WindowId::FiveHour, 1.0, 1_781_010_642.0)]);
+        let long =
+            json!({ "primary": { "used_percent": 5, "window_seconds": 0, "limit_window_seconds": 604800, "resets_at": 1 } });
+        assert_eq!(parse_codex_rate_limits(&long, NOW).unwrap()[0].id, WindowId::SevenDay);
+        let same = json!({ "primary": { "used_percent": 1, "window_minutes": 300, "resets_at": 1 }, "secondary": { "used_percent": 2, "window_minutes": 300, "resets_at": 2 } });
+        assert_eq!(
+            parse_codex_rate_limits(&same, NOW).unwrap().iter().map(|w| w.id).collect::<Vec<_>>(),
+            [WindowId::FiveHour, WindowId::SevenDay]
+        );
+        assert!(parse_codex_rate_limits(&json!({ "rate_limits": { "primary": null, "secondary": null } }), NOW).is_none());
+        assert!(parse_codex_rate_limits(&json!({ "rate_limits": { "primary": { "used_percent": "x" } } }), NOW).is_none());
+        assert!(parse_codex_rate_limits(&json!(null), NOW).is_none());
+        assert!(parse_codex_rate_limits(&json!({}), NOW).is_none());
+        assert_eq!(parse_codex_plan(&json!({})), None);
+    }
+
+    /// usage-parse "decodes the payload without verifying anything", "returns null for malformed tokens"
+    #[test]
+    fn ts_jwt_payloads() {
+        use base64::Engine;
+        let b64 = |v: Value| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v.to_string());
+        let token =
+            format!("{}.{}.signature", b64(json!({ "alg": "none" })), b64(json!({ "email": "a@b.pl", "exp": 1781010642 })));
+        assert_eq!(Value::Object(decode_jwt_claims(&token).unwrap()), json!({ "email": "a@b.pl", "exp": 1781010642 }));
+        assert!(decode_jwt_claims("").is_none());
+        assert!(decode_jwt_claims("only-one-part").is_none());
+        assert!(decode_jwt_claims("a.%%%.c").is_none());
+        assert!(decode_jwt_claims(&format!("a.{}.c", b64(json!([1, 2])))).is_none());
+    }
 }

@@ -625,8 +625,12 @@ impl UsageService {
             hold
         };
         let stamp = self.o.credentials_stamp.as_ref().and_then(|s| s(&r));
-        let result = match tokio::time::timeout(self.o.fetch_timeout, (self.o.fetch_account)(r.clone())).await {
-            Ok(result) => result,
+        // A fetcher that panics is a failed read like a throwing one in 1.1.4 (`network`): it must not take the run down,
+        // which would leave the shared run pending forever and stop every later refresh.
+        let fetch = std::panic::AssertUnwindSafe(async { (self.o.fetch_account)(r.clone()).await }).catch_unwind();
+        let result = match tokio::time::timeout(self.o.fetch_timeout, fetch).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Self::failure(&r, now, "network"),
             Err(_) => Self::failure(&r, now, "timeout"),
         };
         // A result for an account removed (or switched to another identity) while it was in flight is dropped.
@@ -925,3 +929,5 @@ impl UsageService {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod ts_ports;

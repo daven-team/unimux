@@ -116,4 +116,57 @@ mod tests {
         assert_eq!(log.at, parse_iso_date("2026-11-06T11:00:00Z"));
         assert!(read_codex_log(&home.path().join("none"), 0.0).is_none());
     }
+
+    fn event(primary: u32, ts: &str) -> String {
+        format!(
+            r#"{{"timestamp":"{ts}","type":"event_msg","payload":{{"type":"token_count","rate_limits":{{"primary":{{"used_percent":{primary},"window_minutes":300,"resets_at":1781010642}},"secondary":{{"used_percent":3,"window_minutes":10080,"resets_at":1781558816}},"plan_type":"plus"}}}}}}"#
+        )
+    }
+
+    fn put(home: &Path, rel: &str, body: &str) {
+        let path = home.join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+    }
+
+    /// usage-fetchers "returns the newest event that has limits and ignores empty ones", "reads only the tail of a huge log",
+    /// "does not find an event that sits only in the unread head of a huge log", "is null without sessions or without any
+    /// limits"
+    #[test]
+    fn ts_newest_event_tail_only_and_nothing_without_limits() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        assert!(read_codex_log(h, 0.0).is_none());
+        put(h, "sessions/2026/10/10/rollout-x.jsonl", "not json\n{\"payload\":{}}\n");
+        assert!(read_codex_log(h, 0.0).is_none());
+
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        put(h, "sessions/2026/10/08/rollout-2026-10-08T10-00-00-a.jsonl", &format!("{}\n", event(11, "2026-10-08T10:00:00Z")));
+        let empty = r#"{"timestamp":"2026-10-09T11:00:00Z","payload":{"type":"token_count","rate_limits":{"primary":null,"secondary":null}}}"#;
+        put(
+            h,
+            "sessions/2026/10/09/rollout-2026-10-09T10-00-00-b.jsonl",
+            &format!("{}\n{empty}\n", event(22, "2026-10-09T10:00:00Z")),
+        );
+        let log = read_codex_log(h, 0.0).unwrap();
+        assert_eq!(log.windows.iter().map(|w| w.used_percent).collect::<Vec<_>>(), [22.0, 3.0]);
+        assert_eq!((log.plan.as_deref(), log.at), (Some("plus"), parse_iso_date("2026-10-09T10:00:00Z")));
+
+        let filler = format!("{}\n", "x".repeat(2000)).repeat(2500);
+        let home = tempfile::tempdir().unwrap();
+        put(
+            home.path(),
+            "sessions/2026/10/10/rollout-2026-10-10T10-00-00-c.jsonl",
+            &format!("{filler}{}\n", event(77, "2026-10-10T10:00:00Z")),
+        );
+        assert_eq!(read_codex_log(home.path(), 0.0).unwrap().windows[0].used_percent, 77.0);
+        let home = tempfile::tempdir().unwrap();
+        put(
+            home.path(),
+            "sessions/2026/10/10/rollout-2026-10-10T10-00-00-d.jsonl",
+            &format!("{}\n{filler}", event(66, "2026-10-10T10:00:00Z")),
+        );
+        assert!(read_codex_log(home.path(), 0.0).is_none());
+    }
 }

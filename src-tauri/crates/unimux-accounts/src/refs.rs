@@ -221,6 +221,43 @@ mod tests {
         assert!(accounts_panel_info(&again, &[]).set_aside.is_empty());
     }
 
+    /// accounts-refs "renews only app-held families that live nowhere else", "blocks a quarantined record and one whose
+    /// identity cannot be told apart from the live login"
+    #[test]
+    fn ts_the_renew_rule() {
+        let r = |custody: Option<Custody>, family: Option<TokenFamily>| ManagedAccount {
+            id: A.into(),
+            added_at: 1.0,
+            identity: AccountIdentity { email: Some("u1@x.com".into()), account_uuid: Some("u1".into()), ..Default::default() },
+            custody,
+            family,
+            ..Default::default()
+        };
+        let live = |email: &str, uuid: &str| LiveIdentity {
+            identity: AccountIdentity { email: Some(email.into()), account_uuid: Some(uuid.into()), ..Default::default() },
+            record_id: None,
+        };
+        let none = CswapRoster::Absent;
+        assert_eq!(renew_rule(&r(None, Some(TokenFamily::Own)), None, &none), RenewRule::Allowed);
+        assert_eq!(renew_rule(&r(Some(Custody::Foreign), None), None, &none), RenewRule::SwitchedOut);
+        assert_eq!(renew_rule(&r(Some(Custody::Live), None), None, &none), RenewRule::HeldByLive);
+        assert_eq!(renew_rule(&r(None, Some(TokenFamily::Own)), Some(&live("u1@x.com", "u1")), &none), RenewRule::HeldByLive);
+        let roster = CswapRoster::Present(Some(vec![AccountIdentity {
+            email: Some("u1@x.com".into()),
+            account_uuid: Some("u1".into()),
+            ..Default::default()
+        }]));
+        assert_eq!(renew_rule(&r(None, None), None, &roster), RenewRule::HeldByCswap);
+        assert_eq!(renew_rule(&r(None, Some(TokenFamily::Own)), None, &roster), RenewRule::Allowed);
+        assert_eq!(renew_rule(&r(None, None), None, &CswapRoster::UNREADABLE), RenewRule::HeldByCswap);
+
+        assert_ne!(renew_rule(&r(Some(Custody::Quarantined), Some(TokenFamily::Own)), None, &none), RenewRule::Allowed);
+        let unknown = ManagedAccount { id: B.into(), added_at: 4.0, family: Some(TokenFamily::Own), ..Default::default() };
+        assert_eq!(renew_rule(&unknown, Some(&live("u2@x.com", "u2")), &none), RenewRule::HeldByLive);
+        assert_eq!(renew_rule(&unknown, None, &none), RenewRule::Allowed);
+        assert_eq!(renew_rule(&r(None, Some(TokenFamily::Own)), Some(&live("u2@x.com", "u2")), &none), RenewRule::Allowed);
+    }
+
     /// accounts-dead-login "hides switch-out banners stored by older versions and "added" banners (1.1.2)".
     #[test]
     fn hides_switch_out_and_added_banners() {

@@ -416,4 +416,204 @@ mod tests {
         use base64::Engine;
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(text)
     }
+
+    // ---- case-by-case ports of test/usage-credentials.test.ts --------------------------------------------------------
+
+    struct CountingKeychain(Arc<std::sync::atomic::AtomicUsize>, Option<String>);
+
+    impl Keychain for CountingKeychain {
+        fn read(&self) -> BoxFuture<'static, Option<String>> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let v = self.1.clone();
+            async move { v }.boxed()
+        }
+    }
+
+    fn with_env(mut s: CredentialSource, env: &[(&str, &str)]) -> CredentialSource {
+        s.env = Arc::new(env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
+        s
+    }
+
+    fn live(raw: &str) -> CredentialSource {
+        source(vec![("/home/u/.claude/.credentials.json", raw.to_string())])
+    }
+
+    /// "reads the token, expiry and plan from the credentials file", "labels plans with and without a multiplier", "prefers
+    /// the environment token and honours CLAUDE_CONFIG_DIR", "treats missing, corrupt or incomplete files as signed out"
+    #[tokio::test]
+    async fn ts_claude_credentials_file_env_token_config_dir_and_bad_files() {
+        let raw = json!({ "claudeAiOauth": { "accessToken": "tok-1", "expiresAt": 1781010642000u64, "subscriptionType": "max", "rateLimitTier": "default_claude_max_5x" } });
+        let c = read_claude_credentials(&live(&raw.to_string())).await.unwrap();
+        assert_eq!(
+            (c.access_token.as_str(), c.expires_at, c.plan.as_deref(), c.has_refresh),
+            ("tok-1", Some(1_781_010_642_000.0), Some("Max 5x"), false)
+        );
+        assert_eq!(claude_plan_label(Some(&json!("pro")), Some(&json!("default_claude_pro"))).as_deref(), Some("Pro"));
+        assert_eq!(claude_plan_label(Some(&json!("MAX")), Some(&json!("x_20x"))).as_deref(), Some("Max 20x"));
+        assert_eq!(claude_plan_label(None, None), None);
+        assert_eq!(claude_plan_label(Some(&json!(5)), None), None);
+
+        let env = with_env(source(vec![]), &[("CLAUDE_CODE_OAUTH_TOKEN", " env-token ")]);
+        let c = read_claude_credentials(&env).await.unwrap();
+        assert_eq!((c.access_token.as_str(), c.expires_at, c.plan, c.has_refresh), ("env-token", None, None, false));
+        let other = with_env(
+            source(vec![("/o/.credentials.json", json!({ "claudeAiOauth": { "accessToken": "tok-2" } }).to_string())]),
+            &[("CLAUDE_CONFIG_DIR", "/o")],
+        );
+        assert_eq!(read_claude_credentials(&other).await.unwrap().access_token, "tok-2");
+
+        assert!(read_claude_credentials(&source(vec![])).await.is_none());
+        for bad in ["{not json", r#"{"claudeAiOauth":{"accessToken":""}}"#, r#"{"somethingElse":true}"#, "[]"] {
+            assert!(read_claude_credentials(&live(bad)).await.is_none(), "{bad}");
+        }
+    }
+
+    /// "falls back to the macOS Keychain only on macOS and only without a file"
+    #[tokio::test]
+    async fn ts_the_keychain_only_on_macos_and_only_without_a_file() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let kc: Arc<dyn Keychain> =
+            Arc::new(CountingKeychain(calls.clone(), Some(json!({ "claudeAiOauth": { "accessToken": "tok-kc" } }).to_string())));
+        let mut win = source(vec![]);
+        win.keychain = Some(kc.clone());
+        assert!(read_claude_credentials(&win).await.is_none());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let mac = CredentialSource { darwin: true, ..win.clone() };
+        let c = read_claude_credentials(&mac).await.unwrap();
+        assert_eq!((c.access_token.as_str(), c.expires_at, c.plan, c.has_refresh), ("tok-kc", None, None, false));
+        let mut file = live(&json!({ "claudeAiOauth": { "accessToken": "tok-file" } }).to_string());
+        file.darwin = true;
+        file.keychain = Some(kc);
+        assert_eq!(read_claude_credentials(&file).await.unwrap().access_token, "tok-file");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    /// "works when the tokens carry no readable claims", "recognises API key logins, which have no limits", "honours CODEX_HOME
+    /// and treats missing or corrupt files as signed out"
+    #[test]
+    fn ts_codex_credentials_opaque_tokens_api_keys_codex_home_and_bad_files() {
+        let chatgpt = |access: &str, id: &str| {
+            json!({ "auth_mode": "chatgpt", "OPENAI_API_KEY": null, "tokens": { "id_token": id, "access_token": access, "refresh_token": "r", "account_id": "acc-1" } }).to_string()
+        };
+        let c = read_codex_credentials(&source(vec![("/home/u/.codex/auth.json", chatgpt("opaque", "opaque"))])).unwrap();
+        assert!(c.mode == CodexMode::Chatgpt);
+        assert_eq!((c.access_token.as_deref(), c.account_id.as_deref(), c.expires_at), (Some("opaque"), Some("acc-1"), None));
+        assert_eq!((c.plan, c.email, c.has_refresh), (None, None, true));
+        let key = json!({ "auth_mode": "apikey", "OPENAI_API_KEY": "sk-test", "tokens": null }).to_string();
+        let c = read_codex_credentials(&source(vec![("/home/u/.codex/auth.json", key)])).unwrap();
+        assert!(c.mode == CodexMode::ApiKey && c.access_token.is_none() && c.account_id.is_none());
+        assert!(read_codex_credentials(&source(vec![])).is_none());
+        assert!(read_codex_credentials(&source(vec![("/home/u/.codex/auth.json", "{broken".into())])).is_none());
+        let empty = json!({ "auth_mode": "chatgpt", "tokens": { "access_token": "" } }).to_string();
+        assert!(read_codex_credentials(&source(vec![("/home/u/.codex/auth.json", empty)])).is_none());
+        let elsewhere = with_env(source(vec![("/e/auth.json", chatgpt("opaque", "opaque"))]), &[("CODEX_HOME", "/e")]);
+        assert!(read_codex_credentials(&elsewhere).unwrap().mode == CodexMode::Chatgpt);
+    }
+
+    /// "holds a null result for the hold time and then asks again", "forgets a remembered failure on reset (a login must see
+    /// fresh credentials)", "does not cache a successful read"
+    #[tokio::test]
+    async fn ts_the_failure_cache_holds_a_failure_until_the_hold_ends_or_a_reset() {
+        let clock = Arc::new(Mutex::new(1000.0));
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let answers = Arc::new(Mutex::new(Vec::<Option<String>>::new()));
+        let (c, a) = (calls.clone(), answers.clone());
+        let read: Arc<dyn Fn() -> BoxFuture<'static, Option<String>> + Send + Sync> = Arc::new(move || {
+            c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let v = a.lock().pop().flatten();
+            async move { v }.boxed()
+        });
+        let k = clock.clone();
+        let cached = FailureCache::new(read, Duration::from_millis(500), Arc::new(move || *k.lock()));
+        let n = || calls.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(cached.read().await.is_none());
+        *clock.lock() += 499.0;
+        assert!(cached.read().await.is_none());
+        assert_eq!(n(), 1);
+        *clock.lock() += 2.0;
+        cached.read().await;
+        assert_eq!(n(), 2);
+        // Reset: the next read asks again and sees the fresh login.
+        *answers.lock() = vec![Some("secret".into())];
+        assert!(cached.read().await.is_none());
+        assert_eq!(n(), 2);
+        cached.reset();
+        assert_eq!(cached.read().await.as_deref(), Some("secret"));
+        // A success is not cached.
+        *answers.lock() = vec![Some("secret".into()), Some("secret".into())];
+        assert_eq!(cached.read().await.as_deref(), Some("secret"));
+        assert_eq!(cached.read().await.as_deref(), Some("secret"));
+        assert_eq!(n(), 5);
+    }
+
+    /// "points at the profile directory, drops the env token and never reaches the Keychain"
+    #[tokio::test]
+    async fn ts_a_profile_source_uses_its_directory_without_the_env_token_or_the_keychain() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let kc: Arc<dyn Keychain> = Arc::new(CountingKeychain(
+            calls.clone(),
+            Some(json!({ "claudeAiOauth": { "accessToken": "keychain-token" } }).to_string()),
+        ));
+        let mut base =
+            with_env(source(vec![]), &[("CLAUDE_CODE_OAUTH_TOKEN", "env-token"), ("CLAUDE_CONFIG_DIR", "/main"), ("KEEP", "1")]);
+        base.darwin = true;
+        base.keychain = Some(kc);
+        let p = base.profile(Path::new("/profile"));
+        assert_eq!(p.env.get("CLAUDE_CONFIG_DIR").map(String::as_str), Some("/profile"));
+        assert_eq!(
+            (p.env.get("CLAUDE_CODE_OAUTH_TOKEN").map(String::as_str), p.env.get("KEEP").map(String::as_str)),
+            (Some(""), Some("1"))
+        );
+        assert!(!p.darwin);
+        assert!(read_claude_credentials(&p).await.is_none());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let files = source(vec![(
+            "/profile/.credentials.json",
+            json!({ "claudeAiOauth": { "accessToken": "tok-profile" } }).to_string(),
+        )]);
+        let p = CredentialSource { read_file: files.read_file, ..p };
+        assert_eq!(read_claude_credentials(&p).await.unwrap().access_token, "tok-profile");
+    }
+
+    /// "reads the email and organization from .claude.json in the home directory", "reads .claude.json from CLAUDE_CONFIG_DIR
+    /// when it is set", "returns nothing for a missing, corrupt or non-object file"
+    #[test]
+    fn ts_read_claude_identity_from_home_or_config_dir() {
+        let account = json!({ "oauthAccount": { "emailAddress": "me@example.com", "organizationName": "Acme" } }).to_string();
+        let id = read_claude_identity(&source(vec![("/home/u/.claude.json", account.clone())]));
+        assert_eq!((id.email.as_deref(), id.org.as_deref()), (Some("me@example.com"), Some("Acme")));
+        let other = json!({ "oauthAccount": { "emailAddress": "other@example.com" } }).to_string();
+        let s = with_env(
+            source(vec![("/home/u/.claude.json", account), ("/profile/.claude.json", other)]),
+            &[("CLAUDE_CONFIG_DIR", "/profile")],
+        );
+        let id = read_claude_identity(&s);
+        assert_eq!((id.email.as_deref(), id.org), (Some("other@example.com"), None));
+        assert_eq!(read_claude_identity(&source(vec![])), AccountIdentity::default());
+        for bad in ["{broken", "[1,2]", r#"{"oauthAccount":"x"}"#] {
+            assert_eq!(
+                read_claude_identity(&source(vec![("/home/u/.claude.json", bad.into())])),
+                AccountIdentity::default(),
+                "{bad}"
+            );
+        }
+    }
+
+    /// "reports a refresh token without exposing it and stamps the file"
+    #[tokio::test]
+    async fn ts_a_refresh_token_is_reported_only_as_a_hash_and_the_file_is_stamped() {
+        let home = tempfile::tempdir().unwrap();
+        let s = CredentialSource::system(BTreeMap::new(), home.path().to_path_buf(), false, None);
+        assert!(claude_credentials_stamp(&s).is_none());
+        std::fs::create_dir_all(home.path().join(".claude")).unwrap();
+        let file = home.path().join(".claude").join(".credentials.json");
+        std::fs::write(&file, json!({ "claudeAiOauth": { "accessToken": "at", "refreshToken": "rt" } }).to_string()).unwrap();
+        let c = read_claude_credentials(&s).await.unwrap();
+        assert_eq!((c.access_token.as_str(), c.has_refresh), ("at", true));
+        assert_ne!(c.refresh_hash.as_deref(), Some("rt"));
+        let before = claude_credentials_stamp(&s);
+        std::fs::write(&file, json!({ "claudeAiOauth": { "accessToken": "at2", "refreshToken": "rt2" } }).to_string()).unwrap();
+        assert!(before.is_some() && claude_credentials_stamp(&s).is_some());
+        assert_ne!(before, claude_credentials_stamp(&s), "a longer file changes the stamp");
+    }
 }
