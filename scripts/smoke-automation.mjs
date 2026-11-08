@@ -232,7 +232,7 @@ try {
   assert.equal(await evaluate('document.activeElement.id'), 'settings-language');
   await evaluate('Array.from(document.querySelectorAll(".settings-nav button")).find(button => button.textContent === "Terminal").click()');
   await until(() => evaluate('!!document.querySelector("#settings-shell")'), 'terminal settings');
-  assert.ok(await evaluate('(() => { const rows = [...document.querySelectorAll(".settings-card > .setting-row")]; return rows.length === 3 && rows.every((row, index) => index === 0 || row.getBoundingClientRect().top >= rows[index - 1].getBoundingClientRect().bottom); })()'), 'one terminal setting per row');
+  assert.ok(await evaluate('(() => { const rows = [...document.querySelectorAll(".settings-card > .setting-row")]; return rows.length === 4 && rows.every((row, index) => index === 0 || row.getBoundingClientRect().top >= rows[index - 1].getBoundingClientRect().bottom); })()'), 'one terminal setting per row');
   await evaluate('document.querySelector("#settings-shell").click()');
   await until(() => evaluate('!!document.querySelector(".select-popup")'), 'shell dropdown');
   assert.equal(await evaluate('getComputedStyle(document.querySelector("#settings-shell")).outlineStyle'), 'none');
