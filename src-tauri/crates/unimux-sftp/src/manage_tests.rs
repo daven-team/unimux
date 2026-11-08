@@ -200,30 +200,39 @@ async fn editor_save_sets_the_mode_on_the_open_part_handle() {
 }
 
 /// T4: the fix-up after the rename never follows a link: lsetstat when offered, else FSETSTAT on a handle of the file
-/// (FSTAT on it shows a regular file of the size just written) and never in a folder others can write to; no path-based
-/// SETSTAT is ever sent.
+/// (FSTAT on it shows the same regular file of the size just written), only when every folder up to `/` belongs to root or
+/// the session's user and no one else can write to it; no path-based SETSTAT is ever sent.
 #[tokio::test]
 async fn the_mode_fix_up_after_the_rename_never_follows_a_link() {
     let (fake, side) = connect(Config::default()).await;
     fake.put("/f", Node::File(b"abc".to_vec(), 1));
     fake.put("/d", Node::Dir);
     fake.put("/d/g", Node::File(b"abc".to_vec(), 1));
-    assert!(!set_mode_no_follow(&side, "/d", 0o600, 3).await, "not a regular file");
-    assert!(!set_mode_no_follow(&side, "/f", 0o600, 4).await, "another file than the one written");
-    assert!(!set_mode_no_follow(&side, "/gone", 0o600, 3).await);
+    for (path, uid) in [("/", 0), ("/f", 1000), ("/d", 1000), ("/d/g", 1000)] {
+        fake.owners.lock().insert(path.into(), (uid, uid));
+    }
+    assert!(!set_mode_no_follow(&side, "/d", 0o600, 3, Some(1000)).await, "not a regular file");
+    assert!(!set_mode_no_follow(&side, "/f", 0o600, 4, Some(1000)).await, "another file than the one written");
+    assert!(!set_mode_no_follow(&side, "/gone", 0o600, 3, Some(1000)).await);
+    assert!(!set_mode_no_follow(&side, "/f", 0o600, 3, None).await, "the session's user is unknown");
+    assert!(!set_mode_no_follow(&side, "/d/g", 0o640, 3, Some(0)).await, "root does not trust a folder of user 1000");
+    assert!(!set_mode_no_follow(&side, "/d/g", 0o640, 3, Some(1001)).await, "nor does another user");
     for shared in [0o775, 0o757, 0o1777] {
         fake.modes.lock().insert("/d".into(), shared);
-        assert!(!set_mode_no_follow(&side, "/d/g", 0o640, 3).await, "{shared:o}: others could swap the name for a link");
+        assert!(
+            !set_mode_no_follow(&side, "/d/g", 0o640, 3, Some(1000)).await,
+            "{shared:o}: others could swap the name for a link"
+        );
     }
     assert!(fake.log.lock().is_empty());
     assert!(fake.open_handles.lock().is_empty());
-    assert!(set_mode_no_follow(&side, "/f", 0o640, 3).await);
+    assert!(set_mode_no_follow(&side, "/f", 0o640, 3, Some(1000)).await);
     assert_eq!(fake.log.lock().clone(), vec!["FSETSTAT /f".to_string()]);
     assert_eq!(mode_of(&fake, "/f"), Some(0o640));
     assert!(fake.open_handles.lock().is_empty(), "the handle is closed");
     let (fake, side) = connect(Config { lsetstat: true, ..Config::default() }).await;
     fake.put("/f", Node::File(b"abc".to_vec(), 1));
-    assert!(set_mode_no_follow(&side, "/f", 0o640, 99).await);
+    assert!(set_mode_no_follow(&side, "/f", 0o640, 99, None).await);
     assert_eq!(fake.log.lock().clone(), vec!["LSETSTAT /f".to_string()]);
     assert_eq!(mode_of(&fake, "/f"), Some(0o640));
 }
@@ -276,12 +285,27 @@ async fn under_sudo_recursive_deletes_in_shared_writable_folders_are_refused() {
     fake.owners.lock().insert("/d".into(), (1000, 1000));
     assert_eq!(op_sudo(&side, SftpOp::DeleteCount { paths: inner.clone() }).await, Err(SftpErrorCode::UnsafeDelete));
     fake.owners.lock().insert("/d".into(), (0, 0));
+    fake.owners.lock().insert("/d/b".into(), (0, 0));
     assert_eq!(op_sudo(&side, SftpOp::DeleteCount { paths: inner.clone() }).await, Ok(json!({ "files": 1, "dirs": 1 })));
     fake.owners.lock().clear();
     // A single file in a shared folder is one unlink (which never follows a link): allowed.
     let one = DeleteCount { files: 1, dirs: 0 };
     assert_eq!(op_sudo(&side, SftpOp::Delete { paths: vec!["/e".into()], confirmed: one }).await, Ok(Value::Null));
     fake.modes.lock().clear();
+    // A folder above that another user owns (even writable by that user only) or whose owner is unknown: that user could
+    // swap the next part for a link, so root refuses.
+    assert_eq!(
+        op_sudo(&side, SftpOp::DeleteCount { paths: paths.clone() }).await,
+        Err(SftpErrorCode::UnsafeDelete),
+        "owner unknown"
+    );
+    fake.owners.lock().insert("/".into(), (1000, 1000));
+    assert_eq!(
+        op_sudo(&side, SftpOp::DeleteCount { paths: paths.clone() }).await,
+        Err(SftpErrorCode::UnsafeDelete),
+        "owned by 1000"
+    );
+    fake.owners.lock().insert("/".into(), (0, 0));
     assert_eq!(op_sudo(&side, SftpOp::Delete { paths, confirmed: count }).await, Ok(Value::Null));
     assert!(fake.get("/d").is_none());
 }
@@ -318,30 +342,36 @@ async fn folder_reads_stop_at_the_match_and_at_the_total_limits() {
     assert_eq!(side.readdir_raw("/huge", Some(10)).await.unwrap().len(), 11);
 }
 
-/// T5: which folder above a selected one lets root trust the name inside it.
+/// T5: which folder above a selected one lets root (or the session's user) trust the name inside it.
 #[test]
-fn an_ancestor_keeps_the_entry_only_when_nobody_but_root_can_swap_it() {
+fn an_ancestor_keeps_the_entry_only_when_nobody_but_root_or_the_principal_can_swap_it() {
     use crate::manage::ancestor_keeps_entry;
     use crate::proto::Attrs;
     let at = |mode: Option<u32>, uid: Option<u32>| Attrs { mode, uid, gid: uid, ..Attrs::default() };
     let root_entry = at(Some(0o40755), Some(0));
     let user_entry = at(Some(0o40755), Some(1000));
-    // Only the owner writes: fine, whoever owns the entry.
-    assert!(ancestor_keeps_entry(&at(Some(0o40755), Some(0)), &user_entry));
-    assert!(ancestor_keeps_entry(&at(Some(0o40700), Some(1000)), &user_entry));
+    // Only the owner writes: fine when that owner is root, whoever owns the entry.
+    assert!(ancestor_keeps_entry(&at(Some(0o40755), Some(0)), &user_entry, 0));
+    // A folder of another user: that user could swap the name, so root never trusts it.
+    assert!(!ancestor_keeps_entry(&at(Some(0o40700), Some(1000)), &user_entry, 0));
+    assert!(!ancestor_keeps_entry(&at(Some(0o40755), None), &root_entry, 0));
+    // ... while the user who owns it may trust it for themselves.
+    assert!(ancestor_keeps_entry(&at(Some(0o40700), Some(1000)), &user_entry, 1000));
+    assert!(!ancestor_keeps_entry(&at(Some(0o40700), Some(1001)), &user_entry, 1000));
     // Group or others write, or nothing is known: refused.
-    assert!(!ancestor_keeps_entry(&at(Some(0o40775), Some(0)), &root_entry));
-    assert!(!ancestor_keeps_entry(&at(Some(0o40757), Some(0)), &root_entry));
-    assert!(!ancestor_keeps_entry(&at(None, Some(0)), &root_entry));
-    // Sticky and writable by others: only a root-owned folder with a root-owned entry.
-    assert!(ancestor_keeps_entry(&at(Some(0o41777), Some(0)), &root_entry));
-    assert!(!ancestor_keeps_entry(&at(Some(0o41777), Some(0)), &user_entry));
-    assert!(!ancestor_keeps_entry(&at(Some(0o41777), Some(1000)), &root_entry));
-    assert!(!ancestor_keeps_entry(&at(Some(0o41777), None), &root_entry));
-    assert!(!ancestor_keeps_entry(&at(Some(0o41777), Some(0)), &at(Some(0o40755), None)));
+    assert!(!ancestor_keeps_entry(&at(Some(0o40775), Some(0)), &root_entry, 0));
+    assert!(!ancestor_keeps_entry(&at(Some(0o40757), Some(0)), &root_entry, 0));
+    assert!(!ancestor_keeps_entry(&at(None, Some(0)), &root_entry, 0));
+    // Sticky and writable by others: only a root-owned folder with an entry of root or the principal.
+    assert!(ancestor_keeps_entry(&at(Some(0o41777), Some(0)), &root_entry, 0));
+    assert!(!ancestor_keeps_entry(&at(Some(0o41777), Some(0)), &user_entry, 0));
+    assert!(ancestor_keeps_entry(&at(Some(0o41777), Some(0)), &user_entry, 1000));
+    assert!(!ancestor_keeps_entry(&at(Some(0o41777), Some(1000)), &root_entry, 0));
+    assert!(!ancestor_keeps_entry(&at(Some(0o41777), None), &root_entry, 0));
+    assert!(!ancestor_keeps_entry(&at(Some(0o41777), Some(0)), &at(Some(0o40755), None), 0));
     // A link (or anything but a folder) on the way: refused.
-    assert!(!ancestor_keeps_entry(&at(Some(0o120777), Some(0)), &root_entry));
-    assert!(!ancestor_keeps_entry(&at(Some(0o100755), Some(0)), &root_entry));
+    assert!(!ancestor_keeps_entry(&at(Some(0o120777), Some(0)), &root_entry, 0));
+    assert!(!ancestor_keeps_entry(&at(Some(0o100755), Some(0)), &root_entry, 0));
 }
 
 fn file_text(fake: &Fake, path: &str) -> Vec<u8> {

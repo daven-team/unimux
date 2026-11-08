@@ -19,6 +19,7 @@ use sha2::{Digest, Sha256};
 use crate::client::ClientError;
 use crate::error::SftpErrorCode;
 use crate::limits::{posix_basename, posix_join, posix_parent, valid_remote_path};
+use crate::manage::path_kept_for;
 use crate::op::{EditorSave, RemoteStamp};
 use crate::proto::{Attrs, open_flags};
 use crate::remote::{CHUNK, DEPTH, RemoteSide};
@@ -409,25 +410,32 @@ async fn write_handle(side: &RemoteSide, handle: &[u8], data: &[u8], mode: Optio
 }
 
 /// Puts `mode` on the saved file after the rename without ever following a link (T4): lsetstat when the server has it.
-/// Without it there is no SETSTAT that leaves a link alone, so nothing is changed by path: the fix-up is skipped when
-/// someone else could swap the name for a link (the folder is writable by group or others, or its mode is unknown), and
-/// otherwise goes through a handle: an lstat shows a regular file of the size just written, the file is opened, FSTAT on
-/// that handle shows a regular file of that size again, and FSETSTAT changes the mode of exactly what was opened.
-pub(crate) async fn set_mode_no_follow(side: &RemoteSide, path: &str, mode: u32, size: u64) -> bool {
+/// Without it there is no SETSTAT that leaves a link alone, so nothing is changed by path: the fix-up is skipped unless
+/// every folder up to `/` keeps the name what it is for `principal` (the session's uid, root under sudo; see
+/// [`path_kept_for`]: no other user can swap a part of the path for a link), and then goes through a handle: an lstat shows
+/// a regular file of the size just written, the file is opened, FSTAT on that handle shows the same file (type, size,
+/// owner, group and modification time as the lstat), and FSETSTAT changes the mode of exactly what was opened.
+pub(crate) async fn set_mode_no_follow(side: &RemoteSide, path: &str, mode: u32, size: u64, principal: Option<u32>) -> bool {
     let client = side.client();
     if side.lsetstat() {
         return client.lsetstat(path, &Attrs::mode(mode)).await.is_ok();
     }
-    match side.lstat(&posix_parent(path)).await {
-        Ok(Some(dir)) if dir.kind == EntryKind::Dir && dir.mode.is_some_and(|m| m & 0o022 == 0) => {}
-        _ => return false,
+    let Some(principal) = principal else { return false };
+    if !matches!(path_kept_for(side, path, principal).await, Ok(true)) {
+        return false;
     }
-    match side.lstat(path).await {
-        Ok(Some(m)) if m.kind == EntryKind::File && m.size == size => {}
-        _ => return false,
+    let Ok(before) = client.lstat(path).await else { return false };
+    if kind_from_mode(before.mode) != EntryKind::File || before.size != Some(size) {
+        return false;
     }
     let Ok(handle) = client.open_read(path).await else { return false };
-    let same = client.fstat(&handle).await.is_ok_and(|a| kind_from_mode(a.mode) == EntryKind::File && a.size == Some(size));
+    let same = client.fstat(&handle).await.is_ok_and(|a| {
+        kind_from_mode(a.mode) == EntryKind::File
+            && a.size == Some(size)
+            && a.uid == before.uid
+            && a.gid == before.gid
+            && a.mtime == before.mtime
+    });
     let set = same && client.fsetstat(&handle, &Attrs::mode(mode)).await.is_ok();
     let closed = client.close(&handle).await.is_ok();
     set && closed
@@ -551,6 +559,8 @@ async fn save_part(
     // decides.
     let theirs = owner_of(attrs);
     let mut mine = client.fstat(&handle).await.ok().and_then(|a| owner_of(&a));
+    // The uid a new file gets is the uid the session works as (root under sudo).
+    let session_uid = mine.map(|(uid, _)| uid);
     if let Some(theirs_id) = theirs
         && !same_owner(theirs, mine)
     {
@@ -597,7 +607,7 @@ async fn save_part(
         && !warnings.iter().any(|w| w["kind"] == "mode")
     {
         let mut current = a.clone();
-        if set_mode_no_follow(side, target, mode, output.len() as u64).await
+        if set_mode_no_follow(side, target, mode, output.len() as u64, session_uid).await
             && let Some(again) = attrs_at(side, target).await.ok().flatten()
         {
             current = again;
