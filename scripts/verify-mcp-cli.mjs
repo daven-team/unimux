@@ -1,7 +1,7 @@
 // End-to-end check of the unimux MCP server with the real, installed agent CLIs and no sign-in or model usage. The model is a
 // local mock. The server under test:
 //   - Tauri (default): the check build's own MCP server (M1 server, M2 tools) on a seeded scratch state, with the stand-in
-//     automation of the check build (unimux-mcp fake-automation); tokens come from the test bridge (`mcp-token`), the
+//     automation of the check build (unimux-mcp fake-automation, MC_MCP_FAKE_AUTOMATION=1); tokens come from the test bridge (`mcp-token`), the
 //     state the automation answers from from `mcp-automation`. Offscreen, scratch MC_DATA_DIR and home.
 //   - MC_APP_TARGET=electron / --target=electron: the 1.1.4 TS reference in-process (fake automation dependencies,
 //     test/helpers/mcpHarness.ts).
@@ -81,7 +81,8 @@ async function tauriHarness() {
   const port = await freePort();
   const home = scratchHome(root);
   const pathKey = Object.keys(process.env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
-  const env = { ...scrubAppEnv({ ...process.env }), MC_DATA_DIR: data, MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port), ...home.env,
+  // MC_MCP_FAKE_AUTOMATION: the check build answers the tools over its stand-in automation (the real service is its default since M4).
+  const env = { ...scrubAppEnv({ ...process.env }), MC_DATA_DIR: data, MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port), MC_MCP_FAKE_AUTOMATION: '1', ...home.env,
     [pathKey]: `${agents}${win ? ';' : ':'}${process.env[pathKey] ?? ''}` };
   const child = spawnApp({ env });
   let socket;

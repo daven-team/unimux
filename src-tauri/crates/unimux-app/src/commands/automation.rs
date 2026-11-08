@@ -4,14 +4,11 @@
 //! - [`AppDeps`], what the service needs from the app: worktrees through the one git engine (G4, `commands::git`), the
 //!   new cells' start (`automation:start-cells`, routed to the windows that own the cells), the cached CLI detection for
 //!   create_grid's `unavailable`, stopCells over the pty service (`kill_cells_and_wait`), the running cells, the context
-//!   tracker, and the inbox notice through the cell's prompt queue.
+//!   tracker, the safe restart / start of an exited agent through the cell spawn (P4's `cell:spawn`), and the inbox
+//!   notice (M4: a verified Codex session through `codex queue`, every other agent through its prompt queue).
 //! - `automation:execute` (the renderer, no actor: the user), `automation:statuses` pushed at most every 250 ms (pushLater).
 //! - The runtime: a spawn / exit / kill / crash of a cell's process (pty `on_cell`), the renderer's statuses (`cell:runtime`
 //!   observers, cliEnd), the hook hints, cancelOrphans after a projects change settled and forgetCell.
-//!
-//! Open slots: the safe restart and the start of an exited agent need P4's spawn (`restart_agent` / `start_agent` answer
-//! "unavailable" until P4 fills [`set_spawner`]); the Codex `codex queue` delivery of a verified session is M4 (the prompt
-//! queue reaches every agent meanwhile).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
@@ -21,29 +18,165 @@ use parking_lot::RwLock;
 use serde_json::{Value, json};
 use unimux_agents::hooks::HookSignal;
 use unimux_agents::hooks::route::find_cell;
-use unimux_ipc::RouterBuilder;
+use unimux_ipc::{RouterBuilder, Scope};
 use unimux_mcp::service::{AutomationDeps, Restart, model};
 use unimux_mcp::tools::BoxFuture;
 use unimux_mcp::{AutomationService, OpError};
+use unimux_state::normalize::js::truthy;
 
 use crate::cells::CellReport;
 use crate::commands::pty::CellEvent;
 use crate::context::AppContext;
 
-/// The restart / start of an agent's CLI through the cell spawn (P4 fills it): `(cell, resume_only)`. `resume_only` true is
-/// the safe restart on the confirmed session (restartAgent), false the start of an exited agent (startExitedAgent).
-pub type AgentSpawner = Arc<dyn Fn(String, bool) -> BoxFuture<'static, Result<Restart, String>> + Send + Sync>;
-
-static SPAWNER: RwLock<Option<AgentSpawner>> = RwLock::new(None);
-
-/// P4 registers how update_agent restart:true restarts or starts an agent (index.ts `restartAgent` / `startExitedAgent`).
-#[allow(dead_code, reason = "the cell spawn (P4) registers here")]
-pub fn set_spawner(spawner: AgentSpawner) {
-    *SPAWNER.write() = Some(spawner);
-}
-
 const NOT_RUNNING: &str = "Agent is not running. The item is available in its MCP inbox.";
 const QUEUE_FULL: &str = "The prompt queue of this agent is full. The item is available in its MCP inbox.";
+/// `pathExists` (src/main/fsProbe.ts `EXISTS_TIMEOUT_MS`).
+const EXISTS_TIMEOUT: Duration = Duration::from_millis(4000);
+
+fn not_done(reason: &str) -> Result<Restart, String> {
+    Ok(Restart { done: false, reason: Some(reason.to_string()) })
+}
+
+/// The answer of `cell:spawn` as a restart outcome (`{ok, error}`).
+fn spawn_outcome(answer: &Value) -> Restart {
+    let ok = answer.get("ok") == Some(&Value::Bool(true));
+    let reason = if ok { None } else { Some(answer.get("error").and_then(Value::as_str).unwrap_or("").to_string()) };
+    Restart { done: ok, reason }
+}
+
+/// The cell's working folder (`cellCwd`) when it is a string, and whether it exists (4 s).
+async fn existing_cwd(project: &Value, cell: &Value) -> Option<String> {
+    let cwd = model::cell_cwd(project, cell).and_then(|v| v.as_str().map(str::to_string))?;
+    unimux_git::path_exists(&cwd, EXISTS_TIMEOUT).await.then_some(cwd)
+}
+
+/// index.ts `restartAgent`: a running agent restarts on the conversation the user confirmed (never a new one, never a typed
+/// shell command); the renderer is told (`cell:restarted`) so its terminal follows the new process.
+async fn restart_running(ctx: Arc<AppContext>, cell: String) -> Result<Restart, String> {
+    let state = ctx.state.get();
+    let Some((project, _, found)) = model::find(&state, &cell) else { return not_done("Agent is not running.") };
+    if !ctx.cells.is_alive(&cell) {
+        return not_done("Agent is not running.");
+    }
+    let profile = unimux_mcp::automation::profile(&state, found.get("profileId")).cloned().unwrap_or(Value::Null);
+    let session = found.get("session").filter(|s| s.is_object());
+    let Some(session) = session.filter(|s| s.get("cli") == profile.get("cli") && truthy(s.get("confirmed"))) else {
+        return not_done("Choose a compatible conversation from History before restarting through MCP.");
+    };
+    let Some(cwd) = existing_cwd(&project, &found).await else { return not_done("Project folder does not exist.") };
+    if !ctx.cells.is_alive(&cell) {
+        return not_done("Agent is not running.");
+    }
+    // endCellMcp, verifiedCodex, alive and the status go with the kill (before_kill), then the old process is gone.
+    crate::commands::pty::kill_cells_and_wait(&ctx, std::slice::from_ref(&cell)).await;
+    let request = json!({
+        "cellId": cell, "cwd": cwd, "profile": profile, "mode": "resume", "sessionId": session.get("id").cloned().unwrap_or(Value::Null),
+        "sessionConfirmed": true, "cols": 100, "rows": 30,
+    });
+    let answer = crate::commands::pty::spawn::spawn_cell(&ctx, &request).await;
+    let outcome = spawn_outcome(&answer);
+    if outcome.done {
+        ctx.events.emit(Scope::Cell(cell.clone()), "cell:restarted", vec![json!(cell)]);
+    }
+    Ok(outcome)
+}
+
+/// index.ts `startExitedAgent`: update_agent restart:true of a team agent whose CLI or terminal ended starts the cell again the
+/// way a restart from the cell menu does (its conversation resumes when it has one, else a new one starts with the stored
+/// startup prompt); the renderer is told so its terminal follows the new process.
+async fn start_exited(ctx: Arc<AppContext>, cell: String) -> Result<Restart, String> {
+    let state = ctx.state.get();
+    let Some((project, _, found)) = model::find(&state, &cell).filter(|(_, _, c)| !truthy(c.get("ssh"))) else {
+        return not_done("Agent cell not found.");
+    };
+    let profile = unimux_mcp::automation::profile(&state, found.get("profileId")).cloned().unwrap_or(Value::Null);
+    let cli = profile.get("cli").and_then(Value::as_str).unwrap_or_default().to_string();
+    if cli == "shell" {
+        return not_done("Choose an AI agent profile.");
+    }
+    let Some(cwd) = existing_cwd(&project, &found).await else {
+        return not_done("Project folder does not exist; ask the user.");
+    };
+    if ctx.cells.is_alive(&cell) {
+        crate::commands::pty::kill_cells_and_wait(&ctx, std::slice::from_ref(&cell)).await;
+    }
+    let session = found.get("session").filter(|s| s.is_object() && s.get("cli") == profile.get("cli")).cloned();
+    let mut session_id = session.as_ref().and_then(|s| s.get("id")).cloned();
+    if session.is_none() && cli == "claude" {
+        // A new Claude conversation gets its id up front, so the cell can resume it later.
+        let id = model::uid();
+        let (c, sid) = (cell.clone(), id.clone());
+        let _ = ctx.state.change(
+            move |s| {
+                let mut s = s.clone();
+                model::update_cell(&mut s, &c, &[("session", Some(json!({ "cli": "claude", "id": sid })))]);
+                Ok(s)
+            },
+            None,
+            false,
+        );
+        session_id = Some(json!(id));
+    }
+    let confirmed = session.as_ref().is_some_and(|s| s.get("confirmed") == Some(&Value::Bool(true)));
+    let startup_prompt = model::find(&ctx.state.get(), &cell)
+        .and_then(|(_, _, c)| c.get("startupPrompt").and_then(Value::as_str).filter(|p| !p.is_empty()).map(str::to_string));
+    let mut request = json!({
+        "cellId": cell, "cwd": cwd, "profile": profile, "mode": if session.is_some() { "resume" } else { "new" },
+        "sessionId": session_id.unwrap_or(Value::Null), "sessionConfirmed": confirmed, "cols": 100, "rows": 30,
+    });
+    if let Some(prompt) = startup_prompt.filter(|_| session.is_none() || !confirmed) {
+        request["startupPrompt"] = json!(prompt);
+    }
+    let answer = crate::commands::pty::spawn::spawn_cell(&ctx, &request).await;
+    let outcome = spawn_outcome(&answer);
+    if outcome.done {
+        if answer.get("startedWithPrompt") == Some(&Value::Bool(true)) {
+            let c = cell.clone();
+            let _ = ctx.state.change(
+                move |s| {
+                    if model::find(s, &c).is_none_or(|(_, _, cell)| cell.get("startupPrompt").is_none()) {
+                        return Err("unchanged".into());
+                    }
+                    let mut s = s.clone();
+                    model::update_cell(&mut s, &c, &[("startupPrompt", None)]);
+                    Ok(s)
+                },
+                None,
+                false,
+            );
+        }
+        ctx.events.emit(Scope::Cell(cell.clone()), "cell:restarted", vec![json!(cell)]);
+    }
+    Ok(outcome)
+}
+
+/// The prompt queue half of index.ts `deliver`: the notice joins the cell's prompt queue (merged into a notice that has not
+/// gone out yet), which sends it when the agent sits idle at its prompt.
+fn queue_notice(ctx: &AppContext, cell: &str, notice: &str) -> Result<(), String> {
+    let mut queued = false;
+    let changed = ctx.state.change(
+        |s| {
+            let Some((pi, ti, ci)) = model::locate(s, cell) else { return Err(String::new()) };
+            let current = s["projects"][pi]["tabs"][ti]["cells"][ci].get("promptQueue");
+            let pending =
+                current.is_some_and(|q| model::list(q, "items").iter().any(|i| model::id(i).starts_with(model::NOTICE_PREFIX)));
+            let next = model::queue_notice(current, notice, &model::uid());
+            queued = pending || next.as_ref() != current;
+            if !queued {
+                return Err(String::new());
+            }
+            let mut s = s.clone();
+            model::update_cell(&mut s, cell, &[("promptQueue", next)]);
+            Ok(s)
+        },
+        None,
+        true,
+    );
+    if changed.is_err() || !queued {
+        return Err(QUEUE_FULL.to_string());
+    }
+    Ok(())
+}
 
 /// What the automation service needs from the app (index.ts `AutomationDependencies`).
 pub struct AppDeps {
@@ -112,50 +245,37 @@ impl AutomationDeps for AppDeps {
     }
 
     fn restart_agent(&self, cell: &str) -> Option<BoxFuture<'static, Result<Restart, String>>> {
-        let spawner = SPAWNER.read().clone()?;
-        Some(spawner(cell.to_string(), true))
+        let ctx = self.ctx().ok()?;
+        Some(Box::pin(restart_running(ctx, cell.to_string())))
     }
 
     fn start_agent(&self, cell: &str) -> Option<BoxFuture<'static, Result<Restart, String>>> {
-        let spawner = SPAWNER.read().clone()?;
-        Some(spawner(cell.to_string(), false))
+        let ctx = self.ctx().ok()?;
+        Some(Box::pin(start_exited(ctx, cell.to_string())))
     }
 
-    /// 1.1.4: a short inbox notice reaches every running team agent through its prompt queue, which sends it when the agent
-    /// sits idle at its prompt and pauses for permissions, questions and the user typing. (A verified Codex session takes it
-    /// through `codex queue` first: M4.)
+    /// 1.1.4: a short inbox notice ("unimux: new task ...: read_inbox") reaches every running team agent. A Codex session the
+    /// user chose (verified) takes it through `codex queue`; any other agent (Claude, a fresh Codex), and a Codex whose
+    /// native delivery failed, gets it through its prompt queue, which sends it when the agent sits idle at its prompt and
+    /// pauses for permissions, questions and the user typing.
     fn deliver(&self, cell: &str, notice: &str) -> BoxFuture<'static, Result<(), String>> {
-        let result = (|| {
-            let ctx = self.ctx()?;
-            let state = ctx.state.get();
-            if find_cell(&state, cell).is_none() || !ctx.cells.is_alive(cell) || self.exited(cell) {
-                return Err(NOT_RUNNING.to_string());
+        let ctx = match self.ctx() {
+            Ok(ctx) => ctx,
+            Err(e) => return Box::pin(async move { Err(e) }),
+        };
+        if find_cell(&ctx.state.get(), cell).is_none() || !ctx.cells.is_alive(cell) || self.exited(cell) {
+            return Box::pin(async { Err(NOT_RUNNING.to_string()) });
+        }
+        let (cell, notice) = (cell.to_string(), notice.to_string());
+        Box::pin(async move {
+            match crate::commands::agents::prompt::deliver_native(&ctx, &cell, &notice).await {
+                Some(Ok(())) => return Ok(()),
+                // The prompt queue below still reaches it.
+                Some(Err(e)) => ctx.crash.warn(&format!("codex queue delivery to {cell} failed: {e}")),
+                None => {}
             }
-            let mut queued = false;
-            let changed = ctx.state.change(
-                |s| {
-                    let Some((pi, ti, ci)) = model::locate(s, cell) else { return Err(String::new()) };
-                    let current = s["projects"][pi]["tabs"][ti]["cells"][ci].get("promptQueue");
-                    let pending = current
-                        .is_some_and(|q| model::list(q, "items").iter().any(|i| model::id(i).starts_with(model::NOTICE_PREFIX)));
-                    let next = model::queue_notice(current, notice, &model::uid());
-                    queued = pending || next.as_ref() != current;
-                    if !queued {
-                        return Err(String::new());
-                    }
-                    let mut s = s.clone();
-                    model::update_cell(&mut s, cell, &[("promptQueue", next)]);
-                    Ok(s)
-                },
-                None,
-                true,
-            );
-            if changed.is_err() || !queued {
-                return Err(QUEUE_FULL.to_string());
-            }
-            Ok(())
-        })();
-        Box::pin(async move { result })
+            queue_notice(&ctx, &cell, &notice)
+        })
     }
 }
 
@@ -348,5 +468,85 @@ mod tests {
         assert_eq!(s.statuses.get("c").as_deref(), Some("exited"));
         cell_event(&s, &CellEvent::Exited { cell: "c".into(), code: 3 });
         assert_eq!(s.statuses.get("c").as_deref(), Some("exited"));
+    }
+
+    fn app(state: Value) -> (tempfile::TempDir, Arc<AppContext>) {
+        use std::time::Instant;
+        use unimux_core::crash_log::RollingLog;
+        use unimux_core::dev_overrides::DevOverrides;
+        use unimux_core::startup_timing::{StartupLog, StartupTimer};
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = AppContext::new(
+            dir.path().to_path_buf(),
+            DevOverrides::default(),
+            Arc::new(RollingLog::crash_log(dir.path())),
+            Arc::new(StartupTimer::new(Instant::now())),
+            Arc::new(StartupLog::new(dir.path().join("startup.log"), "")),
+            state,
+        );
+        (dir, ctx)
+    }
+
+    fn team_state(project: &str) -> Value {
+        json!({ "version": 1, "projects": [{ "id": "p", "name": "P", "path": project, "tabs": [{ "id": "g", "name": "G", "cells": [
+            { "id": "w1", "name": "Worker", "profileId": "claude", "role": "worker" },
+            { "id": "sh", "name": "Shell", "profileId": "shell", "role": "worker" },
+        ] }] }],
+            "profiles": [{ "id": "claude", "name": "Claude", "cli": "claude", "args": "" }, { "id": "shell", "name": "Terminal", "cli": "shell", "args": "" }] })
+    }
+
+    fn deps(ctx: &Arc<AppContext>) -> AppDeps {
+        AppDeps { ctx: Arc::downgrade(ctx), service: RwLock::new(Weak::new()) }
+    }
+
+    /// The inbox notice: refused for an agent that does not run; a Claude agent gets it through its prompt queue, and a second
+    /// notice that has not gone out yet is merged into the first (one turn for a burst).
+    #[test]
+    fn a_notice_goes_through_the_prompt_queue_of_a_running_agent_and_merges() {
+        let (_dir, ctx) = app(team_state("C:\\nowhere"));
+        let deps = deps(&ctx);
+        let block = |f: BoxFuture<'static, Result<(), String>>| tauri::async_runtime::block_on(f);
+        let task = "unimux: new task t1 \"A\" from Lead: read_inbox";
+        assert_eq!(block(deps.deliver("w1", task)), Err(NOT_RUNNING.to_string()));
+        assert_eq!(block(deps.deliver("gone", task)), Err(NOT_RUNNING.to_string()));
+        ctx.cells.set_alive("w1", true);
+        block(deps.deliver("w1", task)).unwrap();
+        block(deps.deliver("w1", "unimux: new message m1 from Lead: read_inbox")).unwrap();
+        let state = ctx.state.get();
+        let items = state.pointer("/projects/0/tabs/0/cells/0/promptQueue/items").and_then(Value::as_array).cloned().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["text"], json!("unimux: new task t1 \"A\" from Lead; new message m1 from Lead: read_inbox"));
+        assert!(model::id(&items[0]).starts_with(model::NOTICE_PREFIX));
+        ctx.saver.stop();
+    }
+
+    /// update_agent restart:true answers without touching a terminal when the agent does not qualify.
+    #[test]
+    fn restart_and_start_refuse_what_they_cannot_start() {
+        let project = tempfile::tempdir().unwrap();
+        let (_dir, ctx) = app(team_state(project.path().to_str().unwrap()));
+        let deps = deps(&ctx);
+        let run = |f: BoxFuture<'static, Result<Restart, String>>| tauri::async_runtime::block_on(f).unwrap();
+        let r = run(deps.restart_agent("w1").unwrap());
+        assert_eq!((r.done, r.reason.as_deref()), (false, Some("Agent is not running.")));
+        ctx.cells.set_alive("w1", true);
+        let r = run(deps.restart_agent("w1").unwrap());
+        assert_eq!(
+            (r.done, r.reason.as_deref()),
+            (false, Some("Choose a compatible conversation from History before restarting through MCP."))
+        );
+        let r = run(deps.start_agent("sh").unwrap());
+        assert_eq!((r.done, r.reason.as_deref()), (false, Some("Choose an AI agent profile.")));
+        let r = run(deps.start_agent("gone").unwrap());
+        assert_eq!((r.done, r.reason.as_deref()), (false, Some("Agent cell not found.")));
+        ctx.saver.stop();
+    }
+
+    #[test]
+    fn a_spawn_answer_is_a_restart_outcome() {
+        let ok = spawn_outcome(&json!({ "ok": true, "startedWithPrompt": false }));
+        assert!(ok.done && ok.reason.is_none());
+        let failed = spawn_outcome(&json!({ "ok": false, "error": "Folder nie istnieje: C:\\x" }));
+        assert_eq!((failed.done, failed.reason.as_deref()), (false, Some("Folder nie istnieje: C:\\x")));
     }
 }

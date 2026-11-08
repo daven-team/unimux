@@ -934,3 +934,130 @@ async fn grid_shutdown_without_a_runtime_says_so() {
         "Runtime grid shutdown is unavailable."
     );
 }
+
+// ── M4: ports of test/wait-for.test.ts ("wait_for in the service") ────────────
+
+/// A wait of `actor` running on its own task.
+fn spawn_wait(
+    f: &Fixture,
+    input: Value,
+    actor: &'static str,
+    cancel: Option<CancellationToken>,
+) -> tokio::task::JoinHandle<Result<Value, String>> {
+    let service = f.service.clone();
+    tokio::spawn(async move { service.execute_op("wait_for", input, Some(actor), cancel).await.map_err(|e| e.describe()) })
+}
+
+/// Lets a spawned wait reach its first await.
+async fn settle() {
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+}
+
+fn edit_state(f: &Fixture, edit: impl FnOnce(&mut Value)) {
+    f.state
+        .change(
+            |s| {
+                let mut s = s.clone();
+                edit(&mut s);
+                Ok(s)
+            },
+            None,
+            false,
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn wakes_on_the_change_itself_well_before_any_tick_and_leaves_no_subscription_behind() {
+    let f = fixture();
+    let waiting = spawn_wait(&f, json!({ "timeoutSec": 30 }), WORKER, None);
+    settle().await;
+    let sent = std::time::Instant::now();
+    f.ok("send_message", json!({ "toCellId": WORKER, "text": "ping" }), Some(COORDINATOR)).await;
+    assert_eq!(waiting.await.unwrap().unwrap(), json!({ "event": "inbox", "unreadMessages": 1, "queuedTasks": 0 }));
+    assert!(sent.elapsed() < std::time::Duration::from_millis(500), "{:?}", sent.elapsed());
+}
+
+#[tokio::test]
+async fn times_out_after_timeout_sec_with_one_timer_and_no_polling_however_many_unrelated_changes_happen() {
+    let f = fixture();
+    let started = std::time::Instant::now();
+    let waiting = spawn_wait(&f, json!({ "timeoutSec": 1 }), WORKER, None);
+    settle().await;
+    for i in 0..100 {
+        edit_state(&f, |s| s["settings"]["fontSize"] = json!(12 + (i % 2)));
+    }
+    assert_eq!(waiting.await.unwrap().unwrap(), json!({ "event": "timeout" }));
+    let took = started.elapsed().as_millis();
+    assert!((950..1500).contains(&took), "{took} ms");
+}
+
+#[tokio::test]
+async fn ends_at_once_when_its_signal_aborts_also_when_it_was_aborted_before_it_started() {
+    let f = fixture();
+    let token = CancellationToken::new();
+    let waiting = spawn_wait(&f, json!({ "timeoutSec": 30 }), WORKER, Some(token.clone()));
+    settle().await;
+    let at = std::time::Instant::now();
+    token.cancel();
+    assert_eq!(waiting.await.unwrap().unwrap(), json!({ "event": "cancelled" }));
+    assert!(at.elapsed() < std::time::Duration::from_millis(500));
+    let again = spawn_wait(&f, json!({ "timeoutSec": 30 }), WORKER, Some(token));
+    assert_eq!(again.await.unwrap().unwrap(), json!({ "event": "cancelled" }));
+}
+
+#[tokio::test]
+async fn fails_when_the_waiting_agent_leaves_its_cell_is_removed_instead_of_waiting_out_the_timeout() {
+    let f = fixture();
+    let waiting = spawn_wait(&f, json!({ "timeoutSec": 30 }), WORKER, None);
+    settle().await;
+    edit_state(&f, |s| s["projects"][0]["tabs"][0]["cells"].as_array_mut().unwrap().retain(|c| c["id"] != WORKER));
+    let ended = tokio::time::timeout(std::time::Duration::from_secs(5), waiting).await.expect("ended at once").unwrap();
+    assert!(ended.unwrap_err().contains("no longer available"));
+}
+
+#[tokio::test]
+async fn reports_an_exited_agent_of_a_watched_open_task_once_and_again_after_it_ran_and_exited_again() {
+    let f = fixture();
+    let task = f.ok("create_task", json!({ "cellId": WORKER, "title": "T", "prompt": "p" }), Some(COORDINATOR)).await;
+    let ids = json!([task["id"]]);
+    let waiting = spawn_wait(&f, json!({ "taskIds": ids, "timeoutSec": 30 }), COORDINATOR, None);
+    settle().await;
+    f.service.statuses.set(WORKER, "exited");
+    // The exit is told after its grace (a grid the user closes stops its agents first).
+    f.advance(EXIT_GRACE_MS);
+    assert_eq!(
+        waiting.await.unwrap().unwrap(),
+        json!({ "event": "exited", "exitedCellIds": [WORKER], "tasks": [{ "id": task["id"], "status": "queued" }] })
+    );
+    // Told once: the next wait on the same task waits (no hot loop of instant answers).
+    assert_eq!(
+        f.ok("wait_for", json!({ "taskIds": ids, "timeoutSec": 1 }), Some(COORDINATOR)).await,
+        json!({ "event": "timeout" })
+    );
+    f.service.runtime_started(WORKER);
+    f.service.statuses.set(WORKER, "working");
+    let again = spawn_wait(&f, json!({ "taskIds": ids, "timeoutSec": 30 }), COORDINATOR, None);
+    settle().await;
+    f.service.statuses.set(WORKER, "exited");
+    f.advance(EXIT_GRACE_MS);
+    let r = again.await.unwrap().unwrap();
+    assert_eq!((r["event"].clone(), r["exitedCellIds"].clone()), (json!("exited"), json!([WORKER])));
+}
+
+#[tokio::test]
+async fn a_finished_task_wins_over_an_exited_agent_and_all_true_waits_for_every_task() {
+    let f = fixture();
+    let a = f.ok("create_task", json!({ "cellId": WORKER, "title": "A", "prompt": "p" }), Some(COORDINATOR)).await;
+    let b = f.ok("create_task", json!({ "cellId": WORKER, "title": "B", "prompt": "p" }), Some(COORDINATOR)).await;
+    let all = spawn_wait(&f, json!({ "taskIds": [a["id"], b["id"]], "all": true, "timeoutSec": 30 }), COORDINATOR, None);
+    settle().await;
+    f.ok("update_task", json!({ "taskId": a["id"], "status": "completed", "result": { "summary": "A done" } }), Some(WORKER))
+        .await;
+    settle().await;
+    assert!(!all.is_finished());
+    f.ok("update_task", json!({ "taskId": b["id"], "status": "blocked", "blockedReason": "needs data" }), Some(WORKER)).await;
+    let r = all.await.unwrap().unwrap();
+    assert_eq!(r["event"], "tasks");
+    assert_eq!((r["tasks"][0]["status"].clone(), r["tasks"][1]["status"].clone()), (json!("completed"), json!("blocked")));
+}

@@ -6,9 +6,10 @@
 //!
 //! M2: the tool layer is unimux-mcp's `McpTools` (the 1.1.4 tool lists, instructions, argument checks, elicitations)
 //! over the automation service (M3, [`crate::commands::automation`]), the elicitation texts in the app language. The
-//! check build (feature `test-bridge`) runs the tools over unimux-mcp's stand-in automation instead (`fake-automation`),
-//! so the real-app MCP checks (scripts/verify-mcp-cli.mjs) can drive them; its `automation:execute` still reaches the
-//! real service.
+//! check build (feature `test-bridge`) runs the tools over the real service too (M4: verify-team-start, verify-mcp-team and
+//! verify-team-stuck drive the team flow through the cells' own tokens), unless it was started with
+//! `MC_MCP_FAKE_AUTOMATION=1`: then they run over unimux-mcp's stand-in automation (`fake-automation`, test bridge
+//! `mcp-automation`), which scripts/verify-mcp-cli.mjs drives. Its `automation:execute` always reaches the real service.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -58,13 +59,12 @@ mod test_tools {
     use std::sync::Arc;
 
     use serde_json::Value;
-    use unimux_mcp::fake::FakeAutomation;
     use unimux_mcp::tools::BoxFuture;
-    use unimux_mcp::{CallCtx, CallError, McpTools, ToolHost};
+    use unimux_mcp::{Automation, CallCtx, CallError, McpTools, ToolHost};
 
-    pub struct BridgeTools(pub Arc<McpTools<FakeAutomation>>);
+    pub struct BridgeTools<A: Automation>(pub Arc<McpTools<A>>);
 
-    impl ToolHost for BridgeTools {
+    impl<A: Automation> ToolHost for BridgeTools<A> {
         fn instructions(&self, cell: &str) -> String {
             self.0.instructions(cell)
         }
@@ -95,9 +95,15 @@ pub fn server() -> Option<Arc<McpServer>> {
 }
 
 /// The automation service of this run (None before `register`): P4 tells it about spawns (`runtime_started`, `starting`).
-#[allow(dead_code, reason = "the cell spawn (P4) reports its starts here")]
+#[allow(dead_code, reason = "kept for the callers outside the automation wiring")]
 pub fn automation() -> Option<Arc<AutomationService>> {
     SERVICE.get().map(|s| s.automation.clone())
+}
+
+/// The check build answers the MCP tools over the stand-in automation (`MC_MCP_FAKE_AUTOMATION=1`, verify-mcp-cli).
+#[cfg(feature = "test-bridge")]
+pub fn fake_tools() -> bool {
+    std::env::var_os("MC_MCP_FAKE_AUTOMATION").is_some_and(|v| v == "1")
 }
 
 /// The check build's stand-in automation (None before `register`).
@@ -117,7 +123,12 @@ impl McpService {
         let (host, fake): (Arc<dyn ToolHost>, _) = {
             let state = ctx.state.clone();
             let fake = unimux_mcp::fake::FakeAutomation::new(Arc::new(move || state.get()));
-            (Arc::new(test_tools::BridgeTools(McpTools::with_tr(Arc::new(fake.clone()), tr))), fake)
+            let host: Arc<dyn ToolHost> = if fake_tools() {
+                Arc::new(test_tools::BridgeTools(McpTools::with_tr(Arc::new(fake.clone()), tr)))
+            } else {
+                Arc::new(test_tools::BridgeTools(McpTools::with_tr(automation.clone(), tr)))
+            };
+            (host, fake)
         };
         #[cfg(not(feature = "test-bridge"))]
         let host: Arc<dyn ToolHost> = McpTools::with_tr(automation.clone(), tr);

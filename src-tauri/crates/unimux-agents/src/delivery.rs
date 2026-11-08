@@ -89,6 +89,27 @@ pub fn codex_queue_call(session_id: &str, message: &str, launch: &CodexLaunch, e
     }
 }
 
+/// Whether [`codex_queue_call`] reaches Codex without cmd.exe ever parsing the message (hardening beyond 1.1.4, M4): always
+/// outside Windows (argv, no shell); on Windows only a detected codex.exe (started directly) or an npm install whose
+/// PowerShell shim exists. Otherwise PowerShell would look up a bare `codex`, which can resolve to codex.cmd / .bat and
+/// hand the message to cmd.exe (`&`, `|`, `"` in a task text written by another agent could run commands); the app then
+/// skips the native delivery and uses the prompt queue.
+pub fn reaches_codex_without_cmd(launch: &CodexLaunch, exists: impl Fn(&str) -> bool) -> bool {
+    if !launch.os.is_windows() {
+        return true;
+    }
+    let Some(command) = launch.command.as_deref() else { return false };
+    if ends_with_ci(command, ".exe") {
+        return true;
+    }
+    let script = if ends_with_ci(command, ".cmd") || ends_with_ci(command, ".bat") {
+        format!("{}.ps1", &command[..command.len() - 4])
+    } else {
+        command.to_string()
+    };
+    ends_with_ci(&script, ".ps1") && exists(&script)
+}
+
 /// Runs the call without a shell; true when the program exited with 0 in time and within the output caps. Never fails.
 pub async fn run_call(call: ExecCall) -> bool {
     let program =
@@ -245,5 +266,20 @@ mod tests {
         assert!(!rt.block_on(run_call(bad)));
         let missing = ExecCall { file: "unimux-no-such-program-h6".into(), args: vec![], env: vec![], timeout_ms: 1000 };
         assert!(!rt.block_on(run_call(missing)));
+    }
+
+    /// M4: on Windows the native delivery only runs where no cmd.exe can parse the message.
+    #[test]
+    fn native_delivery_on_windows_needs_codex_exe_or_its_powershell_shim() {
+        let ps1 = |p: &str| p == "C:\\npm\\codex.ps1";
+        let ok = |os, command: Option<&str>| reaches_codex_without_cmd(&launch(os, command, &[]), ps1);
+        assert!(ok(Os::Mac, None));
+        assert!(ok(Os::Windows, Some("C:\\Users\\a\\.codex\\bin\\CODEX.EXE")));
+        assert!(ok(Os::Windows, Some("C:\\npm\\codex.cmd")));
+        assert!(ok(Os::Windows, Some("C:\\npm\\codex.ps1")));
+        assert!(!ok(Os::Windows, None));
+        assert!(!ok(Os::Windows, Some("C:\\other\\codex.cmd")));
+        assert!(!ok(Os::Windows, Some("C:\\other\\codex.bat")));
+        assert!(!ok(Os::Windows, Some("C:\\npm\\codex")));
     }
 }

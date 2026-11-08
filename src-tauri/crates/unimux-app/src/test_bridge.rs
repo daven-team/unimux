@@ -295,8 +295,12 @@ pub async fn test_bridge(
             }
             Ok(json!({ "token": server.issue_token(cell), "url": server.url() }))
         }
-        // M2: the state the check build's stand-in automation answers from (its own copy once an operation edited it).
+        // M2: the state the MCP tools answer from: the stand-in automation's (its own copy once an operation edited it) when
+        // the check build runs them over it (MC_MCP_FAKE_AUTOMATION=1), else the app's state (M4: the real service).
         "mcp-automation" => {
+            if !crate::commands::mcp::fake_tools() {
+                return Ok(json!({ "state": &*ctx.state.get() }));
+            }
             let fake = crate::commands::mcp::fake_automation().ok_or_else(|| fail("no MCP server"))?;
             Ok(json!({ "state": &*unimux_mcp::Automation::state(&fake) }))
         }

@@ -15,7 +15,7 @@ use tokio::sync::oneshot;
 use unimux_agents::cli::status::{CliId, CliState, Os, clean_env};
 use unimux_agents::cli::system::process_env;
 use unimux_agents::cli::{CLI_WAIT_MS, GetOptions};
-use unimux_agents::delivery::{CodexLaunch, queue_codex_message, run_call};
+use unimux_agents::delivery::{CodexLaunch, DELIVERY_FAILED, queue_codex_message, reaches_codex_without_cmd, run_call};
 use unimux_agents::hooks::route::{cell_cli, find_cell};
 use unimux_agents::prompt::{AGENT_PROMPT_TIMEOUT_MS, PromptItem, PromptRequest, clean_answer, clean_request};
 use unimux_ipc::{RouterBuilder, Scope};
@@ -114,20 +114,23 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     });
 }
 
-/// `queueCodexMessage` with the detected Codex: the binary from where it was detected and a PATH that has its folder.
-#[allow(dead_code, reason = "the team delivery (M4) calls it")]
+/// `queueCodexMessage` with the detected Codex: the binary from where it was detected and a PATH that has its folder. On
+/// Windows a Codex reached neither as codex.exe nor through its PowerShell shim is not called at all (a bare `codex` lookup
+/// can hit codex.cmd, where cmd.exe would parse the message): the delivery fails and the prompt queue takes the notice.
 pub async fn queue_codex(ctx: &Arc<AppContext>, session_id: &str, text: &str) -> Result<(), &'static str> {
     let detector = super::cli_detector(ctx);
     let codex = detector.get(CliId::Codex, GetOptions { wait_ms: CLI_WAIT_MS, force: false }).await;
     let env = detector.apply_env(clean_env(&process_env()), Some(CliId::Codex)).await;
     let launch = CodexLaunch { command: if codex.state == CliState::Found { codex.path } else { None }, env, os: Os::current() };
+    if !reaches_codex_without_cmd(&launch, |p| std::path::Path::new(p).is_file()) {
+        return Err(DELIVERY_FAILED);
+    }
     queue_codex_message(session_id, text, &launch, run_call).await
 }
 
 /// The native half of index.ts `deliver(cellId, text)`: a Codex session the user chose (verified) takes the notice through
 /// `codex queue`. None when the cell does not qualify (not a Codex cell, no verified session, or another session now); M4 then
 /// uses the prompt queue, as it does after a failed delivery (`Some(Err)`).
-#[allow(dead_code, reason = "the team delivery (M4) calls it")]
 pub async fn deliver_native(ctx: &Arc<AppContext>, cell_id: &str, text: &str) -> Option<Result<(), &'static str>> {
     let session = crate::commands::pty::host().verified_codex(cell_id)?;
     {
