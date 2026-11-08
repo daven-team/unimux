@@ -7,12 +7,15 @@
 //! persisted 429 windows in `<data>/refresh-limits.json`, reconcile, migration) into the startup (W7 slots): the recovery of
 //! an interrupted swap (A2's `recoverActivation`: version-2 journal with 3 tries and 3 s lock waits, else the 0.9.0
 //! recovery), the 0.9.0 -> 0.9.1 migration, the 30 s retry of a recovery that found Claude Code's locks busy; the
-//! `update:busy` probe; the quit's swap waits. The `accounts:*` / `auth:*` / `usage:*` channels come with A4 / A5, which call
-//! [`ClaudeAccounts::before_poll`], [`ClaudeAccounts::refresh_claude`], [`ClaudeAccounts::refs`] and
-//! [`ClaudeAccounts::before_main_login`].
+//! `update:busy` probe; the quit's swap waits.
 //!
 //! A4 ([`login`]): the Claude and Codex login managers, `auth:start` / `auth:cancel`, the login probes, the pty host's crash
 //! hook and the quit's dispose.
+//!
+//! A5 ([`usage`]): `usage:*`, every `accounts:*` channel, `alerts:testLimit`, the polls (which call
+//! [`ClaudeAccounts::before_poll`], [`ClaudeAccounts::refresh_claude`] and [`ClaudeAccounts::refs`]), the automatic switch
+//! and the limit warnings. `auth:*` and [`ClaudeAccounts::before_main_login`] are A4's; A4 plugs its login managers in
+//! through [`usage::set_login_hooks`] and [`ClaudeAccounts::set_login_probes`].
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -26,6 +29,7 @@ use crate::context::AppContext;
 use crate::lifecycle::wind_down::{QUIT_SWAP_AFTER_CELLS, QUIT_SWAP_WAIT, phase};
 
 pub mod login;
+pub mod usage;
 
 static SERVICE: OnceLock<Arc<ClaudeAccounts>> = OnceLock::new();
 
@@ -71,6 +75,8 @@ fn existing() -> Option<Arc<ClaudeAccounts>> {
 
 pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     login::register(r, ctx);
+    // A5: usage:*, accounts:* (all but the logins), alerts:testLimit, the polls and the notices.
+    usage::register(r, ctx);
 
     // recoverActivation (A2): an interrupted main-account swap is repaired (or reported pending) before any account call.
     let c = ctx.clone();
@@ -85,7 +91,9 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
                 c.crash.info(&format!("account recovery at start: {}", r.as_str()));
             }
             // A recovery still 'locked' is retried by its own timer too: the polls do not run while the limits panel is off.
-            svc.start_recovery_retry(Arc::new(|| {}));
+            // pushSwapPending after each try that did not stay locked.
+            let after = c.clone();
+            svc.start_recovery_retry(Arc::new(move || usage::hub(&after).push_swap_pending()));
         }
         .boxed()
     }));
@@ -115,6 +123,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         if let Some(s) = existing() {
             s.quit();
         }
+        usage::stop();
     });
     for (p, name, wait) in [
         (phase::SWAP_WAIT, "swap wait", QUIT_SWAP_WAIT),

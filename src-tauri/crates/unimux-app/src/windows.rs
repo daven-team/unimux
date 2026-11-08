@@ -314,6 +314,10 @@ pub(crate) fn watch_window_state(window: &WebviewWindow, ctx: Arc<AppContext>) {
             if now_shown && w.label() == MAIN {
                 reapply_taskbar(&ctx);
             }
+            // A5: no limit polls while the main window is minimized or hidden (unless warnings or the switch want them).
+            if w.label() == MAIN {
+                crate::commands::accounts::usage::main_shown(now_shown);
+            }
         }
         let now_max = w.is_maximized().unwrap_or(false);
         if maximized.swap(now_max, Ordering::SeqCst) != now_max {

@@ -5854,6 +5854,7 @@ dependencies = [
  "httpdate",
  "hyper",
  "hyper-util",
+ "libc",
  "parking_lot 0.13.0",
  "regex",
  "serde",
@@ -5871,6 +5872,7 @@ dependencies = [
  "unimux-oscrypt",
  "url",
  "uuid",
+ "windows",
  "zeroize",
 ]
 
