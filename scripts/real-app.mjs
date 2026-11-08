@@ -281,7 +281,8 @@ export async function mainControl({ evaluate }) {
     windows: () => call('windows'),
     requestClose: () => call('window', { label: 'main', action: 'requestClose' }),
     minimize: () => call('window', { label: 'main', action: 'sysMinimize' }),
-    setBounds: (bounds) => call('window', { label: 'main', action: 'setBounds', ...bounds }),
+    // Returns at once (no 150 ms settle): Electron's setBounds did, and bench-jank paces the resize steps itself.
+    setBounds: (bounds) => call('window', { label: 'main', action: 'setBounds', settle: false, ...bounds }),
     record: (channels, { swallow = false } = {}) => call('record', { channels, swallow }),
     recorded: async (channel) => (await call('recorded', { take: true, ...(channel ? { channel } : {}) })).map((c) => ({ channel: c.channel, args: c.args })),
     stubToasts: () => call('toasts', { stub: true }),

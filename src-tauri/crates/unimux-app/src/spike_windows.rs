@@ -117,8 +117,10 @@ pub async fn window_op(ctx: &Arc<AppContext>, args: &Value) -> Result<Value, Ipc
     if action == "requestClose" {
         return Ok(json!({ "label": label, "requested": true }));
     }
-    // Window messages are posted to the event loop: give them a moment before reading the result back.
-    if action != "state" {
+    // Window messages are posted to the event loop: give them a moment before reading the result back. `settle: false`
+    // returns at once (bench-jank's window resize paces its own steps 16 ms apart, like Electron's setBounds did).
+    let settle = args.get("settle").and_then(Value::as_bool).unwrap_or(true);
+    if action != "state" && settle {
         tokio::time::sleep(Duration::from_millis(150)).await;
     }
     Ok(window_state(&window).await)
