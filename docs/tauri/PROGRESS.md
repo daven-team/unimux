@@ -1001,7 +1001,7 @@ Verification: cargo fmt; clippy -D warnings `-p unimux-app -p unimux-update --al
 Harness: `scripts/real-app.mjs` (target = the Tauri check build; `MC_APP_TARGET=electron` or `--target=electron` = Electron's out/, the 1.1.4 reference, until R1), `scripts/real-app-owners.mjs` (channel -> package), `scripts/real-app-run.mjs` (runs them all; `--write-progress` rewrites the table below). A failed script prints `BLOCKED by <package> (<commands>)` and exits with 2 only for what it exercised itself (`classifyRun` in real-app-owners.mjs): a test-bridge op a later package adds, a not-yet command outside the startup baseline (the not-yet calls of a bare launch, scripts/real-app-baseline.mjs, cached per binary in artifacts/real-app/baseline-tauri.json; the runner takes it once before the sweep), or a baseline command of a package the script tests (`SCRIPT_PACKAGES`). Any other failure is a `fail` (exit 1) and lists the boot-time calls as "not-yet seen", so a regression in a landed package is never hidden as blocked. Measurements (perf-*, bench-*, measure-startup) that pass are still blocked by every not-yet call (their numbers mean nothing until the app is complete). Re-run after a package lands: `npm run build:check && node scripts/real-app-run.mjs --write-progress`.
 
 <!-- X1 real-app status (tauri) start -->
-Run: 2026-11-08 14:15 UTC, target tauri (check build), `node scripts/real-app-run.mjs --write-progress`.
+Run: 2026-11-08 15:47 UTC, target tauri (check build), `node scripts/real-app-run.mjs --write-progress`.
 
 | script | result | blocked by | detail |
 |---|---|---|---|
@@ -1015,7 +1015,7 @@ Run: 2026-11-08 14:15 UTC, target tauri (check build), `node scripts/real-app-ru
 | verify-conv-search.mjs | pass |  |  |
 | verify-db-core.mjs | pass |  |  |
 | verify-db-mysql-ui.mjs | pass |  |  |
-| verify-db-pg-ui.mjs | pass |  |  |
+| verify-db-pg-ui.mjs | fail |  | Node.js v26.13.0 |
 | verify-db-redis-ui.mjs | pass |  |  |
 | verify-db-redis.mjs | pass |  |  |
 | verify-db-sqlite-ui.mjs | pass |  |  |
@@ -1060,7 +1060,7 @@ Run: 2026-11-08 14:15 UTC, target tauri (check build), `node scripts/real-app-ru
 | verify-safestorage.mjs | pass |  |  |
 | verify-tauri-pty.mjs | pass |  |  |
 | verify-tauri-monitor.mjs | pass |  |  |
-| verify-caption.mjs | fail |  | 107/108 passed |
+| verify-caption.mjs | pass |  |  |
 | verify-update-window.mjs | pass |  |  |
 | verify-update-gate.mjs | pass |  |  |
 | verify-tauri-github.mjs | pass |  |  |
