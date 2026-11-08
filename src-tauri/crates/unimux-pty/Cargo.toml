@@ -16,6 +16,7 @@ parking_lot.workspace = true
 windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Security",
+  "Win32_System_Console",
   "Win32_System_JobObjects",
   "Win32_System_LibraryLoader",
   "Win32_System_Pipes",

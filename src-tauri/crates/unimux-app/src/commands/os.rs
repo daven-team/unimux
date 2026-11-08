@@ -61,7 +61,13 @@ pub type NoticeAction = Arc<dyn Fn(Option<usize>) + Send + Sync>;
 
 impl OsService {
     pub fn new(ctx: &Arc<AppContext>) -> Arc<Self> {
-        let (desktop, recorder): (Arc<dyn Desktop>, Option<Arc<Recorder>>) = if ctx.overrides.offscreen {
+        // A check build launched by the harness (MC_TEST_TOASTS=1, X1 contract) keeps every toast, dialog and shell call off
+        // the desktop also when it is not offscreen.
+        #[cfg(feature = "test-bridge")]
+        let test_toasts = std::env::var("MC_TEST_TOASTS").is_ok_and(|v| v == "1");
+        #[cfg(not(feature = "test-bridge"))]
+        let test_toasts = false;
+        let (desktop, recorder): (Arc<dyn Desktop>, Option<Arc<Recorder>>) = if ctx.overrides.offscreen || test_toasts {
             let r = Arc::new(Recorder::new(&ctx.data_dir));
             (r.clone(), Some(r))
         } else {
@@ -141,6 +147,17 @@ impl OsService {
         let spec = ToastSpec::new(title, body, buttons);
         let id = self.notices.reserve();
         let me = Arc::downgrade(self);
+        // 1.1.4 forgot a notification on its first click or button but kept its handlers: a later activation of the same
+        // toast (a stale "Allow") still acts. Only a toast trimmed out of the newest 50 (or closed) has none left.
+        let acted = std::sync::atomic::AtomicBool::new(false);
+        let may_act = move |me: &Self| {
+            if me.notices.forget(id) {
+                acted.store(true, std::sync::atomic::Ordering::Relaxed);
+                true
+            } else {
+                acted.load(std::sync::atomic::Ordering::Relaxed)
+            }
+        };
         let on_event = Arc::new(move |event: ToastEvent| {
             let Some(me) = me.upgrade() else { return };
             match event {
@@ -150,7 +167,7 @@ impl OsService {
                 // Parked in the Action Center: still clickable, so it stays (bounded by the limit of 50).
                 ToastEvent::TimedOut => {}
                 ToastEvent::Click => {
-                    if me.notices.forget(id) {
+                    if may_act(&me) {
                         match &on_click {
                             Some(action) => action(None),
                             None => me.show_cell(cell.as_deref()),
@@ -158,7 +175,7 @@ impl OsService {
                     }
                 }
                 ToastEvent::Button(index) => {
-                    if !me.notices.forget(id) {
+                    if !may_act(&me) {
                         return;
                     }
                     match &on_button {

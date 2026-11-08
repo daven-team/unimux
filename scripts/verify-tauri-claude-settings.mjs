@@ -17,7 +17,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 import { connectPage, freePort, killTree, launchApp, listDir, readText, realProfileMarkers, sleep, waitExit, waitFor } from './tauri-app.mjs';
@@ -55,6 +55,13 @@ writeFileSync(join(dataDir, 'mcp', `${cell}.json`), '{}');
 writeFileSync(join(dataDir, 'mcp', 'gone-cell.json'), '{}');
 writeFileSync(join(dataDir, 'prompts', `${cell}-1.txt`), 'secret task');
 console.log(`scratch: ${scratch}`);
+// Since P4 the grid spawns the cell for real: with claude installed it runs Claude Code (in the scratch home) and its spawn,
+// kill or exit at a moment the script does not control resets the 20 s watch of the test's own spawns. The app gets a PATH
+// without any claude, so the grid's spawn ends held ("CLI missing", start() waits for it) and the test-bridge spawns stay
+// the only ones.
+const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
+const noClaude = (dir) => !['claude', 'claude.exe', 'claude.cmd', 'claude.ps1'].some((f) => existsSync(join(dir, f)));
+const appEnv = { [pathKey]: (process.env[pathKey] ?? '').split(delimiter).filter((d) => d && noClaude(d)).join(delimiter), MC_CLI_NO_REGISTRY: '1' };
 
 function send(url, body = '', headers = {}) {
   return new Promise((res, rej) => {
@@ -78,12 +85,20 @@ const hookOf = (text, name) => JSON.parse(text).hooks[name][0].hooks[0];
 
 async function start(label) {
   const port = await freePort();
-  const child = launchApp({ dataDir, scratch, port });
+  const child = launchApp({ dataDir, scratch, port, extraEnv: appEnv });
   const page = await connectPage(port, { timeoutMs: 45000 });
   await waitFor(page, `typeof window.__TAURI_INTERNALS__?.invoke === 'function'`, 30000, `${label}: Tauri IPC`);
   await waitFor(page, 'window.__mc?.useStore?.getState?.().ready === true', 45000, `${label}: renderer ready`);
   const bridge = (op, args) => page.evaluate(`window.__TAURI_INTERNALS__.invoke('test_bridge', ${JSON.stringify({ op, args: args ?? null })})`);
   await waitFor(page, `window.__TAURI_INTERNALS__.invoke('test_bridge', { op: 'hooks', args: null }).then((h) => h.port > 0)`, 15000, `${label}: hook server`);
+  // The cell files right after the startup prune, before the grid's spawn ends (its kill drops the cell's MCP config).
+  const files = { hooks: listDir(join(dataDir, 'hooks')), mcp: listDir(join(dataDir, 'mcp')) };
+  // The grid's own spawn of the cell ends once main finds claude missing (the cell is held and killed, which forgets the
+  // watch and the alive mark): wait for that before the test's spawns, then mark the cell alive (the stand-in for a running
+  // Claude whose hooks reach the renderer).
+  await bridge('record', { channels: ['cell:kill'] });
+  const killed = Date.now() + 30000;
+  while (Date.now() < killed && !(await bridge('recorded', { channel: 'cell:kill' })).some((c) => c.args?.[0] === cell)) await sleep(250);
   const { port: hookPort } = await bridge('hooks', { alive: [cell] });
   await page.evaluate(`(() => {
     window.__seen = [];
@@ -98,7 +113,7 @@ async function start(label) {
     if ((await waitExit(child, 10000)) === null) killTree(child);
     page.close?.();
   };
-  return { child, page, bridge, hookPort, seen, spawnCell, quit };
+  return { child, page, bridge, hookPort, files, seen, spawnCell, quit };
 }
 
 let app;
@@ -106,8 +121,8 @@ try {
   app = await start('first run');
   const log = readText(join(dataDir, 'startup.log'));
   check('the startup marks cell-files-pruned', log.includes('cell-files-pruned'));
-  check('the hook and MCP files of removed cells went, the cell\'s own stayed', JSON.stringify(listDir(join(dataDir, 'hooks'))) === JSON.stringify([`claude-${cell}.json`, 'notes.txt'])
-    && JSON.stringify(listDir(join(dataDir, 'mcp'))) === JSON.stringify([`${cell}.json`]), `${listDir(join(dataDir, 'hooks'))} | ${listDir(join(dataDir, 'mcp'))}`);
+  check('the hook and MCP files of removed cells went, the cell\'s own stayed', JSON.stringify(app.files.hooks) === JSON.stringify([`claude-${cell}.json`, 'notes.txt'])
+    && JSON.stringify(app.files.mcp) === JSON.stringify([`${cell}.json`]), `${app.files.hooks} | ${app.files.mcp}`);
   check('every old startup prompt went', listDir(join(dataDir, 'prompts')).length === 0);
 
   // The settings file per version, byte for byte against 1.1.4.

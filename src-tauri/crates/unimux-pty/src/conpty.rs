@@ -49,6 +49,18 @@ use windows::core::{HRESULT, PCSTR, PCWSTR, PWSTR, s, w};
 
 use crate::cmdline::args_to_command_line;
 
+/// A process started in a new process group (CREATE_NEW_PROCESS_GROUP somewhere above us: some launchers, terminals and
+/// harnesses) ignores CTRL+C, and every process it starts inherits that: the shells of the cells would never see the
+/// CTRL_C_EVENT the pseudoconsole raises for `\x03`, so Ctrl+C would not stop a command. Restores normal CTRL+C processing
+/// for this process (and so for the shells it starts) once, before the first terminal.
+fn allow_ctrl_c_in_children() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // SAFETY: no handler routine is passed; it only clears the inherited "ignore CTRL+C" flag of this process.
+        let _ = unsafe { windows::Win32::System::Console::SetConsoleCtrlHandler(None, false) };
+    });
+}
+
 /// Size of both pipes (node-pty's named pipes use 128 KiB) and of one read.
 const PIPE_SIZE: u32 = 128 * 1024;
 const READ_SIZE: usize = 64 * 1024;
@@ -424,6 +436,7 @@ impl Pty {
     /// exit code once the process ended AND its output was fully read (output after exit is never lost).
     pub fn spawn(api: &'static ConptyApi, opts: &SpawnOptions, mut on_data: DataFn, on_exit: ExitFn) -> io::Result<Pty> {
         let size = Coord { x: opts.cols.max(2) as i16, y: opts.rows.max(1) as i16 };
+        allow_ctrl_c_in_children();
         let (mut in_read, mut in_write, mut out_read, mut out_write) =
             (HANDLE::default(), HANDLE::default(), HANDLE::default(), HANDLE::default());
         // Before the pseudoconsole: a failure here must not leave an OpenConsole behind.

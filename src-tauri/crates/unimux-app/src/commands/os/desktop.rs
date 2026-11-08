@@ -218,6 +218,25 @@ impl Recorder {
         self.answers.lock().push_back(answer);
     }
 
+    /// The toasts shown since the launch, `[{title, body, actions}]` (`actions`: the button labels), like 1.1.4's
+    /// `Notification` list of the harness.
+    #[cfg_attr(not(feature = "test-bridge"), allow(dead_code))]
+    pub fn toasts(&self) -> Vec<Value> {
+        self.toasts
+            .lock()
+            .iter()
+            .map(|(spec, _)| json!({ "title": spec.title, "body": spec.body, "actions": spec.buttons }))
+            .collect()
+    }
+
+    /// A toast index of the test bridge: a negative one counts from the end (`-1` = the last toast, as `Array.at`).
+    #[cfg_attr(not(feature = "test-bridge"), allow(dead_code))]
+    pub fn toast_index(&self, index: i64) -> Option<usize> {
+        let len = self.toasts.lock().len() as i64;
+        let i = if index < 0 { len + index } else { index };
+        (0..len).contains(&i).then_some(i as usize)
+    }
+
     /// Acts on recorded toast `index` like the user would: `click`, `button` (with `button`), `closed` or `failed`.
     #[cfg_attr(not(feature = "test-bridge"), allow(dead_code))]
     pub fn activate(&self, index: usize, event: ToastEvent) -> bool {
