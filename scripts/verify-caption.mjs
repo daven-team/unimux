@@ -54,6 +54,9 @@ const check = (name, ok, detail = '') => { results.push({ name, ok: !!ok, detail
 const MAX_RATIO = 0.02;
 const CHANNEL_TOLERANCE = 8;
 const BG = [0x0d, 0x0d, 0x0d];
+/** Window height (DIP) of the maximized look: below a 1080 px monitor at 200 percent, so Windows never moves it onto one
+ * (300 DIP was too short: the first-run page then draws into the cropped 40 DIP). */
+const MAX_LOOK_H = 450;
 const WS_MAXIMIZE = 0x01000000;
 const WS_THICKFRAME = 0x00040000;
 const WS_MAXIMIZEBOX = 0x00010000;
@@ -222,15 +225,19 @@ async function runScale(wc, percent) {
     await wc.cmd('send', win.hwnd, L.WM.NCACTIVATE, 0, 0);
 
     // Maximized look: WS_MAXIMIZE on the style, no real maximize (nothing moves onto a monitor). The native layout reads
-    // IsZoomed (the style bit) on the WM_SIZE of the setpos; the page asks again on its resize.
+    // IsZoomed (the style bit) on the WM_SIZE of the setpos; the page asks again on its resize. The maximized look keeps the
+    // reference width but is only MAX_LOOK_H DIP high: Windows moves a window with WS_MAXIMIZE and a caption that is about
+    // as big as a monitor onto that monitor's work area (a real maximize on the user's desktop; at 200 percent the
+    // reference window is 1934 x 1039 px, so it happened there), and only the top 40 DIP and the title bar are checked.
     const normal = await wc.cmd('rect', win.hwnd);
-    const restyle = async (style) => {
+    const restyle = async (style, height) => {
       await wc.cmd('setstyle', win.hwnd, style);
       const [x0, y0, x1, y1] = normal.window;
-      await wc.cmd('setpos', win.hwnd, x0, y0, x1 - x0, y1 - y0);
+      await wc.cmd('setpos', win.hwnd, x0, y0, x1 - x0, height ?? y1 - y0);
       await sleep(600);
     };
-    await restyle(normal.style | WS_MAXIMIZE);
+    await restyle(normal.style | WS_MAXIMIZE, Math.round(MAX_LOOK_H * scale));
+    await assertOffscreen(wc, win.hwnd, 'the maximized-look window');
     let maxProbe = null;
     for (let i = 0; i < 30; i++) {
       maxProbe = await caption(page, { action: 'probe' });
