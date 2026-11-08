@@ -988,3 +988,100 @@ async fn exit_and_end_session_close_and_forget() {
     assert!(f.coord.session_state(sid).is_none());
     assert_eq!(f.last_session().phase, SshPhase::Closed);
 }
+
+// ---------- test/db-coordinator.test.ts: SFTP sessions and DB tunnels side by side ----------
+
+/// A coordinator whose host is the process router of the app: `sftp:` ids to one link, `db:` ids to another (`db_up`
+/// false: no DB Host running, nothing is delivered).
+async fn routed(db_up: bool) -> (Fx, Arc<Rec>, Arc<Rec>) {
+    use unimux_ssh::coordinator::HostRouter;
+    use unimux_ssh::session::SessionHostKind;
+    let f = setup(Opts::default()).await;
+    let (sftp, db) = (Arc::new(Rec::default()), Arc::new(Rec::default()));
+    db.host_down.store(!db_up, Ordering::SeqCst);
+    let router = HostRouter::new();
+    router.set(Some(SessionHostKind::Sftp), Arc::new(Link(sftp.clone())));
+    router.set(Some(SessionHostKind::Db), Arc::new(Link(db.clone())));
+    let ids = Arc::new(AtomicUsize::new(0));
+    let coord = SshCoordinator::new(CoordinatorDeps {
+        state: f.state.clone(),
+        stores: f.stores.clone(),
+        host: router,
+        events: Arc::new(Events(f.rec.clone())),
+        spawn: Arc::new(|fut| {
+            tokio::spawn(fut);
+        }),
+        now: Arc::new(|| 1000),
+        new_id: Arc::new(move || format!("00000000-0000-4000-8000-{:012x}", ids.fetch_add(1, Ordering::SeqCst) + 0x100)),
+        debug: false,
+        prompt_timeout: Duration::from_secs(300),
+        check_passphrase: Arc::new(check_passphrase),
+    });
+    (Fx { coord, ..f }, sftp, db)
+}
+
+const SFTP_ID: &str = "sftp:11111111-0000-4000-8000-000000000001";
+const DB_ID: &str = "db:22222222-0000-4000-8000-000000000002";
+
+fn connected_ids(rec: &Rec) -> Vec<String> {
+    rec.sent
+        .lock()
+        .iter()
+        .filter_map(|m| match m {
+            HostCommand::Connect(r) => Some(r.id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn last_of(f: &Fx, id: &str) -> SessionState {
+    f.rec.sessions.lock().iter().rev().find(|s| s.cell_id == id).cloned().unwrap()
+}
+
+fn status(id: &str, phase: SshPhase) -> HostMessage {
+    HostMessage::Status { id: id.into(), phase, error: None, exit_code: None, banner: None }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn routes_db_ids_to_the_db_host_and_sftp_ids_to_the_sftp_host() {
+    let (f, sftp, db) = routed(true).await;
+    f.coord.connect_session(SFTP_ID, HOST, false).await.unwrap();
+    f.coord.connect_session(DB_ID, HOST, false).await.unwrap();
+    assert_eq!(connected_ids(&sftp), [SFTP_ID]);
+    assert_eq!(connected_ids(&db), [DB_ID]);
+    assert_eq!(f.coord.connect_session("cell-1", HOST, false).await, Err(SshErrorCode::Unknown));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_undelivered_db_tunnel_login_reads_db_host_crashed() {
+    let (f, _, _) = routed(false).await;
+    assert_eq!(f.coord.connect_session(DB_ID, HOST, false).await, Err(SshErrorCode::DbHostCrashed));
+    let last = last_of(&f, DB_ID);
+    assert_eq!((last.phase, last.error), (SshPhase::Error, Some(SshErrorCode::DbHostCrashed)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn keeps_the_snapshots_apart_and_ends_only_the_sessions_of_the_host_that_restarted() {
+    use unimux_ssh::session::SessionHostKind;
+    let (f, _, _) = routed(true).await;
+    f.coord.connect_session(SFTP_ID, HOST, false).await.unwrap();
+    f.coord.connect_session(DB_ID, HOST, false).await.unwrap();
+    f.coord.on_host_message(status(SFTP_ID, SshPhase::Connected));
+    f.coord.on_host_message(status(DB_ID, SshPhase::Connected));
+    let ids = |v: Value| {
+        v["sessions"].as_array().unwrap().iter().map(|s| s["cellId"].as_str().unwrap().to_string()).collect::<Vec<_>>()
+    };
+    assert_eq!(ids(f.coord.session_snapshot(SessionHostKind::Sftp)), [SFTP_ID]);
+    assert_eq!(ids(f.coord.session_snapshot(SessionHostKind::Db)), [DB_ID]);
+    assert!(ids(f.coord.sessions()).is_empty());
+    f.coord.session_host_crashed(SessionHostKind::Sftp);
+    let sftp = last_of(&f, SFTP_ID);
+    assert_eq!((sftp.phase, sftp.error), (SshPhase::Error, Some(SshErrorCode::SftpHostCrashed)));
+    assert_eq!(last_of(&f, DB_ID).phase, SshPhase::Connected);
+    f.coord.session_host_crashed(SessionHostKind::Db);
+    let db = last_of(&f, DB_ID);
+    assert_eq!((db.phase, db.error), (SshPhase::Error, Some(SshErrorCode::DbHostCrashed)));
+    // The Pty Host restarting touches neither.
+    f.coord.host_crashed();
+    assert_eq!(last_of(&f, SFTP_ID).error, Some(SshErrorCode::SftpHostCrashed));
+}

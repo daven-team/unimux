@@ -149,6 +149,25 @@ mod tests {
         assert_eq!(state::default_state(Platform::Darwin)["profiles"][2]["name"], "Terminal");
     }
 
+    /// test/perf-098.test.ts "scrollback setting": the choices, the default and the normalization of a saved value.
+    #[test]
+    fn the_scrollback_setting_offers_its_choices_with_5000_as_the_default() {
+        assert_eq!(state::default_state(Platform::Win32)["settings"]["scrollbackLines"], 5000);
+        for ok in [1000, 2500, 5000, 10_000, 25_000] {
+            assert_eq!(settings::normalize_scrollback(Some(&json!(ok))), json!(ok));
+        }
+        for bad in [Value::Null, json!(0), json!(-5), json!(7000), json!("5000"), json!(1e9), json!(f64::NAN)] {
+            assert_eq!(settings::normalize_scrollback(Some(&bad)), json!(5000), "{bad}");
+        }
+        assert_eq!(settings::normalize_scrollback(None), json!(5000));
+        let with = |settings: Value| {
+            StateNormalizer.normalize(json!({"version": 1, "projects": [], "settings": settings}), Platform::Win32).unwrap()
+        };
+        assert_eq!(with(json!({}))["settings"]["scrollbackLines"], 5000, "an older state without the setting");
+        assert_eq!(with(json!({"scrollbackLines": 123}))["settings"]["scrollbackLines"], 5000);
+        assert_eq!(with(json!({"scrollbackLines": 10_000}))["settings"]["scrollbackLines"], 10_000);
+    }
+
     #[test]
     fn the_language_rule_of_existing_installations() {
         // A state without a language (an installation from before the language choice) keeps Polish; an unknown one asks again.

@@ -316,6 +316,26 @@ mod tests {
         assert!(!rt.block_on(run_call(missing)));
     }
 
+    /// off-main-exec: a program that overruns its timeout is a failure (and is stopped), in time.
+    #[test]
+    fn a_program_that_overruns_its_timeout_fails() {
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+        let env: Env = std::env::vars().collect();
+        let slow = if cfg!(windows) {
+            ExecCall {
+                file: "cmd.exe".into(),
+                args: vec!["/d".into(), "/c".into(), "ping -n 20 127.0.0.1 >nul".into()],
+                env,
+                timeout_ms: 300,
+            }
+        } else {
+            ExecCall { file: "/bin/sh".into(), args: vec!["-c".into(), "sleep 20".into()], env, timeout_ms: 300 }
+        };
+        let started = std::time::Instant::now();
+        assert!(!rt.block_on(run_call(slow)));
+        assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+    }
+
     /// H6 end to end on Windows: an npm-style install (codex.cmd next to node_modules\@openai\codex\bin\codex.js) is started
     /// as node.exe + codex.js and the script gets the message byte for byte, cmd.exe and PowerShell metacharacters included.
     /// Skipped when no node.exe is on the PATH.

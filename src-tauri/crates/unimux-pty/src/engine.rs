@@ -614,10 +614,8 @@ impl PtyEngine {
         match t {
             "write" => {
                 let Some(data) = m.get("data").and_then(Value::as_str) else { return };
-                let reply = m.get("reply").and_then(Value::as_bool) == Some(true);
                 if let Some(term) = inner.term(id) {
-                    // A terminal reply (device / focus / mouse report) is not typing: it does not shorten the window.
-                    if !reply {
+                    if typed(m) {
                         term.out.wrote();
                     }
                     inner.input(id, &term, data.as_bytes());
@@ -814,5 +812,50 @@ impl ExternalHandle {
 impl Default for PtyEngine {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// A `write` the user typed: a terminal reply (device / focus / mouse report, `reply: true`) is passed on but is not
+/// typing, so it does not shorten the coalescing window.
+fn typed(m: &Value) -> bool {
+    m.get("reply").and_then(Value::as_bool) != Some(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// test/perf-098.test.ts: "passes terminal replies on as replies, so they do not count as typing".
+    #[test]
+    fn terminal_replies_are_not_typing() {
+        assert!(typed(&json!({ "t": "write", "id": "p", "data": "ls" })));
+        assert!(!typed(&json!({ "t": "write", "id": "p", "data": "\u{1b}[I", "reply": true })));
+        assert!(typed(&json!({ "t": "write", "id": "p", "data": "x", "reply": "yes" })));
+    }
+
+    /// test/perf-098.test.ts: "a focus message from the renderer changes the window, a new renderer clears it".
+    #[test]
+    fn a_focus_message_sets_the_focused_terminal_and_a_new_main_page_clears_it() {
+        struct Nowhere;
+        impl crate::batch::Transport for Nowhere {
+            fn post(&self, _seq: u64, _bytes: Vec<u8>) -> bool {
+                true
+            }
+            fn gated(&self) -> bool {
+                false
+            }
+            fn name(&self) -> &'static str {
+                "nowhere"
+            }
+        }
+        let engine = PtyEngine::new();
+        engine.post(MAIN_WINDOW, &json!({ "t": "focus", "id": "c1" }));
+        assert_eq!(engine.stats_json()["focused"], "c1");
+        engine.attach(MAIN_WINDOW, Arc::new(Nowhere));
+        assert_eq!(engine.stats_json()["focused"], Value::Null);
+        engine.post(MAIN_WINDOW, &json!({ "t": "focus", "id": "c1" }));
+        engine.post(MAIN_WINDOW, &json!({ "t": "focus", "id": 42 }));
+        assert_eq!(engine.stats_json()["focused"], Value::Null);
     }
 }

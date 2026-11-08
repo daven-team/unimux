@@ -51,3 +51,5 @@ serde.workspace = true
 redis.workspace = true
 # D7: self-signed server certificates for the TLS tests of the MySQL client
 rcgen.workspace = true
+# the tunnel tests log in to the in-process SSH server (direct-tcpip to the database)
+unimux-ssh = { workspace = true, features = ["test-server"] }

@@ -664,6 +664,71 @@ mod tests {
         assert_eq!(s.sent(), vec!["x"]);
     }
 
+    /// A cell's channel and what it sent.
+    type Cell = (Arc<OutputChannel>, Arc<Sink>);
+
+    /// Two cells on one clock and one focus (test/perf-098.test.ts, "OutputChannel and the focus protocol").
+    fn pair() -> (Arc<ManualScheduler>, Arc<Focus>, [Cell; 2]) {
+        let clock = ManualScheduler::new(1_000_000.0);
+        let focus = Arc::new(Focus::default());
+        let make = |id: &str| {
+            let sink = Arc::new(Sink::default());
+            let out = OutputChannel::new(
+                id,
+                sink.clone(),
+                Arc::new(Control::default()),
+                Arc::new(|| true),
+                focus.clone(),
+                clock.clone(),
+            );
+            (out, sink)
+        };
+        let cells = [make("a"), make("b")];
+        (clock, focus, cells)
+    }
+
+    fn sent_of(sink: &Sink) -> Vec<String> {
+        sink.sent.lock().iter().map(|s| s.0.clone()).collect()
+    }
+
+    #[test]
+    fn perf_098_the_focused_cell_flushes_on_the_short_window_and_a_background_one_on_the_long_one() {
+        let (clock, focus, [(front, front_sent), (back, back_sent)]) = pair();
+        focus.set(Some("a".into()));
+        front.push(b"f");
+        back.push(b"b");
+        clock.advance(crate::flow::BULK_COALESCE_MS * 1.5);
+        assert_eq!(sent_of(&front_sent), vec!["f"]);
+        assert!(sent_of(&back_sent).is_empty());
+        clock.advance(BACKGROUND_COALESCE_MS * 1.5);
+        assert_eq!(sent_of(&back_sent), vec!["b"]);
+    }
+
+    #[test]
+    fn perf_098_a_cell_that_just_got_input_is_treated_like_the_focused_one() {
+        let s = setup();
+        s.out.wrote();
+        s.advance(400.0);
+        s.out.push(b"x");
+        s.advance(crate::flow::BULK_COALESCE_MS * 1.5);
+        assert_eq!(s.sent(), vec!["x"]);
+    }
+
+    #[test]
+    fn perf_098_the_focus_moves_a_pending_background_flush_up_and_leaves_other_cells_alone() {
+        let (clock, focus, [(a, a_sent), (b, b_sent)]) = pair();
+        a.push(b"A");
+        b.push(b"B");
+        clock.advance(1.0);
+        focus.set(Some("a".into()));
+        a.rearm();
+        clock.advance(crate::flow::BULK_COALESCE_MS * 1.5);
+        assert_eq!(sent_of(&a_sent), vec!["A"]);
+        assert!(sent_of(&b_sent).is_empty());
+        clock.advance(BACKGROUND_COALESCE_MS * 1.5);
+        assert_eq!(sent_of(&b_sent), vec!["B"]);
+    }
+
     #[test]
     fn focus_moves_a_background_flush_up() {
         let s = setup();

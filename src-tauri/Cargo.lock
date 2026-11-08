@@ -6176,6 +6176,7 @@ dependencies = [
  "parking_lot 0.13.0",
  "serde_json",
  "tempfile",
+ "unimux-agents",
  "unimux-core",
  "unimux-ipc",
  "windows",

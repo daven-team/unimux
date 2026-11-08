@@ -529,6 +529,30 @@ mod tests {
         }
     }
 
+    /// `cleanStamp` and `validEditorSave` with the vectors of test/editor-source.test.ts.
+    #[test]
+    fn clean_stamps_and_editor_saves_like_1_1_4() {
+        let hash = "a".repeat(64);
+        let clean = stamp(&json!({ "size": 1, "mtimeMs": 2, "hash": hash, "readAt": 3, "sessionId": "sftp:x" })).unwrap();
+        assert_eq!(clean.to_json(), json!({ "size": 1, "mtimeMs": 2, "hash": hash, "readAt": 3 }));
+        assert!(stamp(&json!({ "size": 1, "mtimeMs": 2, "hash": "not-hex" })).is_none());
+        let save = |extra: Value| {
+            let mut v = json!({ "text": "a", "baseline": "b", "encoding": "utf-8", "expected": null });
+            for (k, x) in extra.as_object().unwrap() {
+                v[k] = x.clone();
+            }
+            editor_save(&v)
+        };
+        assert!(save(json!({ "expected": { "size": 1, "mtimeMs": 2, "hash": hash }, "allowOwnerChange": true })).is_some());
+        assert!(save(json!({ "allowOwnerChange": "yes" })).is_none());
+        assert!(save(json!({})).is_some());
+        assert!(save(json!({ "expected": { "size": 1, "mtimeMs": 2 } })).is_some());
+        assert!(save(json!({ "encoding": "latin1" })).is_none());
+        assert!(save(json!({ "expected": { "size": "x", "mtimeMs": 2 } })).is_none());
+        let too_long = "a".repeat(EDITOR_TEXT_BYTES + 1);
+        assert!(save(json!({ "text": too_long, "baseline": "" })).is_none());
+    }
+
     #[test]
     fn delete_counts_are_strict_non_negative_integers() {
         assert_eq!(delete_count(&json!({ "files": 1, "dirs": 0 })), Some(DeleteCount { files: 1, dirs: 0 }));

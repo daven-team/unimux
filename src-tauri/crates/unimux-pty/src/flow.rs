@@ -601,6 +601,29 @@ mod tests {
         assert_eq!(clock.answer_ms(), Some(175.0));
     }
 
+    /// The vectors of test/perf-098.test.ts ("output coalescing window").
+    #[test]
+    fn perf_098_windows_echo_bulk_and_background_on_their_own_grid() {
+        let echo = ECHO_WINDOW_MS;
+        // the echo window right after typing, focused or not
+        assert_eq!(coalesce_delay(10_000.0, 9_950.0, false, echo), ECHO_COALESCE_MS);
+        assert_eq!(coalesce_delay(10_000.0, 9_950.0, true, echo), ECHO_COALESCE_MS);
+        // the short bulk window for the focused cell and a cell typed into within the last second
+        assert_eq!(coalesce_delay(10_000.0, f64::NEG_INFINITY, true, echo), BULK_COALESCE_MS);
+        assert_eq!(coalesce_delay(10_000.0, 10_000.0 - ACTIVE_WINDOW_MS + 1.0, false, echo), BULK_COALESCE_MS);
+        // longer for cells nobody types in
+        assert!((30.0..=40.0).contains(&BACKGROUND_COALESCE_MS));
+        assert_eq!(coalesce_delay(10_000.0, f64::NEG_INFINITY, false, echo), BACKGROUND_COALESCE_MS);
+        assert_eq!(coalesce_delay(10_000.0, 10_000.0 - ACTIVE_WINDOW_MS, false, echo), BACKGROUND_COALESCE_MS);
+        // background flushes on their own shared grid
+        for now in 0..100 {
+            let now = now as f64;
+            let delay = aligned_delay(now, BACKGROUND_COALESCE_MS);
+            assert_eq!((now + delay) % BACKGROUND_COALESCE_MS, 0.0);
+            assert!((BACKGROUND_COALESCE_MS / 2.0..=BACKGROUND_COALESCE_MS * 1.5).contains(&delay));
+        }
+    }
+
     #[test]
     fn aligned_delay_puts_bulk_flushes_on_a_grid() {
         assert_eq!(aligned_delay(1000.0, ECHO_COALESCE_MS), ECHO_COALESCE_MS);

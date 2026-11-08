@@ -180,6 +180,7 @@ pub struct TestServer {
     shell_log: Arc<Mutex<ShellLog>>,
     connections: Arc<std::sync::atomic::AtomicUsize>,
     conn_tasks: Arc<Mutex<Vec<tokio::task::AbortHandle>>>,
+    shared: Arc<Shared>,
     task: JoinHandle<()>,
 }
 
@@ -190,6 +191,14 @@ impl Drop for ConnCount {
     fn drop(&mut self) {
         self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
+}
+
+/// One `direct-tcpip` request as the server saw it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Forward {
+    pub host: String,
+    pub port: u32,
+    pub accepted: bool,
 }
 
 impl TestServer {
@@ -225,7 +234,9 @@ impl TestServer {
             exec_log: exec_log.clone(),
             shell_log: shell_log.clone(),
             conn_tasks: conn_tasks.clone(),
+            forwards: Mutex::new(Vec::new()),
         });
+        let server_shared = shared.clone();
         let count = connections.clone();
         let task = tokio::spawn(async move {
             while let Ok((socket, peer)) = listener.accept().await {
@@ -253,7 +264,7 @@ impl TestServer {
                 });
             }
         });
-        Ok(TestServer { addr, host_keys, attempts, exec_log, shell_log, connections, conn_tasks, task })
+        Ok(TestServer { addr, host_keys, attempts, exec_log, shell_log, connections, conn_tasks, shared: server_shared, task })
     }
 
     /// What the shells saw so far.
@@ -271,6 +282,11 @@ impl TestServer {
         for t in self.conn_tasks.lock().drain(..) {
             t.abort();
         }
+    }
+
+    /// Every `direct-tcpip` request so far: the target and whether it was accepted.
+    pub fn forwards(&self) -> Vec<Forward> {
+        self.shared.forwards.lock().clone()
     }
 
     pub fn port(&self) -> u16 {
@@ -300,6 +316,7 @@ impl TestServer {
 impl Drop for TestServer {
     fn drop(&mut self) {
         self.task.abort();
+        self.drop_connections();
     }
 }
 
@@ -309,6 +326,7 @@ struct Shared {
     exec_log: Arc<Mutex<Vec<String>>>,
     shell_log: Arc<Mutex<ShellLog>>,
     conn_tasks: Arc<Mutex<Vec<tokio::task::AbortHandle>>>,
+    forwards: Mutex<Vec<Forward>>,
 }
 
 /// The scripted shell (see [`ShellLog`]).
@@ -523,11 +541,23 @@ impl Handler for Conn {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         let loopback = matches!(host_to_connect, "127.0.0.1" | "localhost" | "::1");
-        let Ok(port) = u16::try_from(port_to_connect) else { return Ok(()) };
+        let log = |accepted: bool| {
+            let forward = Forward { host: host_to_connect.to_string(), port: port_to_connect, accepted };
+            self.shared.forwards.lock().push(forward);
+        };
+        let Ok(port) = u16::try_from(port_to_connect) else {
+            log(false);
+            return Ok(());
+        };
         if !self.shared.config.forwarding || !loopback {
+            log(false);
             return Ok(());
         }
-        let Ok(mut target) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await else { return Ok(()) };
+        let Ok(mut target) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await else {
+            log(false);
+            return Ok(());
+        };
+        log(true);
         reply.accept().await;
         tokio::spawn(async move {
             let mut stream = channel.into_stream();
