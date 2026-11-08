@@ -38,8 +38,8 @@ pub struct NetBackendOptions {
     pub current_version: String,
     /// Where downloads go (`<updater root>/pending`).
     pub download_dir: PathBuf,
-    /// Some: this app cannot install by itself (macOS until the U5 engine): every update is offered as the download page, with
-    /// this reason.
+    /// Some: this app cannot install by itself: every update is offered as the download page, with this reason. (macOS uses
+    /// [`crate::mac::MacBackend`] instead.)
     pub manual: Option<Manual>,
     pub log: Arc<dyn Fn(&str) + Send + Sync>,
     /// [`DOWNLOAD_STALL`]; tests use a shorter one.
@@ -66,6 +66,31 @@ pub fn file_name_of(url: &str, version: &str) -> String {
     let safe: String = name.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')).collect();
     let safe = safe.trim_start_matches('.').to_string();
     if safe.is_empty() { fallback } else { safe }
+}
+
+/// The origin of a development feed (MC_UPDATE_FEED), the one address outside GitHub update requests may use.
+pub(crate) fn dev_feed_origins(dev_feed: Option<&str>) -> Vec<String> {
+    dev_feed.and_then(|f| Url::parse(f).ok()).map(|u| vec![u.origin().ascii_serialization()]).unwrap_or_default()
+}
+
+/// `latest.json` as text: the release feed or the development one, 90 s, GitHub hosts (or the development origin) only.
+pub(crate) async fn fetch_feed_text(
+    client: &HttpClient,
+    dev_feed: Option<&str>,
+    log: &(dyn Fn(&str) + Send + Sync),
+) -> Result<String, String> {
+    let url = feed::feed_url(dev_feed);
+    let req =
+        calls::update_request(&url, dev_feed_origins(dev_feed), Some(calls::UPDATE_FEED_TIMEOUT)).map_err(|e| e.to_string())?;
+    let response = client.fetch(req).await.map_err(|e| {
+        log(&format!("update feed: {e}"));
+        CHECK_FAILED.to_string()
+    })?;
+    if !response.ok() {
+        log(&format!("update feed: HTTP {}", response.status));
+        return Err(SERVER_ERROR.to_string());
+    }
+    Ok(response.text())
 }
 
 fn percent_decode(s: &str) -> String {
@@ -119,27 +144,12 @@ impl NetBackend {
     }
 
     fn extra_origins(&self) -> Vec<String> {
-        self.o
-            .dev_feed
-            .as_deref()
-            .and_then(|f| Url::parse(f).ok())
-            .map(|u| vec![u.origin().ascii_serialization()])
-            .unwrap_or_default()
+        dev_feed_origins(self.o.dev_feed.as_deref())
     }
 
     async fn lookup_feed(self: Arc<Self>) -> Result<LookupResult, String> {
-        let url = feed::feed_url(self.o.dev_feed.as_deref());
-        let req =
-            calls::update_request(&url, self.extra_origins(), Some(calls::UPDATE_FEED_TIMEOUT)).map_err(|e| e.to_string())?;
-        let response = self.client()?.fetch(req).await.map_err(|e| {
-            (self.o.log)(&format!("update feed: {e}"));
-            CHECK_FAILED.to_string()
-        })?;
-        if !response.ok() {
-            (self.o.log)(&format!("update feed: HTTP {}", response.status));
-            return Err(SERVER_ERROR.to_string());
-        }
-        let feed = feed::parse_feed(&response.text(), feed::platform_keys()).map_err(|e| {
+        let text = fetch_feed_text(&*self.client()?, self.o.dev_feed.as_deref(), &*self.o.log).await?;
+        let feed = feed::parse_feed(&text, feed::platform_keys()).map_err(|e| {
             (self.o.log)(&format!("update feed: {e}"));
             CHECK_FAILED.to_string()
         })?;

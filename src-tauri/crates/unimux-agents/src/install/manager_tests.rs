@@ -272,9 +272,52 @@ async fn refreshes_the_prerequisites_after_the_cache_expired() {
 #[tokio::test(start_paused = true)]
 async fn rejects_an_unknown_cli() {
     let (_f, m) = manager(Fake::new(Os::Windows), InstallTimings::default());
-    for bad in [json!("shell"), json!("__proto__"), json!(42), Value::Null, json!({})] {
+    for bad in [json!("shell"), json!("__proto__"), json!(42), Value::Null, json!({}), json!("claude;calc"), json!(["claude"])] {
         assert_eq!(m.options(&bad).await, None);
     }
+    // A known CLI is answered (`install:options` answers null for the None above).
+    assert_eq!(m.options(&json!("codex")).await.unwrap()["cli"], "codex");
+}
+
+/// test/cli-install.test.ts "cancels only with a string id" (`install:cancel`) and "maps a PowerShell failure (marker 1) with
+/// network text".
+#[tokio::test(start_paused = true)]
+async fn cancels_only_with_a_string_id_and_maps_a_powershell_network_failure() {
+    let (f, m) = manager(Fake::new(Os::Windows), InstallTimings::default());
+    let r = begin(&m).await;
+    for bad in [json!(5), Value::Null, json!({}), json!([r.session_id.clone()])] {
+        m.cancel_request(&bad);
+    }
+    assert!(m.is_active());
+    assert!(f.killed_pty.lock().is_empty());
+    m.cancel_request(&json!(r.session_id));
+    assert!(!m.is_active());
+    assert_eq!(*f.killed_pty.lock(), vec![r.pty_id]);
+
+    let r = begin(&m).await;
+    m.on_host_event(tap(
+        &r.pty_id,
+        "Invoke-RestMethod : The remote name could not be resolved: 'claude.ai'\r\n__AJZ_DONE__1\r\n",
+    ));
+    flush().await;
+    assert_eq!(
+        f.last(),
+        InstallState::Failed { session_id: r.session_id, reason: InstallReason::Network, exit_code: Some(1), dir: None }
+    );
+}
+
+/// test/cli-install.test.ts "ignores an interrupt of another terminal or without a session".
+#[tokio::test(start_paused = true)]
+async fn ignores_an_interrupt_of_another_terminal_or_without_a_session() {
+    let (f, m) =
+        manager(Fake::new(Os::Windows), InstallTimings { abort_grace: Duration::from_millis(100), ..InstallTimings::default() });
+    assert!(!m.on_host_event(PtyEvent::Interrupt { id: "install:none" }));
+    let r = begin(&m).await;
+    let other = r.pty_id.replace("install:", "install:other");
+    assert!(!m.on_host_event(PtyEvent::Interrupt { id: &other }));
+    advance(1000).await;
+    assert_eq!(f.states().len(), 1);
+    assert!(m.is_active());
 }
 
 #[tokio::test(start_paused = true)]

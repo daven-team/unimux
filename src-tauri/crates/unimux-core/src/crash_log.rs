@@ -133,6 +133,34 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// test/updater-log.test.ts: timestamped lines appended, a log without a rotation target starts over, writing never fails.
+    #[test]
+    fn appends_timestamped_lines_starts_over_when_too_large_and_never_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("updater.log");
+        let log = RollingLog::new(&file, None);
+        log.info("Checking for update");
+        log.warn("slow");
+        log.error("offline");
+        let text = fs::read_to_string(&file).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 3);
+        // `<ISO time> info Checking for update`, the time like 2026-11-08T10:00:00.000Z.
+        let (time, rest) = lines[0].split_once(' ').unwrap();
+        assert_eq!(rest, "info Checking for update");
+        assert!(time.len() == 24 && &time[4..5] == "-" && &time[10..11] == "T" && time.ends_with('Z'), "{time}");
+        assert!(lines[1].ends_with(" warn slow") && lines[2].ends_with(" error offline"));
+        fs::write(&file, vec![b'x'; 250 * 1024]).unwrap();
+        log.info("fresh");
+        assert!(fs::metadata(&file).unwrap().len() < 200);
+        assert!(fs::read_to_string(&file).unwrap().contains("fresh"));
+        // A path that cannot be a file (a folder is in the way): nothing happens, nothing panics.
+        let blocked = dir.path().join("blocked");
+        fs::create_dir_all(blocked.join("updater.log")).unwrap();
+        RollingLog::new(blocked.join("updater.log"), None).info("ignored");
+        assert!(blocked.join("updater.log").is_dir());
+    }
+
     #[test]
     fn lines_and_rotation() {
         let dir = tempfile::tempdir().unwrap();

@@ -20,6 +20,7 @@ pub mod legacy;
 pub mod mac;
 pub mod net;
 pub mod progress;
+pub mod schedule;
 pub mod settled;
 pub mod state;
 pub mod version;
