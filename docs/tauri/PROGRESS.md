@@ -1986,6 +1986,71 @@ Szacunek: około 290 dni pracy agentów + 20-25 procent na integrację, czyli re
 6. No real-app script was run (fast mode): the scripts touched here (real-app, ssh-ui-lib, smoke-start, perf-latency, verify-cli-contract, verify-mcp-cli, verify-safestorage, verify-tauri-w3, verify-ssh-ui, verify-caption, bench-jank) are syntax-checked only; R2 runs them.
 7. The .dmg is not mounted by check:bundle (the .app inside comes from the same bundle folder); macOS CI runs the .app check.
 
+## R2 measurements vs 1.1.4 (2026-11-08, Windows 11 26200, release-optimized check build)
+
+### How
+
+- 1.1.4: the published `unimux-Setup-1.1.4.exe` (GitHub release, SHA-256 matches SHA256SUMS.txt), never run: its NSIS payload `app-64.7z` was cut out of the installer and unpacked with Windows' own `tar` into a scratch folder. The user's installed 1.1.4 (D:\Aplikacje\ajzakomator, running) was not touched. A packaged 1.1.4 ignores MC_DATA_DIR / MC_OFFSCREEN / MC_DEBUG_PORT (`devEnv` is off when `app.isPackaged`), so the scratch copy's `unimux.exe` was renamed `electron.exe` (Electron's `isPackaged` is false for that name): the overrides apply, and the single-instance lock is keyed to the userData folder set from MC_DATA_DIR (656c790 src/main/index.ts 228-241), so it never met the user's running app (checked: the real %APPDATA%\unimux\startup.log was not written). Updates are off in that mode (`updatesActive` needs packaged or MC_UPDATE_FEED).
+- Scripts: 1.1.4 ran with the pre-R1 scripts (a worktree of 940ed78, `spawnApp` pointed at that exe, MC_APP_TARGET=electron), 1.2.0 with this tree's; same scratch layouts. Ad-hoc probes for what no script covers (outside the repo, deleted): time to first prompt from outside over CDP, the 5x4x3 grid, minimized 60 s, idle memory, upgrade / 20 cycles / downgrade, the no-console start. Runs interleaved 1.1.4 / 1.2.0; the user's own unimux kept running (about 5 to 15 percent of a core) and other apps were idle.
+- Display 240 Hz (4.2 ms frames), so frame-time columns are in 4.2 ms steps.
+
+### Results (after the fixes below)
+
+| measurement | 1.1.4 | 1.2.0 | verdict |
+|---|---|---|---|
+| startup: spawn -> main page on the DevTools port (median of 7) | 1457 ms | 595 ms | better |
+| startup: spawn -> first shell prompt drawn, 2 projects, 2x2 cmd (median of 7) | 1897 ms | 1153 ms | better |
+| startup.log `first-output` (ms since the process' own start mark; not comparable: Electron's mark starts after Electron's init) | 625 ms | 830 ms | info |
+| echo, local cmd, drawn median / p95, spaced (perf-latency, 100 keys, 2 pairs) | 7.5-7.9 / 8.2 | 4.8-5.2 / 8.0-8.2 | better |
+| echo, local cmd, burst | 8.1 / 8.3-8.4 | 6.3-6.5 / 8.2-8.5 | better |
+| echo, SSH (loopback ssh-test-server), spaced, drawn median / p95 | 1.5-1.6 / 2.4-3.8 | 2.1 / 3.7-5.1 | **miss** (+0.5 ms) |
+| echo, SSH, burst | 1.6 / 2.1-3.9 | 2.1 / 2.8-2.9 | **miss** (+0.5 ms) |
+| echo, SSH, parsed median (keystroke -> echo in xterm's buffer) | 1.1 | 1.4 | **miss** (+0.3 ms) |
+| bench-jank, 24 scenarios x 3 reps, 2 interleaved runs: p50 / p95 / p99 | 4.2 / 4.3 / 4.3 | 4.2 / 4.3 / 4.3 | equal in every scenario |
+| bench-jank max frame, median of 2 (tab first visit / project switch / settings / detach) | 45.8 / 20.9 / 29.2 / 39.7 | 54.1 / 14.6 / 31.3 / 43.8 | mixed, see misses |
+| bench-jank frames over 50 ms (tab first visit; all others 0 in both) | 0 | 0.5 (one run 1) | **miss** (one frame) |
+| bench-jank dropped frames, resize window (after the setBounds fix) | 30 / 61 | 55 / 59 | equal |
+| bench-jank dropped frames, resize sidebar / grid divider | 43 / 11.5 | 34.5 / 2 | better |
+| perf-grid 5x4 busy cmd cells: fps, p95, frames > 50 ms | 248, 4.3, 0 | 248-249, 4.3, 0 | equal |
+| perf-grid CPU of the process tree (shells and writers excluded) | 59 % of a core | 86-93 % (3 runs) | **miss** |
+| 5x4x3 grid (60 terminals, shown grid printing): WebGL after visiting all three | 60 / 60 | 60 / 60 | equal |
+| 5x4x3: first visit of grid 2 / grid 3 | 430-445 / 648-650 ms | 327-339 / 512-517 ms | better |
+| 5x4x3: grid switch median / max (9 switches while printing) | 37-39 / 135-140 ms | 29-32 / 144-147 ms | equal |
+| 5x4x3: busy fps / p95 / max | 249 / 4.3 / 4.3 | 249 / 4.3 / 4.3 | equal |
+| 5x4x3: CPU while the shown grid prints | 72-73 % | 99-100 % | **miss** |
+| memory, idle 2x2 grid: working set / private, whole tree | 512 / 353 MiB (5 electron.exe) | 417-421 / 242-244 MiB (unimux.exe + 6 msedgewebview2.exe) | better |
+| memory, 5x4x3 busy: working set / private | 776-784 / 666 MiB | 703-719 / 567-582 MiB | better |
+| memory, 8 busy cells minimized | 601 / 438 MiB | 606 / 400 MiB | equal / better |
+| minimized 60 s, 8 cells printing 60 lines/s: CPU of the tree | 4.9 % | 7.0-8.1 % (was 67 %) | **miss** (+2-3 points) |
+| minimized 60 s: 400 ms tick median / p95 / max | 400 / 407 / 414 | 400 / 409 / 412-414 | equal |
+| minimized 60 s: output kept (lines per cell while minimized) | 3540-3544 | 3600-4000 | equal |
+| restore after minimized: max frame, frames over 50 ms in 5 s | 37.6, 0 | 54-62, 1 | **miss** (one frame) |
+| perf-hidden 16 MB visible: writer time / CPU | 399-409 ms / 1.27-1.39 s | 449-453 ms / 1.0-1.37 s | **miss** (+10 %) |
+| perf-hidden 16 MB minimized: writer time / CPU / idle CPU 10 s | 418 ms / 0.71-0.83 s / 0.17-0.18 s | 461-486 ms / 0.9-1.06 s / 0.01-0.13 s | **miss** (+10-16 % time) |
+| perf-hidden 400 ms tick minimized (median / max) | 400 / 410-412 | 400 / 408-412 | equal |
+| upgrade: 1.1.4 creates the data (3 projects, 7 tabs, SSH host + password, Redis connection + password, settings), 1.2.0 starts on it | | everything there, both passwords decrypt (SSH cell logs in, Redis session connects) | pass |
+| 20 quit/restart cycles of 1.2.0 on that data (one edit per cycle) | | 20 / 20: state as saved, quit by itself in 371-379 ms with exit code 0, no process left, every JSON parses, no error in crash.log; boot to loaded state 820-882 ms | pass |
+| downgrade: 1.1.4 again on the same folder | | everything 1.2.0 saved last is there, both passwords decrypt, quits cleanly, every JSON parses | pass |
+| start without a console (CreateProcess DETACHED_PROCESS, null std handles, nothing inherited) | | GUI subsystem; page-loaded + first-output in startup.log; no console window in the tree (cmd under OpenConsole has none); quit through the bridge ended the process by itself; smoke-start.mjs OK (incl. the 1.1.x `-e` call) | pass |
+
+### Fixed in R2 (commits on tauri-1.2.0)
+
+1. `fix: fit a shown terminal again when its renderer changes` (c3ef28c): cells fitted while the DOM renderer drew them (7.61 px cells) kept 45 columns in a 49-column box once WebGL took over (7 px cells); 1.1.4 has the same race but hit it only now and then, 1.2.0 on every start. It also made perf-latency's local probe wrap after one key.
+2. `fix: send typed keystrokes to the pty port as WebView2 WebMessages` (5d6c49e): an invoke is a 1.2 ms round trip through WebView2's custom-scheme path, a WebMessage 0.2 ms. SSH echo drawn 2.9 -> 2.1 ms (1.1.4 1.6).
+3. `test: the test bridge's setBounds returns at once for bench-jank` (5f9d855): the bridge's 150 ms settle made each resize step 170 ms apart, so every step refit every cell (dropped frames 484 vs 35); the script was wrong for the comparison, not the app.
+4. `fix: a minimized window pauses its animations and skips xterm's empty selection redraws` (4e3bbdf): WebView2 keeps running animation frames for a minimized window (Electron stops them); the busy marks' spin kept the GPU process at 28 % and xterm's DOM renderer redrew every row on every scroll through the selection path. 67 -> 20 %.
+5. `fix: a window nobody sees asks for no scrollbar frames, acks a trickle every 100 ms and gets its output in 100 ms batches` (0b0b2e0): 20 -> 7-8 %.
+
+### Misses left (P1 by the R2 rule; not fixed here)
+
+1. **SSH echo +0.5 ms** (2.1 vs 1.6 drawn, 1.4 vs 1.1 parsed). Not the SSH library: russh's own round trip against the same test server is 0.28-0.32 ms vs ssh2's 0.37-0.42 ms (probe, 184 keys). What is left is the host -> page path: every message is a new WebView2 shared buffer (CreateSharedBuffer + PostSharedBufferToScript on the UI thread) plus a few thread hops (WebMessage on the UI thread -> port lane task -> writer task -> russh; reader task -> batcher thread -> UI thread). Candidates: reuse shared buffers, send small echo frames as a WebMessage, deliver port posts on the UI thread without the lane task.
+2. **CPU of a busy visible grid +40-55 %** (perf-grid 86-93 vs 59 %, 5x4x3 99-100 vs 72 %), frames equal. 20 busy cells, per process: 1.2.0 GPU 33.5, renderer 33.2, WebView2 browser 10.7, unimux.exe 9.5, network service 3.0; 1.1.4 GPU 32.4, renderer 26.8, pty host 2.7, main 0. The extra is IPC: every host message is a shared buffer, every release and ack an invoke (custom-scheme request through the browser and network processes). Tried and dropped: sending the acks with the release of the same host message (one invoke instead of two) raised the tree to 120 % (renderer script 60 -> 95 ms/s); not understood yet.
+3. **Minimized with busy cells 7-8 % vs 4.9 %**: about 18 invokes a second remain (release + ack of the 100 ms batches) and WebView2 still runs frames for the window.
+4. **One long frame**: tab first visit (54 ms, LoAF 55 ms, in one of two runs; 1.1.4 46 ms, no LoAF), restore after minimize (54-62 ms vs 38 ms): WebGL contexts and fits for the grid coming back.
+5. **perf-hidden throughput -10-16 %** (16 MB through a cmd cell: 449-486 ms vs 399-418 ms).
+6. Seen once, not reproduced: verify-ssh-ui failed at "clean form closed by Esc without asking" in a real-app-run batch; two reruns passed.
+7. Not a miss, for the record: tao's message-only helper ("Tao Thread Event Target", 16 x 16, layered and transparent) counts as a visible top-level window of unimux.exe; nothing is drawn.
+
 ## User feedback 2026-11-06
 
 - Update window: the text arrow looked wrong (fixed in resources/update-splash: drawn chevron), the window must not be always-on-top (fixed in src/updatesplash for Electron; required for U2), and the UAC prompt must come to the front (U2 requirement).
