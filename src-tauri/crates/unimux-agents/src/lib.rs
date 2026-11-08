@@ -11,6 +11,8 @@
 //! - [`context`] (H4): the context meter of each agent cell (transcript usage, read incrementally).
 //! - [`sessions`] (H4): past conversations of a project and its worktrees (`sessions:list`), the Codex session guess of
 //!   `codex:bind`.
+//! - [`launch`] (P4): the launch line of an agent cell (buildCliCommand / buildLaunchCommand, the reset tail), the team
+//!   startup / resume prompts and the per-cell MCP config.
 
 pub mod cell_files;
 pub mod cli;
@@ -18,4 +20,5 @@ pub mod context;
 pub mod conv;
 pub mod fsstat;
 pub mod hooks;
+pub mod launch;
 pub mod sessions;

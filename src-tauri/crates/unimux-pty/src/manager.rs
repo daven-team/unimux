@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use parking_lot::{Condvar, Mutex, RwLock};
 
 use crate::shell::{Launch, Platform, ShellKind, resolve_shell, terminal_env};
+use crate::shell_integration::{default_shell_dir, integrated_launch};
 
 #[cfg(windows)]
 use crate::conpty as sys;
@@ -303,8 +304,16 @@ impl PtyManager {
         let inner = &self.inner;
         let cols = req.cols.max(2);
         let rows = req.rows.max(1);
-        let launch = req.launch.clone().unwrap_or_else(|| resolve_shell(req.shell, &req.env, Platform::current()));
-        let env = terminal_env(&req.env, req.cell_id.as_deref());
+        // A terminal without its own launch gets the resolved shell with its prompt marks (PtyManager.spawn's
+        // integratedLaunch; the cmd prompt lives in the environment).
+        let (launch, env) = match &req.launch {
+            Some(launch) => (launch.clone(), terminal_env(&req.env, req.cell_id.as_deref())),
+            None => {
+                let shell = resolve_shell(req.shell, &req.env, Platform::current());
+                let (launch, env) = integrated_launch(req.shell, &shell, &req.env, Platform::current(), &default_shell_dir());
+                (launch, terminal_env(&env, req.cell_id.as_deref()))
+            }
+        };
 
         let slot = Arc::new(Slot {
             id: req.id.clone(),
