@@ -258,6 +258,33 @@ pub async fn test_bridge(
             }
             Ok(Value::Array(os.taskbar_calls.lock().clone().unwrap_or_default()))
         }
+        // W4 (X1 contract): the OS notifications of this run, `[{title, body, actions}]`. Every harness launch is offscreen or
+        // sets MC_TEST_TOASTS, so the recorder keeps the toasts from the start and none reaches the desktop; `{stub: true}`
+        // only confirms that (answers true), as 1.1.4's stub kept what was shown since the launch.
+        "toasts" => {
+            let os = ctx.os.get().ok_or_else(|| fail("no os service"))?;
+            let recorder = os.recorder.as_ref().ok_or_else(|| fail("toasts need MC_OFFSCREEN or MC_TEST_TOASTS"))?;
+            if args.get("stub").and_then(Value::as_bool) == Some(true) {
+                return Ok(Value::Bool(true));
+            }
+            Ok(Value::Array(recorder.toasts()))
+        }
+        // W4: `{index, action: "click" | <button index>}` acts on a kept toast like the user would (a click on the toast or
+        // one of its buttons); a negative index counts from the end. Answers false for an unknown toast.
+        "toastAction" => {
+            let os = ctx.os.get().ok_or_else(|| fail("no os service"))?;
+            let recorder = os.recorder.as_ref().ok_or_else(|| fail("toastAction needs MC_OFFSCREEN or MC_TEST_TOASTS"))?;
+            let index = args.get("index").and_then(Value::as_i64).ok_or_else(|| fail("toastAction needs {index}"))?;
+            let event = match args.get("action") {
+                Some(Value::String(a)) if a == "click" => unimux_platform::notify::ToastEvent::Click,
+                Some(Value::Number(n)) => unimux_platform::notify::ToastEvent::Button(
+                    n.as_u64().ok_or_else(|| fail("toastAction: bad button index"))? as usize,
+                ),
+                _ => return Err(fail("toastAction needs {action: 'click' | button index}")),
+            };
+            let Some(index) = recorder.toast_index(index) else { return Ok(Value::Bool(false)) };
+            Ok(Value::Bool(recorder.activate(index, event)))
+        }
         // W7: an `app:notice` toast in the main window, `{text}` (the path H2's hook fallback notice takes).
         "appNotice" => {
             let text = args.get("text").and_then(Value::as_str).ok_or_else(|| fail("appNotice needs {text}"))?;

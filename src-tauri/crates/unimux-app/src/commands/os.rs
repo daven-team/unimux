@@ -61,7 +61,13 @@ pub type NoticeAction = Arc<dyn Fn(Option<usize>) + Send + Sync>;
 
 impl OsService {
     pub fn new(ctx: &Arc<AppContext>) -> Arc<Self> {
-        let (desktop, recorder): (Arc<dyn Desktop>, Option<Arc<Recorder>>) = if ctx.overrides.offscreen {
+        // A check build launched by the harness (MC_TEST_TOASTS=1, X1 contract) keeps every toast, dialog and shell call off
+        // the desktop also when it is not offscreen.
+        #[cfg(feature = "test-bridge")]
+        let test_toasts = std::env::var("MC_TEST_TOASTS").is_ok_and(|v| v == "1");
+        #[cfg(not(feature = "test-bridge"))]
+        let test_toasts = false;
+        let (desktop, recorder): (Arc<dyn Desktop>, Option<Arc<Recorder>>) = if ctx.overrides.offscreen || test_toasts {
             let r = Arc::new(Recorder::new(&ctx.data_dir));
             (r.clone(), Some(r))
         } else {
