@@ -35,13 +35,15 @@ writeFileSync(join(local, 'b.txt'), 'local b\n');
 writeFileSync(join(local, 'os-drop.txt'), 'dropped from the OS\n');
 writeFileSync(join(local, 'site', 'index.html'), '<h1>site</h1>\n');
 writeFileSync(join(local, 'site', 'css', 'a.css'), 'body{}\n');
-writeFileSync(join(local, 'big.bin'), Buffer.alloc(24 * 1024 * 1024, 7));
+// Big and slow enough (with --sftp-delay) that a transfer still runs while the steps below look at it, cancel it or ask about
+// it: the Rust host moves this file several times faster than 1.1.4's SFTP Host did (24 MB was done in under a second).
+writeFileSync(join(local, 'big.bin'), Buffer.alloc(96 * 1024 * 1024, 7));
 
 // A user key made here (not the user's ~/.ssh): the server accepts it, the app gets it through the normal import path.
 const pair = ssh2.utils.generateKeyPairSync('ed25519');
 writeFileSync(join(root, 'user.pub'), pair.public);
 
-const server = await startTestServer(['--sftp-root', remoteRoot, '--sftp-home', '/home/alice', '--public-key-file', join(root, 'user.pub'), '--sftp-delay', '4']);
+const server = await startTestServer(['--sftp-root', remoteRoot, '--sftp-home', '/home/alice', '--public-key-file', join(root, 'user.pub'), '--sftp-delay', '8']);
 // SFTP through sudo (0.9.9): one server without a sudo password, one that wants "root-secret"; both serve the same folder.
 const SUDO_PASSWORD = 'root-secret';
 const sudoServer = await startTestServer(['--sftp-root', remoteRoot, '--sftp-home', '/home/alice', '--sftp-sudo']);
