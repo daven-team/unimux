@@ -35,8 +35,8 @@ use unimux_accounts::notice_text::{auto_switch_text, limit_notice_text, switch_b
 use unimux_accounts::refs::{AccountRef, panel_notices};
 use unimux_accounts::results::{SwapError, SwapResult};
 use unimux_accounts::rules::{
-    AdoptCopyDeps, GuardDeps, MakeMainDeps, RemoveDeps, RenewRule, dismiss_account_notice, handle_adopt_copy,
-    handle_make_main, handle_remove_account,
+    AdoptCopyDeps, GuardDeps, MakeMainDeps, RemoveDeps, RenewRule, dismiss_account_notice, handle_adopt_copy, handle_make_main,
+    handle_remove_account,
 };
 use unimux_accounts::swapfs::RealSwapFs;
 use unimux_accounts::usage::credentials::{CredentialSource, claude_credentials_stamp, system_keychain};
@@ -82,7 +82,6 @@ impl Default for LoginHooks {
 static LOGIN: RwLock<Option<LoginHooks>> = RwLock::new(None);
 
 /// A4: the login managers' hooks.
-#[allow(dead_code, reason = "A4 calls it when its login managers land")]
 pub fn set_login_hooks(hooks: LoginHooks) {
     *LOGIN.write() = Some(hooks);
 }
@@ -148,7 +147,19 @@ fn language(ctx: &AppContext) -> String {
 
 /// The hub of this run (made on first use).
 pub fn hub(ctx: &Arc<AppContext>) -> Arc<Hub> {
-    HUB.get_or_init(|| Hub::new(ctx)).clone()
+    HUB.get_or_init(|| {
+        let hub = Hub::new(ctx);
+        // A4: what a finished login changed is read at once (`usage.refresh(true, true, subject)`).
+        let usage = hub.usage.clone();
+        super::login::set_usage_refresh(move |subject| {
+            let usage = usage.clone();
+            tauri::async_runtime::spawn(async move {
+                usage.refresh(true, true, Some(&subject)).await;
+            });
+        });
+        hub
+    })
+    .clone()
 }
 
 impl Hub {
@@ -160,7 +171,8 @@ impl Hub {
         let env: std::collections::BTreeMap<String, String> = std::env::vars().collect();
         let keychain = darwin.then(|| system_keychain(Arc::new(now_ms)));
         let credentials = CredentialSource::system(env, home, darwin, keychain);
-        let codex = Arc::new(CodexAccountsStore::new(ctx.data_dir.join("codex-accounts")));
+        // One store per app run, shared with A4's Codex logins.
+        let codex = super::login::codex_accounts(ctx);
         let weak_ctx = Arc::downgrade(ctx);
         let data_dir = ctx.data_dir.clone();
         let overrides = ctx.overrides.clone();
@@ -177,14 +189,8 @@ impl Hub {
                 now: Arc::new(now_ms),
                 codex_home: Arc::new(move || creds.codex_home()),
                 // MC_USAGE_*_URL: dev-overrides builds only (release builds see None).
-                claude_url: overrides
-                    .usage_claude_url
-                    .clone()
-                    .unwrap_or_else(|| unimux_net::calls::CLAUDE_USAGE_URL.to_string()),
-                codex_url: overrides
-                    .usage_codex_url
-                    .clone()
-                    .unwrap_or_else(|| unimux_net::calls::CODEX_USAGE_URL.to_string()),
+                claude_url: overrides.usage_claude_url.clone().unwrap_or_else(|| unimux_net::calls::CLAUDE_USAGE_URL.to_string()),
+                codex_url: overrides.usage_codex_url.clone().unwrap_or_else(|| unimux_net::calls::CODEX_USAGE_URL.to_string()),
                 refresh_claude: Some(fetch_claude_fn),
                 sleep: Arc::new(|d| tokio::time::sleep(d).boxed()),
                 // The usage endpoint counts its limit per client: the app reads as itself, never as Claude Code.
@@ -204,9 +210,7 @@ impl Hub {
                 }),
                 data_dir.join("usage-cache.json"),
                 Arc::new(move || settings(&s1).get("showAiUsage").and_then(Value::as_bool) == Some(true)),
-                Arc::new(move || {
-                    settings(&s2).get("usageIntervalMinutes").and_then(Value::as_f64).unwrap_or(0.0) * 60_000.0
-                }),
+                Arc::new(move || settings(&s2).get("usageIntervalMinutes").and_then(Value::as_f64).unwrap_or(0.0) * 60_000.0),
                 rt.clone(),
             );
             let stamp_source = credentials.clone();
@@ -230,9 +234,8 @@ impl Hub {
                     .unwrap_or_default()
             }));
             o.accounts_info = Some(Arc::new(move || m4.upgrade().map(|h| h.accounts_info()).unwrap_or_default()));
-            o.live_email = Some(Arc::new(move || {
-                m5.upgrade().and_then(|h| h.claude.store.live()).and_then(|l| l.identity.email)
-            }));
+            o.live_email =
+                Some(Arc::new(move || m5.upgrade().and_then(|h| h.claude.store.live()).and_then(|l| l.identity.email)));
             // Limit warnings and the automatic switch must also work while the window is minimized or in the tray.
             o.poll_hidden = Some(Arc::new(move || {
                 let s = settings(&s3);
@@ -535,7 +538,12 @@ impl Hub {
         let pending = || -> std::io::Result<bool> { has_pending_swap(&RealSwapFs, &self.claude.backup_dir()) };
         let now = || slot.is_unresolved() || slot.is_recovery_pending();
         let read_only = || self.claude.store.read_only();
-        f(&GuardDeps { swap_running: &running, swap_pending: &pending, swap_pending_now: Some(&now), read_only: Some(&read_only) })
+        f(&GuardDeps {
+            swap_running: &running,
+            swap_pending: &pending,
+            swap_pending_now: Some(&now),
+            read_only: Some(&read_only),
+        })
     }
 
     fn remove_account(self: &Arc<Self>, id: &Value) -> Result<Value, String> {
@@ -652,11 +660,8 @@ fn show_switch_notice(ctx: &Arc<AppContext>, event: &SwitchNotice) {
     let lang = language(ctx);
     let (title, body) = auto_switch_text(event, &lang, now_ms());
     let offer = matches!(event.kind, NoticeKind::Offer | NoticeKind::ReturnOffer);
-    let buttons = if offer && (cfg!(windows) || cfg!(target_os = "macos")) {
-        vec![switch_button_text(event, &lang)]
-    } else {
-        Vec::new()
-    };
+    let buttons =
+        if offer && (cfg!(windows) || cfg!(target_os = "macos")) { vec![switch_button_text(event, &lang)] } else { Vec::new() };
     let weak = Arc::downgrade(ctx);
     let on_click: crate::commands::os::NoticeAction = Arc::new(move |_| {
         if let Some(c) = weak.upgrade() {
@@ -695,7 +700,8 @@ fn show_switch_notice(ctx: &Arc<AppContext>, event: &SwitchNotice) {
 fn test_limit(ctx: &Arc<AppContext>) {
     let h = hub(ctx);
     let state = h.usage.state();
-    let account = state.providers.iter().find(|p| p.email.as_deref().is_some_and(|e| !e.is_empty()) && p.status != Status::SignedOut);
+    let account =
+        state.providers.iter().find(|p| p.email.as_deref().is_some_and(|e| !e.is_empty()) && p.status != Status::SignedOut);
     let limits = alert_settings(&ctx.state.get().get("settings").cloned().unwrap_or(Value::Null)).limits;
     let notice = LimitNotice {
         reset: false,
@@ -753,7 +759,9 @@ where
 
 async fn blocking<T: Send + 'static>(h: &Arc<Hub>, f: impl FnOnce(&Arc<Hub>) -> T + Send + 'static) -> Result<T, IpcError> {
     let me = h.clone();
-    tokio::task::spawn_blocking(move || f(&me)).await.map_err(|_| IpcError::Failed { command: "accounts".into(), message: "account work failed".into() })
+    tokio::task::spawn_blocking(move || f(&me))
+        .await
+        .map_err(|_| IpcError::Failed { command: "accounts".into(), message: "account work failed".into() })
 }
 
 pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
@@ -766,7 +774,9 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     // The refresh button reads every account now (1.1.1), not only those past their spacing.
     gated(r, ctx, "usage:refresh", |h, _| async move { Ok(h.usage.refresh_now().await.to_value()) });
     gated(r, ctx, "accounts:remove", |h, id| async move {
-        blocking(&h, move |h| h.remove_account(&id)).await?.map_err(|message| IpcError::Failed { command: "accounts:remove".into(), message })
+        blocking(&h, move |h| h.remove_account(&id))
+            .await?
+            .map_err(|message| IpcError::Failed { command: "accounts:remove".into(), message })
     });
     gated(r, ctx, "accounts:makeMain", |h, id| async move { Ok(h.make_main_claude(&id).await.to_value()) });
     gated(r, ctx, "accounts:adoptCopy", |h, id| async move { blocking(&h, move |h| h.adopt_copy(&id)).await });
@@ -788,11 +798,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     gated(r, ctx, "accounts:switchBest", |h, payload| async move {
         let provider = payload.get("provider").and_then(Value::as_str).and_then(Provider::parse);
         let Some(provider) = provider else { return Ok(SwapResult::fail(SwapError::Invalid).to_value()) };
-        let to = payload
-            .get("to")
-            .and_then(Value::as_str)
-            .filter(|t| t.encode_utf16().count() <= 160)
-            .map(str::to_lowercase);
+        let to = payload.get("to").and_then(Value::as_str).filter(|t| t.encode_utf16().count() <= 160).map(str::to_lowercase);
         Ok(h.auto.switch_now(provider, to.as_deref()).await.to_value())
     });
     gated(r, ctx, "accounts:acceptSwitch", |h, _| async move { Ok(h.auto.accept_offer().await.to_value()) });
@@ -872,4 +878,3 @@ mod tests {
         assert_ne!(usage_key(&a), usage_key(&b));
     }
 }
-

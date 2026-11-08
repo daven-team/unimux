@@ -61,7 +61,6 @@ const COLS: u16 = 100;
 const ROWS: u16 = 28;
 
 /// A5: what a finished login changed is read at once (`usage.refresh(true, true, subject)`).
-#[allow(dead_code, reason = "the usage service (A5) sets it")]
 pub fn set_usage_refresh(refresh: impl Fn(String) + Send + Sync + 'static) {
     *USAGE_REFRESH.lock() = Some(Arc::new(refresh));
 }
@@ -86,19 +85,16 @@ pub struct Logins {
 
 impl Logins {
     /// `login.isActive() || codexLogin.isActive()`.
-    #[allow(dead_code, reason = "make main and the auto-switch (A2 / A5) ask it")]
     pub fn any_active(&self) -> bool {
         self.claude.is_active() || self.codex.is_active()
     }
 
     /// `login.retryParkedRestores(waitMs)` (A5's poll, before the reconcile).
-    #[allow(dead_code, reason = "the usage polls (A5) run it")]
     pub async fn retry_parked_restores(&self, wait: Option<Duration>) {
         self.claude.retry_parked_restores(wait).await;
     }
 
     /// `login.parkedIds()` (the accounts panel, A5).
-    #[allow(dead_code, reason = "the accounts panel (A5) reads it")]
     pub fn parked_ids(&self) -> Vec<String> {
         self.claude.parked_ids()
     }
@@ -181,6 +177,18 @@ pub fn logins(ctx: &Arc<AppContext>) -> Arc<Logins> {
                 codex_active: Arc::new(move || x.is_active()),
                 main_active: Arc::new(move || m.is_main_active()),
                 holds_profile: Arc::new(move |dir: &Path| h.holds_profile(dir)),
+            });
+            // A5: the polls, the panel, make main / the automatic switch and the card removal ask the managers.
+            let (a, p, r, cc, xc) = (logins.clone(), logins.clone(), logins.clone(), logins.clone(), logins.clone());
+            super::usage::set_login_hooks(super::usage::LoginHooks {
+                any_active: Arc::new(move || a.any_active()),
+                parked_ids: Arc::new(move || p.parked_ids()),
+                retry_parked_restores: Arc::new(move |wait| {
+                    let r = r.clone();
+                    async move { r.retry_parked_restores(Some(wait)).await }.boxed()
+                }),
+                cancel_for: Arc::new(move |id: &str| cc.claude.cancel_for(id)),
+                codex_cancel_for: Arc::new(move |id: &str| xc.codex.cancel_for(id)),
             });
             logins
         })
