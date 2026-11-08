@@ -6189,6 +6189,7 @@ dependencies = [
  "futures",
  "indexmap 2.14.2",
  "parking_lot 0.13.0",
+ "regex",
  "russh",
  "serde_json",
  "sha2 0.11.1",

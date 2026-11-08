@@ -21,6 +21,10 @@
 //! T4 (port of the manage ops of src/sftphost/host.ts and src/sftphost/editFile.ts): [`manage`] (delete with the confirmed
 //! count, chmodCount / chmod through lsetstat with progress and `cancelOp`) and [`edit_file`] (readFile / statFile /
 //! writeFile with stamps, the exclusive 0600 part file, the owner check and stranded results).
+//!
+//! T5 (port of src/sftphost/sudo.ts, src/sftphost/execSftp.ts and `startSudo` / `execSftp` of src/sftphost/host.ts):
+//! [`sudo`] (the server commands and their password form, classifySudo incl. Polish, the exec channel pump that keeps
+//! stdout and stderr apart, the marker-gated password write, 3 password tries).
 
 pub mod backend;
 pub mod client;
@@ -37,6 +41,7 @@ pub mod queue;
 pub mod remote;
 pub mod service;
 pub mod sides;
+pub mod sudo;
 pub mod targets;
 pub mod throttle;
 pub mod timers;

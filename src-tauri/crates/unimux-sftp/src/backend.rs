@@ -10,8 +10,7 @@
 //! T4's manage ops and editor files (deleteCount / delete / chmodCount / chmod / cancelOp / readFile / statFile /
 //! writeFile) go through [`manage_op`] ([`crate::manage`], [`crate::edit_file`]).
 //!
-//! What T5 adds plugs in here: SFTP through sudo (`start_sudo`, which can reuse [`attach_stream`] on the exec channel).
-//! Until then it answers like `UnportedBackend`.
+//! T5: SFTP through sudo (`start_sudo`, [`crate::sudo`]) on an exec channel.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -359,9 +358,9 @@ impl SftpBackend for SidesBackend {
         Box::pin(async move { attach_stream(stream, timers).await.map(|s| s as Arc<dyn RemoteSession>) })
     }
 
-    fn start_sudo(&self, _start: SudoStart) -> BoxFuture<'static, Result<Arc<dyn RemoteSession>, SshErrorCode>> {
-        // T5.
-        Box::pin(async { Err(SshErrorCode::SudoFailed) })
+    fn start_sudo(&self, start: SudoStart) -> BoxFuture<'static, Result<Arc<dyn RemoteSession>, SshErrorCode>> {
+        // T5: the SFTP server through sudo on exec channels (crate::sudo).
+        Box::pin(crate::sudo::start_sudo(start))
     }
 
     fn op(&self, id: &str, remote: Option<Arc<dyn RemoteSession>>, sudo: bool, op: SftpOp) -> BoxFuture<'static, SftpResult> {
