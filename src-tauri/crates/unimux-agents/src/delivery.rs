@@ -3,13 +3,13 @@
 //! no shell, no console window, its own Job Object, so the 0.8 s CreateProcess of a big codex.exe never blocks the app (what
 //! 1.1.4's Exec Host utility process was for).
 //!
-//! All user text travels in argv (no shell is involved) or in the environment (PowerShell), never in shell source.
+//! All user text travels in argv of a program started without a shell (H6: never through cmd.exe or PowerShell).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::cli::status::{Env, Os};
+use crate::cli::status::{Env, Os, find_env_key};
 
 /// A program with its argv, environment and time limit (`ExecCall`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,11 +37,8 @@ pub struct CodexLaunch {
     pub os: Os,
 }
 
-fn queue_script(target: &str) -> String {
-    format!(
-        "$ErrorActionPreference = 'Stop'; try {{ & {target} queue --thread $env:UNIMUX_TARGET_SESSION --message $env:UNIMUX_TASK_MESSAGE; exit $LASTEXITCODE }} catch {{ exit 1 }}"
-    )
-}
+/// Where npm puts the Codex entry script next to its shims (`<prefix>\codex.cmd`, `.ps1`, `codex`).
+const NPM_CODEX_JS: &str = "node_modules\\@openai\\codex\\bin\\codex.js";
 
 fn ends_with_ci(s: &str, suffix: &str) -> bool {
     s.len() >= suffix.len()
@@ -49,65 +46,84 @@ fn ends_with_ci(s: &str, suffix: &str) -> bool {
         && s[s.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
 }
 
-/// `codexQueueCall`. Windows: the native installer's codex.exe is started directly (no PowerShell cold start); an npm install is
-/// reached through its PowerShell shim (codex.ps1, also when the .cmd was detected: cmd.exe would parse the message), with this
-/// process's execution policy bypassed so a Restricted machine policy does not refuse the shim.
-pub fn codex_queue_call(session_id: &str, message: &str, launch: &CodexLaunch, exists: impl Fn(&str) -> bool) -> ExecCall {
-    let argv = || ["queue", "--thread", session_id, "--message", message].iter().map(|s| s.to_string()).collect::<Vec<_>>();
-    let base = launch.env.clone();
-    let command = launch.command.as_deref();
-    if !launch.os.is_windows() {
-        return ExecCall { file: command.unwrap_or("codex").to_string(), args: argv(), env: base, timeout_ms: 15000 };
-    }
-    if let Some(exe) = command.filter(|c| ends_with_ci(c, ".exe")) {
-        return ExecCall { file: exe.to_string(), args: argv(), env: base, timeout_ms: 10000 };
-    }
-    let script = command.map(|c| {
-        if ends_with_ci(c, ".cmd") || ends_with_ci(c, ".bat") { format!("{}.ps1", &c[..c.len() - 4]) } else { c.to_string() }
-    });
-    let shim = script.filter(|s| ends_with_ci(s, ".ps1") && exists(s));
-    let mut env = base;
-    let mut set = |k: &str, v: &str| match env.iter_mut().find(|(n, _)| n == k) {
-        Some(slot) => slot.1 = v.to_string(),
-        None => env.push((k.to_string(), v.to_string())),
-    };
-    set("UNIMUX_TARGET_SESSION", session_id);
-    set("UNIMUX_TASK_MESSAGE", message);
-    if let Some(s) = &shim {
-        set("UNIMUX_CODEX_PATH", s);
-    }
-    let target = if shim.is_some() { "$env:UNIMUX_CODEX_PATH" } else { "codex" };
-    ExecCall {
-        file: "powershell.exe".into(),
-        args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"]
-            .iter()
-            .map(|s| s.to_string())
-            .chain([queue_script(target)])
-            .collect(),
-        env,
-        timeout_ms: 15000,
-    }
+/// The folder of a Windows path (either separator); None for a bare name.
+fn windows_dir(path: &str) -> Option<&str> {
+    path.rfind(['\\', '/']).map(|i| &path[..i]).filter(|d| !d.is_empty())
 }
 
-/// Whether [`codex_queue_call`] reaches Codex without cmd.exe ever parsing the message (hardening beyond 1.1.4, M4): always
-/// outside Windows (argv, no shell); on Windows only a detected codex.exe (started directly) or an npm install whose
-/// PowerShell shim exists. Otherwise PowerShell would look up a bare `codex`, which can resolve to codex.cmd / .bat and
-/// hand the message to cmd.exe (`&`, `|`, `"` in a task text written by another agent could run commands); the app then
-/// skips the native delivery and uses the prompt queue.
-pub fn reaches_codex_without_cmd(launch: &CodexLaunch, exists: impl Fn(&str) -> bool) -> bool {
+/// A fully qualified Windows path (`C:\...` or `\\server\...`): never a name a PATH or current-folder lookup resolves.
+fn is_absolute_windows(path: &str) -> bool {
+    let b = path.as_bytes();
+    (b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/')) || path.starts_with("\\\\")
+}
+
+/// The `node.exe` the npm shim itself would run: the one next to the shim, else the first `node.exe` in a fully qualified
+/// folder of the PATH of `env`. Only a file literally named node.exe is taken (never node.cmd / .bat, which cmd.exe runs).
+fn windows_node(shim_dir: &str, env: &Env, exists: &impl Fn(&str) -> bool) -> Option<String> {
+    let local = format!("{shim_dir}\\node.exe");
+    if exists(&local) {
+        return Some(local);
+    }
+    let path = find_env_key(env, "PATH", Os::Windows).map(|i| env[i].1.as_str())?;
+    path.split(';')
+        .map(|d| d.trim().trim_matches('"').trim_end_matches(['\\', '/']))
+        .filter(|d| is_absolute_windows(d))
+        .map(|d| format!("{d}\\node.exe"))
+        .find(|p| exists(p))
+}
+
+/// How Windows reaches Codex with no shell at all: the program, the arguments before `queue` and the time limit. A native
+/// codex.exe is started directly; an npm install (codex.cmd / .bat / .ps1 or the extensionless shim) is resolved to
+/// `node.exe <prefix>\node_modules\@openai\codex\bin\codex.js`, what the shim itself runs. Anything else (nothing detected,
+/// a bare name, another kind of shim, a missing file) is None: a bare `codex` lookup could resolve to codex.cmd / .bat and
+/// hand the message to cmd.exe, so the caller falls back to the prompt queue (H6).
+fn windows_target(launch: &CodexLaunch, exists: &impl Fn(&str) -> bool) -> Option<(String, Vec<String>, u64)> {
+    let command = launch.command.as_deref()?;
+    if !is_absolute_windows(command) {
+        return None;
+    }
+    let dir = windows_dir(command)?;
+    let name = &command[dir.len() + 1..];
+    if ends_with_ci(name, ".exe") {
+        return Some((command.to_string(), Vec::new(), 10000));
+    }
+    if !["codex", "codex.cmd", "codex.bat", "codex.ps1"].iter().any(|n| name.eq_ignore_ascii_case(n)) {
+        return None;
+    }
+    let script = format!("{dir}\\{NPM_CODEX_JS}");
+    if !exists(&script) {
+        return None;
+    }
+    let node = windows_node(dir, &launch.env, exists)?;
+    Some((node, vec![script], 15000))
+}
+
+/// `codexQueueCall`, hardened (H6, beyond 1.1.4): the message only ever travels in argv of a program started without a
+/// shell. Outside Windows the detected binary (or `codex`, looked up by execvp, never a shell) gets the arguments; on Windows
+/// see [`windows_target`]. None when Windows cannot reach Codex that way (1.1.4 ran PowerShell `& codex ...`, whose `codex`
+/// could be codex.cmd, so `&`, `|` or `"` in a task text written by another agent could run commands, and PowerShell 5.1
+/// mangles `"` in native arguments).
+pub fn codex_queue_call(
+    session_id: &str,
+    message: &str,
+    launch: &CodexLaunch,
+    exists: impl Fn(&str) -> bool,
+) -> Option<ExecCall> {
+    let queue = ["queue", "--thread", session_id, "--message", message].map(str::to_string);
+    let env = launch.env.clone();
     if !launch.os.is_windows() {
-        return true;
+        let file = launch.command.as_deref().unwrap_or("codex").to_string();
+        return Some(ExecCall { file, args: queue.to_vec(), env, timeout_ms: 15000 });
     }
-    let Some(command) = launch.command.as_deref() else { return false };
-    if ends_with_ci(command, ".exe") {
-        return true;
-    }
-    let script = if ends_with_ci(command, ".cmd") || ends_with_ci(command, ".bat") {
-        format!("{}.ps1", &command[..command.len() - 4])
-    } else {
-        command.to_string()
-    };
-    ends_with_ci(&script, ".ps1") && exists(&script)
+    let (file, mut args, timeout_ms) = windows_target(launch, &exists)?;
+    args.extend(queue);
+    Some(ExecCall { file, args, env, timeout_ms })
+}
+
+/// Whether [`codex_queue_call`] reaches Codex without any shell: always outside Windows; on Windows a detected codex.exe, or
+/// an npm install with its codex.js and a node.exe. Otherwise the app skips the native delivery and uses the prompt queue.
+pub fn reaches_codex_without_cmd(launch: &CodexLaunch, exists: impl Fn(&str) -> bool) -> bool {
+    !launch.os.is_windows() || windows_target(launch, &exists).is_some()
 }
 
 /// Runs the call without a shell; true when the program exited with 0 in time and within the output caps. Never fails.
@@ -136,7 +152,9 @@ where
     F: FnOnce(ExecCall) -> Fut,
     Fut: std::future::Future<Output = bool>,
 {
-    let call = codex_queue_call(session_id, message, launch, |p| Path::new(p).is_file());
+    let Some(call) = codex_queue_call(session_id, message, launch, |p| Path::new(p).is_file()) else {
+        return Err(DELIVERY_FAILED);
+    };
     if run(call).await { Ok(()) } else { Err(DELIVERY_FAILED) }
 }
 
@@ -156,24 +174,32 @@ mod tests {
         env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str())
     }
 
-    /// agent-delivery: passes untrusted message text as data, without interpolating it into shell source.
+    const CODEX_JS: &str = "C:\\npm\\node_modules\\@openai\\codex\\bin\\codex.js";
+
+    /// agent-delivery (H6): the message is one argv entry of a program started without a shell, on every OS; no shell, no
+    /// environment variable and no script carries it.
     #[test]
-    fn passes_untrusted_message_text_as_data_without_interpolating_it_into_shell_source() {
-        let text = "Review\n\"quotes\"; $(whoami) `whoami` & echo injected %PATH%";
-        let win = codex_queue_call("known-session", text, &launch(Os::Windows, None, &[]), |_| false);
-        assert_eq!(win.file, "powershell.exe");
-        assert!(!win.args.join(" ").contains(text));
-        assert_eq!(get(&win.env, "UNIMUX_TASK_MESSAGE"), Some(text));
-        assert_eq!(get(&win.env, "UNIMUX_TARGET_SESSION"), Some("known-session"));
-        assert!(win.args.last().unwrap().contains("catch { exit 1 }"));
-        let mac = codex_queue_call("known-session", text, &launch(Os::Mac, None, &[]), |_| false);
+    fn passes_untrusted_message_text_as_one_argument_without_any_shell() {
+        let text = "Review\n\"quotes\"; $(whoami) `whoami` & echo injected %PATH% | calc ^& \\\"";
+        let files = |p: &str| p == CODEX_JS || p == "C:\\Program Files\\nodejs\\node.exe";
+        let env = [("Path", "C:\\npm;C:\\Program Files\\nodejs\\")];
+        for shim in ["C:\\npm\\codex.cmd", "C:\\npm\\codex.bat", "C:\\npm\\CODEX.PS1", "C:\\npm\\codex"] {
+            let win = codex_queue_call("known-session", text, &launch(Os::Windows, Some(shim), &env), files).unwrap();
+            assert_eq!(win.file, "C:\\Program Files\\nodejs\\node.exe", "{shim}");
+            assert_eq!(win.args, [CODEX_JS, "queue", "--thread", "known-session", "--message", text]);
+            assert!(!win.file.to_lowercase().contains("powershell") && !win.file.to_lowercase().contains("cmd"));
+            assert_eq!(get(&win.env, "UNIMUX_TASK_MESSAGE"), None);
+            assert_eq!(win.timeout_ms, 15000);
+        }
+        let mac = codex_queue_call("known-session", text, &launch(Os::Mac, None, &[]), |_| false).unwrap();
         assert_eq!(mac.file, "codex");
         assert_eq!(mac.args, ["queue", "--thread", "known-session", "--message", text]);
     }
 
-    /// agent-delivery: starts a native codex.exe directly and reaches an npm shim through its PowerShell script.
+    /// agent-delivery: starts a native codex.exe directly and an npm install as node.exe + codex.js (the node.exe next to
+    /// the shim first, as npm's shim does).
     #[test]
-    fn starts_a_native_codex_exe_directly_and_reaches_an_npm_shim_through_its_powershell_script() {
+    fn starts_a_native_codex_exe_directly_and_an_npm_install_through_node_and_codex_js() {
         let text = "a \"quoted\" & message %PATH%";
         let exe = codex_queue_call(
             "s1",
@@ -183,29 +209,51 @@ mod tests {
         );
         assert_eq!(
             exe,
-            ExecCall {
+            Some(ExecCall {
                 file: "C:\\Users\\a\\.codex\\bin\\codex.exe".into(),
                 args: ["queue", "--thread", "s1", "--message", text].iter().map(|s| s.to_string()).collect(),
                 env: vec![("Path".into(), "x".into())],
                 timeout_ms: 10000,
-            }
+            })
         );
+        let local = |p: &str| p == CODEX_JS || p == "C:\\npm\\node.exe" || p == "C:\\nodejs\\node.exe";
         let cmd =
-            codex_queue_call("s1", text, &launch(Os::Windows, Some("C:\\npm\\codex.cmd"), &[]), |p| p == "C:\\npm\\codex.ps1");
-        assert_eq!(cmd.file, "powershell.exe");
-        assert!(cmd.args.windows(2).any(|w| w == ["-ExecutionPolicy", "Bypass"]));
-        assert!(cmd.args.last().unwrap().contains("& $env:UNIMUX_CODEX_PATH queue"));
-        assert!(!cmd.args.join(" ").contains(text));
-        assert_eq!(get(&cmd.env, "UNIMUX_CODEX_PATH"), Some("C:\\npm\\codex.ps1"));
-        assert_eq!(get(&cmd.env, "UNIMUX_TASK_MESSAGE"), Some(text));
-        assert_eq!(get(&cmd.env, "UNIMUX_TARGET_SESSION"), Some("s1"));
-        // No script next to the shim: the PATH lookup, never cmd.exe with the message.
-        let unknown = codex_queue_call("s1", text, &launch(Os::Windows, Some("C:\\npm\\codex.cmd"), &[]), |_| false);
-        assert!(unknown.args.last().unwrap().contains("& codex queue"));
-        assert_eq!(get(&unknown.env, "UNIMUX_CODEX_PATH"), None);
-        let mac = codex_queue_call("s1", text, &launch(Os::Mac, Some("/opt/codex"), &[]), |_| false);
+            codex_queue_call("s1", text, &launch(Os::Windows, Some("C:\\npm\\codex.cmd"), &[("PATH", "C:\\nodejs")]), local)
+                .unwrap();
+        assert_eq!(cmd.file, "C:\\npm\\node.exe");
+        assert_eq!(cmd.args[0], CODEX_JS);
+        let mac = codex_queue_call("s1", text, &launch(Os::Mac, Some("/opt/codex"), &[]), |_| false).unwrap();
         assert_eq!(mac.file, "/opt/codex");
         assert_eq!(mac.args, ["queue", "--thread", "s1", "--message", text]);
+    }
+
+    /// H6: no codex.js, no node.exe, a bare or relative name, another shim, or a node.cmd / relative PATH entry: no call at
+    /// all (the prompt queue takes the message), never a PATH lookup of `codex` that could hit codex.cmd.
+    #[test]
+    fn windows_without_a_shell_free_route_gives_no_call() {
+        let path = [("Path", "node;.\\bin;C:\\tools")];
+        let only = |files: &'static [&'static str]| move |p: &str| files.contains(&p);
+        let none = |command: Option<&str>, files: &'static [&'static str]| {
+            codex_queue_call("s1", "x", &launch(Os::Windows, command, &path), only(files)).is_none()
+        };
+        assert!(none(None, &[]));
+        assert!(none(Some("codex"), &[]));
+        assert!(none(Some("codex.cmd"), &[]));
+        assert!(none(Some(".\\codex.exe"), &[]));
+        assert!(none(Some("C:\\npm\\codex.cmd"), &["C:\\npm\\node.exe"]));
+        assert!(none(Some("C:\\npm\\codex.cmd"), &[CODEX_JS]));
+        assert!(none(Some("C:\\npm\\codex.cmd"), &[CODEX_JS, "C:\\tools\\node.cmd", "node\\node.exe", ".\\bin\\node.exe"]));
+        assert!(none(Some("C:\\npm\\other.cmd"), &[CODEX_JS, "C:\\npm\\node.exe"]));
+        assert!(none(Some("C:\\npm\\codex.vbs"), &[CODEX_JS, "C:\\npm\\node.exe"]));
+        assert!(!none(Some("C:\\npm\\codex.cmd"), &[CODEX_JS, "C:\\tools\\node.exe"]));
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut ran = false;
+        let r = rt.block_on(queue_codex_message("s1", "x", &launch(Os::Windows, Some("codex"), &[]), |_| {
+            ran = true;
+            async { true }
+        }));
+        assert_eq!(r, Err(DELIVERY_FAILED));
+        assert!(!ran);
     }
 
     /// agent-delivery: reports a queue failure without leaking prompts or credentials; cli-ipc: the detected binary and PATH.
@@ -268,18 +316,58 @@ mod tests {
         assert!(!rt.block_on(run_call(missing)));
     }
 
-    /// M4: on Windows the native delivery only runs where no cmd.exe can parse the message.
+    /// H6 end to end on Windows: an npm-style install (codex.cmd next to node_modules\@openai\codex\bin\codex.js) is started
+    /// as node.exe + codex.js and the script gets the message byte for byte, cmd.exe and PowerShell metacharacters included.
+    /// Skipped when no node.exe is on the PATH.
+    #[cfg(windows)]
     #[test]
-    fn native_delivery_on_windows_needs_codex_exe_or_its_powershell_shim() {
-        let ps1 = |p: &str| p == "C:\\npm\\codex.ps1";
-        let ok = |os, command: Option<&str>| reaches_codex_without_cmd(&launch(os, command, &[]), ps1);
+    fn an_npm_install_gets_the_message_unchanged_through_node() {
+        let env: Env = std::env::vars().collect();
+        let has_node = std::env::var("PATH")
+            .unwrap_or_default()
+            .split(';')
+            .any(|d| !d.is_empty() && Path::new(d).join("node.exe").is_file());
+        if !has_node {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("unimux-h6-{}", std::process::id()));
+        let bin = root.join("node_modules").join("@openai").join("codex").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(root.join("codex.cmd"), "@echo injected\r\n").unwrap();
+        let out = root.join("argv.json");
+        std::fs::write(
+            bin.join("codex.js"),
+            "require('fs').writeFileSync(process.env.UNIMUX_H6_OUT, JSON.stringify(process.argv.slice(2)));\n",
+        )
+        .unwrap();
+        let mut env = env;
+        env.push(("UNIMUX_H6_OUT".into(), out.to_string_lossy().into_owned()));
+        let shim = root.join("codex.cmd").to_string_lossy().into_owned();
+        let text = "Review \"this\" & echo pwned > x | calc %PATH% ^& `whoami` $(whoami) \\\" \\\\\"\nline 2 ' ;";
+        let l = CodexLaunch { command: Some(shim), env, os: Os::Windows };
+        let call = codex_queue_call("s-1", text, &l, |p| Path::new(p).is_file()).unwrap();
+        assert!(call.file.to_lowercase().ends_with("\\node.exe"), "{}", call.file);
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+        let ok = rt.block_on(run_call(call));
+        let argv: Vec<String> = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(ok);
+        assert_eq!(argv, ["queue", "--thread", "s-1", "--message", text]);
+    }
+
+    /// M4 / H6: on Windows the native delivery only runs where no shell can parse the message.
+    #[test]
+    fn native_delivery_on_windows_needs_codex_exe_or_node_and_codex_js() {
+        let files = |p: &str| p == CODEX_JS || p == "C:\\npm\\node.exe";
+        let ok = |os, command: Option<&str>| reaches_codex_without_cmd(&launch(os, command, &[]), files);
         assert!(ok(Os::Mac, None));
         assert!(ok(Os::Windows, Some("C:\\Users\\a\\.codex\\bin\\CODEX.EXE")));
         assert!(ok(Os::Windows, Some("C:\\npm\\codex.cmd")));
         assert!(ok(Os::Windows, Some("C:\\npm\\codex.ps1")));
+        assert!(ok(Os::Windows, Some("C:\\npm\\codex")));
         assert!(!ok(Os::Windows, None));
+        assert!(!ok(Os::Windows, Some("codex")));
         assert!(!ok(Os::Windows, Some("C:\\other\\codex.cmd")));
         assert!(!ok(Os::Windows, Some("C:\\other\\codex.bat")));
-        assert!(!ok(Os::Windows, Some("C:\\npm\\codex")));
     }
 }

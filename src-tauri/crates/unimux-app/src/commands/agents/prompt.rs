@@ -115,8 +115,9 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
 }
 
 /// `queueCodexMessage` with the detected Codex: the binary from where it was detected and a PATH that has its folder. On
-/// Windows a Codex reached neither as codex.exe nor through its PowerShell shim is not called at all (a bare `codex` lookup
-/// can hit codex.cmd, where cmd.exe would parse the message): the delivery fails and the prompt queue takes the notice.
+/// Windows a Codex reached neither as codex.exe nor as node.exe + the npm package's codex.js is not called at all (a bare
+/// `codex` lookup can hit codex.cmd, where cmd.exe would parse the message): the delivery fails and the prompt queue takes
+/// the notice.
 pub async fn queue_codex(ctx: &Arc<AppContext>, session_id: &str, text: &str) -> Result<(), &'static str> {
     let detector = super::cli_detector(ctx);
     let codex = detector.get(CliId::Codex, GetOptions { wait_ms: CLI_WAIT_MS, force: false }).await;
