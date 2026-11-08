@@ -10,6 +10,9 @@
 //! `update:busy` probe; the quit's swap waits. The `accounts:*` / `auth:*` / `usage:*` channels come with A4 / A5, which call
 //! [`ClaudeAccounts::before_poll`], [`ClaudeAccounts::refresh_claude`], [`ClaudeAccounts::refs`] and
 //! [`ClaudeAccounts::before_main_login`].
+//!
+//! A4 ([`login`]): the Claude and Codex login managers, `auth:start` / `auth:cancel`, the login probes, the pty host's crash
+//! hook and the quit's dispose.
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -21,6 +24,8 @@ use unimux_ipc::RouterBuilder;
 
 use crate::context::AppContext;
 use crate::lifecycle::wind_down::{QUIT_SWAP_AFTER_CELLS, QUIT_SWAP_WAIT, phase};
+
+pub mod login;
 
 static SERVICE: OnceLock<Arc<ClaudeAccounts>> = OnceLock::new();
 
@@ -65,7 +70,7 @@ fn existing() -> Option<Arc<ClaudeAccounts>> {
 }
 
 pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
-    let _ = r;
+    login::register(r, ctx);
 
     // recoverActivation (A2): an interrupted main-account swap is repaired (or reported pending) before any account call.
     let c = ctx.clone();
@@ -100,7 +105,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         .boxed()
     }));
 
-    // update:busy: a running swap or Codex "make main", a login in progress (A4 sets the login probe).
+    // update:busy: a running swap or Codex "make main", a login in progress (the login probes of A4).
     let updates = ctx.update.get_or_init(|| crate::update::UpdateService::new(ctx)).clone();
     updates.add_busy_probe(Arc::new(|| existing().map_or((false, false), |s| s.busy())));
 

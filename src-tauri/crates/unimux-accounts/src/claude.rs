@@ -62,14 +62,22 @@ type DirProbe = Arc<dyn Fn(&Path) -> bool + Send + Sync>;
 /// its restore runs (its files must stay the snapshot's).
 #[derive(Clone)]
 pub struct LoginProbes {
+    /// The Claude login manager's session (main, new or saved Claude card, and the main Codex login).
     pub active: Probe,
+    /// A saved Codex card's login (`codexLogin.isActive()`): counts for `update:busy`, not for the reconcile.
+    pub codex_active: Probe,
     pub main_active: Probe,
     pub holds_profile: DirProbe,
 }
 
 impl Default for LoginProbes {
     fn default() -> Self {
-        Self { active: Arc::new(|| false), main_active: Arc::new(|| false), holds_profile: Arc::new(|_| false) }
+        Self {
+            active: Arc::new(|| false),
+            codex_active: Arc::new(|| false),
+            main_active: Arc::new(|| false),
+            holds_profile: Arc::new(|_| false),
+        }
     }
 }
 
@@ -147,7 +155,8 @@ impl ClaudeAccounts {
 
     /// `update:busy` probe: `(swap, login)`.
     pub fn busy(&self) -> (bool, bool) {
-        (self.slot.is_running() || self.slot.is_codex_running(), (self.probes().active)())
+        let probes = self.probes();
+        (self.slot.is_running() || self.slot.is_codex_running(), (probes.active)() || (probes.codex_active)())
     }
 
     /// Set by a finished main Claude login (the record that left was backed up by the app first).

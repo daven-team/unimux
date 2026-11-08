@@ -15,6 +15,10 @@
 //! A6: the GitHub sign-in of "Publish to GitHub" ([`github`]: token store, `gh` fallback, device flow, status cache, the git
 //! environment and refusal regexes), registered in `unimux-app/src/commands/github.rs`.
 //!
+//! A4: the login managers ([`login`]: `claude auth login --claudeai` / `codex login` in an `auth:` terminal, profile
+//! snapshots and restores, fingerprint polls every 1.5 s, the 10 minute limit, the identity confirmation). Ports of
+//! src/main/auth/{login,codexLogin,profileSnapshot}.ts.
+//!
 //! The commands are registered in `unimux-app/src/commands/accounts.rs` by the later A packages.
 
 pub mod activate;
@@ -29,6 +33,7 @@ mod js;
 pub mod legacy_swap;
 pub mod live;
 pub mod locks;
+pub mod login;
 pub mod migrate;
 pub mod reconcile;
 pub mod refresh;
