@@ -9,8 +9,8 @@
 //! wind-down's save phase), the SQLite file and CA dialogs, the result export, and the `db:*` events. Every request passes
 //! the 1.1.4 validation first (`unimux_db::ipc`). The sessions themselves are D4 / D7 / D9 / D11 (routed by D12): D9's
 //! `RedisHost` opens Redis sessions and hands every other kind to D1's `UnavailableHost` (ends them with `unsupported`)
-//! until the other kinds land. Tunnels log in through the SSH coordinator (S3, `commands::ssh::DbTunnels`); their owner (D2)
-//! is not plugged in yet.
+//! until the other kinds land. Tunnels log in through the SSH coordinator (S3, `commands::ssh::DbTunnels`); their owner (D2,
+//! `unimux_db::tunnel::DbTunnelHost`) fills the coordinator's `db` slot and gives the sessions their forwarded channels.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -19,17 +19,20 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use unimux_core::i18n::translate;
 use unimux_db::history::{DbHistoryStore, WRITE_DELAY_MS};
-use unimux_db::host::{DbHostLink, Spawn, UnavailableHost};
+use unimux_db::host::{DbHostLink, Spawn, UnavailableHost, queued_report};
 use unimux_db::ipc;
-use unimux_db::redis::host::{DB_CONNECT_MS, RedisHost, RedisHostDeps};
+use unimux_db::redis::host::{DB_CONNECT_MS, DbTunnels, RedisHost, RedisHostDeps};
 use unimux_db::redis::session::RedisLimits;
 use unimux_db::service::{DbDeps, DbEvents, DbService, DbStateAccess, PROMPT_TIMEOUT_MS, ReadCa, TEST_TIMEOUT_MS};
 use unimux_db::sql::limits;
 use unimux_db::sqlite_files::create_sqlite_file;
 use unimux_db::timers::{Timers, TokioTimers};
+use unimux_db::tunnel::{DbTunnelHost, TUNNEL_TIMERS};
 use unimux_db::vault::DbVault;
 use unimux_ipc::{Events, IpcError, RouterBuilder};
 use unimux_oscrypt::SafeCipher;
+use unimux_ssh::coordinator::SshHostLink;
+use unimux_ssh::session::SessionHostKind;
 
 use crate::commands::os::{PickRequest, SaveRequest, language};
 use crate::context::AppContext;
@@ -143,10 +146,13 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     let warm = vault.clone();
     let _ = std::thread::Builder::new().name("unimux-db-vault".into()).spawn(move || warm.warm());
     let others = UnavailableHost::new(spawn.clone());
+    // D2: the SSH tunnels of the sessions; the coordinator's `db:` messages (sshConnect, host key / auth answers) go to them.
+    let tunnels = DbTunnelHost::new(spawn.clone(), TUNNEL_TIMERS);
+    crate::commands::ssh::link::link(ctx).owners.set(Some(SessionHostKind::Db), tunnels.clone() as Arc<dyn SshHostLink>);
     let host = RedisHost::new(RedisHostDeps {
         next: others.clone(),
         spawn: spawn.clone(),
-        tunnels: None,
+        tunnels: Some(tunnels.clone() as Arc<dyn DbTunnels>),
         connect_ms: DB_CONNECT_MS,
         limits: RedisLimits::default(),
         now: Arc::new(unimux_core::time::now_ms),
@@ -160,15 +166,32 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         read_ca: read_ca(),
         events: Arc::new(AppEvents { events: ctx.events.clone(), vault: vault.clone() }),
         timers: timers.clone(),
-        spawn,
+        spawn: spawn.clone(),
         now: Arc::new(unimux_core::time::now_ms),
         new_uuid: Arc::new(|| uuid::Uuid::new_v4().to_string()),
         idle_ms: limits::IDLE_MS,
         prompt_timeout_ms: PROMPT_TIMEOUT_MS,
         test_timeout_ms: TEST_TIMEOUT_MS,
     });
-    others.connect_weak(Arc::downgrade(&service), |s: &DbService, m| s.on_host_message(m));
-    host.connect_weak(Arc::downgrade(&service), |s: &DbService, m| s.on_host_message(m));
+    // Ordered and off the caller's stack: the hosts report while the service may hold its lock (dbOpen / dbClose).
+    let weak = Arc::downgrade(&service);
+    let report = queued_report(
+        &spawn,
+        Arc::new(move |m| {
+            if let Some(s) = weak.upgrade() {
+                s.on_host_message(m);
+            }
+        }),
+    );
+    others.connect(report.clone());
+    host.connect(report.clone());
+    tunnels.connect(report);
+    // The quit: the sessions' tunnels say goodbye (1.1.4 DbHost.shutdown ends every tunnel after the sessions).
+    let t = tunnels.clone();
+    ctx.lifecycle.wind_down.register(phase::HOSTS, "db tunnels", Duration::from_millis(300), move || async move {
+        t.shutdown();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    });
     // The coordinator's states and prompts of `db:` tunnels go to the service (1.1.4 startSsh `events`).
     let _ = crate::commands::ssh::link::link(ctx).events.db.set(Arc::new(crate::commands::ssh::DbSink(Arc::downgrade(&service))));
 

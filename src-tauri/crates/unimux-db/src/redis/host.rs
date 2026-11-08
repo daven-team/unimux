@@ -22,6 +22,7 @@ use super::connect::{ClientOptions, ConnectError, Dialer, Opened, RedisClient, S
 use super::session::{RedisLimits, RedisSession, RedisSessionOptions, RedisSessionOut, fail};
 use super::tls::TlsSetup;
 use crate::host::{DbHostLink, HostReport, PendingRequests, Spawn, ToHost, op_timeout_ms, with_deadline};
+pub use crate::tunnel::SessionFail;
 
 const MAX_PASSWORD_PROMPTS: u32 = 3;
 /// One database connect attempt (TCP, TLS and the server's startup): `DB_HOST_TIMERS.dbConnectMs`.
@@ -29,9 +30,10 @@ pub const DB_CONNECT_MS: u64 = 20_000;
 
 /// The SSH tunnels of the DB sessions (D2): one per connection, shared and reference counted; the owner logs it in.
 pub trait DbTunnels: Send + Sync {
-    /// Joins the tunnel of `ssh` (`{dbHost, dbPort, tunnelKey, owner}`) and waits until it is up: the opener of its
-    /// forwarded channels, or the error code the session ends with.
-    fn join(&self, session_id: &str, ssh: &Value) -> BoxFuture<'static, Result<StreamSource, String>>;
+    /// Joins the tunnel of `ssh` (`{dbHost, dbPort, tunnelKey, owner}`) at once (call it when the session opens); the
+    /// future waits until the tunnel is up: the opener of its forwarded channels, or the error code the session ends with.
+    /// `fail` ends the session when the tunnel ends later.
+    fn join(&self, session_id: &str, ssh: &Value, fail: SessionFail) -> BoxFuture<'static, Result<StreamSource, String>>;
     /// The session ended: its reference goes (the last one closes the tunnel).
     fn release(&self, session_id: &str);
 }
@@ -221,18 +223,32 @@ impl RedisHost {
         s.st.lock().password = s.config.password.clone();
         self.sessions.lock().insert(id, s.clone());
         self.status(&s, "connecting", Map::new());
+        // The tunnel is joined at once (1.1.4 registered the owner's wait for main's sshConnect in the same tick as dbOpen,
+        // so the coordinator's connect cannot arrive before it); a tunnel that ends later ends the session.
+        let joined = match (s.config.ssh.clone(), self.tunnels.clone()) {
+            (Some(ssh), Some(tunnels)) => {
+                s.st.lock().joined_tunnel = true;
+                let (host, session) = (self.me.clone(), Arc::downgrade(&s));
+                let fail: SessionFail = Arc::new(move |code| {
+                    if let (Some(h), Some(s)) = (host.upgrade(), session.upgrade()) {
+                        h.fail_owned(&s, code, None);
+                    }
+                });
+                Some(tunnels.join(&s.id, &ssh, fail))
+            }
+            _ => None,
+        };
         let Some(me) = self.me.upgrade() else { return };
-        (self.spawn)(Box::pin(async move { me.start(s).await }));
+        (self.spawn)(Box::pin(async move { me.start(s, joined).await }));
     }
 
-    async fn start(self: Arc<Self>, s: Arc<Session>) {
-        if let Some(ssh) = s.config.ssh.clone() {
-            let Some(tunnels) = self.tunnels.clone() else {
+    async fn start(self: Arc<Self>, s: Arc<Session>, joined: Option<BoxFuture<'static, Result<StreamSource, String>>>) {
+        if s.config.ssh.is_some() {
+            let Some(joined) = joined else {
                 self.fail(&s, "unsupported", None);
                 return;
             };
-            s.st.lock().joined_tunnel = true;
-            match tunnels.join(&s.id, &ssh).await {
+            match joined.await {
                 Ok(source) => s.st.lock().tunnel = Some(source),
                 Err(code) => {
                     if self.live(&s) {

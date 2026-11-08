@@ -10,6 +10,8 @@
 //! - D7: [`mysql`] (the MySQL / MariaDB client core).
 //! - D9: [`redis`] (Redis sessions and browsing on the own RESP2 client).
 //! - D11: [`sqlite`] (SQLite sessions: engine thread, catalog, port messages).
+//! - D2: [`tunnel`] (the shared SSH tunnels of the sessions: owner / riders / hand-over, direct-tcpip channels, no local
+//!   port).
 
 pub mod files;
 pub mod history;
@@ -25,5 +27,6 @@ pub mod sql;
 pub mod sqlite;
 pub mod sqlite_files;
 pub mod timers;
+pub mod tunnel;
 pub mod vault;
 pub mod wire;
