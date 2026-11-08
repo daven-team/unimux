@@ -153,9 +153,18 @@ try {
   check('app keeps running after a panic on another thread', alive === 2);
 
   // ── a not-yet command answers with the typed error ───────────────────────
-  // G3 implements the Git panel's probe; sftp:sessions (T1, wave 4) is still unported.
-  const notYet = await page.evaluate(`window.mc.sftp.sessions().then(() => 'resolved', (e) => e.name + ':' + e.code + ':' + e.command)`);
-  check('unported command rejects with McNotYetError', notYet === 'McNotYetError:MC_NOT_YET:sftp:sessions', notYet);
+  // T1 implements sftp:sessions (it answers the empty snapshot now). The first still unported read-only channel of a few
+  // candidates (A5 usage, A4 accounts) proves the typed error; once all of them are ported the check is skipped.
+  const sftpSessions = await page.evaluate(`window.mc.sftp.sessions().then((s) => JSON.stringify(s), (e) => e.name + ':' + e.code)`);
+  check('sftp:sessions answers the empty snapshot', sftpSessions === '{"sessions":[],"prompts":[]}', sftpSessions);
+  const notYet = await page.evaluate(`(async () => {
+    for (const [method, channel] of [['getUsage', 'usage:get'], ['swapPending', 'accounts:swapPending']]) {
+      const r = await window.mc[method]().then(() => 'resolved', (e) => e.name + ':' + e.code + ':' + e.command);
+      if (r !== 'resolved') return r === 'McNotYetError:MC_NOT_YET:' + channel ? 'ok' : r;
+    }
+    return 'all ported';
+  })()`);
+  check('unported command rejects with McNotYetError', notYet === 'ok' || notYet === 'all ported', notYet);
   const lone = await page.evaluate(`window.__mc.useStore.getState().s.snippets.find((x) => x.id === 'snip-lone')?.name`);
   check('a state.json with a lone surrogate loads (not kept aside as corrupt)', lone === 'cut \ufffd' && !listDir(dataDir).some((n) => n.startsWith('state.json.bak-')), JSON.stringify(lone));
   const raw = await page.evaluate(`window.mc.notes.saveImage(new Uint8Array([1, 2, 3]), 'image/png').then(() => 'resolved', (e) => e.name + ':' + e.command)`);

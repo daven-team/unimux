@@ -120,7 +120,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | P5 | SSH shell cells on russh | todo | | | | |
 | H6 | Install manager, login terminals, agent delivery | todo | | | | |
 | S4 | SSH IPC and russh test server | todo | | | | Docker |
-| T1 | SFTP service and sessions | todo | | | | |
+| T1 | SFTP service and sessions | built, fast mode, not verified | 2026-11-08 | 2026-11-08 | | branch `tauri-pkg-T1`. unimux-sftp: `service` (SftpService port: connect with deferred login and sudo decided once, plain sessions, start folder realpath + stat with the `.` and `/` fallbacks, coordinator states in 1.1.4's key order, idle disconnect 2 min with view / shown session / queue activity / pins per window, renderer_gone), `ipc` (the 24 `sftp:*` channels with 1.1.4's zod rules: guid, remote / local paths, strict objects, transfer side refine, chmod, prompt answer union, validEditorSave + cleanStamp), `host` (SftpHost in the app process: russh login through S3's LoginRegistry, `sftp` subsystem within the SFTP timer, sudo ask, fail / onClose / disconnect with cleanup waits, shutdown, crash counter > 5 / 60 s fatal, every op in its own task with opTimeoutMs, transfer port with snapshot on attach; the `SftpBackend` trait T2-T5 fill, `UnportedBackend` until then), `throttle` (ItemThrottle 100 ms), `limits`, `op`, `error`, `timers`. unimux-app `commands/sftp.rs`: host on the coordinator's `sftp` owner slot, `ssh_link.events.sftp`, port `sftp`, page-gone hooks (main + detached), wind-down `sftp shutdown` + force kill, the channels (pinHosts / viewOpened / viewClosed by sender window). smoke-tauri's not-yet probe moved to usage:get / accounts:swapPending. Checked: cargo fmt, clippy -D warnings and cargo test for unimux-sftp and unimux-app. See "T1 open issues". |
 | D2 | SSH tunnels for databases | todo | | | | |
 | D5 | Postgres cursors and read-only | todo | | | | |
 | D8 | MySQL session, meta, edits | todo | | | | |
@@ -1570,6 +1570,16 @@ Not run (fast mode): real-app / CDP scripts (smoke-tauri, verify-tauri-lifecycle
 4. macOS: unimux-db now builds ring (rustls) and the bundled SQLite, so no aarch64-apple-darwin check of unimux-db / unimux-accounts / unimux-ssh is possible on this machine; only CI's macOS job can build them.
 5. `dump-goldens.mjs --check` still needs about 12 GB of heap ("Open after wave 2" 6); `npm run gen:check` as written does not finish here with the default heap.
 6. Worktrees: the ten wave 3 worktrees were removed (node_modules junctions unlinked first) and their branches deleted. Still kept: `.claude/worktrees/wf_3188d96a-67a-38` with `tauri-pkg-A2-fixes` (an uncommitted earlier draft of A2's Codex lock fix, see "Open after wave 2" 8).
+
+## Wave 4 packages: open issues
+
+### T1 open issues (2026-11-08, fast mode)
+
+1. Not verified beyond unit tests: no real login against Docker OpenSSH, no real-app run (verify-sftp-edit / -path / -ui stay blocked until T2-T4 give the backend), smoke-tauri not run after the probe change.
+2. Every operation on a connected session answers `unsupported` (`UnportedBackend`) until T2 (RemoteSide / LocalSide on the `SftpStream`), T3 (queue, `HostChannels::item_changed` / `queue_active`), T4 (manage ops, editor files) and T5 (`SftpBackend::start_sudo`; a sudo host ends with `sudoFailed` until then) plug in through `SftpHost::new(deps, |channels| backend)` in commands/sftp.rs.
+3. The sftp-main and sftp-session cases are ported as unit tests of the service, ipc validation, throttle and host supervision only; PORTING.md rows not added yet.
+4. A connected session notices a dropped connection by polling `handle.is_closed()` once a second (besides the SFTP channel's own close, which T2's RemoteSession reports).
+5. Accepted deviation: a crash is a panic of a session or operation task (no separate process); the renderer keeps its transfer port across a crash (1.1.4 handed out a new one).
 
 ## Do zainstalowania / do decyzji użytkownika
 
