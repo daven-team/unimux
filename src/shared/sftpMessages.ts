@@ -13,6 +13,13 @@ export const sftpMessages = {
   'Proces SFTP został uruchomiony ponownie': ['The SFTP process was restarted', 'Der SFTP-Prozess wurde neu gestartet', 'El proceso SFTP se reinició', 'Le processus SFTP a été redémarré', 'O processo SFTP foi reiniciado'],
   'Serwer nie obsługuje tej operacji': ['The server does not support this operation', 'Der Server unterstützt diesen Vorgang nicht', 'El servidor no admite esta operación', 'Le serveur ne prend pas en charge cette opération', 'O servidor não suporta esta operação'],
   'Za dużo elementów naraz': ['Too many items at once', 'Zu viele Elemente auf einmal', 'Demasiados elementos a la vez', 'Trop d\'éléments à la fois', 'Demasiados itens de uma vez'],
+  'Przez sudo foldery, do których mogą pisać inni użytkownicy, nie są usuwane rekurencyjnie - usuń ich zawartość osobno lub zmień uprawnienia': [
+    'Through sudo, folders other users can write to are not deleted recursively - delete their contents separately or change the permissions',
+    'Über sudo werden Ordner, in die andere Benutzer schreiben können, nicht rekursiv gelöscht - lösche ihren Inhalt einzeln oder ändere die Berechtigungen',
+    'Con sudo no se eliminan de forma recursiva las carpetas en las que pueden escribir otros usuarios: elimina su contenido por separado o cambia los permisos',
+    'Via sudo, les dossiers dans lesquels d\'autres utilisateurs peuvent écrire ne sont pas supprimés récursivement - supprimez leur contenu séparément ou modifiez les droits',
+    'Através de sudo, as pastas onde outros utilizadores podem escrever não são eliminadas recursivamente - elimine o seu conteúdo separadamente ou altere as permissões',
+  ],
   'Nazwa, której nie można bezpiecznie zapisać w tym miejscu': ['A name that cannot be written safely here', 'Ein Name, der hier nicht sicher geschrieben werden kann', 'Un nombre que no se puede escribir aquí de forma segura', 'Un nom qui ne peut pas être écrit ici en toute sécurité', 'Um nome que não pode ser escrito aqui com segurança'],
   'Dowiązanie wskazuje poza wybrany folder - pominięto': ['The link points outside the chosen folder - skipped', 'Der Link zeigt aus dem gewählten Ordner heraus - übersprungen', 'El enlace apunta fuera de la carpeta elegida - omitido', 'Le lien pointe hors du dossier choisi - ignoré', 'A ligação aponta para fora da pasta escolhida - ignorada'],
   'Dowiązania do folderów nie są kopiowane': ['Links to folders are not copied', 'Links auf Ordner werden nicht kopiert', 'Los enlaces a carpetas no se copian', 'Les liens vers des dossiers ne sont pas copiés', 'As ligações para pastas não são copiadas'],

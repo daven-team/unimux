@@ -133,6 +133,14 @@ pub trait FileSide: Send + Sync {
     /// Does not follow symlinks; None when nothing is there.
     fn lstat<'a>(&'a self, path: &'a str) -> BoxFuture<'a, SideResult<Option<Meta>>>;
     fn readdir<'a>(&'a self, path: &'a str) -> BoxFuture<'a, SideResult<Vec<DirEntry>>>;
+    /// [`FileSide::readdir`] of a walk (T3): a folder with more than `max` entries fails with `tooMany` (the remote side
+    /// stops reading after `max + 1`, so a huge or hostile folder never fills the memory).
+    fn readdir_max<'a>(&'a self, path: &'a str, max: usize) -> BoxFuture<'a, SideResult<Vec<DirEntry>>> {
+        Box::pin(async move {
+            let entries = self.readdir(path).await?;
+            if entries.len() > max { Err(SftpErrorCode::TooMany.into()) } else { Ok(entries) }
+        })
+    }
     fn mkdir<'a>(&'a self, path: &'a str) -> BoxFuture<'a, SideResult<()>>;
     /// A file or symlink.
     fn unlink<'a>(&'a self, path: &'a str) -> BoxFuture<'a, SideResult<()>>;

@@ -137,6 +137,11 @@ impl RemoteSide {
         self.client.readdir(path, max).await.map_err(err)
     }
 
+    /// One entry of the folder by name, read only until it comes (T1/T2).
+    pub async fn readdir_find(&self, path: &str, name: &str) -> SideResult<Option<NameEntry>> {
+        self.client.readdir_find(path, name).await.map_err(err)
+    }
+
     /// `chmodNoFollow`: only the permission bits, through lsetstat when offered, else SETSTAT (which follows a symlink:
     /// callers lstat first, and a recursive change as root is refused without lsetstat).
     pub async fn chmod_no_follow(&self, path: &str, mode: u32) -> SideResult<()> {
@@ -269,6 +274,18 @@ impl FileSide for RemoteSide {
             Ok(self
                 .readdir_raw(path, None)
                 .await?
+                .into_iter()
+                .map(|e| DirEntry { meta: remote_meta(&e.attrs), name: e.filename, longname: Some(e.longname) })
+                .collect())
+        })
+    }
+    fn readdir_max<'a>(&'a self, path: &'a str, max: usize) -> BoxFuture<'a, SideResult<Vec<DirEntry>>> {
+        Box::pin(async move {
+            let raw = self.readdir_raw(path, Some(max)).await?;
+            if raw.len() > max {
+                return Err(SftpErrorCode::TooMany.into());
+            }
+            Ok(raw
                 .into_iter()
                 .map(|e| DirEntry { meta: remote_meta(&e.attrs), name: e.filename, longname: Some(e.longname) })
                 .collect())

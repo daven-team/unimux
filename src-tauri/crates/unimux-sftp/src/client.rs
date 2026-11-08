@@ -31,6 +31,8 @@ pub enum ClientError {
     Lost,
     /// An answer of the wrong kind.
     Protocol,
+    /// A folder listing went past [`READDIR_TOTAL_ENTRIES`] / [`READDIR_TOTAL_BYTES`] (T1/T2).
+    TooMany,
 }
 
 impl ClientError {
@@ -43,9 +45,18 @@ impl ClientError {
             ClientError::Status(status::OP_UNSUPPORTED) => SftpErrorCode::Unsupported,
             ClientError::Status(_) | ClientError::Protocol => SftpErrorCode::Failed,
             ClientError::Lost => SftpErrorCode::ConnectionLost,
+            ClientError::TooMany => SftpErrorCode::TooMany,
         }
     }
 }
+
+/// Entries one folder read may go through, whatever its `max` (T1/T2, hardening beyond 1.1.4): a hostile or huge server
+/// folder fails with `tooMany` instead of filling the memory. Above every walk's per-folder need (BATCH_FILES).
+pub const READDIR_TOTAL_ENTRIES: usize = 100_000;
+/// Bytes of names (filename + longname, plus [`READDIR_ENTRY_OVERHEAD`] each) one folder read may go through.
+pub const READDIR_TOTAL_BYTES: usize = 32 * 1024 * 1024;
+/// What one entry costs besides its names (its attributes and bookkeeping) in [`READDIR_TOTAL_BYTES`].
+pub const READDIR_ENTRY_OVERHEAD: usize = 64;
 
 impl From<ProtoError> for ClientError {
     fn from(_: ProtoError) -> Self {
@@ -328,24 +339,61 @@ impl SftpClient {
     }
 
     /// The whole folder (ssh2's `readdir(path)`: OPENDIR, READDIR until `EOF`, CLOSE), "." and ".." left out. `max`: stop
-    /// reading once more than this many entries came (the listing cap; the rest is never fetched).
+    /// reading once more than this many entries came (the listing cap; the rest is never fetched). Without `max` (or with
+    /// a bigger one) a folder past [`READDIR_TOTAL_ENTRIES`] / [`READDIR_TOTAL_BYTES`] fails with [`ClientError::TooMany`].
     pub async fn readdir(&self, path: &str, max: Option<usize>) -> Result<Vec<NameEntry>, ClientError> {
+        let mut out = Vec::new();
+        self.read_dir_each(path, |entry| {
+            out.push(entry);
+            max.is_some_and(|m| out.len() > m)
+        })
+        .await?;
+        Ok(out)
+    }
+
+    /// One entry of the folder by name (T1/T2): the listing is read only until the name comes, nothing else is kept, and the
+    /// same total limits as [`SftpClient::readdir`] apply.
+    pub async fn readdir_find(&self, path: &str, name: &str) -> Result<Option<NameEntry>, ClientError> {
+        let mut found = None;
+        self.read_dir_each(path, |entry| {
+            if entry.filename == name {
+                found = Some(entry);
+                return true;
+            }
+            false
+        })
+        .await?;
+        Ok(found)
+    }
+
+    /// OPENDIR, READDIR until `EOF` or until `each` answers true (stop), CLOSE; "." and ".." never reach `each`. Every entry
+    /// the server sent counts against the total limits, kept or not.
+    async fn read_dir_each(&self, path: &str, mut each: impl FnMut(NameEntry) -> bool) -> Result<(), ClientError> {
         let mut body = Vec::new();
         put_str(&mut body, path);
         let handle = match self.request(proto::OPENDIR, body).await? {
             Reply::Handle(h) => h,
             other => return Err(failure(other)),
         };
-        let mut out = Vec::new();
-        let result = loop {
-            if max.is_some_and(|m| out.len() > m) {
-                break Ok(());
-            }
+        let (mut entries, mut bytes) = (0usize, 0usize);
+        let result = 'read: loop {
             let mut body = Vec::new();
             put_bytes(&mut body, &handle);
             match self.request(proto::READDIR, body).await {
                 Ok(Reply::Name(names)) => {
-                    out.extend(names.into_iter().filter(|n| n.filename != "." && n.filename != ".."));
+                    for n in names {
+                        if n.filename == "." || n.filename == ".." {
+                            continue;
+                        }
+                        entries += 1;
+                        bytes += n.filename.len() + n.longname.len() + READDIR_ENTRY_OVERHEAD;
+                        if entries > READDIR_TOTAL_ENTRIES || bytes > READDIR_TOTAL_BYTES {
+                            break 'read Err(ClientError::TooMany);
+                        }
+                        if each(n) {
+                            break 'read Ok(());
+                        }
+                    }
                 }
                 Ok(Reply::Status { code: status::EOF, .. }) => break Ok(()),
                 Ok(other) => break Err(failure(other)),
@@ -354,9 +402,9 @@ impl SftpClient {
         };
         match result {
             Ok(()) => {
-                // A folder that was read completely is the answer even if its close fails.
+                // A folder that was read (completely or as far as needed) is the answer even if its close fails.
                 let _ = self.close(&handle).await;
-                Ok(out)
+                Ok(())
             }
             Err(e) => {
                 self.close_nowait(&handle);

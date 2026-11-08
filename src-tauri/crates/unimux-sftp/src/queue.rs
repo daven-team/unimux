@@ -370,7 +370,33 @@ struct Walk<'a> {
 }
 
 impl Walk<'_> {
-    fn reject(&mut self, source: &str, label: &str, error: SftpErrorCode) {
+    /// Files, rejected entries (both in `files`) and empty folders found so far: what [`BATCH_FILES`] caps (T3).
+    fn count(&self) -> usize {
+        self.files.len() + self.empty_dirs.len()
+    }
+
+    /// Entries the next folder may have: every entry of a folder adds at least one file, rejected entry or empty folder,
+    /// so a bigger folder would pass the cap anyway and is refused before more of it is read (T3).
+    fn budget(&self) -> usize {
+        BATCH_FILES.saturating_sub(self.count())
+    }
+
+    /// `tooMany` once the walk found more than [`BATCH_FILES`] entries; checked after every push.
+    fn checked(&self) -> SideResult<()> {
+        if self.count() > BATCH_FILES { Err(err(SftpErrorCode::TooMany)) } else { Ok(()) }
+    }
+
+    fn file(&mut self, spec: FileSpec) -> SideResult<()> {
+        self.files.push(spec);
+        self.checked()
+    }
+
+    fn empty_dir(&mut self, target: String) -> SideResult<()> {
+        self.empty_dirs.push(target);
+        self.checked()
+    }
+
+    fn reject(&mut self, source: &str, label: &str, error: SftpErrorCode) -> SideResult<()> {
         self.files.push(FileSpec {
             source: source.to_string(),
             target: self.target_dir.to_string(),
@@ -378,6 +404,7 @@ impl Walk<'_> {
             size: 0,
             error: Some(error),
         });
+        self.checked()
     }
 }
 
@@ -584,7 +611,7 @@ impl TransferQueue {
                 return Err(err(SftpErrorCode::Invalid));
             }
             if !src.valid_name(&name) || !dst.valid_name(&name) {
-                walk.reject(&src.dirname(source), &name, SftpErrorCode::InvalidName);
+                walk.reject(&src.dirname(source), &name, SftpErrorCode::InvalidName)?;
                 continue;
             }
             let target = dst.join(&req.target_dir, &name);
@@ -615,21 +642,18 @@ impl TransferQueue {
                 return Err(err(SftpErrorCode::Cancelled));
             }
             if depth > MAX_DEPTH {
-                w.reject(&source, &label, SftpErrorCode::TooMany);
-                return Ok(());
+                return w.reject(&source, &label, SftpErrorCode::TooMany);
             }
             let Some(meta) = src.lstat(&source).await? else {
                 if depth == 0 {
                     return Err(err(SftpErrorCode::NotFound));
                 }
-                w.reject(&source, &label, SftpErrorCode::NotFound);
-                return Ok(());
+                return w.reject(&source, &label, SftpErrorCode::NotFound);
             };
             let (mut kind, mut size) = (meta.kind, meta.size);
             if kind == EntryKind::Symlink {
                 let Some(real) = src.stat(&source).await.ok().flatten() else {
-                    w.reject(&source, &label, SftpErrorCode::NotFound);
-                    return Ok(());
+                    return w.reject(&source, &label, SftpErrorCode::NotFound);
                 };
                 if depth > 0 {
                     // Inside a folder a link is followed only when it stays inside the folder the user picked.
@@ -639,40 +663,32 @@ impl TransferQueue {
                         _ => false,
                     };
                     if !inside {
-                        w.reject(&source, &label, SftpErrorCode::LinkOutside);
-                        return Ok(());
+                        return w.reject(&source, &label, SftpErrorCode::LinkOutside);
                     }
                     if real.kind != EntryKind::File {
-                        w.reject(&source, &label, SftpErrorCode::LinkFolder);
-                        return Ok(());
+                        return w.reject(&source, &label, SftpErrorCode::LinkFolder);
                     }
                 }
                 kind = real.kind;
                 size = real.size;
             }
             if !dst.contains(&batch.root, &target) || target == batch.root {
-                w.reject(&source, &label, SftpErrorCode::Invalid);
-                return Ok(());
+                return w.reject(&source, &label, SftpErrorCode::Invalid);
             }
             if kind == EntryKind::File {
-                w.files.push(FileSpec { source, target, name: label, size, error: None });
-                if w.files.len() > BATCH_FILES {
-                    return Err(err(SftpErrorCode::TooMany));
-                }
-                return Ok(());
+                return w.file(FileSpec { source, target, name: label, size, error: None });
             }
             if kind != EntryKind::Dir {
-                w.reject(&source, &label, SftpErrorCode::Unsupported);
-                return Ok(());
+                return w.reject(&source, &label, SftpErrorCode::Unsupported);
             }
-            let children = src.readdir(&source).await?;
+            let children = src.readdir_max(&source, w.budget()).await?;
             if children.is_empty() {
-                w.empty_dirs.push(target.clone());
+                w.empty_dir(target.clone())?;
             }
             for child in children {
                 let child_label = format!("{label}/{}", child.name);
                 if !src.valid_name(&child.name) || !dst.valid_name(&child.name) {
-                    w.reject(&source, &child_label, SftpErrorCode::InvalidName);
+                    w.reject(&source, &child_label, SftpErrorCode::InvalidName)?;
                     continue;
                 }
                 let (s, t) = (src.join(&source, &child.name), dst.join(&target, &child.name));
@@ -1492,7 +1508,9 @@ fn read_tree<'a>(
         if depth > MAX_DEPTH {
             return Err(err(SftpErrorCode::TooMany));
         }
-        for child in side.readdir(&from).await? {
+        // T3: one folder read stays bounded; a folder with more entries than the files still allowed is refused before
+        // more of it is read.
+        for child in side.readdir_max(&from, BATCH_FILES.saturating_sub(tree.files.len())).await? {
             if !side.valid_name(&child.name) {
                 return Err(err(SftpErrorCode::InvalidName));
             }
@@ -1548,5 +1566,48 @@ mod tests {
         assert_eq!(item.to_json().to_string(), r#"{"id":"i","state":"queued","speed":0,"error":"failed","startedAt":5}"#);
         assert!(TransferState::Cancelled.is_finished());
         assert!(!TransferState::Conflict.is_finished());
+    }
+
+    /// T3: files, rejected entries and empty folders all count against BATCH_FILES, checked after every push, and the next
+    /// folder read may only bring what is left of it.
+    #[test]
+    fn the_walk_caps_files_rejected_entries_and_empty_folders_together() {
+        let local: Arc<dyn FileSide> = Arc::new(crate::local::LocalSide::default());
+        let batch = Batch {
+            id: "b".into(),
+            direction: TransferDirection::LocalCopy,
+            src: local.clone(),
+            dst: local,
+            policy: Mutex::new(None),
+            root: "/t".into(),
+            dirs: Mutex::new(HashMap::new()),
+            cancelled: AtomicBool::new(false),
+        };
+        let spec = |i: usize| FileSpec {
+            source: format!("/s/{i}"),
+            target: format!("/t/{i}"),
+            name: i.to_string(),
+            size: 0,
+            error: None,
+        };
+        let mut w = Walk { batch: &batch, target_dir: "/t", files: Vec::new(), empty_dirs: Vec::new() };
+        assert_eq!(w.budget(), BATCH_FILES);
+        let third = BATCH_FILES / 3;
+        for i in 0..third {
+            w.file(spec(i)).unwrap();
+            w.empty_dir(format!("/t/e{i}")).unwrap();
+            w.reject("/s", &format!("r{i}"), SftpErrorCode::InvalidName).unwrap();
+        }
+        assert_eq!(w.budget(), BATCH_FILES - 3 * third);
+        while w.count() < BATCH_FILES {
+            w.empty_dir("/t/more".into()).unwrap();
+        }
+        assert_eq!(w.budget(), 0);
+        // Each kind of push past the cap fails.
+        assert_eq!(w.empty_dir("/t/x".into()).unwrap_err().code, SftpErrorCode::TooMany);
+        w.empty_dirs.pop();
+        assert_eq!(w.reject("/s", "x", SftpErrorCode::NotFound).unwrap_err().code, SftpErrorCode::TooMany);
+        w.files.pop();
+        assert_eq!(w.file(spec(0)).unwrap_err().code, SftpErrorCode::TooMany);
     }
 }

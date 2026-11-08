@@ -49,6 +49,7 @@ sftp_codes! {
     LinkSkipped => "linkSkipped",
     UnsafeChmod => "unsafeChmod",
     PartDenied => "partDenied",
+    UnsafeDelete => "unsafeDelete",
 }
 
 impl std::fmt::Display for SftpErrorCode {

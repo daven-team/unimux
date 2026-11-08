@@ -63,7 +63,8 @@ fn code(e: SideError) -> SftpErrorCode {
 }
 
 /// `count`: what deleting `paths` removes: files (symlinks count as files, never followed) and folders, recursively.
-pub async fn delete_count(side: &RemoteSide, paths: &[String]) -> Result<DeleteCount, SftpErrorCode> {
+/// `sudo`: a folder [`remove`] would refuse (`unsafeDelete`) is refused here already, before the user confirms anything.
+pub async fn delete_count(side: &RemoteSide, paths: &[String], sudo: bool) -> Result<DeleteCount, SftpErrorCode> {
     let mut total = DeleteCount::default();
     let mut seen: u64 = 0;
     for path in paths {
@@ -94,6 +95,9 @@ pub async fn delete_count(side: &RemoteSide, paths: &[String]) -> Result<DeleteC
                 total.files += 1;
                 continue;
             }
+            if sudo && unsafe_for_root(side, &p, meta.mode, p == *path).await? {
+                return Err(SftpErrorCode::UnsafeDelete);
+            }
             total.dirs += 1;
             let children = side.readdir(&p).await.map_err(code)?;
             stack.extend(children.into_iter().rev().map(|c| (Some(p.clone()), c.name)));
@@ -107,8 +111,34 @@ enum RemoveStep {
     Rmdir(String),
 }
 
+/// Permission bits that let users other than the owner write to a folder (group or others).
+const SHARED_WRITE: u32 = 0o022;
+
+/// T5 under sudo: a folder others can write to (or whose mode is unknown) could have its entries swapped for links between
+/// the listing and the unlinks, which root would then follow.
+fn shared_writable(mode: Option<u32>) -> bool {
+    mode.is_none_or(|m| m & SHARED_WRITE != 0)
+}
+
+/// Under sudo: emptying the folder at `path` (with `mode`) is unsafe when others can write to it, or (`root`, the folder the
+/// user selected) to the folder it is in, where it could be swapped for a link as a whole.
+async fn unsafe_for_root(side: &RemoteSide, path: &str, mode: Option<u32>, root: bool) -> Result<bool, SftpErrorCode> {
+    if shared_writable(mode) {
+        return Ok(true);
+    }
+    if root && path != "/" {
+        let parent = side.lstat(&side.dirname(path)).await.map_err(code)?;
+        return Ok(parent.is_none_or(|m| shared_writable(m.mode)));
+    }
+    Ok(false)
+}
+
 /// `remove`: a file or link is unlinked, a folder emptied (its files 8 at a time, then its folders one by one) and removed.
-pub async fn remove(side: &RemoteSide, path: &str) -> Result<(), SftpErrorCode> {
+/// After a folder was read it is looked at again (T5): one that is no longer a folder (a link swapped in meanwhile) stops
+/// the delete with `changed` before anything listed in it is unlinked. `sudo`: the session runs as root, so a recursive
+/// delete in a folder other users can write to (the selected folder's parent or any folder inside) is refused with
+/// `unsafeDelete`.
+pub async fn remove(side: &RemoteSide, path: &str, sudo: bool) -> Result<(), SftpErrorCode> {
     let mut stack = vec![RemoveStep::Enter(path.to_string())];
     while let Some(step) = stack.pop() {
         match step {
@@ -119,7 +149,15 @@ pub async fn remove(side: &RemoteSide, path: &str) -> Result<(), SftpErrorCode> 
                     side.unlink(&p).await.map_err(code)?;
                     continue;
                 }
+                if sudo && unsafe_for_root(side, &p, meta.mode, p == path).await? {
+                    return Err(SftpErrorCode::UnsafeDelete);
+                }
                 let children = side.readdir(&p).await.map_err(code)?;
+                match side.lstat(&p).await.map_err(code)? {
+                    Some(again) if again.kind == EntryKind::Dir && !(sudo && shared_writable(again.mode)) => {}
+                    Some(again) if again.kind == EntryKind::Dir => return Err(SftpErrorCode::UnsafeDelete),
+                    _ => return Err(SftpErrorCode::Changed),
+                }
                 if children.iter().any(|c| !valid_remote_name(&c.name)) {
                     return Err(SftpErrorCode::InvalidName);
                 }
