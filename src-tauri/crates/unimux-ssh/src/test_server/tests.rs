@@ -123,6 +123,42 @@ async fn a_saved_password_logs_in_and_the_host_key_is_the_servers() {
     assert_eq!(server.execs(), ["echo sp7-ok"]);
 }
 
+/// An encrypted key signs in with its passphrase; a key the server will not take falls through to the saved password
+/// (1.1.4's W4: a key that cannot sign never ends the login while a password is there).
+#[tokio::test(flavor = "multi_thread")]
+async fn an_encrypted_key_signs_in_and_a_key_that_is_not_taken_falls_through_to_the_saved_password() {
+    let pass = Some(Zeroizing::new("secret".to_string()));
+    let key = generate_key_blocking(&KeyGenRequest {
+        key_type: KeyType::Ed25519,
+        bits: None,
+        comment: "t@x".into(),
+        passphrase: pass.clone(),
+    })
+    .unwrap();
+    let server = TestServer::start(TestServerConfig {
+        users: vec![TestUser::new("k").key_line(&key.meta.public_key), TestUser::new("p").password("pw")],
+        ..TestServerConfig::default()
+    })
+    .await
+    .unwrap();
+    let events = Auto::new(LoginControl::new(), None, &[]);
+    let mut req = request(server.port(), "k");
+    req.private_key = Some(key.private_key.clone());
+    req.passphrase = pass;
+    run(req, &events).await.expect("encrypted key");
+    assert_eq!(server.attempts().last().map(String::as_str), Some("publickey:k:ok"));
+    assert!(events.prompts.lock().is_empty());
+
+    let events = Auto::new(LoginControl::new(), None, &[]);
+    let mut req = request(server.port(), "p");
+    req.private_key = Some(key.private_key.clone());
+    req.passphrase = Some(Zeroizing::new("secret".into()));
+    req.password = Some(Zeroizing::new("pw".into()));
+    run(req, &events).await.expect("falls through to the password");
+    assert_eq!(*events.methods.lock(), ["publickey", "password"]);
+    assert_eq!(server.attempts().last().map(String::as_str), Some("password:p:ok"));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn publickey_logs_in_with_a_generated_key_of_every_type() {
     for (key_type, bits) in [(KeyType::Ed25519, None), (KeyType::Ecdsa, Some(384)), (KeyType::Rsa, Some(2048))] {

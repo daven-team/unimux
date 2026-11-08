@@ -51,6 +51,8 @@ mod fake_server;
 #[cfg(test)]
 mod manage_tests;
 #[cfg(test)]
+mod queue_mem_tests;
+#[cfg(test)]
 mod queue_tests;
 #[cfg(test)]
 mod sides_tests;

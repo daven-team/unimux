@@ -24,6 +24,11 @@ pub struct Config {
     pub fail_rename_to: Mutex<Vec<String>>,
     /// Reads answer at most this many bytes.
     pub short_reads: Option<usize>,
+    /// Attributes carry uid / gid: [`Fake::owners`] per path, else the SSH user's 1000:1000 (a new file is the user's,
+    /// and a chown to anyone else is ignored, like on a server where the user is not root).
+    pub owners: bool,
+    /// A write that would end past this offset fails (a full disk).
+    pub fail_writes_after: Option<usize>,
 }
 
 pub struct Fake {
@@ -42,6 +47,10 @@ pub struct Fake {
     /// When a folder at this path is opened for reading (after its listing was taken), this node takes its place: another
     /// user swapping the folder between the listing and what comes next.
     pub swap_on_opendir: Mutex<Option<(String, Node)>>,
+    /// With [`Config::owners`]: the uid / gid of paths that are not the SSH user's; a rename carries it.
+    pub owners: Mutex<HashMap<String, (u32, u32)>>,
+    /// Every OPEN for writing: (path, exclusive, the mode it asked for).
+    pub opens: Mutex<Vec<(String, bool, Option<u32>)>>,
 }
 
 #[derive(Debug, Clone)]
@@ -64,14 +73,21 @@ impl Fake {
             log: Mutex::new(Vec::new()),
             readdirs: AtomicUsize::new(0),
             swap_on_opendir: Mutex::new(None),
+            owners: Mutex::new(HashMap::new()),
+            opens: Mutex::new(Vec::new()),
         })
     }
 
-    /// The node's attributes with the permission bits of [`Fake::modes`].
+    /// The node's attributes with the permission bits of [`Fake::modes`] (and the owner, see [`Config::owners`]).
     fn attrs_at(&self, path: &str, node: &Node) -> Attrs {
         let mut a = Self::attrs(node);
         if let (Some(bits), Some(m)) = (self.modes.lock().get(path), a.mode) {
             a.mode = Some((m & !0o7777) | (bits & 0o7777));
+        }
+        if self.cfg.owners {
+            let (uid, gid) = self.owners.lock().get(path).copied().unwrap_or((1000, 1000));
+            a.uid = Some(uid);
+            a.gid = Some(gid);
         }
         a
     }
@@ -188,6 +204,9 @@ impl Fake {
                 let flags = rd.u32().unwrap();
                 let exists = self.get(&path);
                 if flags & proto::open_flags::WRITE != 0 {
+                    let mode = Attrs::decode(rd).ok().and_then(|a| a.mode);
+                    let excl = flags & proto::open_flags::EXCL != 0;
+                    self.opens.lock().push((path.clone(), excl, mode));
                     if flags & proto::open_flags::EXCL != 0 && exists.is_some() {
                         return st(status::FAILURE);
                     }
@@ -244,6 +263,9 @@ impl Fake {
                 let data = rd.bytes().unwrap().to_vec();
                 self.writes.fetch_add(1, Ordering::SeqCst);
                 let Some(Handle::File(path)) = self.open_handles.lock().get(&h).cloned() else { return st(status::FAILURE) };
+                if self.cfg.fail_writes_after.is_some_and(|limit| offset + data.len() > limit) {
+                    return st(status::FAILURE);
+                }
                 let mut fs = self.fs.lock();
                 let Some(Node::File(file, _)) = fs.get_mut(&path) else { return st(status::NO_SUCH_FILE) };
                 if file.len() < offset + data.len() {
@@ -397,6 +419,11 @@ impl Fake {
         match modes.remove(from) {
             Some(m) => modes.insert(to.to_string(), m),
             None => modes.remove(to),
+        };
+        let mut owners = self.owners.lock();
+        match owners.remove(from) {
+            Some(o) => owners.insert(to.to_string(), o),
+            None => owners.remove(to),
         };
         st(status::OK)
     }

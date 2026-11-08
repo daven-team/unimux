@@ -317,6 +317,12 @@ impl AppContext {
         self.app_start_unclaimed.swap(false, Ordering::SeqCst)
     }
 
+    /// `appStartClaim.cancel()`: a pty service crash or fatal stop before the renderer claimed the start spends it, so
+    /// the SSH hosts that reconnect at app start do not connect after the restart (D5).
+    pub fn cancel_app_start(&self) {
+        self.app_start_unclaimed.store(false, Ordering::SeqCst);
+    }
+
     /// `send('app:notice', text)`: a one-line notice the main window shows as a toast (H2's hook fallback and later notices).
     #[cfg_attr(not(feature = "test-bridge"), allow(dead_code, reason = "the HTTP hook fallback notice (H2) sends through it"))]
     pub fn app_notice(&self, text: &str) {

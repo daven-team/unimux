@@ -15,7 +15,7 @@ use unimux_ssh::command_history::{CommandHistoryOptions, CommandHistoryStore};
 use unimux_ssh::js_value::JsNum;
 use unimux_ssh::known_hosts::{HostKeyJudgement, KnownHostsStore, TrustMode};
 use unimux_ssh::stores::SshStores;
-use unimux_ssh::vault::{AddKey, KeySource, NewKey, SshVault};
+use unimux_ssh::vault::{AddKey, KeyPatch, KeySource, NewKey, PassphrasePatch, SshVault, UpdateKeyError};
 use zeroize::Zeroizing;
 
 const HOST_A: &str = "00000000-0000-4000-8000-00000000000a";
@@ -244,4 +244,113 @@ async fn shared_stores_open_once_and_every_caller_waits_for_it() {
     assert_eq!(a.lock().info()["keys"][0]["locked"], false);
     assert_eq!(stores.known_hosts().await.lock().list().len(), 0);
     assert_eq!(stores.history().file_path(), ssh.join("command_history.json"));
+}
+
+/// A cipher whose availability can be switched off mid-run (the real v10 format underneath).
+struct Switchable {
+    inner: Cipher,
+    available: std::sync::atomic::AtomicBool,
+}
+
+impl SafeCipher for Switchable {
+    fn storage(&self) -> Storage {
+        if self.available.load(Ordering::SeqCst) { Storage::Dpapi } else { Storage::Unavailable }
+    }
+    fn encrypt(&self, text: &str) -> Result<Vec<u8>, unimux_oscrypt::Error> {
+        self.inner.encrypt(text)
+    }
+    fn decrypt(&self, blob: &[u8]) -> Result<Zeroizing<String>, unimux_oscrypt::Error> {
+        self.inner.decrypt(blob)
+    }
+}
+
+/// The cases of test/ssh-vault.test.ts that need more than one cipher or file state in a row: locked entries unlock again
+/// with the right key, a corrupt file is backed up again without overwriting the first backup (M5), a failed write leaves
+/// memory unchanged and a retry writes, memory-only storage without encryption (D8), and no passphrase change of a stored
+/// key while encryption is unavailable.
+#[test]
+fn vault_edge_cases_across_ciphers_and_file_states() {
+    let dir = tempfile::tempdir().unwrap();
+    let ssh = dir.path().join("ssh");
+    let file = ssh.join("vault.json");
+    let good = || -> Arc<dyn SafeCipher> { Arc::new(Cipher::with_gcm_key([1u8; 32])) };
+    let mut vault = SshVault::open(&file, good());
+    let AddKey::Added { key: first, .. } = vault.add_key(key()).unwrap() else { panic!("added") };
+    vault.set_password(HOST_A, "a").unwrap();
+
+    // Locked with another key, unlocked again with the right one.
+    let mut foreign = SshVault::open(&file, Arc::new(Cipher::with_gcm_key([2u8; 32])));
+    assert!(foreign.key_secret(&first.meta.id).is_err());
+    assert!(foreign.password(HOST_A).is_err());
+    assert_eq!(foreign.info()["lockedPasswords"], json!([HOST_A]));
+    assert!(SshVault::open(&file, good()).key_secret(&first.meta.id).is_ok());
+
+    // A failed write (a non-empty folder where the file belongs) changes nothing in memory; a retry writes for real.
+    let before = vault.info();
+    fs::remove_file(&file).unwrap();
+    fs::create_dir_all(file.join("child")).unwrap();
+    let mut other = key();
+    other.fingerprint = "SHA256:other".into();
+    other.label = "other".into();
+    let other_again = || {
+        let mut k = key();
+        k.fingerprint = "SHA256:other".into();
+        k.label = "other".into();
+        k
+    };
+    assert!(vault.add_key(other).is_err());
+    assert!(vault.set_password("00000000-0000-4000-8000-00000000000b", "b").is_err());
+    assert!(vault.clear_password(HOST_A).is_err());
+    assert!(vault.remove_key(&first.meta.id).is_err());
+    assert_eq!(vault.info(), before);
+    assert_eq!(vault.key_secret(&first.meta.id).unwrap().private_key.as_str(), PRIVATE);
+    fs::remove_dir_all(&file).unwrap();
+    assert!(matches!(vault.add_key(other_again()).unwrap(), AddKey::Added { duplicate: false, .. }));
+    let labels: Vec<String> = SshVault::open(&file, good()).keys().into_iter().map(|k| k.meta.label).collect();
+    assert_eq!(labels, ["laptop", "other"]);
+
+    // Corrupt twice: two backups, the first one never overwritten (M5).
+    fs::write(&file, "{ first").unwrap();
+    SshVault::open(&file, good());
+    fs::write(&file, "{ second").unwrap();
+    SshVault::open(&file, good());
+    let mut backups: Vec<String> = fs::read_dir(&ssh)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("vault.json.bak-"))
+        .map(|e| fs::read_to_string(e.path()).unwrap())
+        .collect();
+    backups.sort();
+    assert_eq!(backups, ["{ first", "{ second"]);
+
+    // Without encryption everything stays in memory and nothing is written (D8).
+    let memory_dir = tempfile::tempdir().unwrap();
+    let memory_file = memory_dir.path().join("ssh").join("vault.json");
+    let off = Arc::new(Switchable { inner: Cipher::with_gcm_key([1u8; 32]), available: false.into() });
+    let mut memory = SshVault::open(&memory_file, off.clone());
+    let AddKey::Added { key: k, .. } = memory.add_key(key()).unwrap() else { panic!("added") };
+    assert!(k.ephemeral);
+    assert_eq!(memory.set_password(HOST_A, "pw").unwrap().to_json(), json!({ "ok": true, "ephemeral": true }));
+    assert!(!memory_file.exists());
+    assert_eq!(memory.key_secret(&k.meta.id).unwrap().private_key.as_str(), PRIVATE);
+    assert_eq!(memory.info()["storage"], "unavailable");
+    assert_eq!(SshVault::open(&memory_file, off).info()["keys"], json!([]));
+
+    // A stored key's saved passphrase cannot change while encryption is unavailable.
+    let switch_dir = tempfile::tempdir().unwrap();
+    let switch_file = switch_dir.path().join("ssh").join("vault.json");
+    let cipher = Arc::new(Switchable { inner: Cipher::with_gcm_key([1u8; 32]), available: true.into() });
+    let mut vault = SshVault::open(&switch_file, cipher.clone());
+    let mut plain = key();
+    plain.save_passphrase = false;
+    let AddKey::Added { key: k, .. } = vault.add_key(plain).unwrap() else { panic!("added") };
+    cipher.available.store(false, Ordering::SeqCst);
+    let save = KeyPatch { passphrase: Some(PassphrasePatch::Save(Zeroizing::new("new".into()))), ..KeyPatch::default() };
+    let forget = KeyPatch { passphrase: Some(PassphrasePatch::Forget), ..KeyPatch::default() };
+    assert_eq!(vault.update_key(&k.meta.id, save).unwrap().err(), Some(UpdateKeyError::Failed));
+    assert_eq!(vault.update_key(&k.meta.id, forget).unwrap().err(), Some(UpdateKeyError::Failed));
+    let kept = vault.key(&k.meta.id).unwrap();
+    assert!(!kept.ephemeral && !kept.meta.passphrase_saved);
+    let reread = SshVault::open(&switch_file, Arc::new(Cipher::with_gcm_key([1u8; 32]))).key_secret(&k.meta.id).unwrap();
+    assert!(reread.passphrase.is_none());
 }

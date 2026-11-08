@@ -818,6 +818,10 @@ impl SshShells {
 }
 
 #[cfg(test)]
+#[path = "shell_int_tests.rs"]
+mod int_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};

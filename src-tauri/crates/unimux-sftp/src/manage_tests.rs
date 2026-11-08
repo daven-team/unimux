@@ -289,3 +289,121 @@ async fn folder_reads_stop_at_the_match_and_at_the_total_limits() {
     assert_eq!(side.readdir_find("/huge", "missing").await, Err(SftpErrorCode::TooMany.into()));
     assert_eq!(side.readdir_raw("/huge", Some(10)).await.unwrap().len(), 11);
 }
+
+fn file_text(fake: &Fake, path: &str) -> Vec<u8> {
+    match fake.get(path) {
+        Some(Node::File(data, _)) => data,
+        other => panic!("{path}: {other:?}"),
+    }
+}
+
+/// 1.1.4's sftp-host.int "files in editor tabs": an exclusive, private part file (mode 0600, never written through a file
+/// planted under its name), the mode and CRLF kept, the new stamp the base of the next save, a change within the same
+/// second told by the content hash, BOM and UTF-16 kept, a folder refused by statFile.
+#[tokio::test]
+async fn editor_saves_through_an_exclusive_private_part_file_and_keep_the_encoding() {
+    let (fake, side) = connect(Config { posix_rename: true, ..Config::default() }).await;
+    fake.put("/e.txt", Node::File(b"one\r\ntwo\r\n".to_vec(), 7));
+    fake.modes.lock().insert("/e.txt".into(), 0o640);
+    let read = read_for_editor(&side, "/e.txt").await.unwrap();
+    assert_eq!((read["text"].as_str(), read["encoding"].as_str(), read["size"].as_u64()), (Some("one\r\ntwo\r\n"), Some("utf-8"), Some(10)));
+    let hash = read["stamp"]["hash"].as_str().unwrap();
+    assert!(hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()));
+    let saved = write_from_editor(&side, "/e.txt", &save("one\nTWO\nthree\n", "one\r\ntwo\r\n", Some(stamp_of(&read["stamp"]))), "editor:s")
+        .await
+        .unwrap();
+    assert_eq!(saved["kind"], "saved");
+    assert_eq!(file_text(&fake, "/e.txt"), b"one\r\nTWO\r\nthree\r\n");
+    assert_eq!(fake.fs.lock().keys().cloned().collect::<Vec<_>>(), ["/", "/e.txt"]);
+    assert_eq!(mode_of(&fake, "/e.txt"), Some(0o640));
+    assert_eq!(*fake.opens.lock(), [("/e.txt.unimux-part".to_string(), true, Some(0o600))]);
+    assert_eq!(saved["stamp"]["size"], 17);
+    let again = write_from_editor(&side, "/e.txt", &save("again\n", "one\r\nTWO\r\nthree\r\n", Some(stamp_of(&saved["stamp"]))), "editor:s")
+        .await
+        .unwrap();
+    assert_eq!(again["kind"], "saved");
+    assert_eq!(file_text(&fake, "/e.txt"), b"again\r\n");
+
+    // Same size and the same second, other content: only the hash tells, and nothing is written.
+    let read = read_for_editor(&side, "/e.txt").await.unwrap();
+    let mtime = match fake.get("/e.txt") {
+        Some(Node::File(_, m)) => m,
+        _ => unreachable!(),
+    };
+    fake.put("/e.txt", Node::File(b"AGAIN\r\n".to_vec(), mtime));
+    let r = write_from_editor(&side, "/e.txt", &save("mine", "again\r\n", Some(stamp_of(&read["stamp"]))), "editor:s").await;
+    assert_eq!(r, Err(SftpErrorCode::Changed));
+    assert_eq!(file_text(&fake, "/e.txt"), b"AGAIN\r\n");
+
+    // A file planted under the part name is removed and the part file created exclusively again.
+    fake.opens.lock().clear();
+    fake.put("/e.txt.unimux-part", Node::File(b"leftover".to_vec(), 1));
+    let read = read_for_editor(&side, "/e.txt").await.unwrap();
+    let r = write_from_editor(&side, "/e.txt", &save("mine", "AGAIN\r\n", Some(stamp_of(&read["stamp"]))), "editor:s").await.unwrap();
+    assert_eq!(r["kind"], "saved");
+    let opens = fake.opens.lock().clone();
+    assert_eq!(opens.len(), 2);
+    assert!(opens.iter().all(|(p, excl, _)| p == "/e.txt.unimux-part" && *excl));
+    assert!(fake.get("/e.txt.unimux-part").is_none());
+
+    // The BOM and UTF-16 are kept.
+    fake.put("/bom.txt", Node::File("\u{feff}zażółć".as_bytes().to_vec(), 1));
+    let bom = read_for_editor(&side, "/bom.txt").await.unwrap();
+    assert_eq!((bom["text"].as_str(), bom["encoding"].as_str()), (Some("zażółć"), Some("utf-8-bom")));
+    let mut s = save("gęś", "zażółć", Some(stamp_of(&bom["stamp"])));
+    s.encoding = "utf-8-bom".into();
+    assert_eq!(write_from_editor(&side, "/bom.txt", &s, "editor:s").await.unwrap()["kind"], "saved");
+    assert_eq!(file_text(&fake, "/bom.txt"), "\u{feff}gęś".as_bytes());
+    fake.put("/w.txt", Node::File(vec![0xff, 0xfe, b'h', 0, b'i', 0], 1));
+    let w = read_for_editor(&side, "/w.txt").await.unwrap();
+    assert_eq!((w["kind"].as_str(), w["text"].as_str(), w["encoding"].as_str()), (Some("text"), Some("hi"), Some("utf-16le")));
+    fake.put("/dir", Node::Dir);
+    assert_eq!(stat_for_editor(&side, "/dir").await, Err(SftpErrorCode::Invalid));
+}
+
+/// A file of another owner is not replaced without consent (the server will not give it back); with consent the save goes
+/// through and reports the owner change.
+#[tokio::test]
+async fn a_file_of_another_owner_is_not_replaced_without_consent() {
+    let (fake, side) = connect(Config { posix_rename: true, owners: true, ..Config::default() }).await;
+    fake.put("/e.txt", Node::File(b"base".to_vec(), 7));
+    fake.owners.lock().insert("/e.txt".into(), (1001, 1001));
+    let read = read_for_editor(&side, "/e.txt").await.unwrap();
+    let stamp = stamp_of(&read["stamp"]);
+    let r = write_from_editor(&side, "/e.txt", &save("mine", "base", Some(stamp.clone())), "editor:s").await.unwrap();
+    assert_eq!(r, json!({ "kind": "ownerChange", "from": { "uid": 1001, "gid": 1001 }, "to": { "uid": 1000, "gid": 1000 } }));
+    assert_eq!(file_text(&fake, "/e.txt"), b"base");
+    for _ in 0..100 {
+        if fake.get("/e.txt.unimux-part").is_none() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(fake.get("/e.txt.unimux-part").is_none(), "no part file stays");
+    let mut s = save("mine", "base", Some(stamp));
+    s.allow_owner_change = true;
+    let done = write_from_editor(&side, "/e.txt", &s, "editor:s").await.unwrap();
+    assert_eq!(done["kind"], "saved");
+    assert_eq!(done["warnings"], json!([{ "kind": "owner", "from": { "uid": 1001, "gid": 1001 }, "to": { "uid": 1000, "gid": 1000 } }]));
+    assert_eq!(file_text(&fake, "/e.txt"), b"mine");
+}
+
+/// A save whose rename fails (no posix-rename, the new file cannot come in) puts the old file back and leaves no part file.
+#[tokio::test]
+async fn a_save_whose_rename_fails_leaves_the_old_file_and_no_part_file() {
+    let (fake, side) = connect(Config::default()).await;
+    fake.put("/e.txt", Node::File(b"old".to_vec(), 7));
+    let read = read_for_editor(&side, "/e.txt").await.unwrap();
+    fake.cfg.fail_rename_to.lock().push("/e.txt.unimux-part>/e.txt".into());
+    let r = write_from_editor(&side, "/e.txt", &save("new", "old", Some(stamp_of(&read["stamp"]))), "editor:s").await;
+    // A fixed code (the fake server refuses with permission denied; 1.1.4's test server with a generic failure).
+    assert!(matches!(r, Err(SftpErrorCode::Permission | SftpErrorCode::Failed)), "{r:?}");
+    assert_eq!(file_text(&fake, "/e.txt"), b"old");
+    for _ in 0..100 {
+        if fake.fs.lock().len() == 2 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(fake.fs.lock().keys().cloned().collect::<Vec<_>>(), ["/", "/e.txt"]);
+}

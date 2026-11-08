@@ -26,7 +26,7 @@ use parking_lot::Mutex;
 use rand_core::UnwrapErr;
 use russh::keys::ssh_key::{Algorithm, EcdsaCurve, PrivateKey, PublicKey};
 use russh::server::{Auth, ChannelOpenHandle, Config, Handler, Msg, PublicKeyOffer, Response, Session, VerifiedPublicKey};
-use russh::{Channel, ChannelId, MethodKind, MethodSet};
+use russh::{Channel, ChannelId, ChannelMsg, MethodKind, MethodSet};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -98,12 +98,38 @@ pub struct TestServerConfig {
     pub exec: Option<ExecHandler>,
     /// The folder the `sftp` subsystem serves as `/`; None refuses the subsystem.
     pub sftp_root: Option<PathBuf>,
+    /// Runs an `exec` request with what the client wrote to it (called at the client's EOF; `exec sh -s` with the script
+    /// on stdin, like the SSH status bar and path completion send it). Takes precedence over `exec`.
+    pub exec_stdin: Option<ExecStdinHandler>,
     /// Accept `shell` requests with an echo shell.
     pub shell: bool,
+    /// With `shell`: the scripted shell of 1.1.4's test/helpers/sshServer.ts instead of the plain echo ([`ShellLog`] lists
+    /// the commands it knows).
+    pub scripted_shell: bool,
+    /// With `scripted_shell`: after `exit` the server drops the connection (a reset instead of a clean close).
+    pub reset_on_exit: bool,
     /// Accept `direct-tcpip` channels to 127.0.0.1.
     pub forwarding: bool,
     /// The server's own algorithm lists (default: russh's).
     pub preferred: russh::Preferred,
+}
+
+/// Runs an `exec` command with its stdin (the command text, the bytes the client sent before EOF).
+pub type ExecStdinHandler = Arc<dyn Fn(&str, &[u8]) -> ExecOutput + Send + Sync>;
+
+/// What the scripted shell saw. It greets with `Welcome\r\n$ `, echoes every byte and runs these lines: `exit` (exit status
+/// 3, then close), `tail <n>` (n bytes, `TAIL-END`, exit status 0, close), `flood <n>` (n bytes, counted in
+/// `flood_sent`), `split` (`zażółć 🙂` in three packets cut inside characters) and `echo <text>`.
+#[derive(Debug, Clone, Default)]
+pub struct ShellLog {
+    /// `pty-req`: (term, cols, rows).
+    pub ptys: Vec<(String, u32, u32)>,
+    /// `window-change`: (cols, rows).
+    pub window_changes: Vec<(u32, u32)>,
+    /// Every byte the shells got.
+    pub input: Vec<u8>,
+    /// Bytes `flood` has written so far.
+    pub flood_sent: usize,
 }
 
 impl Default for TestServerConfig {
@@ -115,7 +141,10 @@ impl Default for TestServerConfig {
             banner: None,
             exec: None,
             sftp_root: None,
+            exec_stdin: None,
             shell: false,
+            scripted_shell: false,
+            reset_on_exit: false,
             forwarding: false,
             preferred: russh::Preferred::default(),
         }
@@ -148,7 +177,19 @@ pub struct TestServer {
     host_keys: Vec<String>,
     attempts: AttemptLog,
     exec_log: Arc<Mutex<Vec<String>>>,
+    shell_log: Arc<Mutex<ShellLog>>,
+    connections: Arc<std::sync::atomic::AtomicUsize>,
+    conn_tasks: Arc<Mutex<Vec<tokio::task::AbortHandle>>>,
     task: JoinHandle<()>,
+}
+
+/// Counts a connection while its task runs (also when the task is aborted).
+struct ConnCount(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for ConnCount {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 impl TestServer {
@@ -175,7 +216,17 @@ impl TestServer {
         });
         let attempts: AttemptLog = Arc::new(Mutex::new(Vec::new()));
         let exec_log = Arc::new(Mutex::new(Vec::new()));
-        let shared = Arc::new(Shared { config, attempts: attempts.clone(), exec_log: exec_log.clone() });
+        let shell_log = Arc::new(Mutex::new(ShellLog::default()));
+        let connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let conn_tasks = Arc::new(Mutex::new(Vec::new()));
+        let shared = Arc::new(Shared {
+            config,
+            attempts: attempts.clone(),
+            exec_log: exec_log.clone(),
+            shell_log: shell_log.clone(),
+            conn_tasks: conn_tasks.clone(),
+        });
+        let count = connections.clone();
         let task = tokio::spawn(async move {
             while let Ok((socket, peer)) = listener.accept().await {
                 if !peer.ip().is_loopback() {
@@ -183,14 +234,43 @@ impl TestServer {
                 }
                 let handler = Conn { shared: shared.clone(), channels: HashMap::new(), keyboard_round: 0 };
                 let cfg = russh_config.clone();
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let guard = ConnCount(count.clone());
+                // The session runs on one end of a pipe and a pump copies the socket to the other: aborting the pump
+                // drops the socket without a disconnect message (`drop_connections`).
+                let _ = socket.set_nodelay(true);
+                let (inner, mut outer) = tokio::io::duplex(64 * 1024);
+                let pump = tokio::spawn(async move {
+                    let mut socket = socket;
+                    let _ = tokio::io::copy_bidirectional(&mut socket, &mut outer).await;
+                });
+                shared.conn_tasks.lock().push(pump.abort_handle());
                 tokio::spawn(async move {
-                    if let Ok(session) = russh::server::run_stream(cfg, socket, handler).await {
+                    let _guard = guard;
+                    if let Ok(session) = russh::server::run_stream(cfg, inner, handler).await {
                         let _ = session.await;
                     }
                 });
             }
         });
-        Ok(TestServer { addr, host_keys, attempts, exec_log, task })
+        Ok(TestServer { addr, host_keys, attempts, exec_log, shell_log, connections, conn_tasks, task })
+    }
+
+    /// What the shells saw so far.
+    pub fn shell_log(&self) -> ShellLog {
+        self.shell_log.lock().clone()
+    }
+
+    /// The connections open right now.
+    pub fn connections(&self) -> usize {
+        self.connections.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Drops every connection without a disconnect message (a network failure as the client sees it).
+    pub fn drop_connections(&self) {
+        for t in self.conn_tasks.lock().drain(..) {
+            t.abort();
+        }
     }
 
     pub fn port(&self) -> u16 {
@@ -227,6 +307,88 @@ struct Shared {
     config: TestServerConfig,
     attempts: AttemptLog,
     exec_log: Arc<Mutex<Vec<String>>>,
+    shell_log: Arc<Mutex<ShellLog>>,
+    conn_tasks: Arc<Mutex<Vec<tokio::task::AbortHandle>>>,
+}
+
+/// The scripted shell (see [`ShellLog`]).
+async fn scripted_shell(mut ch: Channel<Msg>, shared: Arc<Shared>) {
+    const CHUNK: usize = 32 * 1024;
+    let _ = ch.data_bytes(b"Welcome\r\n$ ".to_vec()).await;
+    let mut line = Vec::new();
+    while let Some(msg) = ch.wait().await {
+        let data = match msg {
+            ChannelMsg::Data { data } => data,
+            ChannelMsg::Eof | ChannelMsg::Close => break,
+            _ => continue,
+        };
+        shared.shell_log.lock().input.extend_from_slice(&data);
+        for &b in data.iter() {
+            if b != b'\r' {
+                line.push(b);
+                let _ = ch.data_bytes(vec![b]).await;
+                continue;
+            }
+            let cmd = String::from_utf8_lossy(&line).trim().to_string();
+            line.clear();
+            let _ = ch.data_bytes(b"\r\n".to_vec()).await;
+            let (word, arg) = cmd.split_once(' ').unwrap_or((cmd.as_str(), ""));
+            let size = arg.parse::<usize>().unwrap_or(0);
+            match word {
+                "exit" => {
+                    let _ = ch.exit_status(3).await;
+                    let _ = ch.eof().await;
+                    let _ = ch.close().await;
+                    if shared.config.reset_on_exit {
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                        for t in shared.conn_tasks.lock().drain(..) {
+                            t.abort();
+                        }
+                    }
+                    return;
+                }
+                "tail" => {
+                    let mut left = size;
+                    while left > 0 {
+                        let n = left.min(CHUNK);
+                        if ch.data_bytes(vec![b'x'; n]).await.is_err() {
+                            return;
+                        }
+                        left -= n;
+                    }
+                    let _ = ch.data_bytes(b"TAIL-END\r\n".to_vec()).await;
+                    let _ = ch.exit_status(0).await;
+                    let _ = ch.eof().await;
+                    let _ = ch.close().await;
+                    return;
+                }
+                "flood" => {
+                    let mut left = size;
+                    while left > 0 {
+                        let n = left.min(CHUNK);
+                        if ch.data_bytes(vec![b'x'; n]).await.is_err() {
+                            return;
+                        }
+                        shared.shell_log.lock().flood_sent += n;
+                        left -= n;
+                    }
+                }
+                "split" => {
+                    let bytes = "zażółć 🙂".as_bytes();
+                    for part in [&bytes[..3], &bytes[3..12], &bytes[12..]] {
+                        let _ = ch.data_bytes(part.to_vec()).await;
+                        tokio::time::sleep(Duration::from_millis(30)).await;
+                    }
+                    let _ = ch.data_bytes(b"\r\n".to_vec()).await;
+                }
+                "echo" => {
+                    let _ = ch.data_bytes(format!("{arg}\r\n").into_bytes()).await;
+                }
+                _ => {}
+            }
+            let _ = ch.data_bytes(b"$ ".to_vec()).await;
+        }
+    }
 }
 
 impl Shared {
@@ -377,26 +539,28 @@ impl Handler for Conn {
     async fn pty_request(
         &mut self,
         channel: ChannelId,
-        _term: &str,
-        _col_width: u32,
-        _row_height: u32,
+        term: &str,
+        col_width: u32,
+        row_height: u32,
         _pix_width: u32,
         _pix_height: u32,
         _modes: &[(russh::Pty, u32)],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        self.shared.shell_log.lock().ptys.push((term.to_string(), col_width, row_height));
         session.channel_success(channel)
     }
 
     async fn window_change_request(
         &mut self,
         channel: ChannelId,
-        _col_width: u32,
-        _row_height: u32,
+        col_width: u32,
+        row_height: u32,
         _pix_width: u32,
         _pix_height: u32,
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        self.shared.shell_log.lock().window_changes.push((col_width, row_height));
         session.channel_success(channel)
     }
 
@@ -405,6 +569,10 @@ impl Handler for Conn {
             return session.channel_failure(channel);
         };
         session.channel_success(channel)?;
+        if self.shared.config.scripted_shell {
+            tokio::spawn(scripted_shell(ch, self.shared.clone()));
+            return Ok(());
+        }
         tokio::spawn(async move {
             let mut stream = ch.into_stream();
             let mut buf = [0u8; 4096];
@@ -418,6 +586,33 @@ impl Handler for Conn {
     }
 
     async fn exec_request(&mut self, channel: ChannelId, data: &[u8], session: &mut Session) -> Result<(), Self::Error> {
+        if let Some(handler) = self.shared.config.exec_stdin.clone() {
+            let Some(mut ch) = self.channels.remove(&channel) else { return session.channel_failure(channel) };
+            session.channel_success(channel)?;
+            let command = String::from_utf8_lossy(data).into_owned();
+            self.shared.exec_log.lock().push(command.clone());
+            tokio::spawn(async move {
+                let mut input = Vec::new();
+                while let Some(msg) = ch.wait().await {
+                    match msg {
+                        ChannelMsg::Data { data } => input.extend_from_slice(&data),
+                        ChannelMsg::Eof | ChannelMsg::Close => break,
+                        _ => {}
+                    }
+                }
+                let out = handler(&command, &input);
+                if !out.stdout.is_empty() {
+                    let _ = ch.data_bytes(out.stdout).await;
+                }
+                if !out.stderr.is_empty() {
+                    let _ = ch.extended_data_bytes(1, out.stderr).await;
+                }
+                let _ = ch.exit_status(out.status).await;
+                let _ = ch.eof().await;
+                let _ = ch.close().await;
+            });
+            return Ok(());
+        }
         let (Some(ch), Some(exec)) = (self.channels.remove(&channel), self.shared.config.exec.clone()) else {
             return session.channel_failure(channel);
         };
