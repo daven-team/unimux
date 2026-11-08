@@ -5,12 +5,11 @@
 //! (main.rs setup calls [`start`]) and [`stop`] for the quit path. P3 / M4 issue and revoke cell tokens through [`server`].
 //!
 //! M2: the tool layer is unimux-mcp's `McpTools` (the 1.1.4 tool lists, instructions, argument checks, elicitations)
-//! over [`AppAutomation`]: the app's state for roles, names and the delegation setting, the elicitation texts in the
-//! app language. Its operations are M3's automation service; until M3 registers it they answer "not yet". The check
-//! build (feature `test-bridge`) runs the tools over unimux-mcp's stand-in automation instead (`fake-automation`), so the
-//! real-app MCP checks (scripts/verify-mcp-cli.mjs) can drive them.
+//! over the automation service (M3, [`crate::commands::automation`]), the elicitation texts in the app language. The
+//! check build (feature `test-bridge`) runs the tools over unimux-mcp's stand-in automation instead (`fake-automation`),
+//! so the real-app MCP checks (scripts/verify-mcp-cli.mjs) can drive them; its `automation:execute` still reaches the
+//! real service.
 
-use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -18,10 +17,8 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use unimux_ipc::{RouterBuilder, Scope};
-use unimux_mcp::automation::CancellationToken;
 use unimux_mcp::host::Tr;
-use unimux_mcp::tools::BoxFuture;
-use unimux_mcp::{Automation, Config, McpServer, McpTools, OpError, Role, ToolHost};
+use unimux_mcp::{AutomationService, Config, McpServer, McpTools, ToolHost};
 use unimux_state::StateController;
 
 use crate::context::AppContext;
@@ -29,6 +26,8 @@ use crate::context::AppContext;
 /// The MCP server of this run and the app-side status around it (index.ts `mcpStarting`, `mcpError`).
 pub struct McpService {
     pub server: Arc<McpServer>,
+    /// The automation service (M3): the tools' operations and `automation:execute`.
+    pub automation: Arc<AutomationService>,
     /// True from launch until the first start attempt ended (`McpInfo.starting`).
     starting: AtomicBool,
     /// The message of the last failed start (`McpInfo.error`), cleared by a successful one.
@@ -41,47 +40,6 @@ pub struct McpService {
 }
 
 static SERVICE: OnceLock<Arc<McpService>> = OnceLock::new();
-
-/// The automation service as the tool layer sees it, until M3 registers the real one: roles, names and settings come
-/// from the app's state; every operation answers "not yet". (The check build runs the stand-in automation instead.)
-#[cfg_attr(feature = "test-bridge", allow(dead_code))]
-pub struct AppAutomation {
-    state: Arc<StateController>,
-    shown: Mutex<HashMap<String, Arc<Mutex<HashSet<String>>>>>,
-}
-
-#[cfg_attr(feature = "test-bridge", allow(dead_code))]
-impl AppAutomation {
-    pub fn new(state: Arc<StateController>) -> Self {
-        Self { state, shown: Mutex::default() }
-    }
-}
-
-impl Automation for AppAutomation {
-    fn state(&self) -> Arc<Value> {
-        self.state.get()
-    }
-    fn role_of(&self, cell: &str) -> Option<Role> {
-        unimux_mcp::automation::role_in_state(&self.state.get(), cell)
-    }
-    fn prompts_shown(&self, cell: &str) -> Arc<Mutex<HashSet<String>>> {
-        self.shown.lock().entry(cell.to_string()).or_default().clone()
-    }
-    fn execute(
-        &self,
-        op: &str,
-        args: Value,
-        _actor: &str,
-        _cancel: Option<CancellationToken>,
-    ) -> BoxFuture<'static, Result<Value, OpError>> {
-        // AutomationService.execute parses first: a malformed call gets the zod text even now.
-        let result = match unimux_mcp::schemas::operation(op).map(|s| s.parse(&args)) {
-            Some(Err(issues)) => Err(OpError::Invalid(issues)),
-            _ => Err(OpError::message(format!("Not available in this build yet: the automation operation {op} (M3)."))),
-        };
-        Box::pin(async move { result })
-    }
-}
 
 /// The elicitation texts in the app language (index.ts `tr`: the saved language, else the OS language).
 fn translator(state: Arc<StateController>) -> Tr {
@@ -136,6 +94,12 @@ pub fn server() -> Option<Arc<McpServer>> {
     SERVICE.get().map(|s| s.server.clone())
 }
 
+/// The automation service of this run (None before `register`): P4 tells it about spawns (`runtime_started`, `starting`).
+#[allow(dead_code, reason = "the cell spawn (P4) reports its starts here")]
+pub fn automation() -> Option<Arc<AutomationService>> {
+    SERVICE.get().map(|s| s.automation.clone())
+}
+
 /// The check build's stand-in automation (None before `register`).
 #[cfg(feature = "test-bridge")]
 pub fn fake_automation() -> Option<unimux_mcp::fake::FakeAutomation> {
@@ -148,6 +112,7 @@ impl McpService {
         let cfg =
             Config { version: env!("CARGO_PKG_VERSION").to_string(), log: Arc::new(move |m| crash.warn(m)), ..Config::default() };
         let tr = translator(ctx.state.clone());
+        let automation = crate::commands::automation::create(ctx);
         #[cfg(feature = "test-bridge")]
         let (host, fake): (Arc<dyn ToolHost>, _) = {
             let state = ctx.state.clone();
@@ -155,8 +120,10 @@ impl McpService {
             (Arc::new(test_tools::BridgeTools(McpTools::with_tr(Arc::new(fake.clone()), tr))), fake)
         };
         #[cfg(not(feature = "test-bridge"))]
-        let host: Arc<dyn ToolHost> = McpTools::with_tr(Arc::new(AppAutomation::new(ctx.state.clone())), tr);
+        let host: Arc<dyn ToolHost> = McpTools::with_tr(automation.clone(), tr);
         let server = Arc::new(McpServer::new(host, cfg));
+        let weak = Arc::downgrade(&server);
+        automation.set_probe(Arc::new(move |cell| weak.upgrade().map_or("off", |s| s.connection(cell).as_str())));
         #[cfg(feature = "test-bridge")]
         {
             let weak = Arc::downgrade(&server);
@@ -164,6 +131,7 @@ impl McpService {
         }
         Arc::new(Self {
             server,
+            automation,
             starting: AtomicBool::new(true),
             error: Mutex::new(None),
             push_pending: AtomicBool::new(false),
@@ -265,6 +233,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     // W7: a team cell that left the grids (closed or archived) loses its MCP token; waits and sessions of it end.
     let server = s.server.clone();
     ctx.cells.on_revoke("mcp", move |cell| server.revoke_cell(cell));
+    crate::commands::automation::register(r, ctx, &s.automation);
     r.invoke("mcp:info", move |_| {
         let s = s.clone();
         async move { Ok(s.info()) }
@@ -289,6 +258,7 @@ mod tests {
     use unimux_core::crash_log::RollingLog;
     use unimux_core::dev_overrides::DevOverrides;
     use unimux_core::startup_timing::{StartupLog, StartupTimer};
+    use unimux_mcp::Role;
 
     fn ctx(dir: &std::path::Path) -> Arc<AppContext> {
         AppContext::new(
@@ -333,17 +303,15 @@ mod tests {
     }
 
     #[test]
-    fn the_tools_follow_the_app_state_and_the_operations_wait_for_m3() {
-        let state = Arc::new(StateController::new(
-            json!({ "version": 1,
+    fn the_tools_follow_the_app_state_and_run_the_automation_operations() {
+        let (_dir, ctx, _router) = crate::cells::test_ctx(json!({ "version": 1,
                 "projects": [{ "id": "p", "name": "Proj", "tabs": [{ "id": "g", "name": "Team", "cells": [
                     { "id": "lead", "name": "Lead", "profileId": "claude", "role": "coordinator" },
                     { "id": "plain", "profileId": "claude" }] }] }],
                 "profiles": [{ "id": "claude", "name": "Claude", "cli": "claude" }],
-                "settings": { "language": "de", "delegation": { "mode": "ask", "maxAgents": 3 } } }),
-            Arc::new(unimux_state::PassThrough),
-        ));
-        let tools = McpTools::with_tr(Arc::new(AppAutomation::new(state.clone())), translator(state.clone()));
+                "settings": { "language": "de", "delegation": { "mode": "ask", "maxAgents": 3 } } }));
+        let state = ctx.state.clone();
+        let tools = McpTools::with_tr(crate::commands::automation::create(&ctx), translator(state.clone()));
         assert!(tools.instructions("lead").starts_with("Unimux: you are cell lead \"Lead\" (coordinator) in project Proj."));
         assert!(tools.instructions("lead").contains("Create agents only when the user asked to delegate"));
         assert_eq!(tools.instructions("plain"), "Unimux MCP is disabled for this cell.");
@@ -353,12 +321,8 @@ mod tests {
         let call = |name: &str, args: Value| {
             rt.block_on(tools.clone().call(name.into(), Some(args), unimux_mcp::host::plain_ctx("lead", false)))
         };
-        assert_eq!(
-            call("get_context", json!({})),
-            Err(unimux_mcp::CallError::Tool(
-                "Not available in this build yet: the automation operation get_context (M3).".into()
-            ))
-        );
+        let context = serde_json::to_string(&call("get_context", json!({})).unwrap()).unwrap();
+        assert!(context.contains("lead") && context.contains("coordinator"), "{context}");
         assert_eq!(
             call("send_message", json!({ "toCellId": "lead", "text": "  " })),
             Err(unimux_mcp::CallError::Tool(

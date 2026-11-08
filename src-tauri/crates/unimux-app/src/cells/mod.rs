@@ -98,7 +98,6 @@ impl Cells {
     }
 
     /// After a change of the projects settled, outside the controller (`automation.cancelOrphans`, M3).
-    #[allow(dead_code, reason = "automation.cancelOrphans (M3) registers here")]
     pub fn on_projects_settled(&self, name: &'static str, hook: impl Fn() + Send + Sync + 'static) {
         self.registry.write().settled.push((name, Arc::new(hook)));
     }
@@ -109,7 +108,6 @@ impl Cells {
     }
 
     /// `cell:runtime` of a cell that exists in a grid and runs (hookWatch H2, CLI ends P3 / M3, automation statuses M3).
-    #[allow(dead_code, reason = "hookWatch (H2), cliEnd (P3 / M3) and the automation statuses (M3) register here")]
     pub fn on_runtime(&self, name: &'static str, hook: impl Fn(&CellReport) + Send + Sync + 'static) {
         self.registry.write().runtime.push((name, Arc::new(hook)));
     }

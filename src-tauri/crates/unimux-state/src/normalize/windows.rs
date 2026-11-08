@@ -245,6 +245,18 @@ fn is_closed_task(task: &Value) -> Js<bool> {
 /// `pruneAutomation(automation, projectIds, now)` with no room reserved. Items of removed projects go; per project, closed
 /// tasks and read messages older than 7 days go, and beyond 500 the oldest finished ones. Throws like the TS code on a null item.
 pub fn prune_automation(automation: &mut Map<String, Value>, project_ids: &[&str], now: f64) -> Js<()> {
+    prune_automation_room(automation, project_ids, now, &[], &[])
+}
+
+/// `pruneAutomation(automation, projectIds, now, room)`: as [`prune_automation`], keeping `room` places free per project for
+/// items about to be added (`room.tasks` / `room.messages`, `{[projectId]: n}`), as the automation service does on every insert.
+pub fn prune_automation_room(
+    automation: &mut Map<String, Value>,
+    project_ids: &[&str],
+    now: f64,
+    room_tasks: &[(&str, usize)],
+    room_messages: &[(&str, usize)],
+) -> Js<()> {
     let tasks = automation.get("tasks").and_then(Value::as_array).cloned().unwrap_or_default();
     let messages = automation.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
     let events = automation.get("events").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -265,7 +277,11 @@ pub fn prune_automation(automation: &mut Map<String, Value>, project_ids: &[&str
         let id = js::get(Some(item), "id");
         needed.iter().any(|n| !n.is_object() && !n.is_array() && js::strict_eq(Some(n), id))
     };
-    let keep = |items: &[Value], finished: &dyn Fn(&Value) -> Js<bool>, finished_at: &dyn Fn(&Value) -> f64| -> Js<Vec<Value>> {
+    let keep = |items: &[Value],
+                finished: &dyn Fn(&Value) -> Js<bool>,
+                finished_at: &dyn Fn(&Value) -> f64,
+                free: &[(&str, usize)]|
+     -> Js<Vec<Value>> {
         let mut by_project: Vec<(String, Vec<usize>)> = Vec::new();
         for (i, item) in items.iter().enumerate() {
             if item.is_null() {
@@ -295,11 +311,13 @@ pub fn prune_automation(automation: &mut Map<String, Value>, project_ids: &[&str
                     dropped_count += 1;
                 }
             }
-            // `free[projectId] ?? 0` of an empty object: a name Object.prototype has gives NaN, so nothing more is dropped.
-            if js::is_proto_key(pid) {
-                continue;
-            }
-            let mut over = list.len() as f64 - dropped_count as f64 - PROJECT_ITEM_LIMIT;
+            // `free[projectId] ?? 0`: a name Object.prototype has (and the object lacks) gives NaN, so nothing more is dropped.
+            let reserved = match free.iter().find(|(p, _)| p == pid) {
+                Some((_, n)) => *n as f64,
+                None if js::is_proto_key(pid) => continue,
+                None => 0.0,
+            };
+            let mut over = list.len() as f64 - dropped_count as f64 - (PROJECT_ITEM_LIMIT - reserved);
             if over > 0.0 {
                 let mut sorted = removable.clone();
                 // `[...removable].sort((a, b) => finishedAt(a) - finishedAt(b))`: a damaged timestamp makes the comparator
@@ -320,11 +338,16 @@ pub fn prune_automation(automation: &mut Map<String, Value>, project_ids: &[&str
         }
         Ok(items.iter().enumerate().filter(|(i, item)| in_projects(item) && !dropped[*i]).map(|(_, v)| v.clone()).collect())
     };
-    let tasks = keep(&tasks, &|t| is_closed_task(t), &|t| js::to_number(js::get(Some(t), "updatedAt")))?;
-    let messages = keep(&messages, &|m| Ok(js::get(Some(m), "readAt").is_some()), &|m| match js::get(Some(m), "readAt") {
-        None | Some(Value::Null) => js::to_number(js::get(Some(m), "createdAt")),
-        read => js::to_number(read),
-    })?;
+    let tasks = keep(&tasks, &|t| is_closed_task(t), &|t| js::to_number(js::get(Some(t), "updatedAt")), room_tasks)?;
+    let messages = keep(
+        &messages,
+        &|m| Ok(js::get(Some(m), "readAt").is_some()),
+        &|m| match js::get(Some(m), "readAt") {
+            None | Some(Value::Null) => js::to_number(js::get(Some(m), "createdAt")),
+            read => js::to_number(read),
+        },
+        room_messages,
+    )?;
     if events.iter().any(Value::is_null) {
         return Err(Throw);
     }
