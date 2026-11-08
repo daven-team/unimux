@@ -1,5 +1,5 @@
 // Real-app check of the Files tree on a big generated project: "expand all" timing, scrolling, sticky folder rows and indentation.
-// Usage (after npm run build): node scripts/verify-tree-ui.mjs [--keep] [--label before|after]
+// Usage (after npm run build:check): node scripts/verify-tree-ui.mjs [--keep] [--label before|after]
 // Scratch data, home and project live in D:\Projekty\_tmp-093tree-<rand> and are deleted afterwards. Kills only the PID it started.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';

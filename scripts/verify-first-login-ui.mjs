@@ -6,7 +6,7 @@
 // B) No `claude` anywhere: the login offers the install, the install (a fake command copying the fake CLI into
 //    ~/.local/bin) succeeds and the login starts by itself.
 // Fake home, fake tokens, a local fake usage endpoint, cmd as the shell, PATH without the real CLI, MC_CLI_NO_REGISTRY=1.
-// Run: npm run build && node scripts/verify-first-login-ui.mjs [shots dir]   (default: <tmp>/unimux-first-login-shots)
+// Run: npm run build:check && node scripts/verify-first-login-ui.mjs [shots dir]   (default: <tmp>/unimux-first-login-shots)
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';

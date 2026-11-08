@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { hostFormDirty, hostToDraft, normalizeSshHost, validateHostDraft, type SshHost } from '../src/shared/ssh';
+import { hostFormDirty, hostToDraft, validateHostDraft, type SshHost } from '../src/shared/ssh';
 import {
   ANSI_KEYS, DEFAULT_SSH_THEME, FOLLOW_GLOBAL_THEME, hostThemeFromValue, hostThemeValue, isSshThemeId, normalizeSshThemeId, resolveSshTheme,
   SSH_THEME_IDS, SSH_THEMES, sshThemeById, type TerminalPalette,
 } from '../src/shared/sshThemes';
-import { defaultState, normalizeState, updateSettings, updateSshHost } from '../src/shared/state';
-import { StateController } from '../src/main/stateController';
+import { defaultState, updateSshHost } from '../src/shared/state';
 
 const ID = '00000000-0000-4000-8000-000000000001';
 const host = (patch: Partial<SshHost> = {}): SshHost => ({ id: ID, label: 'web', address: 'web.example', port: 22, username: 'deploy', createdAt: 1, updatedAt: 1, ...patch });
@@ -118,31 +117,6 @@ describe('SSH terminal theme choice', () => {
     expect(hostThemeValue('unimux-fjord')).toBe('unimux-fjord');
     expect(hostThemeFromValue(FOLLOW_GLOBAL_THEME)).toBeUndefined();
     expect(hostThemeFromValue('unimux-fjord')).toBe('unimux-fjord');
-  });
-
-  it('stores the global setting with a default and repairs an unknown one when loading and when the renderer edits it', () => {
-    expect(defaultState().settings.sshTheme).toBe(DEFAULT_SSH_THEME);
-    const { sshTheme: _gone, ...older } = defaultState().settings;
-    expect(normalizeState({ ...defaultState(), settings: older })!.settings.sshTheme).toBe(DEFAULT_SSH_THEME);
-    expect(normalizeState({ ...defaultState(), settings: { ...older, sshTheme: 'retro-9000' } })!.settings.sshTheme).toBe(DEFAULT_SSH_THEME);
-    const saved = JSON.parse(JSON.stringify(updateSettings(defaultState(), { sshTheme: 'unimux-cyberpunk' })));
-    expect(normalizeState(saved)!.settings.sshTheme).toBe('unimux-cyberpunk');
-
-    const base = defaultState();
-    const controller = new StateController(base, () => {});
-    controller.apply({ id: 'e1', base, next: { ...base, settings: { ...base.settings, sshTheme: 'bogus' as never } } });
-    expect(controller.get().settings.sshTheme).toBe(DEFAULT_SSH_THEME);
-    const now = controller.get();
-    controller.apply({ id: 'e2', base: now, next: updateSettings(now, { sshTheme: 'unimux-midnight' }) });
-    expect(controller.get().settings.sshTheme).toBe('unimux-midnight');
-  });
-
-  it('keeps a known host theme, drops an unknown one (the host follows the setting)', () => {
-    expect(normalizeSshHost(host({ theme: 'unimux-lagoon' }))!.theme).toBe('unimux-lagoon');
-    expect(normalizeSshHost({ ...host(), theme: 'neon-dream' })).not.toHaveProperty('theme');
-    expect(normalizeSshHost({ ...host(), theme: FOLLOW_GLOBAL_THEME })).not.toHaveProperty('theme');
-    const loaded = normalizeState({ ...defaultState(), sshHosts: [host({ theme: 'unimux-fjord' }), { ...host({ id: ID.replace(/1$/, '2') }), theme: 7 }] })!;
-    expect(loaded.sshHosts.map((h) => h.theme)).toEqual(['unimux-fjord', undefined]);
   });
 
   it('edits the host theme through the host form (follow the setting = no field)', () => {

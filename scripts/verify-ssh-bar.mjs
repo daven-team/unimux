@@ -1,4 +1,4 @@
-// node scripts/verify-ssh-bar.mjs  (after `npm run build`)
+// node scripts/verify-ssh-bar.mjs  (after `npm run build:check`)
 // Real-app check of the 1.0.7 SSH status bar against scripts/ssh-test-server.mjs --bar debian (canned /proc answers) and
 // --bar windows (a server without sh): the bar fills in, the CPU, user and disk cards, the right-click menu, no runs while
 // the grid is hidden, hiding it in one cell and showing it again from Settings, narrow cells, and the back-off.

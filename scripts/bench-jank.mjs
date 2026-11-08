@@ -1,4 +1,4 @@
-// UI smoothness benchmark of the built app (Windows only; run `npm run build:check` first (MC_APP_TARGET=electron: `npm run build`), MC_NOMINIFY=1 for readable culprits).
+// UI smoothness benchmark of the built app (Windows only; run `npm run build:check` first, MC_NOMINIFY=1 for readable culprits).
 // Measures dropped frames and hitches, not CPU: a page-side requestAnimationFrame recorder (frame intervals), Long Animation
 // Frames (LoAF: the scripts of a slow frame, with their function and source position), long tasks and Event Timing (the
 // time from a real input event to the frame that shows its effect).
@@ -23,7 +23,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { removeScratch } from './app-env.mjs';
-import { isMainPage, isTauri, measurementNeedsCompleteApp } from './real-app.mjs';
+import { isMainPage, measurementNeedsCompleteApp } from './real-app.mjs';
 
 // Numbers from an app that still answers MC_NOT_YET mean nothing: blocked until every package it calls landed.
 measurementNeedsCompleteApp();
@@ -196,8 +196,8 @@ const RECORDER = `(() => {
 })()`;
 
 // ---------------------------------------------------------------- app
-// Chromium's caches: Electron keeps them in the data dir, WebView2 (Tauri) in data\webview2\EBWebView.
-const gpuBase = isTauri ? join(root, 'data', 'webview2', 'EBWebView') : join(root, 'data');
+// Chromium's caches: WebView2 keeps them in data\webview2\EBWebView.
+const gpuBase = join(root, 'data', 'webview2', 'EBWebView');
 if (gpuCache) for (const d of GPU_CACHE_DIRS) if (existsSync(join(gpuCache, d))) cpSync(join(gpuCache, d), join(gpuBase, d), { recursive: true });
 const app = await launchApp(root, { MC_CLI_NO_REGISTRY: '1' }, [], { main: true });
 const result = { at: new Date().toISOString(), reps, scenarios: {} };

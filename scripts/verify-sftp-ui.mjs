@@ -1,6 +1,6 @@
 // node scripts/verify-sftp-ui.mjs - real-app check of the SFTP view (0.9.8) against the local test server only
 // (scripts/ssh-test-server.mjs --sftp-root <scratch>). Never a real host, never the user's data dir, home or ~/.ssh.
-// Needs `npm run build` first. Screenshots go to D:\Projekty\_shots\098-sftp-*.png.
+// Needs `npm run build:check` first. Screenshots go to D:\Projekty\_shots\098-sftp-*.png.
 //
 // Drags between the panes are dispatched as DOM drag events (an in-page HTML5 drag cannot be started over CDP without the OS):
 // dragstart on the selected source rows (the pane's own handler fills the DataTransfer and remembers the drag), then

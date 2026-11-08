@@ -1,10 +1,10 @@
 // W3 real-app check (1.2.0, docs/tauri/PLAN.md): the first start after 1.1.x brings its localStorage over once, and OS file
 // drops give their paths while HTML5 drag and drop inside the app keeps working.
 //
-// 1. "1.1.4 copy": the Electron build of this tree (`npm run build`, Electron 45 like 1.1.4) runs twice on a scratch data dir
-//    and stores what 1.1.4 keeps in localStorage (an unsaved file draft, Redis console history, panel sizes, the DB tree, SSH
-//    folds, a 300 KB value, a lone surrogate, a non-Latin-1 key); the second run overwrites one key and deletes another, so
-//    the database has a compacted table, a log and a tombstone.
+// 1. "1.1.4 copy": the committed test/fixtures/electron-local-storage, what 1.1.4's runtime (Electron 45) stored in
+//    localStorage over two runs (an unsaved file draft, Redis console history, panel sizes, the DB tree, SSH folds, a 300 KB
+//    value, a lone surrogate, a non-Latin-1 key; the second run overwrote one key and deleted another, so the database has a
+//    compacted table, a log and a tombstone). Until R1 this script recorded it from the Electron build of this tree.
 // 2. The Tauri check build starts on a copy: every entry is there with the same UTF-16 units, the draft is back in the file
 //    store, the marker is written (unconfirmed, with the sentinel key), Electron's files are byte-identical. A change made in
 //    1.2.0 survives the second start, which confirms the marker (no second import). Before that, a copy whose app is
@@ -14,24 +14,19 @@
 // 4. Internal drags (CDP Input.setInterceptDrags: the page's own dragstart data is dropped back): grid tab reorder, tab dropped
 //    outside (detach request), snippet and note onto a cell, note and snippet reorder.
 //
-//   npm run build && npm run build:check && node scripts/verify-tauri-w3.mjs [--keep] [--write-fixture]
+//   npm run build:check && node scripts/verify-tauri-w3.mjs [--keep]
 //
-// --write-fixture also copies the Electron database to test/fixtures/electron-local-storage (the cargo test of
-// unimux-state::webview_import reads it). Nothing here shows a window on the desktop (MC_OFFSCREEN, scratch homes).
-import { spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+// Nothing here shows a window on the desktop (MC_OFFSCREEN, scratch homes).
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
-import { removeScratch, scratchHome, scrubAppEnv } from './app-env.mjs';
+import { removeScratch } from './app-env.mjs';
 import { connectPage, freePort, killTree, launchApp, realProfileMarkers, sha256, sleep, waitExit, waitFor } from './tauri-app.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const electronPath = createRequire(import.meta.url)('electron');
 const keep = process.argv.includes('--keep');
-const writeFixture = process.argv.includes('--write-fixture');
 const shots = join(root, 'artifacts', 'tauri-w3');
 mkdirSync(shots, { recursive: true });
 
@@ -44,51 +39,17 @@ console.log(`scratch: ${scratch}`);
 const children = [];
 
 // ── 1. The 1.1.4 copy ────────────────────────────────────────────────────────
-
+// The committed fixture test/fixtures/electron-local-storage: the localStorage database 1.1.4's runtime (Electron 45) wrote
+// in two runs of the Electron build (until R1 this script made it itself: the second run overwrote one key and deleted
+// another, so the database has a compacted table, a log and a tombstone), and expected.json with its entries (the lone
+// surrogate of `mc-w3-lone` written as U+FFFD there, restored below). The cargo test of unimux-state::webview_import reads
+// the same files.
 const electronDir = join(scratch, 'electron-data');
-mkdirSync(electronDir, { recursive: true });
-// No projects: Electron must not start shells or agents here.
+const fixture = join(root, 'test', 'fixtures', 'electron-local-storage');
+mkdirSync(join(electronDir, 'Local Storage'), { recursive: true });
+cpSync(join(fixture, 'leveldb'), join(electronDir, 'Local Storage', 'leveldb'), { recursive: true });
+// No projects: the state the copy came with.
 writeFileSync(join(electronDir, 'state.json'), JSON.stringify({ version: 1, projects: [], activeProjectId: null, settings: { language: 'pl' } }));
-
-async function connectElectronPage(port) {
-  const deadline = Date.now() + 60000;
-  for (;;) {
-    try {
-      const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-      const target = list.find((t) => t.type === 'page' && t.url.startsWith('file:') && t.url.includes('index.html') && !t.url.includes('detached='));
-      if (target) return await connectPage(port, { timeoutMs: 1000, match: target.id });
-    } catch { /* not up yet */ }
-    if (Date.now() > deadline) throw new Error('no Electron page');
-    await sleep(300);
-  }
-}
-
-/** One Electron run: `fn(page)`, then a normal quit (closing the window) so Chromium commits localStorage. */
-async function electronRun(fn) {
-  const port = await freePort();
-  const { env: homeEnv } = scratchHome(join(scratch, 'electron'));
-  const env = scrubAppEnv({ ...process.env, ...homeEnv, MC_DATA_DIR: electronDir, MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port) });
-  const child = spawn(electronPath, [root], { env, stdio: 'ignore', windowsHide: true });
-  children.push(child);
-  let page = null;
-  let out;
-  try {
-    page = await connectElectronPage(port);
-    await waitFor(page, 'window.__mc?.useStore?.getState?.().ready === true', 120000, 'Electron renderer ready');
-    out = await fn(page);
-  } catch (error) {
-    killTree(child);
-    page?.close();
-    if (!keep) removeScratch(scratch);
-    throw error;
-  }
-  await sleep(1500);
-  await page.evaluate('setTimeout(() => window.close(), 50), true').catch(() => undefined);
-  const code = await waitExit(child, 20000);
-  if (code === null) { console.log('Electron did not quit by itself; ending it'); killTree(child); await waitExit(child, 10000); }
-  page.close();
-  return out;
-}
 
 /** Every localStorage entry as UTF-16 code units (lone surrogates survive CDP's JSON). */
 const DUMP = `(() => { const units = (s) => Array.from({ length: s.length }, (_, i) => s.charCodeAt(i)); const out = [];
@@ -96,51 +57,19 @@ const DUMP = `(() => { const units = (s) => Array.from({ length: s.length }, (_,
   return out; })()`;
 const fromUnits = (u) => { let s = ''; for (let i = 0; i < u.length; i += 8192) s += String.fromCharCode(...u.slice(i, i + 8192)); return s; };
 const asMap = (dump) => new Map(dump.map(([k, v]) => [fromUnits(k), v]));
+const unitsOf = (s) => Array.from({ length: s.length }, (_, i) => s.charCodeAt(i));
 
 const PROJECT = 'proj-w3';
 const DRAFT = { id: JSON.stringify([PROJECT, 'src/zażółć.ts']), projectId: PROJECT, relativePath: 'src/zażółć.ts', name: 'zażółć.ts', text: 'const a = "niezapisane 😀";\n', savedText: 'const a = 1;\n', diskText: 'const a = 1;\n' };
-const FIRST = {
-  'mc-file-drafts-v1': JSON.stringify([DRAFT]),
-  'mc-redis-history-v1:conn-1': JSON.stringify(['PING', 'GET klucz:ł', 'SET a 😀']),
-  'mc-split-ratio-v1': '0.62',
-  'mc-split-swapped-v1': '0',
-  'mc-automation-height-v1': '333',
-  'mc-db-tree-v1': JSON.stringify(['conn-1', 'conn-1\ndb']),
-  'mc-file-zoom-v1': '1.25',
-  'mc-ssh-groups-v1': JSON.stringify(['Produkcja']),
-  'mc-w3-big': `${'x'.repeat(300000)}ą`,
-  'mc-w3-klucz-ł': 'wartość',
-  'mc-w3-deleted': 'gone',
-};
-
-await electronRun((page) => page.evaluate(`(() => {
-  const values = ${JSON.stringify(FIRST)};
-  values['mc-w3-lone'] = 'cut ' + String.fromCharCode(0xd83d);
-  for (const [k, v] of Object.entries(values)) localStorage.setItem(k, v);
-  return localStorage.length;
-})()`));
-const expectedDump = await electronRun(async (page) => {
-  const restored = await page.evaluate('window.__mc.useFileStore.getState().documents.map((d) => d.text)');
-  check('Electron (1.1.4 runtime) restores the draft it stored (the fixture is a real one)', restored.length === 1 && restored[0] === DRAFT.text, JSON.stringify(restored));
-  await page.evaluate(`localStorage.setItem('mc-split-swapped-v1', '1'); localStorage.setItem('mc-w3-run2', 'second run'); localStorage.removeItem('mc-w3-deleted'); true`);
-  return page.evaluate(DUMP);
-});
-const expected = asMap(expectedDump);
+/** What the fixture's JSON could not hold: the exact value 1.1.4 stored. */
+const LONE = { 'mc-w3-lone': `cut ${String.fromCharCode(0xd83d)}` };
+const expected = new Map(JSON.parse(readFileSync(join(fixture, 'expected.json'), 'utf8')).map(([k, v]) => [k, unitsOf(LONE[k] ?? v)]));
 const leveldb = join(electronDir, 'Local Storage', 'leveldb');
 const dbFiles = readdirSync(leveldb);
 check('the 1.1.4 copy has a localStorage database with a table and a log', dbFiles.some((f) => f.endsWith('.ldb')) && dbFiles.some((f) => f.endsWith('.log')), dbFiles.join(' '));
-check('the 1.1.4 copy holds every entry', Object.keys(FIRST).every((k) => k === 'mc-w3-deleted' || expected.has(k)) && expected.has('mc-w3-lone') && expected.has('mc-w3-run2') && !expected.has('mc-w3-deleted') && fromUnits(expected.get('mc-split-swapped-v1')) === '1', [...expected.keys()].join(', '));
-
-if (writeFixture) {
-  const target = join(root, 'test', 'fixtures', 'electron-local-storage');
-  rmSync(target, { recursive: true, force: true });
-  mkdirSync(join(target, 'leveldb'), { recursive: true });
-  for (const f of dbFiles) if (f !== 'LOCK' && !f.startsWith('LOG')) cpSync(join(leveldb, f), join(target, 'leveldb', f));
-  // JSON cannot hold a lone surrogate for serde: the test compares lossy strings (U+FFFD), as Entry::lossy gives.
-  const rows = [...expected].map(([k, v]) => [k.toWellFormed(), fromUnits(v).toWellFormed()]);
-  writeFileSync(join(target, 'expected.json'), `${JSON.stringify(rows, null, 1)}\n`);
-  console.log(`fixture written: ${target}`);
-}
+check('the 1.1.4 copy holds every entry', ['mc-file-drafts-v1', 'mc-db-tree-v1', 'mc-w3-big', 'mc-w3-lone', 'mc-w3-run2'].every((k) => expected.has(k)) && !expected.has('mc-w3-deleted') && fromUnits(expected.get('mc-split-swapped-v1')) === '1', [...expected.keys()].join(', '));
+const drafts = JSON.parse(fromUnits(expected.get('mc-file-drafts-v1')));
+check('the fixture holds the unsaved draft 1.1.4 stored', drafts.length === 1 && drafts[0].text === DRAFT.text && drafts[0].savedText === DRAFT.savedText, JSON.stringify(drafts));
 
 // ── 2. The Tauri build on a copy ─────────────────────────────────────────────
 
@@ -242,7 +171,7 @@ try {
   const drafts = await app.page.evaluate('window.__mc.useFileStore.getState().documents.map((d) => ({ name: d.name, text: d.text, saved: d.savedText }))');
   check('the unsaved file draft is back in the file store', drafts.length === 1 && drafts[0].text === DRAFT.text && drafts[0].saved === DRAFT.savedText, JSON.stringify(drafts));
   const dbOpen = await app.page.evaluate('window.__mc.dbClient?.useDbStore?.getState?.().open ?? null');
-  check('the DB tree state is back (read at module load)', JSON.stringify(dbOpen) === FIRST['mc-db-tree-v1'], JSON.stringify(dbOpen));
+  check('the DB tree state is back (read at module load)', JSON.stringify(dbOpen) === fromUnits(expected.get('mc-db-tree-v1')), JSON.stringify(dbOpen));
   const marker = readMarker(markerFile);
   check('webview-import.json written (unconfirmed) after the page stored them', marker && marker.version === 1 && marker.entries === expected.size && marker.imported === expected.size && marker.kept === 0 && marker.error === null && marker.origin === 'file://' && marker.confirmed === false && typeof marker.id === 'string', JSON.stringify(marker));
   check('... and the sentinel holds the import id', JSON.stringify(got.get(SENTINEL)) === JSON.stringify([...marker?.id ?? ''].map((c) => c.charCodeAt(0))));

@@ -1,4 +1,4 @@
-// Real-app check of "Czeka na Ciebie" (1.0.9; npm run build first). A scratch data dir and home, MC_OFFSCREEN=1 and
+// Real-app check of "Czeka na Ciebie" (1.0.9; npm run build:check first). A scratch data dir and home, MC_OFFSCREEN=1 and
 // MC_DEBUG_PORT (default 9418). Scripted stand-ins for `claude` (no model, no network) post the status hooks a real Claude Code
 // would: in the grid "Agenci" one cell asks for a Bash permission, one asks a question (AskUserQuestion), one finishes its turn;
 // in the grid "Recenzja" one turn fails on a rate limit and a muted cell finishes. The checks: the list (order, texts, the

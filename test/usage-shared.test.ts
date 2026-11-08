@@ -1,28 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { defaultState, normalizeState } from '../src/shared/state';
-import { sanitizeUsage } from '../src/main/usage/sanitize';
-import { MAIN_ACCOUNTS, claudeLoginActions, clampPercent, effectivePercent, formatDuration, heldByOf, makeMainOffered, usageBand, usageDiagnostics, usageErrorKind, usageHttpStatus, worstPercent, type ProviderUsage } from '../src/shared/usage';
+import { claudeLoginActions, formatDuration, makeMainOffered, usageBand, usageDiagnostics, usageErrorKind, usageHttpStatus, worstPercent, type ProviderUsage } from '../src/shared/usage';
 import { noticeText, setAsideText, usageErrorKey, usageMessages } from '../src/shared/usageMessages';
 import { translate } from '../src/shared/i18n';
 
 const NOW = Date.parse('2026-10-11T12:00:00Z');
 
 describe('usage helpers', () => {
-  it('clamps percentages and rejects non-numbers', () => {
-    expect(clampPercent(142)).toBe(100);
-    expect(clampPercent(-3)).toBe(0);
-    expect(clampPercent(Number.NaN)).toBe(0);
-    expect(clampPercent(41.5)).toBe(41.5);
-  });
-
-  it('treats a window that already reset as unused', () => {
-    const past = Math.floor(NOW / 1000) - 1;
-    expect(effectivePercent({ id: '5h', usedPercent: 80, resetsAt: past }, NOW)).toBe(0);
-    expect(effectivePercent({ id: '5h', usedPercent: 80, resetsAt: past + 3600 }, NOW)).toBe(80);
-    expect(effectivePercent({ id: '5h', usedPercent: 12, resetsAt: 0 }, NOW)).toBe(12);
-    expect(effectivePercent({ id: '7d', usedPercent: 250, resetsAt: past + 60 }, NOW)).toBe(100);
-  });
-
   it('picks the color band at 70 and 90 percent', () => {
     expect([0, 69.9, 70, 89.9, 90, 100].map(usageBand)).toEqual(['low', 'low', 'mid', 'mid', 'high', 'high']);
   });
@@ -44,49 +27,6 @@ describe('usage helpers', () => {
     expect(formatDuration(3 * 3600)).toBe('3 h');
     expect(formatDuration(6 * 86400 + 8 * 3600)).toBe('6 d 8 h');
     expect(formatDuration(2 * 86400)).toBe('2 d');
-  });
-});
-
-describe('usage settings', () => {
-  it('shows the limits expanded and refreshes every 5 minutes by default', () => {
-    expect(defaultState().settings).toMatchObject({ showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false });
-  });
-
-  it('keeps valid choices and repairs invalid ones', () => {
-    const raw = JSON.parse(JSON.stringify(defaultState()));
-    Object.assign(raw.settings, { showAiUsage: false, usageIntervalMinutes: 15, usageCollapsed: true });
-    expect(normalizeState(JSON.parse(JSON.stringify(raw)))!.settings).toMatchObject({ showAiUsage: false, usageIntervalMinutes: 15, usageCollapsed: true });
-    Object.assign(raw.settings, { showAiUsage: 'yes', usageIntervalMinutes: 7, usageCollapsed: 1 });
-    expect(normalizeState(JSON.parse(JSON.stringify(raw)))!.settings).toMatchObject({ showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false });
-    delete raw.settings.showAiUsage; delete raw.settings.usageIntervalMinutes; delete raw.settings.usageCollapsed;
-    expect(normalizeState(JSON.parse(JSON.stringify(raw)))!.settings).toMatchObject({ showAiUsage: true, usageIntervalMinutes: 5, usageCollapsed: false });
-  });
-});
-
-describe('sanitizeUsage accounts', () => {
-  const valid = { accountId: 'claude:main', provider: 'claude', status: 'ok', fetchedAt: NOW, source: 'live', windows: [] };
-
-  it('lists the main accounts', () => {
-    expect(MAIN_ACCOUNTS).toEqual([{ id: 'claude:main', provider: 'claude' }, { id: 'codex:main', provider: 'codex' }]);
-  });
-
-  it('requires a non-empty account id of at most 80 characters', () => {
-    expect(sanitizeUsage(valid)).toMatchObject({ accountId: 'claude:main' });
-    expect(sanitizeUsage({ ...valid, accountId: undefined })).toBeNull();
-    expect(sanitizeUsage({ ...valid, accountId: '' })).toBeNull();
-    expect(sanitizeUsage({ ...valid, accountId: 5 })).toBeNull();
-    expect(sanitizeUsage({ ...valid, accountId: 'a'.repeat(81) })).toBeNull();
-    expect(sanitizeUsage({ ...valid, accountId: 'a'.repeat(80) })).not.toBeNull();
-  });
-
-  it('keeps org (max 120) and managed (boolean only) and drops unknown fields', () => {
-    const usage = sanitizeUsage({ ...valid, org: 'o'.repeat(200), managed: true, token: 'SECRET' });
-    expect(usage?.org).toHaveLength(120);
-    expect(usage?.managed).toBe(true);
-    expect(usage).not.toHaveProperty('token');
-    expect(sanitizeUsage({ ...valid, managed: 'yes', org: 5 })).not.toHaveProperty('managed');
-    expect(sanitizeUsage({ ...valid, managed: 'yes', org: 5 })).not.toHaveProperty('org');
-    expect(sanitizeUsage({ ...valid, managed: false })?.managed).toBe(false);
   });
 });
 
@@ -145,26 +85,6 @@ describe('failure reasons', () => {
     expect(text).not.toContain('example.com');
     expect(text).toContain('renewal: held (cswap)');
     expect(usageDiagnostics({ ...usage, heldBy: undefined, active: true }, NOW, 'a')).toContain('active login: yes');
-  });
-
-  it('keeps the new fields through sanitizing and drops bad ones', () => {
-    const base = { accountId: 'claude:abc', provider: 'claude', status: 'error', windows: [], fetchedAt: NOW, source: 'live' };
-    expect(sanitizeUsage({ ...base, attemptAt: NOW, retryAt: NOW + 5, active: true, heldBy: 'live' })).toMatchObject({ attemptAt: NOW, retryAt: NOW + 5, active: true, heldBy: 'live' });
-    const bad = sanitizeUsage({ ...base, attemptAt: 'x', retryAt: -1, active: 'yes', heldBy: 'nobody', shared: true });
-    expect(bad).not.toHaveProperty('attemptAt');
-    expect(bad).not.toHaveProperty('retryAt');
-    expect(bad).not.toHaveProperty('active');
-    expect(bad).not.toHaveProperty('heldBy');
-    expect(bad).not.toHaveProperty('shared');
-    expect(sanitizeUsage({ ...base, status: 'elsewhere' })?.status).toBe('elsewhere');
-  });
-
-  it('names who holds a saved account whose tokens are not renewed', () => {
-    expect(heldByOf(undefined)).toBeUndefined();
-    expect(heldByOf('allowed')).toBeUndefined();
-    expect(heldByOf('held-by-live')).toBe('live');
-    expect(heldByOf('held-by-cswap')).toBe('cswap');
-    expect(heldByOf('switched-out')).toBe('switched-out');
   });
 });
 

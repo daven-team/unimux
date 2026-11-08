@@ -20,7 +20,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_TOOLCHAIN: '1.99.1'
-  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
   VITE_CONFIG_NATIVE_IGNORE_WARNING: 'true'
   # npm ci runs before cargo test, so the A1 lock interop cases against the real proper-lockfile must run, never skip.
   UNIMUX_REQUIRE_LOCK_INTEROP: '1'
@@ -72,12 +71,6 @@ jobs:
         working-directory: src-tauri
       - run: cargo test --workspace
         working-directory: src-tauri
-      # B1 dual host: the existing .int suites against the Rust code through unimux-hostd (docs/tauri/HOSTD.md). The node
-      # host of the same suites runs in `npm test` above.
-      - name: .int suites on the Rust host (unimux-hostd)
-        run: npm run test:hostd
-        env:
-          UNIMUX_HOST_TARGETS: rust
       # The release rules (MC_* overrides, the DevTools port and the dev server origin compiled out: `cfg(not(dev_overrides))`
       # in unimux-app, PACKAGED in unimux-core) are only active in release builds, so they get their own clippy and tests.
       - run: cargo clippy --workspace --all-targets --release -- -D warnings
@@ -115,6 +108,9 @@ jobs:
       - run: npm ci --no-audit --no-fund
       # Unsigned: the signed updater artifacts are made by ci.yml (scripts/release-build-assets.mjs).
       - run: npx tauri build --target ${{ matrix.target }}
+      # No Node in the shipped app (PLAN R1): no node.exe, no .node addon, no JS outside the renderer bundle.
+      - name: Bundle carries no Node
+        run: npm run check:bundle -- --target ${{ matrix.target }}
       - name: Release build has no dev overrides
         shell: bash
         run: |

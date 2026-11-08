@@ -1,11 +1,11 @@
-// Real-app check of 1.1.1: the Markdown export of a conversation and Ctrl+Tab between recently used tabs (npm run build:check first; MC_APP_TARGET=electron: npm run build).
+// Real-app check of 1.1.1: the Markdown export of a conversation and Ctrl+Tab between recently used tabs (npm run build:check first).
 // The app runs with a scratch home whose ~/.claude and ~/.codex hold generated transcripts (never the real ones); PATH is cut
 // down so no real Claude or Codex starts. Exports go to a scratch folder (MC_NOTES_EXPORT_DIR) instead of the save dialog.
 // Export: the cell menu opens the dialog, tool calls are off by default and one line each when on, save to a file, copy, save as
 // a note, the palette entry, and the export of a search result going back to the search. Ctrl+Tab: a tap toggles between the
 // last two tabs, held it walks further with the switcher shown, Ctrl+Shift+Tab walks back, Esc cancels, and the keys work with
 // the focus in a terminal. Screenshots go to a temporary folder (printed at the end).
-// Usage: npm run build && node scripts/verify-conv-export.mjs
+// Usage: npm run build:check && node scripts/verify-conv-export.mjs
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -33,7 +33,7 @@ const ids = { claude: randomUUID(), codex: randomUUID() };
     { ...base, type: 'assistant', message: { model: 'claude-opus-5-5', role: 'assistant', content: [{ type: 'text', text: 'Sprawdzę atomicWrite i uruchomię testy.' }] }, uuid: 'a1', timestamp: at(2) },
     { ...base, type: 'assistant', message: { model: 'claude-opus-5-5', role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'npm test' } }] }, uuid: 'a2', timestamp: at(3) },
     { ...base, type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'SECRET-TOOL-OUTPUT' }] }, uuid: 'u2', timestamp: at(4) },
-    { ...base, type: 'assistant', message: { model: 'claude-opus-5-5', role: 'assistant', content: [{ type: 'tool_use', id: 't2', name: 'Edit', input: { file_path: 'src/main/atomicWrite.ts', old_string: 'a', new_string: 'b' } }] }, uuid: 'a3', timestamp: at(5) },
+    { ...base, type: 'assistant', message: { model: 'claude-opus-5-5', role: 'assistant', content: [{ type: 'tool_use', id: 't2', name: 'Edit', input: { file_path: 'src/lib/atomicWrite.ts', old_string: 'a', new_string: 'b' } }] }, uuid: 'a3', timestamp: at(5) },
     { ...base, type: 'assistant', message: { model: 'claude-opus-5-5', role: 'assistant', content: [{ type: 'text', text: 'Poprawione: rename po zapisie pliku tymczasowego. Testy przechodzą.' }] }, uuid: 'a4', timestamp: at(6) },
     { type: 'ai-title', aiTitle: 'Fix the lost tabs after a restart', sessionId: ids.claude },
   ];
@@ -113,7 +113,7 @@ try {
   await app.click('.convx-tools input');
   await app.until(`document.querySelector('.convx-preview')?.textContent.includes('> Narzędzie: Bash \`npm test\`')`, 'tool lines');
   md = await preview();
-  if (!md.includes('> Narzędzie: Edit `src/main/atomicWrite.ts`') || md.includes('SECRET')) throw new Error(`tool lines: ${md}`);
+  if (!md.includes('> Narzędzie: Edit `src/lib/atomicWrite.ts`') || md.includes('SECRET')) throw new Error(`tool lines: ${md}`);
   await shot('conv-export-tools.png');
   ok('"Dołącz wywołania narzędzi" adds one line per call');
 

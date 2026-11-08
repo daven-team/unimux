@@ -8,7 +8,7 @@
 // - Redis Pub/Sub tab subscribed to a channel: moved, a message published from the main window arrives in the detached one.
 // - A remote file with unsaved text: moved (no new login), saved there over SFTP, edited again and attached back.
 // - A restart reopens a detached SQL tab with its unsaved script and a detached Redis tab, each logging in again.
-// Screenshots: D:\Projekty\_shots\108-detach-*.png. Run `npm run build` first. Kills only the PIDs it started.
+// Screenshots: D:\Projekty\_shots\108-detach-*.png. Run `npm run build:check` first. Kills only the PIDs it started.
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

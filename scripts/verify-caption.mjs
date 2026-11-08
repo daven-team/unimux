@@ -31,11 +31,11 @@ import { join, resolve } from 'node:path';
 import { runnerImport } from 'vite';
 import * as L from './caption-lib.mjs';
 import { removeScratch, scratchHome, scrubAppEnv } from './app-env.mjs';
-import { bridgeCall, freePort, isTauri, killAppTreeAndWait, requireBuild, sleep, spawnApp } from './real-app.mjs';
+import { bridgeCall, freePort, killAppTreeAndWait, requireBuild, sleep, spawnApp } from './real-app.mjs';
 import { connectPage, realProfileMarkers, waitExit, waitFor } from './tauri-app.mjs';
 
-if (!isTauri || process.platform !== 'win32') {
-  console.log('SKIP verify-caption: the Tauri check build on Windows only (1.1.4 is its reference, scripts/capture-caption-reference.mjs)');
+if (process.platform !== 'win32') {
+  console.log('SKIP verify-caption: Windows only (1.1.4 is its reference, scripts/capture-caption-reference.mjs)');
   process.exit(0);
 }
 requireBuild();

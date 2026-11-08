@@ -1,11 +1,11 @@
-// Real-app check of stuck tasks in the "Zespół AI" panel (1.1.4; npm run build first). Scratch data dir and home, MC_OFFSCREEN=1,
+// Real-app check of stuck tasks in the "Zespół AI" panel (1.1.4; npm run build:check first). Scratch data dir and home, MC_OFFSCREEN=1,
 // MC_DEBUG_PORT, Windows PowerShell as the shell and a Node stand-in behind claude.cmd that records every start. The seeded
 // team: a coordinator and a worker that connect over MCP (the official SDK client works as their cells), a worker whose CLI
 // fails 1 s after its start (exit code 1, today's incident), a worker that runs but never connects to MCP, and a worker of a
 // closed grid (the project's history), each with an open task. Checks the time-in-state labels, the badges, the banner, the
 // Agents tab, "Przydziel ponownie" of the archived agent's task and "Uruchom ponownie z zadaniem" (the start carries the
 // task). The "never started" badge needs 90 s without MCP, so the run takes about 2.5 minutes.
-// Screenshots go to argv[2] (default: a temp dir). Usage: npm run build && node scripts/verify-team-stuck.mjs [shots]
+// Screenshots go to argv[2] (default: a temp dir). Usage: npm run build:check && node scripts/verify-team-stuck.mjs [shots]
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';

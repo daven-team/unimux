@@ -1,11 +1,10 @@
-//! The trust model against REAL git (PLAN G2 acceptance): the trust cases of test/git-trust.test.ts on a hostile repository
-//! whose configuration names marker-writing programs, and the comparison with 1.1.4: the same repositories are scanned and
-//! trusted by src/main/git.ts (scripts/git-trust-golden.mjs) and by the Rust port, and the keys, the fingerprint hashes and
-//! the git-trust.json bytes must be identical (each side also reads the other's file as trusted).
+//! The trust model against REAL git (PLAN G2 acceptance): the trust cases of 1.1.4's test/git-trust.test.ts on a hostile
+//! repository whose configuration names marker-writing programs, and the trust file round trip on real repositories (until
+//! R1 also compared with 1.1.4's src/main/git.ts; the frozen golden rows of test/golden/git-trust.jsonl keep that pinned).
 //!
 //! The lab has its own configuration (GIT_CONFIG_GLOBAL in the lab, GIT_CONFIG_NOSYSTEM=1, HOME in the lab). The marker
 //! programs are Node scripts (like the TS test); without Node the "nothing was started" checks still run (the programs then
-//! cannot start at all) and the TS comparison is skipped with a note. Nothing here opens a window.
+//! cannot start at all). Nothing here opens a window.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -13,12 +12,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Duration;
 
 use serde_json::{Value, json};
-use unimux_exec::{ExecOptions, Program};
 use unimux_git::handler::handle_git;
-use unimux_git::paths::{canonical_path, realpath_native};
+use unimux_git::paths::realpath_native;
 use unimux_git::{Git, GitErrorCode, GitOptions, TrustState};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -29,10 +26,6 @@ fn id() -> String {
 
 fn slash(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
-}
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
 }
 
 fn node() -> Option<PathBuf> {
@@ -364,40 +357,14 @@ async fn a_worktree_must_be_one_the_project_may_use() {
     assert_eq!(refused.message, unimux_git::NOT_A_WORKTREE);
 }
 
-// ---------- the comparison with 1.1.4 ----------
-
-/// Runs 1.1.4's Git class on the steps; None when Node or the project's node_modules (Vite) are missing.
-fn ts_steps(lab: &Lab, steps: Value) -> Option<Value> {
-    lab.node.as_ref()?;
-    if !repo_root().join("node_modules").join("vite").exists() {
-        eprintln!("node_modules/vite is missing: the TS comparison is skipped");
-        return None;
-    }
-    let env: serde_json::Map<String, Value> = lab
-        .env
-        .iter()
-        .map(|(k, v)| (k.to_string_lossy().into_owned(), Value::String(v.to_string_lossy().into_owned())))
-        .collect();
-    let input = lab.dir.join("trust-steps.json");
-    std::fs::write(&input, json!({ "env": env, "steps": steps }).to_string()).unwrap();
-    let script = repo_root().join("scripts/git-trust-golden.mjs");
-    let program = Program::Args { program: "node".into(), args: vec![script.into(), input.into()] };
-    let out = unimux_exec::run(
-        &program,
-        &ExecOptions {
-            timeout: Duration::from_secs(180),
-            max_output: 16 * 1024 * 1024,
-            cwd: Some(repo_root()),
-            ..Default::default()
-        },
-    )
-    .expect("node");
-    assert!(out.ok(), "node failed: {}", String::from_utf8_lossy(&out.stderr));
-    Some(serde_json::from_slice(&out.stdout).expect("node answer"))
-}
+// ---------- the trust file round trip ----------
+//
+// Until R1 this part also ran 1.1.4's Git class (src/main/git.ts) on the same repositories and compared keys, hashes and the
+// git-trust.json bytes; that reference is gone with Electron. The hash expression and the file format stay pinned by the
+// frozen golden rows of test/golden/git-trust.jsonl (tests/golden_shared.rs).
 
 #[tokio::test(flavor = "multi_thread")]
-async fn trust_hash_keys_and_file_equal_the_ones_1_1_4_writes() {
+async fn trust_keys_and_file_round_trip_on_real_repositories() {
     let lab = Lab::new();
     // 1. the hostile repository of the TS test
     let hostile = lab.hostile("cmp-hostile");
@@ -424,56 +391,35 @@ async fn trust_hash_keys_and_file_equal_the_ones_1_1_4_writes() {
     let safe = lab.quiet("cmp-safe");
     let repos = [("hostile", &hostile), ("extras", &extras), ("attrs", &attrs), ("safe", &safe)];
 
-    let ts_file = lab.dir.join("ts").join("git-trust.json");
-    let rust_file = lab.dir.join("rust").join("git-trust.json");
-    let mut steps = Vec::new();
-    for (name, dir) in &repos {
-        steps.push(json!({ "name": format!("scan-{name}"), "op": "scan", "dir": s(dir) }));
-    }
-    for (name, dir) in &repos {
-        steps.push(
-            json!({ "name": format!("grant-{name}"), "op": "grant", "dir": s(dir), "trustFile": s(&ts_file), "requestId": id() }),
-        );
-    }
-    let rust = lab.git(Some(rust_file.clone()));
+    let trust_file = lab.dir.join("rust").join("git-trust.json");
+    let writer = lab.git(Some(trust_file.clone()));
     for (_, dir) in &repos {
-        rust.grant_trust(&s(dir), &id(), None).await.unwrap();
+        writer.grant_trust(&s(dir), &id(), None).await.unwrap();
     }
-    for (name, dir) in &repos {
-        steps.push(json!({ "name": format!("reads-rust-{name}"), "op": "info", "dir": s(dir), "trustFile": s(&rust_file) }));
-    }
-    let Some(ts) = ts_steps(&lab, Value::Array(steps)) else {
-        eprintln!("node is not installed: the TS comparison is skipped");
-        return;
-    };
+    let written = std::fs::read(&trust_file).unwrap();
 
+    let mut keys_of = HashMap::new();
     for (name, dir) in &repos {
         let git = lab.git(None);
         let root = git.root(&s(dir)).await.unwrap();
         let scan = git.scan(&root, true).await.unwrap();
-        let theirs = &ts[format!("scan-{name}")];
-        assert_eq!(theirs["root"], root, "{name} root");
-        assert_eq!(theirs["keys"], json!(scan.keys), "{name} keys");
-        assert_eq!(theirs["hash"], scan.hash, "{name} fingerprint hash");
+        // the hash depends on the keys only: a second scan of the unchanged repository gives the same one
+        assert_eq!(git.scan(&root, true).await.unwrap().hash, scan.hash, "{name} fingerprint hash is stable");
         let expected = if *name == "safe" { "safe" } else { "trusted" };
-        assert_eq!(ts[format!("grant-{name}")]["data"]["state"], expected, "{name}: 1.1.4 grant");
-        assert_eq!(ts[format!("reads-rust-{name}")]["data"]["state"], expected, "{name}: 1.1.4 reads the Rust file");
-        // Rust reads the file 1.1.4 wrote
-        let reader = lab.git(Some(ts_file.clone()));
+        // a fresh reader of the file (another start of the app) sees the grant
+        let reader = lab.git(Some(trust_file.clone()));
         assert_eq!(
             serde_json::to_value(reader.trust_info(&s(dir), None, false).await.unwrap().state).unwrap(),
             expected,
-            "{name}: Rust reads the 1.1.4 file"
+            "{name}: read back from git-trust.json"
         );
         assert_eq!(reader.trust_store().get(&root), (*name != "safe").then(|| scan.hash.clone()));
-        let _ = canonical_path(&root);
+        keys_of.insert(*name, scan.keys);
     }
-    let ts_bytes = std::fs::read(&ts_file).unwrap();
-    let rust_bytes = std::fs::read(&rust_file).unwrap();
-    assert_eq!(String::from_utf8_lossy(&rust_bytes), String::from_utf8_lossy(&ts_bytes), "git-trust.json bytes");
-    assert_eq!(rust_bytes, ts_bytes);
+    // reading never rewrites the file
+    assert_eq!(std::fs::read(&trust_file).unwrap(), written);
     // the extras repository really exercised the odd parts
-    let extras_keys = &ts["scan-extras"]["keys"];
+    let extras_keys = &keys_of["extras"];
     for key in [
         "hooks/pre-rebase",
         "hooks/commit-msg",
@@ -483,9 +429,9 @@ async fn trust_hash_keys_and_file_equal_the_ones_1_1_4_writes() {
         "merge.mine.driver",
         ".gitattributes: merge=mine",
     ] {
-        assert!(extras_keys.as_array().unwrap().contains(&json!(key)), "{key} in {extras_keys}");
+        assert!(extras_keys.iter().any(|k| k == key), "{key} in {extras_keys:?}");
     }
-    assert!(!extras_keys.to_string().contains("update.sample") && !extras_keys.to_string().contains("a-folder"));
-    assert_eq!(ts["scan-attrs"]["keys"], json!([".gitattributes: filter=Lfs", "filter.lfs.smudge"]));
+    assert!(!extras_keys.iter().any(|k| k.contains("update.sample") || k.contains("a-folder")));
+    assert_eq!(keys_of["attrs"], vec![".gitattributes: filter=Lfs".to_string(), "filter.lfs.smudge".to_string()]);
     assert!(lab.markers().is_empty());
 }

@@ -2,7 +2,7 @@
 // a Uint8Array), ordered fire-and-forget over `mc_send`, push events over Tauri events scoped to this window, the three
 // MessagePorts over Tauri channels (mc.ts). Kept free of the Tauri packages (they are injected) so test/tauri-bridge.test.ts
 // drives it with fakes.
-import type { McTransport } from '../../../preload/mcApi';
+import type { McTransport } from './mcApi';
 import type { AppPlatform } from '../../../shared/platform';
 import { EVENT_OPTIONAL_ARGS } from './contract.gen';
 

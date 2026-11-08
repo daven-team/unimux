@@ -7,7 +7,7 @@ import { getS, toast, useStore } from './store';
 
 const systemLanguage = () => detectLanguage(navigator.languages);
 
-/** True in the app build, where the shared tables are filled per language (electron.vite.messages.ts); false in tests. */
+/** True in the app build, where the shared tables are filled per language (vite.messages.ts); false in tests. */
 const perLanguage = (messages as unknown) === messageTable;
 /** The last language whose translations were ready: shown until a newly chosen one has loaded. */
 let shown: Language | null = null;

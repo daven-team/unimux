@@ -72,11 +72,8 @@ fn bundled_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("UNIMUX_CONPTY_DIR") {
         return d.into();
     }
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../node_modules/node-pty/third_party/conpty");
-    let mut v: Vec<PathBuf> =
-        std::fs::read_dir(&root).expect("node-pty third_party").filter_map(|e| e.ok().map(|e| e.path())).collect();
-    v.sort();
-    v.pop().expect("a conpty version").join("win10-x64")
+    // conpty.dll 1.23 + OpenConsole.exe, committed (1.1.4 took them from node-pty).
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../resources/conpty/x64")
 }
 
 fn pct(v: &mut [f64], p: f64) -> f64 {

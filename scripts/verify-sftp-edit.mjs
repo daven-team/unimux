@@ -1,6 +1,6 @@
 // node scripts/verify-sftp-edit.mjs - real-app check of SFTP files in editor tabs (0.9.9) against the local test server only
 // (scripts/ssh-test-server.mjs --sftp-root <scratch>). Never a real host, never the user's data dir, home or ~/.ssh.
-// Needs `npm run build` first. Screenshots go to D:\Projekty\_shots\099-edit-*.png.
+// Needs `npm run build:check` first. Screenshots go to D:\Projekty\_shots\099-edit-*.png.
 //
 // Opens a remote text file in a tab (host badge, "host:/path" tooltip), edits it and saves with Ctrl+S (the server file
 // changes, no part file stays, the mode is kept), changes it on the server meanwhile (the conflict choices; Show differences;

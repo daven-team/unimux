@@ -1,13 +1,12 @@
 // SSH identities and the Termius-like host cards: the shared layer (model, validation, resolution, state, migration, view helpers).
 import { describe, expect, it } from 'vitest';
-import { StateController } from '../src/main/stateController';
-import { hostFormDirty, hostsUsingKey, hostToDraft, normalizeSshHosts, validateHostDraft, type SshHost, type SshHostDraft } from '../src/shared/ssh';
+import { hostFormDirty, hostsUsingKey, hostToDraft, validateHostDraft, type SshHost, type SshHostDraft } from '../src/shared/ssh';
 import {
-  hostIdentity, hostLogin, hostsUsingIdentity, identitiesUsingKey, identityCredential, identityCredentialText, identityFormDirty, identityToDraft, matchIdentities,
-  normalizeSshIdentities, removeKeyQuestion, removeSshIdentity, upsertSshIdentity, validateIdentityDraft, IDENTITY_LIMIT, type SshIdentity,
+  hostsUsingIdentity, identitiesUsingKey, identityCredential, identityCredentialText, identityFormDirty, identityToDraft, matchIdentities,
+  removeKeyQuestion, removeSshIdentity, upsertSshIdentity, validateIdentityDraft, type SshIdentity,
 } from '../src/shared/sshIdentity';
 import { cardKeyConnects, ctrlPick, detailKey, hostCardDetail, liveDetail, paneDetail, sectionForDetail } from '../src/shared/sshView';
-import { addSshHost, clearSshKeyRefs, defaultState, normalizeState } from '../src/shared/state';
+import { addSshHost, defaultState } from '../src/shared/state';
 import type { AppState } from '../src/shared/types';
 
 const ID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -16,29 +15,6 @@ const OTHER_KEY = ID(901);
 const host = (n: number, patch: Partial<SshHost> = {}): SshHost => ({ id: ID(n), label: `h${n}`, address: `h${n}.example`, port: 22, username: 'deploy', createdAt: 1, updatedAt: 1, ...patch });
 const identity = (n: number, patch: Partial<SshIdentity> = {}): SshIdentity => ({ id: ID(100 + n), label: `id${n}`, username: `user${n}`, createdAt: 1, updatedAt: 1, ...patch });
 const withHosts = (...hosts: SshHost[]): AppState => hosts.reduce((s, h) => addSshHost(s, h), defaultState());
-
-describe('identity normalization', () => {
-  it('keeps valid identities, trims fields and falls back to the user name as label', () => {
-    expect(normalizeSshIdentities([{ id: ID(1), label: '  Hetzner  ', username: ' adam ', keyId: KEY, createdAt: 5, updatedAt: 6, extra: true }]))
-      .toEqual([{ id: ID(1), label: 'Hetzner', username: 'adam', keyId: KEY, createdAt: 5, updatedAt: 6 }]);
-    expect(normalizeSshIdentities([{ id: ID(2), label: '', username: 'root', keyId: 'not-a-uuid', createdAt: -1 }]))
-      .toEqual([{ id: ID(2), label: 'root', username: 'root', createdAt: 0, updatedAt: 0 }]);
-    expect(normalizeSshIdentities([{ id: ID(3), label: 'x'.repeat(200), username: 'u' }])[0].label).toHaveLength(80);
-    expect(normalizeSshIdentities([{ id: ID(4), label: 'bad\u0007label', username: 'u' }])[0].label).toBe('u');
-  });
-
-  it('drops junk, bad ids, bad user names and duplicates, and reads anything else as none', () => {
-    const list = normalizeSshIdentities([null, 7, 'x', { id: 'nope', username: 'u' }, { id: ID(1), username: 'a b' }, { id: ID(2), username: '' }, { id: ID(3) }, identity(1), identity(1, { label: 'dup' })]);
-    expect(list.map((i) => i.id)).toEqual([identity(1).id]);
-    expect(normalizeSshIdentities(undefined)).toEqual([]);
-    expect(normalizeSshIdentities({ id: ID(1) })).toEqual([]);
-  });
-
-  it('keeps at most IDENTITY_LIMIT identities', () => {
-    const many = Array.from({ length: IDENTITY_LIMIT + 5 }, (_, i) => ({ id: ID(i + 1), username: `u${i}` }));
-    expect(normalizeSshIdentities(many)).toHaveLength(IDENTITY_LIMIT);
-  });
-});
 
 describe('identity form', () => {
   it('needs a valid user name; the label falls back to it; only a uuid key is kept', () => {
@@ -59,26 +35,6 @@ describe('identity form', () => {
     expect(identityFormDirty(saved, identityToDraft(saved), { password: '', clearPassword: true })).toBe(true);
     expect(identityFormDirty(undefined, identityToDraft(undefined), clean)).toBe(false);
     expect(identityFormDirty(undefined, { label: '', username: 'a' }, clean)).toBe(true);
-  });
-});
-
-describe('host login resolution', () => {
-  it('signs in with the host itself without an identity', () => {
-    expect(hostLogin(host(1, { keyId: KEY }), [identity(1)])).toEqual({ username: 'deploy', keyId: KEY, secret: { kind: 'host', id: ID(1) } });
-    expect(hostLogin(host(1), [])).toEqual({ username: 'deploy', secret: { kind: 'host', id: ID(1) } });
-  });
-
-  it('takes the user name, key and password of the identity, ignoring the host key', () => {
-    const i = identity(1, { keyId: OTHER_KEY });
-    expect(hostLogin(host(1, { identityId: i.id, keyId: KEY }), [i])).toEqual({ username: 'user1', keyId: OTHER_KEY, secret: { kind: 'identity', id: i.id } });
-    // An identity without a key means no key, even when the host had one.
-    expect(hostLogin(host(1, { identityId: i.id, keyId: KEY }), [identity(1)])).toEqual({ username: 'user1', secret: { kind: 'identity', id: i.id } });
-  });
-
-  it('falls back to the host fields when its identity no longer exists', () => {
-    expect(hostLogin(host(1, { identityId: ID(555), keyId: KEY }), [identity(1)])).toEqual({ username: 'deploy', keyId: KEY, secret: { kind: 'host', id: ID(1) } });
-    expect(hostIdentity(host(1, { identityId: ID(555) }), [identity(1)])).toBeUndefined();
-    expect(hostIdentity(host(1, { identityId: identity(1).id }), [identity(1)])).toEqual(identity(1));
   });
 });
 
@@ -147,48 +103,6 @@ describe('identity state', () => {
     expect(removeKeyQuestion('main', 2, 1)).toEqual({ key: 'Klucz jest używany przez {hosts} hostów i {identities} tożsamości. Usunąć go?', params: { hosts: 2, identities: 1 } });
     expect(removeKeyQuestion('main', 3, 0)).toEqual({ key: 'Klucz jest używany przez {count} hostów. Usunąć go?', params: { count: 3 } });
     expect(removeKeyQuestion('main', 0, 0)).toEqual({ key: 'Usunąć klucz {name}?', params: { name: 'main' } });
-  });
-
-  it('clears a deleted key from hosts and identities alike', () => {
-    let s = upsertSshIdentity(withHosts(host(1, { keyId: KEY }), host(2, { keyId: OTHER_KEY })), identity(1, { keyId: KEY }));
-    s = upsertSshIdentity(s, identity(2, { keyId: OTHER_KEY }));
-    const next = clearSshKeyRefs(s, KEY);
-    expect(next.sshHosts.map((h) => h.keyId)).toEqual([undefined, OTHER_KEY]);
-    expect(next.sshIdentities.map((i) => i.keyId)).toEqual([undefined, OTHER_KEY]);
-    expect('keyId' in next.sshIdentities[0]).toBe(false);
-    expect(clearSshKeyRefs(next, ID(999))).toBe(next);
-  });
-});
-
-describe('identity persistence and migration', () => {
-  it('loads a state file from before identities with none, and keeps host identity references', () => {
-    const { sshIdentities: _gone, ...old } = defaultState();
-    const loaded = normalizeState(JSON.parse(JSON.stringify({ ...old, sshHosts: [host(1)] })))!;
-    expect(loaded.sshIdentities).toEqual([]);
-    expect(loaded.sshHosts).toEqual([host(1)]);
-    const i = identity(1);
-    const saved = upsertSshIdentity(withHosts(host(1, { identityId: i.id }), host(2, { identityId: 'junk' } as Partial<SshHost>)), i);
-    const again = normalizeState(JSON.parse(JSON.stringify(saved)))!;
-    expect(again.sshIdentities).toEqual([i]);
-    expect(again.sshHosts.map((h) => h.identityId)).toEqual([i.id, undefined]);
-    expect(normalizeState(JSON.parse(JSON.stringify({ ...saved, sshIdentities: [{ id: 'bad' }, i, 'x'] })))!.sshIdentities).toEqual([i]);
-  });
-
-  it('normalizes identities edited in the renderer (R6) and keeps an unchanged list as it is', () => {
-    const base = defaultState();
-    const controller = new StateController(base, () => undefined);
-    const i = identity(1);
-    controller.apply({ id: 'e1', base, next: { ...base, sshIdentities: [i, { id: 'bad', username: 'x' } as unknown as SshIdentity, { ...i, label: 'dup' }] } });
-    expect(controller.get().sshIdentities).toEqual([i]);
-    const list = controller.get().sshIdentities;
-    controller.apply({ id: 'e2', base: controller.get(), next: { ...controller.get(), sshHosts: [host(1, { identityId: i.id })] } });
-    expect(controller.get().sshIdentities).toBe(list);
-    expect(controller.get().sshHosts[0].identityId).toBe(i.id);
-  });
-
-  it('normalizes the identity reference of a host like its key reference', () => {
-    expect(normalizeSshHosts([{ ...host(1), identityId: ID(7) }])[0].identityId).toBe(ID(7));
-    expect(normalizeSshHosts([{ ...host(1), identityId: 'nope' }])[0]).toEqual(host(1));
   });
 });
 

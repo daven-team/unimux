@@ -1,21 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { parseRetryAfter } from '../src/main/usage/retryAfter';
 import { diagnosticLabel, usageDiagnostics, type ProviderUsage } from '../src/shared/usage';
 import { usageErrorKey, usageMessages } from '../src/shared/usageMessages';
 
 const NOW = Date.parse('2026-10-11T12:00:00Z');
-
-describe('parseRetryAfter minimum', () => {
-  it('never returns 0 or a sub-second pause', () => {
-    expect(parseRetryAfter('0.4', NOW)).toBe(1000);
-    expect(parseRetryAfter('0.0001', NOW)).toBe(1000);
-    expect(parseRetryAfter('0', NOW)).toBeUndefined();
-    expect(parseRetryAfter(new Date(NOW + 200).toUTCString(), NOW)).toBeUndefined();
-    expect(parseRetryAfter('2', NOW)).toBe(2000);
-    expect(parseRetryAfter('abc', NOW)).toBeUndefined();
-    expect(parseRetryAfter(null, NOW)).toBeUndefined();
-  });
-});
 
 describe('provider-specific usage card wording', () => {
   it('names OpenAI for Codex and Anthropic for Claude, in all six languages', () => {

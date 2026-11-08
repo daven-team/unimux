@@ -1,6 +1,6 @@
 // node scripts/verify-sftp-path.mjs - real-app check of the typed path in the SFTP path bar (1.0.8) against the local test
 // server only (scripts/ssh-test-server.mjs --sftp-root <scratch>). Never a real host, the user's data dir, home or ~/.ssh.
-// Needs `npm run build` first. Screenshots go to D:\Projekty\_shots\108-sftp-path-*.png.
+// Needs `npm run build:check` first. Screenshots go to D:\Projekty\_shots\108-sftp-path-*.png.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ssh2 from 'ssh2';

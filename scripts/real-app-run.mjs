@@ -1,8 +1,8 @@
-// Runs every real-app script (PLAN X1) against one target and sorts each into pass / blocked by <package> / fail / skip.
+// Runs every real-app script (PLAN X1) against the check build and sorts each into pass / blocked by <package> / fail / skip.
 // Each script runs in its own Node process with MC_REAL_APP_REPORT (scripts/real-app.mjs writes its result there); a script
 // that hangs is stopped after its timeout with a tree kill of that Node process (its app goes with it).
 //
-//   npm run build:check && node scripts/real-app-run.mjs [--only=a,b] [--skip=a,b] [--write-progress] [--target=electron]
+//   npm run build:check && node scripts/real-app-run.mjs [--only=a,b] [--skip=a,b] [--write-progress]
 //
 // --write-progress  replaces the "Real-app scripts" table of docs/tauri/PROGRESS.md (between the X1 markers) with this run.
 // Results: artifacts/real-app/<target>.json. Exit code 1 when a script failed (blocked ones do not fail the run: their
@@ -12,7 +12,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { APP_TARGET, ROOT, isTauri, requireBuild, startupBaselineSync } from './real-app.mjs';
+import { APP_TARGET, ROOT, requireBuild, startupBaselineSync } from './real-app.mjs';
 import { SCRIPT_PACKAGES, classifyRun, formatBlocked } from './real-app-owners.mjs';
 
 const W = process.platform === 'win32';
@@ -31,10 +31,8 @@ export const SCRIPTS = [
     'layout-ui', 'limits-ui', 'mcp-app', 'mcp-cli', 'mcp-team', 'notify-actions', 'prompt-queue', 'safety-ui', 'sftp-edit', 'sftp-path',
     'sftp-ui', 'sidebar-anchor', 'ssh-bar', 'ssh-paths', 'ssh-ui', 'start-screen', 'status-ui', 'team-panel', 'team-stuck', 'tree-ui',
     'update-wait', 'waiting-ui'].map((name) => ({ file: `verify-${name}.mjs` })),
-  { file: 'verify-tauri-normalize.mjs', only: 'tauri' },
-  // the acceptance checks of the wave 1 packages (Tauri only: most compare with 1.1.4 or the TS reference themselves)
-  ...['tauri-cells', 'tauri-claude-settings', 'tauri-convsearch', 'tauri-db', 'tauri-detached', 'tauri-fileops', 'tauri-files', 'tauri-hooks', 'tauri-lifecycle', 'tauri-os', 'tauri-search', 'tauri-sessions', 'tauri-w3'].map((name) => ({ file: `verify-${name}.mjs`, only: 'tauri' })),
-  { file: 'verify-cli-detect.mjs', only: 'tauri', missing: () => (existsSync(join(ROOT, 'out', 'main', 'index.js')) ? null : 'the Electron build (npm run build) is its 1.1.4 reference') },
+  // the acceptance checks of the wave 1 packages (the ones that compared with the TS reference left with it in R1)
+  ...['tauri-cells', 'tauri-db', 'tauri-detached', 'tauri-fileops', 'tauri-files', 'tauri-hooks', 'tauri-lifecycle', 'tauri-os', 'tauri-search', 'tauri-w3'].map((name) => ({ file: `verify-${name}.mjs`, only: 'tauri' })),
   { file: 'verify-safestorage.mjs', only: 'tauri', windowsOnly: true },
   // P2: the pty data plane (replay at recorded sizes, echo, 20-cell flood bounds) with the flood helper.
   { file: 'verify-tauri-pty.mjs', only: 'tauri', windowsOnly: true, timeout: 15, missing: () => (existsSync(join(ROOT, 'src-tauri', 'target', 'release', 'unimux-pty-flood.exe')) ? null : 'the flood helper (cd src-tauri && node ../scripts/msvc-run.mjs cargo build --release -p unimux-pty --bins)') },
@@ -49,8 +47,7 @@ export const SCRIPTS = [
   { file: 'verify-release-build.mjs', ci: 'release.yml checks the CI run of a tag (RELEASE_TAG, BUILD_RUN_ID)' },
   // the other real-app scripts
   { file: 'smoke-tauri.mjs', only: 'tauri' },
-  // Electron: the packaged app of `npm run dist:win` (a local check build only, never published); skipped without it.
-  { file: 'smoke-start.mjs', windowsOnly: true, missing: () => (!isTauri && !existsSync(join(ROOT, 'release', 'win-unpacked', 'unimux.exe')) ? 'no packaged Electron app (npm run dist:win)' : null) },
+  { file: 'smoke-start.mjs', windowsOnly: true },
   { file: 'smoke-automation.mjs' },
   { file: 'capture-readme.mjs', args: (scratch) => [join(scratch, 'shots'), '--verify'], timeout: 15 },
   { file: 'measure-startup.mjs', args: () => ['1'] },
@@ -106,10 +103,8 @@ function runOne(script) {
 if (process.argv[1]?.endsWith('real-app-run.mjs')) {
   requireBuild();
   // Once, before the first script: no script pays for the bare launch, and every one is judged against the same set.
-  if (isTauri) {
-    const baseline = startupBaselineSync();
-    console.log(baseline ? `startup baseline (not-yet calls of a bare launch): ${baseline.join(', ') || 'none'}` : 'startup baseline: not available (failures with not-yet calls stay failures)');
-  }
+  const baseline = startupBaselineSync();
+  console.log(baseline ? `startup baseline (not-yet calls of a bare launch): ${baseline.join(', ') || 'none'}` : 'startup baseline: not available (failures with not-yet calls stay failures)');
   const outDir = join(ROOT, 'artifacts', 'real-app');
   mkdirSync(outDir, { recursive: true });
   const results = [];
@@ -159,7 +154,7 @@ function writeProgress(results, at) {
       : r.result === 'fail' ? `${r.tail.split('\n').filter((l) => !/^(info:|BLOCKED)/.test(l)).at(-1)?.replace(/\|/g, '/').slice(0, 160) ?? ''}${r.seen?.length ? ` (not-yet seen: ${r.seen.map((g) => g.owner).join(', ')})` : ''}` : r.why ?? '';
     return `| ${r.file}${r.gate ? ' (release gate)' : ''} | ${r.result} | ${r.result === 'blocked' ? r.blocked.map((g) => g.owner).join(', ') : ''} | ${detail} |`;
   });
-  const table = [start, `Run: ${at.slice(0, 16).replace('T', ' ')} UTC, target ${APP_TARGET}${isTauri ? ' (check build)' : ''}, \`node scripts/real-app-run.mjs --write-progress${isTauri ? '' : ' --target=electron'}\`.`, '',
+  const table = [start, `Run: ${at.slice(0, 16).replace('T', ' ')} UTC, target ${APP_TARGET} (check build), \`node scripts/real-app-run.mjs --write-progress\`.`, '',
     '| script | result | blocked by | detail |', '|---|---|---|---|', ...rows, end].join('\n');
   const a = text.indexOf(start);
   const b = text.indexOf(end);

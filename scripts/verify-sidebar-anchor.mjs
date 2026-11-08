@@ -1,4 +1,4 @@
-// Real-app check (npm run build:check first; MC_APP_TARGET=electron: npm run build): the Accounts & limits panel at the bottom of the sidebar stays where it is, frame by
+// Real-app check (npm run build:check first): the Accounts & limits panel at the bottom of the sidebar stays where it is, frame by
 // frame, when a side panel that loads on demand (Git, Databases) is opened for the first time. It used to jump up for a few
 // frames while the panel's code loaded, because nothing filled the column above it. Runs on a scratch repo and data dir.
 import { execFileSync } from 'node:child_process';

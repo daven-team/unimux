@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { parseAst, transformWithOxc } from 'vite';
 import { describe, expect, it } from 'vitest';
-import { splitMessages } from '../electron.vite.messages';
+import { splitMessages } from '../vite.messages';
 import { MESSAGE_COLUMN, translate, type MessageKey } from '../src/shared/i18n';
 import { messages } from '../src/shared/messages';
 

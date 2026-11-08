@@ -1,21 +1,20 @@
 // Starts the packaged Windows app the way the Start menu, a shortcut or the installer does: no console to attach to and no
 // standard handles. 0.9.3 and 0.9.4 crashed in exactly this case (the Pty Host launch got a null stdout handle, exit code
 // 0x80000003), while every check started from a terminal passed. The app runs in a scratch profile and is stopped afterwards.
-// Tauri (default): the check build (npm run build:check) with MC_DATA_DIR and MC_OFFSCREEN, so nothing reaches the real profile
-// and no window shows; a release unimux.exe ignores both, so it is only run with --ci (the CI machine of U4). Electron
-// (MC_APP_TARGET=electron): release/win-unpacked/unimux.exe as before.
+// Default: the check build (npm run build:check) with MC_DATA_DIR and MC_OFFSCREEN, so nothing reaches the real profile
+// and no window shows; a release unimux.exe ignores both, so it is only run with --ci (the CI machine of U4).
 //
-// --install [setup.exe] (Tauri, CI only, PLAN U4): installs the release installer silently into a scratch folder
+// --install [setup.exe] (CI only, PLAN U4): installs the release installer silently into a scratch folder
 // (`/S /D=<dir>`; default release/unimux-Setup-*.exe), checks the installed files and starts the INSTALLED unimux.exe. A release
 // exe uses the machine's real roaming profile, so this mode refuses to run outside GitHub Actions.
-// Tauri also checks the call the 1.1.x update window ends with (`ELECTRON_RUN_AS_NODE=1 unimux.exe -e <script>`, PLAN U3): it
+// It also checks the call the 1.1.x update window ends with (`ELECTRON_RUN_AS_NODE=1 unimux.exe -e <script>`, PLAN U3): it
 // exits 0 without a window and removes `<data>/update/runtime` only, never a folder a crafted script names.
 // Usage: node scripts/smoke-start.mjs [exe] [--ci] | node scripts/smoke-start.mjs --install [setup.exe] --ci
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { appBinary, isTauri } from './real-app.mjs';
+import { appBinary } from './real-app.mjs';
 
 if (process.platform !== 'win32') {
   console.log('Start without a console: Windows only, skipped');
@@ -27,7 +26,7 @@ const ci = args.includes('--ci');
 const installAt = args.indexOf('--install');
 const install = installAt >= 0;
 const onCiMachine = process.env.GITHUB_ACTIONS === 'true';
-if (install && !(isTauri && ci && onCiMachine)) throw new Error('--install runs a real installer and starts a release build on the real profile: Tauri target, --ci and GitHub Actions only');
+if (install && !(ci && onCiMachine)) throw new Error('--install runs a real installer and starts a release build on the real profile: --ci and GitHub Actions only');
 const scratch = mkdtempSync(join(tmpdir(), 'unimux-start-'));
 
 /** Installs the release setup silently into the scratch folder and returns the installed exe. */
@@ -48,15 +47,15 @@ function installRelease() {
   return join(dir, 'unimux.exe');
 }
 
-const executable = install ? installRelease() : resolve(args.find((a, i) => !a.startsWith('--') && i !== installAt + 1) ?? (isTauri ? appBinary() : 'release/win-unpacked/unimux.exe'));
+const executable = install ? installRelease() : resolve(args.find((a, i) => !a.startsWith('--') && i !== installAt + 1) ?? appBinary());
 if (!existsSync(executable)) throw new Error(`Packaged app not found: ${executable}`);
-const checkBuild = isTauri && /[\\/]target[\\/]check[\\/]/i.test(executable);
-if (isTauri && !checkBuild && !(ci && onCiMachine)) throw new Error(`${executable} is not the check build: a release build ignores MC_DATA_DIR and would start on the real profile (use --ci on a CI machine)`);
+const checkBuild = /[\\/]target[\\/]check[\\/]/i.test(executable);
+if (!checkBuild && !(ci && onCiMachine)) throw new Error(`${executable} is not the check build: a release build ignores MC_DATA_DIR and would start on the real profile (use --ci on a CI machine)`);
 const home = join(scratch, 'home');
 for (const dir of ['AppData/Roaming', 'AppData/Local']) mkdirSync(join(home, dir), { recursive: true });
-// A release Tauri exe takes the roaming folder from the OS (FOLDERID_RoamingAppData), not from APPDATA: on the CI machine
+// A release exe takes the roaming folder from the OS (FOLDERID_RoamingAppData), not from APPDATA: on the CI machine
 // its profile is the runner's real one. Earlier startup marks there are moved aside so only this start counts.
-const releaseProfile = isTauri && !checkBuild;
+const releaseProfile = !checkBuild;
 const profile = releaseProfile ? join(process.env.APPDATA ?? '', 'unimux') : join(home, 'AppData', 'Roaming', 'unimux');
 if (releaseProfile && !process.env.APPDATA) throw new Error('APPDATA is not set');
 mkdirSync(profile, { recursive: true });
@@ -92,12 +91,12 @@ function checkLegacyEvalCall() {
   rmSync(updateDir, { recursive: true, force: true });
   console.log(`-e call OK: exit 0 after ${real} ms (crafted script ${crafted} ms), only update/runtime removed, no app start`);
 }
-// Startup marks that say the start is done: Electron's Pty Host and page load; Tauri's page load (P3 adds its pty mark).
-const readyMarks = isTauri ? ['app-ready', 'page-loaded'] : ['pty-host-started', 'did-finish-load'];
+// Startup marks that say the start is done: the app and its page loaded.
+const readyMarks = ['app-ready', 'page-loaded'];
 const startupLog = join(profile, 'startup.log');
 const pidFile = join(scratch, 'app.pid');
 
-// CreateProcess with STARTF_USESTDHANDLES and null handles; ELECTRON_NO_ATTACH_CONSOLE keeps Electron from borrowing the console
+// CreateProcess with STARTF_USESTDHANDLES and null handles, DETACHED_PROCESS so the app cannot borrow the console
 // of this script, which would hand the app valid handles again. The app's profile follows APPDATA, its home USERPROFILE.
 const launcher = join(scratch, 'launch.ps1');
 writeFileSync(launcher, `
@@ -120,7 +119,6 @@ public static class NoConsoleLaunch {
 $env:APPDATA = Join-Path $HomeDir 'AppData\\Roaming'
 $env:LOCALAPPDATA = Join-Path $HomeDir 'AppData\\Local'
 $env:USERPROFILE = $HomeDir
-$env:ELECTRON_NO_ATTACH_CONSOLE = '1'
 # The Tauri check build: the scratch data dir and an off-screen window (a release build ignores both, see --ci).
 if ($DataDir) { $env:MC_DATA_DIR = $DataDir; $env:MC_OFFSCREEN = '1' }
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
@@ -155,7 +153,7 @@ exit 0
 
 let status = 1;
 try {
-  if (isTauri) checkLegacyEvalCall();
+  checkLegacyEvalCall();
   const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', launcher,
     '-Exe', executable, '-HomeDir', home, '-StartupLog', startupLog, '-PidFile', pidFile, '-Ready1', readyMarks[0], '-Ready2', readyMarks[1], ...(checkBuild ? ['-DataDir', profile] : [])], { encoding: 'utf8', windowsHide: true, timeout: 180_000 });
   process.stdout.write(result.stdout ?? '');

@@ -1,14 +1,12 @@
-// Shared helpers of the W1 caption checks (scripts/capture-caption-reference.mjs, scripts/verify-caption.mjs): PNG read and
-// write, the wincap tool (OS-level window capture, posted window messages, hit tests; never moves the real cursor or
-// activates a window) and the off-screen launchers of the Electron reference build and the Tauri check build.
+// Shared helpers of the W1 caption check (scripts/verify-caption.mjs): PNG read and write and the wincap tool (OS-level
+// window capture, posted window messages, hit tests; never moves the real cursor or activates a window). The 1.1.4 reference
+// images in test/fixtures/caption were captured from the Electron build until R1 (scripts/capture-caption-reference.mjs).
 import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { deflateSync, inflateSync, crc32 } from 'node:zlib';
-import { scratchHome, scrubAppEnv } from './app-env.mjs';
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const SCALES = [1, 1.25, 1.5, 2];
@@ -131,24 +129,13 @@ export const lparam = (x, y) => ((y & 0xffff) << 16 | (x & 0xffff)) >>> 0;
 
 // ---- launchers (off-screen, scratch data, never the real profile) ----
 
-const electronPath = () => createRequire(import.meta.url)('electron');
-
-/** The Electron build of this tree (npm run build): the 1.1.4 window chrome. `scale` forces a device scale factor. */
-export function launchElectron({ dataDir, scratch, port, scale }) {
-  const { env: homeEnv } = scratchHome(scratch);
-  const env = scrubAppEnv({ ...process.env, ...homeEnv, MC_DATA_DIR: dataDir, MC_OFFSCREEN: '1', ...(port ? { MC_DEBUG_PORT: String(port) } : {}) });
-  const args = [...(scale ? [`--force-device-scale-factor=${scale}`] : []), root];
-  return spawn(electronPath(), args, { env, stdio: 'ignore', windowsHide: true });
-}
-
 export function killTree(child) {
   if (!child || child.exitCode !== null) return;
   try { execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } catch { /* already gone */ }
 }
 
 /**
- * Waits for the app's visible top-level window (`title` matches). The windows belong to the process we spawned: Electron's
- * main process (electron.exe) and unimux.exe.
+ * Waits for the app's visible top-level window (`title` matches) of the process we spawned (unimux.exe).
  */
 export async function findAppWindow(wincap, pid, { title = /unimux/, timeoutMs = 60000 } = {}) {
   const deadline = Date.now() + timeoutMs;

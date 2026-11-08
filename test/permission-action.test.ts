@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  dialogReady, isPermissionAnswer, isPermissionToken, mayAnswer, noticeActions, permissionAsk, permissionKeys, type PermissionCellState,
+  dialogReady, mayAnswer, noticeActions, permissionAsk, permissionKeys, type PermissionCellState,
 } from '../src/shared/permissionAction';
-import { notificationActions } from '../src/main/notifyOptions';
-import { routeMessage } from '../src/shared/detached';
 
 const claude = (patch: Partial<PermissionCellState> = {}): PermissionCellState => ({
   status: 'waiting', reason: 'attention', detail: { kind: 'permission', tool: 'Bash' }, hooked: true, agent: true, codex: false, ...patch,
@@ -114,25 +112,5 @@ describe('notification buttons', () => {
     expect(noticeActions({ event: 'attention', cells: 2, enabled: true, token: 'x.1' })).toEqual({});
     expect(noticeActions({ event: 'done', cells: 1, enabled: true, token: 'x.1' })).toEqual({});
     expect(noticeActions({ event: 'attention', cells: 1, enabled: false, token: 'x.1' })).toEqual({});
-  });
-
-  it('labels the buttons on Windows and macOS only, in the order the action index maps', () => {
-    const t = (key: string) => `[${key}]`;
-    expect(notificationActions('answer', 'win32', t)).toEqual([{ text: '[Zezwól]', answer: 'allow' }, { text: '[Odrzuć]', answer: 'deny' }, { text: '[Pokaż]' }]);
-    expect(notificationActions('show', 'darwin', t)).toEqual([{ text: '[Pokaż]' }]);
-    expect(notificationActions('answer', 'linux', t)).toEqual([]);
-  });
-
-  it('validates what comes over IPC', () => {
-    expect(isPermissionToken('k3j4.12')).toBe(true);
-    expect(isPermissionToken('')).toBe(false);
-    expect(isPermissionToken('x'.repeat(81))).toBe(false);
-    expect(isPermissionAnswer('allow')).toBe(true);
-    expect(isPermissionAnswer('yes')).toBe(false);
-  });
-
-  it('routes an answer to the window that holds the cell', () => {
-    expect(routeMessage('notify:answer', ['c1', 't.1', 'allow'], new Map([['c1', 'w2']]))).toEqual([{ window: 'w2', args: ['c1', 't.1', 'allow'] }]);
-    expect(routeMessage('notify:answer', ['c9', 't.1', 'deny'], new Map())).toEqual([{ window: null, args: ['c9', 't.1', 'deny'] }]);
   });
 });

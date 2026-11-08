@@ -1,8 +1,8 @@
-// window.mc in the Tauri build (1.2.0): the same methods as the Electron preload (src/preload/mcApi.ts, shared), over the Tauri
-// transport. Built as its own classic script and run in <head> before the app (vite.config.tauri.ts), like the Electron preload.
+// window.mc in the Tauri build (1.2.0): the methods of mcApi.ts (1.1.4's preload table) over the Tauri transport. Built as its
+// own classic script and run in <head> before the app (vite.config.tauri.ts), like 1.1.4's Electron preload.
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { createMcApi } from '../../../preload/mcApi';
+import { createMcApi } from './mcApi';
 import { createDropRecordFilePaths, createWebView2FilePaths, type WebView2Host } from './filePaths';
 import { createPortPoster, createTauriTransport, McNotYetError, type BootInfo, type TauriTransport } from './transport';
 import { installCompat, type CompatReport } from './webkitCompat';

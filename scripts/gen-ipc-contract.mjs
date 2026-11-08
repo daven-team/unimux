@@ -1,10 +1,12 @@
 // Generates src-tauri/gen/ipc-contract.json, the window.mc contract the Rust router is checked against (1.2.0, PLAN F3).
 //
 // Sources, read with a real TypeScript parser (rolldown's oxc parser; TypeScript 7 has no JS compiler API):
-// - src/preload/mcApi.ts: every method of window.mc and the channel it calls (`t.invoke('x', ...)` / `t.send('x', ...)`);
-// - src/preload/api.d.ts (+ the *Api interfaces in src/shared): parameter names, TypeScript types, return types, and the push
-//   events (the `on(channel: 'x', cb: (...) => void)` overloads);
-// - src/updatesplash/preload.ts: the separate window.updateSplash contract of the update windows.
+// - src/renderer/src/bridge/mcApi.ts: every method of window.mc and the channel it calls (`t.invoke('x', ...)` /
+//   `t.send('x', ...)`);
+// - src/renderer/src/bridge/api.d.ts (+ the *Api interfaces in src/shared): parameter names, TypeScript types, return types,
+//   and the push events (the `on(channel: 'x', cb: (...) => void)` overloads);
+// - test/contract/preload-channels.json: what the removed Electron preloads contributed (frozen at R1): the MessagePorts and
+//   the separate window.updateSplash contract of the update windows.
 //
 // `--check` regenerates in memory and exits 1 when the committed file differs (CI drift check).
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
@@ -15,6 +17,10 @@ import { parseAst } from 'rolldown/parseAst';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = resolve(root, 'src-tauri/gen/ipc-contract.json');
 const OUT_TS = resolve(root, 'src/renderer/src/bridge/contract.gen.ts');
+const MC_API_FILE = 'src/renderer/src/bridge/mcApi.ts';
+const API_FILE = 'src/renderer/src/bridge/api.d.ts';
+const FROZEN_FILE = 'test/contract/preload-channels.json';
+const frozen = JSON.parse(readFileSync(resolve(root, FROZEN_FILE), 'utf8'));
 
 /** The domain (= the `unimux-app/src/commands/<domain>.rs` file that registers it) of a channel or event. */
 export function domainOf(channel) {
@@ -86,7 +92,7 @@ function collectInterfaces(file, into) {
 }
 
 const interfaces = new Map();
-collectInterfaces('src/preload/api.d.ts', interfaces);
+collectInterfaces(API_FILE, interfaces);
 for (const name of readdirSync(resolve(root, 'src/shared'))) if (name.endsWith('.ts')) collectInterfaces(join('src/shared', name), interfaces);
 
 function paramInfo(source, param) {
@@ -124,7 +130,7 @@ function signatures(iface, prefix, out, events) {
 // ── mcApi.ts: the channel of every method ───────────────────────────────────
 
 function implementation() {
-  const { source, ast } = parse('src/preload/mcApi.ts');
+  const { source, ast } = parse(MC_API_FILE);
   const fn = ast.body.map((n) => (n.type === 'ExportNamedDeclaration' ? n.declaration : n)).find((n) => n?.type === 'FunctionDeclaration' && n.id.name === 'createMcApi');
   const ret = fn.body.body.find((s) => s.type === 'ReturnStatement').argument;
   const methods = [];
@@ -157,21 +163,9 @@ function implementation() {
   return methods;
 }
 
+/** window.updateSplash of the update windows, as 1.1.4's src/updatesplash/preload.ts exposed it (frozen at R1). */
 function updateSplash() {
-  const { ast } = parse('src/updatesplash/preload.ts');
-  const out = [];
-  const find = (node) => {
-    if (!node || typeof node !== 'object') return;
-    if (Array.isArray(node)) { node.forEach(find); return; }
-    if (node.type === 'CallExpression' && node.callee.type === 'MemberExpression' && node.callee.object.name === 'ipcRenderer' && node.arguments[0]?.type === 'Literal') {
-      const kind = node.callee.property.name;
-      const channel = node.arguments[0].value;
-      if (!out.some((e) => e.channel === channel && e.kind === kind)) out.push({ channel, kind: kind === 'on' ? 'event' : kind });
-    }
-    for (const k of Object.keys(node)) if (k !== 'start' && k !== 'end') find(node[k]);
-  };
-  find(ast);
-  return out;
+  return frozen.updateSplash.map(({ channel, kind }) => ({ channel, kind }));
 }
 
 export function buildContract() {
@@ -196,9 +190,9 @@ export function buildContract() {
   const count = (kind) => methods.filter((m) => m.kind === kind).length;
   return {
     generatedBy: 'scripts/gen-ipc-contract.mjs',
-    sources: ['src/preload/mcApi.ts', 'src/preload/api.d.ts', 'src/updatesplash/preload.ts'],
+    sources: [MC_API_FILE, API_FILE, FROZEN_FILE],
     summary: { methods: methods.length, invokeMethods: count('invoke'), sendMethods: count('send'), syncMembers: count('sync'), channels: Object.keys(sorted).length, invokeChannels: Object.values(sorted).filter((c) => c.kind === 'invoke').length, sendChannels: Object.values(sorted).filter((c) => c.kind === 'send').length, events: events.length },
-    ports: ['mc:pty-port', 'mc:sftp-port', 'mc:db-port'],
+    ports: frozen.ports.map((p) => p.page),
     channels: sorted,
     events,
     methods,
@@ -213,7 +207,7 @@ export function contractTs(contract) {
   const optional = Object.fromEntries(contract.events.map((e) => [e.name, e.params.flatMap((p, i) => (p.optional ? [i] : []))]).filter(([, list]) => list.length));
   const kinds = Object.fromEntries(Object.entries(contract.channels).map(([name, c]) => [name, c.kind]));
   return [
-    '// Generated by scripts/gen-ipc-contract.mjs from src/preload/api.d.ts and src/preload/mcApi.ts. Do not edit.',
+    `// Generated by scripts/gen-ipc-contract.mjs from ${API_FILE} and ${MC_API_FILE}. Do not edit.`,
     `export const CHANNEL_KINDS: Readonly<Record<string, 'invoke' | 'send'>> = ${JSON.stringify(kinds, null, 2)};`,
     '/** Positions of the arguments an event callback declares optional: a null from Rust becomes undefined there. */',
     `export const EVENT_OPTIONAL_ARGS: Readonly<Record<string, readonly number[]>> = ${JSON.stringify(optional, null, 2)};`,

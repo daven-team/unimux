@@ -2,9 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { allCellIds, cellLabel, namesList, shouldConfirmClose, workingAgents } from '../src/shared/agentWork';
 import { alertNotice, createAlertBurst, groupAlerts, type AlertItem } from '../src/shared/alertBurst';
 import { translate } from '../src/shared/i18n';
-import { defaultState, normalizeState, updateSettings } from '../src/shared/state';
+import { defaultState, updateSettings } from '../src/shared/state';
 import { createTurnRefresh, refreshTargetMatches } from '../src/shared/turnRefresh';
-import { createQuitConfirm, sessionEndingNow } from '../src/main/quitConfirm';
 import type { AppState } from '../src/shared/types';
 
 const en = (key: Parameters<typeof translate>[1], params?: Parameters<typeof translate>[2]) => translate('en', key, params);
@@ -88,18 +87,6 @@ describe('working agents', () => {
     expect(shouldConfirmClose(s, [])).toBe(false);
     expect(shouldConfirmClose(updateSettings(s, { confirmCloseWorking: false }), working)).toBe(false);
   });
-
-  it('keeps the "do not ask again" setting through a save and defaults to asking', () => {
-    const fresh = defaultState();
-    expect(fresh.settings.confirmCloseWorking).toBe(true);
-    const off = updateSettings(fresh, { confirmCloseWorking: false });
-    expect(normalizeState(JSON.parse(JSON.stringify(off)))!.settings.confirmCloseWorking).toBe(false);
-    const raw = JSON.parse(JSON.stringify(fresh));
-    raw.settings.confirmCloseWorking = 'no';
-    expect(normalizeState(raw)!.settings.confirmCloseWorking).toBe(true);
-    delete raw.settings.confirmCloseWorking;
-    expect(normalizeState(raw)!.settings.confirmCloseWorking).toBe(true);
-  });
 });
 
 describe('agent notifications', () => {
@@ -174,118 +161,6 @@ describe('refresh after agent turns', () => {
     refresh.dispose();
     clock.advance(5000);
     expect(fire).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('quit confirmation', () => {
-  function setup(exempt = false) {
-    const clock = fakeTimers();
-    const ask = vi.fn();
-    const quit = vi.fn();
-    const confirm = createQuitConfirm({ exempt: () => exempt, ask, quit, setTimer: clock.setTimer, clearTimer: clock.clearTimer }, 3000, 120000);
-    return { clock, ask, quit, confirm };
-  }
-
-  it('does not hold a quit when no agent works', () => {
-    const { confirm, ask } = setup();
-    expect(confirm.hold()).toBe(false);
-    expect(ask).not.toHaveBeenCalled();
-  });
-
-  it('quits or stays as the user chose', () => {
-    const { confirm, ask, quit, clock } = setup();
-    confirm.setGuard(true);
-    expect(confirm.hold()).toBe(true);
-    expect(ask).toHaveBeenCalledTimes(1);
-    confirm.answer('asking');
-    clock.advance(60000);
-    expect(quit).not.toHaveBeenCalled();
-    confirm.answer('cancel');
-    clock.advance(200000);
-    expect(quit).not.toHaveBeenCalled();
-    expect(confirm.hold()).toBe(true);
-    confirm.answer('asking');
-    confirm.answer('quit');
-    expect(quit).toHaveBeenCalledTimes(1);
-    expect(confirm.hold()).toBe(false);
-    expect(clock.pending()).toBe(0);
-  });
-
-  it('a second Close while asking asks again and quits when the renderer stays silent', () => {
-    const { confirm, ask, quit, clock } = setup();
-    confirm.setGuard(true);
-    confirm.hold();
-    confirm.answer('asking');
-    clock.advance(10000);
-    // The dialog got lost: the renderer no longer acknowledges the repeated question.
-    expect(confirm.hold()).toBe(true);
-    expect(ask).toHaveBeenCalledTimes(2);
-    clock.advance(2999);
-    expect(quit).not.toHaveBeenCalled();
-    clock.advance(1);
-    expect(quit).toHaveBeenCalledTimes(1);
-  });
-
-  it('a repeated Close that is acknowledged keeps waiting for the answer', () => {
-    const { confirm, quit, clock } = setup();
-    confirm.setGuard(true);
-    confirm.hold();
-    confirm.answer('asking');
-    confirm.hold();
-    confirm.answer('asking');
-    clock.advance(5000);
-    expect(quit).not.toHaveBeenCalled();
-    confirm.answer('cancel');
-    expect(quit).not.toHaveBeenCalled();
-  });
-
-  it('an acknowledged question holds the quit at most two minutes', () => {
-    const { confirm, quit, clock } = setup();
-    confirm.setGuard(true);
-    confirm.hold();
-    confirm.answer('asking');
-    clock.advance(60000);
-    confirm.hold();
-    confirm.answer('asking');
-    // The bound is not extended by the repeated question.
-    clock.advance(59999);
-    expect(quit).not.toHaveBeenCalled();
-    clock.advance(1);
-    expect(quit).toHaveBeenCalledTimes(1);
-  });
-
-  it('a session end releases a held quit at once', () => {
-    const { confirm, quit } = setup();
-    confirm.setGuard(true);
-    confirm.hold();
-    confirm.answer('asking');
-    confirm.release();
-    expect(quit).toHaveBeenCalledTimes(1);
-    const idle = setup();
-    idle.confirm.release();
-    expect(idle.quit).not.toHaveBeenCalled();
-  });
-
-  it('treats a session end as exempt for about a minute only', () => {
-    expect(sessionEndingNow(undefined, 1000)).toBe(false);
-    expect(sessionEndingNow(1000, 1000)).toBe(true);
-    expect(sessionEndingNow(1000, 60999)).toBe(true);
-    expect(sessionEndingNow(1000, 61000)).toBe(false);
-  });
-
-  it('never holds a session end or update and does not wait for a silent renderer', () => {
-    const exempt = setup(true);
-    exempt.confirm.setGuard(true);
-    expect(exempt.confirm.hold()).toBe(false);
-    const silent = setup();
-    silent.confirm.setGuard(true);
-    expect(silent.confirm.hold()).toBe(true);
-    silent.clock.advance(3000);
-    expect(silent.quit).toHaveBeenCalledTimes(1);
-    const reloaded = setup();
-    reloaded.confirm.setGuard(true);
-    reloaded.confirm.rendererGone();
-    expect(reloaded.confirm.hold()).toBe(false);
   });
 });
 

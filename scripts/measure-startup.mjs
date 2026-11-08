@@ -1,4 +1,4 @@
-// Startup timing of the built app (0.9.4): launches the Tauri check build (MC_APP_TARGET=electron: `out/`) several times with a scratch data dir and home (2 projects, a 2x2
+// Startup timing of the built app (0.9.4): launches the Tauri check build several times with a scratch data dir and home (2 projects, a 2x2
 // grid of plain shells) and prints the marks of startup.log (ms since process start) with their medians.
 // Usage: npm run build:check && node scripts/measure-startup.mjs [runs=5]
 // Never touches the user's data dir or home; kills only the PIDs it started; deletes its scratch dirs.

@@ -1,4 +1,4 @@
-// Real-app check (npm run build:check first; MC_APP_TARGET=electron: npm run build) of the start card of agent cells (1.1.5, shared/startScreen.ts, CellStartCard.tsx):
+// Real-app check (npm run build:check first) of the start card of agent cells (1.1.5, shared/startScreen.ts, CellStartCard.tsx):
 // - while an agent starts its cell shows the card (provider mark, "Uruchamianie Claude…"), never the long launch line;
 // - once the CLI drew its screen the card goes and neither the screen nor the scrollback holds the launch line;
 // - a CLI that exits 1 at its start with an error line turns the card into an error card (the code, the error, the output,
@@ -6,7 +6,7 @@
 // - a restart shows the card again, a click on the card gives the keyboard to the terminal, a detached window shows it too.
 // Scratch data dir and home; stand-ins for `claude` and `codex` (Node behind .cmd files) that draw a banner after a delay and
 // stay running, or (profile args --fail-now) print an error and exit 1. Screenshots: D:\Projekty\_shots\115-start-*.png.
-// Usage: npm run build && node scripts/verify-start-screen.mjs   (START_SHELL=cmd for cmd.exe)
+// Usage: npm run build:check && node scripts/verify-start-screen.mjs   (START_SHELL=cmd for cmd.exe)
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';

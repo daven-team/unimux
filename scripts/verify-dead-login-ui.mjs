@@ -2,7 +2,7 @@
 // the main card says "Sign-in expired" with "Sign in again", another saved account can still be made main, the dead
 // account then keeps "Sign-in expired" on its card, and an outside switch shows no banner. Fake home, fake tokens, a local
 // fake usage/token endpoint; never the real ~/.claude, cswap data or the app data folder.
-// Run: npm run build && node scripts/verify-dead-login-ui.mjs [shots dir]   (default: <tmp>/unimux-dead-login-shots)
+// Run: npm run build:check && node scripts/verify-dead-login-ui.mjs [shots dir]   (default: <tmp>/unimux-dead-login-shots)
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';

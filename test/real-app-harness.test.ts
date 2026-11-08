@@ -96,18 +96,17 @@ describe('run classification', () => {
 describe('migrated scripts', () => {
   const scripts = readdirSync(join(root, 'scripts')).filter((f) => f.endsWith('.mjs'));
 
-  it('no script imports Electron except the Electron-only SSH smoke (R1 removes it)', () => {
-    // A static import loads Electron even on the Tauri target; real-app.mjs resolves it lazily for MC_APP_TARGET=electron.
-    const importing = scripts.filter((f) => /^import [^;]* from 'electron';/m.test(read(f)));
-    expect(importing).toEqual(['smoke-ssh.mjs']);
+  it('no script loads Electron, its main inspector or the TS main process (all removed in R1)', () => {
+    const all = [...scripts, ...readdirSync(join(root, 'scripts')).filter((f) => f.endsWith('.cjs'))];
+    expect(all.filter((f) => /(from|require\()\s*['"]electron['"]/.test(read(f)))).toEqual([]);
+    expect(all.filter((f) => /--inspect=|mainInspector\(|process\.mainModule/.test(read(f)))).toEqual([]);
+    expect(all.filter((f) => /['"`](\.\/|\.\.\/)*src\/(main|preload|ptyhost|sftphost|dbhost|exechost|convsearch|sshcore|updatesplash)\//.test(read(f)))).toEqual([]);
   });
 
-  it('no script reaches the Electron main inspector except through the harness (Electron target only)', () => {
-    const users = scripts.filter((f) => f !== 'real-app.mjs' && /--inspect=|mainInspector\(/.test(read(f)));
-    // The Electron-internal profilers: reference tools that exit on the Tauri target. verify-safestorage (B2) runs the real
-    // 1.1.4 next to the Tauri app on purpose (safeStorage both ways) and attaches its own inspector to that 1.1.4.
-    expect(users.sort()).toEqual(['bench-perf.mjs', 'perf-check.mjs', 'perf-renders.mjs', 'verify-safestorage.mjs']);
-    for (const f of users.filter((u) => u !== 'verify-safestorage.mjs')) expect(read(f)).toContain('if (isTauri) {');
+  it('the harness has no Electron target any more', () => {
+    const harness = read('real-app.mjs');
+    expect(harness).toContain("export const APP_TARGET = 'tauri';");
+    expect(harness).not.toMatch(/createRequire|ELECTRON_|electron-test-toasts/);
   });
 
   it('runs every verify script (the workspace module through capture-readme --verify) and the X1 list', () => {

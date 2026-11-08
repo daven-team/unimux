@@ -1,8 +1,8 @@
-// Real-app check (npm run build:check first; MC_APP_TARGET=electron: npm run build): workers a coordinator creates with create_grid start in the background with their
+// Real-app check (npm run build:check first): workers a coordinator creates with create_grid start in the background with their
 // task, exactly once, and showing their grid later does not start them again without it. Scratch data dir and home, a
 // stand-in `claude` that records every start (its arguments, with the prompt when one came along) and stays running.
 // Shell: Windows PowerShell (the `pwsh` kind without PowerShell 7 installed), so the prompt goes through Get-Content.
-// Usage: npm run build && node scripts/verify-team-start.mjs   (and TEAM_SHELL=cmd for the order of the arguments)
+// Usage: npm run build:check && node scripts/verify-team-start.mjs   (and TEAM_SHELL=cmd for the order of the arguments)
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';

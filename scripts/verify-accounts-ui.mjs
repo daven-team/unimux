@@ -1,6 +1,6 @@
 // Real-app check of the AI limits panel with a fake home: a fake live Claude login, a local fake usage endpoint and a
 // 0.9.0 accounts.json with two records of the live account. Never the real ~/.claude, cswap data or the app data folder.
-// Run: npm run build && node scripts/verify-accounts-ui.mjs   Screenshot: D:\Projekty\_shots\091-accounts-panel.png
+// Run: npm run build:check && node scripts/verify-accounts-ui.mjs   Screenshot: D:\Projekty\_shots\091-accounts-panel.png
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';

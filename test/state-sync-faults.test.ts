@@ -1,165 +1,35 @@
 import { describe, expect, it } from 'vitest';
-import { StateController } from '../src/main/stateController';
-import { layoutForCount } from '../src/shared/layout';
 import { OptimisticState } from '../src/shared/optimisticState';
 import {
-  addCell, addProject, addTab, closeTab, defaultState, moveProject, removeCell, removeProject, restoreTab, setActiveProject, swapCells, updateCell, updateProject, updateSettings,
+  addProject, defaultState, removeProject, updateProject, updateSettings,
 } from '../src/shared/state';
-import type { StateEdit, StateSnapshot } from '../src/shared/stateEdits';
-import { stateChange, type StateAck, type StateChange } from '../src/shared/statePatch';
+import { mergeStateEdit, type StateEdit, type StateSnapshot } from '../src/shared/stateEdits';
+import { stateChange, type StateChange } from '../src/shared/statePatch';
 import { StateSync } from '../src/shared/stateSync';
 import type { AppState } from '../src/shared/types';
 
-function rng(seed: number) {
-  return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-}
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x));
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
-function startState(): AppState {
-  let s = defaultState();
-  for (let p = 0; p < 2; p++) {
-    s = addProject(s, { name: `P${p}`, path: `/tmp/p${p}` });
-    for (let t = 0; t < 2; t++) s = addTab(s, s.activeProjectId!, { name: `Grid ${t}`, layout: layoutForCount(3), cells: [{ profileId: 'claude' }, { profileId: 'claude' }, { profileId: 'codex' }] });
+/**
+ * The app side of the state (1.1.4's StateController, now unimux-state's controller): every change gets the next revision
+ * and is pushed; an edit is merged onto the current state. The normalization of an edit is left out (nothing here needs it).
+ */
+class StateController {
+  private revision = 0;
+  constructor(private state: AppState, private readonly changed: (snapshot: StateSnapshot) => void) {}
+  get(): AppState { return this.state; }
+  snapshot(): StateSnapshot { return { state: this.state, revision: this.revision }; }
+  change(fn: (state: AppState) => AppState, editId?: string): StateSnapshot {
+    this.state = fn(this.state);
+    const snapshot = { state: this.state, revision: ++this.revision, editId };
+    this.changed(snapshot);
+    return snapshot;
   }
-  return s;
+  apply(edit: StateEdit): StateSnapshot { return this.change((state) => mergeStateEdit(state, edit), edit.id); }
 }
 
-function randomAction(s: AppState, random: () => number): AppState {
-  const pick = <T,>(items: T[]): T => items[Math.floor(random() * items.length)];
-  const project = pick(s.projects);
-  const tabs = project?.tabs ?? [];
-  const ids = s.projects.flatMap((p) => p.tabs.flatMap((t) => t.cells.map((c) => c.id)));
-  switch (Math.floor(random() * 11)) {
-    case 0: return addProject(s, { name: `N${Math.floor(random() * 99)}`, path: '/tmp/x' });
-    case 1: return project && s.projects.length > 1 ? removeProject(s, project.id) : s;
-    case 2: return project ? addTab(s, project.id, { layout: layoutForCount(2), cells: [{ profileId: 'shell' }] }) : s;
-    case 3: return tabs.length ? closeTab(s, project.id, pick(tabs).id) : s;
-    case 4: return project?.archive.length ? restoreTab(s, project.id, pick(project.archive).id) : s;
-    case 5: return tabs.length && tabs.every((t) => t.cells.length < 8) ? addCell(s, project.id, pick(tabs).id, 'claude') : s;
-    case 6: { const tab = tabs.length ? pick(tabs) : null; return tab && tab.cells.length > 1 ? removeCell(s, project.id, tab.id, pick(tab.cells).id) : s; }
-    case 7: { const tab = tabs.length ? pick(tabs) : null; return tab && tab.cells.length > 1 ? swapCells(s, project.id, tab.id, tab.cells[0].id, tab.cells[tab.cells.length - 1].id) : s; }
-    case 8: return ids.length ? updateCell(s, pick(ids), { color: `#${Math.floor(random() * 0xffffff).toString(16)}` }) : s;
-    case 9: return s.projects.length > 1 ? moveProject(s, s.projects[0].id, s.projects[s.projects.length - 1].id, 'after') : project ? setActiveProject(s, project.id) : s;
-    default: return updateSettings(s, { fontSize: 8 + Math.floor(random() * 20) });
-  }
-}
-
-interface Faults { dropPatch: number; dupPatch: number; loseAck: number; failEdit: number }
-
-/** A renderer (StateSync) and main (StateController) connected by an unreliable, interleaved network. */
-function world(seed: number, faults: Faults) {
-  const random = rng(seed);
-  const start = startState();
-  let previous = start;
-  const toRenderer: StateChange[] = [];
-  const requests: Array<{ kind: 'edit'; edit: StateEdit; done: (ack: StateAck | Error | null) => void } | { kind: 'snapshot'; done: (s: StateSnapshot) => void }> = [];
-  const replies: Array<() => void> = [];
-  let faulty = true;
-  const controller = new StateController(clone(start), (snapshot) => {
-    const change = clone(stateChange(previous, snapshot));
-    previous = snapshot.state;
-    if (faulty && random() < faults.dropPatch) return;
-    toRenderer.push(change);
-    if (faulty && random() < faults.dupPatch) toRenderer.push(clone(change));
-  });
-  let view: AppState = clone(start);
-  let clock = 0;
-  const timers: Array<{ at: number; fn: () => void }> = [];
-  const sync = new StateSync(clone(controller.snapshot()), {
-    transport: {
-      applyEdit: (edit) => new Promise<StateAck>((resolve, reject) => {
-        requests.push({ kind: 'edit', edit: clone(edit), done: (r) => (r instanceof Error ? reject(r) : r ? resolve(r) : undefined /* the answer is lost */) });
-      }),
-      loadSnapshot: () => new Promise<StateSnapshot>((resolve) => requests.push({ kind: 'snapshot', done: resolve })),
-    },
-    setTimer: (fn, ms) => { timers.push({ at: clock + ms, fn }); return timers.length; },
-    onState: (s) => { view = s; },
-  });
-  view = sync.init(clone(controller.snapshot()));
-
-  const step = async (): Promise<void> => {
-    const roll = random();
-    if (roll < 0.22) { // the user edits what is on screen
-      const next = randomAction(view, random);
-      if (next !== view) { const edit: StateEdit = { id: `e${Math.floor(random() * 1e9)}`, base: view, next }; view = next; sync.submit(edit); }
-    } else if (roll < 0.34) { // MCP / main changes the state on its own
-      controller.change((s) => randomAction(s, random));
-    } else if (roll < 0.52) { // main handles the next request, in order
-      const request = requests.shift();
-      if (request?.kind === 'edit') {
-        if (faulty && random() < faults.failEdit) replies.push(() => request.done(new Error('transport failed')));
-        else {
-          try {
-            const result = controller.apply(request.edit);
-            const ack = { revision: result.revision, editId: result.editId };
-            if (faulty && random() < faults.loseAck) replies.push(() => request.done(null));
-            else replies.push(() => request.done(ack));
-          } catch (error) { replies.push(() => request.done(error as Error)); }
-        }
-      } else if (request) {
-        const snapshot = clone(controller.snapshot());
-        replies.push(() => request.done(snapshot));
-      }
-    } else if (roll < 0.74) { // a patch reaches the renderer
-      const change = toRenderer.shift();
-      if (change) sync.receive(change);
-    } else if (roll < 0.9) { // an answer reaches the renderer
-      replies.shift()?.();
-    } else { // time passes
-      clock += Math.floor(random() * 600);
-      for (const t of timers.filter((x) => x.at <= clock)) { timers.splice(timers.indexOf(t), 1); t.fn(); }
-    }
-    await flush();
-  };
-
-  const quiet = () => !requests.length && !replies.length && !toRenderer.length && !timers.length && !sync.busy;
-  const drain = async () => {
-    for (let i = 0; i < 400 && !quiet(); i++) {
-      const request = requests.shift();
-      if (request?.kind === 'edit') { try { const r = controller.apply(request.edit); request.done({ revision: r.revision, editId: r.editId }); } catch (error) { request.done(error as Error); } }
-      else if (request) request.done(clone(controller.snapshot()));
-      for (const c of toRenderer.splice(0)) sync.receive(c);
-      for (const r of replies.splice(0)) r();
-      clock += 1000;
-      for (const t of timers.filter((x) => x.at <= clock)) { timers.splice(timers.indexOf(t), 1); t.fn(); }
-      await flush();
-    }
-  };
-
-  return {
-    step, drain, sync, controller, faultsOff: () => { faulty = false; }, getView: () => view,
-    /** One more reliable change by main: what makes a renderer that missed a patch notice. */
-    poke: () => controller.change((s) => updateSettings(s, { fontSize: 8 + Math.floor(random() * 20) })),
-  };
-}
-
-describe('state sync under faults (lost patches and answers, failed edits, resync in flight)', () => {
-  it('ends with the renderer showing exactly main\'s state, and no edit left pending, for hundreds of seeds', async () => {
-    const faults: Faults = { dropPatch: 0.2, dupPatch: 0.1, loseAck: 0.15, failEdit: 0.05 };
-    for (let seed = 1; seed <= 300; seed++) {
-      const w = world(seed, faults);
-      for (let i = 0; i < 90; i++) await w.step();
-      w.faultsOff();
-      await w.drain();
-      w.poke();
-      await w.drain();
-      expect(w.getView(), `seed ${seed}`).toEqual(clone(w.controller.get()));
-      expect(w.sync.pendingCount, `seed ${seed} pending`).toBe(0);
-      expect(w.sync.revision, `seed ${seed} revision`).toBe(w.controller.snapshot().revision);
-    }
-  }, 120_000);
-
-  it('also without any fault the renderer follows main step by step', async () => {
-    for (let seed = 1; seed <= 60; seed++) {
-      const w = world(seed, { dropPatch: 0, dupPatch: 0, loseAck: 0, failEdit: 0 });
-      for (let i = 0; i < 80; i++) await w.step();
-      await w.drain();
-      expect(w.getView(), `seed ${seed}`).toEqual(clone(w.controller.get()));
-      expect(w.sync.pendingCount).toBe(0);
-    }
-  }, 60_000);
-});
+/** A renderer (StateSync) and the app's state (StateController) connected by an unreliable, interleaved network. */
 
 describe('the reviewed scenario: an edit pending across a gap', () => {
   it('after the missed patch and the resync the edit is settled, so the later changes of main show on the screen', async () => {

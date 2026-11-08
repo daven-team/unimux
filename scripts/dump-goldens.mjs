@@ -1,75 +1,51 @@
-// Writes the golden corpus (1.2.0, PLAN F10): what the TS reference code answers for a fixed set of inputs, so the Rust ports
-// are checked against the real behaviour (src-tauri/crates/*/tests/golden.rs). Inputs are generated from a seeded PRNG, so the
-// files are reproducible; CI runs `--check` and fails on any difference.
+// The golden corpus (1.2.0, PLAN F10): what the TS reference code answers for a fixed set of inputs, so the Rust ports are
+// checked against the real behaviour (src-tauri/crates/*/tests/golden*.rs). Inputs come from a seeded PRNG, so the files are
+// reproducible; CI runs `--check` (npm run gen:check) and fails on any difference.
 //
+// Two kinds of files since R1 removed Electron and its TS main process:
+//
+// - LIVE: made from TS that still exists (src/shared, Node itself), regenerated here and compared byte for byte:
 //   test/golden/default-state.json   defaultState(win32 | darwin)
 //   test/golden/state-merge.jsonl    {current, base, next} -> mergeStateEdit
 //   test/golden/state-diff.jsonl     {prev, next} -> diffState
 //   test/golden/translate.jsonl      {language, key, params} -> translate
-//   test/golden/atomic-write.jsonl   {file, pid, ms, counter} -> the temp name tempPathFor would give
+//   test/golden/atomic-write.jsonl   {file, pid, ms, counter} -> the temp name tempPathFor gave
 //   test/golden/state-load.jsonl     {text} (JSON.stringify output, lone surrogates included) -> what 1.2.0 reads: JSON.parse
 //                                     accepts it, a lone surrogate becomes U+FFFD (a Rust string cannot hold one)
 //   test/golden/normalize-state.jsonl   {platform, now, input} -> normalizeState (see scripts/goldens-normalize.mjs)
-//   test/golden/state-after-edit.jsonl  {prev, next} -> normalizeEditedState of main's StateController
-//   test/golden/hook-payloads.jsonl, hook-server.jsonl  the hook server (see scripts/goldens-hooks.mjs)
-//   test/golden/hook-settings.jsonl  Claude settings, Codex notify, hook fallback, cell files (see scripts/goldens-hooksettings.mjs)
 //   test/golden/js-sort.jsonl        {keys} (null is NaN) -> the order V8's Array.prototype.sort gives indexes compared by
 //                                     keys[a] - keys[b], an inconsistent comparator included (the inbox retention sort)
-//   test/golden/db-sql.jsonl, db-redis.jsonl  {fn, args} -> the DB helpers of src/shared (see scripts/goldens-db.mjs)
-//   test/golden/db-ipc.jsonl         {fn, args} -> the db:* request schemas, strictConnection, the query history helpers
-//                                     (see scripts/goldens-db-ipc.mjs)
-//   test/golden/conv-*.jsonl         the conversation search (fold, terms, searchDocs, Date.parse, transcript reading, export,
-//                                     toolDetail, IPC sanitizers; see scripts/goldens-convsearch.mjs)
-//   test/golden/update-progress.jsonl, update-strings.json, update-config.json   the update window (see scripts/goldens-update.mjs)
+//   test/golden/update-progress.jsonl   the update window's progress model (see scripts/goldens-update.mjs)
 //   test/golden/detached.jsonl       {fn, args, out} of src/shared/detached.ts (see scripts/goldens-detached.mjs)
 //   test/golden/route-message.jsonl  {channel, args, owners, out} -> routeMessage (shared with vitest)
-//   test/golden/git-spelling.jsonl   {path} -> normalizeSpelling(path, win32 | darwin) of src/main/gitPaths.ts (PLAN G1; the
-//                                     file-system half is checked live by unimux-git/tests/canonical_paths.rs)
 //   test/golden/git-text.jsonl       {value, max} -> trimGitText(value, max) and redactSecrets(value) of src/shared/git.ts
 //   test/golden/git-resolve.jsonl    {args} -> path.win32.resolve / path.posix.resolve of Node with process.cwd() C:\work\cwd
 //                                     (win32) or /work/cwd (posix) and the drive cwds =C: C:\work\cwd, =D: D:\dcwd\x, =E:
 //                                     C:\not-e, =F: '' (the env of the run is replaced while the rows are made)
-//   test/golden/git-shared.jsonl, git-trust.jsonl   src/shared/git.ts, src/shared/gitTrust.ts, the scan fingerprint hash and
-//                                     GitTrustStore's file format (PLAN G2; see scripts/goldens-git.mjs)
-//   test/golden/files-*.jsonl        project files: name order, path checks, previews, saves (see scripts/goldens-files.mjs) and
-//                                     the file operations and the local pane (files-ops.jsonl, see scripts/goldens-fileops.mjs)
-//   test/golden/search-*.jsonl       project search and replace: patterns, globs, project searches, replaces (see
-//                                     scripts/goldens-search.mjs)
-//   test/golden/mcp-tools.json, mcp-zod.jsonl, mcp-calls.jsonl   the MCP tool layer: tools/list per role, instructions, the
-//                                     zod checks and callTool over a scripted service (see scripts/goldens-mcp.mjs)
-//   test/golden/accounts-store.jsonl, codex-accounts.jsonl, accounts-identity.jsonl   the account stores (1.1.4's code, run on
-//                                     scratch dirs) and the identity helpers (see scripts/goldens-accounts.mjs)
+//   test/golden/git-shared.jsonl     src/shared/git.ts (PLAN G2; see scripts/goldens-git.mjs)
+//   test/golden/db-sql.jsonl, db-redis.jsonl  {fn, args} -> the DB helpers of src/shared (see scripts/goldens-db.mjs)
 //   test/golden/changelog.jsonl, monitor.jsonl   parseReleases / compareVersions and the Monitor panel's trees (see
 //                                     scripts/goldens-g8.mjs)
-//   test/golden/sessions-*.jsonl, context-*.jsonl   the session listing, claudeProjectDirName and the context meter (1.1.4's
-//                                     code, run on scratch homes; see scripts/goldens-sessions.mjs)
-//   test/golden/ssh-vault.jsonl, ssh-known-hosts.jsonl, ssh-command-history.jsonl, ssh-history-rules.jsonl   the SSH stores
-//                                     (1.1.4's code, run on scratch dirs) and the history rules (see scripts/goldens-ssh.mjs)
-//   test/golden/accounts-activate.jsonl  "make main", its version-2 recovery and the 0.9.0 recovery on scratch dirs (1.1.4's
-//                                     code; see scripts/goldens-activate.mjs)
-//   test/golden/launch.jsonl         the launch line, reset tail, team prompts, shell integration and the cell MCP config
-//                                     (see scripts/goldens-launch.mjs)
+//   test/golden/context-scan.jsonl   the context meter's line scan of src/shared/contextUsage.ts (scripts/goldens-sessions.mjs)
+//   test/golden/ssh-history-rules.jsonl   the command history rules of src/shared/commandHistory.ts (scripts/goldens-ssh.mjs)
+//
+// - FROZEN: made until R1 by 1.1.4's main-process code (state-after-edit, git-spelling, git-trust, files-*, search-*,
+//   hook-*, conv-*, db-ipc, the account stores, sessions-*, context-backward, the SSH stores, accounts-activate, launch,
+//   mcp-*, update-strings / update-config). That code is gone, so these files are fixed: test/golden/FROZEN.sha256 holds
+//   their hashes and `--check` fails when one changes or disappears. A deliberate change (a translation inside
+//   update-strings.json, say) edits the file by hand and runs `node scripts/dump-goldens.mjs --refreeze` to record the new
+//   hashes; review that diff like code.
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
-import { updateConfigGolden, updateProgressRows, updateStringsGolden } from './goldens-update.mjs';
+import { normalizeRows } from './goldens-normalize.mjs';
+import { updateProgressRows } from './goldens-update.mjs';
 import { detachedRows, routeMessageRows } from './goldens-detached.mjs';
-import { filesGoldens } from './goldens-files.mjs';
-import { fileOpsGoldens } from './goldens-fileops.mjs';
-import { searchGoldens } from './goldens-search.mjs';
 import path, { dirname, resolve } from 'node:path';
-import { hookPayloadRows, hookServerRows } from './goldens-hooks.mjs';
-import { hookSettingsRows } from './goldens-hooksettings.mjs';
-import { convGoldens } from './goldens-convsearch.mjs';
 import { DB_MODULES, dbGoldens } from './goldens-db.mjs';
-import { DB_IPC_MODULES, dbIpcGoldens } from './goldens-db-ipc.mjs';
-import { accountsStoreRows, codexStoreRows, identityRows } from './goldens-accounts.mjs';
-import { gitSharedRows, gitTrustRows } from './goldens-git.mjs';
+import { gitSharedRows } from './goldens-git.mjs';
 import { g8Goldens } from './goldens-g8.mjs';
-import { backwardRows, contextScanRows, sessionListRows, sessionPathRows } from './goldens-sessions.mjs';
-import { historyRows, historyRuleRows, knownHostsRows, vaultRows } from './goldens-ssh.mjs';
-import { activateRows } from './goldens-activate.mjs';
-import { mcpGoldens } from './goldens-mcp.mjs';
-import { LAUNCH_MODULES, launchGoldens } from './goldens-launch.mjs';
+import { contextScanRows } from './goldens-sessions.mjs';
+import { historyRuleRows } from './goldens-ssh.mjs';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -78,34 +54,17 @@ const dir = resolve(root, 'test/golden');
 const load = async (file) => (await runnerImport(resolve(root, file), { configFile: false, logLevel: 'silent', root })).module;
 
 const [
-  { defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { translate }, { messages }, { normalizeEditedState }, { UpdateProgressModel, closeAction },
-  { normalizeSpelling }, gitShared, hooks, codexHooks,
+  { defaultState, normalizeState }, { mergeStateEdit }, { diffState }, { translate }, { messages }, { UpdateProgressModel, closeAction },
+  gitShared,
 ] = await Promise.all([
   load('src/shared/state.ts'), load('src/shared/stateEdits.ts'), load('src/shared/statePatch.ts'), load('src/shared/i18n.ts'), load('src/shared/messages.ts'),
-  load('src/main/stateController.ts'), load('src/shared/updateProgress.ts'), load('src/main/gitPaths.ts'), load('src/shared/git.ts'),
-  load('src/main/hooks.ts'), load('src/shared/codexHooks.ts'),
+  load('src/shared/updateProgress.ts'), load('src/shared/git.ts'),
 ]);
 const { trimGitText, redactSecrets } = gitShared;
 const [detached, { normalizeWaitMark }] = await Promise.all([load('src/shared/detached.ts'), load('src/shared/waiting.ts')]);
-const [gitTrust, gitMain] = await Promise.all([load('src/shared/gitTrust.ts'), load('src/main/git.ts')]);
-const [hookFallback, cellFiles] = await Promise.all([load('src/main/hookFallback.ts'), load('src/main/cellFiles.ts')]);
-const fileGoldens = await filesGoldens(await load('src/main/files.ts'));
 const dbModules = Object.fromEntries(await Promise.all(Object.entries(DB_MODULES).map(async ([name, file]) => [name, await load(file)])));
 const db = dbGoldens(dbModules);
-const dbIpc = dbIpcGoldens(Object.fromEntries(await Promise.all(Object.entries(DB_IPC_MODULES).map(async ([name, file]) => [name, await load(file)]))));
-const [{ AccountsStore }, { CodexAccountsStore }, accounts, codex, { parseCodexAuth }, { decodeJwtClaims }] = await Promise.all([
-  load('src/main/accounts/store.ts'), load('src/main/accounts/codexStore.ts'), load('src/shared/accounts.ts'), load('src/shared/codexAccounts.ts'),
-  load('src/main/accounts/codexActivate.ts'), load('src/main/usage/parse.ts'),
-]);
-const [sessions, contextMain, contextShared, { normalizeProjectPath }] = await Promise.all([
-  load('src/main/sessions.ts'), load('src/main/contextUsage.ts'), load('src/shared/contextUsage.ts'), load('src/shared/platform.ts'),
-]);
-const [{ SshVault }, { KnownHostsStore }, { CommandHistoryStore }, historyRules] = await Promise.all([
-  load('src/main/ssh/vault.ts'), load('src/main/ssh/knownHosts.ts'), load('src/main/ssh/commandHistory.ts'), load('src/shared/commandHistory.ts'),
-]);
-// One module graph, so activate.ts and the swap slot flags it sets are the same instance.
-const activateModules = await load('scripts/goldens-activate.entry.ts');
-
+const [contextShared, historyRules] = await Promise.all([load('src/shared/contextUsage.ts'), load('src/shared/commandHistory.ts')]);
 // ── a small seeded PRNG (mulberry32) ────────────────────────────────────────
 function rng(seed) {
   let a = seed >>> 0;
@@ -205,26 +164,6 @@ function translations() {
   }
   rows.push({ language: 'en', key: 'not a key {x} {y}', params: { x: 1 }, out: translate('en', 'not a key {x} {y}', { x: 1 }) });
   return rows;
-}
-
-/** Folder spellings: both slashes, verbatim and device prefixes, repeated and trailing separators, drive roots, UNC, Unicode case. */
-function gitSpelling() {
-  const r = rng(1301);
-  const B = '\\';
-  const fixed = [
-    '', '/', '//', '///', '////a', B, `${B}${B}?${B}`, 'C:', `C:${B}`, 'C:/', `c:${B}${B}`, `C:${B}${B}${B}`, 'C:/a/', `C:${B}A${B}B${B}`,
-    `${B}${B}?${B}C:${B}A${B}B${B}`, `${B}${B}.${B}C:${B}x`, '//?/c:/x', '//./pipe/x', `${B}${B}?${B}UNC${B}server${B}share${B}dir`,
-    `${B}${B}server${B}share${B}`, '//server//share//x//', '/home/me//Repo/', `relative${B}Path${B}`, './x/', 'a', 'A/',
-    `C:${B}Users${B}RUNNER~1${B}AppData`, `D:${B}ZAŻÓŁĆ${B}Gęślą Jaźń`, `D:${B}İstanbul${B}ΣΊΣΥΦΟΣ`, `E:${B}STRAẞE${B}ǅ`, `F:${B}😀${B}x/`, `x:${B}${B}${B}y`,
-  ];
-  const parts = ['C:', 'c:', 'D:', B, '/', '//', `${B}${B}`, 'Users', 'RUNNER~1', 'Ąę', 'ẞ', 'İ', 'Σ', 'dir name', '.', '..', '?', '😀', 'ﬀ'];
-  const random = [];
-  for (let i = 0; i < 300; i++) {
-    let p = '';
-    for (let n = 1 + Math.floor(r() * 7); n > 0; n--) p += parts[Math.floor(r() * parts.length)];
-    random.push(p);
-  }
-  return [...fixed, ...random].map((path) => ({ path, win32: normalizeSpelling(path, 'win32'), darwin: normalizeSpelling(path, 'darwin') }));
 }
 
 /** Node's path.win32.resolve / path.posix.resolve (git.ts resolves the common git dir and the clone lock key with it), with a
@@ -336,67 +275,54 @@ const files = {
   'atomic-write.jsonl': jsonl(atomicWriteNames()),
   'state-load.jsonl': jsonl(stateLoad()),
   'normalize-state.jsonl': jsonl(normalizeRows({ normalizeState, root })),
-  'state-after-edit.jsonl': jsonl(afterEditRows({ normalizeState, normalizeEditedState })),
   'js-sort.jsonl': jsonl(jsSort()),
   'update-progress.jsonl': jsonl(updateProgressRows({ UpdateProgressModel, closeAction })),
   'detached.jsonl': jsonl(detachedRows({ ...detached, normalizeWaitMark })),
   'route-message.jsonl': jsonl(routeMessageRows(detached)),
-  'git-spelling.jsonl': jsonl(gitSpelling()),
   'git-text.jsonl': jsonl(gitText()),
   'git-resolve.jsonl': jsonl(gitResolve()),
   'git-shared.jsonl': jsonl(gitSharedRows(gitShared)),
-  'git-trust.jsonl': jsonl(gitTrustRows(gitTrust, gitMain)),
-  'files-collate.jsonl': jsonl(fileGoldens.collate),
-  'files-path.jsonl': jsonl(fileGoldens.paths),
-  'files-preview.jsonl': jsonl(fileGoldens.preview),
-  'files-save.jsonl': jsonl(fileGoldens.save),
-  'files-parquet.jsonl': jsonl(fileGoldens.parquet),
-  'files-ops.jsonl': jsonl(await fileOpsGoldens(load)),
-  ...Object.fromEntries(Object.entries(await searchGoldens(load)).map(([name, rows]) => [name, jsonl(rows)])),
-  'hook-payloads.jsonl': jsonl(hookPayloadRows({ hooks, codexHooks })),
-  'hook-server.jsonl': jsonl(await hookServerRows(hooks)),
-  'hook-settings.jsonl': jsonl(hookSettingsRows({ hooks, codexHooks, hookFallback, cellFiles })),
-  ...Object.fromEntries(Object.entries(await convGoldens(load)).map(([name, rows]) => [name, jsonl(rows)])),
   'db-sql.jsonl': jsonl(db['db-sql.jsonl']),
   'db-redis.jsonl': jsonl(db['db-redis.jsonl']),
-  'db-ipc.jsonl': jsonl(dbIpc),
-  'accounts-store.jsonl': jsonl(accountsStoreRows({ AccountsStore })),
-  'codex-accounts.jsonl': jsonl(codexStoreRows({ CodexAccountsStore })),
-  'accounts-identity.jsonl': jsonl(identityRows({ accounts, codex, parseCodexAuth, decodeJwtClaims })),
   ...Object.fromEntries(Object.entries(await g8Goldens(load)).map(([name, rows]) => [name, jsonl(rows)])),
-  'sessions-paths.jsonl': jsonl(sessionPathRows({ ...sessions, normalizeProjectPath })),
-  'sessions-list.jsonl': jsonl(await sessionListRows({ sessions })),
   'context-scan.jsonl': jsonl(contextScanRows(contextShared)),
-  'context-backward.jsonl': jsonl(await backwardRows(contextMain)),
-  'ssh-vault.jsonl': jsonl(vaultRows({ SshVault })),
-  'ssh-known-hosts.jsonl': jsonl(knownHostsRows({ KnownHostsStore })),
-  'ssh-command-history.jsonl': jsonl(historyRows({ CommandHistoryStore })),
   'ssh-history-rules.jsonl': jsonl(historyRuleRows(historyRules)),
-  'accounts-activate.jsonl': jsonl(await activateRows(activateModules)),
-  'launch.jsonl': jsonl(launchGoldens(Object.fromEntries(await Promise.all(Object.entries(LAUNCH_MODULES).map(async ([name, file]) => [name, await load(file)]))))),
 };
-const mcp = await mcpGoldens(load);
-files['mcp-tools.json'] = `${JSON.stringify(mcp.tools, null, 1)}
-`;
-files['mcp-zod.jsonl'] = jsonl(mcp.zod);
-files['mcp-calls.jsonl'] = jsonl(mcp.calls);
-const updateStrings = updateStringsGolden({ root, translate });
-files['update-strings.json'] = `${JSON.stringify(updateStrings, null, 1)}\n`;
-files['update-config.json'] = `${JSON.stringify(updateConfigGolden({ strings: updateStrings }), null, 1)}\n`;
+
+// ── the frozen files ─────────────────────────────────────────────────────────────────────────────────────────────────────
+const FROZEN = resolve(dir, 'FROZEN.sha256');
+/** The hash of a file's text with LF line ends (a checkout with CRLF ends hashes the same). */
+const sha256 = (file) => createHash('sha256').update(readFileSync(file, 'utf8').replace(/\r\n/g, '\n')).digest('hex');
+/** [{hash, name}] of FROZEN.sha256 (`<sha256>  <file>` per line, `#` comments). */
+const frozenList = () => readFileSync(FROZEN, 'utf8').split('\n').filter((l) => l.trim() && !l.startsWith('#'))
+  .map((l) => { const [hash, name] = l.trim().split(/\s+/); return { hash, name }; });
+
+if (process.argv.includes('--refreeze')) {
+  const header = readFileSync(FROZEN, 'utf8').split('\n').filter((l) => l.startsWith('#'));
+  const rows = frozenList().map(({ name }) => `${sha256(resolve(dir, name))}  ${name}`);
+  writeFileSync(FROZEN, `${[...header, ...rows].join('\n')}\n`);
+  console.log(`recorded the hashes of ${rows.length} frozen golden files`);
+  process.exit(0);
+}
 
 const check = process.argv.includes('--check');
-let stale = [];
+const stale = [];
 mkdirSync(dir, { recursive: true });
 for (const [name, text] of Object.entries(files)) {
-  const path = resolve(dir, name);
+  const file = resolve(dir, name);
   if (check) {
     let current = '';
-    try { current = readFileSync(path, 'utf8'); } catch { /* missing */ }
+    try { current = readFileSync(file, 'utf8'); } catch { /* missing */ }
     if (current !== text) stale.push(name);
-  } else writeFileSync(path, text);
+  } else writeFileSync(file, text);
 }
-if (check && stale.length) {
-  console.error(`golden corpus out of date: ${stale.join(', ')} (run \`npm run gen:goldens\`)`);
-  process.exit(1);
-}
-console.log(check ? 'golden corpus up to date' : `wrote ${Object.keys(files).length} golden files to test/golden`);
+const frozen = frozenList();
+const live = new Set(Object.keys(files));
+const changed = frozen.filter(({ hash, name }) => {
+  if (live.has(name)) return true; // listed twice: a frozen file must not be regenerated
+  try { return sha256(resolve(dir, name)) !== hash; } catch { return true; }
+}).map(({ name }) => name);
+if (stale.length) console.error(`golden corpus out of date: ${stale.join(', ')} (run \`npm run gen:goldens\`)`);
+if (changed.length) console.error(`frozen golden files changed or missing: ${changed.join(', ')} (made by 1.1.4's main-process code; see the header of scripts/dump-goldens.mjs)`);
+if (stale.length || changed.length) process.exit(1);
+console.log(check ? `golden corpus up to date (${live.size} live, ${frozen.length} frozen)` : `wrote ${live.size} golden files to test/golden; ${frozen.length} frozen files unchanged`);

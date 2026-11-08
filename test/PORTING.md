@@ -2,6 +2,12 @@
 
 Every `it()` / `test()` case of a main-side test file (one that imports src/main, src/ptyhost, src/dbhost, src/sftphost, src/convsearch, src/exechost, src/sshcore or src/updatesplash) gets one row here when its package ports it. `npm run porting:count` prints the baseline and the progress; the 1.2.0 release gate needs every case done (ported, renderer-only or obsolete).
 
+R1 (2026-11-08) removed Electron and with it those TypeScript sources and their test files. This file is the record of that port now: the historical total below is what the counter checks against (one row per case, no `partial` row left). The `renderer-only` cases still run in vitest (their files were kept with only those cases); every other case lives on as the Rust test named in its row. Suites that tested deleted code without being counted here (no direct import of a main-side folder) are listed at the end.
+
+<!-- porting-total: 2157 cases in 143 files -->
+
+Historical total: 2157 cases in 143 main-side test files.
+
 Status values: `ported` (a Rust test checks the same behaviour), `partial` (the Rust test covers part of it; the rest is named in the Rust column), `renderer-only` (the case tests TS that stays in the renderer), `obsolete` (Electron-only machinery that no longer exists in 1.2.0; reason in the Rust column).
 
 Rows keep the exact case name (the counter matches them). Rust tests are named `crate::module::tests::name` or `crate/tests/file.rs::name`.
@@ -2165,3 +2171,26 @@ Rows keep the exact case name (the counter matches them). Rust tests are named `
 | stability | describes anything thrown | unimux-app startup::tests::describes_any_panic_payload; unimux-core crash_log::tests::describe_cuts | ported |
 | ipc-guard | ignores a foreign send and delivers the app window's one | unimux-ipc router::tests::ignores_a_foreign_send_and_delivers_the_app_windows_one | ported |
 | main-misc | creates and removes a worktree on a new branch, suffixing collisions | unimux-git/tests/worktree_safety.rs::a_fresh_worktree_is_clean_removed_without_force_its_branch_deleted_with_d; worktree_safety.rs::collisions_with_a_folder_or_a_branch_get_a_number | ported |
+
+<!-- porting-rows-end -->
+
+## Removed at R1 without per-case rows
+
+These suites tested code R1 deleted but were not in the count above (they reached it through a test helper, a preload file or a package, not through a direct import of a main-side folder). They are recorded per suite, not per case: the Rust tests named here cover the same area, but nobody mapped them case by case.
+
+| suite | cases | what it tested | where the behaviour is checked now |
+|---|---|---|---|
+| db-fake.int | 12 | the DB Host against the fake Postgres server (password prompts, TLS modes) | unimux-db tests/pg_client.rs, pg_session.rs (fixtures test/fixtures/pg-tls) |
+| db-mysql-fake.int | 12 | MySQL / MariaDB sessions against mysql2's server protocol | unimux-db tests/mysql_client.rs, mysql_session.rs |
+| db-mysql-real.int | 15 | MySQL / MariaDB against real servers (MC_MYSQL_TEST_SERVERS, skipped without them) | unimux-db tests/wire_servers.rs (ignored without MC_SP9_SERVERS) |
+| db-pglite.int | 30 | the DB Host core against PGlite over the Postgres wire | unimux-db tests/pg_session.rs, sql_golden.rs, wire_servers.rs |
+| db-redis.int | 27 | Redis sessions against the in-process RESP server | unimux-db tests/redis_host.rs, redis_ops.rs, redis_ipc.rs |
+| db-sqlite.int | 15 | SQLite sessions on real database files | unimux-db tests/db_sqlite.rs, sqlite_host.rs |
+| mcp-lazy | 3 | the MCP server starting on first use | unimux-mcp tests/server.rs |
+| mcp-tasks-elicit | 9 | MCP tasks and elicitation through the SDK client | unimux-mcp tests/protocol.rs, tools_http.rs (PLAN M2) |
+| nodeHost | 8 | the Node side of the B1 dual-host harness (test/helpers/nodeHost.ts) | obsolete with the harness; the Rust host: unimux-hostd tests/stdio.rs |
+| pty-host-client | 5 | PtyHostClient across a Pty Host crash (Electron utility process) | obsolete (no Pty Host process); restart of the in-process engine: unimux-pty tests/service.rs |
+| pty-kill-tree | 2 | PtyManager.killAll and tree kills after the time limit | unimux-pty tests/manager.rs |
+| ptyhost.int | 3 | the Pty Host over its message protocol | unimux-pty tests/engine.rs, unimux-hostd tests/stdio.rs |
+| updater | 37 | electron-updater driving (check, download, install, splash hand-over) | unimux-update tests/golden.rs, net_backend.rs and its unit tests (PLAN U1 to U3) |
+| ssh-packaging | 6 | electron-builder file lists keeping ssh2's native parts out, pinned driver versions | obsolete (no electron-builder, no node_modules in the app); `npm run check:bundle` checks the bundle |

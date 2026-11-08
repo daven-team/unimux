@@ -1,4 +1,4 @@
-// Exercise the built app (the Tauri check build; MC_APP_TARGET=electron: Electron's out/) using isolated data and fake agents
+// Exercise the built app (the Tauri check build) using isolated data and fake agents
 // (no model calls).
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
@@ -39,7 +39,7 @@ const port = await new Promise((resolvePort, reject) => {
   const probe = createServer(); probe.on('error', reject);
   probe.listen(0, '127.0.0.1', () => { const p = probe.address().port; probe.close(() => resolvePort(p)); });
 });
-const home = scratchHome(root); // never the real home: the app reads ~/.claude and ~/.codex, Electron its appData
+const home = scratchHome(root); // never the real home: the app reads ~/.claude and ~/.codex
 const env = { ...scrubAppEnv({ ...process.env }), MC_DATA_DIR: data, MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port), UNIMUX_SMOKE_TOKENS: tokens,
   PATH: agents + delimiter + (process.env.PATH ?? process.env.Path ?? ''), ...home.env };
 const child = spawnApp({ cwd: process.cwd(), env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -89,7 +89,7 @@ async function mcpClient(cellId) {
   }
   assert.match(token, /^[0-9a-f]{64}$/);
   const { url } = await evaluate('window.mc.getMcpInfo()');
-  const client = new Client({ name: 'electron-smoke', version: '1' });
+  const client = new Client({ name: 'unimux-smoke', version: '1' });
   await client.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
   clients.push(client);
   return client;
@@ -248,7 +248,7 @@ try {
   console.error(appOutput.slice(-4000));
 } finally {
   await Promise.all(clients.map((client) => client.close().catch(() => {})));
-  // A normal quit (Tauri: the test bridge; Electron: Browser.close), then our own tree kill.
+  // A normal quit through the test bridge, then our own tree kill.
   if (socket?.readyState === WebSocket.OPEN) { await quitApp({ child, evaluate, cdp }).catch(() => {}); socket.close(); }
   for (let i = 0; i < 50 && !exited; i++) await sleep(100);
   if (!exited) {

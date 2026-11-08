@@ -1,6 +1,6 @@
 /// <reference path="./virtual-messages.d.ts" />
 // The renderer's message rows, filled one language at a time. In the renderer build every shared message table
-// (`messages`, `*Messages`) is this object (electron.vite.messages.ts), so the main chunk carries no translations and
+// (`messages`, `*Messages`) is this object (vite.messages.ts), so the main chunk carries no translations and
 // each language is a small chunk loaded on demand. Without that build step (tests, tools) the shared tables keep all
 // languages and this object stays unused.
 import type { Language } from '../../shared/languages';

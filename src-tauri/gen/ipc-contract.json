@@ -1,9 +1,9 @@
 {
  "generatedBy": "scripts/gen-ipc-contract.mjs",
  "sources": [
-  "src/preload/mcApi.ts",
-  "src/preload/api.d.ts",
-  "src/updatesplash/preload.ts"
+  "src/renderer/src/bridge/mcApi.ts",
+  "src/renderer/src/bridge/api.d.ts",
+  "test/contract/preload-channels.json"
  ],
  "summary": {
   "methods": 253,

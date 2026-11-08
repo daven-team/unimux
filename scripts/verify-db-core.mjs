@@ -2,7 +2,7 @@
 // (scripts/pg-test-server.mjs) and the local SSH test server. Through window.mc.db it saves connections (the password goes to
 // <data>/db/vault.json, never state.json), connects directly and through an SSH tunnel (the SSH password question arrives
 // as a db:prompt), reads metadata, streams query rows over the DB port, pages a table, applies staged edits and cancels nothing
-// real. Run `npm run build` first. Never touches real hosts or the user's data dir; kills only the PIDs it started.
+// real. Run `npm run build:check` first. Never touches real hosts or the user's data dir; kills only the PIDs it started.
 import { spawn } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';

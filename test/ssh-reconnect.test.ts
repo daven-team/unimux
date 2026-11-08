@@ -1,27 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
-  hostFormDirty, hostToDraft, normalizeSshHosts, reconnectAllTargets, reconnectAtStartCells, sshCellStart, sshStartEffects, validateHostDraft,
+  hostFormDirty, hostToDraft, reconnectAllTargets, reconnectAtStartCells, sshCellStart, sshStartEffects, validateHostDraft,
   type SshHost, type SshPhase,
 } from '../src/shared/ssh';
-import { normalizeState } from '../src/shared/state';
-import { createAppStartClaim } from '../src/main/appStartClaim';
 
 const ID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const host = (n: number, patch: Partial<SshHost> = {}): SshHost => ({ id: ID(n), label: `h${n}`, address: `h${n}.example`, port: 22, username: 'deploy', createdAt: 1, updatedAt: 1, ...patch });
 
 describe('"Łącz ponownie po uruchomieniu aplikacji" on the saved host', () => {
-  it('loads as off when missing or invalid and keeps only true', () => {
-    expect(normalizeSshHosts([host(1)])[0].reconnectOnStart).toBeUndefined();
-    expect(normalizeSshHosts([{ ...host(1), reconnectOnStart: true }])[0].reconnectOnStart).toBe(true);
-    expect('reconnectOnStart' in normalizeSshHosts([{ ...host(1), reconnectOnStart: false }])[0]).toBe(false);
-    for (const junk of ['true', 1, {}, null, [true]]) expect('reconnectOnStart' in normalizeSshHosts([{ ...host(1), reconnectOnStart: junk }])[0], String(junk)).toBe(false);
-  });
-
-  it('survives the state normalizer', () => {
-    const s = normalizeState({ version: 1, projects: [], sshHosts: [{ ...host(1), reconnectOnStart: true }, { ...host(2), reconnectOnStart: 'yes' }, host(3)] });
-    expect(s!.sshHosts.map((h) => h.reconnectOnStart)).toEqual([true, undefined, undefined]);
-  });
-
   it('round-trips through the host form and counts as a change', () => {
     const on = host(1, { reconnectOnStart: true });
     expect(hostToDraft(on).reconnectOnStart).toBe(true);
@@ -94,19 +80,6 @@ describe('"Połącz ponownie wszystkie SSH"', () => {
   it('takes at most the 20 cells of a grid', () => {
     const cells = Array.from({ length: 25 }, (_, i) => cell(`c${i}`));
     expect(reconnectAllTargets(cells, {}, hosts)).toHaveLength(20);
-  });
-});
-
-describe('the app start claim of main', () => {
-  it('answers true once (a foreign sender never reaches it: the channel is sender-guarded)', () => {
-    const c = createAppStartClaim();
-    expect(c.claim()).toBe(true);
-    expect(c.claim()).toBe(false); // a reload
-  });
-  it('is spent by a Pty Host restart before the renderer claims it', () => {
-    const c = createAppStartClaim();
-    c.cancel();
-    expect(c.claim()).toBe(false);
   });
 });
 

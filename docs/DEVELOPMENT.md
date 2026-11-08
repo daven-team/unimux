@@ -4,25 +4,26 @@
 git clone https://github.com/daven-team/unimux
 cd unimux
 npm install           # .npmrc sets legacy-peer-deps
-npm run dev           # app with hot reload
-npm test              # unit tests + integration tests against a real native PTY
-npm run dist:win      # Windows installer in release/
-npm run dist:mac      # macOS DMG + ZIP in release/ (run on a Mac)
-npm run test:packaged # verify node-pty using the packaged Electron runtime
+npm run dev           # the Tauri app with the Vite dev server (hot reload of the UI)
+npm test              # vitest: src/shared and the renderer
+npm run cargo -- test --workspace --manifest-path src-tauri/Cargo.toml   # the Rust tests
+npm run typecheck     # tsc for the renderer, src/shared, scripts' configs and the tests
+npm run gen:check     # the generated window.mc contract, message table and golden corpus are up to date
+npm run build:check   # optimized exe with the test bridge and dev overrides (src-tauri/target/check) for real-app scripts
+npm run build         # release build and installer: NSIS on Windows, app + DMG on macOS (src-tauri/target/release/bundle)
+npm run check:bundle  # the bundle carries no node.exe, no .node addon and no JS outside the renderer bundle
 node scripts/smoke-start.mjs # Windows: start the check build like a shortcut does (no console) in a scratch profile
 npm run test:start    # CI only: install the release setup silently and start the installed exe the same way
-npm run test:ssh-electron # check SSH key types and ciphers under Electron's own Node
 ```
 
-Built with Electron, TypeScript, React, Zustand, xterm.js, node-pty, electron-vite and Vitest.
+Built with Tauri 2, Rust, TypeScript, React, Zustand, xterm.js, Vite and Vitest. The shipped app has no Node: the UI is a Vite bundle embedded in the Rust binary.
 
 | Path | What lives there |
 |---|---|
-| `src/shared` | Pure logic: layouts, state model, launch commands, status tracking, key encoding |
-| `src/ptyhost` | The terminal process (node-pty) |
-| `src/main` | Electron main: persistence, sessions index, hooks, worktrees, updater |
-| `src/renderer` | The UI |
-| `test` | Vitest suites |
+| `src/shared` | Pure logic shared by the UI and the scripts: layouts, state model, launch commands, status tracking |
+| `src/renderer` | The UI; `src/renderer/src/bridge` is window.mc over Tauri (mcApi.ts + api.d.ts are the contract) |
+| `src-tauri` | The Rust workspace: the app (`unimux-app`) and its crates (docs/tauri/ARCHITECTURE.md) |
+| `test` | Vitest suites, the golden corpus the Rust tests check against, and PORTING.md |
 
 ## How it works
 
@@ -57,12 +58,12 @@ All platforms: add notes in `docs/releases/x.y.z.md`, push a version tag, wait f
 
 ## Performance
 
-Windows only, after `npm run build`:
+Windows only, after `npm run build:check`:
 
-- `node scripts/perf-check.mjs [cells] [seconds]` is the regression check (default 20 cmd cells, 15 s windows). It starts the built app with a scratch data dir and home and measures four phases: idle, one "working" dot with no visible output, a 12,000-line flood in every other cell (memory once the scrollback is full) and every cell printing about 60 lines a second. No terminal has the keyboard focus while it measures, so every cell is a background cell. It prints CPU (% of one core) and private memory per process (main, GPU, renderer, Pty Host, SFTP Host), the running animations and the frames the compositor drew. It fails when an animation runs continuously while cells work, when idle costs 1 % of a core or more (the quieter of two windows; a third window is measured before it fails), or when the working dot costs 2.5 % or more or draws 10 frames a second or more. The dot has its own budget because its ripple steps with a shared timer, about three frames a second, each about 0.5 % of a core on a 240 Hz display with 16-20 WebGL cells (1.0.9: about 2.3 % with 16 cells against 0.6 % without the ripple). `--json` prints the raw numbers, `--scrollback=N` (one of the setting's choices) starts with that scrollback setting.
+- `node scripts/perf-hidden.mjs` (output and timers of a minimized window) and `node scripts/bench-jank.mjs` (UI smoothness) are the regression checks; R2 compares them with 1.1.4.
 - `node scripts/perf-grid.mjs` (frame times and long tasks of a busy grid) and `npm run perf` (`scripts/perf-profile.mjs`, startup profile) give more detail.
 
-Typing latency: `node scripts/perf-latency.mjs` times the drawn echo in the built app (local SSH test server, loopback). `node scripts/ssh-latency-bench.mjs` needs no build and runs on any platform: it times keystroke -> echo through the Pty Host's SSH path (SshManager, OutputChannel, OutputBatcher, a worker thread as the renderer) against a local server behind an emulated round trip of 0 to 300 ms, with echoes of one packet or an echo plus a redraw (zsh, fish), with 16 busy agent terminals in the same host, and (`bursts`) typed like a fast typist: words faster than the server answers, pauses between them. It splits the time into network, host pipeline, input queue and delivery and counts the echoes the host held for more than 2 ms; `--coarse-timers` makes the host's timers fire on 15.6 ms ticks like Windows does when no program asked for a finer timer resolution, and `--src <dir>` measures another checkout's `src` instead (before / after a change; an exported `src` without node_modules works too). In none of the bench's scenarios may a typed echo wait for a coalescing timer (`pipeline > 2 ms` stays at 0, also with `--coarse-timers`). Outside them an echo can still wait for a timer: right after a server got much slower (the echo window is learnt again from the next keys typed after a pause), or in a terminal that prints on its own while you type (its output takes the keystroke's fast flushes).
+Typing latency: `node scripts/perf-latency.mjs` times the drawn echo in the check build (local SSH test server, loopback). (1.1.x also had `scripts/ssh-latency-bench.mjs`, a benchmark of the Node Pty Host's SSH path; it left with Electron in 1.2.0.)
 
 Keep the status indicators free of infinite CSS animations: one running animation makes Chromium present a frame at every vsync (about 40 % of a core on a 240 Hz display; the 1.0.8 dot pulse cost 43 % with 16 cells). A working status mark (`src/renderer/src/components/StatusMark.tsx`, `statusStyles.css`: the badges, the cell icon's corner, the header) turns smoothly for a few finite turns when it appears and then steps with one shared timer (`src/shared/blink.ts`, `src/renderer/src/blink.ts`: `data-pulse` on `<html>`, four phases of 320 ms), which stops while the window is hidden and under reduced motion (a still mark). The spinners (refresh arrows, the account swap ring) turn with CSS only while they are shown. node-pty's ConPTY output Worker gets small heap reservations and an error listener at install time (`scripts/patch-node-pty.cjs`, run by `postinstall` and checked by `npm run test:packaged`); after a node-pty upgrade the patch fails loudly until it is adapted.
 

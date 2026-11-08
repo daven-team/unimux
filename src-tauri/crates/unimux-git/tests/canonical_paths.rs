@@ -1,7 +1,7 @@
-//! Canonical folder spellings on REAL folders against the TS reference (PLAN G1 acceptance): a lab with 8.3 short names, a
-//! junction (a symlink off Windows), a subst drive, missing children and odd case / slashes / prefixes. Every spelling goes to
-//! src/main/gitPaths.ts through scripts/git-paths-golden.mjs (Node strips the types itself) and to the Rust port; the answers
-//! must be identical, and the aliases must really resolve to one folder.
+//! Canonical folder spellings on REAL folders (PLAN G1 acceptance): a lab with 8.3 short names, a junction (a symlink off
+//! Windows), a subst drive, missing children and odd case / slashes / prefixes. The aliases must really resolve to one folder
+//! and every answer must be stable. Until R1 every spelling was also compared with 1.1.4's src/main/gitPaths.ts on the same
+//! folders; the pure spelling rules stay pinned by the frozen golden rows of test/golden/git-spelling.jsonl (tests/golden.rs).
 //!
 //! The subst drive is created with `subst X: <lab folder>` and removed again (`subst X: /d`) when the test ends, even on a
 //! failure; set UNIMUX_TEST_NO_SUBST=1 to leave it out. Nothing here opens a window.
@@ -11,33 +11,10 @@ use std::collections::HashMap;
 #[cfg(windows)]
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-use serde_json::{Value, json};
+#[cfg(windows)]
 use unimux_exec::{ExecOptions, Program};
 use unimux_git::paths::{canonical_path, is_inside_path, normalize_spelling, realpath_native, relative_inside, same_path};
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
-}
-
-/// Runs the TS reference on the spellings; None when Node is not installed.
-fn ts_answers(lab: &Path, paths: &[String], pairs: &[(String, String)]) -> Option<Value> {
-    let input = lab.join("golden-input.json");
-    std::fs::write(&input, json!({ "paths": paths, "pairs": pairs }).to_string()).unwrap();
-    let script = repo_root().join("scripts/git-paths-golden.mjs");
-    let program = Program::Args { program: "node".into(), args: vec![script.into(), input.into()] };
-    let out = match unimux_exec::run(
-        &program,
-        &ExecOptions { timeout: Duration::from_secs(60), max_output: 16 * 1024 * 1024, ..Default::default() },
-    ) {
-        Ok(out) => out,
-        Err(unimux_exec::ExecError::Spawn { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(e) => panic!("node: {e}"),
-    };
-    assert!(out.ok(), "node failed: {}", String::from_utf8_lossy(&out.stderr));
-    Some(serde_json::from_slice(&out.stdout).expect("node answer"))
-}
 
 #[cfg(windows)]
 fn short_spelling(path: &Path) -> Option<String> {
@@ -82,7 +59,7 @@ fn s(p: impl AsRef<Path>) -> String {
 }
 
 #[test]
-fn canonical_paths_of_real_folders_match_the_ts_reference() {
+fn canonical_paths_of_real_folders_are_stable_and_resolve_aliases() {
     let tmp = tempfile::Builder::new().prefix("mc-spelling-rs-").tempdir().unwrap();
     let lab = PathBuf::from(realpath_native(&s(tmp.path())).unwrap());
     let long = lab.join("A Long Project Name");
@@ -188,31 +165,43 @@ fn canonical_paths_of_real_folders_match_the_ts_reference() {
         assert_eq!(canonical_path(alias), canonical_path(target), "{what}");
     }
 
-    let Some(ts) = ts_answers(&lab, &paths, &pairs) else {
-        eprintln!("node is not installed: the TS comparison is skipped");
-        return;
-    };
+    // Every answer is a fixed point: the canonical spelling of a canonical spelling is itself, and normalizing twice changes
+    // nothing. Until R1 every answer was also compared with 1.1.4's src/main/gitPaths.ts on the same folders; the pure
+    // spelling rules stay pinned by the frozen golden rows of test/golden/git-spelling.jsonl (tests/golden.rs).
     let mut bad = Vec::new();
     for p in &paths {
-        let want = ts["canonical"][p].as_str().unwrap();
-        let got = canonical_path(p);
-        if got != want {
-            bad.push(format!("canonical {p:?}: rust {got:?}, ts {want:?}"));
+        let canonical = canonical_path(p);
+        if canonical_path(&canonical) != canonical {
+            bad.push(format!("canonical {p:?} -> {canonical:?} is not a fixed point"));
         }
-        let want = ts["normalize"][p].as_str().unwrap();
-        let got = normalize_spelling(p, cfg!(windows));
-        if got != want {
-            bad.push(format!("normalize {p:?}: rust {got:?}, ts {want:?}"));
+        let normal = normalize_spelling(p, cfg!(windows));
+        if normalize_spelling(&normal, cfg!(windows)) != normal {
+            bad.push(format!("normalize {p:?} -> {normal:?} is not a fixed point"));
         }
     }
-    for (i, (a, b)) in pairs.iter().enumerate() {
-        let want = &ts["pairs"][i];
-        let got = json!({ "same": same_path(a, b), "inside": is_inside_path(a, b), "relative": relative_inside(a, b) });
-        if &got != want {
-            bad.push(format!("pair {a:?} / {b:?}: rust {got}, ts {want}"));
+    // the spellings of one existing folder (slashes, a trailing separator, the verbatim prefix) are that folder
+    let long_canonical = canonical_path(&long_s);
+    let mut spellings = vec![long_s.replace('\\', "/"), format!("{long_s}{}", std::path::MAIN_SEPARATOR)];
+    if cfg!(windows) {
+        spellings.extend([long_s.to_uppercase(), long_s.to_lowercase(), format!(r"\\?\{long_s}")]);
+    }
+    for spelling in &spellings {
+        if canonical_path(spelling) != long_canonical {
+            bad.push(format!("canonical {spelling:?}: {:?}, the folder is {long_canonical:?}", canonical_path(spelling)));
         }
     }
+    for (a, b) in &pairs {
+        if same_path(a, b) != same_path(b, a) {
+            bad.push(format!("same_path is not symmetric for {a:?} / {b:?}"));
+        }
+        if relative_inside(a, b).is_some() && !is_inside_path(a, b) {
+            bad.push(format!("relative_inside without is_inside_path for {a:?} / {b:?}"));
+        }
+    }
+    assert!(is_inside_path(&long_s, &s(&sub)) && !is_inside_path(&s(&sub), &long_s));
+    assert!(!is_inside_path(&long_s, &format!("{long_s} 2")));
+    assert!(same_path(&long_s, &long_s) && !same_path(&long_s, &s(&sub)));
     assert!(bad.is_empty(), "{} differences:\n{}", bad.len(), bad.join("\n"));
     let kinds: Vec<&str> = aliases.iter().map(|(_, _, what)| *what).collect();
-    eprintln!("{} spellings and {} pairs equal to the TS reference; aliases resolved: {kinds:?}", paths.len(), pairs.len());
+    eprintln!("{} spellings and {} pairs checked; aliases resolved: {kinds:?}", paths.len(), pairs.len());
 }

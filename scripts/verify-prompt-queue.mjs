@@ -1,4 +1,4 @@
-// Real-app check of the 1.0.9 prompt queue (npm run build:check first; MC_APP_TARGET=electron: npm run build). A scratch data dir and home, MC_OFFSCREEN=1 and
+// Real-app check of the 1.0.9 prompt queue (npm run build:check first). A scratch data dir and home, MC_OFFSCREEN=1 and
 // MC_DEBUG_PORT (default 9407). One Claude cell (the installed CLI, talking to a local mock of the Messages API, never the
 // network) starts with four queued prompts saved in its state: the queue must come up paused after the launch, send its
 // prompts one per finished turn (a multi-line one intact), pause on a permission dialog, take a prompt added, edited and

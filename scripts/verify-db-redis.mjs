@@ -2,7 +2,7 @@
 // server (scripts/redis-test-server.mjs, password protected, seeded) and the local SSH test server. Through window.mc.db.redis it
 // saves a connection (password only in the sealed vault), connects, lists DBs, scans keys with details, reads and writes values
 // (binary included), runs console commands (dangerous ones refused without confirmation), receives Pub/Sub messages over the DB
-// port, reads INFO/SLOWLOG/CLIENT LIST and connects read-only through an SSH tunnel. Run `npm run build` first. Never touches
+// port, reads INFO/SLOWLOG/CLIENT LIST and connects read-only through an SSH tunnel. Run `npm run build:check` first. Never touches
 // real hosts or the user's data dir; kills only the PIDs it started.
 import { spawn } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';

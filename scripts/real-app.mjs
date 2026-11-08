@@ -1,8 +1,7 @@
 // The real-app harness of every verify-*, perf-*, bench-* and capture script (PLAN X1, on top of F13's tauri-app.mjs).
 //
-// Target: the Tauri `check` build (npm run build:check) by default; MC_APP_TARGET=electron runs the same script against the
-// Electron build in out/ (npm run build), the 1.1.4 reference, until R1 removes it. Both targets get the same scratch data
-// dir and home from the script; nothing here ever reaches the real %APPDATA%\unimux, ~/.claude or ~/.codex.
+// Target: the Tauri `check` build (npm run build:check). Every launch gets a scratch data dir and home from the script;
+// nothing here ever reaches the real %APPDATA%\unimux, ~/.claude or ~/.codex.
 //
 // "Blocked by <package>": the check build records every window.mc command a page asked for that no package implements yet
 // (MC_NOT_YET_LOG, written by test_record.rs as it happens). The UI calls a set of them at every launch (cli:status,
@@ -16,7 +15,6 @@
 // Exit codes: 0 pass, 1 fail, 2 blocked.
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,36 +25,30 @@ import { appBinary, freePort, sleep } from './tauri-app.mjs';
 export { appBinary, freePort, sleep };
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-// `--target=electron` on the command line wins over MC_APP_TARGET (npm scripts cannot set env vars on every OS).
-const targetIndex = process.argv.findIndex((a, i) => i > 1 && a.startsWith('--target='));
-const targetArg = targetIndex > 1 ? process.argv[targetIndex].slice('--target='.length) : undefined;
-// Taken out again, so a script's own positional arguments (a screenshot folder, the parts to run) never see it.
-if (targetIndex > 1) process.argv.splice(targetIndex, 1);
-const target = (targetArg ?? process.env.MC_APP_TARGET ?? 'tauri').toLowerCase();
-if (target !== 'tauri' && target !== 'electron') throw new Error(`MC_APP_TARGET must be tauri or electron, not ${target}`);
-/** 'tauri' (the check build) or 'electron' (out/, the 1.1.4 reference). */
-export const APP_TARGET = target;
-export const isTauri = target === 'tauri';
+// The Electron target (MC_APP_TARGET=electron / --target=electron, the 1.1.4 reference) was removed with Electron (R1); a
+// script that still asks for it fails right away instead of silently testing something else.
+const legacyTarget = process.argv.find((a, i) => i > 1 && a.startsWith('--target=')) ?? (process.env.MC_APP_TARGET ? `MC_APP_TARGET=${process.env.MC_APP_TARGET}` : null);
+if (legacyTarget && !/(^|=)tauri$/i.test(legacyTarget)) throw new Error(`${legacyTarget}: the Electron target was removed in 1.2.0; the harness runs the Tauri check build only`);
+{
+  const index = process.argv.findIndex((a, i) => i > 1 && a.startsWith('--target='));
+  // Taken out, so a script's own positional arguments (a screenshot folder, the parts to run) never see it.
+  if (index > 1) process.argv.splice(index, 1);
+}
+/** The app under test: always the Tauri check build (kept as names for the scripts written against both targets). */
+export const APP_TARGET = 'tauri';
+export const isTauri = true;
 
-/**
- * The version the app under test reports (its status bar): tauri.conf.json for the check build (1.2.0 on), package.json for
- * the Electron build (1.1.4, which electron-builder took from there).
- */
+/** The version the app under test reports (its status bar): the one of tauri.conf.json. */
 export function appVersion(checkout = ROOT) {
-  const file = isTauri ? join(checkout, 'src-tauri', 'crates', 'unimux-app', 'tauri.conf.json') : join(checkout, 'package.json');
-  return JSON.parse(readFileSync(file, 'utf8')).version;
+  return JSON.parse(readFileSync(join(checkout, 'src-tauri', 'crates', 'unimux-app', 'tauri.conf.json'), 'utf8')).version;
 }
 
 /** Throws with what to build when the app under test is missing. */
-export function requireBuild(checkout = ROOT) {
-  if (isTauri) appBinary();
-  else if (!existsSync(join(checkout, 'out', 'main', 'index.js'))) throw new Error(`Build first: npm run build (in ${checkout}; MC_APP_TARGET=electron)`);
+export function requireBuild() {
+  appBinary();
 }
 
-/**
- * A URL of an app page: Tauri's `http://tauri.localhost/` (WebView2 may list it without index.html), `tauri://localhost/`
- * (WKWebView), Electron's `file:///.../out/renderer/index.html`.
- */
+/** A URL of an app page: `http://tauri.localhost/` (WebView2 may list it without index.html) or `tauri://localhost/` (WKWebView). */
 export const isAppUrl = (url) => /^(https?:\/\/tauri\.localhost|tauri:\/\/localhost)\/(index\.html)?([?#]|$)/.test(url) || /\/index\.html([?#]|$)/.test(url);
 /** A page of the app that is the main window (not a detached one, not DevTools). */
 export const isMainPage = (t) => t.type === 'page' && isAppUrl(t.url) && !t.url.includes('detached=');
@@ -138,18 +130,18 @@ process.on('exit', (code) => {
   const notYet = notYetCommands();
   const bridge = [...bridgeBlocks].map(([owner, ops]) => ({ owner, commands: [...ops] }));
   // Only a failure with not-yet calls needs the baseline; a pass never waits for a bare launch.
-  const baseline = isTauri && notYet.length && code !== 0 ? startupBaselineSync() : null;
+  const baseline = notYet.length && code !== 0 ? startupBaselineSync() : null;
   const run = classifyRun({ code, strict, notYet, baseline, packages: SCRIPT_PACKAGES[script] ?? [], bridge });
   if (run.result === 'blocked') {
     console.log(`\nBLOCKED by ${formatBlocked(run.blocked)}`);
     process.exitCode = 2;
-  } else if (run.seen.length && isTauri) {
+  } else if (run.seen.length) {
     const why = code === 0 ? '' : baseline ? ' (boot-time calls of the UI, not the cause)' : ' (no startup baseline: node scripts/real-app-baseline.mjs)';
     console.log(`\ninfo: not-yet commands during the run${why}: ${formatBlocked(run.seen)}`);
   }
   if (process.env.MC_REAL_APP_REPORT) {
     try {
-      writeFileSync(process.env.MC_REAL_APP_REPORT, JSON.stringify({ script, target, code, result: run.result, blocked: run.blocked, seen: run.seen }, null, 1));
+      writeFileSync(process.env.MC_REAL_APP_REPORT, JSON.stringify({ script, target: APP_TARGET, code, result: run.result, blocked: run.blocked, seen: run.seen }, null, 1));
     } catch { /* the runner reports a missing file */ }
   }
   if (reportDir && !runnerLogDir) try { rmSync(reportDir, { recursive: true, force: true }); } catch { /* a log still open */ }
@@ -158,35 +150,20 @@ process.on('exit', (code) => {
 // ── launching ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 /**
  * Starts the app under test with `env` (the full environment: scripts build it from scrubAppEnv(process.env) plus the
- * scratch home, MC_DATA_DIR, MC_OFFSCREEN, MC_DEBUG_PORT). A key set to null removes an inherited variable. `cwd`: the
- * checkout whose out/ the Electron target runs (default: this one). `inspectPort`: Electron's main-process inspector (only
- * the Electron target has one; Tauri scripts use the test-bridge commands instead).
+ * scratch home, MC_DATA_DIR, MC_OFFSCREEN, MC_DEBUG_PORT). A key set to null removes an inherited variable.
  */
-export function spawnApp({ env, args = [], cwd = ROOT, stdio = 'ignore', inspectPort } = {}) {
+export function spawnApp({ env, args = [], cwd = ROOT, stdio = 'ignore' } = {}) {
   const e = { ...env };
   for (const [key, value] of Object.entries(e)) if (value === null || value === undefined) delete e[key];
-  delete e.ELECTRON_RUN_AS_NODE;
-  delete e.ELECTRON_RENDERER_URL;
-  let child;
-  if (isTauri) {
-    e.MC_NOT_YET_LOG = notYetLogPath();
-    // OS notifications of a harness run go to the test bridge (`toasts`), never to the desktop (W4 honours it).
-    e.MC_TEST_TOASTS = '1';
-    child = spawn(appBinary(), args, { cwd, env: e, windowsHide: true, stdio });
-  } else {
-    // Resolved only for this target: the Tauri scripts never load the electron package.
-    const electron = createRequire(join(ROOT, 'package.json'))('electron');
-    // No OS notification of a check may reach the desktop: they go to the main process's __shown (see the file).
-    const toastStub = join(ROOT, 'scripts', 'electron-test-toasts.cjs');
-    e.MC_TEST_TOASTS_NODE_OPTIONS = e.NODE_OPTIONS ?? '';
-    e.NODE_OPTIONS = `${e.NODE_OPTIONS ? `${e.NODE_OPTIONS} ` : ''}--require "${toastStub.replace(/\\/g, '/')}"`;
-    child = spawn(electron, [...(inspectPort ? [`--inspect=${inspectPort}`] : []), ...args, '.'], { cwd, env: e, windowsHide: true, stdio });
-  }
+  e.MC_NOT_YET_LOG = notYetLogPath();
+  // OS notifications of a harness run go to the test bridge (`toasts`), never to the desktop (W4 honours it).
+  e.MC_TEST_TOASTS = '1';
+  const child = spawn(appBinary(), args, { cwd, env: e, windowsHide: true, stdio });
   children.push(child);
   return child;
 }
 
-/** Ends the process tree of an app this script started (unimux.exe or electron.exe and their children), nothing else. */
+/** Ends the process tree of an app this script started (unimux.exe and its children), nothing else. */
 export function killAppTree(pid) {
   if (!pid) return;
   try {
@@ -196,8 +173,8 @@ export function killAppTree(pid) {
 }
 
 /**
- * The process tree of a process this script started (Windows): [{pid, ppid, name, workingSet}], the root first. For Tauri it
- * holds unimux.exe, its msedgewebview2.exe processes and the shells of the cells; for Electron electron.exe and its helpers.
+ * The process tree of a process this script started (Windows): [{pid, ppid, name, workingSet}], the root first: unimux.exe,
+ * its msedgewebview2.exe processes and the shells of the cells.
  */
 export function processTree(pid) {
   if (process.platform !== 'win32') return [];
@@ -233,13 +210,12 @@ export function waitForExit(child, ms) {
 }
 
 /**
- * A normal quit of the app (its windows close, the state is saved), then our own tree kill for anything left: Tauri asks the
- * test bridge (`quit`), Electron closes the browser over CDP. `evaluate` / `cdp`: of the main page.
+ * A normal quit of the app (its windows close, the state is saved) through the test bridge (`quit`), then our own tree kill
+ * for anything left. `evaluate`: of the main page.
  */
-export async function quitApp({ child, evaluate, cdp, ms = 10000 }) {
+export async function quitApp({ child, evaluate, ms = 10000 }) {
   const tree = treePids(child);
-  if (isTauri) await bridgeCall(evaluate, 'quit').catch(() => undefined);
-  else await Promise.race([cdp('Browser.close').catch(() => undefined), sleep(3000)]);
+  await bridgeCall(evaluate, 'quit').catch(() => undefined);
   const exited = await waitForExit(child, ms);
   if (!exited) killAppTree(child.pid);
   await waitForPidsGone(tree, 5000);
@@ -279,33 +255,8 @@ export async function bridgeCall(evaluate, op, args = null) {
   throw new Error(`test_bridge ${op}: ${r.message}`);
 }
 
-/** CDP of Electron's main process (Node inspector): evaluates with the app's own electron module. Electron target only. */
-async function electronInspector(port) {
-  let found;
-  for (let i = 0; i < 75 && !found; i++) {
-    try { found = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json())[0]; } catch { await sleep(200); }
-  }
-  if (!found) throw new Error('main inspector not reachable');
-  const ws = new WebSocket(found.webSocketDebuggerUrl);
-  await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
-  let next = 0;
-  const pending = new Map();
-  ws.onmessage = (e) => { const m = JSON.parse(e.data); pending.get(m.id)?.(m); pending.delete(m.id); };
-  ws.onclose = () => { for (const done of pending.values()) done({ error: { message: 'main inspector closed' } }); pending.clear(); };
-  const evaluate = (expression) => new Promise((res, rej) => {
-    if (ws.readyState !== WebSocket.OPEN) { rej(new Error('main inspector closed')); return; }
-    const id = ++next;
-    pending.set(id, (m) => (m.error || m.result.exceptionDetails ? rej(new Error(JSON.stringify(m.error ?? m.result.exceptionDetails))) : res(m.result.result.value)));
-    ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true } }));
-  });
-  await evaluate(`globalThis.__el = process.mainModule.require('electron'); globalThis.__rec = []; true`);
-  return { evaluate, close: () => { try { ws.close(); } catch { /* closed */ } } };
-}
-
-const mainWin = `__el.BrowserWindow.getAllWindows().find((w) => !w.webContents.getURL().includes('detached='))`;
-
 /**
- * The main-process side of a running app, the same on both targets:
+ * The app-process side of a running app, over the test bridge of the check build:
  *   hook(cellId, event, info?)   a status hook to the main window (`cell:hook`), hookAll(...) to every window
  *   emit(event, args, {label?})  any renderer event
  *   windows()                    [{label, visible, minimized}] of the app windows, main first
@@ -314,65 +265,33 @@ const mainWin = `__el.BrowserWindow.getAllWindows().find((w) => !w.webContents.g
  *   record(channels, {swallow})  record the renderer's calls of these channels (swallow: answer them without running)
  *   recorded(channel?)           the recorded calls [{channel, args}] since the last read
  *   stubToasts() / toasts() / toastClick(i) / toastAction(i, action)   the OS notifications the app shows (W4 adds them);
- *                                stubToasts keeps what was shown since the launch on both targets (every harness launch
- *                                routes toasts to the list from the start), so a toast at startup is still seen
+ *                                stubToasts keeps what was shown since the launch (every harness launch routes toasts to
+ *                                the list from the start), so a toast at startup is still seen
  *   stubTaskbar() / taskbar()    record the taskbar overlay / progress calls, read them (W7 adds them)
- * `page.evaluate`: of the main page; `inspectPort`: the Electron target's main inspector (spawnApp({inspectPort})).
+ * `evaluate`: of the main page.
  */
-export async function mainControl({ evaluate, inspectPort }) {
-  if (isTauri) {
-    const call = (op, args) => bridgeCall(evaluate, op, args);
-    const toArgs = (cellId, event, info) => [cellId, event, ...(info === undefined ? [] : [info])];
-    return {
-      bridge: call,
-      hook: (cellId, event, info) => call('emit', { event: 'cell:hook', args: toArgs(cellId, event, info), label: 'main' }),
-      hookAll: (cellId, event, info) => call('emit', { event: 'cell:hook', args: toArgs(cellId, event, info) }),
-      emit: (event, args = [], { label } = {}) => call('emit', { event, args, ...(label ? { label } : {}) }),
-      windows: () => call('windows'),
-      requestClose: () => call('window', { label: 'main', action: 'requestClose' }),
-      minimize: () => call('window', { label: 'main', action: 'sysMinimize' }),
-      setBounds: (bounds) => call('window', { label: 'main', action: 'setBounds', ...bounds }),
-      record: (channels, { swallow = false } = {}) => call('record', { channels, swallow }),
-      recorded: async (channel) => (await call('recorded', { take: true, ...(channel ? { channel } : {}) })).map((c) => ({ channel: c.channel, args: c.args })),
-      stubToasts: () => call('toasts', { stub: true }),
-      toasts: () => call('toasts'),
-      toastClick: (index) => call('toastAction', { index, action: 'click' }),
-      toastAction: (index, actionIndex) => call('toastAction', { index, action: actionIndex }),
-      stubTaskbar: () => call('taskbar', { stub: true }),
-      taskbar: () => call('taskbar'),
-      evaluateMain: () => { throw new Error('evaluateMain is Electron only: use a test-bridge op'); },
-      close: () => {},
-    };
-  }
-  const main = await electronInspector(inspectPort);
-  const ev = main.evaluate;
+export async function mainControl({ evaluate }) {
+  const call = (op, args) => bridgeCall(evaluate, op, args);
+  const toArgs = (cellId, event, info) => [cellId, event, ...(info === undefined ? [] : [info])];
   return {
-    hook: (cellId, event, info) => ev(`${mainWin}.webContents.send('cell:hook', ${JSON.stringify(cellId)}, ${JSON.stringify(event)}${info === undefined ? '' : `, ${JSON.stringify(info)}`}), true`),
-    hookAll: (cellId, event, info) => ev(`__el.BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('cell:hook', ${JSON.stringify(cellId)}, ${JSON.stringify(event)}${info === undefined ? '' : `, ${JSON.stringify(info)}`})), true`),
-    emit: (event, args = [], { label } = {}) => ev(`(${label === 'main' ? `[${mainWin}]` : '__el.BrowserWindow.getAllWindows()'}).forEach((w) => w.webContents.send(${JSON.stringify(event)}, ...${JSON.stringify(args)})), true`),
-    windows: () => ev(`__el.BrowserWindow.getAllWindows().map((w) => ({ label: w.webContents.getURL().includes('detached=') ? 'detached-' + new URL(w.webContents.getURL()).searchParams.get('detached') : 'main', visible: w.isVisible(), minimized: w.isMinimized() })).sort((a, b) => (a.label === 'main' ? -1 : b.label === 'main' ? 1 : 0))`),
-    requestClose: () => ev(`${mainWin}.close(), true`),
-    minimize: () => ev(`${mainWin}.minimize(), true`),
-    setBounds: (bounds) => ev(`${mainWin}.setBounds(${JSON.stringify(bounds)}), true`),
-    // Swallowed: the app's own listener / handler goes (a send is only recorded, an invoke answers null).
-    record: (channels, { swallow = false } = {}) => ev(`(() => { globalThis.__recCh ??= new Set(); for (const ch of ${JSON.stringify(channels)}) {
-      ${swallow ? `__el.ipcMain.removeAllListeners(ch); __el.ipcMain.removeHandler(ch); __el.ipcMain.handle(ch, (_e, ...args) => { __rec.push({ channel: ch, args }); return null; }); __recCh.delete(ch);` : ''}
-      if (!__recCh.has(ch)) { __recCh.add(ch); __el.ipcMain.on(ch, (_e, ...args) => __rec.push({ channel: ch, args })); } } return true; })()`),
-    recorded: (channel) => ev(`(() => { const want = (c) => ${channel ? `c.channel === ${JSON.stringify(channel)}` : 'true'}; const out = __rec.filter(want); globalThis.__rec = __rec.filter((c) => !want(c)); return out; })()`),
-    // Already stubbed from the start by electron-test-toasts.cjs (spawnApp): keeps what was shown before the inspector came.
-    stubToasts: () => ev(`(() => { globalThis.__shown ??= []; if (!globalThis.__testToasts) __el.Notification.prototype.show = function () { __shown.push(this); }; return true; })()`),
-    toasts: () => ev(`(globalThis.__shown ?? []).map((n) => ({ title: n.title, body: n.body, actions: (n.actions ?? []).map((a) => a.text) }))`),
-    toastClick: (index) => ev(`(() => { __shown.at(${index}).emit('click'); return true; })()`),
-    toastAction: (index, actionIndex) => ev(`(() => { __shown.at(${index}).emit('action', { actionIndex: ${actionIndex} }, ${actionIndex}); return true; })()`),
-    stubTaskbar: () => ev(`(() => { if (globalThis.__taskbar) return true; globalThis.__taskbar = []; const proto = __el.BrowserWindow.prototype;
-        const overlay = proto.setOverlayIcon;
-        proto.setOverlayIcon = function (image, description) { __taskbar.push({ overlay: image ? { size: image.getSize(), scales: image.getScaleFactors(), empty: image.isEmpty(), png: image.getScaleFactors().map((f) => image.toPNG({ scaleFactor: f }).toString('base64')) } : null, description }); return overlay.call(this, image, description); };
-        const progress = proto.setProgressBar;
-        proto.setProgressBar = function (value, options) { __taskbar.push({ progress: value, mode: options?.mode }); return progress.call(this, value, options); };
-        return true; })()`),
-    taskbar: () => ev('__taskbar.slice()'),
-    evaluateMain: ev,
-    close: () => main.close(),
+    bridge: call,
+    hook: (cellId, event, info) => call('emit', { event: 'cell:hook', args: toArgs(cellId, event, info), label: 'main' }),
+    hookAll: (cellId, event, info) => call('emit', { event: 'cell:hook', args: toArgs(cellId, event, info) }),
+    emit: (event, args = [], { label } = {}) => call('emit', { event, args, ...(label ? { label } : {}) }),
+    windows: () => call('windows'),
+    requestClose: () => call('window', { label: 'main', action: 'requestClose' }),
+    minimize: () => call('window', { label: 'main', action: 'sysMinimize' }),
+    setBounds: (bounds) => call('window', { label: 'main', action: 'setBounds', ...bounds }),
+    record: (channels, { swallow = false } = {}) => call('record', { channels, swallow }),
+    recorded: async (channel) => (await call('recorded', { take: true, ...(channel ? { channel } : {}) })).map((c) => ({ channel: c.channel, args: c.args })),
+    stubToasts: () => call('toasts', { stub: true }),
+    toasts: () => call('toasts'),
+    toastClick: (index) => call('toastAction', { index, action: 'click' }),
+    toastAction: (index, actionIndex) => call('toastAction', { index, action: actionIndex }),
+    stubTaskbar: () => call('taskbar', { stub: true }),
+    taskbar: () => call('taskbar'),
+    evaluateMain: () => { throw new Error('evaluateMain was the Electron main inspector (removed in R1): use a test-bridge op'); },
+    close: () => {},
   };
 }
 

@@ -1,4 +1,4 @@
-// Capture the README screenshots from the real built app (the Tauri check build; MC_APP_TARGET=electron: Electron's out/). Never uses an installed app's data or AI models.
+// Capture the README screenshots from the real built app (the Tauri check build). Never uses an installed app's data or AI models.
 // Run: npm run build:check && node scripts/capture-readme.mjs [output dir] [--only name,name] [--hold] [--verify]
 // Demo data (all in a temporary folder): an "Atlas storefront" project that is a scratch git repository, scripted stand-ins
 // for the claude and codex commands (they print a fixed demo session, post status hooks and never contact a model), demo

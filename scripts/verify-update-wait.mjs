@@ -1,4 +1,4 @@
-// Real-app check of 1.1.2 "update while agents work" (npm run build:check first; MC_APP_TARGET=electron: npm run build). No real Claude or Codex and no real update: the grids
+// Real-app check of 1.1.2 "update while agents work" (npm run build:check first). No real Claude or Codex and no real update: the grids
 // hold shell cells whose profile is switched to "claude" in Settings after they started, the agent status is faked with the
 // 'cell:hook' event main sends for a real hook (prompt = working, stop = turn finished), and the update is faked from the main
 // side (real-app.mjs mainControl): the status bar is told an update is ready, and 'update:install' (the hand-over to the update window) is

@@ -4,7 +4,7 @@
 // test/db-mysql-real.int.test.ts: "mysql=root:pw@127.0.0.1:33061,mariadb=root:pw@127.0.0.1:33062") it also runs the tree,
 // table data (edit, Pokaż SQL, save), DDL, the SQL editor (script, load more, cancel, export) on each, and (1.0.6) triggers and
 // events in the tree, every result set of a CALL and the underline of a syntax error.
-// Screenshots: D:\Projekty\_shots\105-mysql-*.png. Run `npm run build` first. Never touches the user's data dir; kills only
+// Screenshots: D:\Projekty\_shots\105-mysql-*.png. Run `npm run build:check` first. Never touches the user's data dir; kills only
 // the PIDs it started; the scratch database unimux_ui is dropped again.
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';

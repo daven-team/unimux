@@ -1,4 +1,4 @@
-// Real-app check of "Wyślij prompt do wielu agentów" (1.1.1; npm run build first). A scratch data dir and home, MC_OFFSCREEN=1 and
+// Real-app check of "Wyślij prompt do wielu agentów" (1.1.1; npm run build:check first). A scratch data dir and home, MC_OFFSCREEN=1 and
 // MC_DEBUG_PORT (default 9419). Scripted stand-ins for `claude` and `codex` (no model, no network) post the status hooks a real
 // Claude Code would and log every byte they receive: in the grid "Agenci" one Claude cell finished its turn, one is fresh, one
 // works (a turn that never ends), one asks for a Bash permission, plus a Codex cell and a shell cell; the grid "Recenzja" (one

@@ -3,8 +3,8 @@
 // arity: a flag that became variadic swallows the prompt after it (1.1.3: `--mcp-config <configs...>` took the task for a
 // config file). Then it asks Codex how it understands the very -c overrides a Codex cell gets (`codex mcp get unimux --json`).
 // Scratch CLAUDE_CONFIG_DIR and CODEX_HOME: nothing reads or writes the user's ~/.claude or ~/.codex, no model is called.
-// The line comes from the app under test: the Tauri check build (`unimux --launch-line`, P4; npm run build:check), or with
-// MC_APP_TARGET=electron the TS reference (src/shared/profiles.ts). A release gate (scripts/release.mjs).
+// The line comes from the app under test: the Tauri check build (`unimux --launch-line`, P4; npm run build:check).
+// A release gate (scripts/release.mjs).
 // Usage: node scripts/verify-cli-contract.mjs   (a CLI that is not installed is skipped with a note)
 import { execFile, execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync } from 'node:fs';
@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
-import { APP_TARGET, BlockedError, appBinary, isTauri } from './real-app.mjs';
+import { APP_TARGET, BlockedError, appBinary } from './real-app.mjs';
 import { removeScratch } from './app-env.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'unimux-cli-contract-'));
@@ -48,10 +48,9 @@ function expectFlags(cli, help, expected) {
 
 /**
  * The launch line of a cell as the app under test builds it: the Tauri check build answers `--launch-line` (P4 ports the
- * builder; until then it says MC_NOT_YET and this check is blocked by P4), the Electron target uses the TS reference.
+ * builder; until then it says MC_NOT_YET and this check is blocked by P4).
  */
-function launchLine(profile, opts, reference) {
-  if (!isTauri) return reference(profile, opts);
+function launchLine(profile, opts) {
   let out;
   try {
     out = execFileSync(appBinary(), ['--launch-line', JSON.stringify({ profile, opts })], { encoding: 'utf8', windowsHide: true, timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -69,9 +68,9 @@ function launchLine(profile, opts, reference) {
 
 try {
   const out = join(root, 'profiles.mjs');
-  await build({ stdin: { contents: "export { buildCliCommand, MCP_TOOL_TIMEOUT_SEC } from './src/shared/profiles';", resolveDir: resolve('.'), loader: 'ts' },
+  await build({ stdin: { contents: "export { MCP_TOOL_TIMEOUT_SEC } from './src/shared/profiles';", resolveDir: resolve('.'), loader: 'ts' },
     bundle: true, platform: 'node', format: 'esm', outfile: out, logLevel: 'silent' });
-  const { buildCliCommand, MCP_TOOL_TIMEOUT_SEC } = await import(pathToFileURL(out).href);
+  const { MCP_TOOL_TIMEOUT_SEC } = await import(pathToFileURL(out).href);
 
   const claudeEnv = { CLAUDE_CONFIG_DIR: join(root, 'claude'), DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' };
   const claude = await run('claude', ['--help'], claudeEnv);
@@ -98,7 +97,7 @@ try {
 
     // The overrides exactly as a Codex cell gets them (bash quoting, split back into arguments).
     const url = 'http://127.0.0.1:65000/mcp';
-    const line = launchLine({ id: 'codex', name: 'Codex', cli: 'codex', args: '' }, { mode: 'new', shell: 'bash', mcp: { url, tokenEnv: 'UNIMUX_MCP_TOKEN' } }, buildCliCommand);
+    const line = launchLine({ id: 'codex', name: 'Codex', cli: 'codex', args: '' }, { mode: 'new', shell: 'bash', mcp: { url, tokenEnv: 'UNIMUX_MCP_TOKEN' } });
     const words = line === null ? [] : [...line.matchAll(/'((?:[^']|'"'"')*)'|(\S+)/g)].map((m) => (m[1] !== undefined ? m[1].replace(/'"'"'/g, "'") : m[2])).slice(1);
     const overrides = [];
     for (let i = 0; i < words.length; i++) if (words[i] === '-c' && words[i + 1]?.startsWith('mcp_servers.')) overrides.push('-c', words[++i]);

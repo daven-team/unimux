@@ -1,10 +1,10 @@
-// Real-app check of the MCP server and the Claude status hooks: the built app (npm run build) with isolated data, a scratch
+// Real-app check of the MCP server and the Claude status hooks: the built app (npm run build:check) with isolated data, a scratch
 // home and fake agents (no model calls), driven over CDP, and the official MCP SDK client connecting the way a cell does
 // (the per-cell --mcp-config file of a Claude cell: URL + literal bearer header).
 // Checks: tools per role, valid and invalid calls, auth (no token, another cell's token or session, a restarted cell's old
 // token), elicitation sessions, mcp:retry, reconnect after an app restart, http hooks -> command hooks fallback (no http hook
 // within 20 s of output-driven work after SessionStart) and a blocking allowedHttpHookUrls in the user's settings.
-// Usage: npm run build && node scripts/verify-mcp-app.mjs
+// Usage: npm run build:check && node scripts/verify-mcp-app.mjs
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

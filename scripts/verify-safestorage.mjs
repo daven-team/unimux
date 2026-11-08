@@ -1,23 +1,22 @@
-// B2 acceptance: Electron safeStorage in the real Tauri app (unimux-oscrypt SafeStorage through AppContext), both directions
-// with the real 1.1.4, on scratch data dirs only.
+// B2 acceptance: Electron safeStorage in the real Tauri app (unimux-oscrypt SafeStorage through AppContext), on scratch data
+// dirs only. The 1.1.4 side is the committed SP2 fixture (a profile 1.1.4 made); until R1 a `--electron <checkout>` mode also
+// ran 1.1.4 from a source checkout next to the Tauri app (safeStorage both ways), which left with Electron.
 //
-//   npm run build:check && node scripts/verify-safestorage.mjs [--electron <checkout with `npx electron-vite build` done>] [--keep]
+//   npm run build:check && node scripts/verify-safestorage.mjs [--keep]
 //
-// A. 1.1.4 stores an SSH password, an SSH key with a saved passphrase, a DB password (through its own IPC) and a GitHub token
-//    (its own safeStorage). Without --electron the committed SP2 fixture (a profile 1.1.4 made) is copied instead; its DPAPI
-//    key unwraps only for the Windows user who made it, so those checks are skipped for anyone else.
+// A. The SP2 fixture (an SSH password, an SSH key with a saved passphrase, a DB password and a GitHub token as 1.1.4 stored
+//    them) is copied into a scratch data dir; its DPAPI key unwraps only for the Windows user who made it, so B is skipped
+//    for anyone else.
 // B. The Tauri check build on that data dir: the key was opened at start (Windows, like OSCrypt::Init) and found, startup.log
 //    says so, every secret decrypts to the text 1.1.4 stored, Rust re-encrypts each in place, Local State is never touched.
-// C. 1.1.4 again: nothing locked, its safeStorage decrypts every blob the Tauri app wrote, files and key untouched.
-// D. Fresh install: the Tauri app creates Local State at start; a restart finds it; 1.1.4 decrypts the Tauri blobs and keeps
-//    the key.
+// D. Fresh install: the Tauri app creates Local State at start; a restart finds it and decrypts.
 // E. MC_SSH_NO_SAFESTORAGE: exactly "1" makes storage report unavailable, "true" does not (1.1.x `=== '1'`); as in 1.1.4 the
 //    key is still opened (Local State written at start) and existing blobs still decrypt.
 // F/G/H. A Local State without a usable key: a foreign DPAPI key (new key stored, other prefs kept, Origin Replaced in
-//    startup.log and crash.log; 1.1.4 keeps that key), a non-JSON file (`Local State.bad`, created anew), a key in an unknown
-//    format (unavailable, file left alone).
+//    startup.log and crash.log), a non-JSON file (`Local State.bad`, created anew), a key in an unknown format (unavailable,
+//    file left alone).
 // Never touches the real %APPDATA%\unimux, ~/.claude or ~/.codex; ends only the processes it started; no window on the
-// desktop (MC_OFFSCREEN for both apps).
+// desktop (MC_OFFSCREEN).
 import { createHash, randomBytes } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,18 +26,11 @@ import { removeScratch } from './app-env.mjs';
 import { connectPage, freePort, killTree, launchApp, realProfileMarkers, sleep, waitExit, waitFor } from './tauri-app.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : undefined; };
-const electronCheckout = arg('--electron') ? resolve(arg('--electron')) : null;
 const keep = process.argv.includes('--keep');
-if (electronCheckout && !existsSync(join(electronCheckout, 'out', 'main', 'index.js'))) throw new Error('--electron must point at a built 1.1.4 checkout');
+if (process.argv.includes('--electron')) throw new Error('--electron (1.1.4 from a source checkout) was removed with Electron in 1.2.0 (R1)');
 const fixtureDir = join(repo, 'src-tauri', 'crates', 'unimux-oscrypt', 'tests', 'fixtures', 'win-electron45');
 
-const SECRETS = {
-  ssh: 'ssh-pass zażółć 🔑 "quoted" \\ end',
-  passphrase: 'key passphrase ł',
-  db: 'db-pass Ünïcode 数据库',
-  github: 'gho_b2CheckThrowawayToken0123456789abcdef',
-};
+const SECRETS = { github: 'gho_b2CheckThrowawayToken0123456789abcdef' };
 const FILES = ['ssh/vault.json', 'db/vault.json', 'github/token.json'];
 
 const results = [];
@@ -85,137 +77,22 @@ async function quitTauri(app) {
 const lastStartupLine = (data) => readFileSync(join(data, 'startup.log'), 'utf8').trim().split('\n').at(-1) ?? '';
 const crashLog = (data) => (existsSync(join(data, 'crash.log')) ? readFileSync(join(data, 'crash.log'), 'utf8') : '');
 
-// ---------- 1.1.4 (only with --electron) ----------
-let lib = null;
-async function electronLib() {
-  // ssh-ui-lib drives the target real-app.mjs picks when it is first imported (X1): here always 1.1.4 (Electron).
-  process.env.MC_APP_TARGET = 'electron';
-  lib ??= await import('./ssh-ui-lib.mjs');
-  return lib;
-}
-/**
- * CDP of the main process (Node inspector): evaluates with the app's own electron module. Attached while 1.1.4 is still
- * loading (ssh-ui-lib launchApp with `options.main` attaches only after the page answers, which can hang with --inspect).
- */
-async function mainInspector(port) {
-  let target;
-  for (let i = 0; i < 50 && !target; i++) {
-    try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json())[0]; } catch { await sleep(200); }
-  }
-  if (!target) throw new Error('main inspector not reachable');
-  const ws = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
-  let next = 0;
-  const pending = new Map();
-  ws.onmessage = (e) => { const m = JSON.parse(e.data); pending.get(m.id)?.(m); pending.delete(m.id); };
-  // The process went away (killed, or a second instance that quit): fail what is pending instead of waiting forever.
-  let closed = false;
-  ws.onclose = () => { closed = true; for (const done of pending.values()) done({ error: { message: 'main inspector closed' } }); pending.clear(); };
-  const evaluate = (expression) => new Promise((resolve, reject) => {
-    if (closed) { reject(new Error('main inspector closed')); return; }
-    const id = ++next;
-    pending.set(id, (m) => (m.error || m.result.exceptionDetails ? reject(new Error(JSON.stringify(m.error ?? m.result.exceptionDetails))) : resolve(m.result.result.value)));
-    ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true } }));
-  });
-  await evaluate(`globalThis.__el = process.mainModule.require('electron'); globalThis.__notes = [];
-    __el.ipcMain.on('notify', (_e, n) => __notes.push(n)); true`);
-  return {
-    evaluate,
-    hook: (cellId, event) => evaluate(`__el.BrowserWindow.getAllWindows()[0].webContents.send('cell:hook', ${JSON.stringify(cellId)}, ${JSON.stringify(event)}), true`),
-    notes: () => evaluate('__notes.splice(0)'),
-    close: () => { try { ws.close(); } catch { /* closed */ } },
-  };
-}
-
-async function startElectron(base, hosts = [], extraEnv = {}) {
-  const { launchApp: launchElectron, sshState, writeState } = await electronLib();
-  // Only a data dir without a state yet: later runs keep the state (the DB connection) 1.1.4 and the Tauri app saved.
-  if (!existsSync(join(base, 'data', 'state.json'))) writeState(base, sshState({ projectPath: join(base, 'project'), hosts }));
-  const here = process.cwd();
-  process.chdir(electronCheckout);
-  try {
-    // The main inspector is attached while the window loads: with --inspect and nobody attached, 1.1.4's page stopped
-    // answering CDP on this machine (Electron 45.2.2, Node 24.22.2). Even so the page's Runtime.enable hangs now and then
-    // (about one start in three), so a start that does not come up is ended (only that process tree) and tried again.
-    // Every 1.1.4 process is in `children` from the moment it is spawned, so `finally` ends it whatever fails later.
-    for (let attempt = 1; ; attempt++) {
-      const inspectPort = await freePort();
-      let spawned = null;
-      const launching = launchElectron(base, extraEnv, [`--inspect=${inspectPort}`], { onSpawn: (child) => { spawned = child; children.push(child); } });
-      launching.catch(() => {});
-      let main = null;
-      try {
-        main = await mainInspector(inspectPort);
-        const app = await launching;
-        return { app, main };
-      } catch (error) {
-        main?.close();
-        // Wait until it is gone: a 1.1.4 that still holds the single-instance lock would make the next start quit at once.
-        if (spawned) { killTree(spawned); await waitExit(spawned, 10000); }
-        // Not spawned yet (launchApp was still picking its port): end it as soon as it comes up.
-        else launching.then((app) => app.close(), () => {});
-        await sleep(1500);
-        if (attempt >= 5) throw error;
-        console.log(`1.1.4 did not come up (${error.message}), attempt ${attempt + 1}`);
-      }
-    }
-  } finally { process.chdir(here); }
-}
-async function quitElectron({ app, main }) {
-  await main.evaluate('setTimeout(() => __el.app.quit(), 50), true').catch(() => {});
-  main.close();
-  for (let i = 0; i < 100; i++) {
-    try { process.kill(app.pid, 0); } catch { return; }
-    await sleep(100);
-  }
-  await app.close();
-}
-const electronDecrypt = (main, blobs) => main.evaluate(`(() => ${JSON.stringify(blobs)}.map((b) => {
-  try { return { text: __el.safeStorage.decryptString(Buffer.from(b, 'base64')) }; } catch (e) { return { error: String(e.message) }; }
-}))()`);
-let electronHost = null;
-
 const markersBefore = realProfileMarkers();
 try {
-  // ---------- A: secrets as 1.1.4 stored them ----------
+  // ---------- A: secrets as 1.1.4 stored them (the committed SP2 fixture) ----------
   const rootA = makeRoot('a');
   const dataA = join(rootA, 'data');
-  let expected;
-  let foreignFixture = false;
-  if (electronCheckout) {
-    electronHost = (await electronLib()).testHost(2222);
-    const a = await startElectron(rootA, [electronHost]);
-    check('A: 1.1.4 safeStorage available', await a.main.evaluate('__el.safeStorage.isEncryptionAvailable()'));
-    const pw = await a.app.evaluate(`window.mc.ssh.setPassword(${JSON.stringify(electronHost.id)}, ${JSON.stringify(SECRETS.ssh)})`);
-    const key = await a.app.evaluate(`window.mc.ssh.generateKey({ label: 'b2', type: 'ed25519', comment: 'b2-check', passphrase: ${JSON.stringify(SECRETS.passphrase)}, savePassphrase: true })`);
-    const db = await a.app.evaluate(`window.mc.db.saveConnection({ kind: 'postgres', name: 'b2 pg', host: '127.0.0.1', port: 5432, user: 'postgres', database: 'postgres', tls: 'prefer', ssh: null, readOnly: false }, { set: ${JSON.stringify(SECRETS.db)} })`);
-    await a.main.evaluate(`(() => {
-      const fs = process.mainModule.require('fs'), path = process.mainModule.require('path');
-      const file = path.join(${JSON.stringify(dataA)}, 'github', 'token.json');
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      const secret = __el.safeStorage.encryptString(${JSON.stringify(SECRETS.github)}).toString('base64');
-      fs.writeFileSync(file, JSON.stringify({ version: 1, login: 'b2-check', savedAt: Date.now(), secret }, null, 1));
-      return true;
-    })()`);
-    check('A: 1.1.4 saved the SSH password, the SSH key and the DB password', pw?.ok && !pw.ephemeral && key?.ok && db?.ok, { pw, key: key?.ok, db: db?.ok });
-    await quitElectron(a);
-    expected = { 'ssh/vault.json': [{ passphrase: SECRETS.passphrase }, SECRETS.ssh], 'db/vault.json': [SECRETS.db], 'github/token.json': [SECRETS.github] };
-  } else {
-    cpSync(join(fixtureDir, 'Local State'), localState(dataA));
-    for (const f of FILES) { mkdirSync(dirname(join(dataA, f)), { recursive: true }); cpSync(join(fixtureDir, 'electron', f), join(dataA, f)); }
-    expected = JSON.parse(readFileSync(join(fixtureDir, 'expected.json'), 'utf8'));
-    console.log('A: no --electron: the committed SP2 fixture (made by 1.1.4) is the data copy');
-  }
+  cpSync(join(fixtureDir, 'Local State'), localState(dataA));
+  for (const f of FILES) { mkdirSync(dirname(join(dataA, f)), { recursive: true }); cpSync(join(fixtureDir, 'electron', f), join(dataA, f)); }
+  const expected = JSON.parse(readFileSync(join(fixtureDir, 'expected.json'), 'utf8'));
   const localA = sha(localState(dataA));
-  const keyA = localJson(dataA).os_crypt?.encrypted_key;
   const matches = (got, want) => (typeof want === 'string' ? got === want : (() => { try { const v = JSON.parse(got); return v.passphrase === want.passphrase && /BEGIN OPENSSH PRIVATE KEY/.test(v.privateKey ?? ''); } catch { return false; } })());
 
   // ---------- B: the Tauri app reads and re-encrypts ----------
   const b = await startTauri(rootA);
   const infoB = await b.bridge('safeStorage', { op: 'info' });
-  foreignFixture = !electronCheckout && infoB.origin === 'replaced';
-  if (foreignFixture) {
-    console.log('SKIP B/C: the fixture Local State was made by another Windows user (DPAPI is per user); the Tauri app stored a new key as 1.1.4 would');
+  if (infoB.origin === 'replaced') {
+    console.log('SKIP B: the fixture Local State was made by another Windows user (DPAPI is per user); the Tauri app stored a new key as 1.1.4 would');
     await quitTauri(b);
   } else {
     check('B: the key was opened at start (Windows, like OSCrypt::Init), before any store asked', infoB.openedBefore === 'existing', infoB);
@@ -244,21 +121,6 @@ try {
     check('B: startup.log has the safe-storage-existing mark', /\bsafe-storage-existing=\d+/.test(lastStartupLine(dataA)), lastStartupLine(dataA));
     await quitTauri(b);
     check('B: Local State not touched by the Tauri app', sha(localState(dataA)) === localA);
-    const rustBlobs = Object.fromEntries(FILES.map((f) => [f, readFileSync(join(dataA, f), 'utf8')]));
-
-    // ---------- C: 1.1.4 reads what the Tauri app wrote ----------
-    if (electronCheckout) {
-      const c = await startElectron(rootA, [electronHost]);
-      const vault = await c.app.evaluate('window.mc.ssh.vaultInfo()');
-      check('C: 1.1.4 SSH vault: password and key not locked', vault.savedPasswords.includes(electronHost.id) && vault.lockedPasswords.length === 0 && vault.keys.length === 1 && !vault.keys[0].locked, { locked: vault.lockedPasswords, keys: vault.keys.map((k) => k.locked) });
-      const dbInfo = await c.app.evaluate('window.mc.db.vaultInfo()');
-      check('C: 1.1.4 DB vault: nothing locked', dbInfo.saved.length === 1 && dbInfo.locked.length === 0, dbInfo);
-      const dec = await electronDecrypt(c.main, fresh);
-      check('C: 1.1.4 safeStorage decrypts every Tauri blob to the same text', dec.every((r, k) => r.text === plain[k].text), dec.map((r) => r.error ?? 'ok'));
-      check('C: 1.1.4 did not rewrite the vault files', FILES.every((f) => readFileSync(join(dataA, f), 'utf8') === rustBlobs[f]));
-      await quitElectron(c);
-      check('C: os_crypt.encrypted_key unchanged after 1.1.4 ran again', localJson(dataA).os_crypt?.encrypted_key === keyA);
-    }
   }
 
   // ---------- D: fresh install ----------
@@ -275,7 +137,6 @@ try {
   check('D: startup.log has the safe-storage-created mark', /\bsafe-storage-created=\d+/.test(lastStartupLine(dataD)), lastStartupLine(dataD));
   check('D: crash.log notes the new key', /safeStorage key created/.test(crashLog(dataD)));
   await quitTauri(d1);
-  const keyD = localJson(dataD).os_crypt.encrypted_key;
   const localD = sha(localState(dataD));
   const d2 = await startTauri(rootD);
   const infoD2 = await d2.bridge('safeStorage', { op: 'info' });
@@ -283,13 +144,6 @@ try {
   check('D: a restart finds the key and decrypts', infoD2.origin === 'existing' && decD2.every((r, k) => r.text === dTexts[k]), { infoD2, decD2: decD2.map((r) => r.error ?? 'ok') });
   await quitTauri(d2);
   check('D: the restart did not rewrite Local State', sha(localState(dataD)) === localD);
-  if (electronCheckout) {
-    const e = await startElectron(rootD);
-    const dec = await electronDecrypt(e.main, dBlobs);
-    check('D: 1.1.4 decrypts blobs made with the key the Tauri app created', dec.every((r, k) => r.text === dTexts[k]), dec.map((r) => r.error ?? 'ok'));
-    await quitElectron(e);
-    check('D: 1.1.4 kept that key', localJson(dataD).os_crypt.encrypted_key === keyD);
-  }
 
   // ---------- E: MC_SSH_NO_SAFESTORAGE ----------
   // 1.1.x `electronCipher`: the flag only makes `storage` / `available()` say unavailable; decryptString still uses the real
@@ -303,20 +157,13 @@ try {
   check('E: MC_SSH_NO_SAFESTORAGE=1: startup.log has the safe-storage-created mark', /\bsafe-storage-created=\d+/.test(lastStartupLine(dataE)), lastStartupLine(dataE));
   await quitTauri(e1);
   check('E: MC_SSH_NO_SAFESTORAGE=1: Local State written as in 1.1.4', !!(existsSync(localState(dataE)) && localJson(dataE).os_crypt?.encrypted_key));
-  const localD1 = sha(localState(dataD)); // after 1.1.4 ran on it (Chromium rewrites its prefs)
+  const localD1 = sha(localState(dataD));
   const e1b = await startTauri(rootD, { MC_SSH_NO_SAFESTORAGE: '1' });
   const infoE1b = await e1b.bridge('safeStorage', { op: 'info' });
   const decE1b = await e1b.bridge('safeStorage', { op: 'decrypt', secrets: dBlobs });
   check('E: MC_SSH_NO_SAFESTORAGE=1: existing blobs still decrypt while storage says unavailable', infoE1b.storage === 'unavailable' && decE1b.every((r, k) => r.text === dTexts[k]), { infoE1b, decE1b: decE1b.map((r) => r.error ?? 'ok') });
   await quitTauri(e1b);
   check('E: MC_SSH_NO_SAFESTORAGE=1: Local State of an existing data dir not rewritten', sha(localState(dataD)) === localD1);
-  if (electronCheckout) {
-    const rootE3 = makeRoot('e3');
-    const e3 = await startElectron(rootE3, [], { MC_SSH_NO_SAFESTORAGE: '1' });
-    const vaultE3 = await e3.app.evaluate('window.mc.ssh.vaultInfo()');
-    await quitElectron(e3);
-    check('E: 1.1.4 with MC_SSH_NO_SAFESTORAGE=1 also reports unavailable and writes Local State', vaultE3.storage === 'unavailable' && !!localJson(join(rootE3, 'data')).os_crypt?.encrypted_key, vaultE3.storage);
-  }
   const rootE2 = makeRoot('e2');
   const e2 = await startTauri(rootE2, { MC_SSH_NO_SAFESTORAGE: 'true' });
   const infoE2 = await e2.bridge('safeStorage', { op: 'info' });
@@ -330,19 +177,12 @@ try {
   const f1 = await startTauri(rootF);
   const infoF = await f1.bridge('safeStorage', { op: 'info' });
   check('F: a foreign DPAPI key: a new key is stored, storage stays dpapi', infoF.origin === 'replaced' && infoF.storage === 'dpapi' && /does not unwrap/.test(infoF.reason ?? ''), infoF);
-  const fBlobs = await f1.bridge('safeStorage', { op: 'encrypt', texts: ['foreign ssh pw ą'] });
   await sleep(300);
   check('F: startup.log has the safe-storage-replaced mark', /\bsafe-storage-replaced=\d+/.test(lastStartupLine(dataF)), lastStartupLine(dataF));
   check('F: crash.log says why the key was replaced', /Local State had no usable key, a new one was stored \(the DPAPI key in Local State does not unwrap/.test(crashLog(dataF)));
   await quitTauri(f1);
   const lf = localJson(dataF);
   check('F: other prefs kept, new key stored', lf.browser?.b2_marker === 'keep me' && lf.os_crypt.encrypted_key !== foreignKey && lf.os_crypt.audit_enabled === true);
-  if (electronCheckout) {
-    const g = await startElectron(rootF);
-    const dec = await electronDecrypt(g.main, fBlobs);
-    await quitElectron(g);
-    check('F: 1.1.4 decrypts with the key the Tauri app stored and keeps it', dec[0]?.text === 'foreign ssh pw ą' && localJson(dataF).os_crypt.encrypted_key === lf.os_crypt.encrypted_key, dec);
-  }
 
   // ---------- G: not JSON ----------
   const rootG = makeRoot('g', '{broken');

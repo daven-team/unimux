@@ -1,4 +1,4 @@
-// Real-app check of small layout fixes (npm run build:check first; MC_APP_TARGET=electron: npm run build), in English on a scratch data dir with a 2x2 grid of shell cells:
+// Real-app check of small layout fixes (npm run build:check first), in English on a scratch data dir with a 2x2 grid of shell cells:
 // - the snippet drop overlay is a translated element ("Drop to paste") that starts right below the cell header, like the path
 //   drop overlay;
 // - the AI team panel has a splitter: keys and a mouse drag resize it, the height is saved, it is clamped so the grid keeps
