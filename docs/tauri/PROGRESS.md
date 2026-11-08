@@ -1575,7 +1575,7 @@ Not run (fast mode): real-app / CDP scripts (smoke-tauri, verify-tauri-lifecycle
 
 ### D2 open issues (2026-11-08, fast mode, not verified)
 
-Checked: `cargo fmt`; `cargo clippy -p unimux-db -p unimux-ssh -p unimux-app --all-targets -- -D warnings`; `cargo test -p unimux-db -p unimux-ssh` (one run, see the row). Not run (fast mode): hostd db-tunnel.int, any tunnel through a real or in-process SSH server, Docker, real app, macOS.
+Checked: `cargo fmt`; `cargo clippy -p unimux-db -p unimux-ssh -p unimux-app --all-targets -- -D warnings`; `cargo test -p unimux-db -p unimux-ssh -p unimux-app`: all green except `sql_golden::a_script_at_the_size_limit_is_handled_in_linear_time` (a debug-build timing check of the SQL splitter, not touched by D2; it failed once on a machine running many parallel cargo builds); `tests/db_tunnel.rs` 5/5. Not run (fast mode): hostd db-tunnel.int, any tunnel through a real or in-process SSH server, Docker, real app, macOS.
 
 1. **Acceptance open**: the hostd `db-tunnel.int` suite (no local listening port, forwarded channel to a database) is not written; the db hostd domain does not exist yet (D12). `tests/db_tunnel.rs` covers the records only (rider without owner, sshConnect timeout, hand-over, a login against a closed port, shutdown); no test opens a direct-tcpip channel.
 2. **Only Redis uses it so far**: Postgres (D5 / D12) and MySQL (D8) sessions must call `DbTunnelHost::join(id, ssh, fail)` synchronously when the session opens (before any await, so main's sshConnect cannot arrive first), use the `TunnelOpener` (pg `Connector`, `open()` for MySQL and the pg CancelRequest) and call `release(id)` when the session ends. `TunnelError` maps to `ConnectError::Tunnel` / `MyError::Tunnel` (`tunnel`).
