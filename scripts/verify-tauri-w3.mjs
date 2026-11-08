@@ -150,7 +150,8 @@ const copiedDb = join(dataDir, 'Local Storage', 'leveldb');
 const hashDb = () => readdirSync(copiedDb).filter((f) => f !== 'LOCK' && !f.startsWith('LOG')).sort().map((f) => `${f} ${sha256(readFileSync(join(copiedDb, f)))}`).join('\n');
 const dbBefore = hashDb();
 
-// A state with a project (two grids, cells that are not started: cell:spawn comes with P1), notes and snippets.
+// A state with a project (two grids of shell cells with cmd: the app starts them, and no agent CLI runs here), notes and
+// snippets.
 const dropDir = join(scratch, 'drop');
 const dropFile = join(dropDir, 'plik ą 1.txt');
 const dropFolder = join(dropDir, 'folder ż');
@@ -158,7 +159,8 @@ mkdirSync(dropFolder, { recursive: true });
 writeFileSync(dropFile, 'dropped from the OS\n');
 const state = JSON.parse(readFileSync(join(electronDir, 'state.json'), 'utf8'));
 const { layoutForCount } = (await runnerImport(resolve(root, 'src/shared/layout.ts'), { configFile: false, logLevel: 'silent', root })).module;
-const profileId = state.profiles?.[0]?.id ?? 'shell';
+const profileId = 'shell';
+state.settings = { ...state.settings, shell: 'cmd' };
 state.projects = [{ id: PROJECT, name: 'w3', path: dropDir, color: '#7c5cff', archive: [], activeTabId: 'tab-a', tabs: [
   { id: 'tab-a', name: 'Pierwszy', layout: layoutForCount(2), cells: [{ id: 'cell-1', profileId }, { id: 'cell-2', profileId }] },
   { id: 'tab-b', name: 'Drugi', layout: layoutForCount(1), cells: [{ id: 'cell-3', profileId }] },
@@ -286,6 +288,8 @@ try {
   };
   const startCheck = (t) => t.includes('dopiero się uruchamia') || t.includes('komórka nie jest uruchomiona');
   const toasts = () => page.evaluate(`[...document.querySelectorAll('.toast')].map((t) => t.textContent)`);
+  // What the cells take (terminals.paste: the dropped paths of a running cell).
+  await page.evaluate(`(() => { window.__w3.osPastes = []; const t = window.__mc.terminals; const paste = t.paste.bind(t); t.paste = (id, text, send) => { window.__w3.osPastes.push({ id, text }); return paste(id, text, send); }; return true; })()`);
 
   const cellPoint = await center('[data-cell-id="cell-1"] .cell-body') ?? await center('[data-cell-id="cell-1"]') ?? await center('.cell');
   check('a cell is on screen', !!cellPoint);
@@ -293,12 +297,12 @@ try {
   const cellCall = await waitFor(page, 'window.__w3.calls[0]', 5000, 'pathsForFiles from the cell').catch(() => null);
   check('OS drop of a file and a folder onto a cell: the cell gets both absolute paths', JSON.stringify(cellCall?.paths) === JSON.stringify([dropFile, dropFolder]), JSON.stringify(cellCall));
   check('... the page-level probe saw the same paths', JSON.stringify((await page.evaluate('window.__w3.probe[0]'))?.paths) === JSON.stringify([dropFile, dropFolder]));
-  await sleep(300);
+  const pasted = `window.__w3.osPastes.some((p) => p.id === 'cell-1' && p.text.includes(${JSON.stringify('plik ą 1.txt')}) && p.text.includes(${JSON.stringify('folder ż')}))`;
+  await waitFor(page, `${pasted} || [...document.querySelectorAll('.toast')].some((t) => /dopiero się uruchamia|komórka nie jest uruchomiona|Nie udało się dodać ścieżki/.test(t.textContent))`, 5000, 'the cell took the drop').catch(() => undefined);
   const cellToasts = await toasts();
-  // Cells do not start in this build yet (pty: P1 / P3), so the cell answers with its start check ("still starting" or "not
-  // running", 1.1.4's texts for such a cell), which comes only after the paths were there; "could not add the path" would
-  // mean they were missing.
-  check('... and the cell went on to its start check (not "could not add the path")', cellToasts.some(startCheck) && !cellToasts.some((t) => t.includes('Nie udało się dodać ścieżki')), JSON.stringify(cellToasts));
+  // The cell pastes both paths into its terminal (1.1.4), or, while it is still starting, answers with its start check, which
+  // comes only after the paths were there; "could not add the path" would mean they were missing.
+  check('... and the cell took both paths (pasted, or its start check; not "could not add the path")', ((await page.evaluate(pasted)) || cellToasts.some(startCheck)) && !cellToasts.some((t) => t.includes('Nie udało się dodać ścieżki')), JSON.stringify({ pastes: await page.evaluate('window.__w3.osPastes'), toasts: cellToasts }));
   await shot(page, 'after-cell-drop');
 
   // A File the page made itself has no path: one '' per File, no wait (1.1.4: getPathForFile gives '').
