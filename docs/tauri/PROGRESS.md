@@ -126,7 +126,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | D8 | MySQL session, meta, edits | todo | | | | |
 | D10 | Redis writes, console, pattern ops, pub/sub | todo | | | | |
 | A4 | Login managers | todo | | | | |
-| A5 | Usage, auto-switch, limit alerts | todo | | | | |
+| A5 | Usage, auto-switch, limit alerts | built, fast mode, not verified | 2026-11-08 | | | branch `tauri-pkg-A5`. unimux-accounts: `usage` (fetchers: Claude oauth/usage, Codex wham/usage with the session-log fallback, saved-profile renewal through `ClaudeAccounts::refresh_claude`; credentials with the macOS Keychain read behind a 30 min failure cache; parse / sanitize; `UsageService`: spacing 20 s / 180 s, backoff 60 s to 30 min, Retry-After, usage-cache.json v2 with the 0.9.0 cache adoption, credentials watcher, hidden-window polling, reschedule), `auto_switch` (auto-switch.json v1, cooldown, no ping-pong, offers, return home, switch now), `limit_alerts` (limit-alerts.json v1, thresholds, resets, quiet hours), `localtime` (OS zone without a date crate), `notice_text` (limit / switch texts in 6 languages: the two Intl patterns written out per language, test strings from Node 26 / ICU 78, no ICU4X). unimux-app `commands/accounts/usage.rs`: usage:get / usage:refresh, every accounts:* channel (A2 handlers, switchBest / acceptSwitch / dismissSwitch, makeMainCodex / removeCodex), alerts:testLimit, `accounts_ready` gating and the quit refusals of accountsIpc.ts, usage:state / usage:open / accounts:swapPending events, polls started on `on_accounts_ready`, settings reschedule on `on_state_changed`, main's `window:shown` -> `set_active`, clickable notices through W4 (`OsService::notice_with`), A4 hooks (`set_login_hooks`). See "A5 open issues". |
 | M3 | Automation operations | todo | | | | |
 | U4 | CI and release pipeline | todo | | | | uses the signing secrets in CI only |
 
@@ -1519,6 +1519,16 @@ Built, not verified: no VM, no Mac, no real installer run on this machine (on pu
 7. **U1 open issue 3** (no bare-installer fallback) is unchanged: the hooks honour `--force-run`, but the Tauri update window never passes it (it relaunches the app itself).
 8. The `-e` call removes the folder named in the script only when it is exactly `<appData>\unimux\update\runtime`, `<appData>\ajzakomator\update\runtime` or (dev-overrides builds) `<MC_DATA_DIR>\update\runtime`; any other script exits 0 doing nothing.
 9. The signalUpdateReady + heartbeat wait moved from inside U1's startup gate to before it (1.1.4 order), so it also runs when the gate does not (manual mode); `verify-update-gate.mjs` was not rerun.
+
+### A5 open issues (2026-11-08, fast mode)
+
+1. Not verified beyond one cargo run: no review round, no real-app run (verify-limits-ui, verify-auto-switch-ui, verify-accounts-ui, verify-dead-login-ui with `MC_USAGE_*_URL` mocks are for wave 7), no golden of the notice texts against Electron's own Intl (the unit test compares with strings printed by Node 26).
+2. The notice dates are a hand-written table of the two CLDR patterns 1.1.4 used (`toLocaleTimeString(l, { hour: '2-digit', minute: '2-digit' })`, `toLocaleDateString(l, { weekday: 'short', day: 'numeric', month: 'numeric' })`) for pl, en, de, es, fr, pt instead of ICU4X (PLAN said ICU4X). The app has only these six languages; a later CLDR change in Chromium would not be followed.
+3. A4 is not merged: `auth:start` / `auth:cancel` stay MC_NOT_YET, and until A4 calls `commands::accounts::usage::set_login_hooks` (any login active, parked ids, retryParkedRestores, cancelFor) and `ClaudeAccounts::set_login_probes`, a running login does not block a make main or the automatic switch and the panel lists no parked restores.
+4. Order difference in the poll's `beforeRun`: the parked restores (A4) run before `ClaudeAccounts::before_poll` (roster read, pending activation recovery, reconcile); 1.1.4 read the roster and retried the recovery before the parked restores. Same steps, the roster is read slightly later.
+5. `accounts:dismissNotice` and `accounts:remove` store errors answer `IpcError::Failed` with a fixed message (the TS handler threw, which rejected the invoke); never a path.
+6. macOS: not compile-checked here (unimux-accounts needs ring for aarch64-apple-darwin, see "Open after wave 3" 4); the Keychain credential read, the `unsupported` automatic switch for Claude and the notice buttons on macOS were never run.
+7. PORTING rows not added: the usage-*, auto-switch and limit-alerts TS cases are covered by the crate's own unit tests (usage/fetchers/tests.rs, usage/service/tests.rs, auto_switch/tests.rs, limit_alerts.rs, notice_text.rs), not row by row; `node scripts/porting-count.mjs --check` was not rerun.
 
 ## Wave 3 integration (2026-11-08, fast mode)
 

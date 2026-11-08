@@ -1,7 +1,7 @@
 //! Commands of the `os` domain (W4): notifications (`notify`, `notify:show`), the taskbar flash (`attention:flash`), dialogs
 //! (`dialog:pickFolder`, `sound:pick`), alert sounds (`sound:load`, `sound:beep`), the clipboard (`clipboard:read`, `:write`,
 //! `:writeSecret`) and the shell (`shell:openExternal`, `:openPath`, `:revealPath`, `:openInEditor`). Ports of the handlers
-//! in src/main/index.ts; the OS calls live in unimux-platform. `alerts:testLimit` belongs to A5 (it needs the usage service
+//! in src/main/index.ts; the OS calls live in unimux-platform. `alerts:testLimit` is registered by A5 (it needs the usage service
 //! and the limit notice text); A5 shows its notices through [`OsService::notice`].
 //!
 //! Registered by `register` only. The service is created here and kept in `AppContext::os`, so the quit path
@@ -121,6 +121,20 @@ impl OsService {
         cell: Option<String>,
         on_button: Option<NoticeAction>,
     ) {
+        self.notice_with(title, body, buttons, cell, None, on_button);
+    }
+
+    /// [`OsService::notice`] with its own click action (A5: a limit or switch notice opens the limits panel); `on_click`
+    /// replaces the default "show the window and the cell".
+    pub fn notice_with(
+        self: &Arc<Self>,
+        title: &str,
+        body: &str,
+        buttons: Vec<String>,
+        cell: Option<String>,
+        on_click: Option<NoticeAction>,
+        on_button: Option<NoticeAction>,
+    ) {
         if !self.desktop.notifications_supported() {
             return;
         }
@@ -137,7 +151,10 @@ impl OsService {
                 ToastEvent::TimedOut => {}
                 ToastEvent::Click => {
                     if me.notices.forget(id) {
-                        me.show_cell(cell.as_deref());
+                        match &on_click {
+                            Some(action) => action(None),
+                            None => me.show_cell(cell.as_deref()),
+                        }
                     }
                 }
                 ToastEvent::Button(index) => {
@@ -655,7 +672,7 @@ pub fn test_op(ctx: &AppContext, args: &Value) -> Result<Value, String> {
 mod tests {
     use super::*;
 
-    /// The W4 channels of the contract are implemented (alerts:testLimit is A5's).
+    /// The W4 channels of the contract are implemented (and A5's alerts:testLimit).
     #[test]
     fn w4_channels_are_implemented() {
         let _one = crate::commands::REGISTER_LOCK.lock();
@@ -694,7 +711,8 @@ mod tests {
         ] {
             assert_eq!(report[channel], Status::Implemented, "{channel}");
         }
-        assert_ne!(report["alerts:testLimit"], Status::Implemented);
+        // A5 registers it (commands::accounts::usage).
+        assert_eq!(report["alerts:testLimit"], Status::Implemented);
         assert!(ctx.os.get().is_some_and(|os| os.recorder.is_none()), "a normal run uses the real desktop");
         ctx.saver.stop();
     }
