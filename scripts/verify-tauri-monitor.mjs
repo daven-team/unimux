@@ -1,6 +1,6 @@
 // Real-app check of the Monitor panel on the Tauri build (1.2.0, PLAN G8): the `check` build on a scratch data dir and a scratch
-// home, offscreen. Two cells of the saved grid get a running process tree each (cmd.exe -> PING.EXE started by this script and
-// handed to the app through the test-bridge op `monitorCells`, until P3 tracks the real pty shells). Checks:
+// home, offscreen. The saved grid has two shell cells with cmd as the shell; the app starts them in its own ptys (P3 / P4) and
+// this script types a long PING into each (cmd.exe -> PING.EXE). Checks:
 //   - the panel lists both cells with their trees (cmd.exe, PING.EXE) and their grid labels;
 //   - the "Aplikacja" section lists the main process and the WebView2 processes by kind (browser, renderer, GPU, services),
 //     exactly the msedgewebview2.exe processes under unimux.exe that Windows reports (Win32_Process, read independently);
@@ -11,7 +11,7 @@
 // Screenshots go to artifacts/tauri-monitor/. Windows only (the macOS half is compile-checked).
 //
 //   npm run build:check && node scripts/verify-tauri-monitor.mjs        (--keep leaves the scratch dir for inspection)
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -59,14 +59,16 @@ const scratch = mkdtempSync(join(tmpdir(), 'unimux-g8-monitor-'));
 const dataDir = join(scratch, 'data');
 mkdirSync(dataDir, { recursive: true });
 let state = addProject(defaultState('win32'), { name: 'monitor', path: scratch });
-state = addTab(state, state.projects[0].id, { layout: layoutForCount(2), cells: [{ profileId: 'claude' }, { profileId: 'codex' }] });
+// Shell cells with cmd: the app starts them itself (an agent cell would start a real CLI, whose processes are no fixed tree).
+state = addTab(state, state.projects[0].id, { layout: layoutForCount(2), cells: [{ profileId: 'shell' }, { profileId: 'shell' }] });
 state.settings.language = 'pl';
+state.settings.shell = 'cmd';
 state.settings.sidePanels = { monitor: true };
 const [cellA, cellB] = state.projects[0].tabs[0].cells;
 writeFileSync(join(dataDir, 'state.json'), JSON.stringify(state));
 
-// The stand-ins of the cells' shells: cmd.exe with a long PING.EXE under it.
-const shells = [0, 1].map(() => spawn('cmd.exe', ['/d', '/c', 'ping -n 300 127.0.0.1 >nul'], { stdio: 'ignore', windowsHide: true }));
+/** The shell of each cell (cmd.exe in the app's pty), by cell order: [{ pid }]. */
+const shells = [];
 
 const markersBefore = realProfileMarkers();
 const port = await freePort();
@@ -86,17 +88,22 @@ try {
   };
   await send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
   await until(`typeof window.__TAURI_INTERNALS__?.invoke === 'function' && !!document.querySelector('#monitor-view')`, 'app UI with the Monitor tab', 60000);
-  const bridge = (op, args) => evaluate(`window.__TAURI_INTERNALS__.invoke('test_bridge', ${JSON.stringify({ op, args: args ?? null })})`);
 
-  // The pings run under their cmd.exe before the app is told about the cells.
+  // Both cells run their shell (the app's own ptys); a long PING is typed into each terminal (xterm's input = keystrokes).
+  await until(`(async () => { const alive = await window.mc.aliveCells(); return [${JSON.stringify(cellA.id)}, ${JSON.stringify(cellB.id)}].every((id) => alive.includes(id) && window.__mc?.terminals?.entries.get(id)?.term); })()`, 'both shell cells running', 30000);
+  const running = await evaluate(`window.mc.monitorSample().then((s) => s.cells.map((c) => ({ cellId: c.cellId, pid: c.pid })))`);
+  for (const cell of [cellA, cellB]) shells.push({ pid: running.find((c) => c.cellId === cell.id)?.pid });
+  const procsNow = systemProcesses();
+  check('the app tracks both cells by their pty shells (cmd.exe under unimux.exe)', shells.every((s) => procsNow.some((p) => p.pid === s.pid && p.ppid === child.pid && /^cmd\.exe$/i.test(p.name))), JSON.stringify(running));
+  // cmd prints its prompt once it is ready for input.
+  await until(`[${JSON.stringify(cellA.id)}, ${JSON.stringify(cellB.id)}].every((id) => { const b = window.__mc.terminals.entries.get(id).term.buffer.active; for (let i = 0; i < b.length; i++) if (/>\\s*$/.test(b.getLine(i)?.translateToString(true) ?? '')) return true; return false; })`, 'cmd prompts', 30000);
+  for (const cell of [cellA, cellB]) await evaluate(`window.__mc.terminals.entries.get(${JSON.stringify(cell.id)}).term.input('ping -n 300 127.0.0.1 >nul\\r', true)`);
   const pingOf = new Map();
   await waitFor({ evaluate: async () => {
     const procs = systemProcesses();
     for (const s of shells) { const ping = descendants(procs, s.pid).find((p) => /^ping\.exe$/i.test(p.name)); if (ping) pingOf.set(s.pid, ping.pid); }
     return pingOf.size === 2;
   } }, '', 15000, 'PING.EXE under each cmd.exe');
-  const told = await bridge('monitorCells', { cells: [{ cellId: cellA.id, pid: shells[0].pid }, { cellId: cellB.id, pid: shells[1].pid }] });
-  check('test bridge takes the running cells', told.cells === 2 && told.mainPid === child.pid, JSON.stringify(told));
 
   await click('#monitor-view');
   await until(`document.querySelectorAll('.monitor-cell').length === 2 && document.querySelectorAll('.monitor-row.app').length > 1`, 'both cells and the app rows', 20000);
@@ -154,7 +161,6 @@ try {
 } finally {
   page?.close();
   killTree(child);
-  for (const s of shells) killTree(s);
   await sleep(500);
 }
 const markersAfter = realProfileMarkers();
