@@ -6,15 +6,16 @@
 //! coordinator's `sftp:` events, the 24 `sftp:*` channels with 1.1.4's validation, the `sftp:session` / `sftp:prompt` /
 //! `sftp:hostCrashed` events, the transfer port `mc:sftp-port`, the page-gone hooks (a reload counts the view closed and
 //! drops the window's pins) and the quit step (`sftp shutdown`, at most about 2 s; the hard limit stops the session tasks).
-//! What runs on a connected session (the SFTP client, queues, manage ops, sudo) is T2-T5's backend; until then
-//! `UnportedBackend` answers.
+//! What runs on a connected session is the backend: T2's `SidesBackend` (the SFTP client, the local side, list / stat /
+//! realpath / mkdir / rename); the queues, manage ops and sudo (T3-T5) plug into it.
 
 use std::sync::{Arc, Weak};
 
 use futures::future::BoxFuture;
 use serde_json::{Value, json};
 use unimux_ipc::RouterBuilder;
-use unimux_sftp::host::{HostDeps, HostOut, SftpHost, UnportedBackend};
+use unimux_sftp::backend::SidesBackend;
+use unimux_sftp::host::{HostDeps, HostOut, SftpHost};
 use unimux_sftp::ipc;
 use unimux_sftp::limits::SHUTDOWN_WAIT;
 use unimux_sftp::service::{SftpCoordinator, SftpDeps, SftpEvents, SftpService};
@@ -128,7 +129,8 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
             c.crash.error(line);
         }
     });
-    let host = SftpHost::new(deps, |_channels| Arc::new(UnportedBackend));
+    let sftp_timers = deps.sftp_timers;
+    let host = SftpHost::new(deps, |channels| SidesBackend::new(channels, sftp_timers));
     let ssh = link(ctx);
     let spawn = {
         let rt = runtime.clone();
