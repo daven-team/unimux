@@ -81,7 +81,6 @@ impl Gates {
     }
 
     /// Waits for every gate a spawn of `cli` (with that startup prompt) needs (P4's `cell:spawn` awaits it).
-    #[allow(dead_code, reason = "awaited by cell:spawn (P4)")]
     pub fn before_spawn(
         &self,
         cli: &str,

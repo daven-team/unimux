@@ -20,7 +20,7 @@
 //!   window field in a message;
 //! - the quit shuts the terminals down in the hosts phase of the wind-down (4 s), the hard limit kills them at once.
 //!
-//! `cell:spawn` (the launch line, gates, CLI decision) is P4's; `cell:runtime` is W7's.
+//! `cell:spawn` (the launch line, gates, CLI decision) is P4's ([`spawn`]); `cell:runtime` is W7's.
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, Weak};
@@ -73,6 +73,8 @@ pub fn host() -> &'static PtyHost {
 /// What happened to a cell's process, for the observers (automation statuses of M3, index.ts `automation.statuses.set`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CellEvent {
+    /// cell:spawn started the cell's terminal (`automation.runtimeStarted`, status `starting`, `cliExitCodes.delete`).
+    Spawning { cell: String },
     /// `spawned`: the cell's terminal runs (`runtimeStarted`, status `unknown`).
     Started { cell: String, pid: u32 },
     /// `exit`: the terminal ended by itself (status `exited`, `noteExit(code)`).
@@ -160,13 +162,11 @@ impl PtyHost {
     // ── the bookkeeping (P4, H6, M3) ──────────────────────────────────────────
 
     /// How often the cell was killed (a spawn that waited for the CLI lookup compares it before and after).
-    #[allow(dead_code, reason = "cell:spawn (P4) compares it")]
     pub fn kill_count(&self, cell: &str) -> u64 {
         self.book.lock().kills.get(cell).copied().unwrap_or(0)
     }
 
     /// `verifiedCodex.set`: the Codex session the user chose for the cell (P4 on a confirmed resume).
-    #[allow(dead_code, reason = "cell:spawn (P4) sets it")]
     pub fn set_verified_codex(&self, cell: &str, session: Option<&str>) {
         let mut book = self.book.lock();
         match session {
@@ -191,6 +191,19 @@ impl PtyHost {
             self.book.lock().pids.iter().filter(|(c, _)| alive(c)).map(|(c, p)| (c.clone(), *p)).collect();
         list.sort();
         list
+    }
+
+    /// A spawn that ended before or instead of its terminal (index.ts cell:spawn: a missing CLI, a failed spawn):
+    /// `endCellMcp`, `alive.delete`, the automation status `exited`.
+    pub(crate) fn spawn_refused(&self, ctx: &AppContext, cell: &str) {
+        end_cell_mcp(ctx, cell);
+        ctx.cells.set_alive(cell, false);
+        self.cell_event(CellEvent::SpawnFailed { cell: cell.to_string() });
+    }
+
+    /// cell:spawn is about to start the cell's terminal (`automation.runtimeStarted`, status `starting`).
+    pub(crate) fn spawning(&self, cell: &str) {
+        self.cell_event(CellEvent::Spawning { cell: cell.to_string() });
     }
 
     fn cell_event(&self, event: CellEvent) {
@@ -335,7 +348,7 @@ impl PtyHost {
 }
 
 /// `endCellMcp`: the cell's MCP token is revoked and its Claude MCP config removed (a locked file: the next start prunes it).
-fn end_cell_mcp(ctx: &AppContext, cell: &str) {
+pub(crate) fn end_cell_mcp(ctx: &AppContext, cell: &str) {
     if let Some(server) = crate::commands::mcp::server() {
         server.revoke_cell(cell);
     }
@@ -415,8 +428,12 @@ impl PortOwner for PtyPort {
     }
 }
 
+#[path = "pty_spawn.rs"]
+pub mod spawn;
+
 pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     *host().ctx.write() = Arc::downgrade(ctx);
+    spawn::register(r, ctx);
     let svc = service();
     ctx.ports.register("pty", Arc::new(PtyPort));
 

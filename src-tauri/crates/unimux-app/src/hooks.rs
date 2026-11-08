@@ -158,7 +158,6 @@ impl Hooks {
 
     /// A Codex spawn of the cell (index.ts: `hooks.prepareCodex(cellId)` then `codexHooked.delete(cellId)`): a fresh nonce
     /// and the notify URL; the cell counts as hooked again only once the new process reports.
-    #[allow(dead_code, reason = "called by the Codex spawn (P3)")]
     pub fn prepare_codex(&self, cell: &str) -> String {
         let url = self.server.prepare_codex(cell);
         self.codex_hooked.lock().remove(cell);
@@ -188,7 +187,6 @@ impl Hooks {
     /// found blocked or when an `allowedHttpHookUrls` list (managed policy, user or project settings) does not allow
     /// 127.0.0.1; writes `hooks/claude-<cell>.json` (a fresh nonce) and starts watching the cell. `env` is the cell's
     /// environment (CLAUDE_CONFIG_DIR, ProgramFiles), `version` the `claude --version` its PATH starts.
-    #[allow(dead_code, reason = "called by cell:spawn (P4)")]
     pub fn claude_spawn(
         &self,
         cell: &str,
@@ -211,7 +209,6 @@ impl Hooks {
     }
 
     /// A spawn of a cell that does not run Claude (index.ts `hookWatch.forget` in cell:spawn).
-    #[allow(dead_code, reason = "called by cell:spawn (P4)")]
     pub fn other_spawn(&self, cell: &str) {
         self.watch.forget(cell);
     }
@@ -229,7 +226,6 @@ impl Hooks {
     }
 
     /// Writes the startup prompt of a spawn to `prompts/<cell>-<seq36>.txt` (index.ts cell:spawn) and returns its path.
-    #[allow(dead_code, reason = "called by cell:spawn (P4)")]
     pub fn write_prompt(&self, cell: &str, text: &str) -> std::io::Result<PathBuf> {
         std::fs::create_dir_all(&self.cell_files.prompts)?;
         let seq = self.prompt_seq.fetch_add(1, Ordering::Relaxed) + 1;
@@ -239,7 +235,6 @@ impl Hooks {
     }
 
     /// The spawn's prompt file (None for a spawn without one), released when that process ends.
-    #[allow(dead_code, reason = "called by cell:spawn (P4)")]
     pub fn queue_prompt(&self, cell: &str, file: Option<PathBuf>) {
         self.prompts.lock().queue(cell, file);
     }

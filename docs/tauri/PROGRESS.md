@@ -116,7 +116,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 
 | id | title | status | started | done | verified | notes |
 |---|---|---|---|---|---|---|
-| P4 | Shell integration, launch line, cell spawn | todo | | | | |
+| P4 | Shell integration, launch line, cell spawn | built, fast mode, not verified | 2026-11-08 | 2026-11-08 | | branch `tauri-pkg-P4`. unimux-agents `launch` (buildCliCommand / buildLaunchCommand with the model-flag strip and model regex, startClear, withResetTail with the exit URL check, shellSafeText / coordinatorSystemRules, the userCodexInstructions check; `team.rs` startup / resume task prompts and readyStartupTasks; `mcp_config.rs` prepareCellMcp / claudeMcpConfig (0600 file for Claude, `UNIMUX_MCP_TOKEN` for Codex); `json.rs` `{profile, opts}` and the `--launch-line` answer). unimux-pty `shell_integration` (POWERSHELL_SCRIPT / BASH_INIT verbatim, UTF-16LE base64 -EncodedCommand, cmd PROMPT, private helper dir 0700 / file 0600 written through a create-new temp file, `UNIMUX_SHELL_INTEGRATION=0`), applied by PtyManager to every terminal started without its own launch. unimux-app `commands/pty_spawn.rs` (`cell:spawn`: fatal check, kill-count snapshot, W7 gates, 4 s folder check, H3 CLI decision 7 s / `force`, cleanEnv + MC_CELL_ID + detector PATH, `version_for` 2 s, H2 hook form and settings file, resume downgrade when the Claude jsonl is missing, team prompts and the `startup` delivery mark, prompts/<cell>-<seq36>.txt, M2 token + cell MCP config or endCellMcp, Codex notify, coordinator rules, exit URL, verifiedCodex, `Spawning` cell event, alive, prompt queue, `service().spawn`, `first-spawn` mark); `--launch-line` answers `{line, launch}`. Goldens: test/golden/launch.jsonl (1,736 rows from the 1.1.4 TS code, scripts/goldens-launch.mjs via dump-goldens). See "P4 open issues" |
 | P5 | SSH shell cells on russh | todo | | | | |
 | H6 | Install manager, login terminals, agent delivery | todo | | | | |
 | S4 | SSH IPC and russh test server | todo | | | | Docker |
@@ -1570,6 +1570,18 @@ Not run (fast mode): real-app / CDP scripts (smoke-tauri, verify-tauri-lifecycle
 4. macOS: unimux-db now builds ring (rustls) and the bundled SQLite, so no aarch64-apple-darwin check of unimux-db / unimux-accounts / unimux-ssh is possible on this machine; only CI's macOS job can build them.
 5. `dump-goldens.mjs --check` still needs about 12 GB of heap ("Open after wave 2" 6); `npm run gen:check` as written does not finish here with the default heap.
 6. Worktrees: the ten wave 3 worktrees were removed (node_modules junctions unlinked first) and their branches deleted. Still kept: `.claude/worktrees/wf_3188d96a-67a-38` with `tauri-pkg-A2-fixes` (an uncommitted earlier draft of A2's Codex lock fix, see "Open after wave 2" 8).
+
+## Wave 4 packages: open issues
+
+### P4 open issues (2026-11-08, fast mode)
+
+Built and unit-tested only: `cargo fmt`, clippy -D warnings for unimux-agents / unimux-pty / unimux-app (all targets; unimux-app also with dev-overrides,test-bridge), one `cargo test` run of the three crates (result below). Not run: the real-app acceptance (verify-start-screen, a Claude and a Codex cell starting with the start card, getting hooks and resuming after a restart), verify-cli-contract against the installed CLIs on the check build, macOS (compile-check through CI only), `dump-goldens.mjs --check` (12 GB heap, see "Open after wave 2" 6).
+
+1. Hardening beyond 1.1.4: `cell:spawn` takes only cell ids `[A-Za-z0-9_-]{1,64}` (they name hook, prompt and MCP files; the renderer uses UUIDs) and drops a session id that is not `[A-Za-z0-9][A-Za-z0-9._-]{0,127}` (it is typed into the shell); such a resume becomes a new conversation.
+2. The shell integration helper folder on Windows is only checked to be a real directory (no owner / ACL check, as in 1.1.4 where the mode check is a no-op); bash integration runs on macOS / Linux only.
+3. Automation statuses (`starting` / `exited`, `runtimeStarted`, `cliExitCodes.delete`) go out as `CellEvent::Spawning` / `SpawnFailed` on the pty host; M3 must register an `on_cell` observer to act on them.
+4. The renderer-facing behaviour (start card, startedWithPrompt clearing the stored startup prompt) is unchanged TS and untested against the Rust side.
+5. Test run (once, loaded machine): unimux-agents all green (179 unit incl. the launch goldens, 1,736 rows), unimux-app 122/122, unimux-pty tests/launch_goldens.rs, manager, service, engine, plane green; two failures are the load-sensitive tests P3 already reported, not touched by P4 and not rerun: `batch::tests::bulk_after_a_quiet_window_leaves_at_once_then_waits_for_the_window` and tests/conpty.rs `output_after_exit_is_delivered_before_the_exit`. `cargo check --target aarch64-apple-darwin -p unimux-pty -p unimux-agents` clean; unimux-app cannot be cross-checked here.
 
 ## Do zainstalowania / do decyzji użytkownika
 

@@ -15,6 +15,9 @@
 //!
 //! P3 (the pty service): [`service`] (PtyService: the supervised control queue over the engine, spawned / spawnError /
 //! exit / tap / interrupt events, kill with an answer, kill all, the crash and fatal flow of the 1.1.4 Pty Host).
+//!
+//! P4: [`shell_integration`] (the OSC 133 prompt marks of PowerShell, cmd and bash: withShellIntegration and the private
+//! helper folder of integratedLaunch), applied by [`manager`] to every terminal started without its own launch.
 
 pub mod actor;
 pub mod batch;
@@ -31,6 +34,7 @@ pub mod plane;
 pub mod routes;
 pub mod service;
 pub mod shell;
+pub mod shell_integration;
 pub mod supervisor;
 pub mod timers;
 #[cfg(unix)]

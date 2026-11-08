@@ -47,6 +47,8 @@
 //                                     (1.1.4's code, run on scratch dirs) and the history rules (see scripts/goldens-ssh.mjs)
 //   test/golden/accounts-activate.jsonl  "make main", its version-2 recovery and the 0.9.0 recovery on scratch dirs (1.1.4's
 //                                     code; see scripts/goldens-activate.mjs)
+//   test/golden/launch.jsonl         the launch line, reset tail, team prompts, shell integration and the cell MCP config
+//                                     (see scripts/goldens-launch.mjs)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { afterEditRows, normalizeRows } from './goldens-normalize.mjs';
 import { updateConfigGolden, updateProgressRows, updateStringsGolden } from './goldens-update.mjs';
@@ -67,6 +69,7 @@ import { backwardRows, contextScanRows, sessionListRows, sessionPathRows } from 
 import { historyRows, historyRuleRows, knownHostsRows, vaultRows } from './goldens-ssh.mjs';
 import { activateRows } from './goldens-activate.mjs';
 import { mcpGoldens } from './goldens-mcp.mjs';
+import { LAUNCH_MODULES, launchGoldens } from './goldens-launch.mjs';
 import { fileURLToPath } from 'node:url';
 import { runnerImport } from 'vite';
 
@@ -370,6 +373,7 @@ const files = {
   'ssh-command-history.jsonl': jsonl(historyRows({ CommandHistoryStore })),
   'ssh-history-rules.jsonl': jsonl(historyRuleRows(historyRules)),
   'accounts-activate.jsonl': jsonl(await activateRows(activateModules)),
+  'launch.jsonl': jsonl(launchGoldens(Object.fromEntries(await Promise.all(Object.entries(LAUNCH_MODULES).map(async ([name, file]) => [name, await load(file)]))))),
 };
 const mcp = await mcpGoldens(load);
 files['mcp-tools.json'] = `${JSON.stringify(mcp.tools, null, 1)}

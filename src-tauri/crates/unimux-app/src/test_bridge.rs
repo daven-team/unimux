@@ -13,16 +13,17 @@ use unimux_ipc::{Caller, IpcError, Scope};
 use crate::context::AppContext;
 
 /// `unimux --launch-line <json>` (check build): the shell line a cell starts its CLI with, from `{profile, opts}` as
-/// `buildCliCommand(profile, opts)` of src/shared/profiles.ts takes them, printed as `{"line": ...}`. P4 ports the builder;
-/// until then the answer is `{"error": "MC_NOT_YET", ...}` with exit code 3, which verify-cli-contract.mjs reports as
-/// "blocked by P4". None when the flag is absent.
+/// `buildCliCommand(profile, opts)` of src/shared/profiles.ts takes them, printed as `{"line": <buildCliCommand>, "launch":
+/// <buildLaunchCommand>}` (the Rust builder of P4, `unimux_agents::launch`; null for a shell profile) with exit code 0, or
+/// `{"error": "MC_FAILED", "message"}` with exit code 1 where the TS builder throws (an invalid model or notify URL).
+/// verify-cli-contract.mjs reads `line`. None when the flag is absent.
 pub fn launch_line_cli() -> Option<i32> {
     let args: Vec<String> = std::env::args().collect();
     let i = args.iter().position(|a| a == "--launch-line")?;
     let input = args.get(i + 1).and_then(|a| serde_json::from_str::<Value>(a).ok());
     let (out, code) = match input {
         None => (json!({ "error": "MC_BAD_ARGS", "message": "--launch-line needs a JSON {profile, opts}" }), 2),
-        Some(_) => (json!({ "error": "MC_NOT_YET", "command": "launch-line", "owner": "P4" }), 3),
+        Some(input) => unimux_agents::launch::json::launch_line_answer(&input),
     };
     println!("{out}");
     Some(code)
