@@ -1,7 +1,7 @@
 // P2 real-app checks (Windows): the Rust pty output engine and data plane under the real renderer (TerminalManager) of
-// the Tauri check build. Terminals are started through the test bridge (`pty` op: what P3's cell:spawn will do, without
-// the launch line) for the cells of a scratch state, so everything after the spawn is the shipped path: OutputChannel,
-// FlowGate, the per-window batcher, the transport (shared buffers by default), the bridge's pty port, TerminalManager.
+// the Tauri check build. The app starts the cmd cells of a scratch state itself (cell:spawn), so everything is the shipped
+// path: OutputChannel, FlowGate, the per-window batcher, the transport (shared buffers by default), the bridge's pty port,
+// TerminalManager.
 //
 //   npm run build:check && (cd src-tauri && node ../scripts/msvc-run.mjs cargo build --release -p unimux-pty --bins)
 //   node scripts/verify-tauri-pty.mjs [replay] [latency] [grid] [reload] [--cells=20] [--rate=1000000] [--seconds=15]
@@ -67,13 +67,8 @@ async function withApp(count, fn) {
   const app = await launchApp(scratch, transport ? { MC_PTY_TRANSPORT: transport } : {});
   try {
     await app.until(`document.querySelectorAll('.cell .xterm').length >= ${count} && window.__mc.terminals.entries.size >= ${count}`, `${count} terminals`, 60000);
-    // cell:spawn is P3 / P4: the cells show its MC_NOT_YET error; the terminals are started through the bridge instead.
-    await sleep(1500);
-    await app.evaluate(`window.__mc.useStore.getState().setUi({ cellErrors: {} }), true`);
-    for (let i = 0; i < count; i++) {
-      const size = await app.evaluate(`(() => { const t = window.__mc.terminals.entries.get('c${i}').term; return { cols: t.cols, rows: t.rows }; })()`);
-      await app.bridge('pty', { action: 'spawn', id: `c${i}`, cwd: join(scratch, 'project'), shell: 'cmd', ...size });
-    }
+    // The app starts the cells itself (cell:spawn, P3 / P4: cmd from the settings, at the terminal's size); a second start
+    // through the test bridge would replace those terminals under a running page.
     await app.until(`[...window.__mc.terminals.entries.values()].every((e) => { const b = e.term.buffer.active; for (let i = 0; i < b.length; i++) if (/>\\s*$/.test(b.getLine(i)?.translateToString(true) ?? '')) return true; return false; })`, 'every prompt', 60000);
     return await fn(app, scratch);
   } finally {
