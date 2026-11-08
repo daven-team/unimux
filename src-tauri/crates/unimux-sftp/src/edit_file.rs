@@ -408,17 +408,29 @@ async fn write_handle(side: &RemoteSide, handle: &[u8], data: &[u8], mode: Optio
     }
 }
 
-/// Puts `mode` on the saved file after the rename without ever following a link (T4): lsetstat when the server has it,
-/// else SETSTAT only while an lstat still shows a regular file of the size just written.
+/// Puts `mode` on the saved file after the rename without ever following a link (T4): lsetstat when the server has it.
+/// Without it there is no SETSTAT that leaves a link alone, so nothing is changed by path: the fix-up is skipped when
+/// someone else could swap the name for a link (the folder is writable by group or others, or its mode is unknown), and
+/// otherwise goes through a handle: an lstat shows a regular file of the size just written, the file is opened, FSTAT on
+/// that handle shows a regular file of that size again, and FSETSTAT changes the mode of exactly what was opened.
 pub(crate) async fn set_mode_no_follow(side: &RemoteSide, path: &str, mode: u32, size: u64) -> bool {
     let client = side.client();
     if side.lsetstat() {
         return client.lsetstat(path, &Attrs::mode(mode)).await.is_ok();
     }
-    match side.lstat(path).await {
-        Ok(Some(m)) if m.kind == EntryKind::File && m.size == size => client.setstat(path, &Attrs::mode(mode)).await.is_ok(),
-        _ => false,
+    match side.lstat(&posix_parent(path)).await {
+        Ok(Some(dir)) if dir.kind == EntryKind::Dir && dir.mode.is_some_and(|m| m & 0o022 == 0) => {}
+        _ => return false,
     }
+    match side.lstat(path).await {
+        Ok(Some(m)) if m.kind == EntryKind::File && m.size == size => {}
+        _ => return false,
+    }
+    let Ok(handle) = client.open_read(path).await else { return false };
+    let same = client.fstat(&handle).await.is_ok_and(|a| kind_from_mode(a.mode) == EntryKind::File && a.size == Some(size));
+    let set = same && client.fsetstat(&handle, &Attrs::mode(mode)).await.is_ok();
+    let closed = client.close(&handle).await.is_ok();
+    set && closed
 }
 
 /// What happens to the part file and the target hold when a save ends, however it ends.

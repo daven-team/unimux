@@ -199,19 +199,28 @@ async fn editor_save_sets_the_mode_on_the_open_part_handle() {
     assert_eq!(mode_of(&fake, "/f.sh"), Some(0o750));
 }
 
-/// T4: the fix-up after the rename never follows a link: lsetstat when offered, else SETSTAT only on a regular file of the
-/// size just written.
+/// T4: the fix-up after the rename never follows a link: lsetstat when offered, else FSETSTAT on a handle of the file
+/// (FSTAT on it shows a regular file of the size just written) and never in a folder others can write to; no path-based
+/// SETSTAT is ever sent.
 #[tokio::test]
 async fn the_mode_fix_up_after_the_rename_never_follows_a_link() {
     let (fake, side) = connect(Config::default()).await;
     fake.put("/f", Node::File(b"abc".to_vec(), 1));
     fake.put("/d", Node::Dir);
+    fake.put("/d/g", Node::File(b"abc".to_vec(), 1));
     assert!(!set_mode_no_follow(&side, "/d", 0o600, 3).await, "not a regular file");
     assert!(!set_mode_no_follow(&side, "/f", 0o600, 4).await, "another file than the one written");
     assert!(!set_mode_no_follow(&side, "/gone", 0o600, 3).await);
+    for shared in [0o775, 0o757, 0o1777] {
+        fake.modes.lock().insert("/d".into(), shared);
+        assert!(!set_mode_no_follow(&side, "/d/g", 0o640, 3).await, "{shared:o}: others could swap the name for a link");
+    }
     assert!(fake.log.lock().is_empty());
+    assert!(fake.open_handles.lock().is_empty());
     assert!(set_mode_no_follow(&side, "/f", 0o640, 3).await);
-    assert_eq!(fake.log.lock().clone(), vec!["SETSTAT /f".to_string()]);
+    assert_eq!(fake.log.lock().clone(), vec!["FSETSTAT /f".to_string()]);
+    assert_eq!(mode_of(&fake, "/f"), Some(0o640));
+    assert!(fake.open_handles.lock().is_empty(), "the handle is closed");
     let (fake, side) = connect(Config { lsetstat: true, ..Config::default() }).await;
     fake.put("/f", Node::File(b"abc".to_vec(), 1));
     assert!(set_mode_no_follow(&side, "/f", 0o640, 99).await);
@@ -250,6 +259,25 @@ async fn under_sudo_recursive_deletes_in_shared_writable_folders_are_refused() {
         // Without sudo the same folders are counted (1.1.4).
         assert_eq!(op(&side, SftpOp::DeleteCount { paths: paths.clone() }).await, Ok(json!({ "files": 2, "dirs": 2 })));
     }
+    // Every folder above the selected one counts, not only its parent: "/" writable by others.
+    fake.modes.lock().clear();
+    fake.modes.lock().insert("/".into(), 0o777);
+    let inner = vec!["/d/b".to_string()];
+    let one_dir = DeleteCount { files: 1, dirs: 1 };
+    assert_eq!(op_sudo(&side, SftpOp::DeleteCount { paths: inner.clone() }).await, Err(SftpErrorCode::UnsafeDelete));
+    assert_eq!(
+        op_sudo(&side, SftpOp::Delete { paths: inner.clone(), confirmed: one_dir }).await,
+        Err(SftpErrorCode::UnsafeDelete)
+    );
+    assert!(fake.get("/d/b/c").is_some(), "nothing removed");
+    // A sticky folder owned by root is fine only for an entry root owns too.
+    fake.modes.lock().insert("/".into(), 0o1777);
+    fake.owners.lock().insert("/".into(), 0);
+    fake.owners.lock().insert("/d".into(), 1000);
+    assert_eq!(op_sudo(&side, SftpOp::DeleteCount { paths: inner.clone() }).await, Err(SftpErrorCode::UnsafeDelete));
+    fake.owners.lock().insert("/d".into(), 0);
+    assert_eq!(op_sudo(&side, SftpOp::DeleteCount { paths: inner.clone() }).await, Ok(json!({ "files": 1, "dirs": 1 })));
+    fake.owners.lock().clear();
     // A single file in a shared folder is one unlink (which never follows a link): allowed.
     let one = DeleteCount { files: 1, dirs: 0 };
     assert_eq!(op_sudo(&side, SftpOp::Delete { paths: vec!["/e".into()], confirmed: one }).await, Ok(Value::Null));
@@ -288,4 +316,30 @@ async fn folder_reads_stop_at_the_match_and_at_the_total_limits() {
     assert_eq!(side.readdir("/huge").await.map(|v| v.len()), Err(SftpErrorCode::TooMany.into()));
     assert_eq!(side.readdir_find("/huge", "missing").await, Err(SftpErrorCode::TooMany.into()));
     assert_eq!(side.readdir_raw("/huge", Some(10)).await.unwrap().len(), 11);
+}
+
+/// T5: which folder above a selected one lets root trust the name inside it.
+#[test]
+fn an_ancestor_keeps_the_entry_only_when_nobody_but_root_can_swap_it() {
+    use crate::manage::ancestor_keeps_entry;
+    use crate::proto::Attrs;
+    let at = |mode: Option<u32>, uid: Option<u32>| Attrs { mode, uid, gid: uid, ..Attrs::default() };
+    let root_entry = at(Some(0o40755), Some(0));
+    let user_entry = at(Some(0o40755), Some(1000));
+    // Only the owner writes: fine, whoever owns the entry.
+    assert!(ancestor_keeps_entry(&at(Some(0o40755), Some(0)), &user_entry));
+    assert!(ancestor_keeps_entry(&at(Some(0o40700), Some(1000)), &user_entry));
+    // Group or others write, or nothing is known: refused.
+    assert!(!ancestor_keeps_entry(&at(Some(0o40775), Some(0)), &root_entry));
+    assert!(!ancestor_keeps_entry(&at(Some(0o40757), Some(0)), &root_entry));
+    assert!(!ancestor_keeps_entry(&at(None, Some(0)), &root_entry));
+    // Sticky and writable by others: only a root-owned folder with a root-owned entry.
+    assert!(ancestor_keeps_entry(&at(Some(0o41777), Some(0)), &root_entry));
+    assert!(!ancestor_keeps_entry(&at(Some(0o41777), Some(0)), &user_entry));
+    assert!(!ancestor_keeps_entry(&at(Some(0o41777), Some(1000)), &root_entry));
+    assert!(!ancestor_keeps_entry(&at(Some(0o41777), None), &root_entry));
+    assert!(!ancestor_keeps_entry(&at(Some(0o41777), Some(0)), &at(Some(0o40755), None)));
+    // A link (or anything but a folder) on the way: refused.
+    assert!(!ancestor_keeps_entry(&at(Some(0o120777), Some(0)), &root_entry));
+    assert!(!ancestor_keeps_entry(&at(Some(0o100755), Some(0)), &root_entry));
 }

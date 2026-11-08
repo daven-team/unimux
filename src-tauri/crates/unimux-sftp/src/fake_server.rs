@@ -35,6 +35,8 @@ pub struct Fake {
     /// Permission bits per path (default 0644 for files, 0755 for folders); SETSTAT, FSETSTAT and lsetstat change them and
     /// a rename carries them.
     pub modes: Mutex<HashMap<String, u32>>,
+    /// Owner (uid, sent as uid and gid) per path; paths without one are sent without an owner.
+    pub owners: Mutex<HashMap<String, u32>>,
     /// The attribute changes in order: "SETSTAT <path>", "FSETSTAT <path of the handle>", "LSETSTAT <path>".
     pub log: Mutex<Vec<String>>,
     /// READDIR requests answered.
@@ -61,6 +63,7 @@ impl Fake {
             writes: AtomicUsize::new(0),
             open_handles: Mutex::new(HashMap::new()),
             modes: Mutex::new(HashMap::new()),
+            owners: Mutex::new(HashMap::new()),
             log: Mutex::new(Vec::new()),
             readdirs: AtomicUsize::new(0),
             swap_on_opendir: Mutex::new(None),
@@ -72,6 +75,10 @@ impl Fake {
         let mut a = Self::attrs(node);
         if let (Some(bits), Some(m)) = (self.modes.lock().get(path), a.mode) {
             a.mode = Some((m & !0o7777) | (bits & 0o7777));
+        }
+        if let Some(uid) = self.owners.lock().get(path) {
+            a.uid = Some(*uid);
+            a.gid = Some(*uid);
         }
         a
     }
