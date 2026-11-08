@@ -2,10 +2,10 @@
 // port object (release acks, queueing until TerminalManager listens, the shared-buffer and pull transports).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { decodeFrames, encodeFrames, FRAME_DATA, FRAME_EXIT, FRAME_JSON, FRAME_REPLAY, FRAME_RESET, PtyFrameDecoder } from '../src/shared/ptyFrames';
 import { replaySegments } from '../src/shared/replay';
-import { createPtyPort, listenSharedBuffers, runPull, type SharedBufferEvent } from '../src/renderer/src/bridge/ptyPort';
+import { createPtyPort, listenSharedBuffers, RELEASE_TICK_MS, runPull, type SharedBufferEvent } from '../src/renderer/src/bridge/ptyPort';
 
 const enc = new TextEncoder();
 const exitPayload = (code: number) => { const b = new Uint8Array(4); new DataView(b.buffer).setInt32(0, code, true); return b; };
@@ -127,12 +127,12 @@ describe('the bridge pty port', () => {
     const posted: unknown[] = [];
     const port = createPtyPort({ post: (m) => posted.push(m) }, 'sharedBuffer');
     const seen: unknown[] = [];
-    port.deliver(new Uint8Array([1]), 1);
-    port.deliver(new Uint8Array([2]), 2);
+    port.deliver(new Uint8Array([1]), 1, true);
+    port.deliver(new Uint8Array([2]), 2, true);
     expect(posted).toEqual([]);
     port.onmessage = (e) => seen.push(e.data);
     port.start();
-    port.deliver(new Uint8Array([3]), 3);
+    port.deliver(new Uint8Array([3]), 3, true);
     expect(seen).toEqual([new Uint8Array([1]), new Uint8Array([2]), new Uint8Array([3])]);
     expect(posted).toEqual([{ t: 'released', upto: 1 }, { t: 'released', upto: 2 }, { t: 'released', upto: 3 }]);
     // Message 1 arrived with nothing released: 1 in flight; the queued ones were counted when they were handled.
@@ -148,7 +148,7 @@ describe('the bridge pty port', () => {
   it('counts the messages the host posted but the page has not released (page side)', () => {
     const port = createPtyPort({ post: () => undefined }, 'sharedBuffer');
     port.onmessage = () => undefined;
-    port.deliver(new Uint8Array([1]), 1);
+    port.deliver(new Uint8Array([1]), 1, true);
     port.deliver(new Uint8Array([1]), 3); // the host already posted 3 while the page handled 1
     expect(port.stats.maxInFlight).toBe(2);
   });
@@ -157,10 +157,34 @@ describe('the bridge pty port', () => {
     const posted: unknown[] = [];
     const port = createPtyPort({ post: (m) => posted.push(m) }, 'sharedBuffer');
     port.onmessage = () => undefined;
-    port.deliver(new Uint8Array([1]), 1);
-    port.deliver(new Uint8Array([1]), 3); // message 2 was lost on the way
-    port.deliver(new Uint8Array([1]), 4);
+    port.deliver(new Uint8Array([1]), 1, true);
+    port.deliver(new Uint8Array([1]), 3, true); // message 2 was lost on the way
+    port.deliver(new Uint8Array([1]), 4, true);
     expect(posted).toEqual([{ t: 'released', upto: 1 }, { t: 'released', upto: 3 }, { t: 'released', upto: 4 }]);
+  });
+
+  it('delays a release the host does not wait for, until the next message to the host or the tick', () => {
+    vi.useFakeTimers();
+    try {
+      const posted: unknown[] = [];
+      const port = createPtyPort({ post: (m) => posted.push(m) }, 'sharedBuffer');
+      port.onmessage = () => undefined;
+      port.deliver(new Uint8Array([1]), 1);
+      port.deliver(new Uint8Array([1]), 2);
+      expect(posted).toEqual([]);
+      vi.advanceTimersByTime(RELEASE_TICK_MS);
+      expect(posted).toEqual([{ t: 'released', upto: 2 }]);
+      port.deliver(new Uint8Array([1]), 3);
+      port.postMessage({ t: 'ack', id: 'x', chars: 1 });
+      expect(posted.slice(1)).toEqual([{ t: 'released', upto: 3 }, { t: 'ack', id: 'x', chars: 1 }]);
+      vi.advanceTimersByTime(RELEASE_TICK_MS * 2);
+      expect(posted).toHaveLength(3);
+      // A release the host waits for is not delayed.
+      port.deliver(new Uint8Array([1]), 4, true);
+      expect(posted.at(-1)).toEqual({ t: 'released', upto: 4 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('a throwing handler still releases', () => {
@@ -197,7 +221,7 @@ describe('the bridge pty port', () => {
     const old = new Uint8Array([1]).buffer;
     const fresh = new Uint8Array([2]).buffer;
     listener!({ additionalData: { mcPort: 'pty', a: 'old', n: 229 }, getBuffer: () => old });
-    listener!({ additionalData: { mcPort: 'pty', a: 'new', n: 1 }, getBuffer: () => fresh });
+    listener!({ additionalData: { mcPort: 'pty', a: 'new', n: 1, r: 1 }, getBuffer: () => fresh });
     expect(released).toEqual([old, fresh]);
     expect(seen).toEqual([new Uint8Array([2])]);
     expect(posted).toEqual([{ t: 'released', upto: 1 }]);

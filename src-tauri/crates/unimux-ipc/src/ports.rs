@@ -26,6 +26,12 @@ pub trait PortSink: Send + Sync {
         let _ = seq;
         self.post_bytes(&bytes)
     }
+    /// [`PortSink::post_frames`] with the batcher's hint that the release of this message must not wait (the host is at
+    /// its cap); only a transport whose page gets the hint and may otherwise delay the release uses it.
+    fn post_frames_hinted(&self, seq: u64, bytes: Vec<u8>, release_now: bool) -> bool {
+        let _ = release_now;
+        self.post_frames(seq, bytes)
+    }
     /// The page answers every frames message with a release ack (`{t:'released', upto}`), so the sender may cap what is
     /// in flight. A pull transport gates itself (one request in flight).
     fn gated(&self) -> bool {

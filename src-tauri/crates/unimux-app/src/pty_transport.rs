@@ -3,7 +3,7 @@
 //! - `sharedBuffer` (Windows, default): `ICoreWebView2Environment12::CreateSharedBuffer` + `ICoreWebView2_17::
 //!   PostSharedBufferToScript` (read only; the additional data `{"mcPort":"pty","a":<attach id>,"n":<seq>}` names the
 //!   port, the page's attach and the message number: buffers an earlier attach posted while the page reloaded are dropped
-//!   by the new page, which releases by `n`). A post waits until the UI thread made it (at most one post queued on the UI thread, a slower UI
+//!   by the new page, which releases by `n`; `"r":1` asks for that release at once, the host reached its cap). A post waits until the UI thread made it (at most one post queued on the UI thread, a slower UI
 //!   thread is waited for and counted every 2 s, never answered with a second post); the page answers each message with a
 //!   release ack, so the batcher caps the messages in flight per window.
 //! - `pull` (macOS default: WKWebView has no shared buffer): the page long-polls `mc_port_pull`, one request in flight; a
@@ -144,10 +144,11 @@ fn valid_attach_id(a: &str) -> bool {
 }
 
 /// The additional data of a shared buffer.
-fn additional_data(attach: Option<&str>, seq: u64) -> String {
+fn additional_data(attach: Option<&str>, seq: u64, release_now: bool) -> String {
+    let r = if release_now { ",\"r\":1" } else { "" };
     match attach {
-        Some(a) => format!("{{\"mcPort\":\"pty\",\"a\":\"{a}\",\"n\":{seq}}}"),
-        None => format!("{{\"mcPort\":\"pty\",\"n\":{seq}}}"),
+        Some(a) => format!("{{\"mcPort\":\"pty\",\"a\":\"{a}\",\"n\":{seq}{r}}}"),
+        None => format!("{{\"mcPort\":\"pty\",\"n\":{seq}{r}}}"),
     }
 }
 
@@ -167,7 +168,10 @@ impl PortSink for SharedBufferSink {
         self.post_frames(0, bytes.to_vec())
     }
     fn post_frames(&self, seq: u64, bytes: Vec<u8>) -> bool {
-        post_shared_buffer(&self.webview, additional_data(self.attach.as_deref(), seq), bytes)
+        self.post_frames_hinted(seq, bytes, false)
+    }
+    fn post_frames_hinted(&self, seq: u64, bytes: Vec<u8>, release_now: bool) -> bool {
+        post_shared_buffer(&self.webview, additional_data(self.attach.as_deref(), seq, release_now), bytes)
     }
     fn gated(&self) -> bool {
         true
@@ -464,9 +468,9 @@ mod tests {
         assert!(!valid_attach_id("x\",\"n\":1"));
         assert!(!valid_attach_id(""));
         assert!(!valid_attach_id(&"a".repeat(65)));
-        let v: Value = serde_json::from_str(&additional_data(Some("abc-1"), 7)).unwrap();
+        let v: Value = serde_json::from_str(&additional_data(Some("abc-1"), 7, false)).unwrap();
         assert_eq!(v, serde_json::json!({ "mcPort": "pty", "a": "abc-1", "n": 7 }));
-        let v: Value = serde_json::from_str(&additional_data(None, 3)).unwrap();
-        assert_eq!(v, serde_json::json!({ "mcPort": "pty", "n": 3 }));
+        let v: Value = serde_json::from_str(&additional_data(None, 3, true)).unwrap();
+        assert_eq!(v, serde_json::json!({ "mcPort": "pty", "n": 3, "r": 1 }));
     }
 }

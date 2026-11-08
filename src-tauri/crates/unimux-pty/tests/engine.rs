@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::{Condvar, Mutex};
 use serde_json::json;
-use unimux_pty::batch::{MAX_IN_FLIGHT, Transport};
+use unimux_pty::batch::{MAX_IN_FLIGHT_SMALL, Transport};
 use unimux_pty::engine::PtyEngine;
 use unimux_pty::flow::{FLUSH_NOW_BYTES, HIGH_WATER};
 use unimux_pty::frame::{self, KIND_DATA, KIND_EXIT, KIND_REPLAY, KIND_RESET};
@@ -297,7 +297,7 @@ fn a_gated_window_never_has_more_than_the_cap_in_flight() {
     }
     let stats = engine.stats_json();
     let w = &stats["windows"]["main"];
-    assert!(w["maxInFlight"].as_u64().unwrap() <= MAX_IN_FLIGHT, "{w}");
+    assert!(w["maxInFlight"].as_u64().unwrap() <= MAX_IN_FLIGHT_SMALL, "{w}");
     assert!(w["posts"].as_u64().unwrap() > 10, "{w}");
     // Fewer messages than frames: batches grew while the page was busy.
     assert!(w["frames"].as_u64().unwrap() > w["posts"].as_u64().unwrap(), "{w}");

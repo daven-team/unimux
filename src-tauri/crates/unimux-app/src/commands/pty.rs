@@ -401,6 +401,9 @@ impl Transport for SinkTransport {
     fn post(&self, seq: u64, bytes: Vec<u8>) -> bool {
         self.0.post_frames(seq, bytes)
     }
+    fn post_hinted(&self, seq: u64, bytes: Vec<u8>, release_now: bool) -> bool {
+        self.0.post_frames_hinted(seq, bytes, release_now)
+    }
     fn gated(&self) -> bool {
         self.0.gated()
     }

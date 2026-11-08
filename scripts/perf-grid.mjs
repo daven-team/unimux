@@ -5,6 +5,7 @@
 // Usage: node scripts/perf-grid.mjs [label] [cells] [lines per 66 ms tick per cell, default 4]
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { cpus } from 'node:os';
 import { join } from 'node:path';
 import { launchApp, sleep } from './ssh-ui-lib.mjs';
 import { removeScratch } from './app-env.mjs';
@@ -46,6 +47,11 @@ const ps = (script) => execFileSync('powershell.exe', ['-NoProfile', '-NonIntera
 /** CPU seconds (user + kernel) of `pid` and all its descendants, without the shells and writers (their cost is not the app's). */
 const appCpu = (pid) => Number(ps(`$all = Get-CimInstance Win32_Process; $ids = @(${Number(pid)}); $i = 0; while ($i -lt $ids.Count) { $ids += @($all | Where-Object { $_.ParentProcessId -eq $ids[$i] -and $_.Name -notin @('cmd.exe','node.exe','conhost.exe','OpenConsole.exe') } | ForEach-Object { $_.ProcessId }); $i++ }; $t = ($all | Where-Object { $ids -contains $_.ProcessId } | ForEach-Object { $_.UserModeTime + $_.KernelModeTime } | Measure-Object -Sum).Sum; ([math]::Round($t / 1e7, 2)).ToString([cultureinfo]::InvariantCulture)`));
 
+/** CPU seconds per process kind of the app tree (browser, renderer, gpu, network, utility, host: unimux.exe), by process id, shells and writers excluded. */
+const appCpuBy = (pid) => JSON.parse(ps(`$all = Get-CimInstance Win32_Process; $ids = @(${Number(pid)}); $i = 0; while ($i -lt $ids.Count) { $ids += @($all | Where-Object { $_.ParentProcessId -eq $ids[$i] -and $_.Name -notin @('cmd.exe','node.exe','conhost.exe','OpenConsole.exe') } | ForEach-Object { $_.ProcessId }); $i++ }; $by = @{}; $all | Where-Object { $ids -contains $_.ProcessId } | ForEach-Object { $c = [string]$_.CommandLine; $k = if ($_.Name -eq 'unimux.exe') { 'host' } elseif ($c -match '--type=renderer') { 'renderer' } elseif ($c -match '--type=gpu-process') { 'gpu' } elseif ($c -match 'network.mojom.NetworkService') { 'network' } elseif ($c -match '--type=') { 'utility' } else { 'browser' }; $by[$k] = [double]$by[$k] + ($_.UserModeTime + $_.KernelModeTime) / 1e7 }; $by | ConvertTo-Json -Compress`));
+/** Busy CPU of the whole machine as a fraction of all logical processors, between two samples of os.cpus(). */
+const machineTimes = () => cpus().reduce((a, c) => ({ busy: a.busy + c.times.user + c.times.sys + c.times.irq, idle: a.idle + c.times.idle }), { busy: 0, idle: 0 });
+
 let app;
 try {
   app = await launchApp(root);
@@ -71,10 +77,18 @@ try {
   await app.cdp('Performance.enable');
   const metrics = async () => Object.fromEntries((await app.cdp('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]));
   const m0 = await metrics();
+  // How often the page calls the host (the fetches of Tauri's IPC, by command name) and how many host messages it gets.
+  await app.evaluate(`(() => { window.__invokes = {}; const orig = window.fetch.bind(window);
+    window.fetch = (url, ...rest) => { const u = String(url); if (u.startsWith('http://ipc.localhost/') || u.startsWith('ipc://')) { const cmd = decodeURIComponent(u.split('/').pop()); window.__invokes[cmd] = (window.__invokes[cmd] ?? 0) + 1; } return orig(url, ...rest); };
+    window.__port0 = { ...window.__MC_PTY_PORT__.stats }; return true; })()`);
+  const by0 = appCpuBy(app.pid);
+  const machine0 = machineTimes();
   const cpu0 = appCpu(app.pid);
   const t0 = Date.now();
   await sleep(15000);
   const cpu = +(appCpu(app.pid) - cpu0).toFixed(2);
+  const by1 = appCpuBy(app.pid);
+  const machine1 = machineTimes();
   const m1 = await metrics();
   const seconds = (Date.now() - t0) / 1000;
   results.frames = await app.evaluate(`(() => { const t = window.__frames; const d = t.slice(1).map((x, i) => x - t[i]).sort((a, b) => a - b);
@@ -86,6 +100,12 @@ try {
   results.mainThreadMsPerS = { task: per('TaskDuration'), script: per('ScriptDuration'), layout: per('LayoutDuration'), style: per('RecalcStyleDuration') };
   results.cpuSeconds = cpu;
   results.cpuPercentOfOneCore = Math.round(cpu / seconds * 1000) / 10;
+  // Percent of one core per process kind, calls per second, and how busy the whole machine was (a noisy window is visible).
+  results.perProcess = Object.fromEntries(Object.keys(by1).map((k) => [k, Math.round(((by1[k] ?? 0) - (by0[k] ?? 0)) / seconds * 1000) / 10]));
+  results.calls = await app.evaluate(`(() => { const s = window.__MC_PTY_PORT__.stats, b = window.__port0; const per = (n) => Math.round(n / ${seconds} * 10) / 10;
+    return { hostMessagesPerS: per(s.received - b.received), kbPerS: per((s.bytes - b.bytes) / 1024), invokesPerS: Object.fromEntries(Object.entries(window.__invokes).map(([k, v]) => [k, per(v)])) }; })()`);
+  const busy = machine1.busy - machine0.busy, idle = machine1.idle - machine0.idle;
+  results.machineBusyPercent = Math.round(busy / (busy + idle) * 1000) / 10;
   results.after = await renderers();
   await app.screenshot(`094-grid-${label}.png`);
   console.log(JSON.stringify(results, null, 1));

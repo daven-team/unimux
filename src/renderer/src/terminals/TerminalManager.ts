@@ -38,9 +38,9 @@ export const CARD_BG = '#131313';
 
 /** Time one frame may spend fitting terminals to resized cells (see TerminalManager.runFits). */
 const FIT_BUDGET_MS = 8;
-/** Ack tick of a window nobody sees, for output below HIDDEN_ACK_BYTES per terminal (see ack). */
-const HIDDEN_ACK_MS = 100;
-const HIDDEN_ACK_BYTES = 64 * 1024;
+/** Ack tick of output below TRICKLE_ACK_BYTES per terminal (see ack). */
+const TRICKLE_ACK_MS = 100;
+const TRICKLE_ACK_BYTES = 64 * 1024;
 /** Window size changes closer together than this are a drag of the window edge (see the constructor). */
 const WINDOW_DRAG_MS = 150;
 
@@ -402,10 +402,10 @@ class TerminalManager {
     // Characters for the Electron host, bytes for the Tauri host (its frames say how many).
     const pending = (this.acks.get(m.id) ?? 0) + (m.bytes ?? m.data.length);
     this.acks.set(m.id, pending);
-    // A window nobody sees acks a trickle (agents printing) every HIDDEN_ACK_MS: every ack is an IPC call, and with 8 busy
-    // cells in a minimized window the 8 ms tick made about 55 calls a second (R2). Anything bigger is acked at the normal pace,
-    // so a flood is never held back by the slower tick.
-    const delay = !this.windowShown && pending < HIDDEN_ACK_BYTES ? HIDDEN_ACK_MS : 8;
+    // A trickle (agents printing) is acked every TRICKLE_ACK_MS: every ack is an IPC call, and the 8 ms tick made about 60 calls
+    // a second with 20 busy cells or 8 in a minimized window (R2), while the host only needs the acks once a terminal gets near
+    // its FlowGate high water (1 MiB). Anything bigger is acked at the normal pace, so a flood is never held back by the slower tick.
+    const delay = pending < TRICKLE_ACK_BYTES ? TRICKLE_ACK_MS : 8;
     if (this.ackTimer !== null && delay < this.ackDelay) { clearTimeout(this.ackTimer); this.ackTimer = null; }
     if (this.ackTimer === null) {
       this.ackDelay = delay;

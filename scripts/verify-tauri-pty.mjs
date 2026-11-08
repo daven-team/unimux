@@ -185,7 +185,7 @@ if (runs.includes('grid')) {
     console.log(JSON.stringify(g));
     const { data } = await app.cdp('Page.captureScreenshot', { format: 'png' });
     writeFileSync(join(outDir, `tauri-p2-flood-${cellCount}x${rate}.png`), Buffer.from(data, 'base64'));
-    if (g.page?.transport === 'sharedBuffer') check(g.page.maxInFlight <= 3, `shared buffers posted and not released, page side: at most ${g.page.maxInFlight} (cap 2, 3 with an echo)`);
+    if (g.page?.transport === 'sharedBuffer') check(g.page.maxInFlight <= 9, `shared buffers posted and not released, page side: at most ${g.page.maxInFlight} (cap 8 small / 2 big messages, one more with an echo)`);
     if (g.page?.transport !== 'pull') check(maxHostInFlight <= 3, `messages in flight per window, host side: at most ${maxHostInFlight} (cap 2, 3 with an echo)`);
     // FlowGate: 1 MiB, plus the flush that crossed it (at most 128 KiB) and one read in progress.
     check(maxUnacked <= 1024 * 1024 + 128 * 1024 + 64 * 1024, `unacked bytes per terminal stay within the FlowGate limit (max ${maxUnacked})`);
