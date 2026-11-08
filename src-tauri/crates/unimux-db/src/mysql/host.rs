@@ -27,7 +27,7 @@ use super::port::MyPortMessage;
 use super::session::{MyBoxConn, MysqlOptions, MysqlOut, MysqlSession, SideConnection};
 use crate::host::{DbHostLink, HostReport, PendingRequests, Spawn, ToHost, op_timeout_ms};
 use crate::redis::connect::{BoxStream, StreamSource};
-use crate::redis::host::DbTunnels;
+use crate::redis::host::{DbTunnels, SessionFail};
 use crate::sql::limits;
 use crate::sql::mysql::{mysql_flavor_of, mysql_server_label, mysql_timeout_sql};
 use crate::wire::value::{Head, node_utf8, utf16_head};
@@ -230,18 +230,32 @@ impl MysqlHost {
         });
         self.sessions.lock().insert(id, s.clone());
         self.status(&s, "connecting", Map::new());
+        // The tunnel is joined at once (1.1.4 registered the owner's wait for main's sshConnect in the same tick as dbOpen,
+        // so the coordinator's connect cannot arrive before it); a tunnel that ends later ends the session.
+        let joined = match (s.config.ssh.clone(), self.tunnels.clone()) {
+            (Some(ssh), Some(tunnels)) => {
+                s.st.lock().joined_tunnel = true;
+                let (host, session) = (self.me.clone(), Arc::downgrade(&s));
+                let fail: SessionFail = Arc::new(move |code| {
+                    if let (Some(h), Some(s)) = (host.upgrade(), session.upgrade()) {
+                        h.fail_owned(&s, code, None);
+                    }
+                });
+                Some(tunnels.join(&s.id, &ssh, fail))
+            }
+            _ => None,
+        };
         let Some(me) = self.me.upgrade() else { return };
-        (self.spawn)(Box::pin(async move { me.start(s).await }));
+        (self.spawn)(Box::pin(async move { me.start(s, joined).await }));
     }
 
-    async fn start(self: Arc<Self>, s: Arc<Session>) {
-        if let Some(ssh) = s.config.ssh.clone() {
-            let Some(tunnels) = self.tunnels.clone() else {
+    async fn start(self: Arc<Self>, s: Arc<Session>, joined: Option<BoxFuture<'static, Result<StreamSource, String>>>) {
+        if s.config.ssh.is_some() {
+            let Some(joined) = joined else {
                 self.fail(&s, "unsupported", None);
                 return;
             };
-            s.st.lock().joined_tunnel = true;
-            match tunnels.join(&s.id, &ssh).await {
+            match joined.await {
                 Ok(source) => s.st.lock().tunnel = Some(source),
                 Err(code) => {
                     if self.live(&s) {

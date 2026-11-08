@@ -399,22 +399,6 @@ impl client::Handler for LoginHandler {
         Ok(())
     }
 
-    async fn disconnected(&mut self, reason: client::DisconnectReason<Self::Error>) -> Result<(), Self::Error> {
-        match reason {
-            client::DisconnectReason::ReceivedDisconnect(_) => {
-                self.shared.control.note_closed(Some(map_error(&russh::Error::Disconnect, None)));
-                Ok(())
-            }
-            client::DisconnectReason::Error(e) => {
-                // A socket that just ended is ssh2's 'close' without an error (the owner decides, a tunnel reads `reset`).
-                let eof = matches!(&e, russh::Error::IO(io) if io.kind() == std::io::ErrorKind::UnexpectedEof)
-                    || matches!(e, russh::Error::Disconnect | russh::Error::HUP);
-                self.shared.control.note_closed((!eof).then(|| map_error(&e, None)));
-                Err(e)
-            }
-        }
-    }
-
     async fn auth_banner(&mut self, banner: &str, _session: &mut client::Session) -> Result<(), Self::Error> {
         if self.shared.control.live() {
             self.shared.events.banner(&sanitize_server_text(banner, SERVER_TEXT_MAX));
@@ -423,19 +407,21 @@ impl client::Handler for LoginHandler {
     }
 
     async fn disconnected(&mut self, reason: client::DisconnectReason<Self::Error>) -> Result<(), Self::Error> {
+        // Two readers of the same end: D2's tunnels wait on `LoginControl::connection_closed`, P5's shells on the
+        // handle's `ConnectionEnd`. Each keeps the mapping its package ported.
         match reason {
             // ssh2 reports the server's DISCONNECT as an error event (S3's table: unknown).
             client::DisconnectReason::ReceivedDisconnect(_) => {
+                self.shared.control.note_closed(Some(map_error(&russh::Error::Disconnect, None)));
                 self.shared.end.set(Some(SshErrorCode::Unknown));
                 Ok(())
             }
             client::DisconnectReason::Error(e) => {
                 // The socket simply ended: ssh2 emits 'close' without an error (the owner then reads `reset`).
-                let code = match &e {
-                    russh::Error::IO(io) if io.kind() == std::io::ErrorKind::UnexpectedEof => None,
-                    _ => Some(map_error(&e, self.shared.control.override_code())),
-                };
-                self.shared.end.set(code);
+                let io_eof = matches!(&e, russh::Error::IO(io) if io.kind() == std::io::ErrorKind::UnexpectedEof);
+                let eof = io_eof || matches!(e, russh::Error::Disconnect | russh::Error::HUP);
+                self.shared.control.note_closed((!eof).then(|| map_error(&e, None)));
+                self.shared.end.set((!io_eof).then(|| map_error(&e, self.shared.control.override_code())));
                 Err(e)
             }
         }

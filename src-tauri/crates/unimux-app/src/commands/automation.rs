@@ -191,6 +191,11 @@ fn runtime_report(service: &AutomationService, report: &CellReport) {
 /// What a cell's process did (index.ts ptyHost `spawned` / `exit` / `spawnError`, cell:kill, the crash).
 fn cell_event(service: &AutomationService, event: &CellEvent) {
     match event {
+        // P4's cell:spawn started the terminal (index.ts: runtimeStarted, status `starting`).
+        CellEvent::Spawning { cell } => {
+            service.runtime_started(cell);
+            service.statuses.set(cell, "starting");
+        }
         CellEvent::Started { cell, .. } => {
             service.runtime_started(cell);
             service.statuses.set(cell, "unknown");
