@@ -4,7 +4,7 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { createMcApi } from './mcApi';
 import { createDropRecordFilePaths, createWebView2FilePaths, type WebView2Host } from './filePaths';
-import { createPortPoster, createTauriTransport, McNotYetError, type BootInfo, type TauriTransport } from './transport';
+import { createPortPoster, createTauriTransport, McNotYetError, webMessagePost, type BootInfo, type TauriTransport } from './transport';
 import { installCompat, type CompatReport } from './webkitCompat';
 import { installMacDrag, type DragGlobal } from './macDrag';
 import { createPtyPort, listenSharedBuffers, runPull, type BridgePtyPort, type SharedBufferHost } from './ptyPort';
@@ -121,22 +121,26 @@ async function whenDbHostStarted(): Promise<void> {
  */
 async function attachPtyPort(): Promise<void> {
   const session = newSession();
-  const post = createPortPoster('pty', session, (args) => invoke('mc_port_post', args));
+  const webview = (window as { chrome?: { webview?: Partial<SharedBufferHost> & { postMessage?: (message: string) => void } } }).chrome?.webview;
+  // Typed keystrokes go as WebMessages once the host said it listens for them (Windows, port_message.rs).
+  let viaWebMessage = false;
+  const host = typeof webview?.postMessage === 'function' ? { postMessage: (m: string) => webview.postMessage!(m) } : undefined;
+  const post = createPortPoster('pty', session, webMessagePost((args) => invoke('mc_port_post', args), host, () => viaWebMessage));
   let transport = 'channel';
   const port = createPtyPort({ post }, transport);
   const channel = new Channel<unknown>();
   channel.onmessage = (message) => port.deliver(message instanceof ArrayBuffer ? new Uint8Array(message) : message);
-  const webview = (window as { chrome?: { webview?: Partial<SharedBufferHost> } }).chrome?.webview;
   // Listening before the attach: the host posts the replay tails right after it. Buffers are matched to this attach.
   if (webview?.addEventListener && webview.releaseBuffer) listenSharedBuffers(webview as SharedBufferHost, port, session);
-  let result: { transport?: string } | null;
+  let result: { transport?: string; post?: string } | null;
   try {
-    result = await invoke<{ transport?: string } | null>('mc_port_attach', { kind: 'pty', channel, attach: session });
+    result = await invoke<{ transport?: string; post?: string } | null>('mc_port_attach', { kind: 'pty', channel, attach: session });
   } catch (error) {
     if ((error as { code?: string })?.code !== 'MC_NOT_YET') console.warn(`[mc] pty port: ${String((error as Error)?.message ?? JSON.stringify(error))}`);
     return;
   }
   transport = result?.transport ?? 'channel';
+  viaWebMessage = result?.post === 'webMessage';
   port.stats.transport = transport;
   let stopped = false;
   window.addEventListener('pagehide', (e) => { if (!e.persisted) stopped = true; });

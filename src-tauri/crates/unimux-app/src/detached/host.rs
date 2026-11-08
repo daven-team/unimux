@@ -402,6 +402,7 @@ impl Host for TauriHost {
         windows::forget_on_destroy(&window, ctx.clone());
         // OS file drops (W3) and the renderer crash / hang handling (W6; detached windows always reload).
         crate::file_drop::install(&window, ctx.clone());
+        crate::port_message::install(&window, ctx.clone());
         crate::lifecycle::watch_renderer(&window, &ctx);
         // The caption buttons and the top resize edge (W1).
         crate::caption::install(&window, &ctx);

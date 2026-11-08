@@ -262,6 +262,34 @@ export function createTauriTransport(boot: BootInfo, deps: TauriDeps): TauriTran
   };
 }
 
+/** A typed keystroke (a `write` that is not a terminal reply): the half of an echo the host waits for. */
+export const isTypedWrite = (message: unknown): boolean => {
+  const m = message as { t?: unknown; reply?: unknown } | null;
+  return typeof m === 'object' && m !== null && m.t === 'write' && m.reply !== true;
+};
+
+/**
+ * The poster's `post` for a port whose host also listens to WebView2 WebMessages (port_message.rs, Windows): a batch with a
+ * typed keystroke goes as a string WebMessage (0.2 ms round trip against 1.2 ms for an invoke), every other batch as the
+ * invoke. Both carry the poster's numbers, so the host still delivers them in order. `enabled()` is false until the host
+ * said so on the attach.
+ */
+export function webMessagePost(
+  invokePost: (args: { session: string; seq: number; kind: string; messages: unknown[] }) => Promise<unknown>,
+  host: { postMessage(message: string): void } | undefined,
+  enabled: () => boolean,
+): (args: { session: string; seq: number; kind: string; messages: unknown[] }) => Promise<unknown> {
+  return (args) => {
+    if (!host || !enabled() || !args.messages.some(isTypedWrite)) return invokePost(args);
+    try {
+      host.postMessage(JSON.stringify({ mcPortPost: args.kind, session: args.session, seq: args.seq, messages: args.messages }));
+      return Promise.resolve();
+    } catch {
+      return invokePost(args);
+    }
+  };
+}
+
 /**
  * Renderer -> host messages of a port (pty: write, resize, ack...), in order. Every message of one task is batched into one
  * `mc_port_post` numbered per page load like sends (Tauri runs invokes concurrently; a MessagePort kept the order) and Rust

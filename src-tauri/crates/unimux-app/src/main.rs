@@ -20,6 +20,7 @@ mod hooks;
 mod ipc;
 mod lifecycle;
 mod mac_chrome;
+mod port_message;
 mod pty_transport;
 #[cfg(feature = "test-bridge")]
 mod spike_pty;

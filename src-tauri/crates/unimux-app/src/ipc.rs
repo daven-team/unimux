@@ -130,7 +130,15 @@ pub async fn mc_port_attach(
     let result = ctx.ports.attach(&kind, &caller.label, sink);
     #[cfg(feature = "test-bridge")]
     ctx.test_record.observe(&result);
-    result.map(|()| serde_json::json!({ "transport": transport }))
+    // Typed keystrokes may come as WebMessages where the window listens for them (port_message.rs).
+    let web_message = kind == "pty" && crate::port_message::available(&caller.label);
+    result.map(|()| {
+        if web_message {
+            serde_json::json!({ "transport": transport, "post": "webMessage" })
+        } else {
+            serde_json::json!({ "transport": transport })
+        }
+    })
 }
 
 /// Renderer -> host messages of the pty port (write, resize, ack, focus...), batched per microtask by the bridge and
@@ -146,7 +154,19 @@ pub async fn mc_port_post(
     kind: String,
     messages: Vec<Value>,
 ) -> Result<(), IpcError> {
-    let caller = caller(&webview, &request);
+    submit_port_post(&ctx, caller(&webview, &request), session, seq, kind, messages)
+}
+
+/// A port batch of a page, from `mc_port_post` or a WebMessage (port_message.rs): into the window's port lane, in order.
+/// Must run inside a tokio runtime.
+pub(crate) fn submit_port_post(
+    ctx: &AppContext,
+    caller: Caller,
+    session: String,
+    seq: u64,
+    kind: String,
+    messages: Vec<Value>,
+) -> Result<(), IpcError> {
     let Some(queue) = ctx.port_posts.get() else { return Ok(()) };
     let lane = format!("{}\0port:{kind}", caller.label);
     if !ctx.guard_allows(&caller) {

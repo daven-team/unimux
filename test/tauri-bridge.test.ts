@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { createMcApi, type McTransport } from '../src/renderer/src/bridge/mcApi';
-import { createPortPoster, createTauriTransport, McNotYetError, type TauriDeps } from '../src/renderer/src/bridge/transport';
+import { createPortPoster, createTauriTransport, McNotYetError, webMessagePost, type TauriDeps } from '../src/renderer/src/bridge/transport';
 // @ts-expect-error plain JS module without types
 import { buildContract, contractText, contractTs } from '../scripts/gen-ipc-contract.mjs';
 
@@ -254,6 +254,35 @@ describe('Tauri transport', () => {
       { session: 's1', seq: 1, kind: 'pty', messages: [{ t: 'write', d: 'a' }, { t: 'write', d: 'b' }] },
       { session: 's1', seq: 2, kind: 'pty', messages: [{ t: 'resize', c: 80 }] },
     ]);
+  });
+
+  it('sends a batch with a typed keystroke as a WebMessage once the host listens, every other batch as the invoke', async () => {
+    const invoked: unknown[] = [];
+    const messages: string[] = [];
+    let on = false;
+    const tasks: Array<() => void> = [];
+    const post = createPortPoster('pty', 's1', webMessagePost(async (a) => { invoked.push(a); }, { postMessage: (m) => messages.push(m) }, () => on), (f) => tasks.push(f));
+    post({ t: 'write', id: 'c', data: 'a' });
+    tasks.shift()!();
+    on = true;
+    post({ t: 'ack', id: 'c', chars: 5 });
+    tasks.shift()!();
+    post({ t: 'write', id: 'c', data: '[I', reply: true });
+    tasks.shift()!();
+    post({ t: 'resize', id: 'c', cols: 80, rows: 24 });
+    post({ t: 'write', id: 'c', data: 'b' });
+    tasks.shift()!();
+    expect(invoked).toEqual([
+      { session: 's1', seq: 1, kind: 'pty', messages: [{ t: 'write', id: 'c', data: 'a' }] },
+      { session: 's1', seq: 2, kind: 'pty', messages: [{ t: 'ack', id: 'c', chars: 5 }] },
+      { session: 's1', seq: 3, kind: 'pty', messages: [{ t: 'write', id: 'c', data: '[I', reply: true }] },
+    ]);
+    // The host matches the prefix: the kind key comes first.
+    expect(messages).toEqual(['{"mcPortPost":"pty","session":"s1","seq":4,"messages":[{"t":"resize","id":"c","cols":80,"rows":24},{"t":"write","id":"c","data":"b"}]}']);
+    // A host that cannot post (the WebView went away) falls back to the invoke.
+    const fallback: unknown[] = [];
+    await webMessagePost(async (a) => { fallback.push(a); }, { postMessage: () => { throw new Error('gone'); } }, () => true)({ session: 's', seq: 1, kind: 'pty', messages: [{ t: 'write', data: 'x' }] });
+    expect(fallback).toHaveLength(1);
   });
 
   it('keeps a state:edit sent right before a reload and replays it on the next page', async () => {

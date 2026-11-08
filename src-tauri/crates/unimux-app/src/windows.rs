@@ -139,6 +139,7 @@ pub fn create_main(app: &AppHandle, ctx: &Arc<AppContext>) -> tauri::Result<Webv
     ctx.mark("window-created");
     apply_webview_settings(&window);
     crate::file_drop::install(&window, ctx.clone());
+    crate::port_message::install(&window, ctx.clone());
     watch_window_state(&window, ctx.clone());
     forget_on_destroy(&window, ctx.clone());
     // Close and quit, session end, renderer crash and hang (W6).
