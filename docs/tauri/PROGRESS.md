@@ -121,7 +121,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 | H6 | Install manager, login terminals, agent delivery | todo | | | | |
 | S4 | SSH IPC and russh test server | todo | | | | Docker |
 | T1 | SFTP service and sessions | todo | | | | |
-| D2 | SSH tunnels for databases | todo | | | | |
+| D2 | SSH tunnels for databases | built, fast mode, not verified | 2026-11-08 | 2026-11-08 | | branch `tauri-pkg-D2`. unimux-db `tunnel` (DbTunnelHost: the tunnel half of 1.1.4 DbHost: one tunnel per `tunnelKey`, owner / riders / refcount, the owner's 6 min wait for sshConnect, `handOver` with attempt numbers (`dbStatus connecting` + `dbTunnelOwner`), `endTunnel` (before up: the error, after: the SSH error or `reset`), `shutdown`; the coordinator's `db` slot of `HostRouter` (sshConnect, host key / auth answers); login through unimux-ssh `login`, `sshStatus` / `sshHostKey` / `sshAuthPrompt` / owner `dbStatus` phases; no local listener: `TunnelOpener::open` gives one direct-tcpip channel per database connection as `TunnelStream` (AsyncRead/Write; pg `Connector`, Redis `StreamSource`, MySQL takes the stream). unimux-ssh login: `LoginControl::connection_closed` (the transport's end after the login). D9 RedisHost joins at dbOpen (`DbTunnels::join` with a `SessionFail`). unimux-app `commands/db.rs`: tunnels in the coordinator slot and in RedisHost, host reports queued on their own task (`host::queued_report`, no re-entry into the service lock), wind-down step "db tunnels" (HOSTS). Tests: `tests/db_tunnel.rs` (no SSH server) + unit test. See "D2 open issues". |
 | D5 | Postgres cursors and read-only | todo | | | | |
 | D8 | MySQL session, meta, edits | todo | | | | |
 | D10 | Redis writes, console, pattern ops, pub/sub | todo | | | | |
@@ -1570,6 +1570,19 @@ Not run (fast mode): real-app / CDP scripts (smoke-tauri, verify-tauri-lifecycle
 4. macOS: unimux-db now builds ring (rustls) and the bundled SQLite, so no aarch64-apple-darwin check of unimux-db / unimux-accounts / unimux-ssh is possible on this machine; only CI's macOS job can build them.
 5. `dump-goldens.mjs --check` still needs about 12 GB of heap ("Open after wave 2" 6); `npm run gen:check` as written does not finish here with the default heap.
 6. Worktrees: the ten wave 3 worktrees were removed (node_modules junctions unlinked first) and their branches deleted. Still kept: `.claude/worktrees/wf_3188d96a-67a-38` with `tauri-pkg-A2-fixes` (an uncommitted earlier draft of A2's Codex lock fix, see "Open after wave 2" 8).
+
+## Wave 4 packages: open issues
+
+### D2 open issues (2026-11-08, fast mode, not verified)
+
+Checked: `cargo fmt`; `cargo clippy -p unimux-db -p unimux-ssh -p unimux-app --all-targets -- -D warnings`; `cargo test -p unimux-db -p unimux-ssh` (one run, see the row). Not run (fast mode): hostd db-tunnel.int, any tunnel through a real or in-process SSH server, Docker, real app, macOS.
+
+1. **Acceptance open**: the hostd `db-tunnel.int` suite (no local listening port, forwarded channel to a database) is not written; the db hostd domain does not exist yet (D12). `tests/db_tunnel.rs` covers the records only (rider without owner, sshConnect timeout, hand-over, a login against a closed port, shutdown); no test opens a direct-tcpip channel.
+2. **Only Redis uses it so far**: Postgres (D5 / D12) and MySQL (D8) sessions must call `DbTunnelHost::join(id, ssh, fail)` synchronously when the session opens (before any await, so main's sshConnect cannot arrive first), use the `TunnelOpener` (pg `Connector`, `open()` for MySQL and the pg CancelRequest) and call `release(id)` when the session ends. `TunnelError` maps to `ConnectError::Tunnel` / `MyError::Tunnel` (`tunnel`).
+3. **Host reports are queued**: `commands/db.rs` now sends every session host's message to the service through `host::queued_report` (an unbounded channel drained on its own task) instead of a direct call, because a release under the service's lock (dbClose) can report `dbTunnelOwner` at once. Order is kept; the reports arrive one task hop later than before (1.1.4's host was another process, so this matches its timing better).
+4. **End detection**: the tunnel's end after the login comes from the russh handler's `disconnected` (new in unimux-ssh `login`; it keeps russh's default return values) plus a 1 s poll of `Handle::is_closed`; an EOF without an error reads `reset` like 1.1.4. S3 open issue 3 (DISCONNECT maps to `unknown`) applies to tunnels too.
+5. **Streams on a closed tunnel**: 1.1.4 destroyed every ForwardSocket when the tunnel ended; here the channels end with the russh connection (disconnect after the kill grace of 2 s, then the handle is dropped). A channel open refused by the server reads `SSH forward failed: (SSH) Channel open failure: <reason>` (russh's reason name, not ssh2's text).
+6. macOS: platform-neutral code, not cross-checked (unimux-db needs a C compiler for bundled SQLite, see D11 open issue 3).
 
 ## Do zainstalowania / do decyzji użytkownika
 

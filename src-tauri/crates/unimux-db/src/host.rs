@@ -176,6 +176,21 @@ impl CrashCounter {
 pub type HostReport = Arc<dyn Fn(Value) + Send + Sync>;
 pub type Spawn = Arc<dyn Fn(BoxFuture<'static, ()>) + Send + Sync>;
 
+/// The session hosts' messages to the service, in order, from a task of their own. 1.1.4's DB Host was another process,
+/// so its messages always arrived later; here the hosts report while the service may hold its lock (it sends `dbOpen`
+/// and `dbClose` under it), so a direct call would come back into the service and deadlock.
+pub fn queued_report(spawn: &Spawn, sink: HostReport) -> HostReport {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
+    spawn(Box::pin(async move {
+        while let Some(m) = rx.recv().await {
+            sink(m);
+        }
+    }));
+    Arc::new(move |m| {
+        let _ = tx.send(m);
+    })
+}
+
 /// The host until the session packages (D4 / D7 / D9 / D11) land: every session ends at once with `unsupported`; nothing is
 /// connected, so no operation is ever asked.
 pub struct UnavailableHost {

@@ -118,6 +118,10 @@ struct Pending {
 pub struct LoginControl {
     pending: Mutex<Pending>,
     ended: watch::Sender<bool>,
+    /// The connection's task ended (set by the handler's `disconnected`): Some(code) with the transport's error, or
+    /// Some(None) for an end without one (EOF). Owners that keep the connection after the login (D2 tunnels) wait for it
+    /// with [`LoginControl::connection_closed`].
+    closed: watch::Sender<Option<Option<SshErrorCode>>>,
 }
 
 impl std::fmt::Debug for LoginControl {
@@ -128,7 +132,32 @@ impl std::fmt::Debug for LoginControl {
 
 impl LoginControl {
     pub fn new() -> Arc<LoginControl> {
-        Arc::new(LoginControl { pending: Mutex::new(Pending::default()), ended: watch::Sender::new(false) })
+        Arc::new(LoginControl {
+            pending: Mutex::new(Pending::default()),
+            ended: watch::Sender::new(false),
+            closed: watch::Sender::new(None),
+        })
+    }
+
+    /// Resolves once the connection's task ended (also long after the login): the error the transport reported
+    /// (`timeout` for unanswered keepalives, `reset`, `unknown` for a DISCONNECT message like ssh2's error event), None for
+    /// an end without an error (EOF; ssh2's 'close' without 'error').
+    pub async fn connection_closed(&self) -> Option<SshErrorCode> {
+        let mut rx = self.closed.subscribe();
+        match rx.wait_for(Option::is_some).await {
+            Ok(v) => (*v).flatten(),
+            Err(_) => None,
+        }
+    }
+
+    fn note_closed(&self, code: Option<SshErrorCode>) {
+        self.closed.send_if_modified(|c| {
+            if c.is_some() {
+                return false;
+            }
+            *c = Some(code);
+            true
+        });
     }
 
     fn live(&self) -> bool {
@@ -316,6 +345,22 @@ impl client::Handler for LoginHandler {
             ));
         }
         Ok(())
+    }
+
+    async fn disconnected(&mut self, reason: client::DisconnectReason<Self::Error>) -> Result<(), Self::Error> {
+        match reason {
+            client::DisconnectReason::ReceivedDisconnect(_) => {
+                self.shared.control.note_closed(Some(map_error(&russh::Error::Disconnect, None)));
+                Ok(())
+            }
+            client::DisconnectReason::Error(e) => {
+                // A socket that just ended is ssh2's 'close' without an error (the owner decides, a tunnel reads `reset`).
+                let eof = matches!(&e, russh::Error::IO(io) if io.kind() == std::io::ErrorKind::UnexpectedEof)
+                    || matches!(e, russh::Error::Disconnect | russh::Error::HUP);
+                self.shared.control.note_closed((!eof).then(|| map_error(&e, None)));
+                Err(e)
+            }
+        }
     }
 
     async fn auth_banner(&mut self, banner: &str, _session: &mut client::Session) -> Result<(), Self::Error> {

@@ -31,7 +31,6 @@ pub trait SessionSink: Send + Sync {
 pub struct SshLink {
     pub coordinator: Arc<SshCoordinator>,
     /// The owners of the connections (P5 cells, T1 SFTP, D2 DB tunnels).
-    #[allow(dead_code, reason = "P5 / T1 / D2 fill the owner slots")]
     pub owners: Arc<HostRouter>,
     pub events: Arc<AppSshEvents>,
 }
