@@ -5,8 +5,9 @@
 //! run's statement timeout, tracks the transaction state from ReadyForQuery and cancels through `pg_cancel_backend` on a
 //! side connection ([`PgCancel`]).
 //!
-//! Metadata, table pages, edits and cellValue are D6: they answer `unsupported` here until D6 fills them in (the hooks
-//! are [`Inner::raw`], [`Inner::reader`], [`Inner::pump`], [`Inner::settle`], [`Inner::reassert`], `must`).
+//! D6 adds the catalog reads ([`super::meta`]: databases, schemas, objects, tableInfo, ddl), table pages inside a READ ONLY
+//! transaction (keyset / offset, the edit key cached for 30 s), previewEdits / applyEdits (one transaction, every UPDATE and
+//! DELETE must hit exactly one row) and cellValue.
 //!
 //! Differences in the plumbing (same messages): the client has no background reader, so the session reads what the
 //! server sends between operations itself (notices of an open result, a FATAL error, the end of the connection:
@@ -32,13 +33,17 @@ use super::client::{CursorState, IdleEvent, PgClient, PgCursor, QueryEvents, TxS
 use super::connect::{Connector, PgTarget, js_floor_text};
 use super::error::{ConnectError, OpenError};
 use super::messages::{PgColumn, PgPortMessage, server_error_value};
+use super::meta::{self, CatalogQuery, MetaError, PgRow};
 use super::port::statement_error_code;
 use crate::model::js_truthy;
-use crate::sql::pg::{ends_transaction, first_keyword, is_read_statement, read_only_allows, returns_rows, value_kind};
+use crate::sql::pg::{
+    BuiltStatement, build_edit_statements, cell_sql, edit_preview, ends_transaction, first_keyword, is_read_statement, page_sql,
+    read_only_allows, returns_rows, value_kind,
+};
 use crate::sql::split::split_sql;
-use crate::sql::{Dialect, limits};
+use crate::sql::{Dialect, EditOp, PageSqlInput, StagedEdit, js_fields, limits};
 use crate::wire::pg::{BackendKey, PgField, PgServerError, PgWireError, Row, parse_tag};
-use crate::wire::value::{DbValue, node_utf8, to_value};
+use crate::wire::value::{DbValue, node_utf8, to_value, utf16_head};
 
 /// The names and categories of the built-in types (`init`); user types are looked up when a result names them.
 pub const TYPES_SQL: &str = "SELECT oid, format_type(oid, NULL), typcategory FROM pg_type WHERE oid < 16384";
@@ -49,9 +54,8 @@ const READ_ONLY_OFF: &str = "SET default_transaction_read_only = off";
 const FIRST_BATCH: usize = 100;
 /// Metadata operations that may wait behind each other (more answer `busy`).
 const META_PENDING_MAX: usize = 4;
-/// D6's operations (pgMeta, pages, edits, cellValue): `unsupported` until D6 implements them.
-const D6_OPS: [&str; 9] =
-    ["databases", "schemas", "objects", "tableInfo", "ddl", "previewEdits", "applyEdits", "cellValue", "tablePage"];
+/// How long a table's edit key is reused for pages and cellValue (pgSession's `keys` cache).
+const EDIT_KEY_TTL_MS: u64 = 30_000;
 
 /// What the session reports (the host forwards it: port messages to the asking window, the rest to main).
 pub trait PgOut: Send + Sync {
@@ -149,6 +153,41 @@ fn fail(error: &str, server: Option<Value>) -> Value {
     v
 }
 
+/// `fail(error, server, index)`: the index of the edit that failed comes after the server error.
+fn fail_at(error: &str, server: Option<Value>, index: Option<usize>) -> Value {
+    let mut v = fail(error, server);
+    if let Some(i) = index {
+        v["index"] = json!(i);
+    }
+    v
+}
+
+/// The answer of a catalog read: None is `notFound`, a refused name its `DbSqlError` code.
+fn meta_answer(r: Result<Option<Value>, MetaError<Fail>>) -> Result<Value, Fail> {
+    match r {
+        Ok(Some(v)) => Ok(ok(v)),
+        Ok(None) => Ok(fail("notFound", None)),
+        Err(MetaError::Sql(e)) => Ok(fail(e.code(), None)),
+        Err(MetaError::Query(e)) => Err(e),
+    }
+}
+
+/// [`meta::CatalogQuery`] on a session's connection (`raw`).
+struct Catalog<'a> {
+    inner: &'a Inner,
+    conn: &'a mut Conn,
+}
+
+impl CatalogQuery for Catalog<'_> {
+    type Error = Fail;
+    fn q<'a>(&'a mut self, sql: &'a str, params: &'a [String]) -> BoxFuture<'a, Result<Vec<PgRow>, Fail>> {
+        Box::pin(async move {
+            let p: Vec<Option<&str>> = params.iter().map(|v| Some(v.as_str())).collect();
+            self.inner.raw(self.conn, sql, &p).await
+        })
+    }
+}
+
 fn str_of<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or("")
 }
@@ -190,6 +229,8 @@ pub(crate) struct Conn {
     pub(crate) client: Option<PgClient>,
     open_reader: Option<Reader>,
     types: HashMap<u32, (String, String)>,
+    /// `schema\0table` -> (when, edit key): pages and cellValue reuse the key for [`EDIT_KEY_TTL_MS`].
+    keys: HashMap<String, (u64, Option<Vec<String>>)>,
 }
 
 struct Run {
@@ -373,7 +414,7 @@ impl PgSession {
         };
         let key = client.key().cloned();
         let tx = client.tx();
-        let conn = Arc::new(AsyncMutex::new(Conn { client: Some(client), open_reader: None, types }));
+        let conn = Arc::new(AsyncMutex::new(Conn { client: Some(client), open_reader: None, types, keys: HashMap::new() }));
         let (queue, jobs) = mpsc::unbounded_channel::<Job>();
         let rt = tokio::runtime::Handle::current();
         let inner = Arc::new(Inner {
@@ -924,7 +965,11 @@ impl Inner {
                     }
                 })
             }
-            _ if D6_OPS.contains(&name) => ready(fail("unsupported", None)),
+            "tablePage" => {
+                let req = op.get("req").cloned().unwrap_or(Value::Null);
+                self.serial_run(move |me, conn| Box::pin(async move { me.run_page(conn, &req).await }));
+                ready(ok(json!(true)))
+            }
             _ => {
                 {
                     let mut st = self.st.lock();
@@ -972,8 +1017,276 @@ impl Inner {
                 self.settle(conn).await?;
                 Ok(ok(json!(self.tx().as_str())))
             }
+            "databases" => meta_answer(meta::list_databases(&mut self.catalog(conn)).await.map(Some)),
+            "schemas" => meta_answer(meta::list_schemas(&mut self.catalog(conn)).await.map(Some)),
+            "objects" => meta_answer(meta::list_objects(&mut self.catalog(conn), str_of(op, "schema")).await.map(Some)),
+            "tableInfo" => {
+                let info = meta::table_info(&mut self.catalog(conn), str_of(op, "schema"), str_of(op, "name")).await;
+                meta_answer(info.map(|i| i.map(|i| i.to_json())))
+            }
+            "ddl" => {
+                let ddl = meta::object_ddl(
+                    &mut self.catalog(conn),
+                    str_of(op, "schema"),
+                    str_of(op, "name"),
+                    str_of(op, "kind"),
+                    op.get("args").and_then(Value::as_str),
+                )
+                .await;
+                meta_answer(ddl.map(|d| d.map(Value::String)))
+            }
+            "previewEdits" => {
+                let req = op.get("req").cloned().unwrap_or(Value::Null);
+                Ok(match self.build_edits(conn, &req).await? {
+                    Ok(statements) => ok(json!({ "sql": edit_preview(&statements), "statements": statements.len() })),
+                    Err(answer) => answer,
+                })
+            }
+            "applyEdits" => self.apply_edits(conn, op.get("req").unwrap_or(&Value::Null)).await,
+            "cellValue" => self.cell_value(conn, op.get("req").unwrap_or(&Value::Null)).await,
             _ => Ok(fail("invalid", None)),
         }
+    }
+
+    // ── catalog, pages and edits (D6) ──────────────────────────────────────────
+
+    /// The catalog reads of [`meta`] on this session's connection.
+    fn catalog<'a>(&'a self, conn: &'a mut Conn) -> Catalog<'a> {
+        Catalog { inner: self, conn }
+    }
+
+    /// `tableInfo` on the session's connection (None: no such table).
+    async fn table_info(&self, conn: &mut Conn, schema: &str, table: &str) -> Result<Option<meta::PgTableInfo>, Fail> {
+        match meta::table_info(&mut self.catalog(conn), schema, table).await {
+            Ok(info) => Ok(info),
+            Err(MetaError::Query(e)) => Err(e),
+            // tableInfo builds no names; kept for completeness
+            Err(MetaError::Sql(_)) => Ok(None),
+        }
+    }
+
+    /// `editKey`: the table's edit key, reused for 30 s.
+    async fn edit_key(&self, conn: &mut Conn, schema: &str, table: &str) -> Result<Option<Vec<String>>, Fail> {
+        let id = format!("{schema}\0{table}");
+        if let Some((at, key)) = conn.keys.get(&id)
+            && self.now().saturating_sub(*at) < EDIT_KEY_TTL_MS
+        {
+            return Ok(key.clone());
+        }
+        let key = self.table_info(conn, schema, table).await?.and_then(|i| i.edit_key);
+        conn.keys.insert(id, (self.now(), key.clone()));
+        Ok(key)
+    }
+
+    /// One statement with text parameters (simple protocol without them, like node-postgres); its command tag.
+    async fn run_params(&self, conn: &mut Conn, sql: &str, params: &[Option<String>]) -> Result<Option<String>, Fail> {
+        if params.is_empty() {
+            return Ok(self.simple(conn, sql).await?.2);
+        }
+        let p: Vec<Option<&str>> = params.iter().map(Option::as_deref).collect();
+        let mut sink = Sink::new(self, false);
+        let r = match conn.client.as_mut() {
+            Some(c) => c.query_params(sql, &p, &mut sink).await,
+            None => return Err(not_connected()),
+        };
+        self.sync_tx(conn);
+        let end = r?;
+        if let Some(e) = end.error {
+            return Err(Fail::Wire(PgWireError::Server(e)));
+        }
+        Ok(end.tag)
+    }
+
+    /// One page of a table inside a READ ONLY transaction, read in bounded batches. The filter is the user's own SQL:
+    /// the READ ONLY transaction stops data changes, not every side effect of the functions it calls, so the session
+    /// settings are set again after the page.
+    async fn run_page(self: &Arc<Self>, conn: &mut Conn, req: &Value) {
+        let started = self.now();
+        let query_id = str_of(req, "queryId").to_owned();
+        let run = self.begin_run(&query_id);
+        let error = |code: &'static str, server: Option<PgServerError>| {
+            self.out.port(PgPortMessage::StatementError {
+                query_id: query_id.clone(),
+                index: 0,
+                error: code,
+                server,
+                time_ms: self.since(started),
+            });
+        };
+        let body: Result<bool, Fail> = async {
+            self.close_open(conn).await;
+            self.settle(conn).await?;
+            if self.tx() != TxStatus::Idle {
+                error("inTransaction", None);
+                return Ok(false);
+            }
+            self.reassert(conn).await?;
+            let key = self.edit_key(conn, str_of(req, "schema"), str_of(req, "table")).await?;
+            let built = match PageSqlInput::from_json(req).and_then(|input| page_sql(&input, key.as_deref())) {
+                Ok(b) => b,
+                Err(_) => {
+                    error("invalid", None);
+                    return Ok(false);
+                }
+            };
+            self.out.port(PgPortMessage::Statement { query_id: query_id.clone(), index: 0, start: 0, end: 0 });
+            self.exec(conn, "BEGIN READ ONLY").await?;
+            let limit = num_of(req, "limit").unwrap_or(0.0).floor().max(0.0) as usize;
+            let paged: Result<(u64, bool), Fail> = async {
+                let params: Vec<Option<&str>> = built.params.iter().map(|p| Some(p.as_str())).collect();
+                let mut reader = self.reader(conn, &built.sql, &params).await?;
+                let sent = match self.pump(conn, &query_id, 0, &mut reader, limit).await {
+                    Ok(n) => n as u64,
+                    Err(e) => {
+                        self.close_cursor(conn, &mut reader.cursor).await;
+                        return Err(e);
+                    }
+                };
+                let more = reader.more();
+                self.close_cursor(conn, &mut reader.cursor).await;
+                self.exec(conn, "COMMIT").await?;
+                Ok((sent, more))
+            }
+            .await;
+            let (sent, more) = match paged {
+                Ok(v) => v,
+                Err(e) => {
+                    let _ = self.exec(conn, "ROLLBACK").await;
+                    return Err(e);
+                }
+            };
+            self.out.port(PgPortMessage::StatementEnd {
+                query_id: query_id.clone(),
+                index: 0,
+                command: "SELECT".into(),
+                row_count: Some(sent),
+                rows: sent,
+                has_more: more,
+                truncated: false,
+                time_ms: self.since(started),
+            });
+            Ok(true)
+        }
+        .await;
+        let mut success = match body {
+            Ok(done) => done,
+            Err(e) => {
+                error(self.code_or_failed(&e), e.server().cloned());
+                false
+            }
+        };
+        if !self.ended() {
+            let restored: Result<(), Fail> = async {
+                self.reassert(conn).await?;
+                let own = self.opts.statement_timeout_ms;
+                if own != 0.0 && !own.is_nan() && self.tx() == TxStatus::Idle {
+                    self.must(conn, &format!("SET statement_timeout = {}", js_floor_text(own))).await?;
+                }
+                Ok(())
+            }
+            .await;
+            if restored.is_err() {
+                success = false;
+            }
+        }
+        {
+            let mut st = self.st.lock();
+            if st.run.as_ref().is_some_and(|r| Arc::ptr_eq(r, &run)) {
+                st.run = None;
+            }
+            st.notice_target = None;
+        }
+        let cancelled = run.cancelled.load(Ordering::SeqCst);
+        self.out.port(PgPortMessage::QueryEnd {
+            query_id,
+            ok: success,
+            cancelled,
+            time_ms: self.since(started),
+            tx: self.tx().as_str(),
+        });
+    }
+
+    /// The statements of staged edits, or the answer that refuses them (notFound, noKey, invalid).
+    async fn build_edits(&self, conn: &mut Conn, req: &Value) -> Result<Result<Vec<BuiltStatement>, Value>, Fail> {
+        let (schema, table) = (str_of(req, "schema"), str_of(req, "table"));
+        let Some(info) = self.table_info(conn, schema, table).await? else { return Ok(Err(fail("notFound", None))) };
+        let raw = req.get("edits").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]);
+        if raw.iter().any(|e| e.get("op").and_then(Value::as_str) != Some("insert")) && info.edit_key.is_none() {
+            return Ok(Err(fail("noKey", None)));
+        }
+        let columns: Vec<String> = info.columns.iter().map(|c| c.name.clone()).collect();
+        let generated: Vec<String> = info.columns.iter().filter(|c| c.generated).map(|c| c.name.clone()).collect();
+        let types: HashMap<String, String> = info.columns.iter().map(|c| (c.name.clone(), c.type_name.clone())).collect();
+        let built = raw.iter().map(StagedEdit::from_json).collect::<Result<Vec<_>, _>>().and_then(|edits| {
+            build_edit_statements(schema, table, info.edit_key.as_deref(), &edits, Some(&columns), &generated, Some(&types))
+        });
+        Ok(built.map_err(|e| fail(e.code(), None)))
+    }
+
+    /// All edits in one transaction; an UPDATE or DELETE that does not hit exactly one row rolls everything back.
+    async fn apply_edits(&self, conn: &mut Conn, req: &Value) -> Result<Value, Fail> {
+        if self.opts.read_only {
+            return Ok(fail("readOnly", None));
+        }
+        if self.tx() != TxStatus::Idle {
+            return Ok(fail("inTransaction", None));
+        }
+        let built = match self.build_edits(conn, req).await? {
+            Ok(b) => b,
+            Err(answer) => return Ok(answer),
+        };
+        self.exec(conn, "BEGIN").await?;
+        let mut affected = 0u64;
+        for s in &built {
+            self.in_flight.store(true, Ordering::SeqCst);
+            let r = self.run_params(conn, &s.sql, &s.params).await;
+            self.in_flight.store(false, Ordering::SeqCst);
+            let tag = match r {
+                Ok(tag) => tag,
+                Err(e) => {
+                    let _ = self.exec(conn, "ROLLBACK").await;
+                    return Ok(fail_at(self.code_of(&e), e.server().and_then(server_error_value), Some(s.index)));
+                }
+            };
+            let count = tag.as_deref().map(parse_tag).and_then(|(_, n)| n);
+            if s.op != EditOp::Insert && count != Some(1) {
+                let _ = self.exec(conn, "ROLLBACK").await;
+                return Ok(fail_at("conflict", None, Some(s.index)));
+            }
+            affected += count.unwrap_or(0);
+        }
+        if let Err(e) = self.exec(conn, "COMMIT").await {
+            let _ = self.exec(conn, "ROLLBACK").await;
+            return Ok(fail(self.code_of(&e), e.server().and_then(server_error_value)));
+        }
+        // COMMIT of a failed transaction answers ROLLBACK without an error.
+        if self.tx() != TxStatus::Idle {
+            return Ok(fail("dbFailed", None));
+        }
+        conn.keys.clear();
+        Ok(ok(json!({ "affected": affected })))
+    }
+
+    /// The whole value of one cell (up to DB_LIMITS.fullValueChars), found by the row's edit key.
+    async fn cell_value(&self, conn: &mut Conn, req: &Value) -> Result<Value, Fail> {
+        let (schema, table) = (str_of(req, "schema"), str_of(req, "table"));
+        let Some(key) = self.edit_key(conn, schema, table).await? else { return Ok(fail("noKey", None)) };
+        let Some(fields) = req.get("key").and_then(Value::as_object).map(js_fields) else {
+            return Ok(fail("invalid", None));
+        };
+        let (sql, params) = match cell_sql(schema, table, str_of(req, "column"), &fields, &key) {
+            Ok(b) => b,
+            Err(_) => return Ok(fail("invalid", None)),
+        };
+        let p: Vec<Option<&str>> = params.iter().map(|v| Some(v.as_str())).collect();
+        let rows = self.raw(conn, &sql, &p).await?;
+        if rows.len() != 1 {
+            return Ok(fail(if rows.is_empty() { "notFound" } else { "conflict" }, None));
+        }
+        Ok(ok(match rows[0].first().cloned().flatten() {
+            None => Value::Null,
+            Some(v) => json!(utf16_head(&v, limits::FULL_VALUE_CHARS).text),
+        }))
     }
 
     // ── cancel ─────────────────────────────────────────────────────────────────

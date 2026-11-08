@@ -197,6 +197,35 @@ pub struct PageSqlInput {
     pub filter: Option<String>,
 }
 
+impl PageSqlInput {
+    /// A `DbTablePageRequest` as the page builders read it (main validated it with zod); an `after` holding a non-string
+    /// is refused.
+    pub fn from_json(v: &Value) -> SqlResult<PageSqlInput> {
+        let str_of = |o: &Value, key: &str| o.get(key).and_then(Value::as_str).unwrap_or("").to_owned();
+        let after = match v.get("after") {
+            Some(Value::Array(items)) => Some(
+                items.iter().map(|x| x.as_str().map(str::to_owned).ok_or(DbSqlError::Invalid)).collect::<SqlResult<Vec<_>>>()?,
+            ),
+            _ => None,
+        };
+        let sort = v.get("sort").and_then(Value::as_array).map(|items| {
+            items
+                .iter()
+                .map(|x| Sort { column: str_of(x, "column"), desc: x.get("desc").and_then(Value::as_bool).unwrap_or(false) })
+                .collect()
+        });
+        Ok(PageSqlInput {
+            schema: str_of(v, "schema"),
+            table: str_of(v, "table"),
+            limit: v.get("limit").and_then(Value::as_f64).unwrap_or(f64::NAN),
+            offset: v.get("offset").and_then(Value::as_f64),
+            after,
+            sort,
+            filter: v.get("filter").and_then(Value::as_str).map(str::to_owned),
+        })
+    }
+}
+
 /// `DbStagedEdit['op']`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditOp {

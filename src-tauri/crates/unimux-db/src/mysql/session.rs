@@ -36,7 +36,7 @@ use crate::sql::mysql::{
 };
 use crate::sql::pg::first_keyword;
 use crate::sql::split::{SqlSpan, split_sql};
-use crate::sql::{DbSqlError, Dialect, EditOp, PageSqlInput, Sort, StagedEdit, js_fields, limits};
+use crate::sql::{DbSqlError, Dialect, EditOp, PageSqlInput, StagedEdit, js_fields, limits};
 use crate::wire::mysql::MyColumn;
 use crate::wire::value::{DbValue, hex_text, node_utf8, server_text, to_value, utf16_head};
 
@@ -111,30 +111,7 @@ fn num_of(v: &Value, key: &str) -> Option<f64> {
 
 /// A table page request as `mysqlPageSql` reads it; an `after` holding a non-string is refused.
 fn page_input(v: &Value) -> Result<PageSqlInput, DbSqlError> {
-    let after = match v.get("after") {
-        Some(Value::Array(items)) => {
-            Some(items.iter().map(|x| x.as_str().map(str::to_owned).ok_or(DbSqlError::Invalid)).collect::<Result<Vec<_>, _>>()?)
-        }
-        _ => None,
-    };
-    let sort = v.get("sort").and_then(Value::as_array).map(|items| {
-        items
-            .iter()
-            .map(|x| Sort {
-                column: str_of(x, "column").to_owned(),
-                desc: x.get("desc").and_then(Value::as_bool).unwrap_or(false),
-            })
-            .collect()
-    });
-    Ok(PageSqlInput {
-        schema: str_of(v, "schema").to_owned(),
-        table: str_of(v, "table").to_owned(),
-        limit: num_of(v, "limit").unwrap_or(f64::NAN),
-        offset: num_of(v, "offset"),
-        after,
-        sort,
-        filter: v.get("filter").and_then(Value::as_str).map(str::to_owned),
-    })
+    PageSqlInput::from_json(v)
 }
 
 fn field_like(f: &MyColumn) -> FieldLike {
