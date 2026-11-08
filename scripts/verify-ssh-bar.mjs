@@ -119,7 +119,7 @@ await run('debian', ['--bar', 'debian'], async (app) => {
   check(/^root\+2$/.test(await app.evaluate(TEXT('.ssh-bar-user'))), `user with the other sessions (${await app.evaluate(TEXT('.ssh-bar-user'))})`);
   check((await app.evaluate(TEXT('.ssh-bar-uptime'))) === '14 dni', `uptime (${await app.evaluate(TEXT('.ssh-bar-uptime'))})`);
   const upTitle = await app.evaluate(`document.querySelector('.ssh-bar-uptime').getAttribute('title') ?? document.querySelector('.ssh-bar-uptime').getAttribute('data-mc-title')`);
-  check(upTitle === 'Czas działania serwera: 14 d 6 h', `uptime tooltip (${JSON.stringify(upTitle)})`);
+  check(upTitle === 'Czas działania serwera: 14 dni 6 h', `uptime tooltip (${JSON.stringify(upTitle)})`);
   await app.until(`${TEXT('.ssh-bar-net')} !== null`, 'network rate', 10000);
   check(await app.evaluate(`document.querySelectorAll('.ssh-bar > .ssh-bar-net .ssh-bar-dir').length === 2`), 'network up and down apart');
   const order = await app.evaluate(`[...document.querySelectorAll('.ssh-bar > [data-item]')].map((e) => e.dataset.item)`);
