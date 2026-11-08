@@ -76,7 +76,37 @@ async function attachPort(kind: 'sftp' | 'db'): Promise<void> {
     return;
   }
   pair.port2.start();
+  // Messages the host sends before the page takes the port wait in port2's queue.
+  await whenPageLoaded();
+  if (kind === 'db') await whenDbHostStarted();
   window.postMessage(`mc:${kind}-port`, '*', [pair.port1]);
+}
+
+/**
+ * 1.1.4 posted a port at `did-finish-load` at the earliest, when the app's modules (dbClient.ts, redisClient.ts, sftp.ts)
+ * already listened for it. This bridge runs in <head> before the module scripts: a port posted before they ran was lost
+ * (the page then never got any DB / SFTP result).
+ */
+function whenPageLoaded(): Promise<void> {
+  if (document.readyState !== 'loading') return Promise.resolve();
+  return new Promise((resolve) => document.addEventListener('DOMContentLoaded', () => resolve(), { once: true }));
+}
+
+/**
+ * 1.1.4 started the DB Host with the first session (db:connect, a connection test) and only then gave the windows their DB
+ * port (again at every load while it ran). Here the host is part of the app, so the page takes the port when this window
+ * sees its first db:session event, or at once when sessions are already open (a reload, a detached DB window).
+ */
+async function whenDbHostStarted(): Promise<void> {
+  let started!: () => void;
+  const seen = new Promise<void>((resolve) => { started = resolve; });
+  const off = window.mc.on('db:session', () => started());
+  try {
+    const open = await window.mc.db.sessions().catch(() => null);
+    if (!open?.sessions.length) await seen;
+  } finally {
+    off();
+  }
 }
 
 /**
