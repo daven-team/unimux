@@ -1,9 +1,9 @@
-// Real-app check of the "Zespół AI" panel and the MCP path behind it (npm run build:check first; MC_APP_TARGET=electron: npm run build). A scratch data dir and home,
+// Real-app check of the "Zespół AI" panel and the MCP path behind it (npm run build:check first). A scratch data dir and home,
 // MC_OFFSCREEN=1, MC_DEBUG_PORT, MC_CLI_NO_REGISTRY=1 and stand-ins for `claude` (no model, no network). The seeded project has
 // tasks in every state (queued behind a prerequisite, in progress, blocked, completed with a result, cancelled) and messages
 // (unread, read); the official MCP SDK client then works as the cells: a worker's wait_for wakes on a coordinator's
 // create_task, a coordinator's wait_for wakes on the worker's update_task, a wait_for times out, and the panel follows.
-// Screenshots go to argv[2] (default: a temp dir). Usage: npm run build && node scripts/verify-team-panel.mjs [shots]
+// Screenshots go to argv[2] (default: a temp dir). Usage: npm run build:check && node scripts/verify-team-panel.mjs [shots]
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';

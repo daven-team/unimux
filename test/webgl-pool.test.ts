@@ -92,10 +92,10 @@ describe('WebGL context pool', () => {
     expect([1, 2, 3, 6, 10].map(webglBackoff)).toEqual([2000, 4000, 8000, 60_000, 60_000]);
   });
 
-  it('every cell of the largest grid fits, below the limit main gives Chromium', () => {
+  it('every cell of the largest grid fits, below the limit the app gives WebView2', () => {
     expect(MAX_WEBGL_CONTEXTS).toBeGreaterThanOrEqual(MAX_CELLS);
     expect(MAX_WEBGL_CONTEXTS).toBeLessThan(CHROMIUM_WEBGL_CONTEXTS);
-    expect(readFileSync('src/main/index.ts', 'utf8')).toContain("app.commandLine.appendSwitch('max-active-webgl-contexts', String(CHROMIUM_WEBGL_CONTEXTS))");
+    expect(readFileSync('src-tauri/crates/unimux-app/src/windows.rs', 'utf8')).toContain(`--max-active-webgl-contexts=${CHROMIUM_WEBGL_CONTEXTS} `);
   });
 
   it('the loss back-off settles at its maximum: only a context that lived WEBGL_HEALTHY_MS starts the count over', () => {

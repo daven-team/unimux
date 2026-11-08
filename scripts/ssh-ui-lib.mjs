@@ -1,5 +1,5 @@
 // Helpers for real-app checks: scratch data dirs and homes, the local test SSH server, the built app over CDP (the Tauri check
-// build, or Electron's out/ with MC_APP_TARGET=electron: scripts/real-app.mjs). Never uses the user's data dir, home, ~/.ssh or
+// build: scripts/real-app.mjs). Never uses the user's data dir, home, ~/.ssh or
 // real hosts. Kills only the PIDs it started.
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { scrubAppEnv } from './app-env.mjs';
-import { bridgeCall, isMainPage, isTauri, killAppTreeAndWait, mainControl, quitApp, requireBuild, spawnApp } from './real-app.mjs';
+import { bridgeCall, isMainPage, killAppTreeAndWait, mainControl, quitApp, requireBuild, spawnApp } from './real-app.mjs';
 
 export const SHOTS = 'D:\\Projekty\\_shots';
 /** Scratch dirs live outside the repo, next to it: D:\Projekty\_tmp-ssh-<name>-<rand>. */
@@ -28,7 +28,7 @@ export function childPids(pid, match) {
 }
 const freePort = () => new Promise((resolve) => { const s = createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 
-/** A fresh scratch root with data\, project\ and a scratch home (home\AppData\Roaming, home\AppData\Local: Electron needs both). */
+/** A fresh scratch root with data\, project\ and a scratch home (home\AppData\Roaming, home\AppData\Local). */
 export function scratchRoot(name) {
   const root = mkdtempSync(join(SCRATCH, `_tmp-ssh-${name}-`));
   for (const dir of ['data', 'project', 'home\\AppData\\Roaming', 'home\\AppData\\Local']) mkdirSync(join(root, dir), { recursive: true });
@@ -75,37 +75,36 @@ export async function startTestServer(args = []) {
 /**
  * Starts the app on the scratch root (data, home) and connects to its main page. `options.main`: also the main-side control
  * (real-app.mjs mainControl: hooks, windows, recorded calls, toasts) as `app.main`, recording the renderer's `notify` calls
- * from the start (`app.main.notes()`); `options.cwd`: the checkout of the Electron target; `options.onSpawn(child)` gets the
+ * from the start (`app.main.notes()`); `options.cwd`: the working folder of the app process; `options.onSpawn(child)` gets the
  * process right after it is spawned, so a caller can end it even when this never resolves. `extraArgs`: app arguments.
  */
 export async function launchApp(root, extraEnv = {}, extraArgs = [], options = {}) {
-  requireBuild(options.cwd ?? process.cwd());
+  requireBuild();
   const port = await freePort();
-  const inspectPort = options.main && !isTauri ? await freePort() : undefined;
   const home = join(root, 'home');
   // Login variables of the real user are dropped first; extraEnv may still point them at a fake home.
   const env = {
     ...scrubAppEnv({ ...process.env }), MC_DATA_DIR: join(root, 'data'), MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port),
-    // Never the real profile: the app reads ~/.claude and ~/.codex, Electron its appData.
+    // Never the real profile: the app reads ~/.claude and ~/.codex.
     USERPROFILE: home, HOME: home, APPDATA: join(home, 'AppData', 'Roaming'), LOCALAPPDATA: join(home, 'AppData', 'Local'),
     ...extraEnv,
   };
   // A key set to null in extraEnv removes an inherited variable (spawnApp drops it).
-  const child = spawnApp({ env, args: extraArgs, cwd: options.cwd ?? process.cwd(), stdio: ['ignore', 'ignore', 'pipe'], inspectPort });
+  const child = spawnApp({ env, args: extraArgs, cwd: options.cwd ?? process.cwd(), stdio: ['ignore', 'ignore', 'pipe'] });
   options.onSpawn?.(child);
   let stderr = '';
   child.stderr.on('data', (d) => { stderr = (stderr + d).slice(-4000); });
   // Any step below that fails ends the app tree first and waits until it is gone, so the caller's scratch folder (which the
   // app and its WebView2 processes hold open) can be removed in its finally.
   try {
-    return await connectApp({ child, port, inspectPort, options, stderr: () => stderr });
+    return await connectApp({ child, port, options, stderr: () => stderr });
   } catch (error) {
     await killAppTreeAndWait(child);
     throw error;
   }
 }
 
-async function connectApp({ child, port, inspectPort, options, stderr }) {
+async function connectApp({ child, port, options, stderr }) {
   let target;
   for (let i = 0; i < 150 && !target && child.exitCode === null; i++) {
     await sleep(200);
@@ -180,11 +179,11 @@ async function connectApp({ child, port, inspectPort, options, stderr }) {
   // Tauri: WebView2 lists the page target with the app URL while the initial empty document (origin "://") is still in
   // place, and that document is replaced a few ms later. An evaluate in that gap found no `__TAURI_INTERNALS__` ("Cannot
   // read properties of undefined (reading 'invoke')") or lost its context ("Execution context was destroyed"), so the
-  // first test-bridge call below failed on a loaded machine. Electron's main control is its own inspector, not the page.
-  if (isTauri) await until(`typeof window.__TAURI_INTERNALS__?.invoke === 'function'`, 'Tauri IPC in the app document', 30000);
+  // first test-bridge call below failed on a loaded machine.
+  await until(`typeof window.__TAURI_INTERNALS__?.invoke === 'function'`, 'Tauri IPC in the app document', 30000);
   if (options.main) {
     // Before the UI is up: the renderer's first `notify` calls are recorded too (1.1.4's mainInspector listened from the start).
-    main = await mainControl({ evaluate, inspectPort });
+    main = await mainControl({ evaluate });
     await main.record(['notify']);
     main.notes = async () => (await main.recorded('notify')).map((c) => c.args[0]);
   }

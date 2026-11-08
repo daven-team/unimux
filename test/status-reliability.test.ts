@@ -1,8 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
 import { describe, expect, it } from 'vitest';
-import { HookServer, hookDebugLine, logStopDebug, parseFailure, stopInfo } from '../src/main/hooks';
 import {
   BG_STALL_MS, FOCUS_ECHO_MS, INTERRUPT_QUIET_MS, isUserInput, shouldNotify, STALL_MS, StatusTracker,
   type CellStatus, type HookEvent, type HookInfo, type StatusCause,
@@ -89,44 +85,6 @@ describe('H1 StopFailure', () => {
     h.tick(2000);
     expect(h.status).toBe('waiting');
     expect(h.lastReason).toBe('done');
-  });
-
-  it('the hook server parses StopFailure, caps its body and still counts an oversized one', async () => {
-    const s = new HookServer();
-    await s.start();
-    const seen: string[] = [];
-    s.on('hook', (cell, ev, info) => seen.push(`${cell}:${ev}:${info?.error ?? ''}`));
-    const post = (b: string) => fetch(s.url('c1', 'fail'), { method: 'POST', body: b });
-    await post(JSON.stringify({ error: 'rate_limit', last_assistant_message: 'x'.repeat(100_000) }));
-    await post(JSON.stringify({ error: 'something_new' }));
-    await post('not json');
-    await post('z'.repeat(600_000)).catch(() => {});
-    await fetch(`http://127.0.0.1:${s.port}/h/bad/c1/fail/x`, { method: 'POST', body: '{}' }).catch(() => {});
-    await new Promise((r) => setTimeout(r, 80));
-    expect(seen).toEqual(['c1:fail:rate_limit', 'c1:fail:unknown', 'c1:fail:unknown', 'c1:fail:unknown']);
-    s.stop();
-  });
-
-  it('writes a StopFailure hook that posts its payload', async () => {
-    const s = new HookServer();
-    await s.start();
-    const dir = mkdtempSync(join(tmpdir(), 'mc-fail-'));
-    try {
-      const json = JSON.parse(readFileSync(s.writeClaudeSettings(dir, 'c3'), 'utf8'));
-      const cmd = json.hooks.StopFailure[0].hooks[0].command as string;
-      expect(cmd).toContain('--data-binary @-');
-      expect(cmd).toContain(`/h/${s.token}/c3/fail/`);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-      s.stop();
-    }
-  });
-
-  it('parseFailure only reports documented codes', () => {
-    expect(parseFailure(JSON.stringify({ error: 'authentication_failed' }))).toBe('authentication_failed');
-    expect(parseFailure(JSON.stringify({ error: 'rm -rf /' }))).toBe('unknown');
-    expect(parseFailure('[]')).toBe('unknown');
-    expect(parseFailure(JSON.stringify({ error: 5 }))).toBe('unknown');
   });
 });
 
@@ -288,31 +246,6 @@ describe('H3 stale background tasks', () => {
     expect(s.t.status).toBe('waiting');
     expect(s.alerts()).toBe(1);
   });
-
-  it('stopInfo reports counts and distinct status strings only', () => {
-    const body = JSON.stringify({ background_tasks: [
-      { id: 'SECRET-ID', type: 'shell', status: 'running', command: 'SECRET-CMD' },
-      { status: 'Running' }, { status: 'completed' }, { id: 'x' },
-    ], session_crons: [{ id: 'c' }] });
-    expect(stopInfo(body)).toEqual({ tasks: 4, active: 2, statuses: ['running', 'completed', '?'], types: ['shell', '?'], continuation: false, workflows: 0 });
-    expect(JSON.stringify(stopInfo(body))).not.toContain('SECRET');
-    expect(stopInfo('garbage')).toEqual({ tasks: 0, active: 0, statuses: [], types: [], continuation: false, workflows: 0, tasksUnknown: true });
-  });
-
-  it('the hook server emits Stop info and a sessionstart event that is never a status hook', async () => {
-    const s = new HookServer();
-    await s.start();
-    const seen: string[] = [];
-    s.on('hook', (c, ev, info: HookInfo | undefined) => seen.push(`${ev}:${info?.tasks}/${info?.active}`));
-    s.on('sessionstart', (c, source) => seen.push(`sessionstart:${source}`));
-    const id = '3f2b8c1e-0d4a-4b7e-9c11-2a5d6e7f8091';
-    await fetch(s.url('c1', 'stop'), { method: 'POST', body: JSON.stringify({ background_tasks: [{ status: 'running' }, { status: 'done' }] }) });
-    await fetch(s.url('c1', 'session'), { method: 'POST', body: JSON.stringify({ session_id: id, source: 'resume' }) });
-    await fetch(s.url('c1', 'session'), { method: 'POST', body: JSON.stringify({ session_id: id, agent_id: 'sub' }) });
-    await new Promise((r) => setTimeout(r, 80));
-    expect(seen).toEqual(['stopbg:2/1', 'sessionstart:resume']);
-    s.stop();
-  });
 });
 
 describe('H4 a click on the cell is not activity', () => {
@@ -450,21 +383,3 @@ describe('status log', () => {
   });
 });
 
-describe('MC_HOOK_DEBUG log', () => {
-  it('records StopFailure and SessionStart with codes and keys only', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mc-dbg2-'));
-    try {
-      logStopDebug(false, dir, 'c1', '{}', 'fail');
-      expect(existsSync(join(dir, 'hook-debug.log'))).toBe(false);
-      logStopDebug(true, dir, 'c1', JSON.stringify({ error: 'rate_limit', error_details: 'SECRET-DETAIL', last_assistant_message: 'SECRET-MSG' }), 'fail');
-      logStopDebug(true, dir, 'c1', JSON.stringify({ session_id: 'SECRET-SID', source: 'resume', cwd: 'SECRET-CWD' }), 'session');
-      const log = readFileSync(join(dir, 'hook-debug.log'), 'utf8');
-      expect(log).toContain('c1 fail error=rate_limit keys=error,error_details,last_assistant_message');
-      expect(log).toContain('c1 session source=resume keys=session_id,source,cwd');
-      expect(log).not.toContain('SECRET');
-      expect(hookDebugLine('fail', 'c1', 'nope')).toContain('fail unparsable');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-});

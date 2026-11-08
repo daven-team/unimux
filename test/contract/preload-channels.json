@@ -1,0 +1,14 @@
+{
+ "comment": "Frozen at R1 (1.2.0) from the Electron preloads that were removed: src/preload/index.ts (the MessagePorts it forwarded to the page) and src/updatesplash/preload.ts (window.updateSplash of the update windows). scripts/gen-ipc-contract.mjs reads this file; window.mc itself comes from src/renderer/src/bridge/mcApi.ts and api.d.ts.",
+ "ports": [
+  { "electron": "pty-port", "page": "mc:pty-port" },
+  { "electron": "sftp-port", "page": "mc:sftp-port" },
+  { "electron": "db-port", "page": "mc:db-port" }
+ ],
+ "updateSplash": [
+  { "channel": "update-splash:init", "kind": "invoke", "method": "init" },
+  { "channel": "update-splash:state", "kind": "event", "method": "onState" },
+  { "channel": "update-splash:close", "kind": "send", "method": "close" },
+  { "channel": "update-splash:open", "kind": "send", "method": "open" }
+ ]
+}

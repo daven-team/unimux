@@ -116,7 +116,7 @@ export function searchHistory(entries: readonly DbHistoryItem[], query: string, 
   return entries.filter((e) => (!opts.starred || e.star) && words.every((w) => e.sql.toLowerCase().includes(w)));
 }
 
-/** `window.mc.db.history` (src/preload); every call is validated in src/main/db/history.ts. */
+/** `window.mc.db.history` (src/renderer/src/bridge/mcApi.ts); the app validates every call. */
 export interface DbHistoryApi {
   list(connectionId: string): Promise<DbHistoryState>;
   /** Records the statements of a run (ignored while the history is off). */

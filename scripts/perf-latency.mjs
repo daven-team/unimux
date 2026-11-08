@@ -7,12 +7,11 @@
 // is where Nagle's algorithm would hold small writes back; on loopback it mostly shows coalescing effects).
 // Prints median / p95 per cell and pace; fails (exit code 1) when the SSH median exceeds MAX_SSH_MEDIAN_MS or the local
 // median by more than MAX_EXTRA_MS, or the SSH p95 exceeds MAX_SSH_P95_MS.
-// Usage: node scripts/perf-latency.mjs [keys per pace, default 60] [--json] [--app <dir of a built unimux checkout>]
-// Target: the Tauri check build (npm run build:check; --app <unimux.exe> for another build). MC_APP_TARGET=electron: out/ of
-// the checkout (npm run build; --app <dir>, for example a 1.1.4 checkout for the comparison of R2).
-import { existsSync, rmSync } from 'node:fs';
+// Usage: node scripts/perf-latency.mjs [keys per pace, default 60] [--json] [--app <unimux.exe of another check build>]
+// Target: the Tauri check build (npm run build:check; --app <unimux.exe> for another build).
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { isTauri, measurementNeedsCompleteApp } from './real-app.mjs';
+import { measurementNeedsCompleteApp } from './real-app.mjs';
 
 // Numbers from an app that still answers MC_NOT_YET mean nothing: blocked until every package it calls landed.
 measurementNeedsCompleteApp();
@@ -29,8 +28,7 @@ const MAX_EXTRA_MS = 8;
 const MAX_SSH_MEDIAN_MS = 8;
 const MAX_SSH_P95_MS = 15;
 
-if (isTauri && appArg >= 0) process.env.MC_APP_BINARY = appDir;
-if (!isTauri && !existsSync(join(appDir, 'out/main/index.js'))) throw new Error(`Build first: npm run build (in ${appDir})`);
+if (appArg >= 0) process.env.MC_APP_BINARY = appDir;
 const here = process.cwd();
 const server = await startTestServer(['--no-auth']);
 const root = scratchRoot('latency');
@@ -46,8 +44,8 @@ try {
   state.sidebarCollapsed = true;
   writeState(root, state);
   writeKnownHost(root, server);
-  // launchApp starts the app in the current directory: the checkout under test.
-  app = await launchApp(root, {}, [], { cwd: isTauri ? here : appDir });
+  // launchApp starts the app in this checkout.
+  app = await launchApp(root, {}, [], { cwd: here });
   const sshCell = tab.cells[0].id;
   await app.until(`!!document.querySelector('.ssh-card button')`, 'connect card');
   await app.click('.ssh-card button');

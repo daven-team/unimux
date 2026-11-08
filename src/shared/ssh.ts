@@ -168,7 +168,7 @@ export type RevealKeyResult = { ok: true; privateKey: string } | { ok: false; er
 /** `restoreCwd` (1.0.6): an app-start restore; the shell goes back into the cell's last folder (cell.ssh.cwd) first. */
 export interface SshConnectCellRequest { cellId: string; hostId: string; cols: number; rows: number; restoreCwd?: boolean }
 
-/** `window.mc.ssh` (src/preload). Every call is validated in src/main/ssh/ipc.ts. */
+/** `window.mc.ssh` (src/renderer/src/bridge/mcApi.ts). The app validates every call. */
 export interface SshApi {
   vaultInfo(): Promise<SshVaultInfo>;
   generateKey(req: GenerateKeyRequest): Promise<KeyResult>;

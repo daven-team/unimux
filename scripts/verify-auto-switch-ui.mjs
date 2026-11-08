@@ -8,7 +8,7 @@
 // "Konta i limity" on one line next to the "Switcher" switch; the card's "Wszystkie ustawienia…" opens the
 // settings section "Konta i limity" at the switcher; the thresholds are sliders (keys, and a drag saved once on release);
 // the settings search finds the moved rows.
-// Run: npm run build && node scripts/verify-auto-switch-ui.mjs [shots dir]   (default: <tmp>/unimux-auto-switch-shots)
+// Run: npm run build:check && node scripts/verify-auto-switch-ui.mjs [shots dir]   (default: <tmp>/unimux-auto-switch-shots)
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';

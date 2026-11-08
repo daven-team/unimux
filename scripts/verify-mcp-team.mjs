@@ -1,10 +1,10 @@
-// Real-app check of the AI team's reliability fixes (1.1.4): the built app (npm run build) with isolated data, a scratch home
+// Real-app check of the AI team's reliability fixes (1.1.4): the built app (npm run build:check) with isolated data, a scratch home
 // and fake agents that stay running but never call a model or MCP, driven over CDP and the official MCP SDK client.
 // Checks: an orphaned task of an archived grid from an older state.json is cancelled at start ("agent closed"); a task for a
 // running worker becomes a short notice in its prompt queue (no "Paste" instruction to the model); a dependent task is
 // delivered when its prerequisite completes; a worker that never connects to MCP is reported by wait_for as "stalled"
 // (after ~90 s); closing a grid with an open task cancels it and the waiting coordinator hears it.
-// Usage: npm run build && node scripts/verify-mcp-team.mjs   (about two minutes: the stall threshold is 90 s)
+// Usage: npm run build:check && node scripts/verify-mcp-team.mjs   (about two minutes: the stall threshold is 90 s)
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';

@@ -1,4 +1,4 @@
-// Real-app check of 1.0.9 "actions in notifications" and "taskbar / Dock state" (npm run build:check first; MC_APP_TARGET=electron: npm run build). No real Claude runs: a
+// Real-app check of 1.0.9 "actions in notifications" and "taskbar / Dock state" (npm run build:check first). No real Claude runs: a
 // shell cell whose profile is switched to "claude" after it started runs a fake permission dialog (a node script that draws
 // Claude Code's dialog and records the keys it receives), and the PermissionRequest hook is faked from the main process
 // inspector. The OS notification is not shown: Notification.show is replaced there, so the test can see the buttons and press

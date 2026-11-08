@@ -31,7 +31,7 @@ export interface SshHistoryStatus {
   file: string;
 }
 
-/** `window.mc.sshHistory` (src/preload); every call is validated in src/main/ssh/commandHistory.ts. */
+/** `window.mc.sshHistory` (src/renderer/src/bridge/mcApi.ts); the app validates every call. */
 export interface SshHistoryApi {
   list(hostId: string): Promise<CommandHistoryEntry[]>;
   /** A command the user ran at the host's prompt (it passed captureCommand). */

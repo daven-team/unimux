@@ -1,9 +1,9 @@
-// The window.mc bridge of the Tauri build (1.2.0, PLAN F4): the shared method table (src/preload/mcApi.ts) keeps the argument
+// The window.mc bridge of the Tauri build (1.2.0, PLAN F4): the shared method table (src/renderer/src/bridge/mcApi.ts) keeps the argument
 // shaping of the Electron preload, and the Tauri transport keeps ipcRenderer's semantics (send order, sync unsubscribe,
 // typed not-yet errors, optional event arguments, edits that survive a reload).
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { createMcApi, type McTransport } from '../src/preload/mcApi';
+import { createMcApi, type McTransport } from '../src/renderer/src/bridge/mcApi';
 import { createPortPoster, createTauriTransport, McNotYetError, type TauriDeps } from '../src/renderer/src/bridge/transport';
 // @ts-expect-error plain JS module without types
 import { buildContract, contractText, contractTs } from '../scripts/gen-ipc-contract.mjs';
@@ -187,7 +187,7 @@ describe('Tauri transport', () => {
     const text = { kind: 'text', text: 'x', size: 1, truncated: false };
     expect(await createMcApi({ ...createTauriTransport(boot, fakeDeps().deps), invoke: async () => text }).readProjectFile('p', 'a.txt')).toBe(text);
     // Bigger than one btoa chunk.
-    const { withImageDataUrl } = await import('../src/preload/mcApi');
+    const { withImageDataUrl } = await import('../src/renderer/src/bridge/mcApi');
     const big = new Uint8Array(100_000).map((_, i) => i % 251);
     const out = await withImageDataUrl(Promise.resolve({ kind: 'image', mime: 'image/gif', dataUrl: big, size: big.length }));
     expect(out.dataUrl).toBe(`data:image/gif;base64,${Buffer.from(big).toString('base64')}`);

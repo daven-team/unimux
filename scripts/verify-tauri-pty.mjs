@@ -10,8 +10,8 @@
 // replay   a cmd cell is narrowed and widened (recorded sizes), the page reloads, the replay draws the same screen;
 //          the transport is the expected one and the frames path is in use.
 // latency  keystroke -> echo drawn in a cmd cell (the perf-latency.mjs probe), idle; with --load while the 19 other cells
-//          of a 5x4 grid run unimux-pty-flood at --rate (scripts/sp5/electron-grid.mjs --latency is the 1.1.4 run).
-// grid     20 cells x --rate for --seconds: fps / frame times like scripts/sp5/electron-grid.mjs, plus the P2 bounds:
+//          of a 5x4 grid run unimux-pty-flood at --rate (the 1.1.4 numbers: docs/tauri/spikes/SP5.md).
+// grid     20 cells x --rate for --seconds: fps / frame times like the SP5 run of 1.1.4, plus the P2 bounds:
 //          shared buffers posted and not released per window (host and page side) and unacked bytes per terminal.
 // reload   4 cells x --reload-rate, --reloads page reloads: after each the host keeps posting, its queue stays bounded
 //          and no in-flight cap needed the timeout (buffers of the old attach are dropped by the new page).
@@ -45,7 +45,7 @@ const results = { date: new Date().toISOString(), runs, transport: transport || 
 const failures = [];
 const check = (ok, what) => { if (!ok) failures.push(what); console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); };
 
-/** The 5x4 grid state of scripts/sp5/electron-grid.mjs (same cells, font, shell). */
+/** The 5x4 grid state of 1.1.4's SP5 reference run (scripts/sp5/electron-grid.mjs until R1: same cells, font, shell). */
 function gridState(scratch, count) {
   const cols = Math.min(5, count);
   const rows = Math.ceil(count / cols);

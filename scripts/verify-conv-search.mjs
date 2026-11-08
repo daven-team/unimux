@@ -1,10 +1,10 @@
-// Real-app check of the 1.0.9 conversation search (npm run build:check first; MC_APP_TARGET=electron: npm run build). The app runs with a scratch home whose ~/.claude
+// Real-app check of the 1.0.9 conversation search (npm run build:check first). The app runs with a scratch home whose ~/.claude
 // and ~/.codex hold generated transcripts (never the real ones), and no real Claude or Codex can start (PATH is cut down).
 // Checks: the shortcut opens the search; an empty query lists every conversation; a folded query (no diacritics) finds the
 // Polish text with marks; the agent filter; the transcript preview; Enter resumes in a new cell of the conversation's
 // project; a conversation of a folder no project holds adds that project; Ctrl+Enter resumes in the free focused cell;
 // copy id. Screenshots go to a temporary folder (printed at the end).
-// Usage: npm run build && node scripts/verify-conv-search.mjs [--many 2000]
+// Usage: npm run build:check && node scripts/verify-conv-search.mjs [--many 2000]
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

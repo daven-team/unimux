@@ -1,8 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
 import { describe, expect, it } from 'vitest';
-import { HookServer, hasActiveBackgroundWork, stopInfo } from '../src/main/hooks';
 import {
   ANSWER_GRACE_MS, BG_STALL_MS, END_GRACE_MS, INTERRUPT_QUIET_MS, isFocusOrMouseReport, isUserInput, shouldNotify, STALL_MS, StatusTracker,
   type CellStatus, type HookEvent, type HookInfo, type StatusCause, WORKFLOW_STALL_MS,
@@ -29,7 +25,6 @@ function sim() {
     run: (from: number, to: number) => { for (let n = from; n <= to; n += 400) watch(n, () => { t.tick(n); }); },
   };
 }
-const bg = (...tasks: unknown[]) => JSON.stringify({ background_tasks: tasks });
 
 describe('Stop hooks that continue the turn (P1)', () => {
   it('a continuation after a Stop reopens the turn once the grace window passed; the real Stop alerts', () => {
@@ -118,59 +113,18 @@ describe('Stop hooks that continue the turn (P1)', () => {
     t.hook('prompt', 0);
     expect(t.hook('stop', 100, { continuation: true })).toBe('applied');
   });
-
-  it('stopInfo reads stop_hook_active', () => {
-    expect(stopInfo(JSON.stringify({ stop_hook_active: true })).continuation).toBe(true);
-    expect(stopInfo(JSON.stringify({ stop_hook_active: false })).continuation).toBe(false);
-    expect(stopInfo(JSON.stringify({ stop_hook_active: 'yes' })).continuation).toBe(false);
-    expect(stopInfo('garbage').continuation).toBe(false);
-  });
 });
 
 describe('long shell-type background tasks do not hold the cell (P2)', () => {
-  it('only agent-like or unknown task types hold it', () => {
-    expect(hasActiveBackgroundWork(bg({ id: 'a', type: 'local_bash', status: 'running' }))).toBe(false);
-    expect(hasActiveBackgroundWork(bg({ type: 'shell', status: 'running' }))).toBe(false);
-    expect(hasActiveBackgroundWork(bg({ type: 'Monitor', status: 'running' }))).toBe(false);
-    expect(hasActiveBackgroundWork(bg({ type: 'dev-server', status: 'running' }))).toBe(false);
-    expect(hasActiveBackgroundWork(bg({ type: 'process', status: 'running' }))).toBe(false);
-    expect(hasActiveBackgroundWork(bg({ type: 'command', status: 'running' }))).toBe(false);
-    expect(hasActiveBackgroundWork(bg({ type: 'local_agent', status: 'running' }))).toBe(true);
-    expect(hasActiveBackgroundWork(bg({ type: 'subagent', status: 'running' }))).toBe(true);
-    expect(hasActiveBackgroundWork(bg({ type: 'workflow', status: 'running' }))).toBe(true);
-    expect(hasActiveBackgroundWork(bg({ type: 'task', status: 'running' }))).toBe(true);
-    expect(hasActiveBackgroundWork(bg({ status: 'running' }))).toBe(true); // missing type: conservative
-    expect(hasActiveBackgroundWork(bg({ type: 'mystery', status: 'running' }))).toBe(true);
-    expect(hasActiveBackgroundWork(bg({ type: 'shell', status: 'running' }, { type: 'agent', status: 'running' }))).toBe(true);
-    expect(hasActiveBackgroundWork(bg({ type: 'agent', status: 'completed' }, { type: 'shell', status: 'running' }))).toBe(false);
-  });
-
-  it('stopInfo counts only the holding tasks as active and lists the types', () => {
-    const info = stopInfo(bg({ id: 'SECRET', type: 'local_bash', status: 'running', command: 'SECRET-CMD' }, { type: 'local_agent', status: 'running' }, { type: 'local_agent', status: 'completed' }));
-    expect(info).toEqual({ tasks: 3, active: 1, statuses: ['running', 'completed'], types: ['local_bash', 'local_agent'], continuation: false, workflows: 0 });
-    expect(JSON.stringify(info)).not.toContain('SECRET');
-  });
-
-  it('the hook server emits a plain stop for a dev server task and stopbg for an agent task', async () => {
-    const s = new HookServer();
-    await s.start();
-    const seen: string[] = [];
-    s.on('hook', (_c, ev) => seen.push(ev));
-    await fetch(s.url('c1', 'stop'), { method: 'POST', body: bg({ type: 'local_bash', status: 'running' }) });
-    await fetch(s.url('c1', 'stop'), { method: 'POST', body: bg({ type: 'local_agent', status: 'running' }) });
-    await new Promise((r) => setTimeout(r, 80));
-    expect(seen).toEqual(['stop', 'stopbg']);
-    s.stop();
-  });
-
   it('replay: two full turns with a dev server running in the background alert at every Stop', () => {
     const s = sim();
-    const shellStop = bg({ type: 'local_bash', status: 'running', command: 'npm run dev' });
+    // What the hook server derives from a Stop with `npm run dev` running as a local_bash task (1.1.4's
+    // hasActiveBackgroundWork / stopInfo, now unimux-agents' hook server): a plain Stop, no task holds the cell.
+    const shellStop = { tasks: 1, active: 0, statuses: ['running'], types: ['local_bash'], continuation: false, workflows: 0 };
     for (const base of [0, 120_000]) {
       s.hook(base, 'prompt');
       s.hook(base + 5000, 'busy');
-      // what the server derives from the payload
-      s.hook(base + 20_000, hasActiveBackgroundWork(shellStop) ? 'stopbg' : 'stop', stopInfo(shellStop));
+      s.hook(base + 20_000, 'stop', shellStop);
       expect(s.t.status).toBe('waiting');
     }
     s.run(240_000, 240_000 + BG_STALL_MS + 1000);
@@ -275,28 +229,6 @@ describe('only focus and mouse reports are terminal replies that mute output (P6
     // CPR replies are not recorded via terminalReply (the manager only forwards focus / mouse reports), so output counts
     for (let ms = 1000; ms <= 4000; ms += 500) h.output(ms);
     expect(h.tick(4100)).toBe('working');
-  });
-});
-
-describe('SubagentStop hook wiring', () => {
-  it('has its own URL event and arrives as a subagent busy hook', async () => {
-    const s = new HookServer();
-    await s.start();
-    const dir = mkdtempSync(join(tmpdir(), 'mc-sub-'));
-    try {
-      const json = JSON.parse(readFileSync(s.writeClaudeSettings(dir, 'c4'), 'utf8'));
-      expect(json.hooks.SubagentStop[0].hooks[0].command).toContain('/c4/subagent/');
-      expect(json.hooks.PostToolUse[0].hooks[0].command).toContain('/c4/busy/');
-      const seen: Array<[string, HookInfo | undefined]> = [];
-      s.on('hook', (_c, ev, info) => seen.push([ev, info]));
-      await fetch(s.url('c4', 'subagent'), { method: 'POST', body: '{}' });
-      await fetch(s.url('c4', 'busy'), { method: 'POST', body: '{}' });
-      await new Promise((r) => setTimeout(r, 80));
-      expect(seen).toEqual([['busy', { subagent: true }], ['busy', undefined]]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-      s.stop();
-    }
   });
 });
 

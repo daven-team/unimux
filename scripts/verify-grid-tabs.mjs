@@ -1,4 +1,4 @@
-// Real-app check of 1.0.0 "grid tabs across projects" (npm run build:check first; MC_APP_TARGET=electron: npm run build). No real Claude or Codex runs: the grids hold shell
+// Real-app check of 1.0.0 "grid tabs across projects" (npm run build:check first). No real Claude or Codex runs: the grids hold shell
 // cells whose profile is switched to "claude" in Settings after they started (the running shells stay shells), and the agent
 // status is faked with the 'cell:hook' event main sends for a real hook (the technique of verify-agent-close.mjs). PATH is cut to
 // the Windows folders, so even a restarted cell could not find a real CLI.

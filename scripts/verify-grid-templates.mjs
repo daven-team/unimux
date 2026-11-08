@@ -1,4 +1,4 @@
-// Real-app check of 1.1.1 grid templates (npm run build:check first; MC_APP_TARGET=electron: npm run build). No real Claude or Codex runs: PATH is cut to the Windows folders
+// Real-app check of 1.1.1 grid templates (npm run build:check first). No real Claude or Codex runs: PATH is cut to the Windows folders
 // and MC_CLI_NO_REGISTRY keeps the registry PATH out,
 // so the claude and codex cells show their install card; the cmd shell cells start for real.
 // Checks: "Zapisz jako szablon…" in a grid tab's menu saves a 2x2 grid of mixed profiles (cmd shell with a folder, codex muted,

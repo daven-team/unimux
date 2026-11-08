@@ -129,7 +129,8 @@ impl Drop for Host {
     }
 }
 
-/// node-pty's conpty.dll 1.23 in node_modules (the one 1.1.4 ships); the host falls back to the in-box API without it.
+/// conpty.dll 1.23 (the one 1.1.4 shipped): UNIMUX_CONPTY_DIR, else the committed src-tauri/resources/conpty/x64; the host
+/// falls back to the in-box API without it.
 fn conpty_dir() -> Option<std::path::PathBuf> {
     if !cfg!(windows) {
         return None;
@@ -137,10 +138,8 @@ fn conpty_dir() -> Option<std::path::PathBuf> {
     if let Some(dir) = std::env::var_os("UNIMUX_CONPTY_DIR") {
         return Some(dir.into());
     }
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../node_modules/node-pty/third_party/conpty");
-    let mut versions: Vec<_> = std::fs::read_dir(&root).ok()?.filter_map(|e| e.ok().map(|e| e.path())).collect();
-    versions.sort();
-    versions.into_iter().rev().map(|v| v.join("win10-x64")).find(|d| d.join("conpty.dll").is_file())
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../resources/conpty/x64");
+    dir.join("conpty.dll").is_file().then_some(dir)
 }
 
 fn shell() -> &'static str {

@@ -1,4 +1,4 @@
-// Startup / idle profile of the built app (run `npm run build:check` first; MC_APP_TARGET=electron: `npm run build`): 6 shell cells in isolated data, then 8 s of idle CPU profile.
+// Startup / idle profile of the built app (run `npm run build:check` first): 6 shell cells in isolated data, then 8 s of idle CPU profile.
 // Prints boot time, first paint, renderer heap and DOM size, the CPU the renderer used while idle and the memory of the process tree.
 // Usage: npm run perf [-- label]
 import { spawn, execFileSync } from 'node:child_process';
@@ -28,7 +28,7 @@ writeFileSync(join(data, 'state.json'), JSON.stringify({
   sidebarCollapsed: false, snippetsOpen: true, sidebarWidth: 228, snippetsWidth: 210,
 }));
 const port = await new Promise((res, rej) => { const s = createServer(); s.on('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
-const home = scratchHome(root); // never the real home: the app reads ~/.claude and ~/.codex, Electron its appData
+const home = scratchHome(root); // never the real home: the app reads ~/.claude and ~/.codex
 const env = { ...scrubAppEnv({ ...process.env }), MC_DATA_DIR: data, MC_OFFSCREEN: '1', MC_DEBUG_PORT: String(port), ...home.env };
 const t0 = Date.now();
 const child = spawnApp({ cwd: repo, env, stdio: 'ignore' });

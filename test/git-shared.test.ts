@@ -1,4 +1,5 @@
-import { readFileSync } from 'fs';
+import { readdirSync, readFileSync } from 'fs';
+import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import {
   DETAILS_FORMAT, LOG_FORMAT, isCommitHash, isSafeRef, isSafeRemote, layoutGraph, normalizeRepoPath, parseBranches, parseDetails, parseDiffTree,
@@ -299,12 +300,43 @@ describe('panel helpers', () => {
   });
 });
 
-describe('translations of the strings main sends', () => {
-  it('has a translation for every Polish message literal in the git engine', () => {
-    const source = ['src/main/git.ts', 'src/main/gitHandler.ts'].map((file) => readFileSync(file, 'utf8')).join('\n');
-    const pattern = /(?:GitFailure\(\s*'[a-z-]+',\s*|fail\(\s*'[a-z-]+',\s*|const (?:INSTALL_HINT|GONE|INVALID|UNTRUSTED|NOT_REPO) = )'((?:\\.|[^'\\])*)'/g;
-    const literals = [...source.matchAll(pattern)].map((m) => m[1].replace(/\\'/g, "'"));
-    expect(literals.length).toBeGreaterThan(8);
-    for (const literal of literals) expect(Object.hasOwn(messages, literal), literal).toBe(true);
+describe('translations of the strings the git engine sends', () => {
+  // The Polish failure texts of 1.1.4's git engine (src/main/git.ts, gitHandler.ts; taken over when R1 removed them): the
+  // Rust engine (unimux-git) sends the same keys, and the renderer translates them.
+  const ENGINE_MESSAGES = [
+    'Nie znaleziono polecenia git. Zainstaluj Git (git-scm.com) i uruchom aplikację ponownie.',
+    'To repozytorium ma w konfiguracji programy, które git może uruchomić. Zaufaj mu, aby użyć tej operacji.',
+    'To nie jest repozytorium git.',
+    'Wynik polecenia git jest zbyt duży.',
+    'Git nie odpowiedział w wyznaczonym czasie.',
+    'Folder już nie istnieje.',
+    'To żądanie zostało już wykonane.',
+    'To nie jest worktree tego repozytorium.',
+    'Nie ma takiego commita.',
+    'Nie udało się odczytać commita.',
+    'To nie jest nieśledzony plik tego repozytorium.',
+    'To repozytorium nadrzędne wobec projektu: zapisy są wyłączone.',
+    'Inna operacja git w tym repozytorium jeszcze trwa.',
+    'Folder docelowy nie jest pusty. Klonować można tylko do pustego folderu.',
+    'Nie można odczytać folderu docelowego.',
+    'Nie można utworzyć folderu docelowego.',
+    'Push wymaga gałęzi z co najmniej jednym commitem.',
+    'Brak zdalnego repozytorium, do którego można wypchnąć tę gałąź.',
+    'Cel push zmienił się od ostatniego odświeżenia. Odśwież panel i spróbuj ponownie.',
+    'Nieprawidłowe żądanie git.',
+    'To repozytorium ma już zdalne repozytorium.',
+    'Nic nie jest dodane do commita. Dodaj najpierw pliki.',
+    'Masz niezatwierdzone zmiany. Zatwierdź je lub odłóż, zanim zmienisz gałąź.',
+    'Nie ma takiej gałęzi.',
+    'Projekt już nie istnieje.',
+  ];
+
+  it('has a translation for every Polish message of the git engine, and the Rust engine still sends each', () => {
+    const dir = join('src-tauri', 'crates', 'unimux-git', 'src');
+    const rust = readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.rs')).map((f) => readFileSync(join(dir, f), 'utf8')).join('\n');
+    for (const literal of ENGINE_MESSAGES) {
+      expect(Object.hasOwn(messages, literal), literal).toBe(true);
+      expect(rust.includes(`"${literal}"`), `unimux-git: ${literal}`).toBe(true);
+    }
   });
 });

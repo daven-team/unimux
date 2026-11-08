@@ -8,7 +8,7 @@ export const MESSAGE_COLUMN = { en: 0, de: 1, es: 2, fr: 3, pt: 4 } as const;
 
 /** Polish source messages keep the original interface easy to find in the code. */
 export function translate(language: Language, key: MessageKey, params: MessageParams = {}): string {
-  // The renderer fills its tables per language (electron.vite.messages.ts); a row it has not loaded yet shows the key, never throws.
+  // The renderer fills its tables per language (vite.messages.ts); a row it has not loaded yet shows the key, never throws.
   const message = language === 'pl' ? key : (messages[key] as readonly string[] | undefined)?.[MESSAGE_COLUMN[language]] ?? key;
   return message.replace(/\{(\w+)\}/g, (token, name: string) => String(params[name] ?? token));
 }

@@ -3,20 +3,14 @@
 //   test/golden/update-progress.jsonl  {baseline, steps: [[elapsedMs, closed, installed, ready, dirBytes|null], ...],
 //                                       out: [[stage, percent, note|null], ...]} -> UpdateProgressModel (src/shared/updateProgress.ts)
 //                                       fed the steps in order; plus one {closeAction: {stage: action}} row
-//   test/golden/update-strings.json    {language: UpdateStrings} as `updateStrings()` of src/main/index.ts builds them (its source
-//                                       is evaluated with tr = translate(language)), plus `failed` (the Tauri window's own text
-//                                       for a failed install, an existing catalog key)
-//   test/golden/update-config.json     a work/config.json exactly as 1.1.4's showUpdateWindow (src/main/updateSplash.ts) writes
-//                                       it, which the 1.2.0 update window must read (the protocol is shared)
+//
+// test/golden/update-strings.json and update-config.json (1.1.4's updateStrings() and showUpdateWindow config) were made here
+// from src/main until R1 and are frozen now (test/golden/FROZEN.sha256).
 //
 // Scenarios are seeded (mulberry32), so the files are reproducible: the old app exits early, late or never; the installer
 // empties and refills the install dir, touches nothing, or the size is not sampled; it ends or never ends; the new app
 // reports ready or not; ticks of 250 ms (the window's TICK) with jitter, or coarser ones to reach the 8 / 15 / 60 s notes.
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { rng } from './goldens-normalize.mjs';
-
-const LANGUAGES = ['pl', 'en', 'de', 'es', 'fr', 'pt'];
 
 export function updateProgressRows({ UpdateProgressModel, closeAction }) {
   const r = rng(1301);
@@ -67,41 +61,4 @@ export function updateProgressRows({ UpdateProgressModel, closeAction }) {
   const stages = ['checking', 'ask', 'downloading', 'failed', 'preparing', 'closing', 'installing', 'launching', 'done', 'error'];
   rows.push({ closeAction: Object.fromEntries(stages.map((s) => [s, closeAction(s)])) });
   return rows;
-}
-
-/** `updateStrings()` of src/main/index.ts, evaluated from its source for every language. */
-export function updateStringsGolden({ root, translate }) {
-  const source = readFileSync(resolve(root, 'src/main/index.ts'), 'utf8');
-  const match = /const updateStrings = \(\): UpdateStrings => (\(\{[\s\S]*?\n\}\));/.exec(source);
-  if (!match) throw new Error('updateStrings() not found in src/main/index.ts');
-  const build = new Function('tr', 'getUpdateState', `return ${match[1]};`);
-  const version = '1.2.1';
-  const out = {};
-  for (const language of LANGUAGES) {
-    const tr = (key, params) => translate(language, key, params);
-    out[language] = { ...build(tr, () => ({ version })), failed: tr('Nie udało się zainstalować aktualizacji.') };
-  }
-  return { version, strings: out };
-}
-
-/** The config 1.1.4's showUpdateWindow writes (key order and all), with the Polish texts. */
-export function updateConfigGolden({ strings }) {
-  const update = 'C:\\Users\\u\\AppData\\Roaming\\unimux\\update';
-  const { failed: _failed, ...pl } = strings.strings.pl;
-  return {
-    version: strings.version,
-    fromVersion: '1.1.4',
-    oldPid: 4242,
-    installDir: 'C:\\Users\\u\\AppData\\Local\\Programs\\unimux',
-    appExe: 'C:\\Users\\u\\AppData\\Local\\Programs\\unimux\\unimux.exe',
-    installedFlag: `${update}\\installer-done`,
-    readyFlag: `${update}\\ready`,
-    shownFlag: `${update}\\work\\shown`,
-    abortFlag: `${update}\\work\\abort`,
-    heartbeatFlag: `${update}\\work\\heartbeat`,
-    runtimeDir: `${update}\\runtime`,
-    workDir: `${update}\\work`,
-    timeoutMs: 5 * 60 * 1000,
-    strings: pl,
-  };
 }

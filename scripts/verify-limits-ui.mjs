@@ -5,7 +5,7 @@
 // their old numbers) and reads every account right away although the last reads were a minute ago; the refresh button reads
 // at once and spins until the reads are back; crossing the 5-hour threshold gives exactly one notification (not again on the
 // next read nor after a restart); a click on it opens the limits panel. Screenshots of the settings group (Settings > Konta i limity since 1.1.2) and the panel.
-// Run: npm run build && node scripts/verify-limits-ui.mjs [shots dir]   (default: <tmp>/unimux-limits-shots)
+// Run: npm run build:check && node scripts/verify-limits-ui.mjs [shots dir]   (default: <tmp>/unimux-limits-shots)
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';

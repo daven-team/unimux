@@ -1,4 +1,4 @@
-// Real-app check of 0.9.7 "everyday work with many agents" (npm run build:check first; MC_APP_TARGET=electron: npm run build).
+// Real-app check of 0.9.7 "everyday work with many agents" (npm run build:check first).
 // No real Claude or Codex runs: the grids hold shell cells whose profile is switched to "claude" in Settings after they started
 // (the running shells stay shells), and the agent status is faked by sending the 'cell:hook' event main sends for a real hook
 // (prompt = working, stop = turn finished) from the main side (scripts/real-app.mjs mainControl: the test bridge of the Tauri

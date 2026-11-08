@@ -36,8 +36,8 @@ const fontSize = Number(opt('font', 11));
 const source = opt('source', 'pty');
 const keep = argv.includes('--keep');
 
-const conptyRoot = join(root, 'node_modules', 'node-pty', 'third_party', 'conpty');
-const conptyDir = join(conptyRoot, readdirSync(conptyRoot).sort().pop(), 'win10-x64');
+// conpty.dll 1.23 + OpenConsole.exe, committed (1.1.4 took them from node-pty).
+const conptyDir = join(root, 'src-tauri', 'resources', 'conpty', 'x64');
 const flood = join(root, 'src-tauri', 'target', 'release', 'unimux-pty-flood.exe');
 if (runs.includes('flood') || runs.includes('close')) {
   if (!existsSync(flood)) throw new Error('build the flood helper first: npm run cargo -- build --release -p unimux-pty --bins (in src-tauri)');

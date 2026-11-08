@@ -2,7 +2,7 @@
 // (scripts/redis-test-server.mjs: password, seeded keys of every type) and the local SSH test server for a read-only tunnel
 // connection. Everything is driven through the UI over CDP (palette, key browser, value panel, dialogs, console, Pub/Sub,
 // server views); a separate session of the same connection reads back what the UI wrote. Screenshots go to
-// D:\Projekty\_shots\100-redis-*.png. Run `npm run build` first. Never touches real hosts or the user's data dir; kills only the
+// D:\Projekty\_shots\100-redis-*.png. Run `npm run build:check` first. Never touches real hosts or the user's data dir; kills only the
 // PIDs it started.
 import { spawn } from 'node:child_process';
 import { rmSync } from 'node:fs';

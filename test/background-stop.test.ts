@@ -1,74 +1,9 @@
-import { mkdtempSync, readFileSync, existsSync, rmSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
 import { describe, expect, it } from 'vitest';
-import { HookServer, hasActiveBackgroundWork, logStopDebug, parseSessionStart, stopDebugLine, stopInfo } from '../src/main/hooks';
 import { hookDetail } from '../src/shared/statusLog';
 import { BG_STALL_MS, INTERRUPT_QUIET_MS, shouldNotify, StatusTracker, STALL_MS } from '../src/shared/status';
 
 /** Ticks every 5 s (like the app) so the sleep detection does not restart the silence window. */
 const run = (t: StatusTracker, from: number, to: number) => { for (let n = from + 5000; n <= to; n += 5000) t.tick(n); return t.tick(to); };
-const bg = (...tasks: unknown[]) => JSON.stringify({ background_tasks: tasks });
-
-describe('hasActiveBackgroundWork', () => {
-  it('handles the payload shapes', () => {
-    expect(hasActiveBackgroundWork(bg())).toBe(false);
-    expect(hasActiveBackgroundWork(bg({ id: 'a', status: 'running' }))).toBe(true);
-    expect(hasActiveBackgroundWork(bg({ status: 'completed' }, { status: 'Running' }))).toBe(true);
-    expect(hasActiveBackgroundWork(bg({ status: 'completed' }, { status: 'FAILED' }, { status: 'killed' }))).toBe(false);
-    expect(hasActiveBackgroundWork(bg({ id: 'x' }))).toBe(true);
-    expect(hasActiveBackgroundWork(bg({ status: 'weird' }))).toBe(true);
-    expect(hasActiveBackgroundWork('not json')).toBe(false);
-    expect(hasActiveBackgroundWork('null')).toBe(false);
-    expect(hasActiveBackgroundWork('{}')).toBe(false);
-    expect(hasActiveBackgroundWork(JSON.stringify({ background_tasks: 'x' }))).toBe(false);
-    expect(hasActiveBackgroundWork(JSON.stringify({ session_crons: [{ id: 'c', status: 'active' }] }))).toBe(false);
-  });
-});
-
-describe('hook server Stop', () => {
-  it('emits stopbg or stop, rejects oversized and wrong-token requests', async () => {
-    const s = new HookServer();
-    await s.start();
-    const seen: string[] = [];
-    s.on('hook', (cell, ev) => seen.push(`${cell}:${ev}`));
-    const url = (ev: string) => s.url('c1', ev as never);
-    const post = (u: string, b: string) => fetch(u, { method: 'POST', body: b });
-    await post(url('stop'), bg({ status: 'running' }));
-    await post(url('stop'), bg({ status: 'done' }));
-    await post(url('stop'), JSON.stringify({ last_assistant_message: 'y'.repeat(100_000) }));
-    await post(url('stopbg'), bg({ status: 'running' }));
-    await post(url('stop'), 'z'.repeat(600_000)).catch(() => {});
-    await post(url('notify'), 'z'.repeat(20_000)).catch(() => {});
-    await post(`http://127.0.0.1:${s.port}/h/bad/c1/stop/x`, bg({ status: 'running' })).catch(() => {});
-    await new Promise((r) => setTimeout(r, 80));
-    expect(seen).toEqual(['c1:stopbg', 'c1:stop', 'c1:stop', 'c1:stop']); // the oversized Stop still counts as a plain Stop
-    s.stop();
-  });
-
-  it('writes a Stop hook that posts its payload', async () => {
-    const s = new HookServer();
-    await s.start();
-    const dir = mkdtempSync(join(tmpdir(), 'mc-bg-'));
-    try {
-      const json = JSON.parse(readFileSync(s.writeClaudeSettings(dir, 'c2'), 'utf8'));
-      expect(json.hooks.Stop[0].hooks[0].command).toContain('--data-binary @-');
-      expect(json.hooks.Stop[0].hooks[0].command).toContain('/c2/stop');
-      expect(json.hooks.UserPromptSubmit[0].hooks[0].command).not.toContain('--data-binary');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-      s.stop();
-    }
-  });
-});
-
-describe('SessionStart hardening', () => {
-  const id = '3f2b8c1e-0d4a-4b7e-9c11-2a5d6e7f8091';
-  it('ignores subagent payloads and accepts fork', () => {
-    expect(parseSessionStart(JSON.stringify({ session_id: id, agent_id: 'sub1' }))).toBeNull();
-    expect(parseSessionStart(JSON.stringify({ session_id: id, source: 'fork' }))).toEqual({ sessionId: id, source: 'fork' });
-  });
-});
 
 describe('StatusTracker background work', () => {
   it('stays working past STALL_MS and flips only after BG_STALL_MS', () => {
@@ -140,81 +75,9 @@ describe('StatusTracker background work', () => {
   });
 });
 
-describe('Stop debug log', () => {
-  it('writes only keys, types and statuses, and is silent when disabled', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mc-dbg-'));
-    try {
-      const body = JSON.stringify({
-        last_assistant_message: 'SECRET-MSG',
-        background_tasks: [{ id: 'i1', type: 'subagent', status: 'running', description: 'SECRET-DESC', command: 'SECRET-CMD' }],
-      });
-      logStopDebug(false, dir, 'c1', body);
-      expect(existsSync(join(dir, 'hook-debug.log'))).toBe(false);
-      logStopDebug(true, dir, 'c1', body);
-      const log = readFileSync(join(dir, 'hook-debug.log'), 'utf8');
-      expect(log).toContain('c1');
-      expect(log).toContain('last_assistant_message,background_tasks');
-      expect(log).toContain('subagent/running');
-      expect(log).not.toContain('SECRET');
-      for (let i = 0; i < 3000; i++) logStopDebug(true, dir, 'c1', body);
-      expect(readFileSync(join(dir, 'hook-debug.log'), 'utf8').length).toBeLessThan(300 * 1024);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-});
-
 describe('workflow entries in the Stop payload', () => {
-  it('holds the cell for running workflows and counts them', () => {
-    const running = [
-      { type: 'workflow', status: 'running', name: 'audyt-guybot-runda-4', description: 'SECRET-DESC' },
-      { type: 'local_workflow', status: 'running' },
-      { type: 'workflow', status: 'pending' },
-    ];
-    for (const task of running) {
-      expect(hasActiveBackgroundWork(bg(task))).toBe(true);
-      expect(stopInfo(bg(task)).workflows).toBe(1);
-    }
-    for (const status of ['completed', 'failed', 'killed']) {
-      expect(hasActiveBackgroundWork(bg({ type: 'workflow', status }))).toBe(false);
-      expect(stopInfo(bg({ type: 'workflow', status })).workflows).toBe(0);
-    }
-    expect(JSON.stringify(stopInfo(bg(running[0])))).not.toMatch(/SECRET|audyt/);
-  });
-
-  it('a running shell plus a running workflow holds; a shell alone does not (dev server regression)', () => {
-    expect(hasActiveBackgroundWork(bg({ type: 'shell', status: 'running' }, { type: 'workflow', status: 'running' }))).toBe(true);
-    expect(hasActiveBackgroundWork(bg({ type: 'shell', status: 'running' }))).toBe(false);
-  });
-
-  it('marks a payload without a task list as unknown, not as "nothing runs"', () => {
-    expect(stopInfo('{}')).toMatchObject({ tasks: 0, workflows: 0, tasksUnknown: true });
-    expect(stopInfo(JSON.stringify({ background_tasks: 'x' })).tasksUnknown).toBe(true);
-    expect(stopInfo(bg()).tasksUnknown).toBeUndefined();
-  });
-
-  it('the debug line tells whether a task is named and whether the stop hook was active, never the name', () => {
-    const line = stopDebugLine('c1', JSON.stringify({ stop_hook_active: true, background_tasks: [{ type: 'workflow', status: 'running', name: 'SECRET-NAME' }] }));
-    expect(line).toContain('workflow/running/named');
-    expect(line).toContain('stop_hook_active=true');
-    expect(line).not.toContain('SECRET');
-  });
-
   it('hookDetail shows the workflow count and an unknown task list', () => {
     expect(hookDetail({ tasks: 1, active: 1, workflows: 1 })).toBe('tasks=1 active=1 workflows=1');
     expect(hookDetail({ tasks: 0, active: 0, workflows: 0, tasksUnknown: true })).toBe('tasks=?');
-  });
-
-  it('the hook server emits stopbg for a workflow and stop when the task list is absent', async () => {
-    const s = new HookServer();
-    await s.start();
-    const seen: string[] = [];
-    s.on('hook', (_cell, ev, info) => seen.push(`${ev}:${info?.workflows ?? '-'}`));
-    const url = s.url('c1', 'stop');
-    await fetch(url, { method: 'POST', body: bg({ type: 'workflow', status: 'running' }) });
-    await fetch(url, { method: 'POST', body: JSON.stringify({ last_assistant_message: 'x' }) });
-    await new Promise((r) => setTimeout(r, 80));
-    expect(seen).toEqual(['stopbg:1', 'stop:0']);
-    s.stop();
   });
 });

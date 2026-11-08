@@ -1,4 +1,4 @@
-// Real-app check of the 1.0.7 status tracking (npm run build:check first; MC_APP_TARGET=electron: npm run build). A scratch data dir and home, MC_OFFSCREEN=1 and
+// Real-app check of the 1.0.7 status tracking (npm run build:check first). A scratch data dir and home, MC_OFFSCREEN=1 and
 // MC_DEBUG_PORT (default 9406). One grid with a shell cell and a Claude cell: the shell runs a silent long command, a quick
 // failing one and a Ctrl-C'd one; Claude (the installed CLI, talking to a local mock of the Messages API, never the network)
 // asks for a Bash permission and then ends with /exit. The status pill of each cell is sampled from the DOM and printed as a

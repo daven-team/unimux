@@ -1,10 +1,8 @@
 // End-to-end check of the unimux MCP server with the real, installed agent CLIs and no sign-in or model usage. The model is a
-// local mock. The server under test:
-//   - Tauri (default): the check build's own MCP server (M1 server, M2 tools) on a seeded scratch state, with the stand-in
-//     automation of the check build (unimux-mcp fake-automation, MC_MCP_FAKE_AUTOMATION=1); tokens come from the test bridge (`mcp-token`), the
-//     state the automation answers from from `mcp-automation`. Offscreen, scratch MC_DATA_DIR and home.
-//   - MC_APP_TARGET=electron / --target=electron: the 1.1.4 TS reference in-process (fake automation dependencies,
-//     test/helpers/mcpHarness.ts).
+// local mock. The server under test is the check build's own MCP server (M1 server, M2 tools) on a seeded scratch state, with
+// the stand-in automation of the check build (unimux-mcp fake-automation, MC_MCP_FAKE_AUTOMATION=1); tokens come from the
+// test bridge (`mcp-token`), the state the automation answers from from `mcp-automation`. Offscreen, scratch MC_DATA_DIR and
+// home. (Until R1 `--target=electron` ran 1.1.4's TS server in-process instead.)
 // Claude Code (skipped when not installed):
 //   1. `claude mcp list` (scratch CLAUDE_CONFIG_DIR) health-checks the server with a cell's bearer token; a revoked token fails;
 //   2. `claude -p --mcp-config <the per-cell file unimux writes>` against a mock Anthropic Messages API: the "model" loads the
@@ -20,35 +18,23 @@ import { execFile } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { build } from 'esbuild';
-import { bridgeCall, freePort, isTauri, killAppTreeAndWait, quitApp, requireBuild, spawnApp, waitForMainPage } from './real-app.mjs';
+import { join } from 'node:path';
+import { bridgeCall, freePort, killAppTreeAndWait, quitApp, requireBuild, spawnApp, waitForMainPage } from './real-app.mjs';
 import { removeScratch, scratchHome, scrubAppEnv } from './app-env.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'unimux-mcp-cli-'));
-const out = join(root, 'harness.mjs');
-await build({ stdin: { contents: "export { startMcpHarness } from './test/helpers/mcpHarness';\nexport { writeClaudeMcpConfig } from './src/main/mcpCellConfig';", resolveDir: resolve('.'), loader: 'ts' },
-  bundle: true, platform: 'node', format: 'esm', outfile: out,
-  external: ['electron', 'node-pty'], logLevel: 'silent', banner: { js: "import{createRequire as __cr}from'module';const require=__cr(import.meta.url);" } });
-const { startMcpHarness, writeClaudeMcpConfig } = await import(pathToFileURL(out).href);
 const debug = (...args) => { if (process.env.MOCK_DEBUG) console.error(...args); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * The server under test behind one interface: url, the three team cells and the side grid with an open task (close_grid
- * needs the user's confirmation for it), tokens, the server info, the tabs the automation sees, and stop.
- */
-async function electronHarness() {
-  const h = await startMcpHarness(undefined, { rateLimit: false });
-  const side = await h.service.execute('create_grid', { name: 'Side', cells: [{ profileId: 'codex', role: 'worker', name: 'Side worker', prompt: 'Work' }] }, h.coordinator.id)
-    .catch(async (error) => { await h.server.stop(); throw error; });
-  return {
-    url: h.url, coordinator: h.coordinator.id, worker: h.worker.id, reviewer: h.reviewer.id, sideGridId: side.gridId,
-    issueToken: async (cell) => h.server.issueToken(cell), revokeCell: async (cell) => h.server.revokeCell(cell),
-    info: async () => h.server.getInfo(), sessions: async () => h.server.sessionCount, tabs: async () => h.controller.get().projects[0].tabs,
-    stop: () => h.server.stop(),
-  };
+/** Claude Code's per-server tool timeout the app writes (unimux-agents' cell MCP config, 1.1.4's CLAUDE_MCP_TIMEOUT_MS). */
+const CLAUDE_MCP_TIMEOUT_MS = 660_000;
+/** The per-cell Claude MCP config file a cell gets (`<dir>/<cellId>.json`, 0600 in a 0700 folder on POSIX); returns its path. */
+function writeClaudeMcpConfig(dir, cellId, url, token) {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = join(dir, `${cellId}.json`);
+  writeFileSync(file, JSON.stringify({ mcpServers: { unimux: { type: 'http', url, headers: { Authorization: `Bearer ${token}` }, timeout: CLAUDE_MCP_TIMEOUT_MS } } }), { mode: 0o600 });
+  if (process.platform !== 'win32') { chmodSync(dir, 0o700); chmodSync(file, 0o600); }
+  return file;
 }
 
 const LEAD = 'cli-lead', WORKER = 'cli-backend', REVIEWER = 'cli-review', SIDE = 'cli-side', SIDE_WORKER = 'cli-side-worker';
@@ -187,8 +173,8 @@ const waitSec = Number(process.env.MCP_CLI_WAIT) || 0;
 let h;
 const servers = [];
 try {
-  h = isTauri ? await tauriHarness() : await electronHarness();
-  report.push(`server: ${isTauri ? 'the Tauri check build' : 'the 1.1.4 TS reference'} at ${h.url}`);
+  h = await tauriHarness();
+  report.push(`server: the Tauri check build at ${h.url}`);
   if (await installed('claude')) {
     const configDir = join(root, 'claude-config'), project = join(root, 'claude-project');
     mkdirSync(configDir); mkdirSync(project);

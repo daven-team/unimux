@@ -3,7 +3,7 @@
 // Drives the "Bazy danych" panel, the connection form, the tree, table data tabs (sort, filter, paging, edits, Pokaż SQL,
 // save, conflict), a read-only connection, the SQL editor (statement, selection, script, several results, load more, cancel,
 // transaction), export and drafts across a reload. Screenshots: D:\Projekty\_shots\100-db-*.png.
-// Run `npm run build` first. Never touches real hosts or the user's data dir; kills only the PIDs it started.
+// Run `npm run build:check` first. Never touches real hosts or the user's data dir; kills only the PIDs it started.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';

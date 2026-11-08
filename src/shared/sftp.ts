@@ -475,7 +475,7 @@ export function ownerFromLongname(longname: string | undefined): { owner?: strin
 
 export interface DeleteCount { files: number; dirs: number }
 
-/** `window.mc.sftp` (src/preload). Every call is validated in src/main/sftp/ipc.ts. */
+/** `window.mc.sftp` (src/renderer/src/bridge/mcApi.ts). The app validates every call. */
 export interface SftpApi {
   /** Starts a login with the saved host data; follow 'sftp:session' / 'sftp:prompt' for the outcome. */
   /** `plain` (0.9.9): never through sudo (editor tabs write as the SSH user); the view's sessions follow the host setting. */
@@ -521,7 +521,7 @@ export interface SftpApi {
 export type LocalErrorCode = 'notFound' | 'exists' | 'permission' | 'notEmpty' | 'notADirectory' | 'invalid' | 'tooMany' | 'failed';
 export type LocalResult<T> = { ok: true; value: T } | { ok: false; error: LocalErrorCode };
 
-/** `window.mc.localFs` (src/preload): any folder the user browses, validated and guarded in src/main/localFiles.ts. */
+/** `window.mc.localFs` (src/renderer/src/bridge/mcApi.ts): any folder the user browses, validated and guarded by the app. */
 export interface LocalFilesApi {
   list(path: string): Promise<LocalResult<{ path: string; entries: LocalEntry[]; truncated: boolean }>>;
   /** Home folder, and the drives on Windows ("C:\\", "D:\\" ...; empty elsewhere). */

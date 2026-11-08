@@ -238,7 +238,7 @@ npm install
 npm run dev
 ```
 
-`npm test` runs the test suite and `npm run dist:win` / `npm run dist:mac` build installers. See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for details. The screenshots above come from the real app with demo data: see [capturing them](docs/screenshots/README.md).
+The app is built with Tauri 2 and Rust (install the Rust toolchain; on Windows the Visual Studio C++ build tools). `npm test` runs the TypeScript tests, `npm run cargo -- test --workspace --manifest-path src-tauri/Cargo.toml` the Rust ones, and `npm run build` builds the app and its installer (NSIS on Windows, app and DMG on macOS) in `src-tauri/target/release/bundle`. See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for details. The screenshots above come from the real app with demo data: see [capturing them](docs/screenshots/README.md).
 
 Ideas and bug reports are welcome in [Issues](https://github.com/daven-team/unimux/issues).
 

@@ -1,146 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { HookServer } from '../src/main/hooks';
 import {
-  CODEX_ATTENTION_TYPES, codexHookOverrides, codexNotifyArgv, CodexThreads, parseCodexNotify,
-  type CodexNotice,
+  CodexThreads,
 } from '../src/shared/codexHooks';
 import { FailureScanner, normalizeOutput } from '../src/shared/outputFailure';
-import { buildCliCommand, DEFAULT_PROFILES } from '../src/shared/profiles';
 
 const A = '3f2b8c1e-0d4a-4b7e-9c11-2a5d6e7f8091';
 const B = '0198aa11-2222-7333-8444-555566667777';
 const C = '0198aa11-9999-7333-8444-555566667777';
-const URL = 'http://127.0.0.1:51234/h/0123456789abcdef0123456789abcdef/cell-1/codex/89abcdef01234567';
-const codex = DEFAULT_PROFILES.find((p) => p.cli === 'codex')!;
-
-const payload = (patch: Record<string, unknown> = {}) => JSON.stringify({
-  type: 'agent-turn-complete', 'thread-id': A, 'turn-id': 'turn-1', cwd: 'D:\\bot-discord', client: 'codex-tui',
-  'input-messages': ['hello'], 'last-assistant-message': 'done', ...patch,
-});
-
-describe('Codex notify payload', () => {
-  it('reads the thread and turn of a completed turn and nothing else', () => {
-    expect(parseCodexNotify(payload())).toEqual({ threadId: A, turnId: 'turn-1' });
-    expect(parseCodexNotify(payload({ 'thread-id': A.toUpperCase() }))?.threadId).toBe(A);
-    expect(Object.keys(parseCodexNotify(payload())!).sort()).toEqual(['threadId', 'turnId']);
-  });
-
-  it('drops malformed ids but still reports the turn end', () => {
-    expect(parseCodexNotify(payload({ 'thread-id': '../../etc/passwd' }))).toEqual({ turnId: 'turn-1' });
-    expect(parseCodexNotify(payload({ 'thread-id': 42, 'turn-id': { a: 1 } }))).toEqual({});
-    expect(parseCodexNotify(payload({ 'turn-id': 'x'.repeat(500) }))).toEqual({ threadId: A });
-    expect(parseCodexNotify(payload({ 'turn-id': 'a b; rm -rf /' }))).toEqual({ threadId: A });
-  });
-
-  it('rejects anything that is not a completed-turn object', () => {
-    for (const body of ['', 'not json', '[]', 'null', '42', '"agent-turn-complete"', JSON.stringify({ type: 'something-else' }), JSON.stringify({}), '{"type":']) {
-      expect(parseCodexNotify(body), body).toBeNull();
-    }
-  });
-
-  it('survives hostile and huge payloads', () => {
-    expect(parseCodexNotify(payload({ 'last-assistant-message': 'x'.repeat(2_000_000) }))).toEqual({ threadId: A, turnId: 'turn-1' });
-    expect(parseCodexNotify('{"type":"agent-turn-complete","__proto__":{"threadId":"x"},"thread-id":"' + A + '"}')).toEqual({ threadId: A });
-  });
-});
-
-describe('Codex launch overrides', () => {
-  it('builds a curl notify argv whose last flag takes the appended payload', () => {
-    const argv = codexNotifyArgv(URL);
-    expect(argv[0]).toBe('curl');
-    expect(argv).toContain(URL);
-    expect(argv[argv.length - 1]).toBe('--data-raw');
-    expect(argv).toEqual(expect.arrayContaining(['--noproxy', '*', '-m', '2']));
-  });
-
-  it('uses TOML literal strings only: no double quote reaches any shell', () => {
-    const overrides = codexHookOverrides(URL);
-    expect(overrides[0]).toBe(`notify=['curl','-s','--noproxy','*','-m','2','${URL}','--data-raw']`);
-    expect(overrides[1]).toBe(`tui.notifications=[${CODEX_ATTENTION_TYPES.map((t) => `'${t}'`).join(',')}]`);
-    expect(overrides[2]).toBe("tui.notification_condition='always'");
-    for (const o of overrides) expect(o).not.toContain('"');
-  });
-
-  it('refuses a URL that could break out of the TOML value', () => {
-    for (const bad of ["http://127.0.0.1:1/h/abc/x'],evil=['/codex/ab", 'http://evil.example/h/0123456789abcdef/cell/codex/0123456789abcdef', `${URL}'`, `${URL} --x`, '']) {
-      expect(() => codexNotifyArgv(bad), bad).toThrow('Invalid hook URL');
-    }
-  });
-
-  it('quotes the overrides for PowerShell, bash/zsh and cmd', () => {
-    const [notify, tui, cond] = codexHookOverrides(URL);
-    const ps = buildCliCommand(codex, { mode: 'new', shell: 'pwsh', codexNotifyUrl: URL })!;
-    expect(ps).toBe(`codex -c '${notify.replace(/'/g, "''")}' -c '${tui.replace(/'/g, "''")}' -c '${cond.replace(/'/g, "''")}'`);
-    const posix = buildCliCommand(codex, { mode: 'new', shell: 'bash', codexNotifyUrl: URL })!;
-    expect(posix).toBe(`codex -c ${posixQuoted(notify)} -c ${posixQuoted(tui)} -c ${posixQuoted(cond)}`);
-    expect(buildCliCommand(codex, { mode: 'new', shell: 'zsh', codexNotifyUrl: URL })).toBe(posix);
-    const cmd = buildCliCommand(codex, { mode: 'new', shell: 'cmd', codexNotifyUrl: URL })!;
-    expect(cmd).toBe(`codex -c "${notify}" -c "${tui}" -c "${cond}"`);
-    // cmd metacharacters never occur in the generated overrides
-    expect(notify.replace(/[A-Za-z0-9'\[\],:/.*=_%-]/g, '')).toBe('');
-  });
-
-  it('resumes the saved conversation of the cell with its own hook and keeps profile args and model', () => {
-    const command = buildCliCommand({ ...codex, args: '--no-alt-screen' }, { mode: 'resume', sessionId: B, shell: 'bash', codexNotifyUrl: URL, model: 'gpt-5' })!;
-    expect(command.startsWith(`codex resume ${B} -c `)).toBe(true);
-    expect(command).toContain(URL);
-    expect(command.endsWith(`--no-alt-screen --model 'gpt-5'`)).toBe(true);
-    expect(command).not.toContain('tui.notifications=true');
-  });
-
-  it('keeps the plain terminal notifications when no hook url is given', () => {
-    expect(buildCliCommand(codex, { mode: 'new' })).toBe('codex -c tui.notifications=true');
-  });
-});
-
-const posixQuoted = (s: string) => "'" + s.replace(/'/g, "'\"'\"'") + "'";
-
-describe('HookServer codex events', () => {
-  const post = (url: string, body: string) => fetch(url, { method: 'POST', body });
-  const wait = () => new Promise((r) => setTimeout(r, 60));
-
-  it('emits a notice per valid request of the current process and drops every other one', async () => {
-    const s = new HookServer();
-    await s.start();
-    const seen: Array<[string, CodexNotice]> = [];
-    const status: string[] = [];
-    s.on('codex', (cell: string, notice: CodexNotice) => seen.push([cell, notice]));
-    s.on('hook', (cell: string, event: string) => status.push(`${cell}:${event}`));
-    try {
-      const old = s.prepareCodex('c1');
-      const url = s.prepareCodex('c1'); // a respawn invalidates the previous process
-      expect(url).toContain(`/h/${s.token}/c1/codex/`);
-      expect((await post(old, payload())).status).toBe(204);
-      expect((await post(url, payload())).status).toBe(204);
-      await post(url, 'not json');
-      await post(url, JSON.stringify({ type: 'other' }));
-      await post(`http://127.0.0.1:${s.port}/h/wrong/c1/codex/x`, payload()).catch(() => {});
-      await post(url.replace('/c1/', '/c2/'), payload());
-      expect((await fetch(url)).status).toBe(403);
-      await wait();
-      expect(seen).toEqual([['c1', { threadId: A, turnId: 'turn-1' }]]);
-      expect(status).toEqual([]);
-    } finally {
-      s.stop();
-    }
-  });
-
-  it('accepts a large payload and counts an oversized one as a turn end without ids', async () => {
-    const s = new HookServer();
-    await s.start();
-    const seen: CodexNotice[] = [];
-    s.on('codex', (_cell: string, notice: CodexNotice) => seen.push(notice));
-    try {
-      const url = s.prepareCodex('c1');
-      await post(url, payload({ 'last-assistant-message': 'y'.repeat(200_000) }));
-      await post(url, 'x'.repeat(1_200_000));
-      await wait();
-      expect(seen).toEqual([{ threadId: A, turnId: 'turn-1' }, {}]);
-    } finally {
-      s.stop();
-    }
-  });
-});
 
 describe('thread bookkeeping of Codex cells', () => {
   it('binds the first committed thread unconfirmed and confirms it when the same thread commits again', () => {
@@ -208,18 +74,6 @@ describe('thread bookkeeping of Codex cells', () => {
     const t = new CodexThreads();
     t.begin({ id: 'not-a-uuid', confirmed: true });
     expect(t.commit(A)).toEqual({ id: A, confirmed: false });
-  });
-});
-
-describe('resume of two Codex cells in one folder', () => {
-  it('resumes each cell with its own saved conversation, in every shell', () => {
-    for (const [cell, id] of [['c1', A], ['c2', B]] as const) {
-      for (const shell of ['pwsh', 'bash', 'cmd'] as const) {
-        const command = buildCliCommand(codex, { mode: 'resume', sessionId: id, shell, codexNotifyUrl: URL.replace('cell-1', cell) })!;
-        expect(command.startsWith(`codex resume ${id} -c `), `${cell} ${shell}`).toBe(true);
-        expect(command).toContain(`/${cell}/codex/`);
-      }
-    }
   });
 });
 

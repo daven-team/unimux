@@ -1,4 +1,4 @@
-// node scripts/verify-ssh-paths.mjs  (after `npm run build`)
+// node scripts/verify-ssh-paths.mjs  (after `npm run build:check`)
 // Real-app check of 1.0.6 SSH path completion and session restore against scripts/ssh-test-server.mjs --shell-root (a fake
 // shell over a scratch folder): `cd /sr` Tab, `vim TEST` Tab Tab Tab Shift+Tab, no popup inside vim, then a clean quit and a
 // restart with "Przywracaj sesje SSH po ponownym uruchomieniu" on: the cell connects by itself into the same folder.

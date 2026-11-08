@@ -3,7 +3,7 @@
 // połączenie offers to create it), opens a prepared database file from the + menu, then runs the tree (tables, views,
 // indexes, triggers, columns), table data (sort, WHERE, edit, Pokaż SQL, save: checked in the file itself), DDL, the SQL
 // editor (script, error underline, load more, cancel) and the History panel (search, star, insert, double-click run,
-// clear, the file in the data dir). Screenshots: D:\Projekty\_shots\106-sqlite-*.png. Run `npm run build` first.
+// clear, the file in the data dir). Screenshots: D:\Projekty\_shots\106-sqlite-*.png. Run `npm run build:check` first.
 // Never touches the user's data dir; kills only the PIDs it started.
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';

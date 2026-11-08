@@ -1,13 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  alertEventOf, ALERT_EVENTS, createAlertSoundThrottle, decideAlert, defaultAlerts, ERROR_PHRASES, errorPhrase, inQuietHours, migrateLegacyAlerts, normalizeAlerts,
+  alertEventOf, createAlertSoundThrottle, decideAlert, defaultAlerts, ERROR_PHRASES, errorPhrase, inQuietHours, normalizeAlerts,
   type AlertContext, type AlertSettings,
 } from '../src/shared/alerts';
 import { messages } from '../src/shared/messages';
-import { StateController } from '../src/main/stateController';
-import { notificationOptions } from '../src/main/notifyOptions';
 import { formatEntry, StatusLog } from '../src/shared/statusLog';
-import { defaultState, normalizeState } from '../src/shared/state';
 
 const at = (h: number, m = 0) => new Date(2026, 9, 12, h, m);
 const ctx = (patch: Partial<AlertContext> = {}): AlertContext => ({
@@ -158,146 +155,6 @@ describe('error phrases', () => {
     expect(errorPhrase('__proto__')).toBe('nieznany błąd');
     for (const key of Object.values(ERROR_PHRASES)) expect(Object.hasOwn(messages, key)).toBe(true);
     for (const key of ['{name} skończył pracę', '{name} potrzebuje Ciebie', '{name} - błąd: {detail}']) expect(Object.hasOwn(messages, key)).toBe(true);
-  });
-});
-
-describe('alerts normalization', () => {
-  it('defaults: everything on, one preset per event, volume 0.7, quiet hours off', () => {
-    const a = defaultAlerts();
-    expect(a.volume).toBe(0.7);
-    expect(a.notifyWhenFocused).toBe(false);
-    expect(a.quietHours).toEqual({ enabled: false, start: '22:00', end: '07:00' });
-    for (const e of ALERT_EVENTS) expect(a.events[e].notify).toBe(true);
-    expect(defaultState().settings.alerts).toEqual(a);
-  });
-
-  it('keeps valid values', () => {
-    const raw = {
-      enabled: false, volume: 0.35, notifyWhenFocused: true, quietHours: { enabled: true, start: '23:15', end: '06:45' },
-      events: {
-        done: { notify: false, sound: { kind: 'file', path: 'C:\\a\\b.wav' } },
-        attention: { notify: true, sound: { kind: 'system' } },
-        error: { notify: true, sound: { kind: 'preset', id: 'retro' } },
-      },
-      notificationActions: false, flashWindow: false, taskbarBadge: false,
-      limits: { enabled: false, fiveHour: { enabled: false, percent: 65 }, sevenDay: { enabled: true, percent: 100 }, resets: true },
-    };
-    expect(normalizeAlerts(JSON.parse(JSON.stringify(raw)))).toEqual(raw);
-  });
-
-  it('falls back field by field for garbage', () => {
-    const d = defaultAlerts();
-    expect(normalizeAlerts(undefined)).toEqual(d);
-    expect(normalizeAlerts('x')).toEqual(d);
-    expect(normalizeAlerts([])).toEqual(d);
-    const bad = normalizeAlerts({
-      volume: 'loud', notifyWhenFocused: 1, notificationActions: 'no', taskbarBadge: 0, quietHours: { enabled: 'yes', start: '7pm', end: 5 },
-      events: {
-        done: { notify: 'x', sound: { kind: 'preset', id: 'nope' } },
-        attention: { notify: false, sound: { kind: 'file', path: 5 } },
-        error: { sound: { kind: 'file', path: '' } },
-      },
-    });
-    expect(bad).toEqual({ ...d, events: { ...d.events, attention: { notify: false, sound: d.events.attention.sound } } });
-    expect(normalizeAlerts({ events: { done: { sound: { kind: 'file', path: 'a\0.wav' } } } }).events.done.sound).toEqual(d.events.done.sound);
-  });
-
-  it('clamps and rounds the volume', () => {
-    expect(normalizeAlerts({ volume: 5 }).volume).toBe(1);
-    expect(normalizeAlerts({ volume: -2 }).volume).toBe(0);
-    expect(normalizeAlerts({ volume: 0.333 }).volume).toBe(0.33);
-    expect(normalizeAlerts({ volume: NaN }).volume).toBe(0.7);
-  });
-});
-
-describe('migration of the retired settings', () => {
-  const migrate = (settings: Record<string, unknown>) => normalizeState({ ...JSON.parse(JSON.stringify(defaultState())), settings: { ...settings } })!.settings;
-  const off = { kind: 'off' };
-
-  it('a fresh install (no retired keys) gets the defaults', () => {
-    expect(migrate({ language: 'en' }).alerts).toEqual(defaultAlerts());
-    expect(migrateLegacyAlerts({})).toEqual(defaultAlerts());
-  });
-
-  it('off stays off for every event; the notifications flag and the focus option carry over', () => {
-    const { alerts } = migrate({ notifications: false, waitingSound: 'off', waitingSoundFile: '', waitingSoundVolume: 70, notifyWhenFocused: true });
-    expect(alerts.volume).toBe(0.7);
-    expect(alerts.notifyWhenFocused).toBe(true);
-    for (const e of ALERT_EVENTS) expect(alerts.events[e]).toEqual({ notify: false, sound: off });
-  });
-
-  it('the system sound moves to every event (errors played it before, too)', () => {
-    const { alerts } = migrate({ notifications: true, waitingSound: 'system', waitingSoundFile: '', waitingSoundVolume: 70, notifyWhenFocused: false });
-    expect(alerts.events.done).toEqual({ notify: true, sound: { kind: 'system' } });
-    expect(alerts.events.attention).toEqual({ notify: true, sound: { kind: 'system' } });
-    expect(alerts.events.error).toEqual({ notify: true, sound: { kind: 'system' } });
-  });
-
-  it('an own file moves to every event with its volume (0-100 becomes 0-1)', () => {
-    const { alerts } = migrate({ notifications: true, waitingSound: 'custom', waitingSoundFile: 'C:\\s\\ding.mp3', waitingSoundVolume: 30 });
-    expect(alerts.volume).toBe(0.3);
-    expect(alerts.events.done.sound).toEqual({ kind: 'file', path: 'C:\\s\\ding.mp3' });
-    expect(alerts.events.attention.sound).toEqual({ kind: 'file', path: 'C:\\s\\ding.mp3' });
-    expect(alerts.events.error.sound).toEqual({ kind: 'file', path: 'C:\\s\\ding.mp3' });
-  });
-
-  it('custom without a file used to beep, so it becomes the system sound', () => {
-    expect(migrate({ notifications: true, waitingSound: 'custom', waitingSoundFile: '' }).alerts.events.done.sound).toEqual({ kind: 'system' });
-  });
-
-  it('missing or garbage legacy values behave like the old defaults (sound off, notifications on, volume 70)', () => {
-    const missing = migrate({ notifications: true }).alerts;
-    expect(missing.volume).toBe(0.7);
-    for (const e of ALERT_EVENTS) expect(missing.events[e]).toEqual({ notify: true, sound: off });
-    const garbage = migrate({ notifications: 'maybe', waitingSound: 'loud', waitingSoundFile: 5, waitingSoundVolume: 'x', notifyWhenFocused: 'yes' }).alerts;
-    expect(garbage.volume).toBe(0.7);
-    expect(garbage.notifyWhenFocused).toBe(false);
-    for (const e of ALERT_EVENTS) expect(garbage.events[e]).toEqual({ notify: true, sound: off });
-    expect(migrate({ notifications: true, waitingSound: 'custom', waitingSoundFile: 'x.wav', waitingSoundVolume: 900 }).alerts.volume).toBe(1);
-  });
-
-  it('never keeps or writes the retired keys, and saved alerts win over them', () => {
-    const settings = migrate({ notifications: false, waitingSound: 'system', waitingSoundFile: 'a.wav', waitingSoundVolume: 10, notifyWhenFocused: true }) as unknown as Record<string, unknown>;
-    for (const key of ['notifications', 'waitingSound', 'waitingSoundFile', 'waitingSoundVolume', 'notifyWhenFocused']) expect(key in settings).toBe(false);
-    const mixed = migrate({ notifications: false, waitingSound: 'system', alerts: { volume: 0.2 } }).alerts;
-    expect(mixed.volume).toBe(0.2);
-    expect(mixed.events.done).toEqual(defaultAlerts().events.done);
-    // a second pass is stable
-    const again = normalizeState(JSON.parse(JSON.stringify({ ...defaultState(), settings })))!.settings;
-    expect(again.alerts).toEqual(settings.alerts);
-  });
-});
-
-describe('saved sound paths', () => {
-  it('only local absolute paths survive normalization', () => {
-    const fallback = defaultAlerts().events.done.sound;
-    const choose = (path: string) => normalizeAlerts({ events: { done: { sound: { kind: 'file', path } } } }).events.done.sound;
-    for (const ok of ['C:\\sounds\\a.wav', 'D:/s/a.mp3', '/Users/me/a.wav']) expect(choose(ok)).toEqual({ kind: 'file', path: ok });
-    for (const bad of ['a.wav', './a.wav', '..\\a.wav', '\\\\host\\share\\a.wav', '//host/share/a.wav', '\\\\?\\UNC\\h\\s\\a.wav', '\\\\?\\C:\\a.wav', '\\\\.\\pipe\\x']) expect(choose(bad)).toEqual(fallback);
-  });
-
-  it('the main-process state edit path normalizes alerts, so the renderer cannot store arbitrary values', () => {
-    const base = defaultState();
-    const controller = new StateController(base, () => {});
-    const next = JSON.parse(JSON.stringify(base));
-    next.settings.alerts.events.done.sound = { kind: 'file', path: '\\\\evil\\share\\x.wav' };
-    next.settings.alerts.events.error.sound = { kind: 'preset', id: 'nope' };
-    next.settings.alerts.volume = 99;
-    next.settings.alerts.events.attention.sound = { kind: 'file', path: 'C:\\ok\\a.wav' };
-    const { alerts } = controller.apply({ id: 'e1', base, next }).state.settings;
-    expect(alerts.events.done.sound).toEqual(defaultAlerts().events.done.sound);
-    expect(alerts.events.error.sound).toEqual(defaultAlerts().events.error.sound);
-    expect(alerts.events.attention.sound).toEqual({ kind: 'file', path: 'C:\\ok\\a.wav' });
-    expect(alerts.volume).toBe(1);
-  });
-});
-
-describe('OS notification options', () => {
-  it('are always silent: the app plays the chosen sound itself', () => {
-    expect(notificationOptions({ title: 'T', body: 'B' })).toEqual({ title: 'T', body: 'B', silent: true });
-    const long = notificationOptions({ title: 'x'.repeat(1000), body: 'y'.repeat(1000) });
-    expect(long.silent).toBe(true);
-    expect(long.title).toHaveLength(200);
   });
 });
 

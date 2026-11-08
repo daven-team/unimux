@@ -1,6 +1,6 @@
-// The renderer build of the Tauri app (1.2.0). Lives next to electron.vite.config.ts until the Electron build is removed (R1):
+// The renderer build of the Tauri app (1.2.0):
 // the same React UI from src/renderer, with
-// - window.mc over Tauri (src/renderer/src/bridge/mc.ts) loaded BEFORE the app, like the Electron preload: in the build it is
+// - window.mc over Tauri (src/renderer/src/bridge/mc.ts) loaded BEFORE the app, like 1.1.4's Electron preload: in the build it is
 //   bundled on its own as a classic script (`mc-bridge.js`, run synchronously in <head>); inside the app bundle the bundler
 //   may evaluate hoisted shared chunks before any entry code, and several modules read window.mc at load time. The dev server
 //   serves unbundled modules, so there it is a module script in front of main.tsx;
@@ -12,7 +12,7 @@ import { resolve } from 'node:path';
 import { rolldown } from 'rolldown';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import { splitMessages } from './electron.vite.messages';
+import { splitMessages } from './vite.messages';
 
 const outDir = resolve(__dirname, 'out/tauri-renderer');
 const BRIDGE_ENTRY = resolve(__dirname, 'src/renderer/src/bridge/mc.ts');

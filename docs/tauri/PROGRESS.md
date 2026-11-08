@@ -151,7 +151,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 
 | id | title | status | started | done | verified | notes |
 |---|---|---|---|---|---|---|
-| R1 | Remove Electron | todo | | | | |
+| R1 | Remove Electron | done (Windows) | 2026-11-08 | 2026-11-08 | 2026-11-08 | branch `tauri-r1-remove`: Electron sources, deps, scripts and suites removed; check:bundle clean on the local NSIS bundle; see "R1 report" |
 | R2 | Parity and performance sweep | todo | | | | |
 | R3 | macOS pass | todo | | | | needs a Mac |
 | R4 | 1.2.0 docs, i18n, release | todo | | | | user approves the test build and notes |
@@ -167,6 +167,7 @@ Updated after every merge (`npm run ipc:report`, `node scripts/porting-count.mjs
 | 2026-11-06 (wave 0b merged) | 6 / 245 (+2 fallbacks; contract 248 incl. 3 sync members) | 4 / 44 emitted | 69 / 2,146 | 0 / 44 (smoke-tauri 34/34, check-electron-compat 21/21, spike-sp1 25/25, sp5 render + close ok) |
 | 2026-11-07 (wave 1 merged) | 54 / 245 methods on 54 / 215 channels (+1 fallback) | not counted (state:changed, window, cli:changed, cell:hook, os and detached events are emitted) | 321 / 2,143 | 0 / 44 by the runner (not run at the integration); smoke-tauri 34/34, check-electron-compat 21/21; the packages ran their own verify-tauri-* checks |
 | 2026-11-07 (W1 + open path merged) | 59 / 250 methods on 59 / 220 channels (+1 fallback; contract 253 incl. 3 sync members, window 20/20) | 45 in the contract | 321 / 2,143 | smoke-tauri 34/34, check-electron-compat 21/21, verify-caption 104/104, verify-tauri-lifecycle 33/33, verify-tauri-detached and verify-tauri-os --quick all passed |
+| 2026-11-08 (R1) | 250 / 250 methods on 220 / 220 channels, 0 not-yet | 45 in the contract | 2,157 / 2,157 (100.0 percent; counted from PORTING.md, TS suites removed) | not run (fast mode) |
 
 ## 1.2.0 release gate checklist
 
@@ -1955,6 +1956,40 @@ Szacunek: około 290 dni pracy agentów + 20-25 procent na integrację, czyli re
 20. **Z osobą przy komputerze lub w VM (opcjonalnie)**: okno bramki aktualizacji nad prawdziwą aplikacją pełnoekranową (U1) i menu układów przyciągania Windows 11 po najechaniu na przycisk maksymalizacji (W7e / W1).
 21. **Opcjonalnie**: LLVM/clang na tym komputerze, jeśli chcesz sprawdzać kompilację unimux-update i unimux-app dla aarch64-apple-darwin bez Maca (ring i objc2 potrzebują kompilatora C dla tego celu).
 22. **Sprzątanie (opcjonalnie)**: worktree `.claude/worktrees/wf_3188d96a-67a-38` (gałąź `tauri-pkg-A2-fixes`, już scalona) trzyma nieużywany szkic poprawki A2; można go usunąć (`git worktree remove --force`, potem `git branch -d tauri-pkg-A2-fixes`). W `src-tauri/target/check` i `artifacts/` leżą wyniki przebiegów; można je usunąć.
+
+## R1 report: Electron removed (2026-11-08, branch `tauri-r1-remove`)
+
+### Done
+
+- Deleted: src/main, src/preload/index.ts, src/ptyhost, src/sftphost, src/dbhost, src/exechost, src/convsearch, src/sshcore (only login.ts, used by the Pty Host and an SP7 spike), src/updatesplash (index.ts and its Electron preload), electron.vite.config.ts. `electron.vite.messages.ts` (the renderer's per-language messages plugin) is now `vite.messages.ts`.
+- window.mc's method table and typed contract moved, not deleted: `src/renderer/src/bridge/mcApi.ts` and `api.d.ts` (the Tauri bridge builds window.mc from them). `test/contract/preload-channels.json` is the frozen record of what the removed preloads added (the three MessagePorts, window.updateSplash); `scripts/gen-ipc-contract.mjs` reads it (contract unchanged except its `sources`).
+- Tests: the 123 main-side suites that only tested deleted code are gone; the 33 mixed suites keep their 229 `renderer-only` cases (3 of them needed a stand-in for deleted code: conv-export reads `test/fixtures/convexport/*.export.json`, frozen from 1.1.4's exporter; state-sync-faults has a small in-test StateController; status-continuation uses the stopInfo values 1.1.4 computed). 13 suites that reached deleted code through helpers, plus ssh-packaging (electron-builder file lists), are recorded per suite at the end of test/PORTING.md. tauri-bridge and real-app-harness were adapted; git-shared and webgl-pool now check the Rust sources instead of src/main. New: test/check-bundle-contents.test.ts. Helpers removed: automationFixture, dbHarness, mcpHarness, mysqlFakeServer, nodeHost, sshKeys, sshLatencyBench / Server.
+- `scripts/porting-count.mjs` counts from PORTING.md against its historical total (`<!-- porting-total: 2157 cases in 143 files -->`) and `--check` also fails when a test imports a removed folder or a renderer-only case disappears.
+- Golden corpus: 42 files made by 1.1.4's main code are frozen (`test/golden/FROZEN.sha256`; `dump-goldens --check` fails on any change, `--refreeze` records a deliberate one); the 20 made from src/shared are still regenerated. Generator scripts that needed src/main are gone.
+- Rust tests that ran the TS reference through Node (unimux-git canonical_paths.rs, trust.rs) now check the Rust side alone (stable answers, alias resolution, the trust file round trip); the 1.1.4 comparison stays pinned by the frozen git-spelling / git-trust goldens. unimux-hostd tests/stdio.rs and the sp5_echo example take conpty.dll from src-tauri/resources/conpty/x64 instead of node_modules/node-pty.
+- Scripts deleted: patch-node-pty, fix-pty-permissions, smoke-ssh(+run), perf-check, perf-renders, bench-perf, electron-test-toasts, check-electron-compat, render-icon (Electron-based), smoke-pty, spike-sp2-safestorage, capture-caption-reference, test-hostd, ssh-latency-bench, bench-conv-search, bench-convsearch, git-paths-golden, git-trust-golden, golden-ssh-keys, mcp-bench(-events), mcp-serve, mcp-tools-size, spike-mcp-wire, status-timeline, verify-cli-detect, verify-tauri-normalize / -sessions / -claude-settings / -convsearch (all four compared with the TS reference), the node-pty / Electron files of sp5 and sp7 (sp5/run.mjs, page.ts, latency-probe.mjs and sp7/docker stay).
+- real-app.mjs has no Electron target (`--target=electron` / `MC_APP_TARGET=electron` now fail fast); its users lost their Electron branches (smoke-start, ssh-ui-lib, perf-latency, verify-cli-contract, verify-mcp-cli, verify-ssh-ui, verify-caption, bench-jank); verify-safestorage keeps the SP2-fixture mode only; verify-tauri-w3 reads the committed electron-local-storage fixture instead of recording it from the Electron build.
+- package.json: no `dependencies` any more (electron, electron-builder, electron-vite, electron-updater, node-pty, pg, pg-cursor, @types/pg*, hyparquet* removed; zod, and ssh2 / mysql2 / ioredis / @modelcontextprotocol/sdk that test servers and real-app scripts still use, are devDependencies; proper-lockfile 4.1.2 kept), no `build` section, no postinstall / icons / start / dist* / test:packaged / test:ssh-electron / test:hostd; `dev` and `build` run Tauri; new `check:bundle`. Lockfile updated with `npm install --package-lock-only`.
+- CI: ci.yml and tauri.yml lose the hostd step and ELECTRON_SKIP_BINARY_DOWNLOAD and run `npm run check:bundle -- --target <triple>` after packaging; deps-report.yml loses the Electron env.
+- `scripts/check-bundle-contents.mjs`: Windows: the files the NSIS installer installs (from the installer.nsi Tauri generates next to it, hooks included, plus the staged resources); macOS: every file of the .app. Fails on node.exe / node / libnode, *.node, *.js / *.mjs / *.cjs, node_modules, *.asar.
+- README development paragraph and the command block of docs/DEVELOPMENT.md updated.
+
+### Verified (Windows 11, 2026-11-08)
+
+- `npm run typecheck`, `npm test` (149 files, 1900 passed, 4 skipped), `npm run gen:check` (contract, 2724 message rows, goldens 20 live + 42 frozen), `node scripts/porting-count.mjs --check` (2157 / 2157, 100.0 percent).
+- `cargo test --workspace` (debug): 2678 passed, 0 failed, 8 ignored; `cargo fmt --check`; `cargo clippy -p unimux-git -p unimux-hostd -p unimux-pty --all-targets -D warnings`.
+- `npm run build:check` built; `npm run ipc:report` on it: 250/250 methods, 220/220 channels, 0 not-yet, 45 events in the contract.
+- `npm run build:release` built `unimux_1.2.0_x64-setup.exe` (15.3 MiB; not run or installed); `npm run check:bundle` on it: clean (installs unimux.exe and resources/conpty/x64/{conpty.dll, OpenConsole.exe}, nothing else).
+
+### Open issues after R1
+
+1. CLAUDE.md is not in the repository (untracked in the main checkout), so its command section was not changed here. Proposed: `npm run dev` = Tauri dev; `npm run build` = release build + installer in src-tauri/target/release/bundle; `npm run build:check` = check build for real-app checks; `npm run typecheck`, `npm test`, `npm run gen:check`, `npm run cargo -- test --workspace --manifest-path src-tauri/Cargo.toml` before a release; `npm run check:bundle`; drop `dist:win`; real-app checks run the check build (scripts/real-app.mjs, scripts/tauri-app.mjs).
+2. Frozen goldens: a deliberate change to a translation used by update-strings.json (or another frozen family) must now be edited by hand plus `--refreeze`.
+3. Rust doc comments still name some deleted TS files and goldens-*.mjs generators as their reference (history; R4 can sweep them). Header comments of a few kept mixed test files still describe their removed main-side parts.
+4. `npm run icons` is gone (render-icon.cjs needed Electron); docs/BRANDING.md and resources/branding/README.md still mention it (R4: `npm run tauri icon` or a small replacement).
+5. The 14 suites at the end of PORTING.md are mapped per area, not per case.
+6. No real-app script was run (fast mode): the scripts touched here (real-app, ssh-ui-lib, smoke-start, perf-latency, verify-cli-contract, verify-mcp-cli, verify-safestorage, verify-tauri-w3, verify-ssh-ui, verify-caption, bench-jank) are syntax-checked only; R2 runs them.
+7. The .dmg is not mounted by check:bundle (the .app inside comes from the same bundle folder); macOS CI runs the .app check.
 
 ## User feedback 2026-11-06
 
