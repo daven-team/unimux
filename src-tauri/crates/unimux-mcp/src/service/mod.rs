@@ -15,6 +15,8 @@ pub mod status;
 mod wait;
 
 #[cfg(test)]
+mod missing_cli_tests;
+#[cfg(test)]
 mod tests;
 
 use std::collections::{HashMap, HashSet};

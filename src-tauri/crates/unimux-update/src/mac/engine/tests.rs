@@ -247,6 +247,8 @@ enum Answer {
         body: Vec<u8>,
         len: usize,
     },
+    /// A body per request path (filled in once the origin is known); 404 for anything else.
+    Routes(Arc<Mutex<HashMap<String, Vec<u8>>>>),
 }
 
 struct Server {
@@ -276,7 +278,20 @@ async fn serve(answer: Answer) -> Server {
                 let head = |status: u16, len: usize| {
                     format!("HTTP/1.1 {status} X\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n").into_bytes()
                 };
+                let path = String::from_utf8_lossy(&request).split(' ').nth(1).unwrap_or("").to_string();
                 match answer {
+                    Answer::Routes(routes) => {
+                        let body = routes.lock().unwrap().get(&path).cloned();
+                        match body {
+                            Some(body) => {
+                                let _ = socket.write_all(&head(200, body.len())).await;
+                                let _ = socket.write_all(&body).await;
+                            }
+                            None => {
+                                let _ = socket.write_all(&head(404, 0)).await;
+                            }
+                        }
+                    }
                     Answer::Body(body) => {
                         let _ = socket.write_all(&head(200, body.len())).await;
                         for piece in body.chunks(64 * 1024) {
@@ -427,6 +442,8 @@ async fn downloads_verifies_the_signature_unpacks_and_stages_next_to_the_app() {
     assert_eq!(fs::read_to_string(env.bundle().with_file_name("unimux.app.new-1.2.1/Contents/MacOS/unimux")).unwrap(), "new");
     assert_eq!(progress.last().unwrap().percent, 100.0);
     assert_eq!(progress.last().unwrap().transferred, archive.len() as u64);
+    // The progress only grows while the data arrives.
+    assert!(progress.windows(2).all(|w| w[0].percent <= w[1].percent && w[0].transferred <= w[1].transferred), "{progress:?}");
     // The verified archive stays (cleanup after the swap), the unpacked copy is gone, nothing else is left.
     assert_eq!(env.names(&env.mac_dir()), ["unimux-1.2.1-mac-arm64.app.tar.gz", "update.log"]);
     assert_eq!(env.names(env.bundle().parent().unwrap()), ["unimux.app", "unimux.app.new-1.2.1"]);
@@ -960,4 +977,133 @@ async fn a_whole_update_on_a_scratch_bundle_and_its_rollback() {
     assert_eq!(env.names(env.bundle().parent().unwrap()), ["unimux.app"]);
     assert_eq!(env.names(&env.mac_dir()), ["ready", "update.log"]);
     assert!(env.log().contains("update 1.2.0 -> 1.2.1 complete"));
+}
+
+// ── the coordinator's backend (1.1.4 updater.ts on macOS, test/mac-update-state.test.ts) ─────────────────────────────
+
+struct Coordinated {
+    backend: Arc<crate::mac::MacBackend>,
+    coordinator: Arc<crate::coordinator::UpdateCoordinator>,
+    states: Arc<Mutex<Vec<crate::state::UpdateState>>>,
+    server: Server,
+}
+
+fn mac_backend(env: &Env, origin: &str) -> Arc<crate::mac::MacBackend> {
+    crate::mac::MacBackend::new(
+        env.updater(),
+        crate::mac::MacBackendOptions { client: None, dev_feed: Some(origin.to_string()), log: Arc::new(|_| {}) },
+    )
+}
+
+/// A feed of 1.2.1 and its signed archive on a loopback "development feed", the engine of `env` behind a coordinator.
+async fn coordinated(env: &mut Env) -> Coordinated {
+    use crate::coordinator::{CoordinatorOptions, UpdateCoordinator};
+    let routes = Arc::new(Mutex::new(HashMap::new()));
+    let server = serve(Answer::Routes(routes.clone())).await;
+    let archive = tar_gz_of(&[("unimux.app", "1.2.1", "com.ajzakomator.app")]);
+    let url = format!("{}/unimux-1.2.1-mac-arm64.app.tar.gz", server.origin);
+    let feed = feed("1.2.1", &url, &env.keys.sign_b64(&archive));
+    routes.lock().unwrap().insert("/latest.json".to_string(), feed.to_string().into_bytes());
+    routes.lock().unwrap().insert("/unimux-1.2.1-mac-arm64.app.tar.gz".to_string(), archive);
+    env.trusted = vec![server.origin.clone()];
+    let backend = mac_backend(env, &server.origin);
+    let states = Arc::new(Mutex::new(Vec::new()));
+    let seen = states.clone();
+    let coordinator = UpdateCoordinator::new(CoordinatorOptions::new(
+        backend.clone(),
+        Arc::new(move |s: &crate::state::UpdateState| seen.lock().unwrap().push(s.clone())),
+        crate::RELEASES_URL,
+    ));
+    Coordinated { backend, coordinator, states, server }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_mac_backend_takes_the_coordinator_from_the_feed_to_the_swap_and_reports_the_window_not_starting() {
+    use crate::coordinator::CheckReason;
+    use crate::state::Status;
+    let mut env = Env::new();
+    let c = coordinated(&mut env).await;
+    assert_eq!(c.coordinator.check(CheckReason::Startup).await.unwrap().as_deref(), Some("1.2.1"));
+    c.coordinator.download().await.unwrap();
+    let state = c.coordinator.get_state();
+    assert_eq!((state.status, state.version.as_deref(), state.portable), (Status::Ready, Some("1.2.1"), Some(false)));
+    let statuses: Vec<Status> = c.states.lock().unwrap().iter().map(|s| s.status).collect();
+    assert_eq!(statuses.first(), Some(&Status::Checking));
+    assert!(statuses.contains(&Status::Available) && statuses.contains(&Status::Downloading), "{statuses:?}");
+    assert!(c.coordinator.installable());
+    // A second look does not download again.
+    let hits = c.server.hits.load(AtomicOrdering::SeqCst);
+    c.coordinator.check(CheckReason::Background).await.unwrap();
+    c.coordinator.download().await.unwrap();
+    assert_eq!(c.server.hits.load(AtomicOrdering::SeqCst), hits + 1, "only the feed was asked again");
+    assert_eq!(c.backend.staged("1.2.1").unwrap().bundle, format!("{}.new-1.2.1", env.bundle_posix()));
+
+    // The hand-over: the staged copy is checked again and the swap for the update window comes back with the marker.
+    assert!(c.coordinator.lock_handover(Some("1.2.1")));
+    let MacInstall::Ready(plan) = c.backend.install("1.2.1").unwrap() else { panic!("refused") };
+    assert_eq!(plan.to_version, "1.2.1");
+    assert_eq!(plan.new_bundle, PathBuf::from(format!("{}.new-1.2.1", env.bundle_posix())));
+    assert!(env.mac_dir().join("pending.json").exists());
+    // The window could not be started: no marker stays, and the message is the spawn failure.
+    assert_eq!(c.backend.abandon_install(), messages::SPAWN);
+    assert!(!env.mac_dir().join("pending.json").exists());
+    // Only a version that was staged can be installed.
+    assert_eq!(c.backend.install("1.2.2").unwrap_err(), messages::VERIFY);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_app_that_cannot_replace_itself_gets_the_download_page_with_the_reason_before_and_at_the_install() {
+    use crate::coordinator::CheckReason;
+    use crate::state::Status;
+    // Owned by another user: the offer is only the download page, nothing is downloaded.
+    let mut env = Env::new();
+    let mut admin = FakeTargetFs::owned(501);
+    admin.owners.insert(env.bundle_posix(), 0);
+    env.fs = Arc::new(admin);
+    let c = coordinated(&mut env).await;
+    assert_eq!(c.coordinator.check(CheckReason::Startup).await.unwrap(), None);
+    let state = c.coordinator.get_state();
+    assert_eq!((state.status, state.portable), (Status::Available, Some(true)));
+    assert_eq!(state.url.as_deref(), Some(crate::RELEASES_URL));
+    assert_eq!(state.message.as_deref(), Some(MacRefusal::NotOwner.message()));
+    assert!(!c.coordinator.installable());
+    assert!(!c.coordinator.lock_handover(Some("1.2.1")));
+    assert_eq!(c.server.hits.load(AtomicOrdering::SeqCst), 1, "the feed only");
+
+    // Refused at the last moment (App Management): the download page with that reason; the staged copy is not used again.
+    let mut env = Env::new();
+    let c = coordinated(&mut env).await;
+    c.coordinator.check(CheckReason::Startup).await.unwrap();
+    c.coordinator.download().await.unwrap();
+    assert!(c.coordinator.lock_handover(Some("1.2.1")));
+    fs::create_dir_all(env.bundle().join("Contents/.unimux-write-probe")).unwrap();
+    assert_eq!(c.backend.install("1.2.1").unwrap(), MacInstall::Refused(MacRefusal::AppManagement));
+    c.coordinator.refuse_install("1.2.1", Some(MacRefusal::AppManagement.message().to_string()));
+    let state = c.coordinator.get_state();
+    assert_eq!((state.status, state.portable), (Status::Available, Some(true)));
+    assert_eq!(state.message.as_deref(), Some(MacRefusal::AppManagement.message()));
+    assert!(c.backend.staged("1.2.1").is_none());
+    assert!(!env.mac_dir().join("pending.json").exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_feed_with_nothing_newer_is_current_and_a_feed_without_this_mac_or_a_server_error_fails_the_look() {
+    use crate::coordinator::{Backend as _, CheckReason};
+    use crate::state::Status;
+    let mut env = Env::new();
+    env.current = "1.2.1".into();
+    let c = coordinated(&mut env).await;
+    assert_eq!(c.coordinator.check(CheckReason::Startup).await.unwrap(), None);
+    let state = c.coordinator.get_state();
+    assert_eq!((state.status, state.version.as_deref()), (Status::Current, Some("1.2.1")));
+
+    // No archive for this Mac in the feed: the engine's message.
+    let env = Env::new();
+    let routes = Arc::new(Mutex::new(HashMap::new()));
+    routes.lock().unwrap().insert("/latest.json".to_string(), br#"{"version":"1.2.1","platforms":{}}"#.to_vec());
+    let empty = serve(Answer::Routes(routes)).await;
+    assert_eq!(mac_backend(&env, &empty.origin).lookup().await.unwrap_err(), messages::NO_ASSET);
+    // A server error.
+    let failing = serve(Answer::Status(500)).await;
+    assert_eq!(mac_backend(&env, &failing.origin).lookup().await.unwrap_err(), messages::SERVER);
 }

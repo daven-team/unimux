@@ -4,11 +4,13 @@
 //! Only the swap and `finish_previous` / `mark_ready` touch the installed app; everything is plain Rust plus the macOS system
 //! tools (`ditto`, `xattr`, `plutil`, `codesign`, `open`), so the module builds and its tests run on every platform.
 
+pub mod backend;
 pub mod engine;
 pub mod plist;
 pub mod swap;
 pub mod target;
 
+pub use backend::{MacBackend, MacBackendOptions};
 pub use engine::{
     DOWNLOAD_CANCELLED, MacCheckResult, MacInstall, MacOffer, MacPreviousOutcome, MacProgress, MacStaged, MacUpdater,
     MacUpdaterDeps, append_update_log, messages,

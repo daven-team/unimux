@@ -234,11 +234,7 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     let m = manager.clone();
     r.send("install:cancel", move |call| {
         let m = m.clone();
-        async move {
-            if let Some(id) = call.arg(0).as_str() {
-                m.cancel(id);
-            }
-        }
+        async move { m.cancel_request(call.arg(0)) }
     });
 
     // ipcMain.handle('install:current'): the running install, so a window opened later attaches to it.

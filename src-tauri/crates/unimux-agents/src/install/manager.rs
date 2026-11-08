@@ -415,6 +415,13 @@ impl InstallManager {
         self.kill(&session);
     }
 
+    /// `install:cancel(id)` from the renderer: only a string id cancels; anything else is ignored.
+    pub fn cancel_request(&self, id: &Value) {
+        if let Some(id) = id.as_str() {
+            self.cancel(id);
+        }
+    }
+
     /// The pty service crashed.
     pub fn fail_active(&self) {
         let Some(session) = self.inner.lock().current.clone() else { return };

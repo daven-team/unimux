@@ -885,6 +885,99 @@ mod tests {
         }
     }
 
+    /// test/update-runtime.test.ts "reports whether the window process could be started and clears stale signals" (the
+    /// failure half; a real start is covered by scripts/verify-update-window.mjs) and the reuse rule of a staged copy.
+    #[test]
+    fn a_window_that_cannot_start_is_reported_after_the_stale_signals_were_cleared() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("data");
+        let h = sample(&data, tmp.path());
+        // Nothing to copy: nothing is started.
+        assert!(hand_over(&h).is_err());
+        fs::create_dir_all(h.app_exe.parent().unwrap()).unwrap();
+        fs::write(&h.app_exe, b"not a program").unwrap();
+        let update = data.join("update");
+        let work = update.join("work");
+        fs::create_dir_all(&work).unwrap();
+        let stale =
+            [update.join("ready"), update.join("installer-done"), work.join("shown"), work.join("abort"), work.join("heartbeat")];
+        for flag in &stale {
+            fs::write(flag, b"old").unwrap();
+        }
+        assert!(hand_over(&h).is_err(), "a file that is no program does not start");
+        assert!(stale.iter().all(|f| !f.exists()));
+        assert_eq!(attempt_version(&data).as_deref(), Some("1.2.1"));
+        // The staged copy is reused while it matches the app's executable and made again once that changed.
+        let runtime = h.updater_root.join("runtime-1.2.1");
+        fs::write(runtime.join("sentinel.txt"), b"x").unwrap();
+        stage_runtime(&h.app_exe, &runtime).unwrap();
+        assert!(runtime.join("sentinel.txt").exists());
+        fs::write(&h.app_exe, b"another build of the app").unwrap();
+        stage_runtime(&h.app_exe, &runtime).unwrap();
+        assert!(!runtime.join("sentinel.txt").exists());
+        assert_eq!(fs::read(runtime.join(RUNTIME_EXE)).unwrap(), b"another build of the app");
+    }
+
+    #[test]
+    fn waits_for_a_file_to_appear_and_gives_up_at_the_deadline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("shown");
+        let later = file.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(60));
+            fs::write(later, b"").unwrap();
+        });
+        assert!(wait_for_file(&file, Duration::from_secs(5)));
+        writer.join().unwrap();
+        let started = Instant::now();
+        assert!(!wait_for_file(&tmp.path().join("never"), Duration::from_millis(60)));
+        assert!(started.elapsed() >= Duration::from_millis(60));
+    }
+
+    /// test/update-runtime.test.ts "installInProgress" and "updateWindowAlive".
+    #[test]
+    fn an_install_is_in_progress_while_a_fresh_attempt_or_a_beating_window_says_so() {
+        let set_mtime = |path: &Path, ms: f64| {
+            let file = fs::File::options().write(true).open(path).unwrap();
+            file.set_modified(std::time::UNIX_EPOCH + Duration::from_millis(ms as u64)).unwrap();
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("data");
+        let work = data.join("update").join("work");
+        let now = unimux_core::time::now_ms() as f64;
+        // No attempt.
+        assert!(!install_in_progress(&data, "0.5.7", 60_000.0, now));
+        assert!(!update_window_alive(&data, now));
+        fs::create_dir_all(&work).unwrap();
+        fs::write(work.join("config.json"), r#"{"version":"0.5.8"}"#).unwrap();
+        set_mtime(&work.join("config.json"), now);
+        // A fresh attempt for another version; not for the target version itself, not once it is stale.
+        assert!(install_in_progress(&data, "0.5.7", 60_000.0, now));
+        assert!(!install_in_progress(&data, "0.5.8", 60_000.0, now));
+        assert!(!install_in_progress(&data, "0.5.7", 60_000.0, now + 120_000.0));
+        // A beating update window keeps a slow install trusted, up to the maximum age.
+        fs::write(work.join("heartbeat"), b"").unwrap();
+        set_mtime(&work.join("heartbeat"), now + 120_000.0);
+        assert!(install_in_progress(&data, "0.5.7", 60_000.0, now + 120_000.0));
+        assert!(!install_in_progress(&data, "0.5.7", 60_000.0, now + 120_000.0 + 61_000.0));
+        let late = now + HEARTBEAT_MAX_AGE_MS + 1000.0;
+        set_mtime(&work.join("heartbeat"), late);
+        assert!(!install_in_progress(&data, "0.5.7", 60_000.0, late));
+        // The installer, the new app or an abort ended it.
+        for flag in [data.join("update").join("installer-done"), data.join("update").join("ready"), work.join("abort")] {
+            fs::write(&flag, b"").unwrap();
+            assert!(!install_in_progress(&data, "0.5.7", 60_000.0, now));
+            fs::remove_file(&flag).unwrap();
+            assert!(install_in_progress(&data, "0.5.7", 60_000.0, now));
+        }
+        // updateWindowAlive: only while the heartbeat is fresh.
+        set_mtime(&work.join("heartbeat"), now);
+        assert!(update_window_alive(&data, now));
+        assert!(!update_window_alive(&data, now + 60_000.0));
+        fs::remove_file(work.join("heartbeat")).unwrap();
+        assert!(!update_window_alive(&data, now));
+    }
+
     #[test]
     fn directory_bytes_counts_files_in_subfolders() {
         let tmp = tempfile::tempdir().unwrap();

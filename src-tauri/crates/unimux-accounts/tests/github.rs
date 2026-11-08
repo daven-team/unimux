@@ -1269,3 +1269,225 @@ async fn publishing_creates_the_repository_adds_origin_and_pushes() {
     assert_eq!(publisher.handle(None, &json!({}), &[]).await["code"], "gone");
     assert_eq!(publisher.handle(Some(&fresh), &json!({"name": "x"}), &[]).await["code"], "invalid");
 }
+
+/// test/github-publish.test.ts "publishing": GitHub's refusal is said and a stored token it no longer accepts is forgotten; a failed push or remote keeps the address of the repository that now
+/// exists; one publish per repository at a time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn publishing_failures_keep_the_address_forget_a_refused_stored_token_and_run_once_per_repository() {
+    use unimux_accounts::github::publish::{PublishRequest, Publisher, publish_err};
+    let req = |name: &str| PublishRequest {
+        request_id: format!("req-{name}-000001"),
+        name: name.into(),
+        private: true,
+        worktree: None,
+    };
+    let lab = PublishLab::new();
+
+    // A stored token GitHub refuses (401) is forgotten; a taken name and no network are said as such; nothing is added.
+    let s = setup(Gh::Missing, "", vec![ok(401, json!({"message": "Bad credentials"}))]);
+    s.store.set(TOKEN, Some("ajzak")).unwrap();
+    let publisher = Publisher::new(lab.git(), s.auth.clone());
+    let work = lab.repo("refused", 1);
+    assert_eq!(publisher.publish(&work, &work, &req("refused")).await["code"], "auth");
+    assert_eq!(s.store.get(), None);
+    let taken =
+        setup(Gh::Token(GH_TOKEN), "", vec![ok(422, json!({"errors": [{"message": "name already exists on this account"}]}))]);
+    assert_eq!(Publisher::new(lab.git(), taken.auth.clone()).publish(&work, &work, &req("refused")).await["code"], "exists");
+    let offline = setup(Gh::Token(GH_TOKEN), "", vec![Answer::Offline]);
+    assert_eq!(Publisher::new(lab.git(), offline.auth.clone()).publish(&work, &work, &req("refused")).await["code"], "network");
+    assert_eq!(lab.sh(Path::new(&work), &["remote"]).trim(), "");
+
+    // The push is refused by the server: push-failed with git's text and the address of the created repository.
+    let hook = lab.dir.join("demo.git").join("hooks").join("pre-receive");
+    std::fs::write(&hook, "#!/bin/sh\necho 'Permission denied for this test' >&2\nexit 1\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let s = setup(Gh::Token(GH_TOKEN), "", vec![created()]);
+    let pushing = lab.repo("pushing", 1);
+    let answer = Publisher::new(lab.git(), s.auth.clone()).publish(&pushing, &pushing, &req("pushing")).await;
+    assert_eq!(answer["code"], "push-failed", "{answer}");
+    assert_eq!(answer["error"], publish_err::PUSH_FAILED);
+    assert_eq!(answer["url"], "https://github.com/ajzak/demo");
+    assert!(answer["detail"].as_str().unwrap().contains("Permission denied for this test"), "{answer}");
+    std::fs::remove_file(&hook).unwrap();
+
+    // origin cannot be added (the configuration is locked): remote-failed, with the address.
+    let s = setup(Gh::Token(GH_TOKEN), "", vec![created()]);
+    let locked = lab.repo("locked", 1);
+    std::fs::write(Path::new(&locked).join(".git").join("config.lock"), "").unwrap();
+    let answer = Publisher::new(lab.git(), s.auth.clone()).publish(&locked, &locked, &req("locked")).await;
+    assert_eq!(answer["code"], "remote-failed", "{answer}");
+    assert_eq!(answer["error"], publish_err::REMOTE_FAILED);
+    assert_eq!(answer["url"], "https://github.com/ajzak/demo");
+
+    // Two publishes of one repository at once: the second is refused as busy, the first completes.
+    let s = setup(Gh::Token(GH_TOKEN), "", vec![created()]);
+    let publisher = Publisher::new(lab.git(), s.auth.clone());
+    let once = lab.repo("once", 1);
+    let request = req("once");
+    let (first, second) = tokio::join!(publisher.publish(&once, &once, &request), publisher.publish(&once, &once, &request));
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(second, json!({"ok": false, "code": "busy", "error": publish_err::BUSY}));
+    assert_eq!(s.fetch.calls().len(), 1);
+}
+
+// ---------- the header with real git (test/github-git.test.ts) ----------
+
+/// An HTTP "GitHub" that refuses every request (401 + Basic challenge) and records the Authorization header of each.
+fn refusing_git_server() -> (String, Arc<Mutex<Vec<Option<String>>>>) {
+    use std::io::{Read as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            let mut head = Vec::new();
+            let mut buf = [0u8; 4096];
+            while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => head.extend_from_slice(&buf[..n]),
+                }
+            }
+            let text = String::from_utf8_lossy(&head).into_owned();
+            let auth = text.lines().find_map(|l| {
+                let (name, value) = l.split_once(':')?;
+                name.trim().eq_ignore_ascii_case("authorization").then(|| value.trim().to_string())
+            });
+            log.lock().push(auth);
+            let _ = stream.write_all(
+                b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"github\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+        }
+    });
+    (origin, seen)
+}
+
+/// The sign-in as git's network runs see it: the real header environment; a refusal is what git says without a prompt.
+#[derive(Debug)]
+struct HeaderAuth {
+    env: Vec<(String, String)>,
+    retry: bool,
+    reports: std::sync::atomic::AtomicUsize,
+}
+
+impl unimux_git::RemoteAuth for HeaderAuth {
+    fn env(&self) -> Option<Vec<(String, String)>> {
+        Some(self.env.clone())
+    }
+    fn auth_refused(&self, message: &str) -> bool {
+        self.retry && message.contains("could not read Username")
+    }
+    fn token_refused(&self, message: &str) -> bool {
+        self.auth_refused(message)
+    }
+    fn refused(&self) {
+        self.reports.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// test/github-git.test.ts: the push carries the token as one header in git's environment and no command line ever holds it
+/// (every git process is traced with GIT_TRACE2_EVENT); a refused header is retried once without it and its owner told; and
+/// while the header is sent git neither asks the user's credential helper nor makes it erase its credential (without the
+/// helper reset it does both).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn git_sends_the_header_from_its_environment_only_retries_without_it_and_leaves_the_users_helper_alone() {
+    use base64::Engine as _;
+    let (origin, seen) = refusing_git_server();
+    let tmp = tempfile::Builder::new().prefix("mc-ghgit-rs-").tempdir().unwrap();
+    let dir = PathBuf::from(unimux_git::paths::realpath_native(&tmp.path().to_string_lossy()).unwrap());
+    let slash = |p: &Path| p.to_string_lossy().replace('\\', "/");
+    let helper_log = dir.join("helper.log");
+    let trace = dir.join("trace2.json");
+    let global = dir.join("global.gitconfig");
+    std::fs::write(
+        &global,
+        format!(
+            "[user]\n\tname = Tester\n\temail = tester@example.com\n[init]\n\tdefaultBranch = main\n[url \"{origin}/\"]\n\tinsteadOf = https://github.com/\n[credential]\n\thelper = \"!f() {{ echo \\\"$1\\\" >> '{log}'; if [ \\\"$1\\\" = get ]; then echo username=user; echo password=secret; fi; cat >/dev/null; }}; f\"\n",
+            log = slash(&helper_log)
+        ),
+    )
+    .unwrap();
+    let mut env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> = std::env::vars_os().collect();
+    for (k, v) in [
+        ("GIT_CONFIG_GLOBAL", global.clone().into_os_string()),
+        ("GIT_CONFIG_NOSYSTEM", "1".into()),
+        ("HOME", dir.clone().into_os_string()),
+        ("USERPROFILE", dir.clone().into_os_string()),
+        ("GIT_TRACE2_EVENT", trace.clone().into_os_string()),
+    ] {
+        env.retain(|key, _| !key.to_string_lossy().eq_ignore_ascii_case(k));
+        env.insert(k.into(), v);
+    }
+    let sh = |cwd: &Path, args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .env_clear()
+            .envs(&env)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    let work = dir.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    sh(&work, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(work.join("file.txt"), "line\n").unwrap();
+    sh(&work, &["add", "."]);
+    sh(&work, &["commit", "-q", "-m", "first"]);
+    let w = work.to_string_lossy().into_owned();
+    let asked = || std::fs::read_to_string(&helper_log).unwrap_or_default().lines().map(str::to_string).collect::<Vec<_>>();
+    let header = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{TOKEN}"));
+    let token_env = git_env::github_git_env(TOKEN, &origin);
+    let auth = |env: Vec<(String, String)>, retry: bool| {
+        Arc::new(HeaderAuth { env, retry, reports: std::sync::atomic::AtomicUsize::new(0) })
+    };
+    let git_with = |auth: Option<Arc<HeaderAuth>>| {
+        unimux_git::Git::new(unimux_git::GitOptions {
+            env: Some(env.clone()),
+            remote_auth: auth.map(|a| a as Arc<dyn unimux_git::RemoteAuth>),
+            ..Default::default()
+        })
+    };
+
+    // Publishing: origin is added and the push carries the header; GitHub refuses, git cannot prompt, the helper is untouched.
+    let git = git_with(None);
+    let pushed = git.publish_push(&w, "req-push-000001", DEMO_URL, "main", token_env.clone(), Some(&w)).await.unwrap();
+    assert!(!pushed.pushed);
+    assert!(pushed.message.contains("could not read Username"), "{}", pushed.message);
+    assert_eq!(*seen.lock(), [Some(format!("basic {header}"))]);
+    assert_eq!(asked(), Vec::<String>::new());
+    let traced = std::fs::read_to_string(&trace).unwrap();
+    assert!(traced.contains("\"push\""), "every git process is traced");
+    assert!(!traced.contains(TOKEN) && !traced.contains(&header), "no command line holds the token");
+
+    // A fetch: the header first; refused, the same fetch once more without it (the user's helper gets its try), owner told.
+    seen.lock().clear();
+    let signed = auth(token_env.clone(), true);
+    let git = git_with(Some(signed.clone()));
+    assert!(git.fetch(&w, "req-fetch-000001", Some(&w)).await.is_err());
+    assert_eq!(signed.reports.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let requests = seen.lock().clone();
+    assert_eq!(requests[0], Some(format!("basic {header}")));
+    assert!(requests.len() > 1 && requests[1..].iter().all(|a| a.as_deref() != Some(&format!("basic {header}"))), "{requests:?}");
+    assert_eq!(asked(), ["get", "erase"], "only the run without the header asked the helper");
+
+    // The check of the check: without the helper reset git asks the helper and makes it erase a credential it never sent.
+    std::fs::remove_file(&helper_log).unwrap();
+    let mut no_reset = token_env.clone();
+    for (k, v) in no_reset.iter_mut() {
+        if k == "GIT_CONFIG_COUNT" {
+            *v = "1".into();
+        }
+    }
+    let git = git_with(Some(auth(no_reset, false)));
+    assert!(git.fetch(&w, "req-fetch-000002", Some(&w)).await.is_err());
+    assert_eq!(asked(), ["get", "erase"]);
+    assert!(!std::fs::read_to_string(&trace).unwrap().contains(TOKEN));
+}

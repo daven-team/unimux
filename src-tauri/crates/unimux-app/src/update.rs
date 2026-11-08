@@ -3,8 +3,8 @@
 //! main window, the window of the status bar button, and the hand-over: lock, the U2 update window started and visible, then
 //! the full W6 wind-down (state saved) and the exit; the window runs the installer once this process is gone.
 //!
-//! macOS has no in-place engine yet (U5): an update there is offered as the download page only, like a 1.1.4 app that
-//! cannot replace itself.
+//! macOS (U5): the coordinator runs on the macOS engine (`unimux_update::mac::MacBackend`); the hand-over gets the bundle swap
+//! from it, and the update window swaps the bundle instead of running an installer.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
@@ -18,22 +18,24 @@ use tokio_util::sync::CancellationToken;
 use unimux_core::VERSION;
 use unimux_core::time::now_ms;
 use unimux_update::coordinator::{
-    BoxFut, CheckReason, CoordinatorOptions, INSTALL_FAILED, Manual, Unsubscribe, UpdateCoordinator, UpdateError,
+    Backend, BoxFut, CheckReason, CoordinatorOptions, INSTALL_FAILED, Unsubscribe, UpdateCoordinator, UpdateError,
 };
 use unimux_update::gate::{
     self, GateDeps, GateEnv, GateHandle, GateOptions, GateResult, GateTimings, GateView, HideFn, UpdateMode, UpdateUiGuard,
     UpdateUiOwner,
 };
 use unimux_update::legacy;
+use unimux_update::mac::{
+    MacBackend, MacBackendOptions, MacInstall, MacPreviousOutcome, MacUpdater, MacUpdaterDeps, messages as mac_messages,
+};
 use unimux_update::net::{NetBackend, NetBackendOptions};
+use unimux_update::schedule::{self, CHECK_EVERY, FIRST_CHECK};
 use unimux_update::state::{Status, UpdateState};
 use unimux_update::window as uw;
 
 use crate::context::AppContext;
 use crate::update_gate::{GateTexts, GateWindow};
 
-const CHECK_EVERY: Duration = Duration::from_secs(30 * 60);
-const FIRST_CHECK: Duration = Duration::from_secs(8);
 const UNAVAILABLE: &str = "Aktualizacje są dostępne w zainstalowanej aplikacji.";
 /// How long the gate waits for the update window of the update that just finished before anything of this start appears.
 const UPDATE_WINDOW_GONE_WAIT: Duration = Duration::from_secs(4);
@@ -46,6 +48,9 @@ pub struct UpdateService {
     ctx: Weak<AppContext>,
     pub coordinator: Arc<UpdateCoordinator>,
     backend: Arc<NetBackend>,
+    /// macOS (U5): the engine behind the coordinator (download, verify, stage next to the app, the bundle swap plan); None
+    /// elsewhere, where [`UpdateService::backend`] serves the coordinator.
+    mac: Option<Arc<MacBackend>>,
     /// The installed app, or a development feed (MC_UPDATE_FEED with dev-overrides).
     active: bool,
     portable: bool,
@@ -87,11 +92,35 @@ impl UpdateService {
             public_key: overrides.update_pubkey.clone().unwrap_or_else(|| unimux_update::UPDATER_PUBLIC_KEY.to_string()),
             current_version: VERSION.to_string(),
             download_dir: uw::updater_root().join("pending"),
-            // U5: no macOS engine yet, so a Mac gets the download page (with no reason line, like a portable build).
-            manual: cfg!(target_os = "macos").then(Manual::default),
+            manual: None,
             log: log.clone(),
             download_stall: unimux_update::net::DOWNLOAD_STALL,
         });
+        // macOS (U5, 1.1.4's macUpdate engine behind the same coordinator): the `darwin-<arch>` entry of latest.json, the
+        // signed archive unpacked and staged next to the app, the download page with the reason when the app cannot replace
+        // itself.
+        let mac = cfg!(target_os = "macos").then(|| {
+            let extra = overrides
+                .update_feed
+                .as_deref()
+                .and_then(|f| unimux_net::Url::parse(f).ok())
+                .map(|u| vec![u.origin().ascii_serialization()])
+                .unwrap_or_default();
+            let mut deps = MacUpdaterDeps::for_app(&ctx.data_dir, VERSION, unimux_core::PACKAGED, extra);
+            if let Some(key) = &overrides.update_pubkey {
+                deps.public_key = key.clone();
+            }
+            let sink = log.clone();
+            deps.log = Some(Arc::new(move |line: &str| sink(&format!("mac update: {line}"))));
+            MacBackend::new(
+                MacUpdater::new(deps),
+                MacBackendOptions { client: None, dev_feed: overrides.update_feed.clone(), log: log.clone() },
+            )
+        });
+        let coordinator_backend: Arc<dyn Backend> = match &mac {
+            Some(mac) => mac.clone(),
+            None => backend.clone(),
+        };
         Arc::new_cyclic(|me: &Weak<UpdateService>| {
             let weak_ctx = Arc::downgrade(ctx);
             let me_emit = me.clone();
@@ -104,7 +133,7 @@ impl UpdateService {
                 }
             });
             let o = CoordinatorOptions {
-                backend: backend.clone(),
+                backend: coordinator_backend,
                 emit,
                 portable: Arc::new(move || portable),
                 releases_url: unimux_update::RELEASES_URL.to_string(),
@@ -118,6 +147,7 @@ impl UpdateService {
                 ctx: Arc::downgrade(ctx),
                 coordinator: UpdateCoordinator::new(o),
                 backend,
+                mac,
                 active,
                 portable,
                 ui: UpdateUiGuard::default(),
@@ -215,24 +245,29 @@ impl UpdateService {
         if self.started.swap(true, Ordering::SeqCst) || !self.active {
             return;
         }
+        // macOS: the previous update was rolled back or never took effect (settled at start, before the gate). 1.1.4's
+        // previousMacUpdate + recordUpdateFailure: the status bar shows the failure until the next check, and that version is
+        // not downloaded again in this run (its update-gate.json record was written at start).
+        if self.mac.is_some()
+            && let MacPreviousOutcome::Failed { version } = unimux_update::mac::outcome_at_start()
+        {
+            self.coordinator.block(Some(&version));
+            let mut failed = UpdateState::with_version(Status::Error, version);
+            failed.message = Some(mac_messages::ROLLED_BACK.to_string());
+            self.coordinator.set_status(failed);
+        }
         let me = Arc::downgrade(self);
-        let timers = tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(FIRST_CHECK).await;
-            if let Some(svc) = me.upgrade()
-                && now_ms() as f64 - svc.coordinator.last_check_at() > 60_000.0
-            {
-                svc.check_for_updates(CheckReason::Background).await;
+        let timers = tauri::async_runtime::spawn(schedule::background_checks(FIRST_CHECK, CHECK_EVERY, move |first| {
+            let me = me.clone();
+            async move {
+                let Some(svc) = me.upgrade() else { return false };
+                // The startup gate has just looked: the first background check is skipped.
+                if !first || now_ms() as f64 - svc.coordinator.last_check_at() > 60_000.0 {
+                    svc.check_for_updates(CheckReason::Background).await;
+                }
+                true
             }
-            let mut every = tokio::time::interval(CHECK_EVERY);
-            // 1.1.4's setInterval fired once after a sleep or hibernation; Burst would run one check per missed half hour.
-            every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            every.tick().await;
-            loop {
-                every.tick().await;
-                let Some(svc) = me.upgrade() else { return };
-                svc.check_for_updates(CheckReason::Background).await;
-            }
-        });
+        }));
         if let Some(ctx) = self.ctx() {
             let coordinator = self.coordinator.clone();
             ctx.lifecycle.on_exit(move || {
@@ -276,15 +311,53 @@ impl UpdateService {
             svc.coordinator.fail_handover(INSTALL_FAILED);
             false
         };
-        // U5 brings the macOS engine; the Mac never gets an installable offer before that (see the module comment).
-        if !cfg!(windows) {
-            return give_up(&self);
-        }
-        let Some(installer) = self.backend.artifact(&version) else {
-            ctx.crash.warn(&format!("update {version}: the downloaded installer is gone"));
-            return give_up(&self);
+        // macOS (U5): the staged bundle is checked again and `pending.json` written; the update window swaps the bundle. A
+        // deadline that already passed abandons the hand-over before anything is touched (1.1.4: install is never called).
+        let swap = match &self.mac {
+            Some(_) if deadline.is_cancelled() => return give_up(&self),
+            Some(mac) => {
+                let (engine, wanted) = (mac.clone(), version.clone());
+                match tauri::async_runtime::spawn_blocking(move || engine.install(&wanted)).await {
+                    Ok(Ok(MacInstall::Ready(plan))) => Some(*plan),
+                    Ok(Ok(MacInstall::Refused(reason))) => {
+                        // The app can no longer replace itself: the download page with the reason (refusal, not a failure).
+                        ctx.crash.warn(&format!("update {version}: install refused ({})", reason.as_str()));
+                        self.coordinator.refuse_install(&version, Some(reason.message().to_string()));
+                        return false;
+                    }
+                    Ok(Err(message)) => {
+                        self.coordinator.fail_handover(&message);
+                        return false;
+                    }
+                    Err(e) => {
+                        ctx.crash.warn(&format!("update {version}: install check failed: {e}"));
+                        return give_up(&self);
+                    }
+                }
+            }
+            None if cfg!(windows) => None,
+            None => return give_up(&self),
         };
-        let Ok(app_exe) = std::env::current_exe() else { return give_up(&self) };
+        // The window could not be started (or the caller gave up): the macOS marker goes again.
+        let undo = |svc: &UpdateService| match &svc.mac {
+            Some(mac) => {
+                svc.coordinator.fail_handover(mac.abandon_install());
+                false
+            }
+            None => give_up(svc),
+        };
+        let installer = match &swap {
+            // The window runs no installer for a bundle swap.
+            Some(_) => std::path::PathBuf::new(),
+            None => match self.backend.artifact(&version) {
+                Some(installer) => installer,
+                None => {
+                    ctx.crash.warn(&format!("update {version}: the downloaded installer is gone"));
+                    return give_up(&self);
+                }
+            },
+        };
+        let Ok(app_exe) = std::env::current_exe() else { return undo(&self) };
         let hand = uw::HandOver {
             installer,
             version: version.clone(),
@@ -296,8 +369,7 @@ impl UpdateService {
             timeout_ms: uw::INSTALL_TIMEOUT_MS,
             env: None,
             webview_dir: None,
-            // The macOS bundle swap (U5) is not wired into the coordinator yet: the Mac still only gets the download page.
-            swap: None,
+            swap,
         };
         let started = Instant::now();
         let lock = self.stage_lock.clone();
@@ -310,11 +382,11 @@ impl UpdateService {
             Ok(Ok(handed)) => handed,
             Ok(Err(e)) => {
                 ctx.crash.warn(&format!("update window failed: {e}"));
-                return give_up(&self);
+                return undo(&self);
             }
             Err(e) => {
                 ctx.crash.warn(&format!("update window failed: {e}"));
-                return give_up(&self);
+                return undo(&self);
             }
         };
         ctx.crash.info(&format!(
@@ -325,6 +397,9 @@ impl UpdateService {
         ));
         if deadline.is_cancelled() {
             uw::abort_update_window(&ctx.data_dir);
+            if let Some(mac) = &self.mac {
+                mac.abandon_install();
+            }
             return give_up(&self);
         }
         hide();
