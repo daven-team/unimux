@@ -205,7 +205,7 @@ impl PgOpenConfig {
 }
 
 /// `String(Math.floor(x))` for the numbers a timeout can be.
-fn js_floor_text(x: f64) -> String {
+pub(crate) fn js_floor_text(x: f64) -> String {
     let f = x.floor();
     if f.is_finite() && f.abs() < 1e21 {
         if f == 0.0 { "0".to_owned() } else { format!("{f:.0}") }
