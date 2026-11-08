@@ -19,7 +19,7 @@ import { Redis } from 'ioredis';
 import { verifyWorkspaceUI } from './verify-workspace-ui.mjs';
 import { scrubAppEnv } from './app-env.mjs';
 import { killTree, startTestServer, writeKnownHost } from './ssh-ui-lib.mjs';
-import { isMainPage, quitApp, requireBuild, spawnApp } from './real-app.mjs';
+import { appVersion, isMainPage, quitApp, requireBuild, spawnApp } from './real-app.mjs';
 
 const checkout = process.cwd();
 requireBuild(checkout);
@@ -881,8 +881,9 @@ try {
   // Electron does not expose Chrome's Browser window-management CDP methods.
   await cdp('Emulation.setDeviceMetricsOverride', { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: false });
   await until('!!window.mc && !!window.__mc && document.querySelectorAll(".cell").length === 5', 'the Agents grid');
-  // The README shows the version the screenshots were taken with (the release bumps package.json later).
-  const version = JSON.parse(readFileSync(join(checkout, 'package.json'), 'utf8')).version;
+  // The README shows the version the screenshots were taken with (the release bumps the version later); the Tauri app takes
+  // its version from tauri.conf.json, not package.json.
+  const version = appVersion(checkout);
   await until(`document.querySelector('.sb-version')?.textContent.includes(${JSON.stringify(`v${version}`)})`, `status bar shows v${version}`);
   console.log(`Capturing with version ${version}`);
   if (await evaluate('document.title !== "unimux" || document.querySelector(".bn-base")?.textContent !== "unimux"')) throw new Error('Expected Unimux branding');

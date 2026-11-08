@@ -38,6 +38,15 @@ if (target !== 'tauri' && target !== 'electron') throw new Error(`MC_APP_TARGET 
 export const APP_TARGET = target;
 export const isTauri = target === 'tauri';
 
+/**
+ * The version the app under test reports (its status bar): tauri.conf.json for the check build (1.2.0 on), package.json for
+ * the Electron build (1.1.4, which electron-builder took from there).
+ */
+export function appVersion(checkout = ROOT) {
+  const file = isTauri ? join(checkout, 'src-tauri', 'crates', 'unimux-app', 'tauri.conf.json') : join(checkout, 'package.json');
+  return JSON.parse(readFileSync(file, 'utf8')).version;
+}
+
 /** Throws with what to build when the app under test is missing. */
 export function requireBuild(checkout = ROOT) {
   if (isTauri) appBinary();
