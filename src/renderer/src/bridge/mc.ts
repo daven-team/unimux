@@ -87,9 +87,14 @@ async function attachPort(kind: 'sftp' | 'db'): Promise<void> {
  * already listened for it. This bridge runs in <head> before the module scripts: a port posted before they ran was lost
  * (the page then never got any DB / SFTP result).
  */
+const pageLoaded = new Promise<void>((resolve) => {
+  // readyState turns 'interactive' before the deferred module scripts run; only DOMContentLoaded comes after them. This
+  // script runs while the document is still loading, so the event is still ahead.
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => resolve(), { once: true });
+  else setTimeout(resolve, 0);
+});
 function whenPageLoaded(): Promise<void> {
-  if (document.readyState !== 'loading') return Promise.resolve();
-  return new Promise((resolve) => document.addEventListener('DOMContentLoaded', () => resolve(), { once: true }));
+  return pageLoaded;
 }
 
 /**
