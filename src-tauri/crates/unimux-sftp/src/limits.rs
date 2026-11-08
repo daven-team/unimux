@@ -138,6 +138,41 @@ pub fn posix_contains(parent: &str, child: &str) -> bool {
     c == p || c.starts_with(&if p == "/" { "/".to_string() } else { format!("{p}/") })
 }
 
+/// `posixJoin(...parts)`: joins remote path parts with "/" (a later absolute part restarts the path).
+pub fn posix_join(parts: &[&str]) -> String {
+    let mut acc = String::new();
+    for part in parts {
+        if part.is_empty() {
+            continue;
+        }
+        acc = if part.starts_with('/') || acc.is_empty() {
+            part.to_string()
+        } else {
+            format!("{}/{part}", acc.trim_end_matches('/'))
+        };
+    }
+    posix_normalize(if acc.is_empty() { "." } else { &acc })
+}
+
+/// `posixParent`: "/a/b" -> "/a", "/a" -> "/", "/" -> "/".
+pub fn posix_parent(path: &str) -> String {
+    let n = posix_normalize(path);
+    if n == "/" || !n.contains('/') {
+        return if n.starts_with('/') { "/".into() } else { ".".into() };
+    }
+    let cut = &n[..n.rfind('/').unwrap_or(0)];
+    if cut.is_empty() { "/".into() } else { cut.to_string() }
+}
+
+/// `posixBasename`.
+pub fn posix_basename(path: &str) -> String {
+    let n = posix_normalize(path);
+    if n == "/" {
+        return String::new();
+    }
+    n[n.rfind('/').map(|i| i + 1).unwrap_or(0)..].to_string()
+}
+
 /// `validRemoteName`: one remote name (no separator, not "." or ".."). Backslashes are allowed: they are ordinary
 /// characters on POSIX.
 pub fn valid_remote_name(name: &str) -> bool {
@@ -159,6 +194,15 @@ mod tests {
         assert!(posix_contains("/a", "/a/b"));
         assert!(posix_contains("/", "/x"));
         assert!(!posix_contains("/a", "/ab"));
+        assert_eq!(posix_join(&["/a/", "b"]), "/a/b");
+        assert_eq!(posix_join(&["/a", "/b", "c"]), "/b/c");
+        assert_eq!(posix_join(&["", ""]), ".");
+        assert_eq!(posix_parent("/a/b"), "/a");
+        assert_eq!(posix_parent("/a"), "/");
+        assert_eq!(posix_parent("/"), "/");
+        assert_eq!(posix_parent("a"), ".");
+        assert_eq!(posix_basename("/a/b/"), "b");
+        assert_eq!(posix_basename("/"), "");
     }
 
     #[test]

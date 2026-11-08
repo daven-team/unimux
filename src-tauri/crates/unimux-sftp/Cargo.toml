@@ -17,7 +17,7 @@ futures.workspace = true
 indexmap.workspace = true
 parking_lot.workspace = true
 russh.workspace = true
-tokio = { workspace = true, features = ["rt", "time", "sync", "io-util"] }
+tokio = { workspace = true, features = ["rt", "time", "sync", "io-util", "fs"] }
 tokio-util.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
