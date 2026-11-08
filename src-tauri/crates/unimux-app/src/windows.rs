@@ -312,6 +312,7 @@ pub(crate) fn watch_window_state(window: &WebviewWindow, ctx: Arc<AppContext>) {
         let now_shown = w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false);
         if shown.swap(now_shown, Ordering::SeqCst) != now_shown {
             ctx.events.emit(Scope::Window(w.label().to_string()), "window:shown", vec![Value::Bool(now_shown)]);
+            crate::commands::pty::engine().set_window_hidden(w.label(), !now_shown);
             if now_shown && w.label() == MAIN {
                 reapply_taskbar(&ctx);
             }

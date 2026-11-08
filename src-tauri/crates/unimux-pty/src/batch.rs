@@ -25,6 +25,10 @@ use crate::frame;
 
 pub const BULK_WINDOW: Duration = Duration::from_millis(16);
 pub const FOCUS_WINDOW: Duration = Duration::from_millis(4);
+/// Bulk and focused output of a window nobody sees (minimized or hidden, R2): every message costs a shared buffer, a page
+/// wake-up and a release call, and nothing is drawn, so a trickle (agents printing) leaves at most this often. Echoes, exits
+/// and anything over [`BATCH_NOW`] still leave at once.
+pub const HIDDEN_WINDOW: Duration = Duration::from_millis(100);
 /// A batch this large leaves at once.
 pub const BATCH_NOW: usize = 256 * 1024;
 /// Messages a window may have posted and not yet released (gated transports).
@@ -95,6 +99,8 @@ struct Inner {
     stats: BatchStats,
     last_send: Mutex<Instant>,
     dead: AtomicBool,
+    /// The window is minimized or hidden (see [`HIDDEN_WINDOW`]).
+    hidden: AtomicBool,
 }
 
 /// One window's batcher and its sender thread (ends when the batcher is dropped or stopped).
@@ -111,6 +117,7 @@ impl WindowBatcher {
             stats: BatchStats::default(),
             last_send: Mutex::new(Instant::now() - BULK_WINDOW),
             dead: AtomicBool::new(false),
+            hidden: AtomicBool::new(false),
         });
         let worker = inner.clone();
         let _ = std::thread::Builder::new().name(format!("pty-send-{label}")).spawn(move || send_loop(&worker));
@@ -119,6 +126,14 @@ impl WindowBatcher {
 
     pub fn transport_name(&self) -> &'static str {
         self.inner.transport.name()
+    }
+
+    /// The window is minimized or hidden (true) or shown again (false): see [`HIDDEN_WINDOW`]. Shown again, what waits for
+    /// the longer window leaves at once.
+    pub fn set_hidden(&self, hidden: bool) {
+        if self.inner.hidden.swap(hidden, Ordering::SeqCst) && !hidden {
+            self.flush_soon();
+        }
     }
 
     /// Queues one frame.
@@ -134,6 +149,7 @@ impl WindowBatcher {
         p.echo |= urgency == Urgency::Echo;
         let due = match urgency {
             Urgency::Now | Urgency::Echo => now,
+            Urgency::Focus | Urgency::Bulk if self.inner.hidden.load(Ordering::Relaxed) => (last + HIDDEN_WINDOW).max(now),
             Urgency::Focus => (last + FOCUS_WINDOW).max(now),
             Urgency::Bulk => (last + BULK_WINDOW).max(now),
         };
@@ -474,6 +490,28 @@ mod tests {
         b.push(KIND_DATA, "a", b"small", Urgency::Bulk);
         assert!(b.inner.pending.lock().deadline.unwrap() >= before + BULK_WINDOW - Duration::from_millis(1));
         b.push(KIND_DATA, "a", &vec![b'x'; BATCH_NOW], Urgency::Bulk);
+        assert!(b.inner.pending.lock().deadline.unwrap() <= Instant::now());
+    }
+
+    #[test]
+    fn a_hidden_window_sends_output_less_often_but_echoes_at_once() {
+        // Capped, so the deadlines can be read.
+        let (b, rx) = batcher(true);
+        for i in 0..MAX_IN_FLIGHT {
+            b.push(KIND_DATA, "a", i.to_string().as_bytes(), Urgency::Now);
+            rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        }
+        b.set_hidden(true);
+        let before = Instant::now();
+        b.push(KIND_DATA, "a", b"trickle", Urgency::Bulk);
+        assert!(b.inner.pending.lock().deadline.unwrap() >= before + HIDDEN_WINDOW - Duration::from_millis(1));
+        b.push(KIND_DATA, "a", b"focused", Urgency::Focus);
+        assert!(b.inner.pending.lock().deadline.unwrap() >= before + HIDDEN_WINDOW - Duration::from_millis(1));
+        // Shown again: what waits leaves at once.
+        b.set_hidden(false);
+        assert!(b.inner.pending.lock().deadline.unwrap() <= Instant::now());
+        b.set_hidden(true);
+        b.push(KIND_DATA, "a", b"echo", Urgency::Echo);
         assert!(b.inner.pending.lock().deadline.unwrap() <= Instant::now());
     }
 }

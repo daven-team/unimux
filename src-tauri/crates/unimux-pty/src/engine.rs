@@ -110,6 +110,8 @@ struct Inner {
     on_tap: RwLock<Option<TapHook>>,
     on_message: RwLock<Option<MessageHook>>,
     pages: AtomicU64,
+    /// Windows that are minimized or hidden now (their batchers use the longer window, also after a page reload).
+    hidden: Mutex<std::collections::HashSet<String>>,
     #[cfg(windows)]
     timer: Mutex<Option<crate::conpty::TimerResolution>>,
     counters: Counters,
@@ -339,6 +341,7 @@ impl PtyEngine {
                 on_tap: RwLock::new(None),
                 on_message: RwLock::new(None),
                 pages: AtomicU64::new(0),
+                hidden: Mutex::new(std::collections::HashSet::new()),
                 #[cfg(windows)]
                 timer: Mutex::new(None),
                 counters: Counters::default(),
@@ -538,11 +541,28 @@ impl PtyEngine {
         }
     }
 
+    /// The window `label` is minimized or hidden (true) or shown (false): its output leaves in fewer, larger messages while
+    /// nobody sees it ([`crate::batch::HIDDEN_WINDOW`]).
+    pub fn set_window_hidden(&self, label: &str, hidden: bool) {
+        {
+            let mut set = self.inner.hidden.lock();
+            if hidden {
+                set.insert(label.to_string());
+            } else {
+                set.remove(label);
+            }
+        }
+        if let Some(link) = self.inner.links.read().get(label) {
+            link.batcher.set_hidden(hidden);
+        }
+    }
+
     /// A window's page attached its pty port (load or reload): it gets the replay tail of each of its terminals.
     pub fn attach(&self, label: &str, transport: Arc<dyn Transport>) {
         let inner = &self.inner;
         let page = inner.pages.fetch_add(1, Ordering::Relaxed) + 1;
         let link = Arc::new(Link { batcher: WindowBatcher::new(label, transport), page });
+        link.batcher.set_hidden(inner.hidden.lock().contains(label));
         // Queued output of the old page is part of the replay tails the new one gets below.
         if let Some(old) = inner.links.write().insert(label.to_string(), link.clone()) {
             old.batcher.stop();

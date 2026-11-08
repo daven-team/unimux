@@ -30,7 +30,7 @@ import { onWindowShown } from '../windowShown';
 import { webviewEngine } from '../platform';
 import { finalReplaySize, replaySegments, writeReplaySegments, type ReplaySize } from '../../../shared/replay';
 import { cursorOffset, reflowedCursor, type WrapBuffer } from '../../../shared/cursorReflow';
-import { coalesceViewportSync } from '../../../shared/viewportSync';
+import { coalesceViewportSync, type ViewportUnsync } from '../../../shared/viewportSync';
 import { showsLaunchLine, StartWatch, type StartScreen } from '../../../shared/startScreen';
 
 /** The background of a cell card (--card-bg in styles.css): a local terminal draws on the card itself (1.0.7). */
@@ -38,6 +38,9 @@ export const CARD_BG = '#131313';
 
 /** Time one frame may spend fitting terminals to resized cells (see TerminalManager.runFits). */
 const FIT_BUDGET_MS = 8;
+/** Ack tick of a window nobody sees, for output below HIDDEN_ACK_BYTES per terminal (see ack). */
+const HIDDEN_ACK_MS = 100;
+const HIDDEN_ACK_BYTES = 64 * 1024;
 /** Window size changes closer together than this are a drag of the window edge (see the constructor). */
 const WINDOW_DRAG_MS = 150;
 
@@ -107,7 +110,7 @@ interface Entry {
   /** 1.0.9: bumped on every status or detail change and every keystroke: a notification's answer token names one value. */
   askEpoch: number;
   /** Undoes the per-frame scrollbar sync (viewportSync.ts) before the terminal is disposed; null when xterm has no viewport. */
-  unsyncViewport: (() => void) | null;
+  unsyncViewport: ViewportUnsync | null;
   /** 1.1.5: the start card of an agent cell (startScreen.ts) and the timer of its next decision. */
   start: StartWatch;
   startTimer: ReturnType<typeof setTimeout> | null;
@@ -259,6 +262,7 @@ class TerminalManager {
     for (const e of this.entries.values()) {
       e.host.style.display = '';
       if (e.attachedTo) this.refit(e);
+      e.unsyncViewport?.resume();
     }
     this.balanceWebgl();
     this.schedulePrewarm();
@@ -396,13 +400,23 @@ class TerminalManager {
     if (m.t !== 'data') return;
     // One message per cell per tick instead of one per output chunk.
     // Characters for the Electron host, bytes for the Tauri host (its frames say how many).
-    this.acks.set(m.id, (this.acks.get(m.id) ?? 0) + (m.bytes ?? m.data.length));
-    this.ackTimer ??= setTimeout(() => {
-      this.ackTimer = null;
-      for (const [id, chars] of this.acks) this.post({ t: 'ack', id, chars });
-      this.acks.clear();
-    }, 8);
+    const pending = (this.acks.get(m.id) ?? 0) + (m.bytes ?? m.data.length);
+    this.acks.set(m.id, pending);
+    // A window nobody sees acks a trickle (agents printing) every HIDDEN_ACK_MS: every ack is an IPC call, and with 8 busy
+    // cells in a minimized window the 8 ms tick made about 55 calls a second (R2). Anything bigger is acked at the normal pace,
+    // so a flood is never held back by the slower tick.
+    const delay = !this.windowShown && pending < HIDDEN_ACK_BYTES ? HIDDEN_ACK_MS : 8;
+    if (this.ackTimer !== null && delay < this.ackDelay) { clearTimeout(this.ackTimer); this.ackTimer = null; }
+    if (this.ackTimer === null) {
+      this.ackDelay = delay;
+      this.ackTimer = setTimeout(() => {
+        this.ackTimer = null;
+        for (const [id, chars] of this.acks) this.post({ t: 'ack', id, chars });
+        this.acks.clear();
+      }, delay);
+    }
   }
+  private ackDelay = 8;
 
   /**
    * The replay is parsed at the sizes the pty had when it was written (see shared/replay), and only then is the terminal fitted
@@ -497,7 +511,7 @@ class TerminalManager {
       id: cellId, term, fit, webgl: null, shownAt: 0, outputAt: undefined, webglChangedAt: undefined, webglBlockedUntil: undefined, webglGl: null, webglGrantedAt: -Infinity, webglLosses: 0, host, tracker: new StatusTracker(), win32: false, agent: opts.agent,
       codex: opts.codex === true, scanner: new FailureScanner(), guard: new MouseFloodGuard(), infer: new AgentInference(window.mc.platform === 'win32' && opts.remote !== true), attachedTo: null, resizeObs: null, replaying: 0, replayMarks: null, refitAfterReplay: false, ptyLive: false, lastSize: { cols: term.cols, rows: term.rows },
       parkedSelection: null, applySelection: null, remote: opts.remote === true, addon: null, askEpoch: 0,
-      unsyncViewport: coalesceViewportSync(term, host),
+      unsyncViewport: coalesceViewportSync(term, host, undefined, () => !this.windowShown),
       start: new StartWatch(), startTimer: null,
     };
     entry.tracker.setCodex(entry.codex);

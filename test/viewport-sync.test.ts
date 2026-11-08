@@ -80,3 +80,39 @@ describe('coalesceViewportSync', () => {
     expect(coalesceViewportSync({ _core: { _viewport: { _sync() {} } } }, new EventTarget())).toBeNull();
   });
 });
+
+describe('coalesceViewportSync while hidden (R2)', () => {
+  it('schedules no sync while hidden and runs one when resumed', () => {
+    const calls: unknown[][] = [];
+    const vp = {
+      _latestYDisp: undefined as number | undefined,
+      _sync(...args: unknown[]) { calls.push(['sync', ...args]); },
+      queueSync(ydisp?: number) { calls.push(['queueSync', ydisp, this._latestYDisp]); },
+      scrollLines() {},
+      scrollToLine() {},
+    };
+    const queued = new Map<number, () => void>();
+    let next = 0;
+    const frames: FrameScheduler = { request: (cb) => { queued.set(++next, cb); return next; }, cancel: (id) => { queued.delete(id); } };
+    let hidden = true;
+    const undo = coalesceViewportSync({ _core: { _viewport: vp } }, new EventTarget(), frames, () => hidden)!;
+    for (let i = 0; i < 20; i++) { vp._sync(); vp.queueSync(); }
+    vp.queueSync(42);
+    expect(queued.size).toBe(0);
+    expect(calls).toEqual([]);
+    expect(vp._latestYDisp).toBe(42);
+    hidden = false;
+    undo.resume();
+    expect(calls).toEqual([['queueSync', undefined, 42]]);
+    // Nothing skipped since: resume does nothing.
+    undo.resume();
+    expect(calls).toHaveLength(1);
+    // Shown: xterm's queued sync and the folded one work as before.
+    vp.queueSync(3);
+    vp._sync();
+    expect(calls[1]).toEqual(['queueSync', 3, 42]);
+    expect(queued.size).toBe(1);
+    undo();
+    expect(Object.prototype.hasOwnProperty.call(vp, 'queueSync') && vp.queueSync.name).toBe('queueSync');
+  });
+});
