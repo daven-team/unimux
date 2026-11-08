@@ -12,10 +12,17 @@
 //! - [`sessions`] (H4): past conversations of a project and its worktrees (`sessions:list`), the Codex session guess of
 //!   `codex:bind`.
 
+//! - [`install`] (H6): the guided install of the CLIs in an `install:` terminal.
+//! - [`delivery`] (H6): `codex queue` delivery to a running Codex session.
+//! - [`prompt`] (H6): the request / answer repairs of `agents:prompt`.
+
 pub mod cell_files;
 pub mod cli;
 pub mod context;
 pub mod conv;
+pub mod delivery;
 pub mod fsstat;
 pub mod hooks;
+pub mod install;
+pub mod prompt;
 pub mod sessions;

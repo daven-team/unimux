@@ -447,6 +447,53 @@ Rows keep the exact case name (the counter matches them). Rust tests are named `
 | cli-ipc | validates the CLI id of a recheck | unimux-agents cli::ipc::tests::validates_the_cli_id_of_a_recheck | ported |
 | cli-ipc | shares a running recheck between repeated requests | unimux-agents cli::ipc::tests::shares_a_running_recheck_between_repeated_requests | ported |
 | cli-ipc | opens only allow-listed documentation, never an address from the renderer | unimux-agents cli::ipc::tests::opens_only_allow_listed_documentation_never_an_address_from_the_renderer | ported |
+| cli-ipc | passes the resolved command and PATH without changing how the message travels | unimux-agents delivery::tests::reports_a_failure_without_the_prompt_and_passes_the_detected_binary_and_path | ported |
+| agent-delivery | passes untrusted message text as data, without interpolating it into shell source | unimux-agents delivery::tests::passes_untrusted_message_text_as_data_without_interpolating_it_into_shell_source | ported |
+| agent-delivery | starts a native codex.exe directly and reaches an npm shim through its PowerShell script with the policy bypassed | unimux-agents delivery::tests::starts_a_native_codex_exe_directly_and_reaches_an_npm_shim_through_its_powershell_script | ported |
+| agent-delivery | reports a queue failure without leaking prompts or credentials | unimux-agents delivery::tests::reports_a_failure_without_the_prompt_and_passes_the_detected_binary_and_path | ported |
+| cli-install | lists only the methods that can work, with the exact command per shell | unimux-agents install::manager::tests::lists_only_the_methods_that_can_work_with_the_exact_command_per_shell | ported |
+| cli-install | offers only the native installer when nothing else is detectable, and wraps it for cmd | unimux-agents install::manager::tests::offers_only_the_native_installer_when_nothing_else_is_detectable_and_wraps_it_for_cmd | ported |
+| cli-install | probes the login shell once on POSIX and offers brew and npm from it | unimux-agents install::manager::tests::probes_the_login_shell_once_on_posix_and_offers_brew_and_npm_from_it | ported |
+| cli-install | falls back to the native installer on macOS and to nothing on Linux when the probe fails | unimux-agents install::manager::tests::falls_back_to_the_native_installer_on_macos_and_to_nothing_on_linux_when_the_probe_fails | ported |
+| cli-install | refreshes the prerequisites after the cache expired | unimux-agents install::manager::tests::refreshes_the_prerequisites_after_the_cache_expired | ported |
+| cli-install | rejects an unknown CLI | unimux-agents install::manager::tests::rejects_an_unknown_cli | ported |
+| cli-install | refuses hostile and impossible requests without spawning anything | unimux-agents install::manager::tests::refuses_hostile_and_impossible_requests_without_spawning_anything | ported |
+| cli-install | refuses a method whose prerequisite is missing | unimux-agents install::manager::tests::refuses_a_method_whose_prerequisite_is_missing | ported |
+| cli-install | ignores extra fields, so a renderer-supplied command is never used | unimux-agents install::manager::tests::ignores_extra_fields_so_a_renderer_supplied_command_is_never_used | ported |
+| cli-install | types the command with its end marker, in a clean environment with the refreshed PATH | unimux-agents install::manager::tests::types_the_command_with_its_end_marker_in_a_clean_environment_with_the_refreshed_path | ported |
+| cli-install | uses the shell-specific marker for cmd and POSIX shells | unimux-agents install::manager::tests::uses_the_shell_specific_marker_for_cmd_and_posix_shells | ported |
+| cli-install | honours the unpackaged-build override for the typed text only | unimux-agents install::manager::tests::honours_the_unpackaged_build_override_for_the_typed_text_only | ported |
+| cli-install | reports a spawn failure and releases the claim | unimux-agents install::manager::tests::reports_a_spawn_failure_and_releases_the_claim | ported |
+| cli-install | succeeds when the marker arrives (split across chunks) and the detector finds the CLI | unimux-agents install::manager::tests::succeeds_when_the_marker_arrives_split_across_chunks_and_the_detector_finds_the_cli | ported |
+| cli-install | fails with a mapped reason on a non-zero exit, even if the detector says missing | unimux-agents install::manager::tests::fails_with_a_mapped_reason_on_a_non_zero_exit | ported |
+| cli-install | maps a PowerShell failure (marker 1) with network text | unimux-agents install::manager::tests::fails_with_a_mapped_reason_on_a_non_zero_exit (curl text, exit 22); the network texts per class in install::shared::tests::failure_classification | partial |
+| cli-install | reports "installed but not on PATH" with the expected directory when the command exited cleanly | unimux-agents install::manager::tests::reports_installed_but_not_on_path_and_a_shell_exit | ported |
+| cli-install | treats the shell exiting on its own as the command result | unimux-agents install::manager::tests::reports_installed_but_not_on_path_and_a_shell_exit | ported |
+| cli-install | turns a spawn error of the host into a generic failure | unimux-agents install::manager::tests::reports_installed_but_not_on_path_and_a_shell_exit | ported |
+| cli-install | times out after 10 minutes, kills the terminal and reports timeout | unimux-agents install::manager::tests::times_out_after_10_minutes_kills_the_terminal_and_reports_timeout | ported |
+| cli-install | succeeds at the time limit when the CLI is there after all | unimux-agents install::manager::tests::succeeds_at_the_time_limit_when_the_cli_is_there_after_all | ported |
+| cli-install | cancel kills the process tree and the pty, emits nothing and ignores late output | unimux-agents install::manager::tests::cancel_kills_the_process_tree_and_the_pty_emits_nothing_and_ignores_late_output | ported |
+| cli-install | cancelling while the detector re-check runs drops the result | unimux-agents install::manager::tests::cancelling_while_the_detector_re_check_runs_drops_the_result | ported |
+| cli-install | allows only one install at a time and a new one after the first ended | unimux-agents install::manager::tests::allows_only_one_install_at_a_time_and_a_new_one_after_the_first_ended | ported |
+| cli-install | refuses a concurrent start that arrives while prerequisites are still being probed | unimux-agents install::manager::tests::allows_only_one_install_at_a_time_and_a_new_one_after_the_first_ended | ported |
+| cli-install | ignores messages of other terminals and arriving without a session | unimux-agents install::manager::tests::ignores_messages_of_other_terminals_and_arriving_without_a_session | ported |
+| cli-install | fails the active install when the pty host crashed | unimux-agents install::manager::tests::fails_the_active_install_on_a_crash_and_kills_on_dispose | ported |
+| cli-install | kills the terminal on dispose (window closed) without a state | unimux-agents install::manager::tests::fails_the_active_install_on_a_crash_and_kills_on_dispose | ported |
+| cli-install | finishes after a grace period when the detector sees a verified CLI but the command never returns | unimux-agents install::manager::tests::finishes_after_a_grace_period_when_the_detector_sees_a_verified_cli | ported |
+| cli-install | lets the marker win inside the grace period | unimux-agents install::manager::tests::lets_the_marker_win_inside_the_grace_period_and_needs_a_verified_version | ported |
+| cli-install | does not count a found binary without a verified version as early success | unimux-agents install::manager::tests::lets_the_marker_win_inside_the_grace_period_and_needs_a_verified_version | ported |
+| cli-install | polls the detector without invalidating its caches | unimux-agents install::manager::tests::finishes_after_a_grace_period_when_the_detector_sees_a_verified_cli | ported |
+| cli-install | answers options only for a known CLI | unimux-agents install::manager::tests::rejects_an_unknown_cli (the app handler answers null for None, not unit-tested) | partial |
+| cli-install | forwards only cli and method of a start request | unimux-agents install::manager::tests::ignores_extra_fields_so_a_renderer_supplied_command_is_never_used | ported |
+| cli-install | cancels only with a string id | unimux-app commands::agents::install::register (string check in the handler, not unit-tested) | partial |
+| cli-install | ends as aborted when the user hits Ctrl+C and no marker follows, instead of waiting 10 minutes | unimux-agents install::manager::tests::ends_as_aborted_when_the_user_hits_ctrl_c_and_no_marker_follows | ported |
+| cli-install | lets a marker that still arrives after Ctrl+C decide (cmd keeps running the line) | unimux-agents install::manager::tests::lets_a_marker_that_still_arrives_after_ctrl_c_decide | ported |
+| cli-install | succeeds after Ctrl+C when the CLI turns out to be installed | unimux-agents install::manager::tests::lets_a_marker_that_still_arrives_after_ctrl_c_decide | ported |
+| cli-install | ignores an interrupt of another terminal or without a session | unimux-agents install::manager::tests::ignores_messages_of_other_terminals_and_arriving_without_a_session (tap only) | partial |
+| cli-install | does not finish on half of a multi-digit exit code | unimux-agents install::manager::tests::does_not_finish_on_half_of_a_multi_digit_exit_code | ported |
+| cli-install | exposes the running install so a window opened later attaches to it | unimux-agents install::manager::tests::exposes_the_running_install_so_a_window_opened_later_attaches_to_it | ported |
+| cli-install | probes the tools with the shell the cells run (settings.shell) | unimux-agents install::manager::tests::probes_the_tools_with_the_shell_the_cells_run | ported |
+| cli-install | answers with the manager's running install | unimux-agents install::manager::tests::exposes_the_running_install_so_a_window_opened_later_attaches_to_it | ported |
 | conv-search | folds case and Polish diacritics without changing the length | unimux-agents conv::text::tests::folds_like_the_ts_reference_test; unimux-agents/tests/conv_golden.rs::fold_of_every_code_unit_matches | ported |
 | conv-search | splits words and quoted phrases and drops terms another one contains | unimux-agents conv::search::tests::splits_words_and_quoted_phrases_and_drops_terms_another_one_contains; unimux-agents/tests/conv_golden.rs::query_terms_match | ported |
 | conv-search | finds the message of an offset | unimux-agents conv::search::tests::finds_the_message_of_an_offset | ported |

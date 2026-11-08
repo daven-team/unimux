@@ -118,7 +118,7 @@ Still open (see the Polish section at the end): macOS identifier com.ajzakomator
 |---|---|---|---|---|---|---|
 | P4 | Shell integration, launch line, cell spawn | todo | | | | |
 | P5 | SSH shell cells on russh | todo | | | | |
-| H6 | Install manager, login terminals, agent delivery | todo | | | | |
+| H6 | Install manager, login terminals, agent delivery | built, fast mode, not verified | 2026-11-08 | 2026-11-08 | | branch `tauri-pkg-H6`. unimux-agents: `install/` (shared.rs: allow-listed commands per shell and method, `__AJZ_DONE__` marker per shell family, failure classes, expected bin dirs, POSIX tool probe; manager.rs: `InstallManager` on the pty tap, one install at a time, 5 s polls, 20 s grace after a verified early find, 3 s after Ctrl+C, 10 min limit, tools cache 30 s), `delivery.rs` (`codex queue --thread --message` through unimux-exec, no shell; env-var text on the PowerShell shim path), `prompt.rs` (agents:prompt request / answer repairs), `cli::system::kill_process_tree`. App: commands/agents/install.rs (`install:options/start/cancel/current`, `install:state`, `install:` prefix hook, crash / page-gone / wind-down dispose, `auth:` login terminals for A4), commands/agents/prompt.rs (`agents:prompt` fan-out per window with 5 s timeout, `agents:prompt:done` from the asked window only, `deliver_native` for M4). PORTING +47 rows. See "H6 open issues" |
 | S4 | SSH IPC and russh test server | todo | | | | Docker |
 | T1 | SFTP service and sessions | todo | | | | |
 | D2 | SSH tunnels for databases | todo | | | | |
@@ -1570,6 +1570,20 @@ Not run (fast mode): real-app / CDP scripts (smoke-tauri, verify-tauri-lifecycle
 4. macOS: unimux-db now builds ring (rustls) and the bundled SQLite, so no aarch64-apple-darwin check of unimux-db / unimux-accounts / unimux-ssh is possible on this machine; only CI's macOS job can build them.
 5. `dump-goldens.mjs --check` still needs about 12 GB of heap ("Open after wave 2" 6); `npm run gen:check` as written does not finish here with the default heap.
 6. Worktrees: the ten wave 3 worktrees were removed (node_modules junctions unlinked first) and their branches deleted. Still kept: `.claude/worktrees/wf_3188d96a-67a-38` with `tauri-pkg-A2-fixes` (an uncommitted earlier draft of A2's Codex lock fix, see "Open after wave 2" 8).
+
+## Wave 4 packages: open issues
+
+### H6 open issues (2026-11-08, fast mode)
+
+Built, not verified: no real-app run (verify-first-login-ui not run), no review round, no install was ever started for real (the manager is exercised against fakes only). Checked once: `cargo fmt`; `cargo clippy -p unimux-agents -p unimux-app --all-targets -D warnings`; `cargo test -p unimux-agents -p unimux-app` (see 6). No TypeScript changed.
+
+1. **Callers still to wire**: `install::spawn_login_terminal` / `kill_login_terminal` (A4's login windows, `auth:` ids), `prompt::deliver_native` / `prompt::queue_codex` (M4's team delivery), `install::install_manager()` (U1 `update:busy` and the quit question, if they ask whether an install runs). They carry `#[allow(dead_code)]` until then.
+2. Deliberate difference: on Windows the `node --version` probe runs the first `node` that `where.exe` printed on the refreshed PATH (1.1.4 let CreateProcess search the app's own PATH, which can miss a fresh Node install).
+3. `kill_process_tree` (unimux-agents cli/system.rs): Windows runs `%SystemRoot%\System32\taskkill.exe /pid <pid> /T /F` on its own thread; POSIX sends SIGKILL to the process group the pty shell leads (`-pid`). The POSIX half is compile-checked only.
+4. Tap output is decoded across reads before the marker parser sees it (see the pty hooks note in "Wave 2 packages: open issues"); the marker parser keeps the last 16 K UTF-16 units like 1.1.4. Not checked against real installers.
+5. PORTING: 47 rows (cli-install 43, agent-delivery 3, cli-ipc 1); partial: "maps a PowerShell failure (marker 1) with network text", "answers options only for a known CLI", "cancels only with a string id", "ignores an interrupt of another terminal or without a session". cli-install-shared and agent-prompt are not main-side files; their cases are ported anyway (install::shared::tests, prompt::tests).
+6. Tests: unimux-agents 210 unit + all integration suites and unimux-app 121 pass; one failure outside H6 in both runs: `sessions::tests::asks_git_for_the_branches_of_loose_worktrees_all_at_once_and_once_per_folder` (H4 code H6 does not touch, "every lookup ran at the same time"; looks timing-sensitive under load, not investigated).
+7. macOS: not compile-checked for aarch64-apple-darwin in this package.
 
 ## Do zainstalowania / do decyzji użytkownika
 

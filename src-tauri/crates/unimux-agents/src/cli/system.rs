@@ -14,6 +14,35 @@ use unimux_exec::{ExecOptions, Program};
 use super::detector::{CliDeps, ExecRequest, ExecResult};
 use super::status::{Env, Os, RegistryPath};
 
+/// `killProcessTree`: kills a process and everything it started (the install terminal's shell and its installer). Windows:
+/// `taskkill /pid <pid> /T /F` from System32, hidden, on its own thread (fire and forget); elsewhere SIGKILL to the process
+/// group the pty shell leads. A process that is already gone is not an error.
+pub fn kill_process_tree(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    #[cfg(windows)]
+    {
+        let root = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from("C:\\Windows"), PathBuf::from);
+        let program = Program::Args {
+            program: root.join("System32").join("taskkill.exe"),
+            args: vec!["/pid".into(), pid.to_string().into(), "/T".into(), "/F".into()],
+        };
+        let options = ExecOptions { timeout: Duration::from_secs(10), ..ExecOptions::default() };
+        let _ = std::thread::Builder::new().name("unimux-killtree".into()).spawn(move || {
+            let _ = unimux_exec::run(&program, &options);
+        });
+    }
+    #[cfg(unix)]
+    {
+        let Ok(pid) = libc::pid_t::try_from(pid) else { return };
+        // SAFETY: kill(2) with a negative pid signals the process group; no memory is involved.
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+        }
+    }
+}
+
 /// Output kept from a probe (`OUTPUT_LIMIT` of cliSystem.ts).
 const OUTPUT_LIMIT: usize = 256 * 1024;
 /// ~/.npmrc larger than this is not read.
