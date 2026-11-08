@@ -362,6 +362,26 @@ mod tests {
         assert_eq!(c.get()["settings"]["scrollbackLines"], 10_000);
     }
 
+    // alerts "the main-process state edit path normalizes alerts, so the renderer cannot store arbitrary values"
+    #[test]
+    fn a_renderer_edit_cannot_store_arbitrary_alerts() {
+        let base = grid(1);
+        let c = StateController::new(base.clone(), Arc::new(crate::StateNormalizer));
+        let base = c.get().as_ref().clone();
+        let defaults = crate::normalize::settings::default_alerts();
+        let mut next = base.clone();
+        next["settings"]["alerts"]["events"]["done"]["sound"] = json!({"kind": "file", "path": "\\\\evil\\share\\x.wav"});
+        next["settings"]["alerts"]["events"]["error"]["sound"] = json!({"kind": "preset", "id": "nope"});
+        next["settings"]["alerts"]["volume"] = json!(99);
+        next["settings"]["alerts"]["events"]["attention"]["sound"] = json!({"kind": "file", "path": "C:\\ok\\a.wav"});
+        c.apply_edit("e1", &base, &next).unwrap();
+        let alerts = c.get()["settings"]["alerts"].clone();
+        assert_eq!(alerts["events"]["done"]["sound"], defaults["events"]["done"]["sound"]);
+        assert_eq!(alerts["events"]["error"]["sound"], defaults["events"]["error"]["sound"]);
+        assert_eq!(alerts["events"]["attention"]["sound"], json!({"kind": "file", "path": "C:\\ok\\a.wav"}));
+        assert_eq!(alerts["volume"], json!(1));
+    }
+
     #[tokio::test]
     async fn the_watch_wakes_on_changes() {
         let c = Arc::new(StateController::new(json!({}), Arc::new(PassThrough)));

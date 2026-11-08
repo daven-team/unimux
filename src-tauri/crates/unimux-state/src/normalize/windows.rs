@@ -357,3 +357,90 @@ pub fn prune_automation_room(
     automation.insert("events".into(), Value::Array(events));
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NOW: f64 = 1_792_195_200_000.0;
+    const DAY: f64 = 86_400_000.0;
+
+    fn task(id: &str, project: &str, status: &str, updated: f64, depends: Option<&[&str]>) -> Value {
+        let mut t = json!({ "id": id, "projectId": project, "cellId": "cell", "title": id, "prompt": "p", "status": status,
+            "delivery": "startup", "createdAt": updated, "updatedAt": updated });
+        if let Some(d) = depends {
+            t["dependsOn"] = json!(d);
+        }
+        t
+    }
+
+    fn message(id: &str, project: &str, created: f64, read: Option<f64>) -> Value {
+        let mut m = json!({ "id": id, "projectId": project, "toCellId": "cell", "text": "t", "delivery": "pending", "createdAt": created });
+        if let Some(r) = read {
+            m["readAt"] = json!(r);
+        }
+        m
+    }
+
+    fn automation(tasks: Vec<Value>, messages: Vec<Value>, events: Vec<Value>) -> Map<String, Value> {
+        json!({ "paused": false, "tasks": tasks, "messages": messages, "events": events }).as_object().unwrap().clone()
+    }
+
+    fn ids(a: &Map<String, Value>, key: &str) -> Vec<String> {
+        a[key].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap().to_string()).collect()
+    }
+
+    // automation-retention "drops finished items older than the retention window and keeps open, unread and still needed
+    // ones", "drops the items of removed projects and their activity", "caps each project on its own: the oldest finished
+    // items make room first"
+    #[test]
+    fn prune_automation_keeps_open_unread_and_needed_items_per_project() {
+        let old = NOW - RETENTION_MS - DAY;
+        let mut a = automation(
+            vec![
+                task("done-old", "p", "completed", old, None),
+                task("cancelled-old", "p", "cancelled", old, None),
+                task("done-new", "p", "completed", NOW - DAY, None),
+                task("open-old", "p", "queued", old, None),
+                task("blocked-old", "p", "blocked", old, None),
+                task("needed-old", "p", "completed", old, None),
+                task("waits", "p", "queued", NOW, Some(&["needed-old"])),
+            ],
+            vec![
+                message("read-old", "p", old, Some(old)),
+                message("read-new", "p", old, Some(NOW - DAY)),
+                message("unread-old", "p", old, None),
+            ],
+            vec![],
+        );
+        prune_automation(&mut a, &["p"], NOW).unwrap();
+        assert_eq!(ids(&a, "tasks"), ["done-new", "open-old", "blocked-old", "needed-old", "waits"]);
+        assert_eq!(ids(&a, "messages"), ["read-new", "unread-old"]);
+        let before = a.clone();
+        prune_automation(&mut a, &["p"], NOW).unwrap();
+        assert_eq!(a, before);
+
+        let event = |id: &str, p: &str| json!({ "id": id, "projectId": p, "action": "x", "detail": "x", "createdAt": NOW });
+        let mut a = automation(
+            vec![task("a", "gone", "queued", NOW, None), task("b", "p", "queued", NOW, None)],
+            vec![message("m", "gone", NOW, None)],
+            vec![event("e1", "gone"), event("e2", "p")],
+        );
+        prune_automation(&mut a, &["p"], NOW).unwrap();
+        assert_eq!(ids(&a, "tasks"), ["b"]);
+        assert!(ids(&a, "messages").is_empty());
+        assert_eq!(ids(&a, "events"), ["e2"]);
+
+        let limit = PROJECT_ITEM_LIMIT as usize;
+        let mut tasks: Vec<Value> = (0..limit - 10).map(|i| task(&format!("open-{i}"), "p", "queued", NOW, None)).collect();
+        tasks.extend((0..20).map(|i| task(&format!("done-{i}"), "p", "completed", NOW - f64::from(20 - i) * 1000.0, None)));
+        tasks.extend((0..limit).map(|i| task(&format!("other-{i}"), "q", "queued", NOW, None)));
+        let mut a = automation(tasks, vec![], vec![]);
+        prune_automation_room(&mut a, &["p", "q"], NOW, &[("p", 1)], &[]).unwrap();
+        let in_p: Vec<&Value> = a["tasks"].as_array().unwrap().iter().filter(|t| t["projectId"] == "p").collect();
+        assert_eq!(in_p.len(), limit - 1);
+        let done: Vec<&str> = in_p.iter().filter(|t| t["status"] == "completed").map(|t| t["id"].as_str().unwrap()).collect();
+        assert_eq!(done, (11..20).map(|i| format!("done-{i}")).collect::<Vec<_>>());
+        assert_eq!(a["tasks"].as_array().unwrap().iter().filter(|t| t["projectId"] == "q").count(), limit);
+    }
+}

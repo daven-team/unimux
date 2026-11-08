@@ -170,6 +170,8 @@ async fn initializes_statelessly_with_the_instructions_and_text_only_json_result
     assert!(r.content_type().unwrap().contains("application/json"));
     let result = &r.json()["result"];
     assert_eq!(result["serverInfo"]["name"], "unimux");
+    // automation-team "reports the app version ...": the version of the app, not of a library.
+    assert_eq!(result["serverInfo"]["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(
         result["capabilities"],
         json!({ "tools": {}, "tasks": { "list": {}, "cancel": {}, "requests": { "tools": { "call": {} } } } })

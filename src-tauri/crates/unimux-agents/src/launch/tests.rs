@@ -132,6 +132,51 @@ fn codex_gets_notify_overrides_quoted_per_shell_and_the_mcp_server_with_its_toke
     assert!(build_cli_command(&codex(), &bad).is_err());
 }
 
+// codex-hooks "quotes the overrides for PowerShell, bash/zsh and cmd", "resumes the saved conversation of the cell with its
+// own hook and keeps profile args and model", "keeps the plain terminal notifications when no hook url is given", "resumes
+// each cell with its own saved conversation, in every shell"
+#[test]
+fn codex_resumes_each_cell_with_its_own_conversation_and_hook_in_every_shell() {
+    let url = |cell: &str| format!("http://127.0.0.1:51234/h/0123456789abcdef0123456789abcdef/{cell}/codex/89abcdef01234567");
+    let notify = |cell: &str| format!("notify=['curl','-s','--noproxy','*','-m','2','{}','--data-raw']", url(cell));
+    let hooked = |shell: Shell| LaunchOptions { codex_notify_url: Some(url("c1")), ..opts(shell) };
+    let ps = build_cli_command(&codex(), &hooked(Shell::Pwsh)).unwrap().unwrap();
+    assert!(ps.starts_with(&format!("codex -c '{}' -c '", notify("c1").replace('\'', "''"))), "{ps}");
+    let posix = build_cli_command(&codex(), &hooked(Shell::Bash)).unwrap().unwrap();
+    assert!(posix.starts_with(&format!("codex -c '{}' -c '", notify("c1").replace('\'', "'\"'\"'"))), "{posix}");
+    assert_eq!(build_cli_command(&codex(), &hooked(Shell::Zsh)).unwrap().unwrap(), posix);
+    let cmd = build_cli_command(&codex(), &hooked(Shell::Cmd)).unwrap().unwrap();
+    assert!(cmd.starts_with(&format!("codex -c \"{}\" -c \"", notify("c1"))), "{cmd}");
+    for line in [&ps, &posix, &cmd] {
+        assert!(!line.contains("tui.notifications=true"), "{line}");
+    }
+    // No hook URL: the plain terminal notifications.
+    assert_eq!(build_cli_command(&codex(), &opts(Shell::Pwsh)).unwrap().unwrap(), "codex -c tui.notifications=true");
+
+    let p = Profile { cli: "codex".into(), args: "--no-alt-screen".into() };
+    let b = "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6071";
+    let resume = LaunchOptions {
+        resume: true,
+        session_id: Some(b.into()),
+        codex_notify_url: Some(url("c1")),
+        model: Some("gpt-5".into()),
+        ..opts(Shell::Bash)
+    };
+    let line = build_cli_command(&p, &resume).unwrap().unwrap();
+    assert!(line.starts_with(&format!("codex resume {b} -c ")), "{line}");
+    assert!(line.contains(&url("c1")) && line.ends_with("--no-alt-screen --model 'gpt-5'"), "{line}");
+    assert!(!line.contains("tui.notifications=true"), "{line}");
+
+    for (cell, id) in [("c1", "019a1b2c-3d4e-7f80-9a1b-000000000001"), ("c2", b)] {
+        for shell in [Shell::Pwsh, Shell::Bash, Shell::Cmd] {
+            let o = LaunchOptions { resume: true, session_id: Some(id.into()), codex_notify_url: Some(url(cell)), ..opts(shell) };
+            let line = build_cli_command(&codex(), &o).unwrap().unwrap();
+            assert!(line.starts_with(&format!("codex resume {id} -c ")), "{cell} {shell:?}: {line}");
+            assert!(line.contains(&format!("/{cell}/codex/")), "{cell} {shell:?}: {line}");
+        }
+    }
+}
+
 #[test]
 fn the_reset_tail_runs_however_the_cli_ended_and_posts_only_to_our_exit_url() {
     let url = "http://127.0.0.1:5/x/c1/0123456789abcdef";
