@@ -15,7 +15,7 @@ use unimux_ssh::keys::{KeyGenRequest, KeyType, check_passphrase, generate_key_bl
 use unimux_ssh::protocol::{AuthPromptInfo, AuthPromptKind, HostCommand, HostKeyChoice, HostMessage, PromptAnswer, PromptField};
 use unimux_ssh::session::{SessionState, SshErrorCode, SshPhase};
 use unimux_ssh::stores::SshStores;
-use unimux_ssh::vault::{AddKey, KeySource, NewKey};
+use unimux_ssh::vault::{AddKey, KeyPatch, KeySource, NewKey, PassphrasePatch};
 use zeroize::Zeroizing;
 
 const HOST: &str = "00000000-0000-4000-8000-000000000001";
@@ -84,6 +84,7 @@ struct Opts {
     save_passphrase: bool,
     prompt_timeout: Option<Duration>,
     identity: bool,
+    debug: bool,
 }
 
 fn state(key_id: Option<&str>, identity: bool) -> Value {
@@ -157,7 +158,7 @@ async fn setup(o: Opts) -> Fx {
         }),
         now: Arc::new(|| 1000),
         new_id: Arc::new(move || format!("00000000-0000-4000-8000-{:012x}", ids.fetch_add(1, Ordering::SeqCst) + 0x100)),
-        debug: false,
+        debug: o.debug,
         prompt_timeout: o.prompt_timeout.unwrap_or(Duration::from_secs(300)),
         check_passphrase: Arc::new(move |k, p| {
             c.fetch_add(1, Ordering::SeqCst);
@@ -583,6 +584,117 @@ async fn signs_in_with_the_identity_and_offers_its_password_to_sudo() {
     .await;
 }
 
+/// SFTP through sudo (1.1.4's sftp-manage "the coordinator"): the sudo option and the host's own command go with the
+/// login of a sudo session only; the sudo question offers the saved login password only when there is one, uses it only
+/// on the explicit choice, and never saves what is typed.
+#[tokio::test(flavor = "multi_thread")]
+async fn sudo_sessions_send_the_option_and_never_save_a_typed_sudo_password() {
+    let f = setup(Opts::default()).await;
+    {
+        let mut st = f.state.0.lock();
+        let mut s = (**st).clone();
+        s["sshHosts"][0]["sftpSudo"] = json!(true);
+        s["sshHosts"][0]["sftpCommand"] = json!("sudo -n /opt/sftp-server");
+        *st = Arc::new(s);
+    }
+    let sid = "sftp:00000000-0000-4000-8000-0000000000d2";
+    f.coord.connect_session(sid, HOST, true).await.unwrap();
+    let sudo_of = |id: &str| {
+        f.rec.sent.lock().iter().rev().find_map(|m| match m {
+            HostCommand::Connect(r) if r.id == id => Some(r.sftp_sudo.as_ref().map(|s| s.command.clone())),
+            _ => None,
+        })
+    };
+    assert_eq!(sudo_of(sid), Some(Some(Some("sudo -n /opt/sftp-server".to_string()))));
+    let ask = |prompt_id: &str, retry: bool| HostMessage::AuthPrompt {
+        id: sid.into(),
+        prompt_id: prompt_id.into(),
+        prompt: AuthPromptInfo { kind: AuthPromptKind::Sudo, name: None, instructions: None, fields: vec![], retry },
+    };
+    f.coord.on_host_message(ask("p1", false));
+    until(|| f.open(sid).is_some()).await;
+    let p = f.open(sid).unwrap();
+    assert_eq!(
+        (p["kind"].as_str(), p["user"].as_str(), p["endpoint"].as_str(), p["canUseSaved"].as_bool(), p["retry"].as_bool()),
+        (Some("sudo"), Some("deploy"), Some("web.example:2222"), Some(false), Some(false))
+    );
+    // The SFTP prompts are the session's own: the cell snapshot does not list them.
+    assert_eq!(f.coord.sessions()["prompts"], json!([]));
+    let own = f.coord.session_snapshot(unimux_ssh::session::SessionHostKind::Sftp);
+    assert_eq!(own["prompts"].as_array().unwrap().iter().map(|p| p["cellId"].clone()).collect::<Vec<_>>(), [json!(sid)]);
+    let pid = p["id"].as_str().unwrap().to_string();
+    let saved = |prompt_id: &str| PromptAnswer::Values {
+        cell_id: sid.into(),
+        prompt_id: prompt_id.into(),
+        values: vec![Zeroizing::new(String::new())],
+        remember: false,
+        use_saved: true,
+    };
+    assert!(!f.coord.answer(saved(&pid)), "no saved password to use");
+    assert!(f.coord.answer(PromptAnswer::Values {
+        cell_id: sid.into(),
+        prompt_id: pid,
+        values: vec![Zeroizing::new("s3cret".into())],
+        remember: true,
+        use_saved: false,
+    }));
+    until(|| {
+        f.rec.sent.lock().iter().any(|m| {
+            matches!(m, HostCommand::AuthAnswer { prompt_id, values: Some(v), .. } if prompt_id == "p1" && v[0].as_str() == "s3cret")
+        })
+    })
+    .await;
+    f.coord.on_host_message(HostMessage::Status {
+        id: sid.into(),
+        phase: SshPhase::Connected,
+        error: None,
+        exit_code: None,
+        banner: None,
+    });
+    tick().await;
+    let vault = f.stores.vault().await;
+    assert!(vault.lock().password(HOST).is_err(), "never saved, whatever remember said");
+    // A restart of the Pty Host is not this session's process; one of the SFTP host ends only SFTP sessions.
+    f.coord.host_crashed();
+    assert_eq!(f.coord.session_state(sid).unwrap().phase, SshPhase::Connected);
+    f.coord.session_host_crashed(unimux_ssh::session::SessionHostKind::Db);
+    assert_eq!(f.coord.session_state(sid).unwrap().phase, SshPhase::Connected);
+    f.coord.session_host_crashed(unimux_ssh::session::SessionHostKind::Sftp);
+    let s = f.coord.session_state(sid).unwrap();
+    assert_eq!((s.phase, s.error), (SshPhase::Error, Some(SshErrorCode::SftpHostCrashed)));
+
+    // A session without the sudo flag (an editor tab) of a sudo host never runs through sudo.
+    let plain = "sftp:00000000-0000-4000-8000-0000000000d3";
+    f.coord.connect_session(plain, HOST, false).await.unwrap();
+    assert_eq!(sudo_of(plain), Some(None));
+
+    // With a saved login password the question offers it, and uses it only on the explicit choice.
+    vault.lock().set_password(HOST, "login-pw").unwrap();
+    let other = "sftp:00000000-0000-4000-8000-0000000000d4";
+    f.coord.connect_session(other, HOST, true).await.unwrap();
+    f.coord.on_host_message(HostMessage::AuthPrompt {
+        id: other.into(),
+        prompt_id: "p2".into(),
+        prompt: AuthPromptInfo { kind: AuthPromptKind::Sudo, name: None, instructions: None, fields: vec![], retry: true },
+    });
+    until(|| f.open(other).is_some()).await;
+    let p = f.open(other).unwrap();
+    assert_eq!((p["canUseSaved"].as_bool(), p["retry"].as_bool()), (Some(true), Some(true)));
+    assert!(f.coord.answer(PromptAnswer::Values {
+        cell_id: other.into(),
+        prompt_id: p["id"].as_str().unwrap().into(),
+        values: vec![Zeroizing::new(String::new())],
+        remember: false,
+        use_saved: true,
+    }));
+    until(|| {
+        f.rec.sent.lock().iter().any(|m| {
+            matches!(m, HostCommand::AuthAnswer { prompt_id, values: Some(v), .. } if prompt_id == "p2" && v[0].as_str() == "login-pw")
+        })
+    })
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn keyboard_prompts_are_sanitized_and_need_one_value_per_field() {
     let f = setup(Opts::default()).await;
@@ -625,6 +737,240 @@ async fn asks_the_owner_for_debug_lines_only_when_main_says_so() {
     let f = setup(Opts::default()).await;
     f.connect(3).await.unwrap().unwrap();
     assert!(matches!(&f.rec.sent.lock()[0], HostCommand::Connect(r) if !r.debug && r.password.is_none()));
+    let f = setup(Opts { debug: true, ..Opts::default() }).await;
+    f.connect(3).await.unwrap().unwrap();
+    assert!(matches!(&f.rec.sent.lock()[0], HostCommand::Connect(r) if r.debug));
+}
+
+/// A generated ed25519 key with the given passphrase, as the vault stores it.
+fn generated(passphrase: &str) -> (Zeroizing<String>, unimux_ssh::keys::KeyMeta) {
+    let g = generate_key_blocking(&KeyGenRequest {
+        key_type: KeyType::Ed25519,
+        bits: None,
+        comment: String::new(),
+        passphrase: Some(Zeroizing::new(passphrase.into())),
+    })
+    .unwrap();
+    (g.private_key, g.meta)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn never_remembers_a_passphrase_checked_against_replaced_key_material() {
+    let f = setup(Opts { encrypted_key: true, ..Opts::default() }).await;
+    let key_id = f.key_id.clone().unwrap();
+    let pending = f.connect(0);
+    until(|| f.open(CELLS[0]).is_some()).await;
+    let p = f.open(CELLS[0]).unwrap();
+    assert_eq!(p["kind"], "passphrase");
+    let (private_key, m) = generated("other");
+    let vault = f.stores.vault().await;
+    let replaced = vault
+        .lock()
+        .replace_key(
+            &key_id,
+            unimux_ssh::vault::ReplacementKey {
+                key_type: m.key_type.as_str().into(),
+                bits: JsNum::from(m.bits),
+                fingerprint: m.fingerprint,
+                public_key: m.public_key,
+                comment: m.comment,
+                encrypted: true,
+                private_key,
+                passphrase: Some(Zeroizing::new("other".into())),
+                save_passphrase: false,
+            },
+        )
+        .unwrap();
+    assert!(replaced.is_ok());
+    assert!(f.values(0, &p, &["right"], true));
+    assert_eq!(pending.await.unwrap(), Ok(()));
+    assert!(vault.lock().remembered(&key_id).is_none());
+    let g = vault.lock().generation(&key_id);
+    assert!(!vault.lock().remember(&key_id, "x", Some(g - 1)));
+    assert!(vault.lock().remember(&key_id, "other", Some(g)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn checks_a_saved_passphrase_again_after_the_key_changed_and_asks_when_it_no_longer_opens_it() {
+    let f = setup(Opts { encrypted_key: true, save_passphrase: true, ..Opts::default() }).await;
+    let key_id = f.key_id.clone().unwrap();
+    f.connect(0).await.unwrap().unwrap();
+    f.connect(1).await.unwrap().unwrap();
+    assert_eq!(f.checks.load(Ordering::SeqCst), 1);
+    let save = |p: &str| KeyPatch { passphrase: Some(PassphrasePatch::Save(Zeroizing::new(p.into()))), ..KeyPatch::default() };
+    let vault = f.stores.vault().await;
+    assert!(vault.lock().update_key(&key_id, save("right")).unwrap().is_ok());
+    f.connect(2).await.unwrap().unwrap();
+    assert_eq!(f.checks.load(Ordering::SeqCst), 2, "checked again after the key changed");
+    for m in f.rec.sent.lock().iter() {
+        if let HostCommand::Connect(r) = m {
+            assert_eq!(r.passphrase.as_deref().map(String::as_str), Some("right"));
+        }
+    }
+
+    // A saved passphrase that no longer opens the key: the user is asked (not a retry) and the typed one is sent.
+    let f = setup(Opts { encrypted_key: true, save_passphrase: true, ..Opts::default() }).await;
+    let key_id = f.key_id.clone().unwrap();
+    assert!(f.stores.vault().await.lock().update_key(&key_id, save("stale")).unwrap().is_ok());
+    let pending = f.connect(0);
+    until(|| f.open(CELLS[0]).is_some()).await;
+    let p = f.open(CELLS[0]).unwrap();
+    assert_eq!((p["kind"].as_str(), p["retry"].as_bool()), (Some("passphrase"), Some(false)));
+    assert!(f.values(0, &p, &["right"], false));
+    assert_eq!(pending.await.unwrap(), Ok(()));
+    assert!(
+        matches!(&f.rec.sent.lock()[0], HostCommand::Connect(r) if r.passphrase.as_deref().map(String::as_str) == Some("right"))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn checks_a_typed_answer_once_for_a_3_cell_prompt_and_keeps_no_copy_unless_remembered() {
+    let f = setup(Opts { encrypted_key: true, ..Opts::default() }).await;
+    let key_id = f.key_id.clone().unwrap();
+    let pending = [f.connect(0), f.connect(1), f.connect(2)];
+    until(|| (0..3).all(|i| f.open(CELLS[i]).is_some())).await;
+    let p = f.open(CELLS[0]).unwrap();
+    assert!((1..3).all(|i| f.open(CELLS[i]).unwrap()["id"] == p["id"]));
+    f.checks.store(0, Ordering::SeqCst);
+    assert!(f.values(2, &p, &["right"], false));
+    for h in pending {
+        assert_eq!(h.await.unwrap(), Ok(()));
+    }
+    assert_eq!(f.checks.load(Ordering::SeqCst), 1);
+    let vault = f.stores.vault().await;
+    assert!(vault.lock().remembered(&key_id).is_none());
+    assert!(!vault.lock().is_verified(&key_id, "right"));
+    // A reconnect asks again: nothing of the typed passphrase was kept.
+    f.coord.killed(CELLS[0]);
+    let before = f.rec.prompts.lock().len();
+    let _again = f.connect(0);
+    until(|| f.rec.prompts.lock()[before..].iter().any(|(c, p)| c == CELLS[0] && p.is_some())).await;
+    let q = f.open(CELLS[0]).unwrap();
+    assert_eq!((q["kind"].as_str(), q["retry"].as_bool()), (Some("passphrase"), Some(false)));
+}
+
+/// A non-empty folder where a store file belongs: every write of that store fails from now on.
+fn break_file(path: &std::path::Path) {
+    let _ = std::fs::remove_file(path);
+    std::fs::create_dir_all(path.join("child")).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_trust_write_rejects_every_cell_of_the_group_with_a_fixed_code() {
+    let f = setup(Opts::default()).await;
+    break_file(&f.stores.dir().join("known_hosts.json"));
+    for i in 0..3 {
+        f.connect(i).await.unwrap().unwrap();
+    }
+    let key = ed25519_blob(1);
+    for (i, pid) in ["pa", "pb", "pc"].iter().enumerate() {
+        f.coord.on_host_message(HostMessage::HostKey { id: CELLS[i].into(), prompt_id: (*pid).into(), key: key.clone() });
+    }
+    until(|| (0..3).all(|i| f.open(CELLS[i]).is_some())).await;
+    let p = f.open(CELLS[1]).unwrap();
+    assert!(f.coord.answer(PromptAnswer::HostKey {
+        cell_id: CELLS[1].into(),
+        prompt_id: p["id"].as_str().unwrap().into(),
+        choice: HostKeyChoice::Save
+    }));
+    let answers = || {
+        f.rec
+            .sent
+            .lock()
+            .iter()
+            .filter_map(|m| match m {
+                HostCommand::HostKeyAnswer { prompt_id, accept, error, .. } => Some((prompt_id.clone(), *accept, *error)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    until(|| answers().len() == 3).await;
+    assert!(answers().iter().all(|(_, accept, error)| !accept && *error == Some(SshErrorCode::Unknown)), "{:?}", answers());
+    assert!(f.stores.known_hosts().await.lock().list().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn keeps_going_when_the_vault_cannot_write_a_password_or_prune() {
+    let f = setup(Opts::default()).await;
+    let vault = f.stores.vault().await;
+    vault.lock().set_password(OTHER, "pw").unwrap();
+    break_file(&f.stores.dir().join("vault.json"));
+    f.connect(3).await.unwrap().unwrap();
+    f.coord.on_host_message(HostMessage::AuthPrompt {
+        id: CELLS[3].into(),
+        prompt_id: "auth1".into(),
+        prompt: AuthPromptInfo { kind: AuthPromptKind::Password, name: None, instructions: None, fields: vec![], retry: false },
+    });
+    until(|| f.open(CELLS[3]).is_some()).await;
+    let p = f.open(CELLS[3]).unwrap();
+    assert!(f.values(3, &p, &["typed-secret"], true));
+    until(|| f.rec.sent.lock().iter().any(|m| matches!(m, HostCommand::AuthAnswer { prompt_id, .. } if prompt_id == "auth1")))
+        .await;
+    f.coord.on_host_message(HostMessage::Status {
+        id: CELLS[3].into(),
+        phase: SshPhase::Connected,
+        error: None,
+        exit_code: None,
+        banner: None,
+    });
+    tick().await;
+    assert_eq!((f.last_session().cell_id.as_str(), f.last_session().phase), (CELLS[3], SshPhase::Connected));
+    let mut s = (*f.state.state()).clone();
+    s["sshHosts"].as_array_mut().unwrap().retain(|h| h["id"] != OTHER);
+    f.coord.state_changed(&s);
+    tick().await;
+    // Nothing was written, nothing panicked: the old password is still in memory and the coordinator still answers.
+    assert_eq!(vault.lock().password(OTHER).unwrap().as_str(), "pw");
+    assert!(f.coord.session_state(CELLS[3]).is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn saves_a_remembered_password_to_the_identity_and_uses_the_host_fields_once_it_is_gone() {
+    let f = setup(Opts { identity: true, ..Opts::default() }).await;
+    let vault = f.stores.vault().await;
+    f.connect(0).await.unwrap().unwrap();
+    assert!(matches!(&f.rec.sent.lock()[0], HostCommand::Connect(r) if r.password.is_none() && r.username == "ops"));
+    f.coord.on_host_message(HostMessage::AuthPrompt {
+        id: CELLS[0].into(),
+        prompt_id: "auth1".into(),
+        prompt: AuthPromptInfo { kind: AuthPromptKind::Password, name: None, instructions: None, fields: vec![], retry: false },
+    });
+    until(|| f.open(CELLS[0]).is_some()).await;
+    let p = f.open(CELLS[0]).unwrap();
+    assert_eq!((p["user"].as_str(), p["endpoint"].as_str()), (Some("ops"), Some("web.example:2222")));
+    assert!(f.values(0, &p, &["typed-identity-pw"], true));
+    until(|| f.rec.sent.lock().iter().any(|m| matches!(m, HostCommand::AuthAnswer { prompt_id, .. } if prompt_id == "auth1")))
+        .await;
+    f.coord.on_host_message(HostMessage::Status {
+        id: CELLS[0].into(),
+        phase: SshPhase::Connected,
+        error: None,
+        exit_code: None,
+        banner: None,
+    });
+    until(|| vault.lock().identity_password(IDENTITY).is_ok()).await;
+    assert_eq!(vault.lock().identity_password(IDENTITY).unwrap().as_str(), "typed-identity-pw");
+    assert!(vault.lock().password(HOST).is_err());
+
+    // The identity is gone (a concurrent edit left the reference): its password is pruned and the host signs in with
+    // its own user name and saved password.
+    vault.lock().set_password(HOST, "own-host-password").unwrap();
+    let mut s = (*f.state.state()).clone();
+    s["sshIdentities"] = json!([]);
+    *f.state.0.lock() = Arc::new(s.clone());
+    f.coord.state_changed(&s);
+    until(|| vault.lock().identity_password(IDENTITY).is_err()).await;
+    f.coord.killed(CELLS[1]);
+    f.connect(1).await.unwrap().unwrap();
+    let sent = f.rec.sent.lock();
+    let r = sent.iter().rev().find_map(|m| match m {
+        HostCommand::Connect(r) if r.id == CELLS[1] => Some(r),
+        _ => None,
+    });
+    let r = r.unwrap();
+    assert_eq!(r.username, "deploy");
+    assert_eq!(r.password.as_deref().map(String::as_str), Some("own-host-password"));
+    assert!(r.private_key.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]

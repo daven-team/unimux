@@ -430,6 +430,13 @@ mod tests {
         );
         let ids = json!([{"id": "i", "username": "ops"}]);
         assert_eq!(host_login(&host, Some(&ids)).key_id, None);
+        // A host without an identity signs in with its own fields, with or without identities in the state.
+        let plain = json!({"id": "h", "username": "deploy", "keyId": "k1"});
+        let own = HostLogin { username: "deploy".into(), key_id: Some("k1".into()), secret: SecretOwner::Host("h".into()) };
+        assert_eq!(host_login(&plain, Some(&ids)), own);
+        assert_eq!(host_login(&plain, None), own);
+        let keyless = json!({"id": "h", "username": "deploy"});
+        assert_eq!(host_login(&keyless, None).key_id, None);
     }
 
     #[test]

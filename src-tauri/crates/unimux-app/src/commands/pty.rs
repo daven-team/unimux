@@ -305,6 +305,8 @@ impl PtyHost {
     fn forget_host_terminals(&self, ctx: &Arc<AppContext>, message: &str) -> bool {
         let tail = message.trim();
         let tail = if tail.is_empty() { String::new() } else { format!("\n{tail}") };
+        // A restart before the renderer listens must still stop the app-start SSH reconnect (D5 after a restart).
+        ctx.cancel_app_start();
         ctx.crash.error(&format!("pty host exited (panic){tail}"));
         ctx.hooks.release_all_prompts();
         let crashed: Vec<Hook> = self.hooks.read().crashed.iter().map(|(_, h)| h.clone()).collect();
@@ -717,6 +719,19 @@ mod tests {
     }
 
     #[test]
+    fn the_app_start_claim_answers_true_once_and_a_crash_before_it_spends_it() {
+        let _one = crate::commands::REGISTER_LOCK.lock();
+        let (_dir, ctx, _router) = crate::cells::test_ctx(state());
+        assert!(ctx.claim_app_start());
+        assert!(!ctx.claim_app_start(), "a reload");
+        let (_dir2, ctx2, _router2) = crate::cells::test_ctx(state());
+        PtyHost::default().forget_host_terminals(&ctx2, "");
+        assert!(!ctx2.claim_app_start(), "spent by the crash before the renderer claimed it");
+        ctx.saver.stop();
+        ctx2.saver.stop();
+    }
+
+    #[test]
     fn a_crash_forgets_every_running_cell_and_says_whether_a_conversation_resumes() {
         let _one = crate::commands::REGISTER_LOCK.lock();
         let (_dir, ctx, _router) = crate::cells::test_ctx(state());
@@ -727,6 +742,8 @@ mod tests {
         handled(&ctx, &h, vec![HostEvent::Spawned { id: "a".into(), pid: 1 }, HostEvent::Spawned { id: "c".into(), pid: 2 }]);
         h.set_verified_codex("c", Some("s"));
         assert!(h.forget_host_terminals(&ctx, "boom"));
+        // The app-start claim is spent by the crash: a renderer that claims it afterwards gets false (D5).
+        assert!(!ctx.claim_app_start());
         assert!(ctx.cells.alive().is_empty());
         assert_eq!(*crashed.lock(), 1);
         assert_eq!(h.verified_codex("c"), None);

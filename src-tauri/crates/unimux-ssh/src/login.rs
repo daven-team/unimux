@@ -843,4 +843,15 @@ mod tests {
         let r = login(request(port), LOGIN_TIMERS, Arc::new(Quiet), control).await;
         assert_eq!(r.err(), Some(SshErrorCode::Cancelled));
     }
+
+    /// Like OpenSSH's client for an interactive session, keystrokes are not held back by Nagle's algorithm; a name that
+    /// does not resolve is `dns`.
+    #[tokio::test]
+    async fn the_session_socket_has_nagle_off_and_an_unknown_host_is_dns() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let stream = connect_tcp("127.0.0.1", port).await.unwrap();
+        assert!(stream.nodelay().unwrap());
+        assert_eq!(connect_tcp("nohost.invalid", 22).await.err(), Some(SshErrorCode::Dns));
+    }
 }
