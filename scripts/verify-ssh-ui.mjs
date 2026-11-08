@@ -8,6 +8,7 @@ import ssh2 from 'ssh2';
 import { join } from 'node:path';
 import { childPids, connected, connectWithPassword, killTree, LANGUAGE, launchApp, sleep, scratchRoot, sshState, startTestServer, testHost, writeKnownHost, writeState } from './ssh-ui-lib.mjs';
 import { removeScratch } from './app-env.mjs';
+import { isTauri } from './real-app.mjs';
 
 /** Expression: the xterm buffer text of every cell of the active tab, in cell order (what the terminal really shows, not a screenshot). */
 const CELL_BUFFERS = `(() => { const s = window.__mc.useStore.getState().s; const p = s.projects.find((x) => x.id === s.activeProjectId); const t = p.tabs.find((x) => x.id === p.activeTabId);
@@ -68,9 +69,14 @@ const PARTS = {
         await app.until(`(() => { const t = ${CELL_BUFFERS}[0]; return t.split('\\n').filter((l) => l.trim() === 'unimux test server').length === 1 && !t.includes('[SSH') && !t.includes('echo'); })()`, 'reconnect on a clean terminal');
         await app.screenshot('ssh-cell-reconnected.png');
         // D5 after a Pty Host crash: the cell ends in the error bar and never connects by itself; "Połącz ponownie" works.
-        const hosts = childPids(app.pid, 'node.mojom.NodeService');
-        if (hosts.length !== 1) throw new Error(`expected one Pty Host process, found ${hosts.length}`);
-        killTree(hosts[0]);
+        // Tauri runs the pty engine inside the app process (no Pty Host child to kill): the check build's test bridge makes
+        // its supervised actor crash the same way, which restarts it like 1.1.4's utility process.
+        if (isTauri) await app.bridge('pty', { action: 'panic', message: 'verify-ssh-ui pty host crash' });
+        else {
+          const hosts = childPids(app.pid, 'node.mojom.NodeService');
+          if (hosts.length !== 1) throw new Error(`expected one Pty Host process, found ${hosts.length}`);
+          killTree(hosts[0]);
+        }
         await app.until(`document.querySelector('.ssh-connect.failed')?.textContent.includes(${JSON.stringify(TEXT.crashed)})`, 'crash card');
         // D1: only an SSH cell was live, so the toast does not promise resumed conversations.
         await app.until(`[...document.querySelectorAll('.toast')].some((t) => t.textContent === ${JSON.stringify(TEXT.restartToast)})`, 'restart toast without resuming');

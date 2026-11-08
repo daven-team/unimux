@@ -66,8 +66,11 @@ try {
   let st = await fieldState('local');
   if (st.value !== local || st.start !== 0 || st.end !== local.length) throw new Error(`local field does not start with the whole path selected: ${JSON.stringify(st)}`);
   await shot(app, 'local-edit');
-  // Ctrl+C in the field copies the selected path (the native field copy).
+  // Ctrl+C in the field copies the selected path (the native field copy). The native copy goes to the OS clipboard, which a
+  // Tauri check build never reads (its offscreen clipboard is a scratch file) and which is the user's: the check takes the
+  // copy event and hands what the field would copy to the app's clipboard instead.
   await ev(`window.mc.clipboardWrite('')`);
+  await ev(`(() => { document.addEventListener('copy', (e) => { const i = e.target; if (!(i instanceof HTMLInputElement)) return; e.preventDefault(); window.mc.clipboardWrite(i.value.slice(i.selectionStart, i.selectionEnd)); }, { capture: true, once: true }); return true; })()`);
   await keyIn('c', 'KeyC', 67, 2);
   await sleep(200);
   const copied = await ev(`window.mc.clipboardRead()`);

@@ -5,7 +5,7 @@
 // Scratch data dir and home only (ssh-ui-lib.mjs); screenshots go to D:\Projekty\_shots\ssh-paths-*.png.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { connected, connectWithPassword, killTree, launchApp, scratchRoot, sleep, sshState, startTestServer, testHost, writeKnownHost, writeState } from './ssh-ui-lib.mjs';
+import { connected, connectWithPassword, launchApp, scratchRoot, sleep, sshState, startTestServer, testHost, writeKnownHost, writeState } from './ssh-ui-lib.mjs';
 import { removeScratch } from './app-env.mjs';
 
 const BUFFER = `(() => { const s = window.__mc.useStore.getState().s; const p = s.projects.find((x) => x.id === s.activeProjectId); const t = p.tabs.find((x) => x.id === p.activeTabId);
@@ -33,15 +33,12 @@ const tab = async (app, shift = false) => {
 };
 const focus = (app) => app.evaluate(`(() => { window.__mc.terminals.focus(${CELL}.id); return true; })()`);
 const lineIs = (app, text, label) => app.until(`${CURSOR_LINE}.trimEnd().endsWith(${JSON.stringify(text)})`, label, 8000);
-/** A clean quit through the window (before-quit runs, unlike killing the process); the process is gone afterwards. */
+/**
+ * A clean quit (before-quit runs, unlike killing the process); the process is gone afterwards. The harness's quit (real-app.mjs
+ * quitApp): a page's window.close() closes nothing in a Tauri WebView2 window, so the check build's test bridge quits there.
+ */
 async function quit(app) {
-  await app.evaluate('window.close(), true').catch(() => undefined);
-  for (let i = 0; i < 75; i++) {
-    try { process.kill(app.pid, 0); } catch { return; }
-    await sleep(200);
-  }
-  killTree(app.pid);
-  throw new Error('the app did not quit');
+  if (!(await app.quit())) throw new Error('the app did not quit');
 }
 
 try {

@@ -88,10 +88,10 @@ async function attachPort(kind: 'sftp' | 'db'): Promise<void> {
  * (the page then never got any DB / SFTP result).
  */
 const pageLoaded = new Promise<void>((resolve) => {
-  // readyState turns 'interactive' before the deferred module scripts run; only DOMContentLoaded comes after them. This
-  // script runs while the document is still loading, so the event is still ahead.
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => resolve(), { once: true });
-  else setTimeout(resolve, 0);
+  // The window's load event, as 1.1.4's did-finish-load: it comes after the deferred app bundle ran and added its 'message'
+  // listeners. readyState turns 'interactive' before the module scripts run, so only 'complete' means the page is ready.
+  if (document.readyState === 'complete') setTimeout(resolve, 0);
+  else window.addEventListener('load', () => resolve(), { once: true });
 });
 function whenPageLoaded(): Promise<void> {
   return pageLoaded;
