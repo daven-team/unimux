@@ -18,6 +18,7 @@
 //! builds) the attach Channel with the JSON text as the sessions wrote it.
 
 use std::collections::{HashMap, VecDeque};
+#[cfg_attr(not(windows), allow(unused_imports))]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -30,11 +31,13 @@ use tauri::ipc::{Channel, InvokeResponseBody, Request, Response};
 use unimux_ipc::{IpcError, PortSink};
 
 /// A UI thread slower than this is counted as a stall (and still waited for).
+#[cfg_attr(not(windows), allow(dead_code))]
 const POST_STALL: Duration = Duration::from_secs(2);
 /// A pull request returns empty after this long without a message (the page asks again).
 const PULL_WAIT: Duration = Duration::from_secs(20);
 
 /// UI-thread stalls of shared-buffer posts (all windows; harness stats).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub static POST_STALLS: AtomicU64 = AtomicU64::new(0);
 
 /// The transport the build prefers for the pty port.

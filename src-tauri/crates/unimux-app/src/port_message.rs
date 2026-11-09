@@ -10,6 +10,8 @@
 //! else (see file_drop.rs); Tauri's IPC parser then refuses it as not an invoke message and logs one `console.error`
 //! into the page. Only pages of the app origin are heard (the same guard as `mc_port_post`).
 
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use std::sync::Arc;
 
 use serde_json::Value;

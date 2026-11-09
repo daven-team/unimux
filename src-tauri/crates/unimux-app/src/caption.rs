@@ -19,6 +19,8 @@
 //! WM_NCRBUTTONUP of a right click there, and DefWindowProc would not open the system menu for it (its own hit test sees
 //! client area), so the window's subclass opens the system menu itself, as Windows Terminal does.
 
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use serde::Deserialize;
 
 /// The three buttons, in the order of the page's `CaptionArea`.
