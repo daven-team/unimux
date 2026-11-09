@@ -2115,6 +2115,37 @@ Tried and dropped: steps(30) on top of the shared phase (one run, spinners only,
 
 Left: a detached window still costs about 200 MiB (renderer and its 20 terminals; memory with 2 grids detached is +440 MiB against one window). The first visit of a grid still has one or two long frames (in the profile mostly shader linking and char measuring of the 20 new terminals).
 
+## Performance work: idle, memory, startup (branch tauri-perf)
+
+New script `scripts/perf-idle.mjs`: 60 cmd cells at their prompts (three 5x4 grids, all visited; `--no-visit` keeps 20 live), CPU and context switches per process kind over a window, shown and minimized, memory per kind, start times, `--fill` prints 1.6 MB in each of the 20 shown cells and reads the memory afterwards.
+
+Where things stand (A/B against perf-baseline, 3 alternating rounds, medians, 60 cells; shells and consoles not counted):
+
+| measurement | baseline | after |
+|---|---|---|
+| idle shown: CPU, percent of a core | 1.2 | 1.1 |
+| idle shown: wakeups a second | 206 | 205 |
+| idle minimized: CPU | 2.4 | 2.6 (noise, 1-4 in single runs) |
+| memory idle, working set / private, MiB | 624 / 517 | 619 / 518 |
+| memory minimized, working set / private, MiB | 509 / 385 | 541 / 422 (the kept WebGL contexts, many-windows work) |
+| startup.log first-spawn / first-output, ms | 491 / 988 | 486 / 940 |
+| spawn to prompts of the shown grid, ms | 1507 | 1510 |
+
+Idle is not worth more work: 1 percent of a core with 60 cells. The page's own share is 3 ms a second.
+
+Change: `TailBuffer` (replay tail per terminal) is a ring capped at its limit. The old `Vec` was trimmed only once it doubled, so a busy terminal held 1 MiB; now 512 KiB. 20 cells after 1.6 MB of output each, unimux.exe private 40.4 -> 28.6 MiB (3 rounds, no overlap: 39-41 vs 29), total tree private 452 -> 438. Output path checked: verify-tauri-pty passes (flood, flow control, 8 reloads, replay), perf-hidden 16 MB unchanged (visible 430 vs 432 ms, minimized 475 vs 468, occluded 427 vs 431, 4 alternating rounds against the state before this change), all scrollback lines there after the fill (5006 of 5006).
+
+Tried and dropped:
+- WebView2 arguments, A/B with the same exe through WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, 3 rounds, 20 cells: background networking, component update, sync and domain reliability off plus Translate, MediaRouter, OptimizationHints, AutofillServerCommunication and CertificateTransparencyComponentUpdater off: working set -11 MiB, private -1 MiB, and the page came up slower in 2 of 3 rounds. `--force-gpu-mem-available-mb=256`: no change.
+- V8 explicit compile hints (`//# allFunctionsCalledOnLoad` on the first-load chunks, 5 alternating rounds): first-output 1007 -> 975 ms, page-loaded 381 -> 414 ms, first prompts 1579 -> 1599 ms. No gain.
+
+Not tried: another allocator (the host is 24 MiB private with 60 idle cells and 5 percent of a core under load), a time limit on the WebGL contexts of parked terminals.
+
+Where the rest goes:
+- A live terminal costs about 3.9 MiB private (2.3 GPU, 1.4 renderer; 60 cells 529, 20 cells 373). The GPU share is its own WebGL context. Giving back contexts of grids not seen for a while would save up to 90 MiB with 40 parked cells, for the first-visit long frames each time such a grid is shown again; left as a product decision.
+- Startup, 20 cells: about 300 ms to the WebView2 window, 70 to the page, then one main-thread task of 350-400 ms (first render) before any pty output can be handled. Spawn to first output is 220-260 ms with one cell (ConPTY and cmd). Without a shader cache a second frame of about 230 ms links the WebGL programs; every later start on the same data folder skips it, so the scratch-folder numbers above are the worst case.
+- Minimized and idle, the WebView2 browser process wakes 130-200 times a second at 1-2 percent of a core, in its thread pool, with no call from the page. Not understood without ETW (WPR needs elevation), the same in the baseline.
+
 ## User feedback 2026-11-06
 
 - Update window: the text arrow looked wrong (fixed in resources/update-splash: drawn chevron), the window must not be always-on-top (fixed in src/updatesplash for Electron; required for U2), and the UAC prompt must come to the front (U2 requirement).
