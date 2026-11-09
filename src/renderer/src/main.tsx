@@ -8,8 +8,11 @@ import { CaptionButtons } from './components/CaptionButtons';
 import { installErrorReporting } from './errorReport';
 import './styles.css';
 import './components/statusStyles.css';
+import { watchSpinners } from '../../shared/spinSync';
+import { onWindowShown } from './windowShown';
 
 installErrorReporting();
+watchSpinners(document, requestAnimationFrame, onWindowShown);
 // The last resort: a render error no inner boundary caught leaves a "reload the window" card, not a blank window.
 // The tooltip host sits beside the app: titles get the styled bubble on the boot and language screens and the fallback too.
 // So do the caption buttons of the Tauri build on Windows (W1): every screen of every window has them, like 1.1.4's overlay.

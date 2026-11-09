@@ -175,7 +175,7 @@ class TerminalManager {
   private buildNumber = 0;
   private acks = new Map<string, number>();
   private ackTimer: ReturnType<typeof setTimeout> | null = null;
-  /** False while the window is minimized or hidden: no terminal is drawn and no WebGL context is kept (output still buffers). */
+  /** False while the window is minimized or hidden: no terminal is drawn and parked ones keep no WebGL context (output still buffers). */
   private windowShown = true;
   /** WebGL contexts handed out at most (64 on Chromium, 12 on WebKit): lowered when the engine turns out to allow fewer (see `contextLost`). */
   private webglLimit = new WebglLimit(maxWebglContexts(webviewEngine()));
@@ -245,8 +245,10 @@ class TerminalManager {
 
   /**
    * The window runs without background throttling (status ticks and output must not slow down while it is minimized), so
-   * drawing stops here instead: every terminal box is taken out of the layout, which pauses xterm's renderer, and the WebGL
-   * contexts are given back. xterm keeps writing into its buffer; showing the window again redraws and refits the cells.
+   * drawing stops here instead: every terminal box is taken out of the layout, which pauses xterm's renderer, and parked
+   * terminals give their WebGL contexts back. Shown ones keep theirs (the context idles while xterm is paused): given back,
+   * a restore drew 20 cells with the DOM renderer and created 20 contexts at once, a 120-140 ms frame (now 20-30 ms, for 45
+   * MiB of GPU memory while minimized). xterm keeps writing into its buffer; showing the window again redraws and refits.
    */
   private setWindowShown(shown: boolean): void {
     if (shown === this.windowShown) return;
@@ -255,7 +257,7 @@ class TerminalManager {
       for (const e of this.entries.values()) {
         if (e.host.contains(document.activeElement)) this.refocus = e.id;
         e.host.style.display = 'none';
-        this.releaseWebgl(e);
+        if (!e.attachedTo) this.releaseWebgl(e);
       }
       return;
     }

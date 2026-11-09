@@ -2074,6 +2074,47 @@ Tried and dropped (measured against the lazy build, A/B on the same build by env
 
 The 16 MB flood is limited by the page: the renderer's main thread is busy 105 percent of the writer's time (visibleMainThreadBusyPercent in perf-hidden), so the transport cannot fix that miss. The 5x4x3 grid was not measured again (it was an ad-hoc probe, perf-grid has no tabs).
 
+## Performance work: many tabs and windows (branch tauri-perf)
+
+New script `scripts/perf-many.mjs`: three 5x4 grids (60 cmd cells), first visits and grid switches while grid 1 prints, grid 1 printing, all 60 printing, minimized and restored with 20 printing, idle, two grids detached. It reads CPU per process kind, memory, IPC calls and frames, and checks that the numbered output in the buffers has no gaps after a restore.
+
+Profile: the costs that grow with the number of cells were the spinners, the WebGL contexts given back on minimize, and the state merge.
+
+Changes:
+1. All spinners of a window share one phase (`src/shared/spinSync.ts`: every `mc-spin` animation gets start time 0). Each mark is its own CSS animation of 60 steps, started when it appeared, so 20 marks stepped in different frames and the window presented on nearly every vsync of a 240 Hz screen. The marks look and turn as before.
+2. A minimized window keeps the WebGL contexts of its shown terminals (parked ones still give theirs back). A restore used to draw every cell with the DOM renderer while 20 contexts were created.
+3. `merge` in `stateEdits.ts` compares by walking the values and stops at the first difference instead of serializing every subtree at every level (same answer as comparing the JSON text; tested). An edit with shared structure: 0.25 -> 0.02 ms per call. `merge` was 22-175 ms of a first grid visit and is no longer in the top of its profile.
+
+A/B, 3 alternating rounds of the 3 builds, medians. `baseline` is perf-baseline (before all of this work), `before` the state after the pty transport work, `after` these changes. No round was discarded: the medians already drop the rounds with a load spike from elsewhere (machine 9-55 percent busy). CPU in percent of a core, shells and writers excluded.
+
+| measurement | baseline | before | after |
+|---|---|---|---|
+| 20 working cells at rest, 60 cells open: CPU | 36.1 | 33.0 | 20.1 |
+| same with 2 detached windows: CPU | 43.4 | 37.0 | 22.6 |
+| shown grid printing (20 cells): CPU | 87.1 | 61.6 | 53.8 (ranges overlap) |
+| all 60 printing, one grid shown: CPU | 109.7 | 69.1 | 71.5 (equal) |
+| all 60 printing in 3 windows: CPU | 214.5 | 113.8 | 104.0 (ranges overlap) |
+| minimized, 20 cells printing: CPU | 12.4 | 10.5 | 9.3 (near noise) |
+| minimized, 3 windows, 60 printing: CPU | 22.7 | 18.8 | 14.2 |
+| minimized idle: CPU | 0.2 | 0.9 | 0.1 |
+| restore after minimize: max frame, ms | 112.5 | 137.5 | 20.8 |
+| restore: frames over 50 ms / over 33 ms | 2 / 9 | 3 / 5 | 0 / 0 |
+| first visit grid 2: ms, frames over 50 ms | 396, 2 | 428, 2 | 371, 1 |
+| first visit grid 3: ms, frames over 50 ms | 838, 4 | 868, 4 | 682, 2 |
+| first visit grid 3: max frame, ms | 275 | 296 | 263 (ranges overlap) |
+| grid switch median / max, ms | 34.4 / 41.5 | 34.8 / 37.7 | 34.7 / 39.1 (equal) |
+| fps while printing (all scenarios) | 250-251 | 250-251 | 249-250 |
+| memory minimized: working set / private, MiB | 771 / 663 | 762 / 654 | 815 / 687 |
+| memory, 2 grids detached: working set / private, MiB | 1297 / 1126 | 1276 / 1105 | 1289 / 1076 |
+
+The price of change 2 is the memory line: about 50 MiB of working set and 33 MiB of private memory more while minimized. 400 ms ticks while minimized are unchanged (p95 411-413 ms).
+
+Output: minimized for 30 s 20 cells printed 1848 lines each as expected, the last 1251 buffered lines of 3 checked cells have no gap after the restore, the screenshot after the restore shows all 20 cells drawn, and perf-hidden still passes (focus back in the terminal, output kept).
+
+Tried and dropped: steps(30) on top of the shared phase (one run, spinners only, a further 8 points of a core at rest; not worth coarser marks). Not tried on purpose: `SetIsVisible(false)` on minimize, SP1 measured that it throttles timers (see ARCHITECTURE section on window state).
+
+Left: a detached window still costs about 200 MiB (renderer and its 20 terminals; memory with 2 grids detached is +440 MiB against one window). The first visit of a grid still has one or two long frames (shader linking, char measuring of 20 new terminals, each 20-60 ms). Minimized CPU per printing cell is now mostly the output itself.
+
 ## User feedback 2026-11-06
 
 - Update window: the text arrow looked wrong (fixed in resources/update-splash: drawn chevron), the window must not be always-on-top (fixed in src/updatesplash for Electron; required for U2), and the UAC prompt must come to the front (U2 requirement).
