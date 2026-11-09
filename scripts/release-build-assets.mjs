@@ -88,7 +88,15 @@ const signing = !!process.env.TAURI_SIGNING_PRIVATE_KEY;
 if (signing) {
   const file = join(out, assets.updater);
   const tauri = rootPath('node_modules', '@tauri-apps', 'cli', 'tauri.js');
-  const signed = run(process.execPath, [tauri, 'signer', 'sign', '--app-version', version, file], { env: { ...process.env, CI: 'true' } });
+  // A secret pasted from a file written on Windows can start with a UTF-8 BOM or end with a line break; neither is part of it.
+  const secret = (value) => value?.replace(/^﻿/, '').replace(/[\r\n]+$/, '');
+  const env = {
+    ...process.env,
+    CI: 'true',
+    TAURI_SIGNING_PRIVATE_KEY: secret(process.env.TAURI_SIGNING_PRIVATE_KEY),
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD: secret(process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD),
+  };
+  const signed = run(process.execPath, [tauri, 'signer', 'sign', '--app-version', version, file], { env });
   // The CLI's errors name what went wrong (a wrong password, a key that does not decode), never the key; anything long enough to be one is cut anyway.
   if (signed.status !== 0 || !existsSync(`${file}.sig`)) fail(`tauri signer sign failed (exit ${signed.status}): ${signed.stderr.replace(/[A-Za-z0-9+/=]{24,}/g, '<redacted>').split('\n').map((l) => l.trim()).filter(Boolean).join(' | ').slice(0, 400)}`);
   try {
