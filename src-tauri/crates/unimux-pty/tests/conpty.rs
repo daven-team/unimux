@@ -107,26 +107,23 @@ fn background_child_keeps_running_and_printing_after_the_shell_exits() {
     assert!(reported >= Duration::from_millis(2500), "exit reported before the child ended ({} ms)", reported.as_millis());
 }
 
-/// A program the shell started into its own console (`start /min`) is in the job but must survive the shell ending by
-/// itself (1.1.4 tree-kills only on a kill); the same program is ended by Pty::kill.
+/// A program the shell started into its own console is in the job but must survive the shell ending by itself.
 #[test]
-fn detached_child_survives_a_normal_exit_and_dies_with_a_kill() {
-    let find_ping = |shell: u32| -> Vec<u32> {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            let found: Vec<u32> = tree(shell).into_iter().skip(1).collect();
-            if !found.is_empty() || Instant::now() > deadline {
-                return found;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    };
-    // The shell waits for the child to show up before it exits (a 1 s ping), so the test sees its pid.
+fn detached_child_survives_a_normal_exit() {
+    // A hidden window: a test must not show anything on the desktop.
     let out = Collector::default();
-    let pty = out.spawn(bundled(), &cmd(&["/d", "/c", "start /min ping -n 61 127.0.0.1 & ping -n 2 127.0.0.1 >nul"]));
-    let detached = find_ping(pty.pid());
-    assert!(!detached.is_empty(), "no detached child");
+    let pty = out.spawn(
+        bundled(),
+        &cmd(&[
+            "/d",
+            "/c",
+            "powershell -NoProfile -Command $p = Start-Process ping -ArgumentList '-n','61','127.0.0.1' -WindowStyle Hidden -PassThru; Write-Output ('CHILD=' + $p.Id + ';')",
+        ]),
+    );
     assert_eq!(out.wait_exit(Duration::from_secs(20)), Some(0));
+    let child = out.text().split("CHILD=").nth(1).and_then(|s| s.split(';').next()?.trim().parse::<u32>().ok());
+    let detached: Vec<u32> = child.into_iter().collect();
+    assert!(!detached.is_empty(), "no detached child reported");
     drop(pty);
     std::thread::sleep(Duration::from_millis(500));
     let alive: Vec<u32> = detached.iter().copied().filter(|p| Pty::process_alive(*p)).collect();
@@ -134,21 +131,6 @@ fn detached_child_survives_a_normal_exit_and_dies_with_a_kill() {
         let _ = std::process::Command::new("taskkill").args(["/PID", &p.to_string(), "/T", "/F"]).output();
     }
     assert!(!alive.is_empty(), "the detached child died with the shell's normal exit");
-
-    let out = Collector::default();
-    let pty = out.spawn(bundled(), &cmd(&[]));
-    assert!(out.wait_text(Duration::from_secs(10), ">"));
-    pty.write(b"start /min ping -n 61 127.0.0.1\r");
-    let detached = find_ping(pty.pid());
-    assert!(!detached.is_empty(), "no detached child");
-    pty.kill();
-    assert!(out.wait_exit(Duration::from_secs(5)).is_some());
-    std::thread::sleep(Duration::from_millis(300));
-    let alive: Vec<u32> = detached.iter().copied().filter(|p| Pty::process_alive(*p)).collect();
-    for p in &alive {
-        let _ = std::process::Command::new("taskkill").args(["/PID", &p.to_string(), "/T", "/F"]).output();
-    }
-    assert!(alive.is_empty(), "kill left the detached child alive: {alive:?}");
 }
 
 /// The graceful path: Pty::close alone (no terminate) while the reader is paused by flow control and the flood helper is
@@ -287,7 +269,7 @@ fn kill_tree_ends_the_tree_at_once_and_after_a_kill() {
 }
 
 #[test]
-fn job_object_kills_the_whole_tree() {
+fn only_kill_tree_ends_what_the_job_holds() {
     for job in [true, false] {
         let out = Collector::default();
         let mut opts = cmd(&[]);
@@ -318,7 +300,11 @@ fn job_object_kills_the_whole_tree() {
         std::thread::sleep(Duration::from_millis(300));
         let alive: Vec<u32> = descendants.iter().copied().filter(|p| Pty::process_alive(*p)).collect();
         if job {
-            assert!(alive.is_empty(), "job: descendants still alive {alive:?}");
+            // The deadline path of kill_all (1.1.4's taskkill /T): nothing of the job is left.
+            pty.kill_tree();
+            std::thread::sleep(Duration::from_millis(300));
+            let left: Vec<u32> = descendants.iter().copied().filter(|p| Pty::process_alive(*p)).collect();
+            assert!(left.is_empty(), "job: descendants still alive after kill_tree {left:?}");
         } else {
             // Without a job only the shell ends (node-pty's kill); 1.1.4 needed taskkill /T for the rest.
             println!("SP5 without job: {} of {} descendants survive the kill", alive.len(), descendants.len());
@@ -327,6 +313,33 @@ fn job_object_kills_the_whole_tree() {
             }
         }
     }
+}
+
+#[test]
+fn a_program_with_a_console_of_its_own_outlives_the_kill_of_its_terminal() {
+    // What `code .` or `start "" cmd` look like to the job, but with a hidden window: nothing may show on the desktop.
+    let out = Collector::default();
+    let pty = out.spawn(bundled(), &cmd(&[]));
+    assert!(out.wait_text(Duration::from_secs(10), ">"));
+    pty.write(b"powershell -NoProfile -Command \"$p = Start-Process ping -ArgumentList '-n','40','127.0.0.1' -WindowStyle Hidden -PassThru; Write-Output ('CHILD=' + $p.Id + ';')\"\r");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut child = None;
+    while Instant::now() < deadline && child.is_none() {
+        // The command line echoes "'CHILD=' +": only digits right after the = are the answer.
+        child = out.text().split("CHILD=").skip(1).find_map(|s| s.split(';').next()?.trim().parse::<u32>().ok());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let child = child.expect("the program did not report its pid");
+    pty.kill();
+    assert!(out.wait_exit(Duration::from_secs(5)).is_some(), "no exit 5 s after kill");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(Pty::process_alive(child), "the program ended with its terminal");
+    pty.kill_tree();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && Pty::process_alive(child) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!Pty::process_alive(child), "kill_tree left the program of the job running");
 }
 
 #[test]

@@ -353,16 +353,24 @@ impl Shared {
         }
     }
 
-    /// node-pty's TerminateProcess(hShell, 1) after the close, then the rest of the tree through the job. Once.
+    /// node-pty's TerminateProcess(hShell, 1) after the close. Once. Only the shell: what it started in a window of its own
+    /// (`code .`, `start "" cmd`) outlives the terminal, as in any terminal and in 1.1.4.
     fn terminate(&self, st: &mut KillState) {
         if st.terminated {
             return;
         }
         st.terminated = true;
-        // SAFETY: valid handles owned by `self`.
+        // SAFETY: a valid handle owned by `self`.
         unsafe {
             let _ = TerminateProcess(HANDLE(self.process.as_raw_handle()), 1);
-            if let Some(job) = &self.job {
+        }
+    }
+
+    /// Ends everything in the terminal's job (1.1.4's `taskkill /T`): only for a terminal that did not end in time.
+    fn terminate_job(&self) {
+        if let Some(job) = &self.job {
+            // SAFETY: a valid handle owned by `self`.
+            unsafe {
                 let _ = TerminateJobObject(job.0, 1);
             }
         }
@@ -698,8 +706,8 @@ impl Pty {
     }
 
     /// node-pty's dll kill order: the input is closed, the pseudoconsole is closed off-thread (attached programs get
-    /// CTRL_CLOSE), and once that returned the shell is terminated (exit code 1) and then the rest of the tree through the
-    /// job. Returns at once; the reader drains the rest and reports the exit.
+    /// CTRL_CLOSE), and once that returned the shell is terminated (exit code 1).
+    /// Returns at once; the reader drains the rest and reports the exit.
     pub fn kill(&self) {
         self.close_input();
         {
@@ -721,6 +729,7 @@ impl Pty {
             st.kill = true;
             self.shared.terminate(&mut st);
         }
+        self.shared.terminate_job();
         self.shared.close_pseudoconsole();
     }
 
