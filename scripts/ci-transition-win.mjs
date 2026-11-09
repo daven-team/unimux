@@ -91,6 +91,8 @@ async function round(name, dir, oldArgs) {
   await sleep(2000);
   install(join(dir, 'uninstall.exe'), ['/S']);
   await waitFor('uninstalled', () => uninstallEntries().length === 0, 120000);
+  // Tauri's silent uninstaller keeps its install-location key. The next round is a machine that never had 1.2.0.
+  ps(`Remove-Item -LiteralPath 'HKCU:\\Software\\ajzak, azozowsky' -Recurse -Force -ErrorAction SilentlyContinue`);
 }
 
 await round('default folder', join(local, 'Programs', 'unimux'), []);
