@@ -225,6 +225,8 @@ try {
     await app.click('.menu-item', 'Zwiń wszystkie foldery');
     await until(`Number(document.querySelector('.explorer-tree').dataset.rows) < 10`, 'collapsed');
     const moved = 'file-00-of-level-0.ts';
+    // The row count changes with the collapse; the virtual list draws the top rows only after the browser clamped the scroll position.
+    await until(`!!document.querySelector('.tree-rows .file-entry[data-path=${JSON.stringify(moved)}]') && !!document.querySelector('.tree-rows .file-entry[data-path="module-0-b"]')`, 'rows after the collapse');
     await evaluate(`(() => {
       const src = document.querySelector('.tree-rows .file-entry[data-path=${JSON.stringify(moved)}]');
       const dst = document.querySelector('.tree-rows .file-entry[data-path="module-0-b"]');

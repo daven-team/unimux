@@ -8,6 +8,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
+#[cfg(windows)]
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde_json::{Value, json};
@@ -15,8 +16,10 @@ use unimux_git::handler::handle_git;
 use unimux_git::paths::realpath_native;
 use unimux_git::{Git, GitErrorCode, GitOptions};
 
+#[cfg(windows)]
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
+#[cfg(windows)]
 fn id() -> String {
     format!("req-{:06}-path", COUNTER.fetch_add(1, Ordering::Relaxed) + 1)
 }

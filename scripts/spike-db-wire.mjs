@@ -1,9 +1,9 @@
 // SP9 (Tauri migration spike, DB wire fidelity): starts our own Docker servers (PostgreSQL 13 and 18, MySQL 8.4,
-// MariaDB 11, Redis 8), writes or checks the 1.1.4 driver goldens (test/db-wire-sp9.int.test.ts, vitest) and runs the Rust
-// comparison (src-tauri/crates/unimux-db/tests/wire_servers.rs), then removes exactly the containers it started (by id).
+// MariaDB 11, Redis 8), and runs the Rust comparison against the 1.1.4 driver goldens committed in
+// test/golden/db-wire (written from the Node drivers before Electron was removed; the writer is in git history at 656c790)
+// (src-tauri/crates/unimux-db/tests/wire_servers.rs), then removes exactly the containers it started (by id).
 //
-//   node scripts/spike-db-wire.mjs            check the committed goldens, then the Rust side
-//   node scripts/spike-db-wire.mjs --write    rewrite the goldens from the Node drivers first
+//   node scripts/spike-db-wire.mjs            the Rust side against the committed goldens
 //   node scripts/spike-db-wire.mjs --keep     leave the containers running and print MC_SP9_SERVERS
 //   node scripts/spike-db-wire.mjs --only=pg18,redis8
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -79,10 +79,6 @@ try {
   for (const s of SERVERS) await waitReady(s);
   const env = JSON.stringify(SERVERS.map((s) => ({ label: s.label, kind: s.kind, host: '127.0.0.1', port: s.hostPort, user: s.user, password: s.password })));
   console.log(`MC_SP9_SERVERS=${env}`);
-  const vitest = spawnSync(process.execPath, [join(ROOT, 'node_modules', 'vitest', 'vitest.mjs'), 'run', 'test/db-wire-sp9.int.test.ts'], {
-    cwd: ROOT, stdio: 'inherit', env: { ...process.env, MC_SP9_SERVERS: env, ...(args.has('--write') ? { MC_SP9_WRITE: '1' } : {}) },
-  });
-  if (vitest.status !== 0) throw new Error('vitest (Node goldens) failed');
   const t0 = Date.now();
   // the server tests are #[ignore]d in a plain cargo test; run them, but only those of the kinds started here (a server
   // test without a server of its kind fails, it does not pass empty)

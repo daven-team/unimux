@@ -597,10 +597,11 @@ mod tests {
         b.push(KIND_DATA, "a", b"focused", Urgency::Focus);
         assert!(b.inner.pending.lock().deadline.unwrap() >= before + HIDDEN_WINDOW - Duration::from_millis(1));
         // Shown again: what waits leaves at once.
+        // (the flusher may already have taken it: no deadline left means it has gone)
         b.set_hidden(false);
-        assert!(b.inner.pending.lock().deadline.unwrap() <= Instant::now());
+        assert!(b.inner.pending.lock().deadline.is_none_or(|d| d <= Instant::now()));
         b.set_hidden(true);
         b.push(KIND_DATA, "a", b"echo", Urgency::Echo);
-        assert!(b.inner.pending.lock().deadline.unwrap() <= Instant::now());
+        assert!(b.inner.pending.lock().deadline.is_none_or(|d| d <= Instant::now()));
     }
 }
