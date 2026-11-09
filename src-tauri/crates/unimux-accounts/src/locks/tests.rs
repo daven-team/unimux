@@ -274,7 +274,10 @@ fn the_legacy_lock_follows_a_junction_to_the_real_config_dir() {
     assert_eq!(paths.legacy, h.home.join("real-claude.lock"));
     assert_eq!(paths.primary, link.join(".oauth_refresh.lock"));
     // Removing the junction itself, never its target's contents.
+    #[cfg(windows)]
     fs::remove_dir(&link).unwrap();
+    #[cfg(unix)]
+    fs::remove_file(&link).unwrap();
     assert!(real.exists());
 }
 
