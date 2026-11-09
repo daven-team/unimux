@@ -71,14 +71,6 @@ jobs:
         working-directory: src-tauri
       - run: cargo clippy --workspace --all-targets --features unimux-app/dev-overrides,unimux-app/test-bridge -- -D warnings
         working-directory: src-tauri
-      - run: cargo test --workspace --no-fail-fast
-        working-directory: src-tauri
-      # The release rules (MC_* overrides, the DevTools port and the dev server origin compiled out: `cfg(not(dev_overrides))`
-      # in unimux-app, PACKAGED in unimux-core) are only active in release builds, so they get their own clippy and tests.
-      - run: cargo clippy --workspace --all-targets --release -- -D warnings
-        working-directory: src-tauri
-      - run: cargo test --workspace --no-fail-fast --release
-        working-directory: src-tauri
       - run: cargo test --workspace --no-fail-fast --features unimux-app/dev-overrides,unimux-app/test-bridge,unimux-core/dev-overrides
         working-directory: src-tauri
 

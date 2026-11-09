@@ -109,7 +109,7 @@ const PARSED: &str = "mc-eval-parsed";
 pub fn wrap(id: u64, expression: &str) -> String {
     format!(
         "(async () => {{ let ok = true, value; \
-         try {{ value = await (\n{expression}\n); }} catch (e) {{ ok = false; value = String((e && e.stack) || e); }} \
+         try {{ value = await (\n{expression}\n); }} catch (e) {{ ok = false; value = [String(e), e && e.stack].filter(Boolean).join(' '); }} \
          let out = null; \
          try {{ const s = JSON.stringify(value); out = s === undefined ? null : JSON.parse(s); }} \
          catch (e) {{ ok = false; out = 'result is not serializable: ' + e; }} \
@@ -123,7 +123,7 @@ pub fn wrap(id: u64, expression: &str) -> String {
 pub fn wrap_statements(id: u64, script: &str) -> String {
     format!(
         "(window.__mcEvalRuns = window.__mcEvalRuns || {{}})[{id}] = {{ ok: true }};\ntry {{\n{script}\n}} \
-         catch (e) {{ window.__mcEvalRuns[{id}] = {{ ok: false, error: String((e && e.stack) || e) }}; }}"
+         catch (e) {{ window.__mcEvalRuns[{id}] = {{ ok: false, error: [String(e), e && e.stack].filter(Boolean).join(' ') }}; }}"
     )
 }
 
@@ -220,7 +220,7 @@ mod tests {
         assert!(s.starts_with(
             "(window.__mcEvalRuns = window.__mcEvalRuns || {})[9] = { ok: true };\ntry {\nconst a = 1; a // comment\n} "
         ));
-        assert!(s.contains("window.__mcEvalRuns[9] = { ok: false, error: String((e && e.stack) || e) }"));
+        assert!(s.contains("window.__mcEvalRuns[9] = { ok: false, error: [String(e), e && e.stack].filter(Boolean).join(' ') }"));
         assert!(probe(9).contains("const r = runs[9]; delete runs[9];"));
         // Ran: the host's completion value; undefined (empty on WKWebView) is null.
         let ran = json!({ "ran": true, "ok": true, "error": null });

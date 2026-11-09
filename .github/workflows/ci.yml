@@ -90,15 +90,11 @@ jobs:
         working-directory: src-tauri
       - run: cargo clippy --workspace --all-targets --features unimux-app/dev-overrides,unimux-app/test-bridge -- -D warnings
         working-directory: src-tauri
-      - run: cargo test --workspace
-        working-directory: src-tauri
-      # The release rules (MC_* overrides, the DevTools port and the dev server origin compiled out) are only active in
-      # release builds, so they get their own clippy and tests.
+      # One test run, in the profile that ships: the release rules (MC_* overrides, the DevTools port and the dev server
+      # origin compiled out) are only active there. The debug and test-bridge code is tested by the Tauri workflow on the branch.
       - run: cargo clippy --workspace --all-targets --release -- -D warnings
         working-directory: src-tauri
       - run: cargo test --workspace --release
-        working-directory: src-tauri
-      - run: cargo test --workspace --features unimux-app/dev-overrides,unimux-app/test-bridge,unimux-core/dev-overrides
         working-directory: src-tauri
 
   # Tag runs can only read caches saved on main, and the build jobs never run on main: without this job every release would

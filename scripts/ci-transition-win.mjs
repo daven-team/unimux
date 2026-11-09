@@ -80,7 +80,10 @@ async function round(name, dir, oldArgs) {
   await waitFor('the app started by --force-run', () => Number(running(exe)) > 0);
   await sleep(15000);
   assert.ok(Number(running(exe)) > 0, 'the app still runs 15 s after the start');
-  assert.ok(!existsSync(join(dataDir, 'crash.log')), `crash.log: ${existsSync(join(dataDir, 'crash.log')) ? readFileSync(join(dataDir, 'crash.log'), 'utf8').slice(-2000) : ''}`);
+  // crash.log is the app's rolling log: info and warn lines are normal on a first start (`<ISO> <level> <text>`).
+  const crashLog = join(dataDir, 'crash.log');
+  const errors = existsSync(crashLog) ? readFileSync(crashLog, 'utf8').split('\n').filter((l) => /^\S+ (error|fatal) /.test(l)) : [];
+  assert.deepEqual(errors, [], 'no error in crash.log');
   console.log('started and still running');
 
   ps(`Get-CimInstance Win32_Process -Filter "Name='unimux.exe'" | Where-Object { $_.ExecutablePath -eq '${exe}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`);

@@ -166,6 +166,13 @@ impl Rig {
             _ => None,
         })
     }
+    /// The newest question of `id`: a session that was replaced leaves its own in the record.
+    fn latest_host_key(&self, id: &str) -> Option<String> {
+        self.rec.messages.lock().iter().rev().find_map(|m| match m {
+            HostMessage::HostKey { id: i, prompt_id, .. } if i == id => Some(prompt_id.clone()),
+            _ => None,
+        })
+    }
     async fn trust(&self, id: &str) -> String {
         wait_for("host key", || self.host_key(id).is_some()).await;
         let (prompt_id, key) = self.host_key(id).unwrap();
@@ -305,7 +312,7 @@ async fn kills_drops_and_replaces_sessions_like_1_1_4() {
     r.shells.connect(req("c4", s.port(), Some("pw")));
     r.shells.connect(req("c4", s.port(), Some("pw")));
     wait_for("connected", || {
-        if let Some((prompt_id, _)) = r.host_key("c4") {
+        if let Some(prompt_id) = r.latest_host_key("c4") {
             r.shells.answer(HostCommand::HostKeyAnswer { id: "c4".into(), prompt_id, accept: true, error: None });
         }
         r.shells.is_connected("c4")
