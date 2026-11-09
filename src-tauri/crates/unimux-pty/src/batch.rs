@@ -312,7 +312,8 @@ fn send_loop(inner: &Inner) {
             let seq = p.posted;
             p.unreleased.push_back((seq, bytes.len()));
             p.unreleased_bytes += bytes.len();
-            let release_now = gated && p.capped(0);
+            // Big unreleased messages are a flood: their release goes back at once, as the sliding window of the cap needs it.
+            let release_now = gated && (p.capped(0) || p.unreleased_bytes >= SMALL_IN_FLIGHT_BYTES);
             (bytes, frames, seq, p.posted - p.released, release_now)
         };
         *inner.last_send.lock() = Instant::now();
@@ -499,11 +500,15 @@ mod tests {
         b.push(KIND_DATA, "a", &vec![b'x'; SMALL_IN_FLIGHT_BYTES], Urgency::Now);
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-            (MAX_IN_FLIGHT_SMALL + 1, false),
-            "one big message is below the cap of 2"
+            (MAX_IN_FLIGHT_SMALL + 1, true),
+            "a big message is released at once"
         );
         b.push(KIND_DATA, "a", b"0", Urgency::Now);
-        assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), (MAX_IN_FLIGHT_SMALL + 2, true), "the cap of big messages");
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            (MAX_IN_FLIGHT_SMALL + 2, true),
+            "and so is what follows it"
+        );
     }
 
     #[test]

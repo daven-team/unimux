@@ -2051,6 +2051,29 @@ Szacunek: około 290 dni pracy agentów + 20-25 procent na integrację, czyli re
 6. Seen once, not reproduced: verify-ssh-ui failed at "clean form closed by Esc without asking" in a real-app-run batch; two reruns passed.
 7. Not a miss, for the record: tao's message-only helper ("Tao Thread Event Target", 16 x 16, layered and transparent) counts as a visible top-level window of unimux.exe; nothing is drawn.
 
+## Performance work: pty transport (branch tauri-perf)
+
+Profile (perf-grid per process, no ETW: WPR needs elevation): the extra CPU of a busy grid over 1.1.4 was the page's calls, about 120 `mc_port_post` a second with 20 busy cells (one release per host message, acks on an 8 ms tick).
+
+Change: a release is delayed until the page's next call to the host (at the latest 120 ms) unless the host asks for it (`r:1` in the additional data: at its cap, or big messages), a trickle below 64 KiB per terminal is acked every 100 ms in every window, and the batcher allows 8 small unreleased messages (2 once they hold 64 KiB, as before for a flood). 120 -> 12 calls a second.
+
+A/B against the state before this work (3 alternating rounds, medians, the user working on the machine):
+
+| measurement | before | after |
+|---|---|---|
+| perf-grid 20 cells: CPU of the tree, percent of a core | 152 | 121 |
+| of which WebView2 browser / unimux.exe / network service | 18.4 / 16.6 / 5.1 | 2.6 / 5.0 / 0.3 |
+| renderer script, ms per s | 104 | 54 |
+| perf-grid 20 cells, 12 lines per tick: CPU | 150 | 117 |
+| fps, frames (both grids) | 251-267 | 250-264 |
+| perf-hidden 16 MB visible, writer ms (6 rounds, both orders) | 567 | 589 (noise: 528-799) |
+| perf-latency SSH spaced, drawn median / p95 | 2.7 / 6.0 | 2.5 / 4.5 |
+| perf-latency SSH burst, drawn median / p95 | 3.2 / 4.1 | 2.7 / 4.9 |
+
+Tried and dropped (measured against the lazy build, A/B on the same build by environment switches): a pool of reused shared buffers (browser + host about 1 point of a core, inside the noise, and it would need releases tied to the attach, a stale release could free a buffer the new page has not copied yet); a 33 ms batch window while 6 or more terminals print (about 2 points, for slower updates).
+
+The 16 MB flood is limited by the page: the renderer's main thread is busy 105 percent of the writer's time (visibleMainThreadBusyPercent in perf-hidden), so the transport cannot fix that miss. The 5x4x3 grid was not measured again (it was an ad-hoc probe, perf-grid has no tabs).
+
 ## User feedback 2026-11-06
 
 - Update window: the text arrow looked wrong (fixed in resources/update-splash: drawn chevron), the window must not be always-on-top (fixed in src/updatesplash for Electron; required for U2), and the UAC prompt must come to the front (U2 requirement).
