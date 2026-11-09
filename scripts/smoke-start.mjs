@@ -11,7 +11,7 @@
 // exits 0 without a window and removes `<data>/update/runtime` only, never a folder a crafted script names.
 // Usage: node scripts/smoke-start.mjs [exe] [--ci] | node scripts/smoke-start.mjs --install [setup.exe] --ci
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { appBinary } from './real-app.mjs';
@@ -53,13 +53,10 @@ const checkBuild = /[\\/]target[\\/]check[\\/]/i.test(executable);
 if (!checkBuild && !(ci && onCiMachine)) throw new Error(`${executable} is not the check build: a release build ignores MC_DATA_DIR and would start on the real profile (use --ci on a CI machine)`);
 const home = join(scratch, 'home');
 for (const dir of ['AppData/Roaming', 'AppData/Local']) mkdirSync(join(home, dir), { recursive: true });
-// A release exe takes the roaming folder from the OS (FOLDERID_RoamingAppData), not from APPDATA: on the CI machine
-// its profile is the runner's real one. Earlier startup marks there are moved aside so only this start counts.
-const releaseProfile = !checkBuild;
-const profile = releaseProfile ? join(process.env.APPDATA ?? '', 'unimux') : join(home, 'AppData', 'Roaming', 'unimux');
-if (releaseProfile && !process.env.APPDATA) throw new Error('APPDATA is not set');
+// The Tauri app's roaming folder (FOLDERID_RoamingAppData) follows the USERPROFILE given below, so even a release exe
+// stays in the scratch home.
+const profile = join(home, 'AppData', 'Roaming', 'unimux');
 mkdirSync(profile, { recursive: true });
-if (releaseProfile && existsSync(join(profile, 'startup.log'))) renameSync(join(profile, 'startup.log'), join(profile, `startup.log.before-smoke-${Date.now()}`));
 
 /**
  * The 1.1.x update window's last call: `<appExe> -e <script>` with ELECTRON_RUN_AS_NODE=1. The app must exit 0 within the

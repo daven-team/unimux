@@ -128,6 +128,11 @@ impl DbVault {
     /// The eager decrypt of the TS constructor (DPAPI only): every password is tried once, so `info().locked` is right from
     /// the start. Runs on first use; the app also calls it on a background thread at start.
     pub fn warm(&self) {
+        // Asking which storage is in use opens the macOS Keychain, whose prompt would hold this lock (and every state change
+        // that prunes the vault) until it is answered. Only a DPAPI vault has anything to decrypt early.
+        if !cfg!(windows) {
+            return;
+        }
         let mut inner = self.inner.lock();
         self.ensure_decrypted(&mut inner);
     }
