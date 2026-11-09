@@ -304,7 +304,7 @@ impl OutputChannel {
     }
 
     pub fn history(&self) -> Vec<u8> {
-        self.state.lock().tail.bytes().to_vec()
+        self.state.lock().tail.bytes()
     }
 
     /// The terminal has this size from now on; the replay tail records it.
