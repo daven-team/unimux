@@ -2274,3 +2274,11 @@ Busy CPU of a grid and SSH echo are close to 1.1.4 but not there; the grid switc
 
 1. `a_paused_terminal_that_ends_delivers_its_last_output_before_the_exit` fails on macOS: a terminal paused by flow control whose program ends loses the output not read yet. Passes on Windows. Probably the kernel dropping unread pty output when the last slave closes; not confirmed without a Mac. Ignored on macOS, open for a fix.
 2. `operations_match_the_ts_reference` and `session_listings_over_scratch_homes_match` compare with goldens recorded on Windows (path roots, NTFS birth times). Ignored outside Windows / on macOS.
+
+## Before the 1.2.0 release (2026-11-10)
+
+- CI: one Rust test run per workflow (Tauri on the branch: debug with the test bridge; CI on tags: release), after a run took about 200 minutes. Further trimming (cache, faster runner) is open.
+- The real update from the published 1.1.4 passed on a clean Windows runner, in the default folder and in a custom one (scripts/ci-transition-win.mjs). The installer was the one built from c1f35e76; only test code and the test-only eval bridge changed after it.
+- Known limit, not fixed: Tauri's silent uninstaller keeps `HKCU\Software\ajzak, azozowsky\unimux`. A machine that had 1.2.0, uninstalled it, reinstalled 1.1.4 in ANOTHER folder and then updates gets 1.2.0 in the old folder, because installer-hooks.nsh only adopts the Electron folder while that key is absent. Fix when the installer is next touched: treat a key whose folder holds no unimux.exe as absent.
+- The macOS Keychain hang: DbVault::warm opened the Keychain under the vault lock, so an unanswered prompt held every state change. warm now runs only on Windows, where a DPAPI vault has something to decrypt.
+- The last local run of the real-app checks (before ce850e51) was 69 passed, 1 failed (verify-db-sqlite-ui, an intermittent "double click ran it", cause unknown, about 3 of 60 tries), 1 skipped.
