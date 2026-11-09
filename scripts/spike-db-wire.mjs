@@ -7,6 +7,7 @@
 //   node scripts/spike-db-wire.mjs --keep     leave the containers running and print MC_SP9_SERVERS
 //   node scripts/spike-db-wire.mjs --only=pg18,redis8
 import { execFileSync, spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +27,38 @@ const SERVERS = [
 const docker = (...a) => execFileSync('docker', a, { encoding: 'utf8' }).trim();
 const started = [];
 let cleaned = false;
+
+// The fixture of the corpus files (tables, roles, the ASCII database, Redis keys and the ACL user): the Rust tests only connect and read.
+const corpus = (name) => JSON.parse(readFileSync(join(ROOT, 'test', 'golden', 'db-wire', name), 'utf8'));
+const dockerInput = (input, ...a) => execFileSync('docker', a, { input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+// One session per list: `SET password_encryption` has to reach the CREATE ROLE after it.
+const script = (statements) => statements.map((sql) => `${sql};\n`).join('');
+const respArg = (arg) => {
+  const bytes = typeof arg === 'string' ? Buffer.from(arg, 'utf8') : Buffer.from(arg.b64, 'base64');
+  return Buffer.concat([Buffer.from(`$${bytes.length}\r\n`), bytes, Buffer.from('\r\n')]);
+};
+
+function prepare(s) {
+  if (s.kind === 'postgres') {
+    const psql = (database, statements) => dockerInput(script(statements), 'exec', '-i', s.id, 'psql', '-q', '-v', 'ON_ERROR_STOP=1', '-U', s.user, '-d', database);
+    const c = corpus('pg-corpus.json');
+    psql('postgres', c.setup);
+    psql('sp9_ascii', c.asciiSetup);
+  } else if (s.kind === 'redis') {
+    const c = corpus('redis-corpus.json');
+    const resp = Buffer.concat(c.setup.flatMap((argv) => [Buffer.from(`*${argv.length}\r\n`), ...argv.map(respArg)]));
+    const out = dockerInput(resp, 'exec', '-i', s.id, 'redis-cli', '--pipe');
+    if (!/errors: 0,/.test(out)) throw new Error(`${s.label} setup: ${out}`);
+  } else {
+    const c = corpus('mysql-corpus.json');
+    const client = s.kind === 'mariadb' ? 'mariadb' : 'mysql';
+    // A procedure body holds semicolons: the client must not end the statement there.
+    const statements = [...c.setup, ...(s.kind === 'mariadb' ? c.mariadbSetup : [])].map((sql) => `${sql} //
+`).join('');
+    dockerInput(`DELIMITER //
+${statements}`, 'exec', '-i', s.id, client, '--default-character-set=utf8mb4', `-u${s.user}`, `-p${s.password}`);
+  }
+}
 
 function cleanup() {
   if (cleaned || args.has('--keep')) return;
@@ -77,6 +110,7 @@ try {
     console.log(`${s.label}: ${s.image} on 127.0.0.1:${s.hostPort} (${id.slice(0, 12)})`);
   }
   for (const s of SERVERS) await waitReady(s);
+  for (const s of SERVERS) prepare(s);
   const env = JSON.stringify(SERVERS.map((s) => ({ label: s.label, kind: s.kind, host: '127.0.0.1', port: s.hostPort, user: s.user, password: s.password })));
   console.log(`MC_SP9_SERVERS=${env}`);
   const t0 = Date.now();
@@ -89,7 +123,7 @@ try {
   });
   console.log(`cargo wire_servers: ${Date.now() - t0} ms`);
   if (cargo.status !== 0) throw new Error('cargo wire_servers failed');
-  console.log('SP9 wire goldens: Node and Rust agree');
+  console.log('SP9 wire goldens: Rust matches the 1.1.4 drivers');
 } catch (e) {
   console.error(e.message);
   process.exitCode = 1;

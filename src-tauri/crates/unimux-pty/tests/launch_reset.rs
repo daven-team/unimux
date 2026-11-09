@@ -7,12 +7,15 @@
 mod common;
 
 use std::collections::HashMap;
+#[cfg(windows)]
 use std::io::{BufRead, BufReader, Write};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use parking_lot::{Condvar, Mutex};
-use unimux_agents::launch::{Shell, start_clear, with_reset_tail};
+#[cfg(windows)]
+use unimux_agents::launch::start_clear;
+use unimux_agents::launch::{Shell, with_reset_tail};
 use unimux_pty::manager::{PtyHandle, PtyManager, PtySink, SpawnRequest};
 use unimux_pty::shell::ShellKind;
 
