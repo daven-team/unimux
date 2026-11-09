@@ -2133,7 +2133,7 @@ Where things stand (A/B against perf-baseline, 3 alternating rounds, medians, 60
 
 Idle is not worth more work: 1 percent of a core with 60 cells. The page's own share is 3 ms a second.
 
-Change: `TailBuffer` (replay tail per terminal) is a ring capped at its limit. The old `Vec` was trimmed only once it doubled, so a busy terminal held 1 MiB; now 512 KiB. 20 cells after 1.6 MB of output each, unimux.exe private 40.4 -> 28.6 MiB (3 rounds, no overlap: 39-41 vs 29), total tree private 452 -> 438. Output path checked: verify-tauri-pty passes (flood, flow control, 8 reloads, replay), perf-hidden 16 MB unchanged (visible 430 vs 432 ms, minimized 475 vs 468, occluded 427 vs 431, 4 alternating rounds against the state before this change), all scrollback lines there after the fill (5006 of 5006).
+Change: `TailBuffer` (replay tail per terminal) is a ring capped at its limit. The old `Vec` was trimmed only once it doubled, so a busy terminal held 1 MiB; now 512 KiB. 20 cells after 1.6 MB of output each, unimux.exe private 40.4 -> 28.6 MiB (3 rounds, no overlap: 39-41 vs 29), total tree private 452 -> 438. Output path checked: verify-tauri-pty passes (flood, flow control, 8 reloads, replay), perf-hidden 16 MB unchanged (visible 430 vs 432 ms, minimized 475 vs 468, occluded 427 vs 431, 4 alternating rounds against the state before this change), the xterm buffers of the 3 cells read after the fill are full (5006 lines, as before; their content was not compared).
 
 Tried and dropped:
 - WebView2 arguments, A/B with the same exe through WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, 3 rounds, 20 cells: background networking, component update, sync and domain reliability off plus Translate, MediaRouter, OptimizationHints, AutofillServerCommunication and CertificateTransparencyComponentUpdater off: working set -11 MiB, private -1 MiB, and the page came up slower in 2 of 3 rounds. `--force-gpu-mem-available-mb=256`: no change.
@@ -2142,9 +2142,9 @@ Tried and dropped:
 Not tried: another allocator (the host is 24 MiB private with 60 idle cells and 5 percent of a core under load), a time limit on the WebGL contexts of parked terminals.
 
 Where the rest goes:
-- A live terminal costs about 3.9 MiB private (2.3 GPU, 1.4 renderer; 60 cells 529, 20 cells 373). The GPU share is its own WebGL context. Giving back contexts of grids not seen for a while would save up to 90 MiB with 40 parked cells, for the first-visit long frames each time such a grid is shown again; left as a product decision.
+- A live terminal costs about 3.9 MiB private (2.3 GPU, 1.4 renderer; 60 cells 529, 20 cells 373). The GPU share is presumably its WebGL context (not measured apart). Giving back contexts of grids not seen for a while would save up to 90 MiB with 40 parked cells, for the first-visit long frames each time such a grid is shown again; left as a product decision.
 - Startup, 20 cells: about 300 ms to the WebView2 window, 70 to the page, then one main-thread task of 350-400 ms (first render) before any pty output can be handled. Spawn to first output is 220-260 ms with one cell (ConPTY and cmd). Without a shader cache a second frame of about 230 ms links the WebGL programs; every later start on the same data folder skips it, so the scratch-folder numbers above are the worst case.
-- Minimized and idle, the WebView2 browser process wakes 130-200 times a second at 1-2 percent of a core, in its thread pool, with no call from the page. Not understood without ETW (WPR needs elevation), the same in the baseline.
+- Minimized and idle, the WebView2 browser process mostly wakes 130-200 times a second at 1-2 percent of a core, in its thread pool, with no call from the page (one run of five: 10 wakes). Not understood without ETW (WPR needs elevation). The totals of the baseline are in the same range (128-718 wakes a second against 270-671); its processes were not looked at one by one.
 
 ## User feedback 2026-11-06
 
