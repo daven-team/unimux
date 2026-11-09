@@ -170,8 +170,11 @@ try {
   check(prompts.get('QUEUE_TWO')?.includes(MULTI), 'the multi-line prompt arrived intact', JSON.stringify(prompts.get('QUEUE_TWO')?.slice(0, 200)));
 
   // Allow the tool; the queue stays paused after the turn ends.
+  // The hook that sets the status runs before Claude Code draws its dialog (300-460 ms later here), and the dialog takes no Enter
+  // for a moment after it appears: wait for the dialog itself instead of a fixed pause from the status.
+  await until(`(() => { const b = window.__mc.terminals.xterm(${JSON.stringify(cellId)}).buffer.active; for (let y = 0; y < b.length; y++) if (b.getLine(y).translateToString(true).includes('Do you want to proceed')) return true; return false; })()`, 15000);
   await focusTerm();
-  await sleep(500);
+  await sleep(700);
   await enter();
   check(await until(`/czeka na Ciebie/.test(${pill})`, 20000), 'turn done after the permission', await evaluate(pill));
   await sleep(4000);
