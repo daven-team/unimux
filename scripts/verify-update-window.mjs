@@ -172,8 +172,11 @@ const harnessPids = new Set();
 const seen = new Map(); // pid -> {name, path, cmd, parent, first, last}
 const names = new Map(); // pid -> image name (all processes), for the dialog check
 const conhosts = new Set();
-const watcherScript = '$ErrorActionPreference="SilentlyContinue"; while ($true) { $p = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine; [Console]::Out.WriteLine(($p | ConvertTo-Json -Compress -Depth 2)); [Console]::Out.Flush(); Start-Sleep -Milliseconds 200 }';
+// Only the command lines of this run's processes go through the JSON (matched inside PowerShell, like verify-update-gate's list): another
+// process's command line can hold characters that break the dump, and then no snapshot ever arrives.
+const watcherScript = '$ErrorActionPreference="SilentlyContinue"; $scratch = \'' + scratch.toLowerCase().replaceAll("'", "''") + '\'; while ($true) { $p = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine; foreach ($x in $p) { if (-not ("$($x.ExecutablePath) $($x.CommandLine)").ToLower().Contains($scratch)) { $x.ExecutablePath = $null; $x.CommandLine = $null } }; [Console]::Out.WriteLine(($p | ConvertTo-Json -Compress -Depth 2)); [Console]::Out.Flush(); Start-Sleep -Milliseconds 200 }';
 const watcher = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', watcherScript], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+harnessPids.add(watcher.pid); // its own command line names the scratch folder
 let buffer = '';
 let snapshots = 0;
 let lastSnapshot = [];
