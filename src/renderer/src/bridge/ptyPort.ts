@@ -7,9 +7,13 @@
 // Each message is handed to TerminalManager synchronously (onmessage), then released: the shared buffer is given back and
 // a release ack `{t: 'released', upto: n}` goes to the host (`n`: the host's number of the message when the transport
 // carries it, else the page's own count, which matches the host's for a transport of one attach), which keeps at most a
-// few messages per window in flight
-// (renderer back-pressure; the FlowGate byte acks hold the terminals themselves back). Page -> host messages (write,
-// resize, ack, focus, released) go through `post`, in order.
+// few messages per window in flight (renderer back-pressure; the FlowGate byte acks hold the terminals themselves back).
+// A release is an IPC call, so it is sent with the page's next message to the host or after RELEASE_TICK_MS, unless the
+// host said it reached its cap (`r` in the additional data). Page -> host messages (write, resize, ack, focus, released)
+// go through `post`, in order.
+
+/** A release nobody waits for goes out after this long, when no other message to the host took it along (just longer than the ack tick of TerminalManager, so it usually does). */
+export const RELEASE_TICK_MS = 120;
 
 export interface PtyPortStats {
   transport: string;
@@ -32,18 +36,31 @@ export interface BridgePtyPort {
   onmessage: ((e: { data: unknown }) => void) | null;
   start(): void;
   close(): void;
-  /** A message from the host (Uint8Array frames or a JSON message). `n`: the host's number of it, when known. */
-  deliver(data: unknown, n?: number): void;
+  /**
+   * A message from the host (Uint8Array frames or a JSON message). `n`: the host's number of it, when known;
+   * `releaseNow`: the host is at its cap, so the release must not wait (always the case without an `n`).
+   */
+  deliver(data: unknown, n?: number, releaseNow?: boolean): void;
   readonly stats: PtyPortStats;
 }
 
 export function createPtyPort(host: PtyPortHost, transport: string): BridgePtyPort {
-  const queue: Array<{ data: unknown; n?: number }> = [];
+  const queue: Array<{ data: unknown; n?: number; releaseNow?: boolean }> = [];
   let closed = false;
   let handled = 0;
   let released = 0;
+  /** The highest message handled and not told to the host yet (0: none). */
+  let unsent = 0;
+  let releaseTimer: ReturnType<typeof setTimeout> | null = null;
   const stats: PtyPortStats = { transport, received: 0, maxInFlight: 0, bytes: 0, stale: 0 };
-  const handle = (data: unknown, n?: number) => {
+  const flushRelease = () => {
+    if (releaseTimer !== null) { clearTimeout(releaseTimer); releaseTimer = null; }
+    if (!unsent) return;
+    released = unsent;
+    unsent = 0;
+    host.post({ t: 'released', upto: released });
+  };
+  const handle = (data: unknown, n?: number, releaseNow?: boolean) => {
     if (n !== undefined) stats.maxInFlight = Math.max(stats.maxInFlight, n - released);
     try {
       port.onmessage?.({ data });
@@ -53,20 +70,29 @@ export function createPtyPort(host: PtyPortHost, transport: string): BridgePtyPo
         stats.bytes += data.length;
         handled++;
         // By the host's number: a lost or foreign message can never put the page's count ahead of the host's.
-        released = n ?? handled;
-        host.post({ t: 'released', upto: released });
+        unsent = n ?? handled;
+        if (n === undefined || releaseNow) flushRelease();
+        else if (releaseTimer === null) releaseTimer = setTimeout(flushRelease, RELEASE_TICK_MS);
       }
     }
   };
   const port: BridgePtyPort = {
     onmessage: null,
-    postMessage: (message) => { if (!closed) host.post(message); },
-    start: () => { while (queue.length && port.onmessage) { const m = queue.shift()!; handle(m.data, m.n); } },
-    close: () => { closed = true; queue.length = 0; },
-    deliver: (data, n) => {
+    postMessage: (message) => {
       if (closed) return;
-      if (!port.onmessage || queue.length) { queue.push({ data, n }); return; }
-      handle(data, n);
+      flushRelease(); // goes along in the same IPC call (the caller batches one task's messages)
+      host.post(message);
+    },
+    start: () => { while (queue.length && port.onmessage) { const m = queue.shift()!; handle(m.data, m.n, m.releaseNow); } },
+    close: () => {
+      closed = true;
+      queue.length = 0;
+      if (releaseTimer !== null) { clearTimeout(releaseTimer); releaseTimer = null; }
+    },
+    deliver: (data, n, releaseNow) => {
+      if (closed) return;
+      if (!port.onmessage || queue.length) { queue.push({ data, n, releaseNow }); return; }
+      handle(data, n, releaseNow);
     },
     stats,
   };
@@ -74,7 +100,7 @@ export function createPtyPort(host: PtyPortHost, transport: string): BridgePtyPo
 }
 
 /** WebView2's `sharedbufferreceived` event (ICoreWebView2_17). */
-export interface SharedBufferEvent { additionalData?: { mcPort?: string; a?: string; n?: number }; getBuffer(): ArrayBuffer }
+export interface SharedBufferEvent { additionalData?: { mcPort?: string; a?: string; n?: number; r?: number }; getBuffer(): ArrayBuffer }
 export interface SharedBufferHost {
   addEventListener(type: 'sharedbufferreceived', cb: (e: SharedBufferEvent) => void): void;
   releaseBuffer(buffer: ArrayBuffer): void;
@@ -96,7 +122,7 @@ export function listenSharedBuffers(webview: SharedBufferHost, port: BridgePtyPo
     }
     let copy: Uint8Array;
     try { copy = new Uint8Array(buffer).slice(); } finally { webview.releaseBuffer(buffer); }
-    port.deliver(copy, typeof e.additionalData.n === 'number' ? e.additionalData.n : undefined);
+    port.deliver(copy, typeof e.additionalData.n === 'number' ? e.additionalData.n : undefined, e.additionalData.r === 1);
   });
 }
 

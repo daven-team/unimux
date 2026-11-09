@@ -222,6 +222,9 @@ fn main() {
         .setup(move |app| {
             let ctx = setup_ctx.clone();
             let _ = ctx.sink.app.set(app.handle().clone());
+            // An outside close of tao's event loop window (WM_CLOSE, taskkill without /F) is a normal quit, never its end.
+            #[cfg(windows)]
+            lifecycle::guard_event_loop_window(&ctx);
             // The bundled conpty.dll + OpenConsole.exe (tauri.windows.conf.json `bundle.resources`), before any terminal.
             #[cfg(windows)]
             if let Ok(dir) = tauri::Manager::path(&*app).resource_dir() {

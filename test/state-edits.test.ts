@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { addProject, addTab, defaultState, updateCell, upsertSnippet } from '../src/shared/state';
 import { layoutForCount } from '../src/shared/layout';
-import { mergeStateEdit } from '../src/shared/stateEdits';
+import { jsonEqual, mergeStateEdit } from '../src/shared/stateEdits';
 import { OptimisticState } from '../src/shared/optimisticState';
 
 function grid(count = 2) {
@@ -27,5 +27,15 @@ describe('concurrent renderer and MCP state edits', () => {
     const stale = optimistic.accept({ state: mainOne, revision: 2, editId: 'one' });
     expect(stale.projects[0].tabs[0].cells[0].name).toBe('Second');
     expect(stale.snippets[0].id).toBe('external');
+  });
+});
+
+describe('jsonEqual says what comparing the JSON text says', () => {
+  const values: unknown[] = [
+    null, undefined, 0, 1, NaN, '', 'a', true, false, [], {}, [1, 2], [2, 1], [null], [undefined], [[1]], { a: 1 }, { a: 1, b: 2 }, { b: 2, a: 1 },
+    { a: undefined }, { a: undefined, b: 2 }, { b: 2 }, { a: null }, { a: [1, { c: 1 }] }, { a: [1, { c: 2 }] }, { a: {} }, { a: [] },
+  ];
+  it('for every pair of a set of shapes', () => {
+    for (const a of values) for (const b of values) expect([a, b, jsonEqual(a, b)]).toEqual([a, b, JSON.stringify(a) === JSON.stringify(b)]);
   });
 });

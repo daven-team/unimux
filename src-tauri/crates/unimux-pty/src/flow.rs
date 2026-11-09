@@ -5,6 +5,8 @@
 //! counts bytes of the pty's output (PLAN P2: TailBuffer 512 KiB in bytes, byte acks). Times are milliseconds of a
 //! monotonic clock (`performance.now()` in 1.1.4, [`crate::timers::Scheduler::now`] here).
 
+use std::collections::VecDeque;
+
 /// Bytes of recent output kept per terminal to replay into a reloaded renderer (1.1.4: PTY_REPLAY_CHARS, 512 Ki chars).
 pub const PTY_REPLAY_BYTES: usize = 512 * 1024;
 /// Size changes a tail remembers at most (a window drag resizes many times, mostly with little output in between).
@@ -51,8 +53,9 @@ struct SizeMark {
 #[derive(Debug)]
 pub struct TailBuffer {
     limit: usize,
-    /// The stored bytes; the kept tail is the last `min(len, limit)` of them. Trimmed to `limit` once it doubles.
-    buf: Vec<u8>,
+    /// The kept bytes, at most `limit`: a ring, so its allocation stays at `limit` however long the stream is (each busy terminal
+    /// used to hold twice that) and old bytes leave without a copy.
+    buf: VecDeque<u8>,
     /// Bytes ever pushed: the absolute position of the tail's end.
     total: u64,
     sizes: Vec<SizeMark>,
@@ -60,7 +63,7 @@ pub struct TailBuffer {
 
 impl TailBuffer {
     pub fn new(limit: usize) -> Self {
-        Self { limit, buf: Vec::new(), total: 0, sizes: Vec::new() }
+        Self { limit, buf: VecDeque::new(), total: 0, sizes: Vec::new() }
     }
 
     /// The terminal has `cols` x `rows` from now on: what follows was written at that size.
@@ -81,7 +84,7 @@ impl TailBuffer {
     }
 
     fn kept_start(&self) -> u64 {
-        self.total - self.buf.len().min(self.limit) as u64
+        self.total - self.buf.len() as u64
     }
 
     fn prune_sizes(&mut self) {
@@ -101,41 +104,49 @@ impl TailBuffer {
             return;
         }
         self.total += data.len() as u64;
-        if data.len() >= self.limit {
+        let data = if data.len() >= self.limit {
             self.buf.clear();
-            self.buf.extend_from_slice(&data[data.len() - self.limit..]);
+            &data[data.len() - self.limit..]
         } else {
-            self.buf.extend_from_slice(data);
-            if self.buf.len() >= self.limit.saturating_mul(2).max(4096) {
-                let extra = self.buf.len() - self.limit;
-                self.buf.drain(..extra);
-            }
+            let over = (self.buf.len() + data.len()).saturating_sub(self.limit);
+            self.buf.drain(..over);
+            data
+        };
+        let need = self.buf.len() + data.len();
+        if need > self.buf.capacity() {
+            // Doubles like a Vec would, but never past the limit: the ring's allocation is what a busy terminal costs.
+            let target = need.max(self.buf.capacity().saturating_mul(2)).min(self.limit);
+            self.buf.reserve_exact(target - self.buf.len());
         }
+        self.buf.extend(data);
         if self.sizes.len() > 1 {
             self.prune_sizes();
         }
     }
 
-    /// Bytes of the kept tail before the cut moves to a character start.
-    fn raw(&self) -> &[u8] {
-        &self.buf[self.buf.len() - self.buf.len().min(self.limit)..]
-    }
-
     /// The newest bytes (at most `limit`), starting at a UTF-8 character: up to 3 continuation bytes at the cut are left
     /// out, so a replay never starts with the second half of a character.
-    pub fn bytes(&self) -> &[u8] {
-        let raw = self.raw();
+    pub fn bytes(&self) -> Vec<u8> {
         // Only a real cut (older bytes were dropped) moves; a stream that itself began mid-character is kept as it came.
-        if self.total == raw.len() as u64 {
-            return raw;
+        let skip = if self.total == self.buf.len() as u64 {
+            0
+        } else {
+            self.buf.iter().take(3).take_while(|b| (**b & 0xC0) == 0x80).count()
+        };
+        let (head, tail) = self.buf.as_slices();
+        let mut out = Vec::with_capacity(self.buf.len() - skip);
+        if skip < head.len() {
+            out.extend_from_slice(&head[skip..]);
+            out.extend_from_slice(tail);
+        } else {
+            out.extend_from_slice(&tail[skip - head.len()..]);
         }
-        let skip = raw.iter().take(3).take_while(|b| (**b & 0xC0) == 0x80).count();
-        &raw[skip..]
+        out
     }
 
     /// The tail with the sizes it was written at, as byte offsets into it (the first one at 0 when a size is known).
     pub fn replay(&self) -> (Vec<u8>, Vec<ReplaySize>) {
-        let data = self.bytes().to_vec();
+        let data = self.bytes();
         let start = self.total - data.len() as u64;
         let mut sizes: Vec<ReplaySize> = Vec::new();
         for s in &self.sizes {
@@ -336,8 +347,20 @@ mod tests {
         for _ in 0..10_000 {
             buf.push(&[b'x'; 100]);
         }
-        assert!(buf.buf.len() <= 4096 + 100, "{}", buf.buf.len());
+        assert_eq!(buf.buf.len(), 1000);
         assert_eq!(buf.bytes().len(), 1000);
+    }
+
+    #[test]
+    fn the_ring_never_allocates_past_the_limit() {
+        for (limit, piece) in [(1000usize, 7usize), (1000, 999), (1000, 1000), (1000, 5000), (4096, 1)] {
+            let mut buf = TailBuffer::new(limit);
+            for i in 0..20_000usize {
+                buf.push(&vec![(i % 251) as u8; piece]);
+            }
+            assert!(buf.buf.capacity() <= limit, "limit {limit}, piece {piece}: capacity {}", buf.buf.capacity());
+            assert_eq!(buf.buf.len(), limit);
+        }
     }
 
     #[test]
@@ -355,9 +378,9 @@ mod tests {
             let mut buf = TailBuffer::new(limit);
             buf.push(s);
             let kept = buf.bytes();
-            assert!(std::str::from_utf8(kept).is_ok(), "limit {limit}: {kept:?}");
+            assert!(std::str::from_utf8(&kept).is_ok(), "limit {limit}: {kept:?}");
             assert!(kept.len() <= limit && kept.len() + 3 >= limit.min(s.len()));
-            assert!(s.ends_with(kept));
+            assert!(s.ends_with(&kept));
         }
         // Pushed in pieces split inside characters: the same.
         for limit in 1..=s.len() {
@@ -365,7 +388,7 @@ mod tests {
             for piece in s.chunks(3) {
                 buf.push(piece);
             }
-            assert!(std::str::from_utf8(buf.bytes()).is_ok(), "limit {limit}");
+            assert!(std::str::from_utf8(&buf.bytes()).is_ok(), "limit {limit}");
         }
         // Nothing was cut: an incomplete start (a stream that began mid-character) is kept as it came.
         let mut buf = TailBuffer::new(100);

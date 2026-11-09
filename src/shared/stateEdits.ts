@@ -2,7 +2,28 @@ import type { AppState } from './types';
 
 export interface StateEdit { id: string; base: AppState; next: AppState }
 export interface StateSnapshot { state: AppState; revision: number; editId?: string }
-const equal = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b);
+/**
+ * Whether two values serialize to the same JSON (undefined-valued keys are left out, keys in the same order): what
+ * `JSON.stringify(a) === JSON.stringify(b)` says, without serializing every subtree at every level of the merge (60 cells: a
+ * state edit took 22-175 ms in `merge` when a grid opened and its cells started). Stops at the first difference.
+ */
+function equal(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return JSON.stringify(a) === JSON.stringify(b);
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!equal(a[i] ?? null, b[i] ?? null)) return false;
+    return true;
+  }
+  const ka = Object.keys(a).filter((k) => (a as Record<string, unknown>)[k] !== undefined);
+  const kb = Object.keys(b).filter((k) => (b as Record<string, unknown>)[k] !== undefined);
+  if (ka.length !== kb.length) return false;
+  for (let i = 0; i < ka.length; i++) {
+    if (ka[i] !== kb[i] || !equal((a as Record<string, unknown>)[ka[i]], (b as Record<string, unknown>)[kb[i]])) return false;
+  }
+  return true;
+}
 const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 const keyed = (x: unknown[]): x is Array<Record<string, unknown> & { id: string }> =>
   x.every((v) => object(v) && typeof v.id === 'string');
@@ -43,5 +64,6 @@ function merge(current: unknown, base: unknown, next: unknown): unknown {
   }
   return next;
 }
+export const jsonEqual = equal;
 export const mergeStateEdit = (current: AppState, edit: Pick<StateEdit, 'base' | 'next'>): AppState =>
   merge(current, edit.base, edit.next) as AppState;

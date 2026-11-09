@@ -38,9 +38,9 @@ export const CARD_BG = '#131313';
 
 /** Time one frame may spend fitting terminals to resized cells (see TerminalManager.runFits). */
 const FIT_BUDGET_MS = 8;
-/** Ack tick of a window nobody sees, for output below HIDDEN_ACK_BYTES per terminal (see ack). */
-const HIDDEN_ACK_MS = 100;
-const HIDDEN_ACK_BYTES = 64 * 1024;
+/** Ack tick of output below TRICKLE_ACK_BYTES per terminal (see ack). */
+const TRICKLE_ACK_MS = 100;
+const TRICKLE_ACK_BYTES = 64 * 1024;
 /** Window size changes closer together than this are a drag of the window edge (see the constructor). */
 const WINDOW_DRAG_MS = 150;
 
@@ -175,7 +175,7 @@ class TerminalManager {
   private buildNumber = 0;
   private acks = new Map<string, number>();
   private ackTimer: ReturnType<typeof setTimeout> | null = null;
-  /** False while the window is minimized or hidden: no terminal is drawn and no WebGL context is kept (output still buffers). */
+  /** False while the window is minimized or hidden: no terminal is drawn and parked ones keep no WebGL context (output still buffers). */
   private windowShown = true;
   /** WebGL contexts handed out at most (64 on Chromium, 12 on WebKit): lowered when the engine turns out to allow fewer (see `contextLost`). */
   private webglLimit = new WebglLimit(maxWebglContexts(webviewEngine()));
@@ -245,8 +245,10 @@ class TerminalManager {
 
   /**
    * The window runs without background throttling (status ticks and output must not slow down while it is minimized), so
-   * drawing stops here instead: every terminal box is taken out of the layout, which pauses xterm's renderer, and the WebGL
-   * contexts are given back. xterm keeps writing into its buffer; showing the window again redraws and refits the cells.
+   * drawing stops here instead: every terminal box is taken out of the layout, which pauses xterm's renderer, and parked
+   * terminals give their WebGL contexts back. Shown ones keep theirs (the context idles while xterm is paused): given back,
+   * a restore drew 20 cells with the DOM renderer and created 20 contexts at once, a 120-140 ms frame (now 20-30 ms, for 45
+   * MiB of GPU memory while minimized). xterm keeps writing into its buffer; showing the window again redraws and refits.
    */
   private setWindowShown(shown: boolean): void {
     if (shown === this.windowShown) return;
@@ -255,7 +257,7 @@ class TerminalManager {
       for (const e of this.entries.values()) {
         if (e.host.contains(document.activeElement)) this.refocus = e.id;
         e.host.style.display = 'none';
-        this.releaseWebgl(e);
+        if (!e.attachedTo) this.releaseWebgl(e);
       }
       return;
     }
@@ -402,10 +404,10 @@ class TerminalManager {
     // Characters for the Electron host, bytes for the Tauri host (its frames say how many).
     const pending = (this.acks.get(m.id) ?? 0) + (m.bytes ?? m.data.length);
     this.acks.set(m.id, pending);
-    // A window nobody sees acks a trickle (agents printing) every HIDDEN_ACK_MS: every ack is an IPC call, and with 8 busy
-    // cells in a minimized window the 8 ms tick made about 55 calls a second (R2). Anything bigger is acked at the normal pace,
-    // so a flood is never held back by the slower tick.
-    const delay = !this.windowShown && pending < HIDDEN_ACK_BYTES ? HIDDEN_ACK_MS : 8;
+    // A trickle (agents printing) is acked every TRICKLE_ACK_MS: every ack is an IPC call, and the 8 ms tick made about 60 calls
+    // a second with 20 busy cells or 8 in a minimized window (R2), while the host only needs the acks once a terminal gets near
+    // its FlowGate high water (1 MiB). Anything bigger is acked at the normal pace, so a flood is never held back by the slower tick.
+    const delay = pending < TRICKLE_ACK_BYTES ? TRICKLE_ACK_MS : 8;
     if (this.ackTimer !== null && delay < this.ackDelay) { clearTimeout(this.ackTimer); this.ackTimer = null; }
     if (this.ackTimer === null) {
       this.ackDelay = delay;

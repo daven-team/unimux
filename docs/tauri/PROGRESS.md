@@ -2051,6 +2051,218 @@ Szacunek: około 290 dni pracy agentów + 20-25 procent na integrację, czyli re
 6. Seen once, not reproduced: verify-ssh-ui failed at "clean form closed by Esc without asking" in a real-app-run batch; two reruns passed.
 7. Not a miss, for the record: tao's message-only helper ("Tao Thread Event Target", 16 x 16, layered and transparent) counts as a visible top-level window of unimux.exe; nothing is drawn.
 
+## Performance work: pty transport (branch tauri-perf)
+
+Profile (perf-grid per process, no ETW: WPR needs elevation): the extra CPU of a busy grid over 1.1.4 was the page's calls, about 120 `mc_port_post` a second with 20 busy cells (one release per host message, acks on an 8 ms tick).
+
+Change: a release is delayed until the page's next call to the host (at the latest 120 ms) unless the host asks for it (`r:1` in the additional data: at its cap, or big messages), a trickle below 64 KiB per terminal is acked every 100 ms in every window, and the batcher allows 8 small unreleased messages (2 once they hold 64 KiB, as before for a flood). 120 -> 12 calls a second.
+
+A/B against the state before this work (3 alternating rounds, medians, the user working on the machine):
+
+| measurement | before | after |
+|---|---|---|
+| perf-grid 20 cells: CPU of the tree, percent of a core | 152 | 121 |
+| of which WebView2 browser / unimux.exe / network service | 18.4 / 16.6 / 5.1 | 2.6 / 5.0 / 0.3 |
+| renderer script, ms per s | 104 | 54 |
+| perf-grid 20 cells, 12 lines per tick: CPU | 150 | 117 |
+| fps, frames (both grids) | 251-267 | 250-264 |
+| perf-hidden 16 MB visible, writer ms (6 rounds, both orders) | 567 | 589 (noise: 528-799) |
+| perf-latency SSH spaced, drawn median / p95 | 2.7 / 6.0 | 2.5 / 4.5 |
+| perf-latency SSH burst, drawn median / p95 | 3.2 / 4.1 | 2.7 / 4.9 |
+
+Tried and dropped (measured against the lazy build, A/B on the same build by environment switches): a pool of reused shared buffers (browser + host about 1 point of a core, inside the noise, and it would need releases tied to the attach, a stale release could free a buffer the new page has not copied yet); a 33 ms batch window while 6 or more terminals print (about 2 points, for slower updates).
+
+The 16 MB flood is limited by the page: the renderer's main thread is busy 105 percent of the writer's time (visibleMainThreadBusyPercent in perf-hidden), so the transport cannot fix that miss. The 5x4x3 grid was not measured again (it was an ad-hoc probe, perf-grid has no tabs).
+
+## Performance work: many tabs and windows (branch tauri-perf)
+
+New script `scripts/perf-many.mjs`: three 5x4 grids (60 cmd cells), first visits and grid switches while grid 1 prints, grid 1 printing, all 60 printing, minimized and restored with 20 printing, idle, two grids detached. It reads CPU per process kind, memory, IPC calls and frames, and checks that the numbered output in the buffers has no gaps after a restore.
+
+Profile: the costs that grow with the number of cells were the spinners, the WebGL contexts given back on minimize, and the state merge.
+
+Changes:
+1. All spinners of a window share one phase (`src/shared/spinSync.ts`: every `mc-spin` animation gets start time 0). Each mark is its own CSS animation of 60 steps, started when it appeared, so 20 marks stepped in different frames and the window presented on nearly every vsync of a 240 Hz screen. The marks look and turn as before.
+2. A minimized window keeps the WebGL contexts of its shown terminals (parked ones still give theirs back). A restore used to draw every cell with the DOM renderer while 20 contexts were created.
+3. `merge` in `stateEdits.ts` compares by walking the values and stops at the first difference instead of serializing every subtree at every level (same answer as comparing the JSON text; tested). An edit with shared structure: 0.25 -> 0.02 ms per call. `merge` was 22-175 ms of a first grid visit and no entry above 3 ms of the new profile is it (that profile came from a minified build, the old one from a readable one).
+
+A/B, 3 alternating rounds of the 3 builds, medians. `baseline` is perf-baseline (before all of this work), `before` the state after the pty transport work, `after` these changes. No round was discarded: the medians already drop the rounds with a load spike from elsewhere (machine 9-55 percent busy). CPU in percent of a core, shells and writers excluded.
+
+| measurement | baseline | before | after |
+|---|---|---|---|
+| 20 working cells at rest, 60 cells open: CPU | 36.1 | 33.0 | 20.1 |
+| same with 2 detached windows: CPU | 43.4 | 37.0 | 22.6 |
+| shown grid printing (20 cells): CPU | 87.1 | 61.6 | 53.8 (ranges overlap) |
+| all 60 printing, one grid shown: CPU | 109.7 | 69.1 | 71.5 (equal) |
+| all 60 printing in 3 windows: CPU | 214.5 | 113.8 | 104.0 (ranges overlap) |
+| minimized, 20 cells printing: CPU | 12.4 | 10.5 | 9.3 (near noise) |
+| minimized, 3 windows, 60 printing: CPU | 22.7 | 18.8 | 14.2 |
+| minimized idle: CPU | 0.2 | 0.9 | 0.1 |
+| restore after minimize: max frame, ms | 112.5 | 137.5 | 20.8 |
+| restore: frames over 50 ms / over 33 ms | 2 / 9 | 3 / 5 | 0 / 0 |
+| first visit grid 2: ms, frames over 50 ms | 396, 2 | 428, 2 | 371, 1 |
+| first visit grid 3: ms, frames over 50 ms | 838, 4 | 868, 4 | 682, 2 |
+| first visit grid 3: max frame, ms | 275 | 296 | 263 (ranges overlap) |
+| grid switch median / max, ms | 34.4 / 41.5 | 34.8 / 37.7 | 34.7 / 39.1 (equal) |
+| fps while printing (all scenarios) | 250-251 | 250-251 | 249-250 |
+| memory minimized: working set / private, MiB | 771 / 663 | 762 / 654 | 815 / 687 |
+| memory, 2 grids detached: working set / private, MiB | 1297 / 1126 | 1276 / 1105 | 1289 / 1076 |
+
+The price of change 2 is the memory line: about 50 MiB of working set and 33 MiB of private memory more while minimized. 400 ms ticks while minimized are unchanged (p95 411-413 ms).
+
+Output: minimized for 30 s, the one cell whose counter was read (a0) printed 1848 lines as expected (60 a second), the last 1251 buffered lines of 3 checked cells have no gap after the restore, the screenshot after the restore shows all 20 cells drawn, and perf-hidden still passes (focus back in the terminal, output kept).
+
+Tried and dropped: steps(30) on top of the shared phase (one run, spinners only, a further 8 points of a core at rest; not worth coarser marks). Not tried on purpose: `SetIsVisible(false)` on minimize, SP1 measured that it throttles timers (see ARCHITECTURE section on window state).
+
+Left: a detached window still costs about 200 MiB (renderer and its 20 terminals; memory with 2 grids detached is +440 MiB against one window). The first visit of a grid still has one or two long frames (in the profile mostly shader linking and char measuring of the 20 new terminals).
+
+## Performance work: idle, memory, startup (branch tauri-perf)
+
+New script `scripts/perf-idle.mjs`: 60 cmd cells at their prompts (three 5x4 grids, all visited; `--no-visit` keeps 20 live), CPU and context switches per process kind over a window, shown and minimized, memory per kind, start times, `--fill` prints 1.6 MB in each of the 20 shown cells and reads the memory afterwards.
+
+Where things stand (A/B against perf-baseline, 3 alternating rounds, medians, 60 cells; shells and consoles not counted):
+
+| measurement | baseline | after |
+|---|---|---|
+| idle shown: CPU, percent of a core | 1.2 | 1.1 |
+| idle shown: wakeups a second | 206 | 205 |
+| idle minimized: CPU | 2.4 | 2.6 (noise, 1-4 in single runs) |
+| memory idle, working set / private, MiB | 624 / 517 | 619 / 518 |
+| memory minimized, working set / private, MiB | 509 / 385 | 541 / 422 (the kept WebGL contexts, many-windows work) |
+| startup.log first-spawn / first-output, ms | 491 / 988 | 486 / 940 |
+| spawn to prompts of the shown grid, ms | 1507 | 1510 |
+
+Idle is not worth more work: 1 percent of a core with 60 cells. The page's own share is 3 ms a second.
+
+Change: `TailBuffer` (replay tail per terminal) is a ring capped at its limit. The old `Vec` was trimmed only once it doubled, so a busy terminal held 1 MiB; now 512 KiB. 20 cells after 1.6 MB of output each, unimux.exe private 40.4 -> 28.6 MiB (3 rounds, no overlap: 39-41 vs 29), total tree private 452 -> 438. Output path checked: verify-tauri-pty passes (flood, flow control, 8 reloads, replay), perf-hidden 16 MB unchanged (visible 430 vs 432 ms, minimized 475 vs 468, occluded 427 vs 431, 4 alternating rounds against the state before this change), the xterm buffers of the 3 cells read after the fill are full (5006 lines, as before; their content was not compared).
+
+Tried and dropped:
+- WebView2 arguments, A/B with the same exe through WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, 3 rounds, 20 cells: background networking, component update, sync and domain reliability off plus Translate, MediaRouter, OptimizationHints, AutofillServerCommunication and CertificateTransparencyComponentUpdater off: working set -11 MiB, private -1 MiB, and the page came up slower in 2 of 3 rounds. `--force-gpu-mem-available-mb=256`: no change.
+- V8 explicit compile hints (`//# allFunctionsCalledOnLoad` on the first-load chunks, 5 alternating rounds): first-output 1007 -> 975 ms, page-loaded 381 -> 414 ms, first prompts 1579 -> 1599 ms. No gain.
+
+Not tried: another allocator (the host is 24 MiB private with 60 idle cells and 5 percent of a core under load), a time limit on the WebGL contexts of parked terminals.
+
+Where the rest goes:
+- A live terminal costs about 3.9 MiB private (2.3 GPU, 1.4 renderer; 60 cells 529, 20 cells 373). The GPU share is presumably its WebGL context (not measured apart). Giving back contexts of grids not seen for a while would save up to 90 MiB with 40 parked cells, for the first-visit long frames each time such a grid is shown again; left as a product decision.
+- Startup, 20 cells: about 300 ms to the WebView2 window, 70 to the page, then one main-thread task of 350-400 ms (first render) before any pty output can be handled. Spawn to first output is 220-260 ms with one cell (ConPTY and cmd). Without a shader cache a second frame of about 230 ms links the WebGL programs; every later start on the same data folder skips it, so the scratch-folder numbers above are the worst case.
+- Minimized and idle, the WebView2 browser process mostly wakes 130-200 times a second at 1-2 percent of a core, in its thread pool, with no call from the page (one run of five: 10 wakes). Not understood without ETW (WPR needs elevation). The totals of the baseline are in the same range (128-718 wakes a second against 270-671); its processes were not looked at one by one.
+
+## Optimization pass (branch tauri-perf, 2026-11-09)
+
+The final check of the three performance steps above, on one build of the branch. Medians over rounds. CPU in percent of one core, shells and writers not counted. Rows are in ms or MiB as named.
+
+### How
+
+- Display: the monitor was at 1024x768 and 60 Hz for the whole run (it is normally 240 Hz), so frame times are in 16.7 ms steps and the numbers below are not comparable with the R2 table. They are comparable with each other: every build ran in this state.
+- Same scripts for every build: a scratch worktree of 940ed78 (its harness still has the Electron target), with perf-many, a 60 s minimized probe, startup and idle probes and a flood probe added there. perf-latency used one column of two rows, because two columns at 1024 px wrap the local probe.
+- 1.1.4: the published `unimux-Setup-1.1.4.exe` (SHA-256 matches SHA256SUMS.txt), never run, payload unpacked with Windows' tar into a scratch folder, `unimux.exe` renamed `electron.exe`, so it honours MC_DATA_DIR, MC_OFFSCREEN and MC_DEBUG_PORT.
+- 1.1.4 ran 3 rounds interleaved with the final build; the baseline ran 3 rounds alternating with the final build. "after" is the median of those 6 rounds of the final build. The machine was 1-8 percent busy.
+- One round of 1.1.4 was thrown away and repeated: a benchmark driver stopped earlier had kept running, so two runs overlapped for about 5 minutes.
+- Not repeated here: upgrade and downgrade between 1.1.4 and 1.2.0 on the same data and the 20 restart cycles of the R2 table (no data format changed since). verify-tauri-lifecycle and smoke-start (start without a console) passed.
+
+### Results
+
+| measurement | 1.1.4 | 1.2.0 before (perf-baseline) | 1.2.0 after |
+|---|---|---|---|
+| startup: spawn -> main page (ms, median of 4 warm starts per round) | 1142 | 507 | 514.5 |
+| startup: spawn -> first prompt drawn (ms) | 1818.5 | 1097 | 1080.5 |
+| startup.log first-output (ms, not comparable across runtimes) | 741 | 784.5 | 754.8 |
+| echo local spaced: parsed median (ms) | 0.6 | 1.2 | 0.9 |
+| echo local spaced: drawn median (ms) | 1.1 | 1.7 | 1.5 |
+| echo local spaced: drawn p95 (ms) | 32.6 | 33 | 33.6 |
+| echo local burst: parsed median (ms) | 2.2 | 2.5 | 2 |
+| echo local burst: drawn median (ms) | 19.5 | 19.4 | 19.3 |
+| echo local burst: drawn p95 (ms) | 33.7 | 33.6 | 34.3 |
+| echo SSH spaced: parsed median (ms) | 1.1 | 1.4 | 1.4 |
+| echo SSH spaced: drawn median (ms) | 1.5 | 2.1 | 1.8 |
+| echo SSH spaced: drawn p95 (ms) | 5.8 | 6.9 | 5.9 |
+| echo SSH burst: parsed median (ms) | 1 | 1.3 | 1.3 |
+| echo SSH burst: drawn median (ms) | 10 | 10.9 | 10.5 |
+| echo SSH burst: drawn p95 (ms) | 33.3 | 32 | 30.4 |
+| perf-grid 20 busy cells: CPU % of a core | 23.4 | 50.8 | 27 |
+| perf-grid: fps | 58.7 | 58.7 | 58.9 |
+| perf-grid: p95 frame (ms) | 18.1 | 18.1 | 18.1 |
+| perf-grid: frames over 50 ms | 0 | 0 | 0 |
+| perf-grid: main thread script ms/s | 23 | 48 | 28 |
+| 5x4x3: first visit grid 2 (ms) | 367.2 | 403.6 | 366.2 |
+| 5x4x3: first visit grid 3 (ms) | 871.4 | 764.4 | 616.3 |
+| 5x4x3: first visit grid 3 max frame (ms) | 159.5 | 194.4 | 186.5 |
+| 5x4x3: first visit frames over 50 ms (grids 2+3) | 7 | 6 | 3 |
+| 5x4x3: WebGL cells after the visits (of 20 shown) | 20 | 20 | 20 |
+| 5x4x3: grid switch median (ms) | 33.6 | 36.1 | 49.2 |
+| 5x4x3: grid switch max (ms) | 50.9 | 49.5 | 50.8 |
+| 5x4x3: CPU while the shown grid prints (% of a core) | 27.3 | 53 | 29.1 |
+| 5x4x3: busy fps | 59 | 59 | 59 |
+| 5x4x3: busy p95 frame (ms) | 18.1 | 18.1 | 18.1 |
+| 5x4x3 busy: working set (MiB) | 826 | 767 | 742 |
+| 5x4x3 busy: private (MiB) | 723 | 633 | 608 |
+| 5x4x3 minimized, 20 printing: CPU | 6.3 | 8.7 | 7.1 |
+| 5x4x3 restore: max frame (ms) | 63.4 | 106.1 | 23.4 |
+| 5x4x3 restore: frames over 50 ms | 1 | 2 | 0 |
+| 5x4x3 idle shown: CPU | 12.8 | 18 | 14.3 |
+| 5x4x3 idle minimized: CPU | 1.3 | 0.9 | 0.2 |
+| idle 2x2: working set (MiB) | 511 | 417 | 417.5 |
+| idle 2x2: private (MiB) | 352 | 241 | 242 |
+| minimized 60 s, 8 cells 60 lines/s: CPU of the tree (% of a core) | 5.1 | 6.6 | 6.2 |
+| minimized 60 s: 400 ms tick median (ms) | 404 | 404 | 404 |
+| minimized 60 s: tick p95 (ms) | 409 | 408 | 408 |
+| minimized 60 s: tick max (ms) | 412 | 410 | 410 |
+| minimized 60 s: lines per cell kept (lowest cell) | 3228 | 3240 | 3240 |
+| minimized 60 s: numbering gaps in the 3 checked cells | 0 | 0 | 0 |
+| 8 busy cells minimized: working set (MiB) | 568 | 472 | 483.5 |
+| 8 busy cells minimized: private (MiB) | 411 | 290 | 295.5 |
+| restore after 60 s minimized: max frame (ms) | 36 | 89.3 | 21.2 |
+| restore after 60 s minimized: frames over 50 ms | 0 | 2 | 0 |
+| perf-hidden 16 MB visible: writer ms | 380 | 428 | 427.5 |
+| perf-hidden 16 MB visible: writer CPU s | 0.8 | 0.8 | 0.9 |
+| perf-hidden 16 MB minimized: writer ms | 470 | 468 | 468.5 |
+| perf-hidden 16 MB minimized: writer CPU s | 0.9 | 1 | 0.9 |
+| perf-hidden minimized: idle 10 s CPU s | 0.1 | 0.1 | 0 |
+| perf-hidden minimized: 400 ms tick max | 410 | 408 | 408.5 |
+| perf-hidden 16 MB occluded: writer ms | 369 | 429 | 425.5 |
+| perf-hidden 16 MB occluded: writer CPU s | 0.8 | 0.8 | 0.9 |
+| perf-hidden occluded: idle 10 s CPU s | 1 | 0.7 | 0.6 |
+| perf-hidden occluded: 400 ms tick max | 409 | 408 | 407.5 |
+
+bench-jank, 24 scenarios x 3 reps, 2 interleaved pairs against 1.1.4 and 2 against the baseline: p50 / p95 / p99 equal in every scenario (one frame step apart at most), frames over 50 ms 0 in all three builds in every scenario.
+
+### Against the baseline (the optimization work)
+
+- Better: CPU of a busy grid 50.8 -> 27 (perf-grid) and 53 -> 29.1 (5x4x3), page script 48 -> 28 ms/s; restore after minimize 106 -> 23 ms max frame and 2 -> 0 frames over 50 ms (60 s minimized case 89 -> 21 ms); first visit grid 3 764 -> 616 ms, frames over 50 ms 6 -> 3; idle shown 18 -> 14.3, idle minimized 0.9 -> 0.2; busy memory private 633 -> 608 MiB; SSH echo drawn 2.1 -> 1.8 ms.
+- Equal: startup, fps, frame percentiles, 16 MB throughput in all three states, memory at idle, minimized CPU with 8 cells (6.6 -> 6.2, within noise).
+- Worse: 5x4x3 grid switch median 36.1 -> 49.2 ms, which is one frame at 60 Hz in 2 of 3 alternating rounds (max equal, 49.5 / 50.8; the 240 Hz A/B of the many-windows step showed no difference). Not explained. Memory of 8 busy cells minimized +6 MiB private and +11 MiB working set, the WebGL contexts kept while minimized.
+
+### Against 1.1.4
+
+- 1.2.0 is better: startup (1142 -> 515 ms to the page, 1819 -> 1081 ms to the prompt), every memory row, first visit of grid 3 and frames over 50 ms, restore after minimize, idle minimized.
+- Still a miss: busy grid CPU 27 vs 23.4 (perf-grid) and 29 vs 27 (5x4x3), down from 2x before this work. Local and SSH echo 0.3-0.4 ms slower (spaced, drawn and parsed). Minimized 8 cells 6.2 vs 5.1. Idle shown 14.3 vs 12.8. 16 MB visible 427 vs 380 ms and occluded 425 vs 369 ms (the page's main thread limits this, see the transport section). Grid switch median +1 frame (see above).
+- Equal: fps, frame percentiles, the 400 ms tick while minimized, output kept while minimized, 16 MB minimized.
+
+### Correctness
+
+- Flood probe (scratch, not in the repo): numbered lines through 4 cells at full speed (1.6 MB each) and 16 MB through one cell, visible and minimized, on this build and on the baseline. Every line present in scrollback, in order: 0 gaps, 0 duplicates, 0 reordered in every stage (the last 12,506 lines of each cell, the scrollback limit of 25,000 rows with wrapped lines), and each ended with the helper's own done line. Minimized runs use a delayed start, because keystrokes do not reach a hidden terminal. verify-tauri-pty (flood, flow control, 8 reloads, replay) passed in the same build. Numbered lines after a 60 s minimized run had no gap in any of the three checked cells, in any of the 12 rounds.
+
+### Checks on this build
+
+- cargo fmt --check, clippy -D warnings (default and unimux-app dev-overrides,test-bridge), cargo test --workspace (2685 passed, 0 failed, 8 ignored), npm run typecheck, npm test (after the fix below: 1910 passed), npm run gen:check.
+- real-app-run, full set minus the update scripts: 62 pass, 6 fail, 1 skip (CI only). verify-update-gate --build 27/27; verify-update-window 137/137 (built with --build; the check run itself needed the fix below).
+
+The 6 failures:
+
+| script | cause | state |
+|---|---|---|
+| verify-prompt-queue | the script pressed Enter a fixed 500 ms after the status change; Claude Code's dialog appears 310-460 ms after it (equal on both builds) and takes no Enter right away. HEAD failed 4 of 4, the baseline 1 of 3 | fixed in the script (waits for the dialog), then 3/3 and 16/16 in a delay experiment across both builds |
+| verify-tree-ui | a selector hit null once ("reading dispatchEvent"); passed when rerun alone | flake, not investigated further |
+| verify-ssh-ui | "every cell shows the server greeting": same failure on the baseline, so not from this work; the small 1024x768 window is the suspected cause, not confirmed | open, pre-existing |
+| verify-tauri-detached | a detached window at a physical position moves 100,80 -> 100,70 after a restart: same failure on the baseline; the 1024x768 display | open, pre-existing |
+| perf-latency | no echo recognized: same failure on the baseline; two columns at 1024 px wrap the probe | environment (one column works, see above) |
+| verify-caption | 103/104: at 200 percent scale the maximized-look window is reported at -8,-8 instead of off-screen. Display-dependent; the caption code was not touched by this work. Not rerun on the baseline, to avoid showing it again | open: must be rerun with the normal display |
+
+Script fixes in this pass: verify-wm-close added to the runner's list (the harness test requires every verify script there); verify-update-window hung forever on a process whose command line broke its JSON dump (it now passes only its own processes' command lines).
+
+### Left open
+
+Busy CPU of a grid and SSH echo are close to 1.1.4 but not there; the grid switch frame at 60 Hz is unexplained; verify-caption, verify-ssh-ui and verify-tauri-detached need a rerun on the normal display before release.
+
 ## User feedback 2026-11-06
 
 - Update window: the text arrow looked wrong (fixed in resources/update-splash: drawn chevron), the window must not be always-on-top (fixed in src/updatesplash for Electron; required for U2), and the UAC prompt must come to the front (U2 requirement).

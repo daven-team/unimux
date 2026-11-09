@@ -72,9 +72,15 @@ try {
 
   // Visible: warm-up, then the measured run.
   await writeOnce();
+  await app.cdp('Performance.enable');
+  const mainBusy = async () => Object.fromEntries((await app.cdp('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]));
+  const busy0 = await mainBusy();
   const cpu0 = treeCpu(app.pid);
   results.visibleMs = await writeOnce();
   results.visibleCpuS = +(treeCpu(app.pid) - cpu0).toFixed(2);
+  // How much of the writer's time the renderer's main thread was busy: near 100 percent, the page is what limits the flood.
+  const busy1 = await mainBusy();
+  if (typeof results.visibleMs === 'number') results.visibleMainThreadBusyPercent = Math.round((busy1.TaskDuration - busy0.TaskDuration) * 1000 / results.visibleMs * 100);
 
   /** One 16 MB run and 10 s idle in the current window state: writer time, timer cadence, CPU of the whole process tree. */
   const measure = async () => {

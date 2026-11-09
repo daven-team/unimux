@@ -9,11 +9,15 @@
 //! A message is handed to the window's [`Transport`], which blocks until it took it: the WebView2 UI thread posted the
 //! shared buffer (Windows; at most one post queued on the UI thread), the page pulled it (pull transport) or the Channel
 //! took it. Renderer back-pressure: a gated transport (the page answers every message with a release ack, `released`)
-//! may have at most [`MAX_IN_FLIGHT`] messages posted and not yet released; while the cap is reached the batch keeps
-//! growing (one bigger message instead of many). The terminals themselves are held back by their FlowGate byte acks.
+//! may have only a few messages posted and not yet released ([`MAX_IN_FLIGHT`] once they hold [`SMALL_IN_FLIGHT_BYTES`],
+//! [`MAX_IN_FLIGHT_SMALL`] while they are small); while the cap is reached the batch keeps growing (one bigger message
+//! instead of many). The terminals themselves are held back by their FlowGate byte acks. A release is an IPC call, so the
+//! page delays it (and sends it with its next call) unless the message it answers says the host is at the cap
+//! ([`Transport::post_hinted`]).
 //! The page releases by the host's message number (`upto` = the `n` it was posted with). A cap that sees no release for
 //! [`CAP_TIMEOUT`] is lifted (a release that never comes, like the pty pause watchdog), so a window never freezes for good.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -31,11 +35,16 @@ pub const FOCUS_WINDOW: Duration = Duration::from_millis(4);
 pub const HIDDEN_WINDOW: Duration = Duration::from_millis(100);
 /// A batch this large leaves at once.
 pub const BATCH_NOW: usize = 256 * 1024;
-/// Messages a window may have posted and not yet released (gated transports).
+/// Messages a window may have posted and not yet released (gated transports) once they hold SMALL_IN_FLIGHT_BYTES.
 pub const MAX_IN_FLIGHT: u64 = 2;
+/// The same for small messages: a busy grid sends many of them and each page release is an IPC call, so the page releases
+/// them lazily, in one call (see the module text).
+pub const MAX_IN_FLIGHT_SMALL: u64 = 8;
+/// Below this many unreleased bytes the messages count as small.
+pub const SMALL_IN_FLIGHT_BYTES: usize = 64 * 1024;
 /// A keystroke's echo may use one more: it does not wait for a release of the bulk output before it (the page still
 /// handles the messages in order, but the release round trip is saved).
-pub const MAX_IN_FLIGHT_ECHO: u64 = MAX_IN_FLIGHT + 1;
+pub const ECHO_SLOT: u64 = 1;
 /// A reached cap without any release for this long is lifted (the page lost a message or its acks).
 pub const CAP_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -58,6 +67,13 @@ pub trait Transport: Send + Sync {
     fn post(&self, seq: u64, bytes: Vec<u8>) -> bool;
     /// The page answers every message with a release ack (`{t:'released', upto}`): the in-flight cap applies.
     fn gated(&self) -> bool;
+    /// [`Transport::post`] with a hint for a gated transport: `release_now` tells the page that the host is at its cap, so
+    /// the release of this message must not wait (without it the page may delay the release; ignored where it cannot be
+    /// carried, those pages release at once).
+    fn post_hinted(&self, seq: u64, bytes: Vec<u8>, release_now: bool) -> bool {
+        let _ = release_now;
+        self.post(seq, bytes)
+    }
     /// "sharedBuffer", "channel", "pull" (stats, logs).
     fn name(&self) -> &'static str;
     /// The batcher stops (the window reloaded or closed): wake a blocked post.
@@ -76,6 +92,29 @@ struct Pending {
     /// An echo is queued: the batch may use the echo slot.
     echo: bool,
     stop: bool,
+    /// (number, bytes) of each message posted and not yet released.
+    unreleased: VecDeque<(u64, usize)>,
+    unreleased_bytes: usize,
+}
+
+impl Pending {
+    /// Whether another post has to wait for a release (`extra`: the echo slot).
+    fn capped(&self, extra: u64) -> bool {
+        let n = self.posted - self.released;
+        n >= MAX_IN_FLIGHT_SMALL + extra || (n >= MAX_IN_FLIGHT + extra && self.unreleased_bytes >= SMALL_IN_FLIGHT_BYTES)
+    }
+
+    /// Everything up to number `upto` is released.
+    fn release_to(&mut self, upto: u64) {
+        self.released = self.released.max(upto);
+        while let Some(&(seq, bytes)) = self.unreleased.front() {
+            if seq > self.released {
+                break;
+            }
+            self.unreleased_bytes -= bytes;
+            self.unreleased.pop_front();
+        }
+    }
 }
 
 #[derive(Default)]
@@ -173,7 +212,7 @@ impl WindowBatcher {
     pub fn released(&self, upto: u64) {
         let mut p = self.inner.pending.lock();
         if upto > p.released && upto <= p.posted {
-            p.released = upto;
+            p.release_to(upto);
             p.progress = Some(Instant::now());
         }
         drop(p);
@@ -227,7 +266,7 @@ impl Drop for WindowBatcher {
 fn send_loop(inner: &Inner) {
     let gated = inner.transport.gated();
     loop {
-        let (bytes, frames, seq, in_flight) = {
+        let (bytes, frames, seq, in_flight, release_now) = {
             let mut p = inner.pending.lock();
             let mut waited = false;
             loop {
@@ -236,8 +275,7 @@ fn send_loop(inner: &Inner) {
                 }
                 let now = Instant::now();
                 let ready = p.deadline.is_some_and(|d| d <= now) && !p.buf.is_empty();
-                let cap = if p.echo { MAX_IN_FLIGHT_ECHO } else { MAX_IN_FLIGHT };
-                let capped = gated && p.posted - p.released >= cap;
+                let capped = gated && p.capped(if p.echo { ECHO_SLOT } else { 0 });
                 if ready && !capped {
                     break;
                 }
@@ -245,7 +283,8 @@ fn send_loop(inner: &Inner) {
                 if ready && capped {
                     if lift.is_some_and(|t| t <= now) {
                         // Nothing was released for CAP_TIMEOUT: a release was lost; the page is not held for ever.
-                        p.released = p.posted;
+                        let upto = p.posted;
+                        p.release_to(upto);
                         inner.stats.cap_timeouts.fetch_add(1, Ordering::Relaxed);
                         continue;
                     }
@@ -270,7 +309,12 @@ fn send_loop(inner: &Inner) {
             p.echo = false;
             p.posted += 1;
             p.progress = Some(Instant::now());
-            (bytes, frames, p.posted, p.posted - p.released)
+            let seq = p.posted;
+            p.unreleased.push_back((seq, bytes.len()));
+            p.unreleased_bytes += bytes.len();
+            // Big unreleased messages are a flood: their release goes back at once, as the sliding window of the cap needs it.
+            let release_now = gated && (p.capped(0) || p.unreleased_bytes >= SMALL_IN_FLIGHT_BYTES);
+            (bytes, frames, seq, p.posted - p.released, release_now)
         };
         *inner.last_send.lock() = Instant::now();
         let s = &inner.stats;
@@ -278,13 +322,13 @@ fn send_loop(inner: &Inner) {
         s.frames.fetch_add(frames, Ordering::Relaxed);
         s.bytes.fetch_add(bytes.len() as u64, Ordering::Relaxed);
         s.max_in_flight.fetch_max(in_flight, Ordering::Relaxed);
-        if !inner.transport.post(seq, bytes) {
+        if !inner.transport.post_hinted(seq, bytes, release_now) {
             s.lost.fetch_add(1, Ordering::Relaxed);
             inner.dead.store(true, Ordering::SeqCst);
             // A page that never got it never releases it: released at its own number (the page releases by number, so a
             // later release covers what came before).
             let mut p = inner.pending.lock();
-            p.released = p.released.max(seq);
+            p.release_to(seq);
             drop(p);
             inner.cv.notify_one();
         }
@@ -293,7 +337,6 @@ fn send_loop(inner: &Inner) {
 
 #[cfg(test)]
 mod tests {
-    use super::MAX_IN_FLIGHT_ECHO;
     use super::*;
     use crate::frame::{KIND_DATA, KIND_EXIT, decode};
     use std::sync::mpsc;
@@ -367,50 +410,105 @@ mod tests {
         assert_eq!(all, vec![KIND_DATA, KIND_EXIT]);
     }
 
-    #[test]
-    fn a_gated_transport_has_at_most_max_in_flight_unreleased_and_batches_grow() {
-        let (b, rx) = batcher(true);
-        // The first MAX_IN_FLIGHT messages are posted one by one (each waited for, so no thread scheduling decides how
-        // they are batched), then the cap holds everything else back.
-        let mut first = Vec::new();
-        for i in 0..MAX_IN_FLIGHT {
-            b.push(KIND_DATA, "a", format!("{i};").as_bytes(), Urgency::Now);
-            first.push(rx.recv_timeout(Duration::from_secs(5)).unwrap());
+    /// Posts `n` messages one by one (each waited for, so no thread scheduling decides how they are batched).
+    fn fill(b: &WindowBatcher, rx: &mpsc::Receiver<(Instant, Vec<u8>)>, n: u64, payload: &[u8]) -> Vec<(Instant, Vec<u8>)> {
+        let mut out = Vec::new();
+        for _ in 0..n {
+            b.push(KIND_DATA, "a", payload, Urgency::Now);
+            out.push(rx.recv_timeout(Duration::from_secs(5)).unwrap());
         }
-        for i in MAX_IN_FLIGHT..200 {
-            b.push(KIND_DATA, "a", format!("{i};").as_bytes(), Urgency::Now);
+        out
+    }
+
+    #[test]
+    fn a_gated_transport_has_few_unreleased_messages_and_batches_grow() {
+        let (b, rx) = batcher(true);
+        let first = fill(&b, &rx, MAX_IN_FLIGHT_SMALL, b"0;");
+        for _ in MAX_IN_FLIGHT_SMALL..200 {
+            b.push(KIND_DATA, "a", b"0;", Urgency::Now);
         }
         assert!(rx.recv_timeout(Duration::from_millis(100)).is_err(), "posted beyond the cap");
-        assert_eq!(b.in_flight(), MAX_IN_FLIGHT);
-        b.released(MAX_IN_FLIGHT);
+        assert_eq!(b.in_flight(), MAX_IN_FLIGHT_SMALL);
+        b.released(MAX_IN_FLIGHT_SMALL);
         let (_, rest) = rx.recv_timeout(Duration::from_secs(2)).unwrap();
         // Everything that waited leaves as one message, in order.
         let n: usize = first.iter().map(|(_, m)| decode(m).unwrap().len()).sum::<usize>() + decode(&rest).unwrap().len();
         assert_eq!(n, 200);
         let st = b.stats_json();
-        assert!(st["maxInFlight"].as_u64().unwrap() <= MAX_IN_FLIGHT);
+        assert!(st["maxInFlight"].as_u64().unwrap() <= MAX_IN_FLIGHT_SMALL);
         assert!(st["gatedWaits"].as_u64().unwrap() >= 1);
+    }
+
+    #[test]
+    fn big_messages_are_capped_at_two() {
+        let (b, rx) = batcher(true);
+        fill(&b, &rx, MAX_IN_FLIGHT, &vec![b'x'; SMALL_IN_FLIGHT_BYTES]);
+        b.push(KIND_DATA, "a", b"held", Urgency::Now);
+        assert!(rx.recv_timeout(Duration::from_millis(100)).is_err(), "posted beyond the big-message cap");
+        assert_eq!(b.in_flight(), MAX_IN_FLIGHT);
+        b.released(1);
+        assert_eq!(ids(&rx.recv_timeout(Duration::from_secs(2)).unwrap().1), vec!["a:held"]);
     }
 
     #[test]
     fn an_echo_uses_one_more_slot_but_no_more() {
         let (b, rx) = batcher(true);
-        for i in 1..=MAX_IN_FLIGHT {
-            b.push(KIND_DATA, "a", i.to_string().as_bytes(), Urgency::Now);
-            rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        }
+        fill(&b, &rx, MAX_IN_FLIGHT_SMALL, b"0");
         b.push(KIND_DATA, "a", b"3", Urgency::Now);
         std::thread::sleep(Duration::from_millis(30));
         assert!(rx.try_recv().is_err());
-        assert_eq!(b.in_flight(), MAX_IN_FLIGHT);
+        assert_eq!(b.in_flight(), MAX_IN_FLIGHT_SMALL);
         b.push(KIND_DATA, "e", b"x", Urgency::Echo);
         let (_, m) = rx.recv_timeout(Duration::from_secs(2)).unwrap();
         assert_eq!(ids(&m), vec!["a:3", "e:x"]);
-        assert_eq!(b.in_flight(), MAX_IN_FLIGHT_ECHO);
+        assert_eq!(b.in_flight(), MAX_IN_FLIGHT_SMALL + ECHO_SLOT);
         b.push(KIND_DATA, "e", b"y", Urgency::Echo);
         assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
         b.released(1);
         assert_eq!(ids(&rx.recv_timeout(Duration::from_secs(2)).unwrap().1), vec!["e:y"]);
+    }
+
+    /// Transport that records the hints.
+    struct Hinted(Mutex<mpsc::Sender<(u64, bool)>>);
+    impl Transport for Hinted {
+        fn post(&self, _seq: u64, _bytes: Vec<u8>) -> bool {
+            unreachable!("the batcher posts with the hint")
+        }
+        fn post_hinted(&self, seq: u64, _bytes: Vec<u8>, release_now: bool) -> bool {
+            self.0.lock().send((seq, release_now)).is_ok()
+        }
+        fn gated(&self) -> bool {
+            true
+        }
+        fn name(&self) -> &'static str {
+            "test"
+        }
+    }
+
+    #[test]
+    fn the_page_is_asked_to_release_at_once_when_the_host_reaches_its_cap() {
+        let (tx, rx) = mpsc::channel();
+        let b = WindowBatcher::new("t", Arc::new(Hinted(Mutex::new(tx))));
+        for i in 1..=MAX_IN_FLIGHT_SMALL {
+            b.push(KIND_DATA, "a", b"0", Urgency::Now);
+            let (seq, hint) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(seq, i);
+            // A release can go lazily until this post fills the last slot.
+            assert_eq!(hint, i == MAX_IN_FLIGHT_SMALL, "message {i}");
+        }
+        b.released(MAX_IN_FLIGHT_SMALL);
+        b.push(KIND_DATA, "a", &vec![b'x'; SMALL_IN_FLIGHT_BYTES], Urgency::Now);
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            (MAX_IN_FLIGHT_SMALL + 1, true),
+            "a big message is released at once"
+        );
+        b.push(KIND_DATA, "a", b"0", Urgency::Now);
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            (MAX_IN_FLIGHT_SMALL + 2, true),
+            "and so is what follows it"
+        );
     }
 
     #[test]
@@ -425,10 +523,7 @@ mod tests {
     #[test]
     fn a_cap_without_any_release_is_lifted_after_the_timeout() {
         let (b, rx) = batcher(true);
-        for i in 0..MAX_IN_FLIGHT {
-            b.push(KIND_DATA, "a", i.to_string().as_bytes(), Urgency::Now);
-            rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        }
+        fill(&b, &rx, MAX_IN_FLIGHT_SMALL, b"0");
         let capped_at = Instant::now();
         b.push(KIND_DATA, "a", b"held", Urgency::Now);
         assert!(rx.recv_timeout(Duration::from_millis(300)).is_err());
@@ -482,10 +577,7 @@ mod tests {
     fn a_large_batch_leaves_without_waiting_for_the_window() {
         // A capped gated batcher keeps what is queued, so its deadline can be read.
         let (b, rx) = batcher(true);
-        for i in 0..MAX_IN_FLIGHT {
-            b.push(KIND_DATA, "a", i.to_string().as_bytes(), Urgency::Now);
-            rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        }
+        fill(&b, &rx, MAX_IN_FLIGHT_SMALL, b"0");
         let before = Instant::now();
         b.push(KIND_DATA, "a", b"small", Urgency::Bulk);
         assert!(b.inner.pending.lock().deadline.unwrap() >= before + BULK_WINDOW - Duration::from_millis(1));
@@ -497,10 +589,7 @@ mod tests {
     fn a_hidden_window_sends_output_less_often_but_echoes_at_once() {
         // Capped, so the deadlines can be read.
         let (b, rx) = batcher(true);
-        for i in 0..MAX_IN_FLIGHT {
-            b.push(KIND_DATA, "a", i.to_string().as_bytes(), Urgency::Now);
-            rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        }
+        fill(&b, &rx, MAX_IN_FLIGHT_SMALL, b"0");
         b.set_hidden(true);
         let before = Instant::now();
         b.push(KIND_DATA, "a", b"trickle", Urgency::Bulk);
