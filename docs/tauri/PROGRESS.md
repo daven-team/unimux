@@ -2083,7 +2083,7 @@ Profile: the costs that grow with the number of cells were the spinners, the Web
 Changes:
 1. All spinners of a window share one phase (`src/shared/spinSync.ts`: every `mc-spin` animation gets start time 0). Each mark is its own CSS animation of 60 steps, started when it appeared, so 20 marks stepped in different frames and the window presented on nearly every vsync of a 240 Hz screen. The marks look and turn as before.
 2. A minimized window keeps the WebGL contexts of its shown terminals (parked ones still give theirs back). A restore used to draw every cell with the DOM renderer while 20 contexts were created.
-3. `merge` in `stateEdits.ts` compares by walking the values and stops at the first difference instead of serializing every subtree at every level (same answer as comparing the JSON text; tested). An edit with shared structure: 0.25 -> 0.02 ms per call. `merge` was 22-175 ms of a first grid visit and is no longer in the top of its profile.
+3. `merge` in `stateEdits.ts` compares by walking the values and stops at the first difference instead of serializing every subtree at every level (same answer as comparing the JSON text; tested). An edit with shared structure: 0.25 -> 0.02 ms per call. `merge` was 22-175 ms of a first grid visit and no entry above 3 ms of the new profile is it (that profile came from a minified build, the old one from a readable one).
 
 A/B, 3 alternating rounds of the 3 builds, medians. `baseline` is perf-baseline (before all of this work), `before` the state after the pty transport work, `after` these changes. No round was discarded: the medians already drop the rounds with a load spike from elsewhere (machine 9-55 percent busy). CPU in percent of a core, shells and writers excluded.
 
@@ -2109,11 +2109,11 @@ A/B, 3 alternating rounds of the 3 builds, medians. `baseline` is perf-baseline 
 
 The price of change 2 is the memory line: about 50 MiB of working set and 33 MiB of private memory more while minimized. 400 ms ticks while minimized are unchanged (p95 411-413 ms).
 
-Output: minimized for 30 s 20 cells printed 1848 lines each as expected, the last 1251 buffered lines of 3 checked cells have no gap after the restore, the screenshot after the restore shows all 20 cells drawn, and perf-hidden still passes (focus back in the terminal, output kept).
+Output: minimized for 30 s, the one cell whose counter was read (a0) printed 1848 lines as expected (60 a second), the last 1251 buffered lines of 3 checked cells have no gap after the restore, the screenshot after the restore shows all 20 cells drawn, and perf-hidden still passes (focus back in the terminal, output kept).
 
 Tried and dropped: steps(30) on top of the shared phase (one run, spinners only, a further 8 points of a core at rest; not worth coarser marks). Not tried on purpose: `SetIsVisible(false)` on minimize, SP1 measured that it throttles timers (see ARCHITECTURE section on window state).
 
-Left: a detached window still costs about 200 MiB (renderer and its 20 terminals; memory with 2 grids detached is +440 MiB against one window). The first visit of a grid still has one or two long frames (shader linking, char measuring of 20 new terminals, each 20-60 ms). Minimized CPU per printing cell is now mostly the output itself.
+Left: a detached window still costs about 200 MiB (renderer and its 20 terminals; memory with 2 grids detached is +440 MiB against one window). The first visit of a grid still has one or two long frames (in the profile mostly shader linking and char measuring of the 20 new terminals).
 
 ## User feedback 2026-11-06
 
