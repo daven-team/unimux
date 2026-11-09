@@ -28,7 +28,7 @@
     "shortDescription": "Mission control for your AI coding agents",
     "longDescription": "Run a wall of Claude Code and Codex terminals side by side, get pinged when one needs you, pick up any conversation after a restart, and commit, edit and review without leaving the grid.",
     "homepage": "https://github.com/daven-team/unimux",
-    "icon": ["../../../resources/icon.ico", "../../../resources/icon.png"],
+    "icon": ["../../../resources/icon.ico", "../../../resources/icon.icns", "../../../resources/icon.png"],
     "createUpdaterArtifacts": false,
     "windows": {
       "webviewInstallMode": { "type": "embedBootstrapper", "silent": true },
