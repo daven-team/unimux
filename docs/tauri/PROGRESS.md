@@ -2269,3 +2269,8 @@ Busy CPU of a grid and SSH echo are close to 1.1.4 but not there; the grid switc
 - Tauri check build: the system title bar shows above unimux's own title bar; W1 must remove it (decorations: false, own drag region, caption buttons like 1.1.4).
 - 2026-11-06: an Edge dialog "cannot create data directory ...\unimux-sp6-*\headless\unimux-updater\webview2-broken\EBWebView" popped up on the user's desktop several times. Source: scripts/spike-update-window.mjs (SP6 fixes, worktree -22) deliberately hands WebView2 a file as its data folder. Gated at the wave 0b integration: the headless case runs only with UNIMUX_SPIKE_BROKEN_WEBVIEW=1 (commit "fix: SP6 spike runs the broken-WebView2 case only ..."). Still to do in U2: the writable-folder pre-check in the updater and the main app (PLAN.md U2/SP6).
 
+
+## macOS tests turned off before 1.2.0 (2026-11-09, the user has no Mac and decided to ship through CI)
+
+1. `a_paused_terminal_that_ends_delivers_its_last_output_before_the_exit` fails on macOS: a terminal paused by flow control whose program ends loses the output not read yet. Passes on Windows. Probably the kernel dropping unread pty output when the last slave closes; not confirmed without a Mac. Ignored on macOS, open for a fix.
+2. `operations_match_the_ts_reference` and `session_listings_over_scratch_homes_match` compare with goldens recorded on Windows (path roots, NTFS birth times). Ignored outside Windows / on macOS.
