@@ -117,6 +117,7 @@ fn same_tree(a: &Value, b: &Value) -> bool {
 
 const BASE: &[(&str, &str)] = &[("a.txt", "A"), ("src/b.txt", "B"), ("src/deep/c.txt", "C"), ("docs/a.txt", "other A")];
 
+#[cfg_attr(not(windows), ignore = "goldens recorded on Windows: a leading backslash or drive is a path root only there")]
 #[test]
 fn operations_match_the_ts_reference() {
     let scratch = tempfile::Builder::new().prefix("unimux-g6-golden-").tempdir().unwrap();

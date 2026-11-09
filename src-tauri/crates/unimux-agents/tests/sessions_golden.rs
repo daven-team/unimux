@@ -220,6 +220,10 @@ fn normalize_out(out: Value, root: &Path) -> Value {
     js_json::parse(&text).unwrap()
 }
 
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "goldens recorded on Windows: APFS moves a file's birth time when its mtime is set earlier"
+)]
 #[test]
 fn session_listings_over_scratch_homes_match() {
     let rows = rows("sessions-list.jsonl");

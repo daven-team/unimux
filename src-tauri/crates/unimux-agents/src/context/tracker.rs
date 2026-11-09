@@ -712,12 +712,14 @@ mod tests {
 
     #[test]
     fn transcript_paths_are_checked_like_node_paths() {
-        assert_eq!(basename("C:\\a\\b.jsonl"), "b.jsonl");
         assert_eq!(basename("/a/b.jsonl/"), "b.jsonl");
         if cfg!(windows) {
+            assert_eq!(basename("C:\\a\\b.jsonl"), "b.jsonl");
             assert!(is_absolute("C:\\x") && is_absolute("\\\\srv\\x") && is_absolute("/x") && !is_absolute("C:x"));
             assert_eq!(basename("C:b.jsonl"), "b.jsonl");
         } else {
+            // A backslash is an ordinary character in a POSIX path (Node's path.posix).
+            assert_eq!(basename("C:\\a\\b.jsonl"), "C:\\a\\b.jsonl");
             assert!(is_absolute("/x") && !is_absolute("C:\\x"));
         }
     }
