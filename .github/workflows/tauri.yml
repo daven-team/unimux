@@ -134,6 +134,29 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
           if-no-files-found: error
 
+  # The real update path on a throwaway runner: the published Electron 1.1.4, then the CI-built installer as 1.1.4's updater runs it.
+  transition:
+    name: Update 1.1.4 -> 1.2.0
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: unimux-tauri-x86_64-pc-windows-msvc
+          path: built
+      - name: The published 1.1.4 installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v1.1.4 -R ${{ github.repository }} -p "unimux-Setup-1.1.4.exe" -D old
+      - name: Update and start
+        shell: bash
+        run: node scripts/ci-transition-win.mjs old/unimux-Setup-1.1.4.exe "$(find built -name '*-setup.exe' | head -1)"
+
   # S4 acceptance: the russh login core against real SSH servers in Docker (OpenSSH 10 with four configs, OpenSSH 5.9,
   # Dropbear 2025 and 2016; the SP7 images), compared with 1.1.4's recorded results (test/golden/sp7/matrix.json). Linux
   # only (Docker on the hosted runner); the containers are removed by id inside the script.
