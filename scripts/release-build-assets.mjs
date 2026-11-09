@@ -89,8 +89,8 @@ if (signing) {
   const file = join(out, assets.updater);
   const tauri = rootPath('node_modules', '@tauri-apps', 'cli', 'tauri.js');
   const signed = run(process.execPath, [tauri, 'signer', 'sign', '--app-version', version, file], { env: { ...process.env, CI: 'true' } });
-  // The CLI prints the signature and the public key, nothing secret; only the outcome is shown here.
-  if (signed.status !== 0 || !existsSync(`${file}.sig`)) fail(`tauri signer sign failed (exit ${signed.status}): ${signed.stderr.split('\n').filter((l) => !/key/i.test(l)).join(' ').trim().slice(0, 300)}`);
+  // The CLI's errors name what went wrong (a wrong password, a key that does not decode), never the key; anything long enough to be one is cut anyway.
+  if (signed.status !== 0 || !existsSync(`${file}.sig`)) fail(`tauri signer sign failed (exit ${signed.status}): ${signed.stderr.replace(/[A-Za-z0-9+/=]{24,}/g, '<redacted>').split('\n').map((l) => l.trim()).filter(Boolean).join(' | ').slice(0, 400)}`);
   try {
     const comment = verifyMinisign(readFileSync(file), readFileSync(`${file}.sig`, 'utf8'), embeddedPublicKey());
     console.log(`Signed ${assets.updater} (${comment})`);
