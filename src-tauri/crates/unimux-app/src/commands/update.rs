@@ -44,7 +44,10 @@ pub fn register(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
         async move { Ok(s.busy()) }
     });
 
+    let headless = ctx.overrides.offscreen;
     r.send("update:open", move |_| async move {
-        unimux_platform::open_url(unimux_update::RELEASES_URL);
+        if !headless {
+            unimux_platform::open_url(unimux_update::RELEASES_URL);
+        }
     });
 }

@@ -65,7 +65,13 @@ pub fn cli_detector(ctx: &Arc<AppContext>) -> Arc<CliDetector> {
 
 fn register_cli(r: &mut RouterBuilder, ctx: &Arc<AppContext>) {
     let detector = cli_detector(ctx);
-    let handlers = Arc::new(CliHandlers::new(detector, |url: &str| unimux_platform::open_url(url)));
+    // Offscreen check builds never start the user's browser (a smoke test sends this very message).
+    let headless = ctx.overrides.offscreen;
+    let handlers = Arc::new(CliHandlers::new(detector, move |url: &str| {
+        if !headless {
+            unimux_platform::open_url(url);
+        }
+    }));
 
     // Open channel (any app window): the cached detection, never a new one.
     let h = handlers.clone();
