@@ -445,12 +445,17 @@ mod tests {
     fn a_slow_post_is_waited_for_and_counted_not_failed() {
         let hub = Hub::default();
         let (tx, rx) = std::sync::mpsc::channel();
-        let late = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(120));
-            tx.send(true).unwrap();
+        // The answer comes only after two counted stalls: no sleep to race against on a loaded machine.
+        std::thread::scope(|scope| {
+            let stalls = &hub.post_stalls;
+            scope.spawn(move || {
+                while stalls.load(Ordering::Relaxed) < 2 {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                tx.send(true).unwrap();
+            });
+            assert!(await_post(&rx, &hub, Duration::from_millis(25)));
         });
-        assert!(await_post(&rx, &hub, Duration::from_millis(25)));
-        late.join().unwrap();
         assert!(hub.post_stalls.load(Ordering::Relaxed) >= 2);
         // A dropped closure (window gone) is a failure, not a hang.
         let (tx, rx) = std::sync::mpsc::channel::<bool>();

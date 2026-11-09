@@ -336,18 +336,24 @@ async fn back_pressures_the_server_until_acks_and_drains_a_paused_tail_before_th
     let base = delivered();
     r.engine.write("c1", b"flood 25165824\r");
     let total = 24 * 1024 * 1024;
-    // Until the flood stops growing: a slow machine is still filling the window after a second.
+    // Held back = no growth for two seconds: on a loaded machine the flood can pause for more than half a second while it
+    // is still filling the window.
     let mut stalled = s.shell_log().flood_sent;
-    for _ in 0..40 {
+    let mut quiet = 0;
+    for _ in 0..120 {
         tokio::time::sleep(Duration::from_millis(500)).await;
         let now = s.shell_log().flood_sent;
-        if now == stalled {
+        if now != stalled {
+            stalled = now;
+            quiet = 0;
+            continue;
+        }
+        quiet += 1;
+        if quiet == 4 {
             break;
         }
-        stalled = now;
     }
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    assert_eq!(s.shell_log().flood_sent, stalled, "the server is held back while nothing is acknowledged");
+    assert_eq!(quiet, 4, "the server is held back while nothing is acknowledged");
     assert!(stalled < total);
     let mut acked = base;
     for _ in 0..3000 {
